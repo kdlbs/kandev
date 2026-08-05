@@ -181,6 +181,9 @@ func TestQueueHandlersDenyUnauthorizedSessionActions(t *testing.T) {
 			return map[string]interface{}{"session_id": "s", "entry_id": id, "content": "changed"}
 		}},
 		{name: "drain", action: ws.ActionMessageQueueDrain, call: (*QueueHandlers).wsDrainQueue, body: func(string) map[string]interface{} { return map[string]interface{}{"session_id": "s"} }},
+		{name: "send now", action: ws.ActionMessageQueueSendNow, call: (*QueueHandlers).wsSendNow, body: func(string) map[string]interface{} {
+			return map[string]interface{}{"session_id": "s", "scope": orchestrator.QueueSendNowScopeEntry, "entry_id": "q"}
+		}},
 		{name: "remove", action: ws.ActionMessageQueueRemove, call: (*QueueHandlers).wsRemoveEntry, body: func(id string) map[string]interface{} {
 			return map[string]interface{}{"session_id": "s", "entry_id": id}
 		}},

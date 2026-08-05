@@ -117,6 +117,7 @@ Read individual ADRs for full context. Create new ones via `/record decision` or
 | 2026-08-03-backend-owned-cancellation-progress | [Keep Cancellation Progress Backend Owned](2026-08-03-backend-owned-cancellation-progress.md) | accepted | backend, frontend, protocol | 2026-08-03 |
 | 2026-08-03-separate-message-queue-provenance-cancellation-and-capacity | [Separate Message Queue Provenance, Cancellation, and Capacity](2026-08-03-separate-message-queue-provenance-cancellation-and-capacity.md) | accepted | backend, frontend, protocol, security | 2026-08-03 |
 | 2026-08-03-provider-scoped-task-mcp-tools | [Derive Provider-Scoped Task MCP Tools in the Backend](2026-08-03-provider-scoped-task-mcp-tools.md) | accepted | backend, agentctl, protocol, integrations | 2026-08-03 |
+| 2026-08-05-queue-send-now-replaces-turn | [Queue Send Now Replaces the Active Turn](2026-08-05-queue-send-now-replaces-turn.md) | accepted | backend, frontend, protocol, workflow | 2026-08-05 |
 | 2026-08-04-file-backed-prompt-attachments | [File-backed prompt attachments](2026-08-04-file-backed-prompt-attachments.md) | accepted | backend, frontend, protocol, infra | 2026-08-04 |
 | 2026-08-04-plugin-contribution-lifecycle-authority | [Make Plugin Contribution Lifecycle Authoritative](2026-08-04-plugin-contribution-lifecycle-authority.md) | accepted | frontend, security | 2026-08-04 |
 | 2026-08-04-navigation-manifest-boundaries | [Centralize Navigation and Namespace Plugin Destinations](2026-08-04-navigation-manifest-boundaries.md) | accepted | frontend | 2026-08-04 |

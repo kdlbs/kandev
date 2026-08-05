@@ -124,6 +124,13 @@ The default delivery mode is queued. Each session accepts 10 queued messages by 
 
 In the task workbench, expand the queue chip to manage pending messages. Every visible pending row has **Remove**, whether it came from a user, another agent, workflow automation, or a server action. **Clear all** removes all visible pending rows in that session and releases their capacity. After removal, merge, or drain, displayed positions compact to `#1` through `#N` while FIFO order stays unchanged. Provenance still matters for editing and merging: only user-origin content can be edited. A row already reserved for delivery is hidden from the panel and cannot be cancelled there.
 
+Use the queue controls according to the outcome you want:
+
+- **Run next** dispatches the promptable FIFO head without interrupting an active turn. It is available when the session can accept a prompt.
+- **Send Now** interrupts the captured active turn and replaces it with either the selected row or the click-time snapshot of every visible row. Bulk Send Now joins non-empty bodies with a blank line, keeps attachments in FIFO order, and deduplicates references. It creates a replacement turn but does not apply normal Cancel side effects: it does not record a cancellation message, complete the cancelled workflow step, or move the task to review. New rows added after the click remain queued.
+- **Clear all** removes every visible pending row without sending a prompt.
+- **Cancel** in the chat toolbar stops the active turn as a user cancellation. It may record the cancellation, complete an eligible workflow step, and move the task to review; it does not send queued content.
+
 Choose the control by intent:
 
 | Intent                                                  | Operation                                                        | Result                                                                                                                                       |

@@ -25,7 +25,9 @@ remains full. Those same rows have no individual remove action.
   and returns the exact number removed.
 - Removal does not change provenance rules for other operations. Only
   user-owned messages may be edited. Merge behavior remains defined by
-  [Merge Enqueued Messages Individually](message-queue-merge.md).
+  [Merge Enqueued Messages Individually](message-queue-merge.md), and
+  interrupt-and-dispatch behavior is defined by
+  [Send Queued Messages Now](message-queue-send-now.md).
 - Successful removal publishes the existing
   `message.queue.status_changed` event. All connected views reconcile to the
   backend result; the initiating view may update optimistically but must
@@ -215,8 +217,8 @@ starts accepting work.
 
 - Editing agent-, workflow-, or server-origin message content.
 - Changing the shipped merge compatibility rules.
-- Cancelling a prompt after it has entered in-flight delivery or reached the
-  executor.
+- Interrupting an active prompt to dispatch pending work; that separate action
+  is governed by [Send Queued Messages Now](message-queue-send-now.md).
 - Per-workspace, per-task, or per-session capacity overrides.
 - Automatically pruning old messages when a lower limit is saved.
 - Queue reordering or bulk selection beyond **Clear all**.

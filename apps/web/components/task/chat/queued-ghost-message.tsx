@@ -17,6 +17,7 @@ import {
   IconFile,
   IconInfoCircle,
   IconRobot,
+  IconSend,
   IconUser,
   IconX,
   IconArrowMerge,
@@ -302,6 +303,8 @@ type DisplayViewProps = {
   onStartEdit: () => void;
   onRemove: () => void;
   onMerge?: () => void | Promise<void>;
+  onSendNow: () => void;
+  sendNowDisabled: boolean;
 };
 
 /** Rough threshold above which we offer a per-row expand toggle. Two lines of
@@ -309,6 +312,10 @@ type DisplayViewProps = {
  * so we use either signal to surface the chevron — short multi-line messages
  * (lists, code blocks) would otherwise be silently truncated. */
 const EXPAND_THRESHOLD = 80;
+
+function queuePositionLabel(index: number | undefined, position: number | undefined): string {
+  return `#${index === undefined ? (position ?? 1) : index + 1}`;
+}
 
 function shouldOfferExpand(text: string): boolean {
   return text.length > EXPAND_THRESHOLD || text.includes("\n");
@@ -324,6 +331,8 @@ type RowActionsProps = {
   onMerge?: () => void | Promise<void>;
   onStartEdit: () => void;
   onRemove: () => void;
+  onSendNow?: () => void;
+  sendNowDisabled: boolean;
 };
 
 function RowActions({
@@ -336,6 +345,8 @@ function RowActions({
   onMerge,
   onStartEdit,
   onRemove,
+  onSendNow,
+  sendNowDisabled,
 }: RowActionsProps) {
   const { t } = useTranslation();
   return (
@@ -349,6 +360,17 @@ function RowActions({
         "[@media(pointer:coarse)]:opacity-100",
       )}
     >
+      <Button
+        variant="ghost"
+        size="sm"
+        className="h-6 w-6 cursor-pointer p-0 text-muted-foreground hover:text-foreground [@media(pointer:coarse)]:h-11 [@media(pointer:coarse)]:w-11"
+        onClick={onSendNow}
+        disabled={sendNowDisabled}
+        title={t("chat:sendNowQueuedMessage")}
+        data-testid="queue-entry-send-now"
+      >
+        <IconSend className="h-3.5 w-3.5" />
+      </Button>
       {canExpand && (
         <Button
           variant="ghost"
@@ -416,6 +438,8 @@ function DisplayView({
   onStartEdit,
   onRemove,
   onMerge,
+  onSendNow,
+  sendNowDisabled,
 }: DisplayViewProps) {
   const { t } = useTranslation();
   const visible = stripSystemTags(entry.content);
@@ -470,6 +494,8 @@ function DisplayView({
         onMerge={onMerge}
         onStartEdit={onStartEdit}
         onRemove={onRemove}
+        onSendNow={onSendNow}
+        sendNowDisabled={sendNowDisabled}
       />
     </div>
   );
@@ -495,6 +521,10 @@ type QueuedGhostMessageProps = {
   onRemove: () => void | Promise<void>;
   /** Fold this entry into the one above it. */
   onMerge?: () => void | Promise<void>;
+  /** Interrupt the current turn and dispatch this exact queued entry. */
+  onSendNow?: () => void;
+  /** Disable while the queue mutation or backend cancellation is in flight. */
+  sendNowDisabled?: boolean;
   /** Called after edit save/cancel so the parent can refocus the chat input. */
   onEditComplete?: () => void;
 };
@@ -511,6 +541,54 @@ function useFocusQueuedEdit(
   }, [editing, textareaRef]);
 }
 
+type QueuedGhostSaveArgs = {
+  value: string;
+  entryContent: string;
+  entityReferences: readonly EntityReference[];
+  onSave: QueuedGhostMessageProps["onSave"];
+  onEditComplete?: () => void;
+  setEditing: (editing: boolean) => void;
+  setSaving: (saving: boolean) => void;
+  t: (key: string) => string;
+};
+
+function useQueuedGhostSave({
+  value,
+  entryContent,
+  entityReferences,
+  onSave,
+  onEditComplete,
+  setEditing,
+  setSaving,
+  t,
+}: QueuedGhostSaveArgs) {
+  return useCallback(async () => {
+    const trimmed = value.trim();
+    if (!trimmed || trimmed === entryContent) {
+      setEditing(false);
+      onEditComplete?.();
+      return;
+    }
+    setSaving(true);
+    try {
+      await onSave(trimmed, survivingEntityReferences(trimmed, entityReferences));
+      setEditing(false);
+      onEditComplete?.();
+    } catch (err) {
+      console.error("Failed to update queued entry:", err);
+      if (err instanceof QueueEntryNotFoundError) {
+        toast.error(t("chat:queueEditAlreadySent"));
+      } else {
+        toast.error(t("chat:queueEditSaveFailed"));
+      }
+      setEditing(false);
+      onEditComplete?.();
+    } finally {
+      setSaving(false);
+    }
+  }, [value, entryContent, onSave, onEditComplete, entityReferences, setEditing, setSaving, t]);
+}
+
 export const QueuedGhostMessage = forwardRef<QueuedGhostMessageHandle, QueuedGhostMessageProps>(
   function QueuedGhostMessage(
     {
@@ -522,6 +600,8 @@ export const QueuedGhostMessage = forwardRef<QueuedGhostMessageHandle, QueuedGho
       onSave,
       onRemove,
       onMerge,
+      onSendNow = () => undefined,
+      sendNowDisabled = false,
       onEditComplete,
     },
     ref,
@@ -537,7 +617,6 @@ export const QueuedGhostMessage = forwardRef<QueuedGhostMessageHandle, QueuedGho
     );
     const effectiveCanMerge = canMerge && canMergeEntry(entry);
     useFocusQueuedEdit(editing, textareaRef);
-
     useEffect(() => {
       if (!editing) setValue(entry.content);
     }, [entry.content, editing]);
@@ -549,45 +628,24 @@ export const QueuedGhostMessage = forwardRef<QueuedGhostMessageHandle, QueuedGho
     }, [entry.content, canEdit]);
 
     useImperativeHandle(ref, () => ({ startEdit }), [startEdit]);
-
     const handleCancel = useCallback(() => {
       setValue(entry.content);
       setEditing(false);
       onEditComplete?.();
     }, [entry.content, onEditComplete]);
 
-    const handleSave = useCallback(async () => {
-      const trimmed = value.trim();
-      if (!trimmed || trimmed === entry.content) {
-        setEditing(false);
-        onEditComplete?.();
-        return;
-      }
-      setSaving(true);
-      try {
-        await onSave(trimmed, survivingEntityReferences(trimmed, entityReferences));
-        setEditing(false);
-        onEditComplete?.();
-      } catch (err) {
-        console.error("Failed to update queued entry:", err);
-        // Exit edit mode after both drain races and transient failures.
-        if (err instanceof QueueEntryNotFoundError) {
-          toast.error(t("chat:queueEditAlreadySent"));
-        } else {
-          toast.error(t("chat:queueEditSaveFailed"));
-        }
-        setEditing(false);
-        onEditComplete?.();
-      } finally {
-        setSaving(false);
-      }
-    }, [value, entry.content, onSave, onEditComplete, entityReferences, t]);
+    const handleSave = useQueuedGhostSave({
+      value,
+      entryContent: entry.content,
+      entityReferences,
+      onSave,
+      onEditComplete,
+      setEditing,
+      setSaving,
+      t,
+    });
 
-    // Persisted positions are durable FIFO keys and intentionally retain gaps
-    // after a remove or merge. The panel index is the compact user-facing
-    // ordinal, so prefer it whenever this row belongs to a rendered list.
-    const positionNumber = index === undefined ? (entry.position ?? 1) : index + 1;
-    const positionLabel = `#${positionNumber}`;
+    const positionLabel = queuePositionLabel(index, entry.position);
 
     return (
       <div
@@ -617,6 +675,8 @@ export const QueuedGhostMessage = forwardRef<QueuedGhostMessageHandle, QueuedGho
             onStartEdit={startEdit}
             onRemove={onRemove}
             onMerge={onMerge}
+            onSendNow={onSendNow}
+            sendNowDisabled={sendNowDisabled}
           />
         )}
       </div>

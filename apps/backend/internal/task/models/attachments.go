@@ -1,10 +1,14 @@
 package models
 
-import "errors"
+import (
+	"errors"
+
+	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
+)
 
 const (
-	MaxMessageAttachmentBytes int64 = 100 * 1024 * 1024
-	MaxMessageAttachmentCount       = 10
+	MaxMessageAttachmentBytes = messagequeue.MaxMessageAttachmentBytes
+	MaxMessageAttachmentCount = messagequeue.MaxMessageAttachmentCount
 )
 
 var (

@@ -157,6 +157,7 @@ Subscription quota tracking and per-agent cheap-model profile routing.
 | [mermaid-rendering](ui/mermaid-rendering.md) | shipped |
 | [message-queue-management](ui/message-queue-management.md) | shipped |
 | [message-queue-merge](ui/message-queue-merge.md) | shipped |
+| [message-queue-send-now](ui/message-queue-send-now.md) | draft |
 | [settings-manual-save](ui/settings-manual-save.md) | shipped |
 | [settings-discovery](ui/settings-discovery.md) | shipped |
 | [executor-settings-card-spacing](ui/executor-settings-card-spacing.md) | shipped |

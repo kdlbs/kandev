@@ -3981,11 +3981,12 @@ type cancelInFlightGuard struct {
 type cancellationKind string
 
 const (
-	cancellationKindExplicit cancellationKind = "explicit"
-	cancellationKindSilent   cancellationKind = "silent"
-	cancellationKindPeer     cancellationKind = "peer"
-	cancellationKindInternal cancellationKind = "internal"
-	cancellationOperationTTL                  = 30 * time.Second
+	cancellationKindExplicit     cancellationKind = "explicit"
+	cancellationKindSilent       cancellationKind = "silent"
+	cancellationKindPeer         cancellationKind = "peer"
+	cancellationKindInternal     cancellationKind = "internal"
+	cancellationKindQueueSendNow cancellationKind = "queue_send_now"
+	cancellationOperationTTL                      = 30 * time.Second
 )
 
 type cancellationIdentity struct {
@@ -4003,6 +4004,8 @@ type cancelOperation struct {
 	kind                       cancellationKind
 	identity                   cancellationIdentity
 	identityReady              bool
+	expectedTurnID             string
+	expectedTurnReady          bool
 	completionEligible         bool
 	completionEligibilityReady bool
 	actions                    []*cancellationAction
@@ -4099,6 +4102,34 @@ func (s *Service) claimCancellationWithAction(
 	return operation, true, registered
 }
 
+// claimCancellationWithActionExclusive establishes a cancellation owner only
+// when no source is already active for the session. Send Now uses this stricter
+// variant because joining an explicit cancel (or another Send Now click) would
+// otherwise let the shared cancellation finish with the wrong source
+// semantics. The accepted result is false when a caller must fail closed.
+func (s *Service) claimCancellationWithActionExclusive(
+	sessionID string,
+	kind cancellationKind,
+	action func(context.Context, *cancelOperation) (bool, error),
+) (*cancelOperation, bool, *cancellationAction, bool) {
+	s.cancellationOperationsMu.Lock()
+	defer s.cancellationOperationsMu.Unlock()
+	if s.cancellationOperations == nil {
+		s.cancellationOperations = make(map[string]*cancelOperation)
+	}
+	if operation, ok := s.cancellationOperations[sessionID]; ok {
+		return operation, false, nil, false
+	}
+	operation := &cancelOperation{done: make(chan struct{}), joined: make(chan struct{}), kind: kind}
+	var registered *cancellationAction
+	if action != nil {
+		registered = &cancellationAction{done: make(chan struct{}), run: action}
+		operation.actions = append(operation.actions, registered)
+	}
+	s.cancellationOperations[sessionID] = operation
+	return operation, true, registered, true
+}
+
 func (s *Service) claimExplicitCancellation(
 	sessionID string,
 	action func(context.Context, *cancelOperation) (bool, error),
@@ -4109,6 +4140,9 @@ func (s *Service) claimExplicitCancellation(
 		s.cancellationOperations = make(map[string]*cancelOperation)
 	}
 	if operation, ok := s.cancellationOperations[sessionID]; ok {
+		if operation.kind == cancellationKindQueueSendNow {
+			return operation, false, nil
+		}
 		operation.markJoinedLocked()
 		if operation.kind == cancellationKindExplicit || action == nil {
 			return operation, false, nil
@@ -4149,6 +4183,24 @@ func (s *Service) setCancellationIdentity(sessionID string, operation *cancelOpe
 		operation.identity = identity
 		operation.identityReady = true
 	}
+}
+
+func (s *Service) setCancellationExpectedTurn(sessionID string, operation *cancelOperation, turnID string) {
+	s.cancellationOperationsMu.Lock()
+	defer s.cancellationOperationsMu.Unlock()
+	if current := s.cancellationOperations[sessionID]; current == operation {
+		operation.expectedTurnID = turnID
+		operation.expectedTurnReady = true
+	}
+}
+
+func (s *Service) cancellationExpectedTurnSnapshot(operation *cancelOperation) (string, bool) {
+	s.cancellationOperationsMu.Lock()
+	defer s.cancellationOperationsMu.Unlock()
+	if operation == nil {
+		return "", false
+	}
+	return operation.expectedTurnID, operation.expectedTurnReady
 }
 
 func (s *Service) setCancellationCompletionEligible(sessionID string, operation *cancelOperation, eligible bool) {
@@ -4694,6 +4746,9 @@ func (s *Service) CancelAgent(ctx context.Context, sessionID string) (err error)
 		}
 		if operation.kind == cancellationKindExplicit {
 			return nil
+		}
+		if operation.kind == cancellationKindQueueSendNow {
+			return ErrSendNowConflict
 		}
 		if action == nil {
 			return s.reconcileJoinedExplicitCancellation(ctx, sessionID, operation)

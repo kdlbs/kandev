@@ -65,6 +65,8 @@ Stopping a turn does not itself run the next queued message. Expand the queue an
 
 The expanded queue also lets you discard stale work. **Remove** is available for every visible pending row, including messages from users, peer agents, workflows, and server actions; **Clear all** removes all visible pending rows in that session. Only user-origin rows remain editable. A message already reserved for delivery is hidden from the queue and cannot be cancelled with these controls.
 
+The queue panel separates four actions. **Run next** sends the promptable FIFO head and leaves a running turn alone. **Send Now** is the replacement action: it interrupts the active turn and sends one selected row, or the click-time snapshot of all visible rows as one FIFO-ordered prompt. It does not record ordinary Cancel side effects or complete the cancelled workflow step. **Clear all** discards the visible queue. The chat toolbar's **Cancel** is the normal user cancellation for the active turn; it sends no queued prompt and may complete an eligible workflow step or move the task to review.
+
 A CLI-passthrough profile displays the agent's native terminal interface in a PTY. It still belongs to the task, but it does not provide Kandev's structured chat messages and tool-call presentation.
 
 <details>
