@@ -103,6 +103,9 @@ Application close codes are:
 | `4003` | Auto-install failed.                                               |
 | `4004` | Executor unsupported in V1.                                        |
 | `4005` | Active LSP connection cap reached.                                 |
+| `4006` | Unexpected LSP proxy stream failure.                               |
+
+The browser translates categorical `4002`, `4004`, `4005`, and `4006` statuses from the close code instead of rendering transport prose. Binary and installation failures may retain an actionable server-provided diagnostic.
 
 ### Browser LSP progress contract
 

@@ -211,16 +211,17 @@ export const CLOSE_CODE_STATUS: Record<number, (reason: string) => LspStatus> = 
     cause: "workspace_unavailable",
   }),
   4003: (reason) => ({ state: "error", reason: reason || t("lsp:installFailed") }),
-  4004: (reason) => ({
+  4004: () => ({
     state: "unavailable",
-    reason: reason || t("lsp:taskExecutorUnsupported"),
+    reason: t("lsp:taskExecutorUnsupported"),
     cause: "unsupported_executor",
   }),
-  4005: (reason) => ({
+  4005: () => ({
     state: "unavailable",
-    reason: reason || t("lsp:tooManyLanguageServers"),
+    reason: t("lsp:tooManyLanguageServers"),
     cause: "capacity",
   }),
+  4006: () => ({ state: "error", reason: t("lsp:languageServerExited") }),
 };
 
 export function getLspUnavailableSetupHint(

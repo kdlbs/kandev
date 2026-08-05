@@ -1114,7 +1114,7 @@ test.describe("LSP file intelligence", () => {
       await expect(
         secondPage
           .getByTestId("lsp-progress-details")
-          .getByText(/active LSP connection cap exceeded/),
+          .getByText(/Too many language servers are active/),
       ).toBeVisible();
       await expect(secondPage.getByText(/Enable auto-install/)).toHaveCount(0);
 
