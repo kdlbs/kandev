@@ -113,7 +113,28 @@ type Service struct {
 	repositoryLookup     RepositoryLookup
 	dependencyValidator  WatchDependencyValidator
 	taskAuthorizer       TaskAuthorizer
+	promptResolver       PromptResolver
 	logger               *logger.Logger
+}
+
+// PromptResolver resolves editable prompt content by name. Mirrors
+// github.PromptResolver — used to resolve the effective MR auto-fix
+// prompt (default template, editable via Settings, or a per-task override).
+type PromptResolver interface {
+	ResolvePromptContent(ctx context.Context, name, fallback string) string
+}
+
+// SetPromptResolver wires the editable prompt service into GitLab automation.
+func (s *Service) SetPromptResolver(resolver PromptResolver) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.promptResolver = resolver
+}
+
+func (s *Service) getPromptResolver() PromptResolver {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.promptResolver
 }
 
 // SetEventBus wires the event bus for publishing review/issue/feedback events.

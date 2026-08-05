@@ -220,6 +220,9 @@ func (s *Store) createTables() error {
 	if err := s.createMRAutomationTables(); err != nil {
 		return err
 	}
+	if err := s.migrateMRAutomationAutomationColumns(); err != nil {
+		return err
+	}
 	if err := s.migrateConfigRevision(); err != nil {
 		return err
 	}

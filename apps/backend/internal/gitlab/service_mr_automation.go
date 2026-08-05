@@ -4,7 +4,14 @@ import (
 	"context"
 	"errors"
 	"strings"
+
+	promptcfg "github.com/kandev/kandev/config/prompts"
 )
+
+// defaultMRAutoFixPromptName is the embedded default prompt template name
+// (apps/backend/config/prompts/mr-auto-fix.md), mirroring GitHub's
+// defaultCIAutoFixPromptName.
+const defaultMRAutoFixPromptName = "mr-auto-fix"
 
 // GetTaskMRAutomationResponse returns a task's MR automation options plus
 // its per-MR lifecycle checkpoints (AC1).
@@ -32,7 +39,7 @@ func (s *Service) GetTaskMRAutomationResponse(ctx context.Context, taskID string
 	if err != nil {
 		return nil, err
 	}
-	return taskMRAutomationResponseFromOptions(opts, states, workspaceID), nil
+	return s.taskMRAutomationResponseFromOptions(ctx, opts, states, workspaceID), nil
 }
 
 // GetTaskMRAutomationEvaluation returns the narrow snapshot needed for one
@@ -82,7 +89,7 @@ func (s *Service) GetTaskMRAutomationEvaluation(
 	evaluationOpts := *opts
 	evaluationOpts.ReviewReviewerUsername = reviewerUsername
 	return &TaskMRAutomationEvaluation{
-		Options:    taskMRAutomationResponseFromOptions(&evaluationOpts, nil, workspaceID),
+		Options:    s.taskMRAutomationResponseFromOptions(ctx, &evaluationOpts, nil, workspaceID),
 		Checkpoint: checkpoint,
 	}, nil
 }
@@ -95,11 +102,18 @@ func (s *Service) rebindTaskMRReviewerFromConfig(ctx context.Context, taskID, us
 	return store.RebindTaskMRReviewer(ctx, taskID, username)
 }
 
-func taskMRAutomationResponseFromOptions(
-	opts *TaskMRAutomationOptions, states []*TaskMRLifecycleState, workspaceID string,
+func (s *Service) taskMRAutomationResponseFromOptions(
+	ctx context.Context, opts *TaskMRAutomationOptions, states []*TaskMRLifecycleState, workspaceID string,
 ) *TaskMRAutomationResponse {
+	effectivePrompt, usingDefault := s.effectiveMRAutoFixPrompt(ctx, opts)
 	return &TaskMRAutomationResponse{
 		TaskID:                  opts.TaskID,
+		AutoFixEnabled:          opts.AutoFixEnabled,
+		AutoMergeEnabled:        opts.AutoMergeEnabled,
+		AutoFixPromptOverride:   opts.AutoFixPromptOverride,
+		AutoFixMaxRounds:        TaskMRAutoFixMaxRounds,
+		EffectiveAutoFixPrompt:  effectivePrompt,
+		UsingDefaultPrompt:      usingDefault,
 		PromptOnReviewRequested: opts.PromptOnReviewRequested,
 		PromptOnMerged:          opts.PromptOnMerged,
 		PromptOnClosed:          opts.PromptOnClosed,
@@ -108,6 +122,26 @@ func taskMRAutomationResponseFromOptions(
 		MRStates:                states,
 		WorkspaceID:             workspaceID,
 	}
+}
+
+// effectiveMRAutoFixPrompt resolves the prompt text that will actually be
+// sent on the next auto-fix dispatch: a non-empty per-task override wins;
+// otherwise the default template, itself resolved through the editable
+// prompt service when wired (so a workspace-level edit to the "mr-auto-fix"
+// prompt applies) or the embedded fallback when not. Mirrors GitHub's
+// effectiveCIAutoFixPrompt.
+func (s *Service) effectiveMRAutoFixPrompt(ctx context.Context, opts *TaskMRAutomationOptions) (string, bool) {
+	if opts.AutoFixPromptOverride != nil {
+		if override := strings.TrimSpace(*opts.AutoFixPromptOverride); override != "" {
+			return override, false
+		}
+	}
+	fallback := promptcfg.Get(defaultMRAutoFixPromptName)
+	resolver := s.getPromptResolver()
+	if resolver == nil {
+		return fallback, true
+	}
+	return resolver.ResolvePromptContent(ctx, defaultMRAutoFixPromptName, fallback), true
 }
 
 // UpdateTaskMRAutomationOptions applies a partial update. When the patch
@@ -141,7 +175,7 @@ func (s *Service) UpdateTaskMRAutomationOptions(ctx context.Context, taskID stri
 	if err != nil {
 		return nil, err
 	}
-	return taskMRAutomationResponseFromOptions(opts, states, workspaceID), nil
+	return s.taskMRAutomationResponseFromOptions(ctx, opts, states, workspaceID), nil
 }
 
 func (s *Service) resolveReviewerUsernameForPatch(ctx context.Context, taskID string, patch TaskMRAutomationPatch) (*string, error) {
@@ -313,12 +347,13 @@ func (s *Service) IsReviewerOnMR(ctx context.Context, taskID, projectPath string
 	return false, nil
 }
 
-// ListLifecycleSubscribedTaskMRs pass-through to the store, used by the
-// poller's lifecycle sync pass (AC22).
-func (s *Service) ListLifecycleSubscribedTaskMRs(ctx context.Context) ([]*TaskMR, error) {
+// ListAutomationSubscribedTaskMRs pass-through to the store, used by the
+// poller's sync pass (AC22) for any MR whose task has a lifecycle,
+// auto-fix, or auto-merge switch on.
+func (s *Service) ListAutomationSubscribedTaskMRs(ctx context.Context) ([]*TaskMR, error) {
 	store := s.requireStore()
 	if store == nil {
 		return nil, errStoreUnavailable
 	}
-	return store.ListLifecycleSubscribedTaskMRs(ctx)
+	return store.ListAutomationSubscribedTaskMRs(ctx)
 }

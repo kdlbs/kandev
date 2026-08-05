@@ -122,6 +122,9 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 		}
 	}
 	gitlabSvc := initGitLabService(dbPool, eventBus, repos.Secrets, log)
+	if gitlabSvc != nil {
+		gitlabSvc.SetPromptResolver(promptSvc)
+	}
 	azureDevOpsSvc := initAzureDevOpsService(dbPool, eventBus, repos.Secrets, log)
 	if azureDevOpsSvc != nil {
 		azureDevOpsSvc.SetRepositoryLookup(&repositoryLookupAdapter{svc: taskSvc})

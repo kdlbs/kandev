@@ -156,8 +156,8 @@ func TestSQLiteRepository_CRUD(t *testing.T) {
 			t.Fatalf("expected custom prompt to be deleted, but it still exists")
 		}
 	}
-	if builtinCount != 5 {
-		t.Fatalf("expected 5 built-in prompts, got %d", builtinCount)
+	if builtinCount != 6 {
+		t.Fatalf("expected 6 built-in prompts, got %d", builtinCount)
 	}
 }
 
@@ -188,8 +188,8 @@ func TestSQLiteRepository_BuiltinPrompts(t *testing.T) {
 		}
 	}
 
-	if builtinCount != 5 {
-		t.Fatalf("expected 5 built-in prompts, got %d", builtinCount)
+	if builtinCount != 6 {
+		t.Fatalf("expected 6 built-in prompts, got %d", builtinCount)
 	}
 	if ciAutoFixContent == "" {
 		t.Fatalf("expected ci-auto-fix built-in prompt")

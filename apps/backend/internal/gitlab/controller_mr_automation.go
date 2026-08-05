@@ -138,6 +138,12 @@ func decodeSingleJSONObject(body io.Reader) (map[string]json.RawMessage, error) 
 
 func applyMRAutomationPatchField(patch *TaskMRAutomationPatch, key string, value json.RawMessage) error {
 	switch key {
+	case "auto_fix_enabled":
+		return decodeMRAutomationSwitch(value, &patch.AutoFixEnabled)
+	case "auto_merge_enabled":
+		return decodeMRAutomationSwitch(value, &patch.AutoMergeEnabled)
+	case "auto_fix_prompt_override":
+		return decodeMRAutoFixPromptOverride(value, &patch.AutoFixPromptOverride)
 	case "prompt_on_review_requested":
 		return decodeMRAutomationSwitch(value, &patch.PromptOnReviewRequested)
 	case "prompt_on_merged":
@@ -149,6 +155,26 @@ func applyMRAutomationPatchField(patch *TaskMRAutomationPatch, key string, value
 	default:
 		return fmt.Errorf("%w: %q", errUnknownMRAutomationField, key)
 	}
+}
+
+// decodeMRAutoFixPromptOverride unmarshals the auto-fix prompt override
+// field. A JSON null is treated the same as an explicit empty string —
+// "restore the default prompt" (AC5) — rather than rejected, matching
+// GitHub's equivalent field. This differs deliberately from the boolean
+// switches: there is no "field absent vs explicitly null" ambiguity to
+// guard against here, since both mean the same thing for this field.
+func decodeMRAutoFixPromptOverride(value json.RawMessage, dst **string) error {
+	if string(value) == "null" {
+		empty := ""
+		*dst = &empty
+		return nil
+	}
+	var prompt string
+	if err := json.Unmarshal(value, &prompt); err != nil {
+		return err
+	}
+	*dst = &prompt
+	return nil
 }
 
 // decodeMRAutomationSwitch unmarshals a boolean patch field, rejecting an
