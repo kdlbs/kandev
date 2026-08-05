@@ -184,17 +184,22 @@ export class SessionPage {
    * This is the same race the office agent-run-live spec rides out with
    * `expect.poll`-based re-seeding.
    */
-  async waitForChatIdle(opts: { timeout?: number; attemptTimeout?: number } = {}) {
+  async waitForChatIdle(
+    opts: { timeout?: number; attemptTimeout?: number; requireEditable?: boolean } = {},
+  ) {
     const softTotalTimeout = opts.timeout ?? 45_000;
     const attemptTimeout =
       opts.attemptTimeout ?? Math.min(15_000, Math.max(5_000, Math.floor(softTotalTimeout / 3)));
     const pollSlice = 1_500;
     const idle = this.anyIdleInput();
+    const editor = this.activeChat().locator(".tiptap.ProseMirror:visible").first();
+    const isReady = async () =>
+      (await idle.isVisible()) && (!opts.requireEditable || (await editor.isEditable()));
     const start = Date.now();
     let lastReloadAt = start;
 
     while (Date.now() - start < softTotalTimeout) {
-      if (await idle.isVisible()) return;
+      if (await isReady()) return;
 
       const resumeButton = this.recoveryResumeButton();
       if (await resumeButton.isVisible()) {
@@ -227,6 +232,10 @@ export class SessionPage {
 
     // Final bounded check: still throws on a genuinely stuck session, but gives
     // the last hydration attempt a full attemptTimeout slice to land.
+    if (opts.requireEditable) {
+      await expect.poll(isReady, { timeout: attemptTimeout }).toBe(true);
+      return;
+    }
     await idle.waitFor({ state: "visible", timeout: attemptTimeout });
   }
 
@@ -379,20 +388,20 @@ export class SessionPage {
 
   /** Chat input placeholder when agent is idle (default mode). */
   idleInput(): Locator {
-    return this.page.locator('[data-placeholder="Continue working on the task..."]');
+    return this.activeChat().locator('[data-placeholder="Continue working on the task..."]');
   }
 
   /** Chat input placeholder when agent is idle in any current mode. */
   anyIdleInput(): Locator {
-    return this.page
+    return this.activeChat()
       .locator('[data-placeholder="Continue working on the task..."]')
-      .or(this.page.locator('[data-placeholder="Continue working on the plan..."]'))
-      .or(this.page.locator('[data-placeholder="Continue working on the file..."]'));
+      .or(this.activeChat().locator('[data-placeholder="Continue working on the plan..."]'))
+      .or(this.activeChat().locator('[data-placeholder="Continue working on the file..."]'));
   }
 
   /** Chat input placeholder when agent is idle (plan mode). */
   planModeInput(): Locator {
-    return this.page.locator('[data-placeholder="Continue working on the plan..."]');
+    return this.activeChat().locator('[data-placeholder="Continue working on the plan..."]');
   }
 
   /**
@@ -1016,7 +1025,12 @@ export class SessionPage {
     const editor = await this.composerReady();
     await editor.click();
     await editor.fill(text);
-    await this.tapSubmitWhenReady();
+    const isTouch = await this.page.evaluate(() => window.matchMedia("(pointer: coarse)").matches);
+    if (isTouch) {
+      await this.tapSubmitWhenReady();
+      return;
+    }
+    await this.clickSubmitWhenReady();
   }
 
   /** The composer's send/submit button (scoped to the active chat panel). */
@@ -1059,9 +1073,18 @@ export class SessionPage {
    * `waitForChatIdle` have already driven hydration, so the default
    * `toBeEditable` wait is the correct condition to synchronize on.
    */
-  private async composerReady(): Promise<Locator> {
+  async composerReady(): Promise<Locator> {
     const editor = this.activeChat().locator('.tiptap.ProseMirror[contenteditable="true"]').first();
-    await expect(editor).toBeEditable();
+    try {
+      await expect(editor).toBeEditable();
+    } catch {
+      // `waitForChatIdle` intentionally treats the visible idle placeholder as
+      // sufficient for terminal workflow states, where the composer may stay
+      // disabled. Sending requires the stronger editable condition; re-drive
+      // that condition when startup hydration exposed a stale idle placeholder.
+      await this.waitForChatIdle({ timeout: 30_000, requireEditable: true });
+      await expect(editor).toBeEditable();
+    }
     return editor;
   }
 

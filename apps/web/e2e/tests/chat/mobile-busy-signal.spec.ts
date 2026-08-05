@@ -89,7 +89,7 @@ test.describe.serial("Mobile Claude background prompt handoff experiment", () =>
     await session.waitForLoad();
     await session.waitForChatIdle({ timeout: 30_000 });
 
-    const editor = session.activeChat().locator(".tiptap.ProseMirror:visible");
+    const editor = await session.composerReady();
     await editor.tap();
     await editor.fill("/detached-background 20s");
     await testPage.getByTestId("submit-message-button").tap();
