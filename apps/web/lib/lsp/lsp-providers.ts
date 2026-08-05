@@ -143,7 +143,10 @@ type LspCompletionItem = {
   filterText?: string;
 };
 
-function mapCompletionItem(item: LspCompletionItem): languages.CompletionItem {
+function mapCompletionItem(
+  item: LspCompletionItem,
+  defaultRange: ReturnType<typeof toMonacoRange>,
+): languages.CompletionItem {
   const label = typeof item.label === "string" ? item.label : item.label.label;
   const insertText = item.textEdit?.newText ?? item.insertText ?? label;
   const isSnippet = item.insertTextFormat === 2;
@@ -154,7 +157,7 @@ function mapCompletionItem(item: LspCompletionItem): languages.CompletionItem {
     documentation: extractDocumentation(item.documentation),
     insertText,
     insertTextRules: isSnippet ? 4 /* InsertAsSnippet */ : undefined,
-    range: item.textEdit?.range ? toMonacoRange(item.textEdit.range) : undefined,
+    range: item.textEdit?.range ? toMonacoRange(item.textEdit.range) : defaultRange,
     sortText: item.sortText,
     filterText: item.filterText,
     additionalTextEdits: item.additionalTextEdits?.map((e) => ({
@@ -175,6 +178,13 @@ function registerCompletionProvider(ctx: ProviderCtx): IDisposable {
     provideCompletionItems: async (model, position, context, token) => {
       const uri = getDocumentUri(model);
       if (!uri) return { suggestions: [] };
+      const word = model.getWordUntilPosition(position);
+      const defaultRange = {
+        startLineNumber: position.lineNumber,
+        startColumn: word.startColumn,
+        endLineNumber: position.lineNumber,
+        endColumn: word.endColumn,
+      };
       try {
         const result = await rpc.sendRequest("textDocument/completion", {
           textDocument: { uri },
@@ -185,7 +195,11 @@ function registerCompletionProvider(ctx: ProviderCtx): IDisposable {
         const items = Array.isArray(result)
           ? result
           : ((result as { items?: unknown[] })?.items ?? []);
-        return { suggestions: (items as LspCompletionItem[]).map(mapCompletionItem) };
+        return {
+          suggestions: (items as LspCompletionItem[]).map((item) =>
+            mapCompletionItem(item, defaultRange),
+          ),
+        };
       } catch {
         return { suggestions: [] };
       }

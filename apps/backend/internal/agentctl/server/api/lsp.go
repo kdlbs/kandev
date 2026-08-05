@@ -24,8 +24,9 @@ import (
 )
 
 const (
-	lspCloseBinaryNotFound = 4001
-	lspCloseInstallFailed  = 4003
+	lspCloseBinaryNotFound         = 4001
+	lspCloseInstallFailed          = 4003
+	lspCloseAutoInstallUnsupported = 4007
 
 	lspLanguageTypeScript    = "typescript"
 	lspLanguagePython        = "python"
@@ -137,11 +138,20 @@ func (s *Server) handleLSPStreamWS(c *gin.Context) {
 
 	binaryPath, err := s.lspInstaller.BinaryPath(language)
 	if err != nil {
+		autoInstall := lspAutoInstallRequested(c)
+		if autoInstall && !installer.CanAutoInstall(language) {
+			_ = conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(
+				lspCloseAutoInstallUnsupported,
+				"auto-install unsupported on task host",
+			))
+			_ = conn.Close()
+			return
+		}
 		s.handleLSPBinaryNotFound(
 			c.Request.Context(),
 			conn,
 			language,
-			lspAutoInstallRequested(c) && installer.CanAutoInstall(language),
+			autoInstall,
 			err,
 		)
 		return

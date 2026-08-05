@@ -58,6 +58,23 @@ function hasActiveLspWork(progress: LspProgressSnapshot): boolean {
   return progress.initializingSince !== null || progress.active.length > 0;
 }
 
+function configurationForLanguage(
+  lspLanguage: string,
+  userConfigs?: Record<string, Record<string, unknown>>,
+): Record<string, unknown> {
+  return {
+    ...(LSP_DEFAULT_CONFIGS[lspLanguage] ?? {}),
+    ...(userConfigs?.[lspLanguage] ?? {}),
+  };
+}
+
+function configurationsMatch(
+  current: Record<string, unknown>,
+  next: Record<string, unknown>,
+): boolean {
+  return JSON.stringify(current) === JSON.stringify(next);
+}
+
 class LSPClientManager {
   private connections = new Map<string, ManagedLspConnection>();
   private connectionGeneration = 0;
@@ -143,22 +160,24 @@ class LSPClientManager {
     userConfigs?: Record<string, Record<string, unknown>>,
   ): () => void {
     const key = `${sessionId}:${lspLanguage}`;
+    const configuration = configurationForLanguage(lspLanguage, userConfigs);
 
     const existing = this.connections.get(key);
     if (existing && existing.ws.readyState <= WebSocket.OPEN) {
-      existing.refCount++;
-      if (existing.idleTimer) {
-        clearTimeout(existing.idleTimer);
-        existing.idleTimer = null;
-      }
-      return () => this.decrementRef(existing);
+      return this.acquireConnection(existing, configuration);
     }
     if (existing) this.cleanupConnection(existing);
 
     const wsUrl = `${getWsBaseUrl()}/lsp/${sessionId}?language=${lspLanguage}`;
     const ws = new WebSocket(wsUrl);
 
-    const conn = createManagedLspConnection(key, sessionId, ++this.connectionGeneration, ws);
+    const conn = createManagedLspConnection(
+      key,
+      sessionId,
+      ++this.connectionGeneration,
+      ws,
+      configuration,
+    );
     this.connections.set(key, conn);
     this.setStatus(key, { state: "connecting" });
 
@@ -195,16 +214,11 @@ class LSPClientManager {
         // Language server is running — start the LSP JSON-RPC bridge
         ws.removeEventListener("message", statusHandler);
         bridgeStarted = true;
-        this.initializeLsp(
-          conn,
-          lspLanguage,
-          {
-            path: data.workspacePath ?? null,
-            uri: data.workspaceUri ?? null,
-            repositorySubpaths: data.repoSubpaths ?? [],
-          },
-          userConfigs,
-        );
+        this.initializeLsp(conn, lspLanguage, {
+          path: data.workspacePath ?? null,
+          uri: data.workspaceUri ?? null,
+          repositorySubpaths: data.repoSubpaths ?? [],
+        });
       } else if (data.status === "install_failed") {
         ws.removeEventListener("message", statusHandler);
         terminalStatusReceived = true;
@@ -249,23 +263,38 @@ class LSPClientManager {
     return () => this.decrementRef(conn);
   }
 
+  private acquireConnection(
+    conn: ManagedLspConnection,
+    configuration: Record<string, unknown>,
+  ): () => void {
+    this.updateConfiguration(conn, configuration);
+    conn.refCount++;
+    this.clearIdleTimer(conn);
+    return () => this.decrementRef(conn);
+  }
+
+  private updateConfiguration(
+    conn: ManagedLspConnection,
+    configuration: Record<string, unknown>,
+  ): void {
+    if (configurationsMatch(conn.configuration, configuration)) return;
+    conn.configuration = configuration;
+    if (!conn.protocolInitialized || !conn.rpc) return;
+    conn.rpc.sendNotification("workspace/didChangeConfiguration", {
+      settings: configuration,
+    });
+  }
+
   private async initializeLsp(
     conn: ManagedLspConnection,
     lspLanguage: string,
     workspace: LspReadyWorkspace,
-    userConfigs?: Record<string, Record<string, unknown>>,
   ) {
     if (!this.isCurrentConnection(conn)) return;
     const { key, ws } = conn;
 
     const workspaceMetadata = configureLspWorkspace(conn, workspace);
     if (workspaceMetadata) this.workspaceMetadata.set(conn.key, workspaceMetadata);
-
-    // Merge default configs with user overrides for this language
-    const mergedConfig: Record<string, unknown> = {
-      ...(LSP_DEFAULT_CONFIGS[lspLanguage] ?? {}),
-      ...(userConfigs?.[lspLanguage] ?? {}),
-    };
 
     try {
       const rpc = new JsonRpcConnection(ws);
@@ -281,8 +310,8 @@ class LSPClientManager {
       // Handle server requests
       rpc.onRequest("workspace/configuration", (params: unknown) => {
         const items = (params as { items?: { section?: string }[] })?.items;
-        if (!Array.isArray(items)) return [mergedConfig];
-        return items.map(() => mergedConfig);
+        if (!Array.isArray(items)) return [conn.configuration];
+        return items.map(() => conn.configuration);
       });
       rpc.onRequest("client/registerCapability", () => null);
 
@@ -307,6 +336,10 @@ class LSPClientManager {
       }
       conn.serverCapabilities = initResult?.capabilities ?? null;
       rpc.sendNotification("initialized", {});
+      conn.protocolInitialized = true;
+      rpc.sendNotification("workspace/didChangeConfiguration", {
+        settings: conn.configuration,
+      });
 
       // Register diagnostics handler
       rpc.onNotification("textDocument/publishDiagnostics", (params) => {
@@ -611,6 +644,7 @@ class LSPClientManager {
     conn.rpc?.dispose();
     conn.rpc = null;
     conn.initialized = false;
+    conn.protocolInitialized = false;
     conn.openDocuments.clear();
     conn.diagnosticsByUri.clear();
     conn.progress = EMPTY_LSP_PROGRESS;

@@ -422,7 +422,11 @@ test.describe("LSP file intelligence", () => {
     );
     expect(manualCompletion.params?.context).toEqual({ triggerKind: 1 });
     await expect(testPage.locator(".suggest-widget")).toContainText("fakeGreeting");
-    await testPage.keyboard.press("Escape");
+    await testPage.keyboard.press("Enter");
+    await expect(testPage.locator(".monaco-editor:visible .view-lines")).toContainText(
+      "fakeGreeting",
+    );
+    await testPage.keyboard.press("Control+Z");
 
     await testPage
       .locator(".monaco-editor:visible .view-line")
@@ -569,7 +573,7 @@ test.describe("LSP file intelligence", () => {
     );
     expect(didChangeIndex).toBeGreaterThanOrEqual(0);
     expect(didSaveIndex).toBeGreaterThan(didChangeIndex);
-    await expectFakeLspMarkerCount(testPage, 1);
+    await expectFakeLspMarkerCount(testPage, 2);
 
     await editor.click();
     await testPage.keyboard.press("Control+End");

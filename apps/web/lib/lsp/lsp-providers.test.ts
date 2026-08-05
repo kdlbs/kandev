@@ -58,6 +58,9 @@ const ensureModelsExist = vi.fn();
 const getModelUri = vi.fn((uri: string) => uri);
 let definitionProvider: DefinitionProvider;
 let completionProvider: CompletionProvider;
+const completionModel = {
+  getWordUntilPosition: vi.fn(() => ({ word: "pri", startColumn: 4, endColumn: 7 })),
+};
 
 function disposable() {
   return { dispose: vi.fn() };
@@ -117,7 +120,7 @@ describe("LSP completion provider", () => {
     rpc.sendRequest.mockResolvedValue([]);
 
     await completionProvider.provideCompletionItems(
-      {},
+      completionModel,
       { lineNumber: 3, column: 7 },
       { triggerKind: 1, triggerCharacter: "." },
       { isCancellationRequested: false },
@@ -134,7 +137,7 @@ describe("LSP completion provider", () => {
     rpc.sendRequest.mockResolvedValue([]);
 
     await completionProvider.provideCompletionItems(
-      {},
+      completionModel,
       { lineNumber: 3, column: 7 },
       { triggerKind: 0 },
       { isCancellationRequested: false },
@@ -151,7 +154,7 @@ describe("LSP completion provider", () => {
     rpc.sendRequest.mockResolvedValue([]);
 
     await completionProvider.provideCompletionItems(
-      {},
+      completionModel,
       { lineNumber: 3, column: 7 },
       { triggerKind: 2 },
       { isCancellationRequested: false },
@@ -161,6 +164,57 @@ describe("LSP completion provider", () => {
       "textDocument/completion",
       expect.objectContaining({ context: { triggerKind: 3 } }),
     );
+  });
+
+  it("uses the current Monaco word as the range when the server omits textEdit", async () => {
+    rpc.sendRequest.mockResolvedValue([{ label: "println", insertText: "println" }]);
+
+    const result = (await completionProvider.provideCompletionItems(
+      completionModel,
+      { lineNumber: 3, column: 7 },
+      { triggerKind: 0 },
+      { isCancellationRequested: false },
+    )) as { suggestions: Array<{ range: unknown }> };
+
+    expect(completionModel.getWordUntilPosition).toHaveBeenCalledWith({
+      lineNumber: 3,
+      column: 7,
+    });
+    expect(result.suggestions[0]?.range).toEqual({
+      startLineNumber: 3,
+      startColumn: 4,
+      endLineNumber: 3,
+      endColumn: 7,
+    });
+  });
+
+  it("keeps the server textEdit range when one is provided", async () => {
+    rpc.sendRequest.mockResolvedValue([
+      {
+        label: "println",
+        textEdit: {
+          range: {
+            start: { line: 1, character: 2 },
+            end: { line: 1, character: 5 },
+          },
+          newText: "println",
+        },
+      },
+    ]);
+
+    const result = (await completionProvider.provideCompletionItems(
+      completionModel,
+      { lineNumber: 3, column: 7 },
+      { triggerKind: 0 },
+      { isCancellationRequested: false },
+    )) as { suggestions: Array<{ range: unknown }> };
+
+    expect(result.suggestions[0]?.range).toEqual({
+      startLineNumber: 2,
+      startColumn: 3,
+      endLineNumber: 2,
+      endColumn: 6,
+    });
   });
 });
 

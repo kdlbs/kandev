@@ -20,6 +20,8 @@ export type ManagedLspConnection = LSPConnection & {
   key: string;
   sessionId: string;
   ownerId: string;
+  configuration: Record<string, unknown>;
+  protocolInitialized: boolean;
   diagnosticsByUri: Map<string, PublishDiagnosticsParams>;
   progress: LspProgressSnapshot;
   registeredProgressTokens: Set<LspProgressToken>;
@@ -43,11 +45,14 @@ export function createManagedLspConnection(
   sessionId: string,
   generation: number,
   ws: WebSocket,
+  configuration: Record<string, unknown>,
 ): ManagedLspConnection {
   return {
     key,
     sessionId,
     ownerId: `${key}:${generation}`,
+    configuration,
+    protocolInitialized: false,
     ws,
     rpc: null,
     initialized: false,

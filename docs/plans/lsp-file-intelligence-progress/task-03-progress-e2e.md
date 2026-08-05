@@ -55,6 +55,7 @@ Record RED/GREEN E2E evidence, exact commands and outcomes, migrated selectors/a
 - Review hardening: desktop crash recovery now proves the close reason, error state, and Retry action before reconnecting, while cross-language crash isolation retains the surviving connection.
 - Review hardening: elapsed-time E2E assertions follow the localized English unit catalog (`sec`) instead of the removed hard-coded suffix.
 - Review hardening: the secondary-repository task-host scenario pins a target opened from the Files tree, navigates back to it through LSP, and proves the existing task-root-relative tab is reused instead of duplicated.
+- Review hardening: the full Kotlin protocol scenario accepts the fake server's completion item without `textEdit`, verifies Monaco inserts it through the current-word fallback range, and undoes the edit before continuing navigation and save coverage.
 - Verified:
   - `pnpm e2e:run --no-build -- --project=chromium tests/lsp/lsp-file-intelligence.spec.ts` — 13 passed
   - `pnpm e2e:run --no-build -- --project=mobile-chrome tests/lsp/mobile-lsp-file-intelligence.spec.ts` — 3 passed

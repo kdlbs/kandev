@@ -12,7 +12,7 @@ Extend the browser-owned LSP connection with standard work-done progress before 
 
 ## Backend
 
-The progress protocol itself requires no backend payload transform because both WebSocket proxy hops forward JSON-RPC bodies unchanged. Review hardening also makes task-host binary discovery, managed cache roots, and npm/Go auto-install resolve through the process manager's task environment, resolves Windows npm shims through PATHEXT, rejects Rust auto-install on task hosts without a packaged strategy, keeps that task-host decision out of the main backend's global settings policy, and checks the persisted executor runtime before any cold execution is created for LSP.
+The progress protocol itself requires no backend payload transform because both WebSocket proxy hops forward JSON-RPC bodies unchanged. Review hardening also makes task-host binary discovery, managed cache roots, and npm/Go auto-install resolve through the process manager's task environment, resolves Windows npm shims through PATHEXT, rejects Rust auto-install on task hosts without a packaged strategy through a distinct browser-visible close code, keeps that task-host decision out of the main backend's global settings policy, and checks the persisted executor runtime before any cold execution is created for LSP.
 
 ## Frontend
 
@@ -25,6 +25,8 @@ The progress protocol itself requires no backend payload transform because both 
 - Keep runtime TypeScript suppression separate from the synchronous LSP-provider registration guard so cold Monaco loads still wrap lazy built-in providers.
 - Preserve detailed pre-bridge install errors when the following WebSocket close contains only a generic mapped reason.
 - Translate Monaco completion trigger context into the LSP request context advertised by the client capability.
+- Supply Monaco's current-word range for completion items without `textEdit`, while preserving explicit server edit ranges.
+- Keep per-language configuration mutable on the shared connection, notify initialized servers when settings change, and answer later `workspace/configuration` requests from that live value.
 - After confirmed persistence, synchronously flush the newest live editor snapshot as `textDocument/didChange`, then route `textDocument/didSave` to matching open documents for servers that requested save synchronization. Include the persisted snapshot only for `includeText` servers when the buffer has not advanced; raced saves omit stale optional text and retain the newer dirty buffer.
 - Resolve LSP targets to repository-scoped workspace requests while preserving an existing task-root-relative editor key, so navigation from attached repositories activates the tree-opened tab instead of duplicating it.
 
@@ -42,6 +44,8 @@ The progress protocol itself requires no backend payload transform because both 
 - **Protocol integration:** `apps/web/lib/lsp/lsp-client-manager.test.ts` proves initialize capability/token advertisement, pre-initialize progress, server-created numeric tokens, subscriber updates, and stale-generation isolation.
 - **Document synchronization:** focused manager, capability, and both save-hook tests prove canonical repo-aware routing, `includeText` handling, `didChange`-before-`didSave` ordering, preservation of edits made during persistence, and no save notification after rejected persistence.
 - **Navigation identity:** the LSP file-opener hook test proves an attached-repository target reuses an existing task-root-relative editor key while retaining canonical repository-scoped opens for new targets.
+- **Completion and configuration:** focused provider and manager tests prove range fallback/override behavior, connection reuse, live configuration notification, and updated request responses.
+- **Task-host setup guidance:** agentctl and frontend mapping tests prove requested-but-unsupported auto-install closes with `4007` and renders localized manual-install guidance rather than suggesting the user enable an unusable preference.
 - **Presentation helpers:** focused pure-helper tests cover labels, lifecycle actions, and locale-aware elapsed-time formatting without adding shallow React markup tests.
 - **Task-host environment:** focused Go tests cover PATH-based command discovery, task-HOME cache roots, GOBIN result lookup, pre-install registry discovery, PATHEXT-aware managed npm shims, platform-gated Rust installation, process-manager environment exposure, and read-only rejection of cold unsupported executors.
 

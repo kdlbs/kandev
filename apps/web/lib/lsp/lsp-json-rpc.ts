@@ -9,6 +9,7 @@ import { getMonacoInstance } from "@/components/editors/monaco/monaco-init";
 
 export type LspUnavailableCause =
   | "missing_binary"
+  | "auto_install_unsupported"
   | "workspace_unavailable"
   | "unsupported_executor"
   | "capacity";
@@ -222,13 +223,22 @@ export const CLOSE_CODE_STATUS: Record<number, (reason: string) => LspStatus> = 
     cause: "capacity",
   }),
   4006: () => ({ state: "error", reason: t("lsp:languageServerExited") }),
+  4007: () => ({
+    state: "unavailable",
+    reason: t("lsp:autoInstallUnsupported"),
+    cause: "auto_install_unsupported",
+  }),
 };
 
 export function getLspUnavailableSetupHint(
   status: LspStatus,
   lspLanguage: string | null,
 ): string | null {
-  if (status.state !== "unavailable" || status.cause !== "missing_binary") return null;
+  if (status.state !== "unavailable") return null;
+  if (status.cause === "auto_install_unsupported") {
+    return t("lsp:installLanguageServerManually");
+  }
+  if (status.cause !== "missing_binary") return null;
   if (lspLanguage === "kotlin") {
     return t("lsp:installKotlinLsp");
   }

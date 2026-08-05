@@ -268,7 +268,7 @@ func TestHandleLSPStream_MissingBinaryWithoutAutoInstallClosesWithBinaryNotFound
 	}
 }
 
-func TestHandleLSPStream_KotlinNeverAttemptsAutoInstall(t *testing.T) {
+func TestHandleLSPStream_UnsupportedAutoInstallUsesDistinctCloseCode(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("PATH", "")
 
@@ -289,8 +289,8 @@ func TestHandleLSPStream_KotlinNeverAttemptsAutoInstall(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected immediate close error, got %T: %v", err, err)
 	}
-	if closeErr.Code != 4001 {
-		t.Fatalf("close code = %d, want 4001", closeErr.Code)
+	if closeErr.Code != 4007 {
+		t.Fatalf("close code = %d, want 4007", closeErr.Code)
 	}
 }
 

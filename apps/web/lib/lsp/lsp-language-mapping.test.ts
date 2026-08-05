@@ -4,6 +4,8 @@ import { CLOSE_CODE_STATUS, getLspUnavailableSetupHint, toLspLanguage } from "./
 import { LSP_LANGUAGE_OPTIONS } from "./lsp-language-options";
 import { getMonacoLanguagesForLsp } from "./lsp-providers";
 
+const BACKEND_REASON = "backend English";
+
 describe("Kotlin LSP language mapping", () => {
   it("maps Monaco Kotlin documents to the Kotlin language server", () => {
     expect(toLspLanguage("kotlin")).toBe("kotlin");
@@ -40,22 +42,35 @@ describe("LSP task-host close codes", () => {
     });
   });
 
+  it("surfaces task-host auto-install limitations separately from a disabled preference", () => {
+    expect(CLOSE_CODE_STATUS[4007](BACKEND_REASON)).toEqual({
+      state: "unavailable",
+      reason: "Auto-install is unavailable on this task host",
+      cause: "auto_install_unsupported",
+    });
+  });
+
   it("localizes categorical close codes instead of rendering transport prose", async () => {
     await activateLocale("pseudo");
     try {
-      expect(CLOSE_CODE_STATUS[4004]("backend English")).toEqual({
+      expect(CLOSE_CODE_STATUS[4004](BACKEND_REASON)).toEqual({
         state: "unavailable",
         reason: "Ĺàńĝũàĝē śēŕvēŕś àŕē ńōţ śũƥƥōŕţēď ƀŷ ţĥĩś ţàśķ ēxēćũţōŕ",
         cause: "unsupported_executor",
       });
-      expect(CLOSE_CODE_STATUS[4005]("backend English")).toEqual({
+      expect(CLOSE_CODE_STATUS[4005](BACKEND_REASON)).toEqual({
         state: "unavailable",
         reason: "Ţōō ḿàńŷ ĺàńĝũàĝē śēŕvēŕś àŕē àćţĩvē",
         cause: "capacity",
       });
-      expect(CLOSE_CODE_STATUS[4006]("backend English")).toEqual({
+      expect(CLOSE_CODE_STATUS[4006](BACKEND_REASON)).toEqual({
         state: "error",
         reason: "ĺàńĝũàĝē śēŕvēŕ ēxĩţēď",
+      });
+      expect(CLOSE_CODE_STATUS[4007](BACKEND_REASON)).toEqual({
+        state: "unavailable",
+        reason: "Àũţō-ĩńśţàĺĺ ĩś ũńàvàĩĺàƀĺē ōń ţĥĩś ţàśķ ĥōśţ",
+        cause: "auto_install_unsupported",
       });
     } finally {
       await activateLocale("en");
@@ -70,6 +85,9 @@ describe("LSP task-host close codes", () => {
     );
     expect(getLspUnavailableSetupHint(CLOSE_CODE_STATUS[4001](""), "python")).toBe(
       "Enable auto-install in Settings → Editors.",
+    );
+    expect(getLspUnavailableSetupHint(CLOSE_CODE_STATUS[4007](""), "rust")).toBe(
+      "Install the language server manually on the task host, then retry.",
     );
   });
 });

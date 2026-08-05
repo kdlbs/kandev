@@ -64,8 +64,9 @@ function modelUri(documentUri: string, sessionId = SESSION_ID): string {
 function beginInitialization(
   sessionId = SESSION_ID,
   ready: Record<string, unknown> = { workspacePath: WORKSPACE_PATH },
+  userConfigs?: Record<string, Record<string, unknown>>,
 ) {
-  const release = lspClientManager.connect(sessionId, "typescript");
+  const release = lspClientManager.connect(sessionId, "typescript", userConfigs);
   const socket = FakeWebSocket.instances.at(-1);
   if (!socket) throw new Error(EXPECTED_SOCKET_ERROR);
   socket.open();
@@ -328,6 +329,44 @@ describe("LSP client connection cleanup", () => {
 });
 
 describe("LSP workspace handshake", () => {
+  it("updates configuration on a reused connection without restarting the server", async () => {
+    createMonacoHarness([]);
+    mocks.registerLspProviders.mockReturnValue([]);
+    const updatedConfig = { typescript: { preferences: { quoteStyle: "double" } } };
+    const { socket, initializeId } = beginInitialization(
+      SESSION_ID,
+      { workspacePath: WORKSPACE_PATH },
+      { typescript: { preferences: { quoteStyle: "single" } } },
+    );
+    completeInitialization(socket, initializeId);
+    await vi.waitFor(() => {
+      expect(lspClientManager.getStatus(SESSION_ID, "typescript")).toEqual({ state: "ready" });
+    });
+
+    lspClientManager.connect(SESSION_ID, "typescript", updatedConfig);
+
+    expect(FakeWebSocket.instances).toHaveLength(1);
+    expect(socket.sent.map((message) => JSON.parse(message))).toContainEqual({
+      jsonrpc: "2.0",
+      method: "workspace/didChangeConfiguration",
+      params: { settings: updatedConfig.typescript },
+    });
+
+    socket.emitMessage(
+      JSON.stringify({
+        jsonrpc: "2.0",
+        id: 99,
+        method: "workspace/configuration",
+        params: { items: [{ section: "typescript" }] },
+      }),
+    );
+    expect(JSON.parse(socket.sent.at(-1) ?? "null")).toEqual({
+      jsonrpc: "2.0",
+      id: 99,
+      result: [updatedConfig.typescript],
+    });
+  });
+
   it("uses the task-host URI and repository list instead of host path metadata", async () => {
     createMonacoHarness([]);
     mocks.registerLspProviders.mockReturnValue([]);

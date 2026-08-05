@@ -265,6 +265,22 @@ func TestForwardLSPCloseUsesGenericStreamErrorCode(t *testing.T) {
 	}
 }
 
+func TestForwardLSPClosePreservesTaskHostApplicationCode(t *testing.T) {
+	const autoInstallUnsupportedCode = 4007
+	writer := &recordingLSPMessageWriter{}
+	handler := &LSPHandler{}
+
+	handler.forwardLSPClose(writer, &gorillaws.CloseError{
+		Code: autoInstallUnsupportedCode,
+		Text: "auto-install unsupported on task host",
+	})
+
+	closeCode := int(writer.payload[0])<<8 | int(writer.payload[1])
+	if closeCode != autoInstallUnsupportedCode {
+		t.Fatalf("close code = %d, want %d", closeCode, autoInstallUnsupportedCode)
+	}
+}
+
 func TestLSPRuntimeSupported(t *testing.T) {
 	tests := []struct {
 		runtime agentruntime.Runtime
