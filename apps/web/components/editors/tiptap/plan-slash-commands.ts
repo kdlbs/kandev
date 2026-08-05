@@ -173,11 +173,10 @@ const EMPTY_STATE: MenuState<PlanSlashCommand> = {
 const PlanSlashPluginKey = new PluginKey("planSlashCommands");
 
 export function createPlanSlashExtension(
-  t: TFunction,
+  getT: () => TFunction,
   setMenuState: (state: MenuState<PlanSlashCommand>) => void,
   onKeyDown: (event: KeyboardEvent) => boolean,
 ) {
-  const commands = buildPlanSlashCommands(t);
   return Extension.create({
     name: "planSlashCommands",
 
@@ -191,6 +190,9 @@ export function createPlanSlashExtension(
           startOfLine: true,
 
           items: ({ query }) => {
+            // Resolved per call, so the menu follows a locale switch without the
+            // extension itself having to be rebuilt.
+            const commands = buildPlanSlashCommands(getT());
             if (!query) return commands;
             const lq = query.toLowerCase();
             return commands.filter(

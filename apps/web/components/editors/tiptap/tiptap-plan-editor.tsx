@@ -223,10 +223,19 @@ function useSlashMenu() {
   // Stable callback passed to extension — never changes, delegates via ref
   const stableKeyDown = useCallback((event: KeyboardEvent) => keyDownRef.current(event), []);
 
+  // Same ref treatment for `t`: keeping it out of the extension's identity stops
+  // a locale switch from rebuilding the ProseMirror plugin mid-edit, and the
+  // command list is rebuilt per `items()` call, so the menu still re-resolves.
+  const tRef = useRef(t);
+  useLayoutEffect(() => {
+    tRef.current = t;
+  });
+  const stableGetT = useCallback(() => tRef.current, []);
+
   /* eslint-disable react-hooks/refs -- stableKeyDown reads ref for deferred access, not during render */
   const extension = useMemo(
-    () => createPlanSlashExtension(t, setMenuState, stableKeyDown),
-    [t, stableKeyDown],
+    () => createPlanSlashExtension(stableGetT, setMenuState, stableKeyDown),
+    [stableGetT, stableKeyDown],
   );
   /* eslint-enable react-hooks/refs */
 
