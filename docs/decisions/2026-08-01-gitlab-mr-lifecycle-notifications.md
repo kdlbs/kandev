@@ -17,11 +17,17 @@ Two structural facts shaped the design:
 1. **`gitlab_mr_watches` is dead in production.** `Service.CreateMRWatch` has no
    production caller; only `gitlab_task_mrs` (written by the link dialog and the
    agent `pr` skill) is a durable, task-scoped record of a linked MR.
-2. **GitLab has no auto-fix/auto-merge automation and no per-PR review-request API
-   event.** `Client.GetMR` already returns `Reviewers`, so "review requested" is
-   modeled as assignment-as-request (the authenticated user appearing in
-   `MR.Reviewers`), not a separate signal fetch the way GitHub's requested-reviewers
-   endpoint works.
+2. **At the time of this ADR, GitLab had no auto-fix/auto-merge automation and
+   no per-PR review-request API event.** `Client.GetMR` already returns
+   `Reviewers`, so "review requested" is modeled as assignment-as-request (the
+   authenticated user appearing in `MR.Reviewers`), not a separate signal
+   fetch the way GitHub's requested-reviewers endpoint works. Auto-fix and
+   auto-merge automation for GitLab MRs landed as a follow-up on the same
+   `gitlab_task_mr_options` / `gitlab_task_mr_state` tables and
+   `/tasks/:taskID/mr-automation` endpoint this ADR introduced — see
+   `docs/specs/gitlab-integration/spec.md`'s "MR automation" section. This
+   item's absence-of-automation framing describes the state at the time of
+   writing, not the current feature set.
 
 ## Decision
 
