@@ -96,7 +96,7 @@ export function ReviewDialogSurface(props: ReviewDialogSurfaceProps) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
-        className="!max-w-[100vw] !w-[100vw] sm:!max-w-[80vw] sm:!w-[80vw] max-h-[85vh] h-[85vh] p-0 gap-0 flex flex-col shadow-2xl"
+        className="!max-w-[100vw] !w-[100vw] md:!max-w-[80vw] md:!w-[80vw] max-h-[85vh] h-[85vh] p-0 gap-0 flex flex-col shadow-2xl"
         showCloseButton={false}
         overlayClassName="bg-black/40"
       >
@@ -126,7 +126,7 @@ export function ReviewDialogSurface(props: ReviewDialogSurfaceProps) {
         <div key={state.reviewSourceKey} ref={splitRowRef} className="flex min-h-0 flex-1">
           <div
             data-testid="review-dialog-sidebar"
-            className="hidden flex-shrink-0 flex-col overflow-hidden border-r border-border sm:flex"
+            className="hidden flex-shrink-0 flex-col overflow-hidden border-r border-border md:flex"
             style={{ width: `${sidebar.width}px` }}
           >
             <ReviewFileTree
@@ -146,7 +146,7 @@ export function ReviewDialogSurface(props: ReviewDialogSurfaceProps) {
             type="button"
             tabIndex={-1}
             aria-label="Resize file list"
-            className="group relative hidden w-1 flex-shrink-0 cursor-col-resize bg-border p-0 transition-colors hover:bg-primary sm:block"
+            className="group relative hidden w-1 flex-shrink-0 cursor-col-resize bg-border p-0 transition-colors hover:bg-primary md:block"
             {...sidebar.resizeHandleProps}
           >
             <span className="absolute inset-y-0 -left-1 -right-1" />

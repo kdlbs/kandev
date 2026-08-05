@@ -260,7 +260,7 @@ describe("useChatInputState attachment feedback", () => {
   it("warns when a pasted attachment exceeds the file size limit", async () => {
     const { result } = renderInputState(vi.fn());
     const oversizedFile = new File(["video"], "recording.mov", { type: "video/quicktime" });
-    Object.defineProperty(oversizedFile, "size", { value: 11 * 1024 * 1024 });
+    Object.defineProperty(oversizedFile, "size", { value: MAX_FILE_SIZE + 1 });
 
     await act(async () => {
       await result.current.addFiles([oversizedFile]);
@@ -268,7 +268,7 @@ describe("useChatInputState attachment feedback", () => {
 
     expect(toastMessage()).toContain("Attachment is too large");
     expect(toastMessage()).toContain(
-      `recording.mov is 11.0 MB. The maximum file size is ${formatBytes(MAX_FILE_SIZE)}.`,
+      `recording.mov is ${formatBytes(MAX_FILE_SIZE + 1)}. The maximum file size is ${formatBytes(MAX_FILE_SIZE)}.`,
     );
     expect(result.current.attachments).toEqual([]);
   });

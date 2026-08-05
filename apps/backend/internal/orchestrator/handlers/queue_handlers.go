@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
 
 	"github.com/kandev/kandev/internal/common/logger"
@@ -10,6 +11,7 @@ import (
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/orchestrator"
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
+	"github.com/kandev/kandev/internal/task/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"go.uber.org/zap"
@@ -40,6 +42,7 @@ const (
 type QueueService interface {
 	QueueMessageWithMetadata(ctx context.Context, sessionID, taskID, content, model, userID string, planMode bool, attachments []messagequeue.MessageAttachment, metadata map[string]interface{}) (*messagequeue.QueuedMessage, error)
 	AppendContent(ctx context.Context, sessionID, taskID, content, model, userID string, planMode bool, attachments []messagequeue.MessageAttachment) (*messagequeue.QueuedMessage, bool, error)
+	GetEntry(ctx context.Context, sessionID, entryID string) (*messagequeue.QueuedMessage, error)
 	UpdateMessageWithMetadata(ctx context.Context, sessionID, entryID, content string, attachments []messagequeue.MessageAttachment, metadataUpdates map[string]interface{}, queuedBy string) error
 	RemoveEntry(ctx context.Context, sessionID, entryID string) error
 	MergeIntoAbove(ctx context.Context, sessionID, entryID, queuedBy string) (*messagequeue.QueuedMessage, error)
@@ -58,6 +61,20 @@ type QueueAccessAuthorizer interface {
 	AuthorizeTaskSessionAccess(ctx context.Context, taskID, sessionID string) error
 }
 
+// QueueAttachmentClaimer binds staged file descriptors to the task/session
+// after a queue entry has been durably accepted.
+type QueueAttachmentClaimer interface {
+	ClaimMessageAttachments(ctx context.Context, taskID, sessionID string, attachments []v1.MessageAttachment) error
+}
+
+type QueueAttachmentReleaser interface {
+	ReleaseMessageAttachments(ctx context.Context, taskID, sessionID string, attachments []v1.MessageAttachment) error
+}
+
+type queueEntryTaker interface {
+	TakeQueuedEntry(context.Context, string, string) (*messagequeue.QueuedMessage, bool, error)
+}
+
 // QueueHandlers handles WebSocket message-queue operations.
 type QueueHandlers struct {
 	queueService       QueueService
@@ -66,6 +83,13 @@ type QueueHandlers struct {
 	eventBus           bus.EventBus
 	logger             *logger.Logger
 	referenceValidator entityrefs.SubmissionValidator
+	attachmentClaimer  QueueAttachmentClaimer
+}
+
+// SetAttachmentClaimer wires the task attachment registry into queue adds.
+// It is optional so queue-focused tests and non-task consumers remain small.
+func (h *QueueHandlers) SetAttachmentClaimer(claimer QueueAttachmentClaimer) {
+	h.attachmentClaimer = claimer
 }
 
 // NewQueueHandlers creates a new QueueHandlers instance.
@@ -136,6 +160,10 @@ func (h *QueueHandlers) wsQueueMessage(ctx context.Context, msg *ws.Message) (*w
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "attachment delivery_mode must be prompt or path",
 			map[string]interface{}{"attachment_index": invalid})
 	}
+	if invalid := firstInvalidAttachment(req.Attachments); invalid >= 0 {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "attachment metadata is invalid",
+			map[string]interface{}{"attachment_index": invalid})
+	}
 	if messagequeue.IsReservedQueuedBy(req.UserID) {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, reservedIdentityError(req.UserID), nil)
 	}
@@ -165,6 +193,14 @@ func (h *QueueHandlers) wsQueueMessage(ctx context.Context, msg *ws.Message) (*w
 		}
 		h.logger.Error("failed to queue message", zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to queue message", nil)
+	}
+	if h.attachmentClaimer != nil && len(req.Attachments) > 0 {
+		if err := h.attachmentClaimer.ClaimMessageAttachments(ctx, req.TaskID, req.SessionID, queueAttachmentsToV1(req.Attachments)); err != nil {
+			if rollbackErr := h.rollbackQueuedAttachmentClaim(ctx, req.SessionID, queued.ID); rollbackErr != nil {
+				return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to roll back queued attachment", nil)
+			}
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "Attachment is no longer available", nil)
+		}
 	}
 
 	h.publishStatus(ctx, req.SessionID)
@@ -292,6 +328,10 @@ func (h *QueueHandlers) wsUpdateMessage(ctx context.Context, msg *ws.Message) (*
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "attachment delivery_mode must be prompt or path",
 			map[string]interface{}{"attachment_index": invalid})
 	}
+	if invalid := firstInvalidAttachment(req.Attachments); invalid >= 0 {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "attachment metadata is invalid",
+			map[string]interface{}{"attachment_index": invalid})
+	}
 
 	// Reject any client-supplied identity that would impersonate the agent.
 	// Without this guard a hostile WS client could send user_id="agent" to
@@ -322,15 +362,82 @@ func (h *QueueHandlers) wsUpdateMessage(ctx context.Context, msg *ws.Message) (*
 		}
 		metadataUpdates = map[string]interface{}{messagequeue.MetadataEntityReferences: referenceMetadata}
 	}
+	var previous *messagequeue.QueuedMessage
+	var releaseClaims QueueAttachmentReleaser
+	var newlyAdded []messagequeue.MessageAttachment
+	if h.attachmentClaimer != nil {
+		var err error
+		previous, err = h.queueService.GetEntry(ctx, req.SessionID, req.EntryID)
+		if err != nil {
+			if errors.Is(err, messagequeue.ErrEntryNotFound) {
+				return ws.NewError(msg.ID, msg.Action, queueErrorCodeEntryNotFound, "Queue entry was already drained or not owned by caller", nil)
+			}
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)
+		}
+		newlyAdded = newlyAddedQueueAttachments(previous.Attachments, req.Attachments)
+		if err := h.attachmentClaimer.ClaimMessageAttachments(ctx, previous.TaskID, req.SessionID, queueAttachmentsToV1(newlyAdded)); err != nil {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "Attachment is no longer available", nil)
+		}
+		releaseClaims, _ = h.attachmentClaimer.(QueueAttachmentReleaser)
+	}
 	if err := h.queueService.UpdateMessageWithMetadata(ctx, req.SessionID, req.EntryID, req.Content, req.Attachments, metadataUpdates, queuedBy); err != nil {
+		if releaseClaims != nil && previous != nil {
+			if releaseErr := releaseClaims.ReleaseMessageAttachments(ctx, previous.TaskID, req.SessionID, queueAttachmentsToV1(newlyAdded)); releaseErr != nil {
+				h.logger.Warn("failed to release attachments after queue update failure", zap.Error(releaseErr))
+			}
+		}
 		if errors.Is(err, messagequeue.ErrEntryNotFound) {
 			return ws.NewError(msg.ID, msg.Action, queueErrorCodeEntryNotFound, "Queue entry was already drained or not owned by caller", nil)
 		}
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)
 	}
-
+	if releaseClaims != nil && previous != nil {
+		if superseded := supersededQueueAttachments(previous.Attachments, req.Attachments); len(superseded) > 0 {
+			if err := releaseClaims.ReleaseMessageAttachments(ctx, previous.TaskID, req.SessionID, queueAttachmentsToV1(superseded)); err != nil {
+				h.logger.Warn("failed to release superseded queue attachments", zap.Error(err))
+			}
+		}
+	}
 	h.publishStatus(ctx, req.SessionID)
 	return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{fieldEntryID: req.EntryID})
+}
+
+func newlyAddedQueueAttachments(previous, replacement []messagequeue.MessageAttachment) []messagequeue.MessageAttachment {
+	retained := make(map[string]struct{}, len(previous))
+	for _, attachment := range previous {
+		if attachment.AttachmentID != "" {
+			retained[attachment.AttachmentID] = struct{}{}
+		}
+	}
+	var newlyAdded []messagequeue.MessageAttachment
+	for _, attachment := range replacement {
+		if attachment.AttachmentID == "" {
+			continue
+		}
+		if _, ok := retained[attachment.AttachmentID]; !ok {
+			newlyAdded = append(newlyAdded, attachment)
+		}
+	}
+	return newlyAdded
+}
+
+func supersededQueueAttachments(previous, replacement []messagequeue.MessageAttachment) []messagequeue.MessageAttachment {
+	retained := make(map[string]struct{}, len(replacement))
+	for _, attachment := range replacement {
+		if attachment.AttachmentID != "" {
+			retained[attachment.AttachmentID] = struct{}{}
+		}
+	}
+	var superseded []messagequeue.MessageAttachment
+	for _, attachment := range previous {
+		if attachment.AttachmentID == "" {
+			continue
+		}
+		if _, ok := retained[attachment.AttachmentID]; !ok {
+			superseded = append(superseded, attachment)
+		}
+	}
+	return superseded
 }
 
 func (h *QueueHandlers) validateSubmittedReferences(
@@ -347,6 +454,21 @@ func (h *QueueHandlers) validateSubmittedReferences(
 	return h.referenceValidator.ValidateForSubmission(ctx, sessionID, taskID, references)
 }
 
+func (h *QueueHandlers) rollbackQueuedAttachmentClaim(ctx context.Context, sessionID, entryID string) error {
+	if err := h.queueService.RemoveEntry(ctx, sessionID, entryID); err == nil {
+		return nil
+	} else {
+		h.logger.Error("failed to remove queue entry after attachment claim failure",
+			zap.String("entry_id", entryID), zap.Error(err))
+	}
+	taker, ok := h.queueService.(queueEntryTaker)
+	if !ok {
+		return errors.New("queue service cannot atomically remove a queued entry")
+	}
+	_, _, err := taker.TakeQueuedEntry(ctx, sessionID, entryID)
+	return err
+}
+
 func firstInvalidDeliveryMode(attachments []messagequeue.MessageAttachment) int {
 	for i, att := range attachments {
 		if att.DeliveryMode != "" && att.DeliveryMode != "prompt" && att.DeliveryMode != "path" {
@@ -354,6 +476,66 @@ func firstInvalidDeliveryMode(attachments []messagequeue.MessageAttachment) int 
 		}
 	}
 	return -1
+}
+
+func firstInvalidAttachment(attachments []messagequeue.MessageAttachment) int {
+	if len(attachments) > models.MaxMessageAttachmentCount {
+		return models.MaxMessageAttachmentCount
+	}
+	var total int64
+	for i, attachment := range attachments {
+		if attachment.Type != "image" && attachment.Type != "audio" && attachment.Type != "resource" {
+			return i
+		}
+		bytes, valid := attachmentPayloadBytes(attachment)
+		if !valid {
+			return i
+		}
+		total += bytes
+		if total > models.MaxMessageAttachmentBytes {
+			return i
+		}
+	}
+	return -1
+}
+
+func attachmentPayloadBytes(attachment messagequeue.MessageAttachment) (int64, bool) {
+	if attachment.AttachmentID != "" {
+		if attachment.Data != "" || attachment.Name == "" || attachment.MimeType == "" {
+			return 0, false
+		}
+		if attachment.SizeBytes < 0 || attachment.SizeBytes > models.MaxMessageAttachmentBytes {
+			return 0, false
+		}
+		return attachment.SizeBytes, true
+	}
+	if attachment.Data == "" || len(attachment.Data) > 10*1024*1024 {
+		return 0, false
+	}
+	decoded, err := base64.StdEncoding.DecodeString(attachment.Data)
+	if err != nil {
+		return 0, false
+	}
+	return int64(len(decoded)), true
+}
+
+func queueAttachmentsToV1(attachments []messagequeue.MessageAttachment) []v1.MessageAttachment {
+	if len(attachments) == 0 {
+		return nil
+	}
+	converted := make([]v1.MessageAttachment, 0, len(attachments))
+	for _, attachment := range attachments {
+		converted = append(converted, v1.MessageAttachment{
+			AttachmentID: attachment.AttachmentID,
+			Type:         attachment.Type,
+			Data:         attachment.Data,
+			MimeType:     attachment.MimeType,
+			Name:         attachment.Name,
+			SizeBytes:    attachment.SizeBytes,
+			DeliveryMode: attachment.DeliveryMode,
+		})
+	}
+	return converted
 }
 
 type wsRemoveEntryRequest struct {

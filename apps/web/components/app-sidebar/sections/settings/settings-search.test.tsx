@@ -115,10 +115,16 @@ describe("SettingsSearch result motion", () => {
     const mocks = installLayoutMocks(true);
     restoreAnimate = mocks.restore;
     const props = { items: ITEMS, onQueryChange: vi.fn(), onSelect: vi.fn() };
-    const { rerender } = render(<SettingsSearch {...props} query="layout" />);
+    const { container, rerender } = render(<SettingsSearch {...props} query="layout" />);
 
     rerender(<SettingsSearch {...props} query="beta layout" />);
 
     expect(mocks.animate).not.toHaveBeenCalled();
+    expect(
+      container.querySelector('[data-settings-search-motion-key="item:alpha-layout"]'),
+    ).toBeNull();
+    expect(
+      container.querySelector('[data-settings-search-motion-key="item:beta-layout"]'),
+    ).not.toBeNull();
   });
 });

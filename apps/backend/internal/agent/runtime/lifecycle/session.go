@@ -23,7 +23,11 @@ import (
 	"go.opentelemetry.io/otel/trace"
 )
 
-const modelConfigOptionID = "model"
+const (
+	modelConfigOptionID      = "model"
+	attachmentDeliveryPath   = "path"
+	attachmentDeliveryPrompt = "prompt"
+)
 
 // SessionManager handles ACP session initialization and management
 type SessionManager struct {
@@ -34,6 +38,7 @@ type SessionManager struct {
 	promptStarter        func(executionID string) (uint64, error)
 	initialPromptFailure func(executionID string)
 	historyManager       *SessionHistoryManager
+	attachmentReader     AttachmentReader
 	stopCh               <-chan struct{} // For graceful shutdown coordination
 }
 
@@ -52,6 +57,12 @@ func (sm *SessionManager) SetDependencies(ep *EventPublisher, strm *StreamManage
 	sm.streamManager = strm
 	sm.executionStore = store
 	sm.historyManager = history
+}
+
+// SetAttachmentReader wires the backend attachment reader used to materialize
+// claimed file descriptors into the active agentctl session before prompts.
+func (sm *SessionManager) SetAttachmentReader(reader AttachmentReader) {
+	sm.attachmentReader = reader
 }
 
 func (sm *SessionManager) SetPromptStarter(starter func(executionID string) (uint64, error)) {
@@ -231,10 +242,23 @@ func (sm *SessionManager) loadSession(
 		zap.String("session_id", sessionID))
 
 	if err := client.LoadSession(ctx, sessionID, mcpServers); err != nil {
-		sm.logger.Error("ACP session/load failed",
-			zap.String("agent_type", agentConfig.ID()),
-			zap.String("session_id", sessionID),
-			zap.Error(err))
+		// context.Canceled is caller teardown (WS disconnect, session already
+		// gone) rather than an agent or transport fault, so it does not warrant
+		// an ERROR + stacktrace. DeadlineExceeded is a real startup/handshake
+		// timeout and stays ERROR — matching the executor startup-deadline
+		// classification. The caller still classifies canceled loads as
+		// transport-dead and skips the session/new fallback.
+		if errors.Is(err, context.Canceled) {
+			sm.logger.Warn("ACP session/load aborted by context",
+				zap.String("agent_type", agentConfig.ID()),
+				zap.String("session_id", sessionID),
+				zap.Error(err))
+		} else {
+			sm.logger.Error("ACP session/load failed",
+				zap.String("agent_type", agentConfig.ID()),
+				zap.String("session_id", sessionID),
+				zap.Error(err))
+		}
 		return "", fmt.Errorf("session/load failed: %w", err)
 	}
 
@@ -392,7 +416,17 @@ func (sm *SessionManager) initializeACPConnection(
 	}
 	result, err := sm.InitializeSession(ctx, execution.agentctl, agentConfig, execution.ACPSessionID, execution.WorkspacePath, mcpServers)
 	if err != nil {
-		sm.logger.Error("session initialization failed", zap.String("execution_id", execution.ID), zap.Error(err))
+		// loadSession already logged the root cause. context.Canceled is
+		// caller teardown, so keep this outer boundary at WARN too —
+		// otherwise the intentional load-path downgrade is undone by a
+		// second ERROR stacktrace here. DeadlineExceeded stays ERROR.
+		if errors.Is(err, context.Canceled) {
+			sm.logger.Warn("session initialization aborted by context",
+				zap.String("execution_id", execution.ID), zap.Error(err))
+		} else {
+			sm.logger.Error("session initialization failed",
+				zap.String("execution_id", execution.ID), zap.Error(err))
+		}
 		return ctx, nil, err
 	}
 	sm.logger.Info("ACP session initialized",
@@ -630,10 +664,12 @@ func convertAttachments(attachments []MessageAttachment) []v1.MessageAttachment 
 	result := make([]v1.MessageAttachment, 0, len(attachments))
 	for _, att := range attachments {
 		result = append(result, v1.MessageAttachment{
+			AttachmentID: att.AttachmentID,
 			Type:         att.Type,
 			Data:         att.Data,
 			MimeType:     att.MimeType,
 			Name:         att.Name,
+			SizeBytes:    att.SizeBytes,
 			DeliveryMode: att.DeliveryMode,
 		})
 	}
@@ -889,10 +925,82 @@ func (sm *SessionManager) sendPrompt(
 	if err != nil {
 		return nil, err
 	}
-	if err := sm.triggerPrompt(preparedCtx, execution, effectivePrompt, attachments, promptGeneration); err != nil {
+	materializedAttachments, err := sm.materializeAttachments(preparedCtx, execution, attachments)
+	if err != nil {
+		return nil, err
+	}
+	if err := sm.triggerPrompt(preparedCtx, execution, effectivePrompt, materializedAttachments, promptGeneration); err != nil {
 		return nil, err
 	}
 	return sm.finishAcceptedPrompt(preparedCtx, execution, dispatchOnly, onDispatched, promptGeneration)
+}
+
+// materializeAttachments resolves claimed backend descriptors into the active
+// agentctl session. The prompt and queue protocols carry only bounded
+// descriptors; bytes are streamed directly from backend storage to agentctl.
+// Materialized descriptors preserve the requested delivery mode. Path-mode
+// files stay on disk; prompt-mode images are converted to native ACP content
+// by agentctl from the materialized file. Legacy inline attachments are left
+// intact.
+func (sm *SessionManager) materializeAttachments(
+	ctx context.Context,
+	execution *AgentExecution,
+	attachments []v1.MessageAttachment,
+) ([]v1.MessageAttachment, error) {
+	if len(attachments) == 0 {
+		return attachments, nil
+	}
+	result := append([]v1.MessageAttachment(nil), attachments...)
+	for i, attachment := range result {
+		if attachment.AttachmentID == "" {
+			continue
+		}
+		if sm.attachmentReader == nil {
+			return nil, fmt.Errorf("attachment %q cannot be delivered: attachment storage is unavailable", attachment.AttachmentID)
+		}
+		if execution.ACPSessionID == "" {
+			return nil, fmt.Errorf("attachment %q cannot be delivered: ACP session is not ready", attachment.AttachmentID)
+		}
+		reader, name, mimeType, sizeBytes, err := sm.attachmentReader.OpenClaimed(
+			ctx, attachment.AttachmentID, execution.TaskID, execution.SessionID,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("open attachment %q: %w", attachment.AttachmentID, err)
+		}
+		materialized, materializeErr := execution.agentctl.MaterializeAttachment(
+			ctx,
+			execution.ACPSessionID,
+			attachment.AttachmentID,
+			name,
+			mimeType,
+			sizeBytes,
+			reader,
+		)
+		closeErr := reader.Close()
+		if materializeErr != nil {
+			return nil, fmt.Errorf("materialize attachment %q: %w", attachment.AttachmentID, materializeErr)
+		}
+		if closeErr != nil {
+			return nil, fmt.Errorf("close attachment %q: %w", attachment.AttachmentID, closeErr)
+		}
+		if materialized == nil || strings.TrimSpace(materialized.Name) == "" {
+			return nil, fmt.Errorf("materialize attachment %q: agentctl returned no filename", attachment.AttachmentID)
+		}
+		result[i].Name = materialized.Name
+		result[i].MimeType = mimeType
+		result[i].SizeBytes = sizeBytes
+		result[i].Data = ""
+		if result[i].DeliveryMode == "" {
+			result[i].DeliveryMode = attachmentDeliveryPrompt
+		}
+		if result[i].DeliveryMode != attachmentDeliveryPath {
+			sm.logger.Debug("preserving native delivery for staged attachment",
+				zap.String("attachment_id", attachment.AttachmentID),
+				zap.String("requested_delivery_mode", attachment.DeliveryMode),
+				zap.Int64("size_bytes", sizeBytes))
+		}
+	}
+	return result, nil
 }
 
 func (sm *SessionManager) preparePrompt(

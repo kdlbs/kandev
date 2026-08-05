@@ -4,6 +4,7 @@ import { KANDEV_MONACO_DARK, KANDEV_MONACO_LIGHT } from "@/lib/theme/editor-them
 
 let initialized = false;
 let monacoInstance: Monaco | null = null;
+let monacoReadyPromise: Promise<Monaco> | null = null;
 
 export function initMonacoThemes() {
   if (initialized || typeof window === "undefined") return;
@@ -11,7 +12,7 @@ export function initMonacoThemes() {
 
   // Dynamic import ensures monaco-loader runs (which sets MonacoEnvironment +
   // loader.config) before any <Editor> component mounts.
-  import("./monaco-loader").then(({ monaco }) => {
+  const loadPromise = import("./monaco-loader").then(({ monaco }) => {
     monacoInstance = monaco;
 
     monaco.editor.defineTheme("kandev-dark", KANDEV_MONACO_DARK);
@@ -69,18 +70,33 @@ export function initMonacoThemes() {
                 column = selectionOrPosition.startColumn;
               }
             }
-            opener(uri, line, column);
-            return true;
+            return opener(uri, line, column);
           }
           return false;
         },
       });
     });
+
+    return monaco;
+  });
+  monacoReadyPromise = loadPromise.catch((error) => {
+    initialized = false;
+    monacoInstance = null;
+    monacoReadyPromise = null;
+    throw error;
   });
 }
 
 export function getMonacoInstance(): Monaco | null {
   return monacoInstance;
+}
+
+/** Resolve once the shared Monaco instance is configured and ready for provider registration. */
+export function waitForMonacoInstance(): Promise<Monaco> {
+  if (monacoInstance) return Promise.resolve(monacoInstance);
+  initMonacoThemes();
+  if (monacoReadyPromise) return monacoReadyPromise;
+  return Promise.reject(new Error("Monaco is unavailable outside the browser"));
 }
 
 export function setMonacoDiagnostics(enabled: boolean) {
@@ -94,19 +110,4 @@ export function setMonacoDiagnostics(enabled: boolean) {
   };
   tsDefaults.setDiagnosticsOptions(diagOptions);
   jsDefaults.setDiagnosticsOptions(diagOptions);
-}
-
-/**
- * Suppress or restore Monaco's built-in TS/JS language providers (hover,
- * completions, definitions, references, etc.). When LSP is active these
- * should be suppressed to avoid duplicate results.
- *
- * Uses the shared flag in builtin-providers.ts which is checked both at
- * registration time (to decide whether to wrap a provider) and at call time
- * (to decide whether wrapped providers return empty results).
- */
-export function setMonacoBuiltinProviders(enabled: boolean) {
-  import("./builtin-providers").then(({ setBuiltinTsSuppressed }) => {
-    setBuiltinTsSuppressed(!enabled);
-  });
 }

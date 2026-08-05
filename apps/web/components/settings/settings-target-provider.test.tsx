@@ -1,4 +1,5 @@
 import { cleanup, render, waitFor } from "@testing-library/react";
+import { createRef } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { LOCATION_CHANGE_EVENT } from "@/lib/routing/navigation-event";
 import { emitSettingsTargetRequest } from "@/lib/settings-discovery/target";
@@ -12,6 +13,20 @@ afterEach(() => {
 });
 
 describe("SettingsTargetProvider", () => {
+  it("preserves a caller-supplied ref while registering the discovery target", () => {
+    const callerRef = createRef<HTMLDivElement>();
+
+    const view = render(
+      <SettingsTargetProvider>
+        <SettingsTarget ref={callerRef} targetId="font-size">
+          Control
+        </SettingsTarget>
+      </SettingsTargetProvider>,
+    );
+
+    expect(callerRef.current).toBe(view.getByText("Control"));
+  });
+
   it("reveals an initial target after descendants register", async () => {
     window.history.replaceState({}, "", "/settings/general/terminal#font-size");
     const reveal = vi.fn();

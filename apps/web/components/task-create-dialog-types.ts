@@ -232,6 +232,8 @@ export type DialogFormState = {
   setHasTitle: (v: boolean) => void;
   hasDescription: boolean;
   setHasDescription: (v: boolean) => void;
+  hasPendingAttachmentUploads: boolean;
+  setHasPendingAttachmentUploads: (v: boolean) => void;
   /** Restored draft description, used as initialDescription for TaskFormInputs */
   draftDescription: string;
   /** Cycle counter incremented each time dialog opens - used in key for remount */
@@ -361,7 +363,14 @@ export type SubmitHandlersDeps = {
     mode: "create" | "edit",
     meta?: { taskSessionId?: string | null; willNavigate?: boolean },
   ) => void;
-  onCreateSession?: (data: { prompt: string; agentProfileId: string; executorId: string }) => void;
+  onCreateSession?: (data: {
+    prompt: string;
+    agentProfileId: string;
+    executorId: string;
+    attachments?: ReturnType<
+      typeof import("@/components/task-create-dialog-helpers").toMessageAttachments
+    >;
+  }) => void;
   onOpenChange: (open: boolean) => void;
   preserveTaskCreateLastUsedOnClose?: () => void;
   taskId: string | null;

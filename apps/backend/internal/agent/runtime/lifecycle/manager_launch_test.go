@@ -1942,6 +1942,9 @@ func TestEnsureLaunchSessionStillActiveRereadsAfterCleanupAdmission(t *testing.T
 	if err == nil || !strings.Contains(err.Error(), "CANCELLED") {
 		t.Fatalf("ensureLaunchSessionStillActive error = %v, want terminal-session validation", err)
 	}
+	if !errors.Is(err, ErrSessionTerminal) {
+		t.Fatalf("ensureLaunchSessionStillActive error = %v, want wrapped ErrSessionTerminal", err)
+	}
 	if got := reader.reads.Load(); got != 2 {
 		t.Fatalf("session reads = %d, want 2", got)
 	}

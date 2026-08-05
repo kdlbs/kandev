@@ -1,16 +1,50 @@
 import type { editor as monacoEditor, IDisposable } from "monaco-editor";
-import { getMonacoInstance } from "@/components/editors/monaco/monaco-init";
-import { setBuiltinTsSuppressed } from "@/components/editors/monaco/builtin-providers";
+import { getMonacoInstance, waitForMonacoInstance } from "@/components/editors/monaco/monaco-init";
+import {
+  registerBuiltinTsSuppression,
+  withLspProviderRegistration,
+} from "@/components/editors/monaco/builtin-providers";
+import { t } from "@/lib/i18n";
 import { registerLspProviders } from "./lsp-providers";
+import { canonicalFileUri, joinFileUri } from "./file-uri";
 import {
   JsonRpcConnection,
-  toMonacoRange,
-  toMonacoSeverity,
   getWsBaseUrl,
   CLOSE_CODE_STATUS,
   LSP_CLIENT_CAPABILITIES,
 } from "./lsp-json-rpc";
-import type { LspRange, LSPConnection, LspStatus } from "./lsp-json-rpc";
+import type { LspStatus } from "./lsp-json-rpc";
+import {
+  createManagedLspConnection,
+  type LspReadyWorkspace,
+  type ManagedLspConnection,
+  type OpenDocumentParams,
+  type PublishDiagnosticsParams,
+} from "./lsp-client-types";
+import { connectionDocumentUri, connectionModelUri } from "./lsp-editor-models";
+import { LspClientEditorState } from "./lsp-client-editor-state";
+import {
+  configureLspWorkspace,
+  lspWorkspaceFolders,
+  repositorySubpathsForSession,
+  workspaceUriForSession,
+  type WorkspaceMetadata,
+} from "./lsp-workspace";
+import {
+  EMPTY_LSP_PROGRESS,
+  finishLspInitialization,
+  type LspProgressSnapshot,
+} from "./lsp-progress";
+import { beginLspProgressTracking } from "./lsp-client-progress";
+import {
+  clearLspEnabledState,
+  isLspEnabledInStorage,
+  saveLspEnabledState,
+} from "./lsp-client-storage";
+import { DISABLED_LSP_STATUS, LSP_IDLE_TIMEOUT } from "./lsp-client-config";
+import { LSP_DEFAULT_CONFIGS } from "./lsp-client-config";
+import { buildDocumentContentChanges, buildDocumentSaveParams } from "./lsp-document-sync";
+import { getLspMonacoProviderMethods } from "./lsp-provider-capabilities";
 
 export type { LspStatus } from "./lsp-json-rpc";
 export { toLspLanguage } from "./lsp-json-rpc";
@@ -19,77 +53,126 @@ export { toLspLanguage } from "./lsp-json-rpc";
 // Types
 // ---------------------------------------------------------------------------
 
-export const LSP_DEFAULT_CONFIGS: Record<string, Record<string, unknown>> = {
-  go: { "ui.semanticTokens": true },
-};
+type ChangeListener = (key: string) => void;
+type FileOpener = (uri: string, line?: number, column?: number) => boolean | Promise<boolean>;
 
-const DISABLED_STATUS = { state: "disabled" } as const;
-const LSP_IDLE_TIMEOUT = 2 * 60 * 1000; // 2 minutes
+function lspErrorMessage(error: unknown): string {
+  if (error instanceof Error) return error.message || String(error);
+  if (typeof error === "object" && error !== null) {
+    const message = (error as { message?: unknown }).message;
+    if (typeof message === "string" && message) return message;
+  }
+  return String(error);
+}
 
-type StatusListener = (key: string, status: LspStatus) => void;
+function hasActiveLspWork(progress: LspProgressSnapshot): boolean {
+  return progress.initializingSince !== null || progress.active.length > 0;
+}
+
+function configurationForLanguage(
+  lspLanguage: string,
+  userConfigs?: Record<string, Record<string, unknown>>,
+): Record<string, unknown> {
+  return {
+    ...(LSP_DEFAULT_CONFIGS[lspLanguage] ?? {}),
+    ...(userConfigs?.[lspLanguage] ?? {}),
+  };
+}
+
+function configurationsMatch(
+  current: Record<string, unknown>,
+  next: Record<string, unknown>,
+): boolean {
+  return JSON.stringify(current) === JSON.stringify(next);
+}
+
+function registerTypeScriptModelSuppression(
+  connection: ManagedLspConnection,
+  lspLanguage: string,
+  serverCapabilities: Record<string, unknown> | null,
+): void {
+  if (lspLanguage !== "typescript") return;
+  connection.providerDisposables.push(
+    registerBuiltinTsSuppression(
+      connection.ownerId,
+      (model) => connectionDocumentUri(model as monacoEditor.ITextModel, connection) !== null,
+      getLspMonacoProviderMethods(serverCapabilities),
+    ),
+  );
+}
 
 class LSPClientManager {
-  private connections = new Map<string, LSPConnection>();
+  private connections = new Map<string, ManagedLspConnection>();
+  private connectionGeneration = 0;
   private statuses = new Map<string, LspStatus>();
-  private listeners = new Set<StatusListener>();
-  private fileOpener: ((uri: string, line?: number, column?: number) => void) | null = null;
-  /** Tracks placeholder Monaco models created for LSP references/definitions. */
-  private placeholderModels = new Set<string>();
-
-  setFileOpener(opener: ((uri: string, line?: number, column?: number) => void) | null): void {
+  /** Keeps Monaco model identity stable after an LSP connection stops or crashes. */
+  private workspaceMetadata = new Map<string, WorkspaceMetadata>();
+  private listeners = new Set<ChangeListener>();
+  private fileOpener: FileOpener | null = null;
+  private editorState = new LspClientEditorState((connection) =>
+    this.isCurrentConnection(connection),
+  );
+  setFileOpener(opener: FileOpener | null): void {
     this.fileOpener = opener;
   }
 
-  getFileOpener(): ((uri: string, line?: number, column?: number) => void) | null {
+  getFileOpener(): FileOpener | null {
     return this.fileOpener;
   }
 
   // ---- localStorage persistence for manual LSP toggle ----
 
-  private lspStorageKey(sessionId: string, language: string): string {
-    return `kandev-lsp:${sessionId}:${language}`;
-  }
-
   /** Save that LSP was manually enabled for this session+language. */
   saveEnabledState(sessionId: string, language: string): void {
-    try {
-      localStorage.setItem(this.lspStorageKey(sessionId, language), "1");
-    } catch {}
+    saveLspEnabledState(sessionId, language);
+    this.notifyChange(`${sessionId}:${language}`);
   }
 
   /** Clear the saved LSP state (manual stop). */
   clearEnabledState(sessionId: string, language: string): void {
-    try {
-      localStorage.removeItem(this.lspStorageKey(sessionId, language));
-    } catch {}
+    clearLspEnabledState(sessionId, language);
+    this.notifyChange(`${sessionId}:${language}`);
   }
 
   /** Check if LSP was previously enabled for this session+language. */
   isEnabledInStorage(sessionId: string, language: string): boolean {
-    try {
-      return localStorage.getItem(this.lspStorageKey(sessionId, language)) === "1";
-    } catch {
-      return false;
-    }
+    return isLspEnabledInStorage(sessionId, language);
   }
 
   getStatus(sessionId: string, lspLanguage: string): LspStatus {
     const key = `${sessionId}:${lspLanguage}`;
-    return this.statuses.get(key) ?? DISABLED_STATUS;
+    return this.statuses.get(key) ?? DISABLED_LSP_STATUS;
   }
 
-  onStatusChange(listener: StatusListener): () => void {
+  getProgress(sessionId: string, lspLanguage: string): LspProgressSnapshot {
+    const key = `${sessionId}:${lspLanguage}`;
+    return this.connections.get(key)?.progress ?? EMPTY_LSP_PROGRESS;
+  }
+
+  getWorkspaceUriForSession(sessionId: string): string | null {
+    return workspaceUriForSession(this.connections.values(), this.workspaceMetadata, sessionId);
+  }
+
+  getRepositorySubpaths(sessionId: string): string[] {
+    return repositorySubpathsForSession(
+      this.connections.values(),
+      this.workspaceMetadata,
+      sessionId,
+    );
+  }
+
+  onChange(listener: ChangeListener): () => void {
     this.listeners.add(listener);
-    return () => {
-      this.listeners.delete(listener);
-    };
+    return () => this.listeners.delete(listener);
+  }
+
+  private notifyChange(key: string): void {
+    for (const listener of this.listeners) listener(key);
   }
 
   private setStatus(key: string, status: LspStatus) {
     this.statuses.set(key, status);
-    for (const listener of this.listeners) {
-      listener(key, status);
-    }
+    this.notifyChange(key);
   }
 
   // ------- Connection lifecycle -------
@@ -100,45 +183,46 @@ class LSPClientManager {
     userConfigs?: Record<string, Record<string, unknown>>,
   ): () => void {
     const key = `${sessionId}:${lspLanguage}`;
+    const configuration = configurationForLanguage(lspLanguage, userConfigs);
 
     const existing = this.connections.get(key);
     if (existing && existing.ws.readyState <= WebSocket.OPEN) {
-      existing.refCount++;
-      if (existing.idleTimer) {
-        clearTimeout(existing.idleTimer);
-        existing.idleTimer = null;
-      }
-      return () => this.decrementRef(key);
+      return this.acquireConnection(existing, configuration);
     }
+    if (existing) this.cleanupConnection(existing);
 
     const wsUrl = `${getWsBaseUrl()}/lsp/${sessionId}?language=${lspLanguage}`;
     const ws = new WebSocket(wsUrl);
 
-    const conn: LSPConnection = {
+    const conn = createManagedLspConnection(
+      key,
+      sessionId,
+      ++this.connectionGeneration,
       ws,
-      rpc: null,
-      initialized: false,
-      refCount: 1,
-      idleTimer: null,
-      openDocuments: new Map(),
-      providerDisposables: [],
-      serverCapabilities: null,
-      workspacePath: null,
-    };
+      configuration,
+    );
     this.connections.set(key, conn);
     this.setStatus(key, { state: "connecting" });
 
     let bridgeStarted = false;
+    let terminalStatusReceived = false;
 
     ws.onopen = () => {
+      if (!this.isCurrentConnection(conn)) return;
       this.setStatus(key, { state: "starting" });
     };
 
     // Listen for backend status messages before the LSP bridge starts.
     const statusHandler = (event: MessageEvent) => {
-      if (bridgeStarted) return;
+      if (bridgeStarted || !this.isCurrentConnection(conn)) return;
 
-      let data: { status?: string; error?: string; workspacePath?: string };
+      let data: {
+        status?: string;
+        error?: string;
+        workspacePath?: string;
+        workspaceUri?: string;
+        repoSubpaths?: string[];
+      };
       try {
         data = JSON.parse(event.data as string);
       } catch {
@@ -153,115 +237,138 @@ class LSPClientManager {
         // Language server is running — start the LSP JSON-RPC bridge
         ws.removeEventListener("message", statusHandler);
         bridgeStarted = true;
-        this.initializeLsp(key, ws, lspLanguage, data.workspacePath ?? null, userConfigs);
+        this.initializeLsp(conn, lspLanguage, {
+          path: data.workspacePath ?? null,
+          uri: data.workspaceUri ?? null,
+          repositorySubpaths: data.repoSubpaths ?? [],
+        });
       } else if (data.status === "install_failed") {
         ws.removeEventListener("message", statusHandler);
-        this.setStatus(key, { state: "error", reason: data.error || "Install failed" });
+        terminalStatusReceived = true;
+        this.setStatus(key, { state: "error", reason: data.error || t("lsp:installFailed") });
       }
     };
     ws.addEventListener("message", statusHandler);
 
     ws.onclose = (event) => {
       ws.removeEventListener("message", statusHandler);
-      this.disposeConnection(key);
+      const wasCurrent = this.isCurrentConnection(conn);
+      this.cleanupConnection(conn);
+      if (!wasCurrent) return;
 
       const current = this.statuses.get(key);
-      if (current?.state === "ready" || current?.state === "stopping") {
+      if (current?.state === "stopping") {
         this.setStatus(key, { state: "disabled" });
         this.statuses.delete(key);
         return;
       }
+      if (terminalStatusReceived) return;
 
-      if (!bridgeStarted) {
-        const statusFactory = CLOSE_CODE_STATUS[event.code];
-        if (statusFactory) {
-          this.setStatus(key, statusFactory(event.reason));
-        } else if (current?.state !== "error" && current?.state !== "unavailable") {
-          this.setStatus(key, { state: "error", reason: event.reason || "Connection closed" });
-        }
+      const statusFactory = CLOSE_CODE_STATUS[event.code];
+      if (statusFactory) {
+        this.setStatus(key, statusFactory(event.reason));
+      } else {
+        const fallbackReason = bridgeStarted
+          ? t("lsp:languageServerExited")
+          : t("lsp:connectionClosed");
+        this.setStatus(key, { state: "error", reason: event.reason || fallbackReason });
       }
     };
 
     ws.onerror = () => {
+      if (!this.isCurrentConnection(conn)) return;
       const current = this.statuses.get(key);
       if (current?.state !== "error" && current?.state !== "unavailable") {
-        this.setStatus(key, { state: "error", reason: "WebSocket error" });
+        this.setStatus(key, { state: "error", reason: t("lsp:webSocketError") });
       }
     };
 
-    return () => this.decrementRef(key);
+    return () => this.decrementRef(conn);
+  }
+
+  private acquireConnection(
+    conn: ManagedLspConnection,
+    configuration: Record<string, unknown>,
+  ): () => void {
+    this.updateConfiguration(conn, configuration);
+    conn.refCount++;
+    this.clearIdleTimer(conn);
+    return () => this.decrementRef(conn);
+  }
+
+  private updateConfiguration(
+    conn: ManagedLspConnection,
+    configuration: Record<string, unknown>,
+  ): void {
+    if (configurationsMatch(conn.configuration, configuration)) return;
+    conn.configuration = configuration;
+    if (!conn.protocolInitialized || !conn.rpc) return;
+    conn.rpc.sendNotification("workspace/didChangeConfiguration", {
+      settings: configuration,
+    });
   }
 
   private async initializeLsp(
-    key: string,
-    ws: WebSocket,
+    conn: ManagedLspConnection,
     lspLanguage: string,
-    workspacePath: string | null,
-    userConfigs?: Record<string, Record<string, unknown>>,
+    workspace: LspReadyWorkspace,
   ) {
-    const conn = this.connections.get(key);
-    if (!conn) return;
+    if (!this.isCurrentConnection(conn)) return;
+    const { key, ws } = conn;
 
-    conn.workspacePath = workspacePath;
-
-    // Merge default configs with user overrides for this language
-    const mergedConfig: Record<string, unknown> = {
-      ...(LSP_DEFAULT_CONFIGS[lspLanguage] ?? {}),
-      ...(userConfigs?.[lspLanguage] ?? {}),
-    };
+    const workspaceMetadata = configureLspWorkspace(conn, workspace);
+    if (workspaceMetadata) this.workspaceMetadata.set(conn.key, workspaceMetadata);
 
     try {
       const rpc = new JsonRpcConnection(ws);
       rpc.listen();
       conn.rpc = rpc;
+      beginLspProgressTracking(
+        conn,
+        rpc,
+        () => this.isCurrentConnection(conn),
+        () => this.handleProgressChange(conn),
+      );
 
       // Handle server requests
       rpc.onRequest("workspace/configuration", (params: unknown) => {
         const items = (params as { items?: { section?: string }[] })?.items;
-        if (!Array.isArray(items)) return [mergedConfig];
-        return items.map(() => mergedConfig);
+        if (!Array.isArray(items)) return [conn.configuration];
+        return items.map(() => conn.configuration);
       });
       rpc.onRequest("client/registerCapability", () => null);
-      rpc.onRequest("window/workDoneProgress/create", () => null);
 
       const initResult = (await rpc.sendRequest("initialize", {
         processId: null,
         capabilities: LSP_CLIENT_CAPABILITIES,
-        rootUri: workspacePath ? `file://${workspacePath}` : null,
-        workspaceFolders: workspacePath
-          ? [
-              {
-                uri: `file://${workspacePath}`,
-                name: workspacePath.split("/").pop() ?? "workspace",
-              },
-            ]
-          : null,
+        workDoneToken: conn.ownerId,
+        rootUri: conn.workspaceUri,
+        workspaceFolders: lspWorkspaceFolders(conn.workspaceUri, workspace.path),
         initializationOptions: {},
       })) as { capabilities?: Record<string, unknown> } | null;
 
+      if (!this.isCurrentConnection(conn)) {
+        this.cleanupConnection(conn);
+        return;
+      }
+
+      const progress = finishLspInitialization(conn.progress);
+      if (progress !== conn.progress) {
+        conn.progress = progress;
+        this.handleProgressChange(conn);
+      }
       conn.serverCapabilities = initResult?.capabilities ?? null;
       rpc.sendNotification("initialized", {});
+      conn.protocolInitialized = true;
+      rpc.sendNotification("workspace/didChangeConfiguration", {
+        settings: conn.configuration,
+      });
 
       // Register diagnostics handler
       rpc.onNotification("textDocument/publishDiagnostics", (params) => {
-        this.handleDiagnostics(
-          params as {
-            uri: string;
-            diagnostics: Array<{
-              range: LspRange;
-              message: string;
-              severity?: number;
-              source?: string;
-              code?: unknown;
-            }>;
-          },
-        );
+        if (!this.isCurrentConnection(conn)) return;
+        this.editorState.handleDiagnostics(conn, params as PublishDiagnosticsParams);
       });
-
-      // Suppress Monaco's built-in TS/JS providers BEFORE registering our LSP providers.
-      if (lspLanguage === "typescript") {
-        setBuiltinTsSuppressed(true);
-      }
 
       // Collect callbacks for semantic token refresh
       const semanticRefreshCallbacks: (() => void)[] = [];
@@ -270,20 +377,48 @@ class LSPClientManager {
         return null;
       });
 
-      // Register Monaco providers for this language
-      conn.providerDisposables = this.registerProviders(
-        rpc,
-        lspLanguage,
-        key,
-        conn.serverCapabilities,
-        semanticRefreshCallbacks,
+      // Monaco loads asynchronously. Do not expose a ready connection until its
+      // providers can be registered; otherwise early diagnostics are dropped.
+      const monaco = await waitForMonacoInstance();
+      if (!this.isCurrentConnection(conn)) {
+        this.cleanupConnection(conn);
+        return;
+      }
+
+      conn.providerDisposables.push(
+        monaco.editor.onDidCreateModel((model: monacoEditor.ITextModel) => {
+          if (this.isCurrentConnection(conn)) {
+            this.editorState.applyCachedDiagnostics(conn, model);
+          }
+        }),
+      );
+      for (const model of monaco.editor.getModels()) {
+        this.editorState.applyCachedDiagnostics(conn, model);
+      }
+
+      registerTypeScriptModelSuppression(conn, lspLanguage, conn.serverCapabilities);
+
+      // Register Monaco providers for this language.
+      conn.providerDisposables.push(
+        ...withLspProviderRegistration(() =>
+          this.registerProviders(
+            rpc,
+            lspLanguage,
+            conn,
+            conn.serverCapabilities,
+            semanticRefreshCallbacks,
+          ),
+        ),
       );
       conn.initialized = true;
 
       this.setStatus(key, { state: "ready" });
     } catch (err) {
+      const wasCurrent = this.isCurrentConnection(conn);
+      this.cleanupConnection(conn);
+      if (!wasCurrent) return;
       console.error(`[LSP] initializeLsp error:`, err);
-      this.setStatus(key, { state: "error", reason: String(err) });
+      this.setStatus(key, { state: "error", reason: lspErrorMessage(err) });
     }
   }
 
@@ -292,108 +427,125 @@ class LSPClientManager {
   private registerProviders(
     rpc: JsonRpcConnection,
     lspLanguage: string,
-    connectionKey: string,
+    conn: ManagedLspConnection,
     serverCapabilities: Record<string, unknown> | null,
     semanticRefreshCallbacks: (() => void)[],
   ): IDisposable[] {
     return registerLspProviders({
       rpc,
       lspLanguage,
-      connectionKey,
       serverCapabilities,
       semanticRefreshCallbacks,
-      getDocumentUri: (model) => this.getDocumentUri(model),
-      ensureModelsExist: (uris, key) => this.ensureModelsExist(uris, key),
+      getDocumentUri: (model) => connectionDocumentUri(model, conn),
+      getModelUri: (uri) =>
+        connectionModelUri(uri, conn, getMonacoInstance()?.editor.getModels() ?? []),
+      ensureModelsExist: (uris) => this.editorState.ensureModelsExist(uris, conn),
     });
   }
 
-  // ------- Placeholder models for Go-to-Definition / References -------
-
-  private ensureModelsExist(uris: string[], connectionKey: string): void {
-    const monaco = getMonacoInstance();
-    if (!monaco) return;
-
-    const conn = this.connections.get(connectionKey);
-
-    for (const fileUri of uris) {
-      if (!fileUri.startsWith("file://")) continue;
-      const parsed = monaco.Uri.parse(fileUri);
-
-      if (monaco.editor.getModel(parsed)) continue;
-
-      monaco.editor.createModel("", undefined, parsed);
-      this.placeholderModels.add(fileUri);
-
-      if (conn?.workspacePath) {
-        const absolutePath = parsed.path;
-        if (!absolutePath.startsWith(conn.workspacePath)) continue;
-        const relativePath = absolutePath.slice(conn.workspacePath.length + 1);
-
-        // Extract sessionId from connection key (format: "sessionId:lspLanguage")
-        const sessionId = connectionKey.split(":")[0];
-
-        // Dynamic import to avoid circular dependency
-        Promise.all([import("@/lib/ws/connection"), import("@/lib/ws/workspace-files")])
-          .then(([{ getWebSocketClient }, { requestFileContent }]) => {
-            const client = getWebSocketClient();
-            if (!client) return;
-            return requestFileContent(client, sessionId, relativePath);
-          })
-          .then((response) => {
-            if (!response) return;
-            const model = monaco.editor.getModel(parsed);
-            if (model && this.placeholderModels.has(fileUri)) {
-              model.setValue(response.content);
-            }
-          })
-          .catch(() => {
-            // Best effort — placeholder stays empty
-          });
-      }
-    }
-  }
-
   /** Dispose a placeholder model (e.g. when the file is opened in a real tab). */
-  disposePlaceholderModel(fileUri: string): void {
-    const monaco = getMonacoInstance();
-    if (!monaco || !this.placeholderModels.has(fileUri)) return;
-    const parsed = monaco.Uri.parse(fileUri);
-    const model = monaco.editor.getModel(parsed);
-    if (model) model.dispose();
-    this.placeholderModels.delete(fileUri);
+  disposePlaceholderModel(modelUri: string): void {
+    this.editorState.disposePlaceholderModel(modelUri);
   }
 
   // ------- Document synchronization -------
 
-  openDocument(
-    sessionId: string,
-    lspLanguage: string,
-    documentUri: string,
-    languageId: string,
-    text: string,
-  ): void {
+  openDocument(sessionId: string, lspLanguage: string, document: OpenDocumentParams): void {
     const key = `${sessionId}:${lspLanguage}`;
     const conn = this.connections.get(key);
     if (!conn?.initialized || !conn.rpc) return;
-    if (conn.openDocuments.has(documentUri)) return;
+    const documentUri = canonicalFileUri(document.uri);
+    if (!documentUri) return;
+    this.promoteDocumentModel(sessionId, documentUri, document.text);
+    const existing = conn.openDocuments.get(documentUri);
+    if (existing) {
+      existing.refCount++;
+      if (document.repo) conn.repositorySubpaths.add(document.repo);
+      return;
+    }
 
-    conn.openDocuments.set(documentUri, { version: 1, languageId });
-    conn.rpc.sendNotification("textDocument/didOpen", {
-      textDocument: { uri: documentUri, languageId, version: 1, text },
+    if (document.repo) conn.repositorySubpaths.add(document.repo);
+    conn.openDocuments.set(documentUri, {
+      version: 1,
+      languageId: document.languageId,
+      refCount: 1,
+      text: document.text,
     });
+    conn.rpc.sendNotification("textDocument/didOpen", {
+      textDocument: {
+        uri: documentUri,
+        languageId: document.languageId,
+        version: 1,
+        text: document.text,
+      },
+    });
+  }
+
+  /** Transfer a placeholder model to a real file editor, regardless of LSP language/status. */
+  promoteDocumentModel(sessionId: string, documentUri: string, text: string): void {
+    this.editorState.promoteDocumentModel(sessionId, documentUri, text);
   }
 
   changeDocument(sessionId: string, lspLanguage: string, documentUri: string, text: string): void {
     const key = `${sessionId}:${lspLanguage}`;
     const conn = this.connections.get(key);
     if (!conn?.initialized || !conn.rpc) return;
-    const doc = conn.openDocuments.get(documentUri);
-    if (!doc) return;
+    const canonicalUri = canonicalFileUri(documentUri);
+    if (!canonicalUri) return;
+    this.synchronizeOpenDocument(conn, canonicalUri, text);
+  }
 
-    doc.version++;
+  saveDocument(
+    sessionId: string,
+    documentPath: string,
+    repo: string | undefined,
+    persistedText: string,
+    liveText = persistedText,
+  ): void {
+    for (const conn of this.connections.values()) {
+      if (conn.sessionId !== sessionId || !conn.initialized || !conn.rpc || !conn.workspaceUri) {
+        continue;
+      }
+
+      let documentUri: string;
+      try {
+        documentUri = joinFileUri(conn.workspaceUri, repo, documentPath);
+      } catch {
+        continue;
+      }
+      if (!conn.openDocuments.has(documentUri)) continue;
+
+      this.synchronizeOpenDocument(conn, documentUri, liveText);
+      // If editing continued while persistence was in flight, including the
+      // older saved snapshot could rewind servers that treat didSave.text as
+      // their current document. The text field is optional, so omit it for
+      // this raced save while keeping the open document on the newest buffer.
+      const savedText = liveText === persistedText ? persistedText : undefined;
+      const params = buildDocumentSaveParams(conn.serverCapabilities, documentUri, savedText);
+      if (params) conn.rpc.sendNotification("textDocument/didSave", params);
+    }
+  }
+
+  private synchronizeOpenDocument(
+    conn: ManagedLspConnection,
+    documentUri: string,
+    text: string,
+  ): void {
+    if (!conn.rpc) return;
+    const document = conn.openDocuments.get(documentUri);
+    if (!document || document.text === text) return;
+
+    const contentChanges = buildDocumentContentChanges(
+      conn.serverCapabilities,
+      document.text,
+      text,
+    );
+    document.text = text;
+    if (contentChanges.length === 0) return;
+    document.version++;
     conn.rpc.sendNotification("textDocument/didChange", {
-      textDocument: { uri: documentUri, version: doc.version },
-      contentChanges: [{ text }],
+      textDocument: { uri: documentUri, version: document.version },
+      contentChanges,
     });
   }
 
@@ -401,64 +553,17 @@ class LSPClientManager {
     const key = `${sessionId}:${lspLanguage}`;
     const conn = this.connections.get(key);
     if (!conn?.initialized || !conn.rpc) return;
-    if (!conn.openDocuments.has(documentUri)) return;
+    const canonicalUri = canonicalFileUri(documentUri);
+    if (!canonicalUri) return;
+    const document = conn.openDocuments.get(canonicalUri);
+    if (!document) return;
+    document.refCount--;
+    if (document.refCount > 0) return;
 
-    conn.openDocuments.delete(documentUri);
+    conn.openDocuments.delete(canonicalUri);
     conn.rpc.sendNotification("textDocument/didClose", {
-      textDocument: { uri: documentUri },
+      textDocument: { uri: canonicalUri },
     });
-  }
-
-  // ------- Helpers -------
-
-  /** Build a file:// URI from a Monaco model, or null if it can't be determined. */
-  private getDocumentUri(model: monacoEditor.ITextModel): string | null {
-    const uri = model.uri.toString();
-    if (uri.startsWith("file://")) return uri;
-    const path = model.uri.path;
-    if (path && path.startsWith("/")) return `file://${path}`;
-    return null;
-  }
-
-  private handleDiagnostics(params: {
-    uri: string;
-    diagnostics: Array<{
-      range: LspRange;
-      message: string;
-      severity?: number;
-      source?: string;
-      code?: unknown;
-    }>;
-  }) {
-    const monaco = getMonacoInstance();
-    if (!monaco) return;
-
-    const models = monaco.editor.getModels();
-    const targetModel = models.find((m: monacoEditor.ITextModel) => {
-      const modelUri = m.uri.toString();
-      if (modelUri === params.uri) return true;
-      if (params.uri.startsWith("file://")) {
-        const filePath = params.uri.replace("file://", "");
-        if (m.uri.path === filePath) return true;
-      }
-      return false;
-    });
-    if (!targetModel) return;
-
-    const markers = params.diagnostics.map((d) => ({
-      message: d.message,
-      severity: toMonacoSeverity(d.severity),
-      ...toMonacoRange(d.range),
-      source: d.source,
-      code: (() => {
-        if (typeof d.code === "object" && d.code !== null)
-          return String((d.code as { value: unknown }).value);
-        if (d.code !== undefined) return String(d.code);
-        return undefined;
-      })(),
-    }));
-
-    monaco.editor.setModelMarkers(targetModel, "lsp", markers);
   }
 
   // ------- Stop / cleanup -------
@@ -489,60 +594,79 @@ class LSPClientManager {
       }
     }
 
-    this.cleanupConnection(key, conn);
+    this.cleanupConnection(conn);
     this.statuses.delete(key);
-    for (const listener of this.listeners) {
-      listener(key, DISABLED_STATUS);
-    }
+    this.notifyChange(key);
   }
 
   disconnectAll(): void {
-    for (const [key, conn] of this.connections) {
+    for (const conn of this.connections.values()) {
       if (conn.idleTimer) clearTimeout(conn.idleTimer);
-      this.cleanupConnection(key, conn);
+      this.cleanupConnection(conn);
     }
     this.statuses.clear();
+    this.workspaceMetadata.clear();
   }
 
-  private decrementRef(key: string) {
-    const conn = this.connections.get(key);
-    if (!conn) return;
+  private decrementRef(conn: ManagedLspConnection) {
+    if (!this.isCurrentConnection(conn)) return;
     conn.refCount--;
-    if (conn.refCount <= 0) {
-      conn.idleTimer = setTimeout(() => {
-        this.cleanupConnection(key, conn);
-        this.statuses.delete(key);
-        for (const listener of this.listeners) {
-          listener(key, DISABLED_STATUS);
-        }
-      }, LSP_IDLE_TIMEOUT);
-    }
+    if (conn.refCount <= 0) this.scheduleIdleCleanup(conn);
   }
 
-  private disposeConnection(key: string) {
-    const conn = this.connections.get(key);
-    if (!conn) return;
+  private handleProgressChange(conn: ManagedLspConnection): void {
+    if (!this.isCurrentConnection(conn)) return;
+    this.notifyChange(conn.key);
+    if (conn.refCount > 0) return;
+    if (hasActiveLspWork(conn.progress)) {
+      this.clearIdleTimer(conn);
+      return;
+    }
+    this.scheduleIdleCleanup(conn);
+  }
+
+  private scheduleIdleCleanup(conn: ManagedLspConnection): void {
+    if (
+      !this.isCurrentConnection(conn) ||
+      conn.refCount > 0 ||
+      hasActiveLspWork(conn.progress) ||
+      conn.idleTimer
+    ) {
+      return;
+    }
+    conn.idleTimer = setTimeout(() => {
+      conn.idleTimer = null;
+      if (!this.isCurrentConnection(conn) || conn.refCount > 0 || hasActiveLspWork(conn.progress)) {
+        return;
+      }
+      this.cleanupConnection(conn);
+      this.statuses.delete(conn.key);
+      this.notifyChange(conn.key);
+    }, LSP_IDLE_TIMEOUT);
+  }
+
+  private clearIdleTimer(conn: ManagedLspConnection): void {
+    if (!conn.idleTimer) return;
+    clearTimeout(conn.idleTimer);
+    conn.idleTimer = null;
+  }
+
+  private isCurrentConnection(conn: ManagedLspConnection): boolean {
+    return this.connections.get(conn.key) === conn;
+  }
+
+  private cleanupConnection(conn: ManagedLspConnection) {
+    this.clearIdleTimer(conn);
     for (const d of conn.providerDisposables) d.dispose();
     conn.providerDisposables = [];
     conn.rpc?.dispose();
     conn.rpc = null;
     conn.initialized = false;
+    conn.protocolInitialized = false;
     conn.openDocuments.clear();
-    this.connections.delete(key);
-  }
-
-  private cleanupConnection(key: string, conn: LSPConnection) {
-    const lspLanguage = key.split(":")[1];
-    if (lspLanguage === "typescript") {
-      setBuiltinTsSuppressed(false);
-    }
-
-    for (const d of conn.providerDisposables) d.dispose();
-    conn.providerDisposables = [];
-    conn.rpc?.dispose();
-    conn.rpc = null;
-    conn.initialized = false;
-    conn.openDocuments.clear();
+    conn.diagnosticsByUri.clear();
+    conn.progress = EMPTY_LSP_PROGRESS;
+    conn.registeredProgressTokens.clear();
     try {
       if (conn.ws.readyState <= WebSocket.OPEN) {
         conn.ws.close();
@@ -550,23 +674,8 @@ class LSPClientManager {
     } catch {
       // ignore
     }
-    this.connections.delete(key);
-
-    // Dispose placeholder models created for this connection
-    const monaco = getMonacoInstance();
-    if (monaco) {
-      for (const uri of this.placeholderModels) {
-        const parsed = monaco.Uri.parse(uri);
-        const model = monaco.editor.getModel(parsed);
-        if (model) model.dispose();
-      }
-      this.placeholderModels.clear();
-
-      // Clear any LSP markers from Monaco models
-      for (const model of monaco.editor.getModels()) {
-        monaco.editor.setModelMarkers(model, "lsp", []);
-      }
-    }
+    if (this.isCurrentConnection(conn)) this.connections.delete(conn.key);
+    this.editorState.disposeConnection(conn.ownerId);
   }
 }
 

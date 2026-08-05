@@ -26,6 +26,7 @@ export type SeedData = {
 export const test = backendFixture.extend<
   {
     testPage: Page;
+    tabletTestPage: Page;
     prCapture: PrAssetCapture;
     /**
      * Auto fixture that resets integration mock state and any persisted
@@ -186,6 +187,9 @@ export const test = backendFixture.extend<
       mcp_task_agent_profile_default: "current_task",
       sidebar_views: [],
       saved_layouts: [],
+      lsp_auto_start_languages: [],
+      lsp_auto_install_languages: [],
+      lsp_server_configs: {},
       task_create_last_used: {
         repository_id: seedData.repositoryId,
         branch: "main",
@@ -215,6 +219,22 @@ export const test = backendFixture.extend<
         console.log(`[browser:${msg.type()}]`, msg.text());
       });
     }
+    await setupPage(page, backend);
+    await use(page);
+    await context.close();
+  },
+
+  tabletTestPage: async ({ browser, backend, testPage }, use) => {
+    // Depend on testPage so its per-test backend and settings reset runs before
+    // this specialized context is created.
+    void testPage;
+    const context = await browser.newContext({
+      baseURL: backend.frontendUrl,
+      viewport: { width: 900, height: 900 },
+      hasTouch: true,
+      isMobile: false,
+    });
+    const page = await context.newPage();
     await setupPage(page, backend);
     await use(page);
     await context.close();
@@ -293,6 +313,9 @@ test.beforeEach(async ({ apiClient, seedData }) => {
     mcp_task_agent_profile_default: "current_task",
     sidebar_views: [],
     saved_layouts: [],
+    lsp_auto_start_languages: [],
+    lsp_auto_install_languages: [],
+    lsp_server_configs: {},
     kanban_view_mode: "",
     startup_page: "task_overview",
     show_anchored_prompt_bar: false,

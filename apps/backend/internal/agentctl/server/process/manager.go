@@ -211,6 +211,8 @@ type Manager struct {
 	admissionCount   int
 	admissionDrained chan struct{}
 	stopping         bool
+	lifetimeCtx      context.Context
+	lifetimeCancel   context.CancelFunc
 	mainReapPending  atomic.Bool
 	// stopChClosed guards close(stopCh), which is the only part of teardown
 	// that is not naturally idempotent. It is reset wherever stopCh itself is
@@ -257,13 +259,38 @@ func (m *Manager) admitStart() (func(), error) {
 func (m *Manager) CloseAdmission() {
 	m.admissionMu.Lock()
 	m.stopping = true
+	lifetimeCancel := m.lifetimeCancel
 	m.admissionMu.Unlock()
+	if lifetimeCancel != nil {
+		lifetimeCancel()
+	}
 	if m.processRunner != nil {
 		m.processRunner.BeginStop()
 	}
 	if m.shellMgr != nil {
 		m.shellMgr.BeginStop()
 	}
+}
+
+// BeginOwnedOperation admits instance-scoped work and returns a context that
+// is canceled when either the caller ends or instance teardown begins. The
+// release function must be called so StopForTeardown can finish draining.
+func (m *Manager) BeginOwnedOperation(parent context.Context) (context.Context, func(), error) {
+	releaseAdmission, err := m.admitStart()
+	if err != nil {
+		return nil, nil, err
+	}
+	operationCtx, cancel := context.WithCancel(parent)
+	stopLifetimeCancel := context.AfterFunc(m.lifetimeCtx, cancel)
+	var once sync.Once
+	release := func() {
+		once.Do(func() {
+			stopLifetimeCancel()
+			cancel()
+			releaseAdmission()
+		})
+	}
+	return operationCtx, release, nil
 }
 
 // WaitForAdmission waits for starts admitted before CloseAdmission to finish.
@@ -292,11 +319,14 @@ func (m *Manager) BeginStop() {
 // NewManager creates a new process manager
 func NewManager(cfg *config.InstanceConfig, log *logger.Logger) *Manager {
 	cfg.WorkDir = resolveExistingWorkDir(cfg.WorkDir, log.WithFields(zap.String("component", "process-manager")))
+	lifetimeCtx, lifetimeCancel := context.WithCancel(context.Background())
 	m := &Manager{
 		cfg:                  cfg,
 		logger:               log.WithFields(zap.String("component", "process-manager")),
 		updatesCh:            make(chan adapter.AgentEvent, 100),
 		pendingPermissions:   make(map[string]*PendingPermission),
+		lifetimeCtx:          lifetimeCtx,
+		lifetimeCancel:       lifetimeCancel,
 		workspaceSourceRoots: canonicalWorkspaceSourceRoots(cfg.WorkspaceSourceRoots),
 	}
 	// Multi-repo task roots hold one git worktree per repository as siblings.
@@ -704,6 +734,24 @@ func (m *Manager) StartProcess(ctx context.Context, req StartProcessRequest) (*P
 		return nil, fmt.Errorf("prepare process environment: %w", err)
 	}
 	return m.processRunner.Start(ctx, effectiveReq)
+}
+
+// StartPipedProcess starts a directly executed process whose stdio is bridged
+// by agentctl while preserving the manager's admission and teardown guarantees.
+func (m *Manager) StartPipedProcess(req PipedStartRequest) (*PipedProcess, error) {
+	release, err := m.admitStart()
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+	if m.processRunner == nil {
+		return nil, fmt.Errorf("process runner not available")
+	}
+	effectiveReq, err := m.buildPipedProcessRequest(req)
+	if err != nil {
+		return nil, fmt.Errorf("prepare process environment: %w", err)
+	}
+	return m.processRunner.StartPiped(effectiveReq)
 }
 
 // StopProcess stops a running process by ID.
@@ -1355,6 +1403,12 @@ func (m *Manager) buildShellConfigWithAgentEnv(agentEnv []string) (shell.Config,
 // buildProcessRequest applies the instance environment to a task-scoped
 // process request. Explicit request values remain authoritative.
 func (m *Manager) buildProcessRequest(req StartProcessRequest) (StartProcessRequest, error) {
+	var err error
+	req.Env, err = mergeAgentEnvIntoShellConfigWithError(m.agentEnvSnapshot(), req.Env)
+	return req, err
+}
+
+func (m *Manager) buildPipedProcessRequest(req PipedStartRequest) (PipedStartRequest, error) {
 	var err error
 	req.Env, err = mergeAgentEnvIntoShellConfigWithError(m.agentEnvSnapshot(), req.Env)
 	return req, err

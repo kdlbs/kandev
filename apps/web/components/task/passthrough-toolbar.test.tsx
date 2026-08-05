@@ -59,6 +59,10 @@ vi.mock("@/components/state-provider", () => ({
           ? { [SESSION_ID]: { id: SESSION_ID, state: mockSessionState } }
           : {},
       },
+      quickChat: { sessions: [] },
+      kanban: { workflowId: null, tasks: [] },
+      kanbanMulti: { snapshots: {} },
+      workflows: { items: [] },
       userSettings: { keyboardShortcuts: mockKeyboardShortcuts, chatSubmitKey: "enter" },
     }),
   useAppStoreApi: () => ({

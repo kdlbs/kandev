@@ -10,8 +10,12 @@ const mockSetActiveSession = vi.fn();
 
 const mockState = {
   kanban: {
+    workflowId: null,
     tasks: [{ id: "task-1", title: "Task title" }],
   },
+  kanbanMulti: { snapshots: {} },
+  quickChat: { sessions: [] },
+  workflows: { items: [] },
   agentProfiles: {
     items: [
       {

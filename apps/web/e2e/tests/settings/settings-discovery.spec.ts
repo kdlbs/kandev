@@ -20,17 +20,22 @@ test.describe("Settings discovery", () => {
 
     const motionRows = sidebar.locator('[data-settings-search-motion-key^="item:"]');
     await expect(motionRows).toHaveCount(2);
-    await motionRows.first().evaluate(async (row) => {
-      await Promise.all(row.getAnimations().map((animation) => animation.finished));
-    });
+    await waitForMotionToSettle(motionRows);
 
     const animatedReorder = await changeSearchAndSampleMotion(search, "terminal font");
     expect(animatedReorder.map((row) => row.key)).toEqual([
       "item:terminal-font-family",
       "item:terminal-font-size",
     ]);
+    // FLIP first paints the surviving rows at their old visual positions even though the DOM is
+    // already in ranked order. This inversion is the continuity we are testing.
     expect(animatedReorder[0].top).toBeGreaterThan(animatedReorder[1].top);
     expect(animatedReorder.every((row) => row.animations.includes(160))).toBe(true);
+    await waitForMotionToSettle(motionRows);
+    const settledTops = await motionRows.evaluateAll((rows) =>
+      rows.map((row) => row.getBoundingClientRect().top),
+    );
+    expect(settledTops[0]).toBeLessThan(settledTops[1]);
 
     await testPage.emulateMedia({ reducedMotion: "reduce" });
     await search.fill("font");
@@ -124,6 +129,14 @@ test.describe("Settings discovery", () => {
     await expect(testPage.getByTestId("settings-floating-save")).toBeVisible();
   });
 });
+
+async function waitForMotionToSettle(rows: Locator) {
+  await rows.evaluateAll(async (elements) => {
+    await Promise.all(
+      elements.flatMap((element) => element.getAnimations().map((animation) => animation.finished)),
+    );
+  });
+}
 
 async function changeSearchAndSampleMotion(search: Locator, query: string) {
   return search.evaluate(async (input, nextQuery) => {

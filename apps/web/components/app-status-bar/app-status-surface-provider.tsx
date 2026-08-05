@@ -98,8 +98,14 @@ export function AppStatusDrawerTrigger({
   );
 }
 
+/**
+ * The trigger must be visible exactly where `useDrawerSurface` picks the drawer
+ * over the inline bar, or the drawer becomes unreachable and the status surface
+ * disappears. `md:hidden` tracks the hook's mobile boundary; the connection-only
+ * variant additionally covers the tablet clause up to the desktop boundary.
+ */
 function drawerTriggerVisibilityClass(connectionOnly: boolean) {
-  return connectionOnly ? "lg:hidden" : "sm:hidden";
+  return connectionOnly ? "lg:hidden" : "md:hidden";
 }
 
 export function AppStatusSurfaceProvider({ children }: { children: ReactNode }) {

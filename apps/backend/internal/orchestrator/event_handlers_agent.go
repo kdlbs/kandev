@@ -643,9 +643,11 @@ func (s *Service) executeQueuedMessage(callerSessionID string, queuedMsg *messag
 	for i, att := range queuedMsg.Attachments {
 		attachments[i] = v1.MessageAttachment{
 			Type:         att.Type,
+			AttachmentID: att.AttachmentID,
 			Data:         att.Data,
 			MimeType:     att.MimeType,
 			Name:         att.Name,
+			SizeBytes:    att.SizeBytes,
 			DeliveryMode: att.DeliveryMode,
 		}
 	}

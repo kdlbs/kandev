@@ -42,4 +42,28 @@ describe("locale-aware Intl wrappers", () => {
     expect(formatDate("2026-07-27T00:00:00Z", { year: "numeric" })).toBe("2026");
     await activateLocale("en");
   });
+
+  it("passes zh-cn to number and date formatters", async () => {
+    await activateLocale("zh-cn");
+    const numberOptions: Intl.NumberFormatOptions = {
+      style: "currency",
+      currency: "CNY",
+      currencyDisplay: "name",
+    };
+    const dateOptions: Intl.DateTimeFormatOptions = {
+      year: "numeric",
+      month: "long",
+      day: "numeric",
+      timeZone: "UTC",
+    };
+    const date = "2026-07-27T00:00:00Z";
+
+    expect(formatNumber(1234.5, numberOptions)).toBe(
+      new Intl.NumberFormat("zh-cn", numberOptions).format(1234.5),
+    );
+    expect(formatDate(date, dateOptions)).toBe(
+      new Intl.DateTimeFormat("zh-cn", dateOptions).format(new Date(date)),
+    );
+    await activateLocale("en");
+  });
 });

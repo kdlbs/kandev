@@ -1,8 +1,7 @@
 /**
- * Pure decision logic for the transcript auto-scroll toggle, shared by the
- * native and Virtuoso message list renderers so the two stay behaviorally
- * consistent. Kept side-effect free for direct unit testing — the renderers
- * own all DOM / Virtuoso imperative calls and just consult these functions.
+ * Pure decision logic for the native transcript auto-scroll toggle. Kept
+ * side-effect free for direct unit testing — the renderer owns all DOM calls
+ * and just consults these functions.
  */
 
 /**
@@ -25,24 +24,6 @@ export function isPrependUpdate(params: {
   if (params.prevFirstKey === null) return false;
   if (params.nextFirstKey === null) return false;
   return params.nextFirstKey !== params.prevFirstKey;
-}
-
-/**
- * Whether new messages arriving should force-scroll the transcript to the
- * bottom. The native renderer already gates this on `isNearBottom`; auto-scroll
- * being disabled overrides that and suppresses the jump entirely.
- */
-export function shouldAutoScrollOnMessagesChange(enabled: boolean, isNearBottom: boolean): boolean {
-  return enabled && isNearBottom;
-}
-
-/**
- * Whether the agent starting a turn (isWorking transitioning to true) should
- * force-scroll to the bottom. Disabled auto-scroll suppresses this too — while
- * off, nothing should move the view.
- */
-export function shouldAutoScrollOnWorkingStart(enabled: boolean): boolean {
-  return enabled;
 }
 
 // Matches the settle tolerance used elsewhere for "has this scrolled past
@@ -170,16 +151,4 @@ export function createFrameCoalescer(run: () => void): {
       run();
     },
   };
-}
-
-const FOLLOW_SMOOTH = "smooth" as const;
-
-/**
- * Virtuoso `followOutput` resolver: identical to the renderer's original
- * always-on behavior, except disabled auto-scroll unconditionally suppresses
- * following regardless of Virtuoso's own atBottom tracking.
- */
-export function resolveFollowOutput(enabled: boolean, isAtBottom: boolean): "smooth" | false {
-  if (!enabled) return false;
-  return isAtBottom ? FOLLOW_SMOOTH : false;
 }

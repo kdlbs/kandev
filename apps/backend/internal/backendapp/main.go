@@ -829,6 +829,7 @@ func startGatewayAndServe(
 	})
 	storageComposition, err := provideStorageComposition(
 		cfg, dbPool, systemSvc.Jobs, lifecycleMgr, services.WorktreeMgr, services.Task,
+		log,
 		func(message string, err error) { log.Error(message, zap.Error(err)) },
 	)
 	if err != nil {
@@ -1838,6 +1839,7 @@ func buildHTTPServer(
 		httpPort:                      resolvedHTTPPort(cfg),
 		features:                      cfg.Features,
 		voice:                         cfg.Voice,
+		homeDir:                       cfg.ResolvedHomeDir(),
 		interimSettingsInterlockToken: interimSettingsInterlockToken,
 		log:                           log,
 	})

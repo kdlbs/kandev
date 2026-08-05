@@ -39,6 +39,11 @@ import { useSettingsSaveContributor } from "./settings-save-provider";
 import { SettingsCard } from "./settings-card";
 import { STANDALONE_SETTINGS_TARGETS } from "@/lib/settings-discovery/catalog/standalone";
 
+const VOICE_SECURE_SCHEME = "HTTPS";
+const VOICE_LOCALHOST_HOST = "localhost";
+const VOICE_INSECURE_SCHEME = "HTTP";
+const VOICE_LOCALHOST_URL = "http://localhost";
+
 // Single source of truth for the language options. Web Speech reads `lang`,
 // Whisper engines treat it as a hint. "auto" defers to the browser locale.
 // `value` is the BCP-47 tag handed to the engine, so it is never translated;
@@ -514,7 +519,12 @@ function AvailabilityBanner({ caps }: { caps: VoiceCapabilities }) {
         <p className="font-medium">{t("settings:voiceUnavailableTitle")}</p>
         <p className="text-xs text-muted-foreground">
           {insecure
-            ? t("settings:voiceUnavailableInsecure")
+            ? t("settings:voiceUnavailableInsecure", {
+                secureScheme: VOICE_SECURE_SCHEME,
+                localhostHost: VOICE_LOCALHOST_HOST,
+                insecureScheme: VOICE_INSECURE_SCHEME,
+                localhostUrl: VOICE_LOCALHOST_URL,
+              })
             : t("settings:voiceUnavailableUnsupported")}
         </p>
       </div>

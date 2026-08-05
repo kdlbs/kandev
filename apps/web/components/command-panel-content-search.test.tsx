@@ -23,8 +23,12 @@ vi.mock("@kandev/ui/command", () => ({
     "data-testid"?: string;
     "data-repository"?: string;
   }) => (
-    <section data-testid={testId} data-repository={repository}>
-      {heading && <h2>{heading}</h2>}
+    <section {...{ "cmdk-group": "" }} data-testid={testId} data-repository={repository}>
+      {heading && (
+        <div {...{ "cmdk-group-heading": "" }} aria-hidden>
+          {heading}
+        </div>
+      )}
       {children}
     </section>
   ),
@@ -103,6 +107,7 @@ const result: WorkspaceContentSearchResult = {
 };
 
 const ARIA_SELECTED_ATTRIBUTE = "aria-selected";
+const CMDK_GROUP_HEADING_SELECTOR = "[cmdk-group-heading]";
 
 function viewProps(overrides: Partial<CommandPanelViewProps> = {}): CommandPanelViewProps {
   return {
@@ -310,8 +315,8 @@ describe("CommandPanelView search-only commands", () => {
 
     expect(screen.getByText(FONT_SIZE_LABEL)).toBeTruthy();
     expect(screen.getByText("Settings › General › Terminal")).toBeTruthy();
-    expect(screen.getByRole("heading", { name: "Settings" })).toBeTruthy();
-    expect(screen.queryByRole("heading", { name: "Commands" })).toBeNull();
+    expect(screen.getByText("Settings", { selector: CMDK_GROUP_HEADING_SELECTOR })).toBeTruthy();
+    expect(screen.queryByText("Commands", { selector: CMDK_GROUP_HEADING_SELECTOR })).toBeNull();
   });
 
   it("separates regular and granular matches into Commands and Settings", () => {
@@ -333,12 +338,16 @@ describe("CommandPanelView search-only commands", () => {
     );
 
     expect(
-      screen.getByText("Terminal Font Size Guide").closest("section")?.querySelector("h2")
-        ?.textContent,
+      screen
+        .getByText("Terminal Font Size Guide")
+        .closest("[cmdk-group]")
+        ?.querySelector(CMDK_GROUP_HEADING_SELECTOR)?.textContent,
     ).toBe("Commands");
     expect(
-      screen.getByText(FONT_SIZE_LABEL, { exact: true }).closest("section")?.querySelector("h2")
-        ?.textContent,
+      screen
+        .getByText(FONT_SIZE_LABEL, { exact: true })
+        .closest("[cmdk-group]")
+        ?.querySelector(CMDK_GROUP_HEADING_SELECTOR)?.textContent,
     ).toBe("Settings");
   });
 });

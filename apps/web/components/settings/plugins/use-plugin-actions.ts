@@ -2,6 +2,9 @@
 
 import { useState } from "react";
 import { toast } from "@/lib/toast/sonner";
+// Module-level `t`: these callbacks fire outside a render, so each message
+// resolves when the action runs rather than at import.
+import { t } from "@/lib/i18n";
 import type { StoreApi } from "zustand";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { useTheme } from "@/components/theme/app-theme";
@@ -94,7 +97,11 @@ function useEnableDisableActions(upsertPlugin: (p: PluginRecord) => void) {
         // Preserve the original Enable failure toast if the diagnostic refresh
         // itself cannot reach the backend.
       }
-      toast.error(err instanceof Error ? err.message : `Failed to enable ${plugin.display_name}`);
+      toast.error(
+        err instanceof Error
+          ? err.message
+          : t("plugins:failedToEnable", { name: plugin.display_name }),
+      );
     } finally {
       setBusyId(null);
     }
@@ -107,7 +114,11 @@ function useEnableDisableActions(upsertPlugin: (p: PluginRecord) => void) {
       unloadPlugin(plugin.id);
       upsertPlugin(withStatus(plugin, "disabled"));
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : `Failed to disable ${plugin.display_name}`);
+      toast.error(
+        err instanceof Error
+          ? err.message
+          : t("plugins:failedToDisable", { name: plugin.display_name }),
+      );
     } finally {
       setBusyId(null);
     }
@@ -134,7 +145,7 @@ function useAutoUpdateAction(upsertPlugin: (p: PluginRecord) => void) {
       toast.error(
         err instanceof Error
           ? err.message
-          : `Failed to update auto-update for ${plugin.display_name}`,
+          : t("plugins:failedToSetAutoUpdateFor", { name: plugin.display_name }),
       );
     } finally {
       setAutoUpdateBusyId(null);
@@ -159,7 +170,9 @@ function useUninstallAction(removePlugin: (id: string) => void) {
       setUninstallTarget(null);
     } catch (err) {
       toast.error(
-        err instanceof Error ? err.message : `Failed to uninstall ${target.display_name}`,
+        err instanceof Error
+          ? err.message
+          : t("plugins:failedToUninstall", { name: target.display_name }),
       );
     } finally {
       setUninstallBusy(false);
@@ -203,7 +216,7 @@ function useInstallAction(upsertPlugin: (p: PluginRecord) => void) {
     if (warning) {
       toast.warning(warning);
     } else {
-      toast.success(`${plugin.display_name} installed`);
+      toast.success(t("plugins:pluginInstalled", { name: plugin.display_name }));
     }
     closeInstallDialog();
   };
@@ -215,7 +228,7 @@ function useInstallAction(upsertPlugin: (p: PluginRecord) => void) {
       const result = await install();
       await afterInstall(result);
     } catch (err) {
-      setInstallError(err instanceof Error ? err.message : "Failed to install plugin");
+      setInstallError(err instanceof Error ? err.message : t("plugins:failedToInstallPlugin"));
     } finally {
       setInstallBusy(false);
     }
@@ -232,7 +245,7 @@ function useInstallAction(upsertPlugin: (p: PluginRecord) => void) {
       const result = await installPluginFromUrl(url);
       await afterInstall(result);
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Failed to install plugin");
+      toast.error(err instanceof Error ? err.message : t("plugins:failedToInstallPlugin"));
     }
   };
 
@@ -274,7 +287,7 @@ function useSyncAction(setPlugins: (plugins: PluginRecord[]) => void) {
       setSyncErrors(result.errors ?? []);
       toast.success(summarizeSyncResult(result));
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Failed to sync plugins");
+      toast.error(err instanceof Error ? err.message : t("plugins:failedToSyncPlugins"));
     } finally {
       setSyncBusy(false);
     }

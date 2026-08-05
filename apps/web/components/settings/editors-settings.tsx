@@ -1,25 +1,17 @@
 "use client";
 
 import { useEffect, useMemo } from "react";
-import {
-  IconEdit,
-  IconTrash,
-  IconChevronDown,
-  IconExternalLink,
-  IconInfoCircle,
-} from "@tabler/icons-react";
+import { IconEdit, IconTrash, IconChevronDown, IconExternalLink } from "@tabler/icons-react";
 import { Badge } from "@kandev/ui/badge";
 import { Button } from "@kandev/ui/button";
-import { Checkbox } from "@kandev/ui/checkbox";
 import { Separator } from "@kandev/ui/separator";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
-import { Switch } from "@kandev/ui/switch";
 import { Textarea } from "@kandev/ui/textarea";
 import { SettingsPageTemplate } from "@/components/settings/settings-page-template";
 import { SettingsTarget } from "@/components/settings/settings-target";
 import { GENERAL_SETTINGS_TARGETS } from "@/lib/settings-discovery/catalog/general";
 import { Combobox, type ComboboxOption } from "@/components/combobox";
 import { EditableCard } from "@/components/settings/editable-card";
+import { LspStatusLocationSetting } from "@/components/settings/lsp-status-location-setting";
 import {
   EditorForm,
   type EditorFormState,
@@ -27,7 +19,7 @@ import {
   formStateFromEditor,
   getCustomEditorSummary,
 } from "@/components/settings/editor-form";
-import { LSP_DEFAULT_CONFIGS } from "@/lib/lsp/lsp-client-manager";
+import { LSP_DEFAULT_CONFIGS } from "@/lib/lsp/lsp-client-config";
 import type { EditorOption } from "@/lib/types/http";
 import type { RequestStatus } from "@/lib/http/use-request";
 import {
@@ -44,6 +36,7 @@ import {
   type EditorsSettingsState,
 } from "@/components/settings/editors-settings-state";
 import { isDraftEntryDirty, isEditorsSettingsDirty } from "./settings-dirty";
+import { LspLanguageCards } from "./lsp-language-cards";
 import { LSP_LANGUAGE_OPTIONS } from "./lsp-language-options";
 import { Trans, useTranslation } from "react-i18next";
 
@@ -53,98 +46,7 @@ import { Trans, useTranslation } from "react-i18next";
  * is part of the message a translator edits, and translating a command name or
  * an LSP method breaks the thing it names.
  */
-const NPM_INSTALL_COMMAND = "npm install";
 const LSP_CONFIG_METHOD = "workspace/configuration";
-
-type LspLanguageCardsProps = {
-  lspAutoStartLanguages: string[];
-  lspAutoInstallLanguages: string[];
-  baselineLspAutoStart: string[];
-  baselineLspAutoInstall: string[];
-  toggleAutoStart: (langId: string, checked: boolean) => void;
-  toggleAutoInstall: (langId: string, checked: boolean) => void;
-};
-
-function LspLanguageCards({
-  lspAutoStartLanguages,
-  lspAutoInstallLanguages,
-  baselineLspAutoStart,
-  baselineLspAutoInstall,
-  toggleAutoStart,
-  toggleAutoInstall,
-}: LspLanguageCardsProps) {
-  const { t } = useTranslation();
-  return (
-    <div className="space-y-3">
-      <div>
-        <div className="text-sm font-medium text-foreground">{t("settings:languageServers")}</div>
-        <div className="text-xs text-muted-foreground">
-          {t("settings:autoStartLanguageServersWhenOpening")}
-          <br />
-          <Trans
-            i18nKey="settings:whenEnabledInstallYourProjectS"
-            values={{ command: NPM_INSTALL_COMMAND }}
-          >
-            When enabled, install your project&apos;s dependencies (e.g.{" "}
-            <code className="text-[11px] bg-muted px-1 rounded">{NPM_INSTALL_COMMAND}</code> via
-            repository setup scripts) to avoid missing type errors.
-          </Trans>
-        </div>
-      </div>
-      <div className="grid gap-3 sm:grid-cols-2">
-        {LSP_LANGUAGE_OPTIONS.map((lang) => {
-          const autoStartDirty =
-            lspAutoStartLanguages.includes(lang.id) !== baselineLspAutoStart.includes(lang.id);
-          const autoInstallDirty =
-            lspAutoInstallLanguages.includes(lang.id) !== baselineLspAutoInstall.includes(lang.id);
-          return (
-            <div
-              key={lang.id}
-              className="rounded-lg border border-border/60 bg-background px-4 py-3 space-y-2.5"
-              data-settings-dirty={autoStartDirty || autoInstallDirty}
-            >
-              <div>
-                <div className="text-sm font-medium text-foreground">{lang.label}</div>
-                <div className="text-xs text-muted-foreground">{lang.binary}</div>
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="text-xs text-muted-foreground">{t("settings:autoStart")}</span>
-                <Switch
-                  checked={lspAutoStartLanguages.includes(lang.id)}
-                  onCheckedChange={(checked) => toggleAutoStart(lang.id, checked === true)}
-                  data-settings-dirty={autoStartDirty}
-                />
-              </div>
-              <div className="flex items-center gap-2">
-                <Checkbox
-                  id={`lsp-install-${lang.id}`}
-                  checked={lspAutoInstallLanguages.includes(lang.id)}
-                  onCheckedChange={(checked) => toggleAutoInstall(lang.id, checked === true)}
-                  className="h-3.5 w-3.5"
-                  data-settings-dirty={autoInstallDirty}
-                />
-                <label
-                  htmlFor={`lsp-install-${lang.id}`}
-                  className="text-xs text-muted-foreground cursor-pointer"
-                >
-                  {t("settings:autoInstallIfNotFound")}
-                </label>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <IconInfoCircle className="h-3.5 w-3.5 text-muted-foreground cursor-help" />
-                  </TooltipTrigger>
-                  <TooltipContent side="top" className="max-w-[260px] text-xs">
-                    {t(lang.installHintKey, lang.installHintValues)}
-                  </TooltipContent>
-                </Tooltip>
-              </div>
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
 
 type LspServerConfigSectionProps = {
   lspConfigStrings: Record<string, string>;
@@ -495,6 +397,7 @@ function getEditorsSaveRevision(state: EditorsSettingsState): string {
     defaultEditorId: state.defaultEditorId,
     lspAutoStartLanguages: state.lspAutoStartLanguages,
     lspAutoInstallLanguages: state.lspAutoInstallLanguages,
+    lspStatusLocation: state.lspStatusLocation,
     lspConfigStrings: state.lspConfigStrings,
   });
 }
@@ -557,6 +460,11 @@ export function EditorsSettings() {
             baselineLspAutoInstall={state.baselineLspAutoInstall}
             toggleAutoStart={toggleAutoStart}
             toggleAutoInstall={toggleAutoInstall}
+          />
+          <LspStatusLocationSetting
+            value={state.lspStatusLocation}
+            baseline={state.baselineLspStatusLocation}
+            onChange={state.setLspStatusLocation}
           />
           <LspServerConfigSection
             lspConfigStrings={state.lspConfigStrings}

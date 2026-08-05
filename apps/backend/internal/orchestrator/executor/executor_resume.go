@@ -1285,7 +1285,7 @@ func resolveResumeTaskDirName(existingEnv *models.TaskEnvironment, task *v1.Task
 	if existingEnv != nil && existingEnv.TaskDirName != "" {
 		return existingEnv.TaskDirName
 	}
-	return worktree.SemanticWorktreeName(task.Title, worktree.SmallSuffix(3))
+	return worktree.SemanticWorktreeName(task.Title, worktree.TaskDirSuffix(task.ID))
 }
 
 // persistResumeState updates the session row for a resume launch. For an agent

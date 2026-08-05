@@ -3,6 +3,7 @@ import {
   buildCoreFields,
   mapUserSettingsResponse,
   parseChangesPanelLayout,
+  parseLspStatusLocation,
   parseStartupPage,
   parseSystemMetricsDisplay,
   parseVoiceMode,
@@ -33,6 +34,27 @@ describe("startup page user settings", () => {
     });
 
     expect(result.startupPage).toBe("last_task");
+  });
+});
+
+describe("LSP status location hydration", () => {
+  it("defaults to toolbar and maps status_bar", () => {
+    expect(parseLspStatusLocation(undefined)).toBe("toolbar");
+    expect(parseLspStatusLocation("unexpected")).toBe("toolbar");
+    expect(parseLspStatusLocation("status_bar")).toBe("status_bar");
+    expect(mapUserSettingsResponse(null).lspStatusLocation).toBe("toolbar");
+
+    const result = mapUserSettingsResponse({
+      settings: {
+        user_id: DEFAULT_USER_ID,
+        workspace_id: toWorkspaceId(""),
+        repository_ids: [],
+        lsp_status_location: "status_bar",
+        updated_at: UPDATED_AT,
+      },
+    });
+
+    expect(result.lspStatusLocation).toBe("status_bar");
   });
 });
 

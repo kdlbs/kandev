@@ -77,6 +77,7 @@ vi.mock("@/components/task-create-dialog-helpers", () => ({
       editingTask.state !== "CREATED",
     ),
   findDuplicateRemoteRepo: () => null,
+  hasPendingAttachmentUploads: () => false,
   validateCreateInputs: (...args: unknown[]) => validateCreateInputsMock(...args),
   toMessageAttachments: () => [],
 }));

@@ -71,6 +71,7 @@ func (c *Controller) UpdateUserSettings(ctx context.Context, req dto.UpdateUserS
 		LspAutoStartLanguages:           req.LspAutoStartLanguages,
 		LspAutoInstallLanguages:         req.LspAutoInstallLanguages,
 		LspServerConfigs:                req.LspServerConfigs,
+		LspStatusLocation:               req.LspStatusLocation,
 		SavedLayouts:                    req.SavedLayouts,
 		SidebarViews:                    req.SidebarViews,
 		SidebarActiveViewID:             req.SidebarActiveViewID,

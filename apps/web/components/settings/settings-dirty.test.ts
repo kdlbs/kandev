@@ -26,11 +26,14 @@ describe("settings dirty comparisons", () => {
       baselineLspAutoStart: ["go"],
       lspAutoInstallLanguages: ["go"],
       baselineLspAutoInstall: ["go"],
+      lspStatusLocation: "toolbar" as const,
+      baselineLspStatusLocation: "toolbar" as const,
       lspConfigStrings: { go: "{}" },
       baselineLspConfigStrings: { go: "{}" },
     };
 
     expect(isEditorsSettingsDirty(baseline)).toBe(false);
     expect(isEditorsSettingsDirty({ ...baseline, defaultEditorId: "cursor" })).toBe(true);
+    expect(isEditorsSettingsDirty({ ...baseline, lspStatusLocation: "status_bar" })).toBe(true);
   });
 });

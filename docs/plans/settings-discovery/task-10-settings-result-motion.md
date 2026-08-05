@@ -1,7 +1,12 @@
 ---
+id: "10-settings-result-motion"
+title: "Subtle Settings result motion"
 status: completed
 created: 2026-08-05
-plan: docs/plans/settings-discovery/plan.md
+wave: 10
+depends_on: ["09-compact-settings-search"]
+plan: "plan.md"
+spec: "../../specs/ui/settings-discovery.md"
 ---
 
 # Task 10: Subtle Settings result motion

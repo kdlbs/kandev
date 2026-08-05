@@ -471,6 +471,7 @@ func marshalUserSettingsPayload(settings *models.UserSettings) ([]byte, error) {
 		"lsp_auto_start_languages":            lspAutoStart,
 		"lsp_auto_install_languages":          lspAutoInstall,
 		"lsp_server_configs":                  lspServerConfigs,
+		"lsp_status_location":                 models.NormalizeLspStatusLocation(settings.LspStatusLocation),
 		"saved_layouts":                       savedLayouts,
 		"sidebar_views":                       sidebarViews,
 		"sidebar_active_view_id":              settings.SidebarActiveViewID,
@@ -591,6 +592,7 @@ func defaultUserSettings(userID string) *models.UserSettings {
 		LspAutoStartLanguages:           []string{},
 		LspAutoInstallLanguages:         []string{},
 		LspServerConfigs:                map[string]map[string]interface{}{},
+		LspStatusLocation:               models.LspStatusLocationToolbar,
 		SavedLayouts:                    []models.SavedLayout{},
 		ChatSubmitKey:                   "cmd_enter",
 		KeyboardShortcuts:               map[string]interface{}{},
@@ -640,6 +642,7 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 		LspAutoStartLanguages           []string                            `json:"lsp_auto_start_languages"`
 		LspAutoInstallLanguages         []string                            `json:"lsp_auto_install_languages"`
 		LspServerConfigs                map[string]map[string]interface{}   `json:"lsp_server_configs"`
+		LspStatusLocation               string                              `json:"lsp_status_location"`
 		SavedLayouts                    []models.SavedLayout                `json:"saved_layouts"`
 		SidebarViews                    []models.SidebarView                `json:"sidebar_views"`
 		SidebarActiveViewID             string                              `json:"sidebar_active_view_id"`
@@ -725,6 +728,7 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 	if settings.LspServerConfigs == nil {
 		settings.LspServerConfigs = map[string]map[string]interface{}{}
 	}
+	settings.LspStatusLocation = models.NormalizeLspStatusLocation(payload.LspStatusLocation)
 	settings.SavedLayouts = payload.SavedLayouts
 	if settings.SavedLayouts == nil {
 		settings.SavedLayouts = []models.SavedLayout{}

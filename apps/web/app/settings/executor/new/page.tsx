@@ -17,6 +17,7 @@ import { useTranslation } from "react-i18next";
 
 const EXECUTOR_TYPES = ["local_docker", "remote_docker"] as const;
 type ExecutorType = (typeof EXECUTOR_TYPES)[number];
+const REMOTE_DOCKER_SCHEMES = "tcp://, ssh://";
 
 export default function ExecutorCreatePage() {
   const { t } = useTranslation();
@@ -169,7 +170,7 @@ function ExecutorFormCard({
           />
           <p className="text-xs text-muted-foreground">
             {isRemoteDocker
-              ? t("executors:theRemoteDockerHostUrlTcp")
+              ? t("executors:theRemoteDockerHostUrlTcp", { schemes: REMOTE_DOCKER_SCHEMES })
               : t("executors:repositoriesWillBeMountedAsVolumes")}
           </p>
         </div>

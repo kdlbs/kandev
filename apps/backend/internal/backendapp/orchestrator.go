@@ -94,8 +94,18 @@ func provideOrchestrator(
 	msgQueue := messagequeue.NewService(queueRepo, maxPerSession, log)
 	log.Info("Message queue initialized",
 		zap.Int("max_per_session", maxPerSession))
+	if taskSvc.AttachmentService() == nil && taskSvc.AttachmentRepository() != nil {
+		attachmentSvc, attachmentErr := taskservice.NewAttachmentService(
+			taskSvc.AttachmentRepository(), cfg.ResolvedHomeDir(), taskSvc.AuthorizeWorkspaceAccess, log,
+		)
+		if attachmentErr != nil {
+			return nil, nil, fmt.Errorf("initialize prompt attachment storage: %w", attachmentErr)
+		}
+		taskSvc.SetAttachmentService(attachmentSvc)
+	}
 
 	orchestratorSvc := orchestrator.NewService(serviceCfg, eventBus, agentManagerClient, taskRepoAdapter, taskRepo, userSvc, secretStore, msgQueue, log)
+	orchestratorSvc.SetAttachmentReader(taskSvc.AttachmentService())
 	if githubSvc != nil {
 		orchestratorSvc.SetGitHubCredentialBroker(
 			githubExecutorCredentialLeaseAdapter{service: githubSvc},

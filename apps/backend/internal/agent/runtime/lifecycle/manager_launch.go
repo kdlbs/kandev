@@ -1074,11 +1074,12 @@ func (m *Manager) launchInternal(ctx context.Context, req *LaunchRequest) (*Agen
 
 	// 4. Resolve workspace path (non-worktree executors use this directly)
 	workspacePath, mainRepoGitDir, worktreeID, worktreeBranch := m.launchResolveWorkspacePath(ctx, req)
-	if err := reconcileWorkspaceSources(ctx, workspacePath, req.WorkspaceFolders); err != nil {
+	owner := ownedDirectoryLinkOwner(req.TaskID, req.TaskDirName)
+	if err := reconcileWorkspaceSources(ctx, workspacePath, req.WorkspaceFolders, owner); err != nil {
 		return nil, err
 	}
 	if req.ExecutorType == string(models.ExecutorTypeLocal) || req.ExecutorType == legacyExecutorTypeLocalPC {
-		if err := reconcileWorkspaceRepositories(workspacePath, workspaceRepositorySpecsFromLaunch(req), m.logger); err != nil {
+		if err := reconcileWorkspaceRepositories(workspacePath, workspaceRepositorySpecsFromLaunch(req), m.logger, owner); err != nil {
 			return nil, err
 		}
 	}
@@ -1326,7 +1327,7 @@ func (m *Manager) ensureLaunchSessionStillActive(ctx context.Context, sessionID 
 	case models.TaskSessionStateCancelled,
 		models.TaskSessionStateCompleted,
 		models.TaskSessionStateFailed:
-		return fmt.Errorf("verify session before registering execution: session %q is %s", sessionID, session.State)
+		return fmt.Errorf("verify session before registering execution: session %q is %s: %w", sessionID, session.State, ErrSessionTerminal)
 	default:
 		return nil
 	}

@@ -201,9 +201,11 @@ type TaskEvent struct {
 // "resource" → ResourceBlock (text or blob based on MIME type).
 type MessageAttachment struct {
 	Type         string `json:"type"`                    // "image", "audio", "resource"
+	AttachmentID string `json:"attachment_id,omitempty"` // File-backed attachment descriptor ID
 	Data         string `json:"data,omitempty"`          // Base64-encoded data
 	MimeType     string `json:"mime_type,omitempty"`     // MIME type (e.g., "image/png")
 	Name         string `json:"name,omitempty"`          // Display name (e.g., filename)
+	SizeBytes    int64  `json:"size_bytes,omitempty"`    // Raw byte size for file-backed descriptors
 	DeliveryMode string `json:"delivery_mode,omitempty"` // "prompt" (native/default) or "path"
 }
 

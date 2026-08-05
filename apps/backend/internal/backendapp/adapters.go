@@ -271,10 +271,12 @@ func convertToLifecycleAttachments(attachments []v1.MessageAttachment) []lifecyc
 	result := make([]lifecycle.MessageAttachment, len(attachments))
 	for i, att := range attachments {
 		result[i] = lifecycle.MessageAttachment{
+			AttachmentID: att.AttachmentID,
 			Type:         att.Type,
 			Data:         att.Data,
 			MimeType:     att.MimeType,
 			Name:         att.Name,
+			SizeBytes:    att.SizeBytes,
 			DeliveryMode: att.DeliveryMode,
 		}
 	}

@@ -15,6 +15,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"io"
 	"regexp"
 	"strconv"
 	"strings"
@@ -59,6 +60,14 @@ type ServiceConfig struct {
 	QueueSize                     int
 	QueueGroup                    string
 	ClaudeBackgroundPromptHandoff bool
+}
+
+// AttachmentReader is the narrow attachment-store seam needed when the
+// orchestrator delivers claimed descriptors to a passthrough agent.
+// Keeping this interface local avoids coupling the coordinator to lifecycle's
+// concrete package while preserving the same structural contract.
+type AttachmentReader interface {
+	OpenClaimed(ctx context.Context, id, taskID, sessionID string) (io.ReadCloser, string, string, int64, error)
 }
 
 // DefaultServiceConfig returns default configuration
@@ -810,6 +819,12 @@ func NewService(
 // If not set: Agent messages won't be saved to the database (events will still be published).
 func (s *Service) SetMessageCreator(mc MessageCreator) {
 	s.messageCreator = mc
+}
+
+// SetAttachmentReader wires the backend attachment store into passthrough
+// prompt delivery so claimed descriptors can be streamed into the workspace.
+func (s *Service) SetAttachmentReader(reader AttachmentReader) {
+	s.executor.SetAttachmentReader(reader)
 }
 
 // SetOnPrimarySessionSet sets a callback on the executor for when the first session

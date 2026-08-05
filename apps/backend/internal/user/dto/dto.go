@@ -43,6 +43,7 @@ type UserSettingsDTO struct {
 	LspAutoStartLanguages           []string                            `json:"lsp_auto_start_languages"`
 	LspAutoInstallLanguages         []string                            `json:"lsp_auto_install_languages"`
 	LspServerConfigs                map[string]map[string]interface{}   `json:"lsp_server_configs,omitempty"`
+	LspStatusLocation               string                              `json:"lsp_status_location"`
 	SavedLayouts                    []models.SavedLayout                `json:"saved_layouts"`
 	SidebarViews                    []models.SidebarView                `json:"sidebar_views"`
 	SidebarActiveViewID             string                              `json:"sidebar_active_view_id"`
@@ -111,6 +112,7 @@ type UpdateUserSettingsRequest struct {
 	LspAutoStartLanguages           *[]string                          `json:"lsp_auto_start_languages,omitempty"`
 	LspAutoInstallLanguages         *[]string                          `json:"lsp_auto_install_languages,omitempty"`
 	LspServerConfigs                *map[string]map[string]interface{} `json:"lsp_server_configs,omitempty"`
+	LspStatusLocation               *string                            `json:"lsp_status_location,omitempty"`
 	SavedLayouts                    *[]models.SavedLayout              `json:"saved_layouts,omitempty"`
 	SidebarViews                    *[]models.SidebarView              `json:"sidebar_views,omitempty"`
 	SidebarActiveViewID             *string                            `json:"sidebar_active_view_id,omitempty"`
@@ -240,6 +242,7 @@ func FromUserSettings(settings *models.UserSettings) UserSettingsDTO {
 		LspAutoStartLanguages:           settings.LspAutoStartLanguages,
 		LspAutoInstallLanguages:         settings.LspAutoInstallLanguages,
 		LspServerConfigs:                settings.LspServerConfigs,
+		LspStatusLocation:               models.NormalizeLspStatusLocation(settings.LspStatusLocation),
 		SavedLayouts:                    settings.SavedLayouts,
 		SidebarViews:                    settings.SidebarViews,
 		SidebarActiveViewID:             settings.SidebarActiveViewID,

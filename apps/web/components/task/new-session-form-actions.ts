@@ -1,7 +1,10 @@
 import { useCallback, type RefObject } from "react";
 import { launchSession } from "@/lib/services/session-launch-service";
 import { buildStartRequest } from "@/lib/services/session-launch-helpers";
-import { toMessageAttachments } from "@/components/task-create-dialog-helpers";
+import {
+  hasPendingAttachmentUploads,
+  toMessageAttachments,
+} from "@/components/task-create-dialog-helpers";
 import type { TaskFormInputsHandle } from "@/components/task-create-dialog-types";
 import type { AgentProfileOption } from "@/lib/state/slices";
 import type { SummarizeSessionResult } from "@/hooks/use-summarize-session";
@@ -80,12 +83,14 @@ export function useSessionLaunchSubmit({
       const prompt =
         contextValue === "copy_prompt" && !typed && initialPrompt ? initialPrompt : typed;
       if (!prompt) return;
+      const selectedAttachments = promptRef.current?.getAttachments() ?? [];
+      if (hasPendingAttachmentUploads(selectedAttachments)) return;
       setIsCreating(true);
       try {
         const { request } = buildStartRequest(taskId, selectedProfileId, {
           executorId,
           prompt,
-          attachments: toMessageAttachments(promptRef.current?.getAttachments() ?? []),
+          attachments: toMessageAttachments(selectedAttachments),
         });
         const response = await launchSession(request);
         if (!response.session_id) {

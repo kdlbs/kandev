@@ -37,6 +37,12 @@ describe("MonacoEditorToolbar external file action", () => {
           sessionId="session-1"
           commentCount={0}
           lspStatus={{ state: "disabled" }}
+          lspProgress={{
+            initializingSince: null,
+            active: [],
+            completed: null,
+            hasReportedProgress: false,
+          }}
           lspLanguage={null}
           onToggleLsp={vi.fn()}
           onToggleWrap={vi.fn()}
@@ -58,5 +64,38 @@ describe("MonacoEditorToolbar external file action", () => {
       size: "sm",
     });
     expect(screen.getByTestId("file-actions-dropdown")).toBeTruthy();
+  });
+
+  it("removes the toolbar LSP trigger when the active surface is the status bar", () => {
+    render(
+      <TooltipProvider>
+        <MonacoEditorToolbar
+          path="src/Main.kt"
+          isDirty={false}
+          isSaving={false}
+          diffStats={null}
+          wrapEnabled={false}
+          showDiffIndicators={false}
+          enableComments={false}
+          sessionId="session-1"
+          commentCount={0}
+          lspStatus={{ state: "starting" }}
+          lspProgress={{
+            initializingSince: 1,
+            active: [],
+            completed: null,
+            hasReportedProgress: false,
+          }}
+          lspLanguage="kotlin"
+          showLspStatus={false}
+          onToggleLsp={vi.fn()}
+          onToggleWrap={vi.fn()}
+          onToggleDiffIndicators={vi.fn()}
+          onSave={vi.fn()}
+        />
+      </TooltipProvider>,
+    );
+
+    expect(screen.queryByTestId("lsp-status")).toBeNull();
   });
 });

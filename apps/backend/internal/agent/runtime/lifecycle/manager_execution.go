@@ -12,6 +12,7 @@ import (
 
 	"github.com/kandev/kandev/internal/agent/runtime/activity"
 	"github.com/kandev/kandev/internal/agentctl/tracing"
+	"github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/common/appctx"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/secrets"
@@ -23,10 +24,51 @@ import (
 // have a resolved workspace path (typically while worktree preparation is in progress).
 var ErrSessionWorkspaceNotReady = errors.New("session workspace not ready")
 
+// ErrSessionTerminal indicates the task session has reached a terminal state
+// (cancelled/completed/failed) and no execution can be created for it. User-facing
+// workspace handlers treat this like ErrSessionWorkspaceNotReady: a graceful
+// not-ready envelope rather than an ERROR-logged failure, since a terminal session
+// will never recover an execution.
+var ErrSessionTerminal = errors.New("session is terminal")
+
 // coalescedExecutionCreationTimeout matches the runtime's 60-second agentctl
 // startup window while preventing blocked instance I/O from owning the shared
 // session slot and its activity lease for the lifetime of the manager.
 const coalescedExecutionCreationTimeout = time.Minute
+
+// ResolveSessionRuntime returns the runtime selected for a session without
+// creating or resuming its execution. Session-scoped handlers can use this to
+// reject unsupported runtimes before GetOrEnsureExecution starts resources.
+func (m *Manager) ResolveSessionRuntime(ctx context.Context, sessionID string) (agentruntime.Runtime, error) {
+	if sessionID == "" {
+		return "", fmt.Errorf("session_id is required")
+	}
+	if check := m.sessionAccessCheck; check != nil {
+		if err := check(ctx, sessionID); err != nil {
+			return "", err
+		}
+	}
+	if execution, exists := m.executionStore.GetBySessionID(sessionID); exists {
+		return execution.RuntimeName, nil
+	}
+	if m.workspaceInfoProvider == nil {
+		return "", fmt.Errorf("workspace info provider not configured")
+	}
+	info, err := m.workspaceInfoProvider.GetWorkspaceInfoForSession(ctx, "", sessionID)
+	if err != nil {
+		return "", fmt.Errorf("failed to resolve runtime for session %s: %w", sessionID, err)
+	}
+	if info == nil {
+		return "", fmt.Errorf("session %s not found", sessionID)
+	}
+	if info.ExecutorType != "" {
+		return models.ExecutorType(info.ExecutorType).Runtime(), nil
+	}
+	if info.RuntimeName != "" {
+		return info.RuntimeName, nil
+	}
+	return agentruntime.RuntimeStandalone, nil
+}
 
 // GetOrEnsureExecution returns an existing execution or creates one on-demand.
 // Use this for workspace-oriented operations (files, shell, inference, ports, vscode, LSP)
@@ -468,11 +510,12 @@ func (m *Manager) createExecution(ctx context.Context, taskID string, info *Work
 	if info == nil {
 		return nil, fmt.Errorf("workspace info is required")
 	}
-	if err := reconcileWorkspaceSources(ctx, info.WorkspacePath, info.WorkspaceFolders); err != nil {
+	owner := ownedDirectoryLinkOwner(taskID, info.TaskDirName)
+	if err := reconcileWorkspaceSources(ctx, info.WorkspacePath, info.WorkspaceFolders, owner); err != nil {
 		return nil, err
 	}
 	if info.ExecutorType == string(models.ExecutorTypeLocal) || info.ExecutorType == "local_pc" {
-		if err := reconcileWorkspaceRepositories(info.WorkspacePath, info.WorkspaceRepositories, m.logger); err != nil {
+		if err := reconcileWorkspaceRepositories(info.WorkspacePath, info.WorkspaceRepositories, m.logger, owner); err != nil {
 			return nil, err
 		}
 	}

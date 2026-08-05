@@ -55,7 +55,7 @@ export async function assertMixedAttachmentLayout({
 
   const fileAttachment = testPage.getByTestId("message-file-attachment", { exact: true });
   const imageAttachment = testPage.getByRole("button", { name: "Open Attachment 1" });
-  await expect(fileAttachment).toHaveText("notes.txt");
+  await expect(fileAttachment).toContainText("notes.txt");
   const [fileBox, imageBox] = await Promise.all([
     fileAttachment.boundingBox(),
     imageAttachment.boundingBox(),

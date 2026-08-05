@@ -30,28 +30,24 @@ const BRANCH_AUTOPICK_DEBUG = "branch-autopick";
 
 export type { CreateTaskParams };
 
+/** Returns true while a selected file still needs its staged upload. */
+export function hasPendingAttachmentUploads(attachments: FileAttachment[]): boolean {
+  return attachments.some((attachment) => attachment.file && !attachment.attachmentId);
+}
+
 /** Converts FileAttachment array to MessageAttachment array for the launch request. */
 export function toMessageAttachments(
   attachments: FileAttachment[],
 ): MessageAttachment[] | undefined {
   if (attachments.length === 0) return undefined;
-  return attachments.map((att) =>
-    att.isImage
-      ? {
-          type: "image" as const,
-          data: att.data,
-          mime_type: att.mimeType,
-          name: att.fileName,
-          ...(att.deliveryMode === "path" && { delivery_mode: "path" as const }),
-        }
-      : {
-          type: "resource" as const,
-          data: att.data,
-          mime_type: att.mimeType,
-          name: att.fileName,
-          delivery_mode: "path" as const,
-        },
-  );
+  return attachments.map((att) => ({
+    type: att.isImage ? ("image" as const) : ("resource" as const),
+    mime_type: att.mimeType,
+    name: att.fileName,
+    size_bytes: att.size,
+    ...(att.attachmentId ? { attachment_id: att.attachmentId } : { data: att.data ?? "" }),
+    ...(att.deliveryMode === "path" && { delivery_mode: "path" as const }),
+  }));
 }
 
 export function autoSelectBranch(

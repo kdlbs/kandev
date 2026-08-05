@@ -24,6 +24,7 @@ export async function verifyShareMarkdownPreview(
   const session = new SessionPage(testPage);
   await session.waitForLoad();
   await session.waitForChatIdle({ timeout: 30_000 });
+  await session.composerReady();
 
   await testPage.getByTestId("share-task-button").click();
   const dialog = testPage.getByRole("dialog", { name: "Share this task" });

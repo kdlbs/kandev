@@ -149,8 +149,16 @@ func TestService_ReplayCachedUpdateSerializesWithChannelSelection(t *testing.T) 
 	t.Cleanup(releaseReplay)
 	svc.SetNotifier(notifier)
 	nightlyFetchEntered := make(chan struct{})
-	svc.SetNightlyFetcher(func(context.Context) (string, string, error) {
+	nightlyFetchRelease := make(chan struct{})
+	releaseNightlyFetch := sync.OnceFunc(func() { close(nightlyFetchRelease) })
+	t.Cleanup(releaseNightlyFetch)
+	svc.SetNightlyFetcher(func(ctx context.Context) (string, string, error) {
 		close(nightlyFetchEntered)
+		select {
+		case <-nightlyFetchRelease:
+		case <-ctx.Done():
+			return "", "", ctx.Err()
+		}
 		return "v1.2.5-nightly.shaabcdef123456", "https://example.test/nightly", nil
 	})
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
@@ -199,6 +207,7 @@ func TestService_ReplayCachedUpdateSerializesWithChannelSelection(t *testing.T) 
 	case <-ctx.Done():
 		t.Fatal("channel selection did not resolve Nightly")
 	}
+	releaseNightlyFetch()
 	select {
 	case err := <-selectDone:
 		if err != nil {

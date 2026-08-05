@@ -4,6 +4,7 @@ package lifecycle
 
 import (
 	"context"
+	"io"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -743,11 +744,20 @@ func (r *LaunchRequest) RepoSpecs() []RepoLaunchSpec {
 
 // MessageAttachment represents an image or file attachment for agent prompts.
 type MessageAttachment struct {
+	AttachmentID string // file-backed descriptor ID; Data is empty for staged files
 	Type         string // "image", "audio", or "resource"
 	Data         string // base64-encoded data
 	MimeType     string // MIME type
 	Name         string // optional filename for resource attachments
+	SizeBytes    int64  // raw byte size for file-backed descriptors
 	DeliveryMode string // "prompt" (native/default) or "path"
+}
+
+// AttachmentReader opens an authorized, claimed backend attachment for
+// streaming into the active agent execution. Implementations must enforce the
+// task/session ownership checks before returning any bytes.
+type AttachmentReader interface {
+	OpenClaimed(ctx context.Context, id, taskID, sessionID string) (io.ReadCloser, string, string, int64, error)
 }
 
 // CredentialsManager interface for credential retrieval

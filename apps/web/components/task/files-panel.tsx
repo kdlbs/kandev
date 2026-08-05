@@ -110,7 +110,11 @@ const FilesPanel = memo(function FilesPanel({ onOpenFile }: FilesPanelProps) {
       null
     );
   });
-  const activeFilePath = useDockviewStore((s) => s.activeFilePath);
+  const activeTreePath = useDockviewStore((state) =>
+    state.activeFilePath && state.activeFileRepo
+      ? `${state.activeFileRepo}/${state.activeFilePath}`
+      : state.activeFilePath,
+  );
   const isArchived = useIsTaskArchived();
   const sourceDialog = useFilesPanelSourceDialog(activeSessionId);
   const {
@@ -167,7 +171,7 @@ const FilesPanel = memo(function FilesPanel({ onOpenFile }: FilesPanelProps) {
             onDeleteFile={deleteFile}
             onRenameFile={renameFile}
             onDownloadFile={downloadFile}
-            activeFilePath={activeFilePath}
+            activeFilePath={activeTreePath}
             onAddSources={
               hasRepository
                 ? (opener) => {

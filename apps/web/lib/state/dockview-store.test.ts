@@ -14,7 +14,11 @@ type CapturedHandlers = {
   active: ((e?: ActivePanelEvent) => void) | null;
 };
 
-type ParamsPanel = { id: string; params: Record<string, unknown> };
+type ParamsPanel = {
+  id: string;
+  params: Record<string, unknown>;
+  api: { component: string };
+};
 
 function makeApi(panels: ParamsPanel[] = []): { api: DockviewApi; captured: CapturedHandlers } {
   const captured: CapturedHandlers = { active: null };
@@ -43,6 +47,8 @@ describe("dockview-store resolveFilePath (via onDidActivePanelChange)", () => {
     captured.active?.({ id: "file:src/foo.ts" });
 
     expect(useDockviewStore.getState().activeFilePath).toBe("src/foo.ts");
+    expect(useDockviewStore.getState().activeFileRepo).toBeNull();
+    expect(useDockviewStore.getState().activePanelComponent).toBe("file-editor");
   });
 
   it("resolves pinned diff:file: panel id to its path", () => {
@@ -52,28 +58,42 @@ describe("dockview-store resolveFilePath (via onDidActivePanelChange)", () => {
     captured.active?.({ id: "diff:file:src/bar.ts" });
 
     expect(useDockviewStore.getState().activeFilePath).toBe("src/bar.ts");
+    expect(useDockviewStore.getState().activeFileRepo).toBeNull();
+    expect(useDockviewStore.getState().activePanelComponent).toBe("diff-viewer");
   });
 
   it("resolves preview:file-editor panel via params.path", () => {
     const { api, captured } = makeApi([
-      { id: "preview:file-editor", params: { path: "src/baz.ts" } },
+      {
+        id: "preview:file-editor",
+        params: { path: "src/baz.ts", repo: "backend" },
+        api: { component: "file-editor" },
+      },
     ]);
     useDockviewStore.getState().setApi(api);
 
     captured.active?.({ id: "preview:file-editor" });
 
     expect(useDockviewStore.getState().activeFilePath).toBe("src/baz.ts");
+    expect(useDockviewStore.getState().activeFileRepo).toBe("backend");
+    expect(useDockviewStore.getState().activePanelComponent).toBe("file-editor");
   });
 
   it("resolves preview:file-diff panel via params.path", () => {
     const { api, captured } = makeApi([
-      { id: "preview:file-diff", params: { path: "src/diff.ts" } },
+      {
+        id: "preview:file-diff",
+        params: { path: "src/diff.ts", repositoryName: "frontend" },
+        api: { component: "diff-viewer" },
+      },
     ]);
     useDockviewStore.getState().setApi(api);
 
     captured.active?.({ id: "preview:file-diff" });
 
     expect(useDockviewStore.getState().activeFilePath).toBe("src/diff.ts");
+    expect(useDockviewStore.getState().activeFileRepo).toBe("frontend");
+    expect(useDockviewStore.getState().activePanelComponent).toBe("diff-viewer");
   });
 
   it("clears activeFilePath when a non-file panel becomes active", () => {
@@ -85,6 +105,8 @@ describe("dockview-store resolveFilePath (via onDidActivePanelChange)", () => {
 
     captured.active?.({ id: "chat" });
     expect(useDockviewStore.getState().activeFilePath).toBeNull();
+    expect(useDockviewStore.getState().activeFileRepo).toBeNull();
+    expect(useDockviewStore.getState().activePanelComponent).toBeNull();
   });
 
   it("clears activeFilePath when active-panel-change fires with no panel", () => {
@@ -96,6 +118,8 @@ describe("dockview-store resolveFilePath (via onDidActivePanelChange)", () => {
 
     captured.active?.(undefined);
     expect(useDockviewStore.getState().activeFilePath).toBeNull();
+    expect(useDockviewStore.getState().activeFileRepo).toBeNull();
+    expect(useDockviewStore.getState().activePanelComponent).toBeNull();
   });
 });
 

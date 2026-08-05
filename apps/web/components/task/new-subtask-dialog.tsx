@@ -391,6 +391,7 @@ function NewSubtaskForm({
   useExecutorDefault(allExecutorProfiles, fs.executorProfileId, fs.setExecutorProfileId);
   const promptZone = useSubtaskPromptZone({
     parentTaskId,
+    workspaceId,
     taskTitle: title,
     inputDisabled: isCreating || isSummarizing,
     contextValue,

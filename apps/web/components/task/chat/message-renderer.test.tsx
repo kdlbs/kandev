@@ -4,9 +4,16 @@ import { MessageRenderer } from "./message-renderer";
 import { sessionId as toSessionId, taskId as toTaskId, type Message } from "@/lib/types/http";
 
 const fallbackOpenFile = vi.hoisted(() => vi.fn());
+const useOpenFileAtLine = vi.hoisted(() =>
+  vi.fn((onOpenFile: ((path: string) => void) | undefined) => (path: string) => onOpenFile?.(path)),
+);
 
 vi.mock("@/hooks/use-panel-actions", () => ({
   usePanelActions: () => ({ openFile: fallbackOpenFile }),
+}));
+
+vi.mock("@/hooks/use-file-editors", () => ({
+  useOpenFileAtLine,
 }));
 
 vi.mock("@/components/state-provider", () => ({
@@ -29,6 +36,40 @@ function message(overrides: Partial<Message>): Message {
 describe("MessageRenderer markdown file links", () => {
   afterEach(() => {
     fallbackOpenFile.mockClear();
+    useOpenFileAtLine.mockClear();
+  });
+
+  it("forwards the renderer session through edit file links", () => {
+    const onOpenFile = vi.fn();
+
+    render(
+      <MessageRenderer
+        comment={message({
+          type: "tool_edit",
+          content: "Edited /workspace/src/app.ts",
+          metadata: {
+            status: "complete",
+            normalized: {
+              modify_file: {
+                file_path: "/workspace/src/app.ts",
+                mutations: [{ type: "replace", start_line: 7 }],
+              },
+            },
+          },
+        })}
+        isTaskDescription={false}
+        worktreePath="/workspace"
+        sessionId="requested-session"
+        onOpenFile={onOpenFile}
+      />,
+    );
+
+    expect(useOpenFileAtLine).toHaveBeenCalledWith(
+      onOpenFile,
+      7,
+      "/workspace",
+      "requested-session",
+    );
   });
 
   it("opens agent plan file links with the renderer file opener", () => {

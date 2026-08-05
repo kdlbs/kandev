@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { toast } from "@/lib/toast/sonner";
 import { getPluginSettings, updatePluginSettings } from "@/lib/api/domains/plugins-api";
+import { t } from "@/lib/i18n";
 
 export type AutoUpdateSettings = {
   /** The instance-wide auto-update default (applies to plugins without an override). */
@@ -49,7 +50,7 @@ export function useAutoUpdateSettings(): AutoUpdateSettings {
       setState(res.auto_update_default);
     } catch (err) {
       setState(prev); // roll back
-      toast.error(err instanceof Error ? err.message : "Failed to update auto-update setting");
+      toast.error(err instanceof Error ? err.message : t("plugins:failedToUpdateAutoUpdate"));
     }
   };
 

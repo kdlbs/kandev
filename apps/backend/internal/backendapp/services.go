@@ -70,6 +70,7 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 			WorkspaceFolders:  repos.Task,
 			Workflows:         repos.Task,
 			Messages:          repos.Task,
+			Attachments:       repos.Task,
 			Turns:             repos.Task,
 			Sessions:          repos.Task,
 			GitSnapshots:      repos.Task,

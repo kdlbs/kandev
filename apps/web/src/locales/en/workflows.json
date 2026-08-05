@@ -188,7 +188,7 @@
   "stepPromptUsageHint": "Type {{open}} for placeholders ({{taskPrompt}} inserts the task description) or @ to reference a saved prompt by name — its content is attached as hidden context, and editing the saved prompt updates every step that references it. Note: {{taskPrompt}} only expands in the step prompt itself, not inside a referenced saved prompt.",
   "syncCompletedWithWarnings": "Sync completed with warnings",
   "syncConfigSaved": "Workflow sync configuration saved",
-  "syncDirectoryHelp": "The directory should contain workflow export files (.yml/.yaml/.json) in the kandev_workflow format — the same format produced by workflow export.",
+  "syncDirectoryHelp": "The directory should contain workflow export files ({{extensions}}) in the {{format}} format — the same format produced by workflow export.",
   "synced": "Synced",
   "syncedBadgeTooltip": "Read-only - managed by workflow sync from {{source}}. Edit or remove it in the synced repository.",
   "syncedReadOnlyReason": "Managed by workflow sync — edit or remove it in the synced repository",
