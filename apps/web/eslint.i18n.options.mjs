@@ -1413,4 +1413,22 @@ export const i18nGuardFiles = [
   "components/gitlab/subscription-toggle.tsx",
   "components/gitlab/task-mr-link-dialog.tsx",
   "hooks/domains/gitlab/use-mr-actions.ts",
+  // The shared scope bar the `/github` and `/gitlab` dashboards render through
+  // their thin wrappers. Listed because this migration converts it COMPLETELY —
+  // all four of its own strings — not because integration chrome belongs to this
+  // PR. `azure-devops-scope-bar.tsx` also wraps it and is untouched; it passes
+  // its own labels in and inherits the base already done. Copy lives in a new
+  // `integrations` namespace, the home `NAMESPACE_RULES` in
+  // externalize-strings.mjs already designates for `components/integrations/`.
+  //
+  // Review caught this: the pseudo walk of `/github` and `/gitlab` reported them
+  // clean because both pages rendered the NOT-CONNECTED alert, so the scope bar
+  // never mounted. A surface that does not render cannot be verified by looking
+  // at it, and "clean" there meant "absent", not "migrated".
+  //
+  // The `KINDS` tables in the two wrappers are SCREAMING_CASE, so the guard
+  // skipped them entirely; their labels now travel as `labelKey`.
+  "components/integrations/presets-scope-bar-base.tsx",
+  "components/github/my-github/presets-scope-bar.tsx",
+  "components/gitlab/my-gitlab/presets-scope-bar.tsx",
 ];

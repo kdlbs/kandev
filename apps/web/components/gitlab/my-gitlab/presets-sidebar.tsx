@@ -57,11 +57,19 @@ function KindToggle({
   );
 }
 
-function SectionHeader({ title }: { title: string }) {
+/**
+ * `id` is a stable section identifier and `title` is the visible label. They
+ * were one value: the testid was built as `gitlab-section-${title.toLowerCase()}`,
+ * so translating the title moved the selector with it — under pseudo the inbox
+ * section became `gitlab-section-ĩńƀōx`. apps/web/AGENTS.md is explicit that a
+ * `data-testid` is never translated; deriving one from copy translates it by
+ * the back door.
+ */
+function SectionHeader({ id, title }: { id: string; title: string }) {
   return (
     <div
       className="px-2 mt-3 mb-1 text-[11px] uppercase tracking-wider text-muted-foreground font-medium"
-      data-testid={`gitlab-section-${title.toLowerCase()}`}
+      data-testid={`gitlab-section-${id}`}
     >
       {title}
     </div>
@@ -128,7 +136,10 @@ function PresetGroupList({
   if (items.length === 0) return null;
   return (
     <>
-      <SectionHeader title={group === "inbox" ? t("gitlab:inbox") : t("gitlab:created")} />
+      <SectionHeader
+        id={group}
+        title={group === "inbox" ? t("gitlab:inbox") : t("gitlab:created")}
+      />
       {items.map((p) => (
         <PresetItem
           key={`${kind}-${p.value}`}
@@ -162,7 +173,7 @@ function SavedSection({
   const { t } = useTranslation();
   return (
     <>
-      <SectionHeader title={t("gitlab:saved")} />
+      <SectionHeader id="saved" title={t("gitlab:saved")} />
       {saved.length === 0 && (
         <div className="mx-2 px-2 py-1 text-xs text-muted-foreground/80 italic">
           {t("gitlab:noSavedQueriesYet")}

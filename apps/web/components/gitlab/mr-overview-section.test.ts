@@ -21,4 +21,8 @@ describe("pipelineSummary", () => {
       ),
     ).toBe("running");
   });
+
+  it("localizes the no-pipeline branch", () => {
+    expect(pipelineSummary(undefined, t)).toBe("No pipeline");
+  });
 });
