@@ -7,9 +7,7 @@ import { sortFindings } from "@/lib/review/findings";
 import { NAVIGATE_FINDING_EVENT, type NavigateFindingEventDetail } from "@/lib/review/navigation";
 import type { TaskReviewFinding } from "@/lib/types/review";
 import { InlineReviewFinding } from "./inline-review-finding";
-
-const STALE_REASON =
-  "The diff changed after this review and the code this finding describes is no longer in it.";
+import { useTranslation } from "react-i18next";
 
 /**
  * Findings for this file that can no longer be anchored to a line.
@@ -20,6 +18,7 @@ const STALE_REASON =
  * with old findings still reads as a diff first.
  */
 export function UnanchoredFindingsBanner({ findings }: { findings: TaskReviewFinding[] }) {
+  const { t } = useTranslation();
   const [expanded, setExpanded] = useState(false);
   const open = findings.filter((f) => f.status === "open");
 
@@ -58,12 +57,16 @@ export function UnanchoredFindingsBanner({ findings }: { findings: TaskReviewFin
           <IconChevronRight className="h-3.5 w-3.5" />
         )}
         <IconAlertTriangle className="h-3.5 w-3.5" />
-        {open.length} stale finding{open.length === 1 ? "" : "s"} for this file
+        {t("diff:staleFindingsForThisFile", { count: open.length })}
       </Button>
       {expanded && (
         <div className="mt-1 space-y-1">
           {sortFindings(open).map((finding) => (
-            <InlineReviewFinding key={finding.id} finding={finding} staleReason={STALE_REASON} />
+            <InlineReviewFinding
+              key={finding.id}
+              finding={finding}
+              staleReason={t("diff:theDiffChangedAfterThisReview")}
+            />
           ))}
         </div>
       )}

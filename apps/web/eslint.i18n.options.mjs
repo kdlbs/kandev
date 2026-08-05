@@ -1610,4 +1610,32 @@ export const i18nGuardFiles = [
   // Quick chat: the modal, its tabs, the setup form and the delete dialog.
   // Copy lands in the existing `chat:` namespace, shared with config chat.
   "components/quick-chat/**/*.{ts,tsx}",
+  // Diff viewer: the pierre-backed viewer shell, its toolbar, the inline
+  // comment/finding surfaces and the walkthrough overlay. Whole directory —
+  // every file in it is migrated, and the `diff` namespace is not shared with
+  // anything outside it.
+  //
+  // Git statuses, file modes, hunk markers and the pierre option keys in here
+  // are protocol values, not copy, and stay in English by design; only their
+  // labels are translated.
+  "components/diff/**/*.{ts,tsx}",
+  // Change-request (PR/MR) and commit dialogs, plus the shared integration
+  // settings widgets: the auth-status banner, the copy-config menu, the
+  // watcher card shell and the integrations nav menu. Both directories share
+  // the `integrations` namespace.
+  //
+  // `change-request-feedback.ts` holds no JSX, so `mode: "jsx-only"` never
+  // inspects it; the glob records that it is migrated, and only the
+  // pseudo-locale can prove it stays that way. Branch names, remotes and VCS
+  // provider ids travel through it as data and are never translated.
+  "components/vcs/**/*.{ts,tsx}",
+  "components/integrations/**/*.{ts,tsx}",
+  // The CLI agent-profile editor. `components/agent/` has no namespace rule of
+  // its own, so its copy lives in `common`.
+  "components/agent/**/*.{ts,tsx}",
+  // SPA entry: the route tables, their Suspense/loading placeholders and the
+  // root/route error boundaries. `src/**` has no namespace rule either, so this
+  // copy is also on `common`. Route names reach `RouteLoading` as catalog keys
+  // rather than resolved copy — see the comment there.
+  "src/*.{ts,tsx}",
 ];

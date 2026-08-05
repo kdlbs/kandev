@@ -21,11 +21,13 @@ import type { TaskWalkthrough, WalkthroughStep } from "@/lib/types/http";
 import type { WalkthroughComment } from "@/lib/state/slices/comments";
 import { CommentForm } from "./comment-form";
 import { cn } from "@kandev/ui/lib/utils";
+import { useTranslation } from "react-i18next";
 
 export const WALKTHROUGH_STEP_BODY_CLASS =
   "prose prose-sm dark:prose-invert max-w-none text-left text-sm leading-6 [overflow-wrap:anywhere] [text-align:left] [&_li]:text-left [&_p]:my-2 [&_p]:text-left";
 
 function StepBody({ step, onOpenFile }: { step: WalkthroughStep; onOpenFile: () => void }) {
+  const { t } = useTranslation();
   const lineLabel = step.line_end ? `${step.line}–${step.line_end}` : `${step.line}`;
   const fileName = step.file.split("/").pop() || step.file;
   return (
@@ -38,7 +40,7 @@ function StepBody({ step, onOpenFile }: { step: WalkthroughStep; onOpenFile: () 
       <button
         type="button"
         onClick={onOpenFile}
-        title={`Open ${step.file}:${step.line}`}
+        title={t("diff:openFileAtLine", { file: step.file, line: step.line })}
         data-testid="walkthrough-step-file"
         className="mb-2.5 flex max-w-full cursor-pointer items-center gap-1.5 rounded-md bg-muted/60 px-2 py-1 text-xs font-medium hover:bg-muted"
       >
@@ -66,6 +68,7 @@ function StepHeader({
   lineLabel: string;
   onClose: () => void;
 }) {
+  const { t } = useTranslation();
   return (
     <div
       className="flex cursor-move touch-none items-center gap-2 border-b border-border px-3 pt-2 pb-1.5"
@@ -73,16 +76,16 @@ function StepHeader({
       data-walkthrough-drag-handle
     >
       <Badge variant="secondary" data-testid="walkthrough-badge">
-        Walkthrough
+        {t("diff:walkthrough")}
       </Badge>
       <span className="text-xs text-muted-foreground" data-testid="walkthrough-step-header">
-        Step {activeStep + 1} / {stepCount} · {lineLabel}
+        {t("diff:stepProgress", { current: activeStep + 1, total: stepCount, lineLabel })}
       </span>
       <Button
         variant="ghost"
         size="icon"
         className="ml-auto size-6 cursor-pointer"
-        aria-label="Close walkthrough"
+        aria-label={t("diff:closeWalkthrough")}
         data-testid="walkthrough-close"
         onClick={onClose}
       >
@@ -103,6 +106,7 @@ function StepNavigation({
   onPrevious: () => void;
   onNext: () => void;
 }) {
+  const { t } = useTranslation();
   return (
     <div
       className="flex shrink-0 items-center gap-2 border-t border-border px-4 py-2"
@@ -116,7 +120,7 @@ function StepNavigation({
         data-testid="walkthrough-prev"
         onClick={onPrevious}
       >
-        Previous
+        {t("diff:previous")}
       </Button>
       <Button
         size="sm"
@@ -125,7 +129,7 @@ function StepNavigation({
         data-testid="walkthrough-next"
         onClick={onNext}
       >
-        Next
+        {t("diff:next")}
       </Button>
     </div>
   );
@@ -150,6 +154,7 @@ function useWalkthroughStepFeedback(params: {
   stepCount: number;
   walkthrough: TaskWalkthrough | null | undefined;
 }) {
+  const { t } = useTranslation();
   const { activeStep, activeTaskId, sessionId, step, stepCount, walkthrough } = params;
   const addComment = useCommentsStore((s) => s.addComment);
   const { runComment } = useRunComment({ sessionId: sessionId ?? null, taskId: activeTaskId });
@@ -167,7 +172,7 @@ function useWalkthroughStepFeedback(params: {
     });
   };
   const showMissingSessionError = () => {
-    toast({ title: "No active session for walkthrough note", variant: "error" });
+    toast({ title: t("diff:noActiveSessionForWalkthroughNote"), variant: "error" });
   };
   const addWalkthroughFeedback = (text: string) => {
     const comment = buildComment(text);
@@ -176,7 +181,7 @@ function useWalkthroughStepFeedback(params: {
       return;
     }
     addComment(comment);
-    toast({ title: "Walkthrough note added", variant: "success" });
+    toast({ title: t("diff:walkthroughNoteAdded"), variant: "success" });
   };
   const runWalkthroughFeedback = (text: string) => {
     const comment = buildComment(text);
@@ -188,12 +193,12 @@ function useWalkthroughStepFeedback(params: {
     void runComment(comment)
       .then(({ queued }) => {
         toast({
-          title: queued ? "Walkthrough note queued" : "Walkthrough note sent",
+          title: queued ? t("diff:walkthroughNoteQueued") : t("diff:walkthroughNoteSent"),
           variant: "success",
         });
       })
       .catch(() => {
-        toast({ title: "Failed to send walkthrough note", variant: "error" });
+        toast({ title: t("diff:failedToSendWalkthroughNote"), variant: "error" });
       });
   };
   return { addWalkthroughFeedback, runWalkthroughFeedback };
