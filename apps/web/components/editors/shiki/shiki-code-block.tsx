@@ -6,6 +6,7 @@ import { IconCheck, IconCopy } from "@tabler/icons-react";
 import { cn } from "@/lib/utils";
 import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard";
 import { highlightCode } from "./shiki-highlighter";
+import { useTranslation } from "react-i18next";
 
 type ShikiCodeBlockProps = {
   children: React.ReactNode;
@@ -13,6 +14,7 @@ type ShikiCodeBlockProps = {
 };
 
 export function ShikiCodeBlock({ children, className }: ShikiCodeBlockProps) {
+  const { t } = useTranslation();
   const { copied, copy } = useCopyToClipboard();
   const { theme, systemTheme } = useTheme();
   const effectiveTheme = theme === "system" ? systemTheme : theme;
@@ -42,7 +44,7 @@ export function ShikiCodeBlock({ children, className }: ShikiCodeBlockProps) {
           "opacity-0 group-hover/code-block:opacity-100",
           "cursor-pointer",
         )}
-        title="Copy code"
+        title={t("editors:copyCode")}
       >
         {copied ? (
           <IconCheck className="h-3 w-3 text-green-400" />

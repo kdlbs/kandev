@@ -8,6 +8,7 @@ import { startQuickChat, type QuickChatRepositoryInput } from "@/lib/api/domains
 import { isQuickChatSetupSessionId } from "@/lib/state/slices/ui/quick-chat-session";
 import { persistQuickChatRename } from "@/lib/quick-chat/rename";
 import type { QuickChatSessionKind } from "@/lib/state/slices/ui/types";
+import { useTranslation } from "react-i18next";
 
 const noop = () => {};
 
@@ -102,6 +103,7 @@ async function startQuickChatForAgent(
  *
  * Exported for unit testing — see `use-quick-chat-modal.test.ts`. */
 export function useAgentSelection(workspaceId: string, store: QuickChatStore) {
+  const { t } = useTranslation();
   const { toast } = useToast();
   const [pendingAgentId, setPendingAgentId] = useState<string | null>(null);
   // Monotonic request id; the latest click "wins" — older responses get
@@ -136,8 +138,8 @@ export function useAgentSelection(workspaceId: string, store: QuickChatStore) {
       } catch (error) {
         if (latestRequestId.current !== requestId) return;
         toast({
-          title: "Failed to start quick chat",
-          description: error instanceof Error ? error.message : "Unknown error",
+          title: t("chat:failedToStartQuickChat"),
+          description: error instanceof Error ? error.message : t("chat:unknownError"),
           variant: "error",
         });
       } finally {
@@ -153,6 +155,7 @@ export function useAgentSelection(workspaceId: string, store: QuickChatStore) {
 }
 
 function useQuickChatSessionClose(store: QuickChatStore, resetPendingStarts: () => void) {
+  const { t } = useTranslation();
   const { toast } = useToast();
   const [sessionToClose, setSessionToClose] = useState<string | null>(null);
   const handleCloseTab = useCallback(
@@ -181,8 +184,8 @@ function useQuickChatSessionClose(store: QuickChatStore, resetPendingStarts: () 
     } catch (error) {
       console.error("Failed to delete quick chat task:", error);
       toast({
-        title: "Failed to delete quick chat",
-        description: error instanceof Error ? error.message : "Unknown error",
+        title: t("chat:failedToDeleteQuickChat"),
+        description: error instanceof Error ? error.message : t("chat:unknownError"),
         variant: "error",
       });
     }
@@ -191,6 +194,7 @@ function useQuickChatSessionClose(store: QuickChatStore, resetPendingStarts: () 
 }
 
 export function useQuickChatModal(workspaceId: string, onSupersedeConfigStart = noop) {
+  const { t } = useTranslation();
   const { toast } = useToast();
   const store = useQuickChatStore(workspaceId);
   const { sessions, activeSession } = useWorkspaceQuickChat(store);
@@ -262,8 +266,8 @@ export function useQuickChatModal(workspaceId: string, onSupersedeConfigStart = 
       store.renameQuickChatSession(sessionId, name);
       persistQuickChatRename(sessionId, resolveTaskId(store, sessionId), name).catch(() => {
         toast({
-          title: "Rename saved on this device only",
-          description: "We could not sync the new name to your other devices.",
+          title: t("chat:renameSavedOnThisDeviceOnly"),
+          description: t("chat:renameSyncFailedDescription"),
           variant: "error",
         });
       });

@@ -32,6 +32,7 @@ import { PlanDragHandle } from "./plan-drag-handle";
 import type { MenuState } from "@/components/task/chat/tiptap-suggestion";
 import { DOMParser as PmDOMParser } from "@tiptap/pm/model";
 import type { Editor } from "@tiptap/core";
+import { useTranslation } from "react-i18next";
 
 export type { CommentForEditor };
 
@@ -196,6 +197,7 @@ function handleSlashKeyDown(
 
 /** Slash command menu state and keyboard navigation. */
 function useSlashMenu() {
+  const { t } = useTranslation();
   const [menuState, setMenuState] = useState<MenuState<PlanSlashCommand>>(EMPTY_SLASH_STATE);
   const [selectedIndex, setSelectedIndex] = useState(0);
   const selectedIndexRef = useRef(0);
@@ -223,8 +225,8 @@ function useSlashMenu() {
 
   /* eslint-disable react-hooks/refs -- stableKeyDown reads ref for deferred access, not during render */
   const extension = useMemo(
-    () => createPlanSlashExtension(setMenuState, stableKeyDown),
-    [stableKeyDown],
+    () => createPlanSlashExtension(t, setMenuState, stableKeyDown),
+    [t, stableKeyDown],
   );
   /* eslint-enable react-hooks/refs */
 
@@ -283,16 +285,17 @@ type PlanEditorState = {
 
 /** Hook encapsulating TipTap editor setup, extensions, and lifecycle effects. */
 function usePlanEditor(props: TipTapPlanEditorProps): PlanEditorState {
+  const { t } = useTranslation();
   const {
     value,
     onChange,
-    placeholder = "Start typing...",
     onSelectionChange,
     comments = [],
     onCommentClick,
     onCommentDeleted,
     onEditorReady,
   } = props;
+  const placeholder = props.placeholder ?? t("editors:startTyping");
 
   const editorRef = useRef<ReturnType<typeof useEditor>>(null);
   const onChangeRef = useRef(onChange);
@@ -370,6 +373,7 @@ function usePlanEditor(props: TipTapPlanEditorProps): PlanEditorState {
 }
 
 export function TipTapPlanEditor(props: TipTapPlanEditorProps) {
+  const { t } = useTranslation();
   const { resolvedTheme } = useTheme();
   const wrapperRef = useRef<HTMLDivElement>(null);
   const { editor, editorRef, onSelectionChangeRef, onCommentClickRef, isReady, slash } =
@@ -406,7 +410,7 @@ export function TipTapPlanEditor(props: TipTapPlanEditorProps) {
       />
       {!isReady && (
         <div className="absolute inset-0 flex items-center justify-center text-muted-foreground text-sm bg-background/80">
-          Loading editor...
+          {t("editors:loadingEditor")}
         </div>
       )}
     </div>
