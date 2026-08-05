@@ -22,7 +22,7 @@ Kandev is currently installable via `brew install kdlbs/kandev/kandev` from the 
 - Merge and publish the source-build contract in a Stable Kandev release before authoring the Core formula. Core must consume the immutable GitHub tag archive for that release, never a branch or unreleased commit.
 - Install the bundle under `libexec/bin` and expose one `bin/kandev` wrapper produced by `write_env_script`. The wrapper sets `KANDEV_BUNDLE_DIR=<libexec>` and `KANDEV_VERSION=<version>`.
 - Use stable numeric tags for `livecheck`; prerelease and Nightly npm versions are not Homebrew channels.
-- Keep `kdlbs/homebrew-kandev` and `scripts/release/update-homebrew-tap.sh` unchanged. The custom tap remains the upstream binary fast path alongside Homebrew Core's source-built bottles.
+- Keep `kdlbs/homebrew-kandev` as the upstream binary fast path alongside Homebrew Core's source-built bottles. The shared release-bundle validator must run before those binary archives are published, and the generated tap formula must smoke-test its version, readiness endpoint, and embedded SPA.
 
 The runtime bundle contains exactly:
 
@@ -42,12 +42,13 @@ The Darwin arm64 helper must carry a Mach-O code signature so Apple Silicon can 
 - **GIVEN** the installed formula starts with an isolated home directory and loopback port, **WHEN** `brew test kandev` polls `GET /health`, **THEN** readiness returns `{"status":"ok"}` and `/` serves the embedded page containing `<title>Kandev</title>`.
 - **GIVEN** a new kandev release `vX.Y.Z` is tagged, **WHEN** Homebrew's auto-bump worker runs, **THEN** `livecheck` resolves the new tag from GitHub Releases and a bump PR is opened against the formula.
 - **GIVEN** a maintainer reviews the PR, **WHEN** they run `brew install --build-from-source kandev` locally, **THEN** the build completes without network or sandbox failures and `brew test kandev` passes.
+- **GIVEN** a Stable release updates `kdlbs/homebrew-kandev`, **WHEN** its platform archive is built and the tap formula is tested, **THEN** the archive contains the complete executable runtime and the installed launcher serves both `/health` and the embedded Kandev page.
 
 ## Out of scope
 
 - Migrating users from `kdlbs/homebrew-kandev` to homebrew-core (both can coexist; users opt in by switching tap reference).
 - Linuxbrew bottle parity beyond what homebrew-core's CI provides by default.
 - Vendoring JS dependencies via `resource` blocks — falls back here only if maintainers reject network-during-install.
-- Changes to `.github/workflows/release.yml` or `scripts/release/update-homebrew-tap.sh`.
+- Changing the custom tap's direct-push publication or deploy-key authentication model.
 - Advertising untapped `brew install kandev` before the Core formula merges.
 - Notability lobbying — submission goes in as-is; maintainers decide.

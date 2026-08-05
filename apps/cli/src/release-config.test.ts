@@ -360,6 +360,21 @@ describe("release desktop artifacts", () => {
     expect(homebrewScript).not.toContain("kandev-desktop-");
   });
 
+  it("keeps the generated tap formula on the installed runtime smoke contract", () => {
+    const formula = readRepoFile("scripts/release/kandev.rb");
+
+    expect(formula).toContain(
+      'assert_equal "v#{version}", shell_output("#{bin}/kandev --version").strip',
+    );
+    expect(formula).toContain('spawn bin/"kandev", "--headless", "--port", port.to_s');
+    expect(formula).toContain("/health");
+    expect(formula).toContain('"status":"ok"');
+    expect(formula).toContain("<title>Kandev</title>");
+    expect(formula.indexOf('version "__VERSION__"')).toBeLessThan(
+      formula.indexOf('license "AGPL-3.0-only"'),
+    );
+  });
+
   it("bumps desktop package and Tauri versions during release preparation", () => {
     const workflow = releaseWorkflow();
 

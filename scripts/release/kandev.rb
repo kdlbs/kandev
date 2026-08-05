@@ -3,8 +3,8 @@
 class Kandev < Formula
   desc "Manage tasks, orchestrate agents, review changes, and ship value"
   homepage "https://github.com/kdlbs/kandev"
-  license "AGPL-3.0-only"
   version "__VERSION__"
+  license "AGPL-3.0-only"
 
   on_macos do
     if Hardware::CPU.arm?
@@ -37,6 +37,20 @@ class Kandev < Formula
   end
 
   test do
-    assert_match "kandev launcher", shell_output("#{bin}/kandev --help")
+    assert_equal "v#{version}", shell_output("#{bin}/kandev --version").strip
+
+    ENV["KANDEV_HOME_DIR"] = testpath.to_s
+    ENV["KANDEV_DATABASE_PATH"] = (testpath/"kandev.db").to_s
+    ENV["KANDEV_SERVER_HOST"] = "127.0.0.1"
+    port = free_port
+    pid = spawn bin/"kandev", "--headless", "--port", port.to_s
+    health_url = "http://127.0.0.1:#{port}/health"
+    curl = "curl --silent --show-error --fail --retry 30 --retry-connrefused --retry-delay 1"
+    health = shell_output("#{curl} #{health_url}")
+    assert_match '"status":"ok"', health
+    assert_match "<title>Kandev</title>", shell_output("#{curl} http://127.0.0.1:#{port}/")
+  ensure
+    Process.kill("TERM", pid) if pid
+    Process.wait(pid) if pid
   end
 end

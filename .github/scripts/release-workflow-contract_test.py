@@ -158,6 +158,17 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
             self.assertIn("inputs.channel == 'stable'", block)
             self.assertNotIn("github.event_name == 'schedule'", block)
 
+    def test_platform_archives_are_validated_before_tap_consumers_receive_them(
+        self,
+    ) -> None:
+        package = step_block("Package bundle")
+        validation = "bash scripts/release/package-bundle.sh --bundle-dir dist/kandev"
+        archive = 'tar -czf "kandev-${{ matrix.platform }}.tar.gz" kandev'
+
+        self.assertIn(validation, package)
+        self.assertIn(archive, package)
+        self.assertLess(package.index(validation), package.index(archive))
+
     def test_stable_jobs_continue_past_skipped_nightly_branch_only_after_successful_needs(
         self,
     ) -> None:
