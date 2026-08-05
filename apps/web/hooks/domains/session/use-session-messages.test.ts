@@ -347,6 +347,21 @@ describe("runBackfillRound", () => {
     const result = await runBackfillRound("sess-1", store as never, 0);
     expect(result).toBe("stop");
   });
+
+  it("does not prepend messages when cleanup occurs during the fetch", async () => {
+    const request = deferred<{ messages: Message[]; has_more: boolean }>();
+    mockListTaskSessionMessages.mockReturnValueOnce(request.promise);
+    const store = makeStore({ messages: [], hasMore: true, oldestCursor: "msg-1" });
+    let active = true;
+    const round = runBackfillRound("sess-1", store as never, 0, () => active);
+
+    expect(mockListTaskSessionMessages).toHaveBeenCalledTimes(1);
+    active = false;
+    request.resolve({ messages: [makeMessage({ id: "old-1" })], has_more: true });
+
+    await expect(round).resolves.toBe("stop");
+    expect(store._prependMessages).not.toHaveBeenCalled();
+  });
 });
 
 describe("stale concurrent fetch guard", () => {

@@ -3,21 +3,27 @@ import { getWebSocketClient } from "@/lib/ws/connection";
 import { useForegroundRefresh } from "@/hooks/use-foreground-refresh";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import type { TaskSessionState, Message } from "@/lib/types/http";
-import { listTaskSessionMessages } from "@/lib/api";
 import { createDebugLogger, isDebug } from "@/lib/debug/log";
 import {
   useUnknownSessionSubscriptionRetry,
   useUnknownSessionSubscriptionRetryEffect,
 } from "./use-session-subscription-retry";
 import { doFetchMessages } from "./use-session-message-fetch";
+import { autoBackfillUntilUserMessage, hasUserOrAgentMessage } from "./message-backfill";
+
+export {
+  autoBackfillUntilUserMessage,
+  type BackfillStep,
+  hasUserOrAgentMessage,
+  MAX_AUTO_BACKFILL_PAGES,
+  runBackfillRound,
+} from "./message-backfill";
 
 export { shouldRetryUnknownSessionSubscription } from "./use-session-subscription-retry";
 
 const INITIAL_FETCH_LIMIT = 100;
-const BACKFILL_PAGE_LIMIT = 100;
 const RUNNING_BACKFILL_INITIAL_DELAY_MS = 1200;
 const RUNNING_BACKFILL_INTERVAL_MS = 5000;
-export const MAX_AUTO_BACKFILL_PAGES = 10;
 
 // Monotonic guard against stale concurrent fetches. Each fetch claims an
 // increasing sequence number before awaiting; a completion only merges if no
@@ -43,12 +49,6 @@ export function commitFetchSeq(sessionId: string, seq: number): boolean {
   if (seq < applied) return false;
   lastAppliedFetchSeq.set(sessionId, seq);
   return true;
-}
-
-export function hasUserOrAgentMessage(messages: Message[]): boolean {
-  return messages.some(
-    (m) => m.type === "message" && (m.author_type === "user" || m.author_type === "agent"),
-  );
 }
 
 // States where a turn (or the agent boot) is actively progressing.
@@ -275,73 +275,6 @@ async function fetchAndStoreMessages(
  * endpoint `useLazyLoadMessages` uses until we span at least one user/agent
  * message or hit the page budget.
  */
-export type BackfillStep = "continue" | "stop";
-
-async function fetchAndPrependOlder(
-  sessionId: string,
-  store: ReturnType<typeof useAppStoreApi>,
-  oldestCursor: string,
-): Promise<number> {
-  const response = await listTaskSessionMessages(sessionId, {
-    limit: BACKFILL_PAGE_LIMIT,
-    before: oldestCursor,
-    sort: "desc",
-  });
-  const ordered = [...(response.messages ?? [])].reverse();
-  const newOldestCursor = ordered[0]?.id ?? oldestCursor;
-  store.getState().prependMessages(sessionId, ordered, {
-    hasMore: response.has_more ?? false,
-    oldestCursor: newOldestCursor,
-  });
-  return ordered.length;
-}
-
-export async function runBackfillRound(
-  sessionId: string,
-  store: ReturnType<typeof useAppStoreApi>,
-  round: number,
-): Promise<BackfillStep> {
-  const meta = store.getState().messages.metaBySession[sessionId];
-  const messages = store.getState().messages.bySession[sessionId] ?? [];
-  if (hasUserOrAgentMessage(messages)) return "stop";
-  if (!meta?.hasMore || !meta.oldestCursor) {
-    debug("autoBackfill: stopping (no more older messages)", {
-      sessionId,
-      round,
-      hasMore: meta?.hasMore ?? false,
-    });
-    return "stop";
-  }
-  debug("autoBackfill: window has no user/agent message, fetching older", {
-    sessionId,
-    round,
-    currentCount: messages.length,
-    oldestCursor: meta.oldestCursor,
-  });
-  try {
-    const added = await fetchAndPrependOlder(sessionId, store, meta.oldestCursor);
-    return added === 0 ? "stop" : "continue";
-  } catch (err) {
-    debug("autoBackfill: fetch failed, stopping", { sessionId, round, err });
-    return "stop";
-  }
-}
-
-export async function autoBackfillUntilUserMessage(
-  sessionId: string,
-  store: ReturnType<typeof useAppStoreApi>,
-): Promise<void> {
-  for (let round = 0; round < MAX_AUTO_BACKFILL_PAGES; round++) {
-    const step = await runBackfillRound(sessionId, store, round);
-    if (step === "stop") return;
-  }
-  debug("autoBackfill: hit page budget without finding user/agent message", {
-    sessionId,
-    pageBudget: MAX_AUTO_BACKFILL_PAGES,
-    messageBudget: MAX_AUTO_BACKFILL_PAGES * BACKFILL_PAGE_LIMIT,
-  });
-}
-
 function useTerminalStateFetch(
   taskSessionId: string | null,
   taskSessionState: TaskSessionState | null,
