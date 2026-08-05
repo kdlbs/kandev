@@ -314,5 +314,16 @@
   "mrAutomationRetryLoad": "Retry",
   "mrAutomationAutoFixPromptSaveFailed": "Failed to save auto-fix prompt.",
   "mrAutomationAutoFixPromptResetFailed": "Failed to reset auto-fix prompt.",
-  "mrAutomationLoadFailed": "Failed to load MR automation."
+  "mrAutomationLoadFailed": "Failed to load MR automation.",
+  "mrPopoverOpenDetail": "Open merge request detail",
+  "mrPopoverPassRate": "Pass rate",
+  "mrPopoverNoPipeline": "No pipeline has started",
+  "mrPopoverApproved": "Approved",
+  "mrPopoverAwaitingReview": "Awaiting review",
+  "mrPopoverAwaitingCount_one": "{{count}} awaiting",
+  "mrPopoverAwaitingCount_other": "{{count}} awaiting",
+  "mrPopoverUnresolvedComments_one": "{{count}} unresolved comment",
+  "mrPopoverUnresolvedComments_other": "{{count}} unresolved comments",
+  "mrPopoverUpdatedJustNow": "updated just now",
+  "mrPopoverUpdatedAgo": "updated {{elapsed}} ago"
 }

@@ -341,6 +341,8 @@ export type GitLabPipeline = {
   jobs_passing: number;
   started_at?: string;
   finished_at?: string;
+  /** Only populated for the latest pipeline in a GitLabMRFeedback response. */
+  jobs?: GitLabPipelineJob[];
 };
 
 /** Single CI job within a GitLab pipeline. */
