@@ -27,8 +27,13 @@ function requestIsActive(
   );
 }
 
-export function subscriptionActionLabel(subscribed: boolean): string {
-  return subscribed ? "Unsubscribe from GitLab notifications" : "Subscribe to GitLab notifications";
+export function subscriptionActionLabel(
+  subscribed: boolean,
+  t: (key: string, values?: Record<string, unknown>) => string,
+): string {
+  return subscribed
+    ? t("gitlab:unsubscribeFromNotifications")
+    : t("gitlab:subscribeToNotifications");
 }
 
 type SubscriptionIdentity = {
@@ -126,7 +131,7 @@ export function SubscriptionToggle(identity: SubscriptionIdentity) {
   const { t } = useTranslation();
   const { subscribed, loading, toggle } = useGitLabSubscription(identity);
 
-  const label = subscriptionActionLabel(subscribed);
+  const label = subscriptionActionLabel(subscribed, t);
   const Icon = subscribed ? IconBellOff : IconBell;
   return (
     <Button

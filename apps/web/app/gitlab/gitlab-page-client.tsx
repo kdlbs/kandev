@@ -98,14 +98,18 @@ function NotConnectedNotice({ reconnect }: { reconnect?: boolean }) {
   );
 }
 
-function resolveTitle(selection: SidebarSelection, saved: SavedPreset[]): string {
+function resolveTitle(
+  selection: SidebarSelection,
+  saved: SavedPreset[],
+  t: (key: string, values?: Record<string, unknown>) => string,
+): string {
   if (selection.source === "saved") {
-    return saved.find((p) => p.id === selection.id)?.label ?? "Saved query";
+    return saved.find((p) => p.id === selection.id)?.label ?? t("gitlab:savedQueryFallback");
   }
   const presets = selection.kind === "mr" ? MR_PRESETS : ISSUE_PRESETS;
   return (
     presets.find((p) => p.value === selection.id)?.label ??
-    (selection.kind === "mr" ? "Merge requests" : "Issues")
+    (selection.kind === "mr" ? t("gitlab:titleMergeRequests") : t("gitlab:titleIssues"))
   );
 }
 
@@ -178,12 +182,14 @@ function useProjectOptions(
   }, [knownProjects, projectFilter]);
 }
 
+/** Lifted out of `useGitLabPageState`, which is at the 100-line function cap. */
+function initialSelection(): SidebarSelection {
+  return { kind: "mr", source: "preset", id: MR_PRESETS[0]?.value ?? "" };
+}
+
 function useGitLabPageState(searchEnabled: boolean, workspaceId?: string) {
-  const [selection, setSelection] = useState<SidebarSelection>(() => ({
-    kind: "mr",
-    source: "preset",
-    id: MR_PRESETS[0]?.value ?? "",
-  }));
+  const { t } = useTranslation();
+  const [selection, setSelection] = useState<SidebarSelection>(initialSelection);
   const {
     draft: customQuery,
     committed: committedQuery,
@@ -215,7 +221,10 @@ function useGitLabPageState(searchEnabled: boolean, workspaceId?: string) {
     search.rawItems,
     projectFilter,
   );
-  const title = useMemo(() => resolveTitle(selection, savedPresets), [selection, savedPresets]);
+  const title = useMemo(
+    () => resolveTitle(selection, savedPresets, t),
+    [selection, savedPresets, t],
+  );
 
   const onSelect = useCallback(
     (s: SidebarSelection) => {

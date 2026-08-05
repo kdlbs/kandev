@@ -128,14 +128,15 @@ function resolveTitle(
   saved: SavedPreset[],
   prPresets: PresetOption[],
   issuePresets: PresetOption[],
+  t: (key: string, values?: Record<string, unknown>) => string,
 ): string {
   if (selection.source === "saved") {
-    return saved.find((p) => p.id === selection.id)?.label ?? "Saved query";
+    return saved.find((p) => p.id === selection.id)?.label ?? t("github:savedQueryFallback");
   }
   const presets = selection.kind === "pr" ? prPresets : issuePresets;
   return (
     presets.find((p) => p.value === selection.id)?.label ??
-    (selection.kind === "pr" ? "Pull requests" : "Issues")
+    (selection.kind === "pr" ? t("github:titlePullRequests") : t("github:titleIssues"))
   );
 }
 
@@ -327,6 +328,7 @@ function useSearchInteractionControls(
 }
 
 function useGitHubPageState(workspaceId: string | null, enabled: boolean) {
+  const { t } = useTranslation();
   const { pr: resolvedPrPresets, issue: resolvedIssuePresets } =
     useResolvedQueryPresets(workspaceId);
   const {
@@ -376,8 +378,8 @@ function useGitHubPageState(workspaceId: string | null, enabled: boolean) {
     repoFilter,
   );
   const title = useMemo(
-    () => resolveTitle(selection, savedPresets, resolvedPrPresets, resolvedIssuePresets),
-    [selection, savedPresets, resolvedPrPresets, resolvedIssuePresets],
+    () => resolveTitle(selection, savedPresets, resolvedPrPresets, resolvedIssuePresets, t),
+    [selection, savedPresets, resolvedPrPresets, resolvedIssuePresets, t],
   );
 
   const onSelect = useSidebarSelectionHandler({

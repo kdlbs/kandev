@@ -76,6 +76,7 @@ function useResolveConflicts(pr: TaskPR): {
  * mergeable" while GitHub recomputes).
  */
 export function PRMergeabilityRow({ pr }: { pr: TaskPR }) {
+  const { t } = useTranslation();
   const { onResolveConflicts, conflictQueued } = useResolveConflicts(pr);
   // "blocked" gets a richer note than the bare chip: it explains *why* the
   // merge is gated. But when the block is only an outstanding requested review,
@@ -86,9 +87,9 @@ export function PRMergeabilityRow({ pr }: { pr: TaskPR }) {
   if (pr.state === "open" && pr.mergeable_state === "blocked") {
     if (isPRAwaitingReview(pr)) return null;
     if (isPRWaitingOnBranchProtection(pr)) {
-      return <BranchProtectionWaitNote reason={blockedReason(pr)} />;
+      return <BranchProtectionWaitNote reason={blockedReason(pr, t)} />;
     }
-    return <BlockedNote reason={blockedReason(pr)} />;
+    return <BlockedNote reason={blockedReason(pr, t)} />;
   }
   return (
     <PRMergeabilityNotice
@@ -110,18 +111,21 @@ export function PRMergeabilityRow({ pr }: { pr: TaskPR }) {
  * fields we do have (required reviews, CI state) and fall back to a generic
  * note for the rest (code owners, required conversations, etc.).
  */
-export function blockedReason(pr: TaskPR): string {
+export function blockedReason(
+  pr: TaskPR,
+  t: (key: string, values?: Record<string, unknown>) => string,
+): string {
   const required = pr.required_reviews ?? null;
   if (required != null && pr.review_count < required) {
     const missing = required - pr.review_count;
-    return `Needs ${missing} more approval${missing === 1 ? "" : "s"} before it can merge.`;
+    return t("github:blockedNeedsApprovals", { count: missing });
   }
   // Only "failure"/"pending" indicate an actual check problem; "" means no CI
   // is configured (or it hasn't loaded), which isn't a status-check block.
   if (pr.checks_state === "failure" || pr.checks_state === "pending") {
-    return "A required status check hasn't passed yet.";
+    return t("github:blockedStatusCheck");
   }
-  return "Required reviews, code owners, or repository rules still need to clear.";
+  return t("github:blockedGeneric");
 }
 
 function BlockedNote({ reason }: { reason: string }) {

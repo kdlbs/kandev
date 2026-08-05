@@ -1,20 +1,24 @@
 import { describe, expect, it } from "vitest";
+import { t } from "@/lib/i18n";
 import { pipelineSummary } from "./mr-overview-section";
 
 describe("pipelineSummary", () => {
   it("does not present unknown job totals as zero passing out of zero", () => {
     expect(
-      pipelineSummary({
-        id: 1,
-        iid: 2,
-        status: "running",
-        source: "merge_request_event",
-        ref: "main",
-        sha: "abc123",
-        web_url: "",
-        jobs_total: 0,
-        jobs_passing: 0,
-      }),
+      pipelineSummary(
+        {
+          id: 1,
+          iid: 2,
+          status: "running",
+          source: "merge_request_event",
+          ref: "main",
+          sha: "abc123",
+          web_url: "",
+          jobs_total: 0,
+          jobs_passing: 0,
+        },
+        t,
+      ),
     ).toBe("running");
   });
 });

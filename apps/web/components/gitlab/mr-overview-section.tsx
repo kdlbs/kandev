@@ -18,8 +18,9 @@ function pipelineTone(status: string): string {
 
 export function pipelineSummary(
   pipeline: GitLabMRFeedback["pipelines"][number] | undefined,
+  t: (key: string, values?: Record<string, unknown>) => string,
 ): string {
-  if (!pipeline) return "No pipeline";
+  if (!pipeline) return t("gitlab:noPipeline");
   if (pipeline.jobs_total <= 0) return pipeline.status;
   return `${pipeline.status} · ${pipeline.jobs_passing}/${pipeline.jobs_total}`;
 }
@@ -78,7 +79,7 @@ export function MROverviewSection({
             className={`mt-1 flex items-center gap-1 font-medium ${pipelineTone(pipeline?.status ?? "pending")}`}
           >
             <IconGitMerge className="h-4 w-4" />
-            {pipelineSummary(pipeline)}
+            {pipelineSummary(pipeline, t)}
           </p>
         </div>
       </div>

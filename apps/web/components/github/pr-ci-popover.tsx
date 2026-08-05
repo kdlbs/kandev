@@ -124,7 +124,7 @@ function PRCIPopoverHeader({
   onOpenDetailPanel?: () => void;
 }) {
   const { t } = useTranslation();
-  const title = `#${pr.pr_number} ${pr.pr_title || "Untitled PR"}`;
+  const title = `#${pr.pr_number} ${pr.pr_title || t("github:untitledPr")}`;
   return (
     <div
       data-testid="pr-popover-header"
@@ -155,14 +155,16 @@ function CheckGroupIcon({ kind }: { kind: CheckBucket }) {
   return <IconCircleX className="h-3.5 w-3.5 text-red-500" />;
 }
 
-function bucketLabel(kind: CheckBucket): string {
-  if (kind === "passed") return "Passed";
-  if (kind === "in_progress") return "In progress";
-  return "Failed";
-}
+/** `kind` is the persisted CheckBucket; only the catalog key is copy. */
+const BUCKET_LABEL_KEYS: Record<CheckBucket, string> = {
+  passed: "github:checkBucketPassed",
+  in_progress: "github:checkBucketInProgress",
+  failed: "github:checkBucketFailed",
+};
 
 function CheckGroupHeader({ kind, count }: { kind: CheckBucket; count: number }) {
-  const label = bucketLabel(kind);
+  const { t } = useTranslation();
+  const label = t(BUCKET_LABEL_KEYS[kind]);
   return (
     <div className="flex items-center justify-between gap-2 px-1 py-1">
       <div className="flex items-center gap-1.5">
@@ -243,6 +245,11 @@ function PRWorkflowRow({
   );
 }
 
+/**
+ * Agent-facing content, not UI copy: the returned string is queued into the chat
+ * by `addAsContext` and sent to the agent verbatim, so it stays English for the
+ * same reason the integration prompt templates do.
+ */
 function buildWorkflowMessage(group: WorkflowGroup): string {
   const failed = group.jobs.filter((j) => bucketCheck(j) === "failed");
   const lines: string[] = [
@@ -477,13 +484,17 @@ function PRCommentsRow({ pr }: { pr: TaskPR }) {
   );
 }
 
-function elapsedLabel(elapsed: number | null): string {
+function elapsedLabel(
+  elapsed: number | null,
+  t: (k: string, v?: Record<string, unknown>) => string,
+): string {
   if (elapsed == null) return "";
-  if (elapsed === 0) return "updated just now";
-  return `updated ${formatElapsedShort(elapsed)} ago`;
+  if (elapsed === 0) return t("github:updatedJustNow");
+  return t("github:updatedAgo", { elapsed: formatElapsedShort(elapsed) });
 }
 
 function PRPopoverFooter({ lastUpdatedAt }: { lastUpdatedAt: number | null }) {
+  const { t } = useTranslation();
   // Capture a "now" snapshot only inside the setInterval callback (an event
   // handler — no impurity in render, no setState during commit). When no
   // tick has fired yet, fall back to lastUpdatedAt so the rendered elapsed
@@ -508,7 +519,7 @@ function PRPopoverFooter({ lastUpdatedAt }: { lastUpdatedAt: number | null }) {
         data-testid="pr-popover-updated-at"
         className="text-[10px] text-muted-foreground tabular-nums"
       >
-        {elapsedLabel(elapsed)}
+        {elapsedLabel(elapsed, t)}
       </span>
     </div>
   );

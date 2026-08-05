@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { t } from "@/lib/i18n";
 import { cleanup, fireEvent, render } from "@testing-library/react";
 import { StateProvider } from "@/components/state-provider";
 import { ToastProvider } from "@/components/toast-provider";
@@ -155,19 +156,19 @@ describe("PRMergeabilityRow", () => {
 
 describe("blockedReason", () => {
   it("names the approval shortfall when required reviews aren't met", () => {
-    expect(blockedReason(makePR({ required_reviews: 2, review_count: 0 }))).toContain(
+    expect(blockedReason(makePR({ required_reviews: 2, review_count: 0 }), t)).toContain(
       "2 more approvals",
     );
-    expect(blockedReason(makePR({ required_reviews: 2, review_count: 1 }))).toContain(
+    expect(blockedReason(makePR({ required_reviews: 2, review_count: 1 }), t)).toContain(
       "1 more approval",
     );
   });
 
   it("points at a failing required check when CI is failure/pending", () => {
-    expect(blockedReason(makePR({ checks_state: "failure" })).toLowerCase()).toContain(
+    expect(blockedReason(makePR({ checks_state: "failure" }), t).toLowerCase()).toContain(
       "required status check",
     );
-    expect(blockedReason(makePR({ checks_state: "pending" })).toLowerCase()).toContain(
+    expect(blockedReason(makePR({ checks_state: "pending" }), t).toLowerCase()).toContain(
       "required status check",
     );
   });
@@ -175,7 +176,7 @@ describe("blockedReason", () => {
   it("does not claim a check failed when no CI is configured (empty checks_state)", () => {
     // Regression: `checks_state !== "success"` also matched "" and falsely
     // reported a status-check block on a code-owners/conversation gate.
-    const msg = blockedReason(makePR({ checks_state: "" })).toLowerCase();
+    const msg = blockedReason(makePR({ checks_state: "" }), t).toLowerCase();
     expect(msg).not.toContain("required status check");
     expect(msg).toContain("repository rules");
   });
@@ -183,6 +184,7 @@ describe("blockedReason", () => {
   it("falls back to a generic protection note for other rules", () => {
     const msg = blockedReason(
       makePR({ checks_state: "success", required_reviews: 1, review_count: 1 }),
+      t,
     );
     expect(msg.toLowerCase()).toContain("repository rules");
   });

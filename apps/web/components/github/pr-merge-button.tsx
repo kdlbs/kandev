@@ -60,7 +60,7 @@ function CompactMergeButton({
               }}
               className="cursor-pointer rounded px-1.5 py-0.5 font-medium hover:bg-muted hover:text-foreground disabled:cursor-default disabled:opacity-60"
             >
-              {mergeShortLabel(method)}
+              {t(mergeShortLabelKey(method))}
             </button>
           ))}
         </div>
@@ -144,7 +144,7 @@ export function PRMergeButton({
   return (
     <MergeButtonShell
       compact={compact}
-      label={merging ? t("github:merging") : mergeLabel(primary)}
+      label={merging ? t("github:merging") : t(mergeLabelKey(primary))}
       disabled={merging}
       actor={mutationActor}
       onPrimaryClick={handlePrimary}
@@ -235,7 +235,7 @@ function MergeButtonShell({
           <DropdownMenuContent align="end" className="w-auto">
             {extraMethods.map((m) => (
               <DropdownMenuItem key={m} onSelect={() => onPickMethod(m)}>
-                {mergeLabel(m)}
+                {t(mergeLabelKey(m))}
               </DropdownMenuItem>
             ))}
           </DropdownMenuContent>
@@ -246,29 +246,30 @@ function MergeButtonShell({
   );
 }
 
-function mergeLabel(method?: MergeMethod): string {
+/** `method` is GitHub's persisted merge method; only the label is copy. */
+function mergeLabelKey(method?: MergeMethod): string {
   switch (method) {
     case "squash":
-      return "Squash and merge";
+      return "github:mergeMethodSquash";
     case "rebase":
-      return "Rebase and merge";
+      return "github:mergeMethodRebase";
     case "merge":
-      return "Create a merge commit";
+      return "github:mergeMethodMergeCommit";
     default:
-      return "Merge PR";
+      return "github:mergeMethodDefault";
   }
 }
 
 // Short form used by the compact "or <method>" alternates so the row fits the
 // narrow popover without wrapping.
-function mergeShortLabel(method: MergeMethod): string {
+function mergeShortLabelKey(method: MergeMethod): string {
   switch (method) {
     case "squash":
-      return "Squash";
+      return "github:mergeMethodSquashShort";
     case "rebase":
-      return "Rebase";
+      return "github:mergeMethodRebaseShort";
     case "merge":
-      return "Merge commit";
+      return "github:mergeMethodMergeCommitShort";
   }
 }
 

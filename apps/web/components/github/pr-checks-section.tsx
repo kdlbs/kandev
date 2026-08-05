@@ -50,6 +50,11 @@ function buildCheckMessage(check: CheckRun): string {
   return parts.join("\n\n");
 }
 
+/**
+ * Agent-facing content, not UI copy: queued into the chat by `onAddAsContext`
+ * and sent to the agent verbatim, so it stays English — same call as the
+ * integration prompt templates.
+ */
 function buildAllFailedMessage(checks: CheckRun[]): string {
   const failed = checks.filter(isFailedCheck);
   const parts = [`### ${failed.length} CI Check${failed.length !== 1 ? "s" : ""} Failed`, ""];
@@ -63,14 +68,17 @@ function buildAllFailedMessage(checks: CheckRun[]): string {
   return parts.join("\n");
 }
 
-function formatSectionSummary(checks: CheckRun[]): string {
+function formatSectionSummary(
+  checks: CheckRun[],
+  t: (key: string, values?: Record<string, unknown>) => string,
+): string {
   const failed = checks.filter(isFailedCheck).length;
   const passed = checks.filter((c) => c.conclusion === "success").length;
   const pending = checks.length - failed - passed;
   const parts: string[] = [];
-  if (failed > 0) parts.push(`${failed} failed`);
-  if (passed > 0) parts.push(`${passed} passed`);
-  if (pending > 0) parts.push(`${pending} pending`);
+  if (failed > 0) parts.push(t("github:checksFailedCount", { count: failed }));
+  if (passed > 0) parts.push(t("github:checksPassedCount", { count: passed }));
+  if (pending > 0) parts.push(t("github:checksPendingCount", { count: pending }));
   return parts.join(", ");
 }
 
@@ -91,7 +99,7 @@ export function ChecksSection({
     return () => clearInterval(id);
   }, [hasRunning]);
 
-  const summary = checks.length > 0 ? ` \u2014 ${formatSectionSummary(checks)}` : "";
+  const summary = checks.length > 0 ? ` \u2014 ${formatSectionSummary(checks, t)}` : "";
   const hasFailed = checks.some(isFailedCheck);
 
   return (
