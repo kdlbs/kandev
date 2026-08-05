@@ -184,6 +184,8 @@ func (s *Server) handleLSPBinaryNotFound(ctx context.Context, conn *websocket.Co
 
 	if err := writeLSPJSONMessage(conn, map[string]string{lspStatusKey: lspStatusInstalling, lspLanguageKey: language}); err != nil {
 		s.logger.Warn("failed to send LSP installing status", zap.String("language", language), zap.Error(err))
+		_ = conn.Close()
+		return
 	}
 
 	installCtx, cancelInstall := context.WithCancel(ctx)

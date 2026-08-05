@@ -28,10 +28,14 @@ var errForcedWebSocketWrite = errors.New("forced WebSocket write failure")
 type writeFailingConn struct {
 	net.Conn
 	failWrites atomic.Bool
+	failOn     []byte
+	failed     chan struct{}
+	failOnce   sync.Once
 }
 
 func (c *writeFailingConn) Write(data []byte) (int, error) {
-	if c.failWrites.Load() {
+	if c.failWrites.Load() || (len(c.failOn) > 0 && bytes.Contains(data, c.failOn)) {
+		c.failOnce.Do(func() { close(c.failed) })
 		return 0, errForcedWebSocketWrite
 	}
 	return c.Conn.Write(data)
@@ -40,6 +44,7 @@ func (c *writeFailingConn) Write(data []byte) (int, error) {
 type writeFailingListener struct {
 	net.Listener
 	accepted chan *writeFailingConn
+	failOn   []byte
 }
 
 type writeDeadlineRecordingConn struct {
@@ -151,7 +156,7 @@ func (l *writeFailingListener) Accept() (net.Conn, error) {
 	if err != nil {
 		return nil, err
 	}
-	wrapped := &writeFailingConn{Conn: conn}
+	wrapped := &writeFailingConn{Conn: conn, failOn: l.failOn, failed: make(chan struct{})}
 	l.accepted <- wrapped
 	return wrapped, nil
 }
@@ -307,6 +312,64 @@ func TestHandleLSPStreamAutoInstallHandsFirstClientMessageToBridge(t *testing.T)
 	}
 	if string(echoed) != string(payload) {
 		t.Fatalf("echoed payload = %s, want %s", echoed, payload)
+	}
+}
+
+func TestHandleLSPStreamDoesNotInstallAfterInstallingStatusWriteFails(t *testing.T) {
+	log := newTestLogger()
+	cfg := &config.InstanceConfig{WorkDir: t.TempDir(), SessionID: "session-install-status-failure"}
+	procMgr := process.NewManager(cfg, log)
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = procMgr.StopForTeardown(ctx)
+	})
+	strategy := &blockingLSPInstallStrategy{
+		started:  make(chan struct{}),
+		canceled: make(chan struct{}),
+	}
+	server := NewServer(cfg, procMgr, nil, nil, log)
+	server.lspInstaller = &fakeLSPInstallerRegistry{strategy: strategy}
+	handlerReturned := make(chan struct{})
+	handler := http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		server.router.ServeHTTP(writer, request)
+		close(handlerReturned)
+	})
+	httpServer := httptest.NewUnstartedServer(handler)
+	listener := &writeFailingListener{
+		Listener: httpServer.Listener,
+		accepted: make(chan *writeFailingConn, 1),
+		failOn:   []byte(`"status":"installing"`),
+	}
+	httpServer.Listener = listener
+	httpServer.Start()
+	t.Cleanup(httpServer.Close)
+
+	conn, _, err := websocket.DefaultDialer.Dial(
+		"ws"+strings.TrimPrefix(httpServer.URL, "http")+
+			"/api/v1/lsp/stream?language=typescript&autoInstall=true",
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("dial lsp stream: %v", err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+	serverConn := <-listener.accepted
+
+	select {
+	case <-serverConn.failed:
+	case <-time.After(2 * time.Second):
+		t.Fatal("installing status write was not attempted")
+	}
+	select {
+	case <-handlerReturned:
+	case <-time.After(2 * time.Second):
+		t.Fatal("LSP handler did not return after its installing status write failed")
+	}
+	select {
+	case <-strategy.started:
+		t.Fatal("LSP auto-install started after its status write failed")
+	default:
 	}
 }
 
