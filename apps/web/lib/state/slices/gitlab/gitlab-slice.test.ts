@@ -3,7 +3,7 @@ import { create } from "zustand";
 import { immer } from "zustand/middleware/immer";
 import { createGitLabSlice } from "./gitlab-slice";
 import type { GitLabSlice } from "./types";
-import type { TaskMR } from "@/lib/types/gitlab";
+import type { TaskMR, TaskMRAutomationOptions } from "@/lib/types/gitlab";
 
 function makeMR(overrides: Partial<TaskMR> = {}): TaskMR {
   return {
@@ -26,8 +26,29 @@ function makeMR(overrides: Partial<TaskMR> = {}): TaskMR {
     required_approvals: 0,
     pipeline_jobs_total: 0,
     pipeline_jobs_pass: 0,
+    reviewer_count: 0,
+    unapproved_reviewers: 0,
+    unresolved_discussions: 0,
     created_at: "",
     updated_at: "",
+    ...overrides,
+  };
+}
+
+function makeOptions(overrides: Partial<TaskMRAutomationOptions> = {}): TaskMRAutomationOptions {
+  return {
+    task_id: "task-a",
+    auto_fix_enabled: false,
+    auto_merge_enabled: false,
+    auto_fix_max_rounds: 10,
+    effective_auto_fix_prompt: "",
+    using_default_prompt: true,
+    prompt_on_review_requested: false,
+    prompt_on_merged: false,
+    prompt_on_closed: false,
+    review_reviewer_username: "",
+    updated_at: "2026-01-01T00:00:00Z",
+    mr_states: [],
     ...overrides,
   };
 }
@@ -276,15 +297,7 @@ describe("action presets + stats", () => {
 describe("task MR automation options", () => {
   it("keys options, loading, saving, and errors independently per task", () => {
     const store = makeStore();
-    const optionsA = {
-      task_id: "task-a",
-      prompt_on_review_requested: true,
-      prompt_on_merged: false,
-      prompt_on_closed: false,
-      review_reviewer_username: "",
-      updated_at: "2026-01-01T00:00:00Z",
-      mr_states: [],
-    };
+    const optionsA = makeOptions({ prompt_on_review_requested: true });
 
     store.getState().setTaskMRAutomationOptions("task-a", optionsA);
     store.getState().setTaskMRAutomationLoading("task-b", true);
@@ -302,24 +315,18 @@ describe("task MR automation options", () => {
 
   it("setTaskMRAutomationOptions fully replaces a task's stored options", () => {
     const store = makeStore();
-    store.getState().setTaskMRAutomationOptions("task-a", {
-      task_id: "task-a",
-      prompt_on_review_requested: true,
-      prompt_on_merged: false,
-      prompt_on_closed: false,
-      review_reviewer_username: "",
-      updated_at: "2026-01-01T00:00:00Z",
-      mr_states: [],
-    });
-    store.getState().setTaskMRAutomationOptions("task-a", {
-      task_id: "task-a",
-      prompt_on_review_requested: false,
-      prompt_on_merged: true,
-      prompt_on_closed: true,
-      review_reviewer_username: "bob",
-      updated_at: "2026-01-02T00:00:00Z",
-      mr_states: [],
-    });
+    store
+      .getState()
+      .setTaskMRAutomationOptions("task-a", makeOptions({ prompt_on_review_requested: true }));
+    store.getState().setTaskMRAutomationOptions(
+      "task-a",
+      makeOptions({
+        prompt_on_merged: true,
+        prompt_on_closed: true,
+        review_reviewer_username: "bob",
+        updated_at: "2026-01-02T00:00:00Z",
+      }),
+    );
 
     const stored = store.getState().taskMRAutomation.byTaskId["task-a"];
     expect(stored?.prompt_on_review_requested).toBe(false);

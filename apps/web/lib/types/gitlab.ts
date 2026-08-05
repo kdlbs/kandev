@@ -81,6 +81,12 @@ export type TaskMR = {
   required_approvals: number;
   pipeline_jobs_total: number;
   pipeline_jobs_pass: number;
+  /** GitLab 15.6+ merge-readiness verdict (e.g. "mergeable"); empty on older hosts. */
+  detailed_merge_status?: string;
+  reviewer_count: number;
+  unapproved_reviewers: number;
+  /** Only populated for MRs with auto-fix or auto-merge enabled. */
+  unresolved_discussions: number;
   created_at: string;
   merged_at?: string;
   closed_at?: string;
@@ -337,6 +343,16 @@ export type GitLabPipeline = {
   finished_at?: string;
 };
 
+/** Single CI job within a GitLab pipeline. */
+export type GitLabPipelineJob = {
+  id: number;
+  name: string;
+  stage: string;
+  status: string;
+  allow_failure: boolean;
+  web_url?: string;
+};
+
 /** Aggregate feedback for an MR (used by the detail panel). */
 export type GitLabMRFeedback = {
   mr: MR;
@@ -380,13 +396,28 @@ export type TaskMRLifecycleState = {
   last_lifecycle_prompt_at?: string;
   last_lifecycle_session_id?: string;
   last_error?: string;
+  last_sync_error?: string;
+  last_fix_signature: string;
+  last_fix_checkpoint_json: string;
+  last_fix_enqueued_at?: string;
+  last_fix_session_id?: string;
+  auto_fix_round_count: number;
+  auto_fix_exhausted_at?: string;
+  last_merge_signature: string;
+  last_merge_attempt_at?: string;
   created_at: string;
   updated_at: string;
 };
 
-/** Task-level MR lifecycle notification switches. */
+/** Task-level MR automation preferences: lifecycle switches (#2125) plus auto-fix CI and auto-merge. */
 export type TaskMRAutomationOptions = {
   task_id: string;
+  auto_fix_enabled: boolean;
+  auto_merge_enabled: boolean;
+  auto_fix_prompt_override?: string | null;
+  auto_fix_max_rounds: number;
+  effective_auto_fix_prompt: string;
+  using_default_prompt: boolean;
   prompt_on_review_requested: boolean;
   prompt_on_merged: boolean;
   prompt_on_closed: boolean;
@@ -397,6 +428,9 @@ export type TaskMRAutomationOptions = {
 
 /** Partial update for task MR automation options. */
 export type TaskMRAutomationPatch = {
+  auto_fix_enabled?: boolean;
+  auto_merge_enabled?: boolean;
+  auto_fix_prompt_override?: string;
   prompt_on_review_requested?: boolean;
   prompt_on_merged?: boolean;
   prompt_on_closed?: boolean;
