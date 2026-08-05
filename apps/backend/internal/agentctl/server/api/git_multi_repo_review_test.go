@@ -158,6 +158,8 @@ func TestNestedSubmoduleReviewEndpointsIncludeRootAndStableChildBase(t *testing.
 	childBase := strings.TrimSpace(runGitAPI(t, parent, "rev-parse", "origin/main:vendor/lib"))
 	writeFileAPI(t, parent, "README.md", "root change\n")
 	childDir := filepath.Join(parent, "vendor/lib")
+	runGitAPI(t, childDir, "config", "user.email", "test@test.com")
+	runGitAPI(t, childDir, "config", "user.name", "Test User")
 	writeFileAPI(t, childDir, "child-change.txt", "child change\n")
 	runGitAPI(t, childDir, "add", ".")
 	runGitAPI(t, childDir, "commit", "-m", "child change")
