@@ -464,7 +464,7 @@ function useVcsDialogsState(
   // tasks because the task root isn't itself a git repo (exit 1).
   const { commit, createPR, repoNames, isLoading: isGitLoading } = useSessionGit(sessionId);
   const repoDisplayName = useRepoDisplayName(sessionId);
-  const isMultiRepo = repoNames.filter((r) => r !== "").length > 1;
+  const isMultiRepo = repoNames.length > 1;
   const changeRequestTerminology = useChangeRequestTerminology(sessionId, ps.repo || undefined);
   const fileSummary = useScopedFileSummary({
     scopedRepo: cs.repo,

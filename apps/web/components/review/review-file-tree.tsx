@@ -6,6 +6,7 @@ import {
   IconChevronRight,
   IconMessage,
   IconAlertTriangle,
+  IconGitBranch,
   IconSearch,
   IconX,
 } from "@tabler/icons-react";
@@ -14,6 +15,7 @@ import { cn } from "@kandev/ui/lib/utils";
 import { FileStatusIcon } from "@/components/shared/file-status-icon";
 import { FileIcon } from "@/components/ui/file-icon";
 import { useTree, type VisibleRow } from "@/hooks/use-tree";
+import { useTranslation } from "react-i18next";
 import type { ReviewFile, FileTreeNode } from "./types";
 import { buildFileTree, reviewFileKey } from "./types";
 import { useTranslation } from "react-i18next";
@@ -132,15 +134,25 @@ function ReviewTreeRow(props: ReviewTreeRowProps) {
 }
 
 function ReviewDirRow({ row, onToggleDir }: ReviewTreeRowProps) {
+  const { t } = useTranslation();
   const isRepoRoot = Boolean(row.node.isRepoRoot);
-  const fileCount = isRepoRoot ? countLeafFiles(row.node) : 0;
+  const isSubmodule = Boolean(row.node.isSubmodule);
+  const isScopeBoundary = isRepoRoot || isSubmodule;
+  const fileCount = isScopeBoundary ? countLeafFiles(row.node) : 0;
+  const scopeLabel = row.node.repositoryName ?? row.node.name;
+  let testId = "dir-node";
+  if (isRepoRoot) testId = "repo-root-node";
+  if (isSubmodule) testId = "submodule-node";
   return (
-    <div data-testid={isRepoRoot ? "repo-root-node" : "dir-node"}>
+    <div data-testid={testId} data-repository-name={row.node.repositoryName}>
       <button
         type="button"
+        aria-label={
+          isSubmodule ? t("common:reviewSubmoduleBoundary", { scope: scopeLabel }) : undefined
+        }
         className={cn(
           "flex items-center w-full gap-1 px-2 py-1 hover:bg-muted/50 transition-colors cursor-pointer",
-          isRepoRoot && "border-t border-border/40 first:border-t-0 mt-1 first:mt-0",
+          isScopeBoundary && "border-t border-border/40 first:border-t-0 mt-1 first:mt-0",
         )}
         style={{ paddingLeft: `${row.depth * 12 + 8}px` }}
         onClick={onToggleDir}
@@ -150,10 +162,13 @@ function ReviewDirRow({ row, onToggleDir }: ReviewTreeRowProps) {
         ) : (
           <IconChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
         )}
+        {isSubmodule && (
+          <IconGitBranch aria-hidden="true" className="h-3.5 w-3.5 shrink-0 text-primary" />
+        )}
         <span
           className={cn(
             "text-[13px] truncate",
-            isRepoRoot ? "font-medium text-foreground" : "text-muted-foreground",
+            isScopeBoundary ? "font-medium text-foreground" : "text-muted-foreground",
           )}
         >
           {row.node.name}

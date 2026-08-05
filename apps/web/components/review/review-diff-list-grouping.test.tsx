@@ -139,7 +139,13 @@ describe("ReviewDiffList — multi-repo grouping", () => {
   });
 
   it("groups files into per-repo sections with the right counts", () => {
-    const files: ReviewFile[] = [file("a.ts", "x"), file("b.ts", "y"), file("c.ts", "x")];
+    const firstRepo = "x";
+    const secondRepo = "y";
+    const files: ReviewFile[] = [
+      file("a.ts", firstRepo),
+      file("b.ts", secondRepo),
+      file("c.ts", firstRepo),
+    ];
     const refs = new Map(files.map((f) => [f.path, createRef<HTMLDivElement>()]));
     render(withTooltips(<ReviewDiffList {...baseProps} files={files} fileRefs={refs} />));
     const groups = screen.getAllByTestId("changes-repo-group");
@@ -147,14 +153,30 @@ describe("ReviewDiffList — multi-repo grouping", () => {
     // The diff body itself is lazy-loaded via IntersectionObserver (which
     // doesn't fire in happy-dom), so verify grouping by counting file path
     // labels in each group's header rather than the inner diff body.
-    const xGroup = groups.find((g) => g.getAttribute("data-repository-name") === "x");
-    const yGroup = groups.find((g) => g.getAttribute("data-repository-name") === "y");
+    const repositoryNameAttribute = "data-repository-name";
+    const xGroup = groups.find((g) => g.getAttribute(repositoryNameAttribute) === firstRepo);
+    const yGroup = groups.find((g) => g.getAttribute(repositoryNameAttribute) === secondRepo);
     // FileDiffHeader always renders the file path in a span; count those.
     expect(xGroup?.textContent).toContain("a.ts");
     expect(xGroup?.textContent).toContain("c.ts");
     expect(xGroup?.textContent).not.toContain("b.ts");
     expect(yGroup?.textContent).toContain("b.ts");
     expect(yGroup?.textContent).not.toContain("a.ts");
+  });
+
+  it("marks named groups as submodule scopes when the root group is present", () => {
+    const submoduleScope = "vendor/lib";
+    const files: ReviewFile[] = [file("README.md"), file("src/lib.ts", submoduleScope)];
+    const refs = new Map(files.map((f) => [f.path, createRef<HTMLDivElement>()]));
+    render(withTooltips(<ReviewDiffList {...baseProps} files={files} fileRefs={refs} />));
+
+    const childGroup = screen.getAllByTestId("changes-repo-group")[0];
+    expect(childGroup.getAttribute("data-repository-name")).toBe("");
+    const groups = screen.getAllByTestId("changes-repo-group");
+    const submoduleGroup = groups.find(
+      (group) => group.getAttribute("data-repository-name") === submoduleScope,
+    );
+    expect(submoduleGroup?.querySelector('[data-submodule-scope="true"]')).not.toBeNull();
   });
 });
 

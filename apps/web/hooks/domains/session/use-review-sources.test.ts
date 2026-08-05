@@ -376,6 +376,7 @@ describe("buildReviewSources", () => {
         },
       ],
       prRepoName: "frontend",
+      useRepositoryKeys: false,
     });
     expect(result.allFiles).toHaveLength(1);
     expect(result.allFiles[0].source).toBe("uncommitted");
@@ -407,6 +408,7 @@ describe("buildReviewSources", () => {
         },
       },
       prDiffFiles: undefined,
+      useRepositoryKeys: false,
     });
     expect(result.allFiles).toHaveLength(1);
     expect(result.allFiles[0].source).toBe("uncommitted");

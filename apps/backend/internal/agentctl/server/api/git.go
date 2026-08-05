@@ -693,8 +693,8 @@ func (s *Server) handleGitLog(c *gin.Context) {
 	}
 
 	if req.Repo == "" {
-		if subs := s.procMgr.RepoSubpaths(); len(subs) > 0 {
-			s.handleGitLogMultiRepo(c, req, subs, limit)
+		if scopes := s.procMgr.RepositoryScopes(); shouldFanOutRepositoryScopes(scopes) {
+			s.handleGitLogMultiRepo(c, req, scopes, limit)
 			return
 		}
 	}
@@ -961,8 +961,8 @@ func (s *Server) handleGitCumulativeDiff(c *gin.Context) {
 	}
 
 	if req.Repo == "" {
-		if subs := s.procMgr.RepoSubpaths(); len(subs) > 0 {
-			s.handleGitCumulativeDiffMultiRepo(c, req, subs)
+		if scopes := s.procMgr.RepositoryScopes(); shouldFanOutRepositoryScopes(scopes) {
+			s.handleGitCumulativeDiffMultiRepo(c, req, scopes)
 			return
 		}
 	}
@@ -1171,6 +1171,9 @@ func (s *Server) resolvePerRepoBase(ctx context.Context, repo string) string {
 	if base == "" || baseBranch == "" {
 		return base
 	}
+	if tracker.IsSubmodule() {
+		return base
+	}
 	gitOp, gitOpErr := s.procMgr.GitOperatorFor(repo)
 	if gitOpErr != nil {
 		return base
@@ -1255,6 +1258,17 @@ type MultiRepoGitStatusResult struct {
 	Error   string             `json:"error,omitempty"`
 }
 
+func shouldFanOutRepositoryScopes(scopes []string) bool {
+	if len(scopes) == 0 {
+		return false
+	}
+	return len(scopes) > 1 || scopes[0] != ""
+}
+
+func requiresExplicitRepositoryScope(scopes []string) bool {
+	return len(scopes) > 0 && scopes[0] != ""
+}
+
 // handleGitStatusMulti returns one git status entry per repo for multi-repo
 // task workspaces (or one untagged entry for single-repo). Used by the
 // session-subscribe handler in the main backend to seed per-repo state on
@@ -1264,7 +1278,7 @@ type MultiRepoGitStatusResult struct {
 // status and run a fresh git query — used on WS subscribe so a new observer
 // always validates the cache against the live worktree.
 func (s *Server) handleGitStatusMulti(c *gin.Context) {
-	subpaths := s.procMgr.RepoSubpaths()
+	subpaths := s.procMgr.RepositoryScopes()
 	// Single-repo: fall back to the workspace-root status with an empty repo
 	// name so the response shape stays uniform.
 	if len(subpaths) == 0 {

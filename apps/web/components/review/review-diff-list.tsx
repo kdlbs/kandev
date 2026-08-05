@@ -45,6 +45,7 @@ type ReviewDiffListProps = {
   fileRefs: Map<string, React.RefObject<HTMLDivElement | null>>;
 };
 
+// eslint-disable-next-line max-lines-per-function -- list owns grouping, scrolling, and row lifecycle
 export const ReviewDiffList = memo(function ReviewDiffList({
   files,
   reviewedFiles,
@@ -96,6 +97,7 @@ export const ReviewDiffList = memo(function ReviewDiffList({
     : -1;
   const groups = useMemo(() => groupByRepositoryName(files, (f) => f.repository_name), [files]);
   const showRepoHeaders = groups.length > 1 || (groups[0]?.repositoryName ?? "") !== "";
+  const hasWorkspaceRootGroup = groups.some((group) => group.repositoryName === "");
   return (
     <div
       ref={scrollContainerRef}
@@ -113,7 +115,14 @@ export const ReviewDiffList = memo(function ReviewDiffList({
           data-repository-name={group.repositoryName || ""}
         >
           {showRepoHeaders && (
-            <RepoGroupHeader name={group.repositoryName} fileCount={group.items.length} />
+            <RepoGroupHeader
+              name={group.repositoryName}
+              fileCount={group.items.length}
+              isSubmodule={
+                Boolean(group.repositoryName) &&
+                (hasWorkspaceRootGroup || group.repositoryName.includes("/"))
+              }
+            />
           )}
           {group.items.map((file) => {
             const key = reviewFileKey(file);

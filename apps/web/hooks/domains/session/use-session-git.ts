@@ -15,6 +15,9 @@ import type {
   GitOperationResult as RawGitOperationResult,
   PRCreateResult,
 } from "@/hooks/use-git-operations";
+import { t } from "@/lib/i18n";
+import { runRepositoryScopeWaves } from "./use-session-git-repository-order";
+import { useMultiRepoSummary } from "./use-session-git-summary";
 
 /**
  * Per-repo result emitted by frontend-side fan-outs (commit, push, pull,
@@ -272,6 +275,46 @@ async function fanOutAcrossRepos(
   return aggregatePerRepoResults(perRepo, operation);
 }
 
+async function fanOutAcrossRepositoryWaves(
+  repos: string[],
+  operation: string,
+  op: (repo: string) => Promise<RawGitOperationResult>,
+): Promise<GitOperationResult> {
+  const results = await runRepositoryScopeWaves(
+    repos,
+    async (repo) => {
+      try {
+        return await op(repo);
+      } catch (e) {
+        return {
+          success: false,
+          operation,
+          output: "",
+          error: e instanceof Error ? e.message : String(e),
+        };
+      }
+    },
+    (repo, failedScopes) => ({
+      success: false,
+      operation,
+      output: "",
+      error: t("common:gitScopeSkipped", {
+        scope: repo || t("common:workspace"),
+        failedScopes: failedScopes.join(", "),
+      }),
+    }),
+  );
+  return aggregatePerRepoResults(
+    results.map(({ repository_name, result }) => ({
+      repository_name,
+      success: result.success,
+      output: result.output,
+      error: result.error,
+    })),
+    operation,
+  );
+}
+
 /**
  * Multi-repo dispatch for stage/unstage/commit/discard. The fan-out logic
  * (stage-all across every repo, commit per-repo with staged changes, etc.)
@@ -295,7 +338,9 @@ function useStageDispatch({
   const stageAll = useCallback(
     async (): Promise<GitOperationResult> => {
       if (reposInFiles.length <= 1) return gitOps.stage(undefined, reposInFiles[0]);
-      return fanOutAcrossRepos(reposInFiles, "stage", (r) => gitOps.stage(undefined, r));
+      return fanOutAcrossRepositoryWaves(reposInFiles, "stage", (r) =>
+        gitOps.stage(undefined, r || undefined),
+      );
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps -- stable fn ref
     [reposInFiles, gitOps.stage],
@@ -303,7 +348,9 @@ function useStageDispatch({
   const unstageAll = useCallback(
     async (): Promise<GitOperationResult> => {
       if (reposInFiles.length <= 1) return gitOps.unstage(undefined, reposInFiles[0]);
-      return fanOutAcrossRepos(reposInFiles, "unstage", (r) => gitOps.unstage(undefined, r));
+      return fanOutAcrossRepositoryWaves(reposInFiles, "unstage", (r) =>
+        gitOps.unstage(undefined, r || undefined),
+      );
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps -- stable fn ref
     [reposInFiles, gitOps.unstage],
@@ -321,31 +368,35 @@ function useStageDispatch({
       repo?: string,
     ): Promise<GitOperationResult> => {
       if (repo !== undefined) return gitOps.commit(message, stageAllOpt, amend, repo || undefined);
-      const reposWithStaged = Array.from(
-        new Set(stagedFiles.map((f) => f.repository_name).filter((n): n is string => Boolean(n))),
-      );
-      if (reposWithStaged.length === 0) return gitOps.commit(message, stageAllOpt, amend);
-      if (reposWithStaged.length === 1) {
-        return gitOps.commit(message, stageAllOpt, amend, reposWithStaged[0]);
+      const reposWithStaged = Array.from(new Set(stagedFiles.map((f) => f.repository_name ?? "")));
+      const reposToCommit = stageAllOpt ? reposInFiles : reposWithStaged;
+      if (reposToCommit.length === 0) return gitOps.commit(message, stageAllOpt, amend);
+      if (reposToCommit.length === 1) {
+        return gitOps.commit(message, stageAllOpt, amend, reposToCommit[0] || undefined);
       }
-      return fanOutAcrossRepos(reposWithStaged, "commit", (r) =>
-        gitOps.commit(message, stageAllOpt, amend, r),
+      return fanOutAcrossRepositoryWaves(reposToCommit, "commit", (r) =>
+        gitOps.commit(message, stageAllOpt, amend, r || undefined),
       );
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps -- stable fn ref
-    [gitOps.commit, stagedFiles],
+    [gitOps.commit, reposInFiles, stagedFiles],
   );
   const runPerRepo = useCallback(
     async (
       paths: string[],
       explicitRepo: string | undefined,
+      operation: string,
       op: (paths: string[], repo: string | undefined) => Promise<GitOperationResult>,
     ): Promise<GitOperationResult> => {
       if (explicitRepo !== undefined) return op(paths, explicitRepo || undefined);
       const buckets = groupPathsByRepo(paths);
-      let last: GitOperationResult | undefined;
-      for (const [repo, repoPaths] of buckets) last = await op(repoPaths, repo || undefined);
-      return last as GitOperationResult;
+      if (buckets.size <= 1) {
+        const [repo, repoPaths] = buckets.entries().next().value as [string, string[]];
+        return op(repoPaths, repo || undefined);
+      }
+      return fanOutAcrossRepositoryWaves(Array.from(buckets.keys()), operation, (repo) =>
+        op(buckets.get(repo) ?? [], repo || undefined),
+      );
     },
     [groupPathsByRepo],
   );
@@ -354,6 +405,7 @@ function useStageDispatch({
       paths: string[],
       repo: string | undefined,
       op: (rp: string[], r: string | undefined) => Promise<GitOperationResult>,
+      operation: string,
     ) => {
       // Bug 6: key pending entries by `repo::path` so an in-flight stage in
       // repo B isn't cleared when repo A's status update lands. The consumer
@@ -367,7 +419,7 @@ function useStageDispatch({
         return next;
       });
       try {
-        return await runPerRepo(paths, repo, op);
+        return await runPerRepo(paths, repo, operation, op);
       } catch (err) {
         setPendingStageFiles((prev) => {
           const next = new Set(prev);
@@ -381,80 +433,25 @@ function useStageDispatch({
   );
   const stageFile = useCallback(
     async (paths: string[], repo?: string) =>
-      wrapPending(paths, repo, (rp, r) => gitOps.stage(rp, r)),
+      wrapPending(paths, repo, (rp, r) => gitOps.stage(rp, r), "stage"),
     // eslint-disable-next-line react-hooks/exhaustive-deps -- stable fn ref
     [gitOps.stage, wrapPending],
   );
   const unstageFile = useCallback(
     async (paths: string[], repo?: string) =>
-      wrapPending(paths, repo, (rp, r) => gitOps.unstage(rp, r)),
+      wrapPending(paths, repo, (rp, r) => gitOps.unstage(rp, r), "unstage"),
     // eslint-disable-next-line react-hooks/exhaustive-deps -- stable fn ref
     [gitOps.unstage, wrapPending],
   );
   const discard = useCallback(
     async (paths?: string[], repo?: string) => {
       if (!paths || paths.length === 0) return gitOps.discard(paths, repo);
-      return runPerRepo(paths, repo, (rp, r) => gitOps.discard(rp, r));
+      return runPerRepo(paths, repo, "discard", (rp, r) => gitOps.discard(rp, r));
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps -- stable fn ref
     [gitOps.discard, runPerRepo],
   );
   return { stageAll, unstageAll, commit, stageFile, unstageFile, discard };
-}
-
-/**
- * Multi-repo summary for the per-repo Pull/Push/Commit controls. Returns the
- * full list of repo names known to the session (even ones with no file
- * changes) plus a per-repo `branch / ahead / behind / hasStaged / hasUnstaged`
- * row for each. Empty for single-repo workspaces.
- */
-function useMultiRepoSummary(
-  statusByRepo: ReturnType<typeof useSessionGitStatusByRepo>,
-  allFiles: FileInfo[],
-  reposInFiles: string[],
-) {
-  // Include every repo known to the session, including the empty-name entry
-  // for single-repo. Components render the same per-repo group structure in
-  // both modes — the empty name routes ops to the workspace root, named
-  // entries route to their respective subdirectories.
-  //
-  // Defensive filter: when there are named entries (multi-repo), drop the
-  // empty entry. The bare task-root tracker is supposed to stay quiet for
-  // multi-repo (see workspace_tracker.go's gitIndexPath guard) but a stale
-  // entry can linger from older builds or a bugged code path; without this
-  // filter the dropdown would show an extra "Repository" / primary-name row
-  // alongside the real per-repo entries.
-  const repoNamesForControls = useMemo(() => {
-    const seen = new Set<string>();
-    for (const { repository_name } of statusByRepo) seen.add(repository_name);
-    for (const r of reposInFiles) seen.add(r);
-    const all = Array.from(seen).sort((a, b) => a.localeCompare(b));
-    const named = all.filter((r) => r !== "");
-    return named.length > 0 ? named : all;
-  }, [statusByRepo, reposInFiles]);
-
-  const perRepoStatus = useMemo(() => {
-    if (statusByRepo.length === 0) return [];
-    const stagedByRepo = new Map<string, boolean>();
-    const unstagedByRepo = new Map<string, boolean>();
-    for (const f of allFiles) {
-      const r = f.repository_name ?? "";
-      if (f.staged) stagedByRepo.set(r, true);
-      else unstagedByRepo.set(r, true);
-    }
-    const hasNamed = statusByRepo.some((s) => s.repository_name !== "");
-    const filtered = hasNamed ? statusByRepo.filter((s) => s.repository_name !== "") : statusByRepo;
-    return filtered.map(({ repository_name, status }) => ({
-      repository_name,
-      branch: status?.branch ?? null,
-      ahead: status?.ahead ?? 0,
-      behind: status?.behind ?? 0,
-      hasStaged: stagedByRepo.get(repository_name) ?? false,
-      hasUnstaged: unstagedByRepo.get(repository_name) ?? false,
-    }));
-  }, [statusByRepo, allFiles]);
-
-  return { repoNamesForControls, perRepoStatus };
 }
 
 /**
@@ -518,14 +515,8 @@ type RemoteOpsArgs = {
  * push. Pull/Rebase/Merge/Abort fan out across every repo unconditionally.
  */
 function useRemoteOpsFanOut({ gitOps, repoNamesForControls, perRepoStatus }: RemoteOpsArgs) {
-  // Filter out the legacy empty-name entry; it represents the workspace root
-  // which isn't a real git repo in multi-repo task workspaces. We only want
-  // to iterate the named repos.
-  const namedRepos = useMemo(
-    () => repoNamesForControls.filter((r) => r !== ""),
-    [repoNamesForControls],
-  );
-  const isMultiRepo = namedRepos.length > 1;
+  const namedRepos = useMemo(() => repoNamesForControls, [repoNamesForControls]);
+  const isMultiRepo = repoNamesForControls.length > 1;
   const aheadByRepo = useMemo(() => {
     const m = new Map<string, number>();
     for (const s of perRepoStatus) m.set(s.repository_name, s.ahead);
@@ -623,7 +614,7 @@ function useFileDerivations(
   }, [allFiles]);
   const reposInFiles = useMemo(() => {
     const seen = new Set<string>();
-    for (const f of allFiles) if (f.repository_name) seen.add(f.repository_name);
+    for (const f of allFiles) seen.add(f.repository_name ?? "");
     return Array.from(seen);
   }, [allFiles]);
   const { repoNamesForControls, perRepoStatus } = useMultiRepoSummary(

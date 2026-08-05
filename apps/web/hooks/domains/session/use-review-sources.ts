@@ -15,6 +15,7 @@ import {
   normalizeDiffContent,
   reviewFileKey,
   splitReviewFileKey,
+  suppressAvailableGitlinkFiles,
 } from "@/components/review/types";
 import { createDebugLogger } from "@/lib/debug/log";
 import type { ReviewFile } from "@/components/review/types";
@@ -95,8 +96,11 @@ function addCumulativeFiles(
     const path = file.path ?? splitReviewFileKey(mapKey).path;
     const repositoryName = useRepositoryKeys ? file.repository_name : undefined;
     const key = reviewFileKey({ path, repository_name: repositoryName });
-    const hasRepoUnawareCollision = key !== path && fileMap.has(path);
-    if (fileMap.has(key) || uncommittedPaths.has(key) || hasRepoUnawareCollision) continue;
+    // A bare path is the workspace-root scope in a multi-repository review;
+    // it must not hide a same-named file from a child repository. The exact
+    // key still preserves uncommitted precedence for the owning scope, while
+    // useRepositoryKeys=false keeps legacy single-repository deduplication.
+    if (fileMap.has(key) || uncommittedPaths.has(key)) continue;
     const diff = file.diff ? normalizeDiffContent(file.diff) : "";
     fileMap.set(key, {
       path,
@@ -122,8 +126,7 @@ function addPRFiles(
 ) {
   for (const file of files) {
     const key = reviewFileKey({ path: file.filename, repository_name: repoName });
-    const hasRepoUnawareCollision = key !== file.filename && fileMap.has(file.filename);
-    if (fileMap.has(key) || uncommittedPaths.has(key) || hasRepoUnawareCollision) continue;
+    if (fileMap.has(key) || uncommittedPaths.has(key)) continue;
     const diff = file.patch ? normalizeDiffContent(file.patch) : "";
     fileMap.set(key, {
       path: file.filename,
@@ -204,20 +207,31 @@ type NormalizeReviewStatusSourcesInput = {
   cumulativeRepositoryNames?: Iterable<string>;
 };
 
+function normalizeMultiRepoStatusByRepo(
+  input: NormalizeReviewStatusSourcesInput,
+  hasRootStatus: boolean,
+) {
+  if (input.statusByRepo.length === 0) return undefined;
+  if (hasRootStatus || input.taskRepositoryCount > 1) return input.statusByRepo;
+  if (!input.gitStatus?.files) return input.statusByRepo;
+  return [{ repository_name: "", status: input.gitStatus }, ...input.statusByRepo];
+}
+
 export function normalizeReviewStatusSources(input: NormalizeReviewStatusSourcesInput) {
   const namedStatuses = input.statusByRepo.filter((entry) => entry.repository_name !== "");
   const useRepositoryKeys = isReviewMultiRepo(
     input.taskRepositoryCount,
-    namedStatuses
+    input.statusByRepo
       .map((entry) => entry.repository_name)
       .concat(Array.from(input.cumulativeRepositoryNames ?? [])),
   );
   if (useRepositoryKeys) {
+    const hasRootStatus = input.statusByRepo.some((entry) => entry.repository_name === "");
     return {
       useRepositoryKeys: true,
       prRepoName: input.resolvedPRRepoName,
       normalizedGitStatus: input.gitStatus,
-      normalizedStatusByRepo: namedStatuses.length > 0 ? namedStatuses : undefined,
+      normalizedStatusByRepo: normalizeMultiRepoStatusByRepo(input, hasRootStatus),
     };
   }
   return {
@@ -226,6 +240,62 @@ export function normalizeReviewStatusSources(input: NormalizeReviewStatusSources
     normalizedGitStatus: input.gitStatus?.files ? input.gitStatus : namedStatuses[0]?.status,
     normalizedStatusByRepo: undefined,
   };
+}
+
+function addUncommittedSources(
+  fileMap: Map<string, ReviewFile>,
+  statusByRepo: BuildReviewSourcesInput["statusByRepo"],
+  gitStatus: BuildReviewSourcesInput["gitStatus"],
+) {
+  if (statusByRepo && statusByRepo.length > 0) {
+    for (const { repository_name, status } of statusByRepo) {
+      if (status?.files) {
+        addUncommittedFiles(
+          fileMap,
+          status.files as Record<string, UncommittedFile>,
+          repository_name || undefined,
+        );
+      }
+    }
+    return;
+  }
+  if (gitStatus?.files) {
+    addUncommittedFiles(fileMap, gitStatus.files as Record<string, UncommittedFile>);
+  }
+}
+
+function addCommittedAndPRSources(
+  fileMap: Map<string, ReviewFile>,
+  input: BuildReviewSourcesInput,
+  uncommittedPaths: Set<string>,
+) {
+  const { cumulativeDiff, prDiffFiles, prRepoName, useRepositoryKeys = true } = input;
+  if (cumulativeDiff?.files) {
+    addCumulativeFiles(
+      fileMap,
+      cumulativeDiff.files,
+      uncommittedPaths,
+      useRepositoryKeys,
+      cumulativeDiff.base_commit,
+    );
+  }
+  if (prDiffFiles && prDiffFiles.length > 0) {
+    addPRFiles(fileMap, prDiffFiles, uncommittedPaths, useRepositoryKeys ? prRepoName : undefined);
+  }
+}
+
+function sortReviewFiles(fileMap: Map<string, ReviewFile>): ReviewFile[] {
+  return Array.from(fileMap.values()).sort((a, b) => {
+    const repoCmp = (a.repository_name ?? "").localeCompare(b.repository_name ?? "");
+    if (repoCmp !== 0) return repoCmp;
+    return a.path.localeCompare(b.path);
+  });
+}
+
+function countReviewSources(files: ReviewFile[]): SourceCounts {
+  const sourceCounts: SourceCounts = { uncommitted: 0, committed: 0, pr: 0 };
+  for (const file of files) sourceCounts[file.source]++;
+  return sourceCounts;
 }
 
 /**
@@ -239,55 +309,14 @@ export function normalizeReviewStatusSources(input: NormalizeReviewStatusSources
  * `components/review/review-dialog.tsx`.
  */
 export function buildReviewSources(input: BuildReviewSourcesInput): BuildReviewSourcesResult {
-  const {
-    gitStatus,
-    statusByRepo,
-    cumulativeDiff,
-    prDiffFiles,
-    prRepoName,
-    useRepositoryKeys = true,
-  } = input;
+  const { gitStatus, statusByRepo } = input;
   const fileMap = new Map<string, ReviewFile>();
 
   const uncommittedPaths = collectUncommittedPaths(statusByRepo, gitStatus);
-
-  if (statusByRepo && statusByRepo.length > 0) {
-    for (const { repository_name, status } of statusByRepo) {
-      if (status?.files) {
-        addUncommittedFiles(
-          fileMap,
-          status.files as Record<string, UncommittedFile>,
-          repository_name || undefined,
-        );
-      }
-    }
-  } else if (gitStatus?.files) {
-    addUncommittedFiles(fileMap, gitStatus.files as Record<string, UncommittedFile>);
-  }
-
-  if (cumulativeDiff?.files) {
-    addCumulativeFiles(
-      fileMap,
-      cumulativeDiff.files,
-      uncommittedPaths,
-      useRepositoryKeys,
-      cumulativeDiff.base_commit,
-    );
-  }
-
-  if (prDiffFiles && prDiffFiles.length > 0)
-    addPRFiles(fileMap, prDiffFiles, uncommittedPaths, prRepoName);
-
-  const allFiles = Array.from(fileMap.values()).sort((a, b) => {
-    const repoCmp = (a.repository_name ?? "").localeCompare(b.repository_name ?? "");
-    if (repoCmp !== 0) return repoCmp;
-    return a.path.localeCompare(b.path);
-  });
-
-  const sourceCounts: SourceCounts = { uncommitted: 0, committed: 0, pr: 0 };
-  for (const f of allFiles) sourceCounts[f.source]++;
-
-  return { allFiles, sourceCounts };
+  addUncommittedSources(fileMap, statusByRepo, gitStatus);
+  addCommittedAndPRSources(fileMap, input, uncommittedPaths);
+  const allFiles = suppressAvailableGitlinkFiles(sortReviewFiles(fileMap));
+  return { allFiles, sourceCounts: countReviewSources(allFiles) };
 }
 
 export type UseReviewSourcesResult = {

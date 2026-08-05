@@ -16,6 +16,9 @@ import type { Comment } from "@/lib/state/slices/comments";
 const RENAMED_PATH = "src/new-name.ts";
 const PREVIOUS_PATH = "src/old-name.ts";
 const README_PATH = "README.md";
+const LIB_SCOPE = "vendor/lib";
+const OUTER_SCOPE = "vendor/outer";
+const INNER_SCOPE = `${OUTER_SCOPE}/vendor/inner`;
 const FRONTEND_REPO = "frontend";
 const BACKEND_REPO = "backend";
 const FIRST_PR_KEY = "acme/app/1";
@@ -249,6 +252,70 @@ describe("buildAllFiles", () => {
   });
 });
 
+describe("buildAllFiles submodule gitlinks", () => {
+  it("hides an available parent gitlink when child files are present", () => {
+    const gitStatusFiles = {
+      [LIB_SCOPE]: {
+        path: LIB_SCOPE,
+        status: "modified" as const,
+        staged: false,
+        diff: "@@gitlink@@",
+      },
+      [`${LIB_SCOPE}\u0000${README_PATH}`]: {
+        path: README_PATH,
+        status: "modified" as const,
+        staged: false,
+        diff: "@@child@@",
+        repository_name: LIB_SCOPE,
+      },
+    };
+
+    const result = buildAllFiles(gitStatusFiles, null);
+
+    expect(result.map(reviewFileKey)).toEqual([`${LIB_SCOPE}\u0000${README_PATH}`]);
+  });
+
+  it("hides a nested parent gitlink at its owning repository scope", () => {
+    const result = buildAllFiles(
+      {
+        [`${OUTER_SCOPE}\u0000vendor/inner`]: {
+          path: "vendor/inner",
+          status: "modified" as const,
+          staged: false,
+          repository_name: OUTER_SCOPE,
+          diff: "@@nested-gitlink@@",
+        },
+        [`${INNER_SCOPE}\u0000${README_PATH}`]: {
+          path: README_PATH,
+          status: "modified" as const,
+          staged: false,
+          repository_name: INNER_SCOPE,
+          diff: "@@nested-child@@",
+        },
+      },
+      null,
+    );
+
+    expect(result.map(reviewFileKey)).toEqual([`${INNER_SCOPE}\u0000${README_PATH}`]);
+  });
+
+  it("keeps the parent gitlink when no child file source is available", () => {
+    const result = buildAllFiles(
+      {
+        [LIB_SCOPE]: {
+          path: LIB_SCOPE,
+          status: "modified" as const,
+          staged: false,
+          diff: "@@gitlink@@",
+        },
+      },
+      null,
+    );
+
+    expect(result.map(reviewFileKey)).toEqual([LIB_SCOPE]);
+  });
+});
+
 describe("buildAllFiles source collisions", () => {
   it("deduplicates a repo-stamped cumulative file against repo-unaware git status", () => {
     const path = "src/shared.ts";
@@ -280,10 +347,43 @@ describe("buildAllFiles source collisions", () => {
       },
     } as unknown as CumulativeDiff;
 
-    const result = buildAllFiles(gitStatusFiles, cumulativeDiff);
+    const result = buildAllFiles(gitStatusFiles, cumulativeDiff, undefined, undefined, false);
 
     expect(result).toHaveLength(1);
     expect(result[0]).toMatchObject({ path, source: "uncommitted" });
+  });
+
+  it("keeps a root file beside a same-named nested-scope file", () => {
+    const result = buildAllFiles(
+      {
+        [README_PATH]: {
+          path: README_PATH,
+          status: "modified" as const,
+          staged: false,
+          diff: "@@root@@",
+        },
+      },
+      {
+        session_id: "s1",
+        base_commit: "abc",
+        head_commit: "def",
+        total_commits: 1,
+        files: {
+          [`vendor/outer\u0000${README_PATH}`]: {
+            path: README_PATH,
+            repository_name: "vendor/outer",
+            status: "modified",
+            staged: false,
+            diff: "@@outer@@",
+          },
+        },
+      } as unknown as CumulativeDiff,
+    );
+
+    expect(result.map(reviewFileKey).sort()).toEqual([
+      README_PATH,
+      `vendor/outer\u0000${README_PATH}`,
+    ]);
   });
 
   it("uses a bare cumulative key in single-repository review mode", () => {

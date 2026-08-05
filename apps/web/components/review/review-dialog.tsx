@@ -26,6 +26,7 @@ import {
   normalizeDiffContent,
   reviewFileKey,
   splitReviewFileKey as splitFileKey,
+  suppressAvailableGitlinkFiles,
 } from "./types";
 
 /**
@@ -58,8 +59,12 @@ function addCumulativeDiffFiles(
     const path = file.path ?? splitFileKey(mapKey).path;
     if (!path) continue;
     const key = fileMapKey(path, repoName);
-    const hasRepoUnawareCollision = key !== path && fileMap.has(path);
-    if (fileMap.has(key) || hasRepoUnawareCollision) continue;
+    // In multi-scope mode, a bare path belongs to the workspace root while a
+    // repository-scoped path belongs to that repository. They may share a
+    // filename (README.md is common), so only the canonical scoped key is a
+    // collision. Single-repository callers pass useRepositoryKeys=false and
+    // therefore still dedupe on the bare path.
+    if (fileMap.has(key)) continue;
     const diff = file.diff ? normalizeDiffContent(file.diff) : "";
     fileMap.set(key, {
       path,
@@ -104,8 +109,7 @@ function addPRFiles(fileMap: Map<string, ReviewFile>, files: PRDiffFile[], repoN
   const repositoryName = repoName || undefined;
   for (const file of files) {
     const key = fileMapKey(file.filename, repositoryName);
-    const hasRepoUnawareCollision = !!repositoryName && fileMap.has(file.filename);
-    if (fileMap.has(key) || hasRepoUnawareCollision) continue;
+    if (fileMap.has(key)) continue;
     const diff = file.patch ? normalizeDiffContent(file.patch) : "";
     fileMap.set(key, {
       path: file.filename,
@@ -147,11 +151,12 @@ export function buildAllFiles(
     );
   }
   if (prDiffFiles) addPRFiles(fileMap, prDiffFiles, prRepoName);
-  return Array.from(fileMap.values()).sort((a, b) => {
+  const sortedFiles = Array.from(fileMap.values()).sort((a, b) => {
     const repoCmp = (a.repository_name ?? "").localeCompare(b.repository_name ?? "");
     if (repoCmp !== 0) return repoCmp;
     return a.path.localeCompare(b.path);
   });
+  return suppressAvailableGitlinkFiles(sortedFiles);
 }
 
 export function filterPendingDiffCommentsForSession(

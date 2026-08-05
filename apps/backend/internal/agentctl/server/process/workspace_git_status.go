@@ -322,6 +322,16 @@ func (wt *WorkspaceTracker) getGitBranchInfo(ctx context.Context, update *types.
 // baseBranch is treated as user-controlled and re-sanitised here so static
 // analysis sees the regex barrier inline with the `git` invocation.
 func (wt *WorkspaceTracker) computeBaseCommit(ctx context.Context, baseBranch string) string {
+	if wt.IsSubmodule() {
+		if !sha1HexPattern.MatchString(baseBranch) {
+			return ""
+		}
+		out, err := wt.runGitOutput(ctx, "rev-parse", "--verify", baseBranch+"^{commit}")
+		if err != nil {
+			return ""
+		}
+		return strings.TrimSpace(string(out))
+	}
 	// Same inline regex barrier as resolveStoredRef so CodeQL's
 	// taint-tracker sees it co-located with the `git` subprocess call.
 	rest, hasOriginPrefix := strings.CutPrefix(baseBranch, "origin/")
@@ -552,6 +562,15 @@ func (r baseBranchResolution) log(wt *WorkspaceTracker) {
 // outcome is assertable in tests rather than only observable through logs.
 func (wt *WorkspaceTracker) resolveBaseBranchWithReason(ctx context.Context) baseBranchResolution {
 	stored := wt.BaseBranch()
+	if wt.IsSubmodule() {
+		anchor := wt.ComparisonAnchor()
+		if anchor != "" {
+			if ref := wt.resolveStoredRef(ctx, anchor); ref != "" {
+				return baseBranchResolution{ref: ref, stored: anchor, reason: baseBranchStored}
+			}
+		}
+		return baseBranchResolution{stored: anchor, reason: baseBranchUnresolved}
+	}
 	if stored != "" {
 		if ref := wt.resolveStoredRef(ctx, stored); ref != "" {
 			return baseBranchResolution{ref: ref, stored: stored, reason: baseBranchStored}
@@ -574,6 +593,9 @@ func (wt *WorkspaceTracker) resolveBaseBranchWithReason(ctx context.Context) bas
 // aheadBehindFallbackCandidates list — local main/master are excluded
 // because they can show stale, in-progress work for divergence counts.
 func (wt *WorkspaceTracker) resolveAheadBehindRef(ctx context.Context) string {
+	if wt.IsSubmodule() {
+		return wt.resolveBaseBranch(ctx)
+	}
 	if stored := wt.BaseBranch(); stored != "" {
 		if ref := wt.resolveStoredRef(ctx, stored); ref != "" {
 			return ref

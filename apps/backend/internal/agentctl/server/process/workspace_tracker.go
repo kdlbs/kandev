@@ -61,6 +61,11 @@ type WorkspaceTracker struct {
 	// Sourced from task_repositories.base_branch on the kandev backend.
 	// Empty for legacy tasks or external branches with no recorded base.
 	baseBranch string
+	// comparisonAnchor is set for an initialized submodule. Unlike a branch
+	// name, it must remain pinned to the gitlink commit recorded by the parent
+	// comparison tree, even when the submodule's own default branch moves.
+	comparisonAnchor    string
+	comparisonAnchorSet bool
 
 	// lastBaseBranchLog dedupes the diff-base resolution log. resolveBaseBranch
 	// runs on every status poll (as often as every couple of seconds), so
@@ -178,11 +183,48 @@ func (wt *WorkspaceTracker) RepositoryName() string {
 func (wt *WorkspaceTracker) SetBaseBranch(baseBranch string) {
 	wt.mu.Lock()
 	defer wt.mu.Unlock()
+	wt.comparisonAnchor = ""
+	wt.comparisonAnchorSet = false
 	if !IsSafeGitRef(baseBranch) {
 		wt.baseBranch = ""
 		return
 	}
 	wt.baseBranch = baseBranch
+}
+
+// SetComparisonAnchor pins this tracker to the commit recorded by its parent
+// repository at the parent's comparison point. An empty anchor is still
+// meaningful: it records that this is a submodule whose committed base could
+// not be resolved, so later base-branch updates must not substitute an
+// unrelated branch from the task configuration.
+func (wt *WorkspaceTracker) SetComparisonAnchor(anchor string) {
+	wt.mu.Lock()
+	defer wt.mu.Unlock()
+	wt.comparisonAnchorSet = true
+	if !sha1HexPattern.MatchString(anchor) {
+		wt.comparisonAnchor = ""
+		wt.baseBranch = ""
+		return
+	}
+	wt.comparisonAnchor = anchor
+	wt.baseBranch = anchor
+}
+
+// IsSubmodule reports whether this tracker represents a declared submodule,
+// including a child whose parent comparison anchor could not be resolved.
+func (wt *WorkspaceTracker) IsSubmodule() bool {
+	wt.mu.RLock()
+	defer wt.mu.RUnlock()
+	return wt.comparisonAnchorSet
+}
+
+// ComparisonAnchor returns the exact parent-recorded gitlink commit when one
+// was discovered. It is empty when the tracker is not a submodule or when the
+// parent anchor could not be resolved locally.
+func (wt *WorkspaceTracker) ComparisonAnchor() string {
+	wt.mu.RLock()
+	defer wt.mu.RUnlock()
+	return wt.comparisonAnchor
 }
 
 // IsSafeGitRef reports whether ref is safe to splice into a `git`

@@ -81,6 +81,26 @@ describe("buildFileTree — multi-repo", () => {
     expect(frontend?.children?.[0].file?.repository_id).toBe("f");
     expect(backend?.children?.[0].file?.repository_id).toBe("b");
   });
+
+  it("places nested submodule scopes beneath their workspace directory hierarchy", () => {
+    const tree = buildFileTree([
+      file({ path: "README.md" }),
+      file({ path: "src/main.ts", repository_name: "vendor/outer" }),
+      file({ path: "README.md", repository_name: "vendor/outer/vendor/inner" }),
+    ]);
+
+    const vendor = tree.find((node) => node.name === "vendor");
+    const outer = vendor?.children?.find((node) => node.name === "outer");
+    const nestedVendor = outer?.children?.find((node) => node.name === "vendor");
+    const inner = nestedVendor?.children?.find((node) => node.name === "inner");
+
+    expect(vendor).toBeDefined();
+    expect(outer?.isSubmodule).toBe(true);
+    expect(outer?.repositoryName).toBe("vendor/outer");
+    expect(inner?.isSubmodule).toBe(true);
+    expect(inner?.repositoryName).toBe("vendor/outer/vendor/inner");
+    expect(inner?.children?.[0].file?.repository_name).toBe("vendor/outer/vendor/inner");
+  });
 });
 
 // reviewFileKey + splitReviewFileKey are the dedup primitive for the

@@ -25,6 +25,20 @@ type ReviewGitStatusFiles = {
   isMultiRepo: boolean;
 };
 
+function buildMultiRepoReviewFiles(
+  statusByRepo: Array<{ repository_name: string; status: GitStatusEntry }>,
+): Record<string, FileInfo> {
+  const files: Record<string, FileInfo> = {};
+  for (const { repository_name, status } of statusByRepo) {
+    if (!status?.files) continue;
+    for (const [path, file] of Object.entries(status.files)) {
+      const key = repository_name ? `${repository_name}\u0000${path}` : path;
+      files[key] = repository_name ? { ...file, repository_name } : file;
+    }
+  }
+  return files;
+}
+
 export function buildReviewGitStatusFiles(
   reviewGitStatus: GitStatusEntry | undefined,
   statusByRepo: Array<{ repository_name: string; status: GitStatusEntry }>,
@@ -34,7 +48,9 @@ export function buildReviewGitStatusFiles(
   const named = statusByRepo.filter((entry) => entry.repository_name !== "");
   const isMultiRepo = isReviewMultiRepo(
     taskRepositoryCount,
-    named.map((entry) => entry.repository_name).concat(Array.from(cumulativeRepositoryNames)),
+    statusByRepo
+      .map((entry) => entry.repository_name)
+      .concat(Array.from(cumulativeRepositoryNames)),
   );
   if (!isMultiRepo) {
     return {
@@ -49,13 +65,7 @@ export function buildReviewGitStatusFiles(
     };
   }
 
-  const files: Record<string, FileInfo> = {};
-  for (const { repository_name, status } of named) {
-    if (!status?.files) continue;
-    for (const [path, file] of Object.entries(status.files)) {
-      files[`${repository_name}\u0000${path}`] = { ...file, repository_name };
-    }
-  }
+  const files = buildMultiRepoReviewFiles(statusByRepo);
   return {
     files: Object.keys(files).length > 0 ? files : null,
     isMultiRepo: true,

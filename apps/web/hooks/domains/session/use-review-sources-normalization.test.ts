@@ -3,11 +3,22 @@ import { reviewFileKey } from "@/components/review/types";
 import type { PRDiffFile } from "@/lib/types/github";
 import { buildReviewSources, normalizeReviewStatusSources } from "./use-review-sources";
 
+const NESTED_SCOPE = "vendor/lib";
+
 const namedStatus = {
   repository_name: "frontend",
   status: {
     files: {
       "src/local.ts": { diff: "@@local@@", status: "modified", additions: 1, deletions: 0 },
+    },
+  },
+};
+
+const nestedStatus = {
+  repository_name: NESTED_SCOPE,
+  status: {
+    files: {
+      "src/local.ts": { diff: "@@nested@@", status: "modified", additions: 1, deletions: 0 },
     },
   },
 };
@@ -95,5 +106,120 @@ describe("review source key mode", () => {
       "frontend\u0000README.md",
       "frontend\u0000src/local.ts",
     ]);
+  });
+});
+
+describe("nested scope review sources", () => {
+  it("retains a real workspace root alongside a named submodule scope", () => {
+    const rootStatus = {
+      repository_name: "",
+      status: {
+        files: {
+          "README.md": { diff: "@@root@@", status: "modified", additions: 1, deletions: 0 },
+        },
+      },
+    };
+    const normalized = normalizeReviewStatusSources({
+      gitStatus: undefined,
+      statusByRepo: [rootStatus, nestedStatus],
+      taskRepositoryCount: 1,
+    });
+
+    expect(normalized.useRepositoryKeys).toBe(true);
+    expect(normalized.normalizedStatusByRepo?.map((entry) => entry.repository_name)).toEqual([
+      "",
+      NESTED_SCOPE,
+    ]);
+
+    const result = buildReviewSources({
+      gitStatus: normalized.normalizedGitStatus,
+      statusByRepo: normalized.normalizedStatusByRepo,
+      cumulativeDiff: null,
+      prDiffFiles: undefined,
+      useRepositoryKeys: normalized.useRepositoryKeys,
+    });
+
+    expect(result.allFiles.map(reviewFileKey)).toEqual([
+      "README.md",
+      `${NESTED_SCOPE}\u0000src/local.ts`,
+    ]);
+  });
+
+  it("keeps same-named root and nested-scope cumulative files distinct", () => {
+    const result = buildReviewSources({
+      gitStatus: undefined,
+      statusByRepo: [
+        {
+          repository_name: "",
+          status: {
+            files: {
+              "README.md": {
+                diff: "@@root@@",
+                status: "modified",
+                additions: 1,
+                deletions: 0,
+              },
+            },
+          },
+        },
+      ],
+      cumulativeDiff: {
+        files: {
+          [`${NESTED_SCOPE}\u0000README.md`]: {
+            path: "README.md",
+            repository_name: NESTED_SCOPE,
+            diff: "@@child@@",
+            status: "modified",
+            additions: 1,
+            deletions: 0,
+          },
+        },
+      },
+      prDiffFiles: undefined,
+      useRepositoryKeys: true,
+    });
+
+    expect(result.allFiles.map(reviewFileKey).sort()).toEqual([
+      "README.md",
+      `${NESTED_SCOPE}\u0000README.md`,
+    ]);
+  });
+});
+
+describe("nested scope gitlink sources", () => {
+  it("suppresses an available parent gitlink but keeps an unavailable one", () => {
+    const rootStatus = {
+      repository_name: "",
+      status: {
+        files: {
+          [NESTED_SCOPE]: { diff: "@@gitlink@@", status: "modified", additions: 1, deletions: 1 },
+        },
+      },
+    };
+    const childStatus = {
+      repository_name: NESTED_SCOPE,
+      status: {
+        files: {
+          "README.md": { diff: "@@child@@", status: "modified", additions: 1, deletions: 0 },
+        },
+      },
+    };
+    const available = buildReviewSources({
+      gitStatus: undefined,
+      statusByRepo: [rootStatus, childStatus],
+      cumulativeDiff: null,
+      prDiffFiles: undefined,
+      useRepositoryKeys: true,
+    });
+    expect(available.allFiles.map(reviewFileKey)).toEqual([`${NESTED_SCOPE}\u0000README.md`]);
+
+    const unavailable = buildReviewSources({
+      gitStatus: undefined,
+      statusByRepo: [rootStatus],
+      cumulativeDiff: null,
+      prDiffFiles: undefined,
+      useRepositoryKeys: true,
+    });
+    expect(unavailable.allFiles.map(reviewFileKey)).toEqual([NESTED_SCOPE]);
   });
 });

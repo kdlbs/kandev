@@ -73,11 +73,40 @@ export function isReviewMultiRepo(
 ): boolean {
   if (taskRepositoryCount > 1) return true;
   const namedRepositories = new Set<string>();
+  let hasWorkspaceRoot = false;
   for (const name of repositoryNames) {
+    if (!name) hasWorkspaceRoot = true;
     if (name) namedRepositories.add(name);
     if (namedRepositories.size > 1) return true;
   }
-  return false;
+  return hasWorkspaceRoot && namedRepositories.size > 0;
+}
+
+/**
+ * A parent repository reports a changed submodule as a gitlink file at the
+ * child's workspace-relative scope. Once the child contributes any file,
+ * that synthetic parent row is redundant; when it contributes nothing, the
+ * row is the only available evidence and must remain visible.
+ */
+export function suppressAvailableGitlinkFiles(files: ReviewFile[]): ReviewFile[] {
+  const childScopesWithFiles = new Set<string>();
+  for (const file of files) {
+    if (file.repository_name) childScopesWithFiles.add(file.repository_name);
+  }
+  if (childScopesWithFiles.size === 0) return files;
+  const gitlinkKeys = new Set<string>();
+  for (const childScope of childScopesWithFiles) {
+    const boundaries = [
+      -1,
+      ...Array.from(childScope.matchAll(/\//g), (match) => match.index ?? -1),
+    ];
+    for (const boundary of boundaries) {
+      const parentScope = boundary < 0 ? "" : childScope.slice(0, boundary);
+      const childPath = childScope.slice(parentScope.length + (parentScope ? 1 : 0));
+      gitlinkKeys.add(reviewFileKey({ path: childPath, repository_name: parentScope }));
+    }
+  }
+  return files.filter((file) => !gitlinkKeys.has(reviewFileKey(file)));
 }
 
 export function getCumulativeReviewRepositoryNames(
@@ -167,6 +196,10 @@ export type FileTreeNode = {
   isRepoRoot?: boolean;
   /** Repository id this node represents (only set when isRepoRoot is true). */
   repositoryId?: string;
+  /** True when this node is the boundary of an initialized submodule scope. */
+  isSubmodule?: boolean;
+  /** Full task-workspace-relative repository scope for a submodule boundary. */
+  repositoryName?: string;
 };
 
 /**
@@ -203,58 +236,106 @@ export const hashDiff = djb2Hash;
  * file paths inside them stay relative to the repo root.
  */
 export function buildFileTree(files: ReviewFile[]): FileTreeNode[] {
-  const repoNames = new Set<string>();
-  for (const f of files) {
-    if (f.repository_name) repoNames.add(f.repository_name);
-  }
-  const isMultiRepo = repoNames.size > 1;
-
-  if (isMultiRepo) return buildMultiRepoTree(files);
+  if (files.some((file) => Boolean(file.repository_name))) return buildScopedTree(files);
   return buildFlatTree(files);
 }
 
-function buildMultiRepoTree(files: ReviewFile[]): FileTreeNode[] {
-  // Group by repo first, then build a sub-tree for each.
-  const byRepo = new Map<string, { name: string; id: string; files: ReviewFile[] }>();
-  for (const f of files) {
-    const name = f.repository_name ?? "(unspecified)";
-    const id = f.repository_id ?? name;
-    const key = id;
-    let entry = byRepo.get(key);
-    if (!entry) {
-      entry = { name, id, files: [] };
-      byRepo.set(key, entry);
+function buildScopedTree(files: ReviewFile[]): FileTreeNode[] {
+  const scopeNames = new Set(
+    files.map((file) => file.repository_name).filter((name): name is string => Boolean(name)),
+  );
+  const hasWorkspaceRootFiles = files.some((file) => !file.repository_name);
+  const topLevelRepoRoots = new Set<string>();
+  if (!hasWorkspaceRootFiles && scopeNames.size > 1) {
+    for (const scope of scopeNames) topLevelRepoRoots.add(scope.split("/")[0]);
+  }
+
+  const repositoryIds = new Map<string, string>();
+  for (const file of files) {
+    if (file.repository_name && file.repository_id) {
+      repositoryIds.set(file.repository_name, file.repository_id);
     }
-    entry.files.push(f);
   }
-  const repoRoots: FileTreeNode[] = [];
-  for (const [, entry] of byRepo) {
-    const repoPath = `__repo__:${entry.id}`;
-    const subtree = buildFlatTree(entry.files);
-    // Two repos can contain a same-named path ("src/foo.ts" in both
-    // frontend and backend). Prefix every node path under this repo with
-    // the repo root path so tree-node paths are globally unique — required
-    // for useTree's expansion Set to track them independently.
-    const prefixedSubtree = subtree.map((n) => prefixPaths(n, repoPath));
-    repoRoots.push({
-      name: entry.name,
-      path: repoPath,
-      isDir: true,
-      isRepoRoot: true,
-      repositoryId: entry.id,
-      children: prefixedSubtree,
-    });
+
+  const root: FileTreeNode = { name: "", path: "", isDir: true, children: [] };
+  const directorySegmentCounts = new Map<string, number>();
+  const context: ScopedTreeContext = {
+    scopeNames,
+    topLevelRepoRoots,
+    repositoryIds,
+    directorySegmentCounts,
+  };
+
+  for (const file of files) {
+    appendScopedFile(root, file, context);
   }
-  // Stable alphabetical order by repo name.
-  return repoRoots.sort((a, b) => a.name.localeCompare(b.name));
+
+  return collapseScopedTree(root);
 }
 
-function prefixPaths(node: FileTreeNode, prefix: string): FileTreeNode {
-  return {
-    ...node,
-    path: `${prefix}/${node.path}`,
-    children: node.children?.map((c) => prefixPaths(c, prefix)),
-  };
+type ScopedTreeContext = {
+  scopeNames: Set<string>;
+  topLevelRepoRoots: Set<string>;
+  repositoryIds: Map<string, string>;
+  directorySegmentCounts: Map<string, number>;
+};
+
+function appendScopedFile(root: FileTreeNode, file: ReviewFile, context: ScopedTreeContext) {
+  const { scopeNames, topLevelRepoRoots, repositoryIds, directorySegmentCounts } = context;
+  const scope = file.repository_name ?? "";
+  const scopeParts = scope ? scope.split("/") : [];
+  const parts = [...scopeParts, ...file.path.split("/")];
+  let current = root;
+
+  for (let i = 0; i < parts.length; i++) {
+    const part = parts[i];
+    const logicalPath = parts.slice(0, i + 1).join("/");
+    if (i === parts.length - 1) {
+      current.children!.push({ name: part, path: logicalPath, isDir: false, file });
+      continue;
+    }
+
+    const isScopeBoundary = Boolean(scope) && i + 1 === scopeParts.length;
+    const isTopLevelScope = i === 0 && topLevelRepoRoots.has(part);
+    const child = getOrAppendDirectorySegment(current, part, logicalPath, directorySegmentCounts);
+    if (isScopeBoundary && scopeNames.has(scope)) {
+      child.isSubmodule = !isTopLevelScope;
+      child.repositoryName = scope;
+    }
+    if (isTopLevelScope) {
+      child.isRepoRoot = true;
+      child.repositoryName = isScopeBoundary && scopeNames.has(scope) ? scope : part;
+      child.repositoryId = repositoryIds.get(part);
+    }
+    current = child;
+  }
+}
+
+function collapseScopedTree(root: FileTreeNode): FileTreeNode[] {
+  function collapse(node: FileTreeNode): FileTreeNode {
+    if (!node.isDir || !node.children) return node;
+
+    node.children = node.children.map(collapse);
+
+    if (
+      node.children.length === 1 &&
+      node.children[0].isDir &&
+      node.name !== "" &&
+      !node.isRepoRoot &&
+      !node.isSubmodule &&
+      !node.children[0].isSubmodule
+    ) {
+      const child = node.children[0];
+      return {
+        ...child,
+        name: `${node.name}/${child.name}`,
+      };
+    }
+
+    return node;
+  }
+
+  return collapse(root).children ?? [];
 }
 
 function getOrAppendDirectorySegment(

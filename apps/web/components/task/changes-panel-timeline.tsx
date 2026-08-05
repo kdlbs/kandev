@@ -248,6 +248,8 @@ type FileListSectionProps = {
   onRepoSecondaryAction?: (repo: string) => void;
   /** Maps a repository_name to its display label; called per group header. */
   repoDisplayName?: (repositoryName: string) => string | undefined;
+  /** Disable section and per-repository actions while another git operation runs. */
+  disabled?: boolean;
 };
 
 /**
@@ -274,6 +276,7 @@ type FileListBodyProps = {
   secondaryLabel?: string;
   /** Maps a repository_name to its display label (e.g. "" → workspace primary repo name). */
   repoDisplayName?: (repositoryName: string) => string | undefined;
+  disabled?: boolean;
 };
 
 function FileListBody(props: FileListBodyProps) {
@@ -391,6 +394,7 @@ function TreeFileListBody(props: FileListBranchProps) {
             secondaryLabel={props.secondaryLabel}
             onRepoAction={props.onRepoAction}
             onRepoSecondaryAction={props.onRepoSecondaryAction}
+            disabled={props.disabled}
             multiSelect={multiSelect}
           />
         ))
@@ -425,6 +429,7 @@ function FlatFileListBody(
                 onRepoAction={props.onRepoAction}
                 onRepoSecondaryAction={props.onRepoSecondaryAction}
                 displayName={props.repoDisplayName?.(group.repositoryName)}
+                disabled={props.disabled}
               />
             ))}
       </ul>
@@ -476,6 +481,7 @@ export function FileListSection(props: FileListSectionProps) {
             secondaryLabel={props.secondaryActionLabel}
             onAction={props.onRepoAction}
             onSecondaryAction={props.onRepoSecondaryAction}
+            disabled={props.isActionLoading || props.isSecondaryActionLoading}
           />
         ) : undefined
       }
@@ -497,6 +503,7 @@ export function FileListSection(props: FileListSectionProps) {
           onRepoAction={props.onRepoAction}
           onRepoSecondaryAction={props.onRepoSecondaryAction}
           repoDisplayName={props.repoDisplayName}
+          disabled={props.isActionLoading || props.isSecondaryActionLoading}
         />
       )}
       {files.length > 0 && hasSelection && (
