@@ -112,18 +112,3 @@ export function setMonacoDiagnostics(enabled: boolean) {
   tsDefaults.setDiagnosticsOptions(diagOptions);
   jsDefaults.setDiagnosticsOptions(diagOptions);
 }
-
-/**
- * Suppress or restore Monaco's built-in TS/JS language providers (hover,
- * completions, definitions, references, etc.). When LSP is active these
- * should be suppressed to avoid duplicate results.
- *
- * Uses shared state in builtin-providers.ts: an explicit registration guard
- * distinguishes LSP providers, while the suppression flag controls wrapped
- * built-ins at call time.
- */
-export function setMonacoBuiltinProviders(enabled: boolean) {
-  import("./builtin-providers").then(({ setBuiltinTsSuppressed }) => {
-    setBuiltinTsSuppressed(!enabled);
-  });
-}

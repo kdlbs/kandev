@@ -22,7 +22,7 @@ The progress protocol itself requires no backend payload transform because both 
 - Extend `ManagedLspConnection` with generation-owned progress state and registered string/number tokens.
 - Update `lsp-client-manager.ts` to advertise `window.workDoneProgress`, supply a client-generated initialize token, accept `window/workDoneProgress/create`, consume `$/progress`, expose a referentially stable progress snapshot, and notify subscribers.
 - Clear initialization and work state on stop, idle teardown, crash, retry, or connection replacement.
-- Keep runtime TypeScript suppression separate from the synchronous LSP-provider registration guard so cold Monaco loads still wrap lazy built-in providers.
+- Keep model-scoped TypeScript suppression separate from the synchronous LSP-provider registration guard so cold Monaco loads still wrap lazy built-in providers while unrelated sessions retain built-in intelligence.
 - Preserve detailed pre-bridge install errors when the following WebSocket close contains only a generic mapped reason.
 - Translate Monaco completion trigger context into the LSP request context advertised by the client capability.
 - Supply Monaco's current-word range for completion items without `textEdit`, while preserving explicit server `TextEdit` and `InsertReplaceEdit` ranges.
@@ -45,6 +45,7 @@ The progress protocol itself requires no backend payload transform because both 
 - **Document synchronization:** focused manager, capability, and both save-hook tests prove canonical repo-aware routing, `includeText` handling, `didChange`-before-`didSave` ordering, preservation of edits made during persistence, and no save notification after rejected persistence.
 - **Navigation identity:** the LSP file-opener hook test proves an attached-repository target reuses an existing task-root-relative editor key while retaining canonical repository-scoped opens for new targets.
 - **Completion and configuration:** focused provider and manager tests prove range fallback/override behavior, connection reuse, live configuration notification, and updated request responses.
+- **Provider ownership and semantic tokens:** focused Monaco/manager/provider tests prove TypeScript built-in suppression follows the owning session model, independent connections dispose separately, and valid empty semantic-token arrays complete without self-scheduled polling.
 - **Task-host setup guidance:** agentctl and frontend mapping tests prove a task host without an installer closes with `4007` before or after auto-install opt-in and renders localized manual-install guidance rather than suggesting an unusable preference.
 - **Presentation helpers:** focused pure-helper tests cover labels, lifecycle actions, and locale-aware elapsed-time formatting without adding shallow React markup tests.
 - **Task-host environment:** focused Go tests cover PATH-based command discovery, task-HOME cache roots, GOBIN result lookup, pre-install registry discovery, PATHEXT-aware managed npm shims, platform-gated Rust installation, process-manager environment exposure, and read-only rejection of cold unsupported executors.

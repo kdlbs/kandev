@@ -8,7 +8,7 @@ const mocks = vi.hoisted(() => ({
   getMonacoInstance: vi.fn(),
   waitForMonacoInstance: vi.fn(),
   registerLspProviders: vi.fn(),
-  setBuiltinTsSuppressed: vi.fn(),
+  registerBuiltinTsSuppression: vi.fn(),
 }));
 
 vi.mock("@/components/editors/monaco/monaco-init", () => ({
@@ -17,7 +17,7 @@ vi.mock("@/components/editors/monaco/monaco-init", () => ({
 }));
 
 vi.mock("@/components/editors/monaco/builtin-providers", () => ({
-  setBuiltinTsSuppressed: mocks.setBuiltinTsSuppressed,
+  registerBuiltinTsSuppression: mocks.registerBuiltinTsSuppression,
   withLspProviderRegistration: <T>(register: () => T) => register(),
 }));
 
@@ -83,6 +83,7 @@ beforeEach(() => {
   const { monaco } = createMonacoHarness([]);
   mocks.waitForMonacoInstance.mockResolvedValue(monaco);
   mocks.registerLspProviders.mockReturnValue([]);
+  mocks.registerBuiltinTsSuppression.mockReturnValue({ dispose: vi.fn() });
 });
 
 afterEach(() => {

@@ -16,8 +16,9 @@ const monaco = monacoImport as unknown as Monaco;
 // Monaco v0.55.1's setModeConfiguration fires onDidChange, but the
 // tsMode.js setupMode() function never subscribes to it — providers are
 // registered once and never torn down. So we intercept provider registration
-// to wrap built-in TS/JS providers with a suppression flag check. When LSP
-// is active, the wrappers return null/empty instead of calling the original.
+// to wrap built-in TS/JS providers with a model-ownership check. When an LSP
+// owns the requested model, the wrappers return null/empty instead of calling
+// the original. Built-ins remain available to unrelated sessions and models.
 //
 // Key: the LSP client marks its own synchronous provider registration with a
 // dedicated guard. Every other TS/JS provider is treated as a Monaco built-in
@@ -102,7 +103,7 @@ if (typeof window !== "undefined") {
         const origMethod = (provider[methodName] as (...a: unknown[]) => unknown).bind(provider);
         const wrapped = Object.create(provider);
         wrapped[methodName] = function (...args: unknown[]) {
-          if (isBuiltinTsSuppressed()) return emptyResult;
+          if (isBuiltinTsSuppressed(args[0])) return emptyResult;
           return origMethod(...args);
         };
         return original.call(langs, selector, wrapped, ...rest);

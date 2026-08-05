@@ -370,8 +370,6 @@ function registerSemanticTokensProvider(
     for (const l of listeners) l();
   });
 
-  const retryTimers = new Set<ReturnType<typeof setTimeout>>();
-
   disposables.push(
     monaco.languages.registerDocumentSemanticTokensProvider(lang, {
       onDidChange,
@@ -386,14 +384,7 @@ function registerSemanticTokensProvider(
             textDocument: { uri },
           })) as { resultId?: string; data: number[] } | null;
           if (token.isCancellationRequested) return null;
-          if (!result?.data?.length) {
-            const timer = setTimeout(() => {
-              retryTimers.delete(timer);
-              for (const l of listeners) l();
-            }, 5000);
-            retryTimers.add(timer);
-            return null;
-          }
+          if (!result) return null;
           return { resultId: result.resultId, data: new Uint32Array(result.data) };
         } catch {
           return null;
@@ -402,13 +393,6 @@ function registerSemanticTokensProvider(
       releaseDocumentSemanticTokens() {},
     }),
   );
-  disposables.push({
-    dispose: () => {
-      for (const t of retryTimers) clearTimeout(t);
-      retryTimers.clear();
-    },
-  });
-
   return disposables;
 }
 

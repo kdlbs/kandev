@@ -1,7 +1,7 @@
 import type { editor as monacoEditor, IDisposable } from "monaco-editor";
 import { getMonacoInstance, waitForMonacoInstance } from "@/components/editors/monaco/monaco-init";
 import {
-  setBuiltinTsSuppressed,
+  registerBuiltinTsSuppression,
   withLspProviderRegistration,
 } from "@/components/editors/monaco/builtin-providers";
 import { t } from "@/lib/i18n";
@@ -75,6 +75,19 @@ function configurationsMatch(
   return JSON.stringify(current) === JSON.stringify(next);
 }
 
+function registerTypeScriptModelSuppression(
+  connection: ManagedLspConnection,
+  lspLanguage: string,
+): void {
+  if (lspLanguage !== "typescript") return;
+  connection.providerDisposables.push(
+    registerBuiltinTsSuppression(
+      connection.ownerId,
+      (model) => connectionDocumentUri(model as monacoEditor.ITextModel, connection) !== null,
+    ),
+  );
+}
+
 class LSPClientManager {
   private connections = new Map<string, ManagedLspConnection>();
   private connectionGeneration = 0;
@@ -86,9 +99,6 @@ class LSPClientManager {
   private editorState = new LspClientEditorState((connection) =>
     this.isCurrentConnection(connection),
   );
-  /** Tracks ready TypeScript connections that require Monaco's built-in providers to stay off. */
-  private typescriptConnections = new Set<string>();
-
   setFileOpener(opener: ((uri: string, line?: number, column?: number) => void) | null): void {
     this.fileOpener = opener;
   }
@@ -373,12 +383,7 @@ class LSPClientManager {
         this.editorState.applyCachedDiagnostics(conn, model);
       }
 
-      // Monaco's provider wrappers are installed once its module is ready.
-      // Only then suppress built-ins and explicitly mark our registration so
-      // lazy built-ins that arrive later are still wrapped.
-      if (lspLanguage === "typescript") {
-        this.addTypeScriptConnection(conn.ownerId);
-      }
+      registerTypeScriptModelSuppression(conn, lspLanguage);
 
       // Register Monaco providers for this language.
       conn.providerDisposables.push(
@@ -657,19 +662,7 @@ class LSPClientManager {
       // ignore
     }
     if (this.isCurrentConnection(conn)) this.connections.delete(conn.key);
-    this.removeTypeScriptConnection(conn.ownerId);
     this.editorState.disposeConnection(conn.ownerId);
-  }
-
-  private addTypeScriptConnection(ownerId: string): void {
-    const shouldSuppress = this.typescriptConnections.size === 0;
-    this.typescriptConnections.add(ownerId);
-    if (shouldSuppress) setBuiltinTsSuppressed(true);
-  }
-
-  private removeTypeScriptConnection(ownerId: string): void {
-    if (!this.typescriptConnections.delete(ownerId)) return;
-    if (this.typescriptConnections.size === 0) setBuiltinTsSuppressed(false);
   }
 }
 

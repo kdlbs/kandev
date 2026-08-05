@@ -3,17 +3,29 @@
 // and lsp-client-manager.ts can import it without circular dependencies or
 // pulling in the full monaco-editor bundle.
 
-let _suppressed = false;
 let lspProviderRegistrationDepth = 0;
+type ModelSuppressionMatcher = (model: unknown) => boolean;
+const modelSuppressions = new Map<string, ModelSuppressionMatcher>();
 
-/** Returns true when built-in TS/JS providers should be suppressed (LSP active). */
-export function isBuiltinTsSuppressed(): boolean {
-  return _suppressed;
+/** Returns true when an active TS/JS LSP owns this specific Monaco model. */
+export function isBuiltinTsSuppressed(model: unknown): boolean {
+  for (const matches of modelSuppressions.values()) {
+    if (matches(model)) return true;
+  }
+  return false;
 }
 
-/** Set suppression state. Called synchronously from lsp-client-manager. */
-export function setBuiltinTsSuppressed(suppressed: boolean): void {
-  _suppressed = suppressed;
+/** Register model ownership for one active TS/JS LSP connection. */
+export function registerBuiltinTsSuppression(
+  ownerId: string,
+  matches: ModelSuppressionMatcher,
+): { dispose: () => void } {
+  modelSuppressions.set(ownerId, matches);
+  return {
+    dispose: () => {
+      if (modelSuppressions.get(ownerId) === matches) modelSuppressions.delete(ownerId);
+    },
+  };
 }
 
 /** Returns true only while the LSP client synchronously registers providers. */

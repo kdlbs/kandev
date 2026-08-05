@@ -27,6 +27,15 @@ type CompletionProvider = {
   ) => Promise<unknown>;
 };
 
+type SemanticTokensProvider = {
+  onDidChange: (listener: () => void) => { dispose: () => void };
+  provideDocumentSemanticTokens: (
+    model: unknown,
+    lastResultId: string | null,
+    token: { isCancellationRequested: boolean },
+  ) => Promise<unknown>;
+};
+
 type MonacoLocation = {
   uri: { toString: () => string };
   range: {
@@ -58,6 +67,7 @@ const ensureModelsExist = vi.fn();
 const getModelUri = vi.fn((uri: string) => uri);
 let definitionProvider: DefinitionProvider;
 let completionProvider: CompletionProvider;
+let semanticTokensProvider: SemanticTokensProvider;
 const completionModel = {
   getWordUntilPosition: vi.fn(() => ({ word: "pri", startColumn: 4, endColumn: 7 })),
 };
@@ -99,6 +109,12 @@ beforeEach(() => {
     }),
     registerReferenceProvider: vi.fn(() => disposable()),
     registerSignatureHelpProvider: vi.fn(() => disposable()),
+    registerDocumentSemanticTokensProvider: vi.fn(
+      (_language: string, provider: SemanticTokensProvider) => {
+        semanticTokensProvider = provider;
+        return disposable();
+      },
+    ),
   };
   mocks.getMonacoInstance.mockReturnValue({
     languages,
@@ -303,5 +319,40 @@ describe("LSP definition provider", () => {
       monacoRange(LOCATION_RANGE),
       monacoRange(LINK_SELECTION_RANGE),
     ]);
+  });
+});
+
+describe("LSP semantic tokens provider", () => {
+  it("returns an empty token payload without scheduling repeated refreshes", async () => {
+    vi.useFakeTimers();
+    try {
+      registerLspProviders({
+        rpc,
+        lspLanguage: "kotlin",
+        serverCapabilities: {
+          semanticTokensProvider: {
+            legend: { tokenTypes: [], tokenModifiers: [] },
+            full: true,
+          },
+        },
+        semanticRefreshCallbacks: [],
+        getDocumentUri: () => SOURCE_URI,
+        getModelUri,
+        ensureModelsExist,
+      });
+      const onDidChange = vi.fn();
+      semanticTokensProvider.onDidChange(onDidChange);
+      rpc.sendRequest.mockResolvedValue({ data: [] });
+
+      const result = await semanticTokensProvider.provideDocumentSemanticTokens({}, null, {
+        isCancellationRequested: false,
+      });
+
+      expect(result).toEqual({ resultId: undefined, data: new Uint32Array() });
+      await vi.advanceTimersByTimeAsync(5000);
+      expect(onDidChange).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

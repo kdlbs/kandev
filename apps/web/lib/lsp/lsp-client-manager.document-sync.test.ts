@@ -1,5 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { createLspManagerHarness, FakeWebSocket } from "./lsp-client-manager.test-harness";
+import {
+  createLspManagerHarness,
+  FakeWebSocket,
+  type TestModel,
+} from "./lsp-client-manager.test-harness";
 import { modelUriForDocument } from "./file-uri";
 
 const mocks = vi.hoisted(() => ({
@@ -8,7 +12,7 @@ const mocks = vi.hoisted(() => ({
   getWebSocketClient: vi.fn(),
   registerLspProviders: vi.fn(),
   requestFileContent: vi.fn(),
-  setBuiltinTsSuppressed: vi.fn(),
+  registerBuiltinTsSuppression: vi.fn(),
 }));
 
 vi.mock("@/components/editors/monaco/monaco-init", () => ({
@@ -16,7 +20,7 @@ vi.mock("@/components/editors/monaco/monaco-init", () => ({
   waitForMonacoInstance: mocks.waitForMonacoInstance,
 }));
 vi.mock("@/components/editors/monaco/builtin-providers", () => ({
-  setBuiltinTsSuppressed: mocks.setBuiltinTsSuppressed,
+  registerBuiltinTsSuppression: mocks.registerBuiltinTsSuppression,
   withLspProviderRegistration: <T>(register: () => T) => register(),
 }));
 vi.mock("./lsp-providers", () => ({ registerLspProviders: mocks.registerLspProviders }));
@@ -29,7 +33,10 @@ vi.mock("@/lib/ws/workspace-files", () => ({
 
 import { lspClientManager } from "./lsp-client-manager";
 
-const { connectReady, createMonacoHarness } = createLspManagerHarness(lspClientManager, mocks);
+const { connectReady, createMonacoHarness, requireModel } = createLspManagerHarness(
+  lspClientManager,
+  mocks,
+);
 const SESSION_ID = "session";
 const WORKSPACE_PATH = "/workspace";
 const DOCUMENT_URI = "file:///workspace/backend/src/Main.ts";
@@ -50,6 +57,7 @@ beforeEach(() => {
   vi.resetAllMocks();
   vi.stubGlobal("WebSocket", FakeWebSocket);
   mocks.waitForMonacoInstance.mockImplementation(async () => mocks.getMonacoInstance());
+  mocks.registerBuiltinTsSuppression.mockReturnValue({ dispose: vi.fn() });
 });
 
 afterEach(() => {
@@ -58,6 +66,26 @@ afterEach(() => {
 });
 
 describe("LSP document subscriptions", () => {
+  it("suppresses TypeScript built-ins only for models owned by the ready connection", async () => {
+    const firstModelUri = modelUriForDocument(DOCUMENT_URI, SESSION_ID);
+    const secondModelUri = modelUriForDocument(DOCUMENT_URI, "other-session");
+    const { models } = createMonacoHarness([firstModelUri, secondModelUri]);
+    let ownsModel: ((model: TestModel) => boolean) | undefined;
+    mocks.registerBuiltinTsSuppression.mockImplementation(
+      (_ownerId: string, matcher: (model: TestModel) => boolean) => {
+        ownsModel = matcher;
+        return { dispose: vi.fn() };
+      },
+    );
+    mocks.registerLspProviders.mockReturnValue([]);
+
+    await connectReady(SESSION_ID, WORKSPACE_PATH);
+
+    expect(ownsModel).toBeDefined();
+    expect(ownsModel?.(requireModel(models, firstModelUri))).toBe(true);
+    expect(ownsModel?.(requireModel(models, secondModelUri))).toBe(false);
+  });
+
   it("shares synchronization for duplicate logical views of one canonical URI", async () => {
     createMonacoHarness([modelUriForDocument(DOCUMENT_URI, SESSION_ID)]);
     mocks.registerLspProviders.mockReturnValue([]);

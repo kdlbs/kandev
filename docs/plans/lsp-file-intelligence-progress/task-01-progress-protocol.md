@@ -63,9 +63,11 @@ Record RED/GREEN evidence, files changed, exact tests run, remaining risks, and 
 - Review hardening: installer failures without details, WebSocket errors, and reasonless pre-bridge or post-bridge closes now resolve their fallback copy through the active locale instead of leaking English into localized status UI and toasts.
 - Review hardening: categorical task-host close codes for unsupported executors, capacity, and stream failures ignore English transport prose and resolve their status through the active frontend locale.
 - Review hardening: completion items without `textEdit` use Monaco's current-word range while `InsertReplaceEdit` keeps its dual range, live LSP JSON settings update the reused connection and its configuration request handler, and task hosts without an installer close with localized manual-install guidance through `4007` before or after preference opt-in.
+- Review hardening: TypeScript built-in suppression now follows per-connection model ownership instead of a global flag, so unrelated sessions keep Monaco intelligence; valid empty semantic-token arrays return an empty payload without periodic client polling.
 - Verified:
   - `pnpm --filter @kandev/web test -- --run lib/lsp/lsp-progress.test.ts lib/lsp/lsp-client-manager.test.ts`
   - `pnpm exec vitest run lib/lsp/lsp-providers.test.ts --reporter=dot`
+  - `pnpm exec vitest run lib/lsp/lsp-providers.test.ts components/editors/monaco/builtin-providers.test.ts lib/lsp/lsp-client-manager.test.ts lib/lsp/lsp-client-manager.progress.test.ts lib/lsp/lsp-client-manager.document-sync.test.ts` (49 passed)
   - `pnpm run typecheck`
   - `pnpm exec eslint lib/lsp/lsp-providers.ts lib/lsp/lsp-providers.test.ts e2e/tests/lsp/lsp-file-intelligence.spec.ts`
   - `go test ./internal/agentctl/server/api ./internal/lsp/installer ./internal/tools/installer`
@@ -75,6 +77,6 @@ Record RED/GREEN evidence, files changed, exact tests run, remaining risks, and 
   - `pnpm e2e:run -- --project=chromium tests/lsp/lsp-file-intelligence.spec.ts` (13 passed)
   - `pnpm exec vitest run lib/lsp/lsp-document-sync.test.ts lib/lsp/lsp-client-manager.test.ts lib/lsp/lsp-client-manager.document-sync.test.ts hooks/use-file-save-delete.test.ts components/task/task-center-panel-restoration.test.ts` (46 passed)
   - `pnpm exec vitest run hooks/use-file-save-delete.test.ts hooks/use-lsp-file-opener.test.ts lib/lsp/lsp-client-manager.document-sync.test.ts components/task/task-center-panel-restoration.test.ts lib/lsp/lsp-document-sync.test.ts` (35 passed)
-  - `pnpm test` (1,122 files; 8,650 passed, 4 skipped)
+  - `pnpm test` (1,122 files; 8,657 passed, 4 skipped)
   - `pnpm lint`, `pnpm run typecheck`, `pnpm i18n:check`, and `pnpm i18n:ratchet`
   - `node --test scripts/validate-public-docs.test.mjs scripts/notify-docs-workflow.test.mjs && node scripts/validate-public-docs.mjs`

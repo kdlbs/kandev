@@ -15,7 +15,7 @@ const mocks = vi.hoisted(() => ({
   getWebSocketClient: vi.fn(),
   registerLspProviders: vi.fn(),
   requestFileContent: vi.fn(),
-  setBuiltinTsSuppressed: vi.fn(),
+  registerBuiltinTsSuppression: vi.fn(),
 }));
 
 vi.mock("@/components/editors/monaco/monaco-init", () => ({
@@ -23,7 +23,7 @@ vi.mock("@/components/editors/monaco/monaco-init", () => ({
   waitForMonacoInstance: mocks.waitForMonacoInstance,
 }));
 vi.mock("@/components/editors/monaco/builtin-providers", () => ({
-  setBuiltinTsSuppressed: mocks.setBuiltinTsSuppressed,
+  registerBuiltinTsSuppression: mocks.registerBuiltinTsSuppression,
   withLspProviderRegistration: <T>(register: () => T) => register(),
 }));
 vi.mock("./lsp-providers", () => ({ registerLspProviders: mocks.registerLspProviders }));
@@ -87,6 +87,7 @@ beforeEach(() => {
   vi.resetAllMocks();
   vi.stubGlobal("WebSocket", FakeWebSocket);
   mocks.waitForMonacoInstance.mockImplementation(async () => mocks.getMonacoInstance());
+  mocks.registerBuiltinTsSuppression.mockReturnValue({ dispose: vi.fn() });
 });
 
 afterEach(() => {
@@ -108,7 +109,7 @@ describe("LSP editor readiness", () => {
     await Promise.resolve();
 
     expect(mocks.registerLspProviders).not.toHaveBeenCalled();
-    expect(mocks.setBuiltinTsSuppressed).not.toHaveBeenCalled();
+    expect(mocks.registerBuiltinTsSuppression).not.toHaveBeenCalled();
     expect(lspClientManager.getStatus("session", "typescript")).toEqual({ state: "starting" });
     lspClientManager.openDocument("session", "typescript", {
       uri: primaryUri,
@@ -265,7 +266,6 @@ describe("LSP client connection cleanup", () => {
     const status = lspClientManager.getStatus("session", "typescript");
     expect(status).toEqual({ state: "error", reason: "language server crashed" });
     expect(providerDispose).toHaveBeenCalledOnce();
-    expect(mocks.setBuiltinTsSuppressed).toHaveBeenLastCalledWith(false);
     expect(placeholder.dispose).toHaveBeenCalledOnce();
     expect(monaco.editor.setModelMarkers).toHaveBeenCalledWith(
       requireModel(models, primaryModelUri),
@@ -275,11 +275,6 @@ describe("LSP client connection cleanup", () => {
   });
 
   it("isolates editor state for sessions that share task-host paths", async () => {
-    let builtinTsSuppressed = false;
-    mocks.setBuiltinTsSuppressed.mockImplementation((suppressed: boolean) => {
-      builtinTsSuppressed = suppressed;
-    });
-
     const documentUri = PRIMARY_DOCUMENT_URI;
     const firstModelUri = modelUri(documentUri, FIRST_SESSION_ID);
     const secondModelUri = modelUri(documentUri, SECOND_SESSION_ID);
@@ -288,7 +283,7 @@ describe("LSP client connection cleanup", () => {
 
     const firstSocket = await connectReady(FIRST_SESSION_ID, WORKSPACE_PATH);
     const secondSocket = await connectReady(SECOND_SESSION_ID, WORKSPACE_PATH);
-    expect(mocks.setBuiltinTsSuppressed.mock.calls).toEqual([[true]]);
+    expect(mocks.registerBuiltinTsSuppression).toHaveBeenCalledTimes(2);
 
     const firstProvider = mocks.registerLspProviders.mock.calls[0][0] as {
       getDocumentUri: (model: TestModel) => string | null;
@@ -318,13 +313,10 @@ describe("LSP client connection cleanup", () => {
     expect(models.has(secondPlaceholderModelUri)).toBe(true);
     expect(markerMessages(markersByUri, firstModelUri)).not.toContain("first issue");
     expect(markerMessages(markersByUri, secondModelUri)).toContain("second issue");
-    expect(builtinTsSuppressed).toBe(true);
-    expect(mocks.setBuiltinTsSuppressed).not.toHaveBeenCalledWith(false);
 
     secondSocket.failClosed(1006, "second language server crashed");
 
     expect(secondPlaceholder.dispose).toHaveBeenCalledOnce();
-    expect(builtinTsSuppressed).toBe(false);
   });
 });
 
@@ -524,10 +516,6 @@ describe("LSP replacement connection cleanup", () => {
   });
 
   it("ignores a delayed close from a replaced TypeScript connection", async () => {
-    let builtinTsSuppressed = false;
-    mocks.setBuiltinTsSuppressed.mockImplementation((suppressed: boolean) => {
-      builtinTsSuppressed = suppressed;
-    });
     const oldDocumentUri = "file:///old/Main.ts";
     const currentDocumentUri = "file:///replacement/Main.ts";
     const oldModelUri = modelUri(oldDocumentUri, REPLACEMENT_SESSION_ID);
@@ -562,7 +550,6 @@ describe("LSP replacement connection cleanup", () => {
     expect(lspClientManager.getStatus(REPLACEMENT_SESSION_ID, "typescript")).toEqual({
       state: "ready",
     });
-    expect(builtinTsSuppressed).toBe(true);
   });
 
   it("ignores delayed initialization from a replaced connection", async () => {
@@ -586,7 +573,7 @@ describe("LSP replacement connection cleanup", () => {
     await Promise.resolve();
 
     expect(mocks.registerLspProviders).toHaveBeenCalledOnce();
-    expect(mocks.setBuiltinTsSuppressed.mock.calls).toEqual([[true]]);
+    expect(mocks.registerBuiltinTsSuppression).toHaveBeenCalledOnce();
     expect(lspClientManager.getStatus(REPLACEMENT_SESSION_ID, "typescript")).toEqual({
       state: "ready",
     });
