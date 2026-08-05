@@ -168,6 +168,33 @@ describe("task.updated archive cleanup", () => {
     expect(archived[0]).toMatchObject({ id: TASK_ID, workspaceId: "ws-1", isArchived: true });
   });
 
+  it("resolves the workspace from active task state when the archive event omits it", () => {
+    const store = makeStore({
+      kanban: {
+        workflowId: "wf1",
+        steps: [],
+        tasks: [{ id: TASK_ID, workflowId: "wf1", workspaceId: "ws-active" }],
+      } as unknown as AppState["kanban"],
+      sidebarArchivedTasks: {
+        itemsByWorkspaceId: {},
+        loadedByWorkspaceId: { "ws-active": true },
+        loadingByWorkspaceId: { "ws-active": false },
+        errorByWorkspaceId: { "ws-active": null },
+      },
+    } as unknown as Partial<AppState>);
+
+    registerTasksHandlers(store)["task.updated"]!(
+      makeUpdatedMessage({
+        ...taskPayload(TASK_ID),
+        archived_at: ARCHIVED_AT,
+      }),
+    );
+
+    expect(store.getState().sidebarArchivedTasks.itemsByWorkspaceId["ws-active"]).toEqual([
+      expect.objectContaining({ id: TASK_ID, workspaceId: "ws-active", isArchived: true }),
+    ]);
+  });
+
   it("preserves the resolved workspace on partial archived updates", () => {
     const store = makeStore({
       sidebarArchivedTasks: {

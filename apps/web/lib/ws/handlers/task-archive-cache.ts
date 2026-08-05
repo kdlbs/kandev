@@ -21,7 +21,14 @@ export function archivedTaskWorkspaceId(
   const cached = Object.entries(state.sidebarArchivedTasks?.itemsByWorkspaceId ?? {}).find(
     ([, tasks]) => tasks.some((task) => task.id === taskId),
   );
-  return cached?.[0] ?? toKanbanTask(payload).workspaceId;
+  if (cached?.[0]) return cached[0];
+  const activeTask = state.kanban.tasks.find((task) => task.id === taskId);
+  if (activeTask?.workspaceId) return activeTask.workspaceId;
+  for (const snapshot of Object.values(state.kanbanMulti.snapshots)) {
+    const snapshotTask = snapshot.tasks.find((task) => task.id === taskId);
+    if (snapshotTask?.workspaceId) return snapshotTask.workspaceId;
+  }
+  return toKanbanTask(payload).workspaceId;
 }
 
 export function findArchivedTaskInCache(state: AppState, taskId: string): KanbanTask | undefined {

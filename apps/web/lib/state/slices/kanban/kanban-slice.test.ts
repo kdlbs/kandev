@@ -147,6 +147,17 @@ describe("kanban slice archived sidebar projection", () => {
     );
   });
 
+  it("creates a workspace bucket when upserting its first archived task", () => {
+    const store = makeStore();
+    const task = { id: TASK_ID, workflowStepId: "step-a", title: "Archived", position: 0 };
+
+    store.getState().upsertSidebarArchivedTask("workspace-new", task);
+
+    expect(store.getState().sidebarArchivedTasks.itemsByWorkspaceId["workspace-new"]).toEqual([
+      task,
+    ]);
+  });
+
   it("does not let a stale load replace archive, unarchive, or delete events", () => {
     const store = makeStore();
     type ArchivedStateWithRevision = KanbanSlice["sidebarArchivedTasks"] & {

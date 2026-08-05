@@ -104,10 +104,7 @@ export function useSidebarArchivedTasks(workspaceId: string | null, enabled: boo
         );
       } finally {
         const latest = store.getState();
-        if (
-          requestGenerationRef.current === requestGeneration &&
-          isCurrentWorkspaceContext(latest, workspaceId, workspaceGeneration)
-        ) {
+        if (requestGenerationRef.current === requestGeneration) {
           latest.setSidebarArchivedTasksLoading(workspaceId, false);
         }
       }

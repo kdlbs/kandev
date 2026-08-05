@@ -64,7 +64,9 @@ function createSidebarArchivedTaskActions(set: KanbanSliceSet): SidebarArchivedT
       }),
     upsertSidebarArchivedTask: (workspaceId, task) =>
       set((draft) => {
-        const items = draft.sidebarArchivedTasks.itemsByWorkspaceId[workspaceId] ?? [];
+        const items =
+          draft.sidebarArchivedTasks.itemsByWorkspaceId[workspaceId] ??
+          (draft.sidebarArchivedTasks.itemsByWorkspaceId[workspaceId] = []);
         const index = items.findIndex((item) => item.id === task.id);
         if (index >= 0) items[index] = task;
         else items.push(task);
