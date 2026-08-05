@@ -470,8 +470,8 @@ describe("release desktop artifacts", () => {
     expect(workflow).toContain("persist-credentials: false");
     expect(workflow).toContain("Desktop validation summary");
     expect(workflow).toContain("No release PR, tag, GitHub release, public container tags");
-    expect(workflow).toContain(
-      "if: ${{ github.event_name == 'workflow_dispatch' && !inputs.dry_run && !inputs.desktop_validation_only }}",
+    expect(workflow).toMatch(
+      /github\.event_name == 'workflow_dispatch' &&\s+inputs\.channel == 'stable' &&\s+!inputs\.dry_run &&\s+!inputs\.desktop_validation_only/,
     );
     expect(workflow).toContain('if [ "$DESKTOP_VALIDATION_ONLY" = "true" ]; then');
     expect(workflow).toContain("scripts/release/desktop-signing-ready.sh macos");
