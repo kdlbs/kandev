@@ -458,6 +458,7 @@ describe("session subscription hydration ordering", () => {
       expect.objectContaining({ session_id: "sess-1" }),
       10000,
     );
+    expect(mockWebSocketClient.request).toHaveBeenCalledTimes(1);
     unmount();
   });
 
@@ -478,5 +479,6 @@ describe("session subscription hydration ordering", () => {
     });
 
     expect(mockWebSocketClient.request).not.toHaveBeenCalled();
+    expect(mockState.setMessagesLoading).toHaveBeenLastCalledWith("sess-1", false);
   });
 });

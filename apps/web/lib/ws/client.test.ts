@@ -153,7 +153,7 @@ describe("session subscription readiness", () => {
     await expect(initial.ready).resolves.toBeUndefined();
 
     socket.close();
-    vi.runOnlyPendingTimers();
+    vi.advanceTimersByTime(0);
     const reconnectedSocket = FakeWebSocket.latest();
     reconnectedSocket.open();
 
@@ -166,5 +166,58 @@ describe("session subscription readiness", () => {
     await expect(reconnected.ready).resolves.toBeUndefined();
     initial.unsubscribe();
     reconnected.unsubscribe();
+  });
+});
+
+describe("session subscription reconnect recovery", () => {
+  it("keeps queued hydration behind the reconnect subscription acknowledgement", async () => {
+    vi.useFakeTimers();
+    const { client, socket } = connectClient({ enabled: true, initialDelay: 0, maxAttempts: 1 });
+    const initial = client.subscribeSessionWithReady("sess-1");
+    acknowledge(socket, sessionSubscribeRequest(socket));
+    await expect(initial.ready).resolves.toBeUndefined();
+
+    socket.close();
+    const reconnectReadiness = client.getSessionSubscriptionReadiness("sess-1");
+    let readinessResolved = false;
+    void reconnectReadiness.then(() => {
+      readinessResolved = true;
+    });
+    client.send({
+      id: "hydration-1",
+      type: "request",
+      action: "message.list",
+      payload: { session_id: "sess-1" },
+    });
+    await Promise.resolve();
+    expect(readinessResolved).toBe(false);
+
+    vi.runOnlyPendingTimers();
+    const reconnectedSocket = FakeWebSocket.latest();
+    reconnectedSocket.open();
+
+    expect(reconnectedSocket.sent.map((message) => message.action)).toEqual([
+      "session.subscribe",
+      "message.list",
+    ]);
+    const reconnectRequest = sessionSubscribeRequest(reconnectedSocket);
+    const hydrationRequest = reconnectedSocket.sent.find(
+      (message) => message.action === "message.list",
+    );
+    if (!hydrationRequest) throw new Error("No queued message.list request was sent");
+
+    acknowledge(reconnectedSocket, reconnectRequest);
+    await expect(reconnectReadiness).resolves.toBeUndefined();
+    expect(hydrationRequest.id).toBe("hydration-1");
+    initial.unsubscribe();
+  });
+
+  it("rejects an active readiness when reconnect recovery is disabled", async () => {
+    const { client, socket } = connectClient({ enabled: false });
+    const subscription = client.subscribeSessionWithReady("sess-1");
+    socket.close();
+
+    await expect(subscription.ready).rejects.toThrow("WebSocket connection closed");
+    subscription.unsubscribe();
   });
 });

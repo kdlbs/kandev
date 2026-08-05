@@ -140,9 +140,14 @@ interface UseSessionMessagesReturn {
 }
 
 type MessageListResponse = { messages: Message[]; has_more?: boolean; cursor?: string };
+type InFlightMessageRequest = {
+  readiness: Promise<void>;
+  promise: Promise<MessageListResponse>;
+};
 
 const EMPTY_MESSAGES: Message[] = [];
 const EMPTY_META = { isLoading: false, hasMore: false, oldestCursor: null };
+const inFlightMessageRequests = new Map<string, InFlightMessageRequest>();
 
 /** Debug-only summary of a fetch response (no-op unless debug logging is on). */
 function logFetchSummary(
@@ -170,6 +175,41 @@ function logFetchSummary(
   }
 }
 
+function requestSessionMessages(
+  client: NonNullable<ReturnType<typeof getWebSocketClient>>,
+  sessionId: string,
+  readiness: Promise<void>,
+): Promise<MessageListResponse> {
+  const existing = inFlightMessageRequests.get(sessionId);
+  if (existing?.readiness === readiness) return existing.promise;
+
+  const requestParams = {
+    session_id: sessionId,
+    limit: INITIAL_FETCH_LIMIT,
+    sort: "desc" as const,
+  };
+  const promise = client.request<MessageListResponse>("message.list", requestParams, 10000);
+  const entry = { readiness, promise };
+  inFlightMessageRequests.set(sessionId, entry);
+  void promise.then(
+    () => {
+      window.setTimeout(() => {
+        if (inFlightMessageRequests.get(sessionId) === entry) {
+          inFlightMessageRequests.delete(sessionId);
+        }
+      }, 0);
+    },
+    () => {
+      window.setTimeout(() => {
+        if (inFlightMessageRequests.get(sessionId) === entry) {
+          inFlightMessageRequests.delete(sessionId);
+        }
+      }, 0);
+    },
+  );
+  return promise;
+}
+
 /** Fetch latest messages via WS and merge with any that arrived via live notifications. */
 async function fetchAndStoreMessages(
   sessionId: string,
@@ -184,19 +224,14 @@ async function fetchAndStoreMessages(
   // session.subscribe registration. The client returns an already-resolved
   // promise when no durable subscription is active, preserving fetch behavior
   // for non-session callers while gating this hook's normal subscription path.
-  await client.getSessionSubscriptionReadiness(sessionId);
+  const readiness = client.getSessionSubscriptionReadiness(sessionId);
+  await readiness;
   if (isActive && !isActive()) return [];
   const seq = nextFetchSeq();
-
-  const requestParams = {
-    session_id: sessionId,
-    limit: INITIAL_FETCH_LIMIT,
-    sort: "desc" as const,
-  };
-  const response = await client.request<MessageListResponse>("message.list", requestParams, 10000);
+  const response = await requestSessionMessages(client, sessionId, readiness);
   if (isActive && !isActive()) return [];
   const fetched = [...(response.messages ?? [])].reverse();
-  logFetchSummary(sessionId, fetched, response, requestParams.limit);
+  logFetchSummary(sessionId, fetched, response, INITIAL_FETCH_LIMIT);
   // Merge: keep WS-delivered messages that aren't in the fetch response.
   // This prevents a slow fetch (sent before messages existed) from wiping
   // messages that arrived via real-time notifications while the fetch was

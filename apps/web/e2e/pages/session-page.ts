@@ -195,9 +195,15 @@ export class SessionPage {
       }
 
       const remaining = Math.max(1, softTotalTimeout - (Date.now() - start));
-      await idle
-        .waitFor({ state: "visible", timeout: Math.min(pollSlice, remaining) })
-        .catch(() => undefined);
+      const timeout = Math.min(pollSlice, remaining);
+      if (opts.requireEditable) {
+        await expect
+          .poll(isReady, { timeout })
+          .toBe(true)
+          .catch(() => undefined);
+      } else {
+        await idle.waitFor({ state: "visible", timeout }).catch(() => undefined);
+      }
     }
 
     // Final bounded check: still throws on a genuinely stuck session.
@@ -1060,7 +1066,7 @@ export class SessionPage {
   /** Wait for the agent reply containing `text` at the given 0-based match `index`. */
   async expectChatResponseVisible(text: string, index = 0, opts: { timeout?: number } = {}) {
     const timeout = opts.timeout ?? 30_000;
-    const target = () => this.chat.getByText(text, { exact: false }).nth(index);
+    const target = () => this.activeChat().getByText(text, { exact: false }).nth(index);
     await expect(target()).toBeVisible({ timeout });
   }
 

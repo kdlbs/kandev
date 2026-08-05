@@ -19,9 +19,7 @@ const DISPATCH_LOG_DENYLIST = new Set<string>([
 
 type MessageHandler<T extends BackendMessageType> = (message: BackendMessageMap[T]) => void;
 
-// Internal alias kept for readability — the WS client emits the same vocabulary
-// the UI consumes. `disconnected` covers both "never connected" (formerly
-// `idle`) and "socket closed" (formerly `closed`); `connected` replaces `open`.
+// Internal alias for the status vocabulary shared with the UI.
 type WebSocketStatus = ConnectionStatus;
 
 export interface ReconnectOptions {
@@ -52,6 +50,7 @@ const DEFAULT_RECONNECT_OPTIONS: Required<ReconnectOptions> = {
   maxDelay: 30000,
   backoffMultiplier: 1.5,
 };
+const WEBSOCKET_CONNECTION_CLOSED_ERROR = "WebSocket connection closed";
 
 export class WebSocketClient {
   private socket: WebSocket | null = null;
@@ -104,8 +103,8 @@ export class WebSocketClient {
     this.socket.onopen = () => {
       this.reconnectAttempts = 0;
       this.setStatus("connected");
-      this.flushQueue();
       this.resubscribe();
+      this.flushQueue();
     };
 
     this.socket.onmessage = (event) => {
@@ -140,7 +139,7 @@ export class WebSocketClient {
       this.socket = null;
     }
     this.setStatus("disconnected");
-    this.resetSessionSubscriptionReadiness(new Error("WebSocket connection closed"));
+    this.resetSessionSubscriptionReadiness(new Error(WEBSOCKET_CONNECTION_CLOSED_ERROR));
     this.cleanupPendingRequests();
   }
 
@@ -226,7 +225,20 @@ export class WebSocketClient {
   }
 
   getSessionSubscriptionReadiness(sessionId: string): Promise<void> {
-    return this.sessionSubscriptionReadiness.get(sessionId)?.promise ?? Promise.resolve();
+    if (!this.sessionSubscriptions.has(sessionId)) return Promise.resolve();
+    if (
+      !this.sessionSubscriptionReadiness.has(sessionId) &&
+      (this.status === "disconnected" || this.status === "error")
+    ) {
+      const unavailable = Promise.reject<void>(new Error(WEBSOCKET_CONNECTION_CLOSED_ERROR));
+      void unavailable.catch(() => undefined);
+      return unavailable;
+    }
+    const readiness = this.getOrCreateSessionSubscriptionReadiness(sessionId);
+    if (this.status === "connected" && this.socket) {
+      this.startSessionSubscription(sessionId, readiness);
+    }
+    return readiness.promise;
   }
 
   focusSession(sessionId: string) {
@@ -313,9 +325,7 @@ export class WebSocketClient {
 
   unsubscribeSession(sessionId: string) {
     const currentCount = this.sessionSubscriptions.get(sessionId);
-    if (!currentCount) {
-      return;
-    }
+    if (!currentCount) return;
     const nextCount = currentCount - 1;
 
     if (nextCount <= 0) {
@@ -487,7 +497,14 @@ export class WebSocketClient {
 
   private handleDisconnect(event: CloseEvent) {
     this.setStatus("disconnected");
-    this.resetSessionSubscriptionReadiness(new Error("WebSocket connection closed"));
+    const shouldRetainSessionReadiness =
+      !this.intentionalClose &&
+      this.reconnectOptions.enabled &&
+      this.reconnectAttempts < this.reconnectOptions.maxAttempts;
+    this.resetSessionSubscriptionReadiness(
+      new Error(WEBSOCKET_CONNECTION_CLOSED_ERROR),
+      shouldRetainSessionReadiness,
+    );
 
     // Don't reconnect if this was an intentional close
     if (this.intentionalClose) {
@@ -540,7 +557,7 @@ export class WebSocketClient {
     // Reject all pending requests
     this.pendingRequests.forEach(({ reject, timeout }) => {
       clearTimeout(timeout);
-      reject(new Error("WebSocket connection closed"));
+      reject(new Error(WEBSOCKET_CONNECTION_CLOSED_ERROR));
     });
     this.pendingRequests.clear();
   }
@@ -565,10 +582,8 @@ export class WebSocketClient {
       requestStarted: false,
       settled: false,
     };
-    // Ordinary subscribeSession consumers do not await readiness. Marking the
-    // promise as handled here keeps a failed control request from becoming an
-    // unhandled rejection while still returning the original promise to the
-    // readiness-aware consumer.
+    // subscribeSession() consumers do not await readiness, so handle failures
+    // while returning the original promise to readiness-aware consumers.
     void promise.catch(() => undefined);
     this.sessionSubscriptionReadiness.set(sessionId, readiness);
     return readiness;
@@ -603,13 +618,18 @@ export class WebSocketClient {
     }
   }
 
-  private resetSessionSubscriptionReadiness(error: Error) {
+  private resetSessionSubscriptionReadiness(error: Error, retainActiveSubscriptions = false) {
     const readinessEntries = [...this.sessionSubscriptionReadiness.entries()];
     this.sessionSubscriptionReadiness.clear();
     for (const [, readiness] of readinessEntries) {
       if (readiness.settled) continue;
       readiness.settled = true;
       readiness.reject(error);
+    }
+    if (retainActiveSubscriptions) {
+      this.sessionSubscriptions.forEach((_, id) =>
+        this.getOrCreateSessionSubscriptionReadiness(id),
+      );
     }
   }
 

@@ -58,8 +58,8 @@ export async function doFetchMessages({
     store.getState().setMessages(taskSessionId, []);
     lastFetchedSessionIdRef.current = taskSessionId;
   } finally {
-    if (isActive && !isActive()) return;
     store.getState().setMessagesLoading(taskSessionId, false);
+    if (isActive && !isActive()) return;
     setIsLoading(false);
   }
 }
