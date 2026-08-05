@@ -20,6 +20,7 @@ async function seedRunningGeneratingSession(
   apiClient: ApiClient,
   seedData: SeedData,
   title: string,
+  sleepSeconds = 20,
 ): Promise<{ session: SessionPage; taskId: string; sessionId: string }> {
   const task = await apiClient.createTaskWithAgent(
     seedData.workspaceId,
@@ -38,7 +39,7 @@ async function seedRunningGeneratingSession(
   await session.waitForChatIdle({ timeout: 30_000 });
   // A no-tool sleep holds the foreground turn open and generating — the exact
   // state that normally queues input, so it isolates the steering gate.
-  await session.sendMessage("/sleep 20");
+  await session.sendMessage(`/sleep ${sleepSeconds}`);
   await expect(session.agentStatus()).toBeVisible({ timeout: 15_000 });
   await waitForActiveSessionForegroundActivity(testPage, "generating");
   if (!task.session_id) throw new Error("createTaskWithAgent did not return a session_id");
@@ -114,6 +115,7 @@ test.describe.serial("Claude mid-turn steering experiment", () => {
         apiClient,
         seedData,
         "Mid-turn steering queue order",
+        60,
       );
 
       await waitForActiveSessionSupportsSteering(testPage, true);

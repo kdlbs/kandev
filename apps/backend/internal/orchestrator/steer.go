@@ -119,6 +119,11 @@ func (s *Service) SteerTask(
 			if qErr != nil {
 				return fmt.Errorf("queue steer behind pending work: %w", qErr)
 			}
+			// SteerTask writes through the queue service directly, so it must
+			// publish the same authoritative snapshot as the WS queue handlers.
+			// Without this event, clients keep rendering the queue state from
+			// before the steer was accepted.
+			s.publishQueueStatusEvent(admittedCtx, sessionID)
 			admittedResult = &PromptResult{StopReason: steerQueuedStopReason}
 			return nil
 		}

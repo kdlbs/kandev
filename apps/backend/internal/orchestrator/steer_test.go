@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/task/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
@@ -127,6 +128,8 @@ func TestSteerTask_OrderRuleQueuesBehindPending(t *testing.T) {
 	repo := setupTestRepo(t)
 	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
 	svc.config.ClaudeMidTurnSteering = true
+	eventBus := &recordingEventBus{}
+	svc.eventBus = eventBus
 
 	const taskID = "task-order"
 	const sessionID = "session-order"
@@ -155,6 +158,19 @@ func TestSteerTask_OrderRuleQueuesBehindPending(t *testing.T) {
 	if status.Entries[0].Content != "queued first" || status.Entries[1].Content != "steer second" {
 		t.Fatalf("queue order = [%q, %q], want [queued first, steer second]",
 			status.Entries[0].Content, status.Entries[1].Content)
+	}
+	if len(eventBus.events) != 1 {
+		t.Fatalf("queue status event count = %d, want 1", len(eventBus.events))
+	}
+	if eventBus.events[0].subject != events.MessageQueueStatusChanged {
+		t.Fatalf("queue status event subject = %q, want %q", eventBus.events[0].subject, events.MessageQueueStatusChanged)
+	}
+	eventData, ok := eventBus.events[0].event.Data.(map[string]interface{})
+	if !ok {
+		t.Fatalf("queue status event data = %T, want map[string]interface{}", eventBus.events[0].event.Data)
+	}
+	if eventData["count"] != 2 {
+		t.Fatalf("queue status event count = %v, want 2", eventData["count"])
 	}
 	if _, inFlight := svc.steerInFlight.Load(sessionID); inFlight {
 		t.Fatal("declined steer left an in-flight slot claimed")
