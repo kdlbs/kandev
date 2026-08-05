@@ -341,7 +341,7 @@ Before any update, finish or stop active sessions, create and export a database 
   `brew upgrade kandev`, reinstall the service with the same flags, and restart.
 - System service: Stable only. Upgrade with the required privileges, reinstall with the same
   service flags, and restart; the UI never applies it.
-- Unmanaged CLI: run `brew upgrade kandev` or `npm install -g kandev@latest`, then restart the process.
+- Unmanaged CLI: run `brew upgrade kandev`, `scoop update kandev`, or `npm install -g kandev@latest`, then restart the process.
 - Transient npx: start the desired release with `npx -y kandev@latest`; this does not update a persistent package.
 - Docker/Kubernetes: replace the image and recreate the workload. Do not treat an in-container package install as a durable update.
 

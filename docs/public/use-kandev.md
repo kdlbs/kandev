@@ -45,6 +45,9 @@ npm install -g kandev@latest
 kandev
 ```
 
+Scoop installs the native runtime bundle, so Node.js is not required to install or start Kandev. It
+is still needed for the agent CLIs Kandev installs through its own interface.
+
 Stable is the default and is selected by npm's `latest` tag. To test the current prerelease from
 `main` without changing a global installation, launch the package once from the npm-only `nightly`
 tag:

@@ -20,7 +20,7 @@ The `kandev` command starts a local Kandev backend, which serves the web UI, HTT
 |---|---|---|
 | macOS | Apple silicon (`arm64`), Intel (`x64`) | Homebrew, npm/npx |
 | Linux | `arm64`, `x64` | Homebrew, npm/npx |
-| Windows | `x64` | npm/npx |
+| Windows | `x64` | Scoop, npm/npx |
 
 The npm package is a small Node.js shim. It selects an exact, same-version native runtime package for `process.platform` and `process.arch`, then starts its `kandev` binary. npm 7 or later is required because the native packages are platform-specific optional dependencies. There is no native Windows ARM64 npm package; running the x64 package under Windows emulation is OS-dependent and is not a tested release target.
 
@@ -36,6 +36,20 @@ Homebrew is available on macOS and Linux:
 brew install kdlbs/kandev/kandev
 kandev --version
 ```
+
+### Scoop
+
+Scoop is available on Windows:
+
+```bash
+scoop bucket add kandev https://github.com/kdlbs/scoop-kandev
+scoop install kandev
+kandev --version
+```
+
+The bucket installs the native runtime bundle, so Node.js is not required to
+install or start Kandev. Node.js is still needed for the agent CLIs Kandev
+installs through its own interface.
 
 ### npm or npx
 
@@ -231,6 +245,7 @@ The installer owns CLI updates. Update persistent Stable installs with:
 
 ```bash
 brew upgrade kandev
+scoop update kandev
 npm install -g kandev@latest
 ```
 
