@@ -212,6 +212,47 @@ func TestResolveRuntimeBundlePrefersEnvOverExecutable(t *testing.T) {
 	}
 }
 
+func TestResolveRuntimeBundleFallsBackToExecutable(t *testing.T) {
+	dir := t.TempDir()
+	launcher := filepath.Join(dir, "bin", executableName("kandev"))
+	writeFile(t, launcher)
+	writeFile(t, filepath.Join(dir, "bin", executableName("agentctl")))
+	writeRemoteAgentctlHelpers(t, dir)
+	t.Setenv("KANDEV_BUNDLE_DIR", "")
+
+	original := executablePath
+	t.Cleanup(func() { executablePath = original })
+	executablePath = func() (string, error) { return launcher, nil }
+
+	bundle, err := resolveRuntimeBundle()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bundle.Source != "executable" {
+		t.Fatalf("Source = %q, want %q", bundle.Source, "executable")
+	}
+	// The lookup resolves symlinks, so compare against a resolved path. On
+	// Windows t.TempDir can sit under an 8.3 short name (JOOMAN~1) that
+	// EvalSymlinks expands, and on macOS /var is a symlink to /private/var.
+	wantDir := resolvedPath(t, dir)
+	if bundle.Dir != wantDir {
+		t.Fatalf("Dir = %q, want %q", bundle.Dir, wantDir)
+	}
+	wantLauncher := filepath.Join(wantDir, "bin", executableName("kandev"))
+	if bundle.Launcher != wantLauncher {
+		t.Fatalf("Launcher = %q, want %q", bundle.Launcher, wantLauncher)
+	}
+}
+
+func resolvedPath(t *testing.T, path string) string {
+	t.Helper()
+	resolved, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		return path
+	}
+	return resolved
+}
+
 func TestResolveRuntimeBundleReportsBothLookupsInError(t *testing.T) {
 	t.Setenv("KANDEV_BUNDLE_DIR", "")
 

@@ -56,7 +56,7 @@ func resolveRuntimeBundle() (runtimeBundle, error) {
 // into the systemd unit and launchd plist, and a self-update repoints it at the
 // new bundle while the outgoing launcher is still running.
 func bundleDirFromExecutable() (string, bool) {
-	exe, err := os.Executable()
+	exe, err := executablePath()
 	if err != nil {
 		return "", false
 	}
