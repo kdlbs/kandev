@@ -4,13 +4,10 @@ import { memo, useEffect, useState } from "react";
 import Link from "@/components/routing/app-link";
 import {
   IconBrandGitlab,
-  IconCheck,
-  IconClock,
   IconExternalLink,
   IconGitMerge,
   IconPlus,
   IconUnlink,
-  IconX,
 } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import {
@@ -36,33 +33,7 @@ import { MRAutomationControls } from "./mr-automation-controls";
 import { useDockviewStore } from "@/lib/state/dockview-store";
 import { mrTaskKey } from "./mr-detail-panel";
 import { useTranslation } from "react-i18next";
-
-/**
- * Icon + colour for an MR's combined state. Mirrors github's pr-task-icon
- * priority order so a merged MR reads the same as a merged PR: terminal
- * states first, then pipeline failures / changes-requested, then ready-to-
- * merge, then awaiting-something, then pipeline-running.
- */
-function MRStatusIcon({ mr }: { mr: TaskMR }) {
-  if (mr.state === "merged") return <IconCheck className="h-3 w-3 text-purple-500" />;
-  if (mr.state === "closed") return <IconX className="h-3 w-3 text-muted-foreground" />;
-  if (mr.pipeline_state === "failure") return <IconX className="h-3 w-3 text-red-500" />;
-  if (mr.approval_state === "approved" && mr.pipeline_state === "success" && !mr.draft) {
-    return <IconCheck className="h-3 w-3 text-emerald-400" />;
-  }
-  if (mr.approval_state === "pending") return <IconClock className="h-3 w-3 text-sky-400" />;
-  if (mr.pipeline_state === "pending") return <IconClock className="h-3 w-3 text-yellow-500" />;
-  return null;
-}
-
-function statusTextColor(mr: TaskMR): string {
-  if (mr.state === "merged") return "text-purple-500";
-  if (mr.state === "closed") return "text-muted-foreground";
-  if (mr.pipeline_state === "failure") return "text-red-500";
-  if (mr.approval_state === "approved") return "text-emerald-400";
-  if (mr.approval_state === "pending") return "text-sky-400";
-  return "text-muted-foreground";
-}
+import { MRStatusIcon } from "./mr-task-icon";
 
 export function mrTriggerClass(compact: boolean, mobile: boolean): string {
   if (mobile) return "h-11 w-11 cursor-pointer";
@@ -103,9 +74,8 @@ function MRTriggerContent({
   if (single) {
     return (
       <>
-        <IconGitMerge className={`h-4 w-4 ${statusTextColor(single)}`} />
+        <MRStatusIcon mr={single} className="h-4 w-4" />
         <span className="text-xs font-medium">!{single.mr_iid}</span>
-        <MRStatusIcon mr={single} />
       </>
     );
   }
