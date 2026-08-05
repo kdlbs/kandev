@@ -10,14 +10,14 @@ test.describe("Mobile settings discovery", () => {
     await testPage.setViewportSize({ width: 390, height: 844 });
     await testPage.goto("/settings/general/appearance");
 
-    const menuButton = testPage.getByTestId("settings-mobile-menu-button");
+    const menuButton = testPage.getByTestId("app-nav-trigger");
     const menuButtonBox = await menuButton.boundingBox();
     expect(menuButtonBox).not.toBeNull();
     expect(menuButtonBox!.width).toBeGreaterThanOrEqual(44);
     expect(menuButtonBox!.height).toBeGreaterThanOrEqual(44);
     await menuButton.click();
 
-    const menu = testPage.getByTestId("settings-mobile-menu");
+    const menu = testPage.getByTestId("app-nav-sheet");
     await expect(menu).toBeVisible();
     await expect
       .poll(async () => (await menu.boundingBox())?.x ?? -1, { message: "Settings sheet settled" })
