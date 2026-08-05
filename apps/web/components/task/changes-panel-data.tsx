@@ -277,7 +277,7 @@ function useChangesPanelPRData(repositoryNames: string[], sessionId: string | nu
       workspace_id: workspaceId,
       owner: taskPR.owner,
       repo: taskPR.repo,
-      repository_name: selectedPRRepositoryName,
+      repository_name: useRepositoryKeys ? selectedPRRepositoryName : undefined,
     }));
   }, [prCommitsList, workspaceId, taskPR?.owner, taskPR?.repo, selectedPRRepositoryName]);
   const { prFiles, prDiffFiles } = useMemo(
