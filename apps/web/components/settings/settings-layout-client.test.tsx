@@ -30,9 +30,24 @@ vi.mock("@/components/state-provider", () => ({
 }));
 
 vi.mock("@/components/page-topbar", () => ({
-  PageTopbar: ({ actions, title }: { actions?: ReactNode; title: string }) => (
+  PageTopbar: ({
+    actions,
+    parents,
+    title,
+  }: {
+    actions?: ReactNode;
+    parents?: Array<{ label: string; href: string }>;
+    title: string;
+  }) => (
     <div>
-      <span data-testid="page-topbar-title">{title}</span>
+      <nav data-testid="page-topbar-breadcrumbs">
+        {parents?.map((parent) => (
+          <a key={parent.href} href={parent.href}>
+            {parent.label}
+          </a>
+        ))}
+        <span data-testid="page-topbar-title">{title}</span>
+      </nav>
       <div data-testid="page-topbar-actions">{actions}</div>
     </div>
   ),
@@ -63,7 +78,7 @@ function DirtySettings() {
   return <div>Dirty settings</div>;
 }
 
-describe("SettingsLayoutClient integrations actions", () => {
+describe("SettingsLayoutClient", () => {
   beforeEach(() => {
     pathname = "/settings/integrations/github";
     state.workspaces.activeId = "ws-1";
@@ -156,5 +171,45 @@ describe("SettingsLayoutClient integrations actions", () => {
     } finally {
       await i18n.changeLanguage("en");
     }
+  });
+});
+
+describe("SettingsLayoutClient workspace breadcrumbs", () => {
+  beforeEach(() => {
+    pathname = "/settings/workspace/ws-2/secrets";
+    state.workspaces.activeId = "ws-1";
+    state.setActiveWorkspace.mockClear();
+  });
+
+  afterEach(() => cleanup());
+
+  it("includes the workspace name in workspace-scoped breadcrumbs", () => {
+    render(
+      <SettingsLayoutClient>
+        <div>Settings page</div>
+      </SettingsLayoutClient>,
+    );
+
+    expect(screen.getByTestId("page-topbar-breadcrumbs").textContent).toBe(
+      "SettingsArchiveSecrets",
+    );
+    expect(screen.getByRole("link", { name: "Archive" }).getAttribute("href")).toBe(
+      "/settings/workspace/ws-2",
+    );
+  });
+
+  it("keeps the automations parent after the workspace breadcrumb", () => {
+    pathname = "/settings/workspace/ws-2/automations/new";
+
+    render(
+      <SettingsLayoutClient>
+        <div>Settings page</div>
+      </SettingsLayoutClient>,
+    );
+
+    const breadcrumbs = screen.getByTestId("page-topbar-breadcrumbs");
+    expect(
+      Array.from(breadcrumbs.querySelectorAll("a, span")).map((element) => element.textContent),
+    ).toEqual(["Settings", "Archive", "Automations", "New"]);
   });
 });

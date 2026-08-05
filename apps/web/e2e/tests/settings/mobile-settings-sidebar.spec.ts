@@ -15,4 +15,33 @@ test.describe("Mobile settings navigation", () => {
 
     await expect(takeover).toBeHidden();
   });
+
+  test("shows the workspace breadcrumb and orders secrets after automations", async ({
+    testPage,
+    seedData,
+  }) => {
+    await testPage.setViewportSize({ width: 390, height: 844 });
+    await testPage.goto(`/settings/workspace/${seedData.workspaceId}/secrets`);
+
+    await expect(testPage.getByRole("navigation", { name: "Breadcrumb" })).toContainText(
+      "E2E Workspace",
+    );
+
+    await testPage.getByTestId("settings-mobile-menu-button").click();
+    const menu = testPage.getByTestId("settings-mobile-menu");
+    const hrefs = await menu
+      .locator("a")
+      .evaluateAll((links) =>
+        links
+          .map((link) => link.getAttribute("href"))
+          .filter((href): href is string => Boolean(href)),
+      );
+
+    const automationsIndex = hrefs.indexOf(
+      `/settings/workspace/${seedData.workspaceId}/automations`,
+    );
+    const secretsIndex = hrefs.indexOf(`/settings/workspace/${seedData.workspaceId}/secrets`);
+    expect(automationsIndex).toBeGreaterThanOrEqual(0);
+    expect(secretsIndex).toBeGreaterThan(automationsIndex);
+  });
 });

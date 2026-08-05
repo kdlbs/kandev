@@ -190,13 +190,6 @@ export function WorkspacesGroup({ pathname, expanded, onToggle }: WorkspacesGrou
               depth={2}
             />
             <SettingsLeaf
-              href={secretsPath}
-              label={t("settings:workspaceSecrets")}
-              icon={IconKey}
-              isActive={pathname === secretsPath}
-              depth={2}
-            />
-            <SettingsLeaf
               href={workflowsPath}
               label={t("workflows:workflows")}
               icon={IconArrowsShuffle}
@@ -222,6 +215,13 @@ export function WorkspacesGroup({ pathname, expanded, onToggle }: WorkspacesGrou
               label={t("common:automations")}
               icon={IconBolt}
               isActive={pathname === automationsPath}
+              depth={2}
+            />
+            <SettingsLeaf
+              href={secretsPath}
+              label={t("settings:workspaceSecrets")}
+              icon={IconKey}
+              isActive={pathname === secretsPath}
               depth={2}
             />
           </SettingsGroup>
