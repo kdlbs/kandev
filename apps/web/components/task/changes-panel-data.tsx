@@ -270,17 +270,16 @@ function useChangesPanelPRData(repositoryNames: string[], sessionId: string | nu
     taskPR?.pr_number ?? null,
     refreshKey,
   );
-  const prCommits = useMemo<PRCommitForMerge[]>(
-    () =>
-      prCommitsList.map((commit) => ({
-        ...commit,
-        workspace_id: workspaceId ?? undefined,
-        owner: taskPR?.owner,
-        repo: taskPR?.repo,
-        repository_name: selectedPRRepositoryName,
-      })),
-    [prCommitsList, workspaceId, taskPR?.owner, taskPR?.repo, selectedPRRepositoryName],
-  );
+  const prCommits = useMemo<PRCommitForMerge[]>(() => {
+    if (!workspaceId?.trim() || !taskPR?.owner?.trim() || !taskPR.repo?.trim()) return [];
+    return prCommitsList.map((commit) => ({
+      ...commit,
+      workspace_id: workspaceId,
+      owner: taskPR.owner,
+      repo: taskPR.repo,
+      repository_name: selectedPRRepositoryName,
+    }));
+  }, [prCommitsList, workspaceId, taskPR?.owner, taskPR?.repo, selectedPRRepositoryName]);
   const { prFiles, prDiffFiles } = useMemo(
     () =>
       buildChangesPanelPRData({

@@ -287,9 +287,9 @@ export type PRCommitForMerge = {
   deletions: number;
   author_date?: string;
   stats_available?: boolean;
-  workspace_id?: string;
-  owner?: string;
-  repo?: string;
+  workspace_id: string;
+  owner: string;
+  repo: string;
   repository_name?: string;
 };
 
@@ -304,15 +304,43 @@ function localCommitTarget(commit: {
   };
 }
 
-function githubCommitTarget(commit: PRCommitForMerge): CommitDetailTarget {
+function githubCommitTarget(commit: PRCommitForMerge): CommitDetailTarget | null {
+  if (!commit.workspace_id.trim() || !commit.owner.trim() || !commit.repo.trim()) return null;
   return {
     source: "github",
     sha: commit.sha,
-    workspaceId: commit.workspace_id ?? "",
-    owner: commit.owner ?? "",
-    repo: commit.repo ?? "",
+    workspaceId: commit.workspace_id,
+    owner: commit.owner,
+    repo: commit.repo,
     ...(commit.repository_name ? { repositoryName: commit.repository_name } : {}),
   };
+}
+
+function prCommitKey(pr: PRCommitForMerge): string {
+  return `${pr.repository_name ?? ""}\0${pr.sha}`;
+}
+
+function appendPROnlyCommits(
+  prCommits: PRCommitForMerge[],
+  matchedPRKeys: Set<string>,
+  pushed: MergedCommit[],
+): void {
+  for (const pr of prCommits) {
+    if (matchedPRKeys.has(prCommitKey(pr))) continue;
+    const detailTarget = githubCommitTarget(pr);
+    if (!detailTarget) continue;
+    pushed.push({
+      commit_sha: pr.sha,
+      commit_message: pr.message,
+      insertions: pr.additions,
+      deletions: pr.deletions,
+      pushed: true,
+      statsAvailable: pr.stats_available === true,
+      detailTarget,
+      ...(pr.repository_name ? { repository_name: pr.repository_name } : {}),
+      committed_at: pr.author_date,
+    });
+  }
 }
 
 /**
@@ -347,7 +375,6 @@ export function mergeCommits(
   ) =>
     shaMatches(pr.sha, local.commit_sha) &&
     repositoryMatches(local.repository_name, pr.repository_name);
-  const prCommitKey = (pr: PRCommitForMerge) => `${pr.repository_name ?? ""}\0${pr.sha}`;
   const unpushed: MergedCommit[] = [];
   const pushed: MergedCommit[] = [];
   const matchedPRKeys = new Set<string>();
@@ -377,21 +404,7 @@ export function mergeCommits(
       }
     }
   }
-  for (const pr of prCommits) {
-    if (!matchedPRKeys.has(prCommitKey(pr))) {
-      pushed.push({
-        commit_sha: pr.sha,
-        commit_message: pr.message,
-        insertions: pr.additions,
-        deletions: pr.deletions,
-        pushed: true,
-        statsAvailable: pr.stats_available === true,
-        detailTarget: githubCommitTarget(pr),
-        ...(pr.repository_name ? { repository_name: pr.repository_name } : {}),
-        committed_at: pr.author_date,
-      });
-    }
-  }
+  appendPROnlyCommits(prCommits, matchedPRKeys, pushed);
   return [...unpushed, ...pushed];
 }
 

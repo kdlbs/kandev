@@ -9,6 +9,10 @@ const makeLocal = (sha: string, message = "msg") => ({
 });
 
 const PR_DATE = "2026-03-29T00:00:00Z";
+const WORKSPACE_ID = "workspace-1";
+const PR_OWNER = "acme";
+const PR_REPO = "widget";
+const REMOTE_SHA = "ccc3333";
 
 const makePR = (sha: string) => ({
   sha,
@@ -49,6 +53,9 @@ const makePRFull = (sha: string, message = "msg", author = "user") => ({
   additions: 5,
   deletions: 2,
   files_changed: 1,
+  workspace_id: WORKSPACE_ID,
+  owner: PR_OWNER,
+  repo: PR_REPO,
 });
 
 describe("mergeCommits", () => {
@@ -116,21 +123,21 @@ describe("mergeCommits", () => {
 
   it("includes PR-only commits (from other contributors) as pushed", () => {
     const local: ReturnType<typeof makeLocal>[] = [];
-    const pr = [makePRFull("ccc3333", "external fix", "other-dev")];
+    const pr = [makePRFull(REMOTE_SHA, "external fix", "other-dev")];
     const result = mergeCommits(local, pr);
     expect(result).toMatchObject([
       {
-        commit_sha: "ccc3333",
+        commit_sha: REMOTE_SHA,
         commit_message: "external fix",
         pushed: true,
         committed_at: PR_DATE,
         statsAvailable: false,
         detailTarget: {
           source: "github",
-          sha: "ccc3333",
-          workspaceId: "",
-          owner: "",
-          repo: "",
+          sha: REMOTE_SHA,
+          workspaceId: WORKSPACE_ID,
+          owner: PR_OWNER,
+          repo: PR_REPO,
         },
       },
     ]);

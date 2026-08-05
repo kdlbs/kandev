@@ -121,6 +121,19 @@ describe("mergeCommits source provenance", () => {
 });
 
 describe("mergeCommits repository identity", () => {
+  it("does not create a PR-only target without complete provenance", () => {
+    const pr = {
+      ...makePR(SHARED_SHA, "remote"),
+      stats_available: false,
+      workspace_id: "",
+      owner: "acme",
+      repo: WIDGET_REPO,
+      repository_name: WIDGET_REPO,
+    };
+
+    expect(mergeCommits([], [pr])).toEqual([]);
+  });
+
   it("does not match a root local commit to a named repository PR", () => {
     const local = [makeLocal(SHARED_SHA, "root local")];
     const pr = {
