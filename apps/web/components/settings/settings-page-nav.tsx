@@ -3,10 +3,10 @@
 import { SettingsTree } from "@/components/app-sidebar/sections/settings/settings-tree";
 
 /**
- * The settings tree as touch rows: the nav sheet's page section on every
- * settings route, and the whole page at `/settings` on a phone. The wrapper
- * compacts the sidebar-styled tree; link clicks are handled by whatever hosts
- * it (`AppNavSheet` closes itself on any link click).
+ * The settings tree as touch rows: the whole page at `/settings` on a phone,
+ * where there is no sidebar to hold it. The wrapper compacts the sidebar-styled
+ * tree, and the search field floats in thumb reach instead of sitting above a
+ * list the user has to scroll past to reach it again.
  */
 export function SettingsPageNav({
   pathname,
@@ -18,7 +18,11 @@ export function SettingsPageNav({
 }) {
   return (
     <div className="flex flex-col gap-0.5 [&_a]:min-h-10 [&_a]:text-sm [&_button]:min-h-10 [&_button]:text-sm [&_svg]:h-4 [&_svg]:w-4">
-      <SettingsTree pathname={pathname} {...(defaultOpenGroup ? { defaultOpenGroup } : {})} />
+      <SettingsTree
+        pathname={pathname}
+        searchLayout="floating"
+        {...(defaultOpenGroup ? { defaultOpenGroup } : {})}
+      />
     </div>
   );
 }

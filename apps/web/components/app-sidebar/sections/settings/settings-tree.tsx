@@ -66,6 +66,7 @@ export function settingsOpenGroupIdForPath(pathname: string, fallbackGroup?: str
 export function SettingsTree({
   pathname,
   defaultOpenGroup,
+  searchLayout,
 }: {
   pathname: string;
   /**
@@ -74,6 +75,8 @@ export function SettingsTree({
    * rather than on `DEFAULT_OPEN_GROUP`.
    */
   defaultOpenGroup?: string;
+  /** `floating` pins the search field in thumb reach — see `SettingsSearch`. */
+  searchLayout?: "inline" | "floating";
 }) {
   const { t } = useTranslation();
   const authEnabled = useFeature("auth");
@@ -103,6 +106,7 @@ export function SettingsTree({
         query={query}
         onQueryChange={setQuery}
         onSelect={() => setQuery("")}
+        {...(searchLayout ? { layout: searchLayout } : {})}
       />
       {query.trim() ? null : (
         <>

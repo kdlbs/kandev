@@ -19,16 +19,41 @@ test.describe("Settings index on a phone", () => {
     await expect(testPage.getByTestId("terminal-font-select")).toBeVisible();
   });
 
-  test("keeps the nav sheet available on a leaf for sideways jumps", async ({ testPage }) => {
+  test("offers no nav drawer anywhere in settings", async ({ testPage }) => {
     await testPage.setViewportSize({ width: 390, height: 844 });
-    await testPage.goto("/settings/general/terminal");
 
-    await testPage.getByTestId("app-nav-trigger").click();
-    const sheet = testPage.getByTestId("app-nav-sheet");
-    await expect(sheet).toBeVisible();
+    for (const path of ["/settings", "/settings/general/terminal", "/settings/prompts"]) {
+      await testPage.goto(path);
+      await expect(testPage.getByTestId("settings-scroll-container")).toBeVisible();
+      // A sheet here would offer the list the index page already is.
+      await expect(testPage.getByTestId("app-nav-trigger")).toHaveCount(0);
+    }
+  });
 
-    await sheet.getByRole("link", { name: /Notifications/ }).click();
+  test("keeps the search field in thumb reach at the bottom of the index", async ({ testPage }) => {
+    await testPage.setViewportSize({ width: 390, height: 844 });
+    await testPage.goto("/settings");
 
-    await expect(testPage).toHaveURL(/\/settings\/general\/notifications$/);
+    // The desktop sidebar's tree is in the DOM too (hidden below md) and carries
+    // the same testid, so scope to the page's copy.
+    const search = testPage.getByTestId("settings-index").getByTestId("settings-search");
+    await expect(search).toBeVisible();
+
+    const [box, viewport] = [
+      await search.boundingBox(),
+      await testPage.evaluate(() => ({ w: innerWidth, h: innerHeight })),
+    ];
+    expect(box).not.toBeNull();
+    // Bottom half of the viewport, and horizontally centred.
+    expect(box!.y).toBeGreaterThan(viewport.h / 2);
+    expect(box!.y + box!.height).toBeLessThanOrEqual(viewport.h);
+    const centreOffset = Math.abs(box!.x + box!.width / 2 - viewport.w / 2);
+    expect(centreOffset).toBeLessThanOrEqual(2);
+
+    // Still filters the list it floats over.
+    await search.getByRole("searchbox", { name: "Search settings" }).fill("terminal font size");
+    await expect(
+      testPage.getByTestId("settings-index").getByTestId("settings-search-results"),
+    ).toBeVisible();
   });
 });

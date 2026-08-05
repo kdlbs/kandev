@@ -40,6 +40,11 @@ export function SettingsIndex({ restoreTo }: { restoreTo: string }) {
 
   useEffect(() => {
     if (isMobile) return;
+    // The sidebar is interactive while this route's chunk is still loading, so a
+    // tap can navigate away before this effect flushes. Read the live location
+    // rather than trusting mount order: handing off after the user has left
+    // would drag them back into Settings.
+    if (window.location.pathname !== SETTINGS_INDEX_PATH) return;
     // `replace`, not `push`: with a history entry for `/settings` still in
     // place, Back would land here and immediately redirect again.
     router.replace(restoreTarget.current);

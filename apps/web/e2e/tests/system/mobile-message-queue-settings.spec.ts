@@ -9,11 +9,9 @@ test("mobile navigation reaches Message Queue with touch-safe shared settings la
   await mobile.mobileMenuButton.click();
   const homeMenu = testPage.getByTestId("mobile-home-menu-card");
   await homeMenu.getByRole("link", { name: "Settings" }).click();
-  await testPage.getByTestId("app-nav-trigger").click();
-
-  const menu = testPage.getByTestId("app-nav-sheet");
-  await menu.getByRole("button", { name: "Expand General" }).click();
-  await menu.getByRole("link", { name: "Message Queue" }).click();
+  // Settings lands on the /settings index, which opens the General group.
+  const index = testPage.getByTestId("settings-index");
+  await index.getByRole("link", { name: "Message Queue" }).click();
 
   await expect(testPage).toHaveURL(
     (url) => new URL(url).pathname === "/settings/general/message-queue",

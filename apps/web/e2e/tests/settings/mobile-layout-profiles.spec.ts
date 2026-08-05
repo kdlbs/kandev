@@ -43,7 +43,7 @@ test.describe("Mobile layout profiles", () => {
     prCapture,
   }) => {
     const layouts = new LayoutSettingsPage(testPage);
-    await layouts.openFromMobileMenu();
+    await layouts.openFromSettingsIndex();
 
     await expect(layouts.editor.locator(".dv-tab", { hasText: "PR Details" })).toHaveCount(0);
     await layouts.addPanel("PR Details", true);
@@ -78,7 +78,7 @@ test.describe("Mobile layout profiles", () => {
     apiClient,
   }) => {
     const layouts = new LayoutSettingsPage(testPage);
-    await layouts.openFromMobileMenu();
+    await layouts.openFromSettingsIndex();
     await assertNoDocumentHorizontalOverflow(testPage, "layouts page");
     await assertNoDescendantOverflowsRight(layouts.root, "layouts settings");
 

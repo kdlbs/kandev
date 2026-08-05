@@ -64,10 +64,9 @@ test.describe("Mobile storage maintenance", () => {
     await mobile.goto();
     await mobile.mobileMenuButton.click();
     await testPage.getByRole("link", { name: "Settings" }).click();
-    await testPage.getByTestId("app-nav-trigger").click();
-    const settingsMenu = testPage.getByTestId("app-nav-sheet");
-    await settingsMenu.getByRole("button", { name: "Expand System" }).click();
-    await settingsMenu.getByRole("link", { name: "Storage" }).click();
+    const index = testPage.getByTestId("settings-index");
+    await index.getByRole("button", { name: "Expand System" }).click();
+    await index.getByRole("link", { name: "Storage" }).click();
 
     await expect(testPage.getByTestId("storage-settings-page")).toBeVisible();
     await testPage

@@ -24,12 +24,8 @@ test.describe("Mobile resource metrics display", () => {
   });
 
   test("renders simplified metrics in the Status drawer", async ({ testPage }) => {
-    await testPage.goto("/settings/general/terminal");
-    await testPage.getByTestId("app-nav-trigger").click();
-    await testPage
-      .getByTestId("app-nav-sheet")
-      .getByRole("link", { name: "Appearance" })
-      .click();
+    await testPage.goto("/settings");
+    await testPage.getByTestId("settings-index").getByRole("link", { name: "Appearance" }).click();
 
     const showMetrics = testPage.getByRole("switch", { name: "Show host metrics in status bar" });
     const simplified = testPage.getByRole("switch", { name: "Simplified metrics" });

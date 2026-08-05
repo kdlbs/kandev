@@ -7,7 +7,6 @@ import { useAppStore } from "@/components/state-provider";
 import { IntegrationCopyConfigMenu } from "@/components/integrations/integration-copy-config-menu";
 import { integrationFromPathname } from "@/components/integrations/integration-copy-config";
 import { safeDecodePathSegment } from "@/lib/routing/path";
-import { SettingsPageNav } from "@/components/settings/settings-page-nav";
 import { SettingsSaveProvider } from "@/components/settings/settings-save-provider";
 import { SettingsTargetProvider } from "@/components/settings/settings-target-provider";
 import { useTranslation } from "react-i18next";
@@ -234,7 +233,11 @@ function SettingsShell({
             showStatusTrigger={false}
             className="h-10"
             actions={showIntegrationCopyAction ? <IntegrationCopyConfigAction /> : undefined}
-            pageNav={<SettingsPageNav pathname={pathname} />}
+            // No hamburger inside Settings: `/settings` renders the tree as a
+            // page on a phone, so a sheet over it would offer the same list the
+            // user just came from. The breadcrumb's Settings crumb goes back to
+            // it, and the home crumb leaves.
+            showNavTrigger={false}
             contentTestId="settings-scroll-container"
             contentClassName="flex flex-col gap-4 overscroll-contain p-4 pb-[calc(11rem_+_env(safe-area-inset-bottom)_+_var(--app-status-bar-height))]"
           >

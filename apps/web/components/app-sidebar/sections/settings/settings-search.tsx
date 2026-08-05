@@ -17,7 +17,21 @@ type SettingsSearchProps = {
   query: string;
   onQueryChange: (query: string) => void;
   onSelect: () => void;
+  /**
+   * Where the field sits.
+   *
+   * - `inline` — sticky at the top of the tree, which is where the desktop
+   *   sidebar wants it: above the list it filters.
+   * - `floating` — pinned near the bottom of the viewport for the `/settings`
+   *   index on a phone, inside thumb reach. Results still render in the page
+   *   flow above it, so the list reads top-down while the field stays put.
+   */
+  layout?: "inline" | "floating";
 };
+
+/** Clears the status bar and the home-indicator inset when floating. */
+const FLOATING_OFFSET =
+  "bottom-[calc(0.75rem+env(safe-area-inset-bottom)+var(--app-status-bar-height))]";
 
 type ResultGroup = {
   id: string;
@@ -25,10 +39,17 @@ type ResultGroup = {
   items: ResolvedSettingsDiscoveryItem[];
 };
 
-export function SettingsSearch({ items, query, onQueryChange, onSelect }: SettingsSearchProps) {
+export function SettingsSearch({
+  items,
+  query,
+  onQueryChange,
+  onSelect,
+  layout = "inline",
+}: SettingsSearchProps) {
   const { t } = useTranslation();
   const trimmedQuery = query.trim();
   const results = trimmedQuery ? searchSettingsDiscovery(items, trimmedQuery) : [];
+  const floating = layout === "floating";
 
   const handleKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
     if (event.key !== "Escape" || query.length === 0) return;
@@ -40,7 +61,11 @@ export function SettingsSearch({ items, query, onQueryChange, onSelect }: Settin
   return (
     <>
       <div
-        className="sticky top-0 z-10 bg-background pb-2 md:bg-sidebar md:pb-1.5"
+        className={
+          floating
+            ? `fixed inset-x-0 z-30 mx-auto w-[min(92vw,26rem)] rounded-xl border border-border bg-background p-1 shadow-lg shadow-black/20 ${FLOATING_OFFSET}`
+            : "sticky top-0 z-10 bg-background pb-2 md:bg-sidebar md:pb-1.5"
+        }
         data-testid="settings-search"
       >
         <div className="relative">
@@ -57,7 +82,11 @@ export function SettingsSearch({ items, query, onQueryChange, onSelect }: Settin
             spellCheck={false}
             onChange={(event: ChangeEvent<HTMLInputElement>) => onQueryChange(event.target.value)}
             onKeyDown={handleKeyDown}
-            className="h-11 appearance-none bg-background pl-9 pr-11 text-base md:h-8 md:pl-8 md:pr-8 md:text-xs [&::-webkit-search-cancel-button]:hidden"
+            className={
+              floating
+                ? "h-11 appearance-none border-0 bg-transparent pl-9 pr-11 text-base shadow-none [&::-webkit-search-cancel-button]:hidden"
+                : "h-11 appearance-none bg-background pl-9 pr-11 text-base md:h-8 md:pl-8 md:pr-8 md:text-xs [&::-webkit-search-cancel-button]:hidden"
+            }
           />
           {query && (
             <Button

@@ -27,6 +27,12 @@ type PageShellProps = {
   pageNav?: ReactNode;
   /** Manifest destination ids `pageNav` already covers. See `AppNavSections`. */
   navOmitDestinations?: string[];
+  /**
+   * Off for a surface whose own page *is* the navigation — Settings, where
+   * `/settings` renders the tree on a phone, so a sheet over it would offer the
+   * list the user is already looking at.
+   */
+  showNavTrigger?: boolean;
   /** "none" for children that own their own scrolling (dockview, full-bleed). */
   scroll?: "auto" | "none";
   contentClassName?: string;
@@ -49,6 +55,7 @@ export function PageShell({
   leading,
   pageNav,
   navOmitDestinations,
+  showNavTrigger = true,
   scroll = "auto",
   contentClassName,
   contentTestId,
@@ -67,7 +74,9 @@ export function PageShell({
         homeHref={home.href}
         leading={
           <>
-            <AppNavSheet pageNav={pageNav} omitDestinations={navOmitDestinations} />
+            {showNavTrigger && (
+              <AppNavSheet pageNav={pageNav} omitDestinations={navOmitDestinations} />
+            )}
             {leading}
           </>
         }

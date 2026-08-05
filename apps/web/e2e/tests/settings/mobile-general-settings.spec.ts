@@ -190,25 +190,25 @@ test.describe("Mobile general settings", () => {
     await expect(testPage.getByTestId("terminal-font-size-input")).toBeVisible();
   });
 
-  test("opens Settings navigation and returns home from a nested settings page", async ({
-    testPage,
-  }) => {
+  test("moves between settings pages and back home without a nav drawer", async ({ testPage }) => {
     await testPage.goto("/settings/general/terminal");
 
     await expect(testPage.getByRole("heading", { name: "Terminal", exact: true })).toBeVisible();
+    // Settings has no hamburger: the page is the navigation, reached through the
+    // breadcrumb's Settings crumb.
+    await expect(testPage.getByTestId("app-nav-trigger")).toHaveCount(0);
 
-    await testPage.getByTestId("app-nav-trigger").click();
-    const menu = testPage.getByTestId("app-nav-sheet");
-    await expect(menu).toBeVisible();
+    await testPage.getByRole("link", { name: "Settings", exact: true }).click();
+    const index = testPage.getByTestId("settings-index");
+    await expect(index).toBeVisible();
 
-    await menu.getByRole("link", { name: "Appearance" }).click();
+    await index.getByRole("link", { name: "Appearance" }).click();
 
     await expect(testPage).toHaveURL(/\/settings\/general\/appearance$/);
-    await expect(menu).not.toBeVisible();
     await expect(testPage.getByRole("heading", { name: "Appearance", exact: true })).toBeVisible();
 
-    await testPage.getByTestId("app-nav-trigger").click();
-    await testPage.getByTestId("app-nav-sheet").getByRole("link", { name: "Home" }).click();
+    // The topbar home crumb leaves the settings surface entirely.
+    await testPage.getByTestId("topbar-phone-home").click();
 
     await expect(testPage).toHaveURL(/\/(?:\?.*)?$/);
     await expect(testPage.getByTestId("kanban-board")).toBeVisible();

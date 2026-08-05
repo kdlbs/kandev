@@ -32,6 +32,7 @@ describe("SettingsIndex", () => {
     router.replace.mockClear();
     router.push.mockClear();
     breakpoint.isMobile = false;
+    window.history.replaceState({}, "", "/settings");
   });
   afterEach(cleanup);
 
@@ -75,6 +76,17 @@ describe("SettingsIndex", () => {
 
     expect(router.replace).toHaveBeenCalledWith(RESTORE_TO);
     expect(screen.queryByTestId("settings-index")).toBeNull();
+  });
+
+  it("does not hand off once the user has already navigated away", () => {
+    // The sidebar is clickable while this route's chunk loads, so the effect can
+    // run after a tap has moved on. Dragging them back would be worse than not
+    // restoring at all.
+    window.history.replaceState({}, "", "/?home=overview");
+
+    render(<SettingsIndex restoreTo={RESTORE_TO} />);
+
+    expect(router.replace).not.toHaveBeenCalled();
   });
 
   it("keeps the target it mounted with", () => {
