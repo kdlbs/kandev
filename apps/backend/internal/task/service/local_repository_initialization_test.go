@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -15,6 +16,24 @@ import (
 )
 
 func TestServiceInitializeLocalRepositoryCreatesMainRepository(t *testing.T) {
+	for key, value := range map[string]string{
+		"GIT_AUTHOR_NAME":     "Host Author",
+		"GIT_AUTHOR_EMAIL":    "host-author@example.com",
+		"GIT_COMMITTER_NAME":  "Host Committer",
+		"GIT_COMMITTER_EMAIL": "host-committer@example.com",
+	} {
+		t.Setenv(key, value)
+	}
+	if runtime.GOOS != "windows" {
+		hooksPath := t.TempDir()
+		hook := filepath.Join(hooksPath, "prepare-commit-msg")
+		if err := os.WriteFile(hook, []byte("#!/bin/sh\nexit 42\n"), 0o755); err != nil {
+			t.Fatalf("WriteFile prepare-commit-msg: %v", err)
+		}
+		t.Setenv("GIT_CONFIG_COUNT", "1")
+		t.Setenv("GIT_CONFIG_KEY_0", "core.hooksPath")
+		t.Setenv("GIT_CONFIG_VALUE_0", hooksPath)
+	}
 	svc, eventBus, repo := createTestService(t)
 	ctx := context.Background()
 	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Workspace"}); err != nil {

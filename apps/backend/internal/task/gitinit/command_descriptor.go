@@ -38,7 +38,12 @@ func CommitCommandContext(
 	targetDirectory *os.File,
 	args ...string,
 ) (*exec.Cmd, error) {
-	return commandContext(ctx, targetPath, targetDirectory, args...)
+	command, err := commandContext(ctx, targetPath, targetDirectory, args...)
+	if err != nil {
+		return nil, err
+	}
+	command.Env = withIsolatedCommitEnvironment(command.Env)
+	return command, nil
 }
 
 func commandContext(ctx context.Context, _ string, targetDirectory *os.File, gitArgs ...string) (*exec.Cmd, error) {
