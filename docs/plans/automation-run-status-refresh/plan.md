@@ -1,7 +1,7 @@
 ---
 spec: docs/specs/office/automation-runs.md
 created: 2026-08-05
-status: draft
+status: building
 ---
 
 # Implementation Plan: Keep automation run status live
@@ -58,13 +58,27 @@ present. This is shared by the desktop `RunsRail` and mobile `RunsDrawer`.
 
 ## Verification Results
 
-Pending implementation.
+- RED: `rtk pnpm --filter @kandev/web test -- --run
+  components/runs/automation-detail-page.test.tsx` failed as expected with 1
+  failing regression and 22 passing tests; the completed group never appeared
+  while the summary reported zero open runs.
+- GREEN: `rtk pnpm --filter @kandev/web test -- --run
+  components/runs/automation-detail-page.test.tsx components/runs/use-live-refresh.test.ts
+  components/runs/use-automation-activity.test.ts` — 3 files passed, 37 tests
+  passed.
+- `rtk git diff --check` — passed.
+- `rtk pnpm exec prettier --check components/runs/automation-detail-page.tsx
+  components/runs/automation-detail-page.test.tsx` — passed.
+- Mobile E2E was not rerun: this is state/data freshness in the existing
+  detail page, with no change to mobile composition, touch targets, scrolling,
+  or navigation; the existing `mobile-automation-detail.spec.ts` remains the
+  mobile-path coverage.
 
 ## Implementation Waves And Parallel Candidates
 
 Wave 1 (sequential):
 
-- [ ] [task-01-live-run-status](task-01-live-run-status.md)
+- [x] [task-01-live-run-status](task-01-live-run-status.md) — done
 
 ## Open Questions
 

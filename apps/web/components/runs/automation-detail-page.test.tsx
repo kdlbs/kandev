@@ -437,3 +437,28 @@ describe("AutomationDetailPage freshness", () => {
     vi.useRealTimers();
   });
 });
+
+describe("AutomationDetailPage visible run freshness", () => {
+  it("keeps polling when a visible running row has no open summary count", async () => {
+    vi.useFakeTimers();
+    mocks.listAutomationRuns
+      .mockResolvedValueOnce([run({ status: "task_created" })])
+      .mockResolvedValue([run({ status: "succeeded" })]);
+    mocks.getAutomationSummary.mockResolvedValue({
+      automation_id: AUTOMATION_ID,
+      open_runs: 0,
+    });
+
+    try {
+      render(<AutomationDetailPage automationId={AUTOMATION_ID} tab="activity" />);
+      await vi.waitFor(() => expect(screen.getByTestId("run-group-running")).toBeTruthy());
+
+      await vi.advanceTimersByTimeAsync(10_000);
+
+      await vi.waitFor(() => expect(screen.getByTestId("run-group-completed")).toBeTruthy());
+      expect(screen.queryByTestId("run-group-running")).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});

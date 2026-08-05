@@ -1,7 +1,7 @@
 ---
 id: "01-live-run-status"
 title: "Keep visible run status live"
-status: pending
+status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
@@ -67,4 +67,16 @@ surface.
 
 ## Results
 
-Pending implementation.
+- RED: `rtk pnpm --filter @kandev/web test -- --run
+  components/runs/automation-detail-page.test.tsx` — 1 expected regression
+  failure and 22 passing tests; `run-group-completed` was absent after the
+  polling interval.
+- GREEN: `rtk pnpm --filter @kandev/web test -- --run
+  components/runs/automation-detail-page.test.tsx components/runs/use-live-refresh.test.ts
+  components/runs/use-automation-activity.test.ts` — 3 files passed, 37 tests
+  passed.
+- `rtk git diff --check` — passed.
+- `rtk pnpm exec prettier --check components/runs/automation-detail-page.tsx
+  components/runs/automation-detail-page.test.tsx` — passed.
+- No backend contract or persistent state changed. No temporary files or
+  diagnostic sessions were created.

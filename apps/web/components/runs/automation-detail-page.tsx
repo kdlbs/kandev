@@ -15,6 +15,7 @@ import { nextFiring } from "./automation-rows";
 import { RunsDrawer } from "./runs-drawer";
 import { RunsRail } from "./runs-rail";
 import { RunTranscript } from "./run-transcript";
+import { isOpenRun } from "./run-status";
 import { AUTOMATIONS_HREF, runHref, type AutomationDetailTab } from "./runs-view";
 import { useAutomationActivity } from "./use-automation-activity";
 import { useLiveRefresh } from "./use-live-refresh";
@@ -303,7 +304,11 @@ export function AutomationDetailPage({
   // where a just-fired run appears and finishes without the page ever asking
   // again — and every note derived from that snapshot, including the amber one
   // explaining why the automation will not fire next, goes stale with it.
-  useLiveRefresh(!foreign && (openRuns > 0 || settling), refresh);
+  // A visible open row is a second live signal: the summary deliberately
+  // excludes some task/session states, but the rail still truthfully says
+  // Running until the run query returns a terminal status.
+  const hasVisibleOpenRun = runs.some((run) => isOpenRun(run.status));
+  useLiveRefresh(!foreign && (openRuns > 0 || hasVisibleOpenRun || settling), refresh);
   const rail = useRailWidth();
   const { isMobile } = useResponsiveBreakpoint();
 
