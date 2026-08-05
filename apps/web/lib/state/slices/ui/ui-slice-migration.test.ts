@@ -23,7 +23,7 @@ function makeSidebarDraft(baseViewId = "view-a"): SidebarViewDraft {
 }
 
 describe("migrateView archived compatibility", () => {
-  it("drops legacy archived clauses while preserving the rest of the view", () => {
+  it("preserves archived clauses while preserving the rest of the view", () => {
     const view = makeSidebarView("view-a", "Archived tasks");
     const archivedClause = {
       id: "archived",
@@ -48,12 +48,10 @@ describe("migrateView archived compatibility", () => {
       group: "repository",
       collapsedGroups: ["org/repo"],
     });
-    expect(migrated.filters).toEqual([
-      { id: "title", dimension: "titleMatch", op: "matches", value: "keep" },
-    ]);
+    expect(migrated.filters).toEqual(view.filters);
   });
 
-  it("turns an archived-only legacy view into an unfiltered view", () => {
+  it("preserves an archived-only view", () => {
     const view = makeSidebarView("view-a", "Archived");
     view.filters = [
       {
@@ -64,12 +62,12 @@ describe("migrateView archived compatibility", () => {
       } as unknown as SidebarView["filters"][number],
     ];
 
-    expect(migrateView(view).filters).toEqual([]);
+    expect(migrateView(view).filters).toEqual(view.filters);
   });
 });
 
 describe("migrateSidebarViewDraft archived compatibility", () => {
-  it("drops legacy archived clauses while preserving draft state", () => {
+  it("preserves archived clauses while preserving draft state", () => {
     const draft = makeSidebarDraft();
     draft.filters = [
       {
@@ -83,9 +81,6 @@ describe("migrateSidebarViewDraft archived compatibility", () => {
     draft.sort = { key: "title", direction: "desc" };
     draft.group = "repository";
 
-    expect(migrateSidebarViewDraft(draft)).toEqual({
-      ...draft,
-      filters: [{ id: "title", dimension: "titleMatch", op: "matches", value: "keep" }],
-    });
+    expect(migrateSidebarViewDraft(draft)).toEqual(draft);
   });
 });

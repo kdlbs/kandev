@@ -1,7 +1,7 @@
 ---
 spec: docs/specs/ui/sidebar-archived-filter.md
 created: 2026-08-04
-status: draft
+status: implemented
 ---
 
 # Implementation Plan: Sidebar Archived Task Views
@@ -167,27 +167,34 @@ replace the retirement tests; they do not revert unrelated work on the branch.
 
 ## Verification Results
 
-Pending. Each implementation task records its exact commands, outcomes, and
-artifact cleanup in its `## Results` section.
+- Backend repository/service/handler tests and the broader task/backend target
+  suite pass, including archived-only pagination, search, totals, and
+  conflicting-flag behavior.
+- The frontend focused archived projection and responsive row suite passes: 13
+  files, 114 tests. Web typecheck, changed-file ESLint, `i18n:check`, and
+  `i18n:ratchet` pass.
+- Desktop and mobile host E2E archived-flow regressions each pass (1 test per
+  project) with the managed web/backend build.
+- Task-level details and exact commands are recorded in Tasks 01–05.
 
 ## Implementation Waves And Parallel Candidates
 
 Wave 1 (parallel candidates; user authorization required):
 
-- [ ] [Task 01 — Add archived-only task query](task-01-archived-only-query.md)
-- [ ] [Task 02 — Restore archived filter contract](task-02-restore-archived-filter.md)
+- [x] [Task 01 — Add archived-only task query](task-01-archived-only-query.md)
+- [x] [Task 02 — Restore archived filter contract](task-02-restore-archived-filter.md)
 
 Wave 2:
 
-- [ ] [Task 03 — Build archived sidebar projection](task-03-archived-sidebar-projection.md)
+- [x] [Task 03 — Build archived sidebar projection](task-03-archived-sidebar-projection.md)
 
 Wave 3:
 
-- [ ] [Task 04 — Integrate archived rows](task-04-integrate-archived-rows.md)
+- [x] [Task 04 — Integrate archived rows](task-04-integrate-archived-rows.md)
 
 Wave 4:
 
-- [ ] [Task 05 — Prove desktop and mobile flows](task-05-archived-sidebar-e2e.md)
+- [x] [Task 05 — Prove desktop and mobile flows](task-05-archived-sidebar-e2e.md)
 
 Tasks 01 and 02 are parallel-safe because their backend and frontend contract
 files are disjoint. Task 03 consumes both contracts; Task 04 consumes the

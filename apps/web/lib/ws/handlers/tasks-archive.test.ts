@@ -143,6 +143,29 @@ describe("task.updated archive cleanup", () => {
     expect(state.kanbanMulti.snapshots.wf1.tasks).toEqual([]);
   });
 
+  it("adds an archived task to the workspace-scoped sidebar projection", () => {
+    const store = makeStore({
+      sidebarArchivedTasks: {
+        itemsByWorkspaceId: {},
+        loadedByWorkspaceId: { "ws-1": true },
+        loadingByWorkspaceId: { "ws-1": false },
+        errorByWorkspaceId: { "ws-1": null },
+      },
+    } as unknown as Partial<AppState>);
+
+    registerTasksHandlers(store)["task.updated"]!(
+      makeUpdatedMessage({
+        ...taskPayload(TASK_ID),
+        workspace_id: "ws-1",
+        archived_at: ARCHIVED_AT,
+      }),
+    );
+
+    const archived = store.getState().sidebarArchivedTasks.itemsByWorkspaceId["ws-1"];
+    expect(archived).toHaveLength(1);
+    expect(archived[0]).toMatchObject({ id: TASK_ID, workspaceId: "ws-1", isArchived: true });
+  });
+
   it("clears active task state, pin, recent history, and sidebar prefs for archived task events", () => {
     const store = makeStoreWithTask({
       tasks: {

@@ -26,6 +26,8 @@ type KanbanTask = KanbanState["tasks"][number];
 export type TaskLike = {
   id?: string;
   task_id?: string;
+  workspace_id?: string;
+  workflow_id?: string;
   workflow_step_id?: string;
   title?: string;
   description?: string | null;
@@ -64,6 +66,7 @@ export type TaskLike = {
   queued_for_step_id?: string | null;
   queued_at?: string | null;
   metadata?: Record<string, unknown> | null;
+  archived_at?: string | null;
   status_summary?: TaskStatusSummary | null;
 };
 
@@ -129,6 +132,8 @@ function pickWorkspaceFolders(source: TaskLike): KanbanTask["workspaceFolders"] 
 export function toKanbanTask(source: TaskLike): KanbanTask {
   return {
     id: pickId(source),
+    workspaceId: source.workspace_id,
+    workflowId: source.workflow_id,
     workflowStepId: source.workflow_step_id ?? "",
     title: source.title ?? "",
     description: source.description ?? undefined,
@@ -157,6 +162,7 @@ export function toKanbanTask(source: TaskLike): KanbanTask {
     queuedForStepId: source.queued_for_step_id,
     queuedAt: source.queued_at,
     statusSummary: source.status_summary,
+    isArchived: source.archived_at != null,
     isPRReview: isPRReviewFromMetadata(source.metadata),
     isIssueWatch: isIssueWatchFromMetadata(source.metadata),
     ...issueFieldsFromMetadata(source.metadata),

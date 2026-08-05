@@ -163,6 +163,7 @@ function upsertMultiTask(
 }
 
 type TaskEventPayload = TaskLike & {
+  workspace_id?: string;
   workflow_id: string;
   old_workflow_id?: string | null;
   is_ephemeral?: boolean;
@@ -291,7 +292,79 @@ function removeTaskFromBothKanbans(state: AppState, taskId: string): AppState {
       },
     };
   }
+
+  const archivedItems = next.sidebarArchivedTasks?.itemsByWorkspaceId;
+  if (archivedItems) {
+    const hasArchivedTask = Object.values(archivedItems).some((tasks) =>
+      tasks.some((task) => task.id === taskId),
+    );
+    if (hasArchivedTask) {
+      next = {
+        ...next,
+        sidebarArchivedTasks: {
+          ...next.sidebarArchivedTasks,
+          itemsByWorkspaceId: Object.fromEntries(
+            Object.entries(archivedItems).map(([workspaceId, tasks]) => [
+              workspaceId,
+              tasks.filter((task) => task.id !== taskId),
+            ]),
+          ),
+        },
+      };
+    }
+  }
   return next;
+}
+
+function archivedTaskWorkspaceId(state: AppState, payload: TaskEventPayload): string | undefined {
+  if (payload.workspace_id) return payload.workspace_id;
+  const taskId = payload.task_id ?? payload.id;
+  const cached = Object.entries(state.sidebarArchivedTasks?.itemsByWorkspaceId ?? {}).find(
+    ([, tasks]) => tasks.some((task) => task.id === taskId),
+  );
+  return cached?.[0] ?? toKanbanTask(payload).workspaceId;
+}
+
+function upsertArchivedTaskInCache(state: AppState, payload: TaskEventPayload): AppState {
+  const workspaceId = archivedTaskWorkspaceId(state, payload);
+  if (!workspaceId || payload.is_ephemeral) return state;
+  const task = toKanbanTask(payload);
+  const sidebarArchivedTasks = state.sidebarArchivedTasks ?? {
+    itemsByWorkspaceId: {},
+    loadedByWorkspaceId: {},
+    loadingByWorkspaceId: {},
+    errorByWorkspaceId: {},
+  };
+  const items = sidebarArchivedTasks.itemsByWorkspaceId[workspaceId] ?? [];
+  const existing = items.find((item) => item.id === task.id);
+  const merged = mergeTaskUpdate(existing, task, payload);
+  return {
+    ...state,
+    sidebarArchivedTasks: {
+      ...sidebarArchivedTasks,
+      itemsByWorkspaceId: {
+        ...sidebarArchivedTasks.itemsByWorkspaceId,
+        [workspaceId]: existing
+          ? items.map((item) => (item.id === task.id ? merged : item))
+          : [...items, merged],
+      },
+    },
+  };
+}
+
+function removeArchivedTaskFromCache(state: AppState, taskId: string): AppState {
+  if (!state.sidebarArchivedTasks) return state;
+  return {
+    ...state,
+    sidebarArchivedTasks: {
+      ...state.sidebarArchivedTasks,
+      itemsByWorkspaceId: Object.fromEntries(
+        Object.entries(state.sidebarArchivedTasks.itemsByWorkspaceId).map(
+          ([workspaceId, tasks]) => [workspaceId, tasks.filter((task) => task.id !== taskId)],
+        ),
+      ),
+    },
+  };
 }
 
 function clearRemovedTaskSelection(state: AppState, taskId: string): AppState {
@@ -434,10 +507,14 @@ function handleTaskUpdated(store: StoreApi<AppState>, message: TaskUpdatedMessag
     }
 
     if (archivedAt) {
-      return clearRemovedTaskSelection(next, taskId);
+      return clearRemovedTaskSelection(upsertArchivedTaskInCache(next, message.payload), taskId);
     }
 
-    return upsertTaskInBothKanbans(next, wfId, message.payload);
+    return upsertTaskInBothKanbans(
+      removeArchivedTaskFromCache(next, taskId),
+      wfId,
+      message.payload,
+    );
   });
 
   if (archivedAt) {

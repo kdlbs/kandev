@@ -333,7 +333,7 @@ describe("user settings websocket task-create last-used", () => {
 });
 
 describe("user settings websocket sidebar draft migration", () => {
-  it("removes a legacy archived clause from a live draft", () => {
+  it("preserves an archived clause in a live draft", () => {
     const store = makeStore();
 
     registerUsersHandlers(store)["user.settings.updated"]?.(
@@ -348,7 +348,9 @@ describe("user settings websocket sidebar draft migration", () => {
       }),
     );
 
-    expect(store.getState().sidebarViews.draft?.filters).toEqual([]);
+    expect(store.getState().sidebarViews.draft?.filters).toEqual([
+      { id: "archived", dimension: "archived", op: "is", value: true },
+    ]);
   });
 });
 

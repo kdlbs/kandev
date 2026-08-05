@@ -21,6 +21,14 @@ const STATE_OPTIONS = [
 
 export const DIMENSION_METAS: DimensionMeta[] = [
   {
+    dimension: "archived",
+    label: "Archived",
+    valueKind: "boolean",
+    ops: ["is", "is_not"],
+    defaultOp: "is",
+    defaultValue: true,
+  },
+  {
     dimension: "isPRReview",
     label: "PR review",
     valueKind: "boolean",

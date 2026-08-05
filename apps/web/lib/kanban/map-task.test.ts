@@ -45,6 +45,7 @@ function httpDTO(overrides: Partial<TaskLike> = {}): TaskLike {
 function wsPayload(overrides: Partial<TaskLike> = {}): TaskLike {
   return {
     task_id: "task-1",
+    workspace_id: "ws-1",
     workflow_id: "wf-1",
     ...BASE_SCALARS,
     // Backend WS task.updated emits both the primary repository_id *and* the
@@ -66,6 +67,16 @@ function wsPayload(overrides: Partial<TaskLike> = {}): TaskLike {
 }
 
 describe("toKanbanTask — HTTP DTO / WS payload parity", () => {
+  it("carries workspace identity and archived state through both task shapes", () => {
+    const archivedAt = "2026-08-04T10:00:00Z";
+    const http = toKanbanTask(httpDTO({ archived_at: archivedAt } as Partial<TaskLike>));
+    const ws = toKanbanTask(wsPayload({ archived_at: archivedAt } as Partial<TaskLike>));
+
+    expect(http.workspaceId).toBe("ws-1");
+    expect(http.isArchived).toBe(true);
+    expect(ws.workspaceId).toBe("ws-1");
+    expect(ws.isArchived).toBe(true);
+  });
   it("plain task: both shapes produce identical KanbanTask", () => {
     expect(toKanbanTask(httpDTO())).toEqual(toKanbanTask(wsPayload()));
   });

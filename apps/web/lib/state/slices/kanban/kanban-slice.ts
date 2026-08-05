@@ -4,6 +4,12 @@ import type { KanbanSlice, KanbanSliceState } from "./types";
 export const defaultKanbanState: KanbanSliceState = {
   kanban: { workflowId: null, steps: [], tasks: [] },
   kanbanMulti: { snapshots: {}, isLoading: false },
+  sidebarArchivedTasks: {
+    itemsByWorkspaceId: {},
+    loadedByWorkspaceId: {},
+    loadingByWorkspaceId: {},
+    errorByWorkspaceId: {},
+  },
   workflows: { items: [], activeId: null },
   workspaceContextGeneration: 0,
   tasks: {
@@ -14,6 +20,7 @@ export const defaultKanbanState: KanbanSliceState = {
   },
 };
 
+/* eslint-disable max-lines-per-function -- the slice keeps related task and archived-cache actions together. */
 export const createKanbanSlice: StateCreator<
   KanbanSlice,
   [["zustand/immer", never]],
@@ -107,4 +114,45 @@ export const createKanbanSlice: StateCreator<
       if (!snapshot) return;
       snapshot.tasks = snapshot.tasks.filter((t) => t.id !== taskId);
     }),
+  setSidebarArchivedTasks: (workspaceId, tasks) =>
+    set((draft) => {
+      const seen = new Set<string>();
+      draft.sidebarArchivedTasks.itemsByWorkspaceId[workspaceId] = tasks.filter((task) => {
+        if (seen.has(task.id)) return false;
+        seen.add(task.id);
+        return true;
+      });
+      draft.sidebarArchivedTasks.loadedByWorkspaceId[workspaceId] = true;
+      draft.sidebarArchivedTasks.errorByWorkspaceId[workspaceId] = null;
+    }),
+  setSidebarArchivedTasksLoading: (workspaceId, loading) =>
+    set((draft) => {
+      draft.sidebarArchivedTasks.loadingByWorkspaceId[workspaceId] = loading;
+    }),
+  setSidebarArchivedTasksError: (workspaceId, error) =>
+    set((draft) => {
+      draft.sidebarArchivedTasks.errorByWorkspaceId[workspaceId] = error;
+    }),
+  upsertSidebarArchivedTask: (workspaceId, task) =>
+    set((draft) => {
+      const items = draft.sidebarArchivedTasks.itemsByWorkspaceId[workspaceId] ?? [];
+      const index = items.findIndex((item) => item.id === task.id);
+      if (index >= 0) items[index] = task;
+      else items.push(task);
+    }),
+  removeSidebarArchivedTask: (taskId, workspaceId) =>
+    set((draft) => {
+      const workspaceIds = workspaceId
+        ? [workspaceId]
+        : Object.keys(draft.sidebarArchivedTasks.itemsByWorkspaceId);
+      for (const id of workspaceIds) {
+        const items = draft.sidebarArchivedTasks.itemsByWorkspaceId[id];
+        if (items) {
+          draft.sidebarArchivedTasks.itemsByWorkspaceId[id] = items.filter(
+            (task) => task.id !== taskId,
+          );
+        }
+      }
+    }),
 });
+/* eslint-enable max-lines-per-function */

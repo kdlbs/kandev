@@ -43,6 +43,7 @@ function getStateBucket(task: TaskSwitcherItem): TaskBucket {
 }
 
 const dimensionExtractors: Record<FilterDimension, DimensionExtractor> = {
+  archived: (t) => t.isArchived === true,
   // State filters intentionally use the action buckets exposed by the filter UI.
   state: (t) => getStateBucket(t),
   workflow: (t) => t.workflowId,
@@ -58,6 +59,16 @@ const dimensionExtractors: Record<FilterDimension, DimensionExtractor> = {
   isIssueWatch: (t) => t.isIssueWatch === true,
   titleMatch: (t) => t.title ?? "",
 };
+
+export function viewRequiresArchivedTasks(
+  view: Pick<SidebarView, "filters"> | null | undefined,
+): boolean {
+  return (
+    view?.filters.some(
+      (clause) => clause.dimension === "archived" && clause.op === "is" && clause.value === true,
+    ) ?? false
+  );
+}
 
 function toStringArray(v: FilterValue): string[] {
   if (Array.isArray(v)) return v.map(String);

@@ -1,7 +1,7 @@
 ---
 id: "03-archived-sidebar-projection"
 title: "Build archived sidebar projection"
-status: pending
+status: done
 wave: 2
 depends_on: ["01-archived-only-query", "02-restore-archived-filter"]
 plan: "plan.md"
@@ -84,4 +84,18 @@ exact files changed, commands/results, blockers, and update this task plus
 
 ## Results
 
-Pending.
+- Added a separate `sidebarArchivedTasks` cache keyed by workspace, with
+  loaded/loading/error state plus replace, upsert, and remove actions. Active
+  Kanban tasks and workflow snapshots remain unchanged.
+- Added a paginated archived-only loader with a store-level loading gate,
+  request-generation and workspace guards, foreground refresh, stable empty
+  selectors, and successful-cache retention when refresh fails. Archived rows
+  merge only for a positive `archived is true` view clause and are deduplicated
+  by task ID.
+- Updated task WebSocket handling so archive, unarchive, and delete transitions
+  keep active and archived projections mutually exclusive while preserving the
+  existing lifecycle side effects.
+- Verification:
+  - `cd apps && pnpm --filter @kandev/web test -- --run lib/api/domains/kanban-api.test.ts lib/kanban/map-task.test.ts lib/state/slices/kanban/kanban-slice.test.ts hooks/domains/kanban/use-sidebar-archived-tasks.test.ts hooks/domains/kanban/use-workspace-sidebar-tasks.test.ts lib/ws/handlers/tasks-archive.test.ts lib/ws/handlers/tasks-unarchive.test.ts lib/ws/handlers/tasks.deleted.test.ts components/task/task-session-sidebar-item.test.ts components/task/mobile/session-task-switcher-sheet-hooks.test.ts components/task/task-select-helpers.test.ts components/task/task-switcher-click.test.ts components/task/task-switcher.test.tsx` — 13 files, 114 tests passed.
+  - `cd apps/web && pnpm run typecheck` — passed.
+  - Changed-file ESLint, `pnpm run i18n:check`, and `pnpm run i18n:ratchet` — passed.

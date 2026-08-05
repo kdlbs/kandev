@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useMemo, useState, memo } from "react";
+import { useTranslation } from "react-i18next";
 import { IconMessageCircle, IconPlus } from "@tabler/icons-react";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@kandev/ui/sheet";
 import { Drawer, DrawerContent, DrawerHeader, DrawerTitle } from "@kandev/ui/drawer";
@@ -59,6 +60,7 @@ function useSidebarGroupToggle(viewId: string) {
   );
 }
 
+// eslint-disable-next-line max-lines-per-function -- assembles the shared task tree with the mobile drawer's view state.
 export function MobileTaskList({
   tasks,
   workflows,
@@ -80,6 +82,9 @@ export function MobileTaskList({
   onLinkSentryIssue,
   deletingTaskId,
   isLoading,
+  loadError,
+  onRetryLoad,
+  retryLabel,
 }: {
   tasks: TaskSwitcherItem[];
   workflows: TaskMoveWorkflow[];
@@ -101,6 +106,9 @@ export function MobileTaskList({
   onLinkSentryIssue?: (taskId: string, taskTitle?: string) => void;
   deletingTaskId: string | null;
   isLoading?: boolean;
+  loadError?: string | null;
+  onRetryLoad?: () => void;
+  retryLabel?: string;
 }) {
   const view = useEffectiveSidebarView();
   const {
@@ -153,6 +161,9 @@ export function MobileTaskList({
       pinnedTaskIds={pinnedTaskIds}
       deletingTaskId={deletingTaskId}
       isLoading={isLoading}
+      loadError={loadError}
+      onRetryLoad={onRetryLoad}
+      retryLabel={retryLabel}
       totalTaskCount={tasks.length}
     />
   );
@@ -292,6 +303,7 @@ function TaskSwitcherSurfaceContent({
   edit,
   linking,
 }: TaskSwitcherSurfaceContentProps) {
+  const { t } = useTranslation();
   return (
     <>
       <TaskSwitcherSurfaceHeader
@@ -305,7 +317,7 @@ function TaskSwitcherSurfaceContent({
       <div className="shrink-0">
         <SidebarFilterBar />
       </div>
-      <div className="flex-1 min-h-0 overflow-y-auto p-2">
+      <div className="flex-1 min-h-0 overflow-y-auto p-2" data-testid="mobile-task-switcher-list">
         <MobileTaskList
           tasks={data.tasksWithRepositories}
           workflows={data.workflows}
@@ -351,6 +363,9 @@ function TaskSwitcherSurfaceContent({
           )}
           deletingTaskId={actions.deletingTaskId}
           isLoading={data.tasksLoading}
+          loadError={data.archivedError ? t("sidebar:archivedLoadFailed") : null}
+          onRetryLoad={data.retryArchivedTasks}
+          retryLabel={t("sidebar:retry")}
         />
       </div>
     </>

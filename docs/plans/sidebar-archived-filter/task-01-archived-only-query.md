@@ -1,7 +1,7 @@
 ---
 id: "01-archived-only-query"
 title: "Add archived-only task query"
-status: pending
+status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
@@ -77,4 +77,14 @@ files changed, commands/results, blockers, and update this task plus
 
 ## Results
 
-Pending.
+- Added the additive `ListTasksByWorkspaceWithArchiveMode` repository/service
+  contract and `only_archived=true` HTTP query handling. Existing callers keep
+  the active/all compatibility method.
+- Archive predicates now apply consistently to non-search and search count/page
+  queries; `onlyArchived` takes precedence over `includeArchived` and excludes
+  ephemeral rows through the existing defaults.
+- Added repository coverage for archived-only rows, totals, search, and
+  ephemeral exclusion, plus PR-number augmentation coverage for archived-only
+  mode.
+- `cd apps/backend && go test ./internal/task/repository ./internal/task/service ./internal/task/handlers -run 'ArchiveModes|OnlyArchived|PRMatchRespectsArchive'` — passed (3 tests).
+- `cd apps/backend && go test ./internal/backendapp ./internal/orchestrator/executor ./internal/plugins ./internal/office/... ./internal/task/...` — passed.

@@ -170,6 +170,7 @@ type TaskContextMenuItemsProps = Omit<ContextMenuProps, "children"> & {
 };
 
 function TaskContextMenuItems(props: TaskContextMenuItemsProps) {
+  const { t } = useTranslation();
   const {
     task,
     workflows,
@@ -240,10 +241,12 @@ function TaskContextMenuItems(props: TaskContextMenuItemsProps) {
       <TaskEditItem task={task} disabled={isDeleting} onEditTask={onEditTask} />
       <TaskRenameItem task={task} disabled={isDeleting} onRenameTask={onRenameTask} />
       <TaskCreateSubtaskItem task={task} disabled={isDeleting} onCreateSubtask={onCreateSubtask} />
-      <ContextMenuItem disabled>
-        <IconCopy className="mr-2 h-4 w-4" />
-        Duplicate
-      </ContextMenuItem>
+      {!task.isArchived && (
+        <ContextMenuItem disabled>
+          <IconCopy className="mr-2 h-4 w-4" />
+          {t("settings:duplicate")}
+        </ContextMenuItem>
+      )}
       <TaskArchiveItem
         taskId={task.id}
         actingIds={actingIds}
@@ -252,23 +255,25 @@ function TaskContextMenuItems(props: TaskContextMenuItemsProps) {
         onArchiveTask={onArchiveTask}
         onBulkArchive={onBulkArchive}
       />
-      <TaskColorMenu taskId={task.id} disabled={isDeleting} />
+      {!task.isArchived && <TaskColorMenu taskId={task.id} disabled={isDeleting} />}
       <TaskNestContextMenuItems task={task} disabled={isDeleting} />
       <TaskLinkMenu disabled={isDeleting} {...selectTaskLinkActions(task, closeMenu, props)} />
-      <TaskMoveItems
-        task={task}
-        workflows={workflows}
-        stepsByWorkflowId={stepsByWorkflowId}
-        steps={steps}
-        isDeleting={isDeleting}
-        onMoveToStep={onMoveToStep}
-        actingIds={actingIds}
-        actingOnSelection={actingOnSelection}
-        onBulkMove={onBulkMove}
-        isMixedWorkflowSelection={isMixedWorkflowSelection}
-        closeMenu={closeMenu}
-        moveTasks={moveTasks}
-      />
+      {!task.isArchived && (
+        <TaskMoveItems
+          task={task}
+          workflows={workflows}
+          stepsByWorkflowId={stepsByWorkflowId}
+          steps={steps}
+          isDeleting={isDeleting}
+          onMoveToStep={onMoveToStep}
+          actingIds={actingIds}
+          actingOnSelection={actingOnSelection}
+          onBulkMove={onBulkMove}
+          isMixedWorkflowSelection={isMixedWorkflowSelection}
+          closeMenu={closeMenu}
+          moveTasks={moveTasks}
+        />
+      )}
       <TaskDetachItem task={task} disabled={isDeleting} onDetachTask={onDetach} />
       <TaskDeleteItem taskId={task.id} isDeleting={isDeleting} onDeleteTask={onDelete} />
     </>

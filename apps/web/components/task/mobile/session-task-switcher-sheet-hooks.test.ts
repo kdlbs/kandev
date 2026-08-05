@@ -44,6 +44,10 @@ describe("toSheetItem", () => {
     expect(item.foregroundActivity).toBeUndefined();
   });
 
+  it("preserves the archived marker for projected rows", () => {
+    expect(toSheetItem(task({ isArchived: true }), emptyCtx()).isArchived).toBe(true);
+  });
+
   it("reads pending permission from the task status summary", () => {
     const item = toSheetItem(
       task({

@@ -1,7 +1,7 @@
 ---
 id: "04-integrate-archived-rows"
 title: "Integrate archived sidebar rows"
-status: pending
+status: done
 wave: 3
 depends_on: ["03-archived-sidebar-projection"]
 plan: "plan.md"
@@ -83,4 +83,17 @@ blockers, and update this task plus `plan.md` status/results.
 
 ## Results
 
-Pending.
+- Desktop and mobile row mapping now carries workspace/workflow identity and
+  `isArchived: true`, displays the archived badge, and deduplicates against the
+  synthetic current-task row.
+- Archived selection navigates directly to task detail, closes the mobile
+  drawer, and bypasses session preparation/launch. Modifier selection and
+  active-only context-menu actions are guarded; delete remains available.
+- Archived-load failures use localized sidebar copy and a Retry action on both
+  desktop and mobile.
+- Verification:
+  - The projection/UI focused suite above covered desktop/mobile mapping,
+    direct navigation, action guards, cache transitions, and retry wiring (114
+    tests across 13 files passed).
+  - `cd apps/web && pnpm run typecheck` — passed.
+  - Changed-file ESLint and `pnpm run i18n:ratchet` — passed.

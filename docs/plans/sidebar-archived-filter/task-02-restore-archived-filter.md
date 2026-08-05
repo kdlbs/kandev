@@ -1,7 +1,7 @@
 ---
 id: "02-restore-archived-filter"
 title: "Restore archived filter contract"
-status: pending
+status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
@@ -77,4 +77,12 @@ and update this task plus `plan.md` status/results.
 
 ## Results
 
-Pending.
+- Restored `archived` in the filter type union, registry, evaluator, and
+  migration allowlist; `Show` evaluates archived rows and `Hide` evaluates
+  active rows through the existing boolean operators.
+- Added `viewRequiresArchivedTasks`, which gates archived candidate loading only
+  for `archived is true`; default views and `is_not` remain active-only.
+- Replaced removal regressions with preservation coverage across boot draft,
+  hydration, live settings updates, and saved-view migration.
+- `cd apps && pnpm --filter @kandev/web test -- --run components/task/sidebar-filter/filter-dimension-registry.test.ts lib/sidebar/apply-view.test.ts lib/state/slices/ui/ui-slice-migration.test.ts lib/state/hydration/hydrator.test.ts lib/ws/handlers/users.test.ts` — passed (5 files, 95 tests).
+- `cd apps/web && pnpm run typecheck` — passed.

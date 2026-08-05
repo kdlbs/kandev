@@ -267,6 +267,7 @@ export async function listTasksByWorkspace(
     pageSize?: number;
     query?: string;
     includeArchived?: boolean;
+    onlyArchived?: boolean;
     workflowId?: string | null;
     repositoryId?: string | null;
     sort?: string;
@@ -279,6 +280,7 @@ export async function listTasksByWorkspace(
   if (params.pageSize) url.searchParams.set("page_size", String(params.pageSize));
   if (params.query) url.searchParams.set("query", params.query);
   if (params.includeArchived) url.searchParams.set("include_archived", "true");
+  if (params.onlyArchived) url.searchParams.set("only_archived", "true");
   if (params.workflowId) url.searchParams.set("workflow_id", params.workflowId);
   if (params.repositoryId) url.searchParams.set("repository_id", params.repositoryId);
   if (params.sort) url.searchParams.set("sort", params.sort);

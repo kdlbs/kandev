@@ -126,3 +126,19 @@ describe("kanban slice workspace transition", () => {
     });
   });
 });
+
+describe("kanban slice archived sidebar projection", () => {
+  it("stores archived tasks separately from active kanban state and deduplicates IDs", () => {
+    const store = makeStore();
+    const task = { id: TASK_ID, workflowStepId: "step-a", title: "Archived", position: 0 };
+
+    store.getState().setSidebarArchivedTasks("workspace-a", [task]);
+    store.getState().upsertSidebarArchivedTask("workspace-a", { ...task, title: "Updated" });
+
+    expect(store.getState().sidebarArchivedTasks.itemsByWorkspaceId["workspace-a"]).toEqual([
+      { ...task, title: "Updated" },
+    ]);
+    expect(store.getState().kanban.tasks).toEqual([]);
+    expect(store.getState().sidebarArchivedTasks.loadedByWorkspaceId["workspace-a"]).toBe(true);
+  });
+});

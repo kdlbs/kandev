@@ -128,7 +128,7 @@ export function buildSidebarItem(
     remoteExecutorType: task.primaryExecutorType ?? undefined,
     remoteExecutorName: task.primaryExecutorName ?? undefined,
     createdAt: task.createdAt,
-    isArchived: false as boolean,
+    isArchived: task.isArchived === true,
     parentTaskTitle: task.parentTaskId ? context.titleById.get(task.parentTaskId) : undefined,
     parentTaskId: task.parentTaskId ?? undefined,
     workspaceMode: task.workspaceMode,

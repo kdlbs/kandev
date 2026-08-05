@@ -59,6 +59,34 @@ function makeUpdatedMessage(payload: Record<string, unknown>) {
 // The backend omits archived_at after unarchive because the field is nil. The
 // resulting task.updated event must still re-add the task to the kanban caches.
 describe("task.updated unarchive restore", () => {
+  it("removes the task from the archived sidebar projection", () => {
+    const store = makeStore({
+      sidebarArchivedTasks: {
+        itemsByWorkspaceId: {
+          "ws-1": [{ id: TASK_ID, workspaceId: "ws-1", isArchived: true }],
+        },
+        loadedByWorkspaceId: { "ws-1": true },
+        loadingByWorkspaceId: { "ws-1": false },
+        errorByWorkspaceId: { "ws-1": null },
+      },
+    } as unknown as Partial<AppState>);
+    const handlers = registerTasksHandlers(store);
+
+    handlers["task.updated"]!(
+      makeUpdatedMessage({
+        task_id: TASK_ID,
+        workspace_id: "ws-1",
+        workflow_id: "wf1",
+        workflow_step_id: "step1",
+        title: "Restored task",
+        state: "TODO",
+        is_ephemeral: false,
+      }),
+    );
+
+    expect(store.getState().sidebarArchivedTasks.itemsByWorkspaceId["ws-1"]).toEqual([]);
+  });
+
   it("re-adds the task to the active kanban when archived_at is omitted", () => {
     const store = makeStore();
     const handlers = registerTasksHandlers(store);

@@ -1,6 +1,9 @@
 "use client";
 
+/* eslint-disable max-lines -- the recursive desktop/mobile task tree shares one action surface. */
+
 import { memo, useMemo } from "react";
+import { useTranslation } from "react-i18next";
 import type { ForegroundActivity, TaskState, TaskSessionState } from "@/lib/types/http";
 import { TaskItem } from "./task-item";
 import { TaskItemWithContextMenu, type StepDef } from "./task-switcher-context-menu";
@@ -77,6 +80,9 @@ type TaskSwitcherProps = {
   pinnedTaskIds?: string[];
   deletingTaskId?: string | null;
   isLoading?: boolean;
+  loadError?: string | null;
+  onRetryLoad?: () => void;
+  retryLabel?: string;
   totalTaskCount?: number;
   // Multi-select (cmd/shift click). When the selection is non-empty, plain
   // clicks toggle instead of navigating; the context menu acts on the selection.
@@ -108,7 +114,12 @@ export function dispatchSidebarRowClick(
     onToggleSelectTask?: (taskId: string) => void;
     onSelectTaskRange?: (taskId: string) => void;
   },
+  isArchived = false,
 ): void {
+  if (isArchived) {
+    handlers.onSelectTask(taskId);
+    return;
+  }
   // Only intercept a modifier click when the matching handler is wired (the
   // mobile switcher renders without selection handlers — there a Cmd/Shift click
   // must still navigate rather than become a no-op).
@@ -173,6 +184,7 @@ type TaskRowProps = {
   isMixedWorkflowSelection?: boolean;
 };
 
+// eslint-disable-next-line max-lines-per-function, complexity, sonarjs/cognitive-complexity -- archived rows gate a shared set of desktop and mobile actions in one place.
 function TaskRow({
   task,
   isSubTask,
@@ -204,6 +216,7 @@ function TaskRow({
   isMixedWorkflowSelection,
   ...props
 }: TaskRowProps) {
+  const isArchived = task.isArchived === true;
   const isSelected = task.id === selectedTaskId || task.id === activeTaskId;
   const taskSteps = task.workflowId ? stepsByWorkflowId?.[task.workflowId] : undefined;
   const stepId = task.workflowStepId;
@@ -214,32 +227,45 @@ function TaskRow({
       stepsByWorkflowId={stepsByWorkflowId}
       steps={taskSteps}
       {...props}
-      onRenameTask={onRenameTask}
-      onArchiveTask={onArchiveTask}
-      onCreateSubtask={onCreateSubtask}
+      onEditTask={isArchived ? undefined : props.onEditTask}
+      onRenameTask={isArchived ? undefined : onRenameTask}
+      onArchiveTask={isArchived ? undefined : onArchiveTask}
+      onCreateSubtask={isArchived ? undefined : onCreateSubtask}
       onDeleteTask={onDeleteTask}
-      onDetachTask={onDetachTask}
-      onMoveToStep={onMoveToStep}
-      onTogglePin={onTogglePin}
-      isPinned={isPinned}
+      onDetachTask={isArchived ? undefined : onDetachTask}
+      onLinkPullRequest={isArchived ? undefined : props.onLinkPullRequest}
+      onLinkIssue={isArchived ? undefined : props.onLinkIssue}
+      onLinkMergeRequest={isArchived ? undefined : props.onLinkMergeRequest}
+      onLinkJiraTicket={isArchived ? undefined : props.onLinkJiraTicket}
+      onLinkLinearIssue={isArchived ? undefined : props.onLinkLinearIssue}
+      onLinkSentryIssue={isArchived ? undefined : props.onLinkSentryIssue}
+      onMoveToStep={isArchived ? undefined : onMoveToStep}
+      onTogglePin={isArchived ? undefined : onTogglePin}
+      isPinned={isArchived ? false : isPinned}
       pinnedTaskIds={pinnedTaskIds}
       isDeleting={deletingTaskId === task.id}
-      selectedTaskIds={selectedTaskIds}
-      onBulkArchive={onBulkArchive}
+      selectedTaskIds={isArchived ? undefined : selectedTaskIds}
+      onBulkArchive={isArchived ? undefined : onBulkArchive}
       onBulkDelete={onBulkDelete}
-      onBulkPin={onBulkPin}
-      onBulkMove={onBulkMove}
-      onClearSelection={onClearSelection}
+      onBulkPin={isArchived ? undefined : onBulkPin}
+      onBulkMove={isArchived ? undefined : onBulkMove}
+      onClearSelection={isArchived ? undefined : onClearSelection}
       isMixedWorkflowSelection={isMixedWorkflowSelection}
     >
       <TaskItem
-        isMultiSelected={selectedTaskIds?.has(task.id) ?? false}
+        isMultiSelected={!isArchived && (selectedTaskIds?.has(task.id) ?? false)}
         onSelect={(e) =>
-          dispatchSidebarRowClick(e, task.id, (selectedTaskIds?.size ?? 0) > 0, {
-            onSelectTask,
-            onToggleSelectTask,
-            onSelectTaskRange,
-          })
+          dispatchSidebarRowClick(
+            e,
+            task.id,
+            !isArchived && (selectedTaskIds?.size ?? 0) > 0,
+            {
+              onSelectTask,
+              onToggleSelectTask: isArchived ? undefined : onToggleSelectTask,
+              onSelectTaskRange: isArchived ? undefined : onSelectTaskRange,
+            },
+            isArchived,
+          )
         }
         title={task.title}
         state={task.state}
@@ -268,7 +294,7 @@ function TaskRow({
         onToggleSubtasks={subtaskToggle?.onToggleSubtasks}
         onClick={() => onSelectTask(task.id)}
         isDeleting={deletingTaskId === task.id}
-        isPinned={isPinned}
+        isPinned={isArchived ? false : isPinned}
       />
     </TaskItemWithContextMenu>
   );
@@ -554,6 +580,9 @@ export const TaskSwitcher = memo(function TaskSwitcher({
   pinnedTaskIds,
   deletingTaskId,
   isLoading = false,
+  loadError,
+  onRetryLoad,
+  retryLabel,
   totalTaskCount,
   selectedTaskIds,
   onToggleSelectTask,
@@ -565,11 +594,34 @@ export const TaskSwitcher = memo(function TaskSwitcher({
   onClearSelection,
   isMixedWorkflowSelection,
 }: TaskSwitcherProps) {
+  const { t } = useTranslation("sidebar");
   const pinnedSet = useMemo(() => new Set(pinnedTaskIds ?? []), [pinnedTaskIds]);
   if (isLoading) return <TaskSwitcherSkeleton />;
   const totalTasks = totalTaskCount ?? grouped.groups.reduce((sum, g) => sum + g.tasks.length, 0);
+  const loadErrorNotice = loadError ? (
+    <div
+      className="flex items-center gap-2 px-3 py-2 text-xs text-destructive"
+      data-testid="sidebar-task-load-error"
+    >
+      <span className="min-w-0 flex-1">{loadError}</span>
+      {onRetryLoad && retryLabel && (
+        <button
+          type="button"
+          className="shrink-0 underline underline-offset-2"
+          onClick={onRetryLoad}
+        >
+          {retryLabel}
+        </button>
+      )}
+    </div>
+  ) : null;
   if (totalTasks === 0) {
-    return <div className="px-3 py-3 text-xs text-muted-foreground">No tasks yet.</div>;
+    return (
+      <>
+        {loadErrorNotice}
+        <div className="px-3 py-3 text-xs text-muted-foreground">{t("noTasksYet")}</div>
+      </>
+    );
   }
 
   const collapsedSet = new Set(collapsedGroupKeys);
@@ -579,6 +631,7 @@ export const TaskSwitcher = memo(function TaskSwitcher({
 
   return (
     <div>
+      {loadErrorNotice}
       {grouped.groups.map((group) => (
         <GroupSection
           key={group.key}

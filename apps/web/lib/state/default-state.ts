@@ -24,6 +24,7 @@ import { migrateSidebarViewDraft, migrateView } from "./slices/ui/ui-slice";
 export const defaultState = {
   kanban: defaultKanbanState.kanban,
   kanbanMulti: defaultKanbanState.kanbanMulti,
+  sidebarArchivedTasks: defaultKanbanState.sidebarArchivedTasks,
   workflows: defaultKanbanState.workflows,
   tasks: defaultKanbanState.tasks,
   workspaces: defaultWorkspaceState.workspaces,

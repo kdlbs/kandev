@@ -45,6 +45,8 @@ export type KanbanState = {
   }>;
   tasks: Array<{
     id: string;
+    workspaceId?: string;
+    workflowId?: string;
     workflowStepId: string;
     title: string;
     description?: string;
@@ -97,6 +99,7 @@ export type KanbanState = {
     queuedAt?: string;
     isPRReview?: boolean;
     isIssueWatch?: boolean;
+    isArchived?: boolean;
     issueUrl?: string;
     issueNumber?: number;
     statusSummary?: TaskStatusSummary | null;
@@ -115,6 +118,13 @@ export type WorkflowSnapshotData = {
 export type KanbanMultiState = {
   snapshots: Record<string, WorkflowSnapshotData>;
   isLoading: boolean;
+};
+
+export type SidebarArchivedTasksState = {
+  itemsByWorkspaceId: Record<string, KanbanState["tasks"]>;
+  loadedByWorkspaceId: Record<string, boolean>;
+  loadingByWorkspaceId: Record<string, boolean>;
+  errorByWorkspaceId: Record<string, string | null>;
 };
 
 export type WorkflowsState = {
@@ -154,6 +164,7 @@ export type TaskState = {
 export type KanbanSliceState = {
   kanban: KanbanState;
   kanbanMulti: KanbanMultiState;
+  sidebarArchivedTasks: SidebarArchivedTasksState;
   workflows: WorkflowsState;
   workspaceContextGeneration: number;
   tasks: TaskState;
@@ -176,6 +187,11 @@ export type KanbanSliceActions = {
   clearKanbanMulti: () => void;
   updateMultiTask: (workflowId: string, task: KanbanState["tasks"][number]) => void;
   removeMultiTask: (workflowId: string, taskId: string) => void;
+  setSidebarArchivedTasks: (workspaceId: string, tasks: KanbanState["tasks"]) => void;
+  setSidebarArchivedTasksLoading: (workspaceId: string, loading: boolean) => void;
+  setSidebarArchivedTasksError: (workspaceId: string, error: string | null) => void;
+  upsertSidebarArchivedTask: (workspaceId: string, task: KanbanState["tasks"][number]) => void;
+  removeSidebarArchivedTask: (taskId: string, workspaceId?: string) => void;
 };
 
 export type KanbanSlice = KanbanSliceState & KanbanSliceActions;

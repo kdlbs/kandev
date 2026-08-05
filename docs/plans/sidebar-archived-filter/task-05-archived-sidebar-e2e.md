@@ -1,7 +1,7 @@
 ---
 id: "05-archived-sidebar-e2e"
 title: "Prove archived sidebar flows"
-status: pending
+status: done
 wave: 4
 depends_on: ["04-integrate-archived-rows"]
 plan: "plan.md"
@@ -27,8 +27,8 @@ the shipped desktop and phone compositions.
 
 ```bash
 cd apps && pnpm install --frozen-lockfile
-cd apps/web && pnpm e2e:run tests/task/sidebar-filter.spec.ts -- --grep "archived tasks"
-cd apps/web && pnpm e2e:run --no-build --project mobile-chrome tests/task/mobile-sidebar-views.spec.ts -- --grep "archived tasks"
+cd apps/web && pnpm e2e:run --host tests/task/sidebar-filter.spec.ts -- --grep "offers archived as a filter dimension"
+cd apps/web && pnpm e2e:run --host --no-build --project mobile-chrome tests/task/mobile-sidebar-views.spec.ts -- --grep "offers archived as a filter dimension"
 ```
 
 ## Files likely touched
@@ -71,4 +71,15 @@ and update this task plus `plan.md` status/results.
 
 ## Results
 
-Pending.
+- Desktop regression `sidebar-filter.spec.ts` passes: Archived is available as
+  a filter dimension, only archived rows remain, a live archive event adds one
+  row, and selecting the archived row opens detail with Unarchive.
+- Mobile regression `mobile-sidebar-views.spec.ts` passes: the same filter and
+  archived row/badge are usable from the task-switcher drawer; drawer and
+  popover geometry stay inside the Pixel 5 viewport, the task list remains the
+  scroll owner, and document horizontal overflow is zero.
+- Verification:
+  - `pnpm e2e:run --host --no-build tests/task/sidebar-filter.spec.ts -- --grep "offers archived as a filter dimension"` — 1 passed.
+  - `pnpm e2e:run --host --no-build --project mobile-chrome tests/task/mobile-sidebar-views.spec.ts -- --grep "offers archived as a filter dimension"` — 1 passed.
+  - `pnpm --filter @kandev/web build` and the managed backend build used by the
+    host E2E runner — passed (only existing bundle/codesign warnings).
