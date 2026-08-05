@@ -297,7 +297,6 @@ describe("useQueue context file metadata and Send Now", () => {
     expect(result.current.cancellationPending).toBe(true);
   });
 });
-});
 
 describe("useQueue mergeEntry", () => {
   beforeEach(() => {
