@@ -3,6 +3,7 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -39,6 +40,46 @@ func (c *writeFailingConn) Write(data []byte) (int, error) {
 type writeFailingListener struct {
 	net.Listener
 	accepted chan *writeFailingConn
+}
+
+type writeDeadlineRecordingConn struct {
+	net.Conn
+	mu         sync.Mutex
+	deadline   time.Time
+	readyWrite chan writeDeadlineObservation
+}
+
+func (c *writeDeadlineRecordingConn) SetWriteDeadline(deadline time.Time) error {
+	c.mu.Lock()
+	c.deadline = deadline
+	c.mu.Unlock()
+	return c.Conn.SetWriteDeadline(deadline)
+}
+
+func (c *writeDeadlineRecordingConn) Write(data []byte) (int, error) {
+	if bytes.Contains(data, []byte(`"status":"ready"`)) {
+		observedAt := time.Now()
+		c.mu.Lock()
+		deadline := c.deadline
+		c.mu.Unlock()
+		c.readyWrite <- writeDeadlineObservation{deadline: deadline, observedAt: observedAt}
+	}
+	return c.Conn.Write(data)
+}
+
+type writeDeadlineRecordingListener struct {
+	net.Listener
+	accepted chan *writeDeadlineRecordingConn
+}
+
+func (l *writeDeadlineRecordingListener) Accept() (net.Conn, error) {
+	conn, err := l.Listener.Accept()
+	if err != nil {
+		return nil, err
+	}
+	wrapped := &writeDeadlineRecordingConn{Conn: conn, readyWrite: make(chan writeDeadlineObservation, 1)}
+	l.accepted <- wrapped
+	return wrapped, nil
 }
 
 type writeDeadlineObservation struct {
@@ -135,17 +176,24 @@ func TestHandleLSPStreamBridgesFramesAndStopsOwnedProcess(t *testing.T) {
 		_ = procMgr.StopForTeardown(ctx)
 	})
 	s := NewServer(cfg, procMgr, nil, nil, log)
-	ts := httptest.NewServer(s.router)
-	t.Cleanup(ts.Close)
+	httpServer := httptest.NewUnstartedServer(s.router)
+	listener := &writeDeadlineRecordingListener{
+		Listener: httpServer.Listener,
+		accepted: make(chan *writeDeadlineRecordingConn, 1),
+	}
+	httpServer.Listener = listener
+	httpServer.Start()
+	t.Cleanup(httpServer.Close)
 
 	conn, _, err := websocket.DefaultDialer.Dial(
-		"ws"+strings.TrimPrefix(ts.URL, "http")+"/api/v1/lsp/stream?language=kotlin",
+		"ws"+strings.TrimPrefix(httpServer.URL, "http")+"/api/v1/lsp/stream?language=kotlin",
 		nil,
 	)
 	if err != nil {
 		t.Fatalf("dial lsp stream: %v", err)
 	}
 	t.Cleanup(func() { _ = conn.Close() })
+	serverConn := <-listener.accepted
 
 	_ = conn.SetReadDeadline(time.Now().Add(5 * time.Second))
 	_, ready, err := conn.ReadMessage()
@@ -163,6 +211,15 @@ func TestHandleLSPStreamBridgesFramesAndStopsOwnedProcess(t *testing.T) {
 	}
 	if status.Status != "ready" || status.Workspace != workDir || status.WorkspaceURI != workspaceFileURI(workDir) || status.RepoSubpaths == nil {
 		t.Fatalf("ready status = %v", status)
+	}
+	select {
+	case observation := <-serverConn.readyWrite:
+		duration := observation.deadline.Sub(observation.observedAt)
+		if duration <= 0 || duration > lspWebSocketWriteTimeout+time.Second {
+			t.Fatalf("ready write deadline has unexpected duration %v", duration)
+		}
+	default:
+		t.Fatal("ready frame write was not observed")
 	}
 
 	payload := []byte(`{"jsonrpc":"2.0","id":1,"method":"initialize"}`)

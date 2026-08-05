@@ -142,7 +142,7 @@ func (s *Server) handleLSPStreamWS(c *gin.Context) {
 	if err != nil {
 		autoInstall := lspAutoInstallRequested(c)
 		if !installer.CanAutoInstall(language) {
-			_ = conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(
+			_ = writeLSPMessage(conn, websocket.CloseMessage, websocket.FormatCloseMessage(
 				lspCloseAutoInstallUnsupported,
 				"auto-install unsupported on task host",
 			))
@@ -169,7 +169,7 @@ func lspAutoInstallRequested(c *gin.Context) bool {
 
 func (s *Server) handleLSPBinaryNotFound(ctx context.Context, conn *websocket.Conn, language string, autoInstall bool, binaryErr error) {
 	if !autoInstall {
-		_ = conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(lspCloseBinaryNotFound, binaryErr.Error()))
+		_ = writeLSPMessage(conn, websocket.CloseMessage, websocket.FormatCloseMessage(lspCloseBinaryNotFound, binaryErr.Error()))
 		_ = conn.Close()
 		return
 	}
@@ -182,7 +182,7 @@ func (s *Server) handleLSPBinaryNotFound(ctx context.Context, conn *websocket.Co
 	if err != nil {
 		if errors.Is(err, context.Canceled) || errors.Is(err, process.ErrManagerStopping) {
 			s.logger.Debug("LSP auto-install canceled during task teardown", zap.String("language", language))
-			_ = conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseGoingAway, ""))
+			_ = writeLSPMessage(conn, websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseGoingAway, ""))
 			_ = conn.Close()
 			return
 		}
@@ -190,7 +190,7 @@ func (s *Server) handleLSPBinaryNotFound(ctx context.Context, conn *websocket.Co
 		if writeErr := writeLSPJSONMessage(conn, map[string]string{lspStatusKey: lspStatusInstallFailed, lspLanguageKey: language, errKey: err.Error()}); writeErr != nil {
 			s.logger.Warn("failed to send LSP install failure status", zap.String("language", language), zap.Error(writeErr))
 		}
-		_ = conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(lspCloseInstallFailed, "install failed"))
+		_ = writeLSPMessage(conn, websocket.CloseMessage, websocket.FormatCloseMessage(lspCloseInstallFailed, "install failed"))
 		_ = conn.Close()
 		return
 	}
@@ -206,7 +206,7 @@ func (s *Server) handleLSPBridge(conn *websocket.Conn, language, binaryPath stri
 	server, err := s.startLSPServer(language, binaryPath)
 	if err != nil {
 		s.logger.Error("LSP: failed to start language server", zap.String("language", language), zap.Error(err))
-		_ = writeLSPForwarderMessage(
+		_ = writeLSPMessage(
 			conn,
 			websocket.CloseMessage,
 			websocket.FormatCloseMessage(lspCloseStartFailed, ""),
@@ -358,14 +358,14 @@ func (s *Server) runLSPBridge(conn *websocket.Conn, language string, server *lsp
 				if err != io.EOF {
 					s.logger.Debug("LSP stdout read error", zap.String("language", language), zap.Error(err))
 				}
-				_ = writeLSPForwarderMessage(
+				_ = writeLSPMessage(
 					conn,
 					websocket.CloseMessage,
 					websocket.FormatCloseMessage(lspCloseServerExited, ""),
 				)
 				return
 			}
-			if wErr := writeLSPForwarderMessage(conn, websocket.TextMessage, msg); wErr != nil {
+			if wErr := writeLSPMessage(conn, websocket.TextMessage, msg); wErr != nil {
 				s.logger.Debug("LSP WebSocket write error", zap.String("language", language), zap.Error(wErr))
 				return
 			}
@@ -396,7 +396,7 @@ func (s *Server) runLSPBridge(conn *websocket.Conn, language string, server *lsp
 	s.stopLSPServer(server)
 }
 
-func writeLSPForwarderMessage(conn *websocket.Conn, messageType int, data []byte) error {
+func writeLSPMessage(conn *websocket.Conn, messageType int, data []byte) error {
 	if err := conn.SetWriteDeadline(time.Now().Add(lspWebSocketWriteTimeout)); err != nil {
 		return err
 	}
@@ -431,5 +431,5 @@ func writeLSPJSONMessage(conn *websocket.Conn, data any) error {
 	if err != nil {
 		return err
 	}
-	return conn.WriteMessage(websocket.TextMessage, msg)
+	return writeLSPMessage(conn, websocket.TextMessage, msg)
 }
