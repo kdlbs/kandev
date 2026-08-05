@@ -69,6 +69,7 @@ Record RED/GREEN evidence, files changed, exact tests run, remaining risks, and 
 - Review hardening: missing-binary close code `4001` now ignores backend prose and resolves through the active locale, Editors cards expose install prerequisites inline for pointer, keyboard, and touch users, and the test-only duplicate language table was removed in favor of the localized Settings metadata source.
 - Review hardening: the Monaco editor opener now opens regular targets inside the active task workspace and propagates `false` for unresolved targets, while agentctl reports unexpected server exit as categorical `4006` with no English close reason so the browser localizes it.
 - Review hardening: JSON-RPC initialize errors now preserve their `message` instead of rendering `[object Object]`, while task-host process-launch failures retain details in backend logs and close through localized categorical `4008` with no English transport reason.
+- Review hardening: task teardown during auto-install keeps the standard `1001` going-away close but omits the English `task stopping` reason, allowing the browser's existing localized pre-bridge fallback to own the user-visible status.
 - Verified:
   - `pnpm --filter @kandev/web test -- --run lib/lsp/lsp-progress.test.ts lib/lsp/lsp-client-manager.test.ts`
   - `pnpm exec vitest run lib/lsp/lsp-providers.test.ts --reporter=dot`

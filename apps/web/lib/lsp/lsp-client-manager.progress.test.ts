@@ -178,7 +178,7 @@ describe("LSP connection failure localization", () => {
       const startingSocket = FakeWebSocket.instances.at(-1);
       if (!startingSocket) throw new Error(EXPECTED_SOCKET_ERROR);
       startingSocket.open();
-      startingSocket.failClosed(1006, "");
+      startingSocket.failClosed(1001, "");
 
       expect(lspClientManager.getStatus(SESSION_ID, LANGUAGE)).toEqual({
         state: "error",

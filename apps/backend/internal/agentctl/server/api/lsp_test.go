@@ -593,7 +593,7 @@ func TestLSPAutoInstallIsCanceledAndDrainedByInstanceTeardown(t *testing.T) {
 	}
 	_, _, err = conn.ReadMessage()
 	closeErr, ok := err.(*websocket.CloseError)
-	if !ok || closeErr.Code != websocket.CloseGoingAway {
-		t.Fatalf("teardown close error = %T %v, want close code %d", err, err, websocket.CloseGoingAway)
+	if !ok || closeErr.Code != websocket.CloseGoingAway || closeErr.Text != "" {
+		t.Fatalf("teardown close error = %T %v, want close code %d with no reason", err, err, websocket.CloseGoingAway)
 	}
 }

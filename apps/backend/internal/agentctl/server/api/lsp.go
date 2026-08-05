@@ -182,7 +182,7 @@ func (s *Server) handleLSPBinaryNotFound(ctx context.Context, conn *websocket.Co
 	if err != nil {
 		if errors.Is(err, context.Canceled) || errors.Is(err, process.ErrManagerStopping) {
 			s.logger.Debug("LSP auto-install canceled during task teardown", zap.String("language", language))
-			_ = conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseGoingAway, "task stopping"))
+			_ = conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseGoingAway, ""))
 			_ = conn.Close()
 			return
 		}
