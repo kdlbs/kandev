@@ -14,11 +14,10 @@ import PluginDetailPage from "@/app/settings/plugins/[pluginId]/page";
 import AutomationEditorPage from "@/app/settings/workspace/[id]/automations/[automationId]/page";
 import NewAutomationPage from "@/app/settings/workspace/[id]/automations/new/page";
 import WorkspaceEditPage from "@/app/settings/workspace/[id]/page";
-import { TaskActionsSettings } from "@/components/settings/general-settings";
-import { SecretsSettings } from "@/components/settings/secrets-settings";
+import { TaskBehaviorSettings } from "@/components/settings/task-behavior-settings";
+import { WorkspaceSettingsShell } from "@/components/settings/workspaces/workspace-settings-shell";
 import { workspaceId, workflowId } from "@/lib/types/ids";
 import type { ListWorkspacesResponse, UserSettingsResponse } from "@/lib/types/http";
-import { GENERAL_SETTINGS_HOME } from "@/components/settings/general-nav";
 import { DEFAULT_SETTINGS_PATH } from "@/lib/settings/last-settings-page";
 import {
   buildSettingsInitialStateForRoute,
@@ -31,8 +30,6 @@ vi.mock("@/components/settings/system/updates-card", () => ({ UpdatesCard: () =>
 const ACTIVE_WORKSPACE_COOKIE = "kandev-active-workspace";
 const OWNER_ID = "owner-1";
 const TIMESTAMP = "2026-01-01T00:00:00Z";
-const ENCODED_WORKSPACE_ID = "workspace%20one";
-const DECODED_WORKSPACE_ID = "workspace one";
 
 describe("buildSettingsInitialStateForRoute", () => {
   beforeEach(() => {
@@ -140,23 +137,31 @@ describe("buildSettingsInitialStateForRoute", () => {
 });
 
 describe("message queue settings route", () => {
-  it("registers the Message Queue General settings leaf", () => {
-    const route = renderSettingsRoute("/settings/general/message-queue");
+  it("renders the Message Queue inside the merged Task behavior page", () => {
+    const route = renderSettingsRoute("/settings/preferences/task-behavior");
 
     expect(isValidElement(route)).toBe(true);
-    expect(((route as ReactElement).type as { name?: string }).name).toBe(
-      "MessageQueueSettingsPage",
-    );
+    expect((route as ReactElement).type).toBe(TaskBehaviorSettings);
   });
 
-  it("redirects the former System URL to the General settings leaf", () => {
+  it("redirects the former General URL to the Task behavior page", () => {
+    const route = renderSettingsRoute("/settings/general/message-queue") as ReactElement<{
+      to: string;
+    }>;
+
+    expect(isValidElement(route)).toBe(true);
+    expect((route.type as { name?: string }).name).toBe("SettingsRedirect");
+    expect(route.props.to).toBe("/settings/preferences/task-behavior");
+  });
+
+  it("redirects the former System URL to the Task behavior page", () => {
     const route = renderSettingsRoute("/settings/system/message-queue") as ReactElement<{
       to: string;
     }>;
 
     expect(isValidElement(route)).toBe(true);
     expect((route.type as { name?: string }).name).toBe("SettingsRedirect");
-    expect(route.props.to).toBe("/settings/general/message-queue");
+    expect(route.props.to).toBe("/settings/preferences/task-behavior");
   });
 });
 
@@ -166,25 +171,38 @@ describe("renderSettingsRoute", () => {
 
     expect(screen.getByText(/notification preferences are managed/i)).toBeTruthy();
     expect(screen.getByRole("link", { name: /notifications/i }).getAttribute("href")).toBe(
-      "/settings/general/notifications",
+      "/settings/preferences/notifications",
     );
   });
 
-  it("renders layout profile settings from General settings", () => {
-    const route = renderSettingsRoute("/settings/general/layouts");
+  it("renders layout profile settings from Preferences", () => {
+    const route = renderSettingsRoute("/settings/preferences/layouts");
     expect(isValidElement(route)).toBe(true);
     expect(((route as ReactElement).type as { name?: string }).name).toBe("LayoutSettings");
   });
 
-  it("renders task action preferences from General settings", () => {
-    const route = renderSettingsRoute("/settings/general/task-actions");
+  it("redirects the legacy task actions page into Task behavior", () => {
+    const route = renderSettingsRoute("/settings/general/task-actions") as ReactElement<{
+      to: string;
+    }>;
     expect(isValidElement(route)).toBe(true);
-    expect((route as ReactElement).type).toBe(TaskActionsSettings);
+    expect((route.type as { name?: string }).name).toBe("SettingsRedirect");
+    expect(route.props.to).toBe("/settings/preferences/task-behavior");
   });
 
   it("passes the route workspace id to the GitLab integration page", () => {
-    expect(gitLabRouteWorkspaceId("/settings/workspace/ws-2/integrations/gitlab")).toBe("ws-2");
-    expect(gitLabRouteWorkspaceId("/settings/workspace/ws%202/integrations/gitlab")).toBe("ws 2");
+    expect(gitLabRouteWorkspaceId("/settings/workspaces/ws-2/integrations/gitlab")).toBe("ws-2");
+    expect(gitLabRouteWorkspaceId("/settings/workspaces/ws%202/integrations/gitlab")).toBe("ws 2");
+  });
+
+  it("redirects legacy /settings/workspace/<id> paths into /settings/workspaces", () => {
+    const route = renderSettingsRoute(
+      "/settings/workspace/ws-1/integrations/github",
+    ) as ReactElement<{ to: string }>;
+
+    expect(isValidElement(route)).toBe(true);
+    expect((route.type as { name?: string }).name).toBe("SettingsRedirect");
+    expect(route.props.to).toBe("/settings/workspaces/ws-1/integrations/github");
   });
 
   it("routes GitHub settings through the integration page wrapper", () => {
@@ -226,29 +244,42 @@ describe("renderSettingsRoute", () => {
       identifiers: { executorId: "executor one" },
     },
     {
-      pathname: `/settings/workspace/${ENCODED_WORKSPACE_ID}`,
+      pathname: "/settings/workspaces/workspace%20one",
       component: WorkspaceEditPage,
-      identifiers: { workspaceId: DECODED_WORKSPACE_ID },
+      identifiers: { workspaceId: "workspace one" },
     },
     {
-      pathname: `/settings/workspace/${ENCODED_WORKSPACE_ID}/automations/new`,
+      pathname: "/settings/workspaces/workspace%20one/automations/new",
       component: NewAutomationPage,
-      identifiers: { workspaceId: DECODED_WORKSPACE_ID },
+      identifiers: { workspaceId: "workspace one" },
     },
     {
-      pathname: `/settings/workspace/${ENCODED_WORKSPACE_ID}/automations/automation%20one`,
+      pathname: "/settings/workspaces/workspace%20one/automations/automation%20one",
       component: AutomationEditorPage,
-      identifiers: { workspaceId: DECODED_WORKSPACE_ID, automationId: "automation one" },
-    },
-    {
-      pathname: `/settings/workspace/${ENCODED_WORKSPACE_ID}/secrets`,
-      component: SecretsSettings,
-      identifiers: { scope: "workspace", workspaceId: DECODED_WORKSPACE_ID },
+      identifiers: { workspaceId: "workspace one", automationId: "automation one" },
     },
   ])(
     "passes decoded synchronous identifiers for $pathname",
     ({ pathname, component, identifiers }) => {
-      assertSynchronousRouteIdentifiers(pathname, component, identifiers);
+      const route = unwrapWorkspaceShell(renderSettingsRoute(pathname));
+      if (!isValidElement<Record<string, unknown>>(route)) {
+        throw new Error(`expected a route element for ${pathname}`);
+      }
+
+      expect({
+        component: route.type,
+        identifiers: pickProps(route.props, Object.keys(identifiers)),
+        thenableProps: Object.entries(route.props)
+          .filter(([, value]) => isThenable(value))
+          .map(([name]) => name),
+        asyncComponent:
+          typeof route.type === "function" && route.type.constructor.name === "AsyncFunction",
+      }).toEqual({
+        component,
+        identifiers,
+        thenableProps: [],
+        asyncComponent: false,
+      });
     },
   );
 
@@ -258,33 +289,14 @@ describe("renderSettingsRoute", () => {
     expect(isValidElement(route)).toBe(true);
     expect((route as ReactElement).type).toBe(ExecutorCreatePage);
   });
-});
 
-function assertSynchronousRouteIdentifiers(
-  pathname: string,
-  component: unknown,
-  identifiers: Record<string, unknown>,
-) {
-  const route = renderSettingsRoute(pathname);
-  if (!isValidElement<Record<string, unknown>>(route)) {
-    throw new Error(`expected a route element for ${pathname}`);
-  }
+  it("reserves /settings/agents/browse for the install catalogue, not an agent named browse", () => {
+    const route = renderSettingsRoute("/settings/agents/browse");
 
-  expect({
-    component: route.type,
-    identifiers: pickProps(route.props, Object.keys(identifiers)),
-    thenableProps: Object.entries(route.props)
-      .filter(([, value]) => isThenable(value))
-      .map(([name]) => name),
-    asyncComponent:
-      typeof route.type === "function" && route.type.constructor.name === "AsyncFunction",
-  }).toEqual({
-    component,
-    identifiers,
-    thenableProps: [],
-    asyncComponent: false,
+    expect(isValidElement(route)).toBe(true);
+    expect(((route as ReactElement).type as { name?: string }).name).toBe("AgentsBrowsePage");
   });
-}
+});
 
 function buildState(
   overrides: Partial<Parameters<typeof buildSettingsInitialStateForRoute>[0]> = {},
@@ -347,12 +359,21 @@ function userSettings(
 }
 
 function gitLabRouteWorkspaceId(pathname: string): string | undefined {
-  const route = renderSettingsRoute(pathname);
+  const route = unwrapWorkspaceShell(renderSettingsRoute(pathname));
   if (!isValidElement(route)) {
     throw new Error("expected GitLab integration route element");
   }
   expect(route.type).toBe(IntegrationsGitLabPage);
   return (route as ReactElement<{ workspaceId?: string }>).props.workspaceId;
+}
+
+// Workspace routes render inside the tabbed WorkspaceSettingsShell; unwrap it
+// so identifier assertions land on the page component itself.
+function unwrapWorkspaceShell(route: unknown): unknown {
+  if (isValidElement(route) && route.type === WorkspaceSettingsShell) {
+    return (route as ReactElement<{ children?: unknown }>).props.children;
+  }
+  return route;
 }
 
 function pickProps(props: Record<string, unknown>, names: string[]): Record<string, unknown> {
@@ -374,7 +395,7 @@ describe("restorable settings paths", () => {
     // target, and must not contain the shapes that resolve against deletable
     // records — those are matched dynamically, so membership is the guard.
     expect(SETTINGS_ROUTE_PATHS.has(DEFAULT_SETTINGS_PATH)).toBe(true);
-    expect(DEFAULT_SETTINGS_PATH).toBe(GENERAL_SETTINGS_HOME);
+    expect(DEFAULT_SETTINGS_PATH).toBe("/settings/preferences/appearance");
 
     for (const path of SETTINGS_ROUTE_PATHS) {
       expect(path.startsWith("/settings"), `${path} is not a settings path`).toBe(true);

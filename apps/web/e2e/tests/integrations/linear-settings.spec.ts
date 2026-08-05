@@ -94,7 +94,7 @@ test.describe("Linear settings", () => {
     await settings.gotoWorkspace(other.id);
 
     await expect(testPage).toHaveURL(
-      new RegExp(`/settings/workspace/${other.id}/integrations/linear$`),
+      new RegExp(`/settings/workspaces/${other.id}/integrations/linear$`),
     );
     await expect(testPage).not.toHaveURL(/[?&]workspace=/);
     await expect(settings.secretInput).toHaveValue("");

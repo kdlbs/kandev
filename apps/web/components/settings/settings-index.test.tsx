@@ -14,18 +14,14 @@ vi.mock("@/hooks/use-responsive-breakpoint", () => ({
 
 // The tree is store- and plugin-heavy; this test is about the routing decision.
 vi.mock("@/components/settings/settings-page-nav", () => ({
-  SettingsPageNav: ({
-    pathname,
-    defaultOpenGroup,
-  }: {
-    pathname: string;
-    defaultOpenGroup?: string;
-  }) => <div data-testid="mock-page-nav" data-pathname={pathname} data-group={defaultOpenGroup} />,
+  SettingsPageNav: ({ pathname }: { pathname: string }) => (
+    <div data-testid="mock-page-nav" data-pathname={pathname} />
+  ),
 }));
 
 import { SettingsIndex } from "./settings-index";
 
-const RESTORE_TO = "/settings/general/terminal";
+const RESTORE_TO = "/settings/preferences/terminal-editors";
 
 describe("SettingsIndex", () => {
   beforeEach(() => {
@@ -36,7 +32,7 @@ describe("SettingsIndex", () => {
   });
   afterEach(cleanup);
 
-  it("is the settings index on a phone, opened on the General group", () => {
+  it("is the settings index on a phone", () => {
     breakpoint.isMobile = true;
 
     render(<SettingsIndex restoreTo={RESTORE_TO} />);
@@ -44,9 +40,6 @@ describe("SettingsIndex", () => {
     expect(screen.getByTestId("settings-index")).not.toBeNull();
     const nav = screen.getByTestId("mock-page-nav");
     expect(nav.getAttribute("data-pathname")).toBe("/settings");
-    // Without this the tree would open DEFAULT_OPEN_GROUP (Workspaces), because
-    // "/settings" belongs to no group prefix.
-    expect(nav.getAttribute("data-group")).toBe("general");
     expect(router.replace).not.toHaveBeenCalled();
   });
 

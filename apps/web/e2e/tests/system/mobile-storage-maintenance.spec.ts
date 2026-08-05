@@ -32,7 +32,7 @@ test.describe("Mobile storage maintenance", () => {
       });
     });
 
-    await testPage.goto("/settings/system/storage");
+    await testPage.goto("/settings/system/data-storage");
     await testPage.getByTestId("storage-run-now").tap();
     await expect(testPage.getByTestId("storage-busy")).toContainText("A test command is running");
     await expect(testPage.getByTestId("storage-run-anyway")).toBeVisible();
@@ -153,7 +153,7 @@ test.describe("Mobile storage maintenance", () => {
 
     await testPage.route(overviewPattern, holdOverview);
     try {
-      await testPage.goto("/settings/system/storage");
+      await testPage.goto("/settings/system/data-storage");
       await overviewObserved;
 
       const spinner = testPage.getByTestId("storage-overview-spinner");
@@ -218,7 +218,7 @@ test.describe("Mobile storage maintenance", () => {
         body: JSON.stringify({ job_id: "mobile-force-purge" }),
       });
     });
-    await testPage.goto("/settings/system/storage");
+    await testPage.goto("/settings/system/data-storage");
     await expect(testPage.getByTestId("storage-quarantine-force-clear")).toBeVisible();
     await testPage.getByTestId("storage-quarantine-card").scrollIntoViewIfNeeded();
     await prCapture.screenshot("quarantine-actions", {

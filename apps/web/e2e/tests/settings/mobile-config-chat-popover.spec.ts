@@ -11,7 +11,7 @@ test.describe("Mobile config chat popover", () => {
     const nextLayout = initialLayout === "tree" ? "flat" : "tree";
 
     try {
-      await testPage.goto("/settings/general/appearance");
+      await testPage.goto("/settings/preferences/appearance");
       const layout = testPage.getByTestId("changes-panel-layout-select");
       await layout.click();
       await testPage

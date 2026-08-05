@@ -83,6 +83,7 @@
   "manualPath": "Manual path",
   "name": "Name",
   "noAgentProfilesAvailable": "No agent profiles available",
+  "overview": "Overview",
   "noCustomScripts": "No custom scripts",
   "noDefault": "No default",
   "noExecutorsAvailable": "No executors available",

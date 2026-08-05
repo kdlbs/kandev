@@ -26,7 +26,7 @@ import {
   type AppriseFormMode,
 } from "@/components/settings/notifications-settings-actions";
 import { SettingsTarget } from "@/components/settings/settings-target";
-import { GENERAL_SETTINGS_TARGETS } from "@/lib/settings-discovery/catalog/general";
+import { GENERAL_SETTINGS_TARGETS } from "@/lib/settings-discovery/catalog/preferences";
 
 function AppriseProviderCardActions({
   provider,

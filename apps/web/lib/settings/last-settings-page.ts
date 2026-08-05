@@ -3,10 +3,9 @@ import { STORAGE_KEYS } from "@/lib/settings/constants";
 
 /**
  * Where `/settings` lands when this device has never opened a settings page.
- * The first entry of the General group, which is also what the General group
- * header points at — see `components/settings/general-nav.ts`.
+ * The first row of the Preferences section in the settings menu.
  */
-export const DEFAULT_SETTINGS_PATH = "/settings/general/appearance";
+export const DEFAULT_SETTINGS_PATH = "/settings/preferences/appearance";
 
 const SETTINGS_INDEX_PATH = "/settings";
 

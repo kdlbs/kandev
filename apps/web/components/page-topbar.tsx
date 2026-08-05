@@ -5,12 +5,19 @@ import { useTranslation } from "react-i18next";
 import { IconArrowLeft, IconHome } from "@tabler/icons-react";
 import {
   Breadcrumb,
+  BreadcrumbEllipsis,
   BreadcrumbItem,
   BreadcrumbLink,
   BreadcrumbList,
   BreadcrumbPage,
   BreadcrumbSeparator,
 } from "@kandev/ui/breadcrumb";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@kandev/ui/dropdown-menu";
 import { cn } from "@kandev/ui/lib/utils";
 import { AppStatusDrawerTrigger } from "@/components/app-status-bar/app-status-surface-provider";
 import { linkToTaskOverview } from "@/lib/links";
@@ -29,11 +36,12 @@ type PageTopbarProps = {
   /**
    * Optional middle crumbs inserted between the back link and the title — use
    * for nested sections (e.g. Home > Settings > Automations > New). When
-   * omitted the breadcrumb is two segments wide. `phoneOnlyLink` keeps the crumb
-   * clickable below `md` but renders static text on desktop — for a crumb whose
-   * target only resolves to somewhere new on a phone.
+   * omitted the breadcrumb is two segments wide. Crumbs without an `href`
+   * render as static text: orientation, not navigation. `phoneOnlyLink` keeps
+   * the crumb clickable below `md` (where the sidebar is hidden) but renders
+   * static text on desktop (e.g. "Settings", whose menu the sidebar owns).
    */
-  parents?: Array<{ label: string; href: string; phoneOnlyLink?: boolean }>;
+  parents?: Array<{ label: string; href?: string; phoneOnlyLink?: boolean }>;
   /** Optional content rendered before the breadcrumb */
   leading?: ReactNode;
   /** Optional content rendered at the visual center of the topbar */
@@ -61,37 +69,6 @@ type PageTopbarProps = {
   /** Optional `data-testid` on the header element. */
   testId?: string;
 };
-
-// A middle crumb. `phoneOnlyLink` exists for a crumb that cannot navigate
-// anywhere on desktop: /settings hands off to the remembered settings page, so
-// on desktop the link lands back where it started. Rendering it as a link there
-// makes the unsaved-changes guard offer to discard and leave, then not leave.
-function ParentCrumb({
-  crumb,
-}: {
-  crumb: { label: string; href: string; phoneOnlyLink?: boolean };
-}) {
-  const linkClass = "cursor-pointer text-muted-foreground hover:text-foreground transition-colors";
-  if (!crumb.phoneOnlyLink) {
-    return (
-      <BreadcrumbLink asChild>
-        <Link href={crumb.href} className={linkClass}>
-          {crumb.label}
-        </Link>
-      </BreadcrumbLink>
-    );
-  }
-  return (
-    <>
-      <BreadcrumbLink asChild className="md:hidden">
-        <Link href={crumb.href} className={linkClass}>
-          {crumb.label}
-        </Link>
-      </BreadcrumbLink>
-      <span className="hidden text-muted-foreground md:inline">{crumb.label}</span>
-    </>
-  );
-}
 
 function BackLink({
   href,
@@ -133,7 +110,7 @@ function TopbarBreadcrumb({
 }: {
   backHref: string;
   backLabel: string;
-  parents: Array<{ label: string; href: string; phoneOnlyLink?: boolean }> | undefined;
+  parents: Array<{ label: string; href?: string; phoneOnlyLink?: boolean }> | undefined;
   title: string;
   subtitle?: string;
   icon?: ReactNode;
@@ -151,11 +128,7 @@ function TopbarBreadcrumb({
   const showHomeCrumb = !showBackLink && homeAffordance !== "none";
   const homeCrumbClass = cn("shrink-0", homeAffordance === "phone" && "md:hidden");
   return (
-    <Breadcrumb
-      className="relative z-10 min-w-0"
-      aria-label={t("common:breadcrumb")}
-      data-testid="page-topbar-breadcrumbs"
-    >
+    <Breadcrumb className="relative z-10 min-w-0" aria-label={t("common:breadcrumb")}>
       <BreadcrumbList className="flex-nowrap text-sm">
         {showBackLink && (
           <>
@@ -179,12 +152,7 @@ function TopbarBreadcrumb({
             <BreadcrumbSeparator className={homeCrumbClass} />
           </>
         )}
-        {parents?.flatMap((p) => [
-          <BreadcrumbItem key={`${p.href}-item`} className="shrink-0">
-            <ParentCrumb crumb={p} />
-          </BreadcrumbItem>,
-          <BreadcrumbSeparator key={`${p.href}-sep`} className="shrink-0" />,
-        ])}
+        <ParentCrumbs parents={parents} />
         <BreadcrumbItem className="min-w-0">
           <BreadcrumbPage className="flex min-w-0 items-center gap-2">
             {icon}
@@ -204,11 +172,99 @@ function TopbarBreadcrumb({
   );
 }
 
+type ParentCrumb = { label: string; href?: string; phoneOnlyLink?: boolean };
+
+function ParentCrumbLabel({ crumb }: { crumb: ParentCrumb }) {
+  if (crumb.href) {
+    return (
+      <>
+        <BreadcrumbLink asChild>
+          <Link
+            href={crumb.href}
+            className={cn(
+              "max-w-40 truncate cursor-pointer text-muted-foreground underline-offset-4 transition-colors hover:text-foreground hover:underline",
+              crumb.phoneOnlyLink && "md:hidden",
+            )}
+          >
+            {crumb.label}
+          </Link>
+        </BreadcrumbLink>
+        {crumb.phoneOnlyLink && (
+          <span className="hidden max-w-40 cursor-default truncate text-muted-foreground/60 md:inline">
+            {crumb.label}
+          </span>
+        )}
+      </>
+    );
+  }
+  // Static crumb: orientation only, dimmed so it does not read as a link.
+  return (
+    <span className="max-w-40 cursor-default truncate text-muted-foreground/60">{crumb.label}</span>
+  );
+}
+
+/**
+ * Middle crumbs: the full chain from `md` up; below `md` everything except the
+ * last parent collapses into a `…` dropdown so deep paths stay one row —
+ * `🏠 › … › Kanban1 › Integrations`.
+ */
+function ParentCrumbs({ parents }: { parents: ParentCrumb[] | undefined }) {
+  if (!parents || parents.length === 0) return null;
+  const collapsed = parents.slice(0, -1);
+  const lastParent = parents[parents.length - 1];
+  return (
+    <>
+      {collapsed.flatMap((p) => [
+        <BreadcrumbItem key={`${p.href ?? p.label}-item`} className="shrink-0 max-md:hidden">
+          <ParentCrumbLabel crumb={p} />
+        </BreadcrumbItem>,
+        <BreadcrumbSeparator key={`${p.href ?? p.label}-sep`} className="shrink-0 max-md:hidden" />,
+      ])}
+      {collapsed.length > 0 && (
+        <>
+          <BreadcrumbItem className="shrink-0 md:hidden">
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button
+                  type="button"
+                  className="flex cursor-pointer items-center text-muted-foreground transition-colors hover:text-foreground"
+                  data-testid="topbar-crumb-overflow"
+                >
+                  {/* The sr-only "More" inside the ellipsis names the trigger. */}
+                  <BreadcrumbEllipsis />
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start">
+                {collapsed.map((p) =>
+                  p.href ? (
+                    <DropdownMenuItem key={p.href} asChild>
+                      <Link href={p.href}>{p.label}</Link>
+                    </DropdownMenuItem>
+                  ) : (
+                    <DropdownMenuItem key={p.label} disabled>
+                      {p.label}
+                    </DropdownMenuItem>
+                  ),
+                )}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </BreadcrumbItem>
+          <BreadcrumbSeparator className="shrink-0 md:hidden" />
+        </>
+      )}
+      <BreadcrumbItem key={`${lastParent.href ?? lastParent.label}-item`} className="shrink-0">
+        <ParentCrumbLabel crumb={lastParent} />
+      </BreadcrumbItem>
+      <BreadcrumbSeparator className="shrink-0" />
+    </>
+  );
+}
+
 type TopbarLeadingProps = {
   variant: "breadcrumb" | "root";
   backHref: string;
   backLabel: string;
-  parents: Array<{ label: string; href: string }> | undefined;
+  parents: Array<{ label: string; href?: string; phoneOnlyLink?: boolean }> | undefined;
   title: string;
   subtitle?: string;
   icon?: ReactNode;

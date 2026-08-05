@@ -83,7 +83,7 @@ function NotAuthenticatedNotice({
 }) {
   const { t } = useTranslation();
   const settingsHref = workspaceId
-    ? `/settings/workspace/${workspaceId}/integrations/github`
+    ? `/settings/workspaces/${workspaceId}/integrations/github`
     : "/settings/integrations/github";
   return (
     <Alert>

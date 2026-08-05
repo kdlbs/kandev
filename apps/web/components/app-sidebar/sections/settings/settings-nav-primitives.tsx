@@ -1,15 +1,13 @@
 "use client";
 
 import Link from "@/components/routing/app-link";
-import { IconChevronRight } from "@tabler/icons-react";
-import type { Icon as TablerIcon } from "@tabler/icons-react";
-import { useEffect, useState, type ComponentType, type ReactNode } from "react";
-import { useTranslation } from "react-i18next";
-import { Collapsible, CollapsibleContent } from "@kandev/ui/collapsible";
+import type { ComponentType, ReactNode } from "react";
 import { cn } from "@/lib/utils";
 import { SIDEBAR_ITEM_ACTIVE, SIDEBAR_ITEM_INACTIVE } from "../../app-sidebar-constants";
 
-const ACTIVE_CLASS = SIDEBAR_ITEM_ACTIVE;
+// Same active treatment as the task list rows (task-item.tsx): a primary-tinted
+// fill, layered on the sidebar's shared left accent bar.
+const ACTIVE_CLASS = cn(SIDEBAR_ITEM_ACTIVE, "bg-primary/10 hover:bg-primary/15");
 const INACTIVE_CLASS = SIDEBAR_ITEM_INACTIVE;
 
 type SettingsLeafProps = {
@@ -25,7 +23,6 @@ type SettingsLeafProps = {
 };
 
 const LEAF_DEPTH_PADDING = ["px-2.5", "pl-7 pr-2.5", "pl-10 pr-2.5", "pl-[52px] pr-2.5"] as const;
-const GROUP_DEPTH_PADDING = ["pl-2.5 pr-1", "pl-7 pr-1", "pl-10 pr-1", "pl-[52px] pr-1"] as const;
 const NAV_FOCUS_CLASS =
   "outline-none focus-visible:ring-1 focus-visible:ring-primary/50 focus-visible:ring-offset-1";
 
@@ -65,113 +62,14 @@ export function SettingsLeaf({
   );
 }
 
-type SettingsGroupProps = {
-  label: string;
-  labelSuffix?: ReactNode;
-  icon?: TablerIcon;
-  /** When the group itself has a destination, the label area is also a link. */
-  href?: string;
-  isActive?: boolean;
-  defaultExpanded?: boolean;
-  depth?: number;
-  children: ReactNode;
-  /**
-   * Controlled expansion. When `expanded` is provided the group becomes a
-   * controlled accordion member (open/close driven by the parent SettingsTree)
-   * and `onToggle` fires on header/chevron clicks. Omit both for the legacy
-   * self-managed behavior used by nested (per-workspace) groups.
-   */
-  expanded?: boolean;
-  onToggle?: () => void;
-};
-
-export function SettingsGroup({
-  label,
-  labelSuffix,
-  icon: Icon,
-  href,
-  isActive,
-  defaultExpanded = false,
-  depth = 0,
-  children,
-  expanded: controlledExpanded,
-  onToggle,
-}: SettingsGroupProps) {
-  const { t } = useTranslation();
-  const [internalExpanded, setInternalExpanded] = useState(defaultExpanded);
-  const isControlled = controlledExpanded !== undefined;
-  const expanded = isControlled ? controlledExpanded : internalExpanded;
-  const paddingClass = GROUP_DEPTH_PADDING[clampDepth(depth, GROUP_DEPTH_PADDING.length - 1)];
-
-  useEffect(() => {
-    if (!isControlled) setInternalExpanded(defaultExpanded);
-  }, [defaultExpanded, isControlled]);
-
-  const toggle = () => {
-    if (isControlled) onToggle?.();
-    else setInternalExpanded((v) => !v);
-  };
-
-  const labelInner = (
-    <>
-      {Icon && <Icon className="h-3.5 w-3.5 shrink-0" />}
-      <span className="flex-1 truncate">{label}</span>
-      {labelSuffix}
-    </>
-  );
-
+/**
+ * A static group label. Not a link, not a button: the menu is exactly two
+ * levels (header → page) and headers have no page or expand state of their own.
+ */
+export function SettingsSectionHeader({ label }: { label: string }) {
   return (
-    <Collapsible open={expanded}>
-      <div
-        className={cn(
-          "flex items-center gap-1 rounded-md",
-          isActive ? ACTIVE_CLASS : INACTIVE_CLASS,
-          paddingClass,
-        )}
-      >
-        {href ? (
-          <Link
-            href={href}
-            data-active={isActive ? "true" : undefined}
-            className={cn(
-              "flex flex-1 min-w-0 items-center gap-2 py-1.5 text-[13px] font-medium cursor-pointer",
-              NAV_FOCUS_CLASS,
-            )}
-          >
-            {labelInner}
-          </Link>
-        ) : (
-          <button
-            type="button"
-            onClick={toggle}
-            className={cn(
-              "flex flex-1 min-w-0 items-center gap-2 py-1.5 text-[13px] font-medium cursor-pointer text-left",
-              NAV_FOCUS_CLASS,
-            )}
-          >
-            {labelInner}
-          </button>
-        )}
-        <button
-          type="button"
-          onClick={toggle}
-          aria-label={
-            expanded ? t("sidebar:collapseGroup", { label }) : t("sidebar:expandGroup", { label })
-          }
-          aria-expanded={expanded}
-          className={cn(
-            "shrink-0 flex h-5 w-5 items-center justify-center text-muted-foreground/60 hover:text-foreground/80 cursor-pointer transition-colors",
-            NAV_FOCUS_CLASS,
-          )}
-        >
-          <IconChevronRight
-            className={cn("h-3 w-3 transition-transform", expanded && "rotate-90")}
-          />
-        </button>
-      </div>
-      <CollapsibleContent className="sidebar-section-content">
-        <div className="flex flex-col gap-0.5">{children}</div>
-      </CollapsibleContent>
-    </Collapsible>
+    <div className="px-2.5 pb-1 pt-3 text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground/80 first:pt-1">
+      {label}
+    </div>
   );
 }

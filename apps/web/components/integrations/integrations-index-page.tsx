@@ -119,7 +119,7 @@ function HideDisabledIntegrationsSetting() {
 export function IntegrationsIndexPage({ workspaceId }: IntegrationsIndexPageProps = {}) {
   const { t } = useTranslation();
   const rootHref = workspaceId
-    ? `/settings/workspace/${encodeURIComponent(workspaceId)}/integrations`
+    ? `/settings/workspaces/${encodeURIComponent(workspaceId)}/integrations`
     : "/settings/integrations";
 
   return (

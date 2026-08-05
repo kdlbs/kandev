@@ -13,16 +13,16 @@ test.describe("Settings index on a phone", () => {
     // Stays on /settings: no desktop-style handoff, and nothing to go Back past.
     await expect(testPage).toHaveURL(/\/settings$/);
 
-    await index.getByRole("link", { name: /Terminal/ }).click();
+    await index.getByRole("link", { name: /Terminal & Editors/ }).click();
 
-    await expect(testPage).toHaveURL(/\/settings\/general\/terminal$/);
+    await expect(testPage).toHaveURL(/\/settings\/preferences\/terminal-editors$/);
     await expect(testPage.getByTestId("terminal-font-select")).toBeVisible();
   });
 
   test("offers no nav drawer anywhere in settings", async ({ testPage }) => {
     await testPage.setViewportSize({ width: 390, height: 844 });
 
-    for (const path of ["/settings", "/settings/general/terminal", "/settings/prompts"]) {
+    for (const path of ["/settings", "/settings/preferences/terminal-editors", "/settings/prompts"]) {
       await testPage.goto(path);
       await expect(testPage.getByTestId("settings-scroll-container")).toBeVisible();
       // A sheet here would offer the list the index page already is.

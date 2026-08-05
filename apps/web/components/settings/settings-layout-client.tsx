@@ -36,33 +36,31 @@ const SEGMENT_LABEL_KEYS: Record<string, string> = {
   agents: "common:agents",
   appearance: "settings:appearance",
   automations: "common:automations",
+  browse: "agents:browseAvailableAgents",
   changelog: "common:changelog",
-  "changes-panel": "settings:changesPanel",
-  "chat-input": "settings:chatInput",
-  editors: "settings:editors",
+  "data-storage": "system:navDataStorage",
   executor: "settings:executor",
   executors: "common:executors",
   "external-mcp": "common:externalMcp",
-  general: "settings:general",
   integrations: "common:integrations",
   "keyboard-shortcuts": "settings:keyboardShortcuts",
   layouts: "settings:layouts",
-  "message-queue": "system:messageQueueTitle",
   new: "settings:new",
   notifications: "settings:notifications",
   plugins: "common:plugins",
+  preferences: "settings:preferences",
+  profiles: "executors:profiles",
   prompts: "common:prompts",
-  "resource-metrics": "settings:resourceMetrics",
+  repositories: "sidebar:repositories",
   secrets: "settings:secrets",
   security: "settings:security",
-  shell: "common:shell",
-  sprites: "settings:sprites",
   system: "common:system",
-  "task-actions": "settings:taskActions",
-  terminal: "settings:terminal",
+  "task-behavior": "settings:taskBehavior",
+  "terminal-editors": "settings:terminalAndEditors",
   tokens: "settings:tokens",
   "utility-agents": "settings:utilityAgents",
   "voice-mode": "settings:voiceMode",
+  workflows: "workflows:workflows",
   workspace: "common:workspace",
   workspaces: "common:workspaces",
 };
@@ -96,41 +94,54 @@ function deriveCurrentPageLabel(pathname: string, t: (key: string) => string): s
 }
 
 // Build the intermediate breadcrumb crumbs between the back link and the
-// current page title. Workspace-scoped pages include the routed workspace so
-// the breadcrumb identifies which workspace owns the settings being edited.
+// current page title. The "Settings" crumb is static text on desktop (the
+// sidebar owns the settings menu there) but stays a link to the settings
+// index on phones, where it is the only way back to the menu. Detail pages
+// (workspaces, agents) get a clickable crumb for their list page, and their
+// sub-pages an additional name crumb back to the detail root.
 function deriveParents(
   pathname: string,
   workspaceName: string | null,
-  t: (key: string) => string,
-): Array<{ label: string; href: string; phoneOnlyLink?: boolean }> {
+  agentDisplayName: string | null,
+): Array<{ label: string; href?: string; phoneOnlyLink?: boolean }> {
   const segments = pathname.split("/").filter(Boolean);
   if (segments.length <= 1) return [];
 
-  // Phone-only: on desktop /settings hands straight back to the remembered
-  // settings page, so a link here cannot go anywhere — and with unsaved edits it
-  // made "Discard and leave" discard without leaving.
-  const parents: Array<{ label: string; href: string; phoneOnlyLink?: boolean }> = [
+  const parents: Array<{ label: string; href?: string; phoneOnlyLink?: boolean }> = [
     { label: t("common:settings"), href: "/settings", phoneOnlyLink: true },
   ];
 
-  const workspaceId = workspaceIdFromPathname(pathname);
-  if (workspaceId) {
-    parents.push({
-      label: workspaceName ?? t("common:workspace"),
-      href: `/settings/workspace/${encodeURIComponent(workspaceId)}`,
-    });
+  const workspaceDetail = pathname.match(/^\/settings\/workspaces\/([^/]+)(\/.+)?$/);
+  if (workspaceDetail) {
+    parents.push({ label: t("common:workspaces"), href: "/settings/workspaces" });
+    if (workspaceDetail[2]) {
+      parents.push({
+        label: workspaceName ?? t("common:workspace"),
+        href: `/settings/workspaces/${workspaceDetail[1]}`,
+      });
+    }
+  }
+
+  const agentDetail = pathname.match(/^\/settings\/agents\/([^/]+)(\/.+)?$/);
+  if (agentDetail && agentDetail[1] !== "browse") {
+    parents.push({ label: t("common:agents"), href: "/settings/agents" });
+    if (agentDetail[2]) {
+      parents.push({
+        label: agentDisplayName ?? t("settings:agent"),
+        href: `/settings/agents/${agentDetail[1]}`,
+      });
+    }
   }
 
   const automationsMatch = pathname.match(
-    /^\/settings\/workspace\/([^/]+)\/automations(?:\/(.+))?/,
-  );
-  if (automationsMatch && automationsMatch[2]) {
+    /^\/settings\/workspaces\/([^/]+)\/automations(?:\/(.+))?/,
+  );  if (automationsMatch && automationsMatch[2]) {
     // Only inject the Automations crumb when we're on a sub-page (new or
     // edit), not on the listing page itself — the listing page title is
     // already "Automations".
     parents.push({
       label: t("common:automations"),
-      href: `/settings/workspace/${automationsMatch[1]}/automations`,
+      href: `/settings/workspaces/${automationsMatch[1]}/automations`,
     });
   }
 
@@ -141,29 +152,32 @@ export function SettingsLayoutClient({ children }: { children: React.ReactNode }
   const { t } = useTranslation();
   const pathname = usePathname();
   const workspaces = useAppStore((s) => s.workspaces.items);
-  const isAgentDetail = pathname.startsWith("/settings/agents/") && pathname !== "/settings/agents";
+  const availableAgents = useAppStore((s) => s.availableAgents.items);
   const showIntegrationCopyAction = integrationFromPathname(pathname) !== null;
 
-  if (isAgentDetail) {
-    return (
-      <SettingsShell
-        title={t("settings:agent")}
-        backHref="/settings/agents"
-        backLabel={t("common:agents")}
-        parents={[]}
-        showIntegrationCopyAction={showIntegrationCopyAction}
-      >
-        {children}
-      </SettingsShell>
-    );
-  }
+  const workspaceDetail = pathname.match(/^\/settings\/workspaces\/([^/]+)(\/.+)?$/);
+  const detailWorkspaceId = safeDecodePathSegment(workspaceDetail?.[1]);
+  const workspaceName = detailWorkspaceId
+    ? (workspaces.find((workspace) => workspace.id === detailWorkspaceId)?.name ?? null)
+    : null;
+
+  // Agent routes are keyed by agent name; the crumb shows its display name.
+  const agentDetail = pathname.match(/^\/settings\/agents\/([^/]+)(\/.+)?$/);
+  const detailAgentName =
+    agentDetail && agentDetail[1] !== "browse" ? safeDecodePathSegment(agentDetail[1]) : null;
+  const agentDisplayName = detailAgentName
+    ? (availableAgents.find((agent) => agent.name === detailAgentName)?.display_name ?? null)
+    : null;
 
   const pageLabel = deriveCurrentPageLabel(pathname, t);
-  const title = pageLabel ?? t("settings:settings");
-  const routeWorkspaceId = workspaceIdFromPathname(pathname);
-  const workspaceName =
-    workspaces.find((workspace) => workspace.id === routeWorkspaceId)?.name ?? null;
-  const parents = deriveParents(pathname, workspaceName, t);
+  // A detail root's own crumb is the workspace/agent name, not the list label.
+  const title =
+    workspaceDetail && !workspaceDetail[2] && workspaceName
+      ? workspaceName
+      : detailAgentName && !agentDetail?.[2]
+        ? (agentDisplayName ?? t("settings:agent"))
+        : (pageLabel ?? t("settings:settings"));
+  const parents = deriveParents(pathname, workspaceName, agentDisplayName);
 
   return (
     <SettingsShell
@@ -218,7 +232,7 @@ function SettingsShell({
   title: string;
   backHref: string;
   backLabel: string;
-  parents: Array<{ label: string; href: string }>;
+  parents: Array<{ label: string; href?: string; phoneOnlyLink?: boolean }>;
   showIntegrationCopyAction: boolean;
   children: React.ReactNode;
 }) {
@@ -243,10 +257,10 @@ function SettingsShell({
             showStatusTrigger={false}
             className="h-10"
             actions={showIntegrationCopyAction ? <IntegrationCopyConfigAction /> : undefined}
-            // No hamburger inside Settings: `/settings` renders the tree as a
-            // page on a phone, so a sheet over it would offer the same list the
-            // user just came from. The breadcrumb's Settings crumb goes back to
-            // it, and the home crumb leaves.
+            // No hamburger inside Settings: `/settings` renders the menu as a
+            // page on a phone, reached through the breadcrumb's Settings crumb
+            // (a link only below md — on desktop the sidebar menu is always
+            // visible, so the crumb is static text). The home crumb leaves.
             showNavTrigger={false}
             contentTestId="settings-scroll-container"
             contentClassName={`flex flex-col gap-4 overscroll-contain p-4 ${contentBottomPadding}`}

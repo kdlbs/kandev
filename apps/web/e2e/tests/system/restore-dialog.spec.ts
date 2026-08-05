@@ -52,7 +52,7 @@ test.describe("Restore snapshot dialog", () => {
     }
     expect(found).toBeTruthy();
 
-    await testPage.goto("/settings/system/backups");
+    await testPage.goto("/settings/system/data-storage");
     await expect(testPage.getByTestId("system-backups-table")).toBeVisible({ timeout: 15_000 });
 
     const firstRow = testPage.locator('[data-testid="system-backups-row"]').first();

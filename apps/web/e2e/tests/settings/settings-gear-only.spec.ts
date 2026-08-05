@@ -24,16 +24,24 @@ test.describe("Settings sidebar takeover", () => {
     await gear.click();
     await expect(takeover).toBeVisible();
 
-    // The tree opens the group that owns the current route, and `/settings` now
-    // hands off to a General page, so reach the workspace subtree explicitly.
+    // The menu is static: the Workspaces row is a page, and workspace data
+    // (rows, sections) lives on that page rather than in the menu.
     await takeover.getByRole("link", { name: "Workspaces" }).click();
-    await expect(testPage).toHaveURL(/\/settings\/workspace$/);
-    await expect(takeover.getByText("Active", { exact: true })).toBeVisible();
-    await expect(takeover.getByRole("link", { name: "Repositories" })).toBeVisible();
-    await expect(
-      takeover.locator('a[href^="/settings/workspace/"][href$="/integrations"]').first(),
-    ).toHaveAttribute("href", /\/settings\/workspace\/[^/]+\/integrations$/);
-    await expect(takeover.locator('a[href="/settings/integrations"]')).toBeVisible();
+    await expect(testPage).toHaveURL(/\/settings\/workspaces$/);
+    await expect(takeover.getByRole("link", { name: "Repositories" })).toHaveCount(0);
+    await expect(takeover.locator('a[href="/settings/integrations"]')).toHaveCount(0);
+    // Each workspace row links to its overview as a whole (overlay link) and
+    // still offers per-section quick links with counts.
+    const workspaceRow = testPage.getByTestId("workspace-list-item").first();
+    await expect(workspaceRow.getByTestId("workspace-overview-link")).toHaveAttribute(
+      "href",
+      /\/settings\/workspaces\/[^/]+$/,
+    );
+    await expect(workspaceRow.getByRole("link", { name: /Repositories/ })).toBeVisible();
+    await expect(workspaceRow.getByRole("link", { name: /Integrations/ })).toHaveAttribute(
+      "href",
+      /\/settings\/workspaces\/[^/]+\/integrations$/,
+    );
 
     // Enter a section: navigates to a settings sub-page; takeover stays open.
     await takeover.locator('a[href="/settings/agents"]').first().click();

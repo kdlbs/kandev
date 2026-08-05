@@ -87,7 +87,7 @@ test.describe("Mobile general settings", () => {
     prCapture,
   }) => {
     await testPage.setViewportSize({ width: 390, height: 844 });
-    await testPage.goto("/settings/general/task-actions");
+    await testPage.goto("/settings/preferences/task-behavior");
 
     const autoScrollControl = testPage.getByRole("switch", {
       name: "Show transcript auto-scroll control",
@@ -129,7 +129,7 @@ test.describe("Mobile general settings", () => {
     const nextLayout = initialLayout === "tree" ? "flat" : "tree";
 
     try {
-      await testPage.goto("/settings/general/appearance");
+      await testPage.goto("/settings/preferences/appearance");
       const layout = testPage.getByTestId("changes-panel-layout-select");
       await layout.click();
       await testPage
@@ -173,27 +173,25 @@ test.describe("Mobile general settings", () => {
     }
   });
 
-  test("opens a dedicated General settings page from the settings index", async ({ testPage }) => {
-    // `/settings` is the index on a phone: the settings tree as a page. It used
-    // to be a card grid over the same list, duplicated at /settings/general.
+  test("opens a dedicated Preferences page from the settings index", async ({ testPage }) => {
+    // `/settings` is the index on a phone: the settings menu as a page.
     await testPage.goto("/settings");
 
-    await expect(testPage.getByRole("link", { name: /Terminal/ })).toBeVisible({
+    await expect(testPage.getByRole("link", { name: /Terminal & Editors/ })).toBeVisible({
       timeout: 15_000,
     });
 
-    await testPage.getByRole("link", { name: /Terminal/ }).click();
+    await testPage.getByRole("link", { name: /Terminal & Editors/ }).click();
 
-    await expect(testPage).toHaveURL(/\/settings\/general\/terminal$/);
-    await expect(testPage.getByRole("heading", { name: "Terminal", exact: true })).toBeVisible();
+    await expect(testPage).toHaveURL(/\/settings\/preferences\/terminal-editors$/);
     await expect(testPage.getByTestId("terminal-font-select")).toBeVisible();
     await expect(testPage.getByTestId("terminal-font-size-input")).toBeVisible();
   });
 
   test("moves between settings pages and back home without a nav drawer", async ({ testPage }) => {
-    await testPage.goto("/settings/general/terminal");
+    await testPage.goto("/settings/preferences/terminal-editors");
 
-    await expect(testPage.getByRole("heading", { name: "Terminal", exact: true })).toBeVisible();
+    await expect(testPage.getByTestId("terminal-font-select")).toBeVisible();
     // Settings has no hamburger: the page is the navigation, reached through the
     // breadcrumb's Settings crumb.
     await expect(testPage.getByTestId("app-nav-trigger")).toHaveCount(0);
@@ -204,7 +202,7 @@ test.describe("Mobile general settings", () => {
 
     await index.getByRole("link", { name: "Appearance" }).click();
 
-    await expect(testPage).toHaveURL(/\/settings\/general\/appearance$/);
+    await expect(testPage).toHaveURL(/\/settings\/preferences\/appearance$/);
     await expect(testPage.getByRole("heading", { name: "Appearance", exact: true })).toBeVisible();
 
     // The topbar home crumb leaves the settings surface entirely.

@@ -17,6 +17,12 @@ import sidebarCatalog from "@/src/locales/en/sidebar.json";
  * diff, kept.
  */
 const NAV_LABELS: Array<[key: string, english: string]> = [
+  ["settings:preferences", "Preferences"],
+  ["settings:workspacesAndAccess", "Workspaces & Access"],
+  ["settings:accessControl", "Access Control"],
+  ["settings:terminalAndEditors", "Terminal & Editors"],
+  ["settings:taskBehavior", "Task Behavior"],
+  ["system:navDataStorage", "Data & Logs"],
   ["common:prompts", "Prompts"],
   ["settings:voiceMode", "Voice Mode"],
   ["settings:utilityAgents", "Utility Agents"],

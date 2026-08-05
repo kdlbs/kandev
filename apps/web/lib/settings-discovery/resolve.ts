@@ -5,6 +5,7 @@ import type {
 } from "./types";
 import { SETTINGS_DISCOVERY_DEFINITIONS } from "./catalog";
 import { SETTINGS_DISCOVERY_GROUPS } from "./catalog/groups";
+import { INTEGRATION_SETTINGS_TARGETS, WORKSPACE_INTEGRATIONS } from "./catalog/integrations";
 import {
   agentProfileDiscoveryTarget,
   executorProfileDiscoveryTarget,
@@ -17,7 +18,7 @@ function workspaceDefinitions(
   const entries: SettingsDiscoveryDefinition[] = [];
   for (const [workspaceIndex, workspace] of workspaces.entries()) {
     const workspaceId = `workspace:${workspace.id}`;
-    const href = `/settings/workspace/${encodeURIComponent(workspace.id)}`;
+    const href = `/settings/workspaces/${encodeURIComponent(workspace.id)}`;
     const order = 10_000 + workspaceIndex * 100;
     entries.push({
       id: workspaceId,
@@ -61,6 +62,30 @@ function workspaceDefinitions(
         groupId: "workspaces",
         href: `${href}/${suffix}`,
         order: order + index + 10,
+      });
+    }
+    // One entry per integration service so search reads "<workspace> › Integrations › Jira".
+    for (const [index, [slug, label]] of WORKSPACE_INTEGRATIONS.entries()) {
+      const integrationId = `${workspaceId}:integration-${slug}`;
+      const integrationHref = `${href}/integrations/${slug}`;
+      entries.push({
+        id: integrationId,
+        kind: "page",
+        label,
+        parentId: `${workspaceId}:integrations`,
+        groupId: "workspaces",
+        href: integrationHref,
+        order: order + index + 20,
+      });
+      entries.push({
+        id: `${integrationId}-connection`,
+        kind: "section",
+        labelKey: "settings:connection",
+        parentId: integrationId,
+        groupId: "workspaces",
+        href: integrationHref,
+        targetId: INTEGRATION_SETTINGS_TARGETS[slug],
+        order: order + index + 21,
       });
     }
   }
@@ -128,7 +153,7 @@ function executorProfileDefinitions(
         kind: "page",
         label: profile.name,
         parentId: "executors",
-        groupId: "executors",
+        groupId: "agents",
         href,
         order,
       });
@@ -143,7 +168,7 @@ function executorProfileDefinitions(
           kind: "section",
           labelKey,
           parentId: profileId,
-          groupId: "executors",
+          groupId: "agents",
           href,
           targetId: executorProfileDiscoveryTarget(
             profile.id,

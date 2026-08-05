@@ -12,7 +12,7 @@ export class LayoutSettingsPage {
   }
 
   async open(): Promise<void> {
-    await this.page.goto("/settings/general/layouts");
+    await this.page.goto("/settings/preferences/layouts");
     await expect(this.root).toBeVisible();
   }
 

@@ -84,7 +84,7 @@ type PageProps = {
 
 function NotConfigured({ workspaceId }: { workspaceId?: string }) {
   const href = workspaceId
-    ? `/settings/workspace/${encodeURIComponent(workspaceId)}/integrations/azure-devops`
+    ? `/settings/workspaces/${encodeURIComponent(workspaceId)}/integrations/azure-devops`
     : "/settings/integrations/azure-devops";
   return (
     <div className="max-w-2xl p-6">

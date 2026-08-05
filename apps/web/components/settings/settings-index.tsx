@@ -54,7 +54,7 @@ export function SettingsIndex({ restoreTo }: { restoreTo: string }) {
 
   return (
     <nav data-testid="settings-index" aria-label={t("common:settings")}>
-      <SettingsPageNav pathname={SETTINGS_INDEX_PATH} defaultOpenGroup="general" />
+      <SettingsPageNav pathname={SETTINGS_INDEX_PATH} />
     </nav>
   );
 }

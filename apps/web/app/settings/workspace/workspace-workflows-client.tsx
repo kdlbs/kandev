@@ -428,7 +428,7 @@ export function WorkspaceWorkflowsClient({
   const [syncDialogOpen, setSyncDialogOpen] = useState(false);
 
   if (!workspace)
-    return <WorkspaceNotFoundCard onBack={() => page.router.push("/settings/workspace")} />;
+    return <WorkspaceNotFoundCard onBack={() => page.router.push("/settings/workspaces")} />;
 
   return (
     <div className="space-y-8">
@@ -442,7 +442,7 @@ export function WorkspaceWorkflowsClient({
           </p>
         </div>
         <Button asChild variant="outline" size="sm">
-          <Link href={`/settings/workspace/${workspace.id}`}>
+          <Link href={`/settings/workspaces/${workspace.id}`}>
             {t("workflows:workspaceSettings")}
           </Link>
         </Button>

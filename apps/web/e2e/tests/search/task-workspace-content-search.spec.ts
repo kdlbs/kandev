@@ -26,7 +26,7 @@ function initializeRepository(directory: string, gitEnv: NodeJS.ProcessEnv): Git
 }
 
 test("@search keeps workspace modes out of non-task routes", async ({ testPage }) => {
-  await testPage.goto("/settings/general/appearance");
+  await testPage.goto("/settings/preferences/appearance");
 
   const dialog = testPage.getByRole("dialog");
   await testPage.keyboard.press(`${MODIFIER}+Shift+f`);

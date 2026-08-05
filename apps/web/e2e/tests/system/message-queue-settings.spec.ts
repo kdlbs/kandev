@@ -41,18 +41,18 @@ test.describe.serial("Message Queue general settings", () => {
     mergeBaseline = undefined;
   });
 
-  test("admin navigates to Message Queue, saves, and reloads the live setting", async ({
+  test("admin navigates to Task behavior, saves, and reloads the live setting", async ({
     testPage,
   }) => {
     const updated = baseline === 17 ? 18 : 17;
-    await testPage.goto("/settings/general/appearance");
+    await testPage.goto("/settings/preferences/appearance");
     const settingsNav = testPage.getByTestId("app-sidebar-settings-mode");
-    await settingsNav.getByRole("link", { name: "Message Queue" }).click();
+    await settingsNav.getByRole("link", { name: /^Task Behavior/ }).click();
 
     await expect(testPage).toHaveURL(
-      (url) => new URL(url).pathname === "/settings/general/message-queue",
+      (url) => new URL(url).pathname === "/settings/preferences/task-behavior",
     );
-    await expect(testPage.getByTestId("system-page-title")).toHaveText("Message Queue");
+    await expect(testPage.getByText("Message Queue").first()).toBeVisible();
 
     const input = testPage.getByTestId("message-queue-max-per-session");
     await expect(input).toHaveValue(String(baseline));
@@ -126,7 +126,7 @@ test.describe.serial("Message Queue general settings", () => {
       });
     });
 
-    await testPage.goto("/settings/general/message-queue");
+    await testPage.goto("/settings/preferences/task-behavior");
     await expect(testPage.getByTestId("message-queue-max-per-session")).toBeDisabled();
     await expect(testPage.getByTestId("message-queue-effective-value")).toHaveText("41");
     await expect(testPage.getByTestId("message-queue-source")).toHaveText("Environment");
@@ -137,7 +137,7 @@ test.describe.serial("Message Queue general settings", () => {
   });
 
   test("member can navigate to the setting but cannot edit it", async ({ testPage }) => {
-    await testPage.goto("/settings/general/appearance");
+    await testPage.goto("/settings/preferences/appearance");
     await testPage.waitForFunction(() => Boolean(window.__KANDEV_E2E_STORE__));
     await testPage.evaluate(() => {
       const store = window.__KANDEV_E2E_STORE__;
@@ -156,7 +156,7 @@ test.describe.serial("Message Queue general settings", () => {
       });
     });
     const settingsNav = testPage.getByTestId("app-sidebar-settings-mode");
-    await settingsNav.getByRole("link", { name: "Message Queue" }).click();
+    await settingsNav.getByRole("link", { name: /^Task Behavior/ }).click();
 
     await expect(testPage.getByTestId("message-queue-max-per-session")).toBeDisabled();
     await expect(testPage.getByTestId("message-queue-merge-enabled")).toBeDisabled();

@@ -7,17 +7,17 @@ test.describe("Settings index on desktop", () => {
   test("opens the default page on a device with no settings history", async ({ testPage }) => {
     await testPage.goto("/settings");
 
-    await expect(testPage).toHaveURL(/\/settings\/general\/appearance$/);
+    await expect(testPage).toHaveURL(/\/settings\/preferences\/appearance$/);
     await expect(testPage.getByTestId("theme-settings-card")).toBeVisible();
   });
 
   test("returns to the page you were last on", async ({ testPage }) => {
-    await testPage.goto("/settings/general/terminal");
+    await testPage.goto("/settings/preferences/terminal-editors");
     await expect(testPage.getByTestId("terminal-font-select")).toBeVisible();
 
     await testPage.goto("/settings");
 
-    await expect(testPage).toHaveURL(/\/settings\/general\/terminal$/);
+    await expect(testPage).toHaveURL(/\/settings\/preferences\/terminal-editors$/);
     await expect(testPage.getByTestId("terminal-font-select")).toBeVisible();
   });
 
@@ -48,29 +48,27 @@ test.describe("Settings index on desktop", () => {
     // identical menus side by side is what this route exists to avoid.
     await testPage.setViewportSize({ width: 1280, height: 860 });
 
-    await expect(testPage).toHaveURL(/\/settings\/general\/appearance$/);
+    await expect(testPage).toHaveURL(/\/settings\/preferences\/appearance$/);
     await expect(testPage.getByTestId("settings-index")).toHaveCount(0);
   });
 
-  test("marks only the active leaf, not the group header that links to it", async ({
-    testPage,
-  }) => {
-    await testPage.goto("/settings/general/appearance");
+  test("marks only the active row, never the static section header", async ({ testPage }) => {
+    await testPage.goto("/settings/preferences/appearance");
 
     const takeover = testPage.getByTestId("app-sidebar-settings-mode");
     await expect(takeover.getByRole("link", { name: "Appearance" })).toBeVisible();
 
-    // The General header links to Appearance, so marking both draws two active
-    // rows for one location. Same shape as System → Status.
+    // Section headers are static text, not links, so exactly one row can claim
+    // the current location.
     const active = takeover.locator("a[data-active='true']");
     await expect(active).toHaveCount(1);
     await expect(active).toHaveAccessibleName(/Appearance/);
   });
 
-  test("redirects the /settings/general prefix to its first page", async ({ testPage }) => {
+  test("redirects the /settings/general prefix to the Appearance page", async ({ testPage }) => {
     await testPage.goto("/settings/general");
 
-    await expect(testPage).toHaveURL(/\/settings\/general\/appearance$/);
+    await expect(testPage).toHaveURL(/\/settings\/preferences\/appearance$/);
   });
 
   test("keeps a record-scoped page out of the restore slot", async ({ testPage, seedData }) => {
@@ -79,7 +77,7 @@ test.describe("Settings index on desktop", () => {
     await testPage.goto("/settings/prompts");
     await expect(testPage.getByTestId("settings-scroll-container")).toBeVisible();
 
-    await testPage.goto(`/settings/workspace/${seedData.workspaceId}/repositories`);
+    await testPage.goto(`/settings/workspaces/${seedData.workspaceId}/repositories`);
     await expect(testPage.getByTestId("settings-scroll-container")).toBeVisible();
 
     await testPage.goto("/settings");

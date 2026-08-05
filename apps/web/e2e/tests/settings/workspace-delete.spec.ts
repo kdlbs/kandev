@@ -12,7 +12,7 @@ test.describe("Workspace settings", () => {
     const workspaceName = `Settings Kanban ${Date.now().toString(36)}`;
     const taskTitle = `Kanban Bootstrap Task ${Date.now().toString(36)}`;
 
-    await testPage.goto("/settings/workspace");
+    await testPage.goto("/settings/workspaces");
     await testPage.getByRole("button", { name: "Add Workspace" }).click();
     await testPage.getByLabel("Workspace Name").fill(workspaceName);
     await testPage.locator("form").getByRole("button", { name: "Add Workspace" }).click();
@@ -94,7 +94,7 @@ test.describe("Workspace settings", () => {
     const workspaceName = `Settings Delete ${suffix}`;
     const workspace = await apiClient.createWorkspace(workspaceName);
 
-    await testPage.goto(`/settings/workspace/${workspace.id}`);
+    await testPage.goto(`/settings/workspaces/${workspace.id}`);
     await expect(testPage.getByRole("heading", { name: workspaceName })).toBeVisible({
       timeout: 15_000,
     });
@@ -156,7 +156,7 @@ test.describe("Workspace settings", () => {
       content: "# Settings cleanup skill\n",
     });
 
-    await testPage.goto(`/settings/workspace/${onboarded.workspaceId}`);
+    await testPage.goto(`/settings/workspaces/${onboarded.workspaceId}`);
     await expect(testPage.getByRole("heading", { name: workspaceName })).toBeVisible({
       timeout: 15_000,
     });

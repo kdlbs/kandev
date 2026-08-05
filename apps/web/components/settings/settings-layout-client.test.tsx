@@ -14,6 +14,7 @@ const state = {
       { id: "ws-2", name: "Archive" },
     ],
   },
+  availableAgents: { items: [{ name: "claude", display_name: "Claude Code" }] },
   setActiveWorkspace: vi.fn(),
 };
 
@@ -69,7 +70,7 @@ function DirtySettings() {
   return <div>Dirty settings</div>;
 }
 
-describe("SettingsLayoutClient", () => {
+describe("SettingsLayoutClient integrations actions", () => {
   beforeEach(() => {
     pathname = "/settings/integrations/github";
     state.workspaces.activeId = "ws-1";
@@ -145,8 +146,8 @@ describe("SettingsLayoutClient", () => {
     );
   });
 
-  it("translates the Message Queue breadcrumb and keeps the shared scroll owner", async () => {
-    pathname = "/settings/general/message-queue";
+  it("translates the Task behavior breadcrumb and keeps the shared scroll owner", async () => {
+    pathname = "/settings/preferences/task-behavior";
     await i18n.changeLanguage("pseudo");
     try {
       render(
@@ -155,7 +156,7 @@ describe("SettingsLayoutClient", () => {
         </SettingsLayoutClient>,
       );
 
-      expect(screen.getByText("Ḿēśśàĝē Qũēũē")).toBeTruthy();
+      expect(screen.getByText("Ţàśķ Ɓēĥàvĩōŕ")).toBeTruthy();
       expect(screen.getByTestId("settings-scroll-container").className).toContain(
         "overflow-y-auto",
       );
@@ -165,41 +166,18 @@ describe("SettingsLayoutClient", () => {
   });
 });
 
-describe("SettingsLayoutClient workspace breadcrumbs", () => {
-  beforeEach(() => {
-    pathname = "/settings/workspace/ws-2/secrets";
-    state.workspaces.activeId = "ws-1";
-    state.setActiveWorkspace.mockClear();
-  });
-
+describe("SettingsLayoutClient breadcrumbs", () => {
   afterEach(() => cleanup());
 
-  it("includes the workspace name in workspace-scoped breadcrumbs", () => {
-    render(
-      <SettingsLayoutClient>
-        <div>Settings page</div>
-      </SettingsLayoutClient>,
-    );
-
-    // "Settings" renders twice: a phone-only link and the desktop static text.
-    expect(screen.getByTestId("page-topbar-breadcrumbs").textContent).toBe(
-      "SettingsSettingsArchiveSecrets",
-    );
-    expect(screen.getByRole("link", { name: "Archive" }).getAttribute("href")).toBe(
-      "/settings/workspace/ws-2",
-    );
-  });
-
   it("renders the Settings crumb as a phone-only link with static desktop text", () => {
+    pathname = "/settings/preferences/appearance";
+
     render(
       <SettingsLayoutClient>
-        <div>Settings page</div>
+        <div>Appearance settings</div>
       </SettingsLayoutClient>,
     );
 
-    // On desktop /settings hands straight back to the remembered page, so the
-    // crumb must not be a link there — otherwise the unsaved-changes guard
-    // offers "Discard and leave" and then does not leave.
     const link = screen.getByRole("link", { name: "Settings" });
     expect(link.getAttribute("href")).toBe("/settings");
     expect(link.className).toContain("md:hidden");
@@ -209,26 +187,67 @@ describe("SettingsLayoutClient workspace breadcrumbs", () => {
     expect(desktopText).toBeTruthy();
   });
 
-  it("keeps the automations parent after the workspace breadcrumb", () => {
-    pathname = "/settings/workspace/ws-2/automations/new";
+  it("links Workspaces and the workspace name on workspace sub-pages", () => {
+    pathname = "/settings/workspaces/ws-1/repositories";
 
     render(
       <SettingsLayoutClient>
-        <div>Settings page</div>
+        <div>Repositories</div>
       </SettingsLayoutClient>,
     );
 
-    const breadcrumbs = screen.getByTestId("page-topbar-breadcrumbs");
-    // The settings crumb chain, in order. Asserted by href rather than by text:
-    // the Settings crumb renders twice (phone link + desktop static text) and
-    // the title sits inside a BreadcrumbPage wrapper, so counting text nodes
-    // measures the markup instead of the chain.
-    expect(
-      Array.from(breadcrumbs.querySelectorAll('a[href^="/settings"]')).map((link) =>
-        link.getAttribute("href"),
-      ),
-    ).toEqual(["/settings", "/settings/workspace/ws-2", "/settings/workspace/ws-2/automations"]);
-    expect(breadcrumbs.textContent).toContain("Archive");
-    expect(breadcrumbs.textContent?.endsWith("New")).toBe(true);
+    expect(screen.getByRole("link", { name: "Workspaces" }).getAttribute("href")).toBe(
+      "/settings/workspaces",
+    );
+    expect(screen.getByRole("link", { name: "Default" }).getAttribute("href")).toBe(
+      "/settings/workspaces/ws-1",
+    );
+  });
+
+  it("titles the workspace overview with the workspace name", () => {
+    pathname = "/settings/workspaces/ws-1";
+
+    const { container } = render(
+      <SettingsLayoutClient>
+        <div>Overview</div>
+      </SettingsLayoutClient>,
+    );
+
+    expect(screen.getByRole("link", { name: "Workspaces" }).getAttribute("href")).toBe(
+      "/settings/workspaces",
+    );
+    // The workspace name is the current page crumb (no anchor of its own).
+    expect(container.querySelector('a[href="/settings/workspaces/ws-1"]')).toBeNull();
+    expect(screen.getByText("Default").closest('[aria-current="page"]')).toBeTruthy();
+  });
+
+  it("links Agents and titles agent detail pages with the display name", () => {
+    pathname = "/settings/agents/claude";
+
+    const { container } = render(
+      <SettingsLayoutClient>
+        <div>Agent setup</div>
+      </SettingsLayoutClient>,
+    );
+
+    expect(screen.getByRole("link", { name: "Agents" }).getAttribute("href")).toBe(
+      "/settings/agents",
+    );
+    expect(container.querySelector('a[href="/settings/agents/claude"]')).toBeNull();
+    expect(screen.getByText("Claude Code").closest('[aria-current="page"]')).toBeTruthy();
+  });
+
+  it("adds the agent name crumb on profile sub-pages", () => {
+    pathname = "/settings/agents/claude/profiles/123e4567-e89b-12d3-a456-426614174000";
+
+    render(
+      <SettingsLayoutClient>
+        <div>Profile editor</div>
+      </SettingsLayoutClient>,
+    );
+
+    expect(screen.getByRole("link", { name: "Claude Code" }).getAttribute("href")).toBe(
+      "/settings/agents/claude",
+    );
   });
 });

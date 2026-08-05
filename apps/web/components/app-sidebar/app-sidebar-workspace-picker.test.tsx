@@ -110,7 +110,7 @@ describe("AppSidebarWorkspacePicker — Add workspace routing", () => {
 
     fireEvent.click(screen.getByText("New kanban workspace"));
 
-    expect(navigationMock.push).toHaveBeenCalledWith("/settings/workspace");
+    expect(navigationMock.push).toHaveBeenCalledWith("/settings/workspaces");
   });
 
   it("keeps the legacy add-workspace route when the office feature is disabled", () => {
@@ -119,7 +119,7 @@ describe("AppSidebarWorkspacePicker — Add workspace routing", () => {
 
     fireEvent.click(screen.getByText("Add workspace"));
 
-    expect(navigationMock.push).toHaveBeenCalledWith("/settings/workspace");
+    expect(navigationMock.push).toHaveBeenCalledWith("/settings/workspaces");
   });
 
   it("calls onActionComplete after navigating to add a workspace", () => {

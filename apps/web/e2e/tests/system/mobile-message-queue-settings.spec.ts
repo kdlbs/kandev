@@ -1,7 +1,7 @@
 import { test, expect } from "../../fixtures/test-base";
 import { MobileKanbanPage } from "../../pages/mobile-kanban-page";
 
-test("mobile navigation reaches Message Queue with touch-safe shared settings layout", async ({
+test("mobile navigation reaches the Message Queue section with touch-safe shared settings layout", async ({
   testPage,
 }) => {
   const mobile = new MobileKanbanPage(testPage);
@@ -9,14 +9,14 @@ test("mobile navigation reaches Message Queue with touch-safe shared settings la
   await mobile.mobileMenuButton.click();
   const homeMenu = testPage.getByTestId("mobile-home-menu-card");
   await homeMenu.getByRole("link", { name: "Settings" }).click();
-  // Settings lands on the /settings index, which opens the General group.
+  // Settings lands on the /settings index; the queue lives on Task behavior.
   const index = testPage.getByTestId("settings-index");
-  await index.getByRole("link", { name: "Message Queue" }).click();
+  await index.getByRole("link", { name: /^Task Behavior/ }).click();
 
   await expect(testPage).toHaveURL(
-    (url) => new URL(url).pathname === "/settings/general/message-queue",
+    (url) => new URL(url).pathname === "/settings/preferences/task-behavior",
   );
-  await expect(testPage.getByTestId("system-page-title")).toHaveText("Message Queue");
+  await expect(testPage.getByText("Message Queue").first()).toBeVisible();
 
   const input = testPage.getByTestId("message-queue-max-per-session");
   await expect(input).toBeVisible();

@@ -17,6 +17,7 @@ import {
   DialogTitle,
 } from "@kandev/ui/dialog";
 import { useAppStore } from "@/components/state-provider";
+import { SpritesSettings } from "@/components/settings/sprites-settings";
 import { deleteExecutorProfile } from "@/lib/api/domains/settings-api";
 import { EXECUTOR_ICON_MAP, getExecutorLabel } from "@/lib/executor-icons";
 import type { Executor, ExecutorProfile } from "@/lib/types/http";
@@ -235,6 +236,16 @@ export default function ExecutorsHubPage() {
         <p className="mt-1 text-sm text-muted-foreground">{t("executors:hubDescription")}</p>
       </div>
       <Separator />
+      {allProfiles.length > 0 && (
+        <div className="space-y-4">
+          <h3 className="text-lg font-semibold">{t("executors:profiles")}</h3>
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+            {allProfiles.map((profile) => (
+              <ProfileCard key={profile.id} profile={profile} onDelete={setDeleteProfileId} />
+            ))}
+          </div>
+        </div>
+      )}
       <div className="space-y-4">
         <h3 className="text-lg font-semibold">{t("executors:createNewProfile")}</h3>
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
@@ -247,16 +258,9 @@ export default function ExecutorsHubPage() {
           ))}
         </div>
       </div>
-      {allProfiles.length > 0 && (
-        <div className="space-y-4">
-          <h3 className="text-lg font-semibold">{t("executors:profiles")}</h3>
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-            {allProfiles.map((profile) => (
-              <ProfileCard key={profile.id} profile={profile} onDelete={setDeleteProfileId} />
-            ))}
-          </div>
-        </div>
-      )}
+      <Separator />
+      {/* Sprites.dev connection and instances: config for the sprites executor backend. */}
+      <SpritesSettings />
       <DeleteProfileDialog
         profileName={profileToDelete?.name}
         open={Boolean(deleteProfileId)}

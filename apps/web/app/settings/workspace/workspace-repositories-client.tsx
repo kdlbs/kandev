@@ -1,7 +1,6 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { WorkspaceSettingsHeader } from "@/app/settings/workspace/workspace-settings-header";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 import { useRouter } from "@/lib/routing/client-router";
@@ -556,11 +555,23 @@ export function WorkspaceRepositoriesClient({
   } = state;
 
   if (!workspace)
-    return <WorkspaceNotFoundCard onBack={() => router.push("/settings/workspace")} />;
+    return <WorkspaceNotFoundCard onBack={() => router.push("/settings/workspaces")} />;
 
   return (
     <div className="space-y-8">
-      <WorkspaceSettingsHeader workspace={workspace} description={pageDescription} />
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <h2 className="text-2xl font-bold">{workspace.name}</h2>
+          <p className="text-sm text-muted-foreground mt-1">
+            {t("workspaces:manageRepositoriesConnected")}
+          </p>
+        </div>
+        <Button asChild variant="outline" size="sm">
+          <Link href={`/settings/workspaces/${workspace.id}`}>
+            {t("workspaces:workspaceSettingsLink")}
+          </Link>
+        </Button>
+      </div>
       <Separator />
       <SettingsSection
         icon={<IconGitBranch className="h-5 w-5" />}
