@@ -266,6 +266,15 @@ export const test = backendFixture.extend<
       await apiClient.rawRequest("DELETE", `/api/v1/jira/config`).catch(() => undefined);
       await apiClient.rawRequest("DELETE", `/api/v1/linear/config`).catch(() => undefined);
       await Promise.all([
+        // Provider-focused specs reuse and mutate the worker-scoped seed row.
+        // Restore its local-only identity before the next test; otherwise a
+        // removed mock remote plus stale provider metadata breaks workspace prep.
+        apiClient.updateRepository(seedData.repositoryId, {
+          provider: "",
+          provider_host: "",
+          provider_owner: "",
+          provider_name: "",
+        }),
         apiClient.mockJiraReset().catch(() => undefined),
         apiClient.mockLinearReset().catch(() => undefined),
         apiClient.mockSentryReset().catch(() => undefined),
