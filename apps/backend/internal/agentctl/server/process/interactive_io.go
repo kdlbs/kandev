@@ -196,7 +196,7 @@ func (r *InteractiveRunner) emitTurnComplete(proc *interactiveProcess) {
 		close(proc.firstIdleCh)
 	})
 	if r.turnCompleteCallback != nil {
-		r.turnCompleteCallback(proc.info.SessionID)
+		r.turnCompleteCallback(proc.info.SessionID, proc.info.ID)
 	}
 	r.logger.Debug("turn complete detected",
 		zap.String("process_id", proc.info.ID),
