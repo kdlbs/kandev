@@ -24,7 +24,8 @@ changes correctly, but the sidebar no longer provides visible context for where 
   fixed delay. Command-panel selection queues the task ID while guarded navigation is pending and
   starts the reveal only after the canonical task route and matching active-task state render.
 - If another command-panel task is selected before the previous reveal finishes, the latest request
-  supersedes the earlier one; a late row from the earlier request must never be scrolled into view.
+  immediately invalidates the earlier one; a late row from the earlier request must never be
+  scrolled into view, even while the newer route is waiting behind a navigation guard.
 - If the active sidebar view filters the task out, a saved group or subtask branch hides it, or the
   desktop sidebar is not rendered, task navigation still succeeds and sidebar preferences remain
   unchanged.

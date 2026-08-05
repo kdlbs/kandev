@@ -73,7 +73,7 @@ Implemented the bounded visible-sidebar reveal helper, latest-request cancellati
 command-panel queue, task-row marker, and desktop/mobile coverage. The RED supersession unit test
 and delayed-blocker desktop regression failed before their respective fixes and passed afterward.
 
-- Unit: 1 file, 8 tests passed; related command-panel consumers: 2 files, 22 tests passed.
+- Unit: 1 file, 9 tests passed; task-navigation hook and command-panel consumers: 3 files, 24 tests passed.
 - Typecheck and Vite build: passed.
 - Desktop full sidebar-scroll E2E: 8 passed, including delayed guarded navigation and above-viewport reveal.
 - Mobile focused E2E: 1 passed under `mobile-chrome`.

@@ -13,7 +13,7 @@ prove the behavior against an actually overflowing sidebar. The helper follows t
 navigation pattern already used by `apps/web/lib/review/navigation.ts`, while scoping lookup to a
 visible task-sidebar scroll viewport so the CSS-hidden desktop rail is never selected on mobile. A
 command-panel selection is queued until the canonical route and matching active task render, and
-the helper gives each request a latest-wins generation token.
+each new selection immediately invalidates the previous latest-wins generation.
 
 ## Confirmed root cause
 
@@ -31,7 +31,8 @@ active-task state change while an off-screen sidebar row remains outside the vis
   bounded `requestAnimationFrame` retry helper. It resolves the row only inside a rendered, visible
   `task-sidebar-scroll` viewport and calls `scrollIntoView({ block: "nearest", inline: "nearest" })`.
   A missing or hidden target resolves as a no-op rather than affecting navigation. A newer reveal
-  request supersedes and terminates an older retry loop before it can scroll a stale row.
+  request supersedes and terminates an older retry loop before it can scroll a stale row, including
+  while the newer route is waiting behind a navigation guard.
 - Add a row-specific task marker to the interactive row in
   `apps/web/components/task/task-item.tsx`. Keep the existing test ID and active-task accessibility
   attributes intact.
@@ -86,10 +87,11 @@ surface, or safe-area behavior is introduced.
 - RED regressions: the supersession unit test failed before generation cancellation, and the
   delayed-blocker desktop E2E failed before post-navigation reveal queuing; both passed after the
   implementation.
-- Unit: `cd apps/web && pnpm exec vitest run lib/sidebar/task-navigation.test.ts` — 1 file, 8
+- Unit: `cd apps/web && pnpm exec vitest run lib/sidebar/task-navigation.test.ts` — 1 file, 9
   tests passed.
 - Related unit consumers: `cd apps/web && pnpm exec vitest run lib/sidebar/task-navigation.test.ts
-  components/command-panel-content-search.test.tsx` — 2 files, 22 tests passed.
+  hooks/use-command-panel-task-navigation.test.ts components/command-panel-content-search.test.tsx`
+  — 3 files, 24 tests passed.
 - Typecheck: `cd apps/web && pnpm exec tsc --noEmit` passed.
 - Desktop focused GREEN: `cd apps/web && pnpm e2e:run --host --no-build
   tests/task/sidebar-scroll-preservation.spec.ts --grep "after a delayed settings navigation

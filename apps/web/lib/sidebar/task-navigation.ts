@@ -4,6 +4,11 @@ export const TASK_SIDEBAR_SCROLL_SELECTOR = '[data-testid="task-sidebar-scroll"]
 const MAX_TASK_NAVIGATION_ATTEMPTS = 60;
 let latestNavigationRequestId = 0;
 
+/** Invalidates the current reveal so a pending selection cannot scroll a stale row. */
+export function cancelSidebarTaskReveal(): void {
+  latestNavigationRequestId += 1;
+}
+
 /** CSS selector for a rendered task row by its stable task id. */
 export function taskRowSelector(taskId: string): string {
   return `[${TASK_ROW_DOM_ATTR}="${CSS.escape(taskId)}"]`;

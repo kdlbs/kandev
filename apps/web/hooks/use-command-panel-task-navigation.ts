@@ -3,7 +3,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "@/lib/routing/client-router";
 import { isTaskDetailPath, linkToTask } from "@/lib/links";
 import type { Task } from "@/lib/types/http";
-import { revealSidebarTask } from "@/lib/sidebar/task-navigation";
+import { cancelSidebarTaskReveal, revealSidebarTask } from "@/lib/sidebar/task-navigation";
 
 export function useCommandPanelTaskNavigation(pathname: string, activeTaskId: string | null) {
   const router = useRouter();
@@ -11,6 +11,7 @@ export function useCommandPanelTaskNavigation(pathname: string, activeTaskId: st
 
   const handleTaskNavigation = useCallback(
     (task: Task) => {
+      cancelSidebarTaskReveal();
       setPendingTaskRevealId(task.id);
       router.push(linkToTask(task.id));
     },

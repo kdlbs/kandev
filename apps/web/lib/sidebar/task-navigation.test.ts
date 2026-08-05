@@ -1,5 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { TASK_ROW_DOM_ATTR, revealSidebarTask, taskRowSelector } from "./task-navigation";
+import {
+  TASK_ROW_DOM_ATTR,
+  cancelSidebarTaskReveal,
+  revealSidebarTask,
+  taskRowSelector,
+} from "./task-navigation";
 
 type Rect = { x: number; y: number; width: number; height: number };
 const TEST_TASK_ID = "task-1";
@@ -103,6 +108,19 @@ describe("revealSidebarTask", () => {
 
     await expect(firstNavigation).resolves.toBe(false);
     expect(firstRow.scrollIntoView).not.toHaveBeenCalled();
+  });
+
+  it("cancels a pending reveal before a newer route is ready", async () => {
+    const viewport = mountViewport();
+    const callbacks: Array<() => void> = [];
+    const navigation = revealSidebarTask("pending", (callback) => callbacks.push(callback));
+
+    cancelSidebarTaskReveal();
+    const row = mountRow(viewport, "pending", { x: 0, y: 120, width: 320, height: 24 });
+    callbacks.shift()!();
+
+    await expect(navigation).resolves.toBe(false);
+    expect(row.scrollIntoView).not.toHaveBeenCalled();
   });
 
   it("ignores a matching row inside a hidden sidebar viewport", async () => {
