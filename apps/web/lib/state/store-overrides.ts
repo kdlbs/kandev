@@ -24,6 +24,7 @@ export function buildStateOverrides(m: DefaultState) {
     secrets: m.secrets,
     notificationProviders: m.notificationProviders,
     settingsData: m.settingsData,
+    sleepInhibition: m.sleepInhibition,
     userSettings: m.userSettings,
     messages: m.messages,
     turns: m.turns,

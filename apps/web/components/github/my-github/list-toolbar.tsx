@@ -6,6 +6,7 @@ import { Input } from "@kandev/ui/input";
 import { cn } from "@/lib/utils";
 import { formatRelativeTime } from "@/lib/utils";
 import { RepoFilterCombobox } from "./repo-filter-combobox";
+import { useTranslation } from "react-i18next";
 
 type ListToolbarProps = {
   title: string;
@@ -33,11 +34,12 @@ function RefreshControls({
   onRefresh: () => void;
   showUpdatedPrefix: boolean;
 }) {
+  const { t } = useTranslation();
   return (
     <>
       {lastFetchedAt && !loading && (
         <span className="text-xs text-muted-foreground whitespace-nowrap">
-          {showUpdatedPrefix ? "Updated " : ""}
+          {showUpdatedPrefix ? t("github:updated") : ""}
           {formatRelativeTime(lastFetchedAt.toISOString())}
         </span>
       )}
@@ -47,7 +49,7 @@ function RefreshControls({
         className="h-8 w-8 cursor-pointer"
         onClick={onRefresh}
         disabled={loading}
-        title="Refresh"
+        title={t("github:refresh")}
       >
         <IconRefresh className={cn("h-4 w-4", loading && "animate-spin")} />
       </Button>
@@ -69,6 +71,7 @@ export function ListToolbar({
   repoOptions,
   onRefresh,
 }: ListToolbarProps) {
+  const { t } = useTranslation();
   const dirty = customQuery !== committedQuery;
   return (
     <div className="px-4 sm:px-6 py-2.5 border-b shrink-0 flex flex-col md:flex-row md:items-center md:flex-wrap gap-2 md:gap-3">
@@ -94,7 +97,7 @@ export function ListToolbar({
         repoFilter={repoFilter}
         onRepoFilterChange={onRepoFilterChange}
         repoOptions={repoOptions}
-        ariaLabel="Filter GitHub results by repository"
+        ariaLabel={t("github:filterGithubResultsByRepository")}
         triggerClassName="w-full md:w-[220px] h-8 border border-input bg-background hover:bg-secondary/50 px-2 py-1.5 text-xs/relaxed"
         className="md:min-w-[360px]"
         testId="github-repo-filter-trigger"
@@ -113,12 +116,12 @@ export function ListToolbar({
           onBlur={() => {
             if (dirty) onCommitCustomQuery();
           }}
-          placeholder='Custom query — press Enter. e.g. "is:open review-requested:@me"'
+          placeholder={t("github:customQueryPressEnterEG")}
           className="h-8 pr-20"
         />
         {dirty && (
           <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-[10px] uppercase tracking-wider text-muted-foreground hidden sm:inline">
-            Press Enter
+            {t("github:pressEnter")}
           </span>
         )}
       </div>

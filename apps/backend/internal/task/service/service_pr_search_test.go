@@ -161,6 +161,23 @@ func TestListTasksByWorkspace_PRMatchRespectsArchivedFilter(t *testing.T) {
 	}
 }
 
+func TestListTasksByWorkspace_PRMatchRespectsOnlyArchivedFilter(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	seedPRSearchTasks(t, repo)
+	if err := repo.ArchiveTask(context.Background(), "task-pr"); err != nil {
+		t.Fatalf("archive: %v", err)
+	}
+	svc.SetPRTaskResolver(&fakePRResolver{byPR: map[int][]string{1243: {"task-pr", "task-title"}}})
+
+	tasks, total, err := svc.ListTasksByWorkspaceWithArchiveMode(context.Background(), "ws-1", "", "", "#1243", 1, 5, "", true, false, false, false, true)
+	if err != nil {
+		t.Fatalf("search only archived: %v", err)
+	}
+	if total != 1 || len(tasks) != 1 || tasks[0].ID != "task-pr" {
+		t.Fatalf("only archived PR search = total %d tasks %v, want task-pr only", total, taskIDSet(tasks))
+	}
+}
+
 func TestListTasksByWorkspace_PRMatchSkippedOnLaterPagesAndScopedSearches(t *testing.T) {
 	ctx := context.Background()
 	cases := []struct {

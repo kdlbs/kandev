@@ -1,7 +1,6 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useRouter } from "@/lib/routing/client-router";
 import { usePathname } from "@/lib/routing/client-router";
 import { useCommands, useCommandPanelOpen } from "@/lib/commands/command-registry";
 import type { CommandPanelMode, CommandItem as CommandItemType } from "@/lib/commands/types";
@@ -16,7 +15,6 @@ import {
 } from "@/components/command-panel-scope-switcher";
 
 import { listTasksByWorkspace } from "@/lib/api";
-import { linkToTask } from "@/lib/links";
 import type { Task } from "@/lib/types/http";
 import type { FileSearchResult } from "@/lib/types/backend";
 import { getWebSocketClient } from "@/lib/ws/connection";
@@ -25,6 +23,7 @@ import { useDockviewStore } from "@/lib/state/dockview-store";
 import { getContentSearchResultValue } from "@/components/workspace-content-search";
 import { getFileName } from "@/lib/utils/file-path";
 import { isTaskWorkspaceSearchAvailable } from "@/lib/commands/task-workspace-search";
+import { useCommandPanelTaskNavigation } from "@/hooks/use-command-panel-task-navigation";
 import {
   CommandPanelView,
   MODE_COMMANDS,
@@ -398,15 +397,24 @@ function useFirstResultSelection(
   }, [commands, contentResults, fileResults, mode, open, search, setSelectedValue, taskResults]);
 }
 
-function useCommandPanelHandlers(
-  state: ReturnType<typeof useCommandPanelState>,
-  setOpen: (open: boolean) => void,
-  commands: CommandItemType[],
-  kanbanSteps: { id: string; title: string; color: string }[],
-  repositories: Array<{ id: string; local_path: string }>,
-) {
+type CommandPanelHandlerOptions = {
+  state: ReturnType<typeof useCommandPanelState>;
+  setOpen: (open: boolean) => void;
+  commands: CommandItemType[];
+  kanbanSteps: { id: string; title: string; color: string }[];
+  repositories: Array<{ id: string; local_path: string }>;
+  onTaskSelect: (task: Task) => void;
+};
+
+function useCommandPanelHandlers({
+  state,
+  setOpen,
+  commands,
+  kanbanSteps,
+  repositories,
+  onTaskSelect,
+}: CommandPanelHandlerOptions) {
   const { mode, search, inputCommand, setMode, setSearch, setInputCommand } = state;
-  const router = useRouter();
 
   const grouped = useMemo(() => {
     const map = new Map<string, CommandItemType[]>();
@@ -452,9 +460,9 @@ function useCommandPanelHandlers(
   const handleTaskSelect = useCallback(
     (task: Task) => {
       setOpen(false);
-      router.push(linkToTask(task.id));
+      onTaskSelect(task);
     },
-    [setOpen, router],
+    [onTaskSelect, setOpen],
   );
 
   const handleFileSelect = useCallback(
@@ -513,6 +521,7 @@ export function CommandPanel() {
   const pathname = usePathname();
   const kanbanSteps = useAppStore((state) => state.kanban.steps);
   const workspaceId = useAppStore((state) => state.workspaces.activeId);
+  const activeTaskId = useAppStore((state) => state.tasks.activeTaskId);
   const activeSessionId = useAppStore((s) => s.tasks.activeSessionId);
   const workspaceSearchAvailable = useAppStore((state) =>
     isTaskWorkspaceSearchAvailable(state, pathname),
@@ -522,6 +531,7 @@ export function CommandPanel() {
   );
   const reposByWorkspace = useAppStore((s) => s.repositories.itemsByWorkspaceId);
   const repositories = workspaceId ? (reposByWorkspace[workspaceId] ?? []) : [];
+  const handleTaskNavigation = useCommandPanelTaskNavigation(pathname, activeTaskId);
 
   const state = useCommandPanelState(panelMode, setMode);
   const {
@@ -566,18 +576,15 @@ export function CommandPanel() {
     setSearch,
   });
 
-  const {
-    grouped,
-    stepMap,
-    repoMap,
-    handleSelect,
-    handleTaskSelect,
-    handleFileSelect,
-    handleKeyDown,
-    onScopeChange,
-    goBack,
-  } = useCommandPanelHandlers(state, setOpen, commands, kanbanSteps, repositories);
-  const handleContentSelect = useContentSearchResultOpener(setOpen, worktreePath);
+  const handlers = useCommandPanelHandlers({
+    state,
+    setOpen,
+    commands,
+    kanbanSteps,
+    repositories,
+    onTaskSelect: handleTaskNavigation,
+  });
+  const handleContentSelect = useContentSearchResultOpener(setOpen, worktreePath, activeSessionId);
 
   return (
     <CommandPanelView
@@ -589,12 +596,12 @@ export function CommandPanel() {
       setSelectedValue={setSelectedValue}
       search={search}
       setSearch={setSearch}
-      handleKeyDown={handleKeyDown}
-      onScopeChange={onScopeChange}
-      goBack={goBack}
+      handleKeyDown={handlers.handleKeyDown}
+      onScopeChange={handlers.onScopeChange}
+      goBack={handlers.goBack}
       fileResults={fileResults}
       isSearchingFiles={isSearchingFiles}
-      handleFileSelect={handleFileSelect}
+      handleFileSelect={handlers.handleFileSelect}
       contentResults={contentResults}
       isSearchingContent={isSearchingContent}
       contentSearchError={contentSearchError}
@@ -602,13 +609,13 @@ export function CommandPanel() {
       workspaceSearchAvailable={workspaceSearchAvailable}
       handleContentSelect={handleContentSelect}
       commands={commands}
-      grouped={grouped}
-      handleSelect={handleSelect}
+      grouped={handlers.grouped}
+      handleSelect={handlers.handleSelect}
       isSearching={isSearching}
       taskResults={taskResults}
-      stepMap={stepMap}
-      repoMap={repoMap}
-      handleTaskSelect={handleTaskSelect}
+      stepMap={handlers.stepMap}
+      repoMap={handlers.repoMap}
+      handleTaskSelect={handlers.handleTaskSelect}
     />
   );
 }

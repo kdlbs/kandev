@@ -15,6 +15,10 @@ export type CommandItem = {
   icon?: ReactNode;
   shortcut?: KeyboardShortcut;
   keywords?: string[];
+  /** Secondary display text. Deliberately excluded from command search terms. */
+  context?: string;
+  /** Hidden from the idle palette; becomes eligible after the user types. */
+  searchOnly?: boolean;
   /** For level-2 transitions: set the mode instead of running an action */
   enterMode?: CommandPanelMode;
   /** Standard action — close panel and execute */

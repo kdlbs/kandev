@@ -8,6 +8,15 @@ import { PrAssetCapture } from "../helpers/pr-asset-capture";
 import { makeGitEnv } from "../helpers/git-helper";
 import type { WorkflowStep } from "../../lib/types/http";
 
+const DEFAULT_SIDEBAR_VIEW = {
+  id: "view-all-tasks",
+  name: "All tasks",
+  filters: [],
+  sort: { key: "state", direction: "asc" },
+  group: "repository",
+  collapsed_groups: [],
+};
+
 export type SeedData = {
   workspaceId: string;
   workflowId: string;
@@ -185,8 +194,12 @@ export const test = backendFixture.extend<
       confirm_task_archive: true,
       agent_generated_task_titles: false,
       mcp_task_agent_profile_default: "current_task",
-      sidebar_views: [],
+      sidebar_views: [DEFAULT_SIDEBAR_VIEW],
+      sidebar_active_view_id: DEFAULT_SIDEBAR_VIEW.id,
       saved_layouts: [],
+      lsp_auto_start_languages: [],
+      lsp_auto_install_languages: [],
+      lsp_server_configs: {},
       task_create_last_used: {
         repository_id: seedData.repositoryId,
         branch: "main",
@@ -263,6 +276,15 @@ export const test = backendFixture.extend<
       await apiClient.rawRequest("DELETE", `/api/v1/jira/config`).catch(() => undefined);
       await apiClient.rawRequest("DELETE", `/api/v1/linear/config`).catch(() => undefined);
       await Promise.all([
+        // Provider-focused specs reuse and mutate the worker-scoped seed row.
+        // Restore its local-only identity before the next test; otherwise a
+        // removed mock remote plus stale provider metadata breaks workspace prep.
+        apiClient.updateRepository(seedData.repositoryId, {
+          provider: "",
+          provider_host: "",
+          provider_owner: "",
+          provider_name: "",
+        }),
         apiClient.mockJiraReset().catch(() => undefined),
         apiClient.mockLinearReset().catch(() => undefined),
         apiClient.mockSentryReset().catch(() => undefined),
@@ -308,8 +330,12 @@ test.beforeEach(async ({ apiClient, seedData }) => {
     confirm_task_archive: true,
     agent_generated_task_titles: false,
     mcp_task_agent_profile_default: "current_task",
-    sidebar_views: [],
+    sidebar_views: [DEFAULT_SIDEBAR_VIEW],
+    sidebar_active_view_id: DEFAULT_SIDEBAR_VIEW.id,
     saved_layouts: [],
+    lsp_auto_start_languages: [],
+    lsp_auto_install_languages: [],
+    lsp_server_configs: {},
     kanban_view_mode: "",
     startup_page: "task_overview",
     show_anchored_prompt_bar: false,

@@ -134,6 +134,7 @@ type wsQueueMessageRequest struct {
 	Model            string                           `json:"model,omitempty"`
 	PlanMode         bool                             `json:"plan_mode,omitempty"`
 	Attachments      []messagequeue.MessageAttachment `json:"attachments,omitempty"`
+	ContextFiles     []v1.ContextFileMeta             `json:"context_files,omitempty"`
 	EntityReferences []v1.EntityReference             `json:"entity_references,omitempty"`
 	UserID           string                           `json:"user_id,omitempty"`
 }
@@ -180,7 +181,10 @@ func (h *QueueHandlers) wsQueueMessage(ctx context.Context, msg *ws.Message) (*w
 	if queuedBy == "" {
 		queuedBy = messagequeue.QueuedByUser
 	}
-	metadata := orchestrator.NewUserMessageMeta().WithEntityReferences(req.EntityReferences).ToMap()
+	metadata := orchestrator.NewUserMessageMeta().
+		WithContextFiles(req.ContextFiles).
+		WithEntityReferences(req.EntityReferences).
+		ToMap()
 	queued, err := h.queueService.QueueMessageWithMetadata(ctx, req.SessionID, req.TaskID, req.Content, req.Model, queuedBy, req.PlanMode, req.Attachments, metadata)
 	if err != nil {
 		if errors.Is(err, messagequeue.ErrQueueFull) {

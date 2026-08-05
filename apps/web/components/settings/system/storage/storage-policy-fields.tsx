@@ -4,6 +4,7 @@ import { Input } from "@kandev/ui/input";
 import { Label } from "@kandev/ui/label";
 import { SettingsCard } from "@/components/settings/settings-card";
 import { StorageSettingHelp } from "./storage-setting-help";
+import { storageSettingsTarget } from "@/lib/settings-discovery/catalog/system";
 
 export function PolicySection({
   sectionId,
@@ -22,6 +23,7 @@ export function PolicySection({
     <SettingsCard
       className="min-w-0"
       isDirty={isDirty}
+      discoveryTargetId={storageSettingsTarget(sectionId)}
       data-testid={`storage-policy-section-${sectionId}`}
     >
       <CardHeader>

@@ -39,13 +39,17 @@ test.describe("Agent message comments on mobile", () => {
     seedData,
   }) => {
     test.setTimeout(90_000);
-    const { task, body } = await openSeededAgentReply(
+    const { task, session, body } = await openSeededAgentReply(
       testPage,
       apiClient,
       seedData,
       "Mobile Agent Message Comments",
     );
 
+    // This readiness helper may reload to recover stale startup state. Run it
+    // before opening the transient drawer so recovery cannot dismiss the UI
+    // that the remaining assertions exercise.
+    await session.waitForChatIdle({ timeout: 30_000, requireEditable: true });
     await selectAgentReplyText(body, SELECTED_REPLY_TEXT);
     const commentTrigger = testPage.getByTestId("agent-message-comment-trigger");
     await expect(commentTrigger).toBeVisible();

@@ -583,6 +583,29 @@ echo "$AGENTCTL_PID"
 
 const sshAgentctlLogTailLines = 25
 
+func buildSSHCreateInstanceRequest(req *ExecutorCreateRequest, workspacePath string) agentctl.CreateInstanceRequest {
+	return agentctl.CreateInstanceRequest{
+		ID:            req.InstanceID,
+		WorkspacePath: workspacePath,
+		SessionID:     req.SessionID,
+		TaskID:        req.TaskID,
+		Protocol:      req.Protocol,
+		AgentType:     sshAgentTypeFromReq(req),
+		AutoApprovePermissions: autoApprovePermissionsOverride(
+			req.AutoApprovePermissions,
+			req.AutoApprovePermissionsOverride,
+		),
+		McpServers:          req.McpServers,
+		McpMode:             req.McpMode,
+		McpProviders:        req.McpProviders,
+		RequiresProcessKill: requiresProcessKillFromReq(req),
+		StripEnv:            stripEnvFromReq(req),
+		BaseBranches:        getMetadataStringMap(req.Metadata, MetadataKeyBaseBranches),
+		RemoteContributions: req.RemoteContributions,
+		Env:                 sshRemoteAgentEnv(req),
+	}
+}
+
 // createRemoteAgentInstance creates a per-session agent instance on the
 // remote agentctl control server by POSTing to /api/v1/instances over a
 // direct-tcpip channel through the existing SSH client — no second port
@@ -598,24 +621,7 @@ func createRemoteAgentInstance(
 	authToken string,
 	log *logger.Logger,
 ) (int, error) {
-	body, err := json.Marshal(agentctl.CreateInstanceRequest{
-		ID:            req.InstanceID,
-		WorkspacePath: workspacePath,
-		SessionID:     req.SessionID,
-		TaskID:        req.TaskID,
-		Protocol:      req.Protocol,
-		AgentType:     sshAgentTypeFromReq(req),
-		AutoApprovePermissions: autoApprovePermissionsOverride(
-			req.AutoApprovePermissions,
-			req.AutoApprovePermissionsOverride,
-		),
-		McpServers:          req.McpServers,
-		McpMode:             req.McpMode,
-		RequiresProcessKill: requiresProcessKillFromReq(req),
-		StripEnv:            stripEnvFromReq(req),
-		BaseBranches:        getMetadataStringMap(req.Metadata, MetadataKeyBaseBranches),
-		Env:                 sshRemoteAgentEnv(req),
-	})
+	body, err := json.Marshal(buildSSHCreateInstanceRequest(req, workspacePath))
 	if err != nil {
 		return 0, fmt.Errorf("ssh: marshal create-instance: %w", err)
 	}
@@ -731,6 +737,9 @@ const (
 	envKeyGoogleAPIKey         = "GOOGLE_API_KEY"
 	envKeyGitHubToken          = "GITHUB_TOKEN"
 	envKeyGHToken              = "GH_TOKEN"
+	envKeyGitLabToken          = "GITLAB_TOKEN"
+	envKeyGitLabHost           = "GITLAB_HOST"
+	envKeyKandevGitLabHost     = "KANDEV_GITLAB_HOST"
 )
 
 var sshRemoteAgentCredentialEnvKeys = []string{
@@ -741,6 +750,9 @@ var sshRemoteAgentCredentialEnvKeys = []string{
 	envKeyGoogleAPIKey,
 	envKeyGitHubToken,
 	envKeyGHToken,
+	envKeyGitLabToken,
+	envKeyGitLabHost,
+	envKeyKandevGitLabHost,
 }
 
 // sshRemoteAgentEnv builds the env map sent to the remote agent instance. Each
@@ -765,6 +777,10 @@ func sshRemoteAgentEnv(req *ExecutorCreateRequest) map[string]string {
 	for key, value := range managedGitHubBrokerEnv(req.Env) {
 		env[key] = value
 	}
+	// GitLab workspace credentials use the indexed Git config helper rather
+	// than a GitHub broker lease. Preserve that credential-free routing shape
+	// for the remote agentctl process as well.
+	copyIndexedGitConfig(req.Env, env)
 	if len(env) == 0 {
 		return nil
 	}

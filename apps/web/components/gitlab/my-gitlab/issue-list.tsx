@@ -9,6 +9,7 @@ import type { GitLabLaunchPayload, GitLabTaskPreset } from "./quick-task-launche
 import { StartTaskMenu } from "./start-task-menu";
 import { SubscriptionToggle } from "../subscription-toggle";
 import { RowTitleLink } from "./row-title-link";
+import { useTranslation } from "react-i18next";
 
 type IssueListProps = {
   items: Issue[];
@@ -49,6 +50,7 @@ function IssueRow({
   workspaceId?: string;
   host?: string;
 }) {
+  const { t } = useTranslation();
   const isOpen = issue.state !== "closed";
   const StateIcon = isOpen ? IconCircle : IconCircleCheck;
   const stateClass = isOpen
@@ -69,7 +71,10 @@ function IssueRow({
           </span>
           <span>·</span>
           <span className="whitespace-nowrap">
-            by {issue.author_username} · opened {formatRelativeTime(issue.created_at)}
+            {t("gitlab:byAuthorOpenedAgo", {
+              author: issue.author_username,
+              time: formatRelativeTime(issue.created_at),
+            })}
           </span>
           <IssueLabels labels={issue.labels} />
         </div>
@@ -106,6 +111,7 @@ function IssueListBody({
   workspaceId,
   host,
 }: IssueListProps) {
+  const { t } = useTranslation();
   if (loading) {
     return (
       <div className="flex justify-center py-10">
@@ -119,7 +125,7 @@ function IssueListBody({
   if (items.length === 0) {
     return (
       <div className="text-center py-10 text-muted-foreground text-sm">
-        No issues match this filter.
+        {t("gitlab:noIssuesMatchThisFilter")}
       </div>
     );
   }

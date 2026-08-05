@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { Trans } from "react-i18next";
+import { Trans, useTranslation } from "react-i18next";
 
 import AgentsSettingsPage from "@/app/settings/agents/page";
 import AgentSetupPage from "@/app/settings/agents/[agentId]/page";
@@ -55,7 +55,7 @@ import { UsersTable } from "@/components/settings/system/users-table";
 import { BackupsTable } from "@/components/settings/system/backups-table";
 import { DatabaseStatsCard } from "@/components/settings/system/database-stats-card";
 import { DiskUsageCard } from "@/components/settings/system/disk-usage-card";
-import { FeatureTogglesSettings } from "@/components/settings/system/feature-toggles-settings";
+import { FeatureTogglesRoute } from "@/components/settings/system/feature-toggles-route";
 import { HealthIssuesCard } from "@/components/settings/system/health-issues-card";
 import { LicensesList } from "@/components/settings/system/licenses-list";
 import { LogViewer } from "@/components/settings/system/log-viewer";
@@ -176,22 +176,8 @@ const SETTINGS_ROUTES: Record<string, RouteRenderer> = {
       <UsersTable />
     </SystemRouteShell>
   ),
-  "/settings/account/security": () => (
-    <SystemPageShell
-      title="Profile & password"
-      description="Change your password and review devices signed in to your account."
-    >
-      <SecuritySettings />
-    </SystemPageShell>
-  ),
-  "/settings/account/tokens": () => (
-    <SystemPageShell
-      title="API tokens"
-      description="Personal access tokens for scripts and CLIs acting as you."
-    >
-      <ApiTokens />
-    </SystemPageShell>
-  ),
+  "/settings/account/security": () => <AccountSecurityRoute />,
+  "/settings/account/tokens": () => <AccountTokensRoute />,
   "/settings/system/about": () => (
     <SystemRouteShell titleKey="system:navAbout" descriptionKey="system:aboutPageDescription">
       <AboutCard />
@@ -216,7 +202,7 @@ const SETTINGS_ROUTES: Record<string, RouteRenderer> = {
       titleKey="system:navFeatureToggles"
       descriptionKey="system:featureTogglesPageDescription"
     >
-      <FeatureTogglesSettings initialFlags={[]} restartCapability={null} />
+      <FeatureTogglesRoute />
     </SystemRouteShell>
   ),
   "/settings/system/licenses": () => (
@@ -416,6 +402,32 @@ function renderIntegrationSettingsRoute(section: string | null, workspaceId?: st
     default:
       return null;
   }
+}
+
+// Components rather than inline JSX so `t()` resolves at render — a t() call
+// inside SETTINGS_ROUTES would run at module load and freeze at the boot locale.
+function AccountSecurityRoute() {
+  const { t } = useTranslation();
+  return (
+    <SystemPageShell
+      title={t("account:securityPageTitle")}
+      description={t("account:securityPageDescription")}
+    >
+      <SecuritySettings />
+    </SystemPageShell>
+  );
+}
+
+function AccountTokensRoute() {
+  const { t } = useTranslation();
+  return (
+    <SystemPageShell
+      title={t("account:tokensPageTitle")}
+      description={t("account:tokensPageDescription")}
+    >
+      <ApiTokens />
+    </SystemPageShell>
+  );
 }
 
 function renderUpdatesRoute() {

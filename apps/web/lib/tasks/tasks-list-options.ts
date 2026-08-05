@@ -22,6 +22,25 @@ export type TasksListGroup = (typeof TASKS_LIST_GROUP_OPTIONS)[number]["value"];
 export const DEFAULT_TASKS_LIST_SORT: TasksListSort = "updated_desc";
 export const DEFAULT_TASKS_LIST_GROUP: TasksListGroup = "state";
 
+// i18next key for each option's display label. The `label` fields above stay
+// as plain English fallback/debug values — UI rendering resolves through
+// these keys instead, in `tasks:` catalog.
+export const SORT_OPTION_LABEL_KEYS: Record<TasksListSort, string> = {
+  updated_desc: "tasks:sortUpdatedNewest",
+  updated_asc: "tasks:sortUpdatedOldest",
+  created_desc: "tasks:sortCreatedNewest",
+  created_asc: "tasks:sortCreatedOldest",
+  title_asc: "tasks:sortTitleAZ",
+  title_desc: "tasks:sortTitleZA",
+};
+
+export const GROUP_OPTION_LABEL_KEYS: Record<TasksListGroup, string> = {
+  state: "tasks:groupByState",
+  workflow: "tasks:groupByWorkflow",
+  repository: "tasks:groupByRepository",
+  none: "tasks:groupByNone",
+};
+
 export const TASK_STATE_ORDER: TaskState[] = [
   "CREATED",
   "SCHEDULING",

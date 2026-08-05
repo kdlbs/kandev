@@ -1286,6 +1286,7 @@ func (e *Executor) buildLaunchAgentRequest(ctx context.Context, task *v1.Task, s
 		IsEphemeral:       task.IsEphemeral,
 		IsPassthrough:     session.IsPassthrough,
 		WorkspacePath:     session.WorkspacePath,
+		McpProviders:      deriveMCPProviders(allRepos),
 	}
 
 	execConfig := e.resolveExecutorConfig(ctx, executorID, task.WorkspaceID, metadata)
@@ -1396,6 +1397,7 @@ func buildRepoSpecs(allRepos []*repoInfo) []RepoSpec {
 			BaseBranch:             info.BaseBranch,
 			CheckoutBranch:         info.CheckoutBranch,
 			PRNumber:               info.PRNumber,
+			RemoteContribution:     info.RemoteContribution,
 			WorktreeBranchPrefix:   info.WorktreeBranchPrefix,
 			WorktreeBranchTemplate: info.WorktreeBranchTemplate,
 			PullBeforeWorktree:     info.PullBeforeWorktree,
@@ -1461,6 +1463,7 @@ func (e *Executor) applyRepositoryConfig(req *LaunchAgentRequest, task *v1.Task,
 		req.BaseBranch = repoInfo.BaseBranch
 		req.CheckoutBranch = repoInfo.CheckoutBranch
 		req.PRNumber = repoInfo.PRNumber
+		req.RemoteContribution = repoInfo.RemoteContribution
 		req.WorktreeBranchPrefix = repoInfo.WorktreeBranchPrefix
 		req.WorktreeBranchTemplate = repoInfo.WorktreeBranchTemplate
 		req.PullBeforeWorktree = repoInfo.PullBeforeWorktree
@@ -1477,7 +1480,7 @@ func (e *Executor) applyRepositoryConfig(req *LaunchAgentRequest, task *v1.Task,
 		}
 		// Task directory mode: place worktree inside per-task directory
 		if req.UseWorktree && repoInfo.Repository != nil && repoInfo.Repository.Name != "" {
-			req.TaskDirName = worktree.SemanticWorktreeName(task.Title, worktree.SmallSuffix(3))
+			req.TaskDirName = worktree.SemanticWorktreeName(task.Title, worktree.TaskDirSuffix(task.ID))
 		}
 		if repoInfo.Repository != nil && repoInfo.Repository.SetupScript != "" {
 			if metadata == nil {

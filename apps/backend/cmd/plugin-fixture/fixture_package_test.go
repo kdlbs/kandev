@@ -28,6 +28,7 @@ func TestFixtureManifest_ParsesAndValidates(t *testing.T) {
 	require.Equal(t, "/ui/bundle.js", m.UI.Bundle)
 	require.True(t, m.HasEvent("task.created"))
 	require.True(t, m.Capabilities.State)
+	require.True(t, m.Capabilities.UserState)
 
 	require.Len(t, m.Webhooks, 1)
 	require.Equal(t, "test-hook", m.Webhooks[0].Key)

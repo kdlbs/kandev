@@ -31,7 +31,7 @@ export type AutopickDecision =
   | { kind: "defer"; reason: string }
   | { kind: "pick"; source: "lastId" | "defId" | "first"; id: string };
 
-type AgentProfileAutopickInput = {
+export type AgentProfileAutopickInput = {
   open: boolean;
   agentProfileId: string;
   workflowAgentProfileId: string;

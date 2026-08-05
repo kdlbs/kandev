@@ -161,7 +161,7 @@ function renderPanel(
 ): React.ReactNode {
   if (!mode) return null;
   if (mode.kind === "commit") {
-    return <CommitDiffView sha={mode.sha} repo={mode.repo} onOpenFile={onOpenFile} wordWrap />;
+    return <CommitDiffView target={mode.target} onOpenFile={onOpenFile} wordWrap />;
   }
   const panelMode = mode.kind;
   const filePath = mode.kind === "file" ? mode.path : undefined;

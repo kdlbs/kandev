@@ -36,6 +36,39 @@ type Position = {
   y: number;
 };
 
+function useMentionChangeScheduler() {
+  const versionRef = useRef(0);
+  const frameRef = useRef<number | null>(null);
+
+  const cancelPending = useCallback(() => {
+    if (frameRef.current === null) return;
+    cancelAnimationFrame(frameRef.current);
+    frameRef.current = null;
+  }, []);
+
+  const schedule = useCallback(
+    (callback: () => void) => {
+      const version = ++versionRef.current;
+      cancelPending();
+      frameRef.current = requestAnimationFrame(() => {
+        frameRef.current = null;
+        if (version !== versionRef.current) return;
+        callback();
+      });
+    },
+    [cancelPending],
+  );
+
+  const invalidate = useCallback(() => {
+    versionRef.current += 1;
+    cancelPending();
+  }, [cancelPending]);
+
+  useEffect(() => invalidate, [invalidate]);
+
+  return { schedule, invalidate };
+}
+
 // Debounce delay for file search (ms)
 const FILE_SEARCH_DEBOUNCE = 300;
 
@@ -269,7 +302,8 @@ function useMentionKeyboard({
         case "Tab":
           if (filteredItems.length > 0) {
             event.preventDefault();
-            handleSelect(filteredItems[selectedIndex]);
+            const index = Math.min(selectedIndex, filteredItems.length - 1);
+            handleSelect(filteredItems[index]);
           }
           break;
         case "Escape":
@@ -339,6 +373,8 @@ export function useInlineMention({
   const [triggerStart, setTriggerStart] = useState<number>(-1);
   const [query, setQuery] = useState("");
   const [selectedIndex, setSelectedIndex] = useState(0);
+  const { schedule: scheduleMentionChange, invalidate: invalidateMentionChange } =
+    useMentionChangeScheduler();
 
   const { prompts } = useCustomPrompts();
   const { fileResults, isLoading } = useFileSearch(sessionId, isOpen, query);
@@ -355,7 +391,7 @@ export function useInlineMention({
   /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     setSelectedIndex(0);
-  }, [filteredItems.length]);
+  }, [query, filteredItems.length]);
 
   useEffect(() => {
     if (!isOpen || isLoading) return;
@@ -366,34 +402,35 @@ export function useInlineMention({
   /* eslint-enable react-hooks/set-state-in-effect */
 
   const handleChange = useCallback(
-    (newValue: string) => {
+    (newValue: string, cursorPosition?: number) => {
       onChange(newValue);
       const input = inputRef.current;
       if (!input) return;
-      requestAnimationFrame(() => {
-        const cursorPos = input.getSelectionStart();
-        const trigger = detectMentionTrigger(newValue, cursorPos);
+      const mentionCursorPosition = cursorPosition ?? input.getSelectionStart();
+
+      scheduleMentionChange(() => {
+        const trigger = detectMentionTrigger(newValue, mentionCursorPosition);
         if (trigger) {
           const caretRect = input.getCaretRect();
           if (caretRect) {
             setPosition({ x: caretRect.x, y: caretRect.y });
             setTriggerStart(trigger.triggerStart);
             setQuery(trigger.query);
+            setSelectedIndex(0);
             setIsOpen(true);
             return;
           }
         }
-        if (isOpen) {
-          clearMentionState(setIsOpen, setTriggerStart, setQuery);
-        }
+        clearMentionState(setIsOpen, setTriggerStart, setQuery);
       });
     },
-    [inputRef, isOpen, onChange],
+    [inputRef, onChange, scheduleMentionChange],
   );
 
   const closeMenu = useCallback(() => {
+    invalidateMentionChange();
     clearMentionState(setIsOpen, setTriggerStart, setQuery);
-  }, []);
+  }, [invalidateMentionChange]);
 
   const handleSelect = useCallback(
     (item: MentionItem) => {

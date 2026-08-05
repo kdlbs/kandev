@@ -10,7 +10,7 @@ import {
   type ReactNode,
 } from "react";
 import type { Components } from "react-markdown";
-import { IconWand, IconMessageDots, IconFile } from "@tabler/icons-react";
+import { IconWand, IconMessageDots, IconFile, IconFolder } from "@tabler/icons-react";
 import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
 import type { Message } from "@/lib/types/http";
@@ -158,7 +158,7 @@ type UserMessageMetadata = WorkflowMessageMetadata & {
   plan_mode?: boolean;
   has_review_comments?: boolean;
   has_hidden_prompts?: boolean;
-  context_files?: Array<{ path: string; name: string }>;
+  context_files?: Array<{ path: string; name: string; is_directory?: boolean }>;
   sender_task_id?: string;
   sender_task_title?: string;
   sender_session_id?: string;
@@ -364,7 +364,7 @@ function UserContextBadges({
 }: {
   hasPlanMode: boolean;
   hasReviewComments: boolean;
-  contextFiles: Array<{ path: string; name: string }>;
+  contextFiles: Array<{ path: string; name: string; is_directory?: boolean }>;
   senderTask: SenderTaskInfo | null;
   workflowMessage: WorkflowStepMessageInfo | null;
 }) {
@@ -393,9 +393,16 @@ function UserContextBadges({
       {contextFiles.map((f) => (
         <span
           key={f.path}
+          data-testid="message-context-file"
+          data-path={f.path}
           className="inline-flex items-center gap-1 rounded-full bg-muted/50 px-2 py-0.5 text-[10px] text-muted-foreground"
         >
-          <IconFile size={10} /> {f.name}
+          {f.is_directory ? (
+            <IconFolder data-testid="message-context-directory-icon" size={10} />
+          ) : (
+            <IconFile data-testid="message-context-file-icon" size={10} />
+          )}{" "}
+          {f.name}
         </span>
       ))}
     </div>

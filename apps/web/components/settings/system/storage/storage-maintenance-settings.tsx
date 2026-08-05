@@ -17,6 +17,8 @@ import { StorageOverviewCard } from "./storage-overview-card";
 import { StoragePolicyCard } from "./storage-policy-card";
 import { StorageQuarantineCard } from "./storage-quarantine-card";
 import { StorageRunHistory } from "./storage-run-history";
+import { SettingsTarget } from "../../settings-target";
+import { SYSTEM_SETTINGS_TARGETS } from "@/lib/settings-discovery/catalog/system";
 
 function StorageJobButtonContent({
   job,
@@ -74,7 +76,10 @@ function StorageActions({
   const cleanupActive =
     controller.cleanupJob?.state === "queued" || controller.cleanupJob?.state === "running";
   return (
-    <div className="flex min-w-0 flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+    <SettingsTarget
+      targetId={SYSTEM_SETTINGS_TARGETS.storageActions}
+      className="flex min-w-0 flex-col gap-4 sm:flex-row sm:items-start sm:justify-between"
+    >
       <div className="min-w-0 sm:max-w-xl">
         <p className="text-sm font-medium">{t("system:storageActionsTitle")}</p>
         <p className="text-xs text-muted-foreground">{t("system:storageActionsDescription")}</p>
@@ -122,7 +127,7 @@ function StorageActions({
           </StorageActionButton>
         </div>
       </div>
-    </div>
+    </SettingsTarget>
   );
 }
 

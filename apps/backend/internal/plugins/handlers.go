@@ -63,6 +63,10 @@ func RegisterRoutes(router *gin.Engine, svc *Service, _ Deliverer, log *logger.L
 
 	api.GET("/:id/bundle", ctrl.bundle)
 	api.GET("/:id/ui/*path", ctrl.ui)
+	// Registered before the /:id/webhooks/:key wildcard for the same reason
+	// /settings is registered before /:id above: some gin/httprouter tree
+	// versions reject a static-ish sibling added after an existing wildcard.
+	registerUserStateRoutes(api, ctrl)
 	api.POST("/:id/webhooks/:key", ctrl.webhook)
 	api.GET("/:id/webhooks/:key", ctrl.webhook)
 }

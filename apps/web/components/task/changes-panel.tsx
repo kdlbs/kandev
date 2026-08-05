@@ -7,7 +7,7 @@ import { ChangesPanelHeader } from "./changes-panel-header";
 import { filterUnpushedCommits, mergeCommits } from "./changes-panel-helpers";
 import { useChangesPanelData, buildChangesPanelBodyProps } from "./changes-panel-data";
 import { ChangesPanelBody } from "./changes-panel-body";
-import type { OpenDiffOptions } from "./changes-diff-target";
+import type { CommitDetailTarget, OpenDiffOptions } from "./changes-diff-target";
 import { useRequestChangesWalkthrough } from "@/hooks/domains/session/use-request-changes-walkthrough";
 
 export { filterUnpushedCommits, mergeCommits };
@@ -15,7 +15,7 @@ export { filterUnpushedCommits, mergeCommits };
 type ChangesPanelProps = {
   onOpenDiffFile: (path: string, options?: OpenDiffOptions) => void;
   onEditFile: (path: string, repo?: string) => void;
-  onOpenCommitDetail?: (sha: string, repo?: string) => void;
+  onOpenCommitDetail?: (target: CommitDetailTarget) => void;
   onOpenDiffAll?: () => void;
   onOpenReview?: () => void;
 };

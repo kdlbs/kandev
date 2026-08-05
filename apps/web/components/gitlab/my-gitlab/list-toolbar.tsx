@@ -5,6 +5,7 @@ import { Button } from "@kandev/ui/button";
 import { Input } from "@kandev/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import { cn, formatRelativeTime } from "@/lib/utils";
+import { useTranslation } from "react-i18next";
 
 const ALL_PROJECTS = "__all__";
 
@@ -34,11 +35,12 @@ function RefreshControls({
   onRefresh: () => void;
   showUpdatedPrefix: boolean;
 }) {
+  const { t } = useTranslation();
   return (
     <>
       {lastFetchedAt && !loading && (
         <span className="text-xs text-muted-foreground whitespace-nowrap">
-          {showUpdatedPrefix ? "Updated " : ""}
+          {showUpdatedPrefix ? t("gitlab:updated") : ""}
           {formatRelativeTime(lastFetchedAt.toISOString())}
         </span>
       )}
@@ -48,7 +50,7 @@ function RefreshControls({
         className="h-8 w-8 cursor-pointer"
         onClick={onRefresh}
         disabled={loading}
-        title="Refresh"
+        title={t("gitlab:refresh")}
         data-testid="gitlab-list-toolbar-refresh"
       >
         <IconRefresh className={cn("h-4 w-4", loading && "animate-spin")} />
@@ -71,6 +73,7 @@ export function ListToolbar({
   projectOptions,
   onRefresh,
 }: ListToolbarProps) {
+  const { t } = useTranslation();
   const selectValue = projectFilter || ALL_PROJECTS;
   const dirty = customQuery !== committedQuery;
   return (
@@ -101,11 +104,11 @@ export function ListToolbar({
           className="w-full md:w-[220px] h-8 cursor-pointer"
           data-testid="gitlab-project-filter-trigger"
         >
-          <SelectValue placeholder="All projects" />
+          <SelectValue placeholder={t("gitlab:allProjects")} />
         </SelectTrigger>
         <SelectContent>
           <SelectItem value={ALL_PROJECTS} className="cursor-pointer">
-            All projects
+            {t("gitlab:allProjects")}
           </SelectItem>
           {projectOptions.map((key) => (
             <SelectItem key={key} value={key} className="cursor-pointer">
@@ -127,13 +130,13 @@ export function ListToolbar({
           onBlur={() => {
             if (dirty) onCommitCustomQuery();
           }}
-          placeholder='Custom query — press Enter. e.g. "labels=bug&state=opened"'
+          placeholder={t("gitlab:customQueryPressEnterEG")}
           className="h-8 pr-20"
           data-testid="gitlab-list-toolbar-custom-query"
         />
         {dirty && (
           <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-[10px] uppercase tracking-wider text-muted-foreground hidden sm:inline">
-            Press Enter
+            {t("gitlab:pressEnter")}
           </span>
         )}
       </div>

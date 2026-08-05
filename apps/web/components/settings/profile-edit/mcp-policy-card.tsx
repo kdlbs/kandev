@@ -29,15 +29,18 @@ function McpPresetButton({ label, onClick }: { label: string; onClick: () => voi
   );
 }
 
+// Returns a catalog key (or null when valid) so the message resolves at render
+// rather than at module load — the same contract as the local validator in
+// app/settings/executor/[id]/page.tsx.
 export function validateMcpPolicy(value: string | undefined): string | null {
   const raw = value ?? "";
   if (!raw.trim()) return null;
   try {
     const parsed = JSON.parse(raw);
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed))
-      return "MCP policy must be a JSON object";
+      return "executors:mcpPolicyMustBeAJsonObject";
   } catch {
-    return "Invalid JSON";
+    return "executors:invalidJson";
   }
   return null;
 }
@@ -45,15 +48,17 @@ export function validateMcpPolicy(value: string | undefined): string | null {
 type McpPolicyCardProps = {
   mcpPolicy: string;
   baselinePolicy?: string;
-  mcpPolicyError: string | null;
+  mcpPolicyErrorKey: string | null;
   onPolicyChange: (value: string) => void;
+  discoveryTargetId?: string;
 };
 
 export function McpPolicyCard({
   mcpPolicy,
   baselinePolicy,
-  mcpPolicyError,
+  mcpPolicyErrorKey,
   onPolicyChange,
+  discoveryTargetId,
 }: McpPolicyCardProps) {
   const { t } = useTranslation();
   const isDirty = baselinePolicy !== undefined && mcpPolicy !== baselinePolicy;
@@ -64,7 +69,7 @@ export function McpPolicyCard({
   };
 
   return (
-    <SettingsCard isDirty={isDirty}>
+    <SettingsCard isDirty={isDirty} discoveryTargetId={discoveryTargetId}>
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
           {t("executors:mcpPolicy")}
@@ -84,7 +89,7 @@ export function McpPolicyCard({
           rows={8}
           data-settings-dirty={isDirty}
         />
-        {mcpPolicyError && <p className="text-xs text-destructive">{mcpPolicyError}</p>}
+        {mcpPolicyErrorKey && <p className="text-xs text-destructive">{t(mcpPolicyErrorKey)}</p>}
         <div className="flex flex-wrap items-center gap-2">
           <p className="text-xs font-medium text-muted-foreground">{t("executors:quickPresets")}</p>
           <McpPresetButton

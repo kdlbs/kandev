@@ -158,6 +158,32 @@ const SCREENS: Array<{ name: string; url: string; allow?: string[] }> = [
     ],
   },
   { name: "settings — task actions", url: "/settings/general/task-actions" },
+  { name: "settings — plugins", url: "/settings/plugins" },
+  // NOT YET: "settings — executors", "settings — account security",
+  // "settings — account tokens". All three routes' own copy is fully migrated
+  // and was verified by walking them under pseudo — including every dialog and
+  // both marketplace tabs, since a static page scan never opens a Radix portal.
+  // What stops them being entries here is what the fixture renders BESIDE that
+  // copy, and in each case an `allow` entry would be the wrong fix:
+  //   - `/settings/executors` renders the seeded executor profiles' NAMES, and
+  //     the e2e fixture happens to name them `Local` and `Worktree`. That is
+  //     user data on exactly the footing as the workspace names below, so it
+  //     needs `findUnlocalizedText` to stop treating user data as eligible —
+  //     listing the two values would fix this fixture and leave every developer
+  //     instance broken under different names. The hub cards' own `Docker` and
+  //     `Sprites.dev` labels are brand nouns; they are in the guard's
+  //     `words.exclude` but not in `ALLOWED`, which is a real sync gap in that
+  //     list rather than something this migration should widen it to paper over.
+  //   - Both account routes render `not found` — the router's 404 body, because
+  //     the e2e profile does not register the auth routes, surfaced in the
+  //     sessions/tokens error region. It is a backend diagnostic, English by
+  //     design (docs/i18n.md, "What the backend deliberately does NOT
+  //     translate"), and allowlisting a payload string would hide the next real
+  //     miss in the same region.
+  // The `plugins` entry above has neither problem and passes with no `allow`.
+  // Its marketplace entries — names, descriptions, categories, source names and
+  // index.json URLs — come from the catalog rather than the DOM on load.
+  //
   // NOT YET: "settings — integrations github", "… gitlab", "… jira",
   // "… linear", "… sentry". Each page's
   // own copy is fully migrated (verified by running this oracle against it —

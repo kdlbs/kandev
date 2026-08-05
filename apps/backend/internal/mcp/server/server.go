@@ -14,6 +14,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/logger"
+	mcpproviders "github.com/kandev/kandev/internal/mcp/providers"
 	"github.com/kandev/kandev/internal/task/service"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"github.com/mark3labs/mcp-go/mcp"
@@ -92,6 +93,7 @@ type Server struct {
 	taskID             string
 	disableAskQuestion bool
 	mode               string // "task" (default), "task-title-pending", "config", or "office"
+	mcpProviders       []string
 	mcpServer          *server.MCPServer
 	sseServer          *server.SSEServer
 	httpServer         *server.StreamableHTTPServer
@@ -110,8 +112,12 @@ type Server struct {
 // New creates a new MCP server for agentctl.
 // port is the HTTP server port used to build the SSE base URL (http://localhost:<port>).
 // mcpLogFile is an optional file path for MCP debug logging; pass "" to disable.
-func New(backend BackendClient, sessionID, taskID string, port int, log *logger.Logger, mcpLogFile string, disableAskQuestion bool, mcpMode string) *Server {
-	s := newServer(backend, sessionID, taskID, log, mcpLogFile, disableAskQuestion, mcpMode)
+func New(backend BackendClient, sessionID, taskID string, port int, log *logger.Logger, mcpLogFile string, disableAskQuestion bool, mcpMode string, mcpProviders ...[]string) *Server {
+	var providers []string
+	if len(mcpProviders) > 0 {
+		providers = mcpProviders[0]
+	}
+	s := newServer(backend, sessionID, taskID, log, mcpLogFile, disableAskQuestion, mcpMode, providers)
 
 	// Create SSE server for Claude Desktop, Cursor, etc.
 	// WithBaseURL ensures the SSE endpoint event includes the full message URL
@@ -133,7 +139,7 @@ func New(backend BackendClient, sessionID, taskID string, port int, log *logger.
 // configuration and create tasks. Routes are mounted under /mcp on the backend.
 func NewExternal(backend BackendClient, log *logger.Logger, mcpLogFile string) *Server {
 	// External mode has no live session, so disable ask-question and use empty IDs.
-	s := newServer(backend, "", "", log, mcpLogFile, true, ModeExternal)
+	s := newServer(backend, "", "", log, mcpLogFile, true, ModeExternal, nil)
 
 	// SSE handlers are mounted at /mcp/sse and /mcp/message — the static base path
 	// makes the SSE endpoint event emit /mcp/message. Keeping the message endpoint
@@ -155,7 +161,7 @@ func NewExternal(backend BackendClient, log *logger.Logger, mcpLogFile string) *
 // newServer builds the shared parts of a Server (logger, mcp-go server, tools).
 // Callers are responsible for constructing sseServer and httpServer with the
 // transport configuration appropriate for their hosting environment.
-func newServer(backend BackendClient, sessionID, taskID string, log *logger.Logger, mcpLogFile string, disableAskQuestion bool, mcpMode string) *Server {
+func newServer(backend BackendClient, sessionID, taskID string, log *logger.Logger, mcpLogFile string, disableAskQuestion bool, mcpMode string, mcpProviders []string) *Server {
 	mcpMode = normalizeMode(mcpMode)
 	s := &Server{
 		backend:            backend,
@@ -163,6 +169,7 @@ func newServer(backend BackendClient, sessionID, taskID string, log *logger.Logg
 		taskID:             taskID,
 		disableAskQuestion: disableAskQuestion,
 		mode:               mcpMode,
+		mcpProviders:       mcpproviders.Normalize(mcpProviders),
 		logger:             log.WithFields(zap.String("component", "mcp-server")),
 		attachmentAttempts: make(map[string]streams.MCPAttachmentAttempt),
 	}
@@ -427,10 +434,65 @@ func (s *Server) SetMode(mode string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	s.mode = normalizeMode(mode)
-	// Clear all existing tools and re-register for the new mode.
-	s.mcpServer.SetTools() // empty call clears all tools
+	normalizedMode := normalizeMode(mode)
+	if s.mode == normalizedMode {
+		return
+	}
+	s.mode = normalizedMode
+	s.rebuildTools()
+}
+
+// SetProviders replaces the provider capabilities advertised by task mode.
+// The MCP mode itself is preserved while the effective tool registry is rebuilt.
+func (s *Server) SetProviders(providerValues []string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	normalizedProviders := mcpproviders.Normalize(providerValues)
+	if sameProviderSet(s.mcpProviders, normalizedProviders) {
+		return
+	}
+	s.mcpProviders = normalizedProviders
+	s.rebuildTools()
+}
+
+func (s *Server) rebuildTools() {
+	// Build against an isolated registry so the live server remains unchanged
+	// until the complete replacement is ready. mcp-go emits one notification
+	// for SetTools, while registering directly would expose every intermediate
+	// AddTool state to initialized clients.
+	s.mcpServer.SetTools(s.assembleTools()...)
+}
+
+func sameProviderSet(left, right []string) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for i := range left {
+		if left[i] != right[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func (s *Server) assembleTools() []server.ServerTool {
+	activeServer := s.mcpServer
+	assemblyServer := server.NewMCPServer(
+		"kandev-mcp",
+		"1.0.0",
+		server.WithToolCapabilities(true),
+	)
+	s.mcpServer = assemblyServer
+	defer func() { s.mcpServer = activeServer }()
+
 	s.registerTools()
+	registered := assemblyServer.ListTools()
+	tools := make([]server.ServerTool, 0, len(registered))
+	for _, entry := range registered {
+		tools = append(tools, *entry)
+	}
+	return tools
 }
 
 // registerTools registers MCP tools based on the server mode.
@@ -493,7 +555,15 @@ func (s *Server) registerTools() {
 		// a sibling to message_task_kandev) but NOT the task-document
 		// tools — those are office coordination plumbing.
 		s.registerKanbanTools()
-		count += 17
+		count += 15
+		if mcpproviders.Contains(s.mcpProviders, mcpproviders.GitHub) {
+			s.registerPRAutomationTools()
+			count += 2
+		}
+		if mcpproviders.Contains(s.mcpProviders, mcpproviders.GitLab) {
+			s.registerMRAutomationTools()
+			count += 2
+		}
 		if !s.disableAskQuestion {
 			s.registerInteractionTools()
 			count++
@@ -685,6 +755,9 @@ If the child has no live execution, the call succeeds idempotently with status="
 		),
 		s.wrapHandler("get_task_conversation_kandev", s.getTaskConversationHandler()),
 	)
+}
+
+func (s *Server) registerPRAutomationTools() {
 	s.mcpServer.AddTool(
 		mcp.NewToolWithRawSchema("get_task_pr_automation_kandev",
 			"Get the current task's GitHub PR automation settings, including lifecycle notification switches.",
@@ -703,6 +776,25 @@ If the child has no live execution, the call succeeds idempotently with status="
 			mcp.WithBoolean("prompt_on_closed", mcp.Description("Prompt this task's agent once when the linked PR becomes closed without merge")),
 		),
 		s.wrapHandler("update_task_pr_automation_kandev", s.updateTaskPRAutomationHandler()),
+	)
+}
+
+func (s *Server) registerMRAutomationTools() {
+	s.mcpServer.AddTool(
+		mcp.NewToolWithRawSchema("get_task_mr_automation_kandev",
+			"Get the current task's GitLab MR automation settings, including lifecycle notification switches.",
+			json.RawMessage(`{"type":"object","properties":{}}`),
+		),
+		s.wrapHandler("get_task_mr_automation_kandev", s.getTaskMRAutomationHandler()),
+	)
+	s.mcpServer.AddTool(
+		mcp.NewTool("update_task_mr_automation_kandev",
+			mcp.WithDescription("Update this task's GitLab merge request lifecycle notification switches."),
+			mcp.WithBoolean("prompt_on_review_requested", mcp.Description("Prompt this task's agent when a review is requested for the authenticated user")),
+			mcp.WithBoolean("prompt_on_merged", mcp.Description("Prompt this task's agent once when the linked MR becomes merged")),
+			mcp.WithBoolean("prompt_on_closed", mcp.Description("Prompt this task's agent once when the linked MR becomes closed without merge")),
+		),
+		s.wrapHandler("update_task_mr_automation_kandev", s.updateTaskMRAutomationHandler()),
 	)
 }
 
@@ -772,7 +864,7 @@ IMPORTANT:
 			mcp.WithBoolean("start_agent", mcp.Description("Whether to auto-start an agent on the created task. Default: true — leave it true unless you specifically want a placeholder task with no agent running. Setting false leaves the task waiting for the user to click 'Start agent' in the UI; the prompt is preserved but no work happens automatically.")),
 			mcp.WithString("repository_id", mcp.Description("Repository ID. Required for top-level tasks unless local_path or repository_url is provided. For subtasks: optional — supply only when the subtask should target a different repo than the parent.")),
 			mcp.WithString("local_path", mcp.Description("Local repository folder path (e.g. '/Users/me/projects/myrepo'). Will create/find the repository automatically. Preferred for local worktree flow. For subtasks: supply only when the subtask should target a different repo than the parent.")),
-			mcp.WithString("repository_url", mcp.Description("GitHub repository URL (e.g. 'https://github.com/owner/repo'). The repository will be cloned automatically on first use. For subtasks: supply only when the subtask should target a different repo than the parent.")),
+			mcp.WithString("repository_url", mcp.Description("Repository URL, GitHub pull request URL, or GitLab merge request URL (for example 'https://github.com/owner/repo'). A contribution URL attaches the task to that existing contribution and prepares its source branch. For subtasks: supply only when the subtask should target a different repo than the parent.")),
 			mcp.WithString("base_branch", mcp.Description("Base branch for the repository (e.g. 'main'). Optional. Defaults: same-repo subtasks inherit the parent's base_branch; cross-repo subtasks and top-level tasks fall back to the repository's default_branch (visible via list_repositories_kandev).")),
 		),
 		s.wrapHandler("create_task_kandev", s.createTaskHandler()),
@@ -1029,7 +1121,10 @@ the prompt; call this tool even when that provisional title looks usable.
 
 Use a concise title targeting about 6 words.
 Write a short title phrase, not a sentence or a progress update. Your title should
-summarize the requested outcome and will replace the provisional title. Use sentence case:
+summarize the requested outcome and will replace the provisional title. For tasks created
+without a title, Kandev also uses this final title when naming Kandev-generated branches;
+branches checked out from a remote link (such as a GitHub PR) and local-executor branches
+are intentionally preserved. Use sentence case:
 capitalize only the first word and proper nouns (for example, "Improve task title casing", not
 "Improve Task Title Casing").`),
 			mcp.WithString(titleArg, mcp.Required(), mcp.Description("Short sentence-case task title targeting about 6 words.")),

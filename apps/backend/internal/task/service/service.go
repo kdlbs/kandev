@@ -280,6 +280,8 @@ type Service struct {
 	baseBranchPusher            AgentBaseBranchPusher
 	runtimeOverridesMu          sync.Mutex
 
+	workspaceSourceProviderRefresher WorkspaceSourceProviderRefresher
+
 	workspaceDefaultsInitializer WorkspaceDefaultsInitializer
 	// foregroundActivity resolves the live fine-grained busy substate of a RUNNING
 	// session (satisfied by the orchestrator). Used to compute the task-level
@@ -382,6 +384,12 @@ func (s *Service) SetBranchMaterializer(m BranchMaterializer) {
 
 func (s *Service) SetWorkspaceSourceMaterializer(m WorkspaceSourceMaterializer) {
 	s.workspaceSourceMaterializer = m
+}
+
+// SetWorkspaceSourceProviderRefresher wires the best-effort live MCP provider
+// reconciliation used after workspace-source and legacy branch attachments.
+func (s *Service) SetWorkspaceSourceProviderRefresher(r WorkspaceSourceProviderRefresher) {
+	s.workspaceSourceProviderRefresher = r
 }
 
 // SetAgentBaseBranchPusher wires the live-update push for

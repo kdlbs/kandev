@@ -119,8 +119,8 @@ func (m *Manager) Start(ctx context.Context) error {
 	if standaloneRT, err := m.executorRegistry.GetBackend(executor.NameStandalone); err == nil {
 		if interactiveRunner := standaloneRT.GetInteractiveRunner(); interactiveRunner != nil {
 			// Turn complete callback
-			interactiveRunner.SetTurnCompleteCallback(func(sessionID string) {
-				m.handlePassthroughTurnComplete(sessionID)
+			interactiveRunner.SetTurnCompleteCallback(func(sessionID, processID string) {
+				m.handlePassthroughTurnComplete(sessionID, processID)
 			})
 
 			// Output callback for standalone passthrough (no WorkspaceTracker)

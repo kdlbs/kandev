@@ -92,34 +92,109 @@ Output the plan as a numbered list. Be specific about file paths, function names
 STEP 1: Determine what to review
 - First, check if there are any uncommitted changes (dirty working directory)
 - If there are uncommitted/staged changes: review those files
-- If the working directory is clean: review the commits that have diverged from the master/main branch
+- If the working directory is clean: review ONLY the commits from this branch
+  - Run: git remote show origin | grep 'HEAD branch' to find the default branch name
+  - Set BASE_REF to origin/<default-branch> using the reported branch
+  - Use: git log --oneline $(git merge-base "$BASE_REF" HEAD)..HEAD to list the branch commits
+  - Use: git diff $(git merge-base "$BASE_REF" HEAD) to see the cumulative changes
+  - Do NOT diff directly against BASE_REF or origin/main/master - that would include unrelated changes if the branch is outdated
+- Read each changed file in full — understand surrounding code, not just the diff
+- Navigate callers, interfaces, and tests to understand changes end-to-end
+- Check git blame on modified sections to understand why code was written a certain way
+- Only REPORT issues on code modified in this changeset, but USE the full codebase for context
 
-STEP 2: Review the changes, then output your findings in EXACTLY 4 sections: BUG, IMPROVEMENT, NITPICK, PERFORMANCE.
+If a code review skill is available (e.g. /code-review, /review), invoke it instead of using the fallback below.
 
-Rules:
-- Each section is OPTIONAL — only include it if you have findings for that category
-- If a section has no findings, omit it entirely
-- Format each finding as: filename:line_number - Description
-- Be specific and reference exact line numbers
-- Keep descriptions concise but actionable
-- Sort findings by severity within each section
-- Focus on logic and design issues, NOT formatting or style that automated tools handle
+STEP 2: Review the changes across these layers (skip layers that don't apply):
 
-Section definitions:
+ARCHITECTURAL FIT (highest priority):
 
-BUG: Critical issues that will cause runtime errors, crashes, incorrect behavior, data corruption, or logic errors
-- Examples: null/nil dereference, race conditions, incorrect algorithms, type mismatches, resource leaks, deadlocks
+- Changes belong in the correct layer/module and follow the dependency direction used by the codebase
+- Business/domain logic is not placed in controllers, transport handlers, repositories, data sources, or infrastructure code
+- Controllers handle protocol concerns, use cases orchestrate workflows, repositories define persistence needs, and data sources handle external systems
+- Domain/application code does not depend on frameworks, transport models, database models, or vendor-specific types
+- Changes do not bypass existing boundaries, duplicate responsibilities, or introduce unnecessary coupling between modules or domains
+- New interfaces and abstractions have clear ownership and represent a meaningful boundary, rather than wrapping a single implementation
+- Compare with neighbouring features and established patterns, but flag deviations only when they create a real architectural or maintainability problem
+- Treat fundamental architectural misplacement or broken dependency direction as a blocker
 
-IMPROVEMENT: Code quality, architecture, security, or maintainability concerns
-- Examples: missing error handling, incorrect access modifiers, SQL injection vulnerabilities, hardcoded credentials, tight coupling, missing validation
+DATA & STATE MODELLING:
 
-NITPICK: Significant readability or maintainability issues that impact code understanding
-- Examples: misleading variable/function names, overly complex logic that should be refactored, missing critical comments for complex algorithms
-- EXCLUDE: formatting, whitespace, import ordering, trivial naming preferences, style issues handled by linters/formatters
+- Domain entities, value objects, DTOs, persistence models, and external API models remain separate where their responsibilities differ
+- State transitions and invariants are explicit and cannot create invalid or partially updated state
+- There is a single clear source of truth; state or business rules are not duplicated across layers
+- Nullability, optional fields, defaults, and invalid combinations are modelled deliberately
+- Persistence schemas or transport types are not leaking implementation details into domain/application contracts
+- Concurrency, retries, partial failures, and duplicate requests cannot corrupt state or apply transitions more than once
+- Backward compatibility, migrations, and mixed-version behaviour are considered when contracts or persisted data change
 
-PERFORMANCE: Algorithmic or resource usage problems with measurable impact
-- Examples: O(n²) where O(n) or O(1) is possible, unnecessary allocations in loops, missing indexes for database queries, blocking I/O in hot paths
-- Concurrency-specific: unprotected shared state, missing synchronization, goroutine leaks, missing context cancellation
+SECURITY (blockers if found):
+
+- No secrets, tokens, or credentials in code
+- Input validation at system boundaries (user input, API handlers, external data)
+- No SQL injection, XSS, command injection, or path traversal
+- Auth and authorization checks on new endpoints
+- No insecure crypto (MD5/SHA1 for passwords, weak random)
+
+LOGIC & CORRECTNESS:
+
+- Edge cases handled (empty input, nil/null, zero, max values)
+- Error paths covered and not silently swallowed
+- Race conditions or concurrency issues (unprotected shared state, missing synchronization, goroutine leaks)
+- Broken invariants — state that can become invalid
+
+PERFORMANCE:
+
+- No N+1 queries (loop with individual DB calls)
+- No memory leaks (unclosed connections, streams, listeners)
+- Algorithm complexity appropriate for data scale (O(n^2) where O(n) is possible)
+- Unnecessary allocations in loops, regex compilation in hot paths, unbounded resource growth
+- Prefer structured concurrency (errgroup, conc) over raw primitives
+
+CODE QUALITY:
+
+- No dead code, unused imports, or commented-out code
+- Check for orphaned code: if the change refactored or removed callers, grep for functions/types/exports that lost their last consumer
+- No speculative code (unused flags, one-off abstractions with single call site)
+- No duplicated logic — extract shared helpers or constants
+- Deep nesting (>3 levels) — use early returns
+
+AI SLOP DETECTION:
+
+- Comments that restate code or narrate obvious steps
+- Unnecessary try/catch that swallow errors or return silent defaults
+- as any / as unknown casts to dodge type errors instead of fixing types
+- Redundant validation where inputs are already parsed/typed
+- Defensive checks abnormal for the area — compare with surrounding code patterns
+
+STEP 3: Output your findings.
+
+Every finding needs: file:line, what's wrong, why it matters, and how to fix it.
+Only report findings you're >=80% confident about.
+
+Use these sections (omit empty ones):
+
+## BLOCKER
+Must fix before merge — architectural violations, security holes, data loss risk, broken logic, crashes.
+
+- file:line - Description. Why it matters. How to fix.
+
+## SUGGESTION
+Recommended but doesn't block — architecture, performance, maintainability, or specific missing tests.
+
+- file:line - Description. Why it matters. How to fix.
+
+End with a verdict: Ready to merge / Ready with suggestions / Blocked — fix blockers first
+
+NOT A FINDING (skip these):
+
+- Issues on lines or files the change didn't modify — even if they are real bugs
+- Pre-existing code patterns that this change didn't introduce
+- Things linters, typecheckers, or CI catch (imports, types, formatting)
+- Intentional functionality changes directly related to the task
+- Issues explicitly suppressed in code (lint-ignore, nolint comments)
+- Pedantic nitpicks a senior engineer wouldn't flag
+- General "add more tests" without specifying what logic is untested
 
 Now review the changes.`,
   },

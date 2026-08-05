@@ -53,6 +53,7 @@ import (
 	"github.com/kandev/kandev/internal/improvekandev"
 	"github.com/kandev/kandev/internal/jira"
 	"github.com/kandev/kandev/internal/linear"
+	lspinstaller "github.com/kandev/kandev/internal/lsp/installer"
 	mcphandlers "github.com/kandev/kandev/internal/mcp/handlers"
 	mcpscope "github.com/kandev/kandev/internal/mcp/scope"
 	mcpserver "github.com/kandev/kandev/internal/mcp/server"
@@ -772,9 +773,10 @@ func webAppHandlerOptions(p routeParams) []webapp.HandlerOption {
 // client can activate the right catalog before first paint.
 func webRuntimeConfig(debug bool, req *http.Request) webapp.RuntimeConfig {
 	return webapp.RuntimeConfig{
-		APIPrefix:     "/api/v1",
-		WebSocketPath: "/ws",
-		Debug:         debug,
+		APIPrefix:                         "/api/v1",
+		WebSocketPath:                     "/ws",
+		LSPAutoInstallPreferenceLanguages: lspinstaller.AutoInstallPreferenceLanguages(),
+		Debug:                             debug,
 		// Gates QA-only UI (the pseudo-locale option). Separate from Debug: the
 		// e2e harness serves a PRODUCTION bundle, so the frontend cannot infer
 		// this from its own build mode.
@@ -1480,11 +1482,13 @@ func registerMCPAndDebugRoutes(
 		p.taskSvc, wfCtrl,
 		clarificationStore, clarificationCanceller, p.msgCreator, p.taskRepo, p.taskRepo, p.eventBus, planService, walkthroughService, p.orchestratorSvc, p.orchestratorSvc.GetMessageQueue(), p.log,
 	)
+	mcpHandlers.SetRemoteContributionService(newRemoteContributionCoordinator(p.services.GitHub, p.services.GitLab))
 	// Wire config-mode dependencies for agent-native configuration
 	mcpHandlers.SetConfigDeps(p.services.Workflow, p.agentSettingsController, p.mcpConfigSvc)
 	mcpHandlers.SetClarificationInputPauser(p.orchestratorSvc)
 	mcpHandlers.SetPromptReferenceResolver(p.services.Prompts)
 	mcpHandlers.SetTaskStopper(p.orchestratorSvc)
+	mcpHandlers.SetTaskTitleBranchRenamer(p.orchestratorSvc)
 	mcpHandlers.SetUserSettingsProvider(p.services.User)
 	if p.systemSvc != nil && p.systemSvc.LogBundles != nil {
 		mcpHandlers.SetDiagnosticBundleServices(p.systemSvc.LogBundles, p.lifecycleMgr)
@@ -1495,6 +1499,9 @@ func registerMCPAndDebugRoutes(
 	if p.services.GitHub != nil {
 		mcpHandlers.SetTaskPRLister(mcpTaskPRListerAdapter{gh: p.services.GitHub})
 		mcpHandlers.SetTaskPRAutomationService(p.services.GitHub)
+	}
+	if p.services.GitLab != nil {
+		mcpHandlers.SetTaskMRAutomationService(p.services.GitLab)
 	}
 
 	// Reuse the cross-task handoff service constructed in registerRoutes —

@@ -13,6 +13,7 @@ import { calculateHash, generateUnifiedDiff } from "@/lib/utils/file-diff";
 import { requestFileContent, updateFileContent, deleteFile } from "@/lib/ws/workspace-files";
 import { useToast } from "@/components/toast-provider";
 import { getFileTabKey } from "./task-center-panel-file-tabs";
+import { lspClientManager } from "@/lib/lsp/lsp-client-manager";
 
 export type FileTabRestorationOptions = {
   activeSessionId: string | null;
@@ -174,6 +175,24 @@ export function useFileTabRestoration({
   return { restorationInProgressRef };
 }
 
+function updateTabsAfterSave(
+  tabs: OpenFileTab[],
+  fileKey: string,
+  persistedContent: string,
+  originalHash: string,
+): OpenFileTab[] {
+  return tabs.map((tab) =>
+    getFileTabKey(tab) === fileKey
+      ? {
+          ...tab,
+          originalContent: persistedContent,
+          originalHash,
+          isDirty: tab.content !== persistedContent,
+        }
+      : tab,
+  );
+}
+
 export function useFileSaveDelete({
   activeSessionId,
   openFileTabs,
@@ -182,11 +201,13 @@ export function useFileSaveDelete({
   handleCloseFileTab,
 }: FileSaveDeleteOptions) {
   const { toast } = useToast();
+  const openFileTabsRef = useRef(openFileTabs);
+  openFileTabsRef.current = openFileTabs;
 
   const handleFileSave = useCallback(
     async (path: string, repo?: string) => {
       const fileKey = getFileTabKey({ path, repo });
-      const tab = openFileTabs.find((item) => getFileTabKey(item) === fileKey);
+      const tab = openFileTabsRef.current.find((item) => getFileTabKey(item) === fileKey);
       if (!tab || !tab.isDirty) return;
       const client = getWebSocketClient();
       if (!client || !activeSessionId) return;
@@ -201,17 +222,16 @@ export function useFileSaveDelete({
           repo: tab.repo,
         });
         if (response.success && response.new_hash) {
+          const current = openFileTabsRef.current.find((item) => getFileTabKey(item) === fileKey);
+          lspClientManager.saveDocument(
+            activeSessionId,
+            path,
+            tab.repo,
+            tab.content,
+            current?.content ?? tab.content,
+          );
           setOpenFileTabs((prev) =>
-            prev.map((t) =>
-              getFileTabKey(t) === fileKey
-                ? {
-                    ...t,
-                    originalContent: t.content,
-                    originalHash: response.new_hash!,
-                    isDirty: false,
-                  }
-                : t,
-            ),
+            updateTabsAfterSave(prev, fileKey, tab.content, response.new_hash!),
           );
         } else {
           toast({
@@ -235,7 +255,7 @@ export function useFileSaveDelete({
         });
       }
     },
-    [openFileTabs, activeSessionId, toast, setOpenFileTabs, setSavingFiles],
+    [activeSessionId, toast, setOpenFileTabs, setSavingFiles],
   );
 
   const handleFileDelete = useCallback(

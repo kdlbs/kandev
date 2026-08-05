@@ -2,9 +2,8 @@
 import { IconSettings } from "@tabler/icons-react";
 import { useTranslation } from "react-i18next";
 import { useGeneralNavItems } from "@/components/settings/general-nav";
+import { GENERAL_SETTINGS_HREF } from "@/lib/settings-discovery/catalog/general";
 import { SettingsGroup, SettingsLeaf } from "./settings-nav-primitives";
-
-const GENERAL_HREF = "/settings/general";
 
 type GeneralGroupProps = {
   pathname: string;
@@ -19,8 +18,8 @@ export function GeneralGroup({ pathname, expanded, onToggle }: GeneralGroupProps
     <SettingsGroup
       label={t("settings:general")}
       icon={IconSettings}
-      href={GENERAL_HREF}
-      isActive={pathname === GENERAL_HREF}
+      href={GENERAL_SETTINGS_HREF}
+      isActive={pathname === GENERAL_SETTINGS_HREF}
       expanded={expanded}
       onToggle={onToggle}
     >

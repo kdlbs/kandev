@@ -137,6 +137,34 @@ describe("pluginRegistry — lifecycle", () => {
     cleanup("plugin-a", "plugin-b");
   });
 
+  it("tracks host lifecycle snapshots without extending the plugin-facing registry", () => {
+    pluginRegistry.markPluginLoading("plugin-a", 3);
+
+    expect(pluginRegistry.getPluginLifecycle("plugin-a")).toEqual({
+      status: "loading",
+      generation: 3,
+    });
+    expect("markPluginLoading" in pluginRegistry.forPlugin("plugin-a")).toBe(false);
+
+    pluginRegistry.markPluginReady("plugin-a", 3);
+
+    expect(pluginRegistry.getPluginLifecycle("plugin-a")).toEqual({
+      status: "ready",
+      generation: 3,
+    });
+  });
+
+  it("does not let an older generation overwrite the current lifecycle", () => {
+    pluginRegistry.markPluginLoading("plugin-a", 4);
+    pluginRegistry.markPluginReady("plugin-a", 3);
+    pluginRegistry.markPluginFailed("plugin-a", 3);
+
+    expect(pluginRegistry.getPluginLifecycle("plugin-a")).toEqual({
+      status: "loading",
+      generation: 4,
+    });
+  });
+
   it("registers a WS handler and only returns it for the matching action", () => {
     const scoped = pluginRegistry.forPlugin("plugin-a");
     const handler = () => {};
@@ -196,6 +224,66 @@ describe("pluginRegistry — lifecycle", () => {
 
     unsubscribe();
     expect(notified).toBe(0);
+  });
+});
+
+describe("pluginRegistry — task panels and task menu actions", () => {
+  afterEach(() => {
+    cleanup("plugin-a", "plugin-b");
+  });
+
+  it("registers a task panel and returns it with its owning pluginId", () => {
+    const scoped = pluginRegistry.forPlugin("plugin-a");
+    function Notes() {
+      return null;
+    }
+
+    scoped.registerTaskPanel({ id: "notes", title: "Notes", icon: "file-text", Component: Notes });
+
+    expect(pluginRegistry.getTaskPanels()).toEqual([
+      { pluginId: "plugin-a", id: "notes", title: "Notes", icon: "file-text", Component: Notes },
+    ]);
+    expect(pluginRegistry.getTaskPanel("plugin-a", "notes")).toMatchObject({
+      pluginId: "plugin-a",
+      id: "notes",
+    });
+    expect(pluginRegistry.getTaskPanel("plugin-a", "missing")).toBeUndefined();
+  });
+
+  it("registers a task menu action and filters by group", () => {
+    const scoped = pluginRegistry.forPlugin("plugin-a");
+    const run = vi.fn();
+
+    scoped.registerTaskMenuAction({ id: "enhance", label: "Enhance", group: "edit", run });
+
+    expect(pluginRegistry.getTaskMenuActions("edit")).toEqual([
+      { pluginId: "plugin-a", id: "enhance", label: "Enhance", group: "edit", run },
+    ]);
+    expect(pluginRegistry.getTaskMenuActions()).toHaveLength(1);
+  });
+
+  it("bulk-revokes task panels and task menu actions on unregisterPlugin", () => {
+    const scopedA = pluginRegistry.forPlugin("plugin-a");
+    const scopedB = pluginRegistry.forPlugin("plugin-b");
+    function Notes() {
+      return null;
+    }
+
+    scopedA.registerTaskPanel({ id: "notes", title: "Notes", Component: Notes });
+    scopedA.registerTaskMenuAction({
+      id: "enhance",
+      label: "Enhance",
+      group: "edit",
+      run: () => {},
+    });
+    scopedB.registerTaskPanel({ id: "notes", title: "Notes", Component: Notes });
+
+    pluginRegistry.unregisterPlugin("plugin-a");
+
+    expect(pluginRegistry.getTaskPanels()).toEqual([
+      { pluginId: "plugin-b", id: "notes", title: "Notes", icon: undefined, Component: Notes },
+    ]);
+    expect(pluginRegistry.getTaskMenuActions()).toEqual([]);
   });
 });
 

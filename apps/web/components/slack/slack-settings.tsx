@@ -36,6 +36,7 @@ import {
   useSlackSettings,
   type FormState,
 } from "./slack-settings-state";
+import { INTEGRATION_SETTINGS_TARGETS } from "@/lib/settings-discovery/catalog/integrations";
 
 type SecretFieldsProps = {
   form: FormState;
@@ -396,6 +397,7 @@ export function SlackConnectionSection({ workspaceId }: { workspaceId: string })
 
   return (
     <SettingsSection
+      discoveryTargetId={INTEGRATION_SETTINGS_TARGETS.slack}
       icon={<IconBrandSlack className="h-5 w-5" />}
       title={t("slack:integrationTitle")}
       description={t("slack:integrationDescription", { example: DEFAULT_PREFIX_EXAMPLE })}

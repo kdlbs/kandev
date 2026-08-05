@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"strings"
 	"testing"
 	"time"
@@ -16,7 +15,7 @@ import (
 )
 
 func TestHandleVscodeStart_Success(t *testing.T) {
-	s := newTestServer(t)
+	s := prepareVscodeTestServer(t)
 
 	body, _ := json.Marshal(VscodeStartRequest{Theme: "dark"})
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/vscode/start", bytes.NewReader(body))
@@ -36,9 +35,8 @@ func TestHandleVscodeStart_Success(t *testing.T) {
 	if !resp.Success {
 		t.Errorf("expected success=true, got false (error: %s)", resp.Error)
 	}
-	// Status should be "installing" since start is non-blocking
-	if resp.Status != "installing" {
-		t.Errorf("expected status=installing, got %q", resp.Status)
+	if resp.Status != string(process.VscodeStatusInstalling) && resp.Status != string(process.VscodeStatusStarting) && resp.Status != string(process.VscodeStatusRunning) {
+		t.Errorf("expected installing/starting/running, got %q", resp.Status)
 	}
 }
 
@@ -150,41 +148,10 @@ func TestHandleVscodeOpenFile_InvalidBody(t *testing.T) {
 }
 
 func TestHandleVscodeOpenFile_NotRunning_AutoStartAttempted(t *testing.T) {
-	// Isolate HOME so ResolveBinary won't find a real code-server install,
-	// AND so the auto-install goroutine writes into a path that survives
-	// the test's lifetime. We deliberately don't use t.TempDir for HOME:
-	// StartVscode races a background tarball extract that, on fast CI
-	// runners, keeps writing files for minutes after the assertions run.
-	// t.TempDir's RemoveAll cleanup would race with that and fail the test.
-	// Allocate outside any t.TempDir hierarchy so Go's testing-framework
-	// cleanup never touches it.
-	homeDir, err := os.MkdirTemp(os.TempDir(), "kandev-vscode-home-*")
-	if err != nil {
-		t.Fatalf("mktemp home: %v", err)
-	}
-	t.Setenv("HOME", homeDir)
-	// Use isolated TMPDIR so the IPC socket search finds no sockets.
-	// Done after homeDir so the install dir doesn't end up nested inside it.
-	t.Setenv("TMPDIR", t.TempDir())
-
-	s := newTestServer(t)
-
-	// Cancel the in-flight install goroutine on test exit, then best-effort
-	// remove the home dir. Ignore errors — OS temp gets pruned anyway.
-	t.Cleanup(func() {
-		stopCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		_ = s.procMgr.StopVscode(stopCtx)
-		_ = os.RemoveAll(homeDir)
-	})
+	s := prepareVscodeTestServer(t)
 
 	body, _ := json.Marshal(types.VscodeOpenFileRequest{Path: "main.go", Line: 10, Col: 5})
-	// Short context: StartVscode flips status to "installing" synchronously
-	// before kicking off the background tarball install; WaitForRunning then
-	// blocks until the install finishes or ctx fires. On runners with fast
-	// GitHub egress the real download can run for many minutes — we only
-	// want to observe the status transition, so 2s is plenty.
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/vscode/open-file", bytes.NewReader(body)).WithContext(ctx)
 	req.Header.Set("Content-Type", "application/json")
@@ -192,12 +159,7 @@ func TestHandleVscodeOpenFile_NotRunning_AutoStartAttempted(t *testing.T) {
 
 	s.router.ServeHTTP(w, req)
 
-	// Auto-start is attempted but fails (no code-server binary in isolated HOME).
-	// The key assertion is that auto-start was attempted: status != stopped.
-	info := s.procMgr.VscodeInfo()
-	if info.Status == "stopped" {
-		t.Error("expected vscode status to change from stopped (auto-start should have been attempted)")
-	}
+	waitForVscodeStatus(t, s, process.VscodeStatusRunning)
 
 	var resp types.VscodeOpenFileResponse
 	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
@@ -211,7 +173,7 @@ func TestHandleVscodeOpenFile_NotRunning_AutoStartAttempted(t *testing.T) {
 }
 
 func TestHandleVscodeStatus_AfterStart(t *testing.T) {
-	s := newTestServer(t)
+	s := prepareVscodeTestServer(t)
 
 	// Start VS Code
 	startBody, _ := json.Marshal(VscodeStartRequest{Theme: "dark"})
@@ -220,7 +182,9 @@ func TestHandleVscodeStatus_AfterStart(t *testing.T) {
 	startW := httptest.NewRecorder()
 	s.router.ServeHTTP(startW, startReq)
 
-	// Check status — should be "installing" (async start)
+	waitForVscodeStatus(t, s, process.VscodeStatusRunning)
+
+	// Check status after the deterministic fixture is ready.
 	statusReq := httptest.NewRequest(http.MethodGet, "/api/v1/vscode/status", nil)
 	statusW := httptest.NewRecorder()
 	s.router.ServeHTTP(statusW, statusReq)
@@ -229,9 +193,8 @@ func TestHandleVscodeStatus_AfterStart(t *testing.T) {
 	if err := json.Unmarshal(statusW.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("failed to parse response: %v", err)
 	}
-	// Status should be installing or error (since code-server binary won't exist in tests)
-	if resp.Status != "installing" && resp.Status != "error" && resp.Status != "starting" {
-		t.Errorf("expected installing/error/starting, got %q", resp.Status)
+	if resp.Status != string(process.VscodeStatusRunning) {
+		t.Errorf("expected running, got %q", resp.Status)
 	}
 }
 
@@ -241,19 +204,13 @@ func TestHandleVscodeStatus_AfterStart(t *testing.T) {
 // This uses the real HTTP handler chain: HTTP request → Gin handler →
 // procMgr.VscodeOpenFile (auto-start + WaitForRunning) → VscodeManager.OpenFile.
 func TestVscodeOpenFile_WaitsForRunning_E2E(t *testing.T) {
-	s := newTestServer(t)
+	s := prepareVscodeTestServer(t)
 	ts := httptest.NewServer(s.router)
-	defer ts.Close()
-
-	// Inject a VscodeManager that transitions from "installing" to "running" after 200ms.
-	s.procMgr.SetVscodeTransitionForTest(process.VscodeStatusInstalling, 0, 200*time.Millisecond)
+	t.Cleanup(ts.Close)
 
 	body, _ := json.Marshal(types.VscodeOpenFileRequest{Path: "main.go", Line: 1})
 
-	// open-file should block waiting for vscode to become running.
-	// It will reach "running" status, but then OpenFile will fail because
-	// there's no real code-server binary/IPC socket. That's expected —
-	// the important assertion is that WaitForRunning succeeded (no "not running" error).
+	// open-file should block until the fixture has reached "running".
 	resp, err := http.Post(ts.URL+"/api/v1/vscode/open-file", "application/json", bytes.NewReader(body))
 	if err != nil {
 		t.Fatalf("request failed: %v", err)
@@ -265,9 +222,8 @@ func TestVscodeOpenFile_WaitsForRunning_E2E(t *testing.T) {
 		t.Fatalf("failed to decode response: %v", err)
 	}
 
-	// The request should fail because there's no real code-server binary,
-	// but the error should be about the binary/IPC socket, NOT about
-	// "code-server is not running" — proving WaitForRunning worked.
+	// The request fails because the fixture has no Remote CLI, but it must
+	// have passed WaitForRunning rather than returning "not running".
 	if result.Success {
 		t.Error("expected success=false (no real code-server binary)")
 	}

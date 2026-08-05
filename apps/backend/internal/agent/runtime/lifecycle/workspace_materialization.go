@@ -8,6 +8,7 @@ import (
 	"time"
 
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
+	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/worktree"
 )
 
@@ -15,10 +16,11 @@ import (
 // prepared for a running remote workspace. It deliberately carries only a
 // credential-free locator; executor launch environments provide Git auth.
 type WorkspaceRepositoryMaterialization struct {
-	RepositoryURL  string
-	Destination    string
-	BaseBranch     string
-	CheckoutBranch string
+	RepositoryURL      string
+	Destination        string
+	BaseBranch         string
+	CheckoutBranch     string
+	RemoteContribution *models.RemoteContribution
 }
 
 const workspaceMaterializationRollbackTimeout = 10 * time.Second
@@ -47,7 +49,7 @@ func remoteWorkspaceProjectionFromLaunch(req *LaunchRequest) ([]WorkspaceReposit
 		if name == "" || branchSlug == "" {
 			return nil, fmt.Errorf("remote repository %q has unsafe runtime name", spec.RepoName)
 		}
-		projection = append(projection, WorkspaceRepositoryMaterialization{RepositoryURL: spec.RepositoryURL, Destination: name + "-" + branchSlug, BaseBranch: spec.BaseBranch, CheckoutBranch: spec.CheckoutBranch})
+		projection = append(projection, WorkspaceRepositoryMaterialization{RepositoryURL: spec.RepositoryURL, Destination: name + "-" + branchSlug, BaseBranch: spec.BaseBranch, CheckoutBranch: spec.CheckoutBranch, RemoteContribution: spec.RemoteContribution})
 	}
 	return projection, nil
 }
@@ -179,10 +181,11 @@ func materializeWorkspaceRepositoriesWithoutRescan(ctx context.Context, client w
 	created := make([]WorkspaceRepositoryMaterialization, 0, len(repositories))
 	for _, repository := range repositories {
 		response, err := client.MaterializeRepository(ctx, agentctl.MaterializeRepositoryRequest{
-			RepositoryURL:  repository.RepositoryURL,
-			Destination:    repository.Destination,
-			BaseBranch:     repository.BaseBranch,
-			CheckoutBranch: repository.CheckoutBranch,
+			RepositoryURL:      repository.RepositoryURL,
+			Destination:        repository.Destination,
+			BaseBranch:         repository.BaseBranch,
+			CheckoutBranch:     repository.CheckoutBranch,
+			RemoteContribution: repository.RemoteContribution,
 		})
 		if err != nil {
 			rollbackErr := rollbackMaterializedWorkspaceRepositories(ctx, client, created)

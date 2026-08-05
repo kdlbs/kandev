@@ -90,7 +90,8 @@ func TestUserMessageMeta_ToMap_AttachmentsOnly(t *testing.T) {
 }
 
 func TestUserMessageMeta_ToMap_ContextFilesOnly(t *testing.T) {
-	files := []v1.ContextFileMeta{{Path: "src/main.go", Name: "main.go"}}
+	isDirectory := true
+	files := []v1.ContextFileMeta{{Path: "src/main.go", Name: "main.go", IsDirectory: &isDirectory}}
 	meta := NewUserMessageMeta().WithContextFiles(files)
 	result := meta.ToMap()
 	if result == nil {
@@ -102,6 +103,9 @@ func TestUserMessageMeta_ToMap_ContextFilesOnly(t *testing.T) {
 	}
 	if len(cf.([]v1.ContextFileMeta)) != 1 {
 		t.Errorf("expected 1 context file, got %d", len(cf.([]v1.ContextFileMeta)))
+	}
+	if !*cf.([]v1.ContextFileMeta)[0].IsDirectory {
+		t.Error("expected directory metadata to be preserved")
 	}
 	if _, ok := result["plan_mode"]; ok {
 		t.Error("unexpected plan_mode key")

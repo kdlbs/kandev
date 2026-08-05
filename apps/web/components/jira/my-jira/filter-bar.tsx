@@ -1,5 +1,6 @@
 "use client";
 
+import { useTranslation } from "react-i18next";
 import { Button } from "@kandev/ui/button";
 import type { JiraProject, JiraStatus } from "@/lib/types/jira";
 import { AssigneePill, ProjectPill, StatusPill } from "./filter-pills";
@@ -23,6 +24,7 @@ export function FilterBar({
   hasActiveFilters,
   onClear,
 }: FilterBarProps) {
+  const { t } = useTranslation();
   return (
     <div className="flex items-center gap-2 flex-wrap px-6 py-2.5 border-b shrink-0 bg-muted/20">
       <ProjectPill
@@ -47,7 +49,7 @@ export function FilterBar({
           onClick={onClear}
           className="cursor-pointer h-7 text-xs ml-1"
         >
-          Clear filters
+          {t("jira:clearFilters")}
         </Button>
       )}
     </div>

@@ -32,6 +32,11 @@ Choose one release channel:
 brew install kdlbs/kandev/kandev
 kandev
 
+# Scoop on Windows
+scoop bucket add kandev https://github.com/kdlbs/scoop-kandev
+scoop install kandev
+kandev
+
 # One-off npm launch
 npx kandev@latest
 
@@ -39,6 +44,9 @@ npx kandev@latest
 npm install -g kandev@latest
 kandev
 ```
+
+Scoop installs the native runtime bundle, so Node.js is not required to install or start Kandev. It
+is still needed for the agent CLIs Kandev installs through its own interface.
 
 Stable is the default and is selected by npm's `latest` tag. To test the current prerelease from
 `main` without changing a global installation, launch the package once from the npm-only `nightly`
@@ -59,8 +67,8 @@ The global command replaces the installed `kandev` channel. Return to Stable wit
 `npm install -g kandev@latest`.
 
 Nightly builds may be unstable. They are best-effort daily snapshots, and a new version appears
-only when `main` has commits after the latest Stable release. Homebrew, Desktop, and container
-installs have no Nightly channel.
+only when `main` has commits after the latest Stable release. Homebrew, Scoop, Desktop, and
+container installs have no Nightly channel.
 
 The launcher selects the platform runtime, starts the Go backend and agent runtime, serves the web app, and opens its local URL. The preferred backend port is `38429`; if it is unavailable, the launcher chooses another free port and prints the actual URL. Use `kandev --headless` (or `KANDEV_NO_BROWSER=1`) when a browser must not open.
 
@@ -84,6 +92,18 @@ Kandev creates these records when no prior workspace or executor configuration e
 The first-run dialog scans supported agent CLIs, lets you inspect detected profiles, and introduces executors, workflows, and the command panel. **Skip** stores only a browser-local onboarding marker. Advancing/completing also saves any dirty agent-profile edits made in the dialog. Neither path creates another workspace. The dialog warns that default agent profiles can have **Auto Approve** enabled. Inspect every profile before assigning trusted code or credentials.
 
 </details>
+
+## Find a setting
+
+Open **Settings** and use **Search settings** at the top of its navigation tree. Search results are
+grouped by area; selecting a specific control opens its owning page, scrolls it into view, focuses
+it, and briefly highlights it without changing the saved value. The same search is available in
+the Settings menu on phones.
+
+From anywhere, press `Cmd/Ctrl+K` and begin typing a setting name or familiar alias. Individual
+settings appear only after typing, while **Go to Settings** remains in the command menu at rest.
+Discovery searches setting names and curated aliases, never saved values, secrets, paths, or other
+configuration content.
 
 ## Add a local repository
 

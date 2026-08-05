@@ -81,7 +81,14 @@ test.describe("Task creation: custom prompt autocomplete", () => {
     await textarea.click();
     await textarea.pressSequentially("@e2e-bu");
 
+    // Wait for the menu AND its option to actually populate before pressing
+    // Enter. The autocomplete popup can open a beat before its options hydrate;
+    // pressing Enter against an empty/half-open menu lets the key fall through
+    // to the form submit, which closes the dialog and fails the assertions
+    // below. Gating on the option (not just the title) is the condition that
+    // makes the selection deterministic.
     await expect(testPage.getByText(MENU_TITLE)).toBeVisible();
+    await expect(testPage.getByRole("option", { name: new RegExp(PROMPT_NAME) })).toBeVisible();
     await textarea.press("Enter");
 
     // Dialog must still be open — Enter selected the menu item, not the form submit.

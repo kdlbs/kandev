@@ -71,6 +71,7 @@ func buildRunningFromExecution(execution *AgentExecution, prior *models.Executor
 		lastSeenAt = &now
 	}
 
+	metadata := execution.metadataSnapshot()
 	running := &models.ExecutorRunning{
 		ID:                 execution.SessionID,
 		SessionID:          execution.SessionID,
@@ -84,10 +85,10 @@ func buildRunningFromExecution(execution *AgentExecution, prior *models.Executor
 		AgentctlURL:        agentctlURL,
 		AgentctlPort:       agentctlPort,
 		PID:                pid,
-		WorktreeID:         getMetadataString(execution.Metadata, MetadataKeyWorktreeID),
-		WorktreePath:       getMetadataString(execution.Metadata, "worktree_path"),
-		WorktreeBranch:     getMetadataString(execution.Metadata, MetadataKeyWorktreeBranch),
-		Metadata:           FilterPersistentMetadata(execution.Metadata),
+		WorktreeID:         getMetadataString(metadata, MetadataKeyWorktreeID),
+		WorktreePath:       getMetadataString(metadata, "worktree_path"),
+		WorktreeBranch:     getMetadataString(metadata, MetadataKeyWorktreeBranch),
+		Metadata:           FilterPersistentMetadata(metadata),
 		LastSeenAt:         lastSeenAt,
 	}
 	if prior != nil {

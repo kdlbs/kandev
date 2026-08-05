@@ -291,7 +291,7 @@ test.describe("CLI mode: passthrough toolbar", () => {
     await session.expectPassthroughHasText("context lookup e2e", 15_000);
     await session.expectPassthroughHasText("CONTEXT PROMPTS", 15_000);
     await session.expectPassthroughHasText(promptContent, 15_000);
-    await session.expectPassthroughHasText("CONTEXT FILES", 15_000);
+    await session.expectPassthroughHasText("CONTEXT PATHS", 15_000);
     await session.expectPassthroughHasText(contextFile, 15_000);
   });
 

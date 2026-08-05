@@ -8,11 +8,13 @@ import path from "node:path";
  * Tag is stable so layer caches survive across runs.
  */
 export const E2E_IMAGE_TAG = "kandev-agent:e2e";
+const FAKE_LSP_SERVER = path.resolve(__dirname, "fake-lsp-server.mjs");
 
 const E2E_DOCKERFILE = `FROM node:22-slim
 RUN apt-get update \\
  && apt-get install -y --no-install-recommends git ca-certificates curl \\
  && rm -rf /var/lib/apt/lists/*
+COPY --chmod=0755 fake-lsp-server.mjs /usr/local/bin/kotlin-lsp
 WORKDIR /workspace
 `;
 
@@ -34,6 +36,7 @@ export function buildE2EImage(): void {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "kandev-e2e-image-"));
   try {
     fs.writeFileSync(path.join(tmpDir, "Dockerfile"), E2E_DOCKERFILE);
+    fs.copyFileSync(FAKE_LSP_SERVER, path.join(tmpDir, "fake-lsp-server.mjs"));
     execFileSync("docker", ["build", "-t", E2E_IMAGE_TAG, tmpDir], {
       stdio: process.env.E2E_DEBUG ? "inherit" : "ignore",
     });

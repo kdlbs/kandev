@@ -236,6 +236,7 @@ function JQLField({
         // A sample JQL query. JQL is a query language, not copy: `project`,
         // `status` and `PROJ` are the field names and project key Jira parses,
         // so a translated (or pseudo-transliterated) example would not run.
+        // eslint-disable-next-line i18next/no-literal-string -- sample JQL query
         placeholder='project = PROJ AND status = "Open"'
         rows={3}
         className="font-mono text-xs resize-y"

@@ -3,12 +3,13 @@
 import { useEffect, useState, useMemo, useRef } from "react";
 import { Trans, useTranslation } from "react-i18next";
 import { IconCopy, IconCheck, IconTerminal2 } from "@tabler/icons-react";
-import { Card, CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
+import { CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
 import { Button } from "@kandev/ui/button";
 import { Skeleton } from "@kandev/ui/skeleton";
 import { previewAgentCommandAction, type CommandPreviewResponse } from "@/app/actions/agents";
 import type { CLIFlag, ProfileEnvVar } from "@/lib/types/http";
 import { copyToClipboard } from "@/lib/utils/copy-to-clipboard";
+import { SettingsCard } from "@/components/settings/settings-card";
 
 type CommandPreviewCardProps = {
   agentName: string;
@@ -19,6 +20,7 @@ type CommandPreviewCardProps = {
   commandPrefix?: string;
   envVars?: ProfileEnvVar[];
   secrets?: { id: string; name: string }[];
+  discoveryTargetId?: string;
 };
 
 // The placeholder the backend substitutes into the launch command. A token the
@@ -141,6 +143,7 @@ export function CommandPreviewCard({
   commandPrefix,
   envVars,
   secrets,
+  discoveryTargetId,
 }: CommandPreviewCardProps) {
   const { t } = useTranslation();
   const envPrefix = useMemo(() => buildEnvPrefix(envVars, secrets), [envVars, secrets]);
@@ -189,7 +192,7 @@ export function CommandPreviewCard({
   }, [agentName, settingsKey]);
 
   return (
-    <Card>
+    <SettingsCard discoveryTargetId={discoveryTargetId}>
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
           <IconTerminal2 className="h-5 w-5" />
@@ -210,6 +213,6 @@ export function CommandPreviewCard({
         )}
         {!loading && !error && !preview && <CommandPreviewEmpty />}
       </CardContent>
-    </Card>
+    </SettingsCard>
   );
 }

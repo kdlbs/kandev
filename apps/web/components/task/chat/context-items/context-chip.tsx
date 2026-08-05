@@ -37,6 +37,9 @@ type ContextChipProps = {
   /** Data URL to render as a tiny thumbnail instead of the default icon */
   thumbnail?: string;
   leadingIcon?: ReactNode;
+  dataTestId?: string;
+  dataPath?: string;
+  dataIsDirectory?: boolean;
   onClick?: () => void;
   onUnpin?: () => void;
   onRemove?: () => void;
@@ -49,6 +52,9 @@ export const ContextChip = memo(function ContextChip({
   preview,
   thumbnail,
   leadingIcon,
+  dataTestId,
+  dataPath,
+  dataIsDirectory,
   onClick,
   onUnpin,
   onRemove,
@@ -65,6 +71,9 @@ export const ContextChip = memo(function ContextChip({
 
   const chip = (
     <div
+      data-testid={dataTestId}
+      data-path={dataPath}
+      data-is-directory={dataIsDirectory ? "true" : "false"}
       className={`group flex items-center gap-1 px-2 py-0.5 text-xs text-muted-foreground bg-muted/50 rounded border border-border/50 ${onClick ? "cursor-pointer hover:bg-muted/80" : ""}`}
       onClick={onClick}
     >

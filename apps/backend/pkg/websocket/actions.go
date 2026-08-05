@@ -325,6 +325,12 @@ const (
 	ActionUserSettingsUpdate  = "user.settings.update"
 	ActionUserSettingsUpdated = "user.settings.updated"
 
+	// ActionPluginUserStateUpdated notifies the writing user's other WS
+	// connections that one of their per-user plugin storage keys changed
+	// (Approach F1). Payload: {pluginId, scope, scopeId, key, updatedAt,
+	// writerId, deleted} — keys only, never the stored value.
+	ActionPluginUserStateUpdated = "plugin.user-state.updated"
+
 	// System maintenance jobs (VACUUM, factory reset, snapshot create/restore,
 	// disk walk). Broadcast to all connected clients so the System pages can
 	// render progress.
@@ -367,6 +373,8 @@ const (
 	ActionMCPUpdateTask                 = "mcp.update_task"
 	ActionMCPGetTaskPRAutomation        = "mcp.get_task_pr_automation"
 	ActionMCPUpdateTaskPRAutomation     = "mcp.update_task_pr_automation"
+	ActionMCPGetTaskMRAutomation        = "mcp.get_task_mr_automation"
+	ActionMCPUpdateTaskMRAutomation     = "mcp.update_task_mr_automation"
 	ActionMCPAddBranchToTask            = "mcp.add_branch_to_task"
 	ActionMCPAddWorkspaceSources        = "mcp.add_workspace_sources"
 	ActionMCPUpdateRepositoryBaseBranch = "mcp.update_repository_base_branch"
@@ -449,6 +457,7 @@ const (
 	ActionGitHubPRWatchDelete        = "github.pr_watches.delete"
 	ActionGitHubPRFilesGet           = "github.pr_files.get"
 	ActionGitHubPRCommitsGet         = "github.pr_commits.get"
+	ActionGitHubPRCommitGet          = "github.pr_commit.get"
 	ActionGitHubTaskPRUpdated        = "github.task_pr.updated"         // Notification
 	ActionGitHubTaskPRDeleted        = "github.task_pr.deleted"         // Notification
 	ActionGitHubTaskCIOptionsUpdated = "github.task_ci_options.updated" // Notification
@@ -501,6 +510,8 @@ const (
 	ActionGitLabNewReviewMRNotify = "gitlab.new_review_mr.notify" // Notification
 	ActionGitLabTaskMRSync        = "gitlab.task_mr.sync"
 	ActionGitLabStats             = "gitlab.stats"
+
+	ActionGitLabTaskMRAutomationUpdated = "gitlab.task_mr_options.updated" // Notification
 
 	ActionGitLabMRMerge                = "gitlab.mr.merge"
 	ActionGitLabMRApprove              = "gitlab.mr.approve"

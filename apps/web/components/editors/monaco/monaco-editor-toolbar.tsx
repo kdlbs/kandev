@@ -24,6 +24,7 @@ import {
 import { PanelHeaderBarSplit } from "@/components/task/panel-primitives";
 import { LspStatusButton } from "@/components/editors/lsp-status-button";
 import type { LspStatus } from "@/lib/lsp/lsp-client-manager";
+import type { LspProgressSnapshot } from "@/lib/lsp/lsp-progress";
 
 const SAVE_SHORTCUT =
   typeof navigator !== "undefined" && navigator.platform.includes("Mac") ? "\u2318" : "Ctrl";
@@ -235,7 +236,9 @@ interface MonacoEditorToolbarProps {
   hasRemoteUpdate?: boolean;
   hasVcsDiff?: boolean;
   lspStatus: LspStatus;
+  lspProgress: LspProgressSnapshot;
   lspLanguage: string | null;
+  showLspStatus?: boolean;
   onToggleLsp: () => void;
   onToggleWrap: () => void;
   onToggleDiffIndicators: () => void;
@@ -260,7 +263,9 @@ export function MonacoEditorToolbar({
   hasRemoteUpdate = false,
   hasVcsDiff = false,
   lspStatus,
+  lspProgress,
   lspLanguage,
+  showLspStatus = true,
   onToggleLsp,
   onToggleWrap,
   onToggleDiffIndicators,
@@ -287,7 +292,14 @@ export function MonacoEditorToolbar({
             sessionId={sessionId}
             commentCount={commentCount}
           />
-          <LspStatusButton status={lspStatus} lspLanguage={lspLanguage} onToggle={onToggleLsp} />
+          {showLspStatus ? (
+            <LspStatusButton
+              status={lspStatus}
+              progress={lspProgress}
+              lspLanguage={lspLanguage}
+              onToggle={onToggleLsp}
+            />
+          ) : null}
           {(isDirty || hasVcsDiff) && (
             <DiffIndicatorsButton
               isVisible={showDiffIndicators}

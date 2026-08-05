@@ -3,6 +3,7 @@ package executor
 import (
 	"context"
 	"errors"
+	"reflect"
 	"testing"
 	"time"
 
@@ -18,12 +19,14 @@ func seedMultiRepoTask(t *testing.T, repo *mockRepository, taskID string) {
 	repo.repositories["repo-front"] = &models.Repository{
 		ID:                   "repo-front",
 		Name:                 "frontend",
+		Provider:             "gitlab",
 		LocalPath:            "/repos/frontend",
 		WorktreeBranchPrefix: "feat/",
 	}
 	repo.repositories["repo-back"] = &models.Repository{
 		ID:                   "repo-back",
 		Name:                 "backend",
+		Provider:             "github",
 		LocalPath:            "/repos/backend",
 		WorktreeBranchPrefix: "feat/",
 	}
@@ -98,6 +101,9 @@ func TestLaunchPreparedSession_MultiRepo_PopulatesRequestRepositories(t *testing
 	// Legacy single-repo top-level fields stay populated from the primary.
 	if captured.RepositoryPath != "/repos/frontend" {
 		t.Errorf("expected primary repo path on top-level field, got %q", captured.RepositoryPath)
+	}
+	if got, want := captured.McpProviders, []string{"github", "gitlab"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("McpProviders = %#v, want %#v", got, want)
 	}
 }
 
@@ -391,6 +397,9 @@ func TestResumeSession_MultiRepo_PopulatesRequestRepositories(t *testing.T) {
 	}
 	if captured.Repositories[0].RepositoryID != "repo-front" || captured.Repositories[1].RepositoryID != "repo-back" {
 		t.Errorf("unexpected repo order: %+v", captured.Repositories)
+	}
+	if got, want := captured.McpProviders, []string{"github", "gitlab"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("McpProviders = %#v, want %#v", got, want)
 	}
 }
 

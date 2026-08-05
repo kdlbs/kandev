@@ -12,6 +12,7 @@ import type {
   ExecutorProfile,
 } from "@/lib/types/http";
 import type { AgentProfileOption } from "@/lib/state/slices";
+import { isSelectableAgentProfile } from "@/lib/state/slices/settings/types";
 import { formatUserHomePath, truncateRepoPath } from "@/lib/utils";
 import { getExecutorIcon } from "@/lib/executor-icons";
 import { AgentLogo } from "@/components/agent-logo";
@@ -119,7 +120,10 @@ export function useBranchOptions(branchOptionsRaw: Branch[]) {
 
 export function useAgentProfileOptions(agentProfiles: AgentProfileOption[]): OptionItem[] {
   return useMemo(() => {
-    return agentProfiles.map((profile: AgentProfileOption) => {
+    // Disabled profiles stay in the store (existing sessions keep their
+    // labels) but are never offered as a choice for new work.
+    const selectable = agentProfiles.filter(isSelectableAgentProfile);
+    return selectable.map((profile: AgentProfileOption) => {
       const parts = profile.label.split(" \u2022 ");
       const agentLabel = parts[0] ?? profile.label;
       const profileLabel = parts[1] ?? "";

@@ -29,6 +29,7 @@ export type {
   SecretsState,
   NotificationProvidersState,
   SettingsDataState,
+  SleepInhibitionStoreState,
   UserSettingsState,
   MessagesState,
   TurnsState,

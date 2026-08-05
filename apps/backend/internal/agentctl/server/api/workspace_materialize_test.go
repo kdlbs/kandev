@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -15,6 +16,7 @@ import (
 
 	"github.com/kandev/kandev/internal/agentctl/server/config"
 	"github.com/kandev/kandev/internal/agentctl/server/process"
+	"github.com/kandev/kandev/internal/task/models"
 )
 
 func TestMaterializeRepository_ClonesIntoWorkspaceDestination(t *testing.T) {
@@ -55,6 +57,66 @@ func TestMaterializeRepository_CreatesNewCheckoutBranchFromBase(t *testing.T) {
 	}
 	if got, want := strings.TrimSpace(materializeGitOutputForTest(t, destination, "rev-parse", "HEAD")), strings.TrimSpace(materializeGitOutputForTest(t, destination, "rev-parse", "origin/main")); got != want {
 		t.Fatalf("HEAD = %q, want base commit %q", got, want)
+	}
+}
+
+func TestMaterializeRepository_RemoteContributionReusePreservesLocalCommit(t *testing.T) {
+	target, source, sourceSHA := createMaterializeRemoteContributionRepos(t)
+	configPath := filepath.Join(t.TempDir(), "gitconfig")
+	config := fmt.Sprintf("[url \"file://%s\"]\n\tinsteadOf = https://github.com/contributor/widget.git\n", source)
+	if err := os.WriteFile(configPath, []byte(config), 0o644); err != nil {
+		t.Fatalf("write git config: %v", err)
+	}
+	t.Setenv("GIT_CONFIG_GLOBAL", configPath)
+
+	binding := models.RemoteContribution{
+		Version:      models.RemoteContributionVersion,
+		Provider:     models.RemoteContributionProviderGitHub,
+		Kind:         models.RemoteContributionKindPullRequest,
+		CanonicalURL: "https://github.com/acme/widget/pull/7",
+		Number:       7,
+		State:        models.RemoteContributionStateOpen,
+		BaseBranch:   "main",
+		HeadBranch:   "feature/remote",
+		HeadSHA:      sourceSHA,
+		SourceRepository: models.RemoteContributionRepository{
+			Host: "github.com", Path: "contributor/widget", RemoteURL: "https://github.com/contributor/widget.git",
+		},
+		CollaborationAllowed: true,
+	}
+	destination := filepath.Join(t.TempDir(), "widget")
+	reused, err := materializeRepository(context.Background(), target, destination, binding.BaseBranch, binding.HeadBranch, &binding)
+	if err != nil {
+		t.Fatalf("initial materialization: %v", err)
+	}
+	if reused {
+		t.Fatal("initial materialization reported reuse")
+	}
+	runMaterializeTestGit(t, destination, "config", "user.email", "test@example.com")
+	runMaterializeTestGit(t, destination, "config", "user.name", "Test User")
+	if err := os.WriteFile(filepath.Join(destination, "agent-change.txt"), []byte("agent change\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runMaterializeTestGit(t, destination, "add", "agent-change.txt")
+	runMaterializeTestGit(t, destination, "commit", "-m", "agent contribution")
+	localHEAD := strings.TrimSpace(materializeGitOutputForTest(t, destination, "rev-parse", "HEAD"))
+
+	reused, err = materializeRepository(context.Background(), target, destination, binding.BaseBranch, binding.HeadBranch, &binding)
+	if err != nil {
+		t.Fatalf("repeat materialization: %v", err)
+	}
+	if !reused {
+		t.Fatal("repeat materialization did not reuse the existing checkout")
+	}
+	if got := strings.TrimSpace(materializeGitOutputForTest(t, destination, "rev-parse", "HEAD")); got != localHEAD {
+		t.Fatalf("HEAD = %q, want local commit %q", got, localHEAD)
+	}
+	if got := strings.TrimSpace(materializeGitOutputForTest(t, destination, "branch", "--show-current")); got != binding.HeadBranch {
+		t.Fatalf("branch = %q, want %q", got, binding.HeadBranch)
+	}
+	wantUpstream := binding.ContributionRemoteName() + "/" + binding.HeadBranch
+	if got := strings.TrimSpace(materializeGitOutputForTest(t, destination, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}")); got != wantUpstream {
+		t.Fatalf("upstream = %q, want %q", got, wantUpstream)
 	}
 }
 
@@ -498,6 +560,46 @@ func createMaterializeOriginWithBranch(t *testing.T, branch string) string {
 	runMaterializeTestGit(t, clone, "-c", "user.email=test@example.com", "-c", "user.name=Test", "commit", "--allow-empty", "-m", "branch")
 	runMaterializeTestGit(t, clone, "push", "-u", "origin", branch)
 	return origin
+}
+
+func createMaterializeRemoteContributionRepos(t *testing.T) (target, source, sourceSHA string) {
+	t.Helper()
+	root := t.TempDir()
+	target = filepath.Join(root, "target.git")
+	source = filepath.Join(root, "source.git")
+	targetSeed := filepath.Join(root, "target-seed")
+	sourceSeed := filepath.Join(root, "source-seed")
+	runMaterializeTestGit(t, root, "init", "--bare", "--initial-branch=main", target)
+	runMaterializeTestGit(t, root, "init", "--bare", "--initial-branch=main", source)
+	runMaterializeTestGit(t, root, "init", "--initial-branch=main", targetSeed)
+	runMaterializeTestGit(t, targetSeed, "config", "user.email", "test@example.com")
+	runMaterializeTestGit(t, targetSeed, "config", "user.name", "Test User")
+	if err := os.WriteFile(filepath.Join(targetSeed, "README.md"), []byte("target\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runMaterializeTestGit(t, targetSeed, "add", "README.md")
+	runMaterializeTestGit(t, targetSeed, "commit", "-m", "target base")
+	runMaterializeTestGit(t, targetSeed, "remote", "add", "origin", target)
+	runMaterializeTestGit(t, targetSeed, "push", "origin", "main")
+
+	runMaterializeTestGit(t, root, "init", "--initial-branch=main", sourceSeed)
+	runMaterializeTestGit(t, sourceSeed, "config", "user.email", "test@example.com")
+	runMaterializeTestGit(t, sourceSeed, "config", "user.name", "Test User")
+	if err := os.WriteFile(filepath.Join(sourceSeed, "README.md"), []byte("source\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runMaterializeTestGit(t, sourceSeed, "add", "README.md")
+	runMaterializeTestGit(t, sourceSeed, "commit", "-m", "source base")
+	runMaterializeTestGit(t, sourceSeed, "checkout", "-b", "feature/remote")
+	if err := os.WriteFile(filepath.Join(sourceSeed, "change.txt"), []byte("contribution\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runMaterializeTestGit(t, sourceSeed, "add", "change.txt")
+	runMaterializeTestGit(t, sourceSeed, "commit", "-m", "source contribution")
+	sourceSHA = strings.TrimSpace(materializeGitOutputForTest(t, sourceSeed, "rev-parse", "HEAD"))
+	runMaterializeTestGit(t, sourceSeed, "remote", "add", "origin", source)
+	runMaterializeTestGit(t, sourceSeed, "push", "origin", "main", "feature/remote")
+	return target, source, sourceSHA
 }
 
 func runMaterializeTestGit(t *testing.T, dir string, args ...string) {

@@ -9,6 +9,8 @@ import {
   type NativeNotificationPermission,
 } from "@/lib/desktop/native-notification-client";
 import type { PermissionRefresh } from "./notifications-settings-actions";
+import { SettingsTarget } from "./settings-target";
+import { GENERAL_SETTINGS_TARGETS } from "@/lib/settings-discovery/catalog/general";
 
 type NotificationPermissionState =
   | NativeNotificationPermission
@@ -42,7 +44,7 @@ export function DesktopNotificationsSection({
 }: DesktopNotificationsSectionProps) {
   const { t } = useTranslation();
   return (
-    <div className="space-y-4">
+    <SettingsTarget targetId={GENERAL_SETTINGS_TARGETS.desktopNotifications} className="space-y-4">
       <div className="flex items-center justify-between gap-4">
         <div>
           <div className="text-base font-medium">{t("settings:desktopNotifications")}</div>
@@ -117,7 +119,7 @@ export function DesktopNotificationsSection({
       {notificationPermission === "error" && (
         <p className="text-sm text-amber-600">{t("settings:notificationPermissionCheckFailed")}</p>
       )}
-    </div>
+    </SettingsTarget>
   );
 }
 

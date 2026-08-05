@@ -1,4 +1,6 @@
 {
+  "addToChatContext": "Add to chat context",
+  "addedToChatContext": "{{name}} added to chat context",
   "collapseMessage": "Collapse message",
   "collapseQueuedMessages": "Collapse queued messages",
   "clearAll": "Clear all",
@@ -22,6 +24,7 @@
   "failedToMergeQueuedMessages": "Failed to merge queued messages.",
   "failedToRemoveQueuedMessage": "Failed to remove queued message.",
   "failedToRunQueuedMessage": "Failed to run queued message.",
+  "fileTreeActions": "File actions",
   "mergeReferenceOverflow": "Too many entity references to merge these queued messages.",
   "mergeWithAbove": "Merge with above",
   "queueCapacity_one": "{{count}} of {{max}}",

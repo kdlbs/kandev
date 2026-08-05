@@ -74,6 +74,7 @@ Select an agent, create a profile, then open **Settings > Agents > _Agent_ > _Pr
 | Command prefix | Optional ACP-only launcher argv prepended to the command, for example `greywall --`. |
 | Environment | Literal values or references to Kandev secrets, resolved when the process starts. |
 | CLI passthrough | Uses the CLI's native terminal interface instead of a structured ACP conversation. |
+| Enabled | Keeps the profile available to existing sessions and settings while hiding it from new task, session, handoff, and Quick Chat selectors. |
 | Auto-approve all permissions | Answers automatically: the first `allow_once`/`allow_always` option, otherwise the first option supplied by the agent; no options cancels. It is off by default. |
 | MCP servers | Adds profile-specific external MCP servers when the agent supports MCP. |
 

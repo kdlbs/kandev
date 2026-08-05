@@ -61,6 +61,11 @@ func Provide(cfg *config.Config, dbPool *db.Pool, secrets SecretVault, eventBus 
 		return nil, nil, fmt.Errorf("plugins: init state store: %w", err)
 	}
 
+	userStateStore, err := state.NewUserStore(dbPool)
+	if err != nil {
+		return nil, nil, fmt.Errorf("plugins: init user state store: %w", err)
+	}
+
 	registry := NewRegistry()
 	if err := registry.Load(pluginStore); err != nil {
 		return nil, nil, fmt.Errorf("plugins: load registry: %w", err)
@@ -68,6 +73,7 @@ func Provide(cfg *config.Config, dbPool *db.Pool, secrets SecretVault, eventBus 
 
 	svc := NewService(pluginStore, registry, eventBus, log)
 	svc.SetState(stateStore)
+	svc.SetUserState(userStateStore)
 	svc.SetSecrets(secrets)
 	svc.SetPluginsDir(dir)
 

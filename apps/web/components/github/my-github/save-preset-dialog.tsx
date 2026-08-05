@@ -13,6 +13,7 @@ import { Input } from "@kandev/ui/input";
 import { Button } from "@kandev/ui/button";
 import { Label } from "@kandev/ui/label";
 import { RepoFilterCombobox } from "./repo-filter-combobox";
+import { useTranslation } from "react-i18next";
 
 type SavePresetDialogProps = {
   open: boolean;
@@ -42,6 +43,7 @@ function SavePresetForm({
   onSave: (label: string, repoFilter: string) => void;
   onClose: () => void;
 }) {
+  const { t } = useTranslation();
   const [value, setValue] = useState(suggestedLabel);
   const [defaultRepoFilter, setDefaultRepoFilter] = useState(repoFilter);
   const trimmed = value.trim();
@@ -56,16 +58,17 @@ function SavePresetForm({
   return (
     <>
       <DialogHeader>
-        <DialogTitle>Save query</DialogTitle>
+        <DialogTitle>{t("github:saveQuery")}</DialogTitle>
         <DialogDescription>
-          Save this {kind === "pr" ? "pull request" : "issue"} query to the sidebar for quick access
-          later.
+          {t("github:savePresetDescription", {
+            kind: kind === "pr" ? t("github:kindPullRequest") : t("github:kindIssue"),
+          })}
         </DialogDescription>
       </DialogHeader>
       <div className="flex flex-col gap-3">
         <div className="flex flex-col gap-1.5">
           <Label htmlFor="preset-label" className="text-xs">
-            Name
+            {t("github:name")}
           </Label>
           <Input
             id="preset-label"
@@ -73,13 +76,13 @@ function SavePresetForm({
             value={value}
             onChange={(e) => setValue(e.target.value)}
             onFocus={(e) => e.target.select()}
-            placeholder="e.g. Needs my review"
+            placeholder={t("github:eGNeedsMyReview")}
           />
         </div>
         <div className="flex flex-col gap-1.5 text-xs">
           {customQuery && (
             <div className="flex gap-2">
-              <span className="text-muted-foreground shrink-0 w-16">Query</span>
+              <span className="text-muted-foreground shrink-0 w-16">{t("github:query")}</span>
               <code className="font-mono text-[11px] bg-muted rounded px-1.5 py-0.5 break-all">
                 {customQuery}
               </code>
@@ -87,27 +90,27 @@ function SavePresetForm({
           )}
         </div>
         <div className="flex flex-col gap-1.5">
-          <Label className="text-xs">Default repository</Label>
+          <Label className="text-xs">{t("github:defaultRepository")}</Label>
           <RepoFilterCombobox
             repoFilter={defaultRepoFilter}
             onRepoFilterChange={setDefaultRepoFilter}
             repoOptions={repoOptions}
-            ariaLabel="Default repository"
+            ariaLabel={t("github:defaultRepository")}
             triggerClassName="h-11 border border-input bg-background px-3 py-2 text-sm hover:bg-secondary/50 md:h-9 md:py-1.5"
             testId="github-save-query-repo-trigger"
             dropdownTestId="github-save-query-repo-dropdown"
           />
           <p className="text-xs text-muted-foreground">
-            This repository opens by default. You can change the filter after opening the query.
+            {t("github:thisRepositoryOpensByDefaultYou")}
           </p>
         </div>
       </div>
       <DialogFooter>
         <Button variant="outline" className="cursor-pointer" onClick={onClose}>
-          Cancel
+          {t("common:cancel")}
         </Button>
         <Button className="cursor-pointer" disabled={!canSubmit} onClick={handleSubmit}>
-          Save
+          {t("common:save")}
         </Button>
       </DialogFooter>
     </>

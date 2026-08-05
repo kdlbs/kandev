@@ -14,10 +14,17 @@ type FileViewerContentProps = {
   path: string;
   content: string;
   repo?: string;
+  sessionId?: string;
   className?: string;
 };
 
-export function FileViewerContent({ path, content, repo, className }: FileViewerContentProps) {
+export function FileViewerContent({
+  path,
+  content,
+  repo,
+  sessionId,
+  className,
+}: FileViewerContentProps) {
   const langExt = getCodeMirrorExtensionFromPath(path);
   const extensions: Extension[] = [EditorView.lineWrapping, EditorView.editable.of(false)];
   if (langExt) {
@@ -41,7 +48,7 @@ export function FileViewerContent({ path, content, repo, className }: FileViewer
   // Monaco, so this CodeMirror viewer must consume it instead.
   const scrollToPendingLine = useCallback(
     (view: EditorView, filePath: string) => {
-      const pending = consumePendingCursorPosition(filePath, repo);
+      const pending = consumePendingCursorPosition(filePath, repo, sessionId);
       if (!pending) return;
       const totalLines = view.state.doc.lines;
       const clampedLine = Math.min(Math.max(pending.line, 1), totalLines);
@@ -51,7 +58,7 @@ export function FileViewerContent({ path, content, repo, className }: FileViewer
         effects: EditorView.scrollIntoView(pos, { y: "center" }),
       });
     },
-    [repo],
+    [repo, sessionId],
   );
 
   const handleCreateEditor = useCallback(

@@ -16,6 +16,8 @@ import {
 } from "@kandev/ui/dropdown-menu";
 import { prPanelLabel, prIdentitySlug, prTaskKey } from "@/components/github/pr-utils";
 import { useDockviewStore } from "@/lib/state/dockview-store";
+import { pluginRegistry, usePluginRegistry } from "@/lib/plugins/registry";
+import { resolvePluginIcon } from "@/lib/plugins/icons";
 import type { TaskPR } from "@/lib/types/github";
 import type { TaskMR } from "@/lib/types/gitlab";
 import { mrTaskKey } from "@/components/gitlab/mr-detail-panel";
@@ -94,6 +96,36 @@ function PRPanelMenuItems({ prs, onOpenPR }: { prs: TaskPR[]; onOpenPR: (pr: Tas
   );
 }
 
+/** One "+" menu row per plugin-registered task panel (AC1), rendered after Plan. */
+function PluginTaskPanelMenuItems({ groupId }: { groupId: string }) {
+  usePluginRegistry();
+  const addPluginPanel = useDockviewStore((s) => s.addPluginPanel);
+  const panels = pluginRegistry.getTaskPanels();
+
+  return (
+    <>
+      {panels.map((registration) => {
+        const Icon = resolvePluginIcon(registration.icon);
+        return (
+          <DropdownMenuItem
+            key={`${registration.pluginId}:${registration.id}`}
+            onClick={() =>
+              addPluginPanel(registration.pluginId, registration.id, registration.title, {
+                groupId,
+              })
+            }
+            className={MENU_ITEM_CLASS}
+            data-testid={`add-panel-plugin-item-${registration.pluginId}-${registration.id}`}
+          >
+            <Icon className={MENU_ICON_CLASS} />
+            {registration.title}
+          </DropdownMenuItem>
+        );
+      })}
+    </>
+  );
+}
+
 export function AddPanelMenuItems({
   groupId,
   state,
@@ -137,6 +169,7 @@ export function AddPanelMenuItems({
           Plan
         </DropdownMenuItem>
       )}
+      <PluginTaskPanelMenuItems groupId={groupId} />
       {!state.hasChanges && (
         <DropdownMenuItem onClick={() => addChangesPanel(groupId)} className={MENU_ITEM_CLASS}>
           <IconGitBranch className={MENU_ICON_CLASS} />

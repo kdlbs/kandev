@@ -28,6 +28,10 @@ export function buildTaskSwitcherProps(args: {
   handleReorderGroup: TaskSwitcherComponentProps["onReorderGroup"];
   handleReorderSubtasks: TaskSwitcherComponentProps["onReorderSubtasks"];
   isLoadingWorkflow: boolean;
+  archivedError: string | null;
+  retryArchivedTasks: () => void;
+  archivedLoadErrorLabel: string;
+  archivedRetryLabel: string;
   totalTaskCount: number;
   selection: ReturnType<typeof useSidebarSelection>;
 }): TaskSwitcherComponentProps {
@@ -56,6 +60,9 @@ export function buildTaskSwitcherProps(args: {
     pinnedTaskIds: args.pinnedTaskIds,
     deletingTaskId: args.sidebarActions.deletingTaskId,
     isLoading: args.isLoadingWorkflow,
+    loadError: args.archivedError ? args.archivedLoadErrorLabel : null,
+    onRetryLoad: args.retryArchivedTasks,
+    retryLabel: args.archivedRetryLabel,
     totalTaskCount: args.totalTaskCount,
     ...args.selection.switcherProps,
   };

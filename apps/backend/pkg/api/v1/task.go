@@ -213,10 +213,12 @@ func (a MessageAttachment) HasValidDeliveryMode() bool {
 	return a.DeliveryMode == "" || a.DeliveryMode == "prompt" || a.DeliveryMode == "path"
 }
 
-// ContextFileMeta represents a context file reference attached to a message
+// ContextFileMeta represents a context file reference attached to a message.
+// IsDirectory is optional for compatibility with older file-only entries.
 type ContextFileMeta struct {
-	Path string `json:"path"`
-	Name string `json:"name"`
+	Path        string `json:"path"`
+	Name        string `json:"name"`
+	IsDirectory *bool  `json:"is_directory,omitempty"`
 }
 
 // Message represents a message in a task session (user or agent)

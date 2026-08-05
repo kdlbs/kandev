@@ -114,13 +114,11 @@ func (p *EventPublisher) PublishAgentctlEvent(ctx context.Context, eventType str
 
 	var worktreeID string
 	var worktreeBranch string
-	if execution.Metadata != nil {
-		if id, ok := execution.Metadata[MetadataKeyWorktreeID].(string); ok {
-			worktreeID = id
-		}
-		if branch, ok := execution.Metadata[MetadataKeyWorktreeBranch].(string); ok {
-			worktreeBranch = branch
-		}
+	if id, ok := execution.metadataValue(MetadataKeyWorktreeID); ok {
+		worktreeID, _ = id.(string)
+	}
+	if branch, ok := execution.metadataValue(MetadataKeyWorktreeBranch); ok {
+		worktreeBranch, _ = branch.(string)
 	}
 
 	payload := AgentctlEventPayload{

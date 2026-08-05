@@ -336,6 +336,11 @@ type Service struct {
 	// session.ensure). Nil = unscoped.
 	taskAccessCheck func(ctx context.Context, taskID string) error
 
+	// titleBranchRuntime performs the lifecycle-owned Git branch rename after
+	// an agent resolves a prompt-first task title. It is optional for tests and
+	// installations that do not configure an agent runtime.
+	titleBranchRuntime titleBranchRuntime
+
 	// Workflow step getter for prompt building
 	workflowStepGetter WorkflowStepGetter
 
@@ -384,6 +389,14 @@ type Service struct {
 	// ciAutomationInFlight prevents PR feedback and task-PR update events from
 	// racing duplicate auto-fix prompts or merge calls for the same PR.
 	ciAutomationInFlight sync.Map
+
+	// GitLab MR lifecycle notification automation. Nil-safe: without it,
+	// gitlab.task_mr.updated events are observed but no lifecycle prompt is
+	// ever evaluated.
+	gitlabMRAutomation taskMRAgentAutomationService
+	// mrAutomationInFlight prevents overlapping poll ticks from running the
+	// lifecycle evaluation pass twice for the same (task, repository, iid).
+	mrAutomationInFlight sync.Map
 
 	// Office task-handoffs materializer (phase 6 wiring) — invoked from
 	// PrepareTaskSession to flip workspace groups to materialized once

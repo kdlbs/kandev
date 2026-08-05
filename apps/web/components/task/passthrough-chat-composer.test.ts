@@ -150,9 +150,9 @@ describe("passthrough chat composer metadata helpers", () => {
       { path: "src/existing.ts", name: "existing.ts" },
       { path: "src/inline.ts", name: "inline.ts" },
     ]);
-    expect(result.content).toContain("CONTEXT FILES");
-    expect(result.content).toContain("- src/existing.ts");
-    expect(result.content).toContain("- src/inline.ts");
+    expect(result.content).toContain("CONTEXT PATHS");
+    expect(result.content).toContain("- file: src/existing.ts");
+    expect(result.content).toContain("- file: src/inline.ts");
     expect(result.content).toContain("CONTEXT PROMPTS");
     expect(result.content).toContain("Look carefully.");
     expect(result.content).toContain("REFERENCED TASKS");

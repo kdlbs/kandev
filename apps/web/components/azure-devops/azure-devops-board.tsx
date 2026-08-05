@@ -20,6 +20,7 @@ import type {
 } from "@/lib/types/azure-devops";
 import { groupAzureDevOpsBoardItems } from "./azure-devops-board-view";
 import { AzureDevOpsWorkItemDetail } from "./azure-devops-work-item-detail";
+import { useTranslation } from "react-i18next";
 
 type Props = {
   workspaceId?: string;
@@ -41,6 +42,7 @@ function BoardCard({
   onOpen: () => void;
   onDragStart: () => void;
 }) {
+  const { t } = useTranslation();
   const pointerStart = useRef<{ x: number; y: number } | null>(null);
   const handlePointerDown = (event: PointerEvent<HTMLDivElement>) => {
     pointerStart.current = { x: event.clientX, y: event.clientY };
@@ -71,7 +73,7 @@ function BoardCard({
       <CardHeader className="px-3 py-0">
         <CardTitle className="flex items-start gap-2 text-sm font-medium">
           <IconGripVertical className="mt-0.5 hidden h-4 w-4 shrink-0 text-muted-foreground md:block" />
-          <span className="line-clamp-2">{item.title || "Untitled work item"}</span>
+          <span className="line-clamp-2">{item.title || t("azuredevops:untitledWorkItem")}</span>
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-2 px-3 text-xs text-muted-foreground">
@@ -97,6 +99,7 @@ function MobileColumnNavigator({
   counts: Map<string, AzureDevOpsBoardWorkItem[]>;
   onChange: (columnId: string) => void;
 }) {
+  const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const index = Math.max(
     0,
@@ -114,7 +117,7 @@ function MobileColumnNavigator({
         variant="outline"
         size="icon"
         className="h-11 w-11 cursor-pointer"
-        aria-label="Previous board column"
+        aria-label={t("azuredevops:previousBoardColumn")}
         disabled={index === 0}
         onClick={() => onChange(columns[index - 1].id)}
       >
@@ -127,7 +130,7 @@ function MobileColumnNavigator({
         data-testid="azure-board-column-picker"
         onClick={() => setOpen(true)}
       >
-        <span>{column?.name ?? "Board column"}</span>
+        <span>{column?.name ?? t("azuredevops:boardColumn")}</span>
         <span>{counts.get(column?.id ?? "")?.length ?? 0}</span>
         <IconList className="h-4 w-4" />
       </Button>
@@ -136,7 +139,7 @@ function MobileColumnNavigator({
         variant="outline"
         size="icon"
         className="h-11 w-11 cursor-pointer"
-        aria-label="Next board column"
+        aria-label={t("azuredevops:nextBoardColumn")}
         disabled={index >= columns.length - 1}
         onClick={() => onChange(columns[index + 1].id)}
       >
@@ -145,7 +148,7 @@ function MobileColumnNavigator({
       <Drawer open={open} onOpenChange={setOpen}>
         <DrawerContent className="max-h-[min(32rem,calc(100dvh-16px-env(safe-area-inset-bottom,0px)))]">
           <DrawerHeader>
-            <DrawerTitle>Board columns</DrawerTitle>
+            <DrawerTitle>{t("azuredevops:boardColumns")}</DrawerTitle>
           </DrawerHeader>
           <div className="min-h-0 overflow-y-auto p-4 pb-[env(safe-area-inset-bottom,0px)]">
             {columns.map((candidate) => (
@@ -189,11 +192,12 @@ function BoardSelectors({
   boards: Array<{ id: string; name: string }>;
   onBoardChange: (value: string) => void;
 }) {
+  const { t } = useTranslation();
   return (
     <div className="flex flex-wrap gap-2">
       <Select value={projectId} onValueChange={onProjectChange}>
         <SelectTrigger className="w-52" data-testid="azure-board-project-select">
-          <SelectValue placeholder="Project" />
+          <SelectValue placeholder={t("azuredevops:project")} />
         </SelectTrigger>
         <SelectContent>
           {projects.map((project) => (
@@ -205,7 +209,7 @@ function BoardSelectors({
       </Select>
       <Select value={teamId} onValueChange={onTeamChange} disabled={!teams.length}>
         <SelectTrigger className="w-52" data-testid="azure-board-team-select">
-          <SelectValue placeholder="Team" />
+          <SelectValue placeholder={t("azuredevops:team")} />
         </SelectTrigger>
         <SelectContent>
           {teams.map((team) => (
@@ -217,7 +221,7 @@ function BoardSelectors({
       </Select>
       <Select value={boardId} onValueChange={onBoardChange} disabled={!boards.length}>
         <SelectTrigger className="w-52" data-testid="azure-board-select">
-          <SelectValue placeholder="Board" />
+          <SelectValue placeholder={t("azuredevops:board")} />
         </SelectTrigger>
         <SelectContent>
           {boards.map((board) => (
@@ -295,8 +299,11 @@ function useBoardPresentation(
 }
 
 function BoardEmptyState() {
+  const { t } = useTranslation();
   return (
-    <div className="p-6 text-sm text-muted-foreground">Select a project to view its board.</div>
+    <div className="p-6 text-sm text-muted-foreground">
+      {t("azuredevops:selectAProjectToViewIts")}
+    </div>
   );
 }
 
@@ -311,6 +318,7 @@ export function AzureDevOpsBoard({
   quickActions = [],
   onStartTask,
 }: Props) {
+  const { t } = useTranslation();
   const { isMobile } = useResponsiveBreakpoint();
   const board = useAzureDevOpsBoard(workspaceId, projectId, initialPreference);
   const [editing, setEditing] = useState<AzureDevOpsBoardWorkItem | null>(null);
@@ -338,7 +346,9 @@ export function AzureDevOpsBoard({
           <AlertDescription>{board.error}</AlertDescription>
         </Alert>
       )}
-      {board.loading && <div className="p-6 text-sm text-muted-foreground">Loading board…</div>}
+      {board.loading && (
+        <div className="p-6 text-sm text-muted-foreground">{t("azuredevops:loadingBoard")}</div>
+      )}
       {!board.loading && board.snapshot && (
         <>
           {isMobile && (

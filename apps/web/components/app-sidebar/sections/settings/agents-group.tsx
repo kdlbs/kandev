@@ -5,9 +5,8 @@ import { IconRobot } from "@tabler/icons-react";
 import { AgentLogo } from "@/components/agent-logo";
 import { useAppStore } from "@/components/state-provider";
 import { useAvailableAgents } from "@/hooks/domains/settings/use-available-agents";
+import { AGENTS_SETTINGS_HREF } from "@/lib/settings-discovery/catalog/agents";
 import { SettingsGroup, SettingsLeaf } from "./settings-nav-primitives";
-
-const ROOT_HREF = "/settings/agents";
 
 type AgentsGroupProps = {
   pathname: string;
@@ -24,15 +23,15 @@ export function AgentsGroup({ pathname, expanded, onToggle }: AgentsGroupProps) 
     <SettingsGroup
       label={t("common:agents")}
       icon={IconRobot}
-      href={ROOT_HREF}
-      isActive={pathname === ROOT_HREF}
+      href={AGENTS_SETTINGS_HREF}
+      isActive={pathname === AGENTS_SETTINGS_HREF}
       expanded={expanded}
       onToggle={onToggle}
     >
       {agents.flatMap((agent) =>
         agent.profiles.map((profile) => {
           const encodedAgent = encodeURIComponent(agent.name);
-          const profilePath = `${ROOT_HREF}/${encodedAgent}/profiles/${profile.id}`;
+          const profilePath = `${AGENTS_SETTINGS_HREF}/${encodedAgent}/profiles/${profile.id}`;
           const agentLabel = profile.agentDisplayName || agent.name;
           return (
             <SettingsLeaf

@@ -78,6 +78,30 @@ func TestMapUserSettingsStateIncludesAppStatusBarOrder(t *testing.T) {
 	}
 }
 
+func TestMapUserSettingsStateNormalizesLspStatusLocation(t *testing.T) {
+	tests := []struct {
+		name  string
+		value string
+		want  string
+	}{
+		{name: "status bar is preserved", value: usermodels.LspStatusLocationStatusBar, want: usermodels.LspStatusLocationStatusBar},
+		{name: "empty uses toolbar", value: "", want: usermodels.LspStatusLocationToolbar},
+		{name: "unknown uses toolbar", value: "future_location", want: usermodels.LspStatusLocationToolbar},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			state := mapUserSettingsState(userdto.UserSettingsResponse{
+				Settings: userdto.UserSettingsDTO{LspStatusLocation: tt.value},
+			}, "workspace-1")
+
+			if got := state["lspStatusLocation"]; got != tt.want {
+				t.Fatalf("lspStatusLocation = %#v, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestMapUserSettingsStateIncludesSystemMetricsDisplayPreference(t *testing.T) {
 	state := mapUserSettingsState(userdto.UserSettingsResponse{
 		Settings: userdto.UserSettingsDTO{SystemMetricsDisplay: usermodels.SystemMetricsDisplaySettings{

@@ -1,5 +1,6 @@
 "use client";
 
+import { useTranslation } from "react-i18next";
 import { DestinationRows } from "@/components/navigation/destination-rows";
 import { resolveDestinations } from "@/lib/navigation/resolve-destinations";
 import { NO_WORKSPACE_CONTEXT } from "@/lib/navigation/surface-policy";
@@ -19,6 +20,7 @@ type MobilePluginNavSectionProps = {
  * `MobileIntegrationsSection`.
  */
 export function MobilePluginNavSection({ onNavigate }: MobilePluginNavSectionProps) {
+  const { t } = useTranslation();
   const registry = usePluginRegistry();
   // Resolved directly rather than through `useStaticDestinations`: this group's
   // hrefs are static plugin paths, so it needs neither workspace context nor the
@@ -34,7 +36,7 @@ export function MobilePluginNavSection({ onNavigate }: MobilePluginNavSectionPro
 
   return (
     <div className="space-y-3" data-testid="mobile-plugin-nav-section">
-      <div className="text-sm font-medium">Plugins</div>
+      <div className="text-sm font-medium">{t("common:plugins")}</div>
       <DestinationRows
         destinations={destinations}
         onNavigate={onNavigate}

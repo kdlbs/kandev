@@ -10,6 +10,35 @@
  *     entry  -> missing keys are an ERROR (they would render as the raw key)
  *   - every catalog entry is referenced somewhere -> orphans are a WARNING
  *   - `en` and `pseudo` have the same key sets -> drift is an ERROR
+ *   - real locales (anything that is not `en`/`pseudo`, discovered from the
+ *     directory listing rather than named here) -> parity issues are a WARNING
+ *
+ * ## Why real locales only warn
+ *
+ * `en` and `pseudo` are ours: English is authored in the same PR as the code,
+ * and `pseudo` is GENERATED from it by `pnpm run i18n:pseudo`. A mismatch there
+ * is always the author's to fix in the change that caused it, so it gates.
+ *
+ * Real-locale catalogs are translated OUT OF BAND, by a third party, on their
+ * own cadence. Gating on them means an ordinary English-only PR fails CI for
+ * work nobody in the merge path can do — and that is not hypothetical: #2261
+ * added 13 `en` chat keys and left `main` red, because #2243 had introduced
+ * `zh-cn` and the gate 20 minutes earlier. So these are reported loudly, for
+ * whoever owns the translation, and do not block a merge.
+ *
+ * ## What this check is NOT
+ *
+ * The real-locale pass is STRUCTURAL, not translational. It compares shapes, so
+ * a green run does not mean "translated" — measured against `main`:
+ *
+ *   caught:     missing key, extra key, missing/extra namespace, empty or
+ *               non-string value, dropped `{{placeholder}}`, dropped `<n>` tag
+ *   NOT caught: a value identical to English, a whole catalog copy-pasted from
+ *               `en`, and swapped `_one`/`_other` forms
+ *
+ * The identical-to-English tolerance is deliberate — brand nouns and technical
+ * literals (`Kandev`, `GitHub`, `Webhook URL`) must stay verbatim, so there is
+ * no sound automatic rule here. Reviewing a translation is a human job.
  *
  * Usage: node scripts/check-i18n-keys.mjs [--strict-orphans]
  */
@@ -130,10 +159,15 @@ if (pseudoMissing.length || pseudoExtra.length) {
   );
 }
 
+// Advisory, never fatal — see the "Why real locales only warn" note at the top.
+// Deliberately NOT gated behind --strict-orphans or any flag: the point is that
+// no invocation of this script can be made to fail on a translation catalog.
 if (realLocaleIssues.length) {
-  failed = true;
-  console.error(`\n✖ ${realLocaleIssues.length} real-locale catalog parity issue(s):`);
-  for (const issue of realLocaleIssues) console.error(`  ${formatParityIssue(issue)}`);
+  console.warn(
+    `\n⚠ ${realLocaleIssues.length} real-locale catalog parity issue(s) ` +
+      `— advisory, does not fail the build:`,
+  );
+  for (const issue of realLocaleIssues) console.warn(`  ${formatParityIssue(issue)}`);
 }
 
 if (orphans.length) {
@@ -147,9 +181,16 @@ if (orphans.length) {
 }
 
 if (!failed) {
+  // Say only what was actually gated. The previous wording claimed "pseudo and
+  // zh-cn in sync", which was misleading twice over: it implied a real locale
+  // gates the build, and it read as "translated" for a check that cannot see
+  // English left inside a translated value.
+  const advisory = realLocales.length
+    ? ` ${realLocaleIssues.length} advisory ${realLocales.join(", ")} issue(s).`
+    : "";
   console.log(
     `✓ i18n keys OK — ${used.size} key(s) referenced, ${en.size} en entr(ies), ` +
-      `${orphans.length} orphan(s), pseudo and ${realLocales.join(", ") || "no real locales"} in sync.`,
+      `${orphans.length} orphan(s), pseudo in sync.${advisory}`,
   );
 }
 process.exit(failed ? 1 : 0);

@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { useTranslation } from "react-i18next";
 import { Input } from "@kandev/ui/input";
 import { Label } from "@kandev/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
@@ -26,13 +27,14 @@ function fieldIsDirty<K extends keyof SSHExecutorConfig>(
 }
 
 export function SSHConnectionForm({ form, baseline, onChange }: SSHConnectionFormProps) {
+  const { t } = useTranslation();
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
       <TextField
         id="ssh-name"
         testId="ssh-input-name"
-        label="Name"
-        placeholder="My VPS"
+        label={t("executors:name")}
+        placeholder={t("executors:sshNamePlaceholder")}
         value={form.name}
         isDirty={fieldIsDirty(form, baseline, "name", "")}
         onChange={(value) => onChange("name", value)}
@@ -40,8 +42,8 @@ export function SSHConnectionForm({ form, baseline, onChange }: SSHConnectionFor
       <TextField
         id="ssh-host-alias"
         testId="ssh-input-host-alias"
-        label="Host alias from ~/.ssh/config (optional)"
-        hint="If set, inherits HostName / Port / User / IdentityFile / ProxyJump from your config."
+        label={t("executors:sshHostAliasLabel", { path: "~/.ssh/config" })}
+        hint={t("executors:sshHostAliasHint")}
         placeholder="prod"
         value={form.host_alias ?? ""}
         isDirty={fieldIsDirty(form, baseline, "host_alias", "")}
@@ -50,7 +52,7 @@ export function SSHConnectionForm({ form, baseline, onChange }: SSHConnectionFor
       <TextField
         id="ssh-host"
         testId="ssh-input-host"
-        label="Host"
+        label={t("executors:host")}
         placeholder="dev.example.com"
         value={form.host ?? ""}
         isDirty={fieldIsDirty(form, baseline, "host", "")}
@@ -59,7 +61,7 @@ export function SSHConnectionForm({ form, baseline, onChange }: SSHConnectionFor
       <TextField
         id="ssh-port"
         testId="ssh-input-port"
-        label="Port"
+        label={t("executors:port")}
         type="number"
         placeholder="22"
         value={String(form.port ?? 22)}
@@ -69,7 +71,7 @@ export function SSHConnectionForm({ form, baseline, onChange }: SSHConnectionFor
       <TextField
         id="ssh-user"
         testId="ssh-input-user"
-        label="User"
+        label={t("executors:user")}
         placeholder="ubuntu"
         value={form.user ?? ""}
         isDirty={fieldIsDirty(form, baseline, "user", "")}
@@ -84,8 +86,8 @@ export function SSHConnectionForm({ form, baseline, onChange }: SSHConnectionFor
         <TextField
           id="ssh-identity-file"
           testId="ssh-input-identity-file"
-          label="Identity file path"
-          hint="Passphrase-protected keys must be loaded into ssh-agent first."
+          label={t("executors:sshIdentityFilePath")}
+          hint={t("executors:sshIdentityFileHint")}
           placeholder="~/.ssh/id_ed25519"
           value={form.identity_file ?? ""}
           isDirty={fieldIsDirty(form, baseline, "identity_file", "")}
@@ -95,8 +97,8 @@ export function SSHConnectionForm({ form, baseline, onChange }: SSHConnectionFor
       <TextField
         id="ssh-proxy-jump"
         testId="ssh-input-proxy-jump"
-        label="ProxyJump (optional)"
-        hint="Single bastion hop. Chained jumps are not supported."
+        label={t("executors:sshProxyJumpLabel")}
+        hint={t("executors:sshProxyJumpHint")}
         placeholder="bastion.example.com"
         value={form.proxy_jump ?? ""}
         isDirty={fieldIsDirty(form, baseline, "proxy_jump", "")}
@@ -153,8 +155,9 @@ function IdentitySourceField({
   isDirty: boolean;
   onChange: (value: SSHIdentitySource) => void;
 }) {
+  const { t } = useTranslation();
   return (
-    <FieldShell id="ssh-identity-source" label="Identity source">
+    <FieldShell id="ssh-identity-source" label={t("executors:sshIdentitySource")}>
       <Select value={value} onValueChange={(next) => onChange(next as SSHIdentitySource)}>
         <SelectTrigger
           id="ssh-identity-source"
@@ -165,10 +168,18 @@ function IdentitySourceField({
         </SelectTrigger>
         <SelectContent>
           <SelectItem value="agent" data-testid="ssh-input-identity-source-agent">
-            ssh-agent (SSH_AUTH_SOCK)
+            {/* The OpenSSH agent program and the environment variable it
+                publishes its socket on are identifiers the user finds under
+                those names on their own machine, so both travel as interpolated
+                values and the pseudo-locale leaves them intact. Only the
+                bracketing around them is copy. */}
+            {t("executors:sshIdentitySourceAgent", {
+              program: "ssh-agent",
+              envVar: "SSH_AUTH_SOCK",
+            })}
           </SelectItem>
           <SelectItem value="file" data-testid="ssh-input-identity-source-file">
-            Identity file (private key path)
+            {t("executors:sshIdentitySourceFile")}
           </SelectItem>
         </SelectContent>
       </Select>

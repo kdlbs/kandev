@@ -3,11 +3,21 @@ package github
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/kandev/kandev/internal/common/securityutil"
 )
+
+func validateGitHubCommitSHA(sha string) error {
+	if !securityutil.LooksLikeCommitSHA(sha) {
+		return fmt.Errorf("invalid commit SHA")
+	}
+	return nil
+}
 
 // buildReviewSearchQuery assembles the full GitHub search query.
 // When customQuery is non-empty, it is used verbatim as the entire query.
@@ -642,6 +652,28 @@ type ghPRCommit struct {
 	} `json:"author"`
 }
 
+// ghPRCommitDetail is the JSON shape returned by GitHub's individual commit
+// endpoint. With gh api --paginate --slurp, the same shape is wrapped in an
+// array, one element per page.
+type ghPRCommitDetail struct {
+	SHA    string `json:"sha"`
+	Commit struct {
+		Message string `json:"message"`
+		Author  struct {
+			Name string `json:"name"`
+			Date string `json:"date"`
+		} `json:"author"`
+	} `json:"commit"`
+	Author *struct {
+		Login string `json:"login"`
+	} `json:"author"`
+	Stats struct {
+		Additions int `json:"additions"`
+		Deletions int `json:"deletions"`
+	} `json:"stats"`
+	Files []ghPRFile `json:"files"`
+}
+
 // parsePRFilesJSON parses the JSON response from the PR files API.
 func parsePRFilesJSON(data string) ([]PRFile, error) {
 	var raw []ghPRFile
@@ -665,6 +697,59 @@ func convertRawPRFiles(raw []ghPRFile) []PRFile {
 		}
 	}
 	return files
+}
+
+// parsePRCommitDetailJSON parses one or more pages from GitHub's individual
+// commit endpoint. Metadata and aggregate stats come from the first page;
+// file records are appended in provider order and duplicate filenames are
+// ignored when a provider repeats a record across pages.
+func parsePRCommitDetailJSON(data string) (PRCommitDetail, error) {
+	var pages []ghPRCommitDetail
+	trimmed := strings.TrimSpace(data)
+	if strings.HasPrefix(trimmed, "[") {
+		if err := json.Unmarshal([]byte(trimmed), &pages); err != nil {
+			return PRCommitDetail{}, fmt.Errorf("parse PR commit detail: %w", err)
+		}
+	} else {
+		var page ghPRCommitDetail
+		if err := json.Unmarshal([]byte(trimmed), &page); err != nil {
+			return PRCommitDetail{}, fmt.Errorf("parse PR commit detail: %w", err)
+		}
+		pages = []ghPRCommitDetail{page}
+	}
+	if len(pages) == 0 {
+		return PRCommitDetail{}, errors.New("parse PR commit detail: empty response")
+	}
+
+	first := pages[0]
+	if first.SHA == "" {
+		return PRCommitDetail{}, errors.New("parse PR commit detail: missing commit SHA")
+	}
+	detail := PRCommitDetail{
+		SHA:        first.SHA,
+		Message:    first.Commit.Message,
+		AuthorName: first.Commit.Author.Name,
+		AuthorDate: first.Commit.Author.Date,
+		Additions:  first.Stats.Additions,
+		Deletions:  first.Stats.Deletions,
+		Files:      make([]PRFile, 0),
+	}
+	if first.Author != nil {
+		detail.AuthorLogin = first.Author.Login
+	}
+	seen := make(map[string]struct{})
+	for _, page := range pages {
+		for _, file := range page.Files {
+			key := file.Filename + "\x00" + file.PreviousFilename
+			if _, ok := seen[key]; ok {
+				continue
+			}
+			seen[key] = struct{}{}
+			detail.Files = append(detail.Files, convertRawPRFiles([]ghPRFile{file})[0])
+		}
+	}
+	detail.FilesChanged = len(detail.Files)
+	return detail, nil
 }
 
 // buildFullDiff wraps a GitHub patch fragment into a complete unified diff.
@@ -729,10 +814,11 @@ func convertRawPRCommits(raw []ghPRCommit) []PRCommitInfo {
 			msg = msg[:idx]
 		}
 		commits[i] = PRCommitInfo{
-			SHA:         c.SHA,
-			Message:     msg,
-			AuthorLogin: author,
-			AuthorDate:  c.Commit.Author.Date,
+			SHA:            c.SHA,
+			Message:        msg,
+			AuthorLogin:    author,
+			AuthorDate:     c.Commit.Author.Date,
+			StatsAvailable: false,
 		}
 	}
 	return commits

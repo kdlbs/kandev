@@ -41,6 +41,7 @@ import type {
   SetAzureDevOpsConfigRequest,
   TestAzureDevOpsConnectionResult,
 } from "@/lib/types/azure-devops";
+import { INTEGRATION_SETTINGS_TARGETS } from "@/lib/settings-discovery/catalog/integrations";
 
 type FormState = {
   organizationUrl: string;
@@ -486,6 +487,7 @@ export function AzureDevOpsConnectionSection({ workspaceId }: { workspaceId: str
 
   return (
     <SettingsSection
+      discoveryTargetId={INTEGRATION_SETTINGS_TARGETS["azure-devops"]}
       icon={<IconBrandAzure className="h-5 w-5" />}
       title={t("azuredevops:integrationTitle")}
       description={t("azuredevops:integrationDescription")}

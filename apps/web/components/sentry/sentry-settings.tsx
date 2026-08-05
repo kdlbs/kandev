@@ -21,6 +21,7 @@ import { SentryInstanceCard } from "./sentry-instance-card";
 import { SentryInstanceForm } from "./sentry-instance-form";
 import { SentryIssueWatchersSection } from "./sentry-issue-watchers-section";
 import { useTranslation } from "react-i18next";
+import { INTEGRATION_SETTINGS_TARGETS } from "@/lib/settings-discovery/catalog/integrations";
 
 // EditMode is the mutually-exclusive form state: at most one add-or-edit form
 // is open at a time.
@@ -189,6 +190,7 @@ export function SentryConnectionSection({ workspaceId }: { workspaceId: string }
 
   return (
     <SettingsSection
+      discoveryTargetId={INTEGRATION_SETTINGS_TARGETS.sentry}
       icon={<IconBrandSentry className="h-5 w-5" />}
       title={t("sentry:sentryIntegration")}
       description={t("sentry:sentryIntegrationDescription")}

@@ -83,6 +83,7 @@ export function GitHubPRConfig({ config, onUpdate }: GitHubPRConfigProps) {
             value={branches}
             onChange={(e) => setBranches(e.target.value)}
             onBlur={handleBranchesBlur}
+            // eslint-disable-next-line i18next/no-literal-string -- example branch names, see above
             placeholder="main, develop"
           />
         </div>
@@ -93,6 +94,7 @@ export function GitHubPRConfig({ config, onUpdate }: GitHubPRConfigProps) {
             value={authors}
             onChange={(e) => setAuthors(e.target.value)}
             onBlur={handleAuthorsBlur}
+            // eslint-disable-next-line i18next/no-literal-string -- example usernames, see above
             placeholder="alice, bob"
           />
         </div>

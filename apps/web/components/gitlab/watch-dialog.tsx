@@ -129,6 +129,7 @@ function FilterFields({ kind, form, setForm }: FormFieldsProps) {
           // Sample namespace/project paths, i.e. the shape of the GitLab data the
           // field accepts. Not copy — a translated "group" would stop being a
           // usable example.
+          // eslint-disable-next-line i18next/no-literal-string -- example project paths
           placeholder="group/api, group/web"
         />
       </div>
@@ -144,6 +145,7 @@ function FilterFields({ kind, form, setForm }: FormFieldsProps) {
             onChange={(event) => setForm((current) => ({ ...current, labels: event.target.value }))}
             // Sample GitLab label names — user data, like the labels the user
             // will actually type here.
+            // eslint-disable-next-line i18next/no-literal-string -- example label names
             placeholder="bug, priority::high"
           />
         </div>
@@ -168,6 +170,7 @@ function FilterFields({ kind, form, setForm }: FormFieldsProps) {
           }
           // A literal GitLab API query parameter. It is submitted to GitLab
           // verbatim, so it is protocol, not copy.
+          // eslint-disable-next-line i18next/no-literal-string -- GitLab API query parameter
           placeholder="state=opened"
           className="font-mono text-xs"
         />

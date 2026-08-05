@@ -16,5 +16,5 @@ export function revealFileAtLine(
 ): void {
   if (line > 0) setPendingCursorPosition(file, line, 1, repo);
   void openFile(file, repo);
-  if (line > 0) scrollEditorIfMounted(file, null, line, 1, repo);
+  if (line > 0) scrollEditorIfMounted(file, null, line, 1, { repo });
 }

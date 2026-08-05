@@ -41,6 +41,7 @@ import {
   secretCopy,
   secretPlaceholder,
 } from "@/components/jira/jira-secret-help";
+import { INTEGRATION_SETTINGS_TARGETS } from "@/lib/settings-discovery/catalog/integrations";
 
 // Cloud sites live under this domain; shown as an example, not as prose, so it
 // is interpolated rather than written into the catalog.
@@ -568,6 +569,7 @@ export function JiraConnectionSection({ workspaceId }: { workspaceId: string }) 
 
   return (
     <SettingsSection
+      discoveryTargetId={INTEGRATION_SETTINGS_TARGETS.jira}
       icon={<IconTicket className="h-5 w-5" />}
       title={t("jira:jiraIntegration")}
       description={t("jira:connectThisWorkspaceToAtlassianCloud")}

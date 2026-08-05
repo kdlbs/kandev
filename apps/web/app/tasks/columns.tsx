@@ -12,6 +12,8 @@ import { formatDistanceToNow } from "date-fns";
 import { TaskDeleteConfirmDialog } from "@/components/task/task-delete-confirm-dialog";
 import { TaskArchiveConfirmDialog } from "@/components/task/task-archive-confirm-dialog";
 import { linkToTask } from "@/lib/links";
+import { useTranslation } from "react-i18next";
+import { t } from "@/lib/i18n";
 
 type TaskWithResolution = Task & {
   workflowName?: string;
@@ -35,6 +37,7 @@ function TitleCell({
   row: Row<TaskWithResolution>;
   repoMap: Map<string, string>;
 }) {
+  const { t } = useTranslation();
   const task = row.original;
   const isArchived = !!task.archived_at;
   const repoName = task.repositories?.[0]
@@ -51,7 +54,7 @@ function TitleCell({
             variant="outline"
             className="text-[10px] px-1.5 py-0 text-amber-500 border-amber-500/30"
           >
-            Archived
+            {t("tasks:archived")}
           </Badge>
         )}
       </div>
@@ -67,6 +70,7 @@ type ActionsCtx = {
 };
 
 function ActionsCell({ row, ctx }: { row: Row<TaskWithResolution>; ctx: ActionsCtx }) {
+  const { t } = useTranslation();
   const task = row.original;
   const isDeleting = ctx.deletingTaskId === task.id;
   const isArchived = !!task.archived_at;
@@ -89,7 +93,7 @@ function ActionsCell({ row, ctx }: { row: Row<TaskWithResolution>; ctx: ActionsC
               <IconArchive className="h-3.5 w-3.5 text-muted-foreground" />
             </Button>
           </TooltipTrigger>
-          <TooltipContent>Archive</TooltipContent>
+          <TooltipContent>{t("tasks:archive")}</TooltipContent>
         </Tooltip>
       )}
       <Tooltip>
@@ -111,7 +115,7 @@ function ActionsCell({ row, ctx }: { row: Row<TaskWithResolution>; ctx: ActionsC
             )}
           </Button>
         </TooltipTrigger>
-        <TooltipContent>Delete</TooltipContent>
+        <TooltipContent>{t("tasks:delete")}</TooltipContent>
       </Tooltip>
       <TaskDeleteConfirmDialog
         open={showDeleteConfirm}
@@ -150,12 +154,12 @@ export function getColumns({
   return [
     {
       accessorKey: "title",
-      header: "Task",
+      header: t("tasks:columnTask"),
       cell: ({ row }) => <TitleCell row={row} repoMap={repoMap} />,
     },
     {
       accessorKey: "workflow_id",
-      header: "Workflow",
+      header: t("tasks:columnWorkflow"),
       cell: ({ row }) => (
         <span className="text-xs text-muted-foreground">
           {workflowMap.get(row.original.workflow_id) || "-"}
@@ -164,7 +168,7 @@ export function getColumns({
     },
     {
       accessorKey: "workflow_step_id",
-      header: "Step",
+      header: t("tasks:columnStep"),
       cell: ({ row }) => (
         <span className="text-xs text-muted-foreground bg-foreground/[0.06] px-2 py-0.5 rounded-md">
           {stepMap.get(row.original.workflow_step_id) || "-"}
@@ -173,7 +177,7 @@ export function getColumns({
     },
     {
       accessorKey: "updated_at",
-      header: "Updated",
+      header: t("tasks:columnUpdated"),
       cell: ({ row }) => (
         <span className="text-xs text-muted-foreground">
           {formatDistanceToNow(new Date(row.original.updated_at), { addSuffix: true })}

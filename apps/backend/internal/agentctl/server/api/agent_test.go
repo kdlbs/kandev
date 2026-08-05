@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"slices"
 	"strings"
 	"testing"
@@ -39,10 +40,43 @@ func newTestServer(t *testing.T) *Server {
 	log := newTestLogger()
 	cfg := &config.InstanceConfig{
 		Port:    0,
-		WorkDir: "/tmp/test",
+		WorkDir: t.TempDir(),
 	}
 	procMgr := process.NewManager(cfg, log)
 	return NewServer(cfg, procMgr, nil, nil, log)
+}
+
+func prepareVscodeTestServer(t *testing.T) *Server {
+	t.Helper()
+	t.Setenv(apiTestVscodeFixtureEnv, "1")
+	log := newTestLogger()
+	cfg := &config.InstanceConfig{Port: 0, WorkDir: t.TempDir(), VscodeCommand: os.Args[0]}
+	procMgr := process.NewManager(cfg, log)
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := procMgr.StopVscode(ctx); err != nil {
+			t.Errorf("StopVscode() cleanup error = %v", err)
+		}
+	})
+	return NewServer(cfg, procMgr, nil, nil, log)
+}
+
+func waitForVscodeStatus(t *testing.T, server *Server, want process.VscodeStatus) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		info := server.procMgr.VscodeInfo()
+		if info.Status == want {
+			return
+		}
+		if info.Status == process.VscodeStatusError || info.Status == process.VscodeStatusStopped {
+			t.Fatalf("VS Code status = %q (%s), want %q", info.Status, info.Error, want)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	info := server.procMgr.VscodeInfo()
+	t.Fatalf("VS Code status = %q (%s), want %q", info.Status, info.Error, want)
 }
 
 func TestHandleAgentConfigure_PrefersPresentStructuredArgs(t *testing.T) {

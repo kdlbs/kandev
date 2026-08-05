@@ -107,7 +107,7 @@ func (s *Service) requeueMessage(ctx context.Context, queuedMsg *messagequeue.Qu
 	if queuedMsg.QueuedBy != "" && coalesceKey != "" {
 		queuedBy = queuedMsg.QueuedBy
 	}
-	if queuedMsg.Metadata["origin"] == githubPRAutomationOrigin {
+	if isLifecycleAutomationOrigin(queuedMsg.Metadata["origin"]) {
 		s.requeueLifecycleMessage(ctx, queuedMsg, queuedBy, coalesceKey)
 		return
 	}
@@ -579,6 +579,17 @@ func (s *Service) handleAgentReady(ctx context.Context, data watcher.AgentEventD
 
 const githubPRAutomationOrigin = "github_pr_automation"
 
+// isLifecycleAutomationOrigin reports whether a queued message's "origin"
+// metadata identifies it as a durable lifecycle prompt (GitHub PR or GitLab
+// MR automation) rather than an ordinary queued message. Both producers
+// share the same durable-queue contract (QueueLifecycleMessageWithCoalesceKey,
+// AcknowledgeQueued on accepted delivery); this is the single place that
+// recognizes the set of origins entitled to that treatment, so adding a
+// future provider only needs a change here.
+func isLifecycleAutomationOrigin(origin interface{}) bool {
+	return origin == githubPRAutomationOrigin || origin == mrAutomationOrigin
+}
+
 func (s *Service) recordQueuedUserMessage(ctx context.Context, queuedMsg *messagequeue.QueuedMessage, attachments []v1.MessageAttachment) error {
 	alreadyRecorded, _ := queuedMsg.Metadata[metaKeyUserMessageRecorded].(bool)
 	if s.messageCreator == nil || alreadyRecorded {
@@ -611,7 +622,7 @@ func (s *Service) executeQueuedMessage(callerSessionID string, queuedMsg *messag
 	promptCtx := context.Background() // Use a fresh context for async execution
 	reservedSessionID := queuedMsg.SessionID
 	defer s.clearQueuedDispatchInFlightIfCurrent(reservedSessionID, queuedMsg.ID)
-	lifecyclePrompt := queuedMsg.Metadata["origin"] == githubPRAutomationOrigin
+	lifecyclePrompt := isLifecycleAutomationOrigin(queuedMsg.Metadata["origin"])
 
 	// Safety net: guarantee the in-flight marker (set by
 	// dispatchTakenQueuedMessage before spawning this goroutine — see the

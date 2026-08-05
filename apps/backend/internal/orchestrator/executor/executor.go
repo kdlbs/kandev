@@ -344,6 +344,7 @@ type LaunchAgentRequest struct {
 	ExecutorConfig       map[string]string // Executor config (docker_host, git_token, etc.)
 	PreviousExecutionID  string            // Previous execution ID for runtime reconnect
 	McpMode              string            // MCP tool mode: "task" (default), "config", or "office"
+	McpProviders         []string          // Normalized provider capabilities attached to the task
 	IsEphemeral          bool              // Ephemeral task (quick chat) — enables fallback workspace creation
 	WorkspacePath        string            // Optional host folder for repo-less tasks (overrides scratch fallback)
 
@@ -373,6 +374,7 @@ type LaunchAgentRequest struct {
 	DefaultBranch          string // Repository's default_branch, used as a fallback when BaseBranch is missing
 	CheckoutBranch         string // Branch to fetch and checkout after worktree creation (e.g., PR head branch)
 	PRNumber               int    // GitHub PR number when CheckoutBranch is a PR head; enables refs/pull/<N>/head fetch for fork PRs.
+	RemoteContribution     *models.RemoteContribution
 	WorktreeBranchPrefix   string // Branch prefix for worktree branches
 	WorktreeBranchTemplate string // Branch name template for worktree branches
 	WorktreeBranchTicket   string // External ticket value for branch templates
@@ -415,6 +417,7 @@ type RepoSpec struct {
 	DefaultBranch          string // Repository's default_branch, used as fallback when BaseBranch is missing
 	CheckoutBranch         string
 	PRNumber               int // GitHub PR number when CheckoutBranch is a PR head; enables refs/pull/<N>/head fetch for fork PRs.
+	RemoteContribution     *models.RemoteContribution
 	WorktreeID             string
 	WorktreeBranchPrefix   string
 	WorktreeBranchTemplate string

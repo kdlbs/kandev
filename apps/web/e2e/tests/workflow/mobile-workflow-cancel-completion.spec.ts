@@ -15,6 +15,10 @@ async function tapCancelButton(session: SessionPage) {
   // cancelling state is observable; the two-second responsiveness assertion
   // starts only after that state proves the request was accepted.
   await expect(async () => {
+    // A successful request can finish between toPass attempts. In that case the
+    // button is already gone; the assertions below still prove the idle state
+    // and completion-action transition rather than trying to tap a stale locator.
+    if (!(await button.isVisible()) || (await button.isDisabled())) return;
     await button.scrollIntoViewIfNeeded();
     await button.tap();
     await expect
@@ -54,8 +58,6 @@ async function seedMobileCancellationWorkflow(apiClient: ApiClient, workspaceId:
 }
 
 test.describe("mobile: cancelled turn completion", () => {
-  test.describe.configure({ retries: 1 });
-
   test("saves the policy by touch, reloads it, and advances after Cancel", async ({
     testPage,
     apiClient,

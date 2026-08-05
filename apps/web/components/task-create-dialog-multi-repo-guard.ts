@@ -9,11 +9,13 @@ const MULTI_REPO_SUPPORTED_EXECUTOR_TYPES = new Set(["worktree", "local_docker",
  *
  * The three messages are copy: they render as the `title` on a disabled option
  * in the automation editor's Executor Profile picker and in the task-create
- * dialog. This module is shared by both surfaces and belongs to neither, so the
- * Automations migration translated the strings its own picker renders without
- * adding the file to `i18nGuardFiles` — allowlisting it would claim a
- * completeness the task-create dialog has not had. Resolved at call time rather
- * than module scope, so a locale switch is picked up.
+ * dialog. The Automations migration translated all three but left the file off
+ * `i18nGuardFiles`, arguing that allowlisting it would claim a completeness the
+ * task-create dialog has not had. That reasoning was wrong, and the entry was
+ * added here: the completeness the allowlist tracks is the FILE's, not the
+ * consuming directory's, and this file holds no other copy. Left off, it could
+ * silently drift back — which is the one thing the list exists to prevent.
+ * Resolved at call time rather than module scope, so a locale switch is picked up.
  */
 export function getMultiRepoExecutorDisabledReason(executorType: string | null | undefined) {
   if (MULTI_REPO_SUPPORTED_EXECUTOR_TYPES.has(executorType ?? "")) return null;

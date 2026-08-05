@@ -1,4 +1,6 @@
 {
+  "addToChatContext": "添加到聊天上下文",
+  "addedToChatContext": "{{name}} 已添加到聊天上下文",
   "collapseMessage": "折叠消息",
   "collapseQueuedMessages": "折叠排队中的消息",
   "clearAll": "全部清除",
@@ -9,6 +11,7 @@
   "failedToMergeQueuedMessages": "合并排队中的消息失败。",
   "failedToRemoveQueuedMessage": "移除排队中的消息失败。",
   "failedToRunQueuedMessage": "运行排队中的消息失败。",
+  "fileTreeActions": "文件操作",
   "mergeReferenceOverflow": "这些排队中的消息包含过多实体引用，无法合并。",
   "mergeWithAbove": "与上方消息合并",
   "queueCapacity_one": "{{count}} / {{max}}",

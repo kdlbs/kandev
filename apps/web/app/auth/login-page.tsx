@@ -9,17 +9,19 @@ import { ApiError } from "@/lib/api/client";
 import { login } from "@/lib/api/domains/auth-api";
 import { useAppStore } from "@/components/state-provider";
 import type { SsoProvider } from "@/lib/state/slices/auth/types";
+import { useTranslation } from "react-i18next";
 
 // LoginSsoButtons renders one "Continue with <provider>" button per
 // plugin-contributed SSO provider, below a divider. Each button is a plain
 // navigation to the plugin's login-initiate webhook.
 function LoginSsoButtons({ providers }: { providers: SsoProvider[] }) {
+  const { t } = useTranslation();
   if (providers.length === 0) return null;
   return (
     <div className="mt-4 flex flex-col gap-2" data-testid="login-sso">
       <div className="flex items-center gap-2 text-xs text-muted-foreground">
         <span className="h-px flex-1 bg-border" />
-        or continue with
+        {t("auth:orContinueWith")}
         <span className="h-px flex-1 bg-border" />
       </div>
       {providers.map((provider) => (
@@ -30,7 +32,9 @@ function LoginSsoButtons({ providers }: { providers: SsoProvider[] }) {
           className="cursor-pointer"
           data-testid={`login-sso-${provider.id}`}
         >
-          <a href={provider.initiateUrl}>Continue with {provider.displayName}</a>
+          <a href={provider.initiateUrl}>
+            {t("auth:continueWithProvider", { provider: provider.displayName })}
+          </a>
         </Button>
       ))}
     </div>
@@ -38,6 +42,7 @@ function LoginSsoButtons({ providers }: { providers: SsoProvider[] }) {
 }
 
 export function LoginPage() {
+  const { t } = useTranslation();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -72,15 +77,15 @@ export function LoginPage() {
       <Card className="w-full max-w-sm">
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-base">
-            <IconLock className="h-4 w-4" /> Sign in
+            <IconLock className="h-4 w-4" /> {t("auth:signIn")}
           </CardTitle>
-          <CardDescription>Sign in to your Kandev account to continue.</CardDescription>
+          <CardDescription>{t("auth:signInToYourKandevAccount")}</CardDescription>
         </CardHeader>
         <CardContent>
           <form className="flex flex-col gap-3" onSubmit={(e) => void onSubmit(e)}>
             <div className="flex flex-col gap-1">
               <label htmlFor="login-email" className="text-xs text-muted-foreground">
-                Email
+                {t("auth:email")}
               </label>
               <Input
                 id="login-email"
@@ -94,7 +99,7 @@ export function LoginPage() {
             </div>
             <div className="flex flex-col gap-1">
               <label htmlFor="login-password" className="text-xs text-muted-foreground">
-                Password
+                {t("auth:password")}
               </label>
               <Input
                 id="login-password"
@@ -117,7 +122,7 @@ export function LoginPage() {
               disabled={submitting}
               data-testid="login-submit"
             >
-              {submitting ? "Signing in..." : "Sign in"}
+              {submitting ? t("auth:signingIn") : t("auth:signIn")}
             </Button>
           </form>
           <LoginSsoButtons providers={ssoProviders} />
