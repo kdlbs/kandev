@@ -18,6 +18,7 @@ import { Checkbox } from "@kandev/ui/checkbox";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from "@kandev/ui/dropdown-menu";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { PRTaskIcon } from "@/components/github/pr-task-icon";
+import { PluginSlot } from "@/components/plugins/plugin-slot";
 import {
   KanbanCardDropdownMenuItems,
   type KanbanCardMenuEntry,
@@ -125,6 +126,22 @@ function RepoChipRow({ chips }: { chips: RepositoryChip[] }) {
   );
 }
 
+/**
+ * `task-card-indicators` slot (AC13): reads the active workspace from the
+ * store itself, rather than threading `workspaceId` through the
+ * KanbanCardFrame -> KanbanCardShell -> KanbanCardBody prop chain, since
+ * `<PluginSlot/>` already renders nothing when the slot is empty (AC14).
+ */
+function TaskCardIndicators({ task }: { task: Task }) {
+  const workspaceId = useAppStore((state) => state.workspaces.activeId);
+  return (
+    <PluginSlot
+      name="task-card-indicators"
+      slotProps={{ taskId: task.id, workspaceId, workflowStepId: task.workflowStepId }}
+    />
+  );
+}
+
 export function KanbanCardBody({
   task,
   repositoryChips,
@@ -147,6 +164,7 @@ export function KanbanCardBody({
               {task.title}
             </p>
             <PRTaskIcon taskId={task.id} />
+            <TaskCardIndicators task={task} />
           </div>
         </div>
         {task.isRemoteExecutor && (

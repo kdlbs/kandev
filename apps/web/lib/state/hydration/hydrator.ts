@@ -1,6 +1,6 @@
 import type { Draft } from "immer";
 import type { AppState, HydrationState } from "../store";
-import { migrateView } from "../slices/ui/ui-slice";
+import { migrateSidebarViewDraft, migrateView } from "../slices/ui/ui-slice";
 import { applyStoredQuickChatNames } from "@/lib/state/slices/ui/quick-chat-sync";
 import { deepMerge, mergeSessionMap, mergeLoadingState } from "./merge-strategies";
 
@@ -105,7 +105,9 @@ function bridgeSidebarViewsFromUserSettings(
     draft.sidebarViews.activeViewId = draft.sidebarViews.views[0].id;
   }
   if (userSettings.sidebarDraft !== undefined) {
-    draft.sidebarViews.draft = userSettings.sidebarDraft;
+    draft.sidebarViews.draft = userSettings.sidebarDraft
+      ? migrateSidebarViewDraft(userSettings.sidebarDraft)
+      : null;
   }
   if (userSettings.sidebarTaskPrefs) {
     if (draft.sidebarTaskPrefs.syncPending) return;

@@ -59,6 +59,11 @@ type GitPushRequest struct {
 	Repo        string `json:"repo,omitempty"`
 }
 
+// GitPushPreflightRequest for POST /api/v1/git/push-preflight.
+type GitPushPreflightRequest struct {
+	Repo string `json:"repo,omitempty"`
+}
+
 // GitRebaseRequest for POST /api/v1/git/rebase
 type GitRebaseRequest struct {
 	BaseBranch string `json:"base_branch"`
@@ -214,6 +219,26 @@ func (s *Server) handleGitPush(c *gin.Context) {
 		return
 	}
 
+	c.JSON(http.StatusOK, result)
+}
+
+func (s *Server) handleGitPushPreflight(c *gin.Context) {
+	var req GitPushPreflightRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, process.GitOperationResult{
+			Success: false, Operation: "push_preflight", Error: "invalid request: " + err.Error(),
+		})
+		return
+	}
+	gitOp := s.gitOpForRepo(c, "push preflight", req.Repo)
+	if gitOp == nil {
+		return
+	}
+	result, err := gitOp.PushPreflight(c.Request.Context())
+	if err != nil {
+		s.handleGitError(c, "push preflight", err)
+		return
+	}
 	c.JSON(http.StatusOK, result)
 }
 

@@ -112,6 +112,7 @@ func buildStandaloneCreateInstanceRequest(
 		RequiresProcessKill:  requiresProcessKill,
 		StripEnv:             stripEnv,
 		BaseBranches:         getMetadataStringMap(req.Metadata, MetadataKeyBaseBranches),
+		RemoteContributions:  req.RemoteContributions,
 		WorkspaceSourceRoots: req.WorkspaceSourceRoots,
 	}
 }

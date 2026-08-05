@@ -4,11 +4,14 @@ import (
 	"context"
 	"net/http"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/task/models"
 	"golang.org/x/crypto/ssh"
 )
 
@@ -463,6 +466,183 @@ func TestSSHRemoteAgentEnvEmpty(t *testing.T) {
 	if got := sshRemoteAgentEnv(&ExecutorCreateRequest{}); got != nil {
 		t.Fatalf("expected nil for no credentials, got %v", got)
 	}
+}
+
+func TestSSHRemoteContributionEnvUsesScopedGitCredentialHelper(t *testing.T) {
+	req := &ExecutorCreateRequest{Env: map[string]string{
+		envKeyGitHubCredentialBrokerURL: "https://kandev.example/api/v1/github/credentials/resolve",
+		envKeyGitHubCredentialLease:     "lease",
+		"GIT_CONFIG_COUNT":              "1",
+		"GIT_CONFIG_KEY_0":              "credential.https://github.com.helper",
+		"GIT_CONFIG_VALUE_0":            "!agentctl git-credential",
+	}}
+	got := sshRemoteContributionEnv(req, "/home/agent/.kandev/bin/agentctl")
+	if got["GIT_CONFIG_VALUE_0"] != "!/home/agent/.kandev/bin/agentctl git-credential" {
+		t.Fatalf("GitHub helper = %q, want absolute agentctl helper", got["GIT_CONFIG_VALUE_0"])
+	}
+	if got["GIT_CONFIG_COUNT"] != "1" {
+		t.Fatalf("GIT_CONFIG_COUNT = %q, want 1", got["GIT_CONFIG_COUNT"])
+	}
+}
+
+func TestSSHRemoteContributionScriptPinsTargetAndSourceIdentity(t *testing.T) {
+	binding := &models.RemoteContribution{
+		Version:      models.RemoteContributionVersion,
+		Provider:     models.RemoteContributionProviderGitHub,
+		Kind:         models.RemoteContributionKindPullRequest,
+		CanonicalURL: "https://github.com/acme/widget/pull/7",
+		Number:       7,
+		State:        models.RemoteContributionStateOpen,
+		BaseBranch:   "main",
+		HeadBranch:   "feature/remote",
+		HeadSHA:      strings.Repeat("a", 40),
+		SourceRepository: models.RemoteContributionRepository{
+			Host:      "github.com",
+			Path:      "contributor/widget",
+			RemoteURL: "https://github.com/contributor/widget.git",
+		},
+		CollaborationAllowed: true,
+	}
+	script := sshRemoteContributionScript("/remote/task", "https://github.com/acme/widget.git", binding)
+	for _, want := range []string{
+		"remote add origin",
+		"fetch --no-tags origin",
+		binding.SourceRepository.RemoteURL,
+		"contribution_remote='" + binding.ContributionRemoteName() + "'",
+		"refs/heads/feature/remote",
+		strings.Repeat("a", 40),
+		"branch --set-upstream-to",
+	} {
+		if !strings.Contains(script, want) {
+			t.Errorf("SSH contribution script missing %q", want)
+		}
+	}
+	if strings.Contains(script, "untrusted") {
+		t.Fatal("SSH contribution script contains provider-authored content")
+	}
+}
+
+func TestSSHRemoteContributionScriptReusesLocalDescendant(t *testing.T) {
+	root := t.TempDir()
+	targetBare := filepath.Join(root, "target.git")
+	sourceBare := filepath.Join(root, "source.git")
+	targetSeed := filepath.Join(root, "target-seed")
+	sourceSeed := filepath.Join(root, "source-seed")
+	workspace := filepath.Join(root, "workspace")
+	for _, args := range [][]string{
+		{"init", "--bare", "--initial-branch=main", targetBare},
+		{"init", "--bare", "--initial-branch=main", sourceBare},
+		{"init", "--initial-branch=main", targetSeed},
+		{"init", "--initial-branch=main", sourceSeed},
+	} {
+		runSSHContributionGit(t, root, args...)
+	}
+	for _, repo := range []string{targetSeed, sourceSeed} {
+		runSSHContributionGit(t, repo, "config", "user.email", "test@example.com")
+		runSSHContributionGit(t, repo, "config", "user.name", "Test User")
+	}
+	if err := os.WriteFile(filepath.Join(targetSeed, "README.md"), []byte("target\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runSSHContributionGit(t, targetSeed, "add", "README.md")
+	runSSHContributionGit(t, targetSeed, "commit", "-m", "target base")
+	runSSHContributionGit(t, targetSeed, "remote", "add", "origin", targetBare)
+	runSSHContributionGit(t, targetSeed, "push", "origin", "main")
+
+	if err := os.WriteFile(filepath.Join(sourceSeed, "README.md"), []byte("source\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runSSHContributionGit(t, sourceSeed, "add", "README.md")
+	runSSHContributionGit(t, sourceSeed, "commit", "-m", "source base")
+	runSSHContributionGit(t, sourceSeed, "checkout", "-b", "feature/remote")
+	if err := os.WriteFile(filepath.Join(sourceSeed, "change.txt"), []byte("contribution\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runSSHContributionGit(t, sourceSeed, "add", "change.txt")
+	runSSHContributionGit(t, sourceSeed, "commit", "-m", "source contribution")
+	sourceSHA := strings.TrimSpace(runSSHContributionGit(t, sourceSeed, "rev-parse", "HEAD"))
+	runSSHContributionGit(t, sourceSeed, "remote", "add", "origin", sourceBare)
+	runSSHContributionGit(t, sourceSeed, "push", "origin", "main", "feature/remote")
+
+	targetURL := "https://github.com/acme/widget.git"
+	sourceURL := "https://github.com/contributor/widget.git"
+	configPath := filepath.Join(root, "gitconfig")
+	config := "[url \"file://" + targetBare + "\"]\n\tinsteadOf = " + targetURL + "\n" +
+		"[url \"file://" + sourceBare + "\"]\n\tinsteadOf = " + sourceURL + "\n"
+	if err := os.WriteFile(configPath, []byte(config), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GIT_CONFIG_GLOBAL", configPath)
+	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
+	if err := os.MkdirAll(workspace, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	binding := &models.RemoteContribution{
+		Version:      models.RemoteContributionVersion,
+		Provider:     models.RemoteContributionProviderGitHub,
+		Kind:         models.RemoteContributionKindPullRequest,
+		CanonicalURL: "https://github.com/acme/widget/pull/7",
+		Number:       7,
+		State:        models.RemoteContributionStateOpen,
+		BaseBranch:   "main",
+		HeadBranch:   "feature/remote",
+		HeadSHA:      sourceSHA,
+		SourceRepository: models.RemoteContributionRepository{
+			Host: "github.com", Path: "contributor/widget", RemoteURL: sourceURL,
+		},
+		CollaborationAllowed: true,
+	}
+	runSSHContributionScript(t, sshRemoteContributionScript(workspace, targetURL, binding))
+	if got := strings.TrimSpace(runSSHContributionGit(t, workspace, "rev-parse", "HEAD")); got != sourceSHA {
+		t.Fatalf("initial SSH checkout HEAD = %q, want %q", got, sourceSHA)
+	}
+	if got := strings.TrimSpace(runSSHContributionGit(t, workspace, "branch", "--show-current")); got != binding.HeadBranch {
+		t.Fatalf("initial SSH branch = %q, want %q", got, binding.HeadBranch)
+	}
+	wantUpstream := binding.ContributionRemoteName() + "/" + binding.HeadBranch
+	if got := strings.TrimSpace(runSSHContributionGit(t, workspace, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}")); got != wantUpstream {
+		t.Fatalf("initial SSH upstream = %q, want %q", got, wantUpstream)
+	}
+
+	runSSHContributionGit(t, workspace, "config", "user.email", "test@example.com")
+	runSSHContributionGit(t, workspace, "config", "user.name", "Test User")
+	if err := os.WriteFile(filepath.Join(workspace, "agent-change.txt"), []byte("agent change\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runSSHContributionGit(t, workspace, "add", "agent-change.txt")
+	runSSHContributionGit(t, workspace, "commit", "-m", "agent contribution")
+	localHEAD := strings.TrimSpace(runSSHContributionGit(t, workspace, "rev-parse", "HEAD"))
+
+	runSSHContributionScript(t, sshRemoteContributionScript(workspace, targetURL, binding))
+	if got := strings.TrimSpace(runSSHContributionGit(t, workspace, "rev-parse", "HEAD")); got != localHEAD {
+		t.Fatalf("resumed SSH checkout HEAD = %q, want local commit %q", got, localHEAD)
+	}
+	if got := strings.TrimSpace(runSSHContributionGit(t, workspace, "branch", "--show-current")); got != binding.HeadBranch {
+		t.Fatalf("resumed SSH branch = %q, want %q", got, binding.HeadBranch)
+	}
+	if got := strings.TrimSpace(runSSHContributionGit(t, workspace, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}")); got != wantUpstream {
+		t.Fatalf("resumed SSH upstream = %q, want %q", got, wantUpstream)
+	}
+}
+
+func runSSHContributionScript(t *testing.T, script string) {
+	t.Helper()
+	cmd := exec.CommandContext(context.Background(), "sh", "-c", script)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("SSH contribution script failed: %v\n%s", err, output)
+	}
+}
+
+func runSSHContributionGit(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	cmd := exec.CommandContext(context.Background(), "git", args...)
+	cmd.Dir = dir
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %v failed: %v\n%s", args, err, output)
+	}
+	return string(output)
 }
 
 func TestSSHManagedBrokerResumeForcesFreshAgentctlWithNewLease(t *testing.T) {

@@ -186,6 +186,10 @@ func TestEnabledModeAllowlistMatrix(t *testing.T) {
 		{name: "workspaces api", method: http.MethodGet, path: "/api/v1/workspaces", blocked: true},
 		{name: "plugin management", method: http.MethodGet, path: "/api/plugins", blocked: true},
 		{name: "plugin bundle unauthenticated", method: http.MethodGet, path: "/api/plugins/p1/bundle", blocked: true},
+		{
+			name: "plugin user-state unauthenticated", method: http.MethodGet,
+			path: "/api/plugins/p1/user-state/task/task1/note", blocked: true,
+		},
 		{name: "debug", method: http.MethodGet, path: "/debug/vars", blocked: true},
 	}
 	for _, tc := range cases {

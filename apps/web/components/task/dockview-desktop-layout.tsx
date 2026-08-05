@@ -32,6 +32,8 @@ import { ChangesTab } from "./changes-tab";
 import { useChangesPanelAutoFocus } from "./changes-panel-focus";
 import { PlanTab } from "./plan-tab";
 import { PreviewFileTab, PreviewDiffTab, PreviewCommitTab, PinnedDefaultTab } from "./preview-tab";
+import { PluginPanelTab } from "./plugin-panel-tab";
+import { useCloseRevokedPluginPanels } from "./use-close-revoked-plugin-panels";
 import { SessionTab } from "./session-tab";
 import { TerminalTab } from "./terminal-tab";
 import { useTabMaximizeOnDoubleClick } from "./use-tab-maximize";
@@ -130,6 +132,7 @@ const components: Record<string, React.FunctionComponent<IDockviewPanelProps>> =
   plan: PortalSlot,
   "pr-detail": PortalSlot,
   "mr-detail": PortalSlot,
+  "plugin-panel": PortalSlot,
   // Backwards compat aliases for saved layouts
   "diff-files": PortalSlot,
   "all-files": PortalSlot,
@@ -172,6 +175,7 @@ const tabComponents: Record<string, React.FunctionComponent<IDockviewPanelHeader
   previewDiffTab: PreviewDiffTab,
   previewCommitTab: PreviewCommitTab,
   pinnedDefaultTab: PinnedDefaultTab,
+  pluginPanelTab: PluginPanelTab,
 };
 
 // ---------------------------------------------------------------------------
@@ -375,6 +379,7 @@ export const DockviewDesktopLayout = memo(function DockviewDesktopLayout({
   useEditorKeybinds();
   usePlanPanelAutoOpen();
   useCompactDockviewDefault(compact);
+  useCloseRevokedPluginPanels(api);
 
   useEffect(() => {
     envIdRef.current = effectiveEnvId;

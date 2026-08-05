@@ -9,6 +9,7 @@ import type { ReviewSource } from "@/hooks/domains/session/use-review-sources";
 import { useEnvironmentSessionId } from "@/hooks/use-environment-session-id";
 import { useFileEditors } from "@/hooks/use-file-editors";
 import { usePanelActive } from "@/hooks/use-panel-active";
+import { t } from "@/lib/i18n";
 import { setPanelTitle } from "@/lib/layout/panel-portal-manager";
 import { useDockviewStore } from "@/lib/state/dockview-store";
 import { BrowserPanel } from "./browser-panel";
@@ -19,6 +20,7 @@ import { FileEditorPanel } from "./file-editor-panel";
 import { FilesPanel } from "./files-panel";
 import { PanelBody, PanelRoot } from "./panel-primitives";
 import { PassthroughToolbar } from "./passthrough-toolbar";
+import { PluginTaskPanel } from "./plugin-task-panel";
 import { TaskChangesPanel } from "./task-changes-panel";
 import { TaskChatPanel } from "./task-chat-panel";
 import { TaskPlanPanel } from "./task-plan-panel";
@@ -194,46 +196,50 @@ function resolveComponent(component: string): string {
   return COMPONENT_ALIASES[component] ?? component;
 }
 
+/**
+ * One renderer per component name — a lookup table rather than a growing
+ * switch, so adding a panel type (like "plugin-panel") never trips the
+ * function-complexity lint ceiling (R3, docs/plans/plugins).
+ */
+type PanelRenderer = (panelId: string, params: Record<string, unknown>) => React.ReactNode;
+
+const PANEL_RENDERERS: Record<string, PanelRenderer> = {
+  sidebar: () => null,
+  chat: (panelId, params) => <ChatContent panelId={panelId} params={params} />,
+  "diff-viewer": (panelId, params) => <DiffViewerContent panelId={panelId} params={params} />,
+  "file-editor": (panelId, params) => <FileEditorPanel panelId={panelId} params={params} />,
+  "commit-detail": (panelId, params) => <CommitDetailPanel panelId={panelId} params={params} />,
+  changes: (panelId) => <ChangesContent panelId={panelId} />,
+  files: () => <FilesContent />,
+  terminal: (panelId, params) => <TerminalPanel panelId={panelId} params={params} />,
+  browser: (panelId, params) => <BrowserPanel panelId={panelId} params={params} />,
+  vscode: (panelId) => <VscodePanel panelId={panelId} />,
+  plan: () => <PlanContent />,
+  "pr-detail": (panelId, params) => (
+    <ReviewDetailPanelComponent panelId={panelId} params={params} />
+  ),
+  "mr-detail": (panelId, params) => (
+    <MRDetailPanelComponent
+      panelId={panelId}
+      params={{ mrKey: typeof params.mrKey === "string" ? params.mrKey : undefined }}
+    />
+  ),
+  "plugin-panel": (panelId, params) => (
+    <PluginTaskPanel
+      pluginId={typeof params.pluginId === "string" ? params.pluginId : ""}
+      panelKey={typeof params.panelKey === "string" ? params.panelKey : ""}
+      panelId={panelId}
+      presentation="desktop"
+    />
+  ),
+};
+
 export function renderPanel(
   panelId: string,
   component: string,
   params: Record<string, unknown>,
 ): React.ReactNode {
-  const resolved = resolveComponent(component);
-
-  switch (resolved) {
-    case "sidebar":
-      return null;
-    case "chat":
-      return <ChatContent panelId={panelId} params={params} />;
-    case "diff-viewer":
-      return <DiffViewerContent panelId={panelId} params={params} />;
-    case "file-editor":
-      return <FileEditorPanel panelId={panelId} params={params} />;
-    case "commit-detail":
-      return <CommitDetailPanel panelId={panelId} params={params} />;
-    case "changes":
-      return <ChangesContent panelId={panelId} />;
-    case "files":
-      return <FilesContent />;
-    case "terminal":
-      return <TerminalPanel panelId={panelId} params={params} />;
-    case "browser":
-      return <BrowserPanel panelId={panelId} params={params} />;
-    case "vscode":
-      return <VscodePanel panelId={panelId} />;
-    case "plan":
-      return <PlanContent />;
-    case "pr-detail":
-      return <ReviewDetailPanelComponent panelId={panelId} params={params} />;
-    case "mr-detail":
-      return (
-        <MRDetailPanelComponent
-          panelId={panelId}
-          params={{ mrKey: typeof params.mrKey === "string" ? params.mrKey : undefined }}
-        />
-      );
-    default:
-      return <div className="p-4 text-muted-foreground">Unknown panel: {component}</div>;
-  }
+  const renderer = PANEL_RENDERERS[resolveComponent(component)];
+  if (renderer) return renderer(panelId, params);
+  return <div className="p-4 text-muted-foreground">{t("common:unknownPanel", { component })}</div>;
 }

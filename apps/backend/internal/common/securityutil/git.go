@@ -61,7 +61,8 @@ func IsKnownSafeGitFlag(arg string) bool {
 		"--abbrev-ref", "--symbolic-full-name", "--verify", "--no-patch",
 		"--format", "--format=", "--stat", "--shortstat", "--numstat", "-p", "-A",
 		"--amend", "--allow-empty", "--soft", "--mixed", "--hard",
-		"--cached", "--force", "--source=HEAD", "--staged", "--worktree",
+		"--cached", "--force", "--source=HEAD", "--staged", "--worktree", "--push",
+		"--dry-run", "--get-all",
 		"--", // Path separator - everything after this is treated as paths, not flags
 	}
 	for _, safe := range safeFlags {

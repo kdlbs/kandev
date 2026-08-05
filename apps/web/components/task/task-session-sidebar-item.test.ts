@@ -86,4 +86,10 @@ describe("buildSidebarItem", () => {
 
     expect(item.agentErrorMessage).toBeNull();
   });
+
+  it("preserves the archived marker for projected rows", () => {
+    const item = buildSidebarItem(task({ isArchived: true }), emptyContext());
+
+    expect(item.isArchived).toBe(true);
+  });
 });

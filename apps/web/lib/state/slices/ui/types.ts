@@ -43,7 +43,16 @@ export type MobileKanbanState = {
   isSearchOpen: boolean;
 };
 
-export type MobileSessionPanel = "chat" | "plan" | "changes" | "files" | "terminal" | "review";
+/** Core, host-defined mobile panels. Kept as a named union (rather than
+ *  inlined into MobileSessionPanel) so existing `=== "chat"`-style narrowing
+ *  still works unchanged after MobileSessionPanel grew a plugin variant. */
+export type MobileSessionCorePanel = "chat" | "plan" | "changes" | "files" | "terminal" | "review";
+
+/** A plugin task panel id on mobile, `plugin:<pluginId>:<panelKey>` — see
+ *  lib/state/layout-manager/plugin-panels.ts's pluginPanelId. */
+export type MobileSessionPluginPanel = `plugin:${string}:${string}`;
+
+export type MobileSessionPanel = MobileSessionCorePanel | MobileSessionPluginPanel;
 
 export type MobileSessionState = {
   activePanelBySessionId: Record<string, MobileSessionPanel>;

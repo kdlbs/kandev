@@ -3,6 +3,8 @@ package lifecycle
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"strings"
 	"time"
 
@@ -11,8 +13,45 @@ import (
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agentctl/server/process"
 	"github.com/kandev/kandev/internal/agentruntime"
+	"github.com/kandev/kandev/internal/task/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
+
+func remoteContributionsFromMetadata(metadata map[string]interface{}) (map[string]models.RemoteContribution, error) {
+	if metadata == nil {
+		return nil, nil
+	}
+	raw, ok := metadata[MetadataKeyRemoteContributions]
+	if !ok || raw == nil {
+		return nil, nil
+	}
+	if typed, ok := raw.(map[string]models.RemoteContribution); ok {
+		return validateRemoteContributions(typed)
+	}
+	data, err := json.Marshal(raw)
+	if err != nil {
+		return nil, fmt.Errorf("encode remote contributions: %w", err)
+	}
+	var decoded map[string]models.RemoteContribution
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return nil, fmt.Errorf("decode remote contributions: %w", err)
+	}
+	return validateRemoteContributions(decoded)
+}
+
+func validateRemoteContributions(values map[string]models.RemoteContribution) (map[string]models.RemoteContribution, error) {
+	if len(values) == 0 {
+		return nil, nil
+	}
+	validated := make(map[string]models.RemoteContribution, len(values))
+	for key, binding := range values {
+		if err := binding.Validate(); err != nil {
+			return nil, fmt.Errorf("validate remote contribution %q: %w", key, err)
+		}
+		validated[key] = binding
+	}
+	return validated, nil
+}
 
 // Runtime abstracts the agent execution environment (Docker, Standalone, K8s, SSH, etc.)
 // Each runtime is responsible for creating and managing agentctl instances.
@@ -72,17 +111,18 @@ const (
 	// MetadataKeyBaseBranches stores a map[string]string (RepositoryName →
 	// base branch ref) for per-repo diff-stat resolution inside agentctl.
 	// The empty key "" applies to the root / single-repo tracker.
-	MetadataKeyBaseBranches     = "base_branches"
-	MetadataKeyIsRemote         = "is_remote"
-	MetadataKeyRemoteAuthHome   = "remote_auth_target_home"
-	MetadataKeyGitUserName      = "git_user_name"
-	MetadataKeyGitUserEmail     = "git_user_email"
-	MetadataKeyImageTagOverride = "image_tag_override"
-	MetadataKeyContainerID      = "container_id"
-	MetadataKeySpriteName       = "sprite_name"
-	MetadataKeySpriteState      = "sprite_state"
-	MetadataKeySpriteCreatedAt  = "sprite_created_at"
-	MetadataKeyLocalPort        = "local_port"
+	MetadataKeyBaseBranches        = "base_branches"
+	MetadataKeyRemoteContributions = "remote_contributions"
+	MetadataKeyIsRemote            = "is_remote"
+	MetadataKeyRemoteAuthHome      = "remote_auth_target_home"
+	MetadataKeyGitUserName         = "git_user_name"
+	MetadataKeyGitUserEmail        = "git_user_email"
+	MetadataKeyImageTagOverride    = "image_tag_override"
+	MetadataKeyContainerID         = "container_id"
+	MetadataKeySpriteName          = "sprite_name"
+	MetadataKeySpriteState         = "sprite_state"
+	MetadataKeySpriteCreatedAt     = "sprite_created_at"
+	MetadataKeyLocalPort           = "local_port"
 
 	// MetadataKeyModelOverride holds a user-requested model that overrides the
 	// agent profile's configured model on the next launch. Set by SetSessionModel
@@ -162,6 +202,7 @@ var persistentMetadataKeys = map[string]bool{
 	MetadataKeyImageTagOverride:    true,
 	MetadataKeyContainerID:         true,
 	MetadataKeyWorktreeBranch:      true,
+	MetadataKeyRemoteContributions: true,
 }
 
 // persistentMetadataPrefixes lists key prefixes that should persist.
@@ -311,6 +352,10 @@ type ExecutorCreateRequest struct {
 	// selected the auto-approve value. Nil preserves agentctl defaults/env fallback.
 	AutoApprovePermissionsOverride *bool
 	Metadata                       map[string]interface{}
+	// RemoteContributions carries validated, credential-free bindings to the
+	// runtime/agentctl boundary. Keys use the same workspace subpath convention
+	// as BaseBranches; the empty key is the workspace root.
+	RemoteContributions map[string]models.RemoteContribution
 	McpServers                     []McpServerConfig
 	AgentConfig                    agents.Agent // Agent type info needed by runtimes
 	PreviousExecutionID            string       // Non-empty when reconnecting to a previous execution

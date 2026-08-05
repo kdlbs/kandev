@@ -396,6 +396,7 @@ func (s *Service) publishTaskEventNow(ctx context.Context, eventType string, tas
 	if task.ParentID != "" {
 		data["parent_id"] = task.ParentID
 	}
+	data["archived_at"] = nil
 	if task.ArchivedAt != nil {
 		data["archived_at"] = task.ArchivedAt.Format(time.RFC3339)
 	}

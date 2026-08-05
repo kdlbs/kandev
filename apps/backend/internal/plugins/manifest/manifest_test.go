@@ -57,6 +57,30 @@ func TestParse_ValidManifestParsesID(t *testing.T) {
 	}
 }
 
+// TestParse_UserStateCapabilityRoundTrips pins capabilities.user_state
+// (Approach D1 / AC17): a plugin declaring host-provided per-user storage
+// parses with Capabilities.UserState set.
+func TestParse_UserStateCapabilityRoundTrips(t *testing.T) {
+	yaml := strings.Replace(validManifestYAML, "secrets: true", "secrets: true\n  user_state: true", 1)
+	m, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatalf("Parse() unexpected error: %v", err)
+	}
+	if !m.Capabilities.UserState {
+		t.Fatalf("Capabilities.UserState = false, want true")
+	}
+}
+
+// TestParse_UserStateCapabilityDefaultsFalse pins that omitting
+// capabilities.user_state defaults to false — a plugin must opt in before
+// the per-user storage routes accept its writes (AC17).
+func TestParse_UserStateCapabilityDefaultsFalse(t *testing.T) {
+	m := validManifest(t)
+	if m.Capabilities.UserState {
+		t.Fatalf("Capabilities.UserState = true, want false (not declared in fixture)")
+	}
+}
+
 func TestValidate_ValidManifestPasses(t *testing.T) {
 	m, err := Parse([]byte(validManifestYAML))
 	if err != nil {

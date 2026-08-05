@@ -26,3 +26,9 @@ func TestIsValidBaseBranchRef(t *testing.T) {
 		}
 	}
 }
+
+func TestIsKnownSafeGitFlagAllowsPushDryRun(t *testing.T) {
+	if !IsKnownSafeGitFlag("--dry-run") {
+		t.Fatal("--dry-run must be allowed for non-mutating push preflight")
+	}
+}

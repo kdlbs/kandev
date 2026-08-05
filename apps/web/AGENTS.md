@@ -74,8 +74,7 @@ lib/api/domains/                    # API clients
 
 **Hydration:** Go injects `window.__KANDEV_BOOT_PAYLOAD__` into the SPA shell before React mounts. `lib/state/hydration/merge-strategies.ts` has `deepMerge()`, `mergeSessionMap()`, `mergeLoadingState()` to avoid overwriting live client state. Pass `activeSessionId` to protect active sessions.
 
-For rebasing or finishing PRs written against the old Next.js runtime, follow
-[`docs/nextjs-spa-migration.md`](../../docs/nextjs-spa-migration.md).
+For rebasing or finishing PRs written against the old Next.js runtime, follow [`docs/nextjs-spa-migration.md`](../../docs/nextjs-spa-migration.md).
 
 **Hooks Pattern:** Hooks in `hooks/domains/` encapsulate WS subscription + store selection. WS client deduplicates subscriptions automatically.
 
@@ -150,21 +149,17 @@ surface.
   with independent open state. Touch-pinned help must close on a second trigger
   tap, outside interaction, and Escape; verify desktop pointer and mobile-sized
   touch flows.
-- **Renaming a `data-testid`:** set the new id as `data-testid="<new>"` and keep
-  the old id as `data-legacy-testid="<old>"`, then migrate e2e specs to the new
-  id in the same PR. JSX rejects two `data-testid` attributes on one element,
-  and Playwright's `getByTestId` only matches one attribute name — the
-  `data-legacy-testid` alias lets existing specs keep selecting the element
-  while the migration is in flight.
-- **Dockview session panel activation:** session chat panels can become active
-  through tab pointer/keyboard events, global tab-cycling shortcuts,
-  reopen/menu actions, and Dockview close controls. When changing
-  `tasks.activeSessionId` or active-session sync, audit all of those paths. Use
-  store state in addition to Dockview `api.isActive`; the current session's chat
-  tab may be Dockview-inactive while Files/Changes is active. Same-session
-  clicks must not leave stale activation intent, and Dockview
-  `.dv-default-tab-action` close controls should be treated as close/delete
-  actions rather than session-switch intent.
+- **Renaming a `data-testid`:** set the new id as `data-testid="<new>"` and keep the old id as
+  `data-legacy-testid="<old>"`, then migrate e2e specs to the new id in the same PR. JSX rejects two
+  `data-testid` attributes on one element, and Playwright's `getByTestId` only matches one attribute
+  name — the `data-legacy-testid` alias lets existing specs keep selecting the element mid-migration.
+- **Dockview session panel activation:** session chat panels can become active through tab
+  pointer/keyboard events, global tab-cycling shortcuts, reopen/menu actions, and Dockview close
+  controls. When changing `tasks.activeSessionId` or active-session sync, audit all of those paths.
+  Use store state in addition to Dockview `api.isActive`; the current session's chat tab may be
+  Dockview-inactive while Files/Changes is active. Same-session clicks must not leave stale
+  activation intent, and Dockview `.dv-default-tab-action` close controls should be treated as
+  close/delete actions rather than session-switch intent.
 - **Conditional review-panel ownership:** the reusable `pr-detail` panel may be
   visible only while the active task has a linked PR or MR. A custom Default
   layout's canonical panel supplies the preferred group and tab index; it does
@@ -173,16 +168,14 @@ surface.
   Restoration, maximized layouts, and a session's offered/dismissed marker
   defer or suppress automatic insertion; linked existing panels synchronize
   provider and review identity without moving them.
-- **GitHub PR status UI:** visual PR/CI status surfaces should use the shared
-  helpers in `apps/web/components/github/pr-task-icon.tsx`
-  (`hasPRChecksPassedForDisplay`, `hasPRChecksInProgressForDisplay`, and
-  `hasPRChecksPassedWithoutReviewWaitForDisplay`) instead of re-deriving status
-  from `checks_state`, `checks_total`, or `checks_passing` locally. Aggregate
-  check counts are a display-only fallback when `checks_state` is empty; they may
-  make chips or task icons render passed/in-progress, but must not enable merge
-  actions. Merge readiness must use `isPRReadyToMerge`, which requires GitHub's
-  explicit `checks_state === "success"` rollup. When changing PR status behavior,
-  update both `pr-task-icon.test.ts` and `pr-status-chip.test.tsx`.
+- **GitHub PR status UI:** visual PR/CI status surfaces should use the shared helpers in
+  `apps/web/components/github/pr-task-icon.tsx` (`hasPRChecksPassedForDisplay`,
+  `hasPRChecksInProgressForDisplay`, `hasPRChecksPassedWithoutReviewWaitForDisplay`) instead of
+  re-deriving status from `checks_state`, `checks_total`, or `checks_passing` locally. Aggregate
+  check counts are a display-only fallback when `checks_state` is empty; they may make chips or task
+  icons render passed/in-progress, but must not enable merge actions. Merge readiness must use
+  `isPRReadyToMerge`, which requires GitHub's explicit `checks_state === "success"` rollup. When
+  changing PR status behavior, update both `pr-task-icon.test.ts` and `pr-status-chip.test.tsx`.
 - **Task repository labels:** user-facing task/card repo chips should display a
   stable repo slug or name (`owner/repo` when known, otherwise the repo name),
   not a local filesystem path. Local clone paths or folder paths belong in
@@ -270,13 +263,38 @@ Enforced by `apps/web/eslint.config.mjs` (warnings, will become errors):
 
 When you hit a limit, extract a helper function, custom hook, or sub-component. Prefer composition over growing a single function.
 
+## Plugin system
+
+The frozen frontend contract is `docs/plans/plugins/PLUGIN-API.md`; `lib/plugins/types.ts`
+is its TS mirror — the two must change together. `lib/plugins/registry.ts` is the
+reactive singleton `PluginRegistry`; every `register*` call there needs a matching
+cleanup entry in `unregisterPlugin` and `totalCount()`, or a disabled/uninstalled
+plugin leaks a stale registration.
+
+- **Task panels** (`registerTaskPanel`): one generic dockview component, `"plugin-panel"`, shared by
+  every plugin — identity lives in `params: { pluginId, panelKey }` (id helpers in
+  `lib/state/layout-manager/plugin-panels.ts`). `renderPanel` in `dockview-shared.tsx` and
+  `dockview-panel-content.tsx` each get exactly one `"plugin-panel"` case (lookup tables, not
+  switches). `PluginTaskPanel` (`components/task/`) resolves the registration behind a
+  `PluginErrorBoundary`; `mobileEnabled: true` also renders it via the phone bottom nav
+  (`session-mobile-bottom-nav.tsx`) with `presentation: "mobile"`.
+- **Kanban card contributions:** `registerTaskMenuAction({ group: "edit", ... })` turns the flat
+  `Edit` item into an `Edit` submenu (`kanban-card-edit-submenu.tsx`);
+  `registerComponent("task-card-indicators", ...)` renders beside `PRTaskIcon` via `<PluginSlot/>`.
+- **`host.storage`:** authenticated per-user key/value storage (`lib/plugins/host-api.ts`), backed by
+  `/api/plugins/{id}/user-state/...` (`docs/decisions/2026-08-01-per-user-plugin-storage.md`).
+  `subscribe` (`lib/plugins/user-state-sync.ts`) wraps `registerWsHandler` with own-plugin filtering
+  and own-tab echo suppression via a per-tab `writerId`.
+- **`host.ui.RichTextEditor`/`RichTextReadOnly`** (`components/editors/tiptap/rich-text-editor.tsx`):
+  narrow Plan-panel-tiptap wrappers — don't widen their props beyond
+  `{ taskId, value, onChange, placeholder, className, testId }` / `{ value, className, testId }`
+  without updating `PLUGIN-API.md`.
+
 ## Testing notes
 
 - jsdom drops `secure` cookies over `http`, so `document.cookie` reads back empty. To assert a cookie write in a Vitest unit test, intercept the setter with `Object.defineProperty(document, "cookie", { set: ... })` and restore it after.
-- jsdom synthetic mouse events do not reliably open Radix Tooltip. In component
-  tests, render under `TooltipProvider` and assert the keyboard-focus path with
-  `fireEvent.focus`. Cover pointer hover in Playwright with `locator.hover()` and
-  assert the visible portaled `role="tooltip"`; do not remove a hover regression
-  solely because `mouseenter` or `pointerMove` failed in jsdom.
-- In Playwright tests, avoid strict locators that assume only one `terminal-panel` or `.xterm` exists. Mobile and dockview layouts can mount multiple terminal instances; scope to the active panel or use `.first()` / `.last()` deliberately with a comment or helper.
-- Shared E2E helpers that inspect mounted React/DOM internals must be scoped to the active panel/container, not global selectors, because hidden or stale mounted panels can coexist in dock/mobile layouts.
+- jsdom synthetic mouse events do not reliably open Radix Tooltip. In component tests, render under
+  `TooltipProvider` and assert the keyboard-focus path with `fireEvent.focus`. Cover pointer hover in
+  Playwright with `locator.hover()` and assert the portaled `role="tooltip"`; don't drop a hover
+  regression just because `mouseenter`/`pointerMove` failed in jsdom.
+- In Playwright tests, avoid strict locators that assume only one `terminal-panel` or `.xterm` exists. Mobile and dockview layouts can mount multiple terminal instances; scope to the active panel or use `.first()` / `.last()` deliberately with a comment or helper. Shared E2E helpers that inspect mounted React/DOM internals must also be scoped to the active panel/container, not global selectors, because hidden or stale mounted panels can coexist in dock/mobile layouts.

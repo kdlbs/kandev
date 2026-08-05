@@ -1,6 +1,7 @@
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from "@kandev/ui/dropdown-menu";
+import { pluginRegistry } from "@/lib/plugins/registry";
 import {
   buildKanbanCardMenuEntries,
   KanbanCardDropdownMenuItems,
@@ -130,6 +131,43 @@ describe("buildKanbanCardMenuEntries — external issue links", () => {
     expect(linkMenu?.kind).toBe("submenu");
 
     expect(itemLabels(linkMenu)).toEqual(["GitHub Pull Request", "GitHub Issue", "Jira Ticket"]);
+  });
+});
+
+describe("buildKanbanCardMenuEntries — !onEdit does not disable plugin edit actions", () => {
+  const PLUGIN_ID = "kandev-plugin-notes";
+
+  afterEach(() => {
+    pluginRegistry.unregisterPlugin(PLUGIN_ID);
+  });
+
+  it("disables Edit task but leaves a visible plugin action enabled when onEdit is absent", () => {
+    pluginRegistry.forPlugin(PLUGIN_ID).registerTaskMenuAction({
+      id: "enhance",
+      label: "Enhance notes",
+      group: "edit",
+      run: vi.fn(),
+    });
+
+    const entries = buildKanbanCardMenuEntries({
+      workflows: [],
+      stepsByWorkflowId: {},
+      // onEdit intentionally omitted — a card with no edit handler wired up.
+    });
+
+    const editMenu = entries.find((entry) => entry.key === "edit");
+    expect(editMenu?.kind).toBe("submenu");
+    if (editMenu?.kind !== "submenu") return;
+
+    const editTask = editMenu.children.find(
+      (child) => child.kind === "item" && child.key === "edit-task",
+    );
+    const pluginAction = editMenu.children.find(
+      (child) => child.kind === "item" && child.key === `plugin-edit-${PLUGIN_ID}-enhance`,
+    );
+
+    expect(editTask?.kind === "item" && editTask.disabled).toBe(true);
+    expect(pluginAction?.kind === "item" && pluginAction.disabled).toBeFalsy();
   });
 });
 

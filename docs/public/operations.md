@@ -349,7 +349,7 @@ rate-limited, or registry-failing installations continue to show that channel's 
 
 Nightlies are best-effort daily snapshots. A new version appears only when `main` contains commits
 after the latest Stable release and that exact commit has not already been published. Nightlies do
-not move npm `latest` and do not create Homebrew, Desktop, GHCR, Git tag, or GitHub Release
+not move npm `latest` and do not create Homebrew, Scoop, Desktop, GHCR, Git tag, or GitHub Release
 artifacts.
 
 Configure update alerts in **Settings > General > Notifications > Notification Events**. Select **Kandev update available** for each notification provider that should receive it: Local delivers the in-app update indication and can use an already-granted browser or native desktop notification; System and Apprise use their configured provider transports. Notification routing is independent of the Stable/Nightly release selector. New Local and System providers include this event by default; existing Local and System providers receive it once on upgrade, while existing Apprise providers remain unchanged. Disabling the event for a provider stops that provider's delivery without disabling release checks. Each provider receives a release version at most once; a later version is a new occurrence. Returning from Nightly to a Stable version is an explicit action and does not produce a normal upgrade notification.
@@ -370,7 +370,7 @@ Before any update, finish or stop active sessions, create and export a database 
   `brew upgrade kandev`, reinstall the service with the same flags, and restart.
 - System service: Stable only. Upgrade with the required privileges, reinstall with the same
   service flags, and restart; the UI never applies it.
-- Unmanaged CLI: run `brew upgrade kandev` or `npm install -g kandev@latest`, then restart the process.
+- Unmanaged CLI: run `brew upgrade kandev`, `scoop update kandev`, or `npm install -g kandev@latest`, then restart the process.
 - Transient npx: start the desired release with `npx -y kandev@latest`; this does not update a persistent package.
 - Docker/Kubernetes: replace the image and recreate the workload. Do not treat an in-container package install as a durable update.
 

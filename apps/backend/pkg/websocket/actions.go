@@ -325,6 +325,12 @@ const (
 	ActionUserSettingsUpdate  = "user.settings.update"
 	ActionUserSettingsUpdated = "user.settings.updated"
 
+	// ActionPluginUserStateUpdated notifies the writing user's other WS
+	// connections that one of their per-user plugin storage keys changed
+	// (Approach F1). Payload: {pluginId, scope, scopeId, key, updatedAt,
+	// writerId, deleted} — keys only, never the stored value.
+	ActionPluginUserStateUpdated = "plugin.user-state.updated"
+
 	// System maintenance jobs (VACUUM, factory reset, snapshot create/restore,
 	// disk walk). Broadcast to all connected clients so the System pages can
 	// render progress.

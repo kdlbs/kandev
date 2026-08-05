@@ -26,6 +26,7 @@ import (
 	"github.com/kandev/kandev/internal/gitconfigenv"
 	"github.com/kandev/kandev/internal/githubauth"
 	mcpproviders "github.com/kandev/kandev/internal/mcp/providers"
+	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/pkg/agent"
 )
 
@@ -249,6 +250,10 @@ type InstanceConfig struct {
 	// origin/main → master priority list inside workspace_git_status.go.
 	BaseBranches map[string]string
 
+	// RemoteContributions maps workspace repository subpaths to the
+	// server-authored contribution binding used for source-routed writes.
+	RemoteContributions map[string]models.RemoteContribution
+
 	// WorkspaceSourceRoots are canonical durable source roots permitted for
 	// linked workspace file operations.
 	WorkspaceSourceRoots []string
@@ -438,6 +443,9 @@ func applyOverrides(cfg *InstanceConfig, overrides *InstanceOverrides) {
 	if len(overrides.BaseBranches) > 0 {
 		cfg.BaseBranches = overrides.BaseBranches
 	}
+	if len(overrides.RemoteContributions) > 0 {
+		cfg.RemoteContributions = cloneRemoteContributions(overrides.RemoteContributions)
+	}
 	if overrides.WorkspaceSourceRoots != nil {
 		cfg.WorkspaceSourceRoots = append([]string(nil), overrides.WorkspaceSourceRoots...)
 	}
@@ -482,7 +490,19 @@ type InstanceOverrides struct {
 	RequiresProcessKill    bool
 	StripEnv               []string
 	BaseBranches           map[string]string
+	RemoteContributions    map[string]models.RemoteContribution
 	WorkspaceSourceRoots   []string
+}
+
+func cloneRemoteContributions(values map[string]models.RemoteContribution) map[string]models.RemoteContribution {
+	if len(values) == 0 {
+		return nil
+	}
+	cloned := make(map[string]models.RemoteContribution, len(values))
+	for key, value := range values {
+		cloned[key] = value
+	}
+	return cloned
 }
 
 // ParseCommand splits a command string into arguments

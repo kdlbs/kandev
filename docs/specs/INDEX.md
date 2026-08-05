@@ -63,6 +63,7 @@ Kandev's task model: documents, execution stages, labels, blocker escalation, su
 | [run-scheduling](tasks/run-scheduling.md) | building |
 | [without-repositories](tasks/without-repositories.md) | draft |
 | [attach-workspace-sources](tasks/attach-workspace-sources.md) | building |
+| [remote-contribution-tasks](tasks/remote-contribution-tasks.md) | approved |
 | [subtask-checklist](tasks/subtask-checklist.md) | shipped |
 | [subtask-detachment](tasks/subtask-detachment.md) | shipped |
 | [subtask-completion-trigger](tasks/subtask-completion-trigger.md) | draft |
@@ -168,6 +169,7 @@ Subscription quota tracking and per-agent cheap-model profile routing.
 | [agent-message-comments](ui/agent-message-comments.md) | shipped |
 | [external-vcs-file-links](ui/external-vcs-file-links.md) | shipped |
 | [task-listing-display-preferences](ui/task-listing-display-preferences.md) | shipped |
+| [sidebar-archived-filter](ui/sidebar-archived-filter.md) | draft |
 | [task-workspace-content-search](ui/task-workspace-content-search.md) | shipped |
 | [task-review-shortcut](ui/task-review-shortcut.md) | approved |
 | [embedded-vscode-executor-availability](ui/embedded-vscode-executor-availability.md) | approved |

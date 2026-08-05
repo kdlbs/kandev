@@ -88,4 +88,15 @@ describe("dispatchSidebarRowClick", () => {
     dispatchSidebarRowClick(fakeKeyEvent(), "t1", false, h);
     expect(h.onSelectTask).toHaveBeenCalledWith("t1");
   });
+
+  it("always navigates archived rows without entering selection mode", () => {
+    const h = handlers();
+    const e = fakeEvent({ metaKey: true, shiftKey: true });
+    dispatchSidebarRowClick(e, "archived-1", true, h, true);
+
+    expect(h.onSelectTask).toHaveBeenCalledWith("archived-1");
+    expect(h.onToggleSelectTask).not.toHaveBeenCalled();
+    expect(h.onSelectTaskRange).not.toHaveBeenCalled();
+    expect(e.preventDefault).not.toHaveBeenCalled();
+  });
 });

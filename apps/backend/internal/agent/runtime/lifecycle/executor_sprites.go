@@ -125,6 +125,9 @@ func (r *SpritesExecutor) ResumeRemoteInstance(_ context.Context, req *ExecutorC
 }
 
 func (r *SpritesExecutor) CreateInstance(ctx context.Context, req *ExecutorCreateRequest) (*ExecutorInstance, error) {
+	if _, err := validateRemoteContributions(req.RemoteContributions); err != nil {
+		return nil, err
+	}
 	token := req.Env["SPRITES_API_TOKEN"]
 	if token == "" {
 		return nil, fmt.Errorf("SPRITES_API_TOKEN not set in execution environment (configure it in the executor profile)")

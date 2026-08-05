@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"reflect"
 	"sync"
 	"testing"
 
@@ -14,8 +13,9 @@ import (
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/common/logger"
 	githubsvc "github.com/kandev/kandev/internal/github"
-	"github.com/kandev/kandev/internal/orchestrator/executor"
+	orchestratorexecutor "github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/repoclone"
+	taskmodels "github.com/kandev/kandev/internal/task/models"
 	taskrepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	taskservice "github.com/kandev/kandev/internal/task/service"
 )
@@ -28,10 +28,29 @@ func newTestLogger() *logger.Logger {
 	return log
 }
 
+func TestBuildLifecycleLaunchRequestForwardsRemoteContributions(t *testing.T) {
+	binding := &taskmodels.RemoteContribution{CanonicalURL: "https://github.com/acme/widget/pull/7"}
+	req := &orchestratorexecutor.LaunchAgentRequest{
+		RemoteContribution: binding,
+		Repositories:       []orchestratorexecutor.RepoSpec{{RemoteContribution: binding}},
+	}
+
+	launchReq := buildLifecycleLaunchRequest(req, "/workspace", "office-profile")
+
+	if launchReq.RemoteContribution != binding {
+		t.Fatalf("top-level remote contribution was not forwarded")
+	}
+	if len(launchReq.Repositories) != 1 || launchReq.Repositories[0].RemoteContribution != binding {
+		t.Fatalf("per-repository remote contribution was not forwarded: %#v", launchReq.Repositories)
+	}
+}
+
 func TestBuildLifecycleLaunchRequestCarriesMCPProviders(t *testing.T) {
 	want := []string{"github", "gitlab"}
-	got := buildLifecycleLaunchRequest(&executor.LaunchAgentRequest{McpProviders: want})
-	if !reflect.DeepEqual(got.McpProviders, want) {
+	got := buildLifecycleLaunchRequest(&orchestratorexecutor.LaunchAgentRequest{
+		McpProviders: want,
+	}, "", "")
+	if len(got.McpProviders) != len(want) || got.McpProviders[0] != want[0] || got.McpProviders[1] != want[1] {
 		t.Fatalf("McpProviders = %#v, want %#v", got.McpProviders, want)
 	}
 }

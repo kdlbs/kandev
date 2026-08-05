@@ -1,5 +1,11 @@
 import type { DockviewApi, DockviewGroupPanel } from "dockview-react";
 import { focusOrAddPanel } from "./dockview-layout-builders";
+import {
+  parsePluginPanelId,
+  pluginPanelId,
+  PLUGIN_PANEL_COMPONENT,
+  PLUGIN_PANEL_TAB_COMPONENT,
+} from "./layout-manager/plugin-panels";
 
 type StoreGet = () => {
   api: DockviewApi | null;
@@ -22,6 +28,28 @@ type SimplePanelOpts = {
 
 function addSimplePanel(api: DockviewApi, groupId: string, opts: SimplePanelOpts): void {
   focusOrAddPanel(api, { ...opts, position: { referenceGroup: groupId } });
+}
+
+type SidePanelOpts = { groupId?: string; quiet?: boolean; inCenter?: boolean };
+
+/**
+ * Shared placement logic for a single-instance "side" panel (Plan, a plugin
+ * task panel, ...): an explicit `groupId` wins, `inCenter` falls back to the
+ * center group, and otherwise the panel opens beside the chat panel. Extracted
+ * from `addPlanPanel` so `addPluginPanel` can reuse the identical placement
+ * rules instead of re-deriving them.
+ */
+function addSidePanel(
+  api: DockviewApi,
+  centerGroupId: string,
+  panel: SimplePanelOpts,
+  opts?: SidePanelOpts,
+): void {
+  const groupId = opts?.groupId ?? (opts?.inCenter ? centerGroupId : undefined);
+  const position = groupId
+    ? { referenceGroup: groupId }
+    : { referencePanel: "chat" as const, direction: "right" as const };
+  focusOrAddPanel(api, { ...panel, position }, opts?.quiet ?? false);
 }
 
 function focusMatchingLegacyPanel(
@@ -526,18 +554,38 @@ export function buildExtraPanelActions(get: StoreGet) {
         position: { referenceGroup: centerGroupId },
       });
     },
-    addPlanPanel: (opts?: { groupId?: string; quiet?: boolean; inCenter?: boolean }) => {
+    addPlanPanel: (opts?: SidePanelOpts) => {
       const { api, centerGroupId } = get();
       if (!api) return;
-      const groupId = opts?.groupId ?? (opts?.inCenter ? centerGroupId : undefined);
-      const position = groupId
-        ? { referenceGroup: groupId }
-        : { referencePanel: "chat" as const, direction: "right" as const };
-      focusOrAddPanel(
+      addSidePanel(
         api,
-        { id: "plan", component: "plan", title: "Plan", tabComponent: "planTab", position },
-        opts?.quiet ?? false,
+        centerGroupId,
+        { id: "plan", component: "plan", title: "Plan", tabComponent: "planTab" },
+        opts,
       );
+    },
+    addPluginPanel: (pluginId: string, panelKey: string, title: string, opts?: SidePanelOpts) => {
+      const { api, centerGroupId } = get();
+      if (!api) return;
+      addSidePanel(
+        api,
+        centerGroupId,
+        {
+          id: pluginPanelId(pluginId, panelKey),
+          component: PLUGIN_PANEL_COMPONENT,
+          title,
+          tabComponent: PLUGIN_PANEL_TAB_COMPONENT,
+          params: { pluginId, panelKey },
+        },
+        opts,
+      );
+    },
+    closePluginPanels: (pluginId: string) => {
+      const { api } = get();
+      if (!api) return;
+      api.panels
+        .filter((p) => parsePluginPanelId(p.id)?.pluginId === pluginId)
+        .forEach((p) => api.removePanel(p));
     },
     ...buildReviewPanelActions(get),
     addTerminalPanel: (

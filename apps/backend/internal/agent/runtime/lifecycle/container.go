@@ -19,6 +19,7 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/gitconfigenv"
 	"github.com/kandev/kandev/internal/githubauth"
+	"github.com/kandev/kandev/internal/task/models"
 )
 
 const (
@@ -57,7 +58,8 @@ type ContainerConfig struct {
 	// BaseBranches maps RepositoryName → base branch ref; forwarded into
 	// agentctl's CreateInstanceRequest so each WorkspaceTracker resolves
 	// diff stats against the task-recorded base.
-	BaseBranches map[string]string
+	BaseBranches        map[string]string
+	RemoteContributions map[string]models.RemoteContribution
 }
 
 func boolPtr(v bool) *bool {
@@ -102,6 +104,7 @@ func buildContainerCreateInstanceRequest(
 		RequiresProcessKill: requiresProcessKill,
 		StripEnv:            stripEnv,
 		BaseBranches:        config.BaseBranches,
+		RemoteContributions: config.RemoteContributions,
 	}
 }
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -132,6 +133,10 @@ func (m *Manager) StartAgentProcess(ctx context.Context, executionID string) (re
 		m.updateExecutionError(executionID, "agentctl not ready: "+err.Error())
 		return fmt.Errorf("agentctl not ready: %w", err)
 	}
+	if err := m.preflightRemoteContributionPushes(operationCtx, execution); err != nil {
+		m.updateExecutionError(executionID, "contribution push preflight failed: "+err.Error())
+		return err
+	}
 
 	taskDescription := getTaskDescriptionFromMetadata(execution)
 	approvalPolicy, agentDisplayName := m.resolveApprovalPolicyAndDisplayName(operationCtx, execution)
@@ -165,6 +170,38 @@ func (m *Manager) StartAgentProcess(ctx context.Context, executionID string) (re
 	}
 
 	return m.initializeAgentSession(operationCtx, execution, bootCommand, agentDisplayName, taskDescription)
+}
+
+func (m *Manager) preflightRemoteContributionPushes(ctx context.Context, execution *AgentExecution) error {
+	if execution == nil || execution.agentctl == nil {
+		return nil
+	}
+	bindings, err := remoteContributionsFromMetadata(execution.Metadata)
+	if err != nil {
+		return err
+	}
+	if len(bindings) == 0 {
+		return nil
+	}
+	keys := make([]string, 0, len(bindings))
+	for key := range bindings {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		result, err := execution.agentctl.GitPushPreflight(ctx, key)
+		if err != nil {
+			return fmt.Errorf("repository %q: %w", key, err)
+		}
+		if result == nil || !result.Success {
+			message := "remote contribution push is not writable"
+			if result != nil && result.Error != "" {
+				message = result.Error
+			}
+			return fmt.Errorf("repository %q: %s", key, message)
+		}
+	}
+	return nil
 }
 
 // pollAgentStderr polls the agent's stderr buffer every 2 seconds and updates the boot message.

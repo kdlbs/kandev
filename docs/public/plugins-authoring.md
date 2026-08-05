@@ -47,7 +47,10 @@ and the current host executable before extraction. Kandev then supervises the
 declared subprocess and injects a Host connection. The UI bundle is static
 package content loaded by the browser; it does not run inside the backend
 subprocess. On disable or uninstall, the host calls destroy when present and
-bulk-revokes registrations, styles, routes, handlers, and navigation.
+bulk-revokes registrations, styles, routes, handlers, and navigation. Reloads and
+updates are generation-safe: a slow or failed initialization is not treated as a
+definitive revocation, while a successfully ready generation can remove panels it
+no longer registers.
 
 ## Package and data layout
 
@@ -125,14 +128,15 @@ curated React, UI, and app-store surface.
 | Need | Use | Scope/lifecycle | Capability or rule |
 | --- | --- | --- | --- |
 | Small JSON object owned by this plugin | Host state: GetState, SetState, DeleteState, ListState | instance, workspace, task, or agent; survives restart/upgrade and is included in Kandev state backups | capabilities.state: true; values are JSON objects, not bare scalars |
-| Per-user browser/plugin storage | No current host.storage API | Unavailable on this branch; do not invent a signature or use browser storage as a Host contract | Store server-side with an explicit entity scope, or ask for a future Host API |
+| Per-user browser/plugin storage | host.storage: get/set/delete/list/subscribe | instance, workspace, task, session, or repository, scoped per user | capabilities.user_state: true; set/delete accept ifUnmodifiedSince and writerId |
 | Operator configuration | Host.GetConfig and manifest config_schema | Plugin-owned settings; config changes restart an active subprocess | Ungated GetConfig; secret fields arrive cleartext in the subprocess |
 | Plugin-owned credentials | Host.GetSecret/SetSecret/DeleteSecret, or secret: true config fields | Encrypted Kandev vault, namespaced to this plugin | capabilities.secrets: true; never log values |
 | Files, caches, or plugin-managed database | KANDEV_PLUGIN_DATA_DIR | Shared across versions, removed on uninstall | Write only below the injected directory; own schema, locking, and migrations |
 
-Host state is not host.storage: it is plugin-scoped backend state, not a
-per-user frontend store. There is no transaction or compare-and-swap operation;
-design updates to be idempotent.
+Host state is not host.storage: Host state is plugin-scoped backend state with
+no transaction primitive, so design updates to be idempotent; host.storage
+(below) is per-user, per-scope frontend storage with an optional
+ifUnmodifiedSince compare-and-swap.
 
 ## Authoritative contracts
 
@@ -166,7 +170,11 @@ host may call initialize more than once across disable/enable cycles. Make it
 repeatable; return a cleanup function from subscriptions and timers, and use
 destroy to remove side effects that are not registrations. The host revokes all
 registry entries, closes plugin modals, and removes plugin styles on
-disable/uninstall.
+disable/uninstall. Reloads can temporarily leave a plugin in a loading or failed
+state; open and saved panels remain until the current generation is ready. A
+ready generation that no longer registers a panel closes it, while an explicit
+disable or uninstall closes every panel owned by the plugin. This lifecycle
+bookkeeping is host-internal; plugins do not call lifecycle methods.
 
 ### Frontend hook/API matrix
 
@@ -178,10 +186,13 @@ disable/uninstall.
 | registerComponent | registerComponent(slot, Component); component receives { slotProps?: unknown } | Active ui.bundle | Every registration is owner-tracked, error-isolated, and bulk-revoked | registry.registerComponent("task-sidebar", Panel) |
 | registerWsHandler | registerWsHandler(action, handler(payload)); receives actions bridged from lib/ws | Active ui.bundle | Handler is removed on disable/uninstall; tolerate duplicate/replayed actions | registry.registerWsHandler("acme.updated", renderUpdate) |
 | registerKeybinding | registerKeybinding(id, handler(event)); id must be declared in ui.keybindings; users can override the effective combo | ui.bundle and ui.keybindings[] | Handler is removed on disable/uninstall; editable targets/core shortcuts win | registry.registerKeybinding("open-panel", () => host.openModal(...)) |
+| registerTaskPanel | { id, title, icon?, Component, mobileEnabled? }; adds a row to the task workspace's "+" (add panel) menu; Component receives { panelId, taskId, sessionId, presentation } | Active ui.bundle | Panel renders behind its own error boundary; slow/failed reloads preserve it, a ready generation missing it closes it, and disable/uninstall closes every owned instance | registry.registerTaskPanel({ id: "notes", title: "Notes", Component: NotesPanel }) |
+| registerTaskMenuAction | { id, label, icon?, group: "edit", visible?(context), run(context) }; adds an item to the kanban card's Edit submenu | Active ui.bundle | Action is revoked on disable/uninstall; a throwing/rejecting run is caught and logged | registry.registerTaskMenuAction({ id: "enhance", label: "Enhance", group: "edit", run: doEnhance }) |
 | host.React / host.jsx | Shared React instance and React.createElement alias | Active ui.bundle | No cleanup; never bundle a second React/Radix runtime | const h = host.jsx |
 | host.store | Curated Zustand { getState, setState, subscribe } for the live app store | Active ui.bundle | Unsubscribe in destroy; setState mutates the whole SPA and is not a plugin database | const stop = host.store.subscribe(render) |
 | host.api.fetch / baseUrl | fetch(path, init?) is scoped to /api/plugins/<id>/...; baseUrl is the backend origin for split-origin deployments | Active ui.bundle; backend path must be a declared webhook when relayed | Abort/ignore requests after destroy; do not assume a webhook authenticates callers | host.api.fetch("webhooks/inbound", { method: "POST" }) |
-| host.ui | Curated host instances: Alert*, Badge, Button, Card*, Checkbox, Dialog*, DropdownMenu*, Input, Label, Pagination*, ScrollArea, Select*, Separator, Sheet*, Skeleton, Spinner, Switch, Table*, Tabs*, Textarea, Tooltip*, plus Combobox, PageTopbar, TaskCreateDialog | Active ui.bundle | Host owns contexts/portals; render with host React and let modal/slot cleanup run | const Button = host.ui.Button |
+| host.storage | Authenticated, per-user key/value storage: get(scope, scopeId, key)/set(scope, scopeId, key, value, options?)/delete(scope, scopeId, key)/list(scope, scopeId) plus subscribe(filter, handler); no plugin backend required | capabilities.user_state: true | set/delete accept an optional writerId (appended to the host's per-tab id, not a replacement) for echo suppression; list returns every entry under the scope pair, unpaginated | host.storage.set("task", taskId, "note", value, { writerId: panelId }) |
+| host.ui | Curated host instances: Alert*, Badge, Button, Card*, Checkbox, Dialog*, DropdownMenu*, Input, Label, Pagination*, ScrollArea, Select*, Separator, Sheet*, Skeleton, Spinner, Switch, Table*, Tabs*, Textarea, Tooltip*, RichTextEditor, RichTextReadOnly, plus Combobox, PageTopbar, TaskCreateDialog | Active ui.bundle | Host owns contexts/portals; render with host React and let modal/slot cleanup run | const Button = host.ui.Button |
 | host.theme | Current "light" or "dark" theme | Active ui.bundle | Read during render; subscribe through host/app patterns if theme-sensitive | host.theme === "dark" |
 | host.navigate | Soft SPA navigation navigate(href, { replace? }) | Active ui.bundle | No registry cleanup; avoid navigating to undeclared external origins | host.navigate("/t/" + taskId) |
 | host.openModal | Host-owned modal: { title?, content, size?, dismissible? } -> { close() } | Active ui.bundle | Modal auto-closes on disable/uninstall; close handles are idempotent | const modal = host.openModal({ content: Panel }) |
@@ -201,27 +212,13 @@ to strings, but an unmounted name renders nowhere.
 | app-status-bar-left | Left side of desktop status bar or mobile status drawer | AppStatusBarSlotProps |
 | app-status-bar-right | Right side of desktop status bar or mobile status drawer | AppStatusBarSlotProps |
 | plugin-settings | Top of this plugin's Settings > Plugins page | { pluginId, status }; owner-scoped to the plugin being viewed |
+| task-card-indicators | Kanban card, beside the PR status icon | { taskId, workspaceId, workflowStepId } |
 
 AppStatusBarSlotProps is { placement, presentation, density, pathname,
 activeWorkspaceId, activeTaskId, activeSessionId }. Desktop presentation is a
 compact 24px bar; mobile presentation is an in-flow drawer, so render a
 touch-usable row. Status items can be reordered by the host; plugins do not get
 an ordering API.
-
-### APIs not available on this branch
-
-Do not copy examples that assume these hooks exist:
-
-- registerTaskPanel and registerTaskMenuAction are not implemented. Use a
-  task-sidebar component, a route, or a webhook-backed UI action.
-- host.storage (per-user frontend storage) is not implemented. Use backend Host
-  state with an explicit task, workspace, agent, or instance scope.
-- host.ui.RichTextEditor and host.ui.RichTextReadOnly are not exported.
-- There is no Kanban-card contribution hook. Use main-top-bar, a route that
-  reads host.store, or a task-sidebar contribution.
-
-These are branch facts, not reserved signatures. When a future branch adds one,
-update the authoritative contract pair and this matrix together.
 
 ## Backend contract
 
@@ -369,43 +366,246 @@ plugin.
 
 ### 3. Task panel with task-scoped Host state
 
-There is no registerTaskPanel or per-user host.storage today. Use the mounted
-task-sidebar slot for the UI, read the active task id from host.store, send it to
-the Go backend, and store the value under the task scope.
+There is now a real `registerTaskPanel` and per-user `host.storage`; prefer
+them over the old task-sidebar-plus-webhook workaround.
 
 ```yaml
 capabilities:
-  state: true
-webhooks:
-  - key: "task-note"
-    method: "POST"
+  user_state: true
 ```
 
 ```js
-registry.registerComponent("task-sidebar", () => {
-  const taskId = host.store.getState().tasks.activeTaskId;
-  return host.jsx("button", {
-    onClick: () => host.api.fetch("webhooks/task-note", {
-      method: "POST",
-      body: JSON.stringify({ taskId }),
-      headers: { "content-type": "application/json" },
-    }),
-  }, "Save task note");
-});
+function useNoteValue(taskId, panelId) {
+  const [value, setValue] = host.React.useState("");
+  const [loadedTaskId, setLoadedTaskId] = host.React.useState(null);
+  const [readError, setReadError] = host.React.useState(false);
+  const updatedAtRef = host.React.useRef(undefined);
+  const dirtyRef = host.React.useRef(false);
+  // Holds cancellation/generation state outside the effect so `refresh` is a
+  // stable function the conflict-refetch below can also call, instead of
+  // duplicating the read-and-commit logic without its guards.
+  const guardRef = host.React.useRef({ cancelled: false, generation: 0 });
+
+  const refresh = host.React.useCallback((options = {}) => {
+    const preserveValue = options.preserveValue ?? dirtyRef.current;
+    const guard = guardRef.current;
+    const generation = ++guard.generation;
+    return host.storage.get("task", taskId, "note").then(
+      (entry) => {
+        // Ignore a response that resolves after taskId changed, the panel
+        // unmounted, or a newer refresh started — otherwise a stale read
+        // (the previous task's note, or one of two overlapping reads that
+        // resolved out of order) can land in the current field.
+        if (guard.cancelled || generation !== guard.generation) return;
+        if (!preserveValue && !dirtyRef.current) setValue(entry ? entry.value : "");
+        updatedAtRef.current = entry ? entry.updatedAt : undefined;
+        setLoadedTaskId(taskId);
+        setReadError(false);
+        return true;
+      },
+      () => {
+        // Do not mark the task loaded after a rejected read. Rendering an
+        // empty editor here would allow its first save to omit
+        // ifUnmodifiedSince and overwrite an existing note. Keep the panel
+        // in a retry state until an authoritative read succeeds.
+        if (guard.cancelled || generation !== guard.generation) return false;
+        setReadError(true);
+        return false;
+      },
+    );
+  }, [taskId]);
+
+  host.React.useEffect(() => {
+    const guard = guardRef.current;
+    guard.cancelled = false;
+    // Clear the previous task's value/timestamp synchronously — otherwise it
+    // stays on screen (and could be sent as ifUnmodifiedSince under the new
+    // taskId) until this effect's first refresh() resolves.
+    setValue("");
+    updatedAtRef.current = undefined;
+    dirtyRef.current = false;
+    setLoadedTaskId(null);
+    setReadError(false);
+    refresh();
+    // Scope echo suppression to this panel instance rather than the shared
+    // per-tab default writer id — otherwise a second surface editing the
+    // same note (a kanban shortcut, another panel) looks like this panel's
+    // own echo and its write never arrives here.
+    const unsubscribe = host.storage.subscribe(
+      { scope: "task", scopeId: taskId, key: "note", writerId: panelId },
+      refresh,
+    );
+    return () => {
+      guard.cancelled = true;
+      unsubscribe();
+    };
+  }, [taskId, panelId, refresh]);
+  return {
+    value,
+    setValue,
+    updatedAtRef,
+    dirtyRef,
+    loaded: loadedTaskId === taskId,
+    readError,
+    refresh,
+  };
+}
+
+function NotesPanel({ taskId, panelId }) {
+  const { value, setValue, updatedAtRef, dirtyRef, loaded, readError, refresh } = useNoteValue(
+    taskId,
+    panelId,
+  );
+  const [conflict, setConflict] = host.React.useState(false);
+  const [writeError, setWriteError] = host.React.useState(false);
+  const pendingValueRef = host.React.useRef(undefined);
+  const writeTimerRef = host.React.useRef(undefined);
+  const writeInFlightRef = host.React.useRef(false);
+  const writeBlockedRef = host.React.useRef(false);
+  const writeGenerationRef = host.React.useRef(0);
+
+  const flushWrite = host.React.useCallback(() => {
+    if (
+      writeBlockedRef.current ||
+      writeInFlightRef.current ||
+      pendingValueRef.current === undefined
+    ) {
+      return;
+    }
+    const generation = writeGenerationRef.current;
+    const next = pendingValueRef.current;
+    pendingValueRef.current = undefined;
+    writeInFlightRef.current = true;
+    host.storage
+      .set("task", taskId, "note", next, {
+        writerId: panelId,
+        ifUnmodifiedSince: updatedAtRef.current,
+      })
+      .then((result) => {
+        if (writeGenerationRef.current !== generation) return;
+        updatedAtRef.current = result.updatedAt;
+        dirtyRef.current = pendingValueRef.current !== undefined;
+        setConflict(false);
+        setWriteError(false);
+      })
+      .catch((error) => {
+        if (writeGenerationRef.current !== generation) return;
+        // Stop the queue on a conflict. Refresh only the authoritative
+        // timestamp and preserve the local value so the user can choose
+        // whether to retry their edit; never replace dirty text silently.
+        pendingValueRef.current = pendingValueRef.current ?? next;
+        writeBlockedRef.current = true;
+        if (error.name === "PluginStorageConflictError") {
+          setConflict(true);
+          return refresh({ preserveValue: true });
+        }
+        setWriteError(true);
+      })
+      .finally(() => {
+        if (writeGenerationRef.current !== generation) return;
+        writeInFlightRef.current = false;
+        if (!writeBlockedRef.current && pendingValueRef.current !== undefined) {
+          writeTimerRef.current = setTimeout(() => {
+            if (writeGenerationRef.current !== generation) return;
+            writeTimerRef.current = undefined;
+            flushWrite();
+          }, 150);
+        }
+      });
+  }, [dirtyRef, panelId, refresh, taskId, updatedAtRef]);
+
+  const scheduleWrite = host.React.useCallback(() => {
+    if (writeBlockedRef.current || writeTimerRef.current !== undefined) return;
+    const generation = writeGenerationRef.current;
+    writeTimerRef.current = setTimeout(() => {
+      if (writeGenerationRef.current !== generation) return;
+      writeTimerRef.current = undefined;
+      flushWrite();
+    }, 150);
+  }, [flushWrite]);
+
+  const retryWrite = host.React.useCallback(async () => {
+    if (!(await refresh({ preserveValue: true }))) return;
+    writeBlockedRef.current = false;
+    setConflict(false);
+    setWriteError(false);
+    scheduleWrite();
+  }, [refresh, scheduleWrite]);
+
+  host.React.useEffect(() => {
+    const generation = ++writeGenerationRef.current;
+    pendingValueRef.current = undefined;
+    writeInFlightRef.current = false;
+    writeBlockedRef.current = false;
+    setConflict(false);
+    setWriteError(false);
+    return () => {
+      if (writeGenerationRef.current === generation) writeGenerationRef.current += 1;
+      pendingValueRef.current = undefined;
+      writeInFlightRef.current = false;
+      writeBlockedRef.current = false;
+      if (writeTimerRef.current !== undefined) clearTimeout(writeTimerRef.current);
+      writeTimerRef.current = undefined;
+    };
+  }, [taskId, panelId]);
+
+  if (readError) {
+    return host.jsx(
+      "button",
+      { type: "button", onClick: refresh },
+      "Could not load this note. Retry",
+    );
+  }
+  if (!loaded) return host.jsx("div", null, "Loading...");
+  const editor = host.jsx(host.ui.RichTextEditor, {
+    taskId,
+    value,
+    onChange: (next) => {
+      setValue(next);
+      dirtyRef.current = true;
+      pendingValueRef.current = next;
+      scheduleWrite();
+    },
+  });
+  const status = conflict
+    ? host.jsx(
+        "div",
+        null,
+        "This note changed elsewhere. Your edit is preserved.",
+        host.jsx("button", { type: "button", onClick: retryWrite }, "Retry my edit"),
+      )
+    : writeError
+      ? host.jsx(
+          "div",
+          null,
+          "Could not save this note.",
+          host.jsx("button", { type: "button", onClick: retryWrite }, "Retry"),
+        )
+      : null;
+  return host.jsx("div", null, editor, status);
+}
+
+registry.registerTaskPanel({ id: "notes", title: "Notes", icon: "book", Component: NotesPanel, mobileEnabled: true });
 ```
 
-```go
-// In HandleWebhook, after authenticating/validating the request:
-host := p.Host()
-if host == nil { return &pluginsdk.WebhookResponse{Status: http.StatusServiceUnavailable}, nil }
-return &pluginsdk.WebhookResponse{Status: http.StatusNoContent}, host.SetState(
-  ctx, "task", taskID, "note", map[string]any{"text": note},
-)
-```
+On a phone, all `mobileEnabled` panels appear under one **Panels** bottom-nav
+action. The picker uses a touch-sized, internally scrolling sheet with each
+panel's icon and title; selecting a row dismisses the picker and focuses that
+panel as the single full-height mobile surface. The component receives
+`presentation: "mobile"`; desktop dockview receives `presentation: "desktop"`.
+The same registration and panel identity drive both viewports, so a panel remains
+selected through a slow or failed reload and is closed only after a ready
+generation omits it or the plugin is explicitly disabled/uninstalled.
 
-This is task-scoped plugin state, not a per-user browser preference. If the
-behavior truly needs user identity, request a future Host API rather than
-guessing at one.
+`writerId` is appended to the host's own per-tab id, not a full replacement —
+a static value like `panelId` is the same across every tab that has that
+panel open, so two different tabs subscribing with the same raw `panelId`
+would otherwise suppress each other's real, cross-tab updates as if they were
+local echoes. Pass `ifUnmodifiedSince` (the `updatedAt` from the last `get`)
+to `set` and handle the resulting `409` by refetching, rather than silently
+discarding a concurrent edit. `host.storage.list` returns every entry under a
+`(scope, scopeId)` pair with no pagination — fine for a handful of keys per
+task, not for an unbounded per-item collection.
 
 ### 4. Webhook receiver
 
@@ -457,20 +657,30 @@ Host reader because event queues are bounded and delivery is best-effort.
 
 ### 6. Kanban-aware contribution
 
-There is no Kanban-card injection hook in this branch. Use a mounted top-bar
-contribution or a route that reads the live app store, and link to a task route
-when a card is selected.
+`registerTaskMenuAction` adds an item to the kanban card's `Edit` submenu;
+`task-card-indicators` (see the named slots table) is the matching read-only
+surface, rendered beside the PR status icon on every card. Both `visible(context)`
+and `run(context)` receive the card's actual `presentation`: `"desktop"` on the
+desktop kanban and `"mobile"` on the phone kanban. Use it when an action needs to
+choose responsive behavior; the host supplies it through the card composition.
 
 ```js
-registry.registerComponent("main-top-bar", ({ slotProps }) => {
-  const state = host.store.getState();
-  const count = state.kanban && state.kanban.tasks ? state.kanban.tasks.length : 0;
-  return host.jsx("span", { title: "View: " + (slotProps && slotProps.currentPage) }, count + " tasks");
+registry.registerTaskMenuAction({
+  id: "enhance-notes",
+  label: "Enhance notes",
+  group: "edit",
+  visible: (context) => Boolean(context.taskId),
+  run: async (context) => {
+    await host.storage.set("task", context.taskId, "note", "...");
+  },
 });
 ```
 
-For a card-specific action, use task-sidebar on the task detail or a route with
-host.store.subscribe; do not patch first-party Kanban components.
+With no plugin action registered, the card's `Edit` item stays flat; once any
+plugin registers one, it becomes `Edit > Edit task` followed by each visible
+action. A `run` that throws or rejects is caught and logged, not left to crash
+the card; the menu closes either way. Do not patch first-party Kanban
+components directly.
 
 ## Build, package, install, and test
 
@@ -557,7 +767,13 @@ repackaging.
   utility-agent call fails with PermissionDenied unless its manifest capability
   is present.
 - **Confusing plugin_state with host.storage:** Host state is backend,
-  plugin-scoped JSON; host.storage does not exist in this branch.
+  plugin-scoped JSON with no per-user identity; host.storage is per-user.
+- **Reusing a raw surface id as writerId:** a static id like panelId is the
+  same across every tab that has that surface open. Passed as-is to
+  host.storage's writerId, it makes two different tabs look like the same
+  writer and suppresses real cross-tab updates as if they were local echoes —
+  the host already appends it to a per-tab id, so pass the surface id, not a
+  fabricated combined string.
 - **Writing outside KANDEV_PLUGIN_DATA_DIR:** arbitrary files belong below the
   injected per-plugin directory; do not write beside the Kandev database or into
   another plugin's directory.

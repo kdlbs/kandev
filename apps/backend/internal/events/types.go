@@ -158,6 +158,14 @@ const (
 	UserSettingsUpdated = "user.settings.updated"
 )
 
+// PluginUserStateUpdated fires after a successful write/delete on a
+// plugin's per-user storage route (/api/plugins/:id/user-state/...). The
+// event payload carries only keys (pluginId/scope/scopeId/key/writerId),
+// never the stored value — see
+// docs/decisions/2026-08-01-per-user-plugin-storage.md. Routed to the
+// writing user's own WS connections only, via UserEventBroadcaster.
+const PluginUserStateUpdated = "plugin.user-state.updated"
+
 // Event types for system maintenance jobs (VACUUM, factory reset, snapshot
 // create/restore, disk walk). Published by internal/system/jobs.Tracker on
 // every state transition and broadcast to all WebSocket clients.

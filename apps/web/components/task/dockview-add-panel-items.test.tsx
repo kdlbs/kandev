@@ -3,6 +3,7 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from "@kandev/ui/dropdown-menu";
 import type { TaskPR } from "@/lib/types/github";
 import { AddPanelMenuItems, type AddPanelMenuState } from "./dockview-add-panel-items";
+import { pluginRegistry } from "@/lib/plugins/registry";
 
 const { mockAddPRPanel } = vi.hoisted(() => ({
   mockAddPRPanel: vi.fn(),
@@ -14,6 +15,7 @@ const mockDockviewStore = vi.hoisted(() => ({
   addBrowserPanel: vi.fn(),
   addVscodePanel: vi.fn(),
   addPlanPanel: vi.fn(),
+  addPluginPanel: vi.fn(),
   addChangesPanel: vi.fn(),
   addFilesPanel: vi.fn(),
   addPRPanel: mockAddPRPanel,
@@ -166,5 +168,38 @@ describe("AddPanelMenuItems — linked PR rows", () => {
     renderMenu({ prs: [makePR("pr-1", 42)] });
     fireEvent.click(screen.getByTestId(`${PR_ITEM_TEST_ID_PREFIX}acme-kandev-42`));
     expect(mockAddPRPanel).toHaveBeenCalledWith("acme/kandev/42");
+  });
+});
+
+describe("AddPanelMenuItems — plugin task panels (AC1)", () => {
+  function Notes() {
+    return null;
+  }
+
+  afterEach(() => {
+    pluginRegistry.unregisterPlugin("kandev-plugin-notes");
+  });
+
+  it("renders no plugin row when no task panel is registered", () => {
+    renderMenu();
+    expect(screen.queryByTestId(/^add-panel-plugin-item-/)).toBeNull();
+  });
+
+  it("renders one row per registered task panel and opens it via addPluginPanel", () => {
+    pluginRegistry
+      .forPlugin("kandev-plugin-notes")
+      .registerTaskPanel({ id: "notes", title: "Notes", Component: Notes });
+
+    renderMenu();
+    const row = screen.getByTestId("add-panel-plugin-item-kandev-plugin-notes-notes");
+    expect(row.textContent).toContain("Notes");
+
+    fireEvent.click(row);
+    expect(mockDockviewStore.addPluginPanel).toHaveBeenCalledWith(
+      "kandev-plugin-notes",
+      "notes",
+      "Notes",
+      { groupId: "group-center" },
+    );
   });
 });

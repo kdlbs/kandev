@@ -676,3 +676,61 @@ describe("addMRPanel — layout-owned review tabs", () => {
     expect(api.panels.filter((panel) => panel.id.startsWith(LEGACY_MR_ID))).toHaveLength(2);
   });
 });
+
+const PLUGIN_ID = "kandev-plugin-notes";
+const PLUGIN_PANEL_KEY = "notes";
+const PLUGIN_PANEL_TITLE = "Notes";
+const PLUGIN_PANEL_ID = "plugin:kandev-plugin-notes:notes";
+
+describe("addPluginPanel / closePluginPanels", () => {
+  function buildExtra(api: DockviewApi) {
+    const store = makeStore(api);
+    return { api, actions: buildExtraPanelActions(store.get) };
+  }
+
+  it("opens a plugin panel beside chat by default, with the shared plugin-panel component/tab", () => {
+    const { api, actions } = buildExtra(makeApi());
+
+    actions.addPluginPanel(PLUGIN_ID, PLUGIN_PANEL_KEY, PLUGIN_PANEL_TITLE);
+
+    const panel = api.getPanel(PLUGIN_PANEL_ID) as unknown as MockPanel;
+    expect(panel).toBeDefined();
+    expect(panel.title).toBe(PLUGIN_PANEL_TITLE);
+    expect(panel.params).toEqual({ pluginId: PLUGIN_ID, panelKey: PLUGIN_PANEL_KEY });
+  });
+
+  it("focuses an already-open plugin panel instead of duplicating it", () => {
+    const { api, actions } = buildExtra(makeApi());
+
+    actions.addPluginPanel(PLUGIN_ID, PLUGIN_PANEL_KEY, PLUGIN_PANEL_TITLE);
+    (api.getPanel(PLUGIN_PANEL_ID) as unknown as MockPanel).isActive = false;
+    actions.addPluginPanel(PLUGIN_ID, PLUGIN_PANEL_KEY, PLUGIN_PANEL_TITLE);
+
+    expect(api.panels.filter((p) => p.id === PLUGIN_PANEL_ID)).toHaveLength(1);
+    expect((api.getPanel(PLUGIN_PANEL_ID) as unknown as MockPanel).isActive).toBe(true);
+  });
+
+  it("respects inCenter and quiet options", () => {
+    const { api, actions } = buildExtra(makeApi());
+
+    actions.addPluginPanel(PLUGIN_ID, PLUGIN_PANEL_KEY, PLUGIN_PANEL_TITLE, {
+      inCenter: true,
+      quiet: true,
+    });
+
+    const panel = api.getPanel(PLUGIN_PANEL_ID) as unknown as MockPanel;
+    expect(panel.group.id).toBe(CENTER_GROUP);
+    expect(panel.isActive).toBe(false);
+  });
+
+  it("closePluginPanels removes only the target plugin's panels", () => {
+    const { api, actions } = buildExtra(makeApi());
+    actions.addPluginPanel(PLUGIN_ID, PLUGIN_PANEL_KEY, PLUGIN_PANEL_TITLE);
+    actions.addPluginPanel("kandev-plugin-other", "widget", "Widget");
+
+    actions.closePluginPanels(PLUGIN_ID);
+
+    expect(api.getPanel(PLUGIN_PANEL_ID)).toBeUndefined();
+    expect(api.getPanel("plugin:kandev-plugin-other:widget")).toBeDefined();
+  });
+});

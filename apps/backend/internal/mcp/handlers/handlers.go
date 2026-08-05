@@ -13,6 +13,7 @@ import (
 
 	"github.com/kandev/kandev/internal/agent/mcpconfig"
 	agentsettingscontroller "github.com/kandev/kandev/internal/agent/settings/controller"
+	"github.com/kandev/kandev/internal/auth/authn"
 	"github.com/kandev/kandev/internal/clarification"
 	"github.com/kandev/kandev/internal/common/constants"
 	"github.com/kandev/kandev/internal/common/logger"
@@ -103,6 +104,14 @@ type conditionalSessionStateUpdater interface {
 // TaskRepository interface for updating task state.
 type TaskRepository interface {
 	UpdateTaskState(ctx context.Context, taskID string, state v1.TaskState) error
+}
+
+// RemoteContributionService resolves provider URLs before task creation and
+// associates an already-existing PR/MR after the target task-repository row
+// exists. Implementations must return only server-authored identity data.
+type RemoteContributionService interface {
+	Resolve(ctx context.Context, workspaceID, userID, rawURL string) (*models.RemoteContributionResolution, bool, error)
+	Associate(ctx context.Context, workspaceID, userID, taskID, repositoryID string, resolution *models.RemoteContributionResolution) error
 }
 
 // sessionOwnedTaskStateUpdater atomically guards a task-state write with the
@@ -227,6 +236,7 @@ type Handlers struct {
 
 	// Optional task-bound GitHub PR automation controls.
 	taskPRAutomation       TaskPRAutomationService
+	remoteContributionSvc  RemoteContributionService
 	diagnosticBundles      DiagnosticBundleProvider
 	diagnosticMaterializer DiagnosticBundleMaterializer
 	// Optional task-bound GitLab MR automation controls.
@@ -297,6 +307,12 @@ func (h *Handlers) SetTaskTitleBranchRenamer(renamer TaskTitleBranchRenamer) {
 // SetUserSettingsProvider wires portable user preferences into MCP task creation.
 func (h *Handlers) SetUserSettingsProvider(provider UserSettingsProvider) {
 	h.userSettingsProvider = provider
+}
+
+// SetRemoteContributionService wires provider-backed PR/MR resolution for
+// repository_url values that identify an existing contribution.
+func (h *Handlers) SetRemoteContributionService(svc RemoteContributionService) {
+	h.remoteContributionSvc = svc
 }
 
 // SetConfigDeps sets the config-mode dependencies for agent-native configuration handlers.
@@ -638,6 +654,12 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		return ws.NewError(msg.ID, msg.Action, code, message, nil)
 	}
 
+	identity, _ := authn.IdentityFromContext(ctx)
+	contributions, err := h.resolveMCPRemoteContributions(ctx, req.WorkspaceID, identity.UserID, repos)
+	if err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, err.Error(), nil)
+	}
+
 	workspacePolicy, err := h.resolveMCPWorkspacePolicy(req.ParentID, req.WorkspaceMode)
 	if err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, err.Error(), nil)
@@ -690,6 +712,28 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		return ws.NewError(msg.ID, msg.Action, code, message, nil)
 	}
 
+	for index, resolution := range contributions {
+		if resolution == nil {
+			continue
+		}
+		if index >= len(task.Repositories) || task.Repositories[index] == nil {
+			if delErr := h.taskSvc.DeleteTask(ctx, task.ID); delErr != nil {
+				h.logger.Error("rollback delete failed after missing task repository",
+					zap.String("task_id", task.ID), zap.Error(delErr))
+			}
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "failed to attach remote contribution: task repository is missing", nil)
+		}
+		if err := h.remoteContributionSvc.Associate(ctx, req.WorkspaceID, identity.UserID, task.ID, task.Repositories[index].ID, resolution); err != nil {
+			h.logger.Error("associate remote contribution; rolling back task creation",
+				zap.String("task_id", task.ID), zap.Error(err))
+			if delErr := h.taskSvc.DeleteTask(ctx, task.ID); delErr != nil {
+				h.logger.Error("rollback delete failed after contribution association error",
+					zap.String("task_id", task.ID), zap.Error(delErr))
+			}
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "failed to attach remote contribution: "+err.Error(), nil)
+		}
+	}
+
 	if h.handoffSvc != nil && workspacePolicy.NeedsAttachment() {
 		if attachErr := h.handoffSvc.AttachWorkspacePolicy(ctx, task.ID, req.ParentID, workspacePolicy); attachErr != nil {
 			h.logger.Error("attach workspace policy; rolling back task creation",
@@ -730,6 +774,63 @@ type taskRepoResult struct {
 	Repos       []service.TaskRepositoryInput
 	WorkspaceID string // inherited from parent, empty otherwise
 	WorkflowID  string // inherited from parent, empty otherwise
+}
+
+func (h *Handlers) resolveMCPRemoteContributions(
+	ctx context.Context, workspaceID, userID string, repos []service.TaskRepositoryInput,
+) ([]*models.RemoteContributionResolution, error) {
+	resolutions := make([]*models.RemoteContributionResolution, len(repos))
+	if h.remoteContributionSvc == nil {
+		return resolutions, nil
+	}
+	for index := range repos {
+		rawURL := strings.TrimSpace(repos[index].RemoteURL)
+		if rawURL == "" {
+			rawURL = strings.TrimSpace(repos[index].GitHubURL)
+		}
+		if rawURL == "" {
+			continue
+		}
+		resolution, matched, err := h.remoteContributionSvc.Resolve(ctx, workspaceID, userID, rawURL)
+		if err != nil {
+			return nil, err
+		}
+		if !matched {
+			continue
+		}
+		if resolution == nil {
+			return nil, errors.New("remote contribution resolver returned no binding")
+		}
+		owner, name, err := splitRemoteContributionTarget(resolution.TargetPath)
+		if err != nil {
+			return nil, err
+		}
+		repo := &repos[index]
+		repo.RepositoryID = ""
+		repo.LocalPath = ""
+		repo.GitHubURL = ""
+		repo.RemoteURL = resolution.TargetRemoteURL
+		repo.Provider = resolution.TargetProvider
+		repo.ProviderHost = resolution.TargetHost
+		repo.ProviderRepoID = resolution.TargetProviderID
+		repo.ProviderOwner = owner
+		repo.ProviderName = name
+		repo.DefaultBranch = resolution.TargetDefaultBranch
+		repo.BaseBranch = resolution.Binding.BaseBranch
+		repo.CheckoutBranch = resolution.Binding.HeadBranch
+		repo.RemoteContribution = &resolution.Binding
+		repo.TrustedRemote = true
+		resolutions[index] = resolution
+	}
+	return resolutions, nil
+}
+
+func splitRemoteContributionTarget(path string) (string, string, error) {
+	parts := strings.Split(strings.Trim(path, "/"), "/")
+	if len(parts) < 2 || parts[len(parts)-1] == "" {
+		return "", "", fmt.Errorf("remote contribution target repository %q is invalid", path)
+	}
+	return strings.Join(parts[:len(parts)-1], "/"), parts[len(parts)-1], nil
 }
 
 // resolveTaskRepositories builds the repository list for a new task.

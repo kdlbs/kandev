@@ -26,15 +26,20 @@ type rawMR struct {
 	References     struct {
 		Full string `json:"full"`
 	} `json:"references"`
-	Author       rawUser    `json:"author"`
-	Reviewers    []rawUser  `json:"reviewers"`
-	Assignees    []rawUser  `json:"assignees"`
-	Labels       []string   `json:"labels"`
-	ChangesCount string     `json:"changes_count"`
-	CreatedAt    time.Time  `json:"created_at"`
-	UpdatedAt    time.Time  `json:"updated_at"`
-	MergedAt     *time.Time `json:"merged_at"`
-	ClosedAt     *time.Time `json:"closed_at"`
+	Author             rawUser    `json:"author"`
+	Reviewers          []rawUser  `json:"reviewers"`
+	Assignees          []rawUser  `json:"assignees"`
+	Labels             []string   `json:"labels"`
+	ChangesCount       string     `json:"changes_count"`
+	CreatedAt          time.Time  `json:"created_at"`
+	UpdatedAt          time.Time  `json:"updated_at"`
+	MergedAt           *time.Time `json:"merged_at"`
+	ClosedAt           *time.Time `json:"closed_at"`
+	AllowCollaboration bool       `json:"allow_collaboration"`
+	SourceProjectID    int64      `json:"source_project_id"`
+	TargetProjectID    int64      `json:"target_project_id"`
+	SourceProject      rawProject `json:"source_project"`
+	TargetProject      rawProject `json:"target_project"`
 }
 
 type rawUser struct {
@@ -46,6 +51,8 @@ type rawUser struct {
 }
 
 type rawProject struct {
+	HTTPURLToRepo     string `json:"http_url_to_repo"`
+	SSHURLToRepo      string `json:"ssh_url_to_repo"`
 	ID                int64  `json:"id"`
 	Path              string `json:"path"`
 	Name              string `json:"name"`
@@ -116,32 +123,57 @@ type rawPipeline struct {
 func convertRawMR(raw *rawMR) *MR {
 	state := normalizeMRState(raw.State)
 	namespace, projectPath := splitFullReference(raw.References.Full)
-	mr := &MR{
-		ID:               raw.ID,
-		IID:              raw.IID,
-		ProjectID:        raw.ProjectID,
-		Title:            raw.Title,
-		URL:              raw.WebURL,
-		WebURL:           raw.WebURL,
-		State:            state,
-		HeadBranch:       raw.SourceBranch,
-		HeadSHA:          raw.SHA,
-		BaseBranch:       raw.TargetBranch,
-		AuthorUsername:   raw.Author.Username,
-		ProjectNamespace: namespace,
-		ProjectPath:      projectPath,
-		Body:             raw.Description,
-		Draft:            raw.Draft || raw.WorkInProgress,
-		MergeStatus:      raw.MergeStatus,
-		HasConflicts:     raw.HasConflicts,
-		Reviewers:        convertReviewers(raw.Reviewers),
-		Assignees:        convertReviewers(raw.Assignees),
-		Labels:           append([]string(nil), raw.Labels...),
-		CreatedAt:        raw.CreatedAt,
-		UpdatedAt:        raw.UpdatedAt,
-		MergedAt:         raw.MergedAt,
-		ClosedAt:         raw.ClosedAt,
+	targetProjectID := raw.TargetProjectID
+	if targetProjectID == 0 {
+		targetProjectID = raw.ProjectID
 	}
+	mr := &MR{
+		ID:                 raw.ID,
+		IID:                raw.IID,
+		ProjectID:          raw.ProjectID,
+		Title:              raw.Title,
+		URL:                raw.WebURL,
+		WebURL:             raw.WebURL,
+		State:              state,
+		HeadBranch:         raw.SourceBranch,
+		HeadSHA:            raw.SHA,
+		BaseBranch:         raw.TargetBranch,
+		AuthorUsername:     raw.Author.Username,
+		ProjectNamespace:   namespace,
+		ProjectPath:        projectPath,
+		SourceProjectID:    raw.SourceProjectID,
+		TargetProjectID:    targetProjectID,
+		AllowCollaboration: raw.AllowCollaboration,
+		Body:               raw.Description,
+		Draft:              raw.Draft || raw.WorkInProgress,
+		MergeStatus:        raw.MergeStatus,
+		HasConflicts:       raw.HasConflicts,
+		Reviewers:          convertReviewers(raw.Reviewers),
+		Assignees:          convertReviewers(raw.Assignees),
+		Labels:             append([]string(nil), raw.Labels...),
+		CreatedAt:          raw.CreatedAt,
+		UpdatedAt:          raw.UpdatedAt,
+		MergedAt:           raw.MergedAt,
+		ClosedAt:           raw.ClosedAt,
+	}
+	if raw.SourceProject.PathWithNamespace != "" {
+		mr.SourceProjectPath = raw.SourceProject.PathWithNamespace
+	}
+	// A fork MR can contain only source_project_id and target_project_id. Do
+	// not turn that response into a same-project MR by copying the target path;
+	// PATClient hydrates the source project by ID before this conversion.
+	if mr.SourceProjectPath == "" && (raw.SourceProjectID == 0 ||
+		(targetProjectID > 0 && raw.SourceProjectID == targetProjectID)) {
+		mr.SourceProjectPath = projectPath
+	}
+	mr.SourceProjectRemoteURL = raw.SourceProject.HTTPURLToRepo
+	if raw.TargetProject.PathWithNamespace != "" {
+		mr.TargetProjectPath = raw.TargetProject.PathWithNamespace
+	}
+	if mr.TargetProjectPath == "" {
+		mr.TargetProjectPath = projectPath
+	}
+	mr.TargetDefaultBranch = raw.TargetProject.DefaultBranch
 	return mr
 }
 

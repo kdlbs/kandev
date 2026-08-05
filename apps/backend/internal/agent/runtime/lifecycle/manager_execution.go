@@ -592,6 +592,10 @@ func (m *Manager) createExecution(ctx context.Context, taskID string, info *Work
 	if managedReq.managedGoCachePath != "" {
 		metadata[managedGoCacheMetadataKey] = managedReq.managedGoCachePath
 	}
+	remoteContributions, err := remoteContributionsFromMetadata(metadata)
+	if err != nil {
+		return nil, err
+	}
 
 	req := &ExecutorCreateRequest{
 		InstanceID:                     executionID,
@@ -611,6 +615,7 @@ func (m *Manager) createExecution(ctx context.Context, taskID string, info *Work
 		PreviousExecutionID:            info.AgentExecutionID,
 		AuthToken:                      m.revealRuntimeSecret(ctx, info.Metadata, MetadataKeyAuthTokenSecret),
 		BootstrapNonce:                 m.revealRuntimeSecret(ctx, info.Metadata, MetadataKeyBootstrapNonceSecret),
+		RemoteContributions:            remoteContributions,
 	}
 
 	if err := resumeRemoteInstancePreflight(ctx, rt, req); err != nil {

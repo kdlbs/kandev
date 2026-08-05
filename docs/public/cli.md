@@ -20,7 +20,7 @@ The `kandev` command starts a local Kandev backend, which serves the web UI, HTT
 |---|---|---|
 | macOS | Apple silicon (`arm64`), Intel (`x64`) | Homebrew, npm/npx |
 | Linux | `arm64`, `x64` | Homebrew, npm/npx |
-| Windows | `x64` | npm/npx |
+| Windows | `x64` | Scoop, npm/npx |
 
 The npm package is a small Node.js shim. It selects an exact, same-version native runtime package for `process.platform` and `process.arch`, then starts its `kandev` binary. npm 7 or later is required because the native packages are platform-specific optional dependencies. There is no native Windows ARM64 npm package; running the x64 package under Windows emulation is OS-dependent and is not a tested release target.
 
@@ -36,6 +36,20 @@ Homebrew is available on macOS and Linux:
 brew install kdlbs/kandev/kandev
 kandev --version
 ```
+
+### Scoop
+
+Scoop is available on Windows:
+
+```bash
+scoop bucket add kandev https://github.com/kdlbs/scoop-kandev
+scoop install kandev
+kandev --version
+```
+
+The bucket installs the native runtime bundle, so Node.js is not required to
+install or start Kandev. Node.js is still needed for the agent CLIs Kandev
+installs through its own interface.
 
 ### npm or npx
 
@@ -53,6 +67,28 @@ npx -y kandev@latest
 ```
 
 If an npm policy such as `--omit=optional` prevents optional dependencies from being installed, Kandev cannot find its native runtime.
+
+### Release archive
+
+Every release publishes a runtime archive per platform, named `kandev-<platform>.tar.gz`, where
+`<platform>` is one of `linux-x64`, `linux-arm64`, `macos-x64`, `macos-arm64`, or `windows-x64`.
+Pick the archive matching the machine, verify it against the `.sha256` published beside it, extract
+it, and run the launcher from the extracted tree:
+
+```bash
+curl -fsSLO https://github.com/kdlbs/kandev/releases/latest/download/kandev-linux-x64.tar.gz
+curl -fsSLO https://github.com/kdlbs/kandev/releases/latest/download/kandev-linux-x64.tar.gz.sha256
+shasum -a 256 -c kandev-linux-x64.tar.gz.sha256
+tar -xzf kandev-linux-x64.tar.gz
+./kandev/bin/kandev --version
+```
+
+Verifying the checksum matters more here than with the package managers, which do that themselves.
+
+The archive extracts to a `kandev/` directory containing `bin/`, and the launcher finds the rest of
+the bundle relative to itself. The extracted directory can be moved anywhere; add `kandev/bin` to
+`PATH` for a persistent command. Set `KANDEV_BUNDLE_DIR` only to point the launcher at a bundle it
+is not part of.
 
 ### npm nightly
 
@@ -231,6 +267,7 @@ The installer owns CLI updates. Update persistent Stable installs with:
 
 ```bash
 brew upgrade kandev
+scoop update kandev
 npm install -g kandev@latest
 ```
 

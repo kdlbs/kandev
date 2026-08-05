@@ -1,5 +1,7 @@
 {
   "account": "Account",
+  "archivedLoadFailed": "Archived tasks could not be loaded",
+  "retry": "Retry",
   "activeWorkspaceBadge": "Active",
   "activity": "Activity",
   "addAgent": "Add agent",
@@ -44,6 +46,7 @@
   "newViewUnavailable": "New view unavailable. {{reason}}",
   "noAgentsYet": "No agents yet",
   "noProjectsYet": "No projects yet",
+  "noTasksYet": "No tasks yet.",
   "noWorkspaces": "No workspaces",
   "office": "Office",
   "offline": "Offline",

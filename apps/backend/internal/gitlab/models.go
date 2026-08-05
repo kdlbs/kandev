@@ -43,32 +43,39 @@ type TestConnectionResult struct {
 // ID is the global GitLab ID — required for some endpoints. The frontend
 // keys on (ProjectPath, IID).
 type MR struct {
-	ID               int64        `json:"id"`
-	IID              int          `json:"iid"`
-	ProjectID        int64        `json:"project_id"`
-	Title            string       `json:"title"`
-	URL              string       `json:"url"`
-	WebURL           string       `json:"web_url"`
-	State            string       `json:"state"` // open, closed, merged, locked
-	HeadBranch       string       `json:"head_branch"`
-	HeadSHA          string       `json:"head_sha"`
-	BaseBranch       string       `json:"base_branch"`
-	AuthorUsername   string       `json:"author_username"`
-	ProjectNamespace string       `json:"project_namespace"`
-	ProjectPath      string       `json:"project_path"`
-	Body             string       `json:"body"`
-	Draft            bool         `json:"draft"`
-	MergeStatus      string       `json:"merge_status"` // can_be_merged, cannot_be_merged, unchecked, ...
-	HasConflicts     bool         `json:"has_conflicts"`
-	Additions        int          `json:"additions"`
-	Deletions        int          `json:"deletions"`
-	Reviewers        []MRReviewer `json:"reviewers"`
-	Assignees        []MRReviewer `json:"assignees"`
-	Labels           []string     `json:"labels"`
-	CreatedAt        time.Time    `json:"created_at"`
-	UpdatedAt        time.Time    `json:"updated_at"`
-	MergedAt         *time.Time   `json:"merged_at,omitempty"`
-	ClosedAt         *time.Time   `json:"closed_at,omitempty"`
+	ID                     int64        `json:"id"`
+	IID                    int          `json:"iid"`
+	ProjectID              int64        `json:"project_id"`
+	Title                  string       `json:"title"`
+	URL                    string       `json:"url"`
+	WebURL                 string       `json:"web_url"`
+	State                  string       `json:"state"` // open, closed, merged, locked
+	HeadBranch             string       `json:"head_branch"`
+	HeadSHA                string       `json:"head_sha"`
+	BaseBranch             string       `json:"base_branch"`
+	AuthorUsername         string       `json:"author_username"`
+	ProjectNamespace       string       `json:"project_namespace"`
+	ProjectPath            string       `json:"project_path"`
+	SourceProjectID        int64        `json:"source_project_id,omitempty"`
+	SourceProjectPath      string       `json:"source_project_path,omitempty"`
+	SourceProjectRemoteURL string       `json:"source_project_remote_url,omitempty"`
+	TargetProjectID        int64        `json:"target_project_id,omitempty"`
+	TargetProjectPath      string       `json:"target_project_path,omitempty"`
+	TargetDefaultBranch    string       `json:"target_default_branch,omitempty"`
+	AllowCollaboration     bool         `json:"allow_collaboration"`
+	Body                   string       `json:"body"`
+	Draft                  bool         `json:"draft"`
+	MergeStatus            string       `json:"merge_status"` // can_be_merged, cannot_be_merged, unchecked, ...
+	HasConflicts           bool         `json:"has_conflicts"`
+	Additions              int          `json:"additions"`
+	Deletions              int          `json:"deletions"`
+	Reviewers              []MRReviewer `json:"reviewers"`
+	Assignees              []MRReviewer `json:"assignees"`
+	Labels                 []string     `json:"labels"`
+	CreatedAt              time.Time    `json:"created_at"`
+	UpdatedAt              time.Time    `json:"updated_at"`
+	MergedAt               *time.Time   `json:"merged_at,omitempty"`
+	ClosedAt               *time.Time   `json:"closed_at,omitempty"`
 }
 
 // MRReviewer represents a reviewer or assignee on an MR.

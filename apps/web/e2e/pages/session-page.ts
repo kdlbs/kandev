@@ -1324,6 +1324,11 @@ export class SessionPage {
     return this.page.getByTestId("new-session-button");
   }
 
+  /** Row in the dockview "+" add-panel menu for a registered plugin task panel. */
+  addPanelPluginItem(pluginId: string, panelId: string): Locator {
+    return this.page.getByTestId(`add-panel-plugin-item-${pluginId}-${panelId}`);
+  }
+
   /** Open the new session dialog via the + menu. */
   async openNewSessionDialog(): Promise<void> {
     await this.addPanelButton().click();

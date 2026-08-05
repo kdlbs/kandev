@@ -23,6 +23,13 @@ type TaskRepositoryInput struct {
 	ProviderRepoID string `json:"provider_repo_id,omitempty"`
 	ProviderOwner  string `json:"provider_owner,omitempty"`
 	ProviderName   string `json:"provider_name,omitempty"`
+	ProviderHost   string `json:"provider_host,omitempty"`
+
+	// RemoteContribution is server-authored after provider resolution. It is
+	// intentionally excluded from JSON request surfaces; callers must not be
+	// able to forge a writable source binding.
+	RemoteContribution *models.RemoteContribution `json:"-"`
+	TrustedRemote      bool                       `json:"-"`
 
 	// ResolveProviderDefaults opts the GitHub-URL resolution path into a
 	// synchronous default-branch probe (git ls-remote --symref) when neither

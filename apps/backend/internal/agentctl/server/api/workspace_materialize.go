@@ -15,6 +15,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/kandev/kandev/internal/common/securityutil"
 	"github.com/kandev/kandev/internal/common/subproc"
+	"github.com/kandev/kandev/internal/task/models"
 	"go.uber.org/zap"
 )
 
@@ -22,10 +23,11 @@ import (
 // agentctl workspace. RepositoryURL must be a credential-free Git locator;
 // destination is always a direct child of the current workspace root.
 type MaterializeRepositoryRequest struct {
-	RepositoryURL  string `json:"repository_url"`
-	Destination    string `json:"destination"`
-	BaseBranch     string `json:"base_branch"`
-	CheckoutBranch string `json:"checkout_branch,omitempty"`
+	RepositoryURL      string                     `json:"repository_url"`
+	Destination        string                     `json:"destination"`
+	BaseBranch         string                     `json:"base_branch"`
+	CheckoutBranch     string                     `json:"checkout_branch,omitempty"`
+	RemoteContribution *models.RemoteContribution `json:"remote_contribution,omitempty"`
 }
 
 // MaterializeRepositoryResponse deliberately contains no remote locator so a
@@ -67,8 +69,18 @@ func (s *Server) handleWorkspaceMaterializeRepository(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, MaterializeRepositoryResponse{Error: "invalid repository branch"})
 		return
 	}
+	if req.RemoteContribution != nil {
+		if err := req.RemoteContribution.Validate(); err != nil {
+			c.JSON(http.StatusBadRequest, MaterializeRepositoryResponse{Error: "invalid remote contribution"})
+			return
+		}
+		if req.BaseBranch != req.RemoteContribution.BaseBranch || req.CheckoutBranch != req.RemoteContribution.HeadBranch {
+			c.JSON(http.StatusBadRequest, MaterializeRepositoryResponse{Error: "remote contribution branch mismatch"})
+			return
+		}
+	}
 
-	reused, err := materializeRepository(c.Request.Context(), req.RepositoryURL, destination, req.BaseBranch, req.CheckoutBranch)
+	reused, err := materializeRepository(c.Request.Context(), req.RepositoryURL, destination, req.BaseBranch, req.CheckoutBranch, req.RemoteContribution)
 	if err != nil {
 		if errors.Is(err, errMaterializeCollision) {
 			c.JSON(http.StatusConflict, MaterializeRepositoryResponse{Error: "destination already exists"})
@@ -196,8 +208,12 @@ func validateRemovalRepositoryLocator(locator string) error {
 	return validateRepositoryLocator(locator)
 }
 
-func materializeRepository(ctx context.Context, locator, destination, baseBranch, checkoutBranch string) (bool, error) {
-	if reused, err := matchingCheckout(ctx, destination, locator, baseBranch, checkoutBranch); err != nil || reused {
+func materializeRepository(ctx context.Context, locator, destination, baseBranch, checkoutBranch string, bindings ...*models.RemoteContribution) (bool, error) {
+	var binding *models.RemoteContribution
+	if len(bindings) > 0 {
+		binding = bindings[0]
+	}
+	if reused, err := matchingCheckout(ctx, destination, locator, baseBranch, checkoutBranch, binding); err != nil || reused {
 		return reused, err
 	}
 	// codeql[go/path-injection] destination is a direct child of the canonical workspace root; Lstat rejects links before use.
@@ -217,7 +233,11 @@ func materializeRepository(ctx context.Context, locator, destination, baseBranch
 	if _, err := materializeGitOutput(ctx, "clone", "--no-checkout", "--", locator, checkout); err != nil {
 		return false, err
 	}
-	if err := checkoutMaterializedBranch(ctx, checkout, baseBranch, checkoutBranch); err != nil {
+	if binding != nil {
+		if err := materializeRemoteContribution(ctx, checkout, binding); err != nil {
+			return false, err
+		}
+	} else if err := checkoutMaterializedBranch(ctx, checkout, baseBranch, checkoutBranch); err != nil {
 		return false, err
 	}
 	// codeql[go/path-injection] checkout is newly created beneath the trusted workspace root; destination is its direct child.
@@ -255,7 +275,55 @@ func hasGitRef(ctx context.Context, directory, ref string) bool {
 	return err == nil
 }
 
-func matchingCheckout(ctx context.Context, destination, locator, baseBranch, checkoutBranch string) (bool, error) {
+func materializeRemoteContribution(ctx context.Context, checkout string, binding *models.RemoteContribution) error {
+	if binding == nil {
+		return errors.New("remote contribution binding is required")
+	}
+	if err := binding.Validate(); err != nil {
+		return err
+	}
+	remoteName := binding.ContributionRemoteName()
+	configured, err := materializeGitOutput(ctx, "-C", checkout, "config", "--get", "remote."+remoteName+".url")
+	if err == nil {
+		if strings.TrimSpace(configured) != binding.SourceRepository.RemoteURL {
+			return errors.New("contribution remote identity conflict")
+		}
+	} else if _, err := materializeGitOutput(ctx, "-C", checkout, "remote", "add", remoteName, binding.SourceRepository.RemoteURL); err != nil {
+		return errors.New("contribution remote could not be configured")
+	}
+
+	remoteRef := "refs/remotes/" + remoteName + "/" + binding.HeadBranch
+	refspec := "+refs/heads/" + binding.HeadBranch + ":" + remoteRef
+	if _, err := materializeGitOutput(ctx, "-C", checkout, "fetch", "--no-tags", remoteName, refspec); err != nil {
+		return errors.New("contribution source branch is unavailable")
+	}
+	actual, err := materializeGitOutput(ctx, "-C", checkout, "rev-parse", "--verify", remoteRef+"^{commit}")
+	if err != nil || !strings.EqualFold(strings.TrimSpace(actual), binding.HeadSHA) {
+		return errors.New("contribution source head changed")
+	}
+
+	branch := binding.HeadBranch
+	if hasGitRef(ctx, checkout, "refs/heads/"+branch) {
+		suffix := strings.TrimPrefix(remoteName, "contrib-")
+		branch = binding.HeadBranch + "-kandev-" + suffix
+		for index := 1; hasGitRef(ctx, checkout, "refs/heads/"+branch); index++ {
+			branch = fmt.Sprintf("%s-kandev-%s-%d", binding.HeadBranch, suffix, index)
+		}
+	}
+	if _, err := materializeGitOutput(ctx, "-C", checkout, "checkout", "-b", branch, remoteRef); err != nil {
+		return errors.New("contribution branch could not be checked out")
+	}
+	if _, err := materializeGitOutput(ctx, "-C", checkout, "branch", "--set-upstream-to="+remoteName+"/"+binding.HeadBranch, branch); err != nil {
+		return errors.New("contribution branch upstream could not be configured")
+	}
+	return nil
+}
+
+func matchingCheckout(ctx context.Context, destination, locator, baseBranch, checkoutBranch string, bindings ...*models.RemoteContribution) (bool, error) {
+	var binding *models.RemoteContribution
+	if len(bindings) > 0 {
+		binding = bindings[0]
+	}
 	exists, err := materializedCheckoutExists(destination)
 	if err != nil || !exists {
 		return false, err
@@ -263,6 +331,12 @@ func matchingCheckout(ctx context.Context, destination, locator, baseBranch, che
 	branch := checkoutBranch
 	if branch == "" {
 		branch = baseBranch
+	}
+	if binding != nil {
+		if err := matchingCheckoutOrigin(ctx, destination, locator); err != nil {
+			return false, err
+		}
+		return matchingRemoteContributionCheckout(ctx, destination, binding)
 	}
 	if err := matchingCheckoutIdentity(ctx, destination, locator, branch); err != nil {
 		return false, err
@@ -295,13 +369,70 @@ func materializedCheckoutExists(destination string) (bool, error) {
 }
 
 func matchingCheckoutIdentity(ctx context.Context, destination, locator, branch string) error {
-	origin, err := materializeGitOutput(ctx, "-C", destination, "remote", "get-url", "origin")
-	if err != nil || strings.TrimSpace(origin) != locator {
+	if err := matchingCheckoutOrigin(ctx, destination, locator); err != nil {
 		return errMaterializeCollision
 	}
 	currentBranch, err := materializeGitOutput(ctx, "-C", destination, "branch", "--show-current")
 	if err != nil || strings.TrimSpace(currentBranch) != branch {
 		return errMaterializeCollision
+	}
+	return nil
+}
+
+func matchingCheckoutOrigin(ctx context.Context, destination, locator string) error {
+	origin, err := materializeGitOutput(ctx, "-C", destination, "remote", "get-url", "origin")
+	if err != nil || strings.TrimSpace(origin) != locator {
+		return errMaterializeCollision
+	}
+	return nil
+}
+
+func matchingRemoteContributionCheckout(ctx context.Context, destination string, binding *models.RemoteContribution) (bool, error) {
+	if err := materializeRemoteContributionRef(ctx, destination, binding); err != nil {
+		return false, err
+	}
+	remoteName := binding.ContributionRemoteName()
+	currentBranch, err := materializeGitOutput(ctx, "-C", destination, "branch", "--show-current")
+	if err != nil || strings.TrimSpace(currentBranch) == "" {
+		return false, errMaterializeCollision
+	}
+	upstream, err := materializeGitOutput(ctx, "-C", destination, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}")
+	if err != nil || strings.TrimSpace(upstream) != remoteName+"/"+binding.HeadBranch {
+		return false, errMaterializeCollision
+	}
+	head, err := materializeGitOutput(ctx, "-C", destination, "rev-parse", "--verify", "HEAD^{commit}")
+	if err != nil {
+		return false, errMaterializeCollision
+	}
+	if strings.EqualFold(strings.TrimSpace(head), binding.HeadSHA) {
+		return true, nil
+	}
+	if _, err := materializeGitOutput(ctx, "-C", destination, "merge-base", "--is-ancestor", binding.HeadSHA, "HEAD"); err != nil {
+		return false, errMaterializeCollision
+	}
+	return true, nil
+}
+
+func materializeRemoteContributionRef(ctx context.Context, checkout string, binding *models.RemoteContribution) error {
+	if binding == nil {
+		return errors.New("remote contribution binding is required")
+	}
+	if err := binding.Validate(); err != nil {
+		return err
+	}
+	remoteName := binding.ContributionRemoteName()
+	configured, err := materializeGitOutput(ctx, "-C", checkout, "config", "--get", "remote."+remoteName+".url")
+	if err != nil || strings.TrimSpace(configured) != binding.SourceRepository.RemoteURL {
+		return errMaterializeCollision
+	}
+	remoteRef := "refs/remotes/" + remoteName + "/" + binding.HeadBranch
+	refspec := "+refs/heads/" + binding.HeadBranch + ":" + remoteRef
+	if _, err := materializeGitOutput(ctx, "-C", checkout, "fetch", "--no-tags", remoteName, refspec); err != nil {
+		return err
+	}
+	actual, err := materializeGitOutput(ctx, "-C", checkout, "rev-parse", "--verify", remoteRef+"^{commit}")
+	if err != nil || !strings.EqualFold(strings.TrimSpace(actual), binding.HeadSHA) {
+		return errors.New("contribution source head changed")
 	}
 	return nil
 }
