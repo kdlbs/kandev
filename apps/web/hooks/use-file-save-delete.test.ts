@@ -97,7 +97,7 @@ describe("useSaveDeleteActions repo threading", () => {
       SESSION_ID,
       expect.objectContaining({ path: PATH, repo: REPO }),
     );
-    expect(mockSaveDocument).toHaveBeenCalledWith(SESSION_ID, PATH, REPO, "v2");
+    expect(mockSaveDocument).toHaveBeenCalledWith(SESSION_ID, PATH, REPO, "v2", "v2");
   });
 
   it("does not notify the language server when saving fails", async () => {
@@ -110,6 +110,42 @@ describe("useSaveDeleteActions repo threading", () => {
     });
 
     expect(mockSaveDocument).not.toHaveBeenCalled();
+  });
+
+  it("keeps the newest editor snapshot in LSP when the buffer advances during save", async () => {
+    seedOpenFile({ repo: REPO });
+    let resolveSave!: (response: { success: boolean; new_hash: string }) => void;
+    mockUpdateFileContent.mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveSave = resolve;
+      }),
+    );
+    const { result } = renderActions();
+
+    let savePromise!: Promise<void>;
+    act(() => {
+      savePromise = result.current.saveFile(PATH, REPO);
+    });
+    const fileKey = buildRepoScopedItemId(PATH, REPO);
+    const savingSnapshot = openFilesMap.get(fileKey)!;
+    openFilesMap.set(fileKey, {
+      ...savingSnapshot,
+      content: "v3 typed while saving",
+      isDirty: true,
+    });
+
+    await act(async () => {
+      resolveSave({ success: true, new_hash: "h:v2" });
+      await savePromise;
+    });
+
+    expect(mockSaveDocument).toHaveBeenCalledWith(
+      SESSION_ID,
+      PATH,
+      REPO,
+      "v2",
+      "v3 typed while saving",
+    );
   });
 
   it("deleteFile forwards the file's repo", async () => {

@@ -26,6 +26,7 @@ const lspMocks = vi.hoisted(() => {
     getFileOpener: vi.fn(),
     getWorkspaceUriForSession: vi.fn(() => null),
     getRepositorySubpaths: vi.fn(() => [attachedRepository]),
+    openFiles: new Map<string, { path: string; repo?: string }>(),
     currentOpener: null as ((uri: string, line?: number, column?: number) => void) | null,
   };
 });
@@ -38,6 +39,12 @@ vi.mock("@/hooks/use-file-editors", () => ({
   useFileEditors: () => ({ openFile: lspMocks.openFile }),
   setPendingCursorPosition: lspMocks.setPendingCursorPosition,
   scrollEditorIfMounted: lspMocks.scrollEditorIfMounted,
+}));
+
+vi.mock("@/lib/state/dockview-store", () => ({
+  useDockviewStore: {
+    getState: () => ({ openFiles: lspMocks.openFiles }),
+  },
 }));
 
 vi.mock("@/lib/lsp/lsp-client-manager", () => ({
@@ -63,6 +70,7 @@ afterEach(() => {
   cleanup();
   vi.clearAllMocks();
   lspMocks.currentOpener = null;
+  lspMocks.openFiles.clear();
   lspMocks.state.taskSessions.items["session-1"].workspace_path = lspMocks.taskRoot;
 });
 
@@ -141,5 +149,34 @@ describe("useLspFileOpener", () => {
       );
     });
     expect(lspMocks.openFile).toHaveBeenCalledWith(SOURCE_FILE_PATH, undefined);
+  });
+
+  it("reuses an attached-repository file already opened from the task-root tree", async () => {
+    lspMocks.setFileOpener.mockImplementation((opener) => {
+      lspMocks.currentOpener = opener;
+    });
+    lspMocks.getFileOpener.mockImplementation(() => lspMocks.currentOpener);
+    lspMocks.openFiles.set(ATTACHED_FILE_PATH, { path: ATTACHED_FILE_PATH });
+
+    renderHook(() => useLspFileOpener());
+    await act(async () => {
+      await lspMocks.currentOpener?.(ATTACHED_MODEL_URI, 19, 5);
+    });
+
+    expect(lspMocks.openFile).toHaveBeenCalledWith(ATTACHED_FILE_PATH, undefined);
+    expect(lspMocks.setPendingCursorPosition).toHaveBeenCalledWith(
+      ATTACHED_FILE_PATH,
+      19,
+      5,
+      undefined,
+      lspMocks.sessionId,
+    );
+    expect(lspMocks.scrollEditorIfMounted).toHaveBeenCalledWith(
+      ATTACHED_FILE_PATH,
+      "file:///task-root",
+      19,
+      5,
+      { repo: undefined, sessionId: lspMocks.sessionId },
+    );
   });
 });

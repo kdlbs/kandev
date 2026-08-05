@@ -95,7 +95,7 @@ export function buildDocumentContentChanges(
 export function buildDocumentSaveParams(
   serverCapabilities: Record<string, unknown> | null,
   uri: string,
-  text: string,
+  text?: string,
 ): DocumentSaveParams | null {
   const sync = serverCapabilities?.textDocumentSync;
   if (!sync || typeof sync !== "object" || Array.isArray(sync)) return null;
@@ -104,7 +104,7 @@ export function buildDocumentSaveParams(
   if (save === true) return { textDocument: { uri } };
   if (!save || typeof save !== "object" || Array.isArray(save)) return null;
 
-  return (save as { includeText?: unknown }).includeText === true
+  return (save as { includeText?: unknown }).includeText === true && text !== undefined
     ? { textDocument: { uri }, text }
     : { textDocument: { uri } };
 }

@@ -33,6 +33,16 @@ const { connectReady, createMonacoHarness } = createLspManagerHarness(lspClientM
 const SESSION_ID = "session";
 const WORKSPACE_PATH = "/workspace";
 const DOCUMENT_URI = "file:///workspace/backend/src/Main.ts";
+const DID_CHANGE = "textDocument/didChange";
+const DID_SAVE = "textDocument/didSave";
+const PERSISTED_SNAPSHOT = "persisted snapshot";
+
+function documentSynchronization(socket: FakeWebSocket) {
+  return socket.sent
+    .map((frame) => JSON.parse(frame) as { method?: string; params?: unknown })
+    .filter((frame) => frame.method === DID_CHANGE || frame.method === DID_SAVE)
+    .map(({ method, params }) => ({ method, params }));
+}
 
 beforeEach(() => {
   lspClientManager.disconnectAll();
@@ -77,14 +87,16 @@ describe("LSP document subscriptions", () => {
       DOCUMENT_URI,
       "export const value = 2;",
     );
-    expect(notificationCount("textDocument/didChange")).toBe(1);
+    expect(notificationCount(DID_CHANGE)).toBe(1);
 
     lspClientManager.closeDocument(SESSION_ID, "typescript", DOCUMENT_URI);
     expect(notificationCount("textDocument/didClose")).toBe(0);
     lspClientManager.closeDocument(SESSION_ID, "typescript", DOCUMENT_URI);
     expect(notificationCount("textDocument/didClose")).toBe(1);
   });
+});
 
+describe("LSP document saves", () => {
   it("notifies a save-capable server after an open repo-scoped document is persisted", async () => {
     createMonacoHarness([modelUriForDocument(DOCUMENT_URI, SESSION_ID)]);
     mocks.registerLspProviders.mockReturnValue([]);
@@ -102,26 +114,59 @@ describe("LSP document subscriptions", () => {
       repo: "backend",
     });
 
-    lspClientManager.saveDocument(SESSION_ID, "src/Main.ts", "backend", "persisted snapshot");
+    lspClientManager.saveDocument(SESSION_ID, "src/Main.ts", "backend", PERSISTED_SNAPSHOT);
 
-    const synchronization = socket.sent
-      .map((frame) => JSON.parse(frame) as { method?: string; params?: unknown })
-      .filter(
-        (frame) =>
-          frame.method === "textDocument/didChange" || frame.method === "textDocument/didSave",
-      );
-    expect(synchronization.map((frame) => frame.method)).toEqual([
-      "textDocument/didChange",
-      "textDocument/didSave",
-    ]);
+    const synchronization = documentSynchronization(socket);
+    expect(synchronization.map((frame) => frame.method)).toEqual([DID_CHANGE, DID_SAVE]);
     expect(synchronization[0]?.params).toEqual({
       textDocument: { uri: DOCUMENT_URI, version: 2 },
-      contentChanges: [{ text: "persisted snapshot" }],
+      contentChanges: [{ text: PERSISTED_SNAPSHOT }],
     });
     expect(synchronization[1]?.params).toEqual({
       textDocument: { uri: DOCUMENT_URI },
-      text: "persisted snapshot",
+      text: PERSISTED_SNAPSHOT,
     });
+  });
+
+  it("does not rewind an open document when the editor advances during persistence", async () => {
+    createMonacoHarness([modelUriForDocument(DOCUMENT_URI, SESSION_ID)]);
+    mocks.registerLspProviders.mockReturnValue([]);
+    const socket = await connectReady(SESSION_ID, WORKSPACE_PATH, {
+      textDocumentSync: {
+        openClose: true,
+        change: 1,
+        save: { includeText: true },
+      },
+    });
+    lspClientManager.openDocument(SESSION_ID, "typescript", {
+      uri: DOCUMENT_URI,
+      languageId: "typescript",
+      text: "before save",
+      repo: "backend",
+    });
+
+    lspClientManager.saveDocument(
+      SESSION_ID,
+      "src/Main.ts",
+      "backend",
+      PERSISTED_SNAPSHOT,
+      "newer editor snapshot",
+    );
+
+    const synchronization = documentSynchronization(socket);
+    expect(synchronization).toEqual([
+      {
+        method: DID_CHANGE,
+        params: {
+          textDocument: { uri: DOCUMENT_URI, version: 2 },
+          contentChanges: [{ text: "newer editor snapshot" }],
+        },
+      },
+      {
+        method: DID_SAVE,
+        params: { textDocument: { uri: DOCUMENT_URI } },
+      },
+    ]);
   });
 
   it("does not notify save-capable servers for documents that are not open", async () => {
@@ -133,8 +178,6 @@ describe("LSP document subscriptions", () => {
 
     lspClientManager.saveDocument(SESSION_ID, "src/Closed.ts", undefined, "saved text");
 
-    expect(socket.sent.some((frame) => JSON.parse(frame).method === "textDocument/didSave")).toBe(
-      false,
-    );
+    expect(socket.sent.some((frame) => JSON.parse(frame).method === DID_SAVE)).toBe(false);
   });
 });

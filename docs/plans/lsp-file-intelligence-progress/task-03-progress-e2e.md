@@ -54,8 +54,9 @@ Record RED/GREEN E2E evidence, exact commands and outcomes, migrated selectors/a
 - GREEN: the fake server can hold initialization and emit controlled begin/report/end frames; desktop proves reported and no-report states, tablet proves the shared drawer and touch geometry, and the lifecycle helper now keys off the trigger's authoritative expanded state.
 - Review hardening: desktop crash recovery now proves the close reason, error state, and Retry action before reconnecting, while cross-language crash isolation retains the surviving connection.
 - Review hardening: elapsed-time E2E assertions follow the localized English unit catalog (`sec`) instead of the removed hard-coded suffix.
+- Review hardening: the secondary-repository task-host scenario pins a target opened from the Files tree, navigates back to it through LSP, and proves the existing task-root-relative tab is reused instead of duplicated.
 - Verified:
-  - `pnpm e2e:run --no-build -- --project=chromium tests/lsp/lsp-file-intelligence.spec.ts` — 12 passed
+  - `pnpm e2e:run --no-build -- --project=chromium tests/lsp/lsp-file-intelligence.spec.ts` — 13 passed
   - `pnpm e2e:run --no-build -- --project=mobile-chrome tests/lsp/mobile-lsp-file-intelligence.spec.ts` — 3 passed
   - `KANDEV_E2E_CONTAINERS=1 pnpm e2e:run --no-build -- --project=containers tests/docker/lsp-file-intelligence.spec.ts` — 3 passed
   - `KANDEV_E2E_CONTAINERS=1 pnpm e2e:run --no-build -- --project=containers tests/ssh/lsp-unsupported-executor.spec.ts` — 1 passed

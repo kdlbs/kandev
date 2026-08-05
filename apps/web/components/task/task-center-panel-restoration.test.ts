@@ -48,16 +48,20 @@ const OPEN_TAB: OpenFileTab = {
   isDirty: true,
 };
 
-function renderSaveHook() {
-  return renderHook(() =>
-    useFileSaveDelete({
-      activeSessionId: SESSION_ID,
-      openFileTabs: [OPEN_TAB],
-      setOpenFileTabs: vi.fn(),
-      setSavingFiles: vi.fn(),
-      handleCloseFileTab: vi.fn(),
-    }),
+function renderSaveHook(initialTabs: OpenFileTab[] = [OPEN_TAB]) {
+  const setOpenFileTabs = vi.fn();
+  const hook = renderHook(
+    ({ openFileTabs }) =>
+      useFileSaveDelete({
+        activeSessionId: SESSION_ID,
+        openFileTabs,
+        setOpenFileTabs,
+        setSavingFiles: vi.fn(),
+        handleCloseFileTab: vi.fn(),
+      }),
+    { initialProps: { openFileTabs: initialTabs } },
   );
+  return { ...hook, setOpenFileTabs };
 }
 
 describe("task center file saves", () => {
@@ -74,7 +78,41 @@ describe("task center file saves", () => {
       await result.current.handleFileSave(PATH, REPO);
     });
 
-    expect(mockSaveDocument).toHaveBeenCalledWith(SESSION_ID, PATH, REPO, "after");
+    expect(mockSaveDocument).toHaveBeenCalledWith(SESSION_ID, PATH, REPO, "after", "after");
+  });
+
+  it("preserves edits made while the persisted save is in flight", async () => {
+    let resolveSave!: (response: { success: boolean; new_hash: string }) => void;
+    mockUpdateFileContent.mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveSave = resolve;
+      }),
+    );
+    const view = renderSaveHook();
+
+    let savePromise!: Promise<void>;
+    act(() => {
+      savePromise = view.result.current.handleFileSave(PATH, REPO);
+    });
+    const newerTab = { ...OPEN_TAB, content: "newer edit", isDirty: true };
+    view.rerender({ openFileTabs: [newerTab] });
+    await act(async () => {
+      resolveSave({ success: true, new_hash: "new-hash" });
+      await savePromise;
+    });
+
+    expect(mockSaveDocument).toHaveBeenCalledWith(SESSION_ID, PATH, REPO, "after", "newer edit");
+    const update = view.setOpenFileTabs.mock.calls[0]?.[0] as (
+      tabs: OpenFileTab[],
+    ) => OpenFileTab[];
+    expect(update([newerTab])).toEqual([
+      expect.objectContaining({
+        content: "newer edit",
+        originalContent: "after",
+        originalHash: "new-hash",
+        isDirty: true,
+      }),
+    ]);
   });
 
   it("does not notify the language server after a rejected save", async () => {

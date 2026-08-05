@@ -72,10 +72,18 @@ async function performSaveFile(path: string, repo: string | undefined, params: S
       repo: file.repo,
     });
     if (response.success && response.new_hash) {
-      lspClientManager.saveDocument(currentSessionId, file.path, file.repo, file.content);
       // Re-read current state: user may have typed more while the save was
-      // in flight. Only mark clean if content still matches what was saved.
+      // in flight. Keep LSP synchronized to that newer buffer while reporting
+      // the snapshot that actually reached disk as the save boundary.
       const current = getOpenFiles().get(fileKey);
+      const liveContent = current?.content ?? file.content;
+      lspClientManager.saveDocument(
+        currentSessionId,
+        file.path,
+        file.repo,
+        file.content,
+        liveContent,
+      );
       const stillClean = current?.content === file.content;
       params.updateFileState(fileKey, {
         originalContent: file.content,

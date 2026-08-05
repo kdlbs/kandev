@@ -448,7 +448,8 @@ class LSPClientManager {
     sessionId: string,
     documentPath: string,
     repo: string | undefined,
-    text: string,
+    persistedText: string,
+    liveText = persistedText,
   ): void {
     for (const conn of this.connections.values()) {
       if (conn.sessionId !== sessionId || !conn.initialized || !conn.rpc || !conn.workspaceUri) {
@@ -463,8 +464,13 @@ class LSPClientManager {
       }
       if (!conn.openDocuments.has(documentUri)) continue;
 
-      this.synchronizeOpenDocument(conn, documentUri, text);
-      const params = buildDocumentSaveParams(conn.serverCapabilities, documentUri, text);
+      this.synchronizeOpenDocument(conn, documentUri, liveText);
+      // If editing continued while persistence was in flight, including the
+      // older saved snapshot could rewind servers that treat didSave.text as
+      // their current document. The text field is optional, so omit it for
+      // this raced save while keeping the open document on the newest buffer.
+      const savedText = liveText === persistedText ? persistedText : undefined;
+      const params = buildDocumentSaveParams(conn.serverCapabilities, documentUri, savedText);
       if (params) conn.rpc.sendNotification("textDocument/didSave", params);
     }
   }

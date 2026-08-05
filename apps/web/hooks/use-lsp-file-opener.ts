@@ -9,13 +9,28 @@ import {
   scrollEditorIfMounted,
 } from "@/hooks/use-file-editors";
 import { lspClientManager } from "@/lib/lsp/lsp-client-manager";
-import { documentUriForModel, filePathToUri, resolveFileUriInWorkspace } from "@/lib/lsp/file-uri";
+import {
+  documentUriForModel,
+  filePathToUri,
+  resolveFileUriInWorkspace,
+  type WorkspaceFileLocation,
+} from "@/lib/lsp/file-uri";
+import { useDockviewStore } from "@/lib/state/dockview-store";
 
 export function toWorkspaceRelativePath(filePath: string, workspacePath: string | null): string {
   const normalizedWorkspacePath = workspacePath?.replace(/\/+$/, "") ?? "";
   if (!normalizedWorkspacePath) return filePath;
   const workspacePrefix = `${normalizedWorkspacePath}/`;
   return filePath.startsWith(workspacePrefix) ? filePath.slice(workspacePrefix.length) : filePath;
+}
+
+export function preserveExistingEditorLocation(
+  location: WorkspaceFileLocation,
+  openFiles: ReadonlyMap<string, unknown>,
+): WorkspaceFileLocation {
+  if (!location.repo) return location;
+  const taskRootPath = `${location.repo}/${location.path}`;
+  return openFiles.has(taskRootPath) ? { path: taskRootPath } : location;
 }
 
 /**
@@ -49,12 +64,16 @@ export function useLspFileOpener() {
       const workspaceUri =
         lspClientManager.getWorkspaceUriForSession(activeSessionId) ?? fallbackWorkspaceUri;
       if (!workspaceUri) return;
-      const location = resolveFileUriInWorkspace(
+      const resolvedLocation = resolveFileUriInWorkspace(
         documentUri,
         workspaceUri,
         lspClientManager.getRepositorySubpaths(activeSessionId),
       );
-      if (!location) return;
+      if (!resolvedLocation) return;
+      const location = preserveExistingEditorLocation(
+        resolvedLocation,
+        useDockviewStore.getState().openFiles,
+      );
 
       // Dispose the placeholder model since a real tab will create its own model
       lspClientManager.disposePlaceholderModel(uri);

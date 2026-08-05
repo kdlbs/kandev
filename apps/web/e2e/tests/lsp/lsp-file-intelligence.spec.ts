@@ -861,6 +861,14 @@ test.describe("LSP file intelligence", () => {
       "fun secondaryGreeting(name: String): String",
     );
 
+    // Pin the source, then open and pin the definition through the Files tree.
+    // That tree path is task-root-relative (`repo/path`) while LSP resolves the
+    // same target as `{ repo, path }`; navigation must reuse this tab identity.
+    const sourceTab = testPage.locator(".dv-default-tab", {
+      hasText: path.basename(secondaryFilePath),
+    });
+    await sourceTab.dblclick();
+
     const nestedPath = `${repositoryName}/src/nested`;
     const referencesPath = `${repositoryName}/src/${DEFINITION_PARENT_PATH}`;
     const targetPath = `${repositoryName}/${secondaryDefinitionPath}`;
@@ -871,6 +879,17 @@ test.describe("LSP file intelligence", () => {
     await expect(referencesFolder).toHaveCount(0);
     await expect(definitionTarget).toHaveCount(0);
 
+    await openDesktopFile(testPage, task.session, definitionTaskRelativePath);
+    const definitionTabs = testPage.locator(".dv-default-tab", {
+      hasText: path.basename(secondaryDefinitionPath),
+    });
+    await expect(definitionTabs).toHaveCount(1);
+    await definitionTabs.dblclick();
+    await sourceTab.click();
+    await expect(testPage.locator(".monaco-editor:visible .view-lines")).toContainText(
+      "fun secondaryGreeting(name: String): String",
+    );
+
     await testPage.locator(".monaco-editor:visible").click();
     await testPage.keyboard.press("F12");
     await expectFakeLspEvent(
@@ -879,9 +898,8 @@ test.describe("LSP file intelligence", () => {
       "secondary repository definition request",
     );
     const definitionUri = pathToFileURL(path.join(started.cwd!, definitionTaskRelativePath)).href;
-    await expect(
-      testPage.locator(".dv-default-tab", { hasText: path.basename(secondaryDefinitionPath) }),
-    ).toBeVisible({ timeout: 15_000 });
+    await expect(definitionTabs).toHaveCount(1);
+    await expect(definitionTabs).toBeVisible({ timeout: 15_000 });
     await expect(testPage.locator(".monaco-editor:visible .view-lines")).toContainText(
       "fun secondaryDefinition(name: String): String",
     );
