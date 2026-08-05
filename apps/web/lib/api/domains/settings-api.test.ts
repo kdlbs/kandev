@@ -128,6 +128,7 @@ describe("startHostShell", () => {
   });
 
   it("preserves the legacy request shape without a client id", async () => {
+    fetchSpy.mockResolvedValueOnce(jsonResponse({}));
     await startHostShell({ cols: 80, rows: 24 });
 
     const fetchCall = vi.mocked(fetch).mock.calls[0];
