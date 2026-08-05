@@ -1,7 +1,7 @@
 ---
 spec: docs/specs/ui/sidebar-view-creation.md
 created: 2026-08-05
-status: complete
+status: building
 ---
 
 # Implementation Plan: Persist the Default Sidebar View
@@ -49,6 +49,9 @@ reintroduce browser migration or relax referential validation.
   they are present, so settings JSON such as `{}` or
   `{"workspace_id":"..."}` retains the backend default while explicit stored
   values remain authoritative.
+- When a write explicitly replaces `sidebar_views` without an active-view
+  field, preserve the referential invariant: an empty replacement resolves to
+  the canonical default instead of persisting an active ID that has no view.
 - Keep `applySidebarViewState` unchanged: non-default or stale active IDs must
   still be rejected unless they exist in the effective saved-view list.
 
@@ -101,6 +104,12 @@ optimistic behavior remain the consumer contract being verified.
   **File:** `apps/backend/internal/user/service/service_test.go`.
   **How:** retain and run the existing `TestApplySidebarViewState` regression
   coverage; no validation weakening is expected.
+- **What:** an explicit empty `sidebar_views` replacement without an active ID
+  retains a coherent canonical view.
+  **File:** `apps/backend/internal/user/service/service_test.go` and
+  `apps/backend/internal/user/handlers/handlers_test.go`.
+  **How:** assert service normalization and real HTTP read-back before the
+  first draft-only edit.
 
 ## E2E Tests
 
@@ -116,12 +125,12 @@ optimistic behavior remain the consumer contract being verified.
 
 ## Verification Results
 
-- `cd apps/backend && go test -tags fts5 -run 'TestScanUserSettingsSidebarDefaults|TestScanUserSettingsPreservesExplicitEmptySidebarSettings|TestHTTPUpdateSidebarDraftFromCleanSettings|TestApplySidebarViewState' ./internal/user/store ./internal/user/handlers ./internal/user/service -v` — 14 tests passed across 3 packages.
+- `cd apps/backend && go test -tags fts5 -run 'TestScanUserSettingsSidebarDefaults|TestScanUserSettingsPreservesExplicitEmptySidebarSettings|TestHTTPUpdateSidebarDraftFromCleanSettings|TestApplySidebarViews|TestApplySidebarViewState' ./internal/user/store ./internal/user/handlers ./internal/user/service -v` — 23 tests passed across 3 packages.
 - `cd apps/backend && go test -tags fts5 ./internal/user/...` — 227 tests passed across 6 packages.
 - `cd apps && pnpm --filter @kandev/web run typecheck` — passed with no TypeScript errors.
 - `cd apps && pnpm --filter @kandev/web test -- lib/state/slices/ui/ui-slice.test.ts -t "syncs filter sort and group drafts"` — 1 passed, 41 skipped.
 - `cd apps && pnpm --filter @kandev/web lint -- e2e/fixtures/test-base.ts e2e/helpers/api-client.ts e2e/tests/task/sidebar-filter.spec.ts` — passed.
-- `cd apps/web && pnpm e2e:run --host --no-build --project chromium tests/task/sidebar-filter.spec.ts -- --grep "default 'All tasks' view"` — 1 Playwright test passed in 5.7s; the managed runner exited cleanly and left no E2E backend/browser processes.
+- `cd apps/web && pnpm e2e:run --host --project chromium tests/task/sidebar-filter.spec.ts -- --grep "default 'All tasks' view"` — 1 Playwright test passed in 5.3s against the rebuilt backend; the managed runner exited cleanly and left no E2E backend/browser processes.
 - `git diff --check` — passed.
 
 ---
@@ -130,7 +139,7 @@ optimistic behavior remain the consumer contract being verified.
 
 Sequential execution in the primary conversation:
 
-- [x] [Task 01: Persist the canonical sidebar default](task-01-persist-canonical-sidebar-default.md) — done
+- [ ] [Task 01: Persist the canonical sidebar default](task-01-persist-canonical-sidebar-default.md) — in_progress (PR fixup)
 
 This is one vertical fix spanning a shared persistence contract and its browser
 regression. It is not parallel-safe and does not authorize subagents.
@@ -142,7 +151,8 @@ regression. It is not parallel-safe and does not authorize subagents.
   is out of scope for this repair.
 - `All tasks` is existing persisted domain copy. This fix does not change
   localization behavior or rename existing views.
-- Explicitly stored sidebar arrays remain explicit values under ADR 0041; this
-  plan only repairs omitted-value defaults.
+- Explicit non-empty sidebar arrays remain explicit values under ADR 0041;
+  empty replacements without an active ID normalize to the canonical view so
+  the backend cannot persist an invalid active/view pair.
 - No schema migration, endpoint shape change, feature flag, or settings-data
   rewrite is required.

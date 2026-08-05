@@ -42,6 +42,33 @@ func TestHTTPUpdateSidebarDraftFromCleanSettings(t *testing.T) {
 	router := gin.New()
 	NewHandlers(controller.NewController(service.NewService(repo, nil, log)), log).registerHTTP(router)
 
+	resetRequest := httptest.NewRequest(
+		http.MethodPatch,
+		"/api/v1/user/settings",
+		bytes.NewReader([]byte(`{"sidebar_views":[]}`)),
+	)
+	resetRequest.Header.Set("Content-Type", "application/json")
+	resetResponse := httptest.NewRecorder()
+	router.ServeHTTP(resetResponse, resetRequest)
+	if resetResponse.Code != http.StatusOK {
+		t.Fatalf("PATCH empty sidebar views status = %d, want %d: %s", resetResponse.Code, http.StatusOK, resetResponse.Body.String())
+	}
+	resetGetResponse := httptest.NewRecorder()
+	router.ServeHTTP(resetGetResponse, httptest.NewRequest(http.MethodGet, "/api/v1/user/settings", nil))
+	if resetGetResponse.Code != http.StatusOK {
+		t.Fatalf("GET reset user settings status = %d, want %d: %s", resetGetResponse.Code, http.StatusOK, resetGetResponse.Body.String())
+	}
+	var resetPayload dto.UserSettingsResponse
+	if err := json.NewDecoder(resetGetResponse.Body).Decode(&resetPayload); err != nil {
+		t.Fatalf("decode reset user settings: %v", err)
+	}
+	if len(resetPayload.Settings.SidebarViews) != 1 || resetPayload.Settings.SidebarViews[0].ID != "view-all-tasks" {
+		t.Fatalf("reset sidebar views = %+v, want canonical All tasks view", resetPayload.Settings.SidebarViews)
+	}
+	if resetPayload.Settings.SidebarActiveViewID != "view-all-tasks" {
+		t.Fatalf("reset active sidebar view = %q, want %q", resetPayload.Settings.SidebarActiveViewID, "view-all-tasks")
+	}
+
 	patch := []byte(`{
 		"sidebar_active_view_id":"view-all-tasks",
 		"sidebar_draft":{

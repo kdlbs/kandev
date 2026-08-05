@@ -15,11 +15,11 @@ import (
 )
 
 const (
-	DefaultUserID    = "default-user"
-	DefaultUserEmail = "default@kandev.local"
+	DefaultUserID        = "default-user"
+	DefaultUserEmail     = "default@kandev.local"
+	DefaultSidebarViewID = "view-all-tasks"
 
 	defaultChangesPanelLayout = "tree"
-	defaultSidebarViewID      = "view-all-tasks"
 )
 
 type sqliteRepository struct {
@@ -599,17 +599,17 @@ func defaultUserSettings(userID string) *models.UserSettings {
 		KeyboardShortcuts:               map[string]interface{}{},
 		TerminalLinkBehavior:            "new_tab",
 		ChangesPanelLayout:              defaultChangesPanelLayout,
-		SidebarViews:                    defaultSidebarViews(),
-		SidebarActiveViewID:             defaultSidebarViewID,
+		SidebarViews:                    DefaultSidebarViews(),
+		SidebarActiveViewID:             DefaultSidebarViewID,
 		SidebarTaskPrefs:                normalizeSidebarTaskPrefs(models.SidebarTaskPrefs{}),
 		AppStatusBarOrder:               normalizeAppStatusBarOrder(models.AppStatusBarOrder{}),
 		VoiceMode:                       defaultVoiceModeSettings(),
 	}
 }
 
-func defaultSidebarViews() []models.SidebarView {
+func DefaultSidebarViews() []models.SidebarView {
 	return []models.SidebarView{{
-		ID:              defaultSidebarViewID,
+		ID:              DefaultSidebarViewID,
 		Name:            "All tasks",
 		Filters:         []models.SidebarViewClause{},
 		Sort:            models.SidebarViewSort{Key: "state", Direction: "asc"},

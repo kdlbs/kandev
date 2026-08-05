@@ -1,7 +1,7 @@
 ---
 id: "01-persist-canonical-sidebar-default"
 title: "Persist the canonical sidebar default"
-status: done
+status: in_progress
 wave: 1
 depends_on: []
 plan: "plan.md"
@@ -18,6 +18,8 @@ filter edit through unit, HTTP integration, and browser coverage.
 - Effective settings whose stored JSON omits sidebar-view fields contain one
   canonical `All tasks` view with ID `view-all-tasks` and the same active ID;
   unrelated stored fields and explicit sidebar values are preserved.
+- A `sidebar_views: []` write that omits the active ID normalizes back to the
+  canonical view instead of persisting an invalid active/view pair.
 - A PATCH containing only `sidebar_active_view_id="view-all-tasks"` and a
   sidebar draft succeeds from a clean user and persists the draft.
 - Editing the first default view in the browser produces no sidebar settings
@@ -27,9 +29,10 @@ filter edit through unit, HTTP integration, and browser coverage.
 
 1. Add the clean-user HTTP regression test and run it before production edits;
    record the expected HTTP 400 caused by the missing saved view.
-2. Add the store default/overlay unit cases and implement the minimal fresh
-   canonical default plus presence-aware scan overlay.
-3. Rerun the targeted Go tests until the HTTP regression returns 200 and the
+2. Add the store default/overlay and empty-replacement service/HTTP cases, then
+   implement the minimal fresh canonical default plus presence-aware scan
+   overlay and write normalization.
+3. Rerun the targeted Go tests until both HTTP regressions return 200 and the
    existing stale-ID validation test remains green.
 4. Align the E2E reset fixture with the canonical backend state, extend the
    first-edit browser scenario, and run only that scenario.
@@ -69,10 +72,10 @@ regression describe one cross-layer contract and should be landed together.
 From the repository root:
 
 ```bash
-cd apps/backend && go test -tags fts5 -run 'TestScanUserSettingsSidebarDefaults|TestScanUserSettingsPreservesExplicitEmptySidebarSettings|TestHTTPUpdateSidebarDraftFromCleanSettings|TestApplySidebarViewState' ./internal/user/store ./internal/user/handlers ./internal/user/service -v
+cd apps/backend && go test -tags fts5 -run 'TestScanUserSettingsSidebarDefaults|TestScanUserSettingsPreservesExplicitEmptySidebarSettings|TestHTTPUpdateSidebarDraftFromCleanSettings|TestApplySidebarViews|TestApplySidebarViewState' ./internal/user/store ./internal/user/handlers ./internal/user/service -v
 ```
 
-Result: 14 tests passed across 3 packages.
+Result: 23 tests passed across 3 packages.
 
 The worktree was missing the Playwright/Vitest links, so dependencies were
 bootstrapped once:
@@ -102,13 +105,13 @@ The focused browser test was run through the managed runner, which builds and
 tears down the real backend/browser fixture:
 
 ```bash
-cd apps/web && pnpm e2e:run --host --no-build --project chromium tests/task/sidebar-filter.spec.ts -- --grep "default 'All tasks' view"
+cd apps/web && pnpm e2e:run --host --project chromium tests/task/sidebar-filter.spec.ts -- --grep "default 'All tasks' view"
 ```
 
-Result: 1 Playwright test passed in 5.7s. The first run exposed a test-overlay
-timing defect after leaving the view picker open; the test now closes the
-picker before editing and the rerun passes. The runner exited cleanly with no
-leftover E2E backend/browser processes.
+Result: 1 Playwright test passed in 5.3s against the rebuilt backend. The first
+run exposed a test-overlay timing defect after leaving the view picker open;
+the test now closes the picker before editing and the rerun passes. The runner
+exited cleanly with no leftover E2E backend/browser processes.
 
 ```bash
 git diff --check
@@ -126,7 +129,9 @@ and synchronize `plan.md` only after all acceptance criteria pass.
 ## Results
 
 - RED store regression before the production change: `rtk go test -tags fts5 -run TestScanUserSettingsSidebarDefaults ./internal/user/store -v` failed because `{}` and unrelated settings returned zero sidebar views instead of one canonical view.
-- RED HTTP regression before the production change: `rtk go test -tags fts5 -run TestHTTPUpdateSidebarDraftFromCleanSettings ./internal/user/handlers -v` returned HTTP 400 with the diagnosed missing-saved-view validation error.
+- RED HTTP regressions before the production change: the clean draft request returned HTTP 400 with the diagnosed missing-saved-view validation error, and the empty-view reset read back zero views instead of the canonical default.
 - Implemented fresh backend `All tasks` defaults and presence-aware JSON overlay; explicit empty/null values remain explicit.
+- Normalized explicit empty sidebar-view writes without an active field back to the canonical default, preserving the active/view referential invariant.
+- The review regression was reproduced in `TestApplySidebarViews` and the HTTP reset path before normalization; both now pass.
 - Added the real HTTP persistence regression, store coverage, canonical E2E reset state, and first-filter-edit browser scenario.
 - All verification commands above pass; no blockers remain.
