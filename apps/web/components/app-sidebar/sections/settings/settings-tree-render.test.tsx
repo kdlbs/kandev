@@ -225,6 +225,8 @@ describe("Workspace settings order", () => {
 
     expect(automationsIndex).toBeGreaterThanOrEqual(0);
     expect(secretsIndex).toBeGreaterThan(automationsIndex);
+    expect(screen.getByRole("link", { name: "Secrets", exact: true })).toBeTruthy();
+    expect(screen.queryByRole("link", { name: "Workspace Secrets", exact: true })).toBeNull();
   });
 });
 

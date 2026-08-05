@@ -219,7 +219,7 @@ export function WorkspacesGroup({ pathname, expanded, onToggle }: WorkspacesGrou
             />
             <SettingsLeaf
               href={secretsPath}
-              label={t("settings:workspaceSecrets")}
+              label={t("settings:secrets")}
               icon={IconKey}
               isActive={pathname === secretsPath}
               depth={2}

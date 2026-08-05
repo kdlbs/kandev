@@ -16,7 +16,7 @@ test.describe("Mobile repository secrets", () => {
     await testPage.getByTestId("settings-mobile-menu-button").click();
     const menu = testPage.getByTestId("settings-mobile-menu");
     await expect(menu).toBeVisible();
-    await menu.getByRole("link", { name: "Workspace Secrets", exact: true }).click();
+    await menu.locator(`a[href="/settings/workspace/${seedData.workspaceId}/secrets"]`).click();
     await expect(testPage).toHaveURL(
       new RegExp(`/settings/workspace/${seedData.workspaceId}/secrets$`),
     );

@@ -455,8 +455,8 @@ type SecretsSettingsProps = {
 type SecretsSettingsState = ReturnType<typeof useSecretsState>;
 type SecretsSettingsActions = ReturnType<typeof useSecretsActions>;
 
-function secretScopeTitle(t: TFunction, scope: SecretScope) {
-  return scope === "workspace" ? t("settings:workspaceSecrets") : t("settings:secrets");
+function secretScopeTitle(t: TFunction) {
+  return t("settings:secrets");
 }
 
 function secretScopeDescription(t: TFunction, scope: SecretScope) {
@@ -478,7 +478,6 @@ function secretDraftInvalidReason(
 }
 
 type SecretsSettingsBodyProps = {
-  scope: SecretScope;
   workspaceId?: string;
   state: SecretsSettingsState;
   actions: SecretsSettingsActions;
@@ -487,7 +486,6 @@ type SecretsSettingsBodyProps = {
 };
 
 function SecretsSettingsBody({
-  scope,
   workspaceId,
   state,
   actions,
@@ -501,7 +499,7 @@ function SecretsSettingsBody({
     <>
       <div className="space-y-6">
         <div className="flex items-center justify-between">
-          <div className="text-sm font-medium text-foreground">{secretScopeTitle(t, scope)}</div>
+          <div className="text-sm font-medium text-foreground">{secretScopeTitle(t)}</div>
           <Button
             onClick={actions.startCreate}
             disabled={isBusy || Boolean(editingId) || showCreate}
@@ -599,7 +597,7 @@ function SecretsSettingsContent({
 
   return (
     <SettingsPageTemplate
-      title={secretScopeTitle(t, scope)}
+      title={secretScopeTitle(t)}
       description={secretScopeDescription(t, scope)}
       isDirty={isDirty}
       saveStatus="idle"
@@ -611,7 +609,6 @@ function SecretsSettingsContent({
       onDiscard={actions.resetForm}
     >
       <SecretsSettingsBody
-        scope={scope}
         workspaceId={workspaceId}
         state={state}
         actions={actions}

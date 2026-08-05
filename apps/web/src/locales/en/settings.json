@@ -206,7 +206,6 @@
   "manageApiKeysAndCredentialsSecrets": "Manage API keys and credentials. Secrets are encrypted at rest and injected into agent environments via executor profile env vars.",
   "globalScope": "Global",
   "workspaceScope": "Workspace",
-  "workspaceSecrets": "Workspace Secrets",
   "workspaceSecretsDescription": "Manage secrets available to repositories in this workspace. Shared agent and executor profiles can use Global secrets only.",
   "revealSecretNamed": "Reveal secret {{name}}",
   "hideSecretNamed": "Hide secret {{name}}",

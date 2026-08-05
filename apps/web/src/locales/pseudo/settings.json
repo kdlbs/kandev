@@ -206,7 +206,6 @@
   "manageApiKeysAndCredentialsSecrets": "Ḿàńàĝē ÀƤĨ ķēŷś àńď ćŕēďēńţĩàĺś. Śēćŕēţś àŕē ēńćŕŷƥţēď àţ ŕēśţ àńď ĩńĵēćţēď ĩńţō àĝēńţ ēńvĩŕōńḿēńţś vĩà ēxēćũţōŕ ƥŕōƒĩĺē ēńv vàŕś.",
   "globalScope": "Ĝĺōƀàĺ",
   "workspaceScope": "Ŵōŕķśƥàćē",
-  "workspaceSecrets": "Ŵōŕķśƥàćē Śēćŕēţś",
   "workspaceSecretsDescription": "Ḿàńàĝē śēćŕēţś àvàĩĺàƀĺē ţō ŕēƥōśĩţōŕĩēś ĩń ţĥĩś ŵōŕķśƥàćē. Śĥàŕēď àĝēńţ àńď ēxēćũţōŕ ƥŕōƒĩĺēś ćàń ũśē Ĝĺōƀàĺ śēćŕēţś ōńĺŷ.",
   "revealSecretNamed": "Ŕēvēàĺ śēćŕēţ {{name}}",
   "hideSecretNamed": "Ĥĩďē śēćŕēţ {{name}}",
