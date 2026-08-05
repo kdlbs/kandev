@@ -209,6 +209,7 @@ type DockviewStore = {
     newEnvId: string,
     activeSessionId: string | null,
     currentSessionIds?: string[],
+    initialLayout?: string | null,
   ) => void;
   deferredPanelActions: DeferredPanelAction[];
   queuePanelAction: (action: DeferredPanelAction) => void;
@@ -824,6 +825,7 @@ function buildEnvSwitchAction(set: StoreSet, get: StoreGet) {
     newEnvId: string,
     activeSessionId: string | null,
     currentSessionIds: string[] = [],
+    initialLayout?: string | null,
   ) => {
     const { api, currentLayoutEnvId, preMaximizeLayout } = get();
     if (!api) {
@@ -883,8 +885,9 @@ function buildEnvSwitchAction(set: StoreSet, get: StoreGet) {
         currentSessionIds,
         safeWidth: measured.width,
         safeHeight: measured.height,
-        buildDefault: (a) => get().buildDefaultLayout(a),
+        buildDefault: (a, intentName) => get().buildDefaultLayout(a, intentName),
         getDefaultLayout: () => get().userDefaultLayout ?? getPresetLayout(get().defaultPreset),
+        initialLayout,
       });
       set(ids);
       enforceFromStore(api, get);
@@ -1204,10 +1207,11 @@ export function performLayoutSwitch(
   newEnvId: string,
   activeSessionId: string | null,
   currentSessionIds: string[] = [],
+  initialLayout?: string | null,
 ): void {
   useDockviewStore
     .getState()
-    .switchEnvLayout(oldEnvId, newEnvId, activeSessionId, currentSessionIds);
+    .switchEnvLayout(oldEnvId, newEnvId, activeSessionId, currentSessionIds, initialLayout);
 }
 
 /**
