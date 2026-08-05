@@ -18,7 +18,7 @@ Teach the existing session-scoped context-file pipeline to represent directory p
 
 - Optional directory identity persists and hydrates without invalidating existing file-only entries, and path-based deduplication/clearing semantics remain unchanged.
 - Pending directory context renders with a folder icon and without file preview/open behavior; file context retains its current behavior.
-- Message construction names file and directory paths in hidden context while keeping outbound `context_files` metadata backward-compatible.
+- Message construction names file and directory paths in hidden context while preserving optional directory identity in outbound `context_files` metadata and remaining compatible with legacy `{ path, name }` entries.
 
 ## TDD sequence
 
@@ -75,10 +75,13 @@ Report RED/GREEN evidence, actual files changed, exact commands and test counts,
   components/task/chat/chat-input-area.test.tsx` — 5 files, 41 tests passed.
 - `cd apps/web && pnpm run typecheck` — passed.
 - Compatibility: `isDirectory` is optional for legacy session-storage entries;
-  directory identity is presentation-only and outbound `context_files` remains
-  `{ path, name }`.
+  outbound `context_files` uses optional `is_directory` metadata so older
+  `{ path, name }` entries remain valid while sent directory badges retain folder identity.
 - PR review remediation: queued sends now forward the filtered `{ path, name }` metadata through
   `useMessageHandler`, `useQueue`, the queue API, and the backend queue handler, so draining a
   queued message preserves its sent-message context metadata. RED covered the missing frontend
   payload and backend constant; GREEN was 3 frontend files/57 tests plus the focused backend
   queue-handler test.
+- Rebase PR-fixup: directory identity now crosses direct and queued metadata into history badges;
+  partial bulk deletion retains failed paths after mixed results. RED covered both behaviors and
+  GREEN passed the focused web/backend suites recorded in the plan.

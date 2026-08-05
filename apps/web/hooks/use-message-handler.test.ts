@@ -582,7 +582,7 @@ describe("queued context file metadata", () => {
       expect.objectContaining({
         contextFilesMeta: [
           { path: "src/app.ts", name: "app.ts" },
-          { path: CONTEXT_DIRECTORY_PATH, name: "components" },
+          { path: CONTEXT_DIRECTORY_PATH, name: "components", is_directory: true },
         ],
       }),
     );
@@ -591,7 +591,7 @@ describe("queued context file metadata", () => {
 });
 
 describe("directory context file submission", () => {
-  it("keeps directory identity out of outbound metadata while describing it in the prompt", async () => {
+  it("preserves directory identity in outbound metadata while describing it in the prompt", async () => {
     selectedSession("CREATED");
     const request = vi.fn().mockResolvedValue(undefined);
     getWebSocketClientMock.mockReturnValue({ request });
@@ -613,10 +613,10 @@ describe("directory context file submission", () => {
       MESSAGE_ADD_ACTION,
       expect.objectContaining({
         content: expect.stringContaining(`- directory: ${CONTEXT_DIRECTORY_PATH}`),
-        context_files: [{ path: CONTEXT_DIRECTORY_PATH, name: "components" }],
+        context_files: [{ path: CONTEXT_DIRECTORY_PATH, name: "components", is_directory: true }],
       }),
       10000,
     );
-    expect(request.mock.calls[0][1].context_files[0]).not.toHaveProperty("isDirectory");
+    expect(request.mock.calls[0][1].context_files[0]).toMatchObject({ is_directory: true });
   });
 });

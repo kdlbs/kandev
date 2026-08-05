@@ -150,14 +150,14 @@ describe("queue reference payloads", () => {
       session_id: "session-1",
       task_id: "task-1",
       content: "queued context",
-      context_files: [{ path: "src/components", name: "components" }],
+      context_files: [{ path: "src/components", name: "components", is_directory: true }],
     });
 
     expect(request).toHaveBeenCalledWith("message.queue.add", {
       session_id: "session-1",
       task_id: "task-1",
       content: "queued context",
-      context_files: [{ path: "src/components", name: "components" }],
+      context_files: [{ path: "src/components", name: "components", is_directory: true }],
     });
   });
 

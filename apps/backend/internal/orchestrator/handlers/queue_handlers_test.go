@@ -259,8 +259,8 @@ func TestWsQueueMessage(t *testing.T) {
 			"task_id":    "task-1",
 			"content":    "test message",
 			"user_id":    "user-1",
-			"context_files": []map[string]string{
-				{"path": "src/components", "name": "components"},
+			"context_files": []map[string]interface{}{
+				{"path": "src/components", "name": "components", "is_directory": true},
 			},
 		})
 
@@ -269,7 +269,13 @@ func TestWsQueueMessage(t *testing.T) {
 		assert.Equal(t, ws.MessageTypeResponse, response.Type)
 		entries := svc.GetStatus(ctx, "session-1").Entries
 		require.Len(t, entries, 1)
-		assert.Equal(t, []v1.ContextFileMeta{{Path: "src/components", Name: "components"}}, entries[0].Metadata[messagequeue.MetadataContextFiles])
+		files, ok := entries[0].Metadata[messagequeue.MetadataContextFiles].([]v1.ContextFileMeta)
+		require.True(t, ok)
+		require.Len(t, files, 1)
+		assert.Equal(t, "src/components", files[0].Path)
+		assert.Equal(t, "components", files[0].Name)
+		require.NotNil(t, files[0].IsDirectory)
+		assert.True(t, *files[0].IsDirectory)
 	})
 
 	t.Run("rejects missing session_id", func(t *testing.T) {

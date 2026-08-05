@@ -1,5 +1,5 @@
 import React from "react";
-import { render, screen, cleanup, fireEvent } from "@testing-library/react";
+import { render, screen, cleanup, fireEvent, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { FileTreeNode } from "@/lib/types/backend";
 
@@ -17,12 +17,44 @@ import { FileContextMenu } from "./file-context-menu";
 
 const FILE_NODE: FileTreeNode = { name: "README.md", path: "README.md", is_dir: false, size: 0 };
 const DIR_NODE: FileTreeNode = { name: "src", path: "src", is_dir: true, size: 0 };
+const BULK_TREE: FileTreeNode = {
+  name: "root",
+  path: "",
+  is_dir: true,
+  size: 0,
+  children: [
+    { name: "a.txt", path: "a.txt", is_dir: false, size: 1 },
+    { name: "b.txt", path: "b.txt", is_dir: false, size: 1 },
+  ],
+};
 
 afterEach(cleanup);
 
 function openMenu(triggerTestId: string) {
   const trigger = screen.getByTestId(triggerTestId);
   fireEvent.contextMenu(trigger);
+}
+
+function BulkDeleteHarness({ onDeleteFile }: { onDeleteFile: (path: string) => Promise<boolean> }) {
+  const [tree, setTree] = React.useState<FileTreeNode | null>(BULK_TREE);
+  return (
+    <>
+      <FileContextMenu
+        node={BULK_TREE}
+        tree={tree}
+        setTree={setTree}
+        onDeleteFile={onDeleteFile}
+        onStartRename={() => {}}
+        selectedCount={2}
+        selectedPaths={new Set(["a.txt", "b.txt"])}
+      >
+        <div data-testid="bulk-row">row</div>
+      </FileContextMenu>
+      <output data-testid="tree-paths">
+        {tree?.children?.map((child) => child.path).join(",")}
+      </output>
+    </>
+  );
 }
 
 describe("FileContextMenu Download item", () => {
@@ -151,5 +183,20 @@ describe("FileContextMenu chat context item", () => {
     openMenu("file-row");
 
     expect(screen.queryByTestId("file-context-add-to-chat")).toBeNull();
+  });
+});
+
+describe("FileContextMenu bulk deletion", () => {
+  it("keeps failed paths visible after a partial deletion failure", async () => {
+    const onDeleteFile = vi.fn(async (path: string) => path === "a.txt");
+    render(<BulkDeleteHarness onDeleteFile={onDeleteFile} />);
+
+    openMenu("bulk-row");
+    fireEvent.click(screen.getByText("Delete 2 items"));
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+
+    await waitFor(() => expect(onDeleteFile).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(screen.getByTestId("tree-paths").textContent).toBe("b.txt"));
+    expect(screen.getByTestId("tree-paths").textContent).not.toContain("a.txt");
   });
 });

@@ -54,6 +54,20 @@ function deleteNodeOptimistically(
     .catch(() => setTree(snapshot));
 }
 
+function removeSuccessfullyDeletedPaths(
+  snapshot: FileTreeNode | null,
+  paths: string[],
+  results: PromiseSettledResult<boolean>[],
+) {
+  let nextTree = snapshot;
+  results.forEach((result, index) => {
+    if (result.status === "fulfilled" && result.value && nextTree) {
+      nextTree = removeNodeFromTree(nextTree, paths[index]);
+    }
+  });
+  return nextTree;
+}
+
 function DeleteConfirmDialog({
   isBulk,
   selectedCount,
@@ -202,11 +216,9 @@ function useFileContextMenuDelete({
         }
         return nextTree;
       });
-      Promise.all(paths.map((path) => onDeleteFile(path)))
-        .then((results) => {
-          if (results.some((ok) => !ok)) setTree(snapshot);
-        })
-        .catch(() => setTree(snapshot));
+      Promise.allSettled(paths.map((path) => onDeleteFile(path))).then((results) => {
+        setTree(removeSuccessfullyDeletedPaths(snapshot, paths, results));
+      });
       return;
     }
     deleteNodeOptimistically(tree, setTree, node.path, onDeleteFile);

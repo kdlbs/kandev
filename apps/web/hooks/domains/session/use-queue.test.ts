@@ -227,7 +227,7 @@ describe("useQueue context file metadata", () => {
       await result.current.queue({
         taskId: TASK_ID,
         content: "queued context",
-        contextFilesMeta: [{ path: "src/components", name: "components" }],
+        contextFilesMeta: [{ path: "src/components", name: "components", is_directory: true }],
       } as never);
     });
 
@@ -239,7 +239,7 @@ describe("useQueue context file metadata", () => {
       plan_mode: undefined,
       attachments: undefined,
       entity_references: undefined,
-      context_files: [{ path: "src/components", name: "components" }],
+      context_files: [{ path: "src/components", name: "components", is_directory: true }],
     });
   });
 });

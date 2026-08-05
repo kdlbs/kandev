@@ -45,7 +45,8 @@ const MetadataCoalesceKey = "coalesce_key"
 // queued message.
 const MetadataEntityReferences = "entity_references"
 
-// MetadataContextFiles carries path/name references for queued user messages.
+// MetadataContextFiles carries path/name references and optional directory
+// identity for queued user messages.
 const MetadataContextFiles = "context_files"
 
 // MetadataLifecycleDurable marks lifecycle entries that remain in persistent

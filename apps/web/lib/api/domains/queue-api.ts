@@ -92,7 +92,7 @@ export type QueueMessageParams = {
     size_bytes?: number;
     delivery_mode?: "prompt" | "path";
   }>;
-  context_files?: Array<{ path: string; name: string }>;
+  context_files?: Array<{ path: string; name: string; is_directory?: boolean }>;
   entity_references?: EntityReference[];
   user_id?: string;
 };

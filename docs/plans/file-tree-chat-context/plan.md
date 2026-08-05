@@ -8,11 +8,11 @@ status: complete
 
 ## Overview
 
-Extend the existing session-scoped context-file model so it can represent directories without breaking stored file entries, then wire a single-node add action into the Files tree's context menu and a visible touch/coarse-pointer row menu. The work reuses the current chat composer, message formatting, `context_files` metadata, Radix menu primitives, and responsive bottom-sheet CSS. Direct sends reuse the existing `message.add.context_files` contract; queued sends carry the same `{ path, name }` metadata through `message.queue.add` into the existing user-message metadata path. Focused component tests land with each frontend step, followed by desktop and mobile Playwright coverage of the complete Files-to-Chat flow.
+Extend the existing session-scoped context-file model so it can represent directories without breaking stored file entries, then wire a single-node add action into the Files tree's context menu and a visible touch/coarse-pointer row menu. The work reuses the current chat composer, message formatting, `context_files` metadata, Radix menu primitives, and responsive bottom-sheet CSS. Direct and queued sends carry `{ path, name }` plus optional `is_directory` metadata through the existing user-message path, preserving legacy file entries. Focused component tests land with each frontend step, followed by desktop and mobile Playwright coverage of the complete Files-to-Chat flow.
 
 ## Backend
 
-No database or filesystem changes are required. `message.add.context_files` already accepts task-root-relative `{ path, name }` references and persists them in user-message metadata. The queue WebSocket request now accepts the same optional `context_files` array, and queue draining preserves it through the existing metadata path; no schema or new message contract is needed. Directory identity is a local pending-composer presentation concern; the hidden prompt block tells the agent whether each pending path is a file or directory before send.
+No database or filesystem changes are required. `message.add.context_files` accepts task-root-relative `{ path, name }` references with optional `is_directory` identity and persists them in user-message metadata. The queue WebSocket request accepts the same optional `context_files` array, and queue draining preserves it through the existing metadata path; no schema or new message contract is needed. The hidden prompt block still tells the agent whether each pending path is a file or directory before send.
 
 ## Frontend
 
@@ -21,7 +21,7 @@ No database or filesystem changes are required. `message.add.context_files` alre
 - Extend `ContextFile` in `apps/web/lib/state/context-files-store.ts` with optional directory identity while preserving hydration of older session-storage entries. Persist that property with the existing `path`, `name`, and `pinned` fields; retain path-based deduplication and ephemeral clearing.
 - Extend `FileContextItem` in `apps/web/lib/types/context.ts` and `buildFileContextItem` in `apps/web/components/task/chat-context-items.ts` so directory items have no file-open handler or lazy file preview.
 - Update `apps/web/components/task/chat/context-items/file-item.tsx` to render the existing `ContextChip` with `IconFolder` for directories and `IconFile` plus `LazyFilePreview` for files. Give path chips stable `data-testid`/path metadata through `ContextChip` for component and E2E assertions.
-- Update `buildContextFilesContext` in `apps/web/hooks/use-message-handler.ts` to describe attached context as file and directory paths while retaining the existing filtered `context_files` metadata payload. Forward that payload through direct and queued sends. Add tests for file-only, directory-only, mixed, duplicate, legacy-hydration, queued metadata, and successful/failed-send retention behavior at the narrowest owning layers.
+- Update `buildContextFilesContext` in `apps/web/hooks/use-message-handler.ts` to describe attached context as file and directory paths while preserving optional directory identity in the filtered `context_files` metadata payload. Forward that payload through direct and queued sends. Add tests for file-only, directory-only, mixed, duplicate, legacy-hydration, queued metadata, and successful/failed-send retention behavior at the narrowest owning layers.
 
 ### File-tree actions
 
@@ -48,7 +48,7 @@ No database or filesystem changes are required. `message.add.context_files` alre
 - **What:** file context items retain previews/open behavior, directory items use a folder icon and do not call the file opener or mount `LazyFilePreview`.
   **Files:** `apps/web/components/task/chat-context-items.test.ts`, `apps/web/components/task/chat/context-items/file-item.test.tsx`.
   **How:** pure builder assertions plus React Testing Library interaction/render tests.
-- **What:** hidden context text names file and directory paths while outbound `context_files` metadata remains `{ path, name }`; failed sends do not clear pending context and successful sends do.
+- **What:** hidden context text names file and directory paths while outbound `context_files` metadata preserves optional directory identity and legacy `{ path, name }` entries; failed sends do not clear pending context and successful sends do.
   **Files:** `apps/web/hooks/use-message-handler.test.ts`, `apps/web/hooks/domains/session/use-queue.test.ts`, `apps/web/lib/api/domains/queue-api.test.ts`, `apps/backend/internal/orchestrator/handlers/queue_handlers_test.go`, and existing chat input area tests where clearing is already owned.
   **How:** focused formatter and submission-state tests with the existing WebSocket/store mocks.
 - **What:** queued context metadata survives the queue API and WebSocket handler into the stored user message.
@@ -102,6 +102,11 @@ No database or filesystem changes are required. `message.add.context_files` alre
   rows; the final fixture searches a file while retaining the directory tree-row flow. Final
   managed E2E runs passed 1 desktop test and 1 Pixel 5 mobile test from fresh production builds,
   with the expected menu hitbox, viewport, overflow, metadata, and cleanup checks.
+- Rebase PR-fixup remediation: partial bulk deletion now removes only paths whose backend
+  deletion fulfilled successfully, and sent context metadata carries optional `is_directory`
+  identity through direct and queued messages into folder/file history badges. RED covered the
+  partial-delete, metadata, and badge regressions; GREEN passed 6 web files/95 tests and 2 backend
+  packages/10 focused tests, plus typecheck and changed-file ESLint.
 
 ## Implementation Waves And Parallel Candidates
 

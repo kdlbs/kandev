@@ -165,7 +165,7 @@ type SendMessagePayload = {
   planMode: boolean;
   hasReviewComments?: boolean;
   attachments?: MessageAttachment[];
-  contextFilesMeta?: Array<{ path: string; name: string }>;
+  contextFilesMeta?: Array<{ path: string; name: string; is_directory?: boolean }>;
   entityReferences?: EntityReference[];
 };
 
@@ -362,7 +362,13 @@ export function useMessageHandler({
         (f) => !f.path.startsWith("prompt:") && f.path !== "plan:context",
       );
       const contextFilesMeta =
-        realFiles.length > 0 ? realFiles.map((f) => ({ path: f.path, name: f.name })) : undefined;
+        realFiles.length > 0
+          ? realFiles.map((f) => ({
+              path: f.path,
+              name: f.name,
+              ...(f.isDirectory !== undefined ? { is_directory: f.isDirectory } : {}),
+            }))
+          : undefined;
 
       const inputMode = requireSessionInputMode(storeApi.getState(), resolvedSessionId);
       if (hasPendingClarification || inputMode === "queue") {
