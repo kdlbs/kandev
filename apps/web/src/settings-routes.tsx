@@ -364,15 +364,9 @@ function renderWorkspaceSettingsRoute(pathname: string) {
   );
   if (workspaceSubpage) {
     const [id, section] = workspaceSubpage;
-    if (section === "repositories") {
-      return <WorkspaceRepositoriesRoute workspaceId={id} />;
-    }
-    if (section === "secrets") {
-      return <SecretsSettings scope="workspace" workspaceId={id} />;
-    }
-    if (section === "workflows") {
-      return <WorkspaceWorkflowsRoute workspaceId={id} />;
-    }
+    if (section === "repositories") return <WorkspaceRepositoriesRoute workspaceId={id} />;
+    if (section === "secrets") return <SecretsSettings scope="workspace" workspaceId={id} />;
+    if (section === "workflows") return <WorkspaceWorkflowsRoute workspaceId={id} />;
     return <AutomationsPage workspaceId={id} />;
   }
 
