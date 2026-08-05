@@ -1311,13 +1311,21 @@ export const i18nGuardFiles = [
   //
   // `getExecutorLabel` returns catalog text now, so a caller that does not
   // subscribe to i18n renders the previous locale until something else makes it
-  // re-render. Every consumer this PR owns subscribes, and
-  // `use-filter-value-options.ts` (the task sidebar's executor filter) gained
-  // `i18n.language` in its memo deps for the same reason. One consumer is left:
-  // `lib/sidebar/apply-view.ts` builds a group label from it inside the sidebar
-  // view pipeline, which this PR does not own — its labels resolve correctly on
-  // load and lag a runtime locale switch until the view recomputes. It belongs
-  // to whoever migrates `lib/sidebar`.
+  // re-render. All three consumers are covered: `ProfileCard` subscribes,
+  // `use-filter-value-options.ts` (the task sidebar's executor filter) carries
+  // `i18n.language` in its memo deps, and both `applyView` consumers — the
+  // desktop sidebar and the mobile task-switcher sheet — do the same for
+  // `applyGroup`'s executorType heading in `lib/sidebar/apply-view.ts`.
+  //
+  // This bug class is invisible to BOTH the guard and the pseudo-locale: the
+  // text is translated, just frozen at the previous locale, so it renders
+  // accented and reads as done. `check-module-scope-t.mjs` does not fire
+  // either — the `t()` call sits inside a function, which is correct, since it
+  // does resolve at call time. Only a locale-switch test covers it, which is
+  // what `use-filter-value-options-locale.test.tsx` is for.
+  //
+  // Still English in `lib/sidebar/apply-view.ts` and belonging to whoever
+  // migrates `lib/sidebar`: `UNASSIGNED_LABEL` and `MULTI_REPO_LABEL`.
   //
   // One deliberate English change, the only one in this PR: the SSH
   // running-sessions confirm read "This executor has 3 running session(s)."
