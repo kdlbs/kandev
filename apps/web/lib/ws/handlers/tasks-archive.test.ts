@@ -104,178 +104,174 @@ function makeStoreWithTask(initial: Partial<AppState> = {}) {
 }
 
 // Keep the lifecycle cases together so archive cleanup stays covered end to end.
-// eslint-disable-next-line max-lines-per-function -- lifecycle cases share one store harness
-describe("task.updated archive cleanup", () => {
-  beforeEach(() => {
-    vi.mocked(removeRecentTask).mockClear();
-    window.history.replaceState({}, "", "/");
+beforeEach(() => {
+  vi.mocked(removeRecentTask).mockClear();
+  window.history.replaceState({}, "", "/");
+});
+
+it("removes archived tasks from the active kanban cache even when workflow focus changed", () => {
+  const staleTask: KanbanTask = {
+    id: "t1",
+    title: "Test",
+    workflowId: "wf1",
+    workflowStepId: "step1",
+  };
+  const store = makeStore({
+    kanban: {
+      workflowId: "wf-active",
+      steps: [],
+      tasks: [staleTask],
+    } as unknown as AppState["kanban"],
+    kanbanMulti: {
+      isLoading: false,
+      snapshots: {
+        wf1: { workflowId: "wf1", workflowName: "WF1", steps: [], tasks: [staleTask] },
+      },
+    } as unknown as AppState["kanbanMulti"],
   });
 
-  it("removes archived tasks from the active kanban cache even when workflow focus changed", () => {
-    const staleTask: KanbanTask = {
-      id: "t1",
-      title: "Test",
+  const handlers = registerTasksHandlers(store);
+  handlers["task.updated"]!(
+    makeUpdatedMessage({
+      ...taskPayload(TASK_ID, "wf1"),
+      archived_at: ARCHIVED_AT,
+    }),
+  );
+
+  const state = store.getState();
+  expect(state.kanban.tasks).toEqual([]);
+  expect(state.kanbanMulti.snapshots.wf1.tasks).toEqual([]);
+});
+
+it("adds an archived task to the workspace-scoped sidebar projection", () => {
+  const store = makeStore({
+    sidebarArchivedTasks: {
+      itemsByWorkspaceId: {},
+      loadedByWorkspaceId: { "ws-1": true },
+      loadingByWorkspaceId: { "ws-1": false },
+      errorByWorkspaceId: { "ws-1": null },
+    },
+  } as unknown as Partial<AppState>);
+
+  registerTasksHandlers(store)["task.updated"]!(
+    makeUpdatedMessage({
+      ...taskPayload(TASK_ID),
+      workspace_id: "ws-1",
+      archived_at: ARCHIVED_AT,
+    }),
+  );
+
+  const archived = store.getState().sidebarArchivedTasks.itemsByWorkspaceId["ws-1"];
+  expect(archived).toHaveLength(1);
+  expect(archived[0]).toMatchObject({ id: TASK_ID, workspaceId: "ws-1", isArchived: true });
+});
+
+it("resolves the workspace from active task state when the archive event omits it", () => {
+  const store = makeStore({
+    kanban: {
       workflowId: "wf1",
-      workflowStepId: "step1",
-    };
-    const store = makeStore({
-      kanban: {
-        workflowId: "wf-active",
-        steps: [],
-        tasks: [staleTask],
-      } as unknown as AppState["kanban"],
-      kanbanMulti: {
-        isLoading: false,
-        snapshots: {
-          wf1: { workflowId: "wf1", workflowName: "WF1", steps: [], tasks: [staleTask] },
-        },
-      } as unknown as AppState["kanbanMulti"],
-    });
+      steps: [],
+      tasks: [{ id: TASK_ID, workflowId: "wf1", workspaceId: "ws-active" }],
+    } as unknown as AppState["kanban"],
+    sidebarArchivedTasks: {
+      itemsByWorkspaceId: {},
+      loadedByWorkspaceId: { "ws-active": true },
+      loadingByWorkspaceId: { "ws-active": false },
+      errorByWorkspaceId: { "ws-active": null },
+    },
+  } as unknown as Partial<AppState>);
 
-    const handlers = registerTasksHandlers(store);
-    handlers["task.updated"]!(
-      makeUpdatedMessage({
-        ...taskPayload(TASK_ID, "wf1"),
-        archived_at: ARCHIVED_AT,
-      }),
-    );
+  registerTasksHandlers(store)["task.updated"]!(
+    makeUpdatedMessage({
+      ...taskPayload(TASK_ID),
+      archived_at: ARCHIVED_AT,
+    }),
+  );
 
-    const state = store.getState();
-    expect(state.kanban.tasks).toEqual([]);
-    expect(state.kanbanMulti.snapshots.wf1.tasks).toEqual([]);
-  });
+  expect(store.getState().sidebarArchivedTasks.itemsByWorkspaceId["ws-active"]).toEqual([
+    expect.objectContaining({ id: TASK_ID, workspaceId: "ws-active", isArchived: true }),
+  ]);
+});
 
-  it("adds an archived task to the workspace-scoped sidebar projection", () => {
-    const store = makeStore({
-      sidebarArchivedTasks: {
-        itemsByWorkspaceId: {},
-        loadedByWorkspaceId: { "ws-1": true },
-        loadingByWorkspaceId: { "ws-1": false },
-        errorByWorkspaceId: { "ws-1": null },
+it("preserves the resolved workspace on partial archived updates", () => {
+  const store = makeStore({
+    sidebarArchivedTasks: {
+      itemsByWorkspaceId: {
+        "ws-1": [{ id: TASK_ID, workspaceId: "ws-1", isArchived: true }],
       },
-    } as unknown as Partial<AppState>);
+      loadedByWorkspaceId: { "ws-1": true },
+      loadingByWorkspaceId: { "ws-1": false },
+      errorByWorkspaceId: { "ws-1": null },
+    },
+  } as unknown as Partial<AppState>);
 
-    registerTasksHandlers(store)["task.updated"]!(
-      makeUpdatedMessage({
-        ...taskPayload(TASK_ID),
-        workspace_id: "ws-1",
-        archived_at: ARCHIVED_AT,
-      }),
-    );
-
-    const archived = store.getState().sidebarArchivedTasks.itemsByWorkspaceId["ws-1"];
-    expect(archived).toHaveLength(1);
-    expect(archived[0]).toMatchObject({ id: TASK_ID, workspaceId: "ws-1", isArchived: true });
-  });
-
-  it("resolves the workspace from active task state when the archive event omits it", () => {
-    const store = makeStore({
-      kanban: {
-        workflowId: "wf1",
-        steps: [],
-        tasks: [{ id: TASK_ID, workflowId: "wf1", workspaceId: "ws-active" }],
-      } as unknown as AppState["kanban"],
-      sidebarArchivedTasks: {
-        itemsByWorkspaceId: {},
-        loadedByWorkspaceId: { "ws-active": true },
-        loadingByWorkspaceId: { "ws-active": false },
-        errorByWorkspaceId: { "ws-active": null },
-      },
-    } as unknown as Partial<AppState>);
-
-    registerTasksHandlers(store)["task.updated"]!(
-      makeUpdatedMessage({
-        ...taskPayload(TASK_ID),
-        archived_at: ARCHIVED_AT,
-      }),
-    );
-
-    expect(store.getState().sidebarArchivedTasks.itemsByWorkspaceId["ws-active"]).toEqual([
-      expect.objectContaining({ id: TASK_ID, workspaceId: "ws-active", isArchived: true }),
-    ]);
-  });
-
-  it("preserves the resolved workspace on partial archived updates", () => {
-    const store = makeStore({
-      sidebarArchivedTasks: {
-        itemsByWorkspaceId: {
-          "ws-1": [{ id: TASK_ID, workspaceId: "ws-1", isArchived: true }],
-        },
-        loadedByWorkspaceId: { "ws-1": true },
-        loadingByWorkspaceId: { "ws-1": false },
-        errorByWorkspaceId: { "ws-1": null },
-      },
-    } as unknown as Partial<AppState>);
-
-    registerTasksHandlers(store)["task.updated"]!(
-      makeUpdatedMessage({
-        ...taskPayload(TASK_ID),
-        archived_at: ARCHIVED_AT,
-        title: "Updated archived task",
-      }),
-    );
-
-    const archived = store.getState().sidebarArchivedTasks.itemsByWorkspaceId["ws-1"];
-    expect(archived[0]).toMatchObject({
-      id: TASK_ID,
+  registerTasksHandlers(store)["task.updated"]!(
+    makeUpdatedMessage({
+      ...taskPayload(TASK_ID),
+      archived_at: ARCHIVED_AT,
       title: "Updated archived task",
-      workspaceId: "ws-1",
-      isArchived: true,
-    });
-  });
+    }),
+  );
 
-  it("clears active task state, pin, recent history, and sidebar prefs for archived task events", () => {
-    const store = makeStoreWithTask({
-      tasks: {
-        activeTaskId: TASK_ID,
-        activeSessionId: SESSION_ID,
-        pinnedSessionId: SESSION_ID,
-        lastSessionByTaskId: { [TASK_ID]: SESSION_ID, t2: "sess-other" },
-      },
-      environmentIdBySessionId: {},
-    } as unknown as Partial<AppState>);
-
-    archiveTask(store);
-
-    const state = store.getState();
-    expect(state.tasks.activeTaskId).toBeNull();
-    expect(state.tasks.activeSessionId).toBeNull();
-    expect(state.tasks.pinnedSessionId).toBeNull();
-    expect(state.tasks.lastSessionByTaskId).not.toHaveProperty(TASK_ID);
-    expect(state.tasks.lastSessionByTaskId).toHaveProperty("t2", "sess-other");
-    expect(removeRecentTask).toHaveBeenCalledWith(TASK_ID);
-    expect(state.removeTaskFromSidebarPrefs).toHaveBeenCalledWith(TASK_ID);
-    expect(state.setOfficeRefetchTrigger).toHaveBeenCalledWith("tasks");
-  });
-
-  it.each(["/t/t1", "/tasks/t1"])("redirects away when archived on %s", (path) => {
-    window.history.replaceState({}, "", path);
-    const store = makeStoreWithTask({
-      tasks: {
-        activeTaskId: TASK_ID,
-        activeSessionId: SESSION_ID,
-        pinnedSessionId: null,
-        lastSessionByTaskId: {},
-      },
-      environmentIdBySessionId: {},
-    } as unknown as Partial<AppState>);
-
-    archiveTask(store);
-
-    expect(window.location.pathname).toBe("/");
-    expect(window.location.search).toBe("?home=overview");
-  });
-
-  it("does not redirect when a different task is archived", () => {
-    window.history.replaceState({}, "", "/t/other");
-    const store = makeStoreWithTask();
-
-    archiveTask(store);
-
-    expect(window.location.pathname).toBe("/t/other");
+  const archived = store.getState().sidebarArchivedTasks.itemsByWorkspaceId["ws-1"];
+  expect(archived[0]).toMatchObject({
+    id: TASK_ID,
+    title: "Updated archived task",
+    workspaceId: "ws-1",
+    isArchived: true,
   });
 });
 
+it("clears active task state, pin, recent history, and sidebar prefs for archived task events", () => {
+  const store = makeStoreWithTask({
+    tasks: {
+      activeTaskId: TASK_ID,
+      activeSessionId: SESSION_ID,
+      pinnedSessionId: SESSION_ID,
+      lastSessionByTaskId: { [TASK_ID]: SESSION_ID, t2: "sess-other" },
+    },
+    environmentIdBySessionId: {},
+  } as unknown as Partial<AppState>);
+
+  archiveTask(store);
+
+  const state = store.getState();
+  expect(state.tasks.activeTaskId).toBeNull();
+  expect(state.tasks.activeSessionId).toBeNull();
+  expect(state.tasks.pinnedSessionId).toBeNull();
+  expect(state.tasks.lastSessionByTaskId).not.toHaveProperty(TASK_ID);
+  expect(state.tasks.lastSessionByTaskId).toHaveProperty("t2", "sess-other");
+  expect(removeRecentTask).toHaveBeenCalledWith(TASK_ID);
+  expect(state.removeTaskFromSidebarPrefs).toHaveBeenCalledWith(TASK_ID);
+  expect(state.setOfficeRefetchTrigger).toHaveBeenCalledWith("tasks");
+});
+
+it.each(["/t/t1", "/tasks/t1"])("redirects away when archived on %s", (path) => {
+  window.history.replaceState({}, "", path);
+  const store = makeStoreWithTask({
+    tasks: {
+      activeTaskId: TASK_ID,
+      activeSessionId: SESSION_ID,
+      pinnedSessionId: null,
+      lastSessionByTaskId: {},
+    },
+    environmentIdBySessionId: {},
+  } as unknown as Partial<AppState>);
+
+  archiveTask(store);
+
+  expect(window.location.pathname).toBe("/");
+  expect(window.location.search).toBe("?home=overview");
+});
+
+it("does not redirect when a different task is archived", () => {
+  window.history.replaceState({}, "", "/t/other");
+  const store = makeStoreWithTask();
+
+  archiveTask(store);
+
+  expect(window.location.pathname).toBe("/t/other");
+});
 describe("office task removal routes", () => {
   beforeEach(() => {
     vi.mocked(removeRecentTask).mockClear();
