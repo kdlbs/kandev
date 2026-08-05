@@ -186,6 +186,10 @@ func TestBundleDirForLauncherPathRejectsLauncherOutsideBin(t *testing.T) {
 		filepath.Join("opt", "kandev", executableName("kandev")),
 		filepath.Join("usr", "local", "sbin", executableName("kandev")),
 		executableName("kandev"),
+		// validateRuntimeBundle joins a lowercase "bin" onto whatever this
+		// returns, so any other casing must be refused here rather than
+		// derived and rejected later with a misleading error.
+		filepath.Join("opt", "kandev", "BIN", executableName("kandev")),
 	} {
 		if got, ok := bundleDirForLauncherPath(exe); ok {
 			t.Fatalf("exe %q was accepted as bundle %q", exe, got)

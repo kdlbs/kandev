@@ -6,7 +6,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"strings"
 )
 
 type runtimeBundle struct {
@@ -73,9 +72,16 @@ func bundleDirFromExecutable() (string, bool) {
 // bundleDirForLauncherPath maps <bundle>/bin/kandev back to <bundle>. Any other
 // layout is refused, so a launcher sitting somewhere unrelated cannot make
 // validateRuntimeBundle probe an arbitrary directory.
+//
+// The directory name must be exactly "bin", matching what validateRuntimeBundle
+// joins onto the result. Accepting other casings here would derive a bundle on a
+// case-sensitive filesystem that validation then rejects, turning a clear "not a
+// bundle" into a confusing "launcher binary not found". Windows is unaffected:
+// EvalSymlinks above canonicalises the path to the casing on disk, so a launcher
+// invoked as BIN\kandev.exe still arrives here as bin\kandev.exe.
 func bundleDirForLauncherPath(exe string) (string, bool) {
 	binDir := filepath.Dir(exe)
-	if !strings.EqualFold(filepath.Base(binDir), "bin") {
+	if filepath.Base(binDir) != "bin" {
 		return "", false
 	}
 	dir := filepath.Dir(binDir)
