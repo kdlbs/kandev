@@ -27,7 +27,9 @@ const lspMocks = vi.hoisted(() => {
     getWorkspaceUriForSession: vi.fn(() => null),
     getRepositorySubpaths: vi.fn(() => [attachedRepository]),
     openFiles: new Map<string, { path: string; repo?: string }>(),
-    currentOpener: null as ((uri: string, line?: number, column?: number) => void) | null,
+    currentOpener: null as
+      | ((uri: string, line?: number, column?: number) => boolean | Promise<boolean>)
+      | null,
   };
 });
 
@@ -128,6 +130,38 @@ describe("useLspFileOpener", () => {
       3,
       { repo: lspMocks.attachedRepository, sessionId: lspMocks.sessionId },
     );
+  });
+
+  it("opens plain Monaco file URIs inside the active workspace", async () => {
+    lspMocks.setFileOpener.mockImplementation((opener) => {
+      lspMocks.currentOpener = opener;
+    });
+    lspMocks.getFileOpener.mockImplementation(() => lspMocks.currentOpener);
+
+    renderHook(() => useLspFileOpener());
+    let handled: boolean | undefined;
+    await act(async () => {
+      handled = await lspMocks.currentOpener?.(ATTACHED_FILE_URI, 8, 2);
+    });
+
+    expect(handled).toBe(true);
+    expect(lspMocks.openFile).toHaveBeenCalledWith(SOURCE_FILE_PATH, lspMocks.attachedRepository);
+  });
+
+  it("declines plain Monaco file URIs outside the active workspace", async () => {
+    lspMocks.setFileOpener.mockImplementation((opener) => {
+      lspMocks.currentOpener = opener;
+    });
+    lspMocks.getFileOpener.mockImplementation(() => lspMocks.currentOpener);
+
+    renderHook(() => useLspFileOpener());
+    let handled: boolean | undefined;
+    await act(async () => {
+      handled = await lspMocks.currentOpener?.("file:///another-workspace/src/index.ts");
+    });
+
+    expect(handled).toBe(false);
+    expect(lspMocks.openFile).not.toHaveBeenCalled();
   });
 
   it("refreshes the registered opener when the workspace root changes", async () => {

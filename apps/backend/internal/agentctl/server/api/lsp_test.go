@@ -123,6 +123,50 @@ func TestRunLSPBridgeClosesStdoutAfterForwarderReturns(t *testing.T) {
 	}
 }
 
+func TestRunLSPBridgeUsesCategoricalCloseWhenServerExits(t *testing.T) {
+	server := newTestServer(t)
+	processDone := make(chan struct{})
+	close(processDone)
+	lspProcess := &lspServerProcess{
+		id:     "exited-server",
+		stdin:  discardLSPWriteCloser{},
+		stdout: io.NopCloser(strings.NewReader("")),
+		done:   processDone,
+	}
+	handlerDone := make(chan error, 1)
+	httpServer := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		conn, err := server.upgrader.Upgrade(writer, request, nil)
+		if err == nil {
+			server.runLSPBridge(conn, "kotlin", lspProcess)
+		}
+		handlerDone <- err
+	}))
+	t.Cleanup(httpServer.Close)
+
+	conn, _, err := websocket.DefaultDialer.Dial("ws"+strings.TrimPrefix(httpServer.URL, "http"), nil)
+	if err != nil {
+		t.Fatalf("dial bridge: %v", err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+	_ = conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	_, _, err = conn.ReadMessage()
+	closeErr, ok := err.(*websocket.CloseError)
+	if !ok {
+		t.Fatalf("server exit error = %T %v, want WebSocket close", err, err)
+	}
+	if closeErr.Code != 4006 || closeErr.Text != "" {
+		t.Fatalf("server exit close = %d %q, want 4006 with no reason", closeErr.Code, closeErr.Text)
+	}
+	select {
+	case err := <-handlerDone:
+		if err != nil {
+			t.Fatalf("bridge handler: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("bridge handler did not return")
+	}
+}
+
 func TestStopLSPServerTimeoutClosesStdoutBeforeJoiningForwarder(t *testing.T) {
 	server := newTestServer(t)
 	stdout := newOrderedLSPReadCloser()

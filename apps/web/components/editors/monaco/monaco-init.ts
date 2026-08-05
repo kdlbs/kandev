@@ -70,8 +70,7 @@ export function initMonacoThemes() {
                 column = selectionOrPosition.startColumn;
               }
             }
-            opener(uri, line, column);
-            return true;
+            return opener(uri, line, column);
           }
           return false;
         },

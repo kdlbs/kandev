@@ -53,6 +53,7 @@ export { toLspLanguage } from "./lsp-json-rpc";
 // ---------------------------------------------------------------------------
 
 type ChangeListener = (key: string) => void;
+type FileOpener = (uri: string, line?: number, column?: number) => boolean | Promise<boolean>;
 
 function hasActiveLspWork(progress: LspProgressSnapshot): boolean {
   return progress.initializingSince !== null || progress.active.length > 0;
@@ -95,15 +96,15 @@ class LSPClientManager {
   /** Keeps Monaco model identity stable after an LSP connection stops or crashes. */
   private workspaceMetadata = new Map<string, WorkspaceMetadata>();
   private listeners = new Set<ChangeListener>();
-  private fileOpener: ((uri: string, line?: number, column?: number) => void) | null = null;
+  private fileOpener: FileOpener | null = null;
   private editorState = new LspClientEditorState((connection) =>
     this.isCurrentConnection(connection),
   );
-  setFileOpener(opener: ((uri: string, line?: number, column?: number) => void) | null): void {
+  setFileOpener(opener: FileOpener | null): void {
     this.fileOpener = opener;
   }
 
-  getFileOpener(): ((uri: string, line?: number, column?: number) => void) | null {
+  getFileOpener(): FileOpener | null {
     return this.fileOpener;
   }
 

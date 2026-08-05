@@ -26,6 +26,7 @@ import (
 const (
 	lspCloseBinaryNotFound         = 4001
 	lspCloseInstallFailed          = 4003
+	lspCloseServerExited           = 4006
 	lspCloseAutoInstallUnsupported = 4007
 
 	lspLanguageTypeScript    = "typescript"
@@ -355,7 +356,7 @@ func (s *Server) runLSPBridge(conn *websocket.Conn, language string, server *lsp
 				_ = writeLSPForwarderMessage(
 					conn,
 					websocket.CloseMessage,
-					websocket.FormatCloseMessage(websocket.CloseNormalClosure, "language server exited"),
+					websocket.FormatCloseMessage(lspCloseServerExited, ""),
 				)
 				return
 			}

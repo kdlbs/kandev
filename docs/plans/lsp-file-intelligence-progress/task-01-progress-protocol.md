@@ -67,6 +67,7 @@ Record RED/GREEN evidence, files changed, exact tests run, remaining risks, and 
 - Review hardening: Go post-install discovery now includes the task environment's `USERPROFILE\go\bin`, covering default Windows Local PC setups without explicit `GOBIN`, `GOPATH`, or `HOME`.
 - Review hardening: the browser-facing LSP capacity slot is acquired before `GetOrEnsureExecution`, so an over-cap request cannot start or resume a supported task host; all resolution failures release the provisional slot.
 - Review hardening: missing-binary close code `4001` now ignores backend prose and resolves through the active locale, Editors cards expose install prerequisites inline for pointer, keyboard, and touch users, and the test-only duplicate language table was removed in favor of the localized Settings metadata source.
+- Review hardening: the Monaco editor opener now opens regular targets inside the active task workspace and propagates `false` for unresolved targets, while agentctl reports unexpected server exit as categorical `4006` with no English close reason so the browser localizes it.
 - Verified:
   - `pnpm --filter @kandev/web test -- --run lib/lsp/lsp-progress.test.ts lib/lsp/lsp-client-manager.test.ts`
   - `pnpm exec vitest run lib/lsp/lsp-providers.test.ts --reporter=dot`
@@ -87,4 +88,6 @@ Record RED/GREEN evidence, files changed, exact tests run, remaining risks, and 
   - `pnpm lint`, `pnpm run typecheck`, `pnpm i18n:check`, and `pnpm i18n:ratchet`
   - `pnpm exec vitest run lib/lsp/lsp-language-mapping.test.ts components/settings/lsp-language-cards.test.tsx components/settings/lsp-language-options.test.ts` (13 passed)
   - `pnpm exec eslint lib/lsp/lsp-json-rpc.ts lib/lsp/lsp-language-mapping.test.ts components/settings/lsp-language-cards.tsx components/settings/lsp-language-cards.test.tsx components/settings/lsp-language-options.ts components/settings/lsp-language-options.test.ts`
+  - `pnpm exec vitest run hooks/use-lsp-file-opener.test.ts components/editors/monaco/monaco-init.test.ts lib/lsp/lsp-language-mapping.test.ts components/settings/lsp-language-cards.test.tsx components/settings/lsp-language-options.test.ts` (23 passed)
+  - `go test ./internal/agentctl/server/api -count=1` (categorical server-exit close included)
   - `node --test scripts/validate-public-docs.test.mjs scripts/notify-docs-workflow.test.mjs && node scripts/validate-public-docs.mjs`

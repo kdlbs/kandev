@@ -28,7 +28,7 @@ The progress protocol itself requires no backend payload transform because both 
 - Supply Monaco's current-word range for completion items without `textEdit`, while preserving explicit server `TextEdit` and `InsertReplaceEdit` ranges.
 - Keep per-language configuration mutable on the shared connection, notify initialized servers when settings change, and answer later `workspace/configuration` requests from that live value.
 - After confirmed persistence, synchronously flush the newest live editor snapshot as `textDocument/didChange`, then route `textDocument/didSave` to matching open documents for servers that requested save synchronization. Include the persisted snapshot only for `includeText` servers when the buffer has not advanced; raced saves omit stale optional text and retain the newer dirty buffer.
-- Resolve LSP targets to repository-scoped workspace requests while preserving an existing task-root-relative editor key, so navigation from attached repositories activates the tree-opened tab instead of duplicating it.
+- Resolve LSP targets and regular in-workspace Monaco `file://` targets to repository-scoped workspace requests while preserving an existing task-root-relative editor key; return the opener's handled result so targets outside the active workspace continue through Monaco rather than being swallowed.
 
 ### Status disclosure
 
@@ -43,7 +43,7 @@ The progress protocol itself requires no backend payload transform because both 
 - **Work progress transitions:** `apps/web/lib/lsp/lsp-progress.test.ts` covers token validation, clamping, omitted-field preservation, independent concurrent tokens, unknown/malformed payloads, completion, and reset.
 - **Protocol integration:** `apps/web/lib/lsp/lsp-client-manager.test.ts` proves initialize capability/token advertisement, pre-initialize progress, server-created numeric tokens, subscriber updates, and stale-generation isolation.
 - **Document synchronization:** focused manager, capability, and both save-hook tests prove canonical repo-aware routing, `includeText` handling, `didChange`-before-`didSave` ordering, preservation of edits made during persistence, and no save notification after rejected persistence.
-- **Navigation identity:** the LSP file-opener hook test proves an attached-repository target reuses an existing task-root-relative editor key while retaining canonical repository-scoped opens for new targets.
+- **Navigation identity:** file-opener and Monaco registration tests prove an attached-repository target reuses an existing task-root-relative editor key, regular in-workspace `file://` targets open, and unresolved targets return unhandled to Monaco.
 - **Completion and configuration:** focused provider and manager tests prove range fallback/override behavior, connection reuse, live configuration notification, and updated request responses.
 - **Provider ownership and semantic tokens:** focused Monaco/manager/provider tests prove TypeScript built-in suppression follows the owning session model, independent connections dispose separately, and valid empty semantic-token arrays complete without self-scheduled polling.
 - **Task-host setup guidance:** agentctl and frontend mapping tests prove a task host without an installer closes with `4007` before or after auto-install opt-in, and that `4001` and `4007` render localized categorical guidance instead of backend transport prose.

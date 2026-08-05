@@ -4,6 +4,7 @@ const loaderState = vi.hoisted(() => ({
   attempts: 0,
   monaco: null as ReturnType<typeof createMonaco> | null,
 }));
+const lspState = vi.hoisted(() => ({ getFileOpener: vi.fn() }));
 
 vi.mock("./monaco-loader", async () => {
   loaderState.attempts++;
@@ -12,7 +13,7 @@ vi.mock("./monaco-loader", async () => {
 });
 
 vi.mock("@/lib/lsp/lsp-client-manager", () => ({
-  lspClientManager: { getFileOpener: vi.fn() },
+  lspClientManager: { getFileOpener: lspState.getFileOpener },
 }));
 
 function createMonaco() {
@@ -54,5 +55,34 @@ describe("Monaco initialization", () => {
     await expect(waitForMonacoInstance()).rejects.toThrow();
     await expect(waitForMonacoInstance()).resolves.toBe(monaco);
     expect(loaderState.attempts).toBe(2);
+  });
+
+  it("returns whether the registered file opener handled the URI", async () => {
+    const monaco = createMonaco();
+    const fileOpener = vi.fn().mockResolvedValue(false);
+    loaderState.monaco = monaco;
+    lspState.getFileOpener.mockReturnValue(fileOpener);
+    const { waitForMonacoInstance } = await import("./monaco-init");
+
+    const loadedMonaco = (await waitForMonacoInstance().catch(() =>
+      waitForMonacoInstance(),
+    )) as ReturnType<typeof createMonaco>;
+    await vi.waitFor(() => expect(loadedMonaco.editor.registerEditorOpener).toHaveBeenCalledOnce());
+    const registered = loadedMonaco.editor.registerEditorOpener.mock.calls[0]?.[0] as {
+      openCodeEditor: (
+        source: unknown,
+        resource: { toString: () => string },
+        position: { lineNumber: number; column: number },
+      ) => boolean | Promise<boolean>;
+    };
+
+    await expect(
+      registered.openCodeEditor(
+        {},
+        { toString: () => "file:///another-workspace/src/index.ts" },
+        { lineNumber: 7, column: 4 },
+      ),
+    ).resolves.toBe(false);
+    expect(fileOpener).toHaveBeenCalledWith("file:///another-workspace/src/index.ts", 7, 4);
   });
 });

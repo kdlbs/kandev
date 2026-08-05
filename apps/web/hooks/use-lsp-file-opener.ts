@@ -10,8 +10,10 @@ import {
 } from "@/hooks/use-file-editors";
 import { lspClientManager } from "@/lib/lsp/lsp-client-manager";
 import {
+  canonicalFileUri,
   documentUriForModel,
   filePathToUri,
+  isSessionModelUri,
   resolveFileUriInWorkspace,
   type WorkspaceFileLocation,
 } from "@/lib/lsp/file-uri";
@@ -52,9 +54,11 @@ export function useLspFileOpener() {
 
   useEffect(() => {
     const opener = async (uri: string, line?: number, column?: number) => {
-      if (!activeSessionId) return;
-      const documentUri = documentUriForModel(uri, activeSessionId);
-      if (!documentUri) return;
+      if (!activeSessionId) return false;
+      const documentUri =
+        documentUriForModel(uri, activeSessionId) ??
+        (isSessionModelUri(uri) ? null : canonicalFileUri(uri));
+      if (!documentUri) return false;
       let fallbackWorkspaceUri: string | null = null;
       try {
         fallbackWorkspaceUri = worktreePath ? filePathToUri(worktreePath) : null;
@@ -63,13 +67,13 @@ export function useLspFileOpener() {
       }
       const workspaceUri =
         lspClientManager.getWorkspaceUriForSession(activeSessionId) ?? fallbackWorkspaceUri;
-      if (!workspaceUri) return;
+      if (!workspaceUri) return false;
       const resolvedLocation = resolveFileUriInWorkspace(
         documentUri,
         workspaceUri,
         lspClientManager.getRepositorySubpaths(activeSessionId),
       );
-      if (!resolvedLocation) return;
+      if (!resolvedLocation) return false;
       const location = preserveExistingEditorLocation(
         resolvedLocation,
         useDockviewStore.getState().openFiles,
@@ -95,6 +99,7 @@ export function useLspFileOpener() {
           sessionId: activeSessionId,
         });
       }
+      return true;
     };
 
     lspClientManager.setFileOpener(opener);
