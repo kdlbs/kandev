@@ -165,7 +165,9 @@ describe("LSP completion provider", () => {
       expect.objectContaining({ context: { triggerKind: 3 } }),
     );
   });
+});
 
+describe("LSP completion ranges", () => {
   it("uses the current Monaco word as the range when the server omits textEdit", async () => {
     rpc.sendRequest.mockResolvedValue([{ label: "println", insertText: "println" }]);
 
@@ -214,6 +216,47 @@ describe("LSP completion provider", () => {
       startColumn: 3,
       endLineNumber: 2,
       endColumn: 6,
+    });
+  });
+
+  it("maps an LSP insert/replace textEdit to Monaco's dual range", async () => {
+    rpc.sendRequest.mockResolvedValue([
+      {
+        label: "println",
+        textEdit: {
+          insert: {
+            start: { line: 1, character: 2 },
+            end: { line: 1, character: 5 },
+          },
+          replace: {
+            start: { line: 1, character: 2 },
+            end: { line: 1, character: 9 },
+          },
+          newText: "println",
+        },
+      },
+    ]);
+
+    const result = (await completionProvider.provideCompletionItems(
+      completionModel,
+      { lineNumber: 3, column: 7 },
+      { triggerKind: 0 },
+      { isCancellationRequested: false },
+    )) as { suggestions: Array<{ range: unknown }> };
+
+    expect(result.suggestions[0]?.range).toEqual({
+      insert: {
+        startLineNumber: 2,
+        startColumn: 3,
+        endLineNumber: 2,
+        endColumn: 6,
+      },
+      replace: {
+        startLineNumber: 2,
+        startColumn: 3,
+        endLineNumber: 2,
+        endColumn: 10,
+      },
     });
   });
 });

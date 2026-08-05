@@ -62,7 +62,7 @@ Record RED/GREEN evidence, files changed, exact tests run, remaining risks, and 
 - Review hardening: LSP navigation into an attached repository preserves an existing task-root-relative editor identity, preventing duplicate tabs and keeping cursor reveal on the tree-opened file.
 - Review hardening: installer failures without details, WebSocket errors, and reasonless pre-bridge or post-bridge closes now resolve their fallback copy through the active locale instead of leaking English into localized status UI and toasts.
 - Review hardening: categorical task-host close codes for unsupported executors, capacity, and stream failures ignore English transport prose and resolve their status through the active frontend locale.
-- Review hardening: completion items without `textEdit` use Monaco's current-word range, live LSP JSON settings update the reused connection and its configuration request handler, and task-hosts without the requested installer close with localized manual-install guidance through `4007`.
+- Review hardening: completion items without `textEdit` use Monaco's current-word range while `InsertReplaceEdit` keeps its dual range, live LSP JSON settings update the reused connection and its configuration request handler, and task hosts without an installer close with localized manual-install guidance through `4007` before or after preference opt-in.
 - Verified:
   - `pnpm --filter @kandev/web test -- --run lib/lsp/lsp-progress.test.ts lib/lsp/lsp-client-manager.test.ts`
   - `pnpm exec vitest run lib/lsp/lsp-providers.test.ts --reporter=dot`

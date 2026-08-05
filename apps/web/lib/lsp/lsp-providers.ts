@@ -137,15 +137,32 @@ type LspCompletionItem = {
   documentation?: unknown;
   insertText?: string;
   insertTextFormat?: number;
-  textEdit?: { range: LspRange; newText: string };
+  textEdit?:
+    | { range: LspRange; newText: string }
+    | { insert: LspRange; replace: LspRange; newText: string };
   additionalTextEdits?: Array<{ range: LspRange; newText: string }>;
   sortText?: string;
   filterText?: string;
 };
 
+type MonacoRange = ReturnType<typeof toMonacoRange>;
+type MonacoCompletionRange = MonacoRange | { insert: MonacoRange; replace: MonacoRange };
+
+function completionRange(
+  textEdit: LspCompletionItem["textEdit"],
+  defaultRange: MonacoRange,
+): MonacoCompletionRange {
+  if (!textEdit) return defaultRange;
+  if ("range" in textEdit) return toMonacoRange(textEdit.range);
+  return {
+    insert: toMonacoRange(textEdit.insert),
+    replace: toMonacoRange(textEdit.replace),
+  };
+}
+
 function mapCompletionItem(
   item: LspCompletionItem,
-  defaultRange: ReturnType<typeof toMonacoRange>,
+  defaultRange: MonacoRange,
 ): languages.CompletionItem {
   const label = typeof item.label === "string" ? item.label : item.label.label;
   const insertText = item.textEdit?.newText ?? item.insertText ?? label;
@@ -157,7 +174,7 @@ function mapCompletionItem(
     documentation: extractDocumentation(item.documentation),
     insertText,
     insertTextRules: isSnippet ? 4 /* InsertAsSnippet */ : undefined,
-    range: item.textEdit?.range ? toMonacoRange(item.textEdit.range) : defaultRange,
+    range: completionRange(item.textEdit, defaultRange),
     sortText: item.sortText,
     filterText: item.filterText,
     additionalTextEdits: item.additionalTextEdits?.map((e) => ({

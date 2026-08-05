@@ -89,5 +89,8 @@ describe("LSP task-host close codes", () => {
     expect(getLspUnavailableSetupHint(CLOSE_CODE_STATUS[4007](""), "rust")).toBe(
       "Install the language server manually on the task host, then retry.",
     );
+    expect(getLspUnavailableSetupHint(CLOSE_CODE_STATUS[4007](""), "kotlin")).toBe(
+      "Install kotlin-lsp on the task host, then restart the task.",
+    );
   });
 });

@@ -139,7 +139,7 @@ func (s *Server) handleLSPStreamWS(c *gin.Context) {
 	binaryPath, err := s.lspInstaller.BinaryPath(language)
 	if err != nil {
 		autoInstall := lspAutoInstallRequested(c)
-		if autoInstall && !installer.CanAutoInstall(language) {
+		if !installer.CanAutoInstall(language) {
 			_ = conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(
 				lspCloseAutoInstallUnsupported,
 				"auto-install unsupported on task host",

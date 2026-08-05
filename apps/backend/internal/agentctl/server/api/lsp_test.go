@@ -268,7 +268,7 @@ func TestHandleLSPStream_MissingBinaryWithoutAutoInstallClosesWithBinaryNotFound
 	}
 }
 
-func TestHandleLSPStream_UnsupportedAutoInstallUsesDistinctCloseCode(t *testing.T) {
+func TestHandleLSPStream_UnsupportedInstallerClosesDistinctlyWithoutOptIn(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("PATH", "")
 
@@ -276,7 +276,7 @@ func TestHandleLSPStream_UnsupportedAutoInstallUsesDistinctCloseCode(t *testing.
 	ts := httptest.NewServer(s.router)
 	t.Cleanup(ts.Close)
 
-	wsURL := "ws" + strings.TrimPrefix(ts.URL, "http") + "/api/v1/lsp/stream?language=kotlin&autoInstall=true"
+	wsURL := "ws" + strings.TrimPrefix(ts.URL, "http") + "/api/v1/lsp/stream?language=kotlin"
 	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
 	if err != nil {
 		t.Fatalf("dial lsp stream: %v", err)

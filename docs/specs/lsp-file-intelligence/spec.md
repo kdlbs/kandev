@@ -41,14 +41,14 @@ Users inspect and edit code inside Kandev task file tabs, but code navigation an
 - Progress copy warns that cross-file results may be incomplete while server-reported analysis is active. Completion means only that the reported work item ended; it does not guarantee that every reference, dependency, or project module is resolved.
 - Server-reported project titles and messages remain fully readable and wrap within the LSP status surface, including URL-, path-, and identifier-like text without ordinary break points. The desktop popover and coarse-pointer tablet drawer do not clip, truncate, or horizontally overflow this text.
 - Kotlin supports auto-start but not auto-install. `kotlin-lsp` must already be available on the task host's `PATH`.
-- Rust auto-install is available only on supported macOS and Linux task hosts. Windows can still run a manually installed `rust-analyzer` from the task host's `PATH`; when a requested installer is unavailable on the actual task host, the task-host stream reports that condition separately and the UI directs the user to manual installation.
+- Rust auto-install is available only on supported macOS and Linux task hosts. Windows can still run a manually installed `rust-analyzer` from the task host's `PATH`; when no installer is available on the actual task host, the task-host stream reports that condition separately and the UI directs the user to manual installation even before the global preference is enabled.
 - The boot runtime advertises the task-host-independent language set that may be saved as a global auto-install preference. The main backend must not filter that preference using its own OS; agentctl is the final authority because it runs on the selected task host.
 - Language servers run through the task's `agentctl`, with the task workspace as their working directory. This keeps project files, dependencies, and server execution in the same environment.
 - Binary discovery and npm/Go auto-install resolve commands and installation results with that same task environment, including task-provided `PATH`, `GOBIN`, `GOPATH`, and `HOME` values.
 - The managed npm/release cache derives its absolute root from the merged task environment's `HOME`, not from agentctl's parent-process home before executor overrides are applied.
 - Managed npm-server lookup resolves the concrete platform launcher, including PATHEXT-backed `.cmd` shims on Windows, both immediately after installation and on later starts.
 - TypeScript/JavaScript LSP providers use a dedicated registration guard. Monaco's built-in providers are wrapped before runtime suppression begins, including when Monaco loads after the LSP handshake, so built-in and LSP providers cannot both remain active.
-- Completion requests translate Monaco invocation, trigger-character, and incomplete-result context into the corresponding LSP enum values and forward the trigger character when present. A server item without `textEdit` receives Monaco's current-word insertion range, while an explicit server range remains authoritative.
+- Completion requests translate Monaco invocation, trigger-character, and incomplete-result context into the corresponding LSP enum values and forward the trigger character when present. A server item without `textEdit` receives Monaco's current-word insertion range; explicit LSP `TextEdit` and `InsertReplaceEdit` ranges remain authoritative.
 - Successful Monaco file saves synchronize every matching open language-server document to the newest editor snapshot, then notify servers that requested `textDocument/didSave`. When that live snapshot still matches the persisted snapshot, the persisted text is included only for servers that advertise `includeText`. If editing advanced while persistence was in flight, the newer buffer stays dirty and synchronized and the optional stale save text is omitted so the language server cannot be rewound. Failed saves emit no save notification.
 - V1 task-host support is limited to Local PC and local Docker executors. Remote Docker, SSH, and Sprites report an unsupported-executor state.
 - Each active browser WebSocket owns one language-server process. The browser shares a connection for the same session and language inside one window and closes it after its idle timeout; separate browser windows may own separate processes.
@@ -96,15 +96,15 @@ Before JSON-RPC traffic begins, the task-host stream can emit:
 
 Application close codes are:
 
-| Code   | Meaning                                                                           |
-| ------ | --------------------------------------------------------------------------------- |
-| `4001` | Server binary missing and auto-install was not requested.                         |
-| `4002` | Session, execution, or agentctl stream unavailable.                               |
-| `4003` | Auto-install failed.                                                              |
-| `4004` | Executor unsupported in V1.                                                       |
-| `4005` | Active LSP connection cap reached.                                                |
-| `4006` | Unexpected LSP proxy stream failure.                                              |
-| `4007` | Server binary missing and requested auto-install is unsupported on the task host. |
+| Code   | Meaning                                                                    |
+| ------ | -------------------------------------------------------------------------- |
+| `4001` | Auto-installable server binary missing and auto-install was not requested. |
+| `4002` | Session, execution, or agentctl stream unavailable.                        |
+| `4003` | Auto-install failed.                                                       |
+| `4004` | Executor unsupported in V1.                                                |
+| `4005` | Active LSP connection cap reached.                                         |
+| `4006` | Unexpected LSP proxy stream failure.                                       |
+| `4007` | Server binary missing and the task host has no supported installer.        |
 
 The browser translates categorical `4002`, `4004`, `4005`, `4006`, and `4007` statuses from the close code instead of rendering transport prose. Binary and installation failures may retain an actionable server-provided diagnostic.
 
@@ -171,7 +171,7 @@ No backend or task-host payload transforms are required: both WebSocket proxy ho
 ## Scenarios
 
 - **GIVEN** Kotlin auto-start is enabled and `kotlin-lsp` is on a Local PC task host's `PATH`, **WHEN** a `.kt` or `.kts` file opens, **THEN** the toolbar reaches ready and Monaco registers Kotlin providers.
-- **GIVEN** `kotlin-lsp` is missing, **WHEN** Kotlin LSP starts, **THEN** the connection closes with `4001` and the UI shows manual setup guidance without attempting installation.
+- **GIVEN** `kotlin-lsp` is missing, **WHEN** Kotlin LSP starts, **THEN** the connection closes with `4007` and the UI shows Kotlin-specific manual setup guidance without attempting installation.
 - **GIVEN** a local Docker task, **WHEN** an LSP starts, **THEN** the binary is resolved and executed inside the container rather than on the main backend host.
 - **GIVEN** Go and `GOBIN` are available only through the task runtime environment, **WHEN** Kandev discovers or installs `gopls`, **THEN** lookup, `go install`, and result discovery all use those task values.
 - **GIVEN** the executor overrides `HOME`, **WHEN** Kandev discovers or installs an npm/release-managed language server, **THEN** cache lookup and publication use that task home rather than agentctl's parent-process home.
@@ -180,7 +180,7 @@ No backend or task-host payload transforms are required: both WebSocket proxy ho
 - **GIVEN** agentctl reports a detailed npm, Go, or release installation failure and then closes with the generic install-failed code, **WHEN** the browser handles both frames, **THEN** the detailed installer error remains visible.
 - **GIVEN** TypeScript LSP initializes while Monaco is still loading, **WHEN** Monaco's lazy TypeScript providers register, **THEN** the built-ins are wrapped and suppressed while only the explicitly guarded LSP providers remain active.
 - **GIVEN** Monaco requests completion manually, after a trigger character, or for an incomplete result, **WHEN** the provider sends `textDocument/completion`, **THEN** the server receives LSP trigger kinds `1`, `2`, or `3` respectively and the trigger character for kind `2`.
-- **GIVEN** a completion item omits `textEdit`, **WHEN** Monaco renders or accepts it, **THEN** Kandev uses the current word at the requested position as its insertion range; an explicit server `textEdit` range overrides that fallback.
+- **GIVEN** a completion item omits `textEdit`, **WHEN** Monaco renders or accepts it, **THEN** Kandev uses the current word at the requested position as its insertion range; an explicit server `TextEdit` or `InsertReplaceEdit` range overrides that fallback and preserves Monaco's corresponding single or dual range.
 - **GIVEN** a live server was initialized with one per-language configuration, **WHEN** the user saves different LSP JSON in Editors settings, **THEN** the existing connection answers future `workspace/configuration` requests with the new value and sends `workspace/didChangeConfiguration` without spawning another server.
 - **GIVEN** an open Monaco document has a debounced content change and its server requests save synchronization, **WHEN** Kandev successfully persists the current editor snapshot, **THEN** the server receives the final `textDocument/didChange` before `textDocument/didSave` for its canonical task-host URI and receives that persisted snapshot on the save notification only when it requests `includeText`; a rejected write sends no save notification.
 - **GIVEN** the user types again while a file save is in flight, **WHEN** the older snapshot finishes persisting, **THEN** the newer editor snapshot remains dirty and is the language server's current document, while `textDocument/didSave` omits the stale optional text instead of rewinding the document.

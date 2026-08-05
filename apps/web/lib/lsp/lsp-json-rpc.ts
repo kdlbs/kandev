@@ -236,6 +236,7 @@ export function getLspUnavailableSetupHint(
 ): string | null {
   if (status.state !== "unavailable") return null;
   if (status.cause === "auto_install_unsupported") {
+    if (lspLanguage === "kotlin") return t("lsp:installKotlinLsp");
     return t("lsp:installLanguageServerManually");
   }
   if (status.cause !== "missing_binary") return null;

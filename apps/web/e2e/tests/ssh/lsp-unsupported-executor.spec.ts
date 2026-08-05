@@ -39,7 +39,7 @@ test.describe("SSH LSP boundary", () => {
       timeout: 15_000,
     });
     await expect(await openLspStatus(testPage)).toContainText(
-      /only supported for local_pc and local_docker tasks/i,
+      /language servers are not supported by this task executor/i,
     );
     await expect(testPage.getByText(/Install kotlin-lsp on the task host/)).toHaveCount(0);
   });
