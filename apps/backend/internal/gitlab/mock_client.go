@@ -346,6 +346,17 @@ func (c *MockClient) GetMRFeedback(ctx context.Context, projectPath string, iid 
 	if mr.HeadSHA != "" || mr.HeadBranch != "" {
 		pipelines, _ = c.ListPipelines(ctx, projectPath, mr.HeadBranch)
 	}
+	if len(pipelines) > 0 {
+		// Only overwrite the seeded pipeline's job counts/list when jobs were
+		// explicitly seeded via SeedPipelineJobs — see the identical guard
+		// (and its rationale) in GetMRStatus above.
+		if jobs, _ := c.ListPipelineJobs(ctx, projectPath, pipelines[0].ID); len(jobs) > 0 {
+			total, passing, _ := summarizePipelineJobs(jobs)
+			pipelines[0].JobsTotal = total
+			pipelines[0].JobsPassing = passing
+			pipelines[0].Jobs = jobs
+		}
+	}
 	return &MRFeedback{
 		MR:          mr,
 		Approvals:   approvals,

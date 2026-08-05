@@ -82,6 +82,32 @@ func TestService_GetMRAutomationSnapshot_HostMismatchFailsClosed(t *testing.T) {
 	}
 }
 
+func TestMockClient_GetMRFeedback_PopulatesLatestPipelineJobs(t *testing.T) {
+	mock := NewMockClient("https://gitlab.example.com")
+	mock.SeedMR("group/project", &MR{IID: 1, HeadBranch: "feature", State: mrStateOpen})
+	pipelineID := int64(99)
+	mock.SeedPipelines("group/project", []Pipeline{{ID: pipelineID, Status: "failed"}})
+	mock.SeedPipelineJobs(pipelineID, []PipelineJob{
+		{ID: 1, Name: "build", Status: "success"},
+		{ID: 2, Name: "test", Status: "failed"},
+	})
+
+	feedback, err := mock.GetMRFeedback(context.Background(), "group/project", 1)
+	if err != nil {
+		t.Fatalf("GetMRFeedback() error = %v", err)
+	}
+	if len(feedback.Pipelines) != 1 {
+		t.Fatalf("Pipelines = %+v, want 1", feedback.Pipelines)
+	}
+	pipeline := feedback.Pipelines[0]
+	if pipeline.JobsTotal != 2 || pipeline.JobsPassing != 1 {
+		t.Errorf("JobsTotal/JobsPassing = %d/%d, want 2/1", pipeline.JobsTotal, pipeline.JobsPassing)
+	}
+	if len(pipeline.Jobs) != 2 {
+		t.Fatalf("Jobs = %+v, want 2 raw jobs for the popover's stage grouping", pipeline.Jobs)
+	}
+}
+
 func TestService_MergeMRForAutomation_MergesAndReturnsMR(t *testing.T) {
 	svc, mock := newMRAutomationAuthFixture(t)
 	mock.SeedMR("group/project", &MR{IID: 1, HeadBranch: "feature", State: mrStateOpen})

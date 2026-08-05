@@ -461,6 +461,16 @@ func (c *PATClient) GetMRFeedback(ctx context.Context, projectPath string, iid i
 			return nil, err
 		}
 	}
+	if len(pipelines) > 0 {
+		jobs, err := c.ListPipelineJobs(ctx, projectPath, pipelines[0].ID)
+		if err != nil {
+			return nil, err
+		}
+		total, passing, _ := summarizePipelineJobs(jobs)
+		pipelines[0].JobsTotal = total
+		pipelines[0].JobsPassing = passing
+		pipelines[0].Jobs = jobs
+	}
 	return &MRFeedback{
 		MR:          mr,
 		Approvals:   approvals,

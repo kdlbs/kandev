@@ -164,6 +164,12 @@ type Pipeline struct {
 	JobsPassing int        `json:"jobs_passing"`
 	StartedAt   *time.Time `json:"started_at,omitempty"`
 	FinishedAt  *time.Time `json:"finished_at,omitempty"`
+	// Jobs is only populated for the latest pipeline in an MRFeedback
+	// response (GetMRFeedback) — fetching per-job detail for every historic
+	// pipeline in the list would be N+1 against the jobs API for no UI
+	// benefit. Empty for every other caller (e.g. GetMRStatus, which only
+	// needs JobsTotal/JobsPassing).
+	Jobs []PipelineJob `json:"jobs,omitempty"`
 }
 
 // MRFeedback aggregates all feedback for an MR (fetched live from GitLab).
