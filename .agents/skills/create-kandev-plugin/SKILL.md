@@ -126,11 +126,11 @@ frontend contract pair is `docs/plans/plugins/PLUGIN-API.md` plus
 Read `docs/plans/plugins/GRPC-CONTRACT.md` when changing the wire contract or
 when the public docs do not answer a low-level compatibility question.
 
-The current frontend branch does not expose `registerTaskPanel`,
-`registerTaskMenuAction`, `host.storage`, `RichTextEditor`,
-`RichTextReadOnly`, or a Kanban-card injection hook. Use the supported slots,
-routes, Host state, and shared store documented in the guide; do not invent
-future signatures.
+The frontend and backend matrices in `docs/public/plugins-authoring.md`,
+together with `apps/web/lib/plugins/types.ts` and `apps/backend/pkg/pluginsdk`,
+are the authoritative record of what exists today. Read them rather than
+asserting from memory that a hook is missing, and do not publish a signature
+they do not declare.
 
 When debugging a contract discrepancy, verify it at the implementation
 boundary: manifest and package rules live under
@@ -156,7 +156,8 @@ for later. In the same change:
 3. Update `docs/public/plugins-authoring.md` in the same change: add the hook to
    the frontend or backend matrix, document inputs/props, capability and
    lifecycle/cleanup behavior, and add a copy-pasteable recipe or maintained
-   fixture link. Remove it from the unavailable-API list when it becomes real.
+   fixture link. Adding the row to the matrix is the update — do not introduce
+   a separate "unavailable" list anywhere.
 4. Update `docs/public/plugins-manifest.md` for capability/manifest changes and
    update `docs/public/plugins.md`, `docs/plugins-example.md`, or the relevant
    ADR when their claims or links change. Keep the public guide as a summary;
@@ -168,11 +169,13 @@ for later. In the same change:
    `node scripts/validate-public-docs.mjs`, and a stale-reference search. Report
    the exact commands and results.
 
-If a proposed hook is not implemented on the current branch, document it as
-unavailable with the nearest supported recipe; do not publish a speculative
-signature. If the hook is implemented but the matrix, recipe, fixture, or
-authoritative contract is missing, the plugin change is not documentation
-complete.
+A hook absent from the frontend/backend matrix and `types.ts` does not exist
+yet; point the author at the nearest supported recipe instead of publishing a
+speculative signature, and do not record the gap as a durable list entry in
+this skill or an `AGENTS.md` — the matrix and the contract sources are the
+only place absence or presence is tracked. If the hook is implemented but the
+matrix, recipe, fixture, or authoritative contract is missing, the plugin
+change is not documentation complete.
 
 ## Create A New Repository
 
