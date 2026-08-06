@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { Command as CommandPrimitive } from "cmdk";
+import { Command as CommandPrimitive, useCommandState } from "cmdk";
 
 import { cn } from "./lib/utils";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "./dialog";
@@ -76,9 +76,29 @@ function CommandInput({
   );
 }
 
-function CommandList({ className, ...props }: React.ComponentProps<typeof CommandPrimitive.List>) {
+const CommandList = React.forwardRef<
+  React.ElementRef<typeof CommandPrimitive.List>,
+  React.ComponentPropsWithoutRef<typeof CommandPrimitive.List>
+>(function CommandList({ className, ...props }, ref) {
+  const search = useCommandState((state) => state.search);
+  const internalRef = React.useRef<React.ElementRef<typeof CommandPrimitive.List> | null>(null);
+
+  const setRefs = React.useCallback(
+    (node: React.ElementRef<typeof CommandPrimitive.List> | null) => {
+      internalRef.current = node;
+      if (typeof ref === "function") ref(node);
+      else if (ref) ref.current = node;
+    },
+    [ref],
+  );
+
+  React.useLayoutEffect(() => {
+    if (internalRef.current) internalRef.current.scrollTop = 0;
+  }, [search]);
+
   return (
     <CommandPrimitive.List
+      ref={setRefs}
       data-slot="command-list"
       className={cn(
         "max-h-72 scroll-py-1 outline-none overflow-x-hidden overflow-y-auto",
@@ -87,7 +107,9 @@ function CommandList({ className, ...props }: React.ComponentProps<typeof Comman
       {...props}
     />
   );
-}
+});
+
+CommandList.displayName = CommandPrimitive.List.displayName;
 
 function CommandEmpty({
   className,
