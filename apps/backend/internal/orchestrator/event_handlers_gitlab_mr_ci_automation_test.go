@@ -535,6 +535,51 @@ func TestHandleTaskMRCIAutomation_AutoFixBlocksAutoMergeInSamePass(t *testing.T)
 	}
 }
 
+// TestHandleTaskMRCIAutomation_RoundCapOverflowMarksExhausted covers the
+// transition into exhaustion, distinct from
+// TestHandleTaskMRCIAutomation_ExhaustedAutoFixStillMergesWhenReady (which
+// seeds an already-exhausted checkpoint and never reaches the dispatch
+// layer). Here AutoFixRoundCount is already at the cap but
+// AutoFixExhaustedAt is still nil, so a new failing job's dispatch attempt
+// must reach dispatchCIAutomationPrompt, receive errCIAutoFixRoundCapReached
+// (no pending queued entry to replace for a Running session with
+// AllowNewRound=false), and cause handleTaskMRCIAutoFix to call
+// markMRAutoFixExhausted.
+func TestHandleTaskMRCIAutomation_RoundCapOverflowMarksExhausted(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task-1", "session-1", models.TaskSessionStateRunning)
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	mr := &gitlab.TaskMR{TaskID: "task-1", ProjectPath: "group/widget", MRIID: 1, State: gitlabMRStateOpen}
+	fake := &mockGitLabMRAutomationService{
+		snapshot: &gitlab.MRAutomationSnapshot{
+			MR:             &gitlab.MR{State: gitlabMRStateOpen, IID: 1, ProjectPath: "group/widget"},
+			PipelineStatus: "failed",
+			FailingJobs:    []gitlab.PipelineJob{{Name: "unit", Status: "failed"}},
+		},
+		checkpoint: &gitlab.TaskMRLifecycleState{
+			TaskID: "task-1", ProjectPath: "group/widget", MRIID: 1,
+			AutoFixRoundCount: gitlab.TaskMRAutoFixMaxRounds,
+		},
+	}
+	svc.SetGitLabMRAutomationService(fake)
+
+	svc.handleTaskMRCIAutomation(ctx, mr, &gitlab.TaskMRAutomationResponse{
+		TaskID: "task-1", AutoFixEnabled: true, EffectiveAutoFixPrompt: "Fix it",
+	})
+
+	if len(fake.exhaustedCalls) != 1 || fake.exhaustedCalls[0] != "task-1" {
+		t.Fatalf("exhaustedCalls = %+v, want exactly one call for task-1", fake.exhaustedCalls)
+	}
+	status := svc.messageQueue.GetStatus(ctx, "session-1")
+	if status.Count != 0 {
+		t.Fatalf("expected no queued prompt once the round cap is reached, got %+v", status)
+	}
+	if len(fake.fixAttempts) != 0 {
+		t.Fatalf("fixAttempts = %+v, want none — a capped dispatch must not record a new round", fake.fixAttempts)
+	}
+}
+
 // TestHandleTaskMRCIAutomation_ExhaustedAutoFixStillMergesWhenReady is the
 // regression for the QA finding that a spent auto-fix round cap stranded
 // auto-merge permanently. Once AutoFixExhaustedAt is set, a human can still

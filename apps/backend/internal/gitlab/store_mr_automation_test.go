@@ -11,7 +11,75 @@ import (
 	"github.com/kandev/kandev/internal/db"
 )
 
-func boolPtr(b bool) *bool { return &b }
+func boolPtr(b bool) *bool       { return &b }
+func stringPtr(s string) *string { return &s }
+
+// TestStore_UpdateTaskMRAutomationOptions_AutoMergeAndPromptOverrideRoundTrip
+// closes a coverage gap: auto_fix_enabled is exercised indirectly by
+// TestStore_UpdateTaskMRAutomationOptions_ReenablingAutoFixResetsRoundCap,
+// but nothing wrote auto_merge_enabled or auto_fix_prompt_override and read
+// them back, including the empty-string-normalizes-to-NULL path
+// (normalizedMRPromptOverride).
+func TestStore_UpdateTaskMRAutomationOptions_AutoMergeAndPromptOverrideRoundTrip(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	seedTask(t, store, "task-1", "")
+
+	updated, err := store.UpdateTaskMRAutomationOptions(ctx, "task-1", TaskMRAutomationPatch{
+		AutoMergeEnabled: boolPtr(true),
+	}, nil)
+	if err != nil {
+		t.Fatalf("enable auto-merge: %v", err)
+	}
+	if !updated.AutoMergeEnabled {
+		t.Fatalf("AutoMergeEnabled = false immediately after patch, want true")
+	}
+	got, err := store.GetTaskMRAutomationOptions(ctx, "task-1")
+	if err != nil {
+		t.Fatalf("GetTaskMRAutomationOptions: %v", err)
+	}
+	if !got.AutoMergeEnabled {
+		t.Fatalf("AutoMergeEnabled = false after persisted read-back, want true")
+	}
+
+	updated, err = store.UpdateTaskMRAutomationOptions(ctx, "task-1", TaskMRAutomationPatch{
+		AutoFixPromptOverride: stringPtr("custom prompt text"),
+	}, nil)
+	if err != nil {
+		t.Fatalf("set prompt override: %v", err)
+	}
+	if updated.AutoFixPromptOverride == nil || *updated.AutoFixPromptOverride != "custom prompt text" {
+		t.Fatalf("AutoFixPromptOverride = %v immediately after patch, want \"custom prompt text\"", updated.AutoFixPromptOverride)
+	}
+	got, err = store.GetTaskMRAutomationOptions(ctx, "task-1")
+	if err != nil {
+		t.Fatalf("GetTaskMRAutomationOptions: %v", err)
+	}
+	if got.AutoFixPromptOverride == nil || *got.AutoFixPromptOverride != "custom prompt text" {
+		t.Fatalf("AutoFixPromptOverride = %v after persisted read-back, want \"custom prompt text\"", got.AutoFixPromptOverride)
+	}
+	if !got.AutoMergeEnabled {
+		t.Fatalf("AutoMergeEnabled reverted to false after an unrelated patch, want still true")
+	}
+
+	// Clearing via an empty string must normalize to NULL, not persist "".
+	updated, err = store.UpdateTaskMRAutomationOptions(ctx, "task-1", TaskMRAutomationPatch{
+		AutoFixPromptOverride: stringPtr(""),
+	}, nil)
+	if err != nil {
+		t.Fatalf("clear prompt override: %v", err)
+	}
+	if updated.AutoFixPromptOverride != nil {
+		t.Fatalf("AutoFixPromptOverride = %v immediately after clearing, want nil", updated.AutoFixPromptOverride)
+	}
+	got, err = store.GetTaskMRAutomationOptions(ctx, "task-1")
+	if err != nil {
+		t.Fatalf("GetTaskMRAutomationOptions: %v", err)
+	}
+	if got.AutoFixPromptOverride != nil {
+		t.Fatalf("AutoFixPromptOverride = %v after persisted read-back, want nil", got.AutoFixPromptOverride)
+	}
+}
 
 func TestStore_GetTaskMRAutomationOptions_ImplicitDefault(t *testing.T) {
 	store := newTestStore(t)
