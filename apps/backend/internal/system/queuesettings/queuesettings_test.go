@@ -77,6 +77,43 @@ func TestStoreRoundTripAndValidation(t *testing.T) {
 	}
 }
 
+// TestStoreLoadDefaultsMergeEnabledForPreExistingRecords guards a real
+// upgrade hazard: an installation that persisted max_per_session before
+// merge_enabled existed has a stored JSON object with no "merge_enabled"
+// key. json.Unmarshal into a plain bool decodes that as false, which would
+// silently disable merging on upgrade instead of leaving it enabled by
+// default. Store.Load must treat the missing key as "unset" (-> true), not
+// "explicitly false".
+func TestStoreLoadDefaultsMergeEnabledForPreExistingRecords(t *testing.T) {
+	raw := &fakeRawStore{raw: []byte(`{"max_per_session":6}`), found: true}
+	store := NewStore(raw)
+
+	loaded, err := store.Load(context.Background())
+	if err != nil {
+		t.Fatalf("load pre-existing record: %v", err)
+	}
+	if loaded == nil || loaded.MaxPerSession != 6 || !loaded.MergeEnabled {
+		t.Fatalf("loaded = %+v, want {MaxPerSession:6 MergeEnabled:true}", loaded)
+	}
+}
+
+// TestStoreLoadPreservesExplicitMergeDisabled is the companion case: once a
+// record has been re-saved through this code path with merge_enabled
+// explicitly false, Load must not treat that as "unset" and re-default it to
+// true.
+func TestStoreLoadPreservesExplicitMergeDisabled(t *testing.T) {
+	raw := &fakeRawStore{raw: []byte(`{"max_per_session":6,"merge_enabled":false}`), found: true}
+	store := NewStore(raw)
+
+	loaded, err := store.Load(context.Background())
+	if err != nil {
+		t.Fatalf("load explicit-false record: %v", err)
+	}
+	if loaded == nil || loaded.MergeEnabled {
+		t.Fatalf("loaded = %+v, want MergeEnabled:false preserved", loaded)
+	}
+}
+
 func TestServiceUpdatePersistsBeforeLiveApply(t *testing.T) {
 	raw := &fakeRawStore{}
 	target := &fakeTarget{max: 10}
