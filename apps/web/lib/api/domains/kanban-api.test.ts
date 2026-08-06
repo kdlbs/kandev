@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { attachTaskWorkspaceSources, detachTask } from "./kanban-api";
+import { attachTaskWorkspaceSources, detachTask, listTasksByWorkspace } from "./kanban-api";
 
 const fetchSpy = vi.fn<typeof fetch>();
+const API_BASE_URL = "http://api.test";
 
 beforeEach(() => {
   fetchSpy.mockReset();
@@ -19,11 +20,11 @@ describe("detachTask", () => {
       }),
     );
 
-    await detachTask("child-1", { baseUrl: "http://api.test" });
+    await detachTask("child-1", { baseUrl: API_BASE_URL });
 
     expect(fetchSpy).toHaveBeenCalledOnce();
     const [url, init] = fetchSpy.mock.calls[0];
-    expect(url).toBe("http://api.test/api/v1/tasks/child-1/detach");
+    expect(url).toBe(`${API_BASE_URL}/api/v1/tasks/child-1/detach`);
     expect(init?.method).toBe("POST");
     expect(init?.body).toBeUndefined();
   });
@@ -50,13 +51,13 @@ describe("attachTaskWorkspaceSources", () => {
       attachTaskWorkspaceSources(
         "task-1",
         { sources: [{ kind: "folder", local_path: "/docs", display_name: "docs" }] },
-        { baseUrl: "http://api.test" },
+        { baseUrl: API_BASE_URL },
       ),
     ).resolves.toMatchObject({ task_id: "task-1", workspace_path: "/workspace/task-1" });
 
     expect(fetchSpy).toHaveBeenCalledOnce();
     const [url, init] = fetchSpy.mock.calls[0];
-    expect(url).toBe("http://api.test/api/v1/tasks/task-1/workspace-sources");
+    expect(url).toBe(`${API_BASE_URL}/api/v1/tasks/task-1/workspace-sources`);
     expect(init).toMatchObject({
       method: "POST",
       body: JSON.stringify({
@@ -75,7 +76,29 @@ describe("attachTaskWorkspaceSources", () => {
     );
 
     await expect(
-      attachTaskWorkspaceSources("task-1", { sources: [] }, { baseUrl: "http://api.test" }),
+      attachTaskWorkspaceSources("task-1", { sources: [] }, { baseUrl: API_BASE_URL }),
     ).rejects.toMatchObject({ name: "ApiError", status: 409, message: "task has an active turn" });
+  });
+});
+
+describe("listTasksByWorkspace", () => {
+  it("requests the archived-only mode without changing the existing list contract", async () => {
+    fetchSpy.mockResolvedValueOnce(
+      new Response(JSON.stringify({ tasks: [], total: 0 }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+
+    await listTasksByWorkspace(
+      "ws-1",
+      { page: 2, pageSize: 100, onlyArchived: true, sort: "updated_desc" },
+      { baseUrl: API_BASE_URL },
+    );
+
+    expect(fetchSpy).toHaveBeenCalledOnce();
+    expect(fetchSpy.mock.calls[0][0]).toBe(
+      `${API_BASE_URL}/api/v1/workspaces/ws-1/tasks?page=2&page_size=100&only_archived=true&sort=updated_desc`,
+    );
   });
 });

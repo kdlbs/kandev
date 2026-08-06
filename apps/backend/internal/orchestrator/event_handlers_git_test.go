@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -69,6 +70,85 @@ func TestHandleBranchSwitched_UpdatesWorktreeBranch(t *testing.T) {
 	if wts[0].WorktreeBranch != "feature/b" {
 		t.Errorf("WorktreeBranch = %q, want %q", wts[0].WorktreeBranch, "feature/b")
 	}
+}
+
+func TestHandleBranchSwitched_RepositoryScopedUpdateKeepsSiblingBranch(t *testing.T) {
+	ctx := context.Background()
+	now := time.Now().UTC()
+	taskRoot := t.TempDir()
+	testRepo := setupTestRepo(t)
+	seedSession(t, testRepo, "t-multi", "s-multi", "step1")
+	for _, repository := range []*models.Repository{
+		{ID: "repo-backend", WorkspaceID: "ws1", Name: "backend", CreatedAt: now, UpdatedAt: now},
+		{ID: "repo-frontend", WorkspaceID: "ws1", Name: "frontend", CreatedAt: now, UpdatedAt: now},
+	} {
+		require.NoError(t, testRepo.CreateRepository(ctx, repository))
+	}
+	require.NoError(t, testRepo.CreateTaskSessionWorktree(ctx, &models.TaskSessionWorktree{
+		ID: "wt-multi-backend", SessionID: "s-multi", WorktreeID: "worktree-backend", RepositoryID: "repo-backend",
+		WorktreePath: filepath.Join(taskRoot, "backend"), WorktreeBranch: "feature/backend-old", Position: 0, CreatedAt: now,
+	}))
+	require.NoError(t, testRepo.CreateTaskSessionWorktree(ctx, &models.TaskSessionWorktree{
+		ID: "wt-multi-frontend", SessionID: "s-multi", WorktreeID: "worktree-frontend", RepositoryID: "repo-frontend",
+		WorktreePath: filepath.Join(taskRoot, "frontend"), WorktreeBranch: "feature/frontend-old", Position: 1, CreatedAt: now,
+	}))
+
+	svc := createTestService(testRepo, newMockStepGetter(), newMockTaskRepo())
+	svc.handleBranchSwitched(ctx, watcher.GitEventData{
+		TaskID: "t-multi", SessionID: "s-multi",
+		BranchSwitch: &lifecycle.GitBranchSwitchData{
+			PreviousBranch: "feature/backend-old", CurrentBranch: "feature/backend-new", RepositoryName: "backend",
+		},
+	})
+
+	worktrees, err := testRepo.ListTaskSessionWorktrees(ctx, "s-multi")
+	require.NoError(t, err)
+	require.Len(t, worktrees, 2)
+	branches := make(map[string]string, len(worktrees))
+	for _, worktree := range worktrees {
+		branches[worktree.RepositoryID] = worktree.WorktreeBranch
+	}
+	require.Equal(t, "feature/backend-new", branches["repo-backend"])
+	require.Equal(t, "feature/frontend-old", branches["repo-frontend"])
+}
+
+func TestHandleBranchSwitched_UnknownRepositoryNameDoesNotOverwriteSiblings(t *testing.T) {
+	ctx := context.Background()
+	now := time.Now().UTC()
+	taskRoot := t.TempDir()
+	testRepo := setupTestRepo(t)
+	seedSession(t, testRepo, "t-multi-unknown", "s-multi-unknown", "step1")
+	for _, repository := range []*models.Repository{
+		{ID: "repo-unknown-backend", WorkspaceID: "ws1", Name: "backend", CreatedAt: now, UpdatedAt: now},
+		{ID: "repo-unknown-frontend", WorkspaceID: "ws1", Name: "frontend", CreatedAt: now, UpdatedAt: now},
+	} {
+		require.NoError(t, testRepo.CreateRepository(ctx, repository))
+	}
+	require.NoError(t, testRepo.CreateTaskSessionWorktree(ctx, &models.TaskSessionWorktree{
+		ID: "wt-unknown-backend", SessionID: "s-multi-unknown", WorktreeID: "worktree-unknown-backend", RepositoryID: "repo-unknown-backend",
+		WorktreePath: filepath.Join(taskRoot, "backend"), WorktreeBranch: "feature/backend-old", Position: 0, CreatedAt: now,
+	}))
+	require.NoError(t, testRepo.CreateTaskSessionWorktree(ctx, &models.TaskSessionWorktree{
+		ID: "wt-unknown-frontend", SessionID: "s-multi-unknown", WorktreeID: "worktree-unknown-frontend", RepositoryID: "repo-unknown-frontend",
+		WorktreePath: filepath.Join(taskRoot, "frontend"), WorktreeBranch: "feature/frontend-old", Position: 1, CreatedAt: now,
+	}))
+
+	svc := createTestService(testRepo, newMockStepGetter(), newMockTaskRepo())
+	svc.handleBranchSwitched(ctx, watcher.GitEventData{
+		TaskID: "t-multi-unknown", SessionID: "s-multi-unknown",
+		BranchSwitch: &lifecycle.GitBranchSwitchData{
+			PreviousBranch: "feature/old", CurrentBranch: "feature/new", RepositoryName: "unknown-repository",
+		},
+	})
+
+	worktrees, err := testRepo.ListTaskSessionWorktrees(ctx, "s-multi-unknown")
+	require.NoError(t, err)
+	branches := make(map[string]string, len(worktrees))
+	for _, worktree := range worktrees {
+		branches[worktree.RepositoryID] = worktree.WorktreeBranch
+	}
+	require.Equal(t, "feature/backend-old", branches["repo-unknown-backend"])
+	require.Equal(t, "feature/frontend-old", branches["repo-unknown-frontend"])
 }
 
 // Regression: when a PR watch already exists for the session and the branch

@@ -7,6 +7,7 @@ import { Input } from "@kandev/ui/input";
 import { Textarea } from "@kandev/ui/textarea";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import type { getChangeRequestTerminology } from "@/hooks/use-git-operations";
+import { Trans, useTranslation } from "react-i18next";
 
 type ChangeRequestTerminology = ReturnType<typeof getChangeRequestTerminology>;
 
@@ -24,11 +25,14 @@ export function GenerateButton({
   isGenerating,
   disabled,
   tooltip,
-  notConfiguredTooltip = "Configure a utility agent in settings to enable AI generation",
+  notConfiguredTooltip,
   isConfigured = true,
 }: GenerateButtonProps) {
+  const { t } = useTranslation();
   const isDisabled = !isConfigured || disabled || isGenerating;
-  const tooltipText = isConfigured ? tooltip : notConfiguredTooltip;
+  const tooltipText = isConfigured
+    ? tooltip
+    : (notConfiguredTooltip ?? t("integrations:configureAUtilityAgentInSettings"));
 
   return (
     <Tooltip>
@@ -71,16 +75,17 @@ export function CommitBodyField({
   isUtilityConfigured: boolean;
   disabled: boolean;
 }) {
+  const { t } = useTranslation();
   return (
     <div className="space-y-2">
       <Label htmlFor="vcs-commit-body" className="text-sm">
-        Description
+        {t("integrations:description")}
       </Label>
       <div className="relative min-w-0">
         <Textarea
           id="vcs-commit-body"
           data-testid="commit-body-input"
-          placeholder="Add details about this change..."
+          placeholder={t("integrations:addDetailsAboutThisChange")}
           value={commitBody}
           onChange={(e) => onCommitBodyChange(e.target.value)}
           rows={3}
@@ -91,7 +96,7 @@ export function CommitBodyField({
             onClick={onGenerateDescription}
             isGenerating={isGeneratingDescription}
             disabled={disabled}
-            tooltip="Generate commit description with AI"
+            tooltip={t("integrations:generateCommitDescriptionWithAi")}
             isConfigured={isUtilityConfigured}
           />
         </div>
@@ -115,12 +120,15 @@ export function PRTitleField({
   isUtilityConfigured: boolean;
   terminology: ChangeRequestTerminology;
 }) {
+  const { t } = useTranslation();
   return (
     <div className="relative min-w-0">
       <Input
         id="vcs-pr-title"
-        aria-label={`${terminology.longName} title`}
-        placeholder={`${terminology.longName} title...`}
+        aria-label={t("integrations:longNameTitle", { longName: terminology.longName })}
+        placeholder={t("integrations:longNameTitlePlaceholder", {
+          longName: terminology.longName,
+        })}
         value={prTitle}
         onChange={(e) => onPrTitleChange(e.target.value)}
         className="pr-10"
@@ -130,7 +138,7 @@ export function PRTitleField({
         <GenerateButton
           onClick={onGenerateTitle}
           isGenerating={isGeneratingTitle}
-          tooltip={`Generate ${terminology.shortName} title with AI`}
+          tooltip={t("integrations:generateTitleWithAi", { shortName: terminology.shortName })}
           isConfigured={isUtilityConfigured}
         />
       </div>
@@ -153,15 +161,16 @@ export function PRDescriptionField({
   isUtilityConfigured: boolean;
   terminology: ChangeRequestTerminology;
 }) {
+  const { t } = useTranslation();
   return (
     <div className="space-y-2">
       <Label htmlFor="vcs-pr-body" className="text-sm">
-        Description
+        {t("integrations:description")}
       </Label>
       <div className="relative min-w-0">
         <Textarea
           id="vcs-pr-body"
-          placeholder="Describe your changes..."
+          placeholder={t("integrations:describeYourChanges")}
           value={prBody}
           onChange={(e) => onPrBodyChange(e.target.value)}
           rows={6}
@@ -171,7 +180,9 @@ export function PRDescriptionField({
           <GenerateButton
             onClick={onGenerateDescription}
             isGenerating={isGeneratingDescription}
-            tooltip={`Generate ${terminology.shortName} description with AI`}
+            tooltip={t("integrations:generateDescriptionWithAi", {
+              shortName: terminology.shortName,
+            })}
             isConfigured={isUtilityConfigured}
           />
         </div>
@@ -194,15 +205,25 @@ export function PRBranchSummary({
     <div className="text-sm text-muted-foreground">
       {baseBranch ? (
         <span>
-          Creating {terminology.shortName} from{" "}
-          <span className="font-medium text-foreground">{displayBranch}</span>
-          {" → "}
-          <span className="font-medium text-foreground">{baseBranch}</span>
+          <Trans
+            i18nKey="integrations:creatingFromInto"
+            values={{ shortName: terminology.shortName, displayBranch, baseBranch }}
+          >
+            Creating {{ shortName: terminology.shortName }} from{" "}
+            <span className="font-medium text-foreground">{displayBranch}</span>
+            {" → "}
+            <span className="font-medium text-foreground">{baseBranch}</span>
+          </Trans>
         </span>
       ) : (
         <span>
-          Creating {terminology.shortName} from{" "}
-          <span className="font-medium text-foreground">{displayBranch}</span>
+          <Trans
+            i18nKey="integrations:creatingFrom"
+            values={{ shortName: terminology.shortName, displayBranch }}
+          >
+            Creating {{ shortName: terminology.shortName }} from{" "}
+            <span className="font-medium text-foreground">{displayBranch}</span>
+          </Trans>
         </span>
       )}
     </div>
@@ -214,9 +235,12 @@ export function ChangeRequestPartialStatus({
 }: {
   terminology: ChangeRequestTerminology;
 }) {
+  const { t } = useTranslation();
   return (
     <div role="status" className="border-l-2 border-amber-500 bg-amber-500/10 px-3 py-2 text-sm">
-      Branch was pushed; retry {terminology.longName.toLowerCase()} creation.
+      {t("integrations:branchWasPushedRetryCreation", {
+        longName: terminology.longName.toLowerCase(),
+      })}
     </div>
   );
 }

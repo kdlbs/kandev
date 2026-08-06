@@ -6,6 +6,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@kandev/ui/
 import { useSessionMessages } from "@/hooks/domains/session/use-session-messages";
 import { MessageRenderer } from "@/components/task/chat/message-renderer";
 import type { Message } from "@/lib/types/http";
+import { useTranslation } from "react-i18next";
 
 type AgentTurnPanelProps = {
   taskId: string;
@@ -49,6 +50,7 @@ export function AgentTurnPanel({
   toInclusive,
   isLive,
 }: AgentTurnPanelProps) {
+  const { t } = useTranslation();
   const { messages, isLoading } = useSessionMessages(sessionId);
   const turnMessages = useMemo(() => {
     const fromMs = fromExclusive ? new Date(fromExclusive).getTime() : -Infinity;
@@ -76,11 +78,11 @@ export function AgentTurnPanel({
           <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground/40 shrink-0" />
         )}
         <span>
-          {isLive ? "working" : "worked"}
-          {duration && <span className="ml-1">for {duration}</span>}
+          {isLive ? t("task:turnWorking") : t("task:turnWorked")}
+          {duration && <span className="ml-1">{t("task:turnForDuration", { duration })}</span>}
           {turnMessages.length > 0 && (
             <span className="ml-1">
-              · {turnMessages.length} message{turnMessages.length === 1 ? "" : "s"}
+              {t("task:turnMessageCount", { count: turnMessages.length })}
             </span>
           )}
         </span>

@@ -30,6 +30,7 @@ import type {
 } from "@/lib/types/github";
 import type { TaskMR } from "@/lib/types/gitlab";
 import type { TaskStatusSummary } from "@/lib/types/task-status-summary";
+import type { TaskMRAutomationOptions } from "@/lib/types/gitlab";
 import type { SystemMetricsSnapshot } from "./system";
 import type { FileChangeNotificationPayload } from "./workspace-files";
 import type {
@@ -289,6 +290,8 @@ export type TaskSessionStateChangedPayload = {
   cancellation_pending?: boolean;
   /** Process-local cancellation transition generation carried by state snapshots. */
   cancellation_revision?: number;
+  /** True when a send right now would steer the running turn; see http.ts. */
+  supports_steering?: boolean;
 };
 
 /**
@@ -301,6 +304,8 @@ export type TaskSessionActivityChangedPayload = {
   session_id: string;
   foreground_activity: ForegroundActivity | null;
   active_subagent_count: number;
+  /** True when a send right now would steer the running turn; see http.ts. */
+  supports_steering?: boolean;
 };
 
 export type TaskSessionCancellationChangedPayload = {
@@ -655,6 +660,10 @@ export type BackendMessageMap = OfficeBackendMessageMap &
     "gitlab.task_mr.updated": BackendMessage<
       "gitlab.task_mr.updated",
       TaskMR & { workspace_id: string }
+    >;
+    "gitlab.task_mr_options.updated": BackendMessage<
+      "gitlab.task_mr_options.updated",
+      TaskMRAutomationOptions
     >;
     "run.event.appended": BackendMessage<"run.event.appended", RunEventAppendedPayload>;
   };

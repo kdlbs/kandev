@@ -8,6 +8,7 @@ import { stripAnsi } from "@/lib/utils/ansi";
 import { Badge } from "@kandev/ui/badge";
 import { ExpandableRow } from "./expandable-row";
 import { useExpandState } from "./use-expand-state";
+import { useTranslation } from "react-i18next";
 
 interface ScriptExecutionMetadata {
   script_type: "setup" | "cleanup" | "agent_boot";
@@ -22,19 +23,21 @@ interface ScriptExecutionMetadata {
   error?: string;
 }
 
-function getAgentBootVerb(
+// Returns the catalog key for the whole "<verb> agent <name>" line rather than
+// a verb to concatenate: the word order is not English-universal.
+function getAgentBootMessageKey(
   isResuming: boolean | undefined,
   isSuccess: boolean,
   isRunning: boolean,
 ): string {
   if (isResuming) {
-    if (isSuccess) return "Resumed";
-    if (isRunning) return "Resuming";
-    return "Failed to resume";
+    if (isSuccess) return "task:agentBootResumed";
+    if (isRunning) return "task:agentBootResuming";
+    return "task:agentBootFailedToResume";
   }
-  if (isSuccess) return "Started";
-  if (isRunning) return "Starting";
-  return "Failed to start";
+  if (isSuccess) return "task:agentBootStarted";
+  if (isRunning) return "task:agentBootStarting";
+  return "task:agentBootFailedToStart";
 }
 
 function AgentBootHeader({
@@ -46,14 +49,13 @@ function AgentBootHeader({
   isSuccess: boolean;
   isRunning: boolean;
 }) {
-  const agentName = metadata.agent_name || "agent";
-  const verb = getAgentBootVerb(metadata.is_resuming, isSuccess, isRunning);
+  const { t } = useTranslation();
+  const agentName = metadata.agent_name || t("task:agentFallbackName");
+  const messageKey = getAgentBootMessageKey(metadata.is_resuming, isSuccess, isRunning);
   return (
     <div className="flex items-center gap-2 text-xs">
       <span className="inline-flex items-center gap-1.5 shrink-0 whitespace-nowrap">
-        <span className="text-xs text-muted-foreground">
-          {verb} agent {agentName}
-        </span>
+        <span className="text-xs text-muted-foreground">{t(messageKey, { agentName })}</span>
         {isRunning && <GridSpinner className="text-muted-foreground" />}
       </span>
     </div>
@@ -71,11 +73,12 @@ function ScriptHeader({
   isRunning: boolean;
   isSuccess: boolean;
 }) {
+  const { t } = useTranslation();
   return (
     <div className="flex items-center gap-2 text-xs">
       <span className="inline-flex items-center gap-1.5 shrink-0 whitespace-nowrap">
         <Badge variant={isSetup ? "default" : "secondary"} className="text-xs">
-          {isSetup ? "Setup" : "Cleanup"}
+          {isSetup ? t("task:setup") : t("task:cleanup")}
         </Badge>
         <span className="font-mono text-xs text-muted-foreground">{command}</span>
         {isRunning && <GridSpinner className="text-muted-foreground" />}
@@ -110,20 +113,27 @@ type ScriptFooterProps = {
 };
 
 function ScriptFooter({ isAgentBoot, isRunning, metadata, exitCode }: ScriptFooterProps) {
+  const { t } = useTranslation();
   if (isRunning) return null;
   if (isAgentBoot && metadata.started_at && metadata.completed_at) {
     return (
       <div className="text-[10px] text-muted-foreground pt-2 border-t border-border/30">
-        Duration: {calculateDuration(metadata.started_at, metadata.completed_at)}
+        {t("task:durationValue", {
+          duration: calculateDuration(metadata.started_at, metadata.completed_at),
+        })}
       </div>
     );
   }
   if (!isAgentBoot && exitCode !== undefined) {
     return (
       <div className="flex items-center justify-between text-[10px] text-muted-foreground pt-2 border-t border-border/30">
-        <span>Exit code: {exitCode}</span>
+        <span>{t("task:exitCodeValue", { exitCode })}</span>
         {metadata.started_at && metadata.completed_at && (
-          <span>Duration: {calculateDuration(metadata.started_at, metadata.completed_at)}</span>
+          <span>
+            {t("task:durationValue", {
+              duration: calculateDuration(metadata.started_at, metadata.completed_at),
+            })}
+          </span>
         )}
       </div>
     );
@@ -150,12 +160,13 @@ function ScriptExpandedContent({
   metadata,
   exitCode,
 }: ScriptBodyProps) {
+  const { t } = useTranslation();
   return (
     <div className="pl-4 border-l-2 border-border/30 space-y-2">
       {isAgentBoot && command && (
         <div>
           <div className="text-[10px] uppercase tracking-wide text-muted-foreground/60 mb-1">
-            Command
+            {t("task:command")}
           </div>
           <pre className="font-mono text-xs bg-muted/30 rounded px-3 py-2 overflow-x-auto whitespace-pre-wrap break-words">
             {command}
@@ -165,7 +176,7 @@ function ScriptExpandedContent({
       {content && content.trim() !== "" && (
         <div>
           <div className="text-[10px] uppercase tracking-wide text-muted-foreground/60 mb-1">
-            Output
+            {t("task:output")}
           </div>
           <pre className="font-mono text-xs bg-muted/30 rounded px-3 py-2 overflow-x-auto max-h-[300px] overflow-y-auto whitespace-pre-wrap break-words">
             {stripAnsi(content)}
@@ -175,7 +186,7 @@ function ScriptExpandedContent({
       {error && (
         <div>
           <div className="text-[10px] uppercase tracking-wide text-red-600/70 dark:text-red-400/70 mb-1">
-            Error
+            {t("task:error")}
           </div>
           <div className="text-xs text-red-600 dark:text-red-400 bg-red-500/10 rounded px-2 py-1.5">
             {error}
@@ -207,6 +218,7 @@ export const ScriptExecutionMessage = memo(function ScriptExecutionMessage({
 }: {
   comment: Message;
 }) {
+  const { t } = useTranslation();
   const { metadata, status, scriptType, isRunning, isSuccess } = parseScriptMetadata(comment);
   const autoExpanded = isRunning;
   const { isExpanded, handleToggle } = useExpandState(status, autoExpanded);
@@ -220,7 +232,7 @@ export const ScriptExecutionMessage = memo(function ScriptExecutionMessage({
         header={
           <div className="flex items-center gap-2 text-xs">
             <span className="text-xs font-mono text-yellow-600 dark:text-yellow-400">
-              Script Execution (metadata unavailable)
+              {t("task:scriptExecutionMetadataUnavailable")}
             </span>
           </div>
         }

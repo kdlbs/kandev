@@ -342,7 +342,11 @@ func (s *Service) validateCreateTaskRequest(req *CreateTaskRequest) error {
 		return err
 	}
 	isOffice := isOfficeRequest(req)
-	if !req.IsEphemeral && !isOffice && req.WorkflowID == "" {
+	// Automation runs never land on a board, so they need no workflow — the
+	// trigger is the start signal, not a column. They are still ordinary,
+	// persistent tasks; only their origin keeps them out of board reads.
+	isAutomationRun := req.Origin == models.TaskOriginAutomationRun
+	if !req.IsEphemeral && !isOffice && !isAutomationRun && req.WorkflowID == "" {
 		return fmt.Errorf("workflow_id is required for non-ephemeral tasks")
 	}
 	if req.IsEphemeral && req.WorkflowID != "" {
@@ -529,6 +533,21 @@ func (s *Service) createTaskRepositories(ctx context.Context, taskID, workspaceI
 
 	seen := make(map[string]bool, len(repositories))
 	for i, repoInput := range repositories {
+		if repoInput.RemoteContribution != nil {
+			if err := repoInput.RemoteContribution.Validate(); err != nil {
+				return fmt.Errorf("invalid remote contribution: %w", err)
+			}
+			if repoInput.CheckoutBranch == "" {
+				repoInput.CheckoutBranch = repoInput.RemoteContribution.HeadBranch
+			}
+			if repoInput.BaseBranch == "" {
+				repoInput.BaseBranch = repoInput.RemoteContribution.BaseBranch
+			}
+			if repoInput.CheckoutBranch != repoInput.RemoteContribution.HeadBranch ||
+				repoInput.BaseBranch != repoInput.RemoteContribution.BaseBranch {
+				return fmt.Errorf("remote contribution branches do not match the resolved binding")
+			}
+		}
 		repositoryID, baseBranch, _, err := s.resolveRepoInput(ctx, workspaceID, repoInput, repoByPath)
 		if err != nil {
 			return err
@@ -560,6 +579,11 @@ func (s *Service) createTaskRepositories(ctx context.Context, taskID, workspaceI
 		metadata := make(map[string]interface{})
 		if prNum := resolvePRNumber(repoInput); prNum > 0 {
 			metadata["pr_number"] = prNum
+		}
+		if repoInput.RemoteContribution != nil {
+			if err := models.PutRemoteContribution(metadata, repoInput.RemoteContribution); err != nil {
+				return fmt.Errorf("persist remote contribution: %w", err)
+			}
 		}
 		taskRepo := &models.TaskRepository{
 			TaskID:         taskID,
@@ -910,7 +934,10 @@ func (s *Service) resolveRepoInputRemote(
 		defaultBranch = s.probeProviderDefaultBranchIfMissing(ctx, workspaceID, provider, owner, name)
 	}
 	providerHost := remoteProviderHost(provider, canonicalURL)
-	if provider == providerGitLab && providerHost != "https://gitlab.com" {
+	if repoInput.ProviderHost != "" && !strings.EqualFold(strings.TrimRight(repoInput.ProviderHost, "/"), providerHost) {
+		return "", "", false, fmt.Errorf("remote_url provider host %q does not match %q", providerHost, repoInput.ProviderHost)
+	}
+	if provider == providerGitLab && providerHost != "https://gitlab.com" && !repoInput.TrustedRemote {
 		return "", "", false, fmt.Errorf("untrusted GitLab origin %q", providerHost)
 	}
 	repo, repoCreated, createErr := s.FindOrCreateRepository(ctx, &FindOrCreateRepositoryRequest{
@@ -2802,14 +2829,35 @@ func filterTasksByWorkspace(tasks []*models.Task, workspaceID string) []*models.
 	return filtered
 }
 
+type workspaceArchiveModeLister interface {
+	ListTasksByWorkspaceWithArchiveMode(ctx context.Context, workspaceID, workflowID, repositoryID, query string, page, pageSize int, sort string, includeArchived, includeEphemeral, onlyEphemeral, excludeConfig, onlyArchived bool) ([]*models.Task, int, error)
+}
+
+func listTasksByWorkspaceWithArchiveMode(repo taskrepo.TaskRepository, ctx context.Context, workspaceID, workflowID, repositoryID, query string, page, pageSize int, sort string, includeArchived, includeEphemeral, onlyEphemeral, excludeConfig, onlyArchived bool) ([]*models.Task, int, error) {
+	if lister, ok := repo.(workspaceArchiveModeLister); ok {
+		return lister.ListTasksByWorkspaceWithArchiveMode(ctx, workspaceID, workflowID, repositoryID, query, page, pageSize, sort, includeArchived, includeEphemeral, onlyEphemeral, excludeConfig, onlyArchived)
+	}
+	if onlyArchived {
+		return nil, 0, fmt.Errorf("archived-only workspace task listing is unavailable")
+	}
+	return repo.ListTasksByWorkspace(ctx, workspaceID, workflowID, repositoryID, query, page, pageSize, sort, includeArchived, includeEphemeral, onlyEphemeral, excludeConfig)
+}
+
 // ListTasksByWorkspace returns paginated tasks for a workspace with task repositories loaded.
 // If query is non-empty, filters by task title, description, repository name, or repository path.
 // workflowID and repositoryID, when non-empty, further restrict results to that workflow/repository.
 func (s *Service) ListTasksByWorkspace(ctx context.Context, workspaceID, workflowID, repositoryID, query string, page, pageSize int, sort string, includeArchived, includeEphemeral, onlyEphemeral, excludeConfig bool) ([]*models.Task, int, error) {
+	return s.ListTasksByWorkspaceWithArchiveMode(ctx, workspaceID, workflowID, repositoryID, query, page, pageSize, sort, includeArchived, includeEphemeral, onlyEphemeral, excludeConfig, false)
+}
+
+// ListTasksByWorkspaceWithArchiveMode is the additive workspace-list contract
+// used by the sidebar archive view. onlyArchived takes precedence over
+// includeArchived when both are true.
+func (s *Service) ListTasksByWorkspaceWithArchiveMode(ctx context.Context, workspaceID, workflowID, repositoryID, query string, page, pageSize int, sort string, includeArchived, includeEphemeral, onlyEphemeral, excludeConfig, onlyArchived bool) ([]*models.Task, int, error) {
 	if err := s.authorizeWorkspaceID(ctx, workspaceID); err != nil {
 		return nil, 0, err
 	}
-	tasks, total, err := s.tasks.ListTasksByWorkspace(ctx, workspaceID, workflowID, repositoryID, query, page, pageSize, sort, includeArchived, includeEphemeral, onlyEphemeral, excludeConfig)
+	tasks, total, err := listTasksByWorkspaceWithArchiveMode(s.tasks, ctx, workspaceID, workflowID, repositoryID, query, page, pageSize, sort, includeArchived, includeEphemeral, onlyEphemeral, excludeConfig, onlyArchived)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -2822,6 +2870,7 @@ func (s *Service) ListTasksByWorkspace(ctx context.Context, workspaceID, workflo
 		page:             page,
 		pageSize:         pageSize,
 		includeArchived:  includeArchived,
+		onlyArchived:     onlyArchived,
 		includeEphemeral: includeEphemeral,
 		onlyEphemeral:    onlyEphemeral,
 		excludeConfig:    excludeConfig,
@@ -2843,6 +2892,7 @@ type prSearchOptions struct {
 	page             int
 	pageSize         int
 	includeArchived  bool
+	onlyArchived     bool
 	includeEphemeral bool
 	onlyEphemeral    bool
 	excludeConfig    bool
@@ -2959,7 +3009,11 @@ func (s *Service) fetchPRMatchedTasks(ctx context.Context, ids []string, existin
 // prMatchFilteredOut applies the same visibility filters the repository search
 // uses, so a PR-matched task respects includeArchived / ephemeral / config flags.
 func (s *Service) prMatchFilteredOut(task *models.Task, opts prSearchOptions) bool {
-	if !opts.includeArchived && task.ArchivedAt != nil {
+	if opts.onlyArchived {
+		if task.ArchivedAt == nil {
+			return true
+		}
+	} else if !opts.includeArchived && task.ArchivedAt != nil {
 		return true
 	}
 	if opts.onlyEphemeral && !task.IsEphemeral {

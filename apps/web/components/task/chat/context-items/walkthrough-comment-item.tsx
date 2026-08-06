@@ -4,6 +4,7 @@ import { memo } from "react";
 import type { WalkthroughCommentContextItem } from "@/lib/types/context";
 import { getFileName } from "@/lib/utils/file-path";
 import { ContextChip } from "./context-chip";
+import { useTranslation } from "react-i18next";
 
 function lineLabel(start: number, end: number) {
   return start === end ? `${start}` : `${start}-${end}`;
@@ -14,6 +15,7 @@ export const WalkthroughCommentItem = memo(function WalkthroughCommentItem({
 }: {
   item: WalkthroughCommentContextItem;
 }) {
+  const { t } = useTranslation();
   const preview = (
     <div className="space-y-2">
       {item.comments.map((comment) => (
@@ -28,7 +30,7 @@ export const WalkthroughCommentItem = memo(function WalkthroughCommentItem({
             className="text-muted-foreground hover:text-foreground cursor-pointer"
             onClick={() => item.onRemoveComment(comment.id)}
           >
-            Remove
+            {t("task:remove")}
           </button>
         </div>
       ))}

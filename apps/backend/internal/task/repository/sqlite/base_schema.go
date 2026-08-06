@@ -336,6 +336,19 @@ func (r *Repository) initTaskSchema() error {
 		FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE
 	);
 
+	CREATE TABLE IF NOT EXISTS repository_secret_bindings (
+		repository_id TEXT NOT NULL,
+		key TEXT NOT NULL,
+		secret_id TEXT NOT NULL,
+		created_at TIMESTAMP NOT NULL,
+		updated_at TIMESTAMP NOT NULL,
+		PRIMARY KEY (repository_id, key),
+		FOREIGN KEY (repository_id) REFERENCES repositories(id) ON DELETE CASCADE
+	);
+
+	CREATE INDEX IF NOT EXISTS idx_repository_secret_bindings_repository
+		ON repository_secret_bindings(repository_id);
+
 	CREATE TABLE IF NOT EXISTS task_repositories (
 		id TEXT PRIMARY KEY,
 		task_id TEXT NOT NULL,
@@ -638,6 +651,12 @@ func (r *Repository) initMessageTurnSchema() error {
 	CREATE INDEX IF NOT EXISTS idx_messages_created_at ON task_session_messages(created_at);
 	CREATE INDEX IF NOT EXISTS idx_messages_session_created ON task_session_messages(task_session_id, created_at);
 	CREATE INDEX IF NOT EXISTS idx_messages_turn_id ON task_session_messages(turn_id);
+	-- The automation run log reads each run's last agent message by task_id
+	-- (automation.listRunsWithTaskState). Every other index here leads with
+	-- task_session_id, so without this that lookup falls back to the global
+	-- created_at index and rescans it once per run row.
+	CREATE INDEX IF NOT EXISTS idx_messages_task_author_created
+		ON task_session_messages(task_id, author_type, type, created_at DESC);
 	-- idx_messages_session_updated is created in runMigrations() after the
 	-- updated_at ADD COLUMN + backfill. Creating it here would fail on existing
 	-- DBs where CREATE TABLE IF NOT EXISTS is a no-op and the column does not

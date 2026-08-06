@@ -39,7 +39,7 @@ export function TaskNestContextMenuItems({ task, disabled }: TaskNestContextMenu
   });
   const nestTask = useNestTask();
 
-  if (!workflowId) return null;
+  if (!workflowId || task.isArchived) return null;
 
   const candidates = computeNestCandidates(tasks ?? [], task.id);
   const hasParent = Boolean(task.parentTaskId);

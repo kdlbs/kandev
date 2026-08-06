@@ -92,3 +92,22 @@ func TestResolveAgentProfileEnvVars_SecretAndValue(t *testing.T) {
 		t.Fatalf("FROM_SECRET: got %q", resolved["FROM_SECRET"])
 	}
 }
+
+func TestResolveAgentProfileEnvVars_RejectsWorkspaceSecret(t *testing.T) {
+	store := newInMemorySecretStore()
+	if err := store.Create(context.Background(), &secrets.SecretWithValue{
+		Secret: secrets.Secret{ID: "workspace-secret", Name: "workspace", Scope: secrets.ScopeWorkspace, WorkspaceID: "workspace-1"},
+		Value:  "must-not-resolve",
+	}); err != nil {
+		t.Fatalf("seed workspace secret: %v", err)
+	}
+
+	log, _ := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json"})
+	m := &Manager{logger: log, secretStore: store}
+	resolved := m.resolveAgentProfileEnvVars(context.Background(), []settingsmodels.ProfileEnvVar{{
+		Key: "WORKSPACE_ONLY", SecretID: "workspace-secret",
+	}})
+	if _, ok := resolved["WORKSPACE_ONLY"]; ok {
+		t.Fatalf("workspace secret was resolved into profile environment: %#v", resolved)
+	}
+}

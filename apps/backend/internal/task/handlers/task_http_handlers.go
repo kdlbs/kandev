@@ -168,12 +168,13 @@ func (h *TaskHandlers) httpListTasksByWorkspace(c *gin.Context) {
 	workflowID := c.Query("workflow_id")
 	repositoryID := c.Query("repository_id")
 	includeArchived := c.Query("include_archived") == queryValueTrue
+	onlyArchived := c.Query("only_archived") == queryValueTrue
 	includeEphemeral := c.Query("include_ephemeral") == queryValueTrue
 	onlyEphemeral := c.Query("only_ephemeral") == queryValueTrue
 	excludeConfig := c.Query("exclude_config") == queryValueTrue
 
-	tasks, total, err := h.service.ListTasksByWorkspace(
-		c.Request.Context(), c.Param("id"), workflowID, repositoryID, query, page, pageSize, sort, includeArchived, includeEphemeral, onlyEphemeral, excludeConfig,
+	tasks, total, err := h.service.ListTasksByWorkspaceWithArchiveMode(
+		c.Request.Context(), c.Param("id"), workflowID, repositoryID, query, page, pageSize, sort, includeArchived, includeEphemeral, onlyEphemeral, excludeConfig, onlyArchived,
 	)
 	if err != nil {
 		handleNotFound(c, h.logger, err, "tasks not found")

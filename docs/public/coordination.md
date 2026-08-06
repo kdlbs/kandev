@@ -107,7 +107,7 @@ Call `create_task_kandev` with `parent_id: "self"`. `workspace_mode` defaults to
 - The one-level Kanban depth rule still applies.
 - An ephemeral Quick Chat task cannot be a parent; omit `parent_id` and create a top-level task instead.
 
-For predictable top-level creation, pass `repository_url`, `repository_id`, or `local_path`, as the tool contract requests. In task mode, the backend currently inherits repositories from the calling source task when no locator is supplied; if that source is repository-free, it can create a repository-free task despite the stricter tool description. The regular UI's **None** source remains the explicit route for intentional repository-free work.
+For predictable top-level creation, pass `repository_url`, `repository_id`, or `local_path`, as the tool contract requests. `repository_url` may be a canonical repository URL, a GitHub pull request URL such as `https://github.com/contributor/widget/pull/123`, or a GitLab merge request URL such as `https://gitlab.example.com/group/widget/-/merge_requests/123` on the configured host. For a pull request or merge request, Kandev validates the open source contribution, keeps the target repository as `origin`, and pushes future commits to the contributor's existing source branch after a write preflight; the existing provider change is reused rather than creating a duplicate. Provider-authored title, description, comments, and diff content are not trusted task context. If collaboration is disabled, enable the provider's edit-from-target setting and retry; if the write preflight reports missing credentials, configure the task's [Git credentials](integrations.md#choose-task-git-credentials) and retry the launch. Kandev never falls back to pushing `origin`. In task mode, the backend currently inherits repositories from the calling source task when no locator is supplied; if that source is repository-free, it can create a repository-free task despite the stricter tool description. The regular UI's **None** source remains the explicit route for intentional repository-free work.
 
 ## Coordinate with targeted messages
 
@@ -123,6 +123,13 @@ For predictable top-level creation, pass `repository_url`, `repository_id`, or `
 The default delivery mode is queued. Each session accepts 10 queued messages by default. An admin can change the install-wide limit under **Settings > General > Message Queue**; `0` means unlimited. The saved value applies immediately to new admissions without removing messages already waiting. `KANDEV_QUEUE_MAX_PER_SESSION` has higher precedence, locks the UI field, and requires a restart when changed; zero or a negative value means unlimited. Only one queued message drains per agent turn. When the cap is reached, the sender receives a structured `queue_full` error and should retry after space becomes available.
 
 In the task workbench, expand the queue chip to manage pending messages. Every visible pending row has **Remove**, whether it came from a user, another agent, workflow automation, or a server action. **Clear all** removes all visible pending rows in that session and releases their capacity. After removal, merge, or drain, displayed positions compact to `#1` through `#N` while FIFO order stays unchanged. Provenance still matters for editing and merging: only user-origin content can be edited. A row already reserved for delivery is hidden from the panel and cannot be cancelled there.
+
+Use the queue controls according to the outcome you want:
+
+- **Run next** dispatches the promptable FIFO head without interrupting an active turn. It is available when the session can accept a prompt.
+- **Send Now** sends directly when the session is promptable; when an agent turn is active, it waits for the backend to acknowledge cancellation and then replaces that captured turn with either the selected row or the click-time snapshot of every visible row. Bulk Send Now joins non-empty bodies with a blank line, keeps attachments in FIFO order, and deduplicates references. It creates a replacement turn but does not apply normal Cancel side effects: it does not record a cancellation message, complete the cancelled workflow step, or move the task to review. New rows added after the click remain queued.
+- **Clear all** removes every visible pending row without sending a prompt.
+- **Cancel** in the chat toolbar stops the active turn as a user cancellation. It may record the cancellation, complete an eligible workflow step, and move the task to review; it does not send queued content.
 
 Choose the control by intent:
 

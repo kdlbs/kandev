@@ -22,6 +22,7 @@ export const defaultSettingsState: SettingsSliceState = {
     loading: false,
   },
   settingsData: { executorsLoaded: false, agentsLoaded: false },
+  sleepInhibition: { response: null, loaded: false, loading: false, error: false },
   userSettings: createDefaultUserSettings(),
 };
 
@@ -251,6 +252,32 @@ function createCoreActions(
   };
 }
 
+function createSleepInhibitionActions(
+  set: ImmerSet,
+): Pick<
+  SettingsSlice,
+  "setSleepInhibition" | "setSleepInhibitionLoading" | "setSleepInhibitionError"
+> {
+  return {
+    setSleepInhibition: (response) =>
+      set((draft) => {
+        draft.sleepInhibition.response = response;
+        draft.sleepInhibition.loaded = true;
+        draft.sleepInhibition.loading = false;
+        draft.sleepInhibition.error = false;
+      }),
+    setSleepInhibitionLoading: (loading) =>
+      set((draft) => {
+        draft.sleepInhibition.loading = loading;
+      }),
+    setSleepInhibitionError: (error) =>
+      set((draft) => {
+        draft.sleepInhibition.error = error;
+        if (error) draft.sleepInhibition.loaded = true;
+      }),
+  };
+}
+
 function createSecretAndSpriteActions(
   set: ImmerSet,
 ): Pick<
@@ -334,6 +361,7 @@ export const createSettingsSlice: StateCreator<
 > = (set) => ({
   ...defaultSettingsState,
   ...createCoreActions(set),
+  ...createSleepInhibitionActions(set),
   ...createInstallJobActions(set),
   ...createAgentUpdateJobActions(set),
   ...createSecretAndSpriteActions(set),

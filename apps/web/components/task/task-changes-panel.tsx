@@ -76,6 +76,13 @@ function scrollToFileAndClear(
   }
 }
 
+export function discardTargetFromReviewFileKey(key: string): {
+  repositoryName: string;
+  path: string;
+} {
+  return splitReviewFileKey(key);
+}
+
 function useChangesView(
   selectedDiff: SelectedDiff | null,
   onClearSelected: () => void,
@@ -260,9 +267,9 @@ function useChangesActions(
 
   const handleDiscard = useCallback(
     async (key: string) => {
-      const { path } = splitReviewFileKey(key);
+      const { repositoryName, path } = discardTargetFromReviewFileKey(key);
       try {
-        const result = await discard([path]);
+        const result = await discard([path], repositoryName || undefined);
         if (result.success) {
           toast({ title: "Changes discarded", description: path, variant: "success" });
         } else {

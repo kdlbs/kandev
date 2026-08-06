@@ -591,6 +591,10 @@ func applySidebarViews(settings *models.UserSettings, req *UpdateUserSettingsReq
 		}
 		seen[views[i].ID] = struct{}{}
 	}
+	if len(views) == 0 && req.SidebarActiveViewID == nil {
+		views = store.DefaultSidebarViews()
+		settings.SidebarActiveViewID = store.DefaultSidebarViewID
+	}
 	settings.SidebarViews = views
 	return nil
 }

@@ -66,6 +66,23 @@ type Repository interface {
 	// Returns nil, nil if no entry matches (already taken or never existed).
 	TakeByID(ctx context.Context, sessionID, entryID string) (*QueuedMessage, error)
 
+	// ClaimSendNow atomically claims the exact ordered source snapshot for an
+	// interrupt-and-replace dispatch. The repository compares every requested
+	// row with the snapshot before mutation, then orders the returned sources by
+	// their persisted FIFO positions. Ordinary rows are removed, and durable
+	// lifecycle rows are reserved until AcknowledgeSendNowClaim or
+	// RestoreSendNowClaim.
+	ClaimSendNow(ctx context.Context, sessionID string, expected []QueuedMessage) (*SendNowClaim, error)
+
+	// RestoreSendNowClaim puts every source back at its original position and
+	// clears durable lifecycle reservations. It must restore the complete claim
+	// or leave the queue unchanged.
+	RestoreSendNowClaim(ctx context.Context, claim *SendNowClaim) error
+
+	// AcknowledgeSendNowClaim removes every durable source after the replacement
+	// prompt has been accepted. Ordinary sources were already removed by claim.
+	AcknowledgeSendNowClaim(ctx context.Context, claim *SendNowClaim) error
+
 	// UpdateContent replaces the content/attachments of an entry. The session
 	// scope (`AND session_id = ?`) is mandatory so a caller can't update an
 	// entry by guessing its UUID across sessions. If queuedBy is non-empty the

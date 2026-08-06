@@ -999,11 +999,21 @@ func (m *Manager) ResumePassthroughSession(ctx context.Context, sessionID string
 
 // handlePassthroughTurnComplete is called when turn detection fires for a passthrough session.
 // This marks the execution as ready for follow-up prompts when the agent finishes processing.
-func (m *Manager) handlePassthroughTurnComplete(sessionID string) {
+// A process can be replaced while its idle timer callback is already queued;
+// reject that stale callback so it cannot mark the replacement execution ready
+// and suppress the replacement process's real completion event.
+func (m *Manager) handlePassthroughTurnComplete(sessionID, processID string) {
 	execution, exists := m.executionStore.GetBySessionID(sessionID)
 	if !exists {
 		m.logger.Debug("turn complete for unknown session (may have ended)",
 			zap.String("session_id", sessionID))
+		return
+	}
+	if execution.PassthroughProcessID != processID {
+		m.logger.Debug("ignoring stale passthrough turn complete",
+			zap.String("session_id", sessionID),
+			zap.String("process_id", processID),
+			zap.String("active_process_id", execution.PassthroughProcessID))
 		return
 	}
 

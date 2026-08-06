@@ -129,7 +129,11 @@ truth for prompt admission and operator-visible activity.
 
 ## Out of scope
 
-- Mid-turn steering for agents without concurrent-prompt capability.
+- Mid-turn steering, including the steer-capable case. Delivering input into a
+  turn that is still generating is specified separately in
+  [mid-turn-steering](mid-turn-steering.md); this spec covers only the
+  foreground-idle handoff, where the foreground has already yielded to
+  recognized background work.
 - Reconstructing detached-work liveness after restart.
 - Rendering active subagent counts or individual subagent details in the UI.
 - Renaming the generic `WAITING_FOR_INPUT` lifecycle state or redesigning status

@@ -1153,6 +1153,7 @@ func (s *Service) publishTaskSessionStateChanged(
 		// previously-live busy signal during settlement or teardown.
 		"foreground_activity":   foregroundActivity,
 		"active_subagent_count": s.ActiveSubagentCount(sessionID),
+		"supports_steering":     s.SteerEligible(sessionID, nextState),
 	}
 	if stateUpdatedAt != nil && !stateUpdatedAt.IsZero() {
 		eventData[metaKeyUpdatedAt] = stateUpdatedAt.Format(time.RFC3339Nano)
@@ -2381,7 +2382,16 @@ func (s *Service) persistSessionMode(ctx context.Context, sessionID, modeID stri
 // handleAgentCapabilitiesEvent broadcasts agent_capabilities events to the WebSocket.
 func (s *Service) handleAgentCapabilitiesEvent(ctx context.Context, payload *lifecycle.AgentStreamEventPayload) {
 	sessionID := payload.SessionID
-	if sessionID == "" || s.eventBus == nil {
+	if sessionID == "" {
+		return
+	}
+	// Record the negotiated prompt-queueing advertisement before the event-bus
+	// guard. It gates prompt handoff and mid-turn steering, so it must land as
+	// soon as the agent advertises it — recording is admission state, whereas the
+	// bus below is only broadcast. Skipping it when no bus is configured would
+	// silently make a capable agent ineligible.
+	s.recordSessionPromptQueueing(sessionID, payload.Data.SupportsPromptQueueing)
+	if s.eventBus == nil {
 		return
 	}
 	eventPayload := lifecycle.AgentCapabilitiesEventPayload{
@@ -2391,6 +2401,7 @@ func (s *Service) handleAgentCapabilitiesEvent(ctx context.Context, payload *lif
 		SupportsImage:           payload.Data.SupportsImage,
 		SupportsAudio:           payload.Data.SupportsAudio,
 		SupportsEmbeddedContext: payload.Data.SupportsEmbeddedContext,
+		SupportsPromptQueueing:  payload.Data.SupportsPromptQueueing,
 		AuthMethods:             payload.Data.AuthMethods,
 		Timestamp:               time.Now().UTC().Format(time.RFC3339),
 	}

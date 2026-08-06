@@ -1,0 +1,254 @@
+package messagequeue
+
+import (
+	"context"
+	"errors"
+	"testing"
+)
+
+func TestSendNowClaimIsExactAtomicAndRestorable(t *testing.T) {
+	tests := []struct {
+		name string
+		new  func(*testing.T) Repository
+	}{
+		{name: "memory", new: func(*testing.T) Repository { return NewMemoryRepository() }},
+		{name: "sqlite", new: newTestSQLiteRepo},
+		{name: "postgres", new: newTestPostgresRepo},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := tt.new(t)
+			ctx := context.Background()
+			first := insertTestEntry(t, repo, "session-1", "task-1", "first", QueuedByUser, nil, nil)
+			durable := insertTestEntry(t, repo, "session-1", "task-1", "durable", QueuedByWorkflow, nil,
+				map[string]interface{}{MetadataLifecycleDurable: true})
+			third := insertTestEntry(t, repo, "session-1", "task-1", "third", QueuedByUser, nil, nil)
+			clickSnapshot, err := repo.ListBySession(ctx, "session-1")
+			if err != nil {
+				t.Fatalf("list click-time snapshot: %v", err)
+			}
+			if len(clickSnapshot) != 3 {
+				t.Fatalf("click-time snapshot = %#v, want three entries", clickSnapshot)
+			}
+
+			claim, err := repo.ClaimSendNow(ctx, "session-1", clickSnapshot)
+			if err != nil {
+				t.Fatalf("claim: %v", err)
+			}
+			if got := []string{claim.Sources[0].ID, claim.Sources[1].ID, claim.Sources[2].ID}; got[0] != first.ID || got[1] != durable.ID || got[2] != third.ID {
+				t.Fatalf("claim source order = %v", got)
+			}
+			if claim.Dispatch.Content != "first\n\ndurable\n\nthird" {
+				t.Fatalf("dispatch content = %q", claim.Dispatch.Content)
+			}
+
+			pending, err := repo.ListBySession(ctx, "session-1")
+			if err != nil {
+				t.Fatalf("list after claim: %v", err)
+			}
+			if len(pending) != 1 || pending[0].ID != durable.ID || !pending[0].IsReservedInFlight() {
+				t.Fatalf("pending after claim = %#v, want only reserved durable source", pending)
+			}
+
+			if err := repo.RestoreSendNowClaim(ctx, claim); err != nil {
+				t.Fatalf("restore: %v", err)
+			}
+			restored, err := repo.ListBySession(ctx, "session-1")
+			if err != nil {
+				t.Fatalf("list after restore: %v", err)
+			}
+			if len(restored) != 3 || restored[0].ID != first.ID || restored[1].ID != durable.ID || restored[2].ID != third.ID {
+				t.Fatalf("restored entries = %#v", restored)
+			}
+			if restored[1].IsReservedInFlight() {
+				t.Fatal("restore left durable source reserved")
+			}
+
+			claim, err = repo.ClaimSendNow(ctx, "session-1", clickSnapshot)
+			if err != nil {
+				t.Fatalf("claim before acknowledge: %v", err)
+			}
+			if err := repo.AcknowledgeSendNowClaim(ctx, claim); err != nil {
+				t.Fatalf("acknowledge: %v", err)
+			}
+			remaining, err := repo.ListBySession(ctx, "session-1")
+			if err != nil {
+				t.Fatalf("list after acknowledge: %v", err)
+			}
+			if len(remaining) != 0 {
+				t.Fatalf("remaining after acknowledge = %#v", remaining)
+			}
+		})
+	}
+}
+
+func TestSendNowClaimRejectsMissingOrReservedSelectionWithoutMutation(t *testing.T) {
+	tests := []struct {
+		name string
+		new  func(*testing.T) Repository
+	}{
+		{name: "memory", new: func(*testing.T) Repository { return NewMemoryRepository() }},
+		{name: "sqlite", new: newTestSQLiteRepo},
+		{name: "postgres", new: newTestPostgresRepo},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := tt.new(t)
+			ctx := context.Background()
+			first := insertTestEntry(t, repo, "session-1", "task-1", "first", QueuedByUser, nil, nil)
+			second := insertTestEntry(t, repo, "session-1", "task-1", "second", QueuedByUser, nil, nil)
+
+			if _, err := repo.ClaimSendNow(ctx, "session-1", []QueuedMessage{*first, {ID: "missing"}}); !errors.Is(err, ErrSendNowClaimChanged) {
+				t.Fatalf("missing claim error = %v, want ErrSendNowClaimChanged", err)
+			}
+			entries, err := repo.ListBySession(ctx, "session-1")
+			if err != nil {
+				t.Fatalf("list after missing claim: %v", err)
+			}
+			if len(entries) != 2 || entries[0].ID != first.ID || entries[1].ID != second.ID {
+				t.Fatalf("entries changed after missing claim = %#v", entries)
+			}
+
+			snapshot := *first
+			if err := repo.UpdateContentAndMetadata(ctx, "session-1", first.ID, "edited", nil,
+				map[string]interface{}{"snapshot": "edited"}, QueuedByUser); err != nil {
+				t.Fatalf("edit queued snapshot: %v", err)
+			}
+			if _, err := repo.ClaimSendNow(ctx, "session-1", []QueuedMessage{snapshot}); !errors.Is(err, ErrSendNowClaimChanged) {
+				t.Fatalf("changed snapshot error = %v, want ErrSendNowClaimChanged", err)
+			}
+			entries, err = repo.ListBySession(ctx, "session-1")
+			if err != nil {
+				t.Fatalf("list after changed snapshot: %v", err)
+			}
+			if len(entries) != 2 || entries[0].ID != first.ID || entries[0].Content != "edited" || entries[1].ID != second.ID {
+				t.Fatalf("entries changed after changed snapshot = %#v", entries)
+			}
+
+			reserved := insertTestEntry(t, repo, "session-1", "task-1", "reserved", QueuedByWorkflow, nil,
+				map[string]interface{}{MetadataLifecycleDurable: true})
+			if _, err := repo.TakeHead(ctx, "session-1"); err != nil {
+				t.Fatalf("take ordinary head: %v", err)
+			}
+			if _, err := repo.TakeHead(ctx, "session-1"); err != nil {
+				t.Fatalf("take second ordinary head: %v", err)
+			}
+			after := insertTestEntry(t, repo, "session-1", "task-1", "after", QueuedByUser, nil, nil)
+			if _, err := repo.ReserveHead(ctx, "session-1"); err != nil {
+				t.Fatalf("reserve head: %v", err)
+			}
+			if _, err := repo.ClaimSendNow(ctx, "session-1", []QueuedMessage{*reserved, *after}); !errors.Is(err, ErrSendNowReservationConflict) {
+				t.Fatalf("reserved claim error = %v, want ErrSendNowReservationConflict", err)
+			}
+			entries, err = repo.ListBySession(ctx, "session-1")
+			if err != nil {
+				t.Fatalf("list after reserved claim: %v", err)
+			}
+			if len(entries) != 2 || entries[0].ID != reserved.ID || entries[1].ID != after.ID || !entries[0].IsReservedInFlight() {
+				t.Fatalf("entries changed after reserved claim = %#v", entries)
+			}
+		})
+	}
+}
+
+func TestSameQueuedMessageContentIncludesStoredSnapshot(t *testing.T) {
+	base := &QueuedMessage{
+		ID:        "entry-1",
+		SessionID: "session-1",
+		TaskID:    "task-1",
+		Position:  1,
+		Content:   "original",
+		Model:     "model-a",
+		PlanMode:  true,
+		Metadata:  map[string]interface{}{"source": "original"},
+		QueuedBy:  QueuedByUser,
+	}
+
+	changedMetadata := *base
+	changedMetadata.Metadata = map[string]interface{}{"source": "edited"}
+	if sameQueuedMessageContent(base, &changedMetadata) {
+		t.Fatal("metadata edit matched the click-time queue snapshot")
+	}
+
+	changedModel := *base
+	changedModel.Model = "model-b"
+	if sameQueuedMessageContent(base, &changedModel) {
+		t.Fatal("model edit matched the click-time queue snapshot")
+	}
+}
+
+func TestSendNowRestoreDiscardsSourcesFromPurgedTaskGeneration(t *testing.T) {
+	tests := []struct {
+		name string
+		new  func(*testing.T) Repository
+	}{
+		{name: "memory", new: func(*testing.T) Repository { return NewMemoryRepository() }},
+		{name: "sqlite", new: newTestSQLiteRepo},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := tt.new(t)
+			ctx := context.Background()
+			entry := insertTestEntry(t, repo, "session-1", "task-1", "discard after purge", QueuedByUser, nil, nil)
+			claim, err := repo.ClaimSendNow(ctx, "session-1", []QueuedMessage{*entry})
+			if err != nil {
+				t.Fatalf("claim: %v", err)
+			}
+			if got := claim.SourceGenerations["task-1"]; got != 0 {
+				t.Fatalf("claim generation = %d, want initial generation 0", got)
+			}
+
+			if _, err := repo.PurgeTask(ctx, "task-1"); err != nil {
+				t.Fatalf("purge task: %v", err)
+			}
+			if err := repo.RestoreSendNowClaim(ctx, claim); err != nil {
+				t.Fatalf("restore after purge: %v", err)
+			}
+			entries, err := repo.ListBySession(ctx, "session-1")
+			if err != nil {
+				t.Fatalf("list after restore: %v", err)
+			}
+			if len(entries) != 0 {
+				t.Fatalf("restored entries after task purge = %#v, want none", entries)
+			}
+		})
+	}
+}
+
+func TestSendNowRestoreKeepsCurrentDurableMetadataAndRecordedMarker(t *testing.T) {
+	repo := NewMemoryRepository().(*memoryRepository)
+	ctx := context.Background()
+	entry := insertTestEntry(t, repo, "session-1", "task-1", "durable", QueuedByWorkflow, nil,
+		map[string]interface{}{
+			MetadataLifecycleDurable: true,
+			"origin":                 "github_pr_automation",
+			"custom":                 "before-claim",
+		})
+	claim, err := repo.ClaimSendNow(ctx, "session-1", []QueuedMessage{*entry})
+	if err != nil {
+		t.Fatalf("claim: %v", err)
+	}
+
+	// Simulate a metadata update made while the durable row was reserved. The
+	// restore must not overwrite it with the click-time snapshot.
+	stored := repo.entries["session-1"][0]
+	stored.Metadata["custom"] = "edited-while-reserved"
+	claim.Sources[0].Metadata[metadataUserMessageRecorded] = true
+
+	if err := repo.RestoreSendNowClaim(ctx, claim); err != nil {
+		t.Fatalf("restore: %v", err)
+	}
+	entries, err := repo.ListBySession(ctx, "session-1")
+	if err != nil {
+		t.Fatalf("list after restore: %v", err)
+	}
+	if got := entries[0].Metadata["custom"]; got != "edited-while-reserved" {
+		t.Fatalf("restored current metadata = %#v, want edited value", got)
+	}
+	if recorded, _ := entries[0].Metadata[metadataUserMessageRecorded].(bool); !recorded {
+		t.Fatalf("restored metadata lost recorded marker: %#v", entries[0].Metadata)
+	}
+}

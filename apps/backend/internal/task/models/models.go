@@ -1114,23 +1114,35 @@ type Repository struct {
 	// populated after the repo is cloned/synced on the agent host.
 	LocalPath string `json:"local_path"`
 	// Provider fields describe the upstream source (e.g. github/gitlab) for future syncing.
-	Provider               string     `json:"provider"`
-	ProviderRepoID         string     `json:"provider_repo_id"`
-	ProviderHost           string     `json:"provider_host"`
-	ProviderOwner          string     `json:"provider_owner"`
-	ProviderName           string     `json:"provider_name"`
-	RemoteURL              string     `json:"remote_url"`
-	DefaultBranch          string     `json:"default_branch"`
-	WorktreeBranchPrefix   string     `json:"worktree_branch_prefix"`
-	WorktreeBranchTemplate string     `json:"worktree_branch_template"`
-	PullBeforeWorktree     bool       `json:"pull_before_worktree"`
-	SetupScript            string     `json:"setup_script"`
-	CleanupScript          string     `json:"cleanup_script"`
-	DevScript              string     `json:"dev_script"`
-	CopyFiles              string     `json:"copy_files"`
-	CreatedAt              time.Time  `json:"created_at"`
-	UpdatedAt              time.Time  `json:"updated_at"`
-	DeletedAt              *time.Time `json:"deleted_at,omitempty"`
+	Provider               string                    `json:"provider"`
+	ProviderRepoID         string                    `json:"provider_repo_id"`
+	ProviderHost           string                    `json:"provider_host"`
+	ProviderOwner          string                    `json:"provider_owner"`
+	ProviderName           string                    `json:"provider_name"`
+	RemoteURL              string                    `json:"remote_url"`
+	DefaultBranch          string                    `json:"default_branch"`
+	WorktreeBranchPrefix   string                    `json:"worktree_branch_prefix"`
+	WorktreeBranchTemplate string                    `json:"worktree_branch_template"`
+	PullBeforeWorktree     bool                      `json:"pull_before_worktree"`
+	SetupScript            string                    `json:"setup_script"`
+	CleanupScript          string                    `json:"cleanup_script"`
+	DevScript              string                    `json:"dev_script"`
+	CopyFiles              string                    `json:"copy_files"`
+	SecretBindings         []RepositorySecretBinding `json:"secret_bindings,omitempty"`
+	CreatedAt              time.Time                 `json:"created_at"`
+	UpdatedAt              time.Time                 `json:"updated_at"`
+	DeletedAt              *time.Time                `json:"deleted_at,omitempty"`
+}
+
+// RepositorySecretBinding maps an environment key to a secret reference. The
+// value is never persisted or returned; a missing secret intentionally leaves
+// this row dangling so launches can report a broken binding.
+type RepositorySecretBinding struct {
+	RepositoryID string    `json:"repository_id,omitempty"`
+	Key          string    `json:"key"`
+	SecretID     string    `json:"secret_id"`
+	CreatedAt    time.Time `json:"created_at,omitempty"`
+	UpdatedAt    time.Time `json:"updated_at,omitempty"`
 }
 
 // RepositoryScript represents a custom script for a repository

@@ -38,6 +38,7 @@ import { buildPluginShortcutEntries } from "@/lib/keyboard/plugin-shortcuts";
 import { usePlugins } from "@/hooks/domains/plugins/use-plugins";
 import { StartupPageSettingsCard } from "@/components/settings/startup-page-settings-card";
 import { GENERAL_SETTINGS_TARGETS } from "@/lib/settings-discovery/catalog/general";
+import { SleepInhibitionSettings } from "@/components/settings/sleep-inhibition-settings";
 
 function ThemeSettingsCard({
   theme,
@@ -266,6 +267,7 @@ export function TaskActionsSettings() {
           <AgentGeneratedTaskTitleSettings />
           <ArchiveConfirmationSettings />
           <UnreadDividerSettings />
+          <SleepInhibitionSettings />
         </div>
       </SettingsSection>
 

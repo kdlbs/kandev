@@ -291,6 +291,36 @@ func TestStore_DeleteTaskMR_RemovesByID(t *testing.T) {
 	}
 }
 
+// TestStore_DeleteTaskMR_CascadesLifecycleCheckpoint is the unlink-cleanup
+// finding: removing an MR link must also remove its lifecycle checkpoint, or
+// re-linking the same MR later would inherit stale observations and could
+// suppress its next lifecycle prompt.
+func TestStore_DeleteTaskMR_CascadesLifecycleCheckpoint(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	seedTask(t, store, "task-1", "")
+
+	tm := newTestMR("task-1", "", "acme/api", 1)
+	if err := store.UpsertTaskMR(ctx, tm); err != nil {
+		t.Fatalf("upsert: %v", err)
+	}
+	if err := store.SetTaskMRObservedState(ctx, "task-1", "", "acme/api", 1, "merged"); err != nil {
+		t.Fatalf("SetTaskMRObservedState: %v", err)
+	}
+
+	if err := store.DeleteTaskMR(ctx, tm.ID); err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+
+	state, err := store.GetTaskMRLifecycleState(ctx, "task-1", "", "acme/api", 1)
+	if err != nil {
+		t.Fatalf("GetTaskMRLifecycleState: %v", err)
+	}
+	if state != nil {
+		t.Fatalf("expected lifecycle checkpoint removed alongside the MR link, got %+v", state)
+	}
+}
+
 func TestStore_DeleteTaskMR_UnknownIDIsNoOp(t *testing.T) {
 	store := newTestStore(t)
 	if err := store.DeleteTaskMR(context.Background(), "no-such-id"); err != nil {

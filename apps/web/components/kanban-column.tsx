@@ -2,13 +2,19 @@
 
 import { useMemo } from "react";
 import { useDroppable } from "@dnd-kit/core";
-import { KanbanCard, resolveTaskRepositoryChips, Task } from "./kanban-card";
+import {
+  KanbanCard,
+  resolveTaskRepositoryChips,
+  Task,
+  type KanbanPresentation,
+} from "./kanban-card";
 import { Badge } from "@kandev/ui/badge";
 import { cn } from "@/lib/utils";
 import { useAppStore } from "@/components/state-provider";
 import type { KanbanExternalLinkAvailability } from "./kanban-external-link-availability";
 import type { Repository } from "@/lib/types/http";
 import { countAdmittedTasks, formatWipCount, isOverWipLimit } from "@/lib/kanban/wip-limit";
+import { useTranslation } from "react-i18next";
 
 export interface WorkflowStep {
   id: string;
@@ -25,6 +31,7 @@ export interface WorkflowStep {
 interface KanbanColumnProps {
   step: WorkflowStep;
   tasks: Task[];
+  presentation?: KanbanPresentation;
   onPreviewTask: (task: Task) => void;
   onOpenTask: (task: Task) => void;
   onEditTask: (task: Task) => void;
@@ -44,9 +51,40 @@ interface KanbanColumnProps {
   externalLinkAvailability: KanbanExternalLinkAvailability;
 }
 
+function ColumnHeader({ step, tasks }: { step: WorkflowStep; tasks: Task[] }) {
+  const { t } = useTranslation();
+  const admittedTaskCount = countAdmittedTasks(tasks);
+  const overWipLimit = isOverWipLimit(admittedTaskCount, step.wip_limit);
+  const wipCountLabel = formatWipCount(admittedTaskCount, step.wip_limit);
+
+  return (
+    <div className="flex items-center justify-between pb-2 mb-3 px-1">
+      <div className="flex items-center gap-2">
+        <div className={cn("w-2 h-2 rounded-full", step.color)} />
+        <h2 className="font-semibold text-sm">{step.title}</h2>
+        <Badge
+          variant="secondary"
+          className={cn(
+            "text-xs tabular-nums",
+            overWipLimit &&
+              "border-amber-500/50 bg-amber-500/15 text-amber-700 dark:text-amber-300",
+          )}
+          aria-label={
+            overWipLimit ? t("kanban:tasksOverWipLimit", { label: wipCountLabel }) : undefined
+          }
+          title={overWipLimit ? t("kanban:overWipLimit") : undefined}
+        >
+          {wipCountLabel}
+        </Badge>
+      </div>
+    </div>
+  );
+}
+
 export function KanbanColumn({
   step,
   tasks,
+  presentation = "desktop",
   onPreviewTask,
   onOpenTask,
   onEditTask,
@@ -79,9 +117,6 @@ export function KanbanColumn({
   // Ordered ids of the cards rendered in this column — the source of truth for
   // shift-click range selection (matches exactly what the user sees).
   const columnTaskIds = useMemo(() => tasks.map((t) => t.id), [tasks]);
-  const admittedTaskCount = countAdmittedTasks(tasks);
-  const overWipLimit = isOverWipLimit(admittedTaskCount, step.wip_limit);
-  const wipCountLabel = formatWipCount(admittedTaskCount, step.wip_limit);
 
   return (
     <div
@@ -94,26 +129,7 @@ export function KanbanColumn({
       )}
     >
       {/* Column Header */}
-      {!hideHeader && (
-        <div className="flex items-center justify-between pb-2 mb-3 px-1">
-          <div className="flex items-center gap-2">
-            <div className={cn("w-2 h-2 rounded-full", step.color)} />
-            <h2 className="font-semibold text-sm">{step.title}</h2>
-            <Badge
-              variant="secondary"
-              className={cn(
-                "text-xs tabular-nums",
-                overWipLimit &&
-                  "border-amber-500/50 bg-amber-500/15 text-amber-700 dark:text-amber-300",
-              )}
-              aria-label={overWipLimit ? `${wipCountLabel} tasks, over WIP limit` : undefined}
-              title={overWipLimit ? "Over WIP limit" : undefined}
-            >
-              {wipCountLabel}
-            </Badge>
-          </div>
-        </div>
-      )}
+      {!hideHeader && <ColumnHeader step={step} tasks={tasks} />}
 
       {/* Tasks */}
       <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden space-y-2 px-1 pt-1">
@@ -122,6 +138,7 @@ export function KanbanColumn({
             key={task.id}
             task={queuedTaskWithTitle(task, steps, step)}
             workspaceId={activeWorkspaceId}
+            presentation={presentation}
             externalLinkAvailability={externalLinkAvailability}
             repositoryChips={resolveTaskRepositoryChips(task, repositories)}
             onClick={onPreviewTask}

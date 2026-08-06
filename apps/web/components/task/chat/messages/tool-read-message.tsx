@@ -9,6 +9,7 @@ import { ExpandableRow } from "./expandable-row";
 import { useExpandState } from "./use-expand-state";
 import { useOpenFileAtLine } from "@/hooks/use-file-editors";
 import { splitReadFiles, type ReadFileRef } from "@/lib/read-selector";
+import { useTranslation } from "react-i18next";
 
 type ReadFileOutput = {
   content?: string;
@@ -114,6 +115,7 @@ export const ToolReadMessage = memo(function ToolReadMessage({
   sessionId,
   onOpenFile,
 }: ToolReadMessageProps) {
+  const { t } = useTranslation();
   const { status, readOutput, filePath, offset, limit, hasOutput, isSuccess } =
     parseReadMetadata(comment);
   const autoExpanded = status === "running";
@@ -164,7 +166,7 @@ export const ToolReadMessage = memo(function ToolReadMessage({
             </span>
           )}
           {readOutput?.truncated && (
-            <span className="text-xs text-amber-500/80 shrink-0">(truncated)</span>
+            <span className="text-xs text-amber-500/80 shrink-0">{t("task:truncatedParen")}</span>
           )}
         </div>
       }

@@ -8,6 +8,7 @@ import { IconChevronDown, IconChevronRight, IconMessage } from "@tabler/icons-re
 import { cn } from "@kandev/ui/lib/utils";
 import type { DiffComment } from "@/lib/diff/types";
 import { formatLineRange } from "@/lib/diff";
+import { useTranslation } from "react-i18next";
 
 interface ReviewCommentsAttachmentProps {
   /** Review comments from the message */
@@ -21,6 +22,7 @@ interface ReviewCommentsAttachmentProps {
  * Shows a compact summary that expands to show full comment details.
  */
 export function ReviewCommentsAttachment({ comments, className }: ReviewCommentsAttachmentProps) {
+  const { t } = useTranslation();
   const [isOpen, setIsOpen] = useState(false);
 
   if (!comments || comments.length === 0) {
@@ -56,11 +58,13 @@ export function ReviewCommentsAttachment({ comments, className }: ReviewComments
 
             <IconMessage className="h-4 w-4 shrink-0 text-blue-500" />
 
-            <span className="text-sm font-medium">Review Comments</span>
+            <span className="text-sm font-medium">{t("task:reviewCommentsTitle")}</span>
 
             <Badge variant="secondary" className="ml-auto text-xs">
-              {totalComments} comment{totalComments !== 1 ? "s" : ""} on {fileCount} file
-              {fileCount !== 1 ? "s" : ""}
+              {t("task:commentsOnFiles", {
+                count: totalComments,
+                files: t("task:fileCountLabel", { count: fileCount }),
+              })}
             </Badge>
           </Button>
         </CollapsibleTrigger>
@@ -90,7 +94,13 @@ export function ReviewCommentsAttachment({ comments, className }: ReviewComments
                         <span className="font-medium">
                           {formatLineRange(comment.startLine, comment.endLine)}
                         </span>
-                        <span>({comment.side === "additions" ? "new" : "old"})</span>
+                        <span>
+                          (
+                          {comment.side === "additions"
+                            ? t("task:diffSideNew")
+                            : t("task:diffSideOld")}
+                          )
+                        </span>
                       </div>
 
                       {/* Code preview */}

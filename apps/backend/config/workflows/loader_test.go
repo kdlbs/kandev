@@ -315,3 +315,48 @@ func TestLoadTemplates_ReportKandevIssuePromptContract(t *testing.T) {
 		}
 	}
 }
+
+// TestLoadTemplates_PRReviewMRAutomationInstruction is AC30: the pr-review
+// template's review step must instruct the agent to enable lifecycle
+// notifications on whichever provider the task's linked review target is
+// on — update_task_pr_automation_kandev for a GitHub PR,
+// update_task_mr_automation_kandev for a GitLab MR.
+func TestLoadTemplates_PRReviewMRAutomationInstruction(t *testing.T) {
+	templates, err := LoadTemplates()
+	if err != nil {
+		t.Fatalf("LoadTemplates() returned error: %v", err)
+	}
+
+	var prReview *models.WorkflowTemplate
+	for _, tmpl := range templates {
+		if tmpl.ID == "pr-review" {
+			prReview = tmpl
+			break
+		}
+	}
+	if prReview == nil {
+		t.Fatal("pr-review template not found")
+	}
+
+	var review *models.StepDefinition
+	for i := range prReview.Steps {
+		if prReview.Steps[i].ID == "review" {
+			review = &prReview.Steps[i]
+			break
+		}
+	}
+	if review == nil {
+		t.Fatal("pr-review template has no review step")
+	}
+	for _, required := range []string{
+		"update_task_pr_automation_kandev",
+		"update_task_mr_automation_kandev",
+		"prompt_on_review_requested",
+		"prompt_on_merged",
+		"prompt_on_closed",
+	} {
+		if !strings.Contains(review.Prompt, required) {
+			t.Errorf("review prompt must contain %q", required)
+		}
+	}
+}

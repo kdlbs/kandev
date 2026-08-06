@@ -23,6 +23,7 @@ import (
 	"github.com/kandev/kandev/internal/plugins"
 	promptservice "github.com/kandev/kandev/internal/prompts/service"
 	promptstore "github.com/kandev/kandev/internal/prompts/store"
+	quickterminalrepository "github.com/kandev/kandev/internal/quickterminal/repository"
 	"github.com/kandev/kandev/internal/runtimeflags"
 	"github.com/kandev/kandev/internal/secrets"
 	"github.com/kandev/kandev/internal/sentry"
@@ -49,16 +50,17 @@ type Repositories struct {
 	User          userstore.Repository
 	// UserAccounts is the account-management view of the same user store
 	// (list/create/role/status), consumed by the auth service.
-	UserAccounts userstore.AccountRepository
-	Notification notificationstore.Repository
-	Editor       editorstore.Repository
-	Prompts      promptstore.Repository
-	Utility      utilitystore.Repository
-	Workflow     *workflowrepository.Repository
-	Secrets      secrets.SecretStore
-	Office       *officesqlite.Repository
-	Terminal     *terminalrepo.Repository
-	RuntimeFlags *runtimeflags.SQLiteStore
+	UserAccounts  userstore.AccountRepository
+	Notification  notificationstore.Repository
+	Editor        editorstore.Repository
+	Prompts       promptstore.Repository
+	Utility       utilitystore.Repository
+	Workflow      *workflowrepository.Repository
+	Secrets       secrets.SecretStore
+	Office        *officesqlite.Repository
+	Terminal      *terminalrepo.Repository
+	QuickTerminal *quickterminalrepository.Repository
+	RuntimeFlags  *runtimeflags.SQLiteStore
 	// Auth persists login identities, sessions, PATs, and invites.
 	Auth *authstore.Store
 }

@@ -4,10 +4,22 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"strings"
 	"testing"
 )
+
+func TestNewInstanceConfigNormalizesMcpProviders(t *testing.T) {
+	cfg := (&Config{}).NewInstanceConfig(0, &InstanceOverrides{
+		McpProviders: []string{" GITLAB ", "unsupported", "github", "github"},
+	})
+
+	want := []string{"github", "gitlab"}
+	if !reflect.DeepEqual(cfg.McpProviders, want) {
+		t.Fatalf("McpProviders = %v, want %v", cfg.McpProviders, want)
+	}
+}
 
 func TestCollectAgentEnvKeepsGitHubCLIShimAheadOfProfilePath(t *testing.T) {
 	t.Setenv("KANDEV_GITHUB_CREDENTIAL_BROKER_URL", "https://kandev.example/api/github/credentials/resolve")

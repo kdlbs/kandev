@@ -63,7 +63,6 @@ const defaultForm: FormState = {
   repositorySelections: [],
   prompt: DEFAULT_PROMPT,
   taskTitleTemplate: "",
-  executionMode: "task",
   enabled: true,
   maxConcurrentRuns: 1,
 };
@@ -79,7 +78,6 @@ function formFromAutomation(a: Automation): FormState {
     repositorySelections: a.repository_ids.map((id) => ({ kind: "registered" as const, id })),
     prompt: a.prompt || DEFAULT_PROMPT,
     taskTitleTemplate: a.task_title_template ?? "",
-    executionMode: a.execution_mode ?? "task",
     enabled: a.enabled,
     maxConcurrentRuns: a.max_concurrent_runs,
   };
@@ -337,10 +335,11 @@ function useAutomationPersistence(options: AutomationPersistenceOptions) {
         description: error instanceof Error ? error.message : t("common:requestFailed"),
       }),
   );
-  const isRunMode = options.form.executionMode === "run";
-  const canSave =
-    options.form.name.trim().length > 0 &&
-    (isRunMode || (!!options.form.workflowId && !!options.form.workflowStepId));
+  // The name is the only thing an automation cannot do without — it is how the
+  // reader finds it in the runs list. Workflow and step are optional: an
+  // automation that only reports has no place on a board, and requiring one
+  // made every such automation pick a step at random to get past the gate.
+  const canSave = options.form.name.trim().length > 0;
   useAutomationSaveContributor({
     isNew: options.isNew,
     currentId: options.currentId,
@@ -453,11 +452,7 @@ export function AutomationEditor({ workspaceId, automationId }: AutomationEditor
       <Separator />
       <SettingsSection form={form} savedForm={dirtyBaseline} updateField={updateField} />
       <Separator />
-      <RunsSection
-        automationId={currentId}
-        executionMode={form.executionMode}
-        workspaceId={workspaceId}
-      />
+      <RunsSection automationId={currentId} workspaceId={workspaceId} />
       <EditorFooter saving={saving} isNew={isNew} onDelete={handleRemove} />
       <CreatedWebhookDialogHost
         details={createdWebhook}

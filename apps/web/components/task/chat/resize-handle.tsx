@@ -1,6 +1,7 @@
 "use client";
 
 import { cn } from "@/lib/utils";
+import { useTranslation } from "react-i18next";
 
 type ResizeHandleProps = {
   planModeEnabled?: boolean;
@@ -27,10 +28,11 @@ export function ResizeHandle({
   onMouseDown,
   onDoubleClick,
 }: ResizeHandleProps) {
+  const { t } = useTranslation();
   return (
     <button
       type="button"
-      aria-label="Resize"
+      aria-label={t("task:resize")}
       className={cn(
         "absolute left-1/2 top-[-1px] -translate-x-1/2 -translate-y-1/2 z-10",
         "w-16 h-3 cursor-ns-resize",

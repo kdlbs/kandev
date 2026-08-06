@@ -3,7 +3,18 @@
 import { createElement } from "react";
 import { PopupMenu, PopupMenuItem, useMenuItemRefs } from "@/components/task/chat/popup-menu";
 import type { MenuState } from "@/components/task/chat/tiptap-suggestion";
-import type { PlanSlashCommand } from "./plan-slash-commands";
+import type { PlanSlashCategory, PlanSlashCommand } from "./plan-slash-commands";
+import { useTranslation } from "react-i18next";
+
+/**
+ * Category ids are stable grouping keys, so the heading copy is resolved here at
+ * render rather than stored on the command. Holds keys, never `t()` results.
+ */
+const CATEGORY_LABEL_KEYS: Record<PlanSlashCategory, string> = {
+  text: "editors:slashCategoryText",
+  lists: "editors:slashCategoryLists",
+  blocks: "editors:slashCategoryBlocks",
+};
 
 type PlanSlashMenuProps = {
   menuState: MenuState<PlanSlashCommand>;
@@ -12,12 +23,13 @@ type PlanSlashMenuProps = {
 };
 
 export function PlanSlashMenu({ menuState, selectedIndex, setSelectedIndex }: PlanSlashMenuProps) {
+  const { t } = useTranslation();
   const { setItemRef } = useMenuItemRefs(selectedIndex);
 
   if (!menuState.isOpen || menuState.items.length === 0) return null;
 
   // Group items by category
-  const grouped = new Map<string, { items: PlanSlashCommand[]; startIndex: number }>();
+  const grouped = new Map<PlanSlashCategory, { items: PlanSlashCommand[]; startIndex: number }>();
   let idx = 0;
   for (const item of menuState.items) {
     const existing = grouped.get(item.category);
@@ -34,7 +46,7 @@ export function PlanSlashMenu({ menuState, selectedIndex, setSelectedIndex }: Pl
       isOpen={menuState.isOpen}
       position={null}
       clientRect={menuState.clientRect}
-      title="Insert block"
+      title={t("editors:insertBlock")}
       selectedIndex={selectedIndex}
       onClose={() => menuState.command?.(menuState.items[0]!)}
       hasItems={menuState.items.length > 0}
@@ -44,7 +56,7 @@ export function PlanSlashMenu({ menuState, selectedIndex, setSelectedIndex }: Pl
         <div key={category}>
           <div className="px-3 pt-2 pb-1">
             <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground/70">
-              {category}
+              {t(CATEGORY_LABEL_KEYS[category])}
             </span>
           </div>
           {group.items.map((item) => {

@@ -65,6 +65,8 @@ Stopping a turn does not itself run the next queued message. Expand the queue an
 
 The expanded queue also lets you discard stale work. **Remove** is available for every visible pending row, including messages from users, peer agents, workflows, and server actions; **Clear all** removes all visible pending rows in that session. Only user-origin rows remain editable. A message already reserved for delivery is hidden from the queue and cannot be cancelled with these controls.
 
+The queue panel separates four actions. **Run next** sends the promptable FIFO head and leaves a running turn alone. **Send Now** sends directly when the session is promptable; otherwise it waits for backend cancellation acknowledgement, then replaces the active turn with one selected row or the click-time snapshot of all visible rows as one FIFO-ordered prompt. It does not record ordinary Cancel side effects or complete the cancelled workflow step. **Clear all** discards the visible queue. The chat toolbar's **Cancel** is the normal user cancellation for the active turn; it sends no queued prompt and may complete an eligible workflow step or move the task to review.
+
 A CLI-passthrough profile displays the agent's native terminal interface in a PTY. It still belongs to the task, but it does not provide Kandev's structured chat messages and tool-call presentation.
 
 <details>
@@ -159,7 +161,9 @@ Kandev hides the action instead of guessing when a repository is local-only, uns
 
 ## Review a diff
 
-Select **Review** in the Changes header. Kandev builds a repository-aware file list by merging available uncommitted, cumulative committed, and linked-PR files. When a path occurs in more than one source, the uncommitted version wins deduplication.
+Select **Review** in the Changes header. Kandev builds a repository-aware file list by merging available uncommitted, cumulative committed, and linked-PR files. Initialized direct and nested Git submodules appear under their task-workspace scopes, so a submodule's `README.md` remains distinct from the parent repository's `README.md`. When a path occurs in more than one source within the same repository, the uncommitted version wins deduplication.
+
+Review compares each submodule with the gitlink commit recorded by its parent and marks the submodule boundaries in the file hierarchy and diff headers. If a declared submodule is unavailable or uninitialized, Kandev keeps the parent's gitlink change visible instead of hiding the only available evidence. Pull requests for submodule repositories remain separate repository workflows; Review does not create or coordinate them.
 
 When a task has multiple linked pull requests, use the PR selector in the Changes diff header or Review toolbar to inspect one PR revision at a time. The selection is scoped to that task for the current app session. Switching PRs replaces only the remote PR contribution; uncommitted and committed sources keep their normal precedence. Selecting a file from a specific PR row opens that exact PR revision, even when a sibling PR changes the same path.
 
@@ -241,6 +245,15 @@ Open **Review follow-up** for three notification controls:
 Lifecycle messages only report the observed event and canonical PR URL; the task workflow and agent context decide what to do next. The repair prompt comes from the built-in `ci-auto-fix` saved prompt and can be overridden for the task. These controls currently operate on GitHub-linked PRs, require the GitHub integration and repository permissions, and do not bypass provider policy. Azure PR creation returns a URL but does not supply the same linked checks, review, or automation panel. See [Integrations](integrations.md).
 
 </details>
+
+### GitLab MR automation
+
+The GitLab MR topbar control has a **Review follow-up** group with the same three notification switches as GitHub's. The switches are task-level and apply to every merge request linked to the task:
+
+- **Your review is requested** wakes the agent when the workspace's connected GitLab account is newly added as a reviewer on the MR. Staying assigned across MR updates does not re-fire it; being removed and re-added — for example, for a re-review after changes — does.
+- **MR merged** and **MR closed without merging** independently wake the agent when review work ends.
+
+GitLab has no auto-fix or auto-merge automation. Lifecycle messages only report the observed event and canonical MR URL, and Kandev delivers them through the same task-session queue as GitHub's. See [Integrations](integrations.md#gitlab).
 
 > **Confidentiality:** redaction is heuristic, a secret Gist is accessible to anyone with its URL, and the snapshot is rendered through a third-party service. Inspect the preview and do not share material that must remain private.
 

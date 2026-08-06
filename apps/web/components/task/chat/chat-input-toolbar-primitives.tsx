@@ -22,6 +22,7 @@ import { SHORTCUTS } from "@/lib/keyboard/constants";
 import { formatShortcut } from "@/lib/keyboard/utils";
 import { cn } from "@/lib/utils";
 import type { MCPAttachmentHistory } from "@/lib/state/slices/session-runtime/types";
+import { useTranslation } from "react-i18next";
 
 type SubmitButtonProps = {
   isAgentBusy: boolean;
@@ -63,6 +64,7 @@ function SendSubmitButton({
   submitShortcut,
   tooltipDescription,
 }: SendSubmitButtonProps) {
+  const { t } = useTranslation();
   return (
     <KeyboardShortcutTooltip
       shortcut={submitShortcut}
@@ -72,7 +74,7 @@ function SendSubmitButton({
       <span
         className="inline-flex"
         tabIndex={isDisabled && !!tooltipDescription ? 0 : undefined}
-        aria-label={isDisabled ? (tooltipDescription ?? "Submit unavailable") : undefined}
+        aria-label={isDisabled ? (tooltipDescription ?? t("task:submitUnavailable")) : undefined}
       >
         <Button
           type="button"
@@ -108,6 +110,7 @@ export function SubmitButton({
   onSubmit,
   submitShortcut,
 }: SubmitButtonProps) {
+  const { t } = useTranslation();
   const showSendButton = !isAgentBusy || hasContent;
   const storeApi = useAppStoreApi();
   const isCancelling = useAppStore((state) => {
@@ -156,7 +159,9 @@ export function SubmitButton({
               )}
             </Button>
           </TooltipTrigger>
-          <TooltipContent>{isCancelling ? "Cancelling..." : "Cancel agent"}</TooltipContent>
+          <TooltipContent>
+            {isCancelling ? t("task:cancelling") : t("task:cancelAgent")}
+          </TooltipContent>
         </Tooltip>
       )}
       {showSendButton && (
@@ -239,6 +244,7 @@ export function McpIndicator({
   mcpServers: string[];
   attachmentHistory?: MCPAttachmentHistory;
 }) {
+  const { t } = useTranslation();
   const usesTouchDrawer = useTouchDrawer();
   const hasMcp = mcpServers.length > 0;
   const Icon = hasMcp ? IconPlugConnected : IconPlugConnectedX;
@@ -249,7 +255,7 @@ export function McpIndicator({
       : mcpServers.map((name) => ({ name, status: "unknown" as const, summary: undefined }));
   const statusList = hasMcp ? (
     <div className="space-y-1">
-      <div className="font-medium">MCP servers</div>
+      <div className="font-medium">{t("task:mcpServers")}</div>
       {servers.map((server) => (
         <div key={server.name} className="flex items-center gap-2">
           <span
@@ -261,7 +267,7 @@ export function McpIndicator({
           />
           <span className="truncate">{server.name}</span>
           <span className="text-muted-foreground">
-            {mcpStatusLabel[server.status] ?? "Unknown"}
+            {mcpStatusLabel[server.status] ?? t("task:unknown")}
           </span>
           {server.summary && <span className="text-muted-foreground">{server.summary}</span>}
         </div>
@@ -275,7 +281,7 @@ export function McpIndicator({
       type="button"
       variant="ghost"
       size="icon"
-      aria-label="Show MCP connection status"
+      aria-label={t("task:showMcpConnectionStatus")}
       className={cn(
         "h-7 w-7 cursor-pointer rounded-md hover:bg-muted/40",
         hasMcp ? "text-foreground" : "text-muted-foreground/40",
@@ -294,7 +300,7 @@ export function McpIndicator({
             type="button"
             variant="ghost"
             size="icon"
-            aria-label="Show MCP connection status"
+            aria-label={t("task:showMcpConnectionStatus")}
             className={cn(
               "h-11 w-11 cursor-pointer rounded-md active:scale-95",
               hasMcp ? "text-foreground" : "text-muted-foreground/40",
@@ -306,7 +312,7 @@ export function McpIndicator({
         </DrawerTrigger>
         <DrawerContent data-testid="mcp-status-drawer" className="max-h-[80dvh]">
           <DrawerHeader>
-            <DrawerTitle>MCP connection status</DrawerTitle>
+            <DrawerTitle>{t("task:mcpConnectionStatus")}</DrawerTitle>
           </DrawerHeader>
           <div className="min-h-0 overflow-y-auto px-4 pb-[calc(1rem+env(safe-area-inset-bottom))] text-sm">
             {statusList}
@@ -325,6 +331,7 @@ export function McpIndicator({
 }
 
 export function AttachFilesButton({ onClick }: { onClick: () => void }) {
+  const { t } = useTranslation();
   return (
     <Tooltip>
       <TooltipTrigger asChild>
@@ -339,7 +346,7 @@ export function AttachFilesButton({ onClick }: { onClick: () => void }) {
           <IconPaperclip className="h-4 w-4" />
         </Button>
       </TooltipTrigger>
-      <TooltipContent>Attach files</TooltipContent>
+      <TooltipContent>{t("task:attachFiles")}</TooltipContent>
     </Tooltip>
   );
 }

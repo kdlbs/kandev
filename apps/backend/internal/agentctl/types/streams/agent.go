@@ -273,6 +273,13 @@ type AgentEvent struct {
 	// SupportsEmbeddedContext indicates the agent supports embedded context.
 	SupportsEmbeddedContext bool `json:"supports_embedded_context"`
 
+	// SupportsPromptQueueing indicates the agent advertised that it accepts a
+	// prompt while another prompt for the same session is still in flight. It is
+	// the negotiated precondition for prompt handoff and mid-turn steering, and
+	// does not by itself promise the agent will fold that prompt into the running
+	// turn. See docs/specs/platform/mid-turn-steering.md.
+	SupportsPromptQueueing bool `json:"supports_prompt_queueing"`
+
 	// AuthMethods lists authentication methods from ACP initialize.
 	AuthMethods []AuthMethodInfo `json:"auth_methods,omitempty"`
 

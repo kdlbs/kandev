@@ -21,6 +21,10 @@ import { RepositoryBranchTemplateHelp } from "@/components/settings/repository-b
 import { DeleteRepositoryDialog } from "@/components/settings/repository-delete-dialog";
 import { CopyFilesField } from "@/components/settings/repository-copy-files-help";
 import { RepositoryCustomScripts } from "@/components/settings/repository-custom-scripts";
+import {
+  RepositorySecretBindings,
+  validateRepositorySecretBindings,
+} from "@/components/settings/repository-secret-bindings";
 import { getRepositoryActiveSessionCountAction } from "@/app/actions/workspaces";
 import type { Repository, RepositoryScript } from "@/lib/types/http";
 import { defaultWorktreeBranchTemplate } from "@/lib/worktree-branch-template";
@@ -289,6 +293,8 @@ function RepositoryEditView({
             copyFiles={repository.copy_files ?? ""}
           />
 
+          <RepositorySecretBindings repository={repository} onUpdate={onUpdate} />
+
           <RepositoryCustomScripts
             repositoryId={repository.id}
             scripts={repository.scripts}
@@ -372,6 +378,23 @@ function buildRepoPreviewData(t: TFunction, repository: RepositoryWithScripts) {
     subtitle,
     ...buildRepoScriptsSummary(t, repository),
   };
+}
+
+function repositorySecretInvalidReason(
+  t: TFunction,
+  validation: ReturnType<typeof validateRepositorySecretBindings>,
+) {
+  if (!validation) return undefined;
+  switch (validation.kind) {
+    case "key":
+      return t("workspaces:environmentSecretKeyInvalid");
+    case "duplicate":
+      return t("workspaces:environmentSecretKeyDuplicate", { key: validation.key });
+    case "reserved":
+      return t("workspaces:environmentSecretKeyReserved", { key: validation.key });
+    case "secret":
+      return t("workspaces:environmentSecretRequired");
+  }
 }
 
 function RepositoryPreview({
@@ -555,6 +578,8 @@ export function RepositoryCard({
   const saveRequest = useRequest(() => onSave(repository.id));
   const isDirty = isRepositoryDirty || areScriptsDirty;
   const deleteState = useRepositoryDelete(repository.id, onDelete, () => setIsEditing(false));
+  const secretBindingValidation = validateRepositorySecretBindings(repository.secret_bindings);
+  const invalidReason = repositorySecretInvalidReason(t, secretBindingValidation);
 
   const handleSave = async () => {
     try {
@@ -572,6 +597,8 @@ export function RepositoryCard({
     id: `repository:${repository.id}`,
     revision: JSON.stringify(repository),
     isDirty,
+    canSave: !secretBindingValidation,
+    invalidReason,
     save: handleSave,
     discard: () => undefined,
   });

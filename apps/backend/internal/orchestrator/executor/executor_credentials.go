@@ -177,13 +177,11 @@ func (e *Executor) configureGitHubCredentialBrokerForRepositories(
 	}
 	scopes := make([]githubCredentialScope, 0, len(infos))
 	for _, info := range infos {
-		scope, err := e.issueGitHubCredentialScope(ctx, req, info)
+		infoScopes, err := e.issueGitHubCredentialScopes(ctx, req, info)
 		if err != nil {
 			return err
 		}
-		if scope != nil {
-			scopes = append(scopes, *scope)
-		}
+		scopes = append(scopes, infoScopes...)
 	}
 	if len(scopes) == 0 {
 		return nil
@@ -273,12 +271,79 @@ func (e *Executor) issueGitHubCredentialScope(
 	if owner == "" || repo == "" || info.RepositoryID == "" {
 		return nil, nil
 	}
+	return e.issueGitHubCredentialScopeForIdentity(ctx, req, info.RepositoryID, owner, repo, defaultGitHubHost)
+}
+
+func (e *Executor) issueGitHubCredentialScopes(
+	ctx context.Context,
+	req *LaunchAgentRequest,
+	info *repoInfo,
+) ([]githubCredentialScope, error) {
+	if info == nil || info.Repository == nil {
+		return nil, nil
+	}
+	scope, err := e.issueGitHubCredentialScope(ctx, req, info)
+	if err != nil {
+		return nil, err
+	}
+	scopes := make([]githubCredentialScope, 0, 2)
+	if scope != nil {
+		scopes = append(scopes, *scope)
+	}
+	sourceScope, err := e.issueGitHubContributionCredentialScope(ctx, req, info)
+	if err != nil {
+		return nil, err
+	}
+	if sourceScope != nil {
+		scopes = append(scopes, *sourceScope)
+	}
+	return scopes, nil
+}
+
+func (e *Executor) issueGitHubContributionCredentialScope(
+	ctx context.Context,
+	req *LaunchAgentRequest,
+	info *repoInfo,
+) (*githubCredentialScope, error) {
+	binding := info.RemoteContribution
+	if binding == nil {
+		return nil, nil
+	}
+	if err := binding.Validate(); err != nil {
+		return nil, fmt.Errorf("validate remote contribution credential scope: %w", err)
+	}
+	if binding.Provider != models.RemoteContributionProviderGitHub {
+		return nil, nil
+	}
+	if !strings.EqualFold(binding.SourceRepository.Host, defaultGitHubHost) {
+		return nil, fmt.Errorf("remote contribution source is not a GitHub repository")
+	}
+	parts := strings.Split(binding.SourceRepository.Path, "/")
+	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+		return nil, fmt.Errorf("remote contribution GitHub source identity is invalid")
+	}
+	targetOwner := strings.TrimSpace(info.Repository.ProviderOwner)
+	targetRepo := strings.TrimSpace(info.Repository.ProviderName)
+	if strings.EqualFold(parts[0], targetOwner) && strings.EqualFold(parts[1], targetRepo) {
+		return nil, nil
+	}
+	if !binding.CollaborationAllowed {
+		return nil, fmt.Errorf("remote contribution does not permit collaboration")
+	}
+	return e.issueGitHubCredentialScopeForIdentity(ctx, req, info.RepositoryID, parts[0], parts[1], defaultGitHubHost)
+}
+
+func (e *Executor) issueGitHubCredentialScopeForIdentity(
+	ctx context.Context,
+	req *LaunchAgentRequest,
+	repositoryID, owner, repo, host string,
+) (*githubCredentialScope, error) {
 	if err := validateGitHubCredentialBrokerURL(e.githubCredentialBrokerURL, req.ExecutorType); err != nil {
 		return nil, err
 	}
 	lease, err := e.githubCredentialIssuer.IssueGitHubCredentialLease(ctx, GitHubCredentialLeaseRequest{
 		WorkspaceID: req.WorkspaceID, TaskID: req.TaskID, SessionID: req.SessionID,
-		RepositoryID: info.RepositoryID, Owner: owner, Repo: repo, Host: defaultGitHubHost,
+		RepositoryID: repositoryID, Owner: owner, Repo: repo, Host: host,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("issue GitHub credential lease: %w", err)
@@ -288,7 +353,7 @@ func (e *Executor) issueGitHubCredentialScope(
 	}
 	return &githubCredentialScope{
 		Lease: lease.Token, TaskID: req.TaskID, SessionID: req.SessionID,
-		RepositoryID: info.RepositoryID, Owner: owner, Repo: repo, Host: defaultGitHubHost,
+		RepositoryID: repositoryID, Owner: owner, Repo: repo, Host: host,
 	}, nil
 }
 
@@ -446,11 +511,10 @@ func (e *Executor) resolveAuthSecrets(ctx context.Context, req *LaunchAgentReque
 			continue
 		}
 
-		value, err := e.secretStore.Reveal(ctx, secretID)
+		value, err := e.revealGlobalSecret(ctx, secretID)
 		if err != nil {
 			e.logger.Debug("failed to resolve auth secret",
 				zap.String("method_id", methodID),
-				zap.String("secret_id", secretID),
 				zap.Error(err))
 			continue
 		}

@@ -18,3 +18,14 @@ export type RoutingTierReference = {
   provider_id: string;
   tier: "frontier" | "balanced" | "economy";
 };
+
+// AutomationReference points at one enabled automation bound to the agent
+// profile being deleted. Mirrors the Go shape on the same 409. An automation is
+// configuration rather than a session — nothing is running, so it never appears
+// in activeSessions, but its next firing would launch against a profile that no
+// longer exists.
+export type AutomationReference = {
+  id: string;
+  name: string;
+  workspace_id: string;
+};

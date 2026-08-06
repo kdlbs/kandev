@@ -38,7 +38,7 @@ vi.mock("@/hooks/domains/kanban/use-all-workflow-snapshots", () => ({
   useAllWorkflowSnapshots: (workspaceId: string | null) => mockUseAllWorkflowSnapshots(workspaceId),
 }));
 
-import { useWorkspaceSidebarTasks } from "./use-workspace-sidebar-tasks";
+import { mergeSidebarArchivedTasks, useWorkspaceSidebarTasks } from "./use-workspace-sidebar-tasks";
 
 function setMockState(patch: Partial<MockState>) {
   mockState = {
@@ -164,6 +164,21 @@ describe("useWorkspaceSidebarTasks", () => {
     const { result } = renderHook(() => useWorkspaceSidebarTasks("ws-1"));
     expect(result.current.allTasks.map((t) => t.id)).toEqual(["t-a1"]);
     expect(result.current.allTasks[0]._workflowId).toBe("wf-A");
+  });
+});
+
+describe("mergeSidebarArchivedTasks", () => {
+  it("merges only the current workspace's archived tasks and deduplicates IDs", () => {
+    const active = [{ id: "same", _workflowId: "wf-1" }];
+    const archived = [
+      { id: "same", workspaceId: "ws-1", isArchived: true },
+      { id: "archived-1", workspaceId: "ws-1", workflowId: "wf-1", isArchived: true },
+      { id: "other", workspaceId: "ws-2", isArchived: true },
+    ] as never;
+
+    expect(
+      mergeSidebarArchivedTasks(active as never, archived, "ws-1", true).map((t) => t.id),
+    ).toEqual(["same", "archived-1"]);
   });
 });
 

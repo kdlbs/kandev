@@ -506,21 +506,7 @@ func (a *Adapter) LoadSession(ctx context.Context, sessionID string, mcpServers 
 	// the frontend doesn't render a stuck "watching" card.
 	a.sweepMonitorsOnReplayEnd(sessionID)
 
-	if replayPlan != nil {
-		entries := make([]PlanEntry, len(replayPlan.Entries))
-		for i, e := range replayPlan.Entries {
-			entries[i] = PlanEntry{
-				Description: e.Content,
-				Status:      string(e.Status),
-				Priority:    string(e.Priority),
-			}
-		}
-		a.sendUpdate(AgentEvent{
-			Type:        streams.EventTypePlan,
-			SessionID:   sessionID,
-			PlanEntries: entries,
-		})
-	}
+	a.emitReplayPlan(sessionID, replayPlan)
 
 	// Emit session status event to normalize with other adapters.
 	// This eliminates the need for ReportsStatusViaStream flag.
@@ -542,6 +528,31 @@ func (a *Adapter) LoadSession(ctx context.Context, sessionID string, mcpServers 
 // than a full process restart since the ACP protocol supports multiple sessions per connection.
 func (a *Adapter) ResetSession(ctx context.Context, mcpServers []types.McpServer) (string, error) {
 	return a.NewSession(ctx, mcpServers)
+}
+
+// emitReplayPlan re-emits the plan captured during session/load replay so the todo
+// indicator survives a resume. An empty plan is dropped: on the ACP ingest path an
+// empty entry list carries no information (same reasoning as extractTodoItems), and
+// re-emitting it would both wipe the live indicator and persist an empty todo snapshot
+// that shadows the last real one in the chat timeline. A genuine "agent cleared the
+// todos" still arrives as a live plan update and keeps its persisted empty snapshot.
+func (a *Adapter) emitReplayPlan(sessionID string, replayPlan *acp.SessionUpdatePlan) {
+	if replayPlan == nil || len(replayPlan.Entries) == 0 {
+		return
+	}
+	entries := make([]PlanEntry, len(replayPlan.Entries))
+	for i, e := range replayPlan.Entries {
+		entries[i] = PlanEntry{
+			Description: e.Content,
+			Status:      string(e.Status),
+			Priority:    string(e.Priority),
+		}
+	}
+	a.sendUpdate(AgentEvent{
+		Type:        streams.EventTypePlan,
+		SessionID:   sessionID,
+		PlanEntries: entries,
+	})
 }
 
 // emitInitialModeState emits a session_mode event from the session response's Modes field.

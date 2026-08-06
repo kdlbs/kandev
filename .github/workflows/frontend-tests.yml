@@ -154,6 +154,12 @@ jobs:
       - name: Run lint
         run: pnpm --filter @kandev/web lint
 
+      # `build` below is Vite, which strips types with esbuild and never checks
+      # them, so nothing in this job used to fail on a type error. Runs before
+      # the tests to fail fast on the cheaper check.
+      - name: Run typecheck
+        run: pnpm --filter @kandev/web typecheck
+
       # Unlike the eslint literal-string guard (scoped to already-migrated paths
       # via i18nGuardFiles), these four checks scan components/app/hooks/lib
       # repo-wide. Each one pins a class of i18n bug that fails silently at

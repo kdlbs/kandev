@@ -6,16 +6,18 @@ import { Button } from "@kandev/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@kandev/ui/dialog";
 import { MemoizedMarkdown } from "@/components/shared/memoized-markdown";
 import type { Message } from "@/lib/types/http";
+import { useTranslation } from "react-i18next";
+import { t } from "@/lib/i18n";
 
 function parsePlanContent(text: string): { title: string; body: string } {
   const lines = text.split("\n");
   const firstContentIdx = lines.findIndex((l) => l.trim().length > 0);
-  if (firstContentIdx === -1) return { title: "Agent Plan", body: "" };
+  if (firstContentIdx === -1) return { title: t("task:agentPlan"), body: "" };
   const firstLine = lines[firstContentIdx];
   const isHeading = /^#{1,6}\s+/.test(firstLine);
   const title = isHeading ? firstLine.replace(/^#{1,6}\s+/, "").trim() : firstLine.trim();
   const body = isHeading ? lines.slice(firstContentIdx + 1).join("\n") : text;
-  return { title: title || "Agent Plan", body };
+  return { title: title || t("task:agentPlan"), body };
 }
 
 function PlanMarkdownBody({
@@ -54,6 +56,7 @@ export const AgentPlanMessage = memo(function AgentPlanMessage({
   worktreePath?: string;
   onOpenFile?: (path: string) => void;
 }) {
+  const { t } = useTranslation();
   const [collapsed, setCollapsed] = useState(false);
   const [dialogOpen, setDialogOpen] = useState(false);
   const text = comment.content;
@@ -71,7 +74,7 @@ export const AgentPlanMessage = memo(function AgentPlanMessage({
             <Button
               variant="ghost"
               size="icon"
-              aria-label={collapsed ? "Expand plan" : "Collapse plan"}
+              aria-label={collapsed ? t("task:expandPlan") : t("task:collapsePlan")}
               className="h-7 w-7 cursor-pointer"
               onClick={() => setCollapsed(!collapsed)}
             >
@@ -80,7 +83,7 @@ export const AgentPlanMessage = memo(function AgentPlanMessage({
             <Button
               variant="ghost"
               size="icon"
-              aria-label="Open plan details"
+              aria-label={t("task:openPlanDetails")}
               className="h-7 w-7 cursor-pointer"
               onClick={() => setDialogOpen(true)}
             >

@@ -1,7 +1,7 @@
 ---
 status: approved
 created: 2026-07-31
-updated: 2026-08-02
+updated: 2026-08-04
 owner: kandev
 ---
 
@@ -47,8 +47,24 @@ and
   request with a target of about six words in sentence case and uses a short title phrase rather than a
   sentence or progress update.
 - A successful agent title call updates every live task surface through the normal `task.updated`
-  event and ends the pending state. Every other session omits the instruction and tool, including when
-  it launches concurrently with the owner or after the owner's launch or title call fails.
+  event, ends the pending state, and renames each Kandev-generated local branch in the owner session
+  from the provisional-title name to a name rendered from the accepted title. Rendering reuses that
+  repository's configured worktree branch template and the task's existing branch-name context.
+- Branch renaming remains part of the opt-in lifecycle: tasks created without `auto_title: true`,
+  including tasks created while **Let agents name new tasks** is disabled, are never renamed by a title
+  call. Ordinary human title edits also do not rename branches.
+- A task repository with an explicit `checkout_branch` is preserved. This includes tasks created from
+  a GitHub pull request or another remote change link, so the session remains on the remote head branch
+  and can contribute changes to it. Local-executor sessions are also preserved because Kandev does not
+  own their shared checkout branch.
+- If the owner session switched away from its recorded generated branch before the title call arrives,
+  Kandev preserves the current branch rather than treating that user selection as Kandev-owned.
+- In multi-repository tasks, eligibility is evaluated per repository. Kandev can rename generated
+  branches and preserve explicit remote checkouts in the same owner session. Sessions other than the
+  title owner keep their current branches; future sessions render new branches from the final task
+  title through the normal creation path.
+- Every other session omits the instruction and tool, including when it launches concurrently with the
+  owner or after the owner's launch or title call fails.
 - A user or other ordinary task-title update made while the agent title is pending wins: it ends the
   pending state, and a later `set_task_title_kandev` call does not overwrite it.
 - Task and subtask dialogs provide the same capability on desktop and phone. Their existing responsive
@@ -69,6 +85,11 @@ are never treated as pending; pending tasks created before the owner key existed
 by their first eligible launch.
 
 No database column or schema migration is required.
+
+Existing `task_repositories.checkout_branch` values are the durable signal that a repository was
+opened on an explicit branch and must be preserved. Successful generated-branch renames update the
+repository-scoped `task_session_worktrees` row and the corresponding task-environment and running
+executor branch snapshots used by restart and resume. The task workspace directory is not renamed.
 
 ## API surface
 
@@ -101,8 +122,15 @@ The owner session for a title-pending task exposes:
 ```
 
 The tool targets the current task bound to the MCP server. A successful response contains
-`{"accepted": true, "task_id": "...", "title": "..."}`. A task whose pending marker is already gone
-returns `{"accepted": false, "reason": "title_not_pending", "task_id": "..."}` without mutation.
+`{"accepted": true, "task_id": "...", "title": "...", "branch_rename": {...}}`. The
+`branch_rename` object reports an aggregate `status` of `renamed`, `preserved`, `partial`, `failed`, or
+`not_applicable`, plus repository-scoped `renamed`, `preserved`, and `failed` entries. Preserved entries
+identify `remote_checkout`, `local_executor`, or `switched_branch` as their reason. `renamed` means at least one rename
+succeeded and none failed, even when other repositories were intentionally preserved; `partial` means
+some eligible renames succeeded and others failed; `failed` means every eligible rename failed;
+`preserved` means there were branches but none were eligible; and `not_applicable` means the owner had
+no branch rows. A task whose pending marker is already gone returns
+`{"accepted": false, "reason": "title_not_pending", "task_id": "..."}` without mutation.
 An unavailable call from a session other than the persisted owner returns
 `{"accepted": false, "reason": "title_not_owner", "task_id": "..."}` without mutation.
 Blank titles and titles over the existing 500-character limit are validation errors.
@@ -151,6 +179,14 @@ retain the now-idempotent tool until its server ends.
   returns `title_not_pending`.
 - If the title update cannot be persisted, the tool returns an error, the pending marker remains, and no
   success event is published.
+- The title compare-and-set completes before any Git side effect. If one or more branch renames fail,
+  the accepted title and cleared pending state are not rolled back. Successful repositories keep their
+  new names and durable snapshots; failed repositories keep their old names. The tool reports the
+  partial or failed outcome, and a repeated title call does not retry because the title is no longer
+  pending.
+- A configured branch template can still produce a collision, including when it omits `{suffix}`. The
+  underlying Git rename fails normally and is reported without deleting, force-renaming, or changing a
+  remote branch.
 
 ## Persistence guarantees
 
@@ -159,6 +195,9 @@ applies across the current user's workspaces. The provisional title and pending 
 session, and executor restarts as part of the task row. Once claimed, the owner session ID survives in
 the same metadata. MCP catalog state is reconstructed from task mode, pending state, and owner identity;
 the same owner can recover its capability, while a different session cannot inherit it after restart.
+After a successful generated-branch rename, repository-scoped workspace and executor snapshots use the
+new branch name so backend restart, executor recovery, and session resume do not restore the
+provisional-title name.
 
 ## Scenarios
 
@@ -192,6 +231,28 @@ the same owner can recover its capability, while a different session cannot inhe
 - **GIVEN** the agent follows the tool guidance and calls `set_task_title_kandev` with a valid few-word
   title, **WHEN** persistence succeeds, **THEN** the task title changes, pending state ends, and
   connected task surfaces update.
+- **GIVEN** an auto-titled task owner is on a Kandev-generated branch, **WHEN** its title call is
+  accepted, **THEN** the branch is renamed from the provisional-title rendering to a rendering of the
+  accepted title using that repository's configured template, and restart/resume snapshots record the
+  new name.
+- **GIVEN** a task was created without `auto_title: true`, **WHEN** its title is edited, **THEN** no
+  title-driven branch rename occurs.
+- **GIVEN** an auto-titled task started from a GitHub pull request or other direct remote checkout,
+  **WHEN** the owner title call is accepted, **THEN** the task title changes but the checked-out remote
+  branch name is preserved.
+- **GIVEN** an auto-titled Local-executor task, **WHEN** the owner title call is accepted, **THEN** the
+  shared checkout branch is preserved.
+- **GIVEN** an auto-titled task whose owner switched to another branch before the title call, **WHEN**
+  the owner title call is accepted, **THEN** the selected branch is preserved and reported as preserved.
+- **GIVEN** an auto-titled multi-repository task mixes a generated branch with a direct remote
+  checkout, **WHEN** the owner title call is accepted, **THEN** the generated branch is renamed and the
+  direct remote checkout is preserved with both outcomes reported.
+- **GIVEN** a generated-branch rename fails after title persistence, **WHEN** the tool returns, **THEN**
+  the accepted task title remains, the failed repository stays on its old branch, and the response
+  reports the failure without mutating any remote branch.
+- **GIVEN** a second task session already exists when the owner sets the title, **WHEN** branch renaming
+  runs, **THEN** only the owner session's eligible branches are renamed and the other session keeps its
+  current branches.
 - **GIVEN** a user manually renames a title-pending task, **WHEN** the agent later calls
   `set_task_title_kandev`, **THEN** the user title is preserved and the tool returns
   `title_not_pending`.
@@ -209,7 +270,11 @@ the same owner can recover its capability, while a different session cannot inhe
 - Reassigning title ownership or retrying the title instruction with a different session after the
   owner launch or title call fails.
 - Removing manual task rename/edit controls.
+- Renaming remote branches, deleting the provisional branch remotely, renaming the task workspace
+  directory, or renaming branches in non-owner sessions.
+- Automatically retrying a failed Git rename after the title-pending lifecycle has resolved.
 
 ## Implementation plan
 
 - [Agent-Generated Task Titles](../../plans/agent-generated-task-titles/plan.md)
+- [Agent Title Branch Renaming](../../plans/agent-title-branch-renaming/plan.md)

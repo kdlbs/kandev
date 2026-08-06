@@ -147,7 +147,35 @@ func (c *PATClient) GetMR(ctx context.Context, projectPath string, iid int) (*MR
 	if err := c.get(ctx, endpoint, &raw); err != nil {
 		return nil, fmt.Errorf("get MR !%d: %w", iid, err)
 	}
+	targetProjectID := raw.TargetProjectID
+	if targetProjectID == 0 {
+		targetProjectID = raw.ProjectID
+	}
+	if raw.SourceProjectID > 0 && (targetProjectID == 0 || raw.SourceProjectID != targetProjectID) {
+		sourceProject, err := c.getProjectByID(ctx, raw.SourceProjectID)
+		if err != nil {
+			return nil, fmt.Errorf("resolve MR source project %d: %w", raw.SourceProjectID, err)
+		}
+		raw.SourceProject = *sourceProject
+	}
 	return convertRawMR(&raw), nil
+}
+
+func (c *PATClient) getProjectByID(ctx context.Context, id int64) (*rawProject, error) {
+	if id <= 0 {
+		return nil, errors.New("source project ID is invalid")
+	}
+	var project rawProject
+	if err := c.get(ctx, fmt.Sprintf("/projects/%d", id), &project); err != nil {
+		return nil, err
+	}
+	if project.ID == 0 {
+		project.ID = id
+	}
+	if strings.TrimSpace(project.PathWithNamespace) == "" {
+		return nil, errors.New("source project path is missing")
+	}
+	return &project, nil
 }
 
 func (c *PATClient) FindMRByBranch(ctx context.Context, projectPath, branch string) (*MR, error) {

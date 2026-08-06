@@ -77,7 +77,16 @@ export const noLiteralStringOptions = {
       // separator, which the token patterns above do not cover. Copy chunks
       // ("Select task ", " tasks, over WIP limit") carry a capital, a space or
       // punctuation and so still get flagged.
-      "[a-z0-9]+(?:[-_][a-z0-9]*)*|[-_][a-z0-9]+(?:[-_][a-z0-9]*)*",
+      //
+      // The outer `(?:…)` is load-bearing. `^` and `$` bind tighter than `|`, so
+      // the ungrouped form compiled to `(^A)|(B$)` — a first branch with no end
+      // anchor, which matched ANY string starting with a lowercase letter or a
+      // digit. That swallowed every `<Trans>` split fragment that happens to
+      // begin lowercase ("open pull requests assigned to you") in silence, for
+      // the whole repo, for as long as the pattern has existed. See the compiled
+      // -pattern test in `eslint.i18n.options.test.ts`, which fails without the
+      // group.
+      "(?:[a-z0-9]+(?:[-_][a-z0-9]*)*|[-_][a-z0-9]+(?:[-_][a-z0-9]*)*)",
       // Single lowercase/camel/kebab tokens are prop enum values,
       // classnames, and identifiers (variant="ghost", side="top",
       // value="work-items") — never display copy, which is capitalized
@@ -92,7 +101,19 @@ export const noLiteralStringOptions = {
       "^(noopener|noreferrer)( (noopener|noreferrer))*$",
       "^__[a-z_]+__$",
       "^/[\\w/\\-\\[\\]:.]*(\\?[\\w=&%.\\-]*)?$",
-      "(?:-?[a-z0-9]+(?:[:/-][a-z0-9.]+)*\\s+)*-?[a-z0-9]+(?:[:/-][a-z0-9.]+)*",
+      // Whitespace-separated token lists: Tailwind class lists that reach the
+      // guard as an object property (`{ className: "h-4 w-4" }`) rather than as
+      // a `className` JSX attribute, plus `owner/repo` and `ns:key` values.
+      //
+      // At least ONE token must carry a `-`, `:` or `/` (the middle branch).
+      // Without that requirement the pattern was "any run of lowercase words
+      // separated by spaces", which is a description of TYPOGRAPHY, not of
+      // syntax — and so it silently excluded every lowercase English sentence
+      // that happens to carry no punctuation ("open pull requests assigned to
+      // you"). Separators are what make a token a class name or a path rather
+      // than a word; English copy that needs one is rare, English copy that
+      // needs none is most of it.
+      "(?:-?[a-z0-9]+(?:[:/-][a-z0-9.]+)*\\s+)*-?[a-z0-9]+(?:[:/-][a-z0-9.]+)+(?:\\s+-?[a-z0-9]+(?:[:/-][a-z0-9.]+)*)*",
     ],
   },
   "jsx-attributes": {
@@ -120,6 +141,14 @@ export const noLiteralStringOptions = {
       // Identifiers and prefixes the caller composes into ids/testids.
       "id",
       "k",
+      // A prop whose NAME ends in `Key` carries a catalog key, not copy:
+      // `titleKey`, `descriptionKey`, `labelKey`, `i18nKey`. Migrating a surface
+      // that resolves its copy at render (`SystemRouteShell`, the preset-icon
+      // catalogs) produces exactly this shape, and the value is by construction
+      // `namespace:someKey` — already-migrated copy, flagged only for being a
+      // string. This keys off the prop NAME, a syntactic category, not off what
+      // the value happens to look like.
+      ".*[Kk]ey$",
       // Option/badge values are data the app compares and submits.
       "value",
       "cmd",
@@ -1135,11 +1164,13 @@ export const i18nGuardFiles = [
   //   - `components/settings/config-chat-agent-section.tsx`, the Configuration
   //     Chat card on Settings → Utility Agents. #2218 migrates it with the page
   //     that owns it, into `settings:configChatAgent*`.
-  //   - `components/quick-chat/**`. `quick-chat-modal.tsx` renders
-  //     `ConfigChatSetup` in its `presentation="dialog"` form and calls
-  //     `useConfigChat`, so it inherits everything migrated here, but its own
-  //     chrome — and `configuration-chat-toggle.tsx`, which `ConfigChatSetup`
-  //     renders — is still English and belongs to the quick-chat migration.
+  //
+  // `components/quick-chat/**` was the other entry here until #2300 migrated it
+  // — `quick-chat-modal.tsx` renders `ConfigChatSetup` in its
+  // `presentation="dialog"` form and calls `useConfigChat`, so it inherited
+  // everything migrated here, and its own chrome (plus
+  // `configuration-chat-toggle.tsx`, which `ConfigChatSetup` renders) now lands
+  // on the same `chat:` namespace. It is listed at the end of this file.
   "components/config-chat/*.{ts,tsx}",
 
   // Automations — `components/automations/**` (incl. `trigger-configs/`) and
@@ -1494,4 +1525,156 @@ export const i18nGuardFiles = [
   "components/jira/my-jira/filter-bar.tsx",
   "components/sentry/sentry-issue-dialog.tsx",
   "components/task-create-dialog-multi-repo-guard.ts",
+  // Stats dashboard.
+  "app/stats/stats-sections.tsx",
+  "app/stats/stats-page-client.tsx",
+  "app/stats/stats-charts.tsx",
+  // Tasks list view.
+  "app/tasks/tasks-list-view.tsx",
+  "app/tasks/tasks-list-controls.tsx",
+  "app/tasks/tasks-pagination.tsx",
+  "app/tasks/rich-task-list-row.tsx",
+  "app/tasks/[[]id[]]/kanban-task-shell.tsx",
+  "app/tasks/columns.tsx",
+  // Auth: login, invite, first-run setup.
+  "app/auth/invite-page.tsx",
+  "app/auth/setup-wizard.tsx",
+  "app/auth/login-page.tsx",
+  // Settings → Integrations index.
+  "app/settings/integrations/page.tsx",
+  // Settings → Agents: already fully migrated to the `agents:` namespace by
+  // #2193 and #2281, before this list caught up. No `settings:` copy here —
+  // recorded so the guard covers them going forward.
+  "app/settings/agents/[[]agentId[]]/use-profile-mcp-config.ts",
+  "app/settings/agents/page.tsx",
+  "app/settings/agents/[[]agentId[]]/profiles/[[]profileId[]]/command-preview-card.tsx",
+  // Home route redirect shell.
+  "app/page-client.tsx",
+  // Review dialog: top bar, file tree, diff toolbar/header/list, walkthrough.
+  "components/review/review-comments-overview.tsx",
+  "components/review/review-dialog-pr-state.tsx",
+  "components/review/review-dialog-surface.tsx",
+  "components/review/review-diff-header.tsx",
+  "components/review/review-diff-list.tsx",
+  "components/review/review-diff-toolbar.tsx",
+  "components/review/review-file-tree.tsx",
+  "components/review/review-findings-button.tsx",
+  "components/review/review-findings-overview.tsx",
+  "components/review/review-fix-comments-button.tsx",
+  "components/review/review-markdown-diff-preview-content.tsx",
+  "components/review/review-pr-selector.tsx",
+  "components/review/review-run-button.tsx",
+  "components/review/review-top-bar.tsx",
+  "components/review/walkthrough-overlay.tsx",
+  // Plain-TS label helpers the review diff list renders — guard-blind, so they
+  // are listed to keep the entries above honest rather than because lint sees
+  // anything here.
+  "components/review/types.ts",
+  // Kanban board: swimlanes, graph pipeline, and the mobile board shell.
+  "components/kanban/graph2-task-pipeline.tsx",
+  "components/kanban/kanban-header-mobile.tsx",
+  "components/kanban/kanban-header.tsx",
+  "components/kanban/mobile-column-tabs.tsx",
+  "components/kanban/mobile-drop-targets.tsx",
+  "components/kanban/mobile-fab.tsx",
+  "components/kanban/mobile-menu-sheet.tsx",
+  // Extracted out of mobile-menu-sheet.tsx to stay under the 600-line limit.
+  "components/kanban/mobile-menu-styles.ts",
+  "components/kanban/mobile-menu-utility-actions.tsx",
+  "components/kanban/mobile-menu-task-list-options.tsx",
+  "components/kanban/mobile-search-bar.tsx",
+  "components/kanban/swimlane-graph-content.tsx",
+  "components/kanban/swimlane-graph2-content.tsx",
+  "components/kanban/swimlane-header.tsx",
+  "components/kanban/swimlane-kanban-content.tsx",
+  "components/kanban/task-multi-select-toolbar.tsx",
+  // Kanban board: loose card/column/dropdown components on the same namespace.
+  "components/kanban-board.tsx",
+  "components/kanban-card-content.tsx",
+  "components/kanban-card-menu-items.tsx",
+  "components/kanban-column.tsx",
+  "components/kanban-display-dropdown.tsx",
+  "components/kanban-with-preview.tsx",
+  // Shared by the desktop dropdown and the mobile sheet; returns catalog keys.
+  "lib/kanban/repository-placeholder.ts",
+  // The editor surfaces: Monaco/CodeMirror editors and diff viewers, the Shiki
+  // and Monaco code blocks, the TipTap plan editor, and the file-actions menu.
+  // Copy lands in the `editors:` namespace.
+  //
+  // Two of these files hold copy the rule cannot see, so it is recorded here
+  // rather than enforced: `tiptap-mermaid-extension.ts` and the CodeMirror
+  // gutter marker in `use-codemirror-editor-state.ts` build DOM imperatively
+  // from ProseMirror/CodeMirror callbacks, which have no hook scope, so both
+  // resolve through the module-level `t` from `@/lib/i18n`.
+  "components/editors/**/*.{ts,tsx}",
+  // Quick chat: the modal, its tabs, the setup form and the delete dialog.
+  // Copy lands in the existing `chat:` namespace, shared with config chat.
+  "components/quick-chat/**/*.{ts,tsx}",
+  // Diff viewer: the pierre-backed viewer shell, its toolbar, the inline
+  // comment/finding surfaces and the walkthrough overlay. Whole directory —
+  // every file in it is migrated, and the `diff` namespace is not shared with
+  // anything outside it.
+  //
+  // Git statuses, file modes, hunk markers and the pierre option keys in here
+  // are protocol values, not copy, and stay in English by design; only their
+  // labels are translated.
+  "components/diff/**/*.{ts,tsx}",
+  // Change-request (PR/MR) and commit dialogs, plus the shared integration
+  // settings widgets: the auth-status banner, the copy-config menu, the
+  // watcher card shell and the integrations nav menu. Both directories share
+  // the `integrations` namespace.
+  //
+  // `change-request-feedback.ts` holds no JSX, so `mode: "jsx-only"` never
+  // inspects it; the glob records that it is migrated, and only the
+  // pseudo-locale can prove it stays that way. Branch names, remotes and VCS
+  // provider ids travel through it as data and are never translated.
+  "components/vcs/**/*.{ts,tsx}",
+  "components/integrations/**/*.{ts,tsx}",
+  // The CLI agent-profile editor. `components/agent/` has no namespace rule of
+  // its own, so its copy lives in `common`.
+  "components/agent/**/*.{ts,tsx}",
+  // SPA entry: the route tables, their Suspense/loading placeholders and the
+  // root/route error boundaries. `src/**` has no namespace rule either, so this
+  // copy is also on `common`. Route names reach `RouteLoading` as catalog keys
+  // rather than resolved copy — see the comment there.
+  "src/*.{ts,tsx}",
+  // Task chat surface: the composer, the transcript, the message renderers and
+  // the Kandev tool-call renderers. A directory glob rather than a file list —
+  // the whole tree is migrated, including the `.ts` helpers that hold copy
+  // (`subagent-meta.ts`, `use-attachment-file-feedback.ts`, `agent-error-label.ts`)
+  // which `mode: "jsx-only"` never inspects; only the pseudo-locale can prove
+  // those stay clean.
+  //
+  // Deliberately left in English inside this tree, because they are protocol
+  // rather than copy: message `author_type` values, the `prompt:<id>` context
+  // path, the `null` rendered in the debug-metadata dialog, the highlight CSS
+  // in `message-comment-decorations.tsx`, and the programming-language names in
+  // `tiptap-code-block-view.tsx`.
+  "components/task/chat/**/*.{ts,tsx}",
+  // Seven task subdirectories, one glob each. Whole trees — including the
+  // `.ts` helpers and the module-scope config tables that `mode: "jsx-only"`
+  // never inspects, so only the pseudo-locale can prove those stay clean.
+  //
+  // The pattern used throughout these trees for copy the rule cannot see: a
+  // module-level table stores a `labelKey` (a catalog key) rather than a
+  // resolved string, and the component resolves it at render. That keeps the
+  // sibling `value` / `key` field — which is persisted or compared with `===`
+  // — in English while the label follows the locale.
+  //
+  // Deliberately left in English inside these trees, because they are data or
+  // protocol rather than copy: sidebar-filter *values* (`state`, `in_progress`,
+  // …) and sort/group keys, which are persisted in a saved view; the `"main"`
+  // default base-branch name in `session-mobile-top-bar-git-controls.tsx`; the
+  // share API's `applied_rules` redaction ids and share URLs/tokens; terminal
+  // key sequences and key-cap glyphs in `mobile-terminal-keybar-helpers.tsx`
+  // (only their spoken aria-labels are translated); and the `group:` bucket on
+  // the command-palette entry in `sidebar-filter-bar.tsx`, which is shared
+  // taxonomy owned by `components/session-commands.tsx` and migrates with it.
+  "components/task/simple/**/*.{ts,tsx}",
+  "components/task/mobile/**/*.{ts,tsx}",
+  "components/task/add-workspace-sources/**/*.{ts,tsx}",
+  "components/task/sidebar-filter/**/*.{ts,tsx}",
+  "components/task/share/**/*.{ts,tsx}",
+  "components/task/inspector/**/*.{ts,tsx}",
+  "components/task/document/**/*.{ts,tsx}",
 ];

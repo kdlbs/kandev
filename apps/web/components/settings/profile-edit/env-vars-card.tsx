@@ -10,6 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import type { ProfileEnvVar } from "@/lib/types/http";
 import { SettingsCard } from "@/components/settings/settings-card";
 import { useTranslation } from "react-i18next";
+import type { SecretListItem } from "@/lib/types/http-secrets";
 
 export type EnvVarRow = {
   key: string;
@@ -48,11 +49,13 @@ function ValueOrSecretInput({
 }: {
   row: EnvVarRow;
   index: number;
-  secrets: { id: string; name: string }[];
+  secrets: SecretListItem[];
   onUpdate: (index: number, field: keyof EnvVarRow, val: string) => void;
   baselineRow?: EnvVarRow;
 }) {
   const { t } = useTranslation();
+  const hasMissingSecret =
+    Boolean(row.secretId) && !secrets.some((secret) => secret.id === row.secretId);
   if (row.mode === "value") {
     return (
       <Input
@@ -73,6 +76,9 @@ function ValueOrSecretInput({
         <SelectValue placeholder={t("executors:selectSecret")} />
       </SelectTrigger>
       <SelectContent>
+        {hasMissingSecret && (
+          <SelectItem value={row.secretId}>{t("executors:missingSecretReference")}</SelectItem>
+        )}
         {secrets.map((s) => (
           <SelectItem key={s.id} value={s.id}>
             {s.name}
@@ -93,7 +99,7 @@ function EnvVarRowComponent({
 }: {
   row: EnvVarRow;
   index: number;
-  secrets: { id: string; name: string }[];
+  secrets: SecretListItem[];
   onUpdate: (index: number, field: keyof EnvVarRow, val: string) => void;
   onRemove: (index: number) => void;
   baselineRow?: EnvVarRow;
@@ -158,7 +164,7 @@ function DraftValueInput({
 }: {
   draft: EnvVarRow;
   valueId: string;
-  secrets: { id: string; name: string }[];
+  secrets: SecretListItem[];
   onEnter: (e: React.KeyboardEvent<HTMLInputElement>) => void;
   setDraft: React.Dispatch<React.SetStateAction<EnvVarRow>>;
 }) {
@@ -182,6 +188,9 @@ function DraftValueInput({
         <SelectValue placeholder={t("executors:selectSecret")} />
       </SelectTrigger>
       <SelectContent>
+        {draft.secretId && !secrets.some((secret) => secret.id === draft.secretId) && (
+          <SelectItem value={draft.secretId}>{t("executors:missingSecretReference")}</SelectItem>
+        )}
         {secrets.map((s) => (
           <SelectItem key={s.id} value={s.id}>
             {s.name}
@@ -197,7 +206,7 @@ function EnvVarAddForm({
   secrets,
 }: {
   onAdd: (row: EnvVarRow) => void;
-  secrets: { id: string; name: string }[];
+  secrets: SecretListItem[];
 }) {
   const { t } = useTranslation();
   const uid = useId();
@@ -293,7 +302,7 @@ function EnvVarAddForm({
 type EnvVarsFieldProps = {
   rows: EnvVarRow[];
   baselineRows?: EnvVarRow[];
-  secrets: { id: string; name: string }[];
+  secrets: SecretListItem[];
   onAdd: (row: EnvVarRow) => void;
   onUpdate: (index: number, field: keyof EnvVarRow, val: string) => void;
   onRemove: (index: number) => void;

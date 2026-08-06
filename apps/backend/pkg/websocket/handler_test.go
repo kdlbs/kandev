@@ -25,6 +25,29 @@ func TestDispatcher_RegisterAndDispatch(t *testing.T) {
 	}
 }
 
+func TestDispatcher_HandlerCountTracksUniqueActions(t *testing.T) {
+	d := NewDispatcher()
+	if got := dispatcherHandlerCount(t, d); got != 0 {
+		t.Fatalf("initial handler count = %d, want 0", got)
+	}
+	noop := HandlerFunc(func(_ context.Context, msg *Message) (*Message, error) { return msg, nil })
+	d.RegisterFunc("one", noop)
+	d.RegisterFunc("two", noop)
+	d.RegisterFunc("one", noop)
+	if got := dispatcherHandlerCount(t, d); got != 2 {
+		t.Fatalf("handler count after replacement = %d, want 2", got)
+	}
+}
+
+func dispatcherHandlerCount(t *testing.T, d *Dispatcher) int {
+	t.Helper()
+	counter, ok := interface{}(d).(interface{ HandlerCount() int })
+	if !ok {
+		t.Fatal("Dispatcher does not expose HandlerCount")
+	}
+	return counter.HandlerCount()
+}
+
 func TestDispatcher_UnknownActionReturnsError(t *testing.T) {
 	d := NewDispatcher()
 

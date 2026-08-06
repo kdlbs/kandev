@@ -208,6 +208,28 @@ describe("SettingsTree rendering", () => {
   });
 });
 
+describe("Workspace settings order", () => {
+  beforeEach(() => {
+    state.workspaces.activeId = MAIN_WORKSPACE_ID;
+    state.workspaces.items = [{ id: MAIN_WORKSPACE_ID, name: MAIN_WORKSPACE_NAME }];
+  });
+
+  afterEach(() => cleanup());
+
+  it("places workspace secrets below automations", () => {
+    render(<WorkspacesGroup pathname="/settings/workspace" expanded />);
+
+    const hrefs = screen.getAllByRole("link").map((link) => link.getAttribute("href"));
+    const automationsIndex = hrefs.indexOf("/settings/workspace/ws-1/automations");
+    const secretsIndex = hrefs.indexOf("/settings/workspace/ws-1/secrets");
+
+    expect(automationsIndex).toBeGreaterThanOrEqual(0);
+    expect(secretsIndex).toBeGreaterThan(automationsIndex);
+    expect(screen.getByRole("link", { name: "Secrets" })).toBeTruthy();
+    expect(screen.queryByRole("link", { name: "Workspace Secrets" })).toBeNull();
+  });
+});
+
 describe("SettingsTree integration status", () => {
   beforeEach(() => {
     state.workspaces.activeId = MAIN_WORKSPACE_ID;

@@ -50,6 +50,7 @@ import {
 } from "./office-agent-client-routes";
 import { RoutineDetailRoute } from "./office-routine-client-routes";
 import { TooltipProvider } from "@kandev/ui/tooltip";
+import { Trans, useTranslation } from "react-i18next";
 
 type RouteRenderer = () => React.ReactNode;
 
@@ -369,17 +370,19 @@ function matchAgentRoute(pathname: string): AgentRouteMatch | null {
 }
 
 function OfficeUnavailable() {
+  const { t } = useTranslation();
   return (
     <div className="flex h-full items-center justify-center p-6 text-sm text-muted-foreground">
-      Office is not enabled for this runtime.
+      {t("common:officeIsNotEnabledForThis")}
     </div>
   );
 }
 
 function OfficeRouteLoading() {
+  const { t } = useTranslation();
   return (
     <div className="flex h-full items-center justify-center">
-      <span className="text-sm text-muted-foreground">Loading...</span>
+      <span className="text-sm text-muted-foreground">{t("common:loadingEllipsis")}</span>
     </div>
   );
 }
@@ -406,6 +409,7 @@ type OfficeSetupState =
   | { status: "error"; message: string };
 
 function OfficeSetupRoute() {
+  const { t } = useTranslation();
   const router = useRouter();
   const searchParams = useSearchParams();
   const mode = searchParams.get("mode") ?? undefined;
@@ -428,7 +432,7 @@ function OfficeSetupRoute() {
         if (cancelled) return;
         setState({
           status: "error",
-          message: error instanceof Error ? error.message : "Failed to load setup",
+          message: error instanceof Error ? error.message : t("common:failedToLoadSetup"),
         });
       }
     }
@@ -457,8 +461,10 @@ function OfficeSetupRoute() {
 function OfficeRouteFallback({ pathname }: { pathname: string }) {
   return (
     <div className="p-6 text-sm text-muted-foreground">
-      This Office route is handled by the SPA shell, but its dedicated client page is still being
-      ported: <span className="font-mono">{pathname}</span>
+      <Trans i18nKey="common:officeRouteNotPortedYet" values={{ pathname }}>
+        This Office route is handled by the SPA shell, but its dedicated client page is still being
+        ported: <span className="font-mono">{pathname}</span>
+      </Trans>
     </div>
   );
 }

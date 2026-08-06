@@ -3,6 +3,7 @@
 import { useDroppable } from "@dnd-kit/core";
 import { cn } from "@/lib/utils";
 import type { WorkflowStep } from "../kanban-column";
+import { useTranslation } from "react-i18next";
 
 type MobileDropTargetProps = {
   step: WorkflowStep;
@@ -39,6 +40,7 @@ type MobileDropTargetsProps = {
 };
 
 export function MobileDropTargets({ steps, currentStepId, isDragging }: MobileDropTargetsProps) {
+  const { t } = useTranslation();
   if (!isDragging) return null;
 
   return (
@@ -49,7 +51,7 @@ export function MobileDropTargets({ steps, currentStepId, isDragging }: MobileDr
         ))}
       </div>
       <p className="text-xs text-muted-foreground text-center mt-2">
-        Drop on a column to move task
+        {t("kanban:dropOnAColumnToMove")}
       </p>
     </div>
   );

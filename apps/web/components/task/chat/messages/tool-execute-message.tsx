@@ -8,6 +8,7 @@ import type { Message } from "@/lib/types/http";
 import { ShellOutputDisclosure } from "./shell-output-disclosure";
 import { normalizeToolCallStatus } from "./tool-status";
 import type { ToolCallMetadata } from "../types";
+import { useTranslation } from "react-i18next";
 
 type ToolExecuteMessageProps = {
   comment: Message;
@@ -21,9 +22,10 @@ function ExecuteStatusIcon({
   status: string | undefined;
   exitCode: number | undefined;
 }) {
+  const { t } = useTranslation();
   if (status === "complete" && exitCode === 0) {
     return (
-      <span className="shrink-0" aria-label="Command succeeded">
+      <span className="shrink-0" aria-label={t("task:commandSucceeded")}>
         <IconCheck aria-hidden className="h-3.5 w-3.5 text-green-500" />
       </span>
     );
@@ -33,14 +35,14 @@ function ExecuteStatusIcon({
     (status === "complete" && typeof exitCode === "number" && exitCode !== 0)
   ) {
     return (
-      <span className="shrink-0" aria-label="Command failed">
+      <span className="shrink-0" aria-label={t("task:commandFailed")}>
         <IconX aria-hidden className="h-3.5 w-3.5 text-red-500" />
       </span>
     );
   }
   if (status === "running") {
     return (
-      <span className="shrink-0" aria-label="Command running">
+      <span className="shrink-0" aria-label={t("task:commandRunning")}>
         <GridSpinner className="text-muted-foreground" />
       </span>
     );
@@ -59,6 +61,7 @@ export const ToolExecuteMessage = memo(function ToolExecuteMessage({
   comment,
   worktreePath,
 }: ToolExecuteMessageProps) {
+  const { t } = useTranslation();
   const { status, shellExec } = parseExecuteMetadata(comment);
   const command = shellExec?.command || comment.content;
   const displayCommand = transformPathsInText(command, worktreePath);
@@ -80,7 +83,7 @@ export const ToolExecuteMessage = memo(function ToolExecuteMessage({
         </div>
         {displayWorkDir && (
           <div className="min-w-0 whitespace-pre-wrap break-words [overflow-wrap:anywhere] text-xs text-muted-foreground">
-            <span className="opacity-60">cwd:</span>{" "}
+            <span className="opacity-60">{t("task:cwd")}</span>{" "}
             <span className="font-mono" title={workDir}>
               {displayWorkDir}
             </span>

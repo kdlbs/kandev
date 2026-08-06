@@ -181,6 +181,9 @@ func TestQueueHandlersDenyUnauthorizedSessionActions(t *testing.T) {
 			return map[string]interface{}{"session_id": "s", "entry_id": id, "content": "changed"}
 		}},
 		{name: "drain", action: ws.ActionMessageQueueDrain, call: (*QueueHandlers).wsDrainQueue, body: func(string) map[string]interface{} { return map[string]interface{}{"session_id": "s"} }},
+		{name: "send now", action: ws.ActionMessageQueueSendNow, call: (*QueueHandlers).wsSendNow, body: func(string) map[string]interface{} {
+			return map[string]interface{}{"session_id": "s", "scope": orchestrator.QueueSendNowScopeEntry, "entry_id": "q"}
+		}},
 		{name: "remove", action: ws.ActionMessageQueueRemove, call: (*QueueHandlers).wsRemoveEntry, body: func(id string) map[string]interface{} {
 			return map[string]interface{}{"session_id": "s", "entry_id": id}
 		}},
@@ -251,7 +254,7 @@ func TestQueueHandlersDenyUnauthorizedTaskSessionPairActions(t *testing.T) {
 
 func TestWsQueueMessage(t *testing.T) {
 	t.Run("queues a message", func(t *testing.T) {
-		handlers, _ := setupQueueHandlers(t)
+		handlers, svc := setupQueueHandlers(t)
 		ctx := context.Background()
 
 		msg := createTestMessage(t, ws.ActionMessageQueueAdd, map[string]interface{}{
@@ -259,11 +262,23 @@ func TestWsQueueMessage(t *testing.T) {
 			"task_id":    "task-1",
 			"content":    "test message",
 			"user_id":    "user-1",
+			"context_files": []map[string]interface{}{
+				{"path": "src/components", "name": "components", "is_directory": true},
+			},
 		})
 
 		response, err := handlers.wsQueueMessage(ctx, msg)
 		require.NoError(t, err)
 		assert.Equal(t, ws.MessageTypeResponse, response.Type)
+		entries := svc.GetStatus(ctx, "session-1").Entries
+		require.Len(t, entries, 1)
+		files, ok := entries[0].Metadata[messagequeue.MetadataContextFiles].([]v1.ContextFileMeta)
+		require.True(t, ok)
+		require.Len(t, files, 1)
+		assert.Equal(t, "src/components", files[0].Path)
+		assert.Equal(t, "components", files[0].Name)
+		require.NotNil(t, files[0].IsDirectory)
+		assert.True(t, *files[0].IsDirectory)
 	})
 
 	t.Run("rejects missing session_id", func(t *testing.T) {

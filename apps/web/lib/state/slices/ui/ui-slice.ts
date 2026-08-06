@@ -16,15 +16,21 @@ import { APP_SIDEBAR_EXPANDED_WIDTH } from "@/components/app-sidebar/app-sidebar
 import { buildSidebarTaskPrefsActions } from "./sidebar-task-prefs-actions";
 import { buildSidebarViewActions } from "./sidebar-view-actions";
 import { DEFAULT_VIEW } from "./sidebar-view-builtins";
-import type { SidebarView, SortSpec } from "./sidebar-view-types";
+import type { SidebarView, SidebarViewDraft, SortSpec } from "./sidebar-view-types";
 import type { SystemHealthResponse } from "@/lib/types/health";
 import type { ActiveDocument, QuickChatSession, UISlice, UISliceState } from "./types";
 import { getQuickChatSetupSessionId } from "./quick-chat-session";
 import {
   reconcileQuickChatSessions,
+  reconcileQuickTerminalTabs,
   removeQuickChatSessionsForTask,
   upsertQuickChatSession,
 } from "./quick-chat-sync";
+import {
+  activateConversationDraft,
+  activateWorkspaceFallback,
+  buildQuickTerminalActions,
+} from "./quick-terminal-actions";
 
 /** Default sidebar view state: the single built-in "All tasks" view, active, no draft. */
 function createDefaultSidebarState(): UISliceState["sidebarViews"] {
@@ -69,6 +75,18 @@ export function migrateView(view: SidebarView): SidebarView {
   };
 }
 
+/** Drops removed filter dimensions from an in-flight saved-view draft. */
+export function migrateSidebarViewDraft(draft: SidebarViewDraft): SidebarViewDraft {
+  const sort: SortSpec = KNOWN_SORT_KEYS.has(draft.sort.key)
+    ? draft.sort
+    : { key: "state", direction: draft.sort.direction };
+  return {
+    ...draft,
+    filters: draft.filters.filter((c) => KNOWN_DIMENSIONS.has(c.dimension)),
+    sort,
+  };
+}
+
 export const defaultUIState: UISliceState = {
   previewPanel: {
     openBySessionId: {},
@@ -95,7 +113,15 @@ export const defaultUIState: UISliceState = {
   reviewPRSelection: { selectedKeyByTaskId: {} },
   documentPanel: { activeDocumentBySessionId: {} },
   systemHealth: { issues: [], checks: [], healthy: true, loaded: false, loading: false },
-  quickChat: { isOpen: false, sessions: [], activeSessionId: null },
+  quickChat: {
+    isOpen: false,
+    sessions: [],
+    activeSessionId: null,
+    terminalTabs: [],
+    activeKind: "conversation",
+    activeTerminalTabId: null,
+    lastTerminalTabIdByWorkspace: {},
+  },
   sessionFailureNotification: null,
   taskDeletedNotification: null,
   updateAvailableNotification: null,
@@ -321,6 +347,7 @@ function buildOpenQuickChatAction(set: ImmerSet) {
         if (existingConfigSession) {
           draft.quickChat.isOpen = true;
           draft.quickChat.activeSessionId = existingConfigSession.sessionId;
+          draft.quickChat.activeKind = "conversation";
           return;
         }
         const setupSessionId = getQuickChatSetupSessionId(workspaceId, kind);
@@ -329,6 +356,7 @@ function buildOpenQuickChatAction(set: ImmerSet) {
         }
         draft.quickChat.isOpen = true;
         draft.quickChat.activeSessionId = setupSessionId;
+        draft.quickChat.activeKind = "conversation";
         return;
       }
       const existing = draft.quickChat.sessions.find((session) => session.sessionId === sessionId);
@@ -341,6 +369,7 @@ function buildOpenQuickChatAction(set: ImmerSet) {
       }
       draft.quickChat.isOpen = true;
       draft.quickChat.activeSessionId = sessionId;
+      draft.quickChat.activeKind = "conversation";
     });
 }
 
@@ -370,7 +399,10 @@ function buildQuickChatActions(set: ImmerSet) {
         } else {
           draft.quickChat.sessions.push({ sessionId, workspaceId, agentProfileId, kind, taskId });
         }
-        if (shouldActivate) draft.quickChat.activeSessionId = sessionId;
+        if (shouldActivate) {
+          draft.quickChat.activeSessionId = sessionId;
+          draft.quickChat.activeKind = "conversation";
+        }
       }),
     openQuickChat: buildOpenQuickChatAction(set),
     closeQuickChat: () =>
@@ -385,18 +417,31 @@ function buildQuickChatActions(set: ImmerSet) {
         draft.quickChat.sessions = draft.quickChat.sessions.filter(
           (session) => session.sessionId !== sessionId,
         );
-        if (draft.quickChat.activeSessionId !== sessionId) return;
+        if (
+          draft.quickChat.activeKind !== "conversation" ||
+          draft.quickChat.activeSessionId !== sessionId
+        ) {
+          return;
+        }
         const nextSession = draft.quickChat.sessions.find(
           (session) => session.workspaceId === closingSession?.workspaceId,
         );
-        draft.quickChat.activeSessionId = nextSession?.sessionId ?? null;
-        if (!nextSession) draft.quickChat.isOpen = false;
+        if (nextSession) {
+          activateConversationDraft(
+            draft.quickChat,
+            nextSession.sessionId,
+            nextSession.workspaceId,
+          );
+        } else {
+          activateWorkspaceFallback(draft.quickChat, closingSession?.workspaceId);
+        }
       }),
     setActiveQuickChatSession: (sessionId: string, workspaceId: string) =>
       set((draft) => {
         const session = draft.quickChat.sessions.find((item) => item.sessionId === sessionId);
         if (!session || session.workspaceId !== workspaceId) return;
         draft.quickChat.activeSessionId = sessionId;
+        draft.quickChat.activeKind = "conversation";
       }),
     // Optimistic only. Persisting the name is `persistQuickChatRename`'s job,
     // so the backing task title stays the shared source of truth.
@@ -408,6 +453,10 @@ function buildQuickChatActions(set: ImmerSet) {
     syncQuickChatSessions: (workspaceId: string, sessions: QuickChatSession[]) =>
       set((draft) => {
         draft.quickChat = reconcileQuickChatSessions(draft.quickChat, workspaceId, sessions);
+      }),
+    syncQuickTerminalTabs: (workspaceId: string, tabs: UISliceState["quickChat"]["terminalTabs"]) =>
+      set((draft) => {
+        draft.quickChat = reconcileQuickTerminalTabs(draft.quickChat, workspaceId, tabs);
       }),
     upsertQuickChatSessionFromEvent: (session: QuickChatSession) =>
       set((draft) => {
@@ -445,6 +494,7 @@ export const createUISlice: StateCreator<UISlice, [["zustand/immer", never]], []
   ...buildSystemHealthActions(set),
   ...buildDismissedAgentErrors(set),
   ...buildNotificationActions(set),
+  ...buildQuickTerminalActions(set),
   ...buildQuickChatActions(set),
   setRightPanelActiveTab: (sessionId, tab) =>
     set((draft) => {

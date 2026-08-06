@@ -6,7 +6,8 @@ import type { Message, TaskSessionState } from "@/lib/types/http";
 import { useSessionTurn } from "@/hooks/domains/session/use-session-turn";
 import { useAppStore } from "@/components/state-provider";
 import { GridSpinner } from "@/components/grid-spinner";
-import { resolveAgentErrorLabel } from "./agent-error-label";
+import { resolveAgentErrorLabelKey } from "./agent-error-label";
+import { useTranslation } from "react-i18next";
 
 type AgentStatusProps = {
   sessionState?: TaskSessionState;
@@ -15,25 +16,27 @@ type AgentStatusProps = {
   isWorking?: boolean;
 };
 
+// Labels are catalog keys, not copy: this table is built at module load, where
+// a `t()` call would freeze at the boot locale. They resolve at render.
 type StatusConfig = {
-  label: string;
+  labelKey: string;
   dynamicLabel?: boolean;
   icon: "spinner" | "error" | "warning" | null;
 };
 
 const STATE_CONFIG: Record<TaskSessionState, StatusConfig> = {
-  CREATED: { label: "", icon: null },
-  STARTING: { label: "Agent is starting", dynamicLabel: true, icon: "spinner" },
-  RUNNING: { label: "Agent is running", icon: "spinner" },
-  IDLE: { label: "", icon: null },
-  WAITING_FOR_INPUT: { label: "", icon: null },
-  COMPLETED: { label: "", icon: null },
-  FAILED: { label: "Agent has encountered an error", icon: "error" },
-  CANCELLED: { label: "", icon: null },
+  CREATED: { labelKey: "", icon: null },
+  STARTING: { labelKey: "task:agentIsStarting", dynamicLabel: true, icon: "spinner" },
+  RUNNING: { labelKey: "task:agentIsRunning", icon: "spinner" },
+  IDLE: { labelKey: "", icon: null },
+  WAITING_FOR_INPUT: { labelKey: "", icon: null },
+  COMPLETED: { labelKey: "", icon: null },
+  FAILED: { labelKey: "task:agentHasEncounteredAnError", icon: "error" },
+  CANCELLED: { labelKey: "", icon: null },
 };
 
 const BACKGROUND_WORK_CONFIG: StatusConfig = {
-  label: "Background work is running",
+  labelKey: "task:backgroundWorkIsRunning",
   icon: "spinner",
 };
 
@@ -154,9 +157,10 @@ function AgentErrorStatus({
   config,
   sessionId,
 }: {
-  config: { label: string };
+  config: { labelKey: string };
   sessionId: string | null;
 }) {
+  const { t } = useTranslation();
   const errorMessage = useAppStore((state) =>
     sessionId
       ? (state.taskSessions.items[sessionId]?.error_message as string | undefined)
@@ -165,8 +169,11 @@ function AgentErrorStatus({
   const [expanded, setExpanded] = useState(false);
   const toggle = useCallback(() => setExpanded((value) => !value), []);
 
-  const displayLabel = resolveAgentErrorLabel(errorMessage, config.label);
+  const displayLabel = t(resolveAgentErrorLabelKey(errorMessage, config.labelKey));
   const hasDetails = !!errorMessage;
+  const detailsToggleLabel = expanded
+    ? t("task:hideErrorDetails", { displayLabel })
+    : t("task:showErrorDetails", { displayLabel });
 
   return (
     <div
@@ -180,9 +187,7 @@ function AgentErrorStatus({
         onClick={hasDetails ? toggle : undefined}
         disabled={!hasDetails}
         aria-expanded={hasDetails ? expanded : undefined}
-        aria-label={
-          hasDetails ? `${expanded ? "Hide" : "Show"} error details: ${displayLabel}` : displayLabel
-        }
+        aria-label={hasDetails ? detailsToggleLabel : displayLabel}
       >
         <IconAlertCircle className="h-3.5 w-3.5 flex-shrink-0" aria-hidden="true" />
         <span className="min-w-0 break-words font-medium">{displayLabel}</span>
@@ -252,7 +257,7 @@ function useAgentStatusData(sessionId: string | null, messages: Message[], isRun
 }
 
 function renderActiveStatus(
-  config: { label: string; icon: string },
+  config: { label: string; labelKey: string; icon: string },
   sessionId: string | null,
   runningData: ReturnType<typeof useAgentStatusData>,
 ): React.ReactNode {
@@ -290,6 +295,7 @@ export function AgentStatus({
   messages = [],
   isWorking = false,
 }: AgentStatusProps) {
+  const { t } = useTranslation();
   const hasBackgroundWork = useAppStore((state) =>
     sessionId ? state.taskSessions.items[sessionId]?.foreground_activity === "background" : false,
   );
@@ -300,8 +306,12 @@ export function AgentStatus({
   const runningData = useAgentStatusData(sessionId, messages, isRunning);
 
   if (config?.icon) {
-    const label = agentLabel ? `Starting ${agentLabel}` : config.label;
-    return renderActiveStatus({ label, icon: config.icon }, sessionId, runningData);
+    const label = agentLabel ? t("task:startingAgent", { agentLabel }) : t(config.labelKey);
+    return renderActiveStatus(
+      { label, labelKey: config.labelKey, icon: config.icon },
+      sessionId,
+      runningData,
+    );
   }
 
   const displayDuration = runningData.displayDuration;

@@ -11,12 +11,14 @@ import { deriveSessionInputMode } from "./session-input-mode";
 function session(
   state: TaskSessionState,
   foregroundActivity?: ForegroundActivity | null,
+  supportsSteering?: boolean,
 ): TaskSession {
   return {
     id: sessionId("selected-session"),
     task_id: taskId("task-1"),
     state,
     foreground_activity: foregroundActivity,
+    supports_steering: supportsSteering,
     started_at: "2026-07-22T00:00:00Z",
     updated_at: "2026-07-22T00:00:00Z",
   };
@@ -41,6 +43,16 @@ describe("deriveSessionInputMode", () => {
 
   it("treats an unknown RUNNING activity conservatively as queue", () => {
     const selected = session("RUNNING", "unknown" as ForegroundActivity);
+    expect(deriveSessionInputMode(selected)).toBe("queue");
+  });
+
+  it("delivers directly for a generating session that supports steering", () => {
+    const selected = session("RUNNING", "generating", true);
+    expect(deriveSessionInputMode(selected)).toBe("direct");
+  });
+
+  it("still queues a generating session when steering is not supported", () => {
+    const selected = session("RUNNING", "generating", false);
     expect(deriveSessionInputMode(selected)).toBe("queue");
   });
 

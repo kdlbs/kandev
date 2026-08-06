@@ -82,6 +82,7 @@ function buildDraftRepo(
     cleanup_script: "",
     dev_script: "",
     copy_files: "",
+    secret_bindings: [],
     created_at: "",
     updated_at: "",
     scripts: [],
@@ -123,6 +124,7 @@ async function saveNewRepository(
     cleanup_script: repo.cleanup_script,
     dev_script: repo.dev_script,
     copy_files: repo.copy_files,
+    secret_bindings: repo.secret_bindings ?? [],
   });
   // Like the repository name above, the seeded script name and command are
   // PERSISTED and sent to a shell verbatim, so both stay in English.
@@ -179,6 +181,7 @@ async function saveExistingRepository({
     cleanup_script: repo.cleanup_script,
     dev_script: repo.dev_script,
     copy_files: repo.copy_files,
+    secret_bindings: repo.secret_bindings ?? [],
   });
   const savedScripts = savedRepositoriesById.get(repoId)?.scripts ?? [];
   const currentScriptIds = new Set(repo.scripts.map((s) => s.id));

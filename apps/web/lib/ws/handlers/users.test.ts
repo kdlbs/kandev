@@ -332,6 +332,28 @@ describe("user settings websocket task-create last-used", () => {
   });
 });
 
+describe("user settings websocket sidebar draft migration", () => {
+  it("preserves an archived clause in a live draft", () => {
+    const store = makeStore();
+
+    registerUsersHandlers(store)["user.settings.updated"]?.(
+      userSettingsMessage({
+        sidebar_views: [],
+        sidebar_draft: {
+          base_view_id: "all",
+          filters: [{ id: "archived", dimension: "archived", op: "is", value: true }],
+          sort: { key: "state", direction: "asc" },
+          group: "none",
+        },
+      }),
+    );
+
+    expect(store.getState().sidebarViews.draft?.filters).toEqual([
+      { id: "archived", dimension: "archived", op: "is", value: true },
+    ]);
+  });
+});
+
 describe("user settings websocket sidebar settings", () => {
   it("preserves userSettings sidebar fields when payload omits them", () => {
     const store = makeStore();

@@ -19,6 +19,7 @@ import { useRemoteAuthSpecs } from "@/hooks/domains/settings/use-remote-auth-spe
 import { useTaskExecutorProfile } from "@/hooks/domains/session/use-task-executor-profile";
 import { isAgentConfiguredOnExecutor } from "@/lib/agent-executor-compat";
 import type { AgentProfileOption } from "@/lib/state/slices";
+import { isSelectableAgentProfile } from "@/lib/state/slices/settings/types";
 
 export type HandoffProfile = {
   id: string;
@@ -43,7 +44,7 @@ export function useHandoffProfiles(taskId: string, enabled = true): HandoffProfi
   const { specs: authSpecs, loaded: authLoaded } = useRemoteAuthSpecs();
 
   return useMemo(() => {
-    return agentProfiles.map((profile) => {
+    return agentProfiles.filter(isSelectableAgentProfile).map((profile) => {
       const { label, agentName } = profileDisplayLabel(profile);
       let disabled = false;
       if (executorProfile && authLoaded) {

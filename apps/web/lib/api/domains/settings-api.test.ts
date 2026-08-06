@@ -4,7 +4,13 @@ vi.mock("@/lib/config", () => ({
   getBackendConfig: () => ({ apiBaseUrl: "http://api.test" }),
 }));
 
-import { fetchMessageQueueSettings, updateMessageQueueSettings } from "./settings-api";
+import {
+  fetchMessageQueueSettings,
+  fetchSleepInhibitionSettings,
+  startHostShell,
+  updateMessageQueueSettings,
+  updateSleepInhibitionSettings,
+} from "./settings-api";
 
 const BASE = "http://api.test/api/v1/system/message-queue/settings";
 type FetchInput = Parameters<typeof fetch>[0];
@@ -64,5 +70,68 @@ describe("message queue settings api", () => {
     expect(lastCall().url).toBe(BASE);
     expect(lastCall().init?.method).toBe("PATCH");
     expect(lastCall().init?.body).toBe(JSON.stringify({ max_per_session: 25 }));
+  });
+});
+
+describe("sleep inhibition settings api", () => {
+  it("fetches the install-wide setting without cache", async () => {
+    fetchSpy.mockResolvedValueOnce(
+      jsonResponse({
+        settings: { enabled: false },
+        status: { platform: "linux", supported: true, active: false },
+      }),
+    );
+
+    const response = await fetchSleepInhibitionSettings();
+
+    expect(lastCall().url).toBe("http://api.test/api/v1/system/sleep-inhibition");
+    expect(lastCall().init?.cache).toBe("no-store");
+    expect(response.settings.enabled).toBe(false);
+  });
+
+  it("PATCHes the configured enabled value", async () => {
+    fetchSpy.mockResolvedValueOnce(
+      jsonResponse({
+        settings: { enabled: true },
+        status: { platform: "linux", supported: true, active: true },
+      }),
+    );
+
+    await updateSleepInhibitionSettings({ enabled: true });
+
+    expect(lastCall().url).toBe("http://api.test/api/v1/system/sleep-inhibition");
+    expect(lastCall().init?.method).toBe("PATCH");
+    expect(lastCall().init?.body).toBe(JSON.stringify({ enabled: true }));
+  });
+});
+
+describe("startHostShell", () => {
+  it("serializes a client id alongside the terminal size", async () => {
+    const clientId = "6f2d7f2d-0d0c-4c9b-8b73-1c53a5ed5b6b";
+    fetchSpy.mockResolvedValueOnce(
+      jsonResponse({
+        session_id: "session-1",
+        agent_id: "_host_shell",
+        cmd: ["/bin/bash"],
+        running: true,
+        started_at: "2026-08-04T00:00:00Z",
+      }),
+    );
+
+    await startHostShell({ cols: 80, rows: 24 }, { clientId });
+
+    expect(JSON.parse(String(lastCall().init?.body))).toEqual({
+      cols: 80,
+      rows: 24,
+      client_id: clientId,
+    });
+  });
+
+  it("preserves the legacy request shape without a client id", async () => {
+    fetchSpy.mockResolvedValueOnce(jsonResponse({}));
+    await startHostShell({ cols: 80, rows: 24 });
+
+    const fetchCall = vi.mocked(fetch).mock.calls[0];
+    expect(JSON.parse(String(fetchCall?.[1]?.body))).toEqual({ cols: 80, rows: 24 });
   });
 });

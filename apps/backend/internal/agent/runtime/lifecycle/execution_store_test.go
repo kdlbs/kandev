@@ -39,6 +39,60 @@ func TestExecutionStore_AddRejectsDuplicateSession(t *testing.T) {
 	}
 }
 
+// TestExecutionStore_ActivePromptGenerationGating pins the predicate a mid-turn
+// steer relies on: a generation is steerable only while it is dispatched and
+// still in flight — never merely admitted (buffers mid-reset), completed, or
+// superseded by a newer prompt.
+func TestExecutionStore_ActivePromptGenerationGating(t *testing.T) {
+	store := NewExecutionStore()
+	exec := &AgentExecution{ID: "exec-1", SessionID: "session-1"}
+	if err := store.Add(exec); err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+
+	if got := store.ActivePromptGeneration("exec-1"); got != 0 {
+		t.Fatalf("no prompt begun: want 0, got %d", got)
+	}
+
+	gen, err := store.BeginPrompt("exec-1")
+	if err != nil {
+		t.Fatalf("BeginPrompt: %v", err)
+	}
+	// Admitted but not dispatched yet — a steer must not reuse it (it could
+	// overtake the predecessor and race its buffer reset).
+	if got := store.ActivePromptGeneration("exec-1"); got != 0 {
+		t.Fatalf("admitted-not-dispatched: want 0, got %d", got)
+	}
+
+	store.MarkPromptDispatched("exec-1", gen)
+	if got := store.ActivePromptGeneration("exec-1"); got != gen {
+		t.Fatalf("dispatched in-flight: want %d, got %d", gen, got)
+	}
+
+	// Completion of that generation makes it non-steerable (the turn is over).
+	if err := store.WithLock("exec-1", func(e *AgentExecution) { e.promptCompletionGeneration = gen }); err != nil {
+		t.Fatalf("WithLock: %v", err)
+	}
+	if got := store.ActivePromptGeneration("exec-1"); got != 0 {
+		t.Fatalf("completed generation: want 0, got %d", got)
+	}
+
+	// A newer generation that begins (and is not yet dispatched) is likewise not
+	// steerable, and MarkPromptDispatched for the stale generation is ignored.
+	newGen, err := store.BeginPrompt("exec-1")
+	if err != nil {
+		t.Fatalf("BeginPrompt (2): %v", err)
+	}
+	store.MarkPromptDispatched("exec-1", gen) // stale — must be ignored
+	if got := store.ActivePromptGeneration("exec-1"); got != 0 {
+		t.Fatalf("superseded, new gen not dispatched: want 0, got %d", got)
+	}
+	store.MarkPromptDispatched("exec-1", newGen)
+	if got := store.ActivePromptGeneration("exec-1"); got != newGen {
+		t.Fatalf("new gen dispatched: want %d, got %d", newGen, got)
+	}
+}
+
 func TestExecutionStore_AddSameExecutionTwiceIsIdempotent(t *testing.T) {
 	store := NewExecutionStore()
 

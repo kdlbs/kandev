@@ -36,7 +36,6 @@ func createTestAutomation(t *testing.T, svc *Service, workspaceID string) *Autom
 		Name:              "test automation",
 		AgentProfileID:    "agent-1",
 		ExecutorProfileID: "exec-1",
-		ExecutionMode:     ExecutionModeRun,
 	})
 	if err != nil {
 		t.Fatalf("CreateAutomation() error = %v", err)

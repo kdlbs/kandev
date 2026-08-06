@@ -63,6 +63,7 @@ import {
   type SecretsState,
   type NotificationProvidersState,
   type SettingsDataState,
+  type SleepInhibitionStoreState,
   type UserSettingsState,
   type ProcessStatusEntry,
   type Worktree,
@@ -125,6 +126,7 @@ export type AppState = KanbanSlice & {
   sprites: (typeof defaultSettingsState)["sprites"];
   notificationProviders: (typeof defaultSettingsState)["notificationProviders"];
   settingsData: (typeof defaultSettingsState)["settingsData"];
+  sleepInhibition: (typeof defaultSettingsState)["sleepInhibition"];
   userSettings: (typeof defaultSettingsState)["userSettings"];
 
   // Session slice
@@ -183,6 +185,7 @@ export type AppState = KanbanSlice & {
   gitlabActionPresets: (typeof defaultGitLabState)["gitlabActionPresets"];
   gitlabStats: (typeof defaultGitLabState)["gitlabStats"];
   gitlabStatus: (typeof defaultGitLabState)["gitlabStatus"];
+  taskMRAutomation: (typeof defaultGitLabState)["taskMRAutomation"];
 
   // Azure DevOps slice
   azureDevOpsTaskPullRequests: (typeof defaultAzureDevOpsState)["azureDevOpsTaskPullRequests"];
@@ -293,6 +296,9 @@ export type AppState = KanbanSlice & {
   removeSpritesInstance: (name: string) => void;
   setNotificationProviders: (state: NotificationProvidersState) => void;
   setNotificationProvidersLoading: (loading: boolean) => void;
+  setSleepInhibition: (response: NonNullable<SleepInhibitionStoreState["response"]>) => void;
+  setSleepInhibitionLoading: (loading: boolean) => void;
+  setSleepInhibitionError: (error: boolean) => void;
   setUserSettings: (settings: UserSettingsState) => void;
   setTerminalOutput: (terminalId: string, data: string) => void;
   appendShellOutput: (sessionId: string, data: string) => void;
@@ -338,7 +344,13 @@ export type AppState = KanbanSlice & {
   invalidateSystemHealth: () => void;
   openQuickChat: UIA["openQuickChat"];
   addQuickChatSession: UIA["addQuickChatSession"];
+  reuseOrCreateQuickTerminal: UIA["reuseOrCreateQuickTerminal"];
+  createQuickTerminal: UIA["createQuickTerminal"];
+  updateQuickTerminal: UIA["updateQuickTerminal"];
+  activateQuickTerminal: UIA["activateQuickTerminal"];
+  removeQuickTerminal: UIA["removeQuickTerminal"];
   syncQuickChatSessions: UIA["syncQuickChatSessions"];
+  syncQuickTerminalTabs: UIA["syncQuickTerminalTabs"];
   upsertQuickChatSessionFromEvent: UIA["upsertQuickChatSessionFromEvent"];
   removeQuickChatSessionsForTask: UIA["removeQuickChatSessionsForTask"];
   closeQuickChat: () => void;
@@ -528,7 +540,8 @@ export type AppState = KanbanSlice & {
 // only have one piece of it (e.g. update notification settings from the
 // settings boot payload) must be able to pass a partial `system` object
 // without fabricating placeholder values for the rest.
-export type HydrationState = Omit<Partial<AppState>, "system"> & {
+export type HydrationState = Omit<Partial<AppState>, "system" | "quickChat"> & {
+  quickChat?: Partial<AppState["quickChat"]>;
   system?: Partial<AppState["system"]>;
 };
 

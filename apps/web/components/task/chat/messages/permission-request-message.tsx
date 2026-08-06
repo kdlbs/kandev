@@ -10,31 +10,32 @@ import {
   usePermissionResponseHandlers,
   type PermissionRequestMetadata,
 } from "./use-permission-handlers";
+import { t } from "@/lib/i18n";
 
 function getPermissionStatusBadge(status: PermissionRequestMetadata["status"]) {
   switch (status) {
     case "approved":
       return (
         <span className="inline-flex items-center gap-1 text-xs text-green-600 dark:text-green-400">
-          <IconCheck className="h-3 w-3" /> Approved
+          <IconCheck className="h-3 w-3" /> {t("task:approved")}
         </span>
       );
     case "rejected":
       return (
         <span className="inline-flex items-center gap-1 text-xs text-red-600 dark:text-red-400">
-          <IconX className="h-3 w-3" /> Rejected
+          <IconX className="h-3 w-3" /> {t("task:rejected")}
         </span>
       );
     case "expired":
       return (
         <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
-          Expired
+          {t("task:expired")}
         </span>
       );
     default:
       return (
         <span className="inline-flex items-center gap-1 text-xs text-amber-600 dark:text-amber-400">
-          Pending Approval
+          {t("task:pendingApproval")}
         </span>
       );
   }

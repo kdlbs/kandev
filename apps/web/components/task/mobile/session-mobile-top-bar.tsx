@@ -18,6 +18,7 @@ import {
 import { TaskTopBarPluginActions } from "@/components/task/task-top-bar-plugin-actions";
 import { MRTopbarButton } from "@/components/gitlab/mr-topbar-button";
 import { linkToTaskOverview } from "@/lib/links";
+import { useTranslation } from "react-i18next";
 
 type SessionMobileTopBarProps = {
   taskId?: string | null;
@@ -50,9 +51,10 @@ function MobileTaskTitle({
   totalAdditions: number;
   totalDeletions: number;
 }) {
+  const { t } = useTranslation();
   return (
     <div className="flex flex-col min-w-0 flex-1">
-      <span className="text-sm font-medium truncate">{taskTitle ?? "Task details"}</span>
+      <span className="text-sm font-medium truncate">{taskTitle ?? t("task:taskDetails")}</span>
       {displayBranch && (
         <div className="flex items-center gap-1.5">
           <IconGitBranch className="h-3 w-3 text-muted-foreground flex-shrink-0" />
@@ -104,6 +106,7 @@ function RemoteExecutorIndicator({
 }
 
 function ApproveButton({ onApprove }: { onApprove: () => void }) {
+  const { t } = useTranslation();
   return (
     <Button
       size="sm"
@@ -111,7 +114,7 @@ function ApproveButton({ onApprove }: { onApprove: () => void }) {
       onClick={onApprove}
     >
       <IconCheck className="h-3.5 w-3.5" />
-      Approve
+      {t("task:approve")}
     </Button>
   );
 }
@@ -234,6 +237,7 @@ function MobileTopBarActions({
   onMerge,
   onMenuClick,
 }: MobileTopBarActionsProps) {
+  const { t } = useTranslation();
   return (
     <div className="flex items-center gap-1" data-testid="mobile-topbar-actions">
       <MRTopbarButton compact mobile />
@@ -276,7 +280,7 @@ function MobileTopBarActions({
         className="cursor-pointer"
         onClick={onMenuClick}
         data-testid="mobile-session-menu"
-        aria-label="Open task switcher"
+        aria-label={t("task:openTaskSwitcher")}
       >
         <IconMenu2 className="h-4 w-4" />
       </Button>
@@ -287,6 +291,7 @@ function MobileTopBarActions({
 export const SessionMobileTopBar = memo(function SessionMobileTopBar(
   props: SessionMobileTopBarProps,
 ) {
+  const { t } = useTranslation();
   const [commitDialogOpen, setCommitDialogOpen] = useState(false);
   const [prDialogOpen, setPrDialogOpen] = useState(false);
   const [prBranchPushed, setPrBranchPushed] = useState(false);
@@ -322,7 +327,7 @@ export const SessionMobileTopBar = memo(function SessionMobileTopBar(
         <Button variant="ghost" size="icon-sm" asChild>
           <Link
             href={linkToTaskOverview({ workspaceId: props.workspaceId ?? undefined })}
-            aria-label="Task overview"
+            aria-label={t("task:taskOverview")}
           >
             <IconArrowLeft className="h-4 w-4" />
           </Link>

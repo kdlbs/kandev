@@ -1,0 +1,441 @@
+#!/usr/bin/env python3
+# probe-claude-midturn-fold — does the Claude CLI fold a stream-json message
+# into a turn that is already running?
+#
+# Context: docs/specs/platform/background-work-liveness.md scopes out "mid-turn
+# steering for agents without concurrent-prompt capability", and ADR-0049 admits
+# a prompt handoff only for adapters "fixture-tested to accept the next human
+# prompt echo while the earlier RPC remains open". Issue #1607 assumes the
+# capability is absent for Claude over ACP. This probe settles it against the
+# real binary, with no Kandev and no ACP bridge in the path: raw stream-json on
+# stdin/stdout.
+#
+# Method: prompt A runs two sequential `sleep`s. While the first one is
+# executing, prompt B is written to stdin with a client-supplied uuid. Whether
+# the CLI folds B into the running turn or holds it for the next turn is decided
+# by three independent observations, in descending order of trust:
+#
+#   1. result count      — a fold answers TWO prompts with ONE `result` frame.
+#   2. B's replayed echo — arrives before the first `result` iff B was folded
+#                          (requires --replay-user-messages).
+#   3. command_lifecycle — B's uuid reaching `started` before the first `result`.
+#                          Corroboration only: the frame is marked @internal and
+#                          may be gated or absent on older CLIs.
+#
+# Observation 3 is raw CLI observation only. It is NOT Kandev's admission gate:
+# Kandev negotiates steering over ACP, on the `initialize` advertisement
+# `agentCapabilities._meta.claudeCode.promptQueueing` (read in
+# acp/prompt_queueing.go). `msg_lifecycle_v1` on the stream-json init frame is
+# not advertised over ACP at all, so it can corroborate the fold here without
+# ever being something Kandev could gate on.
+#
+# Usage:
+#   scripts/probe-claude-midturn-fold [options]
+#
+#   --out <path>          JSONL frame log (default: ./midturn-fold-<ts>.jsonl)
+#   --model <name>        Model for the probe session (default: sonnet)
+#   --sleep <seconds>     Length of each sleep in prompt A (default: 20)
+#   --delay <seconds>     Wait after seeing A's first tool_use before sending B
+#                         (default: 3)
+#   --after-seconds <n>   Send B n seconds after start instead of waiting for a
+#                         tool_use. Use when A is not tool-shaped.
+#   --linger <seconds>    After the first result, how long to wait for B to run
+#                         as its own turn (default: 90)
+#   --timeout <seconds>   Hard kill (default: 300)
+#   --budget <usd>        Passed to --max-budget-usd (default: 1.00)
+#   --bypass              Use --permission-mode bypassPermissions instead of the
+#                         narrow Bash(sleep:*) allowlist. Only for a sandbox.
+#   --prompt-a <text>     Override prompt A (e.g. to probe run_in_background)
+#   --prompt-b <text>     Override prompt B
+#   --claude <path>       claude binary (default: first on PATH)
+#   --dry-run             Print the command and the two prompts, spend nothing.
+#
+# Output: the JSONL log plus a verdict block on stdout. One paid turn per run.
+#
+# To probe the background-work half of the question instead — do a predecessor's
+# backgrounded tool calls survive the boundary? — keep the same machinery and
+# swap the prompt:
+#
+#   scripts/probe-claude-midturn-fold \
+#     --prompt-a 'Start `sleep 45` with run_in_background, then tell me its task id.' \
+#     --after-seconds 12 --bypass
+#
+# then read the log for tool frames on that task id arriving after B's echo.
+
+import argparse
+import json
+import os
+import queue
+import shutil
+import signal
+import subprocess
+import sys
+import threading
+import time
+import uuid
+
+
+def _kill_process_group(proc):
+    """SIGKILL the CLI's whole process group, falling back to the direct child.
+    The Claude CLI spawns tool subprocesses that outlive a plain proc.kill();
+    signalling the group reaps the entire tree."""
+    try:
+        os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+    except (ProcessLookupError, PermissionError, OSError):
+        proc.kill()
+
+
+PROMPT_A = (
+    "Run exactly this shell command with the Bash tool: sleep {s}\n"
+    "When it finishes, run exactly this one: sleep {s}\n"
+    "Then reply with the single word DONE. Do not run anything else and do not "
+    "combine the two commands."
+)
+
+PROMPT_B = (
+    "Change of plan: skip the second sleep and reply with the single word "
+    "STEERED instead."
+)
+
+
+def parse_args():
+    p = argparse.ArgumentParser(add_help=True)
+    p.add_argument("--out")
+    p.add_argument("--model", default="sonnet")
+    p.add_argument("--sleep", type=int, default=20)
+    p.add_argument("--delay", type=float, default=3.0)
+    p.add_argument("--after-seconds", type=float, default=None)
+    p.add_argument("--linger", type=float, default=90.0)
+    p.add_argument("--timeout", type=float, default=300.0)
+    p.add_argument("--budget", default="1.00")
+    p.add_argument("--bypass", action="store_true")
+    p.add_argument("--prompt-a")
+    p.add_argument("--prompt-b")
+    p.add_argument("--claude")
+    p.add_argument("--dry-run", action="store_true")
+    return p.parse_args()
+
+
+def build_command(args, session_id):
+    claude = args.claude or shutil.which("claude")
+    if not claude:
+        sys.exit("probe: no `claude` on PATH; pass --claude <path>")
+    cmd = [
+        claude,
+        "--print",
+        "--input-format", "stream-json",
+        "--output-format", "stream-json",
+        "--replay-user-messages",
+        "--verbose",
+        # Asks for a minimal session and writes nothing to session history.
+        # Note: an observed 2.1.220 run still listed skills and plugins on the
+        # init frame, so treat this as best-effort isolation, not a guarantee —
+        # check the init frame in the log if a customization could skew a result.
+        "--safe-mode",
+        "--no-session-persistence",
+        "--session-id", session_id,
+        "--model", args.model,
+        "--tools", "Bash",
+        "--max-budget-usd", str(args.budget),
+    ]
+    if args.bypass:
+        cmd += ["--permission-mode", "bypassPermissions"]
+    else:
+        # Narrow enough that `sleep N` runs unattended and nothing else does.
+        cmd += ["--allowedTools", "Bash(sleep:*)"]
+    return cmd
+
+
+def user_frame(text, session_id, msg_uuid):
+    return {
+        "type": "user",
+        "message": {"role": "user", "content": [{"type": "text", "text": text}]},
+        "parent_tool_use_id": None,
+        "session_id": session_id,
+        "uuid": msg_uuid,
+    }
+
+
+class Recorder:
+    """Frame log with a monotonic clock shared by both directions."""
+
+    def __init__(self):
+        self.t0 = time.monotonic()
+        self.frames = []
+        self.lock = threading.Lock()
+
+    def ms(self):
+        return round((time.monotonic() - self.t0) * 1000)
+
+    def add(self, direction, frame, raw=None):
+        entry = {"t_ms": self.ms(), "dir": direction}
+        if frame is not None:
+            entry["frame"] = frame
+        if raw is not None:
+            entry["raw"] = raw
+        with self.lock:
+            self.frames.append(entry)
+        return entry
+
+    def note(self, event, **fields):
+        return self.add("probe", {"probe_event": event, **fields})
+
+    def write(self, path):
+        with open(path, "w", encoding="utf-8") as fh:
+            with self.lock:
+                for entry in self.frames:
+                    fh.write(json.dumps(entry, ensure_ascii=False) + "\n")
+
+
+class StreamEOF:
+    """One reader thread reached EOF.
+
+    Carries whether it was the protocol (JSON) stream. A bare sentinel would be
+    indistinguishable between stdout and stderr, and the CLI routinely closes
+    stderr first — breaking the main loop there would end the probe while stdout
+    can still deliver the very frames the verdict is read from.
+    """
+
+    __slots__ = ("direction", "is_protocol")
+
+    def __init__(self, direction, is_protocol):
+        self.direction = direction
+        self.is_protocol = is_protocol
+
+
+def reader(stream, direction, rec, events, is_json):
+    # readline(), not `for line in stream`: iteration fills an 8KB read-ahead
+    # buffer, which arrives as one burst and flattens the timing this probe is
+    # measuring. readline returns as soon as a newline lands.
+    while True:
+        line = stream.readline()
+        if line == "":
+            break
+        line = line.rstrip("\n")
+        if not line:
+            continue
+        if not is_json:
+            rec.add(direction, None, raw=line)
+            continue
+        try:
+            frame = json.loads(line)
+        except json.JSONDecodeError:
+            rec.add(direction, None, raw=line)
+            continue
+        entry = rec.add(direction, frame)
+        events.put((entry["t_ms"], frame))
+    events.put(StreamEOF(direction, is_json))
+
+
+def tool_use_names(frame):
+    if frame.get("type") != "assistant":
+        return []
+    content = frame.get("message", {}).get("content") or []
+    if not isinstance(content, list):
+        return []
+    return [b.get("name") for b in content if isinstance(b, dict) and b.get("type") == "tool_use"]
+
+
+def main():
+    args = parse_args()
+    session_id = str(uuid.uuid4())
+    uuid_a, uuid_b = str(uuid.uuid4()), str(uuid.uuid4())
+    prompt_a = args.prompt_a or PROMPT_A.format(s=args.sleep)
+    prompt_b = args.prompt_b or PROMPT_B
+    cmd = build_command(args, session_id)
+
+    if args.dry_run:
+        print(" ".join(cmd))
+        print("\n--- prompt A ---\n" + prompt_a)
+        print("\n--- prompt B ---\n" + prompt_b)
+        return 0
+
+    out_path = args.out or os.path.abspath(f"midturn-fold-{int(time.time())}.jsonl")
+    rec = Recorder()
+    rec.note("start", cmd=cmd, session_id=session_id,
+             uuid_a=uuid_a, uuid_b=uuid_b, cli_cwd=os.getcwd())
+
+    # start_new_session puts the CLI in its own process group so a forced
+    # cleanup can signal the whole tree (CLI + tool subprocesses), not just the
+    # direct child.
+    proc = subprocess.Popen(
+        cmd,
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        bufsize=1,
+        start_new_session=True,
+    )
+    events = queue.Queue()
+    readers = [
+        threading.Thread(target=reader, args=(proc.stdout, "out", rec, events, True),
+                         daemon=True),
+        threading.Thread(target=reader, args=(proc.stderr, "err", rec, events, False),
+                         daemon=True),
+    ]
+    for t in readers:
+        t.start()
+
+    def send(frame, label):
+        rec.add("in", frame)
+        rec.note(label)
+        try:
+            proc.stdin.write(json.dumps(frame) + "\n")
+            proc.stdin.flush()
+            return True
+        except (BrokenPipeError, ValueError):
+            rec.note("send_failed", label=label)
+            return False
+
+    send(user_frame(prompt_a, session_id, uuid_a), "sent_a")
+
+    # --- observation state -------------------------------------------------
+    init = None
+    sent_b_at = None
+    first_tool_at = None
+    result_times = []
+    b_echo_at = None
+    b_lifecycle = []          # [(t_ms, state)]
+    tool_results_after_b = 0
+    verdict_deadline = None
+    hard_deadline = rec.t0 + args.timeout
+    # Arrival order, not elapsed milliseconds, decides fold vs queue: a fold can
+    # put B's echo and the result in the same millisecond, and order is what the
+    # protocol actually guarantees.
+    pre_result_echo = False
+    pre_result_start = False
+
+    def maybe_send_b(now_ms):
+        nonlocal sent_b_at
+        if sent_b_at is not None:
+            return
+        if init is None:
+            # Before the init frame the session does not exist yet, so B would
+            # not be landing mid-turn — it would be racing startup.
+            return
+        if args.after_seconds is not None:
+            if now_ms >= args.after_seconds * 1000:
+                if send(user_frame(prompt_b, session_id, uuid_b), "sent_b"):
+                    sent_b_at = rec.ms()
+            return
+        if first_tool_at is not None and now_ms >= first_tool_at + args.delay * 1000:
+            if send(user_frame(prompt_b, session_id, uuid_b), "sent_b"):
+                sent_b_at = rec.ms()
+
+    while True:
+        if time.monotonic() > hard_deadline:
+            rec.note("hard_timeout")
+            break
+        try:
+            item = events.get(timeout=0.25)
+        except queue.Empty:
+            maybe_send_b(rec.ms())
+            if verdict_deadline is not None and time.monotonic() > verdict_deadline:
+                rec.note("linger_expired")
+                break
+            continue
+        if isinstance(item, StreamEOF):
+            rec.note("stream_eof", stream=item.direction)
+            if item.is_protocol:
+                break
+            continue
+        t_ms, frame = item
+        ftype = frame.get("type")
+
+        if ftype == "system" and frame.get("subtype") == "init":
+            init = frame
+        elif ftype == "result":
+            result_times.append(t_ms)
+            if len(result_times) == 1:
+                # Either B already landed inside this turn (fold) or it has to
+                # run as its own turn (queue). A fold is already decided, so
+                # only drain briefly; a queue needs the full second-turn window.
+                folded = pre_result_echo or pre_result_start
+                verdict_deadline = time.monotonic() + (3.0 if folded else args.linger)
+            else:
+                rec.note("second_result")
+                break
+        elif ftype == "command_lifecycle" and frame.get("command_uuid") == uuid_b:
+            b_lifecycle.append((t_ms, frame.get("state")))
+            if frame.get("state") == "started" and not result_times:
+                pre_result_start = True
+        elif ftype == "user":
+            if frame.get("uuid") == uuid_b and b_echo_at is None:
+                b_echo_at = t_ms
+                pre_result_echo = not result_times
+                rec.note("b_echo_observed", before_first_result=pre_result_echo)
+            content = frame.get("message", {}).get("content") or []
+            if b_echo_at is not None and isinstance(content, list):
+                if any(isinstance(b, dict) and b.get("type") == "tool_result" for b in content):
+                    tool_results_after_b += 1
+        elif ftype == "assistant":
+            if first_tool_at is None and tool_use_names(frame):
+                first_tool_at = t_ms
+                rec.note("first_tool_use_observed", tools=tool_use_names(frame))
+
+        maybe_send_b(rec.ms())
+        if verdict_deadline is not None and time.monotonic() > verdict_deadline:
+            rec.note("linger_expired")
+            break
+
+    # --- shutdown ----------------------------------------------------------
+    try:
+        proc.stdin.close()
+    except (BrokenPipeError, ValueError):
+        pass
+    try:
+        proc.wait(timeout=20)
+    except subprocess.TimeoutExpired:
+        rec.note("kill_after_stdin_close")
+        _kill_process_group(proc)
+        proc.wait(timeout=10)
+
+    # Drain the readers before the log is written: frames that arrived between
+    # the loop breaking and the process exiting are still being appended, and a
+    # probe that silently drops its last frames is worse than no probe.
+    for t in readers:
+        t.join(timeout=5)
+
+    first_result = result_times[0] if result_times else None
+    started = [t for t, s in b_lifecycle if s == "started"]
+    b_started = started[0] if started else None
+
+    if sent_b_at is None:
+        verdict = "INCONCLUSIVE — prompt B was never sent (no tool_use seen; try --after-seconds)"
+    elif not result_times:
+        verdict = "INCONCLUSIVE — no result frame; check the log for auth, permission or budget errors"
+    elif pre_result_echo or pre_result_start:
+        verdict = "FOLD — B entered the running turn before it ended (mid-turn steering works)"
+    elif len(result_times) >= 2 or b_started is not None or b_echo_at is not None:
+        verdict = "QUEUE — B ran only after the first turn ended (turn-boundary drain)"
+    elif b_lifecycle:
+        verdict = "DISCARDED — B was acknowledged but never ran; see lifecycle states"
+    else:
+        verdict = "NO_LIFECYCLE — no echo and no lifecycle for B; it was dropped, or this CLI does not report either"
+
+    rec.note("verdict", text=verdict)
+    rec.write(out_path)
+
+    caps = (init or {}).get("capabilities")
+    print(f"\nverdict: {verdict}\n")
+    version = (init or {}).get("claude_code_version") or (init or {}).get("version", "?")
+    print(f"  cli version           {version}")
+    print(f"  permission mode       {(init or {}).get('permissionMode', '?')}")
+    print(f"  capabilities          {caps if caps is not None else 'not advertised'}")
+    print(f"  msg_lifecycle_v1      {'yes' if caps and 'msg_lifecycle_v1' in caps else 'no'}")
+    print(f"  result frames         {len(result_times)}  (1 = one turn answered both prompts)")
+    print(f"  B sent at             {sent_b_at} ms")
+    print(f"  first tool_use at     {first_tool_at} ms")
+    print(f"  first result at       {first_result} ms")
+    print(f"  B echo at            "
+          f" {b_echo_at} ms" + ("  (before first result)" if pre_result_echo else ""))
+    print(f"  B lifecycle           {b_lifecycle or 'none'}")
+    print(f"  tool_results after B  {tool_results_after_b}  "
+          f"(>0 = predecessor tool work continued past the boundary)")
+    print(f"\n  frames: {out_path}\n")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -55,7 +55,9 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 	if err != nil {
 		return nil, nil, err
 	}
+	userSecretStore := secrets.NewUserVisibleStore(repos.Secrets)
 	agentSettingsController := agentsettingscontroller.NewController(repos.AgentSettings, discoveryRegistry, agentRegistry, repos.Task, log)
+	agentSettingsController.SetSecretStore(userSecretStore)
 
 	userSvc := userservice.NewService(repos.User, eventBus, log)
 	editorSvc := editorservice.NewService(repos.Editor, repos.Task, userSvc)
@@ -91,6 +93,10 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 			TaskWorktreeRoots: []string{filepath.Join(cfg.ResolvedHomeDir(), "tasks")},
 		},
 	)
+	taskSvc.SetSecretStore(userSecretStore)
+	if deleter, ok := userSecretStore.(taskservice.WorkspaceSecretDeleter); ok {
+		taskSvc.SetWorkspaceSecretDeleter(deleter)
+	}
 
 	// Wire workflow step creator to task service for board creation
 	taskSvc.SetWorkflowStepCreator(workflowSvc)
@@ -164,6 +170,15 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 		automationComponents.Service.SetTaskDeleter(&automationTaskDeleterAdapter{svc: taskSvc})
 		// Per-user workspace scoping for the automation HTTP/WS surface.
 		automationComponents.Service.SetWorkspaceAuthorizer(taskSvc.AuthorizeWorkspaceAccess)
+		// A UI filter is not an authorization boundary: reject a workflow owned
+		// by another workspace even when a request names it directly.
+		automationComponents.Service.SetWorkflowLocator(&automationWorkflowLocatorAdapter{svc: taskSvc})
+		// Profile deletion disables the automations bound to a profile before
+		// the row goes, but nothing ever checked that the binding pointed at a
+		// real profile in the first place — so a create or rebind naming an id
+		// that never existed produced the same orphan without any delete
+		// involved.
+		automationComponents.Service.SetAgentProfileLookup(&automationAgentProfileLookupAdapter{store: repos.AgentSettings})
 	}
 
 	services := &Services{
@@ -221,10 +236,36 @@ func (a *githubBrokerScopeAuthorizer) AuthorizeGitHubRepository(
 	if err := a.authorizeTaskSession(ctx, workspaceID, taskID, sessionID); err != nil {
 		return err
 	}
-	if err := a.authorizeTaskRepository(ctx, taskID, repositoryID); err != nil {
+	link, err := a.authorizeTaskRepository(ctx, taskID, repositoryID)
+	if err != nil {
 		return err
 	}
-	return a.authorizeRepositoryIdentity(ctx, workspaceID, repositoryID, owner, repoName)
+	if err := a.authorizeRepositoryIdentity(ctx, workspaceID, repositoryID, owner, repoName); err == nil {
+		return nil
+	}
+	if link == nil {
+		return fmt.Errorf("repository identity does not match lease scope")
+	}
+	repository, err := a.repo.GetRepository(ctx, repositoryID)
+	if err != nil {
+		return err
+	}
+	if repository == nil || repository.WorkspaceID != workspaceID || !strings.EqualFold(repository.Provider, "github") {
+		return fmt.Errorf("repository identity does not match lease scope")
+	}
+	binding, found, err := taskmodels.LoadRemoteContribution(link.Metadata)
+	if err != nil {
+		return fmt.Errorf("validate remote contribution scope: %w", err)
+	}
+	if !found || binding.Provider != taskmodels.RemoteContributionProviderGitHub ||
+		!binding.CollaborationAllowed || !strings.EqualFold(binding.SourceRepository.Host, "github.com") {
+		return fmt.Errorf("repository identity does not match lease scope")
+	}
+	parts := strings.Split(binding.SourceRepository.Path, "/")
+	if len(parts) != 2 || !strings.EqualFold(parts[0], owner) || !strings.EqualFold(parts[1], repoName) {
+		return fmt.Errorf("repository identity does not match lease scope")
+	}
+	return nil
 }
 
 func (a *githubBrokerScopeAuthorizer) authorizeTaskSession(
@@ -257,22 +298,17 @@ func (a *githubBrokerScopeAuthorizer) authorizeTaskSession(
 func (a *githubBrokerScopeAuthorizer) authorizeTaskRepository(
 	ctx context.Context,
 	taskID, repositoryID string,
-) error {
+) (*taskmodels.TaskRepository, error) {
 	links, err := a.repo.ListTaskRepositories(ctx, taskID)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	linked := false
 	for _, link := range links {
 		if link != nil && link.RepositoryID == repositoryID {
-			linked = true
-			break
+			return link, nil
 		}
 	}
-	if !linked {
-		return fmt.Errorf("repository is not linked to task")
-	}
-	return nil
+	return nil, fmt.Errorf("repository is not linked to task")
 }
 
 func (a *githubBrokerScopeAuthorizer) authorizeRepositoryIdentity(

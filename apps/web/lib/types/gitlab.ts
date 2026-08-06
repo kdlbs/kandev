@@ -366,3 +366,38 @@ export type GitLabMRCommit = {
 
 /** Project branch entry. */
 export type GitLabRepoBranch = { name: string };
+
+/** Per-MR lifecycle dedupe/checkpoint row (observability only, not editable). */
+export type TaskMRLifecycleState = {
+  task_id: string;
+  repository_id: string;
+  project_path: string;
+  mr_iid: number;
+  review_request_initialized: boolean;
+  last_review_requested: boolean;
+  last_observed_state: string;
+  last_lifecycle_event: string;
+  last_lifecycle_prompt_at?: string;
+  last_lifecycle_session_id?: string;
+  last_error?: string;
+  created_at: string;
+  updated_at: string;
+};
+
+/** Task-level MR lifecycle notification switches. */
+export type TaskMRAutomationOptions = {
+  task_id: string;
+  prompt_on_review_requested: boolean;
+  prompt_on_merged: boolean;
+  prompt_on_closed: boolean;
+  review_reviewer_username: string;
+  updated_at: string;
+  mr_states: TaskMRLifecycleState[];
+};
+
+/** Partial update for task MR automation options. */
+export type TaskMRAutomationPatch = {
+  prompt_on_review_requested?: boolean;
+  prompt_on_merged?: boolean;
+  prompt_on_closed?: boolean;
+};

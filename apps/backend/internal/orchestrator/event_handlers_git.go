@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -600,14 +601,14 @@ func (s *Service) handlePermissionRequest(ctx context.Context, data watcher.Perm
 		}
 	}
 
-	// Run-mode automation tasks are hidden from the kanban, so there is no UI
-	// for the user to answer a permission prompt. Auto-reject and mark the run
-	// failed so the failure shows up in the automation's Recent Runs.
+	// Automation tasks are hidden from the kanban, so there is no UI for the
+	// user to answer a permission prompt. Auto-reject and mark the run failed
+	// so the failure shows up in the automation's Recent Runs.
 	s.failAutomationRunOnPermission(ctx, data)
 }
 
 // failAutomationRunOnPermission checks whether the permission request belongs
-// to a run-mode automation task and, if so, rejects the prompt and marks the
+// to an automation task and, if so, rejects the prompt and marks the
 // corresponding automation_run row as failed.
 func (s *Service) failAutomationRunOnPermission(ctx context.Context, data watcher.PermissionRequestData) {
 	if s.automationService == nil || data.TaskID == "" {
@@ -617,7 +618,10 @@ func (s *Service) failAutomationRunOnPermission(ctx context.Context, data watche
 	if err != nil || task == nil {
 		return
 	}
-	if !task.IsEphemeral || task.Origin != models.TaskOriginAutomationRun {
+	// Keyed on origin alone — automation tasks are no longer ephemeral, and a
+	// prompt nobody can answer would otherwise hang the run at task_created
+	// forever, holding a max_concurrent_runs slot.
+	if task.Origin != models.TaskOriginAutomationRun {
 		return
 	}
 
@@ -625,13 +629,13 @@ func (s *Service) failAutomationRunOnPermission(ctx context.Context, data watche
 	// also true here because the session is going to be marked failed anyway.
 	optionID := pickRejectOption(data.Options)
 	if err := s.RespondToPermission(ctx, data.TaskSessionID, data.PendingID, optionID, true, true); err != nil {
-		s.logger.Warn("failed to auto-reject permission for run-mode automation",
+		s.logger.Warn("failed to auto-reject permission for automation run",
 			zap.String("task_id", data.TaskID),
 			zap.String("pending_id", data.PendingID),
 			zap.Error(err))
 	}
 
-	errMsg := fmt.Sprintf("Permission required: %s — run-mode automations cannot answer prompts", data.Title)
+	errMsg := fmt.Sprintf("Permission required: %s — automation runs cannot answer prompts", data.Title)
 	if err := s.automationService.MarkRunFailedByTaskID(ctx, data.TaskID, errMsg); err != nil {
 		s.logger.Warn("failed to mark automation run failed after permission prompt",
 			zap.String("task_id", data.TaskID), zap.Error(err))
@@ -757,7 +761,7 @@ func (s *Service) handleBranchSwitched(ctx context.Context, data watcher.GitEven
 	// renaming or switching branches (e.g. `git branch -m`, `git checkout`)
 	// leaves PR auto-association stuck on the original branch.
 	if data.BranchSwitch.CurrentBranch != "" {
-		if err := s.repo.UpdateTaskSessionWorktreeBranch(ctx, data.SessionID, data.BranchSwitch.CurrentBranch); err != nil {
+		if err := s.updateBranchSwitchWorktreeSnapshot(ctx, data.SessionID, data.BranchSwitch.RepositoryName, data.BranchSwitch.CurrentBranch); err != nil {
 			s.logger.Error("failed to update session worktree branch after branch switch",
 				zap.String("session_id", data.SessionID),
 				zap.String("current_branch", data.BranchSwitch.CurrentBranch),
@@ -788,6 +792,72 @@ func (s *Service) handleBranchSwitched(ctx context.Context, data watcher.GitEven
 		})
 		_ = s.eventBus.Publish(ctx, events.BuildGitWSEventSubject(data.SessionID), event)
 	}
+}
+
+// updateBranchSwitchWorktreeSnapshot scopes a multi-repository branch event to
+// the worktree whose path basename matches agentctl's RepositoryName tag. Older
+// events and single-repository rows retain the all-worktrees fallback.
+func (s *Service) updateBranchSwitchWorktreeSnapshot(ctx context.Context, sessionID, repositoryName, branch string) error {
+	if repositoryName == "" {
+		return s.repo.UpdateTaskSessionWorktreeBranch(ctx, sessionID, branch)
+	}
+	scoped, ok := s.repo.(titleBranchScopedSnapshotStore)
+	if !ok {
+		return s.repo.UpdateTaskSessionWorktreeBranch(ctx, sessionID, branch)
+	}
+	lister, ok := s.repo.(titleBranchWorktreeLister)
+	if !ok {
+		return s.repo.UpdateTaskSessionWorktreeBranch(ctx, sessionID, branch)
+	}
+	worktrees, err := lister.ListTaskSessionWorktrees(ctx, sessionID)
+	if err != nil {
+		return err
+	}
+	matched := matchingBranchSwitchWorktrees(worktrees, repositoryName)
+	if len(matched) == 0 {
+		if repositoryName != "" {
+			return nil
+		}
+		return s.repo.UpdateTaskSessionWorktreeBranch(ctx, sessionID, branch)
+	}
+	return s.persistBranchSwitchWorktrees(ctx, scoped, sessionID, branch, matched)
+}
+
+func matchingBranchSwitchWorktrees(worktrees []*models.TaskSessionWorktree, repositoryName string) map[string]string {
+	matched := make(map[string]string)
+	for _, worktree := range worktrees {
+		if worktree == nil || worktree.RepositoryID == "" {
+			continue
+		}
+		if filepath.Base(filepath.Clean(worktree.WorktreePath)) == repositoryName {
+			matched[worktree.RepositoryID] = worktree.WorktreeID
+		}
+	}
+	if len(matched) == 0 && len(worktrees) == 1 && worktrees[0] != nil {
+		matched[worktrees[0].RepositoryID] = worktrees[0].WorktreeID
+	}
+	return matched
+}
+
+func (s *Service) persistBranchSwitchWorktrees(
+	ctx context.Context,
+	scoped titleBranchScopedSnapshotStore,
+	sessionID string,
+	branch string,
+	matched map[string]string,
+) error {
+	for repositoryID, worktreeID := range matched {
+		if exact, exactOK := s.repo.(titleBranchWorktreeSnapshotStore); exactOK && worktreeID != "" {
+			if err := exact.UpdateTaskSessionWorktreeBranchByWorktree(ctx, sessionID, worktreeID, branch); err != nil {
+				return err
+			}
+			continue
+		}
+		if err := scoped.UpdateTaskSessionWorktreeBranchByRepository(ctx, sessionID, repositoryID, branch); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // resetPRWatchForBranchSwitch re-points the session's existing PR watch to the

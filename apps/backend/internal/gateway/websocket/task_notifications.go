@@ -91,6 +91,7 @@ func RegisterTaskNotifications(ctx context.Context, eventBus bus.EventBus, hub *
 	b.subscribe(eventBus, events.GitHubTaskCIOptionsUpdated, ws.ActionGitHubTaskCIOptionsUpdated)
 	b.subscribe(eventBus, events.GitHubRateLimitUpdated, ws.ActionGitHubRateLimitUpdated)
 	b.subscribe(eventBus, events.GitLabTaskMRUpdated, ws.ActionGitLabTaskMRUpdated)
+	b.subscribe(eventBus, events.GitLabTaskMROptionsUpdated, ws.ActionGitLabTaskMRAutomationUpdated)
 
 	go func() {
 		<-ctx.Done()
@@ -252,6 +253,13 @@ func (b *TaskEventBroadcaster) routeBroadcast(
 		// progress/warnings are available when the user navigates to the
 		// session page after task creation.
 		b.hub.BroadcastToWorkspace(workspaceID, msg)
+		return nil
+	case ws.ActionGitLabTaskMRUpdated, ws.ActionGitLabTaskMRAutomationUpdated:
+		// These payloads carry per-task MR link/lifecycle state. Fail closed
+		// (drop, don't fall back to a global broadcast) when workspace
+		// resolution came back empty and auth is enforced — an unattributed
+		// GitLab MR update must never cross workspace boundaries.
+		b.hub.BroadcastToWorkspaceOrDrop(workspaceID, msg)
 		return nil
 	}
 	// Workspace-carrying events (task/workflow/repository/…) route to the

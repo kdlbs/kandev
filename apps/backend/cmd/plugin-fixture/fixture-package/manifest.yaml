@@ -26,6 +26,7 @@ capabilities:
   events: ["task.created"]
   state: true
   secrets: true
+  user_state: true
 
 webhooks:
   - key: "test-hook"

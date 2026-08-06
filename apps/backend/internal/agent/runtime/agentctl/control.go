@@ -13,6 +13,7 @@ import (
 
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/common/subproc"
+	"github.com/kandev/kandev/internal/task/models"
 	"go.uber.org/zap"
 )
 
@@ -56,6 +57,7 @@ type CreateInstanceRequest struct {
 	AssumeMcpSse           bool              `json:"assume_mcp_sse,omitempty"`       // Assume agent supports SSE MCP servers
 	AssumeMcpHttp          bool              `json:"assume_mcp_http,omitempty"`      // Assume agent supports HTTP MCP servers
 	McpMode                string            `json:"mcp_mode,omitempty"`             // MCP tool mode: "task" (default), "config", or "office"
+	McpProviders           []string          `json:"mcp_providers,omitempty"`        // Supported review-automation providers
 	// RequiresProcessKill tells agentctl to skip the graceful stdin-close wait
 	// and reap the agent process group immediately. Required for agents whose
 	// runtime keeps child processes (e.g. MCP servers) alive when stdin closes
@@ -72,6 +74,10 @@ type CreateInstanceRequest struct {
 	// single-repo tracker. Empty map disables the override and falls back
 	// to the hardcoded origin/main → master priority list inside agentctl.
 	BaseBranches map[string]string `json:"base_branches,omitempty"`
+	// RemoteContributions maps an agentctl workspace repository subpath to the
+	// server-authored contribution binding for that checkout. The empty key is
+	// the workspace root.
+	RemoteContributions map[string]models.RemoteContribution `json:"remote_contributions,omitempty"`
 	// WorkspaceSourceRoots are canonical host roots explicitly attached to the
 	// workspace. Agentctl permits file operations through links only beneath
 	// these roots.

@@ -15,6 +15,7 @@ import type {
   ListWorkspacesResponse,
   RepositoryPathValidationResponse,
   Repository,
+  RepositorySecretBinding,
   RepositoryScript,
   StepEvents,
   Workspace,
@@ -230,6 +231,7 @@ export async function createRepositoryAction(payload: {
   cleanup_script: string;
   dev_script: string;
   copy_files: string;
+  secret_bindings?: RepositorySecretBinding[];
 }) {
   return fetchJson<Repository>(
     `${apiBaseUrl}/api/v1/workspaces/${payload.workspace_id}/repositories`,
@@ -252,6 +254,7 @@ export async function createRepositoryAction(payload: {
         cleanup_script: payload.cleanup_script,
         dev_script: payload.dev_script,
         copy_files: payload.copy_files,
+        secret_bindings: payload.secret_bindings,
       }),
     },
   );

@@ -254,11 +254,35 @@ func (c *Client) Prompt(
 	attachments []v1.MessageAttachment,
 	promptGeneration uint64,
 ) error {
+	return c.prompt(ctx, text, attachments, promptGeneration, false)
+}
+
+// PromptSteer sends a prompt with the steer flag set, asking agentctl to deliver
+// it into a turn that is still generating rather than serializing behind it.
+// agentctl honors this only when its adapter can steer and the connected agent
+// advertised the capability; otherwise it falls back to an ordinary prompt.
+func (c *Client) PromptSteer(
+	ctx context.Context,
+	text string,
+	attachments []v1.MessageAttachment,
+	promptGeneration uint64,
+) error {
+	return c.prompt(ctx, text, attachments, promptGeneration, true)
+}
+
+func (c *Client) prompt(
+	ctx context.Context,
+	text string,
+	attachments []v1.MessageAttachment,
+	promptGeneration uint64,
+	steer bool,
+) error {
 	payload := struct {
 		Text             string                 `json:"text"`
 		Attachments      []v1.MessageAttachment `json:"attachments,omitempty"`
 		PromptGeneration uint64                 `json:"prompt_generation,omitempty"`
-	}{Text: text, Attachments: attachments, PromptGeneration: promptGeneration}
+		Steer            bool                   `json:"steer,omitempty"`
+	}{Text: text, Attachments: attachments, PromptGeneration: promptGeneration, Steer: steer}
 
 	resp, err := c.sendStreamRequest(ctx, "agent.prompt", payload)
 	if err != nil {

@@ -1,5 +1,6 @@
 import { useCallback } from "react";
 import { useAppStore } from "@/components/state-provider";
+import { captureQuickChatLauncherFocus } from "@/components/quick-chat/quick-chat-focus";
 import type { QuickChatSessionKind } from "@/lib/state/slices/ui/types";
 
 /**
@@ -16,6 +17,7 @@ export function useQuickChatLauncher(
 
   const handleOpenQuickChat = useCallback(() => {
     if (!workspaceId) return;
+    captureQuickChatLauncherFocus();
 
     // If there's an existing session, open it. Otherwise just open the modal with agent picker
     const matchingSessions = quickChatSessions.filter(

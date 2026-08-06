@@ -6,6 +6,7 @@ import type { KanbanSlice } from "./types";
 
 const TASK_ID = "task-1";
 const WORKFLOW_ID = "workflow-a";
+const ARCHIVED_WORKSPACE_ID = "workspace-a";
 const AUTO_SESSION_ID = "session-auto";
 const PINNED_SESSION_ID = "session-pinned";
 
@@ -98,7 +99,7 @@ describe("kanban slice workspace transition", () => {
         isLoading: true,
       },
       workflows: {
-        items: [{ id: WORKFLOW_ID, workspaceId: "workspace-a", name: "Workflow A" }],
+        items: [{ id: WORKFLOW_ID, workspaceId: ARCHIVED_WORKSPACE_ID, name: "Workflow A" }],
         activeId: WORKFLOW_ID,
       },
       workspaceContextGeneration: 7,
@@ -124,5 +125,78 @@ describe("kanban slice workspace transition", () => {
         lastSessionByTaskId: {},
       },
     });
+  });
+});
+
+describe("kanban slice archived sidebar projection", () => {
+  it("stores archived tasks separately from active kanban state and deduplicates IDs", () => {
+    const store = makeStore();
+    const task = { id: TASK_ID, workflowStepId: "step-a", title: "Archived", position: 0 };
+
+    store.getState().setSidebarArchivedTasks(ARCHIVED_WORKSPACE_ID, [task]);
+    store
+      .getState()
+      .upsertSidebarArchivedTask(ARCHIVED_WORKSPACE_ID, { ...task, title: "Updated" });
+
+    expect(store.getState().sidebarArchivedTasks.itemsByWorkspaceId[ARCHIVED_WORKSPACE_ID]).toEqual(
+      [{ ...task, title: "Updated" }],
+    );
+    expect(store.getState().kanban.tasks).toEqual([]);
+    expect(store.getState().sidebarArchivedTasks.loadedByWorkspaceId[ARCHIVED_WORKSPACE_ID]).toBe(
+      true,
+    );
+  });
+
+  it("creates a workspace bucket when upserting its first archived task", () => {
+    const store = makeStore();
+    const task = { id: TASK_ID, workflowStepId: "step-a", title: "Archived", position: 0 };
+
+    store.getState().upsertSidebarArchivedTask("workspace-new", task);
+
+    expect(store.getState().sidebarArchivedTasks.itemsByWorkspaceId["workspace-new"]).toEqual([
+      task,
+    ]);
+  });
+
+  it("does not let a stale load replace archive, unarchive, or delete events", () => {
+    const store = makeStore();
+    type ArchivedStateWithRevision = KanbanSlice["sidebarArchivedTasks"] & {
+      revisionByWorkspaceId?: Record<string, number>;
+    };
+    const revision = () =>
+      (store.getState().sidebarArchivedTasks as ArchivedStateWithRevision).revisionByWorkspaceId?.[
+        ARCHIVED_WORKSPACE_ID
+      ] ?? 0;
+    const setArchivedTasks = store.getState().setSidebarArchivedTasks as unknown as (
+      workspaceId: string,
+      tasks: KanbanSlice["sidebarArchivedTasks"]["itemsByWorkspaceId"][string],
+      expectedRevision?: number,
+    ) => boolean;
+    const task = { id: TASK_ID, workflowStepId: "step-a", title: "Loaded", position: 0 };
+
+    setArchivedTasks(ARCHIVED_WORKSPACE_ID, [task]);
+    const beforeArchive = revision();
+    store
+      .getState()
+      .upsertSidebarArchivedTask(ARCHIVED_WORKSPACE_ID, { ...task, title: "Archived live" });
+    expect(setArchivedTasks(ARCHIVED_WORKSPACE_ID, [task], beforeArchive)).toBe(false);
+    expect(store.getState().sidebarArchivedTasks.itemsByWorkspaceId[ARCHIVED_WORKSPACE_ID]).toEqual(
+      [{ ...task, title: "Archived live" }],
+    );
+
+    const beforeUnarchive = revision();
+    store.getState().removeSidebarArchivedTask(TASK_ID, ARCHIVED_WORKSPACE_ID);
+    expect(setArchivedTasks(ARCHIVED_WORKSPACE_ID, [task], beforeUnarchive)).toBe(false);
+    expect(store.getState().sidebarArchivedTasks.itemsByWorkspaceId[ARCHIVED_WORKSPACE_ID]).toEqual(
+      [],
+    );
+
+    setArchivedTasks(ARCHIVED_WORKSPACE_ID, [task]);
+    const beforeDelete = revision();
+    store.getState().removeSidebarArchivedTask(TASK_ID, ARCHIVED_WORKSPACE_ID);
+    expect(setArchivedTasks(ARCHIVED_WORKSPACE_ID, [task], beforeDelete)).toBe(false);
+    expect(store.getState().sidebarArchivedTasks.itemsByWorkspaceId[ARCHIVED_WORKSPACE_ID]).toEqual(
+      [],
+    );
   });
 });

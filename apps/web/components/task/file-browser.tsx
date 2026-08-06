@@ -18,14 +18,12 @@ import { useAppStore } from "@/components/state-provider";
 import { useOpenSessionFolder } from "@/hooks/use-open-session-folder";
 import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard";
 import { useToast } from "@/components/toast-provider";
+import { useTranslation } from "react-i18next";
 import { useMultiSelect } from "@/hooks/use-multi-select";
-import { FileBrowserSearchHeader } from "./file-browser-search-header";
-import {
-  insertNodeInTree,
-  removeNodeFromTree,
-  FileBrowserToolbar,
-  FileBrowserContentArea,
-} from "./file-browser-parts";
+import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
+import { useContextFilesStore } from "@/lib/state/context-files-store";
+import { FileBrowserHeader } from "./file-browser-header";
+import { insertNodeInTree, removeNodeFromTree, FileBrowserContentArea } from "./file-browser-parts";
 import {
   useFileBrowserSearch,
   useFileBrowserTree,
@@ -38,70 +36,6 @@ import { getFileBrowserSessionWorkspacePath, resolveFileBrowserPaths } from "./f
 import { FileTreeEditorProvider } from "./file-tree-editor-menu";
 import { computeMoveTargets, getVisiblePaths, moveNodesInTree } from "./file-tree-utils";
 import { useFileTreeReveal } from "./file-tree-reveal";
-
-type FileBrowserHeaderProps = {
-  treeLoaded: boolean;
-  search: ReturnType<typeof useFileBrowserSearch>;
-  displayPath: string;
-  fullPath: string;
-  copied: boolean;
-  expandedPathsSize: number;
-  onCopyPath: (value: string) => void | Promise<void>;
-  onStartCreate?: () => void;
-  onOpenFolder: () => void;
-  onCollapseAll: () => void;
-  showCreateButton: boolean;
-  onAddSources?: (opener: HTMLButtonElement) => void;
-  addSourcesButtonRef?: Ref<HTMLButtonElement>;
-  addSourcesDisabledReason?: string;
-};
-
-function FileBrowserHeader({
-  treeLoaded,
-  search,
-  displayPath,
-  fullPath,
-  copied,
-  expandedPathsSize,
-  onCopyPath,
-  onStartCreate,
-  onOpenFolder,
-  onCollapseAll,
-  showCreateButton,
-  onAddSources,
-  addSourcesButtonRef,
-  addSourcesDisabledReason,
-}: FileBrowserHeaderProps) {
-  if (!treeLoaded) return null;
-  if (search.isSearchActive) {
-    return (
-      <FileBrowserSearchHeader
-        isSearching={search.isSearching}
-        localSearchQuery={search.localSearchQuery}
-        searchInputRef={search.searchInputRef}
-        onSearchChange={search.handleSearchChange}
-        onCloseSearch={search.handleCloseSearch}
-      />
-    );
-  }
-  return (
-    <FileBrowserToolbar
-      displayPath={displayPath}
-      fullPath={fullPath}
-      copied={copied}
-      expandedPathsSize={expandedPathsSize}
-      onCopyPath={onCopyPath}
-      onStartCreate={onStartCreate}
-      onOpenFolder={onOpenFolder}
-      onStartSearch={() => search.setIsSearchActive(true)}
-      onCollapseAll={onCollapseAll}
-      showCreateButton={showCreateButton}
-      onAddSources={onAddSources}
-      addSourcesButtonRef={addSourcesButtonRef}
-      addSourcesDisabledReason={addSourcesDisabledReason}
-    />
-  );
-}
 
 type FileBrowserProps = {
   sessionId: string;
@@ -124,6 +58,8 @@ function useFileBrowserHandlers(
   treeState: ReturnType<typeof useFileBrowserTree>,
 ) {
   const { toast } = useToast();
+  const { t } = useTranslation("chat");
+  const addContextFile = useContextFilesStore((state) => state.addFile);
   const [creatingInPath, setCreatingInPath] = useState<string | null>(null);
   const [activeFolderPath, setActiveFolderPath] = useState<string>("");
   const openFileAbortRef = useRef<AbortController | null>(null);
@@ -181,6 +117,20 @@ function useFileBrowserHandlers(
     [sessionId, onOpenFile, toast],
   );
   const handleCancelCreate = useCallback(() => setCreatingInPath(null), []);
+  const handleAddToChatContext = useCallback(
+    (node: FileTreeNode) => {
+      addContextFile(sessionId, {
+        path: node.path,
+        name: node.name,
+        isDirectory: node.is_dir,
+      });
+      toast({
+        description: t("chat:addedToChatContext", { name: node.name }),
+        variant: "success",
+      });
+    },
+    [addContextFile, sessionId, t, toast],
+  );
 
   return {
     creatingInPath,
@@ -190,6 +140,7 @@ function useFileBrowserHandlers(
     toggleExpand,
     openFileByPath,
     handleCancelCreate,
+    handleAddToChatContext,
   };
 }
 
@@ -500,12 +451,14 @@ function FileBrowserTreeContent({
   onDeleteFile,
   onRenameFile,
   onDownloadFile,
+  showTouchActions,
 }: Omit<FileBrowserProps, "sessionId" | "environmentId" | "onOpenFile" | "onCreateFile"> & {
   scrollAreaRef: React.RefObject<HTMLDivElement | null>;
   data: ReturnType<typeof useFileBrowserData>;
   handlers: ReturnType<typeof useFileBrowserHandlers>;
   multiSelect: ReturnType<typeof useSelectionInteractions>["multiSelect"];
   dnd: ReturnType<typeof useSelectionInteractions>["dnd"];
+  showTouchActions: boolean;
 }) {
   const { search, isSessionFailed, sessionError, treeState, fileStatuses } = data;
   return (
@@ -530,6 +483,8 @@ function FileBrowserTreeContent({
         onDeleteFile={onDeleteFile}
         onRenameFile={onRenameFile}
         onDownloadFile={onDownloadFile}
+        onAddToChatContext={handlers.handleAddToChatContext}
+        showTouchActions={showTouchActions}
         onCreateFileSubmit={handlers.handleCreateFileSubmit}
         onCancelCreate={handlers.handleCancelCreate}
         onRetry={() => void treeState.loadTree({ resetRetry: true })}
@@ -563,6 +518,8 @@ export function FileBrowser({
   addSourcesButtonRef,
   addSourcesDisabledReason,
 }: FileBrowserProps) {
+  const { isMobile, isFinePointer } = useResponsiveBreakpoint();
+  const showTouchActions = isMobile || !isFinePointer;
   const scrollAreaRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const { data, handlers, multiSelect, dnd, handleClickOutside } = useFileBrowserViewModel({
@@ -610,6 +567,7 @@ export function FileBrowser({
           onDeleteFile={onDeleteFile}
           onRenameFile={onRenameFile}
           onDownloadFile={onDownloadFile}
+          showTouchActions={showTouchActions}
         />
       </div>
     </FileTreeEditorProvider>

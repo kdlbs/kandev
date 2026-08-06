@@ -178,6 +178,7 @@ type AgentStreamEventData struct {
 	SupportsImage           bool                     `json:"supports_image"`
 	SupportsAudio           bool                     `json:"supports_audio"`
 	SupportsEmbeddedContext bool                     `json:"supports_embedded_context"`
+	SupportsPromptQueueing  bool                     `json:"supports_prompt_queueing"`
 	AuthMethods             []streams.AuthMethodInfo `json:"auth_methods,omitempty"`
 
 	// Session models (from "session_models" event)
@@ -294,6 +295,9 @@ type GitStatusData struct {
 	// multi-repo task workspaces. Empty for single-repo. Carried through to
 	// the frontend so the Changes panel can render per-repo group headers.
 	RepositoryName string `json:"repository_name,omitempty"`
+	// IsSubmodule identifies an initialized Git submodule repository so the
+	// frontend can render its scope boundary without guessing from its name.
+	IsSubmodule bool `json:"is_submodule,omitempty"`
 }
 
 type GitCommitData struct {
@@ -509,6 +513,7 @@ type AgentCapabilitiesEventPayload struct {
 	SupportsImage           bool                     `json:"supports_image"`
 	SupportsAudio           bool                     `json:"supports_audio"`
 	SupportsEmbeddedContext bool                     `json:"supports_embedded_context"`
+	SupportsPromptQueueing  bool                     `json:"supports_prompt_queueing"`
 	AuthMethods             []streams.AuthMethodInfo `json:"auth_methods"`
 	Timestamp               string                   `json:"timestamp"`
 }

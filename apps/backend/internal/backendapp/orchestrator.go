@@ -15,6 +15,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	agentsettingscontroller "github.com/kandev/kandev/internal/agent/settings/controller"
 	settingsstore "github.com/kandev/kandev/internal/agent/settings/store"
+	automationpkg "github.com/kandev/kandev/internal/automation"
 	"github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/common/gitref"
 	"github.com/kandev/kandev/internal/common/logger"
@@ -74,6 +75,8 @@ func provideOrchestrator(
 	serviceCfg := orchestrator.DefaultServiceConfig()
 	serviceCfg.ClaudeBackgroundPromptHandoff =
 		cfg != nil && cfg.Features.ClaudeBackgroundPromptHandoff
+	serviceCfg.ClaudeMidTurnSteering =
+		cfg != nil && cfg.Features.ClaudeMidTurnSteering
 	namespace := resolveEventNamespace(cfg)
 	serviceCfg.QueueGroup = "orchestrator." + namespace
 	busMode := "memory"
@@ -106,6 +109,7 @@ func provideOrchestrator(
 
 	orchestratorSvc := orchestrator.NewService(serviceCfg, eventBus, agentManagerClient, taskRepoAdapter, taskRepo, userSvc, secretStore, msgQueue, log)
 	orchestratorSvc.SetAttachmentReader(taskSvc.AttachmentService())
+	orchestratorSvc.SetTitleBranchRuntime(lifecycleMgr)
 	if githubSvc != nil {
 		orchestratorSvc.SetGitHubCredentialBroker(
 			githubExecutorCredentialLeaseAdapter{service: githubSvc},
@@ -119,6 +123,9 @@ func provideOrchestrator(
 	taskSvc.SetRowLivenessProber(agentManagerClient)
 	taskSvc.SetContextWindowResetter(orchestratorSvc.ResetContextWindow)
 	taskSvc.SetGitArchiveCapture(orchestratorSvc)
+	// Automation runs keep their worktrees so they stay repliable, which makes
+	// them the one task kind nothing else ever cleans up; the orchestrator needs
+	// the manager to enforce the per-automation retention window.
 	orchestratorSvc.SetWorktreeManager(lifecycleMgr.WorktreeManager())
 
 	msgCreator := &messageCreatorAdapter{svc: taskSvc, logger: log}
@@ -512,6 +519,55 @@ func (a *profileLookupAdapter) LookupProfile(ctx context.Context, profileID stri
 //
 // Each integration's package is optional in dev mode; nil-safe so the
 // adapter degrades gracefully when one isn't wired.
+// automationDepsAdapter lets the agent-settings controller name the enabled
+// automations bound to a profile without importing the automation package's
+// types into it.
+type automationDepsAdapter struct {
+	store *automationpkg.Store
+}
+
+func (a *automationDepsAdapter) ListEnabledAutomationsByAgentProfile(
+	ctx context.Context, profileID string,
+) ([]agentsettingscontroller.AutomationReference, error) {
+	if a == nil || a.store == nil {
+		return nil, nil
+	}
+	bindings, err := a.store.ListEnabledByAgentProfile(ctx, profileID)
+	if err != nil {
+		return nil, err
+	}
+	refs := make([]agentsettingscontroller.AutomationReference, 0, len(bindings))
+	for _, b := range bindings {
+		refs = append(refs, agentsettingscontroller.AutomationReference{
+			ID:          b.ID,
+			Name:        b.Name,
+			WorkspaceID: b.WorkspaceID,
+		})
+	}
+	return refs, nil
+}
+
+func (a *automationDepsAdapter) DisableAutomationsByAgentProfile(
+	ctx context.Context, profileID string,
+) ([]agentsettingscontroller.AutomationReference, error) {
+	if a == nil || a.store == nil {
+		return nil, nil
+	}
+	bindings, err := a.store.DisableByAgentProfile(ctx, profileID)
+	if err != nil {
+		return nil, err
+	}
+	refs := make([]agentsettingscontroller.AutomationReference, 0, len(bindings))
+	for _, b := range bindings {
+		refs = append(refs, agentsettingscontroller.AutomationReference{
+			ID:          b.ID,
+			Name:        b.Name,
+			WorkspaceID: b.WorkspaceID,
+		})
+	}
+	return refs, nil
+}
+
 type watcherDepsAdapter struct {
 	linear *linearpkg.Service
 	jira   *jirapkg.Service

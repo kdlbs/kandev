@@ -108,6 +108,21 @@ func (r *Repository) ListTaskRepositories(ctx context.Context, taskID string) ([
 	return result, rows.Err()
 }
 
+// ListTaskRepositoryProviders returns the provider identities for a task's
+// live repository links in task order. Keeping the repository join in the
+// query avoids one repository lookup per task link during provider refresh.
+func (r *Repository) ListTaskRepositoryProviders(ctx context.Context, taskID string) ([]string, error) {
+	var providers []string
+	err := r.ro.SelectContext(ctx, &providers, r.ro.Rebind(`
+		SELECT r.provider
+		FROM task_repositories tr
+		INNER JOIN repositories r ON r.id = tr.repository_id
+		WHERE tr.task_id = ? AND r.deleted_at IS NULL
+		ORDER BY tr.position ASC, tr.created_at ASC
+	`), taskID)
+	return providers, err
+}
+
 // UpdateTaskRepository updates an existing task-repository link
 func (r *Repository) UpdateTaskRepository(ctx context.Context, taskRepo *models.TaskRepository) error {
 	taskRepo.UpdatedAt = time.Now().UTC()

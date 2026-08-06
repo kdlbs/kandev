@@ -16,6 +16,7 @@ import {
   IconChevronsLeft,
   IconChevronsRight,
 } from "@tabler/icons-react";
+import { useTranslation } from "react-i18next";
 
 type TasksPaginationProps = {
   total: number;
@@ -34,6 +35,7 @@ export function TasksPagination({
   pagination,
   onPaginationChange,
 }: TasksPaginationProps) {
+  const { t } = useTranslation();
   if (total === 0) return null;
 
   const currentPage = pagination.pageIndex + 1;
@@ -55,21 +57,21 @@ export function TasksPagination({
       className="flex flex-col gap-3 px-1 pb-2 text-sm sm:flex-row sm:items-center sm:justify-between"
     >
       <div className="flex-1 text-muted-foreground">
-        Showing {start} to {end} of {total} results
+        {t("tasks:showingRange", { start, end, count: total })}
       </div>
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:gap-6 lg:gap-8">
         <RowsPerPageSelect pagination={pagination} onPaginationChange={onPaginationChange} />
         <Pagination className="mx-0 w-auto justify-start sm:justify-end">
           <PaginationContent>
             <PageNavigationButton
-              label="Go to first page"
+              label={t("tasks:goToFirstPage")}
               disabled={!canPrevious}
               className="hidden lg:flex"
               onClick={() => setPageIndex(0)}
               icon={<IconChevronsLeft className="h-4 w-4" />}
             />
             <PageNavigationButton
-              label="Go to previous page"
+              label={t("tasks:goToPreviousPage")}
               disabled={!canPrevious}
               onClick={() => setPageIndex(pagination.pageIndex - 1)}
               icon={<IconChevronLeft className="h-4 w-4" />}
@@ -80,13 +82,13 @@ export function TasksPagination({
               onPageChange={(page) => setPageIndex(page - 1)}
             />
             <PageNavigationButton
-              label="Go to next page"
+              label={t("tasks:goToNextPage")}
               disabled={!canNext}
               onClick={() => setPageIndex(pagination.pageIndex + 1)}
               icon={<IconChevronRight className="h-4 w-4" />}
             />
             <PageNavigationButton
-              label="Go to last page"
+              label={t("tasks:goToLastPage")}
               disabled={!canNext}
               className="hidden lg:flex"
               onClick={() => setPageIndex(safePageCount - 1)}
@@ -103,9 +105,10 @@ function RowsPerPageSelect({
   pagination,
   onPaginationChange,
 }: Pick<TasksPaginationProps, "pagination" | "onPaginationChange">) {
+  const { t } = useTranslation();
   return (
     <div className="flex items-center gap-2">
-      <p className="text-sm font-medium whitespace-nowrap">Rows per page</p>
+      <p className="text-sm font-medium whitespace-nowrap">{t("tasks:rowsPerPage")}</p>
       <Select
         value={`${pagination.pageSize}`}
         onValueChange={(value) => {

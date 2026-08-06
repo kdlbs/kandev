@@ -1,5 +1,5 @@
-import { useRef } from "react";
-import { render } from "@testing-library/react";
+import { useLayoutEffect, useRef } from "react";
+import { cleanup, render } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Message } from "@/lib/types/http";
 
@@ -21,6 +21,8 @@ import { useScrollToDividerOrBottom } from "./message-list-native";
 import { useAutoScroll } from "./message-list-native-scroll";
 
 const DIVIDER_KEY = "m2";
+const DIVIDER_SCROLL_CONTAINER_TEST_ID = "divider-scroll-container";
+const MISSING_SCROLL_CONTAINER_ERROR = "scroll container did not render";
 const TEST_MESSAGES = [{} as Message];
 const NEVER_LOCKED = () => false;
 
@@ -29,26 +31,55 @@ function Harness({
   anchoredBarOffsetPx,
   dividerKey = DIVIDER_KEY,
   onDividerScroll,
+  scrollLayoutKey = "initial",
+  dividerDocumentTop = 250,
 }: {
   itemCount: number;
   anchoredBarOffsetPx: number;
   dividerKey?: string | null;
   onDividerScroll?: () => void;
+  scrollLayoutKey?: string;
+  dividerDocumentTop?: number;
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
-  useScrollToDividerOrBottom(
-    scrollRef,
-    itemCount,
-    dividerKey,
-    anchoredBarOffsetPx,
+  useLayoutEffect(() => {
+    const scrollContainer = scrollRef.current;
+    if (!scrollContainer) return;
+    Object.defineProperty(scrollContainer, "getBoundingClientRect", {
+      configurable: true,
+      value: () => createRect(100, 400),
+    });
+    const divider = scrollContainer.querySelector<HTMLElement>(`[id="msg-${DIVIDER_KEY}"]`);
+    if (!divider) return;
+    Object.defineProperty(divider, "getBoundingClientRect", {
+      configurable: true,
+      value: () => createRect(dividerDocumentTop - scrollContainer.scrollTop, 20),
+    });
+  }, [dividerDocumentTop]);
+  useScrollToDividerOrBottom(scrollRef, itemCount, dividerKey, anchoredBarOffsetPx, {
     onDividerScroll,
-  );
+    scrollLayoutKey,
+  });
   return (
-    <div ref={scrollRef}>
+    <div ref={scrollRef} data-testid={DIVIDER_SCROLL_CONTAINER_TEST_ID}>
       <div id="msg-m1" />
       <div id={`msg-${DIVIDER_KEY}`} />
     </div>
   );
+}
+
+function createRect(top: number, height: number): DOMRect {
+  return {
+    x: 0,
+    y: top,
+    top,
+    bottom: top + height,
+    left: 0,
+    right: 100,
+    width: 100,
+    height,
+    toJSON: () => ({}),
+  } as DOMRect;
 }
 
 function AutoScrollHarness({
@@ -82,29 +113,48 @@ function setScrollMetrics(element: HTMLElement) {
 }
 
 afterEach(() => {
+  cleanup();
   vi.restoreAllMocks();
 });
 
+// eslint-disable-next-line max-lines-per-function -- this suite keeps the related scroll invariants together.
 describe("useScrollToDividerOrBottom — anchored-bar offset", () => {
-  it("re-scrolls the divider into view once the anchored bar's measured height arrives, so it lands below the pinned bar instead of under it", () => {
-    const scrollIntoView = vi.fn();
-    HTMLElement.prototype.scrollIntoView = scrollIntoView;
-
+  it("re-scrolls the divider when the anchored bar's measured height arrives", () => {
     const { rerender } = render(<Harness itemCount={2} anchoredBarOffsetPx={0} />);
-    expect(scrollIntoView).toHaveBeenCalledTimes(1);
+    const scrollContainer = document.querySelector<HTMLElement>(
+      `[data-testid="${DIVIDER_SCROLL_CONTAINER_TEST_ID}"]`,
+    );
+    if (!scrollContainer) throw new Error(MISSING_SCROLL_CONTAINER_ERROR);
+    expect(scrollContainer.scrollTop).toBe(150);
 
-    // The anchored bar's real height resolves a tick after mount (async
-    // ResizeObserver report) — the divider must be re-placed now that the
-    // scroll-margin backing it is no longer 0, or it stays hidden under the
-    // bar for good (didScrollToDivider already latched true).
     rerender(<Harness itemCount={2} anchoredBarOffsetPx={76} />);
 
-    expect(scrollIntoView).toHaveBeenCalledTimes(2);
-    expect(scrollIntoView).toHaveBeenLastCalledWith({ block: "start" });
+    expect(scrollContainer.scrollTop).toBe(74);
+  });
+
+  it("reasserts the divider after a loading layout shift with the same item count", () => {
+    const { rerender } = render(
+      <Harness itemCount={2} anchoredBarOffsetPx={0} scrollLayoutKey="loading" />,
+    );
+    const scrollContainer = document.querySelector<HTMLElement>(
+      `[data-testid="${DIVIDER_SCROLL_CONTAINER_TEST_ID}"]`,
+    );
+    if (!scrollContainer) throw new Error(MISSING_SCROLL_CONTAINER_ERROR);
+    expect(scrollContainer.scrollTop).toBe(150);
+
+    rerender(
+      <Harness
+        itemCount={2}
+        anchoredBarOffsetPx={0}
+        scrollLayoutKey="settled"
+        dividerDocumentTop={166}
+      />,
+    );
+
+    expect(scrollContainer.scrollTop).toBe(66);
   });
 
   it("resynchronizes auto-scroll state after placing the divider", () => {
-    HTMLElement.prototype.scrollIntoView = vi.fn();
     const onDividerScroll = vi.fn();
 
     render(<Harness itemCount={2} anchoredBarOffsetPx={0} onDividerScroll={onDividerScroll} />);
@@ -152,47 +202,51 @@ describe("useScrollToDividerOrBottom — anchored-bar offset", () => {
   });
 
   it("never re-scrolls once the reader has started scrolling, even if the anchored bar's height changes afterward", () => {
-    const scrollIntoView = vi.fn();
-    HTMLElement.prototype.scrollIntoView = scrollIntoView;
-
     const { rerender, container } = render(<Harness itemCount={2} anchoredBarOffsetPx={0} />);
-    expect(scrollIntoView).toHaveBeenCalledTimes(1);
+    const scrollContainer = container.querySelector<HTMLElement>(
+      `[data-testid="${DIVIDER_SCROLL_CONTAINER_TEST_ID}"]`,
+    );
+    if (!scrollContainer) throw new Error(MISSING_SCROLL_CONTAINER_ERROR);
+    expect(scrollContainer.scrollTop).toBe(150);
 
-    container.querySelector("div")?.dispatchEvent(new Event("wheel", { bubbles: true }));
+    scrollContainer.dispatchEvent(new Event("wheel", { bubbles: true }));
 
     rerender(<Harness itemCount={2} anchoredBarOffsetPx={76} />);
 
-    expect(scrollIntoView).toHaveBeenCalledTimes(1);
+    expect(scrollContainer.scrollTop).toBe(150);
   });
 
   it("never scrolls the divider when there is no unread boundary, regardless of anchored-bar height changes", () => {
-    const scrollIntoView = vi.fn();
-    HTMLElement.prototype.scrollIntoView = scrollIntoView;
-
     const { rerender } = render(
       <Harness itemCount={2} anchoredBarOffsetPx={0} dividerKey={null} />,
     );
-    expect(scrollIntoView).not.toHaveBeenCalled();
+    const scrollContainer = document.querySelector<HTMLElement>(
+      `[data-testid="${DIVIDER_SCROLL_CONTAINER_TEST_ID}"]`,
+    );
+    if (!scrollContainer) throw new Error(MISSING_SCROLL_CONTAINER_ERROR);
+    expect(scrollContainer.scrollTop).toBe(0);
 
     rerender(<Harness itemCount={2} anchoredBarOffsetPx={76} dividerKey={null} />);
 
-    expect(scrollIntoView).not.toHaveBeenCalled();
+    expect(scrollContainer.scrollTop).toBe(0);
   });
 
   it("stops re-scrolling once the settling window has elapsed, even without any user interaction", () => {
     vi.useFakeTimers();
-    const scrollIntoView = vi.fn();
-    HTMLElement.prototype.scrollIntoView = scrollIntoView;
 
     const { rerender } = render(<Harness itemCount={2} anchoredBarOffsetPx={0} />);
-    expect(scrollIntoView).toHaveBeenCalledTimes(1);
+    const scrollContainer = document.querySelector<HTMLElement>(
+      `[data-testid="${DIVIDER_SCROLL_CONTAINER_TEST_ID}"]`,
+    );
+    if (!scrollContainer) throw new Error(MISSING_SCROLL_CONTAINER_ERROR);
+    expect(scrollContainer.scrollTop).toBe(150);
 
     // Past the 4s settling window (e.g. a scrollbar drag with no
     // wheel/touch/key event to catch — the correction must freeze anyway).
     vi.advanceTimersByTime(4001);
     rerender(<Harness itemCount={2} anchoredBarOffsetPx={76} />);
 
-    expect(scrollIntoView).toHaveBeenCalledTimes(1);
+    expect(scrollContainer.scrollTop).toBe(150);
     vi.useRealTimers();
   });
 });

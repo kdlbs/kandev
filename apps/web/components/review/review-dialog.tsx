@@ -26,6 +26,7 @@ import {
   normalizeDiffContent,
   reviewFileKey,
   splitReviewFileKey as splitFileKey,
+  suppressAvailableGitlinkFiles,
 } from "./types";
 
 /**
@@ -58,8 +59,12 @@ function addCumulativeDiffFiles(
     const path = file.path ?? splitFileKey(mapKey).path;
     if (!path) continue;
     const key = fileMapKey(path, repoName);
-    const hasRepoUnawareCollision = key !== path && fileMap.has(path);
-    if (fileMap.has(key) || hasRepoUnawareCollision) continue;
+    // In multi-scope mode, a bare path belongs to the workspace root while a
+    // repository-scoped path belongs to that repository. They may share a
+    // filename (README.md is common), so only the canonical scoped key is a
+    // collision. Single-repository callers pass useRepositoryKeys=false and
+    // therefore still dedupe on the bare path.
+    if (fileMap.has(key)) continue;
     const diff = file.diff ? normalizeDiffContent(file.diff) : "";
     fileMap.set(key, {
       path,
@@ -73,6 +78,7 @@ function addCumulativeDiffFiles(
       diff_skip_reason: file.diff_skip_reason,
       repository_name: repoName,
       base_ref: file.base_ref ?? defaultBaseRef,
+      is_submodule: file.is_submodule,
     });
   }
 }
@@ -80,9 +86,12 @@ function addCumulativeDiffFiles(
 function addUncommittedFiles(
   fileMap: Map<string, ReviewFile>,
   gitStatusFiles: Record<string, FileInfo>,
+  useRepositoryKeys: boolean,
+  isSubmodule = false,
 ) {
   for (const file of Object.values(gitStatusFiles)) {
-    const key = fileMapKey(file.path, file.repository_name);
+    const repositoryName = useRepositoryKeys ? file.repository_name : undefined;
+    const key = fileMapKey(file.path, repositoryName);
     if (fileMap.has(key)) continue;
     const diff = file.diff ? normalizeDiffContent(file.diff) : "";
     fileMap.set(key, {
@@ -95,17 +104,17 @@ function addUncommittedFiles(
       source: "uncommitted",
       old_path: file.old_path,
       diff_skip_reason: file.diff_skip_reason,
-      repository_name: file.repository_name,
+      repository_name: repositoryName,
+      is_submodule: file.is_submodule ?? isSubmodule,
     });
   }
 }
 
 function addPRFiles(fileMap: Map<string, ReviewFile>, files: PRDiffFile[], repoName?: string) {
-  const repositoryName = repoName || undefined;
+  const repositoryName = repoName;
   for (const file of files) {
     const key = fileMapKey(file.filename, repositoryName);
-    const hasRepoUnawareCollision = !!repositoryName && fileMap.has(file.filename);
-    if (fileMap.has(key) || hasRepoUnawareCollision) continue;
+    if (fileMap.has(key)) continue;
     const diff = file.patch ? normalizeDiffContent(file.patch) : "";
     fileMap.set(key, {
       path: file.filename,
@@ -117,6 +126,7 @@ function addPRFiles(fileMap: Map<string, ReviewFile>, files: PRDiffFile[], repoN
       source: "pr",
       old_path: file.old_path,
       repository_name: repositoryName,
+      is_submodule: file.is_submodule,
     });
   }
 }
@@ -137,7 +147,7 @@ export function buildAllFiles(
   // (panel: fresh worktree content from `git-status`, dialog: stale cumulative
   // diff snapshot from the last fetch) — the dialog appeared to show outdated
   // content even though the cumulative-diff hook was successfully refetching.
-  if (gitStatusFiles) addUncommittedFiles(fileMap, gitStatusFiles);
+  if (gitStatusFiles) addUncommittedFiles(fileMap, gitStatusFiles, useRepositoryKeys);
   if (cumulativeDiff?.files) {
     addCumulativeDiffFiles(
       fileMap,
@@ -147,11 +157,12 @@ export function buildAllFiles(
     );
   }
   if (prDiffFiles) addPRFiles(fileMap, prDiffFiles, prRepoName);
-  return Array.from(fileMap.values()).sort((a, b) => {
+  const sortedFiles = Array.from(fileMap.values()).sort((a, b) => {
     const repoCmp = (a.repository_name ?? "").localeCompare(b.repository_name ?? "");
     if (repoCmp !== 0) return repoCmp;
     return a.path.localeCompare(b.path);
   });
+  return suppressAvailableGitlinkFiles(sortedFiles);
 }
 
 export function filterPendingDiffCommentsForSession(
@@ -295,7 +306,7 @@ function useReviewDialogHandlers(opts: ReviewDialogHandlerOptions) {
       // discard runs in the correct repo's worktree.
       const { repositoryName, path } = splitFileKey(key);
       try {
-        const result = await discard([path], repositoryName || undefined);
+        const result = await discard([path], repositoryName);
         if (result.success)
           toast({ title: "Changes discarded", description: path, variant: "success" });
         else

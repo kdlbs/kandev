@@ -111,6 +111,9 @@ capabilities:
   secrets: true
   auth: true                                  # establish a login session for an
                                               # external (OIDC/SAML) identity — see ADR 0050
+  user_state: true                            # authenticated, per-user host.storage — see
+                                              # "Frontend plugin runtime" and ADR
+                                              # 2026-08-01-per-user-plugin-storage
 
 webhooks:
   - key: "slack-events"
@@ -322,6 +325,39 @@ message WebhookResponse { int32 status = 1; map<string, string> headers = 2; byt
 
 The `WebhookResponse` is relayed back as the HTTP response. The plugin verifies the
 external system's signature (Slack signing secret, GitHub webhook secret, etc.) itself.
+
+### Authenticated per-user storage API (browser -> kandev, `host.storage`)
+
+```text
+GET    /api/plugins/{id}/user-state/{scope}/{scopeId}          # list, ordered by key
+GET    /api/plugins/{id}/user-state/{scope}/{scopeId}/{key}
+PUT    /api/plugins/{id}/user-state/{scope}/{scopeId}/{key}     # body: {value, writerId?, ifUnmodifiedSince?}
+DELETE /api/plugins/{id}/user-state/{scope}/{scopeId}/{key}
+```
+
+Unlike every other plugin HTTP surface, this one is reachable directly from an
+authenticated browser session (session cookie or PAT) — it is **not** in
+`httpmw`'s public-path allowlist, and it never touches the plugin's gRPC
+subprocess. Identity comes from `authn.FromGin`; every read/write is scoped to
+that user via a `plugin_user_state` row keyed
+`(plugin_id, user_id, scope, scope_id, state_key)`, which is a separate table
+from the plugin-owned `plugin_state` (no proto change, no migration between the
+two). Requires the plugin manifest to declare `capabilities.user_state: true`
+(`403` otherwise); an unknown/disabled plugin returns `404`; a cross-user `GET`
+returns `404` (never leaks that the key exists for someone else). `scope` must
+be one of `instance|workspace|task|session|repository`; `scopeId`/`key` must
+match `[A-Za-z0-9][A-Za-z0-9._:-]{0,127}`; the body is capped (`413` over the
+limit). `PUT` accepts an optional `ifUnmodifiedSince`, compared against the
+stored row's `updated_at` — a conflicting write returns `409` and leaves the
+stored value unchanged (optimistic concurrency; see ADR
+2026-08-01-per-user-plugin-storage). Uninstalling a plugin deletes its
+`plugin_user_state` rows for every user, not just one.
+
+A successful `PUT`/`DELETE` publishes the `plugin.user-state.updated` bus event,
+routed by the existing `UserEventBroadcaster` (the same user-scoped fan-out
+`user.settings.updated` uses) to only the writing user's own WS connections. The
+payload carries `{ pluginId, scope, scopeId, key, updatedAt, writerId, deleted }`
+— keys only, never the value.
 
 ### Host gRPC service (plugin -> kandev)
 
@@ -566,6 +602,45 @@ Mattermost-webapp model), not iframes. The full contract lives in
   that instance. `content` reuses the slot-component contract (rendered with the
   host React instance). Independent of keybindings — any plugin code path may call
   it, including a keybinding handler.
+- **Task panels:** `registerTaskPanel({ id, title, icon?, Component, mobileEnabled? })`
+  adds a row to the task workspace's "+" (add panel) menu; selecting it opens a
+  dockview panel rendering `Component` with `{ panelId, taskId, sessionId,
+  presentation }`. Every plugin panel shares one generic `"plugin-panel"` dockview
+  component (identity in `params.pluginId`/`params.panelKey`), so a saved layout
+  round-trips even when the owning plugin is later uninstalled — the layout manager
+  drops an unresolvable reference instead of throwing, and `Settings > Layouts`
+  renders a placeholder box for it. On phones, one bounded **Panels**
+  bottom-navigation entry opens a touch-native picker containing every
+  `mobileEnabled: true` registration; choosing one renders the same `Component`
+  full-height with `presentation: "mobile"`. Plugin loading and reloading are
+  authoritative lifecycle states, not elapsed-time guesses: a temporarily missing
+  registration never deletes an open or saved panel while its plugin is loading.
+  A successful initialization that omits a previously registered panel, or a
+  definitive disable/uninstall, closes that panel. If the removed panel is focused
+  on a phone, the session deterministically returns to Chat. A `Component` that
+  throws renders a per-panel error-boundary fallback without affecting the rest of
+  the layout. Decision:
+  ADR-2026-08-04-plugin-contribution-lifecycle-authority.
+- **Kanban card contributions:** `registerTaskMenuAction({ id, label, icon?,
+  group: "edit", visible?, run })` adds an item to the kanban card's `Edit`
+  submenu (the flat `Edit` item becomes `Edit > Edit task` once any plugin
+  registers one); `run(context)` receives `{ workspaceId, taskId, taskTitle,
+  workflowStepId, presentation }`, and a rejected `run` is caught and logged
+  without blocking the menu from closing. `registerComponent("task-card-indicators",
+  C)` renders `C` beside the PR status icon on every kanban card, receiving
+  `{ taskId, workspaceId, workflowStepId }` as `slotProps`.
+- **`host.storage`:** authenticated, per-user key/value storage
+  (`get`/`set`/`delete`/`list`/`subscribe`), backed by the `plugin_user_state`
+  table (separate from the plugin-backend-only `plugin_state` table — no gRPC/proto
+  change) and requiring `capabilities.user_state: true`. A successful
+  `set`/`delete` publishes `plugin.user-state.updated` to the writing user's own
+  WS connections only (payload carries keys, never the value); `host.storage.subscribe`
+  filters to the plugin's own events and suppresses the writing tab's own echo via a
+  per-tab `writerId`. See `docs/decisions/2026-08-01-per-user-plugin-storage.md` and
+  the full contract in `PLUGIN-API.md`.
+- **`host.ui.RichTextEditor` / `host.ui.RichTextReadOnly`:** narrow wrappers over the
+  Plan panel's tiptap markdown editor, pixel-identical to the Plan panel, so a
+  plugin needing rich text (e.g. a notes scratchpad) ships no tiptap of its own.
 
 ## State machine
 
@@ -621,6 +696,15 @@ complete.
   (macOS/Linux) or loopback TCP with AutoMTLS (Windows) — never a routable network
   address. There is no remote/operator-hosted plugin tier in v1; every plugin backend
   is a binary kandev spawns and supervises on the same host. See "Out of scope".
+- **`host.storage`'s user-state routes are the first plugin HTTP surface reachable
+  with the caller's own browser session** (every other plugin HTTP route is either
+  operator-only management or a self-authenticating external webhook). It is
+  guarded the same way any other authenticated API route is — `httpmw`'s allowlist
+  explicitly does not cover it, so an unauthenticated request is rejected before the
+  handler runs — plus a capability gate (`user_state`), scope/key validation, a body
+  cap, and per-user row isolation. The stored value is opaque to the host: it is
+  never interpreted, never included in the `plugin.user-state.updated` WS payload,
+  and never delivered to the plugin's gRPC backend (a browser-only surface).
 
 ## Failure modes
 
@@ -645,6 +729,13 @@ complete.
   a message naming the missing capability.
 - **Checksum mismatch or unresolvable host-platform executable at install time**:
   install is rejected before any code runs.
+- **Frontend bundle import or initialization remains in flight**: open and saved
+  plugin-panel identities are preserved regardless of duration. A failed or timed-out
+  initialization leaves the panel recoverable for a later successful load; it is not
+  interpreted as disable or uninstall.
+- **Per-user state purge fails during uninstall**: uninstall fails closed before the
+  package or plugin record is removed. The stopped-but-installed plugin remains
+  retryable and a successful retry purges every user's rows before removal completes.
 
 ## Persistence guarantees
 
@@ -654,6 +745,9 @@ complete.
 - Extracted plugin packages persist at `~/.kandev/plugins/<id>/<version>/` until
   uninstall.
 - Plugin state in SQLite survives restarts.
+- `plugin_user_state` survives restarts and ordinary disable/enable cycles, but no row
+  survives a successful uninstall. If its purge fails, uninstall does not report
+  success and leaves the plugin installed so the cleanup can be retried.
 - Event delivery buffer is in-memory; events in the buffer do not survive a backend
   restart.
 - There are no plugin credentials to persist or lose — auth is re-derived from the
@@ -789,6 +883,35 @@ complete.
   a failed delivery leaves no durable user message and a retry can't duplicate
   the prompt.
 
+- **GIVEN** a saved or open plugin task panel and a plugin reload whose import or
+  `initialize()` takes longer than 500 milliseconds, **WHEN** registration eventually
+  succeeds with the same panel identity, **THEN** the panel remains in the layout and
+  renders the reloaded component without being closed or deleted.
+
+- **GIVEN** an open plugin task panel and a successfully initialized replacement
+  version that no longer registers that panel identity, **WHEN** initialization
+  completes, **THEN** the obsolete panel closes exactly once.
+
+- **GIVEN** a plugin task panel focused on a phone, **WHEN** the plugin is disabled or
+  uninstalled, **THEN** its picker row disappears, its component unmounts, and the
+  session focuses Chat instead of leaving an unavailable panel selected.
+
+- **GIVEN** several plugins register mobile-enabled task panels, **WHEN** a user opens
+  the task workspace on a phone, **THEN** the fixed bottom navigation exposes one
+  touch-sized Panels entry whose picker lists every panel without shrinking the other
+  navigation targets or causing document-level horizontal overflow.
+
+- **GIVEN** a plugin task-menu action is invoked from the phone kanban, **WHEN** its
+  `visible(context)` or `run(context)` callback executes, **THEN**
+  `context.presentation` is `"mobile"`; the same action invoked from desktop receives
+  `"desktop"`.
+
+- **GIVEN** a plugin has per-user state and deleting those rows returns an error,
+  **WHEN** an operator uninstalls it, **THEN** the request fails, the package and plugin
+  record remain installed for retry, and no successful-uninstall response is emitted.
+  **WHEN** cleanup later succeeds and uninstall is retried, **THEN** all users' rows,
+  the package, and the record are removed.
+
 ## Out of scope
 
 - **Remote / operator-hosted plugin tier.** The earlier `base_url` registration model,
@@ -831,6 +954,11 @@ complete.
   scope for now. See "Host data API".
 - **Per-session code-stats precomputation.** `SessionCodeStats` is computed on
   demand per request in v1; a materialized or cached aggregation is future work.
+- **New plugin contribution hooks or storage contracts.** This hardening does not add
+  registration methods, change the `plugin_user_state` schema, alter user-state HTTP
+  routes or WS payloads, or broaden the rich-text wrappers.
+- **A general mobile navigation redesign.** The bounded Panels picker applies only to
+  plugin-contributed task panels and reuses the existing task-mobile picker pattern.
 - **Workspace-scoped plugin data access.** v1 reads are global to the instance with
   a reserved scoping hook; per-plugin or per-user workspace restriction is future
   work (see ADR 0043 open decisions).

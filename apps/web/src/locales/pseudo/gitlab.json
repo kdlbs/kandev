@@ -280,5 +280,18 @@
   "workflow": "Ŵōŕķƒĺōŵ",
   "workflowStep": "Ŵōŕķƒĺōŵ śţēƥ",
   "workflowThatReceivesNewTasks": "Ŵōŕķƒĺōŵ ţĥàţ ŕēćēĩvēś ńēŵ ţàśķś.",
-  "yourTokenMayStillBeValid": "Ŷōũŕ ţōķēń ḿàŷ śţĩĺĺ ƀē vàĺĩď — ţĥĩś ĺōōķś ĺĩķē à ńēţŵōŕķ ōŕ ũƥśţŕēàḿ ĩśśũē."
+  "yourTokenMayStillBeValid": "Ŷōũŕ ţōķēń ḿàŷ śţĩĺĺ ƀē vàĺĩď — ţĥĩś ĺōōķś ĺĩķē à ńēţŵōŕķ ōŕ ũƥśţŕēàḿ ĩśśũē.",
+  "mrAutomationClosedLabel": "ḾŔ ćĺōśēď ŵĩţĥōũţ ḿēŕĝĩńĝ",
+  "mrAutomationDescription": "Ŵàķēś ţĥĩś ţàśķ'ś àĝēńţ ŵĥēń ŷōũŕ ŕēvĩēŵ ĩś ŕēqũēśţēď ōń à ĺĩńķēď ḿēŕĝē ŕēqũēśţ, ōŕ ŵĥēń ōńē ḿēŕĝēś ōŕ ćĺōśēś. Ńōţĩƒĩćàţĩōńś ĝō ţō ŵĥĩćĥēvēŕ śēśśĩōń qũēũē ĩś àćţĩvē ƒōŕ ţĥĩś ţàśķ.",
+  "mrAutomationMergedLabel": "ḾŔ ḿēŕĝēď",
+  "mrAutomationRetry": "Ŕēţŕŷ",
+  "mrAutomationReviewRequestedHelp": "Ŵàķē ţĥē àĝēńţ ŵĥēń ţĥē ŵōŕķśƥàćē'ś ćōńńēćţēď ĜĩţĹàƀ àććōũńţ ĩś àďďēď àś à ŕēvĩēŵēŕ. Ɓēĩńĝ ŕē-àďďēď àƒţēŕ ŕēḿōvàĺ ćōũńţś àś à ńēŵ ŕēqũēśţ; śţàŷĩńĝ àśśĩĝńēď àćŕōśś ḾŔ ũƥďàţēś ďōēś ńōţ.",
+  "mrAutomationReviewRequestedHelpAriaLabel": "Ēxƥĺàĩń ŕēvĩēŵ ŕēqũēśţ ńōţĩƒĩćàţĩōńś",
+  "mrAutomationReviewRequestedLabel": "Ŷōũŕ ŕēvĩēŵ ĩś ŕēqũēśţēď",
+  "mrAutomationTerminalHelp": "Ŵàķē ţĥē àĝēńţ ŵĥēń ŕēvĩēŵ ŵōŕķ ēńďś. Ćĥōōśē ēĩţĥēŕ ōŕ ƀōţĥ ōũţćōḿēś.",
+  "mrAutomationTerminalHelpAriaLabel": "Ēxƥĺàĩń ƒĩńàĺ ḾŔ śţàţē ńōţĩƒĩćàţĩōńś",
+  "mrAutomationToggleAriaLabel": "Ţōĝĝĺē ŕēvĩēŵ ƒōĺĺōŵ-ũƥ àũţōḿàţĩōń",
+  "mrAutomationTriggerLabel": "Ŕēvĩēŵ ƒōĺĺōŵ-ũƥ",
+  "mrAutomationUpdateFailedDescription": "Ţĥē śēţţĩńĝ ŵàś ńōţ śàvēď.",
+  "mrAutomationUpdateFailedTitle": "Ƒàĩĺēď ţō ũƥďàţē ḾŔ àũţōḿàţĩōń"
 }

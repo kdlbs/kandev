@@ -98,6 +98,12 @@ describe("useHandoffProfiles", () => {
     expect(result.current).toEqual([]);
   });
 
+  it("omits disabled profiles from handoff choices", () => {
+    mockProfiles = [PROFILE_A, { ...PROFILE_B, enabled: false }];
+    const { result } = renderHook(() => useHandoffProfiles("task-1"));
+    expect(result.current.map((p) => p.id)).toEqual(["profile-a"]);
+  });
+
   it("passes the enabled flag to executor profile lookup", () => {
     renderHook(() => useHandoffProfiles("task-1", false));
     expect(mockUseTaskExecutorProfile).toHaveBeenCalledWith("task-1", false);

@@ -93,6 +93,7 @@ type WorkingTreeProps = Pick<
   | "unstagedFiles"
   | "stagedFiles"
   | "pendingStageFiles"
+  | "isLoading"
   | "loadingOperation"
   | "dialogs"
   | "onOpenDiffFile"
@@ -120,7 +121,7 @@ function WorkingTreeSections(props: WorkingTreeProps) {
           files={props.unstagedFiles}
           pendingStageFiles={props.pendingStageFiles}
           actionLabel="Stage all"
-          isActionLoading={isBulkOp && props.loadingOperation === "stage"}
+          isActionLoading={props.isLoading || (isBulkOp && props.loadingOperation === "stage")}
           onAction={props.onStageAll}
           onOpenDiff={props.onOpenDiffFile}
           onEditFile={props.onEditFile}
@@ -139,10 +140,12 @@ function WorkingTreeSections(props: WorkingTreeProps) {
           files={props.stagedFiles}
           pendingStageFiles={props.pendingStageFiles}
           actionLabel="Commit"
-          isActionLoading={props.loadingOperation === "commit"}
+          isActionLoading={props.isLoading || props.loadingOperation === "commit"}
           onAction={() => props.dialogs.openCommitDialog()}
           secondaryActionLabel="Unstage all"
-          isSecondaryActionLoading={isBulkOp && props.loadingOperation === "unstage"}
+          isSecondaryActionLoading={
+            props.isLoading || (isBulkOp && props.loadingOperation === "unstage")
+          }
           onSecondaryAction={props.onUnstageAll}
           onOpenDiff={props.onOpenDiffFile}
           onEditFile={props.onEditFile}

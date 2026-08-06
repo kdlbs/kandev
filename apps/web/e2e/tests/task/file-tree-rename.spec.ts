@@ -47,7 +47,9 @@ async function startRenameViaContextMenu(testPage: Page, node: ReturnType<Page["
   // the row is the only one with this className combo; locate via role.
   const input = node.getByRole("textbox");
   await expect(input).toBeVisible({ timeout: 2_000 });
-  await expect(input).toBeFocused({ timeout: 2_000 });
+  // The rename input is focused in an effect after the row switches into
+  // edit mode; allow a little extra time when the browser is under CI load.
+  await expect(input).toBeFocused({ timeout: 5_000 });
   return input;
 }
 

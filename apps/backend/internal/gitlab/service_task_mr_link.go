@@ -303,9 +303,62 @@ func taskMRFromStatus(taskID, repositoryID, host, projectPath string, status *MR
 	}
 }
 
-type taskMRUpdatedEvent struct {
-	WorkspaceID string `json:"workspace_id"`
+// TaskMRUpdatedEvent is the payload published on events.GitLabTaskMRUpdated.
+// Exported (not just the embedded *TaskMR) so orchestrator-side consumers —
+// notably the MR lifecycle automation pass — can type-assert event.Data
+// without reaching into an unexported gitlab-package type.
+type TaskMRUpdatedEvent struct {
+	WorkspaceID    string       `json:"workspace_id"`
+	Reviewers      []MRReviewer `json:"reviewers"`
+	ReviewersValid bool         `json:"reviewers_valid,omitempty"`
 	*TaskMR
+}
+
+// GetWorkspaceID implements the websocket broadcaster's workspace-routing
+// interface (internal/gateway/websocket.extractWorkspaceID). Without it, the
+// broadcaster's map-only field extractor cannot see WorkspaceID on this
+// struct payload and always treats the event as workspace-unknown.
+func (e *TaskMRUpdatedEvent) GetWorkspaceID() string {
+	if e == nil {
+		return ""
+	}
+	return e.WorkspaceID
+}
+
+// publishTaskMRLifecycleSyncEvent publishes a TaskMRUpdatedEvent after the
+// poller's lifecycle sync pass refreshes a linked MR (AC22). Unlike
+// publishTaskMRUpdated (an HTTP/link-flow caller that already has a trusted
+// workspace ID), this path resolves the workspace itself — a lookup failure
+// skips publishing rather than emitting an event the websocket layer could
+// broadcast instance-wide; the next poll retries.
+func (s *Service) publishTaskMRLifecycleSyncEvent(
+	ctx context.Context, mr *TaskMR, reviewers []MRReviewer, reviewersValid bool,
+) {
+	if mr == nil {
+		return
+	}
+	s.mu.RLock()
+	eventBus := s.eventBus
+	store := s.store
+	s.mu.RUnlock()
+	if eventBus == nil || store == nil {
+		return
+	}
+	workspaceID, err := store.WorkspaceIDForTask(ctx, mr.TaskID)
+	if err != nil {
+		s.logger.Debug("gitlab: resolve workspace for MR lifecycle sync event",
+			zap.String("task_id", mr.TaskID), zap.Error(err))
+		return
+	}
+	event := bus.NewEvent(events.GitLabTaskMRUpdated, eventSource, &TaskMRUpdatedEvent{
+		WorkspaceID:    workspaceID,
+		Reviewers:      reviewers,
+		ReviewersValid: reviewersValid,
+		TaskMR:         mr,
+	})
+	if err := eventBus.Publish(ctx, events.GitLabTaskMRUpdated, event); err != nil {
+		s.logger.Debug("publish GitLab task MR lifecycle sync event", zap.Error(err))
+	}
 }
 
 func (s *Service) publishTaskMRUpdated(ctx context.Context, workspaceID string, association *TaskMR) {
@@ -315,7 +368,7 @@ func (s *Service) publishTaskMRUpdated(ctx context.Context, workspaceID string, 
 	if eventBus == nil {
 		return
 	}
-	event := bus.NewEvent(events.GitLabTaskMRUpdated, eventSource, &taskMRUpdatedEvent{
+	event := bus.NewEvent(events.GitLabTaskMRUpdated, eventSource, &TaskMRUpdatedEvent{
 		WorkspaceID: workspaceID,
 		TaskMR:      association,
 	})

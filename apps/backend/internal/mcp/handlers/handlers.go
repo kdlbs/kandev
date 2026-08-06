@@ -13,6 +13,7 @@ import (
 
 	"github.com/kandev/kandev/internal/agent/mcpconfig"
 	agentsettingscontroller "github.com/kandev/kandev/internal/agent/settings/controller"
+	"github.com/kandev/kandev/internal/auth/authn"
 	"github.com/kandev/kandev/internal/clarification"
 	"github.com/kandev/kandev/internal/common/constants"
 	"github.com/kandev/kandev/internal/common/logger"
@@ -105,6 +106,14 @@ type TaskRepository interface {
 	UpdateTaskState(ctx context.Context, taskID string, state v1.TaskState) error
 }
 
+// RemoteContributionService resolves provider URLs before task creation and
+// associates an already-existing PR/MR after the target task-repository row
+// exists. Implementations must return only server-authored identity data.
+type RemoteContributionService interface {
+	Resolve(ctx context.Context, workspaceID, userID, rawURL string) (*models.RemoteContributionResolution, bool, error)
+	Associate(ctx context.Context, workspaceID, userID, taskID, repositoryID string, resolution *models.RemoteContributionResolution) error
+}
+
 // sessionOwnedTaskStateUpdater atomically guards a task-state write with the
 // current state of its owning session. Production SQLite implements this so a
 // clarification answer cannot restore IN_PROGRESS after coordinator stop has
@@ -155,6 +164,12 @@ type TaskStopper interface {
 	StopTaskForCoordinator(ctx context.Context, taskID string) (orchestrator.CoordinatorTaskStopResult, error)
 }
 
+// TaskTitleBranchRenamer performs the best-effort branch side effect after an
+// owner session accepts a prompt-first task title.
+type TaskTitleBranchRenamer interface {
+	RenameGeneratedBranchesForTaskTitle(ctx context.Context, taskID, sessionID, title string) (orchestrator.TitleBranchRenameResult, error)
+}
+
 // MessageQueuer queues a prompt message for delivery to a session on its next turn.
 // TakeQueued is exposed so move_task can roll back the hand-off prompt when the
 // underlying MoveTask call fails — without it, a queued "you were moved..."
@@ -193,6 +208,7 @@ type Handlers struct {
 	walkthroughService   *service.WalkthroughService
 	sessionLauncher      SessionLauncher
 	taskStopper          TaskStopper
+	titleBranchRenamer   TaskTitleBranchRenamer
 	stopTaskGetter       func(context.Context, string) (*models.Task, error)
 	messageQueue         MessageQueuer
 	promptResolver       PromptReferenceResolver
@@ -220,8 +236,11 @@ type Handlers struct {
 
 	// Optional task-bound GitHub PR automation controls.
 	taskPRAutomation       TaskPRAutomationService
+	remoteContributionSvc  RemoteContributionService
 	diagnosticBundles      DiagnosticBundleProvider
 	diagnosticMaterializer DiagnosticBundleMaterializer
+	// Optional task-bound GitLab MR automation controls.
+	taskMRAutomation TaskMRAutomationService
 }
 
 // NewHandlers creates new MCP handlers.
@@ -279,9 +298,21 @@ func (h *Handlers) SetTaskStopper(stopper TaskStopper) {
 	h.taskStopper = stopper
 }
 
+// SetTaskTitleBranchRenamer wires the best-effort branch rename performed
+// after an accepted agent-generated title.
+func (h *Handlers) SetTaskTitleBranchRenamer(renamer TaskTitleBranchRenamer) {
+	h.titleBranchRenamer = renamer
+}
+
 // SetUserSettingsProvider wires portable user preferences into MCP task creation.
 func (h *Handlers) SetUserSettingsProvider(provider UserSettingsProvider) {
 	h.userSettingsProvider = provider
+}
+
+// SetRemoteContributionService wires provider-backed PR/MR resolution for
+// repository_url values that identify an existing contribution.
+func (h *Handlers) SetRemoteContributionService(svc RemoteContributionService) {
+	h.remoteContributionSvc = svc
 }
 
 // SetConfigDeps sets the config-mode dependencies for agent-native configuration handlers.
@@ -298,6 +329,8 @@ func (h *Handlers) SetConfigDeps(
 
 // RegisterHandlers registers all MCP handlers with the dispatcher.
 func (h *Handlers) RegisterHandlers(d *ws.Dispatcher) {
+	before := d.HandlerCount()
+
 	// Task-mode handlers (always registered)
 	d.RegisterFunc(ws.ActionMCPListWorkspaces, h.handleListWorkspaces)
 	d.RegisterFunc(ws.ActionMCPListWorkflows, h.handleListWorkflows)
@@ -309,6 +342,8 @@ func (h *Handlers) RegisterHandlers(d *ws.Dispatcher) {
 	d.RegisterFunc(ws.ActionMCPSetTaskTitle, h.handleSetTaskTitle)
 	d.RegisterFunc(ws.ActionMCPGetTaskPRAutomation, h.handleGetTaskPRAutomation)
 	d.RegisterFunc(ws.ActionMCPUpdateTaskPRAutomation, h.handleUpdateTaskPRAutomation)
+	d.RegisterFunc(ws.ActionMCPGetTaskMRAutomation, h.handleGetTaskMRAutomation)
+	d.RegisterFunc(ws.ActionMCPUpdateTaskMRAutomation, h.handleUpdateTaskMRAutomation)
 	d.RegisterFunc(ws.ActionMCPAddBranchToTask, h.handleAddBranchToTask)
 	d.RegisterFunc(ws.ActionMCPAddWorkspaceSources, h.handleAddWorkspaceSources)
 	d.RegisterFunc(ws.ActionMCPUpdateRepositoryBaseBranch, h.handleUpdateRepositoryBaseBranch)
@@ -331,13 +366,10 @@ func (h *Handlers) RegisterHandlers(d *ws.Dispatcher) {
 	d.RegisterFunc(ws.ActionTaskWalkthroughGet, h.handleGetWalkthrough)
 	d.RegisterFunc(ws.ActionTaskWalkthroughDelete, h.handleDeleteWalkthrough)
 	d.RegisterFunc(ws.ActionMCPClarificationTimeout, h.handleClarificationTimeout)
-	count := 26
 	if h.diagnosticBundles != nil && h.diagnosticMaterializer != nil {
 		d.RegisterFunc(ws.ActionMCPGetDiagnosticBundle, h.handleGetDiagnosticBundle)
-		count++
 	}
-	count += h.registerReviewHandlers(d)
-	count += 2 // task PR automation get/update
+	h.registerReviewHandlers(d)
 
 	// Config-mode handlers (registered when config deps are set)
 	if h.workflowSvc != nil {
@@ -349,7 +381,6 @@ func (h *Handlers) RegisterHandlers(d *ws.Dispatcher) {
 		d.RegisterFunc(ws.ActionMCPUpdateWorkflowStep, h.handleUpdateWorkflowStep)
 		d.RegisterFunc(ws.ActionMCPDeleteWorkflowStep, h.handleDeleteWorkflowStep)
 		d.RegisterFunc(ws.ActionMCPReorderWorkflowStep, h.handleReorderWorkflowSteps)
-		count += 8
 	}
 	if h.agentSettingsCtrl != nil {
 		d.RegisterFunc(ws.ActionMCPListAgents, h.handleListAgents)
@@ -358,43 +389,38 @@ func (h *Handlers) RegisterHandlers(d *ws.Dispatcher) {
 		d.RegisterFunc(ws.ActionMCPCreateAgentProfile, h.handleCreateAgentProfile)
 		d.RegisterFunc(ws.ActionMCPUpdateAgentProfile, h.handleUpdateAgentProfile)
 		d.RegisterFunc(ws.ActionMCPDeleteAgentProfile, h.handleDeleteAgentProfile)
-		count += 6
 	}
 	// Executor discovery/profile listing is always available (read-only, used in task mode for create_task)
 	if h.taskSvc != nil {
 		d.RegisterFunc(ws.ActionMCPListExecutors, h.handleListExecutors)
 		d.RegisterFunc(ws.ActionMCPListExecutorProfiles, h.handleListExecutorProfiles)
-		count += 2
 	}
 	if h.mcpConfigSvc != nil {
 		d.RegisterFunc(ws.ActionMCPGetMcpConfig, h.handleGetMcpConfig)
 		d.RegisterFunc(ws.ActionMCPUpdateMcpConfig, h.handleUpdateMcpConfig)
-		count += 2
 	}
 	if h.handoffSvc != nil {
 		d.RegisterFunc(ws.ActionMCPListRelatedTasks, h.handleListRelatedTasks)
 		d.RegisterFunc(ws.ActionMCPListTaskDocuments, h.handleListTaskDocuments)
 		d.RegisterFunc(ws.ActionMCPGetTaskDocument, h.handleGetTaskDocument)
 		d.RegisterFunc(ws.ActionMCPWriteTaskDocument, h.handleWriteTaskDocument)
-		count += 4
 	}
 	if h.taskSvc != nil {
 		d.RegisterFunc(ws.ActionMCPMoveTask, h.handleMoveTask)
 		d.RegisterFunc(ws.ActionMCPDeleteTask, h.handleDeleteTask)
 		d.RegisterFunc(ws.ActionMCPArchiveTask, h.handleArchiveTask)
 		d.RegisterFunc(ws.ActionMCPUpdateTaskState, h.handleUpdateTaskState)
-		count += 4
 
 		// Executor mutation handlers (config-mode only)
 		if h.workflowSvc != nil {
 			d.RegisterFunc(ws.ActionMCPCreateExecutorProfile, h.handleCreateExecutorProfile)
 			d.RegisterFunc(ws.ActionMCPUpdateExecutorProfile, h.handleUpdateExecutorProfile)
 			d.RegisterFunc(ws.ActionMCPDeleteExecutorProfile, h.handleDeleteExecutorProfile)
-			count += 3
 		}
 	}
 
-	h.logger.Info("registered MCP handlers", zap.Int("count", count))
+	after := d.HandlerCount()
+	h.logger.Info("registered MCP handlers", zap.Int("count", after-before))
 }
 
 // handleListWorkspaces lists all workspaces.
@@ -628,6 +654,12 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		return ws.NewError(msg.ID, msg.Action, code, message, nil)
 	}
 
+	identity, _ := authn.IdentityFromContext(ctx)
+	contributions, err := h.resolveMCPRemoteContributions(ctx, req.WorkspaceID, identity.UserID, repos)
+	if err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, err.Error(), nil)
+	}
+
 	workspacePolicy, err := h.resolveMCPWorkspacePolicy(req.ParentID, req.WorkspaceMode)
 	if err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, err.Error(), nil)
@@ -680,6 +712,28 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		return ws.NewError(msg.ID, msg.Action, code, message, nil)
 	}
 
+	for index, resolution := range contributions {
+		if resolution == nil {
+			continue
+		}
+		if index >= len(task.Repositories) || task.Repositories[index] == nil {
+			if delErr := h.taskSvc.DeleteTask(ctx, task.ID); delErr != nil {
+				h.logger.Error("rollback delete failed after missing task repository",
+					zap.String("task_id", task.ID), zap.Error(delErr))
+			}
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "failed to attach remote contribution: task repository is missing", nil)
+		}
+		if err := h.remoteContributionSvc.Associate(ctx, req.WorkspaceID, identity.UserID, task.ID, task.Repositories[index].ID, resolution); err != nil {
+			h.logger.Error("associate remote contribution; rolling back task creation",
+				zap.String("task_id", task.ID), zap.Error(err))
+			if delErr := h.taskSvc.DeleteTask(ctx, task.ID); delErr != nil {
+				h.logger.Error("rollback delete failed after contribution association error",
+					zap.String("task_id", task.ID), zap.Error(delErr))
+			}
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "failed to attach remote contribution: "+err.Error(), nil)
+		}
+	}
+
 	if h.handoffSvc != nil && workspacePolicy.NeedsAttachment() {
 		if attachErr := h.handoffSvc.AttachWorkspacePolicy(ctx, task.ID, req.ParentID, workspacePolicy); attachErr != nil {
 			h.logger.Error("attach workspace policy; rolling back task creation",
@@ -720,6 +774,65 @@ type taskRepoResult struct {
 	Repos       []service.TaskRepositoryInput
 	WorkspaceID string // inherited from parent, empty otherwise
 	WorkflowID  string // inherited from parent, empty otherwise
+}
+
+func (h *Handlers) resolveMCPRemoteContributions(
+	ctx context.Context, workspaceID, userID string, repos []service.TaskRepositoryInput,
+) ([]*models.RemoteContributionResolution, error) {
+	resolutions := make([]*models.RemoteContributionResolution, len(repos))
+	if h.remoteContributionSvc == nil {
+		return resolutions, nil
+	}
+	for index := range repos {
+		rawURL := strings.TrimSpace(repos[index].RemoteURL)
+		if rawURL == "" {
+			rawURL = strings.TrimSpace(repos[index].GitHubURL)
+		}
+		if rawURL == "" {
+			continue
+		}
+		resolution, matched, err := h.remoteContributionSvc.Resolve(ctx, workspaceID, userID, rawURL)
+		if err != nil {
+			return nil, err
+		}
+		if !matched {
+			continue
+		}
+		if resolution == nil {
+			return nil, errors.New("remote contribution resolver returned no binding")
+		}
+		owner, name, err := splitRemoteContributionTarget(resolution.TargetPath)
+		if err != nil {
+			return nil, err
+		}
+		repo := &repos[index]
+		repo.RepositoryID = ""
+		repo.LocalPath = ""
+		repo.GitHubURL = ""
+		repo.RemoteURL = resolution.TargetRemoteURL
+		repo.Provider = resolution.TargetProvider
+		repo.ProviderHost = resolution.TargetHost
+		repo.ProviderRepoID = resolution.TargetProviderID
+		repo.ProviderOwner = owner
+		repo.ProviderName = name
+		if resolution.TargetDefaultBranch != "" {
+			repo.DefaultBranch = resolution.TargetDefaultBranch
+		}
+		repo.BaseBranch = resolution.Binding.BaseBranch
+		repo.CheckoutBranch = resolution.Binding.HeadBranch
+		repo.RemoteContribution = &resolution.Binding
+		repo.TrustedRemote = true
+		resolutions[index] = resolution
+	}
+	return resolutions, nil
+}
+
+func splitRemoteContributionTarget(path string) (string, string, error) {
+	parts := strings.Split(strings.Trim(path, "/"), "/")
+	if len(parts) < 2 || parts[len(parts)-1] == "" {
+		return "", "", fmt.Errorf("remote contribution target repository %q is invalid", path)
+	}
+	return strings.Join(parts[:len(parts)-1], "/"), parts[len(parts)-1], nil
 }
 
 // resolveTaskRepositories builds the repository list for a new task.
@@ -1361,6 +1474,20 @@ func (h *Handlers) handleSetTaskTitle(ctx context.Context, msg *ws.Message) (*ws
 	}
 	if !accepted {
 		result["reason"] = reason
+		return ws.NewResponse(msg.ID, msg.Action, result)
+	}
+	if h.titleBranchRenamer != nil {
+		branchResult, branchErr := h.titleBranchRenamer.RenameGeneratedBranchesForTaskTitle(ctx, req.TaskID, req.SessionID, task.Title)
+		if branchErr != nil {
+			h.logger.Warn("failed to rename generated task branches", zap.String("task_id", req.TaskID), zap.Error(branchErr))
+			branchResult = orchestrator.TitleBranchRenameResult{
+				Status: orchestrator.TitleBranchStatusFailed,
+				Failed: []orchestrator.TitleBranchFailure{{Message: branchErr.Error()}},
+			}
+		}
+		result["branch_rename"] = branchResult
+	} else {
+		result["branch_rename"] = orchestrator.TitleBranchRenameResult{Status: orchestrator.TitleBranchStatusNotApplicable}
 	}
 	return ws.NewResponse(msg.ID, msg.Action, result)
 }

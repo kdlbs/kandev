@@ -40,7 +40,6 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/workflow/engine"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
-	"github.com/kandev/kandev/internal/worktree"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
@@ -60,6 +59,11 @@ type ServiceConfig struct {
 	QueueSize                     int
 	QueueGroup                    string
 	ClaudeBackgroundPromptHandoff bool
+
+	// ClaudeMidTurnSteering enables delivering a prompt into a still-generating
+	// turn for an agent that advertised prompt queueing. Independent of
+	// ClaudeBackgroundPromptHandoff, which covers the foreground-idle handoff.
+	ClaudeMidTurnSteering bool
 }
 
 // AttachmentReader is the narrow attachment-store seam needed when the
@@ -331,6 +335,11 @@ type Service struct {
 	// session.ensure). Nil = unscoped.
 	taskAccessCheck func(ctx context.Context, taskID string) error
 
+	// titleBranchRuntime performs the lifecycle-owned Git branch rename after
+	// an agent resolves a prompt-first task title. It is optional for tests and
+	// installations that do not configure an agent runtime.
+	titleBranchRuntime titleBranchRuntime
+
 	// Workflow step getter for prompt building
 	workflowStepGetter WorkflowStepGetter
 
@@ -379,6 +388,14 @@ type Service struct {
 	// ciAutomationInFlight prevents PR feedback and task-PR update events from
 	// racing duplicate auto-fix prompts or merge calls for the same PR.
 	ciAutomationInFlight sync.Map
+
+	// GitLab MR lifecycle notification automation. Nil-safe: without it,
+	// gitlab.task_mr.updated events are observed but no lifecycle prompt is
+	// ever evaluated.
+	gitlabMRAutomation taskMRAgentAutomationService
+	// mrAutomationInFlight prevents overlapping poll ticks from running the
+	// lifecycle evaluation pass twice for the same (task, repository, iid).
+	mrAutomationInFlight sync.Map
 
 	// Office task-handoffs materializer (phase 6 wiring) — invoked from
 	// PrepareTaskSession to flip workspace groups to materialized once
@@ -466,10 +483,20 @@ type Service struct {
 	// Automation service for handling automation triggers
 	automationService AutomationService
 
-	// Worktree manager — used to clean up ephemeral worktrees for run-mode
-	// automation tasks immediately on completion rather than waiting for
-	// the 24h Office GC. Nil-safe.
-	worktreeMgr *worktree.Manager
+	// Worktree reaper — reclaims the workspaces of automation runs that have
+	// aged out of the per-automation retention window. Nil-safe: most tests
+	// construct the service without one, and an install with no worktree
+	// manager simply keeps every run's checkout. Set via SetWorktreeManager.
+	worktreeReaper automationWorktreeReaper
+
+	// unreclaimedWorkspaces holds the automation runs whose workspace removal
+	// was attempted and did not actually free the directory. Retention selects
+	// candidates by "still has a live worktree row", and a failed removal can
+	// leave a run with no live row and a full checkout, invisible to every
+	// later sweep — this is how it gets retried instead of written off. See
+	// queueAutomationWorkspaceReclaim.
+	unreclaimedWorkspaces   map[string]struct{}
+	unreclaimedWorkspacesMu sync.Mutex
 
 	// Clarification canceller — cancels pending clarifications when agent's turn completes
 	clarificationCanceller ClarificationCanceller
@@ -489,34 +516,14 @@ type Service struct {
 	// Active turns map: sessionID -> turnID
 	activeTurns sync.Map
 
-	// dispatchingQueued tracks, per session, the entry ID of whichever
-	// queued message was most recently taken and handed off to the async
-	// executeQueuedMessage goroutine, but hasn't yet reached promptTask's
-	// own setSessionRunning call — the only point at which session.State
-	// itself starts correctly reporting "busy" for that dispatch. Without
-	// this, a second take-and-dispatch decision for the same session (a
-	// workflow drain, a manual drain, or another parent interrupt) could
-	// acquire the cancelInFlight guard in that gap, see the still-idle
-	// session.State, and dispatch a second, unrelated queued entry before
-	// the first dispatch's turn has even started.
-	//
-	// Stores the entry ID (string), not a bool: a newer dispatch for the
-	// same session (e.g. a second parent interrupt cancelling and
-	// re-taking) always supersedes an older one that's still settling —
-	// markQueuedDispatchInFlight unconditionally overwrites. Each
-	// goroutine must reconfirm it still owns *its own* entry ID
-	// (isCurrentQueuedDispatch) immediately before calling
-	// setSessionRunning, and may only clear the marker via a
-	// compare-and-delete keyed on that same entry ID
-	// (clearQueuedDispatchInFlightIfCurrent) — otherwise a superseded
-	// goroutine finishing late could delete a newer dispatch's marker out
-	// from under it, or proceed to prompt after it no longer owns the
-	// session. Non-cancelling take-and-dispatch paths
-	// (drainQueuedMessageForPromptableSessionLocked, takeIfPromptableLocked)
-	// instead use isQueuedDispatchInFlight, which only asks "is *anything*
-	// still settling" — they have no cancel to supersede it with, so any
-	// in-flight dispatch at all is reason enough to defer.
-	dispatchingQueued sync.Map
+	// dispatchingQueued tracks the pre-acceptance reservation for the exact
+	// queued message handed to an async worker. acceptedQueuedDispatch keeps
+	// the same ownership visible after the worker claims RUNNING until its turn
+	// settles, so Send Now cannot cancel or duplicate a successor that FIFO has
+	// already accepted. The two maps are managed by queued_dispatch.go and are
+	// arbitrated through cancelInFlight.
+	dispatchingQueued      sync.Map
+	acceptedQueuedDispatch sync.Map
 
 	// afterReadyLifecycleReservation is a deterministic test seam for the
 	// narrow interval after handleAgentReady releases its per-session guard
@@ -560,6 +567,11 @@ type Service struct {
 	// completed-execution stream markers.
 	executionTeardownClaims sync.Map
 
+	// steerInFlight tracks sessions with an unacknowledged mid-turn steer.
+	// The spec allows at most one in-flight steer per session; a second attempt
+	// while one is outstanding queues instead. Keyed by sessionID, cleared when
+	// the steer dispatch is accepted or fails.
+	steerInFlight sync.Map
 	// Session reset flags: sessionID -> true while resetAgentContext is restarting process.
 	// Used to suppress stale ready events and avoid draining queued prompts mid-reset.
 	resetInProgressSessions sync.Map
@@ -644,6 +656,15 @@ type Service struct {
 	mu        sync.RWMutex
 	running   bool
 	startedAt time.Time
+
+	// sendNowWorkers owns the asynchronous replacement handoffs. The context
+	// is cancelled during Stop so a claimed durable source gets a bounded
+	// recovery attempt before shutdown returns.
+	sendNowMu      sync.Mutex
+	sendNowCtx     context.Context
+	sendNowCancel  context.CancelFunc
+	sendNowStopped bool
+	sendNowWorkers sync.WaitGroup
 }
 
 // Status contains orchestrator status information
@@ -710,6 +731,7 @@ func NewService(
 	}
 
 	// Create the service (watcher will be created after we have handlers)
+	sendNowCtx, sendNowCancel := context.WithCancel(context.Background())
 	s := &Service{
 		config:                       cfg,
 		logger:                       svcLogger,
@@ -723,6 +745,8 @@ func NewService(
 		messageQueue:                 msgQueue,
 		clarificationWatchdogTimeout: 15 * time.Second,
 		gitSnapshotCache:             newGitSnapshotCache(),
+		sendNowCtx:                   sendNowCtx,
+		sendNowCancel:                sendNowCancel,
 	}
 	exec.SetOnContextWindowReset(s.clearContextWindowForReset)
 
@@ -1259,10 +1283,16 @@ func (s *Service) startTurnForSessionWithOwnership(ctx context.Context, sessionI
 // query the DB for any open turn and close it. Loops to mop up multiple
 // zombies (e.g. left over from before this fix) with a small sanity bound.
 func (s *Service) completeTurnForSession(ctx context.Context, sessionID string) {
+	s.clearAcceptedQueuedDispatch(sessionID)
 	s.completeTurnForTaskSession(ctx, "", sessionID)
 }
 
 func (s *Service) completeTurnForTaskSession(ctx context.Context, taskID, sessionID string) {
+	// Stream-only completion paths call this helper directly rather than the
+	// session wrapper. Clear the accepted queued-dispatch ownership here too,
+	// otherwise a completed Send Now/FIFO successor can permanently block the
+	// next queue action.
+	s.clearAcceptedQueuedDispatch(sessionID)
 	if err := s.completeTurnForTaskSessionChecked(ctx, taskID, sessionID); err != nil {
 		s.logger.Warn("failed to reconcile active turn",
 			zap.String("session_id", sessionID),
@@ -1475,74 +1505,6 @@ func (s *Service) peekActiveTurnID(ctx context.Context, sessionID string) (strin
 	return turn.ID, nil
 }
 
-// markQueuedDispatchInFlight records that entryID — a specific queued
-// message — has been taken and handed off to the async
-// executeQueuedMessage goroutine for sessionID. Unconditionally
-// overwrites any previous entry for the session: a newer dispatch always
-// supersedes an older one that's still settling. See the
-// Service.dispatchingQueued field doc comment for why this exists:
-// session.State alone doesn't reflect "busy" until that goroutine's own
-// promptTask call reaches setSessionRunning, several DB round-trips
-// later — and for why the token must be the specific entry ID, not a bare
-// bool.
-func (s *Service) markQueuedDispatchInFlight(sessionID, entryID string) {
-	if sessionID == "" {
-		return
-	}
-	s.dispatchingQueued.Store(sessionID, entryID)
-}
-
-// clearQueuedDispatchInFlightIfCurrent removes sessionID's in-flight
-// marker only if it still names entryID — a compare-and-delete so a
-// goroutine whose own dispatch has since been superseded by a newer one
-// (a different entryID overwrote the marker) can never clear the
-// *newer* dispatch's marker out from under it. Called by
-// executeQueuedMessage via defer so the marker is cleared on every exit
-// path (success, transient requeue, superseded, or lost/dropped message)
-// — but only when this goroutine is still the current owner.
-func (s *Service) clearQueuedDispatchInFlightIfCurrent(sessionID, entryID string) {
-	if sessionID == "" {
-		return
-	}
-	s.dispatchingQueued.CompareAndDelete(sessionID, entryID)
-}
-
-// isCurrentQueuedDispatch reports whether entryID is still the most
-// recently handed-off in-flight dispatch for sessionID — i.e. no *other*
-// dispatch has superseded it since markQueuedDispatchInFlight was called
-// for it. A goroutine that owns entryID must confirm this immediately
-// before calling setSessionRunning (see promptTask's claimDispatch
-// parameter); if it no longer owns the token, a different dispatch has
-// already taken over the session and this one must not proceed.
-func (s *Service) isCurrentQueuedDispatch(sessionID, entryID string) bool {
-	if sessionID == "" {
-		return false
-	}
-	v, ok := s.dispatchingQueued.Load(sessionID)
-	if !ok {
-		return false
-	}
-	current, _ := v.(string)
-	return current == entryID
-}
-
-// isQueuedDispatchInFlight reports whether *any* queued message is
-// currently in the handoff window for sessionID, regardless of which one
-// — see markQueuedDispatchInFlight. Checked by
-// drainQueuedMessageForPromptableSessionLocked and takeIfPromptableLocked
-// before either takes and directly dispatches another entry on the same
-// session without a cancel to supersede whatever is already settling; a
-// genuine cancel (cancelAndTakeForPeerMessage) is exempt — see its own
-// doc comment for why it may proceed regardless and simply overwrite the
-// token via markQueuedDispatchInFlight.
-func (s *Service) isQueuedDispatchInFlight(sessionID string) bool {
-	if sessionID == "" {
-		return false
-	}
-	_, ok := s.dispatchingQueued.Load(sessionID)
-	return ok
-}
-
 func (s *Service) setSessionResetInProgress(sessionID string, inProgress bool) {
 	if sessionID == "" {
 		return
@@ -1578,6 +1540,7 @@ func (s *Service) Start(ctx context.Context) error {
 	s.mu.Unlock()
 
 	s.logger.Info("starting orchestrator service")
+	s.resetSendNowWorkers()
 
 	// Reconcile session state from persisted runtime state on startup.
 	// This does NOT launch any agent processes — sessions are recovered lazily
@@ -1671,6 +1634,7 @@ func (s *Service) Stop() error {
 
 	s.cancelAllClarificationWatchdogs()
 	s.cancelAllTransientRetries()
+	s.stopSendNowWorkers()
 
 	if len(errs) > 0 {
 		return errs[0]

@@ -3,11 +3,12 @@
 import { useCallback, useEffect, useState } from "react";
 import { useAppStore } from "@/components/state-provider";
 import { MAX_SIDEBAR_VIEWS } from "@/lib/state/slices/ui/sidebar-view-builtins";
+import { t } from "@/lib/i18n";
 
 export function getNewViewDisabledReason(viewCount: number, hasDraft: boolean): string | null {
-  if (hasDraft) return "Save or discard changes before creating a new view.";
+  if (hasDraft) return t("task:saveOrDiscardBeforeNewView");
   if (viewCount >= MAX_SIDEBAR_VIEWS) {
-    return `You can save up to ${MAX_SIDEBAR_VIEWS} views.`;
+    return t("task:viewLimitReached", { count: MAX_SIDEBAR_VIEWS });
   }
   return null;
 }

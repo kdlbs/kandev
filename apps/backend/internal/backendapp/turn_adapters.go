@@ -2,6 +2,7 @@ package backendapp
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 
@@ -132,6 +133,48 @@ func (a *taskDeleterAdapter) translateDeleteErr(err error) error {
 // automation.ErrTaskNotFound so the automation run-cleanup paths can
 // classify the "already gone" case via errors.Is without importing the task
 // repository's package.
+// automationWorkflowLocatorAdapter lets the automation service verify that a
+// workflow belongs to the workspace an automation is saved into, without the
+// automation package importing the task service.
+type automationWorkflowLocatorAdapter struct {
+	svc *taskservice.Service
+}
+
+func (a *automationWorkflowLocatorAdapter) WorkflowWorkspaceID(ctx context.Context, workflowID string) (string, error) {
+	wf, err := a.svc.GetWorkflow(ctx, workflowID)
+	if err != nil {
+		return "", err
+	}
+	if wf == nil {
+		return "", nil
+	}
+	return wf.WorkspaceID, nil
+}
+
+// automationAgentProfileLookupAdapter satisfies automation.AgentProfileLookup
+// over the agent settings store, so the automation service can refuse a
+// binding to a profile that isn't there without importing the settings
+// controller that already imports it.
+//
+// GetAgentProfile filters soft-deleted rows and reports a miss as
+// sql.ErrNoRows, which is the only shape translated to (false, nil). Every
+// other error is returned verbatim so a driver failure is never mistaken for a
+// deleted profile — the service surfaces it instead of rejecting the binding.
+type automationAgentProfileLookupAdapter struct {
+	store settingsstore.Repository
+}
+
+func (a *automationAgentProfileLookupAdapter) AgentProfileExists(ctx context.Context, profileID string) (bool, error) {
+	profile, err := a.store.GetAgentProfile(ctx, profileID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return profile != nil, nil
+}
+
 type automationTaskDeleterAdapter struct {
 	svc *taskservice.Service
 }

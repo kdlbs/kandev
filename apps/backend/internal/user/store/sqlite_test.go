@@ -69,6 +69,72 @@ func TestScanUserSettingsStartupPage(t *testing.T) {
 	}
 }
 
+func TestScanUserSettingsSidebarDefaults(t *testing.T) {
+	defaultView := models.SidebarView{
+		ID:              "view-all-tasks",
+		Name:            "All tasks",
+		Filters:         []models.SidebarViewClause{},
+		Sort:            models.SidebarViewSort{Key: "state", Direction: "asc"},
+		Group:           "repository",
+		CollapsedGroups: []string{},
+	}
+
+	tests := []struct {
+		name          string
+		raw           string
+		wantDefaults  bool
+		wantViewCount int
+	}{
+		{name: "empty settings use canonical sidebar default", raw: "{}", wantDefaults: true, wantViewCount: 1},
+		{name: "unrelated settings retain canonical sidebar default", raw: `{"workspace_id":"workspace-1"}`, wantDefaults: true, wantViewCount: 1},
+		{name: "explicit sidebar settings are preserved", raw: `{"sidebar_views":[{"id":"custom","name":"Custom"}],"sidebar_active_view_id":"custom"}`, wantDefaults: false, wantViewCount: 1},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			settings, err := scanUserSettings(settingsScanner{raw: tt.raw}, DefaultUserID)
+			if err != nil {
+				t.Fatalf("scan settings: %v", err)
+			}
+			if len(settings.SidebarViews) != tt.wantViewCount {
+				t.Fatalf("sidebar view count = %d, want %d", len(settings.SidebarViews), tt.wantViewCount)
+			}
+			if tt.wantDefaults {
+				if !reflect.DeepEqual(settings.SidebarViews[0], defaultView) {
+					t.Fatalf("sidebar default = %+v, want %+v", settings.SidebarViews[0], defaultView)
+				}
+				if settings.SidebarActiveViewID != defaultView.ID {
+					t.Fatalf("active sidebar view = %q, want %q", settings.SidebarActiveViewID, defaultView.ID)
+				}
+				return
+			}
+			if settings.SidebarViews[0].ID != "custom" || settings.SidebarActiveViewID != "custom" {
+				t.Fatalf("explicit sidebar settings were not preserved: views=%+v active=%q", settings.SidebarViews, settings.SidebarActiveViewID)
+			}
+		})
+	}
+}
+
+func TestScanUserSettingsPreservesExplicitEmptySidebarSettings(t *testing.T) {
+	for _, raw := range []string{
+		`{"sidebar_views":[],"sidebar_active_view_id":""}`,
+		`{"sidebar_views":null,"sidebar_active_view_id":null}`,
+	} {
+		t.Run(raw, func(t *testing.T) {
+			settings, err := scanUserSettings(settingsScanner{raw: raw}, DefaultUserID)
+			if err != nil {
+				t.Fatalf("scan settings: %v", err)
+			}
+			if len(settings.SidebarViews) != 0 {
+				t.Fatalf("sidebar views = %+v, want an explicit empty list", settings.SidebarViews)
+			}
+			if settings.SidebarActiveViewID != "" {
+				t.Fatalf("active sidebar view = %q, want an explicit empty ID", settings.SidebarActiveViewID)
+			}
+		})
+	}
+}
+
 func TestScanUserSettingsChangesPanelLayoutDefault(t *testing.T) {
 	t.Run("empty settings default to tree", func(t *testing.T) {
 		settings, err := scanUserSettings(settingsScanner{raw: "{}"}, DefaultUserID)

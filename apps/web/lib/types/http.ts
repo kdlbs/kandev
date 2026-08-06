@@ -263,8 +263,14 @@ export type Repository = {
    * suffix. Remote executors always copy the bytes.
    */
   copy_files: string;
+  secret_bindings?: RepositorySecretBinding[];
   created_at: string;
   updated_at: string;
+};
+
+export type RepositorySecretBinding = {
+  key: string;
+  secret_id: string;
 };
 
 export type RepositoryScript = {
@@ -443,6 +449,13 @@ export type TaskSession = ActiveSubagentCountFields & {
   cancellation_revision?: number;
   /** Fine-grained busy substate; background may outlive the foreground turn (ADR-0049). */
   foreground_activity?: ForegroundActivity | null;
+  /**
+   * True when a send right now would be delivered into the still-generating turn
+   * (mid-turn steering) rather than blocked/queued. Live, derived from the
+   * connected agent's negotiated capability plus the runtime flag; never
+   * persisted. The composer uses it to promise delivery, not folding.
+   */
+  supports_steering?: boolean;
   /** Compact pending-input projection used when this session's messages are unloaded. */
   pending_action?: TaskPendingAction | null;
   error_message?: string;

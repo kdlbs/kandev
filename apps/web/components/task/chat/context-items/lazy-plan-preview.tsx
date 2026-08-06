@@ -3,12 +3,14 @@
 import { useEffect } from "react";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { getTaskPlan } from "@/lib/api/domains/plan-api";
+import { useTranslation } from "react-i18next";
 
 type LazyPlanPreviewProps = {
   taskId: string | null;
 };
 
 export function LazyPlanPreview({ taskId }: LazyPlanPreviewProps) {
+  const { t } = useTranslation();
   const plan = useAppStore((state) => (taskId ? (state.taskPlans.byTaskId[taskId] ?? null) : null));
   const loaded = useAppStore((state) =>
     taskId ? (state.taskPlans.loadedByTaskId[taskId] ?? false) : false,
@@ -35,13 +37,13 @@ export function LazyPlanPreview({ taskId }: LazyPlanPreviewProps) {
   }, [taskId, loaded, loading, storeApi]);
 
   if (!taskId) {
-    return <div className="text-xs text-muted-foreground">No task selected</div>;
+    return <div className="text-xs text-muted-foreground">{t("task:noTaskSelected")}</div>;
   }
 
   if (loading || !loaded) {
     return (
       <div className="space-y-1.5">
-        <div className="text-muted-foreground text-xs font-medium">Plan</div>
+        <div className="text-muted-foreground text-xs font-medium">{t("task:plan")}</div>
         <div className="h-3 w-3/4 bg-muted animate-pulse rounded" />
         <div className="h-3 w-1/2 bg-muted animate-pulse rounded" />
       </div>
@@ -49,14 +51,14 @@ export function LazyPlanPreview({ taskId }: LazyPlanPreviewProps) {
   }
 
   if (!plan?.content) {
-    return <div className="text-xs text-muted-foreground">Plan is empty</div>;
+    return <div className="text-xs text-muted-foreground">{t("task:planIsEmpty")}</div>;
   }
 
   const preview = plan.content.length > 2000 ? plan.content.slice(0, 2000) + "..." : plan.content;
 
   return (
     <div className="space-y-1.5">
-      <div className="text-muted-foreground text-xs font-medium">Plan</div>
+      <div className="text-muted-foreground text-xs font-medium">{t("task:plan")}</div>
       <pre className="text-[10px] leading-tight font-mono whitespace-pre-wrap break-all">
         {preview}
       </pre>

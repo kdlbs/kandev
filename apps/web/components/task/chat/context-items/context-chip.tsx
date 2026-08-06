@@ -15,6 +15,7 @@ import {
 import type { TablerIcon } from "@tabler/icons-react";
 import { HoverCard, HoverCardTrigger, HoverCardContent } from "@kandev/ui/hover-card";
 import type { ContextItemKind } from "@/lib/types/context";
+import { useTranslation } from "react-i18next";
 
 const ICON_BY_KIND: Record<ContextItemKind, TablerIcon> = {
   plan: IconListCheck,
@@ -37,6 +38,9 @@ type ContextChipProps = {
   /** Data URL to render as a tiny thumbnail instead of the default icon */
   thumbnail?: string;
   leadingIcon?: ReactNode;
+  dataTestId?: string;
+  dataPath?: string;
+  dataIsDirectory?: boolean;
   onClick?: () => void;
   onUnpin?: () => void;
   onRemove?: () => void;
@@ -49,10 +53,14 @@ export const ContextChip = memo(function ContextChip({
   preview,
   thumbnail,
   leadingIcon,
+  dataTestId,
+  dataPath,
+  dataIsDirectory,
   onClick,
   onUnpin,
   onRemove,
 }: ContextChipProps) {
+  const { t } = useTranslation();
   const Icon = ICON_BY_KIND[kind];
   let iconNode: ReactNode;
   if (leadingIcon) {
@@ -65,6 +73,9 @@ export const ContextChip = memo(function ContextChip({
 
   const chip = (
     <div
+      data-testid={dataTestId}
+      data-path={dataPath}
+      data-is-directory={dataIsDirectory ? "true" : "false"}
       className={`group flex items-center gap-1 px-2 py-0.5 text-xs text-muted-foreground bg-muted/50 rounded border border-border/50 ${onClick ? "cursor-pointer hover:bg-muted/80" : ""}`}
       onClick={onClick}
     >
@@ -77,7 +88,7 @@ export const ContextChip = memo(function ContextChip({
             onUnpin();
           }}
           className="ml-0.5 text-muted-foreground/70 hover:text-foreground cursor-pointer"
-          title="Unpin (will be removed after send)"
+          title={t("task:unpinWillBeRemovedAfterSend")}
         >
           <IconPinFilled className="h-2.5 w-2.5" />
         </button>
@@ -88,7 +99,7 @@ export const ContextChip = memo(function ContextChip({
             e.stopPropagation();
             onRemove();
           }}
-          aria-label={`Remove ${label}`}
+          aria-label={t("task:removeLabeled", { label })}
           className="min-h-11 min-w-11 opacity-100 ml-0.5 hover:text-foreground cursor-pointer sm:min-h-0 sm:min-w-0 sm:opacity-0 sm:group-hover:opacity-100"
         >
           <IconX className="h-2.5 w-2.5" />

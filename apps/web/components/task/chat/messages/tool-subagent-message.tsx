@@ -7,6 +7,7 @@ import { cn } from "@/lib/utils";
 import type { Message } from "@/lib/types/http";
 import type { SubagentTaskPayload, ToolCallMetadata } from "@/components/task/chat/types";
 import { SubagentMetaRow } from "@/components/task/chat/messages/subagent-meta-row";
+import { useTranslation } from "react-i18next";
 
 type ToolSubagentMessageProps = {
   comment: Message;
@@ -137,6 +138,7 @@ function SubagentHeader({
   hasExpandableContent,
   onToggle,
 }: SubagentHeaderProps) {
+  const { t } = useTranslation();
   const shownDescription = stripSubagentTypePrefix(description, subagentType);
   const showDescription = shownDescription !== "";
   const showInlineWorking = isActive && !hasExpandableContent;
@@ -170,7 +172,7 @@ function SubagentHeader({
         </span>
       )}
       {showInlineWorking && (
-        <span className="text-xs text-muted-foreground italic">Working...</span>
+        <span className="text-xs text-muted-foreground italic">{t("task:working")}</span>
       )}
       {isActive && <GridSpinner className="text-muted-foreground shrink-0" />}
       {childCount > 0 && (
@@ -178,7 +180,7 @@ function SubagentHeader({
           data-testid="subagent-child-count"
           className="text-muted-foreground/60 text-xs px-1.5 rounded min-w-[20px] text-center font-mono whitespace-nowrap"
         >
-          {childCount} tool call{childCount !== 1 ? "s" : ""}
+          {t("task:toolCallCount", { count: childCount })}
         </span>
       )}
     </>

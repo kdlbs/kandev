@@ -329,30 +329,17 @@ func NewManager(cfg *config.InstanceConfig, log *logger.Logger) *Manager {
 		lifetimeCancel:       lifetimeCancel,
 		workspaceSourceRoots: canonicalWorkspaceSourceRoots(cfg.WorkspaceSourceRoots),
 	}
-	// Multi-repo task roots hold one git worktree per repository as siblings.
-	// In that case build a per-repo tracker for each child so each emits its
-	// own GitStatusUpdate (tagged with RepositoryName) and the changes panel
-	// can show all repos. The root tracker covers the single-repo case via
-	// preferGitRepoChildIfRootIsBare; we skip its fallback when we've already
-	// detected a multi-repo root to avoid double-tracking the first repo.
-	repoChildren := scanRepositorySubdirs(cfg.WorkDir, m.workspaceSourceRoots)
-	if len(repoChildren) >= 2 {
-		// Multi-repo: root tracker bound to the bare task root (no fallback,
-		// no events), plus one tracker per repo subdir.
-		m.workspaceTracker = NewWorkspaceTrackerForRepo(cfg.WorkDir, "", log)
-		m.workspaceTracker.SetBaseBranch(lookupBaseBranch(cfg.BaseBranches, ""))
-		m.workspaceTracker.SetAllowedSourceRoots(cfg.WorkspaceSourceRoots)
-		for _, child := range repoChildren {
-			tr := NewWorkspaceTrackerForRepo(child.path, child.name, log)
-			tr.SetBaseBranch(lookupBaseBranch(cfg.BaseBranches, child.name))
-			tr.SetAllowedSourceRoots(cfg.WorkspaceSourceRoots)
-			m.repoTrackers = append(m.repoTrackers, tr)
-		}
-	} else {
-		m.workspaceTracker = NewWorkspaceTracker(cfg.WorkDir, log)
-		m.workspaceTracker.SetBaseBranch(lookupBaseBranch(cfg.BaseBranches, ""))
-		m.workspaceTracker.SetAllowedSourceRoots(cfg.WorkspaceSourceRoots)
-	}
+	// Build the root plus any immediate sibling repositories and recursively
+	// declared initialized submodules. The root remains a real empty-named
+	// scope when it is itself a Git repository; a bare task root keeps the
+	// existing multi-repository behavior.
+	m.workspaceTracker, m.repoTrackers = m.buildWorkspaceTrackerGraph(
+		lifetimeCtx,
+		cfg.WorkDir,
+		m.workspaceSourceRoots,
+		false,
+		false,
+	)
 	m.processRunner = NewProcessRunner(m.workspaceTracker, log, cfg.ProcessBufferMaxBytes)
 	m.shellMgr = shell.NewManager(cfg.WorkDir, log)
 	m.status.Store(StatusStopped)
@@ -642,6 +629,9 @@ func (m *Manager) GetWorkspaceTrackerFor(subpath string) (*WorkspaceTracker, err
 	if cleaned == "" {
 		return m.workspaceTracker, nil
 	}
+	if tracker := m.findRepositoryTracker(cleaned); tracker != nil {
+		return tracker, nil
+	}
 
 	m.workspaceTrackersMu.Lock()
 	defer m.workspaceTrackersMu.Unlock()
@@ -691,13 +681,13 @@ func (m *Manager) UpdateBaseBranches(ctx context.Context, branches map[string]st
 	// caller's ctx so an HTTP request cancel after the field stores
 	// can't strand half the trackers without their refresh.
 	if root != nil {
-		root.SetBaseBranch(lookupBaseBranch(branches, root.RepositoryName()))
+		root.SetBaseBranchIfNotSubmodule(lookupBaseBranch(branches, root.RepositoryName()))
 	}
 	for _, t := range trackers {
-		t.SetBaseBranch(lookupBaseBranch(branches, t.RepositoryName()))
+		t.SetBaseBranchIfNotSubmodule(lookupBaseBranch(branches, t.RepositoryName()))
 	}
 	for subpath, t := range bySubpath {
-		t.SetBaseBranch(lookupBaseBranch(branches, subpath))
+		t.SetBaseBranchIfNotSubmodule(lookupBaseBranch(branches, subpath))
 	}
 	go m.refreshTrackersDetached(root, trackers, bySubpath)
 }
@@ -789,7 +779,41 @@ func (m *Manager) RepoSubpaths() []string {
 			out = append(out, t.repositoryName)
 		}
 	}
+	sort.Strings(out)
 	return out
+}
+
+// RepositoryScopes returns the stable scope order used by unpinned Git API
+// fan-out. The empty scope is included only when the workspace root tracker
+// owns a real Git repository; a bare multi-repository task root therefore
+// retains its legacy named-only response.
+func (m *Manager) RepositoryScopes() []string {
+	root, trackers := m.snapshotTrackers()
+	scopes := make([]string, 0, len(trackers)+1)
+	if root != nil && root.gitIndexPath != "" {
+		scopes = append(scopes, "")
+	}
+	for _, tracker := range trackers {
+		if tracker != nil && tracker.repositoryName != "" {
+			scopes = append(scopes, tracker.repositoryName)
+		}
+	}
+	if root != nil && root.gitIndexPath != "" {
+		sort.Strings(scopes[1:])
+	} else {
+		sort.Strings(scopes)
+	}
+	return scopes
+}
+
+func (m *Manager) findRepositoryTracker(repositoryName string) *WorkspaceTracker {
+	_, trackers := m.snapshotTrackers()
+	for _, tracker := range trackers {
+		if tracker != nil && tracker.repositoryName == repositoryName {
+			return tracker
+		}
+	}
+	return nil
 }
 
 // newTrackerForRepo builds a per-repo tracker that inherits the workspace's
@@ -894,6 +918,9 @@ func (m *Manager) GitOperator() *GitOperator {
 	if m.gitOperator == nil {
 		m.gitOperator = NewGitOperator(m.cfg.WorkDir, m.logger, m.workspaceTracker)
 		m.gitOperator.setEnvironmentProvider(m.gitEnvironment)
+		if binding, ok := m.cfg.RemoteContributions[""]; ok {
+			m.gitOperator.setRemoteContribution(&binding)
+		}
 	}
 	return m.gitOperator
 }
@@ -922,8 +949,15 @@ func (m *Manager) GitOperatorFor(subpath string) (*GitOperator, error) {
 	if op, ok := m.gitOperatorsBySubpath[cleaned]; ok {
 		return op, nil
 	}
-	op := NewGitOperatorForRepo(full, cleaned, m.logger, m.workspaceTracker)
+	tracker := m.findRepositoryTracker(cleaned)
+	if tracker == nil {
+		tracker = m.GetWorkspaceTracker()
+	}
+	op := NewGitOperatorForRepo(full, cleaned, m.logger, tracker)
 	op.setEnvironmentProvider(m.gitEnvironment)
+	if binding, ok := m.cfg.RemoteContributions[cleaned]; ok {
+		op.setRemoteContribution(&binding)
+	}
 	m.gitOperatorsBySubpath[cleaned] = op
 	return op, nil
 }
@@ -959,7 +993,13 @@ func (m *Manager) resolveSubpath(subpath string) (string, string, error) {
 		}
 	}
 
-	full := filepath.Join(m.cfg.WorkDir, cleaned)
+	// Repository scope names are also used as API keys and Git paths. Keep
+	// those keys slash-separated on every platform; filepath.Clean uses the
+	// native separator, which made Windows lookups miss the trackers built
+	// from Git's slash-separated gitlink paths and create an unanchored lazy
+	// tracker instead.
+	scope := filepath.ToSlash(cleaned)
+	full := filepath.Join(m.cfg.WorkDir, filepath.FromSlash(scope))
 	info, err := os.Stat(full)
 	if err != nil {
 		return "", "", fmt.Errorf("repo subpath not found: %w", err)
@@ -967,7 +1007,7 @@ func (m *Manager) resolveSubpath(subpath string) (string, string, error) {
 	if !info.IsDir() {
 		return "", "", fmt.Errorf("repo subpath is not a directory: %q", subpath)
 	}
-	return cleaned, full, nil
+	return scope, full, nil
 }
 
 // WorkDir returns the absolute workspace root for this agentctl instance.

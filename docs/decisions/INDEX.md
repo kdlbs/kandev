@@ -105,6 +105,9 @@ Read individual ADRs for full context. Create new ones via `/record decision` or
 | 2026-08-01-architecture-lint-budgets | [Architecture Lint Budgets and Compatibility Expiry](2026-08-01-architecture-lint-budgets.md) | accepted (amended 2026-08-02) | infra | 2026-08-01 |
 | 2026-08-01-release-toggle-gating-contract | [Release Toggles Are Install-Wide Fail-Closed Gates](2026-08-01-release-toggle-gating-contract.md) | proposed | backend, frontend, workflow | 2026-08-01 |
 | 2026-08-01-share-artifact-locale | [Shared-Task Artifacts Render in the Creator's Locale](2026-08-01-share-artifact-locale.md) | accepted | backend | 2026-08-01 |
+| 2026-08-01-gitlab-mr-lifecycle-notifications | [GitLab MR Lifecycle Notifications](2026-08-01-gitlab-mr-lifecycle-notifications.md) | accepted | backend, frontend | 2026-08-01 |
+| 2026-08-01-per-user-plugin-storage | [Host-Provided Per-User Plugin Storage](2026-08-01-per-user-plugin-storage.md) | accepted | backend, frontend, security | 2026-08-01 |
+| 2026-08-01-plugin-task-panel-contributions | [Plugin Task Panel, Kanban Menu Action, and Card Indicator Contributions](2026-08-01-plugin-task-panel-contributions.md) | accepted | frontend | 2026-08-01 |
 | 2026-08-02-new-workspace-github-access-defaults | [Bootstrap New Workspaces From Host GitHub Access](2026-08-02-new-workspace-github-access-defaults.md) | accepted | backend, frontend, security | 2026-08-02 |
 | 2026-08-02-explicit-user-cancel-completion | [Explicit User Cancellation May Complete a Workflow Step](2026-08-02-explicit-user-cancel-completion.md) | accepted | workflow | 2026-08-02 |
 | 2026-08-02-single-owner-agent-task-titles | [Assign Agent Task Titles to One Session](2026-08-02-single-owner-agent-task-titles.md) | accepted | backend, frontend, protocol, workflow | 2026-08-02 |
@@ -113,5 +116,13 @@ Read individual ADRs for full context. Create new ones via `/record decision` or
 | 2026-08-02-isolate-replaceable-session-stream-traffic | [Isolate Replaceable Session Stream Traffic](2026-08-02-isolate-replaceable-session-stream-traffic.md) | accepted | backend, frontend, protocol | 2026-08-02 |
 | 2026-08-03-backend-owned-cancellation-progress | [Keep Cancellation Progress Backend Owned](2026-08-03-backend-owned-cancellation-progress.md) | accepted | backend, frontend, protocol | 2026-08-03 |
 | 2026-08-03-separate-message-queue-provenance-cancellation-and-capacity | [Separate Message Queue Provenance, Cancellation, and Capacity](2026-08-03-separate-message-queue-provenance-cancellation-and-capacity.md) | accepted | backend, frontend, protocol, security | 2026-08-03 |
+| 2026-08-03-provider-scoped-task-mcp-tools | [Derive Provider-Scoped Task MCP Tools in the Backend](2026-08-03-provider-scoped-task-mcp-tools.md) | accepted | backend, agentctl, protocol, integrations | 2026-08-03 |
+| 2026-08-05-queue-send-now-replaces-turn | [Queue Send Now Replaces the Active Turn](2026-08-05-queue-send-now-replaces-turn.md) | accepted | backend, frontend, protocol, workflow | 2026-08-05 |
 | 2026-08-04-file-backed-prompt-attachments | [File-backed prompt attachments](2026-08-04-file-backed-prompt-attachments.md) | accepted | backend, frontend, protocol, infra | 2026-08-04 |
+| 2026-08-04-plugin-contribution-lifecycle-authority | [Make Plugin Contribution Lifecycle Authoritative](2026-08-04-plugin-contribution-lifecycle-authority.md) | accepted | frontend, security | 2026-08-04 |
 | 2026-08-04-navigation-manifest-boundaries | [Centralize Navigation and Namespace Plugin Destinations](2026-08-04-navigation-manifest-boundaries.md) | accepted | frontend | 2026-08-04 |
+| 2026-08-04-mid-turn-steering | [Deliver Operator Input Into a Generating Turn](2026-08-04-mid-turn-steering.md) | accepted | backend, frontend, protocol | 2026-08-04 |
+| 2026-08-04-remote-contribution-bindings | [Bind Remote Contributions to Target Repositories](2026-08-04-remote-contribution-bindings.md) | accepted | backend, protocol, security, GitHub, GitLab | 2026-08-04 |
+| 2026-08-03-scope-and-merge-repository-secrets | [Scope and Merge Repository Secrets](2026-08-03-scope-and-merge-repository-secrets.md) | accepted | backend, frontend, security, protocol | 2026-08-03 |
+| 2026-08-05-server-owned-quick-terminal-descriptors | [Server-Owned Quick Terminal Descriptors](2026-08-05-server-owned-quick-terminal-descriptors.md) | accepted | backend, frontend, protocol, security | 2026-08-05 |
+| 2026-08-05-nested-submodules-as-repository-scopes | [Model Nested Submodules as Repository Scopes](2026-08-05-nested-submodules-as-repository-scopes.md) | accepted | backend, frontend, protocol | 2026-08-05 |

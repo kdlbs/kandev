@@ -17,6 +17,7 @@ import { useOpenSessionFolder } from "@/hooks/use-open-session-folder";
 import { useAppStore } from "@/components/state-provider";
 import type { EditorOption } from "@/lib/types/http";
 import { copyToClipboard } from "@/lib/utils/copy-to-clipboard";
+import { useTranslation } from "react-i18next";
 
 type FileActionsDropdownProps = {
   /** File path to open / copy */
@@ -104,6 +105,7 @@ function useFileActions({
 }
 
 export function FileActionsMenuItems(props: FileActionsMenuItemsProps) {
+  const { t } = useTranslation();
   const { defaultEditorId, enabledEditors, handleCopyPath, handleOpenFolder, handleOpenInEditor } =
     useFileActions(props);
 
@@ -118,23 +120,25 @@ export function FileActionsMenuItems(props: FileActionsMenuItemsProps) {
           <IconExternalLink className="h-3.5 w-3.5" />
           {editor.name}
           {editor.id === defaultEditorId && (
-            <span className="ml-auto text-[10px] text-muted-foreground">default</span>
+            <span className="ml-auto text-[10px] text-muted-foreground">
+              {t("editors:default")}
+            </span>
           )}
         </DropdownMenuItem>
       ))}
       {enabledEditors.length === 0 && (
         <DropdownMenuItem disabled className="text-xs">
-          No editors configured
+          {t("editors:noEditorsConfigured")}
         </DropdownMenuItem>
       )}
       <DropdownMenuSeparator />
       <DropdownMenuItem className="cursor-pointer text-xs" onSelect={handleCopyPath}>
         <IconCopy className="h-3.5 w-3.5" />
-        Copy path
+        {t("editors:copyPath")}
       </DropdownMenuItem>
       <DropdownMenuItem className="cursor-pointer text-xs" onSelect={handleOpenFolder}>
         <IconFolderShare className="h-3.5 w-3.5" />
-        Open folder
+        {t("editors:openFolder")}
       </DropdownMenuItem>
     </>
   );
@@ -146,6 +150,7 @@ export function FileActionsDropdown({
   size = "xs",
   onCopied,
 }: FileActionsDropdownProps) {
+  const { t } = useTranslation();
   const btnClass = fileActionsButtonClass(size);
   const iconClass = size === "xs" ? "h-3.5 w-3.5" : "h-4 w-4";
 
@@ -159,7 +164,7 @@ export function FileActionsDropdown({
             </Button>
           </DropdownMenuTrigger>
         </TooltipTrigger>
-        <TooltipContent>Open with...</TooltipContent>
+        <TooltipContent>{t("editors:openWith")}</TooltipContent>
       </Tooltip>
       <DropdownMenuContent align="end" className="w-44">
         <FileActionsMenuItems filePath={filePath} sessionId={sessionId} onCopied={onCopied} />

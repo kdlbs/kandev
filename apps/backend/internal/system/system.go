@@ -33,6 +33,7 @@ import (
 	"github.com/kandev/kandev/internal/system/queuesettings"
 	"github.com/kandev/kandev/internal/system/restart"
 	systemsettings "github.com/kandev/kandev/internal/system/settings"
+	"github.com/kandev/kandev/internal/system/sleepinhibition"
 	"github.com/kandev/kandev/internal/system/storage"
 	"github.com/kandev/kandev/internal/system/updates"
 	"go.uber.org/zap"
@@ -48,32 +49,34 @@ type BuildInfo struct {
 	BuildTime string
 }
 
-// Wiring holds the runtime hooks the destructive endpoints need —
-// currently only OrchestratorShutdown, which stops in-flight agent
-// executions before factory reset wipes their backing data. The frontend
-// dialog prompts the user to relaunch after a successful reset/restore;
-// no in-process re-exec is performed.
+// Wiring supplies the runtime hooks and repositories owned by the wider
+// application. OrchestratorShutdown stops in-flight agent executions before
+// destructive resets; TaskSessions is the authoritative session reader used
+// by the install-wide sleep-inhibition service.
 type Wiring struct {
 	OrchestratorShutdown func()
 	MessageQueue         queuesettings.Target
+	TaskSessions         sleepinhibition.SessionReader
 }
 
 // Service exposes the composed system sub-services. Each field is
 // addressable so the cmd/kandev wiring can attach callbacks (Restart)
 // after construction.
 type Service struct {
-	Info           *info.Service
-	Jobs           *jobs.Tracker
-	Disk           *disk.Service
-	Database       *database.Service
-	Backups        *backups.Service
-	LogBundles     *logbundle.Service
-	FrontendErrors *frontenderrors.Service
-	Metrics        *metrics.Service
-	MessageQueue   *queuesettings.Service
-	Updates        *updates.Service
-	Restart        restart.Manager
-	Storage        *storage.Handler
+	logger          *logger.Logger
+	Info            *info.Service
+	Jobs            *jobs.Tracker
+	Disk            *disk.Service
+	Database        *database.Service
+	Backups         *backups.Service
+	LogBundles      *logbundle.Service
+	FrontendErrors  *frontenderrors.Service
+	Metrics         *metrics.Service
+	MessageQueue    *queuesettings.Service
+	SleepInhibition *sleepinhibition.Service
+	Updates         *updates.Service
+	Restart         restart.Manager
+	Storage         *storage.Handler
 	// StorageRuntime owns the scheduler, reconciliation, and durable cleanup worker.
 	StorageRuntime *storage.Runtime
 }
@@ -105,6 +108,7 @@ func Provide(cfg *config.Config, log *logger.Logger, pool *db.Pool, eventBus bus
 	}
 	var metricsSvc *metrics.Service
 	var queueSettingsSvc *queuesettings.Service
+	var sleepInhibitionSvc *sleepinhibition.Service
 	updatesOpts := []updates.Option{updates.WithHomeDir(homeDir), updates.WithJobs(tracker)}
 	if settingsStore != nil {
 		metricsStore := metrics.NewStore(settingsStore)
@@ -112,6 +116,15 @@ func Provide(cfg *config.Config, log *logger.Logger, pool *db.Pool, eventBus bus
 		if wiring.MessageQueue != nil {
 			queueSettingsSvc = queuesettings.NewService(
 				queuesettings.NewStore(settingsStore), wiring.MessageQueue, nil, log,
+			)
+		}
+		if wiring.TaskSessions != nil {
+			sleepInhibitionSvc = sleepinhibition.NewService(
+				sleepinhibition.NewStore(settingsStore),
+				wiring.TaskSessions,
+				sleepinhibition.NewPlatformInhibitor(),
+				eventBus,
+				log,
 			)
 		}
 		updatesOpts = append(updatesOpts, updates.WithSettingsStore(settingsStore))
@@ -123,6 +136,7 @@ func Provide(cfg *config.Config, log *logger.Logger, pool *db.Pool, eventBus bus
 	}
 
 	return &Service{
+		logger:   log,
 		Info:     info.NewService(build.Version, build.Commit, build.BuildTime),
 		Jobs:     tracker,
 		Disk:     disk.NewService(homeDir, tracker, log),
@@ -132,11 +146,12 @@ func Provide(cfg *config.Config, log *logger.Logger, pool *db.Pool, eventBus bus
 			HomeDir: homeDir, Version: build.Version, Commit: build.Commit,
 			BuildTime: build.BuildTime, Log: log,
 		}),
-		FrontendErrors: frontenderrors.New(log, nil),
-		Metrics:        metricsSvc,
-		MessageQueue:   queueSettingsSvc,
-		Updates:        updatesSvc,
-		Restart:        restart.NewManagerFromEnv(),
+		FrontendErrors:  frontenderrors.New(log, nil),
+		Metrics:         metricsSvc,
+		MessageQueue:    queueSettingsSvc,
+		SleepInhibition: sleepInhibitionSvc,
+		Updates:         updatesSvc,
+		Restart:         restart.NewManagerFromEnv(),
 	}
 }
 
@@ -186,6 +201,9 @@ func (s *Service) RegisterRoutes(router *gin.Engine, log *logger.Logger) {
 	if s.MessageQueue != nil {
 		queuesettings.RegisterRoutes(g, admin, s.MessageQueue)
 	}
+	if s.SleepInhibition != nil {
+		sleepinhibition.RegisterRoutes(g, admin, s.SleepInhibition)
+	}
 
 	g.GET("/updates", updates.HandleGet(s.Updates))
 	admin.POST("/updates/check", updates.HandleCheck(s.Updates))
@@ -199,8 +217,8 @@ func (s *Service) RegisterRoutes(router *gin.Engine, log *logger.Logger) {
 	log.Debug("Registered System routes (HTTP)")
 }
 
-// StartBackground kicks off the updates poller goroutine. The poller
-// stops when ctx is cancelled.
+// StartBackground starts the System-owned pollers and reconciliation loops.
+// They stop when the application cleanup path calls StopBackground.
 func (s *Service) StartBackground(ctx context.Context) {
 	if s.LogBundles != nil {
 		s.LogBundles.Start(ctx)
@@ -211,10 +229,20 @@ func (s *Service) StartBackground(ctx context.Context) {
 	if s.StorageRuntime != nil {
 		_ = s.StorageRuntime.Start(ctx)
 	}
+	if s.SleepInhibition != nil {
+		if err := s.SleepInhibition.Start(ctx); err != nil {
+			if s.logger != nil {
+				s.logger.Warn("failed to start sleep inhibition service", zap.Error(err))
+			}
+		}
+	}
 }
 
 // StopBackground joins owned storage background workers.
 func (s *Service) StopBackground() {
+	if s.SleepInhibition != nil {
+		s.SleepInhibition.Stop()
+	}
 	if s.LogBundles != nil {
 		s.LogBundles.Stop()
 	}

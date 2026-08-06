@@ -4,6 +4,7 @@ import { useAppStore } from "@/components/state-provider";
 import { formatRelativeTime } from "@/lib/utils";
 import { AgentAvatar } from "@/app/office/components/agent-avatar";
 import type { TaskActivityEntry } from "@/app/office/tasks/[id]/types";
+import { useTranslation } from "react-i18next";
 
 type TaskActivityProps = {
   taskId: string;
@@ -11,13 +12,14 @@ type TaskActivityProps = {
 };
 
 function ActivityRow({ entry }: { entry: TaskActivityEntry }) {
+  const { t } = useTranslation();
   const agentName = useAppStore((s) =>
     entry.actorType === "agent"
-      ? (s.office.agentProfiles.find((a) => a.id === entry.actorId)?.name ?? "Agent")
+      ? (s.office.agentProfiles.find((a) => a.id === entry.actorId)?.name ?? t("task:agent"))
       : "",
   );
-  let actorName = "System";
-  if (entry.actorType === "user") actorName = "You";
+  let actorName = t("task:system");
+  if (entry.actorType === "user") actorName = t("task:you");
   else if (entry.actorType === "agent") actorName = agentName;
 
   return (
@@ -44,10 +46,11 @@ function ActivityRow({ entry }: { entry: TaskActivityEntry }) {
 }
 
 export function TaskActivity({ taskId, entries }: TaskActivityProps) {
+  const { t } = useTranslation();
   void taskId;
 
   if (entries.length === 0) {
-    return <p className="text-sm text-muted-foreground py-4">No activity yet</p>;
+    return <p className="text-sm text-muted-foreground py-4">{t("task:noActivityYet")}</p>;
   }
 
   return (

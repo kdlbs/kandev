@@ -80,14 +80,31 @@ func main() {
 }
 
 // Initialize handles the ACP initialize request, returning agent capabilities.
+//
+// The `_meta.claudeCode.promptQueueing` advertisement mirrors what
+// `@agentclientprotocol/claude-agent-acp` sends. It is set deliberately rather
+// than special-casing the mock downstream: prompt handoff and mid-turn steering
+// are gated on this negotiated advertisement, so the mock must earn eligibility
+// the same way a real bridge does or E2E would prove nothing about the gate.
 func (a *mockAgent) Initialize(_ context.Context, _ acp.InitializeRequest) (acp.InitializeResponse, error) {
+	var meta map[string]any
+	if mockPromptQueueingEnabled() {
+		meta = map[string]any{
+			"claudeCode": map[string]any{"promptQueueing": true},
+		}
+	}
 	return acp.InitializeResponse{
 		ProtocolVersion: acp.ProtocolVersionNumber,
 		AgentCapabilities: acp.AgentCapabilities{
 			LoadSession:     true,
 			McpCapabilities: acp.McpCapabilities{Sse: true},
+			Meta:            meta,
 		},
 	}, nil
+}
+
+func mockPromptQueueingEnabled() bool {
+	return strings.ToLower(strings.TrimSpace(os.Getenv("KANDEV_MOCK_AGENT_PROMPT_QUEUEING"))) != "false"
 }
 
 // NewSession creates a new conversation session.

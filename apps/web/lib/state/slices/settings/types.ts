@@ -24,6 +24,7 @@ import type { SidebarTaskPrefsState } from "@/lib/state/slices/ui/types";
 import type { SecretListItem } from "@/lib/types/http-secrets";
 import type { SpritesStatus, SpritesInstance } from "@/lib/types/http-sprites";
 import type { TasksListGroup, TasksListSort } from "@/lib/tasks/tasks-list-options";
+import type { SleepInhibitionResponse } from "@/lib/types/system";
 
 export type ExecutorsState = {
   items: Executor[];
@@ -53,6 +54,11 @@ export type AgentProfileOption = {
   agent_name: string;
   cli_passthrough: boolean;
   /**
+   * False hides the profile from task/session creation pickers. Existing
+   * sessions keep their labels and the profile stays editable in settings.
+   */
+  enabled?: boolean;
+  /**
    * Host utility probe status for the agent this profile belongs to.
    * Used by pickers and the settings sidebar to flag profiles whose agent
    * needs login or reinstallation.
@@ -61,10 +67,18 @@ export type AgentProfileOption = {
   capability_error?: string;
 };
 
+/** Profiles with an omitted enabled field remain selectable for compatibility. */
+export function isSelectableAgentProfile(profile: Pick<AgentProfileOption, "enabled">): boolean {
+  return profile.enabled !== false;
+}
+
 /** Single source of truth for mapping an API Agent+Profile to a store AgentProfileOption. */
 export function toAgentProfileOption(
   agent: Pick<Agent, "id" | "name" | "capability_status" | "capability_error">,
-  profile: Pick<AgentProfile, "id" | "agentDisplayName" | "name"> & { cliPassthrough?: boolean },
+  profile: Pick<AgentProfile, "id" | "agentDisplayName" | "name"> & {
+    cliPassthrough?: boolean;
+    enabled?: boolean;
+  },
 ): AgentProfileOption {
   return {
     id: profile.id,
@@ -72,6 +86,7 @@ export function toAgentProfileOption(
     agent_id: agent.id,
     agent_name: agent.name,
     cli_passthrough: profile.cliPassthrough ?? false,
+    enabled: profile.enabled ?? true,
     capability_status: agent.capability_status,
     capability_error: agent.capability_error,
   };
@@ -165,6 +180,14 @@ export type NotificationProvidersState = {
 export type SettingsDataState = {
   executorsLoaded: boolean;
   agentsLoaded: boolean;
+};
+
+/** Install-wide sleep-inhibition settings and runtime status. */
+export type SleepInhibitionStoreState = {
+  response: SleepInhibitionResponse | null;
+  loaded: boolean;
+  loading: boolean;
+  error: boolean;
 };
 
 export type UserSettingsState = {
@@ -266,6 +289,7 @@ export type SettingsSliceState = {
   sprites: SpritesState;
   notificationProviders: NotificationProvidersState;
   settingsData: SettingsDataState;
+  sleepInhibition: SleepInhibitionStoreState;
   userSettings: UserSettingsState;
 };
 
@@ -304,6 +328,9 @@ export type SettingsSliceActions = {
   setNotificationProviders: (state: NotificationProvidersState) => void;
   setNotificationProvidersLoading: (loading: boolean) => void;
   setSettingsData: (next: Partial<SettingsDataState>) => void;
+  setSleepInhibition: (response: SleepInhibitionResponse) => void;
+  setSleepInhibitionLoading: (loading: boolean) => void;
+  setSleepInhibitionError: (error: boolean) => void;
   setUserSettings: (settings: UserSettingsState) => void;
   bumpAgentProfilesVersion: () => void;
 };

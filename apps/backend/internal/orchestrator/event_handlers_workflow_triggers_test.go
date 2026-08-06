@@ -1004,6 +1004,156 @@ func TestProcessOnEnterResetAgentContext(t *testing.T) {
 		}
 	})
 
+	// Regression: a CREATED session has never been prompted, so there is no
+	// agent conversation to clear — but its prepared execution row made
+	// resetAgentContext restart (in practice: start) the subprocess anyway.
+	// markIdleAfterReset then left the state at CREATED, so autoStartStepPrompt
+	// concluded the agent was never started and started it a second time. The
+	// second start hit agentctl's "cannot configure while agent is running"
+	// guard, which failed the task, force-killed the agent, and dropped the
+	// step prompt. Reset must own no start for a never-prompted session.
+	t.Run("reset_agent_context skipped for CREATED session", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		seedSession(t, repo, "t1", "s1", "step1")
+
+		session, _ := repo.GetTaskSession(ctx, "s1")
+		session.State = models.TaskSessionStateCreated
+		session.AgentExecutionID = "exec-created"
+		seedExecutorRunning(t, repo, session.ID, session.TaskID, "exec-created")
+		_ = repo.UpdateTaskSession(ctx, session)
+
+		agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
+		svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
+
+		step := &wfmodels.WorkflowStep{
+			ID: "step2", WorkflowID: "wf1", Name: "Work",
+			Events: wfmodels.StepEvents{
+				OnEnter: []wfmodels.OnEnterAction{
+					{Type: wfmodels.OnEnterResetAgentContext},
+				},
+			},
+		}
+
+		session, _ = repo.GetTaskSession(ctx, "s1")
+		if !svc.resetAgentContext(ctx, "t1", session, step.Name) {
+			t.Fatal("expected reset to report success for a never-prompted session")
+		}
+
+		if len(agentMgr.restartProcessCalls) != 0 {
+			t.Fatalf("expected 0 RestartAgentProcess calls for a CREATED session, got %d",
+				len(agentMgr.restartProcessCalls))
+		}
+
+		// A never-prompted session has no ACP session; the skip must not have
+		// been reached by way of a clear that happened to leave it empty.
+		updated, _ := repo.GetTaskSession(ctx, "s1")
+		if updated.Metadata != nil {
+			if acp, _ := updated.Metadata["acp_session_id"].(string); acp != "" {
+				t.Errorf("expected acp_session_id to remain empty, got %q", acp)
+			}
+		}
+	})
+
+	// Same skip for passthrough: the CLI has no conversation to reset before
+	// its first prompt either.
+	t.Run("reset_agent_context skipped for CREATED passthrough session", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		seedSession(t, repo, "t1", "s1", "step1")
+
+		session, _ := repo.GetTaskSession(ctx, "s1")
+		session.State = models.TaskSessionStateCreated
+		session.AgentExecutionID = "exec-created-pt"
+		seedExecutorRunning(t, repo, session.ID, session.TaskID, "exec-created-pt")
+		_ = repo.UpdateTaskSession(ctx, session)
+
+		agentMgr := &mockAgentManager{repoForExecutionLookup: repo, isPassthrough: true}
+		svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
+
+		session, _ = repo.GetTaskSession(ctx, "s1")
+		if !svc.resetAgentContext(ctx, "t1", session, "Work") {
+			t.Fatal("expected reset to report success for a never-prompted passthrough session")
+		}
+		if len(agentMgr.restartProcessCalls) != 0 {
+			t.Fatalf("expected 0 RestartAgentProcess calls for a CREATED passthrough session, got %d",
+				len(agentMgr.restartProcessCalls))
+		}
+	})
+
+	t.Run("CREATED passthrough session starts before workflow prompt", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		seedSession(t, repo, "t1", "s1", "step1")
+
+		session, _ := repo.GetTaskSession(ctx, "s1")
+		session.State = models.TaskSessionStateCreated
+		session.IsPassthrough = true
+		session.AgentProfileID = "profile-created-pt-start"
+		session.AgentExecutionID = "exec-created-pt-start"
+		seedExecutorRunning(t, repo, session.ID, session.TaskID, session.AgentExecutionID)
+		if err := repo.UpdateTaskSession(ctx, session); err != nil {
+			t.Fatalf("seed passthrough session: %v", err)
+		}
+
+		taskRepo := newMockTaskRepo()
+		taskRepo.tasks["t1"] = &v1.Task{
+			ID: "t1", Title: "Created passthrough task", Description: "Run the work",
+			State: v1.TaskStateInProgress,
+		}
+		agentMgr := &mockAgentManager{
+			isPassthrough:  true,
+			isAgentRunning: true,
+			launchAgentFunc: func(context.Context, *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
+				return &executor.LaunchAgentResponse{
+					AgentExecutionID: "exec-created-pt-start",
+					Status:           v1.AgentStatusStarting,
+					WorkspacePath:    t.TempDir(),
+				}, nil
+			},
+		}
+		startAgentProcessCalled := make(chan struct{}, 1)
+		agentMgr.startAgentProcessFunc = func(_ context.Context, _ string) error {
+			select {
+			case startAgentProcessCalled <- struct{}{}:
+			default:
+			}
+			started, err := repo.GetTaskSession(ctx, session.ID)
+			if err != nil {
+				return err
+			}
+			started.State = models.TaskSessionStateWaitingForInput
+			return repo.UpdateTaskSession(ctx, started)
+		}
+		stepGetter := newMockStepGetter()
+		stepGetter.steps["step1"] = &wfmodels.WorkflowStep{ID: "step1", WorkflowID: "wf1", Name: "Current"}
+		svc := createTestServiceWithScheduler(repo, stepGetter, taskRepo, agentMgr)
+
+		step := &wfmodels.WorkflowStep{
+			ID: "step2", WorkflowID: "wf1", Name: "Work", Prompt: "Do the work",
+			Events: wfmodels.StepEvents{OnEnter: []wfmodels.OnEnterAction{
+				{Type: wfmodels.OnEnterResetAgentContext},
+				{Type: wfmodels.OnEnterAutoStartAgent},
+			}},
+		}
+
+		session, _ = repo.GetTaskSession(ctx, "s1")
+		svc.processOnEnter(ctx, "t1", session, step, "Run the work")
+		select {
+		case <-startAgentProcessCalled:
+		case <-time.After(time.Second):
+			t.Fatal("expected StartAgentProcess to be called")
+		}
+
+		agentMgr.mu.Lock()
+		startCalls := append([]string(nil), agentMgr.startAgentProcessCalls...)
+		stdinCalls := append([]passthroughStdinCall(nil), agentMgr.passthroughStdinCalls...)
+		agentMgr.mu.Unlock()
+		if len(startCalls) != 1 || startCalls[0] != session.AgentExecutionID {
+			t.Fatalf("expected one agent start for CREATED passthrough session, got %v", startCalls)
+		}
+		if len(stdinCalls) != 0 {
+			t.Fatalf("expected no PTY write before passthrough process start, got %v", stdinCalls)
+		}
+	})
+
 	t.Run("reset_agent_context works for passthrough sessions", func(t *testing.T) {
 		repo := setupTestRepo(t)
 		seedSession(t, repo, "t1", "s1", "step1")

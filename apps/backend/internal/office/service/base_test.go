@@ -60,6 +60,7 @@ func newTestService(t *testing.T, overrides ...service.ServiceOptions) *service.
 		priority TEXT NOT NULL DEFAULT 'medium' CHECK (priority IN ('critical','high','medium','low')),
 		position INTEGER DEFAULT 0,
 		is_ephemeral INTEGER DEFAULT 0,
+		origin TEXT DEFAULT 'manual',
 		parent_id TEXT DEFAULT '',
 		execution_policy TEXT DEFAULT '',
 		execution_state TEXT DEFAULT '',
