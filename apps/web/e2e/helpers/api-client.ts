@@ -892,6 +892,7 @@ export class ApiClient {
       mcp_task_agent_profile_default?: MCPTaskAgentProfileDefault;
       tasks_list_show_details?: boolean;
       show_transcript_auto_scroll_control?: boolean;
+      show_todo_list_panel?: boolean;
       agent_generated_task_titles?: boolean;
       [key: string]: unknown;
     };

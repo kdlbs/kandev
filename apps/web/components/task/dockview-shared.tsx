@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useCallback, useEffect } from "react";
+import { useTranslation } from "react-i18next";
 import {
   DockviewDefaultTab,
   type IDockviewPanelProps,
@@ -40,6 +41,8 @@ import { ReviewDetailPanelComponent } from "./review-detail-panel";
 import { MRDetailPanelComponent } from "@/components/gitlab/mr-detail-panel";
 import { PluginTaskPanel } from "./plugin-task-panel";
 import { PluginPanelTab } from "./plugin-panel-tab";
+import { TodoIndicatorContent, resolveStatus } from "./chat/todo-indicator";
+import { useSessionTodoItems } from "./chat/use-chat-panel-state";
 
 import { setPanelTitle, panelPortalManager } from "@/lib/layout/panel-portal-manager";
 import { getWebSocketClient } from "@/lib/ws/connection";
@@ -117,6 +120,7 @@ export const dockviewComponents: Record<string, React.FunctionComponent<IDockvie
   browser: PortalSlot,
   vscode: PortalSlot,
   plan: PortalSlot,
+  todos: PortalSlot,
   "pr-detail": PortalSlot,
   "mr-detail": PortalSlot,
   // Generic component every plugin-contributed task panel shares (Approach
@@ -365,6 +369,36 @@ function PlanContent() {
   return <TaskPlanPanel taskId={taskId} visible />;
 }
 
+/**
+ * Renders the active session's agent-generated todo checklist as a right-
+ * panel tab. Reuses TodoIndicatorContent/resolveStatus so the panel shows
+ * identical rows, in the same order, as the chat status-bar TodoIndicator —
+ * no duplicated status-icon/progress logic. Shows an empty state instead of
+ * nothing when the active session has no todo entries yet, matching how
+ * Files/Changes/Plan behave with no applicable content.
+ */
+function TodosContent() {
+  const { t } = useTranslation();
+  const sessionId = useAppStore((state) => state.tasks.activeSessionId);
+  const todos = useSessionTodoItems(sessionId, []);
+
+  if (todos.length === 0) {
+    return (
+      <div data-testid="todos-panel-empty-state" className="p-4 text-sm text-muted-foreground">
+        {t("chat:noTodosYet")}
+      </div>
+    );
+  }
+
+  const completed = todos.filter((todo) => resolveStatus(todo) === "completed").length;
+  const progress = Math.round((completed / todos.length) * 100);
+  return (
+    <div className="p-3">
+      <TodoIndicatorContent todos={todos} completed={completed} progress={progress} />
+    </div>
+  );
+}
+
 // ---------------------------------------------------------------------------
 // renderPanel — maps component names to their portal content
 // ---------------------------------------------------------------------------
@@ -398,6 +432,7 @@ const PANEL_RENDERERS: Record<string, PanelRenderer> = {
   browser: (panelId, params) => <BrowserPanel panelId={panelId} params={params} />,
   vscode: (panelId) => <VscodePanel panelId={panelId} />,
   plan: () => <PlanContent />,
+  todos: () => <TodosContent />,
   "pr-detail": (panelId, params) => (
     <ReviewDetailPanelComponent panelId={panelId} params={params} />
   ),

@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useCallback, useEffect } from "react";
+import { useTranslation } from "react-i18next";
 import { ReviewDetailPanelComponent } from "./review-detail-panel";
 import { MRDetailPanelComponent } from "@/components/gitlab/mr-detail-panel";
 import { useAppStore } from "@/components/state-provider";
@@ -15,6 +16,8 @@ import { useDockviewStore } from "@/lib/state/dockview-store";
 import { BrowserPanel } from "./browser-panel";
 import type { CommitDetailTarget, OpenDiffOptions } from "./changes-diff-target";
 import { ChangesPanel } from "./changes-panel";
+import { TodoIndicatorContent, resolveStatus } from "./chat/todo-indicator";
+import { useSessionTodoItems } from "./chat/use-chat-panel-state";
 import { CommitDetailPanel } from "./commit-detail-panel";
 import { FileEditorPanel } from "./file-editor-panel";
 import { FilesPanel } from "./files-panel";
@@ -187,6 +190,28 @@ function PlanContent() {
   return <TaskPlanPanel taskId={taskId} visible />;
 }
 
+function TodosContent() {
+  const { t } = useTranslation();
+  const sessionId = useAppStore((state) => state.tasks.activeSessionId);
+  const todos = useSessionTodoItems(sessionId, []);
+
+  if (todos.length === 0) {
+    return (
+      <div data-testid="todos-panel-empty-state" className="p-4 text-sm text-muted-foreground">
+        {t("chat:noTodosYet")}
+      </div>
+    );
+  }
+
+  const completed = todos.filter((todo) => resolveStatus(todo) === "completed").length;
+  const progress = Math.round((completed / todos.length) * 100);
+  return (
+    <div className="p-3">
+      <TodoIndicatorContent todos={todos} completed={completed} progress={progress} />
+    </div>
+  );
+}
+
 const COMPONENT_ALIASES: Record<string, string> = {
   "diff-files": "changes",
   "all-files": "files",
@@ -215,6 +240,7 @@ const PANEL_RENDERERS: Record<string, PanelRenderer> = {
   browser: (panelId, params) => <BrowserPanel panelId={panelId} params={params} />,
   vscode: (panelId) => <VscodePanel panelId={panelId} />,
   plan: () => <PlanContent />,
+  todos: () => <TodosContent />,
   "pr-detail": (panelId, params) => (
     <ReviewDetailPanelComponent panelId={panelId} params={params} />
   ),

@@ -66,6 +66,7 @@ export type UserSettings = {
   show_scroll_to_last_prompt?: boolean;
   show_scroll_to_start?: boolean;
   show_transcript_auto_scroll_control?: boolean;
+  show_todo_list_panel?: boolean;
   review_auto_mark_on_scroll?: boolean;
   confirm_task_archive?: boolean;
   unread_divider?: boolean;
@@ -124,6 +125,7 @@ export type UserSettingsUpdatePayload = {
   show_scroll_to_last_prompt?: boolean;
   show_scroll_to_start?: boolean;
   show_transcript_auto_scroll_control?: boolean;
+  show_todo_list_panel?: boolean;
   review_auto_mark_on_scroll?: boolean;
   confirm_task_archive?: boolean;
   unread_divider?: boolean;

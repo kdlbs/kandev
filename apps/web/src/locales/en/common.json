@@ -118,6 +118,7 @@
   "status": "Status",
   "subtaskTitle": "Subtask title",
   "system": "System",
+  "todos": "Todos",
   "taskLoading": "Loading task...",
   "taskUnavailable": "Task unavailable",
   "taskUnavailableDescription": "We could not load this task. It may have been deleted or you may not have access.",

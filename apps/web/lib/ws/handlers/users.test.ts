@@ -184,6 +184,20 @@ describe("user settings websocket transcript navigation", () => {
   });
 });
 
+describe("todo list panel websocket sync", () => {
+  it("syncs the todo list panel preference and preserves it when omitted", () => {
+    const store = makeStore();
+
+    registerUsersHandlers(store)["user.settings.updated"]?.(
+      userSettingsMessage({ show_todo_list_panel: true }),
+    );
+    expect(store.getState().userSettings.showTodoListPanel).toBe(true);
+
+    registerUsersHandlers(store)["user.settings.updated"]?.(userSettingsMessage({}));
+    expect(store.getState().userSettings.showTodoListPanel).toBe(true);
+  });
+});
+
 describe("user settings websocket partial updates", () => {
   it("preserves normalized preferences omitted from a partial live update", () => {
     const store = makeStore();
