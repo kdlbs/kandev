@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { IconDotsVertical, IconPencil, IconPlus, IconTrash } from "@tabler/icons-react";
+import { IconDotsVertical, IconPlus, IconTrash } from "@tabler/icons-react";
 import { Badge } from "@kandev/ui/badge";
 import { Button } from "@kandev/ui/button";
 import { Card, CardContent } from "@kandev/ui/card";
@@ -12,14 +12,12 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@kandev/ui/dropdown-menu";
-import { AgentLogo } from "@/components/agent-logo";
 import Link from "@/components/routing/app-link";
 import { useAppStore } from "@/components/state-provider";
 import { useToast } from "@/components/toast-provider";
 import { AgentProfileDeleteConfirmDialog } from "@/components/settings/agent-profile-delete-dialog";
 import { deleteAgentProfileAction } from "@/app/actions/agents";
 import { useRouter } from "@/lib/routing/client-router";
-import { AGENTS_BROWSE_SETTINGS_HREF } from "@/lib/settings-discovery/catalog/agents";
 import type { Agent, AgentProfile } from "@/lib/types/http";
 
 function agentSetupHref(agentName: string): string {
@@ -30,42 +28,46 @@ function profileHref(agentName: string, profileId: string): string {
   return `/settings/agents/${encodeURIComponent(agentName)}/profiles/${encodeURIComponent(profileId)}`;
 }
 
-function NewProfileButton({ agents }: { agents: Agent[] }) {
+/**
+ * An agent's profiles inside its group card on the Agents page: a contrasted
+ * body with a count, a prominent "New profile" action, and one clickable row
+ * per profile (no agent branding — the group header already names the agent).
+ */
+export function AgentProfilesSubList({
+  savedAgent,
+  agentName,
+}: {
+  savedAgent: Agent | undefined;
+  agentName: string;
+}) {
   const { t } = useTranslation();
-  const router = useRouter();
-
-  if (agents.length === 0) {
-    return (
-      <Button size="sm" className="cursor-pointer" asChild>
-        <Link href={AGENTS_BROWSE_SETTINGS_HREF}>
-          <IconPlus className="h-4 w-4 mr-2" />
-          {t("agents:newProfile")}
-        </Link>
-      </Button>
-    );
-  }
-
+  const profiles = savedAgent?.profiles ?? [];
   return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <Button size="sm" className="cursor-pointer" data-testid="new-agent-profile">
-          <IconPlus className="h-4 w-4 mr-2" />
-          {t("agents:newProfile")}
+    <div
+      className="border-t border-border/70 bg-background p-3 space-y-2"
+      data-testid={`agent-profiles-${agentName}`}
+    >
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-sm font-medium text-muted-foreground">
+          {profiles.length === 0
+            ? t("agents:noProfilesYet")
+            : t("agents:profileCount", { count: profiles.length })}
+        </span>
+        <Button size="sm" className="cursor-pointer" asChild>
+          <Link href={agentSetupHref(agentName)} data-testid={`new-profile-${agentName}`}>
+            <IconPlus className="h-4 w-4 mr-2" />
+            {t("agents:newProfile")}
+          </Link>
         </Button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end">
-        {agents.map((agent) => (
-          <DropdownMenuItem
-            key={agent.name}
-            className="cursor-pointer"
-            onSelect={() => router.push(agentSetupHref(agent.name))}
-          >
-            <AgentLogo agentName={agent.name} className="h-3.5 w-3.5 mr-2 shrink-0" />
-            {agent.profiles[0]?.agentDisplayName ?? agent.name}
-          </DropdownMenuItem>
-        ))}
-      </DropdownMenuContent>
-    </DropdownMenu>
+      </div>
+      {profiles.length > 0 && (
+        <div className="grid gap-2">
+          {profiles.map((profile) => (
+            <ProfileRow key={profile.id} agent={savedAgent as Agent} profile={profile} />
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -102,38 +104,28 @@ export function ProfileRow({ agent, profile }: { agent: Agent; profile: AgentPro
   };
 
   return (
-    <Card className="relative transition-colors hover:bg-muted/50" data-testid="agent-profile-row">
+    <Card
+      className="relative gap-0 py-1.5 transition-colors hover:bg-muted/50"
+      data-testid="agent-profile-row"
+    >
       {/* Whole-card link as an overlay — the action buttons sit above it (z-10). */}
       <Link
         href={href}
-        aria-label={profile.name || profile.agentDisplayName || agent.name}
+        aria-label={profile.name}
         className="absolute inset-0"
         data-testid="agent-profile-row-link"
       />
-      <CardContent className="py-2 flex items-center justify-between gap-2">
-        <div className="flex min-w-0 flex-1 items-center gap-2">
-          <AgentLogo agentName={agent.name} className="shrink-0" />
-          <span className="text-sm font-medium truncate">
-            {profile.agentDisplayName || agent.name}
-          </span>
-          <span className="text-sm text-muted-foreground truncate">{profile.name}</span>
-          {profile.model && (
-            <Badge variant="outline" className="hidden sm:inline-flex">
-              {profile.model}
-            </Badge>
-          )}
-          {profile.mode && (
-            <Badge variant="secondary" className="hidden sm:inline-flex">
-              {profile.mode}
-            </Badge>
+      <CardContent className="flex items-center justify-between gap-2 px-3">
+        <div className="min-w-0 flex-1">
+          <div className="text-sm font-medium truncate">{profile.name}</div>
+          {(profile.model || profile.mode) && (
+            <div className="mt-0.5 flex flex-wrap items-center gap-1.5">
+              {profile.model && <Badge variant="outline">{profile.model}</Badge>}
+              {profile.mode && <Badge variant="secondary">{profile.mode}</Badge>}
+            </div>
           )}
         </div>
         <div className="relative z-10 flex shrink-0 items-center gap-1">
-          <Button variant="ghost" size="sm" className="cursor-pointer" asChild>
-            <Link href={href} aria-label={t("common:edit")}>
-              <IconPencil className="h-4 w-4" />
-            </Link>
-          </Button>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button
@@ -163,42 +155,5 @@ export function ProfileRow({ agent, profile }: { agent: Agent; profile: AgentPro
         onConfirm={() => void handleDelete()}
       />
     </Card>
-  );
-}
-
-/**
- * Every configured profile across all agents — the first thing on the Agents
- * page. Profiles are user data: they live here as a list, never as menu rows.
- */
-export function AgentProfilesSection({ savedAgents }: { savedAgents: Agent[] }) {
-  const { t } = useTranslation();
-  const configuredAgents = savedAgents.filter((agent) => agent.profiles.length > 0);
-
-  return (
-    <div className="space-y-4">
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-        <div>
-          <h3 className="text-lg font-semibold">{t("agents:agentProfiles")}</h3>
-          <p className="text-sm text-muted-foreground">{t("agents:agentProfilesDescription")}</p>
-        </div>
-        <NewProfileButton agents={savedAgents} />
-      </div>
-
-      {configuredAgents.length === 0 ? (
-        <Card>
-          <CardContent className="py-8 text-center">
-            <p className="text-sm text-muted-foreground">{t("agents:noProfilesYet")}</p>
-          </CardContent>
-        </Card>
-      ) : (
-        <div className="space-y-2">
-          {configuredAgents.flatMap((agent) =>
-            agent.profiles.map((profile) => (
-              <ProfileRow key={profile.id} agent={agent} profile={profile} />
-            )),
-          )}
-        </div>
-      )}
-    </div>
   );
 }

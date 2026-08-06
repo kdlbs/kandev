@@ -5,7 +5,7 @@ import { useTranslation } from "react-i18next";
 import Link from "@/components/routing/app-link";
 import {
   IconAlertTriangle,
-  IconChevronRight,
+  IconDownload,
   IconLoader2,
   IconPlus,
   IconRefresh,
@@ -21,7 +21,7 @@ import { useAgentDiscovery } from "@/hooks/domains/settings/use-agent-discovery"
 import { useAgentRuntimeUpdates } from "@/hooks/domains/settings/use-agent-runtime-updates";
 import { useAvailableAgents } from "@/hooks/domains/settings/use-available-agents";
 import { AddTUIAgentDialog } from "@/components/settings/add-tui-agent-dialog";
-import { AgentProfilesSection } from "@/components/settings/agents/agent-profiles-section";
+import { AgentProfilesSubList } from "@/components/settings/agents/agent-profiles-section";
 import { HostShellDialog } from "@/components/settings/host-shell-dialog";
 import { InstalledAgentCard } from "@/components/settings/installed-agent-card";
 import { AGENTS_BROWSE_SETTINGS_HREF } from "@/lib/settings-discovery/catalog/agents";
@@ -35,6 +35,7 @@ import type {
 
 type InstalledAgentsSectionProps = {
   installedAgents: AgentDiscovery[];
+  savedAgents: Agent[];
   discoveryLoading: boolean;
   rescanning: boolean;
   savedAgentsByName: Map<string, Agent>;
@@ -103,6 +104,7 @@ function InstalledAgentsHeader({
 
 function InstalledAgentsSection({
   installedAgents,
+  savedAgents,
   discoveryLoading,
   rescanning,
   savedAgentsByName,
@@ -118,6 +120,13 @@ function InstalledAgentsSection({
 }: InstalledAgentsSectionProps) {
   const { t } = useTranslation();
   const [shellOpen, setShellOpen] = useState(false);
+
+  // Configured agents whose CLI the scan no longer detects still get a group
+  // (via a synthetic discovery record), so their profiles never vanish.
+  const installedNames = new Set(installedAgents.map((agent) => agent.name));
+  const orphanAgents = savedAgents.filter(
+    (agent) => agent.profiles.length > 0 && !installedNames.has(agent.name),
+  );
 
   return (
     <div className="space-y-4">
@@ -137,7 +146,7 @@ function InstalledAgentsSection({
         }}
       />
 
-      {installedAgents.length === 0 && (
+      {installedAgents.length === 0 && orphanAgents.length === 0 && (
         <Card>
           <CardContent className="py-8 text-center">
             <div className="flex items-center justify-center gap-2 text-sm text-muted-foreground">
@@ -154,7 +163,7 @@ function InstalledAgentsSection({
         </Card>
       )}
 
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
+      <div className="grid gap-3">
         {installedAgents.map((agent: AgentDiscovery) => (
           <InstalledAgentCard
             key={agent.name}
@@ -168,30 +177,32 @@ function InstalledAgentsSection({
             onPreview={previewUpdate}
             onUpdate={startUpdate}
             onAuthComplete={() => void handleRescan()}
-          />
+          >
+            <AgentProfilesSubList
+              savedAgent={savedAgentsByName.get(agent.name)}
+              agentName={agent.name}
+            />
+          </InstalledAgentCard>
+        ))}
+        {orphanAgents.map((agent: Agent) => (
+          <InstalledAgentCard
+            key={agent.id}
+            agent={{
+              name: agent.name,
+              supports_mcp: agent.supports_mcp,
+              mcp_config_path: agent.mcp_config_path ?? null,
+              installation_paths: [],
+              available: false,
+              matched_path: null,
+            }}
+            savedAgent={agent}
+            displayName={resolveDisplayName(agent.name)}
+          >
+            <AgentProfilesSubList savedAgent={agent} agentName={agent.name} />
+          </InstalledAgentCard>
         ))}
       </div>
     </div>
-  );
-}
-
-/** The install catalogue lives behind a sub-route, never first on the page. */
-function BrowseAgentsLink() {
-  const { t } = useTranslation();
-  return (
-    <Link href={AGENTS_BROWSE_SETTINGS_HREF} className="block" data-testid="browse-agents-link">
-      <Card className="hover:bg-muted/50 transition-colors cursor-pointer">
-        <CardContent className="py-3 flex items-center justify-between">
-          <div>
-            <h4 className="text-sm font-medium">{t("agents:browseAvailableAgents")}</h4>
-            <p className="text-xs text-muted-foreground mt-0.5">
-              {t("agents:availableToInstallDescription")}
-            </p>
-          </div>
-          <IconChevronRight className="h-5 w-5 text-muted-foreground" />
-        </CardContent>
-      </Card>
-    </Link>
   );
 }
 
@@ -305,19 +316,26 @@ export default function AgentsSettingsPage() {
 
   return (
     <div className="space-y-8">
-      <div>
-        <h2 className="text-2xl font-bold">{t("common:agents")}</h2>
-        <p className="text-sm text-muted-foreground mt-1">{t("agents:pageDescription")}</p>
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <h2 className="text-2xl font-bold">{t("common:agents")}</h2>
+          <p className="text-sm text-muted-foreground mt-1">{t("agents:pageDescription")}</p>
+        </div>
+        {/* The page's primary action: everything else on this page manages what
+            is already installed. */}
+        <Button size="sm" className="cursor-pointer" asChild data-testid="install-agents-button">
+          <Link href={AGENTS_BROWSE_SETTINGS_HREF}>
+            <IconDownload className="h-4 w-4 mr-2" />
+            {t("agents:installAgents")}
+          </Link>
+        </Button>
       </div>
-
-      <Separator />
-
-      <AgentProfilesSection savedAgents={savedAgents} />
 
       <Separator />
 
       <InstalledAgentsSection
         installedAgents={installedAgents}
+        savedAgents={savedAgents}
         discoveryLoading={discoveryLoading}
         rescanning={rescanning}
         savedAgentsByName={savedAgentsByName}
@@ -331,10 +349,6 @@ export default function AgentsSettingsPage() {
         setTuiDialogOpen={setTuiDialogOpen}
         handleRescan={handleRescan}
       />
-
-      <Separator />
-
-      <BrowseAgentsLink />
 
       <AddTUIAgentDialog
         open={tuiDialogOpen}

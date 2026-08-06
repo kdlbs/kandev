@@ -128,7 +128,7 @@ function TopbarBreadcrumb({
   const showHomeCrumb = !showBackLink && homeAffordance !== "none";
   const homeCrumbClass = cn("shrink-0", homeAffordance === "phone" && "md:hidden");
   return (
-    <Breadcrumb className="relative z-10 min-w-0" aria-label={t("common:breadcrumb")}>
+    <Breadcrumb className="relative z-10 min-w-0 select-none" aria-label={t("common:breadcrumb")}>
       <BreadcrumbList className="flex-nowrap text-sm">
         {showBackLink && (
           <>

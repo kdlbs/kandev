@@ -15,6 +15,9 @@ const state = {
     ],
   },
   availableAgents: { items: [{ name: "claude", display_name: "Claude Code" }] },
+  settingsAgents: {
+    items: [{ name: "claude", profiles: [{ id: "prof-1", name: "My Profile101" }] }],
+  },
   setActiveWorkspace: vi.fn(),
 };
 
@@ -221,7 +224,7 @@ describe("SettingsLayoutClient breadcrumbs", () => {
     expect(screen.getByText("Default").closest('[aria-current="page"]')).toBeTruthy();
   });
 
-  it("links Agents and titles agent detail pages with the display name", () => {
+  it("links Agents and titles the create page with the display name", () => {
     pathname = "/settings/agents/claude";
 
     const { container } = render(
@@ -237,17 +240,20 @@ describe("SettingsLayoutClient breadcrumbs", () => {
     expect(screen.getByText("Claude Code").closest('[aria-current="page"]')).toBeTruthy();
   });
 
-  it("adds the agent name crumb on profile sub-pages", () => {
-    pathname = "/settings/agents/claude/profiles/123e4567-e89b-12d3-a456-426614174000";
+  it("titles profile pages with the profile name, directly under Agents", () => {
+    pathname = "/settings/agents/claude/profiles/prof-1";
 
-    render(
+    const { container } = render(
       <SettingsLayoutClient>
         <div>Profile editor</div>
       </SettingsLayoutClient>,
     );
 
-    expect(screen.getByRole("link", { name: "Claude Code" }).getAttribute("href")).toBe(
-      "/settings/agents/claude",
+    expect(screen.getByRole("link", { name: "Agents" }).getAttribute("href")).toBe(
+      "/settings/agents",
     );
+    // The saved agent has no page of its own, so no agent-name crumb.
+    expect(container.querySelector('a[href="/settings/agents/claude"]')).toBeNull();
+    expect(screen.getByText("My Profile101").closest('[aria-current="page"]')).toBeTruthy();
   });
 });

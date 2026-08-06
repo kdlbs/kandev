@@ -102,7 +102,6 @@ function deriveCurrentPageLabel(pathname: string, t: (key: string) => string): s
 function deriveParents(
   pathname: string,
   workspaceName: string | null,
-  agentDisplayName: string | null,
 ): Array<{ label: string; href?: string; phoneOnlyLink?: boolean }> {
   const segments = pathname.split("/").filter(Boolean);
   if (segments.length <= 1) return [];
@@ -123,19 +122,17 @@ function deriveParents(
   }
 
   const agentDetail = pathname.match(/^\/settings\/agents\/([^/]+)(\/.+)?$/);
-  if (agentDetail && agentDetail[1] !== "browse") {
+  if (agentDetail) {
+    // No agent-name crumb: saved agents have no page of their own (the route
+    // redirects to the index), so profile and browse pages sit directly under
+    // Agents.
     parents.push({ label: t("common:agents"), href: "/settings/agents" });
-    if (agentDetail[2]) {
-      parents.push({
-        label: agentDisplayName ?? t("settings:agent"),
-        href: `/settings/agents/${agentDetail[1]}`,
-      });
-    }
   }
 
   const automationsMatch = pathname.match(
     /^\/settings\/workspaces\/([^/]+)\/automations(?:\/(.+))?/,
-  );  if (automationsMatch && automationsMatch[2]) {
+  );
+  if (automationsMatch && automationsMatch[2]) {
     // Only inject the Automations crumb when we're on a sub-page (new or
     // edit), not on the listing page itself — the listing page title is
     // already "Automations".
@@ -153,6 +150,7 @@ export function SettingsLayoutClient({ children }: { children: React.ReactNode }
   const pathname = usePathname();
   const workspaces = useAppStore((s) => s.workspaces.items);
   const availableAgents = useAppStore((s) => s.availableAgents.items);
+  const settingsAgents = useAppStore((s) => s.settingsAgents.items);
   const showIntegrationCopyAction = integrationFromPathname(pathname) !== null;
 
   const workspaceDetail = pathname.match(/^\/settings\/workspaces\/([^/]+)(\/.+)?$/);
@@ -161,23 +159,31 @@ export function SettingsLayoutClient({ children }: { children: React.ReactNode }
     ? (workspaces.find((workspace) => workspace.id === detailWorkspaceId)?.name ?? null)
     : null;
 
-  // Agent routes are keyed by agent name; the crumb shows its display name.
+  // Agent routes are keyed by agent name; the create page is titled with the
+  // agent's display name, profile pages with the profile's own name.
   const agentDetail = pathname.match(/^\/settings\/agents\/([^/]+)(\/.+)?$/);
   const detailAgentName =
     agentDetail && agentDetail[1] !== "browse" ? safeDecodePathSegment(agentDetail[1]) : null;
   const agentDisplayName = detailAgentName
     ? (availableAgents.find((agent) => agent.name === detailAgentName)?.display_name ?? null)
     : null;
+  const profileMatch = pathname.match(/^\/settings\/agents\/[^/]+\/profiles\/([^/]+)$/);
+  const profileId = safeDecodePathSegment(profileMatch?.[1]);
+  const profileName = profileId
+    ? (settingsAgents
+        .flatMap((agent) => agent.profiles)
+        .find((profile) => profile.id === profileId)?.name ?? null)
+    : null;
 
   const pageLabel = deriveCurrentPageLabel(pathname, t);
-  // A detail root's own crumb is the workspace/agent name, not the list label.
+  // A detail page's own crumb is the individual's name, not the list label.
   const title =
     workspaceDetail && !workspaceDetail[2] && workspaceName
       ? workspaceName
       : detailAgentName && !agentDetail?.[2]
         ? (agentDisplayName ?? t("settings:agent"))
-        : (pageLabel ?? t("settings:settings"));
-  const parents = deriveParents(pathname, workspaceName, agentDisplayName);
+        : (profileName ?? pageLabel ?? t("settings:settings"));
+  const parents = deriveParents(pathname, workspaceName);
 
   return (
     <SettingsShell
