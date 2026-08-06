@@ -347,6 +347,12 @@ Completed 2026-08-05.
   the effective policy at the generation-allocation seam, so stale task/recovery candidates cannot
   launch or reserve capacity. The regression failed before the guard, then passed 20 repetitions
   under `-race`; the full controller race suite and backend lint pass.
+- The next review found task cleanup could snapshot generation N, race with a successor allocation,
+  then mark generation N+1 off without releasing its capacity slot. Cleanup now enters an exclusive
+  task/language command batch, reloads the current generation and task host after earlier commands,
+  holds every affected lane through the task-host teardown backstop, and only then releases the
+  proven-dead current generation. The synchronized regression failed first, then passed 20 race
+  repetitions with the focused cleanup failure/fallback suite.
 
 ---
 

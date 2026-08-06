@@ -630,6 +630,7 @@ type fakeLSPHost struct {
 	stopCalls          int
 	configurationCalls int
 	lastStart          TaskHostStartRequest
+	lastStop           TaskHostStopRequest
 	lastConfiguration  TaskHostConfigurationRequest
 	snapshots          map[string]RuntimeSnapshot
 	startEntered       chan struct{}
@@ -737,6 +738,7 @@ func (f *fakeLSPHost) StopTaskLSP(_ context.Context, request TaskHostStopRequest
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.stopCalls++
+	f.lastStop = request
 	if f.stopErr != nil {
 		return nil, f.stopErr
 	}

@@ -719,6 +719,26 @@ func (c *commandCoordinator) submit(
 	coalesceKey string,
 	run func(context.Context) (*LanguageSnapshot, error),
 ) (*LanguageSnapshot, error) {
+	return c.submitCommand(ctx, key, action, coalesceKey, true, run)
+}
+
+func (c *commandCoordinator) submitExclusive(
+	ctx context.Context,
+	key TaskLanguageKey,
+	action Action,
+	run func(context.Context) (*LanguageSnapshot, error),
+) (*LanguageSnapshot, error) {
+	return c.submitCommand(ctx, key, action, "", false, run)
+}
+
+func (c *commandCoordinator) submitCommand(
+	ctx context.Context,
+	key TaskLanguageKey,
+	action Action,
+	coalesceKey string,
+	allowCoalesce bool,
+	run func(context.Context) (*LanguageSnapshot, error),
+) (*LanguageSnapshot, error) {
 	c.mu.Lock()
 	if c.lanes == nil {
 		c.lanes = make(map[TaskLanguageKey]*commandLane)
@@ -728,7 +748,10 @@ func (c *commandCoordinator) submit(
 		lane = &commandLane{}
 		c.lanes[key] = lane
 	}
-	batch := coalescibleBatch(lane, action, coalesceKey)
+	var batch *commandBatch
+	if allowCoalesce {
+		batch = coalescibleBatch(lane, action, coalesceKey)
+	}
 	if batch == nil {
 		batch = &commandBatch{
 			action: action, coalesceKey: coalesceKey,
