@@ -228,6 +228,11 @@ func (c *Controller) stopReconciledRuntime(
 		_, _ = c.transition(ctx, state, settings, PhaseError, "task_host_stop_failed", err.Error())
 		return err
 	}
+	c.releaseCapacity(
+		ctx,
+		TaskLanguageKey{TaskID: state.TaskID, Language: state.Language},
+		generation,
+	)
 	_, err = c.updateState(ctx, state.TaskID, state.Language, func(next *TaskLanguageState) {
 		next.Phase = PhaseOff
 		if runtime != nil {
@@ -240,11 +245,6 @@ func (c *Controller) stopReconciledRuntime(
 		next.ErrorCode = ""
 		next.ErrorMessage = ""
 	})
-	c.releaseCapacity(
-		ctx,
-		TaskLanguageKey{TaskID: state.TaskID, Language: state.Language},
-		generation,
-	)
 	return err
 }
 
@@ -256,6 +256,14 @@ func (c *Controller) CleanupTask(ctx context.Context, taskID, reason string) err
 	if err != nil {
 		return err
 	}
+	// Local task-owned work must stop even when the environment record is
+	// temporarily unavailable. Otherwise recovery can relaunch after teardown.
+	for _, state := range states {
+		key := TaskLanguageKey{TaskID: taskID, Language: state.Language}
+		c.cancelRecovery(key)
+		c.cancelWatch(key)
+		c.capacity.CancelQueued(key)
+	}
 	environment, envErr := c.tasks.GetTaskEnvironmentByTaskID(ctx, taskID)
 	if envErr != nil {
 		return envErr
@@ -265,12 +273,6 @@ func (c *Controller) CleanupTask(ctx context.Context, taskID, reason string) err
 	// Remove every queued language for this task before releasing any live
 	// slot, otherwise an earlier release could promote another language that
 	// this same task teardown is about to clean.
-	for _, state := range states {
-		key := TaskLanguageKey{TaskID: taskID, Language: state.Language}
-		c.cancelRecovery(key)
-		c.cancelWatch(key)
-		c.capacity.CancelQueued(key)
-	}
 	for _, state := range states {
 		cleanupErrors = append(cleanupErrors, c.cleanupTaskLanguage(ctx, state, host, hostExists, reason))
 	}
@@ -305,6 +307,7 @@ func (c *Controller) cleanupTaskLanguage(
 			Language: state.Language, Generation: state.Generation, Reason: reason,
 		})
 	}
+	c.releaseCapacity(ctx, TaskLanguageKey{TaskID: state.TaskID, Language: state.Language}, state.Generation)
 	_, updateErr := c.updateState(ctx, state.TaskID, state.Language, func(next *TaskLanguageState) {
 		next.Phase = PhaseOff
 		next.LastAction = ActionReconcile
@@ -314,7 +317,6 @@ func (c *Controller) cleanupTaskLanguage(
 		next.ErrorCode = ""
 		next.ErrorMessage = ""
 	})
-	c.releaseCapacity(ctx, TaskLanguageKey{TaskID: state.TaskID, Language: state.Language}, state.Generation)
 	return errors.Join(stopErr, updateErr)
 }
 
@@ -324,6 +326,24 @@ func runtimeHasProcess(snapshot *RuntimeSnapshot) bool {
 	}
 	switch snapshot.Phase {
 	case PhaseInstalling, PhaseStarting, PhaseProcessStarted, PhaseInitializing, PhaseReady, PhaseStopping:
+		return true
+	default:
+		return false
+	}
+}
+
+func runtimeFailureProvesNoProcess(snapshot *RuntimeSnapshot, generation uint64) bool {
+	if snapshot == nil || snapshot.Generation != generation {
+		return false
+	}
+	if snapshot.Phase == PhaseOff {
+		return true
+	}
+	if snapshot.Phase != PhaseError {
+		return false
+	}
+	switch snapshot.ErrorCode {
+	case "binary_unavailable", errorCodeProcessStartFailed, "start_canceled":
 		return true
 	default:
 		return false

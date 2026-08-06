@@ -170,6 +170,45 @@ func TestHubHandshakeDiagnosticReplayAndNotificationFanout(t *testing.T) {
 	}
 }
 
+func TestHubAttachPublishesHandshakeBeforeConcurrentBroadcast(t *testing.T) {
+	upstream := &recordingFeatureUpstream{}
+	hub, snapshot := newHubForTest(upstream)
+	t.Cleanup(hub.Close)
+	hub.documents.mu.Lock()
+	attached := make(chan *Attachment, 1)
+	go func() { attached <- hub.Attach(snapshot) }()
+	time.Sleep(20 * time.Millisecond)
+
+	registered := make(chan bool, 1)
+	go func() {
+		hub.mu.RLock()
+		registered <- len(hub.attachments) != 0
+		hub.mu.RUnlock()
+	}()
+	wasVisibleBeforeReplay := false
+	select {
+	case wasVisibleBeforeReplay = <-registered:
+	case <-time.After(100 * time.Millisecond):
+	}
+	broadcastDone := make(chan struct{})
+	go func() {
+		hub.Broadcast("window/logMessage", json.RawMessage(`{"type":3,"message":"ready"}`))
+		close(broadcastDone)
+	}()
+	if wasVisibleBeforeReplay {
+		<-broadcastDone
+	}
+	hub.documents.mu.Unlock()
+	attachment := <-attached
+	t.Cleanup(attachment.Close)
+
+	first := readAttachmentMessage(t, attachment)
+	if !rawContains(first, `"status":"attached"`) {
+		t.Fatalf("first attachment message = %s", first)
+	}
+	<-broadcastDone
+}
+
 func TestAttachmentRejectsLifecycleMessagesWithoutClosing(t *testing.T) {
 	upstream := &recordingFeatureUpstream{}
 	hub, snapshot := newHubForTest(upstream)

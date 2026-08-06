@@ -33,6 +33,9 @@ func (c *Controller) RefreshDiscovery(ctx context.Context, taskID string) error 
 // restarting a generation. Dynamic-capable servers update in place; every
 // other live language receives an explicit restart-required overlay.
 func (c *Controller) WorkspaceSourcesChanged(ctx context.Context, taskID string) error {
+	if err := c.authorize(ctx, taskID); err != nil {
+		return err
+	}
 	if _, err := c.tasks.GetTask(ctx, taskID); err != nil {
 		return err
 	}

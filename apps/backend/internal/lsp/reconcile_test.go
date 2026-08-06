@@ -152,6 +152,35 @@ func TestCleanupPreservesPolicyAndStopsEveryTaskLanguage(t *testing.T) {
 	}
 }
 
+func TestCleanupCancelsTaskWorkWhenEnvironmentLookupFails(t *testing.T) {
+	store := newMemoryLSPStore()
+	seedLSPState(t, store, TaskLanguageState{
+		TaskID: "task-1", Language: "go", Policy: PolicyKeepWarm,
+		DetectionState: DetectionComplete, Phase: PhaseQueued, Generation: 1,
+		LastInitiator: InitiatorUser,
+	})
+	tasks := &fakeControllerTasks{environmentErr: errors.New("environment unavailable")}
+	controller := NewController(ControllerConfig{
+		Tasks: tasks, Store: store, Settings: &fakeLSPSettings{}, Runtimes: newReconcileRuntimes(),
+		Capacity: NewCapacity(1), Clock: func() time.Time { return time.Unix(200, 0).UTC() },
+	})
+	key := TaskLanguageKey{TaskID: "task-1", Language: "go"}
+	controller.capacity.Admit(TaskLanguageKey{TaskID: "other", Language: "rust"}, 1, time.Unix(1, 0))
+	controller.capacity.Admit(key, 1, time.Unix(2, 0))
+	timer := &fakeScheduledTimer{}
+	watchCanceled := false
+	controller.recoveries[key] = &recoveryState{timer: timer}
+	controller.watches[key] = func() { watchCanceled = true }
+
+	if err := controller.CleanupTask(context.Background(), "task-1", "task_archived"); err == nil {
+		t.Fatal("cleanup unexpectedly succeeded")
+	}
+	if !timer.Stopped() || !watchCanceled || controller.capacity.Queued() != 0 {
+		t.Fatalf("cleanup cancellation timer=%v watch=%v queued=%d",
+			timer.Stopped(), watchCanceled, controller.capacity.Queued())
+	}
+}
+
 func newReconcileController(store *memoryLSPStore, runtimes *reconcileRuntimes, capacity *Capacity) *Controller {
 	tasks := &fakeControllerTasks{environments: make(map[string]*models.TaskEnvironment)}
 	for _, taskID := range []string{"task-1", "disabled", "live-a", "live-b"} {

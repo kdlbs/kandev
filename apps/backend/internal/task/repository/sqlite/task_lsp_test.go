@@ -219,6 +219,55 @@ func TestTaskLSPGenerationAllocationIsMonotonic(t *testing.T) {
 	}
 }
 
+func TestTaskLSPCASReturnsItsOwnWriteWithoutConcurrentReread(t *testing.T) {
+	repo, db := newTaskLSPTestRepo(t)
+	seedTaskForStatusSummary(t, db, "task-lsp-returning", "workspace-lsp-returning")
+	ctx := context.Background()
+	if _, err := db.Exec(`
+		CREATE TRIGGER task_lsp_after_insert AFTER INSERT ON task_lsp_languages
+		BEGIN
+			UPDATE task_lsp_languages
+			SET revision = revision + 10, error_message = 'after-insert'
+			WHERE task_id = NEW.task_id AND language = NEW.language;
+		END
+	`); err != nil {
+		t.Fatalf("create insert trigger: %v", err)
+	}
+	state := lsp.DefaultTaskLanguageState("task-lsp-returning", "go")
+	inserted, err := repo.CompareAndUpdateTaskLSPLanguage(ctx, state, 0)
+	if err != nil {
+		t.Fatalf("insert state: %v", err)
+	}
+	if inserted.Revision != 1 || inserted.ErrorMessage != "" {
+		t.Fatalf("insert returned a later writer's row: %#v", inserted)
+	}
+	if _, err := db.Exec(`DROP TRIGGER task_lsp_after_insert`); err != nil {
+		t.Fatal(err)
+	}
+	loaded, found, err := repo.GetTaskLSPLanguage(ctx, state.TaskID, state.Language)
+	if err != nil || !found {
+		t.Fatalf("load triggered row: found=%v err=%v", found, err)
+	}
+	if _, err := db.Exec(`
+		CREATE TRIGGER task_lsp_after_update AFTER UPDATE ON task_lsp_languages
+		BEGIN
+			UPDATE task_lsp_languages
+			SET revision = revision + 10, error_message = 'after-update'
+			WHERE task_id = NEW.task_id AND language = NEW.language;
+		END
+	`); err != nil {
+		t.Fatalf("create update trigger: %v", err)
+	}
+	loaded.ErrorMessage = "caller-write"
+	updated, err := repo.CompareAndUpdateTaskLSPLanguage(ctx, *loaded, loaded.Revision)
+	if err != nil {
+		t.Fatalf("update state: %v", err)
+	}
+	if updated.Revision != loaded.Revision+1 || updated.ErrorMessage != "caller-write" {
+		t.Fatalf("update returned a later writer's row: %#v", updated)
+	}
+}
+
 func newTaskLSPTestRepo(t *testing.T) (*Repository, *sqlx.DB) {
 	t.Helper()
 	dbPath := filepath.Join(t.TempDir(), "task-lsp-repository.db")

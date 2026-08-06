@@ -189,6 +189,9 @@ func (c *Controller) observeRuntimeSnapshot(
 	if runtime.Generation < state.Generation {
 		return nil
 	}
+	if runtime.Phase == PhaseOff {
+		c.releaseCapacity(ctx, key, runtime.Generation)
+	}
 	stored, err := c.adoptRuntime(ctx, *state, runtime)
 	if err != nil {
 		return err
@@ -314,8 +317,9 @@ func (c *Controller) scheduleReadyReset(key TaskLanguageKey, generation uint64) 
 	if scheduler == nil {
 		scheduler = realScheduler{}
 	}
+	lifecycleCtx := c.lifecycleCtx
 	recovery.readyTimer = scheduler.AfterFunc(readyRecoveryReset, func() {
-		state, _, err := c.store.GetTaskLSPLanguage(context.Background(), key.TaskID, key.Language)
+		state, _, err := c.store.GetTaskLSPLanguage(lifecycleCtx, key.TaskID, key.Language)
 		c.lifecycleMu.Lock()
 		defer c.lifecycleMu.Unlock()
 		current := c.recoveries[key]

@@ -106,3 +106,9 @@ TDD and verification evidence:
 Actual files added: `server/lsp/{attachment,hub,documents}.go` and hub/document tests. Actual files
 updated: peer raw-call/cancellation support, runtime fanout/hub ownership, manager generation-bound
 Attach, task-host WebSocket attach route/tests, this task, and parent plan.
+
+PR remediation on 2026-08-06 added an atomic attachment publication barrier: handshake and cached
+diagnostics are queued before an attachment becomes visible to live fanout. The document broker now
+tracks each attachment's own text baseline, applies incremental ranges against that baseline, and
+sends a full canonical replacement upstream, so a divergent duplicate open cannot corrupt ranges.
+Focused hub/document tests and the task-host race suite pass.

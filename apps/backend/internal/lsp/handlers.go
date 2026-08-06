@@ -7,7 +7,6 @@ import (
 	"errors"
 	"io"
 	"net/http"
-	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
@@ -136,7 +135,7 @@ func writeHTTPResult(c *gin.Context, value any, err error) {
 		status, message = http.StatusConflict, err.Error()
 	case errors.Is(err, ErrTaskNotReady), errors.Is(err, ErrExecutorUnsupported):
 		status, message = http.StatusUnprocessableEntity, err.Error()
-	case errors.Is(err, repoerrors.ErrTaskNotFound), strings.Contains(strings.ToLower(err.Error()), "not found"):
+	case errors.Is(err, repoerrors.ErrTaskNotFound):
 		status, message = http.StatusNotFound, "task not found"
 	}
 	c.JSON(status, gin.H{string(PhaseError): message})

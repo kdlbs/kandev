@@ -107,3 +107,11 @@ Completed 2026-08-05.
   - `go test -race ./internal/lsp/... ./internal/gateway/websocket -run 'Test(LSP|Lsp)'`
   - `go test ./internal/lsp/... -run 'Test(Concurrent|Capacity|Authorization|Policy)' -count=20`
   - `go test ./internal/lsp/... ./internal/agentctl/server/... ./internal/agent/runtime/agentctl ./internal/agent/runtime/lifecycle ./internal/gateway/websocket ./internal/backendapp`
+
+PR remediation on 2026-08-06 added task-host failure-snapshot propagation and releases capacity
+only when generation-scoped evidence proves no process was created. A successful Stop releases its
+slot and watch even if the following durable write fails. Capacity snapshots now include a backend
+epoch and monotonic revision in both REST and language events. Workspace-source reconciliation has
+an explicit authorization guard; HTTP and attachment 404s require the typed task-not-found error;
+the attachment proxy uses joined ping/read-deadline keepalive. Focused controller, client, gateway,
+SQLite, lint, and race checks pass.

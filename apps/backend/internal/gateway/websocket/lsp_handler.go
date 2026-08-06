@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"net/http"
-	"strings"
 	"sync"
 	"time"
 
@@ -15,11 +14,14 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 	sharedlsp "github.com/kandev/kandev/internal/lsp"
 	"github.com/kandev/kandev/internal/lsp/protocol"
+	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 )
 
 const (
 	lspCloseStreamError  = 4006
 	lspProxyWriteTimeout = 10 * time.Second
+	lspProxyIdleTimeout  = 90 * time.Second
+	lspProxyPingInterval = 30 * time.Second
 	lspErrorResponseKey  = "error"
 )
 
@@ -96,7 +98,7 @@ func lspAttachmentHTTPStatus(err error) int {
 		return http.StatusBadRequest
 	case errors.Is(err, sharedlsp.ErrAttachmentNotReady), errors.Is(err, sharedlsp.ErrServerDisabled):
 		return http.StatusConflict
-	case strings.Contains(strings.ToLower(err.Error()), "not found"):
+	case errors.Is(err, repoerrors.ErrTaskNotFound):
 		return http.StatusNotFound
 	default:
 		return http.StatusInternalServerError
@@ -114,6 +116,37 @@ func (h *LSPHandler) proxyLSPConnections(
 			_ = upstreamConn.Close()
 		})
 	}
+	if err := configureLSPReadKeepalive(browserConn); err != nil {
+		closeBoth()
+		return
+	}
+	if err := configureLSPReadKeepalive(upstreamConn); err != nil {
+		closeBoth()
+		return
+	}
+	stopPings := make(chan struct{})
+	pingsDone := make(chan struct{})
+	go func() {
+		defer close(pingsDone)
+		ticker := time.NewTicker(lspProxyPingInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				deadline := time.Now().Add(lspProxyWriteTimeout)
+				if err := browserConn.WriteControl(gorillaws.PingMessage, nil, deadline); err != nil {
+					closeBoth()
+					return
+				}
+				if err := upstreamConn.WriteControl(gorillaws.PingMessage, nil, deadline); err != nil {
+					closeBoth()
+					return
+				}
+			case <-stopPings:
+				return
+			}
+		}
+	}()
 	done := make(chan struct{}, 2)
 	go func() {
 		h.copyLSPMessages("taskhost->browser", upstreamConn, browserConn, taskID, language)
@@ -124,9 +157,21 @@ func (h *LSPHandler) proxyLSPConnections(
 		done <- struct{}{}
 	}()
 	<-done
+	close(stopPings)
 	closeBoth()
 	<-done
+	<-pingsDone
 	h.logger.Info("LSP attachment closed", zap.String("task_id", taskID), zap.String("language", language))
+}
+
+func configureLSPReadKeepalive(conn *gorillaws.Conn) error {
+	if err := conn.SetReadDeadline(time.Now().Add(lspProxyIdleTimeout)); err != nil {
+		return err
+	}
+	conn.SetPongHandler(func(string) error {
+		return conn.SetReadDeadline(time.Now().Add(lspProxyIdleTimeout))
+	})
+	return nil
 }
 
 func (h *LSPHandler) copyLSPMessages(

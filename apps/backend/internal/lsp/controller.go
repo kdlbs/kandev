@@ -24,6 +24,8 @@ var (
 	ErrAttachmentNotReady  = errors.New("task language server attachment is not ready")
 )
 
+const errorCodeProcessStartFailed = "process_start_failed"
+
 type Origin struct {
 	Initiator Initiator
 	Reason    string
@@ -81,6 +83,7 @@ type LanguageSnapshot struct {
 	Activity          Activity           `json:"activity"`
 	Progress          []WorkItem         `json:"progress"`
 	LastCompletedWork *CompletedWorkItem `json:"last_completed_work,omitempty"`
+	Capacity          CapacitySnapshot   `json:"capacity"`
 }
 
 type TaskSnapshot struct {
@@ -90,9 +93,11 @@ type TaskSnapshot struct {
 }
 
 type CapacitySnapshot struct {
-	Active int `json:"active"`
-	Queued int `json:"queued"`
-	Limit  int `json:"limit"`
+	Active   int    `json:"active"`
+	Queued   int    `json:"queued"`
+	Limit    int    `json:"limit"`
+	Epoch    string `json:"epoch"`
+	Revision uint64 `json:"revision"`
 }
 
 type AttachmentTarget struct {
@@ -188,9 +193,7 @@ func (c *Controller) Snapshot(ctx context.Context, taskID string) (*TaskSnapshot
 	result := &TaskSnapshot{
 		TaskID:    taskID,
 		Languages: make([]LanguageSnapshot, 0, len(languages)),
-		Capacity: CapacitySnapshot{
-			Active: c.capacity.Active(), Queued: c.capacity.Queued(), Limit: c.capacity.Limit(),
-		},
+		Capacity:  c.capacity.Snapshot(),
 	}
 	for _, language := range languages {
 		state, ok := byLanguage[language]
@@ -485,8 +488,11 @@ func (c *Controller) launchReserved(
 		runtimeSnapshot, err = host.StartTaskLSP(ctx, request)
 	}
 	if err != nil {
-		// A task-host transport error can be ambiguous. Keep capacity until a
-		// later snapshot/reconciliation proves the process tree is gone.
+		// Transport failures remain ambiguous unless the task host returned
+		// generation-scoped evidence that no process was created.
+		if runtimeFailureProvesNoProcess(runtimeSnapshot, state.Generation) {
+			c.releaseCapacity(ctx, key, state.Generation)
+		}
 		if runtimeSnapshot != nil {
 			persisted, persistErr := c.persistRuntime(ctx, state, *runtimeSnapshot)
 			if persistErr == nil {
@@ -579,12 +585,12 @@ func (c *Controller) stopRuntime(
 	if err != nil {
 		return c.transition(ctx, state, settings, PhaseError, "task_host_stop_failed", err.Error())
 	}
+	c.releaseCapacity(ctx, key, state.Generation)
+	c.cancelWatch(key)
 	stored, err := c.persistRuntime(ctx, state, *runtimeSnapshot)
 	if err != nil {
 		return nil, err
 	}
-	c.releaseCapacity(ctx, key, state.Generation)
-	c.cancelWatch(key)
 	snapshot := c.languageSnapshot(*stored, settings, runtimeSnapshot)
 	return &snapshot, nil
 }
@@ -674,6 +680,7 @@ func (c *Controller) languageSnapshot(
 		EffectivePolicy:   effectivePolicy(state, settings),
 		Activity:          ActivityIdle,
 		Progress:          []WorkItem{},
+		Capacity:          c.capacity.Snapshot(),
 	}
 	if runtime != nil && runtime.Generation == state.Generation {
 		snapshot.Activity = runtime.Activity

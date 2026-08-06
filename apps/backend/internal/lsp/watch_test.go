@@ -171,6 +171,38 @@ func TestReconcilerCloseJoinsWatchersAndStopsTimers(t *testing.T) {
 	}
 }
 
+func TestStoppedReadyTimerUsesCanceledLifecycleContext(t *testing.T) {
+	store := newMemoryLSPStore()
+	seedLSPState(t, store, TaskLanguageState{
+		TaskID: "task-1", Language: "go", Policy: PolicyKeepWarm,
+		DetectionState: DetectionComplete, Phase: PhaseReady, Generation: 1,
+		LastInitiator: InitiatorAutomatic,
+	})
+	scheduler := newFakeScheduler()
+	controller := newReconcileControllerWithScheduler(store, newReconcileRuntimes(), scheduler)
+	lifecycleCtx, cancel := context.WithCancel(context.Background())
+	controller.lifecycleCtx = lifecycleCtx
+	controller.lifecycleCancel = cancel
+	key := TaskLanguageKey{TaskID: "task-1", Language: "go"}
+	controller.scheduleReadyReset(key, 1)
+	timer := scheduler.next(t)
+	observed := make(chan error, 1)
+	store.getContextHook = func(ctx context.Context) { observed <- ctx.Err() }
+
+	if err := controller.Close(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	timer.ForceFire()
+	select {
+	case err := <-observed:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("ready-reset context error = %v, want canceled", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("stopped ready timer callback did not complete")
+	}
+}
+
 func newReconcileControllerWithScheduler(
 	store *memoryLSPStore,
 	runtimes *reconcileRuntimes,
@@ -252,6 +284,13 @@ func (t *fakeScheduledTimer) Fire() {
 		return
 	}
 	t.fired = true
+	callback := t.callback
+	t.mu.Unlock()
+	callback()
+}
+
+func (t *fakeScheduledTimer) ForceFire() {
+	t.mu.Lock()
 	callback := t.callback
 	t.mu.Unlock()
 	callback()

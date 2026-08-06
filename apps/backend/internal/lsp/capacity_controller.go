@@ -48,8 +48,8 @@ func (c *Controller) promoteCapacityEntry(
 		return c.failCapacityPromotion(ctx, *state, settings, "task_lookup_failed", err)
 	}
 	if task.ArchivedAt != nil {
-		snapshot, transitionErr := c.transition(ctx, *state, settings, PhaseWaitingForTask, "", "")
 		c.releaseCapacity(ctx, entry.Key, entry.Generation)
+		snapshot, transitionErr := c.transition(ctx, *state, settings, PhaseWaitingForTask, "", "")
 		return snapshot, transitionErr
 	}
 	environment, err := c.tasks.GetTaskEnvironmentByTaskID(ctx, entry.Key.TaskID)
@@ -57,15 +57,15 @@ func (c *Controller) promoteCapacityEntry(
 		return c.failCapacityPromotion(ctx, *state, settings, "task_environment_unavailable", err)
 	}
 	if !readyTaskEnvironment(environment) {
-		snapshot, transitionErr := c.transition(ctx, *state, settings, PhaseWaitingForTask, "", "")
 		c.releaseCapacity(ctx, entry.Key, entry.Generation)
+		snapshot, transitionErr := c.transition(ctx, *state, settings, PhaseWaitingForTask, "", "")
 		return snapshot, transitionErr
 	}
 	if !ExecutorSupportsLSP(environment.ExecutorType) {
+		c.releaseCapacity(ctx, entry.Key, entry.Generation)
 		snapshot, transitionErr := c.transition(
 			ctx, *state, settings, PhaseUnsupported, "unsupported_executor", "",
 		)
-		c.releaseCapacity(ctx, entry.Key, entry.Generation)
 		return snapshot, transitionErr
 	}
 	return c.launchReserved(ctx, *state, settings, environment, state.LastAction)
@@ -78,9 +78,9 @@ func (c *Controller) failCapacityPromotion(
 	errorCode string,
 	cause error,
 ) (*LanguageSnapshot, error) {
+	c.releaseCapacity(ctx, TaskLanguageKey{TaskID: state.TaskID, Language: state.Language}, state.Generation)
 	snapshot, transitionErr := c.transition(
 		ctx, state, settings, PhaseError, errorCode, cause.Error(),
 	)
-	c.releaseCapacity(ctx, TaskLanguageKey{TaskID: state.TaskID, Language: state.Language}, state.Generation)
 	return snapshot, errors.Join(cause, transitionErr)
 }

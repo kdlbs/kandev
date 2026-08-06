@@ -28,6 +28,22 @@ function mergeLanguage(
   languages[incoming.language] = incoming;
 }
 
+function mergeCapacity(task: TaskLspTaskState, incoming: TaskLspCapacity): void {
+  const currentEpoch = task.capacity.epoch;
+  if (currentEpoch && !incoming.epoch) return;
+  if (!currentEpoch && incoming.epoch) {
+    task.capacity = incoming;
+    return;
+  }
+  if (currentEpoch && incoming.epoch && currentEpoch !== incoming.epoch) {
+    if (currentEpoch > incoming.epoch) return;
+    task.capacity = incoming;
+    return;
+  }
+  if ((task.capacity.revision ?? 0) > (incoming.revision ?? 0)) return;
+  task.capacity = incoming;
+}
+
 export const createLspSlice: StateCreator<AppState, [["zustand/immer", never]], [], LspSlice> = (
   set,
 ) => ({
@@ -36,7 +52,7 @@ export const createLspSlice: StateCreator<AppState, [["zustand/immer", never]], 
     set((draft) => {
       const task = draft.taskLsp.byTaskId[snapshot.task_id] ?? emptyTaskState();
       for (const language of snapshot.languages) mergeLanguage(task.languages, language);
-      task.capacity = snapshot.capacity;
+      mergeCapacity(task, snapshot.capacity);
       task.loaded = true;
       task.loading = false;
       task.error = null;
@@ -46,6 +62,7 @@ export const createLspSlice: StateCreator<AppState, [["zustand/immer", never]], 
     set((draft) => {
       const task = draft.taskLsp.byTaskId[snapshot.task_id] ?? emptyTaskState();
       mergeLanguage(task.languages, snapshot);
+      if (snapshot.capacity) mergeCapacity(task, snapshot.capacity);
       draft.taskLsp.byTaskId[snapshot.task_id] = task;
     }),
   setTaskLspLoading: (taskId, loading) =>

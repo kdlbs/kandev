@@ -1213,9 +1213,6 @@ func (e *Executor) finalizeLaunch(ctx context.Context, task *v1.Task, session *m
 		return nil, err
 	}
 	e.persistWorktreeAssociation(ctx, task.ID, session, repoInfo.RepositoryID, resp)
-	if e.onTaskEnvironmentReady != nil {
-		e.onTaskEnvironmentReady(context.WithoutCancel(ctx), task.ID)
-	}
 
 	sessionState := v1.TaskSessionStateCreated
 	if startAgent {
@@ -1254,6 +1251,9 @@ func (e *Executor) finalizeLaunch(ctx context.Context, task *v1.Task, session *m
 				zap.String("session_id", sessionID),
 				zap.Error(err))
 		}
+	}
+	if e.onTaskEnvironmentReady != nil {
+		e.onTaskEnvironmentReady(context.WithoutCancel(ctx), task.ID)
 	}
 
 	e.logger.Info("agent launched for prepared session",

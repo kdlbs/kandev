@@ -295,6 +295,14 @@ Completed 2026-08-05.
   `origin/main` filesystem-fixture failures in task handlers/service; isolated task cleanup and every
   changed backend package passed. Unchanged CLI release-workflow and review-workflow contract tests
   also expose two base-branch assertion mismatches and are recorded without expanding this feature.
+- PR feedback remediation on 2026-08-06 closed lifecycle races around agent-start ordering,
+  proven-no-process capacity release, task teardown cancellation, attachment replay/document
+  baselines, replacement retry, WebSocket keepalive, atomic persistence returns, typed errors, and
+  frontend capacity ordering. Capacity snapshots now carry a process epoch plus monotonic sequence,
+  so delayed REST responses cannot overwrite newer WebSocket evidence across backend restarts.
+  Focused changed-package tests, frontend typecheck/tests, backend lint, and the LSP/controller/
+  gateway race suite passed. The broad backend target reproduced only the already-recorded unchanged
+  local filesystem-fixture failures in task handlers/service; every changed package passed.
 
 ---
 

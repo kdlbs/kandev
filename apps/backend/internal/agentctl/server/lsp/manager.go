@@ -192,14 +192,18 @@ func (m *Manager) start(request StartRequest) (Snapshot, error) {
 	if request.Generation == slot.lastGeneration {
 		return m.Snapshot(request.Language), nil
 	}
-	slot.lastGeneration = request.Generation
 	if slot.runtime != nil {
 		m.publishPhase(request.Language, slot.runtime.generation, sharedlsp.PhaseStopping)
 		if err := m.stopRuntime(context.Background(), slot.runtime); err != nil {
-			return m.publishError(request.Language, request.Generation, "replacement_cleanup_failed", err), err
+			return m.publishError(
+				request.Language, slot.runtime.generation, "replacement_cleanup_failed", err,
+			), err
 		}
 		slot.runtime = nil
 	}
+	// Accept the replacement generation only after the previous process tree
+	// is proven gone. A failed cleanup remains retryable with the same request.
+	slot.lastGeneration = request.Generation
 
 	workspace := m.configSnapshot()
 	m.publishForGeneration(request.Language, request.Generation, func(snapshot *Snapshot) {

@@ -98,3 +98,29 @@ func TestCapacityAdoptsAlreadyRunningServersAboveConfiguredLimit(t *testing.T) {
 		t.Fatalf("adopted active=%d queued=%d", capacity.Active(), capacity.Queued())
 	}
 }
+
+func TestCapacitySnapshotRevisionOrdersCountChanges(t *testing.T) {
+	capacity := NewCapacity(1)
+	active := TaskLanguageKey{TaskID: "task-1", Language: "go"}
+	queued := TaskLanguageKey{TaskID: "task-2", Language: "kotlin"}
+	initial := capacity.Snapshot()
+	if initial.Epoch == "" || initial.Revision != 0 || initial.Active != 0 {
+		t.Fatalf("initial snapshot = %#v", initial)
+	}
+	capacity.Admit(active, 1, time.Unix(1, 0))
+	first := capacity.Snapshot()
+	capacity.Admit(active, 1, time.Unix(2, 0))
+	if duplicate := capacity.Snapshot(); duplicate.Epoch != initial.Epoch || duplicate.Revision != first.Revision {
+		t.Fatalf("idempotent admission advanced revision: before=%#v after=%#v", first, duplicate)
+	}
+	capacity.Admit(queued, 1, time.Unix(3, 0))
+	queuedSnapshot := capacity.Snapshot()
+	if queuedSnapshot.Revision <= first.Revision || queuedSnapshot.Queued != 1 {
+		t.Fatalf("queued snapshot = %#v, first=%#v", queuedSnapshot, first)
+	}
+	capacity.CancelQueued(queued)
+	canceled := capacity.Snapshot()
+	if canceled.Revision <= queuedSnapshot.Revision || canceled.Queued != 0 {
+		t.Fatalf("canceled snapshot = %#v, queued=%#v", canceled, queuedSnapshot)
+	}
+}

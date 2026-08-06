@@ -461,6 +461,62 @@ func TestCapacityReleaseStartsQueuedAcceptedGeneration(t *testing.T) {
 	}
 }
 
+func TestProvenStartFailureReleasesCapacity(t *testing.T) {
+	tasks := &fakeControllerTasks{environments: map[string]*models.TaskEnvironment{
+		"failed": readyEnvironment("failed", "local_pc"),
+		"next":   readyEnvironment("next", "local_pc"),
+	}}
+	store := newMemoryLSPStore()
+	host := newFakeLSPHost()
+	host.startErr = errors.New("process did not start")
+	host.startErrorSnapshot = &RuntimeSnapshot{Phase: PhaseError, ErrorCode: errorCodeProcessStartFailed}
+	controller := newTestController(tasks, store, &fakeLSPSettings{}, &fakeLSPRuntimes{host: host})
+	controller.capacity = NewCapacity(1)
+	origin := Origin{Initiator: InitiatorUser, Reason: "user_control"}
+
+	if _, err := controller.Start(context.Background(), "failed", "go", origin); err != nil {
+		t.Fatalf("failed start: %v", err)
+	}
+	if active := controller.capacity.Active(); active != 0 {
+		t.Fatalf("capacity active after proven process-start failure = %d, want 0", active)
+	}
+	host.mu.Lock()
+	host.startErr = nil
+	host.startErrorSnapshot = nil
+	host.mu.Unlock()
+	next, err := controller.Start(context.Background(), "next", "kotlin", origin)
+	if err != nil {
+		t.Fatalf("next start: %v", err)
+	}
+	if next.Phase != PhaseReady {
+		t.Fatalf("next phase = %q, want ready", next.Phase)
+	}
+}
+
+func TestSuccessfulStopReleasesCapacityWhenPersistenceFails(t *testing.T) {
+	store := newMemoryLSPStore()
+	host := newFakeLSPHost()
+	controller := newTestController(
+		&fakeControllerTasks{}, store, &fakeLSPSettings{}, &fakeLSPRuntimes{host: host},
+	)
+	controller.capacity = NewCapacity(1)
+	origin := Origin{Initiator: InitiatorUser, Reason: "user_control"}
+	if _, err := controller.Start(context.Background(), "task-1", "go", origin); err != nil {
+		t.Fatal(err)
+	}
+
+	store.mu.Lock()
+	store.compareErrAt = store.compareCalls + 2 // mark stopping succeeds; runtime persistence fails.
+	store.compareErr = errors.New("persistence unavailable")
+	store.mu.Unlock()
+	if _, err := controller.Stop(context.Background(), "task-1", "go", origin); err == nil {
+		t.Fatal("stop unexpectedly succeeded")
+	}
+	if active := controller.capacity.Active(); active != 0 {
+		t.Fatalf("capacity active after successful task-host stop = %d, want 0", active)
+	}
+}
+
 func TestConcurrentDuplicateStartCoalescesOneGeneration(t *testing.T) {
 	store := newMemoryLSPStore()
 	host := newFakeLSPHost()
@@ -530,10 +586,11 @@ func languageFromSnapshot(t *testing.T, snapshot *TaskSnapshot, language string)
 }
 
 type fakeControllerTasks struct {
-	mu           sync.Mutex
-	authErr      error
-	calls        []string
-	environments map[string]*models.TaskEnvironment
+	mu             sync.Mutex
+	authErr        error
+	environmentErr error
+	calls          []string
+	environments   map[string]*models.TaskEnvironment
 }
 
 func (f *fakeControllerTasks) AuthorizeTaskAccess(_ context.Context, taskID string) error {
@@ -548,6 +605,9 @@ func (f *fakeControllerTasks) GetTask(_ context.Context, taskID string) (*models
 
 func (f *fakeControllerTasks) GetTaskEnvironmentByTaskID(_ context.Context, taskID string) (*models.TaskEnvironment, error) {
 	f.record("environment:" + taskID)
+	if f.environmentErr != nil {
+		return nil, f.environmentErr
+	}
 	if f.environments != nil {
 		return f.environments[taskID], nil
 	}
@@ -661,6 +721,7 @@ type fakeLSPHost struct {
 	startEntered       chan struct{}
 	startRelease       chan struct{}
 	startErr           error
+	startErrorSnapshot *RuntimeSnapshot
 	discovery          *DiscoveryResult
 	discoveryErr       error
 	discoveries        int
@@ -717,14 +778,21 @@ func (f *fakeLSPHost) StartTaskLSP(_ context.Context, request TaskHostStartReque
 	}
 	f.mu.Lock()
 	startErr := f.startErr
+	startErrorSnapshot := f.startErrorSnapshot
 	if startErr != nil {
 		f.snapshots[request.Language] = RuntimeSnapshot{
 			Language: request.Language, Generation: request.Generation,
-			Phase: PhaseError, ErrorCode: "process_start_failed", ErrorMessage: startErr.Error(),
+			Phase: PhaseError, ErrorCode: errorCodeProcessStartFailed, ErrorMessage: startErr.Error(),
 		}
 	}
 	f.mu.Unlock()
 	if startErr != nil {
+		if startErrorSnapshot != nil {
+			snapshot := *startErrorSnapshot
+			snapshot.Language = request.Language
+			snapshot.Generation = request.Generation
+			return &snapshot, startErr
+		}
 		return nil, startErr
 	}
 	return f.setReady(request.Language, request.Generation), nil
