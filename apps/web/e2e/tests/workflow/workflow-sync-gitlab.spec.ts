@@ -79,17 +79,31 @@ test.describe("GitLab workflow sync", () => {
     await expect
       .poll(
         async () => {
-          cardTestId = await testPage
-            .locator('[data-testid^="workflow-card-"]')
-            .evaluateAll((elements, targetName) => {
-              for (const element of elements) {
-                const input = element.querySelector("input");
-                if (input && (input as HTMLInputElement).value === targetName) {
-                  return element.getAttribute("data-testid");
+          try {
+            cardTestId = await testPage
+              .locator('[data-testid^="workflow-card-"]')
+              .evaluateAll((elements, targetName) => {
+                for (const element of elements) {
+                  const input = element.querySelector("input");
+                  if (input && (input as HTMLInputElement).value === targetName) {
+                    return element.getAttribute("data-testid");
+                  }
                 }
-              }
+                return null;
+              }, "GitLab Synced Workflow");
+          } catch (err) {
+            // expect.poll does not retry on a thrown exception, only on a
+            // value mismatch — so a transient "Execution context was
+            // destroyed" (the reload's own document swap still settling,
+            // which addWorkflowButton above can observe a moment before
+            // evaluateAll's very next call does) must be swallowed here as
+            // "not found yet" rather than aborting the whole poll on its
+            // first tick. Any other error is a real failure and propagates.
+            if (err instanceof Error && err.message.includes("Execution context was destroyed")) {
               return null;
-            }, "GitLab Synced Workflow");
+            }
+            throw err;
+          }
           return cardTestId;
         },
         { message: "waiting for the synced workflow card to render", timeout: 15_000 },
