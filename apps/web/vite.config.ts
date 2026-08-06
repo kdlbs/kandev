@@ -7,6 +7,9 @@ export default defineConfig({
   server: {
     port: readPort(process.env.PORT),
     strictPort: Boolean(process.env.PORT),
+    // Dev instances run side-by-side with a primary and are reached via LAN
+    // hostnames (e.g. ubu4.in.fiere.fr) — bypass the default host allowlist.
+    allowedHosts: true,
   },
   preview: {
     port: readPort(process.env.PORT),
