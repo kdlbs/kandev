@@ -505,6 +505,34 @@ func TestProjectorClearsPendingWhenRequestMessageResolves(t *testing.T) {
 			wantArmed: "clarification",
 			status:    "answered",
 		},
+		{
+			name:        "permission rejected",
+			messageType: "permission_request",
+			arm: func(t *testing.T, eventBus *bus.MemoryEventBus, taskID, sessionID string) {
+				publishProjectorEvent(t, eventBus, events.PermissionRequestReceived, events.BuildPermissionRequestSubject(sessionID), map[string]interface{}{
+					"task_id":    taskID,
+					"session_id": sessionID,
+				})
+			},
+			wantArmed: "permission",
+			status:    "rejected",
+		},
+		{
+			name:        "clarification cancelled",
+			messageType: "clarification_request",
+			arm: func(t *testing.T, eventBus *bus.MemoryEventBus, taskID, sessionID string) {
+				publishProjectorEvent(t, eventBus, events.MessageAdded, events.MessageAdded, map[string]interface{}{
+					"task_id":        taskID,
+					"session_id":     sessionID,
+					"author_type":    "user",
+					"type":           "clarification_request",
+					"requests_input": true,
+					"metadata":       map[string]interface{}{"status": "pending", "pending_id": "pending-1"},
+				})
+			},
+			wantArmed: "clarification",
+			status:    "cancelled",
+		},
 	}
 
 	for i, tc := range cases {
