@@ -591,6 +591,12 @@ type Service struct {
 	// The spec allows at most one in-flight steer per session; a second attempt
 	// while one is outstanding queues instead. Keyed by sessionID, cleared when
 	// the steer dispatch is accepted or fails.
+	//
+	// Also read by the non-cancelling queue-drain paths (see isSteerInFlight):
+	// SteerTask releases the per-session message-queue admission lock before
+	// its own blocking dispatch, so a message queued in that window — with the
+	// turn completing in the same window — must not let an ordinary drain
+	// dispatch it ahead of the steer that was admitted first.
 	steerInFlight sync.Map
 	// Session reset flags: sessionID -> true while resetAgentContext is restarting process.
 	// Used to suppress stale ready events and avoid draining queued prompts mid-reset.

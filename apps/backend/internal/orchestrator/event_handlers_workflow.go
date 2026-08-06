@@ -1456,9 +1456,12 @@ func (s *Service) drainQueuedMessageForPromptableSession(ctx context.Context, se
 // Backs off without taking anything when isQueuedDispatchInFlight reports
 // a different dispatch already handed off for this session — see the
 // Service.dispatchingQueued field doc comment for the double-dispatch
-// window this closes.
+// window this closes. Also backs off while isSteerInFlight reports an
+// admitted-but-not-yet-dispatched steer for this session — see steerInFlight's
+// field doc comment for the ordering gap this closes.
 func (s *Service) drainQueuedMessageForPromptableSessionLocked(ctx context.Context, sessionID string) bool {
-	if s.messageQueue == nil || s.isCancelInFlight(sessionID) || s.isQueuedDispatchInFlight(sessionID) {
+	if s.messageQueue == nil || s.isCancelInFlight(sessionID) ||
+		s.isQueuedDispatchInFlight(sessionID) || s.isSteerInFlight(sessionID) {
 		return false
 	}
 	queuedMsg, ok := s.messageQueue.ReserveQueued(ctx, sessionID)
