@@ -310,6 +310,11 @@ Completed 2026-08-05.
   their focused tests, the full controller package under `-race`, and backend lint pass. The
   production E2E assertion now matches the canonical full-text upstream `didChange` contract; its
   focused scenario passed, and the retry-only status-placement case passed four retry-free runs.
+- The next Codex review found a task-host hard deadline that contradicted the accepted no-timeout
+  initialization contract. The `initialize` request now uses the owned runtime lifetime context,
+  so only explicit Stop, task-host shutdown, process exit, or environment teardown cancels it; the
+  one-minute UI warning remains informational. Stop during an unanswered `initialize` bypasses the
+  unavailable graceful-shutdown exchange, closes the protocol streams, and reaps the process tree.
 
 ---
 
