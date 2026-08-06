@@ -220,6 +220,11 @@ function InsightFooterButtons({
  * Leaving: swapping the sidebar back while the main panel stayed on a settings
  * page left the two disagreeing — kanban navigation beside an open settings
  * page, with no route back to the tree except the gear that had just closed it.
+ *
+ * Either way the swap waits for the navigation to commit. A settings page with
+ * unsaved edits blocks the push, and "Continue editing" cancels it: toggling
+ * regardless left the URL in Settings with the sidebar already back on kanban
+ * navigation — the same disagreement, reached from the other side.
  */
 function useSettingsGearToggle(
   settingsMode: boolean,
@@ -231,8 +236,14 @@ function useSettingsGearToggle(
 
   return () => {
     const onSettingsRoute = isSettingsRoute(pathname);
-    if (!settingsMode && !onSettingsRoute) router.push("/settings");
-    if (settingsMode && onSettingsRoute) router.push(workspaceHomeHref(activeWorkspace));
+    if (!settingsMode && !onSettingsRoute) {
+      router.push("/settings", { onNavigated: onToggleSettingsMode });
+      return;
+    }
+    if (settingsMode && onSettingsRoute) {
+      router.push(workspaceHomeHref(activeWorkspace), { onNavigated: onToggleSettingsMode });
+      return;
+    }
     onToggleSettingsMode();
   };
 }

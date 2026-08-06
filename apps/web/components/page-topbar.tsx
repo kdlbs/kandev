@@ -29,9 +29,11 @@ type PageTopbarProps = {
   /**
    * Optional middle crumbs inserted between the back link and the title — use
    * for nested sections (e.g. Home > Settings > Automations > New). When
-   * omitted the breadcrumb is two segments wide.
+   * omitted the breadcrumb is two segments wide. `phoneOnlyLink` keeps the crumb
+   * clickable below `md` but renders static text on desktop — for a crumb whose
+   * target only resolves to somewhere new on a phone.
    */
-  parents?: Array<{ label: string; href: string }>;
+  parents?: Array<{ label: string; href: string; phoneOnlyLink?: boolean }>;
   /** Optional content rendered before the breadcrumb */
   leading?: ReactNode;
   /** Optional content rendered at the visual center of the topbar */
@@ -59,6 +61,37 @@ type PageTopbarProps = {
   /** Optional `data-testid` on the header element. */
   testId?: string;
 };
+
+// A middle crumb. `phoneOnlyLink` exists for a crumb that cannot navigate
+// anywhere on desktop: /settings hands off to the remembered settings page, so
+// on desktop the link lands back where it started. Rendering it as a link there
+// makes the unsaved-changes guard offer to discard and leave, then not leave.
+function ParentCrumb({
+  crumb,
+}: {
+  crumb: { label: string; href: string; phoneOnlyLink?: boolean };
+}) {
+  const linkClass = "cursor-pointer text-muted-foreground hover:text-foreground transition-colors";
+  if (!crumb.phoneOnlyLink) {
+    return (
+      <BreadcrumbLink asChild>
+        <Link href={crumb.href} className={linkClass}>
+          {crumb.label}
+        </Link>
+      </BreadcrumbLink>
+    );
+  }
+  return (
+    <>
+      <BreadcrumbLink asChild className="md:hidden">
+        <Link href={crumb.href} className={linkClass}>
+          {crumb.label}
+        </Link>
+      </BreadcrumbLink>
+      <span className="hidden text-muted-foreground md:inline">{crumb.label}</span>
+    </>
+  );
+}
 
 function BackLink({
   href,
@@ -100,7 +133,7 @@ function TopbarBreadcrumb({
 }: {
   backHref: string;
   backLabel: string;
-  parents: Array<{ label: string; href: string }> | undefined;
+  parents: Array<{ label: string; href: string; phoneOnlyLink?: boolean }> | undefined;
   title: string;
   subtitle?: string;
   icon?: ReactNode;
@@ -118,7 +151,11 @@ function TopbarBreadcrumb({
   const showHomeCrumb = !showBackLink && homeAffordance !== "none";
   const homeCrumbClass = cn("shrink-0", homeAffordance === "phone" && "md:hidden");
   return (
-    <Breadcrumb className="relative z-10 min-w-0" aria-label={t("common:breadcrumb")}>
+    <Breadcrumb
+      className="relative z-10 min-w-0"
+      aria-label={t("common:breadcrumb")}
+      data-testid="page-topbar-breadcrumbs"
+    >
       <BreadcrumbList className="flex-nowrap text-sm">
         {showBackLink && (
           <>
@@ -144,14 +181,7 @@ function TopbarBreadcrumb({
         )}
         {parents?.flatMap((p) => [
           <BreadcrumbItem key={`${p.href}-item`} className="shrink-0">
-            <BreadcrumbLink asChild>
-              <Link
-                href={p.href}
-                className="cursor-pointer text-muted-foreground hover:text-foreground transition-colors"
-              >
-                {p.label}
-              </Link>
-            </BreadcrumbLink>
+            <ParentCrumb crumb={p} />
           </BreadcrumbItem>,
           <BreadcrumbSeparator key={`${p.href}-sep`} className="shrink-0" />,
         ])}

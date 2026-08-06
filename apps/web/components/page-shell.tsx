@@ -13,7 +13,7 @@ type PageShellProps = {
   icon?: ReactNode;
   backHref?: string;
   backLabel?: string;
-  parents?: Array<{ label: string; href: string }>;
+  parents?: Array<{ label: string; href: string; phoneOnlyLink?: boolean }>;
   variant?: "breadcrumb" | "root";
   center?: ReactNode;
   leading?: ReactNode;

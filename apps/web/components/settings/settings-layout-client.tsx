@@ -102,12 +102,15 @@ function deriveParents(
   pathname: string,
   workspaceName: string | null,
   t: (key: string) => string,
-): Array<{ label: string; href: string }> {
+): Array<{ label: string; href: string; phoneOnlyLink?: boolean }> {
   const segments = pathname.split("/").filter(Boolean);
   if (segments.length <= 1) return [];
 
-  const parents: Array<{ label: string; href: string }> = [
-    { label: t("common:settings"), href: "/settings" },
+  // Phone-only: on desktop /settings hands straight back to the remembered
+  // settings page, so a link here cannot go anywhere — and with unsaved edits it
+  // made "Discard and leave" discard without leaving.
+  const parents: Array<{ label: string; href: string; phoneOnlyLink?: boolean }> = [
+    { label: t("common:settings"), href: "/settings", phoneOnlyLink: true },
   ];
 
   const workspaceId = workspaceIdFromPathname(pathname);

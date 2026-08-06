@@ -181,12 +181,32 @@ describe("SettingsLayoutClient workspace breadcrumbs", () => {
       </SettingsLayoutClient>,
     );
 
+    // "Settings" renders twice: a phone-only link and the desktop static text.
     expect(screen.getByTestId("page-topbar-breadcrumbs").textContent).toBe(
-      "SettingsArchiveSecrets",
+      "SettingsSettingsArchiveSecrets",
     );
     expect(screen.getByRole("link", { name: "Archive" }).getAttribute("href")).toBe(
       "/settings/workspace/ws-2",
     );
+  });
+
+  it("renders the Settings crumb as a phone-only link with static desktop text", () => {
+    render(
+      <SettingsLayoutClient>
+        <div>Settings page</div>
+      </SettingsLayoutClient>,
+    );
+
+    // On desktop /settings hands straight back to the remembered page, so the
+    // crumb must not be a link there — otherwise the unsaved-changes guard
+    // offers "Discard and leave" and then does not leave.
+    const link = screen.getByRole("link", { name: "Settings" });
+    expect(link.getAttribute("href")).toBe("/settings");
+    expect(link.className).toContain("md:hidden");
+    const desktopText = screen
+      .getAllByText("Settings")
+      .find((el) => el.tagName === "SPAN" && el.className.includes("md:inline"));
+    expect(desktopText).toBeTruthy();
   });
 
   it("keeps the automations parent after the workspace breadcrumb", () => {
@@ -199,8 +219,16 @@ describe("SettingsLayoutClient workspace breadcrumbs", () => {
     );
 
     const breadcrumbs = screen.getByTestId("page-topbar-breadcrumbs");
+    // The settings crumb chain, in order. Asserted by href rather than by text:
+    // the Settings crumb renders twice (phone link + desktop static text) and
+    // the title sits inside a BreadcrumbPage wrapper, so counting text nodes
+    // measures the markup instead of the chain.
     expect(
-      Array.from(breadcrumbs.querySelectorAll("a, span")).map((element) => element.textContent),
-    ).toEqual(["Settings", "Archive", "Automations", "New"]);
+      Array.from(breadcrumbs.querySelectorAll('a[href^="/settings"]')).map((link) =>
+        link.getAttribute("href"),
+      ),
+    ).toEqual(["/settings", "/settings/workspace/ws-2", "/settings/workspace/ws-2/automations"]);
+    expect(breadcrumbs.textContent).toContain("Archive");
+    expect(breadcrumbs.textContent?.endsWith("New")).toBe(true);
   });
 });
