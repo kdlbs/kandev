@@ -7,12 +7,19 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"sync"
+	"time"
 
 	"github.com/kandev/kandev/internal/lsp/protocol"
 )
 
-var errPeerClosed = errors.New("language-server JSON-RPC peer closed")
+const defaultPeerWriteTimeout = 5 * time.Second
+
+var (
+	errPeerClosed       = errors.New("language-server JSON-RPC peer closed")
+	errPeerWriteTimeout = errors.New("language-server JSON-RPC write timed out")
+)
 
 type rpcError struct {
 	Code    int             `json:"code"`
@@ -51,6 +58,7 @@ type peer struct {
 
 	onRequest      func(string, json.RawMessage) (any, error)
 	onNotification func(string, json.RawMessage)
+	writeTimeout   time.Duration
 }
 
 func newPeer(
@@ -66,6 +74,7 @@ func newPeer(
 		done:           make(chan struct{}),
 		onRequest:      onRequest,
 		onNotification: onNotification,
+		writeTimeout:   defaultPeerWriteTimeout,
 	}
 	go p.readLoop()
 	return p
@@ -255,13 +264,92 @@ func (p *peer) write(message rpcMessage) error {
 		return errPeerClosed
 	default:
 	}
-	if _, err := fmt.Fprintf(p.stdin, "Content-Length: %d\r\n\r\n", len(payload)); err != nil {
-		return err
+	header := fmt.Sprintf("Content-Length: %d\r\n\r\n", len(payload))
+	frame := make([]byte, 0, len(header)+len(payload))
+	frame = append(frame, header...)
+	frame = append(frame, payload...)
+	return p.writeFrame(frame)
+}
+
+type peerWriteDeadliner interface {
+	SetWriteDeadline(time.Time) error
+}
+
+func (p *peer) writeFrame(frame []byte) error {
+	timeout := p.writeTimeout
+	if timeout <= 0 {
+		timeout = defaultPeerWriteTimeout
 	}
-	if _, err := p.stdin.Write(payload); err != nil {
-		return err
+	if writeErr, handled := writePeerFrameWithDeadline(p.stdin, frame, timeout); handled {
+		return writeErr
+	}
+	return writePeerFrameWithCloseTimeout(p.stdin, frame, timeout)
+}
+
+func writePeerFrameWithDeadline(
+	stdin io.WriteCloser,
+	frame []byte,
+	timeout time.Duration,
+) (error, bool) {
+	deadliner, ok := stdin.(peerWriteDeadliner)
+	if !ok {
+		return nil, false
+	}
+	if err := deadliner.SetWriteDeadline(time.Now().Add(timeout)); err != nil {
+		return nil, false
+	}
+	writeErr := writePeerFrame(stdin, frame)
+	clearErr := deadliner.SetWriteDeadline(time.Time{})
+	if peerWriteTimedOut(writeErr) {
+		closeErr := stdin.Close()
+		return errors.Join(errPeerWriteTimeout, writeErr, closeErr), true
+	}
+	if clearErr != nil {
+		_ = stdin.Close()
+		return errors.Join(writeErr, fmt.Errorf("clear language-server write deadline: %w", clearErr)), true
+	}
+	return writeErr, true
+}
+
+func writePeerFrameWithCloseTimeout(stdin io.WriteCloser, frame []byte, timeout time.Duration) error {
+	result := make(chan error, 1)
+	go func() {
+		result <- writePeerFrame(stdin, frame)
+	}()
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	select {
+	case writeErr := <-result:
+		return writeErr
+	case <-timer.C:
+		closeErr := stdin.Close()
+		writeErr := <-result
+		return errors.Join(errPeerWriteTimeout, writeErr, closeErr)
+	}
+}
+
+func writePeerFrame(writer io.Writer, frame []byte) error {
+	for len(frame) > 0 {
+		written, err := writer.Write(frame)
+		if written > 0 {
+			frame = frame[written:]
+		}
+		if err != nil {
+			return err
+		}
+		if written == 0 {
+			return io.ErrNoProgress
+		}
 	}
 	return nil
+}
+
+func peerWriteTimedOut(err error) bool {
+	if errors.Is(err, os.ErrDeadlineExceeded) {
+		return true
+	}
+	var timeout interface{ Timeout() bool }
+	return errors.As(err, &timeout) && timeout.Timeout()
 }
 
 func (p *peer) removePending(id string) {

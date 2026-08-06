@@ -126,3 +126,10 @@ during an unanswered initialize skips the protocol shutdown request that the ser
 service, closes the streams, and reaps the process. Focused no-deadline and stop-during-initialize
 regressions failed before their changes and pass afterward; 20 repetitions, the full task-host race
 suite, and backend lint pass.
+
+The next review found that any JSON-RPC write could still block forever when a server stopped
+reading stdin. Peer writes now serialize a complete frame behind the existing write lock, use an
+OS pipe deadline when supported, and otherwise close the owned stdin after the same bounded wait.
+Both the real process-pipe and generic blocked-writer regressions failed before the change and pass
+20 repetitions under `-race`; `go test -race ./internal/agentctl/server/lsp -count=1 -timeout=90s`
+and backend lint pass.

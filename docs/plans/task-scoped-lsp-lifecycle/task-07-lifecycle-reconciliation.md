@@ -118,3 +118,10 @@ A follow-up Codex review on 2026-08-06 found that a task-host `process_exited` s
 recovery without releasing its now-dead generation's capacity slot. Proven process-exit evidence
 now releases the slot first, atomically promotes queued work, then schedules recovery. The queue
 promotion regression, full controller package, race detector, and backend lint pass.
+
+The next review found that the user-facing orchestrator `StopTask` path stopped the executor but
+did not invoke task-scoped LSP cleanup, unlike archive/delete/environment teardown. Backend wiring
+now registers the existing authorized task cleanup service as an orchestrator post-executor-stop
+hook and runs it before the task enters review. The regression proves cleanup observes the stopped
+executor and precedes the review transition; it passed 20 repetitions, the full orchestrator and
+backend-app packages, and backend lint.
