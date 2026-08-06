@@ -13,11 +13,12 @@ import {
   DropdownMenuTrigger,
 } from "@kandev/ui/dropdown-menu";
 import Link from "@/components/routing/app-link";
-import { useAppStore } from "@/components/state-provider";
+import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { useToast } from "@/components/toast-provider";
 import { AgentProfileDeleteConfirmDialog } from "@/components/settings/agent-profile-delete-dialog";
 import { deleteAgentProfileAction } from "@/app/actions/agents";
 import { useRouter } from "@/lib/routing/client-router";
+import { toAgentProfileOption } from "@/lib/state/slices/settings/types";
 import type { Agent, AgentProfile } from "@/lib/types/http";
 
 function agentSetupHref(agentName: string): string {
@@ -77,19 +78,29 @@ export function ProfileRow({ agent, profile }: { agent: Agent; profile: AgentPro
   const { toast } = useToast();
   const router = useRouter();
   const [confirmOpen, setConfirmOpen] = useState(false);
-  const settingsAgents = useAppStore((state) => state.settingsAgents.items);
+  const store = useAppStoreApi();
   const setSettingsAgents = useAppStore((state) => state.setSettingsAgents);
+  const setAgentProfiles = useAppStore((state) => state.setAgentProfiles);
   const href = profileHref(agent.name, profile.id);
 
   const handleDelete = async () => {
     setConfirmOpen(false);
     const result = await deleteAgentProfileAction(profile.id);
     if (result.status === "ok") {
-      setSettingsAgents(
-        settingsAgents.map((item) => ({
-          ...item,
-          profiles: item.profiles.filter((p) => p.id !== profile.id),
-        })),
+      // Read the store at write time, not at render: this closure was created
+      // before the await, so a snapshot taken then would be stale by now and
+      // two profiles deleted in quick succession would resurrect each other.
+      const nextAgents = store.getState().settingsAgents.items.map((item) => ({
+        ...item,
+        profiles: item.profiles.filter((p) => p.id !== profile.id),
+      }));
+      setSettingsAgents(nextAgents);
+      // `agentProfiles` is the flattened picker list over the same data. Every
+      // other writer updates the pair together, and its only refetch is a
+      // one-shot guarded by `agentsLoaded`, so skipping it here left the
+      // deleted profile selectable until a reload.
+      setAgentProfiles(
+        nextAgents.flatMap((item) => item.profiles.map((p) => toAgentProfileOption(item, p))),
       );
       return;
     }
@@ -100,7 +111,11 @@ export function ProfileRow({ agent, profile }: { agent: Agent; profile: AgentPro
       router.push(href);
       return;
     }
-    toast({ title: t("agents:cannotDeleteAgentProfile"), description: result.message, variant: "error" });
+    toast({
+      title: t("agents:cannotDeleteAgentProfile"),
+      description: result.message,
+      variant: "error",
+    });
   };
 
   return (
