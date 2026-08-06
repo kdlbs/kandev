@@ -210,15 +210,22 @@ calls `addTodosPanel({ groupId })`; row is hidden for a passthrough session)
 and an E2E case in `todo-list-panel.spec.ts` (preference off, task opened
 with the tab absent, "+" clicked, "Todos" menuitem clicked, tab becomes
 active and shows real seeded content) proving the manual path is independent
-of the preference. Strengthened that E2E case with a concrete cross-group
-assertion (`todosGroupId !== filesGroupId`, both read via the same
-`readTodosLayout` helper the other cases already use) after a manual
-browser spot-check on an *already-populated* task only demonstrated
-`focusOrAddPanel`'s refocus branch — the assertion instead exercises the
-add-when-absent branch from the chat/center group (`addPanelButton()`
-targets the first header action in DOM order, not the Files/Changes group),
-confirming the panel lands in that different group rather than always
-defaulting beside Files/Changes.
+of the preference. Strengthened that E2E case with a cross-group assertion
+(`todosGroupId !== filesGroupId`, both read via the same `readTodosLayout`
+helper the other cases already use) after a manual browser spot-check on an
+*already-populated* task only demonstrated `focusOrAddPanel`'s refocus
+branch. The assertion proves the panel did **not** land in the Files/
+Changes group — i.e. it did not silently fall back to the settings-driven
+hook's default placement — which is the property that mattered to verify
+automatically. It does not independently re-confirm which exact group
+`addPanelButton()`'s `.first()` targets; that it lands specifically in the
+*invoking* group rests on reading `addTodosPanel`'s
+`position: { referenceGroup: groupId }` implementation, not on a second,
+independent runtime check of the clicked group's own id. [INFERENCE:
+exact-group-match] A tighter assertion (capturing the chat panel's group id
+before the click and asserting `todosGroupId` equals it) would close that
+gap; not added here to avoid widening test surface after the suite was
+already green and reviewed.
 
 Commands and results:
 - `pnpm exec vitest run components/task/dockview-add-panel-items.test.tsx` → 8 passed (6 pre-existing PR-row cases + 2 new).
