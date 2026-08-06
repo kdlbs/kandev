@@ -7,7 +7,9 @@ import {
   IconFolder,
   IconGitBranch,
   IconGitPullRequest,
+  IconListCheck,
 } from "@tabler/icons-react";
+import { useTranslation } from "react-i18next";
 import {
   DropdownMenuItem,
   DropdownMenuSub,
@@ -137,10 +139,12 @@ export function AddPanelMenuItems({
   const addBrowserPanel = useDockviewStore((s) => s.addBrowserPanel);
   const addVscodePanel = useDockviewStore((s) => s.addVscodePanel);
   const addPlanPanel = useDockviewStore((s) => s.addPlanPanel);
+  const addTodosPanel = useDockviewStore((s) => s.addTodosPanel);
   const addFilesPanel = useDockviewStore((s) => s.addFilesPanel);
   const addChangesPanel = useDockviewStore((s) => s.addChangesPanel);
   const addPRPanel = useDockviewStore((s) => s.addPRPanel);
   const addMRPanel = useDockviewStore((s) => s.addMRPanel);
+  const { t } = useTranslation();
 
   return (
     <>
@@ -170,6 +174,12 @@ export function AddPanelMenuItems({
         </DropdownMenuItem>
       )}
       <PluginTaskPanelMenuItems groupId={groupId} />
+      {!state.isPassthrough && (
+        <DropdownMenuItem onClick={() => addTodosPanel({ groupId })} className={MENU_ITEM_CLASS}>
+          <IconListCheck className={MENU_ICON_CLASS} />
+          {t("common:todos")}
+        </DropdownMenuItem>
+      )}
       {!state.hasChanges && (
         <DropdownMenuItem onClick={() => addChangesPanel(groupId)} className={MENU_ITEM_CLASS}>
           <IconGitBranch className={MENU_ICON_CLASS} />

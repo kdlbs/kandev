@@ -9,6 +9,7 @@ const DONE_STATES = ["COMPLETED", "WAITING_FOR_INPUT"];
 type TodosLayout = {
   todosExists: boolean;
   todosGroupId: string | null;
+  filesGroupId: string | null;
   rightTopOrder: string[];
 };
 
@@ -97,6 +98,7 @@ async function readTodosLayout(page: Page): Promise<TodosLayout | null> {
     return {
       todosExists: !!todos,
       todosGroupId: todos?.group?.id ?? null,
+      filesGroupId: files?.group?.id ?? null,
       rightTopOrder: files?.group?.panels?.map((panel) => panel.id) ?? [],
     };
   });
@@ -238,5 +240,36 @@ test.describe("Todo list panel preference", () => {
     await expect(panel.getByText("Write tests")).toBeVisible();
     await expect(panel.getByText("Implement feature")).toBeVisible();
     await expect(panel.getByText("1/2 completed")).toBeVisible();
+  });
+
+  test("is manually addable from the task workbench's own + menu, independent of the preference", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(120_000);
+    // Preference stays off for this test (see beforeEach) — the + menu's
+    // Todos row is a manual, always-available add action, not gated by the
+    // preference the way the automatic visibility-sync hook is.
+    const task = await createTaskWithTodos(apiClient, seedData, "Todos via plus menu");
+    const session = await openTask(testPage, task.id);
+    await expect(todosTabWrapper(testPage)).toHaveCount(0);
+
+    // `addPanelButton()` targets the chat/center group's own "+" (the
+    // first header action in DOM order) — deliberately not the Files/
+    // Changes group where the settings-driven sync hook would default to
+    // placing Todos, so this proves the manual action honors the invoking
+    // group rather than always landing beside Files/Changes.
+    await session.addPanelButton().click();
+    const todosItem = testPage.getByRole("menuitem", { name: "Todos" });
+    await expect(todosItem).toBeVisible();
+    await todosItem.click();
+
+    await expect(todosTabWrapper(testPage)).toBeVisible({ timeout: 15_000 });
+    await expect(todosTabWrapper(testPage)).toHaveClass(/dv-active-tab/);
+    await expect(testPage.getByTestId("todos-panel")).toBeVisible();
+    const layout = await readTodosLayout(testPage);
+    expect(layout?.todosExists).toBe(true);
+    expect(layout?.todosGroupId).not.toBe(layout?.filesGroupId);
   });
 });

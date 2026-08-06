@@ -172,3 +172,58 @@ Re-verification after the fix, all green:
 - `pnpm run typecheck` → clean.
 - `pnpm run i18n:check` → `2123 key(s) referenced, 2407 en entries, 0 orphans, pseudo in sync`.
 - Manual re-screenshot of the live demo task's Todos panel after the fix: all 5 seeded items render with correct order/status/progress ("2/5 completed"), matching the chat transcript's "UPDATED TODOS (2/5)" summary.
+
+**Addendum 2 (explicit follow-up request): manual "+" add-panel menu
+entry.** The task workbench's own "+" dropdown
+(`apps/web/components/task/dockview-add-panel-items.tsx`, rendered by both
+`dockview-header-actions.tsx`'s per-group header button and
+`dockview-watermark.tsx`'s empty-group watermark) is a *third* addable-panel
+surface, separate from both the settings-driven visibility-sync hook and the
+Layout Editor's "Add panel" button — and had no Todos entry at all, so there
+was no manual way to open the panel independent of the preference. Added:
+- `addTodosPanel(opts?: { groupId?: string })` to
+  `apps/web/lib/state/dockview-panel-actions.ts` /
+  `apps/web/lib/state/dockview-store.ts`, mirroring `addPlanPanel`'s exact
+  `focusOrAddPanel`-based idempotent pattern (focuses the existing panel
+  instance if one is already open anywhere, rather than duplicating it —
+  `todos` remains the single-instance panel `REUSABLE_PANEL_IDS` documents
+  it as).
+- A "Todos" row in `AddPanelMenuItems`, positioned beside Plan and sharing
+  its exact guard (`!state.isPassthrough`) and its exact "always shown,
+  never hidden by presence" convention — unlike Files/Changes, which hide
+  their row once open because they're near-always-already-open default
+  panels; Todos and Plan are off-by-default and single-instance, so showing
+  the row unconditionally just re-focuses the existing instance on a second
+  click rather than risking staleness from a suppressed row.
+- `t("common:todos")` for the row label (the only new copy; every sibling
+  row's label in this file is a pre-existing unconverted literal, out of
+  scope to migrate here per the repo's incremental i18n migration rule).
+
+Deliberately did not add a `hasTodos` guard to hide the row once a Todos
+panel is already open (unlike Files/Changes) — doing so would have made the
+row disappear exactly when a user wants to jump to it from a different
+group, and clicking it while one is already open simply re-focuses that
+existing instance instead of erroring or duplicating.
+
+Added unit coverage in `dockview-add-panel-items.test.tsx` (row renders and
+calls `addTodosPanel({ groupId })`; row is hidden for a passthrough session)
+and an E2E case in `todo-list-panel.spec.ts` (preference off, task opened
+with the tab absent, "+" clicked, "Todos" menuitem clicked, tab becomes
+active and shows real seeded content) proving the manual path is independent
+of the preference. Strengthened that E2E case with a concrete cross-group
+assertion (`todosGroupId !== filesGroupId`, both read via the same
+`readTodosLayout` helper the other cases already use) after a manual
+browser spot-check on an *already-populated* task only demonstrated
+`focusOrAddPanel`'s refocus branch — the assertion instead exercises the
+add-when-absent branch from the chat/center group (`addPanelButton()`
+targets the first header action in DOM order, not the Files/Changes group),
+confirming the panel lands in that different group rather than always
+defaulting beside Files/Changes.
+
+Commands and results:
+- `pnpm exec vitest run components/task/dockview-add-panel-items.test.tsx` → 8 passed (6 pre-existing PR-row cases + 2 new).
+- `pnpm exec playwright test e2e/tests/settings/todo-list-panel.spec.ts` → 5 passed.
+- `pnpm run typecheck` → clean.
+- `pnpm exec eslint components/task/dockview-add-panel-items.tsx components/task/dockview-add-panel-items.test.tsx lib/state/dockview-panel-actions.ts lib/state/dockview-store.ts --max-warnings 0` → clean.
+- `pnpm run i18n:check` → `2123 key(s) referenced, 2407 en entries, 0 orphans, pseudo in sync`.
+- `pnpm exec vitest run components/task/ lib/state/` → 289 files / 2358 tests passed, 4 skipped (no regression from the new store action or menu item).

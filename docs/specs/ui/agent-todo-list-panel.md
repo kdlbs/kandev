@@ -1,5 +1,5 @@
 ---
-status: draft
+status: shipped
 created: 2026-08-03
 owner: kandev
 ---
@@ -63,12 +63,27 @@ to do so. Users need a Settings option to enable or disable a persistent
   because the preference itself is the single deliberate on/off action here
   (PR Details additionally suppresses re-creation because *review linkage*,
   not a deliberate user setting, is what re-triggers it).
+- The Todos panel is also listed in the task workbench's own "+" add-panel
+  menu (`apps/web/components/task/dockview-add-panel-items.tsx`), alongside
+  Plan/Browser/VS Code, so a user can manually open (or refocus) it in any
+  group regardless of the preference's current value — mirroring Plan's
+  always-shown convention (no session-count guard) since, like Plan, it is
+  off by default and single-instance rather than a near-always-open panel
+  like Files/Changes. Manually adding it while the preference is off is not
+  itself persisted or protected: the next event that re-runs the
+  visibility-sync hook (e.g. switching tasks and back) removes it again,
+  the same as it would for any other task once the preference turns off.
 - The Todos panel renders the same checklist content and status semantics as
   the existing `TodoIndicator` popover (pending / in-progress / completed /
   failed rows, in emission order) for the panel's owning task's active
-  session, using the same live data source (`sessionTodos.bySessionId`)
-  already powering `TodoIndicator` and `TodoMessage`. No new backend event, WS
-  payload, or data model is introduced.
+  session. It sources this from the live `sessionTodos.bySessionId` slice
+  when the session has emitted a live update since the page loaded, falling
+  back to the latest persisted `todo`-type message
+  (`buildTodoItems` in `apps/web/hooks/use-processed-messages.ts`) for a
+  session that already completed before the page loaded — exactly the same
+  two-source fallback `TodoIndicator`'s own call site already uses, so the
+  panel and the chip never disagree about a given session's todos. No new
+  backend event, WS payload, or data model is introduced.
 - When the active session has no todo entries yet, the panel shows an empty
   state instead of being hidden, matching how Files/Changes/Plan behave with
   no applicable content.
@@ -178,6 +193,11 @@ No new endpoint. Extends the existing per-user settings contract:
   back to the same task, **THEN** the tab reappears, because the preference —
   not the close action — is the authoritative on/off control and this feature
   introduces no closed-for-session memory.
+- **GIVEN** the preference is off, **WHEN** the user opens the task
+  workbench's own "+" add-panel menu on any group, **THEN** a Todos row is
+  present (matching Plan/Browser/VS Code's always-shown convention) and
+  selecting it opens the Todos panel in that group immediately, independent
+  of the preference.
 
 ## Out of scope
 
