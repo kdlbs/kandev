@@ -40,7 +40,7 @@ describe("workflow dirty state", () => {
   });
 
   it("marks a changed workflow prompt dirty", () => {
-    const draft = { ...workflow, prompt: "Always open a draft PR." };
+    const draft = { ...workflow, prompt: "If the PR is merged or closed, move the Task to Done." };
     expect(isWorkflowFieldDirty(draft, workflow, "prompt")).toBe(true);
     expect(isWorkflowFieldDirty(draft, { ...workflow, prompt: "" }, "prompt")).toBe(true);
     expect(isWorkflowFieldDirty(draft, draft, "prompt")).toBe(false);

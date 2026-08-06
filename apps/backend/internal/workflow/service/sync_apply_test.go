@@ -127,7 +127,7 @@ func TestApplySyncedWorkflows_UpdatesAndClearsWorkflowPrompt(t *testing.T) {
 
 	// Update prompt from portable definition.
 	updated := portableWorkflow("Dev Flow", "Todo")
-	updated.Prompt = "Always open a draft PR."
+	updated.Prompt = "If the PR is merged or closed, move the Task to Done."
 	result, err := svc.ApplySyncedWorkflows(ctx, "ws-1", []SyncFileExport{
 		{Path: "flows/dev.yml", Export: exportOf(updated)},
 	})
@@ -136,7 +136,7 @@ func TestApplySyncedWorkflows_UpdatesAndClearsWorkflowPrompt(t *testing.T) {
 
 	got, err := provider.GetWorkflow(ctx, wf.ID)
 	require.NoError(t, err)
-	assert.Equal(t, "Always open a draft PR.", got.Prompt)
+	assert.Equal(t, "If the PR is merged or closed, move the Task to Done.", got.Prompt)
 
 	// Omitting prompt in the portable file clears it on sync.
 	cleared := portableWorkflow("Dev Flow", "Todo")

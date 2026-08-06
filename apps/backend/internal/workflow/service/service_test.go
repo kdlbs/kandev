@@ -723,7 +723,7 @@ func TestImportWorkflows(t *testing.T) {
 			Workflows: []models.WorkflowPortable{
 				{
 					Name:   "Prompted WF",
-					Prompt: "Always open a draft PR.",
+					Prompt: "If the PR is merged or closed, move the Task to Done.",
 					Steps: []models.StepPortable{
 						{Name: "Todo", Position: 0, Color: "gray"},
 					},
@@ -737,7 +737,7 @@ func TestImportWorkflows(t *testing.T) {
 
 		wf, err := provider.GetWorkflow(ctx, "imported-Prompted WF")
 		require.NoError(t, err)
-		assert.Equal(t, "Always open a draft PR.", wf.Prompt)
+		assert.Equal(t, "If the PR is merged or closed, move the Task to Done.", wf.Prompt)
 	})
 
 	t.Run("normalizes duplicate start steps on import", func(t *testing.T) {

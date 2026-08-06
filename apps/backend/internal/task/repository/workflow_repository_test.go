@@ -74,7 +74,7 @@ func TestSQLiteRepository_WorkflowPromptRoundTrip(t *testing.T) {
 		WorkspaceID: workspace.ID,
 		Name:        "Prompted Workflow",
 		Description: "desc",
-		Prompt:      "Always open a draft PR and mention security constraints.",
+		Prompt:      "If the PR is merged or closed, move the Task to Done.",
 	}
 	if err := repo.CreateWorkflow(ctx, workflow); err != nil {
 		t.Fatalf("failed to create workflow: %v", err)

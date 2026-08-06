@@ -64,7 +64,7 @@ Each entry under `workflows:`:
 - name: My Workflow
   description: Optional human description.
   prompt: |               # optional shared agent instructions at every step entry
-    Always open a draft PR.
+    If the PR is merged or closed, move the Task to Done.
   agent_profile:        # optional, workflow-level default agent
     agent_name: Claude Code
     model: claude-opus-4-7

@@ -55,7 +55,7 @@ func TestBuildWorkflowPrompt_ReplacesTaskPromptPlaceholder(t *testing.T) {
 
 func TestBuildWorkflowPrompt_PrependsWorkflowPromptBeforeStepPrompt(t *testing.T) {
 	stepGetter := newMockStepGetter()
-	stepGetter.workflowPrompts["wf-1"] = "Always open a draft PR."
+	stepGetter.workflowPrompts["wf-1"] = "If the PR is merged or closed, move the Task to Done."
 	svc := createTestService(setupTestRepo(t), stepGetter, newMockTaskRepo())
 	step := &wfmodels.WorkflowStep{
 		ID:         "step-1",
@@ -65,7 +65,7 @@ func TestBuildWorkflowPrompt_PrependsWorkflowPromptBeforeStepPrompt(t *testing.T
 
 	got := svc.buildWorkflowPrompt(context.Background(), "Migrate Atlantis datasource.", step, "task-1", "session-1", false)
 
-	want := "## Workflow instructions\n\nAlways open a draft PR.\n\n<!-- /workflow-instructions -->\n\nCommit the changes."
+	want := "## Workflow instructions\n\nIf the PR is merged or closed, move the Task to Done.\n\n<!-- /workflow-instructions -->\n\nCommit the changes."
 	if got != want {
 		t.Fatalf("buildWorkflowPrompt() = %q, want %q", got, want)
 	}

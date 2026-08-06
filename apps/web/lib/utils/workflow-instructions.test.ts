@@ -16,9 +16,9 @@ describe("splitWorkflowInstructions", () => {
   });
 
   it("splits a leading workflow instructions block from the step body", () => {
-    const content = `${WORKFLOW_INSTRUCTIONS_HEADING}\n\nAlways open a draft PR.\n\n${WORKFLOW_INSTRUCTIONS_END}\n\nCommit the changes.`;
+    const content = `${WORKFLOW_INSTRUCTIONS_HEADING}\n\nIf the PR is merged or closed, move the Task to Done.\n\n${WORKFLOW_INSTRUCTIONS_END}\n\nCommit the changes.`;
     expect(splitWorkflowInstructions(content)).toEqual({
-      instructions: "Always open a draft PR.",
+      instructions: "If the PR is merged or closed, move the Task to Done.",
       rest: "Commit the changes.",
       hasInstructions: true,
     });
@@ -49,9 +49,9 @@ describe("splitWorkflowInstructions", () => {
   });
 
   it("falls back to first blank line for legacy messages without an end marker", () => {
-    const content = `${WORKFLOW_INSTRUCTIONS_HEADING}\n\nAlways open a draft PR.\n\nCommit the changes.`;
+    const content = `${WORKFLOW_INSTRUCTIONS_HEADING}\n\nIf the PR is merged or closed, move the Task to Done.\n\nCommit the changes.`;
     expect(splitWorkflowInstructions(content)).toEqual({
-      instructions: "Always open a draft PR.",
+      instructions: "If the PR is merged or closed, move the Task to Done.",
       rest: "Commit the changes.",
       hasInstructions: true,
     });
