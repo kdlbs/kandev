@@ -94,7 +94,7 @@ describe("SettingsLayoutClient integrations actions", () => {
   });
 
   it("shows copy config on workspace-scoped integration pages", () => {
-    pathname = "/settings/workspace/ws-1/integrations/github";
+    pathname = "/settings/workspaces/ws-1/integrations/github";
 
     render(
       <SettingsLayoutClient>
@@ -105,8 +105,15 @@ describe("SettingsLayoutClient integrations actions", () => {
     expect(screen.getByTestId(COPY_CONFIG_TEST_ID).dataset.sourceWorkspaceId).toBe("ws-1");
   });
 
-  it("uses the workspace from scoped integration routes before store hydration catches up", () => {
-    pathname = "/settings/workspace/ws-2/integrations/github";
+  // The route the app actually renders. `integrationFromPathname` accepts both
+  // spellings, so the source workspace has to be read off both too — parsing
+  // only the legacy singular path left this action copying the *active*
+  // workspace's credentials while the breadcrumb named the routed one.
+  it.each([
+    ["canonical", "/settings/workspaces/ws-2/integrations/github"],
+    ["legacy", "/settings/workspace/ws-2/integrations/github"],
+  ])("copies from the routed workspace, not the active one (%s path)", (_label, path) => {
+    pathname = path;
     state.workspaces.activeId = "ws-1";
 
     render(
@@ -118,8 +125,21 @@ describe("SettingsLayoutClient integrations actions", () => {
     expect(screen.getByTestId(COPY_CONFIG_TEST_ID).dataset.sourceWorkspaceId).toBe("ws-2");
   });
 
+  it("falls back to the active workspace when the routed one is not in the store", () => {
+    pathname = "/settings/workspaces/ws-deleted/integrations/github";
+    state.workspaces.activeId = "ws-1";
+
+    render(
+      <SettingsLayoutClient>
+        <div>Settings page</div>
+      </SettingsLayoutClient>,
+    );
+
+    expect(screen.getByTestId(COPY_CONFIG_TEST_ID).dataset.sourceWorkspaceId).toBe("ws-1");
+  });
+
   it("falls back to the active workspace when a scoped route has invalid encoding", () => {
-    pathname = "/settings/workspace/%E0%A4%A/integrations/github";
+    pathname = "/settings/workspaces/%E0%A4%A/integrations/github";
     state.workspaces.activeId = "ws-1";
 
     render(

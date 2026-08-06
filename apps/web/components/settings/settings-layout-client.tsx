@@ -231,8 +231,14 @@ function IntegrationCopyConfigAction() {
   );
 }
 
+// Workspace id from either spelling of the workspace route. `workspaces` is
+// canonical and `workspace` is the legacy path the route table redirects, but
+// this has to match whatever `integrationFromPathname` matches: that regex
+// accepts both, so a plural-only parse here would leave the copy action
+// rendered with no routed workspace and silently fall back to the *active*
+// one — copying the wrong workspace's credentials.
 function workspaceIdFromPathname(pathname: string): string | null {
-  const match = pathname.match(/^\/settings\/workspace\/([^/]+)(?:\/|$)/);
+  const match = pathname.match(/^\/settings\/workspaces?\/([^/]+)(?:\/|$)/);
   return safeDecodePathSegment(match?.[1]);
 }
 
