@@ -73,6 +73,7 @@ type QueueActionsArgs = {
   removeQueueEntry: ReturnType<typeof useQueueState>["removeQueueEntry"];
   setQueueLoading: ReturnType<typeof useQueueState>["setQueueLoading"];
   metaMax: number | undefined;
+  metaMergeEnabled: boolean | undefined;
 };
 
 function useDrainNextAction(
@@ -146,7 +147,11 @@ function useQueueRefetch(
         setQueueLoading(sid, true);
         const status = await getQueueStatus(sid);
         if (refetchVersion.current[sid] !== version) return;
-        setQueueEntries(sid, status.entries ?? [], { count: status.count, max: status.max });
+        setQueueEntries(sid, status.entries ?? [], {
+          count: status.count,
+          max: status.max,
+          mergeEnabled: status.merge_enabled,
+        });
       } finally {
         if (refetchVersion.current[sid] === version) setQueueLoading(sid, false);
       }
@@ -163,6 +168,7 @@ function useQueueActions({
   removeQueueEntry,
   setQueueLoading,
   metaMax,
+  metaMergeEnabled,
 }: QueueActionsArgs) {
   const { refetch, invalidate: invalidateRefetch } = useQueueRefetch(
     setQueueEntries,
@@ -212,7 +218,11 @@ function useQueueActions({
         // optimistic empty state. The explicit refetch below then owns the
         // newest version and replaces it with the backend's exact result.
         invalidateRefetch(sessionId);
-        setQueueEntries(sessionId, [], { count: 0, max: metaMax ?? 0 });
+        setQueueEntries(sessionId, [], {
+          count: 0,
+          max: metaMax ?? 0,
+          mergeEnabled: metaMergeEnabled ?? true,
+        });
       } catch (err) {
         mutationFailed = true;
         mutationError = err;
@@ -230,7 +240,15 @@ function useQueueActions({
     } finally {
       setQueueLoading(sessionId, false);
     }
-  }, [sessionId, setQueueEntries, setQueueLoading, metaMax, refetch, invalidateRefetch]);
+  }, [
+    sessionId,
+    setQueueEntries,
+    setQueueLoading,
+    metaMax,
+    metaMergeEnabled,
+    refetch,
+    invalidateRefetch,
+  ]);
 
   const drainNext = useDrainNextAction(sessionId, setQueueLoading, refetch);
 
@@ -373,6 +391,7 @@ export function useQueue(sessionId: string | null) {
     removeQueueEntry: state.removeQueueEntry,
     setQueueLoading: state.setQueueLoading,
     metaMax: meta?.max,
+    metaMergeEnabled: meta?.mergeEnabled,
   });
 
   useEffect(() => {
@@ -405,6 +424,7 @@ export function useQueue(sessionId: string | null) {
     count: meta?.count ?? entries.length,
     max: meta?.max ?? 0,
     isFull: meta ? meta.count >= meta.max && meta.max > 0 : false,
+    mergeEnabled: meta?.mergeEnabled ?? true,
     isLoading,
     cancellationPending,
     queue,

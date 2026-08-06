@@ -495,6 +495,7 @@ export type QueueStatusChangedPayload = {
   entries?: QueuedMessagePayload[] | null;
   count?: number;
   max?: number;
+  merge_enabled?: boolean;
 };
 
 export type TaskStatusSummaryUpdatedPayload = {

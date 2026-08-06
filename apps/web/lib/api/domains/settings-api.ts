@@ -21,8 +21,8 @@ import type {
   DynamicModelsResponse,
 } from "@/lib/types/http";
 import type {
+  MessageQueueSettingsPatch,
   MessageQueueSettingsResponse,
-  MessageQueueSettingsValue,
   SystemMetricsGlobalSettings,
   SystemMetricsSettingsResponse,
 } from "@/lib/types/system";
@@ -85,7 +85,7 @@ export async function fetchMessageQueueSettings(
 }
 
 export async function updateMessageQueueSettings(
-  payload: MessageQueueSettingsValue,
+  payload: MessageQueueSettingsPatch,
   options?: ApiRequestOptions,
 ): Promise<MessageQueueSettingsResponse> {
   return fetchJson<MessageQueueSettingsResponse>(MESSAGE_QUEUE_SETTINGS_PATH, {
