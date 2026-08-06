@@ -1080,7 +1080,13 @@ func (s *Server) handleGitCumulativeDiffMultiRepo(
 		}
 		anyOK = true
 		merged.TotalCommits += outcome.result.TotalCommits
-		mergeCumulativeFiles(merged.Files, outcome.result.Files, outcome.subpath, outcome.result.BaseCommit)
+		mergeCumulativeFiles(
+			merged.Files,
+			outcome.result.Files,
+			outcome.subpath,
+			outcome.result.BaseCommit,
+			outcome.isSubmodule,
+		)
 	}
 	if !anyOK {
 		merged.Success = false
@@ -1094,26 +1100,33 @@ func (s *Server) handleGitCumulativeDiffMultiRepo(
 // and was skipped; a non-nil error is a hard failure that aborts the request,
 // with status holding the code the serial version would have written.
 type perRepoDiffOutcome struct {
-	subpath string
-	result  *process.CumulativeDiffResult
-	status  int
-	err     error
+	subpath     string
+	result      *process.CumulativeDiffResult
+	status      int
+	err         error
+	isSubmodule bool
 }
 
 // collectCumulativeDiffForRepo runs the cumulative diff for one repository of a
 // multi-repo fan-out. Like collectLogForRepo it takes a plain context and never
 // writes to the gin context, so it is safe to run concurrently.
 func (s *Server) collectCumulativeDiffForRepo(ctx context.Context, sub string) perRepoDiffOutcome {
-	base := s.resolvePerRepoBase(ctx, sub)
+	base, isSubmodule := s.resolvePerRepoBaseAndScope(ctx, sub)
 	if base == "" {
 		s.logger.Warn("cumulative diff: no per-repo base, skipping",
 			zap.String("repo", sub))
-		return perRepoDiffOutcome{subpath: sub}
+		return perRepoDiffOutcome{subpath: sub, isSubmodule: isSubmodule}
 	}
 	// Multi-repo: base is already resolved per-repo via resolvePerRepoBase,
 	// so we pass empty target_branch to skip the second merge-base attempt.
 	result, status, err := s.runGitCumulativeDiffForRepo(ctx, base, "", sub)
-	return perRepoDiffOutcome{subpath: sub, result: result, status: status, err: err}
+	return perRepoDiffOutcome{
+		subpath:     sub,
+		result:      result,
+		status:      status,
+		err:         err,
+		isSubmodule: isSubmodule,
+	}
 }
 
 // fanOutRepos runs collect once per repository, concurrently, and returns the
@@ -1163,34 +1176,45 @@ func fanOutRepos[T any](ctx context.Context, subpaths []string, collect func(con
 // Without this, a repo whose base branch is a merged/deleted stacked parent
 // lingering only as a local ref keeps inflating the commit count and diff.
 func (s *Server) resolvePerRepoBase(ctx context.Context, repo string) string {
+	base, _ := s.resolvePerRepoBaseAndScope(ctx, repo)
+	return base
+}
+
+// resolvePerRepoBaseAndScope returns the repository's comparison anchor and
+// whether its workspace is a submodule. The metadata travels with cumulative
+// diff results so the frontend can distinguish nested repository scopes from
+// ordinary sibling repositories that merely happen to have a named path.
+func (s *Server) resolvePerRepoBaseAndScope(ctx context.Context, repo string) (string, bool) {
 	tracker, err := s.procMgr.GetWorkspaceTrackerFor(repo)
 	if err != nil {
-		return ""
+		return "", false
 	}
+	isSubmodule := tracker.IsSubmodule()
 	base, baseBranch := tracker.ResolveBaseAnchor(ctx)
 	if base == "" || baseBranch == "" {
-		return base
+		return base, isSubmodule
 	}
-	if tracker.IsSubmodule() {
-		return base
+	if isSubmodule {
+		return base, true
 	}
 	gitOp, gitOpErr := s.procMgr.GitOperatorFor(repo)
 	if gitOpErr != nil {
-		return base
+		return base, false
 	}
-	return gitOp.CorrectStaleComparisonBase(ctx, base, baseBranch)
+	return gitOp.CorrectStaleComparisonBase(ctx, base, baseBranch), false
 }
 
 // mergeCumulativeFiles copies per-repo files into the merged map under a
 // `<repo> <path>` key (NUL-separated) and decorates each file payload
-// with `repository_name`, the repo-relative `path`, and the exact old-side
-// `base_ref` used to produce its cumulative diff.
+// with `repository_name`, the repo-relative `path`, the exact old-side
+// `base_ref` used to produce its cumulative diff, and (for nested repository
+// scopes) `is_submodule`.
 // The composite key keeps `README.md` in two repos from clashing in the map;
 // the frontend reads `path` and `repository_name` off the payload so the
 // file tree groups under the repo header without the prefix bleeding into
 // the displayed path. NUL is impossible in real paths, so the key is
 // always uniquely splittable and the displayed path is unaffected.
-func mergeCumulativeFiles(dst, src map[string]interface{}, repo, baseRef string) {
+func mergeCumulativeFiles(dst, src map[string]interface{}, repo, baseRef string, isSubmodule bool) {
 	for path, payload := range src {
 		m, ok := payload.(map[string]interface{})
 		if !ok {
@@ -1204,7 +1228,7 @@ func mergeCumulativeFiles(dst, src map[string]interface{}, repo, baseRef string)
 		// path, and base_ref so the caller's source map isn't mutated. Earlier
 		// code wrote directly to `m`, which permanently rewrote the per-repo result
 		// before it could be reused (e.g. emitted to a second consumer).
-		copied := make(map[string]interface{}, len(m)+3)
+		copied := make(map[string]interface{}, len(m)+4)
 		for k, v := range m {
 			copied[k] = v
 		}
@@ -1212,6 +1236,9 @@ func mergeCumulativeFiles(dst, src map[string]interface{}, repo, baseRef string)
 		copied["path"] = path
 		if baseRef != "" {
 			copied["base_ref"] = baseRef
+		}
+		if isSubmodule {
+			copied["is_submodule"] = true
 		}
 		dst[fmt.Sprintf("%s\x00%s", repo, path)] = copied
 	}

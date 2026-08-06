@@ -222,7 +222,7 @@ func TestNestedSubmoduleReviewEndpointsIncludeRootAndStableChildBase(t *testing.
 		t.Fatalf("child cumulative diff missing: %s", diffResponse.Body.String())
 	}
 	childFile, ok := childPayload.(map[string]interface{})
-	if !ok || childFile["repository_name"] != "vendor/lib" || childFile["path"] != "child-change.txt" || childFile["base_ref"] != childBase {
+	if !ok || childFile["repository_name"] != "vendor/lib" || childFile["path"] != "child-change.txt" || childFile["base_ref"] != childBase || childFile["is_submodule"] != true {
 		t.Fatalf("child cumulative payload = %#v, want scoped path and base", childPayload)
 	}
 	if _, ok := diff.Files["\x00README.md"]; !ok {
