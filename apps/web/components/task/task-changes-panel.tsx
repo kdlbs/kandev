@@ -260,9 +260,9 @@ function useChangesActions(
 
   const handleDiscard = useCallback(
     async (key: string) => {
-      const { path } = splitReviewFileKey(key);
+      const { repositoryName, path } = splitReviewFileKey(key);
       try {
-        const result = await discard([path]);
+        const result = await discard([path], repositoryName || undefined);
         if (result.success) {
           toast({ title: "Changes discarded", description: path, variant: "success" });
         } else {

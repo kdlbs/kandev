@@ -302,6 +302,11 @@ func (m *Manager) initializedSubmodulePath(workspaceRoot, parentPath, relativePa
 			zap.String("path", childPath), zap.Error(err))
 		return "", false
 	}
+	childRoot, ok := m.openVerifiedSubmoduleRoot(parentRoot, childInfo, childPath, relativePath)
+	if !ok {
+		return "", false
+	}
+	defer func() { _ = childRoot.Close() }()
 	resolvedRoot, err := filepath.EvalSymlinks(workspaceRoot)
 	if err != nil {
 		m.logger.Warn("submodule discovery could not resolve workspace root",
@@ -325,7 +330,42 @@ func (m *Manager) initializedSubmodulePath(workspaceRoot, parentPath, relativePa
 			zap.String("path", childPath))
 		return "", false
 	}
+	currentChildInfo, err := parentRoot.Lstat(filepath.FromSlash(relativePath))
+	if err != nil || currentChildInfo.Mode()&os.ModeSymlink != 0 ||
+		!os.SameFile(childInfo, currentChildInfo) {
+		m.logger.Warn("submodule discovery rejected changed child worktree",
+			zap.String("path", childPath), zap.Error(err))
+		return "", false
+	}
 	return childPath, true
+}
+
+func (m *Manager) openVerifiedSubmoduleRoot(
+	parentRoot *os.Root,
+	childInfo os.FileInfo,
+	childPath string,
+	relativePath string,
+) (*os.Root, bool) {
+	childRoot, err := parentRoot.OpenRoot(filepath.FromSlash(relativePath))
+	if err != nil {
+		m.logger.Warn("submodule discovery could not open child worktree",
+			zap.String("path", childPath), zap.Error(err))
+		return nil, false
+	}
+	openedChildInfo, err := childRoot.Stat(".")
+	if err != nil || !os.SameFile(childInfo, openedChildInfo) {
+		_ = childRoot.Close()
+		m.logger.Warn("submodule discovery rejected replaced child worktree",
+			zap.String("path", childPath), zap.Error(err))
+		return nil, false
+	}
+	if _, err := childRoot.Lstat(".git"); err != nil {
+		_ = childRoot.Close()
+		m.logger.Warn("submodule discovery rejected child without git entry",
+			zap.String("path", childPath), zap.Error(err))
+		return nil, false
+	}
+	return childRoot, true
 }
 
 func listGitlinkPaths(ctx context.Context, workDir, ref string) ([]string, error) {

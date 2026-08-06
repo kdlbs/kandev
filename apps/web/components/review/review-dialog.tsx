@@ -85,9 +85,11 @@ function addCumulativeDiffFiles(
 function addUncommittedFiles(
   fileMap: Map<string, ReviewFile>,
   gitStatusFiles: Record<string, FileInfo>,
+  useRepositoryKeys: boolean,
 ) {
   for (const file of Object.values(gitStatusFiles)) {
-    const key = fileMapKey(file.path, file.repository_name);
+    const repositoryName = useRepositoryKeys ? file.repository_name : undefined;
+    const key = fileMapKey(file.path, repositoryName);
     if (fileMap.has(key)) continue;
     const diff = file.diff ? normalizeDiffContent(file.diff) : "";
     fileMap.set(key, {
@@ -100,7 +102,7 @@ function addUncommittedFiles(
       source: "uncommitted",
       old_path: file.old_path,
       diff_skip_reason: file.diff_skip_reason,
-      repository_name: file.repository_name,
+      repository_name: repositoryName,
     });
   }
 }
@@ -141,7 +143,7 @@ export function buildAllFiles(
   // (panel: fresh worktree content from `git-status`, dialog: stale cumulative
   // diff snapshot from the last fetch) — the dialog appeared to show outdated
   // content even though the cumulative-diff hook was successfully refetching.
-  if (gitStatusFiles) addUncommittedFiles(fileMap, gitStatusFiles);
+  if (gitStatusFiles) addUncommittedFiles(fileMap, gitStatusFiles, useRepositoryKeys);
   if (cumulativeDiff?.files) {
     addCumulativeDiffFiles(
       fileMap,

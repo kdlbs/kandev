@@ -681,17 +681,13 @@ func (m *Manager) UpdateBaseBranches(ctx context.Context, branches map[string]st
 	// caller's ctx so an HTTP request cancel after the field stores
 	// can't strand half the trackers without their refresh.
 	if root != nil {
-		root.SetBaseBranch(lookupBaseBranch(branches, root.RepositoryName()))
+		root.SetBaseBranchIfNotSubmodule(lookupBaseBranch(branches, root.RepositoryName()))
 	}
 	for _, t := range trackers {
-		if !t.IsSubmodule() {
-			t.SetBaseBranch(lookupBaseBranch(branches, t.RepositoryName()))
-		}
+		t.SetBaseBranchIfNotSubmodule(lookupBaseBranch(branches, t.RepositoryName()))
 	}
 	for subpath, t := range bySubpath {
-		if !t.IsSubmodule() {
-			t.SetBaseBranch(lookupBaseBranch(branches, subpath))
-		}
+		t.SetBaseBranchIfNotSubmodule(lookupBaseBranch(branches, subpath))
 	}
 	go m.refreshTrackersDetached(root, trackers, bySubpath)
 }

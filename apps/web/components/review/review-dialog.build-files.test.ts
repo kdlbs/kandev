@@ -255,11 +255,12 @@ describe("buildAllFiles", () => {
 describe("buildAllFiles submodule gitlinks", () => {
   it("hides an available parent gitlink when child files are present", () => {
     const gitStatusFiles = {
-      [LIB_SCOPE]: {
+      [`\u0000${LIB_SCOPE}`]: {
         path: LIB_SCOPE,
         status: "modified" as const,
         staged: false,
         diff: "@@gitlink@@",
+        repository_name: "",
       },
       [`${LIB_SCOPE}\u0000${README_PATH}`]: {
         path: README_PATH,

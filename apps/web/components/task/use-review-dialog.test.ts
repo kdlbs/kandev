@@ -125,10 +125,10 @@ describe("buildReviewGitStatusFiles", () => {
 
     expect(result.isMultiRepo).toBe(true);
     expect(Object.keys(result.files ?? {}).sort()).toEqual([
-      "README.md",
+      "\u0000README.md",
       "vendor/lib\u0000src/lib.ts",
     ]);
-    expect(result.files?.["README.md"]?.repository_name).toBeUndefined();
+    expect(result.files?.["\u0000README.md"]?.repository_name).toBe("");
     expect(result.files?.["vendor/lib\u0000src/lib.ts"]?.repository_name).toBe("vendor/lib");
   });
 });

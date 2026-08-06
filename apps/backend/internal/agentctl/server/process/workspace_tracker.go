@@ -183,6 +183,23 @@ func (wt *WorkspaceTracker) RepositoryName() string {
 func (wt *WorkspaceTracker) SetBaseBranch(baseBranch string) {
 	wt.mu.Lock()
 	defer wt.mu.Unlock()
+	wt.setBaseBranchLocked(baseBranch)
+}
+
+// SetBaseBranchIfNotSubmodule updates the branch override only while holding
+// the same lock used to publish a comparison anchor. This keeps a concurrent
+// rescan from replacing a submodule anchor with a task-level base branch.
+func (wt *WorkspaceTracker) SetBaseBranchIfNotSubmodule(baseBranch string) bool {
+	wt.mu.Lock()
+	defer wt.mu.Unlock()
+	if wt.comparisonAnchorSet {
+		return false
+	}
+	wt.setBaseBranchLocked(baseBranch)
+	return true
+}
+
+func (wt *WorkspaceTracker) setBaseBranchLocked(baseBranch string) {
 	wt.comparisonAnchor = ""
 	wt.comparisonAnchorSet = false
 	if !IsSafeGitRef(baseBranch) {

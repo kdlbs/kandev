@@ -112,7 +112,10 @@ describe("buildFileTree — multi-repo", () => {
 describe("reviewFileKey", () => {
   it("returns the bare path when no repository_name is set", () => {
     expect(reviewFileKey({ path: "README.md" })).toBe("README.md");
-    expect(reviewFileKey({ path: "src/index.ts", repository_name: "" })).toBe("src/index.ts");
+  });
+
+  it("keeps an explicit root scope distinct from a legacy bare path", () => {
+    expect(reviewFileKey({ path: "src/index.ts", repository_name: "" })).toBe(`${SEP}src/index.ts`);
   });
 
   it("joins repository_name and path with the NUL separator", () => {
@@ -202,15 +205,21 @@ describe("splitReviewFileKey", () => {
     });
   });
 
-  it("treats a key with empty repository_name as a legacy bare-path key", () => {
-    // reviewFileKey({path, repository_name: ""}) returns the bare path,
-    // so split should mirror that — no NUL in input means repo is "".
+  it("splits an explicit empty repository_name root key", () => {
+    expect(splitReviewFileKey(`${SEP}${APP_PATH}`)).toEqual({
+      repositoryName: "",
+      path: APP_PATH,
+    });
+  });
+
+  it("keeps a legacy bare-path key without a repository scope", () => {
     expect(splitReviewFileKey(APP_PATH)).toEqual({ repositoryName: "", path: APP_PATH });
   });
 
   it("round-trips through reviewFileKey", () => {
     const cases = [
       { path: "README.md" },
+      { path: "root.md", repository_name: "" },
       { path: "src/index.ts", repository_name: "frontend" },
       { path: "deep/nested/path/file.go", repository_name: "backend" },
       { path: "with spaces/file.md", repository_name: "shared" },

@@ -245,39 +245,6 @@ function aggregatePerRepoResults(
   };
 }
 
-/**
- * Runs `op` against each repo in `repos`, collecting per-repo results.
- * Continues past failures so partial-success state is surfaced (instead of
- * stopping at the first error and leaving the user blind to repo A having
- * already mutated).
- */
-async function fanOutAcrossRepos(
-  repos: string[],
-  operation: string,
-  op: (repo: string) => Promise<RawGitOperationResult>,
-): Promise<GitOperationResult> {
-  const perRepo: PerRepoOperationResult[] = [];
-  for (const repo of repos) {
-    try {
-      const r = await op(repo);
-      perRepo.push({
-        repository_name: repo,
-        success: r.success,
-        output: r.output,
-        error: r.error,
-      });
-    } catch (e) {
-      perRepo.push({
-        repository_name: repo,
-        success: false,
-        output: "",
-        error: e instanceof Error ? e.message : String(e),
-      });
-    }
-  }
-  return aggregatePerRepoResults(perRepo, operation);
-}
-
 async function fanOutAcrossRepositoryWaves(
   repos: string[],
   operation: string,
@@ -527,7 +494,7 @@ function useRemoteOpsFanOut({ gitOps, repoNamesForControls, perRepoStatus }: Rem
   const pull = useCallback(
     async (rebase = false, repo?: string): Promise<GitOperationResult> => {
       if (repo !== undefined || !isMultiRepo) return gitOps.pull(rebase, repo);
-      return fanOutAcrossRepos(namedRepos, "pull", (r) => gitOps.pull(rebase, r));
+      return fanOutAcrossRepositoryWaves(namedRepos, "pull", (r) => gitOps.pull(rebase, r));
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps -- stable fn ref
     [gitOps.pull, isMultiRepo, namedRepos],
@@ -543,7 +510,7 @@ function useRemoteOpsFanOut({ gitOps, repoNamesForControls, perRepoStatus }: Rem
       if (reposWithAhead.length === 0) {
         return { success: true, operation: "push", output: "No commits to push" };
       }
-      return fanOutAcrossRepos(reposWithAhead, "push", (r) => gitOps.push(options, r));
+      return fanOutAcrossRepositoryWaves(reposWithAhead, "push", (r) => gitOps.push(options, r));
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps -- stable fn ref
     [gitOps.push, isMultiRepo, namedRepos, aheadByRepo],
@@ -552,7 +519,7 @@ function useRemoteOpsFanOut({ gitOps, repoNamesForControls, perRepoStatus }: Rem
   const rebase = useCallback(
     async (baseBranch: string, repo?: string): Promise<GitOperationResult> => {
       if (repo !== undefined || !isMultiRepo) return gitOps.rebase(baseBranch, repo);
-      return fanOutAcrossRepos(namedRepos, "rebase", (r) => gitOps.rebase(baseBranch, r));
+      return fanOutAcrossRepositoryWaves(namedRepos, "rebase", (r) => gitOps.rebase(baseBranch, r));
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps -- stable fn ref
     [gitOps.rebase, isMultiRepo, namedRepos],
@@ -561,7 +528,7 @@ function useRemoteOpsFanOut({ gitOps, repoNamesForControls, perRepoStatus }: Rem
   const merge = useCallback(
     async (baseBranch: string, repo?: string): Promise<GitOperationResult> => {
       if (repo !== undefined || !isMultiRepo) return gitOps.merge(baseBranch, repo);
-      return fanOutAcrossRepos(namedRepos, "merge", (r) => gitOps.merge(baseBranch, r));
+      return fanOutAcrossRepositoryWaves(namedRepos, "merge", (r) => gitOps.merge(baseBranch, r));
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps -- stable fn ref
     [gitOps.merge, isMultiRepo, namedRepos],
@@ -570,7 +537,7 @@ function useRemoteOpsFanOut({ gitOps, repoNamesForControls, perRepoStatus }: Rem
   const abort = useCallback(
     async (operation: "merge" | "rebase", repo?: string): Promise<GitOperationResult> => {
       if (repo !== undefined || !isMultiRepo) return gitOps.abort(operation, repo);
-      return fanOutAcrossRepos(namedRepos, "abort", (r) => gitOps.abort(operation, r));
+      return fanOutAcrossRepositoryWaves(namedRepos, "abort", (r) => gitOps.abort(operation, r));
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps -- stable fn ref
     [gitOps.abort, isMultiRepo, namedRepos],

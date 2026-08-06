@@ -10,7 +10,7 @@ import type { ReviewSeverity, TaskReviewFinding, TaskReviewRun } from "@/lib/typ
 export function findingFileKey(finding: TaskReviewFinding): string {
   return reviewFileKey({
     path: finding.file_path,
-    repository_name: finding.repository_name || undefined,
+    repository_name: finding.repository_name === undefined ? undefined : finding.repository_name,
   });
 }
 

@@ -13,7 +13,11 @@ import { usePRDiff } from "@/hooks/domains/github/use-pr-diff";
 import { usePRReviewRepositoryIdentity } from "@/hooks/domains/github/use-pr-review-repository-identity";
 import { useTaskRepositories } from "@/hooks/domains/kanban/use-task-repositories";
 import { formatReviewCommentsAsMarkdown } from "@/components/task/chat/messages/review-comments-attachment";
-import { getCumulativeReviewRepositoryNames, isReviewMultiRepo } from "@/components/review/types";
+import {
+  getCumulativeReviewRepositoryNames,
+  isReviewMultiRepo,
+  reviewFileKey,
+} from "@/components/review/types";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { generateUUID } from "@/lib/utils";
 import { useToast } from "@/components/toast-provider";
@@ -32,8 +36,8 @@ function buildMultiRepoReviewFiles(
   for (const { repository_name, status } of statusByRepo) {
     if (!status?.files) continue;
     for (const [path, file] of Object.entries(status.files)) {
-      const key = repository_name ? `${repository_name}\u0000${path}` : path;
-      files[key] = repository_name ? { ...file, repository_name } : file;
+      const key = reviewFileKey({ path, repository_name });
+      files[key] = { ...file, repository_name };
     }
   }
   return files;
@@ -76,8 +80,9 @@ export function buildReviewGitStatusFiles(
  * Builds the unified gitStatus.files map fed into the ReviewDialog. Multi-repo
  * tasks have one git status per repo, and two repos can have files at the same
  * relative path (`README.md` in both), so the map key is `repo\u0000path` and
- * every FileInfo is stamped with its `repository_name`. Single-repo tasks keep
- * the legacy path-only keying.
+ * every FileInfo is stamped with its `repository_name`, including the explicit
+ * empty scope for the real workspace root. Single-repo tasks keep the legacy
+ * path-only keying.
  */
 function useReviewGitStatusFiles(
   sessionId: string | null,

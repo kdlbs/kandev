@@ -149,13 +149,8 @@ function collectPathsFromFiles(
   useRepositoryKeys: boolean = true,
 ): void {
   for (const path of Object.keys(files)) {
-    // In multi-repo mode a bare path identifies the workspace root. A child
-    // path must stay composite-keyed so it cannot hide a same-named root file
-    // in the cumulative diff.
-    if (!useRepositoryKeys || !repositoryName) paths.add(path);
-    if (useRepositoryKeys && repositoryName) {
-      paths.add(reviewFileKey({ path, repository_name: repositoryName }));
-    }
+    const scope = useRepositoryKeys ? repositoryName : undefined;
+    paths.add(reviewFileKey({ path, repository_name: scope }));
   }
 }
 
@@ -256,6 +251,7 @@ function addUncommittedSources(
   fileMap: Map<string, ReviewFile>,
   statusByRepo: BuildReviewSourcesInput["statusByRepo"],
   gitStatus: BuildReviewSourcesInput["gitStatus"],
+  useRepositoryKeys: boolean,
 ) {
   if (statusByRepo && statusByRepo.length > 0) {
     for (const { repository_name, status } of statusByRepo) {
@@ -263,7 +259,7 @@ function addUncommittedSources(
         addUncommittedFiles(
           fileMap,
           status.files as Record<string, UncommittedFile>,
-          repository_name || undefined,
+          useRepositoryKeys ? repository_name : undefined,
         );
       }
     }
@@ -324,7 +320,7 @@ export function buildReviewSources(input: BuildReviewSourcesInput): BuildReviewS
   const useRepositoryKeys = input.useRepositoryKeys ?? true;
 
   const uncommittedPaths = collectUncommittedPaths(statusByRepo, gitStatus, useRepositoryKeys);
-  addUncommittedSources(fileMap, statusByRepo, gitStatus);
+  addUncommittedSources(fileMap, statusByRepo, gitStatus, useRepositoryKeys);
   addCommittedAndPRSources(fileMap, input, uncommittedPaths);
   const allFiles = suppressAvailableGitlinkFiles(sortReviewFiles(fileMap));
   return { allFiles, sourceCounts: countReviewSources(allFiles) };

@@ -102,21 +102,38 @@ test.describe("Nested submodule Review", () => {
 
       const outerPath = path.join(worktreePath, "vendor/outer");
       const innerPath = path.join(outerPath, "vendor/inner");
-      const parentOuterSha = readGitValue(
-        worktreePath,
-        ["rev-parse", "HEAD:vendor/outer"],
-        backend.tmpDir,
-      );
-      const outerInnerSha = readGitValue(
-        outerPath,
-        ["rev-parse", "HEAD:vendor/inner"],
-        backend.tmpDir,
-      );
-      expect(parentOuterSha).toBe(readGitValue(outerPath, ["rev-parse", "HEAD"], backend.tmpDir));
-      expect(outerInnerSha).toBe(readGitValue(innerPath, ["rev-parse", "HEAD"], backend.tmpDir));
-      expect(readGitValue(worktreePath, ["status", "--porcelain"], backend.tmpDir)).toBe("");
-      expect(readGitValue(outerPath, ["status", "--porcelain"], backend.tmpDir)).toBe("");
-      expect(readGitValue(innerPath, ["status", "--porcelain"], backend.tmpDir)).toBe("");
+      const expectedOuterSha = readGitValue(outerPath, ["rev-parse", "HEAD"], backend.tmpDir);
+      const expectedInnerSha = readGitValue(innerPath, ["rev-parse", "HEAD"], backend.tmpDir);
+      // The dialog closes as soon as the request starts. Wait for the deepest
+      // commits and their parent gitlinks to settle before asserting the
+      // filesystem state, otherwise a successful dependency-wave commit can
+      // look flaky while the root request is still in flight.
+      await expect
+        .poll(
+          () => readGitValue(worktreePath, ["rev-parse", "HEAD:vendor/outer"], backend.tmpDir),
+          { timeout: 45_000 },
+        )
+        .toBe(expectedOuterSha);
+      await expect
+        .poll(() => readGitValue(outerPath, ["rev-parse", "HEAD:vendor/inner"], backend.tmpDir), {
+          timeout: 45_000,
+        })
+        .toBe(expectedInnerSha);
+      await expect
+        .poll(() => readGitValue(worktreePath, ["status", "--porcelain"], backend.tmpDir), {
+          timeout: 45_000,
+        })
+        .toBe("");
+      await expect
+        .poll(() => readGitValue(outerPath, ["status", "--porcelain"], backend.tmpDir), {
+          timeout: 45_000,
+        })
+        .toBe("");
+      await expect
+        .poll(() => readGitValue(innerPath, ["status", "--porcelain"], backend.tmpDir), {
+          timeout: 45_000,
+        })
+        .toBe("");
       expect(readGitValue(worktreePath, ["rev-parse", "HEAD"], backend.tmpDir)).not.toBe(
         parentBaseSha,
       );

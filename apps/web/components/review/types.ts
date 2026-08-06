@@ -31,12 +31,15 @@ export type ReviewFile = {
  * impossible to embed in a real path or repository name, so the key is
  * always uniquely splittable. Single-repo files (no `repository_name`)
  * keep the legacy bare-path key for backwards compatibility with existing
- * `session_file_reviews` rows.
+ * `session_file_reviews` rows. An explicit empty name represents the real
+ * workspace root in a multi-repo payload and therefore keeps the separator.
  */
 const FILE_KEY_SEP = "\u0000";
 
 export function reviewFileKey(file: { path: string; repository_name?: string }): string {
-  return file.repository_name ? `${file.repository_name}${FILE_KEY_SEP}${file.path}` : file.path;
+  return file.repository_name === undefined
+    ? file.path
+    : `${file.repository_name}${FILE_KEY_SEP}${file.path}`;
 }
 
 /** Mirrors backend `worktree.SanitizeRepoDirName`, which defines the

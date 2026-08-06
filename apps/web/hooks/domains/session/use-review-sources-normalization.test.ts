@@ -140,7 +140,7 @@ describe("nested scope review sources", () => {
     });
 
     expect(result.allFiles.map(reviewFileKey)).toEqual([
-      "README.md",
+      "\u0000README.md",
       `${NESTED_SCOPE}\u0000src/local.ts`,
     ]);
   });
@@ -180,7 +180,7 @@ describe("nested scope review sources", () => {
     });
 
     expect(result.allFiles.map(reviewFileKey).sort()).toEqual([
-      "README.md",
+      "\u0000README.md",
       `${NESTED_SCOPE}\u0000README.md`,
     ]);
   });
@@ -251,6 +251,6 @@ describe("nested scope gitlink sources", () => {
       prDiffFiles: undefined,
       useRepositoryKeys: true,
     });
-    expect(unavailable.allFiles.map(reviewFileKey)).toEqual([NESTED_SCOPE]);
+    expect(unavailable.allFiles.map(reviewFileKey)).toEqual([`\u0000${NESTED_SCOPE}`]);
   });
 });

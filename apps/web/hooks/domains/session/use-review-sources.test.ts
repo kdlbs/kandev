@@ -211,6 +211,7 @@ describe("buildReviewSources", () => {
     });
     expect(result.allFiles).toHaveLength(1);
     expect(result.allFiles[0].source).toBe("uncommitted");
+    expect(result.allFiles[0].repository_name).toBeUndefined();
     expect(result.sourceCounts).toEqual({ uncommitted: 1, committed: 0, pr: 0 });
   });
 
@@ -311,6 +312,7 @@ describe("buildReviewSources", () => {
     });
     expect(result.allFiles).toHaveLength(1);
     expect(result.allFiles[0].source).toBe("uncommitted");
+    expect(result.allFiles[0].repository_name).toBeUndefined();
     expect(result.sourceCounts).toEqual({ uncommitted: 1, committed: 0, pr: 0 });
   });
 
@@ -381,6 +383,7 @@ describe("buildReviewSources", () => {
     });
     expect(result.allFiles).toHaveLength(1);
     expect(result.allFiles[0].source).toBe("uncommitted");
+    expect(result.allFiles[0].repository_name).toBeUndefined();
     expect(result.sourceCounts).toEqual({ uncommitted: 1, committed: 0, pr: 0 });
   });
 
@@ -413,6 +416,7 @@ describe("buildReviewSources", () => {
     });
     expect(result.allFiles).toHaveLength(1);
     expect(result.allFiles[0].source).toBe("uncommitted");
+    expect(result.allFiles[0].repository_name).toBeUndefined();
     expect(result.sourceCounts).toEqual({ uncommitted: 1, committed: 0, pr: 0 });
   });
 
