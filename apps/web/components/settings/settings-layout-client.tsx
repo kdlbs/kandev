@@ -233,11 +233,7 @@ function IntegrationCopyConfigAction() {
   const pathname = usePathname();
   const workspaces = useAppStore((s) => s.workspaces.items);
   const activeId = useAppStore((s) => s.workspaces.activeId);
-  const routeWorkspaceId = workspaceIdFromPathname(pathname);
-  const selected =
-    routeWorkspaceId && workspaces.some((workspace) => workspace.id === routeWorkspaceId)
-      ? routeWorkspaceId
-      : (activeId ?? workspaces[0]?.id ?? null);
+  const selected = copySourceWorkspaceId(pathname, workspaces, activeId);
   const integration = integrationFromPathname(pathname);
 
   if (!integration || !selected || workspaces.length === 0) return null;
@@ -253,15 +249,40 @@ function IntegrationCopyConfigAction() {
   );
 }
 
-// Workspace id from either spelling of the workspace route. `workspaces` is
-// canonical and `workspace` is the legacy path the route table redirects, but
-// this has to match whatever `integrationFromPathname` matches: that regex
-// accepts both, so a plural-only parse here would leave the copy action
-// rendered with no routed workspace and silently fall back to the *active*
-// one — copying the wrong workspace's credentials.
+// Either spelling: `workspaces` is canonical, `workspace` the legacy path the
+// route table redirects. Both are matched because `integrationFromPathname`
+// matches both — a plural-only parse here left the copy action rendered with no
+// routed workspace, silently sourcing from the active one instead.
+const WORKSPACE_SCOPED_SETTINGS = /^\/settings\/workspaces?\//;
+
 function workspaceIdFromPathname(pathname: string): string | null {
   const match = pathname.match(/^\/settings\/workspaces?\/([^/]+)(?:\/|$)/);
   return safeDecodePathSegment(match?.[1]);
+}
+
+/**
+ * Which workspace the copy action reads its configuration *from*.
+ *
+ * An unscoped `/settings/integrations/<slug>` genuinely means "the active
+ * workspace" — the route table redirects it into that workspace's tab — so the
+ * active workspace is the right source there.
+ *
+ * A route that names a workspace is different: if that workspace does not
+ * resolve (deleted since the URL was bookmarked, or a malformed segment) then
+ * falling back would copy credentials out of a workspace the URL never
+ * mentioned, with nothing on screen saying so. There is no safe substitute, so
+ * the action stays hidden.
+ */
+function copySourceWorkspaceId(
+  pathname: string,
+  workspaces: Array<{ id: string }>,
+  activeId: string | null,
+): string | null {
+  if (WORKSPACE_SCOPED_SETTINGS.test(pathname)) {
+    const routed = workspaceIdFromPathname(pathname);
+    return routed && workspaces.some((workspace) => workspace.id === routed) ? routed : null;
+  }
+  return activeId ?? workspaces[0]?.id ?? null;
 }
 
 function SettingsShell({

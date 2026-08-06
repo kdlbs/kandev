@@ -125,8 +125,14 @@ describe("SettingsLayoutClient integrations actions", () => {
     expect(screen.getByTestId(COPY_CONFIG_TEST_ID).dataset.sourceWorkspaceId).toBe("ws-2");
   });
 
-  it("falls back to the active workspace when the routed one is not in the store", () => {
-    pathname = "/settings/workspaces/ws-deleted/integrations/github";
+  // A URL that names a workspace and cannot resolve it has no safe source: the
+  // active workspace is not what the route referred to, and copying its
+  // credentials into the chosen target would be silent and wrong.
+  it.each([
+    ["deleted since the URL was saved", "/settings/workspaces/ws-deleted/integrations/github"],
+    ["a malformed segment", "/settings/workspaces/%E0%A4%A/integrations/github"],
+  ])("offers no copy action when the routed workspace is %s", (_label, path) => {
+    pathname = path;
     state.workspaces.activeId = "ws-1";
 
     render(
@@ -135,20 +141,7 @@ describe("SettingsLayoutClient integrations actions", () => {
       </SettingsLayoutClient>,
     );
 
-    expect(screen.getByTestId(COPY_CONFIG_TEST_ID).dataset.sourceWorkspaceId).toBe("ws-1");
-  });
-
-  it("falls back to the active workspace when a scoped route has invalid encoding", () => {
-    pathname = "/settings/workspaces/%E0%A4%A/integrations/github";
-    state.workspaces.activeId = "ws-1";
-
-    render(
-      <SettingsLayoutClient>
-        <div>Settings page</div>
-      </SettingsLayoutClient>,
-    );
-
-    expect(screen.getByTestId(COPY_CONFIG_TEST_ID).dataset.sourceWorkspaceId).toBe("ws-1");
+    expect(screen.queryByTestId(COPY_CONFIG_TEST_ID)).toBeNull();
   });
 
   it("hosts the route save action and reserves safe-area scroll space", async () => {
