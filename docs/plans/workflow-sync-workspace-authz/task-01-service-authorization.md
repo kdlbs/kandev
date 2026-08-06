@@ -55,3 +55,12 @@ cd apps/backend && golangci-lint run ./internal/workflowsync/... ./internal/back
 - `go build ./...`: clean.
 - `go test -race ./internal/workflowsync/... ./internal/backendapp/...`: both `ok`.
 - `golangci-lint run ./internal/workflowsync/... ./internal/backendapp/... --new-from-rev=main --timeout=5m`: 0 issues.
+- **Codex review finding (blocker, fixed):** the initial service-layer tests only ever installed a
+  hand-written fake authorizer, so a regression removing the real
+  `svc.SetWorkspaceAuthorizer(taskSvc.AuthorizeWorkspaceAccess)` wiring line in
+  `initWorkflowSyncService` would leave every test green. Added
+  `apps/backend/internal/backendapp/workflowsync_wiring_test.go`
+  (`TestInitWorkflowSyncService_WiresRealWorkspaceAuthorization`), which calls
+  `initWorkflowSyncService` itself with a real `taskservice.Service` backed by SQLite. Verified by
+  temporarily commenting out the wiring line: the new test failed for the expected reason; restoring
+  the line made it pass again (confirmed via `go build`/full suite afterward).

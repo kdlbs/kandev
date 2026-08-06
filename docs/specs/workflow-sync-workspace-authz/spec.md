@@ -1,5 +1,5 @@
 ---
-status: draft
+status: building
 created: 2026-08-06
 owner: nova28
 ---
@@ -7,15 +7,27 @@ owner: nova28
 # Workflow Sync — Per-User Workspace Authorization
 
 ## Why
-Every other per-workspace integration service (GitHub, GitLab watch dependencies aside, Jira,
-Linear, Slack, Azure DevOps, Automation) enforces that a caller-supplied `workspace_id` belongs to
-the requesting user before reading or mutating that workspace's data. `internal/workflowsync`
-(workflow sync config + force-sync) never adopted this boundary: its HTTP handlers take
-`workspace_id` straight from the query string and hand it to the service with no ownership check.
-Under `features.auth` enabled, an authenticated member who knows (or guesses) another workspace's ID
-can read that workspace's synced-repo configuration or overwrite it to point at a different
-repo/branch/directory — a persistent redirection of what that workspace syncs, applied on the next
-poll under the victim workspace's own routing.
+Every other per-workspace integration service (GitHub, Jira, Linear, Slack, Azure DevOps,
+Automation) enforces that a caller-supplied `workspace_id` belongs to the requesting user *inside
+the service itself* — `SetWorkspaceAuthorizer` + a check at the top of every user-facing method —
+in addition to the global `integrationWorkspaceScopeMiddleware`
+(`internal/backendapp/main.go`/`helpers.go`) that already gates their HTTP routes by path prefix.
+`internal/workflowsync` is the one integration service that never adopted the service-layer half of
+that pattern: its `Service` methods take a caller-supplied `workspace_id` straight from the caller
+with no ownership check of their own.
+
+**Correction (found during review):** an earlier draft of this spec claimed the HTTP endpoints
+(`/api/v1/workflow-sync/config`, `/api/v1/workflow-sync/sync`) had no ownership check at all and were
+directly exploitable by an authenticated member. That was wrong — those paths are already listed in
+`integrationWorkspacePrefixes` and covered by the global middleware, which authorizes before any
+workflow-sync handler runs, exactly like `/api/v1/jira/`, `/api/v1/github/`, etc. The actual gap this
+spec closes is narrower: `workflowsync.Service` has no authorization boundary of its own, unlike
+every sibling integration service, so (a) it is the one integration whose safety depends entirely on
+the route-level middleware never being bypassed, misconfigured, or missing this path prefix, with no
+independent second layer, and (b) any future non-HTTP caller of the service (a WS handler, an MCP
+tool, a plugin, a different mount point) would inherit no protection at all, unlike every sibling
+service where the constructor-level check still applies regardless of how the call arrived. This is
+a defense-in-depth and consistency fix, not a closure of a currently open HTTP exploit.
 
 ## What
 - The workflow-sync config read endpoint (`GET /api/v1/workflow-sync/config`) SHALL deny a request

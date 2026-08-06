@@ -108,13 +108,26 @@ Backend-only change; no frontend/E2E surface (no UI, WS, or client-visible contr
 
 ## Verification Results
 
-Both tasks done; see each task file's `## Results` for exact per-task output. Whole-package
-summary:
+Both tasks done; see each task file's `## Results` for exact per-task output, including two
+Codex-review-driven follow-up fixes (untested production wiring, force-sync's second error path)
+and expanded test coverage. Whole-package summary:
 - `go build ./...`: clean.
 - `gofmt -l internal/workflowsync internal/backendapp`: no output (already formatted).
 - `go vet ./internal/workflowsync/... ./internal/backendapp/...`: clean.
 - `go test -race ./internal/workflowsync/... ./internal/backendapp/...`: both `ok`.
 - `golangci-lint run ./internal/workflowsync/... ./internal/backendapp/... --new-from-rev=main --timeout=5m`: 0 issues.
+- Full `go build ./... && go test -race ./...` (whole backend): all packages `ok` except a
+  pre-existing, unrelated flake in `internal/repoclone`
+  (`TestEnsureWorkspaceClonedWithBasicAuthKeepsCredentialScopedToGitChild/context_cancellation`,
+  a subprocess-timing test) — confirmed unrelated by re-running it in isolation (passes) and by this
+  branch touching neither that package nor anything it depends on.
+
+**Severity correction:** Codex review found that `origin/main` already has a global
+`integrationWorkspaceScopeMiddleware` (`internal/backendapp/main.go:1807`) that path-matches
+`/api/v1/workflow-sync/` and authorizes before any handler runs — the HTTP-level exploit originally
+described in this spec's first draft was already blocked. See spec.md's "Correction" note; this fix
+closes a real but narrower gap (service-layer defense-in-depth, consistency with every sibling
+integration, protection for any future non-HTTP caller), not a currently-open HTTP vulnerability.
 
 ---
 

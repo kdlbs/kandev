@@ -140,6 +140,10 @@ func (c *Controller) httpForceSync(ctx *gin.Context) {
 		return
 	}
 	cfg, err := c.service.GetConfigForWorkspace(ctx.Request.Context(), workspaceID)
+	if workspaceDenied(err) {
+		ctx.JSON(http.StatusNotFound, gin.H{"error": "workspace not found"})
+		return
+	}
 	if err != nil {
 		c.internalError(ctx, "failed to load workflow sync config", err)
 		return

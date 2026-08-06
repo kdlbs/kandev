@@ -53,14 +53,23 @@ cd apps/backend && go test -race ./internal/workflowsync/...
 
 ## Results
 
-- Status: **done**.
-- `go test ./internal/workflowsync/... -run 'TestHTTPHandlers' -v`: 3/3 pass
-  (`TestHTTPHandlers_OwnerCanReadAndWriteOwnWorkspace`,
-  `TestHTTPHandlers_ForeignMemberDeniedOnAllRoutesWithoutLeaking` with 4 subtests
-  get/post/delete/sync, `TestHTTPHandlers_SyntheticIdentitySucceedsWhenAuthDisabled`).
+- Status: **done**, including two follow-up fixes from an independent Codex review round.
+- `go test ./internal/workflowsync/... -run 'TestHTTPHandlers' -v`: all pass
+  (`TestHTTPHandlers_OwnerSucceedsOnAllRoutes`, `TestHTTPHandlers_SyntheticIdentitySucceedsOnAllRoutes`,
+  `TestHTTPHandlers_ForeignMemberDeniedOnAllRoutesWithoutLeaking`, each table-driven across
+  get/post/delete/sync, plus `TestHTTPHandlers_ForceSyncDeniesSecondLookupAfterAccessRevoked`).
 - Regression confirmed: before the task-01 service change, the get/post/delete/sync subtests failed
-  with 500s and leaked/accepted the foreign workspace's config (verified during TDD — the test file
-  was written and run against pre-fix `handlers.go` first, then against pre-fix `service.go`, each
-  failing for the expected reason before the corresponding fix landed).
+  with 500s and leaked/accepted the foreign workspace's config (verified during TDD).
+- **Codex review finding (blocker, fixed):** `httpForceSync`'s second call
+  (`GetConfigForWorkspace`, used to build the response after a successful sync) did not map
+  `ErrWorkspaceNotFound` to 404 — a race where access is revoked between the sync and the follow-up
+  read fell through to a generic 500. Fixed with the same `workspaceDenied` check; covered by
+  `TestHTTPHandlers_ForceSyncDeniesSecondLookupAfterAccessRevoked` (verified to fail pre-fix, pass
+  post-fix).
+- **Codex review finding (suggestion, fixed):** owner/synthetic-identity coverage was GET-only and
+  the leak/mutation assertions didn't cover branch/path or the full config. Rewritten as
+  table-driven tests across all four operations (`TestHTTPHandlers_OwnerSucceedsOnAllRoutes`,
+  `TestHTTPHandlers_SyntheticIdentitySucceedsOnAllRoutes`), with distinctive branch/path fixture
+  values and a full-struct `before`/`after` config comparison in the denial test.
 - `go test -race ./internal/workflowsync/... ./internal/backendapp/...`: both `ok`.
 - `golangci-lint run ./internal/workflowsync/... --new-from-rev=main --timeout=5m`: 0 issues.

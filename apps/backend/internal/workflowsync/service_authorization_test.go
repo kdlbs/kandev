@@ -104,4 +104,14 @@ func TestServiceMethods_SucceedWhenAuthorizerAllows(t *testing.T) {
 	cfg, err := svc.GetConfigForWorkspace(context.Background(), "ws-1")
 	require.NoError(t, err)
 	assert.NotNil(t, cfg)
+
+	_, err = svc.SetConfigForWorkspace(context.Background(), "ws-1", &SetConfigRequest{
+		RepoOwner: "acme", RepoName: "flows",
+	})
+	require.NoError(t, err)
+
+	_, err = svc.SyncWorkspace(context.Background(), "ws-1")
+	require.NoError(t, err)
+
+	require.NoError(t, svc.DeleteConfigForWorkspace(context.Background(), "ws-1"))
 }
