@@ -12,16 +12,21 @@ export type CommandPanelScopeMode = "commands" | "search-files" | "search-conten
 
 type ScopeOption = {
   mode: CommandPanelScopeMode;
-  label: string;
+  /**
+   * Catalog key, resolved at render. `mode` stays the untranslated
+   * discriminant — it is compared with `===` in `isCommandPanelScopeMode` and
+   * threaded through the command-panel state.
+   */
+  labelKey: string;
   shortcutId: ConfigurableShortcutId;
 };
 
 const SCOPE_OPTIONS: ScopeOption[] = [
-  { mode: "commands", label: "Commands", shortcutId: "SEARCH" },
-  { mode: "search-files", label: "Files", shortcutId: "FILE_SEARCH" },
+  { mode: "commands", labelKey: "common:scopeCommands", shortcutId: "SEARCH" },
+  { mode: "search-files", labelKey: "common:scopeFiles", shortcutId: "FILE_SEARCH" },
   {
     mode: "search-content",
-    label: "Contents",
+    labelKey: "common:scopeContents",
     shortcutId: "CONTENT_SEARCH",
   },
 ];
@@ -59,15 +64,16 @@ export function CommandPanelScopeSwitcher({
       {SCOPE_OPTIONS.map((scope) => {
         const active = mode === scope.mode;
         const shortcut = formatShortcut(getShortcut(scope.shortcutId, keyboardShortcuts));
+        const label = t(scope.labelKey);
         return (
           <button
             key={scope.mode}
             type="button"
             role="tab"
-            aria-label={scope.label}
+            aria-label={label}
             aria-selected={active}
             tabIndex={-1}
-            title={`${scope.label} (${shortcut})`}
+            title={t("common:scopeTitleWithShortcut", { label, shortcut })}
             onMouseDown={(event) => event.preventDefault()}
             onClick={() => onScopeChange(scope.mode)}
             className={cn(
@@ -77,7 +83,7 @@ export function CommandPanelScopeSwitcher({
                 : "after:scale-x-75 after:opacity-0",
             )}
           >
-            <span>{scope.label}</span>
+            <span>{label}</span>
           </button>
         );
       })}

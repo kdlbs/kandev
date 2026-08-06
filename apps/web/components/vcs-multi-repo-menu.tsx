@@ -52,6 +52,21 @@ export type PrimaryButtonConfig = {
   tooltip: string;
 };
 
+/**
+ * One complete sentence per action rather than a single frame with the action
+ * name interpolated. `primaryButtonConfig.label` is itself already translated,
+ * and a translated value dropped into a translated frame cannot be declined to
+ * agree with the surrounding grammar (genitive in German/Russian, and so on) —
+ * nor can the frame be reordered around it. Keyed off `primaryAction`, which is
+ * an untranslated discriminant.
+ */
+const PICK_REPOSITORY_KEYS: Record<"commit" | "push" | "pr" | "rebase", string> = {
+  commit: "integrations:pickARepositoryForCommit",
+  push: "integrations:pickARepositoryForPush",
+  pr: "integrations:pickARepositoryForCreatePr",
+  rebase: "integrations:pickARepositoryForRebase",
+};
+
 const ITEM_CLASS = "cursor-pointer gap-3";
 const ICON_CLASS = "h-4 w-4 text-muted-foreground";
 
@@ -305,9 +320,7 @@ export function MultiRepoVcsButton({
           </DropdownMenu>
         </span>
       </TooltipTrigger>
-      <TooltipContent>
-        {t("integrations:pickARepositoryForAction", { action: primaryButtonConfig.label })}
-      </TooltipContent>
+      <TooltipContent>{t(PICK_REPOSITORY_KEYS[primaryAction])}</TooltipContent>
     </Tooltip>
   );
 }

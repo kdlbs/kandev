@@ -23,6 +23,13 @@ import {
   writeImproveKandevSkipIntro,
 } from "./improve-kandev-dialog-model";
 import { Trans, useTranslation } from "react-i18next";
+// The module-level `t` — resolved when called, not at import — for the two
+// error-only strings below. The hook-provided `t` changes identity on a locale
+// switch, and putting it in these effects' dependency arrays would re-POST
+// `bootstrapImproveKandev` (which forks a repository) and reset auth state
+// whenever the user changes language. Render-time copy still uses the reactive
+// `t` from `useTranslation()`.
+import { t as tStatic } from "@/lib/i18n";
 
 type ImproveKandevDialogProps = {
   open: boolean;
@@ -133,7 +140,6 @@ function useGitHubAuthCheck(
   workspaceId: string | null,
   setAuth: (s: AuthState) => void,
 ) {
-  const { t } = useTranslation();
   useEffect(() => {
     if (!open || !workspaceId) return;
     let cancelled = false;
@@ -150,7 +156,7 @@ function useGitHubAuthCheck(
           kind: "missing",
           message: ghIssue.message,
           fixUrl: ghIssue.fix_url.replace("{workspaceId}", workspaceId),
-          fixLabel: ghIssue.fix_label || t("common:configureGithub"),
+          fixLabel: ghIssue.fix_label || tStatic("common:configureGithub"),
         });
       } catch {
         if (!cancelled) setAuth({ kind: "ok" }); // Fail open — bootstrap will surface real errors.
@@ -159,7 +165,7 @@ function useGitHubAuthCheck(
     return () => {
       cancelled = true;
     };
-  }, [open, workspaceId, setAuth, t]);
+  }, [open, workspaceId, setAuth]);
 }
 
 function useBootstrapKandev(
@@ -168,7 +174,6 @@ function useBootstrapKandev(
   workspaceId: string | null,
   setBootstrap: (s: BootstrapState) => void,
 ) {
-  const { t } = useTranslation();
   const { toast } = useToast();
   const setRepositories = useAppStore((state) => state.setRepositories);
   useEffect(() => {
@@ -196,10 +201,10 @@ function useBootstrapKandev(
         });
       } catch (err) {
         if (cancelled) return;
-        const message = err instanceof Error ? err.message : t("common:bootstrapFailed");
+        const message = err instanceof Error ? err.message : tStatic("common:bootstrapFailed");
         setBootstrap({ kind: "error", message });
         toast({
-          title: t("common:couldNotPrepareImproveKandev"),
+          title: tStatic("common:couldNotPrepareImproveKandev"),
           description: message,
           variant: "error",
         });
@@ -208,7 +213,7 @@ function useBootstrapKandev(
     return () => {
       cancelled = true;
     };
-  }, [open, mode, workspaceId, setBootstrap, setRepositories, toast, t]);
+  }, [open, mode, workspaceId, setBootstrap, setRepositories, toast]);
 }
 
 function IntroBody({
