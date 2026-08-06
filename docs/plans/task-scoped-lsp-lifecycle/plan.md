@@ -322,7 +322,8 @@ Completed 2026-08-05.
   bounded deadline and close a wedged server pipe on timeout, so Stop and teardown cannot wait
   forever on JSON-RPC stdin. Focused regressions passed 20 repetitions, the changed task-host
   packages passed under `-race`, the orchestrator/backend wiring packages passed, and backend lint
-  reported zero issues.
+  reported zero issues. CodeQL then identified a theoretical frame-allocation overflow; frame size
+  arithmetic is now checked before allocation, with focused overflow and wire-format coverage.
 
 ---
 

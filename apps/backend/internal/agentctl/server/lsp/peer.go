@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"sync"
 	"time"
@@ -17,8 +18,9 @@ import (
 const defaultPeerWriteTimeout = 5 * time.Second
 
 var (
-	errPeerClosed       = errors.New("language-server JSON-RPC peer closed")
-	errPeerWriteTimeout = errors.New("language-server JSON-RPC write timed out")
+	errPeerClosed        = errors.New("language-server JSON-RPC peer closed")
+	errPeerFrameTooLarge = errors.New("language-server JSON-RPC frame is too large")
+	errPeerWriteTimeout  = errors.New("language-server JSON-RPC write timed out")
 )
 
 type rpcError struct {
@@ -264,11 +266,29 @@ func (p *peer) write(message rpcMessage) error {
 		return errPeerClosed
 	default:
 	}
-	header := fmt.Sprintf("Content-Length: %d\r\n\r\n", len(payload))
-	frame := make([]byte, 0, len(header)+len(payload))
-	frame = append(frame, header...)
-	frame = append(frame, payload...)
+	frame, err := buildPeerFrame(payload)
+	if err != nil {
+		return err
+	}
 	return p.writeFrame(frame)
+}
+
+func buildPeerFrame(payload []byte) ([]byte, error) {
+	header := fmt.Sprintf("Content-Length: %d\r\n\r\n", len(payload))
+	frameSize, err := checkedPeerFrameSize(len(header), len(payload))
+	if err != nil {
+		return nil, err
+	}
+	frame := make([]byte, 0, frameSize)
+	frame = append(frame, header...)
+	return append(frame, payload...), nil
+}
+
+func checkedPeerFrameSize(headerLength, payloadLength int) (int, error) {
+	if headerLength < 0 || payloadLength < 0 || payloadLength > math.MaxInt-headerLength {
+		return 0, errPeerFrameTooLarge
+	}
+	return headerLength + payloadLength, nil
 }
 
 type peerWriteDeadliner interface {
