@@ -240,6 +240,43 @@ func TestBuildWorkflowPrompt_ExpandsStepPromptReference(t *testing.T) {
 	}
 }
 
+func TestBuildWorkflowPrompt_ExpandsWorkflowPromptReference(t *testing.T) {
+	// @name in the workflow-level prompt must expand the same way as step prompts:
+	// expansion runs on the full joined string after instructions are prepended.
+	stepGetter := newMockStepGetter()
+	stepGetter.workflowPrompts["wf-1"] = "Follow @security-rules always."
+	svc := createTestService(setupTestRepo(t), stepGetter, newMockTaskRepo())
+	expander := &fakePromptReferenceExpander{}
+	svc.promptExpander = expander
+	step := &wfmodels.WorkflowStep{
+		ID:         "step-1",
+		WorkflowID: "wf-1",
+		Prompt:     "Commit the changes.",
+	}
+
+	got := svc.buildWorkflowPrompt(context.Background(), "base", step, "task-1", "session-1", false)
+
+	if len(expander.calls) != 1 {
+		t.Fatalf("expected expander called once on joined prompt, got %d", len(expander.calls))
+	}
+	seen := expander.calls[0]
+	if !strings.Contains(seen, "## Workflow instructions") {
+		t.Fatalf("expected expander to see workflow instructions block, got %q", seen)
+	}
+	if !strings.Contains(seen, "Follow @security-rules always.") {
+		t.Fatalf("expected expander to see workflow @mention, got %q", seen)
+	}
+	if !strings.Contains(seen, "Commit the changes.") {
+		t.Fatalf("expected expander to see step prompt after instructions, got %q", seen)
+	}
+	if !strings.Contains(got, "Follow @security-rules always.") {
+		t.Fatalf("expected visible @mention preserved, got %q", got)
+	}
+	if !strings.Contains(got, sysprompt.Wrap(fakeResolvedPromptReferenceContext)) {
+		t.Fatalf("expected hidden expansion block appended for workflow @mention, got %q", got)
+	}
+}
+
 func TestBuildWorkflowPrompt_PassthroughSkipsReferenceExpansion(t *testing.T) {
 	svc := createTestService(setupTestRepo(t), newMockStepGetter(), newMockTaskRepo())
 	expander := &fakePromptReferenceExpander{}
