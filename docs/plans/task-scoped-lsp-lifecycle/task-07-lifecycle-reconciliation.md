@@ -138,3 +138,10 @@ task-owned cleanup hook. After accepted session stops, the coordinator now verif
 session remains, invokes the same task cleanup with trusted coordinator origin before REVIEW, and
 surfaces cleanup failure instead of completing the transition. Its ordering regression and the
 idempotent/partial-stop cases passed 20 repetitions.
+
+The next exact-head review found that task reconciliation could retain a stale keep-warm candidate
+after the current effective policy changed to Disabled. `ActionReconcile` now validates the latest
+persisted policy and current global default immediately before allocating a generation. A stale
+candidate therefore returns the current off/disabled snapshot without ensuring a task host,
+launching a process, or consuming capacity. The focused regression failed before the guard and then
+passed 20 repetitions under `-race`; the full `internal/lsp` race suite and backend lint also pass.

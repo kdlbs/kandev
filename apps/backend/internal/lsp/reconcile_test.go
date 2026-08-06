@@ -59,6 +59,37 @@ func TestReconcileStartsOneReplacementForMissingDesiredRuntime(t *testing.T) {
 	}
 }
 
+func TestReconcileMissingRechecksPolicyBeforeAllocatingGeneration(t *testing.T) {
+	store := newMemoryLSPStore()
+	seedLSPState(t, store, TaskLanguageState{
+		TaskID: "task-1", Language: "go", Policy: PolicyKeepWarm,
+		DetectionState: DetectionComplete, Phase: PhaseOff, Generation: 2,
+		LastInitiator: InitiatorAutomatic,
+	})
+	stale := storedLSPState(t, store, "task-1", "go")
+	current := stale
+	current.Policy = PolicyDisabled
+	if _, err := store.CompareAndUpdateTaskLSPLanguage(context.Background(), current, stale.Revision); err != nil {
+		t.Fatal(err)
+	}
+	runtimes := newReconcileRuntimes()
+	controller := newReconcileController(store, runtimes, NewCapacity(8))
+
+	snapshot, err := controller.reconcileMissing(context.Background(), reconcileCandidate{
+		state: stale, settings: TaskSettings{},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	state := storedLSPState(t, store, "task-1", "go")
+	if store.allocations != 0 || runtimes.ensureCalls != 0 || state.Generation != 2 {
+		t.Fatalf("state=%#v ensure=%d allocations=%d", state, runtimes.ensureCalls, store.allocations)
+	}
+	if snapshot == nil || snapshot.Policy != PolicyDisabled || snapshot.Phase != PhaseOff {
+		t.Fatalf("snapshot=%#v", snapshot)
+	}
+}
+
 func TestReconcileStopsDisabledOrphanAndRebuildsActualCapacity(t *testing.T) {
 	store := newMemoryLSPStore()
 	seedLSPState(t, store, TaskLanguageState{
