@@ -578,6 +578,57 @@ func TestNormalizeShellToolResultStripsLeadingCommandEchoWithWorkDirResolvedPath
 	require.Equal(t, "start\nhello\n", payload.ShellExec().Output.Stdout)
 }
 
+// TestNormalizeShellToolResultStripsLeadingCommandEchoWithCRLFMultilineCommandNoWorkDir
+// is a regression for a live report: a multi-line command with no reported
+// cwd (the common case - most commands don't need an explicit cwd), run
+// through a real terminal that echoes canonical-mode input with "\r\n" line
+// endings while the command's own embedded newlines - the text the tool
+// call actually reports - stay plain "\n". stripCommandEcho's exact-match
+// prefix check then fails at the very first embedded newline, and until now
+// stripCommandEchoWithWorkDir bailed out immediately whenever workDir was
+// empty, without ever reaching the CRLF-normalizing cutLines comparison it
+// already applies for the workDir-resolved-path case - so the entire
+// multi-line echo leaked into the persisted Output verbatim, directly
+// butted against the real output with no separator.
+func TestNormalizeShellToolResultStripsLeadingCommandEchoWithCRLFMultilineCommandNoWorkDir(t *testing.T) {
+	t.Parallel()
+
+	command := "for i in 1 2; do\n  echo $i\ndone"
+	stdout := "$ for i in 1 2; do\r\n  echo $i\r\ndone\r\n1\n2\n"
+
+	normalizer := NewNormalizer("")
+	payload := normalizer.NormalizeToolCall("execute", map[string]any{
+		"kind":      "execute",
+		"raw_input": map[string]any{"command": command},
+	})
+
+	normalizer.NormalizeToolResult(payload, stdout)
+
+	require.Equal(t, "1\n2\n", payload.ShellExec().Output.Stdout)
+}
+
+// TestNormalizeShellToolResultCRLFMultilineFallbackNeverCorruptsNearMissOutput
+// is a safety regression for the above: the CRLF-normalizing comparison must
+// still decline to strip when the echoed lines genuinely diverge from the
+// reported command (e.g. a stale echo, or a provider that actually ran
+// something else), rather than guessing.
+func TestNormalizeShellToolResultCRLFMultilineFallbackNeverCorruptsNearMissOutput(t *testing.T) {
+	t.Parallel()
+
+	command := "for i in 1 2; do\n  echo $i\ndone"
+	stdout := "$ for i in 1 2; do\r\n  echo $i\r\ndone; echo extra\r\n1\n2\n"
+
+	normalizer := NewNormalizer("")
+	payload := normalizer.NormalizeToolCall("execute", map[string]any{
+		"kind":      "execute",
+		"raw_input": map[string]any{"command": command},
+	})
+
+	normalizer.NormalizeToolResult(payload, stdout)
+
+	require.Equal(t, stdout, payload.ShellExec().Output.Stdout)
+}
+
 func TestNormalizeShellToolUpdateStripsLeadingCommandEchoFromLiveOutput(t *testing.T) {
 	t.Parallel()
 
