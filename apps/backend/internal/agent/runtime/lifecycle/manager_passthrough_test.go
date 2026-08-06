@@ -1196,7 +1196,7 @@ func TestManager_VerifyPassthroughEnabled(t *testing.T) {
 				}
 			}
 
-			err := mgr.verifyPassthroughEnabled(context.Background(), "test-session", tt.profileID)
+			_, err := mgr.verifyPassthroughEnabled(context.Background(), "test-session", tt.profileID)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("verifyPassthroughEnabled() error = %v, wantErr %v", err, tt.wantErr)
 			}
