@@ -102,7 +102,7 @@ describe("buildFileTree — multi-repo", () => {
     expect(inner?.children?.[0].file?.repository_name).toBe("vendor/outer/vendor/inner");
   });
 
-  it("keeps repeated directory segments distinct when input order interleaves branches", () => {
+  it("merges repeated directory segments within a repo despite interleaved input", () => {
     const tree = buildFileTree([
       file({ path: "src/a.ts", repository_name: "frontend", repository_id: "f" }),
       file({ path: "README.md", repository_name: "frontend", repository_id: "f" }),
@@ -112,10 +112,22 @@ describe("buildFileTree — multi-repo", () => {
 
     const frontend = tree.find((node) => node.name === "frontend");
     const srcNodes = frontend?.children?.filter((node) => node.name === "src") ?? [];
+    expect(srcNodes).toHaveLength(1);
+    expect(srcNodes[0].children?.map((node) => node.file?.path)).toEqual(["src/a.ts", "src/b.ts"]);
+  });
+
+  it("keeps identical relative directories distinct across repositories", () => {
+    const tree = buildFileTree([
+      file({ path: "src/frontend.ts", repository_name: "frontend", repository_id: "f" }),
+      file({ path: "src/backend.ts", repository_name: "backend", repository_id: "b" }),
+    ]);
+
+    const srcNodes = tree.map((root) => root.children?.find((node) => node.name === "src"));
     expect(srcNodes).toHaveLength(2);
-    expect(srcNodes[0].children?.[0].file?.path).toBe("src/a.ts");
-    expect(srcNodes[1].children?.[0].file?.path).toBe("src/b.ts");
-    expect(srcNodes[0].path).not.toBe(srcNodes[1].path);
+    expect(srcNodes.map((node) => node?.children?.[0].file?.repository_name)).toEqual([
+      "frontend",
+      "backend",
+    ]);
   });
 });
 

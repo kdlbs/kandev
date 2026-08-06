@@ -263,12 +263,10 @@ function buildScopedTree(files: ReviewFile[]): FileTreeNode[] {
   }
 
   const root: FileTreeNode = { name: "", path: "", isDir: true, children: [] };
-  const directorySegmentCounts = new Map<string, number>();
   const context: ScopedTreeContext = {
     scopeNames,
     topLevelRepoRoots,
     repositoryIds,
-    directorySegmentCounts,
   };
 
   for (const file of files) {
@@ -282,11 +280,10 @@ type ScopedTreeContext = {
   scopeNames: Set<string>;
   topLevelRepoRoots: Set<string>;
   repositoryIds: Map<string, string>;
-  directorySegmentCounts: Map<string, number>;
 };
 
 function appendScopedFile(root: FileTreeNode, file: ReviewFile, context: ScopedTreeContext) {
-  const { scopeNames, topLevelRepoRoots, repositoryIds, directorySegmentCounts } = context;
+  const { scopeNames, topLevelRepoRoots, repositoryIds } = context;
   const scope = file.repository_name ?? "";
   const scopeParts = scope ? scope.split("/") : [];
   const parts = [...scopeParts, ...file.path.split("/")];
@@ -302,7 +299,7 @@ function appendScopedFile(root: FileTreeNode, file: ReviewFile, context: ScopedT
 
     const isScopeBoundary = Boolean(scope) && i + 1 === scopeParts.length;
     const isTopLevelScope = i === 0 && topLevelRepoRoots.has(part);
-    const child = getOrAppendDirectorySegment(current, part, logicalPath, directorySegmentCounts);
+    const child = getOrAppendScopedDirectorySegment(current, part, logicalPath);
     if (isScopeBoundary && scopeNames.has(scope)) {
       child.isSubmodule = !isTopLevelScope;
       child.repositoryName = scope;
@@ -314,6 +311,26 @@ function appendScopedFile(root: FileTreeNode, file: ReviewFile, context: ScopedT
     }
     current = child;
   }
+}
+
+function getOrAppendScopedDirectorySegment(
+  parent: FileTreeNode,
+  name: string,
+  logicalPath: string,
+): FileTreeNode {
+  const existing = parent.children!.find(
+    (child) => child.isDir && child.name === name && child.path === logicalPath,
+  );
+  if (existing) return existing;
+
+  const child: FileTreeNode = {
+    name,
+    path: logicalPath,
+    isDir: true,
+    children: [],
+  };
+  parent.children!.push(child);
+  return child;
 }
 
 function collapseScopedTree(root: FileTreeNode): FileTreeNode[] {
