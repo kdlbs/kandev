@@ -468,11 +468,9 @@ func (m *Manager) createExecutionFromSessionInfo(ctx context.Context, sessionID 
 		return nil, fmt.Errorf("create execution for session %s: %w", sessionID, err)
 	}
 
-	// Decide launch vs recovery before starting the process: a session with no
-	// prior agent execution has never run, so there is nothing for the CLI's
-	// resume flag to attach to (issue #2330).
-	applyPassthroughResumeIntent(execution, info)
-
+	// createExecution derived the resume intent (applyResumeIntent): a session
+	// with no prior agent execution has never run, so there is nothing for the
+	// CLI's resume flag to attach to and it launches fresh (issue #2330).
 	m.logger.Info("starting passthrough process for session",
 		zap.String("session_id", sessionID),
 		zap.String("execution_id", execution.ID),
@@ -491,19 +489,19 @@ func (m *Manager) createExecutionFromSessionInfo(ctx context.Context, sessionID 
 	return execution, nil
 }
 
-// applyPassthroughResumeIntent marks whether a freshly created passthrough
-// execution should launch as a resume. It mirrors buildExecutionFromInstance,
-// which derives the same flag from PreviousExecutionID — the very
-// info.AgentExecutionID createExecution passes into the executor request.
+// applyResumeIntent marks whether a freshly built execution should launch as a
+// resume, from the same PreviousExecutionID buildExecutionFromInstance uses on
+// the ACP launch path (populated here from info.AgentExecutionID).
 //
-// An empty AgentExecutionID means no agent execution has ever been recorded for
-// this session (the state a task created with start_agent:false is in). Such a
-// session has no CLI-side conversation for `-c` / `--resume` to attach to, and
-// its stored prompt has never been delivered, so it must take the fresh-launch
-// path. Only a session that previously ran — one whose execution was lost from
-// the in-memory store by a backend restart — is a genuine recovery.
-func applyPassthroughResumeIntent(execution *AgentExecution, info *WorkspaceInfo) {
-	execution.isResumedSession = info.AgentExecutionID != ""
+// An empty PreviousExecutionID means no agent execution has ever been recorded
+// for this session — the state a task created with start_agent:false is in.
+// startPassthroughExecution reads the flag: such a session has no CLI-side
+// conversation for `-c` / `--resume` to attach to, and its stored prompt has
+// never been delivered, so it must take the fresh-launch path. Only a session
+// that previously ran — one whose execution was lost from the in-memory store
+// by a backend restart — is a genuine recovery.
+func applyResumeIntent(execution *AgentExecution, req *ExecutorCreateRequest) {
+	execution.isResumedSession = req.PreviousExecutionID != ""
 }
 
 // verifyPassthroughEnabled checks if the session's profile has CLI passthrough
@@ -668,6 +666,10 @@ func (m *Manager) createExecution(ctx context.Context, taskID string, info *Work
 
 	execution := runtimeInstance.ToAgentExecution(req)
 	execution.RuntimeName = rt.Name()
+	// Set before executionStore.Add: once the execution is registered, a
+	// concurrent EnsurePassthroughExecution can reach it, and it must never
+	// observe a half-initialised resume intent.
+	applyResumeIntent(execution, req)
 
 	// Cache only agent-profile values for the best-effort configure fallback.
 	// The effective runtime snapshot (including repository secrets) is already

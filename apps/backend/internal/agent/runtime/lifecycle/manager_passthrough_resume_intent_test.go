@@ -10,12 +10,12 @@ import (
 	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
 )
 
-// TestApplyPassthroughResumeIntent pins the first half of issue #2330: a
-// passthrough session with no prior agent execution — the state a task created
-// with start_agent:false is in — has never run, so its first launch must not
-// carry the CLI resume flag. A session that did run before (its execution lost
-// from the in-memory store by a backend restart) must still resume.
-func TestApplyPassthroughResumeIntent(t *testing.T) {
+// TestApplyResumeIntent pins the first half of issue #2330: a passthrough
+// session with no prior agent execution — the state a task created with
+// start_agent:false is in — has never run, so its first launch must not carry
+// the CLI resume flag. A session that did run before (its execution lost from
+// the in-memory store by a backend restart) must still resume.
+func TestApplyResumeIntent(t *testing.T) {
 	tests := []struct {
 		name                string
 		previousExecutionID string
@@ -36,9 +36,9 @@ func TestApplyPassthroughResumeIntent(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			execution := &AgentExecution{ID: "exec-1", SessionID: "sess-1"}
-			applyPassthroughResumeIntent(execution, &WorkspaceInfo{
-				SessionID:        "sess-1",
-				AgentExecutionID: tt.previousExecutionID,
+			applyResumeIntent(execution, &ExecutorCreateRequest{
+				SessionID:           "sess-1",
+				PreviousExecutionID: tt.previousExecutionID,
 			})
 			if execution.isResumedSession != tt.wantResumed {
 				t.Errorf("isResumedSession = %v, want %v", execution.isResumedSession, tt.wantResumed)
@@ -47,12 +47,12 @@ func TestApplyPassthroughResumeIntent(t *testing.T) {
 	}
 }
 
-// TestApplyPassthroughResumeIntentRoutesLaunch pins the mapping from that
+// TestApplyResumeIntentRoutesPassthroughLaunch pins the mapping from that
 // intent to the launch path actually taken. The distinction matters beyond the
 // resume flag: only startPassthroughSession delivers the session's stored
 // prompt, while ResumePassthroughSession deliberately does not (it would
 // duplicate the prompt in agent history).
-func TestApplyPassthroughResumeIntentRoutesLaunch(t *testing.T) {
+func TestApplyResumeIntentRoutesPassthroughLaunch(t *testing.T) {
 	tests := []struct {
 		name                string
 		previousExecutionID string
@@ -84,9 +84,9 @@ func TestApplyPassthroughResumeIntentRoutesLaunch(t *testing.T) {
 			if err := mgr.executionStore.Add(execution); err != nil {
 				t.Fatalf("seed execution: %v", err)
 			}
-			applyPassthroughResumeIntent(execution, &WorkspaceInfo{
-				SessionID:        "sess-1",
-				AgentExecutionID: tt.previousExecutionID,
+			applyResumeIntent(execution, &ExecutorCreateRequest{
+				SessionID:           "sess-1",
+				PreviousExecutionID: tt.previousExecutionID,
 			})
 
 			err := mgr.startPassthroughExecution(context.Background(), execution, nil)
