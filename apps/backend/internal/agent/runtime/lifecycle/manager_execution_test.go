@@ -358,6 +358,51 @@ func TestCreateExecutionRollsBackWhenRegistrationCannotPersist(t *testing.T) {
 	}
 }
 
+// A shell terminal left open on a terminal session reconnects on a timer. Each
+// attempt must be rejected from the session state alone: creating the runtime
+// instance first and rolling it back turned an idle panel into a spawn/teardown
+// loop for as long as the tab stayed open.
+func TestGetOrEnsureExecutionForEnvironmentRejectsTerminalSessionWithoutCreatingInstance(t *testing.T) {
+	for _, state := range []models.TaskSessionState{
+		models.TaskSessionStateFailed,
+		models.TaskSessionStateCancelled,
+		models.TaskSessionStateCompleted,
+	} {
+		t.Run(string(state), func(t *testing.T) {
+			const (
+				sessionID     = "session-terminal-shell"
+				environmentID = "env-terminal-shell"
+			)
+			mgr, backend := newEnvironmentExecutionTestManager(t, &mockWorkspaceInfoProvider{
+				infos: map[string]*WorkspaceInfo{
+					sessionID: {
+						TaskID: "task-terminal-shell", SessionID: sessionID,
+						TaskEnvironmentID: environmentID, WorkspacePath: "/workspace/task",
+						AgentID: "auggie",
+					},
+				},
+			})
+			mgr.SetExecutorProfileReader(&fakeExecutorProfileReader{session: &models.TaskSession{
+				ID: sessionID, TaskID: "task-terminal-shell", State: state,
+			}})
+
+			_, err := mgr.GetOrEnsureExecutionForEnvironment(context.Background(), environmentID)
+			if !errors.Is(err, ErrSessionTerminal) {
+				t.Fatalf("GetOrEnsureExecutionForEnvironment error = %v, want ErrSessionTerminal", err)
+			}
+			if got := backend.createCount.Load(); got != 0 {
+				t.Fatalf("CreateInstance calls = %d, want 0", got)
+			}
+			if got := backend.stopCount.Load(); got != 0 {
+				t.Fatalf("StopInstance calls = %d, want 0", got)
+			}
+			if _, exists := mgr.executionStore.GetBySessionID(sessionID); exists {
+				t.Fatal("terminal session must not register an execution")
+			}
+		})
+	}
+}
+
 func TestResolveTaskEnvironmentID(t *testing.T) {
 	t.Run("returns TaskEnvironmentID when execution carries it", func(t *testing.T) {
 		store := NewExecutionStore()

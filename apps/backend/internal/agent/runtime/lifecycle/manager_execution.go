@@ -510,6 +510,15 @@ func (m *Manager) createExecution(ctx context.Context, taskID string, info *Work
 	if info == nil {
 		return nil, fmt.Errorf("workspace info is required")
 	}
+	// A terminal session can never gain an execution, so reject it before
+	// reconciling the workspace, taking an activity lease, or creating a
+	// runtime instance. User-facing panels (terminal, git, files) reconnect on
+	// a timer; without this every retry paid for a full instance creation that
+	// the post-creation check below tore straight back down. That check stays —
+	// it guards the session that terminalizes *during* creation.
+	if err := m.ensureLaunchSessionStillActive(ctx, info.SessionID); err != nil {
+		return nil, err
+	}
 	owner := ownedDirectoryLinkOwner(taskID, info.TaskDirName)
 	if err := reconcileWorkspaceSources(ctx, info.WorkspacePath, info.WorkspaceFolders, owner); err != nil {
 		return nil, err
