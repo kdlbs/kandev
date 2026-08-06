@@ -292,6 +292,7 @@
   "skip": "Skip",
   "stagesAndCommitsChangesUsingConventional": "Stages and commits changes using Conventional Commits.",
   "status": "Status",
+  "statusWithConnectionIssue": "{{description}} Status",
   "subtaskTitle": "Subtask title",
   "switchMode": "Switch mode",
   "system": "System",

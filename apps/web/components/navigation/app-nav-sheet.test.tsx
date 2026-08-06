@@ -14,6 +14,7 @@ const state = {
 };
 
 let healthHasIssues = false;
+let statusSeverity: "none" | "unstable" | "lost" = "none";
 
 vi.mock("@/lib/routing/client-router", () => ({
   useRouter: () => ({ push: mocks.routerPush }),
@@ -45,7 +46,7 @@ vi.mock("@/hooks/use-nav-availability", () => ({
 vi.mock("@/components/app-status-bar/app-status-surface-provider", () => ({
   useAppStatusDrawer: () => ({
     enabled: true,
-    issueSeverity: "none",
+    issueSeverity: statusSeverity,
     openStatusDrawer: mocks.openStatusDrawer,
   }),
 }));
@@ -70,13 +71,24 @@ vi.mock("@/components/system-health/health-indicator", () => ({
   HealthIssuesDialog: () => <div data-testid="health-dialog" />,
 }));
 
-function SectionsHost({ omitSections }: { omitSections?: Parameters<
-    typeof AppNavSections
-  >[0]["omitSections"] }) {
+type SectionsProps = Parameters<typeof AppNavSections>[0];
+
+function SectionsHost({
+  omitSections,
+  omitDestinations,
+}: {
+  omitSections?: SectionsProps["omitSections"];
+  omitDestinations?: SectionsProps["omitDestinations"];
+}) {
   const controls = useAppNavDialogs(() => {});
   return (
     <>
-      <AppNavSections onNavigate={() => {}} omitSections={omitSections} controls={controls} />
+      <AppNavSections
+        onNavigate={() => {}}
+        omitSections={omitSections}
+        omitDestinations={omitDestinations}
+        controls={controls}
+      />
       {controls.dialogs}
     </>
   );
@@ -122,9 +134,45 @@ describe("AppNavSheet", () => {
 describe("AppNavSections", () => {
   beforeEach(() => {
     healthHasIssues = false;
+    statusSeverity = "none";
     vi.clearAllMocks();
   });
   afterEach(cleanup);
+
+  // Office renders its own Tasks row (pointing inside Office) above these
+  // sections, so the manifest's kanban-bound Tasks has to go without taking
+  // Home — the only other primary destination — with it.
+  it("drops a single named destination and keeps the rest of its section", () => {
+    render(<SectionsHost omitDestinations={["tasks"]} />);
+
+    expect(screen.queryByRole("link", { name: "Tasks" })).toBeNull();
+    expect(screen.getByRole("link", { name: "Home" })).not.toBeNull();
+    expect(screen.getByTestId("app-nav-primary")).not.toBeNull();
+  });
+
+  it.each([
+    ["unstable", "Connection unstable. Reconnecting to Kandev."],
+    ["lost", "Connection lost for at least 10 seconds. Live updates may be stale."],
+  ] as const)("keeps Status in the button's accessible name while %s", (severity, description) => {
+    statusSeverity = severity;
+    render(<SectionsHost />);
+
+    // A bare aria-label of the connection sentence would replace the visible
+    // "Status" and break label-in-name for voice control.
+    const status = screen.getByTestId("mobile-home-status-button");
+    const name = status.getAttribute("aria-label") ?? "";
+    expect(name).toContain("Status");
+    expect(name).toContain(description);
+    expect(screen.getByRole("button", { name: /Status/ })).toBe(status);
+  });
+
+  it("leaves the Status button's name as the visible text while healthy", () => {
+    render(<SectionsHost />);
+
+    const status = screen.getByTestId("mobile-home-status-button");
+    expect(status.getAttribute("aria-label")).toBeNull();
+    expect(status.textContent).toContain("Status");
+  });
 
   it("drops the primary section when the caller omits it", () => {
     render(<SectionsHost omitSections={["primary"]} />);

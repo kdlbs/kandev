@@ -13,6 +13,8 @@ type AppNavSheetProps = {
    * page's own nav plus the app-wide destinations in one place.
    */
   pageNav?: ReactNode;
+  /** Manifest destination ids `pageNav` already covers. See `AppNavSections`. */
+  omitDestinations?: string[];
 };
 
 /**
@@ -20,7 +22,7 @@ type AppNavSheetProps = {
  * one left-side sheet, one meaning at every width below `md`. Replaces the
  * per-surface menus that each hand-picked a different subset of destinations.
  */
-export function AppNavSheet({ pageNav }: AppNavSheetProps) {
+export function AppNavSheet({ pageNav, omitDestinations }: AppNavSheetProps) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const close = () => setOpen(false);
@@ -53,7 +55,11 @@ export function AppNavSheet({ pageNav }: AppNavSheetProps) {
             onClick={closeOnLinkClick}
           >
             {pageNav}
-            <AppNavSections onNavigate={close} controls={controls} />
+            <AppNavSections
+              onNavigate={close}
+              omitDestinations={omitDestinations}
+              controls={controls}
+            />
           </nav>
         </SheetContent>
       </Sheet>

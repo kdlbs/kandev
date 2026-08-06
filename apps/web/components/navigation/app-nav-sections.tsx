@@ -85,6 +85,13 @@ type AppNavSectionsProps = {
    * Tasks. Everything else draws the full set.
    */
   omitSections?: NavSection[];
+  /**
+   * Individual manifest destination ids the caller's own nav already covers, for
+   * shells that need most of a section. Office omits "tasks": its page nav has a
+   * Tasks row pointing inside Office, and the manifest's points at kanban, so
+   * both rendered gave two identically labelled rows going to different places.
+   */
+  omitDestinations?: string[];
   controls: AppNavDialogControls;
 };
 
@@ -94,11 +101,18 @@ type AppNavSectionsProps = {
  * Improve Kandev, Health issues). All rows come from the navigation manifest,
  * so a new destination appears on every surface at once.
  */
-export function AppNavSections({ onNavigate, omitSections = [], controls }: AppNavSectionsProps) {
+export function AppNavSections({
+  onNavigate,
+  omitSections = [],
+  omitDestinations = [],
+  controls,
+}: AppNavSectionsProps) {
   const omit = new Set(omitSections);
   return (
     <>
-      {!omit.has("primary") && <PrimaryNavSection onNavigate={onNavigate} />}
+      {!omit.has("primary") && (
+        <PrimaryNavSection onNavigate={onNavigate} omitDestinations={omitDestinations} />
+      )}
       {!omit.has("plugins") && <MobilePluginNavSection onNavigate={onNavigate} />}
       {!omit.has("integrations") && <MobileIntegrationsSection onNavigate={onNavigate} />}
       <UtilityNavSection onNavigate={onNavigate} controls={controls} />
@@ -106,8 +120,15 @@ export function AppNavSections({ onNavigate, omitSections = [], controls }: AppN
   );
 }
 
-function PrimaryNavSection({ onNavigate }: { onNavigate: () => void }) {
-  const destinations = useStaticDestinations("mobileMenu", "primary");
+function PrimaryNavSection({
+  onNavigate,
+  omitDestinations,
+}: {
+  onNavigate: () => void;
+  omitDestinations: string[];
+}) {
+  const all = useStaticDestinations("mobileMenu", "primary");
+  const destinations = all.filter((destination) => !omitDestinations.includes(destination.id));
   if (destinations.length === 0) return null;
   return (
     <div className="flex flex-col gap-3" data-testid="app-nav-primary">
@@ -185,7 +206,15 @@ function StatusRow({ closeMenu }: { closeMenu: () => void }) {
       )}
       onClick={openStatus}
       data-testid="mobile-home-status-button"
-      aria-label={issue?.description}
+      // Compose, never replace: a bare `aria-label` of the connection sentence
+      // drops the visible "Status" out of the accessible name, so voice control
+      // ("click Status") stops matching the button it is looking at. Same shape
+      // as the nav trigger's `openNavigationMenuWithConnectionIssue`.
+      aria-label={
+        issue
+          ? t("common:statusWithConnectionIssue", { description: issue.description })
+          : undefined
+      }
       data-connection-severity={issueSeverity === "none" ? undefined : issueSeverity}
     >
       <IconActivity className="h-4 w-4 shrink-0" />

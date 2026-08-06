@@ -25,6 +25,8 @@ type PageShellProps = {
   topbarTestId?: string;
   /** In-section nav for the phone sheet: settings tree, office sections. */
   pageNav?: ReactNode;
+  /** Manifest destination ids `pageNav` already covers. See `AppNavSections`. */
+  navOmitDestinations?: string[];
   /** "none" for children that own their own scrolling (dockview, full-bleed). */
   scroll?: "auto" | "none";
   contentClassName?: string;
@@ -46,6 +48,7 @@ export function PageShell({
   variant = "breadcrumb",
   leading,
   pageNav,
+  navOmitDestinations,
   scroll = "auto",
   contentClassName,
   contentTestId,
@@ -64,7 +67,7 @@ export function PageShell({
         homeHref={home.href}
         leading={
           <>
-            <AppNavSheet pageNav={pageNav} />
+            <AppNavSheet pageNav={pageNav} omitDestinations={navOmitDestinations} />
             {leading}
           </>
         }
