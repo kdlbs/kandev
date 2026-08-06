@@ -37,6 +37,7 @@ func TestManager_DiscoversNestedSubmoduleScopesWithStableAnchors(t *testing.T) {
 		WorkDir:      parent,
 		BaseBranches: map[string]string{"": "main"},
 	}, newTestLogger(t))
+	t.Cleanup(mgr.stopWorkspaceTrackers)
 
 	if mgr.GetWorkspaceTracker().RepositoryName() != "" {
 		t.Fatalf("root tracker RepositoryName() = %q, want empty root scope", mgr.GetWorkspaceTracker().RepositoryName())
@@ -77,6 +78,7 @@ func TestManager_RescanDiscoversNewNestedSubmoduleAndRetainsRoot(t *testing.T) {
 	t.Cleanup(childCleanup)
 
 	mgr := NewManager(&config.InstanceConfig{WorkDir: parent}, newTestLogger(t))
+	t.Cleanup(mgr.stopWorkspaceTrackers)
 	root := mgr.GetWorkspaceTracker()
 	if got := mgr.RepoSubpaths(); len(got) != 0 {
 		t.Fatalf("initial RepoSubpaths() = %v, want none", got)
@@ -98,7 +100,6 @@ func TestManager_RescanDiscoversNewNestedSubmoduleAndRetainsRoot(t *testing.T) {
 	if tracker, err := mgr.GetWorkspaceTrackerFor("vendor/lib"); err != nil || tracker == nil {
 		t.Fatalf("rescanned child tracker = %v, err %v", tracker, err)
 	}
-	mgr.stopWorkspaceTrackers()
 }
 
 func TestManager_SkipsUninitializedSubmoduleWithoutLosingRoot(t *testing.T) {
@@ -115,6 +116,7 @@ func TestManager_SkipsUninitializedSubmoduleWithoutLosingRoot(t *testing.T) {
 	}
 
 	mgr := NewManager(&config.InstanceConfig{WorkDir: parent}, newTestLogger(t))
+	t.Cleanup(mgr.stopWorkspaceTrackers)
 	if got := mgr.RepoSubpaths(); len(got) != 0 {
 		t.Fatalf("uninitialized RepoSubpaths() = %v, want none", got)
 	}

@@ -955,7 +955,7 @@ func (m *Manager) GitOperatorFor(subpath string) (*GitOperator, error) {
 	}
 	tracker := m.findRepositoryTracker(cleaned)
 	if tracker == nil {
-		tracker = m.workspaceTracker
+		tracker = m.GetWorkspaceTracker()
 	}
 	op := NewGitOperatorForRepo(full, cleaned, m.logger, tracker)
 	op.setEnvironmentProvider(m.gitEnvironment)

@@ -438,7 +438,7 @@ func TestRescanRepositories_PromotesBareTaskRootWhenFirstRepositoryAppears(t *te
 
 	log, _ := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json"})
 	m := NewManager(&config.InstanceConfig{WorkDir: taskRoot}, log)
-	defer m.stopWorkspaceTrackers()
+	t.Cleanup(m.stopWorkspaceTrackers)
 
 	repository := filepath.Join(taskRoot, "attached-repository")
 	initGitRepoAt(t, repository)

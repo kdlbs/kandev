@@ -6,6 +6,30 @@ export function isRepositoryScopeAncestor(ancestor: string, scope: string): bool
 }
 
 /**
+ * Adds only tracked repository scopes that are ancestors of changed scopes.
+ * Clean parents need to participate in stage-all commits so they can record
+ * the child gitlink after the child commit; unrelated clean siblings do not.
+ */
+export function repositoryScopesWithAvailableAncestors(
+  scopes: Iterable<string>,
+  availableScopes: Iterable<string>,
+): string[] {
+  const requested = Array.from(new Set(scopes));
+  const available = new Set(availableScopes);
+  const result = new Set(requested);
+  for (const scope of requested) {
+    if (scope === "") continue;
+    const parts = scope.split("/");
+    for (let length = 1; length < parts.length; length += 1) {
+      const ancestor = parts.slice(0, length).join("/");
+      if (available.has(ancestor)) result.add(ancestor);
+    }
+    if (available.has("")) result.add("");
+  }
+  return Array.from(result);
+}
+
+/**
  * Groups unique repository scopes into dependency-safe waves. The deepest
  * repositories run first; scopes at the same depth are independent and may
  * run in parallel. Empty scope is the real workspace root and therefore has

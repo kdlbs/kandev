@@ -62,9 +62,9 @@ test.describe("Nested submodule Review", () => {
       await expect
         .poll(() => session.reviewDiffText(), { timeout: 45_000 })
         .toEqual(expect.stringContaining("parent working-tree change"));
-      const diffText = await session.reviewDiffText();
-      expect(diffText).toContain("outer committed change");
-      expect(diffText).toContain("inner committed change");
+      for (const expected of ["outer committed change", "inner committed change"]) {
+        await expect.poll(() => session.reviewDiffText(), { timeout: 45_000 }).toContain(expected);
+      }
 
       await expect(
         review.locator('[data-testid="review-file-row"][data-file-path="vendor/outer"]'),

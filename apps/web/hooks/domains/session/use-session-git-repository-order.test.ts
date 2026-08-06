@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   isRepositoryScopeAncestor,
+  repositoryScopesWithAvailableAncestors,
   repositoryScopeWaves,
   runRepositoryScopeWaves,
   shouldSkipRepositoryScope,
@@ -24,6 +25,18 @@ describe("repository scope mutation order", () => {
     expect(isRepositoryScopeAncestor(ROOT_SCOPE, OUTER_SCOPE)).toBe(true);
     expect(isRepositoryScopeAncestor(OUTER_SCOPE, INNER_SCOPE)).toBe(true);
     expect(isRepositoryScopeAncestor(OTHER_SCOPE, INNER_SCOPE)).toBe(false);
+  });
+
+  it("includes clean tracked parents without unrelated clean siblings", () => {
+    expect(
+      repositoryScopesWithAvailableAncestors(
+        [INNER_SCOPE],
+        [ROOT_SCOPE, OUTER_SCOPE, INNER_SCOPE, OTHER_SCOPE],
+      ),
+    ).toEqual([INNER_SCOPE, OUTER_SCOPE, ROOT_SCOPE]);
+    expect(repositoryScopesWithAvailableAncestors(["frontend"], ["frontend", "backend"])).toEqual([
+      "frontend",
+    ]);
   });
 
   it("blocks only ancestors after a child failure", () => {

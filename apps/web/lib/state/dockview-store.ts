@@ -874,7 +874,12 @@ function buildEnvSwitchAction(set: StoreSet, get: StoreGet) {
       pinnedWidths: manualRightWidth === null ? new Map() : new Map([["right", manualRightWidth]]),
     });
     try {
-      if (restoreMaximizeFromStorage(api, newEnvId, set, activeSessionId, currentSessionIds))
+      const hasFirstAdoptionRouteLayout =
+        oldEnvId === null && currentLayoutEnvId === null && Boolean(initialLayout);
+      if (
+        !hasFirstAdoptionRouteLayout &&
+        restoreMaximizeFromStorage(api, newEnvId, set, activeSessionId, currentSessionIds)
+      )
         return;
       const measured = measureDockviewContainer(api);
       const ids = performEnvSwitch({

@@ -39,8 +39,10 @@ test.describe("Nested submodule Review on mobile", () => {
       await expect(review).toBeVisible({ timeout: 15_000 });
       const repositoryLabels = review.getByTestId("review-file-repository");
       await expect(repositoryLabels).toHaveCount(2);
-      await expect(repositoryLabels.filter({ hasText: "vendor/outer" }).first()).toBeVisible();
-      const innerLabel = repositoryLabels.filter({ hasText: "vendor/outer/vendor/inner" });
+      await expect(repositoryLabels.filter({ hasText: /^vendor\/outer$/ })).toBeVisible();
+      const innerLabel = repositoryLabels.filter({
+        hasText: /^vendor\/outer\/vendor\/inner$/,
+      });
       await expect(innerLabel).toBeVisible({ timeout: 15_000 });
 
       const innerHeader = review

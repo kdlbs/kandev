@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -44,6 +45,7 @@ func TestMultiRepoReviewEndpointsUseStoredBaseBranches(t *testing.T) {
 	log, _ := logger.NewLogger(logger.LoggingConfig{Level: "error"})
 	cfg := &config.InstanceConfig{WorkDir: taskRoot, BaseBranches: bases}
 	mgr := process.NewManager(cfg, log)
+	t.Cleanup(func() { _ = mgr.StopForTeardown(context.Background()) })
 	srv := NewServer(cfg, mgr, nil, nil, log)
 
 	logResponse := httptest.NewRecorder()
@@ -171,6 +173,7 @@ func TestNestedSubmoduleReviewEndpointsIncludeRootAndStableChildBase(t *testing.
 		BaseBranches: map[string]string{"": "main"},
 	}
 	mgr := process.NewManager(cfg, log)
+	t.Cleanup(func() { _ = mgr.StopForTeardown(context.Background()) })
 	srv := NewServer(cfg, mgr, nil, nil, log)
 
 	statusResponse := httptest.NewRecorder()

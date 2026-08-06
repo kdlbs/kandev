@@ -16,7 +16,10 @@ import type {
   PRCreateResult,
 } from "@/hooks/use-git-operations";
 import { t } from "@/lib/i18n";
-import { runRepositoryScopeWaves } from "./use-session-git-repository-order";
+import {
+  repositoryScopesWithAvailableAncestors,
+  runRepositoryScopeWaves,
+} from "./use-session-git-repository-order";
 import { useMultiRepoSummary } from "./use-session-git-summary";
 
 /**
@@ -613,8 +616,11 @@ function useFileDerivations(
   const reposInFiles = useMemo(() => {
     const seen = new Set<string>();
     for (const f of allFiles) seen.add(f.repository_name ?? "");
-    return Array.from(seen);
-  }, [allFiles]);
+    return repositoryScopesWithAvailableAncestors(
+      seen,
+      statusByRepo.map(({ repository_name }) => repository_name),
+    );
+  }, [allFiles, statusByRepo]);
   const { repoNamesForControls, perRepoStatus } = useMultiRepoSummary(
     statusByRepo,
     allFiles,
