@@ -20,7 +20,7 @@ func TestRecoveryUsesOneFiveThirtySecondBackoffAndThenStops(t *testing.T) {
 	host := newFakeLSPHost()
 	host.startErr = errors.New("still crashed")
 	host.snapshots["kotlin"] = RuntimeSnapshot{
-		Language: "kotlin", Generation: 1, Phase: PhaseError, ErrorCode: "process_exited",
+		Language: "kotlin", Generation: 1, Phase: PhaseError, ErrorCode: errorCodeProcessExited,
 	}
 	runtimes := newReconcileRuntimes()
 	runtimes.existing["env-task-1"] = host
@@ -46,6 +46,41 @@ func TestRecoveryUsesOneFiveThirtySecondBackoffAndThenStops(t *testing.T) {
 	state := storedLSPState(t, store, "task-1", "kotlin")
 	if state.Phase != PhaseError {
 		t.Fatalf("exhausted recovery state = %#v", state)
+	}
+}
+
+func TestProcessExitReleasesCapacityAndPromotesQueuedGeneration(t *testing.T) {
+	tasks := &fakeControllerTasks{environments: map[string]*models.TaskEnvironment{
+		"crashed": readyEnvironment("crashed", "local_pc"),
+		"queued":  readyEnvironment("queued", "local_pc"),
+	}}
+	store := newMemoryLSPStore()
+	host := newFakeLSPHost()
+	controller := newTestController(tasks, store, &fakeLSPSettings{}, &fakeLSPRuntimes{host: host})
+	controller.capacity = NewCapacity(1)
+	origin := Origin{Initiator: InitiatorUser, Reason: "user_control"}
+
+	if _, err := controller.Start(context.Background(), "crashed", "go", origin); err != nil {
+		t.Fatal(err)
+	}
+	queued, err := controller.Start(context.Background(), "queued", "kotlin", origin)
+	if err != nil || queued.Phase != PhaseQueued {
+		t.Fatalf("queued=%#v error=%v", queued, err)
+	}
+	if err := controller.observeRuntimeSnapshot(context.Background(), TaskLanguageKey{
+		TaskID: "crashed", Language: "go",
+	}, RuntimeSnapshot{
+		Language: "go", Generation: 1, Phase: PhaseError, ErrorCode: errorCodeProcessExited,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	promoted, _, err := store.GetTaskLSPLanguage(context.Background(), "queued", "kotlin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if promoted.Phase != PhaseReady || controller.capacity.Active() != 1 || controller.capacity.Queued() != 0 {
+		t.Fatalf("promoted=%#v active=%d queued=%d", promoted, controller.capacity.Active(), controller.capacity.Queued())
 	}
 }
 

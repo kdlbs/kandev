@@ -115,3 +115,9 @@ epoch and monotonic revision in both REST and language events. Workspace-source 
 an explicit authorization guard; HTTP and attachment 404s require the typed task-not-found error;
 the attachment proxy uses joined ping/read-deadline keepalive. Focused controller, client, gateway,
 SQLite, lint, and race checks pass.
+
+A follow-up Codex review on 2026-08-06 found that overlapping `SetPolicy` commands with different
+values shared an action-only coalescing key. Command batches now include the requested policy in
+their coalescing identity, preserving FIFO execution for distinct writes while retaining duplicate
+coalescing. The deterministic overlapping-policy regression, full controller package, race
+detector, and backend lint pass.

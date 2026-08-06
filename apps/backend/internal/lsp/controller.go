@@ -24,7 +24,10 @@ var (
 	ErrAttachmentNotReady  = errors.New("task language server attachment is not ready")
 )
 
-const errorCodeProcessStartFailed = "process_start_failed"
+const (
+	errorCodeProcessExited      = "process_exited"
+	errorCodeProcessStartFailed = "process_start_failed"
+)
 
 type Origin struct {
 	Initiator Initiator
@@ -254,7 +257,7 @@ func (c *Controller) SetPolicy(
 	if !validPolicy(policy) {
 		return nil, fmt.Errorf("%w: %q", ErrInvalidPolicy, policy)
 	}
-	return c.commands.submit(ctx, TaskLanguageKey{TaskID: taskID, Language: language}, ActionSetPolicy,
+	return c.commands.submit(ctx, TaskLanguageKey{TaskID: taskID, Language: language}, ActionSetPolicy, string(policy),
 		func(workCtx context.Context) (*LanguageSnapshot, error) {
 			return c.setPolicy(workCtx, taskID, language, policy, origin)
 		})
@@ -271,7 +274,7 @@ func (c *Controller) Start(
 	if err := validateLanguageAndOrigin(language, origin); err != nil {
 		return nil, err
 	}
-	return c.commands.submit(ctx, TaskLanguageKey{TaskID: taskID, Language: language}, ActionStart,
+	return c.commands.submit(ctx, TaskLanguageKey{TaskID: taskID, Language: language}, ActionStart, "",
 		func(workCtx context.Context) (*LanguageSnapshot, error) {
 			return c.start(workCtx, taskID, language, origin, ActionStart)
 		})
@@ -289,7 +292,7 @@ func (c *Controller) Stop(
 		return nil, err
 	}
 	c.cancelRecovery(TaskLanguageKey{TaskID: taskID, Language: language})
-	return c.commands.submit(ctx, TaskLanguageKey{TaskID: taskID, Language: language}, ActionStop,
+	return c.commands.submit(ctx, TaskLanguageKey{TaskID: taskID, Language: language}, ActionStop, "",
 		func(workCtx context.Context) (*LanguageSnapshot, error) {
 			return c.stop(workCtx, taskID, language, origin, ActionStop)
 		})
@@ -306,7 +309,7 @@ func (c *Controller) Restart(
 	if err := validateLanguageAndOrigin(language, origin); err != nil {
 		return nil, err
 	}
-	return c.commands.submit(ctx, TaskLanguageKey{TaskID: taskID, Language: language}, ActionRestart,
+	return c.commands.submit(ctx, TaskLanguageKey{TaskID: taskID, Language: language}, ActionRestart, "",
 		func(workCtx context.Context) (*LanguageSnapshot, error) {
 			return c.start(workCtx, taskID, language, origin, ActionRestart)
 		})
@@ -772,11 +775,12 @@ type commandResult struct {
 }
 
 type commandBatch struct {
-	action Action
-	ctx    context.Context
-	run    func(context.Context) (*LanguageSnapshot, error)
-	done   chan struct{}
-	result commandResult
+	action      Action
+	coalesceKey string
+	ctx         context.Context
+	run         func(context.Context) (*LanguageSnapshot, error)
+	done        chan struct{}
+	result      commandResult
 }
 
 type commandLane struct {
@@ -793,6 +797,7 @@ func (c *commandCoordinator) submit(
 	ctx context.Context,
 	key TaskLanguageKey,
 	action Action,
+	coalesceKey string,
 	run func(context.Context) (*LanguageSnapshot, error),
 ) (*LanguageSnapshot, error) {
 	c.mu.Lock()
@@ -804,10 +809,11 @@ func (c *commandCoordinator) submit(
 		lane = &commandLane{}
 		c.lanes[key] = lane
 	}
-	batch := coalescibleBatch(lane, action)
+	batch := coalescibleBatch(lane, action, coalesceKey)
 	if batch == nil {
 		batch = &commandBatch{
-			action: action, ctx: context.WithoutCancel(ctx), run: run, done: make(chan struct{}),
+			action: action, coalesceKey: coalesceKey,
+			ctx: context.WithoutCancel(ctx), run: run, done: make(chan struct{}),
 		}
 		if lane.running == nil {
 			lane.running = batch
@@ -826,15 +832,15 @@ func (c *commandCoordinator) submit(
 	}
 }
 
-func coalescibleBatch(lane *commandLane, action Action) *commandBatch {
+func coalescibleBatch(lane *commandLane, action Action, coalesceKey string) *commandBatch {
 	if len(lane.queued) > 0 {
 		last := lane.queued[len(lane.queued)-1]
-		if last.action == action {
+		if last.action == action && last.coalesceKey == coalesceKey {
 			return last
 		}
 		return nil
 	}
-	if lane.running != nil && lane.running.action == action {
+	if lane.running != nil && lane.running.action == action && lane.running.coalesceKey == coalesceKey {
 		return lane.running
 	}
 	return nil

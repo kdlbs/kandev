@@ -113,3 +113,8 @@ an environment lookup can fail during teardown. Ready-reset callbacks retain the
 context instead of creating background work after controller close. Environment-ready LSP
 reconciliation is scheduled only after the agent process start has been dispatched. Focused
 cleanup/timer/launch-order regressions and the controller race suite pass.
+
+A follow-up Codex review on 2026-08-06 found that a task-host `process_exited` snapshot scheduled
+recovery without releasing its now-dead generation's capacity slot. Proven process-exit evidence
+now releases the slot first, atomically promotes queued work, then schedules recovery. The queue
+promotion regression, full controller package, race detector, and backend lint pass.

@@ -121,3 +121,8 @@ Completed 2026-08-05.
   stopped; all changed backend packages and isolated task-LSP cleanup tests passed. Separate CLI and
   script targets exposed unchanged base-branch release/review workflow assertion mismatches. Root
   lint, architecture lint, formatting, docs validation, and all-app typecheck passed.
+- PR CI on 2026-08-06 exposed one stale incremental-change assertion after attachment replay moved
+  the upstream document contract to canonical full text. The corrected production-build scenario
+  passed 1/1 with retries disabled. The same shard's status-placement retry passed once in isolation
+  and 3/3 repeated runs with one worker and no retries, so no product change or timeout increase was
+  made for that non-reproducing timing artifact.
