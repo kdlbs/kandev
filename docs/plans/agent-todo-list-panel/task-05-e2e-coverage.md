@@ -117,3 +117,58 @@ Commands and results (final, after all fixes):
 - `cd apps/web && pnpm exec vitest run components/task/ components/settings/ lib/ssr/user-settings.test.ts lib/ws/handlers/users.test.ts hooks/use-ensure-user-settings.test.ts` → 302 files / 2188 tests passed, 4 skipped; 1 unrelated pre-existing flaky test (`storage-maintenance-settings.test.tsx`, untouched by this feature) timed out under full-directory load and passed cleanly in isolation.
 - `cd apps/web && pnpm run typecheck` → clean.
 - `cd apps/web && pnpm run i18n:check` → `2123 key(s) referenced, 2407 en entries, 0 orphans, pseudo in sync`.
+
+**Addendum (found during a manual demo-server review after this task's E2E
+suite was already green):** a 4th bug, upstream of anything the E2E suite's
+own mocked-timing exercised. `TodosContent` (both files) passed `[]` as the
+`messageTodos` fallback to `useSessionTodoItems` — a deliberate but wrong
+choice, since `sessionTodos.bySessionId` (the live store slice) is
+populated *exclusively* by the `session.todos.updated` WS handler and is
+never backfilled from history. Any session that already had todo data
+*before* the viewing page loaded — a fresh page load, a reopened task, or
+simply a task whose plan update completed before a demo browser connected —
+showed "No todos yet." in the new panel while the adjacent `TodoIndicator`
+chat-status-bar chip, looking at the identical session at the identical
+moment, correctly showed "2/5" — because `TodoIndicator`'s call site already
+derives a `messageTodos` fallback from the latest persisted `todo`-type
+message (`buildTodoItems` in `hooks/use-processed-messages.ts`, previously
+module-private) rather than passing `[]`. This directly violates the spec's
+"shows the same rows... that the TodoIndicator popover shows for that
+session" scenario for exactly the case — an already-completed session — the
+E2E suite's own tests happened to always open a task via a still-connected
+page immediately after the WS-live update fired, never exercising a true
+cold load. Caught only by manually seeding a real backend (see below) and
+looking at it, not by any automated test in this task.
+
+Fixed by exporting `buildTodoItems` and having both `TodosContent`s call
+`useSessionMessages(sessionId)` + `buildTodoItems(messages)` for the
+fallback, exactly mirroring `TodoIndicator`'s data source. Added a
+`data-testid="todos-panel"` wrapper (both files) so E2E/unit assertions can
+scope to the panel's own rendered rows without colliding with the same
+session's chat-transcript text or the (possibly still-mounted-but-hidden)
+status-bar popover using the identical row markup. Added a 3rd unit case to
+each `TodosContent` test file (message-history fallback with an empty live
+store) and a 4th E2E case
+(`shows the checklist for a session whose todos were already persisted
+before this page ever loaded it`) seeding a task via the mock agent's
+`e2e:plan(...)` scripting command, letting it settle, *then* turning the
+preference on and opening it fresh.
+
+To manually review the feature, a real backend + frontend was run outside
+the E2E harness: `apps/backend/bin/kandev __backend` (the same hidden
+subcommand the E2E fixture uses to skip the runtime-bundle bootstrap) with
+`KANDEV_MOCK_AGENT=true`, `KANDEV_WEB_DIST_DIR` pointed at the built
+`apps/web/dist`, and a fresh `HOME`/`KANDEV_DATABASE_PATH`, seeded via direct
+REST calls (workspace, workflow, local git repo, a task whose description is
+an `e2e:plan(...)` command) — this is what surfaced the bug via a
+`tab.screenshot()` comparison against the chat status bar, which no unit or
+E2E test had put side by side.
+
+Re-verification after the fix, all green:
+- `pnpm exec vitest run components/task/dockview-panel-content.todos.test.tsx components/task/dockview-shared.test.tsx components/task/dockview-panel-content.diff.test.tsx` → 3 files, 8 tests passed.
+- `pnpm exec playwright test e2e/tests/settings/todo-list-panel.spec.ts` → 4 passed.
+- `pnpm exec playwright test e2e/tests/settings/todo-list-panel.spec.ts e2e/tests/chat/chat-status-bar.spec.ts` → 10 passed (no regression in the pre-existing `TodoIndicator`/status-bar coverage this fix's shared-helper export touches).
+- `pnpm exec vitest run components/task/ components/settings/` → 301 files / 2166 tests passed, 4 skipped.
+- `pnpm run typecheck` → clean.
+- `pnpm run i18n:check` → `2123 key(s) referenced, 2407 en entries, 0 orphans, pseudo in sync`.
+- Manual re-screenshot of the live demo task's Todos panel after the fix: all 5 seeded items render with correct order/status/progress ("2/5 completed"), matching the chat transcript's "UPDATED TODOS (2/5)" summary.

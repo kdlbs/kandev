@@ -37,6 +37,38 @@ async function createTaskWithSession(apiClient: ApiClient, seedData: SeedData, t
   return task;
 }
 
+/** Seeds a task whose session already emitted todo entries via the mock
+ * agent's `e2e:plan(...)` scripting command, then settles — so the entries
+ * exist only in persisted message history by the time a fresh page opens
+ * the task, exactly like reopening an already-completed real task. */
+async function createTaskWithTodos(apiClient: ApiClient, seedData: SeedData, title: string) {
+  const task = await apiClient.createTaskWithAgent(
+    seedData.workspaceId,
+    title,
+    seedData.agentProfileId,
+    {
+      description: [
+        'e2e:plan([{"content":"Write tests","status":"completed"},{"content":"Implement feature","status":"in_progress"}])',
+        'e2e:message("done")',
+      ].join("\n"),
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+      repository_ids: [seedData.repositoryId],
+    },
+  );
+  if (!task.session_id) throw new Error(`${title} did not create a session`);
+  await expect
+    .poll(
+      async () => {
+        const { sessions } = await apiClient.listTaskSessions(task.id);
+        return DONE_STATES.includes(sessions[0]?.state ?? "");
+      },
+      { timeout: 45_000, message: `Waiting for ${title} session to settle` },
+    )
+    .toBe(true);
+  return task;
+}
+
 async function openTask(page: Page, taskId: string): Promise<SessionPage> {
   await page.goto(`/t/${taskId}`);
   const session = new SessionPage(page);
@@ -181,5 +213,30 @@ test.describe("Todo list panel preference", () => {
         todosGroupId: "group-right-bottom",
         rightTopOrder: ["files", "changes"],
       });
+  });
+
+  test("shows the checklist for a session whose todos were already persisted before this page ever loaded it — not just live updates", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(120_000);
+    // Todos are emitted and the session settles entirely before the
+    // preference is even turned on or the task is opened, so the only way
+    // the panel can show them is by deriving from persisted message
+    // history (`sessionTodos.bySessionId` is populated exclusively by a
+    // live WS event and is never backfilled).
+    const task = await createTaskWithTodos(apiClient, seedData, "Todos from history");
+    await setTodoListPanelPreference(apiClient, true);
+    await openTask(testPage, task.id);
+
+    await expect(todosTabWrapper(testPage)).toBeVisible({ timeout: 15_000 });
+    await todosTabWrapper(testPage).click();
+    const panel = testPage.getByTestId("todos-panel");
+    await expect(panel).toBeVisible({ timeout: 15_000 });
+    await expect(testPage.getByTestId("todos-panel-empty-state")).toHaveCount(0);
+    await expect(panel.getByText("Write tests")).toBeVisible();
+    await expect(panel.getByText("Implement feature")).toBeVisible();
+    await expect(panel.getByText("1/2 completed")).toBeVisible();
   });
 });

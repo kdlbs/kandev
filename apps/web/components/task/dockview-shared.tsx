@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useCallback, useEffect } from "react";
+import React, { useCallback, useEffect, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import {
   DockviewDefaultTab,
@@ -12,10 +12,12 @@ import { useAppStore } from "@/components/state-provider";
 import { useFileEditors } from "@/hooks/use-file-editors";
 import { usePanelActive } from "@/hooks/use-panel-active";
 import { useSessionGitStatus } from "@/hooks/domains/session/use-session-git-status";
+import { useSessionMessages } from "@/hooks/domains/session/use-session-messages";
 import { useSessionCommits } from "@/hooks/domains/session/use-session-commits";
 import { useEnvironmentSessionId } from "@/hooks/use-environment-session-id";
 import type { ReviewSource } from "@/hooks/domains/session/use-review-sources";
 import { t } from "@/lib/i18n";
+import { buildTodoItems } from "@/hooks/use-processed-messages";
 
 // Panel components (rendered via portals, not directly by dockview)
 import { TaskChatPanel } from "./task-chat-panel";
@@ -380,7 +382,9 @@ function PlanContent() {
 function TodosContent() {
   const { t } = useTranslation();
   const sessionId = useAppStore((state) => state.tasks.activeSessionId);
-  const todos = useSessionTodoItems(sessionId, []);
+  const { messages } = useSessionMessages(sessionId);
+  const messageTodos = useMemo(() => buildTodoItems(messages), [messages]);
+  const todos = useSessionTodoItems(sessionId, messageTodos);
 
   if (todos.length === 0) {
     return (
@@ -393,7 +397,7 @@ function TodosContent() {
   const completed = todos.filter((todo) => resolveStatus(todo) === "completed").length;
   const progress = Math.round((completed / todos.length) * 100);
   return (
-    <div className="p-3">
+    <div data-testid="todos-panel" className="p-3">
       <TodoIndicatorContent todos={todos} completed={completed} progress={progress} />
     </div>
   );
