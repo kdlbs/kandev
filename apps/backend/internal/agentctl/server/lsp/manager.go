@@ -548,12 +548,22 @@ func (m *Manager) stopRuntime(ctx context.Context, current *runtime) error {
 	defer cancel()
 	stopErr := m.processes.StopProcess(cleanupCtx, process.StopProcessRequest{ProcessID: current.process.ID})
 	current.closeStreams()
+	stopErr = errors.Join(stopErr, waitForRuntimeCleanup(cleanupCtx, current))
+	return stopErr
+}
+
+func waitForRuntimeCleanup(ctx context.Context, current *runtime) error {
 	select {
 	case <-current.done:
-	case <-cleanupCtx.Done():
-		stopErr = errors.Join(stopErr, cleanupCtx.Err())
+	case <-ctx.Done():
+		return ctx.Err()
 	}
-	return stopErr
+	select {
+	case <-current.process.Done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 func cleanupContext(parent context.Context) (context.Context, context.CancelFunc) {

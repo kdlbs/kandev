@@ -81,11 +81,27 @@ func waitForProcessExit(t *testing.T, pid int) {
 	t.Helper()
 	deadline := time.Now().Add(3 * time.Second)
 	for time.Now().Before(deadline) {
-		err := syscall.Kill(pid, 0)
-		if errors.Is(err, syscall.ESRCH) {
+		if !processStillRunning(pid) {
 			return
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
 	t.Fatalf("process %d remained after language-server stop: %s", pid, fmt.Sprint(syscall.Kill(pid, 0)))
+}
+
+func processStillRunning(pid int) bool {
+	err := syscall.Kill(pid, 0)
+	if errors.Is(err, syscall.ESRCH) {
+		return false
+	}
+	stat, readErr := os.ReadFile(fmt.Sprintf("/proc/%d/stat", pid))
+	if readErr != nil {
+		return err == nil || errors.Is(err, syscall.EPERM)
+	}
+	commandEnd := strings.LastIndex(string(stat), ") ")
+	if commandEnd < 0 {
+		return true
+	}
+	fields := strings.Fields(string(stat)[commandEnd+2:])
+	return len(fields) == 0 || (fields[0] != "Z" && fields[0] != "X")
 }
