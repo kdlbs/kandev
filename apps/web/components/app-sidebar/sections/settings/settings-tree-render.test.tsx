@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const MAIN_WORKSPACE_ID = "ws-1";
 const MAIN_WORKSPACE_NAME = "Main Workspace";
 const VOICE_MODE_LABEL = "Voice Mode";
+const SEARCH_LABEL = "Search settings";
 
 const state = {
   workspaces: {
@@ -142,7 +143,7 @@ describe("SettingsTree search", () => {
   it("preserves the normal menu until a query filters it to grouped hits", () => {
     render(<SettingsTree pathname="/settings" />);
 
-    const search = screen.getByRole("searchbox", { name: "Search settings" });
+    const search = screen.getByRole("searchbox", { name: SEARCH_LABEL });
     expect(screen.getByRole("link", { name: VOICE_MODE_LABEL })).toBeTruthy();
 
     fireEvent.change(search, { target: { value: "font size" } });
@@ -158,7 +159,7 @@ describe("SettingsTree search", () => {
   it("prefixes per-workspace results with the workspace name", () => {
     render(<SettingsTree pathname="/settings" />);
 
-    fireEvent.change(screen.getByRole("searchbox", { name: "Search settings" }), {
+    fireEvent.change(screen.getByRole("searchbox", { name: SEARCH_LABEL }), {
       target: { value: "Jira" },
     });
 
@@ -171,7 +172,7 @@ describe("SettingsTree search", () => {
 
   it("clears a query with Escape and restores the normal menu", () => {
     render(<SettingsTree pathname="/settings" />);
-    const search = screen.getByRole("searchbox", { name: "Search settings" });
+    const search = screen.getByRole("searchbox", { name: SEARCH_LABEL });
 
     fireEvent.change(search, { target: { value: "font size" } });
     fireEvent.keyDown(search, { key: "Escape" });
@@ -183,7 +184,7 @@ describe("SettingsTree search", () => {
   it("announces an empty result without rendering the normal menu", () => {
     render(<SettingsTree pathname="/settings" />);
 
-    fireEvent.change(screen.getByRole("searchbox", { name: "Search settings" }), {
+    fireEvent.change(screen.getByRole("searchbox", { name: SEARCH_LABEL }), {
       target: { value: "definitely missing" },
     });
 

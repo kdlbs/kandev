@@ -30,6 +30,8 @@ vi.mock("@/components/settings/system/updates-card", () => ({ UpdatesCard: () =>
 const ACTIVE_WORKSPACE_COOKIE = "kandev-active-workspace";
 const OWNER_ID = "owner-1";
 const TIMESTAMP = "2026-01-01T00:00:00Z";
+// The merged page that Message Queue and the legacy task-actions URL both land on.
+const TASK_BEHAVIOR_PATH = "/settings/preferences/task-behavior";
 
 describe("buildSettingsInitialStateForRoute", () => {
   beforeEach(() => {
@@ -138,7 +140,7 @@ describe("buildSettingsInitialStateForRoute", () => {
 
 describe("message queue settings route", () => {
   it("renders the Message Queue inside the merged Task behavior page", () => {
-    const route = renderSettingsRoute("/settings/preferences/task-behavior");
+    const route = renderSettingsRoute(TASK_BEHAVIOR_PATH);
 
     expect(isValidElement(route)).toBe(true);
     expect((route as ReactElement).type).toBe(TaskBehaviorSettings);
@@ -151,7 +153,7 @@ describe("message queue settings route", () => {
 
     expect(isValidElement(route)).toBe(true);
     expect((route.type as { name?: string }).name).toBe("SettingsRedirect");
-    expect(route.props.to).toBe("/settings/preferences/task-behavior");
+    expect(route.props.to).toBe(TASK_BEHAVIOR_PATH);
   });
 
   it("redirects the former System URL to the Task behavior page", () => {
@@ -161,7 +163,7 @@ describe("message queue settings route", () => {
 
     expect(isValidElement(route)).toBe(true);
     expect((route.type as { name?: string }).name).toBe("SettingsRedirect");
-    expect(route.props.to).toBe("/settings/preferences/task-behavior");
+    expect(route.props.to).toBe(TASK_BEHAVIOR_PATH);
   });
 });
 
@@ -187,7 +189,7 @@ describe("renderSettingsRoute", () => {
     }>;
     expect(isValidElement(route)).toBe(true);
     expect((route.type as { name?: string }).name).toBe("SettingsRedirect");
-    expect(route.props.to).toBe("/settings/preferences/task-behavior");
+    expect(route.props.to).toBe(TASK_BEHAVIOR_PATH);
   });
 
   it("passes the route workspace id to the GitLab integration page", () => {
@@ -212,6 +214,24 @@ describe("renderSettingsRoute", () => {
     expect((route as ReactElement).type).toBe(IntegrationsGitHubPage);
   });
 
+  it("reserves /settings/executor/new for executor creation", () => {
+    const route = renderSettingsRoute("/settings/executor/new");
+
+    expect(isValidElement(route)).toBe(true);
+    expect((route as ReactElement).type).toBe(ExecutorCreatePage);
+  });
+
+  it("reserves /settings/agents/browse for the install catalogue, not an agent named browse", () => {
+    const route = renderSettingsRoute("/settings/agents/browse");
+
+    expect(isValidElement(route)).toBe(true);
+    expect(((route as ReactElement).type as { name?: string }).name).toBe("AgentsBrowsePage");
+  });
+});
+
+// Split from the block above to stay inside the per-function line limit: this
+// half is only about decoding `%20`-style segments into component props.
+describe("renderSettingsRoute identifier decoding", () => {
   it.each([
     {
       pathname: "/settings/plugins/plugin%20one",
@@ -283,19 +303,6 @@ describe("renderSettingsRoute", () => {
     },
   );
 
-  it("reserves /settings/executor/new for executor creation", () => {
-    const route = renderSettingsRoute("/settings/executor/new");
-
-    expect(isValidElement(route)).toBe(true);
-    expect((route as ReactElement).type).toBe(ExecutorCreatePage);
-  });
-
-  it("reserves /settings/agents/browse for the install catalogue, not an agent named browse", () => {
-    const route = renderSettingsRoute("/settings/agents/browse");
-
-    expect(isValidElement(route)).toBe(true);
-    expect(((route as ReactElement).type as { name?: string }).name).toBe("AgentsBrowsePage");
-  });
 });
 
 function buildState(

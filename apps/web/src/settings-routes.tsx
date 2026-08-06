@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, type ReactNode } from "react";
 import { Trans, useTranslation } from "react-i18next";
 
 import AgentsSettingsPage from "@/app/settings/agents/page";
@@ -28,8 +28,6 @@ import AutomationsPage from "@/app/settings/workspace/[id]/automations/page";
 import AutomationEditorPage from "@/app/settings/workspace/[id]/automations/[automationId]/page";
 import NewAutomationPage from "@/app/settings/workspace/[id]/automations/new/page";
 import WorkspaceEditPage from "@/app/settings/workspace/[id]/page";
-import { WorkspaceRepositoriesClient } from "@/app/settings/workspace/workspace-repositories-client";
-import { WorkspaceWorkflowsClient } from "@/app/settings/workspace/workspace-workflows-client";
 import WorkspacesPage from "@/app/settings/workspace/page";
 import Link from "@/components/routing/app-link";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
@@ -66,7 +64,6 @@ import {
   type WorkspaceSettingsTab,
 } from "@/components/settings/workspaces/workspace-settings-shell";
 import licenses from "@/generated/licenses.json";
-import { fetchJson } from "@/lib/api/client";
 import {
   APPEARANCE_SETTINGS_HREF,
   KEYBOARD_SHORTCUTS_SETTINGS_HREF,
@@ -87,7 +84,6 @@ import {
   PluginRouteFallback,
 } from "@/components/plugins/plugin-error-boundary";
 import { pluginRegistry, usePluginRegistry } from "@/lib/plugins/registry";
-import { listWorkflows } from "@/lib/api/domains/kanban-api";
 import {
   fetchUserSettings,
   listAgentDiscovery,
@@ -95,16 +91,13 @@ import {
   listAvailableAgents,
   listExecutors,
 } from "@/lib/api/domains/settings-api";
-import { listWorkflowTemplates } from "@/lib/api/domains/workflow-api";
-import { listRepositories, listWorkspaces } from "@/lib/api/domains/workspace-api";
-import { useRouter } from "@/lib/routing/client-router";
+import { listWorkspaces } from "@/lib/api/domains/workspace-api";
 import {
   matchSingle,
   matchDouble,
   normalizeSettingsPath,
   safeDecodePathSegment,
 } from "@/lib/routing/path";
-import { IMPROVE_KANDEV_WORKSPACE_NAME } from "@/components/improve-kandev-dialog-model";
 import {
   mapWorkspaceItem,
   readActiveWorkspaceCookie,
@@ -115,26 +108,15 @@ import type { HydrationState } from "@/lib/state/store";
 import { toAgentProfileOption } from "@/lib/state/slices/settings/types";
 import type {
   ListWorkspacesResponse,
-  Repository,
-  RepositoryScript,
   UserSettingsResponse,
-  Workflow,
-  WorkflowTemplate,
-  Workspace,
 } from "@/lib/types/http";
 import type { LicenseEntry } from "@/lib/types/system";
+import {
+  WorkspaceRepositoriesRoute,
+  WorkspaceWorkflowsRoute,
+} from "./settings-routes.workspace-data";
 
 type RouteRenderer = () => ReactNode;
-type RepositoryWithScripts = Repository & { scripts: RepositoryScript[] };
-type WorkspaceRepositoriesRouteState = {
-  workspace: Workspace | null;
-  repositories: RepositoryWithScripts[];
-};
-type WorkspaceWorkflowsRouteState = {
-  workspace: Workspace | null;
-  workflows: Workflow[];
-  workflowTemplates: WorkflowTemplate[];
-};
 type SettingsInitialStateData = {
   workspaces: ListWorkspacesResponse["workspaces"];
   executors: Awaited<ReturnType<typeof listExecutors>>["executors"];
@@ -376,7 +358,47 @@ function renderDynamicSettingsRoute(pathname: string) {
   return null;
 }
 
-function renderWorkspaceSettingsRoute(pathname: string) {
+// One component per workspace sub-page tab. A lookup rather than a ternary
+// chain: the nested version pushed the enclosing matcher over both the
+// cyclomatic and cognitive complexity limits.
+// Keep in step with the alternation in the sub-page pattern below.
+type WorkspaceSubpageSection = "repositories" | "workflows" | "automations" | "secrets";
+
+const WORKSPACE_SUBPAGE_PAGES: Record<WorkspaceSubpageSection, (id: string) => ReactNode> = {
+  repositories: (id) => <WorkspaceRepositoriesRoute workspaceId={id} />,
+  workflows: (id) => <WorkspaceWorkflowsRoute workspaceId={id} />,
+  automations: (id) => <AutomationsPage workspaceId={id} />,
+  secrets: (id) => <SecretsSettings scope="workspace" workspaceId={id} />,
+};
+
+function renderWorkspaceIntegrationRoute(match: RegExpMatchArray): ReactNode {
+  const workspaceId = safeDecodePathSegment(match[1]);
+  const section = match[2] ? safeDecodePathSegment(match[2]) : null;
+  if (!workspaceId || (match[2] && !section)) return null;
+  const integrationPage = renderIntegrationSettingsRoute(section, workspaceId);
+  if (!integrationPage) return null;
+  return (
+    <WorkspaceSettingsShell workspaceId={workspaceId} activeTab="integrations">
+      {integrationPage}
+    </WorkspaceSettingsShell>
+  );
+}
+
+function renderWorkspaceAutomationRoute(id: string, automationId: string): ReactNode {
+  const editor =
+    automationId === "new" ? (
+      <NewAutomationPage workspaceId={id} />
+    ) : (
+      <AutomationEditorPage workspaceId={id} automationId={automationId} />
+    );
+  return (
+    <WorkspaceSettingsShell workspaceId={id} activeTab="automations">
+      {editor}
+    </WorkspaceSettingsShell>
+  );
+}
+
+function renderWorkspaceSettingsRoute(pathname: string): ReactNode {
   // Legacy /settings/workspace/<id>... paths forward to /settings/workspaces/<id>...
   if (pathname.startsWith("/settings/workspace/")) {
     return (
@@ -390,16 +412,7 @@ function renderWorkspaceSettingsRoute(pathname: string) {
     /^\/settings\/workspaces\/([^/]+)\/integrations(?:\/([^/]+))?$/,
   );
   if (workspaceIntegration?.[1]) {
-    const workspaceId = safeDecodePathSegment(workspaceIntegration[1]);
-    const section = workspaceIntegration[2] ? safeDecodePathSegment(workspaceIntegration[2]) : null;
-    if (!workspaceId || (workspaceIntegration[2] && !section)) return null;
-    const integrationPage = renderIntegrationSettingsRoute(section, workspaceId);
-    if (!integrationPage) return null;
-    return (
-      <WorkspaceSettingsShell workspaceId={workspaceId} activeTab="integrations">
-        {integrationPage}
-      </WorkspaceSettingsShell>
-    );
+    return renderWorkspaceIntegrationRoute(workspaceIntegration);
   }
 
   const workspaceAutomation = matchDouble(
@@ -407,18 +420,7 @@ function renderWorkspaceSettingsRoute(pathname: string) {
     /^\/settings\/workspaces\/([^/]+)\/automations\/([^/]+)$/,
   );
   if (workspaceAutomation) {
-    const [id, automationId] = workspaceAutomation;
-    const editor =
-      automationId === "new" ? (
-        <NewAutomationPage workspaceId={id} />
-      ) : (
-        <AutomationEditorPage workspaceId={id} automationId={automationId} />
-      );
-    return (
-      <WorkspaceSettingsShell workspaceId={id} activeTab="automations">
-        {editor}
-      </WorkspaceSettingsShell>
-    );
+    return renderWorkspaceAutomationRoute(workspaceAutomation[0], workspaceAutomation[1]);
   }
 
   const workspaceSubpage = matchDouble(
@@ -427,20 +429,10 @@ function renderWorkspaceSettingsRoute(pathname: string) {
   );
   if (workspaceSubpage) {
     const [id, section] = workspaceSubpage;
-    const tab = section as WorkspaceSettingsTab;
-    const page =
-      section === "repositories" ? (
-        <WorkspaceRepositoriesRoute workspaceId={id} />
-      ) : section === "workflows" ? (
-        <WorkspaceWorkflowsRoute workspaceId={id} />
-      ) : section === "secrets" ? (
-        <SecretsSettings scope="workspace" workspaceId={id} />
-      ) : (
-        <AutomationsPage workspaceId={id} />
-      );
+    const tab = section as WorkspaceSubpageSection;
     return (
-      <WorkspaceSettingsShell workspaceId={id} activeTab={tab}>
-        {page}
+      <WorkspaceSettingsShell workspaceId={id} activeTab={tab as WorkspaceSettingsTab}>
+        {WORKSPACE_SUBPAGE_PAGES[tab](id)}
       </WorkspaceSettingsShell>
     );
   }
@@ -647,104 +639,6 @@ export function buildSettingsInitialStateForRoute({
           },
         }
       : {}),
-  };
-}
-
-function WorkspaceRepositoriesRoute({ workspaceId }: { workspaceId: string }) {
-  const [state, setState] = useState<WorkspaceRepositoriesRouteState | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    setState(null);
-
-    loadWorkspaceRepositoriesRoute(workspaceId)
-      .catch(() => ({ workspace: null, repositories: [] }))
-      .then((nextState) => {
-        if (!cancelled) setState(nextState);
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [workspaceId]);
-
-  if (!state) return null;
-  return (
-    <WorkspaceRepositoriesClient
-      workspace={state.workspace}
-      repositories={state.repositories}
-      isImproveWorkspace={state.workspace?.name === IMPROVE_KANDEV_WORKSPACE_NAME}
-    />
-  );
-}
-
-function WorkspaceWorkflowsRoute({ workspaceId }: { workspaceId: string }) {
-  const [state, setState] = useState<WorkspaceWorkflowsRouteState | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    setState(null);
-
-    loadWorkspaceWorkflowsRoute(workspaceId)
-      .catch(() => ({ workspace: null, workflows: [], workflowTemplates: [] }))
-      .then((nextState) => {
-        if (!cancelled) setState(nextState);
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [workspaceId]);
-
-  if (!state) return null;
-  return (
-    <WorkspaceWorkflowsClient
-      workspace={state.workspace}
-      workflows={state.workflows}
-      workflowTemplates={state.workflowTemplates}
-      isImproveWorkspace={state.workspace?.name === IMPROVE_KANDEV_WORKSPACE_NAME}
-    />
-  );
-}
-
-async function loadWorkspaceRepositoriesRoute(
-  workspaceId: string,
-): Promise<WorkspaceRepositoriesRouteState> {
-  const [workspace, repoResponse] = await Promise.all([
-    fetchJson<Workspace>(`/api/v1/workspaces/${workspaceId}`, { cache: "no-store" }),
-    listRepositories(workspaceId, { includeScripts: true }, { cache: "no-store" }),
-  ]);
-
-  return {
-    workspace,
-    repositories: repoResponse.repositories.map((repository) => ({
-      ...repository,
-      scripts: repository.scripts ?? [],
-    })),
-  };
-}
-
-async function loadWorkspaceWorkflowsRoute(
-  workspaceId: string,
-): Promise<WorkspaceWorkflowsRouteState> {
-  const workspace = await fetchJson<Workspace>(`/api/v1/workspaces/${workspaceId}`, {
-    cache: "no-store",
-  });
-  // The dedicated Improve Kandev workspace lists its hidden workflows
-  // (improve-kandev, report-kandev-issue) read-only; other workspaces keep
-  // them hidden.
-  const [workflowResponse, templateResponse] = await Promise.all([
-    listWorkflows(workspaceId, {
-      includeHidden: workspace.name === IMPROVE_KANDEV_WORKSPACE_NAME,
-      cache: "no-store",
-    }),
-    listWorkflowTemplates({ cache: "no-store" }),
-  ]);
-
-  return {
-    workspace,
-    workflows: workflowResponse.workflows ?? [],
-    workflowTemplates: templateResponse.templates ?? [],
   };
 }
 

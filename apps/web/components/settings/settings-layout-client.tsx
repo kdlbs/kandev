@@ -154,53 +154,75 @@ function deriveParents(
   return parents;
 }
 
+// The record identities a settings pathname can carry, parsed in one place.
+// `isRoot` separates a record's own page from its sub-pages: only the former is
+// titled with the record's name.
+type RecordRoute = {
+  workspaceId: string | null;
+  workspaceIsRoot: boolean;
+  agentName: string | null;
+  agentIsRoot: boolean;
+  profileId: string | null;
+};
+
+function matchRecordRoute(pathname: string): RecordRoute {
+  const workspace = pathname.match(/^\/settings\/workspaces\/([^/]+)(\/.+)?$/);
+  // Agent routes are keyed by agent name; `browse` is the catalog index rather
+  // than a saved agent, so it carries no record name.
+  const agent = pathname.match(/^\/settings\/agents\/([^/]+)(\/.+)?$/);
+  const profile = pathname.match(/^\/settings\/agents\/[^/]+\/profiles\/([^/]+)$/);
+
+  return {
+    workspaceId: safeDecodePathSegment(workspace?.[1]),
+    workspaceIsRoot: Boolean(workspace) && !workspace?.[2],
+    agentName: agent && agent[1] !== "browse" ? safeDecodePathSegment(agent[1]) : null,
+    agentIsRoot: Boolean(agent) && !agent?.[2],
+    profileId: safeDecodePathSegment(profile?.[1]),
+  };
+}
+
+// A record's own page is titled with the record's name, not the list label;
+// everything else falls back to the derived page label, then to "Settings".
+function resolveTitle(
+  route: RecordRoute,
+  names: { workspace: string | null; agent: string | null; profile: string | null },
+  pageLabel: string | null,
+  t: (key: string) => string,
+): string {
+  if (route.workspaceIsRoot && names.workspace) return names.workspace;
+  if (route.agentName && route.agentIsRoot) return names.agent ?? t("settings:agent");
+  return names.profile ?? pageLabel ?? t("settings:settings");
+}
+
 export function SettingsLayoutClient({ children }: { children: React.ReactNode }) {
   const { t } = useTranslation();
   const pathname = usePathname();
   const workspaces = useAppStore((s) => s.workspaces.items);
   const availableAgents = useAppStore((s) => s.availableAgents.items);
   const settingsAgents = useAppStore((s) => s.settingsAgents.items);
-  const showIntegrationCopyAction = integrationFromPathname(pathname) !== null;
 
-  const workspaceDetail = pathname.match(/^\/settings\/workspaces\/([^/]+)(\/.+)?$/);
-  const detailWorkspaceId = safeDecodePathSegment(workspaceDetail?.[1]);
-  const workspaceName = detailWorkspaceId
-    ? (workspaces.find((workspace) => workspace.id === detailWorkspaceId)?.name ?? null)
+  const route = matchRecordRoute(pathname);
+  const workspaceName = route.workspaceId
+    ? (workspaces.find((workspace) => workspace.id === route.workspaceId)?.name ?? null)
     : null;
-
-  // Agent routes are keyed by agent name; the create page is titled with the
-  // agent's display name, profile pages with the profile's own name.
-  const agentDetail = pathname.match(/^\/settings\/agents\/([^/]+)(\/.+)?$/);
-  const detailAgentName =
-    agentDetail && agentDetail[1] !== "browse" ? safeDecodePathSegment(agentDetail[1]) : null;
-  const agentDisplayName = detailAgentName
-    ? (availableAgents.find((agent) => agent.name === detailAgentName)?.display_name ?? null)
+  const agentDisplayName = route.agentName
+    ? (availableAgents.find((agent) => agent.name === route.agentName)?.display_name ?? null)
     : null;
-  const profileMatch = pathname.match(/^\/settings\/agents\/[^/]+\/profiles\/([^/]+)$/);
-  const profileId = safeDecodePathSegment(profileMatch?.[1]);
-  const profileName = profileId
+  const profileName = route.profileId
     ? (settingsAgents
         .flatMap((agent) => agent.profiles)
-        .find((profile) => profile.id === profileId)?.name ?? null)
+        .find((profile) => profile.id === route.profileId)?.name ?? null)
     : null;
 
-  const pageLabel = deriveCurrentPageLabel(pathname, t);
-  // A detail page's own crumb is the individual's name, not the list label.
-  const title =
-    workspaceDetail && !workspaceDetail[2] && workspaceName
-      ? workspaceName
-      : detailAgentName && !agentDetail?.[2]
-        ? (agentDisplayName ?? t("settings:agent"))
-        : (profileName ?? pageLabel ?? t("settings:settings"));
-  const parents = deriveParents(pathname, workspaceName, t);
+  const names = { workspace: workspaceName, agent: agentDisplayName, profile: profileName };
 
   return (
     <SettingsShell
-      title={title}
+      title={resolveTitle(route, names, deriveCurrentPageLabel(pathname, t), t)}
       backHref="/"
       backLabel="Kandev"
-      parents={parents}
-      showIntegrationCopyAction={showIntegrationCopyAction}
+      parents={deriveParents(pathname, workspaceName, t)}
+      showIntegrationCopyAction={integrationFromPathname(pathname) !== null}
     >
       {children}
     </SettingsShell>
