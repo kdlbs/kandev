@@ -514,6 +514,8 @@ export type PRDiffFile = {
   deletions: number;
   patch: string;
   old_path?: string;
+  /** True when the PR file belongs to an initialized Git submodule scope. */
+  is_submodule?: boolean;
 };
 
 // PR commit info (from GitHub API)

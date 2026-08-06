@@ -198,6 +198,9 @@ func TestNestedSubmoduleReviewEndpointsIncludeRootAndStableChildBase(t *testing.
 	if !ok {
 		t.Fatalf("child repo status missing entirely: %s", statusResponse.Body.String())
 	}
+	if !childStatus.IsSubmodule {
+		t.Fatalf("child repo is_submodule was false: %s", statusResponse.Body.String())
+	}
 	if !containsString(childStatus.Modified, "child-uncommitted.txt") &&
 		!containsString(childStatus.Untracked, "child-uncommitted.txt") {
 		t.Fatalf("child-uncommitted.txt not in Modified or Untracked: %s", statusResponse.Body.String())

@@ -8,9 +8,13 @@ import type { ReviewSeverity, TaskReviewFinding, TaskReviewRun } from "@/lib/typ
  * different repositories would share their findings.
  */
 export function findingFileKey(finding: TaskReviewFinding): string {
+  const repositoryName =
+    finding.repository_name === "" && finding.repository_id === ""
+      ? undefined
+      : finding.repository_name;
   return reviewFileKey({
     path: finding.file_path,
-    repository_name: finding.repository_name === undefined ? undefined : finding.repository_name,
+    repository_name: repositoryName,
   });
 }
 

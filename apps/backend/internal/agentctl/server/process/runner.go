@@ -148,6 +148,11 @@ type commandProcess struct {
 	mu         sync.Mutex // Protects info fields during updates
 }
 
+type workspaceStreamNotifier interface {
+	notifyWorkspaceStreamProcessOutput(*types.ProcessOutput)
+	notifyWorkspaceStreamProcessStatus(*types.ProcessStatusUpdate)
+}
+
 // ProcessRunner manages multiple background processes with output streaming.
 //
 // Thread-safe: All public methods can be called concurrently from multiple goroutines.
@@ -169,10 +174,10 @@ type commandProcess struct {
 //   - Stop() kills the entire process group (handles child processes correctly)
 //   - This ensures clean cleanup even if the process spawns subprocesses
 type ProcessRunner struct {
-	logger             *logger.Logger    // Scoped logger for this component
-	workspaceTracker   *WorkspaceTracker // WebSocket stream coordinator (can be nil)
-	workspaceTrackerMu sync.RWMutex      // Protects workspaceTracker during tracker graph replacement
-	bufferMaxBytes     int64             // Default output buffer size for new processes
+	logger             *logger.Logger          // Scoped logger for this component
+	workspaceTracker   workspaceStreamNotifier // WebSocket stream coordinator (can be nil)
+	workspaceTrackerMu sync.RWMutex            // Protects workspaceTracker during tracker graph replacement
+	bufferMaxBytes     int64                   // Default output buffer size for new processes
 
 	mu               sync.RWMutex               // Protects processes map
 	processes        map[string]*commandProcess // Active processes by ID
@@ -201,25 +206,26 @@ func (r *ProcessRunner) BeginStop() {
 //   - bufferMaxBytes: Default output buffer size (typically 2MB). Individual processes
 //     can override via StartProcessRequest.BufferMaxBytes.
 func NewProcessRunner(workspaceTracker *WorkspaceTracker, log *logger.Logger, bufferMaxBytes int64) *ProcessRunner {
+	var notifier workspaceStreamNotifier
+	if workspaceTracker != nil {
+		notifier = workspaceTracker
+	}
 	return &ProcessRunner{
 		logger:           log.WithFields(zap.String("component", "process-runner")),
-		workspaceTracker: workspaceTracker,
+		workspaceTracker: notifier,
 		bufferMaxBytes:   bufferMaxBytes,
 		processes:        make(map[string]*commandProcess),
 	}
 }
 
 func (r *ProcessRunner) setWorkspaceTracker(tracker *WorkspaceTracker) {
+	var notifier workspaceStreamNotifier
+	if tracker != nil {
+		notifier = tracker
+	}
 	r.workspaceTrackerMu.Lock()
-	r.workspaceTracker = tracker
+	r.workspaceTracker = notifier
 	r.workspaceTrackerMu.Unlock()
-}
-
-func (r *ProcessRunner) getWorkspaceTracker() *WorkspaceTracker {
-	r.workspaceTrackerMu.RLock()
-	tracker := r.workspaceTracker
-	r.workspaceTrackerMu.RUnlock()
-	return tracker
 }
 
 // Start spawns a new background process and returns immediately.
@@ -754,10 +760,6 @@ func (r *ProcessRunner) waitForProcessGroupExit(ctx context.Context, pid int) bo
 }
 
 func (r *ProcessRunner) publishOutput(proc *commandProcess, chunk ProcessOutputChunk) {
-	tracker := r.getWorkspaceTracker()
-	if tracker == nil {
-		return
-	}
 	proc.mu.Lock()
 	info := proc.info
 	proc.mu.Unlock()
@@ -770,14 +772,19 @@ func (r *ProcessRunner) publishOutput(proc *commandProcess, chunk ProcessOutputC
 		Data:      chunk.Data,
 		Timestamp: chunk.Timestamp,
 	}
+	// Keep the tracker selected for the entire publication. A rescan can replace
+	// and stop the old tracker between selection and notification; holding the
+	// read lock prevents that replacement from dropping this update.
+	r.workspaceTrackerMu.RLock()
+	defer r.workspaceTrackerMu.RUnlock()
+	tracker := r.workspaceTracker
+	if tracker == nil {
+		return
+	}
 	tracker.notifyWorkspaceStreamProcessOutput(output)
 }
 
 func (r *ProcessRunner) publishStatus(proc *commandProcess) {
-	tracker := r.getWorkspaceTracker()
-	if tracker == nil {
-		return
-	}
 	proc.mu.Lock()
 	info := proc.info
 	proc.mu.Unlock()
@@ -792,6 +799,13 @@ func (r *ProcessRunner) publishStatus(proc *commandProcess) {
 		Status:     info.Status,
 		ExitCode:   info.ExitCode,
 		Timestamp:  time.Now().UTC(),
+	}
+	// Keep the tracker selected for the entire publication; see publishOutput.
+	r.workspaceTrackerMu.RLock()
+	defer r.workspaceTrackerMu.RUnlock()
+	tracker := r.workspaceTracker
+	if tracker == nil {
+		return
 	}
 	r.logger.Debug("process status update",
 		zap.String("process_id", info.ID),

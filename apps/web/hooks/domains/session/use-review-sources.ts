@@ -143,6 +143,7 @@ function addPRFiles(
       source: "pr",
       old_path: file.old_path,
       repository_name: repoName,
+      is_submodule: file.is_submodule,
     });
   }
 }
@@ -171,7 +172,7 @@ function collectUncommittedPaths(
         collectPathsFromFiles(
           paths,
           status.files as Record<string, UncommittedFile>,
-          repository_name || undefined,
+          repository_name,
           useRepositoryKeys,
         );
     }
@@ -179,7 +180,7 @@ function collectUncommittedPaths(
     collectPathsFromFiles(
       paths,
       gitStatus.files as Record<string, UncommittedFile>,
-      undefined,
+      useRepositoryKeys ? "" : undefined,
       useRepositoryKeys,
     );
   }
@@ -278,7 +279,7 @@ function addUncommittedSources(
     addUncommittedFiles(
       fileMap,
       gitStatus.files as Record<string, UncommittedFile>,
-      undefined,
+      useRepositoryKeys ? "" : undefined,
       gitStatus.is_submodule,
     );
   }

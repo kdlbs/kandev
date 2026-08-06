@@ -111,7 +111,7 @@ function addUncommittedFiles(
 }
 
 function addPRFiles(fileMap: Map<string, ReviewFile>, files: PRDiffFile[], repoName?: string) {
-  const repositoryName = repoName || undefined;
+  const repositoryName = repoName;
   for (const file of files) {
     const key = fileMapKey(file.filename, repositoryName);
     if (fileMap.has(key)) continue;
@@ -126,6 +126,7 @@ function addPRFiles(fileMap: Map<string, ReviewFile>, files: PRDiffFile[], repoN
       source: "pr",
       old_path: file.old_path,
       repository_name: repositoryName,
+      is_submodule: file.is_submodule,
     });
   }
 }

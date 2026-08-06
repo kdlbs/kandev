@@ -208,6 +208,7 @@ describe("buildReviewSources", () => {
         },
       },
       prDiffFiles: prFiles,
+      useRepositoryKeys: false,
     });
     expect(result.allFiles).toHaveLength(1);
     expect(result.allFiles[0].source).toBe("uncommitted");
