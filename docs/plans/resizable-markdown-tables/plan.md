@@ -34,7 +34,8 @@ likely `apps/web/components/shared/resizable-markdown-table.tsx`.
 - Measure the table and its header cells after layout. A `ResizeObserver` keeps
   separator positions aligned while automatic content or container geometry
   changes, and controlled column-width updates explicitly trigger another
-  measurement even when the table's outer box is unchanged.
+  measurement even when the table's outer box is unchanged. Observe character
+  data as well as child-list mutations so streamed text updates also remeasure.
 - Place focusable `role="separator"` controls in an overlay within the table's
   scroll content. Each control is centered on an internal boundary, spans the
   full table height, and scrolls with the table. Omit a boundary while either
@@ -170,7 +171,7 @@ None.
 
 ## Verification results
 
-- `vitest`: 40 focused geometry/hook/shared-renderer tests passed.
+- `vitest`: 41 focused geometry/hook/shared-renderer tests passed.
 - `pnpm run typecheck`: passed.
 - `pnpm --filter @kandev/web lint`: passed with zero warnings.
 - `make build-web`: passed.

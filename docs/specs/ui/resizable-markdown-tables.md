@@ -23,7 +23,8 @@ editing the source Markdown or opening another view.
 - Dragging a separator changes only the two adjacent columns. Their combined
   width and the table's total width remain unchanged, and neither column may be
   reduced below 64 CSS pixels. Separator positions are re-measured after every
-  controlled width change so the drag target remains on the rendered boundary.
+  controlled width change and streamed cell-text mutation so the drag target
+  remains on the rendered boundary.
 - A separator is exposed only while both adjacent measured columns meet the
   64-pixel minimum. This omits every pair measuring less than 128 CSS pixels and
   keeps each exposed separator's current ARIA value inside its declared range.

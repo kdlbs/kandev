@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useMarkdownTableResize } from "./use-markdown-table-resize";
 
 let notifyMutation: MutationCallback;
+const observeMutation = vi.fn();
 
 class ResizeObserverStub {
   disconnect = vi.fn();
@@ -11,7 +12,7 @@ class ResizeObserverStub {
 
 class MutationObserverStub {
   disconnect = vi.fn();
-  observe = vi.fn();
+  observe = observeMutation;
 
   constructor(callback: MutationCallback) {
     notifyMutation = callback;
@@ -83,6 +84,7 @@ function keyboardEvent(key: string) {
 }
 
 beforeEach(() => {
+  observeMutation.mockClear();
   vi.stubGlobal("ResizeObserver", ResizeObserverStub);
   vi.stubGlobal("MutationObserver", MutationObserverStub);
 });
@@ -93,6 +95,16 @@ afterEach(() => {
 });
 
 describe("useMarkdownTableResize", () => {
+  it("observes streamed text mutations that can rebalance automatic columns", () => {
+    const { table } = renderResizeHook();
+
+    expect(observeMutation).toHaveBeenCalledWith(table, {
+      characterData: true,
+      childList: true,
+      subtree: true,
+    });
+  });
+
   it("resizes with arrow keys and resets with Enter", () => {
     const { result } = renderResizeHook();
     const right = keyboardEvent("ArrowRight");

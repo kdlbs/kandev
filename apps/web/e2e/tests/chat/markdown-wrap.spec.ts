@@ -308,6 +308,7 @@ test.describe("Markdown text wrapping", () => {
     const wrapper = table.locator("xpath=..");
     const separator = markdown.getByTestId("markdown-table-resizer-2");
     const thirdHeader = table.locator("thead th").nth(2);
+    const fourthHeader = table.locator("thead th").nth(3);
 
     await expect(separator).toBeVisible({ timeout: 30_000 });
     expect(await wrapper.evaluate((element) => element.scrollWidth > element.clientWidth)).toBe(
@@ -324,6 +325,17 @@ test.describe("Markdown text wrapping", () => {
     expect(headerBox).not.toBeNull();
     expect(separatorBox!.x + separatorBox!.width / 2).toBeCloseTo(
       headerBox!.x + headerBox!.width,
+      0,
+    );
+
+    const boundaryX = separatorBox!.x + separatorBox!.width / 2;
+    const headerY = headerBox!.y + headerBox!.height / 2;
+    await testPage.mouse.move(boundaryX, headerY);
+    await testPage.mouse.down();
+    await testPage.mouse.move(boundaryX + 1000, headerY);
+    await testPage.mouse.up();
+    expect(await fourthHeader.evaluate((cell) => cell.getBoundingClientRect().width)).toBeCloseTo(
+      64,
       0,
     );
     await expectNoMarkdownOverflow(testPage);

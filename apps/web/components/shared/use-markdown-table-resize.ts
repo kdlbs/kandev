@@ -93,7 +93,7 @@ function useTableGeometry(
     resizeObserver.observe(table);
     resizeObserver.observe(wrapper);
     const mutationObserver = new MutationObserver(measure);
-    mutationObserver.observe(table, { childList: true, subtree: true });
+    mutationObserver.observe(table, { characterData: true, childList: true, subtree: true });
     window.addEventListener("resize", measure);
     return () => {
       resizeObserver.disconnect();
