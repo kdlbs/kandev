@@ -282,7 +282,8 @@ Completed 2026-08-05.
 - Production Playwright passed 29/29 task-scoped LSP scenarios: 9 task-contract, 13 existing
   desktop, 3 phone/tablet, and 4 Docker/SSH tests. The fake Kotlin server verified real PID,
   initialize, import, generation, graceful-exit, and task-cleanup evidence.
-- Focused frontend verification passed 26 files / 203 tests, typecheck, full lint, i18n check and
+- After rebasing onto `origin/main` at `828213a6a`, focused frontend verification passed 22 files /
+  183 tests (upstream consolidated four test files), all-app typecheck, full lint, i18n check and
   ratchet, and production Vite build. Public docs passed 58 validator tests and 41-page validation.
 - Focused backend packages, backend lint, and the race command across controller, task-host LSP,
   gateway, lifecycle, and agentctl client passed. `goleak` guards and the real process-group test
@@ -290,6 +291,10 @@ Completed 2026-08-05.
 - The final E2E matrix left no test-owned backend, agentctl, Kotlin server, or container processes.
   Exact commands, counts, one isolated unrelated broad-web-run artifact, and cleanup disposition
   are recorded in Tasks 10–11 and the delivery handoff.
+- The repository-wide test target was also attempted after the rebase. It stopped only on unchanged
+  `origin/main` filesystem-fixture failures in task handlers/service; isolated task cleanup and every
+  changed backend package passed. Unchanged CLI release-workflow and review-workflow contract tests
+  also expose two base-branch assertion mismatches and are recorded without expanding this feature.
 
 ---
 

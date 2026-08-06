@@ -254,6 +254,19 @@ function mergeGitHubState(initialState: HydrationState) {
   };
 }
 
+function mergeTaskLspState(initialState: HydrationState): DefaultState["taskLsp"] {
+  return {
+    byTaskId: {
+      ...defaultState.taskLsp.byTaskId,
+      ...initialState.taskLsp?.byTaskId,
+    },
+    pendingByKey: {
+      ...defaultState.taskLsp.pendingByKey,
+      ...initialState.taskLsp?.pendingByKey,
+    },
+  };
+}
+
 export function mergeInitialState(initialState?: HydrationState): DefaultState {
   if (!initialState) return defaultState;
   return {
@@ -296,16 +309,7 @@ export function mergeInitialState(initialState?: HydrationState): DefaultState {
     activeModel: { ...defaultState.activeModel, ...initialState.activeModel },
     taskPlans: { ...defaultState.taskPlans, ...initialState.taskPlans },
     ...mergeAgentReviewArtifacts(initialState),
-    taskLsp: {
-      byTaskId: {
-        ...defaultState.taskLsp.byTaskId,
-        ...initialState.taskLsp?.byTaskId,
-      },
-      pendingByKey: {
-        ...defaultState.taskLsp.pendingByKey,
-        ...initialState.taskLsp?.pendingByKey,
-      },
-    },
+    taskLsp: mergeTaskLspState(initialState),
     queue: { ...defaultState.queue, ...initialState.queue },
     terminal: { ...defaultState.terminal, ...initialState.terminal },
     shell: { ...defaultState.shell, ...initialState.shell },

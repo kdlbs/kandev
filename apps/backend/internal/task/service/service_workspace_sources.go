@@ -17,7 +17,6 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 	taskrepository "github.com/kandev/kandev/internal/task/repository"
 	"github.com/kandev/kandev/internal/worktree"
-	"go.uber.org/zap"
 )
 
 type WorkspaceSourceKind string

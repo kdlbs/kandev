@@ -873,7 +873,7 @@ func TestGetOrEnsureTaskHostForEnvironment(t *testing.T) {
 			envInfos: map[string]*WorkspaceInfo{
 				"env-1": {
 					TaskID: "task-1", SessionID: "session-2", TaskEnvironmentID: "env-1",
-					WorkspacePath: "/workspace/task-1",
+					WorkspacePath: "/workspace/task-1", AgentProfileID: "session-profile-2",
 				},
 			},
 		})
@@ -905,8 +905,18 @@ func TestGetOrEnsureTaskHostForEnvironment(t *testing.T) {
 		if backend.lastRequest == nil || !backend.lastRequest.IsTaskHost {
 			t.Fatalf("executor request = %#v, want dedicated task-host marker", backend.lastRequest)
 		}
-		if backend.lastRequest.AgentConfig != nil || backend.lastRequest.Protocol != "" {
+		if backend.lastRequest.AgentConfig != nil || backend.lastRequest.Protocol != "" ||
+			backend.lastRequest.AgentProfileID != "" || backend.lastRequest.OfficeAgentProfileID != "" {
 			t.Fatalf("task host inherited session agent identity: %#v", backend.lastRequest)
+		}
+		if got := backend.lastRequest.Env["KANDEV_TASK_ID"]; got != "task-1" {
+			t.Fatalf("task host KANDEV_TASK_ID = %q, want task-1", got)
+		}
+		if got := backend.lastRequest.Env["KANDEV_SESSION_ID"]; got != taskHostRuntimeSessionPrefix+"env-1" {
+			t.Fatalf("task host KANDEV_SESSION_ID = %q, want synthetic task-host identity", got)
+		}
+		if _, exists := backend.lastRequest.Env["KANDEV_AGENT_PROFILE_ID"]; exists {
+			t.Fatal("task host environment inherited KANDEV_AGENT_PROFILE_ID")
 		}
 		if got, ok := mgr.executionStore.GetBySessionID("session-2"); !ok || got.ID != "session-exec-2" {
 			t.Fatalf("session execution changed: %#v, %v", got, ok)
