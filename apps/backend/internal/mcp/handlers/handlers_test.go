@@ -1837,6 +1837,59 @@ func TestResolveMCPAutoStartConfig_FallsBackToWorkflowAgentProfile(t *testing.T)
 	assert.Equal(t, workflowProfileID, config.AgentProfileID)
 }
 
+// The reported bug: a task pinned to an unpinned step still launches with the
+// workflow default (resolveEffectiveAgentProfile -> resolveStepAgentProfile
+// falls back to the workflow default and overrides the caller). MCP must report
+// that same profile, not the caller's explicit one, or the stored metadata
+// disagrees with the launched profile.
+func TestResolveMCPAutoStartConfig_WorkflowDefaultOutranksExplicitOnUnpinnedStep(t *testing.T) {
+	svc, _, workflowCtrl, workflowRepo := newTestTaskServiceWithWorkflow(t)
+	ctx := context.Background()
+	workspace, workflow := defaultWorkspaceAndWorkflow(t, ctx, svc)
+	workflowProfileID := "workflow-profile"
+	_, err := svc.UpdateWorkflow(ctx, workflow.ID, &service.UpdateWorkflowRequest{
+		AgentProfileID: &workflowProfileID,
+	})
+	require.NoError(t, err)
+	step := seedWorkflowStep(t, ctx, workflowRepo, &workflowmodels.WorkflowStep{
+		WorkflowID:      workflow.ID,
+		Name:            "Unassigned",
+		Position:        1,
+		AllowManualMove: true,
+	})
+	h := &Handlers{taskSvc: svc, workflowCtrl: workflowCtrl, logger: testLogger(t).WithFields()}
+
+	config := h.resolveMCPAutoStartConfig(ctx, &models.Task{
+		WorkspaceID:    workspace.ID,
+		WorkflowID:     workflow.ID,
+		WorkflowStepID: step.ID,
+	}, "explicit-profile", "", "")
+
+	assert.Equal(t, workflowProfileID, config.AgentProfileID)
+}
+
+// A stepless task keeps the caller's explicit profile even when the workflow has
+// a default: resolveEffectiveAgentProfile only overrides on a workflow step, so
+// the workflow default must not leak in off a step.
+func TestResolveMCPAutoStartConfig_WorkflowDefaultDoesNotOverrideExplicitWithoutStep(t *testing.T) {
+	svc, _, workflowCtrl, _ := newTestTaskServiceWithWorkflow(t)
+	ctx := context.Background()
+	workspace, workflow := defaultWorkspaceAndWorkflow(t, ctx, svc)
+	workflowProfileID := "workflow-profile"
+	_, err := svc.UpdateWorkflow(ctx, workflow.ID, &service.UpdateWorkflowRequest{
+		AgentProfileID: &workflowProfileID,
+	})
+	require.NoError(t, err)
+	h := &Handlers{taskSvc: svc, workflowCtrl: workflowCtrl, logger: testLogger(t).WithFields()}
+
+	config := h.resolveMCPAutoStartConfig(ctx, &models.Task{
+		WorkspaceID: workspace.ID,
+		WorkflowID:  workflow.ID,
+	}, "explicit-profile", "", "")
+
+	assert.Equal(t, "explicit-profile", config.AgentProfileID)
+}
+
 func TestResolveMCPAutoStartConfig_ExplicitAgentProfileWinsOverSourceTask(t *testing.T) {
 	svc, _ := newTestTaskService(t)
 	ctx := context.Background()

@@ -1129,19 +1129,21 @@ func (h *Handlers) resolveMCPAutoStartConfigWithError(ctx context.Context, task 
 		}
 	}
 
-	// A workflow step's pinned profile outranks the caller's, because that is
-	// what the orchestrator launches (resolveEffectiveAgentProfile). Resolving
-	// it here too keeps the profile reported back to the caller equal to the
-	// one that will actually run.
-	if stepProfileID, _ := h.resolveWorkflowControllerAgentProfile(ctx, task.WorkflowStepID, task.WorkflowID); stepProfileID != "" {
-		agentProfileID = stepProfileID
-	}
-
-	if agentProfileID == "" {
-		var err error
-		agentProfileID, err = h.resolveWorkflowAgentProfileWithError(ctx, task.WorkflowStepID, task.WorkflowID)
+	// Mirror the orchestrator's launch-time precedence so the profile reported
+	// back to the caller (and stored in task metadata) equals the one that will
+	// actually run. resolveEffectiveAgentProfile resolves the step's launch
+	// profile (the step's pinned profile, or the workflow default when the step
+	// has none) and applies it over any caller-provided profile, but only for a
+	// task that actually sits on a workflow step. A stepless task keeps its
+	// metadata profile at launch, so here the workflow-derived profile overrides
+	// the caller only on a step; off a step it merely fills an omitted profile.
+	if task.WorkflowStepID != "" || agentProfileID == "" {
+		workflowProfileID, err := h.resolveWorkflowAgentProfileWithError(ctx, task.WorkflowStepID, task.WorkflowID)
 		if err != nil {
 			return mcpAutoStartConfig{}, fmt.Errorf("resolve workflow agent profile: %w", err)
+		}
+		if workflowProfileID != "" {
+			agentProfileID = workflowProfileID
 		}
 	}
 	if agentProfileID == "" && h.taskSvc != nil {
