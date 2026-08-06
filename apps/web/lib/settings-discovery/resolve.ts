@@ -53,6 +53,7 @@ function workspaceDefinitions(
       ["workflows", "workflows:workflows"],
       ["automations", "common:automations"],
       ["integrations", "common:integrations"],
+      ["secrets", "settings:secrets"],
     ].entries()) {
       entries.push({
         id: `${workspaceId}:${suffix}`,

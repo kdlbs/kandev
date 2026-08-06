@@ -24,7 +24,8 @@ export type WorkspaceSettingsTab =
   | "repositories"
   | "workflows"
   | "integrations"
-  | "automations";
+  | "automations"
+  | "secrets";
 
 export function workspaceSettingsHref(workspaceId: string, tab: WorkspaceSettingsTab): string {
   const base = `${WORKSPACES_SETTINGS_HREF}/${encodeURIComponent(workspaceId)}`;
@@ -37,6 +38,7 @@ const TAB_ORDER: Array<{ tab: WorkspaceSettingsTab; labelKey: string }> = [
   { tab: "workflows", labelKey: "workflows:workflows" },
   { tab: "integrations", labelKey: "common:integrations" },
   { tab: "automations", labelKey: "common:automations" },
+  { tab: "secrets", labelKey: "settings:secrets" },
 ];
 
 /**

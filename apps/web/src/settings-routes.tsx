@@ -423,7 +423,7 @@ function renderWorkspaceSettingsRoute(pathname: string) {
 
   const workspaceSubpage = matchDouble(
     pathname,
-    /^\/settings\/workspaces\/([^/]+)\/(repositories|workflows|automations)$/,
+    /^\/settings\/workspaces\/([^/]+)\/(repositories|workflows|automations|secrets)$/,
   );
   if (workspaceSubpage) {
     const [id, section] = workspaceSubpage;
@@ -433,6 +433,8 @@ function renderWorkspaceSettingsRoute(pathname: string) {
         <WorkspaceRepositoriesRoute workspaceId={id} />
       ) : section === "workflows" ? (
         <WorkspaceWorkflowsRoute workspaceId={id} />
+      ) : section === "secrets" ? (
+        <SecretsSettings scope="workspace" workspaceId={id} />
       ) : (
         <AutomationsPage workspaceId={id} />
       );
