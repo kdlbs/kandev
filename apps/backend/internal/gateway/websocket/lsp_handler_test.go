@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -18,6 +19,7 @@ import (
 	sharedlsp "github.com/kandev/kandev/internal/lsp"
 	"github.com/kandev/kandev/internal/lsp/installer"
 	"github.com/kandev/kandev/internal/lsp/protocol"
+	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 )
 
 type recordingLSPMessageWriter struct {
@@ -25,6 +27,34 @@ type recordingLSPMessageWriter struct {
 	deadlineOnWrite time.Time
 	messageType     int
 	payload         []byte
+}
+
+type readDeadlineListener struct {
+	net.Listener
+	deadlines chan time.Time
+}
+
+func (l *readDeadlineListener) Accept() (net.Conn, error) {
+	conn, err := l.Listener.Accept()
+	if err != nil {
+		return nil, err
+	}
+	return &readDeadlineConn{Conn: conn, deadlines: l.deadlines}, nil
+}
+
+type readDeadlineConn struct {
+	net.Conn
+	deadlines chan time.Time
+}
+
+func (c *readDeadlineConn) SetReadDeadline(deadline time.Time) error {
+	if deadline.After(time.Now()) {
+		select {
+		case c.deadlines <- deadline:
+		default:
+		}
+	}
+	return c.Conn.SetReadDeadline(deadline)
 }
 
 func (w *recordingLSPMessageWriter) SetWriteDeadline(deadline time.Time) error {
@@ -91,9 +121,51 @@ func TestLSPTaskAttachmentRouteResolvesTaskLanguageAndOnlyDetaches(t *testing.T)
 	}
 }
 
+func TestLSPProxySetsReadDeadlineForStaleConnectionCleanup(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	upgrader := gorillaws.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer func() { _ = conn.Close() }()
+		_, _, _ = conn.ReadMessage()
+	}))
+	defer upstream.Close()
+	host := &gatewayFakeTaskHost{attachURL: "ws" + strings.TrimPrefix(upstream.URL, "http")}
+	resolver := &gatewayFakeAttachmentResolver{target: &sharedlsp.AttachmentTarget{
+		Host: host, Language: "kotlin", Generation: 1,
+	}}
+	handler := NewLSPHandler(resolver, testLogger())
+	router := gin.New()
+	router.GET("/lsp/tasks/:taskId/:language/attach", handler.HandleLSPConnection)
+	server := httptest.NewUnstartedServer(router)
+	deadlines := make(chan time.Time, 4)
+	server.Listener = &readDeadlineListener{Listener: server.Listener, deadlines: deadlines}
+	server.Start()
+	defer server.Close()
+
+	conn, _, err := gorillaws.DefaultDialer.Dial(
+		"ws"+strings.TrimPrefix(server.URL, "http")+"/lsp/tasks/task-1/kotlin/attach", nil,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = conn.Close() }()
+	select {
+	case deadline := <-deadlines:
+		if time.Until(deadline) <= 0 {
+			t.Fatalf("read deadline = %v", deadline)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("proxy did not configure a read deadline")
+	}
+}
+
 func TestLSPTaskAttachmentAuthorizationFailureHappensBeforeUpgradeOrDial(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	resolver := &gatewayFakeAttachmentResolver{err: errors.New("task not found")}
+	resolver := &gatewayFakeAttachmentResolver{err: repoerrors.ErrTaskNotFound}
 	handler := NewLSPHandler(resolver, testLogger())
 	router := gin.New()
 	router.GET("/lsp/tasks/:taskId/:language/attach", handler.HandleLSPConnection)
@@ -111,6 +183,26 @@ func TestLSPTaskAttachmentAuthorizationFailureHappensBeforeUpgradeOrDial(t *test
 	}
 	if resolver.taskID != "hidden" || resolver.language != "go" {
 		t.Fatalf("resolver calls task=%q language=%q", resolver.taskID, resolver.language)
+	}
+}
+
+func TestLSPTaskAttachmentUnrelatedNotFoundErrorStaysInternal(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	resolver := &gatewayFakeAttachmentResolver{err: errors.New("language-server binary not found")}
+	handler := NewLSPHandler(resolver, testLogger())
+	router := gin.New()
+	router.GET("/lsp/tasks/:taskId/:language/attach", handler.HandleLSPConnection)
+	server := httptest.NewServer(router)
+	defer server.Close()
+
+	_, response, err := gorillaws.DefaultDialer.Dial(
+		"ws"+strings.TrimPrefix(server.URL, "http")+"/lsp/tasks/task-1/go/attach", nil,
+	)
+	if err == nil {
+		t.Fatal("attachment unexpectedly upgraded")
+	}
+	if response == nil || response.StatusCode != http.StatusInternalServerError {
+		t.Fatalf("response = %#v error=%v", response, err)
 	}
 }
 

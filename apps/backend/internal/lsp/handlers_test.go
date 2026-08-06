@@ -4,11 +4,13 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
 	"github.com/gin-gonic/gin"
+	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 )
 
 func TestLSPHTTPRoutesAreTaskLanguageScopedAndStampUserOrigin(t *testing.T) {
@@ -111,6 +113,27 @@ func TestLSPHTTPPolicyAcceptsOnlyPolicyAndMapsDisabledRestartConflict(t *testing
 	}
 	if snapshot.TaskID != "task-1" {
 		t.Fatalf("snapshot = %#v", snapshot)
+	}
+}
+
+func TestLSPHTTPNotFoundMappingRequiresTypedTaskError(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	for _, test := range []struct {
+		name string
+		err  error
+		want int
+	}{
+		{name: "typed task absence", err: repoerrors.ErrTaskNotFound, want: http.StatusNotFound},
+		{name: "unrelated dependency text", err: errors.New("language-server binary not found"), want: http.StatusInternalServerError},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			response := httptest.NewRecorder()
+			ctx, _ := gin.CreateTestContext(response)
+			writeHTTPResult(ctx, nil, test.err)
+			if response.Code != test.want {
+				t.Fatalf("status=%d body=%s, want %d", response.Code, response.Body.String(), test.want)
+			}
+		})
 	}
 }
 

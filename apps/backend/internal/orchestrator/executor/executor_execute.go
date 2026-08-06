@@ -1277,7 +1277,6 @@ func (e *Executor) finalizeLaunch(ctx context.Context, task *v1.Task, session *m
 		e.cleanupUnstartedExecutionAfterPersistError(ctx, sessionID, resp.AgentExecutionID, err)
 		return nil, err
 	}
-
 	sessionState := v1.TaskSessionStateCreated
 	if startAgent {
 		sessionState = v1.TaskSessionStateStarting

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createAppStore } from "@/lib/state/store";
-import type { TaskLspLanguageSnapshot } from "@/lib/types/http-lsp";
+import type { TaskLspCapacity, TaskLspLanguageSnapshot } from "@/lib/types/http-lsp";
 
 const NOW = "2026-08-05T10:00:00Z";
 
@@ -31,6 +31,26 @@ function store() {
   return createAppStore();
 }
 
+function expectSequencedCapacityAfterUnsequencedSnapshot() {
+  const subject = store();
+  subject.getState().setTaskLspSnapshot({
+    task_id: "task-1",
+    languages: [language(8, "starting")],
+    capacity: { active: 1, queued: 0, limit: 4, revision: 99 },
+  });
+  subject.getState().mergeTaskLspLanguage({
+    ...language(9, "ready"),
+    capacity: {
+      active: 0,
+      queued: 0,
+      limit: 4,
+      revision: 1,
+      epoch: "20260806T090000.000000002Z",
+    },
+  });
+  expect(subject.getState().taskLsp.byTaskId["task-1"]?.capacity.active).toBe(0);
+}
+
 describe("LSP slice", () => {
   it("normalizes snapshots by task and language", () => {
     const subject = store();
@@ -52,6 +72,60 @@ describe("LSP slice", () => {
       capacity: { active: 0, queued: 0, limit: 4 },
     });
     expect(subject.getState().taskLsp.byTaskId["task-1"]?.languages.kotlin?.phase).toBe("ready");
+  });
+
+  it("rejects stale REST capacity after a live language update", () => {
+    const subject = store();
+    subject.getState().mergeTaskLspLanguage({
+      ...language(9, "ready"),
+      capacity: { active: 1, queued: 0, limit: 4, revision: 2 },
+    } as TaskLspLanguageSnapshot);
+    subject.getState().setTaskLspSnapshot({
+      task_id: "task-1",
+      languages: [language(8, "starting")],
+      capacity: { active: 0, queued: 0, limit: 4, revision: 1 } as TaskLspCapacity,
+    });
+    expect(subject.getState().taskLsp.byTaskId["task-1"]?.capacity.active).toBe(1);
+  });
+
+  it("orders capacity across backend restart epochs", () => {
+    const subject = store();
+    subject.getState().mergeTaskLspLanguage({
+      ...language(9, "ready"),
+      capacity: {
+        active: 1,
+        queued: 0,
+        limit: 4,
+        revision: 8,
+        epoch: "20260806T090000.000000001Z",
+      },
+    } as TaskLspLanguageSnapshot);
+    subject.getState().setTaskLspSnapshot({
+      task_id: "task-1",
+      languages: [language(9, "ready")],
+      capacity: {
+        active: 0,
+        queued: 0,
+        limit: 4,
+        revision: 1,
+        epoch: "20260806T090000.000000002Z",
+      } as TaskLspCapacity,
+    });
+    subject.getState().mergeTaskLspLanguage({
+      ...language(10, "ready"),
+      capacity: {
+        active: 2,
+        queued: 0,
+        limit: 4,
+        revision: 99,
+        epoch: "20260806T090000.000000001Z",
+      },
+    } as TaskLspLanguageSnapshot);
+    expect(subject.getState().taskLsp.byTaskId["task-1"]?.capacity.active).toBe(0);
+  });
+
+  it("accepts sequenced capacity after an unsequenced snapshot", () => {
+    expectSequencedCapacityAfterUnsequencedSnapshot();
   });
 
   it("accepts same-revision runtime evidence and isolates tasks", () => {

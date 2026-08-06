@@ -128,7 +128,7 @@ func (r *Repository) insertTaskLSPLanguage(
 	next lsp.TaskLanguageState,
 	now time.Time,
 ) (*lsp.TaskLanguageState, error) {
-	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
+	query := `
 		INSERT INTO task_lsp_languages (
 			task_id, language, policy, detected, detection_state,
 			detection_scanned_at, detection_truncated, phase, generation, revision,
@@ -140,18 +140,17 @@ func (r *Repository) insertTaskLSPLanguage(
 			?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
 		)
 		ON CONFLICT (task_id, language) DO NOTHING
-	`), taskLSPWriteArgs(next, now, true)...)
+		RETURNING ` + taskLSPColumns
+	state, err := scanTaskLSPLanguage(r.db.QueryRowxContext(
+		ctx, r.db.Rebind(query), taskLSPWriteArgs(next, now, true)...,
+	))
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, lsp.ErrRevisionConflict
+	}
 	if err != nil {
 		return nil, fmt.Errorf("insert task LSP language: %w", err)
 	}
-	rows, err := result.RowsAffected()
-	if err != nil {
-		return nil, err
-	}
-	if rows == 0 {
-		return nil, lsp.ErrRevisionConflict
-	}
-	return r.getStoredTaskLSPLanguage(ctx, next.TaskID, next.Language)
+	return state, nil
 }
 
 func (r *Repository) updateTaskLSPLanguage(
@@ -160,7 +159,7 @@ func (r *Repository) updateTaskLSPLanguage(
 	expectedRevision uint64,
 	now time.Time,
 ) (*lsp.TaskLanguageState, error) {
-	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
+	query := `
 		UPDATE task_lsp_languages SET
 			policy = ?, detected = ?, detection_state = ?, detection_scanned_at = ?,
 			detection_truncated = ?, phase = ?, generation = ?, revision = revision + 1,
@@ -170,18 +169,17 @@ func (r *Repository) updateTaskLSPLanguage(
 			restart_required = ?, restart_required_reason = ?, error_code = ?,
 			error_message = ?, updated_at = ?
 		WHERE task_id = ? AND language = ? AND revision = ?
-	`), taskLSPUpdateArgs(next, expectedRevision, now)...)
+		RETURNING ` + taskLSPColumns
+	state, err := scanTaskLSPLanguage(r.db.QueryRowxContext(
+		ctx, r.db.Rebind(query), taskLSPUpdateArgs(next, expectedRevision, now)...,
+	))
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, lsp.ErrRevisionConflict
+	}
 	if err != nil {
 		return nil, fmt.Errorf("update task LSP language: %w", err)
 	}
-	rows, err := result.RowsAffected()
-	if err != nil {
-		return nil, err
-	}
-	if rows == 0 {
-		return nil, lsp.ErrRevisionConflict
-	}
-	return r.getStoredTaskLSPLanguage(ctx, next.TaskID, next.Language)
+	return state, nil
 }
 
 func (r *Repository) AllocateTaskLSPGeneration(
@@ -296,24 +294,6 @@ func taskLSPUpdateArgs(next lsp.TaskLanguageState, expectedRevision uint64, now 
 	// UPDATE preserves created_at, so remove its insert-only duplicate timestamp.
 	args = args[:len(args)-1]
 	return append(args, next.TaskID, next.Language, expectedRevision)
-}
-
-func (r *Repository) getStoredTaskLSPLanguage(
-	ctx context.Context,
-	taskID, language string,
-) (*lsp.TaskLanguageState, error) {
-	query := `
-		SELECT ` + taskLSPColumns + `
-		FROM task_lsp_languages
-		WHERE task_id = ? AND language = ?
-	`
-	state, err := scanTaskLSPLanguage(
-		r.db.QueryRowxContext(ctx, r.db.Rebind(query), taskID, language),
-	)
-	if err != nil {
-		return nil, fmt.Errorf("read stored task LSP language: %w", err)
-	}
-	return state, nil
 }
 
 func scanTaskLSPLanguage(scanner taskLSPScanner) (*lsp.TaskLanguageState, error) {

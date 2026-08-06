@@ -112,3 +112,9 @@ Actual files added: `server/lsp/{manager,runtime,peer,progress,types}.go`, synch
 goleak `TestMain`, and the Unix process-tree test. Actual files updated: agentctl LSP/API routes and
 tests, process-manager background-work accounting/tests, instance idle logic/tests, this task, and
 the parent plan. Attachment forwarding remains intentionally scoped to Task 04.
+
+PR remediation on 2026-08-06 made failed replacement cleanup truthful and retryable: the old live
+generation remains in `error/replacement_cleanup_failed`, the requested generation is not accepted
+until the old process tree is proven gone, and retrying that same generation performs cleanup again
+without overlap. Task-host mutation clients now preserve the generation-scoped failure snapshot.
+The focused manager/client tests and the task-host race suite pass.

@@ -506,6 +506,58 @@ func TestTaskEnvironmentReadyCallbackRunsAfterSessionLinkPersistence(t *testing.
 	}
 }
 
+func TestTaskEnvironmentReadyCallbackDoesNotDelayAgentProcessStart(t *testing.T) {
+	repo := newMockRepository()
+	agentStarted := make(chan struct{})
+	agentManager := &mockAgentManager{startAgentProcessFunc: func(context.Context, string) error {
+		close(agentStarted)
+		return nil
+	}}
+	exec := newTestExecutor(t, agentManager, repo)
+	now := time.Now().UTC()
+	session := &models.TaskSession{
+		ID: "session-ready", TaskID: "task-ready", State: models.TaskSessionStateCreated,
+		TaskEnvironmentID: "env-ready", StartedAt: now, UpdatedAt: now,
+	}
+	persisted := *session
+	repo.sessions[session.ID] = &persisted
+
+	callbackEntered := make(chan struct{})
+	releaseCallback := make(chan struct{})
+	exec.onTaskEnvironmentReady = func(context.Context, string) {
+		close(callbackEntered)
+		<-releaseCallback
+	}
+	response := &LaunchAgentResponse{AgentExecutionID: "execution-ready", WorkspacePath: "/workspace/task-ready"}
+	done := make(chan error, 1)
+	go func() {
+		_, err := exec.finalizeLaunch(
+			context.Background(), &v1.Task{ID: "task-ready"}, session, "profile-ready", session.ID,
+			&repoInfo{RepositoryID: "repo-ready"}, response, true, executorConfig{},
+		)
+		done <- err
+	}()
+
+	select {
+	case <-callbackEntered:
+	case err := <-done:
+		t.Fatalf("finalizeLaunch returned before callback: %v", err)
+	case <-time.After(time.Second):
+		t.Fatal("task environment callback was not invoked")
+	}
+	select {
+	case <-agentStarted:
+	case <-time.After(250 * time.Millisecond):
+		close(releaseCallback)
+		<-done
+		t.Fatal("task environment reconciliation delayed the agent process start")
+	}
+	close(releaseCallback)
+	if err := <-done; err != nil {
+		t.Fatalf("finalizeLaunch: %v", err)
+	}
+}
+
 // TestApplyExecutorRunningMetadata_SkipsSessionScopedKeys pins the guard
 // that prevents a SECOND session on the same task from inheriting the FIRST
 // session's session-scoped runtime resources — agentctl PID/port, remote

@@ -62,6 +62,47 @@ func TestDocumentBrokerDeduplicatesOpenAndVersionsInterleavedChanges(t *testing.
 	}
 }
 
+func TestDocumentBrokerAppliesIncrementalChangeToSendingAttachmentBaseline(t *testing.T) {
+	upstream := &recordingFeatureUpstream{}
+	hub, snapshot := newHubForTest(upstream)
+	t.Cleanup(hub.Close)
+	first := hub.Attach(snapshot)
+	second := hub.Attach(snapshot)
+	drainAttached(t, first)
+	drainAttached(t, second)
+	t.Cleanup(first.Close)
+	t.Cleanup(second.Close)
+
+	handleNotification(t, first, "textDocument/didOpen", map[string]any{
+		"textDocument": map[string]any{
+			"uri": documentURI, "languageId": "kotlin", "version": 1, "text": "uvwxyz",
+		},
+	})
+	handleNotification(t, second, "textDocument/didOpen", map[string]any{
+		"textDocument": map[string]any{
+			"uri": documentURI, "languageId": "kotlin", "version": 1, "text": "abcde",
+		},
+	})
+	handleNotification(t, second, "textDocument/didChange", map[string]any{
+		"textDocument": map[string]any{"uri": documentURI, "version": 2},
+		"contentChanges": []map[string]any{{
+			"range": map[string]any{
+				"start": map[string]any{"line": 0, "character": 1},
+				"end":   map[string]any{"line": 0, "character": 2},
+			},
+			"text": "X",
+		}},
+	})
+
+	notifications := upstream.notificationSnapshot()
+	change := notifications[len(notifications)-1]
+	if change.method != "textDocument/didChange" ||
+		!rawContains(change.params, `"contentChanges":[{"text":"aXcde"}]`) ||
+		rawContains(change.params, `"range":`) {
+		t.Fatalf("canonical change = %s", change.params)
+	}
+}
+
 func TestDocumentBrokerFinalCloseAndDetachReleaseOnlyDocuments(t *testing.T) {
 	upstream := &recordingFeatureUpstream{}
 	hub, snapshot := newHubForTest(upstream)

@@ -57,6 +57,30 @@ func TestTaskLSPControlUsesLanguageRouteAndServerOwnedBody(t *testing.T) {
 	}
 }
 
+func TestTaskLSPControlReturnsFailureSnapshot(t *testing.T) {
+	want := sharedlsp.RuntimeSnapshot{
+		Language: "go", Generation: 3, Phase: sharedlsp.PhaseError,
+		ErrorCode: "process_start_failed", ErrorMessage: "process exited",
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(map[string]any{"error": "start failed", "snapshot": want})
+	}))
+	t.Cleanup(server.Close)
+	host, port := testServerAddress(t, server.URL)
+	client := NewClient(host, port, newTestLogger())
+
+	got, err := client.StartTaskLSP(context.Background(), sharedlsp.TaskHostStartRequest{
+		Language: "go", Generation: 3,
+	})
+	if err == nil {
+		t.Fatal("start unexpectedly succeeded")
+	}
+	if got == nil || got.Generation != want.Generation || got.ErrorCode != want.ErrorCode {
+		t.Fatalf("failure snapshot = %#v, want %#v", got, want)
+	}
+}
+
 func TestTaskLSPConfigurationUsesTaskHostGenerationRoute(t *testing.T) {
 	var gotPath string
 	var gotBody map[string]any

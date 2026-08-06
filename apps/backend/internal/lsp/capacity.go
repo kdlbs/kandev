@@ -25,10 +25,12 @@ type QueueEntry struct {
 // Capacity counts real task/language server slots. Browser attachments and
 // editor mounts do not consume capacity and cannot release a slot.
 type Capacity struct {
-	mu     sync.Mutex
-	limit  int
-	active map[TaskLanguageKey]uint64
-	queued map[TaskLanguageKey]QueueEntry
+	mu       sync.Mutex
+	limit    int
+	active   map[TaskLanguageKey]uint64
+	queued   map[TaskLanguageKey]QueueEntry
+	epoch    string
+	revision uint64
 }
 
 func NewCapacity(limit int) *Capacity {
@@ -39,6 +41,7 @@ func NewCapacity(limit int) *Capacity {
 		limit:  limit,
 		active: make(map[TaskLanguageKey]uint64),
 		queued: make(map[TaskLanguageKey]QueueEntry),
+		epoch:  time.Now().UTC().Format("20060102T150405.000000000Z"),
 	}
 }
 
@@ -76,9 +79,11 @@ func (c *Capacity) Admit(key TaskLanguageKey, generation uint64, acceptedAt time
 	}
 	if len(c.active) < c.limit {
 		c.active[key] = generation
+		c.revision++
 		return true
 	}
 	c.queued[key] = QueueEntry{Key: key, Generation: generation, AcceptedAt: acceptedAt}
+	c.revision++
 	return false
 }
 
@@ -88,9 +93,13 @@ func (c *Capacity) Admit(key TaskLanguageKey, generation uint64, acceptedAt time
 func (c *Capacity) Adopt(key TaskLanguageKey, generation uint64) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	activeBefore, queuedBefore := len(c.active), len(c.queued)
 	delete(c.queued, key)
 	if current, ok := c.active[key]; !ok || generation >= current {
 		c.active[key] = generation
+	}
+	if len(c.active) != activeBefore || len(c.queued) != queuedBefore {
+		c.revision++
 	}
 }
 
@@ -105,6 +114,7 @@ func (c *Capacity) Release(key TaskLanguageKey, generation uint64) *QueueEntry {
 		return nil
 	}
 	delete(c.active, key)
+	c.revision++
 	if len(c.queued) == 0 {
 		return nil
 	}
@@ -134,19 +144,25 @@ func (c *Capacity) CancelQueued(key TaskLanguageKey) bool {
 		return false
 	}
 	delete(c.queued, key)
+	c.revision++
 	return true
 }
 
-func (c *Capacity) Active() int {
+func (c *Capacity) Snapshot() CapacitySnapshot {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return len(c.active)
+	return CapacitySnapshot{
+		Active: len(c.active), Queued: len(c.queued), Limit: c.limit,
+		Epoch: c.epoch, Revision: c.revision,
+	}
+}
+
+func (c *Capacity) Active() int {
+	return c.Snapshot().Active
 }
 
 func (c *Capacity) Queued() int {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return len(c.queued)
+	return c.Snapshot().Queued
 }
 
 func (c *Capacity) Limit() int { return c.limit }

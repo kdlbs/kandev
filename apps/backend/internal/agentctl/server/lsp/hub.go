@@ -49,13 +49,16 @@ func (h *hub) Attach(snapshot Snapshot) *Attachment {
 	}
 	h.nextID++
 	attachment := newAttachment(h.nextID, h)
-	h.attachments[attachment.id] = attachment
-	h.mu.Unlock()
 	h.documents.SetCapabilities(snapshot.Capabilities)
 	attachment.enqueue(attachmentHandshake(snapshot))
 	for _, diagnostic := range snapshot.Diagnostics {
 		attachment.enqueue(serverNotification("textDocument/publishDiagnostics", diagnostic))
 	}
+	// Make the attachment visible to fanout only after its generation-scoped
+	// handshake and replay are queued. This is the attachment's publication
+	// barrier: live notifications can never overtake recovery evidence.
+	h.attachments[attachment.id] = attachment
+	h.mu.Unlock()
 	return attachment
 }
 

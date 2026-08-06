@@ -107,3 +107,9 @@ go test -race ./internal/lsp/... ./internal/task/service -run 'Test(LSP|Lsp|Reco
 go test ./internal/lsp/... -run 'Test(Reconcile|Recovery|Cleanup|Watch)' -count=20                                                               PASS
 go test -race ./internal/agentctl/server/lsp ./internal/lsp ./internal/gateway/websocket                                                         PASS
 ```
+
+PR remediation on 2026-08-06 cancels task recovery timers, watches, and queued admissions before
+an environment lookup can fail during teardown. Ready-reset callbacks retain the owned lifecycle
+context instead of creating background work after controller close. Environment-ready LSP
+reconciliation is scheduled only after the agent process start has been dispatched. Focused
+cleanup/timer/launch-order regressions and the controller race suite pass.

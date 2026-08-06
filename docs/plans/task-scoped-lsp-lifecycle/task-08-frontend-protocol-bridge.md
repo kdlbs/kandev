@@ -107,3 +107,8 @@ Completed 2026-08-05.
 - GREEN: `cd apps && pnpm --filter @kandev/web test -- --run lib/api/domains/lsp-api.test.ts lib/state/slices/lsp hooks/domains/lsp lib/ws/handlers/lsp.test.ts hooks/use-lsp.test.tsx lib/lsp/lsp-client-manager.test.ts lib/lsp/lsp-client-manager.task-scope.test.ts lib/lsp/lsp-client-manager.document-sync.test.ts lib/lsp/lsp-client-manager.progress.test.ts lib/lsp/lsp-providers.test.ts` — 10 files, 65 tests passed.
 - GREEN: `cd apps/web && pnpm run typecheck`.
 - GREEN: `cd apps/web && pnpm exec eslint lib/api/domains/lsp-api.ts lib/state/slices/lsp hooks/domains/lsp lib/ws/handlers/lsp.ts lib/lsp hooks/use-lsp.ts` — no findings.
+
+PR remediation on 2026-08-06 made capacity merging independently sequence-aware. REST hydration and
+live language events share the backend capacity epoch/revision; lower revisions and older backend
+epochs cannot overwrite newer counts, while a newer backend epoch is accepted after restart.
+The LSP slice race regressions, related frontend suites, and web typecheck pass.

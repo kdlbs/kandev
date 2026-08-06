@@ -110,7 +110,13 @@ func (c *Client) taskLSPRequest(
 		return nil, fmt.Errorf("read task LSP response: %w", err)
 	}
 	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
-		return nil, fmt.Errorf("task LSP %s failed with status %d: %s", action, response.StatusCode, truncateBody(responseBody))
+		var envelope struct {
+			Snapshot *sharedlsp.RuntimeSnapshot `json:"snapshot"`
+		}
+		_ = json.Unmarshal(responseBody, &envelope)
+		return envelope.Snapshot, fmt.Errorf(
+			"task LSP %s failed with status %d: %s", action, response.StatusCode, truncateBody(responseBody),
+		)
 	}
 	var snapshot sharedlsp.RuntimeSnapshot
 	if err := json.Unmarshal(responseBody, &snapshot); err != nil {

@@ -7,6 +7,8 @@ import (
 	"time"
 )
 
+const progressKindEnd = "end"
+
 type progressParams struct {
 	Token json.RawMessage `json:"token"`
 	Value struct {
@@ -53,7 +55,7 @@ func (m *Manager) applyProgress(language string, generation uint64, raw json.Raw
 			if params.Value.Percentage != nil {
 				snapshot.Work[index].Percentage = normalizedPercentage(params.Value.Percentage)
 			}
-		case "end":
+		case progressKindEnd:
 			if index >= 0 {
 				item := snapshot.Work[index]
 				message := params.Value.Message

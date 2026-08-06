@@ -32,6 +32,7 @@ type fakeProcessManager struct {
 	reapRelease     <-chan struct{}
 	stopReturned    chan struct{}
 	stopReturnOnce  sync.Once
+	stopErr         error
 }
 
 type fakeLSPProcess struct {
@@ -121,6 +122,11 @@ func (m *fakeProcessManager) StartPipedProcess(req process.PipedStartRequest) (*
 
 func (m *fakeProcessManager) StopProcess(_ context.Context, req process.StopProcessRequest) error {
 	m.mu.Lock()
+	if m.stopErr != nil {
+		err := m.stopErr
+		m.mu.Unlock()
+		return err
+	}
 	fakeProcess := m.active[req.ProcessID]
 	if fakeProcess != nil {
 		delete(m.active, req.ProcessID)
@@ -441,6 +447,55 @@ func TestManagerRestartReapsBeforeReplacementAndRetriesIdempotently(t *testing.T
 	started, stopped, overlap := processes.counts()
 	if started != 2 || stopped != 1 || overlap || snapshot.Generation != 2 {
 		t.Fatalf("started=%d stopped=%d overlap=%v snapshot=%#v", started, stopped, overlap, snapshot)
+	}
+}
+
+func TestManagerReplacementCleanupFailureKeepsOldGenerationRetryable(t *testing.T) {
+	servers := make(chan *fakeLSPServer, 2)
+	manager, processes := newManagerForTest(t, func(int) *fakeLSPServer {
+		server := newFakeLSPServer()
+		servers <- server
+		return server
+	})
+	if _, err := manager.Start(context.Background(), StartRequest{Language: "kotlin", Generation: 1}); err != nil {
+		t.Fatalf("start generation 1: %v", err)
+	}
+	firstServer := <-servers
+	waitForPhase(t, manager, "kotlin", sharedlsp.PhaseReady)
+	waitForConfigurationReply(t, firstServer)
+	processes.mu.Lock()
+	processes.stopErr = errors.New("process tree still alive")
+	processes.mu.Unlock()
+
+	snapshot, err := manager.Restart(context.Background(), StartRequest{Language: "kotlin", Generation: 2})
+	if err == nil {
+		t.Fatal("restart unexpectedly succeeded")
+	}
+	if snapshot.Generation != 1 || snapshot.Phase != sharedlsp.PhaseError ||
+		snapshot.ErrorCode != "replacement_cleanup_failed" {
+		t.Fatalf("failed replacement snapshot = %#v", snapshot)
+	}
+	processes.mu.Lock()
+	processes.stopErr = nil
+	processes.mu.Unlock()
+	if _, err := manager.Restart(context.Background(), StartRequest{Language: "kotlin", Generation: 2}); err != nil {
+		t.Fatalf("retry generation 2: %v", err)
+	}
+	secondServer := <-servers
+	snapshot = waitForPhase(t, manager, "kotlin", sharedlsp.PhaseReady)
+	waitForConfigurationReply(t, secondServer)
+	started, stopped, overlap := processes.counts()
+	if snapshot.Generation != 2 || started != 2 || stopped != 1 || overlap {
+		t.Fatalf("snapshot=%#v started=%d stopped=%d overlap=%v", snapshot, started, stopped, overlap)
+	}
+}
+
+func waitForConfigurationReply(t *testing.T, server *fakeLSPServer) {
+	t.Helper()
+	select {
+	case <-server.configurationReply:
+	case <-time.After(2 * time.Second):
+		t.Fatal("workspace/configuration was not answered")
 	}
 }
 

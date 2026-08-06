@@ -21,11 +21,11 @@ type DocumentSnapshot struct {
 }
 
 type openDocument struct {
-	uri        string
-	languageID string
-	text       string
-	version    uint64
-	references map[uint64]struct{}
+	uri            string
+	languageID     string
+	text           string
+	version        uint64
+	attachmentText map[uint64]string
 }
 
 type documentBroker struct {
@@ -83,7 +83,7 @@ func (b *documentBroker) open(attachmentID uint64, raw json.RawMessage) error {
 		return err
 	}
 	if document := b.docs[uri]; document != nil {
-		document.references[attachmentID] = struct{}{}
+		document.attachmentText[attachmentID] = params.TextDocument.Text
 		return nil
 	}
 	params.TextDocument.URI = uri
@@ -99,11 +99,11 @@ func (b *documentBroker) open(attachmentID uint64, raw json.RawMessage) error {
 		return err
 	}
 	b.docs[uri] = &openDocument{
-		uri:        uri,
-		languageID: params.TextDocument.LanguageID,
-		text:       params.TextDocument.Text,
-		version:    1,
-		references: map[uint64]struct{}{attachmentID: {}},
+		uri:            uri,
+		languageID:     params.TextDocument.LanguageID,
+		text:           params.TextDocument.Text,
+		version:        1,
+		attachmentText: map[uint64]string{attachmentID: params.TextDocument.Text},
 	}
 	return nil
 }
@@ -126,10 +126,10 @@ func (b *documentBroker) change(attachmentID uint64, raw json.RawMessage) error 
 	if document == nil {
 		return errors.New("didChange received for unopened document")
 	}
-	if _, attached := document.references[attachmentID]; !attached {
+	text, attached := document.attachmentText[attachmentID]
+	if !attached {
 		return errors.New("didChange attachment does not own document reference")
 	}
-	text := document.text
 	for _, change := range params.ContentChanges {
 		text, err = applyContentChange(text, change)
 		if err != nil {
@@ -142,13 +142,14 @@ func (b *documentBroker) change(attachmentID uint64, raw json.RawMessage) error 
 	nextVersion := document.version + 1
 	payload, _ := json.Marshal(map[string]any{
 		fieldTextDocument:   map[string]any{fieldURI: uri, fieldVersion: nextVersion},
-		fieldContentChanges: params.ContentChanges,
+		fieldContentChanges: []map[string]any{{fieldText: text}},
 	})
 	if err := b.upstream.Notify(methodDidChange, payload); err != nil {
 		return err
 	}
 	document.text = text
 	document.version = nextVersion
+	document.attachmentText[attachmentID] = text
 	return nil
 }
 
@@ -173,7 +174,7 @@ func (b *documentBroker) saveDocument(attachmentID uint64, raw json.RawMessage) 
 	if document == nil {
 		return errors.New("didSave received for unopened document")
 	}
-	if _, attached := document.references[attachmentID]; !attached {
+	if _, attached := document.attachmentText[attachmentID]; !attached {
 		return errors.New("didSave attachment does not own document reference")
 	}
 	payload := map[string]any{fieldTextDocument: map[string]any{fieldURI: uri}}
@@ -205,7 +206,7 @@ func (b *documentBroker) ReleaseAttachment(attachmentID uint64) {
 	defer b.mu.Unlock()
 	uris := make([]string, 0)
 	for uri, document := range b.docs {
-		if _, attached := document.references[attachmentID]; attached {
+		if _, attached := document.attachmentText[attachmentID]; attached {
 			uris = append(uris, uri)
 		}
 	}
@@ -220,11 +221,11 @@ func (b *documentBroker) releaseReference(attachmentID uint64, uri string) error
 	if document == nil {
 		return nil
 	}
-	if _, attached := document.references[attachmentID]; !attached {
+	if _, attached := document.attachmentText[attachmentID]; !attached {
 		return nil
 	}
-	delete(document.references, attachmentID)
-	if len(document.references) != 0 {
+	delete(document.attachmentText, attachmentID)
+	if len(document.attachmentText) != 0 {
 		return nil
 	}
 	delete(b.docs, uri)
@@ -250,7 +251,7 @@ func (b *documentBroker) Snapshot(uri string) (DocumentSnapshot, bool) {
 		LanguageID: document.languageID,
 		Text:       document.text,
 		Version:    document.version,
-		References: len(document.references),
+		References: len(document.attachmentText),
 	}, true
 }
 

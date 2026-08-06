@@ -62,9 +62,16 @@ export type TaskLspLanguageSnapshot = {
   activity: TaskLspActivity;
   progress: TaskLspWorkItem[];
   last_completed_work?: TaskLspCompletedWorkItem;
+  capacity?: TaskLspCapacity;
 };
 
-export type TaskLspCapacity = { active: number; queued: number; limit: number };
+export type TaskLspCapacity = {
+  active: number;
+  queued: number;
+  limit: number;
+  epoch?: string;
+  revision?: number;
+};
 
 export type TaskLspSnapshot = {
   task_id: string;
