@@ -9,19 +9,7 @@ import {
   useRef,
   useState,
 } from "react";
-import {
-  IconCheck,
-  IconChevronDown,
-  IconChevronUp,
-  IconEdit,
-  IconFile,
-  IconInfoCircle,
-  IconRobot,
-  IconSend,
-  IconUser,
-  IconX,
-  IconArrowMerge,
-} from "@tabler/icons-react";
+import { IconCheck, IconFile, IconInfoCircle, IconRobot, IconUser } from "@tabler/icons-react";
 import ReactMarkdown from "react-markdown";
 import { toast } from "@/lib/toast/sonner";
 import { useTranslation } from "react-i18next";
@@ -48,6 +36,7 @@ import {
   survivingEntityReferences,
 } from "@/lib/entity-references/message-references";
 import { buildEntityReferenceMarkdownComponents } from "@/components/task/chat/messages/entity-reference-chip";
+import { QueuedGhostRowActions } from "@/components/task/chat/queued-ghost-row-actions";
 import { t } from "@/lib/i18n";
 
 type QueuedAttachment = NonNullable<QueuedMessage["attachments"]>[number];
@@ -321,113 +310,6 @@ function shouldOfferExpand(text: string): boolean {
   return text.length > EXPAND_THRESHOLD || text.includes("\n");
 }
 
-type RowActionsProps = {
-  canExpand: boolean;
-  expanded: boolean;
-  canMerge: boolean;
-  canEdit: boolean;
-  canRemove: boolean;
-  onToggleExpand: () => void;
-  onMerge?: () => void | Promise<void>;
-  onStartEdit: () => void;
-  onRemove: () => void;
-  onSendNow?: () => void;
-  sendNowDisabled: boolean;
-};
-
-function RowActions({
-  canExpand,
-  expanded,
-  canMerge,
-  canEdit,
-  canRemove,
-  onToggleExpand,
-  onMerge,
-  onStartEdit,
-  onRemove,
-  onSendNow,
-  sendNowDisabled,
-}: RowActionsProps) {
-  const { t } = useTranslation();
-  return (
-    <div
-      className={cn(
-        "flex items-center gap-0.5 flex-shrink-0 transition-opacity",
-        // Hover-reveal on devices that support hover (desktop); always
-        // visible on touch surfaces where there's no hover affordance.
-        "opacity-0 group-hover:opacity-100 focus-within:opacity-100",
-        "[@media(hover:none)]:opacity-100",
-        "[@media(pointer:coarse)]:opacity-100",
-      )}
-    >
-      <Button
-        variant="ghost"
-        size="sm"
-        className="h-6 w-6 cursor-pointer p-0 text-muted-foreground hover:text-foreground [@media(pointer:coarse)]:h-11 [@media(pointer:coarse)]:w-11"
-        onClick={onSendNow}
-        disabled={sendNowDisabled}
-        title={t("chat:sendNowQueuedMessage")}
-        data-testid="queue-entry-send-now"
-      >
-        <IconSend className="h-3.5 w-3.5" />
-      </Button>
-      {canExpand && (
-        <Button
-          variant="ghost"
-          size="sm"
-          className="h-6 w-6 cursor-pointer p-0 text-muted-foreground hover:text-foreground [@media(pointer:coarse)]:h-11 [@media(pointer:coarse)]:w-11"
-          onClick={onToggleExpand}
-          title={expanded ? t("chat:collapseMessage") : t("chat:expandMessage")}
-          data-testid="queue-entry-expand"
-          aria-expanded={expanded}
-        >
-          {expanded ? (
-            <IconChevronUp className="h-3.5 w-3.5" />
-          ) : (
-            <IconChevronDown className="h-3.5 w-3.5" />
-          )}
-        </Button>
-      )}
-      {canMerge && onMerge && (
-        <Button
-          variant="ghost"
-          size="sm"
-          className="h-6 w-6 cursor-pointer p-0 text-muted-foreground hover:text-foreground [@media(pointer:coarse)]:h-11 [@media(pointer:coarse)]:w-11"
-          onClick={onMerge}
-          title={t("chat:mergeWithAbove")}
-          data-testid="queue-entry-merge"
-        >
-          <IconArrowMerge className="h-3.5 w-3.5" />
-        </Button>
-      )}
-      {canEdit && (
-        <Button
-          variant="ghost"
-          size="sm"
-          className="h-6 w-6 cursor-pointer p-0 text-muted-foreground hover:text-foreground [@media(pointer:coarse)]:h-11 [@media(pointer:coarse)]:w-11"
-          onClick={onStartEdit}
-          title={t("chat:editQueuedMessage")}
-          data-testid="queue-entry-edit"
-        >
-          <IconEdit className="h-3.5 w-3.5" />
-        </Button>
-      )}
-      {canRemove && (
-        <Button
-          variant="ghost"
-          size="sm"
-          className="h-6 w-6 cursor-pointer p-0 text-muted-foreground hover:text-foreground [@media(pointer:coarse)]:h-11 [@media(pointer:coarse)]:w-11"
-          onClick={onRemove}
-          title={t("chat:removeQueuedMessage")}
-          data-testid="queue-entry-remove"
-        >
-          <IconX className="h-4 w-4" />
-        </Button>
-      )}
-    </div>
-  );
-}
-
 function DisplayView({
   entry,
   entityReferences,
@@ -484,7 +366,7 @@ function DisplayView({
         )}
         <AttachmentRow attachments={attachments} interactive={true} />
       </div>
-      <RowActions
+      <QueuedGhostRowActions
         canExpand={canExpand}
         expanded={expanded}
         canMerge={canMerge}
