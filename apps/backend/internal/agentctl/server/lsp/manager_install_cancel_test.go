@@ -96,3 +96,89 @@ func TestManagerStopCancelsPendingInstallBeforeSlotLock(t *testing.T) {
 		t.Fatalf("phase = %q, want off", got)
 	}
 }
+
+func TestManagerStopCancelsInstallWithSecondStartWaiting(t *testing.T) {
+	strategy := &blockingInstallStrategy{started: make(chan struct{}), release: make(chan struct{})}
+	processes := newFakeProcessManager(func(int) *fakeLSPServer { return newFakeLSPServer() })
+	manager := NewManager(
+		Config{WorkDir: "/workspace", WorkspaceURI: "file:///workspace", OwnerID: "task-1"},
+		processes,
+		&blockingInstallRegistry{strategy: strategy},
+		testLogger(),
+	)
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		if err := manager.Close(ctx); err != nil {
+			t.Errorf("close manager: %v", err)
+		}
+	})
+
+	firstStart := make(chan error, 1)
+	go func() {
+		_, err := manager.Start(context.Background(), StartRequest{
+			Language: "go", Generation: 1, AutoInstall: true,
+		})
+		firstStart <- err
+	}()
+	select {
+	case <-strategy.started:
+	case <-time.After(time.Second):
+		t.Fatal("installer did not start")
+	}
+	secondStart := make(chan error, 1)
+	go func() {
+		_, err := manager.Restart(context.Background(), StartRequest{
+			Language: "go", Generation: 2, AutoInstall: true,
+		})
+		secondStart <- err
+	}()
+	waitForPendingStartCount(t, manager, "go", 2)
+
+	stopDone := make(chan error, 1)
+	go func() {
+		_, err := manager.Stop(context.Background(), StopRequest{Language: "go", Generation: 1})
+		stopDone <- err
+	}()
+	select {
+	case err := <-stopDone:
+		if err != nil {
+			t.Fatalf("stop with queued replacement: %v", err)
+		}
+	case <-time.After(200 * time.Millisecond):
+		close(strategy.release)
+		<-firstStart
+		<-secondStart
+		<-stopDone
+		t.Fatal("Stop waited behind the queued replacement instead of canceling pending starts")
+	}
+	for name, result := range map[string]<-chan error{"first": firstStart, "second": secondStart} {
+		if err := <-result; !errors.Is(err, context.Canceled) {
+			t.Fatalf("%s start error = %v, want canceled", name, err)
+		}
+	}
+	if started, _, _ := processes.counts(); started != 0 {
+		t.Fatalf("language-server processes started = %d, want 0", started)
+	}
+}
+
+func waitForPendingStartCount(t *testing.T, manager *Manager, language string, want int) {
+	t.Helper()
+	slot, err := manager.slotFor(language)
+	if err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(time.Second)
+	for pendingStartCount(slot) != want {
+		if time.Now().After(deadline) {
+			t.Fatalf("pending starts = %d, want %d", pendingStartCount(slot), want)
+		}
+		time.Sleep(time.Millisecond)
+	}
+}
+
+func pendingStartCount(slot *languageSlot) int {
+	slot.startMu.Lock()
+	defer slot.startMu.Unlock()
+	return len(slot.pendingStarts)
+}

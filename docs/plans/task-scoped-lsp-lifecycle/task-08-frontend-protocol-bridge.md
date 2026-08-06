@@ -112,3 +112,10 @@ PR remediation on 2026-08-06 made capacity merging independently sequence-aware.
 live language events share the backend capacity epoch/revision; lower revisions and older backend
 epochs cannot overwrite newer counts, while a newer backend epoch is accepted after restart.
 The LSP slice race regressions, related frontend suites, and web typecheck pass.
+
+A later Codex review found that a provided session missing from the not-yet-hydrated session map
+fell back to the previously active task, allowing a transient wrong-task attachment. Session-backed
+editors now wait for the authoritative session/task mapping; only sessionless task surfaces use the
+active task. The regression failed before the change and the seven-test hook suite, targeted ESLint,
+and web typecheck pass. This is shared state resolution only, with no desktop/mobile presentation,
+touch, scrolling, or geometry change; the focused unit coverage therefore satisfies mobile parity.

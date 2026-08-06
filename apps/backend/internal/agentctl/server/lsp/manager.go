@@ -37,53 +37,6 @@ type backgroundWorkOwner interface {
 	BeginBackgroundWork() func()
 }
 
-type languageSlot struct {
-	opMu                   sync.Mutex
-	startMu                sync.Mutex
-	runtime                *runtime
-	lastGeneration         uint64
-	nextStartToken         uint64
-	pendingStartToken      uint64
-	pendingStartGeneration uint64
-	pendingStartCancel     context.CancelFunc
-}
-
-func (s *languageSlot) lockStartOperation(
-	parent context.Context,
-	generation uint64,
-) (context.Context, func()) {
-	operationCtx, cancel := context.WithCancel(parent)
-	s.startMu.Lock()
-	s.opMu.Lock()
-	s.nextStartToken++
-	token := s.nextStartToken
-	s.pendingStartToken = token
-	s.pendingStartGeneration = generation
-	s.pendingStartCancel = cancel
-	s.startMu.Unlock()
-	return operationCtx, func() {
-		s.opMu.Unlock()
-		s.startMu.Lock()
-		if s.pendingStartToken == token {
-			s.pendingStartToken = 0
-			s.pendingStartGeneration = 0
-			s.pendingStartCancel = nil
-		}
-		s.startMu.Unlock()
-		cancel()
-	}
-}
-
-func (s *languageSlot) lockAfterCancelingStart(generation uint64) {
-	s.startMu.Lock()
-	if s.pendingStartCancel != nil &&
-		(generation == 0 || generation >= s.pendingStartGeneration) {
-		s.pendingStartCancel()
-	}
-	s.opMu.Lock()
-	s.startMu.Unlock()
-}
-
 type Manager struct {
 	cfg       Config
 	processes ProcessManager
@@ -226,6 +179,9 @@ func (m *Manager) start(request StartRequest) (Snapshot, error) {
 	defer unlock()
 	if err := m.checkOpen(); err != nil {
 		return Snapshot{}, err
+	}
+	if err := operationCtx.Err(); err != nil {
+		return m.Snapshot(request.Language), err
 	}
 	if request.Generation < slot.lastGeneration {
 		return m.Snapshot(request.Language), ErrStaleGeneration

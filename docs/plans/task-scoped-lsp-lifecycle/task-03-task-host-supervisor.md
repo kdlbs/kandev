@@ -144,3 +144,10 @@ generation-aware child context before taking the operation lock; Stop cancels th
 start before waiting for the lock, which also drains the canceled install before returning. The
 blocked-installer regression passed 20 repetitions under `-race`, and the full task-host LSP race
 suite passed with goleak enabled.
+
+The next exact-head review found a second Start could hold the start-registration mutex while
+waiting behind that install, preventing Stop from reaching the cancellation function. Pending
+starts and pending stops now register in separate token maps without holding the registration mutex
+across the operation-slot wait. Stop cancels the active matching generation plus every unaccepted
+queued start; starts arriving behind a pending Stop self-cancel. The active-plus-queued regression
+and the original blocked-install regression pass 20 repetitions under `-race`.
