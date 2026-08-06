@@ -1,74 +1,107 @@
-import { useCallback, useEffect, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { useAppStore } from "@/components/state-provider";
+import { useTaskLsp } from "@/hooks/domains/lsp/use-task-lsp";
 import { lspClientManager, toLspLanguage, type LspStatus } from "@/lib/lsp/lsp-client-manager";
 import { EMPTY_LSP_PROGRESS, type LspProgressSnapshot } from "@/lib/lsp/lsp-progress";
+import type { TaskLspLanguageSnapshot } from "@/lib/types/http-lsp";
+import { t } from "@/lib/i18n";
 
 const DISABLED: LspStatus = { state: "disabled" };
-const startRequestGenerations = new Map<string, number>();
-const manualStopOverrides = new Set<string>();
+const ATTACHMENT_RETRY_DELAYS_MS = [1_000, 2_000, 5_000] as const;
+const PHASE_STATUS: Partial<Record<TaskLspLanguageSnapshot["phase"], LspStatus>> = {
+  off: DISABLED,
+  waiting_for_task: DISABLED,
+  queued: { state: "starting" },
+  installing: { state: "installing" },
+  starting: { state: "starting" },
+  process_started: { state: "starting" },
+  initializing: { state: "starting" },
+  ready: { state: "ready" },
+  stopping: { state: "stopping" },
+};
 
-function lspKey(sessionId: string | null, lspLanguage: string | null): string | null {
-  return sessionId && lspLanguage ? `${sessionId}:${lspLanguage}` : null;
+function managerKey(taskId: string | null, language: string | null): string | null {
+  return taskId && language ? `${taskId}:${language}` : null;
 }
 
-function subscribeToLspKey(key: string | null, callback: () => void): () => void {
-  if (!key) return () => {};
-  return lspClientManager.onChange((changedKey) => {
-    if (changedKey === key) callback();
+function taskStatus(snapshot: TaskLspLanguageSnapshot | undefined): LspStatus {
+  if (!snapshot) return DISABLED;
+  if (snapshot.phase === "unsupported") {
+    return {
+      state: "unavailable",
+      cause: "unsupported_executor",
+      reason: snapshot.error_message ?? snapshot.error_code ?? t("lsp:taskExecutorUnsupported"),
+    };
+  }
+  if (snapshot.phase === "error") {
+    return {
+      state: "error",
+      reason: snapshot.error_message ?? snapshot.error_code ?? t("lsp:connectionClosed"),
+    };
+  }
+  return PHASE_STATUS[snapshot.phase] ?? DISABLED;
+}
+
+function taskProgress(snapshot: TaskLspLanguageSnapshot | undefined): LspProgressSnapshot {
+  if (!snapshot) return EMPTY_LSP_PROGRESS;
+  return {
+    initializingSince: snapshot.initialize_started_at
+      ? Date.parse(snapshot.initialize_started_at)
+      : null,
+    active: snapshot.progress.map((item) => ({
+      token: item.token,
+      title: item.title,
+      message: item.message ?? null,
+      percentage: item.percentage ?? null,
+      startedAt: Date.parse(item.started_at),
+    })),
+    completed: null,
+    hasReportedProgress: snapshot.progress.length > 0,
+  };
+}
+
+function useTaskIdForSession(sessionId: string | null): string | null {
+  return useAppStore((state) => {
+    if (!sessionId) return state.tasks.activeTaskId;
+    return state.taskSessions.items[sessionId]?.task_id ?? state.tasks.activeTaskId;
   });
 }
 
-function requestLspStart(sessionId: string, lspLanguage: string): void {
-  const key = `${sessionId}:${lspLanguage}`;
-  manualStopOverrides.delete(key);
-  startRequestGenerations.set(key, (startRequestGenerations.get(key) ?? 0) + 1);
-  lspClientManager.saveEnabledState(sessionId, lspLanguage);
-}
-
-function requestLspStop(sessionId: string, lspLanguage: string): void {
-  const key = `${sessionId}:${lspLanguage}`;
-  manualStopOverrides.add(key);
-  lspClientManager.stop(sessionId, lspLanguage);
-  startRequestGenerations.delete(key);
-  lspClientManager.clearEnabledState(sessionId, lspLanguage);
-}
-
-function toggleLsp(sessionId: string, lspLanguage: string): void {
-  const current = lspClientManager.getStatus(sessionId, lspLanguage);
-  if (
-    current.state === "disabled" ||
-    current.state === "error" ||
-    current.state === "unavailable"
-  ) {
-    requestLspStart(sessionId, lspLanguage);
-  } else if (
-    current.state === "ready" ||
-    current.state === "connecting" ||
-    current.state === "installing" ||
-    current.state === "starting"
-  ) {
-    requestLspStop(sessionId, lspLanguage);
-  }
-}
-
 export function useLspStatus(sessionId: string | null, lspLanguage: string | null) {
-  const key = lspKey(sessionId, lspLanguage);
-  const status = useSyncExternalStore(
-    (callback) => subscribeToLspKey(key, callback),
-    () =>
-      sessionId && lspLanguage ? lspClientManager.getStatus(sessionId, lspLanguage) : DISABLED,
+  const taskId = useTaskIdForSession(sessionId);
+  const taskLsp = useTaskLsp(taskId);
+  const snapshot = lspLanguage ? taskLsp.byLanguage[lspLanguage] : undefined;
+  const key = managerKey(taskId, lspLanguage);
+  const attachmentStatus = useSyncExternalStore(
+    (callback) => {
+      if (!key) return () => {};
+      return lspClientManager.onChange((changedKey) => {
+        if (changedKey === key) callback();
+      });
+    },
+    () => (taskId && lspLanguage ? lspClientManager.getStatus(taskId, lspLanguage) : DISABLED),
   );
-  const progress = useSyncExternalStore(
-    (callback) => subscribeToLspKey(key, callback),
-    () =>
-      sessionId && lspLanguage
-        ? lspClientManager.getProgress(sessionId, lspLanguage)
-        : EMPTY_LSP_PROGRESS,
-  );
+  const lifecycleStatus = taskStatus(snapshot);
+  const status =
+    lifecycleStatus.state === "ready" && sessionId && attachmentStatus.state !== "disabled"
+      ? attachmentStatus
+      : lifecycleStatus;
+  const progress = useMemo(() => taskProgress(snapshot), [snapshot]);
   const toggle = useCallback(() => {
-    if (sessionId && lspLanguage) toggleLsp(sessionId, lspLanguage);
-  }, [sessionId, lspLanguage]);
-  return { status, progress, toggle };
+    if (!lspLanguage) return;
+    if (
+      lifecycleStatus.state === "disabled" ||
+      lifecycleStatus.state === "error" ||
+      lifecycleStatus.state === "unavailable"
+    ) {
+      void taskLsp.start(lspLanguage).catch(() => undefined);
+      return;
+    }
+    if (lifecycleStatus.state !== "stopping") {
+      void taskLsp.stop(lspLanguage).catch(() => undefined);
+    }
+  }, [lifecycleStatus.state, lspLanguage, taskLsp]);
+  return { status, progress, toggle, taskId, snapshot, attachmentStatus };
 }
 
 export function useLsp(
@@ -80,42 +113,42 @@ export function useLsp(
   lspLanguage: string | null;
   toggle: () => void;
 } {
-  const lspAutoStartLanguages = useAppStore((s) => s.userSettings.lspAutoStartLanguages);
-  const lspServerConfigs = useAppStore((s) => s.userSettings.lspServerConfigs);
   const lspLanguage = toLspLanguage(monacoLanguage);
-  const shouldAutoStart = lspLanguage ? lspAutoStartLanguages.includes(lspLanguage) : false;
-  const key = lspKey(sessionId, lspLanguage);
-  const hasManualStopOverride = key ? manualStopOverrides.has(key) : false;
-  const isManuallyEnabled = useSyncExternalStore(
-    (callback) => subscribeToLspKey(key, callback),
-    () =>
-      sessionId && lspLanguage
-        ? lspClientManager.isEnabledInStorage(sessionId, lspLanguage)
-        : false,
-  );
-  const startRequestGeneration = useSyncExternalStore(
-    (callback) => subscribeToLspKey(key, callback),
-    () => (key ? (startRequestGenerations.get(key) ?? 0) : 0),
-  );
-  const { status, progress, toggle } = useLspStatus(sessionId, lspLanguage);
-
-  // Each mounted matching editor owns one connection lease. An explicit Stop
-  // suppresses global auto-start for this session/language until Start clears
-  // the override; later settings/configuration renders must not reacquire it.
-  useEffect(() => {
-    const autoStartEnabled = shouldAutoStart && !hasManualStopOverride;
-    if ((!autoStartEnabled && !isManuallyEnabled) || !sessionId || !lspLanguage) return;
-    const disconnect = lspClientManager.connect(sessionId, lspLanguage, lspServerConfigs);
-    return disconnect;
-  }, [
-    hasManualStopOverride,
-    isManuallyEnabled,
-    shouldAutoStart,
+  const { status, progress, toggle, taskId, snapshot, attachmentStatus } = useLspStatus(
     sessionId,
     lspLanguage,
-    lspServerConfigs,
-    startRequestGeneration,
-  ]);
+  );
+  const [attachmentAttempt, setAttachmentAttempt] = useState(0);
+  const retryIndex = useRef(0);
+  const retryTarget = `${taskId ?? ""}:${lspLanguage ?? ""}:${snapshot?.generation ?? 0}`;
+
+  useEffect(() => {
+    if (!taskId || !sessionId || !lspLanguage || snapshot?.phase !== "ready") return;
+    return lspClientManager.connect(taskId, sessionId, lspLanguage);
+  }, [taskId, sessionId, lspLanguage, snapshot?.generation, snapshot?.phase, attachmentAttempt]);
+
+  useEffect(() => {
+    retryIndex.current = 0;
+  }, [retryTarget]);
+
+  useEffect(() => {
+    if (
+      !taskId ||
+      !sessionId ||
+      !lspLanguage ||
+      snapshot?.phase !== "ready" ||
+      attachmentStatus.state === "ready"
+    ) {
+      retryIndex.current = 0;
+      return;
+    }
+    if (attachmentStatus.state !== "error") return;
+    const delay = ATTACHMENT_RETRY_DELAYS_MS[retryIndex.current];
+    if (delay === undefined) return;
+    retryIndex.current++;
+    const timer = window.setTimeout(() => setAttachmentAttempt((attempt) => attempt + 1), delay);
+    return () => window.clearTimeout(timer);
+  }, [taskId, sessionId, lspLanguage, snapshot?.phase, attachmentStatus.state, attachmentAttempt]);
 
   return { status, progress, lspLanguage, toggle };
 }

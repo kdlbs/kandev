@@ -1,7 +1,7 @@
 ---
 id: "07-lifecycle-reconciliation"
 title: "Lifecycle reconciliation"
-status: pending
+status: completed
 wave: 3
 depends_on: ["06-task-controller"]
 plan: "plan.md"
@@ -81,4 +81,29 @@ race/goleak results, child-process cleanup, and any recovery limitation. Update 
 
 ## Results
 
-Pending.
+Completed 2026-08-05.
+
+- Added startup adoption before launch, capacity reconstruction, stale/disabled runtime cleanup,
+  environment-ready and unarchive reconciliation, and bounded 1s/5s/30s recovery with a
+  five-ready-minute reset. Reconciler shutdown cancels and joins watches/timers.
+- Task archive/delete/environment reset now stop task-owned language servers before destructive
+  mutation; cascade teardown retains full environment process-tree cleanup as the backstop. Policy
+  and history survive temporary teardown; delete still cascades persistent rows.
+- Published revisioned `task.lsp_state_changed` / task-subscriber `task.lsp.changed` snapshots.
+  Added bounded no-file discovery persistence and task-environment-ready inherited auto-start.
+- Multi-repository roots now initialize as ordered contained workspace folders. Live servers that
+  advertise folder-change support receive `workspace/didChangeWorkspaceFolders`; other live
+  generations remain running and publish `workspace_roots_changed` restart-required evidence.
+- Restored shared-cache install mutation coordination in the task-host supervisor. Browser,
+  watcher, and attachment disconnects remain non-owning.
+- The first focused race run exposed a captured timer-pointer race in recovery scheduling. Replaced
+  it with a locked epoch token; the exact race suite then passed.
+
+Verification:
+
+```text
+go test ./internal/lsp/... ./internal/task/service ./internal/agent/runtime/lifecycle ./internal/backendapp -run 'Test(LSP|Lsp|TaskLSP|TaskLsp)'        PASS
+go test -race ./internal/lsp/... ./internal/task/service -run 'Test(LSP|Lsp|Reconcile|Recovery|Cleanup)'                                         PASS
+go test ./internal/lsp/... -run 'Test(Reconcile|Recovery|Cleanup|Watch)' -count=20                                                               PASS
+go test -race ./internal/agentctl/server/lsp ./internal/lsp ./internal/gateway/websocket                                                         PASS
+```

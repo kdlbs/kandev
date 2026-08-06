@@ -75,6 +75,15 @@ type TaskExecutionStopper interface {
 	RegisterExecutionStopOwner(sessionID, executionID string, force bool)
 }
 
+// TaskLSPLifecycle is the task-owned language-server cleanup/recovery seam.
+// Callers provide only a task resolved by the service; session and execution
+// identifiers never cross this ownership boundary.
+type TaskLSPLifecycle interface {
+	CleanupTask(ctx context.Context, taskID, reason string) error
+	ReconcileTask(ctx context.Context, taskID string) error
+	WorkspaceSourcesChanged(ctx context.Context, taskID string) error
+}
+
 // TaskRowLivenessProber classifies an executors_running row's backing-process
 // liveness in a runtime-aware way (a local process check is never applied to a
 // remote/SSH row). It is optional and satisfied by the lifecycle adapter. When
@@ -290,6 +299,7 @@ type Service struct {
 	discoveryConfig             RepositoryDiscoveryConfig
 	worktreeCleanup             WorktreeCleanup
 	executionStopper            TaskExecutionStopper
+	taskLSP                     TaskLSPLifecycle
 	rowLivenessProber           TaskRowLivenessProber
 	contextWindowResetter       func(context.Context, string) error
 	cleanupActivity             TaskResourceCleanupActivityGate
@@ -465,6 +475,30 @@ func (s *Service) SetProviderDefaultBranchProber(p ProviderDefaultBranchProber) 
 // SetExecutionStopper wires the task execution stopper (orchestrator).
 func (s *Service) SetExecutionStopper(stopper TaskExecutionStopper) {
 	s.executionStopper = stopper
+}
+
+// SetTaskLSPLifecycle wires the task-owned language-server controller.
+func (s *Service) SetTaskLSPLifecycle(lifecycle TaskLSPLifecycle) {
+	s.taskLSP = lifecycle
+}
+
+// CleanupTaskLSP exposes the task-owned cleanup hook to cascade composition.
+// It accepts only a task ID and semantic reason; runtime/session identifiers
+// remain private to the LSP controller.
+func (s *Service) CleanupTaskLSP(ctx context.Context, taskID, reason string) error {
+	if s.taskLSP == nil {
+		return nil
+	}
+	return s.taskLSP.CleanupTask(ctx, taskID, reason)
+}
+
+// ReconcileTaskLSP is used by task resume/cascade composition without
+// exposing the controller or a runtime execution identifier.
+func (s *Service) ReconcileTaskLSP(ctx context.Context, taskID string) error {
+	if s.taskLSP == nil {
+		return nil
+	}
+	return s.taskLSP.ReconcileTask(ctx, taskID)
 }
 
 // SetRowLivenessProber wires the runtime-aware executors_running liveness probe

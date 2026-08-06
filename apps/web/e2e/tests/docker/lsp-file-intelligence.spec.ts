@@ -42,7 +42,7 @@ test.describe("Docker task-host LSP", () => {
     });
     await testPage.keyboard.press("Escape");
     await performLspAction(testPage, "stop");
-    await expect(statusButton).toHaveAttribute("data-lsp-state", "disabled");
+    await expect(statusButton).toHaveAttribute("data-lsp-state", "stopped");
   });
 
   test("isolates Monaco models for two container sessions sharing /workspace", async ({
@@ -82,9 +82,9 @@ test.describe("Docker task-host LSP", () => {
       "FIRST_CONTAINER_CONTENT",
     );
     await expect
-      .poll(() => didOpenFrames.find((frame) => frame.sessionId === first.sessionId)?.uri ?? null)
+      .poll(() => didOpenFrames.find((frame) => frame.taskId === first.taskId)?.uri ?? null)
       .not.toBeNull();
-    const firstDidOpen = didOpenFrames.find((frame) => frame.sessionId === first.sessionId)!;
+    const firstDidOpen = didOpenFrames.find((frame) => frame.taskId === first.taskId)!;
     expect(firstDidOpen.uri).toBe(`file:///workspace/${filePath}`);
     expect(new URL(firstDidOpen.uri).search).toBe("");
     expect(firstDidOpen.text).toContain("FIRST_CONTAINER_CONTENT");
@@ -118,9 +118,9 @@ test.describe("Docker task-host LSP", () => {
     );
 
     await expect
-      .poll(() => didOpenFrames.find((frame) => frame.sessionId === second.sessionId)?.uri ?? null)
+      .poll(() => didOpenFrames.find((frame) => frame.taskId === second.taskId)?.uri ?? null)
       .toBe(firstDidOpen.uri);
-    const secondDidOpen = didOpenFrames.find((frame) => frame.sessionId === second.sessionId)!;
+    const secondDidOpen = didOpenFrames.find((frame) => frame.taskId === second.taskId)!;
     expect(new URL(secondDidOpen.uri).search).toBe("");
     expect(secondDidOpen.text).toContain("SECOND_CONTAINER_CONTENT");
 
@@ -218,7 +218,7 @@ test.describe("Docker task-host LSP", () => {
     await expect(editorContent).toContainText(editMarker);
 
     await performLspAction(testPage, "stop");
-    await expect(statusButton).toHaveAttribute("data-lsp-state", "disabled");
+    await expect(statusButton).toHaveAttribute("data-lsp-state", "stopped");
     await expect(editorContent).toContainText(editMarker);
     await expect.poll(activeModelUri).toBe(authoritativeModelUri);
 

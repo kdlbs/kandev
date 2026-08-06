@@ -161,6 +161,31 @@ func TestTaskEventBroadcaster_NoDuplicateSubscriptions(t *testing.T) {
 	}
 }
 
+func TestTaskEventBroadcaster_TaskLSPStateIsTaskScoped(t *testing.T) {
+	h := newTestHub(t)
+	first := newTestClient("first")
+	second := newTestClient("second")
+	registerTestClient(h, first)
+	registerTestClient(h, second)
+	h.SubscribeToTask(first, "task-1")
+	h.SubscribeToTask(second, "task-2")
+
+	payload := map[string]any{
+		"task_id": "task-1", "language": "kotlin", "phase": "ready",
+	}
+	msg, err := ws.NewNotification(ws.ActionTaskLSPChanged, payload)
+	require.NoError(t, err)
+	b := &TaskEventBroadcaster{hub: h, logger: testLogger()}
+	require.NoError(t, b.routeBroadcast(ws.ActionTaskLSPChanged, payload, "", "", msg))
+
+	if !clientReceived(first) {
+		t.Fatal("task subscriber did not receive LSP notification")
+	}
+	if clientReceived(second) {
+		t.Fatal("LSP notification crossed task boundary")
+	}
+}
+
 // TestTaskEventBroadcaster_PreservesAllFields verifies that event data passes through the
 // event bus unmodified — the broadcaster receives the same object that was published,
 // including fields like turn_id, raw_content, and updated_at that the old

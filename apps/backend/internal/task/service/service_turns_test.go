@@ -1084,6 +1084,46 @@ func TestGetWorkspaceInfoForEnvironment(t *testing.T) {
 	}
 }
 
+func TestGetWorkspaceInfoForEnvironmentWithoutSessionUsesTaskEnvironment(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+
+	setupTestTask(t, repo)
+	now := time.Now().UTC()
+	if err := repo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
+		ID: "env-task-owned", TaskID: "task-123",
+		ExecutorType: string(models.ExecutorTypeLocal), ExecutorProfileID: "executor-profile",
+		WorkspacePath: "/host/task-owned", TaskDirName: "task-owned_ab12",
+		ContainerID: "container-task-owned", Status: models.TaskEnvironmentStatusReady,
+		CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("create task environment: %v", err)
+	}
+
+	info, err := svc.GetWorkspaceInfoForEnvironment(ctx, "env-task-owned")
+	if err != nil {
+		t.Fatalf("GetWorkspaceInfoForEnvironment returned error: %v", err)
+	}
+	if info.TaskID != "task-123" || info.TaskEnvironmentID != "env-task-owned" {
+		t.Fatalf("task ownership = %q/%q", info.TaskID, info.TaskEnvironmentID)
+	}
+	if info.SessionID != "" {
+		t.Fatalf("SessionID = %q, want empty task-owned transport", info.SessionID)
+	}
+	if info.WorkspacePath != "/host/task-owned" || info.TaskDirName != "task-owned_ab12" {
+		t.Fatalf("workspace = %q (%q)", info.WorkspacePath, info.TaskDirName)
+	}
+	if info.ExecutorType != string(models.ExecutorTypeLocal) {
+		t.Fatalf("ExecutorType = %q", info.ExecutorType)
+	}
+	if info.AgentProfileID != "" || info.ExecutionProfileID != "" || info.AgentID != "" {
+		t.Fatalf("task-owned fallback inherited agent identity: %#v", info)
+	}
+	if got := info.Metadata[lifecycle.MetadataKeyContainerID]; got != "container-task-owned" {
+		t.Fatalf("container metadata = %v", got)
+	}
+}
+
 // Multi-repo: the workspace path agentctl boots with must be the task root
 // (parent of every per-repo subdir) so its scanRepositorySubdirs detects all
 // repos and starts a per-repo tracker for each. Returning a single repo's

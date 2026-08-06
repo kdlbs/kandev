@@ -36,7 +36,7 @@ test.describe("SSH LSP boundary", () => {
 
     const statusButton = testPage.locator('[data-testid="lsp-status-button"]:visible');
     await performLspAction(testPage, "start");
-    await expect(statusButton).toHaveAttribute("data-lsp-state", "unavailable", {
+    await expect(statusButton).toHaveAttribute("data-lsp-state", "unsupported", {
       timeout: 15_000,
     });
     await expect(await openLspStatus(testPage)).toContainText(

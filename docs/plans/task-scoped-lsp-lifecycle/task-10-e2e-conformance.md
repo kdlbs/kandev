@@ -1,7 +1,7 @@
 ---
 id: "10-e2e-conformance"
 title: "LSP E2E conformance"
-status: pending
+status: completed
 wave: 5
 depends_on: ["09-responsive-control-surface"]
 plan: "plan.md"
@@ -86,4 +86,31 @@ Update task/plan status and actual files.
 
 ## Results
 
-Pending.
+Completed 2026-08-05.
+
+- Production-build task contract: `pnpm e2e:run tests/lsp/task-lsp-lifecycle.spec.ts` — 9/9
+  passed in 1.4 minutes. Fake-server evidence held one PID/initialize/import across file, panel,
+  session, browser, reload, and former-idle-boundary changes; explicit Restart produced exactly one
+  replacement generation, Stop prevented reacquisition, and archive reaped the process.
+- Existing desktop coverage: `pnpm e2e:run --no-build tests/lsp/lsp-file-intelligence.spec.ts` —
+  13/13 passed in 2.3 minutes, including missing-binary guidance, honest progress, shared
+  configuration, multi-root URIs, crash recovery, archive cleanup, and real-server capacity.
+- Responsive coverage: `pnpm e2e:run --no-build --project mobile-chrome
+  tests/lsp/mobile-lsp-file-intelligence.spec.ts` — 3/3 passed in 17.4 seconds across phone and
+  tablet composition.
+- Runtime coverage: `KANDEV_E2E_CONTAINERS=1 pnpm e2e:run --project containers
+  tests/docker/lsp-file-intelligence.spec.ts tests/ssh/lsp-unsupported-executor.spec.ts` — 4/4
+  passed in 1.2 minutes. Local Docker shared one task host; SSH failed closed without LSP launch.
+- Focused frontend suites passed 26 files / 203 tests. Web typecheck, full frontend lint, i18n check
+  and ratchet, and two production Vite builds passed.
+- A non-required broad web run completed all 1,130 files and all 8,703 assertions, then exited on
+  one unhandled localhost/Monaco error while a concurrent managed E2E backend was being torn down.
+  The named automation test passed 2/2 in isolation after E2E ended; this run is recorded as an
+  interference artifact, not claimed as a clean full-suite pass.
+- `go test -race ./internal/lsp ./internal/agentctl/server/lsp
+  ./internal/gateway/websocket ./internal/agent/runtime/lifecycle
+  ./internal/agent/runtime/agentctl` passed. Both long-running LSP packages use `goleak` TestMain;
+  focused backend packages and backend lint passed with zero findings.
+- Final managed runners left no E2E containers, backend, agentctl, fake-server, or Kotlin child
+  processes. One exact temp-home tree left by an earlier interrupted runner was identified from its
+  `KANDEV_E2E_MOCK` environment and reaped before the clean final matrix.

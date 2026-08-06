@@ -281,7 +281,7 @@ func (m *Manager) CleanupStaleExecutionBySessionID(ctx context.Context, sessionI
 	// goroutines. Without this, the old agentctl instance keeps running when a new
 	// execution is created for the same session, causing git polling on deleted worktrees.
 	// This is idempotent — returns success if the instance is already gone.
-	m.stopAgentViaBackend(ctx, execution.ID, execution, stopReasonStaleExecutionCleanup, false, false)
+	_ = m.stopAgentViaBackend(ctx, execution.ID, execution, stopReasonStaleExecutionCleanup, false, false)
 
 	// Close agentctl connection if it exists
 	if execution.agentctl != nil {
@@ -322,8 +322,10 @@ func (m *Manager) RemoveExecution(executionID string) {
 	m.releaseActivity(executionActivityKey(executionID))
 	if execution, ok := m.executionStore.Get(executionID); ok {
 		m.closeStreamCoalescer(execution)
-		m.cleanupPassthroughMCPConfig(execution)
-		m.setRuntimeInterest(execution.SessionID, false)
+		if !execution.IsTaskHost {
+			m.cleanupPassthroughMCPConfig(execution)
+			m.setRuntimeInterest(execution.SessionID, false)
+		}
 	}
 	m.executionStore.Remove(executionID)
 	m.logger.Debug("removed execution from tracking",

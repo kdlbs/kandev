@@ -1,7 +1,7 @@
 ---
 id: "09-responsive-control-surface"
 title: "Responsive task control surface"
-status: pending
+status: completed
 wave: 4
 depends_on: ["08-frontend-protocol-bridge"]
 plan: "plan.md"
@@ -95,4 +95,19 @@ Update task/plan status and actual files.
 
 ## Results
 
-Pending.
+Completed 2026-08-05.
+
+- Replaced active-file-only lifecycle placement with one task aggregate, a task-topbar fallback,
+  and an editor shortcut that all use the task controller. The disclosure exposes policy,
+  effective policy, phase/work evidence, completed-work evidence, generation/timing/reasons,
+  actionable errors, and confirmed Restart.
+- Reused the same disclosure/view-model in the existing phone/tablet Status drawer. It has one
+  scroll owner, no nested drawer, 44 px controls, dynamic-viewport/safe-area containment, and no
+  file-viewer protocol attachment.
+- Removed the status-location setting UI/resolver while retaining its stored compatibility field.
+  Added English, pseudo-locale, and Simplified Chinese copy.
+- Fixed Radix trigger ref forwarding so the desktop disclosure anchors inside the viewport, and
+  subscribed the shared task hook so progress remains live on every mounted surface.
+- GREEN: `cd apps/web && pnpm exec vitest run components/lsp/task-lsp-control.test.tsx hooks/domains/lsp/use-task-lsp.test.tsx` — 2 files, 10 tests passed.
+- GREEN: `cd apps/web && pnpm run typecheck` and `cd apps/web && pnpm build`.
+- GREEN: `cd apps/web && pnpm e2e:run --no-build --project mobile-chrome -- e2e/tests/lsp/mobile-lsp-file-intelligence.spec.ts` — 3 tests passed across phone/tablet composition and the disabled-status-bar path.

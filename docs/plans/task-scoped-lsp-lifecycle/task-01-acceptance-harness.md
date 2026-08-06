@@ -1,7 +1,7 @@
 ---
 id: "01-acceptance-harness"
 title: "Lifecycle acceptance harness"
-status: pending
+status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
@@ -74,4 +74,13 @@ and any contract ambiguity. Update this task and `plan.md` in the same conversat
 
 ## Results
 
-Pending.
+- Extended `fake-lsp-server.mjs` with controller-generation, explicit initialize, and explicit
+  project-import evidence while retaining raw protocol, configuration, exit, signal, PID, and
+  timestamp records in the worker-owned backend temp directory.
+- Added eight production-build desktop scenarios in `task-lsp-lifecycle.spec.ts`; Playwright listed
+  all eight under the `chromium` project.
+- RED command:
+  `cd apps/web && pnpm e2e:run tests/lsp/task-lsp-lifecycle.spec.ts -- --grep "starts Kotlin before opening a file"`
+- Expected RED result: failed at `openTaskLspControl` because
+  `getByTestId("task-lsp-control")` was absent (`element(s) not found`, 5-second locator timeout).
+  This is the missing start-before-editor task surface, not an infrastructure or compile failure.

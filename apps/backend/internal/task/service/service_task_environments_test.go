@@ -186,6 +186,48 @@ func TestResetTaskEnvironment_DestroysEachResourceTypeAndDeletesRow(t *testing.T
 	}
 }
 
+func TestResetTaskEnvironment_StopsTaskLSPBeforeTeardown(t *testing.T) {
+	repo := &stubEnvRepo{env: &models.TaskEnvironment{
+		ID: "env-1", TaskID: "task-1", ContainerID: "container-1",
+	}}
+	destroyer := &stubDestroyer{}
+	lifecycle := &recordingTaskLSPLifecycle{}
+	lifecycle.onCleanup = func(_ context.Context, _ string) {
+		if len(destroyer.containerCalls) != 0 {
+			t.Fatal("container teardown ran before task LSP cleanup")
+		}
+	}
+	svc := newResetTestService(t, repo)
+	svc.SetSessionRunningChecker(&stubRunningChecker{})
+	svc.SetEnvironmentDestroyer(destroyer)
+	svc.SetTaskLSPLifecycle(lifecycle)
+
+	if err := svc.ResetTaskEnvironment(context.Background(), "task-1", ResetOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if got := lifecycle.cleanupCalls; len(got) != 1 || got[0] != "task-1:task_environment_reset" {
+		t.Fatalf("cleanup calls = %v", got)
+	}
+}
+
+func TestResetTaskEnvironment_LSPCleanupFailurePreservesEnvironment(t *testing.T) {
+	repo := &stubEnvRepo{env: &models.TaskEnvironment{
+		ID: "env-1", TaskID: "task-1", ContainerID: "container-1",
+	}}
+	destroyer := &stubDestroyer{}
+	svc := newResetTestService(t, repo)
+	svc.SetSessionRunningChecker(&stubRunningChecker{})
+	svc.SetEnvironmentDestroyer(destroyer)
+	svc.SetTaskLSPLifecycle(&recordingTaskLSPLifecycle{cleanupErr: errors.New("stop failed")})
+
+	if err := svc.ResetTaskEnvironment(context.Background(), "task-1", ResetOptions{}); err == nil {
+		t.Fatal("reset succeeded despite task LSP cleanup failure")
+	}
+	if repo.deleted || len(destroyer.containerCalls) != 0 {
+		t.Fatalf("environment mutated after LSP cleanup failure: deleted=%v calls=%v", repo.deleted, destroyer.containerCalls)
+	}
+}
+
 func TestTeardownEnvironmentResources_CancellationStopsBeforeNextResource(t *testing.T) {
 	svc := newResetTestService(t, &stubEnvRepo{})
 	ctx, cancel := context.WithCancel(context.Background())

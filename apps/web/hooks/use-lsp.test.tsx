@@ -1,233 +1,194 @@
-import { act, renderHook, waitFor } from "@testing-library/react";
+import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { LspStatus } from "@/lib/lsp/lsp-client-manager";
+import type { TaskLspLanguageSnapshot } from "@/lib/types/http-lsp";
 
 const mocks = vi.hoisted(() => {
-  const disabledStatus = { state: "disabled" } as { state: string; reason?: string };
-  const emptyProgress = {
-    initializingSince: null as number | null,
-    active: [],
-    completed: null,
-    hasReportedProgress: false,
-  };
-  const enabledKeys = new Set<string>();
-  const changeListeners = new Set<(key: string) => void>();
-  const connect = vi.fn(() => vi.fn());
-  const state = { status: disabledStatus, progress: emptyProgress };
-  const userSettings: {
-    lspAutoStartLanguages: string[];
-    lspServerConfigs: Record<string, Record<string, unknown>>;
-  } = {
-    lspAutoStartLanguages: [],
-    lspServerConfigs: {},
-  };
-  const stop = vi.fn((sessionId: string, language: string) => {
-    state.status = disabledStatus;
-    for (const listener of changeListeners) listener(`${sessionId}:${language}`);
-  });
-
+  const listeners = new Set<(key: string) => void>();
   return {
-    clearEnabledState: vi.fn((sessionId: string, language: string) => {
-      const key = `kandev-lsp:${sessionId}:${language}`;
-      enabledKeys.delete(key);
-      for (const listener of changeListeners) listener(`${sessionId}:${language}`);
-    }),
-    connect,
-    disabledStatus,
-    emptyProgress,
-    enabledKeys,
-    getProgress: vi.fn(() => state.progress),
-    getStatus: vi.fn(() => state.status),
-    isEnabledInStorage: vi.fn((sessionId: string, language: string) =>
-      enabledKeys.has(`kandev-lsp:${sessionId}:${language}`),
-    ),
+    connect: vi.fn(() => vi.fn()),
+    getStatus: vi.fn<() => LspStatus>(() => ({ state: "disabled" })),
     onChange: vi.fn((listener: (key: string) => void) => {
-      changeListeners.add(listener);
-      return () => changeListeners.delete(listener);
+      listeners.add(listener);
+      return () => listeners.delete(listener);
     }),
-    saveEnabledState: vi.fn((sessionId: string, language: string) => {
-      const key = `kandev-lsp:${sessionId}:${language}`;
-      enabledKeys.add(key);
-      for (const listener of changeListeners) listener(`${sessionId}:${language}`);
-    }),
-    state,
-    changeListeners,
-    stop,
-    userSettings,
+    start: vi.fn().mockResolvedValue(undefined),
+    stop: vi.fn().mockResolvedValue(undefined),
+    restart: vi.fn().mockResolvedValue(undefined),
+    setPolicy: vi.fn().mockResolvedValue(undefined),
+    userConfigs: { typescript: { diagnostics: true } },
+    listeners,
   };
 });
 
-vi.mock("@/components/state-provider", () => ({
-  useAppStore: (selector: (state: { userSettings: Record<string, unknown> }) => unknown) =>
-    selector({ userSettings: mocks.userSettings }),
-}));
+const NOW = "2026-08-05T10:00:00Z";
+const TASK_ID = "task-1";
+const SESSION_ID = "session-1";
+const LANGUAGE = "typescript";
 
+function snapshot(
+  phase: TaskLspLanguageSnapshot["phase"],
+  overrides: Partial<TaskLspLanguageSnapshot> = {},
+): TaskLspLanguageSnapshot {
+  return {
+    task_id: TASK_ID,
+    language: LANGUAGE,
+    policy: "keep_warm",
+    detected: true,
+    detection_state: "complete",
+    detection_truncated: false,
+    phase,
+    generation: phase === "off" ? 0 : 2,
+    revision: 3,
+    last_transition_at: NOW,
+    last_action: "start",
+    last_initiator: "user",
+    restart_required: false,
+    created_at: NOW,
+    updated_at: NOW,
+    effective_policy: "keep_warm",
+    activity: "idle",
+    progress: [],
+    ...overrides,
+  };
+}
+
+let current = snapshot("off");
+const domain = {
+  get byLanguage() {
+    return { [LANGUAGE]: current };
+  },
+  start: mocks.start,
+  stop: mocks.stop,
+  restart: mocks.restart,
+  setPolicy: mocks.setPolicy,
+};
+
+vi.mock("@/components/state-provider", () => ({
+  useAppStore: (selector: (state: unknown) => unknown) =>
+    selector({
+      tasks: { activeTaskId: TASK_ID },
+      taskSessions: { items: { [SESSION_ID]: { task_id: TASK_ID } } },
+      userSettings: { lspServerConfigs: mocks.userConfigs },
+    }),
+}));
+vi.mock("@/hooks/domains/lsp/use-task-lsp", () => ({
+  useTaskLsp: () => domain,
+}));
 vi.mock("@/lib/lsp/lsp-client-manager", () => ({
   lspClientManager: {
-    clearEnabledState: mocks.clearEnabledState,
     connect: mocks.connect,
-    getProgress: mocks.getProgress,
     getStatus: mocks.getStatus,
-    isEnabledInStorage: mocks.isEnabledInStorage,
     onChange: mocks.onChange,
-    saveEnabledState: mocks.saveEnabledState,
-    stop: mocks.stop,
   },
-  toLspLanguage: (language: string) => (language === "typescript" ? language : null),
+  toLspLanguage: (language: string) => (language === LANGUAGE ? language : null),
 }));
 
 import { useLsp, useLspStatus } from "./use-lsp";
 
-const SESSION_ID = "session";
-const LANGUAGE = "typescript";
-
 beforeEach(() => {
+  current = snapshot("off");
   mocks.connect.mockClear();
-  mocks.clearEnabledState.mockClear();
-  mocks.isEnabledInStorage.mockClear();
-  mocks.getProgress.mockClear();
   mocks.getStatus.mockClear();
-  mocks.onChange.mockClear();
-  mocks.saveEnabledState.mockClear();
+  mocks.getStatus.mockReturnValue({ state: "disabled" });
+  mocks.start.mockClear();
   mocks.stop.mockClear();
-  mocks.enabledKeys.clear();
-  mocks.state.status = mocks.disabledStatus;
-  mocks.state.progress = mocks.emptyProgress;
-  mocks.userSettings.lspAutoStartLanguages = [];
-  mocks.userSettings.lspServerConfigs = {};
+  mocks.restart.mockClear();
+  mocks.listeners.clear();
 });
 
 afterEach(() => {
-  mocks.changeListeners.clear();
+  cleanup();
+  vi.useRealTimers();
 });
 
-describe("useLsp manual policy leases", () => {
-  it("lets a status-only subscriber control the mounted editor lease", async () => {
-    const editor = renderHook(() => useLsp(SESSION_ID, LANGUAGE));
-    const status = renderHook(() => useLspStatus(SESSION_ID, LANGUAGE));
-
-    act(() => status.result.current.toggle());
+describe("task-scoped useLsp", () => {
+  it("attaches a ready task/language with task and session identity separated", async () => {
+    current = snapshot("ready");
+    const view = renderHook(() => useLsp(SESSION_ID, LANGUAGE));
     await waitFor(() => expect(mocks.connect).toHaveBeenCalledOnce());
-
-    act(() => {
-      mocks.state.status = {
-        state: "error",
-        reason: "server crashed",
-      } as typeof mocks.disabledStatus;
-      for (const listener of mocks.changeListeners) listener(`${SESSION_ID}:${LANGUAGE}`);
-    });
-    act(() => status.result.current.toggle());
-    await waitFor(() => expect(mocks.connect).toHaveBeenCalledTimes(2));
-
-    act(() => {
-      mocks.state.status = { state: "ready" } as typeof mocks.disabledStatus;
-      for (const listener of mocks.changeListeners) listener(`${SESSION_ID}:${LANGUAGE}`);
-    });
-    act(() => status.result.current.toggle());
-    expect(mocks.stop).toHaveBeenCalledOnce();
-    expect(mocks.clearEnabledState).toHaveBeenCalledOnce();
-
-    status.unmount();
-    expect(mocks.connect).toHaveBeenCalledTimes(2);
-    editor.unmount();
+    expect(mocks.connect).toHaveBeenCalledWith(TASK_ID, SESSION_ID, LANGUAGE);
+    const release = mocks.connect.mock.results[0]?.value;
+    view.unmount();
+    expect(release).toHaveBeenCalledOnce();
   });
 
-  it("gives every mounted matching editor a lease when manually enabled", async () => {
-    const first = renderHook(() => useLsp(SESSION_ID, LANGUAGE));
-    const second = renderHook(() => useLsp(SESSION_ID, LANGUAGE));
-
-    act(() => first.result.current.toggle());
-
-    await waitFor(() => expect(mocks.connect).toHaveBeenCalledTimes(2));
-    const firstRelease = mocks.connect.mock.results[0]?.value as ReturnType<typeof vi.fn>;
-    const secondRelease = mocks.connect.mock.results[1]?.value as ReturnType<typeof vi.fn>;
-
-    first.unmount();
-    expect(firstRelease).toHaveBeenCalledOnce();
-    expect(secondRelease).not.toHaveBeenCalled();
-
-    second.unmount();
-    expect(secondRelease).toHaveBeenCalledOnce();
-  });
-
-  it("restores a saved policy only through mounted editor leases", async () => {
-    mocks.saveEnabledState(SESSION_ID, LANGUAGE);
+  it("does not attach for an unsupported active file", () => {
+    current = snapshot("ready");
+    const view = renderHook(() => useLsp(SESSION_ID, "plaintext"));
+    expect(view.result.current.lspLanguage).toBeNull();
     expect(mocks.connect).not.toHaveBeenCalled();
-
-    const first = renderHook(() => useLsp(SESSION_ID, LANGUAGE));
-    const second = renderHook(() => useLsp(SESSION_ID, LANGUAGE));
-
-    await waitFor(() => expect(mocks.connect).toHaveBeenCalledTimes(2));
-    const firstRelease = mocks.connect.mock.results[0]?.value as ReturnType<typeof vi.fn>;
-    const secondRelease = mocks.connect.mock.results[1]?.value as ReturnType<typeof vi.fn>;
-
-    first.unmount();
-    expect(firstRelease).toHaveBeenCalledOnce();
-    expect(secondRelease).not.toHaveBeenCalled();
-
-    second.unmount();
-    expect(secondRelease).toHaveBeenCalledOnce();
   });
 
-  it("retries a failed manually enabled connection in the mounted editor", async () => {
-    const hook = renderHook(() => useLsp(SESSION_ID, LANGUAGE));
+  it("starts and stops through the task controller instead of local persistence", () => {
+    const view = renderHook(() => useLspStatus(SESSION_ID, LANGUAGE));
+    act(() => view.result.current.toggle());
+    expect(mocks.start).toHaveBeenCalledWith(LANGUAGE);
 
-    act(() => hook.result.current.toggle());
-    await waitFor(() => expect(mocks.connect).toHaveBeenCalledOnce());
-
-    act(() => {
-      mocks.state.status = {
-        state: "error",
-        reason: "server crashed",
-      } as typeof mocks.disabledStatus;
-      for (const listener of mocks.changeListeners) listener(`${SESSION_ID}:${LANGUAGE}`);
-    });
-    act(() => hook.result.current.toggle());
-
-    await waitFor(() => expect(mocks.connect).toHaveBeenCalledTimes(2));
+    current = snapshot("ready");
+    view.rerender();
+    act(() => view.result.current.toggle());
+    expect(mocks.stop).toHaveBeenCalledWith(LANGUAGE);
   });
-});
 
-describe("useLsp auto-start policy", () => {
-  it("keeps an auto-started server stopped until the user starts it again", async () => {
-    const autoStartSession = "auto-start-session";
-    mocks.userSettings.lspAutoStartLanguages = [LANGUAGE];
-    const hook = renderHook(() => useLsp(autoStartSession, LANGUAGE));
-
-    await waitFor(() => expect(mocks.connect).toHaveBeenCalledOnce());
-    act(() => {
-      mocks.state.status = { state: "ready" } as typeof mocks.disabledStatus;
-      for (const listener of mocks.changeListeners) listener(`${autoStartSession}:${LANGUAGE}`);
+  it("derives honest initialization and server work from task snapshots", () => {
+    current = snapshot("initializing", {
+      initialize_started_at: "2026-08-05T09:59:00Z",
+      activity: "server_work",
+      progress: [
+        {
+          token: "gradle",
+          title: "Importing Kotlin project",
+          message: "Resolving modules",
+          percentage: 35,
+          started_at: "2026-08-05T09:58:00Z",
+        },
+      ],
     });
-    act(() => hook.result.current.toggle());
-
-    mocks.userSettings.lspServerConfigs = { [LANGUAGE]: { diagnostics: false } };
-    hook.rerender();
-    await waitFor(() => {
-      expect(mocks.connect).toHaveBeenCalledOnce();
-    });
-
-    act(() => hook.result.current.toggle());
-    await waitFor(() => expect(mocks.connect).toHaveBeenCalledTimes(2));
-  });
-});
-
-describe("useLsp progress subscription", () => {
-  it("subscribes to the current connection progress snapshot", () => {
-    const hook = renderHook(() => useLsp(SESSION_ID, LANGUAGE));
-    const progress = {
-      initializingSince: 100,
-      active: [],
+    const view = renderHook(() => useLspStatus(SESSION_ID, LANGUAGE));
+    expect(view.result.current.status).toEqual({ state: "starting" });
+    expect(view.result.current.progress).toEqual({
+      initializingSince: Date.parse("2026-08-05T09:59:00Z"),
+      active: [
+        {
+          token: "gradle",
+          title: "Importing Kotlin project",
+          message: "Resolving modules",
+          percentage: 35,
+          startedAt: Date.parse("2026-08-05T09:58:00Z"),
+        },
+      ],
       completed: null,
-      hasReportedProgress: false,
-    };
-
-    act(() => {
-      mocks.state.progress = progress;
-      for (const listener of mocks.changeListeners) listener(`${SESSION_ID}:${LANGUAGE}`);
+      hasReportedProgress: true,
     });
+  });
 
-    expect((hook.result.current as unknown as { progress?: typeof progress }).progress).toBe(
-      progress,
-    );
+  it("keeps lifecycle status visible without an attachment", () => {
+    current = snapshot("error", { error_message: "Gradle import failed" });
+    const view = renderHook(() => useLspStatus(SESSION_ID, LANGUAGE));
+    expect(view.result.current.status).toEqual({ state: "error", reason: "Gradle import failed" });
+  });
+
+  it("reattaches after a transient browser connection loss without restarting the task server", () => {
+    vi.useFakeTimers();
+    current = snapshot("ready");
+    const firstRelease = vi.fn();
+    const secondRelease = vi.fn();
+    mocks.connect.mockReturnValueOnce(firstRelease).mockReturnValueOnce(secondRelease);
+    const view = renderHook(() => useLsp(SESSION_ID, LANGUAGE));
+    expect(mocks.connect).toHaveBeenCalledOnce();
+
+    mocks.getStatus.mockReturnValue({ state: "error", reason: "connection dropped" });
+    act(() => mocks.listeners.forEach((listener) => listener(`${TASK_ID}:${LANGUAGE}`)));
+    act(() => vi.advanceTimersByTime(999));
+    expect(mocks.connect).toHaveBeenCalledOnce();
+    act(() => vi.advanceTimersByTime(1));
+    expect(mocks.connect).toHaveBeenCalledTimes(2);
+    expect(firstRelease).toHaveBeenCalledOnce();
+    expect(mocks.start).not.toHaveBeenCalled();
+    expect(mocks.restart).not.toHaveBeenCalled();
+
+    view.unmount();
+    expect(secondRelease).toHaveBeenCalledOnce();
   });
 });

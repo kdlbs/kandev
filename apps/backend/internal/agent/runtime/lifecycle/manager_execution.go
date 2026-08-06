@@ -176,6 +176,124 @@ func (m *Manager) GetOrEnsureExecutionForEnvironment(ctx context.Context, taskEn
 	return value.(*AgentExecution), nil
 }
 
+// GetExecutionForEnvironment returns an already-running task-host execution
+// without creating or resuming resources. Authorization deliberately runs
+// before the in-memory cache lookup.
+func (m *Manager) GetExecutionForEnvironment(
+	ctx context.Context,
+	taskEnvironmentID string,
+) (*AgentExecution, bool, error) {
+	if taskEnvironmentID == "" {
+		return nil, false, fmt.Errorf("task_environment_id is required")
+	}
+	if check := m.environmentAccessCheck; check != nil {
+		if err := check(ctx, taskEnvironmentID); err != nil {
+			return nil, false, err
+		}
+	}
+	execution, exists := m.executionStore.GetByTaskEnvironmentID(taskEnvironmentID)
+	return execution, exists, nil
+}
+
+// GetOrEnsureTaskHostForEnvironment returns the one internal task-host
+// execution owned by a task environment. Session executions are deliberately
+// ignored: they may stop independently while task services remain warm.
+func (m *Manager) GetOrEnsureTaskHostForEnvironment(
+	ctx context.Context,
+	taskEnvironmentID string,
+) (*AgentExecution, error) {
+	if taskEnvironmentID == "" {
+		return nil, fmt.Errorf("task_environment_id is required")
+	}
+	if check := m.environmentAccessCheck; check != nil {
+		if err := check(ctx, taskEnvironmentID); err != nil {
+			return nil, err
+		}
+	}
+	if execution, exists := m.executionStore.GetTaskHostByEnvironmentID(taskEnvironmentID); exists {
+		return execution, nil
+	}
+
+	value, err := m.doCoalescedExecution(ctx, taskHostRuntimeSessionPrefix+taskEnvironmentID,
+		func(sharedCtx context.Context) (interface{}, error) {
+			if execution, exists := m.executionStore.GetTaskHostByEnvironmentID(taskEnvironmentID); exists {
+				return execution, nil
+			}
+			if m.workspaceInfoProvider == nil {
+				return nil, fmt.Errorf("workspace info provider not configured")
+			}
+			info, err := m.workspaceInfoProvider.GetWorkspaceInfoForEnvironment(sharedCtx, taskEnvironmentID)
+			if err != nil {
+				return nil, fmt.Errorf("failed to get workspace info for environment %s: %w", taskEnvironmentID, err)
+			}
+			if info == nil {
+				return nil, fmt.Errorf("task environment %s not found", taskEnvironmentID)
+			}
+			if info.TaskEnvironmentID != taskEnvironmentID {
+				return nil, fmt.Errorf("workspace info resolved environment %s, want %s", info.TaskEnvironmentID, taskEnvironmentID)
+			}
+			if info.TaskID == "" {
+				return nil, fmt.Errorf("task environment %s has no task_id", taskEnvironmentID)
+			}
+			if info.WorkspacePath == "" {
+				return nil, fmt.Errorf("%w: task environment %s has no workspace path yet", ErrSessionWorkspaceNotReady, taskEnvironmentID)
+			}
+			if err := m.ensureTaskHostTaskActive(sharedCtx, info.TaskID); err != nil {
+				return nil, err
+			}
+			return m.createTaskHostExecution(sharedCtx, info.TaskID, info)
+		})
+	if err != nil {
+		return nil, err
+	}
+	return value.(*AgentExecution), nil
+}
+
+// GetTaskHostForEnvironment returns only the dedicated task-host execution.
+// Authorization runs before the cache lookup.
+func (m *Manager) GetTaskHostForEnvironment(
+	ctx context.Context,
+	taskEnvironmentID string,
+) (*AgentExecution, bool, error) {
+	if taskEnvironmentID == "" {
+		return nil, false, fmt.Errorf("task_environment_id is required")
+	}
+	if check := m.environmentAccessCheck; check != nil {
+		if err := check(ctx, taskEnvironmentID); err != nil {
+			return nil, false, err
+		}
+	}
+	execution, exists := m.executionStore.GetTaskHostByEnvironmentID(taskEnvironmentID)
+	return execution, exists, nil
+}
+
+// StopTaskHostForEnvironment reaps the task-owned agentctl process tree without
+// touching any session execution sharing the same task environment.
+func (m *Manager) StopTaskHostForEnvironment(
+	ctx context.Context,
+	taskEnvironmentID, reason string,
+) error {
+	execution, exists, err := m.GetTaskHostForEnvironment(ctx, taskEnvironmentID)
+	if err != nil || !exists {
+		return err
+	}
+	return m.StopAgentWithReason(ctx, execution.ID, reason, false)
+}
+
+func (m *Manager) ensureTaskHostTaskActive(ctx context.Context, taskID string) error {
+	if m.executorProfileReader == nil {
+		return nil
+	}
+	cleanupActive, err := m.executorProfileReader.HasActiveTaskResourceCleanupJob(ctx, taskID)
+	if err != nil {
+		return fmt.Errorf("verify task-host cleanup admission: %w", err)
+	}
+	if cleanupActive {
+		return fmt.Errorf("verify task-host cleanup admission: %w for task %q", errTaskCleanupActive, taskID)
+	}
+	return nil
+}
+
 // EnsureWorkspaceExecutionForSession ensures an agentctl execution exists for a specific task session.
 // This is used when the frontend provides a session ID (e.g., from URL path /task/[id]/[sessionId]).
 // If an execution already exists for the session, it returns it. Otherwise, it creates a new execution

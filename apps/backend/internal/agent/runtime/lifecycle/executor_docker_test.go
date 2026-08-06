@@ -762,8 +762,10 @@ func TestBuildReconnectCreateInstanceRequestOmitsAutoApproveOverrideWhenUnset(t 
 }
 
 type recordingReconnectControl struct {
-	methods []string
-	created *agentctl.CreateInstanceRequest
+	methods   []string
+	created   *agentctl.CreateInstanceRequest
+	deleted   string
+	deleteErr error
 }
 
 func (c *recordingReconnectControl) GetInstance(
@@ -774,9 +776,10 @@ func (c *recordingReconnectControl) GetInstance(
 	return &agentctl.InstanceInfo{ID: "instance-1", Port: 41001}, nil
 }
 
-func (c *recordingReconnectControl) DeleteInstance(_ context.Context, _ string) error {
+func (c *recordingReconnectControl) DeleteInstance(_ context.Context, instanceID string) error {
 	c.methods = append(c.methods, "DELETE")
-	return nil
+	c.deleted = instanceID
+	return c.deleteErr
 }
 
 func (c *recordingReconnectControl) CreateInstance(
@@ -786,6 +789,23 @@ func (c *recordingReconnectControl) CreateInstance(
 	c.methods = append(c.methods, "POST")
 	c.created = req
 	return &agentctl.CreateInstanceResponse{ID: "instance-1", Port: 41002}, nil
+}
+
+func TestDeleteDockerTaskHostInstanceDeletesDedicatedAgentctlInstance(t *testing.T) {
+	control := &recordingReconnectControl{}
+
+	err := deleteDockerTaskHostInstance(context.Background(), control, "task-host-1")
+	if err != nil {
+		t.Fatalf("deleteDockerTaskHostInstance: %v", err)
+	}
+	if control.deleted != "task-host-1" {
+		t.Fatalf("deleted instance = %q, want task-host-1", control.deleted)
+	}
+
+	control.deleteErr = agentctl.ErrInstanceNotFound
+	if err := deleteDockerTaskHostInstance(context.Background(), control, "task-host-1"); err != nil {
+		t.Fatalf("idempotent delete returned: %v", err)
+	}
 }
 
 func TestDockerManagedBrokerReconnectRecreatesInstanceWithFreshLease(t *testing.T) {

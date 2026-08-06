@@ -1,7 +1,7 @@
 ---
 id: "06-task-controller"
 title: "Authorized task controller"
-status: pending
+status: completed
 wave: 3
 depends_on: ["02-state-contracts", "04-attachment-hub", "05-language-discovery"]
 plan: "plan.md"
@@ -84,4 +84,26 @@ proof, concurrency/race results, removed session contracts, and exact files. Upd
 
 ## Results
 
-Pending.
+Completed 2026-08-05.
+
+- Added `internal/lsp.Controller` as the authorized task/language seam for aggregate snapshots,
+  effective policy, policy mutation, Start/Stop/Restart, capacity, and attachment resolution.
+  Every human operation calls `AuthorizeTaskAccess` before language validation, persistence,
+  settings, environment, capacity, execution, or task-host access; synchronized fakes cover every
+  exported operation and prove hidden tasks stop at authorization.
+- Added a fail-closed executor resolver and a process-capacity controller keyed by
+  `(task_id, language)`. It parses `KANDEV_LSP_MAX_SERVERS`, uses the legacy connections variable
+  only when the new variable is absent, queues by accepted time/task/language, and never counts or
+  releases browser attachments. Unsupported and queued starts do not ensure task resources.
+- Added per-key FIFO command serialization with duplicate in-flight coalescing and detached
+  accepted work. Explicit Start is idempotent while already desired/live; Stop persists Disabled;
+  Restart preserves policy and allocates exactly one monotonic replacement generation.
+- Added task-scoped REST routes and strict bodies, backend-to-task-host control/snapshot/attach
+  client methods, a lifecycle runtime adapter, and the non-owning
+  `/lsp/tasks/:taskId/:language/attach` proxy. Removed `/lsp/:sessionId`, the browser connection
+  limiter, browser-derived installation choice, and the legacy task-host browser-owned stream.
+- Focused verification passed:
+  - `go test ./internal/lsp/... ./internal/gateway/websocket ./internal/agent/runtime/agentctl ./internal/backendapp -run 'Test(LSP|Lsp)'`
+  - `go test -race ./internal/lsp/... ./internal/gateway/websocket -run 'Test(LSP|Lsp)'`
+  - `go test ./internal/lsp/... -run 'Test(Concurrent|Capacity|Authorization|Policy)' -count=20`
+  - `go test ./internal/lsp/... ./internal/agentctl/server/... ./internal/agent/runtime/agentctl ./internal/agent/runtime/lifecycle ./internal/gateway/websocket ./internal/backendapp`

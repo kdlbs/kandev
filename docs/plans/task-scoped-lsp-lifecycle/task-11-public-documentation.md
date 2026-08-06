@@ -1,7 +1,7 @@
 ---
 id: "11-public-documentation"
 title: "Public LSP documentation"
-status: pending
+status: completed
 wave: 5
 depends_on: ["10-e2e-conformance"]
 plan: "plan.md"
@@ -76,4 +76,20 @@ results, final spec/plan status, and `git diff --check`. Update task/plan status
 
 ## Results
 
-Pending.
+Completed 2026-08-05.
+
+- Updated Developer Tools as the task-scoped LSP how-to: policy, Start/Stop/Restart, aggregate and
+  fallback surfaces, phone/tablet composition, bounded discovery, reconnect/recovery, task cleanup,
+  executor support, capacity, progress honesty, and binary trust boundaries.
+- Updated Configuration and Feature Status as references for `KANDEV_LSP_MAX_SERVERS`, its
+  deprecated fallback, and the shipped task/language ownership model. Updated the WebSocket route
+  reference and public coverage evidence.
+- Updated backend and agentctl scoped AGENTS guidance for the dedicated task-host execution and
+  instance-owned language manager. No web AGENTS change was needed; its store/UI conventions
+  remain accurate.
+- Stale-claim search leaves only intentional matches: the deprecated configuration entry, two
+  behavioral spec assertions, and the ADR's historical context.
+- `node --test scripts/validate-public-docs.test.mjs` passed 58/58 tests;
+  `node scripts/validate-public-docs.mjs` validated 41 pages; `git diff --check` passed.
+- Reconciled the feature spec and specs index to `shipped`; synchronized all task checkboxes,
+  results, and the parent verification ledger.

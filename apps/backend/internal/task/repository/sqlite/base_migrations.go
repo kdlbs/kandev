@@ -338,6 +338,8 @@ func (r *Repository) runMigrations() error {
 		CREATE INDEX IF NOT EXISTS idx_task_status_summaries_workspace
 			ON task_status_summaries(workspace_id)`)
 
+	r.migrate.Apply("task_lsp_languages.table", taskLSPSchemaDDL)
+
 	if err := r.clearRecoveredAgentErrors(); err != nil {
 		return err
 	}

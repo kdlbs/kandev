@@ -7,8 +7,6 @@ import {
   createKotlinTask,
   installFakeKotlinLsp,
   LONG_LSP_PROGRESS_MESSAGE,
-  openLspStatus,
-  performLspAction,
   readFakeLspEvents,
   releaseFakeLspInitialization,
 } from "./lsp-e2e-helpers";
@@ -17,7 +15,7 @@ import { dwell } from "../../helpers/causal-waits";
 test.describe("Mobile LSP boundaries", () => {
   test.describe.configure({ timeout: 90_000 });
 
-  test("opens Kotlin in the mobile viewer without starting a language server", async ({
+  test("keeps task LSP controls available without letting the mobile viewer start a server", async ({
     testPage,
     apiClient,
     seedData,
@@ -33,7 +31,7 @@ test.describe("Mobile LSP boundaries", () => {
     try {
       installFakeKotlinLsp(backend);
       await apiClient.rawRequest("PATCH", "/api/v1/user/settings", {
-        lsp_auto_start_languages: ["kotlin"],
+        lsp_auto_start_languages: [],
         lsp_status_location: "status_bar",
       });
 
@@ -56,7 +54,27 @@ test.describe("Mobile LSP boundaries", () => {
       await expect(viewer).toBeVisible();
       await expect(viewer.locator(".cm-editor")).toBeVisible();
       await expect(viewer.getByTestId("lsp-status-button")).toHaveCount(0);
-      await expect(testPage.getByTestId("app-status-lsp")).toHaveCount(0);
+
+      const statusTrigger = testPage.getByRole("button", { name: "Status", exact: true });
+      await expect(statusTrigger).toBeVisible();
+      const triggerBox = await statusTrigger.boundingBox();
+      expect(triggerBox?.height).toBeGreaterThanOrEqual(44);
+      await statusTrigger.tap();
+
+      const drawer = testPage.getByTestId("app-status-drawer");
+      await expect(drawer).toBeVisible();
+      const kotlin = drawer.getByTestId("task-lsp-language-kotlin");
+      await expect(kotlin).toBeVisible();
+      await expect(kotlin).toHaveAttribute("data-lsp-policy", "inherit");
+      const start = kotlin.locator('[data-testid="lsp-lifecycle-action"][data-lsp-action="start"]');
+      await expect(start).toBeVisible();
+      const startBox = await start.boundingBox();
+      expect(startBox?.height).toBeGreaterThanOrEqual(44);
+      await expect(testPage.getByTestId("lsp-status-drawer")).toHaveCount(0);
+      await expect(testPage.getByTestId("app-status-drawer-scroll-region")).toHaveCount(1);
+      await assertNoElementHorizontalOverflow(drawer, "phone task LSP status drawer");
+      await assertNoDocumentHorizontalOverflow(testPage, "phone task LSP status drawer");
+
       await dwell(
         testPage,
         1_000,
@@ -99,6 +117,10 @@ test.describe("Mobile LSP boundaries", () => {
       const task = await createKotlinTask(testPage, apiClient, seedData, backend, {
         title: "Tablet Kotlin LSP Progress",
       });
+      const environment = await apiClient.getTaskEnvironment(task.taskId);
+      expect(["local", "worktree", "local_pc", "local_docker"]).toContain(
+        environment?.executor_type,
+      );
       await expect(testPage.getByTestId("tablet-task-layout")).toBeVisible();
       const fileNode = testPage.locator(
         `[data-testid="file-tree-node"][data-path="${task.filePaths[0]}"]`,
@@ -107,22 +129,31 @@ test.describe("Mobile LSP boundaries", () => {
       await fileNode.tap();
       await expect(testPage.locator(".monaco-editor:visible")).toBeVisible({ timeout: 15_000 });
 
-      const statusButton = testPage.getByTestId("lsp-status-button");
+      const statusButton = testPage.getByTestId("task-lsp-control");
       await expect(statusButton).toBeVisible();
       await expect(testPage.getByTestId("app-status-lsp")).toHaveCount(0);
       expect((await apiClient.getUserSettings()).settings.lsp_status_location).toBe("status_bar");
       const triggerBox = await statusButton.boundingBox();
       expect(triggerBox?.width).toBeGreaterThanOrEqual(44);
       expect(triggerBox?.height).toBeGreaterThanOrEqual(44);
-      await performLspAction(testPage, "start");
+      await statusButton.tap();
 
-      const drawer = await openLspStatus(testPage);
-      await expect(drawer).toHaveAttribute("data-testid", "lsp-status-drawer");
+      const drawer = testPage.getByTestId("app-status-drawer");
+      await expect(drawer).toBeVisible();
+      const kotlin = drawer.getByTestId("task-lsp-language-kotlin");
+      await expect(kotlin).toHaveAttribute("data-lsp-policy", "inherit");
+      await kotlin.locator('[data-testid="lsp-lifecycle-action"][data-lsp-action="start"]').tap();
+      await expect(kotlin).toHaveAttribute("data-lsp-generation", "1", { timeout: 15_000 });
+      await expect
+        .poll(() =>
+          readFakeLspEvents(backend).some(
+            (event) => event.event === "initialize progress reported",
+          ),
+        )
+        .toBe(true);
+      await expect(testPage.getByTestId("lsp-status-drawer")).toHaveCount(0);
       await expect(testPage.getByTestId("lsp-status-popover")).toHaveCount(0);
-      const projectProgress = drawer.getByTestId("lsp-project-progress");
-      await expect(projectProgress).toHaveAttribute("data-lsp-progress-kind", "active", {
-        timeout: 15_000,
-      });
+      const projectProgress = kotlin.getByTestId("task-lsp-progress");
       await expect(projectProgress).toContainText("Importing Kotlin project");
       const progressMessage = projectProgress.getByText(LONG_LSP_PROGRESS_MESSAGE, {
         exact: true,
@@ -136,7 +167,9 @@ test.describe("Mobile LSP boundaries", () => {
       expect(drawerBox!.y).toBeGreaterThanOrEqual(0);
       expect(drawerBox!.x + drawerBox!.width).toBeLessThanOrEqual(820);
       expect(drawerBox!.y + drawerBox!.height).toBeLessThanOrEqual(900);
-      const actionBox = await drawer.getByTestId("lsp-lifecycle-action").boundingBox();
+      const actionBox = await kotlin
+        .locator('[data-testid="lsp-lifecycle-action"][data-lsp-action="stop"]')
+        .boundingBox();
       expect(actionBox?.height).toBeGreaterThanOrEqual(44);
       const verticalScrollOwner = drawer.locator("[data-vaul-no-drag]");
       await expect(verticalScrollOwner).toHaveCount(1);
@@ -146,11 +179,9 @@ test.describe("Mobile LSP boundaries", () => {
       await assertNoDocumentHorizontalOverflow(testPage, "tablet LSP progress drawer");
 
       releaseFakeLspInitialization(backend);
-      await expect(projectProgress).toHaveAttribute("data-lsp-progress-kind", "completed", {
-        timeout: 15_000,
-      });
-      await expect(projectProgress).toContainText("Tablet project model loaded");
-      await performLspAction(testPage, "stop");
+      await expect(kotlin).toHaveAttribute("data-lsp-state", "ready", { timeout: 15_000 });
+      await expect(kotlin).toContainText("Tablet project model loaded");
+      await kotlin.locator('[data-testid="lsp-lifecycle-action"][data-lsp-action="stop"]').tap();
     } finally {
       await apiClient.rawRequest("PATCH", "/api/v1/user/settings", {
         lsp_status_location: initialLocation,
@@ -158,7 +189,7 @@ test.describe("Mobile LSP boundaries", () => {
     }
   });
 
-  test("persists Kotlin settings with usable mobile guidance", async ({ testPage, apiClient }) => {
+  test("persists Kotlin defaults with usable mobile guidance", async ({ testPage, apiClient }) => {
     const initial = await apiClient.getUserSettings();
     const initialAutoStart = Array.isArray(initial.settings.lsp_auto_start_languages)
       ? (initial.settings.lsp_auto_start_languages as string[])
@@ -182,8 +213,7 @@ test.describe("Mobile LSP boundaries", () => {
       await expect(
         testPage.getByText("the mobile file viewer does not start them", { exact: false }),
       ).toBeVisible();
-      await expect(testPage.getByRole("radio", { name: /Application status bar/ })).toBeVisible();
-      await expect(testPage.getByText(/touch-oriented layout is active/)).toBeVisible();
+      await expect(testPage.getByRole("radio", { name: /Application status bar/ })).toHaveCount(0);
 
       const autoStart = kotlinCard.getByTestId("lsp-auto-start-kotlin");
       await expect(autoStart).not.toBeChecked();

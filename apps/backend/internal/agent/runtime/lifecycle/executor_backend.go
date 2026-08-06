@@ -342,6 +342,7 @@ type ExecutorCreateRequest struct {
 	TaskTitle            string
 	SessionID            string
 	TaskEnvironmentID    string // Env this execution belongs to (shared across sessions in same task)
+	IsTaskHost           bool   // Internal task-environment service host; never session-owned
 	AgentProfileID       string
 	OfficeAgentProfileID string
 	WorkspacePath        string
@@ -444,6 +445,7 @@ func (ri *ExecutorInstance) ToAgentExecution(req *ExecutorCreateRequest) *AgentE
 		TaskID:               req.TaskID,
 		SessionID:            req.SessionID,
 		TaskEnvironmentID:    req.TaskEnvironmentID,
+		IsTaskHost:           req.IsTaskHost,
 		AgentProfileID:       req.AgentProfileID,
 		OfficeAgentProfileID: req.OfficeAgentProfileID,
 		AgentID:              agentID,

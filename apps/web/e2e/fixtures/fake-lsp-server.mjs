@@ -8,6 +8,7 @@ const logPath = process.env.KANDEV_LSP_E2E_LOG ?? path.join(os.homedir(), "lsp-e
 const crashOnOpenPath = path.join(os.homedir(), "lsp-e2e-crash-on-open");
 const initializeModePath = path.join(os.homedir(), "lsp-e2e-initialize-mode.json");
 const initializeReleasePath = path.join(os.homedir(), "lsp-e2e-initialize-release");
+const controllerGeneration = process.env.KANDEV_LSP_GENERATION ?? null;
 let input = Buffer.alloc(0);
 let nextServerRequestId = 10_000;
 const openDocumentUris = new Set();
@@ -16,7 +17,13 @@ const definitionTargetFile = "nested/references/Definition Target # query? 100%.
 function log(event, details = {}) {
   fs.appendFileSync(
     logPath,
-    `${JSON.stringify({ event, pid: process.pid, timestamp: Date.now(), ...details })}\n`,
+    `${JSON.stringify({
+      event,
+      pid: process.pid,
+      timestamp: Date.now(),
+      controllerGeneration,
+      ...details,
+    })}\n`,
   );
 }
 
@@ -128,6 +135,7 @@ function sendInitializeProgress(message, progress) {
 }
 
 function handleInitialize(message) {
+  log("initialize", { id: message.id, rootUri: message.params?.rootUri ?? null });
   if (!fs.existsSync(initializeModePath)) {
     send(initializeResult(message.id));
     return;
@@ -256,6 +264,7 @@ function handleDidClose(message) {
 function handleNotification(message) {
   switch (message.method) {
     case "initialized": {
+      log("project import", { openDocumentCount: openDocumentUris.size });
       const id = nextServerRequestId++;
       log("workspace/configuration requested", { id });
       send({
@@ -334,4 +343,9 @@ process.on("uncaughtException", (error) => {
   process.exit(1);
 });
 
-log("started", { argv: process.argv.slice(2), cwd: process.cwd(), home: os.homedir() });
+log("started", {
+  argv: process.argv.slice(2),
+  cwd: process.cwd(),
+  home: os.homedir(),
+  generation: controllerGeneration,
+});

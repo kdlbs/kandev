@@ -18,6 +18,10 @@ type processManager interface {
 	StopForTeardown(context.Context) error
 }
 
+type backgroundWorkReporter interface {
+	HasBackgroundWork() bool
+}
+
 // Instance represents a single agent instance running as a subprocess.
 // Each instance has its own process manager, HTTP server, and configuration.
 type Instance struct {
@@ -87,6 +91,9 @@ func (i *Instance) LastActivity() time.Time {
 // stream) is never considered idle.
 func (i *Instance) IsIdle(now time.Time, timeout time.Duration) bool {
 	if i.inflightRequests.Load() > 0 {
+		return false
+	}
+	if reporter, ok := i.manager.(backgroundWorkReporter); ok && reporter.HasBackgroundWork() {
 		return false
 	}
 	last := i.LastActivity()

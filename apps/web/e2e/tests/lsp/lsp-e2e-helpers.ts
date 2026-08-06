@@ -38,6 +38,8 @@ export type FakeLspEvent = {
   event: string;
   pid: number;
   timestamp: number;
+  controllerGeneration?: string | null;
+  generation?: string | null;
   id?: number;
   method?: string;
   params?: Record<string, unknown>;
@@ -169,7 +171,7 @@ export function expectedMonacoModelUri(documentUri: string, sessionId: string): 
 }
 
 export type LspDidOpenFrame = {
-  sessionId: string;
+  taskId: string;
   uri: string;
   text: string;
 };
@@ -178,9 +180,9 @@ export type LspDidOpenFrame = {
 export function attachLspDidOpenCapture(page: Page): LspDidOpenFrame[] {
   const frames: LspDidOpenFrame[] = [];
   page.on("websocket", (socket) => {
-    const sessionMatch = /\/lsp\/([^?]+)/.exec(socket.url());
-    if (!sessionMatch) return;
-    const sessionId = decodeURIComponent(sessionMatch[1]);
+    const taskMatch = /\/lsp\/tasks\/([^/]+)\//.exec(socket.url());
+    if (!taskMatch) return;
+    const taskId = decodeURIComponent(taskMatch[1]);
     socket.on("framesent", (event) => {
       if (typeof event.payload !== "string" || !event.payload.includes("textDocument/didOpen")) {
         return;
@@ -192,7 +194,7 @@ export function attachLspDidOpenCapture(page: Page): LspDidOpenFrame[] {
         };
         const document = message.params?.textDocument;
         if (message.method === "textDocument/didOpen" && document?.uri && document.text) {
-          frames.push({ sessionId, uri: document.uri, text: document.text });
+          frames.push({ taskId, uri: document.uri, text: document.text });
         }
       } catch {
         // Ignore non-JSON frames and unrelated bridge traffic.
@@ -298,32 +300,108 @@ export async function openDesktopFile(
 }
 
 export async function openLspStatus(page: Page): Promise<Locator> {
-  const trigger = page
-    .locator('[data-testid="lsp-status-button"]:visible, [data-testid="app-status-lsp"]:visible')
-    .first();
-  if ((await trigger.getAttribute("aria-expanded")) !== "true") {
-    await trigger.click();
-  }
-  await expect(trigger).toHaveAttribute("aria-expanded", "true");
-
-  const surface = page.locator(
-    '[data-testid="lsp-status-popover"]:visible, [data-testid="lsp-status-drawer"]:visible',
-  );
-  await expect(surface).toBeVisible();
-  return surface;
+  const language = await currentTaskLspLanguage(page);
+  const disclosure = await openTaskLspControl(page);
+  const row = disclosure.getByTestId(`task-lsp-language-${language}`);
+  await expect(row).toBeVisible();
+  return row;
 }
 
 export async function performLspAction(
   page: Page,
   action: "start" | "stop" | "retry",
 ): Promise<void> {
-  const surface = await openLspStatus(page);
-  const actionButton = surface.locator(
+  await performTaskLspAction(
+    page,
+    await currentTaskLspLanguage(page),
+    action === "retry" ? "restart" : action,
+  );
+}
+
+async function currentTaskLspLanguage(page: Page): Promise<string> {
+  const shortcut = page.locator('[data-testid="lsp-status-button"][data-lsp-language]:visible');
+  if ((await shortcut.count()) === 0) return "kotlin";
+  return (await shortcut.first().getAttribute("data-lsp-language")) || "kotlin";
+}
+
+export async function openTaskLspControl(page: Page): Promise<Locator> {
+  const trigger = await firstInViewport(
+    page,
+    '[data-testid="app-status-lsp"], [data-testid="task-lsp-control"]',
+  );
+  await expect(trigger).toBeVisible();
+  if ((await trigger.getAttribute("aria-expanded")) !== "true") {
+    await trigger.click();
+  }
+  await expect(trigger).toHaveAttribute("aria-expanded", "true");
+
+  const popover = page.getByTestId("task-lsp-surface");
+  await expect(popover).toBeVisible();
+  const surface = popover.getByTestId("task-lsp-disclosure");
+  await expect(surface).toBeVisible();
+  return surface;
+}
+
+export async function performTaskLspAction(
+  page: Page,
+  language: string,
+  action: "start" | "stop" | "restart",
+): Promise<void> {
+  const surface = await openTaskLspControl(page);
+  const row = surface.getByTestId(`task-lsp-language-${language}`);
+  const actionButton = row.locator(
     `[data-testid="lsp-lifecycle-action"][data-lsp-action="${action}"]`,
   );
   await expect(actionButton).toBeVisible();
   await expect(actionButton).toBeEnabled();
-  await actionButton.click();
+  await actionButton.scrollIntoViewIfNeeded();
+  await actionButton.click({ timeout: 10_000 });
+
+  if (action === "restart") {
+    const confirmation = page.getByRole("alertdialog", { name: "Restart Kotlin language server" });
+    await expect(confirmation).toContainText("stops the current Kotlin process");
+    await confirmation.getByRole("button", { name: "Restart" }).click();
+    await expect(confirmation).toBeHidden();
+  }
+
+  await page.keyboard.press("Escape");
+  const popover = page.getByTestId("task-lsp-surface");
+  try {
+    await popover.waitFor({ state: "hidden", timeout: 1_000 });
+  } catch {
+    const trigger = await firstInViewport(
+      page,
+      [
+        '[data-testid="app-status-lsp"][aria-expanded="true"]',
+        '[data-testid="task-lsp-control"][aria-expanded="true"]',
+      ].join(", "),
+    );
+    await trigger.click();
+  }
+  await expect(popover).toBeHidden();
+}
+
+async function firstInViewport(page: Page, selector: string): Promise<Locator> {
+  const candidates = page.locator(selector);
+  const viewport = page.viewportSize();
+  if (!viewport) throw new Error("Playwright viewport is unavailable");
+  await expect.poll(() => candidates.count()).toBeGreaterThan(0);
+  for (let index = 0; index < (await candidates.count()); index++) {
+    const candidate = candidates.nth(index);
+    const box = await candidate.boundingBox();
+    if (
+      box &&
+      box.width > 0 &&
+      box.height > 0 &&
+      box.x < viewport.width &&
+      box.y < viewport.height &&
+      box.x + box.width > 0 &&
+      box.y + box.height > 0
+    ) {
+      return candidate;
+    }
+  }
+  throw new Error(`No in-viewport task LSP control matched ${selector}`);
 }
 
 export function removeFakeKotlinLsp(backend: BackendContext): void {
@@ -412,6 +490,58 @@ export async function expectFakeLspEvent(
     )
     .toBe(true);
   return matched!;
+}
+
+export async function expectFakeLspEventCount(
+  backend: BackendContext,
+  predicate: (event: FakeLspEvent) => boolean,
+  expectedCount: number,
+  description: string,
+  timeout = 15_000,
+): Promise<FakeLspEvent[]> {
+  let matched: FakeLspEvent[] = [];
+  await expect
+    .poll(
+      () => {
+        matched = readFakeLspEvents(backend).filter(predicate);
+        return matched.length;
+      },
+      { message: `waiting for ${expectedCount} fake LSP events: ${description}`, timeout },
+    )
+    .toBe(expectedCount);
+  return matched;
+}
+
+export async function expectFakeLspGeneration(
+  backend: BackendContext,
+  expectedGeneration: number,
+  timeout = 15_000,
+): Promise<FakeLspEvent> {
+  const started = await expectFakeLspEventCount(
+    backend,
+    (event) => event.event === "started",
+    expectedGeneration,
+    `process generation ${expectedGeneration}`,
+    timeout,
+  );
+  return started[expectedGeneration - 1];
+}
+
+export async function expectFakeLspProcessStopped(pid: number, timeout = 15_000): Promise<void> {
+  await expect
+    .poll(
+      () => {
+        try {
+          process.kill(pid, 0);
+          return false;
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code === "ESRCH") return true;
+          throw error;
+        }
+      },
+      { message: `waiting for fake LSP process ${pid} to stop`, timeout },
+    )
+    .toBe(true);
 }
 
 export async function expectFakeLspMarkerCount(

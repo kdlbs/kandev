@@ -1,7 +1,7 @@
 ---
 id: "03-task-host-supervisor"
 title: "Task-host runtime supervisor"
-status: pending
+status: done
 wave: 2
 depends_on: ["02-state-contracts"]
 plan: "plan.md"
@@ -79,4 +79,36 @@ and remaining attachment work. Update task/plan status and actual file inventory
 
 ## Results
 
-Pending.
+Implemented one agentctl-owned manager per instance with serialized language slots, monotonic and
+idempotent generations, replacement-after-reap ordering, task-host-owned JSON-RPC initialization,
+server configuration replies, progress/capability/diagnostic snapshots, graceful shutdown with
+forced cleanup, crash evidence, and joined manager teardown. Added strict authenticated
+snapshot/Start/Stop/Restart/watch adapters; request bodies cannot inject language, task, session,
+generation ownership, or runtime identifiers. Watch disconnect only unsubscribes.
+
+Added process-manager background-work reference counting and idle-reaper integration. A live LSP
+keeps its task host alive without relying on an HTTP/WebSocket lease. The manager lifetime is an
+owned process-manager operation, so agentctl teardown cancels install/initialize work, closes every
+peer, reaps every process tree, and releases admission.
+
+TDD evidence:
+
+- RED: all synchronized manager cases failed with `task-host LSP lifecycle is not implemented`;
+  background-work tests failed on missing methods/idle handling; control/watch routes returned 404.
+- GREEN: duplicate and concurrent Start/Stop/Restart, early initialize progress, capability and
+  configuration capture, graceful/forced stop, crash-without-respawn, watcher disconnect, manager
+  teardown, background-work reference counting, and idle behavior pass.
+- `go test ./internal/agentctl/server/lsp ./internal/agentctl/server/api
+  ./internal/agentctl/server/instance ./internal/agentctl/server/process` — pass.
+- `go test -race ./internal/agentctl/server/lsp ./internal/agentctl/server/api
+  ./internal/agentctl/server/instance` — pass.
+- `go test ./internal/agentctl/server/lsp -run 'Test(Manager|Runtime)' -count=20` — pass in 7.533s.
+- `go.uber.org/goleak` runs from the new package `TestMain`; all package and repeated tests pass
+  without reported goroutines.
+- `TestManagerStopReapsLanguageServerProcessGroup` launches a real shell parent plus `sleep` child;
+  forced Stop confirms both PIDs reach `ESRCH` after process-group teardown.
+
+Actual files added: `server/lsp/{manager,runtime,peer,progress,types}.go`, synchronized manager tests,
+goleak `TestMain`, and the Unix process-tree test. Actual files updated: agentctl LSP/API routes and
+tests, process-manager background-work accounting/tests, instance idle logic/tests, this task, and
+the parent plan. Attachment forwarding remains intentionally scoped to Task 04.

@@ -45,6 +45,32 @@ func TestIsIdle_FallsBackToCreatedAt(t *testing.T) {
 		"instance with no activity must fall back to CreatedAt for idle decision")
 }
 
+type backgroundWorkProcessManager struct {
+	active bool
+}
+
+func (*backgroundWorkProcessManager) CloseAdmission() {}
+
+func (*backgroundWorkProcessManager) StopForTeardown(context.Context) error { return nil }
+
+func (m *backgroundWorkProcessManager) HasBackgroundWork() bool { return m.active }
+
+func TestIsIdle_RespectsTaskBackgroundWork(t *testing.T) {
+	manager := &backgroundWorkProcessManager{active: true}
+	inst := &Instance{
+		CreatedAt: time.Now().Add(-time.Hour),
+		manager:   manager,
+	}
+	inst.lastActivityNanos.Store(time.Now().Add(-time.Hour).UnixNano())
+
+	assert.False(t, inst.IsIdle(time.Now(), time.Minute),
+		"task-owned background work must keep its task host alive")
+
+	manager.active = false
+	assert.True(t, inst.IsIdle(time.Now(), time.Minute),
+		"stale task host without background work may be reaped")
+}
+
 // TestActivityMiddleware_BumpsAndDecrements asserts the middleware
 // increments inflightRequests on entry, decrements on exit, and stamps
 // lastActivity in both transitions. While the handler is mid-flight the

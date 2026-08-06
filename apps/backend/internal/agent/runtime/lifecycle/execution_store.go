@@ -21,6 +21,10 @@ var ErrExecutionNotFound = errors.New("execution not found")
 // adding a replacement.
 var ErrExecutionAlreadyExistsForSession = errors.New("execution already exists for session")
 
+// ErrExecutionAlreadyExistsForTaskHost is returned by Add when a task
+// environment already owns a dedicated task-host execution.
+var ErrExecutionAlreadyExistsForTaskHost = errors.New("execution already exists for task host")
+
 // ErrAgentAlreadyRunning is returned by LaunchAgent when an agent execution is
 // already tracked for the requested session. The error fires both when the
 // execution is live (a concurrent caller raced us) and when it is stale (a
@@ -37,20 +41,22 @@ var ErrAgentAlreadyRunning = errors.New("session already has an agent running")
 var ErrAgentReported = errors.New("agent error")
 
 // ExecutionStore provides thread-safe storage and retrieval of agent executions.
-// It maintains three indexes for efficient lookup by execution ID, session ID, and container ID.
+// It maintains indexes for execution, session, task-host environment, and container.
 type ExecutionStore struct {
-	executions  map[string]*AgentExecution
-	bySession   map[string]string // sessionID -> executionID
-	byContainer map[string]string // containerID -> executionID
-	mu          sync.RWMutex
+	executions            map[string]*AgentExecution
+	bySession             map[string]string // sessionID -> executionID
+	byTaskHostEnvironment map[string]string // taskEnvironmentID -> dedicated task-host executionID
+	byContainer           map[string]string // containerID -> executionID
+	mu                    sync.RWMutex
 }
 
 // NewExecutionStore creates a new ExecutionStore with initialized maps.
 func NewExecutionStore() *ExecutionStore {
 	return &ExecutionStore{
-		executions:  make(map[string]*AgentExecution),
-		bySession:   make(map[string]string),
-		byContainer: make(map[string]string),
+		executions:            make(map[string]*AgentExecution),
+		bySession:             make(map[string]string),
+		byTaskHostEnvironment: make(map[string]string),
+		byContainer:           make(map[string]string),
 	}
 }
 
@@ -69,7 +75,16 @@ func (s *ExecutionStore) Add(execution *AgentExecution) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if execution.SessionID != "" {
+	if execution.IsTaskHost && execution.TaskEnvironmentID == "" {
+		return fmt.Errorf("task-host execution requires task_environment_id")
+	}
+	if execution.IsTaskHost {
+		if existingID, exists := s.byTaskHostEnvironment[execution.TaskEnvironmentID]; exists && existingID != execution.ID {
+			return fmt.Errorf("%w: task_environment=%s existing=%s new=%s",
+				ErrExecutionAlreadyExistsForTaskHost,
+				execution.TaskEnvironmentID, existingID, execution.ID)
+		}
+	} else if execution.SessionID != "" {
 		if existingID, exists := s.bySession[execution.SessionID]; exists && existingID != execution.ID {
 			return fmt.Errorf("%w: session=%s existing=%s new=%s",
 				ErrExecutionAlreadyExistsForSession,
@@ -79,7 +94,9 @@ func (s *ExecutionStore) Add(execution *AgentExecution) error {
 
 	s.executions[execution.ID] = execution
 
-	if execution.SessionID != "" {
+	if execution.IsTaskHost {
+		s.byTaskHostEnvironment[execution.TaskEnvironmentID] = execution.ID
+	} else if execution.SessionID != "" {
 		s.bySession[execution.SessionID] = execution.ID
 	}
 
@@ -100,7 +117,9 @@ func (s *ExecutionStore) Remove(executionID string) {
 	}
 
 	// Remove from secondary indexes
-	if execution.SessionID != "" {
+	if execution.IsTaskHost {
+		delete(s.byTaskHostEnvironment, execution.TaskEnvironmentID)
+	} else if execution.SessionID != "" {
 		delete(s.bySession, execution.SessionID)
 	}
 	if execution.ContainerID != "" {
@@ -177,11 +196,25 @@ func (s *ExecutionStore) GetByTaskEnvironmentID(taskEnvironmentID string) (*Agen
 	defer s.mu.RUnlock()
 
 	for _, execution := range s.executions {
-		if execution.TaskEnvironmentID == taskEnvironmentID {
+		if !execution.IsTaskHost && execution.TaskEnvironmentID == taskEnvironmentID {
 			return execution, true
 		}
 	}
 	return nil, false
+}
+
+// GetTaskHostByEnvironmentID returns the dedicated task-host execution for a
+// task environment. It never falls back to a session-owned execution.
+func (s *ExecutionStore) GetTaskHostByEnvironmentID(taskEnvironmentID string) (*AgentExecution, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	executionID, exists := s.byTaskHostEnvironment[taskEnvironmentID]
+	if !exists {
+		return nil, false
+	}
+	execution, exists := s.executions[executionID]
+	return execution, exists
 }
 
 // GetByContainerID returns the agent execution associated with a container ID.

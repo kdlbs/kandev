@@ -17,6 +17,7 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 	taskrepository "github.com/kandev/kandev/internal/task/repository"
 	"github.com/kandev/kandev/internal/worktree"
+	"go.uber.org/zap"
 )
 
 type WorkspaceSourceKind string
@@ -476,6 +477,12 @@ func (s *Service) commitWorkspaceSourceBatch(ctx context.Context, task *models.T
 		s.PublishWorkspaceSourcesAdopted(context.WithoutCancel(ctx), task.ID, result.WorkspacePath, result.SessionIDs)
 	}
 	succeeded = true
+	if s.taskLSP != nil {
+		if err := s.taskLSP.WorkspaceSourcesChanged(context.WithoutCancel(ctx), task.ID); err != nil {
+			s.logger.Warn("failed to refresh task language-server workspace roots",
+				zap.String("task_id", task.ID), zap.Error(err))
+		}
+	}
 	return result, nil
 }
 
