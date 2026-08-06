@@ -97,7 +97,9 @@ test.describe.serial("Message Queue general settings", () => {
     await toggle.click();
     await expect(testPage.getByTestId("settings-floating-save")).toBeVisible();
     await testPage.getByRole("button", { name: "Save changes" }).click();
-    expect((await saveResponse).status()).toBe(200);
+    const response = await saveResponse;
+    expect(response.status()).toBe(200);
+    expect(response.request().postDataJSON()).toEqual({ merge_enabled: !wasEnabled });
     await expect(toggle).toHaveAttribute("aria-checked", String(!wasEnabled));
 
     await testPage.reload();

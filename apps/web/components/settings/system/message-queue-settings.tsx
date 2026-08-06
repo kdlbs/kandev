@@ -130,8 +130,8 @@ function useMessageQueueSettingsDraft() {
       setSaveFailed(false);
       try {
         const response = await updateMessageQueueSettings({
-          max_per_session: parsed,
-          merge_enabled: mergeDraft,
+          ...(isMaxDirty ? { max_per_session: parsed } : {}),
+          ...(isMergeDirty ? { merge_enabled: mergeDraft } : {}),
         });
         setSnapshot(response);
         setDraft((current) =>

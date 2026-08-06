@@ -137,7 +137,7 @@ describe("MessageQueueSettings — per-session limit", () => {
 
     await act(async () => contributor.save(contributor.revision));
 
-    expect(updateSettingsMock).toHaveBeenCalledWith({ max_per_session: 25, merge_enabled: true });
+    expect(updateSettingsMock).toHaveBeenCalledWith({ max_per_session: 25 });
     expect(screen.getByTestId(EFFECTIVE_VALUE_ID).textContent).toBe("25");
     await waitFor(() => expect(saveContributor?.isDirty).toBe(false));
   });
@@ -244,9 +244,26 @@ describe("MessageQueueSettings — merge toggle", () => {
 
     await act(async () => contributor.save(contributor.revision));
 
-    expect(updateSettingsMock).toHaveBeenCalledWith({ max_per_session: 10, merge_enabled: false });
+    expect(updateSettingsMock).toHaveBeenCalledWith({ merge_enabled: false });
     await waitFor(() => expect(saveContributor?.isDirty).toBe(false));
     expect(mergeToggle().getAttribute("aria-pressed")).toBe("false");
+  });
+
+  it("sends both fields in one PATCH when max_per_session and merge_enabled are both dirty", async () => {
+    updateSettingsMock.mockResolvedValueOnce(response(25, 25, "setting", false, false));
+    render(<MessageQueueSettings />);
+    const input = await screen.findByLabelText(MAXIMUM_LABEL);
+
+    fireEvent.change(input, { target: { value: "25" } });
+    fireEvent.click(mergeToggle());
+    const contributor = requireContributor();
+
+    await act(async () => contributor.save(contributor.revision));
+
+    expect(updateSettingsMock).toHaveBeenCalledWith({
+      max_per_session: 25,
+      merge_enabled: false,
+    });
   });
 
   it("stays editable for admins even when max_per_session is environment-locked", async () => {
