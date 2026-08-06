@@ -330,6 +330,11 @@ Completed 2026-08-05.
   now retains capacity and publishes an actionable error when both per-language Stop and task-host
   cleanup fail; successful task-host fallback is treated as proof that the process is gone. Both
   regressions passed 20 repetitions under `-race`, as did the full supervisor/controller race suite.
+- The terminal audit caught one late Codex finding after the preceding poll: coordinator/MCP task
+  stops also transition a fully stopped child to review and therefore must invoke the same task LSP
+  cleanup hook. The coordinator now checks that no working session remains, cleans task-owned
+  runtimes before REVIEW, and reports cleanup failure. The focused ordering/idempotency/partial-stop
+  suite passed 20 repetitions.
 
 ---
 

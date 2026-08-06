@@ -315,6 +315,41 @@ func TestStopTaskForCoordinator_StopsAndIsIdempotent(t *testing.T) {
 	}
 }
 
+func TestStopTaskForCoordinatorCleansTaskLSPBeforeReview(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateRunning)
+	seedExecutorRunning(t, repo, "session1", "task1", "execution1")
+	taskRepo := newMockTaskRepo()
+	seedMockTaskState(taskRepo, "task1", v1.TaskStateInProgress)
+	service := newCoordinatorStopTestService(
+		repo, taskRepo, &mockAgentManager{repoForExecutionLookup: repo},
+	)
+
+	cleanupCalls := 0
+	service.SetOnTaskStopCleanup(func(_ context.Context, taskID, reason string) error {
+		cleanupCalls++
+		if taskID != "task1" || reason != coordinatorMCPStopReason {
+			t.Fatalf("cleanup task=%q reason=%q", taskID, reason)
+		}
+		if taskRepo.updatedStates[taskID] == v1.TaskStateReview {
+			t.Fatal("task moved to review before task LSP cleanup")
+		}
+		return nil
+	})
+
+	result, err := service.StopTaskForCoordinator(ctx, "task1")
+	if err != nil {
+		t.Fatalf("StopTaskForCoordinator: %v", err)
+	}
+	if result.Status != CoordinatorTaskStopStatusStopped || cleanupCalls != 1 {
+		t.Fatalf("result=%#v cleanup calls=%d", result, cleanupCalls)
+	}
+	if got := taskRepo.updatedStates["task1"]; got != v1.TaskStateReview {
+		t.Fatalf("task state = %q, want REVIEW", got)
+	}
+}
+
 func TestStopTaskForCoordinator_AggregatesAbsentAndFailure(t *testing.T) {
 	lookupFailure := errors.New("lifecycle store unavailable")
 	tests := []struct {
