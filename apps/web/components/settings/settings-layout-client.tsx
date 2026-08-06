@@ -78,11 +78,19 @@ function segmentLabel(segment: string, t: (key: string) => string): string {
     .join(" ");
 }
 
+// Full-path overrides for pages whose segment word is scope-ambiguous: the
+// install-wide secrets page is "Global Secrets", while a workspace's secrets
+// tab keeps the plain segment label.
+const FULL_PATH_LABEL_KEYS: Record<string, string> = {
+  "/settings/secrets": "settings:globalSecrets",
+};
+
 // Derive the human-readable label for the current /settings sub-page from the
 // deepest non-id path segment. /settings → null (the topbar still shows
 // "Settings" as the page itself). UUID-looking segments are skipped so e.g.
 // /settings/workspace/<uuid> resolves to "Workspace" not the raw id.
 function deriveCurrentPageLabel(pathname: string, t: (key: string) => string): string | null {
+  if (FULL_PATH_LABEL_KEYS[pathname]) return t(FULL_PATH_LABEL_KEYS[pathname]);
   const segments = pathname.split("/").filter(Boolean);
   if (segments.length <= 1) return null; // just /settings
   for (let i = segments.length - 1; i >= 1; i--) {

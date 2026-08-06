@@ -120,7 +120,7 @@ export const SETTINGS_MENU_SECTIONS: MenuSection[] = [
         activePrefixes: ["/settings/workspaces/", "/settings/workspace/"],
         countKey: "workspaces",
       },
-      { href: SECRETS_SETTINGS_HREF, labelKey: "settings:secrets", icon: IconKey, countKey: "secrets" },
+      { href: SECRETS_SETTINGS_HREF, labelKey: "settings:globalSecrets", icon: IconKey, countKey: "secrets" },
       { href: EXTERNAL_MCP_SETTINGS_HREF, labelKey: "common:externalMcp", icon: IconPlugConnected },
       {
         href: PLUGINS_SETTINGS_HREF,

@@ -136,7 +136,7 @@ export const STANDALONE_DISCOVERY_DEFINITIONS: SettingsDiscoveryDefinition[] = [
   {
     id: "secrets",
     kind: "page",
-    labelKey: "settings:secrets",
+    labelKey: "settings:globalSecrets",
     groupId: "workspaces",
     href: SECRETS_SETTINGS_HREF,
     order: 525,

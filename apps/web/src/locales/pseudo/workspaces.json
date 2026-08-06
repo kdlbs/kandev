@@ -93,6 +93,8 @@
   "patternSyntax": "Ƥàţţēŕń śŷńţàx",
   "remoteRepository": "Ŕēḿōţē ŕēƥōśĩţōŕŷ",
   "repositories": "Ŕēƥōśĩţōŕĩēś",
+  "resourceCount_one": "{{count}} ŕēśōũŕćē",
+  "resourceCount_other": "{{count}} ŕēśōũŕćēś",
   "repositoriesInThisWorkspace": "Ŕēƥōśĩţōŕĩēś ĩń ţĥĩś ŵōŕķśƥàćē",
   "repository": "Ŕēƥōśĩţōŕŷ",
   "repositoryName": "Ŕēƥōśĩţōŕŷ Ńàḿē",

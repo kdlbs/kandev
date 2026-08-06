@@ -93,6 +93,8 @@
   "patternSyntax": "Pattern syntax",
   "remoteRepository": "Remote repository",
   "repositories": "Repositories",
+  "resourceCount_one": "{{count}} resource",
+  "resourceCount_other": "{{count}} resources",
   "repositoriesInThisWorkspace": "Repositories in this workspace",
   "repository": "Repository",
   "repositoryName": "Repository Name",

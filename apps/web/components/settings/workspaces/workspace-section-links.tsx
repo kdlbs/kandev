@@ -2,16 +2,11 @@
 
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import type { ComponentType } from "react";
-import {
-  IconArrowsShuffle,
-  IconBolt,
-  IconGitBranch,
-  IconPlugConnected,
-} from "@tabler/icons-react";
+import { IconChevronRight } from "@tabler/icons-react";
 import { listAutomations } from "@/lib/api/domains/automation-api";
 import { listWorkflows } from "@/lib/api/domains/kanban-api";
 import { listRepositories } from "@/lib/api/domains/workspace-api";
+import { listSecrets } from "@/lib/api/domains/secrets-api";
 import { getAzureDevOpsConfig } from "@/lib/api/domains/azure-devops-api";
 import { fetchGitHubStatus } from "@/lib/api/domains/github-auth-api";
 import { getGitLabConfig } from "@/lib/api/domains/gitlab-api";
@@ -20,18 +15,18 @@ import { getLinearConfig } from "@/lib/api/domains/linear-api";
 import { listSentryInstances } from "@/lib/api/domains/sentry-api";
 import { getSlackConfig } from "@/lib/api/domains/slack-api";
 import Link from "@/components/routing/app-link";
-import { Button } from "@kandev/ui/button";
 import {
   workspaceSettingsHref,
   type WorkspaceSettingsTab,
 } from "./workspace-settings-shell";
 import { cn } from "@kandev/ui/lib/utils";
 
-type SectionCounts = {
+export type SectionCounts = {
   repositories?: number;
   workflows?: number;
   integrations?: number;
   automations?: number;
+  secrets?: number;
 };
 
 // One probe per integration service; counts the ones configured/connected for
@@ -57,90 +52,113 @@ async function countConfiguredIntegrations(workspaceId: string): Promise<number>
  * requests per row beats a dedicated summary endpoint for now. Each count
  * lands as soon as its request resolves — one slow endpoint (the integration
  * probes can wait on external services) must not hold the others hostage.
+ * `settled` flips once every probe finished, fulfilled or not.
  */
-export function useWorkspaceSectionCounts(workspaceId: string): SectionCounts {
+export function useWorkspaceSectionCounts(workspaceId: string): {
+  counts: SectionCounts;
+  settled: boolean;
+} {
   const [counts, setCounts] = useState<SectionCounts>({});
+  const [settled, setSettled] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
     setCounts({});
+    setSettled(false);
     const apply = (patch: SectionCounts) => {
       if (!cancelled) setCounts((prev) => ({ ...prev, ...patch }));
     };
     // The backend serializes empty lists as null — count defensively.
-    listRepositories(workspaceId)
-      .then((res) => apply({ repositories: (res.repositories ?? []).length }))
-      .catch(() => undefined);
-    listWorkflows(workspaceId)
-      .then((res) => apply({ workflows: (res.workflows ?? []).length }))
-      .catch(() => undefined);
-    listAutomations(workspaceId)
-      .then((automations) => apply({ automations: automations.length }))
-      .catch(() => undefined);
-    countConfiguredIntegrations(workspaceId)
-      .then((integrations) => apply({ integrations }))
-      .catch(() => undefined);
+    const probes = [
+      listRepositories(workspaceId)
+        .then((res) => apply({ repositories: (res.repositories ?? []).length }))
+        .catch(() => undefined),
+      listWorkflows(workspaceId)
+        .then((res) => apply({ workflows: (res.workflows ?? []).length }))
+        .catch(() => undefined),
+      listAutomations(workspaceId)
+        .then((automations) => apply({ automations: (automations ?? []).length }))
+        .catch(() => undefined),
+      countConfiguredIntegrations(workspaceId)
+        .then((integrations) => apply({ integrations }))
+        .catch(() => undefined),
+      listSecrets({ scope: "workspace", workspaceId })
+        .then((secrets) => apply({ secrets: (secrets ?? []).length }))
+        .catch(() => undefined),
+    ];
+    void Promise.allSettled(probes).then(() => {
+      if (!cancelled) setSettled(true);
+    });
     return () => {
       cancelled = true;
     };
   }, [workspaceId]);
 
-  return counts;
+  return { counts, settled };
 }
 
 type SectionStat = {
   key: keyof SectionCounts;
   tab: WorkspaceSettingsTab;
   labelKey: string;
-  icon: ComponentType<{ className?: string }>;
 };
 
 const SECTION_STATS: SectionStat[] = [
-  { key: "repositories", tab: "repositories", labelKey: "sidebar:repositories", icon: IconGitBranch },
-  { key: "workflows", tab: "workflows", labelKey: "workflows:workflows", icon: IconArrowsShuffle },
-  { key: "integrations", tab: "integrations", labelKey: "common:integrations", icon: IconPlugConnected },
-  { key: "automations", tab: "automations", labelKey: "common:automations", icon: IconBolt },
+  { key: "repositories", tab: "repositories", labelKey: "sidebar:repositories" },
+  { key: "workflows", tab: "workflows", labelKey: "workflows:workflows" },
+  { key: "integrations", tab: "integrations", labelKey: "common:integrations" },
+  { key: "automations", tab: "automations", labelKey: "common:automations" },
+  { key: "secrets", tab: "secrets", labelKey: "settings:secrets" },
 ];
 
 /**
- * Quick links into a workspace's sections with their counts. Rendered above
- * the row's whole-card overlay link (z-10), so both stay clickable without
- * nesting anchors.
+ * A workspace's sections as count tiles: big count, chevron, label. Rendered
+ * above the row's whole-card overlay link (z-10), so both stay clickable
+ * without nesting anchors. Zero counts dim; unknown counts show an em dash.
  */
 export function WorkspaceSectionStats({
   workspaceId,
+  counts,
   className,
 }: {
   workspaceId: string;
+  counts: SectionCounts;
   className?: string;
 }) {
   const { t } = useTranslation();
-  const counts = useWorkspaceSectionCounts(workspaceId);
 
   return (
     <div
-      className={cn("flex flex-wrap items-center gap-2", className)}
+      className={cn(
+        // Desktop columns cap at 175px per tile instead of stretching full width.
+        "grid flex-1 grid-cols-3 gap-2 lg:grid-cols-[repeat(5,minmax(0,175px))]",
+        className,
+      )}
       data-testid="workspace-section-stats"
     >
-      {SECTION_STATS.map(({ key, tab, labelKey, icon: Icon }) => (
-        <Button
-          key={key}
-          asChild
-          variant="outline"
-          // "lg" is this kit's medium: default is a compact h-7. The outline
-          // hover is invisible on dark card backgrounds — brighten it there.
-          size="lg"
-          className="relative z-10 gap-1.5 hover:border-foreground/30 dark:hover:bg-input/80"
-        >
-          <Link href={workspaceSettingsHref(workspaceId, tab)}>
-            <Icon className="h-4 w-4" />
-            {t(labelKey)}
-            <span className="font-normal tabular-nums text-muted-foreground/70">
-              {counts[key] ?? "–"}
-            </span>
+      {SECTION_STATS.map(({ key, tab, labelKey }) => {
+        const count = counts[key];
+        return (
+          <Link
+            key={key}
+            href={workspaceSettingsHref(workspaceId, tab)}
+            className="relative z-10 flex flex-col gap-1 rounded-lg border border-border/70 bg-background/50 p-2.5 transition-colors hover:border-foreground/30 hover:bg-muted/50"
+          >
+            <div className="flex items-start justify-between gap-1">
+              <span
+                className={cn(
+                  "text-lg font-bold leading-none tabular-nums",
+                  (count === 0 || count === undefined) && "text-muted-foreground/50",
+                )}
+              >
+                {count ?? "—"}
+              </span>
+              <IconChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground/50" />
+            </div>
+            <span className="truncate text-xs text-muted-foreground">{t(labelKey)}</span>
           </Link>
-        </Button>
-      ))}
+        );
+      })}
     </div>
   );
 }

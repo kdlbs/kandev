@@ -455,8 +455,8 @@ type SecretsSettingsProps = {
 type SecretsSettingsState = ReturnType<typeof useSecretsState>;
 type SecretsSettingsActions = ReturnType<typeof useSecretsActions>;
 
-function secretScopeTitle(t: TFunction) {
-  return t("settings:secrets");
+function secretScopeTitle(t: TFunction, scope: SecretScope) {
+  return scope === "workspace" ? t("settings:secrets") : t("settings:globalSecrets");
 }
 
 function secretScopeDescription(t: TFunction, scope: SecretScope) {
@@ -478,6 +478,7 @@ function secretDraftInvalidReason(
 }
 
 type SecretsSettingsBodyProps = {
+  scope: SecretScope;
   workspaceId?: string;
   state: SecretsSettingsState;
   actions: SecretsSettingsActions;
@@ -486,6 +487,7 @@ type SecretsSettingsBodyProps = {
 };
 
 function SecretsSettingsBody({
+  scope,
   workspaceId,
   state,
   actions,
@@ -502,7 +504,7 @@ function SecretsSettingsBody({
           that spec time out rather than silently scan an unrendered route. */}
       <div className="space-y-6" data-testid="secrets-settings-body">
         <div className="flex items-center justify-between">
-          <div className="text-sm font-medium text-foreground">{secretScopeTitle(t)}</div>
+          <div className="text-sm font-medium text-foreground">{secretScopeTitle(t, scope)}</div>
           <Button
             onClick={actions.startCreate}
             disabled={isBusy || Boolean(editingId) || showCreate}
@@ -600,7 +602,7 @@ function SecretsSettingsContent({
 
   return (
     <SettingsPageTemplate
-      title={secretScopeTitle(t)}
+      title={secretScopeTitle(t, scope)}
       description={secretScopeDescription(t, scope)}
       isDirty={isDirty}
       saveStatus="idle"
@@ -612,6 +614,7 @@ function SecretsSettingsContent({
       onDiscard={actions.resetForm}
     >
       <SecretsSettingsBody
+        scope={scope}
         workspaceId={workspaceId}
         state={state}
         actions={actions}

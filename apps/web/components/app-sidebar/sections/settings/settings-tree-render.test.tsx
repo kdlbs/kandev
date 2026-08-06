@@ -129,7 +129,7 @@ describe("SettingsTree static menu", () => {
     expect(screen.getByRole("link", { name: "Workspaces 1" })).toBeTruthy();
     expect(screen.getByRole("link", { name: "Agents 1" })).toBeTruthy();
     expect(screen.getByRole("link", { name: "Executors 1" })).toBeTruthy();
-    expect(screen.getByRole("link", { name: "Secrets 2" })).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Global Secrets 2" })).toBeTruthy();
     expect(screen.getByRole("link", { name: "Plugins 1" })).toBeTruthy();
     // Rows without a list never carry a badge.
     expect(screen.getByRole("link", { name: "Appearance" }).textContent).toBe("Appearance");

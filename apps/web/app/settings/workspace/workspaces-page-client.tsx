@@ -2,19 +2,23 @@
 
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { IconChevronRight, IconFolder, IconPlus } from "@tabler/icons-react";
+import { IconChevronRight, IconPlus } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Card, CardContent } from "@kandev/ui/card";
 import { Separator } from "@kandev/ui/separator";
 import { Input } from "@kandev/ui/input";
 import { Label } from "@kandev/ui/label";
+import { cn } from "@kandev/ui/lib/utils";
 import Link from "@/components/routing/app-link";
 import { createWorkspaceAction } from "@/app/actions/workspaces";
 import { useRequest } from "@/lib/http/use-request";
 import { useToast } from "@/components/toast-provider";
 import { RequestIndicator } from "@/components/request-indicator";
 import { useAppStore } from "@/components/state-provider";
-import { WorkspaceSectionStats } from "@/components/settings/workspaces/workspace-section-links";
+import {
+  useWorkspaceSectionCounts,
+  WorkspaceSectionStats,
+} from "@/components/settings/workspaces/workspace-section-links";
 import {
   ActiveWorkspaceBadge,
   workspaceSettingsHref,
@@ -74,33 +78,44 @@ function AddWorkspaceForm({
 }
 
 function WorkspaceListItem({ workspace }: { workspace: Workspace }) {
+  const { t } = useTranslation();
   const activeId = useAppStore((s) => s.workspaces.activeId);
+  const isActive = workspace.id === activeId;
+  const { counts, settled } = useWorkspaceSectionCounts(workspace.id);
+  const total = Object.values(counts).reduce(
+    (sum, value) => sum + (value ?? 0),
+    0,
+  );
   return (
     <Card
-      className="relative transition-colors hover:bg-muted/50"
+      className={cn(
+        "relative transition-colors hover:bg-muted/50",
+        isActive && "border-l-2 border-l-primary",
+      )}
       data-testid="workspace-list-item"
     >
-      {/* Whole-card link as an overlay — the quick links sit above it (z-10). */}
+      {/* Whole-card link as an overlay — the section tiles sit above it (z-10). */}
       <Link
         href={workspaceSettingsHref(workspace.id, "overview")}
         aria-label={workspace.name}
         className="absolute inset-0"
         data-testid="workspace-overview-link"
       />
-      <CardContent className="flex items-center justify-between gap-4 py-4">
-        <div className="flex min-w-0 items-center gap-3">
-          <div className="p-2 bg-muted rounded-md">
-            <IconFolder className="h-4 w-4" />
-          </div>
+      <CardContent className="flex flex-col gap-3 lg:flex-row lg:items-center lg:gap-6">
+        <div className="flex items-center justify-between gap-3 lg:w-44 lg:shrink-0">
           <div className="min-w-0">
             <div className="flex items-center gap-2">
-              <h4 className="truncate font-medium">{workspace.name}</h4>
-              {workspace.id === activeId && <ActiveWorkspaceBadge />}
+              <h4 className="truncate text-lg font-semibold">{workspace.name}</h4>
+              {isActive && <ActiveWorkspaceBadge />}
             </div>
-            <WorkspaceSectionStats workspaceId={workspace.id} className="mt-1.5" />
+            <p className="mt-0.5 hidden text-sm text-muted-foreground lg:block">
+              {settled ? t("workspaces:resourceCount", { count: total }) : "\u00a0"}
+            </p>
           </div>
+          <IconChevronRight className="h-5 w-5 shrink-0 text-muted-foreground lg:hidden" />
         </div>
-        <IconChevronRight className="h-5 w-5 shrink-0 text-muted-foreground" />
+        <WorkspaceSectionStats workspaceId={workspace.id} counts={counts} />
+        <IconChevronRight className="hidden h-5 w-5 shrink-0 text-muted-foreground lg:block" />
       </CardContent>
     </Card>
   );

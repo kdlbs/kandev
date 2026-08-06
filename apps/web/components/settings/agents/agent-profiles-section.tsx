@@ -105,7 +105,8 @@ export function ProfileRow({ agent, profile }: { agent: Agent; profile: AgentPro
 
   return (
     <Card
-      className="relative gap-0 py-1.5 transition-colors hover:bg-muted/50"
+      // Same surface treatment as the workspace section tiles.
+      className="relative gap-0 border-border/70 bg-background/50 py-1.5 transition-colors hover:border-foreground/30 hover:bg-muted/50"
       data-testid="agent-profile-row"
     >
       {/* Whole-card link as an overlay — the action buttons sit above it (z-10). */}
@@ -117,9 +118,12 @@ export function ProfileRow({ agent, profile }: { agent: Agent; profile: AgentPro
       />
       <CardContent className="flex items-center justify-between gap-2 px-3">
         <div className="min-w-0 flex-1">
-          <div className="text-sm font-medium truncate">{profile.name}</div>
+          <div className="flex items-center gap-2">
+            <span aria-hidden className="h-1.5 w-1.5 shrink-0 rounded-full bg-primary/70" />
+            <span className="truncate text-sm font-medium">{profile.name}</span>
+          </div>
           {(profile.model || profile.mode) && (
-            <div className="mt-0.5 flex flex-wrap items-center gap-1.5">
+            <div className="mt-0.5 flex flex-wrap items-center gap-1.5 pl-3.5">
               {profile.model && <Badge variant="outline">{profile.model}</Badge>}
               {profile.mode && <Badge variant="secondary">{profile.mode}</Badge>}
             </div>
