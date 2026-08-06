@@ -239,6 +239,7 @@ func TestStart_AgentLoginSessionsStillIdleTimeout(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Start: %v", err)
 	}
+	t.Cleanup(func() { _ = mgr.StopAll() })
 
 	select {
 	case <-exited:
@@ -259,6 +260,7 @@ func TestStart_AgentLoginSessionsStillHardTimeout(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Start: %v", err)
 	}
+	t.Cleanup(func() { _ = mgr.StopAll() })
 
 	select {
 	case <-exited:
@@ -270,6 +272,7 @@ func TestStart_AgentLoginSessionsStillHardTimeout(t *testing.T) {
 
 func TestStopAll_StopsEverySessionAndIsIdempotent(t *testing.T) {
 	mgr := newTestManager(t, nil)
+	t.Cleanup(func() { _ = mgr.StopAll() })
 	first, err := mgr.Start("test-agent", []string{"sh", "-c", "sleep 1"}, 80, 24)
 	if err != nil {
 		t.Fatalf("first start: %v", err)

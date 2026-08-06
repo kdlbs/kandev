@@ -44,6 +44,7 @@ func TestBuildLoginPTYServicesRegistersStopAllCleanup(t *testing.T) {
 	if err != nil {
 		t.Fatalf("StartWithKey: %v", err)
 	}
+	t.Cleanup(func() { _ = loginMgr.StopAll() })
 	if err := cleanups[0](); err != nil {
 		t.Fatalf("cleanup: %v", err)
 	}
