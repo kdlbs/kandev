@@ -165,6 +165,12 @@ func (s *Service) HandleSessionExit(managerKey, sessionID, _ string, exitCode in
 
 func (s *Service) BindHostShellSession(ctx context.Context, tabID, sessionID string) error {
 	_, err := s.UpdateLifecycle(ctx, tabID, sessionID, models.StatusRunning, "", nil)
+	if errors.Is(err, repository.ErrNotFound) {
+		// The host shell was started for a client_id that has no persisted
+		// Quick Terminal tab. Signal the caller to keep the PTY running rather
+		// than treating the missing descriptor as a start failure.
+		return loginpty.ErrNoHostShellDescriptor
+	}
 	return err
 }
 

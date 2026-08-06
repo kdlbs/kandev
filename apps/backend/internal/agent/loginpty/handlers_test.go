@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -265,6 +266,47 @@ func TestHostShellClientIDBindsSessionBeforeResponding(t *testing.T) {
 	}
 }
 
+func TestHostShellStartsWhenNoDescriptorToBind(t *testing.T) {
+	mgr := newTestManager(t, nil)
+	binder := &hostShellBinderStub{err: ErrNoHostShellDescriptor}
+	router := newHostShellRouterWithBinder(t, mgr, binder)
+	tabID := uuid.NewString()
+
+	status, code := startHostShellRequest(t, router, map[string]any{"client_id": tabID})
+	if code != http.StatusOK {
+		t.Fatalf("start status = %d, want %d (missing descriptor must not fail start)", code, http.StatusOK)
+	}
+	t.Cleanup(func() { stopSession(t, mgr, status.ID) })
+	if got := mgr.GetByID(status.ID); got == nil || !got.Status().Running {
+		t.Fatal("host shell session was stopped despite a benign missing-descriptor bind")
+	}
+}
+
+func TestHostShellReusedSessionSurvivesBindError(t *testing.T) {
+	mgr := newTestManager(t, nil)
+	binder := &hostShellBinderStub{}
+	router := newHostShellRouterWithBinder(t, mgr, binder)
+	tabID := uuid.NewString()
+
+	first, code := startHostShellRequest(t, router, map[string]any{"client_id": tabID})
+	if code != http.StatusOK {
+		t.Fatalf("first start status = %d", code)
+	}
+	t.Cleanup(func() { stopSession(t, mgr, first.ID) })
+
+	// A subsequent start for the same client reuses the session. A hard bind
+	// error must surface as 500 but must NOT stop the reused (still-attached)
+	// session.
+	binder.err = errors.New("descriptor write failed")
+	_, code = startHostShellRequest(t, router, map[string]any{"client_id": tabID})
+	if code != http.StatusInternalServerError {
+		t.Fatalf("reused start with bind error status = %d, want %d", code, http.StatusInternalServerError)
+	}
+	if got := mgr.GetByID(first.ID); got == nil || !got.Status().Running {
+		t.Fatal("reused host shell session was stopped after a bind error")
+	}
+}
+
 func TestHostShellSessionSurvivesWebSocketReconnect(t *testing.T) {
 	mgr := newTestManager(t, nil)
 	router := newHostShellRouter(t, mgr)
@@ -279,7 +321,9 @@ func TestHostShellSessionSurvivesWebSocketReconnect(t *testing.T) {
 	t.Cleanup(func() { stopSession(t, mgr, status.ID) })
 
 	firstConn := connectHostShellStream(t, server.URL, status.ID)
-	waitForHostShellOutput(t, firstConn, "%")
+	// Don't wait for a shell prompt: it varies by shell and by user (zsh "%",
+	// bash "$", root "#"), which made this hang under CI's root bash. The
+	// command's own echoed marker is a deterministic readiness signal instead.
 	if err := firstConn.WriteMessage(gorillaws.BinaryMessage, []byte("export KANDEV_QT_ONE=QUICK_TERMINAL_ONE && echo $KANDEV_QT_ONE\n")); err != nil {
 		t.Fatalf("write export command: %v", err)
 	}
