@@ -34,6 +34,8 @@ import { MRAutomationControls } from "./mr-automation-controls";
 
 const AUTO_FIX_LABEL = "Auto-fix CI and address comments";
 const AUTO_MERGE_LABEL = "Auto-merge when ready";
+const EDIT_PROMPT_LABEL = "Edit auto-fix prompt for this task";
+const PROMPT_TEXTAREA_LABEL = "Task auto-fix prompt";
 
 function makeOptions(overrides: Partial<TaskMRAutomationOptions> = {}): TaskMRAutomationOptions {
   return {
@@ -178,15 +180,41 @@ describe("MRAutomationControls — Automation section (AC1)", () => {
   it("opens the auto-fix prompt dialog with the effective prompt pre-filled", () => {
     hookMocks.options = makeOptions({ effective_auto_fix_prompt: "custom prompt text" });
     renderControls();
-    fireEvent.click(screen.getByLabelText("Edit auto-fix prompt for this task"));
-    const textarea = screen.getByLabelText("Task auto-fix prompt") as HTMLTextAreaElement;
+    fireEvent.click(screen.getByLabelText(EDIT_PROMPT_LABEL));
+    const textarea = screen.getByLabelText(PROMPT_TEXTAREA_LABEL) as HTMLTextAreaElement;
     expect(textarea.value).toBe("custom prompt text");
+  });
+
+  it("opens on the effective prompt when the stored override is whitespace-only", () => {
+    // A whitespace-only override resolves to the default server-side
+    // (using_default_prompt: true), so opening the editor on that raw
+    // whitespace would show a blank textarea with Save disabled.
+    hookMocks.options = makeOptions({
+      auto_fix_prompt_override: "   ",
+      effective_auto_fix_prompt: "the default prompt",
+      using_default_prompt: true,
+    });
+    renderControls();
+    fireEvent.click(screen.getByLabelText(EDIT_PROMPT_LABEL));
+    const textarea = screen.getByLabelText(PROMPT_TEXTAREA_LABEL) as HTMLTextAreaElement;
+    expect(textarea.value).toBe("the default prompt");
+  });
+
+  it("opens on a real override when one is set", () => {
+    hookMocks.options = makeOptions({
+      auto_fix_prompt_override: "my override",
+      effective_auto_fix_prompt: "my override",
+    });
+    renderControls();
+    fireEvent.click(screen.getByLabelText(EDIT_PROMPT_LABEL));
+    const textarea = screen.getByLabelText(PROMPT_TEXTAREA_LABEL) as HTMLTextAreaElement;
+    expect(textarea.value).toBe("my override");
   });
 
   it("saves a new prompt override", () => {
     renderControls();
-    fireEvent.click(screen.getByLabelText("Edit auto-fix prompt for this task"));
-    const textarea = screen.getByLabelText("Task auto-fix prompt") as HTMLTextAreaElement;
+    fireEvent.click(screen.getByLabelText(EDIT_PROMPT_LABEL));
+    const textarea = screen.getByLabelText(PROMPT_TEXTAREA_LABEL) as HTMLTextAreaElement;
     fireEvent.change(textarea, { target: { value: "a new override" } });
     fireEvent.click(screen.getByText("Save prompt"));
     expect(hookMocks.updateMock).toHaveBeenCalledWith({
@@ -196,7 +224,7 @@ describe("MRAutomationControls — Automation section (AC1)", () => {
 
   it("restores the default prompt via Use default", () => {
     renderControls();
-    fireEvent.click(screen.getByLabelText("Edit auto-fix prompt for this task"));
+    fireEvent.click(screen.getByLabelText(EDIT_PROMPT_LABEL));
     fireEvent.click(screen.getByText("Use default"));
     expect(hookMocks.resetPromptMock).toHaveBeenCalled();
   });

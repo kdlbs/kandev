@@ -302,7 +302,16 @@ function useMRAutoFixPromptEditor(
   );
 
   const openPromptEditor = useCallback(() => {
-    setPromptDraft(options?.auto_fix_prompt_override ?? options?.effective_auto_fix_prompt ?? "");
+    // A trimmed-empty override is "no override" as far as the backend's
+    // effective-prompt resolution is concerned, so the editor must open on
+    // the effective prompt rather than on unusable whitespace. Clearing via
+    // the UI already round-trips as null, but a whitespace-only override
+    // submitted through HTTP PATCH or MCP persists verbatim — `??` alone
+    // would then open an all-whitespace textarea with Save disabled.
+    const override = options?.auto_fix_prompt_override?.trim()
+      ? options.auto_fix_prompt_override
+      : null;
+    setPromptDraft(override ?? options?.effective_auto_fix_prompt ?? "");
     setPromptOpen(true);
   }, [options]);
 
