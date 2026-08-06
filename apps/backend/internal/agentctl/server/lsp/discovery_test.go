@@ -145,7 +145,7 @@ func TestDiscoveryEntryAndDepthBudgetsReturnPartialEvidence(t *testing.T) {
 		root := t.TempDir()
 		writeDiscoveryFile(t, root, "a.txt")
 		writeDiscoveryFile(t, root, "b.txt")
-		writeDiscoveryFile(t, root, "z.kt")
+		writeDiscoveryFile(t, root, "z.txt")
 
 		result := discoverLanguages(context.Background(), root, nil, discoveryOptions{
 			maxDuration: time.Second, maxEntries: 2, maxDepth: 6,

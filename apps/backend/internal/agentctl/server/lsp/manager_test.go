@@ -29,6 +29,9 @@ type fakeProcessManager struct {
 	overlapObserved bool
 	ownedReleased   chan struct{}
 	releaseOnce     sync.Once
+	reapRelease     <-chan struct{}
+	stopReturned    chan struct{}
+	stopReturnOnce  sync.Once
 }
 
 type fakeLSPProcess struct {
@@ -130,8 +133,18 @@ func (m *fakeProcessManager) StopProcess(_ context.Context, req process.StopProc
 	fakeProcess.stopOnce.Do(func() {
 		_ = fakeProcess.serverInput.Close()
 		_ = fakeProcess.serverOutput.Close()
-		close(fakeProcess.done)
+		if m.reapRelease == nil {
+			close(fakeProcess.done)
+		} else {
+			go func() {
+				<-m.reapRelease
+				close(fakeProcess.done)
+			}()
+		}
 	})
+	if m.stopReturned != nil {
+		m.stopReturnOnce.Do(func() { close(m.stopReturned) })
+	}
 	return nil
 }
 
@@ -475,6 +488,64 @@ func TestManagerStopUsesShutdownExitAndCloseReapsRuntime(t *testing.T) {
 	case <-processes.ownedReleased:
 	default:
 		t.Fatal("manager close did not release its process-manager ownership")
+	}
+}
+
+func TestManagerStopWaitsForProcessTreeReap(t *testing.T) {
+	manager, processes := newManagerForTest(t, func(int) *fakeLSPServer {
+		return newFakeLSPServer()
+	})
+	reapRelease := make(chan struct{})
+	stopReturned := make(chan struct{})
+	processes.reapRelease = reapRelease
+	processes.stopReturned = stopReturned
+	var releaseOnce sync.Once
+	releaseReap := func() { releaseOnce.Do(func() { close(reapRelease) }) }
+	defer releaseReap()
+
+	if _, err := manager.Start(context.Background(), StartRequest{
+		Language: "kotlin", Generation: 1,
+	}); err != nil {
+		t.Fatalf("start generation: %v", err)
+	}
+	waitForPhase(t, manager, "kotlin", sharedlsp.PhaseReady)
+	manager.mu.RLock()
+	slot := manager.slots["kotlin"]
+	manager.mu.RUnlock()
+	slot.opMu.Lock()
+	current := slot.runtime
+	slot.opMu.Unlock()
+
+	stopDone := make(chan error, 1)
+	go func() {
+		_, err := manager.Stop(context.Background(), StopRequest{Language: "kotlin", Generation: 1})
+		stopDone <- err
+	}()
+	<-stopReturned
+	select {
+	case <-current.done:
+	case <-time.After(2 * time.Second):
+		releaseReap()
+		<-stopDone
+		t.Fatal("protocol runtime did not stop")
+	}
+
+	var stopErr error
+	returnedBeforeReap := false
+	select {
+	case stopErr = <-stopDone:
+		returnedBeforeReap = true
+	case <-time.After(100 * time.Millisecond):
+	}
+	releaseReap()
+	if !returnedBeforeReap {
+		stopErr = <-stopDone
+	}
+	if stopErr != nil {
+		t.Fatalf("stop generation: %v", stopErr)
+	}
+	if returnedBeforeReap {
+		t.Fatal("Stop returned before the process tree was reaped")
 	}
 }
 
