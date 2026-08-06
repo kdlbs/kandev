@@ -103,6 +103,7 @@ function useTableGeometry(
 }
 
 type PointerResizeOptions = {
+  enabled: boolean;
   fixedTableWidth: number | null;
   refs: TableRefs;
   setColumnWidths: (widths: number[] | null) => void;
@@ -111,6 +112,7 @@ type PointerResizeOptions = {
 };
 
 function usePointerResize({
+  enabled,
   fixedTableWidth,
   refs,
   setColumnWidths,
@@ -145,6 +147,13 @@ function usePointerResize({
     },
     [],
   );
+
+  useEffect(() => {
+    if (enabled || !dragRef.current) return;
+    dragRef.current = null;
+    setActiveBoundary(null);
+    setDocumentResizeState(false);
+  }, [enabled]);
 
   const startResize = useCallback(
     (boundaryIndex: number, event: PointerEvent<HTMLButtonElement>) => {
@@ -206,6 +215,7 @@ export function useMarkdownTableResize(enabled: boolean) {
   }, [setColumnWidths]);
   const geometry = useTableGeometry(enabled, refs, widthsRef, reset);
   const pointerResize = usePointerResize({
+    enabled,
     fixedTableWidth,
     refs,
     setColumnWidths,

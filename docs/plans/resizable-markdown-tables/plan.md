@@ -51,7 +51,8 @@ likely `apps/web/components/shared/resizable-markdown-table.tsx`.
   CSS automatic layout. A changed column count does the same.
 - Render controls only when the responsive capability is non-phone and
   fine-pointer. Tables that cannot provide valid multi-column geometry stay
-  automatic.
+  automatic. A capability change during a drag also clears the active drag and
+  document-level cursor and selection overrides.
 
 ### Styling and localization
 
@@ -167,7 +168,7 @@ None.
 
 ## Verification results
 
-- `vitest`: 36 focused geometry/hook/shared-renderer tests passed.
+- `vitest`: 37 focused geometry/hook/shared-renderer tests passed.
 - `pnpm run typecheck`: passed.
 - `pnpm --filter @kandev/web lint`: passed with zero warnings.
 - `make build-web`: passed.

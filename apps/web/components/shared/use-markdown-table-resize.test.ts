@@ -117,6 +117,27 @@ describe("useMarkdownTableResize", () => {
     expect(result.current.fixedTableWidth).toBeNull();
   });
 
+  it("clears an active drag and document resize state when resizing becomes disabled", () => {
+    const { result, rerender } = renderResizeHook();
+    const pointer = {
+      button: 0,
+      clientX: 130,
+      currentTarget: { setPointerCapture: vi.fn() },
+      pointerId: 7,
+      preventDefault: vi.fn(),
+    };
+
+    act(() => result.current.startResize(0, pointer as never));
+    expect(result.current.activeBoundary).toBe(0);
+    expect(document.body.style.cursor).toBe("col-resize");
+    expect(document.body.style.userSelect).toBe("none");
+
+    rerender({ enabled: false });
+    expect(result.current.activeBoundary).toBeNull();
+    expect(document.body.style.cursor).toBe("");
+    expect(document.body.style.userSelect).toBe("");
+  });
+
   it("clears custom widths when the table column count changes", () => {
     const { result, row } = renderResizeHook();
     act(() => result.current.resizeWithKeyboard(0, keyboardEvent("ArrowRight") as never));

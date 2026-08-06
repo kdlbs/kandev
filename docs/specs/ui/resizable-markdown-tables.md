@@ -45,6 +45,8 @@ editing the source Markdown or opening another view.
 - Phone and coarse-pointer layouts do not show or activate resize separators.
   They keep the existing automatic wrapping for ordinary tables and local
   horizontal scrolling for wide tables.
+- If resize capability becomes unavailable during a drag, the drag ends and
+  any document-level cursor or text-selection override is cleared.
 - Table-local scrolling remains the only horizontal scroll owner. Resizing must
   not create document-level or chat-level horizontal overflow.
 
