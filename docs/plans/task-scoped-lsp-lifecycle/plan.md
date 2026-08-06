@@ -342,6 +342,11 @@ Completed 2026-08-05.
   without yielding the slot to them. A provided session now resolves only through its authoritative
   session/task mapping; the active task fallback remains limited to surfaces with no session. Both
   regressions failed first, then passed focused tests; frontend lint/typecheck also pass.
+- The following exact-head review found that a queued reconcile could act on a keep-warm candidate
+  after its effective task policy had changed to Disabled. Reconcile starts now re-read and validate
+  the effective policy at the generation-allocation seam, so stale task/recovery candidates cannot
+  launch or reserve capacity. The regression failed before the guard, then passed 20 repetitions
+  under `-race`; the full controller race suite and backend lint pass.
 
 ---
 

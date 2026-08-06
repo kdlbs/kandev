@@ -426,6 +426,10 @@ func (c *Controller) validateStart(
 	settings TaskSettings,
 	action Action,
 ) (*LanguageSnapshot, bool, error) {
+	if action == ActionReconcile && effectivePolicy(current, settings) != PolicyKeepWarm {
+		snapshot := c.languageSnapshot(current, settings, nil)
+		return &snapshot, true, nil
+	}
 	if action == ActionStart && current.Policy == PolicyKeepWarm && phaseHasServer(current.Phase) {
 		snapshot := c.languageSnapshot(current, settings, nil)
 		return &snapshot, true, nil
