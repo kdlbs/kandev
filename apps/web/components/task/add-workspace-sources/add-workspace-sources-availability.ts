@@ -1,3 +1,5 @@
+import { t } from "@/lib/i18n";
+
 type AvailabilityInput = {
   isLoading?: boolean;
   hasActiveTurn?: boolean;
@@ -10,7 +12,6 @@ export function hasActiveTaskSourceWork(
 ): boolean {
   return taskSessionIds.some((sessionId) => Boolean(activeTurnBySession[sessionId]));
 }
-import { t } from "@/lib/i18n";
 
 export function getAddSourcesDisabledReason({
   isLoading,

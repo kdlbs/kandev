@@ -56,7 +56,7 @@
   "selectEnvironmentSecret": "Śēĺēćţ à śēćŕēţ",
   "missingSecretReference": "Ḿĩśśĩńĝ śēćŕēţ ŕēƒēŕēńćē",
   "noEnvironmentSecrets": "Ńō ēńvĩŕōńḿēńţ śēćŕēţś ćōńƒĩĝũŕēď.",
-  "noAvailableEnvironmentSecrets": "Ńō Ĝĺōƀàĺ ōŕ ŵōŕķśƥàćē śēćŕēţś àŕē àvàĩĺàƀĺē.",
+  "noAvailableEnvironmentSecrets": "Ńō Ĝĺōƀàĺ ōŕ Ŵōŕķśƥàćē śēćŕēţś àŕē àvàĩĺàƀĺē.",
   "addEnvironmentSecret": "Àďď ēńvĩŕōńḿēńţ śēćŕēţ",
   "removeEnvironmentSecret": "Ŕēḿōvē ēńvĩŕōńḿēńţ śēćŕēţ {{key}}",
   "environmentSecretKeyInvalid": "Ũśē à vàĺĩď ƤŌŚĨX ēńvĩŕōńḿēńţ ķēŷ.",

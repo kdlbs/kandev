@@ -777,6 +777,7 @@
   "workspaceCount_one": "{{count}} ŵōŕķśƥàćē",
   "workspaceCount_other": "{{count}} ŵōŕķśƥàćēś",
   "workspaceRepository": "Ŵōŕķśƥàćē ŕēƥōśĩţōŕŷ",
+  "wouldCreateABlockerCycle": "Ŵōũĺď ćŕēàţē à ƀĺōćķēŕ ćŷćĺē: {{cycle}}",
   "writeYourChangesHere": "Ŵŕĩţē ŷōũŕ ćĥàńĝēś ĥēŕē",
   "you": "Ŷōũ",
   "youCanAttachUpToFiles": "Ŷōũ ćàń àţţàćĥ ũƥ ţō {{maxFiles}} ƒĩĺēś.",

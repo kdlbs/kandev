@@ -777,6 +777,7 @@
   "workspaceCount_one": "{{count}} workspace",
   "workspaceCount_other": "{{count}} workspaces",
   "workspaceRepository": "Workspace repository",
+  "wouldCreateABlockerCycle": "Would create a blocker cycle: {{cycle}}",
   "writeYourChangesHere": "Write your changes here",
   "you": "You",
   "youCanAttachUpToFiles": "You can attach up to {{maxFiles}} files.",
