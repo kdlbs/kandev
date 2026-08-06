@@ -1018,6 +1018,52 @@ func TestService_UpdateIssueWatch_MultipleRepositories(t *testing.T) {
 	}
 }
 
+// TestService_UpdateIssueWatch_UnrelatedPatchKeepsMultiRepoBinding pins the
+// truncation regression: a PATCH that touches no repository field must leave a
+// multi-repository watch's full binding intact. The legacy mirror columns only
+// hold the first entry, so rebuilding the list from them on every PATCH would
+// silently drop every secondary repository.
+func TestService_UpdateIssueWatch_UnrelatedPatchKeepsMultiRepoBinding(t *testing.T) {
+	ctx := context.Background()
+	f := newSvcFixture(t)
+	f.svc.SetRepositoryLookup(fakeRepoLookup{workspaceID: "ws-1", defaultBranch: "main", ok: true})
+
+	w, err := f.svc.CreateIssueWatch(ctx, &CreateIssueWatchRequest{
+		WorkspaceID: "ws-1", WorkflowID: "wf", WorkflowStepID: "step",
+		Filter: SearchFilter{TeamKey: "ENG"},
+		Repositories: []IssueWatchRepository{
+			{RepositoryID: "repo-1", BaseBranch: "main"},
+			{RepositoryID: "repo-2", BaseBranch: "develop"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	prompt := "edited prompt"
+	enabled := false
+	updated, err := f.svc.UpdateIssueWatch(ctx, w.ID, &UpdateIssueWatchRequest{Prompt: &prompt, Enabled: &enabled})
+	if err != nil {
+		t.Fatalf("unrelated patch: %v", err)
+	}
+	if len(updated.Repositories) != 2 {
+		t.Fatalf("unrelated patch truncated the binding, got %+v", updated.Repositories)
+	}
+	if updated.Repositories[0] != (IssueWatchRepository{RepositoryID: "repo-1", BaseBranch: "main"}) ||
+		updated.Repositories[1] != (IssueWatchRepository{RepositoryID: "repo-2", BaseBranch: "develop"}) {
+		t.Fatalf("binding changed on unrelated patch: %+v", updated.Repositories)
+	}
+
+	// The truncation must not persist either.
+	persisted, err := f.store.GetIssueWatch(ctx, w.ID)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if len(persisted.Repositories) != 2 {
+		t.Fatalf("truncated binding persisted, got %+v", persisted.Repositories)
+	}
+}
+
 func TestService_IssueWatch_RejectsInvalidBaseBranch(t *testing.T) {
 	ctx := context.Background()
 	f := newSvcFixture(t)

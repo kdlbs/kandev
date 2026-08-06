@@ -22,7 +22,7 @@ A Linear issue watch can currently bind **at most one** repository, so watcher-c
 
 `linear_issue_watches` gains one column; the legacy columns stay and mirror the first entry for downgrade safety.
 
-```
+```text
 linear_issue_watches
   repositories_json  TEXT NOT NULL DEFAULT ''   # JSON array of IssueWatchRepository
   repository_id      TEXT NOT NULL DEFAULT ''   # legacy — mirrors first entry, read-compat fallback
@@ -31,16 +31,18 @@ linear_issue_watches
 
 `repositories_json` is the canonical store of the binding. Wire shape of one entry:
 
-```
+```text
 IssueWatchRepository
   repositoryId   string   # kandev repository UUID; "" never stored
-  baseBranch     string   # "" = the repository's default branch (resolved at save time)
+  baseBranch     string   # input "" = "use the repo default"; the CONCRETE branch is persisted
 ```
 
 Rules:
-- Empty `repositories_json` = unbound. The legacy `repository_id`/`base_branch` columns are read **only as a fallback** for rows written before the migration backfill; every write keeps them in sync with the first entry (or `''` when unbound).
+- Empty `repositories_json` = unbound. The legacy `repository_id`/`base_branch` columns are derived from the first entry (or `''` when unbound) **by the store at write time** — the canonical list is the only source of truth, so the mirror cannot drift; they are read as a fallback only for rows written before the migration backfill.
+- **An empty `baseBranch` in input is resolved to the repository's `DefaultBranch` and the concrete branch is persisted.** `""` never appears in a stored bound entry; it appears only transiently on the wire and for unbound watches.
 - Migration backfills `repositories_json` from legacy columns for existing bound rows (`[{"repositoryId": <repository_id>, "baseBranch": <base_branch>}]`), expand-only and idempotent per the house pattern (ADR 0008).
-- A stored entry's `repositoryId` is guaranteed to belong to the watch's workspace (validated at save time, mirroring the current single-repo `RepositoryLookup` guard).
+- A stored entry's `repositoryId` is guaranteed to belong to the watch's workspace (validated at save time; production always wires the `RepositoryLookup`, so the workspace check always runs in the API path).
+- **Duplicate `repositoryId` entries are collapsed to the first occurrence at save time — not rejected.** The dialog also prevents duplicates by excluding already-bound repositories from the add control.
 - Entries are ordered; the first entry is the task's primary repository (matching the multi-repo task convention, e.g. `executor.go` populating legacy top-level fields from `Repositories[0]`).
 
 ## API surface
@@ -55,7 +57,7 @@ repositories?: [{ repositoryId: string, baseBranch: string }]   # create: absent
 ```
 
 - Legacy singular `repositoryId` / `baseBranch` fields remain accepted; when both plural and singular are present, the plural wins. A create with only the singular fields stores a one-entry list (backward compatible with today's client).
-- The watch GET response emits both: `repositories` (canonical) and the legacy singular keys (mirroring the first entry, for old clients).
+- **Unbound GET response contract:** the watch GET response emits `repositories` (canonical) and the legacy singular keys (mirroring the first entry) **only when the watch is bound**; an unbound watch omits both — `repositories` is absent, never an empty array. The frontend treats a defined `repositories` array, including `[]`, as canonical and falls back to the legacy keys only when `repositories` is absent.
 - `NewLinearIssueEvent` (internal bus) carries `Repositories []IssueWatchRepository` instead of the singular pair; the orchestrator source maps it onto `IssueTaskRequest.Repositories` directly. Empty list ⇒ `Repositories == nil` in the task request (the unbound invariant).
 
 ## Permissions
@@ -83,6 +85,7 @@ The binding survives restart: it lives in `linear_issue_watches.repositories_jso
 - **GIVEN** a create request binding a repository from another workspace (or a non-existent one), **WHEN** saved, **THEN** it is rejected with a 400-family `ErrInvalidConfig` and nothing is stored.
 - **GIVEN** a bound watch whose repository is later soft-deleted, **WHEN** the watcher dispatches, **THEN** the watch is disabled with a `last_error` and no task is created.
 - **GIVEN** an update request omitting `repositories`, **WHEN** patched, **THEN** the binding is left unchanged; an update sending `repositories: []` clears it.
+- **GIVEN** a watch bound to two repositories, **WHEN** an unrelated PATCH (e.g. prompt or enabled only) is applied, **THEN** both entries remain — the binding is never rebuilt from the legacy mirror, which holds only the first entry.
 
 ## Out of scope
 

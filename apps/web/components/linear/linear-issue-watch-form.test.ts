@@ -172,6 +172,13 @@ describe("repository bindings form mapping", () => {
     );
   });
 
+  it("treats an explicit empty repositories array as canonical, ignoring stale legacy fields", () => {
+    expect(
+      watchForm({ repositories: [], repositoryId: "repo-legacy", baseBranch: "old-main" })
+        .repositories,
+    ).toEqual([]);
+  });
+
   it("maps an unbound watch to an empty list", () => {
     expect(watchForm({}).repositories).toEqual([]);
   });

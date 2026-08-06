@@ -14,7 +14,7 @@ spec: "../../specs/linear-watcher-multiple-repositories/spec.md"
 
 - `IssueWatch` carries `Repositories []IssueWatchRepository`; `IssueWatchRepository{RepositoryID, BaseBranch}` is defined in `apps/backend/internal/linear/models.go`. Custom `UnmarshalJSON` on `IssueWatch` fills `Repositories` from the legacy `repositoryId`/`baseBranch` keys when `repositories` is absent (plural wins when both present).
 - `linear_issue_watches` gains `repositories_json TEXT NOT NULL DEFAULT ''` in `createTablesSQL` plus an idempotent `addIssueWatchRepositoriesJSONColumn()` migration (`PRAGMA table_info` guard + `ALTER TABLE`) that **backfills** `repositories_json` from non-empty legacy `repository_id`/`base_branch` and is registered in `initSchema`. Fresh installs get the column from DDL.
-- Store CRUD persists/reads `repositories_json` as canonical and keeps the legacy `repository_id`/`base_branch` columns mirrored from the first entry (or `''` when unbound); reads fall back to the legacy columns only when `repositories_json` is empty.
+- Store CRUD persists/reads `repositories_json` as canonical and **derives** the legacy `repository_id`/`base_branch` columns from the first entry (or `''` when unbound) **at write time** — the store is the sole writer of the DB columns, so the mirror cannot drift; the service mirrors the same values on the response object. Reads fall back to the legacy columns only when `repositories_json` is empty.
 - `CreateIssueWatchRequest` / `UpdateIssueWatchRequest` gain `Repositories []IssueWatchRepository` (update: nil slice = unchanged, empty = clear); `NewLinearIssueEvent` replaces `RepositoryID`/`BaseBranch` with `Repositories`.
 
 ## Verification

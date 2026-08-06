@@ -62,10 +62,10 @@ type IssueWatchRepository struct {
   - Trim both fields per entry; drop entries with empty `RepositoryID` (mirrors `normalizeFilter` dropping empty ids).
   - Reject a non-empty `BaseBranch` that fails `securityutil.IsValidBaseBranchRef` (existing guard, per entry).
   - **Dedupe by `RepositoryID`, keep first occurrence** (mirrors `normalizeFilter` priority dedupe; the UI also prevents duplicates).
-  - When `repoLookup` is wired: `GetRepository` per entry — missing ⇒ `ErrInvalidConfig`, cross-workspace ⇒ `ErrInvalidConfig`; fill empty `BaseBranch` with the repo's `DefaultBranch`. Unwired ⇒ accept as-is (fail-open, matches today).
+  - When `repoLookup` is wired: `GetRepository` per entry — missing ⇒ `ErrInvalidConfig`, cross-workspace ⇒ `ErrInvalidConfig`; fill empty `BaseBranch` with the repo's `DefaultBranch`. The lookup is **always wired in production** (`backendapp/helpers.go`), so the workspace check always runs in the API path; the unwired branch exists only for unit tests that construct the service directly.
 - `CreateIssueWatch`: normalize the request's bindings first (`plural if len>0 else singular→one-entry`), run `resolveRepositoryBindings`, then set `w.Repositories`, and sync `w.RepositoryID`/`w.BaseBranch` from `Repositories[0]` before persist.
 - `UpdateIssueWatch`: capture `prevRepositories`; in `applyIssueWatchPatch` handle the new field (plural present ⇒ replace; else legacy singular logic unchanged, converting the result into `Repositories`); re-resolve only when the binding changed (same edit-friendly rule as today: unchanged binding with a since-deleted repo must not block prompt/filter edits).
-- `applyIssueWatchPatch`: plural present ⇒ `w.Repositories = req.Repositories` and legacy fields are derived from it; singular present + plural absent ⇒ existing rebind/reset-branch semantics, then `w.Repositories = [w.RepositoryID, w.BaseBranch]` (or empty when RepositoryID == "").
+- `applyIssueWatchPatch`: plural present ⇒ `w.Repositories = req.Repositories` and legacy fields are derived from it; singular present + plural absent ⇒ existing rebind/reset-branch semantics, then `w.Repositories = [w.RepositoryID, w.BaseBranch]` (or empty when RepositoryID == ""); **no repository field present ⇒ the binding is left untouched** (an unrelated PATCH must never rebuild the list from the legacy mirror, which holds only the first entry).
 - `publishNewLinearIssueEvent`: emit `Repositories: w.Repositories` (drop singular).
 
 ### Source (`source_linear.go`)
@@ -142,19 +142,19 @@ Frontend:
 Extend `apps/web/e2e/tests/integrations/linear-settings.spec.ts` (mock Linear provider, real SQLite store — watch CRUD exercises the real service):
 
 - **Scenario:** seed two repositories in the workspace (`apiClient.createRepository`), open New Watcher, add both via the repo dropdown, set a branch on one, save; assert the watch persists via `apiClient.rawRequest("GET", "/api/v1/linear/watches/issue?workspace_id=…")` → `repositories` has 2 entries in order.
-- **Scenario:** reopen the dialog for the saved watch; both repo rows render with the saved branches.
-- **Scenario (invariant):** create a watch without touching the repository picker; assert the stored watch has no `repositories` and a triggered issue still creates a repo-less task (assert via the created task's repository association, mirroring the existing watcher trigger helpers in this spec file's sibling flows).
+- **Scenario (invariant):** create a watch without touching the repository picker; assert the stored watch **omits** `repositories` (the unbound GET contract — the key is absent, never an empty array) and a triggered issue still creates a repo-less task (assert via the created task's repository association, mirroring the existing watcher trigger helpers in this spec file's sibling flows).
+- **Scenario:** reopen the dialog for the saved watch; both repo rows render with the saved branches — including a repo whose branch fetch returns nothing (no repo on disk), which must still display its resolved default branch.
 - Keep it to one spec file; run with `KANDEV_E2E_MOCK=true` (e2e fixture already sets `KANDEV_MOCK_LINEAR`).
 
 ## Rollout
 
 - **No feature flag** — additive, empty default (`repositories_json = ''` = today's behaviour), same rationale as PR #1491.
 - Migration is expand-only + backfill, idempotent, runs on first boot (ADR 0008 snapshot path).
-- Backend + frontend ship in the same release; an old UI against the new backend sends singular fields (still accepted); a new UI against an old backend sends `repositories` (ignored) and the watch is created unbound — the documented degrade for a mixed-version deployment, acceptable and temporary.
+- Backend and frontend ship in the same release, and the SPA is served by the backend, so a new UI can never reach an old backend in a supported deployment — there is no window in which `repositories` could be silently discarded. The only cross-version direction is an old UI against a new backend, which stays fully compatible via the accepted singular fields.
 
 ## Risks
 
-- **Dual representation** (JSON column + legacy mirror columns). Mitigated: the service is the single writer, it syncs both, and the store treats `repositories_json` as canonical with legacy as read-fallback only.
+- **Dual representation** (JSON column + legacy mirror columns). Mitigated: the legacy columns are derived from the canonical list by the store at write time (single derivation at the persistence boundary, so they cannot drift); the service mirrors the same values on the in-memory response object. Neither layer holds an independent value.
 - **i18n ratchet on new UI.** The new component and any changed dialog lines must use `t()` with keys added to both catalogs; forgetting fails pre-commit/CI. Mitigated: keys + `i18n:pseudo` step listed in the frontend task.
 - **Patch tri-state of the array.** `repositories: []` (clear) vs absent (unchanged) relies on Go slice nil-ness through JSON — `nil` slice on absent key. Covered by the update tests.
 - **Scope creep to Jira/Sentry.** Explicitly out of scope; the shared helper change is guarded to be backward compatible.

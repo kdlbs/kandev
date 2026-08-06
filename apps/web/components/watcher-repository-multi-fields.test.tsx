@@ -122,6 +122,13 @@ describe("WatcherRepositoryMultiFields", () => {
     expect(onChange).toHaveBeenCalledWith([REPO_B_DEVELOP]);
   });
 
+  it("renders a saved branch even when the branch list does not include it", () => {
+    // Empty branch response (e.g. fetch failed, or the repo dir was moved):
+    // the saved branch must still render as an option so the trigger shows it.
+    renderPicker([{ repositoryId: "repo-a", baseBranch: "main" }], [REPO_A], []);
+    expect(screen.getByTestId("branch-trigger-repo-a").textContent).toContain("main");
+  });
+
   it("shows the add control and a hint when the workspace has no repositories", () => {
     renderPicker([], [], []);
     expect(screen.getByText("No repositories available in this workspace.")).toBeTruthy();

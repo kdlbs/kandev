@@ -459,23 +459,31 @@ func sameRepositories(a, b []IssueWatchRepository) bool {
 // applyRepositoryBindingPatch applies the repository-binding part of a PATCH.
 // The plural field wins when present; otherwise the legacy singular fields
 // apply with the old rebind/reset-branch semantics and are converted back
-// into the canonical list (an empty singular repositoryId unbinds).
+// into the canonical list (an empty singular repositoryId unbinds). When no
+// repository field is present at all, the binding is left untouched — an
+// unrelated PATCH (prompt, enabled, …) must never rebuild the list from the
+// legacy mirror, which only holds the first entry of a multi-repo watch.
 func applyRepositoryBindingPatch(w *IssueWatch, req *UpdateIssueWatchRequest) {
 	if req.Repositories != nil {
 		w.Repositories = req.Repositories
 		syncLegacyBinding(w)
 		return
 	}
+	singularChanged := false
 	if req.RepositoryID != nil {
 		if *req.RepositoryID != w.RepositoryID && req.BaseBranch == nil {
 			w.BaseBranch = ""
 		}
 		w.RepositoryID = *req.RepositoryID
+		singularChanged = true
 	}
 	if req.BaseBranch != nil {
 		w.BaseBranch = *req.BaseBranch
+		singularChanged = true
 	}
-	w.Repositories = bindingFromLegacy(w.RepositoryID, w.BaseBranch)
+	if singularChanged {
+		w.Repositories = bindingFromLegacy(w.RepositoryID, w.BaseBranch)
+	}
 }
 
 func validateIssueWatchCreate(req *CreateIssueWatchRequest) error {

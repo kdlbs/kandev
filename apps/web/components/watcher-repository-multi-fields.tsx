@@ -111,6 +111,12 @@ function RepoBindingRow({
   // renders every matching item's text in the trigger and React warns on
   // duplicate keys. Dedupe by name so each branch is one option.
   const uniqueBranchNames = Array.from(new Set(branches.map((b) => b.name)));
+  // A saved branch that the fetch did not return (stale/empty response, or the
+  // repo moved) must still render as an option, or the reopened row's Select
+  // has no matching item and shows an empty trigger instead of the binding.
+  if (binding.baseBranch && !uniqueBranchNames.includes(binding.baseBranch)) {
+    uniqueBranchNames.push(binding.baseBranch);
+  }
   return (
     <div className="grid grid-cols-1 gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,240px)] sm:items-end">
       <div className="min-w-0 space-y-1.5">

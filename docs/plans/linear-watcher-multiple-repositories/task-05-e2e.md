@@ -14,8 +14,8 @@ spec: "../../specs/linear-watcher-multiple-repositories/spec.md"
 
 - Extending `apps/web/e2e/tests/integrations/linear-settings.spec.ts` (mock Linear provider; watch CRUD runs against the real SQLite store):
   - GIVEN a workspace with two seeded repositories (`apiClient.createRepository`), WHEN the user adds both to a new watcher via the repository add control and saves, THEN the stored watch (`apiClient.rawRequest("GET", "/api/v1/linear/watches/issue?workspace_id=…")`) has `repositories` with both entries in the added order.
-  - WHEN the dialog is reopened for that watch, THEN both repo rows render with their saved branches.
-  - GIVEN a watch created without touching the repository picker, THEN the stored watch carries no `repositories`, and triggering it still produces a task with no repository association (repo-less invariant, asserted via the created task).
+  - WHEN the dialog is reopened for that watch, THEN both repo rows render with their saved branches — including a repo whose branch fetch returns nothing (no repo on disk), which must still display its resolved default branch.
+  - GIVEN a watch created without touching the repository picker, THEN the stored watch **omits** `repositories` (the unbound GET contract: the key is absent, never an empty array), and triggering it still produces a task with no repository association (repo-less invariant, asserted via the created task).
 - The new copy asserted in the spec (button/option names) matches the `linear` i18n catalog keys, and the spec passes locally.
 
 ## Verification

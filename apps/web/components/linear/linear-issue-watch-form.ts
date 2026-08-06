@@ -105,12 +105,14 @@ function estimateString(v: number | null | undefined): string {
 }
 
 /**
- * Maps a stored watch's repository bindings into the form, preferring the
- * canonical `repositories` list and falling back to the legacy singular fields
- * for watches saved before multi-repository support.
+ * Maps a stored watch's repository bindings into the form. A defined
+ * `repositories` array is canonical — including an empty one, which means
+ * "unbound" even if the legacy singular fields still carry stale values.
+ * The legacy singular fields are read only when `repositories` is undefined
+ * (watches saved before multi-repository support).
  */
 export function watchRepositories(w: LinearIssueWatch): LinearWatchRepositoryBinding[] {
-  if (w.repositories && w.repositories.length > 0) return w.repositories;
+  if (w.repositories !== undefined) return w.repositories;
   if (w.repositoryId) return [{ repositoryId: w.repositoryId, baseBranch: w.baseBranch ?? "" }];
   return [];
 }

@@ -329,6 +329,9 @@ test.describe("Linear settings", () => {
     await expect(editDialog.getByText("E2E Repo", { exact: true })).toBeVisible();
     await expect(editDialog.getByText("E2E Repo B", { exact: true })).toBeVisible();
     await expect(editDialog.getByTestId(`branch-trigger-${firstRepoId}`)).toContainText("main");
+    // The second repo's branch was resolved to its default at save; it must
+    // render even though its branch fetch returns nothing (no repo on disk).
+    await expect(editDialog.getByTestId(`branch-trigger-${secondRepo.id}`)).toContainText("main");
   });
 
   test("watcher saved without touching the repository picker stays unbound", async ({
