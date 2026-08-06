@@ -38,9 +38,50 @@ type backgroundWorkOwner interface {
 }
 
 type languageSlot struct {
-	opMu           sync.Mutex
-	runtime        *runtime
-	lastGeneration uint64
+	opMu                   sync.Mutex
+	startMu                sync.Mutex
+	runtime                *runtime
+	lastGeneration         uint64
+	nextStartToken         uint64
+	pendingStartToken      uint64
+	pendingStartGeneration uint64
+	pendingStartCancel     context.CancelFunc
+}
+
+func (s *languageSlot) lockStartOperation(
+	parent context.Context,
+	generation uint64,
+) (context.Context, func()) {
+	operationCtx, cancel := context.WithCancel(parent)
+	s.startMu.Lock()
+	s.opMu.Lock()
+	s.nextStartToken++
+	token := s.nextStartToken
+	s.pendingStartToken = token
+	s.pendingStartGeneration = generation
+	s.pendingStartCancel = cancel
+	s.startMu.Unlock()
+	return operationCtx, func() {
+		s.opMu.Unlock()
+		s.startMu.Lock()
+		if s.pendingStartToken == token {
+			s.pendingStartToken = 0
+			s.pendingStartGeneration = 0
+			s.pendingStartCancel = nil
+		}
+		s.startMu.Unlock()
+		cancel()
+	}
+}
+
+func (s *languageSlot) lockAfterCancelingStart(generation uint64) {
+	s.startMu.Lock()
+	if s.pendingStartCancel != nil &&
+		(generation == 0 || generation >= s.pendingStartGeneration) {
+		s.pendingStartCancel()
+	}
+	s.opMu.Lock()
+	s.startMu.Unlock()
 }
 
 type Manager struct {
@@ -172,7 +213,7 @@ func (m *Manager) start(request StartRequest) (Snapshot, error) {
 	if err := validateStartRequest(request); err != nil {
 		return Snapshot{}, err
 	}
-	operationCtx, err := m.ensureLifetime()
+	lifetimeCtx, err := m.ensureLifetime()
 	if err != nil {
 		return Snapshot{}, err
 	}
@@ -181,8 +222,8 @@ func (m *Manager) start(request StartRequest) (Snapshot, error) {
 		return Snapshot{}, err
 	}
 
-	slot.opMu.Lock()
-	defer slot.opMu.Unlock()
+	operationCtx, unlock := slot.lockStartOperation(lifetimeCtx, request.Generation)
+	defer unlock()
 	if err := m.checkOpen(); err != nil {
 		return Snapshot{}, err
 	}
@@ -229,7 +270,7 @@ func (m *Manager) start(request StartRequest) (Snapshot, error) {
 		workspace:     workspace,
 		process:       server,
 		manager:       m,
-		ctx:           operationCtx,
+		ctx:           lifetimeCtx,
 	})
 	if owner, ok := m.processes.(backgroundWorkOwner); ok {
 		runtime.releaseBackgroundWork = owner.BeginBackgroundWork()
@@ -375,7 +416,7 @@ func (m *Manager) Stop(ctx context.Context, request StopRequest) (Snapshot, erro
 		}
 		return Snapshot{}, err
 	}
-	slot.opMu.Lock()
+	slot.lockAfterCancelingStart(request.Generation)
 	defer slot.opMu.Unlock()
 	if request.Generation != 0 && request.Generation < slot.lastGeneration {
 		return m.Snapshot(request.Language), ErrStaleGeneration
