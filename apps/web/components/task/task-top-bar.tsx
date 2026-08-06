@@ -21,6 +21,7 @@ import { TaskUnarchiveButton } from "@/components/task/task-unarchive-button";
 import { WorkflowStepper, type WorkflowStepperStep } from "@/components/task/workflow-stepper";
 import { TaskTopBarPluginActions } from "@/components/task/task-top-bar-plugin-actions";
 import { TopbarMetrics } from "@/components/system-metrics/topbar-metrics";
+import { TaskLspTopbarControl } from "@/components/lsp/task-lsp-topbar-control";
 import { isDebugUI } from "@/lib/config";
 
 type TaskTopBarProps = {
@@ -368,6 +369,7 @@ function TopBarRight({
 }) {
   return (
     <div className="flex items-center justify-self-end gap-2 [&_button]:whitespace-nowrap">
+      <TaskLspTopbarControl taskId={taskId ?? null} />
       <TopbarMetrics activeSessionId={activeSessionId} size="sm" />
       {!isArchived && (
         <TopbarCluster label="Plugin top bar actions" className="[&_button]:h-7 [&_button]:text-xs">

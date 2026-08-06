@@ -1,7 +1,7 @@
 ---
 id: "02-state-contracts"
 title: "Task language state contract"
-status: pending
+status: done
 wave: 2
 depends_on: ["01-acceptance-harness"]
 plan: "plan.md"
@@ -73,4 +73,17 @@ compatibility limitation. Reconcile actual files and update task/plan status.
 
 ## Results
 
-Pending.
+- Added `lsp.TaskLanguageState`, closed enums, validation, synthesized Inherit/off defaults, and a
+  store seam containing no session/browser/editor/environment ownership identifiers.
+- Added replay-safe `task_lsp_languages` fresh/migration DDL with composite `(task_id, language)`
+  primary key, task cascade, enum checks, every durable field from the spec, and a phase index.
+- Added SQLite CAS updates that increment revision atomically and `INSERT ... ON CONFLICT ...
+  RETURNING` generation allocation that increments generation/revision monotonically while
+  stamping action, reason, initiator, and timestamps.
+- Focused regex suite passed:
+  `go test ./internal/lsp/... ./internal/task/repository/sqlite -run 'Test(TaskLSP|TaskLsp|PostgresTaskLSP|PostgresTaskLsp|SchemaReplay)' -count=1`.
+- Full task package suite passed:
+  `go test ./internal/lsp/... ./internal/task/repository/sqlite -count=1` (SQLite repository took
+  11.741s).
+- `TestPostgresTaskLSPSchemaReplay` was discovered and skipped because
+  `KANDEV_TEST_POSTGRES_DSN` is not set; no Postgres pass is claimed.

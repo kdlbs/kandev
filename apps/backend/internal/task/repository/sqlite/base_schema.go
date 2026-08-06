@@ -165,6 +165,9 @@ func (r *Repository) initCoreSchema() error {
 	if err := r.initTaskStatusSummarySchema(); err != nil {
 		return err
 	}
+	if err := r.initTaskLSPSchema(); err != nil {
+		return err
+	}
 	return r.initCoreIndexes()
 }
 
@@ -184,6 +187,54 @@ const taskStatusSummarySchemaDDL = `
 
 func (r *Repository) initTaskStatusSummarySchema() error {
 	_, err := r.db.Exec(taskStatusSummarySchemaDDL)
+	return err
+}
+
+const taskLSPSchemaDDL = `
+	CREATE TABLE IF NOT EXISTS task_lsp_languages (
+		task_id TEXT NOT NULL,
+		language TEXT NOT NULL,
+		policy TEXT NOT NULL DEFAULT 'inherit'
+			CHECK (policy IN ('inherit', 'keep_warm', 'disabled')),
+		detected BOOLEAN NOT NULL DEFAULT FALSE,
+		detection_state TEXT NOT NULL DEFAULT 'unknown'
+			CHECK (detection_state IN ('unknown', 'scanning', 'complete', 'partial', 'unavailable')),
+		detection_scanned_at TIMESTAMP,
+		detection_truncated BOOLEAN NOT NULL DEFAULT FALSE,
+		phase TEXT NOT NULL DEFAULT 'off'
+			CHECK (phase IN (
+				'off', 'waiting_for_task', 'queued', 'installing', 'starting',
+				'process_started', 'initializing', 'ready', 'stopping', 'error', 'unsupported'
+			)),
+		generation BIGINT NOT NULL DEFAULT 0 CHECK (generation >= 0),
+		revision BIGINT NOT NULL DEFAULT 0 CHECK (revision >= 0),
+		process_started_at TIMESTAMP,
+		initialize_started_at TIMESTAMP,
+		ready_at TIMESTAMP,
+		last_transition_at TIMESTAMP NOT NULL,
+		last_action TEXT NOT NULL DEFAULT ''
+			CHECK (last_action IN ('', 'start', 'stop', 'restart', 'set_policy', 'reconcile')),
+		last_action_at TIMESTAMP,
+		last_stop_reason TEXT NOT NULL DEFAULT '',
+		last_restart_reason TEXT NOT NULL DEFAULT '',
+		last_initiator TEXT NOT NULL DEFAULT 'automatic'
+			CHECK (last_initiator IN ('user', 'agent', 'automatic')),
+		restart_required BOOLEAN NOT NULL DEFAULT FALSE,
+		restart_required_reason TEXT NOT NULL DEFAULT '',
+		error_code TEXT NOT NULL DEFAULT '',
+		error_message TEXT NOT NULL DEFAULT '',
+		created_at TIMESTAMP NOT NULL,
+		updated_at TIMESTAMP NOT NULL,
+		PRIMARY KEY (task_id, language),
+		FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
+	);
+
+	CREATE INDEX IF NOT EXISTS idx_task_lsp_languages_phase
+		ON task_lsp_languages(phase, updated_at);
+`
+
+func (r *Repository) initTaskLSPSchema() error {
+	_, err := r.db.Exec(taskLSPSchemaDDL)
 	return err
 }
 

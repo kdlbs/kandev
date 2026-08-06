@@ -341,6 +341,7 @@ type ExecutorCreateRequest struct {
 	TaskTitle            string
 	SessionID            string
 	TaskEnvironmentID    string // Env this execution belongs to (shared across sessions in same task)
+	IsTaskHost           bool   // Internal task-environment service host; never session-owned
 	AgentProfileID       string
 	OfficeAgentProfileID string
 	WorkspacePath        string
@@ -359,13 +360,13 @@ type ExecutorCreateRequest struct {
 	// runtime/agentctl boundary. Keys use the same workspace subpath convention
 	// as BaseBranches; the empty key is the workspace root.
 	RemoteContributions map[string]models.RemoteContribution
-	McpServers                     []McpServerConfig
-	AgentConfig                    agents.Agent // Agent type info needed by runtimes
-	PreviousExecutionID            string       // Non-empty when reconnecting to a previous execution
-	McpMode                        string       // MCP tool mode: "task" (default), "config", or "office"
-	McpProviders                   []string     // Normalized provider capabilities attached to the task
-	AuthToken                      string       // Previously handshaken agentctl token for reconnects
-	BootstrapNonce                 string       // Stored nonce for re-handshake after container restart
+	McpServers          []McpServerConfig
+	AgentConfig         agents.Agent // Agent type info needed by runtimes
+	PreviousExecutionID string       // Non-empty when reconnecting to a previous execution
+	McpMode             string       // MCP tool mode: "task" (default), "config", or "office"
+	McpProviders        []string     // Normalized provider capabilities attached to the task
+	AuthToken           string       // Previously handshaken agentctl token for reconnects
+	BootstrapNonce      string       // Stored nonce for re-handshake after container restart
 
 	// OnProgress is an optional callback for streaming preparation progress.
 	// Executors that perform multi-step setup (e.g. Sprites, remote Docker) can
@@ -442,6 +443,7 @@ func (ri *ExecutorInstance) ToAgentExecution(req *ExecutorCreateRequest) *AgentE
 		TaskID:               req.TaskID,
 		SessionID:            req.SessionID,
 		TaskEnvironmentID:    req.TaskEnvironmentID,
+		IsTaskHost:           req.IsTaskHost,
 		AgentProfileID:       req.AgentProfileID,
 		OfficeAgentProfileID: req.OfficeAgentProfileID,
 		AgentID:              agentID,

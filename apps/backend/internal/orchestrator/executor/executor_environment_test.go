@@ -420,6 +420,89 @@ func TestReuseExistingEnvironment_EmptyEnvFieldsDoNothing(t *testing.T) {
 	}
 }
 
+func TestPersistTaskEnvironment_RepairsResolvedExecutorIdentity(t *testing.T) {
+	repo := newMockRepository()
+	exec := newTestExecutor(t, &mockAgentManager{}, repo)
+	environment := &models.TaskEnvironment{
+		ID:     "env-1",
+		TaskID: "task-1",
+		Status: models.TaskEnvironmentStatusCreating,
+	}
+	repo.taskEnvironments[environment.ID] = environment
+	session := &models.TaskSession{
+		ID:                "session-1",
+		TaskID:            "task-1",
+		ExecutorProfileID: "local-profile",
+		TaskEnvironmentID: environment.ID,
+	}
+	req := &LaunchAgentRequest{
+		TaskID:       "task-1",
+		ExecutorType: string(models.ExecutorTypeLocal),
+	}
+	response := &LaunchAgentResponse{WorkspacePath: "/workspace/task-1"}
+	config := executorConfig{
+		ExecutorID:   models.ExecutorIDLocal,
+		ExecutorType: string(models.ExecutorTypeLocal),
+	}
+
+	exec.persistTaskEnvironment(
+		context.Background(), "task-1", session, environment, req, response, config,
+	)
+
+	stored := repo.taskEnvironments[environment.ID]
+	if stored.ExecutorType != string(models.ExecutorTypeLocal) {
+		t.Fatalf("ExecutorType = %q, want %q", stored.ExecutorType, models.ExecutorTypeLocal)
+	}
+	if stored.ExecutorID != models.ExecutorIDLocal {
+		t.Fatalf("ExecutorID = %q, want %q", stored.ExecutorID, models.ExecutorIDLocal)
+	}
+	if stored.ExecutorProfileID != "local-profile" {
+		t.Fatalf("ExecutorProfileID = %q, want local-profile", stored.ExecutorProfileID)
+	}
+}
+
+func TestTaskEnvironmentReadyCallbackRunsAfterSessionLinkPersistence(t *testing.T) {
+	repo := newMockRepository()
+	exec := newTestExecutor(t, &mockAgentManager{}, repo)
+	now := time.Now().UTC()
+	session := &models.TaskSession{
+		ID: "session-ready", TaskID: "task-ready", State: models.TaskSessionStateCreated,
+		TaskEnvironmentID: "env-ready", StartedAt: now, UpdatedAt: now,
+	}
+	persisted := *session
+	persisted.TaskEnvironmentID = ""
+	repo.sessions[session.ID] = &persisted
+
+	var callbackCalls int
+	var observedEnvironmentID string
+	exec.onTaskEnvironmentReady = func(ctx context.Context, taskID string) {
+		callbackCalls++
+		stored, err := repo.GetTaskSession(ctx, session.ID)
+		if err == nil && stored != nil {
+			observedEnvironmentID = stored.TaskEnvironmentID
+		}
+	}
+	request := &LaunchAgentRequest{
+		TaskID: "task-ready", TaskEnvironmentID: "env-ready",
+		ExecutorType: string(models.ExecutorTypeLocal),
+	}
+	response := &LaunchAgentResponse{AgentExecutionID: "execution-ready", WorkspacePath: "/workspace/task-ready"}
+	exec.persistTaskEnvironment(
+		context.Background(), "task-ready", session, nil, request, response,
+		executorConfig{ExecutorID: models.ExecutorIDLocal, ExecutorType: string(models.ExecutorTypeLocal)},
+	)
+	if _, err := exec.finalizeLaunch(
+		context.Background(), &v1.Task{ID: "task-ready"}, session, "profile-ready", session.ID,
+		&repoInfo{RepositoryID: "repo-ready"}, response, false, executorConfig{},
+	); err != nil {
+		t.Fatalf("finalizeLaunch: %v", err)
+	}
+
+	if callbackCalls != 1 || observedEnvironmentID != "env-ready" {
+		t.Fatalf("ready callback calls/environment = %d/%q, want 1/env-ready", callbackCalls, observedEnvironmentID)
+	}
+}
+
 // TestApplyExecutorRunningMetadata_SkipsSessionScopedKeys pins the guard
 // that prevents a SECOND session on the same task from inheriting the FIRST
 // session's session-scoped runtime resources — agentctl PID/port, remote
@@ -546,6 +629,15 @@ func TestExtractSandboxID(t *testing.T) {
 				t.Errorf("extractSandboxID() = %q, want %q", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestTaskEnvironmentExecutorIdentityDefaultsWithoutMutatingSessionConfig(t *testing.T) {
+	executorType, executorID := taskEnvironmentExecutorIdentity(&LaunchAgentRequest{}, executorConfig{})
+
+	if executorType != string(models.ExecutorTypeLocal) || executorID != models.ExecutorIDLocal {
+		t.Fatalf("default environment identity = %q/%q, want %q/%q",
+			executorType, executorID, models.ExecutorTypeLocal, models.ExecutorIDLocal)
 	}
 }
 

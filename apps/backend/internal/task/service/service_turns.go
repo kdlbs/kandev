@@ -991,7 +991,36 @@ func (s *Service) GetWorkspaceInfoForEnvironment(ctx context.Context, taskEnviro
 		}
 		return info, nil
 	}
-	return nil, fmt.Errorf("task environment %s has no linked task session", taskEnvironmentID)
+	return s.getTaskOwnedWorkspaceInfo(ctx, env)
+}
+
+func (s *Service) getTaskOwnedWorkspaceInfo(
+	ctx context.Context,
+	env *models.TaskEnvironment,
+) (*lifecycle.WorkspaceInfo, error) {
+	info := &lifecycle.WorkspaceInfo{
+		TaskID: env.TaskID, TaskEnvironmentID: env.ID,
+		WorkspacePath: env.WorkspacePath, TaskDirName: env.TaskDirName,
+		ExecutorType: env.ExecutorType,
+	}
+	applyTaskEnvironmentToWorkspaceInfo(info, env)
+	if s.workspaceFolders != nil {
+		folders, err := s.workspaceFolders.ListTaskWorkspaceFolders(ctx, env.TaskID)
+		if err != nil {
+			return nil, fmt.Errorf("list task workspace folders: %w", err)
+		}
+		for _, folder := range folders {
+			if folder != nil {
+				info.WorkspaceFolders = append(info.WorkspaceFolders, lifecycle.WorkspaceFolderSpec{
+					Name: folder.DisplayName, LocalPath: folder.LocalPath,
+				})
+			}
+		}
+	}
+	if err := s.populateWorkspaceRepositorySpecs(ctx, env.TaskID, nil, info); err != nil {
+		return nil, err
+	}
+	return info, nil
 }
 
 func isExecutorRunningNotFoundError(err error) bool {

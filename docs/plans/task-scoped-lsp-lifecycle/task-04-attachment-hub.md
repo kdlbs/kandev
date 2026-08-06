@@ -1,7 +1,7 @@
 ---
 id: "04-attachment-hub"
 title: "Task-host attachment hub"
-status: pending
+status: done
 wave: 2
 depends_on: ["03-task-host-supervisor"]
 plan: "plan.md"
@@ -72,4 +72,37 @@ unsupported server/client method. Update task/plan status and actual files.
 
 ## Results
 
-Pending.
+Implemented a generation-bound task-host attachment hub. Each downstream request retains its local
+JSON-RPC ID while the single upstream peer allocates a distinct task-host ID; per-attachment
+pending maps route responses and cancellation only to the source attachment. Detach cancels and
+joins pending work, drops late responses, and releases document references without changing
+runtime policy or process state. Restart closes the old generation hub before replacement.
+
+The first frame now carries `attached`, language, generation, workspace URI/folders, and initialized
+capabilities. Cached diagnostics replay after that frame; safe server notifications fan out to all
+current attachments. Lifecycle/configuration messages (`initialize`, `initialized`, `shutdown`,
+`exit`, and `workspace/didChangeConfiguration`) are task-host-owned and rejected without closing a
+healthy attachment. Server requests remain centrally handled by the Task 03 peer.
+
+Added a synchronized canonical document broker. First open sends upstream version 1; duplicate
+opens only add attachment references and cannot rewind text. Accepted full/incremental changes are
+applied to the canonical overlay and receive monotonically increasing upstream versions in arrival
+order. Save respects server capability and omits stale optional text. Final close/detach sends one
+`didClose`; closing the last attachment leaves the hub and language server alive.
+
+TDD and verification evidence:
+
+- RED: hub/document types were undefined and `/attach` returned 404.
+- GREEN: colliding IDs, cancellation, detach/late-response discard, stale generation rejection,
+  restart closure, diagnostic replay, notification fanout, lifecycle rejection, duplicate/stale
+  open, interleaved versioning, save filtering, final close, and non-owning disconnect pass.
+- `go test ./internal/agentctl/server/lsp ./internal/agentctl/server/api -run
+  'Test(Attachment|Hub|Document|LSPAttach)'` — pass.
+- `go test -race ./internal/agentctl/server/lsp ./internal/agentctl/server/api` — pass.
+- `go test ./internal/agentctl/server/lsp -run 'Test(Attachment|Hub|Document)' -count=20` — pass
+  in 0.392s with package `goleak` verification.
+- Full `go test ./internal/agentctl/server/lsp ./internal/agentctl/server/api` — pass.
+
+Actual files added: `server/lsp/{attachment,hub,documents}.go` and hub/document tests. Actual files
+updated: peer raw-call/cancellation support, runtime fanout/hub ownership, manager generation-bound
+Attach, task-host WebSocket attach route/tests, this task, and parent plan.

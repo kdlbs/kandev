@@ -36,7 +36,6 @@ export type LSPConnection = {
   rpc: JsonRpcConnection | null;
   initialized: boolean;
   refCount: number;
-  idleTimer: ReturnType<typeof setTimeout> | null;
   openDocuments: Map<string, OpenDocument>;
   providerDisposables: IDisposable[];
   serverCapabilities: Record<string, unknown> | null;

@@ -9,7 +9,7 @@ agentctl exposes these route groups (see `server/api/`):
 - `/instances/*` - Multi-instance management
 - `/processes/*` - Agent subprocess management (start/stop)
 - `/agent/configure`, `/agent/stream` - Agent configuration and event streaming
-- `/lsp/stream` - Task-host language-server stdio/WebSocket bridge
+- `/lsp/discovery`, `/lsp/workspace/*`, `/lsp/languages/*` - Instance-owned language-server discovery, control, watch, and non-owning attachment
 - `/git/*` - Git operations (status, commit, push, pull, rebase, stage, create PR, etc.)
 - `/shell/*` - Shell session management
 - `/workspace/*` - File operations, search, tree
@@ -114,10 +114,12 @@ wait). After the command leader exits, `waitForProcessExit` still checks the
 agent process group and sends SIGTERM/SIGKILL if descendants remain. If `Stop(ctx)`
 times out, it also re-runs the pgid SIGKILL fallback.
 
-Non-agent protocol subprocesses must use the same ownership path. LSP servers
-start through `process.Manager.StartPipedProcess`, which exposes stdin/stdout to
-the bridge while registering the command with `ProcessRunner`; instance teardown
-then closes admission and reaps the full process tree on Unix and Windows.
+Non-agent protocol subprocesses must use the same ownership path. The instance-owned
+`server/lsp.Manager` starts each language through
+`process.Manager.StartPipedProcess`, owns initialization/progress and downstream
+attachments, and registers the command with `ProcessRunner`. An attachment is
+never a process lease; instance teardown closes admission, stops every language,
+and reaps the full process tree on Unix and Windows.
 LSP auto-install work holds `Manager.BeginOwnedOperation`; npm and Go installer
 commands run through `Manager.CombinedOutput`, so teardown cancels downloads,
 drains cache mutations, and reaps installer descendants before resources are

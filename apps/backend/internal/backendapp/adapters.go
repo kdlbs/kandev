@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path/filepath"
+	"sort"
 	"sync"
 	"time"
 
@@ -19,6 +21,7 @@ import (
 	"github.com/kandev/kandev/internal/clarification"
 	"github.com/kandev/kandev/internal/common/logger"
 	githubsvc "github.com/kandev/kandev/internal/github"
+	tasklsp "github.com/kandev/kandev/internal/lsp"
 	"github.com/kandev/kandev/internal/orchestrator"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/task/models"
@@ -26,6 +29,81 @@ import (
 	taskservice "github.com/kandev/kandev/internal/task/service"
 	"github.com/kandev/kandev/pkg/api/v1"
 )
+
+type taskLSPTaskHostAdapter struct {
+	manager *lifecycle.Manager
+}
+
+func newTaskLSPTaskHostAdapter(manager *lifecycle.Manager) *taskLSPTaskHostAdapter {
+	return &taskLSPTaskHostAdapter{manager: manager}
+}
+
+func (a *taskLSPTaskHostAdapter) EnsureTaskHost(
+	ctx context.Context,
+	taskEnvironmentID string,
+) (tasklsp.TaskHost, error) {
+	execution, err := a.manager.GetOrEnsureTaskHostForEnvironment(ctx, taskEnvironmentID)
+	if err != nil {
+		return nil, err
+	}
+	if execution == nil || execution.GetAgentCtlClient() == nil {
+		return nil, errors.New("task host control client is unavailable")
+	}
+	return execution.GetAgentCtlClient(), nil
+}
+
+func (a *taskLSPTaskHostAdapter) ExistingTaskHost(
+	ctx context.Context,
+	taskEnvironmentID string,
+) (tasklsp.TaskHost, bool, error) {
+	execution, exists, err := a.manager.GetTaskHostForEnvironment(ctx, taskEnvironmentID)
+	if err != nil || !exists || execution == nil {
+		return nil, false, err
+	}
+	client := execution.GetAgentCtlClient()
+	if client == nil {
+		return nil, false, nil
+	}
+	return client, true, nil
+}
+
+func (a *taskLSPTaskHostAdapter) CleanupTaskHost(
+	ctx context.Context,
+	taskEnvironmentID, reason string,
+) error {
+	return a.manager.StopTaskHostForEnvironment(ctx, taskEnvironmentID, reason)
+}
+
+func taskLSPDiscoveryRoots(info *lifecycle.WorkspaceInfo) []string {
+	if info == nil {
+		return nil
+	}
+	seen := make(map[string]struct{})
+	add := func(path string) {
+		if path == "" || !filepath.IsAbs(path) {
+			return
+		}
+		path = filepath.Clean(path)
+		if filepath.Dir(path) != path {
+			seen[path] = struct{}{}
+		}
+	}
+	if models.ExecutorType(info.ExecutorType) != models.ExecutorTypeLocalDocker {
+		add(info.WorkspacePath)
+	}
+	for _, folder := range info.WorkspaceFolders {
+		add(folder.LocalPath)
+	}
+	for _, repository := range info.WorkspaceRepositories {
+		add(repository.RepositoryPath)
+	}
+	result := make([]string, 0, len(seen))
+	for root := range seen {
+		result = append(result, root)
+	}
+	sort.Strings(result)
+	return result
+}
 
 // taskGetterRepo is the minimal interface needed by the scheduler adapter.
 type taskGetterRepo interface {

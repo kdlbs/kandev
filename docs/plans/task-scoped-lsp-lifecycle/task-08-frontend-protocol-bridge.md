@@ -1,7 +1,7 @@
 ---
 id: "08-frontend-protocol-bridge"
 title: "Frontend task protocol bridge"
-status: pending
+status: completed
 wave: 4
 depends_on: ["07-lifecycle-reconciliation"]
 plan: "plan.md"
@@ -86,4 +86,24 @@ typecheck/lint results, and any protocol feature limitation. Update task/plan st
 
 ## Results
 
-Pending.
+Completed 2026-08-05.
+
+- Added task/language HTTP types, strict action clients, a revision-aware Zustand slice, semantic
+  WebSocket updates, and `useTaskLsp`. Lower revisions cannot rewind live state; equal revisions
+  can carry newer task-host work evidence.
+- Re-keyed the browser attachment manager to `(task, language)`. Same-task sessions share one
+  attachment while session IDs remain only at the Monaco model/file edge. The attached envelope is
+  now the capability/workspace source.
+- Removed browser `initialize`, `initialized`, `shutdown`, `exit`, progress ownership, manual
+  localStorage policy, and the two-minute editor idle timer. Final editor release closes only the
+  downstream attachment.
+- Preserved provider registration, diagnostic replay to every same-task session model, canonical
+  document deduplication, navigation placeholders, TypeScript suppression, ordered changes, and
+  save-race protection. Effective server configuration is supplied by the task host rather than an
+  editor attachment.
+- RED evidence: the initial API/slice/WS suites failed on missing task-domain modules; the new
+  task-scope manager test failed with two session-keyed sockets; the hook suite failed before the
+  task controller bridge existed.
+- GREEN: `cd apps && pnpm --filter @kandev/web test -- --run lib/api/domains/lsp-api.test.ts lib/state/slices/lsp hooks/domains/lsp lib/ws/handlers/lsp.test.ts hooks/use-lsp.test.tsx lib/lsp/lsp-client-manager.test.ts lib/lsp/lsp-client-manager.task-scope.test.ts lib/lsp/lsp-client-manager.document-sync.test.ts lib/lsp/lsp-client-manager.progress.test.ts lib/lsp/lsp-providers.test.ts` — 10 files, 65 tests passed.
+- GREEN: `cd apps/web && pnpm run typecheck`.
+- GREEN: `cd apps/web && pnpm exec eslint lib/api/domains/lsp-api.ts lib/state/slices/lsp hooks/domains/lsp lib/ws/handlers/lsp.ts lib/lsp hooks/use-lsp.ts` — no findings.

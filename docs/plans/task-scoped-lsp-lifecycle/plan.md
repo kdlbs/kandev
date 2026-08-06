@@ -1,7 +1,7 @@
 ---
 spec: docs/specs/lsp-file-intelligence/spec.md
 created: 2026-08-05
-status: draft
+status: completed
 ---
 
 # Implementation Plan: Task-Scoped LSP Lifecycle
@@ -275,9 +275,21 @@ evidence so tests assert process truth rather than only UI labels.
 
 ## Verification Results
 
-Pending. On completion, synchronize this section with every task's `## Results`: include RED/GREEN
-evidence, exact test counts and commands, race/goleak outcomes, production E2E artifacts, child
-process cleanup evidence, public-doc validation, and final worktree status.
+Completed 2026-08-05.
+
+- TDD began with an executable production RED: the task controller was absent before any
+  production implementation. Tasks 02–09 record their focused RED/GREEN evidence and actual files.
+- Production Playwright passed 29/29 task-scoped LSP scenarios: 9 task-contract, 13 existing
+  desktop, 3 phone/tablet, and 4 Docker/SSH tests. The fake Kotlin server verified real PID,
+  initialize, import, generation, graceful-exit, and task-cleanup evidence.
+- Focused frontend verification passed 26 files / 203 tests, typecheck, full lint, i18n check and
+  ratchet, and production Vite build. Public docs passed 58 validator tests and 41-page validation.
+- Focused backend packages, backend lint, and the race command across controller, task-host LSP,
+  gateway, lifecycle, and agentctl client passed. `goleak` guards and the real process-group test
+  cover worker and child-process cleanup.
+- The final E2E matrix left no test-owned backend, agentctl, Kotlin server, or container processes.
+  Exact commands, counts, one isolated unrelated broad-web-run artifact, and cleanup disposition
+  are recorded in Tasks 10–11 and the delivery handoff.
 
 ---
 
@@ -285,29 +297,29 @@ process cleanup evidence, public-doc validation, and final worktree status.
 
 Wave 1 — executable acceptance contract:
 
-- [ ] [Task 01: Lifecycle acceptance harness](task-01-acceptance-harness.md)
+- [x] [Task 01: Lifecycle acceptance harness](task-01-acceptance-harness.md)
 
 Wave 2 — persistence and task-host ownership:
 
-- [ ] [Task 02: Task language state contract](task-02-state-contracts.md)
-- [ ] [Task 03: Task-host runtime supervisor](task-03-task-host-supervisor.md)
-- [ ] [Task 04: Task-host attachment hub](task-04-attachment-hub.md)
-- [ ] [Task 05: Bounded language discovery](task-05-language-discovery.md)
+- [x] [Task 02: Task language state contract](task-02-state-contracts.md)
+- [x] [Task 03: Task-host runtime supervisor](task-03-task-host-supervisor.md)
+- [x] [Task 04: Task-host attachment hub](task-04-attachment-hub.md)
+- [x] [Task 05: Bounded language discovery](task-05-language-discovery.md)
 
 Wave 3 — backend control and lifecycle integration:
 
-- [ ] [Task 06: Authorized task controller](task-06-task-controller.md)
-- [ ] [Task 07: Lifecycle reconciliation](task-07-lifecycle-reconciliation.md)
+- [x] [Task 06: Authorized task controller](task-06-task-controller.md)
+- [x] [Task 07: Lifecycle reconciliation](task-07-lifecycle-reconciliation.md)
 
 Wave 4 — shared frontend behavior and responsive UI:
 
-- [ ] [Task 08: Frontend task protocol bridge](task-08-frontend-protocol-bridge.md)
-- [ ] [Task 09: Responsive task control surface](task-09-responsive-control-surface.md)
+- [x] [Task 08: Frontend task protocol bridge](task-08-frontend-protocol-bridge.md)
+- [x] [Task 09: Responsive task control surface](task-09-responsive-control-surface.md)
 
 Wave 5 — conformance and documentation:
 
-- [ ] [Task 10: LSP E2E conformance](task-10-e2e-conformance.md)
-- [ ] [Task 11: Public documentation](task-11-public-documentation.md)
+- [x] [Task 10: LSP E2E conformance](task-10-e2e-conformance.md)
+- [x] [Task 11: Public documentation](task-11-public-documentation.md)
 
 After all task checks pass, follow the repository commit, push, PR, and PR-fixup workflows. The PR
 must use the repository template, include docs impact and production E2E evidence, and remain in

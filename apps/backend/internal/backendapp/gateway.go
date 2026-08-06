@@ -141,7 +141,6 @@ func provideGateway(
 	scriptSvc := &scriptServiceAdapter{taskSvc: taskSvc}
 	if lifecycleMgr != nil {
 		gateway.SetLifecycleManager(lifecycleMgr, userSvc, scriptSvc)
-		gateway.SetLSPHandler(lifecycleMgr, userSvc)
 		gateway.SetVscodeProxy(lifecycleMgr)
 		gateway.SetPortProxy(lifecycleMgr)
 		gateway.SetPortTunnel(lifecycleMgr)

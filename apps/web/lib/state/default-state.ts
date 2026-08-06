@@ -16,6 +16,7 @@ import {
   defaultAutomationsState,
   defaultSystemState,
   defaultReviewState,
+  defaultLspState,
 } from "./slices";
 import { applyStoredQuickChatNames } from "@/lib/state/slices/ui/quick-chat-sync";
 import type { HydrationState } from "./store";
@@ -55,6 +56,7 @@ export const defaultState = {
   taskPlans: defaultSessionState.taskPlans,
   walkthroughs: defaultSessionState.walkthroughs,
   taskReview: defaultReviewState.taskReview,
+  taskLsp: defaultLspState.taskLsp,
   queue: defaultSessionState.queue,
   terminal: defaultSessionRuntimeState.terminal,
   shell: defaultSessionRuntimeState.shell,
@@ -292,6 +294,16 @@ export function mergeInitialState(initialState?: HydrationState): DefaultState {
     activeModel: { ...defaultState.activeModel, ...initialState.activeModel },
     taskPlans: { ...defaultState.taskPlans, ...initialState.taskPlans },
     ...mergeAgentReviewArtifacts(initialState),
+    taskLsp: {
+      byTaskId: {
+        ...defaultState.taskLsp.byTaskId,
+        ...initialState.taskLsp?.byTaskId,
+      },
+      pendingByKey: {
+        ...defaultState.taskLsp.pendingByKey,
+        ...initialState.taskLsp?.pendingByKey,
+      },
+    },
     queue: { ...defaultState.queue, ...initialState.queue },
     terminal: { ...defaultState.terminal, ...initialState.terminal },
     shell: { ...defaultState.shell, ...initialState.shell },

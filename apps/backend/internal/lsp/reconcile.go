@@ -1,0 +1,331 @@
+package lsp
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"sort"
+
+	taskmodels "github.com/kandev/kandev/internal/task/models"
+)
+
+type reconcileCandidate struct {
+	state    TaskLanguageState
+	settings TaskSettings
+}
+
+// ReconcileAll adopts every proven-live task-host generation before it admits
+// any missing desired server. This ordering rebuilds real capacity without a
+// backend restart creating duplicate imports.
+func (c *Controller) ReconcileAll(ctx context.Context) error {
+	states, err := c.store.ListAllTaskLSPLanguages(ctx)
+	if err != nil {
+		return err
+	}
+	sort.Slice(states, func(i, j int) bool {
+		if states[i].TaskID != states[j].TaskID {
+			return states[i].TaskID < states[j].TaskID
+		}
+		return states[i].Language < states[j].Language
+	})
+	missing := make([]reconcileCandidate, 0)
+	var reconcileErrors []error
+	for _, state := range states {
+		candidate, inspectErr := c.inspectReconcileState(ctx, state)
+		if inspectErr != nil {
+			reconcileErrors = append(reconcileErrors, inspectErr)
+			continue
+		}
+		if candidate != nil {
+			missing = append(missing, *candidate)
+		}
+	}
+	for _, candidate := range missing {
+		if _, startErr := c.reconcileMissing(ctx, candidate); startErr != nil {
+			reconcileErrors = append(reconcileErrors, startErr)
+		}
+	}
+	return errors.Join(reconcileErrors...)
+}
+
+// ReconcileTask converges durable languages for one real task. It is an
+// internal lifecycle hook: callers resolve the task record rather than
+// accepting an agent-selected ownership identifier.
+func (c *Controller) ReconcileTask(ctx context.Context, taskID string) error {
+	if _, err := c.tasks.GetTask(ctx, taskID); err != nil {
+		return err
+	}
+	discoveryErr := c.discoverTask(ctx, taskID, false)
+	states, err := c.store.ListTaskLSPLanguages(ctx, taskID)
+	if err != nil {
+		return errors.Join(discoveryErr, err)
+	}
+	var reconcileErrors []error
+	for _, state := range states {
+		key := TaskLanguageKey{TaskID: state.TaskID, Language: state.Language}
+		_, commandErr := c.commands.submit(ctx, key, ActionReconcile,
+			func(workCtx context.Context) (*LanguageSnapshot, error) {
+				candidate, inspectErr := c.inspectReconcileState(workCtx, state)
+				if inspectErr != nil || candidate == nil {
+					return nil, inspectErr
+				}
+				return c.reconcileMissing(workCtx, *candidate)
+			})
+		if commandErr != nil {
+			reconcileErrors = append(reconcileErrors, commandErr)
+		}
+	}
+	return errors.Join(discoveryErr, errors.Join(reconcileErrors...))
+}
+
+func (c *Controller) inspectReconcileState(
+	ctx context.Context,
+	state TaskLanguageState,
+) (*reconcileCandidate, error) {
+	task, err := c.tasks.GetTask(ctx, state.TaskID)
+	if err != nil {
+		return nil, err
+	}
+	settings, err := c.loadSettings(ctx)
+	if err != nil {
+		return nil, err
+	}
+	desired := effectivePolicy(state, settings) == PolicyKeepWarm && task.ArchivedAt == nil
+	environment, err := c.tasks.GetTaskEnvironmentByTaskID(ctx, state.TaskID)
+	if err != nil {
+		return nil, err
+	}
+	if handled, stateErr := c.reconcileEnvironmentState(ctx, state, settings, desired, environment); handled {
+		return nil, stateErr
+	}
+	host, exists, err := c.runtimes.ExistingTaskHost(ctx, environment.ID)
+	if err != nil {
+		_, _ = c.transition(ctx, state, settings, PhaseError, "task_host_unreachable", err.Error())
+		return nil, fmt.Errorf("inspect task host for %s/%s: %w", state.TaskID, state.Language, err)
+	}
+	if !exists || host == nil {
+		return c.reconcileAbsentRuntime(ctx, state, settings, desired)
+	}
+	runtime, err := host.TaskLSPSnapshot(ctx, state.Language)
+	if err != nil {
+		_, _ = c.transition(ctx, state, settings, PhaseError, "task_host_unreachable", err.Error())
+		return nil, fmt.Errorf("snapshot task host for %s/%s: %w", state.TaskID, state.Language, err)
+	}
+	if !runtimeHasProcess(runtime) {
+		return c.reconcileAbsentRuntime(ctx, state, settings, desired)
+	}
+	return c.reconcileLiveRuntime(ctx, state, settings, desired, host, *runtime)
+}
+
+func (c *Controller) reconcileEnvironmentState(
+	ctx context.Context,
+	state TaskLanguageState,
+	settings TaskSettings,
+	desired bool,
+	environment *taskmodels.TaskEnvironment,
+) (bool, error) {
+	if !readyTaskEnvironment(environment) {
+		if desired && state.Phase != PhaseWaitingForTask {
+			_, err := c.transition(ctx, state, settings, PhaseWaitingForTask, "", "")
+			return true, err
+		}
+		return true, nil
+	}
+	if ExecutorSupportsLSP(environment.ExecutorType) {
+		return false, nil
+	}
+	if desired && (state.Phase != PhaseUnsupported || state.ErrorCode != "unsupported_executor") {
+		_, err := c.transition(ctx, state, settings, PhaseUnsupported, "unsupported_executor", "")
+		return true, err
+	}
+	return true, nil
+}
+
+func (c *Controller) reconcileAbsentRuntime(
+	ctx context.Context,
+	state TaskLanguageState,
+	settings TaskSettings,
+	desired bool,
+) (*reconcileCandidate, error) {
+	if desired {
+		return &reconcileCandidate{state: state, settings: settings}, nil
+	}
+	if state.Phase == PhaseOff && state.ErrorCode == "" {
+		return nil, nil
+	}
+	_, err := c.transition(ctx, state, settings, PhaseOff, "", "")
+	return nil, err
+}
+
+func (c *Controller) reconcileLiveRuntime(
+	ctx context.Context,
+	state TaskLanguageState,
+	settings TaskSettings,
+	desired bool,
+	host TaskHost,
+	runtime RuntimeSnapshot,
+) (*reconcileCandidate, error) {
+	if !desired {
+		return nil, c.stopReconciledRuntime(ctx, state, settings, host, runtime.Generation, "policy_disabled")
+	}
+	if runtime.Generation < state.Generation {
+		if err := c.stopReconciledRuntime(ctx, state, settings, host, runtime.Generation, "stale_generation"); err != nil {
+			return nil, err
+		}
+		return &reconcileCandidate{state: state, settings: settings}, nil
+	}
+	if _, err := c.adoptRuntime(ctx, state, runtime); err != nil {
+		return nil, err
+	}
+	key := TaskLanguageKey{TaskID: state.TaskID, Language: state.Language}
+	c.capacity.Adopt(key, runtime.Generation)
+	c.ensureWatch(key)
+	return nil, nil
+}
+
+func (c *Controller) reconcileMissing(
+	ctx context.Context,
+	candidate reconcileCandidate,
+) (*LanguageSnapshot, error) {
+	origin := Origin{Initiator: InitiatorAutomatic, Reason: "reconcile_missing_runtime"}
+	return c.start(ctx, candidate.state.TaskID, candidate.state.Language, origin, ActionReconcile)
+}
+
+func (c *Controller) adoptRuntime(
+	ctx context.Context,
+	state TaskLanguageState,
+	runtime RuntimeSnapshot,
+) (*TaskLanguageState, error) {
+	return c.updateStateWithRuntime(ctx, state.TaskID, state.Language, &runtime, func(next *TaskLanguageState) {
+		if runtime.Generation < next.Generation {
+			return
+		}
+		next.Generation = runtime.Generation
+		next.Phase = runtime.Phase
+		next.ProcessStartedAt = runtime.ProcessStartedAt
+		next.InitializeStartedAt = runtime.InitializeStartedAt
+		next.ReadyAt = runtime.ReadyAt
+		next.LastTransitionAt = runtime.LastTransitionAt
+		next.ErrorCode = runtime.ErrorCode
+		next.ErrorMessage = runtime.ErrorMessage
+		next.LastAction = ActionReconcile
+		next.LastInitiator = InitiatorAutomatic
+	})
+}
+
+func (c *Controller) stopReconciledRuntime(
+	ctx context.Context,
+	state TaskLanguageState,
+	settings TaskSettings,
+	host TaskHost,
+	generation uint64,
+	reason string,
+) error {
+	runtime, err := host.StopTaskLSP(ctx, TaskHostStopRequest{
+		Language: state.Language, Generation: generation, Reason: reason,
+	})
+	if err != nil {
+		_, _ = c.transition(ctx, state, settings, PhaseError, "task_host_stop_failed", err.Error())
+		return err
+	}
+	_, err = c.updateState(ctx, state.TaskID, state.Language, func(next *TaskLanguageState) {
+		next.Phase = PhaseOff
+		if runtime != nil {
+			next.Generation = runtime.Generation
+		}
+		next.LastAction = ActionReconcile
+		next.LastInitiator = InitiatorAutomatic
+		next.LastStopReason = reason
+		next.LastTransitionAt = c.clock()
+		next.ErrorCode = ""
+		next.ErrorMessage = ""
+	})
+	c.releaseCapacity(
+		ctx,
+		TaskLanguageKey{TaskID: state.TaskID, Language: state.Language},
+		generation,
+	)
+	return err
+}
+
+// CleanupTask is the task-lifecycle ownership hook. It cancels task-level
+// recovery and reaps every language before the environment cleanup backstop;
+// policy/history remain durable for archive/stop resume.
+func (c *Controller) CleanupTask(ctx context.Context, taskID, reason string) error {
+	states, err := c.store.ListTaskLSPLanguages(ctx, taskID)
+	if err != nil {
+		return err
+	}
+	environment, envErr := c.tasks.GetTaskEnvironmentByTaskID(ctx, taskID)
+	if envErr != nil {
+		return envErr
+	}
+	host, hostExists, hostErr := c.cleanupTaskHost(ctx, environment)
+	cleanupErrors := []error{hostErr}
+	// Remove every queued language for this task before releasing any live
+	// slot, otherwise an earlier release could promote another language that
+	// this same task teardown is about to clean.
+	for _, state := range states {
+		key := TaskLanguageKey{TaskID: taskID, Language: state.Language}
+		c.cancelRecovery(key)
+		c.cancelWatch(key)
+		c.capacity.CancelQueued(key)
+	}
+	for _, state := range states {
+		cleanupErrors = append(cleanupErrors, c.cleanupTaskLanguage(ctx, state, host, hostExists, reason))
+	}
+	if environment != nil && ExecutorSupportsLSP(environment.ExecutorType) {
+		if cleanupErr := c.runtimes.CleanupTaskHost(ctx, environment.ID, reason); cleanupErr != nil {
+			cleanupErrors = append(cleanupErrors, cleanupErr)
+		}
+	}
+	return errors.Join(cleanupErrors...)
+}
+
+func (c *Controller) cleanupTaskHost(
+	ctx context.Context,
+	environment *taskmodels.TaskEnvironment,
+) (TaskHost, bool, error) {
+	if environment == nil || !ExecutorSupportsLSP(environment.ExecutorType) {
+		return nil, false, nil
+	}
+	return c.runtimes.ExistingTaskHost(ctx, environment.ID)
+}
+
+func (c *Controller) cleanupTaskLanguage(
+	ctx context.Context,
+	state TaskLanguageState,
+	host TaskHost,
+	hostExists bool,
+	reason string,
+) error {
+	var stopErr error
+	if hostExists && host != nil && state.Generation > 0 {
+		_, stopErr = host.StopTaskLSP(ctx, TaskHostStopRequest{
+			Language: state.Language, Generation: state.Generation, Reason: reason,
+		})
+	}
+	_, updateErr := c.updateState(ctx, state.TaskID, state.Language, func(next *TaskLanguageState) {
+		next.Phase = PhaseOff
+		next.LastAction = ActionReconcile
+		next.LastInitiator = InitiatorAutomatic
+		next.LastStopReason = reason
+		next.LastTransitionAt = c.clock()
+		next.ErrorCode = ""
+		next.ErrorMessage = ""
+	})
+	c.releaseCapacity(ctx, TaskLanguageKey{TaskID: state.TaskID, Language: state.Language}, state.Generation)
+	return errors.Join(stopErr, updateErr)
+}
+
+func runtimeHasProcess(snapshot *RuntimeSnapshot) bool {
+	if snapshot == nil || snapshot.Generation == 0 {
+		return false
+	}
+	switch snapshot.Phase {
+	case PhaseInstalling, PhaseStarting, PhaseProcessStarted, PhaseInitializing, PhaseReady, PhaseStopping:
+		return true
+	default:
+		return false
+	}
+}

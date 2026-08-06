@@ -20,6 +20,7 @@ export { createAutomationsSlice, defaultAutomationsState } from "./automations/a
 export { createSystemSlice, defaultSystemState } from "./system/system-slice";
 export { createPluginsSlice, defaultPluginsState } from "./plugins/plugins-slice";
 export { createReviewSlice, defaultReviewState } from "./review/review-slice";
+export { createLspSlice, defaultLspState } from "./lsp/lsp-slice";
 
 // Export types
 export type { KanbanSlice, KanbanSliceState, KanbanSliceActions } from "./kanban/types";
@@ -92,6 +93,7 @@ export type {
   PluginsState,
 } from "./plugins/types";
 export type { ReviewSlice, ReviewSliceActions, ReviewSliceState } from "./review/types";
+export type { LspSlice, LspSliceActions, LspSliceState, TaskLspTaskState } from "./lsp/types";
 
 // Re-export commonly used types from each domain
 export type {

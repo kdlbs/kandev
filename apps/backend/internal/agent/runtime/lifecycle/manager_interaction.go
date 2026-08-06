@@ -610,7 +610,9 @@ func (m *Manager) StopAgentWithReason(ctx context.Context, executionID string, r
 		zap.Bool("force", force),
 		zap.Stringer("runtime", execution.RuntimeName))
 
-	// Try to gracefully stop via agentctl first, then always close connections
+	// Try to gracefully stop via agentctl first. Task hosts retain their live
+	// control connection and ownership index until runtime teardown succeeds so
+	// cleanup can retry without losing the only handle to a process tree.
 	agentStopFailed := false
 	if execution.agentctl != nil {
 		if !force {
@@ -629,11 +631,19 @@ func (m *Manager) StopAgentWithReason(ctx context.Context, executionID string, r
 				}
 			}
 		}
-		execution.agentctl.Close()
+		if !execution.IsTaskHost {
+			execution.agentctl.Close()
+		}
 	}
 
 	// Stop the agent execution via the runtime that created it
-	m.stopAgentViaBackend(ctx, executionID, execution, reason, force, agentStopFailed)
+	runtimeStopErr := m.stopAgentViaBackend(ctx, executionID, execution, reason, force, agentStopFailed)
+	if runtimeStopErr != nil && execution.IsTaskHost {
+		return runtimeStopErr
+	}
+	if execution.IsTaskHost && execution.agentctl != nil {
+		execution.agentctl.Close()
+	}
 
 	// Update execution status and remove from tracking
 	_ = m.executionStore.WithLock(executionID, func(exec *AgentExecution) {
@@ -642,18 +652,23 @@ func (m *Manager) StopAgentWithReason(ctx context.Context, executionID string, r
 		exec.FinishedAt = &now
 	})
 
-	// End session trace span
-	execution.EndSessionSpan()
+	if !execution.IsTaskHost {
+		// Task hosts have no session trace or session-facing lifecycle state.
+		execution.EndSessionSpan()
+	}
 
 	m.RemoveExecution(executionID)
-	m.clearRemoteStatus(execution.SessionID)
+	if !execution.IsTaskHost {
+		m.clearRemoteStatus(execution.SessionID)
+	}
 
 	m.logger.Info("agent stopped and removed from tracking",
 		zap.String("execution_id", executionID),
 		zap.String("task_id", execution.TaskID))
 
-	// Publish stopped event
-	m.eventPublisher.PublishAgentEvent(ctx, events.AgentStopped, execution)
+	if !execution.IsTaskHost {
+		m.eventPublisher.PublishAgentEvent(ctx, events.AgentStopped, execution)
+	}
 
 	return nil
 }
@@ -1531,9 +1546,9 @@ func (m *Manager) RespondToPermissionBySessionID(sessionID, pendingID, optionID 
 }
 
 // stopAgentViaBackend stops the agent execution via the runtime that created it.
-func (m *Manager) stopAgentViaBackend(ctx context.Context, executionID string, execution *AgentExecution, reason string, force bool, agentStopFailed bool) {
+func (m *Manager) stopAgentViaBackend(ctx context.Context, executionID string, execution *AgentExecution, reason string, force bool, agentStopFailed bool) error {
 	if execution.RuntimeName == "" || m.executorRegistry == nil {
-		return
+		return nil
 	}
 	rt, err := m.executorRegistry.GetBackend(execution.RuntimeName)
 	if err != nil {
@@ -1541,18 +1556,22 @@ func (m *Manager) stopAgentViaBackend(ctx context.Context, executionID string, e
 			zap.String("execution_id", executionID),
 			zap.Stringer("runtime", execution.RuntimeName),
 			zap.Error(err))
-		return
+		return fmt.Errorf("get runtime for stopping execution: %w", err)
 	}
 	m.stopPassthroughProcess(ctx, executionID, execution, rt)
 	runtimeInstance := &ExecutorInstance{
 		InstanceID:           execution.ID,
 		TaskID:               execution.TaskID,
 		ContainerID:          execution.ContainerID,
+		ContainerIP:          execution.ContainerIP,
 		StandaloneInstanceID: execution.standaloneInstanceID,
 		StandalonePort:       execution.standalonePort,
 		Metadata:             execution.Metadata,
 		StopReason:           reason,
 		AgentStopFailed:      agentStopFailed,
+	}
+	if execution.agentctl != nil {
+		runtimeInstance.AuthToken = execution.agentctl.AuthToken()
 	}
 	if err := rt.StopInstance(ctx, runtimeInstance, force); err != nil {
 		// During shutdown the runtime instance may already be stopping or
@@ -1566,7 +1585,9 @@ func (m *Manager) stopAgentViaBackend(ctx context.Context, executionID string, e
 				zap.String("execution_id", executionID),
 				zap.Error(err))
 		}
+		return fmt.Errorf("stop runtime instance: %w", err)
 	}
+	return nil
 }
 
 // stopPassthroughProcess stops the passthrough interactive process if one is running.

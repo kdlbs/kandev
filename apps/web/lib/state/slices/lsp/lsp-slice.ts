@@ -1,0 +1,77 @@
+import type { StateCreator } from "zustand";
+import type { AppState } from "@/lib/state/store";
+import type { TaskLspCapacity, TaskLspLanguageSnapshot } from "@/lib/types/http-lsp";
+import type { LspSlice, LspSliceState, TaskLspTaskState } from "./types";
+
+const EMPTY_CAPACITY: TaskLspCapacity = { active: 0, queued: 0, limit: 0 };
+
+export const defaultLspState: LspSliceState = {
+  taskLsp: { byTaskId: {}, pendingByKey: {} },
+};
+
+function emptyTaskState(): TaskLspTaskState {
+  return {
+    languages: {},
+    capacity: { ...EMPTY_CAPACITY },
+    loaded: false,
+    loading: false,
+    error: null,
+  };
+}
+
+function mergeLanguage(
+  languages: Record<string, TaskLspLanguageSnapshot>,
+  incoming: TaskLspLanguageSnapshot,
+): void {
+  const current = languages[incoming.language];
+  if (current && current.revision > incoming.revision) return;
+  languages[incoming.language] = incoming;
+}
+
+export const createLspSlice: StateCreator<AppState, [["zustand/immer", never]], [], LspSlice> = (
+  set,
+) => ({
+  ...defaultLspState,
+  setTaskLspSnapshot: (snapshot) =>
+    set((draft) => {
+      const task = draft.taskLsp.byTaskId[snapshot.task_id] ?? emptyTaskState();
+      for (const language of snapshot.languages) mergeLanguage(task.languages, language);
+      task.capacity = snapshot.capacity;
+      task.loaded = true;
+      task.loading = false;
+      task.error = null;
+      draft.taskLsp.byTaskId[snapshot.task_id] = task;
+    }),
+  mergeTaskLspLanguage: (snapshot) =>
+    set((draft) => {
+      const task = draft.taskLsp.byTaskId[snapshot.task_id] ?? emptyTaskState();
+      mergeLanguage(task.languages, snapshot);
+      draft.taskLsp.byTaskId[snapshot.task_id] = task;
+    }),
+  setTaskLspLoading: (taskId, loading) =>
+    set((draft) => {
+      const task = draft.taskLsp.byTaskId[taskId] ?? emptyTaskState();
+      task.loading = loading;
+      draft.taskLsp.byTaskId[taskId] = task;
+    }),
+  setTaskLspError: (taskId, error) =>
+    set((draft) => {
+      const task = draft.taskLsp.byTaskId[taskId] ?? emptyTaskState();
+      task.error = error;
+      task.loading = false;
+      draft.taskLsp.byTaskId[taskId] = task;
+    }),
+  setTaskLspActionPending: (taskId, language, action) =>
+    set((draft) => {
+      const key = `${taskId}:${language}`;
+      if (action === undefined) delete draft.taskLsp.pendingByKey[key];
+      else draft.taskLsp.pendingByKey[key] = action;
+    }),
+  clearTaskLsp: (taskId) =>
+    set((draft) => {
+      delete draft.taskLsp.byTaskId[taskId];
+      for (const key of Object.keys(draft.taskLsp.pendingByKey)) {
+        if (key.startsWith(`${taskId}:`)) delete draft.taskLsp.pendingByKey[key];
+      }
+    }),
+});

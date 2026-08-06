@@ -847,6 +847,12 @@ func (s *Service) SetOnPrimarySessionSet(fn executor.PrimarySessionSetFunc) {
 	s.executor.SetOnPrimarySessionSet(fn)
 }
 
+// SetOnTaskEnvironmentReady wires task-level consumers after canonical
+// environment persistence.
+func (s *Service) SetOnTaskEnvironmentReady(fn executor.TaskEnvironmentReadyFunc) {
+	s.executor.SetOnTaskEnvironmentReady(fn)
+}
+
 // SetRepoCloner sets the repository cloner and updater on the executor, enabling automatic
 // cloning of provider-backed repositories (e.g. from a GitHub URL) when they are launched
 // for local/worktree execution and have no local path yet.

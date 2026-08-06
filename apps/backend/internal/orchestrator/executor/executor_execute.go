@@ -1213,6 +1213,9 @@ func (e *Executor) finalizeLaunch(ctx context.Context, task *v1.Task, session *m
 		return nil, err
 	}
 	e.persistWorktreeAssociation(ctx, task.ID, session, repoInfo.RepositoryID, resp)
+	if e.onTaskEnvironmentReady != nil {
+		e.onTaskEnvironmentReady(context.WithoutCancel(ctx), task.ID)
+	}
 
 	sessionState := v1.TaskSessionStateCreated
 	if startAgent {
@@ -1782,12 +1785,16 @@ func (e *Executor) persistTaskEnvironment(
 	}
 
 	workspacePath := computeWorkspacePath(req, resp)
+	resolvedExecutorType, resolvedExecutorID := taskEnvironmentExecutorIdentity(req, execCfg)
 
 	if existingEnv != nil {
 		// agent_execution_id is no longer stored on task_environments — the column
 		// is being dropped (executors_running is the single source of truth).
 		// Status, worktree, and container fields are still env-row-owned.
 		existingEnv.Status = models.TaskEnvironmentStatusReady
+		existingEnv.ExecutorType = resolvedExecutorType
+		existingEnv.ExecutorID = resolvedExecutorID
+		existingEnv.ExecutorProfileID = session.ExecutorProfileID
 		// Refresh worktree + workspace + container/sandbox fields. The original
 		// update branch only touched AgentExecutionID/Status, so envs created
 		// with empty paths (e.g. before the worktree resolved) stayed
@@ -1833,8 +1840,8 @@ func (e *Executor) persistTaskEnvironment(
 		ID:                session.TaskEnvironmentID,
 		TaskID:            taskID,
 		RepositoryID:      req.RepositoryID,
-		ExecutorType:      req.ExecutorType,
-		ExecutorID:        execCfg.ExecutorID,
+		ExecutorType:      resolvedExecutorType,
+		ExecutorID:        resolvedExecutorID,
 		ExecutorProfileID: session.ExecutorProfileID,
 		// AgentExecutionID is intentionally not set here — see executors_running
 		// for the active execution per session.
@@ -1858,6 +1865,21 @@ func (e *Executor) persistTaskEnvironment(
 		return
 	}
 	session.TaskEnvironmentID = env.ID
+}
+
+func taskEnvironmentExecutorIdentity(req *LaunchAgentRequest, execCfg executorConfig) (string, string) {
+	executorType := req.ExecutorType
+	if executorType == "" {
+		executorType = execCfg.ExecutorType
+	}
+	executorID := execCfg.ExecutorID
+	if executorType == "" {
+		executorType = string(models.ExecutorTypeLocal)
+		if executorID == "" {
+			executorID = models.ExecutorIDLocal
+		}
+	}
+	return executorType, executorID
 }
 
 // buildTaskEnvironmentRepos converts per-repo worktree results into env-repo rows.

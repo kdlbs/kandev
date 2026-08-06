@@ -651,6 +651,10 @@ type PrimarySessionSetFunc func(ctx context.Context, taskID, sessionID string)
 // and invalidates updates captured before the reset.
 type ContextWindowResetFunc func(ctx context.Context, sessionID string) error
 
+// TaskEnvironmentReadyFunc fires after the canonical task environment is
+// persisted ready. It deliberately exposes no session/execution ownership.
+type TaskEnvironmentReadyFunc func(ctx context.Context, taskID string)
+
 // ExecutorTypeCapabilities provides behavioral queries about executor types.
 // Implemented by the lifecycle manager using its backend registry.
 type ExecutorTypeCapabilities interface {
@@ -743,6 +747,8 @@ type Executor struct {
 	// Callback for model changes that invalidate the current context window.
 	// The orchestrator owns the per-session generation guard used by this reset.
 	onContextWindowReset ContextWindowResetFunc
+
+	onTaskEnvironmentReady TaskEnvironmentReadyFunc
 
 	// Per-session locks to prevent concurrent resume/launch operations on the same session.
 	// This prevents race conditions when the backend restarts and multiple resume requests
@@ -941,6 +947,11 @@ func (e *Executor) SetOnPrimarySessionSet(fn PrimarySessionSetFunc) {
 // SetOnContextWindowReset wires the guarded context-window reset callback.
 func (e *Executor) SetOnContextWindowReset(fn ContextWindowResetFunc) {
 	e.onContextWindowReset = fn
+}
+
+// SetOnTaskEnvironmentReady wires task-owned runtime reconciliation.
+func (e *Executor) SetOnTaskEnvironmentReady(fn TaskEnvironmentReadyFunc) {
+	e.onTaskEnvironmentReady = fn
 }
 
 // SetOnLaunchFailed sets a callback for launch failures that happen before

@@ -20,7 +20,7 @@ vi.mock("@/hooks/use-responsive-breakpoint", () => ({
     isDesktop: responsiveState.breakpoint === "desktop",
     isCompactDesktop: false,
     isFullDesktop: responsiveState.breakpoint === "desktop",
-    isFinePointer: responsiveState.breakpoint !== "mobile",
+    isFinePointer: responsiveState.breakpoint === "desktop",
     usesDesktopWorkbench: responsiveState.breakpoint === "desktop",
   }),
 }));
@@ -71,15 +71,16 @@ function ConnectionIssueControls() {
   );
 }
 
+function resetSurfaceTest() {
+  responsiveState.breakpoint = "desktop";
+  featureState.appStatusBar = true;
+}
+
+beforeEach(resetSurfaceTest);
+afterEach(cleanup);
+
 describe("AppStatusSurfaceProvider", () => {
-  beforeEach(() => {
-    responsiveState.breakpoint = "desktop";
-    featureState.appStatusBar = true;
-  });
-
-  afterEach(cleanup);
-
-  it("mounts only desktop status bar outside phone breakpoint", () => {
+  it("mounts the inline status bar on desktop", () => {
     renderSurface();
 
     expect(screen.getByTestId(STATUS_BAR_TEST_ID)).toBeTruthy();
@@ -119,6 +120,25 @@ describe("AppStatusSurfaceProvider", () => {
     expect(screen.queryByTestId(STATUS_DRAWER_TRIGGER_TEST_ID)).toBeNull();
   });
 
+  it("keeps task LSP controls discoverable on phone when the status-bar feature is disabled", () => {
+    responsiveState.breakpoint = "mobile";
+    featureState.appStatusBar = false;
+    renderSurface({
+      tasks: {
+        activeTaskId: "task-1",
+        activeSessionId: null,
+        pinnedSessionId: null,
+        lastSessionByTaskId: {},
+      },
+    });
+
+    expect(screen.getByTestId(STATUS_DRAWER_TEST_ID).getAttribute("data-connection-only")).toBe(
+      "false",
+    );
+    fireEvent.click(screen.getByTestId(STATUS_DRAWER_TRIGGER_TEST_ID));
+    expect(screen.getByTestId(STATUS_DRAWER_TEST_ID).textContent).toBe("true");
+  });
+
   it("exposes a connection-only Status drawer for an active phone warning when disabled", () => {
     responsiveState.breakpoint = "mobile";
     featureState.appStatusBar = false;
@@ -137,13 +157,13 @@ describe("AppStatusSurfaceProvider", () => {
     expect(screen.getByTestId(STATUS_DRAWER_TEST_ID).textContent).toBe("true");
   });
 
-  it("does not expose a drawer trigger at the tablet breakpoint", () => {
+  it("uses the shared drawer surface at the tablet breakpoint", () => {
     responsiveState.breakpoint = "tablet";
     renderSurface();
 
-    expect(screen.getByTestId(STATUS_BAR_TEST_ID)).toBeTruthy();
-    expect(screen.queryByTestId(STATUS_DRAWER_TEST_ID)).toBeNull();
-    expect(screen.queryByTestId(STATUS_DRAWER_TRIGGER_TEST_ID)).toBeNull();
+    expect(screen.queryByTestId(STATUS_BAR_TEST_ID)).toBeNull();
+    expect(screen.getByTestId(STATUS_DRAWER_TEST_ID).textContent).toBe("false");
+    expect(screen.getByTestId(STATUS_DRAWER_TRIGGER_TEST_ID).className).toContain("md:hidden");
   });
 
   it("keeps an active connection warning reachable at the tablet breakpoint", () => {
