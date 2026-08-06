@@ -156,13 +156,12 @@ func (s *Service) handleTaskMRCIAutoFix(
 	if !mrAutoFixChecksSettled(snapshot) {
 		return false
 	}
-	previous := decodeMRAutoFixCheckpoint(state)
+	previous := s.decodeMRAutoFixCheckpoint(state)
 	delta := mrAutoFixBuildDelta(snapshot, previous)
 	checkpoint := mrAutoFixBuildDelta(snapshot, mrAutoFixCheckpoint{})
 	checkpointJSON, signature := encodeMRAutoFixCheckpoint(checkpoint)
 	if len(delta.FailedJobs) == 0 && len(delta.Notes) == 0 {
-		s.handleTaskMRCIAutoFixEmptyDelta(ctx, mr, state, previous, signature, checkpointJSON)
-		return false
+		return s.handleTaskMRCIAutoFixEmptyDelta(ctx, mr, state, previous, signature, checkpointJSON)
 	}
 	if state != nil && state.LastFixSignature == signature {
 		return mrAutoFixDuplicateAttemptBlocksMerge(state)
@@ -213,10 +212,19 @@ func (s *Service) handleMRAutoFixWithoutSession(ctx context.Context, mr *gitlab.
 	return true
 }
 
+// handleTaskMRCIAutoFixEmptyDelta returns true when the caller must not
+// proceed to auto-merge in this pass — mirrors GitHub's
+// handleTaskPRCIAutoFixEmptyDelta. A recently-dispatched fix (within the
+// same duplicate window as the non-empty-delta path) still blocks merge
+// here even though there is nothing new to report: the agent may not have
+// finished addressing the checkpointed failure yet.
 func (s *Service) handleTaskMRCIAutoFixEmptyDelta(
 	ctx context.Context, mr *gitlab.TaskMR, state *gitlab.TaskMRLifecycleState,
 	previous mrAutoFixCheckpoint, signature, checkpointJSON string,
-) {
+) bool {
+	if state != nil && state.LastFixSignature == signature && mrAutoFixDuplicateAttemptBlocksMerge(state) {
+		return true
+	}
 	if state != nil && len(previous.FailedJobs)+len(previous.Notes) > 0 {
 		if err := runTaskMRAutomationFollowUp(ctx, ciAutomationFollowUpTimeout, func(followUp context.Context) error {
 			return s.gitlabMRAutomation.RefreshTaskMRFixCheckpoint(
@@ -226,6 +234,7 @@ func (s *Service) handleTaskMRCIAutoFixEmptyDelta(
 			s.logger.Debug("record MR auto-fix checkpoint refresh failed", zap.String("task_id", mr.TaskID), zap.Error(err))
 		}
 	}
+	return false
 }
 
 // handleTaskMRCIAutoMerge merges the MR when its readiness signature hasn't
@@ -474,12 +483,19 @@ func mrAutoFixSanitizeSnapshotField(value string) string {
 	return strings.TrimSpace(mrAutoFixSnapshotFieldReplacer.Replace(value))
 }
 
-func decodeMRAutoFixCheckpoint(state *gitlab.TaskMRLifecycleState) mrAutoFixCheckpoint {
+// decodeMRAutoFixCheckpoint is a method (not a free function) solely so a
+// corrupt LastFixCheckpointJSON row is diagnosable rather than silently
+// treated as an empty checkpoint, which would make every currently-failing
+// job look "new" and trigger a spurious re-dispatch.
+func (s *Service) decodeMRAutoFixCheckpoint(state *gitlab.TaskMRLifecycleState) mrAutoFixCheckpoint {
 	if state == nil || state.LastFixCheckpointJSON == "" {
 		return mrAutoFixCheckpoint{}
 	}
 	var checkpoint mrAutoFixCheckpoint
-	_ = json.Unmarshal([]byte(state.LastFixCheckpointJSON), &checkpoint)
+	if err := json.Unmarshal([]byte(state.LastFixCheckpointJSON), &checkpoint); err != nil {
+		s.logger.Debug("decode MR auto-fix checkpoint JSON failed; treating as empty",
+			zap.String("task_id", state.TaskID), zap.Error(err))
+	}
 	return checkpoint
 }
 

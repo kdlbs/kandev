@@ -46,18 +46,23 @@ const STATUS_RANK: Record<string, number> = {
 };
 
 /**
- * Mirrors mrAutomationReadyToMerge (backend) for display purposes: the same
- * gates (open, not draft, pipeline success, approved, zero unresolved
- * discussions, GitLab's own merge-readiness verdict) evaluated against
- * whatever TaskMR fields are already on hand. `unresolved_discussions` is
- * only populated for automation-subscribed MRs (see the TaskMR field's own
- * doc comment), so this can still under-report for a non-subscribed MR —
- * but it must never claim "ready" while a populated, non-zero count or a
- * non-mergeable verdict says otherwise.
+ * Best-effort client-side approximation of the backend's
+ * mrAutomationReadyToMerge, evaluated against whatever TaskMR fields are
+ * already on hand — for the tooltip/badge only; it never gates a merge.
+ * Deliberately does NOT check approval_state: the backend gate doesn't
+ * either. It trusts GitLab's own merge-readiness verdict
+ * (detailed_merge_status, or merge_status on pre-15.6 hosts) to have
+ * already accounted for approval rules server-side, so an unsynced empty
+ * approval_state can't make this read "not ready" while the backend is
+ * about to merge. `unresolved_discussions` is only populated for
+ * automation-subscribed MRs (see the TaskMR field's own doc comment), so
+ * this can still under-report for a non-subscribed MR — but it must never
+ * claim "ready" while a populated, non-zero count or a non-mergeable
+ * verdict says otherwise.
  */
 export function isMRReadyToMerge(mr: TaskMR): boolean {
   if (mr.state !== "open" || mr.draft) return false;
-  if (mr.pipeline_state !== "success" || mr.approval_state !== "approved") return false;
+  if (mr.pipeline_state !== "success") return false;
   if (mr.unresolved_discussions > 0) return false;
   return mrMergeStatusReady(mr);
 }

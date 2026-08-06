@@ -310,6 +310,52 @@ func TestHandleTaskMRCIAutomation_UnchangedSnapshotDispatchesNothing(t *testing.
 	}
 }
 
+// TestHandleTaskMRCIAutomation_EmptyDeltaWithRecentFixStillBlocksAutoMerge
+// is the regression for the missing duplicate-blocks-merge guard on the
+// empty-delta path (parity with GitHub's handleTaskPRCIAutoFixEmptyDelta).
+// The snapshot is simultaneously "otherwise merge-ready" and "has the same
+// failing job as the checkpoint" — an artificial combination, as in
+// TestHandleTaskMRCIAutomation_AutoFixBlocksAutoMergeInSamePass above, to
+// isolate this guard from the pipeline-status gate that would otherwise
+// mask it.
+func TestHandleTaskMRCIAutomation_EmptyDeltaWithRecentFixStillBlocksAutoMerge(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task-1", "session-1", models.TaskSessionStateRunning)
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	mr := &gitlab.TaskMR{TaskID: "task-1", Host: "https://gitlab.example.com", ProjectPath: "group/widget", MRIID: 1, State: gitlabMRStateOpen}
+	snapshot := &gitlab.MRAutomationSnapshot{
+		MR: &gitlab.MR{
+			State: gitlabMRStateOpen, IID: 1, ProjectPath: "group/widget",
+			MergeStatus: "can_be_merged", DetailedMergeStatus: "mergeable",
+		},
+		PipelineStatus: "success",
+		FailingJobs:    []gitlab.PipelineJob{{Name: "unit", Status: "failed"}},
+	}
+	checkpointJSON, signature := encodeMRAutoFixCheckpoint(mrAutoFixBuildDelta(snapshot, mrAutoFixCheckpoint{}))
+	recent := time.Now().Add(-10 * time.Minute)
+	fake := &mockGitLabMRAutomationService{
+		snapshot: snapshot,
+		checkpoint: &gitlab.TaskMRLifecycleState{
+			LastFixSignature: signature, LastFixCheckpointJSON: checkpointJSON, LastFixEnqueuedAt: &recent,
+		},
+	}
+	svc.SetGitLabMRAutomationService(fake)
+
+	svc.handleTaskMRCIAutomation(ctx, mr, &gitlab.TaskMRAutomationResponse{
+		TaskID: "task-1", AutoFixEnabled: true, AutoMergeEnabled: true, WorkspaceID: "ws-1",
+		EffectiveAutoFixPrompt: "Fix it",
+	})
+
+	if fake.mergeCalls.Load() != 0 {
+		t.Fatalf("MergeMRForAutomation calls = %d, want 0 — a recently-dispatched fix must still block auto-merge on the empty-delta path", fake.mergeCalls.Load())
+	}
+	status := svc.messageQueue.GetStatus(ctx, "session-1")
+	if status.Count != 0 {
+		t.Fatalf("expected no new dispatch for an unchanged snapshot, got %+v", status)
+	}
+}
+
 func TestHandleTaskMRCIAutomation_RunningPipelineDispatchesNothing(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)

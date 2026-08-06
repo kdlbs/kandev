@@ -117,7 +117,7 @@ describe("getMRTooltip", () => {
 });
 
 describe("isMRReadyToMerge", () => {
-  it("is true only for open, non-draft, approved MRs with a passing pipeline and a mergeable status", () => {
+  it("is true only for open, non-draft MRs with a passing pipeline and a mergeable status", () => {
     expect(
       isMRReadyToMerge(
         makeMR({
@@ -133,6 +133,19 @@ describe("isMRReadyToMerge", () => {
       ),
     ).toBe(false);
     expect(isMRReadyToMerge(makeMR({ state: "merged", approval_state: "approved" }))).toBe(false);
+  });
+
+  it("does not gate on approval_state, matching the backend's mrAutomationReadyToMerge (which trusts GitLab's own merge-readiness verdict)", () => {
+    expect(
+      isMRReadyToMerge(
+        makeMR({
+          approval_state: "",
+          pipeline_state: "success",
+          detailed_merge_status: "mergeable",
+          unresolved_discussions: 0,
+        }),
+      ),
+    ).toBe(true);
   });
 
   it("is false when there are unresolved discussions, even if every other gate passes", () => {
