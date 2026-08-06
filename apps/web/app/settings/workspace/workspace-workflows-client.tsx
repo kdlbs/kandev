@@ -167,6 +167,7 @@ function hasNewerWorkflowMetadata(current: Workflow, savedFrom: Workflow) {
   return (
     current.name !== savedFrom.name ||
     current.description !== savedFrom.description ||
+    (current.prompt ?? "") !== (savedFrom.prompt ?? "") ||
     current.agent_profile_id !== savedFrom.agent_profile_id
   );
 }

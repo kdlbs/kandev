@@ -201,7 +201,7 @@ export type Workflow = {
   name: string;
   description?: string | null;
   /** Optional workflow-level agent instructions prepended at every step entry. */
-  prompt?: string | null;
+  prompt?: string;
   workflow_template_id?: string | null;
   agent_profile_id?: AgentProfileId;
   sort_order?: number;

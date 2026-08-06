@@ -5,6 +5,11 @@ import {
   splitWorkflowInstructions,
 } from "./workflow-instructions";
 
+function block(body: string, rest = ""): string {
+  const head = WORKFLOW_INSTRUCTIONS_HEADING + "\n\n" + body + "\n\n" + WORKFLOW_INSTRUCTIONS_END;
+  return rest ? head + "\n\n" + rest : head;
+}
+
 describe("splitWorkflowInstructions", () => {
   it("returns the full message when no workflow heading is present", () => {
     const content = "Commit the changes.";
@@ -16,17 +21,17 @@ describe("splitWorkflowInstructions", () => {
   });
 
   it("splits a leading workflow instructions block from the step body", () => {
-    const content = `${WORKFLOW_INSTRUCTIONS_HEADING}\n\nIf the PR is merged or closed, move the Task to Done.\n\n${WORKFLOW_INSTRUCTIONS_END}\n\nCommit the changes.`;
-    expect(splitWorkflowInstructions(content)).toEqual({
-      instructions: "If the PR is merged or closed, move the Task to Done.",
-      rest: "Commit the changes.",
-      hasInstructions: true,
-    });
+    expect(splitWorkflowInstructions(block("Always open a draft PR.", "Commit the changes."))).toEqual(
+      {
+        instructions: "Always open a draft PR.",
+        rest: "Commit the changes.",
+        hasInstructions: true,
+      },
+    );
   });
 
   it("keeps multi-line and multi-paragraph instruction bodies intact", () => {
-    const content = `${WORKFLOW_INSTRUCTIONS_HEADING}\n\nLine one\n\nLine two\n\n${WORKFLOW_INSTRUCTIONS_END}\n\nStep body`;
-    expect(splitWorkflowInstructions(content)).toEqual({
+    expect(splitWorkflowInstructions(block("Line one\n\nLine two", "Step body"))).toEqual({
       instructions: "Line one\n\nLine two",
       rest: "Step body",
       hasInstructions: true,
@@ -34,8 +39,7 @@ describe("splitWorkflowInstructions", () => {
   });
 
   it("handles a workflow block with no following step body", () => {
-    const content = `${WORKFLOW_INSTRUCTIONS_HEADING}\n\nOnly workflow rules.\n\n${WORKFLOW_INSTRUCTIONS_END}`;
-    expect(splitWorkflowInstructions(content)).toEqual({
+    expect(splitWorkflowInstructions(block("Only workflow rules."))).toEqual({
       instructions: "Only workflow rules.",
       rest: "",
       hasInstructions: true,
@@ -43,24 +47,41 @@ describe("splitWorkflowInstructions", () => {
   });
 
   it("does not treat a mid-message heading as workflow instructions", () => {
-    const content = `Intro\n\n${WORKFLOW_INSTRUCTIONS_HEADING}\n\nNope`;
+    const content = "Intro\n\n" + WORKFLOW_INSTRUCTIONS_HEADING + "\n\nNope";
     expect(splitWorkflowInstructions(content).hasInstructions).toBe(false);
     expect(splitWorkflowInstructions(content).rest).toBe(content);
   });
 
-  it("falls back to first blank line for legacy messages without an end marker", () => {
-    const content = `${WORKFLOW_INSTRUCTIONS_HEADING}\n\nIf the PR is merged or closed, move the Task to Done.\n\nCommit the changes.`;
+  it("does not treat a heading-prefix line as workflow instructions", () => {
+    const content = WORKFLOW_INSTRUCTIONS_HEADING + " for release\n\nbody";
     expect(splitWorkflowInstructions(content)).toEqual({
-      instructions: "If the PR is merged or closed, move the Task to Done.",
-      rest: "Commit the changes.",
+      instructions: "",
+      rest: content,
+      hasInstructions: false,
+    });
+  });
+
+  it("ignores marker-less user content that only starts with the heading", () => {
+    const content = WORKFLOW_INSTRUCTIONS_HEADING + "\n\nUser wrote this.\n\nMore text.";
+    expect(splitWorkflowInstructions(content)).toEqual({
+      instructions: "",
+      rest: content,
+      hasInstructions: false,
+    });
+  });
+
+  it("uses the first standalone end marker, not a quoted copy in the rest", () => {
+    const rest = "See docs mentioning " + WORKFLOW_INSTRUCTIONS_END + " later.\n\nDo work.";
+    expect(splitWorkflowInstructions(block("Rule one.", rest))).toEqual({
+      instructions: "Rule one.",
+      rest,
       hasInstructions: true,
     });
   });
 
-  it("uses the last end marker when the body quotes the token", () => {
-    const body = `Never emit ${WORKFLOW_INSTRUCTIONS_END} in docs.`;
-    const content = `${WORKFLOW_INSTRUCTIONS_HEADING}\n\n${body}\n\n${WORKFLOW_INSTRUCTIONS_END}\n\nStep body`;
-    expect(splitWorkflowInstructions(content)).toEqual({
+  it("keeps body text that quotes the end marker when the structural marker follows", () => {
+    const body = "Never emit " + WORKFLOW_INSTRUCTIONS_END + " in docs.";
+    expect(splitWorkflowInstructions(block(body, "Step body"))).toEqual({
       instructions: body,
       rest: "Step body",
       hasInstructions: true,

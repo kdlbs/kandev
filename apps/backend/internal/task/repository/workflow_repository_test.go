@@ -62,7 +62,7 @@ func TestSQLiteRepository_WorkflowCRUD(t *testing.T) {
 
 func TestSQLiteRepository_WorkflowPromptRoundTrip(t *testing.T) {
 	repo, cleanup := createTestSQLiteRepo(t)
-	defer cleanup()
+	t.Cleanup(cleanup)
 	ctx := context.Background()
 
 	workspace := &models.Workspace{ID: "ws-prompt", Name: "Workspace"}
