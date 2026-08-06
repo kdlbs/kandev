@@ -23,9 +23,9 @@ export function SubagentMetaRow({
     >
       {chips.map((chip) => (
         <Badge
-          key={chip.label}
+          key={chip.id}
           variant="secondary"
-          data-testid={`subagent-meta-${chip.label}`}
+          data-testid={`subagent-meta-${chip.id}`}
           className="font-mono text-[10px] font-normal"
         >
           {chip.value}

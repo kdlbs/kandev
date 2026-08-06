@@ -32,6 +32,7 @@ import {
   type KanbanExternalLinkAvailability,
   useKanbanExternalLinkAvailability,
 } from "@/components/kanban-external-link-availability";
+import { useTranslation } from "react-i18next";
 
 /**
  * Sentinel step ID used to collect tasks whose workflow_step_id no longer
@@ -277,6 +278,7 @@ function MobileKanbanLayout({
   activeTask: Task | null;
   mobileWorkflowNavigation?: MobileWorkflowNavigation;
 }) {
+  const { t } = useTranslation();
   const taskCounts = useMemo(() => {
     const counts: Record<string, number> = {};
     for (const step of steps) {
@@ -306,7 +308,7 @@ function MobileKanbanLayout({
           className="mx-4 my-3 flex flex-1 items-center justify-center rounded-xl border border-dashed border-border/70 px-6 text-center text-sm text-muted-foreground"
           data-testid="mobile-kanban-no-steps"
         >
-          No steps configured. Choose another workflow or add steps in Settings.
+          {t("kanban:noStepsConfiguredChooseAnotherWorkflow")}
         </div>
       ) : (
         <SwipeableColumns

@@ -369,7 +369,12 @@ func materializedCheckoutExists(destination string) (bool, error) {
 }
 
 func matchingCheckoutIdentity(ctx context.Context, destination, locator, branch string) error {
-	if err := matchingCheckoutOrigin(ctx, destination, locator); err != nil {
+	// Read the URL stored in the checkout instead of the expanded URL returned by
+	// `git remote get-url`. Executor-specific insteadOf rules can rewrite the
+	// latter to a local transport, even though the checkout still belongs to the
+	// requested repository.
+	origin, err := materializeGitOutput(ctx, "-C", destination, "config", "--local", "--get", "remote.origin.url")
+	if err != nil || strings.TrimSpace(origin) != locator {
 		return errMaterializeCollision
 	}
 	currentBranch, err := materializeGitOutput(ctx, "-C", destination, "branch", "--show-current")

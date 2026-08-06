@@ -15,6 +15,7 @@ import {
 } from "@kandev/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
 import type { WorkflowStep } from "@/components/kanban-column";
+import { useTranslation } from "react-i18next";
 
 interface TaskMultiSelectToolbarProps {
   selectedIds: Set<string>;
@@ -52,6 +53,7 @@ function BulkArchiveDialog({
   isProcessing: boolean;
   onConfirm: (opts: { cascade: boolean }) => void;
 }) {
+  const { t } = useTranslation();
   const [open, setOpen] = useState(false);
 
   return (
@@ -65,7 +67,7 @@ function BulkArchiveDialog({
         data-testid="bulk-archive-button"
       >
         <IconArchive className="h-4 w-4" />
-        Archive {count}
+        {t("kanban:archiveCount", { count })}
       </Button>
       <TaskArchiveConfirmDialog
         open={open}
@@ -95,6 +97,7 @@ function BulkDeleteDialog({
   isProcessing: boolean;
   onConfirm: (opts: { cascade: boolean }) => void;
 }) {
+  const { t } = useTranslation();
   const [open, setOpen] = useState(false);
 
   return (
@@ -108,7 +111,7 @@ function BulkDeleteDialog({
         data-testid="bulk-delete-button"
       >
         <IconTrash className="h-4 w-4" />
-        Delete {count}
+        {t("kanban:deleteCount", { count })}
       </Button>
       <TaskDeleteConfirmDialog
         open={open}
@@ -135,6 +138,7 @@ export function TaskMultiSelectToolbar({
   onBulkArchive,
   onBulkMove,
 }: TaskMultiSelectToolbarProps) {
+  const { t } = useTranslation();
   const taskIds = useMemo(() => [...selectedIds], [selectedIds]);
   const executorTypes = useBulkExecutorTypes(taskIds);
 
@@ -161,10 +165,10 @@ export function TaskMultiSelectToolbar({
               variant="outline"
               className="cursor-pointer gap-1.5"
               disabled={isProcessing || !canMove}
-              title={!canMove ? "Cannot move tasks from different workflows" : undefined}
+              title={!canMove ? t("kanban:cannotMoveTasksFromDifferentWorkflows") : undefined}
               data-testid="bulk-move-button"
             >
-              Move to
+              {t("kanban:moveTo")}
               <IconChevronRight className="h-4 w-4" />
             </Button>
           </DropdownMenuTrigger>
@@ -206,7 +210,7 @@ export function TaskMultiSelectToolbar({
         className="cursor-pointer ml-1"
         onClick={onClearSelection}
         disabled={isProcessing}
-        aria-label="Clear selection"
+        aria-label={t("kanban:clearSelection")}
         data-testid="bulk-clear-selection"
       >
         <IconX className="h-4 w-4" />

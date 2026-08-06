@@ -781,6 +781,21 @@ func sshRemoteAgentEnv(req *ExecutorCreateRequest) map[string]string {
 	// than a GitHub broker lease. Preserve that credential-free routing shape
 	// for the remote agentctl process as well.
 	copyIndexedGitConfig(req.Env, env)
+
+	for _, key := range req.ApprovedSecretEnvKeys {
+		if !posixSSHEnvIdentifier.MatchString(key) {
+			continue
+		}
+		// Repository approval grants forwarding of an otherwise non-managed
+		// key; it must never replace a credential or broker value selected by
+		// the executor composition boundary.
+		if _, exists := env[key]; exists {
+			continue
+		}
+		if value := req.Env[key]; value != "" {
+			env[key] = value
+		}
+	}
 	if len(env) == 0 {
 		return nil
 	}

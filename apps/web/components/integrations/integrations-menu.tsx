@@ -14,6 +14,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { IconPlugConnected } from "@tabler/icons-react";
 import { DestinationRows } from "@/components/navigation/destination-rows";
 import { useAppDestinations } from "@/hooks/use-app-destinations";
+import { useTranslation } from "react-i18next";
 
 type MobileIntegrationsSectionProps = {
   onNavigate: () => void;
@@ -31,6 +32,7 @@ function useIntegrationDestinations() {
 }
 
 export function IntegrationsMenu() {
+  const { t } = useTranslation();
   const links = useIntegrationDestinations();
   const [open, setOpen] = useState(false);
   const closeTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -71,7 +73,7 @@ export function IntegrationsMenu() {
           variant="ghost"
           size="icon-lg"
           className="cursor-pointer text-muted-foreground hover:text-foreground"
-          aria-label="Integrations"
+          aria-label={t("common:integrations")}
           onPointerEnter={openOnHover}
           onPointerLeave={closeAfterHover}
         >
@@ -84,7 +86,7 @@ export function IntegrationsMenu() {
         onPointerEnter={openOnHover}
         onPointerLeave={closeAfterHover}
       >
-        <DropdownMenuLabel>Integrations</DropdownMenuLabel>
+        <DropdownMenuLabel>{t("common:integrations")}</DropdownMenuLabel>
         {links.map((link) => {
           const Icon = link.icon;
           return (
@@ -135,13 +137,14 @@ export function IntegrationsTopbarLinks() {
  * surfaces cannot drift apart.
  */
 export function MobileIntegrationsSection({ onNavigate }: MobileIntegrationsSectionProps) {
+  const { t } = useTranslation();
   const destinations = useAppDestinations("mobileMenu", "integrations");
 
   if (destinations.length === 0) return null;
 
   return (
     <div className="space-y-3">
-      <div className="text-sm font-medium">Integrations</div>
+      <div className="text-sm font-medium">{t("common:integrations")}</div>
       <DestinationRows
         destinations={destinations}
         onNavigate={onNavigate}

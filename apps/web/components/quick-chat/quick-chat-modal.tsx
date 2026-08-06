@@ -15,14 +15,18 @@ import { ConfigChatSetup } from "@/components/config-chat/config-chat-setup";
 import { useConfigChat } from "@/components/config-chat/use-config-chat";
 import type { QuickChatSession } from "@/lib/state/slices/ui/types";
 import { isQuickChatSetupSessionId } from "@/lib/state/slices/ui/quick-chat-session";
+import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 
 type QuickChatModalProps = {
   workspaceId: string;
 };
 
-function quickChatTabName(session: QuickChatSession, index: number) {
-  if (!isQuickChatSetupSessionId(session.sessionId)) return session.name || `Chat ${index + 1}`;
-  return session.kind === "config" ? "Configuration Chat" : "New Chat";
+function quickChatTabName(t: TFunction, session: QuickChatSession, index: number) {
+  if (!isQuickChatSetupSessionId(session.sessionId)) {
+    return session.name || t("chat:chatTabName", { index: index + 1 });
+  }
+  return session.kind === "config" ? t("chat:configurationChatTab") : t("chat:newChatTab");
 }
 
 function QuickChatTabs({
@@ -42,13 +46,14 @@ function QuickChatTabs({
   onRename: (sessionId: string, name: string) => void;
   onCloseModal: () => void;
 }) {
+  const { t } = useTranslation();
   if (sessions.length === 0) return null;
 
   return (
     <div className="flex items-center gap-1 px-2 py-1 border-b bg-muted/20">
       <div className="flex items-center gap-1 overflow-x-auto flex-1 scrollbar-hide">
         {sessions.map((s, index) => {
-          const tabName = quickChatTabName(s, index);
+          const tabName = quickChatTabName(t, s, index);
           return (
             <QuickChatTabItem
               key={s.sessionId || `new-${index}`}
@@ -67,7 +72,7 @@ function QuickChatTabs({
           variant="ghost"
           className="h-11 w-11 shrink-0 cursor-pointer sm:h-6 sm:w-6"
           onClick={onNewChat}
-          aria-label="Start new chat"
+          aria-label={t("chat:startNewChat")}
         >
           <IconPlus className="h-4 w-4 sm:h-3.5 sm:w-3.5" />
         </Button>
@@ -79,7 +84,7 @@ function QuickChatTabs({
         variant="ghost"
         className="h-11 w-11 shrink-0 cursor-pointer p-0 sm:hidden"
         onClick={onCloseModal}
-        aria-label="Close quick chat"
+        aria-label={t("chat:closeQuickChat")}
         data-testid="quick-chat-close"
       >
         <IconX className="h-3.5 w-3.5" />
@@ -95,11 +100,14 @@ function QuickChatResizeHandle({
   edge: "left" | "right";
   onMouseDown: (event: React.MouseEvent) => void;
 }) {
+  const { t } = useTranslation();
   return (
     <button
       type="button"
       tabIndex={-1}
-      aria-label={`Resize quick chat from ${edge}`}
+      aria-label={
+        edge === "left" ? t("chat:resizeQuickChatFromLeft") : t("chat:resizeQuickChatFromRight")
+      }
       data-testid={`quick-chat-resize-${edge}`}
       onMouseDown={onMouseDown}
       className={`group absolute inset-y-0 z-20 hidden w-2 cursor-ew-resize items-center justify-center sm:flex ${
@@ -116,6 +124,7 @@ function QuickChatResizeHandle({
 }
 
 export const QuickChatModal = memo(function QuickChatModal({ workspaceId }: QuickChatModalProps) {
+  const { t } = useTranslation();
   const configChat = useConfigChat(workspaceId);
   const {
     isOpen,
@@ -150,7 +159,7 @@ export const QuickChatModal = memo(function QuickChatModal({ workspaceId }: Quic
           showCloseButton={false}
           overlayClassName="bg-black/20"
         >
-          <DialogTitle className="sr-only">Quick Chat</DialogTitle>
+          <DialogTitle className="sr-only">{t("common:commandQuickChat")}</DialogTitle>
           <QuickChatResizeHandle edge="left" {...leftResizeHandleProps} />
           <QuickChatResizeHandle edge="right" {...rightResizeHandleProps} />
           <QuickChatTabs

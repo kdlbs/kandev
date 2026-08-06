@@ -31,6 +31,28 @@ func TestMaterializeRepository_ClonesIntoWorkspaceDestination(t *testing.T) {
 	}
 }
 
+func TestMaterializeRepository_ReusesCheckoutWithGitURLRewrite(t *testing.T) {
+	origin := createMaterializeOrigin(t)
+	configPath := filepath.Join(t.TempDir(), "gitconfig")
+	locator := "https://gitlab.com/fixture/repository.git"
+	config := "[url \"file://" + filepath.ToSlash(origin) + "\"]\n\tinsteadOf = " + locator + "\n"
+	if err := os.WriteFile(configPath, []byte(config), 0o600); err != nil {
+		t.Fatalf("write git config: %v", err)
+	}
+	t.Setenv("GIT_CONFIG_GLOBAL", configPath)
+
+	destination := filepath.Join(t.TempDir(), "second-repo")
+	if reused, err := materializeRepository(context.Background(), locator, destination, "main", ""); err != nil || reused {
+		t.Fatalf("initial materialization = reused:%t, err:%v", reused, err)
+	}
+
+	reused, err := materializeRepository(context.Background(), locator, destination, "main", "")
+
+	if err != nil || !reused {
+		t.Fatalf("rewritten checkout reuse = reused:%t, err:%v; want reused checkout", reused, err)
+	}
+}
+
 func TestMaterializeRepository_ChecksOutBaseAsNamedTrackingBranch(t *testing.T) {
 	origin := createMaterializeOrigin(t)
 	workDir := t.TempDir()

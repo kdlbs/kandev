@@ -47,6 +47,7 @@ import {
   survivingEntityReferences,
 } from "@/lib/entity-references/message-references";
 import { buildEntityReferenceMarkdownComponents } from "@/components/task/chat/messages/entity-reference-chip";
+import { t } from "@/lib/i18n";
 
 type QueuedAttachment = NonNullable<QueuedMessage["attachments"]>[number];
 
@@ -62,6 +63,7 @@ type AttachmentRowProps = {
  * editing the message text.
  */
 function AttachmentRow({ attachments, interactive }: AttachmentRowProps) {
+  const { t } = useTranslation();
   if (attachments.length === 0) return null;
   const images = attachments.filter((a) => a.type === "image");
   const files = attachments.filter((a) => a.type !== "image");
@@ -71,7 +73,7 @@ function AttachmentRow({ attachments, interactive }: AttachmentRowProps) {
         <ImagePreviewDialog
           key={`img-${i}`}
           src={`data:${att.mime_type};base64,${att.data}`}
-          alt={`Attachment ${i + 1}`}
+          alt={t("task:attachmentIndexed", { index: i + 1 })}
           interactive={interactive}
           thumbnailClassName={cn(
             "h-10 w-10 rounded-md border border-border object-cover",
@@ -85,7 +87,7 @@ function AttachmentRow({ attachments, interactive }: AttachmentRowProps) {
           className="inline-flex items-center gap-1.5 rounded-full bg-muted/60 px-2 py-0.5 text-xs text-muted-foreground"
         >
           <IconFile className="h-3 w-3" />
-          Attachment
+          {t("task:attachment")}
         </span>
       ))}
     </div>
@@ -154,14 +156,17 @@ function senderLabel(entry: QueuedMessage): string {
   if (kind === "agent") {
     const title = entry.metadata?.sender_task_title;
     const sessionName = entry.metadata?.sender_session_name;
-    const base = typeof title === "string" && title.length > 0 ? `From ${title}` : "From agent";
+    const base =
+      typeof title === "string" && title.length > 0
+        ? t("task:fromTask", { title })
+        : t("task:fromAgent");
     return typeof sessionName === "string" && sessionName.length > 0
-      ? `${base} · ${sessionName}`
+      ? t("task:senderWithSession", { base, sessionName })
       : base;
   }
-  if (kind === "workflow") return "Workflow";
-  if (kind === "system") return "System";
-  return "You";
+  if (kind === "workflow") return t("task:workflowSender");
+  if (kind === "system") return t("task:systemSender");
+  return t("task:you");
 }
 
 type SenderIconProps = { entry: QueuedMessage };
@@ -234,6 +239,7 @@ function EditView({
   onCancel,
   textareaRef,
 }: EditViewProps) {
+  const { t } = useTranslation();
   const onKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key === "Escape") {
       event.preventDefault();
@@ -251,7 +257,7 @@ function EditView({
         data-testid="queue-edit-textarea"
         value={value}
         disabled={saving}
-        placeholder="Enter message content..."
+        placeholder={t("task:enterMessageContent")}
         onChange={(e) => onChange(e.target.value)}
         onKeyDown={onKeyDown}
         className={cn(
@@ -267,7 +273,7 @@ function EditView({
           className="h-7 cursor-pointer"
         >
           <IconCheck className="mr-1 h-3.5 w-3.5" />
-          Save
+          {t("common:save")}
         </Button>
         <Button
           size="sm"
@@ -276,10 +282,10 @@ function EditView({
           disabled={saving}
           className="h-7 cursor-pointer"
         >
-          Cancel
+          {t("common:cancel")}
         </Button>
         <span className="ml-auto text-xs text-muted-foreground">
-          Press Esc to cancel, Cmd+Enter to save
+          {t("task:pressEscToCancelCmdEnter")}
         </span>
       </div>
     </div>
@@ -411,6 +417,7 @@ function DisplayView({
   onRemove,
   onMerge,
 }: DisplayViewProps) {
+  const { t } = useTranslation();
   const visible = stripSystemTags(entry.content);
   const attachments = (entry.attachments ?? []) as QueuedAttachment[];
   const senderTask = getSenderTaskInfo(entry);
@@ -425,7 +432,7 @@ function DisplayView({
     <div className="group flex items-start gap-2 py-1.5" data-testid="queue-entry">
       <span className="flex items-center gap-1.5 mt-0.5 text-muted-foreground">
         <span
-          aria-label={`Position ${positionLabel}`}
+          aria-label={t("task:position", { positionLabel })}
           className="font-mono text-[10px] tabular-nums"
         >
           {positionLabel}

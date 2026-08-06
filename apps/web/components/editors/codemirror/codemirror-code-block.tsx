@@ -8,6 +8,7 @@ import { IconCheck, IconCopy } from "@tabler/icons-react";
 import { cn } from "@/lib/utils";
 import { getCodeMirrorExtension } from "@/lib/languages";
 import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard";
+import { useTranslation } from "react-i18next";
 
 type CodeBlockProps = {
   children: React.ReactNode;
@@ -21,6 +22,7 @@ const getLanguageExtension = (language?: string) => {
 };
 
 export function CodeMirrorCodeBlock({ children, className }: CodeBlockProps) {
+  const { t } = useTranslation();
   const { copied, copy } = useCopyToClipboard();
   const { theme, systemTheme } = useTheme();
   const effectiveTheme = theme === "system" ? systemTheme : theme;
@@ -52,7 +54,7 @@ export function CodeMirrorCodeBlock({ children, className }: CodeBlockProps) {
           "opacity-0 group-hover/code-block:opacity-100",
           "cursor-pointer",
         )}
-        title="Copy code"
+        title={t("editors:copyCode")}
       >
         {copied ? (
           <IconCheck className="h-3 w-3 text-green-400" />

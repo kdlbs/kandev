@@ -1,9 +1,13 @@
 "use client";
 
 import { NodeViewContent, NodeViewWrapper, type NodeViewProps } from "@tiptap/react";
+import { useTranslation } from "react-i18next";
 
-const CODE_LANGUAGES = [
-  { value: "", label: "Plain" },
+// `value` is the highlight.js language id and the language names are proper
+// nouns, so both stay untranslated. Only the "no language" option is copy, and
+// it travels as a catalog key because this table is built at module load.
+const CODE_LANGUAGES: Array<{ value: string; label?: string; labelKey?: string }> = [
+  { value: "", labelKey: "task:codeLanguagePlain" },
   { value: "javascript", label: "JavaScript" },
   { value: "typescript", label: "TypeScript" },
   { value: "python", label: "Python" },
@@ -23,6 +27,7 @@ const CODE_LANGUAGES = [
 ];
 
 export function CodeBlockView({ node, updateAttributes }: NodeViewProps) {
+  const { t } = useTranslation();
   const language = (node.attrs.language as string) || "";
 
   return (
@@ -35,7 +40,7 @@ export function CodeBlockView({ node, updateAttributes }: NodeViewProps) {
       >
         {CODE_LANGUAGES.map((lang) => (
           <option key={lang.value} value={lang.value}>
-            {lang.label}
+            {lang.labelKey ? t(lang.labelKey) : lang.label}
           </option>
         ))}
       </select>

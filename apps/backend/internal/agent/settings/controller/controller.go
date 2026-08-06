@@ -15,6 +15,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/settings/modelfetcher"
 	"github.com/kandev/kandev/internal/agent/settings/store"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/secrets"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"go.uber.org/zap"
 )
@@ -65,6 +66,13 @@ type Controller struct {
 	maintenance     *maintenanceCoordinator
 	hub             JobBroadcaster
 	logger          *logger.Logger
+	secretStore     secrets.SecretStore
+}
+
+// SetSecretStore wires the metadata-only validator used by shared agent
+// profiles. Workspace-scoped references are intentionally rejected here.
+func (c *Controller) SetSecretStore(secretStore secrets.SecretStore) {
+	c.secretStore = secretStore
 }
 
 // SetWatcherDependencyChecker wires in the watcher dependency enumerator so

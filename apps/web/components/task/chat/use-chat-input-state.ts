@@ -37,6 +37,7 @@ import type { TipTapInputHandle } from "./tiptap-input";
 import type { ImagePasteIssue } from "./clipboard-attachments";
 import { deleteAttachment, uploadAttachment } from "@/lib/api/domains/attachment-api";
 import { ApiError } from "@/lib/api/client";
+import { useTranslation } from "react-i18next";
 
 type UseChatInputStateProps = {
   sessionId: string | null;
@@ -398,6 +399,7 @@ export function useChatInputState({
   onRequestChangesTooltipDismiss,
   onSubmit,
 }: UseChatInputStateProps) {
+  const { t } = useTranslation();
   const [value, setValue] = useState(() => (sessionId ? getChatDraftText(sessionId) : ""));
   const [historyIndex, setHistoryIndex] = useState(-1);
   const inputRef = useRef<TipTapInputHandle>(null);
@@ -486,7 +488,7 @@ export function useChatInputState({
           ? ({
               kind: "image" as const,
               id: `image:${att.id}`,
-              label: `Image (${formatBytes(att.size)})`,
+              label: t("task:imageWithSize", { bytes: formatBytes(att.size) }),
               attachment: att,
               onRemove: () => handleRemoveAttachment(att.id),
               onDeliveryModeChange: (mode) => handleDeliveryModeChange(att.id, mode),

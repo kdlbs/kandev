@@ -39,6 +39,7 @@ import type {
   WorkflowStep,
 } from "@/lib/types/http";
 import { TaskDetailRoute } from "./task-detail-route";
+import { useTranslation } from "react-i18next";
 
 const OfficeRoutes = lazy(() =>
   import("./office-routes").then((mod) => ({ default: mod.OfficeRoutes })),
@@ -211,14 +212,14 @@ export function SpaRoutes({ routeData }: { routeData?: BootRouteData }) {
   }
   if (route.kind === "settings") {
     return (
-      <Suspense fallback={<RouteLoading routeName="Settings" />}>
+      <Suspense fallback={<RouteLoading routeNameKey="common:settings" />}>
         <SettingsRoutes pathname={route.pathname} />
       </Suspense>
     );
   }
   if (route.kind === "office") {
     return (
-      <Suspense fallback={<RouteLoading routeName="Office" />}>
+      <Suspense fallback={<RouteLoading routeNameKey="sidebar:office" />}>
         <OfficeRoutes pathname={route.pathname} />
       </Suspense>
     );
@@ -227,11 +228,14 @@ export function SpaRoutes({ routeData }: { routeData?: BootRouteData }) {
   return <DataBackedRoute route={route} routeData={routeData} />;
 }
 
-function RouteLoading({ routeName }: { routeName: string }) {
+// Takes the route name as a catalog KEY, not resolved copy: a `t()` at the call
+// site would sit in a plain route-dispatch function with no hook of its own.
+function RouteLoading({ routeNameKey }: { routeNameKey: string }) {
+  const { t } = useTranslation();
   return (
     <div className="flex h-full min-h-0 w-full items-center justify-center bg-background">
       <p role="status" aria-live="polite" className="text-sm text-muted-foreground">
-        Loading {routeName}…
+        {t("common:loadingRoute", { routeName: t(routeNameKey) })}
       </p>
     </div>
   );

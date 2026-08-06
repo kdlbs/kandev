@@ -123,6 +123,7 @@ Per-workspace credentials and triage triggers for external services.
 | [creation](workspaces/creation.md) | building |
 | [deletion](workspaces/deletion.md) | shipped |
 | [local-repositories](workspaces/local-repositories.md) | shipped |
+| [repository-secrets](workspaces/repository-secrets.md) | shipped |
 
 ## costs/ — cost tracking & budgets
 
@@ -149,6 +150,7 @@ Subscription quota tracking and per-agent cheap-model profile routing.
 | [sidebar-view-creation](ui/sidebar-view-creation.md) | shipped |
 | [command-panel sidebar task reveal](ui/command-panel-sidebar-task-reveal.md) | draft |
 | [sidebar-task-completion-icons](ui/sidebar-task-completion-icons.md) | shipped |
+| [session-tab-delete-feedback](ui/session-tab-delete-feedback.md) | shipped |
 | [slash-command-composer](ui/slash-command-composer.md) | shipped |
 | [subagent-observability](ui/subagent-observability.md) | building |
 | [entity-reference-composer](ui/entity-reference-composer.md) | draft |

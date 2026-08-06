@@ -935,6 +935,9 @@ func (e *Executor) buildResumeRequestAtCredentialBoundary(
 		return nil, "", execConfig, existingEnv, existingRunning, err
 	}
 	e.injectGitLabWorkspaceCredentials(ctx, req)
+	if err := e.resolveLaunchEnvironment(ctx, req, execConfig.ProfileEnvVars, allRepos); err != nil {
+		return nil, "", execConfig, existingEnv, existingRunning, err
+	}
 
 	return req, repositoryID, execConfig, existingEnv, existingRunning, nil
 }
@@ -999,15 +1002,6 @@ func (e *Executor) applyExecutorConfigToResumeRequest(ctx context.Context, req *
 	req.ExecutorType = execConfig.ExecutorType
 	req.ExecutorConfig = execConfig.ExecutorCfg
 	req.SetupScript = execConfig.SetupScript
-	if len(execConfig.ProfileEnv) > 0 {
-		if req.Env == nil {
-			req.Env = make(map[string]string)
-		}
-		for k, v := range execConfig.ProfileEnv {
-			req.Env[k] = v
-		}
-	}
-
 	if executorWasEmpty && session.ExecutorID != "" {
 		session.UpdatedAt = time.Now().UTC()
 		if err := e.repo.UpdateTaskSession(ctx, session); err != nil {

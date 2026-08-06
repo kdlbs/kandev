@@ -2,8 +2,11 @@ package process
 
 import (
 	"context"
+	"path/filepath"
 	"strings"
 	"testing"
+
+	"go.uber.org/zap/zapcore"
 
 	"github.com/kandev/kandev/internal/agentctl/types"
 )
@@ -292,4 +295,250 @@ func TestLookupBaseBranch_FallbackToEmptyKey(t *testing.T) {
 			}
 		})
 	}
+}
+
+// Regression: resolveBaseBranch fell through to the integration-branch list
+// silently. When a task's base branch never reached the tracker, the diff stat
+// was computed against origin/master — a wrong-but-plausible number with
+// nothing in the logs to attribute it. The two fallback reasons need different
+// fixes (propagation vs a branch that no longer exists in git), so they must be
+// distinguishable without re-running git by hand.
+func TestResolveBaseBranchWithReason(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("stored branch resolves", func(t *testing.T) {
+		repoDir, cleanup := setupTestRepo(t)
+		t.Cleanup(cleanup)
+
+		runGit(t, repoDir, "checkout", "-b", "develop")
+		runGit(t, repoDir, "checkout", "main")
+
+		wt := NewWorkspaceTracker(repoDir, newTestLogger(t))
+		wt.SetBaseBranch("develop")
+
+		got := wt.resolveBaseBranchWithReason(ctx)
+		if got.ref != "develop" {
+			t.Errorf("ref = %q, want %q", got.ref, "develop")
+		}
+		if got.reason != baseBranchStored {
+			t.Errorf("reason = %v, want baseBranchStored", got.reason)
+		}
+	})
+
+	t.Run("no stored branch falls back", func(t *testing.T) {
+		repoDir, cleanup := setupTestRepo(t)
+		t.Cleanup(cleanup)
+
+		wt := NewWorkspaceTracker(repoDir, newTestLogger(t))
+
+		got := wt.resolveBaseBranchWithReason(ctx)
+		if got.ref != "origin/main" {
+			t.Errorf("ref = %q, want %q", got.ref, "origin/main")
+		}
+		if got.reason != baseBranchFallbackNoStored {
+			t.Errorf("reason = %v, want baseBranchFallbackNoStored", got.reason)
+		}
+		if got.stored != "" {
+			t.Errorf("stored = %q, want empty", got.stored)
+		}
+	})
+
+	// A base branch that is recorded but missing from git is a different
+	// failure than one that never arrived — this is the case where the branch
+	// was deleted or never fetched, not a propagation gap.
+	t.Run("stored branch that does not exist falls back and is attributable", func(t *testing.T) {
+		repoDir, cleanup := setupTestRepo(t)
+		t.Cleanup(cleanup)
+
+		wt := NewWorkspaceTracker(repoDir, newTestLogger(t))
+		wt.SetBaseBranch("features/never-fetched")
+
+		got := wt.resolveBaseBranchWithReason(ctx)
+		if got.ref != "origin/main" {
+			t.Errorf("ref = %q, want %q", got.ref, "origin/main")
+		}
+		if got.reason != baseBranchFallbackStoredUnresolved {
+			t.Errorf("reason = %v, want baseBranchFallbackStoredUnresolved", got.reason)
+		}
+		if got.stored != "features/never-fetched" {
+			t.Errorf("stored = %q, want the recorded branch", got.stored)
+		}
+	})
+
+	// resolveBaseBranch keeps its exact contract — only observability is added.
+	t.Run("resolveBaseBranch returns the same ref", func(t *testing.T) {
+		repoDir, cleanup := setupTestRepo(t)
+		t.Cleanup(cleanup)
+
+		wt := NewWorkspaceTracker(repoDir, newTestLogger(t))
+		wt.SetBaseBranch("features/never-fetched")
+
+		if got := wt.resolveBaseBranch(ctx); got != wt.resolveBaseBranchWithReason(ctx).ref {
+			t.Errorf("resolveBaseBranch diverged from resolveBaseBranchWithReason")
+		}
+	})
+}
+
+// The reason enum only pays off if it reaches the operator, and only if it does
+// so at a level and with fields that identify *which* repository fell back to
+// *which* candidate. resolveBaseBranch also runs on every status poll, so an
+// unsuppressed log would bury the one event that matters under thousands of
+// identical repeats — the suppression is part of the contract, not an
+// optimisation.
+func TestResolveBaseBranchLogsFallback(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("single-repo fallback names the repository", func(t *testing.T) {
+		repoDir, cleanup := setupTestRepo(t)
+		t.Cleanup(cleanup)
+
+		log, observed := newObservedTestLogger(t)
+		wt := NewWorkspaceTracker(repoDir, log)
+
+		wt.resolveBaseBranch(ctx)
+
+		entries := observed.FilterMessage(
+			"no base branch recorded for workspace, using integration fallback for diff stats").All()
+		if len(entries) != 1 {
+			t.Fatalf("got %d fallback log entries, want 1", len(entries))
+		}
+		if got := entries[0].ContextMap()["repository"]; got != filepath.Base(repoDir) {
+			t.Errorf("repository field = %v, want %q", got, filepath.Base(repoDir))
+		}
+	})
+
+	// A missing base branch is ordinary (legacy tasks, external branches), so it
+	// stays at debug and must not cry wolf at warn.
+	t.Run("no stored branch logs at debug with repository and candidate", func(t *testing.T) {
+		repoDir, cleanup := setupTestRepo(t)
+		t.Cleanup(cleanup)
+
+		log, observed := newObservedTestLogger(t)
+		wt := NewWorkspaceTrackerForRepo(repoDir, "frontend", log)
+
+		wt.resolveBaseBranch(ctx)
+
+		entries := observed.FilterMessage(
+			"no base branch recorded for workspace, using integration fallback for diff stats").All()
+		if len(entries) != 1 {
+			t.Fatalf("got %d fallback log entries, want 1", len(entries))
+		}
+		if entries[0].Level != zapcore.DebugLevel {
+			t.Errorf("level = %v, want debug", entries[0].Level)
+		}
+		fields := entries[0].ContextMap()
+		if fields["repository"] != "frontend" {
+			t.Errorf("repository field = %v, want frontend", fields["repository"])
+		}
+		if fields["candidate"] != "origin/main" {
+			t.Errorf("candidate field = %v, want origin/main", fields["candidate"])
+		}
+	})
+
+	// A base branch that was recorded but does not resolve is an anomaly the
+	// operator has to see without turning on debug logging.
+	t.Run("stored branch that does not resolve warns and names the branch", func(t *testing.T) {
+		repoDir, cleanup := setupTestRepo(t)
+		t.Cleanup(cleanup)
+
+		log, observed := newObservedTestLogger(t)
+		wt := NewWorkspaceTrackerForRepo(repoDir, "frontend", log)
+		wt.SetBaseBranch("features/never-fetched")
+
+		wt.resolveBaseBranch(ctx)
+
+		entries := observed.FilterMessage(
+			"recorded base branch does not resolve in git, diff stats fall back to an integration branch").All()
+		if len(entries) != 1 {
+			t.Fatalf("got %d fallback log entries, want 1", len(entries))
+		}
+		if entries[0].Level != zapcore.WarnLevel {
+			t.Errorf("level = %v, want warn", entries[0].Level)
+		}
+		fields := entries[0].ContextMap()
+		if fields["repository"] != "frontend" {
+			t.Errorf("repository field = %v, want frontend", fields["repository"])
+		}
+		if fields["stored_base_branch"] != "features/never-fetched" {
+			t.Errorf("stored_base_branch field = %v, want features/never-fetched", fields["stored_base_branch"])
+		}
+		if fields["candidate"] != "origin/main" {
+			t.Errorf("candidate field = %v, want origin/main", fields["candidate"])
+		}
+	})
+
+	t.Run("an unchanged outcome is logged once", func(t *testing.T) {
+		repoDir, cleanup := setupTestRepo(t)
+		t.Cleanup(cleanup)
+
+		log, observed := newObservedTestLogger(t)
+		wt := NewWorkspaceTrackerForRepo(repoDir, "frontend", log)
+		wt.SetBaseBranch("features/never-fetched")
+
+		for range 5 {
+			wt.resolveBaseBranch(ctx)
+		}
+
+		if got := observed.Len(); got != 1 {
+			t.Fatalf("got %d log entries across 5 identical resolutions, want 1: %+v", got, observed.All())
+		}
+	})
+
+	// Suppression keys off the outcome, not "have I ever logged" — a tracker
+	// whose resolution changes has to report the new one, or the log stops
+	// tracking reality after the first fallback.
+	t.Run("a changed outcome is logged again", func(t *testing.T) {
+		repoDir, cleanup := setupTestRepo(t)
+		t.Cleanup(cleanup)
+
+		log, observed := newObservedTestLogger(t)
+		wt := NewWorkspaceTrackerForRepo(repoDir, "frontend", log)
+
+		wt.resolveBaseBranch(ctx)
+		wt.SetBaseBranch("features/never-fetched")
+		wt.resolveBaseBranch(ctx)
+
+		if got := observed.Len(); got != 2 {
+			t.Fatalf("got %d log entries, want 2 (one per distinct outcome): %+v", got, observed.All())
+		}
+	})
+
+	t.Run("different unresolved stored branches are logged separately", func(t *testing.T) {
+		repoDir, cleanup := setupTestRepo(t)
+		t.Cleanup(cleanup)
+
+		log, observed := newObservedTestLogger(t)
+		wt := NewWorkspaceTrackerForRepo(repoDir, "frontend", log)
+
+		wt.SetBaseBranch("features/first-missing")
+		wt.resolveBaseBranch(ctx)
+		wt.SetBaseBranch("features/second-missing")
+		wt.resolveBaseBranch(ctx)
+
+		if got := observed.Len(); got != 2 {
+			t.Fatalf("got %d log entries, want 2 for distinct stored branches: %+v", got, observed.All())
+		}
+	})
+
+	t.Run("fallback after a successful stored resolution is logged again", func(t *testing.T) {
+		repoDir, cleanup := setupTestRepo(t)
+		t.Cleanup(cleanup)
+
+		runGit(t, repoDir, "checkout", "-b", "develop")
+		runGit(t, repoDir, "checkout", "main")
+
+		log, observed := newObservedTestLogger(t)
+		wt := NewWorkspaceTrackerForRepo(repoDir, "frontend", log)
+
+		wt.SetBaseBranch("features/never-fetched")
+		wt.resolveBaseBranch(ctx)
+		wt.SetBaseBranch("develop")
+		wt.resolveBaseBranch(ctx)
+		wt.SetBaseBranch("features/never-fetched")
+		wt.resolveBaseBranch(ctx)
+
+		if got := observed.Len(); got != 2 {
+			t.Fatalf("got %d log entries, want 2 across fallback, stored, fallback: %+v", got, observed.All())
+		}
+	})
 }

@@ -2,16 +2,10 @@
 
 import { IconHelpHexagon } from "@tabler/icons-react";
 import { Badge } from "@kandev/ui/badge";
-import {
-  EmptyListNote,
-  KandevBody,
-  KandevRow,
-  KeyValueRow,
-  SummaryDot,
-  pluralCount,
-} from "./shared";
+import { EmptyListNote, KandevBody, KandevRow, KeyValueRow, SummaryDot } from "./shared";
 import { pickArray, pickString, shortId } from "./parse";
 import type { KandevRenderer } from "./types";
+import { useTranslation } from "react-i18next";
 
 type QuestionOption = { label?: string; description?: string };
 type Question = {
@@ -26,6 +20,7 @@ type AnswerEntry = { question_id?: string; selected?: string; custom_text?: stri
 // the user's answer underlined in the body so a completed call is informative
 // at a glance.
 function QuestionBlock({ q, answer }: { q: Question; answer: AnswerEntry | undefined }) {
+  const { t } = useTranslation();
   return (
     <div className="space-y-1.5">
       {q.prompt && <div className="text-xs text-foreground whitespace-pre-wrap">{q.prompt}</div>}
@@ -40,14 +35,14 @@ function QuestionBlock({ q, answer }: { q: Question; answer: AnswerEntry | undef
                 className="text-[10px]"
                 title={opt.description}
               >
-                {opt.label ?? `option ${i + 1}`}
+                {opt.label ?? t("task:option", { index: i + 1 })}
               </Badge>
             );
           })}
         </div>
       )}
       {answer?.custom_text && (
-        <KeyValueRow label="answer">
+        <KeyValueRow label={t("task:answer")}>
           <span className="whitespace-pre-wrap">{answer.custom_text}</span>
         </KeyValueRow>
       )}
@@ -79,6 +74,7 @@ function readResponses(result: unknown): unknown {
 }
 
 export const AskUserQuestionRenderer: KandevRenderer = ({ args, result, status }) => {
+  const { t } = useTranslation();
   const questions = pickArray<Question>(args, "questions") ?? [];
   const context = pickString(args, "context");
   const responses = readResponses(result);
@@ -92,10 +88,10 @@ export const AskUserQuestionRenderer: KandevRenderer = ({ args, result, status }
   return (
     <KandevRow
       Icon={IconHelpHexagon}
-      title="Kandev: Ask User Question"
+      title={t("task:kandevAskUserQuestion")}
       summary={
         <span className="inline-flex items-center gap-1.5 min-w-0">
-          <span>{pluralCount(questions.length, "question")}</span>
+          <span>{t("task:questionCount", { count: questions.length })}</span>
           {promptShort && (
             <>
               <SummaryDot />
@@ -109,12 +105,12 @@ export const AskUserQuestionRenderer: KandevRenderer = ({ args, result, status }
     >
       <KandevBody>
         {context && (
-          <KeyValueRow label="context">
+          <KeyValueRow label={t("task:contextFieldLabel")}>
             <span className="whitespace-pre-wrap">{context}</span>
           </KeyValueRow>
         )}
         {questions.length === 0 ? (
-          <EmptyListNote noun="questions" />
+          <EmptyListNote messageKey="task:noQuestionsFound" />
         ) : (
           <div className="space-y-3">
             {questions.map((q, i) => (
@@ -128,7 +124,7 @@ export const AskUserQuestionRenderer: KandevRenderer = ({ args, result, status }
         )}
         {pendingId && status === "running" && (
           <div className="text-[10px] italic text-muted-foreground/70">
-            Awaiting user response (pending_id={shortId(pendingId)})
+            {t("task:awaitingUserResponse", { pendingId: shortId(pendingId) })}
           </div>
         )}
       </KandevBody>

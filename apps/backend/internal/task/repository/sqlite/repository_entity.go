@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jmoiron/sqlx"
 
 	"github.com/kandev/kandev/internal/db/dialect"
 	"github.com/kandev/kandev/internal/task/models"
@@ -16,6 +17,10 @@ import (
 
 // CreateRepository creates a new repository
 func (r *Repository) CreateRepository(ctx context.Context, repository *models.Repository) error {
+	return r.insertRepository(ctx, r.db, repository)
+}
+
+func (r *Repository) insertRepository(ctx context.Context, exec sqlx.ExtContext, repository *models.Repository) error {
 	if repository.ID == "" {
 		repository.ID = uuid.New().String()
 	}
@@ -23,7 +28,7 @@ func (r *Repository) CreateRepository(ctx context.Context, repository *models.Re
 	repository.CreatedAt = now
 	repository.UpdatedAt = now
 
-	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
+	_, err := exec.ExecContext(ctx, r.db.Rebind(`
 		INSERT INTO repositories (
 			id, workspace_id, name, source_type, local_path, provider, provider_repo_id, provider_host, provider_owner,
 			provider_name, remote_url, default_branch, worktree_branch_prefix, worktree_branch_template, pull_before_worktree, setup_script, cleanup_script, dev_script, copy_files, created_at, updated_at, deleted_at
@@ -33,6 +38,25 @@ func (r *Repository) CreateRepository(ctx context.Context, repository *models.Re
 		repository.WorktreeBranchTemplate, dialect.BoolToInt(repository.PullBeforeWorktree), repository.SetupScript, repository.CleanupScript, repository.DevScript, repository.CopyFiles, repository.CreatedAt, repository.UpdatedAt, repository.DeletedAt)
 
 	return err
+}
+
+// CreateRepositoryWithSecretBindings persists a repository and its complete
+// binding set in one transaction.
+func (r *Repository) CreateRepositoryWithSecretBindings(
+	ctx context.Context, repository *models.Repository, bindings []models.RepositorySecretBinding,
+) error {
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := r.insertRepository(ctx, tx, repository); err != nil {
+		return err
+	}
+	if err := insertRepositorySecretBindings(ctx, r.db, tx, repository.ID, bindings); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // GetRepository retrieves a repository by ID
@@ -52,14 +76,23 @@ func (r *Repository) GetRepository(ctx context.Context, id string) (*models.Repo
 	if err == sql.ErrNoRows {
 		return nil, fmt.Errorf("%w: %s", repoerrors.ErrRepositoryNotFound, id)
 	}
+	if err == nil {
+		if err := r.attachRepositorySecretBindings(ctx, repository); err != nil {
+			return nil, err
+		}
+	}
 	return repository, err
 }
 
 // UpdateRepository updates an existing repository
 func (r *Repository) UpdateRepository(ctx context.Context, repository *models.Repository) error {
+	return r.updateRepository(ctx, r.db, repository)
+}
+
+func (r *Repository) updateRepository(ctx context.Context, exec sqlx.ExtContext, repository *models.Repository) error {
 	repository.UpdatedAt = time.Now().UTC()
 
-	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
+	result, err := exec.ExecContext(ctx, r.db.Rebind(`
 		UPDATE repositories SET
 			name = ?, source_type = ?, local_path = ?, provider = ?, provider_repo_id = ?, provider_host = ?, provider_owner = ?,
 			provider_name = ?, remote_url = ?, default_branch = ?, worktree_branch_prefix = ?, worktree_branch_template = ?, pull_before_worktree = ?, setup_script = ?, cleanup_script = ?, dev_script = ?, copy_files = ?, updated_at = ?
@@ -78,10 +111,35 @@ func (r *Repository) UpdateRepository(ctx context.Context, repository *models.Re
 	return nil
 }
 
+// UpdateRepositoryWithSecretBindings replaces bindings atomically with the
+// repository mutation.
+func (r *Repository) UpdateRepositoryWithSecretBindings(
+	ctx context.Context, repository *models.Repository, bindings []models.RepositorySecretBinding,
+) error {
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := r.updateRepository(ctx, tx, repository); err != nil {
+		return err
+	}
+	if err := insertRepositorySecretBindings(ctx, r.db, tx, repository.ID, bindings); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
 // DeleteRepository soft-deletes a repository by ID
 func (r *Repository) DeleteRepository(ctx context.Context, id string) error {
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+
 	now := time.Now().UTC()
-	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
+	result, err := tx.ExecContext(ctx, r.db.Rebind(`
 		UPDATE repositories SET deleted_at = ?, updated_at = ? WHERE id = ? AND deleted_at IS NULL
 	`), now, now, id)
 	if err != nil {
@@ -91,14 +149,23 @@ func (r *Repository) DeleteRepository(ctx context.Context, id string) error {
 	if rows == 0 {
 		return fmt.Errorf("repository not found: %s", id)
 	}
-	return nil
+	if _, err := tx.ExecContext(ctx, r.db.Rebind(`DELETE FROM repository_secret_bindings WHERE repository_id = ?`), id); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // DeleteRepositoryIfUnreferenced soft-deletes only an unadopted repository.
 // Keeping the reference check inside UPDATE closes the cleanup/adoption race.
 func (r *Repository) DeleteRepositoryIfUnreferenced(ctx context.Context, id string) (bool, error) {
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return false, err
+	}
+	defer func() { _ = tx.Rollback() }()
+
 	now := time.Now().UTC()
-	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
+	result, err := tx.ExecContext(ctx, r.db.Rebind(`
 		UPDATE repositories
 		SET deleted_at = ?, updated_at = ?
 		WHERE id = ?
@@ -114,6 +181,14 @@ func (r *Repository) DeleteRepositoryIfUnreferenced(ctx context.Context, id stri
 	if err != nil {
 		return false, err
 	}
+	if rows > 0 {
+		if _, err := tx.ExecContext(ctx, r.db.Rebind(`DELETE FROM repository_secret_bindings WHERE repository_id = ?`), id); err != nil {
+			return false, err
+		}
+		if err := tx.Commit(); err != nil {
+			return false, err
+		}
+	}
 	return rows > 0, nil
 }
 
@@ -122,8 +197,14 @@ func (r *Repository) DeleteRepositoryIfUnreferenced(ctx context.Context, id stri
 // predicate in the UPDATE prevents a session from becoming active between a
 // separate check and the delete.
 func (r *Repository) DeleteRepositoryIfNoActiveTaskSessions(ctx context.Context, id string) (bool, error) {
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return false, err
+	}
+	defer func() { _ = tx.Rollback() }()
+
 	now := time.Now().UTC()
-	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
+	result, err := tx.ExecContext(ctx, r.db.Rebind(`
 		UPDATE repositories
 		SET deleted_at = ?, updated_at = ?
 		WHERE id = ?
@@ -144,6 +225,14 @@ func (r *Repository) DeleteRepositoryIfNoActiveTaskSessions(ctx context.Context,
 	rows, err := result.RowsAffected()
 	if err != nil {
 		return false, err
+	}
+	if rows > 0 {
+		if _, err := tx.ExecContext(ctx, r.db.Rebind(`DELETE FROM repository_secret_bindings WHERE repository_id = ?`), id); err != nil {
+			return false, err
+		}
+		if err := tx.Commit(); err != nil {
+			return false, err
+		}
 	}
 	return rows > 0, nil
 }
@@ -173,7 +262,13 @@ func (r *Repository) ListRepositories(ctx context.Context, workspaceID string) (
 		}
 		result = append(result, repository)
 	}
-	return result, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if err := r.attachRepositorySecretBindingsBatch(ctx, result); err != nil {
+		return nil, err
+	}
+	return result, nil
 }
 
 // GetRepositoryByProviderInfo finds a repository by workspace, provider, owner, and name.
@@ -202,6 +297,11 @@ func (r *Repository) GetRepositoryByProviderInfo(ctx context.Context, workspaceI
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
+	if err == nil {
+		if err := r.attachRepositorySecretBindings(ctx, repository); err != nil {
+			return nil, err
+		}
+	}
 	return repository, err
 }
 
@@ -227,7 +327,132 @@ func (r *Repository) GetRepositoryByLocalPath(ctx context.Context, workspaceID, 
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
+	if err == nil {
+		if err := r.attachRepositorySecretBindings(ctx, repository); err != nil {
+			return nil, err
+		}
+	}
 	return repository, err
+}
+
+func (r *Repository) ListRepositorySecretBindings(ctx context.Context, repositoryID string) ([]*models.RepositorySecretBinding, error) {
+	var rows []repositorySecretBindingRow
+	if err := r.ro.SelectContext(ctx, &rows, r.ro.Rebind(`
+		SELECT repository_id, key, secret_id, created_at, updated_at
+		FROM repository_secret_bindings WHERE repository_id = ? ORDER BY key`), repositoryID); err != nil {
+		return nil, err
+	}
+	return repositorySecretBindingsFromRows(rows), nil
+}
+
+func (r *Repository) ListRepositorySecretBindingsByRepositoryIDs(
+	ctx context.Context, repositoryIDs []string,
+) (map[string][]*models.RepositorySecretBinding, error) {
+	result := make(map[string][]*models.RepositorySecretBinding, len(repositoryIDs))
+	if len(repositoryIDs) == 0 {
+		return result, nil
+	}
+	query, args, err := sqlx.In(`
+		SELECT repository_id, key, secret_id, created_at, updated_at
+		FROM repository_secret_bindings WHERE repository_id IN (?) ORDER BY repository_id, key`, repositoryIDs)
+	if err != nil {
+		return nil, err
+	}
+	var rows []repositorySecretBindingRow
+	if err := r.ro.SelectContext(ctx, &rows, r.ro.Rebind(query), args...); err != nil {
+		return nil, err
+	}
+	for _, binding := range repositorySecretBindingsFromRows(rows) {
+		result[binding.RepositoryID] = append(result[binding.RepositoryID], binding)
+	}
+	return result, nil
+}
+
+func (r *Repository) ReplaceRepositorySecretBindings(
+	ctx context.Context, repositoryID string, bindings []models.RepositorySecretBinding,
+) error {
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := insertRepositorySecretBindings(ctx, r.db, tx, repositoryID, bindings); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+type repositorySecretBindingRow struct {
+	RepositoryID string    `db:"repository_id"`
+	Key          string    `db:"key"`
+	SecretID     string    `db:"secret_id"`
+	CreatedAt    time.Time `db:"created_at"`
+	UpdatedAt    time.Time `db:"updated_at"`
+}
+
+func insertRepositorySecretBindings(
+	ctx context.Context, db *sqlx.DB, exec *sqlx.Tx, repositoryID string, bindings []models.RepositorySecretBinding,
+) error {
+	if _, err := exec.ExecContext(ctx, db.Rebind(`DELETE FROM repository_secret_bindings WHERE repository_id = ?`), repositoryID); err != nil {
+		return err
+	}
+	now := time.Now().UTC()
+	for _, binding := range bindings {
+		if _, err := exec.ExecContext(ctx, db.Rebind(`
+			INSERT INTO repository_secret_bindings (repository_id, key, secret_id, created_at, updated_at)
+			VALUES (?, ?, ?, ?, ?)`), repositoryID, binding.Key, binding.SecretID, now, now); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (r *Repository) attachRepositorySecretBindings(ctx context.Context, repository *models.Repository) error {
+	bindings, err := r.ListRepositorySecretBindings(ctx, repository.ID)
+	if err != nil {
+		return err
+	}
+	repository.SecretBindings = bindingsToValues(bindings)
+	return nil
+}
+
+func (r *Repository) attachRepositorySecretBindingsBatch(ctx context.Context, repositories []*models.Repository) error {
+	ids := make([]string, 0, len(repositories))
+	for _, repository := range repositories {
+		ids = append(ids, repository.ID)
+	}
+	bindings, err := r.ListRepositorySecretBindingsByRepositoryIDs(ctx, ids)
+	if err != nil {
+		return err
+	}
+	for _, repository := range repositories {
+		repository.SecretBindings = bindingsToValues(bindings[repository.ID])
+	}
+	return nil
+}
+
+func repositorySecretBindingsFromRows(rows []repositorySecretBindingRow) []*models.RepositorySecretBinding {
+	result := make([]*models.RepositorySecretBinding, 0, len(rows))
+	for _, row := range rows {
+		result = append(result, &models.RepositorySecretBinding{
+			RepositoryID: row.RepositoryID,
+			Key:          row.Key,
+			SecretID:     row.SecretID,
+			CreatedAt:    row.CreatedAt,
+			UpdatedAt:    row.UpdatedAt,
+		})
+	}
+	return result
+}
+
+func bindingsToValues(bindings []*models.RepositorySecretBinding) []models.RepositorySecretBinding {
+	result := make([]models.RepositorySecretBinding, 0, len(bindings))
+	for _, binding := range bindings {
+		if binding != nil {
+			result = append(result, *binding)
+		}
+	}
+	return result
 }
 
 // CreateRepositoryScript creates a new repository script

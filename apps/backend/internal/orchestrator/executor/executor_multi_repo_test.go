@@ -107,6 +107,45 @@ func TestLaunchPreparedSession_MultiRepo_PopulatesRequestRepositories(t *testing
 	}
 }
 
+func TestLaunchPreparedSession_RepositoryEnvironmentConflictFailsBeforeLaunch(t *testing.T) {
+	repo := newMockRepository()
+	const taskID = "task-multi-env-conflict"
+	const sessionID = "session-multi-env-conflict"
+	seedMultiRepoTask(t, repo, taskID)
+	repo.repositories["repo-front"].WorkspaceID = "ws-1"
+	repo.repositories["repo-front"].SecretBindings = []models.RepositorySecretBinding{{
+		Key: "PACKAGE_TOKEN", SecretID: "secret-front",
+	}}
+	repo.repositories["repo-back"].WorkspaceID = "ws-1"
+	repo.repositories["repo-back"].SecretBindings = []models.RepositorySecretBinding{{
+		Key: "PACKAGE_TOKEN", SecretID: "secret-back",
+	}}
+	repo.sessions[sessionID] = &models.TaskSession{
+		ID:             sessionID,
+		TaskID:         taskID,
+		AgentProfileID: "profile-123",
+		State:          models.TaskSessionStateCreated,
+		StartedAt:      time.Now(),
+		UpdatedAt:      time.Now(),
+	}
+
+	agentManager := &mockAgentManager{}
+	exec := newTestExecutor(t, agentManager, repo)
+	_, err := exec.LaunchPreparedSession(context.Background(), &v1.Task{
+		ID: taskID, WorkspaceID: "ws-1", Title: "Multi",
+	}, sessionID, LaunchOptions{AgentProfileID: "profile-123", StartAgent: false})
+	if err == nil {
+		t.Fatal("LaunchPreparedSession succeeded, want environment conflict")
+	}
+	var conflictErr *EnvironmentConflictError
+	if !errors.As(err, &conflictErr) {
+		t.Fatalf("LaunchPreparedSession error = %T %v, want EnvironmentConflictError", err, err)
+	}
+	if agentManager.launchAgentCallCount != 0 {
+		t.Fatalf("LaunchAgent calls = %d, want 0", agentManager.launchAgentCallCount)
+	}
+}
+
 func TestLaunchPreparedSession_MultiRepo_LaunchFailureReportsFailingSecondaryRepositoryID(t *testing.T) {
 	repo := newMockRepository()
 	const taskID = "task-multi-launch-failure"

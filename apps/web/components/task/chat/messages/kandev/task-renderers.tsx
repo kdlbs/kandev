@@ -5,6 +5,7 @@ import { Badge } from "@kandev/ui/badge";
 import { IdChip, KandevBody, KandevRow, KeyValueRow, SummaryDot, TaskStateBadge } from "./shared";
 import { pickArray, pickString } from "./parse";
 import type { KandevRenderer } from "./types";
+import { useTranslation } from "react-i18next";
 
 type Repository = {
   repository_id?: string;
@@ -72,6 +73,7 @@ function TaskDTOBody({ task }: { task: Record<string, unknown> | undefined }) {
 // ---------- create_task ----------
 
 export const CreateTaskRenderer: KandevRenderer = ({ args, result, status }) => {
+  const { t } = useTranslation();
   const title = pickString(args, "title");
   const task =
     result && typeof result === "object" ? (result as Record<string, unknown>) : undefined;
@@ -79,7 +81,7 @@ export const CreateTaskRenderer: KandevRenderer = ({ args, result, status }) => 
   return (
     <KandevRow
       Icon={IconPlus}
-      title="Kandev: Create Task"
+      title={t("task:kandevCreateTask")}
       summary={
         <span className="inline-flex items-center gap-1.5">
           {title && <span className="truncate max-w-[40ch]">&ldquo;{title}&rdquo;</span>}
@@ -104,6 +106,7 @@ export const CreateTaskRenderer: KandevRenderer = ({ args, result, status }) => 
 // ---------- update_task ----------
 
 export const UpdateTaskRenderer: KandevRenderer = ({ args, result, status }) => {
+  const { t } = useTranslation();
   const taskId = pickString(args, "task_id");
   const newTitle = pickString(args, "title");
   const newState = pickString(args, "state");
@@ -122,7 +125,7 @@ export const UpdateTaskRenderer: KandevRenderer = ({ args, result, status }) => 
   return (
     <KandevRow
       Icon={IconPencil}
-      title="Kandev: Update Task"
+      title={t("task:kandevUpdateTask")}
       summary={
         <span className="inline-flex items-center gap-1.5">
           <IdChip id={taskId} />
@@ -138,14 +141,14 @@ export const UpdateTaskRenderer: KandevRenderer = ({ args, result, status }) => 
       hasExpandableContent={!!task || changes.length > 0}
     >
       <KandevBody>
-        {newTitle !== undefined && <KeyValueRow label="title">{newTitle}</KeyValueRow>}
+        {newTitle !== undefined && <KeyValueRow label={t("task:title")}>{newTitle}</KeyValueRow>}
         {newState !== undefined && (
-          <KeyValueRow label="state">
+          <KeyValueRow label={t("task:state")}>
             <TaskStateBadge state={newState} />
           </KeyValueRow>
         )}
         {newDescription !== undefined && (
-          <KeyValueRow label="description">
+          <KeyValueRow label={t("task:description")}>
             <span className="whitespace-pre-wrap">{newDescription}</span>
           </KeyValueRow>
         )}
@@ -158,6 +161,7 @@ export const UpdateTaskRenderer: KandevRenderer = ({ args, result, status }) => 
 // ---------- move_task ----------
 
 export const MoveTaskRenderer: KandevRenderer = ({ args, result, status }) => {
+  const { t } = useTranslation();
   const taskId = pickString(args, "task_id");
   const stepId = pickString(args, "workflow_step_id");
   const workflowId = pickString(args, "workflow_id");
@@ -167,7 +171,7 @@ export const MoveTaskRenderer: KandevRenderer = ({ args, result, status }) => {
   return (
     <KandevRow
       Icon={IconArrowsExchange}
-      title="Kandev: Move Task"
+      title={t("task:kandevMoveTask")}
       summary={
         <span className="inline-flex items-center gap-1.5">
           <IdChip id={taskId} />
@@ -180,17 +184,17 @@ export const MoveTaskRenderer: KandevRenderer = ({ args, result, status }) => {
     >
       <KandevBody>
         {workflowId && (
-          <KeyValueRow label="workflow" mono>
+          <KeyValueRow label={t("task:workflow")} mono>
             {workflowId}
           </KeyValueRow>
         )}
         {stepId && (
-          <KeyValueRow label="step" mono>
+          <KeyValueRow label={t("task:stepFieldLabel")} mono>
             {stepId}
           </KeyValueRow>
         )}
         {prompt && (
-          <KeyValueRow label="prompt">
+          <KeyValueRow label={t("task:promptFieldLabel")}>
             <span className="whitespace-pre-wrap">{prompt}</span>
           </KeyValueRow>
         )}
@@ -203,6 +207,7 @@ export const MoveTaskRenderer: KandevRenderer = ({ args, result, status }) => {
 // ---------- message_task ----------
 
 export const MessageTaskRenderer: KandevRenderer = ({ args, result, status }) => {
+  const { t } = useTranslation();
   const taskId = pickString(args, "task_id");
   const prompt = pickString(args, "prompt");
   // Truncate the prompt to a single short fragment for the header so a
@@ -215,7 +220,7 @@ export const MessageTaskRenderer: KandevRenderer = ({ args, result, status }) =>
   return (
     <KandevRow
       Icon={IconMessage2}
-      title="Kandev: Message Task"
+      title={t("task:kandevMessageTask")}
       summary={
         <span className="inline-flex items-center gap-1.5 min-w-0">
           <IdChip id={taskId} />
@@ -232,12 +237,12 @@ export const MessageTaskRenderer: KandevRenderer = ({ args, result, status }) =>
     >
       <KandevBody>
         {prompt && (
-          <KeyValueRow label="prompt">
+          <KeyValueRow label={t("task:promptFieldLabel")}>
             <span className="whitespace-pre-wrap">{prompt}</span>
           </KeyValueRow>
         )}
         {session && (
-          <KeyValueRow label="session">
+          <KeyValueRow label={t("task:session")}>
             <IdChip id={sessionId} />
           </KeyValueRow>
         )}

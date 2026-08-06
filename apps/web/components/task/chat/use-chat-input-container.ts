@@ -15,6 +15,7 @@ import type {
   MessageAttachment,
   ChatInputContainerHandle,
 } from "./chat-input-container";
+import { t } from "@/lib/i18n";
 
 type UseChatInputContainerParams = {
   ref: React.ForwardedRef<ChatInputContainerHandle>;
@@ -89,7 +90,7 @@ function getInputPlaceholder(
   isStarting: boolean,
   steerPlaceholder: string | undefined,
 ): string {
-  if (isStarting) return "Preparing workspace...";
+  if (isStarting) return t("task:preparingWorkspace");
   // The steer label wins over a caller-supplied placeholder: when a send would be
   // delivered into the running turn, that is the one thing the operator most needs
   // to know, and it must not be masked by a generic "Continue working…" prompt the
@@ -98,9 +99,9 @@ function getInputPlaceholder(
   // branch is inert for every non-steering composer.
   if (steerPlaceholder) return steerPlaceholder;
   if (placeholder) return placeholder;
-  if (isAgentBusy) return "Queue more instructions...";
-  if (hasAgentCommands) return "Ask to make changes, @mention files, run /commands";
-  return "Ask to make changes, @mention files";
+  if (isAgentBusy) return t("task:queueMoreInstructions");
+  if (hasAgentCommands) return t("task:askToMakeChangesWithCommands");
+  return t("task:askToMakeChanges");
 }
 
 export function shouldShowChatFocusHint(args: {

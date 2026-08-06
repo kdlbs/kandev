@@ -36,6 +36,7 @@ import { useToast } from "@/components/toast-provider";
 import { openExternalLink } from "@/lib/desktop/external-links";
 import type { FileInfo } from "@/lib/state/slices";
 import { getChangeRequestFailureFeedback } from "./change-request-feedback";
+import { Trans, useTranslation } from "react-i18next";
 
 type VcsDialogsContextValue = {
   /** When `repo` is provided, the commit is scoped to that repo only. */
@@ -86,11 +87,13 @@ function computeFileSummary(
 }
 
 function FileSummaryText({ count, additions, deletions }: FileSummary) {
-  if (count === 0) return <span>No changes to commit</span>;
+  const { t } = useTranslation();
+  if (count === 0) return <span>{t("integrations:noChangesToCommit")}</span>;
   return (
     <span>
-      <span className="font-medium text-foreground">{count}</span> file{count !== 1 ? "s" : ""}{" "}
-      changed
+      <Trans i18nKey="integrations:filesChanged" count={count} values={{ count }}>
+        <span className="font-medium text-foreground">{count}</span> files changed
+      </Trans>
       {(additions > 0 || deletions > 0) && (
         <span className="ml-2">
           (<span className="text-green-600">+{additions}</span>
@@ -142,13 +145,16 @@ function CommitDialog({
   isGeneratingDescription,
   isUtilityConfigured,
 }: CommitDialogProps) {
+  const { t } = useTranslation();
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-[500px]">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <IconGitCommit className="h-5 w-5" />
-            {scopedRepo ? `Commit Changes — ${scopedRepo}` : "Commit Changes"}
+            {scopedRepo
+              ? t("integrations:commitChangesScoped", { scopedRepo })
+              : t("integrations:commitChanges")}
           </DialogTitle>
         </DialogHeader>
         <div className="space-y-4 py-2">
@@ -158,7 +164,7 @@ function CommitDialog({
           <div className="relative min-w-0">
             <Input
               data-testid="commit-title-input"
-              placeholder="Enter commit message..."
+              placeholder={t("integrations:enterCommitMessage")}
               value={commitMessage}
               onChange={(e) => onCommitMessageChange(e.target.value)}
               className="pr-10"
@@ -169,7 +175,7 @@ function CommitDialog({
                 onClick={onGenerateMessage}
                 isGenerating={isGenerating}
                 disabled={fileSummary.count === 0}
-                tooltip="Generate commit message with AI"
+                tooltip={t("integrations:generateCommitMessageWithAi")}
                 isConfigured={isUtilityConfigured}
               />
             </div>
@@ -189,26 +195,26 @@ function CommitDialog({
               onCheckedChange={(checked) => onStageAllChange(checked === true)}
             />
             <Label htmlFor="vcs-stage-all" className="text-sm text-muted-foreground cursor-pointer">
-              Stage all changes before committing
+              {t("integrations:stageAllChangesBeforeCommitting")}
             </Label>
           </div>
         </div>
         <DialogFooter>
           <DialogClose asChild>
             <Button type="button" variant="outline" className="cursor-pointer">
-              Cancel
+              {t("common:cancel")}
             </Button>
           </DialogClose>
           <Button onClick={onCommit} disabled={!commitMessage.trim() || isGitLoading}>
             {isGitLoading ? (
               <>
                 <IconLoader2 className="h-4 w-4 animate-spin mr-2" />
-                Committing...
+                {t("integrations:committingEllipsis")}
               </>
             ) : (
               <>
                 <IconCheck className="h-4 w-4 mr-2" />
-                Commit
+                {t("integrations:commit")}
               </>
             )}
           </Button>
@@ -359,14 +365,18 @@ function useScopedFileSummary({
  * empty scope resolves to the primary single-repo display name, or "All
  * repos" when the workspace has multiple repos and the dialog is fanning out.
  */
-function pickRepoLabel(
+export function pickRepoLabel(
   scopedRepo: string,
   isMultiRepo: boolean,
   resolveDisplayName: (name: string) => string | undefined,
+  // Structural, matching the other translate-taking helpers in the app: this
+  // only ever looks a key up, so both the hook's `t` and the module-level one
+  // from `@/lib/i18n` qualify. The branded `TFunction` excluded the latter.
+  t: (key: string) => string,
 ): string {
   if (scopedRepo) return resolveDisplayName(scopedRepo) || scopedRepo;
-  if (isMultiRepo) return "All repos";
-  return resolveDisplayName("") || "Repository";
+  if (isMultiRepo) return t("integrations:allRepos");
+  return resolveDisplayName("") || t("integrations:repository");
 }
 
 function useCreatePRHandler(
@@ -376,6 +386,7 @@ function useCreatePRHandler(
   toast: ReturnType<typeof useToast>["toast"],
   defaultTerminology: ReturnType<typeof getChangeRequestTerminology>,
 ) {
+  const { t } = useTranslation();
   const activeTaskId = useAppStore((state) => state.tasks.activeTaskId);
   const setPendingPrUrlForTask = useAppStore((state) => state.setPendingPrUrlForTask);
   return useCallback(async () => {
@@ -391,10 +402,13 @@ function useCreatePRHandler(
       );
       if (result.success) {
         const terms = resolveChangeRequestTerminology(result.provider, defaultTerminology);
-        const title = ps.draft ? `Draft ${terms.shortName} created` : `${terms.shortName} created`;
+        const title = ps.draft
+          ? t("integrations:draftCreated", { shortName: terms.shortName })
+          : t("integrations:shortNameCreated", { shortName: terms.shortName });
         toast({
           title,
-          description: result.pr_url || `${terms.longName} created successfully`,
+          description:
+            result.pr_url || t("integrations:createdSuccessfully", { longName: terms.longName }),
           variant: "success",
         });
         if (result.pr_url) {
@@ -414,15 +428,24 @@ function useCreatePRHandler(
       }
     } catch (e) {
       toast({
-        title: `Create ${defaultTerminology.shortName} failed`,
-        description: e instanceof Error ? e.message : "An error occurred",
+        title: t("integrations:createFailed", { shortName: defaultTerminology.shortName }),
+        description: e instanceof Error ? e.message : t("integrations:anErrorOccurred"),
         variant: "error",
       });
     }
     ps.setTitle("");
     ps.setBody("");
     ps.setBranchPushed(false);
-  }, [ps, baseBranch, createPR, toast, defaultTerminology, activeTaskId, setPendingPrUrlForTask]);
+  }, [
+    ps,
+    baseBranch,
+    createPR,
+    toast,
+    defaultTerminology,
+    activeTaskId,
+    setPendingPrUrlForTask,
+    t,
+  ]);
 }
 
 function useVcsDialogsState(
@@ -456,6 +479,10 @@ function useVcsDialogsState(
     const title = cs.message.trim();
     const body = cs.body.trim();
     const fullMessage = body ? `${title}\n\n${body}` : title;
+    // Deliberately English: `useGitWithFeedback` composes this into
+    // "<label>...", "<label> successful" and "<label> failed" itself, and that
+    // hook is not migrated. Translating only the label would produce a
+    // half-translated toast.
     const label = cs.repo ? `Commit (${cs.repo})` : "Commit";
     await gitWithFeedback(
       () => commit(fullMessage, cs.stageAll, false, cs.repo || undefined),
@@ -500,10 +527,11 @@ export function VcsDialogsProvider({
   displayBranch,
   children,
 }: VcsDialogsProviderProps) {
+  const { t } = useTranslation();
   const state = useVcsDialogsState(sessionId, taskTitle, baseBranch);
   const { cs, ps, isGitLoading, fileSummary, handleCommit, handleCreatePR, contextValue } = state;
-  const effectiveRepoLabel = pickRepoLabel(cs.repo, state.isMultiRepo, state.repoDisplayName);
-  const effectivePRLabel = pickRepoLabel(ps.repo, state.isMultiRepo, state.repoDisplayName);
+  const effectiveRepoLabel = pickRepoLabel(cs.repo, state.isMultiRepo, state.repoDisplayName, t);
+  const effectivePRLabel = pickRepoLabel(ps.repo, state.isMultiRepo, state.repoDisplayName, t);
   const isUtilityConfigured = useIsUtilityConfigured();
   const {
     isGeneratingCommitMessage,

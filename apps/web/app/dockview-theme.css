@@ -141,6 +141,43 @@
   opacity: 1;
 }
 
+/* Session tabs own their delete control so the X can transition to an
+ * in-place spinner while the delete request is in flight. */
+.dockview-theme-kandev .session-tab-close-action {
+  opacity: 0;
+  transition:
+    opacity 0.15s ease,
+    background-color 0.15s ease,
+    color 0.15s ease;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+}
+
+.dockview-theme-kandev .session-tab-close-action:hover {
+  background: color-mix(in srgb, var(--foreground) 12%, transparent);
+  color: var(--foreground);
+}
+
+.dockview-theme-kandev .session-tab-close-action:focus-visible {
+  outline: 1px solid var(--ring);
+  outline-offset: 1px;
+}
+
+.dockview-theme-kandev .dv-tab:hover .session-tab-close-action,
+.dockview-theme-kandev .dv-active-tab .session-tab-close-action,
+.dockview-theme-kandev .session-tab-close-action[aria-busy="true"] {
+  opacity: 1;
+}
+
+.dockview-theme-kandev .session-tab-close-action:disabled {
+  cursor: wait;
+}
+
+.dockview-theme-kandev .dv-locked-groupview .session-tab-close-action {
+  display: none !important;
+}
+
 .dockview-theme-kandev .dv-content-container {
   background: var(--card);
 }

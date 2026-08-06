@@ -1164,11 +1164,13 @@ export const i18nGuardFiles = [
   //   - `components/settings/config-chat-agent-section.tsx`, the Configuration
   //     Chat card on Settings → Utility Agents. #2218 migrates it with the page
   //     that owns it, into `settings:configChatAgent*`.
-  //   - `components/quick-chat/**`. `quick-chat-modal.tsx` renders
-  //     `ConfigChatSetup` in its `presentation="dialog"` form and calls
-  //     `useConfigChat`, so it inherits everything migrated here, but its own
-  //     chrome — and `configuration-chat-toggle.tsx`, which `ConfigChatSetup`
-  //     renders — is still English and belongs to the quick-chat migration.
+  //
+  // `components/quick-chat/**` was the other entry here until #2300 migrated it
+  // — `quick-chat-modal.tsx` renders `ConfigChatSetup` in its
+  // `presentation="dialog"` form and calls `useConfigChat`, so it inherited
+  // everything migrated here, and its own chrome (plus
+  // `configuration-chat-toggle.tsx`, which `ConfigChatSetup` renders) now lands
+  // on the same `chat:` namespace. It is listed at the end of this file.
   "components/config-chat/*.{ts,tsx}",
 
   // Automations — `components/automations/**` (incl. `trigger-configs/`) and
@@ -1548,4 +1550,105 @@ export const i18nGuardFiles = [
   "app/settings/agents/[[]agentId[]]/profiles/[[]profileId[]]/command-preview-card.tsx",
   // Home route redirect shell.
   "app/page-client.tsx",
+  // Review dialog: top bar, file tree, diff toolbar/header/list, walkthrough.
+  "components/review/review-comments-overview.tsx",
+  "components/review/review-dialog-pr-state.tsx",
+  "components/review/review-dialog-surface.tsx",
+  "components/review/review-diff-header.tsx",
+  "components/review/review-diff-list.tsx",
+  "components/review/review-diff-toolbar.tsx",
+  "components/review/review-file-tree.tsx",
+  "components/review/review-findings-button.tsx",
+  "components/review/review-findings-overview.tsx",
+  "components/review/review-fix-comments-button.tsx",
+  "components/review/review-markdown-diff-preview-content.tsx",
+  "components/review/review-pr-selector.tsx",
+  "components/review/review-run-button.tsx",
+  "components/review/review-top-bar.tsx",
+  "components/review/walkthrough-overlay.tsx",
+  // Plain-TS label helpers the review diff list renders — guard-blind, so they
+  // are listed to keep the entries above honest rather than because lint sees
+  // anything here.
+  "components/review/types.ts",
+  // Kanban board: swimlanes, graph pipeline, and the mobile board shell.
+  "components/kanban/graph2-task-pipeline.tsx",
+  "components/kanban/kanban-header-mobile.tsx",
+  "components/kanban/kanban-header.tsx",
+  "components/kanban/mobile-column-tabs.tsx",
+  "components/kanban/mobile-drop-targets.tsx",
+  "components/kanban/mobile-fab.tsx",
+  "components/kanban/mobile-menu-sheet.tsx",
+  // Extracted out of mobile-menu-sheet.tsx to stay under the 600-line limit.
+  "components/kanban/mobile-menu-styles.ts",
+  "components/kanban/mobile-menu-utility-actions.tsx",
+  "components/kanban/mobile-menu-task-list-options.tsx",
+  "components/kanban/mobile-search-bar.tsx",
+  "components/kanban/swimlane-graph-content.tsx",
+  "components/kanban/swimlane-graph2-content.tsx",
+  "components/kanban/swimlane-header.tsx",
+  "components/kanban/swimlane-kanban-content.tsx",
+  "components/kanban/task-multi-select-toolbar.tsx",
+  // Kanban board: loose card/column/dropdown components on the same namespace.
+  "components/kanban-board.tsx",
+  "components/kanban-card-content.tsx",
+  "components/kanban-card-menu-items.tsx",
+  "components/kanban-column.tsx",
+  "components/kanban-display-dropdown.tsx",
+  "components/kanban-with-preview.tsx",
+  // Shared by the desktop dropdown and the mobile sheet; returns catalog keys.
+  "lib/kanban/repository-placeholder.ts",
+  // The editor surfaces: Monaco/CodeMirror editors and diff viewers, the Shiki
+  // and Monaco code blocks, the TipTap plan editor, and the file-actions menu.
+  // Copy lands in the `editors:` namespace.
+  //
+  // Two of these files hold copy the rule cannot see, so it is recorded here
+  // rather than enforced: `tiptap-mermaid-extension.ts` and the CodeMirror
+  // gutter marker in `use-codemirror-editor-state.ts` build DOM imperatively
+  // from ProseMirror/CodeMirror callbacks, which have no hook scope, so both
+  // resolve through the module-level `t` from `@/lib/i18n`.
+  "components/editors/**/*.{ts,tsx}",
+  // Quick chat: the modal, its tabs, the setup form and the delete dialog.
+  // Copy lands in the existing `chat:` namespace, shared with config chat.
+  "components/quick-chat/**/*.{ts,tsx}",
+  // Diff viewer: the pierre-backed viewer shell, its toolbar, the inline
+  // comment/finding surfaces and the walkthrough overlay. Whole directory —
+  // every file in it is migrated, and the `diff` namespace is not shared with
+  // anything outside it.
+  //
+  // Git statuses, file modes, hunk markers and the pierre option keys in here
+  // are protocol values, not copy, and stay in English by design; only their
+  // labels are translated.
+  "components/diff/**/*.{ts,tsx}",
+  // Change-request (PR/MR) and commit dialogs, plus the shared integration
+  // settings widgets: the auth-status banner, the copy-config menu, the
+  // watcher card shell and the integrations nav menu. Both directories share
+  // the `integrations` namespace.
+  //
+  // `change-request-feedback.ts` holds no JSX, so `mode: "jsx-only"` never
+  // inspects it; the glob records that it is migrated, and only the
+  // pseudo-locale can prove it stays that way. Branch names, remotes and VCS
+  // provider ids travel through it as data and are never translated.
+  "components/vcs/**/*.{ts,tsx}",
+  "components/integrations/**/*.{ts,tsx}",
+  // The CLI agent-profile editor. `components/agent/` has no namespace rule of
+  // its own, so its copy lives in `common`.
+  "components/agent/**/*.{ts,tsx}",
+  // SPA entry: the route tables, their Suspense/loading placeholders and the
+  // root/route error boundaries. `src/**` has no namespace rule either, so this
+  // copy is also on `common`. Route names reach `RouteLoading` as catalog keys
+  // rather than resolved copy — see the comment there.
+  "src/*.{ts,tsx}",
+  // Task chat surface: the composer, the transcript, the message renderers and
+  // the Kandev tool-call renderers. A directory glob rather than a file list —
+  // the whole tree is migrated, including the `.ts` helpers that hold copy
+  // (`subagent-meta.ts`, `use-attachment-file-feedback.ts`, `agent-error-label.ts`)
+  // which `mode: "jsx-only"` never inspects; only the pseudo-locale can prove
+  // those stay clean.
+  //
+  // Deliberately left in English inside this tree, because they are protocol
+  // rather than copy: message `author_type` values, the `prompt:<id>` context
+  // path, the `null` rendered in the debug-metadata dialog, the highlight CSS
+  // in `message-comment-decorations.tsx`, and the programming-language names in
+  // `tiptap-code-block-view.tsx`.
+  "components/task/chat/**/*.{ts,tsx}",
 ];

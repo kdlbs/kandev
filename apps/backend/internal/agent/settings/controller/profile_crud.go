@@ -14,6 +14,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/settings/dto"
 	"github.com/kandev/kandev/internal/agent/settings/models"
 	"github.com/kandev/kandev/internal/agent/settings/profileconfig"
+	"github.com/kandev/kandev/internal/secrets"
 )
 
 type CreateProfileRequest struct {
@@ -59,6 +60,9 @@ func (c *Controller) CreateProfile(ctx context.Context, req CreateProfileRequest
 		return nil, err
 	}
 	if err := validateProfileEnvVarDTOs(req.EnvVars); err != nil {
+		return nil, err
+	}
+	if err := c.validateGlobalSecretRefs(ctx, req.EnvVars); err != nil {
 		return nil, err
 	}
 	if err := validateCommandPrefix(req.CommandPrefix); err != nil {
@@ -208,6 +212,9 @@ func (c *Controller) UpdateProfile(ctx context.Context, req UpdateProfileRequest
 		if err := validateProfileEnvVarDTOs(*req.EnvVars); err != nil {
 			return nil, err
 		}
+		if err := c.validateGlobalSecretRefs(ctx, *req.EnvVars); err != nil {
+			return nil, err
+		}
 		profile.EnvVars = envVarsFromDTO(*req.EnvVars)
 	}
 	if req.CommandPrefix != nil {
@@ -222,6 +229,21 @@ func (c *Controller) UpdateProfile(ctx context.Context, req UpdateProfileRequest
 	}
 	result := toProfileDTO(profile)
 	return &result, nil
+}
+
+func (c *Controller) validateGlobalSecretRefs(ctx context.Context, envVars []dto.ProfileEnvVarDTO) error {
+	if c.secretStore == nil {
+		return nil
+	}
+	for i, envVar := range envVars {
+		if strings.TrimSpace(envVar.SecretID) == "" {
+			continue
+		}
+		if err := secrets.ValidateGlobalReference(ctx, c.secretStore, envVar.SecretID); err != nil {
+			return fmt.Errorf("%w: env_vars[%d] secret must be global", ErrInvalidProfileEnvVars, i)
+		}
+	}
+	return nil
 }
 
 // validateCLIFlagDTOs rejects entries with an empty flag string or malformed

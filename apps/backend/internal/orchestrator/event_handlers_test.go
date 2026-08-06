@@ -223,15 +223,18 @@ type mockAgentManager struct {
 	// optional rowLivenessProber so reconciliation tests can drive runtime-aware
 	// liveness per row. Nil → the mock is not a prober and reconciliation treats
 	// every row as Unknown.
-	rowLivenessFn       func(*models.ExecutorRunning) models.ProcessLiveness
-	resolveProfileInfo  *executor.AgentProfileInfo
-	resolveProfileErr   error
-	restartProcessCalls []string // tracks execution IDs passed to RestartAgentProcess
-	restartProcessErr   error
-	promptErr           error
-	promptResult        *executor.PromptResult
-	promptAgentFunc     func(context.Context, string, string, []v1.MessageAttachment, bool) (*executor.PromptResult, error)
-	launchAgentFunc     func(context.Context, *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error)
+	rowLivenessFn          func(*models.ExecutorRunning) models.ProcessLiveness
+	resolveProfileInfo     *executor.AgentProfileInfo
+	resolveProfileErr      error
+	restartProcessCalls    []string // tracks execution IDs passed to RestartAgentProcess
+	restartProcessErr      error
+	promptErr              error
+	promptResult           *executor.PromptResult
+	promptAgentFunc        func(context.Context, string, string, []v1.MessageAttachment, bool) (*executor.PromptResult, error)
+	launchAgentFunc        func(context.Context, *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error)
+	startAgentProcessCalls []string
+	startAgentProcessErr   error
+	startAgentProcessFunc  func(context.Context, string) error
 
 	mu                      sync.Mutex
 	stopAgentWithReasonArgs []stopAgentCall // tracks StopAgentWithReason calls
@@ -355,8 +358,18 @@ func (m *mockAgentManager) LaunchAgent(ctx context.Context, req *executor.Launch
 	}
 	return nil, nil
 }
-func (m *mockAgentManager) StartAgentProcess(_ context.Context, _ string) error { return nil }
-func (m *mockAgentManager) IsAgentCommandConfigured(_ string) bool              { return true }
+func (m *mockAgentManager) StartAgentProcess(ctx context.Context, sessionID string) error {
+	m.mu.Lock()
+	m.startAgentProcessCalls = append(m.startAgentProcessCalls, sessionID)
+	hook := m.startAgentProcessFunc
+	err := m.startAgentProcessErr
+	m.mu.Unlock()
+	if hook != nil {
+		return hook(ctx, sessionID)
+	}
+	return err
+}
+func (m *mockAgentManager) IsAgentCommandConfigured(_ string) bool { return true }
 func (m *mockAgentManager) StopAgent(_ context.Context, agentExecutionID string, force bool) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()

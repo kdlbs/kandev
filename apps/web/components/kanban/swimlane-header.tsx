@@ -5,6 +5,7 @@ import { Badge } from "@kandev/ui/badge";
 import { Checkbox } from "@kandev/ui/checkbox";
 import { IconChevronRight, IconGripVertical } from "@tabler/icons-react";
 import { cn } from "@kandev/ui/lib/utils";
+import { useTranslation } from "react-i18next";
 
 export type SwimlaneHeaderProps = {
   workflowName: string;
@@ -25,6 +26,7 @@ export function SwimlaneHeader({
   onToggleMultiSelect,
   isMultiSelectMode,
 }: SwimlaneHeaderProps) {
+  const { t } = useTranslation();
   return (
     <div
       className="grid grid-cols-[1fr_auto_1fr] items-center gap-1 py-1.5 w-full"
@@ -56,7 +58,7 @@ export function SwimlaneHeader({
               tabIndex={-1}
               aria-hidden
             />
-            Multi-select
+            {t("kanban:multiSelect")}
           </div>
         )}
         <div className="flex-1 border-t border-dashed border-border/50" />

@@ -8,12 +8,14 @@ import {
   matchEntityReferenceLink,
 } from "@/lib/entity-references/message-references";
 import { markdownComponents } from "@/components/shared/markdown-components";
+import { useTranslation } from "react-i18next";
 
 type EntityReferenceChipProps = {
   reference: EntityReference;
 };
 
 export function EntityReferenceChip({ reference }: EntityReferenceChipProps) {
+  const { t } = useTranslation();
   const label = entityReferenceLabel(reference);
   const isInternal = reference.url.startsWith("/") || reference.url.startsWith("#");
   return (
@@ -21,7 +23,7 @@ export function EntityReferenceChip({ reference }: EntityReferenceChipProps) {
       href={entityReferenceHref(reference)}
       target={isInternal ? "_self" : "_blank"}
       rel={isInternal ? undefined : "noopener noreferrer"}
-      aria-label={`Open ${label}: ${reference.title}`}
+      aria-label={t("task:openEntityReference", { label, title: reference.title })}
       title={`${reference.provider} ${reference.kind}: ${reference.title}`}
       data-testid="entity-reference-chip"
       data-entity-ref={reference.ref}
