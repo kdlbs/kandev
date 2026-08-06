@@ -13,7 +13,11 @@ import { usePRDiff } from "@/hooks/domains/github/use-pr-diff";
 import { usePRReviewRepositoryIdentity } from "@/hooks/domains/github/use-pr-review-repository-identity";
 import { useTaskRepositories } from "@/hooks/domains/kanban/use-task-repositories";
 import { formatReviewCommentsAsMarkdown } from "@/components/task/chat/messages/review-comments-attachment";
-import { getCumulativeReviewRepositoryNames, isReviewMultiRepo } from "@/components/review/types";
+import {
+  getCumulativeReviewRepositoryNames,
+  isReviewMultiRepo,
+  reviewFileKey,
+} from "@/components/review/types";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { generateUUID } from "@/lib/utils";
 import { useToast } from "@/components/toast-provider";
@@ -25,6 +29,24 @@ type ReviewGitStatusFiles = {
   isMultiRepo: boolean;
 };
 
+function buildMultiRepoReviewFiles(
+  statusByRepo: Array<{ repository_name: string; status: GitStatusEntry }>,
+): Record<string, FileInfo> {
+  const files: Record<string, FileInfo> = {};
+  for (const { repository_name, status } of statusByRepo) {
+    if (!status?.files) continue;
+    for (const [path, file] of Object.entries(status.files)) {
+      const key = reviewFileKey({ path, repository_name });
+      files[key] = {
+        ...file,
+        repository_name,
+        is_submodule: file.is_submodule ?? status.is_submodule,
+      };
+    }
+  }
+  return files;
+}
+
 export function buildReviewGitStatusFiles(
   reviewGitStatus: GitStatusEntry | undefined,
   statusByRepo: Array<{ repository_name: string; status: GitStatusEntry }>,
@@ -34,11 +56,22 @@ export function buildReviewGitStatusFiles(
   const named = statusByRepo.filter((entry) => entry.repository_name !== "");
   const isMultiRepo = isReviewMultiRepo(
     taskRepositoryCount,
-    named.map((entry) => entry.repository_name).concat(Array.from(cumulativeRepositoryNames)),
+    statusByRepo
+      .map((entry) => entry.repository_name)
+      .concat(Array.from(cumulativeRepositoryNames)),
   );
   if (!isMultiRepo) {
+    const sourceStatus = reviewGitStatus?.files ? reviewGitStatus : named[0]?.status;
+    const files = sourceStatus?.files
+      ? Object.fromEntries(
+          Object.entries(sourceStatus.files).map(([path, file]) => [
+            path,
+            { ...file, is_submodule: file.is_submodule ?? sourceStatus.is_submodule },
+          ]),
+        )
+      : null;
     return {
-      files: reviewGitStatus?.files ?? named[0]?.status.files ?? null,
+      files,
       isMultiRepo: false,
     };
   }
@@ -49,13 +82,7 @@ export function buildReviewGitStatusFiles(
     };
   }
 
-  const files: Record<string, FileInfo> = {};
-  for (const { repository_name, status } of named) {
-    if (!status?.files) continue;
-    for (const [path, file] of Object.entries(status.files)) {
-      files[`${repository_name}\u0000${path}`] = { ...file, repository_name };
-    }
-  }
+  const files = buildMultiRepoReviewFiles(statusByRepo);
   return {
     files: Object.keys(files).length > 0 ? files : null,
     isMultiRepo: true,
@@ -66,8 +93,9 @@ export function buildReviewGitStatusFiles(
  * Builds the unified gitStatus.files map fed into the ReviewDialog. Multi-repo
  * tasks have one git status per repo, and two repos can have files at the same
  * relative path (`README.md` in both), so the map key is `repo\u0000path` and
- * every FileInfo is stamped with its `repository_name`. Single-repo tasks keep
- * the legacy path-only keying.
+ * every FileInfo is stamped with its `repository_name`, including the explicit
+ * empty scope for the real workspace root. Single-repo tasks keep the legacy
+ * path-only keying.
  */
 function useReviewGitStatusFiles(
   sessionId: string | null,

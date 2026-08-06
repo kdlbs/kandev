@@ -338,7 +338,7 @@ const VcsSplitButton = memo(function VcsSplitButton({
   const isGitLoading = git.isLoading;
   // Multi-repo when there's more than one named repo. Single-repo workspaces
   // get either a single empty-name entry or no entries at all in repoNames.
-  const isMultiRepo = git.repoNames.filter((r) => r !== "").length > 1;
+  const isMultiRepo = git.repoNames.length > 1;
 
   const primaryAction = determinePrimaryAction(
     uncommittedFileCount,

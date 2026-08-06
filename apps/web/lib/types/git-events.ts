@@ -30,6 +30,8 @@ export type GitStatusData = {
    * git status off this name so the changes panel can show all repos at once.
    */
   repository_name?: string;
+  /** True when this status belongs to an initialized Git submodule scope. */
+  is_submodule?: boolean;
 };
 
 // Git commit data

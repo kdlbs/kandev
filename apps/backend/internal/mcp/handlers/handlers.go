@@ -1129,6 +1129,14 @@ func (h *Handlers) resolveMCPAutoStartConfigWithError(ctx context.Context, task 
 		}
 	}
 
+	// A workflow step's pinned profile outranks the caller's, because that is
+	// what the orchestrator launches (resolveEffectiveAgentProfile). Resolving
+	// it here too keeps the profile reported back to the caller equal to the
+	// one that will actually run.
+	if stepProfileID, _ := h.resolveWorkflowControllerAgentProfile(ctx, task.WorkflowStepID, task.WorkflowID); stepProfileID != "" {
+		agentProfileID = stepProfileID
+	}
+
 	if agentProfileID == "" {
 		var err error
 		agentProfileID, err = h.resolveWorkflowAgentProfileWithError(ctx, task.WorkflowStepID, task.WorkflowID)

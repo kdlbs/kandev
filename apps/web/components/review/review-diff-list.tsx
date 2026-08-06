@@ -18,7 +18,7 @@ import {
   reviewFileKey,
 } from "./types";
 import type { ReviewFile } from "./types";
-import { RepoGroupHeader } from "./review-diff-list-groups";
+import { ReviewDiffGroup } from "./review-diff-group";
 import { ReviewDiffHeader, type ReviewExternalLinkContext } from "./review-diff-header";
 import { extractReviewMarkdownPreview } from "./review-markdown-diff-preview";
 import { ReviewMarkdownDiffPreviewContent } from "./review-markdown-diff-preview-content";
@@ -107,15 +107,11 @@ export const ReviewDiffList = memo(function ReviewDiffList({
       onKeyDownCapture={handleKeyDown}
     >
       {groups.map((group) => (
-        <div
+        <ReviewDiffGroup
           key={group.repositoryName || "__no_repo__"}
-          data-testid="changes-repo-group"
-          data-repository-name={group.repositoryName || ""}
-        >
-          {showRepoHeaders && (
-            <RepoGroupHeader name={group.repositoryName} fileCount={group.items.length} />
-          )}
-          {group.items.map((file) => {
+          group={group}
+          showRepoHeaders={showRepoHeaders}
+          renderFile={(file) => {
             const key = reviewFileKey(file);
             return (
               <FileDiffSection
@@ -131,7 +127,7 @@ export const ReviewDiffList = memo(function ReviewDiffList({
                 isSelected={selectedFile === key}
                 forceLoad={
                   selectedIndex >= 0 &&
-                  files.findIndex((f) => reviewFileKey(f) === key) <= selectedIndex
+                  files.findIndex((candidate) => reviewFileKey(candidate) === key) <= selectedIndex
                 }
                 onToggleReviewed={onToggleReviewed}
                 onDiscard={onDiscard}
@@ -149,15 +145,12 @@ export const ReviewDiffList = memo(function ReviewDiffList({
                 }}
               />
             );
-          })}
-        </div>
+          }}
+        />
       ))}
     </div>
   );
 });
-
-// Per-repo grouping helpers live in ./review-diff-list-groups so this file
-// stays under the 600-line lint cap.
 
 type FileDiffSectionProps = {
   file: ReviewFile;

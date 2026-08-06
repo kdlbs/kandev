@@ -198,6 +198,19 @@ describe("ReviewFileTree", () => {
     // backend's child is still visible.
     expect(screen.getByText("task.go")).toBeTruthy();
   });
+
+  it("marks a nested submodule boundary with an accessible scope label", () => {
+    renderTree([
+      file({ path: "README.md" }),
+      file({ path: "src/a.ts", repository_name: "vendor/lib" }),
+    ]);
+
+    const node = screen.getByTestId("submodule-node");
+    expect(node.textContent).toContain("lib");
+    expect(within(node).getByRole("button").getAttribute("aria-label")).toBe(
+      "Submodule: vendor/lib",
+    );
+  });
 });
 
 describe("ReviewFileTree multi-repo identity", () => {

@@ -192,6 +192,7 @@ function useEnvSwitchCleanup(
   effectiveSessionId: string | null,
   effectiveEnvId: string | null,
   activeTaskId: string | null,
+  initialLayout?: string | null,
 ) {
   const prevEnvRef = useRef<string | null | undefined>(undefined);
   const prevTaskRef = useRef<string | null | undefined>(undefined);
@@ -244,9 +245,9 @@ function useEnvSwitchCleanup(
       if (effectiveSessionId && !currentSessionIds.includes(effectiveSessionId)) {
         currentSessionIds.unshift(effectiveSessionId);
       }
-      performLayoutSwitch(oldEnvId, newEnvId, effectiveSessionId, currentSessionIds);
+      performLayoutSwitch(oldEnvId, newEnvId, effectiveSessionId, currentSessionIds, initialLayout);
     }
-  }, [effectiveEnvId, effectiveSessionId, activeTaskId, currentSessionIdsKey]);
+  }, [effectiveEnvId, effectiveSessionId, activeTaskId, currentSessionIdsKey, initialLayout]);
 }
 
 // ---------------------------------------------------------------------------
@@ -408,7 +409,7 @@ export const DockviewDesktopLayout = memo(function DockviewDesktopLayout({
   // IMPORTANT: this must run BEFORE useAutoSessionTab so the old layout is
   // saved before a new session tab is created — otherwise the new session's
   // panel could leak into the old session's persisted layout.
-  useEnvSwitchCleanup(effectiveSessionId, effectiveEnvId, activeTaskId);
+  useEnvSwitchCleanup(effectiveSessionId, effectiveEnvId, activeTaskId, initialLayout);
 
   useAutoSessionTab(effectiveSessionId);
   useChangesPanelAutoFocus(changesFocusKey);

@@ -344,6 +344,7 @@ func buildGitStatusNotification(sessionID, repositoryName string, status client.
 		"renamed":          status.Renamed,
 		"branch_additions": status.BranchAdditions,
 		"branch_deletions": status.BranchDeletions,
+		"is_submodule":     status.IsSubmodule,
 	}
 	if repositoryName != "" {
 		statusPayload["repository_name"] = repositoryName

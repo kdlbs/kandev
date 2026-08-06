@@ -32,6 +32,7 @@ export function RepoGroupItem({
   onRepoAction,
   onRepoSecondaryAction,
   displayName,
+  disabled = false,
 }: {
   group: RepoGroup;
   collapsed: boolean;
@@ -43,6 +44,7 @@ export function RepoGroupItem({
   onRepoSecondaryAction?: (repo: string) => void;
   /** Optional display label override; defaults to group.repositoryName. */
   displayName?: string;
+  disabled?: boolean;
 }) {
   const stop = (e: React.MouseEvent) => e.stopPropagation();
   const label = displayName || group.repositoryName || "Repository";
@@ -74,6 +76,7 @@ export function RepoGroupItem({
                 variant="ghost"
                 className="h-5 text-[10px] px-1.5 cursor-pointer"
                 data-testid="repo-group-action"
+                disabled={disabled}
                 onClick={() => onRepoAction(group.repositoryName)}
               >
                 {primaryLabel}
@@ -85,6 +88,7 @@ export function RepoGroupItem({
                 variant="ghost"
                 className="h-5 text-[10px] px-1.5 cursor-pointer text-muted-foreground"
                 data-testid="repo-group-secondary-action"
+                disabled={disabled}
                 onClick={() => onRepoSecondaryAction(group.repositoryName)}
               >
                 {secondaryLabel}
@@ -107,11 +111,13 @@ export function FileSectionActions({
   secondaryLabel,
   onAction,
   onSecondaryAction,
+  disabled = false,
 }: {
   primaryLabel: string;
   secondaryLabel?: string;
   onAction?: (repo: string) => void;
   onSecondaryAction?: (repo: string) => void;
+  disabled?: boolean;
 }) {
   if (!onAction && !onSecondaryAction) return null;
   return (
@@ -122,6 +128,7 @@ export function FileSectionActions({
           variant="ghost"
           className="h-5 text-[10px] px-1.5 cursor-pointer"
           data-testid="repo-group-action"
+          disabled={disabled}
           onClick={() => onAction("")}
         >
           {primaryLabel}
@@ -133,6 +140,7 @@ export function FileSectionActions({
           variant="ghost"
           className="h-5 text-[10px] px-1.5 cursor-pointer text-muted-foreground"
           data-testid="repo-group-secondary-action"
+          disabled={disabled}
           onClick={() => onSecondaryAction("")}
         >
           {secondaryLabel}
