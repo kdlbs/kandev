@@ -46,7 +46,8 @@ likely `apps/web/components/shared/resizable-markdown-table.tsx`.
   semantics in Playwright alongside keyboard behavior.
 - On first adjustment, snapshot measured widths and apply them through a
   `<colgroup>` with fixed table layout. Keep the measured table width constant so
-  one adjacent column grows exactly as the other shrinks.
+  one adjacent column grows exactly as the other shrinks. Do not activate fixed
+  widths until pointer movement has a non-zero delta.
 - Use pointer capture for dragging. Restore the drag-start snapshot on
   `pointercancel`, and clean up cursor and selection overrides on every exit
   path.
@@ -171,7 +172,7 @@ None.
 
 ## Verification results
 
-- `vitest`: 41 focused geometry/hook/shared-renderer tests passed.
+- `vitest`: 42 focused geometry/hook/shared-renderer tests passed.
 - `pnpm run typecheck`: passed.
 - `pnpm --filter @kandev/web lint`: passed with zero warnings.
 - `make build-web`: passed.

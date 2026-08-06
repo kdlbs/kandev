@@ -30,6 +30,7 @@ type DragState = {
   restoreWidths: number[] | null;
   startWidths: number[];
   startX: number;
+  tableWidth: number;
 };
 
 function readGeometry(table: HTMLTableElement, wrapper: HTMLDivElement): TableGeometry | null {
@@ -175,13 +176,12 @@ function usePointerResize({
         restoreWidths: widthsRef.current ? [...widthsRef.current] : null,
         startWidths: measured.columnWidths,
         startX: event.clientX,
+        tableWidth: measured.tableWidth,
       };
-      setColumnWidths(measured.columnWidths);
-      setFixedTableWidth(measured.tableWidth);
       setActiveBoundary(boundaryIndex);
       setDocumentResizeState(true);
     },
-    [fixedTableWidth, refs, setColumnWidths, setFixedTableWidth, widthsRef],
+    [fixedTableWidth, refs, widthsRef],
   );
 
   const moveResize = useCallback(
@@ -189,11 +189,12 @@ function usePointerResize({
       const drag = dragRef.current;
       if (!drag || drag.pointerId !== event.pointerId) return;
       event.preventDefault();
-      setColumnWidths(
-        resizeAdjacentColumns(drag.startWidths, drag.boundaryIndex, event.clientX - drag.startX),
-      );
+      const delta = event.clientX - drag.startX;
+      if (delta === 0) return;
+      setFixedTableWidth(drag.tableWidth);
+      setColumnWidths(resizeAdjacentColumns(drag.startWidths, drag.boundaryIndex, delta));
     },
-    [setColumnWidths],
+    [setColumnWidths, setFixedTableWidth],
   );
 
   return { activeBoundary, finishDrag, moveResize, startResize };

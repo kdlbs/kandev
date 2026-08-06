@@ -168,6 +168,29 @@ describe("useMarkdownTableResize", () => {
     expect(document.body.style.userSelect).toBe("");
   });
 
+  it("keeps automatic layout when a pointer drag ends without movement", () => {
+    const { result } = renderResizeHook();
+    const target = {
+      hasPointerCapture: vi.fn(() => true),
+      releasePointerCapture: vi.fn(),
+      setPointerCapture: vi.fn(),
+    };
+    const pointer = {
+      button: 0,
+      clientX: 130,
+      currentTarget: target,
+      pointerId: 7,
+      preventDefault: vi.fn(),
+    };
+
+    act(() => result.current.startResize(0, pointer as never));
+    act(() => result.current.finishDrag(pointer as never, false));
+
+    expect(result.current.columnWidths).toBeNull();
+    expect(result.current.fixedTableWidth).toBeNull();
+    expect(target.releasePointerCapture).toHaveBeenCalledWith(7);
+  });
+
   it("clears custom widths when the table column count changes", () => {
     const { result, row } = renderResizeHook();
     act(() => result.current.resizeWithKeyboard(0, keyboardEvent("ArrowRight") as never));

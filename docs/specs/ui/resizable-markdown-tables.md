@@ -29,7 +29,9 @@ editing the source Markdown or opening another view.
   64-pixel minimum. This omits every pair measuring less than 128 CSS pixels and
   keeps each exposed separator's current ARIA value inside its declared range.
 - The first resize begins from the browser's measured automatic layout. Custom
-  widths then remain in component memory for that mounted table only.
+  widths activate only after a non-zero pointer movement, then remain in
+  component memory for that mounted table only. Clicking a separator solely to
+  focus it leaves automatic layout active.
 - Double-clicking any separator clears every custom width on that table and
   returns it to the current automatic layout. It does not restore a stale pixel
   snapshot.
