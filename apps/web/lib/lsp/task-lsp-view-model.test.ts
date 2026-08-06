@@ -114,7 +114,9 @@ describe("deriveTaskLspViewModel", () => {
     expect(errored.aggregate.compact).toMatchObject({ kind: "multiple", errorCount: 1 });
     expect(errored.relevantRows[0].state).toBe("error");
   });
+});
 
+describe("deriveTaskLspViewModel actions and visibility", () => {
   it("derives safe Start, Stop, and Restart availability from authoritative phase", () => {
     const view = deriveTaskLspViewModel(
       [
@@ -131,5 +133,41 @@ describe("deriveTaskLspViewModel", () => {
     expect(byLanguage.kotlin).toEqual({ start: false, stop: true, restart: true });
     expect(byLanguage.python).toEqual({ start: false, stop: false, restart: false });
     expect(byLanguage.rust).toEqual({ start: false, stop: false, restart: false });
+  });
+
+  it("filters hidden languages from rows and aggregate counts without changing snapshots", () => {
+    const go = language("go", { detected: true, phase: "ready", generation: 2 });
+    const view = deriveTaskLspViewModel(
+      [go, language("kotlin", { detected: true, phase: "ready", generation: 4 })],
+      NOW,
+      { hiddenLanguages: ["go"] },
+    );
+
+    expect(view.rows.map((row) => row.language)).toEqual(["kotlin"]);
+    expect(view.relevantRows.map((row) => row.language)).toEqual(["kotlin"]);
+    expect(view.aggregate.runningCount).toBe(1);
+    expect(view.hiddenCount).toBe(1);
+    expect(go.phase).toBe("ready");
+    expect(go.generation).toBe(2);
+  });
+
+  it("force-shows a hidden current editor language and reports an all-hidden aggregate", () => {
+    const languages = [language("go", { detected: true }), language("kotlin", { detected: true })];
+
+    const hidden = deriveTaskLspViewModel(languages, NOW, {
+      hiddenLanguages: ["go", "kotlin"],
+    });
+    expect(hidden.rows).toEqual([]);
+    expect(hidden.relevantRows).toEqual([]);
+    expect(hidden.hiddenCount).toBe(2);
+    expect(hidden.aggregate.compact).toEqual({ kind: "empty" });
+
+    const focused = deriveTaskLspViewModel(languages, NOW, {
+      hiddenLanguages: ["go", "kotlin"],
+      forceVisibleLanguage: "go",
+    });
+    expect(focused.rows.map((row) => row.language)).toEqual(["go"]);
+    expect(focused.relevantRows.map((row) => row.language)).toEqual(["go"]);
+    expect(focused.hiddenCount).toBe(2);
   });
 });

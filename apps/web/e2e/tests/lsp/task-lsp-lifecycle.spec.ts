@@ -3,6 +3,7 @@ import type { Locator, Page } from "@playwright/test";
 import { SessionPage } from "../../pages/session-page";
 import {
   createKotlinTask,
+  expandTaskLspLanguage,
   expectFakeLspEventCount,
   expectFakeLspGeneration,
   expectFakeLspProcessStopped,
@@ -184,9 +185,13 @@ test.describe("task-scoped LSP lifecycle", () => {
         openTaskLspControl(secondPage),
       ]);
       const start = (surface: Locator) =>
-        surface
-          .getByTestId("task-lsp-language-kotlin")
-          .locator('[data-testid="lsp-lifecycle-action"][data-lsp-action="start"]');
+        surface.locator(
+          '[data-testid="task-lsp-language-kotlin"] [data-testid="lsp-lifecycle-action"][data-lsp-action="start"]',
+        );
+      await Promise.all([
+        expandTaskLspLanguage(firstSurface, "kotlin"),
+        expandTaskLspLanguage(secondSurface, "kotlin"),
+      ]);
       await expect(start(firstSurface)).toBeEnabled();
       await expect(start(secondSurface)).toBeEnabled();
       await start(firstSurface).click();
@@ -329,9 +334,8 @@ test.describe("task-scoped LSP lifecycle", () => {
     await expect(aggregate).toBeVisible();
     await expect(aggregate).toContainText(/Kotlin.*Importing|LSP.*running/i);
     const surface = await openTaskLspControl(testPage);
-    await expect(surface.getByTestId("task-lsp-language-kotlin")).toContainText(
-      LONG_LSP_PROGRESS_MESSAGE,
-    );
+    const kotlin = await expandTaskLspLanguage(surface, "kotlin");
+    await expect(kotlin).toContainText(LONG_LSP_PROGRESS_MESSAGE);
 
     releaseFakeLspInitialization(backend);
     await expectKotlinState(testPage, "ready");
@@ -357,5 +361,87 @@ test.describe("task-scoped LSP lifecycle", () => {
     await performTaskLspAction(testPage, "kotlin", "start");
     await expectFakeLspGeneration(backend, 1);
     await performTaskLspAction(testPage, "kotlin", "stop");
+  });
+
+  test("persists status visibility without changing the running task server", async ({
+    testPage,
+    apiClient,
+    seedData,
+    backend,
+  }) => {
+    const initial = await apiClient.getUserSettings();
+    const initialHidden = Array.isArray(initial.settings.lsp_status_hidden_languages)
+      ? (initial.settings.lsp_status_hidden_languages as string[])
+      : [];
+    let taskId = "";
+    let stopped = false;
+
+    try {
+      await apiClient.saveUserSettings({
+        lsp_status_hidden_languages: initialHidden.filter((language) => language !== "kotlin"),
+      });
+      installFakeKotlinLsp(backend);
+      const task = await createKotlinTask(testPage, apiClient, seedData, backend, {
+        title: "Task LSP Status Visibility",
+      });
+      taskId = task.taskId;
+      await performTaskLspAction(testPage, "kotlin", "start");
+      const process = await expectFakeLspGeneration(backend, 1);
+
+      await testPage.goto("/settings/general/editors");
+      await expect(testPage.getByRole("heading", { name: "Editors", exact: true })).toBeVisible();
+      const visibility = testPage.getByTestId("lsp-status-visible-kotlin");
+      await expect(visibility).toBeChecked();
+      await visibility.click();
+      const floatingSave = testPage.getByTestId("settings-floating-save");
+      await floatingSave.getByRole("button", { name: "Save changes" }).click();
+      await expect(floatingSave).toBeHidden({ timeout: 15_000 });
+      await expect
+        .poll(async () => {
+          const hidden = (await apiClient.getUserSettings()).settings.lsp_status_hidden_languages;
+          return Array.isArray(hidden) && hidden.includes("kotlin");
+        })
+        .toBe(true);
+
+      await testPage.goto(`/t/${task.taskId}`);
+      await task.session.waitForLoad(45_000);
+      let surface = await openTaskLspControl(testPage);
+      await expect(surface.getByTestId("task-lsp-language-kotlin")).toHaveCount(0);
+      await expectFakeLspEventCount(
+        backend,
+        (event) => event.event === "started",
+        1,
+        "hiding status leaves the running generation unchanged",
+      );
+
+      await testPage.reload();
+      await task.session.waitForLoad(45_000);
+      surface = await openTaskLspControl(testPage);
+      await expect(surface.getByTestId("task-lsp-language-kotlin")).toHaveCount(0);
+      await testPage.keyboard.press("Escape");
+
+      await openDesktopFile(testPage, task.session, task.filePaths[0]);
+      const editorShortcut = testPage.getByTestId("lsp-status-button");
+      await expect(editorShortcut).toHaveAttribute("data-lsp-language", "kotlin");
+      await editorShortcut.click();
+      const editorSurface = testPage.getByTestId("task-lsp-surface");
+      const kotlin = editorSurface.getByTestId("task-lsp-language-kotlin");
+      await expect(kotlin).toHaveAttribute("data-lsp-generation", "1");
+      await expect(kotlin.getByTestId("task-lsp-language-trigger-kotlin")).toHaveAttribute(
+        "aria-expanded",
+        "true",
+      );
+
+      await apiClient.rawRequest("POST", `/api/v1/tasks/${task.taskId}/lsp/kotlin/stop`);
+      await expectFakeLspProcessStopped(process.pid);
+      stopped = true;
+    } finally {
+      if (taskId && !stopped) {
+        await apiClient
+          .rawRequest("POST", `/api/v1/tasks/${taskId}/lsp/kotlin/stop`)
+          .catch(() => undefined);
+      }
+      await apiClient.saveUserSettings({ lsp_status_hidden_languages: initialHidden });
+    }
   });
 });

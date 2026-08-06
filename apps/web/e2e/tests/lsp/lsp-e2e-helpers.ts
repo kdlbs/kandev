@@ -283,8 +283,21 @@ export async function openDesktopFile(
 export async function openLspStatus(page: Page): Promise<Locator> {
   const language = await currentTaskLspLanguage(page);
   const disclosure = await openTaskLspControl(page);
+  return expandTaskLspLanguage(disclosure, language);
+}
+
+export async function expandTaskLspLanguage(
+  disclosure: Locator,
+  language: string,
+): Promise<Locator> {
   const row = disclosure.getByTestId(`task-lsp-language-${language}`);
   await expect(row).toBeVisible();
+  const trigger = row.getByTestId(`task-lsp-language-trigger-${language}`);
+  if ((await trigger.getAttribute("aria-expanded")) !== "true") {
+    await trigger.scrollIntoViewIfNeeded();
+    await trigger.click();
+  }
+  await expect(trigger).toHaveAttribute("aria-expanded", "true");
   return row;
 }
 
@@ -329,7 +342,7 @@ export async function performTaskLspAction(
   action: "start" | "stop" | "restart",
 ): Promise<void> {
   const surface = await openTaskLspControl(page);
-  const row = surface.getByTestId(`task-lsp-language-${language}`);
+  const row = await expandTaskLspLanguage(surface, language);
   const actionButton = row.locator(
     `[data-testid="lsp-lifecycle-action"][data-lsp-action="${action}"]`,
   );

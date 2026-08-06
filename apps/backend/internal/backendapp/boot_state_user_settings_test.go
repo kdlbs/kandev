@@ -102,6 +102,17 @@ func TestMapUserSettingsStateNormalizesLspStatusLocation(t *testing.T) {
 	}
 }
 
+func TestMapUserSettingsStateIncludesLspStatusHiddenLanguages(t *testing.T) {
+	state := mapUserSettingsState(userdto.UserSettingsResponse{
+		Settings: userdto.UserSettingsDTO{LspStatusHiddenLanguages: []string{"go", "kotlin"}},
+	}, "workspace-1")
+
+	got, ok := state["lspStatusHiddenLanguages"].([]string)
+	if !ok || len(got) != 2 || got[0] != "go" || got[1] != "kotlin" {
+		t.Fatalf("lspStatusHiddenLanguages = %#v, want [go kotlin]", state["lspStatusHiddenLanguages"])
+	}
+}
+
 func TestMapUserSettingsStateIncludesSystemMetricsDisplayPreference(t *testing.T) {
 	state := mapUserSettingsState(userdto.UserSettingsResponse{
 		Settings: userdto.UserSettingsDTO{SystemMetricsDisplay: usermodels.SystemMetricsDisplaySettings{

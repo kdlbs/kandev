@@ -8,6 +8,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@kandev/ui/popover";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { cn } from "@kandev/ui/lib/utils";
 import { useTaskLsp } from "@/hooks/domains/lsp/use-task-lsp";
+import { useAppStore } from "@/components/state-provider";
 import { formatLspElapsed } from "@/lib/lsp/lsp-progress-view";
 import {
   deriveTaskLspViewModel,
@@ -46,8 +47,9 @@ function useLiveNow(enabled: boolean): number {
   return Math.max(now, Date.now());
 }
 
-function useTaskLspView(taskId: string | null) {
+function useTaskLspView(taskId: string | null, forceVisibleLanguage?: string | null) {
   const controller = useTaskLsp(taskId);
+  const hiddenLanguages = useAppStore((state) => state.userSettings.lspStatusHiddenLanguages ?? []);
   const tracksElapsed = controller.languages.some(
     (language) =>
       language.progress.length > 0 ||
@@ -56,8 +58,12 @@ function useTaskLspView(taskId: string | null) {
   );
   const now = useLiveNow(tracksElapsed);
   const view = useMemo(
-    () => deriveTaskLspViewModel(controller.languages, now),
-    [controller.languages, now],
+    () =>
+      deriveTaskLspViewModel(controller.languages, now, {
+        hiddenLanguages,
+        forceVisibleLanguage,
+      }),
+    [controller.languages, forceVisibleLanguage, hiddenLanguages, now],
   );
   return { controller, view, now };
 }
@@ -71,6 +77,52 @@ function orderedRows(rows: TaskLspLanguageView[], focusLanguage?: string | null)
   });
 }
 
+function useExpandedLanguages(focusLanguage?: string | null) {
+  const [expandedLanguages, setExpandedLanguages] = useState<Set<string>>(
+    () => new Set(focusLanguage ? [focusLanguage] : []),
+  );
+
+  useEffect(() => {
+    if (!focusLanguage) return;
+    setExpandedLanguages((current) => {
+      if (current.has(focusLanguage)) return current;
+      const next = new Set(current);
+      next.add(focusLanguage);
+      return next;
+    });
+  }, [focusLanguage]);
+
+  const setExpanded = (language: string, open: boolean) => {
+    setExpandedLanguages((current) => {
+      const next = new Set(current);
+      if (open) next.add(language);
+      else next.delete(language);
+      return next;
+    });
+  };
+  return { expandedLanguages, setExpanded };
+}
+
+function TaskLspEmptyState({ hiddenCount }: { hiddenCount: number }) {
+  const { t } = useTranslation();
+  const hasHiddenLanguages = hiddenCount > 0;
+  return (
+    <div className="space-y-2 rounded-md border border-dashed p-3 text-sm text-muted-foreground">
+      <p>
+        {t(hasHiddenLanguages ? "lsp:allTaskLanguageServersHidden" : "lsp:noTaskLanguageServers")}
+      </p>
+      {hasHiddenLanguages ? (
+        <a
+          href="/settings/general/editors"
+          className="inline-flex min-h-11 items-center font-medium text-foreground underline underline-offset-4 hover:text-primary"
+        >
+          {t("lsp:manageStatusVisibility")}
+        </a>
+      ) : null}
+    </div>
+  );
+}
+
 export function TaskLspDisclosure({
   taskId,
   touch,
@@ -81,8 +133,9 @@ export function TaskLspDisclosure({
   focusLanguage?: string | null;
 }) {
   const { t } = useTranslation();
-  const { controller, view, now } = useTaskLspView(taskId);
+  const { controller, view, now } = useTaskLspView(taskId, focusLanguage);
   const [restartLanguage, setRestartLanguage] = useState<string | null>(null);
+  const { expandedLanguages, setExpanded } = useExpandedLanguages(focusLanguage);
   const rows = orderedRows(view.rows, focusLanguage);
   const restartRow = rows.find((row) => row.language === restartLanguage) ?? null;
   const run = (action: () => Promise<unknown>) => void action().catch(() => undefined);
@@ -126,9 +179,7 @@ export function TaskLspDisclosure({
         </div>
       ) : null}
       {controller.loaded && rows.length === 0 ? (
-        <p className="rounded-md border border-dashed p-3 text-sm text-muted-foreground">
-          {t("lsp:noTaskLanguageServers")}
-        </p>
+        <TaskLspEmptyState hiddenCount={view.hiddenCount} />
       ) : null}
       <div className="space-y-2">
         {rows.map((row) => (
@@ -137,7 +188,9 @@ export function TaskLspDisclosure({
             row={row}
             now={now}
             touch={touch}
+            open={expandedLanguages.has(row.language)}
             pending={controller.pending[row.language]}
+            onOpenChange={(open) => setExpanded(row.language, open)}
             onStart={() => run(() => controller.start(row.language))}
             onStop={() => run(() => controller.stop(row.language))}
             onRestart={() => setRestartLanguage(row.language)}
@@ -369,7 +422,7 @@ export function TaskLspControl({
   onOpenExternal,
 }: TaskLspControlProps) {
   const { t } = useTranslation();
-  const { controller, view } = useTaskLspView(taskId);
+  const { controller, view } = useTaskLspView(taskId, language);
   const selected = language ? view.rows.find((row) => row.language === language) : undefined;
   const relevant = view.relevantRows.length > 0 || controller.loading || Boolean(controller.error);
   if (!taskId || (hideWhenIrrelevant && !relevant)) return null;

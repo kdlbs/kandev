@@ -924,6 +924,7 @@ export class ApiClient {
     saved_layouts?: unknown[];
     lsp_auto_start_languages?: string[];
     lsp_auto_install_languages?: string[];
+    lsp_status_hidden_languages?: string[];
     lsp_server_configs?: Record<string, Record<string, unknown>>;
     lsp_status_location?: "toolbar" | "status_bar";
     kanban_view_mode?: string;

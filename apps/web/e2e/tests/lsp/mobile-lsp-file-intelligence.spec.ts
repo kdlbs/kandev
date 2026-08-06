@@ -5,6 +5,7 @@ import {
 } from "../../helpers/layout-assertions";
 import {
   createKotlinTask,
+  expandTaskLspLanguage,
   installFakeKotlinLsp,
   LONG_LSP_PROGRESS_MESSAGE,
   readFakeLspEvents,
@@ -26,11 +27,15 @@ test.describe("Mobile LSP boundaries", () => {
       : [];
     const initialLocation =
       initial.settings.lsp_status_location === "status_bar" ? "status_bar" : "toolbar";
+    const initialHidden = Array.isArray(initial.settings.lsp_status_hidden_languages)
+      ? (initial.settings.lsp_status_hidden_languages as string[])
+      : [];
 
     try {
       installFakeKotlinLsp(backend);
       await apiClient.rawRequest("PATCH", "/api/v1/user/settings", {
         lsp_auto_start_languages: [],
+        lsp_status_hidden_languages: initialHidden.filter((language) => language !== "kotlin"),
         lsp_status_location: "status_bar",
       });
 
@@ -65,6 +70,11 @@ test.describe("Mobile LSP boundaries", () => {
       const kotlin = drawer.getByTestId("task-lsp-language-kotlin");
       await expect(kotlin).toBeVisible();
       await expect(kotlin).toHaveAttribute("data-lsp-policy", "inherit");
+      const languageTrigger = kotlin.getByTestId("task-lsp-language-trigger-kotlin");
+      await expect(languageTrigger).toHaveAttribute("aria-expanded", "false");
+      expect((await languageTrigger.boundingBox())?.height).toBeGreaterThanOrEqual(44);
+      await languageTrigger.tap();
+      await expect(languageTrigger).toHaveAttribute("aria-expanded", "true");
       const start = kotlin.locator('[data-testid="lsp-lifecycle-action"][data-lsp-action="start"]');
       await expect(start).toBeVisible();
       const startBox = await start.boundingBox();
@@ -80,6 +90,7 @@ test.describe("Mobile LSP boundaries", () => {
     } finally {
       await apiClient.rawRequest("PATCH", "/api/v1/user/settings", {
         lsp_auto_start_languages: initialAutoStart,
+        lsp_status_hidden_languages: initialHidden,
         lsp_status_location: initialLocation,
       });
     }
@@ -94,10 +105,14 @@ test.describe("Mobile LSP boundaries", () => {
     const initial = await apiClient.getUserSettings();
     const initialLocation =
       initial.settings.lsp_status_location === "status_bar" ? "status_bar" : "toolbar";
+    const initialHidden = Array.isArray(initial.settings.lsp_status_hidden_languages)
+      ? (initial.settings.lsp_status_hidden_languages as string[])
+      : [];
 
     try {
       await testPage.setViewportSize({ width: 820, height: 900 });
       await apiClient.rawRequest("PATCH", "/api/v1/user/settings", {
+        lsp_status_hidden_languages: initialHidden.filter((language) => language !== "kotlin"),
         lsp_status_location: "status_bar",
       });
       installFakeKotlinLsp(backend, {
@@ -136,6 +151,7 @@ test.describe("Mobile LSP boundaries", () => {
       await expect(drawer).toBeVisible();
       const kotlin = drawer.getByTestId("task-lsp-language-kotlin");
       await expect(kotlin).toHaveAttribute("data-lsp-policy", "inherit");
+      await expandTaskLspLanguage(drawer.getByTestId("task-lsp-disclosure"), "kotlin");
       await kotlin.locator('[data-testid="lsp-lifecycle-action"][data-lsp-action="start"]').tap();
       await expect(kotlin).toHaveAttribute("data-lsp-generation", "1", { timeout: 15_000 });
       await expect
@@ -178,6 +194,7 @@ test.describe("Mobile LSP boundaries", () => {
       await kotlin.locator('[data-testid="lsp-lifecycle-action"][data-lsp-action="stop"]').tap();
     } finally {
       await apiClient.rawRequest("PATCH", "/api/v1/user/settings", {
+        lsp_status_hidden_languages: initialHidden,
         lsp_status_location: initialLocation,
       });
     }
@@ -190,10 +207,14 @@ test.describe("Mobile LSP boundaries", () => {
       : [];
     const initialLocation =
       initial.settings.lsp_status_location === "status_bar" ? "status_bar" : "toolbar";
+    const initialHidden = Array.isArray(initial.settings.lsp_status_hidden_languages)
+      ? (initial.settings.lsp_status_hidden_languages as string[])
+      : [];
 
     try {
       await apiClient.rawRequest("PATCH", "/api/v1/user/settings", {
         lsp_auto_start_languages: [],
+        lsp_status_hidden_languages: initialHidden.filter((language) => language !== "kotlin"),
         lsp_status_location: "toolbar",
       });
       await testPage.goto("/settings/general/editors");
@@ -212,6 +233,9 @@ test.describe("Mobile LSP boundaries", () => {
       const autoStart = kotlinCard.getByTestId("lsp-auto-start-kotlin");
       await expect(autoStart).not.toBeChecked();
       await autoStart.tap();
+      const statusVisibility = kotlinCard.getByTestId("lsp-status-visible-kotlin");
+      await expect(statusVisibility).toBeChecked();
+      await statusVisibility.tap();
       const floatingSave = testPage.getByTestId("settings-floating-save");
       await floatingSave.getByRole("button", { name: "Save changes" }).tap();
       await expect(floatingSave).not.toBeVisible({ timeout: 15_000 });
@@ -221,12 +245,19 @@ test.describe("Mobile LSP boundaries", () => {
           (await apiClient.getUserSettings()).settings.lsp_auto_start_languages as string[]
         ).includes("kotlin"),
       ).toBe(true);
+      expect(
+        (
+          (await apiClient.getUserSettings()).settings.lsp_status_hidden_languages as string[]
+        ).includes("kotlin"),
+      ).toBe(true);
       await testPage.reload();
       await expect(testPage.getByTestId("lsp-auto-start-kotlin")).toBeChecked();
+      await expect(testPage.getByTestId("lsp-status-visible-kotlin")).not.toBeChecked();
       await assertNoDocumentHorizontalOverflow(testPage, "mobile Editors settings");
     } finally {
       await apiClient.rawRequest("PATCH", "/api/v1/user/settings", {
         lsp_auto_start_languages: initialAutoStart,
+        lsp_status_hidden_languages: initialHidden,
         lsp_status_location: initialLocation,
       });
     }

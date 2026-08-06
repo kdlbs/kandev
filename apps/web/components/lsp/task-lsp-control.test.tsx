@@ -6,6 +6,9 @@ import { TaskLspControl, TaskLspDisclosure } from "./task-lsp-control";
 
 const TEST_TIME = "2026-08-05T12:00:00Z";
 const KOTLIN_ROW_TEST_ID = "task-lsp-language-kotlin";
+const GO_ROW_TEST_ID = "task-lsp-language-go";
+const LSP_STATE_ATTRIBUTE = "data-lsp-state";
+const LSP_STATUS_BUTTON_TEST_ID = "lsp-status-button";
 
 const controller = vi.hoisted(() => ({
   languages: [] as TaskLspLanguageSnapshot[],
@@ -21,9 +24,21 @@ const controller = vi.hoisted(() => ({
   refetch: vi.fn(),
 }));
 
+const settings = vi.hoisted(() => ({ hiddenLanguages: [] as string[] }));
+
 vi.mock("@/hooks/domains/lsp/use-task-lsp", () => ({
   useTaskLsp: () => controller,
 }));
+
+vi.mock("@/components/state-provider", () => ({
+  useAppStore: (
+    selector: (state: { userSettings: { lspStatusHiddenLanguages: string[] } }) => unknown,
+  ) => selector({ userSettings: { lspStatusHiddenLanguages: settings.hiddenLanguages } }),
+}));
+
+function expandLanguage(id: string) {
+  fireEvent.click(screen.getByTestId(`task-lsp-language-trigger-${id}`));
+}
 
 function language(
   id: string,
@@ -82,6 +97,7 @@ beforeEach(() => {
   ];
   controller.pending = {};
   controller.error = null;
+  settings.hiddenLanguages = [];
   for (const action of [
     controller.start,
     controller.stop,
@@ -101,8 +117,9 @@ describe("TaskLspDisclosure evidence", () => {
   it("shows task policy, honest progress, generation, elapsed time, reason, and initiator", () => {
     render(<TaskLspDisclosure taskId="task-1" touch={false} />);
 
+    expandLanguage("kotlin");
     const kotlin = screen.getByTestId(KOTLIN_ROW_TEST_ID);
-    expect(kotlin.getAttribute("data-lsp-state")).toBe("server_work");
+    expect(kotlin.getAttribute(LSP_STATE_ATTRIBUTE)).toBe("server_work");
     expect(kotlin.getAttribute("data-lsp-policy")).toBe("keep_warm");
     expect(kotlin.getAttribute("data-lsp-generation")).toBe("3");
     expect(kotlin.textContent).toContain("Importing Kotlin project");
@@ -133,8 +150,9 @@ describe("TaskLspDisclosure evidence", () => {
 
     render(<TaskLspDisclosure taskId="task-1" touch={false} />);
 
+    expandLanguage("kotlin");
     const kotlin = screen.getByTestId(KOTLIN_ROW_TEST_ID);
-    expect(kotlin.getAttribute("data-lsp-state")).toBe("ready");
+    expect(kotlin.getAttribute(LSP_STATE_ATTRIBUTE)).toBe("ready");
     expect(within(kotlin).queryByTestId("task-lsp-progress")).toBeNull();
     expect(within(kotlin).getByTestId("task-lsp-completed-work").textContent).toContain(
       "Project model loaded",
@@ -154,6 +172,7 @@ describe("TaskLspDisclosure evidence", () => {
 
     render(<TaskLspDisclosure taskId="task-1" touch={false} />);
 
+    expandLanguage("kotlin");
     const evidence = screen.getByTestId("task-lsp-initialization");
     expect(evidence.getAttribute("data-lsp-initialization-stage")).toBe("long_running");
     expect(evidence.textContent).toContain("Initialization is taking longer than usual");
@@ -172,6 +191,7 @@ describe("TaskLspDisclosure evidence", () => {
 
     render(<TaskLspDisclosure taskId="task-1" touch={false} />);
 
+    expandLanguage("kotlin");
     expect(screen.getByTestId("task-lsp-idle").textContent).toContain(
       "No background work reported",
     );
@@ -193,9 +213,10 @@ describe("TaskLspDisclosure controls", () => {
 
     render(<TaskLspDisclosure taskId="task-1" touch={false} />);
 
-    expect(screen.getByTestId("task-lsp-language-go").textContent).toContain(
-      "Waiting for capacity",
-    );
+    expandLanguage("go");
+    expandLanguage("python");
+    expandLanguage("kotlin");
+    expect(screen.getByTestId(GO_ROW_TEST_ID).textContent).toContain("Waiting for capacity");
     expect(screen.getByTestId("task-lsp-language-python").textContent).toContain(
       "Language servers are not supported by this task executor",
     );
@@ -207,11 +228,12 @@ describe("TaskLspDisclosure controls", () => {
   it("delegates policy, Start, and Stop to the shared task controller", () => {
     render(<TaskLspDisclosure taskId="task-1" touch={false} />);
 
-    fireEvent.change(screen.getByRole("combobox", { name: "Go task policy" }), {
-      target: { value: "disabled" },
-    });
+    expandLanguage("go");
+    expandLanguage("kotlin");
+    fireEvent.click(screen.getByRole("combobox", { name: "Go task policy" }));
+    fireEvent.click(screen.getByRole("option", { name: "Disabled" }));
     fireEvent.click(
-      within(screen.getByTestId("task-lsp-language-go")).getByRole("button", { name: "Start" }),
+      within(screen.getByTestId(GO_ROW_TEST_ID)).getByRole("button", { name: "Start" }),
     );
     fireEvent.click(
       within(screen.getByTestId(KOTLIN_ROW_TEST_ID)).getByRole("button", {
@@ -227,6 +249,7 @@ describe("TaskLspDisclosure controls", () => {
   it("explains restart impact and waits for confirmation", () => {
     render(<TaskLspDisclosure taskId="task-1" touch={false} />);
 
+    expandLanguage("kotlin");
     fireEvent.click(
       within(screen.getByTestId(KOTLIN_ROW_TEST_ID)).getByRole("button", {
         name: "Restart",
@@ -245,15 +268,17 @@ describe("TaskLspDisclosure controls", () => {
   it("uses 44px controls in the embedded touch composition without nesting a drawer", () => {
     render(<TaskLspDisclosure taskId="task-1" touch />);
 
+    expandLanguage("go");
     const disclosure = screen.getByTestId("task-lsp-disclosure");
     expect(disclosure.querySelector("[role=dialog]")).toBeNull();
     expect(disclosure.className).toContain("shrink-0");
     expect(
-      within(screen.getByTestId("task-lsp-language-go")).getByRole("button", { name: "Start" })
-        .className,
+      within(screen.getByTestId(GO_ROW_TEST_ID)).getByRole("button", { name: "Start" }).className,
     ).toContain("h-11");
   });
+});
 
+describe("TaskLspDisclosure presentation", () => {
   it("opens one shared disclosure from the compact task control", () => {
     render(
       <TooltipProvider>
@@ -274,11 +299,68 @@ describe("TaskLspDisclosure controls", () => {
       </TooltipProvider>,
     );
 
-    expect(screen.getByTestId("lsp-status-button").getAttribute("data-lsp-language")).toBe(
+    expect(screen.getByTestId(LSP_STATUS_BUTTON_TEST_ID).getAttribute("data-lsp-language")).toBe(
       "kotlin",
     );
-    expect(screen.getByTestId("lsp-status-button").getAttribute("data-lsp-state")).toBe(
+    expect(screen.getByTestId(LSP_STATUS_BUTTON_TEST_ID).getAttribute(LSP_STATE_ATTRIBUTE)).toBe(
       "server_work",
     );
+  });
+
+  it("starts rows collapsed and expands them independently", () => {
+    render(<TaskLspDisclosure taskId="task-1" touch={false} />);
+
+    expect(screen.getByTestId("task-lsp-language-trigger-go").getAttribute("aria-expanded")).toBe(
+      "false",
+    );
+    expect(within(screen.getByTestId(GO_ROW_TEST_ID)).queryByText("Task policy")).toBeNull();
+    expect(
+      within(screen.getByTestId(KOTLIN_ROW_TEST_ID)).queryByTestId("task-lsp-progress"),
+    ).toBeNull();
+
+    expandLanguage("go");
+
+    expect(screen.getByTestId("task-lsp-language-trigger-go").getAttribute("aria-expanded")).toBe(
+      "true",
+    );
+    expect(within(screen.getByTestId(GO_ROW_TEST_ID)).getByText("Task policy")).toBeTruthy();
+    expect(
+      within(screen.getByTestId(KOTLIN_ROW_TEST_ID)).queryByTestId("task-lsp-progress"),
+    ).toBeNull();
+  });
+
+  it("filters hidden task-status languages but force-shows the current editor language", () => {
+    settings.hiddenLanguages = ["kotlin"];
+    const { unmount } = render(<TaskLspDisclosure taskId="task-1" touch={false} />);
+
+    expect(screen.queryByTestId(KOTLIN_ROW_TEST_ID)).toBeNull();
+    expect(screen.getByTestId(GO_ROW_TEST_ID)).toBeTruthy();
+    unmount();
+
+    render(
+      <TooltipProvider>
+        <TaskLspControl taskId="task-1" placement="editor-toolbar" language="kotlin" />
+      </TooltipProvider>,
+    );
+    expect(screen.getByTestId(LSP_STATUS_BUTTON_TEST_ID).getAttribute(LSP_STATE_ATTRIBUTE)).toBe(
+      "server_work",
+    );
+    fireEvent.click(screen.getByTestId(LSP_STATUS_BUTTON_TEST_ID));
+    expect(screen.getByTestId(KOTLIN_ROW_TEST_ID)).toBeTruthy();
+    expect(
+      screen.getByTestId("task-lsp-language-trigger-kotlin").getAttribute("aria-expanded"),
+    ).toBe("true");
+  });
+
+  it("keeps visibility settings discoverable when every task language is hidden", () => {
+    settings.hiddenLanguages = ["go", "kotlin"];
+
+    render(<TaskLspDisclosure taskId="task-1" touch={false} />);
+
+    expect(screen.queryByTestId(GO_ROW_TEST_ID)).toBeNull();
+    expect(screen.queryByTestId(KOTLIN_ROW_TEST_ID)).toBeNull();
+    expect(
+      screen.getByRole("link", { name: "Manage status visibility" }).getAttribute("href"),
+    ).toBe("/settings/general/editors");
   });
 });
