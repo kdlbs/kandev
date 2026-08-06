@@ -17,6 +17,12 @@ const mocks = vi.hoisted(() => {
     restart: vi.fn().mockResolvedValue(undefined),
     setPolicy: vi.fn().mockResolvedValue(undefined),
     userConfigs: { typescript: { diagnostics: true } },
+    storeState: {
+      tasks: { activeTaskId: "task-1" as string | null },
+      taskSessions: {
+        items: { "session-1": { task_id: "task-1" } } as Record<string, { task_id: string }>,
+      },
+    },
     listeners,
   };
 });
@@ -65,12 +71,7 @@ const domain = {
 };
 
 vi.mock("@/components/state-provider", () => ({
-  useAppStore: (selector: (state: unknown) => unknown) =>
-    selector({
-      tasks: { activeTaskId: TASK_ID },
-      taskSessions: { items: { [SESSION_ID]: { task_id: TASK_ID } } },
-      userSettings: { lspServerConfigs: mocks.userConfigs },
-    }),
+  useAppStore: (selector: (state: unknown) => unknown) => selector(mocks.storeState),
 }));
 vi.mock("@/hooks/domains/lsp/use-task-lsp", () => ({
   useTaskLsp: () => domain,
@@ -95,6 +96,8 @@ beforeEach(() => {
   mocks.stop.mockClear();
   mocks.restart.mockClear();
   mocks.listeners.clear();
+  mocks.storeState.tasks.activeTaskId = TASK_ID;
+  mocks.storeState.taskSessions.items = { [SESSION_ID]: { task_id: TASK_ID } };
 });
 
 afterEach(() => {
@@ -118,6 +121,19 @@ describe("task-scoped useLsp", () => {
     const view = renderHook(() => useLsp(SESSION_ID, "plaintext"));
     expect(view.result.current.lspLanguage).toBeNull();
     expect(mocks.connect).not.toHaveBeenCalled();
+  });
+
+  it("waits for the provided session mapping instead of attaching to the previous active task", () => {
+    current = snapshot("ready");
+    mocks.storeState.tasks.activeTaskId = "previous-task";
+    mocks.storeState.taskSessions.items = {};
+
+    const view = renderHook(() => useLsp(SESSION_ID, LANGUAGE));
+    expect(mocks.connect).not.toHaveBeenCalled();
+
+    mocks.storeState.taskSessions.items = { [SESSION_ID]: { task_id: TASK_ID } };
+    view.rerender();
+    expect(mocks.connect).toHaveBeenCalledWith(TASK_ID, SESSION_ID, LANGUAGE);
   });
 
   it("starts and stops through the task controller instead of local persistence", () => {

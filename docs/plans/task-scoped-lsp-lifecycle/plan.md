@@ -335,6 +335,13 @@ Completed 2026-08-05.
   cleanup hook. The coordinator now checks that no working session remains, cleans task-owned
   runtimes before REVIEW, and reports cleanup failure. The focused ordering/idempotency/partial-stop
   suite passed 20 repetitions.
+- The next exact-head review found a queued replacement Start could hold the cancellation mutex
+  while waiting for the active install slot, and that an unhydrated session could temporarily attach
+  to the previous active task in the frontend. Task-host starts now register independently in a
+  cancellation barrier, so Stop cancels both the active install and already-waiting replacements
+  without yielding the slot to them. A provided session now resolves only through its authoritative
+  session/task mapping; the active task fallback remains limited to surfaces with no session. Both
+  regressions failed first, then passed focused tests; frontend lint/typecheck also pass.
 
 ---
 

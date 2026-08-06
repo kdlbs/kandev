@@ -63,7 +63,7 @@ function taskProgress(snapshot: TaskLspLanguageSnapshot | undefined): LspProgres
 function useTaskIdForSession(sessionId: string | null): string | null {
   return useAppStore((state) => {
     if (!sessionId) return state.tasks.activeTaskId;
-    return state.taskSessions.items[sessionId]?.task_id ?? state.tasks.activeTaskId;
+    return state.taskSessions.items[sessionId]?.task_id ?? null;
   });
 }
 
