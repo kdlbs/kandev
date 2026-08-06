@@ -1,25 +1,20 @@
 "use client";
 
-import React, { useCallback, useEffect, useMemo } from "react";
-import { useTranslation } from "react-i18next";
+import React, { useCallback, useEffect } from "react";
 import { ReviewDetailPanelComponent } from "./review-detail-panel";
 import { MRDetailPanelComponent } from "@/components/gitlab/mr-detail-panel";
 import { useAppStore } from "@/components/state-provider";
 import { useSessionChangesCount } from "@/hooks/domains/session/use-session-changes-count";
-import { useSessionMessages } from "@/hooks/domains/session/use-session-messages";
 import type { ReviewSource } from "@/hooks/domains/session/use-review-sources";
 import { useEnvironmentSessionId } from "@/hooks/use-environment-session-id";
 import { useFileEditors } from "@/hooks/use-file-editors";
 import { usePanelActive } from "@/hooks/use-panel-active";
 import { t } from "@/lib/i18n";
-import { buildTodoItems } from "@/hooks/use-processed-messages";
 import { setPanelTitle } from "@/lib/layout/panel-portal-manager";
 import { useDockviewStore } from "@/lib/state/dockview-store";
 import { BrowserPanel } from "./browser-panel";
 import type { CommitDetailTarget, OpenDiffOptions } from "./changes-diff-target";
 import { ChangesPanel } from "./changes-panel";
-import { TodoIndicatorContent, resolveStatus } from "./chat/todo-indicator";
-import { useSessionTodoItems } from "./chat/use-chat-panel-state";
 import { CommitDetailPanel } from "./commit-detail-panel";
 import { FileEditorPanel } from "./file-editor-panel";
 import { FilesPanel } from "./files-panel";
@@ -30,6 +25,7 @@ import { TaskChangesPanel } from "./task-changes-panel";
 import { TaskChatPanel } from "./task-chat-panel";
 import { TaskPlanPanel } from "./task-plan-panel";
 import { TerminalPanel } from "./terminal-panel";
+import { TodosContent } from "./todos-panel-content";
 import { VscodePanel } from "./vscode-panel";
 
 export const CHAT_PANEL_FALLBACK_LABEL = "Agent";
@@ -190,30 +186,6 @@ function FilesContent() {
 function PlanContent() {
   const taskId = useAppStore((state) => state.tasks.activeTaskId);
   return <TaskPlanPanel taskId={taskId} visible />;
-}
-
-function TodosContent() {
-  const { t } = useTranslation();
-  const sessionId = useAppStore((state) => state.tasks.activeSessionId);
-  const { messages } = useSessionMessages(sessionId);
-  const messageTodos = useMemo(() => buildTodoItems(messages), [messages]);
-  const todos = useSessionTodoItems(sessionId, messageTodos);
-
-  if (todos.length === 0) {
-    return (
-      <div data-testid="todos-panel-empty-state" className="p-4 text-sm text-muted-foreground">
-        {t("chat:noTodosYet")}
-      </div>
-    );
-  }
-
-  const completed = todos.filter((todo) => resolveStatus(todo) === "completed").length;
-  const progress = Math.round((completed / todos.length) * 100);
-  return (
-    <div data-testid="todos-panel" className="p-3">
-      <TodoIndicatorContent todos={todos} completed={completed} progress={progress} />
-    </div>
-  );
 }
 
 const COMPONENT_ALIASES: Record<string, string> = {

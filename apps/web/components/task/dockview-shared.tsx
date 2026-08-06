@@ -1,7 +1,6 @@
 "use client";
 
-import React, { useCallback, useEffect, useMemo } from "react";
-import { useTranslation } from "react-i18next";
+import React, { useCallback, useEffect } from "react";
 import {
   DockviewDefaultTab,
   type IDockviewPanelProps,
@@ -12,12 +11,10 @@ import { useAppStore } from "@/components/state-provider";
 import { useFileEditors } from "@/hooks/use-file-editors";
 import { usePanelActive } from "@/hooks/use-panel-active";
 import { useSessionGitStatus } from "@/hooks/domains/session/use-session-git-status";
-import { useSessionMessages } from "@/hooks/domains/session/use-session-messages";
 import { useSessionCommits } from "@/hooks/domains/session/use-session-commits";
 import { useEnvironmentSessionId } from "@/hooks/use-environment-session-id";
 import type { ReviewSource } from "@/hooks/domains/session/use-review-sources";
 import { t } from "@/lib/i18n";
-import { buildTodoItems } from "@/hooks/use-processed-messages";
 
 // Panel components (rendered via portals, not directly by dockview)
 import { TaskChatPanel } from "./task-chat-panel";
@@ -43,8 +40,7 @@ import { ReviewDetailPanelComponent } from "./review-detail-panel";
 import { MRDetailPanelComponent } from "@/components/gitlab/mr-detail-panel";
 import { PluginTaskPanel } from "./plugin-task-panel";
 import { PluginPanelTab } from "./plugin-panel-tab";
-import { TodoIndicatorContent, resolveStatus } from "./chat/todo-indicator";
-import { useSessionTodoItems } from "./chat/use-chat-panel-state";
+import { TodosContent } from "./todos-panel-content";
 
 import { setPanelTitle, panelPortalManager } from "@/lib/layout/panel-portal-manager";
 import { getWebSocketClient } from "@/lib/ws/connection";
@@ -369,38 +365,6 @@ function FilesContent() {
 function PlanContent() {
   const taskId = useAppStore((state) => state.tasks.activeTaskId);
   return <TaskPlanPanel taskId={taskId} visible />;
-}
-
-/**
- * Renders the active session's agent-generated todo checklist as a right-
- * panel tab. Reuses TodoIndicatorContent/resolveStatus so the panel shows
- * identical rows, in the same order, as the chat status-bar TodoIndicator —
- * no duplicated status-icon/progress logic. Shows an empty state instead of
- * nothing when the active session has no todo entries yet, matching how
- * Files/Changes/Plan behave with no applicable content.
- */
-function TodosContent() {
-  const { t } = useTranslation();
-  const sessionId = useAppStore((state) => state.tasks.activeSessionId);
-  const { messages } = useSessionMessages(sessionId);
-  const messageTodos = useMemo(() => buildTodoItems(messages), [messages]);
-  const todos = useSessionTodoItems(sessionId, messageTodos);
-
-  if (todos.length === 0) {
-    return (
-      <div data-testid="todos-panel-empty-state" className="p-4 text-sm text-muted-foreground">
-        {t("chat:noTodosYet")}
-      </div>
-    );
-  }
-
-  const completed = todos.filter((todo) => resolveStatus(todo) === "completed").length;
-  const progress = Math.round((completed / todos.length) * 100);
-  return (
-    <div data-testid="todos-panel" className="p-3">
-      <TodoIndicatorContent todos={todos} completed={completed} progress={progress} />
-    </div>
-  );
 }
 
 // ---------------------------------------------------------------------------
