@@ -11,6 +11,7 @@ import {
   IconGitPullRequest,
   IconLoader2,
 } from "@tabler/icons-react";
+import { useTranslation } from "react-i18next";
 import { Button } from "@kandev/ui/button";
 import {
   DropdownMenu,
@@ -58,7 +59,8 @@ type ActionKey = "commit" | "push" | "pr" | "pull" | "rebase" | "merge" | "force
 
 type ActionDef = {
   key: ActionKey;
-  label: string;
+  /** Catalog key, resolved at render: `t()` here would freeze at the boot locale. */
+  labelKey: string;
   icon: ReactNode;
   /** Returns true when this action should be disabled for a given repo. */
   disabledFor: (status: PerRepoStatus | undefined) => boolean;
@@ -68,49 +70,49 @@ type ActionDef = {
 const ACTION_DEFS: ActionDef[] = [
   {
     key: "commit",
-    label: "Commit",
+    labelKey: "integrations:commit",
     icon: <IconGitCommit className={ICON_CLASS} />,
     disabledFor: (s) => !((s?.hasStaged ?? false) || (s?.hasUnstaged ?? false)),
     invoke: (repo, cb) => cb.onCommit(repo),
   },
   {
     key: "push",
-    label: "Push",
+    labelKey: "integrations:push",
     icon: <IconCloudUpload className={ICON_CLASS} />,
     disabledFor: (s) => (s?.ahead ?? 0) === 0,
     invoke: (repo, cb) => cb.onPush(false, repo),
   },
   {
     key: "pr",
-    label: "Create PR",
+    labelKey: "integrations:createPr",
     icon: <IconGitPullRequest className={ICON_CLASS} />,
     disabledFor: () => false,
     invoke: (repo, cb) => cb.onPR(repo),
   },
   {
     key: "pull",
-    label: "Pull",
+    labelKey: "integrations:pull",
     icon: <IconCloudDownload className={ICON_CLASS} />,
     disabledFor: () => false,
     invoke: (repo, cb) => cb.onPull(repo),
   },
   {
     key: "rebase",
-    label: "Rebase",
+    labelKey: "integrations:rebase",
     icon: <IconGitCherryPick className={ICON_CLASS} />,
     disabledFor: () => false,
     invoke: (repo, cb) => cb.onRebase(repo),
   },
   {
     key: "merge",
-    label: "Merge",
+    labelKey: "integrations:merge",
     icon: <IconGitMerge className={ICON_CLASS} />,
     disabledFor: () => false,
     invoke: (repo, cb) => cb.onMerge(repo),
   },
   {
     key: "force-push",
-    label: "Force Push",
+    labelKey: "integrations:forcePush",
     icon: <IconAlertTriangle className={ICON_CLASS} />,
     disabledFor: (s) => (s?.ahead ?? 0) === 0,
     invoke: (repo, cb) => cb.onPush(true, repo),
@@ -138,19 +140,20 @@ function PerRepoActionSub({
   repoDisplayName: (repositoryName: string) => string | undefined;
   callbacks: PerRepoCallbacks;
 }) {
+  const { t } = useTranslation();
   const statusByName = new Map(perRepoStatus.map((s) => [s.repository_name, s]));
   return (
     <DropdownMenuSub>
       <DropdownMenuSubTrigger className={ITEM_CLASS} disabled={disabled}>
         {action.icon}
-        <span className="flex-1">{action.label}</span>
+        <span className="flex-1">{t(action.labelKey)}</span>
       </DropdownMenuSubTrigger>
       <DropdownMenuSubContent className="w-52">
         {repoNames.map((repo) => {
           const status = statusByName.get(repo);
           const ahead = status?.ahead ?? 0;
           const behind = status?.behind ?? 0;
-          const label = repoDisplayName(repo) || repo || "Repository";
+          const label = repoDisplayName(repo) || repo || t("integrations:repository");
           return (
             <DropdownMenuItem
               key={repo || "__no_repo__"}
@@ -194,10 +197,11 @@ function MultiRepoVcsDropdown({
   repoDisplayName: (repositoryName: string) => string | undefined;
   callbacks: PerRepoCallbacks;
 }) {
+  const { t } = useTranslation();
   return (
     <DropdownMenuContent align="end" className="w-56">
       <DropdownMenuLabel className="text-[10px] text-muted-foreground/70 uppercase tracking-wide">
-        Pick action, then repo
+        {t("integrations:pickActionThenRepo")}
       </DropdownMenuLabel>
       {ACTION_DEFS.map((action, idx) => (
         <div key={action.key}>
@@ -221,10 +225,16 @@ function MultiRepoVcsDropdown({
 }
 
 /** Inline footnote under Rebase/Merge showing the target branch. */
+// `type` stays a discriminant and never reaches the screen: rendering the union
+// member directly would make "onto"/"from" untranslatable and couple the copy to
+// the logic. Each branch resolves a whole message with the ref interpolated.
 function RebaseMergeFootnote({ target, type }: { target: string; type: "onto" | "from" }) {
+  const { t } = useTranslation();
   return (
     <div className="px-3 py-0.5 text-[10px] text-muted-foreground/60">
-      {type} {target}
+      {type === "onto"
+        ? t("integrations:ontoBranch", { branch: target })
+        : t("integrations:fromBranch", { branch: target })}
     </div>
   );
 }
@@ -256,6 +266,7 @@ export function MultiRepoVcsButton({
   repoDisplayName: (repositoryName: string) => string | undefined;
   callbacks: PerRepoCallbacks;
 }) {
+  const { t } = useTranslation();
   return (
     <Tooltip>
       <TooltipTrigger asChild>
@@ -294,7 +305,9 @@ export function MultiRepoVcsButton({
           </DropdownMenu>
         </span>
       </TooltipTrigger>
-      <TooltipContent>Pick a repository for {primaryButtonConfig.label}</TooltipContent>
+      <TooltipContent>
+        {t("integrations:pickARepositoryForAction", { action: primaryButtonConfig.label })}
+      </TooltipContent>
     </Tooltip>
   );
 }

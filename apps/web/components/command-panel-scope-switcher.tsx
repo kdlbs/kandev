@@ -6,6 +6,7 @@ import type { ConfigurableShortcutId } from "@/lib/keyboard/shortcut-overrides";
 import { getShortcut } from "@/lib/keyboard/shortcut-overrides";
 import { formatShortcut } from "@/lib/keyboard/utils";
 import { cn } from "@/lib/utils";
+import { useTranslation } from "react-i18next";
 
 export type CommandPanelScopeMode = "commands" | "search-files" | "search-content";
 
@@ -46,12 +47,13 @@ export function CommandPanelScopeSwitcher({
   mode: CommandPanelScopeMode;
   onScopeChange: (mode: CommandPanelScopeMode) => void;
 }) {
+  const { t } = useTranslation();
   const keyboardShortcuts = useAppStore((state) => state.userSettings.keyboardShortcuts);
 
   return (
     <div
       role="tablist"
-      aria-label="Command palette mode"
+      aria-label={t("common:commandPaletteMode")}
       className="mr-1 flex h-10 shrink-0 items-stretch gap-0.5"
     >
       {SCOPE_OPTIONS.map((scope) => {
