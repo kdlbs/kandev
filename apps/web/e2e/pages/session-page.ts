@@ -170,17 +170,23 @@ export class SessionPage {
   /**
    * Wait for the chat to be idle (input placeholder visible, agent not busy).
    *
+   * A fresh task can still miss the first persisted session-state transition
+   * while the page hydrates under CI load. Re-drive SSR hydration periodically
+   * so a stale busy state does not consume the whole idle wait budget.
+   *
    * After a backend restart, auto-resume can briefly surface the recovery
    * prompt ("Environment setup failed"); click through it when visible.
    */
   async waitForChatIdle(opts: { timeout?: number; requireEditable?: boolean } = {}) {
     const softTotalTimeout = opts.timeout ?? 45_000;
+    const attemptTimeout = Math.min(15_000, Math.max(5_000, Math.floor(softTotalTimeout / 3)));
     const pollSlice = 1_500;
     const idle = this.anyIdleInput();
     const editor = this.activeChat().locator(".tiptap.ProseMirror:visible").first();
     const isReady = async () =>
       (await idle.isVisible()) && (!opts.requireEditable || (await editor.isEditable()));
     const start = Date.now();
+    let lastReloadAt = start;
 
     while (Date.now() - start < softTotalTimeout) {
       if (await isReady()) return;
@@ -194,7 +200,17 @@ export class SessionPage {
         continue;
       }
 
-      const remaining = Math.max(1, softTotalTimeout - (Date.now() - start));
+      const now = Date.now();
+      const remaining = Math.max(1, softTotalTimeout - (now - start));
+      if (now - lastReloadAt >= attemptTimeout && remaining > pollSlice) {
+        lastReloadAt = now;
+        await this.page.reload();
+        await this.activeChat()
+          .waitFor({ state: "visible", timeout: Math.min(attemptTimeout, remaining) })
+          .catch(() => undefined);
+        continue;
+      }
+
       const timeout = Math.min(pollSlice, remaining);
       if (opts.requireEditable) {
         await expect
@@ -206,12 +222,13 @@ export class SessionPage {
       }
     }
 
-    // Final bounded check: still throws on a genuinely stuck session.
+    // Final bounded check: still throws on a genuinely stuck session, but gives
+    // the last hydration attempt a full attemptTimeout slice to land.
     if (opts.requireEditable) {
-      await expect.poll(isReady, { timeout: pollSlice }).toBe(true);
+      await expect.poll(isReady, { timeout: attemptTimeout }).toBe(true);
       return;
     }
-    await idle.waitFor({ state: "visible", timeout: pollSlice });
+    await idle.waitFor({ state: "visible", timeout: attemptTimeout });
   }
 
   /** Wait for the passthrough terminal to be visible (for TUI/passthrough sessions). */
