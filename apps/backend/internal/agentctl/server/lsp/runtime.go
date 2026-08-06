@@ -16,7 +16,6 @@ import (
 )
 
 const (
-	initializeTimeout     = 2 * time.Minute
 	gracefulStopTimeout   = 3 * time.Second
 	processCleanupTimeout = 5 * time.Second
 )
@@ -48,6 +47,7 @@ type runtime struct {
 	done    chan struct{}
 	hub     *hub
 
+	initialized           atomic.Bool
 	stopping              atomic.Bool
 	releaseBackgroundWork func()
 }
@@ -91,12 +91,10 @@ func (r *runtime) run() (runErr error) {
 		snapshot.Phase = sharedlsp.PhaseInitializing
 		snapshot.InitializeStartedAt = &now
 	})
-	initializeCtx, cancel := context.WithTimeout(r.ctx, initializeTimeout)
-	defer cancel()
 	var result struct {
 		Capabilities json.RawMessage `json:"capabilities"`
 	}
-	if err := protocolPeer.Call(initializeCtx, "initialize", r.initializeParams(), &result); err != nil {
+	if err := protocolPeer.Call(r.initializeRequestContext(), "initialize", r.initializeParams(), &result); err != nil {
 		return fmt.Errorf("initialize language server: %w", err)
 	}
 	r.manager.publishForGeneration(r.language, r.generation, func(snapshot *Snapshot) {
@@ -105,6 +103,7 @@ func (r *runtime) run() (runErr error) {
 	if err := protocolPeer.Notify(methodInitialized, map[string]any{}); err != nil {
 		return fmt.Errorf("notify initialized: %w", err)
 	}
+	r.initialized.Store(true)
 	configuration := r.configurationSnapshot()
 	if len(configuration) != 0 {
 		if err := protocolPeer.Notify("workspace/didChangeConfiguration", map[string]any{
@@ -130,6 +129,10 @@ func (r *runtime) run() (runErr error) {
 	case <-r.ctx.Done():
 		return r.ctx.Err()
 	}
+}
+
+func (r *runtime) initializeRequestContext() context.Context {
+	return r.ctx
 }
 
 func (r *runtime) initializeParams() map[string]any {
@@ -271,6 +274,10 @@ func (r *runtime) requestShutdown(parent context.Context) {
 	protocolPeer := r.peer
 	r.peerMu.RUnlock()
 	if protocolPeer == nil {
+		return
+	}
+	if !r.initialized.Load() {
+		protocolPeer.CloseStreams()
 		return
 	}
 	shutdownCtx := parent

@@ -118,3 +118,11 @@ generation remains in `error/replacement_cleanup_failed`, the requested generati
 until the old process tree is proven gone, and retrying that same generation performs cleanup again
 without overlap. Task-host mutation clients now preserve the generation-scoped failure snapshot.
 The focused manager/client tests and the task-host race suite pass.
+
+A follow-up Codex review on 2026-08-06 found that task-host `initialize` still carried a two-minute
+hard deadline despite the accepted spec. Initialization now uses the owned runtime lifetime context
+without an automatic deadline and follows only explicit runtime/task teardown cancellation. Stop
+during an unanswered initialize skips the protocol shutdown request that the server cannot yet
+service, closes the streams, and reaps the process. Focused no-deadline and stop-during-initialize
+regressions failed before their changes and pass afterward; 20 repetitions, the full task-host race
+suite, and backend lint pass.
