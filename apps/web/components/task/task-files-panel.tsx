@@ -70,6 +70,7 @@ const TaskFilesPanel = memo(function TaskFilesPanel({
   onOpenFile,
   activeFilePath,
 }: TaskFilesPanelProps) {
+  const { t } = useTranslation();
   const [addSourcesOpen, setAddSourcesOpen] = useState(false);
   const [addSourcesOpener, setAddSourcesOpener] = useState<HTMLElement | null>(null);
   const addSourcesButtonRef = useRef<HTMLButtonElement>(null);
@@ -101,7 +102,7 @@ const TaskFilesPanel = memo(function TaskFilesPanel({
   const hasRepository = Boolean(activeTask?.repositoryId || activeTask?.repositories?.length);
   const resolvedAddSourcesDisabledReason = hasRepository
     ? addSourcesDisabledReason
-    : "This task needs a repository before sources can be added.";
+    : t("task:taskNeedsRepositoryForSources");
   if (isArchived) return <ArchivedPanelPlaceholder />;
   return (
     <SessionPanel borderSide="left">

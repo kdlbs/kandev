@@ -265,16 +265,16 @@ function formatExecutorType(type: string): string {
   switch (type) {
     case "local_pc":
     case "worktree":
-      return "Local (worktree)";
+      return t("task:executorTypeLocalWorktree");
     case "local_docker":
-      return "Local Docker";
+      return t("task:executorTypeLocalDocker");
     case "sprites":
-      return "Sprites sandbox";
+      return t("task:executorTypeSpritesSandbox");
     case "remote_docker":
-      return "Remote Docker";
+      return t("task:executorTypeRemoteDocker");
     case "ssh":
       return "SSH";
     default:
-      return type || "Unknown executor";
+      return type || t("task:executorTypeUnknown");
   }
 }

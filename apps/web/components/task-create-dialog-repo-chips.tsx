@@ -13,6 +13,7 @@ import { WorkspaceRepoChips } from "@/components/task-create-dialog-workspace-re
 import { CreateLocalRepositorySurface } from "@/components/create-local-repository-surface";
 import type { DirectLocalExecutorSelection } from "@/components/task-create-dialog-handlers";
 import { useTranslation } from "react-i18next";
+import { t } from "@/lib/i18n";
 
 type RepoChipsRowProps = {
   fs: DialogFormState;
@@ -296,6 +297,6 @@ function FreshBranchToggle({
 
 function computeAddHint(canAddMore: boolean, workspaceRepoCount: number): string | undefined {
   if (canAddMore) return undefined;
-  if (workspaceRepoCount === 0) return "No repositories available in this workspace";
-  return "All workspace repositories are already added";
+  if (workspaceRepoCount === 0) return t("task:noRepositoriesAvailableInWorkspace");
+  return t("task:allWorkspaceRepositoriesAdded");
 }

@@ -29,6 +29,7 @@ import { useSessionPendingInput, type PendingInput } from "@/hooks/use-task-pend
 import { buildAgentLabelsById, resolveAgentLabelFor, sortSessions } from "./session-sort";
 import { resolveComposerWorkspaceId } from "./chat/composer-workspace";
 import { useTranslation } from "react-i18next";
+import { t } from "@/lib/i18n";
 
 type SessionStatus = "running" | "waiting_input" | "complete" | "failed" | "cancelled";
 
@@ -50,12 +51,14 @@ function formatDuration(startedAt: string, isRunning: boolean, now: number): str
   return `${seconds}s`;
 }
 
-const STATUS_LABELS: Record<SessionStatus, string> = {
-  running: "Running",
-  complete: "Complete",
-  waiting_input: "Waiting for input",
-  failed: "Failed",
-  cancelled: "Cancelled",
+/** Catalog keys, not copy — the map is module scope, so the value must stay a
+ * key and resolve at call time (`sessionStatusTooltip`). */
+const STATUS_LABEL_KEYS: Record<SessionStatus, string> = {
+  running: "task:sessionStatusRunning",
+  complete: "task:sessionStatusComplete",
+  waiting_input: "task:sessionStatusWaitingForInput",
+  failed: "task:sessionStatusFailed",
+  cancelled: "task:sessionStatusCancelled",
 };
 
 // The session-icon tooltip reflects the message-derived "needs me" reading
@@ -68,10 +71,11 @@ export function sessionStatusTooltip(
   foregroundActivity?: ForegroundActivity | null,
 ): string {
   const canRequestInput = state === "RUNNING" || state === "WAITING_FOR_INPUT";
-  if (canRequestInput && pending.permission) return "Permission requested";
-  if (canRequestInput && pending.clarification) return "Waiting for input";
-  if (canRequestInput && foregroundActivity === "background") return "Background running";
-  return STATUS_LABELS[mapSessionStatus(state)];
+  if (canRequestInput && pending.permission) return t("task:sessionStatusPermissionRequested");
+  if (canRequestInput && pending.clarification) return t("task:sessionStatusWaitingForInput");
+  if (canRequestInput && foregroundActivity === "background")
+    return t("task:sessionStatusBackgroundRunning");
+  return t(STATUS_LABEL_KEYS[mapSessionStatus(state)]);
 }
 
 function mapSessionStatus(state: TaskSessionState): SessionStatus {

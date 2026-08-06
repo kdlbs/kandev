@@ -24,6 +24,7 @@ import type { AppState } from "@/lib/state/store";
 import { generateUUID } from "@/lib/utils";
 import { resolveComposerWorkspaceId } from "./chat/composer-workspace";
 import { useTranslation } from "react-i18next";
+import { t } from "@/lib/i18n";
 
 const PLAN_CONTEXT_PATH = "plan:context";
 
@@ -251,7 +252,7 @@ async function requestPassthroughMessage({
   attachments?: MessageAttachment[];
 }) {
   const client = getWebSocketClient();
-  if (!client) throw new Error("WebSocket client not available");
+  if (!client) throw new Error(t("task:websocketClientNotAvailable"));
   const hasAttachments = !!(attachments && attachments.length > 0);
   await client.request(
     "message.add",
@@ -318,7 +319,7 @@ export function useSendPassthroughMessage({
     }: ChatSubmitPayload) => {
       if (!taskId || !sessionId) {
         toast({ title: t("task:sessionNotReady"), variant: "error" });
-        throw new Error("Session not ready");
+        throw new Error(t("task:sessionNotReady"));
       }
       try {
         const message = await buildPassthroughFinalMessage({

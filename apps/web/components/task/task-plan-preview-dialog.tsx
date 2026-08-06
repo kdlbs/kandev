@@ -16,6 +16,7 @@ import { Badge } from "@kandev/ui/badge";
 import type { TaskPlanRevision } from "@/lib/types/http";
 import { formatPreciseTime } from "@/lib/utils";
 import { useTranslation } from "react-i18next";
+import { t } from "@/lib/i18n";
 
 const PlanReadOnlyMarkdown = dynamic(
   () =>
@@ -153,7 +154,7 @@ function PreviewBody({
       })
       .catch((err) => {
         if (!cancelled) {
-          setError(err instanceof Error ? err.message : "Failed to load revision");
+          setError(err instanceof Error ? err.message : t("task:failedToLoadRevision"));
         }
       });
     return () => {

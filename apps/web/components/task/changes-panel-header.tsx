@@ -32,6 +32,7 @@ import { BaseBranchPicker } from "./base-branch-picker";
 import type { GitCredentialDisplay } from "./changes-git-credential-display";
 import { useTouchDrawer } from "@/hooks/use-compact-task-chrome";
 import { useTranslation } from "react-i18next";
+import { PerRepoPullMenu } from "./changes-panel-per-repo-menu";
 
 export type PerRepoStatus = {
   repository_name: string;
@@ -63,8 +64,6 @@ type RenameBranchResult = {
  * per named repo with that repo's task base_branch (or the workspace-level
  * fallback when none was recorded).
  */
-import { PerRepoPullMenu } from "./changes-panel-per-repo-menu";
-
 function buildBranchRows(
   perRepoStatus: PerRepoStatus[],
   baseBranchByRepo: Record<string, string> | undefined,
@@ -104,12 +103,12 @@ function RenameBranchButton({
     try {
       const result = await onRenameBranch(trimmedBranchName, repositoryName);
       if (!result.success) {
-        setError(result.error || "Failed to rename branch");
+        setError(result.error || t("task:failedToRenameBranch"));
         return;
       }
       setOpen(false);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to rename branch");
+      setError(err instanceof Error ? err.message : t("task:failedToRenameBranch"));
     }
   };
   const openDialog = () => {
@@ -233,8 +232,8 @@ function BranchHoverCard({
   const usesTouchDrawer = useTouchDrawer();
   const [open, setOpen] = useState(false);
   const isMulti = rows && rows.length > 0;
-  const headerLabel = isMulti ? "Your branches:" : "Your code lives in:";
-  const trailerLabel = "comparing against:";
+  const headerLabel = isMulti ? t("task:yourBranchesLabel") : t("task:yourCodeLivesInLabel");
+  const trailerLabel = t("task:comparingAgainstLabel");
   const trigger = (
     <button
       type="button"
@@ -452,8 +451,8 @@ function ChangesPanelWalkthroughButton({
 }) {
   const { t } = useTranslation();
   const tooltip = requestWalkthroughDisabled
-    ? "Loading changed files..."
-    : "Walk me through these changes";
+    ? t("task:loadingChangedFiles")
+    : t("task:walkMeThroughTheseChanges");
   return (
     <Tooltip>
       <TooltipTrigger asChild className="order-first @[350px]/changes-panel:order-none">

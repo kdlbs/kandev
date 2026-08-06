@@ -194,7 +194,8 @@ function DebugOverlayToggle({
   showDebugOverlay?: boolean;
   onToggleDebugOverlay: () => void;
 }) {
-  const label = showDebugOverlay ? "Hide Debug Info" : "Show Debug Info";
+  const { t } = useTranslation();
+  const label = showDebugOverlay ? t("task:hideDebugInfo") : t("task:showDebugInfo");
   return (
     <Tooltip>
       <TooltipTrigger asChild>
@@ -273,9 +274,12 @@ function GitHubIssueTopbarButton({
   issueUrl?: string;
   issueNumber?: number;
 }) {
+  const { t } = useTranslation();
   if (!issueUrl) return null;
-  const label = issueNumber ? `#${issueNumber}` : "Issue";
-  const tooltip = issueNumber ? `GitHub issue #${issueNumber}` : "GitHub issue";
+  const label = issueNumber ? `#${issueNumber}` : t("task:issue");
+  const tooltip = issueNumber
+    ? t("task:githubIssueNumbered", { number: issueNumber })
+    : t("task:githubIssue2");
   return (
     <Tooltip>
       <TooltipTrigger asChild>

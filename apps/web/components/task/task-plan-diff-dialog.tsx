@@ -16,6 +16,7 @@ import { cn } from "@/lib/utils";
 import type { TaskPlanRevision } from "@/lib/types/http";
 import { lineDiff, diffSummary, type DiffLine, type DiffLineKind } from "./task-plan-diff";
 import { useTranslation } from "react-i18next";
+import { t } from "@/lib/i18n";
 
 type Props = {
   /** Revision pair in arbitrary user-pick order; the dialog re-orders them by
@@ -54,7 +55,9 @@ export function PlanRevisionDiffDialog({
   const open = before !== null && after !== null;
   const sameRevision = before !== null && after !== null && before.id === after.id;
   const title =
-    before && after ? `Compare v${before.revision_number} → v${after.revision_number}` : "Compare";
+    before && after
+      ? t("task:compareRevisions", { before: before.revision_number, after: after.revision_number })
+      : t("task:compare");
 
   return (
     <Dialog
@@ -438,7 +441,7 @@ function useDiffContent(
       })
       .catch((err) => {
         if (cancelled) return;
-        setError(err instanceof Error ? err.message : "Failed to load revision content");
+        setError(err instanceof Error ? err.message : t("task:failedToLoadRevisionContent"));
       });
     return () => {
       cancelled = true;

@@ -154,7 +154,7 @@ function WorkspaceActionsMenu({
   );
   const disabledReason =
     addSourcesDisabledReason ??
-    (onAddSources ? undefined : "This task needs a repository before sources can be added.");
+    (onAddSources ? undefined : t("task:taskNeedsRepositoryForSources"));
 
   return (
     <DropdownMenu>

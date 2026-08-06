@@ -19,6 +19,7 @@ import { AgentLogo } from "@/components/agent-logo";
 import { getCapabilityWarning } from "@/lib/capability-warning";
 import { buildBranchKeywords } from "./task-create-dialog-pill";
 import { useTranslation } from "react-i18next";
+import { t } from "@/lib/i18n";
 
 type OptionItem = {
   value: string;
@@ -196,15 +197,15 @@ export function computeExecutorHint(
   const selectedExecutor = executors.find((e: Executor) => e.id === executorId);
   if (selectedExecutor?.type === "worktree") {
     if (repoCount > 1) {
-      return "A git worktree will be created for each repository in a parent folder. The agent runs in that parent folder so it can see every worktree side by side.";
+      return t("task:executorHintWorktreeMulti");
     }
-    return "A git worktree will be created from the base branch.";
+    return t("task:executorHintWorktreeSingle");
   }
   if (selectedExecutor?.type === "local_docker" || selectedExecutor?.type === "remote_docker") {
-    return "A Docker container will be created from the selected base branch and checked out on a task branch.";
+    return t("task:executorHintDocker");
   }
   if (selectedExecutor?.type === "local" || selectedExecutor?.type === "local_pc")
-    return "The agent will run directly on the repository.";
+    return t("task:executorHintLocal");
   return null;
 }
 

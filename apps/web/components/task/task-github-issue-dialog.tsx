@@ -17,6 +17,10 @@ import { linkTaskIssue, unlinkTaskIssue } from "@/lib/api/domains/github-api";
 import type { Repository } from "@/lib/types/http";
 import { useTranslation } from "react-i18next";
 
+/** URL shape the user types verbatim — protocol, not copy. Passed into the
+ * placeholder message as an interpolation value so it survives translation. */
+const GITHUB_ISSUE_URL_EXAMPLE = "github.com/owner/repo/issues/1470";
+
 type TaskIssue = {
   id: string;
   title: string;
@@ -85,8 +89,8 @@ function TaskGitHubIssueFields({
 }: DialogFieldsProps) {
   const { t } = useTranslation();
   const placeholder = inferredRepo
-    ? t("task:githubIssueRefPlaceholder")
-    : "github.com/owner/repo/issues/1470";
+    ? t("task:githubIssueRefPlaceholder", { example: GITHUB_ISSUE_URL_EXAMPLE })
+    : GITHUB_ISSUE_URL_EXAMPLE;
   return (
     <div className="space-y-2">
       <Label htmlFor="task-github-issue-input">{t("task:issue")}</Label>
@@ -147,7 +151,7 @@ function TaskGitHubIssueActions({
           disabled={submitting}
           data-testid="task-github-issue-submit"
         >
-          {submitting ? t("task:saving2") : t("common:save")}
+          {submitting ? t("task:saving") : t("common:save")}
         </Button>
       </div>
     </DialogFooter>
@@ -169,7 +173,7 @@ export function TaskGitHubIssueDialog({
   if (task.issueNumber) {
     currentLabel = `#${task.issueNumber}`;
   } else if (task.issueUrl) {
-    currentLabel = "Linked issue";
+    currentLabel = t("task:linkedIssue");
   }
   const githubRepos = useMemo(() => githubReposForTask(task, repositories), [task, repositories]);
   const inferredRepo = githubRepos.length === 1 ? githubRepos[0] : null;
@@ -183,7 +187,7 @@ export function TaskGitHubIssueDialog({
 
   const submit = async () => {
     if (!input.trim()) {
-      setError("Enter a GitHub issue URL or number.");
+      setError(t("task:enterGithubIssueUrlOrNumber"));
       return;
     }
     setSubmitting(true);
@@ -193,7 +197,7 @@ export function TaskGitHubIssueDialog({
       toast({ description: t("task:githubIssueLinked"), variant: "success" });
       onOpenChange(false);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to link GitHub issue.");
+      setError(err instanceof Error ? err.message : t("task:failedToLinkGithubIssue"));
     } finally {
       setSubmitting(false);
     }
@@ -207,7 +211,7 @@ export function TaskGitHubIssueDialog({
       toast({ description: t("task:githubIssueUnlinked"), variant: "success" });
       onOpenChange(false);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to unlink GitHub issue.");
+      setError(err instanceof Error ? err.message : t("task:failedToUnlinkGithubIssue"));
     } finally {
       setSubmitting(false);
     }

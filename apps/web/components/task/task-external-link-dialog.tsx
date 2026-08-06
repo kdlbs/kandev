@@ -43,13 +43,17 @@ type TaskExternalLinkDialogProps = {
   workspaceId: string;
 };
 
+/** Copy fields hold CATALOG KEYS, not English: `PROVIDERS` is a module-scope
+ * table, so a resolved string would freeze at the boot locale (and
+ * `i18next/no-literal-string` cannot see it). Each is resolved with `t()` at its
+ * use site. */
 type ProviderConfig = {
-  title: string;
-  description: string;
-  inputLabel: string;
-  placeholder: string;
-  validationHint: string;
-  successLabel: string;
+  titleKey: string;
+  descriptionKey: string;
+  inputLabelKey: string;
+  placeholderKey: string;
+  validationHintKey: string;
+  successLabelKey: string;
   extractKey: (raw: string) => string | null;
   fetch: (key: string, workspaceId: string, instanceId?: string) => Promise<unknown>;
   resolveLinkedKey?: (requestedKey: string, result: unknown) => string;
@@ -74,32 +78,32 @@ function isSentryIssue(result: unknown): result is SentryIssue {
 
 const PROVIDERS: Record<ExternalLinkProvider, ProviderConfig> = {
   jira: {
-    title: "Link Jira ticket",
-    description: "Use a Jira ticket key or URL for this task.",
-    inputLabel: "Ticket",
-    placeholder: "PROJ-123 or paste ticket URL",
-    validationHint: "Paste a Jira ticket URL or key (PROJ-123).",
-    successLabel: "Jira ticket linked",
+    titleKey: "task:linkJiraTicket",
+    descriptionKey: "task:linkJiraTicketDescription",
+    inputLabelKey: "task:ticket",
+    placeholderKey: "task:jiraTicketPlaceholder",
+    validationHintKey: "task:jiraTicketValidationHint",
+    successLabelKey: "task:jiraTicketLinked",
     extractKey: (raw) => raw.toUpperCase().match(JIRA_KEY_RE)?.[0] ?? null,
     fetch: (key, workspaceId) => getJiraTicket(key, { workspaceId }),
   },
   linear: {
-    title: "Link Linear issue",
-    description: "Use a Linear issue identifier or URL for this task.",
-    inputLabel: "Issue",
-    placeholder: "ENG-123 or paste issue URL",
-    validationHint: "Paste a Linear issue URL or identifier (ENG-123).",
-    successLabel: "Linear issue linked",
+    titleKey: "task:linkLinearIssue",
+    descriptionKey: "task:linkLinearIssueDescription",
+    inputLabelKey: "task:issue",
+    placeholderKey: "task:linearIssuePlaceholder",
+    validationHintKey: "task:linearIssueValidationHint",
+    successLabelKey: "task:linearIssueLinked",
     extractKey: (raw) => raw.toUpperCase().match(LINEAR_KEY_RE)?.[0] ?? null,
     fetch: (key, workspaceId) => getLinearIssue(key, { workspaceId }),
   },
   sentry: {
-    title: "Link Sentry issue",
-    description: "Use a Sentry short ID or URL for this task.",
-    inputLabel: "Issue",
-    placeholder: "PROJ-123 or paste issue URL",
-    validationHint: "Paste a Sentry issue URL or short ID (PROJ-123).",
-    successLabel: "Sentry issue linked",
+    titleKey: "task:linkSentryIssue",
+    descriptionKey: "task:linkSentryIssueDescription",
+    inputLabelKey: "task:issue",
+    placeholderKey: "task:sentryIssuePlaceholder",
+    validationHintKey: "task:sentryIssueValidationHint",
+    successLabelKey: "task:sentryIssueLinked",
     extractKey: extractSentryIssueKey,
     fetch: (key, workspaceId, instanceId) => getSentryIssue(workspaceId, instanceId ?? "", key),
     resolveLinkedKey: (requestedKey, result) =>
@@ -185,6 +189,7 @@ function useExternalLinkForm(
   open: boolean,
   onOpenChange: (open: boolean) => void,
 ) {
+  const { t } = useTranslation();
   const { toast } = useToast();
   const store = useAppStoreApi();
   const [input, setInput] = useState("");
@@ -203,11 +208,11 @@ function useExternalLinkForm(
   const submit = async () => {
     const key = config.extractKey(input);
     if (!key) {
-      setError(config.validationHint);
+      setError(t(config.validationHintKey));
       return;
     }
     if (config.requiresInstance && !instanceId) {
-      setError("Select a Sentry instance to link against.");
+      setError(t("task:selectSentryInstanceToLink"));
       return;
     }
 
@@ -225,10 +230,14 @@ function useExternalLinkForm(
       await updateTask(task.id, {
         title: buildLinkedIssueTitle(latestTask?.title ?? task.title, linkedKey),
       });
-      toast({ description: config.successLabel, variant: "success" });
+      toast({ description: t(config.successLabelKey), variant: "success" });
       onOpenChange(false);
     } catch (err) {
-      setError(err instanceof Error ? err.message : `Failed to link ${config.inputLabel}.`);
+      setError(
+        err instanceof Error
+          ? err.message
+          : t("task:failedToLinkTarget", { target: t(config.inputLabelKey) }),
+      );
     } finally {
       setSubmitting(false);
     }
@@ -253,8 +262,8 @@ export function TaskExternalLinkDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="w-[calc(100vw-2rem)] sm:max-w-lg">
         <DialogHeader>
-          <DialogTitle>{config.title}</DialogTitle>
-          <DialogDescription>{config.description}</DialogDescription>
+          <DialogTitle>{t(config.titleKey)}</DialogTitle>
+          <DialogDescription>{t(config.descriptionKey)}</DialogDescription>
         </DialogHeader>
         {provider === "sentry" && (
           <SentryLinkInstanceField
@@ -264,7 +273,7 @@ export function TaskExternalLinkDialog({
           />
         )}
         <div className="space-y-2">
-          <Label htmlFor="task-external-link-input">{config.inputLabel}</Label>
+          <Label htmlFor="task-external-link-input">{t(config.inputLabelKey)}</Label>
           <Input
             id="task-external-link-input"
             data-testid="task-external-link-input"
@@ -273,7 +282,7 @@ export function TaskExternalLinkDialog({
               setInput(event.target.value);
               if (error) setError(null);
             }}
-            placeholder={config.placeholder}
+            placeholder={t(config.placeholderKey)}
             disabled={submitting}
           />
           {error && (
@@ -300,7 +309,7 @@ export function TaskExternalLinkDialog({
             data-dialog-default-action
             data-testid="task-external-link-submit"
           >
-            {submitting ? t("task:saving2") : t("common:save")}
+            {submitting ? t("task:saving") : t("common:save")}
           </Button>
         </DialogFooter>
       </DialogContent>

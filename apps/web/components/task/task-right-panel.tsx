@@ -27,6 +27,7 @@ import {
 import type { RepositoryScript } from "@/lib/types/http";
 import type { Terminal } from "@/hooks/domains/session/use-terminals";
 import { useTranslation } from "react-i18next";
+import { t } from "@/lib/i18n";
 
 type TaskRightPanelProps = {
   topPanel: ReactNode;
@@ -38,9 +39,14 @@ type TaskRightPanelProps = {
 
 const DEFAULT_RIGHT_LAYOUT: Record<string, number> = { top: 55, bottom: 45 };
 
+/** Typed verbatim by the user and compared with `===`, so it must never be
+ * translated. Passed into the prompt copy as an interpolation value so the
+ * sentence can be localized while the token itself survives every locale. */
+const DESTROY_TOKEN = "destroy";
+
 function pickCurrentRenameValue(terminal: Terminal): string {
   if (terminal.customName && terminal.customName !== "") return terminal.customName;
-  if (terminal.seq) return `Terminal ${terminal.seq}`;
+  if (terminal.seq) return t("task:terminalWithSeq", { seq: terminal.seq });
   return terminal.label;
 }
 
@@ -149,10 +155,13 @@ function useRightPanelTabs({
       // promotes this to a real shadcn ContextMenu, but window.prompt
       // ships the renameable-terminal requirement today.
       const current = pickCurrentRenameValue(terminal);
-      const choice = window.prompt(t("task:renameTerminalLeaveEmptyToReset"), current);
+      const choice = window.prompt(
+        t("task:renameTerminalLeaveEmptyToReset", { token: DESTROY_TOKEN }),
+        current,
+      );
       if (choice === null) return;
       const trimmed = choice.trim();
-      if (trimmed.toLowerCase() === "destroy") {
+      if (trimmed.toLowerCase() === DESTROY_TOKEN) {
         void destroyTerminal(terminal.id);
         return;
       }

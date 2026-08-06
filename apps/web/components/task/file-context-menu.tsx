@@ -152,7 +152,9 @@ function FileContextMenuItems({
   onDelete,
 }: FileContextMenuItemsProps) {
   const { t } = useTranslation();
-  const deleteLabel = isBulk ? `Delete ${selectedCount} items` : "Delete";
+  const deleteLabel = isBulk
+    ? t("task:deleteItemsLabel", { count: selectedCount })
+    : t("task:delete");
   const showRename = !!onRenameFile && !isBulk;
   const download = !node.is_dir && !isBulk ? onDownloadFile : undefined;
   return (

@@ -15,6 +15,7 @@ import { isPreparingPhase } from "@/lib/prepare/summarize";
 import { PrepareStatusSection } from "./executor-prepare-status";
 import { EnvironmentInfo } from "./executor-environment-info";
 import { useTranslation } from "react-i18next";
+import { t } from "@/lib/i18n";
 
 type ExecutorSettingsButtonProps = {
   taskId?: string | null;
@@ -141,9 +142,9 @@ function computeAriaLabel(
   preparing: boolean,
   status: { label: string; tone: StatusTone } | null,
 ): string {
-  if (preparing) return "Executor settings, preparing environment";
-  if (status) return `Executor settings, environment ${status.label}`;
-  return "Executor settings";
+  if (preparing) return t("task:executorSettingsPreparing");
+  if (status) return t("task:executorSettingsWithStatus", { status: status.label });
+  return t("task:executorSettings");
 }
 
 function ExecutorButtonIcon({

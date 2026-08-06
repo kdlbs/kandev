@@ -120,14 +120,14 @@ export function ContextSelect({
 }) {
   const { t } = useTranslation();
   const displayLabel = useMemo(() => {
-    if (value === "blank") return "Blank";
-    if (value === "copy_prompt") return "Copy initial prompt";
+    if (value === "blank") return t("task:blank");
+    if (value === "copy_prompt") return t("task:copyInitialPrompt");
     if (value.startsWith("summarize:")) {
       const sid = value.slice("summarize:".length);
       const opt = sessionOptions.find((o) => o.id === sid);
-      return opt ? `Summarize ${opt.label}` : "Summarize";
+      return opt ? t("task:summarizeSessionNamed", { label: opt.label }) : t("task:summarize");
     }
-    return "Blank";
+    return t("task:blank");
   }, [value, sessionOptions]);
 
   return (
@@ -224,7 +224,7 @@ export function useDialogAttachments(disabled: boolean, workspaceId?: string | n
       } catch (error) {
         updateAttachment(attachment.id, {
           uploadStatus: "failed",
-          uploadError: error instanceof ApiError ? error.message : "Upload failed",
+          uploadError: error instanceof ApiError ? error.message : t("task:uploadFailed"),
         });
       }
     },

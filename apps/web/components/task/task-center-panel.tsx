@@ -240,14 +240,21 @@ function useCenterPanelTabs(
   openFileTabs: OpenFileTab[],
   handleCloseFileTab: (fileKey: string) => void,
   hasChanges: boolean | undefined,
-  reviewLabel: "Pull Request" | "Merge Request" | null,
+  reviewKind: "pr" | "mr" | null,
 ) {
   const { t } = useTranslation();
   const tabs: SessionTab[] = useMemo(() => {
     const staticTabs: SessionTab[] = [
       ...(hasChanges ? [{ id: "changes", label: t("task:allChanges") }] : []),
       { id: "chat", label: t("task:chat") },
-      ...(reviewLabel ? [{ id: "pr", label: reviewLabel }] : []),
+      ...(reviewKind
+        ? [
+            {
+              id: "pr",
+              label: reviewKind === "pr" ? t("task:pullRequest2") : t("task:mergeRequestLabel"),
+            },
+          ]
+        : []),
     ];
     const fileTabs: SessionTab[] = openFileTabs.map((tab) => ({
       id: `file:${getFileTabKey(tab)}`,
@@ -261,22 +268,22 @@ function useCenterPanelTabs(
       className: "cursor-pointer group gap-1.5 data-[state=active]:bg-muted",
     }));
     return [...staticTabs, ...fileTabs];
-  }, [openFileTabs, handleCloseFileTab, hasChanges, reviewLabel]);
+  }, [openFileTabs, handleCloseFileTab, hasChanges, reviewKind, t]);
   const separatorAfterIndex = useMemo(() => {
     if (openFileTabs.length === 0) return undefined;
-    const staticCount = (hasChanges ? 1 : 0) + 1 + (reviewLabel ? 1 : 0);
+    const staticCount = (hasChanges ? 1 : 0) + 1 + (reviewKind ? 1 : 0);
     return staticCount - 1;
-  }, [openFileTabs.length, hasChanges, reviewLabel]);
+  }, [openFileTabs.length, hasChanges, reviewKind]);
   return { tabs, separatorAfterIndex };
 }
 
 function useTaskReview(taskId: string | null) {
   const taskPR = useActiveTaskPR();
   const taskMR = useTaskMRs(taskId)[0] ?? null;
-  let reviewLabel: "Pull Request" | "Merge Request" | null = null;
-  if (taskPR) reviewLabel = "Pull Request";
-  else if (taskMR) reviewLabel = "Merge Request";
-  return { taskPR, taskMR, reviewLabel };
+  let reviewKind: "pr" | "mr" | null = null;
+  if (taskPR) reviewKind = "pr";
+  else if (taskMR) reviewKind = "mr";
+  return { taskPR, taskMR, reviewKind };
 }
 
 function usePersistOpenFileTabs(activeSessionId: string | null, openFileTabs: OpenFileTab[]) {
@@ -314,7 +321,7 @@ function useCenterPanelState(props: TaskCenterPanelProps) {
     activeSessionId,
     activeTaskId,
   );
-  const { taskPR, taskMR, reviewLabel } = useTaskReview(activeTaskId);
+  const { taskPR, taskMR, reviewKind } = useTaskReview(activeTaskId);
   const [openFileTabs, setOpenFileTabs] = useState<OpenFileTab[]>([]);
   const [savingFiles, setSavingFiles] = useState<Set<string>>(new Set());
   const [selectedDiff, setSelectedDiff] = useState<SelectedDiff | null>(null);
@@ -341,7 +348,7 @@ function useCenterPanelState(props: TaskCenterPanelProps) {
     openFileTabs,
     fileTabOps.handleCloseFileTab,
     hasChanges,
-    reviewLabel,
+    reviewKind,
   );
 
   useEffect(() => {

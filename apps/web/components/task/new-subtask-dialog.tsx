@@ -507,7 +507,7 @@ export function NewSubtaskDialog({
   const autoTitle = useAppStore((s) => s.userSettings.agentGeneratedTaskTitles);
 
   const defaultTitle = useMemo(
-    () => `${parentTaskTitle} / Subtask ${siblingCount + 1}`,
+    () => t("task:defaultSubtaskTitle", { parent: parentTaskTitle, index: siblingCount + 1 }),
     [parentTaskTitle, siblingCount],
   );
 

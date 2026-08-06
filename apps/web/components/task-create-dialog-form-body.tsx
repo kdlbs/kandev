@@ -135,7 +135,7 @@ function AgentColumn({
       />
     );
   }
-  const placeholder = agentProfilesLoading ? "Loading agents..." : "Select agent";
+  const placeholder = agentProfilesLoading ? t("task:loadingAgents") : t("task:selectAgent");
   return (
     <>
       <AgentSelectorComponent

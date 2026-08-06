@@ -99,8 +99,8 @@ function ReviewWalkthroughRequestButton({
   const { t } = useTranslation();
   if (!handleRequestWalkthrough) return null;
   const tooltip = requestWalkthroughDisabled
-    ? "Loading changed files..."
-    : "Walk me through these changes";
+    ? t("task:loadingChangedFiles")
+    : t("task:walkMeThroughTheseChanges");
   return (
     <Tooltip>
       <TooltipTrigger asChild>

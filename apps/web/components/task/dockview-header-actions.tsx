@@ -169,7 +169,7 @@ export function LeftHeaderActions(props: IDockviewHeaderActionsProps) {
         command: devScript,
         label: t("task:devServer"),
       });
-      addTerminalPanel(result.terminalId, group.id, environmentId, undefined, "Dev Server");
+      addTerminalPanel(result.terminalId, group.id, environmentId, undefined, t("task:devServer"));
     } catch (error) {
       console.error("Failed to start dev script:", error);
     }

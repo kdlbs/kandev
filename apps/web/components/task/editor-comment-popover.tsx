@@ -8,6 +8,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@kande
 import { cn } from "@/lib/utils";
 import { useDraggablePopover, usePopoverDismiss } from "@/components/task/use-draggable-popover";
 import { useTranslation } from "react-i18next";
+import { t } from "@/lib/i18n";
 
 type EditorCommentPopoverProps = {
   selectedText: string;
@@ -151,8 +152,8 @@ export function EditorCommentPopover({
 
   const lineRangeText =
     lineRange.start === lineRange.end
-      ? `Line ${lineRange.start}`
-      : `Lines ${lineRange.start}-${lineRange.end}`;
+      ? t("task:lineNumber", { line: lineRange.start })
+      : t("task:lineRange", { start: lineRange.start, end: lineRange.end });
 
   return (
     <div

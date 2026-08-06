@@ -64,6 +64,7 @@ import type { SavedLayout } from "@/lib/types/http";
 import { useTaskSessions } from "@/hooks/use-task-sessions";
 import { resolveLayoutApplySessionIds } from "./layout-preset-selector-session-ids";
 import { useTranslation } from "react-i18next";
+import { t } from "@/lib/i18n";
 
 type PresetOption = {
   id: BuiltInLayoutProfileId;
@@ -87,7 +88,7 @@ const BUILT_IN_PRESETS: PresetOption[] = BUILT_IN_LAYOUT_PROFILES.map((profile) 
 }));
 
 function mutationError(error: unknown): string {
-  return error instanceof Error ? error.message : "Please try again.";
+  return error instanceof Error ? error.message : t("task:pleaseTryAgain");
 }
 
 function SaveLayoutDialog({

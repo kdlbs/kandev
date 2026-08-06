@@ -4,9 +4,7 @@ import { IconGitFork } from "@tabler/icons-react";
 import { Toggle } from "@kandev/ui/toggle";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { useTranslation } from "react-i18next";
-
-const FRESH_BRANCH_TOOLTIP =
-  "Create a new branch from the selected base. Any uncommitted changes in your local clone will be discarded; you'll be asked to confirm if there are any.";
+import { t } from "@/lib/i18n";
 
 export type FreshBranchToggleProps = {
   enabled: boolean;
@@ -35,7 +33,7 @@ export function FreshBranchToggle({ enabled, onToggle }: FreshBranchToggleProps)
           <IconGitFork />
         </Toggle>
       </TooltipTrigger>
-      <TooltipContent className="max-w-xs">{FRESH_BRANCH_TOOLTIP}</TooltipContent>
+      <TooltipContent className="max-w-xs">{t("task:freshBranchTooltip")}</TooltipContent>
     </Tooltip>
   );
 }
@@ -55,8 +53,8 @@ export function computeBranchPlaceholder({
   loading,
   optionCount,
 }: BranchPlaceholderArgs) {
-  if (lockedToCurrentBranch) return currentLocalBranch || "Uses current branch";
-  if (!hasRepositorySelection) return "Select repository first";
-  if (loading) return "Loading branches...";
-  return optionCount > 0 ? "Select branch" : "No branches found";
+  if (lockedToCurrentBranch) return currentLocalBranch || t("task:usesCurrentBranch");
+  if (!hasRepositorySelection) return t("task:selectRepositoryFirst");
+  if (loading) return t("task:loadingBranches2");
+  return optionCount > 0 ? t("task:selectBranch") : t("task:noBranchesFound");
 }

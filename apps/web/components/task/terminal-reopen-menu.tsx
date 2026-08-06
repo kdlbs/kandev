@@ -123,7 +123,8 @@ function useDestroyTerminalRow({
       event.preventDefault();
       event.stopPropagation();
       if (!environmentId) return;
-      const label = shell.seq != null ? `terminal #${shell.seq}` : "this terminal";
+      const label =
+        shell.seq != null ? t("task:terminalNumbered", { seq: shell.seq }) : t("task:thisTerminal");
       if (!window.confirm(t("task:terminateThisKillsTheRunningPty", { label }))) return;
 
       try {

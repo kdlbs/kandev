@@ -45,6 +45,7 @@ import {
   looksLikeURL,
 } from "@/components/workspace-source-picker/remote-url";
 import { Trans, useTranslation } from "react-i18next";
+import { t } from "@/lib/i18n";
 
 const TRUNCATE_THRESHOLD = 30;
 
@@ -301,7 +302,7 @@ function RepoTriggerIcon({ row }: { row: TaskRemoteRepoRow }) {
 }
 
 export function computeTriggerLabel(row: TaskRemoteRepoRow): string {
-  if (!row.url) return "Pick or paste a repo";
+  if (!row.url) return t("task:pickOrPasteARepo");
   if (row.source === "picker" && row.fullName) return row.fullName;
   return truncateMiddle(stripScheme(row.url), TRUNCATE_THRESHOLD);
 }
@@ -351,7 +352,7 @@ function RemoteRepoPopoverContent({
     const trimmed = candidate.trim();
     if (!isSupportedRemoteURL(trimmed)) {
       if (looksLikeURL(trimmed)) {
-        setUrlError("Enter a GitHub, GitLab, or Azure DevOps repository URL.");
+        setUrlError(t("task:enterRepositoryUrl"));
       }
       return false;
     }
@@ -618,11 +619,11 @@ function computeRemoteBranchDisabledReason(
   branchesLoading: boolean,
   optionCount: number,
 ): string | undefined {
-  if (!hasUrl) return "Select or enter a remote repository first.";
+  if (!hasUrl) return t("task:selectOrEnterRemoteRepoFirst");
   // If a branch is already set the pill is enabled; no disabled reason needed.
   if (hasBranch) return undefined;
-  if (branchesLoading) return "Loading branches…";
-  if (optionCount === 0) return "No branches available for this URL.";
+  if (branchesLoading) return t("task:loadingBranches3");
+  if (optionCount === 0) return t("task:noBranchesForUrl");
   return undefined;
 }
 

@@ -22,6 +22,7 @@ import type {
   SessionModelEntry,
 } from "@/lib/state/slices/session-runtime/types";
 import { useTranslation } from "react-i18next";
+import { t } from "@/lib/i18n";
 
 type SessionModelsEntry = {
   currentModelId: string;
@@ -206,7 +207,7 @@ function resolveAvailableModels({
 }
 
 function describeError(err: unknown): string {
-  return err instanceof Error ? err.message : "Unknown error";
+  return err instanceof Error ? err.message : t("task:unknownError2");
 }
 
 /** Builds model/config change handlers with optimistic update + error toast + revert. */

@@ -168,7 +168,7 @@ function useWatermarkHandlers(
         command: devScript,
         label: t("task:devServer"),
       });
-      addTerminalPanel(result.terminalId, groupId, environmentId, undefined, "Dev Server");
+      addTerminalPanel(result.terminalId, groupId, environmentId, undefined, t("task:devServer"));
     } catch (error) {
       console.error("Failed to start dev script:", error);
     }

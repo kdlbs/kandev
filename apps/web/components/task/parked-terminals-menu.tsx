@@ -3,6 +3,8 @@
 import { useState, useRef, useEffect } from "react";
 import type { Terminal } from "@/hooks/domains/session/use-terminals";
 import { useTranslation } from "react-i18next";
+// Aliased: the map callback below binds `t` to a terminal, shadowing the hook.
+import { t as translate } from "@/lib/i18n";
 
 /**
  * Compact dropdown that lists every parked (hidden but PTY-alive) terminal
@@ -71,7 +73,7 @@ export function ParkedTerminalsMenu({
               }}
               onContextMenu={(e) => {
                 e.preventDefault();
-                if (window.confirm(`Destroy "${t.label}"? This kills the PTY and removes it.`)) {
+                if (window.confirm(translate("task:destroyTerminalConfirm", { label: t.label }))) {
                   setOpen(false);
                   void onDestroy(t.id);
                 }

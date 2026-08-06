@@ -66,7 +66,7 @@ function StartTaskSplitButton({
   onPlanModeAction,
 }: StartTaskSplitButtonProps) {
   const { t } = useTranslation();
-  const altLabel = isEditMode ? "Update task" : "Create only";
+  const altLabel = isEditMode ? t("task:updateTask") : t("task:createOnly");
 
   return (
     <div className="flex flex-col w-full sm:w-auto gap-2 sm:gap-0">
@@ -268,18 +268,35 @@ function computeBaseDisabled(props: TaskCreateDialogFooterProps) {
 
 export type ButtonKind = "update" | "start-task" | "default";
 
-export const REASON_TITLE = "Add a task title";
-export const REASON_PROMPT = "Add a task prompt";
-export const REASON_REPO = "Select a repository";
-export const REASON_BRANCH = "Select a branch";
-export const REASON_WORKSPACE = "Select a workspace";
-export const REASON_WORKFLOW = "Select a workflow";
-export const REASON_AGENT = "Select an agent";
-export const REASON_DESCRIPTION = "Add a session description";
+// Catalog keys, not copy. `computeDisabledReason` is a pure helper with no
+// access to `t`, so it returns the key and the component resolves it at render
+// (the repo-wide pattern for module-scope tables). Keeping these as keys also
+// preserves the identity comparisons in the unit tests.
+export const REASON_TITLE = "task:reasonAddTaskTitle";
+export const REASON_PROMPT = "task:reasonAddTaskPrompt";
+export const REASON_REPO = "task:reasonSelectRepository";
+export const REASON_BRANCH = "task:reasonSelectBranch";
+export const REASON_WORKSPACE = "task:reasonSelectWorkspace";
+export const REASON_WORKFLOW = "task:reasonSelectWorkflow";
+export const REASON_AGENT = "task:reasonSelectAgent";
+export const REASON_DESCRIPTION = "task:reasonAddSessionDescription";
+export const REASON_NO_COMPATIBLE_AGENT = "task:noCompatibleAgentProfileFor";
 
-function noCompatibleAgentReason(executorProfileName: string | null): string {
-  const target = executorProfileName ? `“${executorProfileName}”` : "this executor";
-  return `No compatible agent profile is configured for ${target}. Configure agent credentials in Settings → Executors.`;
+/**
+ * Resolve what `computeDisabledReason` returned. Reasons this component owns are
+ * catalog keys; `submitBlockedReason` is human text supplied by the caller and
+ * passes through untouched.
+ */
+export function resolveDisabledReason(
+  t: (key: string, options?: Record<string, unknown>) => string,
+  reason: string | null | undefined,
+  executorProfileName: string | null,
+): string | undefined {
+  if (!reason) return undefined;
+  if (!reason.startsWith("task:")) return reason;
+  return t(reason, {
+    target: executorProfileName ? `“${executorProfileName}”` : t("task:thisExecutor"),
+  });
 }
 
 function baseReason(props: TaskCreateDialogFooterProps): string | null {
@@ -289,12 +306,12 @@ function baseReason(props: TaskCreateDialogFooterProps): string | null {
   if (!props.hasAllBranches) return REASON_BRANCH;
   if (props.isCreateMode && !props.workspaceId) return REASON_WORKSPACE;
   if (props.isCreateMode && !props.effectiveWorkflowId) return REASON_WORKFLOW;
-  if (props.noCompatibleAgent) return noCompatibleAgentReason(props.executorProfileName);
+  if (props.noCompatibleAgent) return REASON_NO_COMPATIBLE_AGENT;
   return null;
 }
 
 function sessionDefaultReason(props: TaskCreateDialogFooterProps): string | null {
-  if (props.noCompatibleAgent) return noCompatibleAgentReason(props.executorProfileName);
+  if (props.noCompatibleAgent) return REASON_NO_COMPATIBLE_AGENT;
   if (!props.agentProfileId) return REASON_AGENT;
   if (!props.hasDescription) return REASON_DESCRIPTION;
   return null;
@@ -330,7 +347,7 @@ function computeFooterState(props: TaskCreateDialogFooterProps) {
   // Session mode previously only gated on missing agent — it ignored
   // noCompatibleAgent, so a user who switched executor after picking an
   // agent could still submit a known-incompatible combination. The reason
-  // text already surfaces noCompatibleAgentReason in this branch (see
+  // text already surfaces REASON_NO_COMPATIBLE_AGENT in this branch (see
   // sessionDefaultReason), so the disable gate needs to match.
   const sessionDisabled = !props.agentProfileId || props.noCompatibleAgent;
   const defaultDisabled = (props.isSessionMode ? sessionDisabled : altDisabled) || blocked;
@@ -382,7 +399,7 @@ export const TaskCreateDialogFooter = memo(function TaskCreateDialogFooter(
       </DialogClose>
       <KeyboardShortcutTooltip
         shortcut={SHORTCUTS.SUBMIT}
-        description={disabledReason ?? undefined}
+        description={resolveDisabledReason(t, disabledReason, props.executorProfileName)}
       >
         <span className="inline-flex w-full sm:w-auto" data-testid="submit-start-agent-wrapper">
           {(() => {

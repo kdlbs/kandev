@@ -6,6 +6,7 @@ import { getWebSocketClient } from "@/lib/ws/connection";
 import { getExecutorStatusIcon } from "@/lib/executor-icons";
 import { formatRelativeTime } from "@/lib/utils";
 import { useTranslation } from "react-i18next";
+import { t } from "@/lib/i18n";
 
 type RemoteStatusData = {
   remote_name?: string;
@@ -112,7 +113,7 @@ export function RemoteCloudTooltip({
   }, [hasExternalStatus, open, fetchedSessionId, sessionId, taskId]);
 
   const status = hasExternalStatus ? (externalStatus ?? null) : fetchedStatus;
-  const remoteName = status?.remote_name ?? fallbackName ?? "Remote executor";
+  const remoteName = status?.remote_name ?? fallbackName ?? t("task:remoteExecutor");
   const cloudState = getCloudState(status);
   const loading = Boolean(
     !hasExternalStatus && open && sessionId && fetchedSessionId !== sessionId,

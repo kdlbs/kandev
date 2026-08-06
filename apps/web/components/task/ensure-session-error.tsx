@@ -28,8 +28,7 @@ export function describeEnsureError(
   if (isAgentProfileMissing) {
     return {
       title: t("task:noAgentProfileConfigured"),
-      detail:
-        "This task has no agent profile, and the workspace, workflow, and workflow step have no default set. Pick a default agent profile so new tasks can start a session.",
+      detail: t("task:noAgentProfileConfiguredDetail"),
       isAgentProfileMissing: true,
       action: workspaceId
         ? { label: t("task:openWorkspaceSettings"), href: `/settings/workspace/${workspaceId}` }
@@ -38,7 +37,7 @@ export function describeEnsureError(
   }
   return {
     title: t("task:couldnTStartASession"),
-    detail: message || "The backend rejected the session request.",
+    detail: message || t("task:backendRejectedSessionRequest"),
     isAgentProfileMissing: false,
     action: null,
   };

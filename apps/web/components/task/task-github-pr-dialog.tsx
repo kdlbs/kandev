@@ -22,6 +22,10 @@ import {
 } from "./task-github-pr-url";
 import { useTranslation } from "react-i18next";
 
+/** URL shape the user types verbatim — protocol, not copy. Passed into the
+ * placeholder message as an interpolation value so it survives translation. */
+const GITHUB_PR_URL_EXAMPLE = "github.com/owner/repo/pull/1471";
+
 type TaskGitHubPRDialogProps = {
   workspaceId: string | null;
   open: boolean;
@@ -58,7 +62,7 @@ function PRDialogFooter({
         disabled={submitting}
         data-testid="task-github-pr-submit"
       >
-        {submitting ? t("task:saving2") : t("common:save")}
+        {submitting ? t("task:saving") : t("common:save")}
       </Button>
     </DialogFooter>
   );
@@ -79,8 +83,8 @@ export function TaskGitHubPRDialog({
   const githubRepos = useMemo(() => githubReposForTask(task, repositories), [task, repositories]);
   const inferredRepo = githubRepos.length === 1 ? githubRepos[0] : null;
   const placeholder = inferredRepo
-    ? t("task:githubPrRefPlaceholder")
-    : "github.com/owner/repo/pull/1471";
+    ? t("task:githubPrRefPlaceholder", { example: GITHUB_PR_URL_EXAMPLE })
+    : GITHUB_PR_URL_EXAMPLE;
 
   useEffect(() => {
     if (open) {
@@ -91,11 +95,11 @@ export function TaskGitHubPRDialog({
 
   const submit = async () => {
     if (!workspaceId) {
-      setError("Select a workspace before linking a GitHub pull request.");
+      setError(t("task:selectWorkspaceBeforeLinkingPr"));
       return;
     }
     if (!input.trim()) {
-      setError("Enter a GitHub pull request URL or number.");
+      setError(t("task:enterGithubPrUrlOrNumber"));
       return;
     }
     setSubmitting(true);
@@ -111,7 +115,7 @@ export function TaskGitHubPRDialog({
       toast({ description: t("task:githubPullRequestLinked"), variant: "success" });
       onOpenChange(false);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to link GitHub pull request.");
+      setError(err instanceof Error ? err.message : t("task:failedToLinkGithubPullRequest"));
     } finally {
       setSubmitting(false);
     }

@@ -233,7 +233,7 @@ function RevisionsDialogStack({
           toast.error(t("task:failedToRestorePlan"));
         }
       } catch (err) {
-        toast.error(err instanceof Error ? err.message : "Failed to restore plan");
+        toast.error(err instanceof Error ? err.message : t("task:failedToRestorePlan"));
       }
     },
     [onRevert, setPreviewRevision, setDiffOpen, closePopover],

@@ -320,7 +320,9 @@ function BulkSelectionMenuItems({
   const n = actingIds.length;
   const allPinned =
     actingIds.length > 0 && actingIds.every((id) => pinnedTaskIds?.includes(id) ?? false);
-  const pinLabel = `${allPinned ? "Unpin" : "Pin"} ${n} ${n === 1 ? "task" : "tasks"}`;
+  const pinLabel = allPinned
+    ? t("task:unpinTasksCount", { count: n })
+    : t("task:pinTasksCount", { count: n });
   return (
     <>
       {onBulkPin && (

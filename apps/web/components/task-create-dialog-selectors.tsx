@@ -400,7 +400,7 @@ function useFileAttachments(
       } catch (error) {
         updateAttachment(attachment.id, {
           uploadStatus: "failed",
-          uploadError: error instanceof ApiError ? error.message : "Upload failed",
+          uploadError: error instanceof ApiError ? error.message : t("task:uploadFailed"),
         });
       }
     },
