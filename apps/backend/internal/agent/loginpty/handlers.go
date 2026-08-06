@@ -1,6 +1,7 @@
 package loginpty
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -26,12 +27,17 @@ type LoginCommandLookup interface {
 	Get(id string) (agents.Agent, bool)
 }
 
+type HostShellSessionBinder interface {
+	BindHostShellSession(ctx context.Context, tabID, sessionID string) error
+}
+
 // Handlers wraps the manager + agent registry to expose HTTP/WS endpoints.
 type Handlers struct {
-	mgr      *Manager
-	registry *registry.Registry
-	logger   *zap.Logger
-	upgrader gorillaws.Upgrader
+	mgr             *Manager
+	registry        *registry.Registry
+	logger          *zap.Logger
+	upgrader        gorillaws.Upgrader
+	hostShellBinder HostShellSessionBinder
 }
 
 // NewHandlers constructs Handlers. If checkOrigin is nil, the upgrader uses
@@ -53,6 +59,10 @@ func NewHandlers(mgr *Manager, reg *registry.Registry, log *zap.Logger, checkOri
 		logger:   log,
 		upgrader: up,
 	}
+}
+
+func (h *Handlers) SetHostShellSessionBinder(binder HostShellSessionBinder) {
+	h.hostShellBinder = binder
 }
 
 // defaultCheckOrigin mirrors the policy used by the existing terminal
@@ -123,6 +133,7 @@ func (h *Handlers) httpStartHostShell(c *gin.Context) {
 	}
 
 	managerKey := hostShellAgentID
+	tabID := ""
 	if len(req.ClientID) > 0 {
 		var clientID string
 		if err := json.Unmarshal(req.ClientID, &clientID); err != nil {
@@ -134,7 +145,8 @@ func (h *Handlers) httpStartHostShell(c *gin.Context) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "client_id must be a UUID"})
 			return
 		}
-		managerKey += ":" + parsedClientID.String()
+		tabID = parsedClientID.String()
+		managerKey += ":" + tabID
 	}
 
 	shell, shellArgs := detectShell()
@@ -144,6 +156,14 @@ func (h *Handlers) httpStartHostShell(c *gin.Context) {
 		h.logger.Warn("host shell start failed", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
+	}
+	if tabID != "" && h.hostShellBinder != nil {
+		if bindErr := h.hostShellBinder.BindHostShellSession(c.Request.Context(), tabID, sess.ID); bindErr != nil {
+			sess.stop()
+			h.logger.Warn("host shell bind failed", zap.String("tab_id", tabID), zap.Error(bindErr))
+			c.JSON(http.StatusInternalServerError, gin.H{"error": bindErr.Error()})
+			return
+		}
 	}
 	c.JSON(http.StatusOK, sess.Status())
 }

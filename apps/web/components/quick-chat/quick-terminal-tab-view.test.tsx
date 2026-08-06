@@ -73,25 +73,63 @@ const tab = {
 };
 
 describe("QuickTerminalTabView", () => {
-  it("starts a host shell with the terminal tab's stable client id and detaches on unmount", () => {
+  it("starts a host shell with the terminal tab's stable client id and detaches on unmount", async () => {
     const onStateChange = vi.fn();
     const view = render(<QuickTerminalTabView tab={tab} onStateChange={onStateChange} />);
 
-    return waitFor(() =>
+    await waitFor(() =>
       expect(screen.getByTestId("pty-view-probe").getAttribute("data-lifecycle")).toBe(
         "detach-on-unmount",
       ),
-    ).then(() => {
-      fireEvent.click(screen.getByTestId("pty-view-probe"));
-      expect(startHostShell).toHaveBeenCalledWith({ cols: 80, rows: 24 }, { clientId: tab.tabId });
-      view.unmount();
+    );
+
+    fireEvent.click(screen.getByTestId("pty-view-probe"));
+    expect(startHostShell).toHaveBeenCalledWith({ cols: 80, rows: 24 }, { clientId: tab.tabId });
+    await waitFor(() =>
+      expect(onStateChange).toHaveBeenCalledWith({
+        status: "running",
+        sessionId: "session-1",
+        exitCode: null,
+        error: null,
+      }),
+    );
+
+    view.unmount();
+  });
+
+  it("keeps the shared descriptor when a connecting mount is cancelled before its create resolves", async () => {
+    // Under StrictMode the descriptor-create effect runs, tears down, and runs
+    // again for the same stable tabId. The idempotent backend create returns the
+    // same row, so the cancelled first mount must not delete it — otherwise the
+    // live tab (and its bound PTY) is destroyed and cannot survive a reload.
+    let resolveCreate: ((value: unknown) => void) | undefined;
+    createQuickTerminalTab.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveCreate = resolve;
+        }),
+    );
+
+    const view = render(<QuickTerminalTabView tab={tab} onStateChange={vi.fn()} />);
+    view.unmount();
+    resolveCreate?.({
+      tabId: tab.tabId,
+      workspaceId: tab.workspaceId,
+      sessionId: null,
+      sequence: 1,
+      status: "connecting",
     });
+    await Promise.resolve();
+
+    expect(deleteQuickTerminalTab).not.toHaveBeenCalled();
   });
 
   it("renders accessible lifecycle status for the selected terminal", () => {
     const { rerender } = render(<QuickTerminalTabView tab={tab} onStateChange={vi.fn()} />);
 
-    expect(screen.getByRole("status").textContent).toContain("Connecting to terminal…");
+    expect(screen.getByTestId("quick-terminal-status").textContent).toContain(
+      "Connecting to terminal…",
+    );
 
     rerender(
       <QuickTerminalTabView
@@ -107,6 +145,8 @@ describe("QuickTerminalTabView", () => {
         onStateChange={vi.fn()}
       />,
     );
-    expect(screen.getByRole("status").textContent).toContain("Terminal exited with code 7.");
+    expect(screen.getByTestId("quick-terminal-status").textContent).toContain(
+      "Terminal exited with code 7.",
+    );
   });
 });

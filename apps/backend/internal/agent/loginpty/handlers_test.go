@@ -2,15 +2,32 @@ package loginpty
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	gorillaws "github.com/gorilla/websocket"
 )
+
+type hostShellBinderStub struct {
+	tabID     string
+	sessionID string
+	err       error
+}
+
+func (s *hostShellBinderStub) BindHostShellSession(_ context.Context, tabID, sessionID string) error {
+	s.tabID = tabID
+	s.sessionID = sessionID
+	return s.err
+}
 
 func TestDetectShellWindows(t *testing.T) {
 	tests := []struct {
@@ -60,12 +77,18 @@ func TestDetectShellWindows(t *testing.T) {
 	}
 }
 
-func newHostShellRouter(t *testing.T, mgr *Manager) *gin.Engine {
+func newHostShellRouterWithBinder(t *testing.T, mgr *Manager, binder HostShellSessionBinder) *gin.Engine {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
-	NewHandlers(mgr, nil, mgr.log.Zap(), nil).RegisterRoutes(router)
+	handlers := NewHandlers(mgr, nil, mgr.log.Zap(), nil)
+	handlers.SetHostShellSessionBinder(binder)
+	handlers.RegisterRoutes(router)
 	return router
+}
+
+func newHostShellRouter(t *testing.T, mgr *Manager) *gin.Engine {
+	return newHostShellRouterWithBinder(t, mgr, nil)
 }
 
 func startHostShellRequest(t *testing.T, router http.Handler, body map[string]any) (Status, int) {
@@ -93,6 +116,39 @@ func stopSession(t *testing.T, mgr *Manager, sessionID string) {
 	if sess := mgr.GetByID(sessionID); sess != nil {
 		sess.stop()
 	}
+}
+
+func connectHostShellStream(t *testing.T, serverURL, sessionID string) *gorillaws.Conn {
+	t.Helper()
+	wsURL := "ws" + strings.TrimPrefix(serverURL, "http") + fmt.Sprintf("/api/v1/agent-login/sessions/%s/stream", sessionID)
+	conn, _, err := gorillaws.DefaultDialer.Dial(wsURL, nil)
+	if err != nil {
+		t.Fatalf("dial stream: %v", err)
+	}
+	return conn
+}
+
+func waitForHostShellOutput(t *testing.T, conn *gorillaws.Conn, needle string) {
+	t.Helper()
+	deadline := time.Now().Add(15 * time.Second)
+	var output strings.Builder
+	for time.Now().Before(deadline) {
+		if err := conn.SetReadDeadline(time.Now().Add(3 * time.Second)); err != nil {
+			t.Fatalf("set read deadline: %v", err)
+		}
+		messageType, data, err := conn.ReadMessage()
+		if err != nil {
+			t.Fatalf("read message: %v; output so far: %q", err, output.String())
+		}
+		if messageType != gorillaws.BinaryMessage {
+			continue
+		}
+		output.Write(data)
+		if strings.Contains(output.String(), needle) {
+			return
+		}
+	}
+	t.Fatalf("timed out waiting for %q in %q", needle, output.String())
 }
 
 func TestHostShellClientIDIsIdempotentAndIndependent(t *testing.T) {
@@ -188,4 +244,52 @@ func TestHostShellRejectsMalformedJSON(t *testing.T) {
 	if activeSessions != 0 {
 		t.Fatal("malformed body started a host shell session")
 	}
+}
+
+func TestHostShellClientIDBindsSessionBeforeResponding(t *testing.T) {
+	mgr := newTestManager(t, nil)
+	binder := &hostShellBinderStub{}
+	router := newHostShellRouterWithBinder(t, mgr, binder)
+	tabID := uuid.NewString()
+
+	status, code := startHostShellRequest(t, router, map[string]any{"client_id": tabID})
+	if code != http.StatusOK {
+		t.Fatalf("start status = %d", code)
+	}
+	t.Cleanup(func() { stopSession(t, mgr, status.ID) })
+	if binder.tabID != tabID {
+		t.Fatalf("binder tab id = %q, want %q", binder.tabID, tabID)
+	}
+	if binder.sessionID != status.ID {
+		t.Fatalf("binder session id = %q, want %q", binder.sessionID, status.ID)
+	}
+}
+
+func TestHostShellSessionSurvivesWebSocketReconnect(t *testing.T) {
+	mgr := newTestManager(t, nil)
+	router := newHostShellRouter(t, mgr)
+	server := httptest.NewServer(router)
+	defer server.Close()
+
+	clientID := uuid.NewString()
+	status, code := startHostShellRequest(t, router, map[string]any{"client_id": clientID})
+	if code != http.StatusOK {
+		t.Fatalf("start status = %d", code)
+	}
+	t.Cleanup(func() { stopSession(t, mgr, status.ID) })
+
+	firstConn := connectHostShellStream(t, server.URL, status.ID)
+	waitForHostShellOutput(t, firstConn, "%")
+	if err := firstConn.WriteMessage(gorillaws.BinaryMessage, []byte("export KANDEV_QT_ONE=QUICK_TERMINAL_ONE && echo $KANDEV_QT_ONE\n")); err != nil {
+		t.Fatalf("write export command: %v", err)
+	}
+	waitForHostShellOutput(t, firstConn, "QUICK_TERMINAL_ONE")
+	_ = firstConn.Close()
+
+	secondConn := connectHostShellStream(t, server.URL, status.ID)
+	defer func() { _ = secondConn.Close() }()
+	if err := secondConn.WriteMessage(gorillaws.BinaryMessage, []byte("echo $KANDEV_QT_ONE\n")); err != nil {
+		t.Fatalf("write echo command: %v", err)
+	}
+	waitForHostShellOutput(t, secondConn, "QUICK_TERMINAL_ONE")
 }

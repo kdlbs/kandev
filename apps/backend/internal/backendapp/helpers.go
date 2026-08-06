@@ -1051,7 +1051,9 @@ func registerSecondaryRoutes(
 	// Login PTY: spawns agent login commands under a PTY on the kandev host
 	// (claude auth login, auggie login, ...). The manager is shared with Quick
 	// Terminal so descriptor lifecycle callbacks observe the same sessions.
-	loginpty.NewHandlers(p.loginMgr, p.agentRegistry, p.log.Zap(), nil).RegisterRoutes(p.router)
+	loginHandlers := loginpty.NewHandlers(p.loginMgr, p.agentRegistry, p.log.Zap(), nil)
+	loginHandlers.SetHostShellSessionBinder(p.quickTerminalSvc)
+	loginHandlers.RegisterRoutes(p.router)
 	if p.quickTerminalSvc != nil {
 		p.quickTerminalSvc.RegisterRoutes(p.router)
 	}
