@@ -86,7 +86,7 @@ test.describe.serial("Message Queue general settings", () => {
       testPage.getByText(/Only adjacent messages from the same sender can be merged/),
     ).toBeVisible();
     await expect(
-      testPage.getByText(/more than 100 entity references, the shared per-message limit/),
+      testPage.getByText(/combined, deduplicated entity references would exceed 100/),
     ).toBeVisible();
 
     const saveResponse = testPage.waitForResponse(

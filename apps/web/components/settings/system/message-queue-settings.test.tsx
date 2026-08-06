@@ -227,7 +227,7 @@ describe("MessageQueueSettings — merge toggle", () => {
       screen.getByText(/Only adjacent messages from the same sender can be merged/),
     ).toBeTruthy();
     expect(
-      screen.getByText(/more than 100 entity references, the shared per-message limit/),
+      screen.getByText(/combined, deduplicated entity references would exceed 100/),
     ).toBeTruthy();
   });
 
