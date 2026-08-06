@@ -110,6 +110,7 @@ function deriveCurrentPageLabel(pathname: string, t: (key: string) => string): s
 function deriveParents(
   pathname: string,
   workspaceName: string | null,
+  t: (key: string) => string,
 ): Array<{ label: string; href?: string; phoneOnlyLink?: boolean }> {
   const segments = pathname.split("/").filter(Boolean);
   if (segments.length <= 1) return [];
@@ -191,7 +192,7 @@ export function SettingsLayoutClient({ children }: { children: React.ReactNode }
       : detailAgentName && !agentDetail?.[2]
         ? (agentDisplayName ?? t("settings:agent"))
         : (profileName ?? pageLabel ?? t("settings:settings"));
-  const parents = deriveParents(pathname, workspaceName);
+  const parents = deriveParents(pathname, workspaceName, t);
 
   return (
     <SettingsShell
