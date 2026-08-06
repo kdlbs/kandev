@@ -1,6 +1,9 @@
 package acpcompat
 
-import "testing"
+import (
+	"reflect"
+	"testing"
+)
 
 func TestClientCapabilityMeta_CursorGetsParameterizedPicker(t *testing.T) {
 	meta := ClientCapabilityMeta(CursorAgentID, map[string]any{"terminal_output": true})
@@ -52,5 +55,55 @@ func TestClientCapabilityMeta_DoesNotMutateBase(t *testing.T) {
 	}
 	if len(base) != 1 {
 		t.Errorf("base map grew: %v", base)
+	}
+}
+
+func TestParseVariantModelID(t *testing.T) {
+	model, options, ok := ParseVariantModelID("grok-4.5[effort=high,fast=true]")
+	if !ok {
+		t.Fatal("ParseVariantModelID returned ok=false")
+	}
+	if model != "grok-4.5" {
+		t.Errorf("model = %q, want grok-4.5", model)
+	}
+	want := map[string]string{"effort": "high", "fast": "true"}
+	if !reflect.DeepEqual(options, want) {
+		t.Errorf("options = %#v, want %#v", options, want)
+	}
+}
+
+func TestParseVariantModelID_RejectsMalformedIDs(t *testing.T) {
+	for _, model := range []string{
+		"grok-4.5",
+		"grok-4.5[]",
+		"grok-4.5[fast]",
+		"grok-4.5[fast=true,fast=false]",
+		"[fast=true]",
+	} {
+		t.Run(model, func(t *testing.T) {
+			gotModel, gotOptions, ok := ParseVariantModelID(model)
+			if ok || gotModel != model || gotOptions != nil {
+				t.Fatalf("ParseVariantModelID(%q) = (%q, %#v, %v), want unchanged and false",
+					model, gotModel, gotOptions, ok)
+			}
+		})
+	}
+}
+
+func TestMigrateCursorModel_PreservesExplicitOptions(t *testing.T) {
+	existing := map[string]string{"effort": "low"}
+	model, options, changed := MigrateCursorModel(
+		CursorAgentID,
+		"grok-4.5[effort=high,fast=true]",
+		existing,
+	)
+	if !changed || model != "grok-4.5" {
+		t.Fatalf("MigrateCursorModel() = (%q, %#v, %v), want migrated model", model, options, changed)
+	}
+	if options["effort"] != "low" || options["fast"] != "true" {
+		t.Errorf("options = %#v, want explicit effort and migrated fast", options)
+	}
+	if _, ok := existing["fast"]; ok {
+		t.Error("MigrateCursorModel mutated the input options")
 	}
 }

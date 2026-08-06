@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -58,6 +59,7 @@ func (e *ACPInferenceExecutor) Execute(ctx context.Context, req *PromptRequest) 
 	if workDir == "" {
 		return &PromptResponse{Success: false, Error: "work_dir is required for ACP inference"}, nil
 	}
+	model, modelConfigOptions, _ := acpcompat.MigrateCursorModel(req.AgentID, req.Model, nil)
 	resolvedCmd := resolveProbeCommand(cfg.Command[0])
 	if resolvedCmd == "" {
 		return &PromptResponse{Success: false, Error: fmt.Sprintf("command %q is not an allowed ACP command", cfg.Command[0])}, nil
@@ -66,11 +68,11 @@ func (e *ACPInferenceExecutor) Execute(ctx context.Context, req *PromptRequest) 
 	startTime := time.Now()
 
 	// Build command with model flag
-	args := buildACPCommand(cfg, req.Model)
+	args := buildACPCommand(cfg, model)
 
 	e.logger.Info("starting ACP inference",
 		zap.String("agent_id", req.AgentID),
-		zap.String("model", req.Model),
+		zap.String("model", model),
 		zap.Strings("command", args))
 
 	// Use the hard-coded resolvedCmd (not args[0]) so CodeQL can see that
@@ -108,7 +110,7 @@ func (e *ACPInferenceExecutor) Execute(ctx context.Context, req *PromptRequest) 
 		e.logger.Warn("ACP inference: dropping unsupported MCP server transport",
 			zap.String("name", name))
 	}
-	response, err := e.executeACPSession(ctx, stdin, stdout, workDir, req.AgentID, req.Prompt, req.Model, req.Mode, mcpServers)
+	response, err := e.executeACPSession(ctx, stdin, stdout, workDir, req.AgentID, req.Prompt, model, modelConfigOptions, req.Mode, mcpServers)
 	if err != nil {
 		return &PromptResponse{
 			Success:    false,
@@ -120,7 +122,7 @@ func (e *ACPInferenceExecutor) Execute(ctx context.Context, req *PromptRequest) 
 	return &PromptResponse{
 		Success:    true,
 		Response:   response,
-		Model:      req.Model,
+		Model:      model,
 		DurationMs: int(time.Since(startTime).Milliseconds()),
 	}, nil
 }
@@ -138,6 +140,7 @@ func (e *ACPInferenceExecutor) executeACPSession(
 	agentID string,
 	prompt string,
 	model string,
+	modelConfigOptions map[string]string,
 	mode string,
 	mcpServers []acp.McpServer,
 ) (string, error) {
@@ -212,6 +215,9 @@ func (e *ACPInferenceExecutor) executeACPSession(
 			return "", fmt.Errorf("ACP model selection failed: %w", err)
 		}
 	}
+	if err := applySessionConfigOptions(ctx, conn, string(sessionID), modelConfigOptions); err != nil {
+		return "", fmt.Errorf("ACP model config selection failed: %w", err)
+	}
 
 	// Optionally set the session mode before prompting.
 	if mode != "" {
@@ -247,6 +253,29 @@ func applySessionModel(
 	configOptions []acp.SessionConfigOption,
 ) (sessionmodel.Method, error) {
 	return sessionmodel.ApplySDKFromACP(ctx, conn, string(sessionID), model, configOptions)
+}
+
+func applySessionConfigOptions(
+	ctx context.Context,
+	conn sessionmodel.SDKConn,
+	sessionID string,
+	options map[string]string,
+) error {
+	if len(options) == 0 {
+		return nil
+	}
+	keys := make([]string, 0, len(options))
+	for key := range options {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	applier := sessionmodel.SDKApplier{Conn: conn}
+	for _, key := range keys {
+		if err := applier.SetConfigOption(ctx, sessionID, key, options[key]); err != nil {
+			return fmt.Errorf("set %q: %w", key, err)
+		}
+	}
+	return nil
 }
 
 // toACPMcpServers converts the cross-process DTO list into the ACP SDK shape.
@@ -521,11 +550,12 @@ func (e *ACPInferenceExecutor) probeACPSession(
 	conn := acp.NewClientSideConnection(client, stdin, stdout)
 	conn.SetLogger(slog.Default().With("component", "acp-probe"))
 
-	// Same client capabilities the live session adapter sends. cursor-agent
-	// picks its model picker mode from this handshake, so a probe that opts
-	// out reports the exploded fast=true model rows while sessions run on the
-	// bare ids — the agent-models surface would then offer a model list no
-	// session uses, and a model id the UI cannot select.
+	// Advertise the same model-picker capability the live session adapter sends.
+	// cursor-agent picks its model picker mode from this handshake, so a probe
+	// that opts out reports the exploded fast=true model rows while sessions run
+	// on the bare ids — the agent-models surface would then offer a model list no
+	// session uses, and a model id the UI cannot select. The probe intentionally
+	// omits the live adapter's terminal_output base capability.
 	initResp, err := conn.Initialize(ctx, acp.InitializeRequest{
 		ProtocolVersion: acp.ProtocolVersionNumber,
 		ClientCapabilities: acp.ClientCapabilities{

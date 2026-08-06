@@ -1,5 +1,7 @@
 package acpcompat
 
+import "strings"
+
 const (
 	CursorAgentID = "cursor-acp"
 
@@ -22,11 +24,11 @@ const (
 	// Advertising this is what makes a regular-tier Cursor session expressible.
 	// Zed carries the same opt-in for the same reason (zed-industries/zed#59694).
 	//
-	// The two modes advertise disjoint model ids, which makes the pin the
-	// backstop: a profile pinned to bare "grok-4.5" cannot match anything in
-	// variants mode, so if this opt-in ever stops taking effect the fail-closed
-	// SetModel in the lifecycle session manager refuses to start the session
-	// instead of quietly running it at the fast tier.
+	// The two modes advertise disjoint model ids. Existing variant IDs are
+	// migrated to the bare model plus config options before the opt-in is used,
+	// while the fail-closed SetModel in the lifecycle session manager prevents a
+	// bare profile from silently running at the fast tier if the opt-in stops
+	// taking effect.
 	ParameterizedModelPickerMetaKey = "parameterizedModelPicker"
 )
 
@@ -34,11 +36,11 @@ const (
 // one agent.
 //
 // This lives here, rather than next to either caller, because the picker mode
-// must be identical on BOTH ACP entry points: the live session adapter and the
-// host-utility capability probe. They are separate handshakes, and when only
-// one of them opted in, the agent-models surface advertised the exploded
-// fast=true rows while sessions ran on the bare ids — a model id the UI could
-// not offer and the probe could not validate.
+// must be identical across all three ACP handshake consumers: the live session
+// adapter, the host-utility capability probe, and one-shot inference. They are
+// separate handshakes, and when only one of them opted in, the agent-models
+// surface advertised the exploded fast=true rows while sessions ran on the
+// bare ids — a model id the UI could not offer and the probe could not validate.
 //
 // base is copied, never mutated, so callers can pass a shared literal.
 func ClientCapabilityMeta(agentID string, base map[string]any) map[string]any {
@@ -50,4 +52,67 @@ func ClientCapabilityMeta(agentID string, base map[string]any) map[string]any {
 		meta[ParameterizedModelPickerMetaKey] = true
 	}
 	return meta
+}
+
+// ParseVariantModelID splits a legacy Cursor model ID into its bare model ID
+// and encoded session config options. Cursor's variants picker used IDs such
+// as "grok-4.5[effort=high,fast=true]"; parameterized picker mode advertises
+// "grok-4.5" and exposes those values as separate config options.
+//
+// Invalid or ambiguous IDs are returned unchanged so callers fail closed
+// rather than guessing at a model or option value.
+func ParseVariantModelID(modelID string) (string, map[string]string, bool) {
+	open := strings.LastIndexByte(modelID, '[')
+	if open <= 0 || !strings.HasSuffix(modelID, "]") {
+		return modelID, nil, false
+	}
+	encoded := strings.TrimSpace(modelID[open+1 : len(modelID)-1])
+	if encoded == "" {
+		return modelID, nil, false
+	}
+
+	options := make(map[string]string)
+	for _, part := range strings.Split(encoded, ",") {
+		key, value, ok := strings.Cut(part, "=")
+		key = strings.TrimSpace(key)
+		value = strings.TrimSpace(value)
+		if !ok || key == "" || value == "" {
+			return modelID, nil, false
+		}
+		if _, exists := options[key]; exists {
+			return modelID, nil, false
+		}
+		options[key] = value
+	}
+
+	return modelID[:open], options, true
+}
+
+// MigrateCursorModel converts a legacy Cursor variant ID to the parameterized
+// picker representation. Existing config options win over values encoded in
+// the old ID so a later explicit profile edit is not overwritten. The input
+// map is never mutated.
+func MigrateCursorModel(
+	agentID string,
+	modelID string,
+	configOptions map[string]string,
+) (string, map[string]string, bool) {
+	if agentID != CursorAgentID {
+		return modelID, configOptions, false
+	}
+	bareModelID, variantOptions, ok := ParseVariantModelID(modelID)
+	if !ok {
+		return modelID, configOptions, false
+	}
+
+	merged := make(map[string]string, len(configOptions)+len(variantOptions))
+	for key, value := range configOptions {
+		merged[key] = value
+	}
+	for key, value := range variantOptions {
+		if _, exists := merged[key]; !exists {
+			merged[key] = value
+		}
+	}
+	return bareModelID, merged, true
 }

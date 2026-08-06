@@ -125,7 +125,7 @@ func TestExecuteACPSession_AdvertisesParameterizedModelPickerToCursor(t *testing
 	defer cancel()
 
 	if _, err := e.executeACPSession(ctx, c2aW, a2cR, t.TempDir(),
-		acpcompat.CursorAgentID, "hello", "", "", nil); err != nil {
+		acpcompat.CursorAgentID, "hello", "", nil, "", nil); err != nil {
 		t.Fatalf("executeACPSession: %v", err)
 	}
 
