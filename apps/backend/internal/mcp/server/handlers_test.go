@@ -1221,3 +1221,54 @@ func TestCreateTask_ResponseOmitsDescriptionEcho(t *testing.T) {
 	assert.Contains(t, text.Text, "CREATED")
 	assert.Contains(t, text.Text, "wf-1")
 }
+
+func TestUpdateTask_ResponseOmitsDescriptionEcho(t *testing.T) {
+	backend := &testBackend{response: map[string]interface{}{
+		"id":          "task-A",
+		"title":       "Renamed task",
+		"state":       "RUNNING",
+		"workflow_id": "wf-1",
+		"description": "a very long description the caller just sent",
+	}}
+	s := newTaskModeServer(t, backend, "task-A")
+
+	result := callTool(t, s, "update_task_kandev", map[string]interface{}{
+		"task_id":     "task-A",
+		"title":       "Renamed task",
+		"description": "a very long description the caller just sent",
+	})
+	require.False(t, result.IsError)
+	text, ok := result.Content[0].(mcp.TextContent)
+	require.True(t, ok)
+
+	assert.NotContains(t, text.Text, "a very long description the caller just sent")
+	assert.NotContains(t, text.Text, `"description"`)
+	assert.Contains(t, text.Text, "task-A")
+	assert.Contains(t, text.Text, "Renamed task")
+	assert.Contains(t, text.Text, "RUNNING")
+	assert.Contains(t, text.Text, "wf-1")
+}
+
+// Unlike create_task, update_task is routinely called without a description —
+// a state-only move still returned the task's stored prose, which the caller
+// never asked for and pays thousands of tokens to carry.
+func TestUpdateTask_StateOnlyMove_StillOmitsStoredDescription(t *testing.T) {
+	backend := &testBackend{response: map[string]interface{}{
+		"id":          "task-A",
+		"title":       "Some task",
+		"state":       "DONE",
+		"description": "prose the caller never sent and did not ask for",
+	}}
+	s := newTaskModeServer(t, backend, "task-A")
+
+	result := callTool(t, s, "update_task_kandev", map[string]interface{}{
+		"task_id": "task-A",
+		"state":   "DONE",
+	})
+	require.False(t, result.IsError)
+	text, ok := result.Content[0].(mcp.TextContent)
+	require.True(t, ok)
+
+	assert.NotContains(t, text.Text, "prose the caller never sent")
+	assert.Contains(t, text.Text, "DONE")
+}

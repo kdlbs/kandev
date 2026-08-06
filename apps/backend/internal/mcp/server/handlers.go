@@ -242,6 +242,11 @@ func (s *Server) updateTaskHandler() server.ToolHandlerFunc {
 		if err := s.backend.RequestPayload(ctx, ws.ActionMCPUpdateTask, payload, &result); err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
+		// A write tool confirms the write; it is not a way to read a task's
+		// prose back. The description is either what this call just sent or
+		// unrelated to it — echoing it costs the caller thousands of tokens
+		// either way. Read it deliberately via list_related_tasks_kandev.
+		delete(result, descriptionArg)
 		data, _ := json.MarshalIndent(result, "", "  ")
 		return mcp.NewToolResultText(string(data)), nil
 	}
