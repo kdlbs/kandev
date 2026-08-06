@@ -225,8 +225,11 @@ describe("Workspace settings order", () => {
 
     expect(automationsIndex).toBeGreaterThanOrEqual(0);
     expect(secretsIndex).toBeGreaterThan(automationsIndex);
-    expect(screen.getByRole("link", { name: "Secrets", exact: true })).toBeTruthy();
-    expect(screen.queryByRole("link", { name: "Workspace Secrets", exact: true })).toBeNull();
+    // Anchored so the leaf must be labelled exactly "Secrets" — a rename to
+    // "Workspace Secrets" has to fail here. `ByRoleOptions` has no `exact`
+    // flag; a RegExp is how ByRole expresses a strict accessible-name match.
+    expect(screen.getByRole("link", { name: /^Secrets$/ })).toBeTruthy();
+    expect(screen.queryByRole("link", { name: /^Workspace Secrets$/ })).toBeNull();
   });
 });
 
