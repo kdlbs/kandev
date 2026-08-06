@@ -69,7 +69,8 @@ function NewProfileButton({ agents }: { agents: Agent[] }) {
   );
 }
 
-function ProfileRow({ agent, profile }: { agent: Agent; profile: AgentProfile }) {
+/** One saved profile as a fully clickable row — shared by the Agents index and the agent page. */
+export function ProfileRow({ agent, profile }: { agent: Agent; profile: AgentProfile }) {
   const { t } = useTranslation();
   const { toast } = useToast();
   const router = useRouter();

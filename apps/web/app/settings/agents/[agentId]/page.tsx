@@ -23,6 +23,8 @@ import { agentProfileId as toAgentProfileId } from "@/lib/types/ids";
 import { useAppStore } from "@/components/state-provider";
 import { useAvailableAgents } from "@/hooks/domains/settings/use-available-agents";
 import { deleteAgentAction } from "@/app/actions/agents";
+import { IconPlus } from "@tabler/icons-react";
+import { ProfileRow } from "@/components/settings/agents/agent-profiles-section";
 import { saveNewAgent, saveExistingAgent, isProfileDirty } from "./agent-save-helpers";
 import type { DraftProfile, DraftAgent } from "./agent-save-helpers";
 import { AgentHeader, ProfilesCard } from "./agent-setup-parts";
@@ -464,6 +466,77 @@ function AgentSetupForm({
   );
 }
 
+/**
+ * The agent page for saved agents: agent-level facts (install path, delete)
+ * plus a list of profiles. Profiles are edited on their own page only — the
+ * inline editors live exclusively in the create flow now, so a profile never
+ * has two editors with independent draft state.
+ */
+function AgentOverview({
+  savedAgent,
+  discoveryAgent,
+  onToastError,
+}: {
+  savedAgent: Agent;
+  discoveryAgent: AgentDiscovery | undefined;
+  onToastError: (error: unknown) => void;
+}) {
+  const { t } = useTranslation();
+  const router = useRouter();
+  const availableAgents = useAvailableAgents().items;
+  const displayName =
+    availableAgents.find((item: AvailableAgent) => item.name === savedAgent.name)?.display_name ??
+    savedAgent.name;
+
+  const handleDeleteAgent = async () => {
+    try {
+      await deleteAgentAction(savedAgent.id);
+      router.replace("/settings/agents");
+    } catch (err) {
+      onToastError(err);
+    }
+  };
+
+  return (
+    <div className="space-y-8">
+      <AgentHeader
+        displayName={displayName}
+        matchedPath={discoveryAgent?.matched_path}
+        isCreateMode={false}
+        savedAgent={savedAgent}
+        onDelete={handleDeleteAgent}
+      />
+      <Separator />
+      <div className="space-y-4" data-testid="agent-profile-list">
+        <div className="flex items-center justify-between gap-4">
+          <h3 className="text-lg font-semibold">
+            {t("agents:agentProfilesTitle", { name: displayName })}
+          </h3>
+          <Button size="sm" className="cursor-pointer" asChild>
+            <Link href={`/settings/agents/${encodeURIComponent(savedAgent.name)}?mode=create`}>
+              <IconPlus className="h-4 w-4 mr-2" />
+              {t("agents:newProfile")}
+            </Link>
+          </Button>
+        </div>
+        {savedAgent.profiles.length === 0 ? (
+          <Card>
+            <CardContent className="py-8 text-center">
+              <p className="text-sm text-muted-foreground">{t("agents:noProfilesYet")}</p>
+            </CardContent>
+          </Card>
+        ) : (
+          <div className="grid gap-2">
+            {savedAgent.profiles.map((profile) => (
+              <ProfileRow key={profile.id} agent={savedAgent} profile={profile} />
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function AgentSetupPage() {
   const { t } = useTranslation();
   const { toast } = useToast();
@@ -553,6 +626,18 @@ export default function AgentSetupPage() {
       variant: "error",
     });
   };
+
+  // Saved agents get the list view; the inline editor only serves creation
+  // (new agent from browse, or "New profile" via ?mode=create).
+  if (savedAgent && !isCreateMode) {
+    return (
+      <AgentOverview
+        savedAgent={savedAgent}
+        discoveryAgent={discoveryAgent}
+        onToastError={handleToastError}
+      />
+    );
+  }
 
   return (
     <AgentSetupForm
