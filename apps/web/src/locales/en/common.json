@@ -36,7 +36,7 @@
   "cliPassthrough": "CLI passthrough",
   "close": "Close",
   "commandAgentsSettingsKeywords": "agents, agent settings, agent profiles, installed agents, claude",
-  "commandArchiveTaskKeywords": "archive, archive task, archive current task, close task, done, finish task, put away",
+  "commandArchiveTaskKeywords": "archive, archive task, archive current task, close task, finish task, put away",
   "commandConfigChatKeywords": "config chat, config mode, configure kandev, workflow configuration, mcp configuration",
   "commandExecutorsSettingsKeywords": "executors, executor profiles, execution environment, environment variables, runtime, compute",
   "commandGoToAllTasks": "Go to All Tasks",

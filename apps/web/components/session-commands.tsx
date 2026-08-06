@@ -31,7 +31,7 @@ import { createFile } from "@/lib/ws/workspace-files";
 import { useDockviewStore } from "@/lib/state/dockview-store";
 import { NewSessionDialog } from "@/components/task/new-session-dialog";
 import { NewSubtaskDialog } from "@/components/task/new-subtask-dialog";
-import { TaskArchiveConfirmDialog } from "@/components/task/task-archive-confirm-dialog";
+import { TaskArchiveConfirmFlow } from "@/components/task/task-archive-confirm-flow";
 import { useTaskArchiveConfirm } from "@/hooks/use-task-archive-confirm";
 import { searchKeywords } from "@/lib/commands/search-keywords";
 import type { CommandItem } from "@/lib/commands/types";
@@ -311,16 +311,9 @@ function SessionCommandDialogs({
         parentTaskId={activeTaskId}
         parentTaskTitle={activeTaskTitle}
       />
-      <TaskArchiveConfirmDialog
-        open={archive.target !== null}
-        onOpenChange={(open) => {
-          if (!open) archive.closeConfirm();
-        }}
-        taskTitle={archive.target?.title ?? ""}
+      <TaskArchiveConfirmFlow
         taskId={activeTaskId}
-        executorType={archive.target?.executorType}
-        isArchiving={archive.isPending}
-        onConfirm={archive.confirmArchive}
+        archive={archive}
         confirmTestId="palette-archive-confirm"
       />
     </>

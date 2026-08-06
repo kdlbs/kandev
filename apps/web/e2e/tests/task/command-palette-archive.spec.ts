@@ -84,10 +84,22 @@ test.describe("Command palette archive", () => {
     await apiClient.archiveTask(task.id);
 
     await testPage.goto(`/t/${task.id}`);
+    // The Unarchive control only renders once the detail view has the archived
+    // task, so waiting on it keeps the shortcut press from racing hydration.
+    await expect(testPage.getByTestId("task-unarchive-button")).toBeVisible({ timeout: 15_000 });
     const modifier = process.platform === "darwin" ? "Meta" : "Control";
     await testPage.keyboard.press(`${modifier}+k`);
     const dialog = testPage.getByRole("dialog");
     await expect(dialog).toBeVisible({ timeout: 10_000 });
+
+    // Positive control: the other task command is registered, so an empty
+    // archive result proves the command is hidden rather than not yet loaded.
+    await dialog.getByRole("combobox").fill("subtask");
+    await expect(
+      dialog
+        .getByRole("option")
+        .filter({ has: testPage.getByText("Create Subtask", { exact: true }) }),
+    ).toBeVisible();
 
     await dialog.getByRole("combobox").fill("archive");
     await expect(

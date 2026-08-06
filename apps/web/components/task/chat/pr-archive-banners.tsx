@@ -2,7 +2,7 @@
 
 import { useCallback, useState, type ReactNode } from "react";
 import { IconGitMerge, IconGitPullRequestClosed, IconX } from "@tabler/icons-react";
-import { TaskArchiveConfirmDialog } from "@/components/task/task-archive-confirm-dialog";
+import { TaskArchiveConfirmFlow } from "@/components/task/task-archive-confirm-flow";
 import { useAppStore } from "@/components/state-provider";
 import { useTaskArchiveConfirm } from "@/hooks/use-task-archive-confirm";
 import {
@@ -37,8 +37,7 @@ function ArchiveDismissBanner({
   onDismiss: () => void;
 }) {
   const { t } = useTranslation();
-  const { target, requestArchive, closeConfirm, confirmArchive, isPending } =
-    useTaskArchiveConfirm(taskId);
+  const archive = useTaskArchiveConfirm(taskId);
   return (
     <>
       <div data-testid={`${testIdPrefix}-banner`} className={containerClass}>
@@ -47,7 +46,7 @@ function ArchiveDismissBanner({
         <button
           type="button"
           data-testid={`${testIdPrefix}-archive-button`}
-          onClick={requestArchive}
+          onClick={archive.requestArchive}
           className={archiveClass}
         >
           {t("task:archive")}
@@ -62,16 +61,9 @@ function ArchiveDismissBanner({
           <IconX className="h-3 w-3" />
         </button>
       </div>
-      <TaskArchiveConfirmDialog
-        open={target !== null}
-        onOpenChange={(open) => {
-          if (!open) closeConfirm();
-        }}
-        taskTitle={target?.title ?? ""}
+      <TaskArchiveConfirmFlow
         taskId={taskId}
-        executorType={target?.executorType}
-        isArchiving={isPending}
-        onConfirm={confirmArchive}
+        archive={archive}
         confirmTestId={`${testIdPrefix}-archive-confirm`}
       />
     </>
