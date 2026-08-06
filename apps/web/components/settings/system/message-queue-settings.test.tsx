@@ -226,6 +226,9 @@ describe("MessageQueueSettings — merge toggle", () => {
     expect(
       screen.getByText(/Only adjacent messages from the same sender can be merged/),
     ).toBeTruthy();
+    expect(
+      screen.getByText(/more than 100 entity references, the shared per-message limit/),
+    ).toBeTruthy();
   });
 
   it("stages a toggle change and PATCHes merge_enabled without touching max_per_session", async () => {
