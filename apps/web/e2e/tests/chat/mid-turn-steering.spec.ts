@@ -15,13 +15,24 @@ import { SessionPage } from "../../pages/session-page";
 // tiptap placeholder is a cursor-anchored decoration and only renders under
 // focus, so asserting message delivery is the robust signal.
 
+interface SeedRunningGeneratingSessionOptions {
+  // Duration for the default `/sleep N` predecessor. Ignored when
+  // predecessorPrompt is set.
+  sleepSeconds?: number;
+  // Overrides the default `/sleep N` predecessor entirely — used by the
+  // folded/deferred tests to seed steer-fold-setup / steer-defer-setup
+  // instead.
+  predecessorPrompt?: string;
+}
+
 async function seedRunningGeneratingSession(
   testPage: Page,
   apiClient: ApiClient,
   seedData: SeedData,
   title: string,
-  sleepSeconds = 20,
+  options: SeedRunningGeneratingSessionOptions = {},
 ): Promise<{ session: SessionPage; taskId: string; sessionId: string }> {
+  const { sleepSeconds = 20, predecessorPrompt } = options;
   const task = await apiClient.createTaskWithAgent(
     seedData.workspaceId,
     title,
@@ -39,7 +50,9 @@ async function seedRunningGeneratingSession(
   await session.waitForChatIdle({ timeout: 30_000 });
   // A no-tool sleep holds the foreground turn open and generating — the exact
   // state that normally queues input, so it isolates the steering gate.
-  await session.sendMessage(`/sleep ${sleepSeconds}`);
+  // steer-fold-setup/steer-defer-setup hold the same way, but differ in
+  // whether they answer on their own first (see the folded/deferred tests).
+  await session.sendMessage(predecessorPrompt ?? `/sleep ${sleepSeconds}`);
   await expect(session.agentStatus()).toBeVisible({ timeout: 15_000 });
   await waitForActiveSessionForegroundActivity(testPage, "generating");
   if (!task.session_id) throw new Error("createTaskWithAgent did not return a session_id");
@@ -115,7 +128,7 @@ test.describe.serial("Claude mid-turn steering experiment", () => {
         apiClient,
         seedData,
         "Mid-turn steering queue order",
-        60,
+        { sleepSeconds: 60 },
       );
 
       await waitForActiveSessionSupportsSteering(testPage, true);
@@ -134,6 +147,100 @@ test.describe.serial("Claude mid-turn steering experiment", () => {
       await expect(entries).toHaveCount(2, { timeout: 10_000 });
       await expect(entries.nth(0)).toHaveText("already queued");
       await expect(entries.nth(1)).toHaveText("steer after queued");
+    });
+
+    // The two outcomes below replay the mid-turn steering spec's "folded" vs
+    // "deferred" outcome taxonomy (docs/specs/platform/mid-turn-steering.md)
+    // via the dedicated mock-agent setup scenarios: steer-fold-setup never
+    // answers on its own (task 08's mock-replay acceptance for "folded" —
+    // pinned deterministically at the mock level by
+    // TestSteerFoldSetupEmitsNoAnswerUntilCancelled), steer-defer-setup
+    // answers immediately and then holds (mock-replay acceptance for
+    // "deferred", pinned by TestSteerDeferSetupAnswersBeforeHolding). Both
+    // outcomes are success, per spec — these E2E cases prove the full stack
+    // (not just the mock) delivers a steer against each predecessor shape
+    // without error. The steer's own reply text is intentionally free-form
+    // (routed through the mock's default responder, which mixes in random
+    // tool calls before its guaranteed final echo line) so message-count
+    // assertions here would be flaky by construction — only the delivered
+    // marker text is asserted, matching the "enabled" describe block's
+    // existing pattern above.
+    test("delivers a folded steer with no separate predecessor answer", async ({
+      testPage,
+      apiClient,
+      seedData,
+    }) => {
+      test.setTimeout(120_000);
+      const { session } = await seedRunningGeneratingSession(
+        testPage,
+        apiClient,
+        seedData,
+        "Mid-turn steering folded",
+        { predecessorPrompt: "/e2e:steer-fold-setup" },
+      );
+
+      await waitForActiveSessionSupportsSteering(testPage, true);
+      // The predecessor is silent by construction (see the unit test above),
+      // so nothing but the steer's own eventual answer should appear here.
+      await expect(
+        session.activeChat().getByText("Predecessor turn's own answer", { exact: false }),
+      ).not.toBeVisible();
+
+      const editor = session.activeChat().locator(".tiptap.ProseMirror:visible");
+      await typeWhileBusy(testPage, editor, "steer: fold into the running turn");
+      await testPage.getByTestId("submit-message-button").click();
+
+      await expect(
+        session
+          .activeChat()
+          .getByTestId("user-message-bubble")
+          .filter({ hasText: "steer: fold into the running turn" }),
+      ).toBeVisible({ timeout: 15_000 });
+      await expect(
+        testPage.getByText("steer: fold into the running turn", { exact: false }),
+      ).toHaveCount(2, { timeout: 15_000 });
+      await expect(testPage.getByTestId("queue-chip")).not.toBeVisible();
+    });
+
+    test("delivers a deferred steer whose predecessor answers first, with no error or version warning", async ({
+      testPage,
+      apiClient,
+      seedData,
+    }) => {
+      test.setTimeout(120_000);
+      const { session } = await seedRunningGeneratingSession(
+        testPage,
+        apiClient,
+        seedData,
+        "Mid-turn steering deferred",
+        { predecessorPrompt: "/e2e:steer-defer-setup" },
+      );
+
+      await waitForActiveSessionSupportsSteering(testPage, true);
+      const predecessorAnswer = session
+        .activeChat()
+        .getByText("Predecessor turn's own answer, delivered before any steer arrives.");
+      await expect(predecessorAnswer).toBeVisible({ timeout: 15_000 });
+
+      const editor = session.activeChat().locator(".tiptap.ProseMirror:visible");
+      await typeWhileBusy(testPage, editor, "steer: run as your own turn");
+      await testPage.getByTestId("submit-message-button").click();
+
+      await expect(
+        session
+          .activeChat()
+          .getByTestId("user-message-bubble")
+          .filter({ hasText: "steer: run as your own turn" }),
+      ).toBeVisible({ timeout: 15_000 });
+      await expect(testPage.getByText("steer: run as your own turn", { exact: false })).toHaveCount(
+        2,
+        { timeout: 15_000 },
+      );
+      // Deferred: the predecessor's own answer must still be there, alongside
+      // the steer's own separate answer — neither turn clobbers the other.
+      await expect(predecessorAnswer).toBeVisible();
+      await expect(testPage.getByTestId("last-agent-error-notice")).not.toBeVisible();
+      await expect(testPage.getByTestId("toast-message")).not.toBeVisible();
     });
   });
 
