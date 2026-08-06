@@ -125,3 +125,10 @@ now registers the existing authorized task cleanup service as an orchestrator po
 hook and runs it before the task enters review. The regression proves cleanup observes the stopped
 executor and precedes the review transition; it passed 20 repetitions, the full orchestrator and
 backend-app packages, and backend lint.
+
+A later Codex review found cleanup released capacity and wrote `off` even when both per-language
+Stop and task-host teardown failed, despite the process possibly remaining live. Cleanup now retains
+that generation's slot and publishes `task_host_stop_failed` until process absence is proven. A
+successful full task-host cleanup remains an authoritative fallback and then releases the slot and
+clears the error. Both failure and fallback regressions passed 20 repetitions under `-race`, along
+with the full controller race suite.

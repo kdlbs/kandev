@@ -636,6 +636,7 @@ type fakeLSPHost struct {
 	startRelease       chan struct{}
 	startErr           error
 	startErrorSnapshot *RuntimeSnapshot
+	stopErr            error
 	discovery          *DiscoveryResult
 	discoveryErr       error
 	discoveries        int
@@ -736,6 +737,9 @@ func (f *fakeLSPHost) StopTaskLSP(_ context.Context, request TaskHostStopRequest
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.stopCalls++
+	if f.stopErr != nil {
+		return nil, f.stopErr
+	}
 	snapshot := RuntimeSnapshot{Language: request.Language, Generation: request.Generation, Phase: PhaseOff}
 	f.snapshots[request.Language] = snapshot
 	return &snapshot, nil

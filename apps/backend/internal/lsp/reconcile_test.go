@@ -152,6 +152,64 @@ func TestCleanupPreservesPolicyAndStopsEveryTaskLanguage(t *testing.T) {
 	}
 }
 
+func TestCleanupRetainsCapacityWhenStopAndTaskHostCleanupFail(t *testing.T) {
+	store := newMemoryLSPStore()
+	seedLSPState(t, store, TaskLanguageState{
+		TaskID: "task-1", Language: "kotlin", Policy: PolicyKeepWarm,
+		DetectionState: DetectionComplete, Phase: PhaseReady, Generation: 3,
+		LastInitiator: InitiatorUser,
+	})
+	stopFailure := errors.New("language server may still be running")
+	cleanupFailure := errors.New("task host cleanup failed")
+	host := newFakeLSPHost()
+	host.stopErr = stopFailure
+	runtimes := newReconcileRuntimes()
+	runtimes.existing["env-task-1"] = host
+	runtimes.cleanupErr = cleanupFailure
+	capacity := NewCapacity(8)
+	capacity.Adopt(TaskLanguageKey{TaskID: "task-1", Language: "kotlin"}, 3)
+	controller := newReconcileController(store, runtimes, capacity)
+
+	err := controller.CleanupTask(context.Background(), "task-1", "task_archived")
+	if !errors.Is(err, stopFailure) || !errors.Is(err, cleanupFailure) {
+		t.Fatalf("cleanup error = %v, want stop and task-host failures", err)
+	}
+	if capacity.Active() != 1 {
+		t.Fatalf("active capacity = %d, want retained slot", capacity.Active())
+	}
+	state := storedLSPState(t, store, "task-1", "kotlin")
+	if state.Phase != PhaseError || state.ErrorCode != "task_host_stop_failed" {
+		t.Fatalf("failed cleanup state = %#v", state)
+	}
+}
+
+func TestCleanupTaskHostFallbackReleasesFailedLanguage(t *testing.T) {
+	store := newMemoryLSPStore()
+	seedLSPState(t, store, TaskLanguageState{
+		TaskID: "task-1", Language: "kotlin", Policy: PolicyKeepWarm,
+		DetectionState: DetectionComplete, Phase: PhaseReady, Generation: 3,
+		LastInitiator: InitiatorUser,
+	})
+	host := newFakeLSPHost()
+	host.stopErr = errors.New("per-language stop failed")
+	runtimes := newReconcileRuntimes()
+	runtimes.existing["env-task-1"] = host
+	capacity := NewCapacity(8)
+	capacity.Adopt(TaskLanguageKey{TaskID: "task-1", Language: "kotlin"}, 3)
+	controller := newReconcileController(store, runtimes, capacity)
+
+	if err := controller.CleanupTask(context.Background(), "task-1", "task_archived"); err != nil {
+		t.Fatalf("task-host fallback cleanup: %v", err)
+	}
+	if capacity.Active() != 0 {
+		t.Fatalf("active capacity = %d, want released slot", capacity.Active())
+	}
+	state := storedLSPState(t, store, "task-1", "kotlin")
+	if state.Phase != PhaseOff || state.ErrorCode != "" {
+		t.Fatalf("fallback-cleaned state = %#v", state)
+	}
+}
+
 func TestCleanupCancelsTaskWorkWhenEnvironmentLookupFails(t *testing.T) {
 	store := newMemoryLSPStore()
 	seedLSPState(t, store, TaskLanguageState{
@@ -220,6 +278,7 @@ type reconcileRuntimes struct {
 	cleanupCalls       int
 	cleanupEnvironment string
 	cleanupReason      string
+	cleanupErr         error
 }
 
 func newReconcileRuntimes() *reconcileRuntimes {
@@ -258,6 +317,9 @@ func (r *reconcileRuntimes) CleanupTaskHost(_ context.Context, environmentID, re
 	r.cleanupCalls++
 	r.cleanupEnvironment = environmentID
 	r.cleanupReason = reason
+	if r.cleanupErr != nil {
+		return r.cleanupErr
+	}
 	delete(r.existing, environmentID)
 	return nil
 }

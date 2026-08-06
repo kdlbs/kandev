@@ -137,3 +137,10 @@ and backend lint pass.
 CodeQL review then found that adding header and payload lengths directly in the frame allocation
 could theoretically overflow `int`. The peer now rejects invalid/overflowing frame sizes before
 allocation. Exact wire-format and maximum-size overflow tests pass 20 repetitions under `-race`.
+
+A later Codex review found that Start held the per-language operation lock during installer work,
+so Stop could not reach task-host cleanup to cancel that installer. Starts now register a
+generation-aware child context before taking the operation lock; Stop cancels the matching pending
+start before waiting for the lock, which also drains the canceled install before returning. The
+blocked-installer regression passed 20 repetitions under `-race`, and the full task-host LSP race
+suite passed with goleak enabled.

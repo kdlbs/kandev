@@ -324,6 +324,12 @@ Completed 2026-08-05.
   packages passed under `-race`, the orchestrator/backend wiring packages passed, and backend lint
   reported zero issues. CodeQL then identified a theoretical frame-allocation overflow; frame size
   arithmetic is now checked before allocation, with focused overflow and wire-format coverage.
+- A later Codex review found two teardown races. Each synchronous task-host Start now registers a
+  generation-aware cancelable operation before taking the language slot, allowing Stop/task cleanup
+  to cancel and drain an in-flight installer instead of waiting for it to finish. Controller cleanup
+  now retains capacity and publishes an actionable error when both per-language Stop and task-host
+  cleanup fail; successful task-host fallback is treated as proof that the process is gone. Both
+  regressions passed 20 repetitions under `-race`, as did the full supervisor/controller race suite.
 
 ---
 
