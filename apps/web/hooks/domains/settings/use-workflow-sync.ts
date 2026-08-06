@@ -64,11 +64,15 @@ function configToForm(cfg: WorkflowSyncConfig | null): WorkflowSyncFormState {
 // parse can always get it right. Baking branch/path back into this field
 // would let it silently disagree with the authoritative Branch/Directory
 // fields after a direct edit.
-function displayUrl(form: Pick<WorkflowSyncFormState, "provider" | "repo_owner" | "repo_name" | "project_path">): string {
+function displayUrl(
+  form: Pick<WorkflowSyncFormState, "provider" | "repo_owner" | "repo_name" | "project_path">,
+): string {
   if (form.provider === "gitlab") {
     return form.project_path;
   }
-  return form.repo_owner ? buildGitHubRepoUrl({ owner: form.repo_owner, repo: form.repo_name }) : "";
+  return form.repo_owner
+    ? buildGitHubRepoUrl({ owner: form.repo_owner, repo: form.repo_name })
+    : "";
 }
 
 function parseRepoUrl(provider: WorkflowSyncProvider, value: string) {

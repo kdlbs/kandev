@@ -157,7 +157,12 @@ describe("useWorkflowSync — link field redisplay", () => {
 
   it("redisplays only the repo identity, not branch or directory", async () => {
     getWorkflowSyncConfigMock.mockResolvedValue(
-      makeConfig({ repo_owner: "acme", repo_name: "flows", branch: "release/1.2", path: "custom/dir" }),
+      makeConfig({
+        repo_owner: "acme",
+        repo_name: "flows",
+        branch: "release/1.2",
+        path: "custom/dir",
+      }),
     );
     const { result } = renderHook(() => useWorkflowSync("ws-1"));
     await waitFor(() => expect(result.current.loading).toBe(false));

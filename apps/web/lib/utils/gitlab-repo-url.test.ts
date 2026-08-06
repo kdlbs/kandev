@@ -32,19 +32,19 @@ describe("parseGitLabProjectUrl", () => {
     expect(parseGitLabProjectUrl(`git@gitlab.com:${PROJECT}.git`)).toEqual({
       projectPath: PROJECT,
     });
-    expect(parseGitLabProjectUrl(`git@gitlab.internal.example.com:${NESTED_PROJECT}.git`)).toEqual(
-      { projectPath: NESTED_PROJECT },
-    );
+    expect(parseGitLabProjectUrl(`git@gitlab.internal.example.com:${NESTED_PROJECT}.git`)).toEqual({
+      projectPath: NESTED_PROJECT,
+    });
   });
 
   it("extracts branch and directory from a /-/tree/ link", () => {
-    expect(
-      parseGitLabProjectUrl(`${HOST}/${NESTED_PROJECT}/-/tree/main/${WORKFLOWS_DIR}`),
-    ).toEqual({
-      projectPath: NESTED_PROJECT,
-      branch: "main",
-      path: WORKFLOWS_DIR,
-    });
+    expect(parseGitLabProjectUrl(`${HOST}/${NESTED_PROJECT}/-/tree/main/${WORKFLOWS_DIR}`)).toEqual(
+      {
+        projectPath: NESTED_PROJECT,
+        branch: "main",
+        path: WORKFLOWS_DIR,
+      },
+    );
   });
 
   it("extracts branch without path from a branch-root /-/tree/ link", () => {

@@ -1635,6 +1635,22 @@ export class ApiClient {
     });
   }
 
+  // mockGitLabAddRepoFiles seeds repository content (as opposed to
+  // mockGitLabAddFiles, which seeds files changed on a merge request) — used
+  // by workflow sync e2e specs to seed the directory the sync reads.
+  async mockGitLabAddRepoFiles(
+    workspaceId: string,
+    project: string,
+    ref: string,
+    files: Array<{ path: string; content: string }>,
+  ): Promise<void> {
+    await this.request(
+      "POST",
+      this.gitLabWorkspacePath("/api/v1/gitlab/mock/repo-files", workspaceId),
+      { project, ref, files },
+    );
+  }
+
   async mockGitLabAddCommits(
     workspaceId: string,
     project: string,

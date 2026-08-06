@@ -81,7 +81,9 @@ function RepoUrlField({ provider, url, invalid, resolved, onChange }: RepoUrlFie
   // match it.
   const placeholder = provider === "gitlab" ? "group/project" : "https://github.com/kdlbs/kandev";
   const hint =
-    provider === "gitlab" ? t("workflows:pasteGitLabPathHint") : t("workflows:pasteRepositoryLinkHint", { provider: providerLabel });
+    provider === "gitlab"
+      ? t("workflows:pasteGitLabPathHint")
+      : t("workflows:pasteRepositoryLinkHint", { provider: providerLabel });
   return (
     <div className="space-y-1.5">
       <Label htmlFor="workflow-sync-url">
@@ -197,17 +199,28 @@ function resolvedTarget(t: TFunction, form: WorkflowSyncFormState): string {
   const branch = form.branch || "main";
   if (form.provider === "gitlab") {
     return form.project_path
-      ? t("workflows:syncResolvedTargetGitLab", { projectPath: form.project_path, branch, directory })
+      ? t("workflows:syncResolvedTargetGitLab", {
+          projectPath: form.project_path,
+          branch,
+          directory,
+        })
       : "";
   }
   return form.repo_owner
-    ? t("workflows:syncResolvedTarget", { owner: form.repo_owner, repo: form.repo_name, branch, directory })
+    ? t("workflows:syncResolvedTarget", {
+        owner: form.repo_owner,
+        repo: form.repo_name,
+        branch,
+        directory,
+      })
     : "";
 }
 
 function isSaveDisabled(sync: WorkflowSyncController, intervalInvalid: boolean): boolean {
   const targetMissing =
-    sync.form.provider === "gitlab" ? !sync.form.project_path.trim() : !sync.form.repo_owner.trim() || !sync.form.repo_name.trim();
+    sync.form.provider === "gitlab"
+      ? !sync.form.project_path.trim()
+      : !sync.form.repo_owner.trim() || !sync.form.repo_name.trim();
   return sync.saving || sync.loading || sync.urlInvalid || intervalInvalid || targetMissing;
 }
 
@@ -247,7 +260,10 @@ export function WorkflowSyncDialog({ open, onOpenChange, sync }: WorkflowSyncDia
         <div className="space-y-4">
           <ProviderField provider={sync.form.provider} onChange={sync.setProvider} />
           {switchingProvider && (
-            <p className="text-xs text-destructive" data-testid="workflow-sync-provider-switch-warning">
+            <p
+              className="text-xs text-destructive"
+              data-testid="workflow-sync-provider-switch-warning"
+            >
               {t("workflows:switchProviderWarning")}
             </p>
           )}

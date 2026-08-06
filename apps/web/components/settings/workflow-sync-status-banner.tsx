@@ -26,7 +26,9 @@ function syncState(config: WorkflowSyncConfig): SyncState {
 // syncSourceLabel is the human-readable sync source: "owner/repo" for GitHub,
 // the namespace path (already "group/project" shaped) for GitLab.
 function syncSourceLabel(config: WorkflowSyncConfig): string {
-  return config.provider === "gitlab" ? config.project_path : `${config.repo_owner}/${config.repo_name}`;
+  return config.provider === "gitlab"
+    ? config.project_path
+    : `${config.repo_owner}/${config.repo_name}`;
 }
 
 function StateIcon({ state }: { state: SyncState }) {
