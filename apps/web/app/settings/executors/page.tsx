@@ -17,7 +17,6 @@ import {
   DialogTitle,
 } from "@kandev/ui/dialog";
 import { useAppStore } from "@/components/state-provider";
-import { SpritesSettings } from "@/components/settings/sprites-settings";
 import { deleteExecutorProfile } from "@/lib/api/domains/settings-api";
 import { EXECUTOR_ICON_MAP, getExecutorLabel } from "@/lib/executor-icons";
 import type { Executor, ExecutorProfile } from "@/lib/types/http";
@@ -258,9 +257,6 @@ export default function ExecutorsHubPage() {
           ))}
         </div>
       </div>
-      <Separator />
-      {/* Sprites.dev connection and instances: config for the sprites executor backend. */}
-      <SpritesSettings />
       <DeleteProfileDialog
         profileName={profileToDelete?.name}
         open={Boolean(deleteProfileId)}
