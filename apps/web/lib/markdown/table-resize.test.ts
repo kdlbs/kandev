@@ -17,4 +17,8 @@ describe("resizeAdjacentColumns", () => {
   it("leaves widths unchanged when the boundary is invalid", () => {
     expect(resizeAdjacentColumns([120, 180], 1, 20)).toEqual([120, 180]);
   });
+
+  it("leaves a sub-128-pixel pair unchanged when both minimums cannot fit", () => {
+    expect(resizeAdjacentColumns([63, 64, 240], 0, 20)).toEqual([63, 64, 240]);
+  });
 });

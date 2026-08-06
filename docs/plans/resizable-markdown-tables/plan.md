@@ -21,7 +21,9 @@ resize controls.
 Add a small pure geometry module under `apps/web/lib/markdown/` that adjusts an
 adjacent width pair while preserving its sum and enforcing the 64-pixel minimum.
 Use the same function for pointer and keyboard input so clamping behavior has one
-testable source of truth.
+testable source of truth. If the pair totals less than 128 pixels, leave both
+widths unchanged because the total-width and dual-minimum constraints cannot
+otherwise both hold.
 
 ### Resizable table component
 
@@ -35,6 +37,10 @@ likely `apps/web/components/shared/resizable-markdown-table.tsx`.
 - Place focusable `role="separator"` controls in an overlay within the table's
   scroll content. Each control is centered on an internal boundary, spans the
   full table height, and scrolls with the table.
+- Give each separator an adjacent-column accessible name, vertical orientation,
+  a 64-pixel minimum, the rounded current left-column width, and a maximum equal
+  to the pair total minus the right-column minimum. Verify those rendered ARIA
+  semantics in Playwright alongside keyboard behavior.
 - On first adjustment, snapshot measured widths and apply them through a
   `<colgroup>` with fixed table layout. Keep the measured table width constant so
   one adjacent column grows exactly as the other shrinks.

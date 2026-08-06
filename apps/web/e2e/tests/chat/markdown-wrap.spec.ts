@@ -201,6 +201,12 @@ test.describe("Markdown text wrapping", () => {
     const initialWidths = await cells.evaluateAll((elements) =>
       elements.map((element) => element.getBoundingClientRect().width),
     );
+    await expect(separator).toHaveAttribute("role", "separator");
+    await expect(separator).toHaveAccessibleName("Resize table columns 1 and 2");
+    await expect(separator).toHaveAttribute("aria-orientation", "vertical");
+    await expect(separator).toHaveAttribute("aria-valuemin", "64");
+    await expect(separator).toHaveAttribute("aria-valuenow", String(Math.round(initialWidths[0])));
+    expect(Number(await separator.getAttribute("aria-valuemax"))).toBeGreaterThan(initialWidths[0]);
     const initialTableWidth = await table.evaluate(
       (element) => element.getBoundingClientRect().width,
     );

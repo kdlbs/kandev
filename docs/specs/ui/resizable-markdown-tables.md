@@ -23,14 +23,20 @@ editing the source Markdown or opening another view.
 - Dragging a separator changes only the two adjacent columns. Their combined
   width and the table's total width remain unchanged, and neither column may be
   reduced below 64 CSS pixels.
+- An adjacent pair measuring less than 128 CSS pixels cannot satisfy both
+  64-pixel minimums. Its separator does not move, preserving both the pair total
+  and minimum-width contract.
 - The first resize begins from the browser's measured automatic layout. Custom
   widths then remain in component memory for that mounted table only.
 - Double-clicking any separator clears every custom width on that table and
   returns it to the current automatic layout. It does not restore a stale pixel
   snapshot.
 - A focused separator supports `ArrowLeft` and `ArrowRight` in 8-pixel steps.
-  `Enter` resets the whole table. It exposes separator orientation and current
-  width information to assistive technology.
+  `Enter` resets the whole table. Each control has `role="separator"`, an
+  accessible name identifying its adjacent one-based column numbers,
+  `aria-orientation="vertical"`, `aria-valuemin="64"`, `aria-valuenow` equal to
+  the rounded current left-column width, and `aria-valuemax` equal to the
+  adjacent pair total minus the 64-pixel right-column minimum.
 - Hover, keyboard focus, and active dragging make the complete boundary line
   visible. Normal links, selection, and scrolling remain interactive outside
   the separator's narrow hit area.

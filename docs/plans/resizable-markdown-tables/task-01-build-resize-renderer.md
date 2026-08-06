@@ -14,8 +14,13 @@ spec: "../../specs/ui/resizable-markdown-tables.md"
 
 - Shared Markdown tables render accessible full-height internal separators only
   on non-phone fine-pointer layouts with valid multi-column geometry.
+- Every separator exposes its adjacent-column accessible name, vertical
+  orientation, 64-pixel minimum, rounded current left-column width, and the
+  pair-derived maximum through the complete ARIA separator contract.
 - Pointer and keyboard adjustment resize only adjacent columns, preserve the
   table width, and enforce a 64-pixel minimum.
+- Adjacent pairs below 128 pixels remain unchanged because both minimum widths
+  cannot fit while preserving their total.
 - Double-click and `Enter` clear all custom widths and restore CSS automatic
   layout; unmount, reload, and column-count changes retain no state.
 - Existing two-/three-column wrapping and four-plus-column local scrolling CSS
