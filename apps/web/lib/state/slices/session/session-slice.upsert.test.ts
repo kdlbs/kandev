@@ -378,6 +378,16 @@ describe("queue actions", () => {
     });
   });
 
+  it("retains a disabled merge state", () => {
+    const store = makeStore();
+    store.getState().setQueueEntries(SESSION_ID, [makeEntry()], {
+      count: 1,
+      max: 10,
+      mergeEnabled: false,
+    });
+    expect(store.getState().queue.metaBySessionId[SESSION_ID]?.mergeEnabled).toBe(false);
+  });
+
   it("removeQueueEntry drops a single entry by id and refreshes meta.count", () => {
     const store = makeStore();
     const entries = [makeEntry({ id: "e1" }), makeEntry({ id: "e2" }), makeEntry({ id: "e3" })];
