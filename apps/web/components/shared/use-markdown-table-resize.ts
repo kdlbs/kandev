@@ -65,6 +65,7 @@ function useTableGeometry(
   refs: TableRefs,
   widthsRef: RefObject<number[] | null>,
   reset: () => void,
+  columnWidths: number[] | null,
 ) {
   const [geometry, setGeometry] = useState<TableGeometry | null>(null);
   const measure = useCallback(() => {
@@ -81,8 +82,9 @@ function useTableGeometry(
     setGeometry(next);
   }, [enabled, refs, reset, widthsRef]);
 
+  useLayoutEffect(() => measure(), [columnWidths, measure]);
+
   useLayoutEffect(() => {
-    measure();
     const table = refs.tableRef.current;
     const wrapper = refs.wrapperRef.current;
     if (!enabled || !table || !wrapper) return;
@@ -213,7 +215,7 @@ export function useMarkdownTableResize(enabled: boolean) {
     setColumnWidths(null);
     setFixedTableWidth(null);
   }, [setColumnWidths]);
-  const geometry = useTableGeometry(enabled, refs, widthsRef, reset);
+  const geometry = useTableGeometry(enabled, refs, widthsRef, reset, columnWidths);
   const pointerResize = usePointerResize({
     enabled,
     fixedTableWidth,

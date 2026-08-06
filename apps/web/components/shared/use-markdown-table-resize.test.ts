@@ -33,6 +33,7 @@ function rect(left: number, top: number, width: number, height: number): DOMRect
 }
 
 function createTableGeometry(widths: number[]) {
+  let measuredWidths = [...widths];
   const wrapper = document.createElement("div");
   const table = document.createElement("table");
   const row = table.insertRow();
@@ -45,16 +46,23 @@ function createTableGeometry(widths: number[]) {
   Object.defineProperty(table, "getBoundingClientRect", {
     value: () => rect(10, 20, 300, 100),
   });
-  let left = 10;
-  for (const width of widths) {
+  widths.forEach((_, index) => {
     const cell = row.insertCell();
-    const cellLeft = left;
     Object.defineProperty(cell, "getBoundingClientRect", {
-      value: () => rect(cellLeft, 20, width, 30),
+      value: () => {
+        const left = 10 + measuredWidths.slice(0, index).reduce((sum, width) => sum + width, 0);
+        return rect(left, 20, measuredWidths[index] ?? 0, 30);
+      },
     });
-    left += width;
-  }
-  return { row, table, wrapper };
+  });
+  return {
+    row,
+    setMeasuredWidths: (next: number[]) => {
+      measuredWidths = next;
+    },
+    table,
+    wrapper,
+  };
 }
 
 function renderResizeHook() {
@@ -104,6 +112,16 @@ describe("useMarkdownTableResize", () => {
     expect(enter.preventDefault).toHaveBeenCalledOnce();
     expect(result.current.columnWidths).toBeNull();
     expect(result.current.fixedTableWidth).toBeNull();
+  });
+
+  it("remeasures separator geometry when controlled widths change", () => {
+    const { result, setMeasuredWidths } = renderResizeHook();
+    expect(result.current.geometry?.boundaries[0]).toBe(120);
+
+    setMeasuredWidths([140, 160]);
+    act(() => result.current.resizeWithKeyboard(0, keyboardEvent("ArrowRight") as never));
+
+    expect(result.current.geometry?.boundaries[0]).toBe(140);
   });
 
   it("clears custom widths when resizing becomes disabled", () => {
