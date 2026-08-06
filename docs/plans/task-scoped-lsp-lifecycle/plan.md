@@ -177,6 +177,12 @@ order only and do not authorize subagents.
   actions do not.
 - Route every new label, policy, reason, error, confirmation, empty state, and accessibility name
   through `lsp.json`/`settings.json` in English, pseudo, and Simplified Chinese.
+- Persist a global `lsp_status_hidden_languages` user preference. Default every registered language
+  to visible; filter only aggregate/status rows and counts, force-show the current editor language,
+  and preserve the always-discoverable task/workspace entry when all languages are hidden.
+- Present each language as an independently controlled compact collapsible. Keep state and detection
+  in the summary, move policy/evidence/actions into the content, and replace the native policy
+  dropdown with the shared Select primitive on desktop and touch layouts.
 
 ---
 
@@ -217,8 +223,11 @@ order only and do not authorize subagents.
   attachment release without an idle lifecycle stop.
 - **View model/components:** pure and component tests cover aggregate priority/counts, active-file
   independence, policy controls, action availability, restart confirmation, metadata, actionable
-  errors, status-bar and topbar fallback placement, drawer inline composition, 44 px affordances,
-  and translated copy.
+  errors, status visibility filtering, editor-language force visibility, independent collapsibles,
+  shared Select styling, status-bar and topbar fallback placement, drawer inline composition, 44 px
+  affordances, and translated copy.
+- **User settings:** backend DTO/service/store and frontend hydration/dirty-state/card tests cover a
+  validated, persisted hidden-language list with visible-by-default semantics.
 
 ---
 
@@ -248,6 +257,9 @@ evidence so tests assert process truth rather than only UI labels.
 - **Phone/tablet parity:** `mobile-lsp-file-intelligence.spec.ts` proves phone Status can control a
   task server without the file viewer auto-starting it; tablet exposes the same policy/generation,
   one non-nested contained drawer, 44 px actions, safe-area containment, and no horizontal overflow.
+- **Visibility customization:** production E2E hides one language in editor settings, verifies it is
+  absent from desktop and mobile aggregate surfaces after reload without changing lifecycle state,
+  verifies its current-editor shortcut still works, and restores the preference.
 - **Executor safety:** the Local Docker spec starts once inside the container and shares that
   process; SSH/unsupported specs operate the task surface and prove no execution/server resource is
   launched. Missing binary, initialize rejection, crash, capacity, and restart-required states
@@ -263,7 +275,8 @@ evidence so tests assert process truth rather than only UI labels.
 
 - Update the Language servers section in `docs/public/developer-tools.md` (how-to) with task policy,
   aggregate/fallback/mobile controls, Start/Stop/Restart effects, discovery, persistence/recovery,
-  supported executors, and honest progress.
+  supported executors, collapsible language rows, status visibility preferences, and honest
+  progress.
 - Update the Language servers row in `docs/public/feature-status.md` (reference) to remove the
   active-file/session/browser ownership boundary.
 - Update `docs/public/configuration.md` (reference) for `KANDEV_LSP_MAX_SERVERS` and the deprecated
@@ -353,6 +366,20 @@ Completed 2026-08-05.
   holds every affected lane through the task-host teardown backstop, and only then releases the
   proven-dead current generation. The synchronized regression failed first, then passed 20 race
   repetitions with the focused cleanup failure/fallback suite.
+- Before the next review request, the branch merged `origin/main` at `9a4c65f75`; the sole conflict
+  retained both independently added accepted ADR index rows. On the merged tree, the controller,
+  task-host, and gateway race suites pass, the four focused frontend LSP files pass 25 tests, web
+  typecheck passes, and changed-code backend lint reports zero issues. The unfiltered backend lint
+  target reports eight `goconst` findings introduced on `main`; they remain outside this PR diff.
+- The 2026-08-06 status-surface follow-up added persisted per-language visibility and independent
+  collapsibles backed by the shared Select. A production RED exposed missing boot-state hydration
+  and an all-hidden fallback gap before both fixes. The final production matrix passed 10/10 task
+  lifecycle, 13/13 existing desktop intelligence, and 3/3 phone/tablet scenarios without another
+  Kotlin generation or import. Seven focused frontend files passed 73 tests; web lint, typecheck,
+  formatting, i18n, production build, backend user/backendapp tests, changed-file Go lint, and the
+  58-test/41-page public-doc validators passed. The container command rebuilt successfully but this
+   host lacked a reachable Docker daemon, leaving two daemon-backed cases skipped and two
+   fixture-safe cases passed; Task 10 retains the prior 4/4 real-container evidence.
 
 ---
 
@@ -383,6 +410,12 @@ Wave 5 — conformance and documentation:
 
 - [x] [Task 10: LSP E2E conformance](task-10-e2e-conformance.md)
 - [x] [Task 11: Public documentation](task-11-public-documentation.md)
+
+Wave 6 — status-surface usability follow-up:
+
+- [x] [Task 12: Persist LSP status visibility](task-12-persist-status-visibility.md)
+- [x] [Task 13: Refine language disclosure](task-13-refine-language-disclosure.md)
+- [x] [Task 14: Verify status customization](task-14-verify-status-customization.md)
 
 After all task checks pass, follow the repository commit, push, PR, and PR-fixup workflows. The PR
 must use the repository template, include docs impact and production E2E evidence, and remain in

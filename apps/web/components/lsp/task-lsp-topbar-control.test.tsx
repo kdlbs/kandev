@@ -12,6 +12,7 @@ const state = vi.hoisted(() => ({
   drawerEnabled: false,
   drawerOpen: false,
   languages: [] as TaskLspLanguageSnapshot[],
+  hiddenLanguages: [] as string[],
   openLspStatusDrawer: vi.fn(),
 }));
 
@@ -33,6 +34,12 @@ vi.mock("@/components/app-status-bar/app-status-surface-provider", () => ({
 
 vi.mock("@/hooks/domains/lsp/use-task-lsp", () => ({
   useTaskLsp: () => ({ languages: state.languages }),
+}));
+
+vi.mock("@/components/state-provider", () => ({
+  useAppStore: (
+    selector: (value: { userSettings: { lspStatusHiddenLanguages: string[] } }) => unknown,
+  ) => selector({ userSettings: { lspStatusHiddenLanguages: state.hiddenLanguages } }),
 }));
 
 vi.mock("./task-lsp-control", () => ({
@@ -74,6 +81,7 @@ describe("TaskLspTopbarControl", () => {
     state.drawerEnabled = false;
     state.drawerOpen = false;
     state.languages = [kotlin];
+    state.hiddenLanguages = [];
     state.openLspStatusDrawer.mockReset();
   });
 
@@ -94,6 +102,13 @@ describe("TaskLspTopbarControl", () => {
   it("remains discoverable when no supported project language has been detected", () => {
     state.languages = [];
     render(<TaskLspTopbarControl taskId="task-1" />);
+    expect(screen.getByTestId(CONTROL_TEST_ID)).toBeTruthy();
+  });
+
+  it("remains discoverable when every relevant language is hidden from task status", () => {
+    state.hiddenLanguages = ["kotlin"];
+    render(<TaskLspTopbarControl taskId="task-1" />);
+
     expect(screen.getByTestId(CONTROL_TEST_ID)).toBeTruthy();
   });
 

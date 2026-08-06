@@ -44,9 +44,12 @@ and obscure the actual task-level work that is still running.
   and depth six beneath the task root and ordered repository roots. It does not follow directory
   symlinks and skips `.git`, `.kandev`, `node_modules`, `vendor`, `target`, `build`, `dist`, and
   `.gradle`. A truncated scan is visible as partial rather than as a false complete result.
-- The task control lists every supported language so a user can start one even when discovery is
-  pending or finds no matching file. Detected, explicitly configured, running, queued, importing,
-  restart-required, and failed languages are considered relevant for the aggregate summary.
+- The task control lists every status-visible supported language so a user can start one even when
+  discovery is pending or finds no matching file. Every language is visible by default. A global
+  user preference may hide individual languages from task aggregate/status surfaces without
+  changing discovery, task policy, process state, or the current-language editor shortcut.
+  Detected, explicitly configured, running, queued, importing, restart-required, and failed visible
+  languages are considered relevant for the aggregate summary.
 - Global editor settings remain defaults for auto-start, permission to auto-install, and the JSON
   configuration returned through `workspace/configuration`. Auto-start now reacts to task
   discovery and task-environment readiness, not to a file mount. Saving configuration updates one
@@ -59,13 +62,17 @@ and obscure the actual task-level work that is still running.
   task has a relevant language, even when another file, an unsupported file, or a non-file panel is
   active. One relevant language can read `Kotlin · Importing 4m`; multiple live languages can read
   `LSP · 2 running`. Server text and elapsed time are evidence, not inferred completion.
-- Opening the task aggregate shows relevant languages, detection, policy, effective policy,
-  lifecycle phase, server-reported work, elapsed time, generation, start time, last stop/restart
-  reason, initiator, actionable errors, and Start/Stop/Restart controls. A Restart confirmation
-  states that the current server and analysis are discarded and a project import may run again.
+- Opening the task aggregate shows one compact collapsible row per visible language. The collapsed
+  summary preserves language, lifecycle state, and detection evidence; expanding a row reveals
+  policy, effective policy, server-reported work, elapsed time, generation, start time, last
+  stop/restart reason, initiator, actionable errors, and Start/Stop/Restart controls. The task
+  policy picker uses the shared select control. A Restart confirmation states that the current
+  server and analysis are discarded and a project import may run again.
 - When the Application status bar is disabled or no language is relevant enough for its compact
-  item, an always-discoverable task/workspace action opens the same controller. The editor toolbar
-  shortcut delegates to that controller and never creates a separate lifecycle.
+  item, an always-discoverable task/workspace action opens the same controller. This action remains
+  available when every language is hidden and directs the user to visibility settings. The editor
+  toolbar shortcut delegates to that controller, force-shows its current language for that
+  disclosure, and never creates a separate lifecycle.
 - Phone and coarse-pointer tablet layouts expose the same task value and actions through the
   existing Status drawer or task action. The language rows render inline in that drawer rather
   than opening another drawer. Touch targets are at least 44 px; the drawer has one scroll owner,
@@ -171,11 +178,12 @@ task ownership fields.
 
 Global settings retain these meanings:
 
-| JSON field                   | Type       | Meaning                                                                                |
-| ---------------------------- | ---------- | -------------------------------------------------------------------------------------- |
-| `lsp_auto_start_languages`   | `string[]` | Default languages enabled by an `inherit` policy after detection.                      |
-| `lsp_auto_install_languages` | `string[]` | Languages whose missing registered server Kandev may install on a supported task host. |
-| `lsp_server_configs`         | object     | Per-language JSON used for `workspace/configuration` and live configuration changes.   |
+| JSON field                    | Type       | Meaning                                                                                |
+| ----------------------------- | ---------- | -------------------------------------------------------------------------------------- |
+| `lsp_auto_start_languages`    | `string[]` | Default languages enabled by an `inherit` policy after detection.                      |
+| `lsp_auto_install_languages`  | `string[]` | Languages whose missing registered server Kandev may install on a supported task host. |
+| `lsp_status_hidden_languages` | `string[]` | Languages omitted from aggregate task status surfaces; all are visible by default.     |
+| `lsp_server_configs`          | object     | Per-language JSON used for `workspace/configuration` and live configuration changes.   |
 
 ## API surface
 
@@ -334,9 +342,10 @@ never auto-restarted or timed out.
 
 Task policy, language detection summary, generation, revision, lifecycle timestamps, stable reason
 codes, initiator category, and current error projection survive browser and backend restarts in
-`task_lsp_languages`. Global defaults/configuration remain in user settings. Browser local storage
-does not own or override task policy; legacy session/language enablement keys are ignored and
-removed when encountered.
+`task_lsp_languages`. Global defaults, configuration, and status visibility remain in user
+settings. Hiding a language is presentational and never owns or overrides task policy. Browser
+local storage does not own or override task policy; legacy session/language enablement keys are
+ignored and removed when encountered.
 
 A living task-host agentctl retains the process, initialized JSON-RPC peer, active progress,
 capabilities, diagnostic cache, and open-document broker across browser and ordinary backend
@@ -384,8 +393,19 @@ task-environment cleanup merely because a browser remains connected.
   retains Stop and Restart controls.
 - **GIVEN** two task languages are live, **WHEN** the status bar renders, **THEN** it shows one
   aggregate item such as `LSP · 2 running`, not one item per active editor.
+- **GIVEN** the user opens the task disclosure, **WHEN** its language rows render, **THEN** each row
+  starts as a compact summary and independently expands to reveal the task policy and lifecycle
+  actions through shared design-system controls.
+- **GIVEN** Go is hidden in editor settings, **WHEN** task status renders or reloads, **THEN** Go is
+  omitted from aggregate counts and rows while its discovery, policy, generation, and process state
+  are unchanged.
+- **GIVEN** Go is hidden from task status, **WHEN** a Go Monaco editor opens its toolbar shortcut,
+  **THEN** that disclosure includes and focuses Go so the editor shortcut remains functional.
+- **GIVEN** every language is hidden, **WHEN** a task view renders, **THEN** the task/workspace status
+  action stays discoverable and explains how to manage language visibility in settings.
 - **GIVEN** the Application status bar is disabled, **WHEN** any task view is open, **THEN** a task
-  or workspace action can open every supported language and its controls without a supported file.
+  or workspace action can open every visible supported language and its controls without a
+  supported file.
 - **GIVEN** the server process started but has not received an initialize response, **WHEN** status
   renders, **THEN** it distinguishes process start from initialization and shows elapsed time with
   no ETA.
@@ -458,7 +478,8 @@ task-environment cleanup merely because a browser remains connected.
 ### Mobile and security
 
 - **GIVEN** a phone task view, **WHEN** the user opens Status, **THEN** task language policy, state,
-  progress, errors, and 44 px controls appear inline in the one safe-area-aware drawer.
+  progress, errors, and 44 px controls appear in independently collapsible inline rows in the one
+  safe-area-aware drawer.
 - **GIVEN** a phone opens a Kotlin file while Kotlin policy is Disabled, **WHEN** the viewer mounts,
   **THEN** no LSP attachment or process starts; the separate task Status control can still Start it.
 - **GIVEN** a coarse-pointer tablet, **WHEN** the task control opens, **THEN** the same shared rows

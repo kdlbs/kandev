@@ -396,6 +396,7 @@ function getEditorsSaveRevision(state: EditorsSettingsState): string {
     defaultEditorId: state.defaultEditorId,
     lspAutoStartLanguages: state.lspAutoStartLanguages,
     lspAutoInstallLanguages: state.lspAutoInstallLanguages,
+    lspStatusHiddenLanguages: state.lspStatusHiddenLanguages,
     lspStatusLocation: state.lspStatusLocation,
     lspConfigStrings: state.lspConfigStrings,
   });
@@ -413,7 +414,8 @@ export function EditorsSettings() {
   const saveDefaultRequest = useSaveRequest(state);
   const { createRequest, updateRequest, deleteRequest } = useEditorRequests(state, applyEditors);
   const { updateLspConfigString } = useLspConfigActions(setLspConfigStrings, setLspConfigErrors);
-  const { toggleAutoStart, toggleAutoInstall } = useLspLanguageToggles(state);
+  const { toggleAutoStart, toggleAutoInstall, toggleStatusVisibility } =
+    useLspLanguageToggles(state);
   const isDirty = isEditorsSettingsDirty(state);
   const saveRevision = getEditorsSaveRevision(state);
   const hasInvalidConfig = Object.keys(state.lspConfigErrors).length > 0;
@@ -457,8 +459,11 @@ export function EditorsSettings() {
             lspAutoInstallLanguages={state.lspAutoInstallLanguages}
             baselineLspAutoStart={state.baselineLspAutoStart}
             baselineLspAutoInstall={state.baselineLspAutoInstall}
+            lspStatusHiddenLanguages={state.lspStatusHiddenLanguages}
+            baselineLspStatusHiddenLanguages={state.baselineLspStatusHiddenLanguages}
             toggleAutoStart={toggleAutoStart}
             toggleAutoInstall={toggleAutoInstall}
+            toggleStatusVisibility={toggleStatusVisibility}
           />
           <LspServerConfigSection
             lspConfigStrings={state.lspConfigStrings}

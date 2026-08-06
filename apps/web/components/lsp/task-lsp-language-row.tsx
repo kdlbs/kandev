@@ -1,9 +1,16 @@
 "use client";
 
 import { useTranslation } from "react-i18next";
-import { IconAlertTriangle, IconLoader2, IconPointFilled } from "@tabler/icons-react";
+import {
+  IconAlertTriangle,
+  IconChevronDown,
+  IconLoader2,
+  IconPointFilled,
+} from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@kandev/ui/collapsible";
 import { Progress } from "@kandev/ui/progress";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import { cn } from "@kandev/ui/lib/utils";
 import { formatLspElapsed, LSP_LONG_INITIALIZATION_MS } from "@/lib/lsp/lsp-progress-view";
 import type { TaskLspLanguageView, TaskLspVisualState } from "@/lib/lsp/task-lsp-view-model";
@@ -67,7 +74,9 @@ type TaskLspLanguageRowProps = {
   row: TaskLspLanguageView;
   now: number;
   touch: boolean;
+  open: boolean;
   pending?: TaskLspAction;
+  onOpenChange: (open: boolean) => void;
   onStart: () => void;
   onStop: () => void;
   onRestart: () => void;
@@ -336,10 +345,16 @@ function LifecycleEvidence({ row, now }: { row: TaskLspLanguageView; now: number
   );
 }
 
-function LanguageHeader({ row }: { row: TaskLspLanguageView }) {
+function LanguageHeader({ row, open }: { row: TaskLspLanguageView; open: boolean }) {
   const { t } = useTranslation();
   return (
-    <div className="flex min-w-0 items-start justify-between gap-3">
+    <CollapsibleTrigger
+      className="group flex min-h-11 w-full cursor-pointer items-start gap-3 px-3 py-2.5 text-left outline-none transition-colors hover:bg-muted/40 focus-visible:bg-muted/40 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+      aria-label={t(open ? "lsp:collapseLanguageDetails" : "lsp:expandLanguageDetails", {
+        language: row.label,
+      })}
+      data-testid={`task-lsp-language-trigger-${row.language}`}
+    >
       <div className="min-w-0">
         <div className="flex items-center gap-1.5">
           <IconPointFilled className={cn("size-4 shrink-0", stateTone(row.state))} aria-hidden />
@@ -347,10 +362,16 @@ function LanguageHeader({ row }: { row: TaskLspLanguageView }) {
         </div>
         <p className={cn("text-xs", stateTone(row.state))}>{t(STATE_KEYS[row.state])}</p>
       </div>
-      <div className="shrink-0 text-right text-xs text-muted-foreground">
-        <DetectionEvidence row={row} />
+      <div className="ml-auto flex shrink-0 items-center gap-2 text-right text-xs text-muted-foreground">
+        <span className="max-w-40 [overflow-wrap:anywhere]">
+          <DetectionEvidence row={row} />
+        </span>
+        <IconChevronDown
+          className="size-4 shrink-0 transition-transform group-data-[state=open]:rotate-180"
+          aria-hidden
+        />
       </div>
-    </div>
+    </CollapsibleTrigger>
   );
 }
 
@@ -358,35 +379,40 @@ function PolicySection({
   row,
   disabled,
   controlHeight,
+  touch,
   onSetPolicy,
 }: Pick<TaskLspLanguageRowProps, "row" | "onSetPolicy"> & {
   disabled: boolean;
   controlHeight: string;
+  touch: boolean;
 }) {
   const { t } = useTranslation();
   const snapshot = row.snapshot;
   return (
     <>
-      <label className="flex min-w-0 items-center justify-between gap-3 text-xs">
+      <div className="flex min-w-0 items-center justify-between gap-3 text-xs">
         <span className="text-muted-foreground">{t("lsp:taskPolicy")}</span>
-        <select
+        <Select
           value={snapshot.policy}
           disabled={disabled}
-          onChange={(event) => onSetPolicy(event.target.value as TaskLspPolicy)}
-          aria-label={t("lsp:taskPolicyAria", { language: row.label })}
-          className={cn(
-            "max-w-44 rounded-md border border-input bg-background px-2 text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring",
-            controlHeight,
-          )}
-          data-testid={`task-lsp-policy-${row.language}`}
+          onValueChange={(value) => onSetPolicy(value as TaskLspPolicy)}
         >
-          {(["inherit", "keep_warm", "disabled"] as const).map((policy) => (
-            <option key={policy} value={policy}>
-              {t(POLICY_KEYS[policy])}
-            </option>
-          ))}
-        </select>
-      </label>
+          <SelectTrigger
+            aria-label={t("lsp:taskPolicyAria", { language: row.label })}
+            className={cn("w-44 max-w-[65%] justify-between", controlHeight)}
+            data-testid={`task-lsp-policy-${row.language}`}
+          >
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent position="popper" align="end">
+            {(["inherit", "keep_warm", "disabled"] as const).map((policy) => (
+              <SelectItem key={policy} value={policy} className={touch ? "min-h-11" : undefined}>
+                {t(POLICY_KEYS[policy])}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
       <p className="text-xs text-muted-foreground">
         {t("lsp:effectivePolicy", { policy: t(POLICY_KEYS[snapshot.effective_policy]) })}
       </p>
@@ -450,7 +476,9 @@ export function TaskLspLanguageRow({
   row,
   now,
   touch,
+  open,
   pending,
+  onOpenChange,
   onStart,
   onStop,
   onRestart,
@@ -460,37 +488,44 @@ export function TaskLspLanguageRow({
   const snapshot = row.snapshot;
   const controlHeight = touch ? "h-11" : "h-8";
   return (
-    <article
-      className="min-w-0 space-y-3 rounded-lg border bg-card p-3 shadow-sm [overflow-wrap:anywhere]"
-      data-testid={`task-lsp-language-${row.language}`}
-      data-lsp-state={row.state}
-      data-lsp-policy={snapshot.policy}
-      data-lsp-generation={snapshot.generation}
-    >
-      <LanguageHeader row={row} />
-      <PolicySection
-        row={row}
-        disabled={disabled}
-        controlHeight={controlHeight}
-        onSetPolicy={onSetPolicy}
-      />
+    <Collapsible open={open} onOpenChange={onOpenChange} asChild>
+      <article
+        className="min-w-0 overflow-hidden rounded-lg border bg-card shadow-sm [overflow-wrap:anywhere]"
+        data-testid={`task-lsp-language-${row.language}`}
+        data-lsp-state={row.state}
+        data-lsp-policy={snapshot.policy}
+        data-lsp-generation={snapshot.generation}
+      >
+        <LanguageHeader row={row} open={open} />
+        <CollapsibleContent>
+          <div className="min-w-0 space-y-3 border-t bg-background/40 p-3">
+            <PolicySection
+              row={row}
+              disabled={disabled}
+              controlHeight={controlHeight}
+              touch={touch}
+              onSetPolicy={onSetPolicy}
+            />
 
-      <ProgressEvidence row={row} />
-      <InitializationEvidence row={row} now={now} />
-      <CompletedWorkEvidence row={row} />
-      <IdleEvidence row={row} />
-      <StateEvidence row={row} />
-      <ErrorEvidence row={row} />
-      <RestartRequiredEvidence row={row} />
-      <LifecycleEvidence row={row} now={now} />
-      <LifecycleButtons
-        row={row}
-        disabled={disabled}
-        controlHeight={controlHeight}
-        onStart={onStart}
-        onStop={onStop}
-        onRestart={onRestart}
-      />
-    </article>
+            <ProgressEvidence row={row} />
+            <InitializationEvidence row={row} now={now} />
+            <CompletedWorkEvidence row={row} />
+            <IdleEvidence row={row} />
+            <StateEvidence row={row} />
+            <ErrorEvidence row={row} />
+            <RestartRequiredEvidence row={row} />
+            <LifecycleEvidence row={row} now={now} />
+            <LifecycleButtons
+              row={row}
+              disabled={disabled}
+              controlHeight={controlHeight}
+              onStart={onStart}
+              onStop={onStop}
+              onRestart={onRestart}
+            />
+          </div>
+        </CollapsibleContent>
+      </article>
+    </Collapsible>
   );
 }

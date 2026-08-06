@@ -542,6 +542,10 @@ func marshalUserSettingsPayload(settings *models.UserSettings) ([]byte, error) {
 	if lspAutoInstall == nil {
 		lspAutoInstall = []string{}
 	}
+	lspStatusHidden := settings.LspStatusHiddenLanguages
+	if lspStatusHidden == nil {
+		lspStatusHidden = []string{}
+	}
 	lspServerConfigs := settings.LspServerConfigs
 	if lspServerConfigs == nil {
 		lspServerConfigs = map[string]map[string]interface{}{}
@@ -589,6 +593,7 @@ func marshalUserSettingsPayload(settings *models.UserSettings) ([]byte, error) {
 		"release_notes_last_seen_version":          settings.ReleaseNotesLastSeenVersion,
 		"lsp_auto_start_languages":                 lspAutoStart,
 		"lsp_auto_install_languages":               lspAutoInstall,
+		"lsp_status_hidden_languages":              lspStatusHidden,
 		"lsp_server_configs":                       lspServerConfigs,
 		"lsp_status_location":                      models.NormalizeLspStatusLocation(settings.LspStatusLocation),
 		"saved_layouts":                            savedLayouts,
@@ -660,6 +665,7 @@ func defaultUserSettings(userID string) *models.UserSettings {
 		ShowReleaseNotification:           true,
 		LspAutoStartLanguages:             []string{},
 		LspAutoInstallLanguages:           []string{},
+		LspStatusHiddenLanguages:          []string{},
 		LspServerConfigs:                  map[string]map[string]interface{}{},
 		LspStatusLocation:                 models.LspStatusLocationToolbar,
 		SavedLayouts:                      []models.SavedLayout{},
@@ -729,6 +735,7 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 		ReleaseNotesLastSeenVersion       string                              `json:"release_notes_last_seen_version"`
 		LspAutoStartLanguages             []string                            `json:"lsp_auto_start_languages"`
 		LspAutoInstallLanguages           []string                            `json:"lsp_auto_install_languages"`
+		LspStatusHiddenLanguages          []string                            `json:"lsp_status_hidden_languages"`
 		LspServerConfigs                  map[string]map[string]interface{}   `json:"lsp_server_configs"`
 		LspStatusLocation                 string                              `json:"lsp_status_location"`
 		SavedLayouts                      []models.SavedLayout                `json:"saved_layouts"`
@@ -822,6 +829,10 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 	settings.LspAutoInstallLanguages = payload.LspAutoInstallLanguages
 	if settings.LspAutoInstallLanguages == nil {
 		settings.LspAutoInstallLanguages = []string{}
+	}
+	settings.LspStatusHiddenLanguages = payload.LspStatusHiddenLanguages
+	if settings.LspStatusHiddenLanguages == nil {
+		settings.LspStatusHiddenLanguages = []string{}
 	}
 	settings.LspServerConfigs = payload.LspServerConfigs
 	if settings.LspServerConfigs == nil {

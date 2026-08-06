@@ -103,6 +103,7 @@ function makeUnloadedSettings(): UserSettingsState {
     appStatusBarOrder: { leftItemIds: [], rightItemIds: [] },
     lspAutoStartLanguages: [],
     lspAutoInstallLanguages: [],
+    lspStatusHiddenLanguages: [],
     lspServerConfigs: {},
     lspStatusLocation: "toolbar",
     hiddenWorkflowStepIds: {},

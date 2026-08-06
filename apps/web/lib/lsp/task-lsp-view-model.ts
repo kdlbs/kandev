@@ -47,12 +47,18 @@ export type TaskLspCompactSummary =
 export type TaskLspViewModel = {
   rows: TaskLspLanguageView[];
   relevantRows: TaskLspLanguageView[];
+  hiddenCount: number;
   aggregate: {
     compact: TaskLspCompactSummary;
     runningCount: number;
     errorCount: number;
     workCount: number;
   };
+};
+
+export type TaskLspViewOptions = {
+  hiddenLanguages?: readonly string[];
+  forceVisibleLanguage?: string | null;
 };
 
 const LABELS: Record<string, string> = {
@@ -209,10 +215,18 @@ function compactSummary(
 export function deriveTaskLspViewModel(
   languages: readonly TaskLspLanguageSnapshot[],
   now: number,
+  options: TaskLspViewOptions = {},
 ): TaskLspViewModel {
-  const rows = languages
+  const hiddenLanguages = new Set(options.hiddenLanguages ?? []);
+  const allRows = languages
     .map((snapshot) => row(snapshot, now))
     .sort((a, b) => a.label.localeCompare(b.label));
+  const hiddenCount = allRows.filter((candidate) => hiddenLanguages.has(candidate.language)).length;
+  const rows = allRows.filter(
+    (candidate) =>
+      !hiddenLanguages.has(candidate.language) ||
+      candidate.language === options.forceVisibleLanguage,
+  );
   const relevantRows = rows
     .filter((candidate) => candidate.relevant)
     .sort((a, b) => PRIORITY[a.state] - PRIORITY[b.state] || a.label.localeCompare(b.label));
@@ -224,6 +238,7 @@ export function deriveTaskLspViewModel(
   return {
     rows,
     relevantRows,
+    hiddenCount,
     aggregate: {
       compact: compactSummary(relevantRows, runningCount, errorCount, workCount),
       runningCount,
