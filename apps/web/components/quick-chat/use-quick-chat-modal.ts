@@ -321,6 +321,26 @@ type QuickChatTabActionsOptions = {
   setSetupKey: React.Dispatch<React.SetStateAction<number>>;
 };
 
+function useQuickChatRename(store: QuickChatStore) {
+  const { toast } = useToast();
+  const { t } = useTranslation();
+
+  return useCallback(
+    (sessionId: string, name: string) => {
+      if (!sessionId) return;
+      store.renameQuickChatSession(sessionId, name);
+      persistQuickChatRename(sessionId, resolveTaskId(store, sessionId), name).catch(() => {
+        toast({
+          title: t("chat:renameSavedOnThisDeviceOnly"),
+          description: t("chat:renameSyncFailedDescription"),
+          variant: "error",
+        });
+      });
+    },
+    [store, t, toast],
+  );
+}
+
 function useQuickChatTabActions({
   workspaceId,
   sessions,
@@ -329,11 +349,10 @@ function useQuickChatTabActions({
   resetPendingStarts,
   setSetupKey,
 }: QuickChatTabActionsOptions) {
-  const { toast } = useToast();
-  const { t } = useTranslation();
   const { sessionToClose, setSessionToClose, handleCloseTab, handleConfirmClose } =
     useQuickChatSessionClose(store, resetPendingStarts);
   const handleCloseTerminal = useQuickTerminalClose(store, resetPendingStarts);
+  const handleRename = useQuickChatRename(store);
 
   const handleOpenChange = useCallback(
     (open: boolean) => {
@@ -398,21 +417,6 @@ function useQuickChatTabActions({
       store.setActiveQuickChatSession(sessionId, workspaceId);
     },
     [resetPendingStarts, store, workspaceId],
-  );
-
-  const handleRename = useCallback(
-    (sessionId: string, name: string) => {
-      if (!sessionId) return;
-      store.renameQuickChatSession(sessionId, name);
-      persistQuickChatRename(sessionId, resolveTaskId(store, sessionId), name).catch(() => {
-        toast({
-          title: t("chat:renameSavedOnThisDeviceOnly"),
-          description: t("chat:renameSyncFailedDescription"),
-          variant: "error",
-        });
-      });
-    },
-    [store, toast],
   );
 
   return {
