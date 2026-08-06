@@ -228,6 +228,35 @@ describe("report shape", () => {
     expect(result.stdout).toContain("agent-facing");
   });
 
+  /**
+   * The known-good prompt builders in `components/github` surface under *plural
+   * concatenation*, not eye-review — an agent-facing string carrying `{n}
+   * check{s}` is not a defect, because the text goes verbatim to a model. A
+   * caveat printed only by the eye-review section would leave the defect list
+   * telling a maintainer to break working prompts.
+   */
+  it("repeats the prompt-builder exclusion in the plural section when it has findings", () => {
+    const result = sweep({
+      "prompt-builder.ts": [
+        "// Agent-facing: sent verbatim to the model, deliberately not translated.",
+        "export const heading = (failed: string[]) =>",
+        '  `### ${failed.length} CI Check${failed.length !== 1 ? "s" : ""} Failed`;',
+      ].join("\n"),
+    });
+
+    const pluralSection = result.stdout.slice(0, result.stdout.indexOf("to review by eye"));
+    expect(result.plurals).toHaveLength(1);
+    expect(pluralSection).toContain("agent-facing");
+    expect(pluralSection).toContain("pr-checks-section.tsx");
+  });
+
+  it("keeps the plural section bare when it has no findings", () => {
+    const result = sweep({ "clean.ts": "export const n = 1;" });
+
+    const pluralSection = result.stdout.slice(0, result.stdout.indexOf("to review by eye"));
+    expect(pluralSection).not.toContain("agent-facing");
+  });
+
   it("exits non-zero when given no directory", () => {
     const result = spawnSync(process.execPath, [SCRIPT], { encoding: "utf8" });
 

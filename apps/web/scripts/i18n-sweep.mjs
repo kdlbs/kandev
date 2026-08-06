@@ -18,6 +18,14 @@
  * CI nor pre-commit. The eye-review half needs judgement, and a check that fires
  * on every clean run teaches people to ignore it.
  *
+ * Known limits, inherited from the Python original and kept for parity with it:
+ * a line is skipped only when it *starts* with a comment, so a trailing
+ * `// n === 1 ? "" : "s"` would be reported (0 occurrences across `components`,
+ * `app`, `hooks` and `lib` today — if that changes, masking comments needs a
+ * quote-aware lexer, since `//` also appears inside strings and URLs), and
+ * `.d.ts` files are scanned like any other `.ts` (there are none in the
+ * directories this is pointed at). See also the note on `NOISE_VAL` below.
+ *
  * Usage: node scripts/i18n-sweep.mjs <dir> [<dir> ...]
  */
 import fs from "node:fs";
@@ -137,18 +145,34 @@ function sweep(dirs) {
   return { plurals, hits };
 }
 
+/**
+ * The prompt-builder exclusion, printed rather than auto-detected. Agent-facing
+ * text is sent verbatim to a model, so translating it — or removing a plural
+ * morpheme from it — would be a bug. Both sections need this caveat: the known
+ * examples in `components/github` surface under *plural concatenation*, not
+ * eye-review, so a note carried only by the second section would leave the
+ * defect list telling a maintainer to break working prompts.
+ */
+const PROMPT_CAVEAT = [
+  "  Note: prompt builders and other agent-facing text are deliberately English —",
+  "  the content is sent verbatim to a model, so translating it would be a bug.",
+  "  components/github/pr-checks-section.tsx and pr-ci-popover.tsx are known-good",
+  "  examples, and both sit under comments explaining the choice.",
+];
+
 function report({ plurals, hits }) {
   const out = [];
   out.push(
     `=== ${plurals.length} English plural concatenation(s) — forbidden, undetected by any gate ===`,
   );
+  if (plurals.length) {
+    out.push(...PROMPT_CAVEAT, "  Every other entry below is a defect.");
+  }
   for (const p of plurals) out.push(`  ${p}`);
   out.push("", `=== ${hits.length} literal(s) to review by eye ===`);
   out.push(
-    "  Note: prompt builders and other agent-facing text are deliberately English —",
-    "  the content is sent verbatim to a model, so translating it would be a bug.",
-    "  components/github/pr-checks-section.tsx and pr-ci-popover.tsx are known-good",
-    "  examples. Judge each hit; nothing in this section is automatically a defect.",
+    ...PROMPT_CAVEAT,
+    "  Judge each hit; nothing in this section is automatically a defect.",
   );
   for (const h of hits) out.push(`  ${h}`);
   return out.join("\n");
