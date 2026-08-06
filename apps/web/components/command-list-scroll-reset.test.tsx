@@ -1,6 +1,6 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { createRef, useState } from "react";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { Command, CommandInput, CommandItem, CommandList } from "@kandev/ui/command";
 
 const LIST_TEST_ID = "command-list";
@@ -97,5 +97,24 @@ describe("CommandList scroll reset", () => {
     );
 
     expect(ref.current).toBe(getList());
+  });
+
+  it("runs cleanup returned by a callback ref on unmount", () => {
+    const refCleanup = vi.fn();
+    const callbackRef = vi.fn(() => refCleanup);
+    const { unmount } = render(
+      <Command>
+        <CommandInput placeholder={SEARCH_PLACEHOLDER} />
+        <CommandList ref={callbackRef} data-testid={LIST_TEST_ID}>
+          {renderItems()}
+        </CommandList>
+      </Command>,
+    );
+
+    expect(callbackRef).toHaveBeenCalledWith(getList());
+
+    unmount();
+
+    expect(refCleanup).toHaveBeenCalledTimes(1);
   });
 });

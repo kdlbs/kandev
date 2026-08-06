@@ -91,7 +91,7 @@ Also run lint on the touched files if the pre-commit hook flags them.
 
 - Added a focused regression test at `apps/web/components/command-list-scroll-reset.test.tsx`
   covering plain cmdk filtering, controlled `shouldFilter={false}` inputs, query
-  clearing, and forwarded refs.
+  clearing, forwarded refs, and callback-ref cleanup on unmount.
 - Updated `apps/packages/ui/src/command.tsx` so `CommandList` subscribes to
   `useCommandState((state) => state.search)`, resets `scrollTop` in a
   `useLayoutEffect`, and preserves forwarded refs.

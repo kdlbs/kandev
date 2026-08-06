@@ -104,7 +104,7 @@ it is out of scope for this fix.
 
 - ✅ `cd apps && pnpm --filter @kandev/web test -- components/command-list-scroll-reset.test.tsx`
   - `1` test file passed
-  - `4` tests passed
+  - `5` tests passed
 - ✅ `cd apps/web && pnpm run typecheck`
   - `tsc --noEmit` passed
 
@@ -114,7 +114,7 @@ it is out of scope for this fix.
 
 Single task; no parallelism.
 
-```
+```text
 Wave 1:
 - [x] [task-01-command-list-scroll-reset](task-01-command-list-scroll-reset.md)
 ```

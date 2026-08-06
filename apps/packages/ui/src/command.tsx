@@ -8,6 +8,18 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { InputGroup, InputGroupAddon } from "./input-group";
 import { IconSearch, IconCheck } from "@tabler/icons-react";
 
+type CommandListElement = React.ElementRef<typeof CommandPrimitive.List>;
+type CommandListProps = React.ComponentPropsWithoutRef<typeof CommandPrimitive.List>;
+type RefCleanup = void | (() => void);
+
+function applyCommandListRef(
+  ref: React.ForwardedRef<CommandListElement>,
+  node: CommandListElement | null,
+): RefCleanup {
+  if (typeof ref === "function") return ref(node);
+  if (ref) ref.current = node;
+}
+
 function Command({ className, ...props }: React.ComponentProps<typeof CommandPrimitive>) {
   return (
     <CommandPrimitive
@@ -76,21 +88,69 @@ function CommandInput({
   );
 }
 
-const CommandList = React.forwardRef<
-  React.ElementRef<typeof CommandPrimitive.List>,
-  React.ComponentPropsWithoutRef<typeof CommandPrimitive.List>
->(function CommandList({ className, ...props }, ref) {
+const CommandList = React.forwardRef<CommandListElement, CommandListProps>(function CommandList(
+  { className, ...props },
+  ref,
+) {
   const search = useCommandState((state) => state.search);
-  const internalRef = React.useRef<React.ElementRef<typeof CommandPrimitive.List> | null>(null);
+  const internalRef = React.useRef<CommandListElement | null>(null);
+  const latestForwardedRef = React.useRef(ref);
+  const assignedRef = React.useRef<React.ForwardedRef<CommandListElement>>(null);
+  const assignedCleanup = React.useRef<(() => void) | undefined>(undefined);
+
+  latestForwardedRef.current = ref;
+
+  const detachAssignedRef = React.useCallback(() => {
+    const cleanup = assignedCleanup.current;
+    const forwardedRef = assignedRef.current;
+
+    assignedCleanup.current = undefined;
+    assignedRef.current = null;
+
+    if (cleanup) {
+      cleanup();
+      return;
+    }
+
+    if (forwardedRef) applyCommandListRef(forwardedRef, null);
+  }, []);
+
+  const attachAssignedRef = React.useCallback(
+    (node: CommandListElement, forwardedRef: typeof ref) => {
+      assignedRef.current = forwardedRef;
+      const cleanup = applyCommandListRef(forwardedRef, node);
+      assignedCleanup.current = typeof cleanup === "function" ? cleanup : undefined;
+    },
+    [],
+  );
 
   const setRefs = React.useCallback(
-    (node: React.ElementRef<typeof CommandPrimitive.List> | null) => {
+    (node: CommandListElement | null) => {
+      if (internalRef.current === node) return;
+
+      detachAssignedRef();
       internalRef.current = node;
-      if (typeof ref === "function") ref(node);
-      else if (ref) ref.current = node;
+
+      if (!node) return;
+
+      attachAssignedRef(node, latestForwardedRef.current);
+
+      return () => {
+        if (internalRef.current !== node) return;
+        internalRef.current = null;
+        detachAssignedRef();
+      };
     },
-    [ref],
+    [attachAssignedRef, detachAssignedRef],
   );
+
+  React.useLayoutEffect(() => {
+    const node = internalRef.current;
+    if (!node || assignedRef.current === ref) return;
+
+    detachAssignedRef();
+    attachAssignedRef(node, ref);
+  }, [attachAssignedRef, detachAssignedRef, ref]);
 
   React.useLayoutEffect(() => {
     if (internalRef.current) internalRef.current.scrollTop = 0;
