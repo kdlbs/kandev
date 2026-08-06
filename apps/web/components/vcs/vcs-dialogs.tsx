@@ -369,7 +369,10 @@ export function pickRepoLabel(
   scopedRepo: string,
   isMultiRepo: boolean,
   resolveDisplayName: (name: string) => string | undefined,
-  t: ReturnType<typeof useTranslation>["t"],
+  // Structural, matching the other translate-taking helpers in the app: this
+  // only ever looks a key up, so both the hook's `t` and the module-level one
+  // from `@/lib/i18n` qualify. The branded `TFunction` excluded the latter.
+  t: (key: string) => string,
 ): string {
   if (scopedRepo) return resolveDisplayName(scopedRepo) || scopedRepo;
   if (isMultiRepo) return t("integrations:allRepos");
