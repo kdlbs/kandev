@@ -52,4 +52,15 @@ cd apps/backend && go test -race ./internal/workflowsync/...
 ```
 
 ## Results
-(Fill in after implementation: exact test output, pass/fail counts.)
+
+- Status: **done**.
+- `go test ./internal/workflowsync/... -run 'TestHTTPHandlers' -v`: 3/3 pass
+  (`TestHTTPHandlers_OwnerCanReadAndWriteOwnWorkspace`,
+  `TestHTTPHandlers_ForeignMemberDeniedOnAllRoutesWithoutLeaking` with 4 subtests
+  get/post/delete/sync, `TestHTTPHandlers_SyntheticIdentitySucceedsWhenAuthDisabled`).
+- Regression confirmed: before the task-01 service change, the get/post/delete/sync subtests failed
+  with 500s and leaked/accepted the foreign workspace's config (verified during TDD — the test file
+  was written and run against pre-fix `handlers.go` first, then against pre-fix `service.go`, each
+  failing for the expected reason before the corresponding fix landed).
+- `go test -race ./internal/workflowsync/... ./internal/backendapp/...`: both `ok`.
+- `golangci-lint run ./internal/workflowsync/... --new-from-rev=main --timeout=5m`: 0 issues.

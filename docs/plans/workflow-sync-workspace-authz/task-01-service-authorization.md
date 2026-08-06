@@ -45,4 +45,13 @@ cd apps/backend && golangci-lint run ./internal/workflowsync/... ./internal/back
 ```
 
 ## Results
-(Fill in after implementation: exact test output, pass/fail counts.)
+
+- Status: **done**.
+- `go test ./internal/workflowsync/... -run 'Authoriz|DeniesForeign|SucceedWhenNoAuthorizer|SucceedWhenAuthorizerAllows' -v`: 6/6 pass (`TestGetConfigForWorkspace_DeniesForeignWorkspace`,
+  `TestSetConfigForWorkspace_DeniesForeignWorkspaceAndLeavesConfigUnchanged`,
+  `TestDeleteConfigForWorkspace_DeniesForeignWorkspaceAndLeavesConfigInPlace`,
+  `TestSyncWorkspace_DeniesForeignWorkspaceAndNeverApplies`,
+  `TestServiceMethods_SucceedWhenNoAuthorizerWired`, `TestServiceMethods_SucceedWhenAuthorizerAllows`).
+- `go build ./...`: clean.
+- `go test -race ./internal/workflowsync/... ./internal/backendapp/...`: both `ok`.
+- `golangci-lint run ./internal/workflowsync/... ./internal/backendapp/... --new-from-rev=main --timeout=5m`: 0 issues.

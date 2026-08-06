@@ -1,7 +1,7 @@
 ---
 spec: docs/specs/workflow-sync-workspace-authz/spec.md
 created: 2026-08-06
-status: draft
+status: building
 ---
 
 # Implementation Plan: Workflow Sync — Per-User Workspace Authorization
@@ -107,15 +107,22 @@ Backend-only change; no frontend/E2E surface (no UI, WS, or client-visible contr
 ---
 
 ## Verification Results
-Pending. Record exact `go test` output and `golangci-lint` result here on completion.
+
+Both tasks done; see each task file's `## Results` for exact per-task output. Whole-package
+summary:
+- `go build ./...`: clean.
+- `gofmt -l internal/workflowsync internal/backendapp`: no output (already formatted).
+- `go vet ./internal/workflowsync/... ./internal/backendapp/...`: clean.
+- `go test -race ./internal/workflowsync/... ./internal/backendapp/...`: both `ok`.
+- `golangci-lint run ./internal/workflowsync/... ./internal/backendapp/... --new-from-rev=main --timeout=5m`: 0 issues.
 
 ---
 
 ## Implementation Waves And Parallel Candidates
 
 Sequential (2 tasks; task 2's handler tests depend on task 1's service-layer change):
-- [ ] [task-01-service-authorization](task-01-service-authorization.md)
-- [ ] [task-02-handler-error-mapping](task-02-handler-error-mapping.md)
+- [x] [task-01-service-authorization](task-01-service-authorization.md)
+- [x] [task-02-handler-error-mapping](task-02-handler-error-mapping.md)
 
 ## Open Questions
 (none)

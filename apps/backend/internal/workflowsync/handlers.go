@@ -9,7 +9,17 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 )
+
+// workspaceDenied reports whether err is the per-user workspace access
+// denial surfaced by the workspace authorizer. Handlers map it to 404 so a
+// workspace the caller may not access is indistinguishable from a missing
+// one — the same convention used by every other integration in this
+// codebase (see internal/jira/handlers.go).
+func workspaceDenied(err error) bool {
+	return errors.Is(err, repoerrors.ErrWorkspaceNotFound)
+}
 
 // Controller holds HTTP route handlers for workflow sync.
 type Controller struct {
@@ -46,6 +56,10 @@ func (c *Controller) httpGetConfig(ctx *gin.Context) {
 		return
 	}
 	cfg, err := c.service.GetConfigForWorkspace(ctx.Request.Context(), workspaceID)
+	if workspaceDenied(err) {
+		ctx.JSON(http.StatusNotFound, gin.H{"error": "workspace not found"})
+		return
+	}
 	if err != nil {
 		c.internalError(ctx, "failed to load workflow sync config", err)
 		return
@@ -75,6 +89,10 @@ func (c *Controller) httpSetConfig(ctx *gin.Context) {
 		return
 	}
 	cfg, err := c.service.SetConfigForWorkspace(ctx.Request.Context(), workspaceID, &req)
+	if workspaceDenied(err) {
+		ctx.JSON(http.StatusNotFound, gin.H{"error": "workspace not found"})
+		return
+	}
 	if errors.Is(err, ErrInvalidConfig) {
 		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
@@ -91,7 +109,12 @@ func (c *Controller) httpDeleteConfig(ctx *gin.Context) {
 	if !ok {
 		return
 	}
-	if err := c.service.DeleteConfigForWorkspace(ctx.Request.Context(), workspaceID); err != nil {
+	err := c.service.DeleteConfigForWorkspace(ctx.Request.Context(), workspaceID)
+	if workspaceDenied(err) {
+		ctx.JSON(http.StatusNotFound, gin.H{"error": "workspace not found"})
+		return
+	}
+	if err != nil {
 		c.internalError(ctx, "failed to remove workflow sync config", err)
 		return
 	}
@@ -108,6 +131,10 @@ func (c *Controller) httpForceSync(ctx *gin.Context) {
 		return
 	}
 	result, syncErr := c.service.SyncWorkspace(ctx.Request.Context(), workspaceID)
+	if workspaceDenied(syncErr) {
+		ctx.JSON(http.StatusNotFound, gin.H{"error": "workspace not found"})
+		return
+	}
 	if errors.Is(syncErr, ErrNotConfigured) {
 		ctx.JSON(http.StatusNotFound, gin.H{"error": syncErr.Error()})
 		return
