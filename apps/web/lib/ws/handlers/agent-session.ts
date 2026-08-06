@@ -10,7 +10,6 @@ import {
   type TaskSession,
   type TaskSessionState,
 } from "@/lib/types/http";
-import type { QueuedMessage } from "@/lib/state/slices/session/types";
 import type { QueueStatusChangedPayload } from "@/lib/types/backend";
 import { syncKanbanPrimarySessionState } from "@/lib/ws/handlers/agent-session-kanban-sync";
 import { parseContextWindowEntry } from "@/lib/state/slices/session-runtime/context-window";
@@ -677,7 +676,7 @@ function handleQueueStatusChangedMessage(
     console.warn("[Queue] Missing session_id in queue status change event");
     return;
   }
-  const entries = (payload.entries as QueuedMessage[] | null | undefined) ?? [];
+  const entries = payload.entries ?? [];
   const count = typeof payload.count === "number" ? payload.count : entries.length;
   const max = typeof payload.max === "number" ? payload.max : 0;
   const mergeEnabled = typeof payload.merge_enabled === "boolean" ? payload.merge_enabled : true;
