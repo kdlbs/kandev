@@ -23,9 +23,9 @@ editing the source Markdown or opening another view.
 - Dragging a separator changes only the two adjacent columns. Their combined
   width and the table's total width remain unchanged, and neither column may be
   reduced below 64 CSS pixels.
-- An adjacent pair measuring less than 128 CSS pixels cannot satisfy both
-  64-pixel minimums. Its separator does not move, preserving both the pair total
-  and minimum-width contract.
+- A separator is exposed only while both adjacent measured columns meet the
+  64-pixel minimum. This omits every pair measuring less than 128 CSS pixels and
+  keeps each exposed separator's current ARIA value inside its declared range.
 - The first resize begins from the browser's measured automatic layout. Custom
   widths then remain in component memory for that mounted table only.
 - Double-clicking any separator clears every custom width on that table and

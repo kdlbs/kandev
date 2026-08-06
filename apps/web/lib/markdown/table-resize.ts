@@ -1,5 +1,16 @@
 export const MIN_MARKDOWN_COLUMN_WIDTH = 64;
 
+export function canResizeColumnBoundary(widths: readonly number[], boundaryIndex: number): boolean {
+  const left = widths[boundaryIndex];
+  const right = widths[boundaryIndex + 1];
+  return (
+    left !== undefined &&
+    right !== undefined &&
+    left >= MIN_MARKDOWN_COLUMN_WIDTH &&
+    right >= MIN_MARKDOWN_COLUMN_WIDTH
+  );
+}
+
 export function resizeAdjacentColumns(
   widths: readonly number[],
   boundaryIndex: number,

@@ -1,5 +1,16 @@
 import { describe, expect, it } from "vitest";
-import { resizeAdjacentColumns } from "./table-resize";
+import { canResizeColumnBoundary, resizeAdjacentColumns } from "./table-resize";
+
+describe("canResizeColumnBoundary", () => {
+  it("allows a boundary when both adjacent columns meet the minimum", () => {
+    expect(canResizeColumnBoundary([64, 64, 240], 0)).toBe(true);
+  });
+
+  it("rejects a boundary when either adjacent column is below the minimum", () => {
+    expect(canResizeColumnBoundary([63, 65, 240], 0)).toBe(false);
+    expect(canResizeColumnBoundary([65, 63, 240], 0)).toBe(false);
+  });
+});
 
 describe("resizeAdjacentColumns", () => {
   it("moves one boundary without changing the table width", () => {

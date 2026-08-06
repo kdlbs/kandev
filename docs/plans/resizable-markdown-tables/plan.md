@@ -36,7 +36,8 @@ likely `apps/web/components/shared/resizable-markdown-table.tsx`.
   changes.
 - Place focusable `role="separator"` controls in an overlay within the table's
   scroll content. Each control is centered on an internal boundary, spans the
-  full table height, and scrolls with the table.
+  full table height, and scrolls with the table. Omit a boundary while either
+  adjacent measured column is below the 64-pixel minimum.
 - Give each separator an adjacent-column accessible name, vertical orientation,
   a 64-pixel minimum, the rounded current left-column width, and a maximum equal
   to the pair total minus the right-column minimum. Verify those rendered ARIA
@@ -168,7 +169,7 @@ None.
 
 ## Verification results
 
-- `vitest`: 37 focused geometry/hook/shared-renderer tests passed.
+- `vitest`: 39 focused geometry/hook/shared-renderer tests passed.
 - `pnpm run typecheck`: passed.
 - `pnpm --filter @kandev/web lint`: passed with zero warnings.
 - `make build-web`: passed.

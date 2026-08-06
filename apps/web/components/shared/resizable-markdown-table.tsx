@@ -3,7 +3,7 @@
 import { useTranslation } from "react-i18next";
 import type { ReactNode } from "react";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
-import { MIN_MARKDOWN_COLUMN_WIDTH } from "@/lib/markdown/table-resize";
+import { canResizeColumnBoundary, MIN_MARKDOWN_COLUMN_WIDTH } from "@/lib/markdown/table-resize";
 import { useMarkdownTableResize } from "./use-markdown-table-resize";
 
 export function ResizableMarkdownTable({ children }: { children?: ReactNode }) {
@@ -34,8 +34,16 @@ export function ResizableMarkdownTable({ children }: { children?: ReactNode }) {
       </table>
       {resizeEnabled &&
         resize.geometry?.boundaries.map((left, index) => {
-          const leftWidth = displayedWidths?.[index] ?? MIN_MARKDOWN_COLUMN_WIDTH;
-          const rightWidth = displayedWidths?.[index + 1] ?? MIN_MARKDOWN_COLUMN_WIDTH;
+          const leftWidth = displayedWidths?.[index];
+          const rightWidth = displayedWidths?.[index + 1];
+          if (
+            !displayedWidths ||
+            leftWidth === undefined ||
+            rightWidth === undefined ||
+            !canResizeColumnBoundary(displayedWidths, index)
+          ) {
+            return null;
+          }
           return (
             <button
               key={index}

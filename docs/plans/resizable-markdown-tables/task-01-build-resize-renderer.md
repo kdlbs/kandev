@@ -19,8 +19,9 @@ spec: "../../specs/ui/resizable-markdown-tables.md"
   pair-derived maximum through the complete ARIA separator contract.
 - Pointer and keyboard adjustment resize only adjacent columns, preserve the
   table width, and enforce a 64-pixel minimum.
-- Adjacent pairs below 128 pixels remain unchanged because both minimum widths
-  cannot fit while preserving their total.
+- Boundaries with either adjacent measured column below 64 pixels are omitted;
+  adjacent pairs below 128 pixels therefore remain unchanged without exposing
+  an invalid or immovable separator.
 - Double-click and `Enter` clear all custom widths and restore CSS automatic
   layout; unmount, reload, and column-count changes retain no state.
 - Existing two-/three-column wrapping and four-plus-column local scrolling CSS
