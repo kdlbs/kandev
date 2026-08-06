@@ -183,6 +183,71 @@ func TestCleanupPreservesPolicyAndStopsEveryTaskLanguage(t *testing.T) {
 	}
 }
 
+func TestCleanupReleasesGenerationStartedAfterInitialSnapshot(t *testing.T) {
+	baseStore := newMemoryLSPStore()
+	seedLSPState(t, baseStore, TaskLanguageState{
+		TaskID: "task-1", Language: "go", Policy: PolicyKeepWarm,
+		DetectionState: DetectionComplete, Phase: PhaseOff, Generation: 1,
+		LastInitiator: InitiatorAutomatic,
+	})
+	store := &cleanupSnapshotStore{
+		memoryLSPStore: baseStore,
+		listed:         make(chan struct{}),
+		release:        make(chan struct{}),
+	}
+	host := newFakeLSPHost()
+	host.startEntered = make(chan struct{})
+	host.startRelease = make(chan struct{})
+	runtimes := &fakeLSPRuntimes{host: host}
+	controller := NewController(ControllerConfig{
+		Tasks: &fakeControllerTasks{}, Store: store, Settings: &fakeLSPSettings{}, Runtimes: runtimes,
+		Capacity: NewCapacity(1), Clock: func() time.Time { return time.Unix(200, 0).UTC() },
+	})
+
+	cleanupDone := make(chan error, 1)
+	go func() {
+		cleanupDone <- controller.CleanupTask(context.Background(), "task-1", "task_archived")
+	}()
+	<-store.listed
+	origin := Origin{Initiator: InitiatorUser, Reason: "user_control"}
+	type startResult struct {
+		snapshot *LanguageSnapshot
+		err      error
+	}
+	startDone := make(chan startResult, 1)
+	go func() {
+		snapshot, startErr := controller.Start(context.Background(), "task-1", "go", origin)
+		startDone <- startResult{snapshot: snapshot, err: startErr}
+	}()
+	<-host.startEntered
+	close(store.release)
+	key := TaskLanguageKey{TaskID: "task-1", Language: "go"}
+	if !commandQueuedWithin(controller, key, time.Second) {
+		close(host.startRelease)
+		<-startDone
+		<-cleanupDone
+		t.Fatal("cleanup did not serialize behind the running successor generation")
+	}
+	close(host.startRelease)
+	started := <-startDone
+	if started.err != nil {
+		t.Fatal(started.err)
+	}
+	if started.snapshot.Generation != 2 {
+		t.Fatalf("started=%#v", started.snapshot)
+	}
+	if err := <-cleanupDone; err != nil {
+		t.Fatal(err)
+	}
+	state := storedLSPState(t, baseStore, "task-1", "go")
+	if state.Generation != 2 || state.Phase != PhaseOff || controller.capacity.Active() != 0 {
+		t.Fatalf("cleaned state=%#v active=%d", state, controller.capacity.Active())
+	}
+	if host.lastStop.Generation != 2 {
+		t.Fatalf("stopped generation = %d, want successor generation 2", host.lastStop.Generation)
+	}
+}
+
 func TestCleanupRetainsCapacityWhenStopAndTaskHostCleanupFail(t *testing.T) {
 	store := newMemoryLSPStore()
 	seedLSPState(t, store, TaskLanguageState{
@@ -310,6 +375,25 @@ type reconcileRuntimes struct {
 	cleanupEnvironment string
 	cleanupReason      string
 	cleanupErr         error
+}
+
+type cleanupSnapshotStore struct {
+	*memoryLSPStore
+	listed  chan struct{}
+	release chan struct{}
+	once    sync.Once
+}
+
+func (s *cleanupSnapshotStore) ListTaskLSPLanguages(
+	ctx context.Context,
+	taskID string,
+) ([]TaskLanguageState, error) {
+	states, err := s.memoryLSPStore.ListTaskLSPLanguages(ctx, taskID)
+	s.once.Do(func() {
+		close(s.listed)
+		<-s.release
+	})
+	return states, err
 }
 
 func newReconcileRuntimes() *reconcileRuntimes {

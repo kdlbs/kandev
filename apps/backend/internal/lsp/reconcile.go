@@ -268,34 +268,53 @@ func (c *Controller) CleanupTask(ctx context.Context, taskID, reason string) err
 	if envErr != nil {
 		return envErr
 	}
-	host, hostExists, hostErr := c.cleanupTaskHost(ctx, environment)
 	cleanupErrors := make([]error, 0, len(states)+1)
-	pending := make([]taskLanguageCleanupResult, 0, len(states))
-	// Remove every queued language for this task before releasing any live
-	// slot, otherwise an earlier release could promote another language that
-	// this same task teardown is about to clean.
-	for _, state := range states {
-		result := c.cleanupTaskLanguage(ctx, state, host, hostExists, hostErr, reason)
-		if result.processGone {
-			cleanupErrors = append(cleanupErrors, result.err)
-		} else {
-			pending = append(pending, result)
-		}
-	}
+	stopAttempts := make(chan struct{}, len(states))
+	commandResults := make(chan error, len(states))
+	taskHostDone := make(chan struct{})
 	var taskHostCleanupErr error
+	// Each language lane stays held from its refreshed generation snapshot
+	// through the task-host backstop. A Start/Restart accepted on either side
+	// of cleanup therefore cannot be mistaken for the generation that cleanup
+	// actually proved dead.
+	for _, listed := range states {
+		listed := listed
+		go func() {
+			key := TaskLanguageKey{TaskID: taskID, Language: listed.Language}
+			_, commandErr := c.commands.submitExclusive(
+				context.WithoutCancel(ctx), key, ActionReconcile,
+				func(workCtx context.Context) (*LanguageSnapshot, error) {
+					current, _, currentErr := c.store.GetTaskLSPLanguage(
+						workCtx, taskID, listed.Language,
+					)
+					result := taskLanguageCleanupResult{state: listed, err: currentErr}
+					if currentErr == nil {
+						host, hostExists, hostErr := c.cleanupTaskHost(workCtx, environment)
+						result = c.cleanupTaskLanguage(
+							workCtx, *current, host, hostExists, hostErr, reason,
+						)
+					}
+					stopAttempts <- struct{}{}
+					<-taskHostDone
+					return nil, c.finalizeTaskLanguageCleanup(
+						workCtx, result, taskHostCleanupErr, reason,
+					)
+				},
+			)
+			commandResults <- commandErr
+		}()
+	}
+	for range states {
+		<-stopAttempts
+	}
 	if environment != nil && ExecutorSupportsLSP(environment.ExecutorType) {
 		taskHostCleanupErr = c.runtimes.CleanupTaskHost(ctx, environment.ID, reason)
 	}
-	if taskHostCleanupErr == nil {
-		for _, result := range pending {
-			cleanupErrors = append(cleanupErrors, c.finishTaskLanguageCleanup(ctx, result.state, reason))
-		}
-	} else {
-		for _, result := range pending {
-			cleanupErrors = append(cleanupErrors, result.err)
-		}
-		cleanupErrors = append(cleanupErrors, taskHostCleanupErr)
+	close(taskHostDone)
+	for range states {
+		cleanupErrors = append(cleanupErrors, <-commandResults)
 	}
+	cleanupErrors = append(cleanupErrors, taskHostCleanupErr)
 	return errors.Join(cleanupErrors...)
 }
 
@@ -345,8 +364,23 @@ func (c *Controller) cleanupTaskLanguage(
 	return taskLanguageCleanupResult{
 		state:       state,
 		processGone: true,
-		err:         c.finishTaskLanguageCleanup(ctx, state, reason),
 	}
+}
+
+func (c *Controller) finalizeTaskLanguageCleanup(
+	ctx context.Context,
+	result taskLanguageCleanupResult,
+	taskHostCleanupErr error,
+	reason string,
+) error {
+	if !result.processGone && taskHostCleanupErr != nil {
+		return result.err
+	}
+	current, _, err := c.store.GetTaskLSPLanguage(ctx, result.state.TaskID, result.state.Language)
+	if err != nil {
+		return err
+	}
+	return c.finishTaskLanguageCleanup(ctx, *current, reason)
 }
 
 func (c *Controller) finishTaskLanguageCleanup(

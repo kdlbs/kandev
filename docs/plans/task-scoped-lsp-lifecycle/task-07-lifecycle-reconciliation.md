@@ -145,3 +145,11 @@ persisted policy and current global default immediately before allocating a gene
 candidate therefore returns the current off/disabled snapshot without ensuring a task host,
 launching a process, or consuming capacity. The focused regression failed before the guard and then
 passed 20 repetitions under `-race`; the full `internal/lsp` race suite and backend lint also pass.
+
+The following review found cleanup could use generation N from its initial list while a serialized
+Start/Restart allocated generation N+1, causing teardown to mark the successor off but retain its
+capacity slot. Cleanup now queues an exclusive batch in every affected task/language command lane,
+reloads both the current row and task host after prior commands finish, and holds the lanes through
+the full task-host cleanup backstop. Finalization releases and clears the exact current generation
+that teardown proved dead. The deterministic barrier regression failed before the fix, then passed
+20 repetitions under `-race` together with the cleanup failure/fallback cases.
