@@ -195,12 +195,14 @@ grep -Fq "GOFLAGS=\"-trimpath\"" "$TMP_DIR/runtime-dry-run" ||
   fail "runtime target did not forward GOFLAGS"
 grep -Fq -- 'requested_bundle_dir='"\"$runtime_output\"" "$TMP_DIR/runtime-dry-run" ||
   fail "runtime target did not retain the selected output directory"
-grep -Fq -- '--bundle-dir "$resolved_bundle_dir"' "$TMP_DIR/runtime-dry-run" ||
-  fail "runtime target did not validate the canonical output directory"
+grep -Fq -- '--bundle-dir "$staging_bundle_dir"' "$TMP_DIR/runtime-dry-run" ||
+  fail "runtime target did not validate the staged bundle"
 grep -Fq 'resolved_bundle_dir=' "$TMP_DIR/runtime-dry-run" ||
   fail "runtime target did not canonicalize the bundle directory before writing"
 grep -Fq 'pwd -P' "$TMP_DIR/runtime-dry-run" ||
   fail "runtime target did not resolve symlinked bundle directories"
+grep -Fq 'mktemp -d "$resolved_bundle_dir/.runtime-bundle.XXXXXX"' "$TMP_DIR/runtime-dry-run" ||
+  fail "runtime target did not create a clean staging bundle"
 if grep -Fq "rm -rf \"$runtime_output/bin\"" "$TMP_DIR/runtime-dry-run"; then
   fail "runtime target recursively deleted through an unresolved bundle path"
 fi
@@ -219,6 +221,53 @@ done
 if grep -Eq 'pnpm( with current)? .*install|playwright install' "$TMP_DIR/runtime-dry-run"; then
   fail "runtime target attempted to install dependencies or Playwright"
 fi
+
+runtime_backend="$TMP_DIR/runtime backend"
+mkdir -p "$runtime_backend/bin"
+for binary in \
+  kandev \
+  agentctl \
+  agentctl-linux-amd64 \
+  agentctl-linux-arm64 \
+  agentctl-darwin-arm64 \
+  agentctl-darwin-amd64; do
+  printf 'new %s\n' "$binary" > "$runtime_backend/bin/$binary"
+  chmod +x "$runtime_backend/bin/$binary"
+done
+write_macho "$runtime_backend/bin/agentctl-darwin-arm64" signed
+
+failed_copy_bundle="$TMP_DIR/failed copy bundle"
+make_complete_bundle "$failed_copy_bundle"
+cp -R "$failed_copy_bundle/bin" "$TMP_DIR/failed copy snapshot"
+rm "$runtime_backend/bin/agentctl-darwin-amd64"
+if make -C "$ROOT_DIR" runtime-bundle \
+  MAKE=true \
+  BACKEND_DIR="$runtime_backend" \
+  RUNTIME_VERSION=1.2.3 \
+  RUNTIME_BUNDLE_DIR="$failed_copy_bundle" \
+  >"$TMP_DIR/out" 2>"$TMP_DIR/err"; then
+  fail "runtime target ignored a failed binary copy"
+fi
+if ! diff -r "$TMP_DIR/failed copy snapshot" "$failed_copy_bundle/bin" >/dev/null; then
+  fail "failed binary copy changed the previous runtime bundle"
+fi
+
+printf 'new agentctl-darwin-amd64\n' > "$runtime_backend/bin/agentctl-darwin-amd64"
+chmod +x "$runtime_backend/bin/agentctl-darwin-amd64"
+stale_bundle="$TMP_DIR/stale bundle"
+make_complete_bundle "$stale_bundle"
+touch "$stale_bundle/bin/debugger"
+chmod +x "$stale_bundle/bin/debugger"
+if ! make -C "$ROOT_DIR" runtime-bundle \
+  MAKE=true \
+  BACKEND_DIR="$runtime_backend" \
+  RUNTIME_VERSION=1.2.3 \
+  RUNTIME_BUNDLE_DIR="$stale_bundle" \
+  >"$TMP_DIR/out" 2>"$TMP_DIR/err"; then
+  fail "repeat runtime bundle failed instead of replacing stale artifacts: $(cat "$TMP_DIR/err")"
+fi
+[ ! -e "$stale_bundle/bin/debugger" ] ||
+  fail "repeat runtime bundle retained a stale artifact"
 
 root_symlink="$TMP_DIR/root symlink"
 ln -s / "$root_symlink"

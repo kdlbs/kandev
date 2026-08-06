@@ -322,19 +322,26 @@ runtime-bundle:
 	@$(MAKE) -s build-web
 	@$(MAKE) -s sync-embedded-web
 	@$(MAKE) -C $(BACKEND_DIR) build-runtime VERSION="$(RUNTIME_VERSION)" GOFLAGS="$(GOFLAGS)"
-	@requested_bundle_dir="$(RUNTIME_BUNDLE_DIR)"; \
+	@set -eu; \
+		requested_bundle_dir="$(RUNTIME_BUNDLE_DIR)"; \
 		mkdir -p "$$requested_bundle_dir"; \
 		resolved_bundle_dir="$$(cd "$$requested_bundle_dir" && pwd -P)"; \
 		test -n "$$resolved_bundle_dir" || { echo "RUNTIME_BUNDLE_DIR could not be resolved; aborting."; exit 1; }; \
 		test "$$resolved_bundle_dir" != "/" || { echo "RUNTIME_BUNDLE_DIR must not resolve to /; aborting."; exit 1; }; \
-		mkdir -p "$$resolved_bundle_dir/bin"; \
+		staging_bundle_dir="$$(mktemp -d "$$resolved_bundle_dir/.runtime-bundle.XXXXXX")"; \
+		trap 'rm -rf "$$staging_bundle_dir"' EXIT; \
+		mkdir -p "$$staging_bundle_dir/bin"; \
 		cp "$(BACKEND_DIR)/bin/kandev" "$(BACKEND_DIR)/bin/agentctl" \
 		"$(BACKEND_DIR)/bin/agentctl-linux-amd64" \
 		"$(BACKEND_DIR)/bin/agentctl-linux-arm64" \
 		"$(BACKEND_DIR)/bin/agentctl-darwin-arm64" \
 		"$(BACKEND_DIR)/bin/agentctl-darwin-amd64" \
-		"$$resolved_bundle_dir/bin/"; \
-		scripts/release/package-bundle.sh --bundle-dir "$$resolved_bundle_dir"
+		"$$staging_bundle_dir/bin/"; \
+		scripts/release/package-bundle.sh --bundle-dir "$$staging_bundle_dir"; \
+		rm -rf "$$resolved_bundle_dir/bin"; \
+		mv "$$staging_bundle_dir/bin" "$$resolved_bundle_dir/bin"; \
+		rmdir "$$staging_bundle_dir"; \
+		trap - EXIT
 	$(call success,Runtime bundle packaged at $(RUNTIME_BUNDLE_DIR))
 
 .PHONY: service-bundle
