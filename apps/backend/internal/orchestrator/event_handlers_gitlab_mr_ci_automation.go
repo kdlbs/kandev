@@ -189,10 +189,12 @@ func (s *Service) handleTaskMRCIAutoFix(
 		s.publishTaskMRAutomationState(ctx, mr.TaskID)
 		return true
 	}
-	if err := s.gitlabMRAutomation.RecordTaskMRFixAttempt(context.WithoutCancel(ctx), gitlab.TaskMRFixAttempt{
-		TaskID: mr.TaskID, RepositoryID: mr.RepositoryID, ProjectPath: mr.ProjectPath, MRIID: mr.MRIID,
-		Signature: signature, CheckpointJSON: checkpointJSON, SessionID: session.ID,
-		EnqueuedAt: time.Now().UTC(), IncrementRound: result.consumesRound(),
+	if err := runTaskMRAutomationFollowUp(ctx, ciAutomationFollowUpTimeout, func(followUp context.Context) error {
+		return s.gitlabMRAutomation.RecordTaskMRFixAttempt(followUp, gitlab.TaskMRFixAttempt{
+			TaskID: mr.TaskID, RepositoryID: mr.RepositoryID, ProjectPath: mr.ProjectPath, MRIID: mr.MRIID,
+			Signature: signature, CheckpointJSON: checkpointJSON, SessionID: session.ID,
+			EnqueuedAt: time.Now().UTC(), IncrementRound: result.consumesRound(),
+		})
 	}); err != nil {
 		s.logger.Debug("record MR auto-fix attempt failed", zap.String("task_id", mr.TaskID), zap.Error(err))
 	} else {
@@ -216,9 +218,11 @@ func (s *Service) handleTaskMRCIAutoFixEmptyDelta(
 	previous mrAutoFixCheckpoint, signature, checkpointJSON string,
 ) {
 	if state != nil && len(previous.FailedJobs)+len(previous.Notes) > 0 {
-		if err := s.gitlabMRAutomation.RefreshTaskMRFixCheckpoint(
-			context.WithoutCancel(ctx), mr.TaskID, mr.RepositoryID, mr.ProjectPath, mr.MRIID, signature, checkpointJSON,
-		); err != nil {
+		if err := runTaskMRAutomationFollowUp(ctx, ciAutomationFollowUpTimeout, func(followUp context.Context) error {
+			return s.gitlabMRAutomation.RefreshTaskMRFixCheckpoint(
+				followUp, mr.TaskID, mr.RepositoryID, mr.ProjectPath, mr.MRIID, signature, checkpointJSON,
+			)
+		}); err != nil {
 			s.logger.Debug("record MR auto-fix checkpoint refresh failed", zap.String("task_id", mr.TaskID), zap.Error(err))
 		}
 	}
@@ -241,11 +245,26 @@ func (s *Service) handleTaskMRCIAutoMerge(ctx context.Context, mr *gitlab.TaskMR
 		s.publishTaskMRAutomationState(ctx, mr.TaskID)
 		return
 	}
-	_ = s.gitlabMRAutomation.RecordTaskMRMergeAttempt(context.WithoutCancel(ctx), gitlab.TaskMRMergeAttempt{
-		TaskID: mr.TaskID, RepositoryID: mr.RepositoryID, ProjectPath: mr.ProjectPath, MRIID: mr.MRIID,
-		Signature: signature, AttemptedAt: time.Now().UTC(),
-	})
-	_ = s.gitlabMRAutomation.ClearTaskMRAutomationError(context.WithoutCancel(ctx), mr.TaskID, mr.RepositoryID, mr.ProjectPath, mr.MRIID)
+	// The merge already succeeded, so a failure here cannot be retried by
+	// re-merging — but it must not be silent: an unwritten LastMergeSignature
+	// makes the next pass re-attempt the merge against an already-merged MR
+	// and record a misleading automation error.
+	if err := runTaskMRAutomationFollowUp(ctx, ciAutomationFollowUpTimeout, func(followUp context.Context) error {
+		return s.gitlabMRAutomation.RecordTaskMRMergeAttempt(followUp, gitlab.TaskMRMergeAttempt{
+			TaskID: mr.TaskID, RepositoryID: mr.RepositoryID, ProjectPath: mr.ProjectPath, MRIID: mr.MRIID,
+			Signature: signature, AttemptedAt: time.Now().UTC(),
+		})
+	}); err != nil {
+		s.logger.Warn("record MR auto-merge attempt failed; the next pass may re-attempt an already-merged MR",
+			zap.String("task_id", mr.TaskID), zap.String("project_path", mr.ProjectPath),
+			zap.Int("mr_iid", mr.MRIID), zap.Error(err))
+	}
+	if err := runTaskMRAutomationFollowUp(ctx, ciAutomationFollowUpTimeout, func(followUp context.Context) error {
+		return s.gitlabMRAutomation.ClearTaskMRAutomationError(followUp, mr.TaskID, mr.RepositoryID, mr.ProjectPath, mr.MRIID)
+	}); err != nil {
+		s.logger.Debug("clear MR automation error after merge failed",
+			zap.String("task_id", mr.TaskID), zap.Error(err))
+	}
 	s.publishTaskMRAutomationState(ctx, mr.TaskID)
 }
 
@@ -344,9 +363,11 @@ func (s *Service) markMRAutoFixExhausted(ctx context.Context, mr *gitlab.TaskMR)
 		zap.String("task_id", mr.TaskID), zap.String("repository_id", mr.RepositoryID),
 		zap.String("project_path", mr.ProjectPath), zap.Int("mr_iid", mr.MRIID),
 		zap.Int("max_rounds", gitlab.TaskMRAutoFixMaxRounds))
-	if err := s.gitlabMRAutomation.MarkTaskMRAutoFixExhausted(
-		context.WithoutCancel(ctx), mr.TaskID, mr.RepositoryID, mr.ProjectPath, mr.MRIID, message,
-	); err != nil {
+	if err := runTaskMRAutomationFollowUp(ctx, ciAutomationFollowUpTimeout, func(followUp context.Context) error {
+		return s.gitlabMRAutomation.MarkTaskMRAutoFixExhausted(
+			followUp, mr.TaskID, mr.RepositoryID, mr.ProjectPath, mr.MRIID, message,
+		)
+	}); err != nil {
 		s.logger.Debug("record MR auto-fix exhaustion failed", zap.String("task_id", mr.TaskID), zap.Error(err))
 		return
 	}

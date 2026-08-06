@@ -12,6 +12,7 @@ import {
 import { Button } from "@kandev/ui/button";
 import { Label } from "@kandev/ui/label";
 import { Textarea } from "@kandev/ui/textarea";
+import Link from "@/components/routing/app-link";
 
 const MR_FEEDBACK_PLACEHOLDER = "{{mr.feedback}}";
 
@@ -78,13 +79,13 @@ export function MRAutoFixPromptDialog({
               >
                 {t("gitlab:mrAutoFixInsertMrFeedback")}
               </Button>
-              <a
+              <Link
                 href="/settings/prompts"
                 className="cursor-pointer text-xs text-primary hover:underline"
                 onClick={(e) => e.stopPropagation()}
               >
                 {t("gitlab:mrAutomationEditDefaultPrompt")}
-              </a>
+              </Link>
             </div>
           </div>
           <div
