@@ -99,7 +99,13 @@ describe("getMRTooltip", () => {
 
   it("flags a ready-to-merge MR", () => {
     expect(
-      getMRTooltip(makeMR({ approval_state: "approved", pipeline_state: "success" })),
+      getMRTooltip(
+        makeMR({
+          approval_state: "approved",
+          pipeline_state: "success",
+          merge_status: "can_be_merged",
+        }),
+      ),
     ).toContain("Ready to merge");
   });
 
@@ -111,9 +117,15 @@ describe("getMRTooltip", () => {
 });
 
 describe("isMRReadyToMerge", () => {
-  it("is true only for open, non-draft, approved MRs with a passing pipeline", () => {
+  it("is true only for open, non-draft, approved MRs with a passing pipeline and a mergeable status", () => {
     expect(
-      isMRReadyToMerge(makeMR({ approval_state: "approved", pipeline_state: "success" })),
+      isMRReadyToMerge(
+        makeMR({
+          approval_state: "approved",
+          pipeline_state: "success",
+          merge_status: "can_be_merged",
+        }),
+      ),
     ).toBe(true);
     expect(
       isMRReadyToMerge(
@@ -121,6 +133,53 @@ describe("isMRReadyToMerge", () => {
       ),
     ).toBe(false);
     expect(isMRReadyToMerge(makeMR({ state: "merged", approval_state: "approved" }))).toBe(false);
+  });
+
+  it("is false when there are unresolved discussions, even if every other gate passes", () => {
+    expect(
+      isMRReadyToMerge(
+        makeMR({
+          approval_state: "approved",
+          pipeline_state: "success",
+          merge_status: "can_be_merged",
+          unresolved_discussions: 1,
+        }),
+      ),
+    ).toBe(false);
+  });
+
+  it("is false when detailed_merge_status is present but not mergeable, regardless of merge_status", () => {
+    expect(
+      isMRReadyToMerge(
+        makeMR({
+          approval_state: "approved",
+          pipeline_state: "success",
+          merge_status: "can_be_merged",
+          detailed_merge_status: "not_approved",
+        }),
+      ),
+    ).toBe(false);
+  });
+
+  it("falls back to merge_status when detailed_merge_status is absent (pre-15.6 host)", () => {
+    expect(
+      isMRReadyToMerge(
+        makeMR({
+          approval_state: "approved",
+          pipeline_state: "success",
+          merge_status: "can_be_merged",
+        }),
+      ),
+    ).toBe(true);
+    expect(
+      isMRReadyToMerge(
+        makeMR({
+          approval_state: "approved",
+          pipeline_state: "success",
+          merge_status: "cannot_be_merged",
+        }),
+      ),
+    ).toBe(false);
   });
 });
 

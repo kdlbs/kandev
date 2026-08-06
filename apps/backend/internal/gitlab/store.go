@@ -246,28 +246,13 @@ func (s *Store) createTables() error {
 // columns are added via ALTER TABLE rather than only listed in the CREATE
 // TABLE above (which is a no-op on an existing table).
 func (s *Store) migrateTaskMRAutomationFields() error {
-	columns := []struct {
-		name string
-		ddl  string
-	}{
+	columns := []struct{ name, ddl string }{
 		{"detailed_merge_status", "TEXT NOT NULL DEFAULT ''"},
 		{"reviewer_count", "INTEGER NOT NULL DEFAULT 0"},
 		{"unapproved_reviewers", "INTEGER NOT NULL DEFAULT 0"},
 		{"unresolved_discussions", "INTEGER NOT NULL DEFAULT 0"},
 	}
-	existing, err := s.tableColumns("gitlab_task_mrs")
-	if err != nil {
-		return err
-	}
-	for _, column := range columns {
-		if _, ok := existing[column.name]; ok {
-			continue
-		}
-		if _, err := s.db.Exec(fmt.Sprintf("ALTER TABLE gitlab_task_mrs ADD COLUMN %s %s", column.name, column.ddl)); err != nil {
-			return fmt.Errorf("migrate gitlab_task_mrs.%s: %w", column.name, err)
-		}
-	}
-	return nil
+	return addMissingColumns(s, "gitlab_task_mrs", columns)
 }
 
 // ensureMRWatchIndexes re-creates gitlab_mr_watches' indexes after

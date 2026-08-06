@@ -3,6 +3,7 @@
 import { IconGitMerge } from "@tabler/icons-react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { cn } from "@/lib/utils";
+import { t } from "@/lib/i18n";
 import { useTaskMRs } from "@/hooks/domains/gitlab/use-task-mr";
 import type { TaskMR } from "@/lib/types/gitlab";
 
@@ -44,23 +45,35 @@ const STATUS_RANK: Record<string, number> = {
   [MUTED_FOREGROUND]: 0,
 };
 
-/** Mirrors mrAutomationReadyToMerge's non-fetch-dependent subset for display purposes only. */
+/**
+ * Mirrors mrAutomationReadyToMerge (backend) for display purposes: the same
+ * gates (open, not draft, pipeline success, approved, zero unresolved
+ * discussions, GitLab's own merge-readiness verdict) evaluated against
+ * whatever TaskMR fields are already on hand. `unresolved_discussions` is
+ * only populated for automation-subscribed MRs (see the TaskMR field's own
+ * doc comment), so this can still under-report for a non-subscribed MR —
+ * but it must never claim "ready" while a populated, non-zero count or a
+ * non-mergeable verdict says otherwise.
+ */
 export function isMRReadyToMerge(mr: TaskMR): boolean {
-  return (
-    mr.state === "open" &&
-    !mr.draft &&
-    mr.pipeline_state === "success" &&
-    mr.approval_state === "approved"
-  );
+  if (mr.state !== "open" || mr.draft) return false;
+  if (mr.pipeline_state !== "success" || mr.approval_state !== "approved") return false;
+  if (mr.unresolved_discussions > 0) return false;
+  return mrMergeStatusReady(mr);
+}
+
+function mrMergeStatusReady(mr: TaskMR): boolean {
+  if (mr.detailed_merge_status) return mr.detailed_merge_status === "mergeable";
+  return mr.merge_status === "can_be_merged";
 }
 
 export function getMRTooltip(mr: TaskMR): string {
   const parts = [`!${mr.mr_iid}: ${mr.mr_title}`];
-  if (mr.state !== "open") parts.push(`State: ${mr.state}`);
-  if (mr.approval_state) parts.push(`Review: ${mr.approval_state}`);
-  if (mr.pipeline_state) parts.push(`Pipeline: ${mr.pipeline_state}`);
-  if (mr.draft) parts.push("Draft");
-  else if (isMRReadyToMerge(mr)) parts.push("Ready to merge");
+  if (mr.state !== "open") parts.push(t("gitlab:mrTooltipState", { state: mr.state }));
+  if (mr.approval_state) parts.push(t("gitlab:mrTooltipReview", { state: mr.approval_state }));
+  if (mr.pipeline_state) parts.push(t("gitlab:mrTooltipPipeline", { state: mr.pipeline_state }));
+  if (mr.draft) parts.push(t("gitlab:draft"));
+  else if (isMRReadyToMerge(mr)) parts.push(t("gitlab:mrTooltipReadyToMerge"));
   return parts.join(" | ");
 }
 

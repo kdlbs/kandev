@@ -142,7 +142,11 @@ function MRApprovalRow({ mr }: { mr: TaskMR }) {
   const { t } = useTranslation();
   const required = mr.required_approvals;
   const approved = mr.approval_count;
-  const isApproved = required > 0 && approved >= required;
+  // required === 0 still counts as approved once someone has approved —
+  // matches the backend's summarizeApprovals, which returns "approved" for
+  // required==0 && have>0. Requiring `required > 0` here contradicted that
+  // and mislabeled optional-review projects as "Awaiting review".
+  const isApproved = required > 0 ? approved >= required : approved > 0;
   const icon = isApproved ? (
     <IconCheck className="h-3.5 w-3.5 text-emerald-500" />
   ) : (

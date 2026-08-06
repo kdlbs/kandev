@@ -106,7 +106,7 @@ beforeEach(() => {
 
 afterEach(() => cleanup());
 
-describe("MRCIPopover", () => {
+describe("MRCIPopover — pipeline (AC18/AC19)", () => {
   it("AC18: renders the pass-rate bar at the live job breakdown once feedback loads", () => {
     feedbackMocks.feedback = makeFeedback({
       pipelines: [
@@ -146,7 +146,9 @@ describe("MRCIPopover", () => {
     expect(screen.queryByTestId("mr-pipeline-progress")).toBeNull();
     expect(screen.getByTestId("mr-pipeline-empty")).toBeTruthy();
   });
+});
 
+describe("MRCIPopover — approvals (AC20/AC21)", () => {
   it("AC20: renders Approved with a check icon when approval_count meets required_approvals", () => {
     render(<MRCIPopover mr={makeMR({ approval_count: 2, required_approvals: 2 })} enabled />);
     const row = screen.getByTestId(APPROVAL_ROW_TEST_ID);
@@ -168,6 +170,19 @@ describe("MRCIPopover", () => {
     expect(row.textContent).not.toContain("/");
   });
 
+  it("AC20: renders Approved (not Awaiting review) when required_approvals is 0 but the MR has an approval", () => {
+    render(<MRCIPopover mr={makeMR({ approval_count: 1, required_approvals: 0 })} enabled />);
+    const row = screen.getByTestId(APPROVAL_ROW_TEST_ID);
+    expect(row.textContent).toContain("Approved");
+    expect(row.textContent).not.toContain("Awaiting review");
+  });
+
+  it("AC20: renders Awaiting review when required_approvals is 0 and there are zero approvals", () => {
+    render(<MRCIPopover mr={makeMR({ approval_count: 0, required_approvals: 0 })} enabled />);
+    const row = screen.getByTestId(APPROVAL_ROW_TEST_ID);
+    expect(row.textContent).toContain("Awaiting review");
+  });
+
   it("AC21: appends an awaiting-count suffix when reviewers haven't approved yet", () => {
     render(
       <MRCIPopover
@@ -187,7 +202,9 @@ describe("MRCIPopover", () => {
     );
     expect(screen.getByTestId(APPROVAL_ROW_TEST_ID).textContent).not.toContain("awaiting");
   });
+});
 
+describe("MRCIPopover — discussions (AC22)", () => {
   it("AC22: renders the unresolved-comments row via count-based pluralization, singular", () => {
     feedbackMocks.feedback = makeFeedback({ discussions: [makeDiscussion()] });
     render(<MRCIPopover mr={makeMR()} enabled />);

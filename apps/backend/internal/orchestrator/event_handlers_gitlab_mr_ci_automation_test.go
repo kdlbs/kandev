@@ -360,6 +360,37 @@ func TestHandleTaskMRCIAutomation_TerminalStateSkipsAutoFix(t *testing.T) {
 	}
 }
 
+// TestHandleTaskMRCIAutomation_StaleOpenRowSkipsAutoFixWhenSnapshotIsTerminal
+// pins a fix for a real bug: the passed-in TaskMR row (from the DB, possibly
+// a poll cycle stale) can still read "open" for an MR GitLab already reports
+// merged/closed/locked when the immediate options-updated trigger fires
+// before the next lightweight sync. The fresh snapshot fetched inside this
+// call must be the terminal-state source of truth, not just the row.
+func TestHandleTaskMRCIAutomation_StaleOpenRowSkipsAutoFixWhenSnapshotIsTerminal(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task-1", "session-1", models.TaskSessionStateRunning)
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	mr := &gitlab.TaskMR{TaskID: "task-1", ProjectPath: "group/widget", MRIID: 1, State: gitlabMRStateOpen}
+	fake := &mockGitLabMRAutomationService{
+		snapshot: &gitlab.MRAutomationSnapshot{
+			MR:             &gitlab.MR{State: gitlabMRStateMerged},
+			PipelineStatus: "failed",
+			FailingJobs:    []gitlab.PipelineJob{{Name: "unit", Status: "failed"}},
+		},
+	}
+	svc.SetGitLabMRAutomationService(fake)
+
+	svc.handleTaskMRCIAutomation(ctx, mr, &gitlab.TaskMRAutomationResponse{
+		TaskID: "task-1", AutoFixEnabled: true, EffectiveAutoFixPrompt: "Fix it",
+	})
+
+	status := svc.messageQueue.GetStatus(ctx, "session-1")
+	if status.Count != 0 {
+		t.Fatalf("expected no dispatch when the fresh snapshot reports a merged MR, got %+v", status)
+	}
+}
+
 func TestHandleTaskMRCIAutomation_MergesWhenReady(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)

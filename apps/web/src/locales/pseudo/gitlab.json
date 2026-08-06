@@ -323,5 +323,9 @@
   "mrPopoverUnresolvedComments_one": "{{count}} ũńŕēśōĺvēď ćōḿḿēńţ",
   "mrPopoverUnresolvedComments_other": "{{count}} ũńŕēśōĺvēď ćōḿḿēńţś",
   "mrPopoverUpdatedJustNow": "ũƥďàţēď ĵũśţ ńōŵ",
-  "mrPopoverUpdatedAgo": "ũƥďàţēď {{elapsed}} àĝō"
+  "mrPopoverUpdatedAgo": "ũƥďàţēď {{elapsed}} àĝō",
+  "mrTooltipState": "Śţàţē: {{state}}",
+  "mrTooltipReview": "Ŕēvĩēŵ: {{state}}",
+  "mrTooltipPipeline": "Ƥĩƥēĺĩńē: {{state}}",
+  "mrTooltipReadyToMerge": "Ŕēàďŷ ţō ḿēŕĝē"
 }

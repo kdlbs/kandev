@@ -323,5 +323,9 @@
   "mrPopoverUnresolvedComments_one": "{{count}} unresolved comment",
   "mrPopoverUnresolvedComments_other": "{{count}} unresolved comments",
   "mrPopoverUpdatedJustNow": "updated just now",
-  "mrPopoverUpdatedAgo": "updated {{elapsed}} ago"
+  "mrPopoverUpdatedAgo": "updated {{elapsed}} ago",
+  "mrTooltipState": "State: {{state}}",
+  "mrTooltipReview": "Review: {{state}}",
+  "mrTooltipPipeline": "Pipeline: {{state}}",
+  "mrTooltipReadyToMerge": "Ready to merge"
 }

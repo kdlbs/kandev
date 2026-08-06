@@ -115,6 +115,14 @@ func (s *Service) handleTaskMRCIAutomation(ctx context.Context, mr *gitlab.TaskM
 		s.publishTaskMRAutomationState(ctx, mr.TaskID)
 		return
 	}
+	// Re-check against the snapshot's live GitLab state, not the possibly
+	// stale gitlab_task_mrs row above: the immediate options-updated trigger
+	// (as opposed to the ~1-minute poller sweep) can fire before the next
+	// lightweight sync catches up, so mr.State can still read "open" for an
+	// MR GitLab already reports merged/closed/locked.
+	if snapshot.MR == nil || !mrAutoFixCanRun(snapshot.MR.State) {
+		return
+	}
 	autoFixBlockedMerge := false
 	if options.AutoFixEnabled {
 		autoFixBlockedMerge = s.handleTaskMRCIAutoFix(ctx, mr, options, snapshot)
