@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/coder/acp-go-sdk"
+	"github.com/kandev/kandev/internal/agentctl/acpcompat"
 	acpclient "github.com/kandev/kandev/internal/agentctl/server/acp"
 	"github.com/kandev/kandev/internal/agentctl/server/adapter/transport/shared"
 	"github.com/kandev/kandev/internal/agentctl/types"
@@ -44,6 +45,21 @@ const (
 	// by ACP agents to surface the active model as a selectable option.
 	configOptionIDModel = "model"
 )
+
+const (
+	cursorAgentID                   = acpcompat.CursorAgentID
+	parameterizedModelPickerMetaKey = acpcompat.ParameterizedModelPickerMetaKey
+)
+
+// clientCapabilitiesForAgent builds the ACP client capabilities for one agent.
+// The meta map is agent-scoped because cursor-agent reads it to choose a model
+// picker mode (see acpcompat.ClientCapabilityMeta); every other agent sees the
+// capabilities kandev has always sent.
+func clientCapabilitiesForAgent(agentID string) acp.ClientCapabilities {
+	return acp.ClientCapabilities{
+		Meta: acpcompat.ClientCapabilityMeta(agentID, map[string]any{"terminal_output": true}),
+	}
+}
 
 // wakeupPromptTimeout bounds how long a synthetic wakeup prompt can run.
 // Wakeup turns can perform real work (the model often runs a few tool calls
@@ -413,9 +429,7 @@ func (a *Adapter) Initialize(ctx context.Context) error {
 
 	resp, err := a.acpConn.Initialize(ctx, acp.InitializeRequest{
 		ProtocolVersion: acp.ProtocolVersionNumber,
-		ClientCapabilities: acp.ClientCapabilities{
-			Meta: map[string]any{"terminal_output": true},
-		},
+		ClientCapabilities: clientCapabilitiesForAgent(a.agentID),
 		ClientInfo: &acp.Implementation{
 			Name:    "kandev-agentctl",
 			Version: "1.0.0",

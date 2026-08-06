@@ -108,7 +108,7 @@ func (e *ACPInferenceExecutor) Execute(ctx context.Context, req *PromptRequest) 
 		e.logger.Warn("ACP inference: dropping unsupported MCP server transport",
 			zap.String("name", name))
 	}
-	response, err := e.executeACPSession(ctx, stdin, stdout, workDir, req.Prompt, req.Model, req.Mode, mcpServers)
+	response, err := e.executeACPSession(ctx, stdin, stdout, workDir, req.AgentID, req.Prompt, req.Model, req.Mode, mcpServers)
 	if err != nil {
 		return &PromptResponse{
 			Success:    false,
@@ -135,6 +135,7 @@ func (e *ACPInferenceExecutor) executeACPSession(
 	stdin io.Writer,
 	stdout io.Reader,
 	workDir string,
+	agentID string,
 	prompt string,
 	model string,
 	mode string,
@@ -168,8 +169,16 @@ func (e *ACPInferenceExecutor) executeACPSession(
 	conn.SetLogger(slog.Default().With("component", "acp-inference"))
 
 	// Initialize ACP handshake
+	// Same client capabilities the session adapter and the probe send. This
+	// path applies a caller-supplied model below, and an agent that picks its
+	// model-picker mode from the handshake advertises a different id set per
+	// mode — so opting out here would reject the very model ids the rest of
+	// the product hands out.
 	_, err := conn.Initialize(ctx, acp.InitializeRequest{
 		ProtocolVersion: acp.ProtocolVersionNumber,
+		ClientCapabilities: acp.ClientCapabilities{
+			Meta: acpcompat.ClientCapabilityMeta(agentID, nil),
+		},
 		ClientInfo: &acp.Implementation{
 			Name:    "kandev-inference",
 			Version: "1.0.0",
@@ -512,8 +521,16 @@ func (e *ACPInferenceExecutor) probeACPSession(
 	conn := acp.NewClientSideConnection(client, stdin, stdout)
 	conn.SetLogger(slog.Default().With("component", "acp-probe"))
 
+	// Same client capabilities the live session adapter sends. cursor-agent
+	// picks its model picker mode from this handshake, so a probe that opts
+	// out reports the exploded fast=true model rows while sessions run on the
+	// bare ids — the agent-models surface would then offer a model list no
+	// session uses, and a model id the UI cannot select.
 	initResp, err := conn.Initialize(ctx, acp.InitializeRequest{
 		ProtocolVersion: acp.ProtocolVersionNumber,
+		ClientCapabilities: acp.ClientCapabilities{
+			Meta: acpcompat.ClientCapabilityMeta(agentID, nil),
+		},
 		ClientInfo: &acp.Implementation{
 			Name:    "kandev-probe",
 			Version: "1.0.0",
