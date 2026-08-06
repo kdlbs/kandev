@@ -18,7 +18,6 @@ import { useTree, type VisibleRow } from "@/hooks/use-tree";
 import { useTranslation } from "react-i18next";
 import type { ReviewFile, FileTreeNode } from "./types";
 import { buildFileTree, reviewFileKey } from "./types";
-import { useTranslation } from "react-i18next";
 
 type ReviewFileTreeProps = {
   files: ReviewFile[];
