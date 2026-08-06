@@ -3,12 +3,12 @@ package models
 import (
 	"errors"
 
-	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
+	"github.com/kandev/kandev/internal/messageconstraints"
 )
 
 const (
-	MaxMessageAttachmentBytes = messagequeue.MaxMessageAttachmentBytes
-	MaxMessageAttachmentCount = messagequeue.MaxMessageAttachmentCount
+	MaxMessageAttachmentBytes = messageconstraints.MaxAttachmentBytes
+	MaxMessageAttachmentCount = messageconstraints.MaxAttachmentCount
 )
 
 var (

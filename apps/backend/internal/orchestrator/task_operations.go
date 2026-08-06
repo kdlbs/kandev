@@ -3627,7 +3627,10 @@ func (s *Service) claimSessionRunningForPrompt(
 	// remains until the turn settles, so Send Now cannot cancel or duplicate
 	// this successor while the executor call is still in progress.
 	if claimEntryID != "" {
-		s.releaseQueuedDispatchPendingIfCurrent(sessionID, claimEntryID)
+		s.releaseQueuedDispatchPendingIfCurrent(
+			sessionID,
+			s.queuedDispatchReservationForEntry(sessionID, claimEntryID),
+		)
 	}
 	return freshSession, nil
 }
@@ -3673,7 +3676,10 @@ func (s *Service) claimLifecycleSessionRunning(
 		s.restoreLifecycleClaim(ctx, taskID, sessionID, claim.PreviousState)
 		return nil, "", errLifecyclePromptInactive
 	}
-	s.releaseQueuedDispatchPendingIfCurrent(sessionID, claimEntryID)
+	s.releaseQueuedDispatchPendingIfCurrent(
+		sessionID,
+		s.queuedDispatchReservationForEntry(sessionID, claimEntryID),
+	)
 	return freshSession, claim.PreviousState, nil
 }
 

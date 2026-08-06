@@ -557,7 +557,7 @@ func (s *Service) handleAgentReady(ctx context.Context, data watcher.AgentEventD
 			// still owns the same guard used by all drains. Deferring this mark
 			// until after guard release lets a competing manual drain reserve the
 			// same durable row and begin a duplicate delivery attempt.
-			deferredLifecycleReservation = s.markQueuedDispatchInFlightWithSource(data.SessionID, queuedMsg.ID, queuedMsg)
+			deferredLifecycleReservation = s.markQueuedDispatchInFlightWithSourceLocked(data.SessionID, queuedMsg.ID, queuedMsg)
 			deferredLifecycleDispatch = queuedMsg
 			return
 		}
@@ -630,7 +630,10 @@ func (s *Service) executeQueuedMessageWithReservation(
 ) {
 	promptCtx := context.Background() // Use a fresh context for async execution
 	reservedSessionID := queuedMsg.SessionID
-	defer s.clearQueuedDispatchInFlightIfCurrent(reservedSessionID, queuedMsg.ID)
+	if reservation == nil {
+		reservation = s.queuedDispatchReservationForEntry(reservedSessionID, queuedMsg.ID)
+	}
+	defer s.clearQueuedDispatchInFlightIfCurrent(reservedSessionID, reservation)
 	lifecyclePrompt := isLifecycleAutomationOrigin(queuedMsg.Metadata["origin"])
 
 	claimEntryID, handoffDone := s.claimQueuedMessageHandoff(
@@ -825,7 +828,7 @@ func (s *Service) handleQueuedMessageExecutionError(
 	s.logger.Warn("queued message execution failed - message is lost (no retry/dead letter queue)",
 		zap.String("session_id", callerSessionID),
 		zap.String("queue_id", queuedMsg.ID),
-		zap.String("content_preview", queuedMsg.Content[:min(50, len(queuedMsg.Content))]))
+		zap.Int("content_length", len(queuedMsg.Content)))
 }
 
 // claimQueuedMessageHandoff resolves direct/test reservations and claims the
@@ -870,6 +873,7 @@ func (s *Service) claimQueuedMessageHandoff(
 			zap.String("session_id", callerSessionID),
 			zap.String("queue_id", queuedMsg.ID),
 			zap.Error(claimErr))
+		s.requeueMessage(ctx, queuedMsg, "queued-dispatch-claim-retry")
 		return "", true
 	case tracked:
 		return queuedMsg.ID, false

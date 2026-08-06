@@ -8,20 +8,30 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/kandev/kandev/internal/entityrefs"
+	"github.com/kandev/kandev/internal/messageconstraints"
 	apiv1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
 const (
-	// MaxMessageAttachmentBytes and MaxMessageAttachmentCount are shared by
-	// ordinary queue admission and send-now aggregation.
-	MaxMessageAttachmentBytes int64 = 100 * 1024 * 1024
-	MaxMessageAttachmentCount       = 10
+	metadataUserMessageRecorded = "user_message_recorded"
 
 	// MetadataSendNowSources records the source identity and provenance that
 	// was folded into a replacement prompt. The original rows remain in the
 	// SendNowClaim so retry and acknowledgement can address them exactly.
 	MetadataSendNowSources = "send_now_sources"
 )
+
+// restoreSendNowMetadata keeps the latest persisted metadata while carrying
+// forward the monotonic transcript marker set after a replacement prompt was
+// recorded. Other claim-time metadata must never overwrite edits made while
+// the source was reserved.
+func restoreSendNowMetadata(current, claim map[string]interface{}) map[string]interface{} {
+	metadata := clearReservedMetadata(current)
+	if recorded, _ := claim[metadataUserMessageRecorded].(bool); recorded {
+		metadata[metadataUserMessageRecorded] = true
+	}
+	return metadata
+}
 
 var (
 	ErrSendNowEmpty               = errors.New("send-now queue selection is empty")
@@ -36,8 +46,59 @@ var (
 // at its original position and every durable lifecycle row can be acknowledged
 // only after the replacement prompt is accepted.
 type SendNowClaim struct {
-	Sources  []QueuedMessage `json:"sources"`
-	Dispatch QueuedMessage   `json:"dispatch"`
+	Sources           []QueuedMessage  `json:"sources"`
+	Dispatch          QueuedMessage    `json:"dispatch"`
+	SourceGenerations map[string]int64 `json:"source_generations,omitempty"`
+}
+
+func sendNowSourceGenerationChanged(claim *SendNowClaim, source QueuedMessage, current int64) bool {
+	if claim == nil || source.TaskID == "" || claim.SourceGenerations == nil {
+		return false
+	}
+	expected, ok := claim.SourceGenerations[source.TaskID]
+	return ok && expected != current
+}
+
+// ValidateSendNowEntries checks aggregate admission limits without building a
+// dispatch envelope. Callers use it before interrupting an active turn; the
+// repository still validates the exact snapshot again inside its claim
+// transaction.
+func ValidateSendNowEntries(entries []QueuedMessage) error {
+	if len(entries) == 0 {
+		return ErrSendNowEmpty
+	}
+
+	attachmentCount := 0
+	attachmentBytes := int64(0)
+	seenReferences := make(map[string]struct{})
+	referenceCount := 0
+	for _, entry := range entries {
+		attachmentCount += len(entry.Attachments)
+		if attachmentCount > messageconstraints.MaxAttachmentCount {
+			return fmt.Errorf("%w: at most %d attachments are allowed", ErrSendNowAttachmentOverflow, messageconstraints.MaxAttachmentCount)
+		}
+		for _, attachment := range entry.Attachments {
+			bytes, err := attachmentPayloadBytes(attachment)
+			if err != nil {
+				return fmt.Errorf("%w: %v", ErrSendNowAttachmentOverflow, err)
+			}
+			attachmentBytes += bytes
+			if attachmentBytes > messageconstraints.MaxAttachmentBytes {
+				return fmt.Errorf("%w: total attachment size exceeds %d bytes", ErrSendNowAttachmentOverflow, messageconstraints.MaxAttachmentBytes)
+			}
+		}
+		for _, reference := range entityrefs.NormalizePersisted(entry.Metadata[MetadataEntityReferences]) {
+			if _, duplicate := seenReferences[reference.Ref]; duplicate {
+				continue
+			}
+			seenReferences[reference.Ref] = struct{}{}
+			referenceCount++
+			if referenceCount > entityrefs.MaxReferencesPerMessage {
+				return fmt.Errorf("%w: at most %d references are allowed", ErrSendNowReferenceOverflow, entityrefs.MaxReferencesPerMessage)
+			}
+		}
+	}
+	return nil
 }
 
 func requestedSendNowIDs(expected []QueuedMessage) (map[string]struct{}, error) {
@@ -70,8 +131,8 @@ func validateSendNowSnapshot(selected []*QueuedMessage, expected []QueuedMessage
 // snapshot. It performs no repository mutation, which lets callers validate a
 // bulk selection before interrupting an active turn.
 func BuildSendNowEnvelope(entries []QueuedMessage) (*QueuedMessage, error) {
-	if len(entries) == 0 {
-		return nil, ErrSendNowEmpty
+	if err := ValidateSendNowEntries(entries); err != nil {
+		return nil, err
 	}
 
 	contentParts := make([]string, 0, len(entries))
@@ -79,26 +140,12 @@ func BuildSendNowEnvelope(entries []QueuedMessage) (*QueuedMessage, error) {
 	seenReferences := make(map[string]struct{})
 	references := make([]apiv1.EntityReference, 0)
 	sources := make([]map[string]interface{}, 0, len(entries))
-	attachmentBytes := int64(0)
 
 	for _, entry := range entries {
 		if entry.Content != "" {
 			contentParts = append(contentParts, entry.Content)
 		}
-		if len(attachments)+len(entry.Attachments) > MaxMessageAttachmentCount {
-			return nil, fmt.Errorf("%w: at most %d attachments are allowed", ErrSendNowAttachmentOverflow, MaxMessageAttachmentCount)
-		}
-		for _, attachment := range entry.Attachments {
-			bytes, err := attachmentPayloadBytes(attachment)
-			if err != nil {
-				return nil, fmt.Errorf("%w: %v", ErrSendNowAttachmentOverflow, err)
-			}
-			attachmentBytes += bytes
-			if attachmentBytes > MaxMessageAttachmentBytes {
-				return nil, fmt.Errorf("%w: total attachment size exceeds %d bytes", ErrSendNowAttachmentOverflow, MaxMessageAttachmentBytes)
-			}
-			attachments = append(attachments, attachment)
-		}
+		attachments = append(attachments, entry.Attachments...)
 
 		for _, reference := range entityrefs.NormalizePersisted(entry.Metadata[MetadataEntityReferences]) {
 			if _, duplicate := seenReferences[reference.Ref]; duplicate {
@@ -106,9 +153,6 @@ func BuildSendNowEnvelope(entries []QueuedMessage) (*QueuedMessage, error) {
 			}
 			seenReferences[reference.Ref] = struct{}{}
 			references = append(references, reference)
-			if len(references) > entityrefs.MaxReferencesPerMessage {
-				return nil, fmt.Errorf("%w: at most %d references are allowed", ErrSendNowReferenceOverflow, entityrefs.MaxReferencesPerMessage)
-			}
 		}
 
 		sources = append(sources, map[string]interface{}{

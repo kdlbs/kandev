@@ -54,6 +54,9 @@ node scripts/validate-public-docs.mjs
 git diff --check
 ```
 
+The public-doc files are disjoint from Task 04, but final status/results edits
+to the shared `plan.md` record are serialized after both tasks finish.
+
 ## Output contract
 
 Report public files changed, the terminology/behavior clarified, exact validator

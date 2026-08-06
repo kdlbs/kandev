@@ -759,6 +759,17 @@ func (r *sqliteRepository) ClaimSendNow(ctx context.Context, sessionID string, e
 	if err != nil {
 		return nil, err
 	}
+	generations := make(map[string]int64)
+	for _, source := range sources {
+		if source.TaskID == "" {
+			continue
+		}
+		generation, generationErr := lifecycleGenerationInTx(ctx, tx, r.db, source.TaskID)
+		if generationErr != nil {
+			return nil, generationErr
+		}
+		generations[source.TaskID] = generation
+	}
 
 	if err := r.applySQLiteSendNowClaim(ctx, tx, sessionID, sources, storedByID); err != nil {
 		return nil, err
@@ -766,7 +777,7 @@ func (r *sqliteRepository) ClaimSendNow(ctx context.Context, sessionID string, e
 	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
-	return &SendNowClaim{Sources: sources, Dispatch: *envelope}, nil
+	return &SendNowClaim{Sources: sources, Dispatch: *envelope, SourceGenerations: generations}, nil
 }
 
 func (r *sqliteRepository) RestoreSendNowClaim(ctx context.Context, claim *SendNowClaim) error {
@@ -780,11 +791,25 @@ func (r *sqliteRepository) RestoreSendNowClaim(ctx context.Context, claim *SendN
 	if err != nil {
 		return err
 	}
-	if err := validateSQLiteSendNowRestore(claim, sessionID, stored); err != nil {
+	generations := make(map[string]int64)
+	for _, source := range claim.Sources {
+		if source.TaskID == "" {
+			continue
+		}
+		generation, generationErr := lifecycleGenerationInTx(ctx, tx, r.db, source.TaskID)
+		if generationErr != nil {
+			return generationErr
+		}
+		generations[source.TaskID] = generation
+	}
+	if err := validateSQLiteSendNowRestore(claim, sessionID, stored, generations); err != nil {
 		return err
 	}
 
 	for _, source := range claim.Sources {
+		if sendNowSourceGenerationChanged(claim, source, generations[source.TaskID]) {
+			continue
+		}
 		if err := r.restoreSQLiteSendNowSource(ctx, tx, sessionID, source, stored); err != nil {
 			return err
 		}
@@ -833,8 +858,9 @@ func (r *sqliteRepository) beginSendNowClaimTx(
 }
 
 type storedQueueEntry struct {
-	message *QueuedMessage
-	raw     string
+	message         *QueuedMessage
+	raw             string
+	attachmentsJSON string
 }
 
 func (r *sqliteRepository) listStoredSessionEntries(ctx context.Context, tx *sqlx.Tx, sessionID string) (map[string]storedQueueEntry, error) {
@@ -861,7 +887,11 @@ func (r *sqliteRepository) listOrderedStoredSessionEntries(ctx context.Context, 
 		if scanErr != nil {
 			return nil, nil, scanErr
 		}
-		entry := storedQueueEntry{message: message, raw: raw}
+		attachmentsJSON, marshalErr := marshalAttachments(message.Attachments)
+		if marshalErr != nil {
+			return nil, nil, marshalErr
+		}
+		entry := storedQueueEntry{message: message, raw: raw, attachmentsJSON: attachmentsJSON}
 		ordered = append(ordered, entry)
 		entries[message.ID] = entry
 	}
@@ -918,7 +948,7 @@ func (r *sqliteRepository) applySQLiteSendNowClaim(
 			}
 			continue
 		}
-		if err := r.removeSQLiteSendNowSource(ctx, tx, sessionID, source.ID); err != nil {
+		if err := r.removeSQLiteSendNowSource(ctx, tx, sessionID, source, storedEntry); err != nil {
 			return err
 		}
 	}
@@ -953,10 +983,17 @@ func (r *sqliteRepository) reserveSQLiteSendNowSource(
 	return nil
 }
 
-func (r *sqliteRepository) removeSQLiteSendNowSource(ctx context.Context, tx *sqlx.Tx, sessionID, entryID string) error {
+func (r *sqliteRepository) removeSQLiteSendNowSource(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	sessionID string,
+	source QueuedMessage,
+	stored storedQueueEntry,
+) error {
 	result, err := tx.ExecContext(ctx, r.db.Rebind(`
-		DELETE FROM queued_messages WHERE id = ? AND session_id = ?
-	`), entryID, sessionID)
+		DELETE FROM queued_messages
+		WHERE id = ? AND session_id = ? AND content = ? AND attachments_json = ? AND metadata_json = ?
+	`), source.ID, sessionID, source.Content, stored.attachmentsJSON, stored.raw)
 	if err != nil {
 		return fmt.Errorf("remove send-now entry: %w", err)
 	}
@@ -970,10 +1007,18 @@ func (r *sqliteRepository) removeSQLiteSendNowSource(ctx context.Context, tx *sq
 	return nil
 }
 
-func validateSQLiteSendNowRestore(claim *SendNowClaim, sessionID string, stored map[string]storedQueueEntry) error {
+func validateSQLiteSendNowRestore(
+	claim *SendNowClaim,
+	sessionID string,
+	stored map[string]storedQueueEntry,
+	generations map[string]int64,
+) error {
 	for _, source := range claim.Sources {
 		if source.SessionID != sessionID {
 			return ErrSendNowClaimChanged
+		}
+		if sendNowSourceGenerationChanged(claim, source, generations[source.TaskID]) {
+			continue
 		}
 		entry, ok := stored[source.ID]
 		if !ok {
@@ -1003,7 +1048,7 @@ func (r *sqliteRepository) restoreSQLiteSendNowSource(
 	if !source.IsDurableLifecycle() || !entry.message.IsReservedInFlight() {
 		return nil
 	}
-	metadataJSON, err := marshalMetadata(clearReservedMetadata(source.Metadata))
+	metadataJSON, err := marshalMetadata(restoreSendNowMetadata(entry.message.Metadata, source.Metadata))
 	if err != nil {
 		return err
 	}

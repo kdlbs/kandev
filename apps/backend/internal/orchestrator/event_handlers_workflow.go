@@ -1483,7 +1483,7 @@ func (s *Service) dispatchTakenQueuedMessage(ctx context.Context, sessionID stri
 	// Reserve entryID before handing off to the async goroutine. The worker
 	// transitions this reservation to accepted under the same guard used by
 	// Send Now before it performs any visible prompt side effects.
-	reservation := s.markQueuedDispatchInFlightWithSource(sessionID, queuedMsg.ID, queuedMsg)
+	reservation := s.markQueuedDispatchInFlightWithSourceLocked(sessionID, queuedMsg.ID, queuedMsg)
 	go s.executeQueuedMessageWithReservation(sessionID, queuedMsg, reservation)
 	return true
 }

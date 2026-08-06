@@ -178,3 +178,77 @@ func TestSameQueuedMessageContentIncludesStoredSnapshot(t *testing.T) {
 		t.Fatal("model edit matched the click-time queue snapshot")
 	}
 }
+
+func TestSendNowRestoreDiscardsSourcesFromPurgedTaskGeneration(t *testing.T) {
+	tests := []struct {
+		name string
+		new  func(*testing.T) Repository
+	}{
+		{name: "memory", new: func(*testing.T) Repository { return NewMemoryRepository() }},
+		{name: "sqlite", new: newTestSQLiteRepo},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := tt.new(t)
+			ctx := context.Background()
+			entry := insertTestEntry(t, repo, "session-1", "task-1", "discard after purge", QueuedByUser, nil, nil)
+			claim, err := repo.ClaimSendNow(ctx, "session-1", []QueuedMessage{*entry})
+			if err != nil {
+				t.Fatalf("claim: %v", err)
+			}
+			if got := claim.SourceGenerations["task-1"]; got != 0 {
+				t.Fatalf("claim generation = %d, want initial generation 0", got)
+			}
+
+			if _, err := repo.PurgeTask(ctx, "task-1"); err != nil {
+				t.Fatalf("purge task: %v", err)
+			}
+			if err := repo.RestoreSendNowClaim(ctx, claim); err != nil {
+				t.Fatalf("restore after purge: %v", err)
+			}
+			entries, err := repo.ListBySession(ctx, "session-1")
+			if err != nil {
+				t.Fatalf("list after restore: %v", err)
+			}
+			if len(entries) != 0 {
+				t.Fatalf("restored entries after task purge = %#v, want none", entries)
+			}
+		})
+	}
+}
+
+func TestSendNowRestoreKeepsCurrentDurableMetadataAndRecordedMarker(t *testing.T) {
+	repo := NewMemoryRepository().(*memoryRepository)
+	ctx := context.Background()
+	entry := insertTestEntry(t, repo, "session-1", "task-1", "durable", QueuedByWorkflow, nil,
+		map[string]interface{}{
+			MetadataLifecycleDurable: true,
+			"origin":                 "github_pr_automation",
+			"custom":                 "before-claim",
+		})
+	claim, err := repo.ClaimSendNow(ctx, "session-1", []QueuedMessage{*entry})
+	if err != nil {
+		t.Fatalf("claim: %v", err)
+	}
+
+	// Simulate a metadata update made while the durable row was reserved. The
+	// restore must not overwrite it with the click-time snapshot.
+	stored := repo.entries["session-1"][0]
+	stored.Metadata["custom"] = "edited-while-reserved"
+	claim.Sources[0].Metadata[metadataUserMessageRecorded] = true
+
+	if err := repo.RestoreSendNowClaim(ctx, claim); err != nil {
+		t.Fatalf("restore: %v", err)
+	}
+	entries, err := repo.ListBySession(ctx, "session-1")
+	if err != nil {
+		t.Fatalf("list after restore: %v", err)
+	}
+	if got := entries[0].Metadata["custom"]; got != "edited-while-reserved" {
+		t.Fatalf("restored current metadata = %#v, want edited value", got)
+	}
+	if recorded, _ := entries[0].Metadata[metadataUserMessageRecorded].(bool); !recorded {
+		t.Fatalf("restored metadata lost recorded marker: %#v", entries[0].Metadata)
+	}
+}

@@ -637,6 +637,15 @@ type Service struct {
 	mu        sync.RWMutex
 	running   bool
 	startedAt time.Time
+
+	// sendNowWorkers owns the asynchronous replacement handoffs. The context
+	// is cancelled during Stop so a claimed durable source gets a bounded
+	// recovery attempt before shutdown returns.
+	sendNowMu      sync.Mutex
+	sendNowCtx     context.Context
+	sendNowCancel  context.CancelFunc
+	sendNowStopped bool
+	sendNowWorkers sync.WaitGroup
 }
 
 // Status contains orchestrator status information
@@ -703,6 +712,7 @@ func NewService(
 	}
 
 	// Create the service (watcher will be created after we have handlers)
+	sendNowCtx, sendNowCancel := context.WithCancel(context.Background())
 	s := &Service{
 		config:                       cfg,
 		logger:                       svcLogger,
@@ -716,6 +726,8 @@ func NewService(
 		messageQueue:                 msgQueue,
 		clarificationWatchdogTimeout: 15 * time.Second,
 		gitSnapshotCache:             newGitSnapshotCache(),
+		sendNowCtx:                   sendNowCtx,
+		sendNowCancel:                sendNowCancel,
 	}
 	exec.SetOnContextWindowReset(s.clearContextWindowForReset)
 
@@ -1257,6 +1269,11 @@ func (s *Service) completeTurnForSession(ctx context.Context, sessionID string) 
 }
 
 func (s *Service) completeTurnForTaskSession(ctx context.Context, taskID, sessionID string) {
+	// Stream-only completion paths call this helper directly rather than the
+	// session wrapper. Clear the accepted queued-dispatch ownership here too,
+	// otherwise a completed Send Now/FIFO successor can permanently block the
+	// next queue action.
+	s.clearAcceptedQueuedDispatch(sessionID)
 	if err := s.completeTurnForTaskSessionChecked(ctx, taskID, sessionID); err != nil {
 		s.logger.Warn("failed to reconcile active turn",
 			zap.String("session_id", sessionID),
@@ -1597,6 +1614,7 @@ func (s *Service) Stop() error {
 
 	s.cancelAllClarificationWatchdogs()
 	s.cancelAllTransientRetries()
+	s.stopSendNowWorkers()
 
 	if len(errs) > 0 {
 		return errs[0]

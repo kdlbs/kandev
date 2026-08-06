@@ -351,6 +351,12 @@ func (r *memoryRepository) ClaimSendNow(_ context.Context, sessionID string, exp
 	if err != nil {
 		return nil, err
 	}
+	generations := make(map[string]int64)
+	for _, source := range sources {
+		if source.TaskID != "" {
+			generations[source.TaskID] = r.generation[source.TaskID]
+		}
+	}
 
 	remaining := make([]*QueuedMessage, 0, len(list))
 	for _, entry := range list {
@@ -369,7 +375,7 @@ func (r *memoryRepository) ClaimSendNow(_ context.Context, sessionID string, exp
 	} else {
 		r.entries[sessionID] = remaining
 	}
-	return &SendNowClaim{Sources: sources, Dispatch: *envelope}, nil
+	return &SendNowClaim{Sources: sources, Dispatch: *envelope, SourceGenerations: generations}, nil
 }
 
 func (r *memoryRepository) RestoreSendNowClaim(_ context.Context, claim *SendNowClaim) error {
@@ -385,14 +391,17 @@ func (r *memoryRepository) RestoreSendNowClaim(_ context.Context, claim *SendNow
 	for _, entry := range list {
 		existing[entry.ID] = entry
 	}
-	if err := validateMemorySendNowRestore(claim, sessionID, existing); err != nil {
+	if err := validateMemorySendNowRestore(claim, sessionID, existing, r.generation); err != nil {
 		return err
 	}
 
 	for _, source := range claim.Sources {
+		if sendNowSourceGenerationChanged(claim, source, r.generation[source.TaskID]) {
+			continue
+		}
 		if existing[source.ID] != nil {
 			if source.IsDurableLifecycle() {
-				existing[source.ID].Metadata = clearReservedMetadata(source.Metadata)
+				existing[source.ID].Metadata = restoreSendNowMetadata(existing[source.ID].Metadata, source.Metadata)
 			}
 			continue
 		}
@@ -408,10 +417,18 @@ func (r *memoryRepository) RestoreSendNowClaim(_ context.Context, claim *SendNow
 	return nil
 }
 
-func validateMemorySendNowRestore(claim *SendNowClaim, sessionID string, existing map[string]*QueuedMessage) error {
+func validateMemorySendNowRestore(
+	claim *SendNowClaim,
+	sessionID string,
+	existing map[string]*QueuedMessage,
+	generations map[string]int64,
+) error {
 	for _, source := range claim.Sources {
 		if source.SessionID != sessionID {
 			return ErrSendNowClaimChanged
+		}
+		if sendNowSourceGenerationChanged(claim, source, generations[source.TaskID]) {
+			continue
 		}
 		entry := existing[source.ID]
 		if source.IsDurableLifecycle() {

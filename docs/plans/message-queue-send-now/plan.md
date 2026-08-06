@@ -275,8 +275,9 @@ Wave 4:
 - [x] [Task 04: Prove Send Now end to end](task-04-send-now-e2e.md)
 - [x] [Task 05: Document Send Now behavior](task-05-document-send-now.md)
 
-Tasks 04 and 05 are parallel-safe after Tasks 02 and 03: they own disjoint E2E
-and public-doc files and change no shared contract or package configuration.
+Tasks 04 and 05 own disjoint E2E and public-doc files, but the final plan/status
+and verification-results update is serialized after both tasks complete so the
+durable implementation record cannot be overwritten by parallel edits.
 
 ---
 

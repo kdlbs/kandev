@@ -43,13 +43,30 @@ func (reservation *queuedDispatchReservation) currentPhase() queuedDispatchPhase
 }
 
 // markQueuedDispatchInFlight records a dispatch without retaining a source.
-// Callers that may be superseded by Send Now should use
-// markQueuedDispatchInFlightWithSource so the exact source can be restored.
+// This unguarded helper is used by tests and setup code; production queue-take
+// paths use the Locked variant below while holding the session guard.
 func (s *Service) markQueuedDispatchInFlight(sessionID, entryID string) *queuedDispatchReservation {
 	return s.markQueuedDispatchInFlightWithSource(sessionID, entryID, nil)
 }
 
+// markQueuedDispatchInFlightWithSource is the unguarded setup/test helper.
+// Production queue-take paths must call markQueuedDispatchInFlightWithSourceLocked
+// while holding the session's cancelInFlight guard.
 func (s *Service) markQueuedDispatchInFlightWithSource(
+	sessionID, entryID string,
+	source *messagequeue.QueuedMessage,
+) *queuedDispatchReservation {
+	if sessionID == "" || entryID == "" {
+		return nil
+	}
+	return s.markQueuedDispatchInFlightWithSourceLocked(sessionID, entryID, source)
+}
+
+// markQueuedDispatchInFlightWithSourceLocked records a dispatch while the
+// caller owns sessionID's cancelInFlight guard. All production queue-take
+// paths use this variant so a Send Now claim cannot interleave between the
+// reservation replacement and the worker launch.
+func (s *Service) markQueuedDispatchInFlightWithSourceLocked(
 	sessionID, entryID string,
 	source *messagequeue.QueuedMessage,
 ) *queuedDispatchReservation {
@@ -142,7 +159,17 @@ func (s *Service) resolveQueuedDispatchForClaim(
 	expected *queuedDispatchReservation,
 ) (*queuedDispatchReservation, bool, error) {
 	if expected != nil {
-		return expected, false, nil
+		if expected.currentPhase() == queuedDispatchSupersededBySendNow {
+			return expected, false, nil
+		}
+		if pending := s.pendingQueuedDispatch(sessionID); pending == expected {
+			return expected, false, nil
+		}
+		if accepted := s.acceptedQueuedDispatchForSession(sessionID); accepted == expected {
+			return expected, false, nil
+		}
+		expected.phase.Store(uint32(queuedDispatchSupersededByNewDispatch))
+		return expected, true, errQueuedDispatchSuperseded
 	}
 	pending := s.pendingQueuedDispatch(sessionID)
 	accepted := s.acceptedQueuedDispatchForSession(sessionID)
@@ -158,11 +185,11 @@ func (s *Service) resolveQueuedDispatchForClaim(
 	return nil, false, nil
 }
 
-// supersedeQueuedDispatchForSendNow is called while sessionID's cancellation
-// guard is held. It returns the exact source only for a pending automatic FIFO
-// reservation. An accepted or source-less reservation is already terminal for
-// Send Now and must remain a conflict.
-func (s *Service) supersedeQueuedDispatchForSendNow(sessionID string) (*messagequeue.QueuedMessage, error) {
+// pendingQueuedDispatchForSendNow is called while sessionID's cancellation
+// guard is held. It returns the exact pending reservation without changing
+// ownership. The source is restored first; only a successful restore may
+// supersede the FIFO worker.
+func (s *Service) pendingQueuedDispatchForSendNow(sessionID string) (*queuedDispatchReservation, error) {
 	reservation := s.pendingQueuedDispatch(sessionID)
 	if reservation == nil {
 		if s.acceptedQueuedDispatchForSession(sessionID) != nil {
@@ -173,11 +200,24 @@ func (s *Service) supersedeQueuedDispatchForSendNow(sessionID string) (*messageq
 	if reservation.currentPhase() != queuedDispatchPending || reservation.source == nil {
 		return nil, ErrSendNowConflict
 	}
+	return reservation, nil
+}
+
+// supersedeQueuedDispatchForSendNow is called while sessionID's cancellation
+// guard is held, after the exact FIFO source has been restored successfully.
+func (s *Service) supersedeQueuedDispatchForSendNow(
+	sessionID string,
+	reservation *queuedDispatchReservation,
+) error {
+	if reservation == nil || s.pendingQueuedDispatch(sessionID) != reservation ||
+		reservation.currentPhase() != queuedDispatchPending || reservation.source == nil {
+		return ErrSendNowConflict
+	}
 	reservation.phase.Store(uint32(queuedDispatchSupersededBySendNow))
 	if !s.dispatchingQueued.CompareAndDelete(sessionID, reservation) {
-		return nil, ErrSendNowConflict
+		return ErrSendNowConflict
 	}
-	return reservation.source, nil
+	return nil
 }
 
 func (s *Service) isQueuedDispatchAccepted(sessionID string) bool {
@@ -185,33 +225,53 @@ func (s *Service) isQueuedDispatchAccepted(sessionID string) bool {
 }
 
 // clearQueuedDispatchInFlightIfCurrent clears either phase only for the exact
-// entry that owns it. Workers that lost to a newer dispatch cannot remove the
-// replacement marker.
-func (s *Service) clearQueuedDispatchInFlightIfCurrent(sessionID, entryID string) {
-	if sessionID == "" || entryID == "" {
+// reservation that owns it. Workers that lost to a newer dispatch cannot
+// remove the replacement marker even when the queue entry ID was restored and
+// reused.
+func (s *Service) clearQueuedDispatchInFlightIfCurrent(
+	sessionID string,
+	reservation *queuedDispatchReservation,
+) {
+	if sessionID == "" || reservation == nil {
 		return
 	}
-	if pending := s.pendingQueuedDispatch(sessionID); pending != nil && pending.entryID == entryID {
+	if pending := s.pendingQueuedDispatch(sessionID); pending == reservation {
 		pending.phase.Store(uint32(queuedDispatchSupersededByNewDispatch))
-		s.dispatchingQueued.CompareAndDelete(sessionID, pending)
+		s.dispatchingQueued.CompareAndDelete(sessionID, reservation)
 	}
-	if accepted := s.acceptedQueuedDispatchForSession(sessionID); accepted != nil && accepted.entryID == entryID {
+	if accepted := s.acceptedQueuedDispatchForSession(sessionID); accepted == reservation {
 		accepted.phase.Store(uint32(queuedDispatchSupersededByNewDispatch))
-		s.acceptedQueuedDispatch.CompareAndDelete(sessionID, accepted)
+		s.acceptedQueuedDispatch.CompareAndDelete(sessionID, reservation)
 	}
 }
 
 // releaseQueuedDispatchPendingIfCurrent is used by the fast prompt-claim
 // helpers. Ownership has already moved to the accepted map, so they must not
 // clear the accepted marker while the agent turn is still running.
-func (s *Service) releaseQueuedDispatchPendingIfCurrent(sessionID, entryID string) {
-	if sessionID == "" || entryID == "" {
+func (s *Service) releaseQueuedDispatchPendingIfCurrent(
+	sessionID string,
+	reservation *queuedDispatchReservation,
+) {
+	if sessionID == "" || reservation == nil {
 		return
 	}
-	if pending := s.pendingQueuedDispatch(sessionID); pending != nil && pending.entryID == entryID {
+	if pending := s.pendingQueuedDispatch(sessionID); pending == reservation {
 		pending.phase.Store(uint32(queuedDispatchAccepted))
 		s.dispatchingQueued.CompareAndDelete(sessionID, pending)
 	}
+}
+
+func (s *Service) queuedDispatchReservationForEntry(sessionID, entryID string) *queuedDispatchReservation {
+	if sessionID == "" || entryID == "" {
+		return nil
+	}
+	if pending := s.pendingQueuedDispatch(sessionID); pending != nil && pending.entryID == entryID {
+		return pending
+	}
+	if accepted := s.acceptedQueuedDispatchForSession(sessionID); accepted != nil && accepted.entryID == entryID {
+		return accepted
+	}
+	return nil
 }
 
 func (s *Service) isCurrentQueuedDispatch(sessionID, entryID string) bool {

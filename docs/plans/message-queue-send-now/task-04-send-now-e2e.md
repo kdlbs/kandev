@@ -40,9 +40,10 @@ workflow-step preservation, and touch geometry.
 
 ## Parallelism
 
-Parallel-safe with Task 05 after dependencies complete. Files are disjoint and
-neither task changes a shared contract or package configuration. User
-authorization is still required before using subagents.
+The E2E and public-doc files are disjoint, so implementation work can overlap
+after dependencies complete. Final status/results edits to the shared `plan.md`
+record are serialized after both tasks finish. User authorization is still
+required before using subagents.
 
 ## Inputs
 
@@ -59,15 +60,17 @@ Bootstrap once if needed:
 cd apps && pnpm install --frozen-lockfile
 ```
 
-Run a fresh production build through the managed runner:
+Run the focused scenarios through the managed runner:
 
 ```bash
-cd apps/web && pnpm e2e:run --project chromium tests/chat/message-queue.spec.ts -- --grep 'Send Now' --retries=0
-cd apps/web && pnpm e2e:run --project mobile-chrome tests/chat/mobile-message-queue-management.spec.ts -- --grep 'Send Now' --retries=0
+cd apps/web && pnpm e2e --project=chromium e2e/tests/chat/message-queue.spec.ts --grep 'Send Now' --retries=0
+cd apps/web && pnpm e2e --project=mobile-chrome e2e/tests/chat/mobile-message-queue-management.spec.ts --grep 'Send Now' --retries=0
 ```
 
-Confirm each command discovers the intended test count before recording it as
-evidence.
+If the managed runner is required for a fresh embedded build, run the
+repository build/sync wrapper first, then use the same focused Playwright
+commands. Confirm each command discovers the intended test count before
+recording it as evidence.
 
 ## Output contract
 

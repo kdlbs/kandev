@@ -47,6 +47,12 @@ func NewServiceMemory(log *logger.Logger) *Service {
 // MaxPerSession returns the configured per-session cap.
 func (s *Service) MaxPerSession() int { return int(s.maxPerSession.Load()) }
 
+// LifecycleGeneration returns the task archive/delete generation captured by
+// send-now restoration guards.
+func (s *Service) LifecycleGeneration(ctx context.Context, taskID string) (int64, error) {
+	return s.repo.LifecycleGeneration(ctx, taskID)
+}
+
 // SetMaxPerSession applies a new admission cap without pruning existing rows.
 // Non-positive values disable the cap.
 func (s *Service) SetMaxPerSession(maxPerSession int) {
