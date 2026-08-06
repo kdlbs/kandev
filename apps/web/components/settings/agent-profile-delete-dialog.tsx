@@ -15,6 +15,7 @@ import {
 import { useAppStore } from "@/components/state-provider";
 import type {
   ActiveSessionInfo,
+  AutomationReference,
   RoutingTierReference,
   WatcherReference,
 } from "@/lib/types/agent-profile-errors";
@@ -70,6 +71,7 @@ export type AgentProfileDeleteConflict = {
   activeSessions: ActiveSessionInfo[];
   watchers: WatcherReference[];
   routingTiers: RoutingTierReference[];
+  automations: AutomationReference[];
 };
 
 type AgentProfileDeleteConflictDialogProps = {
@@ -88,6 +90,7 @@ export function AgentProfileDeleteConflictDialog({
   const quickChats = conflict?.activeSessions.filter((s) => s.is_ephemeral) ?? [];
   const watchers = conflict?.watchers ?? [];
   const routingTiers = conflict?.routingTiers ?? [];
+  const automations = conflict?.automations ?? [];
   const hasHardBlockers = routingTiers.length > 0;
   const watchersByKind = groupWatchersByKind(watchers);
   const workspaces = useAppStore((s) => s.workspaces.items);
@@ -120,6 +123,10 @@ export function AgentProfileDeleteConflictDialog({
                 routingTiers={routingTiers}
                 workspaceLabels={new Map(workspaces.map((w) => [w.id, w.name]))}
                 providerLabels={new Map(providers.map((p) => [p.id, p.name]))}
+              />
+              <AutomationConflictSection
+                automations={automations}
+                workspaceLabels={new Map(workspaces.map((w) => [w.id, w.name]))}
               />
               {hasHardBlockers ? (
                 <p className="mt-2">{t("agents:changeTierMappingsFirst")}</p>
@@ -187,6 +194,40 @@ function WatcherConflictSection({
               {watcherKindLabel(t, kind as WatcherReference["kind"])}:
             </span>{" "}
             {items.map((w) => w.label || w.id).join(", ")}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+// Enabled automations bound to this profile. Listed separately from sessions
+// because nothing is running: an automation is a standing instruction, and the
+// damage shows up on its next firing rather than now.
+function AutomationConflictSection({
+  automations,
+  workspaceLabels,
+}: {
+  automations: AutomationReference[];
+  workspaceLabels: Map<string, string>;
+}) {
+  const { t } = useTranslation();
+  if (automations.length === 0) return null;
+  return (
+    <div className="mt-2" data-testid="delete-conflict-automations">
+      <p className="font-medium text-sm">{t("agents:conflictAutomationsTitle")}</p>
+      <ul className="list-disc list-inside mt-1 space-y-0.5">
+        {automations.map((ref) => (
+          <li key={ref.id} className="text-sm">
+            <Trans
+              i18nKey="agents:conflictAutomationRow"
+              values={{
+                name: ref.name,
+                workspace: formatLookupLabel(workspaceLabels, ref.workspace_id),
+              }}
+            >
+              <span className="font-medium" />
+            </Trans>
           </li>
         ))}
       </ul>

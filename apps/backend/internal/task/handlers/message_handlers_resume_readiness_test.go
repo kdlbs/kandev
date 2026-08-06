@@ -83,6 +83,19 @@ func (o *resumeRetryOrchestrator) ForegroundActivity(string) v1.ForegroundActivi
 	return ""
 }
 
+// These tests cover the resume/retry path for a session that is *not*
+// generating, so steering never applies. False is the interface's conservative
+// default and keeps the prompt-with-resume path under test.
+func (*resumeRetryOrchestrator) SteerEligible(string, models.TaskSessionState) bool {
+	return false
+}
+
+func (*resumeRetryOrchestrator) SteerTask(
+	context.Context, string, string, string, string, bool, []v1.MessageAttachment,
+) (*orchestrator.PromptResult, error) {
+	return &orchestrator.PromptResult{}, nil
+}
+
 // newTestMessageHandlersWithOrchestrator mirrors newTestMessageHandlers but
 // wires a real OrchestratorService fake, which forwardMessageAsPrompt/
 // handlePromptWithResume require (they early-return when h.orchestrator is

@@ -61,12 +61,12 @@ func IsKnownSafeGitFlag(arg string) bool {
 		"--abbrev-ref", "--symbolic-full-name", "--verify", "--no-patch",
 		"--format", "--format=", "--stat", "--shortstat", "--numstat", "-p", "-A",
 		"--amend", "--allow-empty", "--soft", "--mixed", "--hard",
-		"--cached", "--force", "--source=HEAD", "--staged", "--worktree", "--push",
-		"--dry-run", "--get-all",
+		"--cached", "--force", "--source=HEAD", "--staged", "--worktree",
+		"--dry-run", "--get-all", "--first-parent", "--is-ancestor",
 		"--", // Path separator - everything after this is treated as paths, not flags
 	}
 	for _, safe := range safeFlags {
-		if arg == safe || strings.HasPrefix(arg, safe) {
+		if arg == safe || (safe != "--" && strings.HasPrefix(arg, safe)) {
 			return true
 		}
 	}

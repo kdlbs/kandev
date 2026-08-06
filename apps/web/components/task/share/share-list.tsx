@@ -6,6 +6,7 @@ import { IconExternalLink, IconTrash } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 
 import { revokeShare, type Share } from "@/lib/api/domains/share-api";
+import { useTranslation } from "react-i18next";
 
 type Props = {
   shares: Share[];
@@ -18,13 +19,14 @@ type Props = {
  * onRevoked() so the parent can refresh from the source of truth.
  */
 export function ShareList({ shares, onRevoked }: Props) {
+  const { t } = useTranslation();
   const active = shares.filter((s) => !s.revoked_at);
   if (active.length === 0) return null;
 
   return (
     <div className="flex flex-col gap-2 rounded border bg-muted/30 p-3">
       <div className="text-xs font-medium text-muted-foreground">
-        Active shares for this session
+        {t("task:activeSharesForThisSession")}
       </div>
       <ul className="flex flex-col gap-1.5">
         {active.map((share) => (
@@ -36,6 +38,7 @@ export function ShareList({ shares, onRevoked }: Props) {
 }
 
 function ShareRow({ share, onRevoked }: { share: Share; onRevoked: () => void }) {
+  const { t } = useTranslation();
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
@@ -46,7 +49,7 @@ function ShareRow({ share, onRevoked }: { share: Share; onRevoked: () => void })
       await revokeShare(share.id);
       onRevoked();
     } catch (e) {
-      setErr(e instanceof Error ? e.message : "Failed to revoke share.");
+      setErr(e instanceof Error ? e.message : t("task:failedToRevokeShare"));
     } finally {
       // Always clear busy — on success the row usually unmounts via the
       // parent's refresh, but if it stays rendered (e.g. error path or a
@@ -75,10 +78,10 @@ function ShareRow({ share, onRevoked }: { share: Share; onRevoked: () => void })
           onClick={handleRevoke}
           disabled={busy}
           className="flex-shrink-0 cursor-pointer"
-          aria-label="Revoke share"
+          aria-label={t("task:revokeShare")}
         >
           <IconTrash className="h-3 w-3" />
-          {busy ? "Revoking…" : "Revoke"}
+          {busy ? t("task:revoking") : t("task:revoke")}
         </Button>
       </div>
       {err && <span className="text-xs text-destructive">{err}</span>}

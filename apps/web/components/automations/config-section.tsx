@@ -1,19 +1,18 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
 import { useTranslation } from "react-i18next";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import { Label } from "@kandev/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import { useAppStore } from "@/components/state-provider";
 import { useSettingsData } from "@/hooks/domains/settings/use-settings-data";
-import { useWorkflows } from "@/hooks/use-workflows";
 import { useRepositories } from "@/hooks/domains/workspace/use-repositories";
 import { discoverRepositoriesAction } from "@/app/actions/workspaces";
+import { listWorkflows } from "@/lib/api";
 import { listWorkflowSteps } from "@/lib/api/domains/workflow-api";
 import type { ExecutorProfile, LocalRepository, Repository } from "@/lib/types/http";
-import type { ExecutionMode, TriggerType } from "@/lib/types/automation";
+import type { TriggerType } from "@/lib/types/automation";
 import { getMultiRepoExecutorDisabledReason } from "@/components/task-create-dialog-multi-repo-guard";
-import { RequiredFieldLabel } from "./required-field-label";
 import { AutomationRepositoryRows } from "./automation-repository-rows";
 import {
   buildRepositoryItems,
@@ -46,10 +45,8 @@ type ConfigSectionProps = {
   agentProfileId: string;
   executorProfileId: string;
   repositorySelections: RepositorySelection[];
-  executionMode: ExecutionMode;
   conditionType: TriggerType | null;
   dirtyFields?: {
-    executionMode: boolean;
     workflowId: boolean;
     workflowStepId: boolean;
     agentProfileId: boolean;
@@ -61,11 +58,16 @@ type ConfigSectionProps = {
   onAgentProfileChange: (id: string) => void;
   onExecutorProfileChange: (id: string) => void;
   onRepositoriesChange: (selections: RepositorySelection[]) => void;
-  onExecutionModeChange: (mode: ExecutionMode) => void;
 };
 
+/**
+ * Stands in for "no selection" in the workflow and step pickers. Radix refuses
+ * an empty SelectItem value, so clearing a field needs an id of its own; it is
+ * mapped back to "" before it reaches the form.
+ */
+const NONE_OPTION_ID = "__none__";
+
 const CLEAN_FIELDS = {
-  executionMode: false,
   workflowId: false,
   workflowStepId: false,
   agentProfileId: false,
@@ -73,13 +75,78 @@ const CLEAN_FIELDS = {
   repositorySelections: false,
 };
 
-// `id` is the persisted ExecutionMode the backend stores and replays; only the
-// catalog key is copy. Resolved at render — a module-scope t() would freeze at
-// the boot locale.
-const EXECUTION_MODE_ITEMS = [
-  { id: "task", labelKey: "automations:executionModeTask" },
-  { id: "run", labelKey: "automations:executionModeRun" },
-];
+type WorkflowOption = { id: string; name: string };
+
+// A page opened while the backend is restarting gets a bare "Failed to fetch".
+// A single attempt would leave the field empty for the rest of the session, so
+// back off and try again before giving up.
+const WORKFLOW_RETRY_DELAYS_MS = [500, 1500, 4000];
+
+/**
+ * Workflows for the workspace being edited, fetched into local state.
+ *
+ * Deliberately not the `workflows` store slot. That slot is global and both the
+ * active workspace and this settings page write to it, so when the two differ
+ * they race — the network log shows the two workspaces' requests alternating —
+ * and whichever lands last defines the list. That produced two failures: the
+ * editor offered another workspace's workflows (a name present in both, like
+ * "Feature Dev", makes the wrong one look right, so an automation could be
+ * saved against a workflow its workspace does not own), and filtering the
+ * shared slot by workspace instead left the list empty whenever the foreign
+ * fetch won.
+ *
+ * Owning the request here makes the list depend only on the workspace this
+ * editor is for.
+ */
+function useWorkspaceWorkflows(workspaceId: string) {
+  const [workflows, setWorkflows] = useState<WorkflowOption[]>([]);
+  const [failed, setFailed] = useState(false);
+  const [retryNonce, setRetryNonce] = useState(0);
+
+  useEffect(() => {
+    if (!workspaceId) {
+      setWorkflows([]);
+      setFailed(false);
+      return;
+    }
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+
+    const attempt = (index: number) => {
+      listWorkflows(workspaceId, { cache: "no-store", includeHidden: true })
+        .then((response) => {
+          if (cancelled) return;
+          setWorkflows(response.workflows.map((w) => ({ id: w.id, name: w.name })));
+          setFailed(false);
+        })
+        .catch(() => {
+          if (cancelled) return;
+          if (index < WORKFLOW_RETRY_DELAYS_MS.length) {
+            timer = setTimeout(() => attempt(index + 1), WORKFLOW_RETRY_DELAYS_MS[index]);
+            return;
+          }
+          // Keep whatever was already loaded rather than blanking a usable
+          // field on a flake, and say so rather than just looking empty.
+          setFailed(true);
+        });
+    };
+
+    // Clear before fetching, not after. Keeping the previous list across a
+    // workspace change is the exact bug this hook exists to prevent: if the new
+    // workspace's fetch then fails, the old workspace's workflows stay
+    // selectable — and savable — under the new workspace's name.
+    setWorkflows([]);
+    setFailed(false);
+    attempt(0);
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+    };
+  }, [workspaceId, retryNonce]);
+
+  const retry = useCallback(() => setRetryNonce((nonce) => nonce + 1), []);
+  return { workflows, failed, retry };
+}
 
 function useDiscoveredRepositories(workspaceId: string) {
   const [items, setItems] = useState<LocalRepository[]>([]);
@@ -103,16 +170,11 @@ function useDiscoveredRepositories(workspaceId: string) {
 
 type StepOption = { id: string; name: string };
 
-// A plain function returning copy is invisible to `i18next/no-literal-string`
-// (it only inspects literals in JSX), so `t` is threaded in explicitly rather
-// than imported at module scope.
 function getWorkflowStepHelpText(
   workflowId: string,
-  workflowStepId: string,
   t: (key: string) => string,
 ): string | undefined {
   if (!workflowId) return t("automations:workflowStepHelpNoWorkflow");
-  if (!workflowStepId) return t("automations:workflowStepHelp");
   return undefined;
 }
 
@@ -153,7 +215,6 @@ function useConfigSectionComputed({
   repositorySelections,
   repositories,
   discoveredRepos,
-  t,
 }: {
   agentProfiles: AgentProfileLike[];
   executors: ExecutorLike[];
@@ -161,8 +222,8 @@ function useConfigSectionComputed({
   repositorySelections: RepositorySelection[];
   repositories: Repository[];
   discoveredRepos: LocalRepository[];
-  t: (key: string) => string;
 }) {
+  const { t } = useTranslation();
   const filteredAgentProfiles = agentProfiles.filter((profile) => !profile.cli_passthrough);
   // Profiles returned by the executors list/boot payload don't always carry
   // their own executor_type/executor_name (only the settings > Executors
@@ -203,7 +264,6 @@ export function ConfigSection({
   agentProfileId,
   executorProfileId,
   repositorySelections,
-  executionMode,
   conditionType,
   dirtyFields = CLEAN_FIELDS,
   onWorkflowChange,
@@ -211,21 +271,18 @@ export function ConfigSection({
   onAgentProfileChange,
   onExecutorProfileChange,
   onRepositoriesChange,
-  onExecutionModeChange,
 }: ConfigSectionProps) {
   const { t } = useTranslation();
   useSettingsData(true);
-  useWorkflows(workspaceId, true);
   const { repositories } = useRepositories(workspaceId, true);
   const discoveredRepos = useDiscoveredRepositories(workspaceId);
 
-  const workflows = useAppStore((state) => state.workflows.items);
+  const workflowState = useWorkspaceWorkflows(workspaceId);
+  const workflows = workflowState.workflows;
   const agentProfiles = useAppStore((state) => state.agentProfiles.items);
   const executors = useAppStore((state) => state.executors.items);
   const steps = useWorkflowSteps(workflowId);
   const isPRTrigger = conditionType === "github_pr";
-  const isRunMode = executionMode === "run";
-
   const { filteredAgentProfiles, executorItems, supportsMultiRepo, singleRepositoryItems } =
     useConfigSectionComputed({
       agentProfiles,
@@ -234,7 +291,6 @@ export function ConfigSection({
       repositorySelections,
       repositories,
       discoveredRepos,
-      t,
     });
 
   return (
@@ -243,27 +299,18 @@ export function ConfigSection({
         {t("automations:configurationLabel")}
       </Label>
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-        <SelectField
-          testId="execution-mode-selector"
-          label={t("automations:executionModeLabel")}
-          value={executionMode}
-          isDirty={dirtyFields.executionMode}
-          onChange={(v) => onExecutionModeChange(v as ExecutionMode)}
-          placeholder={t("automations:executionModePlaceholder")}
-          items={EXECUTION_MODE_ITEMS.map((item) => ({ id: item.id, label: t(item.labelKey) }))}
+        <WorkflowFields
+          workflowId={workflowId}
+          workflowStepId={workflowStepId}
+          workflows={workflows}
+          workflowsFailed={workflowState.failed}
+          onRetryWorkflows={workflowState.retry}
+          steps={steps}
+          workflowDirty={dirtyFields.workflowId}
+          workflowStepDirty={dirtyFields.workflowStepId}
+          onWorkflowChange={onWorkflowChange}
+          onStepChange={onStepChange}
         />
-        {!isRunMode && (
-          <WorkflowFields
-            workflowId={workflowId}
-            workflowStepId={workflowStepId}
-            workflows={workflows}
-            steps={steps}
-            workflowDirty={dirtyFields.workflowId}
-            workflowStepDirty={dirtyFields.workflowStepId}
-            onWorkflowChange={onWorkflowChange}
-            onStepChange={onStepChange}
-          />
-        )}
         <SelectField
           label={t("automations:agentProfileLabel")}
           value={agentProfileId}
@@ -357,6 +404,8 @@ function WorkflowFields({
   workflowId,
   workflowStepId,
   workflows,
+  workflowsFailed,
+  onRetryWorkflows,
   steps,
   workflowDirty,
   workflowStepDirty,
@@ -366,47 +415,77 @@ function WorkflowFields({
   workflowId: string;
   workflowStepId: string;
   workflows: Array<{ id: string; name: string }>;
+  workflowsFailed: boolean;
+  onRetryWorkflows: () => void;
   steps: StepOption[];
   workflowDirty: boolean;
   workflowStepDirty: boolean;
   onWorkflowChange: (id: string) => void;
   onStepChange: (id: string) => void;
 }) {
-  const { t } = useTranslation();
   // The step list is empty until a workflow is picked. Showing an empty
   // dropdown next to the workflow select invites users to click it first
   // and bounce off — keep the field in the DOM (so its testid is stable
   // for tooling) but disable it and surface a hint until a workflow is
   // chosen.
+  const { t } = useTranslation();
   const hasWorkflow = !!workflowId;
+  // Both fields are optional: an automation that only reports has no place on a
+  // board, and demanding a workflow before it can be saved made every such
+  // automation pick one at random. Nothing here blocks saving, so nothing here
+  // says it does.
+  //
+  // Optional also has to mean reversible. A select listing only real workflows
+  // can be set but never unset, which would strand every automation upgraded
+  // from the era when a workflow was mandatory. An explicit None entry is the
+  // way back; picking it clears the step too, since a step without its workflow
+  // is not a selection anyone can act on.
   return (
     <>
       <SelectField
         testId="workflow-selector"
         label={t("automations:workflowLabel")}
-        required
         value={workflowId}
         isDirty={workflowDirty}
-        onChange={onWorkflowChange}
-        placeholder={t("automations:workflowPlaceholder")}
-        items={workflows.map((w) => ({ id: w.id, label: w.name }))}
-        helpText={!hasWorkflow ? t("automations:workflowHelp") : undefined}
+        onChange={(value) => onWorkflowChange(value === NONE_OPTION_ID ? "" : value)}
+        placeholder={
+          workflowsFailed
+            ? t("automations:couldNotLoadWorkflows")
+            : t("automations:selectWorkflowOptional")
+        }
+        items={[
+          { id: NONE_OPTION_ID, label: t("automations:noWorkflow") },
+          ...workflows.map((w) => ({ id: w.id, label: w.name })),
+        ]}
       />
+      {workflowsFailed && (
+        <p className="text-[10px] text-destructive" data-testid="workflow-load-error">
+          {t("automations:workflowLoadError")}{" "}
+          <button
+            type="button"
+            onClick={onRetryWorkflows}
+            className="cursor-pointer underline underline-offset-2"
+            data-testid="workflow-retry"
+          >
+            {t("automations:tryAgain")}
+          </button>
+        </p>
+      )}
       <SelectField
         testId="workflow-step-selector"
         label={t("automations:workflowStepLabel")}
-        required
         value={workflowStepId}
         isDirty={workflowStepDirty}
-        onChange={onStepChange}
+        onChange={(value) => onStepChange(value === NONE_OPTION_ID ? "" : value)}
         placeholder={
-          hasWorkflow
-            ? t("automations:workflowStepPlaceholder")
-            : t("automations:workflowStepPlaceholderNoWorkflow")
+          hasWorkflow ? t("automations:selectStepOptional") : t("automations:pickAWorkflowFirst")
         }
-        items={steps.map((s) => ({ id: s.id, label: s.name }))}
+        items={[
+          { id: NONE_OPTION_ID, label: t("automations:noStep") },
+          ...steps.map((s) => ({ id: s.id, label: s.name })),
+        ]}
         disabled={!hasWorkflow}
-        helpText={getWorkflowStepHelpText(workflowId, workflowStepId, t)}
+        helpText={getWorkflowStepHelpText(workflowId, t)}
       />
     </>
   );
@@ -421,7 +500,6 @@ function SelectField({
   items,
   disabled,
   helpText,
-  required,
   isDirty = false,
 }: {
   testId?: string;
@@ -432,24 +510,17 @@ function SelectField({
   items: Array<{ id: string; label: string; disabled?: boolean; disabledReason?: string }>;
   disabled?: boolean;
   helpText?: string;
-  required?: boolean;
   isDirty?: boolean;
 }) {
-  const invalid = required && !value;
   const helpId = testId && helpText ? `${testId}-help` : undefined;
   return (
     <div className="space-y-1.5">
-      {required ? (
-        <RequiredFieldLabel className="text-xs">{label}</RequiredFieldLabel>
-      ) : (
-        <Label className="text-xs">{label}</Label>
-      )}
+      <Label className="text-xs">{label}</Label>
       <Select value={value || undefined} onValueChange={onChange} disabled={disabled}>
         <SelectTrigger
           data-testid={testId}
           className="cursor-pointer"
-          aria-describedby={invalid ? helpId : undefined}
-          aria-invalid={invalid ? true : undefined}
+          aria-describedby={helpId}
           data-settings-dirty={isDirty}
         >
           <SelectValue placeholder={placeholder} />

@@ -34,7 +34,8 @@ test.describe("Quick Chat repository context on mobile", () => {
     await expect(dialog.locator(".tiptap.ProseMirror")).toBeVisible({ timeout: 30_000 });
     await assertNoDocumentHorizontalOverflow(testPage);
 
-    await dialog.getByLabel("Start new chat").click();
+    await dialog.getByTestId("quick-chat-add-menu-trigger").click();
+    await testPage.getByTestId("quick-chat-new-agent").click();
     await expect(dialog.getByTestId("quick-chat-setup")).toBeVisible({ timeout: 5_000 });
     const secondAgentSelector = dialog.getByTestId("agent-profile-selector");
     if (await secondAgentSelector.getByText("Select agent", { exact: false }).isVisible()) {

@@ -198,6 +198,7 @@ func (p *EventPublisher) PublishAgentStreamEvent(execution *AgentExecution, even
 		SupportsImage:           event.SupportsImage,
 		SupportsAudio:           event.SupportsAudio,
 		SupportsEmbeddedContext: event.SupportsEmbeddedContext,
+		SupportsPromptQueueing:  event.SupportsPromptQueueing,
 		AuthMethods:             event.AuthMethods,
 		CurrentModelID:          event.CurrentModelID,
 		SessionModels:           event.SessionModels,

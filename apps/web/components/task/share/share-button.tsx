@@ -7,6 +7,7 @@ import { Button } from "@kandev/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 
 import { ShareDialog } from "./share-dialog";
+import { useTranslation } from "react-i18next";
 
 type Props = {
   taskId: string;
@@ -27,6 +28,7 @@ const TOP_BAR_BUTTON_CLASS =
  * (rather than disabling it) for unshareable sessions.
  */
 export function ShareButton({ taskId, sessionId, iconOnly = false }: Props) {
+  const { t } = useTranslation();
   const [open, setOpen] = useState(false);
 
   const button = iconOnly ? (
@@ -35,7 +37,7 @@ export function ShareButton({ taskId, sessionId, iconOnly = false }: Props) {
       size="sm"
       onClick={() => setOpen(true)}
       className={TOP_BAR_BUTTON_CLASS}
-      aria-label="Share this task"
+      aria-label={t("task:shareThisTask")}
       data-testid="share-task-button"
     >
       <IconShare className="h-3.5 w-3.5" />
@@ -46,11 +48,11 @@ export function ShareButton({ taskId, sessionId, iconOnly = false }: Props) {
       size="sm"
       onClick={() => setOpen(true)}
       className="cursor-pointer"
-      aria-label="Share this task"
+      aria-label={t("task:shareThisTask")}
       data-testid="share-task-button"
     >
       <IconShare className="h-3.5 w-3.5" />
-      <span className="ml-1">Share</span>
+      <span className="ml-1">{t("task:share")}</span>
     </Button>
   );
 
@@ -58,7 +60,7 @@ export function ShareButton({ taskId, sessionId, iconOnly = false }: Props) {
     <>
       <Tooltip>
         <TooltipTrigger asChild>{button}</TooltipTrigger>
-        <TooltipContent>Share this task conversation as a public link</TooltipContent>
+        <TooltipContent>{t("task:shareThisTaskConversationAsA")}</TooltipContent>
       </Tooltip>
       <ShareDialog open={open} onOpenChange={setOpen} taskId={taskId} sessionId={sessionId} />
     </>

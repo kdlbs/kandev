@@ -22,13 +22,13 @@ test.describe("Quick Chat entry points on mobile", () => {
     await testPage.waitForLoadState("networkidle");
     await assertNoDocumentHorizontalOverflow(testPage);
 
-    await testPage.getByTestId("mobile-quick-chat-button").click();
+    await testPage.getByTestId("mobile-quick-chat-button").tap();
 
     const dialog = testPage.getByRole("dialog", { name: "Quick Chat" });
     await expect(dialog.getByTestId("quick-chat-setup")).toBeVisible({ timeout: 10_000 });
     await assertNoDocumentHorizontalOverflow(testPage);
 
-    await dialog.getByTestId("quick-chat-close").click();
+    await dialog.getByTestId("quick-chat-close").tap();
     await expect(dialog).not.toBeVisible();
   });
 
@@ -59,10 +59,10 @@ test.describe("Quick Chat entry points on mobile", () => {
     const session = new SessionPage(testPage);
     await session.waitForLoad();
 
-    await testPage.getByTestId("mobile-session-menu").click();
+    await testPage.getByTestId("mobile-session-menu").tap();
     const sheet = testPage.getByRole("dialog", { name: "Tasks" });
     await expect(sheet).toBeVisible();
-    await testPage.getByTestId("mobile-sheet-quick-chat").click();
+    await testPage.getByTestId("mobile-sheet-quick-chat").tap();
 
     const dialog = testPage.getByRole("dialog", { name: "Quick Chat" });
     await expect(dialog.getByTestId("quick-chat-setup")).toBeVisible({ timeout: 10_000 });

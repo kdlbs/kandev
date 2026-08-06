@@ -1,15 +1,23 @@
 "use client";
 
-import { useCallback, useEffect, useState, type Dispatch, type SetStateAction } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type Dispatch,
+  type SetStateAction,
+} from "react";
 import { useTranslation } from "react-i18next";
 import dynamic from "@/lib/routing/client-dynamic";
 import { useRouter } from "@/lib/routing/client-router";
-import { IconMessageCircle, IconSquarePlus } from "@tabler/icons-react";
+import { IconMessageCircle, IconSquarePlus, IconTerminal2 } from "@tabler/icons-react";
 import type { Icon as TablerIcon } from "@tabler/icons-react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { useAppStore } from "@/components/state-provider";
 import { useInOffice } from "@/hooks/use-in-office";
 import { useQuickChatLauncher } from "@/hooks/use-quick-chat-launcher";
+import { useQuickTerminalLauncher } from "@/hooks/use-quick-terminal-launcher";
 import { TaskCreateDialog } from "@/components/task-create-dialog";
 import { linkToTask } from "@/lib/links";
 import type { Task } from "@/lib/types/http";
@@ -38,7 +46,7 @@ function useNewTaskCreationRequest(
   }, [setOpen, workspaceId]);
 }
 
-const ONE_ROW_ACTION_INSET_CLASS = "pr-10";
+const ROW_ACTION_INSET_CLASS = "pr-16";
 type RowActionButtonProps = {
   icon: TablerIcon;
   label: string;
@@ -47,12 +55,35 @@ type RowActionButtonProps = {
 };
 
 function RowActionButton({ icon: Icon, label, testId, onClick }: RowActionButtonProps) {
+  const [tooltipOpen, setTooltipOpen] = useState(false);
+  const hoveredRef = useRef(false);
+
+  const handleTooltipOpenChange = (nextOpen: boolean) => {
+    // Focus is restored to this action after Quick Terminal closes. Keep the
+    // tooltip pointer-driven so that accessibility focus does not leave a
+    // stale popover behind the dialog.
+    if (nextOpen && !hoveredRef.current) return;
+    setTooltipOpen(nextOpen);
+  };
+
   return (
-    <Tooltip>
+    <Tooltip open={tooltipOpen} onOpenChange={handleTooltipOpenChange}>
       <TooltipTrigger asChild>
         <button
           type="button"
           onClick={onClick}
+          onPointerEnter={() => {
+            hoveredRef.current = true;
+            setTooltipOpen(true);
+          }}
+          onPointerLeave={() => {
+            hoveredRef.current = false;
+            setTooltipOpen(false);
+          }}
+          onFocus={() => {
+            hoveredRef.current = false;
+            setTooltipOpen(false);
+          }}
           aria-label={label}
           data-testid={testId}
           className="flex h-6 w-6 items-center justify-center rounded text-muted-foreground/70 hover:bg-muted hover:text-foreground cursor-pointer"
@@ -86,11 +117,12 @@ export function AppSidebarNewTaskItem({ collapsed }: AppSidebarNewTaskItemProps)
   const setActiveSession = useAppStore((s) => s.setActiveSession);
   const inOffice = useInOffice();
   const handleOpenQuickChat = useQuickChatLauncher(workspaceId);
+  const handleOpenQuickTerminal = useQuickTerminalLauncher(workspaceId);
   const [open, setOpen] = useState(false);
   useNewTaskCreationRequest(workspaceId, setOpen);
 
-  const canOpenQuickChat = !collapsed && !!workspaceId;
-  const actionInsetClass = canOpenQuickChat ? ONE_ROW_ACTION_INSET_CLASS : undefined;
+  const canOpenRowActions = !collapsed && !!workspaceId;
+  const actionInsetClass = canOpenRowActions ? ROW_ACTION_INSET_CLASS : undefined;
   const handleRegularTaskCreated = useCallback(
     (
       task: Task,
@@ -121,8 +153,14 @@ export function AppSidebarNewTaskItem({ collapsed }: AppSidebarNewTaskItemProps)
           testId="create-task-button"
           className={actionInsetClass}
         />
-        {canOpenQuickChat && (
+        {canOpenRowActions && (
           <div className="absolute right-1.5 top-1/2 -translate-y-1/2 flex items-center gap-1 sidebar-fade-in">
+            <RowActionButton
+              icon={IconTerminal2}
+              label={t("sidebar:quickTerminal")}
+              testId="sidebar-quick-terminal-shortcut"
+              onClick={handleOpenQuickTerminal}
+            />
             <RowActionButton
               icon={IconMessageCircle}
               label={t("sidebar:quickChat")}

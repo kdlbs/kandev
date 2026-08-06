@@ -70,6 +70,7 @@ import (
 	"github.com/kandev/kandev/internal/profiles"
 	promptcontroller "github.com/kandev/kandev/internal/prompts/controller"
 	prompthandlers "github.com/kandev/kandev/internal/prompts/handlers"
+	"github.com/kandev/kandev/internal/quickterminal"
 	"github.com/kandev/kandev/internal/repoclone"
 	"github.com/kandev/kandev/internal/runtimeflags"
 	"github.com/kandev/kandev/internal/secrets"
@@ -518,6 +519,8 @@ type routeParams struct {
 	analyticsRepo                 analyticsrepository.Repository
 	orchestratorSvc               *orchestrator.Service
 	lifecycleMgr                  *lifecycle.Manager
+	loginMgr                      *loginpty.Manager
+	quickTerminalSvc              *quickterminal.Service
 	hostUtilityMgr                *hostutility.Manager
 	eventBus                      bus.EventBus
 	services                      *Services
@@ -1050,15 +1053,12 @@ func registerSecondaryRoutes(
 	p.log.Debug("Registered Agent Settings handlers (HTTP)")
 
 	// Login PTY: spawns agent login commands under a PTY on the kandev host
-	// (claude auth login, auggie login, ...). The user explicitly closes the
-	// dialog when done, so invalidate the discovery cache on every session
-	// end regardless of exit code — rescanning is cheap and correctly picks
-	// up new auth state for agents whose login flow lives inside the TUI
-	// (e.g. gemini) where the process keeps running after auth completes.
-	loginMgr := loginpty.NewManager(p.log, func(_ string, _ int, _ error) {
-		p.agentSettingsController.InvalidateDiscoveryCache()
-	})
-	loginpty.NewHandlers(loginMgr, p.agentRegistry, p.log.Zap(), nil).RegisterRoutes(p.router)
+	// (claude auth login, auggie login, ...). The manager is shared with Quick
+	// Terminal so descriptor lifecycle callbacks observe the same sessions.
+	loginpty.NewHandlers(p.loginMgr, p.agentRegistry, p.log.Zap(), nil).RegisterRoutes(p.router)
+	if p.quickTerminalSvc != nil {
+		p.quickTerminalSvc.RegisterRoutes(p.router)
+	}
 	p.log.Debug("Registered Login PTY handlers (HTTP + WebSocket)")
 
 	userhandlers.RegisterRoutes(p.router, p.gateway.Dispatcher, p.userCtrl, p.log)

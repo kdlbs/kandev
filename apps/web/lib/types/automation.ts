@@ -11,11 +11,6 @@ export type RunStatus =
   | "archived"
   | "cancelled";
 
-// ExecutionMode controls whether an automation firing creates a visible
-// kanban task ("task", the default) or an ephemeral run hidden from the
-// kanban whose output is surfaced via the automation's run history ("run").
-export type ExecutionMode = "task" | "run";
-
 export type Automation = {
   id: string;
   workspace_id: string;
@@ -28,13 +23,24 @@ export type Automation = {
   repository_ids: string[];
   prompt: string;
   task_title_template: string;
-  execution_mode: ExecutionMode;
   enabled: boolean;
   max_concurrent_runs: number;
   last_triggered_at: string | null;
   created_at: string;
   updated_at: string;
   triggers: AutomationTrigger[];
+  /**
+   * This automation predates the withdrawal of execution modes and was stored
+   * in the `task` mode — the default — so its firings used to put a card on
+   * the kanban and no longer do. The server derives it from a column nothing
+   * else reads; it exists to explain the change once, not to describe how the
+   * automation runs now, which is the same for every automation.
+   *
+   * Optional because a backend older than the migration doesn't send it, and
+   * because it stops being interesting the moment the notice is dismissed —
+   * absent means "nothing changed for this automation".
+   */
+  legacy_board_card?: boolean;
 };
 
 export type AutomationTrigger = {
@@ -59,6 +65,40 @@ export type AutomationRun = {
   trigger_data: Record<string, unknown>;
   error_message: string;
   created_at: string;
+  /** Tail of the agent's last message on the generated task, truncated server-side. */
+  summary?: string;
+  /**
+   * The run's conversation. Absent when the run never produced a task or the
+   * task is gone — the detail view mounts its transcript from this, so a run
+   * without one is reported rather than offered as something to open.
+   */
+  session_id?: string;
+};
+
+/**
+ * A run as it appears in the workspace-wide feed. A per-automation run log can
+ * take the automation for granted; a mixed feed cannot, so the server
+ * denormalises the name and execution mode onto every row rather than making
+ * the client join against the automation list.
+ */
+export type WorkspaceAutomationRun = AutomationRun & {
+  automation_name: string;
+};
+
+/**
+ * One automation's health, answered per automation.
+ *
+ * The runs list used to derive this from the workspace feed, which is capped —
+ * past the cap a quiet automation's last run falls out of the window and its
+ * row claims it has never run. The server answers per automation instead, so a
+ * row's two claims do not depend on how noisy its neighbours are.
+ */
+export type AutomationSummary = {
+  automation_id: string;
+  /** Open under the same definition the concurrency cap uses. */
+  open_runs: number;
+  /** Absent when the automation has never run, or its runs were all deleted. */
+  last_run?: AutomationRun;
 };
 
 // --- Trigger config types ---
@@ -125,7 +165,6 @@ export type CreateAutomationRequest = {
   repository_ids?: string[];
   prompt?: string;
   task_title_template?: string;
-  execution_mode?: ExecutionMode;
   max_concurrent_runs?: number;
   triggers?: Array<{
     type: TriggerType;
@@ -144,7 +183,6 @@ export type UpdateAutomationRequest = {
   repository_ids?: string[];
   prompt?: string;
   task_title_template?: string;
-  execution_mode?: ExecutionMode;
   enabled?: boolean;
   max_concurrent_runs?: number;
 };

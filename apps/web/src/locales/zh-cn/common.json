@@ -62,6 +62,7 @@
   "presetIconTool": "工具",
   "prompts": "提示词",
   "requestFailed": "请求失败",
+  "rename": "重命名",
   "reset": "重置",
   "resetWatchChecking": "正在检查将删除多少任务…",
   "resetWatchDeleteAllTasks": "这会删除此前由此监控创建的所有任务，包括已归档任务。监控的轮询游标也会被清除，因此下次检查会重新导入当前所有匹配项。此操作无法撤销。",

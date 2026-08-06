@@ -19,9 +19,7 @@ const DISPATCH_LOG_DENYLIST = new Set<string>([
 
 type MessageHandler<T extends BackendMessageType> = (message: BackendMessageMap[T]) => void;
 
-// Internal alias kept for readability — the WS client emits the same vocabulary
-// the UI consumes. `disconnected` covers both "never connected" (formerly
-// `idle`) and "socket closed" (formerly `closed`); `connected` replaces `open`.
+// Internal alias for the status vocabulary shared with the UI.
 type WebSocketStatus = ConnectionStatus;
 
 export interface ReconnectOptions {
@@ -32,6 +30,19 @@ export interface ReconnectOptions {
   backoffMultiplier?: number;
 }
 
+export interface SessionSubscriptionHandle {
+  ready: Promise<void>;
+  unsubscribe: () => void;
+}
+
+type SessionSubscriptionReadiness = {
+  promise: Promise<void>;
+  resolve: () => void;
+  reject: (reason: unknown) => void;
+  requestStarted: boolean;
+  settled: boolean;
+};
+
 const DEFAULT_RECONNECT_OPTIONS: Required<ReconnectOptions> = {
   enabled: true,
   maxAttempts: 10,
@@ -39,6 +50,7 @@ const DEFAULT_RECONNECT_OPTIONS: Required<ReconnectOptions> = {
   maxDelay: 30000,
   backoffMultiplier: 1.5,
 };
+const WEBSOCKET_CONNECTION_CLOSED_ERROR = "WebSocket connection closed";
 
 export class WebSocketClient {
   private socket: WebSocket | null = null;
@@ -59,6 +71,7 @@ export class WebSocketClient {
   private intentionalClose = false;
   private subscriptions = new Map<string, number>();
   private sessionSubscriptions = new Map<string, number>();
+  private sessionSubscriptionReadiness = new Map<string, SessionSubscriptionReadiness>();
   // Ref-counted focus signals: a session can be focused by both the task panel
   // and the task details page if both are mounted. Backend wakes its workspace
   // tracker into fast-poll mode while any client has focus, falling back to
@@ -90,8 +103,8 @@ export class WebSocketClient {
     this.socket.onopen = () => {
       this.reconnectAttempts = 0;
       this.setStatus("connected");
-      this.flushQueue();
       this.resubscribe();
+      this.flushQueue();
     };
 
     this.socket.onmessage = (event) => {
@@ -126,6 +139,7 @@ export class WebSocketClient {
       this.socket = null;
     }
     this.setStatus("disconnected");
+    this.resetSessionSubscriptionReadiness(new Error(WEBSOCKET_CONNECTION_CLOSED_ERROR));
     this.cleanupPendingRequests();
   }
 
@@ -184,18 +198,47 @@ export class WebSocketClient {
   }
 
   subscribeSession(sessionId: string) {
+    return this.subscribeSessionWithReady(sessionId).unsubscribe;
+  }
+
+  subscribeSessionWithReady(sessionId: string): SessionSubscriptionHandle {
     const currentCount = this.sessionSubscriptions.get(sessionId) ?? 0;
     const nextCount = currentCount + 1;
     this.sessionSubscriptions.set(sessionId, nextCount);
-    if (this.status === "connected" && nextCount === 1) {
-      this.send({
-        id: generateUUID(),
-        type: "request",
-        action: "session.subscribe",
-        payload: { session_id: sessionId },
-      });
+    const readiness = this.getOrCreateSessionSubscriptionReadiness(sessionId);
+    if (this.status === "connected" && this.socket) {
+      this.startSessionSubscription(sessionId, readiness);
     }
-    return () => this.unsubscribeSession(sessionId);
+    return {
+      ready: readiness.promise,
+      unsubscribe: () => this.unsubscribeSession(sessionId),
+    };
+  }
+
+  resubscribeSession(sessionId: string): Promise<void> {
+    if (!this.sessionSubscriptions.has(sessionId)) return Promise.resolve();
+    const readiness = this.getOrCreateSessionSubscriptionReadiness(sessionId, true);
+    if (this.status === "connected" && this.socket) {
+      this.startSessionSubscription(sessionId, readiness);
+    }
+    return readiness.promise;
+  }
+
+  getSessionSubscriptionReadiness(sessionId: string): Promise<void> {
+    if (!this.sessionSubscriptions.has(sessionId)) return Promise.resolve();
+    if (
+      !this.sessionSubscriptionReadiness.has(sessionId) &&
+      (this.status === "disconnected" || this.status === "error")
+    ) {
+      const unavailable = Promise.reject<void>(new Error(WEBSOCKET_CONNECTION_CLOSED_ERROR));
+      void unavailable.catch(() => undefined);
+      return unavailable;
+    }
+    const readiness = this.getOrCreateSessionSubscriptionReadiness(sessionId);
+    if (this.status === "connected" && this.socket) {
+      this.startSessionSubscription(sessionId, readiness);
+    }
+    return readiness.promise;
   }
 
   focusSession(sessionId: string) {
@@ -282,13 +325,12 @@ export class WebSocketClient {
 
   unsubscribeSession(sessionId: string) {
     const currentCount = this.sessionSubscriptions.get(sessionId);
-    if (!currentCount) {
-      return;
-    }
+    if (!currentCount) return;
     const nextCount = currentCount - 1;
 
     if (nextCount <= 0) {
       this.sessionSubscriptions.delete(sessionId);
+      this.cancelSessionSubscriptionReadiness(sessionId);
       if (this.status === "connected") {
         this.send({
           id: generateUUID(),
@@ -455,6 +497,14 @@ export class WebSocketClient {
 
   private handleDisconnect(event: CloseEvent) {
     this.setStatus("disconnected");
+    const shouldRetainSessionReadiness =
+      !this.intentionalClose &&
+      this.reconnectOptions.enabled &&
+      this.reconnectAttempts < this.reconnectOptions.maxAttempts;
+    this.resetSessionSubscriptionReadiness(
+      new Error(WEBSOCKET_CONNECTION_CLOSED_ERROR),
+      shouldRetainSessionReadiness,
+    );
 
     // Don't reconnect if this was an intentional close
     if (this.intentionalClose) {
@@ -507,9 +557,80 @@ export class WebSocketClient {
     // Reject all pending requests
     this.pendingRequests.forEach(({ reject, timeout }) => {
       clearTimeout(timeout);
-      reject(new Error("WebSocket connection closed"));
+      reject(new Error(WEBSOCKET_CONNECTION_CLOSED_ERROR));
     });
     this.pendingRequests.clear();
+  }
+
+  private getOrCreateSessionSubscriptionReadiness(
+    sessionId: string,
+    forceNewAfterSettled = false,
+  ): SessionSubscriptionReadiness {
+    const existing = this.sessionSubscriptionReadiness.get(sessionId);
+    if (existing && !(forceNewAfterSettled && existing.settled)) return existing;
+
+    let resolve!: () => void;
+    let reject!: (reason: unknown) => void;
+    const promise = new Promise<void>((resolvePromise, rejectPromise) => {
+      resolve = resolvePromise;
+      reject = rejectPromise;
+    });
+    const readiness: SessionSubscriptionReadiness = {
+      promise,
+      resolve,
+      reject,
+      requestStarted: false,
+      settled: false,
+    };
+    // subscribeSession() consumers do not await readiness, so handle failures
+    // while returning the original promise to readiness-aware consumers.
+    void promise.catch(() => undefined);
+    this.sessionSubscriptionReadiness.set(sessionId, readiness);
+    return readiness;
+  }
+
+  private startSessionSubscription(sessionId: string, readiness: SessionSubscriptionReadiness) {
+    if (readiness.requestStarted) return;
+    readiness.requestStarted = true;
+    void this.request("session.subscribe", { session_id: sessionId }).then(
+      () => {
+        if (this.sessionSubscriptionReadiness.get(sessionId) !== readiness) return;
+        readiness.settled = true;
+        readiness.resolve();
+      },
+      (error: unknown) => {
+        if (this.sessionSubscriptionReadiness.get(sessionId) === readiness) {
+          this.sessionSubscriptionReadiness.delete(sessionId);
+        }
+        readiness.settled = true;
+        readiness.reject(error);
+      },
+    );
+  }
+
+  private cancelSessionSubscriptionReadiness(sessionId: string) {
+    const readiness = this.sessionSubscriptionReadiness.get(sessionId);
+    if (!readiness) return;
+    this.sessionSubscriptionReadiness.delete(sessionId);
+    if (!readiness.settled) {
+      readiness.settled = true;
+      readiness.reject(new Error("Session subscription released"));
+    }
+  }
+
+  private resetSessionSubscriptionReadiness(error: Error, retainActiveSubscriptions = false) {
+    const readinessEntries = [...this.sessionSubscriptionReadiness.entries()];
+    this.sessionSubscriptionReadiness.clear();
+    for (const [, readiness] of readinessEntries) {
+      if (readiness.settled) continue;
+      readiness.settled = true;
+      readiness.reject(error);
+    }
+    if (retainActiveSubscriptions) {
+      this.sessionSubscriptions.forEach((_, id) =>
+        this.getOrCreateSessionSubscriptionReadiness(id),
+      );
+    }
   }
 
   private resubscribe() {
@@ -523,12 +644,8 @@ export class WebSocketClient {
       });
     });
     this.sessionSubscriptions.forEach((_count, sessionId) => {
-      this.send({
-        id: generateUUID(),
-        type: "request",
-        action: "session.subscribe",
-        payload: { session_id: sessionId },
-      });
+      const readiness = this.getOrCreateSessionSubscriptionReadiness(sessionId);
+      this.startSessionSubscription(sessionId, readiness);
     });
     this.sessionFocusCounts.forEach((_count, sessionId) => {
       this.send({

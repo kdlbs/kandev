@@ -31,6 +31,7 @@ import { MRDetailPanelComponent, mrTaskKey } from "@/components/gitlab/mr-detail
 import { PluginTaskPanel } from "../plugin-task-panel";
 import { parsePluginPanelId } from "@/lib/state/layout-manager/plugin-panels";
 import { useEffectiveMobilePanel, type MobileReviewSource } from "./mobile-plugin-panel-lifecycle";
+import { useTranslation } from "react-i18next";
 
 export { resolveMobilePluginPanel } from "./mobile-plugin-panel-lifecycle";
 
@@ -91,10 +92,11 @@ function MobileChatPanelContent({
   effectiveSessionId: string | null;
   onOpenFile: (path: string, repo?: string) => void;
 }) {
+  const { t } = useTranslation();
   if (!activeTaskId) {
     return (
       <div className="flex-1 flex items-center justify-center text-muted-foreground">
-        No task selected
+        {t("task:noTaskSelected")}
       </div>
     );
   }

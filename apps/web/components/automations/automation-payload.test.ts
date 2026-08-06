@@ -25,7 +25,6 @@ function baseForm(overrides: Partial<FormState> = {}): FormState {
     repositorySelections: [],
     prompt: "Run it",
     taskTitleTemplate: "",
-    executionMode: "task",
     enabled: true,
     maxConcurrentRuns: 1,
     ...overrides,

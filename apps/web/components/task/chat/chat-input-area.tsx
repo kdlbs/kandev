@@ -483,6 +483,12 @@ type ChatInputAreaProps = {
   isSending: boolean;
   hideSessionsDropdown?: boolean;
   minimalToolbar?: boolean;
+  /** Hide ACP/session-specific controls (model picker, mode, MCP, reset context,
+   *  sessions, enhance, plugin actions) while keeping Plan, attachment and
+   *  context controls. Surfaces whose agent only exists for the length of a turn
+   *  — an automation run — flip this off the moment the turn ends, so a control
+   *  that talks to a live ACP session is never left on screen without one. */
+  hideAgentControls?: boolean;
   /** Hide the plan mode toggle button (for ephemeral/quick chat sessions) */
   hidePlanMode?: boolean;
   placeholderOverride?: string;
@@ -575,6 +581,7 @@ export function ChatInputArea({
   isSending,
   hideSessionsDropdown,
   minimalToolbar,
+  hideAgentControls,
   hidePlanMode,
   placeholderOverride,
   surfaceClassName,
@@ -609,6 +616,7 @@ export function ChatInputArea({
     onClarificationResolved,
     hideSessionsDropdown,
     minimalToolbar,
+    hideAgentControls,
     hidePlanMode,
   });
   return (

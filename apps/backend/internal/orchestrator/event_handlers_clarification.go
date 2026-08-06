@@ -90,7 +90,7 @@ func (s *Service) handleClarificationStaleDismissed(ctx context.Context, event *
 	}
 
 	s.captureGitStatusSnapshot(writeCtx, data.SessionID)
-	s.finalizeAutomationRunIfEphemeral(writeCtx, data.TaskID, data.SessionID, true, "")
+	s.finalizeAutomationRun(writeCtx, data.TaskID, true, "")
 	transitioned := s.processOnTurnCompleteViaEngine(writeCtx, data.TaskID, session)
 	if !transitioned {
 		s.writeTaskReviewState(writeCtx, data.TaskID, data.SessionID)

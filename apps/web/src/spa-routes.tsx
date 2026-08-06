@@ -9,6 +9,15 @@ import { StatsPageClient } from "@/app/stats/stats-page-client";
 import { isRangeKey } from "@/app/stats/stats-utils";
 import type { RangeKey } from "@/app/stats/stats-utils";
 import { TasksPageClient } from "@/app/tasks/tasks-page-client";
+import { AutomationDetailPage } from "@/components/runs/automation-detail-page";
+import { RunsListPage } from "@/components/runs/runs-list-page";
+import { RunsPageClient } from "@/components/runs/runs-page-client";
+import {
+  AUTOMATIONS_HREF,
+  LEGACY_RUNS_PREFIX,
+  parseDetailTab,
+  RUNS_FEED_VIEW,
+} from "@/components/runs/runs-view";
 import {
   parseTasksListGroup,
   parseTasksListSort,
@@ -29,6 +38,7 @@ import {
   PluginRouteFallback,
 } from "@/components/plugins/plugin-error-boundary";
 import { PluginPageFrame } from "@/components/plugins/plugin-page";
+import { safeDecodePathSegment } from "@/lib/routing/path";
 import { mapWorkspaceItem, readActiveWorkspaceCookie } from "@/lib/routing/route-bootstrap";
 import { resolveActiveId } from "@/lib/ssr/resolve-active-id";
 import { mapUserSettingsResponse } from "@/lib/ssr/user-settings";
@@ -73,6 +83,8 @@ type SpaRoute =
   | { kind: "jira" }
   | { kind: "linear" }
   | { kind: "stats"; range?: RangeKey }
+  | { kind: "runs"; view?: string }
+  | { kind: "runDetail"; automationId: string; tab?: string; runId?: string }
   | { kind: "settings"; pathname: string }
   | { kind: "office"; pathname: string }
   | { kind: "plugin"; path: string }
@@ -96,6 +108,7 @@ export function resolveSpaRoute(pathname: string, searchParams: URLSearchParams)
   const normalized = normalizePath(pathname);
   return (
     resolveTaskDetailRoute(normalized, searchParams) ??
+    resolveRunsRoute(normalized, searchParams) ??
     resolveTopLevelRoute(normalized, searchParams) ??
     resolveNestedRoute(normalized) ??
     resolvePluginRoute(normalized) ??
@@ -111,6 +124,37 @@ export function resolveSpaRoute(pathname: string, searchParams: URLSearchParams)
 function resolvePluginRoute(normalized: string): SpaRoute | null {
   const match = pluginRegistry.getRoutes().find((route) => route.path === normalized);
   return match ? { kind: "plugin", path: normalized } : null;
+}
+
+/**
+ * `/automations` is a list and `/automations/<id>` is that automation's
+ * history. The flat cross-automation feed is a view of the list rather than a
+ * sibling path, so nothing has to be reserved out of the automation id space.
+ *
+ * `/runs` is the name this destination shipped under and still resolves, so
+ * links already shared or bookmarked keep working.
+ */
+const AUTOMATION_PREFIXES = [`${AUTOMATIONS_HREF}/`, `${LEGACY_RUNS_PREFIX}/`];
+
+function resolveRunsRoute(normalized: string, searchParams: URLSearchParams): SpaRoute | null {
+  if (normalized === AUTOMATIONS_HREF || normalized === LEGACY_RUNS_PREFIX) {
+    return { kind: "runs", view: searchParams.get("view") ?? undefined };
+  }
+  const prefix = AUTOMATION_PREFIXES.find((candidate) => normalized.startsWith(candidate));
+  if (!prefix) return null;
+  const raw = normalized.slice(prefix.length);
+  if (!raw || raw.includes("/")) return null;
+  // A malformed escape ("/automations/%") makes decodeURIComponent throw, which
+  // would take down route resolution for the whole SPA rather than 404 the one
+  // bad link.
+  const automationId = safeDecodePathSegment(raw);
+  if (!automationId) return null;
+  return {
+    kind: "runDetail",
+    automationId,
+    tab: searchParams.get("tab") ?? undefined,
+    runId: searchParams.get("run") ?? undefined,
+  };
 }
 
 function resolveTaskDetailRoute(
@@ -478,6 +522,23 @@ function ExternalDataRoute({
     case "stats":
       return (
         <StatsPageClient workspaceId={workspaceId} activeRange={route.range} initialError={null} />
+      );
+    case "runs":
+      // The flat feed is demoted to a lens over the list, not deleted: with
+      // many automations "what happened overnight" is a real question a
+      // per-automation view cannot answer.
+      return route.view === RUNS_FEED_VIEW ? (
+        <RunsPageClient workspaceId={workspaceId} />
+      ) : (
+        <RunsListPage workspaceId={workspaceId} />
+      );
+    case "runDetail":
+      return (
+        <AutomationDetailPage
+          automationId={route.automationId}
+          tab={parseDetailTab(route.tab)}
+          runId={route.runId}
+        />
       );
   }
 }

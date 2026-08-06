@@ -325,3 +325,25 @@ func (c *Config) ToSharedConfig() *shared.Config {
 		RequiresProcessKill: c.RequiresProcessKill,
 	}
 }
+
+// SteerablePrompter is implemented by an adapter that can deliver a prompt into
+// a turn that is still generating, instead of holding it until the turn ends.
+//
+// It is an optional interface rather than a method on AgentAdapter so transports
+// that cannot steer need no change — the same shape the process manager uses for
+// RequiresProcessKill. Callers must type-assert and must also check
+// SupportsSteering(), which reflects the connected agent's negotiated
+// advertisement and is therefore only known after initialize.
+//
+// Delivery is opportunistic: whether the agent folds the prompt into the running
+// turn or runs it as the next turn is the agent's decision and is not advertised
+// over the protocol. See docs/specs/platform/mid-turn-steering.md.
+type SteerablePrompter interface {
+	SupportsSteering() bool
+	PromptSteer(
+		ctx context.Context,
+		message string,
+		attachments []v1.MessageAttachment,
+		promptGeneration uint64,
+	) error
+}

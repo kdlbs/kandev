@@ -297,16 +297,26 @@ func (c *Controller) DeleteProfile(ctx context.Context, id string, force bool) (
 	if err := c.prepareProfileDeletion(ctx, id, force); err != nil {
 		return nil, err
 	}
+	// Automations are disabled BEFORE the row is deleted and a failure here
+	// aborts the whole delete. See disableReferencingAutomations for why this
+	// pass runs in the opposite order to the watcher pass below.
+	if err := c.disableReferencingAutomations(ctx, id); err != nil {
+		return nil, err
+	}
 	if err := c.repo.DeleteAgentProfile(ctx, id); err != nil {
 		if strings.Contains(err.Error(), "agent profile not found") {
 			return nil, ErrAgentProfileNotFound
 		}
 		return nil, err
 	}
-	// Eagerly disable referencing watchers only AFTER the row is gone, so a
+	// Watchers, by contrast, are disabled only AFTER the row is gone, so a
 	// failed delete never strands watchers disabled against a still-live
-	// profile. If this disable itself fails, the dispatch coordinator's
-	// preflight self-heals the watchers on their next poll.
+	// profile. They can afford that ordering because they have a genuine second
+	// chance: the dispatch coordinator's preflight re-resolves the profile on
+	// every watcher poll and disables the row itself when the profile has
+	// vanished. So a failure here is logged and ignored — the next poll fixes
+	// it. Automations have no such preflight, which is the whole reason they
+	// are handled above instead of here.
 	if force {
 		c.disableReferencingWatchers(ctx, id, profile.Name)
 	}
@@ -319,9 +329,9 @@ func (c *Controller) DeleteProfile(ctx context.Context, id string, force bool) (
 // Routing-tier references are hard blockers even when force=true because a
 // deleted profile would orphan workspace tier mappings. When force is false,
 // active sessions and watchers return *ErrProfileInUseDetail so the UI can
-// render a confirmation dialog. force=true skips only those soft blockers; the
-// eager disable of referencing watchers runs in DeleteProfile after the row is
-// actually gone.
+// render a confirmation dialog. force=true skips only those soft blockers.
+// Neither branch disables anything: DeleteProfile disables referencing
+// automations before the row goes away and referencing watchers after it does.
 func (c *Controller) prepareProfileDeletion(ctx context.Context, profileID string, force bool) error {
 	routingTierRefs, err := c.listRoutingTierReferences(ctx, profileID)
 	if err != nil {
@@ -348,8 +358,29 @@ func (c *Controller) prepareProfileDeletion(ctx context.Context, profileID strin
 				watcherRefs = refs
 			}
 		}
-		if len(activeTasks) > 0 || len(watcherRefs) > 0 {
-			return &ErrProfileInUseDetail{ActiveSessions: activeTasks, Watchers: watcherRefs}
+		var automationRefs []AutomationReference
+		if c.automationDeps != nil {
+			refs, err := c.automationDeps.ListEnabledAutomationsByAgentProfile(ctx, profileID)
+			if err != nil {
+				// Fails closed, unlike the watcher lookup above. A watcher this
+				// path misses is disabled anyway by the force pass afterwards;
+				// an automation is not, so a lookup that silently returned
+				// nothing would orphan exactly the references this check was
+				// added to catch. Refusing is recoverable — the user retries.
+				return fmt.Errorf("check automations using this profile: %w", err)
+			}
+			automationRefs = refs
+		}
+		// An enabled automation is a standing instruction to launch against this
+		// profile. Nothing is running, so it never appears in the active-session
+		// list, but its next firing would go looking for a profile that is gone —
+		// and a schedule fails quietly, hours later, with nobody watching.
+		if len(activeTasks) > 0 || len(watcherRefs) > 0 || len(automationRefs) > 0 {
+			return &ErrProfileInUseDetail{
+				ActiveSessions: activeTasks,
+				Watchers:       watcherRefs,
+				Automations:    automationRefs,
+			}
 		}
 	}
 	// Clean up ephemeral tasks (quick chat, config chat) using this profile.
@@ -367,6 +398,51 @@ func (c *Controller) listRoutingTierReferences(ctx context.Context, profileID st
 		return nil, err
 	}
 	return refs, nil
+}
+
+// disableReferencingAutomations turns off every automation bound to the profile
+// about to be deleted, and reports failure so DeleteProfile can abort.
+//
+// A force-delete is the user saying "yes, break these" — but an automation is
+// not broken loudly. It is a standing instruction on a schedule, so left
+// enabled it keeps firing into a profile that no longer exists, hours later,
+// with nobody watching. Disabling is the honest outcome of the confirmation
+// they just gave, and it is reversible: the automation is still there, and
+// re-enabling it after picking a new profile is one toggle.
+//
+// This runs before the delete and is not best-effort, because the two failure
+// directions cost wildly different amounts:
+//
+//   - disable fails, delete aborted — automation still enabled, profile still
+//     there. Nothing is inconsistent, the error reaches the caller, and a retry
+//     costs one click.
+//   - disable fails, delete proceeds — automation enabled and bound to a row
+//     that is gone. Nothing ever notices. Automations have no equivalent of the
+//     watcher preflight to re-resolve the profile, so the binding is permanent
+//     and every future schedule fails quietly.
+//
+// The residual case is disable-succeeds-then-delete-fails, which leaves an
+// automation disabled against a still-live profile. That is the direction we
+// choose to lose in: it is visible on the automation page and one toggle to
+// undo, where the other direction is silent and unrecoverable.
+//
+// Runs on both the force and non-force paths. On the non-force path
+// prepareProfileDeletion has already refused the delete if any automation was
+// enabled, so this is normally a no-op — except in the window where one is
+// enabled between that check and this call, which it also closes.
+func (c *Controller) disableReferencingAutomations(ctx context.Context, profileID string) error {
+	if c.automationDeps == nil {
+		return nil
+	}
+	disabled, err := c.automationDeps.DisableAutomationsByAgentProfile(ctx, profileID)
+	if err != nil {
+		return fmt.Errorf("disable automations using this profile: %w", err)
+	}
+	if len(disabled) > 0 {
+		c.logger.Info("disabled referencing automations before profile delete",
+			zap.String("profile_id", profileID), zap.Int("count", len(disabled)))
+	}
+	return nil
 }
 
 // disableReferencingWatchers stamps the deletion cause onto every watcher

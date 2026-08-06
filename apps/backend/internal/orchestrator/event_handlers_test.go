@@ -248,6 +248,12 @@ type mockAgentManager struct {
 	// the execution ID so callers can filter by the agent that received it.
 	capturedPrompts     []string
 	capturedPromptCalls []promptCall
+	// Steer tracking. capturedSteerCalls records every SteerAgentWithDispatchCallback
+	// invocation; steerErr, when set, is returned instead of dispatching. Having
+	// this method also makes the mock satisfy the executor's optional
+	// steerAgentWithDispatchCallback capability.
+	capturedSteerCalls []promptCall
+	steerErr           error
 	// Optional: closed once on the first PromptAgent call so tests can wait
 	// deterministically without polling. Tests opt in by initializing the channel.
 	promptDone chan struct{}
@@ -417,6 +423,29 @@ func (m *mockAgentManager) PromptAgentWithDispatchCallback(ctx context.Context, 
 	}
 	return result, err
 }
+
+func (m *mockAgentManager) SteerAgentWithDispatchCallback(_ context.Context, executionID string, prompt string, _ []v1.MessageAttachment, dispatchOnly bool, onDispatched func()) (*executor.PromptResult, error) {
+	m.mu.Lock()
+	m.capturedSteerCalls = append(m.capturedSteerCalls, promptCall{ExecutionID: executionID, Prompt: prompt, DispatchOnly: dispatchOnly})
+	steerErr := m.steerErr
+	m.mu.Unlock()
+	if steerErr != nil {
+		return nil, steerErr
+	}
+	if onDispatched != nil {
+		onDispatched()
+	}
+	return &executor.PromptResult{StopReason: "dispatched"}, nil
+}
+
+func (m *mockAgentManager) getCapturedSteerCalls() []promptCall {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return append([]promptCall(nil), m.capturedSteerCalls...)
+}
+
+// CancelAgent keeps its named sessionID parameter: the body below forwards it
+// to cancelAgentFunc, so the topic's `_ string` would not compile here.
 func (m *mockAgentManager) CancelAgent(ctx context.Context, sessionID string) error {
 	m.cancelAgentCalls.Add(1)
 	if m.cancelAgentEntered != nil {

@@ -105,6 +105,7 @@
   "thisActionCannotBeUndone": "This action cannot be undone.",
   "turnGroupToolCalls_one": "{{count}} tool call",
   "turnGroupToolCalls_other": "{{count}} tool calls",
+  "composerSteerPlaceholder": "Send now — delivered to the running turn",
   "unknownError": "Unknown error",
   "useWorkspaceDefault": "Use workspace default...",
   "useWorkspaceDefaultOption": "Use workspace default"

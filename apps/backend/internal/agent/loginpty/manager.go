@@ -3,10 +3,10 @@
 // browser-based or token-prompt auth flows without shelling into the
 // container.
 //
-// Sessions are keyed by agent ID — at most one login PTY per agent runs at a
-// time, since concurrent logins for the same agent would race on the same
-// HOME dotfile. The session terminates when the command exits, on idle
-// timeout, or on explicit Stop.
+// Sessions are keyed by an internal uniqueness key — at most one login PTY per
+// key runs at a time. Normal agent logins use the agent ID as that key, while
+// callers that own separate logical sessions (such as host-shell tabs) can
+// provide a bounded key without changing the public AgentID.
 package loginpty
 
 import (
@@ -47,7 +47,7 @@ var (
 // Manager owns active login sessions and dispatches lifecycle callbacks.
 type Manager struct {
 	mu       sync.Mutex
-	sessions map[string]*Session // key: agentID
+	sessions map[string]*Session // key: internal uniqueness key
 	byID     map[string]*Session // key: sessionID
 	log      *logger.Logger
 
@@ -55,6 +55,11 @@ type Manager struct {
 	// agent ID and exit code). Used by callers to invalidate discovery cache
 	// and broadcast updated availability. Optional.
 	onExit func(agentID string, exitCode int, exitErr error)
+
+	// onSessionExit is the owner-aware lifecycle hook. It carries the internal
+	// uniqueness key so keyed callers can reconcile their durable descriptor
+	// without changing the stable public AgentID passed to onExit.
+	onSessionExit func(managerKey, sessionID, agentID string, exitCode int, exitErr error)
 }
 
 // NewManager constructs a Manager. onExit may be nil.
@@ -67,15 +72,29 @@ func NewManager(log *logger.Logger, onExit func(agentID string, exitCode int, ex
 	}
 }
 
-// Start spawns a PTY-backed process for the agent. Returns the session
-// snapshot. Fails with ErrSessionAlreadyRunning if a session for this agent
-// is already active.
+// SetSessionExitCallback registers the owner-aware lifecycle hook. Call this
+// during backend construction, before any sessions are started.
+func (m *Manager) SetSessionExitCallback(callback func(managerKey, sessionID, agentID string, exitCode int, exitErr error)) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.onSessionExit = callback
+}
+
+// Start spawns a PTY-backed process for the agent. It preserves the legacy
+// one-session-per-agent behavior by using agentID as the internal key.
 func (m *Manager) Start(agentID string, cmd []string, cols, rows uint16) (*Session, error) {
+	return m.StartWithKey(agentID, agentID, cmd, cols, rows)
+}
+
+// StartWithKey spawns a PTY-backed process using managerKey for uniqueness
+// while retaining agentID as the stable public identity and exit-callback
+// value. Fails with ErrSessionAlreadyRunning if managerKey is already active.
+func (m *Manager) StartWithKey(managerKey, agentID string, cmd []string, cols, rows uint16) (*Session, error) {
 	if len(cmd) == 0 {
 		return nil, errors.New("empty command")
 	}
 	m.mu.Lock()
-	if existing, ok := m.sessions[agentID]; ok {
+	if existing, ok := m.sessions[managerKey]; ok {
 		m.mu.Unlock()
 		_ = existing.Status() // touch
 		return existing, ErrSessionAlreadyRunning
@@ -91,6 +110,7 @@ func (m *Manager) Start(agentID string, cmd []string, cols, rows uint16) (*Sessi
 	sess := &Session{
 		ID:          uuid.NewString(),
 		AgentID:     agentID,
+		managerKey:  managerKey,
 		Cmd:         append([]string(nil), cmd...),
 		subscribers: map[chan<- []byte]struct{}{},
 		log:         m.log.WithFields(zap.String("agent", agentID)),
@@ -102,7 +122,7 @@ func (m *Manager) Start(agentID string, cmd []string, cols, rows uint16) (*Sessi
 		return nil, err
 	}
 
-	m.sessions[agentID] = sess
+	m.sessions[managerKey] = sess
 	m.byID[sess.ID] = sess
 	m.mu.Unlock()
 
@@ -123,6 +143,17 @@ func (m *Manager) Stop(agentID string) error {
 	sess, ok := m.sessions[agentID]
 	m.mu.Unlock()
 	if !ok {
+		return ErrSessionNotFound
+	}
+	sess.stop()
+	return nil
+}
+
+// StopSession terminates a session by its public session ID. It is used by
+// owners whose uniqueness key is intentionally different from AgentID.
+func (m *Manager) StopSession(sessionID string) error {
+	sess := m.GetByID(sessionID)
+	if sess == nil {
 		return ErrSessionNotFound
 	}
 	sess.stop()
@@ -204,7 +235,9 @@ loop:
 	}
 
 	m.mu.Lock()
-	delete(m.sessions, sess.AgentID)
+	if current, ok := m.sessions[sess.managerKey]; ok && current == sess {
+		delete(m.sessions, sess.managerKey)
+	}
 	delete(m.byID, sess.ID)
 	m.mu.Unlock()
 
@@ -235,6 +268,9 @@ loop:
 	if m.onExit != nil {
 		m.onExit(sess.AgentID, info.code, info.err)
 	}
+	if m.onSessionExit != nil {
+		m.onSessionExit(sess.managerKey, sess.ID, sess.AgentID, info.code, info.err)
+	}
 }
 
 type exitInfo struct {
@@ -260,6 +296,7 @@ type Session struct {
 	AgentID string
 	Cmd     []string
 
+	managerKey string
 	mu         sync.Mutex
 	cmd        *exec.Cmd
 	pty        ptyHandle
@@ -279,6 +316,15 @@ type Session struct {
 	readDone   chan struct{} // closed when readLoop exits (all PTY output drained)
 
 	log *logger.Logger
+}
+
+// ManagerKey returns the internal uniqueness key used by Manager. It is
+// intentionally separate from AgentID so keyed host shells can prove their
+// descriptor owns the session without exposing the key as an agent identity.
+func (s *Session) ManagerKey() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.managerKey
 }
 
 func (s *Session) start(cmd []string, cols, rows uint16) error {

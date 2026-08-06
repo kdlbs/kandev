@@ -186,13 +186,14 @@ function TaskSwitcherSurfaceHeader({
   onNewTask: () => void;
   presentation: "sheet" | "drawer";
 }) {
+  const { t } = useTranslation();
   const content = (
     <>
       <div className="flex items-center justify-between">
         {presentation === "drawer" ? (
-          <DrawerTitle className="text-base">Tasks</DrawerTitle>
+          <DrawerTitle className="text-base">{t("task:tasks")}</DrawerTitle>
         ) : (
-          <SheetTitle className="text-base">Tasks</SheetTitle>
+          <SheetTitle className="text-base">{t("task:tasks")}</SheetTitle>
         )}
         <div className="flex items-center gap-2">
           {workspaceId && (
@@ -204,7 +205,7 @@ function TaskSwitcherSurfaceHeader({
               data-testid="mobile-sheet-quick-chat"
             >
               <IconMessageCircle className="h-4 w-4" />
-              Chat
+              {t("task:chat")}
             </Button>
           )}
           <Button
@@ -214,7 +215,7 @@ function TaskSwitcherSurfaceHeader({
             onClick={onNewTask}
           >
             <IconPlus className="h-4 w-4" />
-            New
+            {t("task:new")}
           </Button>
         </div>
       </div>

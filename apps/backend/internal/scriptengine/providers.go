@@ -15,12 +15,12 @@ import (
 // All binding values have already passed the credential-free domain validator,
 // but they are still shell-quoted here because branch names are provider data.
 // The fragment intentionally does not print the remote URL or provider text.
-func RemoteContributionSetupScript(binding *models.RemoteContribution) string {
+func RemoteContributionSetupScript(binding *models.RemoteContribution) (string, error) {
 	if binding == nil {
-		return ""
+		return "", nil
 	}
 	if err := binding.Validate(); err != nil {
-		return ""
+		return "", fmt.Errorf("validate remote contribution: %w", err)
 	}
 	remoteName := binding.ContributionRemoteName()
 	remoteBranch := binding.HeadBranch
@@ -75,7 +75,7 @@ func RemoteContributionSetupScript(binding *models.RemoteContribution) string {
 )
 `, shellQuote("/workspace"), shellQuote(remoteName), shellQuote(binding.SourceRepository.RemoteURL),
 		shellQuote(remoteBranch), shellQuote(remoteRef), shellQuote(refspec), shellQuote(binding.HeadSHA),
-		branchSuffix, branchSuffix)
+		branchSuffix, branchSuffix), nil
 }
 
 // RepositoryProvider returns git-related placeholders from metadata and environment.

@@ -120,6 +120,8 @@ Read individual ADRs for full context. Create new ones via `/record decision` or
 | 2026-08-04-file-backed-prompt-attachments | [File-backed prompt attachments](2026-08-04-file-backed-prompt-attachments.md) | accepted | backend, frontend, protocol, infra | 2026-08-04 |
 | 2026-08-04-plugin-contribution-lifecycle-authority | [Make Plugin Contribution Lifecycle Authoritative](2026-08-04-plugin-contribution-lifecycle-authority.md) | accepted | frontend, security | 2026-08-04 |
 | 2026-08-04-navigation-manifest-boundaries | [Centralize Navigation and Namespace Plugin Destinations](2026-08-04-navigation-manifest-boundaries.md) | accepted | frontend | 2026-08-04 |
+| 2026-08-04-mid-turn-steering | [Deliver Operator Input Into a Generating Turn](2026-08-04-mid-turn-steering.md) | accepted | backend, frontend, protocol | 2026-08-04 |
 | 2026-08-04-remote-contribution-bindings | [Bind Remote Contributions to Target Repositories](2026-08-04-remote-contribution-bindings.md) | accepted | backend, protocol, security, GitHub, GitLab | 2026-08-04 |
 | 2026-08-03-scope-and-merge-repository-secrets | [Scope and Merge Repository Secrets](2026-08-03-scope-and-merge-repository-secrets.md) | accepted | backend, frontend, security, protocol | 2026-08-03 |
 | 2026-08-05-task-scoped-lsp-ownership | [Own Language Servers by Task and Language](2026-08-05-task-scoped-lsp-ownership.md) | accepted | backend, frontend, protocol, security | 2026-08-05 |
+| 2026-08-05-server-owned-quick-terminal-descriptors | [Server-Owned Quick Terminal Descriptors](2026-08-05-server-owned-quick-terminal-descriptors.md) | accepted | backend, frontend, protocol, security | 2026-08-05 |

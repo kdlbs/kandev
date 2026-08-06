@@ -19,6 +19,7 @@ import { AppSidebarPrimaryNav } from "./app-sidebar-primary-nav";
 import { AppSidebarResizeHandle } from "./app-sidebar-resize-handle";
 import { AppSidebarSettingsMode } from "./app-sidebar-settings-mode";
 import { AgentsSection } from "./sections/agents-section";
+import { AutomationsSection } from "./sections/automations-section";
 import { IntegrationsSection } from "./sections/integrations-section";
 import { OfficeNavigationSection } from "./sections/office-navigation-section";
 import { ProjectsSection } from "./sections/projects-section";
@@ -62,6 +63,10 @@ function AppSidebarNavigation({ collapsed, inOffice, settingsMode }: AppSidebarN
             data-testid="app-sidebar-scroll"
           >
             <AppSidebarPrimaryNav collapsed={collapsed} />
+            {/* Directly under New Task: an automation is a thing you keep, the
+                same weight as a project, and the list IS the nav — picking one
+                opens its history rather than a settings form. */}
+            {!inOffice && <AutomationsSection collapsed={collapsed} />}
             <PluginNavItems collapsed={collapsed} />
             {inOffice && <OfficeNavigationSection collapsed={collapsed} section="work" />}
             <ProjectsSection collapsed={collapsed} />

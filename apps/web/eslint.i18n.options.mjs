@@ -1650,4 +1650,30 @@ export const i18nGuardFiles = [
   // in `message-comment-decorations.tsx`, and the programming-language names in
   // `tiptap-code-block-view.tsx`.
   "components/task/chat/**/*.{ts,tsx}",
+  // Seven task subdirectories, one glob each. Whole trees — including the
+  // `.ts` helpers and the module-scope config tables that `mode: "jsx-only"`
+  // never inspects, so only the pseudo-locale can prove those stay clean.
+  //
+  // The pattern used throughout these trees for copy the rule cannot see: a
+  // module-level table stores a `labelKey` (a catalog key) rather than a
+  // resolved string, and the component resolves it at render. That keeps the
+  // sibling `value` / `key` field — which is persisted or compared with `===`
+  // — in English while the label follows the locale.
+  //
+  // Deliberately left in English inside these trees, because they are data or
+  // protocol rather than copy: sidebar-filter *values* (`state`, `in_progress`,
+  // …) and sort/group keys, which are persisted in a saved view; the `"main"`
+  // default base-branch name in `session-mobile-top-bar-git-controls.tsx`; the
+  // share API's `applied_rules` redaction ids and share URLs/tokens; terminal
+  // key sequences and key-cap glyphs in `mobile-terminal-keybar-helpers.tsx`
+  // (only their spoken aria-labels are translated); and the `group:` bucket on
+  // the command-palette entry in `sidebar-filter-bar.tsx`, which is shared
+  // taxonomy owned by `components/session-commands.tsx` and migrates with it.
+  "components/task/simple/**/*.{ts,tsx}",
+  "components/task/mobile/**/*.{ts,tsx}",
+  "components/task/add-workspace-sources/**/*.{ts,tsx}",
+  "components/task/sidebar-filter/**/*.{ts,tsx}",
+  "components/task/share/**/*.{ts,tsx}",
+  "components/task/inspector/**/*.{ts,tsx}",
+  "components/task/document/**/*.{ts,tsx}",
 ];

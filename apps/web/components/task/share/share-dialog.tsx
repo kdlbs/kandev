@@ -25,6 +25,7 @@ import { copyToClipboard } from "@/lib/utils/copy-to-clipboard";
 
 import { ShareList } from "./share-list";
 import { ShareSnapshotPreview } from "./share-snapshot-preview";
+import { useTranslation } from "react-i18next";
 
 type DialogState =
   | { kind: "loading" }
@@ -41,6 +42,7 @@ type Props = {
 };
 
 export function ShareDialog({ open, onOpenChange, taskId, sessionId }: Props) {
+  const { t } = useTranslation();
   const [state, setState] = useState<DialogState>({ kind: "loading" });
   const { shares, refresh } = useShares(open ? taskId : null, open ? sessionId : null);
 
@@ -52,10 +54,10 @@ export function ShareDialog({ open, onOpenChange, taskId, sessionId }: Props) {
     } catch (e) {
       setState({
         kind: "error",
-        message: e instanceof Error ? e.message : "Failed to load preview.",
+        message: e instanceof Error ? e.message : t("task:failedToLoadPreview"),
       });
     }
-  }, [taskId, sessionId]);
+  }, [taskId, sessionId, t]);
 
   useEffect(() => {
     if (!open) return;
@@ -74,22 +76,19 @@ export function ShareDialog({ open, onOpenChange, taskId, sessionId }: Props) {
       } catch (e) {
         setState({
           kind: "error",
-          message: e instanceof Error ? e.message : "Failed to publish share.",
+          message: e instanceof Error ? e.message : t("task:failedToPublishShare"),
         });
       }
     },
-    [taskId, sessionId, refresh],
+    [taskId, sessionId, refresh, t],
   );
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="flex max-h-[85vh] w-full max-w-[min(640px,92vw)] flex-col gap-3 overflow-hidden sm:max-w-2xl">
         <DialogHeader>
-          <DialogTitle>Share this task</DialogTitle>
-          <DialogDescription>
-            Publish a redacted snapshot of this completed task as a secret GitHub Gist on your
-            account.
-          </DialogDescription>
+          <DialogTitle>{t("task:shareThisTask")}</DialogTitle>
+          <DialogDescription>{t("task:publishARedactedSnapshotOfThis")}</DialogDescription>
         </DialogHeader>
         <DialogBody
           state={state}
@@ -114,8 +113,9 @@ type BodyProps = {
 };
 
 function DialogBody({ state, shares, onPublish, onRevoked, onRetry, onClose }: BodyProps) {
+  const { t } = useTranslation();
   if (state.kind === "loading") {
-    return <p className="text-sm text-muted-foreground">Building preview…</p>;
+    return <p className="text-sm text-muted-foreground">{t("task:buildingPreview")}</p>;
   }
   if (state.kind === "error") {
     return (
@@ -125,10 +125,10 @@ function DialogBody({ state, shares, onPublish, onRevoked, onRetry, onClose }: B
         </Alert>
         <DialogFooter>
           <Button variant="outline" onClick={onClose} className="cursor-pointer">
-            Close
+            {t("task:close")}
           </Button>
           <Button onClick={onRetry} className="cursor-pointer">
-            Try again
+            {t("task:tryAgain")}
           </Button>
         </DialogFooter>
       </div>
@@ -145,10 +145,7 @@ function DialogBody({ state, shares, onPublish, onRevoked, onRetry, onClose }: B
     <div className="flex min-w-0 flex-1 flex-col gap-3 overflow-hidden">
       <Alert>
         <IconAlertTriangle className="h-4 w-4" />
-        <AlertDescription>
-          Anyone with this link can view this conversation. Review the preview carefully before
-          publishing — once published, the snapshot is uploaded to GitHub Gist on your account.
-        </AlertDescription>
+        <AlertDescription>{t("task:anyoneWithThisLinkCanView")}</AlertDescription>
       </Alert>
       <div className="flex min-w-0 flex-1 flex-col gap-3 overflow-y-auto pr-1">
         <ShareList shares={shares} onRevoked={onRevoked} />
@@ -161,14 +158,14 @@ function DialogBody({ state, shares, onPublish, onRevoked, onRetry, onClose }: B
           disabled={isPublishing}
           className="cursor-pointer"
         >
-          Cancel
+          {t("common:cancel")}
         </Button>
         <Button
           onClick={() => onPublish(snapshot)}
           disabled={isPublishing}
           className="cursor-pointer"
         >
-          {isPublishing ? "Publishing…" : "Publish to GitHub Gist"}
+          {isPublishing ? t("task:publishing") : t("task:publishToGithubGist")}
         </Button>
       </DialogFooter>
     </div>
@@ -186,6 +183,7 @@ function PublishedState({
   onRevoked: () => void;
   onClose: () => void;
 }) {
+  const { t } = useTranslation();
   const [copied, setCopied] = useState(false);
 
   const handleCopy = async () => {
@@ -198,9 +196,7 @@ function PublishedState({
   return (
     <div className="flex min-w-0 flex-1 flex-col gap-3 overflow-hidden">
       <Alert>
-        <AlertDescription>
-          Published. Anyone with this link can view the conversation.
-        </AlertDescription>
+        <AlertDescription>{t("task:publishedAnyoneWithThisLinkCan")}</AlertDescription>
       </Alert>
       <div className="flex min-w-0 items-center gap-2 rounded border bg-muted/30 p-2">
         <a
@@ -221,7 +217,7 @@ function PublishedState({
           className="flex-shrink-0 cursor-pointer"
         >
           <IconCopy className="h-3 w-3" />
-          {copied ? "Copied" : "Copy"}
+          {copied ? t("task:copied2") : t("task:copy")}
         </Button>
       </div>
       <div className="min-w-0 flex-1 overflow-y-auto pr-1">
@@ -229,7 +225,7 @@ function PublishedState({
       </div>
       <DialogFooter>
         <Button onClick={onClose} className="cursor-pointer">
-          Done
+          {t("task:done")}
         </Button>
       </DialogFooter>
     </div>

@@ -13,6 +13,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 	"sync/atomic"
 
 	"github.com/kandev/kandev/internal/common/logger"
@@ -24,6 +25,20 @@ type Service struct {
 	repo          Repository
 	maxPerSession atomic.Int64
 	logger        *logger.Logger
+	admissionMu   sync.Mutex
+	admissions    map[string]*sessionAdmission
+}
+
+type sessionAdmission struct {
+	mu   sync.Mutex
+	refs int
+}
+
+type sessionAdmissionContextKey struct{}
+
+type sessionAdmissionToken struct {
+	service   *Service
+	sessionID string
 }
 
 // NewService creates a Service backed by the supplied repository. maxPerSession
@@ -31,8 +46,9 @@ type Service struct {
 // pass 0 to disable the cap.
 func NewService(repo Repository, maxPerSession int, log *logger.Logger) *Service {
 	service := &Service{
-		repo:   repo,
-		logger: log.WithFields(zap.String("component", "message-queue")),
+		repo:       repo,
+		logger:     log.WithFields(zap.String("component", "message-queue")),
+		admissions: make(map[string]*sessionAdmission),
 	}
 	service.SetMaxPerSession(maxPerSession)
 	return service
@@ -56,6 +72,45 @@ func (s *Service) SetMaxPerSession(maxPerSession int) {
 	s.maxPerSession.Store(int64(maxPerSession))
 }
 
+// WithSessionAdmission runs fn under the per-session queue admission lock.
+// All queue insertion paths use the same lock. The callback must complete
+// synchronously; queue methods called with its context reuse the held lock.
+func (s *Service) WithSessionAdmission(ctx context.Context, sessionID string, fn func(context.Context) error) error {
+	if fn == nil {
+		return errors.New("session admission callback is nil")
+	}
+	if token, ok := ctx.Value(sessionAdmissionContextKey{}).(sessionAdmissionToken); ok &&
+		token.service == s && token.sessionID == sessionID {
+		return fn(ctx)
+	}
+
+	s.admissionMu.Lock()
+	entry := s.admissions[sessionID]
+	if entry == nil {
+		entry = &sessionAdmission{}
+		s.admissions[sessionID] = entry
+	}
+	entry.refs++
+	s.admissionMu.Unlock()
+
+	entry.mu.Lock()
+	defer func() {
+		entry.mu.Unlock()
+		s.admissionMu.Lock()
+		entry.refs--
+		if entry.refs == 0 && s.admissions[sessionID] == entry {
+			delete(s.admissions, sessionID)
+		}
+		s.admissionMu.Unlock()
+	}()
+
+	admittedCtx := context.WithValue(ctx, sessionAdmissionContextKey{}, sessionAdmissionToken{
+		service:   s,
+		sessionID: sessionID,
+	})
+	return fn(admittedCtx)
+}
+
 // QueueMessage appends a new entry to the session's FIFO queue. Returns
 // ErrQueueFull when the cap is exceeded.
 func (s *Service) QueueMessage(ctx context.Context, sessionID, taskID, content, model, userID string, planMode bool, attachments []MessageAttachment) (*QueuedMessage, error) {
@@ -73,6 +128,18 @@ func (s *Service) QueueMessageWithMetadata(ctx context.Context, sessionID, taskI
 }
 
 func (s *Service) queueMessageWithMetadata(ctx context.Context, sessionID, taskID, content, model, userID string, planMode bool, attachments []MessageAttachment, metadata map[string]interface{}, maxPerSession int) (*QueuedMessage, error) {
+	var queued *QueuedMessage
+	err := s.WithSessionAdmission(ctx, sessionID, func(admittedCtx context.Context) error {
+		var err error
+		queued, err = s.insertQueueMessageWithMetadata(
+			admittedCtx, sessionID, taskID, content, model, userID, planMode, attachments, metadata, maxPerSession,
+		)
+		return err
+	})
+	return queued, err
+}
+
+func (s *Service) insertQueueMessageWithMetadata(ctx context.Context, sessionID, taskID, content, model, userID string, planMode bool, attachments []MessageAttachment, metadata map[string]interface{}, maxPerSession int) (*QueuedMessage, error) {
 	metadataCopy := copyMessageMetadata(metadata, 0)
 	msg := &QueuedMessage{
 		SessionID:   sessionID,
@@ -108,6 +175,16 @@ func (s *Service) RestoreMessage(ctx context.Context, msg *QueuedMessage) (*Queu
 	if msg == nil {
 		return nil, errors.New("queued message is nil")
 	}
+	var restored *QueuedMessage
+	err := s.WithSessionAdmission(ctx, msg.SessionID, func(admittedCtx context.Context) error {
+		var err error
+		restored, err = s.restoreMessage(admittedCtx, msg)
+		return err
+	})
+	return restored, err
+}
+
+func (s *Service) restoreMessage(ctx context.Context, msg *QueuedMessage) (*QueuedMessage, error) {
 	restored := *msg
 	restored.Metadata = copyMessageMetadata(msg.Metadata, 0)
 	if err := s.repo.Restore(ctx, &restored, 0); err != nil {
@@ -133,6 +210,20 @@ func (s *Service) QueueMessageWithCoalesceKey(ctx context.Context, sessionID, ta
 }
 
 func (s *Service) queueMessageWithCoalesceKey(ctx context.Context, sessionID, taskID, content, model, userID string, planMode bool, attachments []MessageAttachment, metadata map[string]interface{}, coalesceKey string, allowInsert bool, maxPerSession int) (*QueuedMessage, bool, error) {
+	var queued *QueuedMessage
+	var replaced bool
+	err := s.WithSessionAdmission(ctx, sessionID, func(admittedCtx context.Context) error {
+		var err error
+		queued, replaced, err = s.insertQueueMessageWithCoalesceKey(
+			admittedCtx, sessionID, taskID, content, model, userID, planMode, attachments, metadata,
+			coalesceKey, allowInsert, maxPerSession,
+		)
+		return err
+	})
+	return queued, replaced, err
+}
+
+func (s *Service) insertQueueMessageWithCoalesceKey(ctx context.Context, sessionID, taskID, content, model, userID string, planMode bool, attachments []MessageAttachment, metadata map[string]interface{}, coalesceKey string, allowInsert bool, maxPerSession int) (*QueuedMessage, bool, error) {
 	metadataCopy := copyMessageMetadata(metadata, 1)
 	metadataCopy[MetadataCoalesceKey] = coalesceKey
 	msg := &QueuedMessage{
@@ -199,6 +290,20 @@ func (s *Service) RequeueLifecycleMessageWithCoalesceKey(ctx context.Context, se
 }
 
 func (s *Service) queueLifecycleMessageWithCoalesceKey(ctx context.Context, sessionID, taskID, content, model, userID string, planMode bool, attachments []MessageAttachment, metadata map[string]interface{}, coalesceKey string, allowInsert, isRetry bool) (*QueuedMessage, bool, bool, error) {
+	var queued *QueuedMessage
+	var replaced, accepted bool
+	err := s.WithSessionAdmission(ctx, sessionID, func(admittedCtx context.Context) error {
+		var err error
+		queued, replaced, accepted, err = s.insertLifecycleMessageWithCoalesceKey(
+			admittedCtx, sessionID, taskID, content, model, userID, planMode, attachments,
+			metadata, coalesceKey, allowInsert, isRetry,
+		)
+		return err
+	})
+	return queued, replaced, accepted, err
+}
+
+func (s *Service) insertLifecycleMessageWithCoalesceKey(ctx context.Context, sessionID, taskID, content, model, userID string, planMode bool, attachments []MessageAttachment, metadata map[string]interface{}, coalesceKey string, allowInsert, isRetry bool) (*QueuedMessage, bool, bool, error) {
 	metadataCopy := clearReservedMetadata(metadata)
 	generation, err := s.repo.LifecycleGeneration(ctx, taskID)
 	if err != nil {
@@ -322,8 +427,13 @@ func copyMessageMetadata(metadata map[string]interface{}, extraCapacity int) map
 // queued_by matches userID. Otherwise inserts a new entry. Returns
 // ErrQueueFull when an insert would exceed the cap.
 func (s *Service) AppendContent(ctx context.Context, sessionID, taskID, content, model, userID string, planMode bool, attachments []MessageAttachment) (*QueuedMessage, bool, error) {
-	maxPerSession := s.MaxPerSession()
-	msg, appended, err := s.repo.AppendOrInsertTail(ctx, sessionID, taskID, content, model, userID, planMode, attachments, nil, maxPerSession)
+	var msg *QueuedMessage
+	var appended bool
+	err := s.WithSessionAdmission(ctx, sessionID, func(admittedCtx context.Context) error {
+		var err error
+		msg, appended, err = s.repo.AppendOrInsertTail(admittedCtx, sessionID, taskID, content, model, userID, planMode, attachments, nil, s.MaxPerSession())
+		return err
+	})
 	if err != nil {
 		return nil, false, err
 	}

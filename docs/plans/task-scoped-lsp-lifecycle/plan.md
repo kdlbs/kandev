@@ -353,6 +353,11 @@ Completed 2026-08-05.
   holds every affected lane through the task-host teardown backstop, and only then releases the
   proven-dead current generation. The synchronized regression failed first, then passed 20 race
   repetitions with the focused cleanup failure/fallback suite.
+- Before the next review request, the branch merged `origin/main` at `9a4c65f75`; the sole conflict
+  retained both independently added accepted ADR index rows. On the merged tree, the controller,
+  task-host, and gateway race suites pass, the four focused frontend LSP files pass 25 tests, web
+  typecheck passes, and changed-code backend lint reports zero issues. The unfiltered backend lint
+  target reports eight `goconst` findings introduced on `main`; they remain outside this PR diff.
 
 ---
 

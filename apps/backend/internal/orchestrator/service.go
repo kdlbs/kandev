@@ -40,7 +40,6 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/workflow/engine"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
-	"github.com/kandev/kandev/internal/worktree"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
@@ -60,6 +59,11 @@ type ServiceConfig struct {
 	QueueSize                     int
 	QueueGroup                    string
 	ClaudeBackgroundPromptHandoff bool
+
+	// ClaudeMidTurnSteering enables delivering a prompt into a still-generating
+	// turn for an agent that advertised prompt queueing. Independent of
+	// ClaudeBackgroundPromptHandoff, which covers the foreground-idle handoff.
+	ClaudeMidTurnSteering bool
 }
 
 // AttachmentReader is the narrow attachment-store seam needed when the
@@ -483,10 +487,20 @@ type Service struct {
 	// Automation service for handling automation triggers
 	automationService AutomationService
 
-	// Worktree manager — used to clean up ephemeral worktrees for run-mode
-	// automation tasks immediately on completion rather than waiting for
-	// the 24h Office GC. Nil-safe.
-	worktreeMgr *worktree.Manager
+	// Worktree reaper — reclaims the workspaces of automation runs that have
+	// aged out of the per-automation retention window. Nil-safe: most tests
+	// construct the service without one, and an install with no worktree
+	// manager simply keeps every run's checkout. Set via SetWorktreeManager.
+	worktreeReaper automationWorktreeReaper
+
+	// unreclaimedWorkspaces holds the automation runs whose workspace removal
+	// was attempted and did not actually free the directory. Retention selects
+	// candidates by "still has a live worktree row", and a failed removal can
+	// leave a run with no live row and a full checkout, invisible to every
+	// later sweep — this is how it gets retried instead of written off. See
+	// queueAutomationWorkspaceReclaim.
+	unreclaimedWorkspaces   map[string]struct{}
+	unreclaimedWorkspacesMu sync.Mutex
 
 	// Clarification canceller — cancels pending clarifications when agent's turn completes
 	clarificationCanceller ClarificationCanceller
@@ -577,6 +591,11 @@ type Service struct {
 	// completed-execution stream markers.
 	executionTeardownClaims sync.Map
 
+	// steerInFlight tracks sessions with an unacknowledged mid-turn steer.
+	// The spec allows at most one in-flight steer per session; a second attempt
+	// while one is outstanding queues instead. Keyed by sessionID, cleared when
+	// the steer dispatch is accepted or fails.
+	steerInFlight sync.Map
 	// Session reset flags: sessionID -> true while resetAgentContext is restarting process.
 	// Used to suppress stale ready events and avoid draining queued prompts mid-reset.
 	resetInProgressSessions sync.Map

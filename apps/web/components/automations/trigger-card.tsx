@@ -20,6 +20,7 @@ import { GitHubPRConfig } from "./trigger-configs/github-pr-config";
 import { GitHubPushConfig } from "./trigger-configs/github-push-config";
 import { GitHubCIConfig } from "./trigger-configs/github-ci-config";
 import { WebhookConfig } from "./trigger-configs/webhook-config";
+import { describeSchedule } from "./schedule-expression";
 
 type TriggerCardProps = {
   trigger: AutomationTrigger;
@@ -88,10 +89,12 @@ function getTriggerSummary(
     const expr = (cfg.cron_expression as string) ?? "";
     const presetKey = CRON_PRESET_KEYS[expr];
     if (presetKey) return t(presetKey);
-    // The expression itself is syntax and travels as an interpolated value.
-    return expr
-      ? t("automations:summaryCron", { expression: expr })
-      : t("automations:summaryCustomSchedule");
+    if (!expr) return t("automations:summaryCustomSchedule");
+    // Off the preset list, describeSchedule reads the expression properly —
+    // "Every Monday at 09:00 GMT" rather than echoing the cron syntax at the
+    // user. It is not translated yet, so the preset path above is checked
+    // first and keeps its catalog copy for the cases most people hit.
+    return describeSchedule(expr, (cfg.timezone as string) ?? "");
   }
   if (trigger.type === "github_pr") {
     // Event names are the persisted GitHub event ids, not copy.

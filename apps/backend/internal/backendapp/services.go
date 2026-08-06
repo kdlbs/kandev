@@ -170,6 +170,15 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 		automationComponents.Service.SetTaskDeleter(&automationTaskDeleterAdapter{svc: taskSvc})
 		// Per-user workspace scoping for the automation HTTP/WS surface.
 		automationComponents.Service.SetWorkspaceAuthorizer(taskSvc.AuthorizeWorkspaceAccess)
+		// A UI filter is not an authorization boundary: reject a workflow owned
+		// by another workspace even when a request names it directly.
+		automationComponents.Service.SetWorkflowLocator(&automationWorkflowLocatorAdapter{svc: taskSvc})
+		// Profile deletion disables the automations bound to a profile before
+		// the row goes, but nothing ever checked that the binding pointed at a
+		// real profile in the first place — so a create or rebind naming an id
+		// that never existed produced the same orphan without any delete
+		// involved.
+		automationComponents.Service.SetAgentProfileLookup(&automationAgentProfileLookupAdapter{store: repos.AgentSettings})
 	}
 
 	services := &Services{
@@ -606,6 +615,7 @@ func initWorkflowSyncService(dbPool *db.Pool, githubSvc *github.Service, workflo
 		log.Warn("workflow sync service initialization failed (non-fatal)", zap.Error(err))
 		return nil
 	}
+	svc.SetWorkspaceAuthorizer(taskSvc.AuthorizeWorkspaceAccess)
 	return svc
 }
 

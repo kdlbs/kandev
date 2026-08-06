@@ -176,6 +176,7 @@ func TestBackgroundCompletion_EnabledClaudeSettledSessionPublishesBackground(t *
 	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
 	enableClaudeBackgroundPromptHandoffForTest(t, svc)
 	setSessionAgentNameForTest(t, svc, sessionID, "claude-acp")
+	advertisePromptQueueingForTest(t, svc, sessionID)
 	recorded := &recordingEventBus{}
 	svc.eventBus = recorded
 	svc.registerBackgroundWorkKind(

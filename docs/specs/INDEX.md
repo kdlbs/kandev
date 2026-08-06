@@ -27,6 +27,7 @@ The office umbrella covers kandev's autonomous-agent product surface: workspaces
 | [live-updates](office/live-updates.md) | draft |
 | [inbox](office/inbox.md) | draft |
 | [assistant](office/assistant.md) | draft |
+| [automation-runs](office/automation-runs.md) | draft |
 | [automations-settings](office/automations-settings.md) | draft |
 | [testing](office/testing.md) | shipped |
 | [unread-divider](office/unread-divider.md) | shipped |
@@ -40,6 +41,7 @@ Product-wide capabilities that are not tied to a single feature area.
 | [background-work-liveness](platform/background-work-liveness.md) | shipped |
 | [task-sleep-inhibition](platform/task-sleep-inhibition.md) | building |
 | [i18n](platform/i18n.md) | building |
+| [mid-turn-steering](platform/mid-turn-steering.md) | shipped |
 | [plugins](plugins/spec.md) | draft |
 | [plugins — authoring experience](plugins/authoring-experience.md) | draft |
 | [plugins — marketplace](plugins/marketplace.md) | building |
@@ -163,6 +165,7 @@ Subscription quota tracking and per-agent cheap-model profile routing.
 | [quick-chat-elevation](ui/quick-chat-elevation.md) | building |
 | [transcript-navigation-settings](ui/transcript-navigation-settings.md) | shipped |
 | [app-status-bar](ui/app-status-bar.md) | shipped |
+| [quick-terminal](quick-terminal/spec.md) | shipped |
 | [mobile-task-navigation](ui/mobile-task-navigation.md) | shipped |
 | [adaptive-kanban](ui/adaptive-kanban.md) | shipped |
 | [task-layout-profiles](ui/task-layout-profiles.md) | draft |
@@ -200,6 +203,7 @@ System pages (Radarr/Sonarr-style) for status, disk usage, database maintenance,
 
 | Spec | Status |
 |---|---|
+| [session-subscription-recovery](session-subscription-recovery/spec.md) | draft |
 | [npm-nightly-channel](npm-nightly-channel/spec.md) | shipped |
 | [agent-resume-runtime-recovery](agent-resume-runtime-recovery/spec.md) | shipped |
 | [agent-stall-recovery](agent-stall-recovery/spec.md) | approved |

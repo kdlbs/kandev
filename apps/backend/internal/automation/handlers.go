@@ -26,6 +26,9 @@ func registerWSHandlers(dispatcher *ws.Dispatcher, svc *Service, log *logger.Log
 	dispatcher.RegisterFunc(ws.ActionAutomationDisable, wsDisable(svc, log))
 	dispatcher.RegisterFunc(ws.ActionAutomationTrigger, wsManualTrigger(svc, log))
 	dispatcher.RegisterFunc(ws.ActionAutomationRunsList, wsListRuns(svc, log))
+	dispatcher.RegisterFunc(ws.ActionAutomationRunsListWorkspace, wsListWorkspaceRuns(svc, log))
+	dispatcher.RegisterFunc(ws.ActionAutomationSummaries, wsListAutomationSummaries(svc, log))
+	dispatcher.RegisterFunc(ws.ActionAutomationSummary, wsGetAutomationSummary(svc, log))
 	dispatcher.RegisterFunc(ws.ActionAutomationTriggerAdd, wsAddTrigger(svc, log))
 	dispatcher.RegisterFunc(ws.ActionAutomationTriggerUpdate, wsUpdateTrigger(svc, log))
 	dispatcher.RegisterFunc(ws.ActionAutomationTriggerDelete, wsDeleteTrigger(svc, log))
@@ -188,10 +191,18 @@ func wsManualTrigger(svc *Service, log *logger.Logger) func(ctx context.Context,
 		if len(a.Triggers) > 0 {
 			triggerID = a.Triggers[0].ID
 		}
-		if fireErr := svc.FireTrigger(ctx, id, triggerID, "manual", data, ""); fireErr != nil {
+		result, fireErr := svc.FireTrigger(ctx, id, triggerID, "manual", data, "")
+		if fireErr != nil {
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, fireErr.Error(), nil)
 		}
-		return ws.NewResponse(msg.ID, msg.Action, map[string]bool{"triggered": true})
+		// A skip is not a failure, but it is not a fire either. Reporting
+		// triggered = true for one leaves the caller — and the person who
+		// clicked — unable to tell that nothing ran.
+		return ws.NewResponse(msg.ID, msg.Action, map[string]any{
+			"triggered": !result.Skipped,
+			"skipped":   result.Skipped,
+			"reason":    result.Reason,
+		})
 	}
 }
 
@@ -211,6 +222,74 @@ func wsListRuns(svc *Service, log *logger.Logger) func(ctx context.Context, msg 
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)
 		}
 		return ws.NewResponse(msg.ID, msg.Action, runs)
+	}
+}
+
+// wsListWorkspaceRuns feeds the workspace-wide runs page. Unlike
+// wsListRuns it wraps the list in an object: this response is the whole
+// page's data, so leaving room for cursors/counts later costs nothing now
+// and a bare array would be a breaking change to add them to.
+func wsListWorkspaceRuns(svc *Service, log *logger.Logger) func(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	return func(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+		payload, _ := parseMap(msg)
+		workspaceID, _ := payload["workspace_id"].(string)
+		if workspaceID == "" {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "workspace_id required", nil)
+		}
+		limit := 50
+		if l, ok := payload["limit"].(float64); ok && l > 0 {
+			limit = int(l)
+		}
+		runs, err := svc.ListWorkspaceRuns(ctx, workspaceID, limit)
+		if err != nil {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)
+		}
+		// Never nil: the client renders an empty feed, not a null.
+		if runs == nil {
+			runs = []*WorkspaceAutomationRun{}
+		}
+		return ws.NewResponse(msg.ID, msg.Action, map[string]any{"runs": runs})
+	}
+}
+
+// wsListAutomationSummaries answers the runs list's health question per
+// automation, so a row's "last said" and "still running" do not depend on how
+// far back the capped workspace feed happens to reach.
+func wsListAutomationSummaries(svc *Service, log *logger.Logger) func(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	return func(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+		payload, _ := parseMap(msg)
+		workspaceID, _ := payload["workspace_id"].(string)
+		if workspaceID == "" {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "workspace_id required", nil)
+		}
+		summaries, err := svc.ListAutomationSummaries(ctx, workspaceID)
+		if err != nil {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)
+		}
+		// Never nil: a workspace whose automations have never run renders empty
+		// rows, not a null the client has to guard.
+		if summaries == nil {
+			summaries = []*AutomationSummary{}
+		}
+		return ws.NewResponse(msg.ID, msg.Action, map[string]any{"summaries": summaries})
+	}
+}
+
+// wsGetAutomationSummary answers the same two facts for one automation, for the
+// detail page. Nullable rather than an envelope of one: "this automation has
+// never run" is a real answer, not an empty list.
+func wsGetAutomationSummary(svc *Service, log *logger.Logger) func(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	return func(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+		payload, _ := parseMap(msg)
+		automationID, _ := payload["automation_id"].(string)
+		if automationID == "" {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "automation_id required", nil)
+		}
+		summary, err := svc.GetAutomationSummary(ctx, automationID)
+		if err != nil {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)
+		}
+		return ws.NewResponse(msg.ID, msg.Action, map[string]any{"summary": summary})
 	}
 }
 

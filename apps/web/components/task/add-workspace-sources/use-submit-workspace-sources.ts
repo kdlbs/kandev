@@ -1,5 +1,6 @@
 import { useCallback, type Dispatch, type SetStateAction } from "react";
 import { flushSync } from "react-dom";
+import { t } from "@/lib/i18n";
 import { attachTaskWorkspaceSources } from "@/lib/api/domains/kanban-api";
 import {
   buildWorkspaceSourcesPayload,
@@ -31,9 +32,8 @@ export function useSubmitWorkspaceSources({
 }: Props) {
   return useCallback(async () => {
     if (submitting) return;
-    if (rows.length === 0) return setSubmitError("Add at least one source.");
-    if (Object.keys(errors).length)
-      return setSubmitError("Fix the marked sources before adding them.");
+    if (rows.length === 0) return setSubmitError(t("task:addAtLeastOneSource"));
+    if (Object.keys(errors).length) return setSubmitError(t("task:fixTheMarkedSources"));
 
     setSubmitting(true);
     setSubmitError(null);
@@ -45,11 +45,7 @@ export function useSubmitWorkspaceSources({
       });
       onOpenChange(false);
     } catch (error) {
-      setSubmitError(
-        error instanceof Error
-          ? error.message
-          : "Could not add sources. Your entries are still here to retry.",
-      );
+      setSubmitError(error instanceof Error ? error.message : t("task:couldNotAddSources"));
     } finally {
       setSubmitting(false);
     }
@@ -63,5 +59,6 @@ export function useSubmitWorkspaceSources({
     setSubmitError,
     submitting,
     taskId,
+    t,
   ]);
 }

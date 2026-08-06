@@ -187,7 +187,7 @@ func loadActivityStats(
 		FROM tasks
 		WHERE workspace_id = ?
 		  AND archived_at IS NULL
-		  AND is_ephemeral = 0
+		  AND is_ephemeral = 0 AND COALESCE(origin,'') != 'automation_run'
 	`), workspaceID).Scan(&stats.InProgress, &stats.OpenTasks)
 
 	return stats
@@ -207,7 +207,7 @@ func loadBlockers(ctx context.Context, reader *sqlx.DB, workspaceID string) []Bl
 		WHERE workspace_id = ?
 		  AND state = 'BLOCKED'
 		  AND archived_at IS NULL
-		  AND is_ephemeral = 0
+		  AND is_ephemeral = 0 AND COALESCE(origin,'') != 'automation_run'
 		ORDER BY updated_at DESC
 		LIMIT 10
 	`), workspaceID)

@@ -544,6 +544,32 @@ func (a *lifecycleAdapter) PromptAgentWithDispatchCallback(ctx context.Context, 
 	}, nil
 }
 
+// Compile-time guard for the steer capability. The executor selects the steer
+// path by asserting the agent manager to its unexported
+// steerAgentWithDispatchCallback interface (internal/orchestrator/executor); that
+// assertion fails silently at runtime if this method's signature drifts,
+// disabling every production steer. Pin the exact shape here so drift is a build
+// error, not a runtime regression.
+var _ interface {
+	SteerAgentWithDispatchCallback(context.Context, string, string, []v1.MessageAttachment, bool, func()) (*executor.PromptResult, error)
+} = (*lifecycleAdapter)(nil)
+
+// SteerAgentWithDispatchCallback forwards a mid-turn steer to the lifecycle
+// manager. Without it the executor's steer path type-assertion fails and every
+// eligible steer returns ErrPromptDispatchCallbackUnsupported, so the production
+// agent-manager client must satisfy the steerAgentWithDispatchCallback capability
+// exactly as it does the ordinary dispatch-callback prompt.
+func (a *lifecycleAdapter) SteerAgentWithDispatchCallback(ctx context.Context, agentInstanceID string, prompt string, attachments []v1.MessageAttachment, dispatchOnly bool, onDispatched func()) (*executor.PromptResult, error) {
+	result, err := a.mgr.SteerAgentWithDispatchCallback(ctx, agentInstanceID, prompt, attachments, dispatchOnly, onDispatched)
+	if err != nil {
+		return nil, err
+	}
+	return &executor.PromptResult{
+		StopReason:   result.StopReason,
+		AgentMessage: result.AgentMessage,
+	}, nil
+}
+
 // CancelAgent interrupts the current agent turn without terminating the process.
 func (a *lifecycleAdapter) CancelAgent(ctx context.Context, sessionID string) error {
 	return a.mgr.CancelAgentBySessionID(ctx, sessionID)
@@ -815,6 +841,14 @@ func (w *orchestratorWrapper) StepRequiresCompletionSignal(ctx context.Context, 
 // ForegroundActivity forwards to the orchestrator service (ADR-0049).
 func (w *orchestratorWrapper) ForegroundActivity(sessionID string) v1.ForegroundActivity {
 	return w.svc.ForegroundActivity(sessionID)
+}
+
+func (w *orchestratorWrapper) SteerEligible(sessionID string, state models.TaskSessionState) bool {
+	return w.svc.SteerEligible(sessionID, state)
+}
+
+func (w *orchestratorWrapper) SteerTask(ctx context.Context, taskID, sessionID, prompt, model string, planMode bool, attachments []v1.MessageAttachment) (*orchestrator.PromptResult, error) {
+	return w.svc.SteerTask(ctx, taskID, sessionID, prompt, model, planMode, attachments)
 }
 
 // messageCreatorAdapter adapts the task service to the orchestrator.MessageCreator interface

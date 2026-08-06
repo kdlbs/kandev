@@ -285,6 +285,12 @@ type TaskSessionDTO struct {
 	// generation that produced CancellationPending. It is always serialized so
 	// clients can reject delayed snapshots from older generations.
 	CancellationRevision uint64 `json:"cancellation_revision"`
+	// SupportsSteering is true when a send right now would be delivered into the
+	// still-generating turn (mid-turn steering) rather than blocked/queued.
+	// Derived live at serialization from the connected agent's negotiated
+	// capability plus the runtime flag; never persisted (see mid-turn-steering
+	// spec). The composer uses it to promise delivery, not folding.
+	SupportsSteering bool `json:"supports_steering,omitempty"`
 	// PendingAction is the compact per-session projection used when the
 	// session transcript is not loaded in the client.
 	PendingAction       *string `json:"pending_action,omitempty"`
@@ -341,6 +347,8 @@ type TaskSessionSummaryDTO struct {
 	// CancellationRevision identifies the process-local cancellation transition
 	// generation represented by CancellationPending.
 	CancellationRevision uint64 `json:"cancellation_revision"`
+	// SupportsSteering mirrors TaskSessionDTO.SupportsSteering for list endpoints.
+	SupportsSteering bool `json:"supports_steering,omitempty"`
 	// PendingAction is the compact per-session projection used when the
 	// session transcript is not loaded in the client.
 	PendingAction       *string `json:"pending_action"`
@@ -858,6 +866,13 @@ type ActiveSubagentCountProvider interface {
 	ActiveSubagentCount(sessionID string) int
 }
 
+// SteerEligibleProvider reports whether a send to a session right now would be
+// delivered as a mid-turn steer. Optional: a provider that does not implement it
+// simply never advertises steering, which is the conservative default.
+type SteerEligibleProvider interface {
+	SteerEligible(sessionID string, state models.TaskSessionState) bool
+}
+
 // EnrichForegroundActivity stamps the live fine-grained busy substate onto a full
 // session DTO. Generating is emitted only for RUNNING sessions; detached
 // background activity remains meaningful after the coarse state settles.
@@ -869,6 +884,7 @@ func EnrichForegroundActivity(dto *TaskSessionDTO, provider ForegroundActivityPr
 		dto.ForegroundActivity = activity
 	}
 	dto.ActiveSubagentCount = activeSubagentCount(dto.ID, provider)
+	dto.SupportsSteering = steerEligible(dto.ID, dto.State, provider)
 }
 
 // EnrichForegroundActivitySummary is EnrichForegroundActivity for the lightweight
@@ -881,6 +897,7 @@ func EnrichForegroundActivitySummary(dto *TaskSessionSummaryDTO, provider Foregr
 		dto.ForegroundActivity = activity
 	}
 	dto.ActiveSubagentCount = activeSubagentCount(dto.ID, provider)
+	dto.SupportsSteering = steerEligible(dto.ID, dto.State, provider)
 }
 
 func activeSubagentCount(sessionID string, provider ForegroundActivityProvider) int {
@@ -889,6 +906,18 @@ func activeSubagentCount(sessionID string, provider ForegroundActivityProvider) 
 		return 0
 	}
 	return countProvider.ActiveSubagentCount(sessionID)
+}
+
+// steerEligible reports whether the live provider would deliver a send to this
+// session as a mid-turn steer. Derived here at the serialization boundary from
+// the live in-memory provider and never persisted, so a restart with no
+// connected execution serializes false.
+func steerEligible(sessionID string, state models.TaskSessionState, provider ForegroundActivityProvider) bool {
+	steerProvider, ok := provider.(SteerEligibleProvider)
+	if !ok {
+		return false
+	}
+	return steerProvider.SteerEligible(sessionID, state)
 }
 
 // WorkflowStepDTO represents a workflow step for API responses

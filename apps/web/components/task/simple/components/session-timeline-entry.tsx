@@ -8,6 +8,7 @@ import { selectCommandCount } from "@/lib/state/slices/session/selectors";
 import { AdvancedChatPanel } from "@/app/office/tasks/[id]/advanced-panels/chat-panel";
 import { useActiveSessionRef } from "./active-session-ref-context";
 import type { TaskSession } from "@/app/office/tasks/[id]/types";
+import { useTranslation } from "react-i18next";
 
 const COLLAPSE_KEY_PREFIX = "office.session.collapsed.";
 
@@ -119,35 +120,39 @@ function StateGlyph({ isLive, isTerminal }: { isLive: boolean; isTerminal: boole
 }
 
 function HeaderText({
-  verb,
+  verbKey,
   duration,
-  commandsLabel,
+  commandCount,
 }: {
-  verb: string;
+  verbKey: string;
   duration: string | null;
-  commandsLabel: string | null;
+  commandCount: number | null;
 }) {
+  const { t } = useTranslation();
   return (
     <span className="text-muted-foreground">
-      {verb}
-      {duration && <span className="ml-1">for {duration}</span>}
-      {commandsLabel && <span className="ml-1">· ran {commandsLabel}</span>}
+      {t(verbKey)}
+      {duration && <span className="ml-1">{t("task:turnForDuration", { duration })}</span>}
+      {commandCount !== null && (
+        <span className="ml-1">{t("task:ranCommands", { count: commandCount })}</span>
+      )}
     </span>
   );
 }
 
-function pickHeaderVerb(isLive: boolean, _isTerminal: boolean): string {
-  if (isLive) return "working";
+// Returns a catalog key rather than resolved copy: these helpers run outside a
+// hook scope, and the verb has to re-resolve when the locale changes.
+function pickHeaderVerbKey(isLive: boolean, _isTerminal: boolean): string {
+  if (isLive) return "task:turnWorking";
   // Office IDLE and kanban terminal both render "worked" — the agent
   // did real work and isn't doing more right now. The previous "idle"
   // verb was confusing: "Agent idle for 20s" reads as "the agent has
   // been doing nothing for 20s" when actually 20s was the turn duration.
-  return "worked";
+  return "task:turnWorked";
 }
 
-function buildCommandsLabel(count: number): string | null {
-  if (count <= 0) return null;
-  return `${count} command${count === 1 ? "" : "s"}`;
+function commandCountOrNull(count: number): number | null {
+  return count > 0 ? count : null;
 }
 
 type SessionTimelineEntryProps = {
@@ -171,7 +176,8 @@ type SessionTimelineEntryProps = {
   /**
    * Optional small chip rendered next to the agent name (e.g. "Reviewer",
    * "Approver"). Used by office tasks to make the role obvious when the
-   * timeline shows multiple agents.
+   * timeline shows multiple agents. Carries a catalog key rather than
+   * resolved copy — see `deriveRoleChip` in `session-groups.ts`.
    */
   roleChip?: string | null;
 };
@@ -202,6 +208,7 @@ function pickActiveSession(group: TaskSession[]): TaskSession | null {
  */
 export const SessionTimelineEntry = forwardRef<HTMLDivElement, SessionTimelineEntryProps>(
   function SessionTimelineEntry({ taskId, session, groupSessions, roleChip }, forwardedRef) {
+    const { t } = useTranslation();
     const group = useMemo(
       () => (groupSessions && groupSessions.length > 0 ? groupSessions : [session]),
       [groupSessions, session],
@@ -258,7 +265,7 @@ export const SessionTimelineEntry = forwardRef<HTMLDivElement, SessionTimelineEn
     const displayAgentName =
       resolvedAgentName ||
       (session.agentName !== agentProfileId ? session.agentName : null) ||
-      "Agent";
+      t("task:agent");
     const dtoCommandCount = group.reduce((sum, g) => sum + (g.commandCount ?? 0), 0);
     const commandCount = Math.max(dtoCommandCount, storeCommandCount);
     const duration = entryDuration(session, activeSession);
@@ -282,8 +289,8 @@ export const SessionTimelineEntry = forwardRef<HTMLDivElement, SessionTimelineEn
       else if (forwardedRef) forwardedRef.current = node;
     };
 
-    const headerVerb = pickHeaderVerb(isLive, isTerminal);
-    const commandsLabel = buildCommandsLabel(commandCount);
+    const headerVerbKey = pickHeaderVerbKey(isLive, isTerminal);
+    const headerCommandCount = commandCountOrNull(commandCount);
 
     // The chat embed prefers the *active* session id when one exists, so a
     // RUNNING resume after IDLE shows live messages. Falls back to the
@@ -301,10 +308,14 @@ export const SessionTimelineEntry = forwardRef<HTMLDivElement, SessionTimelineEn
                 data-testid="session-role-chip"
                 className="text-[10px] uppercase tracking-wide rounded bg-muted px-1.5 py-0.5 text-muted-foreground"
               >
-                {roleChip}
+                {t(roleChip)}
               </span>
             )}
-            <HeaderText verb={headerVerb} duration={duration} commandsLabel={commandsLabel} />
+            <HeaderText
+              verbKey={headerVerbKey}
+              duration={duration}
+              commandCount={headerCommandCount}
+            />
             <span className="flex-1" />
             <IconChevronDown
               className={`h-3.5 w-3.5 text-muted-foreground transition-transform ${open ? "rotate-180" : ""}`}

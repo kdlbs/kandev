@@ -24,6 +24,7 @@ import { repositorySlug } from "@/lib/repository-slug";
 import { statusSummaryActiveErrorPreview } from "@/lib/task-status-summary";
 import { resolvePreferredSessionId } from "../task-select-helpers";
 import { mapSnapshotToKanban, sortByUpdatedAtDesc } from "./session-task-switcher-sheet-helpers";
+import { useTranslation } from "react-i18next";
 
 type SheetItemCtx = {
   repositoryPathsById: Map<string, string | undefined>;
@@ -466,6 +467,7 @@ function useSheetDeleteActions(
   store: ReturnType<typeof useAppStoreApi>,
   removeTaskFromBoard: ReturnType<typeof useTaskRemoval>["removeTaskFromBoard"],
 ) {
+  const { t } = useTranslation();
   const { deleteTaskById } = useTaskActions();
   const [deletingTask, setDeletingTask] = useState<{
     id: string;
@@ -480,11 +482,11 @@ function useSheetDeleteActions(
       const task = findSheetTask(state, taskId);
       setDeletingTask({
         id: taskId,
-        title: task?.title ?? "this task",
+        title: task?.title ?? t("task:thisTask"),
         executorType: task?.primaryExecutorType,
       });
     },
-    [store],
+    [store, t],
   );
 
   const handleDeleteConfirm = useCallback(
@@ -522,6 +524,7 @@ function useSheetDeleteActions(
 }
 
 export function useSheetActions(workspaceId: string | null, onOpenChange: (open: boolean) => void) {
+  const { t } = useTranslation();
   const setActiveTask = useAppStore((state) => state.setActiveTask);
   const setActiveSession = useAppStore((state) => state.setActiveSession);
   const store = useAppStoreApi();
@@ -577,11 +580,11 @@ export function useSheetActions(workspaceId: string | null, onOpenChange: (open:
       const task = findSheetTask(state, taskId);
       setArchivingTask({
         id: taskId,
-        title: task?.title ?? "this task",
+        title: task?.title ?? t("task:thisTask"),
         executorType: task?.primaryExecutorType,
       });
     },
-    [store],
+    [store, t],
   );
 
   const handleArchiveConfirm = useCallback(

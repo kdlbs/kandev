@@ -33,6 +33,16 @@ type taskScanColumn struct {
 	selectExpr func(alias string) string
 }
 
+// Automation runs are hidden from the board and from task lists by their
+// provenance, not by ephemerality: their tasks are ordinary persistent tasks
+// that keep their worktree and stay repliable, they just have their own
+// destination (docs/specs/office/automations-settings.md). is_ephemeral keeps
+// its original quick-chat meaning, so every board read pairs the two.
+const (
+	andNotAutomationOrigin  = ` AND COALESCE(origin, '') != '` + models.TaskOriginAutomationRun + `'`
+	andNotAutomationOriginT = ` AND COALESCE(t.origin, '') != '` + models.TaskOriginAutomationRun + `'`
+)
+
 var taskScanColumns = []taskScanColumn{
 	{name: "id"},
 	{name: "workspace_id"},
@@ -338,7 +348,7 @@ func (r *Repository) lockWorkflowStepsForAdmission(ctx context.Context, tx *sql.
 }
 
 func (r *Repository) countAdmittedInTx(ctx context.Context, tx *sql.Tx, stepID, excludeTaskID string) (int, error) {
-	query := `SELECT COUNT(*) FROM tasks WHERE workflow_step_id = ? AND wip_admitted = 1 AND archived_at IS NULL AND is_ephemeral = 0`
+	query := `SELECT COUNT(*) FROM tasks WHERE workflow_step_id = ? AND wip_admitted = 1 AND archived_at IS NULL AND is_ephemeral = 0` + andNotAutomationOrigin
 	args := []interface{}{stepID}
 	if excludeTaskID != "" {
 		query += " AND id != ?"
@@ -362,7 +372,7 @@ func (r *Repository) ensureWorkflowStepCapacity(ctx context.Context, tx *sql.Tx,
 		WHERE workflow_step_id = ?
 		  AND wip_admitted = 1
 		  AND archived_at IS NULL
-		  AND is_ephemeral = 0
+		  AND is_ephemeral = 0`+andNotAutomationOrigin+`
 	`), targetStepID).Scan(&occupants); err != nil {
 		return err
 	}
@@ -750,7 +760,7 @@ func (r *Repository) UpdateTaskIfWorkflowStepHasCapacity(ctx context.Context, ta
 		  AND wip_admitted = 1
 		  AND id != ?
 		  AND archived_at IS NULL
-		  AND is_ephemeral = 0
+		  AND is_ephemeral = 0`+andNotAutomationOrigin+`
 	`), targetStepID, excludeTaskID).Scan(&occupants); err != nil {
 		return err
 	}
@@ -808,7 +818,7 @@ func (r *Repository) PromoteQueuedTaskIfWorkflowStepHasCapacity(
 			  AND wip_admitted = 1
 			  AND id != ?
 			  AND archived_at IS NULL
-			  AND is_ephemeral = 0
+			  AND is_ephemeral = 0`+andNotAutomationOrigin+`
 		`), destinationStepID, task.ID).Scan(&occupants); err != nil {
 			return false, err
 		}
@@ -823,7 +833,7 @@ func (r *Repository) PromoteQueuedTaskIfWorkflowStepHasCapacity(
 		  AND workflow_step_id = ?
 		  AND (queued_for_step_id = ? OR queued_for_step_id = '' OR queued_for_step_id IS NULL)
 		  AND archived_at IS NULL
-		  AND is_ephemeral = 0
+		  AND is_ephemeral = 0`+andNotAutomationOrigin+`
 	`), task.WorkspaceID, task.WorkflowID, task.WorkflowStepID, task.Title, task.Description, task.State, task.Priority, task.Position, dialect.BoolToInt(task.WIPAdmitted), task.QueuedForStepID, task.QueuedAt, string(metadata), task.ParentID, task.UpdatedAt, task.Origin, task.ProjectID, task.Labels, task.Identifier, task.ID, fromStepID, destinationStepID)
 	if err != nil {
 		return false, err
@@ -874,7 +884,7 @@ func (r *Repository) ListTasks(ctx context.Context, workflowID string) ([]*model
 	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(`
 		SELECT `+taskSelectColumns("t")+`
 		FROM tasks t
-		WHERE t.workflow_id = ? AND t.archived_at IS NULL AND t.is_ephemeral = 0
+		WHERE t.workflow_id = ? AND t.archived_at IS NULL AND t.is_ephemeral = 0`+andNotAutomationOriginT+`
 		ORDER BY t.created_at ASC
 	`), workflowID)
 	if err != nil {
@@ -888,7 +898,7 @@ func (r *Repository) ListTasks(ctx context.Context, workflowID string) ([]*model
 // CountTasksByWorkflow returns the number of non-archived, non-ephemeral tasks in a workflow
 func (r *Repository) CountTasksByWorkflow(ctx context.Context, workflowID string) (int, error) {
 	var count int
-	err := r.ro.QueryRowContext(ctx, r.ro.Rebind(`SELECT COUNT(*) FROM tasks WHERE workflow_id = ? AND archived_at IS NULL AND is_ephemeral = 0`), workflowID).Scan(&count)
+	err := r.ro.QueryRowContext(ctx, r.ro.Rebind(`SELECT COUNT(*) FROM tasks WHERE workflow_id = ? AND archived_at IS NULL AND is_ephemeral = 0`+andNotAutomationOrigin), workflowID).Scan(&count)
 	if err != nil {
 		return 0, err
 	}
@@ -898,7 +908,7 @@ func (r *Repository) CountTasksByWorkflow(ctx context.Context, workflowID string
 // CountTasksByWorkflowStep returns the number of non-archived, non-ephemeral tasks in a workflow step
 func (r *Repository) CountTasksByWorkflowStep(ctx context.Context, stepID string) (int, error) {
 	var count int
-	err := r.ro.QueryRowContext(ctx, r.ro.Rebind(`SELECT COUNT(*) FROM tasks WHERE workflow_step_id = ? AND archived_at IS NULL AND is_ephemeral = 0`), stepID).Scan(&count)
+	err := r.ro.QueryRowContext(ctx, r.ro.Rebind(`SELECT COUNT(*) FROM tasks WHERE workflow_step_id = ? AND archived_at IS NULL AND is_ephemeral = 0`+andNotAutomationOrigin), stepID).Scan(&count)
 	if err != nil {
 		return 0, err
 	}
@@ -915,7 +925,7 @@ func (r *Repository) CountTasksByWorkflowStepExcludingTask(ctx context.Context, 
 		  AND id != ?
 		  AND wip_admitted = 1
 		  AND archived_at IS NULL
-		  AND is_ephemeral = 0
+		  AND is_ephemeral = 0`+andNotAutomationOrigin+`
 	`), stepID, excludeTaskID).Scan(&count)
 	if err != nil {
 		return 0, err
@@ -932,7 +942,7 @@ func (r *Repository) CountAdmittedTasksByWorkflowStep(ctx context.Context, stepI
 		WHERE workflow_step_id = ?
 		  AND wip_admitted = 1
 		  AND archived_at IS NULL
-		  AND is_ephemeral = 0
+		  AND is_ephemeral = 0`+andNotAutomationOrigin+`
 	`), stepID).Scan(&count)
 	return count, err
 }
@@ -969,7 +979,7 @@ func (r *Repository) NextPullCandidateExcluding(ctx context.Context, stepID stri
 			FROM tasks t
 			WHERE t.workflow_step_id = ?
 			  AND t.archived_at IS NULL
-			  AND t.is_ephemeral = 0
+			  AND t.is_ephemeral = 0`+andNotAutomationOriginT+`
 			  AND (t.queued_for_step_id = '' OR t.queued_for_step_id IS NULL)
 			  `+excludeClause+`
 			ORDER BY
@@ -1016,7 +1026,7 @@ func (r *Repository) NextQueuedTaskForStepExcluding(ctx context.Context, feederS
 		FROM tasks t
 		WHERE t.workflow_step_id = ?
 		  AND t.archived_at IS NULL
-		  AND t.is_ephemeral = 0
+		  AND t.is_ephemeral = 0`+andNotAutomationOriginT+`
 		  AND (t.queued_for_step_id = '' OR t.queued_for_step_id IS NULL OR t.queued_for_step_id = ?)
 		  `+excludeClause+`
 		ORDER BY
@@ -1051,7 +1061,7 @@ func (r *Repository) ListChildren(ctx context.Context, parentID string) ([]*mode
 	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(`
 		SELECT `+taskSelectColumns("t")+`
 		FROM tasks t
-		WHERE t.parent_id = ? AND t.archived_at IS NULL AND t.is_ephemeral = 0
+		WHERE t.parent_id = ? AND t.archived_at IS NULL AND t.is_ephemeral = 0`+andNotAutomationOriginT+`
 		ORDER BY t.created_at ASC, t.id ASC
 	`), parentID)
 	if err != nil {
@@ -1071,7 +1081,7 @@ func (r *Repository) ListChildCompletionRows(ctx context.Context, parentID strin
 	err := r.ro.SelectContext(ctx, &rows, r.ro.Rebind(`
 		SELECT id, state, title, workflow_step_id, updated_at
 		FROM tasks
-		WHERE parent_id = ? AND archived_at IS NULL AND is_ephemeral = 0
+		WHERE parent_id = ? AND archived_at IS NULL AND is_ephemeral = 0`+andNotAutomationOrigin+`
 		ORDER BY created_at ASC, id ASC
 	`), parentID)
 	if err != nil {
@@ -1091,7 +1101,7 @@ func (r *Repository) ListChildrenIncludingArchived(ctx context.Context, parentID
 	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(`
 		SELECT `+taskSelectColumns("t")+`
 		FROM tasks t
-		WHERE t.parent_id = ? AND t.is_ephemeral = 0
+		WHERE t.parent_id = ? AND t.is_ephemeral = 0`+andNotAutomationOriginT+`
 		ORDER BY t.created_at ASC, t.id ASC
 	`), parentID)
 	if err != nil {
@@ -1135,7 +1145,7 @@ func (r *Repository) ListSiblings(ctx context.Context, taskID string) ([]*models
 		  AND t.workspace_id = ?
 		  AND t.id != ?
 		  AND t.archived_at IS NULL
-		  AND t.is_ephemeral = 0
+		  AND t.is_ephemeral = 0`+andNotAutomationOriginT+`
 		ORDER BY t.created_at ASC, t.id ASC
 	`), self.ParentID, self.WorkspaceID, self.ID)
 	if err != nil {
@@ -1150,7 +1160,7 @@ func (r *Repository) ListTasksByWorkflowStep(ctx context.Context, workflowStepID
 	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(`
 		SELECT `+taskSelectColumns("t")+`
 		FROM tasks t
-		WHERE t.workflow_step_id = ? AND t.archived_at IS NULL AND t.is_ephemeral = 0 ORDER BY t.created_at ASC
+		WHERE t.workflow_step_id = ? AND t.archived_at IS NULL AND t.is_ephemeral = 0`+andNotAutomationOriginT+` ORDER BY t.created_at ASC
 	`), workflowStepID)
 	if err != nil {
 		return nil, err
@@ -1167,7 +1177,7 @@ func (r *Repository) ListQueuedTasks(ctx context.Context) ([]*models.Task, error
 		SELECT `+taskSelectColumns("t")+`
 		FROM tasks t
 		WHERE t.queued_for_step_id IS NOT NULL AND t.queued_for_step_id != ''
-		  AND t.archived_at IS NULL AND t.is_ephemeral = 0
+		  AND t.archived_at IS NULL AND t.is_ephemeral = 0`+andNotAutomationOriginT+`
 		ORDER BY t.queued_at ASC, t.created_at ASC, t.id ASC
 	`))
 	if err != nil {
@@ -1211,6 +1221,10 @@ func (r *Repository) ListTasksByWorkspaceWithArchiveMode(ctx context.Context, wo
 		filter += " AND is_ephemeral = 0"
 	}
 	// If includeEphemeral is true and onlyEphemeral is false, include both
+	// Automation runs are excluded regardless of the ephemeral toggles: they
+	// are hidden by provenance, and "include quick chats" is not a request to
+	// see them.
+	filter += andNotAutomationOrigin
 
 	if onlyArchived {
 		filter += " AND archived_at IS NOT NULL"
@@ -1305,7 +1319,7 @@ func rewriteFilterForAlias(filter, alias string) string {
 		return filter
 	}
 	out := filter
-	for _, col := range []string{"is_ephemeral", "archived_at", "metadata", "workflow_id"} {
+	for _, col := range []string{"is_ephemeral", "archived_at", "metadata", "workflow_id", "origin"} {
 		// Replace " <col>" only when not already prefixed by `alias.`.
 		out = simplePrefixCol(out, col, alias)
 	}
@@ -2222,7 +2236,7 @@ func (r *Repository) ListTasksByProject(ctx context.Context, projectID string) (
 	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(`
 		SELECT `+taskSelectColumns("t")+`
 		FROM tasks t
-		WHERE t.project_id = ? AND t.archived_at IS NULL AND t.is_ephemeral = 0
+		WHERE t.project_id = ? AND t.archived_at IS NULL AND t.is_ephemeral = 0`+andNotAutomationOriginT+`
 		ORDER BY t.created_at ASC
 	`), projectID)
 	if err != nil {
@@ -2240,7 +2254,7 @@ func (r *Repository) ListTasksByAssignee(ctx context.Context, agentInstanceID st
 		SELECT `+taskSelectColumns("t")+`
 		FROM tasks t
 		WHERE `+runnerProjection("t")+` = ?
-		  AND t.archived_at IS NULL AND t.is_ephemeral = 0
+		  AND t.archived_at IS NULL AND t.is_ephemeral = 0`+andNotAutomationOriginT+`
 		ORDER BY t.created_at ASC
 	`), agentInstanceID)
 	if err != nil {
@@ -2253,7 +2267,7 @@ func (r *Repository) ListTasksByAssignee(ctx context.Context, agentInstanceID st
 // ListTaskTree returns a flat list of non-archived tasks for a workspace, suitable for
 // building a tree using each task's ParentID field.
 func (r *Repository) ListTaskTree(ctx context.Context, workspaceID string, filters models.TaskTreeFilters) ([]*models.Task, error) {
-	query := `SELECT ` + taskSelectColumns("t") + ` FROM tasks t WHERE t.workspace_id = ? AND t.archived_at IS NULL AND t.is_ephemeral = 0`
+	query := `SELECT ` + taskSelectColumns("t") + ` FROM tasks t WHERE t.workspace_id = ? AND t.archived_at IS NULL AND t.is_ephemeral = 0` + andNotAutomationOriginT
 	args := []interface{}{workspaceID}
 
 	if filters.ProjectID != "" {
