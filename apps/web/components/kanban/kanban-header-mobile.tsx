@@ -16,7 +16,6 @@ import { useQuickChatLauncher } from "@/hooks/use-quick-chat-launcher";
 import { useQuickTerminalLauncher } from "@/hooks/use-quick-terminal-launcher";
 import { workspaceHomeHref } from "@/components/app-sidebar/app-sidebar-workspace-navigation";
 import { cn } from "@/lib/utils";
-import { useTranslation } from "react-i18next";
 
 type KanbanHeaderMobileProps = {
   workspaceId?: string;
@@ -69,7 +68,6 @@ function MobileHeaderActions({
   const { t } = useTranslation();
   const { issueSeverity } = useAppStatusDrawer();
   const issueDetails = useConnectionIssueCopy(issueSeverity);
-  const { t } = useTranslation();
 
   return (
     <>
