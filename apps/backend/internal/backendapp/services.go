@@ -592,6 +592,7 @@ func initWorkflowSyncService(
 		log.Warn("workflow sync service initialization failed (non-fatal)", zap.Error(err))
 		return nil
 	}
+	svc.SetWorkspaceAuthorizer(taskSvc.AuthorizeWorkspaceAccess)
 	return svc
 }
 
