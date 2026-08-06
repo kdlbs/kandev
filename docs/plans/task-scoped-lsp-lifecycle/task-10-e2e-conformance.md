@@ -42,10 +42,10 @@ cd apps/web && pnpm e2e:run tests/lsp/task-lsp-lifecycle.spec.ts
 cd apps/web && pnpm e2e:run --no-build tests/lsp/lsp-file-intelligence.spec.ts
 cd apps/web && pnpm e2e:run --no-build --project mobile-chrome tests/lsp/mobile-lsp-file-intelligence.spec.ts
 cd apps/web && KANDEV_E2E_CONTAINERS=1 pnpm e2e:run --project containers tests/docker/lsp-file-intelligence.spec.ts tests/ssh/lsp-unsupported-executor.spec.ts
-cd apps/backend && go test -race ./internal/lsp/... ./internal/agentctl/server/lsp ./internal/gateway/websocket
+cd apps/backend && go test -race ./internal/lsp ./internal/agentctl/server/lsp ./internal/gateway/websocket ./internal/agent/runtime/lifecycle ./internal/agent/runtime/agentctl
 cd apps && pnpm --filter @kandev/web test -- --run lib/lsp lib/state/slices/lsp components/lsp components/app-status-bar
 cd apps/web && pnpm run typecheck
-cd apps && pnpm run i18n:check && pnpm run i18n:ratchet
+cd apps/web && pnpm run i18n:check && pnpm run i18n:ratchet
 ```
 
 Use `--no-build` only after the first managed run built the final unchanged production artifacts and
@@ -93,16 +93,18 @@ Completed 2026-08-05.
   session, browser, reload, and former-idle-boundary changes; explicit Restart produced exactly one
   replacement generation, Stop prevented reacquisition, and archive reaped the process.
 - Existing desktop coverage: `pnpm e2e:run --no-build tests/lsp/lsp-file-intelligence.spec.ts` —
-  13/13 passed in 2.3 minutes, including missing-binary guidance, honest progress, shared
-  configuration, multi-root URIs, crash recovery, archive cleanup, and real-server capacity.
+  13/13 passed in 2.1 minutes after the final rebase, including missing-binary guidance, honest
+  progress, shared configuration, multi-root URIs, crash recovery, archive cleanup, and real-server
+  capacity.
 - Responsive coverage: `pnpm e2e:run --no-build --project mobile-chrome
-  tests/lsp/mobile-lsp-file-intelligence.spec.ts` — 3/3 passed in 17.4 seconds across phone and
+  tests/lsp/mobile-lsp-file-intelligence.spec.ts` — 3/3 passed in 17.5 seconds across phone and
   tablet composition.
 - Runtime coverage: `KANDEV_E2E_CONTAINERS=1 pnpm e2e:run --project containers
   tests/docker/lsp-file-intelligence.spec.ts tests/ssh/lsp-unsupported-executor.spec.ts` — 4/4
   passed in 1.2 minutes. Local Docker shared one task host; SSH failed closed without LSP launch.
-- Focused frontend suites passed 26 files / 203 tests. Web typecheck, full frontend lint, i18n check
-  and ratchet, and two production Vite builds passed.
+- After rebasing onto `origin/main` at `828213a6a`, focused frontend suites passed 22 files / 183
+  tests after upstream test consolidation. All-app typecheck, full frontend lint, i18n check and
+  ratchet, and production Vite builds passed.
 - A non-required broad web run completed all 1,130 files and all 8,703 assertions, then exited on
   one unhandled localhost/Monaco error while a concurrent managed E2E backend was being torn down.
   The named automation test passed 2/2 in isolation after E2E ended; this run is recorded as an
@@ -114,3 +116,8 @@ Completed 2026-08-05.
 - Final managed runners left no E2E containers, backend, agentctl, fake-server, or Kotlin child
   processes. One exact temp-home tree left by an earlier interrupted runner was identified from its
   `KANDEV_E2E_MOCK` environment and reaped before the clean final matrix.
+- Post-rebase `make test` reached only unchanged `origin/main` filesystem-fixture failures in task
+  handlers/service (`parent directory cannot be accessed` / invalid folder location) before Make
+  stopped; all changed backend packages and isolated task-LSP cleanup tests passed. Separate CLI and
+  script targets exposed unchanged base-branch release/review workflow assertion mismatches. Root
+  lint, architecture lint, formatting, docs validation, and all-app typecheck passed.

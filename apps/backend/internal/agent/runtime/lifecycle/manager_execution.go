@@ -712,6 +712,16 @@ type executionCreatePlan struct {
 	profileInfo *AgentProfileInfo
 }
 
+type executionEnvironmentPlan struct {
+	env                       map[string]string
+	profileInfo               *AgentProfileInfo
+	executionProfileID        string
+	autoApprove               bool
+	autoApproveOverride       *bool
+	approvedSecretEnvironment []string
+	managedGoCachePath        string
+}
+
 func (m *Manager) buildExecutionCreatePlan(
 	ctx context.Context,
 	taskID string,
@@ -727,7 +737,56 @@ func (m *Manager) buildExecutionCreatePlan(
 	if err != nil {
 		return nil, err
 	}
+	environment, err := m.buildExecutionEnvironmentPlan(ctx, taskID, info, isTaskHost, executionID, agentConfig)
+	if err != nil {
+		return nil, err
+	}
+	metadata := executionMetadata(info.Metadata, isTaskHost)
+	if environment.managedGoCachePath != "" {
+		metadata[managedGoCacheMetadataKey] = environment.managedGoCachePath
+	}
+	remoteContributions, err := remoteContributionsFromMetadata(metadata)
+	if err != nil {
+		return nil, err
+	}
+	runtimeDetails := m.executionRuntimeDetails(ctx, info, isTaskHost, executionID, metadata)
+	protocol := ""
+	if agentConfig != nil && agentConfig.Runtime() != nil {
+		protocol = string(agentConfig.Runtime().Protocol)
+	}
+	req := &ExecutorCreateRequest{
+		InstanceID:                     executionID,
+		TaskID:                         taskID,
+		SessionID:                      runtimeDetails.sessionID,
+		TaskEnvironmentID:              info.TaskEnvironmentID,
+		IsTaskHost:                     isTaskHost,
+		AgentProfileID:                 environment.executionProfileID,
+		OfficeAgentProfileID:           runtimeDetails.officeAgentProfileID,
+		WorkspacePath:                  info.WorkspacePath,
+		WorkspaceSourceRoots:           workspaceSourceRoots(info.WorkspaceFolders, info.WorkspaceRepositories),
+		Protocol:                       protocol,
+		Env:                            environment.env,
+		AutoApprovePermissions:         environment.autoApprove,
+		AutoApprovePermissionsOverride: environment.autoApproveOverride,
+		AgentConfig:                    agentConfig,
+		Metadata:                       metadata,
+		ApprovedSecretEnvKeys:          append([]string(nil), environment.approvedSecretEnvironment...),
+		RemoteContributions:            remoteContributions,
+		PreviousExecutionID:            runtimeDetails.previousExecutionID,
+		AuthToken:                      runtimeDetails.authToken,
+		BootstrapNonce:                 runtimeDetails.bootstrapNonce,
+	}
+	return &executionCreatePlan{executionID: executionID, request: req, profileInfo: environment.profileInfo}, nil
+}
 
+func (m *Manager) buildExecutionEnvironmentPlan(
+	ctx context.Context,
+	taskID string,
+	info *WorkspaceInfo,
+	isTaskHost bool,
+	executionID string,
+	agentConfig agents.Agent,
+) (*executionEnvironmentPlan, error) {
 	profileInfo, executionProfileID := m.executionProfile(ctx, info, isTaskHost)
 	managedAgentProfileID := info.AgentProfileID
 	managedSessionID := info.SessionID
@@ -763,51 +822,19 @@ func (m *Manager) buildExecutionCreatePlan(
 	if err != nil {
 		return nil, fmt.Errorf("build recovered environment: %w", err)
 	}
-	autoApprove := false
-	var autoApproveOverride *bool
+	plan := &executionEnvironmentPlan{
+		env: env, profileInfo: profileInfo, executionProfileID: executionProfileID,
+		approvedSecretEnvironment: managedReq.ApprovedSecretEnvKeys,
+		managedGoCachePath:        managedReq.managedGoCachePath,
+	}
 	if profileInfo != nil {
-		autoApprove = profileInfo.AutoApprove
-		autoApproveOverride = boolPtr(profileInfo.AutoApprove)
+		plan.autoApprove = profileInfo.AutoApprove
+		plan.autoApproveOverride = boolPtr(profileInfo.AutoApprove)
 	}
-	if len(env) == 0 {
-		env = nil
+	if len(plan.env) == 0 {
+		plan.env = nil
 	}
-	metadata := executionMetadata(info.Metadata, isTaskHost)
-	if managedReq.managedGoCachePath != "" {
-		metadata[managedGoCacheMetadataKey] = managedReq.managedGoCachePath
-	}
-	remoteContributions, err := remoteContributionsFromMetadata(metadata)
-	if err != nil {
-		return nil, err
-	}
-	runtimeDetails := m.executionRuntimeDetails(ctx, info, isTaskHost, executionID, metadata)
-	protocol := ""
-	if agentConfig != nil && agentConfig.Runtime() != nil {
-		protocol = string(agentConfig.Runtime().Protocol)
-	}
-	req := &ExecutorCreateRequest{
-		InstanceID:                     executionID,
-		TaskID:                         taskID,
-		SessionID:                      runtimeDetails.sessionID,
-		TaskEnvironmentID:              info.TaskEnvironmentID,
-		IsTaskHost:                     isTaskHost,
-		AgentProfileID:                 executionProfileID,
-		OfficeAgentProfileID:           runtimeDetails.officeAgentProfileID,
-		WorkspacePath:                  info.WorkspacePath,
-		WorkspaceSourceRoots:           workspaceSourceRoots(info.WorkspaceFolders, info.WorkspaceRepositories),
-		Protocol:                       protocol,
-		Env:                            env,
-		AutoApprovePermissions:         autoApprove,
-		AutoApprovePermissionsOverride: autoApproveOverride,
-		AgentConfig:                    agentConfig,
-		Metadata:                       metadata,
-		ApprovedSecretEnvKeys:          append([]string(nil), managedReq.ApprovedSecretEnvKeys...),
-		RemoteContributions:            remoteContributions,
-		PreviousExecutionID:            runtimeDetails.previousExecutionID,
-		AuthToken:                      runtimeDetails.authToken,
-		BootstrapNonce:                 runtimeDetails.bootstrapNonce,
-	}
-	return &executionCreatePlan{executionID: executionID, request: req, profileInfo: profileInfo}, nil
+	return plan, nil
 }
 
 func (m *Manager) executionAgentConfig(info *WorkspaceInfo, isTaskHost bool) (agents.Agent, error) {
