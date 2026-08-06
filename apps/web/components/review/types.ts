@@ -22,6 +22,8 @@ export type ReviewFile = {
   repository_name?: string;
   /** Exact git ref used as the old side when this committed patch was built. */
   base_ref?: string;
+  /** True when this file belongs to an initialized Git submodule scope. */
+  is_submodule?: boolean;
 };
 
 /**

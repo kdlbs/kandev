@@ -202,6 +202,7 @@ func (wt *WorkspaceTracker) computeGitStatus(ctx context.Context) (types.GitStat
 	update := types.GitStatusUpdate{
 		Timestamp:      time.Now(),
 		RepositoryName: wt.repositoryName,
+		IsSubmodule:    wt.IsSubmodule(),
 		Modified:       []string{},
 		Added:          []string{},
 		Deleted:        []string{},

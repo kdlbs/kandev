@@ -59,7 +59,7 @@ afterEach(() => {
   mocks.isMobile = false;
 });
 
-function file(path: string, repo?: string): ReviewFile {
+function file(path: string, repo?: string, isSubmodule = false): ReviewFile {
   return {
     path,
     diff: "@@ -1 +1 @@\n-a\n+b\n",
@@ -69,6 +69,7 @@ function file(path: string, repo?: string): ReviewFile {
     staged: false,
     source: "uncommitted",
     repository_name: repo,
+    is_submodule: isSubmodule,
   };
 }
 
@@ -90,6 +91,8 @@ function withTooltips(node: ReactNode) {
   return <TooltipProvider>{node}</TooltipProvider>;
 }
 
+const REPO_HEADER_TEST_ID = "changes-repo-header";
+
 function renderSingleFile(reviewFile: ReviewFile, selected = true) {
   const refs = new Map([[reviewFile.path, createRef<HTMLDivElement>()]]);
   render(
@@ -108,7 +111,7 @@ describe("ReviewDiffList — multi-repo grouping", () => {
   it("renders no repo header when all files lack a repository_name", () => {
     const refs = new Map([["a.ts", createRef<HTMLDivElement>()]]);
     render(withTooltips(<ReviewDiffList {...baseProps} files={[file("a.ts")]} fileRefs={refs} />));
-    expect(screen.queryAllByTestId("changes-repo-header")).toHaveLength(0);
+    expect(screen.queryAllByTestId(REPO_HEADER_TEST_ID)).toHaveLength(0);
   });
 
   it("renders one header per repo when 2+ repos are present", () => {
@@ -120,7 +123,7 @@ describe("ReviewDiffList — multi-repo grouping", () => {
     const refs = new Map(files.map((f) => [f.path, createRef<HTMLDivElement>()]));
     render(withTooltips(<ReviewDiffList {...baseProps} files={files} fileRefs={refs} />));
 
-    const headers = screen.getAllByTestId("changes-repo-header");
+    const headers = screen.getAllByTestId(REPO_HEADER_TEST_ID);
     expect(headers).toHaveLength(2);
     expect(headers[0].textContent).toContain("frontend");
     expect(headers[0].textContent).toContain("2 files");
@@ -135,7 +138,7 @@ describe("ReviewDiffList — multi-repo grouping", () => {
         <ReviewDiffList {...baseProps} files={[file("a.ts", "only-repo")]} fileRefs={refs} />,
       ),
     );
-    expect(screen.getByTestId("changes-repo-header").textContent).toContain("only-repo");
+    expect(screen.getByTestId(REPO_HEADER_TEST_ID).textContent).toContain("only-repo");
   });
 
   it("groups files into per-repo sections with the right counts", () => {
@@ -166,7 +169,7 @@ describe("ReviewDiffList — multi-repo grouping", () => {
 
   it("marks named groups as submodule scopes when the root group is present", () => {
     const submoduleScope = "vendor/lib";
-    const files: ReviewFile[] = [file("README.md"), file("src/lib.ts", submoduleScope)];
+    const files: ReviewFile[] = [file("README.md"), file("src/lib.ts", submoduleScope, true)];
     const refs = new Map(files.map((f) => [f.path, createRef<HTMLDivElement>()]));
     render(withTooltips(<ReviewDiffList {...baseProps} files={files} fileRefs={refs} />));
 
@@ -177,6 +180,17 @@ describe("ReviewDiffList — multi-repo grouping", () => {
       (group) => group.getAttribute("data-repository-name") === submoduleScope,
     );
     expect(submoduleGroup?.querySelector('[data-submodule-scope="true"]')).not.toBeNull();
+  });
+
+  it("marks a direct submodule scope without a workspace-root group", () => {
+    const submoduleScope = "vendor";
+    const reviewFile = file("src/lib.ts", submoduleScope, true);
+    const refs = new Map([[reviewFile.path, createRef<HTMLDivElement>()]]);
+    render(withTooltips(<ReviewDiffList {...baseProps} files={[reviewFile]} fileRefs={refs} />));
+
+    expect(screen.getByTestId(REPO_HEADER_TEST_ID).getAttribute("data-submodule-scope")).toBe(
+      "true",
+    );
   });
 });
 

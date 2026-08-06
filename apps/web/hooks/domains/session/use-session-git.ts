@@ -164,6 +164,34 @@ export function groupPathsByRepoName(
 }
 
 /**
+ * Returns mutation scopes that have a live status tracker. A file can still
+ * appear under the empty scope when the parent repository only reports a
+ * changed gitlink; that scope is not a runnable repository unless it is also
+ * present in statusByRepo. Legacy single-repository hydration has no per-repo
+ * list, so it keeps the historical empty-scope fallback.
+ */
+export function repositoryScopesForMutation(
+  allFiles: Pick<FileInfo, "repository_name">[],
+  availableScopes: Iterable<string>,
+): string[] {
+  const available = Array.from(new Set(availableScopes));
+  if (available.length === 0) {
+    return repositoryScopesWithAvailableAncestors(
+      new Set(allFiles.map((file) => file.repository_name ?? "")),
+      available,
+    );
+  }
+
+  const availableSet = new Set(available);
+  const requested = new Set<string>();
+  for (const file of allFiles) {
+    const scope = file.repository_name ?? "";
+    if (availableSet.has(scope)) requested.add(scope);
+  }
+  return repositoryScopesWithAvailableAncestors(requested, available);
+}
+
+/**
  * Builds the SessionGit's flat file list. For multi-repo workspaces it
  * stamps each FileInfo with its repository_name so consumers can group;
  * for single-repo it returns the legacy single-status files unchanged.
@@ -581,10 +609,8 @@ function useFileDerivations(
     return m;
   }, [allFiles]);
   const reposInFiles = useMemo(() => {
-    const seen = new Set<string>();
-    for (const f of allFiles) seen.add(f.repository_name ?? "");
-    return repositoryScopesWithAvailableAncestors(
-      seen,
+    return repositoryScopesForMutation(
+      allFiles,
       statusByRepo.map(({ repository_name }) => repository_name),
     );
   }, [allFiles, statusByRepo]);

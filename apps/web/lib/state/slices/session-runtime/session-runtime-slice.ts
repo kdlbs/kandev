@@ -96,6 +96,7 @@ function hasBranchSummaryChanged(existing: GitStatusEntry, incoming: GitStatusEn
     existing.ahead !== incoming.ahead ||
     existing.behind !== incoming.behind ||
     (existing.repository_name ?? "") !== (incoming.repository_name ?? "") ||
+    existing.is_submodule !== incoming.is_submodule ||
     existing.branch_additions !== incoming.branch_additions ||
     existing.branch_deletions !== incoming.branch_deletions
   );

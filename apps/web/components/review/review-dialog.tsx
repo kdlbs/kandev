@@ -78,6 +78,7 @@ function addCumulativeDiffFiles(
       diff_skip_reason: file.diff_skip_reason,
       repository_name: repoName,
       base_ref: file.base_ref ?? defaultBaseRef,
+      is_submodule: file.is_submodule,
     });
   }
 }
@@ -86,6 +87,7 @@ function addUncommittedFiles(
   fileMap: Map<string, ReviewFile>,
   gitStatusFiles: Record<string, FileInfo>,
   useRepositoryKeys: boolean,
+  isSubmodule = false,
 ) {
   for (const file of Object.values(gitStatusFiles)) {
     const repositoryName = useRepositoryKeys ? file.repository_name : undefined;
@@ -103,6 +105,7 @@ function addUncommittedFiles(
       old_path: file.old_path,
       diff_skip_reason: file.diff_skip_reason,
       repository_name: repositoryName,
+      is_submodule: file.is_submodule ?? isSubmodule,
     });
   }
 }
@@ -302,7 +305,7 @@ function useReviewDialogHandlers(opts: ReviewDialogHandlerOptions) {
       // discard runs in the correct repo's worktree.
       const { repositoryName, path } = splitFileKey(key);
       try {
-        const result = await discard([path], repositoryName || undefined);
+        const result = await discard([path], repositoryName);
         if (result.success)
           toast({ title: "Changes discarded", description: path, variant: "success" });
         else

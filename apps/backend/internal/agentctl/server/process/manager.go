@@ -334,7 +334,7 @@ func NewManager(cfg *config.InstanceConfig, log *logger.Logger) *Manager {
 	// scope when it is itself a Git repository; a bare task root keeps the
 	// existing multi-repository behavior.
 	m.workspaceTracker, m.repoTrackers = m.buildWorkspaceTrackerGraph(
-		context.Background(),
+		lifetimeCtx,
 		cfg.WorkDir,
 		m.workspaceSourceRoots,
 		false,

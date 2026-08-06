@@ -37,6 +37,7 @@ type UncommittedFile = {
   additions?: number;
   deletions?: number;
   staged?: boolean;
+  is_submodule?: boolean;
 };
 
 type CumulativeFile = {
@@ -54,12 +55,14 @@ type CumulativeFile = {
    * this and carry the path only on the map key.
    */
   path?: string;
+  is_submodule?: boolean;
 };
 
 function addUncommittedFiles(
   fileMap: Map<string, ReviewFile>,
   files: Record<string, UncommittedFile>,
   repositoryName?: string,
+  isSubmodule?: boolean,
 ) {
   for (const [path, file] of Object.entries(files)) {
     const diff = file.diff ? normalizeDiffContent(file.diff) : "";
@@ -76,6 +79,7 @@ function addUncommittedFiles(
       old_path: file.old_path,
       diff_skip_reason: skipReason,
       repository_name: repositoryName,
+      is_submodule: file.is_submodule ?? isSubmodule,
     });
   }
 }
@@ -114,6 +118,7 @@ function addCumulativeFiles(
       diff_skip_reason: file.diff_skip_reason,
       repository_name: repositoryName,
       base_ref: file.base_ref ?? defaultBaseRef,
+      is_submodule: file.is_submodule,
     });
   }
 }
@@ -182,9 +187,12 @@ function collectUncommittedPaths(
 }
 
 export type BuildReviewSourcesInput = {
-  gitStatus: { files?: Record<string, UncommittedFile> } | undefined;
+  gitStatus: { files?: Record<string, UncommittedFile>; is_submodule?: boolean } | undefined;
   statusByRepo:
-    | Array<{ repository_name: string; status: { files?: Record<string, UncommittedFile> } }>
+    | Array<{
+        repository_name: string;
+        status: { files?: Record<string, UncommittedFile>; is_submodule?: boolean };
+      }>
     | undefined;
   cumulativeDiff: {
     base_commit?: string;
@@ -260,13 +268,19 @@ function addUncommittedSources(
           fileMap,
           status.files as Record<string, UncommittedFile>,
           useRepositoryKeys ? repository_name : undefined,
+          status.is_submodule,
         );
       }
     }
     return;
   }
   if (gitStatus?.files) {
-    addUncommittedFiles(fileMap, gitStatus.files as Record<string, UncommittedFile>);
+    addUncommittedFiles(
+      fileMap,
+      gitStatus.files as Record<string, UncommittedFile>,
+      undefined,
+      gitStatus.is_submodule,
+    );
   }
 }
 

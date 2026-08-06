@@ -96,7 +96,6 @@ export const ReviewDiffList = memo(function ReviewDiffList({
     : -1;
   const groups = useMemo(() => groupByRepositoryName(files, (f) => f.repository_name), [files]);
   const showRepoHeaders = groups.length > 1 || (groups[0]?.repositoryName ?? "") !== "";
-  const hasWorkspaceRootGroup = groups.some((group) => group.repositoryName === "");
   return (
     <div
       ref={scrollContainerRef}
@@ -112,7 +111,6 @@ export const ReviewDiffList = memo(function ReviewDiffList({
           key={group.repositoryName || "__no_repo__"}
           group={group}
           showRepoHeaders={showRepoHeaders}
-          hasWorkspaceRootGroup={hasWorkspaceRootGroup}
           renderFile={(file) => {
             const key = reviewFileKey(file);
             return (

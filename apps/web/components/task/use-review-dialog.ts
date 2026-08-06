@@ -37,7 +37,11 @@ function buildMultiRepoReviewFiles(
     if (!status?.files) continue;
     for (const [path, file] of Object.entries(status.files)) {
       const key = reviewFileKey({ path, repository_name });
-      files[key] = { ...file, repository_name };
+      files[key] = {
+        ...file,
+        repository_name,
+        is_submodule: file.is_submodule ?? status.is_submodule,
+      };
     }
   }
   return files;
@@ -57,8 +61,17 @@ export function buildReviewGitStatusFiles(
       .concat(Array.from(cumulativeRepositoryNames)),
   );
   if (!isMultiRepo) {
+    const sourceStatus = reviewGitStatus?.files ? reviewGitStatus : named[0]?.status;
+    const files = sourceStatus?.files
+      ? Object.fromEntries(
+          Object.entries(sourceStatus.files).map(([path, file]) => [
+            path,
+            { ...file, is_submodule: file.is_submodule ?? sourceStatus.is_submodule },
+          ]),
+        )
+      : null;
     return {
-      files: reviewGitStatus?.files ?? named[0]?.status.files ?? null,
+      files,
       isMultiRepo: false,
     };
   }

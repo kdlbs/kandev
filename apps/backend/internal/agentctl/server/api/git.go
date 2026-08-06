@@ -1220,6 +1220,7 @@ func mergeCumulativeFiles(dst, src map[string]interface{}, repo, baseRef string)
 // GitStatusResult represents the result of a git status query.
 type GitStatusResult struct {
 	Success         bool                   `json:"success"`
+	IsSubmodule     bool                   `json:"is_submodule,omitempty"`
 	Branch          string                 `json:"branch"`
 	RemoteBranch    string                 `json:"remote_branch"`
 	HeadCommit      string                 `json:"head_commit"`
@@ -1330,6 +1331,7 @@ func (s *Server) collectStatusForRepo(ctx context.Context, sub string, fresh boo
 		RepositoryName: sub,
 		Status: GitStatusResult{
 			Success:         true,
+			IsSubmodule:     status.IsSubmodule,
 			Branch:          status.Branch,
 			RemoteBranch:    status.RemoteBranch,
 			HeadCommit:      status.HeadCommit,
@@ -1388,6 +1390,7 @@ func (s *Server) handleGitStatus(c *gin.Context) {
 
 	c.JSON(http.StatusOK, GitStatusResult{
 		Success:         true,
+		IsSubmodule:     status.IsSubmodule,
 		Branch:          status.Branch,
 		RemoteBranch:    status.RemoteBranch,
 		HeadCommit:      status.HeadCommit,

@@ -305,6 +305,7 @@ func (p *EventPublisher) PublishGitStatus(execution *AgentExecution, update *age
 			BranchAdditions: update.BranchAdditions,
 			BranchDeletions: update.BranchDeletions,
 			RepositoryName:  update.RepositoryName,
+			IsSubmodule:     update.IsSubmodule,
 		},
 	})
 }
