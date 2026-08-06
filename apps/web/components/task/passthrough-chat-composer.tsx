@@ -23,6 +23,7 @@ import { getTaskPlan } from "@/lib/api/domains/plan-api";
 import type { AppState } from "@/lib/state/store";
 import { generateUUID } from "@/lib/utils";
 import { resolveComposerWorkspaceId } from "./chat/composer-workspace";
+import { useTranslation } from "react-i18next";
 
 const PLAN_CONTEXT_PATH = "plan:context";
 
@@ -47,6 +48,7 @@ export function PassthroughComposerPanel({
   isSending: boolean;
   onImplementPlan?: (fresh: boolean) => void;
 }) {
+  const { t } = useTranslation();
   const hasContextComments =
     panelState.planComments.length > 0 ||
     panelState.pendingPRFeedback.length > 0 ||
@@ -90,7 +92,7 @@ export function PassthroughComposerPanel({
         isMoving={isMoving}
         isSending={isSending}
         onCancel={onCancel}
-        placeholder="Type a message, @mention files or prompts, Shift+Enter for newline"
+        placeholder={t("task:typeAMessageMentionFilesOr")}
         pendingCommentsByFile={panelState.pendingCommentsByFile}
         hasContextComments={hasContextComments}
         submitKey={panelState.chatSubmitKey}
@@ -301,6 +303,7 @@ export function useSendPassthroughMessage({
   panelState: ReturnType<typeof useChatPanelState>;
   onSent: () => void;
 }) {
+  const { t } = useTranslation();
   const { toast } = useToast();
   const markCommentsSent = useCommentsStore((s) => s.markCommentsSent);
   const storeApi = useAppStoreApi();
@@ -314,7 +317,7 @@ export function useSendPassthroughMessage({
       inlineTaskMentions,
     }: ChatSubmitPayload) => {
       if (!taskId || !sessionId) {
-        toast({ title: "Session not ready", variant: "error" });
+        toast({ title: t("task:sessionNotReady"), variant: "error" });
         throw new Error("Session not ready");
       }
       try {
@@ -336,7 +339,7 @@ export function useSendPassthroughMessage({
         onSent();
       } catch (error) {
         console.error("Failed to send passthrough message:", error);
-        toast({ title: "Failed to send message", variant: "error" });
+        toast({ title: t("task:failedToSendMessage"), variant: "error" });
         throw error;
       }
     },

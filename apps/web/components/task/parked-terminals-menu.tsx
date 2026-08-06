@@ -2,6 +2,7 @@
 
 import { useState, useRef, useEffect } from "react";
 import type { Terminal } from "@/hooks/domains/session/use-terminals";
+import { useTranslation } from "react-i18next";
 
 /**
  * Compact dropdown that lists every parked (hidden but PTY-alive) terminal
@@ -22,6 +23,7 @@ export function ParkedTerminalsMenu({
   onResume: (id: string) => Promise<void> | void;
   onDestroy: (id: string) => Promise<void> | void;
 }) {
+  const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const wrapperRef = useRef<HTMLDivElement>(null);
 
@@ -46,10 +48,10 @@ export function ParkedTerminalsMenu({
         className="inline-flex items-center gap-1 rounded-sm px-2 py-1 h-6 text-xs text-muted-foreground hover:bg-muted cursor-pointer"
         aria-haspopup="menu"
         aria-expanded={open}
-        title="Parked terminals"
+        title={t("task:parkedTerminals")}
       >
         <span className="font-mono">⌃</span>
-        <span>Parked ({parkedTerminals.length})</span>
+        <span>{t("task:parkedCount", { parked: parkedTerminals.length })}</span>
       </button>
       {open && (
         <div

@@ -28,6 +28,7 @@ import { PromptResultRecovery } from "@/components/prompt-result-recovery";
 import { EnvironmentBadges, ContextSelect } from "./session-dialog-shared";
 import { useSessionContextChange, useSessionLaunchSubmit } from "./new-session-form-actions";
 import { resolveComposerWorkspaceId } from "./chat/composer-workspace";
+import { Trans, useTranslation } from "react-i18next";
 
 export type { HandoffPreset } from "./handoff-types";
 
@@ -187,6 +188,7 @@ export function useSessionPromptController(
   promptRef: RefObject<TaskFormInputsHandle | null>,
   taskId: string,
 ) {
+  const { t } = useTranslation();
   const { toast } = useToast();
   const { enhancePrompt, isEnhancingPrompt } = useUtilityAgentGenerator({ sessionId: null });
   const latestPromptValueRef = useRef("");
@@ -210,7 +212,7 @@ export function useSessionPromptController(
     await enhancePrompt(current, (enhanced) => {
       const delivered = promptResultDelivery.deliver(current, enhanced, generation);
       if (delivered) {
-        toast({ description: "Enhanced prompt applied.", variant: "success" });
+        toast({ description: t("task:enhancedPromptApplied"), variant: "success" });
       }
 
       return delivered;
@@ -305,6 +307,7 @@ function SessionFormHeader({
   isCreating: boolean;
   onProfileChange: (value: string) => void;
 }) {
+  const { t } = useTranslation();
   return (
     <>
       <EnvironmentBadges executorLabel={executorLabel} worktreeBranch={worktreeBranch} />
@@ -315,13 +318,15 @@ function SessionFormHeader({
       />
       {showAgentSelector && (
         <div className="min-w-0 space-y-1.5">
-          <label className="text-xs font-medium text-muted-foreground">Agent Profile</label>
+          <label className="text-xs font-medium text-muted-foreground">
+            {t("task:agentProfile")}
+          </label>
           <AgentSelector
             options={profileOptions}
             value={selectedProfileId}
             onValueChange={onProfileChange}
             disabled={isCreating}
-            placeholder="Select agent profile"
+            placeholder={t("task:selectAgentProfile")}
             popoverPortal
           />
         </div>
@@ -360,6 +365,7 @@ function NewSessionForm({
   handoff?: HandoffPreset;
   onClose: () => void;
 }) {
+  const { t } = useTranslation();
   const handoffInitial = handoff ? buildHandoffInitialState(handoff) : null;
   const { toast } = useToast();
   const setActiveSession = useAppStore((state) => state.setActiveSession);
@@ -478,10 +484,10 @@ function NewSessionForm({
           disabled={isCreating}
           className="cursor-pointer"
         >
-          Cancel
+          {t("common:cancel")}
         </Button>
         <Button type="submit" disabled={isSubmitDisabled} className="cursor-pointer">
-          {isCreating ? "Creating..." : "Start Agent"}
+          {isCreating ? t("task:creatingEllipsis") : t("task:startAgent2")}
         </Button>
       </DialogFooter>
     </form>
@@ -497,19 +503,22 @@ function NoAgentBanner({
   hasProfiles: boolean;
   executorProfileName: string | null;
 }) {
+  const { t } = useTranslation();
   if (noCompatibleProfiles) {
     return (
       <p className="text-xs text-center text-muted-foreground">
-        No agent profile is configured for{" "}
-        <span className="text-foreground">“{executorProfileName}”</span>. Configure credentials in
-        Settings → Executors.
+        <Trans i18nKey="task:noAgentProfileConfiguredFor" values={{ name: executorProfileName }}>
+          No agent profile is configured for{" "}
+          <span className="text-foreground">“{executorProfileName}”</span>. Configure credentials in
+          Settings → Executors.
+        </Trans>
       </p>
     );
   }
   if (!hasProfiles) {
     return (
       <p className="text-xs text-center text-muted-foreground">
-        No agent profiles configured. Add one in Settings → Agents first.
+        {t("task:noAgentProfilesConfiguredAddOne")}
       </p>
     );
   }
@@ -558,11 +567,15 @@ export function NewSessionDialog({
           <DialogTitle className="min-w-0 wrap-break-word pr-6 text-sm font-medium">
             {handoffLabel ? (
               <>
-                Hand off to <span className="text-foreground">{handoffLabel}</span>
+                <Trans i18nKey="task:handOffToTarget" values={{ label: handoffLabel }}>
+                  Hand off to <span className="text-foreground">{handoffLabel}</span>
+                </Trans>
               </>
             ) : (
               <>
-                New agent in <span className="text-foreground">{taskTitle}</span>
+                <Trans i18nKey="task:newAgentInTask" values={{ title: taskTitle }}>
+                  New agent in <span className="text-foreground">{taskTitle}</span>
+                </Trans>
               </>
             )}
           </DialogTitle>

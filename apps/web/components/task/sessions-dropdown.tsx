@@ -28,6 +28,7 @@ import { getWebSocketClient } from "@/lib/ws/connection";
 import { useSessionPendingInput, type PendingInput } from "@/hooks/use-task-pending-input";
 import { buildAgentLabelsById, resolveAgentLabelFor, sortSessions } from "./session-sort";
 import { resolveComposerWorkspaceId } from "./chat/composer-workspace";
+import { useTranslation } from "react-i18next";
 
 type SessionStatus = "running" | "waiting_input" | "complete" | "failed" | "cancelled";
 
@@ -319,17 +320,18 @@ function SessionDropdownContent({
   onSetPrimary?: (sessionId: string) => void;
   onNewSession: () => void;
 } & SessionLifecycleCallbacks) {
+  const { t } = useTranslation();
   return (
     <DropdownMenuContent align="end" className="w-auto min-w-[240px] max-w-[420px]">
       <div className="flex items-center justify-between px-2 py-0">
-        <span className="text-xs font-medium text-muted-foreground">Agents</span>
+        <span className="text-xs font-medium text-muted-foreground">{t("common:agents")}</span>
         <button
           type="button"
           onClick={onNewSession}
           className="flex items-center gap-1 rounded-md border border-border/60 px-2 py-1 text-xs text-muted-foreground hover:text-foreground hover:border-border transition-colors cursor-pointer"
         >
           <IconPlus className="h-3.5 w-3.5" />
-          New
+          {t("task:new")}
         </button>
       </div>
       <DropdownMenuSeparator />
@@ -368,10 +370,13 @@ function SessionDropdownList({
   onSelectSession: (sessionId: string) => void;
   onSetPrimary?: (sessionId: string) => void;
 } & SessionLifecycleCallbacks) {
+  const { t } = useTranslation();
   if (sessions.length === 0) {
     return (
       <div className="max-h-[300px] overflow-y-auto">
-        <div className="px-2 py-6 text-center text-sm text-muted-foreground">No agents yet</div>
+        <div className="px-2 py-6 text-center text-sm text-muted-foreground">
+          {t("task:noAgentsYet")}
+        </div>
       </div>
     );
   }
@@ -495,6 +500,7 @@ function SessionRowActions({
   onResume: (sessionId: string) => void;
   onDelete: (sessionId: string) => void;
 }) {
+  const { t } = useTranslation();
   const resumeAction = (e: React.MouseEvent) => {
     e.stopPropagation();
     onResume(session.id);
@@ -521,7 +527,7 @@ function SessionRowActions({
               <IconStar className="h-3.5 w-3.5" />
             </button>
           </TooltipTrigger>
-          <TooltipContent side="left">Set as Primary</TooltipContent>
+          <TooltipContent side="left">{t("task:setAsPrimary")}</TooltipContent>
         </Tooltip>
       )}
       {isSessionResumable(session.state) && (
@@ -535,7 +541,7 @@ function SessionRowActions({
               <IconPlayerPlayFilled className="h-3 w-3" />
             </button>
           </TooltipTrigger>
-          <TooltipContent side="left">Resume agent</TooltipContent>
+          <TooltipContent side="left">{t("task:resumeAgent")}</TooltipContent>
         </Tooltip>
       )}
       {isSessionDeletable(session.state) && (
@@ -549,7 +555,7 @@ function SessionRowActions({
               <IconTrash className="h-3 w-3" />
             </button>
           </TooltipTrigger>
-          <TooltipContent side="left">Delete agent</TooltipContent>
+          <TooltipContent side="left">{t("task:deleteAgent")}</TooltipContent>
         </Tooltip>
       )}
     </div>

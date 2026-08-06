@@ -16,18 +16,18 @@ import {
 import { getPRAggregateStatusColor, PRTaskIcon } from "@/components/github/pr-task-icon";
 import { IssueTaskIcon } from "@/components/github/issue-task-icon";
 import { useAppStore } from "@/components/state-provider";
-import { cn, formatRelativeTime } from "@/lib/utils";
+import { cn } from "@/lib/utils";
 import { computeRowIndent, resolveRowDepth } from "@/lib/sidebar/row-indent";
-import { isDebugUI } from "@/lib/config";
+import { TaskItemStatsRow } from "./task-item-stats-row";
 import { useTaskColor } from "@/hooks/use-task-color";
 import { TASK_COLOR_BAR_CLASS, type TaskColor } from "@/lib/task-colors";
 import type { ForegroundActivity, TaskState, TaskSessionState } from "@/lib/types/http";
 import { shouldUseQuestionTaskIcon, shouldUsePermissionTaskIcon } from "@/lib/ui/state-icons";
-import type { SessionPollMode } from "@/lib/state/slices/session-runtime/types";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { RemoteCloudTooltip } from "./remote-cloud-tooltip";
 import { classifyTask } from "./task-classify";
 import { ScrollOnOverflow } from "@kandev/ui/scroll-on-overflow";
+import { useTranslation } from "react-i18next";
 
 type DiffStats = {
   additions: number;
@@ -154,11 +154,12 @@ function taskItemRowClick(
 }
 
 function BackgroundWorkTaskIcon() {
+  const { t } = useTranslation();
   return (
     <Tooltip>
       <TooltipTrigger asChild>
         <span
-          aria-label="Background work is running"
+          aria-label={t("task:backgroundWorkIsRunning")}
           tabIndex={0}
           className="mt-[1px] flex shrink-0 rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500 focus-visible:ring-offset-1"
         >
@@ -169,7 +170,7 @@ function BackgroundWorkTaskIcon() {
           />
         </span>
       </TooltipTrigger>
-      <TooltipContent side="right">Background work is running</TooltipContent>
+      <TooltipContent side="right">{t("task:backgroundWorkIsRunning")}</TooltipContent>
     </Tooltip>
   );
 }
@@ -271,54 +272,6 @@ function TaskStateIcon({
   );
 }
 
-const POLL_MODE_CONFIG: Record<SessionPollMode, { letter: string; color: string; label: string }> =
-  {
-    fast: { letter: "F", color: "text-emerald-500", label: "focused, 2s polling" },
-    slow: { letter: "S", color: "text-yellow-500", label: "subscribed, 30s polling" },
-    paused: { letter: "P", color: "text-muted-foreground/40", label: "no subscribers" },
-  };
-
-function TaskItemStatsRow({
-  updatedAt,
-  prInfo,
-  primarySessionId,
-}: {
-  updatedAt?: string;
-  prInfo?: { number: number; state: string; aggregateState?: string };
-  primarySessionId?: string | null;
-}) {
-  const pollMode = useAppStore((s) =>
-    isDebugUI() && primarySessionId
-      ? (s.sessionPollMode.bySessionId[primarySessionId] ?? null)
-      : null,
-  );
-
-  if (!updatedAt && !prInfo && !pollMode) return null;
-
-  const modeConfig = pollMode ? POLL_MODE_CONFIG[pollMode] : null;
-
-  return (
-    <span className="flex items-center gap-1.5 text-[11px]">
-      {updatedAt && (
-        <span className="text-muted-foreground/50">{formatRelativeTime(updatedAt)}</span>
-      )}
-      {prInfo && <span className="text-muted-foreground/50">#{prInfo.number}</span>}
-      {modeConfig && (
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <span className={cn("font-mono text-[10px] font-semibold", modeConfig.color)}>
-              {modeConfig.letter}
-            </span>
-          </TooltipTrigger>
-          <TooltipContent side="right">
-            Git poll: {pollMode} ({modeConfig.label})
-          </TooltipContent>
-        </Tooltip>
-      )}
-    </span>
-  );
-}
-
 function DiffStatsRight({ diffStats, menuOpen }: { diffStats: DiffStats; menuOpen: boolean }) {
   return (
     <div
@@ -388,6 +341,7 @@ function TaskItemContent({
   issueInfo?: { url: string; number: number };
   agentErrorMessage?: string | null;
 }) {
+  const { t } = useTranslation();
   return (
     <div className="flex min-w-0 flex-1 flex-col gap-0.5">
       <span className="flex items-center gap-1 min-w-0 text-[13px] font-medium text-foreground leading-tight">
@@ -412,7 +366,7 @@ function TaskItemContent({
         )}
         {isArchived && (
           <span className="rounded px-1 py-px text-[10px] bg-amber-500/15 text-amber-500">
-            Archived
+            {t("task:filterDimensionArchived")}
           </span>
         )}
       </span>
@@ -427,13 +381,14 @@ function TaskItemContent({
 }
 
 function TaskAgentErrorIcon({ message }: { message: string }) {
+  const { t } = useTranslation();
   return (
     <Tooltip>
       <TooltipTrigger asChild>
         <span
           data-testid="task-agent-error-icon"
           className="inline-flex shrink-0 cursor-help text-destructive"
-          aria-label="Task has an agent error"
+          aria-label={t("task:taskHasAnAgentError")}
         >
           <IconAlertCircle className="h-3.5 w-3.5" aria-hidden="true" />
         </span>
@@ -590,12 +545,13 @@ function SubtaskToggle({
   collapsed: boolean;
   onToggle: () => void;
 }) {
+  const { t } = useTranslation();
   return (
     <button
       type="button"
       data-testid="sidebar-subtask-toggle"
       data-task-id={taskId}
-      aria-label={collapsed ? "Expand subtasks" : "Collapse subtasks"}
+      aria-label={collapsed ? t("task:expandSubtasks") : t("task:collapseSubtasks")}
       aria-expanded={!collapsed}
       onClick={(e) => {
         e.stopPropagation();
@@ -619,6 +575,7 @@ function TaskMenuButton({
   expanded: boolean;
   rowFocus?: boolean;
 }) {
+  const { t } = useTranslation();
   return (
     <div
       className={cn(
@@ -652,7 +609,7 @@ function TaskMenuButton({
             }),
           );
         }}
-        aria-label="Task actions"
+        aria-label={t("task:taskActions")}
         aria-haspopup="menu"
         aria-expanded={expanded}
       >

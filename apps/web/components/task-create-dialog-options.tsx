@@ -18,6 +18,7 @@ import { getExecutorIcon } from "@/lib/executor-icons";
 import { AgentLogo } from "@/components/agent-logo";
 import { getCapabilityWarning } from "@/lib/capability-warning";
 import { buildBranchKeywords } from "./task-create-dialog-pill";
+import { useTranslation } from "react-i18next";
 
 type OptionItem = {
   value: string;
@@ -119,6 +120,7 @@ export function useBranchOptions(branchOptionsRaw: Branch[]) {
 }
 
 export function useAgentProfileOptions(agentProfiles: AgentProfileOption[]): OptionItem[] {
+  const { t } = useTranslation();
   return useMemo(() => {
     // Disabled profiles stay in the store (existing sessions keep their
     // labels) but are never offered as a choice for new work.
@@ -145,7 +147,7 @@ export function useAgentProfileOptions(agentProfiles: AgentProfileOption[]): Opt
               {isPassthrough && (
                 <IconTerminal2
                   className="size-3.5 text-muted-foreground"
-                  title="CLI mode - your prompt will be auto-injected into the terminal"
+                  title={t("task:cliModeYourPromptWillBe")}
                 />
               )}
               {profileLabel ? (

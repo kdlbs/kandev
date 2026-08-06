@@ -3,6 +3,7 @@
 import { IconGitFork } from "@tabler/icons-react";
 import { Toggle } from "@kandev/ui/toggle";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
+import { useTranslation } from "react-i18next";
 
 const FRESH_BRANCH_TOOLTIP =
   "Create a new branch from the selected base. Any uncommitted changes in your local clone will be discarded; you'll be asked to confirm if there are any.";
@@ -19,12 +20,13 @@ export type FreshBranchToggleProps = {
  * attach-file button in the prompt input).
  */
 export function FreshBranchToggle({ enabled, onToggle }: FreshBranchToggleProps) {
+  const { t } = useTranslation();
   return (
     <Tooltip>
       <TooltipTrigger asChild>
         <Toggle
           variant="outline"
-          aria-label="Create a new branch"
+          aria-label={t("task:createANewBranch")}
           pressed={enabled}
           onPressedChange={onToggle}
           data-testid="fresh-branch-toggle"

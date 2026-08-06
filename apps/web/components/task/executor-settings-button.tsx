@@ -14,6 +14,7 @@ import { useTaskEnvironment } from "@/hooks/domains/session/use-task-environment
 import { isPreparingPhase } from "@/lib/prepare/summarize";
 import { PrepareStatusSection } from "./executor-prepare-status";
 import { EnvironmentInfo } from "./executor-environment-info";
+import { useTranslation } from "react-i18next";
 
 type ExecutorSettingsButtonProps = {
   taskId?: string | null;
@@ -21,11 +22,28 @@ type ExecutorSettingsButtonProps = {
   disabled?: boolean;
 };
 
+function ResetEnvironmentTooltip({ hasWorktreePath }: { hasWorktreePath: boolean }) {
+  const { t } = useTranslation();
+  return (
+    <TooltipContent className="max-w-xs">
+      <p className="font-medium">{t("task:resetEnvironment2")}</p>
+      <p className="mt-1 text-xs">{t("task:deletesTheCurrentTaskEnvironmentContainer")}</p>
+      <p className="mt-1 text-xs text-destructive">
+        {t("task:anyUncommittedOrUnpushedChangesAre")}
+      </p>
+      {hasWorktreePath && (
+        <p className="mt-1 text-xs text-muted-foreground">{t("task:pushYourBranchToItsRemote")}</p>
+      )}
+    </TooltipContent>
+  );
+}
+
 export function ExecutorSettingsButton({
   taskId,
   sessionId,
   disabled,
 }: ExecutorSettingsButtonProps) {
+  const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const [resetDialogOpen, setResetDialogOpen] = useState(false);
   const prepare = usePrepareSummary(sessionId ?? null);
@@ -86,7 +104,10 @@ export function ExecutorSettingsButton({
           <div className="border-t border-border px-2 py-1.5 flex items-center justify-end">
             <Tooltip>
               <TooltipTrigger asChild>
-                <span tabIndex={!env || isResetting ? 0 : -1} aria-label="Reset environment">
+                <span
+                  tabIndex={!env || isResetting ? 0 : -1}
+                  aria-label={t("task:resetEnvironment2")}
+                >
                   <Button
                     variant="destructive"
                     size="sm"
@@ -95,26 +116,11 @@ export function ExecutorSettingsButton({
                     data-testid="executor-settings-reset"
                     onClick={() => setResetDialogOpen(true)}
                   >
-                    <IconTrash className="h-3.5 w-3.5 mr-1" /> Reset environment
+                    <IconTrash className="h-3.5 w-3.5 mr-1" /> {t("task:resetEnvironment2")}
                   </Button>
                 </span>
               </TooltipTrigger>
-              <TooltipContent className="max-w-xs">
-                <p className="font-medium">Reset environment</p>
-                <p className="mt-1 text-xs">
-                  Deletes the current task environment (container, sandbox, and/or worktree) and
-                  forces a fresh one to be created for your next run.
-                </p>
-                <p className="mt-1 text-xs text-destructive">
-                  Any uncommitted or unpushed changes are lost.
-                </p>
-                {hasWorktreePath && (
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    Push your branch to its remote in the confirmation dialog to preserve committed
-                    work before resetting.
-                  </p>
-                )}
-              </TooltipContent>
+              <ResetEnvironmentTooltip hasWorktreePath={hasWorktreePath} />
             </Tooltip>
           </div>
         </HoverCardContent>
@@ -177,12 +183,13 @@ function ExecutorStatusDot({
   status: { label: string; tone: StatusTone } | null;
   loading: boolean;
 }) {
+  const { t } = useTranslation();
   const tone = status?.tone ?? "neutral";
   const label = status?.label ?? "not created";
   return (
     <span
       aria-hidden="true"
-      title={`Environment ${label}`}
+      title={t("task:environment", { label })}
       data-testid="executor-status-indicator"
       className={`absolute right-1 top-1 h-2.5 w-2.5 rounded-full border border-background ${DOT_CLASSES[tone]} ${
         loading && !status ? "animate-pulse" : ""

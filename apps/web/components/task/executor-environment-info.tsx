@@ -12,6 +12,8 @@ import {
 } from "@/lib/api/domains/task-environment-api";
 import { copyToClipboard } from "@/lib/utils/copy-to-clipboard";
 import { resolveExecutorEnvironmentStatus, type StatusTone } from "./executor-environment-status";
+import { useTranslation } from "react-i18next";
+import { t } from "@/lib/i18n";
 
 const TONE_CLASSES: Record<StatusTone, string> = {
   running: "border-green-500/30 bg-green-500/10 text-green-700 dark:text-green-300",
@@ -32,6 +34,7 @@ export function EnvironmentInfo({
   ssh?: SSHLiveStatus | null;
   loading: boolean;
 }) {
+  const { t } = useTranslation();
   if (loading && !env) {
     return (
       <div className="flex items-center justify-center py-6 text-muted-foreground">
@@ -43,10 +46,8 @@ export function EnvironmentInfo({
   if (!env) {
     return (
       <div className="px-3 py-4 text-muted-foreground">
-        <p className="font-medium text-foreground">No environment yet</p>
-        <p className="text-xs mt-1">
-          An environment is created when you start a session on this task.
-        </p>
+        <p className="font-medium text-foreground">{t("task:noEnvironmentYet")}</p>
+        <p className="text-xs mt-1">{t("task:anEnvironmentIsCreatedWhenYou")}</p>
       </div>
     );
   }
@@ -89,9 +90,10 @@ function EnvironmentFields({
   container: ContainerLiveStatus | null;
   ssh: SSHLiveStatus | null;
 }) {
+  const { t } = useTranslation();
   const fields = useMemo(() => buildFields(env, container, ssh), [env, container, ssh]);
   if (fields.length === 0) {
-    return <p className="text-xs text-muted-foreground">No resource details available.</p>;
+    return <p className="text-xs text-muted-foreground">{t("task:noResourceDetailsAvailable")}</p>;
   }
   return (
     <dl className="space-y-1 text-xs">
@@ -119,6 +121,7 @@ function Field({
   copy?: boolean;
   copyValue?: string;
 }) {
+  const { t } = useTranslation();
   return (
     <div className="flex items-start gap-2">
       <dt className="text-muted-foreground min-w-[80px]">{label}</dt>
@@ -128,10 +131,10 @@ function Field({
           <button
             type="button"
             className="cursor-pointer text-muted-foreground hover:text-foreground"
-            aria-label={`Copy ${label}`}
+            aria-label={t("task:copy2", { label })}
             onClick={() => {
               void copyToClipboard(copyValue ?? value).then((success) => {
-                if (success) toast.success(`${label} copied`);
+                if (success) toast.success(t("task:copied3", { label }));
               });
             }}
           >
@@ -156,30 +159,30 @@ function buildFields(
   const rows: FieldRow[] = [];
 
   if (env.worktree_path) {
-    rows.push({ label: "Worktree", value: env.worktree_path, copy: true });
+    rows.push({ label: t("task:worktree"), value: env.worktree_path, copy: true });
   }
   if (env.worktree_branch) {
-    rows.push({ label: "Branch", value: env.worktree_branch, copy: true });
+    rows.push({ label: t("task:branch"), value: env.worktree_branch, copy: true });
   }
 
   if (env.container_id) {
     const short = env.container_id.slice(0, 12);
-    rows.push({ label: "Container", value: short, copy: true });
+    rows.push({ label: t("task:container"), value: short, copy: true });
     // Use `sh` rather than `bash` — user-built images may only ship
     // /bin/sh (busybox/alpine/etc.), and the bootstrap entrypoint already
     // assumes sh-only.
     rows.push({
-      label: "Shell",
+      label: t("common:shell"),
       value: `docker exec -it ${short} sh`,
       copy: true,
     });
     if (container?.started_at && container.state === "running") {
-      rows.push({ label: "Uptime", value: formatUptime(container.started_at) });
+      rows.push({ label: t("task:uptime"), value: formatUptime(container.started_at) });
     }
   }
 
   if (env.sandbox_id) {
-    rows.push({ label: "Sprite", value: env.sandbox_id, copy: true });
+    rows.push({ label: t("task:sprite"), value: env.sandbox_id, copy: true });
   }
 
   if (env.executor_type === "ssh" && ssh) {
@@ -193,18 +196,18 @@ function addSshRows(rows: FieldRow[], ssh: SSHLiveStatus) {
   // user@host[:port] — matches what a user would paste into an SSH client.
   // Suppress :22 since the canonical port reads as noise.
   if (ssh.host) {
-    rows.push({ label: "Host", value: formatHostTarget(ssh), copy: true });
+    rows.push({ label: t("task:host"), value: formatHostTarget(ssh), copy: true });
   }
   if (ssh.remote_task_dir) {
-    rows.push({ label: "Workdir", value: ssh.remote_task_dir, copy: true });
+    rows.push({ label: t("task:workdir"), value: ssh.remote_task_dir, copy: true });
   }
   const agentctl = formatAgentctlSummary(ssh);
   if (agentctl) {
-    rows.push({ label: "Agentctl", value: agentctl });
+    rows.push({ label: t("task:agentctl"), value: agentctl });
   }
   if (ssh.fingerprint) {
     rows.push({
-      label: "Fingerprint",
+      label: t("task:fingerprint"),
       value: formatFingerprint(ssh.fingerprint),
       copy: true,
       copyValue: ssh.fingerprint,
@@ -213,7 +216,7 @@ function addSshRows(rows: FieldRow[], ssh: SSHLiveStatus) {
   // Shell affordance: paste-ready ssh command that mirrors how kandev
   // connects. Helpful when the user wants to inspect the remote dir by hand.
   if (ssh.host) {
-    rows.push({ label: "Shell", value: formatShellCommand(ssh), copy: true });
+    rows.push({ label: t("common:shell"), value: formatShellCommand(ssh), copy: true });
   }
 }
 

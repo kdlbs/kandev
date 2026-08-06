@@ -1711,4 +1711,42 @@ export const i18nGuardFiles = [
   "components/watcher-repository-fields.tsx",
   "components/workflow-selector-row.tsx",
   "components/workspace-content-search.tsx",
+  // The loose `components/task/*.tsx` level and the `components/task-*.tsx`
+  // create-dialog / preview files — the last of the task area. A single `*`,
+  // not `**`: the subdirectory globs above are separate migrations, and a `**`
+  // here would claim credit for trees this PR never touched.
+  //
+  // `chat-context-items.ts` is listed on its own because it holds no JSX;
+  // `mode: "jsx-only"` never inspects it, so the entry records that its three
+  // plural labels are migrated but only the pseudo-locale can prove it stays
+  // that way. The other loose `.ts` files at this level are deliberately
+  // absent — they are hooks and layout helpers whose copy has not been
+  // migrated, and claiming them would be false.
+  //
+  // Deliberately left in English inside this tree, because they are protocol
+  // or data rather than copy: the dockview panel ids built by
+  // `sessionPanelId()` in `session-reopen-menu.tsx` and its `.ts` siblings;
+  // ports, hosts and proxy/tunnel URLs in `port-forward-dialog.tsx`, whose
+  // `badge` prop was split into a `"detected" | "manual"` discriminant plus a
+  // translated label so the `===` comparison stays locale-independent; commit
+  // SHAs, refs and author names in `commit-row.tsx` / `commit-detail-panel.tsx`;
+  // terminal commands and the `</ kandev-system>` marker in the passthrough
+  // components; the `#1470`-style GitHub ref *shape* inside
+  // `githubIssueRefPlaceholder` / `githubPrRefPlaceholder`, which is one key
+  // each so a translator can localize the "or" without touching the URL; and
+  // console-only diagnostic prefixes such as `[ModeSelector] …`.
+  "components/task/*.tsx",
+  "components/task/chat-context-items.ts",
+  "components/task-create-dialog-footer.tsx",
+  "components/task-create-dialog-form-body.tsx",
+  "components/task-create-dialog-fresh-branch.tsx",
+  "components/task-create-dialog-header.tsx",
+  "components/task-create-dialog-options.tsx",
+  "components/task-create-dialog-remote-repo-chip.tsx",
+  "components/task-create-dialog-remote-repo-chips.tsx",
+  "components/task-create-dialog-repo-chips.tsx",
+  "components/task-create-dialog-selectors.tsx",
+  "components/task-create-dialog-source-mode.tsx",
+  "components/task-create-dialog-workspace-repo-chips.tsx",
+  "components/task-preview-panel.tsx",
 ];

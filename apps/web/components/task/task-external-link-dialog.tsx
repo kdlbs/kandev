@@ -26,6 +26,7 @@ import { useSentryInstances } from "@/hooks/domains/sentry/use-sentry-availabili
 import { findTaskInSnapshots } from "@/lib/kanban/find-task";
 import type { SentryIssue } from "@/lib/types/sentry";
 import { buildLinkedIssueTitle } from "./task-external-link-utils";
+import { useTranslation } from "react-i18next";
 
 export type ExternalLinkProvider = "jira" | "linear" | "sentry";
 
@@ -120,6 +121,7 @@ function SentryLinkInstanceField({
   instanceId: string;
   onChange: (id: string) => void;
 }) {
+  const { t } = useTranslation();
   const sentry = useSentryInstances(workspaceId);
 
   // Depend on a by-value signature of the healthy instance IDs rather than the
@@ -149,17 +151,17 @@ function SentryLinkInstanceField({
   if (sentry.state === "empty" || sentry.state === "unhealthy") {
     return (
       <p className="text-xs text-muted-foreground" data-testid="sentry-link-no-instance">
-        Connect a healthy Sentry instance in Settings → Integrations → Sentry to link issues.
+        {t("task:connectAHealthySentryInstanceIn")}
       </p>
     );
   }
   if (sentry.state !== "multi") return null;
   return (
     <div className="space-y-2">
-      <Label htmlFor="sentry-link-instance">Sentry instance</Label>
+      <Label htmlFor="sentry-link-instance">{t("task:sentryInstance")}</Label>
       <Select value={instanceId} onValueChange={onChange}>
         <SelectTrigger id="sentry-link-instance" data-testid="sentry-link-instance-select">
-          <SelectValue placeholder="Select an instance" />
+          <SelectValue placeholder={t("task:selectAnInstance")} />
         </SelectTrigger>
         <SelectContent>
           {sentry.healthy.map((inst) => (
@@ -242,6 +244,7 @@ export function TaskExternalLinkDialog({
   task,
   workspaceId,
 }: TaskExternalLinkDialogProps) {
+  const { t } = useTranslation();
   const config = PROVIDERS[provider];
   const { input, setInput, instanceId, setInstanceId, submitting, error, setError, submit } =
     useExternalLinkForm(config, task, workspaceId, open, onOpenChange);
@@ -287,7 +290,7 @@ export function TaskExternalLinkDialog({
             onClick={() => onOpenChange(false)}
             disabled={submitting}
           >
-            Cancel
+            {t("common:cancel")}
           </Button>
           <Button
             type="button"
@@ -297,7 +300,7 @@ export function TaskExternalLinkDialog({
             data-dialog-default-action
             data-testid="task-external-link-submit"
           >
-            {submitting ? "Saving" : "Save"}
+            {submitting ? t("task:saving2") : t("common:save")}
           </Button>
         </DialogFooter>
       </DialogContent>

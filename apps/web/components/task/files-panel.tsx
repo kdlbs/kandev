@@ -15,6 +15,7 @@ import {
   getAddSourcesDisabledReason,
   hasActiveTaskSourceWork as getHasActiveTaskSourceWork,
 } from "./add-workspace-sources/add-workspace-sources-availability";
+import { useTranslation } from "react-i18next";
 
 type FilesPanelProps = {
   onOpenFile: (file: OpenFileTab) => void;
@@ -52,9 +53,10 @@ function TaskSourceDialog({
 }
 
 function NoTaskSelected() {
+  const { t } = useTranslation();
   return (
     <div className="flex items-center justify-center h-full text-muted-foreground text-xs">
-      No task selected
+      {t("task:noTaskSelected")}
     </div>
   );
 }

@@ -32,6 +32,7 @@ import { applySummarizeSessionResult, type SummaryToastFn } from "./session-cont
 import { useSubtaskPromptZone, useSubtaskSubmit } from "./use-subtask-submit";
 import type { KanbanState } from "@/lib/state/slices/kanban/types";
 import type { Message, TaskSession } from "@/lib/types/http";
+import { useTranslation } from "react-i18next";
 
 type NewSubtaskDialogProps = {
   open: boolean;
@@ -481,6 +482,7 @@ export function NewSubtaskDialog({
   parentTaskId,
   parentTaskTitle,
 }: NewSubtaskDialogProps) {
+  const { t } = useTranslation();
   const { sessions: parentSessions } = useTaskSessions(parentTaskId);
   const {
     agentProfiles,
@@ -517,7 +519,7 @@ export function NewSubtaskDialog({
       >
         <DialogHeader>
           <DialogTitle className="min-w-0 wrap-break-word pr-6 text-sm font-medium">
-            New subtask for <span className="text-foreground">{parentTaskTitle}</span>
+            {t("task:newSubtaskFor")} <span className="text-foreground">{parentTaskTitle}</span>
           </DialogTitle>
         </DialogHeader>
         <NewSubtaskForm

@@ -20,6 +20,7 @@ import {
   pullRequestPayload,
   type TaskPullRequestLinkTarget,
 } from "./task-github-pr-url";
+import { useTranslation } from "react-i18next";
 
 type TaskGitHubPRDialogProps = {
   workspaceId: string | null;
@@ -29,6 +30,40 @@ type TaskGitHubPRDialogProps = {
   repositories: Repository[];
 };
 
+function PRDialogFooter({
+  submitting,
+  onCancel,
+  onSubmit,
+}: {
+  submitting: boolean;
+  onCancel: () => void;
+  onSubmit: () => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <DialogFooter className="gap-2">
+      <Button
+        type="button"
+        variant="outline"
+        className="cursor-pointer"
+        onClick={onCancel}
+        disabled={submitting}
+      >
+        {t("common:cancel")}
+      </Button>
+      <Button
+        type="button"
+        className="cursor-pointer"
+        onClick={onSubmit}
+        disabled={submitting}
+        data-testid="task-github-pr-submit"
+      >
+        {submitting ? t("task:saving2") : t("common:save")}
+      </Button>
+    </DialogFooter>
+  );
+}
+
 export function TaskGitHubPRDialog({
   workspaceId,
   open,
@@ -36,6 +71,7 @@ export function TaskGitHubPRDialog({
   task,
   repositories,
 }: TaskGitHubPRDialogProps) {
+  const { t } = useTranslation();
   const { toast } = useToast();
   const [input, setInput] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -43,7 +79,7 @@ export function TaskGitHubPRDialog({
   const githubRepos = useMemo(() => githubReposForTask(task, repositories), [task, repositories]);
   const inferredRepo = githubRepos.length === 1 ? githubRepos[0] : null;
   const placeholder = inferredRepo
-    ? "#1471 or github.com/owner/repo/pull/1471"
+    ? t("task:githubPrRefPlaceholder")
     : "github.com/owner/repo/pull/1471";
 
   useEffect(() => {
@@ -72,7 +108,7 @@ export function TaskGitHubPRDialog({
         pr_url: payload.pr_url,
         ...(payload.repository_id ? { repository_id: payload.repository_id } : {}),
       });
-      toast({ description: "GitHub pull request linked", variant: "success" });
+      toast({ description: t("task:githubPullRequestLinked"), variant: "success" });
       onOpenChange(false);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to link GitHub pull request.");
@@ -85,15 +121,18 @@ export function TaskGitHubPRDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="w-[calc(100vw-2rem)] sm:max-w-lg">
         <DialogHeader>
-          <DialogTitle>Link GitHub pull request</DialogTitle>
+          <DialogTitle>{t("task:linkGithubPullRequest")}</DialogTitle>
           <DialogDescription>
             {inferredRepo
-              ? `Use a full pull request URL or number for ${inferredRepo.owner}/${inferredRepo.repo}.`
-              : "Use a full GitHub pull request URL for this task."}
+              ? t("task:useAFullPullRequestUrl", {
+                  owner: inferredRepo.owner,
+                  repo: inferredRepo.repo,
+                })
+              : t("task:useAFullGithubPullRequest")}
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-2">
-          <Label htmlFor="task-github-pr-input">Pull request</Label>
+          <Label htmlFor="task-github-pr-input">{t("task:pullRequest")}</Label>
           <Input
             id="task-github-pr-input"
             data-testid="task-github-pr-input"
@@ -108,26 +147,11 @@ export function TaskGitHubPRDialog({
             </p>
           )}
         </div>
-        <DialogFooter className="gap-2">
-          <Button
-            type="button"
-            variant="outline"
-            className="cursor-pointer"
-            onClick={() => onOpenChange(false)}
-            disabled={submitting}
-          >
-            Cancel
-          </Button>
-          <Button
-            type="button"
-            className="cursor-pointer"
-            onClick={submit}
-            disabled={submitting}
-            data-testid="task-github-pr-submit"
-          >
-            {submitting ? "Saving" : "Save"}
-          </Button>
-        </DialogFooter>
+        <PRDialogFooter
+          submitting={submitting}
+          onCancel={() => onOpenChange(false)}
+          onSubmit={submit}
+        />
       </DialogContent>
     </Dialog>
   );

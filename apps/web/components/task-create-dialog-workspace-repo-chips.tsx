@@ -31,6 +31,8 @@ import {
   computeBranchDisabledReason,
 } from "@/components/task-create-dialog-branch-utils";
 import { useRepoBranchAutoselect } from "@/components/task-create-dialog-repo-branch-autoselect";
+import { useTranslation } from "react-i18next";
+import { t } from "@/lib/i18n";
 
 type WorkspaceRepoChipsProps = {
   rows: TaskRepoRow[];
@@ -88,6 +90,7 @@ export function WorkspaceRepoChips({
   lastUsedBranch,
   userSettingsLoaded,
 }: WorkspaceRepoChipsProps) {
+  const { t } = useTranslation();
   return (
     <>
       {rows.map((row) => (
@@ -134,7 +137,7 @@ export function WorkspaceRepoChips({
               type="button"
               onClick={onAdd}
               disabled={!canAddMore}
-              aria-label="Add repository"
+              aria-label={t("task:addRepository")}
               data-testid="add-repository"
               className={cn(
                 "inline-flex items-center justify-center gap-1.5 rounded-md text-muted-foreground",
@@ -149,7 +152,7 @@ export function WorkspaceRepoChips({
             </button>
           </span>
         </TooltipTrigger>
-        <TooltipContent>{addHint ?? "Add another repository"}</TooltipContent>
+        <TooltipContent>{addHint ?? t("task:addAnotherRepository")}</TooltipContent>
       </Tooltip>
     </>
   );
@@ -375,7 +378,7 @@ function computeRepoChipDisplay(
 function buildCreateRepositoryAction(onSelect?: () => void): PillAction | undefined {
   if (!onSelect) return undefined;
   return {
-    label: "Create new repository",
+    label: t("task:createNewRepository"),
     icon: <IconFolderPlus className="h-3.5 w-3.5" />,
     onSelect,
   };
@@ -401,6 +404,7 @@ function RepoChip({
   onRefreshRepositories,
   repositoriesRefreshing,
 }: RepoChipProps) {
+  const { t } = useTranslation();
   const { repoOptions, branchOptions, branchesLoading, refreshBranches } = useRepoChipData({
     row,
     workspaceId,
@@ -436,11 +440,11 @@ function RepoChip({
       <Pill
         icon={<IconCode className="h-3 w-3 shrink-0 text-muted-foreground" />}
         value={repoLabel}
-        placeholder="repository"
+        placeholder={t("task:repository")}
         options={repoOptions}
         onSelect={onRepositoryChange}
-        searchPlaceholder="Search repositories..."
-        emptyMessage="No repositories"
+        searchPlaceholder={t("task:searchRepositories")}
+        emptyMessage={t("task:noRepositories")}
         testId="repo-chip-trigger"
         tooltip={repoTooltip}
         filter={scoreRepo}
@@ -464,8 +468,8 @@ function RepoChip({
           branchesLoading,
           optionCount: branchOptions.length,
         })}
-        searchPlaceholder="Search branches..."
-        emptyMessage="No branches"
+        searchPlaceholder={t("task:searchBranches")}
+        emptyMessage={t("task:noBranches")}
         testId="branch-chip-trigger"
         tooltip={computeBranchTooltip(branchPrefix)}
         onRefresh={refreshBranches}
@@ -479,20 +483,21 @@ function RepoChip({
 }
 
 function RepoChipRemoveButton({ onRemove }: { onRemove: () => void }) {
+  const { t } = useTranslation();
   return (
     <Tooltip>
       <TooltipTrigger asChild>
         <button
           type="button"
           onClick={onRemove}
-          aria-label="Remove repository"
+          aria-label={t("task:removeRepository")}
           className="h-6 w-6 inline-flex items-center justify-center rounded text-muted-foreground hover:text-destructive hover:bg-muted/60 cursor-pointer"
           data-testid="remove-repo-chip"
         >
           <IconX className="h-3 w-3" />
         </button>
       </TooltipTrigger>
-      <TooltipContent>Remove repository</TooltipContent>
+      <TooltipContent>{t("task:removeRepository")}</TooltipContent>
     </Tooltip>
   );
 }
@@ -528,7 +533,7 @@ function renderDiscoveredRepoOption(path: string, alreadyAdded: boolean) {
         <span className="truncate text-[11px] text-muted-foreground">{display}</span>
       </span>
       <Badge variant="outline" className="text-[10px] text-muted-foreground shrink-0">
-        on disk
+        {t("task:onDisk")}
       </Badge>
       {alreadyAdded ? <AlreadyAddedMarker /> : null}
     </span>
@@ -536,10 +541,11 @@ function renderDiscoveredRepoOption(path: string, alreadyAdded: boolean) {
 }
 
 function AlreadyAddedMarker() {
+  const { t } = useTranslation();
   return (
     <span
       role="img"
-      aria-label="Already added"
+      aria-label={t("task:alreadyAdded")}
       data-testid="already-added-repository-marker"
       className="shrink-0 text-primary"
     >

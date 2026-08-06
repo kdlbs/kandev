@@ -26,6 +26,7 @@ import { Label } from "@kandev/ui/label";
 import { Input } from "@kandev/ui/input";
 import { Textarea } from "@kandev/ui/textarea";
 import { RadioGroup, RadioGroupItem } from "@kandev/ui/radio-group";
+import { Trans, useTranslation } from "react-i18next";
 
 // --- Discard Confirmation Dialog ---
 
@@ -44,34 +45,35 @@ export function DiscardDialog({
   filesToDiscard,
   onConfirm,
 }: DiscardDialogProps) {
+  const { t } = useTranslation();
   const isBulk = filesToDiscard && filesToDiscard.length > 1;
   const displayFile = fileToDiscard ?? (filesToDiscard?.length === 1 ? filesToDiscard[0] : null);
   const description = isBulk
-    ? `This will permanently discard all changes to ${filesToDiscard.length} files. This action cannot be undone.`
+    ? t("task:discardAllChangesToFiles", { count: filesToDiscard.length })
     : null;
 
   return (
     <AlertDialog open={open} onOpenChange={onOpenChange}>
       <AlertDialogContent>
         <AlertDialogHeader>
-          <AlertDialogTitle>Discard changes?</AlertDialogTitle>
+          <AlertDialogTitle>{t("task:discardChanges")}</AlertDialogTitle>
           <AlertDialogDescription className="break-words">
             {description ?? (
-              <>
+              <Trans i18nKey="task:discardChangesToFile" values={{ file: displayFile }}>
                 This will permanently discard all changes to{" "}
                 <span className="font-semibold [overflow-wrap:anywhere]">{displayFile}</span>. This
                 action cannot be undone.
-              </>
+              </Trans>
             )}
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
-          <AlertDialogCancel>Cancel</AlertDialogCancel>
+          <AlertDialogCancel>{t("common:cancel")}</AlertDialogCancel>
           <AlertDialogAction
             onClick={onConfirm}
             className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
           >
-            Discard
+            {t("task:discard")}
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>
@@ -98,21 +100,20 @@ export function AmendDialog({
   onAmend,
   isLoading,
 }: AmendDialogProps) {
+  const { t } = useTranslation();
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-[500px]">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <IconGitCommit className="h-5 w-5" />
-            Amend Commit Message
+            {t("task:amendCommitMessage")}
           </DialogTitle>
         </DialogHeader>
         <div className="space-y-4 py-2">
-          <p className="text-sm text-muted-foreground">
-            Edit the message for the most recent commit.
-          </p>
+          <p className="text-sm text-muted-foreground">{t("task:editTheMessageForTheMost")}</p>
           <Textarea
-            placeholder="Enter new commit message..."
+            placeholder={t("task:enterNewCommitMessage")}
             value={amendMessage}
             onChange={(e) => onAmendMessageChange(e.target.value)}
             rows={4}
@@ -123,7 +124,7 @@ export function AmendDialog({
         <DialogFooter>
           <DialogClose asChild>
             <Button type="button" variant="outline" className="cursor-pointer">
-              Cancel
+              {t("common:cancel")}
             </Button>
           </DialogClose>
           <Button
@@ -134,12 +135,12 @@ export function AmendDialog({
             {isLoading ? (
               <>
                 <IconLoader2 className="h-4 w-4 animate-spin mr-2" />
-                Amending...
+                {t("task:amending")}
               </>
             ) : (
               <>
                 <IconCheck className="h-4 w-4 mr-2" />
-                Amend
+                {t("task:amend")}
               </>
             )}
           </Button>
@@ -159,6 +160,35 @@ type ResetDialogProps = {
   isLoading: boolean;
 };
 
+/** Type-to-confirm field for a hard reset. The SHA is never translated — the
+ * user must type it verbatim and it is compared with `===`. */
+function HardResetConfirmField({
+  shortSha,
+  confirmation,
+  onConfirmationChange,
+}: {
+  shortSha: string;
+  confirmation: string;
+  onConfirmationChange: (value: string) => void;
+}) {
+  return (
+    <div className="space-y-2 p-3 border border-destructive/50 rounded-md bg-destructive/5">
+      <p className="text-xs text-destructive font-medium">
+        <Trans i18nKey="task:typeShaToConfirm" values={{ shortSha }}>
+          Type <code className="bg-muted px-1 rounded">{shortSha}</code> to confirm:
+        </Trans>
+      </p>
+      <Input
+        value={confirmation}
+        onChange={(e) => onConfirmationChange(e.target.value)}
+        placeholder={shortSha}
+        className="font-mono h-8 text-sm"
+        autoComplete="off"
+      />
+    </div>
+  );
+}
+
 export function ResetDialog({
   open,
   onOpenChange,
@@ -166,6 +196,7 @@ export function ResetDialog({
   onReset,
   isLoading,
 }: ResetDialogProps) {
+  const { t } = useTranslation();
   const shortSha = commitSha?.slice(0, 7) ?? "";
   const [mode, setMode] = useState<"soft" | "hard">("soft");
   const [confirmation, setConfirmation] = useState("");
@@ -192,7 +223,7 @@ export function ResetDialog({
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent className="sm:max-w-[450px]">
         <DialogHeader>
-          <DialogTitle>Reset to commit {shortSha}</DialogTitle>
+          <DialogTitle>{t("task:resetToCommitSha", { shortSha })}</DialogTitle>
         </DialogHeader>
         <div className="space-y-4 py-2">
           <RadioGroup
@@ -204,10 +235,10 @@ export function ResetDialog({
               <RadioGroupItem value="soft" id="reset-soft" className="mt-1" />
               <div className="flex-1">
                 <Label htmlFor="reset-soft" className="font-medium cursor-pointer">
-                  Soft Reset
+                  {t("task:softReset")}
                 </Label>
                 <p className="text-sm text-muted-foreground">
-                  Move HEAD to this commit. Keep all changes staged.
+                  {t("task:moveHeadToThisCommitKeep")}
                 </p>
               </div>
             </div>
@@ -215,34 +246,27 @@ export function ResetDialog({
               <RadioGroupItem value="hard" id="reset-hard" className="mt-1" />
               <div className="flex-1">
                 <Label htmlFor="reset-hard" className="font-medium cursor-pointer text-destructive">
-                  Hard Reset
+                  {t("task:hardReset")}
                 </Label>
                 <p className="text-sm text-muted-foreground">
-                  Discard all changes permanently. This cannot be undone.
+                  {t("task:discardAllChangesPermanentlyThisCannot")}
                 </p>
               </div>
             </div>
           </RadioGroup>
 
           {mode === "hard" && (
-            <div className="space-y-2 p-3 border border-destructive/50 rounded-md bg-destructive/5">
-              <p className="text-xs text-destructive font-medium">
-                Type <code className="bg-muted px-1 rounded">{shortSha}</code> to confirm:
-              </p>
-              <Input
-                value={confirmation}
-                onChange={(e) => setConfirmation(e.target.value)}
-                placeholder={shortSha}
-                className="font-mono h-8 text-sm"
-                autoComplete="off"
-              />
-            </div>
+            <HardResetConfirmField
+              shortSha={shortSha}
+              confirmation={confirmation}
+              onConfirmationChange={setConfirmation}
+            />
           )}
         </div>
         <DialogFooter>
           <DialogClose asChild>
             <Button type="button" variant="outline" disabled={isLoading} className="cursor-pointer">
-              Cancel
+              {t("common:cancel")}
             </Button>
           </DialogClose>
           <Button
@@ -254,10 +278,10 @@ export function ResetDialog({
             {isLoading ? (
               <>
                 <IconLoader2 className="h-4 w-4 animate-spin mr-2" />
-                Resetting...
+                {t("common:resetting")}
               </>
             ) : (
-              <>Reset</>
+              <>{t("common:reset")}</>
             )}
           </Button>
         </DialogFooter>

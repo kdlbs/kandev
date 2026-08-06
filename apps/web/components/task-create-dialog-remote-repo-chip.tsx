@@ -44,6 +44,7 @@ import {
   looksLikeSupportedRemoteURL,
   looksLikeURL,
 } from "@/components/workspace-source-picker/remote-url";
+import { Trans, useTranslation } from "react-i18next";
 
 const TRUNCATE_THRESHOLD = 30;
 
@@ -130,20 +131,21 @@ export function RemoteRepoChip({
 }
 
 function RemoteResolutionError({ error, onRetry }: { error: Error; onRetry: () => void }) {
+  const { t } = useTranslation();
   return (
     <span className="flex max-w-full items-center gap-2 text-xs text-destructive" role="alert">
       <span className="min-w-0 break-words">
-        Could not resolve remote repository: {error.message}
+        {t("task:couldNotResolveRemoteRepository", { message: error.message })}
       </span>
       <Button
         type="button"
         variant="outline"
         size="sm"
         className="h-11 sm:h-9 cursor-pointer"
-        aria-label="Retry remote repository resolution"
+        aria-label={t("task:retryRemoteRepositoryResolution")}
         onClick={onRetry}
       >
-        Retry
+        {t("task:retry")}
       </Button>
     </span>
   );
@@ -316,6 +318,16 @@ function truncateMiddle(value: string, max: number): string {
 
 // --- Popover content ---------------------------------------------------------
 
+function StagedRemoteUrlHint() {
+  return (
+    <div className="px-2 pt-1 text-xs text-muted-foreground">
+      <Trans i18nKey="task:remoteUrlPressEnter">
+        <span className="font-medium text-foreground">Remote URL</span> — press Enter to submit it.
+      </Trans>
+    </div>
+  );
+}
+
 function RemoteRepoPopoverContent({
   accessible,
   selectedRepositoryIdentities,
@@ -327,6 +339,7 @@ function RemoteRepoPopoverContent({
   onPick: (repo: RemoteRepository) => void;
   onPaste: (value: string) => void;
 }) {
+  const { t } = useTranslation();
   const [value, setValue] = useState("");
   const [urlError, setUrlError] = useState<string | null>(null);
   const [activeProvider, setActiveProvider] = useState<RemoteRepositoryProvider | null>(null);
@@ -382,8 +395,8 @@ function RemoteRepoPopoverContent({
           const isURL = looksLikeURL(value.trim());
           if (commitURL(value) || isURL) event.preventDefault();
         }}
-        placeholder="Search repositories or paste a remote URL"
-        aria-label="Search repositories or paste a remote URL"
+        placeholder={t("task:searchRepositoriesOrPasteARemote")}
+        aria-label={t("task:searchRepositoriesOrPasteARemote")}
         aria-invalid={visibleUrlError ? true : undefined}
         data-testid="remote-repo-input"
         data-legacy-testid="remote-paste-url-input"
@@ -393,12 +406,7 @@ function RemoteRepoPopoverContent({
           visibleUrlError && "border-destructive focus:border-destructive",
         )}
       />
-      {hasStagedURL ? (
-        <div className="px-2 pt-1 text-xs text-muted-foreground">
-          <span className="font-medium text-foreground">Remote URL</span> — press Enter to submit
-          it.
-        </div>
-      ) : null}
+      {hasStagedURL ? <StagedRemoteUrlHint /> : null}
       <PickerList
         accessible={{ ...accessible, repos: visibleRepos }}
         selectedRepositoryIdentities={selectedRepositoryIdentities}
@@ -444,6 +452,7 @@ function PickerList({
   onPick: (repo: RemoteRepository) => void;
   urlError: string | null;
 }) {
+  const { t } = useTranslation();
   const { repos, loading, error } = accessible;
   return (
     <div className="h-56 max-h-[calc(100vh-16rem)] overflow-y-auto p-1">
@@ -459,15 +468,17 @@ function PickerList({
           data-testid="remote-repo-picker-loading"
         >
           <Spinner className="size-3" />
-          <span>Loading repositories…</span>
+          <span>{t("task:loadingRepositories")}</span>
         </div>
       ) : null}
       {!accessible.unavailable && !loading && repos.length === 0 && !error ? (
-        <div className="px-2 py-3 text-xs text-muted-foreground">No repositories found.</div>
+        <div className="px-2 py-3 text-xs text-muted-foreground">
+          {t("task:noRepositoriesFound")}
+        </div>
       ) : null}
       {error ? (
         <div className="px-2 py-3 text-xs text-destructive">
-          Could not load repositories: {error.message}
+          {t("task:couldNotLoadRepositories", { message: error.message })}
         </div>
       ) : null}
       {repos.map((repo) => (
@@ -493,6 +504,7 @@ function RepoOption({
   alreadyAdded: boolean;
   onPick: (repo: RemoteRepository) => void;
 }) {
+  const { t } = useTranslation();
   return (
     <button
       type="button"
@@ -511,7 +523,7 @@ function RepoOption({
         {alreadyAdded ? <AlreadyAddedMarker /> : null}
         {repo.private ? (
           <Badge variant="outline" className="text-[10px] text-muted-foreground">
-            private
+            {t("task:private")}
           </Badge>
         ) : null}
       </span>
@@ -520,10 +532,11 @@ function RepoOption({
 }
 
 function AlreadyAddedMarker() {
+  const { t } = useTranslation();
   return (
     <span
       role="img"
-      aria-label="Already added"
+      aria-label={t("task:alreadyAdded")}
       data-testid="already-added-repository-marker"
       className="text-primary"
     >
@@ -535,14 +548,16 @@ function AlreadyAddedMarker() {
 function ConnectProvidersBanner() {
   return (
     <div className="px-3 py-3 text-xs text-muted-foreground">
-      Connect a source control provider in{" "}
-      <Link
-        href="/settings/integrations"
-        className="text-foreground underline underline-offset-2 cursor-pointer"
-      >
-        Settings
-      </Link>{" "}
-      to pick from your repositories.
+      <Trans i18nKey="task:connectProviderBanner">
+        Connect a source control provider in{" "}
+        <Link
+          href="/settings/integrations"
+          className="text-foreground underline underline-offset-2 cursor-pointer"
+        >
+          Settings
+        </Link>{" "}
+        to pick from your repositories.
+      </Trans>
     </div>
   );
 }
@@ -562,6 +577,7 @@ function RemoteBranchPill({
   branchesLoading: boolean;
   onBranchChange: (branch: string) => void;
 }) {
+  const { t } = useTranslation();
   const hasUrl = !!url.trim();
   const hasBranch = !!branch.trim();
   const branchOptions = useMemo(() => sortBranches(branches).map(branchToOption), [branches]);
@@ -586,11 +602,11 @@ function RemoteBranchPill({
         branchesLoading,
         branchOptions.length,
       )}
-      searchPlaceholder="Search branches..."
-      emptyMessage={branchesLoading ? "Loading branches…" : "No branches"}
+      searchPlaceholder={t("task:searchBranches")}
+      emptyMessage={branchesLoading ? t("task:loadingBranches") : t("task:noBranches")}
       testId="remote-branch-chip-trigger"
       filter={scoreBranch}
-      tooltip="Base branch"
+      tooltip={t("task:baseBranch")}
       flat
     />
   );
@@ -613,20 +629,21 @@ function computeRemoteBranchDisabledReason(
 // --- Remove button -----------------------------------------------------------
 
 function RemoveButton({ onRemove }: { onRemove: () => void }) {
+  const { t } = useTranslation();
   return (
     <Tooltip>
       <TooltipTrigger asChild>
         <button
           type="button"
           onClick={onRemove}
-          aria-label="Remove repository"
+          aria-label={t("task:removeRepository")}
           data-testid="remote-chip-remove"
           className="h-6 w-6 inline-flex items-center justify-center rounded text-muted-foreground hover:text-destructive hover:bg-muted/60 cursor-pointer"
         >
           <IconX className="h-3 w-3" />
         </button>
       </TooltipTrigger>
-      <TooltipContent>Remove repository</TooltipContent>
+      <TooltipContent>{t("task:removeRepository")}</TooltipContent>
     </Tooltip>
   );
 }

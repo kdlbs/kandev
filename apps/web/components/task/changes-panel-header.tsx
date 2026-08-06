@@ -6,7 +6,6 @@ import {
   IconEye,
   IconChevronDown,
   IconGitBranch,
-  IconGitCherryPick,
   IconGitMerge,
   IconArrowRight,
   IconLoader2,
@@ -27,20 +26,14 @@ import {
   DrawerTitle,
   DrawerTrigger,
 } from "@kandev/ui/drawer";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-} from "@kandev/ui/dropdown-menu";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from "@kandev/ui/dropdown-menu";
 import { PanelHeaderBarSplit } from "./panel-primitives";
 import { BaseBranchPicker } from "./base-branch-picker";
 import type { GitCredentialDisplay } from "./changes-git-credential-display";
 import { useTouchDrawer } from "@/hooks/use-compact-task-chrome";
+import { useTranslation } from "react-i18next";
 
-type PerRepoStatus = {
+export type PerRepoStatus = {
   repository_name: string;
   branch: string | null;
   ahead: number;
@@ -70,6 +63,8 @@ type RenameBranchResult = {
  * per named repo with that repo's task base_branch (or the workspace-level
  * fallback when none was recorded).
  */
+import { PerRepoPullMenu } from "./changes-panel-per-repo-menu";
+
 function buildBranchRows(
   perRepoStatus: PerRepoStatus[],
   baseBranchByRepo: Record<string, string> | undefined,
@@ -97,6 +92,7 @@ function RenameBranchButton({
   onRenameBranch?: (newName: string, repo: string) => Promise<RenameBranchResult>;
   isRenaming: boolean;
 }) {
+  const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const [newBranchName, setNewBranchName] = useState(branch);
   const [error, setError] = useState<string | null>(null);
@@ -129,7 +125,7 @@ function RenameBranchButton({
         variant="ghost"
         className="h-6 w-6 shrink-0 text-muted-foreground hover:text-foreground"
         disabled={!onRenameBranch || isRenaming}
-        aria-label={`Edit branch ${branch}`}
+        aria-label={t("task:editBranch", { branch })}
         onClick={openDialog}
       >
         <IconEdit className="h-3.5 w-3.5" />
@@ -137,10 +133,12 @@ function RenameBranchButton({
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>Edit branch</DialogTitle>
+            <DialogTitle>{t("task:editBranch2")}</DialogTitle>
           </DialogHeader>
           <div className="space-y-2">
-            <Label htmlFor={`branch-name-${repositoryName || "default"}`}>Branch name</Label>
+            <Label htmlFor={`branch-name-${repositoryName || "default"}`}>
+              {t("task:branchName")}
+            </Label>
             <Input
               id={`branch-name-${repositoryName || "default"}`}
               value={newBranchName}
@@ -151,7 +149,7 @@ function RenameBranchButton({
           </div>
           <DialogFooter>
             <Button type="button" variant="outline" onClick={() => setOpen(false)}>
-              Cancel
+              {t("common:cancel")}
             </Button>
             <Button
               type="button"
@@ -159,7 +157,7 @@ function RenameBranchButton({
               disabled={!canRename || isRenaming}
               onClick={submitRename}
             >
-              Save
+              {t("common:save")}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -231,6 +229,7 @@ function BranchHoverCard({
   isRenaming: boolean;
   credentialDisplay: GitCredentialDisplay | null;
 }) {
+  const { t } = useTranslation();
   const usesTouchDrawer = useTouchDrawer();
   const [open, setOpen] = useState(false);
   const isMulti = rows && rows.length > 0;
@@ -240,7 +239,7 @@ function BranchHoverCard({
     <button
       type="button"
       className="flex items-center justify-center size-5 rounded hover:bg-muted/60 text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
-      aria-label="Show branch and Git credential details"
+      aria-label={t("task:showBranchAndGitCredentialDetails")}
     >
       <IconGitBranch className="h-3.5 w-3.5" />
     </button>
@@ -289,8 +288,8 @@ function BranchHoverCard({
         <DrawerTrigger asChild>{trigger}</DrawerTrigger>
         <DrawerContent>
           <DrawerHeader>
-            <DrawerTitle>Branch details</DrawerTitle>
-            <DrawerDescription>Branch comparison and task Git credentials.</DrawerDescription>
+            <DrawerTitle>{t("task:branchDetails")}</DrawerTitle>
+            <DrawerDescription>{t("task:branchComparisonAndTaskGitCredentials")}</DrawerDescription>
           </DrawerHeader>
           <div className="px-4 pb-6">{content}</div>
         </DrawerContent>
@@ -399,65 +398,6 @@ function PullDropdown({
   );
 }
 
-function PerRepoPullMenu({
-  repoNames,
-  perRepoStatus,
-  onRepoPull,
-  onRepoRebase,
-  onRepoMerge,
-  repoDisplayName,
-}: {
-  repoNames: string[];
-  perRepoStatus: PerRepoStatus[];
-  onRepoPull: (repo: string) => void;
-  onRepoRebase: (repo: string) => void;
-  onRepoMerge: (repo: string) => void;
-  repoDisplayName?: (repositoryName: string) => string | undefined;
-}) {
-  const statusByName = new Map(perRepoStatus.map((s) => [s.repository_name, s]));
-  return (
-    <>
-      {repoNames.map((repo, idx) => {
-        const s = statusByName.get(repo);
-        const behind = s?.behind ?? 0;
-        const label = repoDisplayName?.(repo) || repo || "Repository";
-        return (
-          <div key={repo || "__no_repo__"}>
-            {idx > 0 && <DropdownMenuSeparator />}
-            <DropdownMenuLabel className="text-[10px] text-muted-foreground/70 uppercase tracking-wide flex items-center justify-between">
-              <span className="truncate">{label}</span>
-              {behind > 0 && (
-                <span className="text-yellow-500 normal-case tracking-normal">{behind} behind</span>
-              )}
-            </DropdownMenuLabel>
-            <DropdownMenuItem
-              onClick={() => onRepoPull(repo)}
-              className="cursor-pointer text-xs gap-2"
-            >
-              <IconCloudDownload className="h-3.5 w-3.5 text-muted-foreground" />
-              Pull
-            </DropdownMenuItem>
-            <DropdownMenuItem
-              onClick={() => onRepoRebase(repo)}
-              className="cursor-pointer text-xs gap-2"
-            >
-              <IconGitCherryPick className="h-3.5 w-3.5 text-muted-foreground" />
-              Rebase
-            </DropdownMenuItem>
-            <DropdownMenuItem
-              onClick={() => onRepoMerge(repo)}
-              className="cursor-pointer text-xs gap-2"
-            >
-              <IconGitMerge className="h-3.5 w-3.5 text-muted-foreground" />
-              Merge
-            </DropdownMenuItem>
-          </div>
-        );
-      })}
-    </>
-  );
-}
-
 function ChangesPanelHeaderLeft({
   showDiffReview,
   onOpenDiffAll,
@@ -471,6 +411,7 @@ function ChangesPanelHeaderLeft({
   onRequestWalkthrough?: () => void;
   requestWalkthroughDisabled?: boolean;
 }) {
+  const { t } = useTranslation();
   if (!showDiffReview) return null;
   return (
     <>
@@ -481,7 +422,7 @@ function ChangesPanelHeaderLeft({
         onClick={onOpenDiffAll}
       >
         <IconGitMerge className="h-3 w-3" />
-        Diff
+        {t("task:diff")}
       </Button>
       <Button
         size="sm"
@@ -490,7 +431,7 @@ function ChangesPanelHeaderLeft({
         onClick={onOpenReview}
       >
         <IconEye className="h-3 w-3" />
-        Review
+        {t("task:filterStateReview")}
       </Button>
       {onRequestWalkthrough ? (
         <ChangesPanelWalkthroughButton
@@ -509,6 +450,7 @@ function ChangesPanelWalkthroughButton({
   onRequestWalkthrough: () => void;
   requestWalkthroughDisabled?: boolean;
 }) {
+  const { t } = useTranslation();
   const tooltip = requestWalkthroughDisabled
     ? "Loading changed files..."
     : "Walk me through these changes";
@@ -520,13 +462,13 @@ function ChangesPanelWalkthroughButton({
             size="sm"
             variant="ghost"
             className="h-5 text-[11px] px-1.5 gap-1 cursor-pointer"
-            aria-label="Walk me through these changes"
+            aria-label={t("task:walkMeThroughTheseChanges")}
             data-testid="changes-request-walkthrough"
             disabled={requestWalkthroughDisabled}
             onClick={onRequestWalkthrough}
           >
             <IconRoute className="h-3 w-3" />
-            <span className="hidden @[350px]/changes-panel:inline">Walkthrough</span>
+            <span className="hidden @[350px]/changes-panel:inline">{t("task:walkthrough2")}</span>
           </Button>
         </span>
       </TooltipTrigger>

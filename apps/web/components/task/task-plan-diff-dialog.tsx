@@ -15,6 +15,7 @@ import { ToggleGroup, ToggleGroupItem } from "@kandev/ui/toggle-group";
 import { cn } from "@/lib/utils";
 import type { TaskPlanRevision } from "@/lib/types/http";
 import { lineDiff, diffSummary, type DiffLine, type DiffLineKind } from "./task-plan-diff";
+import { useTranslation } from "react-i18next";
 
 type Props = {
   /** Revision pair in arbitrary user-pick order; the dialog re-orders them by
@@ -47,6 +48,7 @@ export function PlanRevisionDiffDialog({
   onClose,
   onRestoreOlder,
 }: Props): ReactNode {
+  const { t } = useTranslation();
   const [before, after] = useMemo(() => orderPair(pair), [pair]);
   const [mode, setMode] = useState<DiffMode>("unified");
   const open = before !== null && after !== null;
@@ -68,7 +70,7 @@ export function PlanRevisionDiffDialog({
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
           <DialogDescription className="text-xs">
-            Line-level diff between the two selected versions.
+            {t("task:lineLevelDiffBetweenTheTwo")}
           </DialogDescription>
         </DialogHeader>
         <DiffBody
@@ -85,7 +87,7 @@ export function PlanRevisionDiffDialog({
             className="cursor-pointer"
             data-testid="plan-revision-diff-close"
           >
-            Close
+            {t("task:close")}
           </Button>
           {before && !sameRevision && (
             <Button
@@ -93,7 +95,7 @@ export function PlanRevisionDiffDialog({
               className="cursor-pointer"
               data-testid="plan-revision-diff-restore"
             >
-              Restore v{before.revision_number}
+              {t("task:restoreVersion", { version: before.revision_number })}
             </Button>
           )}
         </DialogFooter>
@@ -115,6 +117,7 @@ function DiffBody({
   mode: DiffMode;
   setMode: (m: DiffMode) => void;
 }) {
+  const { t } = useTranslation();
   const { beforeContent, afterContent, lines, error } = useDiffContent(before, after, loadContent);
   const summary = lines ? diffSummary(lines) : null;
   const sameRevision = before !== null && after !== null && before.id === after.id;
@@ -122,7 +125,9 @@ function DiffBody({
     <div className="flex flex-col flex-1 min-h-0 gap-2">
       <div className="flex items-center justify-between">
         <div className="text-[11px] text-muted-foreground" data-testid="plan-revision-diff-summary">
-          {summary ? `${summary.added} added · ${summary.removed} removed` : "Loading…"}
+          {summary
+            ? t("task:addedRemoved", { added: summary.added, removed: summary.removed })
+            : t("task:loading2")}
         </div>
         <ToggleGroup
           type="single"
@@ -138,14 +143,14 @@ function DiffBody({
             className="text-xs px-2 cursor-pointer"
             data-testid="plan-revision-diff-mode-unified"
           >
-            Unified
+            {t("task:unified")}
           </ToggleGroupItem>
           <ToggleGroupItem
             value="split"
             className="text-xs px-2 cursor-pointer"
             data-testid="plan-revision-diff-mode-split"
           >
-            Split
+            {t("task:split")}
           </ToggleGroupItem>
         </ToggleGroup>
       </div>
@@ -190,13 +195,13 @@ function DiffBodyInner({
   sameRevision: boolean;
   summary: { added: number; removed: number } | null;
 }) {
+  const { t } = useTranslation();
   if (error) return <div className="p-3 text-destructive">{error}</div>;
   if (lines === null) return <DiffLoading />;
-  if (sameRevision)
-    return <DiffMessage>These are the same version; nothing to compare.</DiffMessage>;
-  if (lines.length === 0) return <DiffMessage>(both versions are empty)</DiffMessage>;
+  if (sameRevision) return <DiffMessage>{t("task:theseAreTheSameVersionNothing")}</DiffMessage>;
+  if (lines.length === 0) return <DiffMessage>{t("task:bothVersionsAreEmpty")}</DiffMessage>;
   if (summary && summary.added === 0 && summary.removed === 0) {
-    return <DiffMessage>No textual changes between these versions.</DiffMessage>;
+    return <DiffMessage>{t("task:noTextualChangesBetweenTheseVersions")}</DiffMessage>;
   }
   if (mode === "split") {
     return <SplitDiff beforeContent={beforeContent ?? ""} afterContent={afterContent ?? ""} />;
@@ -348,10 +353,11 @@ function SplitCell({ side, line }: { side: "before" | "after"; line: DiffLine | 
 }
 
 function DiffLoading() {
+  const { t } = useTranslation();
   return (
     <div className="flex items-center gap-2 p-3 text-muted-foreground">
       <IconLoader2 className="h-3.5 w-3.5 animate-spin" />
-      Loading…
+      {t("task:loading2")}
     </div>
   );
 }

@@ -12,6 +12,7 @@ import {
   getAddSourcesDisabledReason,
   hasActiveTaskSourceWork as getHasActiveTaskSourceWork,
 } from "./add-workspace-sources/add-workspace-sources-availability";
+import { useTranslation } from "react-i18next";
 
 function FilesTabContent({
   sessionId,
@@ -36,10 +37,11 @@ function FilesTabContent({
   addSourcesButtonRef?: Ref<HTMLButtonElement>;
   addSourcesDisabledReason?: string;
 }) {
+  const { t } = useTranslation();
   if (!sessionId) {
     return (
       <div className="flex items-center justify-center h-full text-muted-foreground text-xs">
-        No task selected
+        {t("task:noTaskSelected")}
       </div>
     );
   }

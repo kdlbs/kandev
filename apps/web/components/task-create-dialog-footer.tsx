@@ -18,6 +18,7 @@ import {
 } from "@kandev/ui/dropdown-menu";
 import { SHORTCUTS } from "@/lib/keyboard/constants";
 import { KeyboardShortcutTooltip } from "@/components/keyboard-shortcut-tooltip";
+import { useTranslation } from "react-i18next";
 
 type UpdateButtonProps = {
   isCreatingTask: boolean;
@@ -26,6 +27,7 @@ type UpdateButtonProps = {
 };
 
 function UpdateButton({ isCreatingTask, hasTitle, onUpdate }: UpdateButtonProps) {
+  const { t } = useTranslation();
   return (
     <Button
       type="button"
@@ -37,10 +39,10 @@ function UpdateButton({ isCreatingTask, hasTitle, onUpdate }: UpdateButtonProps)
       {isCreatingTask ? (
         <>
           <IconLoader2 className="h-3.5 w-3.5 animate-spin" />
-          Updating...
+          {t("task:updating2")}
         </>
       ) : (
-        "Update"
+        t("task:update")
       )}
     </Button>
   );
@@ -63,6 +65,7 @@ function StartTaskSplitButton({
   onAltAction,
   onPlanModeAction,
 }: StartTaskSplitButtonProps) {
+  const { t } = useTranslation();
   const altLabel = isEditMode ? "Update task" : "Create only";
 
   return (
@@ -80,7 +83,7 @@ function StartTaskSplitButton({
           ) : (
             <IconSend className="h-3.5 w-3.5" />
           )}
-          {isCreatingTask ? "Starting..." : "Start task"}
+          {isCreatingTask ? t("task:starting") : t("task:startTask")}
         </Button>
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
@@ -102,7 +105,7 @@ function StartTaskSplitButton({
                 data-testid="submit-plan-mode"
               >
                 <IconFileInvoice className="h-3.5 w-3.5 mr-1.5" />
-                Start task in plan mode
+                {t("task:startTaskInPlanMode")}
               </DropdownMenuItem>
             )}
             <DropdownMenuItem
@@ -111,7 +114,7 @@ function StartTaskSplitButton({
               data-testid="submit-create-without-agent"
             >
               <IconPlus className="h-3.5 w-3.5 mr-1.5" />
-              {isEditMode ? "Update task" : "Create without starting agent"}
+              {isEditMode ? t("task:updateTask") : t("task:createWithoutStartingAgent")}
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
@@ -127,7 +130,7 @@ function StartTaskSplitButton({
           data-testid="mobile-plan-mode"
         >
           <IconFileInvoice className="h-3.5 w-3.5" />
-          Plan mode
+          {t("task:planMode")}
         </Button>
       )}
       <Button
@@ -163,6 +166,7 @@ function DefaultSubmitButton({
   hasDescription,
   disabled,
 }: DefaultSubmitButtonProps) {
+  const { t } = useTranslation();
   const planModeStyle =
     isCreateMode && !hasDescription
       ? "bg-blue-600 border-blue-500 text-white hover:bg-blue-700 hover:text-white"
@@ -182,20 +186,20 @@ function DefaultSubmitButton({
           return (
             <>
               <IconLoader2 className="h-3.5 w-3.5 animate-spin" />
-              {isEditMode ? "Updating..." : "Starting..."}
+              {isEditMode ? t("task:updating2") : t("task:starting")}
             </>
           );
         }
-        if (isSessionMode) return "Create Session";
+        if (isSessionMode) return t("task:createSession");
         if (isCreateMode) {
           return (
             <>
               <IconFileInvoice className="h-3.5 w-3.5" />
-              Start Plan Mode
+              {t("task:startPlanMode")}
             </>
           );
         }
-        return "Update task";
+        return t("task:updateTask");
       })()}
     </Button>
   );
@@ -339,6 +343,7 @@ function computeFooterState(props: TaskCreateDialogFooterProps) {
 export const TaskCreateDialogFooter = memo(function TaskCreateDialogFooter(
   props: TaskCreateDialogFooterProps,
 ) {
+  const { t } = useTranslation();
   const {
     isSessionMode,
     isCreateMode,
@@ -372,7 +377,7 @@ export const TaskCreateDialogFooter = memo(function TaskCreateDialogFooter(
           disabled={isCreatingSession || isCreatingTask}
           className="w-full h-10 border-0 cursor-pointer sm:w-auto sm:h-7 sm:border"
         >
-          Cancel
+          {t("common:cancel")}
         </Button>
       </DialogClose>
       <KeyboardShortcutTooltip

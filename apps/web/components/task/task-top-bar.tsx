@@ -22,6 +22,7 @@ import { WorkflowStepper, type WorkflowStepperStep } from "@/components/task/wor
 import { TaskTopBarPluginActions } from "@/components/task/task-top-bar-plugin-actions";
 import { TopbarMetrics } from "@/components/system-metrics/topbar-metrics";
 import { isDebugUI } from "@/lib/config";
+import { useTranslation } from "react-i18next";
 
 type TaskTopBarProps = {
   taskId?: string | null;
@@ -231,9 +232,10 @@ function AttentionStatusGroup({
   issueUrl?: string;
   issueNumber?: number;
 }) {
+  const { t } = useTranslation();
   return (
     <TopbarCluster
-      label="Task status and attention"
+      label={t("task:taskStatusAndAttention")}
       className={[
         "[&_button]:h-7",
         "[&_button]:text-xs",
@@ -309,10 +311,11 @@ function TopbarToolsGroup({
   isArchived?: boolean;
   embeddedVscodeSupported?: boolean;
 }) {
+  const { t } = useTranslation();
   const showDebugToggle = isDebugUI() && onToggleDebugOverlay;
 
   return (
-    <TopbarCluster label="Task tools" className="[&_button]:h-7 [&_button]:text-xs">
+    <TopbarCluster label={t("task:taskTools")} className="[&_button]:h-7 [&_button]:text-xs">
       {!isArchived && (
         <>
           <LayoutPresetSelector />
@@ -366,11 +369,15 @@ function TopBarRight({
   officeTaskHref?: string | null;
   onTaskUnarchived?: (taskId: string) => void;
 }) {
+  const { t } = useTranslation();
   return (
     <div className="flex items-center justify-self-end gap-2 [&_button]:whitespace-nowrap">
       <TopbarMetrics activeSessionId={activeSessionId} size="sm" />
       {!isArchived && (
-        <TopbarCluster label="Plugin top bar actions" className="[&_button]:h-7 [&_button]:text-xs">
+        <TopbarCluster
+          label={t("task:pluginTopBarActions")}
+          className="[&_button]:h-7 [&_button]:text-xs"
+        >
           <TaskTopBarPluginActions
             sessionId={activeSessionId ?? null}
             taskId={taskId ?? null}
@@ -380,14 +387,17 @@ function TopBarRight({
         </TopbarCluster>
       )}
       {isArchived && (
-        <TopbarCluster label="Unarchive task" className="[&_button]:h-7 [&_button]:text-xs">
+        <TopbarCluster
+          label={t("task:unarchiveTask")}
+          className="[&_button]:h-7 [&_button]:text-xs"
+        >
           <TaskUnarchiveButton taskId={taskId} onUnarchived={onTaskUnarchived} />
         </TopbarCluster>
       )}
       {officeTaskHref && (
-        <TopbarCluster label="Open in office view" className="[&_a]:h-7 [&_a]:text-xs">
+        <TopbarCluster label={t("task:openInOfficeView")} className="[&_a]:h-7 [&_a]:text-xs">
           <Button asChild size="sm" variant="outline" className="h-7 cursor-pointer px-2">
-            <Link href={officeTaskHref}>Open in office view</Link>
+            <Link href={officeTaskHref}>{t("task:openInOfficeView")}</Link>
           </Button>
         </TopbarCluster>
       )}

@@ -21,6 +21,7 @@ import { usePanelSearch } from "@/hooks/use-panel-search";
 import { suppressIOSKeyboardAssists } from "@/lib/terminal/suppress-ios-keyboard-assists";
 import { sendShellInput } from "@/lib/terminal/send-shell-input";
 import { WorkspaceUnavailable } from "./workspace-unavailable";
+import { useTranslation } from "react-i18next";
 
 type ShellTerminalProps = {
   sessionId?: string;
@@ -398,6 +399,7 @@ export function ShellTerminal({
   processId,
   isStopping = false,
 }: ShellTerminalProps) {
+  const { t } = useTranslation();
   const terminalRef = useRef<HTMLDivElement>(null);
   const xtermRef = useRef<Terminal | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
@@ -492,7 +494,9 @@ export function ShellTerminal({
           <div ref={terminalRef} className="h-full w-full" />
         </div>
         {isStopping && (
-          <div className="absolute right-3 top-2 text-xs text-muted-foreground">Stopping…</div>
+          <div className="absolute right-3 top-2 text-xs text-muted-foreground">
+            {t("task:stopping")}
+          </div>
         )}
         {searchBar}
       </div>
