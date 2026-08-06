@@ -206,7 +206,8 @@ test.describe("Markdown text wrapping", () => {
     await expect(separator).toHaveAttribute("aria-orientation", "vertical");
     await expect(separator).toHaveAttribute("aria-valuemin", "64");
     await expect(separator).toHaveAttribute("aria-valuenow", String(Math.round(initialWidths[0])));
-    expect(Number(await separator.getAttribute("aria-valuemax"))).toBeGreaterThan(initialWidths[0]);
+    const expectedMax = Math.max(64, initialWidths[0] + initialWidths[1] - 64);
+    expect(Number(await separator.getAttribute("aria-valuemax"))).toBeCloseTo(expectedMax, 5);
     const initialTableWidth = await table.evaluate(
       (element) => element.getBoundingClientRect().width,
     );

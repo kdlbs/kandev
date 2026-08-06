@@ -80,6 +80,8 @@ specific.
 - RED: adjacent-pair resizing grows and shrinks by equal amounts.
 - RED: both drag directions clamp at 64 pixels without changing the pair total.
 - RED: keyboard deltas use the same geometry behavior.
+- Cover the resize hook's keyboard branches, capability-disable reset, and
+  column-count-change reset in a focused hook test.
 - GREEN: implement the geometry module and table component, then wire it into
   `markdown-components.tsx`.
 - The repository does not add isolated React component tests for pure UI.
@@ -92,6 +94,7 @@ Likely files:
 - `apps/web/lib/markdown/table-resize.test.ts`
 - `apps/web/components/shared/resizable-markdown-table.tsx`
 - `apps/web/components/shared/use-markdown-table-resize.ts`
+- `apps/web/components/shared/use-markdown-table-resize.test.ts`
 - `apps/web/components/shared/markdown-components.tsx`
 - `apps/web/app/globals.css`
 - `apps/web/src/locales/en/common.json`
@@ -127,15 +130,16 @@ the renderer contract, and this package does not authorize subagent use.
 ## Verification
 
 ```bash
-cd apps && pnpm install --frozen-lockfile
-cd apps && pnpm --filter @kandev/web exec vitest run \
+(cd apps && pnpm install --frozen-lockfile)
+(cd apps && pnpm --filter @kandev/web exec vitest run \
   lib/markdown/table-resize.test.ts \
-  components/shared/markdown-components.test.tsx
-cd apps/web && pnpm run typecheck
-cd apps && pnpm --filter @kandev/web lint
+  components/shared/use-markdown-table-resize.test.ts \
+  components/shared/markdown-components.test.tsx)
+(cd apps/web && pnpm run typecheck)
+(cd apps && pnpm --filter @kandev/web lint)
 make build-web
-cd apps/web && pnpm e2e:run tests/chat/markdown-wrap.spec.ts
-cd apps/web && pnpm e2e:run --project mobile-chrome tests/chat/mobile-markdown-wrap.spec.ts
+(cd apps/web && pnpm e2e:run tests/chat/markdown-wrap.spec.ts)
+(cd apps/web && pnpm e2e:run --project mobile-chrome tests/chat/mobile-markdown-wrap.spec.ts)
 ```
 
 ## Documentation impact
@@ -163,7 +167,7 @@ None.
 
 ## Verification results
 
-- `vitest`: 32 focused geometry/shared-renderer tests passed.
+- `vitest`: 36 focused geometry/hook/shared-renderer tests passed.
 - `pnpm run typecheck`: passed.
 - `pnpm --filter @kandev/web lint`: passed with zero warnings.
 - `make build-web`: passed.

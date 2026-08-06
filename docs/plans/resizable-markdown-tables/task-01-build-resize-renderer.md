@@ -44,12 +44,13 @@ spec: "../../specs/ui/resizable-markdown-tables.md"
 ## Verification
 
 ```bash
-cd apps && pnpm install --frozen-lockfile
-cd apps && pnpm --filter @kandev/web exec vitest run \
+(cd apps && pnpm install --frozen-lockfile)
+(cd apps && pnpm --filter @kandev/web exec vitest run \
   lib/markdown/table-resize.test.ts \
-  components/shared/markdown-components.test.tsx
-cd apps/web && pnpm run typecheck
-cd apps && pnpm --filter @kandev/web lint
+  components/shared/use-markdown-table-resize.test.ts \
+  components/shared/markdown-components.test.tsx)
+(cd apps/web && pnpm run typecheck)
+(cd apps && pnpm --filter @kandev/web lint)
 git diff --check
 ```
 
