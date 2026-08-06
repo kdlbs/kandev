@@ -133,3 +133,7 @@ OS pipe deadline when supported, and otherwise close the owned stdin after the s
 Both the real process-pipe and generic blocked-writer regressions failed before the change and pass
 20 repetitions under `-race`; `go test -race ./internal/agentctl/server/lsp -count=1 -timeout=90s`
 and backend lint pass.
+
+CodeQL review then found that adding header and payload lengths directly in the frame allocation
+could theoretically overflow `int`. The peer now rejects invalid/overflowing frame sizes before
+allocation. Exact wire-format and maximum-size overflow tests pass 20 repetitions under `-race`.

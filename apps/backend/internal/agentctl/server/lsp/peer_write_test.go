@@ -3,6 +3,7 @@ package lsp
 import (
 	"errors"
 	"io"
+	"math"
 	"os"
 	"sync"
 	"testing"
@@ -13,6 +14,19 @@ type blockingPeerWriter struct {
 	started chan struct{}
 	closed  chan struct{}
 	once    sync.Once
+}
+
+func TestBuildPeerFrame(t *testing.T) {
+	frame, err := buildPeerFrame([]byte(`{}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := string(frame), "Content-Length: 2\r\n\r\n{}"; got != want {
+		t.Fatalf("frame = %q, want %q", got, want)
+	}
+	if _, err := checkedPeerFrameSize(math.MaxInt, 1); !errors.Is(err, errPeerFrameTooLarge) {
+		t.Fatalf("overflow size error = %v, want frame too large", err)
+	}
 }
 
 func TestPeerWriteTimeoutClosesBlockedProcessPipe(t *testing.T) {
