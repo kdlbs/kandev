@@ -22,6 +22,13 @@ import { cn } from "@kandev/ui/lib/utils";
 import { AppStatusDrawerTrigger } from "@/components/app-status-bar/app-status-surface-provider";
 import { linkToTaskOverview } from "@/lib/links";
 
+/**
+ * A middle breadcrumb between the leading crumb and the page title. No `href`
+ * means orientation rather than navigation; `phoneOnlyLink` keeps the crumb
+ * clickable below `md` (where the sidebar is hidden) and static above it.
+ */
+export type ParentCrumb = { label: string; href?: string; phoneOnlyLink?: boolean };
+
 type PageTopbarProps = {
   /** Page title shown as the rightmost (current) breadcrumb */
   title: string;
@@ -41,7 +48,7 @@ type PageTopbarProps = {
    * the crumb clickable below `md` (where the sidebar is hidden) but renders
    * static text on desktop (e.g. "Settings", whose menu the sidebar owns).
    */
-  parents?: Array<{ label: string; href?: string; phoneOnlyLink?: boolean }>;
+  parents?: ParentCrumb[];
   /** Optional content rendered before the breadcrumb */
   leading?: ReactNode;
   /** Optional content rendered at the visual center of the topbar */
@@ -110,7 +117,7 @@ function TopbarBreadcrumb({
 }: {
   backHref: string;
   backLabel: string;
-  parents: Array<{ label: string; href?: string; phoneOnlyLink?: boolean }> | undefined;
+  parents: ParentCrumb[] | undefined;
   title: string;
   subtitle?: string;
   icon?: ReactNode;
@@ -171,8 +178,6 @@ function TopbarBreadcrumb({
     </Breadcrumb>
   );
 }
-
-type ParentCrumb = { label: string; href?: string; phoneOnlyLink?: boolean };
 
 function ParentCrumbLabel({ crumb }: { crumb: ParentCrumb }) {
   if (crumb.href) {
@@ -264,7 +269,7 @@ type TopbarLeadingProps = {
   variant: "breadcrumb" | "root";
   backHref: string;
   backLabel: string;
-  parents: Array<{ label: string; href?: string; phoneOnlyLink?: boolean }> | undefined;
+  parents: ParentCrumb[] | undefined;
   title: string;
   subtitle?: string;
   icon?: ReactNode;

@@ -5,6 +5,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 let pathname = "/settings/integrations/github";
 const COPY_CONFIG_TEST_ID = "mock-copy-config";
 
+// The rendered current-page crumb; PageTopbar marks it, not the parents.
+const CURRENT_PAGE = '[aria-current="page"]';
+const WORKSPACES_HREF = "/settings/workspaces";
+const WS_HREF = `${WORKSPACES_HREF}/ws-1`;
+
 const state = {
   configChat: { isOpen: false },
   workspaces: {
@@ -18,6 +23,16 @@ const state = {
   settingsAgents: {
     items: [{ name: "claude", profiles: [{ id: "prof-1", name: "My Profile101" }] }],
   },
+  executors: {
+    items: [
+      {
+        id: "exec-1",
+        name: "local-docker",
+        profiles: [{ id: "exec-prof-1", name: "Alpha" }],
+      },
+    ],
+  },
+  automations: { items: [{ id: "auto-1", workspace_id: "ws-1", name: "Nightly sync" }] },
   setActiveWorkspace: vi.fn(),
 };
 
@@ -94,7 +109,7 @@ describe("SettingsLayoutClient integrations actions", () => {
   });
 
   it("shows copy config on workspace-scoped integration pages", () => {
-    pathname = "/settings/workspaces/ws-1/integrations/github";
+    pathname = `${WS_HREF}/integrations/github`;
 
     render(
       <SettingsLayoutClient>
@@ -204,7 +219,7 @@ describe("SettingsLayoutClient breadcrumbs", () => {
   });
 
   it("links Workspaces and the workspace name on workspace sub-pages", () => {
-    pathname = "/settings/workspaces/ws-1/repositories";
+    pathname = `${WS_HREF}/repositories`;
 
     render(
       <SettingsLayoutClient>
@@ -213,7 +228,7 @@ describe("SettingsLayoutClient breadcrumbs", () => {
     );
 
     expect(screen.getByRole("link", { name: "Workspaces" }).getAttribute("href")).toBe(
-      "/settings/workspaces",
+      WORKSPACES_HREF,
     );
     expect(screen.getByRole("link", { name: "Default" }).getAttribute("href")).toBe(
       "/settings/workspaces/ws-1",
@@ -221,7 +236,7 @@ describe("SettingsLayoutClient breadcrumbs", () => {
   });
 
   it("titles the workspace overview with the workspace name", () => {
-    pathname = "/settings/workspaces/ws-1";
+    pathname = WS_HREF;
 
     const { container } = render(
       <SettingsLayoutClient>
@@ -230,11 +245,11 @@ describe("SettingsLayoutClient breadcrumbs", () => {
     );
 
     expect(screen.getByRole("link", { name: "Workspaces" }).getAttribute("href")).toBe(
-      "/settings/workspaces",
+      WORKSPACES_HREF,
     );
     // The workspace name is the current page crumb (no anchor of its own).
-    expect(container.querySelector('a[href="/settings/workspaces/ws-1"]')).toBeNull();
-    expect(screen.getByText("Default").closest('[aria-current="page"]')).toBeTruthy();
+    expect(container.querySelector(`a[href="${WS_HREF}"]`)).toBeNull();
+    expect(screen.getByText("Default").closest(CURRENT_PAGE)).toBeTruthy();
   });
 
   it("links Agents and titles the create page with the display name", () => {
@@ -250,7 +265,7 @@ describe("SettingsLayoutClient breadcrumbs", () => {
       "/settings/agents",
     );
     expect(container.querySelector('a[href="/settings/agents/claude"]')).toBeNull();
-    expect(screen.getByText("Claude Code").closest('[aria-current="page"]')).toBeTruthy();
+    expect(screen.getByText("Claude Code").closest(CURRENT_PAGE)).toBeTruthy();
   });
 
   it("titles profile pages with the profile name, directly under Agents", () => {
@@ -267,6 +282,85 @@ describe("SettingsLayoutClient breadcrumbs", () => {
     );
     // The saved agent has no page of its own, so no agent-name crumb.
     expect(container.querySelector('a[href="/settings/agents/claude"]')).toBeNull();
-    expect(screen.getByText("My Profile101").closest('[aria-current="page"]')).toBeTruthy();
+    expect(screen.getByText("My Profile101").closest(CURRENT_PAGE)).toBeTruthy();
+  });
+
+  // Integrations is a page of its own, so an integration service hangs off it
+  // rather than jumping from the workspace straight to "GitHub".
+});
+
+// The chains the URL-segment heuristic could not express: a section that is
+// itself a page, and record pages whose parent is another record.
+describe("SettingsLayoutClient record breadcrumbs", () => {
+  afterEach(() => cleanup());
+
+  it("links Integrations from an integration service page", () => {
+    pathname = `${WS_HREF}/integrations/github`;
+
+    render(
+      <SettingsLayoutClient>
+        <div>GitHub settings</div>
+      </SettingsLayoutClient>,
+    );
+
+    expect(crumbHrefs()).toEqual([
+      "/settings",
+      WORKSPACES_HREF,
+      "/settings/workspaces/ws-1",
+      "/settings/workspaces/ws-1/integrations",
+    ]);
+    expect(screen.getByText("GitHub").closest(CURRENT_PAGE)).toBeTruthy();
+  });
+
+  // The automation id was skipped as unreadable and the title fell back to the
+  // section segment, so this page read "… › Automations › Automations".
+  it("titles an automation with its name under a linked Automations crumb", () => {
+    pathname = `${WS_HREF}/automations/auto-1`;
+
+    render(
+      <SettingsLayoutClient>
+        <div>Automation editor</div>
+      </SettingsLayoutClient>,
+    );
+
+    expect(screen.getByRole("link", { name: "Automations" }).getAttribute("href")).toBe(
+      "/settings/workspaces/ws-1/automations",
+    );
+    expect(screen.getByText("Nightly sync").closest(CURRENT_PAGE)).toBeTruthy();
+  });
+
+  it("puts an executor profile under its executor, under Executors", () => {
+    pathname = "/settings/executor/exec-1/profile/exec-prof-1";
+
+    render(
+      <SettingsLayoutClient>
+        <div>Profile editor</div>
+      </SettingsLayoutClient>,
+    );
+
+    expect(crumbHrefs()).toEqual(["/settings", "/settings/executors", "/settings/executor/exec-1"]);
+    expect(screen.getByRole("link", { name: "local-docker" })).toBeTruthy();
+    expect(screen.getByText("Alpha").closest(CURRENT_PAGE)).toBeTruthy();
+  });
+
+  it("names the Executors page for a bare executor route", () => {
+    pathname = "/settings/executors/exec-prof-1";
+
+    render(
+      <SettingsLayoutClient>
+        <div>Profile editor</div>
+      </SettingsLayoutClient>,
+    );
+
+    expect(crumbHrefs()).toEqual(["/settings", "/settings/executors"]);
+    expect(screen.getByRole("link", { name: "Executors" })).toBeTruthy();
   });
 });
+
+/** Parent crumb hrefs in order, read off the rendered breadcrumb nav. */
+function crumbHrefs(): string[] {
+  const nav = screen.getByRole("navigation", { name: "breadcrumb" });
+  return [...nav.querySelectorAll("a[href]")]
+    .map((link) => link.getAttribute("href") ?? "")
+    .filter((href) => href.startsWith("/settings"));
+}

@@ -14,8 +14,13 @@ import PluginDetailPage from "@/app/settings/plugins/[pluginId]/page";
 import AutomationEditorPage from "@/app/settings/workspace/[id]/automations/[automationId]/page";
 import NewAutomationPage from "@/app/settings/workspace/[id]/automations/new/page";
 import WorkspaceEditPage from "@/app/settings/workspace/[id]/page";
+import {
+  resolveSettingsBreadcrumbs,
+  type CrumbValues,
+} from "@/components/settings/settings-breadcrumbs";
 import { TaskBehaviorSettings } from "@/components/settings/task-behavior-settings";
 import { WorkspaceSettingsShell } from "@/components/settings/workspaces/workspace-settings-shell";
+import { SETTINGS_DISCOVERY_ROUTE_EXCLUSIONS } from "@/lib/settings-discovery/catalog";
 import { workspaceId, workflowId } from "@/lib/types/ids";
 import type { ListWorkspacesResponse, UserSettingsResponse } from "@/lib/types/http";
 import { DEFAULT_SETTINGS_PATH } from "@/lib/settings/last-settings-page";
@@ -302,7 +307,6 @@ describe("renderSettingsRoute identifier decoding", () => {
       });
     },
   );
-
 });
 
 function buildState(
@@ -410,5 +414,74 @@ describe("restorable settings paths", () => {
     }
     expect(SETTINGS_ROUTE_PATHS.has("/settings/plugins/kandev-plugin-e2e")).toBe(false);
     expect(SETTINGS_ROUTE_PATHS.has("/settings/does-not-exist")).toBe(false);
+  });
+});
+
+describe("settings breadcrumb coverage", () => {
+  // The dynamic route shapes, one per crumb row. Ids are deliberately absent
+  // from any store here: a route whose title only works once its record loads
+  // still has to name the page, and the fallback is what this asserts.
+  const DYNAMIC_SETTINGS_PATHS = [
+    "/settings/workspaces/ws-1",
+    "/settings/workspaces/ws-1/repositories",
+    "/settings/workspaces/ws-1/workflows",
+    "/settings/workspaces/ws-1/secrets",
+    "/settings/workspaces/ws-1/integrations",
+    "/settings/workspaces/ws-1/integrations/github",
+    "/settings/workspaces/ws-1/automations",
+    "/settings/workspaces/ws-1/automations/new",
+    "/settings/workspaces/ws-1/automations/auto-1",
+    "/settings/agents/claude",
+    "/settings/agents/claude/profiles/agent-profile-1",
+    "/settings/executors/exec-profile-1",
+    "/settings/executors/new/local_docker",
+    "/settings/executors/ssh/exec-1",
+    "/settings/executor/exec-1",
+    "/settings/executor/exec-1/profile/exec-profile-1",
+  ];
+
+  // Nothing resolves through the store, so every label must come from the
+  // catalog. `t` echoes its key, which is enough to prove one was used.
+  const echoKey = (key: string) => key;
+  const noRecords: CrumbValues = {
+    workspaceName: () => null,
+    agentDisplayName: () => null,
+    agentProfileName: () => null,
+    automationName: () => null,
+    executorName: () => null,
+    executorProfileName: () => null,
+    executorTypeTitle: () => null,
+    integrationTitle: () => null,
+    pluginName: () => null,
+  };
+
+  /**
+   * A title-cased URL segment reads as English in every locale and no lint rule
+   * can see it — there is no literal to flag. So every route the app ships must
+   * resolve its title through the catalog, a brand name, or a record name.
+   *
+   * Redirect-only paths are exempt via the discovery catalog's own exclusion
+   * list: they render for one frame on the way somewhere else, and that list is
+   * already the maintained record of which paths those are.
+   */
+  it("titles every shipped settings route from the catalog, not the URL", () => {
+    const untranslated: string[] = [];
+    const paths = [...SETTINGS_ROUTE_PATHS, ...DYNAMIC_SETTINGS_PATHS];
+    for (const path of paths) {
+      if (path in SETTINGS_DISCOVERY_ROUTE_EXCLUSIONS) continue;
+      const { titleFromUrlSegment } = resolveSettingsBreadcrumbs(path, echoKey, noRecords);
+      if (titleFromUrlSegment) untranslated.push(path);
+    }
+    expect(untranslated, "add a SEGMENT_LABEL_KEYS entry or a crumb route row").toEqual([]);
+  });
+
+  it("orients every dynamic route under the settings page that owns it", () => {
+    for (const path of DYNAMIC_SETTINGS_PATHS) {
+      const { parents } = resolveSettingsBreadcrumbs(path, echoKey, noRecords);
+      // Settings, then the owning menu row: a record page is never a top-level
+      // settings page, so two crumbs is the floor.
+      expect(parents.length, `${path} has no owning page crumb`).toBeGreaterThanOrEqual(2);
+      expect(parents[0].label).toBe("common:settings");
+    }
   });
 });

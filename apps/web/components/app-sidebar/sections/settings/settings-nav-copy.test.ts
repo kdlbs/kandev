@@ -44,7 +44,7 @@ const NAV_LABELS: Array<[key: string, english: string]> = [
 
 /**
  * Labels that also exist as a route page title, keyed by
- * `SEGMENT_LABEL_KEYS` in components/settings/settings-layout-client.tsx. The
+ * `SEGMENT_LABEL_KEYS` in components/settings/settings-breadcrumb-labels.ts. The
  * nav and the title are the same words for the same destination and the user
  * sees both at once (nav on the left, title above), so they must resolve
  * through ONE key. Two keys with identical English today is a translator's

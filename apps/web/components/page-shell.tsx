@@ -2,7 +2,7 @@
 
 import type { ReactNode } from "react";
 import { AppNavSheet } from "@/components/navigation/app-nav-sheet";
-import { PageTopbar } from "@/components/page-topbar";
+import { PageTopbar, type ParentCrumb } from "@/components/page-topbar";
 import { useHomeAffordance } from "@/hooks/use-home-affordance";
 import { cn } from "@/lib/utils";
 
@@ -13,7 +13,7 @@ type PageShellProps = {
   icon?: ReactNode;
   backHref?: string;
   backLabel?: string;
-  parents?: Array<{ label: string; href?: string; phoneOnlyLink?: boolean }>;
+  parents?: ParentCrumb[];
   variant?: "breadcrumb" | "root";
   center?: ReactNode;
   leading?: ReactNode;
