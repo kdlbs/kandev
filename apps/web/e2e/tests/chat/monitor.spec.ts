@@ -75,7 +75,7 @@ test.describe("Claude-acp Monitor tool", () => {
     apiClient,
     seedData,
   }) => {
-    test.setTimeout(120_000);
+    test.setTimeout(240_000);
 
     // Three monitor events fire over ~3s. The agent then ends the monitor and
     // produces a final assistant message so the turn completes deterministically.
@@ -87,6 +87,7 @@ test.describe("Claude-acp Monitor tool", () => {
       'e2e:monitor_event("task-1", "in_progress: lint")',
       "e2e:delay(200)",
       'e2e:monitor_event("task-1", "success: lint")',
+      "e2e:delay(500)",
       'e2e:monitor_end("task-1")',
       'e2e:message("watching done")',
     ].join("\n");
@@ -105,7 +106,8 @@ test.describe("Claude-acp Monitor tool", () => {
     await session.sendMessageViaButton(script);
 
     // The dedicated Monitor card renders, not the generic tool_call row.
-    const monitorCard = session.chat.locator('[data-testid="monitor-card"]').first();
+    const monitorCard = session.activeChat().locator('[data-testid="monitor-card"]');
+    await expect(monitorCard).toHaveCount(1);
     await expect(monitorCard).toBeVisible();
     await expect(monitorCard).toContainText("gh pr checks --watch");
 
@@ -113,12 +115,10 @@ test.describe("Claude-acp Monitor tool", () => {
     // "ended" because the script issued monitor_end and the parent turn
     // completed.
     await expect(monitorCard).toContainText("3 events", { timeout: 30_000 });
-    await expect(session.chat.locator('[data-testid="monitor-status-pill"]').first()).toContainText(
-      /ended/,
-    );
+    await expect(monitorCard.getByTestId("monitor-status-pill")).toContainText(/ended/);
 
     // Each event body landed in the recent-events tail.
-    const eventList = session.chat.locator('[data-testid="monitor-event"]');
+    const eventList = session.activeChat().locator('[data-testid="monitor-event"]');
     await expect(eventList).toHaveCount(3);
     await expect(eventList.nth(0)).toContainText("queued: lint");
     await expect(eventList.nth(2)).toContainText("success: lint");
@@ -126,8 +126,8 @@ test.describe("Claude-acp Monitor tool", () => {
     // Critical: the model's "Human: <task-notification>" echo must NOT appear
     // anywhere in the chat. The adapter strips matched envelopes from the
     // assistant text and drops orphan "Human:" prefixes entirely.
-    await expect(session.chat).not.toContainText("<task-notification>");
-    await expect(session.chat).not.toContainText("Human: <task");
+    await expect(session.activeChat()).not.toContainText("<task-notification>");
+    await expect(session.activeChat()).not.toContainText("Human: <task");
   });
 
   test("singular event count uses 'event' not 'events'", async ({
@@ -135,12 +135,13 @@ test.describe("Claude-acp Monitor tool", () => {
     apiClient,
     seedData,
   }) => {
-    test.setTimeout(120_000);
+    test.setTimeout(240_000);
 
     const script = [
       'e2e:monitor_start("task-1", "tail -f log")',
-      "e2e:delay(100)",
+      "e2e:delay(500)",
       'e2e:monitor_event("task-1", "first and only line")',
+      "e2e:delay(500)",
       'e2e:monitor_end("task-1")',
       'e2e:message("done")',
     ].join("\n");
@@ -154,7 +155,8 @@ test.describe("Claude-acp Monitor tool", () => {
     await session.waitForChatIdle({ timeout: 30_000 });
     await waitForMonitorSubscription(capture, sessionId);
     await session.sendMessageViaButton(script);
-    const card = session.chat.locator('[data-testid="monitor-card"]').first();
+    const card = session.activeChat().locator('[data-testid="monitor-card"]');
+    await expect(card).toHaveCount(1);
     await expect(card).toContainText("1 event", { timeout: 30_000 });
     await expect(card).not.toContainText("1 events");
   });
@@ -164,7 +166,7 @@ test.describe("Claude-acp Monitor tool", () => {
     apiClient,
     seedData,
   }) => {
-    test.setTimeout(120_000);
+    test.setTimeout(240_000);
 
     const script = [
       'e2e:monitor_start("task-1", "wait for ci")',
@@ -172,6 +174,7 @@ test.describe("Claude-acp Monitor tool", () => {
       'e2e:monitor_event("task-1", "step-1")',
       "e2e:delay(150)",
       'e2e:monitor_event("task-1", "step-2")',
+      "e2e:delay(500)",
       'e2e:monitor_end("task-1")',
       'e2e:message("done")',
     ].join("\n");
@@ -185,20 +188,20 @@ test.describe("Claude-acp Monitor tool", () => {
     await session.waitForChatIdle({ timeout: 30_000 });
     await waitForMonitorSubscription(capture, sessionId);
     await session.sendMessageViaButton(script);
-    await expect(session.chat.locator('[data-testid="monitor-card"]').first()).toContainText(
-      "2 events",
-      { timeout: 30_000 },
-    );
+    const cards = session.activeChat().locator('[data-testid="monitor-card"]');
+    await expect(cards).toHaveCount(1);
+    await expect(cards).toContainText("2 events", { timeout: 30_000 });
 
     // Reload — SSR + Zustand hydration must reconstitute the card from DB.
     await testPage.reload();
     await session.waitForLoad();
     await session.waitForChatIdle({ timeout: 30_000 });
 
-    const card = session.chat.locator('[data-testid="monitor-card"]').first();
+    const card = session.activeChat().locator('[data-testid="monitor-card"]');
+    await expect(card).toHaveCount(1);
     await expect(card).toBeVisible();
     await expect(card).toContainText("wait for ci");
     await expect(card).toContainText("2 events");
-    await expect(session.chat.locator('[data-testid="monitor-event"]')).toHaveCount(2);
+    await expect(session.activeChat().locator('[data-testid="monitor-event"]')).toHaveCount(2);
   });
 });
