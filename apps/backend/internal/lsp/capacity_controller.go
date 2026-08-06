@@ -16,7 +16,7 @@ func (c *Controller) releaseCapacity(
 	if next == nil {
 		return
 	}
-	_, _ = c.commands.submit(context.WithoutCancel(ctx), next.Key, ActionReconcile,
+	_, _ = c.commands.submit(context.WithoutCancel(ctx), next.Key, ActionReconcile, "",
 		func(workCtx context.Context) (*LanguageSnapshot, error) {
 			return c.promoteCapacityEntry(workCtx, *next)
 		})

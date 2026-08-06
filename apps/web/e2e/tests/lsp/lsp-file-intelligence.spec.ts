@@ -730,13 +730,9 @@ test.describe("LSP file intelligence", () => {
         | undefined;
       expect(contentChanges).toHaveLength(1);
       expect(contentChanges?.[0]).toMatchObject({
-        range: {
-          start: { line: expect.any(Number), character: expect.any(Number) },
-          end: { line: expect.any(Number), character: expect.any(Number) },
-        },
-        text: "\n// second document edit",
+        text: expect.stringContaining("\n// second document edit"),
       });
-      expect(contentChanges?.[0].range?.start).toEqual(contentChanges?.[0].range?.end);
+      expect(contentChanges?.[0].range).toBeUndefined();
       await expectFakeLspMarkerMessages(testPage, secondModelUri, [
         "Fake Kotlin diagnostic after edit",
       ]);

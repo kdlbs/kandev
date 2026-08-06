@@ -63,7 +63,7 @@ func (c *Controller) ReconcileTask(ctx context.Context, taskID string) error {
 	var reconcileErrors []error
 	for _, state := range states {
 		key := TaskLanguageKey{TaskID: state.TaskID, Language: state.Language}
-		_, commandErr := c.commands.submit(ctx, key, ActionReconcile,
+		_, commandErr := c.commands.submit(ctx, key, ActionReconcile, "",
 			func(workCtx context.Context) (*LanguageSnapshot, error) {
 				candidate, inspectErr := c.inspectReconcileState(workCtx, state)
 				if inspectErr != nil || candidate == nil {
@@ -343,7 +343,7 @@ func runtimeFailureProvesNoProcess(snapshot *RuntimeSnapshot, generation uint64)
 		return false
 	}
 	switch snapshot.ErrorCode {
-	case "binary_unavailable", errorCodeProcessStartFailed, "start_canceled":
+	case "binary_unavailable", errorCodeProcessStartFailed, "start_canceled", errorCodeProcessExited:
 		return true
 	default:
 		return false

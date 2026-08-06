@@ -189,7 +189,7 @@ func (c *Controller) observeRuntimeSnapshot(
 	if runtime.Generation < state.Generation {
 		return nil
 	}
-	if runtime.Phase == PhaseOff {
+	if runtimeFailureProvesNoProcess(&runtime, runtime.Generation) {
 		c.releaseCapacity(ctx, key, runtime.Generation)
 	}
 	stored, err := c.adoptRuntime(ctx, *state, runtime)
@@ -280,6 +280,7 @@ func (c *Controller) attemptRecovery(
 		ctx,
 		key,
 		ActionReconcile,
+		"",
 		func(workCtx context.Context) (*LanguageSnapshot, error) {
 			return c.reconcileMissing(workCtx, *candidate)
 		},

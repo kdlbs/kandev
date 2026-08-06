@@ -303,6 +303,13 @@ Completed 2026-08-05.
   Focused changed-package tests, frontend typecheck/tests, backend lint, and the LSP/controller/
   gateway race suite passed. The broad backend target reproduced only the already-recorded unchanged
   local filesystem-fixture failures in task handlers/service; every changed package passed.
+- A follow-up Codex review on 2026-08-06 found two controller races. Generation-scoped
+  `process_exited` evidence now releases capacity before recovery and promotes the oldest queued
+  server. Concurrent policy commands coalesce only when both action and policy value match, so a
+  later distinct task policy still executes in FIFO order. Both regressions failed before the fix;
+  their focused tests, the full controller package under `-race`, and backend lint pass. The
+  production E2E assertion now matches the canonical full-text upstream `didChange` contract; its
+  focused scenario passed, and the retry-only status-placement case passed four retry-free runs.
 
 ---
 
