@@ -1,3 +1,4 @@
+import type { ComponentType } from "react";
 import Link from "@/components/routing/app-link";
 import {
   IconBrandGithub,
@@ -9,9 +10,34 @@ import {
   IconTicket,
 } from "@tabler/icons-react";
 import { Card, CardContent } from "@kandev/ui/card";
+import { Label } from "@kandev/ui/label";
+import { Switch } from "@kandev/ui/switch";
 import { useTranslation } from "react-i18next";
+import { useDraftedIntegrationEnabled } from "@/components/integrations/use-drafted-integration-enabled";
+import { useHideDisabledIntegrationsInNav } from "@/hooks/domains/integrations/use-hide-disabled-integrations-in-nav";
+import { AzureDevOpsEnabledControl } from "@/components/azure-devops/azure-devops-enabled-control";
+import { GitHubEnabledControl } from "@/components/github/github-enabled-control";
+import { GitLabEnabledControl } from "@/components/gitlab/gitlab-enabled-control";
+import { JiraEnabledControl } from "@/components/jira/jira-enabled-control";
+import { LinearEnabledControl } from "@/components/linear/linear-enabled-control";
+import { SentryEnabledControl } from "@/components/sentry/sentry-enabled-control";
+import { SlackEnabledControl } from "@/components/slack/slack-enabled-control";
 
-const INTEGRATIONS = [
+type IntegrationSlug =
+  | "azure-devops"
+  | "github"
+  | "gitlab"
+  | "jira"
+  | "linear"
+  | "sentry"
+  | "slack";
+
+const INTEGRATIONS: Array<{
+  slug: IntegrationSlug;
+  label: string;
+  descriptionKey: string;
+  Icon: ComponentType<{ className?: string }>;
+}> = [
   {
     slug: "azure-devops",
     label: "Azure DevOps",
@@ -56,9 +82,51 @@ const INTEGRATIONS = [
   },
 ];
 
+// Each row's slider is a per-integration hook wrapper (rules of hooks forbid
+// picking a hook dynamically by slug), so the map below selects the right
+// *component* — every component calls exactly one hook unconditionally.
+const ENABLED_CONTROL_BY_SLUG: Record<IntegrationSlug, ComponentType> = {
+  "azure-devops": AzureDevOpsEnabledControl,
+  github: GitHubEnabledControl,
+  gitlab: GitLabEnabledControl,
+  jira: JiraEnabledControl,
+  linear: LinearEnabledControl,
+  sentry: SentryEnabledControl,
+  slack: SlackEnabledControl,
+};
+
 type IntegrationsIndexPageProps = {
   workspaceId?: string;
 };
+
+function HideDisabledIntegrationsSetting() {
+  const { t } = useTranslation();
+  const { hideDisabled, setHideDisabled } = useHideDisabledIntegrationsInNav();
+  const draft = useDraftedIntegrationEnabled({
+    id: "integrations-hide-disabled-in-nav",
+    enabled: hideDisabled,
+    persist: setHideDisabled,
+  });
+  return (
+    <div className="flex min-h-11 items-center justify-between gap-4 rounded-lg border p-4">
+      <div className="min-w-0 space-y-0.5">
+        <Label htmlFor="hide-disabled-integrations-in-nav">
+          {t("settings:hideDisabledIntegrationsFromNav")}
+        </Label>
+        <p className="text-xs text-muted-foreground">
+          {t("settings:hideDisabledIntegrationsFromNavDescription")}
+        </p>
+      </div>
+      <Switch
+        id="hide-disabled-integrations-in-nav"
+        checked={draft.enabled}
+        data-settings-dirty={draft.isDirty}
+        onCheckedChange={draft.setEnabled}
+        className="shrink-0 cursor-pointer"
+      />
+    </div>
+  );
+}
 
 export default function IntegrationsIndexPage({ workspaceId }: IntegrationsIndexPageProps = {}) {
   const { t } = useTranslation();
@@ -77,23 +145,33 @@ export default function IntegrationsIndexPage({ workspaceId }: IntegrationsIndex
       <div className="grid auto-rows-fr gap-3 sm:grid-cols-2 lg:grid-cols-3">
         {INTEGRATIONS.map(({ slug, label, descriptionKey, Icon }) => {
           const href = `${rootHref}/${slug}`;
+          const EnabledControl = ENABLED_CONTROL_BY_SLUG[slug];
           return (
-            <Link key={href} href={href} className="flex h-full cursor-pointer">
-              <Card className="h-full w-full transition-colors hover:border-primary/40">
-                <CardContent className="space-y-2">
-                  <div className="flex items-center gap-2 text-base font-semibold">
-                    <Icon className="h-5 w-5" />
-                    {label}
-                  </div>
-                  <p className="text-sm text-muted-foreground">
-                    {t(descriptionKey, { trigger: "!kandev" })}
-                  </p>
-                </CardContent>
-              </Card>
-            </Link>
+            <Card
+              key={slug}
+              data-testid={`integration-card-${slug}`}
+              className="h-full w-full transition-colors hover:border-primary/40"
+            >
+              <CardContent className="space-y-2">
+                <Link
+                  href={href}
+                  className="flex items-center gap-2 text-base font-semibold hover:underline cursor-pointer"
+                >
+                  <Icon className="h-5 w-5" />
+                  {label}
+                </Link>
+                <div className="flex justify-end">
+                  <EnabledControl />
+                </div>
+                <Link href={href} className="text-sm text-muted-foreground cursor-pointer">
+                  {t(descriptionKey, { trigger: "!kandev" })}
+                </Link>
+              </CardContent>
+            </Card>
           );
         })}
       </div>
+      <HideDisabledIntegrationsSetting />
     </div>
   );
 }

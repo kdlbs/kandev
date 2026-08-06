@@ -307,6 +307,8 @@
   "integrationDescriptionLinear": "Personal API key and team defaults.",
   "integrationDescriptionSentry": "Auth token, org/project defaults, and issue browsing.",
   "integrationDescriptionSlack": "Browser-session credentials and {{trigger}} triage agent.",
+  "hideDisabledIntegrationsFromNav": "Hide disabled integrations from left panel navigation",
+  "hideDisabledIntegrationsFromNavDescription": "When on, a disabled integration is removed from the sidebar and mobile menu even if it's still configured.",
   "invalidJson": "Invalid JSON",
   "keyboardShortcuts": "Keyboard Shortcuts",
   "language": "Language",

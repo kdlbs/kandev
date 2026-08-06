@@ -8,6 +8,7 @@ import { Separator } from "@kandev/ui/separator";
 import { TooltipProvider } from "@kandev/ui/tooltip";
 import { useToast } from "@/components/toast-provider";
 import { SettingsSection } from "@/components/settings/settings-section";
+import { GitHubEnabledControl } from "@/components/github/github-enabled-control";
 import { GitHubAutomationSettings, GitHubPersonalSettings } from "./github-status";
 import { GitHubCallbackNotice } from "./github-callback-notice";
 import { ReviewWatchTable } from "./review-watch-table";
@@ -264,6 +265,7 @@ export function GitHubConnectionSection({ workspaceId }: { workspaceId: string }
         discoveryTargetId={INTEGRATION_SETTINGS_TARGETS.github}
         title={t("github:workspaceGithubAccess")}
         description={t("github:credentialUsedForRepositorySyncWatches")}
+        action={<GitHubEnabledControl />}
       >
         <GitHubAutomationSettings workspaceId={workspaceId} />
       </SettingsSection>

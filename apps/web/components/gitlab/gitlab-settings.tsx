@@ -22,6 +22,7 @@ import { Separator } from "@kandev/ui/separator";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import { Spinner } from "@kandev/ui/spinner";
 import { WorkspaceScopedSection } from "@/components/integrations/workspace-scoped-section";
+import { GitLabEnabledControl } from "@/components/gitlab/gitlab-enabled-control";
 import { useToast } from "@/components/toast-provider";
 import { SettingsSection } from "@/components/settings/settings-section";
 import { SettingsCard } from "@/components/settings/settings-card";
@@ -435,15 +436,18 @@ function GitLabConnectionCard(props: ConnectionCardProps) {
       description={t("gitlab:connectAGitlabAccountSoKandev")}
       icon={<IconBrandGitlab className="h-4 w-4" />}
       action={
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => void reload()}
-          disabled={loading}
-          className="gap-1 cursor-pointer"
-        >
-          <IconRefresh className="h-3 w-3" /> {t("gitlab:refresh")}
-        </Button>
+        <div className="flex items-center gap-2">
+          <GitLabEnabledControl />
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => void reload()}
+            disabled={loading}
+            className="gap-1 cursor-pointer"
+          >
+            <IconRefresh className="h-3 w-3" /> {t("gitlab:refresh")}
+          </Button>
+        </div>
       }
     >
       <SettingsCard isDirty={authMethodDirty}>

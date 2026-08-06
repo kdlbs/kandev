@@ -24,6 +24,7 @@ import {
 } from "@/components/integrations/auth-status-banner";
 import { WorkspaceScopedSection } from "@/components/integrations/workspace-scoped-section";
 import { AzureDevOpsDefaultQueriesSection } from "@/components/azure-devops/azure-devops-default-queries";
+import { AzureDevOpsEnabledControl } from "@/components/azure-devops/azure-devops-enabled-control";
 import { AzureDevOpsQuickActionsSection } from "@/components/azure-devops/azure-devops-quick-actions";
 import { AzureDevOpsWatchSettings } from "@/components/azure-devops/azure-devops-watch-settings";
 import { SettingsSection } from "@/components/settings/settings-section";
@@ -491,6 +492,7 @@ export function AzureDevOpsConnectionSection({ workspaceId }: { workspaceId: str
       icon={<IconBrandAzure className="h-5 w-5" />}
       title={t("azuredevops:integrationTitle")}
       description={t("azuredevops:integrationDescription")}
+      action={<AzureDevOpsEnabledControl />}
     >
       <Card>
         <CardContent className="space-y-4 pt-6">

@@ -40,16 +40,12 @@ async function integrationCardIconTopInsets(cards: Locator[]) {
 }
 
 async function integrationCards(page: Page): Promise<Locator[]> {
-  const links = page.getByTestId("settings-scroll-container").locator('a[href*="/integrations/"]');
-  await expect(links.first()).toBeVisible();
-  const count = await links.count();
+  const cards = page
+    .getByTestId("settings-scroll-container")
+    .locator('[data-testid^="integration-card-"]');
+  await expect(cards.first()).toBeVisible();
+  const count = await cards.count();
   expect(count).toBeGreaterThan(0);
 
-  return Promise.all(
-    Array.from({ length: count }, async (_, index) => {
-      const card = links.nth(index).locator(':scope > [data-slot="card"]');
-      await expect(card).toHaveCount(1);
-      return card;
-    }),
-  );
+  return Array.from({ length: count }, (_, index) => cards.nth(index));
 }

@@ -307,6 +307,8 @@
   "integrationDescriptionLinear": "Ƥēŕśōńàĺ ÀƤĨ ķēŷ àńď ţēàḿ ďēƒàũĺţś.",
   "integrationDescriptionSentry": "Àũţĥ ţōķēń, ōŕĝ/ƥŕōĵēćţ ďēƒàũĺţś, àńď ĩśśũē ƀŕōŵśĩńĝ.",
   "integrationDescriptionSlack": "Ɓŕōŵśēŕ-śēśśĩōń ćŕēďēńţĩàĺś àńď {{trigger}} ţŕĩàĝē àĝēńţ.",
+  "hideDisabledIntegrationsFromNav": "Ĥĩďē ďĩśàƀĺēď ĩńţēĝŕàţĩōńś ƒŕōḿ ĺēƒţ ƥàńēĺ ńàvĩĝàţĩōń",
+  "hideDisabledIntegrationsFromNavDescription": "Ŵĥēń ōń, à ďĩśàƀĺēď ĩńţēĝŕàţĩōń ĩś ŕēḿōvēď ƒŕōḿ ţĥē śĩďēƀàŕ àńď ḿōƀĩĺē ḿēńũ ēvēń ĩƒ ĩţ'ś śţĩĺĺ ćōńƒĩĝũŕēď.",
   "invalidJson": "Ĩńvàĺĩď ĴŚŌŃ",
   "keyboardShortcuts": "Ķēŷƀōàŕď Śĥōŕţćũţś",
   "language": "Ĺàńĝũàĝē",

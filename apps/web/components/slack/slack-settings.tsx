@@ -13,10 +13,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { SettingsSection } from "@/components/settings/settings-section";
 import { useSettingsSaveContributor } from "@/components/settings/settings-save-provider";
 import { SettingsCard } from "@/components/settings/settings-card";
-import { useSlackEnabled } from "@/hooks/domains/slack/use-slack-enabled";
+import { SlackEnabledControl } from "@/components/slack/slack-enabled-control";
 import { IntegrationAuthStatusBanner } from "@/components/integrations/auth-status-banner";
 import { WorkspaceScopedSection } from "@/components/integrations/workspace-scoped-section";
-import { DraftedIntegrationEnabledControl } from "@/components/integrations/drafted-integration-enabled-control";
 import { type UtilityAgent } from "@/lib/api/domains/utility-api";
 import type { TestSlackConnectionResult } from "@/lib/types/slack";
 import {
@@ -365,11 +364,6 @@ function ActionBar({
   );
 }
 
-function EnabledPill() {
-  const { enabled, setEnabled } = useSlackEnabled();
-  return <DraftedIntegrationEnabledControl id="slack" enabled={enabled} persist={setEnabled} />;
-}
-
 export function SlackConnectionSection({ workspaceId }: { workspaceId: string }) {
   const { t } = useTranslation();
   const s = useSlackSettings(workspaceId);
@@ -401,7 +395,7 @@ export function SlackConnectionSection({ workspaceId }: { workspaceId: string })
       icon={<IconBrandSlack className="h-5 w-5" />}
       title={t("slack:integrationTitle")}
       description={t("slack:integrationDescription", { example: DEFAULT_PREFIX_EXAMPLE })}
-      action={<EnabledPill />}
+      action={<SlackEnabledControl />}
     >
       <SettingsCard isDirty={dirty}>
         <CardContent className="space-y-4 pt-6">
