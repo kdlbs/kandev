@@ -229,6 +229,39 @@ func newCoordinatorStopTestService(
 	return svc
 }
 
+func TestStopTaskCleansTaskLSPBeforeReview(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateRunning)
+	seedExecutorRunning(t, repo, "session1", "task1", "execution1")
+	taskRepo := newMockTaskRepo()
+	seedMockTaskState(taskRepo, "task1", v1.TaskStateInProgress)
+	agentManager := &mockAgentManager{repoForExecutionLookup: repo}
+	svc := newCoordinatorStopTestService(repo, taskRepo, agentManager)
+
+	cleanupCalls := 0
+	svc.SetOnTaskStopCleanup(func(_ context.Context, taskID, reason string) error {
+		cleanupCalls++
+		if taskID != "task1" || reason != "user_stop" {
+			t.Fatalf("cleanup task=%q reason=%q", taskID, reason)
+		}
+		if taskRepo.updatedStates[taskID] == v1.TaskStateReview {
+			t.Fatal("task moved to review before task LSP cleanup")
+		}
+		return nil
+	})
+
+	if err := svc.StopTask(ctx, "task1", "user_stop", false); err != nil {
+		t.Fatalf("StopTask: %v", err)
+	}
+	if cleanupCalls != 1 {
+		t.Fatalf("cleanup calls = %d, want 1", cleanupCalls)
+	}
+	if got := taskRepo.updatedStates["task1"]; got != v1.TaskStateReview {
+		t.Fatalf("task state = %q, want REVIEW", got)
+	}
+}
+
 func TestStopTaskForCoordinator_StopsAndIsIdempotent(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)

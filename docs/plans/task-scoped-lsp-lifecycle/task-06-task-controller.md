@@ -121,3 +121,10 @@ values shared an action-only coalescing key. Command batches now include the req
 their coalescing identity, preserving FIFO execution for distinct writes while retaining duplicate
 coalescing. The deterministic overlapping-policy regression, full controller package, race
 detector, and backend lint pass.
+
+The next review found that applying `Inherit` while the global default was disabled persisted
+`Disabled` during convergence. Stop bookkeeping now changes the requested policy only for explicit
+Stop; SetPolicy retains its requested value while still stopping under the disabled effective
+policy. The regression also proves a later global default change starts the inherited language as
+the next generation. It passed 20 repetitions, the full controller package under `-race`, and
+backend lint.

@@ -315,6 +315,14 @@ Completed 2026-08-05.
   so only explicit Stop, task-host shutdown, process exit, or environment teardown cancels it; the
   one-minute UI warning remains informational. Stop during an unanswered `initialize` bypasses the
   unavailable graceful-shutdown exchange, closes the protocol streams, and reaps the process tree.
+- The following Codex review closed three remaining lifecycle gaps. Setting an inherited policy
+  while the global default is disabled now stops the runtime without rewriting the requested
+  policy. A successful user task Stop invokes the same task-LSP cleanup seam before moving the task
+  to review, releasing process capacity deterministically. Task-host protocol writes now have a
+  bounded deadline and close a wedged server pipe on timeout, so Stop and teardown cannot wait
+  forever on JSON-RPC stdin. Focused regressions passed 20 repetitions, the changed task-host
+  packages passed under `-race`, the orchestrator/backend wiring packages passed, and backend lint
+  reported zero issues.
 
 ---
 
