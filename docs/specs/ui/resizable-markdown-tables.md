@@ -1,5 +1,5 @@
 ---
-status: draft
+status: building
 created: 2026-08-05
 owner: kandev
 ---

@@ -44,6 +44,7 @@ test.describe("mobile: Markdown table wrapping", () => {
     const firstColumnCode = table.locator("tbody tr").nth(1).locator("td").first().locator("code");
 
     await expect(table).toBeVisible({ timeout: 30_000 });
+    await expect(markdown.getByTestId(/^markdown-table-resizer-/)).toHaveCount(0);
     expect(
       await firstColumnCode.evaluate((code) => {
         const range = document.createRange();
@@ -109,6 +110,7 @@ test.describe("mobile: Markdown table wrapping", () => {
     const tableWrapper = table.locator("xpath=..");
 
     await expect(table).toBeVisible();
+    await expect(markdown.getByTestId(/^markdown-table-resizer-/)).toHaveCount(0);
     expect(
       await tableWrapper.evaluate((element) => element.scrollWidth > element.clientWidth + 1),
     ).toBe(true);

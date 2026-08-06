@@ -170,6 +170,159 @@ test.describe("Markdown text wrapping", () => {
     await expectNoDocumentOverflow(testPage);
   });
 
+  test("desktop users resize adjacent table columns from the full-height boundary", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(90_000);
+    await testPage.setViewportSize({ width: 1100, height: 800 });
+
+    const marker = "Resizable table marker";
+    const session = await openTaskWithMarkdown(testPage, apiClient, seedData, {
+      title: "Resize Markdown Table Columns",
+      kind: "message",
+      text: [
+        "| Setting | Effect | Notes |",
+        "| --- | --- | --- |",
+        `| strictDepBuilds | Install fails for unapproved lifecycle scripts | ${marker} |`,
+        "| allowBuilds | Approved packages may run build scripts | Ephemeral adjustment |",
+      ].join("\\n"),
+    });
+
+    const markdown = session.activeChat().locator(".markdown-body", { hasText: marker });
+    const table = markdown.locator("table");
+    const cells = table.locator("tbody tr").first().locator("td");
+    const separator = markdown.getByTestId("markdown-table-resizer-0");
+
+    await expect(table).toBeVisible({ timeout: 30_000 });
+    await expect(separator).toBeVisible();
+
+    const initialWidths = await cells.evaluateAll((elements) =>
+      elements.map((element) => element.getBoundingClientRect().width),
+    );
+    const initialTableWidth = await table.evaluate(
+      (element) => element.getBoundingClientRect().width,
+    );
+    const [separatorBox, bodyCellBox, tableBox] = await Promise.all([
+      separator.boundingBox(),
+      cells.first().boundingBox(),
+      table.boundingBox(),
+    ]);
+    expect(separatorBox).not.toBeNull();
+    expect(bodyCellBox).not.toBeNull();
+    expect(tableBox).not.toBeNull();
+    expect(separatorBox!.height).toBeCloseTo(tableBox!.height, 1);
+
+    const boundaryX = separatorBox!.x + separatorBox!.width / 2;
+    const bodyRowY = bodyCellBox!.y + bodyCellBox!.height / 2;
+    await testPage.mouse.move(boundaryX, bodyRowY);
+    await testPage.mouse.down();
+    await testPage.mouse.move(boundaryX + 60, bodyRowY);
+    await testPage.mouse.up();
+
+    const resizedWidths = await cells.evaluateAll((elements) =>
+      elements.map((element) => element.getBoundingClientRect().width),
+    );
+    expect(resizedWidths[0] - initialWidths[0]).toBeCloseTo(60, 0);
+    expect(initialWidths[1] - resizedWidths[1]).toBeCloseTo(60, 0);
+    expect(resizedWidths[2]).toBeCloseTo(initialWidths[2], 0);
+    expect(await table.evaluate((element) => element.getBoundingClientRect().width)).toBeCloseTo(
+      initialTableWidth,
+      0,
+    );
+
+    const movedSeparatorBox = await separator.boundingBox();
+    const movedBodyCellBox = await cells.first().boundingBox();
+    expect(movedSeparatorBox).not.toBeNull();
+    expect(movedBodyCellBox).not.toBeNull();
+    const movedBoundaryX = movedSeparatorBox!.x + movedSeparatorBox!.width / 2;
+    const movedBodyRowY = movedBodyCellBox!.y + movedBodyCellBox!.height / 2;
+    await testPage.mouse.move(movedBoundaryX, movedBodyRowY);
+    await testPage.mouse.down();
+    await testPage.mouse.move(movedBoundaryX + 1000, movedBodyRowY);
+    await testPage.mouse.up();
+    const clampedWidths = await cells.evaluateAll((elements) =>
+      elements.map((element) => element.getBoundingClientRect().width),
+    );
+    expect(clampedWidths[1]).toBeCloseTo(64, 0);
+    expect(clampedWidths[2]).toBeCloseTo(initialWidths[2], 0);
+
+    await separator.dblclick();
+    const resetWidths = await cells.evaluateAll((elements) =>
+      elements.map((element) => element.getBoundingClientRect().width),
+    );
+    resetWidths.forEach((width, index) => expect(width).toBeCloseTo(initialWidths[index], 0));
+
+    await separator.focus();
+    await testPage.keyboard.press("ArrowRight");
+    const keyboardWidths = await cells.evaluateAll((elements) =>
+      elements.map((element) => element.getBoundingClientRect().width),
+    );
+    expect(keyboardWidths[0] - initialWidths[0]).toBeCloseTo(8, 0);
+    expect(initialWidths[1] - keyboardWidths[1]).toBeCloseTo(8, 0);
+    await testPage.keyboard.press("Enter");
+    const keyboardResetWidths = await cells.evaluateAll((elements) =>
+      elements.map((element) => element.getBoundingClientRect().width),
+    );
+    keyboardResetWidths.forEach((width, index) =>
+      expect(width).toBeCloseTo(initialWidths[index], 0),
+    );
+
+    await testPage.keyboard.press("ArrowRight");
+    await expect(table.locator("colgroup")).toHaveCount(1);
+    await testPage.setViewportSize({ width: 600, height: 800 });
+    await expect(markdown.getByTestId(/^markdown-table-resizer-/)).toHaveCount(0);
+    await expect(table.locator("colgroup")).toHaveCount(0);
+    await expectNoDocumentOverflow(testPage);
+  });
+
+  test("wide desktop table separators stay aligned inside local scrolling", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(90_000);
+    await testPage.setViewportSize({ width: 900, height: 800 });
+
+    const marker = "Scrollable resizer marker";
+    const session = await openTaskWithMarkdown(testPage, apiClient, seedData, {
+      title: "Scroll Resizable Markdown Table",
+      kind: "message",
+      text: [
+        "| Status | Owner | Project | Branch | Review | Build | Deploy | Notes |",
+        "| --- | --- | --- | --- | --- | --- | --- | --- |",
+        `| Failing checks | Team Alpha | Kandev Web | main | Pending | Passing | Ready | ${marker} |`,
+      ].join("\\n"),
+    });
+
+    const markdown = session.activeChat().locator(".markdown-body", { hasText: marker });
+    const table = markdown.locator("table");
+    const wrapper = table.locator("xpath=..");
+    const separator = markdown.getByTestId("markdown-table-resizer-2");
+    const thirdHeader = table.locator("thead th").nth(2);
+
+    await expect(separator).toBeVisible({ timeout: 30_000 });
+    expect(await wrapper.evaluate((element) => element.scrollWidth > element.clientWidth)).toBe(
+      true,
+    );
+    await wrapper.evaluate((element) => {
+      element.scrollLeft = 160;
+    });
+    const [separatorBox, headerBox] = await Promise.all([
+      separator.boundingBox(),
+      thirdHeader.boundingBox(),
+    ]);
+    expect(separatorBox).not.toBeNull();
+    expect(headerBox).not.toBeNull();
+    expect(separatorBox!.x + separatorBox!.width / 2).toBeCloseTo(
+      headerBox!.x + headerBox!.width,
+      0,
+    );
+    await expectNoMarkdownOverflow(testPage);
+    await expectNoDocumentOverflow(testPage);
+  });
+
   test("wide tables keep readable columns and scroll internally at 320px", async ({
     testPage,
     apiClient,

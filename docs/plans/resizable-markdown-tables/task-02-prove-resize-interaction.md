@@ -1,7 +1,7 @@
 ---
 id: "02-prove-resize-interaction"
 title: "Prove Markdown table resizing and mobile parity"
-status: pending
+status: done
 wave: 2
 depends_on: ["01-build-resize-renderer"]
 plan: "plan.md"
@@ -69,3 +69,18 @@ may legitimately feed a defect back into Task 01 files.
 Report desktop and mobile command results, before/after column and table widths,
 the tested hit-point location, local/document overflow measurements, files
 changed, and any unsupported browser behavior.
+
+## Result
+
+- RED: the desktop user-flow test failed because the shared renderer exposed no
+  resize separator.
+- GREEN: the rebuilt production bundle passed all 8 desktop Markdown wrapping
+  tests and both Mobile Chrome Markdown tests.
+- The desktop test drags from the first body row, verifies equal-and-opposite
+  60-pixel adjacent changes, an unchanged third column and table width, the
+  64-pixel clamp, double-click reset, 8-pixel keyboard adjustment, and `Enter`
+  reset.
+- A wide desktop table keeps its separator aligned after 160 pixels of local
+  scroll. Chat and document overflow checks remain clean.
+- Mobile Chrome exposes no separators while ordinary tables wrap and wide tables
+  retain local scrolling. No unsupported browser behavior remains in scope.

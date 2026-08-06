@@ -1,7 +1,7 @@
 ---
 id: "01-build-resize-renderer"
 title: "Build the ephemeral Markdown table resize renderer"
-status: pending
+status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
@@ -27,9 +27,10 @@ spec: "../../specs/ui/resizable-markdown-tables.md"
 
 1. RED: add pure tests for equal-and-opposite width changes, both clamp
    directions, unchanged pair totals, and 8-pixel keyboard deltas.
-2. RED: add component tests for separator semantics, capability gating, reset,
-   pointer cancellation, and column-count invalidation using controlled geometry.
-3. GREEN: implement the geometry helper and resizable table component.
+2. RED: add a browser regression proving the shared renderer has no resize
+   separator before production behavior changes.
+3. GREEN: implement the geometry helper and resizable table component. Keep
+   pure UI behavior in Playwright instead of adding isolated React tests.
 4. GREEN: replace the shared Markdown table wrapper, add scoped styles and the
    localized accessible name, then rerun the existing renderer suite.
 5. REFACTOR: keep DOM measurement and pointer lifecycle local to the component;
@@ -41,7 +42,6 @@ spec: "../../specs/ui/resizable-markdown-tables.md"
 cd apps && pnpm install --frozen-lockfile
 cd apps && pnpm --filter @kandev/web exec vitest run \
   lib/markdown/table-resize.test.ts \
-  components/shared/resizable-markdown-table.test.tsx \
   components/shared/markdown-components.test.tsx
 cd apps/web && pnpm run typecheck
 cd apps && pnpm --filter @kandev/web lint
@@ -53,7 +53,7 @@ git diff --check
 - `apps/web/lib/markdown/table-resize.ts`
 - `apps/web/lib/markdown/table-resize.test.ts`
 - `apps/web/components/shared/resizable-markdown-table.tsx`
-- `apps/web/components/shared/resizable-markdown-table.test.tsx`
+- `apps/web/components/shared/use-markdown-table-resize.ts`
 - `apps/web/components/shared/markdown-components.tsx`
 - `apps/web/app/globals.css`
 - `apps/web/src/locales/en/common.json`
@@ -77,6 +77,16 @@ wiring must stay in one RED-GREEN cycle.
 
 ## Output contract
 
-Record the expected RED failures, focused GREEN command results, measured DOM
-contract used by the component tests, files changed, and any residual geometry
-that must be proven in Playwright.
+Record the expected RED failures, focused GREEN command results, files changed,
+and the rendered geometry proven in Playwright.
+
+## Result
+
+- RED: three geometry assertions failed against the no-op width helper; the
+  desktop Playwright regression failed because no separator existed.
+- GREEN: 32 focused geometry/shared-renderer tests passed; TypeScript, frontend
+  lint, and `git diff --check` passed.
+- The renderer now provides fine-pointer separators, pointer capture, 64-pixel
+  adjacent clamping, keyboard adjustment, ephemeral reset, structure-change
+  invalidation, and cleanup on cancellation/unmount.
+- Real table geometry and responsive behavior are covered by Task 02.

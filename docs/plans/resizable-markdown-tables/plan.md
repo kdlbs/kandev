@@ -1,7 +1,7 @@
 ---
 spec: docs/specs/ui/resizable-markdown-tables.md
 created: 2026-08-05
-status: draft
+status: complete
 ---
 
 # Implementation Plan: Resizable Markdown Table Columns
@@ -69,23 +69,23 @@ specific.
 
 ## Tests
 
-### Unit and component tests
+### Unit tests
 
 - RED: adjacent-pair resizing grows and shrinks by equal amounts.
 - RED: both drag directions clamp at 64 pixels without changing the pair total.
 - RED: keyboard deltas use the same geometry behavior.
-- RED: the shared renderer emits semantic table content and accessible internal
-  separators when capability and geometry are available, resets custom widths,
-  and clears widths after a column-count change.
 - GREEN: implement the geometry module and table component, then wire it into
   `markdown-components.tsx`.
+- The repository does not add isolated React component tests for pure UI.
+  Playwright covers separator semantics, rendered geometry, reset behavior, and
+  responsive capability gating through the real shared renderer.
 
 Likely files:
 
 - `apps/web/lib/markdown/table-resize.ts`
 - `apps/web/lib/markdown/table-resize.test.ts`
 - `apps/web/components/shared/resizable-markdown-table.tsx`
-- `apps/web/components/shared/resizable-markdown-table.test.tsx`
+- `apps/web/components/shared/use-markdown-table-resize.ts`
 - `apps/web/components/shared/markdown-components.tsx`
 - `apps/web/app/globals.css`
 - `apps/web/src/locales/en/common.json`
@@ -115,8 +115,8 @@ Likely files:
 Execution is sequential in the primary conversation. The E2E work depends on
 the renderer contract, and this package does not authorize subagent use.
 
-- [ ] [Task 01: Build the ephemeral resize renderer](task-01-build-resize-renderer.md)
-- [ ] [Task 02: Prove desktop interaction and mobile parity](task-02-prove-resize-interaction.md)
+- [x] [Task 01: Build the ephemeral resize renderer](task-01-build-resize-renderer.md)
+- [x] [Task 02: Prove desktop interaction and mobile parity](task-02-prove-resize-interaction.md)
 
 ## Verification
 
@@ -124,7 +124,6 @@ the renderer contract, and this package does not authorize subagent use.
 cd apps && pnpm install --frozen-lockfile
 cd apps && pnpm --filter @kandev/web exec vitest run \
   lib/markdown/table-resize.test.ts \
-  components/shared/resizable-markdown-table.test.tsx \
   components/shared/markdown-components.test.tsx
 cd apps/web && pnpm run typecheck
 cd apps && pnpm --filter @kandev/web lint
@@ -155,3 +154,13 @@ or workflow documentation changes are required.
 ## Open questions
 
 None.
+
+## Verification results
+
+- `vitest`: 32 focused geometry/shared-renderer tests passed.
+- `pnpm run typecheck`: passed.
+- `pnpm --filter @kandev/web lint`: passed with zero warnings.
+- `make build-web`: passed.
+- Desktop `markdown-wrap.spec.ts`: 8 tests passed.
+- Mobile Chrome `mobile-markdown-wrap.spec.ts`: 2 tests passed.
+- `git diff --check`: passed.

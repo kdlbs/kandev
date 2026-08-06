@@ -1043,6 +1043,41 @@ html[data-rendering-engine="webkit"] [data-webkit-safe-motion="true"][data-state
   table-layout: auto;
 }
 
+.markdown-table-scroll {
+  position: relative;
+}
+
+.markdown-table-resizer {
+  position: absolute;
+  z-index: 10;
+  width: 0.625rem;
+  padding: 0;
+  transform: translateX(-50%);
+  cursor: col-resize;
+  touch-action: none;
+  border: 0;
+  outline: none;
+  background: transparent;
+}
+
+.markdown-table-resizer::after {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 2px;
+  content: "";
+  transform: translateX(-50%);
+  background: transparent;
+  transition: background-color 100ms ease;
+}
+
+.markdown-table-resizer:hover::after,
+.markdown-table-resizer:focus-visible::after,
+.markdown-table-resizer[data-active="true"]::after {
+  background: var(--primary);
+}
+
 .markdown-body th,
 .markdown-body td {
   border: 1px solid var(--border);
