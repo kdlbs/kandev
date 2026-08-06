@@ -2491,7 +2491,19 @@ func (s *Service) StopTaskForCoordinator(ctx context.Context, taskID string) (Co
 			accepted++
 		}
 	}
-	if accepted > 0 {
+	cleanupSucceeded := true
+	if accepted > 0 && s.taskStopCleanup != nil {
+		blockingSessionID, sessionsKnown := s.otherWorkingSessionID(ctx, taskID, "")
+		if !sessionsKnown || blockingSessionID != "" {
+			cleanupSucceeded = false
+		} else {
+			if cleanupErr := s.taskStopCleanup(ctx, taskID, coordinatorMCPStopReason); cleanupErr != nil {
+				failures = append(failures, fmt.Errorf("coordinator stop: clean up task-owned runtimes: %w", cleanupErr))
+				cleanupSucceeded = false
+			}
+		}
+	}
+	if accepted > 0 && cleanupSucceeded {
 		// This helper owns Office/archive/active-state guards and publishes
 		// through the task-service adapter. Remaining working sessions still
 		// block REVIEW on a partial stop.

@@ -132,3 +132,9 @@ that generation's slot and publishes `task_host_stop_failed` until process absen
 successful full task-host cleanup remains an authoritative fallback and then releases the slot and
 clears the error. Both failure and fallback regressions passed 20 repetitions under `-race`, along
 with the full controller race suite.
+
+The final review audit found that the coordinator/MCP `StopTaskForCoordinator` path bypassed the
+task-owned cleanup hook. After accepted session stops, the coordinator now verifies no working
+session remains, invokes the same task cleanup with trusted coordinator origin before REVIEW, and
+surfaces cleanup failure instead of completing the transition. Its ordering regression and the
+idempotent/partial-stop cases passed 20 repetitions.
