@@ -95,6 +95,7 @@ Roles, governance gates, and granular permissions that apply across human users 
 | Spec | Status |
 |---|---|
 | [runtime-updates](agents/runtime-updates.md) | approved |
+| [profile-disable](agents/profile-disable.md) | draft |
 | [roles](agents/roles.md) | shipped |
 | [governance](agents/governance.md) | shipped |
 | [granular-permissions](agents/granular-permissions.md) | draft |
@@ -121,6 +122,7 @@ Per-workspace credentials and triage triggers for external services.
 | [creation](workspaces/creation.md) | building |
 | [deletion](workspaces/deletion.md) | shipped |
 | [local-repositories](workspaces/local-repositories.md) | shipped |
+| [repository-secrets](workspaces/repository-secrets.md) | shipped |
 
 ## costs/ — cost tracking & budgets
 
@@ -145,7 +147,9 @@ Subscription quota tracking and per-agent cheap-model profile routing.
 | [review-file-status](ui/review-file-status.md) | building |
 | [review-markdown-preview](ui/review-markdown-preview.md) | draft |
 | [sidebar-view-creation](ui/sidebar-view-creation.md) | shipped |
+| [command-panel sidebar task reveal](ui/command-panel-sidebar-task-reveal.md) | draft |
 | [sidebar-task-completion-icons](ui/sidebar-task-completion-icons.md) | shipped |
+| [session-tab-delete-feedback](ui/session-tab-delete-feedback.md) | shipped |
 | [slash-command-composer](ui/slash-command-composer.md) | shipped |
 | [subagent-observability](ui/subagent-observability.md) | building |
 | [entity-reference-composer](ui/entity-reference-composer.md) | draft |
@@ -171,6 +175,7 @@ Subscription quota tracking and per-agent cheap-model profile routing.
 | [task-listing-display-preferences](ui/task-listing-display-preferences.md) | shipped |
 | [sidebar-archived-filter](ui/sidebar-archived-filter.md) | draft |
 | [task-workspace-content-search](ui/task-workspace-content-search.md) | shipped |
+| [file-tree-chat-context](ui/file-tree-chat-context.md) | shipped |
 | [task-review-shortcut](ui/task-review-shortcut.md) | approved |
 | [embedded-vscode-executor-availability](ui/embedded-vscode-executor-availability.md) | approved |
 | [embedded-vscode-windows-availability](ui/embedded-vscode-windows-availability.md) | archived; superseded by embedded-vscode-executor-availability |

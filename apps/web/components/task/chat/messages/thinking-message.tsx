@@ -7,6 +7,7 @@ import { IconBrain } from "@tabler/icons-react";
 import type { Message } from "@/lib/types/http";
 import type { RichMetadata } from "@/components/task/chat/types";
 import { ExpandableRow } from "./expandable-row";
+import { useTranslation } from "react-i18next";
 
 // Strip markdown formatting for inline display
 function stripMarkdown(text: string): string {
@@ -29,6 +30,7 @@ function stripMarkdown(text: string): string {
 }
 
 export const ThinkingMessage = memo(function ThinkingMessage({ comment }: { comment: Message }) {
+  const { t } = useTranslation();
   const [isExpanded, setIsExpanded] = useState(false);
   const metadata = comment.metadata as RichMetadata | undefined;
   const text = metadata?.thinking ?? comment.content;
@@ -46,7 +48,7 @@ export const ThinkingMessage = memo(function ThinkingMessage({ comment }: { comm
       header={
         <div className="flex items-center gap-2 text-xs">
           <span className="inline-flex items-center gap-1.5">
-            <span className="font-mono text-xs text-muted-foreground">Thinking</span>
+            <span className="font-mono text-xs text-muted-foreground">{t("task:thinking")}</span>
             {isShort && <span className="text-xs text-muted-foreground/80">{displayText}</span>}
           </span>
         </div>

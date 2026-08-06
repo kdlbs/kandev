@@ -25,7 +25,7 @@ import path from "node:path";
 const ROOT = path.resolve(import.meta.dirname, "..");
 const EN = path.join(ROOT, "src", "locales", "en");
 const TARGETS = process.argv.slice(2).filter((a) => !a.startsWith("--"));
-const DIRS = TARGETS.length ? TARGETS : ["components", "app", "hooks", "lib"];
+const DIRS = TARGETS.length ? TARGETS : ["components", "app", "hooks", "lib", "src"];
 
 /** English plural morphemes an interpolation must never carry. */
 const MORPHEME = /^(s|es|'s|)$/;

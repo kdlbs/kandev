@@ -7,6 +7,7 @@ import { cn } from "@/lib/utils";
 import { stripSystemTags } from "@/lib/utils/system-tags";
 import { MemoizedMarkdown } from "@/components/shared/memoized-markdown";
 import { ScrollToLastPromptButton } from "./scroll-to-last-prompt-button";
+import { useTranslation } from "react-i18next";
 
 type AnchoredLastPromptBarProps = {
   /** Raw content of the user's last prompt. */
@@ -126,6 +127,7 @@ export function AnchoredLastPromptBar({
   showScrollToLastPrompt = true,
   onHeightChange,
 }: AnchoredLastPromptBarProps) {
+  const { t } = useTranslation();
   const [expanded, setExpanded] = useState(false);
   const textRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
@@ -192,7 +194,7 @@ export function AnchoredLastPromptBar({
                 variant="ghost"
                 size="icon"
                 onClick={() => setExpanded((v) => !v)}
-                aria-label={expanded ? "Collapse last prompt" : "Expand last prompt"}
+                aria-label={expanded ? t("task:collapseLastPrompt") : t("task:expandLastPrompt")}
                 aria-expanded={expanded}
                 data-testid="anchored-last-prompt-expand"
                 className="h-6 w-6 shrink-0 cursor-pointer text-muted-foreground hover:text-foreground"

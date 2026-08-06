@@ -19,6 +19,7 @@ import { WalkthroughFloatingWindow } from "@/components/diff/walkthrough-floatin
 import { clearOpenWalkthroughTaskId, setOpenWalkthroughTaskId } from "@/lib/walkthrough-open-state";
 import { cn } from "@kandev/ui/lib/utils";
 import type { TaskWalkthrough } from "@/lib/types/http";
+import { useTranslation } from "react-i18next";
 
 type WalkthroughOverlayProps = {
   /** The task whose walkthrough launcher should be shown. */
@@ -45,6 +46,7 @@ function WalkthroughLauncher({
   onToggle,
   stepCount,
 }: WalkthroughLauncherProps) {
+  const { t } = useTranslation();
   return (
     <div className="group fixed bottom-[calc(1.5rem+var(--app-status-bar-height))] right-6 z-[41]">
       <button
@@ -60,10 +62,10 @@ function WalkthroughLauncher({
         )}
       >
         <IconRoute className="size-4 text-primary" />
-        Walkthrough
+        {t("review:walkthrough")}
         {hasUnseen ? (
           <span
-            aria-label="New walkthrough"
+            aria-label={t("review:newWalkthrough")}
             className="size-1.5 rounded-full bg-primary"
             data-testid="walkthrough-unseen-dot"
           />
@@ -79,8 +81,8 @@ function WalkthroughLauncher({
       </button>
       <button
         type="button"
-        aria-label="Discard walkthrough"
-        title="Discard walkthrough"
+        aria-label={t("review:discardWalkthrough")}
+        title={t("review:discardWalkthrough")}
         data-testid="walkthrough-discard"
         onClick={onDiscardClick}
         className={cn(
@@ -111,25 +113,26 @@ function DiscardWalkthroughDialog({
   onOpenChange,
   open,
 }: DiscardWalkthroughDialogProps) {
+  const { t } = useTranslation();
   return (
     <AlertDialog open={open} onOpenChange={onOpenChange}>
       <AlertDialogContent data-testid="walkthrough-discard-dialog">
         <AlertDialogHeader>
-          <AlertDialogTitle>Discard walkthrough?</AlertDialogTitle>
+          <AlertDialogTitle>{t("review:discardWalkthroughTitle")}</AlertDialogTitle>
           <AlertDialogDescription>
-            This removes the saved walkthrough from this task. The agent can create a new one later.
+            {t("review:discardWalkthroughDescription")}
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
           <AlertDialogCancel className="cursor-pointer" disabled={discarding}>
-            Cancel
+            {t("common:cancel")}
           </AlertDialogCancel>
           <AlertDialogAction
             className="cursor-pointer bg-destructive text-destructive-foreground hover:bg-destructive/90"
             disabled={discarding}
             onClick={onConfirm}
           >
-            Discard walkthrough
+            {t("review:discardWalkthrough")}
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>
@@ -185,6 +188,7 @@ function useWalkthroughBackfill(params: {
  * surface required).
  */
 export function WalkthroughOverlay({ taskId, onSelectFile }: WalkthroughOverlayProps) {
+  const { t } = useTranslation();
   const walkthrough = useAppStore((s) => (taskId ? s.walkthroughs.byTaskId[taskId] : null));
   const connectionStatus = useAppStore((s) => s.connection.status);
   const activeStep = useAppStore((s) =>
@@ -237,10 +241,10 @@ export function WalkthroughOverlay({ taskId, onSelectFile }: WalkthroughOverlayP
       setOpenTaskId(null);
       setWalkthrough(taskId, null);
       setConfirmDiscardOpen(false);
-      toast({ title: "Walkthrough discarded", variant: "success" });
+      toast({ title: t("review:walkthroughDiscarded"), variant: "success" });
     } catch (error) {
       console.error("Failed to discard walkthrough:", error);
-      toast({ title: "Failed to discard walkthrough", variant: "error" });
+      toast({ title: t("review:failedToDiscardWalkthrough"), variant: "error" });
     } finally {
       setDiscarding(false);
     }

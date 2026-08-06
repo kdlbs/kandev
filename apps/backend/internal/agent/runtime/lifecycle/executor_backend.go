@@ -336,17 +336,20 @@ type RemoteStatusProvider interface {
 
 // ExecutorCreateRequest contains parameters for creating an agentctl instance.
 type ExecutorCreateRequest struct {
-	InstanceID             string
-	TaskID                 string
-	TaskTitle              string
-	SessionID              string
-	TaskEnvironmentID      string // Env this execution belongs to (shared across sessions in same task)
-	AgentProfileID         string
-	OfficeAgentProfileID   string
-	WorkspacePath          string
-	WorkspaceSourceRoots   []string
-	Protocol               string
-	Env                    map[string]string
+	InstanceID           string
+	TaskID               string
+	TaskTitle            string
+	SessionID            string
+	TaskEnvironmentID    string // Env this execution belongs to (shared across sessions in same task)
+	AgentProfileID       string
+	OfficeAgentProfileID string
+	WorkspacePath        string
+	WorkspaceSourceRoots []string
+	Protocol             string
+	Env                  map[string]string
+	// ApprovedSecretEnvKeys contains repository binding keys explicitly
+	// approved for SSH forwarding. Other request env keys remain filtered.
+	ApprovedSecretEnvKeys  []string
 	AutoApprovePermissions bool
 	// AutoApprovePermissionsOverride is set when a resolved profile explicitly
 	// selected the auto-approve value. Nil preserves agentctl defaults/env fallback.

@@ -7,6 +7,7 @@ import { Input } from "@kandev/ui/input";
 import { IconShieldLock } from "@tabler/icons-react";
 import { ApiError } from "@/lib/api/client";
 import { setup } from "@/lib/api/domains/auth-api";
+import { useTranslation } from "react-i18next";
 
 type SetupFormProps = {
   email: string;
@@ -31,11 +32,12 @@ function SetupForm({
   submitting,
   onSubmit,
 }: SetupFormProps) {
+  const { t } = useTranslation();
   return (
     <form className="flex flex-col gap-3" onSubmit={onSubmit}>
       <div className="flex flex-col gap-1">
         <label htmlFor="setup-display-name" className="text-xs text-muted-foreground">
-          Display name
+          {t("auth:displayName")}
         </label>
         <Input
           id="setup-display-name"
@@ -48,7 +50,7 @@ function SetupForm({
       </div>
       <div className="flex flex-col gap-1">
         <label htmlFor="setup-email" className="text-xs text-muted-foreground">
-          Email
+          {t("auth:email")}
         </label>
         <Input
           id="setup-email"
@@ -62,7 +64,7 @@ function SetupForm({
       </div>
       <div className="flex flex-col gap-1">
         <label htmlFor="setup-password" className="text-xs text-muted-foreground">
-          Password
+          {t("auth:password")}
         </label>
         <Input
           id="setup-password"
@@ -74,7 +76,7 @@ function SetupForm({
           value={password}
           onChange={(e) => setPassword(e.target.value)}
         />
-        <p className="text-[11px] text-muted-foreground">At least 8 characters.</p>
+        <p className="text-[11px] text-muted-foreground">{t("auth:atLeast8Characters")}</p>
       </div>
       {error && (
         <p className="text-xs text-destructive" data-testid="setup-error">
@@ -87,13 +89,14 @@ function SetupForm({
         disabled={submitting}
         data-testid="setup-submit"
       >
-        {submitting ? "Creating admin account..." : "Create admin account"}
+        {submitting ? t("auth:creatingAdminAccount") : t("auth:createAdminAccount")}
       </Button>
     </form>
   );
 }
 
 export function SetupWizard() {
+  const { t } = useTranslation();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [displayName, setDisplayName] = useState("");
@@ -127,12 +130,9 @@ export function SetupWizard() {
       <Card className="w-full max-w-sm">
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-base">
-            <IconShieldLock className="h-4 w-4" /> Set up Kandev
+            <IconShieldLock className="h-4 w-4" /> {t("auth:setUpKandev")}
           </CardTitle>
-          <CardDescription>
-            Authentication is enabled for this deployment. Create the first account below — it
-            becomes the admin and can invite additional users.
-          </CardDescription>
+          <CardDescription>{t("auth:authenticationIsEnabledForThisDeployment")}</CardDescription>
         </CardHeader>
         <CardContent>
           <SetupForm

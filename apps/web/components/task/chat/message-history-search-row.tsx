@@ -2,6 +2,7 @@
 
 import { cn } from "@/lib/utils";
 import type { SearchHit } from "./message-history";
+import { useTranslation } from "react-i18next";
 
 export type HitRowProps = {
   hit: SearchHit;
@@ -12,6 +13,7 @@ export type HitRowProps = {
 };
 
 export function HitRow({ hit, isSelected, rowIndex, onMouseEnter, onClick }: HitRowProps) {
+  const { t } = useTranslation();
   const firstLine = hit.content.split("\n", 1)[0];
   return (
     <button
@@ -27,7 +29,7 @@ export function HitRow({ hit, isSelected, rowIndex, onMouseEnter, onClick }: Hit
       )}
       style={{ width: "calc(100% - 8px)" }}
     >
-      <span className="truncate flex-1">{firstLine || "(empty)"}</span>
+      <span className="truncate flex-1">{firstLine || t("task:empty")}</span>
     </button>
   );
 }

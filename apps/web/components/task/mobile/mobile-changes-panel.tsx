@@ -86,8 +86,8 @@ export const MobileChangesPanel = memo(function MobileChangesPanel({
   const bodyProps = buildChangesPanelBodyProps(data, {
     onOpenDiffFile: handleOpenDiffFile,
     onEditFile: onOpenFile ?? (() => {}),
-    onOpenCommitDetail: (sha, repo) => {
-      setDiffSheet({ kind: "commit", sha, repo });
+    onOpenCommitDetail: (target) => {
+      setDiffSheet({ kind: "commit", target });
     },
     onOpenReview: handleOpenReview,
   });

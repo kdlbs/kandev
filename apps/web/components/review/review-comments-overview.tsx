@@ -3,6 +3,7 @@
 import { IconMessage } from "@tabler/icons-react";
 import type { DiffComment } from "@/lib/diff/types";
 import { formatLineRange } from "@/lib/diff";
+import { useTranslation } from "react-i18next";
 
 type FileGroup = { key: string; filePath: string; comments: DiffComment[] };
 
@@ -51,13 +52,14 @@ function fileName(filePath: string): string {
  * inside the "Fix Comments" hover popover on the review top bar.
  */
 export function ReviewCommentsOverview({ comments }: { comments: DiffComment[] }) {
+  const { t } = useTranslation();
   const groups = groupCommentsByFile(comments);
   const total = comments.length;
 
   if (total === 0) {
     return (
       <div className="px-3 py-4 text-center text-xs text-muted-foreground">
-        No comments to fix yet.
+        {t("review:noCommentsToFixYet")}
       </div>
     );
   }
@@ -67,10 +69,10 @@ export function ReviewCommentsOverview({ comments }: { comments: DiffComment[] }
       <div className="flex items-center gap-2 border-b border-border/60 px-3 py-2">
         <IconMessage className="h-4 w-4 shrink-0 text-blue-500" />
         <span className="text-sm font-medium">
-          {total} pending review comment{total !== 1 ? "s" : ""}
+          {t("review:pendingCommentCount", { count: total })}
         </span>
         <span className="text-xs text-muted-foreground">
-          across {groups.length} file{groups.length !== 1 ? "s" : ""}
+          {t("review:acrossFileCount", { count: groups.length })}
         </span>
       </div>
 
@@ -103,7 +105,7 @@ export function ReviewCommentsOverview({ comments }: { comments: DiffComment[] }
                   <div className="mb-0.5 flex items-center gap-1 text-[10px] font-medium text-muted-foreground">
                     <span>{formatLineRange(comment.startLine, comment.endLine)}</span>
                     <span className="text-muted-foreground/60">
-                      · {comment.side === "additions" ? "new" : "old"}
+                      · {comment.side === "additions" ? t("review:new") : t("review:old")}
                     </span>
                   </div>
                   <p className="line-clamp-2 whitespace-pre-wrap text-xs leading-snug text-foreground/90">

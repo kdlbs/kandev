@@ -8,6 +8,7 @@ import { getMonacoLanguageFromName } from "@/lib/editor/language-map";
 import { EDITOR_FONT_FAMILY } from "@/lib/theme/editor-theme";
 import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard";
 import { initMonacoThemes } from "./monaco-init";
+import { useTranslation } from "react-i18next";
 
 initMonacoThemes();
 
@@ -17,6 +18,7 @@ type MonacoCodeBlockProps = {
 };
 
 export function MonacoCodeBlock({ children, className }: MonacoCodeBlockProps) {
+  const { t } = useTranslation();
   const { copied, copy } = useCopyToClipboard();
   const { resolvedTheme } = useTheme();
 
@@ -39,7 +41,7 @@ export function MonacoCodeBlock({ children, className }: MonacoCodeBlockProps) {
           "opacity-0 group-hover/code-block:opacity-100",
           "cursor-pointer",
         )}
-        title="Copy code"
+        title={t("editors:copyCode")}
       >
         {copied ? (
           <IconCheck className="h-3 w-3 text-green-400" />

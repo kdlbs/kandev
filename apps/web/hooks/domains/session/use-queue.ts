@@ -11,6 +11,7 @@ import {
   mergeQueuedEntry,
   QueueEntryNotFoundError,
 } from "@/lib/api/domains/queue-api";
+import type { QueueMessageParams } from "@/lib/api/domains/queue-api";
 import type { QueuedMessage } from "@/lib/state/slices/session/types";
 import type { EntityReference } from "@/lib/types/entity-reference";
 
@@ -33,6 +34,7 @@ export type QueueMessageInput = {
   planMode?: boolean;
   attachments?: MessageAttachment[];
   entityReferences?: EntityReference[];
+  contextFilesMeta?: QueueMessageParams["context_files"];
 };
 
 /** Selectors over the queue slice for one session. */
@@ -117,6 +119,7 @@ function useQueueActions({
       planMode,
       attachments,
       entityReferences,
+      contextFilesMeta,
     }: QueueMessageInput) => {
       if (!sessionId) return;
       setQueueLoading(sessionId, true);
@@ -129,6 +132,7 @@ function useQueueActions({
           plan_mode: planMode,
           attachments,
           entity_references: entityReferences,
+          ...(contextFilesMeta ? { context_files: contextFilesMeta } : {}),
         });
         await refetch(sessionId);
       } finally {

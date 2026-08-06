@@ -198,18 +198,15 @@ const SCREENS: Array<{ name: string; url: string; allow?: string[] }> = [
   // migration owns.
   //
   // What still blocks these five entries is the shared integration chrome, not
-  // the nav. Two components rendered by all five pages are still English and
-  // would have to be migrated (or allowlisted, which is worse) first:
-  // `components/integrations/drafted-integration-enabled-control.tsx`
-  // ("Enabled"/"Disabled") and `components/watcher-repository-fields.tsx`
-  // ("Repository", "Base Branch", "(no repository)"), plus `STEP_DEFAULT_LABEL`
-  // and `stepPlaceholder`. All four are shared with the un-migrated Azure DevOps
-  // surface, plus `components/integrations/settings-section.tsx` chrome and the
-  // watcher card's own empty/loading states.
-  //
-  // The Sentry run also surfaced `components/integrations/auth-status-banner.tsx`
-  // ("Authenticated", "· checked <relative>") and `@kandev/ui`'s built-in dialog
-  // "Close" label — both shared, both out of scope for a per-integration PR.
+  // the nav. `components/integrations/**` is now migrated, which cleared
+  // `drafted-integration-enabled-control.tsx` ("Enabled"/"Disabled"),
+  // `auth-status-banner.tsx` ("Authenticated", "· checked <relative>") and the
+  // watcher card's loading state. What is left is
+  // `components/watcher-repository-fields.tsx` ("Repository", "Base Branch",
+  // "(no repository)"), `STEP_DEFAULT_LABEL` and `stepPlaceholder` — all shared
+  // with the un-migrated Azure DevOps surface — plus
+  // `components/integrations/settings-section.tsx` chrome and `@kandev/ui`'s
+  // built-in dialog "Close" label.
   //
   // NOT YET: "settings — external mcp", "… prompts", "… voice mode",
   // "… utility agents". All four pages' own copy is fully migrated and was

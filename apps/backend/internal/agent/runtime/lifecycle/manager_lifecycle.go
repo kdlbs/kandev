@@ -102,6 +102,15 @@ func (m *Manager) Start(ctx context.Context) error {
 			// truth — overwrite the row to match. No-op if already in sync.
 			m.persistExecutorRunning(ctx, execution)
 
+			// Re-seed the base-branch map before reconnecting. A surviving
+			// agentctl instance never passes through waitForAgentctlReady, so
+			// without this its trackers keep whatever map they had — or none,
+			// if it was created by a path that could not supply one — and
+			// their diff stats stay pinned to an integration-branch fallback.
+			if client := execution.GetAgentCtlClient(); client != nil {
+				m.pushTaskBaseBranches(ctx, execution.TaskID, execution.ID, client)
+			}
+
 			// Reconnect to workspace streams (shell, git, file changes) in background
 			// This is needed so shell.input, git status, etc. work after backend restart
 			go m.streamManager.ReconnectAll(execution)

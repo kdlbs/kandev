@@ -13,6 +13,7 @@ import { linkToTask, linkToTasks } from "@/lib/links";
 import { getRecentTasks } from "@/lib/recent-tasks";
 import { isExplicitHomeDestination, resolveStartupTaskId } from "@/lib/startup-page";
 import { shouldRestoreHomeTaskListingView } from "@/lib/task-listing/view-preference";
+import { useTranslation } from "react-i18next";
 
 type PageClientProps = {
   workspaceId?: string;
@@ -21,6 +22,7 @@ type PageClientProps = {
 };
 
 export function PageClient({ workspaceId, initialTaskId, initialSessionId }: PageClientProps) {
+  const { t } = useTranslation();
   const router = useRouter();
   const searchParams = useSearchParams();
   const { preferredView } = useTaskListingView();
@@ -82,7 +84,7 @@ export function PageClient({ workspaceId, initialTaskId, initialSessionId }: Pag
     return (
       <div className="flex h-full min-h-0 w-full items-center justify-center bg-background">
         <p role="status" aria-live="polite" className="text-sm text-muted-foreground">
-          Opening last task…
+          {t("common:openingLastTask")}
         </p>
       </div>
     );

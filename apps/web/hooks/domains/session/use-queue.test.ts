@@ -205,6 +205,45 @@ describe("useQueue", () => {
   });
 });
 
+describe("useQueue context file metadata", () => {
+  beforeEach(() => {
+    resetMockState();
+    setDocumentVisibility("visible");
+    queueApiMock.getQueueStatus.mockResolvedValue({ entries: [], count: 0, max: 10 });
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.clearAllMocks();
+  });
+
+  it("forwards context file metadata with queued messages", async () => {
+    queueApiMock.queueMessage.mockResolvedValue(entry());
+    const { result } = renderHook(() => useQueue(SESSION_ID));
+    await waitFor(() => expect(queueApiMock.getQueueStatus).toHaveBeenCalled());
+    queueApiMock.queueMessage.mockClear();
+
+    await act(async () => {
+      await result.current.queue({
+        taskId: TASK_ID,
+        content: "queued context",
+        contextFilesMeta: [{ path: "src/components", name: "components", is_directory: true }],
+      } as never);
+    });
+
+    expect(queueApiMock.queueMessage).toHaveBeenCalledWith({
+      session_id: SESSION_ID,
+      task_id: TASK_ID,
+      content: "queued context",
+      model: undefined,
+      plan_mode: undefined,
+      attachments: undefined,
+      entity_references: undefined,
+      context_files: [{ path: "src/components", name: "components", is_directory: true }],
+    });
+  });
+});
+
 describe("useQueue mergeEntry", () => {
   beforeEach(() => {
     resetMockState();

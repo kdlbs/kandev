@@ -10,6 +10,7 @@ import {
 import type { MentionItem } from "@/hooks/use-inline-mention";
 import { getFileName, isDirectory } from "@/lib/utils/file-path";
 import { PopupMenu, PopupMenuItem, useMenuItemRefs } from "./popup-menu";
+import { useTranslation } from "react-i18next";
 
 type MentionMenuProps = {
   isOpen: boolean;
@@ -61,14 +62,15 @@ export function MentionMenu({
   onClose,
   setSelectedIndex,
 }: MentionMenuProps) {
+  const { t } = useTranslation();
   const { setItemRef } = useMenuItemRefs(selectedIndex);
 
   const emptyState = (
     <div className="px-3 py-1 text-center text-xs text-muted-foreground">
       {(() => {
-        if (isLoading) return "Loading...";
-        if (query) return "No results found";
-        return "Type to search...";
+        if (isLoading) return t("task:loading");
+        if (query) return t("task:noResultsFound");
+        return t("task:typeToSearch");
       })()}
     </div>
   );
@@ -78,7 +80,7 @@ export function MentionMenu({
       isOpen={isOpen}
       position={position ?? null}
       clientRect={clientRect}
-      title="Mention tasks, files, prompts"
+      title={t("task:mentionTasksFilesPrompts")}
       selectedIndex={selectedIndex}
       onClose={onClose}
       hasItems={items.length > 0}

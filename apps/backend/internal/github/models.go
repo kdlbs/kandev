@@ -820,13 +820,29 @@ type PRFile struct {
 
 // PRCommitInfo represents a commit in a pull request.
 type PRCommitInfo struct {
-	SHA          string `json:"sha"`
-	Message      string `json:"message"`
-	AuthorLogin  string `json:"author_login"`
-	AuthorDate   string `json:"author_date"`
-	Additions    int    `json:"additions"`
-	Deletions    int    `json:"deletions"`
-	FilesChanged int    `json:"files_changed"`
+	SHA            string `json:"sha"`
+	Message        string `json:"message"`
+	AuthorLogin    string `json:"author_login"`
+	AuthorDate     string `json:"author_date"`
+	Additions      int    `json:"additions"`
+	Deletions      int    `json:"deletions"`
+	FilesChanged   int    `json:"files_changed"`
+	StatsAvailable bool   `json:"stats_available"`
+}
+
+// PRCommitDetail represents the metadata and changed files for one GitHub
+// commit. Unlike PRCommitInfo, its statistics come from GitHub's individual
+// commit endpoint and are always measured.
+type PRCommitDetail struct {
+	SHA          string   `json:"sha"`
+	Message      string   `json:"message"`
+	AuthorLogin  string   `json:"author_login"`
+	AuthorName   string   `json:"author_name"`
+	AuthorDate   string   `json:"author_date"`
+	Additions    int      `json:"additions"`
+	Deletions    int      `json:"deletions"`
+	FilesChanged int      `json:"files_changed"`
+	Files        []PRFile `json:"files"`
 }
 
 // DailyCount holds a date and count for chart data.

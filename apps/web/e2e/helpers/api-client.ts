@@ -10,9 +10,14 @@ import type {
 } from "../../lib/types/http";
 import type { Agent, AgentProfile } from "../../lib/types/http-agents";
 import { normalizeAgentProfile } from "../../lib/api/domains/agent-profile-normalize";
-import type { TaskCIAutomationOptions, TaskCIAutomationPatch } from "../../lib/types/github";
+import type {
+  PRCommitDetail,
+  TaskCIAutomationOptions,
+  TaskCIAutomationPatch,
+} from "../../lib/types/github";
 import type { VoiceModeSettings } from "../../lib/types/http-voice";
 import type { TaskStatusSummary } from "../../lib/types/task-status-summary";
+import type { SecretListItem, SecretScope } from "../../lib/types/http-secrets";
 import type {
   GitLabMRApproval,
   GitLabMRCommit,
@@ -586,6 +591,7 @@ export class ApiClient {
       mode?: string;
       config_options?: Record<string, string>;
       cli_passthrough?: boolean;
+      enabled?: boolean;
       cli_flags?: Array<{ description: string; flag: string; enabled: boolean }>;
       command_prefix?: string;
       env_vars?: Array<{ key: string; value?: string; secret_id?: string }>;
@@ -718,6 +724,53 @@ export class ApiClient {
     });
   }
 
+  async createSecret(
+    name: string,
+    value: string,
+    options?: { scope?: SecretScope; workspaceId?: string },
+  ): Promise<SecretListItem> {
+    return this.request("POST", "/api/v1/secrets", {
+      name,
+      value,
+      scope: options?.scope ?? "global",
+      ...(options?.workspaceId ? { workspace_id: options.workspaceId } : {}),
+    });
+  }
+
+  async listSecrets(options?: {
+    scope?: SecretScope;
+    workspaceId?: string;
+    includeGlobal?: boolean;
+  }): Promise<SecretListItem[]> {
+    const query = new URLSearchParams();
+    if (options?.scope) query.set("scope", options.scope);
+    if (options?.workspaceId) query.set("workspace_id", options.workspaceId);
+    if (options?.includeGlobal) query.set("include_global", "true");
+    const suffix = query.toString();
+    return this.request("GET", `/api/v1/secrets${suffix ? `?${suffix}` : ""}`);
+  }
+
+  async deleteSecret(secretId: string, workspaceId?: string): Promise<void> {
+    const suffix = workspaceId ? `?workspace_id=${encodeURIComponent(workspaceId)}` : "";
+    const response = await this.rawRequest("DELETE", `/api/v1/secrets/${secretId}${suffix}`);
+    if (!response.ok) {
+      throw new Error(
+        `API DELETE /api/v1/secrets/${secretId}${suffix} failed (${response.status}): ${await response.text()}`,
+      );
+    }
+  }
+
+  async deleteSecretIfPresent(secretId: string, workspaceId?: string): Promise<void> {
+    try {
+      await this.deleteSecret(secretId, workspaceId);
+    } catch (error) {
+      if (error instanceof Error && error.message.includes(" failed (404):")) {
+        return;
+      }
+      throw error;
+    }
+  }
+
   async updateRepository(
     repositoryId: string,
     updates: {
@@ -729,6 +782,7 @@ export class ApiClient {
       setup_script?: string;
       cleanup_script?: string;
       copy_files?: string;
+      secret_bindings?: Array<{ key: string; secret_id: string }>;
     },
   ): Promise<void> {
     await this.request("PATCH", `/api/v1/repositories/${repositoryId}`, updates);
@@ -861,6 +915,7 @@ export class ApiClient {
     unread_divider?: boolean;
     agent_generated_task_titles?: boolean;
     mcp_task_agent_profile_default?: MCPTaskAgentProfileDefault;
+    sidebar_active_view_id?: string;
     show_anchored_prompt_bar?: boolean;
     show_scroll_to_last_prompt?: boolean;
     show_scroll_to_start?: boolean;
@@ -1329,6 +1384,7 @@ export class ApiClient {
       message: string;
       author_login: string;
       author_date: string;
+      stats_available?: boolean;
     }>,
   ): Promise<void> {
     await this.request("POST", "/api/v1/github/mock/commits", {
@@ -1341,6 +1397,28 @@ export class ApiClient {
 
     // PR commit fixtures predate workspace-scoped GitHub authentication and
     // expect the shared mock client to be available for provider lookups.
+    const workspaceId = await this.activeWorkspaceId();
+    if (!workspaceId) return;
+    await this.mockGitHubSetWorkspaceConnection(workspaceId, {
+      source: "legacy_shared",
+      status: "active",
+    });
+  }
+
+  async mockGitHubAddPRCommitDetail(
+    owner: string,
+    repo: string,
+    sha: string,
+    detail: Omit<PRCommitDetail, "sha"> & { sha?: string },
+  ): Promise<void> {
+    await this.request("POST", "/api/v1/github/mock/commit-details", {
+      owner,
+      repo,
+      sha,
+      detail: { ...detail, sha: detail.sha ?? sha },
+    });
+    await this.seedMockGitHubRepositoryAccess([{ repo_owner: owner, repo_name: repo }]);
+
     const workspaceId = await this.activeWorkspaceId();
     if (!workspaceId) return;
     await this.mockGitHubSetWorkspaceConnection(workspaceId, {

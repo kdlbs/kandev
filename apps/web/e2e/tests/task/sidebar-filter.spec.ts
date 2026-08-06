@@ -94,6 +94,22 @@ test.describe("Sidebar filter bar — popover basics", () => {
     const chips = filters.chipMenu.getByTestId("sidebar-view-chip");
     await expect(chips).toHaveCount(1);
     await expect(chips.filter({ hasText: "All tasks" })).toBeVisible();
+    await filters.closeViewPicker();
+
+    await filters.addFilterRow();
+    await filters.setClauseDimension(0, "Archived");
+    await expect
+      .poll(async () => {
+        const { settings } = await apiClient.getUserSettings();
+        const draft = settings.sidebar_draft as { base_view_id?: string } | null | undefined;
+        return draft?.base_view_id ?? null;
+      })
+      .toBe("view-all-tasks");
+    await expect(testPage.getByText("Sidebar views", { exact: true })).toHaveCount(0);
+
+    await testPage.reload();
+    await new SessionPage(testPage).waitForLoad();
+    await new SidebarFilterPopoverPage(testPage).expectActiveViewChip("All tasks");
   });
 
   test("switching chips updates active state and persists across reload", async ({

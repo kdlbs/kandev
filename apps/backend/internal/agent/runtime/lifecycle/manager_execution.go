@@ -548,16 +548,6 @@ func (m *Manager) createExecution(ctx context.Context, taskID string, info *Work
 		return nil, fmt.Errorf("agent type %q not found in registry", info.AgentID)
 	}
 
-	// Forward AgentProfile.EnvVars to the runtime instance. The Launch /
-	// ResumeSession paths merge these into req.Env via buildEnvForExecution
-	// before calling LaunchAgent; the lazy workspace-only path (any
-	// GetOrEnsureExecution* caller after backend restart) lands here directly,
-	// so without this merge the runtime instance gets spawned with empty env
-	// and CLAUDE_CONFIG_DIR (and any other workspace profile var) is lost.
-	// The agent subprocess inherits the instance env via agentctl, and ACP
-	// session/load then looks under the wrong SDK root → -32002 Resource not
-	// found.
-	env := map[string]string{}
 	var profileInfo *AgentProfileInfo
 	executionProfileID := workspaceExecutionProfileID(info)
 	if executionProfileID != "" && m.profileResolver != nil {
@@ -570,12 +560,34 @@ func (m *Manager) createExecution(ctx context.Context, taskID string, info *Work
 			profileInfo = resolvedProfile
 		}
 	}
-	m.mergeAgentProfileEnvFromInfo(ctx, profileInfo, env)
-	managedReq := &LaunchRequest{ExecutorType: info.ExecutorType, Env: env}
+	managedReq := &LaunchRequest{
+		TaskID:             taskID,
+		WorkspaceID:        info.WorkspaceID,
+		SessionID:          info.SessionID,
+		AgentProfileID:     info.AgentProfileID,
+		ExecutionProfileID: executionProfileID,
+		ExecutorType:       info.ExecutorType,
+		Env:                make(map[string]string),
+	}
 	if err := m.prepareManagedGoCacheEnvironment(ctx, managedReq); err != nil {
 		return nil, err
 	}
-	env = managedReq.Env
+	definitions, err := m.repositoryEnvironmentDefinitions(ctx, taskID, info.WorkspaceID)
+	if err != nil {
+		return nil, err
+	}
+	managedReq.EnvironmentDefinitions = append(managedReq.EnvironmentDefinitions, definitions...)
+	executorDefinitions, err := m.executorProfileEnvironmentDefinitions(ctx, workspaceExecutorProfileID(info))
+	if err != nil {
+		return nil, err
+	}
+	managedReq.EnvironmentDefinitions = append(managedReq.EnvironmentDefinitions, executorDefinitions...)
+	managedReq.ApprovedSecretEnvKeys = approvedSecretEnvironmentKeys(managedReq.EnvironmentDefinitions)
+	managedReq.EnvironmentResolutionRequired = true
+	env, err := m.buildEnvForExecution(ctx, executionID, managedReq, agentConfig, profileInfo)
+	if err != nil {
+		return nil, fmt.Errorf("build recovered environment: %w", err)
+	}
 	autoApprove := false
 	var autoApproveOverride *bool
 	if profileInfo != nil {
@@ -612,6 +624,7 @@ func (m *Manager) createExecution(ctx context.Context, taskID string, info *Work
 		AutoApprovePermissionsOverride: autoApproveOverride,
 		AgentConfig:                    agentConfig,
 		Metadata:                       metadata,
+		ApprovedSecretEnvKeys:          append([]string(nil), managedReq.ApprovedSecretEnvKeys...),
 		PreviousExecutionID:            info.AgentExecutionID,
 		AuthToken:                      m.revealRuntimeSecret(ctx, info.Metadata, MetadataKeyAuthTokenSecret),
 		BootstrapNonce:                 m.revealRuntimeSecret(ctx, info.Metadata, MetadataKeyBootstrapNonceSecret),
@@ -630,12 +643,11 @@ func (m *Manager) createExecution(ctx context.Context, taskID string, info *Work
 	execution := runtimeInstance.ToAgentExecution(req)
 	execution.RuntimeName = rt.Name()
 
-	// Cache the resolved profile env on the execution so a subsequent
-	// configureAndStartAgent (when this workspace-only execution is promoted)
-	// reuses it via mergeAgentProfileEnvForExecution instead of doing another
-	// secret-store round-trip. Mirrors the Launch path (manager_launch.go).
-	if env != nil {
-		m.cacheResolvedProfileEnv(execution, env)
+	// Cache only agent-profile values for the best-effort configure fallback.
+	// The effective runtime snapshot (including repository secrets) is already
+	// captured by ToAgentExecution and must not be mislabeled as profile data.
+	if profileInfo != nil && len(profileInfo.EnvVars) > 0 {
+		m.cacheResolvedProfileEnv(execution, m.resolveAgentProfileEnvVars(ctx, profileInfo.EnvVars))
 	}
 
 	// Set the ACP session ID for session resumption
@@ -743,6 +755,13 @@ func workspaceExecutionProfileID(info *WorkspaceInfo) string {
 	return info.AgentProfileID
 }
 
+func workspaceExecutorProfileID(info *WorkspaceInfo) string {
+	if info == nil {
+		return ""
+	}
+	return info.ExecutorProfileID
+}
+
 // rollbackRacedExecution tears down an execution that lost a session-conflict
 // race in the store. Without this the runtime instance (agentctl + agent
 // subprocess if any) keeps running with no tracking entry, and no cleanup path
@@ -821,8 +840,7 @@ func (m *Manager) persistRuntimeSecret(
 
 	m.logger.Debug("persisted runtime secret in secret store",
 		zap.String("instance_id", instance.InstanceID),
-		zap.String("metadata_key", metadataKey),
-		zap.String("secret_id", secret.ID))
+		zap.String("metadata_key", metadataKey))
 }
 
 func (m *Manager) revealRuntimeSecret(ctx context.Context, metadata map[string]interface{}, metadataKey string) string {
@@ -833,11 +851,10 @@ func (m *Manager) revealRuntimeSecret(ctx context.Context, metadata map[string]i
 	if secretID == "" {
 		return ""
 	}
-	value, err := m.secretStore.Reveal(ctx, secretID)
+	value, err := revealGlobalSecret(ctx, m.secretStore, secretID)
 	if err != nil {
 		m.logger.Warn("failed to reveal runtime secret",
 			zap.String("metadata_key", metadataKey),
-			zap.String("secret_id", secretID),
 			zap.Error(err))
 		return ""
 	}

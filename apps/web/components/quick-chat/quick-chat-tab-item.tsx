@@ -3,6 +3,7 @@
 import { memo, useCallback, useEffect, useRef, useState } from "react";
 import { IconSparkles, IconX } from "@tabler/icons-react";
 import type { QuickChatSessionKind } from "@/lib/state/slices/ui/types";
+import { useTranslation } from "react-i18next";
 
 type QuickChatTabItemProps = {
   name: string;
@@ -24,6 +25,7 @@ export const QuickChatTabItem = memo(function QuickChatTabItem({
   onClose,
   onRename,
 }: QuickChatTabItemProps) {
+  const { t } = useTranslation();
   const [isEditing, setIsEditing] = useState(false);
   const [draft, setDraft] = useState(name);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -75,7 +77,7 @@ export const QuickChatTabItem = memo(function QuickChatTabItem({
       {isEditing ? (
         <input
           ref={inputRef}
-          aria-label="Rename chat"
+          aria-label={t("chat:renameChat")}
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
           onBlur={commit}
@@ -101,11 +103,11 @@ export const QuickChatTabItem = memo(function QuickChatTabItem({
           type="button"
           onClick={onActivate}
           onDoubleClick={handleStartEdit}
-          title={isRenameable ? "Double-click to rename" : undefined}
+          title={isRenameable ? t("chat:doubleClickToRename") : undefined}
           className="flex items-center px-2.5 py-1 text-xs cursor-pointer"
         >
           {kind === "config" && (
-            <span role="img" aria-label="Configuration chat" className="mr-1.5 shrink-0">
+            <span role="img" aria-label={t("chat:configurationChat")} className="mr-1.5 shrink-0">
               <IconSparkles className="h-3 w-3" aria-hidden />
             </span>
           )}
@@ -114,7 +116,7 @@ export const QuickChatTabItem = memo(function QuickChatTabItem({
       )}
       <button
         type="button"
-        aria-label={`Close ${name}`}
+        aria-label={t("chat:close", { name })}
         className="p-1 cursor-pointer opacity-60 hover:opacity-100"
         onClick={onClose}
       >

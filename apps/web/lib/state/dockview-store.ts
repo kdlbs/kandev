@@ -33,6 +33,7 @@ import {
   materializeReusableChatPanel,
 } from "./layout-manager";
 import type { BuiltInPreset, LayoutState, LayoutGroupIds } from "./layout-manager";
+import type { CommitDetailTarget } from "@/components/task/changes-diff-target";
 import { performEnvSwitch, replaceStaleSessionPanels } from "./dockview-env-switch";
 import { enforcePinnedTargets } from "./dockview-pinned-enforce";
 import {
@@ -149,7 +150,7 @@ type DockviewStore = {
     },
   ) => void;
   addCommitDetailPanel: (
-    sha: string,
+    target: CommitDetailTarget | string,
     opts?: OpenPanelOpts & { groupId?: string; repo?: string },
   ) => void;
   addFileEditorPanel: (path: string, name: string, opts?: OpenPanelOpts) => void;

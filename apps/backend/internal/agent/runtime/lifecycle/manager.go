@@ -110,6 +110,11 @@ type Manager struct {
 	// manager_subscription.go.
 	pollAggregator *workspacePollAggregator
 
+	// baseBranchProvider hydrates a task's stored per-repo base-branch map so
+	// every workspace can be seeded at agentctl-ready time, not just full
+	// launches. See manager_base_branches.go.
+	baseBranchProvider BaseBranchProvider
+
 	// secretStore encrypts/decrypts runtime auth tokens (e.g., agentctl handshake tokens).
 	// Used to persist tokens across backend restarts for remote executor recovery.
 	secretStore secrets.SecretStore

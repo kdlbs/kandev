@@ -508,11 +508,10 @@ func (e *Executor) resolveAuthSecrets(ctx context.Context, req *LaunchAgentReque
 			continue
 		}
 
-		value, err := e.secretStore.Reveal(ctx, secretID)
+		value, err := e.revealGlobalSecret(ctx, secretID)
 		if err != nil {
 			e.logger.Debug("failed to resolve auth secret",
 				zap.String("method_id", methodID),
-				zap.String("secret_id", secretID),
 				zap.Error(err))
 			continue
 		}

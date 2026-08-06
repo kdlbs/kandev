@@ -16,6 +16,7 @@ import {
   lastAgentErrorStamp,
   readLastAgentError,
 } from "@/lib/session-last-agent-error";
+import { useTranslation } from "react-i18next";
 
 export type MessageListProps = {
   items: RenderItem[];
@@ -288,6 +289,7 @@ export function LastAgentErrorNotice({
   sessionId: string | null;
   error: LastAgentError | null;
 }) {
+  const { t } = useTranslation();
   const stamp = error ? lastAgentErrorStamp(error) : "";
   const dismissedStamp = useAppStore((state) =>
     sessionId ? state.dismissedAgentErrors[sessionId] : undefined,
@@ -323,7 +325,7 @@ export function LastAgentErrorNotice({
       <div className="flex items-start gap-2 px-3 py-2">
         <IconAlertCircle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
         <div className="min-w-0 flex-1">
-          <div className="text-xs font-medium">Previous agent error</div>
+          <div className="text-xs font-medium">{t("task:previousAgentError")}</div>
           <pre className="mt-1 max-h-40 overflow-y-auto whitespace-pre-wrap break-words text-[11px] leading-relaxed text-destructive/85">
             {error.message}
           </pre>
@@ -331,7 +333,7 @@ export function LastAgentErrorNotice({
         <button
           type="button"
           className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded hover:bg-destructive/10 cursor-pointer"
-          aria-label="Hide previous agent error"
+          aria-label={t("task:hidePreviousAgentError")}
           onClick={dismiss}
         >
           <IconX className="h-3.5 w-3.5" aria-hidden="true" />
@@ -347,16 +349,17 @@ export function LastAgentErrorNotice({
  * (see hooks/use-processed-messages.ts's findUnreadDividerItemId).
  */
 export function UnreadDivider() {
+  const { t } = useTranslation();
   return (
     <div
       data-testid="unread-divider"
       role="separator"
-      aria-label="New messages"
+      aria-label={t("task:newMessages")}
       className="relative my-3 flex items-center"
     >
       <div className="h-px flex-1 bg-destructive" />
       <span className="ml-2 shrink-0 text-[10px] font-semibold uppercase tracking-wide text-destructive">
-        New
+        {t("task:new")}
       </span>
     </div>
   );
@@ -384,11 +387,12 @@ export function MessageListStatus({
    */
   onLoadMore?: () => void;
 }) {
+  const { t } = useTranslation();
   return (
     <>
       {isLoadingMore && hasMore && (
         <div className="text-center text-xs text-muted-foreground py-2">
-          Loading older messages...
+          {t("task:loadingOlderMessages")}
         </div>
       )}
       {hasMore && !isLoadingMore && onLoadMore && (
@@ -401,7 +405,7 @@ export function MessageListStatus({
             data-testid="load-older-messages"
             onClick={onLoadMore}
           >
-            Load older messages
+            {t("task:loadOlderMessages")}
           </Button>
         </div>
       )}
@@ -411,12 +415,12 @@ export function MessageListStatus({
           data-testid="conversation-loading-state"
         >
           <GridSpinner className="text-primary mr-2" />
-          <span>Loading conversation...</span>
+          <span>{t("task:loadingConversation")}</span>
         </div>
       )}
       {!messagesLoading && !isInitialLoading && messagesCount === 0 && (
         <div className="flex items-center justify-center py-8 text-muted-foreground">
-          <span>No messages yet. Start the conversation!</span>
+          <span>{t("task:noMessagesYetStartTheConversation")}</span>
         </div>
       )}
     </>

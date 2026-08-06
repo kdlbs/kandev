@@ -280,6 +280,24 @@ func (m *Manager) finalizeBootMessage(execution *AgentExecution, msg *models.Mes
 // buildEnvForExecution builds environment variables for any runtime.
 // This is the unified method used by the runtime interface.
 func (m *Manager) buildEnvForExecution(ctx context.Context, executionID string, req *LaunchRequest, agentConfig agents.Agent, profileInfo *AgentProfileInfo) (map[string]string, error) {
+	if req.EnvironmentFinalized {
+		env := cloneStringMap(req.Env)
+		if err := spillLargeWakePayloadEnv(env, req.WorkspacePath, m.logger.Zap()); err != nil {
+			return nil, err
+		}
+		return env, nil
+	}
+	if req.EnvironmentResolutionRequired {
+		env, err := m.resolveStrictEnvironment(ctx, executionID, req, agentConfig, profileInfo)
+		if err != nil {
+			return nil, err
+		}
+		if err := spillLargeWakePayloadEnv(env, req.WorkspacePath, m.logger.Zap()); err != nil {
+			return nil, err
+		}
+		return env, nil
+	}
+
 	env := make(map[string]string)
 
 	// Copy request environment
@@ -406,6 +424,12 @@ func (m *Manager) waitForAgentctlReady(execution *AgentExecution) {
 	// default slow poll mode even though the frontend already sent focus,
 	// and git state updates take up to 30s to reach the UI.
 	m.flushCachedPollMode(execution.SessionID)
+	// Seed the workspace's per-repo base-branch map. LaunchRequest metadata
+	// only carries it on the full launch path, so workspaces created by an
+	// agent starting on an already-prepared workspace, or by lazy recovery
+	// after a restart, would otherwise have none — and their branch diff stat
+	// would silently fall back to an integration branch.
+	m.pushTaskBaseBranches(ctx, execution.TaskID, execution.ID, execution.GetAgentCtlClient())
 	// Use the timeout context for event publishing instead of a fresh Background context
 	m.eventPublisher.PublishAgentctlEvent(ctx, events.AgentctlReady, execution, "")
 }

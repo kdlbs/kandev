@@ -1,4 +1,5 @@
 import { type Locator, type Page, expect } from "@playwright/test";
+import { FileTreePage } from "./file-tree-page";
 
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -20,6 +21,7 @@ export class SessionPage {
   readonly planPanel: Locator;
   readonly stepper: Locator;
   readonly passthroughTerminal: Locator;
+  readonly fileTree: FileTreePage;
 
   constructor(private readonly page: Page) {
     this.chat = page.getByTestId("session-chat");
@@ -30,6 +32,7 @@ export class SessionPage {
     this.planPanel = page.getByTestId("plan-panel");
     this.stepper = page.getByTestId("workflow-stepper");
     this.passthroughTerminal = page.getByTestId("passthrough-terminal");
+    this.fileTree = new FileTreePage(page, this.files, () => this.activeChat());
   }
 
   // Port forward dialog locators
@@ -1483,12 +1486,57 @@ export class SessionPage {
 
   /** Find a tree node by its data-path attribute. */
   fileTreeNode(nodePath: string): Locator {
-    return this.files.locator(`[data-testid="file-tree-node"][data-path="${nodePath}"]`);
+    return this.fileTree.fileTreeNode(nodePath);
+  }
+
+  /** Visible search button in the Files panel. */
+  fileSearchButton(): Locator {
+    return this.fileTree.fileSearchButton();
+  }
+
+  /** Search input shown in the visible Files panel. */
+  fileSearchInput(): Locator {
+    return this.fileTree.fileSearchInput();
+  }
+
+  /** Search result by its task-root-relative path. */
+  fileSearchResult(nodePath: string): Locator {
+    return this.fileTree.fileSearchResult(nodePath);
   }
 
   /** All file tree nodes with data-selected="true". */
   fileTreeSelectedNodes(): Locator {
-    return this.files.locator("[data-selected='true']");
+    return this.fileTree.fileTreeSelectedNodes();
+  }
+
+  /** The desktop context-menu action for the selected file-tree node. */
+  fileTreeAddToChatContextMenuItem(): Locator {
+    return this.fileTree.fileTreeAddToChatContextMenuItem();
+  }
+
+  /** Visible coarse-pointer row action for one file-tree node. */
+  fileTreeNodeActions(nodePath: string): Locator {
+    return this.fileTree.fileTreeNodeActions(nodePath);
+  }
+
+  /** Responsive dropdown opened from a file-tree row action. */
+  fileTreeTouchMenu(): Locator {
+    return this.fileTree.fileTreeTouchMenu();
+  }
+
+  /** Add-to-chat item inside the responsive file-tree dropdown. */
+  fileTreeTouchAddToChatContextItem(): Locator {
+    return this.fileTree.fileTreeTouchAddToChatContextItem();
+  }
+
+  /** Pending composer chip for a file or directory path. */
+  chatContextFile(path: string): Locator {
+    return this.fileTree.chatContextFile(path);
+  }
+
+  /** Context-file badge on a sent user message. */
+  sentMessageContextFile(path: string): Locator {
+    return this.fileTree.sentMessageContextFile(path);
   }
 
   // --- Changes panel multi-select helpers ---

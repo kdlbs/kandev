@@ -782,6 +782,23 @@ func (c *GHClient) ListPRCommits(ctx context.Context, owner, repo string, number
 	return parsePRCommitsJSON(out)
 }
 
+func (c *GHClient) GetPRCommitDetail(ctx context.Context, owner, repo, sha string) (PRCommitDetail, error) {
+	if err := validateGitHubCommitSHA(sha); err != nil {
+		return PRCommitDetail{}, err
+	}
+	out, err := c.run(ctx, "api",
+		fmt.Sprintf("repos/%s/%s/commits/%s?per_page=100", owner, repo, sha),
+		"--paginate", "--slurp")
+	if err != nil {
+		return PRCommitDetail{}, fmt.Errorf("get PR commit detail: %w", err)
+	}
+	detail, err := parsePRCommitDetailJSON(out)
+	if err != nil {
+		return PRCommitDetail{}, err
+	}
+	return detail, nil
+}
+
 func (c *GHClient) SubmitReview(ctx context.Context, owner, repo string, number int, event, body string) error {
 	args := []string{"api",
 		fmt.Sprintf("repos/%s/%s/pulls/%d/reviews", owner, repo, number),

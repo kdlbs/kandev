@@ -3,6 +3,7 @@ import {
   type PRCreateResult,
   type getChangeRequestTerminology,
 } from "@/hooks/use-git-operations";
+import { t } from "@/lib/i18n";
 
 type Terminology = ReturnType<typeof getChangeRequestTerminology>;
 
@@ -10,14 +11,16 @@ export function getChangeRequestFailureFeedback(result: PRCreateResult, fallback
   const terms = resolveChangeRequestTerminology(result.provider, fallback);
   if (result.branch_pushed) {
     return {
-      title: `Branch pushed; ${terms.shortName} not created`,
-      description: `Branch was pushed; retry ${terms.longName.toLowerCase()} creation.`,
+      title: t("integrations:branchPushedNotCreated", { shortName: terms.shortName }),
+      description: t("integrations:branchWasPushedRetryCreation", {
+        longName: terms.longName.toLowerCase(),
+      }),
       variant: "default" as const,
     };
   }
   return {
-    title: `Create ${terms.shortName} failed`,
-    description: result.error || "An error occurred",
+    title: t("integrations:createFailed", { shortName: terms.shortName }),
+    description: result.error || t("integrations:anErrorOccurred"),
     variant: "error" as const,
   };
 }

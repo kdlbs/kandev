@@ -602,6 +602,7 @@ func (s *Service) GetWorkspaceInfoForSession(ctx context.Context, taskID, sessio
 		WorkspacePath:           workspacePath,
 		AgentProfileID:          session.AgentProfileID,
 		ExecutionProfileID:      session.ExecutionProfileID,
+		ExecutorProfileID:       session.ExecutorProfileID,
 		AgentID:                 agentID,
 		ACPSessionID:            acpSessionID,
 		SessionMode:             sessionMode,
@@ -888,6 +889,9 @@ func applyTaskEnvironmentToWorkspaceInfo(info *lifecycle.WorkspaceInfo, env *mod
 	// while the ID still pointed at the stale row — a mismatch downstream
 	// reconcilers and progress events would key off the wrong env.
 	info.TaskEnvironmentID = env.ID
+	if info.ExecutorProfileID == "" {
+		info.ExecutorProfileID = env.ExecutorProfileID
+	}
 	if info.WorkspacePath == "" {
 		info.WorkspacePath = env.WorkspacePath
 	}

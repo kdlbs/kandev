@@ -141,6 +141,7 @@ const NAMESPACE_RULES = [
   [/^components\/plugins\//, "plugins"],
   [/^components\/(integrations|vcs)\//, "integrations"],
   [/^app\/stats\//, "stats"],
+  [/^app\/tasks\//, "tasks"],
   [/^app\/auth\//, "auth"],
 ];
 

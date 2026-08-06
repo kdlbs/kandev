@@ -9,6 +9,7 @@ import { Badge } from "@kandev/ui/badge";
 import { Button } from "@kandev/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
 import { Separator } from "@kandev/ui/separator";
+import { Switch } from "@kandev/ui/switch";
 import { useToast } from "@/components/toast-provider";
 import { useSettingsSaveContributor } from "@/components/settings/settings-save-provider";
 import { SettingsCard } from "@/components/settings/settings-card";
@@ -32,6 +33,7 @@ import {
   useSyncAgentsToStore,
 } from "@/components/settings/agent-profile-page-state";
 import { CustomCLIFlagsCard } from "@/components/settings/cli-flags-field";
+import { ProfileEnabledHelp } from "@/components/settings/profile-enabled-help";
 
 export {
   ProfileEnvVarsEditor,
@@ -67,24 +69,40 @@ type ProfileEditorHeaderProps = {
   agentName: string;
   agentDisplayName: string;
   savedProfileName: string;
+  enabled: boolean;
+  onEnabledChange: (enabled: boolean) => void;
 };
 
 function ProfileEditorHeader({
   agentName,
   agentDisplayName,
   savedProfileName,
+  enabled,
+  onEnabledChange,
 }: ProfileEditorHeaderProps) {
   const { t } = useTranslation();
   return (
-    <div className="flex items-start justify-between">
-      <div>
-        <h2 className="text-2xl font-bold flex items-center gap-2">
+    <div className="flex flex-col items-stretch justify-between gap-4 sm:flex-row sm:items-start">
+      <div className="min-w-0">
+        <h2 className="text-2xl font-bold flex min-w-0 items-center gap-2 wrap-break-word">
           <AgentLogo agentName={agentName} size={28} className="shrink-0" />
           {agentDisplayName} • {savedProfileName}
         </h2>
         <p className="text-sm text-muted-foreground mt-1">
           {t("agents:agentProfileSettings", { name: agentDisplayName })}
         </p>
+      </div>
+      <div className="flex items-center gap-3 sm:shrink-0">
+        <div className="flex items-center gap-1 text-left sm:text-right">
+          <p className="text-sm font-medium">{t("agents:enabled")}</p>
+          <ProfileEnabledHelp />
+        </div>
+        <Switch
+          checked={enabled}
+          onCheckedChange={onEnabledChange}
+          data-testid="profile-enabled-toggle"
+          aria-label={enabled ? t("agents:disableProfile") : t("agents:enableProfile")}
+        />
       </div>
     </div>
   );
@@ -340,6 +358,7 @@ function ProfileEditor({
   const handleSave = useProfileSave({
     agent,
     draft,
+    savedProfile,
     setSavedProfile,
     setDraft,
     setSaveStatus,
@@ -372,6 +391,8 @@ function ProfileEditor({
         agentName={agent.name}
         agentDisplayName={profile.agentDisplayName ?? ""}
         savedProfileName={savedProfile.name}
+        enabled={draft.enabled ?? true}
+        onEnabledChange={(next) => updateDraft({ enabled: next })}
       />
 
       <Separator />

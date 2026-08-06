@@ -835,9 +835,9 @@ func TestApplySidebarViews(t *testing.T) {
 			wantApplied: false,
 		},
 		{
-			name:        "empty slice is accepted",
+			name:        "empty slice restores the canonical default",
 			req:         &UpdateUserSettingsRequest{SidebarViews: ptr([]models.SidebarView{})},
-			wantCount:   0,
+			wantCount:   1,
 			wantApplied: true,
 		},
 		{

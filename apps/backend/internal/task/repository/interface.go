@@ -327,6 +327,22 @@ type RepositoryEntityRepository interface {
 	GetRepositoryByLocalPath(ctx context.Context, workspaceID, localPath string) (*models.Repository, error)
 }
 
+// RepositorySecretBindingRepository stores normalized repository environment
+// references. It is optional on RepositoryEntityRepository to keep legacy
+// adapters source-compatible while the SQLite implementation rolls out.
+type RepositorySecretBindingRepository interface {
+	ListRepositorySecretBindings(ctx context.Context, repositoryID string) ([]*models.RepositorySecretBinding, error)
+	ListRepositorySecretBindingsByRepositoryIDs(ctx context.Context, repositoryIDs []string) (map[string][]*models.RepositorySecretBinding, error)
+	ReplaceRepositorySecretBindings(ctx context.Context, repositoryID string, bindings []models.RepositorySecretBinding) error
+}
+
+// RepositorySecretBindingMutator adds atomic repository-plus-binding writes.
+type RepositorySecretBindingMutator interface {
+	RepositorySecretBindingRepository
+	CreateRepositoryWithSecretBindings(ctx context.Context, repository *models.Repository, bindings []models.RepositorySecretBinding) error
+	UpdateRepositoryWithSecretBindings(ctx context.Context, repository *models.Repository, bindings []models.RepositorySecretBinding) error
+}
+
 // RepositoryCleanupRepository performs guarded deletion of repositories
 // created during workspace-source attachment rollback.
 type RepositoryCleanupRepository interface {

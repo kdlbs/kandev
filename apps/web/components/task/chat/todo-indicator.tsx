@@ -6,6 +6,7 @@ import { HoverCard, HoverCardContent, HoverCardTrigger } from "@kandev/ui/hover-
 import { Popover, PopoverTrigger, PopoverContent } from "@kandev/ui/popover";
 import { useCompactTaskChrome } from "@/hooks/use-compact-task-chrome";
 import { cn } from "@/lib/utils";
+import { useTranslation } from "react-i18next";
 
 type TodoDisplayItem = {
   text: string;
@@ -71,12 +72,13 @@ function TodoIndicatorContent({
   completed: number;
   progress: number;
 }) {
+  const { t } = useTranslation();
   return (
     <div data-testid="todo-indicator-popover">
       <div className="flex items-center justify-between text-xs mb-2">
-        <span className="font-medium text-foreground">Todos</span>
+        <span className="font-medium text-foreground">{t("task:todos")}</span>
         <span className="text-muted-foreground">
-          {completed}/{todos.length} completed
+          {t("task:todosCompleted", { completed, total: todos.length })}
         </span>
       </div>
       <div className="h-1.5 rounded-full bg-muted/70 mb-3">

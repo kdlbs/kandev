@@ -306,6 +306,32 @@ function renderAgentMessageWithSession(
   );
 }
 
+describe("ChatMessage context file badges", () => {
+  it("renders a folder icon for directory context metadata", () => {
+    const Wrapper = wrapper();
+
+    render(
+      <Wrapper>
+        <ChatMessage
+          comment={userMessage({
+            metadata: {
+              context_files: [
+                { path: "src", name: "src", is_directory: true },
+                { path: "src/app.ts", name: "app.ts" },
+              ],
+            },
+          })}
+          label="Message"
+          className=""
+        />
+      </Wrapper>,
+    );
+
+    expect(screen.getByTestId("message-context-directory-icon")).not.toBeNull();
+    expect(screen.getByTestId("message-context-file-icon")).not.toBeNull();
+  });
+});
+
 describe("ChatMessage sender badge", () => {
   it("renders the sender badge when sender_task_id is present in metadata", () => {
     const { container } = renderWithSender([{ id: SENDER_TASK_ID, title: SENDER_TITLE }], {

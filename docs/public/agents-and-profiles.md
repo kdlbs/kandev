@@ -74,6 +74,7 @@ Select an agent, create a profile, then open **Settings > Agents > _Agent_ > _Pr
 | Command prefix | Optional ACP-only launcher argv prepended to the command, for example `greywall --`. |
 | Environment | Literal values or references to Kandev secrets, resolved when the process starts. |
 | CLI passthrough | Uses the CLI's native terminal interface instead of a structured ACP conversation. |
+| Enabled | Keeps the profile available to existing sessions and settings while hiding it from new task, session, handoff, and Quick Chat selectors. |
 | Auto-approve all permissions | Answers automatically: the first `allow_once`/`allow_always` option, otherwise the first option supplied by the agent; no options cancels. It is off by default. |
 | MCP servers | Adds profile-specific external MCP servers when the agent supports MCP. |
 
@@ -139,6 +140,13 @@ The prefix must contain a nonempty first argv element that is not flag-like. Mal
 
 Create reusable secrets at **Settings > Secrets** (`/settings/general/secrets`), then select a secret reference in a profile environment entry. Secret names are 1–100 characters and values are 1–10,000 characters. Editing a secret with a blank value keeps the saved value.
 
+Kandev has two secret scopes:
+
+- **Global** secrets are available to the current user across their workspaces. When authentication is disabled, Global is install-global.
+- **Workspace** secrets belong to one workspace and can be selected by that workspace's repositories. They are not available to shared agent or executor profiles.
+
+The General page manages Global secrets. Manage Workspace secrets from **Settings > Workspaces > _workspace_ > Secrets**. Agent and executor profile selectors intentionally show Global secrets only; a Workspace reference saved through an older or direct API path is rejected when the profile is saved or launched.
+
 Kandev encrypts secret values at rest with AES-256-GCM. The encryption key is `<KANDEV_HOME_DIR>/data/master.key` (by default `~/.kandev/data/master.key`) and is created with owner-only file permissions. `KANDEV_DATABASE_PATH` does not relocate this key. Protect and back it up with the Kandev database; losing it makes stored values unreadable. Anyone with access to the Secrets settings can reveal the plaintext.
 
 Profile environment rules are:
@@ -151,6 +159,8 @@ Profile environment rules are:
 - an entry must use either a literal value or a secret reference, never both.
 
 Secret references are resolved at process launch. A deleted, missing, or unreadable secret causes that environment entry to be omitted; Kandev does not fall back to an old value. Empty resolved values are also omitted. Profile values fill missing environment keys but do not overwrite environment supplied by the executor or Kandev runtime.
+
+Repositories can bind an environment key to a Global secret or to a Workspace secret from the same workspace under **Settings > Workspaces > _workspace_ > Repositories**. A task inherits bindings from every attached repository. Repository bindings are secret references, never values, and a repository binding to a deleted or unreadable secret blocks that task's launch. If two sources provide the same key, Kandev deduplicates an identical secret reference and rejects every other collision; repository order never chooses a winner.
 
 Literal values remain in profile configuration. A secret reference avoids copying a token there, but the selected agent and its child processes still receive the plaintext at runtime. Use narrowly scoped credentials, and keep read-only review profiles separate from profiles allowed to publish, merge, deploy, or administer external systems.
 

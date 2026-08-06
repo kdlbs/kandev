@@ -63,6 +63,19 @@ function preserveOmittedStatusSummary(
   }
 }
 
+// Task lifecycle events may omit parent_id when the parent is unchanged. Only
+// an explicit `parent_id: null` means detach (see parentIDEventField in
+// service_tasks.go), so an omitted link must not un-nest a cached child.
+function preserveOmittedParent(
+  existing: KanbanTask,
+  merged: KanbanTask,
+  payload: TaskEventPayload,
+): void {
+  if (!hasPayloadField(payload, "parent_id")) {
+    merged.parentTaskId = existing.parentTaskId;
+  }
+}
+
 function mergeTaskUpdate(
   existing: KanbanTask | undefined,
   nextTask: KanbanTask,
@@ -73,6 +86,7 @@ function mergeTaskUpdate(
     ...nextTask,
     ...mergeTaskRepositoryFields(existing, nextTask),
   };
+  preserveOmittedParent(existing, merged, payload);
   if (!hasPayloadField(payload, "primary_session_id") && nextTask.primarySessionId === undefined) {
     merged.primarySessionId = existing.primarySessionId;
   }

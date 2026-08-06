@@ -526,8 +526,9 @@ describe("PRDetailContent persistent request expiry", () => {
       }),
     );
 
+    const timersBeforeRequest = vi.getTimerCount();
     await act(async () => reviewRequest?.reRequest("octocat"));
-    expect(vi.getTimerCount()).toBe(1);
+    expect(vi.getTimerCount()).toBe(timersBeforeRequest + 1);
 
     view.rerender(
       createElement(ReviewRequestHarness, {
@@ -537,7 +538,7 @@ describe("PRDetailContent persistent request expiry", () => {
     );
     await act(async () => undefined);
 
-    expect(vi.getTimerCount()).toBe(0);
+    expect(vi.getTimerCount()).toBe(timersBeforeRequest);
     vi.useRealTimers();
   });
 

@@ -15,8 +15,9 @@ import (
 )
 
 const (
-	DefaultUserID    = "default-user"
-	DefaultUserEmail = "default@kandev.local"
+	DefaultUserID        = "default-user"
+	DefaultUserEmail     = "default@kandev.local"
+	DefaultSidebarViewID = "view-all-tasks"
 
 	defaultChangesPanelLayout = "tree"
 )
@@ -598,11 +599,23 @@ func defaultUserSettings(userID string) *models.UserSettings {
 		KeyboardShortcuts:               map[string]interface{}{},
 		TerminalLinkBehavior:            "new_tab",
 		ChangesPanelLayout:              defaultChangesPanelLayout,
-		SidebarViews:                    []models.SidebarView{},
+		SidebarViews:                    DefaultSidebarViews(),
+		SidebarActiveViewID:             DefaultSidebarViewID,
 		SidebarTaskPrefs:                normalizeSidebarTaskPrefs(models.SidebarTaskPrefs{}),
 		AppStatusBarOrder:               normalizeAppStatusBarOrder(models.AppStatusBarOrder{}),
 		VoiceMode:                       defaultVoiceModeSettings(),
 	}
+}
+
+func DefaultSidebarViews() []models.SidebarView {
+	return []models.SidebarView{{
+		ID:              DefaultSidebarViewID,
+		Name:            "All tasks",
+		Filters:         []models.SidebarViewClause{},
+		Sort:            models.SidebarViewSort{Key: "state", Direction: "asc"},
+		Group:           "repository",
+		CollapsedGroups: []string{},
+	}}
 }
 
 func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID string) (*models.UserSettings, error) {
@@ -644,8 +657,8 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 		LspServerConfigs                map[string]map[string]interface{}   `json:"lsp_server_configs"`
 		LspStatusLocation               string                              `json:"lsp_status_location"`
 		SavedLayouts                    []models.SavedLayout                `json:"saved_layouts"`
-		SidebarViews                    []models.SidebarView                `json:"sidebar_views"`
-		SidebarActiveViewID             string                              `json:"sidebar_active_view_id"`
+		SidebarViews                    json.RawMessage                     `json:"sidebar_views"`
+		SidebarActiveViewID             json.RawMessage                     `json:"sidebar_active_view_id"`
 		SidebarDraft                    *models.SidebarViewDraft            `json:"sidebar_draft"`
 		SidebarTaskPrefs                models.SidebarTaskPrefs             `json:"sidebar_task_prefs"`
 		TaskCreateLastUsed              models.TaskCreateLastUsed           `json:"task_create_last_used"`
@@ -733,11 +746,25 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 	if settings.SavedLayouts == nil {
 		settings.SavedLayouts = []models.SavedLayout{}
 	}
-	settings.SidebarViews = payload.SidebarViews
-	if settings.SidebarViews == nil {
-		settings.SidebarViews = []models.SidebarView{}
+	if len(payload.SidebarViews) > 0 {
+		if err := json.Unmarshal(payload.SidebarViews, &settings.SidebarViews); err != nil {
+			return nil, err
+		}
+		if settings.SidebarViews == nil {
+			settings.SidebarViews = []models.SidebarView{}
+		}
 	}
-	settings.SidebarActiveViewID = payload.SidebarActiveViewID
+	if len(payload.SidebarActiveViewID) > 0 {
+		var activeViewID *string
+		if err := json.Unmarshal(payload.SidebarActiveViewID, &activeViewID); err != nil {
+			return nil, err
+		}
+		if activeViewID == nil {
+			settings.SidebarActiveViewID = ""
+		} else {
+			settings.SidebarActiveViewID = *activeViewID
+		}
+	}
 	settings.SidebarDraft = payload.SidebarDraft
 	settings.SidebarTaskPrefs = normalizeSidebarTaskPrefs(payload.SidebarTaskPrefs)
 	settings.TaskCreateLastUsed = payload.TaskCreateLastUsed

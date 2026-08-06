@@ -3,6 +3,7 @@
 import { IconRobot } from "@tabler/icons-react";
 import type { SlashCommand } from "./slash-command-types";
 import { PopupMenu, PopupMenuItem, useMenuItemRefs } from "./popup-menu";
+import { useTranslation } from "react-i18next";
 
 type SlashCommandMenuProps = {
   isOpen: boolean;
@@ -25,6 +26,7 @@ export function SlashCommandMenu({
   onClose,
   setSelectedIndex,
 }: SlashCommandMenuProps) {
+  const { t } = useTranslation();
   const { setItemRef } = useMenuItemRefs(selectedIndex);
 
   if (commands.length === 0) {
@@ -36,7 +38,7 @@ export function SlashCommandMenu({
       isOpen={isOpen}
       position={position ?? null}
       clientRect={clientRect}
-      title="Commands"
+      title={t("common:commandGroupCommands")}
       selectedIndex={selectedIndex}
       onClose={onClose}
     >

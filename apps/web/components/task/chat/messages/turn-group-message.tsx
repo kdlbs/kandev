@@ -274,6 +274,7 @@ function RepeatedToolSummary({
   entry: Extract<TurnGroupContentEntry, { kind: "repeated_tool_summary" }>;
   renderProps: MessageRenderProps;
 }) {
+  const { t } = useTranslation();
   const [expanded, setExpanded] = useState(false);
   const count = entry.messages.length;
   return (
@@ -293,7 +294,9 @@ function RepeatedToolSummary({
           <IconChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground/60" />
         )}
         <span className="min-w-0 break-words">
-          {count} repeated identical terminal commands {expanded ? "shown" : "hidden"}
+          {expanded
+            ? t("task:repeatedTerminalCommandsShown", { count })
+            : t("task:repeatedTerminalCommandsHidden", { count })}
         </span>
       </button>
       {expanded && (

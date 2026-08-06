@@ -24,6 +24,8 @@ import { useUtilityAgentGenerator } from "@/hooks/use-utility-agent-generator";
 import { useIsUtilityConfigured } from "@/hooks/use-is-utility-configured";
 import { usePromptResultDelivery } from "@/hooks/use-prompt-result-delivery";
 import { PromptResultRecovery } from "@/components/prompt-result-recovery";
+import { useTranslation } from "react-i18next";
+import { t } from "@/lib/i18n";
 
 // Re-export ImageAttachment type for consumers
 export type { ImageAttachment } from "./image-attachment-preview";
@@ -152,6 +154,7 @@ function FailedSessionBanner({
   resumeLabel?: string;
   resumingLabel?: string;
 }) {
+  const { t } = useTranslation();
   const [isResuming, setIsResuming] = useState(false);
   const [isStartingFresh, setIsStartingFresh] = useState(false);
 
@@ -211,7 +214,9 @@ function FailedSessionBanner({
                     </Button>
                   </span>
                 </TooltipTrigger>
-                {!profileExists && <TooltipContent>Agent profile no longer exists</TooltipContent>}
+                {!profileExists && (
+                  <TooltipContent>{t("task:agentProfileNoLongerExists")}</TooltipContent>
+                )}
               </Tooltip>
             )}
             <Button
@@ -223,7 +228,7 @@ function FailedSessionBanner({
               data-testid="recovery-fresh-button"
             >
               <IconRefresh className="h-3.5 w-3.5" />
-              {isStartingFresh ? "Starting..." : "Start fresh session"}
+              {isStartingFresh ? t("task:starting") : t("task:startFreshSession")}
             </Button>
           </div>
         </div>
@@ -352,10 +357,10 @@ function buildEditorAreaProps(
 function buildStoppedBannerProps(p: ChatInputContainerProps) {
   if (!p.executorUnavailable) return {};
   return {
-    message: "Executor environment is unavailable.",
+    message: t("task:executorEnvironmentIsUnavailable"),
     detail: p.executorUnavailableReason,
-    resumeLabel: "Restart",
-    resumingLabel: "Restarting...",
+    resumeLabel: t("task:restart"),
+    resumingLabel: t("task:restarting"),
   };
 }
 

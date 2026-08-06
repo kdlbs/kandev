@@ -14,6 +14,7 @@ import { useConnectionIssueCopy } from "@/components/app-status-bar/connection-s
 import { useQuickChatLauncher } from "@/hooks/use-quick-chat-launcher";
 import { workspaceHomeHref } from "@/components/app-sidebar/app-sidebar-workspace-navigation";
 import { cn } from "@/lib/utils";
+import { useTranslation } from "react-i18next";
 
 type KanbanHeaderMobileProps = {
   workspaceId?: string;
@@ -30,10 +31,11 @@ type KanbanHeaderMobileProps = {
 };
 
 function MobileBrandLink({ workspaceId }: Pick<KanbanHeaderMobileProps, "workspaceId">) {
+  const { t } = useTranslation();
   return (
     <Link
       href={workspaceHomeHref(workspaceId ? { id: workspaceId } : undefined)}
-      aria-label="Kandev home"
+      aria-label={t("kanban:kandevHome")}
       className="relative z-10 shrink-0 cursor-pointer text-[15px] font-semibold leading-none transition-colors hover:text-foreground/80"
     >
       Kandev
@@ -60,6 +62,7 @@ function MobileHeaderActions({
   toggleSearch: () => void;
   setMenuOpen: (open: boolean) => void;
 }) {
+  const { t } = useTranslation();
   const { issueSeverity } = useAppStatusDrawer();
   const issueDetails = useConnectionIssueCopy(issueSeverity);
 
@@ -77,7 +80,7 @@ function MobileHeaderActions({
           size="icon-lg"
           onClick={handleOpenQuickChat}
           className="cursor-pointer"
-          aria-label="Quick Chat"
+          aria-label={t("common:commandQuickChat")}
           data-testid="mobile-quick-chat-button"
         >
           <IconMessageCircle className="h-4 w-4" />
@@ -90,7 +93,7 @@ function MobileHeaderActions({
           onClick={toggleSearch}
           className="cursor-pointer"
           aria-pressed={isSearchOpen}
-          aria-label="Search tasks"
+          aria-label={t("kanban:searchTasks")}
           data-testid="mobile-search-toggle"
         >
           <IconSearch className="h-4 w-4" />
@@ -105,7 +108,11 @@ function MobileHeaderActions({
           issueSeverity === "lost" && "text-destructive",
           issueSeverity === "unstable" && "text-amber-500",
         )}
-        aria-label={issueDetails ? `${issueDetails.description} Open menu` : "Open menu"}
+        aria-label={
+          issueDetails
+            ? t("kanban:openMenuWithStatus", { description: issueDetails.description })
+            : t("kanban:openMenu")
+        }
         data-connection-severity={issueSeverity === "none" ? undefined : issueSeverity}
       >
         <IconMenu2 className="h-4 w-4" />

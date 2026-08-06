@@ -17,8 +17,10 @@ import {
 } from "@kandev/ui/alert-dialog";
 import { useAppStore } from "@/components/state-provider";
 import { getWebSocketClient } from "@/lib/ws/connection";
+import { useTranslation } from "react-i18next";
 
 export function ResetContextButton({ sessionId }: { sessionId: string }) {
+  const { t } = useTranslation();
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [isResetting, setIsResetting] = useState(false);
   const clearContextWindow = useAppStore((state) => state.clearContextWindow);
@@ -58,28 +60,23 @@ export function ResetContextButton({ sessionId }: { sessionId: string }) {
             )}
           </Button>
         </TooltipTrigger>
-        <TooltipContent>
-          Reset agent context — clears conversation history, preserves workspace
-        </TooltipContent>
+        <TooltipContent>{t("task:resetAgentContextClearsConversationHistory")}</TooltipContent>
       </Tooltip>
       <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Reset agent context?</AlertDialogTitle>
-            <AlertDialogDescription>
-              This will clear the agent&apos;s conversation history and start a fresh context. Your
-              workspace, files, and git state will be preserved.
-            </AlertDialogDescription>
+            <AlertDialogTitle>{t("task:resetAgentContext")}</AlertDialogTitle>
+            <AlertDialogDescription>{t("task:thisWillClearTheAgentS")}</AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel className="cursor-pointer">Cancel</AlertDialogCancel>
+            <AlertDialogCancel className="cursor-pointer">{t("common:cancel")}</AlertDialogCancel>
             <AlertDialogAction
               onClick={handleReset}
               disabled={isResetting}
               className="cursor-pointer"
               data-testid="reset-context-confirm"
             >
-              {isResetting ? "Resetting..." : "Reset Context"}
+              {isResetting ? t("task:resetting") : t("task:resetContext")}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

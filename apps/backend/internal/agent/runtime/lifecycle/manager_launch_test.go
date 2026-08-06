@@ -25,6 +25,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/executor"
 	"github.com/kandev/kandev/internal/agent/runtime/activity"
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
+	runtimeenv "github.com/kandev/kandev/internal/agent/runtime/environment"
 	settingsmodels "github.com/kandev/kandev/internal/agent/settings/models"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/secrets"
@@ -496,6 +497,64 @@ func TestBuildEnvForExecution_SeparatesOfficeAndExecutionProfiles(t *testing.T) 
 	if env["KANDEV_EXECUTION_PROFILE_ID"] != "claude-profile" {
 		t.Fatalf("KANDEV_EXECUTION_PROFILE_ID = %q, want claude-profile", env["KANDEV_EXECUTION_PROFILE_ID"])
 	}
+}
+
+func TestBuildEnvForExecution_RejectsLateManagedValuesThatConflictWithRepositorySecrets(t *testing.T) {
+	store := newInMemorySecretStore()
+	for _, key := range []string{"AGENT_MODEL", "AGENTCTL_AUTO_APPROVE_PERMISSIONS", "GOCACHE", "ANTHROPIC_API_KEY"} {
+		if err := store.Create(context.Background(), &secrets.SecretWithValue{
+			Secret: secrets.Secret{ID: "secret-" + key, Name: key, Scope: secrets.ScopeWorkspace, WorkspaceID: "workspace-1"},
+			Value:  "repository-value",
+		}); err != nil {
+			t.Fatalf("seed %s: %v", key, err)
+		}
+	}
+
+	tests := []struct {
+		name       string
+		key        string
+		profile    *AgentProfileInfo
+		cachePath  string
+		required   []string
+		credential string
+	}{
+		{name: "model", key: "AGENT_MODEL", profile: &AgentProfileInfo{Model: "managed-model"}},
+		{name: "auto approve", key: "AGENTCTL_AUTO_APPROVE_PERMISSIONS", profile: &AgentProfileInfo{AutoApprove: true}},
+		{name: "go cache", key: "GOCACHE", cachePath: "/managed/cache"},
+		{name: "required credential", key: "ANTHROPIC_API_KEY", required: []string{"ANTHROPIC_API_KEY"}, credential: "managed-credential"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			mgr := newTestManager(t)
+			mgr.secretStore = store
+			mgr.credsMgr = fixedCredentialManager{value: tc.credential}
+			req := &LaunchRequest{
+				TaskID: "task-1", WorkspaceID: "workspace-1", SessionID: "session-1",
+				EnvironmentResolutionRequired: true,
+				EnvironmentDefinitions: []runtimeenv.Definition{{
+					Key: tc.key, SecretID: "secret-" + tc.key, Origin: "repository app", WorkspaceID: "workspace-1",
+				}},
+			}
+			req.managedGoCachePath = tc.cachePath
+			_, err := mgr.buildEnvForExecution(context.Background(), "exec-1", req, &testAgent{runtimeConfig: &agents.RuntimeConfig{RequiredEnv: tc.required}}, tc.profile)
+			if err == nil {
+				t.Fatal("buildEnvForExecution succeeded, want conflict")
+			}
+			var conflictErr *runtimeenv.ConflictError
+			if !errors.As(err, &conflictErr) {
+				t.Fatalf("error = %T %v, want environment conflict", err, err)
+			}
+			if len(conflictErr.Origins) != 2 {
+				t.Fatalf("conflict origins = %#v, want repository and managed origin", conflictErr.Origins)
+			}
+		})
+	}
+}
+
+type fixedCredentialManager struct{ value string }
+
+func (m fixedCredentialManager) GetCredentialValue(context.Context, string) (string, error) {
+	return m.value, nil
 }
 
 type recordingEnvProfileResolver struct {
@@ -1087,12 +1146,42 @@ func TestLaunch_PublishesPrepareCompletedAfterRuntimeProgress(t *testing.T) {
 		t.Fatalf("Launch returned error: %v", err)
 	}
 
+	if backend.lastRequest == nil {
+		t.Fatal("runtime did not receive a create request")
+	}
+	require.Equal(t, "/tmp/ws", backend.lastRequest.WorkspacePath,
+		"runtime must receive the workspace path returned by environment preparation")
+
 	completed := prepareCompletedPayloads(eventBus)
 	require.NotEmpty(t, completed)
 	final := completed[len(completed)-1]
 	require.True(t, final.Success)
 	requirePrepareStep(t, final.Steps, "Validate Docker")
 	requirePrepareStep(t, final.Steps, "Waiting for Docker container")
+}
+
+func TestLaunch_UsesPreparedWorkspacePathForWorktree(t *testing.T) {
+	profileResolver := &countingProfileResolver{info: &AgentProfileInfo{
+		ProfileID: "profile-worktree",
+		AgentName: "auggie",
+	}}
+	mgr, backend := newEnvironmentExecutionTestManagerWithProfileResolver(t, nil, profileResolver)
+	mgr.preparerRegistry = NewPreparerRegistry(mgr.logger)
+	mgr.preparerRegistry.Register(models.ExecutorTypeWorktree, &progressPreparer{})
+
+	_, err := mgr.Launch(context.Background(), &LaunchRequest{
+		TaskID:         "task-worktree-path",
+		SessionID:      "session-worktree-path",
+		AgentProfileID: "profile-worktree",
+		ExecutorType:   string(models.ExecutorTypeWorktree),
+		RepositoryPath: "/tmp/repo",
+		UseWorktree:    true,
+		BaseBranch:     "main",
+	})
+	require.NoError(t, err)
+	require.NotNil(t, backend.lastRequest)
+	require.Equal(t, "/tmp/ws", backend.lastRequest.WorkspacePath,
+		"worktree runtime must receive the path returned by preparation")
 }
 
 func TestLaunch_PublishesPrepareCompletionOnLegacyRouteEnvError(t *testing.T) {

@@ -53,6 +53,9 @@ export function InlineSecretSelect({
         </SelectTrigger>
         <SelectContent>
           <SelectItem value={NONE_VALUE}>{t("executors:none")}</SelectItem>
+          {secretId && !secrets.some((secret) => secret.id === secretId) && (
+            <SelectItem value={secretId}>{t("executors:missingSecretReference")}</SelectItem>
+          )}
           {secrets.map((s) => (
             <SelectItem key={s.id} value={s.id}>
               {s.name}

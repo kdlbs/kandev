@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useCallback, memo, type ReactElement } from "react";
-import { useTranslation } from "react-i18next";
+import { Trans, useTranslation } from "react-i18next";
 import {
   IconAlertTriangle,
   IconArchive,
@@ -61,9 +61,10 @@ export const ActionMessage = memo(function ActionMessage({ comment }: { comment:
   // Read session state from the store instead of receiving it as a prop, so a
   // state transition doesn't re-render every message in the list (only the
   // rare action messages that actually depend on it).
+  const { t } = useTranslation();
   const { sessionState, sessionError, activeTurnId } = useActionMessageSession(comment.session_id);
   const metadata = comment.metadata as ActionMeta | undefined;
-  const message = comment.content || "An error occurred";
+  const message = comment.content || t("task:anErrorOccurred");
 
   if (metadata?.action_visibility === "running") {
     if (sessionState !== "RUNNING" || !comment.turn_id || activeTurnId !== comment.turn_id) {
@@ -277,6 +278,7 @@ function MissingBranchRecovery({
   fallbackMessage: string;
   technicalDetails?: string;
 }) {
+  const { t } = useTranslation();
   const branch = metadata.missing_branch?.trim();
   return (
     <section
@@ -290,14 +292,16 @@ function MissingBranchRecovery({
           aria-hidden="true"
         />
         <div className="min-w-0 flex-1">
-          <h3 className="text-sm font-medium text-foreground">Branch is no longer available</h3>
+          <h3 className="text-sm font-medium text-foreground">
+            {t("task:branchIsNoLongerAvailable")}
+          </h3>
           <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
             {branch ? (
-              <>
+              <Trans i18nKey="task:thisTaskPointsToBranch" values={{ branch }}>
                 This task points to <code className="break-all text-foreground">{branch}</code>, but
                 that branch could not be found on the remote repository. It may have been merged or
                 deleted.
-              </>
+              </Trans>
             ) : (
               fallbackMessage
             )}

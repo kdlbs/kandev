@@ -39,6 +39,7 @@
   "contextCompactions": "压缩次数",
   "createAWorkspaceToConfigureThisIntegration": "创建工作区后即可配置此集成。",
   "dAgo": "{{diffDay}}天前",
+  "deleteSession": "删除会话",
   "edit": "编辑",
   "executors": "执行器",
   "externalMcp": "外部 MCP",

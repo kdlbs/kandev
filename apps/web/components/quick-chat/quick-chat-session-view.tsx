@@ -5,6 +5,7 @@ import { useEnsureTaskSession } from "@/hooks/use-ensure-task-session";
 import { PassthroughTerminal } from "@/components/task/passthrough-terminal";
 import type { QuickChatSession } from "@/lib/state/slices/ui/types";
 import { QuickChatContent } from "./quick-chat-content";
+import { useTranslation } from "react-i18next";
 
 function useIsQuickChatPassthrough(sessionId: string) {
   return useAppStore((state) => {
@@ -24,6 +25,7 @@ type QuickChatSessionViewProps = {
 };
 
 export function QuickChatSessionView({ session, onInitialPromptSent }: QuickChatSessionViewProps) {
+  const { t } = useTranslation();
   // A tab can arrive from a task event, which carries no session payload.
   // Fetch the row on open so such a tab is usable, not just visible.
   useEnsureTaskSession(session.sessionId);
@@ -40,7 +42,7 @@ export function QuickChatSessionView({ session, onInitialPromptSent }: QuickChat
     <QuickChatContent
       sessionId={session.sessionId}
       minimalToolbar={isConfig}
-      placeholderOverride={isConfig ? "Ask anything about your configuration..." : undefined}
+      placeholderOverride={isConfig ? t("chat:configChatPlaceholder") : undefined}
       initialPrompt={session.initialPrompt}
       onInitialPromptSent={onInitialPromptSent}
     />

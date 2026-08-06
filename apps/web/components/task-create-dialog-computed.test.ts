@@ -1,9 +1,12 @@
 import { describe, expect, it } from "vitest";
+import type { ExecutorProfile } from "@/lib/types/http";
 import {
   computeHasRepositorySelection,
   computeSelectedRepoCount,
+  filterCompatibleAgentProfiles,
 } from "./task-create-dialog-computed";
 import type { DialogFormState } from "@/components/task-create-dialog-types";
+import type { AgentProfileOption } from "@/lib/state/slices/settings/types";
 
 const URL_A = "github.com/a/b";
 const URL_B = "github.com/c/d";
@@ -190,5 +193,37 @@ describe("computeSelectedRepoCount", () => {
     );
     expect(count).toBe(2);
     expect(count > 1).toBe(true);
+  });
+});
+
+describe("filterCompatibleAgentProfiles", () => {
+  it("removes disabled raw profiles before compatibility and autopick", () => {
+    const profiles = [
+      {
+        id: "enabled",
+        label: "Agent • Enabled",
+        agent_id: "a1",
+        agent_name: "mock-agent",
+        cli_passthrough: false,
+        enabled: true,
+      },
+      {
+        id: "disabled",
+        label: "Agent • Disabled",
+        agent_id: "a1",
+        agent_name: "mock-agent",
+        cli_passthrough: false,
+        enabled: false,
+      },
+    ] satisfies AgentProfileOption[];
+
+    expect(
+      filterCompatibleAgentProfiles(
+        profiles,
+        { executor_type: "local", config: {} } as unknown as ExecutorProfile,
+        true,
+        [],
+      ).map((p) => p.id),
+    ).toEqual(["enabled"]);
   });
 });

@@ -12,6 +12,7 @@ import {
   IconFolder,
   IconGitBranch,
   IconHexagon,
+  IconKey,
   IconPlugConnected,
   IconTicket,
 } from "@tabler/icons-react";
@@ -163,6 +164,7 @@ export function WorkspacesGroup({ pathname, expanded, onToggle }: WorkspacesGrou
       {orderedWorkspaces.map((workspace) => {
         const workspacePath = `${WORKSPACES_SETTINGS_HREF}/${workspace.id}`;
         const repositoriesPath = `${workspacePath}/repositories`;
+        const secretsPath = `${workspacePath}/secrets`;
         const workflowsPath = `${workspacePath}/workflows`;
         const automationsPath = `${workspacePath}/automations`;
         const integrationsPath = `${workspacePath}/integrations`;
@@ -213,6 +215,13 @@ export function WorkspacesGroup({ pathname, expanded, onToggle }: WorkspacesGrou
               label={t("common:automations")}
               icon={IconBolt}
               isActive={pathname === automationsPath}
+              depth={2}
+            />
+            <SettingsLeaf
+              href={secretsPath}
+              label={t("settings:secrets")}
+              icon={IconKey}
+              isActive={pathname === secretsPath}
               depth={2}
             />
           </SettingsGroup>

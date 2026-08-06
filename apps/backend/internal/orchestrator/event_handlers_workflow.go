@@ -1151,8 +1151,8 @@ func (s *Service) processOnEnter(ctx context.Context, taskID string, session *mo
 	}
 
 	switch {
-	case hasAutoStart && isPassthrough:
-		// Passthrough path: write prompt directly to PTY stdin.
+	case hasAutoStart && isPassthrough && session.State != models.TaskSessionStateCreated:
+		// Started passthrough path: write prompt directly to PTY stdin.
 		// By the time processOnEnter runs (from an on_turn_complete transition),
 		// the agent has finished its previous turn and the PTY is waiting for input.
 		effectivePrompt := s.buildWorkflowPrompt(ctx, taskDescription, step, taskID, sessionID, isPassthrough)
@@ -1585,6 +1585,42 @@ func workflowMessageMetadata(planMode bool, origin workflowMessageOrigin, refere
 	return meta
 }
 
+// handleCreatedAutoStartLaunchFailure preserves a workflow prompt when the
+// created-session launch loses a concurrent-start race. The prompt was already
+// recorded in chat history, so queueing it is the only way to deliver it after
+// the session becomes ready. If queueing is not applicable or fails, restore
+// the hand-off message that was taken before the prompt was merged.
+func (s *Service) handleCreatedAutoStartLaunchFailure(
+	ctx context.Context,
+	taskID, sessionID, stepName, prompt string,
+	launchErr error,
+	planMode, shouldQueueIfBusy, userMessageRecorded bool,
+	attachments []v1.MessageAttachment,
+	origin workflowMessageOrigin,
+	references []v1.EntityReference,
+	takenMsg *messagequeue.QueuedMessage,
+) {
+	promptQueued := false
+	if shouldQueueIfBusy && (isAgentAlreadyRunningError(launchErr) ||
+		isSessionBusyError(launchErr) || isTransientPromptError(launchErr)) {
+		if queueErr := s.queueAutoStartPrompt(
+			ctx, taskID, sessionID, prompt, planMode,
+			attachments, origin, userMessageRecorded, references,
+		); queueErr != nil {
+			s.logger.Warn("failed to queue auto-start prompt after launch failure",
+				zap.String("task_id", taskID),
+				zap.String("session_id", sessionID),
+				zap.String("step_name", stepName),
+				zap.Error(queueErr))
+		} else {
+			promptQueued = true
+		}
+	}
+	if !promptQueued && takenMsg != nil {
+		s.requeueMessage(ctx, takenMsg, takenMsg.QueuedBy)
+	}
+}
+
 func (s *Service) autoStartStepPrompt(
 	ctx context.Context,
 	taskID string, session *models.TaskSession, step *wfmodels.WorkflowStep, prompt string,
@@ -1686,7 +1722,11 @@ func (s *Service) autoStartStepPrompt(
 			recordedPrompt, true, planMode, true, attachments, references,
 		)
 		if err != nil {
-			requeueTaken()
+			s.handleCreatedAutoStartLaunchFailure(
+				ctx, taskID, sessionID, stepName, prompt, err,
+				planMode, shouldQueueIfBusy, userMsgRecorded,
+				attachments, origin, references, takenMsg,
+			)
 		}
 		return err
 	}
@@ -2140,6 +2180,22 @@ func (s *Service) markIdleAfterReset(
 // the agent's conversation context. The workspace environment is preserved.
 func (s *Service) resetAgentContext(ctx context.Context, taskID string, session *models.TaskSession, stepName string) bool {
 	sessionID := session.ID
+
+	// A CREATED session has never been prompted, so there is no agent
+	// conversation to clear. Its execution may still be workspace-only
+	// (prepared, never started), in which case a "restart" here would *start*
+	// the subprocess — and auto_start_agent, which reads State==CREATED as
+	// "the agent was never started", would then start it a second time. The
+	// second start is rejected by agentctl's running-process guard, failing
+	// the task and dropping the step prompt. Leave the start to
+	// autoStartStepPrompt: the process it launches begins on a fresh ACP
+	// session regardless, so nothing is lost by skipping.
+	if session.State == models.TaskSessionStateCreated {
+		s.logger.Debug("session has no agent context to reset, skipping",
+			zap.String("session_id", sessionID),
+			zap.String("step_name", stepName))
+		return true
+	}
 
 	executionID, err := s.agentManager.GetExecutionIDForSession(ctx, sessionID)
 	if err != nil || executionID == "" {

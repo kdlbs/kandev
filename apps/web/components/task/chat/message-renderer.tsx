@@ -29,6 +29,8 @@ import {
   KandevToolMessage,
   hasKandevRenderer,
 } from "@/components/task/chat/messages/kandev-tool-message";
+import { useTranslation } from "react-i18next";
+import { t } from "@/lib/i18n";
 
 type AdapterContext = {
   isTaskDescription: boolean;
@@ -44,6 +46,7 @@ type AdapterContext = {
 };
 
 function TaskDescriptionStartButton({ taskId, sessionId }: { taskId: string; sessionId: string }) {
+  const { t } = useTranslation();
   const [isStarting, setIsStarting] = useState(false);
   const prepareStatus = useAppStore(
     (state) => state.prepareProgress.bySessionId[sessionId]?.status ?? null,
@@ -75,7 +78,7 @@ function TaskDescriptionStartButton({ taskId, sessionId }: { taskId: string; ses
         data-testid="task-description-start-button"
       >
         <IconPlayerPlay className="h-3.5 w-3.5" />
-        {isStarting ? "Starting…" : "Start agent"}
+        {isStarting ? t("task:startingEllipsis") : t("task:startAgent")}
       </Button>
     </div>
   );
@@ -110,6 +113,7 @@ function TaskDescriptionMessage({
   onScrollToMessage?: (messageId: string) => void;
   isTurnActive?: boolean;
 }) {
+  const { t } = useTranslation();
   const sessionState = useSessionStateValue(sessionId);
   const task = useTask(taskId ?? null);
   const renderAsUser = comment.author_type === "user" || sessionState !== "FAILED";
@@ -117,7 +121,7 @@ function TaskDescriptionMessage({
     return (
       <ChatMessage
         comment={comment}
-        label="Agent"
+        label={t("task:agent")}
         className="bg-muted/40 text-foreground border-border/60"
         showRichBlocks={comment.type === "message" || comment.type === "content" || !comment.type}
         sessionId={sessionId}
@@ -134,7 +138,7 @@ function TaskDescriptionMessage({
     <>
       <ChatMessage
         comment={comment}
-        label="You"
+        label={t("task:you")}
         className="bg-primary/10 text-foreground border-primary/30"
         sessionId={sessionId}
         isTurnActive={isTurnActive}
@@ -338,7 +342,7 @@ const adapters: MessageAdapter[] = [
         return (
           <ChatMessage
             comment={comment}
-            label="You"
+            label={t("task:you")}
             className="bg-primary/10 text-foreground border-primary/30"
             sessionId={ctx.sessionId}
             worktreePath={ctx.worktreePath}
@@ -351,7 +355,7 @@ const adapters: MessageAdapter[] = [
       return (
         <ChatMessage
           comment={comment}
-          label="Agent"
+          label={t("task:agent")}
           className="bg-muted/40 text-foreground border-border/60"
           showRichBlocks={comment.type === "message" || comment.type === "content" || !comment.type}
           sessionId={ctx.sessionId}

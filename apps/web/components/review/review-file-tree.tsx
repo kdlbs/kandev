@@ -16,6 +16,7 @@ import { FileIcon } from "@/components/ui/file-icon";
 import { useTree, type VisibleRow } from "@/hooks/use-tree";
 import type { ReviewFile, FileTreeNode } from "./types";
 import { buildFileTree, reviewFileKey } from "./types";
+import { useTranslation } from "react-i18next";
 
 type ReviewFileTreeProps = {
   files: ReviewFile[];
@@ -86,6 +87,7 @@ interface ReviewFilterInputProps {
 }
 
 function ReviewFilterInput({ ref, value, onChange }: ReviewFilterInputProps) {
+  const { t } = useTranslation();
   return (
     <div className="px-2 py-2 shrink-0">
       <div className="flex items-center gap-1.5 px-2 py-1 rounded-md bg-muted/50 border border-border/50 focus-within:border-border focus-within:bg-muted/80 transition-colors">
@@ -94,7 +96,7 @@ function ReviewFilterInput({ ref, value, onChange }: ReviewFilterInputProps) {
           ref={ref}
           value={value}
           onChange={(e) => onChange(e.target.value)}
-          placeholder="Filter changed files"
+          placeholder={t("review:filterChangedFiles")}
           className="flex-1 bg-transparent text-[13px] text-foreground placeholder:text-muted-foreground outline-none min-w-0"
         />
         {value && (

@@ -74,7 +74,7 @@ async function createRepository(page: Page, name: string, targetPath: string): P
   await expect(page.getByTestId("create-local-repository-dialog")).not.toBeVisible();
 }
 
-function expectUnbornMainRepository(repositoryPath: string): void {
+function expectMainRepository(repositoryPath: string): void {
   expect(fs.statSync(path.join(repositoryPath, ".git")).isDirectory()).toBe(true);
   expect(
     execFileSync("git", ["symbolic-ref", "--short", "HEAD"], {
@@ -82,9 +82,31 @@ function expectUnbornMainRepository(repositoryPath: string): void {
       encoding: "utf8",
     }).trim(),
   ).toBe("main");
+  const branchRef = spawnSync("git", ["show-ref", "--verify", "--quiet", "refs/heads/main"], {
+    cwd: repositoryPath,
+  });
+  expect(branchRef.error).toBeUndefined();
+  expect(branchRef.status).toBe(0);
+
   const head = spawnSync("git", ["rev-parse", "--verify", "HEAD"], { cwd: repositoryPath });
   expect(head.error).toBeUndefined();
-  expect(head.status).not.toBe(0);
+  expect(head.status).toBe(0);
+
+  const commitCount = spawnSync("git", ["rev-list", "--count", "HEAD"], {
+    cwd: repositoryPath,
+    encoding: "utf8",
+  });
+  expect(commitCount.error).toBeUndefined();
+  expect(commitCount.status).toBe(0);
+  expect(String(commitCount.stdout).trim()).toBe("1");
+
+  const tree = spawnSync("git", ["ls-tree", "-r", "--name-only", "HEAD"], {
+    cwd: repositoryPath,
+    encoding: "utf8",
+  });
+  expect(tree.error).toBeUndefined();
+  expect(tree.status).toBe(0);
+  expect(String(tree.stdout).trim()).toBe("");
 }
 
 function taskIdFromUrl(page: Page): string {
@@ -94,13 +116,13 @@ function taskIdFromUrl(page: Page): string {
 }
 
 test.describe("Create task with a new local repository", () => {
-  test("initializes, registers, selects, and starts from an unborn main repository", async ({
+  test("initializes, registers, selects, and starts from a real main repository", async ({
     testPage,
     apiClient,
     seedData,
     backend,
   }) => {
-    const repositoryName = "desktop-unborn-main";
+    const repositoryName = "desktop-real-main";
     const repositoryPath = path.join(
       backend.tmpDir,
       "missing-manual-parent",
@@ -132,7 +154,13 @@ test.describe("Create task with a new local repository", () => {
     expect(fs.statSync(path.dirname(repositoryPath)).isDirectory()).toBe(true);
 
     await expect(testPage.getByTestId("repo-chip-trigger")).toContainText(repositoryName);
-    await expect(testPage.getByTestId("branch-chip-trigger").first()).toContainText("main");
+    const branchSelector = testPage.getByTestId("branch-chip-trigger").first();
+    await expect(branchSelector).toBeEnabled({ timeout: 10_000 });
+    await branchSelector.click();
+    const mainOption = testPage.getByRole("option", { name: /^main\b/ }).first();
+    await expect(mainOption).toBeVisible();
+    await mainOption.click();
+    await expect(branchSelector).toContainText("main");
     await expect(testPage.getByTestId("executor-profile-selector")).toContainText(
       directExecutor!.name,
     );
@@ -162,7 +190,7 @@ test.describe("Create task with a new local repository", () => {
         executor_type: expect.stringMatching(/^(local|local_pc)$/),
         executor_profile_id: directProfile!.id,
       });
-    expectUnbornMainRepository(repositoryPath);
+    expectMainRepository(repositoryPath);
   });
 
   test("leaves a conflicting target untouched and allows retry with a new name", async ({
@@ -198,6 +226,6 @@ test.describe("Create task with a new local repository", () => {
     await nameInput.fill(retryName);
     await createRepository(testPage, retryName, retryPath);
     await expect(testPage.getByTestId("repo-chip-trigger")).toContainText(retryName);
-    expectUnbornMainRepository(retryPath);
+    expectMainRepository(retryPath);
   });
 });

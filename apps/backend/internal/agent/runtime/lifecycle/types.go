@@ -12,6 +12,7 @@ import (
 
 	"github.com/kandev/kandev/internal/agent/mcpconfig"
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
+	runtimeenv "github.com/kandev/kandev/internal/agent/runtime/environment"
 	settingsmodels "github.com/kandev/kandev/internal/agent/settings/models"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/agentruntime"
@@ -646,10 +647,21 @@ type LaunchRequest struct {
 	TaskDescription    string              // Task description to send via ACP prompt
 	Attachments        []MessageAttachment // Attachments (images/files) for the initial prompt
 	Env                map[string]string   // Additional env vars
-	ACPSessionID       string              // ACP session ID to resume, if available
-	Metadata           map[string]interface{}
-	ModelOverride      string         // If set, use this model instead of the profile's model
-	RouteOverride      *RouteOverride // If set, overrides agent_id/model/mode/etc per provider routing
+	// ApprovedSecretEnvKeys contains repository binding keys that SSH may
+	// forward in addition to its managed credential allowlist.
+	ApprovedSecretEnvKeys []string
+	// EnvironmentDefinitions preserve source identity until lifecycle has added
+	// every managed runtime value and can perform the final strict resolution.
+	EnvironmentDefinitions        []runtimeenv.Definition
+	EnvironmentResolutionRequired bool
+	// EnvironmentFinalized marks the immutable effective snapshot passed to the
+	// runtime. Later lifecycle steps must not merge profile or credential values
+	// over this snapshot.
+	EnvironmentFinalized bool
+	ACPSessionID         string // ACP session ID to resume, if available
+	Metadata             map[string]interface{}
+	ModelOverride        string         // If set, use this model instead of the profile's model
+	RouteOverride        *RouteOverride // If set, overrides agent_id/model/mode/etc per provider routing
 
 	// Ephemeral tasks (quick chat) get fallback workspace directories when no repo is configured.
 	// Non-ephemeral tasks without a workspace path will not receive a fallback directory.
@@ -835,6 +847,7 @@ type WorkspaceInfo struct {
 	WorkspaceID           string
 	AgentProfileID        string // Stable Office agent identity (or the execution profile for legacy sessions)
 	ExecutionProfileID    string // Concrete CLI profile selected for this execution
+	ExecutorProfileID     string // Concrete executor profile selected for this execution
 	AgentID               string // Agent type ID (e.g., "auggie", "codex") - required for runtime creation
 	ACPSessionID          string // Agent's session ID for conversation resumption (from session metadata)
 	// SessionMode is the persisted session permission mode (e.g. "acceptEdits")

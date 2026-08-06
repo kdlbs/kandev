@@ -8,6 +8,8 @@ import Link from "@/components/routing/app-link";
 import { cancelTaskReview, runTaskReview } from "@/lib/api/domains/review-api";
 import { isRunActive } from "@/lib/review/findings";
 import type { TaskReviewRun } from "@/lib/types/review";
+import { Trans, useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 
 export type ReviewRunButtonProps = {
   taskId: string | null | undefined;
@@ -23,20 +25,21 @@ export type ReviewRunButtonProps = {
  * showing a dead-end error.
  */
 function RunNotice({ code, message }: { code: string; message: string }) {
+  const { t } = useTranslation();
   if (code === "review_agent_unavailable") {
     return (
       <p className="text-xs text-muted-foreground" data-testid="review-agent-unavailable">
-        No inference-capable agent is configured for review.{" "}
-        <Link href="/settings/utility-agents" className="cursor-pointer underline">
-          Settings → Utility Agents
-        </Link>
+        <Trans i18nKey="review:reviewAgentUnavailableNotice">
+          No inference-capable agent is configured for review.{" "}
+          <Link href="/settings/utility-agents" className="cursor-pointer underline" />
+        </Trans>
       </p>
     );
   }
   if (code === "review_no_changes") {
     return (
       <p className="text-xs text-muted-foreground" data-testid="review-no-changes">
-        No changes to review yet.
+        {t("review:noChangesToReviewYet")}
       </p>
     );
   }
@@ -85,6 +88,7 @@ function RunTrigger({
   compact: boolean;
   onStart: () => void;
 }) {
+  const { t } = useTranslation();
   return (
     <Tooltip>
       <TooltipTrigger asChild>
@@ -94,7 +98,7 @@ function RunTrigger({
           className="cursor-pointer gap-1 px-2"
           onClick={onStart}
           disabled={disabled}
-          aria-label="Review these changes with an agent"
+          aria-label={t("review:reviewTheseChangesWithAnAgent")}
           data-testid="review-run-changes"
         >
           {busy ? (
@@ -102,11 +106,11 @@ function RunTrigger({
           ) : (
             <IconSparkles className="h-4 w-4" />
           )}
-          {!compact && <span className="text-xs">Review changes</span>}
+          {!compact && <span className="text-xs">{t("review:reviewChanges")}</span>}
         </Button>
       </TooltipTrigger>
       <TooltipContent>
-        {busy ? "Review in progress" : "Review these changes with an agent"}
+        {busy ? t("review:reviewInProgress") : t("review:reviewTheseChangesWithAnAgent")}
       </TooltipContent>
     </Tooltip>
   );
@@ -120,12 +124,13 @@ function RunTrigger({
 function resolveNotice(
   notice: { code: string; message: string } | null,
   activeRun: TaskReviewRun | null,
+  t: TFunction,
 ): { code: string; message: string } | null {
   if (notice) return notice;
   if (activeRun?.status !== "failed") return null;
   return {
     code: activeRun.error_code,
-    message: activeRun.error_message || "The review failed",
+    message: activeRun.error_message || t("review:theReviewFailed"),
   };
 }
 
@@ -135,9 +140,10 @@ export function ReviewRunButton({
   activeRun,
   compact = false,
 }: ReviewRunButtonProps) {
+  const { t } = useTranslation();
   const { notice, starting, start, clearNotice } = useRunReview(taskId, sessionId);
   const running = isRunActive(activeRun);
-  const shown = resolveNotice(notice, activeRun);
+  const shown = resolveNotice(notice, activeRun, t);
 
   const handleCancel = useCallback(async () => {
     if (!activeRun) return;
@@ -165,7 +171,7 @@ export function ReviewRunButton({
           data-testid="review-cancel-run"
         >
           <IconX className="h-3.5 w-3.5" />
-          Cancel
+          {t("common:cancel")}
         </Button>
       )}
 

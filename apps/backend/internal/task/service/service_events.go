@@ -899,6 +899,10 @@ func (s *Service) publishRepositoryEvent(ctx context.Context, eventType string, 
 	if s.eventBus == nil || repository == nil {
 		return
 	}
+	bindings := make([]map[string]string, 0, len(repository.SecretBindings))
+	for _, binding := range repository.SecretBindings {
+		bindings = append(bindings, map[string]string{"key": binding.Key, "secret_id": binding.SecretID})
+	}
 	data := map[string]interface{}{
 		"id":                     repository.ID,
 		"workspace_id":           repository.WorkspaceID,
@@ -917,6 +921,7 @@ func (s *Service) publishRepositoryEvent(ctx context.Context, eventType string, 
 		"cleanup_script":         repository.CleanupScript,
 		"dev_script":             repository.DevScript,
 		"copy_files":             repository.CopyFiles,
+		"secret_bindings":        bindings,
 		"created_at":             repository.CreatedAt.Format(time.RFC3339),
 		"updated_at":             repository.UpdatedAt.Format(time.RFC3339),
 	}
