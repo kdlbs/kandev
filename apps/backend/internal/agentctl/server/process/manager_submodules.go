@@ -17,6 +17,7 @@ import (
 )
 
 const submoduleDiscoveryTimeout = 10 * time.Second
+const maxSubmoduleDiscoveryDepth = 32
 
 func (m *Manager) hasBareMultiRepoTrackerGraph() bool {
 	root, trackers := m.snapshotTrackers()
@@ -60,7 +61,7 @@ func (m *Manager) buildWorkspaceTrackerGraph(
 
 	root := NewWorkspaceTracker(workDir, m.logger)
 	m.configureTracker(root, "", roots)
-	trackers := m.discoverSubmoduleTrackers(ctx, root, roots, workDir)
+	trackers := m.discoverSubmoduleTrackers(ctx, root, roots, workDir, 0)
 	if rootIsGit && includeAttachedRepos {
 		known := make(map[string]struct{}, len(trackers))
 		for _, tracker := range trackers {
@@ -92,7 +93,7 @@ func (m *Manager) buildRepositoryScopeTrackers(
 	tracker := m.newTrackerForRepo(repo.path, repo.name)
 	m.configureTracker(tracker, repo.name, roots)
 	trackers := []*WorkspaceTracker{tracker}
-	return append(trackers, m.discoverSubmoduleTrackers(ctx, tracker, roots, workspaceRoot)...)
+	return append(trackers, m.discoverSubmoduleTrackers(ctx, tracker, roots, workspaceRoot, 0)...)
 }
 
 // reconcileWorkspaceTrackerGraph keeps existing tracker instances when their
@@ -153,7 +154,7 @@ func (m *Manager) reconcileWorkspaceTrackerGraph(
 	m.applyWorkspacePollModeLocked(newTrackers...)
 	m.repoTrackersMu.Unlock()
 	if m.processRunner != nil {
-		m.processRunner.workspaceTracker = root
+		m.processRunner.setWorkspaceTracker(root)
 	}
 
 	if oldRoot != nil && oldRoot != root {
@@ -196,7 +197,7 @@ func (m *Manager) replaceWorkspaceTrackerGraph(
 	m.applyWorkspacePollModeLocked(append([]*WorkspaceTracker{desiredRoot}, desiredTrackers...)...)
 	m.repoTrackersMu.Unlock()
 	if m.processRunner != nil {
-		m.processRunner.workspaceTracker = desiredRoot
+		m.processRunner.setWorkspaceTracker(desiredRoot)
 	}
 
 	if oldRoot != nil {
@@ -239,7 +240,15 @@ func (m *Manager) discoverSubmoduleTrackers(
 	parent *WorkspaceTracker,
 	roots []string,
 	workspaceRoot string,
+	depth int,
 ) []*WorkspaceTracker {
+	if depth >= maxSubmoduleDiscoveryDepth {
+		m.logger.Warn("submodule discovery depth limit reached",
+			zap.String("repository_name", parent.RepositoryName()),
+			zap.Int("depth", depth),
+			zap.Int("max_depth", maxSubmoduleDiscoveryDepth))
+		return nil
+	}
 	paths, err := listGitlinkPaths(ctx, parent.workDir, "HEAD")
 	if err != nil {
 		m.logger.Warn("could not discover submodules",
@@ -272,7 +281,7 @@ func (m *Manager) discoverSubmoduleTrackers(
 		child.SetComparisonAnchor(anchor)
 
 		trackers = append(trackers, child)
-		trackers = append(trackers, m.discoverSubmoduleTrackers(ctx, child, roots, workspaceRoot)...)
+		trackers = append(trackers, m.discoverSubmoduleTrackers(ctx, child, roots, workspaceRoot, depth+1)...)
 	}
 	return trackers
 }

@@ -124,3 +124,21 @@ func TestManager_SkipsUninitializedSubmoduleWithoutLosingRoot(t *testing.T) {
 		t.Fatal("root tracker was lost when submodule was unavailable")
 	}
 }
+
+func TestManager_SubmoduleDiscoveryStopsAtDepthLimit(t *testing.T) {
+	parent, parentCleanup := setupTestRepo(t)
+	t.Cleanup(parentCleanup)
+	mgr := NewManager(&config.InstanceConfig{WorkDir: parent}, newTestLogger(t))
+	t.Cleanup(mgr.stopWorkspaceTrackers)
+
+	got := mgr.discoverSubmoduleTrackers(
+		context.Background(),
+		mgr.GetWorkspaceTracker(),
+		nil,
+		parent,
+		maxSubmoduleDiscoveryDepth,
+	)
+	if got != nil {
+		t.Fatalf("depth-limited discovery returned %v trackers, want none", len(got))
+	}
+}

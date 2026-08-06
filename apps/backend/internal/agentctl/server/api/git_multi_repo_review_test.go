@@ -194,8 +194,13 @@ func TestNestedSubmoduleReviewEndpointsIncludeRootAndStableChildBase(t *testing.
 	if _, ok := statusByRepo[""]; !ok {
 		t.Fatalf("root status missing: %s", statusResponse.Body.String())
 	}
-	if childStatus, ok := statusByRepo["vendor/lib"]; !ok || !containsString(childStatus.Modified, "child-uncommitted.txt") && !containsString(childStatus.Untracked, "child-uncommitted.txt") {
-		t.Fatalf("child status missing child-uncommitted.txt: %s", statusResponse.Body.String())
+	childStatus, ok := statusByRepo["vendor/lib"]
+	if !ok {
+		t.Fatalf("child repo status missing entirely: %s", statusResponse.Body.String())
+	}
+	if !containsString(childStatus.Modified, "child-uncommitted.txt") &&
+		!containsString(childStatus.Untracked, "child-uncommitted.txt") {
+		t.Fatalf("child-uncommitted.txt not in Modified or Untracked: %s", statusResponse.Body.String())
 	}
 
 	diffResponse := httptest.NewRecorder()

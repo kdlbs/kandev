@@ -169,9 +169,10 @@ type commandProcess struct {
 //   - Stop() kills the entire process group (handles child processes correctly)
 //   - This ensures clean cleanup even if the process spawns subprocesses
 type ProcessRunner struct {
-	logger           *logger.Logger    // Scoped logger for this component
-	workspaceTracker *WorkspaceTracker // WebSocket stream coordinator (can be nil)
-	bufferMaxBytes   int64             // Default output buffer size for new processes
+	logger             *logger.Logger    // Scoped logger for this component
+	workspaceTracker   *WorkspaceTracker // WebSocket stream coordinator (can be nil)
+	workspaceTrackerMu sync.RWMutex      // Protects workspaceTracker during tracker graph replacement
+	bufferMaxBytes     int64             // Default output buffer size for new processes
 
 	mu               sync.RWMutex               // Protects processes map
 	processes        map[string]*commandProcess // Active processes by ID
@@ -206,6 +207,19 @@ func NewProcessRunner(workspaceTracker *WorkspaceTracker, log *logger.Logger, bu
 		bufferMaxBytes:   bufferMaxBytes,
 		processes:        make(map[string]*commandProcess),
 	}
+}
+
+func (r *ProcessRunner) setWorkspaceTracker(tracker *WorkspaceTracker) {
+	r.workspaceTrackerMu.Lock()
+	r.workspaceTracker = tracker
+	r.workspaceTrackerMu.Unlock()
+}
+
+func (r *ProcessRunner) getWorkspaceTracker() *WorkspaceTracker {
+	r.workspaceTrackerMu.RLock()
+	tracker := r.workspaceTracker
+	r.workspaceTrackerMu.RUnlock()
+	return tracker
 }
 
 // Start spawns a new background process and returns immediately.
@@ -740,7 +754,8 @@ func (r *ProcessRunner) waitForProcessGroupExit(ctx context.Context, pid int) bo
 }
 
 func (r *ProcessRunner) publishOutput(proc *commandProcess, chunk ProcessOutputChunk) {
-	if r.workspaceTracker == nil {
+	tracker := r.getWorkspaceTracker()
+	if tracker == nil {
 		return
 	}
 	proc.mu.Lock()
@@ -755,11 +770,12 @@ func (r *ProcessRunner) publishOutput(proc *commandProcess, chunk ProcessOutputC
 		Data:      chunk.Data,
 		Timestamp: chunk.Timestamp,
 	}
-	r.workspaceTracker.notifyWorkspaceStreamProcessOutput(output)
+	tracker.notifyWorkspaceStreamProcessOutput(output)
 }
 
 func (r *ProcessRunner) publishStatus(proc *commandProcess) {
-	if r.workspaceTracker == nil {
+	tracker := r.getWorkspaceTracker()
+	if tracker == nil {
 		return
 	}
 	proc.mu.Lock()
@@ -782,7 +798,7 @@ func (r *ProcessRunner) publishStatus(proc *commandProcess) {
 		zap.String("session_id", info.SessionID),
 		zap.String("status", string(info.Status)),
 	)
-	r.workspaceTracker.notifyWorkspaceStreamProcessStatus(update)
+	tracker.notifyWorkspaceStreamProcessStatus(update)
 }
 
 // snapshot creates a thread-safe copy of process info at the current moment.
