@@ -11,7 +11,6 @@ import {
   ContextMenuTrigger,
 } from "@kandev/ui/context-menu";
 import type { QuickChatSessionKind } from "@/lib/state/slices/ui/types";
-import { useTranslation } from "react-i18next";
 
 type QuickChatTabItemProps = {
   name: string;

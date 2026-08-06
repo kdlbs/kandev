@@ -21,7 +21,12 @@ vi.mock("@kandev/ui/context-menu", () => ({
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
-    t: (key: string) => (key === "common:rename" ? "Rename" : key),
+    t: (key: string) =>
+      ({
+        "common:rename": "Rename",
+        "chat:renameChat": "Rename chat",
+        "chat:configurationChat": "Configuration chat",
+      })[key] ?? key,
   }),
 }));
 
