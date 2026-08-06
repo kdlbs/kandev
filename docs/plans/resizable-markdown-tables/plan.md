@@ -130,7 +130,7 @@ cd apps/web && pnpm run typecheck
 cd apps && pnpm --filter @kandev/web lint
 make build-web
 cd apps/web && pnpm e2e:run tests/chat/markdown-wrap.spec.ts
-cd apps/web && pnpm e2e:run tests/chat/mobile-markdown-wrap.spec.ts
+cd apps/web && pnpm e2e:run --project mobile-chrome tests/chat/mobile-markdown-wrap.spec.ts
 ```
 
 ## Documentation impact
