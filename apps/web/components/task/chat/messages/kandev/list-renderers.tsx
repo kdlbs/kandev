@@ -486,7 +486,9 @@ export const ListTaskDocumentsRenderer: KandevRenderer = ({ args, result, status
               )}
               {d.type && <span className="text-[10px] text-muted-foreground/60">{d.type}</span>}
               {d.author && (
-                <span className="text-[10px] text-muted-foreground/60">by {d.author}</span>
+                <span className="text-[10px] text-muted-foreground/60">
+                  {t("task:byAuthor", { author: d.author })}
+                </span>
               )}
             </div>
           ))

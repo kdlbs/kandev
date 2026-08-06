@@ -19,7 +19,7 @@ import { getShortcut } from "@/lib/keyboard/shortcut-overrides";
 import { whisperModelConfig } from "@/lib/voice/whisper-web-models";
 import { VoiceModelLoadIndicator } from "./voice-model-load-indicator";
 import { useTranslation } from "react-i18next";
-import { t } from "@/lib/i18n";
+import type { TFunction } from "i18next";
 
 type VoiceInputButtonProps = {
   /** Inserts the recognized transcript at the current cursor position. */
@@ -272,12 +272,13 @@ function resolveEffectiveMode(
 }
 
 function resolveTooltip(args: {
+  translate: TFunction;
   modelLoad: VoiceModelLoadState;
   modelLabel: string;
   state: VoiceInputState;
   holdMode: boolean;
 }): string {
-  const { modelLoad, modelLabel, state, holdMode } = args;
+  const { translate: t, modelLoad, modelLabel, state, holdMode } = args;
   if (modelLoad.state === "loading") {
     const pct = Number.isFinite(modelLoad.progress)
       ? Math.min(100, Math.max(0, Math.round(modelLoad.progress * 100)))
@@ -315,6 +316,7 @@ function VoiceMicButton({
   pointerHandlers,
   onClick,
 }: VoiceMicButtonProps) {
+  const { t } = useTranslation();
   const isRecording = state === "recording";
   const isBusy = state === "requesting" || state === "processing" || modelLoad.state === "loading";
   return (
@@ -350,6 +352,7 @@ function VoiceMicButton({
 }
 
 function EnabledVoiceInputButton({ onTranscript, onAutoSend, disabled }: VoiceInputButtonProps) {
+  const { t } = useTranslation();
   const { toast } = useToast();
   const voiceMode = useAppStore((s) => s.userSettings.voiceMode);
   const handleError = useCallback((err: VoiceError) => toastForError(toast, err), [toast]);
@@ -380,7 +383,7 @@ function EnabledVoiceInputButton({ onTranscript, onAutoSend, disabled }: VoiceIn
   const pointerHandlers = holdMode ? buildHoldHandlers(start, stop) : {};
   const onClick = holdMode ? undefined : buildToggleHandler(state, start, stop);
   const modelLabel = whisperModelConfig(voiceMode.whisperWebModel).label;
-  const tooltipText = resolveTooltip({ modelLoad, modelLabel, state, holdMode });
+  const tooltipText = resolveTooltip({ translate: t, modelLoad, modelLabel, state, holdMode });
 
   return (
     <div className="flex items-center gap-1.5">

@@ -239,7 +239,7 @@ function ContextPopoverList({
           <span className="text-xs flex-1 truncate">{t("task:plan")}</span>
           {planContextEnabled && (
             <span className="text-[9px] font-medium text-primary bg-primary/10 px-1.5 py-0.5 rounded">
-              ACTIVE
+              {t("task:activeBadge")}
             </span>
           )}
         </div>

@@ -87,8 +87,8 @@ function DisclosureContent({
   const emptyLabel =
     normalizeToolCallStatus(snapshot?.status) === "running" &&
     !isTerminalToolCallStatus(messageStatus)
-      ? "No command output yet."
-      : "No command output.";
+      ? t("task:noCommandOutputYet")
+      : t("task:noCommandOutput");
 
   return (
     <div className="min-w-0 space-y-2 border-l-2 border-border/30 pl-3 pt-1">
