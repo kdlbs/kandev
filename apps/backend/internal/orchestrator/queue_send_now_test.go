@@ -60,6 +60,30 @@ func TestSelectSendNowEntriesRejectsEmptyAndRacedEntry(t *testing.T) {
 	}
 }
 
+func TestSendNowWorkersCanRestartAfterStop(t *testing.T) {
+	svc := &Service{logger: testLogger()}
+
+	svc.stopSendNowWorkers()
+	if !svc.sendNowStopped {
+		t.Fatal("stopping Send Now workers did not mark the worker owner stopped")
+	}
+
+	svc.resetSendNowWorkers()
+	if svc.sendNowStopped {
+		t.Fatal("resetting Send Now workers left the worker owner stopped")
+	}
+	if svc.sendNowCtx == nil || svc.sendNowCancel == nil {
+		t.Fatal("resetting Send Now workers did not create a fresh cancellable context")
+	}
+	select {
+	case <-svc.sendNowCtx.Done():
+		t.Fatal("fresh Send Now worker context is already cancelled")
+	default:
+	}
+
+	svc.stopSendNowWorkers()
+}
+
 func TestExplicitCancellationDoesNotJoinSendNowOperation(t *testing.T) {
 	operation := &cancelOperation{
 		done:   make(chan struct{}),

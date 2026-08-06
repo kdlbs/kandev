@@ -1521,6 +1521,7 @@ func (s *Service) Start(ctx context.Context) error {
 	s.mu.Unlock()
 
 	s.logger.Info("starting orchestrator service")
+	s.resetSendNowWorkers()
 
 	// Reconcile session state from persisted runtime state on startup.
 	// This does NOT launch any agent processes — sessions are recovered lazily

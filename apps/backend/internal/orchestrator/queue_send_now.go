@@ -347,6 +347,13 @@ func (s *Service) launchSendNowClaim(
 	return true
 }
 
+func (s *Service) resetSendNowWorkers() {
+	s.sendNowMu.Lock()
+	defer s.sendNowMu.Unlock()
+	s.sendNowStopped = false
+	s.sendNowCtx, s.sendNowCancel = context.WithCancel(context.Background())
+}
+
 func (s *Service) stopSendNowWorkers() {
 	s.sendNowMu.Lock()
 	s.sendNowStopped = true
