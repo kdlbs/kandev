@@ -419,6 +419,10 @@ func (m *Manager) resumeExistingExecution(ctx context.Context, sessionID string,
 
 // createExecutionFromSessionInfo creates a new execution for a passthrough session
 // when no execution exists (e.g., backend restarted and execution store was cleared).
+//
+// Terminal sessions are rejected by the guard at the top of createExecution, the
+// same one every other creation path goes through, so this recovery path never
+// spawns a runtime for a session that ended before the restart.
 func (m *Manager) createExecutionFromSessionInfo(ctx context.Context, sessionID string) (*AgentExecution, error) {
 	if m.workspaceInfoProvider == nil {
 		return nil, fmt.Errorf("cannot restore session %s: workspace info provider not configured", sessionID)
