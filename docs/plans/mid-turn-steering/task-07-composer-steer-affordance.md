@@ -40,6 +40,36 @@ spec: "../../specs/platform/mid-turn-steering.md"
 
 ## Validation Results
 
+Re-run on 2026-08-06 against the branch merged with `main`. Supersedes the
+2026-08-04 entry below, which certified "or a message is already queued, the
+composer keeps today's queue affordance" (AC1) without that half being
+implemented or tested.
+
+- An independent Codex review on 2026-08-06 confirmed the gap by tracing the
+  full chain: `SteerEligible` on the backend computes `supports_steering`
+  without a queue-length check, and every frontend hop
+  (`deriveSessionFlags` → `use-chat-panel-state.ts` → `use-composer-props.ts`
+  → `use-chat-input-container.ts`) passed `supportsSteering` straight through
+  with no reference to the queue. A session with `supports_steering: true`
+  and an already-queued message showed "Send now — delivered to the running
+  turn" even though `SteerTask` would silently queue the next send behind the
+  existing one (correct backend behavior, wrong displayed affordance).
+- Fixed with `resolvesSteeringAffordance(supportsSteering, queuedCount)`
+  (`hooks/domains/session/session-input-mode.ts`), applied in
+  `use-chat-panel-state.ts` where session state and live queue count
+  (`useQueue`) are already both in scope. AC1 is now fully satisfied.
+- `cd apps/web && pnpm run typecheck`: passed.
+- `cd apps/web && npx eslint hooks/domains/session/session-input-mode.ts hooks/domains/session/session-input-mode.test.ts components/task/chat/use-chat-panel-state.ts --max-warnings 0`: passed, 0 issues.
+- `cd apps/web && npx vitest run hooks/domains/session/session-input-mode.test.ts hooks/domains/session/use-session-state.test.ts components/task/chat/use-chat-input-container.test.ts`: 48/48 passed, including three new `resolvesSteeringAffordance` cases.
+- `cd apps/web && pnpm run i18n:check`: passed — no new copy was added (this
+  is a logic-only fix), so no new keys; the pre-existing
+  `chat:composerSteerPlaceholder` orphan warning (a checker false-positive
+  from the scoped `useTranslation("chat")` call site, noted below) is
+  unchanged.
+- `cd apps/web && npx playwright test --config e2e/playwright.config.ts tests/chat/mid-turn-steering.spec.ts --project=chromium --workers=1`: all 6 tests passed, including "keeps a steer behind a message that was already queued," which now also exercises the corrected affordance's underlying data path end to end (the placeholder text itself is intentionally not asserted in E2E — see that spec file's own top comment on why it's a flaky signal).
+
+---
+
 Re-run on 2026-08-04 against the branch merged with `main`.
 
 - `cd apps/web && pnpm run typecheck`: passed.

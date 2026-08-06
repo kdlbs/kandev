@@ -8,6 +8,7 @@ import { usePanelActions } from "@/hooks/use-panel-actions";
 import { useSessionMessages } from "@/hooks/domains/session/use-session-messages";
 import { useCustomPrompts } from "@/hooks/domains/settings/use-custom-prompts";
 import { useSessionState } from "@/hooks/domains/session/use-session-state";
+import { resolvesSteeringAffordance } from "@/hooks/domains/session/session-input-mode";
 import { useSessionMcp } from "@/hooks/domains/session/use-session-mcp";
 import { useProcessedMessages } from "@/hooks/use-processed-messages";
 import { useSessionModel } from "@/hooks/domains/session/use-session-model";
@@ -600,6 +601,7 @@ export function useChatPanelState({
     mcpAttachmentHistory,
     prompts,
     todoItems,
+    supportsSteering: resolvesSteeringAffordance(sessionState.supportsSteering, sessionData.count),
   };
 }
 
