@@ -67,6 +67,47 @@ func TestReclaimSessionWorktree_PreservesSharedWorktree(t *testing.T) {
 	assertWorktreeReferenceStatus(t, store, wt.ID, "session-borrower", StatusActive)
 }
 
+// TestReclaimSessionWorktree_ReclaimsAfterBothSharingSessionsDeleted covers
+// the spec's sequential sharing scenario directly (docs/specs/
+// session-delete-resource-cleanup: "GIVEN sessions S1 and S2 both holding W
+// at path P, WHEN S1 is deleted and then S2 is deleted, THEN after the
+// second delete's job succeeds P no longer exists"). The two halves — "still
+// shared, preserved" and "exclusively held, removed" — are each covered in
+// isolation by sibling tests, but neither proves the second delete's live
+// reference-count query actually observes the first delete's already-gone
+// row rather than some stale view.
+func TestReclaimSessionWorktree_ReclaimsAfterBothSharingSessionsDeleted(t *testing.T) {
+	mgr, store := newReferenceCleanupTestManager(t)
+	ctx := context.Background()
+	seedReferenceCleanupSession(t, store, "task-owner", "session-owner", models.TaskSessionStateCompleted)
+	seedReferenceCleanupSession(t, store, "task-borrower", "session-borrower", models.TaskSessionStateCompleted)
+	wt := createReferenceCleanupWorktree(t, mgr, "task-owner", "session-owner")
+	borrowed := *wt
+	borrowed.TaskID = "task-borrower"
+	borrowed.SessionID = "session-borrower"
+	if err := store.CreateWorktree(ctx, &borrowed); err != nil {
+		t.Fatalf("create borrower worktree reference: %v", err)
+	}
+
+	// S1 deleted first: still preserved because S2's row is live.
+	simulateSessionCascadeDelete(t, store, "session-owner")
+	if err := mgr.ReclaimSessionWorktree(ctx, wt); err != nil {
+		t.Fatalf("ReclaimSessionWorktree (S1): %v", err)
+	}
+	if _, err := os.Stat(wt.Path); err != nil {
+		t.Fatalf("worktree should survive while S2 still holds it: %v", err)
+	}
+
+	// S2 deleted second: now the last live reference is gone too.
+	simulateSessionCascadeDelete(t, store, "session-borrower")
+	if err := mgr.ReclaimSessionWorktree(ctx, &borrowed); err != nil {
+		t.Fatalf("ReclaimSessionWorktree (S2): %v", err)
+	}
+	if _, err := os.Stat(wt.Path); !os.IsNotExist(err) {
+		t.Fatalf("worktree should be reclaimed once both sharing sessions are deleted, stat error = %v", err)
+	}
+}
+
 func TestReclaimSessionWorktree_DoesNotDeleteBranch(t *testing.T) {
 	mgr, store := newReferenceCleanupTestManager(t)
 	ctx := context.Background()

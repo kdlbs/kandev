@@ -214,7 +214,7 @@ function SessionActionsMenu({
   );
 }
 
-function DeleteSessionConfirmDialog({
+export function DeleteSessionConfirmDialog({
   open,
   onOpenChange,
   isPrimary,

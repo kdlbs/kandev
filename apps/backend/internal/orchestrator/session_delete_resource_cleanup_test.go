@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 
@@ -100,6 +101,46 @@ func TestDeleteSession_ActivatesResourceCleanupAfterCommit(t *testing.T) {
 	defer cache.mu.Unlock()
 	if len(cache.forgets) != 1 || cache.forgets[0] != sessionID {
 		t.Fatalf("worktree cache forgets = %v, want [%s]", cache.forgets, sessionID)
+	}
+}
+
+// TestDeleteSession_RefusesRunningSessionWithoutTouchingCleanup covers the
+// spec's refusal scenario directly (docs/specs/session-delete-resource-cleanup:
+// "GIVEN a session in RUNNING state, WHEN a delete is requested, THEN the
+// request is rejected with an error naming the state, the session row still
+// exists, and its worktree directory still exists"). The state-check itself
+// predates this feature, but the feature adds a resource-cleanup
+// collaborator ahead of it in the call chain — this pins that the refusal
+// still happens first and never reaches (or activates) cleanup.
+func TestDeleteSession_RefusesRunningSessionWithoutTouchingCleanup(t *testing.T) {
+	const (
+		taskID    = "task-cleanup-running-refused"
+		sessionID = "session-cleanup-running-refused"
+	)
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, taskID, sessionID, models.TaskSessionStateRunning)
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	cleanup := &fakeSessionDeleteResourceCleanup{prepareOperationID: "session_delete:op-refused"}
+	svc.sessionResourceCleanup = cleanup
+
+	err := svc.DeleteSession(t.Context(), sessionID)
+	if err == nil {
+		t.Fatal("expected DeleteSession to refuse a RUNNING session")
+	}
+	if !strings.Contains(err.Error(), string(models.TaskSessionStateRunning)) {
+		t.Fatalf("error = %q, want it to name the RUNNING state", err.Error())
+	}
+
+	if _, getErr := repo.GetTaskSession(t.Context(), sessionID); getErr != nil {
+		t.Fatalf("session row should survive a refused delete: %v", getErr)
+	}
+	cleanup.mu.Lock()
+	defer cleanup.mu.Unlock()
+	if len(cleanup.prepareCalls) != 0 {
+		t.Fatalf("prepare calls = %+v, want none — refusal must happen before cleanup is ever touched", cleanup.prepareCalls)
+	}
+	if len(cleanup.startCalls) != 0 {
+		t.Fatalf("start calls = %v, want none", cleanup.startCalls)
 	}
 }
 

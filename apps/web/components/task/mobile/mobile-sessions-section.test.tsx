@@ -1,9 +1,14 @@
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { MobileSessionsPicker } from "./mobile-sessions-section";
+import { DeleteSessionConfirmDialog, MobileSessionsPicker } from "./mobile-sessions-section";
 import type { AgentProfileOption } from "@/lib/state/slices";
 import { repositoryId, type Repository, type TaskSession } from "@/lib/types/http";
+
+const mockWsRequest = vi.fn();
+vi.mock("@/lib/ws/connection", () => ({
+  getWebSocketClient: () => ({ request: mockWsRequest }),
+}));
 
 const mocks = vi.hoisted(() => ({
   activeSessionId: "session-a" as string | null,
@@ -121,6 +126,8 @@ beforeEach(() => {
   mocks.repositoriesByWorkspaceId = {};
   mocks.messagesBySession = {};
   mocks.setActiveSession.mockReset();
+  mockWsRequest.mockReset();
+  mockWsRequest.mockResolvedValue({ snapshots: [] });
 });
 
 describe("MobileSessionsPicker selection", () => {
@@ -341,5 +348,66 @@ describe("MobileSessionsPicker pending lifecycle", () => {
     expect(perm.textContent).toMatch(/permission/i);
 
     mocks.messagesBySession = {};
+  });
+});
+
+describe("DeleteSessionConfirmDialog (mobile Sessions picker)", () => {
+  it("shows uncommitted-file and unpushed-commit counts, keyed by the given session id", async () => {
+    mockWsRequest.mockResolvedValue({
+      snapshots: [{ branch: "main", ahead: 2, files: { "a.ts": {}, "b.ts": {}, "c.ts": {} } }],
+    });
+    render(
+      <DeleteSessionConfirmDialog
+        open
+        onOpenChange={() => {}}
+        isPrimary={false}
+        isOnlySession={false}
+        sessionId="session-dirty"
+        onConfirm={() => {}}
+      />,
+    );
+
+    const uncommitted = await screen.findByTestId("session-delete-uncommitted-warning");
+    expect(uncommitted.textContent).toContain("3");
+    expect(screen.getByTestId("session-delete-unpushed-warning").textContent).toContain("2");
+    expect(mockWsRequest).toHaveBeenCalledWith(
+      "session.git.snapshots",
+      expect.objectContaining({ session_id: "session-dirty" }),
+    );
+  });
+
+  it("shows no warning for a session that is clean and level with its remote", async () => {
+    mockWsRequest.mockResolvedValue({ snapshots: [{ branch: "main", ahead: 0, files: {} }] });
+    render(
+      <DeleteSessionConfirmDialog
+        open
+        onOpenChange={() => {}}
+        isPrimary={false}
+        isOnlySession={true}
+        sessionId="session-clean"
+        onConfirm={() => {}}
+      />,
+    );
+
+    await vi.waitFor(() => expect(mockWsRequest).toHaveBeenCalled());
+    expect(screen.queryByTestId("session-delete-uncommitted-warning")).toBeNull();
+    expect(screen.queryByTestId("session-delete-unpushed-warning")).toBeNull();
+  });
+
+  it("does not claim only conversation history is removed", () => {
+    render(
+      <DeleteSessionConfirmDialog
+        open
+        onOpenChange={() => {}}
+        isPrimary={false}
+        isOnlySession={true}
+        sessionId="session-copy"
+        onConfirm={() => {}}
+      />,
+    );
+    const description = screen.getByText(/permanently delete/i);
+    expect(description.textContent?.toLowerCase()).not.toMatch(
+      /only.*conversation history|conversation history.*only/,
+    );
   });
 });
