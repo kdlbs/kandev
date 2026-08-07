@@ -6,6 +6,7 @@ import { useTranslation } from "react-i18next";
 import Link from "@/components/routing/app-link";
 import { IconLoader2, IconLock, IconSettings } from "@tabler/icons-react";
 import { Badge } from "@kandev/ui/badge";
+import { NotInstalledBadge } from "@/components/settings/record-badges";
 import { Button } from "@kandev/ui/button";
 import { Card } from "@kandev/ui/card";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
@@ -62,6 +63,9 @@ function InstalledAgentIdentity({
         <h4 className="min-w-0 truncate text-lg font-semibold">{displayName}</h4>
         {agent.supports_mcp && <Badge variant="secondary">MCP</Badge>}
         {configured && <Badge variant="outline">{t("agents:configured")}</Badge>}
+        {/* Its profiles are still listed and editable below, so the card has to
+            say why none of them can run. */}
+        {!agent.available && <NotInstalledBadge />}
         <div className="ml-auto flex shrink-0 items-center gap-1">
           {probing && (
             <Tooltip>

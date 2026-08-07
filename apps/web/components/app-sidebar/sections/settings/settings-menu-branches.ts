@@ -70,7 +70,7 @@ export type SettingsMenuNode = {
    * than a flag per badge — a row shows at most one, and the renderer should
    * not have to decide which flag outranks which.
    */
-  badge?: "active" | "disabled";
+  badge?: "active" | "disabled" | "not-installed";
   /**
    * Routes this node owns beyond `href` and its `href/` descendants. Needed by
    * nodes with no page of their own (an agent, whose profile pages live under a
@@ -197,7 +197,15 @@ export function buildWorkspacesBranch(
  * An agent with no profiles is dropped rather than rendered as a node that can
  * neither navigate nor expand.
  */
-export function buildAgentsBranch(agents: ReadonlyArray<BranchAgent>): SettingsMenuNode[] {
+export function buildAgentsBranch(
+  agents: ReadonlyArray<BranchAgent>,
+  /**
+   * Names the CLI scan currently finds. Omitted while the scan has not run:
+   * "not detected yet" is not "not installed", and badging every agent for the
+   * moment before discovery lands would be worse than saying nothing.
+   */
+  detectedNames?: ReadonlySet<string>,
+): SettingsMenuNode[] {
   return agents
     .filter((agent) => agent.profiles.length > 0)
     .map((agent) => {
@@ -209,6 +217,9 @@ export function buildAgentsBranch(agents: ReadonlyArray<BranchAgent>): SettingsM
         label: { text: agent.profiles[0].agentDisplayName || agent.name },
         agentName: agent.name,
         ownsPrefixes: [`${agentHref}/`],
+        ...(detectedNames && !detectedNames.has(agent.name)
+          ? { badge: "not-installed" as const }
+          : {}),
         // The agent is kandev's; only the profiles under it are the user's.
         children: agent.profiles.map((profile) => ({
           key: `agent:${agent.name}:profile:${profile.id}`,

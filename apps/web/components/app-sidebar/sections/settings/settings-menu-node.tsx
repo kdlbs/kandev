@@ -3,7 +3,11 @@
 import { useTranslation } from "react-i18next";
 
 import { AgentLogo } from "@/components/agent-logo";
-import { ActiveWorkspaceBadge, DisabledBadge } from "@/components/settings/record-badges";
+import {
+  ActiveWorkspaceBadge,
+  DisabledBadge,
+  NotInstalledBadge,
+} from "@/components/settings/record-badges";
 import type { SettingsMenuNode } from "./settings-menu-branches";
 import { RecordGlyph, SettingsBranch, SettingsLeaf } from "./settings-nav-primitives";
 import type { SettingsMenuExpansion } from "./use-settings-menu-expansion";
@@ -44,6 +48,7 @@ function resolveLeadingIcon(node: SettingsMenuNode, isRecord: boolean) {
 function renderBadge(badge: SettingsMenuNode["badge"]) {
   if (badge === "disabled") return <DisabledBadge />;
   if (badge === "active") return <ActiveWorkspaceBadge />;
+  if (badge === "not-installed") return <NotInstalledBadge />;
   return undefined;
 }
 

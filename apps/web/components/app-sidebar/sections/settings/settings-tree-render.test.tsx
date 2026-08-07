@@ -15,6 +15,9 @@ const AGENTS_ROW_KEY = "row:/settings/agents";
 const WORKSPACE_KEY = `workspace:${MAIN_WORKSPACE_ID}`;
 const AGENT_KEY = "agent:claude-code";
 const AGENT_LABEL = "Claude Code";
+// Anchored: the caret beside the row is labelled "Expand/Collapse Claude Code",
+// and a badge can extend the row's own name past an exact match.
+const AGENT_ROW = /^Claude Code/;
 
 const state = {
   workspaces: {
@@ -46,6 +49,7 @@ const state = {
   // the CLI scan. Empty here: one agent, so there is no order to disturb.
   agentDiscovery: {
     items: [] as Array<{ name: string; available: boolean }>,
+    loaded: false,
   },
   settingsData: {
     executorsLoaded: true,
@@ -218,6 +222,8 @@ describe("SettingsTree tree modes", () => {
   beforeEach(() => {
     state.workspaces.activeId = MAIN_WORKSPACE_ID;
     state.workspaces.items = [{ id: MAIN_WORKSPACE_ID, name: MAIN_WORKSPACE_NAME }];
+    state.agentDiscovery.items = [];
+    state.agentDiscovery.loaded = false;
   });
 
   afterEach(() => {
@@ -311,6 +317,8 @@ describe("SettingsTree record treatment", () => {
   beforeEach(() => {
     state.workspaces.activeId = MAIN_WORKSPACE_ID;
     state.workspaces.items = [{ id: MAIN_WORKSPACE_ID, name: MAIN_WORKSPACE_NAME }];
+    state.agentDiscovery.items = [];
+    state.agentDiscovery.loaded = false;
   });
 
   afterEach(() => {
@@ -393,6 +401,29 @@ describe("SettingsTree record treatment", () => {
 
     expect(screen.getByRole("link", { name: /Second Workspace/ }).textContent)
       .not.toContain("Active");
+  });
+
+  it("badges an agent whose CLI the scan cannot find", () => {
+    state.agentDiscovery.items = [{ name: "claude-code", available: false }];
+    state.agentDiscovery.loaded = true;
+    setMenuMode("persistent", [AGENTS_ROW_KEY]);
+    render(<SettingsTree pathname="/settings/preferences/appearance" />);
+
+    // Its profiles stay listed below, so the agent row says why none can run.
+    expect(screen.getByRole("button", { name: AGENT_ROW }).textContent)
+      .toContain("Not installed");
+  });
+
+  it("says nothing about installation before the scan has reported", () => {
+    state.agentDiscovery.items = [];
+    state.agentDiscovery.loaded = false;
+    setMenuMode("persistent", [AGENTS_ROW_KEY]);
+    render(<SettingsTree pathname="/settings/preferences/appearance" />);
+
+    // "Not looked yet" is not "not installed" — badging here would flash a
+    // wrong claim on every cold load.
+    expect(screen.getByRole("button", { name: AGENT_ROW }).textContent)
+      .not.toContain("Not installed");
   });
 
   it("leaves a row that has a glyph of its own alone", () => {

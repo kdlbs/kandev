@@ -6,7 +6,7 @@ import { useAppStore } from "@/components/state-provider";
 import { AGENTS_SETTINGS_HREF } from "@/lib/settings-discovery/catalog/agents";
 import { EXECUTORS_SETTINGS_HREF } from "@/lib/settings-discovery/catalog/executors";
 import { WORKSPACES_SETTINGS_HREF } from "@/lib/settings-discovery/catalog/workspaces";
-import { orderAgentsForDisplay } from "@/lib/settings/agent-display-order";
+import { detectedAgents, orderAgentsForDisplay } from "@/lib/settings/agent-display-order";
 import { isTreeSettingsMenuMode, type SettingsMenuMode } from "@/lib/settings/settings-menu-mode";
 import {
   buildAgentsBranch,
@@ -49,16 +49,22 @@ export function useSettingsMenuBranches(mode: SettingsMenuMode): SettingsMenuBra
   // ones; the branch lists the same agents and so must land them in the same
   // order. Before the scan hydrates this is empty and the saved order stands.
   const agentDiscovery = useAppStore((s) => s.agentDiscovery.items);
+  const discoveryLoaded = useAppStore((s) => s.agentDiscovery.loaded);
 
   return useMemo(() => {
     if (!isTree) return NO_BRANCHES;
     const orderedAgents = orderAgentsForDisplay(agentDiscovery, agents);
+    // Only once the scan has actually reported: before that, "not in the list"
+    // means "not looked yet".
+    const detectedNames = discoveryLoaded
+      ? new Set(detectedAgents(agentDiscovery).map((agent) => agent.name))
+      : undefined;
     return {
       ...branchEntry(WORKSPACES_SETTINGS_HREF, buildWorkspacesBranch(workspaces, activeWorkspaceId)),
-      ...branchEntry(AGENTS_SETTINGS_HREF, buildAgentsBranch(orderedAgents)),
+      ...branchEntry(AGENTS_SETTINGS_HREF, buildAgentsBranch(orderedAgents, detectedNames)),
       ...branchEntry(EXECUTORS_SETTINGS_HREF, buildExecutorsBranch(executors)),
     };
-  }, [isTree, workspaces, activeWorkspaceId, agents, executors, agentDiscovery]);
+  }, [isTree, workspaces, activeWorkspaceId, agents, executors, agentDiscovery, discoveryLoaded]);
 }
 
 /**
