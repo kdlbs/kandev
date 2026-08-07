@@ -494,6 +494,57 @@ test.describe("Plugins — gRPC plugin install/load/live-update/uninstall", () =
     ).toBeVisible();
   });
 
+  // host.toast is a per-plugin Proxy over sonner. The unit tests only ever see
+  // it against a mocked sonner, so nothing has observed its runtime behavior:
+  // that a real toast renders, and that `.error` does NOT file a
+  // frontend-error report the way the app's own reporting seam does.
+  test("host.toast.error renders a real toast and files no frontend-error report", async ({
+    testPage,
+  }) => {
+    test.setTimeout(60_000);
+
+    await openInstallDialog(testPage);
+    await uploadPackage(testPage, PACKAGE_PATH);
+    await expect(testPage.getByTestId(`plugin-row-${PLUGIN_ID}`)).toBeVisible({ timeout: 15_000 });
+
+    await testPage.goto("/");
+    await testPage.reload();
+    await testPage.getByTestId(`plugin-nav-item-${NAV_ITEM_ID}`).click();
+
+    const reportRequests: string[] = [];
+    testPage.on("request", (request) => {
+      if (request.url().includes("/api/v1/system/logs/frontend-errors")) {
+        reportRequests.push(request.url());
+      }
+    });
+    const consoleErrors: string[] = [];
+    testPage.on("console", (message) => {
+      if (message.type() === "error") consoleErrors.push(message.text());
+    });
+
+    const trigger = testPage.getByTestId("hello-toast-error");
+    await expect(trigger).toBeVisible({ timeout: 15_000 });
+    await trigger.click();
+
+    // The real sonner <Toaster/> the app mounts in app/layout.tsx.
+    await expect(
+      testPage.locator("[data-sonner-toast]").filter({ hasText: "Plugin toast error" }),
+    ).toBeVisible();
+
+    // The load-bearing assertion: the app's reporting seam would POST here on
+    // every .error, so a polling plugin would file an Error-level backend log
+    // entry per cycle. The report is scheduled in a microtask and sent async,
+    // so give it a real chance to fire before asserting it never did.
+    await testPage.waitForTimeout(500);
+    expect(reportRequests).toEqual([]);
+
+    // Attribution goes to the console instead, matching every other plugin
+    // failure path.
+    expect(consoleErrors.some((line) => line.includes(`toast.error from "${PLUGIN_ID}"`))).toBe(
+      true,
+    );
+  });
+
   // host.theme is a live getter and host.onThemeChange is backed by a
   // MutationObserver on <html>'s class. jsdom's MutationObserver is a shim, so
   // only a browser proves a real theme flip reaches a plugin subscriber.

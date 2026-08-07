@@ -12,7 +12,9 @@
  * The plugin page also renders a `host.theme` readout kept current purely
  * through `host.onThemeChange`, so an e2e can flip the app theme for real and
  * prove the subscription fires in a browser (jsdom's MutationObserver is a
- * shim, and jsdom cannot open a Radix tooltip from synthetic hover at all).
+ * shim, and jsdom cannot open a Radix tooltip from synthetic hover at all),
+ * plus a button that fires `host.toast.error` against the real sonner
+ * instance the app mounts.
  *
  * It also registers the plugin-hooks surface this fixture exists to drive
  * end to end: a "Notes" task panel (registerTaskPanel, mobile-enabled) that
@@ -96,6 +98,20 @@
               "data-theme-changes": String(themeState.changes),
             },
             themeState.theme,
+          ),
+          // host.toast is a per-plugin Proxy over sonner; unit tests only ever
+          // see it against a mocked sonner, so this button is how an e2e
+          // proves a real toast renders and that .error does NOT file a
+          // frontend-error report.
+          jsx(
+            "button",
+            {
+              "data-testid": "hello-toast-error",
+              onClick: function () {
+                host.toast.error("Plugin toast error");
+              },
+            },
+            "toast error",
           ),
         );
       }
