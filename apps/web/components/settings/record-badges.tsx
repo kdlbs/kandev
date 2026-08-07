@@ -2,6 +2,14 @@
 
 import { useTranslation } from "react-i18next";
 
+import { cn } from "@/lib/utils";
+
+// Shared so the three cannot drift apart in size or shape; only the colour
+// differs between them.
+const BADGE_BASE = "shrink-0 border px-1 py-0.5 text-[9px] font-medium leading-none";
+const BADGE_INFO = "rounded border-primary/35 bg-primary/10 text-primary";
+const BADGE_WARN = "rounded border-amber-500/30 bg-amber-500/10 text-amber-600 dark:text-amber-400";
+
 /**
  * The badges that qualify a record wherever it is listed.
  *
@@ -15,8 +23,16 @@ import { useTranslation } from "react-i18next";
 /** The workspace new tasks and commands act on. */
 export function ActiveWorkspaceBadge() {
   const { t } = useTranslation();
+  // Keeps its pill shape and slightly larger type: it predates the others and
+  // the workspace list and switcher already draw it this way.
   return (
-    <span className="shrink-0 rounded-full border border-primary/35 bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium leading-none text-primary">
+    <span
+      className={cn(
+        BADGE_BASE,
+        BADGE_INFO,
+        "rounded-full px-1.5 text-[10px]",
+      )}
+    >
       {t("sidebar:activeWorkspaceBadge")}
     </span>
   );
@@ -26,19 +42,13 @@ export function ActiveWorkspaceBadge() {
  * An agent whose CLI is not on this machine. Its profiles stay listed and
  * editable — you may be about to install it — but nothing can run against it.
  *
- * Neutral rather than amber, though the profile page draws this same fact as an
- * amber panel: in the menu a not-installed agent sits directly above its own
- * profiles, so a second amber pill would read as another "you turned this off"
- * rather than as "this is not here". Yours to fix versus not yours to fix are
- * different kinds of problem and should not share a colour at one glance.
+ * Amber, like the disabled badge and like the panel the profile page shows for
+ * this same fact: both mark a record you cannot currently run, whatever the
+ * reason. Blue is left to the badge that simply says which record is current.
  */
 export function NotInstalledBadge() {
   const { t } = useTranslation();
-  return (
-    <span className="shrink-0 rounded border border-muted-foreground/40 bg-muted px-1 py-0.5 text-[9px] font-medium leading-none text-muted-foreground">
-      {t("agents:notInstalled")}
-    </span>
-  );
+  return <span className={cn(BADGE_BASE, BADGE_WARN)}>{t("agents:notInstalled")}</span>;
 }
 
 /**
@@ -50,8 +60,6 @@ export function NotInstalledBadge() {
 export function DisabledBadge() {
   const { t } = useTranslation();
   return (
-    <span className="shrink-0 rounded border border-amber-500/30 bg-amber-500/10 px-1 py-0.5 text-[9px] font-medium leading-none text-amber-600 dark:text-amber-400">
-      {t("sidebar:disabledBadge")}
-    </span>
+    <span className={cn(BADGE_BASE, BADGE_WARN)}>{t("sidebar:disabledBadge")}</span>
   );
 }
