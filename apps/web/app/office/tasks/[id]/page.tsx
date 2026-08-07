@@ -166,6 +166,7 @@ function mapTaskSession(session: ApiTaskSession): TaskSession {
     completedAt: session.completed_at ?? undefined,
     updatedAt: session.updated_at,
     errorMessage: session.error_message ?? undefined,
+    metadata: session.metadata ?? undefined,
     commandCount: session.command_count,
   };
 }
@@ -236,6 +237,28 @@ function useSessionLiveSync({
     [sessionStatesKey],
   );
 
+  // Same stable-key trick for the live metadata (last_agent_error etc.)
+  // carried by session.state_changed, so the office chat can render the
+  // remediation link without a refetch.
+  const sessionMetadataKey = useAppStore((s) => {
+    const items = s.taskSessions?.items ?? {};
+    return baseSessions
+      .map((sess) => JSON.stringify(items[sess.id]?.metadata ?? null))
+      .join("\u0001");
+  });
+  const sessionStoreMetadata = useMemo(
+    () =>
+      sessionMetadataKey.split("\u0001").map((chunk) => {
+        try {
+          const parsed = chunk ? JSON.parse(chunk) : null;
+          return parsed && typeof parsed === "object" ? (parsed as Record<string, unknown>) : null;
+        } catch {
+          return null;
+        }
+      }),
+    [sessionMetadataKey],
+  );
+
   const connectionStatus = useAppStore((s) => s.connection.status);
   useSessionLiveSyncSubscriptions({
     connectionStatus,
@@ -261,7 +284,7 @@ function useSessionLiveSync({
     void onCommentsRefetch();
   }, [sessionStatesKey, taskId, onTaskRefetch, onCommentsRefetch]);
 
-  return sessionStoreStates;
+  return { sessionStoreStates, sessionStoreMetadata };
 }
 
 // ---------------------------------------------------------------------------
@@ -391,7 +414,7 @@ function useIssueData(id: string) {
     setTimeline(updatedTimeline);
   }, []);
 
-  const sessionStoreStates = useSessionLiveSync({
+  const { sessionStoreStates, sessionStoreMetadata } = useSessionLiveSync({
     task,
     baseSessions,
     onTaskRefetch,
@@ -399,11 +422,16 @@ function useIssueData(id: string) {
   });
   const sessions = useMemo(
     () =>
-      baseSessions.map((s, i) => ({
-        ...s,
-        state: (sessionStoreStates[i] ?? s.state) as TaskSession["state"],
-      })),
-    [baseSessions, sessionStoreStates],
+      baseSessions.map((s, i) => {
+        const liveMetadata = sessionStoreMetadata[i];
+        return {
+          ...s,
+          state: (sessionStoreStates[i] ?? s.state) as TaskSession["state"],
+          // Live session.state_changed metadata wins over the initial fetch.
+          metadata: liveMetadata ?? s.metadata,
+        };
+      }),
+    [baseSessions, sessionStoreStates, sessionStoreMetadata],
   );
 
   // Refetch comments when a new comment is created via office WS event

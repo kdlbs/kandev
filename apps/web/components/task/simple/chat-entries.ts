@@ -47,7 +47,9 @@ export function buildLaterAgentReplyMap(comments: TaskComment[]): Map<string, bo
 /**
  * Pull RunError entries out of failed sessions. One entry per office
  * session in FAILED state — the session row's error_message becomes
- * the rawPayload for the chat entry's Show details.
+ * the rawPayload for the chat entry's Show details. The adapter-validated
+ * remediation URL is copied from the persisted last_agent_error metadata;
+ * the browser-edge allowlist still applies before anything renders.
  */
 export function buildRunErrorsFromSessions(sessions: TaskSession[]): RunError[] {
   const errors: RunError[] = [];
@@ -60,9 +62,18 @@ export function buildRunErrorsFromSessions(sessions: TaskSession[]): RunError[] 
       agentProfileId: s.agentProfileId,
       rawPayload: s.errorMessage ?? "",
       failedAt,
+      remediationUrl: remediationUrlFromSessionMetadata(s.metadata),
     });
   }
   return errors;
+}
+
+function remediationUrlFromSessionMetadata(metadata: Record<string, unknown> | null | undefined) {
+  const lastError = metadata?.last_agent_error;
+  if (!lastError || typeof lastError !== "object") return undefined;
+  const record = lastError as Record<string, unknown>;
+  const raw = record.remediation_url ?? record.remediationUrl;
+  return typeof raw === "string" && raw !== "" ? raw : undefined;
 }
 
 export type MergeChatEntriesArgs = {

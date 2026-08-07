@@ -119,5 +119,6 @@
   "composerSteerPlaceholder": "立即发送 — 将送入正在进行的回合",
   "unknownError": "未知错误",
   "useWorkspaceDefault": "使用工作区默认值…",
-  "useWorkspaceDefaultOption": "使用工作区默认值"
+  "useWorkspaceDefaultOption": "使用工作区默认值",
+  "openProviderPage": "打开服务商页面"
 }

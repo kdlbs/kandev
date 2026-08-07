@@ -11,6 +11,7 @@ import { TurnGroupMessage } from "@/components/task/chat/messages/turn-group-mes
 import { PrepareProgress } from "@/components/session/prepare-progress";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { dismissLastAgentError } from "@/lib/api/domains/session-api";
+import { RemediationLink } from "@/components/task/remediation-link";
 import {
   type LastAgentError,
   lastAgentErrorStamp,
@@ -329,6 +330,11 @@ export function LastAgentErrorNotice({
           <pre className="mt-1 max-h-40 overflow-y-auto whitespace-pre-wrap break-words text-[11px] leading-relaxed text-destructive/85">
             {error.message}
           </pre>
+          {error.remediationUrl && (
+            <div className="mt-1">
+              <RemediationLink url={error.remediationUrl} className="text-destructive/85" />
+            </div>
+          )}
         </div>
         <button
           type="button"

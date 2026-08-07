@@ -1,6 +1,6 @@
 import { useState } from "react";
 import type { ReactNode } from "react";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { buildGroupedRenderItems, type RenderItem } from "@/hooks/use-processed-messages";
 import type { Message } from "@/lib/types/http";
@@ -13,6 +13,10 @@ function elementWithRect(top: number, bottom: number): HTMLElement {
   el.getBoundingClientRect = () => ({ top, bottom }) as DOMRect;
   return el;
 }
+const AGENT_ERROR_MESSAGE = "agent process exited";
+
+// NOTE: mockStoreState is vi.hoisted, so it cannot reference the const above —
+// the factory runs before module initialization.
 const mockStoreState = vi.hoisted(() => ({
   taskSessions: {
     items: {
@@ -233,17 +237,20 @@ describe("MessageItem memo boundary", () => {
 });
 
 describe("MessageItem agent error notice", () => {
-  it("shows retained agent errors even when there are no messages", () => {
+  afterEach(() => {
+    cleanup();
+  });
+
+  const REMEDIATION_URL = "https://opencode.ai/workspace/wrk_01KQM7K5CYT715264YKKFB17ZY/go";
+
+  function renderNotice(error: { message: string; occurredAt?: string; remediationUrl?: string }) {
     render(
       <MessageItem
         item={{
           type: "agent_error_notice",
           id: "last-agent-error-s1-2026-06-14T12:00:00Z",
           sessionId: "s1",
-          error: {
-            message: "agent process exited",
-            occurredAt: "2026-06-14T12:00:00Z",
-          },
+          error,
         }}
         sessionId="s1"
         permissionsByToolCallId={perm}
@@ -254,9 +261,33 @@ describe("MessageItem agent error notice", () => {
         onScrollToMessage={noop}
       />,
     );
+  }
+
+  it("shows retained agent errors even when there are no messages", () => {
+    renderNotice({ message: AGENT_ERROR_MESSAGE });
 
     expect(screen.getByTestId("last-agent-error-notice").getAttribute("role")).toBe("alert");
-    expect(screen.queryByText("agent process exited")).not.toBeNull();
+    expect(screen.getByTestId("last-agent-error-notice").textContent).toContain(
+      AGENT_ERROR_MESSAGE,
+    );
+  });
+
+  it("renders a validated remediation link, and nothing for an invalid URL", () => {
+    renderNotice({
+      message: "usage limit reached",
+      remediationUrl: REMEDIATION_URL,
+    });
+
+    const link = screen.getByTestId("remediation-link") as HTMLAnchorElement;
+    expect(link.href).toBe(REMEDIATION_URL);
+    expect(link.rel).toBe("noopener noreferrer");
+    expect(screen.getByTestId("last-agent-error-notice").textContent).toContain(
+      "usage limit reached",
+    );
+
+    cleanup();
+    renderNotice({ message: "usage limit reached", remediationUrl: "https://evil.example.com/x" });
+    expect(screen.queryByTestId("remediation-link")).toBeNull();
   });
 });
 

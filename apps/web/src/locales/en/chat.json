@@ -56,6 +56,7 @@
   "noAgentsAvailable": "No agents available",
   "noRepositoriesAvailableInWorkspace": "No repositories available in this workspace",
   "noRepository": "No repository",
+  "openProviderPage": "Open provider page",
   "optional": "(optional)",
   "providerQuotaModel": "Model: {{model}}",
   "providerQuotaProviderFallback": "Provider",
