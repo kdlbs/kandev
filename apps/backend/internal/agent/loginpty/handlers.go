@@ -1,6 +1,7 @@
 package loginpty
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -26,12 +27,23 @@ type LoginCommandLookup interface {
 	Get(id string) (agents.Agent, bool)
 }
 
+// ErrNoHostShellDescriptor is the sentinel a HostShellSessionBinder returns
+// when the client_id has no durable descriptor to bind. It is not fatal: the
+// host shell PTY still starts and streams, there is simply nothing persistent
+// to reconcile against.
+var ErrNoHostShellDescriptor = errors.New("no host shell descriptor for client")
+
+type HostShellSessionBinder interface {
+	BindHostShellSession(ctx context.Context, tabID, sessionID string) error
+}
+
 // Handlers wraps the manager + agent registry to expose HTTP/WS endpoints.
 type Handlers struct {
-	mgr      *Manager
-	registry *registry.Registry
-	logger   *zap.Logger
-	upgrader gorillaws.Upgrader
+	mgr             *Manager
+	registry        *registry.Registry
+	logger          *zap.Logger
+	upgrader        gorillaws.Upgrader
+	hostShellBinder HostShellSessionBinder
 }
 
 // NewHandlers constructs Handlers. If checkOrigin is nil, the upgrader uses
@@ -53,6 +65,10 @@ func NewHandlers(mgr *Manager, reg *registry.Registry, log *zap.Logger, checkOri
 		logger:   log,
 		upgrader: up,
 	}
+}
+
+func (h *Handlers) SetHostShellSessionBinder(binder HostShellSessionBinder) {
+	h.hostShellBinder = binder
 }
 
 // defaultCheckOrigin mirrors the policy used by the existing terminal
@@ -123,6 +139,7 @@ func (h *Handlers) httpStartHostShell(c *gin.Context) {
 	}
 
 	managerKey := hostShellAgentID
+	tabID := ""
 	if len(req.ClientID) > 0 {
 		var clientID string
 		if err := json.Unmarshal(req.ClientID, &clientID); err != nil {
@@ -134,18 +151,51 @@ func (h *Handlers) httpStartHostShell(c *gin.Context) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "client_id must be a UUID"})
 			return
 		}
-		managerKey += ":" + parsedClientID.String()
+		tabID = parsedClientID.String()
+		managerKey += ":" + tabID
 	}
 
 	shell, shellArgs := detectShell()
 	command := append([]string{shell}, shellArgs...)
 	sess, err := h.mgr.StartWithKey(managerKey, hostShellAgentID, command, req.Cols, req.Rows)
-	if err != nil && err != ErrSessionAlreadyRunning {
+	reused := errors.Is(err, ErrSessionAlreadyRunning)
+	if err != nil && !reused {
 		h.logger.Warn("host shell start failed", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
+	if tabID != "" && h.hostShellBinder != nil {
+		if handled := h.bindHostShellSession(c, tabID, sess, reused); handled {
+			return
+		}
+	}
 	c.JSON(http.StatusOK, sess.Status())
+}
+
+// bindHostShellSession reconciles a started host-shell PTY with its durable
+// descriptor. It returns true when it has already written an error response, so
+// the caller must stop processing.
+//
+// A missing descriptor (ErrNoHostShellDescriptor) is not fatal: the PTY is a
+// generic host shell keyed by client_id and callers may attach without ever
+// persisting a Quick Terminal tab, so the session keeps running. Any other bind
+// error is a 500; a freshly created session is stopped to avoid leaking it,
+// while a reused session belongs to an existing attachment and must survive.
+func (h *Handlers) bindHostShellSession(c *gin.Context, tabID string, sess *Session, reused bool) bool {
+	bindErr := h.hostShellBinder.BindHostShellSession(c.Request.Context(), tabID, sess.ID)
+	if bindErr == nil {
+		return false
+	}
+	if errors.Is(bindErr, ErrNoHostShellDescriptor) {
+		h.logger.Debug("host shell started without durable descriptor", zap.String("tab_id", tabID))
+		return false
+	}
+	if !reused {
+		sess.stop()
+	}
+	h.logger.Warn("host shell bind failed", zap.String("tab_id", tabID), zap.Error(bindErr))
+	c.JSON(http.StatusInternalServerError, gin.H{"error": bindErr.Error()})
+	return true
 }
 
 // detectShell picks a sensible interactive shell, preferring $SHELL on Unix

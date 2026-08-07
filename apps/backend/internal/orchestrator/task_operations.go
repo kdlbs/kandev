@@ -1442,6 +1442,16 @@ func (s *Service) buildWorkflowPrompt(ctx context.Context, basePrompt string, st
 	return prompt
 }
 
+// workflowInstructionsHeading/End are stable, agent-facing markers for the
+// optional workflow-level prompt block. Chat collapses everything between
+// them by default. Do not i18n (sent to the model, same as step prompt English).
+// The end marker is required so multi-paragraph workflow prompts do not break
+// the frontend split (a first-blank-line heuristic would cut mid-body).
+const (
+	workflowInstructionsHeading = "## Workflow instructions"
+	workflowInstructionsEnd     = "<!-- /workflow-instructions -->"
+)
+
 func (s *Service) buildWorkflowPromptWithContext(
 	ctx context.Context,
 	basePrompt string,
@@ -1452,6 +1462,10 @@ func (s *Service) buildWorkflowPromptWithContext(
 ) (string, string) {
 	_ = sessionID
 	var parts []string
+
+	if block := s.workflowInstructionsBlock(ctx, step, taskID); block != "" {
+		parts = append(parts, block)
+	}
 
 	// Build the prompt from step.Prompt template and base prompt
 	if step.Prompt != "" {
@@ -1471,6 +1485,40 @@ func (s *Service) buildWorkflowPromptWithContext(
 
 	joined := strings.Join(parts, "\n\n")
 	return s.expandPromptReferencesWithContext(ctx, joined, isPassthrough)
+}
+
+// workflowInstructionsBlock returns the visible "## Workflow instructions"
+// section when the step's workflow has a non-empty prompt. Empty/whitespace
+// prompts and missing getters/workflows omit the section entirely.
+func (s *Service) workflowInstructionsBlock(ctx context.Context, step *wfmodels.WorkflowStep, taskID string) string {
+	if s.workflowStepGetter == nil || step == nil || step.WorkflowID == "" {
+		return ""
+	}
+	prompt, err := s.workflowStepGetter.GetWorkflowPrompt(ctx, step.WorkflowID)
+	if err != nil {
+		if s.logger != nil {
+			s.logger.Warn("failed to get workflow prompt for prompt building",
+				zap.String("workflow_id", step.WorkflowID),
+				zap.Error(err))
+		}
+		return ""
+	}
+	prompt = strings.TrimSpace(prompt)
+	if prompt == "" {
+		return ""
+	}
+	interpolated := strings.TrimSpace(sysprompt.InterpolatePlaceholders(prompt, taskID))
+	if interpolated == "" {
+		return ""
+	}
+	// Drop any accidental end-marker text from user content so chat split
+	// cannot cut the block early (frontend also prefers the final marker).
+	interpolated = strings.ReplaceAll(interpolated, workflowInstructionsEnd, "")
+	interpolated = strings.TrimSpace(interpolated)
+	if interpolated == "" {
+		return ""
+	}
+	return workflowInstructionsHeading + "\n\n" + interpolated + "\n\n" + workflowInstructionsEnd
 }
 
 // expandPromptReferences resolves "@name" saved-prompt references in prompt
@@ -1817,13 +1865,9 @@ func (s *Service) ensureSessionRunning(ctx context.Context, sessionID string, se
 			if isOfficeTask {
 				return errOfficeTaskResumeRequiresScheduler
 			}
-			recoveryCtx := context.WithoutCancel(ctx)
-			if stopErr := s.reapPromptUnreadyExecution(recoveryCtx, sessionID, err); stopErr != nil {
-				return fmt.Errorf("failed to stop prompt-unready execution: %w", stopErr)
-			}
-			refreshed, refreshErr := s.repo.GetTaskSession(recoveryCtx, sessionID)
-			if refreshErr != nil {
-				return fmt.Errorf("failed to reload session after prompt-readiness recovery: %w", refreshErr)
+			refreshed, reapErr := s.reapAndReloadSession(ctx, sessionID, err)
+			if reapErr != nil {
+				return reapErr
 			}
 			session = refreshed
 		} else {
@@ -1835,6 +1879,61 @@ func (s *Service) ensureSessionRunning(ctx context.Context, sessionID string, se
 		zap.String("session_id", sessionID),
 		zap.String("session_state", string(session.State)))
 
+	// Bounded to two attempts: a fresh cold resume, and — if the launched
+	// agent never reports prompt-ready — one reap-and-retry, mirroring the
+	// already-tracked-execution branch above. Without this, a wedged launch
+	// right after a backend restart (the common "kandev restart" cold-resume
+	// shape: in-memory execution store empty, executors_running row intact)
+	// surfaced a bare "agent not ready after resume: ... context deadline
+	// exceeded" with no self-heal, unlike every other resume path in this
+	// file.
+	for attempt := 1; ; attempt++ {
+		retryable, err := s.attemptColdResume(ctx, sessionID, session, isOfficeTask)
+		if err == nil {
+			return nil
+		}
+		if attempt >= 2 || !retryable {
+			return err
+		}
+		refreshed, reapErr := s.reapAndReloadSession(ctx, sessionID, err)
+		if reapErr != nil {
+			return reapErr
+		}
+		session = refreshed
+	}
+}
+
+// reapAndReloadSession stops a prompt-unready execution and reloads the
+// session row afterward. Shared by ensureSessionRunning's already-tracked-
+// execution branch and its cold-resume retry loop so both recovery paths
+// stay in lockstep.
+func (s *Service) reapAndReloadSession(ctx context.Context, sessionID string, cause error) (*models.TaskSession, error) {
+	recoveryCtx := context.WithoutCancel(ctx)
+	if stopErr := s.reapPromptUnreadyExecution(recoveryCtx, sessionID, cause); stopErr != nil {
+		return nil, fmt.Errorf("failed to stop prompt-unready execution: %w", stopErr)
+	}
+	refreshed, refreshErr := s.repo.GetTaskSession(recoveryCtx, sessionID)
+	if refreshErr != nil {
+		return nil, fmt.Errorf("failed to reload session after prompt-readiness recovery: %w", refreshErr)
+	}
+	return refreshed, nil
+}
+
+// attemptColdResume performs one resume attempt for ensureSessionRunning's
+// cold-resume loop (no execution currently tracked in memory). retryable is
+// true only when the caller should reap the stuck execution and retry —
+// specifically the main-path prompt-readiness timeout below, which is the
+// exact "kandev restart" wedged-launch shape this loop exists to self-heal.
+// The concurrent-resume-race branch (ErrExecutionAlreadyRunning) reports its
+// own timeout as non-retryable: that failure is against an execution this
+// attempt never launched, not a wedged cold launch, so retrying it here would
+// blur two distinct failure modes the caller's tests pin down separately.
+func (s *Service) attemptColdResume(
+	ctx context.Context,
+	sessionID string,
+	session *models.TaskSession,
+	isOfficeTask bool,
+) (retryable bool, err error) {
 	// If the session is in CREATED state with an existing workspace (executors_running
 	// row exists), the workspace was prepared but the agent was never started. Use
 	// LaunchPreparedSession which routes to startAgentOnExistingWorkspace to reuse
@@ -1843,20 +1942,20 @@ func (s *Service) ensureSessionRunning(ctx context.Context, sessionID string, se
 	if session.State == models.TaskSessionStateCreated {
 		hasRunning, _ := s.repo.HasExecutorRunningRow(ctx, sessionID)
 		if hasRunning {
-			return s.startAgentOnPreparedWorkspace(ctx, sessionID, session)
+			return false, s.startAgentOnPreparedWorkspace(ctx, sessionID, session)
 		}
 	}
 	if isOfficeTask {
-		return errOfficeTaskResumeRequiresScheduler
+		return false, errOfficeTaskResumeRequiresScheduler
 	}
 
-	running, err := s.repo.GetExecutorRunningBySessionID(ctx, sessionID)
-	if err != nil || running == nil {
-		return fmt.Errorf("session is not resumable: no executor record (state: %s)", session.State)
+	running, lookupErr := s.repo.GetExecutorRunningBySessionID(ctx, sessionID)
+	if lookupErr != nil || running == nil {
+		return false, fmt.Errorf("session is not resumable: no executor record (state: %s)", session.State)
 	}
 
 	if err := validateSessionWorktrees(session); err != nil {
-		return err
+		return false, err
 	}
 
 	// Use context.WithoutCancel to prevent WebSocket request timeout from canceling the resume.
@@ -1864,19 +1963,19 @@ func (s *Service) ensureSessionRunning(ctx context.Context, sessionID string, se
 	// when the agent's ACP session initializes — that's what unblocks waitForSessionReady,
 	// no flag-tracking needed.
 	resumeCtx := context.WithoutCancel(ctx)
-	if _, err = s.executor.ResumeSession(resumeCtx, session, true); err != nil {
-		if errors.Is(err, executor.ErrExecutionAlreadyRunning) {
+	if _, launchErr := s.executor.ResumeSession(resumeCtx, session, true); launchErr != nil {
+		if errors.Is(launchErr, executor.ErrExecutionAlreadyRunning) {
 			s.recoverAgentPromptStreamIfNeeded(resumeCtx, sessionID)
 			if readyErr := s.waitForAgentPromptReady(resumeCtx, sessionID); readyErr != nil {
-				return fmt.Errorf("agent not ready after resume race: %w", readyErr)
+				return false, fmt.Errorf("agent not ready after resume race: %w", readyErr)
 			}
-			return nil
+			return false, nil
 		}
-		return s.handleSessionLaunchFailure(
+		return false, s.handleSessionLaunchFailure(
 			resumeCtx,
 			session.TaskID,
 			sessionID,
-			fmt.Errorf("failed to resume session: %w", err),
+			fmt.Errorf("failed to resume session: %w", launchErr),
 			session,
 		)
 	}
@@ -1893,14 +1992,14 @@ func (s *Service) ensureSessionRunning(ctx context.Context, sessionID string, se
 	// own bounded timeouts (waitForSessionReady's AgentLaunchTimeout launch
 	// budget, and waitForAgentPromptReady's 30s below).
 	if err := s.waitForSessionReady(resumeCtx, sessionID); err != nil {
-		return fmt.Errorf("session not ready after resume: %w", err)
+		return false, fmt.Errorf("session not ready after resume: %w", err)
 	}
-	if err := s.waitForAgentPromptReady(resumeCtx, sessionID); err != nil {
-		return fmt.Errorf("agent not ready after resume: %w", err)
+	readyErr := s.waitForAgentPromptReady(resumeCtx, sessionID)
+	if readyErr == nil {
+		s.logger.Debug("session resumed and ready for prompt")
+		return false, nil
 	}
-
-	s.logger.Debug("session resumed and ready for prompt")
-	return nil
+	return errors.Is(readyErr, ErrAgentNotReadyForPrompt), fmt.Errorf("agent not ready after resume: %w", readyErr)
 }
 
 func (s *Service) recoverAgentPromptStreamIfNeeded(ctx context.Context, sessionID string) {

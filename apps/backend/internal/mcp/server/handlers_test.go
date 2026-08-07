@@ -62,7 +62,7 @@ func TestCreateTask_ToolSchema_HasParentID(t *testing.T) {
 	require.True(t, ok, "prompt should have a description")
 	assert.Contains(t, promptDesc, "For auto-started subtasks")
 	assert.NotContains(t, promptDesc, "REQUIRED")
-	assert.Contains(t, tool.Tool.Description, "explicit agent_profile_id always wins")
+	assert.Contains(t, tool.Tool.Description, "outranks an explicit agent_profile_id")
 	assert.Contains(t, tool.Tool.Description, "current_task")
 	assert.Contains(t, tool.Tool.Description, "workspace_default")
 	assert.Contains(t, tool.Tool.Description, "workflow")
@@ -73,7 +73,7 @@ func TestCreateTask_ToolSchema_HasParentID(t *testing.T) {
 	require.True(t, ok, "agent_profile_id schema should be an object")
 	agentProfileDesc, ok := agentProfileProp["description"].(string)
 	require.True(t, ok, "agent_profile_id should have a description")
-	assert.Contains(t, agentProfileDesc, "Explicit agent_profile_id always wins")
+	assert.Contains(t, agentProfileDesc, "outranks it")
 	assert.Contains(t, agentProfileDesc, "current_task")
 	assert.Contains(t, agentProfileDesc, "workspace_default")
 

@@ -7,6 +7,7 @@ import { useRepoDisplayName } from "@/hooks/domains/session/use-repo-display-nam
 import type { WorkspaceContentSearchError } from "@/hooks/domains/session/use-workspace-content-search";
 import { groupByRepositoryName, isSingleRepoGroup } from "@/lib/group-by-repo";
 import type { ContentSearchMatchRange, WorkspaceContentSearchResult } from "@/lib/types/backend";
+import { useTranslation } from "react-i18next";
 
 type PreviewPart = { text: string; matched: boolean };
 
@@ -137,33 +138,38 @@ export function WorkspaceContentSearch({
   sessionId,
   onSelect,
 }: WorkspaceContentSearchProps) {
+  const { t } = useTranslation();
   const getRepoDisplayName = useRepoDisplayName(sessionId);
   if (error === "session-unavailable") {
-    return <CommandEmpty>Content search needs an active task session.</CommandEmpty>;
+    return <CommandEmpty>{t("common:contentSearchNeedsAnActiveTask")}</CommandEmpty>;
   }
   if (error === "query-too-long") {
-    return <CommandEmpty>Search queries are limited to 200 characters.</CommandEmpty>;
+    return <CommandEmpty>{t("common:searchQueriesAreLimitedTo200")}</CommandEmpty>;
   }
   if (error === "transport-error") {
-    return <CommandEmpty>Search failed. Edit the query or reopen search to retry.</CommandEmpty>;
+    return <CommandEmpty>{t("common:searchFailedEditTheQueryOr")}</CommandEmpty>;
   }
   if (isSearching && results.length === 0) {
     return (
       <CommandEmpty>
         <IconLoader2 className="mr-2 inline size-3.5 animate-spin text-muted-foreground" />
-        Searching task workspace…
+        {t("common:searchingTaskWorkspace")}
       </CommandEmpty>
     );
   }
-  if (!search.trim()) return <CommandEmpty>Type to search task contents…</CommandEmpty>;
-  if (results.length === 0) return <CommandEmpty>No content matches found.</CommandEmpty>;
+  if (!search.trim()) return <CommandEmpty>{t("common:typeToSearchTaskContents")}</CommandEmpty>;
+  if (results.length === 0) return <CommandEmpty>{t("common:noContentMatchesFound")}</CommandEmpty>;
 
   const groups = groupByRepositoryName(results, (result) => result.repository_name);
   const singleRepo = isSingleRepoGroup(groups);
   return groups.map((group) => (
     <CommandGroup
       key={group.repositoryName}
-      heading={singleRepo ? "Results" : (getRepoDisplayName(group.repositoryName) ?? "Workspace")}
+      heading={
+        singleRepo
+          ? t("common:results")
+          : (getRepoDisplayName(group.repositoryName) ?? t("common:workspace"))
+      }
       forceMount
       data-testid="content-search-repo-group"
       data-repository={group.repositoryName}

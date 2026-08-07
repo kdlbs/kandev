@@ -33,10 +33,6 @@ vi.mock("@/lib/layout/panel-portal-manager", () => ({
   setPanelTitle: vi.fn(),
 }));
 
-vi.mock("react-i18next", () => ({
-  useTranslation: () => ({ t: (key: string) => key }),
-}));
-
 vi.mock("./panel-primitives", () => ({
   PanelRoot: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
   PanelBody: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
@@ -66,7 +62,7 @@ describe("CommitDiffView error state", () => {
     expect(screen.getByRole("alert").textContent).toContain("Commit detail unavailable");
     expect(screen.queryByText("No files in this commit")).toBeNull();
 
-    fireEvent.click(screen.getByRole("button", { name: "system:featureTogglesRetry" }));
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
     expect(mocks.refetch).toHaveBeenCalledOnce();
   });
 });

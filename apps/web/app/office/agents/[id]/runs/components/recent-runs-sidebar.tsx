@@ -7,6 +7,7 @@ import { Badge } from "@kandev/ui/badge";
 import { cn } from "@/lib/utils";
 import type { AgentRunSummary } from "@/lib/api/domains/office-extended-api";
 import { timeAgo } from "@/lib/utils/time";
+import { useTranslation } from "react-i18next";
 
 type Props = {
   runs: AgentRunSummary[];
@@ -40,16 +41,17 @@ function deriveActiveRunId(pathname: string | null, fallback: string): string {
  *   so it's keyboard-navigable + screen-reader friendly.
  */
 export function RecentRunsSidebar({ runs, agentId, activeRunId }: Props) {
+  const { t } = useTranslation();
   const pathname = usePathname();
   const currentId = deriveActiveRunId(pathname, activeRunId);
 
   if (runs.length === 0) {
-    return <div className="text-xs text-muted-foreground p-4">No runs yet.</div>;
+    return <div className="text-xs text-muted-foreground p-4">{t("office:noRunsYet")}</div>;
   }
   return (
     <nav
       className="flex flex-col divide-y divide-border border border-border rounded-lg overflow-hidden"
-      aria-label="Recent runs"
+      aria-label={t("office:recentRuns")}
       data-testid="recent-runs-sidebar"
     >
       {runs.map((run) => (

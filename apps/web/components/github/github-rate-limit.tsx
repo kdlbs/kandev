@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { formatDistanceToNow } from "date-fns";
+import type { Locale } from "date-fns";
 import { IconAlertTriangle } from "@tabler/icons-react";
 import { Alert, AlertDescription } from "@kandev/ui/alert";
 import type { GitHubRateLimitInfo, GitHubRateLimitSnapshot } from "@/lib/types/github";
@@ -9,6 +9,7 @@ import { GitHubAccessHelp } from "./github-access-help";
 import { useTranslation } from "react-i18next";
 // Locale-aware digit grouping; `toLocaleString("en-US")` pinned it to English.
 import { formatNumber } from "@/lib/i18n/formats";
+import { formatTimeDistance, useDateLocale } from "@/lib/i18n/date-locale";
 
 // Keyed by GitHub's rate-limit resource name, which is wire data. Catalog keys
 // rather than `t()` calls, because this is module scope (see docs/i18n.md).
@@ -35,10 +36,8 @@ function isExhausted(snap: GitHubRateLimitSnapshot, now: number): boolean {
   return Number.isFinite(reset) && reset > now;
 }
 
-function formatReset(snap: GitHubRateLimitSnapshot): string {
-  const reset = new Date(snap.reset_at);
-  if (!Number.isFinite(reset.getTime())) return "";
-  return formatDistanceToNow(reset, { addSuffix: true });
+function formatReset(snap: GitHubRateLimitSnapshot, locale: Locale): string {
+  return formatTimeDistance(snap.reset_at, locale);
 }
 
 // latestReset returns the snapshot whose reset_at is furthest in the future.
@@ -85,6 +84,9 @@ function RateLimitDetails({
   exhausted: GitHubRateLimitSnapshot[];
 }) {
   const { t } = useTranslation();
+  // `reset` is interpolated into translated sentences, so it has to speak the
+  // same language as the copy around it.
+  const locale = useDateLocale();
   return (
     <div className="space-y-2" data-testid="github-rate-limit-display">
       {exhausted.length > 0 && (
@@ -99,7 +101,7 @@ function RateLimitDetails({
                     : snapshot.resource,
                 )
                 .join(", "),
-              reset: formatReset(latestReset(exhausted)),
+              reset: formatReset(latestReset(exhausted), locale),
             })}
           </AlertDescription>
         </Alert>
@@ -112,7 +114,7 @@ function RateLimitDetails({
           const unit = t(resource?.unitKey ?? "github:rateLimitUnitRequests");
           const limit =
             snapshot.limit > 0 ? formatNumber(snapshot.limit) : t("github:rateLimitUnknown");
-          const reset = formatReset(snapshot);
+          const reset = formatReset(snapshot, locale);
           return (
             <p key={snapshot.resource} data-testid={`github-rate-limit-${snapshot.resource}`}>
               <span className="font-medium text-foreground">{label}:</span>{" "}

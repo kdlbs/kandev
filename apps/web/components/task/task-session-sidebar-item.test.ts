@@ -92,4 +92,22 @@ describe("buildSidebarItem", () => {
 
     expect(item.isArchived).toBe(true);
   });
+
+  it("carries the queued prompt count from the status summary", () => {
+    const item = buildSidebarItem(
+      task({ statusSummary: { revision: 4, updated_at: UPDATED_AT, queued_prompt_count: 3 } }),
+      emptyContext(),
+    );
+
+    expect(item.queuedCount).toBe(3);
+  });
+
+  it("leaves queuedCount undefined when the summary has no queued prompts", () => {
+    const item = buildSidebarItem(
+      task({ statusSummary: { revision: 5, updated_at: UPDATED_AT } }),
+      emptyContext(),
+    );
+
+    expect(item.queuedCount).toBeUndefined();
+  });
 });

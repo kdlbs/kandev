@@ -118,6 +118,40 @@ func TestApplySyncedWorkflows_CreatesNewWorkflows(t *testing.T) {
 	assert.True(t, steps[0].IsStartStep)
 }
 
+func TestApplySyncedWorkflows_UpdatesAndClearsWorkflowPrompt(t *testing.T) {
+	svc, provider, _ := setupSyncService(t)
+	ctx := context.Background()
+	wf := addSyncedWorkflow(provider, "wf-1", "ws-1", "Dev Flow", "flows/dev.yml")
+	wf.Prompt = "Old shared instructions."
+	createStep(t, svc, &models.WorkflowStep{ID: "step-todo", WorkflowID: wf.ID, Name: "Todo", Position: 0, IsStartStep: true})
+
+	// Update prompt from portable definition.
+	updated := portableWorkflow("Dev Flow", "Todo")
+	updated.Prompt = "If the PR is merged or closed, move the Task to Done."
+	result, err := svc.ApplySyncedWorkflows(ctx, "ws-1", []SyncFileExport{
+		{Path: "flows/dev.yml", Export: exportOf(updated)},
+	})
+	require.NoError(t, err)
+	assert.Contains(t, result.Updated, "Dev Flow")
+
+	got, err := provider.GetWorkflow(ctx, wf.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "If the PR is merged or closed, move the Task to Done.", got.Prompt)
+
+	// Omitting prompt in the portable file clears it on sync.
+	cleared := portableWorkflow("Dev Flow", "Todo")
+	cleared.Prompt = ""
+	result, err = svc.ApplySyncedWorkflows(ctx, "ws-1", []SyncFileExport{
+		{Path: "flows/dev.yml", Export: exportOf(cleared)},
+	})
+	require.NoError(t, err)
+	assert.Contains(t, result.Updated, "Dev Flow")
+
+	got, err = provider.GetWorkflow(ctx, wf.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "", got.Prompt)
+}
+
 func TestApplySyncedWorkflows_UpdatesMatchedWorkflowPreservingStepIDs(t *testing.T) {
 	svc, provider, _ := setupSyncService(t)
 	ctx := context.Background()

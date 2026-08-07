@@ -420,8 +420,12 @@ func (m *Manager) resumeExistingExecution(ctx context.Context, sessionID string,
 // createExecutionFromSessionInfo creates a new execution for a passthrough session
 // when no execution exists — either because the session has never run (a task
 // created with start_agent:false, started later) or because a backend restart
-// cleared the execution store. The two are distinguished by
-// applyPassthroughResumeIntent, which decides fresh launch vs resume.
+// cleared the execution store. The two are distinguished by applyResumeIntent,
+// which decides fresh launch vs resume.
+//
+// Terminal sessions are rejected by the guard at the top of createExecution, the
+// same one every other creation path goes through, so this recovery path never
+// spawns a runtime for a session that ended before the restart.
 func (m *Manager) createExecutionFromSessionInfo(ctx context.Context, sessionID string) (*AgentExecution, error) {
 	if m.workspaceInfoProvider == nil {
 		return nil, fmt.Errorf("cannot restore session %s: workspace info provider not configured", sessionID)
@@ -533,6 +537,15 @@ func (m *Manager) verifyPassthroughEnabled(ctx context.Context, sessionID, profi
 func (m *Manager) createExecution(ctx context.Context, taskID string, info *WorkspaceInfo) (*AgentExecution, error) {
 	if info == nil {
 		return nil, fmt.Errorf("workspace info is required")
+	}
+	// A terminal session can never gain an execution, so reject it before
+	// reconciling the workspace, taking an activity lease, or creating a
+	// runtime instance. User-facing panels (terminal, git, files) reconnect on
+	// a timer; without this every retry paid for a full instance creation that
+	// the post-creation check below tore straight back down. That check stays —
+	// it guards the session that terminalizes *during* creation.
+	if err := m.ensureLaunchSessionStillActive(ctx, info.SessionID); err != nil {
+		return nil, err
 	}
 	owner := ownedDirectoryLinkOwner(taskID, info.TaskDirName)
 	if err := reconcileWorkspaceSources(ctx, info.WorkspacePath, info.WorkspaceFolders, owner); err != nil {

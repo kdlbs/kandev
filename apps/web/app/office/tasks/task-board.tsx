@@ -5,15 +5,19 @@ import { ScrollArea } from "@kandev/ui/scroll-area";
 import { useAppStore } from "@/components/state-provider";
 import type { OfficeTask, OfficeTaskStatus } from "@/lib/state/slices/office/types";
 import { StatusIcon } from "./status-icon";
+import { STATUS_LABEL_KEYS } from "../lib/label-keys";
+import { useTranslation } from "react-i18next";
 
-const FALLBACK_COLUMNS: { status: OfficeTaskStatus; label: string }[] = [
-  { status: "backlog", label: "Backlog" },
-  { status: "todo", label: "Todo" },
-  { status: "in_progress", label: "In Progress" },
-  { status: "in_review", label: "In Review" },
-  { status: "blocked", label: "Blocked" },
-  { status: "done", label: "Done" },
-  { status: "cancelled", label: "Cancelled" },
+// `labelKey`, not `label` — see the note in `status-labels.ts`. The workspace's
+// own status metadata wins when present, and its labels are workspace data.
+const FALLBACK_COLUMNS: { status: OfficeTaskStatus; labelKey: string }[] = [
+  { status: "backlog", labelKey: STATUS_LABEL_KEYS.backlog },
+  { status: "todo", labelKey: STATUS_LABEL_KEYS.todo },
+  { status: "in_progress", labelKey: STATUS_LABEL_KEYS.in_progress },
+  { status: "in_review", labelKey: STATUS_LABEL_KEYS.in_review },
+  { status: "blocked", labelKey: STATUS_LABEL_KEYS.blocked },
+  { status: "done", labelKey: STATUS_LABEL_KEYS.done },
+  { status: "cancelled", labelKey: STATUS_LABEL_KEYS.cancelled },
 ];
 
 type TaskBoardProps = {
@@ -68,10 +72,11 @@ function BoardColumn({
 }
 
 export function TaskBoard({ tasks }: TaskBoardProps) {
+  const { t } = useTranslation();
   const meta = useAppStore((s) => s.office.meta);
   const columns = meta
     ? meta.statuses.map((s) => ({ status: s.id as OfficeTaskStatus, label: s.label }))
-    : FALLBACK_COLUMNS;
+    : FALLBACK_COLUMNS.map((c) => ({ status: c.status, label: t(c.labelKey) }));
 
   const grouped = new Map<OfficeTaskStatus, OfficeTask[]>();
   for (const col of columns) {

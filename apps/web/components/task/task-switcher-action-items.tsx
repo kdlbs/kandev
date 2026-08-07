@@ -2,6 +2,7 @@
 
 import { IconArchive, IconLoader, IconSubtask, IconTrash, IconUnlink } from "@tabler/icons-react";
 import { ContextMenuItem, ContextMenuSeparator } from "@kandev/ui/context-menu";
+import { useTranslation } from "react-i18next";
 
 export function TaskArchiveItem({
   taskId,
@@ -18,12 +19,13 @@ export function TaskArchiveItem({
   onArchiveTask?: (taskId: string) => void;
   onBulkArchive?: (taskIds: string[]) => void;
 }) {
+  const { t } = useTranslation();
   if (actingOnSelection && onBulkArchive) {
     const count = actingIds.length;
     return (
       <ContextMenuItem disabled={disabled} onSelect={() => onBulkArchive(actingIds)}>
         <IconArchive className="mr-2 h-4 w-4" />
-        {count > 1 ? `Archive ${count} tasks` : "Archive"}
+        {count > 1 ? t("task:archiveTasks", { count }) : t("task:archive")}
       </ContextMenuItem>
     );
   }
@@ -31,7 +33,7 @@ export function TaskArchiveItem({
   return (
     <ContextMenuItem disabled={disabled} onSelect={() => onArchiveTask(taskId)}>
       <IconArchive className="mr-2 h-4 w-4" />
-      Archive
+      {t("task:archive")}
     </ContextMenuItem>
   );
 }
@@ -45,6 +47,7 @@ export function TaskCreateSubtaskItem({
   disabled?: boolean;
   onCreateSubtask?: (taskId: string, taskTitle: string) => void;
 }) {
+  const { t } = useTranslation();
   if (!onCreateSubtask) return null;
   return (
     <ContextMenuItem
@@ -53,7 +56,7 @@ export function TaskCreateSubtaskItem({
       onSelect={() => onCreateSubtask(task.id, task.title)}
     >
       <IconSubtask className="mr-2 h-4 w-4" />
-      Create Subtask
+      {t("task:createSubtask")}
     </ContextMenuItem>
   );
 }
@@ -67,6 +70,7 @@ export function TaskDetachItem({
   disabled?: boolean;
   onDetachTask?: (taskId: string) => void;
 }) {
+  const { t } = useTranslation();
   if (!task.parentTaskId || !onDetachTask) return null;
   return (
     <ContextMenuItem
@@ -75,7 +79,7 @@ export function TaskDetachItem({
       onSelect={() => onDetachTask(task.id)}
     >
       <IconUnlink className="mr-2 h-4 w-4" />
-      Detach from parent
+      {t("task:detachFromParent")}
     </ContextMenuItem>
   );
 }
@@ -89,6 +93,7 @@ export function TaskDeleteItem({
   isDeleting?: boolean;
   onDeleteTask?: (taskId: string) => void;
 }) {
+  const { t } = useTranslation();
   if (!onDeleteTask) return null;
   return (
     <>
@@ -103,7 +108,7 @@ export function TaskDeleteItem({
         ) : (
           <IconTrash className="mr-2 h-4 w-4" />
         )}
-        Delete
+        {t("task:delete")}
       </ContextMenuItem>
     </>
   );

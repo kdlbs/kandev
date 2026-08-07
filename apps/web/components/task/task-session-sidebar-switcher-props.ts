@@ -27,6 +27,7 @@ export function buildTaskSwitcherProps(args: {
   togglePinnedTask: TaskSwitcherComponentProps["onTogglePin"];
   handleReorderGroup: TaskSwitcherComponentProps["onReorderGroup"];
   handleReorderSubtasks: TaskSwitcherComponentProps["onReorderSubtasks"];
+  handleNestTask: TaskSwitcherComponentProps["onNestTask"];
   isLoadingWorkflow: boolean;
   archivedError: string | null;
   retryArchivedTasks: () => void;
@@ -57,6 +58,7 @@ export function buildTaskSwitcherProps(args: {
     onTogglePin: args.togglePinnedTask,
     onReorderGroup: args.handleReorderGroup,
     onReorderSubtasks: args.handleReorderSubtasks,
+    onNestTask: args.handleNestTask,
     pinnedTaskIds: args.pinnedTaskIds,
     deletingTaskId: args.sidebarActions.deletingTaskId,
     isLoading: args.isLoadingWorkflow,

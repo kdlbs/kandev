@@ -11,12 +11,14 @@ import type { Project } from "@/lib/state/slices/office/types";
 import { ProjectCard } from "./project-card";
 import { CreateProjectDialog } from "./create-project-dialog";
 import { EmptyState } from "../components/shared/empty-state";
+import { useTranslation } from "react-i18next";
 
 type ProjectsPageClientProps = {
   initialProjects: Project[];
 };
 
 export function ProjectsPageClient({ initialProjects }: ProjectsPageClientProps) {
+  const { t } = useTranslation();
   const projects = useAppStore((s) => s.office.projects);
   const agents = useAppStore((s) => s.office.agentProfiles);
   const setProjects = useAppStore((s) => s.setProjects);
@@ -56,14 +58,14 @@ export function ProjectsPageClient({ initialProjects }: ProjectsPageClientProps)
       <div className="flex justify-end">
         <Button size="sm" onClick={() => setDialogOpen(true)} className="cursor-pointer">
           <IconPlus className="h-4 w-4 mr-1" />
-          New Project
+          {t("office:newProject")}
         </Button>
       </div>
 
       {projects.length === 0 ? (
         <EmptyState
-          message="No projects yet."
-          description="Projects group related tasks and repositories together."
+          message={t("office:noProjectsYet")}
+          description={t("office:projectsGroupRelatedTasksAndRepositories")}
           action={
             <Button
               variant="outline"
@@ -71,7 +73,7 @@ export function ProjectsPageClient({ initialProjects }: ProjectsPageClientProps)
               className="cursor-pointer"
             >
               <IconPlus className="h-4 w-4 mr-1" />
-              Create your first project
+              {t("office:createYourFirstProject")}
             </Button>
           }
         />

@@ -54,7 +54,13 @@ export function SpritesConnectionCard({ secretId }: { secretId?: string }) {
   }, [secretId, t]);
 
   return (
-    <SettingsCard discoveryTargetId={GENERAL_SETTINGS_TARGETS.spritesConnection}>
+    // `sprites-connection-card` is the pseudo-coverage oracle's render anchor for
+    // this screen (e2e/tests/i18n/pseudo-coverage.spec.ts). Renaming it makes that
+    // spec time out rather than silently scan an unrendered route.
+    <SettingsCard
+      discoveryTargetId={GENERAL_SETTINGS_TARGETS.spritesConnection}
+      data-testid="sprites-connection-card"
+    >
       <CardHeader>
         <div className="flex items-center justify-between">
           <div>

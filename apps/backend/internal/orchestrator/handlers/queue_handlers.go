@@ -74,6 +74,12 @@ type QueueAccessAuthorizer interface {
 	AuthorizeTaskSessionAccess(ctx context.Context, taskID, sessionID string) error
 }
 
+// SessionTaskResolver returns the task that owns a session. It enriches the
+// message.queue.status_changed event with task_id so task-scoped consumers
+// (e.g. the status summary projector) can refresh per-task queued counts.
+// An empty result omits the field; an error is logged and also omits it.
+type SessionTaskResolver func(ctx context.Context, sessionID string) (string, error)
+
 // QueueAttachmentClaimer binds staged file descriptors to the task/session
 // after a queue entry has been durably accepted.
 type QueueAttachmentClaimer interface {
@@ -90,14 +96,15 @@ type queueEntryTaker interface {
 
 // QueueHandlers handles WebSocket message-queue operations.
 type QueueHandlers struct {
-	queueService       QueueService
-	queueDrainer       QueueDrainer
-	queueDispatcher    QueueSendNowDispatcher
-	accessAuthorizer   QueueAccessAuthorizer
-	eventBus           bus.EventBus
-	logger             *logger.Logger
-	referenceValidator entityrefs.SubmissionValidator
-	attachmentClaimer  QueueAttachmentClaimer
+	queueService        QueueService
+	queueDrainer        QueueDrainer
+	queueDispatcher     QueueSendNowDispatcher
+	accessAuthorizer    QueueAccessAuthorizer
+	sessionTaskResolver SessionTaskResolver
+	eventBus            bus.EventBus
+	logger              *logger.Logger
+	referenceValidator  entityrefs.SubmissionValidator
+	attachmentClaimer   QueueAttachmentClaimer
 }
 
 // SetAttachmentClaimer wires the task attachment registry into queue adds.
@@ -106,13 +113,16 @@ func (h *QueueHandlers) SetAttachmentClaimer(claimer QueueAttachmentClaimer) {
 	h.attachmentClaimer = claimer
 }
 
-// NewQueueHandlers creates a new QueueHandlers instance.
+// NewQueueHandlers creates a new QueueHandlers instance. sessionTaskResolver
+// enriches published queue status events with the owning task_id; nil keeps
+// the payload unchanged.
 func NewQueueHandlers(
 	queueService QueueService,
 	eventBus bus.EventBus,
 	log *logger.Logger,
 	queueDrainer QueueDrainer,
 	accessAuthorizer QueueAccessAuthorizer,
+	sessionTaskResolver SessionTaskResolver,
 	validators ...entityrefs.SubmissionValidator,
 ) *QueueHandlers {
 	var referenceValidator entityrefs.SubmissionValidator
@@ -120,12 +130,13 @@ func NewQueueHandlers(
 		referenceValidator = validators[0]
 	}
 	handlers := &QueueHandlers{
-		queueService:       queueService,
-		queueDrainer:       queueDrainer,
-		accessAuthorizer:   accessAuthorizer,
-		eventBus:           eventBus,
-		logger:             log.WithFields(zap.String("component", "queue-handlers")),
-		referenceValidator: referenceValidator,
+		queueService:        queueService,
+		queueDrainer:        queueDrainer,
+		accessAuthorizer:    accessAuthorizer,
+		sessionTaskResolver: sessionTaskResolver,
+		eventBus:            eventBus,
+		logger:              log.WithFields(zap.String("component", "queue-handlers")),
+		referenceValidator:  referenceValidator,
 	}
 	if dispatcher, ok := queueDrainer.(QueueSendNowDispatcher); ok {
 		handlers.queueDispatcher = dispatcher
@@ -822,14 +833,24 @@ func (h *QueueHandlers) publishStatus(ctx context.Context, sessionID string) {
 		return
 	}
 	status := h.queueService.GetStatus(ctx, sessionID)
+	eventData := map[string]interface{}{
+		fieldSessionID: sessionID,
+		"entries":      status.Entries,
+		"count":        status.Count,
+		fieldMax:       status.Max,
+	}
+	if h.sessionTaskResolver != nil {
+		if taskID, err := h.sessionTaskResolver(ctx, sessionID); err != nil {
+			h.logger.Warn("resolve session task for queue status event",
+				zap.String("session_id", sessionID),
+				zap.Error(err))
+		} else if taskID != "" {
+			eventData["task_id"] = taskID
+		}
+	}
 	_ = h.eventBus.Publish(ctx, events.MessageQueueStatusChanged, bus.NewEvent(
 		events.MessageQueueStatusChanged,
 		"queue-handlers",
-		map[string]interface{}{
-			fieldSessionID: sessionID,
-			"entries":      status.Entries,
-			"count":        status.Count,
-			fieldMax:       status.Max,
-		},
+		eventData,
 	))
 }

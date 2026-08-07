@@ -658,8 +658,11 @@ const (
 type Workflow struct {
 	ID                 string  `json:"id"`
 	WorkspaceID        string  `json:"workspace_id"`
-	Name               string  `json:"name"`
-	Description        string  `json:"description"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	// Prompt is optional workflow-level agent instructions prepended at
+	// every step entry before the step prompt. Empty means off.
+	Prompt             string  `json:"prompt,omitempty"`
 	AgentProfileID     string  `json:"agent_profile_id,omitempty"`
 	WorkflowTemplateID *string `json:"workflow_template_id,omitempty"`
 	SortOrder          int     `json:"sort_order"`

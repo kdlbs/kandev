@@ -11,6 +11,7 @@ import { TasksContent } from "./tasks-content";
 import { getExpandableTaskIds, useIssuesTree } from "./use-tasks-tree";
 import { useServerSearch } from "./use-server-search";
 import { usePaginatedTasks } from "./use-paginated-tasks";
+import { useTranslation } from "react-i18next";
 
 const STORAGE_KEY_PREFIX = "kandev-tasks-filters-";
 const SHOW_SYSTEM_STORAGE_KEY = "kandev-tasks-show-system";
@@ -223,6 +224,7 @@ function LoadMoreButton({
   loading: boolean;
   onClick: () => void;
 }) {
+  const { t } = useTranslation();
   if (!visible) return null;
   return (
     <div className="flex justify-center pt-2">
@@ -233,7 +235,7 @@ function LoadMoreButton({
         disabled={loading}
         className="cursor-pointer"
       >
-        {loading ? "Loading…" : "Load more"}
+        {loading ? t("common:loading") : t("office:loadMore")}
       </Button>
     </div>
   );

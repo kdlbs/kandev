@@ -360,6 +360,19 @@ describe("release desktop artifacts", () => {
     expect(homebrewScript).not.toContain("kandev-desktop-");
   });
 
+  it("keeps the generated tap formula on the installed runtime smoke contract", () => {
+    const formula = readRepoFile("scripts/release/kandev.rb");
+
+    expect(formula).toContain(
+      'assert_equal "v#{version}", shell_output("#{bin}/kandev --version").strip',
+    );
+    expect(formula).toContain('spawn bin/"kandev", "--headless", "--port", port.to_s');
+    expect(formula).toContain("/health");
+    expect(formula).toContain('"status":"ok"');
+    expect(formula).toContain("<title>Kandev</title>");
+    expect(formula).not.toContain('version "__VERSION__"');
+  });
+
   it("bumps desktop package and Tauri versions during release preparation", () => {
     const workflow = releaseWorkflow();
 
@@ -457,8 +470,8 @@ describe("release desktop artifacts", () => {
     expect(workflow).toContain("persist-credentials: false");
     expect(workflow).toContain("Desktop validation summary");
     expect(workflow).toContain("No release PR, tag, GitHub release, public container tags");
-    expect(workflow).toContain(
-      "if: ${{ github.event_name == 'workflow_dispatch' && !inputs.dry_run && !inputs.desktop_validation_only }}",
+    expect(workflow).toMatch(
+      /github\.event_name == 'workflow_dispatch' &&\s+inputs\.channel == 'stable' &&\s+!inputs\.dry_run &&\s+!inputs\.desktop_validation_only/,
     );
     expect(workflow).toContain('if [ "$DESKTOP_VALIDATION_ONLY" = "true" ]; then');
     expect(workflow).toContain("scripts/release/desktop-signing-ready.sh macos");

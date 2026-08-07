@@ -3,6 +3,7 @@
 import { IconLoader2, IconSearch, IconX } from "@tabler/icons-react";
 import { Input } from "@kandev/ui/input";
 import { PanelHeaderBar } from "./panel-primitives";
+import { useTranslation } from "react-i18next";
 
 type FileBrowserSearchHeaderProps = {
   isSearching: boolean;
@@ -19,6 +20,7 @@ export function FileBrowserSearchHeader({
   onSearchChange,
   onCloseSearch,
 }: FileBrowserSearchHeaderProps) {
+  const { t } = useTranslation();
   return (
     <PanelHeaderBar className="group/header">
       {isSearching ? (
@@ -34,7 +36,7 @@ export function FileBrowserSearchHeader({
         onKeyDown={(e) => {
           if (e.key === "Escape") onCloseSearch();
         }}
-        placeholder="Search files..."
+        placeholder={t("task:searchFiles2")}
         className="flex-1 min-w-0 h-5 text-xs border-none bg-transparent shadow-none focus-visible:ring-0 px-2"
       />
       <button

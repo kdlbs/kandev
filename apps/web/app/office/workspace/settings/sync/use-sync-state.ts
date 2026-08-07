@@ -4,12 +4,15 @@ import { useCallback, useEffect, useState } from "react";
 import { toast } from "@/lib/toast/sonner";
 import * as officeApi from "@/lib/api/domains/office-api";
 import type { SyncDiff } from "@/lib/api/domains/office-api";
+import { useTranslation } from "react-i18next";
 
-const MSG_LOAD_FAIL = "Failed to load diffs";
-const MSG_IMPORT_FAIL = "Failed to import from filesystem";
-const MSG_EXPORT_FAIL = "Failed to export to filesystem";
+// Catalog keys, not messages — module scope freezes a `t()` at the boot locale.
+const MSG_LOAD_FAIL = "office:failedToLoadDiffs";
+const MSG_IMPORT_FAIL = "office:failedToImportFromFilesystem";
+const MSG_EXPORT_FAIL = "office:failedToExportToFilesystem";
 
 export function useSyncState(activeWorkspaceId: string) {
+  const { t } = useTranslation();
   const [incoming, setIncoming] = useState<SyncDiff | null>(null);
   const [outgoing, setOutgoing] = useState<SyncDiff | null>(null);
   const [loading, setLoading] = useState(false);
@@ -27,11 +30,11 @@ export function useSyncState(activeWorkspaceId: string) {
       setIncoming(inRes.diff);
       setOutgoing(outRes.diff);
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : MSG_LOAD_FAIL);
+      toast.error(err instanceof Error ? err.message : t(MSG_LOAD_FAIL));
     } finally {
       setLoading(false);
     }
-  }, [activeWorkspaceId]);
+  }, [activeWorkspaceId, t]);
 
   useEffect(() => {
     refresh();
@@ -43,29 +46,32 @@ export function useSyncState(activeWorkspaceId: string) {
     try {
       const res = await officeApi.applyIncomingSync(activeWorkspaceId);
       toast.success(
-        `Imported from filesystem (created ${res.result.created_count}, updated ${res.result.updated_count})`,
+        t("office:importedFromFilesystemCreatedUpdated", {
+          created: res.result.created_count,
+          updated: res.result.updated_count,
+        }),
       );
       await refresh();
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : MSG_IMPORT_FAIL);
+      toast.error(err instanceof Error ? err.message : t(MSG_IMPORT_FAIL));
     } finally {
       setApplyingIn(false);
     }
-  }, [activeWorkspaceId, refresh]);
+  }, [activeWorkspaceId, refresh, t]);
 
   const applyOutgoing = useCallback(async () => {
     if (!activeWorkspaceId) return;
     setApplyingOut(true);
     try {
       await officeApi.applyOutgoingSync(activeWorkspaceId);
-      toast.success("Exported to filesystem");
+      toast.success(t("office:exportedToFilesystem"));
       await refresh();
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : MSG_EXPORT_FAIL);
+      toast.error(err instanceof Error ? err.message : t(MSG_EXPORT_FAIL));
     } finally {
       setApplyingOut(false);
     }
-  }, [activeWorkspaceId, refresh]);
+  }, [activeWorkspaceId, refresh, t]);
 
   return {
     incoming,

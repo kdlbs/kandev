@@ -218,13 +218,23 @@ func (m *Manager) resolvePassthroughAgent(ctx context.Context, execution *AgentE
 }
 
 // promptForPassthroughCommand returns the prompt that should be passed to
-// BuildPassthroughCommand. When the agent uses idle-based auto-inject and has
-// no PromptFlag, the prompt would otherwise be appended as a positional arg
-// (putting TUIs like Claude into non-interactive `-p` mode and exiting before
-// auto-inject fires). In that case we return "" so the prompt is delivered via
-// PTY stdin in autoInjectInitialPrompt.
+// BuildPassthroughCommand.
+//
+// When the agent has a PromptFlag, the prompt rides that flag and is returned
+// here. When it does not, the prompt is suppressed: BuildPassthroughCommand
+// would otherwise append it as a positional argument, which interactive TUIs
+// (claude, codex, fuelclaude, …) ignore or misinterpret — e.g. `zsh -ic
+// "fuelclaude --model opus" "<prompt>"` drops the prompt as an unreferenced
+// positional and the agent starts at an empty prompt. In the no-flag case the
+// prompt is delivered instead via PTY stdin in autoInjectInitialPrompt.
+//
+// AutoInjectPrompt alone no longer gates suppression: a custom TUI agent with
+// neither a PromptFlag nor AutoInjectPrompt (the default for agents built from
+// a tui_config) would otherwise have no delivery path at all, so suppression is
+// keyed on the absence of a PromptFlag, which is the actual "can't carry the
+// prompt on the CLI" condition.
 func promptForPassthroughCommand(pt agents.PassthroughConfig, taskDescription string) string {
-	if pt.AutoInjectPrompt && pt.PromptFlag.IsEmpty() {
+	if pt.PromptFlag.IsEmpty() {
 		return ""
 	}
 	return taskDescription
@@ -1411,10 +1421,10 @@ type passthroughRunner interface {
 	WriteStdin(processID string, data string) error
 }
 
-// autoInjectInitialPrompt writes the task description to the PTY stdin once
-// the agent is idle (ready for input). Opt-in per agent via PassthroughConfig.
-// Called from startPassthroughSession and attemptResumeFallback only — never
-// from ResumePassthroughSession (would duplicate the prompt in agent history).
+// autoInjectInitialPrompt writes the task description to PTY stdin once a
+// passthrough agent without a PromptFlag is idle (ready for input). Called from
+// startPassthroughSession and attemptResumeFallback only — never from
+// ResumePassthroughSession (would duplicate the prompt in agent history).
 func (m *Manager) autoInjectInitialPrompt(execution *AgentExecution, pt agents.PassthroughConfig) {
 	runner := m.GetInteractiveRunner()
 	if runner == nil {
@@ -1426,15 +1436,19 @@ func (m *Manager) autoInjectInitialPrompt(execution *AgentExecution, pt agents.P
 // autoInjectInitialPromptWith is the testable inner of autoInjectInitialPrompt,
 // taking a runner seam so unit tests can avoid spawning a real PTY.
 func (m *Manager) autoInjectInitialPromptWith(runner passthroughRunner, execution *AgentExecution, pt agents.PassthroughConfig) {
-	if !pt.AutoInjectPrompt {
-		return
-	}
 	if !pt.PromptFlag.IsEmpty() {
-		// The agent already received the prompt as a CLI flag.
+		// The agent already received the prompt as a CLI flag — no stdin
+		// delivery. This mirrors promptForPassthroughCommand, which only
+		// passes the prompt to BuildPassthroughCommand when a PromptFlag
+		// exists; the two no-flag cases (built-in AutoInjectPrompt agents
+		// and custom TUI agents) both land here for stdin delivery.
 		return
 	}
 	description := getTaskDescriptionFromMetadata(execution)
 	if description == "" {
+		// Nothing to inject (e.g. a non-LLM TUI tool with no task
+		// description). Generic passthrough tools launched without a task
+		// take this exit and never receive spurious stdin.
 		return
 	}
 	processID := execution.PassthroughProcessID

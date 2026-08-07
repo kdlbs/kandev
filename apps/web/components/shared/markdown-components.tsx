@@ -7,6 +7,7 @@ import remarkGemoji from "remark-gemoji";
 import { InlineCode } from "@/components/task/chat/messages/inline-code";
 import { CodeBlock } from "@/components/task/chat/messages/code-block";
 import { MermaidBlock } from "@/components/shared/mermaid-block";
+import { ResizableMarkdownTable } from "@/components/shared/resizable-markdown-table";
 import { isMermaidContent } from "@/components/editors/tiptap/tiptap-mermaid-extension";
 import { usePanelActions } from "@/hooks/use-panel-actions";
 import { useAppStore } from "@/components/state-provider";
@@ -233,9 +234,5 @@ function MarkdownCode({ className, children }: MarkdownCodeProps) {
 export const markdownComponents = {
   code: MarkdownCode,
   a: MarkdownLink,
-  table: ({ children }: { children?: ReactNode }) => (
-    <div className="overflow-x-auto">
-      <table>{children}</table>
-    </div>
-  ),
+  table: ResizableMarkdownTable,
 };

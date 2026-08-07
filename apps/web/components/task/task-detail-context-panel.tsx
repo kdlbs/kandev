@@ -3,6 +3,7 @@
 import { Badge } from "@kandev/ui/badge";
 import { IconAlertTriangle, IconFileText, IconUsersGroup } from "@tabler/icons-react";
 import type { TaskContextDTO, TaskRefDTO } from "@/lib/api/domains/office-task-context-api";
+import { useTranslation } from "react-i18next";
 
 type Props = {
   /**
@@ -50,6 +51,7 @@ export function TaskDetailContextPanel({ context }: Props) {
 }
 
 function WorkspaceStatusBanner({ context }: { context: TaskContextDTO }) {
+  const { t } = useTranslation();
   if (context.workspace_status !== "requires_configuration") return null;
   return (
     <div
@@ -59,11 +61,8 @@ function WorkspaceStatusBanner({ context }: { context: TaskContextDTO }) {
     >
       <IconAlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
       <div className="space-y-1">
-        <div className="text-xs font-medium">Workspace requires configuration</div>
-        <div className="text-[11px]">
-          Restoring this task&apos;s materialized workspace failed. Reconfigure the workspace before
-          launching.
-        </div>
+        <div className="text-xs font-medium">{t("task:workspaceRequiresConfiguration")}</div>
+        <div className="text-[11px]">{t("task:restoringThisTaskSMaterializedWorkspace")}</div>
       </div>
     </div>
   );
@@ -76,17 +75,18 @@ function WorkspaceSection({
   group: NonNullable<TaskContextDTO["workspace_group"]>;
   mode?: TaskContextDTO["workspace_mode"];
 }) {
+  const { t } = useTranslation();
   const memberCount = group.members.length;
   return (
     <div className="space-y-2">
       <div className="flex items-center gap-2">
         <IconUsersGroup className="h-4 w-4 text-muted-foreground" />
         <Badge variant="outline" className="font-normal">
-          Shared workspace · {memberCount} {memberCount === 1 ? "member" : "members"}
+          {t("task:sharedWorkspaceMembers", { count: memberCount })}
         </Badge>
         {mode && (
           <span className="text-[11px] text-muted-foreground" data-testid="workspace-mode-label">
-            mode: {mode}
+            {t("task:workspaceModeLabel", { mode })}
           </span>
         )}
       </div>
@@ -107,19 +107,20 @@ function WorkspaceSection({
 }
 
 function RelationsSection({ context }: { context: TaskContextDTO }) {
+  const { t } = useTranslation();
   return (
     <div className="space-y-2">
-      <div className="text-xs font-medium text-muted-foreground">Related tasks</div>
+      <div className="text-xs font-medium text-muted-foreground">{t("task:relatedTasks")}</div>
       <div className="space-y-1 text-xs">
-        {context.parent && <Relation label="Parent" task={context.parent} />}
-        {context.siblings.map((t) => (
-          <Relation key={t.id} label="Sibling" task={t} />
+        {context.parent && <Relation label={t("task:parent")} task={context.parent} />}
+        {context.siblings.map((related) => (
+          <Relation key={related.id} label={t("task:sibling")} task={related} />
         ))}
-        {context.blockers.map((t) => (
-          <Relation key={t.id} label="Blocked by" task={t} variant="warning" />
+        {context.blockers.map((related) => (
+          <Relation key={related.id} label={t("task:blockedBy")} task={related} variant="warning" />
         ))}
-        {context.blocked_by.map((t) => (
-          <Relation key={t.id} label="Blocks" task={t} />
+        {context.blocked_by.map((related) => (
+          <Relation key={related.id} label={t("task:blocks")} task={related} />
         ))}
       </div>
     </div>
@@ -148,10 +149,11 @@ function Relation({
 }
 
 function DocumentsSection({ docs }: { docs: TaskContextDTO["available_documents"] }) {
+  const { t } = useTranslation();
   return (
     <div className="space-y-2">
       <div className="flex items-center gap-2 text-xs font-medium text-muted-foreground">
-        <IconFileText className="h-4 w-4" /> Documents available
+        <IconFileText className="h-4 w-4" /> {t("task:documentsAvailable")}
       </div>
       <ul className="space-y-1 text-xs">
         {docs.map((d) => (

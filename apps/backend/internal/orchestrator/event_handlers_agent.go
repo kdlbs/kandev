@@ -87,6 +87,13 @@ func (s *Service) publishQueueStatusEvent(ctx context.Context, sessionID string)
 		"count":      queueStatus.Count,
 		"max":        queueStatus.Max,
 	}
+	if taskID, err := s.SessionTaskID(ctx, sessionID); err != nil {
+		s.logger.Warn("resolve session task for queue status event",
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+	} else if taskID != "" {
+		eventData["task_id"] = taskID
+	}
 
 	s.logger.Debug("publishing queue status changed event",
 		zap.String("session_id", sessionID),
