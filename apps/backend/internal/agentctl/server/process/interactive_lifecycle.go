@@ -66,8 +66,8 @@ type interactiveProcess struct {
 
 	// firstIdleCh is closed the first time the idle detector fires for this
 	// process — i.e. the CLI has finished its startup output and is ready for
-	// input. Used by the lifecycle manager to auto-inject the task description
-	// at the right moment when AutoInjectPrompt is enabled.
+	// input. Used by the lifecycle manager to inject initial task descriptions
+	// for passthrough agents without a PromptFlag.
 	firstIdleOnce sync.Once
 	firstIdleCh   chan struct{}
 }

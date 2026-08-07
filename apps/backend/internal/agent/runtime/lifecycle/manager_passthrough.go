@@ -1425,10 +1425,10 @@ type passthroughRunner interface {
 	WriteStdin(processID string, data string) error
 }
 
-// autoInjectInitialPrompt writes the task description to the PTY stdin once
-// the agent is idle (ready for input). Opt-in per agent via PassthroughConfig.
-// Called from startPassthroughSession and attemptResumeFallback only — never
-// from ResumePassthroughSession (would duplicate the prompt in agent history).
+// autoInjectInitialPrompt writes the task description to PTY stdin once a
+// passthrough agent without a PromptFlag is idle (ready for input). Called from
+// startPassthroughSession and attemptResumeFallback only — never from
+// ResumePassthroughSession (would duplicate the prompt in agent history).
 func (m *Manager) autoInjectInitialPrompt(execution *AgentExecution, pt agents.PassthroughConfig) {
 	runner := m.GetInteractiveRunner()
 	if runner == nil {
