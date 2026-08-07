@@ -59,7 +59,7 @@ func (s *Service) getWorkflowMeta(ctx context.Context, workflowID string) (Workf
 	cache.mu.Unlock()
 
 	// Coalesce concurrent same-ID loads; first writer still wins on the map.
-	v, err, _ := cache.group.Do(workflowID, func() (any, error) {
+	v, _, _ := cache.group.Do(workflowID, func() (any, error) {
 		cache.mu.Lock()
 		if entry, hit := cache.byID[workflowID]; hit {
 			cache.mu.Unlock()
@@ -78,11 +78,6 @@ func (s *Service) getWorkflowMeta(ctx context.Context, workflowID string) (Workf
 		cache.mu.Unlock()
 		return entry, nil
 	})
-	if err != nil {
-		// singleflight only surfaces the loader's returned error; we pack errors
-		// into the entry so this path should not run for normal loads.
-		return WorkflowMeta{}, err
-	}
 	entry := v.(workflowMetaCacheEntry)
 	return entry.meta, entry.err
 }
