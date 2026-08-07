@@ -1258,6 +1258,7 @@
   "terminalNotAvailableThisTaskIs": "Terminal not available — this task is archived",
   "terminalNumbered": "terminal #{{seq}}",
   "terminalPromptInputAreDisabledUntil": "Terminal & prompt input are disabled until the next run starts.",
+  "terminalSessionEnded": "This session has ended — the terminal will not reconnect.",
   "terminalUnavailableNoActiveSession": "Terminal unavailable — no active session.",
   "terminalWithSeq": "Terminal {{seq}}",
   "terminals": "Terminals",

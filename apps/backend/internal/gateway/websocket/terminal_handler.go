@@ -50,6 +50,17 @@ var terminalUpgrader = gorillaws.Upgrader{
 	CheckOrigin:     checkWebSocketOrigin,
 }
 
+const (
+	// closeCodeSessionTerminal tells the client this terminal will never come
+	// back, so it must stop reconnecting. 4000-4999 is the range RFC 6455
+	// reserves for application close codes.
+	closeCodeSessionTerminal = 4001
+	// sessionTerminalCloseReason travels in the close frame. Keep it under the
+	// 123-byte control-frame payload limit, or the frame is rejected and the
+	// client sees an anonymous 1006 again.
+	sessionTerminalCloseReason = "session has ended"
+)
+
 type terminalRoute struct {
 	kind string
 	id   string
@@ -138,6 +149,17 @@ func (h *TerminalHandler) handleAgentTerminalRoute(c *gin.Context, sessionID str
 func (h *TerminalHandler) handleEnvironmentUserShellWS(c *gin.Context, environmentID, terminalID string) {
 	execution, err := h.lifecycleMgr.GetOrEnsureExecutionForEnvironment(c.Request.Context(), environmentID)
 	if err != nil {
+		// A terminal session never gains an execution, so retrying cannot help.
+		// Rejecting the upgrade with 503 does not say that: a failed handshake
+		// reaches the browser as a bare 1006 close with no status and no body,
+		// indistinguishable from "agentctl is still booting". The client backs
+		// off to a flat 5s and then retries for as long as the tab stays open.
+		// Complete the handshake instead, and close with a code that carries
+		// the verdict.
+		if errors.Is(err, lifecycle.ErrSessionTerminal) {
+			h.closeTerminalAsPermanent(c, environmentID, terminalID, err)
+			return
+		}
 		h.logger.Warn("environment terminal execution not ready",
 			zap.String("task_environment_id", environmentID),
 			zap.String("terminal_id", terminalID),
@@ -170,6 +192,35 @@ func (h *TerminalHandler) handleEnvironmentUserShellWS(c *gin.Context, environme
 		zap.String("terminal_id", terminalID),
 		zap.String("remote_addr", c.Request.RemoteAddr))
 	h.handleUserShellWS(c, execution, environmentID, terminalID, interactiveRunner)
+}
+
+// closeTerminalAsPermanent completes the WebSocket handshake only to close it
+// with closeCodeSessionTerminal. The handshake is the point: a close code is
+// the only channel a browser gives us for saying *why* a terminal is
+// unavailable, and it is what lets the client tell "never" from "not yet".
+func (h *TerminalHandler) closeTerminalAsPermanent(c *gin.Context, environmentID, terminalID string, cause error) {
+	h.logger.Info("terminal permanently unavailable",
+		zap.String("task_environment_id", environmentID),
+		zap.String("terminal_id", terminalID),
+		zap.String("reason", sessionTerminalCloseReason),
+		zap.Error(cause))
+	conn, err := terminalUpgrader.Upgrade(c.Writer, c.Request, nil)
+	if err != nil {
+		// Upgrade already wrote an HTTP error to the client.
+		h.logger.Warn("upgrade failed while rejecting terminal session",
+			zap.String("task_environment_id", environmentID),
+			zap.Error(err))
+		return
+	}
+	defer func() { _ = conn.Close() }()
+	if err := conn.WriteMessage(
+		gorillaws.CloseMessage,
+		gorillaws.FormatCloseMessage(closeCodeSessionTerminal, sessionTerminalCloseReason),
+	); err != nil {
+		h.logger.Warn("failed to send terminal close frame",
+			zap.String("task_environment_id", environmentID),
+			zap.Error(err))
+	}
 }
 
 func (h *TerminalHandler) handleRemoteUserShellWS(

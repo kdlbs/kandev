@@ -25,6 +25,20 @@ export function teardownWebSocket(
 
 const STABLE_CONNECTION_MS = 500;
 
+/**
+ * Sent by the server when the session behind a terminal has ended. Nothing
+ * about that recovers, so the loop must stop rather than back off. Kept in
+ * sync with `closeCodeSessionTerminal` in the gateway's terminal_handler.go.
+ */
+export const CLOSE_CODE_SESSION_TERMINAL = 4001;
+
+/** Close codes that mean "do not reconnect", as opposed to "not yet". */
+const PERMANENT_CLOSE_CODES = new Set<number>([CLOSE_CODE_SESSION_TERMINAL]);
+
+export function isPermanentCloseCode(code: number): boolean {
+  return PERMANENT_CLOSE_CODES.has(code);
+}
+
 export function reconnectDelayMs(attempt: number): number {
   const cappedAttempt = Math.min(attempt, 5);
   return Math.min(5000, 300 * 2 ** cappedAttempt);
@@ -62,6 +76,10 @@ export type ReconnectLoopOptions = {
   attachAddonRef: React.MutableRefObject<AttachAddon | null>;
   onConnected: () => void;
   onDisconnected?: () => void;
+  /** Called instead of scheduling a retry when the server says the terminal
+   * will never be available again. Receives the close reason so the caller can
+   * tell the user why the terminal stopped, rather than leaving it blank. */
+  onPermanentClose?: (reason: string) => void;
   connectWebSocket: ConnectWebSocketFn;
   manualInputRouting?: boolean;
   onWsReady?: (ws: WebSocket) => void;
@@ -80,6 +98,7 @@ export function startReconnectLoop({
   attachAddonRef,
   onConnected,
   onDisconnected,
+  onPermanentClose,
   connectWebSocket,
   manualInputRouting,
   onWsReady,
@@ -130,6 +149,18 @@ export function startReconnectLoop({
           if (stableOpenTimeout) {
             clearTimeout(stableOpenTimeout);
             stableOpenTimeout = null;
+          }
+          // Retrying a permanent failure is what turned a dead terminal tab
+          // into an endless reconnect loop. Stop, and hand the reason up so
+          // the pane can say something instead of sitting blank.
+          if (isPermanentCloseCode(event.code)) {
+            log("Permanent close, not reconnecting", {
+              code: event.code,
+              reason: event.reason,
+            });
+            isMounted = false;
+            onPermanentClose?.(event.reason);
+            return;
           }
           const nextDelay = reconnectDelayMs(retryAttempt);
           retryAttempt += 1;

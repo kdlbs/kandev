@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { buildTerminalWsUrl } from "./use-passthrough-terminal";
 import { computeCanConnect } from "./passthrough-terminal";
-import { reconnectDelayMs, startReconnectLoop } from "./ws-reconnect";
+import { CLOSE_CODE_SESSION_TERMINAL, reconnectDelayMs, startReconnectLoop } from "./ws-reconnect";
 import type { Terminal } from "@xterm/xterm";
 
 const WS_BASE_URL = "ws://localhost:38429";
@@ -56,6 +56,32 @@ describe("buildTerminalWsUrl", () => {
   });
 });
 
+/** A connect that immediately reports the given close, to drive the loop. */
+function closesWith(code: number, reason: string) {
+  return vi.fn(({ onSocketClose }: { onSocketClose: (e: CloseEvent) => void }) => {
+    onSocketClose({ code, reason } as CloseEvent);
+  });
+}
+
+function startTestLoop(
+  overrides: Partial<Parameters<typeof startReconnectLoop>[0]> &
+    Pick<Parameters<typeof startReconnectLoop>[0], "connectWebSocket">,
+) {
+  return startReconnectLoop({
+    environmentId: "env-1",
+    wsBaseUrl: WS_BASE_URL,
+    mode: "shell",
+    terminalId: "shell-1",
+    label: undefined,
+    terminal: { reset: vi.fn() } as unknown as Terminal,
+    fitAndResize: vi.fn(),
+    wsRef: { current: null },
+    attachAddonRef: { current: null },
+    onConnected: vi.fn(),
+    ...overrides,
+  });
+}
+
 describe("startReconnectLoop", () => {
   afterEach(() => {
     vi.useRealTimers();
@@ -88,6 +114,42 @@ describe("startReconnectLoop", () => {
 
     expect(connectWebSocket).toHaveBeenCalledTimes(1);
     expect(onDisconnected).toHaveBeenCalledTimes(1);
+    stop();
+  });
+
+  // A terminal on an ended session used to reconnect every 5s for as long as
+  // the tab stayed open, because a rejected upgrade is indistinguishable from
+  // a transient one. The server now closes with a dedicated code instead.
+  it("stops reconnecting when the server says the session has ended", () => {
+    vi.useFakeTimers();
+    const onPermanentClose = vi.fn();
+    const connectWebSocket = closesWith(CLOSE_CODE_SESSION_TERMINAL, "session has ended");
+
+    const stop = startTestLoop({ connectWebSocket, onPermanentClose });
+
+    vi.advanceTimersByTime(150);
+    expect(connectWebSocket).toHaveBeenCalledTimes(1);
+
+    // Well past the 5s the backoff saturates at, and several times over.
+    vi.advanceTimersByTime(60_000);
+    expect(connectWebSocket).toHaveBeenCalledTimes(1);
+    expect(onPermanentClose).toHaveBeenCalledWith("session has ended");
+    stop();
+  });
+
+  it("still retries transient closes so a booting agentctl is not given up on", () => {
+    vi.useFakeTimers();
+    const onPermanentClose = vi.fn();
+    const connectWebSocket = closesWith(1006, "");
+
+    const stop = startTestLoop({ connectWebSocket, onPermanentClose });
+
+    vi.advanceTimersByTime(150);
+    expect(connectWebSocket).toHaveBeenCalledTimes(1);
+
+    vi.advanceTimersByTime(300);
+    expect(connectWebSocket).toHaveBeenCalledTimes(2);
+    expect(onPermanentClose).not.toHaveBeenCalled();
     stop();
   });
 

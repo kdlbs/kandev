@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	gorillaws "github.com/gorilla/websocket"
 	agentctlclient "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/agentctl/server/process"
@@ -393,5 +394,75 @@ func TestStartUserShellProcessExportsEffectiveRuntimeEnv(t *testing.T) {
 		if env[key] != want {
 			t.Fatalf("shell env[%q] = %q, want %q (env=%#v)", key, env[key], want, env)
 		}
+	}
+}
+
+type terminalSessionWorkspaceProvider struct {
+	info *lifecycle.WorkspaceInfo
+}
+
+func (p *terminalSessionWorkspaceProvider) GetWorkspaceInfoForSession(_ context.Context, _, _ string) (*lifecycle.WorkspaceInfo, error) {
+	return p.info, nil
+}
+
+func (p *terminalSessionWorkspaceProvider) GetWorkspaceInfoForEnvironment(_ context.Context, _ string) (*lifecycle.WorkspaceInfo, error) {
+	return p.info, nil
+}
+
+// A shell terminal on an ended session used to be refused with a 503 on the
+// upgrade, which the browser reports as a bare 1006 close - no status, no
+// body, and no way to tell "never" from "not yet". The client retried every
+// 5s for as long as the tab stayed open. The handshake must complete so the
+// close code can carry the verdict.
+func TestEnvironmentTerminalClosesPermanentlyForTerminalSession(t *testing.T) {
+	log := testTerminalLogger(t)
+	manager := lifecycle.NewManager(
+		nil, bus.NewMemoryEventBus(log), nil, nil, nil, nil,
+		lifecycle.ExecutorFallbackDeny, t.TempDir(), log,
+	)
+	manager.SetWorkspaceInfoProvider(&terminalSessionWorkspaceProvider{
+		info: &lifecycle.WorkspaceInfo{
+			TaskID:            "task-terminal",
+			SessionID:         "session-terminal",
+			TaskEnvironmentID: "env-terminal",
+			WorkspacePath:     t.TempDir(),
+			AgentID:           "auggie",
+		},
+	})
+	manager.SetExecutorProfileReader(&stubExecutorProfileReader{
+		session: &taskmodels.TaskSession{
+			ID:    "session-terminal",
+			State: taskmodels.TaskSessionStateFailed,
+		},
+	})
+
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	router.GET("/terminal/*target", NewTerminalHandler(manager, nil, nil, log).HandleTerminalWS)
+	server := httptest.NewServer(router)
+	defer server.Close()
+
+	wsURL := "ws" + server.URL[len("http"):] + "/terminal/environment/env-terminal?terminalId=term-1"
+	conn, resp, err := gorillaws.DefaultDialer.Dial(wsURL, nil)
+	if err != nil {
+		status := 0
+		if resp != nil {
+			status = resp.StatusCode
+		}
+		t.Fatalf("handshake must succeed so the close code is observable; err=%v status=%d", err, status)
+	}
+	defer func() { _ = conn.Close() }()
+
+	_ = conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+	_, _, readErr := conn.ReadMessage()
+	closeErr, ok := readErr.(*gorillaws.CloseError)
+	if !ok {
+		t.Fatalf("ReadMessage() error = %v, want a websocket close error", readErr)
+	}
+	if closeErr.Code != closeCodeSessionTerminal {
+		t.Fatalf("close code = %d, want %d", closeErr.Code, closeCodeSessionTerminal)
+	}
+	if closeErr.Text != sessionTerminalCloseReason {
+		t.Fatalf("close reason = %q, want %q", closeErr.Text, sessionTerminalCloseReason)
 	}
 }

@@ -11,6 +11,7 @@ import { matchesShortcut } from "@/lib/keyboard/utils";
 import { SHORTCUTS } from "@/lib/keyboard/constants";
 import { getShortcut, type StoredShortcutOverrides } from "@/lib/keyboard/shortcut-overrides";
 import { exposeBufferReader, clearBufferReader } from "./terminal-buffer-reader";
+import { t } from "@/lib/i18n";
 
 // Debug flag - set to true to see detailed logs
 const DEBUG = false;
@@ -551,6 +552,13 @@ export function useWebSocketConnection({
       attachAddonRef,
       onConnected,
       onDisconnected,
+      onPermanentClose: (reason) => {
+        // The socket is gone for good, so nothing else will ever draw here.
+        // Write the verdict into the pane rather than leaving the user with a
+        // terminal that silently stopped responding.
+        terminal.write(`\r\n\x1b[33m${t("task:terminalSessionEnded")}\x1b[0m\r\n`);
+        log("Terminal closed permanently", { reason });
+      },
       connectWebSocket,
       manualInputRouting,
       onWsReady,
