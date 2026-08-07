@@ -20,11 +20,13 @@ func TestUpdateGitStatus_CancellationLogsDebugNotWarn(t *testing.T) {
 	tests := []struct {
 		name        string
 		observerErr error
+		cancelWT    bool
 		wantWarn    bool
 	}{
-		{"context canceled", context.Canceled, false},
-		{"admission canceled", subproc.ErrAdmissionCanceled, false},
-		{"real failure", errors.New("git exploded"), true},
+		{"context canceled", context.Canceled, false, false},
+		{"admission canceled", subproc.ErrAdmissionCanceled, false, false},
+		{"tracker context canceled with opaque error", errors.New("exit status 1"), true, false},
+		{"real failure", errors.New("git exploded"), false, true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -33,6 +35,9 @@ func TestUpdateGitStatus_CancellationLogsDebugNotWarn(t *testing.T) {
 			t.Cleanup(wt.Stop)
 			wt.gitStatusObserver = func(context.Context) (types.GitStatusUpdate, error) {
 				return types.GitStatusUpdate{}, tt.observerErr
+			}
+			if tt.cancelWT {
+				wt.cancelFunc()
 			}
 
 			if wt.updateGitStatus(context.Background()) {
@@ -60,6 +65,13 @@ func TestUpdateGitStatus_CancellationLogsDebugNotWarn(t *testing.T) {
 				t.Fatalf("debug count = %d, want 1 for cancellation", debugs)
 			}
 		})
+	}
+}
+
+func TestWorkspaceTrackerIsGitStatusCancellation_NilCancelCtx(t *testing.T) {
+	wt := &WorkspaceTracker{}
+	if wt.isGitStatusCancellation(errors.New("git exploded")) {
+		t.Fatal("isGitStatusCancellation returned true with nil cancelCtx")
 	}
 }
 

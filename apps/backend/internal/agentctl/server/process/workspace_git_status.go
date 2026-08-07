@@ -49,7 +49,7 @@ func (wt *WorkspaceTracker) updateGitStatusClass(ctx context.Context, class subp
 		}
 		return false
 	}
-	if ctx.Err() != nil || wt.cancelCtx.Err() != nil {
+	if ctx.Err() != nil || (wt.cancelCtx != nil && wt.cancelCtx.Err() != nil) {
 		return false
 	}
 
@@ -67,9 +67,10 @@ func (wt *WorkspaceTracker) updateGitStatusClass(ctx context.Context, class subp
 // tracker's own shutdown context was canceled, or the background admission slot
 // was revoked. These are all expected during teardown and don't warrant a warn.
 func (wt *WorkspaceTracker) isGitStatusCancellation(err error) bool {
-	return errors.Is(err, context.Canceled) ||
-		errors.Is(err, subproc.ErrAdmissionCanceled) ||
-		wt.cancelCtx.Err() != nil
+	if errors.Is(err, context.Canceled) || errors.Is(err, subproc.ErrAdmissionCanceled) {
+		return true
+	}
+	return wt.cancelCtx != nil && wt.cancelCtx.Err() != nil
 }
 
 // tryUpdateGitStatus attempts a non-blocking git status update. If another
