@@ -12,7 +12,10 @@ import {
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import { IconAdjustmentsHorizontal } from "@tabler/icons-react";
 import { useKanbanDisplaySettings } from "@/hooks/use-kanban-display-settings";
-import type { PluginTaskFilterRegistration } from "@/lib/plugins/registry";
+import {
+  pluginTaskFilterRegistrationKey,
+  type PluginTaskFilterRegistration,
+} from "@/lib/plugins/registry";
 import type { Repository } from "@/lib/types/http";
 import type { WorkflowsState } from "@/lib/state/slices";
 import type { ComponentProps } from "react";
@@ -252,12 +255,14 @@ export function KanbanDisplayDropdown({
             onRepositoryChange={onRepositoryChange}
           />
           {pluginFilters?.map((filter) => (
-            <div key={filter.id} className="contents">
+            <div key={pluginTaskFilterRegistrationKey(filter)} className="contents">
               <DropdownMenuSeparator />
               <PluginFilterSection
                 filter={filter}
-                selected={pluginFilterSelections?.[filter.id] ?? []}
-                onChange={(values) => onPluginFilterChange?.(filter.id, values)}
+                selected={pluginFilterSelections?.[pluginTaskFilterRegistrationKey(filter)] ?? []}
+                onChange={(values) =>
+                  onPluginFilterChange?.(pluginTaskFilterRegistrationKey(filter), values)
+                }
               />
             </div>
           ))}

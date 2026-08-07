@@ -1,8 +1,8 @@
-import { useCallback, useMemo, useSyncExternalStore } from "react";
-import { usePluginRegistry } from "@/lib/plugins/registry";
+import { useCallback, useSyncExternalStore } from "react";
+import { pluginTaskFilterRegistrationKey, usePluginRegistry } from "@/lib/plugins/registry";
 import type { PluginTaskFilterContext } from "@/lib/plugins/types";
 
-/** Per-filter-id selected option values, keyed by `TaskFilterRegistration.id`. */
+/** Selected option values, keyed by owning plugin plus `TaskFilterRegistration.id`. */
 export type PluginTaskFilterSelections = Record<string, string[]>;
 
 /**
@@ -26,14 +26,14 @@ class PluginTaskFilterStore {
 
   getSelections = (): PluginTaskFilterSelections => this.selections;
 
-  setFilterSelection(filterId: string, values: string[]): void {
+  setFilterSelection(filterKey: string, values: string[]): void {
     if (values.length === 0) {
-      if (!(filterId in this.selections)) return;
+      if (!(filterKey in this.selections)) return;
       const next = { ...this.selections };
-      delete next[filterId];
+      delete next[filterKey];
       this.selections = next;
     } else {
-      this.selections = { ...this.selections, [filterId]: values };
+      this.selections = { ...this.selections, [filterKey]: values };
     }
     this.notify();
   }
@@ -66,10 +66,10 @@ export function usePluginTaskFilters() {
     pluginTaskFilterStore.getSelections,
   );
 
-  const filters = useMemo(() => registry.getTaskFilters(), [registry]);
+  const filters = registry.getTaskFilters();
 
-  const setFilterSelection = useCallback((filterId: string, values: string[]) => {
-    pluginTaskFilterStore.setFilterSelection(filterId, values);
+  const setFilterSelection = useCallback((filterKey: string, values: string[]) => {
+    pluginTaskFilterStore.setFilterSelection(filterKey, values);
   }, []);
 
   /**
@@ -80,7 +80,7 @@ export function usePluginTaskFilters() {
   const taskMatchesPluginFilters = useCallback(
     (context: PluginTaskFilterContext): boolean => {
       return filters.every((filter) => {
-        const selected = selections[filter.id] ?? [];
+        const selected = selections[pluginTaskFilterRegistrationKey(filter)] ?? [];
         if (selected.length === 0) return true;
         try {
           return filter.matches(context, selected);

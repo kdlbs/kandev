@@ -91,6 +91,13 @@ export interface PluginTaskFilterRegistration extends TaskFilterRegistration {
   pluginId: string;
 }
 
+/** Stable UI/state identity for plugin-local task filter ids. */
+export function pluginTaskFilterRegistrationKey(
+  registration: Pick<PluginTaskFilterRegistration, "pluginId" | "id">,
+): string {
+  return `${registration.pluginId}:${registration.id}`;
+}
+
 /** Host-owned lifecycle states used to reconcile registrations with UI state. */
 export type PluginLifecycleStatus = "loading" | "ready" | "failed" | "removed";
 

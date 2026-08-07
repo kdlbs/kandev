@@ -51,7 +51,7 @@ describe("KanbanDisplayDropdown — plugin task filters", () => {
             matches: () => true,
           },
         ]}
-        pluginFilterSelections={{ tags: ["bug"] }}
+        pluginFilterSelections={{ "kandev-plugin-tags:tags": ["bug"] }}
       />,
     );
     openDropdown();
@@ -87,6 +87,6 @@ describe("KanbanDisplayDropdown — plugin task filters", () => {
 
     fireEvent.click(screen.getByTestId("display-plugin-filter-tags-option-bug"));
 
-    expect(onPluginFilterChange).toHaveBeenCalledWith("tags", ["bug"]);
+    expect(onPluginFilterChange).toHaveBeenCalledWith("kandev-plugin-tags:tags", ["bug"]);
   });
 });
