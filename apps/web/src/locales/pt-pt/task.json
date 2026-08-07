@@ -753,7 +753,7 @@
   "viewLimitReached_other": "Pode guardar até {{count}} vistas.",
   "viewName": "Nome da vista",
   "voiceInput": "Entrada de voz",
-  "voiceInputNeedsHttps": "A entrada de voz precisa de HTTPS. Abra este site em https:// (ou http://localhost) — a maioria dos navegadores móveis bloqueia as APIs de microfone em origens inseguras.",
+  "voiceInputNeedsHttps": "A entrada de voz precisa de HTTPS. Abra este site em {{secureSchemeUrl}} (ou {{localhostUrl}}) — a maioria dos navegadores móveis bloqueia as APIs de microfone em origens inseguras.",
   "voiceInputUnavailable": "Entrada de voz indisponível",
   "voiceInputUnavailableHere": "A entrada de voz não está disponível aqui.",
   "voiceInputUnavailableTapForDetails": "Entrada de voz indisponível — toque para ver os detalhes",

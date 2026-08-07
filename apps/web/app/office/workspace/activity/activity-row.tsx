@@ -3,12 +3,22 @@
 import Link from "@/components/routing/app-link";
 import type { ActivityEntry } from "@/lib/state/slices/office/types";
 import { timeAgo } from "@/lib/utils/time";
+import type { OfficeTaskStatus } from "@/lib/state/slices/office/types";
+import { STATUS_LABEL_KEYS } from "../../lib/label-keys";
+import { useTranslation } from "react-i18next";
+// Module-level `t`, resolved at call time: `renderAction` and `actorLabel` are
+// plain helpers called during the row's render, not components, so there is no
+// hook to bind. The row re-renders on `languageChanged` through the
+// `useTranslation()` below.
+import { t } from "@/lib/i18n";
 
-const CANCEL_REASON_LABEL: Record<string, string> = {
-  assignee_changed: "assignee changed",
-  task_terminal: "task completed",
-  task_not_found: "task not found",
-  review_participant_changed: "reviewer changed",
+// Catalog keys, not copy — module scope freezes a `t()` at the boot locale. The
+// record keys are the wire cancellation reasons.
+const CANCEL_REASON_LABEL_KEYS: Record<string, string> = {
+  assignee_changed: "office:cancelReasonAssigneeChanged",
+  task_terminal: "office:cancelReasonTaskTerminal",
+  task_not_found: "office:cancelReasonTaskNotFound",
+  review_participant_changed: "office:cancelReasonReviewParticipantChanged",
 };
 
 const MAX_DESCRIPTION_LENGTH = 80;
@@ -23,7 +33,8 @@ function actorInitial(actorType: string, actorId: string): string {
 }
 
 function actorLabel(entry: ActivityEntry): string {
-  if (entry.actorType === "system") return "System";
+  if (entry.actorType === "system") return t("office:system");
+  // An agent id or the raw actor type — identifiers, never copy.
   return entry.actorId || entry.actorType;
 }
 
@@ -46,15 +57,28 @@ function truncate(text: string): string {
   return `${text.slice(0, MAX_DESCRIPTION_LENGTH)}…`;
 }
 
+/** `.replace(/_/g, " ")` keeps an unmapped wire reason visible rather than blank. */
+function cancelReasonLabel(reason: string): string {
+  if (!reason) return "";
+  const key = CANCEL_REASON_LABEL_KEYS[reason];
+  return key ? t(key) : reason.replace(/_/g, " ");
+}
+
+/** Same fallback rule for a task status that is not in the shared label map. */
+function taskStatusLabel(raw: string): string {
+  if (!raw) return "";
+  const key = STATUS_LABEL_KEYS[raw as OfficeTaskStatus];
+  return key ? t(key) : raw.replace(/_/g, " ");
+}
+
 function renderAction(entry: ActivityEntry): React.ReactNode {
   const d = entry.details;
 
   if (entry.action === "run_stale_cancelled") {
-    const reason = typeof d?.reason === "string" ? d.reason : "";
-    const label = CANCEL_REASON_LABEL[reason] ?? reason.replace(/_/g, " ");
+    const label = cancelReasonLabel(typeof d?.reason === "string" ? d.reason : "");
     return (
       <>
-        <span className="text-muted-foreground"> stale run cancelled</span>
+        <span className="text-muted-foreground"> {t("office:staleRunCancelled")}</span>
         {taskRefNode(d)}
         {label && <span className="text-muted-foreground"> — {truncate(label)}</span>}
       </>
@@ -64,7 +88,7 @@ function renderAction(entry: ActivityEntry): React.ReactNode {
   if (entry.action === "run_retry_cancelled") {
     return (
       <>
-        <span className="text-muted-foreground"> retry cancelled — reassigned</span>
+        <span className="text-muted-foreground"> {t("office:retryCancelledReassigned")}</span>
         {taskRefNode(d)}
       </>
     );
@@ -73,23 +97,32 @@ function renderAction(entry: ActivityEntry): React.ReactNode {
   if (entry.action === "recovery_dispatch") {
     return (
       <>
-        <span className="text-muted-foreground"> unstarted task recovered</span>
+        <span className="text-muted-foreground"> {t("office:unstartedTaskRecovered")}</span>
         {taskRefNode(d)}
       </>
     );
   }
 
   if (entry.action === "task_status_changed") {
-    const newStatus = typeof d?.new_status === "string" ? d.new_status.replace(/_/g, " ") : "";
+    // One key for the whole clause. "status changed" + " to {status}" as two
+    // fragments freezes the English order, and the status arrived as the raw
+    // wire value; it now resolves through the shared status label map.
+    const status = taskStatusLabel(typeof d?.new_status === "string" ? d.new_status : "");
     return (
       <>
-        <span className="text-muted-foreground"> status changed</span>
-        {newStatus && <span className="text-muted-foreground"> to {newStatus}</span>}
+        <span className="text-muted-foreground">
+          {" "}
+          {status ? t("office:activityStatusChangedTo", { status }) : t("office:statusChanged")}
+        </span>
         {taskRefNode(d)}
       </>
     );
   }
 
+  // NOT localized, deliberately: `entry.action` is an open-ended backend
+  // activity identifier with no closed union on the wire, so a key map would
+  // silently fall through for any action the backend adds. `targetType` below is
+  // a wire value for the same reason.
   const formatted = truncate(entry.action.replace(/[._]/g, " "));
   return (
     <>
@@ -122,6 +155,7 @@ type Props = {
 };
 
 export function ActivityRow({ entry }: Props) {
+  const { t } = useTranslation();
   const href = runHref(entry);
   return (
     <div className="flex items-start gap-3 px-4 py-2.5 text-sm hover:bg-accent/50 transition-colors">
@@ -137,7 +171,7 @@ export function ActivityRow({ entry }: Props) {
           href={href}
           className="text-xs text-muted-foreground hover:text-foreground shrink-0 cursor-pointer"
         >
-          Run
+          {t("office:run")}
         </Link>
       )}
       <span className="text-xs text-muted-foreground shrink-0">{timeAgo(entry.createdAt)}</span>

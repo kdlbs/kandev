@@ -1384,7 +1384,7 @@
   "viewName": "Vĩēŵ ńàḿē",
   "viewPlanHistory": "Vĩēŵ ƥĺàń ĥĩśţōŕŷ",
   "voiceInput": "Vōĩćē ĩńƥũţ",
-  "voiceInputNeedsHttps": "Vōĩćē ĩńƥũţ ńēēďś ĤŢŢƤŚ. Ōƥēń ţĥĩś śĩţē ōvēŕ ĥţţƥś:// (ōŕ ĥţţƥ://ĺōćàĺĥōśţ) — ḿōśţ ḿōƀĩĺē ƀŕōŵśēŕś ƀĺōćķ ḿĩćŕōƥĥōńē ÀƤĨś ōń ĩńśēćũŕē ōŕĩĝĩńś.",
+  "voiceInputNeedsHttps": "Vōĩćē ĩńƥũţ ńēēďś ĤŢŢƤŚ. Ōƥēń ţĥĩś śĩţē ōvēŕ {{secureSchemeUrl}} (ōŕ {{localhostUrl}}) — ḿōśţ ḿōƀĩĺē ƀŕōŵśēŕś ƀĺōćķ ḿĩćŕōƥĥōńē ÀƤĨś ōń ĩńśēćũŕē ōŕĩĝĩńś.",
   "voiceInputUnavailable": "Vōĩćē ĩńƥũţ ũńàvàĩĺàƀĺē",
   "voiceInputUnavailableHere": "Vōĩćē ĩńƥũţ ĩś ũńàvàĩĺàƀĺē ĥēŕē.",
   "voiceInputUnavailableTapForDetails": "Vōĩćē ĩńƥũţ ũńàvàĩĺàƀĺē — ţàƥ ƒōŕ ďēţàĩĺś",

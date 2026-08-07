@@ -649,6 +649,30 @@ func (s *Service) GetStatus(ctx context.Context, sessionID string) *QueueStatus 
 	}
 }
 
+// CountPendingByTaskIDs returns the pending prompt count per task, keyed by
+// task_id, for every requested task. Reserved in-flight lifecycle rows are
+// excluded, matching GetStatus. Used by task-list assembly and the status
+// summary projector to render per-task queued-prompt badges.
+func (s *Service) CountPendingByTaskIDs(ctx context.Context, taskIDs []string) (map[string]int, error) {
+	counts, err := s.repo.CountPendingByTaskIDs(ctx, taskIDs)
+	if err != nil {
+		s.logger.Error("count pending by task ids failed",
+			zap.Int("task_count", len(taskIDs)),
+			zap.Error(err))
+		return nil, err
+	}
+	return counts, nil
+}
+
+// CountPendingByTask returns the pending prompt count for one task.
+func (s *Service) CountPendingByTask(ctx context.Context, taskID string) (int, error) {
+	counts, err := s.CountPendingByTaskIDs(ctx, []string{taskID})
+	if err != nil {
+		return 0, err
+	}
+	return counts[taskID], nil
+}
+
 // SnapshotSession returns the complete persisted queue state for rollback.
 // Unlike GetStatus, it includes durable lifecycle rows reserved by an in-flight
 // delivery so a later restore cannot erase them before acknowledgement.

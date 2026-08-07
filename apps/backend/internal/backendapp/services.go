@@ -806,9 +806,11 @@ func (a *workflowProviderAdapter) CreateWorkflow(ctx context.Context, workspaceI
 
 // UpdateWorkflow implements workflowservice.WorkflowProvider.
 func (a *workflowProviderAdapter) UpdateWorkflow(ctx context.Context, workflow *taskmodels.Workflow) error {
+	prompt := workflow.Prompt
 	_, err := a.svc.UpdateWorkflow(ctx, workflow.ID, &taskservice.UpdateWorkflowRequest{
 		Name:           &workflow.Name,
 		Description:    &workflow.Description,
+		Prompt:         &prompt,
 		AgentProfileID: &workflow.AgentProfileID,
 	})
 	return err

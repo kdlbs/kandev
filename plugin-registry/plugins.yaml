@@ -38,6 +38,9 @@ plugins:
   - id: kandev-plugin-tags
     repo: yattdev/kandev-plugin-tags
     categories: [tools]
+  - id: kandev-plugin-notes
+    repo: yattdev/kandev-plugin-notes
+    categories: [tools]
 # Example entry (copy, uncomment, and fill in when adding a plugin):
 #
 # plugins:

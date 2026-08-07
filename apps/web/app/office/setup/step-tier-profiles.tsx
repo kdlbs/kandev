@@ -14,6 +14,7 @@ import {
   fillMissingTierProfileIds,
   useSelectableProfileOptions,
 } from "./agent-profile-setup-controls";
+import { useTranslation } from "react-i18next";
 
 type StepTierProfilesProps = {
   tierProfileIds: Partial<Record<Tier, string>>;
@@ -27,22 +28,32 @@ type StepTierProfilesProps = {
 
 const TIERS = ["frontier", "balanced", "economy"] as const;
 
-const TIER_PROFILE_COPY: Record<Tier, { label: string; description: string }> = {
-  frontier: {
-    label: "Frontier",
-    description:
-      "Used when the coordinator creates agents for the highest-capability work or assigns the Frontier tier.",
-  },
-  balanced: {
-    label: "Balanced",
-    description: "Used for general worker agents when the coordinator assigns the Balanced tier.",
-  },
-  economy: {
-    label: "Economy",
-    description:
-      "Used for QA, routine, and lower-cost agents when the coordinator assigns the Economy tier.",
-  },
-};
+// Catalog keys, not copy: this is module scope, so a `t()` here would resolve
+// once at import and freeze at the boot locale. The record keys are the wire
+// `Tier` values and stay untranslated.
+//
+// `usageLabel` is a whole aria-label per tier rather than a "{{label}} tier
+// usage" frame with the tier name interpolated: the name is itself translated,
+// and a translated value inside a translated frame can neither reorder nor
+// agree.
+const TIER_PROFILE_COPY: Record<Tier, { label: string; description: string; usageLabel: string }> =
+  {
+    frontier: {
+      label: "office:tierFrontier",
+      description: "office:tierFrontierDescription",
+      usageLabel: "office:tierFrontierUsage",
+    },
+    balanced: {
+      label: "office:tierBalanced",
+      description: "office:tierBalancedDescription",
+      usageLabel: "office:tierBalancedUsage",
+    },
+    economy: {
+      label: "office:tierEconomy",
+      description: "office:tierEconomyDescription",
+      usageLabel: "office:tierEconomyUsage",
+    },
+  };
 
 export function StepTierProfiles({
   tierProfileIds,
@@ -50,6 +61,7 @@ export function StepTierProfiles({
   onChange,
   onAgentProfilesChange,
 }: StepTierProfilesProps) {
+  const { t } = useTranslation();
   const settingsAgents = useAppStore((s) => s.settingsAgents.items);
   const setAgentProfiles = useAppStore((s) => s.setAgentProfiles);
   const { profileOptions } = useSelectableProfileOptions(agentProfiles);
@@ -58,19 +70,17 @@ export function StepTierProfiles({
   return (
     <div className="space-y-6">
       <div>
-        <h2 className="text-xl font-semibold">Setup tier agent profiles</h2>
+        <h2 className="text-xl font-semibold">{t("office:setupTierAgentProfiles")}</h2>
         <p className="text-sm text-muted-foreground mt-1">
-          Choose the profile family Office should use when agents are assigned Frontier, Balanced,
-          or Economy work.
+          {t("office:chooseTheProfileFamilyOfficeShould")}
         </p>
       </div>
       <div className="space-y-4">
         <div className="space-y-3">
           <div>
-            <Label>Agent tier profiles</Label>
+            <Label>{t("office:agentTierProfiles")}</Label>
             <p className="text-xs text-muted-foreground mt-1">
-              The coordinator can create worker agents and choose a tier for each one. Each tier
-              resolves to the profile selected here, and can be changed later in Workspace routing.
+              {t("office:theCoordinatorCanCreateWorkerAgents")}
             </p>
           </div>
           <div className="grid gap-3 md:grid-cols-3">
@@ -125,23 +135,24 @@ function TierProfileSelector({
   options: ReturnType<typeof useSelectableProfileOptions>["profileOptions"];
   onChange: (profileId: string) => void;
 }) {
+  const { t } = useTranslation();
   const copy = TIER_PROFILE_COPY[tier];
   return (
     <div className="min-w-0 space-y-1.5">
       <div className="flex items-center gap-1.5">
-        <Label className="text-xs font-medium">{copy.label}</Label>
+        <Label className="text-xs font-medium">{t(copy.label)}</Label>
         <Tooltip>
           <TooltipTrigger asChild>
             <button
               type="button"
               className="inline-flex size-4 items-center justify-center rounded-sm text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-              aria-label={`${copy.label} tier usage`}
+              aria-label={t(copy.usageLabel)}
             >
               <IconInfoCircle className="size-3.5" />
             </button>
           </TooltipTrigger>
           <TooltipContent className="max-w-xs" side="top">
-            {copy.description}
+            {t(copy.description)}
           </TooltipContent>
         </Tooltip>
       </div>
@@ -150,7 +161,7 @@ function TierProfileSelector({
         value={value}
         onValueChange={onChange}
         disabled={options.length === 0}
-        placeholder="Select profile..."
+        placeholder={t("office:selectProfile")}
         triggerClassName="border border-input rounded-md px-3 h-9 w-full"
       />
     </div>

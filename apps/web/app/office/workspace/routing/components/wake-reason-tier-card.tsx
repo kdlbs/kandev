@@ -12,7 +12,9 @@ import type {
   WorkspaceRouting,
 } from "@/lib/state/slices/office/types";
 import { providerLabel } from "./provider-order-editor";
+import { TIER_NAME_KEYS } from "../../../lib/label-keys";
 import { USE_AGENT_TIER, WAKE_REASONS, type WakeReasonCopy } from "./wake-reason-info";
+import { useTranslation } from "react-i18next";
 
 type Props = {
   config: WorkspaceRouting;
@@ -26,6 +28,7 @@ type Props = {
 // text so a new user understands what the row controls before touching
 // the dropdown.
 export function WakeReasonTierCard({ config, value, onChange, disabled }: Props) {
+  const { t } = useTranslation();
   const handleRowChange = (reason: WakeReason, tier: Tier | typeof USE_AGENT_TIER) => {
     const next: TierPerReason = { ...value };
     if (tier === USE_AGENT_TIER) {
@@ -38,13 +41,9 @@ export function WakeReasonTierCard({ config, value, onChange, disabled }: Props)
   return (
     <Card>
       <CardHeader className="space-y-1">
-        <CardTitle className="text-sm">Wake-reason tier policy</CardTitle>
+        <CardTitle className="text-sm">{t("office:wakeReasonTierPolicy")}</CardTitle>
         <p className="text-xs text-muted-foreground leading-relaxed">
-          Override which model tier runs for specific kinds of agent work. Most users leave this on
-          the workspace defaults — Economy for background tasks, Balanced for normal runs.
-          Heartbeats, scheduled routines, and budget alerts run constantly in the background, so
-          using a cheaper tier here can dramatically reduce cost without affecting the work that
-          matters.
+          {t("office:overrideWhichModelTierRunsFor")}
         </p>
       </CardHeader>
       <CardContent className="divide-y divide-border">
@@ -72,15 +71,16 @@ type RowProps = {
 };
 
 function WakeReasonRow({ row, tier, config, disabled, onChange }: RowProps) {
+  const { t } = useTranslation();
   return (
     <div className="py-3 space-y-2 first:pt-0 last:pb-0">
       <div className="flex items-center justify-between gap-3">
         <RowLabel row={row} />
         <TierSelect tier={tier} onChange={onChange} disabled={disabled} />
       </div>
-      <p className="text-xs text-muted-foreground leading-relaxed pl-1">{row.short}</p>
+      <p className="text-xs text-muted-foreground leading-relaxed pl-1">{t(row.shortKey)}</p>
       <p className="text-[11px] text-muted-foreground/80 leading-relaxed pl-1">
-        {row.recommendation}
+        {t(row.recommendationKey)}
       </p>
       <ResolvedRow tier={tier} config={config} />
     </div>
@@ -88,31 +88,33 @@ function WakeReasonRow({ row, tier, config, disabled, onChange }: RowProps) {
 }
 
 function RowLabel({ row }: { row: WakeReasonCopy }) {
+  const { t } = useTranslation();
   return (
     <div className="flex items-center gap-1.5">
-      <span className="text-sm font-medium uppercase tracking-wide">{row.label}</span>
+      <span className="text-sm font-medium uppercase tracking-wide">{t(row.labelKey)}</span>
       <Tooltip>
         <TooltipTrigger asChild>
           <button
             type="button"
-            aria-label={`More info about ${row.label}`}
+            aria-label={t("office:moreInfoAbout", { label: t(row.labelKey) })}
             className="cursor-pointer text-muted-foreground hover:text-foreground"
           >
             <IconInfoCircle className="h-3.5 w-3.5" />
           </button>
         </TooltipTrigger>
         <TooltipContent side="right" className="max-w-xs text-xs leading-relaxed">
-          {row.long}
+          {t(row.longKey)}
         </TooltipContent>
       </Tooltip>
     </div>
   );
 }
 
-const TIER_OPTIONS: Array<{ value: Tier; label: string }> = [
-  { value: "frontier", label: "Frontier (best capability)" },
-  { value: "balanced", label: "Balanced (standard)" },
-  { value: "economy", label: "Economy (cheapest)" },
+// Catalog keys, not copy — module scope freezes a `t()` at the boot locale.
+const TIER_OPTIONS: Array<{ value: Tier; labelKey: string }> = [
+  { value: "frontier", labelKey: "office:tierFrontierQualified" },
+  { value: "balanced", labelKey: "office:tierBalancedQualified" },
+  { value: "economy", labelKey: "office:tierEconomyQualified" },
 ];
 
 function TierSelect({
@@ -124,6 +126,7 @@ function TierSelect({
   onChange: (tier: Tier | typeof USE_AGENT_TIER) => void;
   disabled?: boolean;
 }) {
+  const { t } = useTranslation();
   const selected = tier ?? USE_AGENT_TIER;
   return (
     <Select
@@ -136,11 +139,11 @@ function TierSelect({
       </SelectTrigger>
       <SelectContent>
         <SelectItem value={USE_AGENT_TIER} className="cursor-pointer">
-          Use agent&apos;s normal tier
+          {t("office:useAgentSNormalTier")}
         </SelectItem>
         {TIER_OPTIONS.map((opt) => (
           <SelectItem key={opt.value} value={opt.value} className="cursor-pointer">
-            {opt.label}
+            {t(opt.labelKey)}
           </SelectItem>
         ))}
       </SelectContent>
@@ -153,20 +156,24 @@ function TierSelect({
 // selected tier is not mapped on any provider in the order we surface a
 // warning chip directing them to the provider tier mapping section.
 function ResolvedRow({ tier, config }: { tier: Tier | undefined; config: WorkspaceRouting }) {
+  const { t } = useTranslation();
   if (!tier) return null;
   const match = firstProviderWithTier(tier, config);
   if (!match) {
     return (
       <p className="text-[11px] text-destructive flex items-center gap-1 pl-1">
         <IconAlertTriangle className="h-3 w-3" />
-        No provider has the {tier} tier mapped — set a model for {tier} under Provider tier mapping
-        below.
+        {/* One key: the tier appeared twice in one sentence, so two fragments
+            would have frozen both the order and the repetition. */}
+        {t("office:noProviderHasTierMapped", { tier: t(TIER_NAME_KEYS[tier]) })}
       </p>
     );
   }
   return (
     <p className="text-[11px] text-muted-foreground pl-1">
-      Currently maps to{" "}
+      {/* The clause and the provider/model chip: the chip is a data token, so
+          the sentence keeps its own key and the chip trails it. */}
+      {t("office:currentlyMapsTo")}{" "}
       <Tooltip>
         <TooltipTrigger asChild>
           <Badge variant="secondary" className="ml-0.5 cursor-help">
@@ -174,9 +181,7 @@ function ResolvedRow({ tier, config }: { tier: Tier | undefined; config: Workspa
           </Badge>
         </TooltipTrigger>
         <TooltipContent side="right" className="max-w-xs text-xs leading-relaxed">
-          Typical mapping. At launch time the router walks the provider order and picks the first
-          healthy provider, so a degraded primary may cause this run to use a different
-          provider/model than shown here.
+          {t("office:typicalMappingAtLaunchTimeThe")}
         </TooltipContent>
       </Tooltip>
     </p>

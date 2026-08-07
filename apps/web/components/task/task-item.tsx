@@ -85,6 +85,8 @@ type TaskItemProps = {
   onToggleSubtasks?: () => void;
   repositories?: string[];
   prInfo?: { number: number; state: string; aggregateState?: string };
+  /** Number of prompts currently en-queued for this task (mail badge). */
+  queuedCount?: number;
   issueInfo?: { url: string; number: number };
   isPinned?: boolean;
   agentErrorMessage?: string | null;
@@ -324,6 +326,7 @@ function TaskItemContent({
   repositories,
   updatedAt,
   prInfo,
+  queuedCount,
   issueInfo,
   agentErrorMessage,
 }: {
@@ -338,6 +341,7 @@ function TaskItemContent({
   repositories?: string[];
   updatedAt?: string;
   prInfo?: { number: number; state: string; aggregateState?: string };
+  queuedCount?: number;
   issueInfo?: { url: string; number: number };
   agentErrorMessage?: string | null;
 }) {
@@ -375,7 +379,12 @@ function TaskItemContent({
           {repositories.join(" · ")}
         </span>
       )}
-      <TaskItemStatsRow updatedAt={updatedAt} prInfo={prInfo} primarySessionId={primarySessionId} />
+      <TaskItemStatsRow
+        updatedAt={updatedAt}
+        prInfo={prInfo}
+        primarySessionId={primarySessionId}
+        queuedCount={queuedCount}
+      />
     </div>
   );
 }
@@ -428,6 +437,7 @@ export const TaskItem = memo(function TaskItem({
   onToggleSubtasks,
   repositories,
   prInfo,
+  queuedCount,
   issueInfo,
   isPinned,
   agentErrorMessage,
@@ -474,6 +484,7 @@ export const TaskItem = memo(function TaskItem({
         repositories={repositories}
         updatedAt={updatedAt}
         prInfo={prInfo}
+        queuedCount={queuedCount}
         issueInfo={issueInfo}
         agentErrorMessage={agentErrorMessage}
       />

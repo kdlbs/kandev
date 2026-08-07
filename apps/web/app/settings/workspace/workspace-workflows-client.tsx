@@ -167,6 +167,7 @@ function hasNewerWorkflowMetadata(current: Workflow, savedFrom: Workflow) {
   return (
     current.name !== savedFrom.name ||
     current.description !== savedFrom.description ||
+    (current.prompt ?? "") !== (savedFrom.prompt ?? "") ||
     current.agent_profile_id !== savedFrom.agent_profile_id
   );
 }
@@ -193,7 +194,7 @@ function useWorkflowActions({
 
   const handleUpdateWorkflow = (
     workflowId: string,
-    updates: { name?: string; description?: string; agent_profile_id?: string },
+    updates: { name?: string; description?: string; prompt?: string; agent_profile_id?: string },
   ) => {
     setWorkflowItems((prev) =>
       prev.map((wf) =>

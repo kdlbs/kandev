@@ -45,6 +45,13 @@ type Repository interface {
 	// CountBySession returns the number of entries for a session.
 	CountBySession(ctx context.Context, sessionID string) (int, error)
 
+	// CountPendingByTaskIDs returns the number of pending entries per task,
+	// keyed by task_id, for every requested task ID (zero when a task has no
+	// pending entries). Pending excludes durable lifecycle rows already
+	// reserved in flight, matching GetStatus semantics. The reserved exclusion
+	// is applied in Go via IsReservedInFlight, never by matching JSON in SQL.
+	CountPendingByTaskIDs(ctx context.Context, taskIDs []string) (map[string]int, error)
+
 	// TakeHead atomically returns and deletes the lowest-position entry for the
 	// session. Returns nil, nil if the queue is empty.
 	TakeHead(ctx context.Context, sessionID string) (*QueuedMessage, error)

@@ -29,6 +29,7 @@ import { WorkflowSyncedBadge } from "./workflow-synced-badge";
 import { useWorkflowMutationGuard } from "./workflow-mutation-guard";
 import { WorkflowCycleGuardDialog } from "./workflow-cycle-diagnostic";
 import { useWorkflowDraftContributor } from "./use-workflow-draft-contributor";
+import { WorkflowPromptSection } from "./workflow-prompt-section";
 
 const TEMP_WORKFLOW_PREFIX = "temp-workflow-";
 
@@ -42,6 +43,7 @@ type WorkflowCardProps = {
   onUpdateWorkflow: (updates: {
     name?: string;
     description?: string;
+    prompt?: string;
     agent_profile_id?: string;
   }) => void;
   onDeleteWorkflow: () => Promise<unknown>;
@@ -218,6 +220,7 @@ type WorkflowCardBodyProps = {
   onUpdateWorkflow: (updates: {
     name?: string;
     description?: string;
+    prompt?: string;
     agent_profile_id?: string;
   }) => void;
   workflowLoading: boolean;
@@ -306,6 +309,12 @@ function WorkflowCardBody({
           </Select>
         </div>
       </div>
+      <WorkflowPromptSection
+        workflow={workflow}
+        savedWorkflow={savedWorkflow}
+        readOnly={readOnly}
+        onUpdate={(prompt) => onUpdateWorkflow({ prompt })}
+      />
       <div className="space-y-2">
         <Label>{t("workflows:workflowSteps")}</Label>
         {workflowLoading ? (

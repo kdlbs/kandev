@@ -14,8 +14,24 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@kandev/ui/
 import { useRunAttempts } from "@/hooks/domains/office/use-run-attempts";
 import type { RouteAttempt, RouteAttemptOutcome } from "@/lib/state/slices/office/types";
 import { providerLabel } from "../../workspace/routing/components/provider-order-editor";
+import type { TFunction } from "i18next";
+import { useTranslation } from "react-i18next";
 
 type Props = { runId: string };
+
+// The record keys are the wire `RouteAttemptOutcome` values and stay
+// untranslated; only the pill's text is copy. It used to be derived from the
+// enum with `outcome.replace(/_/g, " ")`, which rendered the identifier as
+// pseudo-English and could never be localized — one key per outcome instead.
+const OUTCOME_LABEL: Record<RouteAttemptOutcome, string> = {
+  launched: "office:routeOutcomeLaunched",
+  failed_provider_unavailable: "office:routeOutcomeFailedProviderUnavailable",
+  failed_other: "office:routeOutcomeFailedOther",
+  skipped_degraded: "office:routeOutcomeSkippedDegraded",
+  skipped_user_action: "office:routeOutcomeSkippedUserAction",
+  skipped_missing_mapping: "office:routeOutcomeSkippedMissingMapping",
+  skipped_max_attempts: "office:routeOutcomeSkippedMaxAttempts",
+};
 
 const OUTCOME_VARIANT: Record<
   RouteAttemptOutcome,
@@ -31,14 +47,15 @@ const OUTCOME_VARIANT: Record<
 };
 
 export function RoutePanel({ runId }: Props) {
+  const { t } = useTranslation();
   const { attempts, isLoading } = useRunAttempts(runId);
   if (!isLoading && attempts.length === 0) return null;
   return (
     <div className="rounded-lg border border-border" data-testid="route-panel">
       <div className="px-4 py-3 border-b border-border">
-        <p className="text-sm font-medium">Route attempts</p>
+        <p className="text-sm font-medium">{t("office:routeAttempts")}</p>
         <p className="text-xs text-muted-foreground mt-0.5">
-          Provider candidates tried for this run, in order.
+          {t("office:providerCandidatesTriedForThisRun")}
         </p>
       </div>
       <ul className="divide-y divide-border">
@@ -53,6 +70,7 @@ export function RoutePanel({ runId }: Props) {
 }
 
 function RouteAttemptRow({ attempt }: { attempt: RouteAttempt }) {
+  const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   return (
     <Collapsible open={open} onOpenChange={setOpen}>
@@ -66,13 +84,13 @@ function RouteAttemptRow({ attempt }: { attempt: RouteAttempt }) {
           {attempt.tier || "—"}
         </Badge>
         <Badge variant={OUTCOME_VARIANT[attempt.outcome] ?? "outline"} className="text-[10px]">
-          {humanOutcome(attempt.outcome)}
+          {t(OUTCOME_LABEL[attempt.outcome] ?? "office:routeOutcomeFailedOther")}
         </Badge>
         {attempt.error_code && (
           <span className="text-xs font-mono text-muted-foreground">{attempt.error_code}</span>
         )}
         <span className="text-xs text-muted-foreground ml-auto">
-          {durationLabel(attempt.started_at, attempt.finished_at)}
+          {durationLabel(t, attempt.started_at, attempt.finished_at)}
         </span>
         <CollapsibleTrigger asChild>
           <Button variant="ghost" size="icon" className="h-6 w-6 cursor-pointer">
@@ -101,12 +119,8 @@ function OutcomeIcon({ outcome }: { outcome: RouteAttemptOutcome }) {
   return <IconAlertCircle className="h-3.5 w-3.5 text-amber-600" />;
 }
 
-function humanOutcome(outcome: RouteAttemptOutcome): string {
-  return outcome.replace(/_/g, " ");
-}
-
-function durationLabel(start: string, end?: string): string {
-  if (!end) return "in flight";
+function durationLabel(t: TFunction, start: string, end?: string): string {
+  if (!end) return t("office:inFlight");
   const ms = Date.parse(end) - Date.parse(start);
   if (Number.isNaN(ms) || ms < 0) return "—";
   if (ms < 1000) return `${ms}ms`;
