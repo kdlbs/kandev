@@ -35,7 +35,7 @@ function resolveLeadingIcon(node: SettingsMenuNode, isRecord: boolean) {
   if (node.agentName) {
     return <AgentLogo agentName={node.agentName} className="h-3.5 w-3.5 shrink-0" />;
   }
-  if (isRecord && !node.icon) return <RecordGlyph enabled={node.enabled} />;
+  if (isRecord && !node.icon) return <RecordGlyph />;
   return undefined;
 }
 

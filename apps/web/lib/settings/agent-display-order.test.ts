@@ -48,14 +48,22 @@ describe("orphanedAgents", () => {
 });
 
 describe("orderAgentsForDisplay", () => {
-  it("puts detected agents first in scan order, then the rest", () => {
-    // Saved order is codex, claude, mock — the menu used to render exactly that
-    // while the page rendered claude, mock, codex.
+  it("ranks by the backend's order, detected or not", () => {
+    // DISCOVERY is the backend's ranking: claude, codex, mock. Saved order is
+    // codex, claude, mock — what the menu used to render.
     expect(orderAgentsForDisplay(DISCOVERY, SAVED).map((agent) => agent.name)).toEqual([
       CLAUDE,
-      MOCK,
       CODEX,
+      MOCK,
     ]);
+  });
+
+  it("keeps an undetected agent in rank rather than flinging it to the end", () => {
+    // `codex` is ranked above `mock` and stays there even though the scan does
+    // not find it — otherwise the dev-only mock agent outranks a real one.
+    const ordered = orderAgentsForDisplay(DISCOVERY, SAVED).map((agent) => agent.name);
+
+    expect(ordered.indexOf(CODEX)).toBeLessThan(ordered.indexOf(MOCK));
   });
 
   it("keeps the saved order when the scan has not hydrated yet", () => {

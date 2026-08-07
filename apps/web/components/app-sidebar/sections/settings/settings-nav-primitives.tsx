@@ -45,15 +45,15 @@ const GLYPH_CLASS = "h-3.5 w-3.5 shrink-0";
  * The mark on a row built from the user's own data.
  *
  * The dot is the shared one the Agents page puts in front of a profile, so a
- * profile is marked the same way in the menu as on its own page — including
- * when it is disabled. It is centred in a full glyph box rather than rendered
- * loose: at 6px it would otherwise sit narrower than every tabler glyph around
- * it and pull its label out of the column.
+ * profile is marked the same way in the menu as on its own page. It is centred
+ * in a full glyph box rather than rendered loose: at 6px it would otherwise sit
+ * narrower than every tabler glyph around it and pull its label out of the
+ * column.
  */
-export function RecordGlyph({ enabled }: { enabled?: boolean }) {
+export function RecordGlyph() {
   return (
     <span className={cn(GLYPH_CLASS, "flex items-center justify-center")} aria-hidden="true">
-      <RecordDot enabled={enabled} />
+      <RecordDot />
     </span>
   );
 }

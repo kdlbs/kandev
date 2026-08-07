@@ -25,7 +25,12 @@ import { AgentProfilesSubList } from "@/components/settings/agents/agent-profile
 import { HostShellDialog } from "@/components/settings/host-shell-dialog";
 import { InstalledAgentCard } from "@/components/settings/installed-agent-card";
 import { AGENTS_BROWSE_SETTINGS_HREF } from "@/lib/settings-discovery/catalog/agents";
-import { detectedAgents, orphanedAgents } from "@/lib/settings/agent-display-order";
+import {
+  detectedAgents,
+  orderAgentsForDisplay,
+  orphanedAgents,
+  type DiscoveredAgent,
+} from "@/lib/settings/agent-display-order";
 import { toAgentProfileOption } from "@/lib/state/slices/settings/types";
 import type {
   AgentDiscovery,
@@ -36,6 +41,8 @@ import type {
 
 type InstalledAgentsSectionProps = {
   installedAgents: AgentDiscovery[];
+  /** The full scan, detected or not — the backend's ranking of every agent. */
+  discoveryOrder: AgentDiscovery[];
   savedAgents: Agent[];
   discoveryLoading: boolean;
   rescanning: boolean;
@@ -103,8 +110,47 @@ function InstalledAgentsHeader({
   );
 }
 
+type AgentCard = { key: string; agent: AgentDiscovery; detected: boolean };
+
+/**
+ * Every agent worth a card, in the backend's rank order: the ones the scan
+ * found, plus configured agents it did not, the latter given a synthetic
+ * discovery record so a missing CLI never hides its profiles.
+ */
+function agentCards(
+  installedAgents: AgentDiscovery[],
+  savedAgents: Agent[],
+  discoveryOrder: DiscoveredAgent[],
+): AgentCard[] {
+  const detected: AgentCard[] = installedAgents.map((agent) => ({
+    key: agent.name,
+    agent,
+    detected: true,
+  }));
+  const orphans: AgentCard[] = orphanedAgents(installedAgents, savedAgents).map((agent) => ({
+    key: agent.id,
+    agent: {
+      name: agent.name,
+      supports_mcp: agent.supports_mcp,
+      mcp_config_path: agent.mcp_config_path ?? null,
+      installation_paths: [],
+      available: false,
+      matched_path: null,
+    },
+    detected: false,
+  }));
+  // Rank by name against the same list the menu ranks against, so the two
+  // surfaces cannot order the same agents differently.
+  const ordered = orderAgentsForDisplay(
+    discoveryOrder,
+    [...detected, ...orphans].map((card) => ({ name: card.agent.name, profiles: [], card })),
+  );
+  return ordered.map((entry) => entry.card);
+}
+
 function InstalledAgentsSection({
   installedAgents,
+  discoveryOrder,
   savedAgents,
   discoveryLoading,
   rescanning,
@@ -122,10 +168,13 @@ function InstalledAgentsSection({
   const { t } = useTranslation();
   const [shellOpen, setShellOpen] = useState(false);
 
-  // Configured agents whose CLI the scan no longer detects still get a group
-  // (via a synthetic discovery record), so their profiles never vanish. The
-  // settings menu lists agents in this same order — see `agent-display-order`.
-  const orphanAgents = orphanedAgents(installedAgents, savedAgents);
+  // One ranked list rather than "detected, then the rest". Two groups meant an
+  // agent the scan misses always sorted below every detected one — which put
+  // the dev-only mock agent, ranked last by the backend, ahead of real agents
+  // whose CLI happened to be absent. Undetected agents still render, via a
+  // synthetic discovery record, so their profiles never vanish; they just keep
+  // their rank. The settings menu ranks the same way — see `agent-display-order`.
+  const cards = agentCards(installedAgents, savedAgents, discoveryOrder);
 
   return (
     <div className="space-y-4">
@@ -145,7 +194,7 @@ function InstalledAgentsSection({
         }}
       />
 
-      {installedAgents.length === 0 && orphanAgents.length === 0 && (
+      {cards.length === 0 && (
         <Card>
           <CardContent className="py-8 text-center">
             <div className="flex items-center justify-center gap-2 text-sm text-muted-foreground">
@@ -163,41 +212,28 @@ function InstalledAgentsSection({
       )}
 
       <div className="grid gap-3">
-        {installedAgents.map((agent: AgentDiscovery) => (
+        {cards.map(({ key, agent, detected }) => (
           <InstalledAgentCard
-            key={agent.name}
+            key={key}
             agent={agent}
             savedAgent={savedAgentsByName.get(agent.name)}
             displayName={resolveDisplayName(agent.name)}
-            capabilityStatus={resolveCapabilityStatus(agent.name)}
-            runtimeUpdate={resolveRuntimeUpdate(agent.name)}
-            installJob={installJobs[agent.name]}
-            updateJob={updateJobs[agent.name]}
-            onPreview={previewUpdate}
-            onUpdate={startUpdate}
-            onAuthComplete={() => void handleRescan()}
+            {...(detected
+              ? {
+                  capabilityStatus: resolveCapabilityStatus(agent.name),
+                  runtimeUpdate: resolveRuntimeUpdate(agent.name),
+                  installJob: installJobs[agent.name],
+                  updateJob: updateJobs[agent.name],
+                  onPreview: previewUpdate,
+                  onUpdate: startUpdate,
+                  onAuthComplete: () => void handleRescan(),
+                }
+              : {})}
           >
             <AgentProfilesSubList
               savedAgent={savedAgentsByName.get(agent.name)}
               agentName={agent.name}
             />
-          </InstalledAgentCard>
-        ))}
-        {orphanAgents.map((agent: Agent) => (
-          <InstalledAgentCard
-            key={agent.id}
-            agent={{
-              name: agent.name,
-              supports_mcp: agent.supports_mcp,
-              mcp_config_path: agent.mcp_config_path ?? null,
-              installation_paths: [],
-              available: false,
-              matched_path: null,
-            }}
-            savedAgent={agent}
-            displayName={resolveDisplayName(agent.name)}
-          >
-            <AgentProfilesSubList savedAgent={agent} agentName={agent.name} />
           </InstalledAgentCard>
         ))}
       </div>
@@ -272,6 +308,7 @@ function useAgentPageState() {
   return {
     savedAgents,
     installedAgents,
+    discoveryAgents,
     savedAgentsByName,
     discoveryLoading,
     rescanning,
@@ -293,6 +330,7 @@ export default function AgentsSettingsPage() {
   const {
     savedAgents,
     installedAgents,
+    discoveryAgents,
     savedAgentsByName,
     discoveryLoading,
     rescanning,
@@ -331,6 +369,7 @@ export default function AgentsSettingsPage() {
 
       <InstalledAgentsSection
         installedAgents={installedAgents}
+        discoveryOrder={discoveryAgents}
         savedAgents={savedAgents}
         discoveryLoading={discoveryLoading}
         rescanning={rescanning}

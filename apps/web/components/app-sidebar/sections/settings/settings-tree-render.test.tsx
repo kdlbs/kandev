@@ -22,10 +22,7 @@ const state = {
     items: [
       {
         name: "claude-code",
-        profiles: [
-          { id: "profile-1", name: "Default", agentDisplayName: AGENT_LABEL },
-          { id: "profile-2", name: "Retired", agentDisplayName: AGENT_LABEL, enabled: false },
-        ],
+        profiles: [{ id: "profile-1", name: "Default", agentDisplayName: AGENT_LABEL }],
       },
     ],
   },
@@ -199,11 +196,10 @@ describe("SettingsTree static menu", () => {
   it("shows item counts on rows whose page owns a list", () => {
     render(<SettingsTree pathname="/settings" />);
 
-    // One workspace, two agent profiles (one of them disabled — the count is of
-    // profiles, not of usable ones), one executor profile, two secrets, one
-    // plugin (from the store/hook mocks above).
+    // One workspace, one agent profile, one executor profile, two secrets,
+    // one plugin (from the store/hook mocks above).
     expect(screen.getByRole("link", { name: "Workspaces 1" })).toBeTruthy();
-    expect(screen.getByRole("link", { name: "Agents 2" })).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Agents 1" })).toBeTruthy();
     expect(screen.getByRole("link", { name: "Executors 1" })).toBeTruthy();
     expect(screen.getByRole("link", { name: "Global Secrets 2" })).toBeTruthy();
     expect(screen.getByRole("link", { name: "Plugins 1" })).toBeTruthy();
@@ -250,7 +246,7 @@ describe("SettingsTree tree modes", () => {
     // node holds it — the Agents row has to keep the active mark itself.
     render(<SettingsTree pathname="/settings/agents/browse" />);
 
-    expect(activeRowNames()).toEqual(["Agents2"]);
+    expect(activeRowNames()).toEqual(["Agents1"]);
   });
 
   it("collapses the other branches when one is opened in accordion mode", () => {
@@ -359,21 +355,6 @@ describe("SettingsTree record treatment", () => {
       // The dot the Agents page puts in front of a profile.
       expect(box?.firstElementChild?.getAttribute("class")).toContain(RECORD_DOT);
     }
-  });
-
-  it("marks a disabled profile apart from an enabled one", () => {
-    setMenuMode("persistent", [AGENTS_ROW_KEY, AGENT_KEY]);
-    render(<SettingsTree pathname="/settings/preferences/appearance" />);
-
-    const dotOf = (name: string) =>
-      screen.getByRole("link", { name }).querySelector("[data-record-dot]");
-
-    // A disabled profile stays listed and editable; only the dot says it is off.
-    expect(dotOf("Default")?.getAttribute("data-record-dot")).toBe("enabled");
-    expect(dotOf("Retired")?.getAttribute("data-record-dot")).toBe("disabled");
-    // Not colour alone: the disabled one is hollow, the enabled one filled.
-    expect(dotOf("Retired")?.getAttribute("class")).toContain("border");
-    expect(dotOf("Default")?.getAttribute("class")).toContain("bg-primary/70");
   });
 
   it("leaves a row that has a glyph of its own alone", () => {

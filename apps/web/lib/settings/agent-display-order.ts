@@ -1,21 +1,22 @@
 /**
  * The order agents are listed in, wherever they are listed.
  *
- * The Agents page shows them in two groups: the ones the CLI scan currently
- * detects, in scan order, then agents that are configured but whose CLI the scan
- * no longer finds — those keep a group of their own so their profiles never
- * vanish. That grouping is the page's, but it is not the page's alone: the
- * settings menu lists the same agents, and listing them in a different order
- * makes the two read as different sets of agents.
+ * The backend already ranks every agent it knows about: each implementation
+ * declares a `DisplayOrder`, and `GET /agents/discovery` returns them sorted by
+ * it — Claude first, then Codex, with the dev-only mock agent last at 99. That
+ * ranking covers agents the scan did *not* find as well as the ones it did, so
+ * it is a complete order and not just an order over what happens to be
+ * installed on this machine.
  *
- * So the rule lives here and both read it, rather than the menu re-deriving an
- * order and drifting from the page it opens.
+ * So neither surface invents an order: both rank saved agents by where the
+ * backend put them. The menu and the Agents page listing the same agents in
+ * different orders is what this module exists to prevent.
  */
 
 export type DiscoveredAgent = { name: string; available: boolean };
 export type SavedAgent = { name: string; profiles: ReadonlyArray<unknown> };
 
-/** Agents the scan currently detects, in scan order. */
+/** Agents the scan currently detects, in rank order. */
 export function detectedAgents<D extends DiscoveredAgent>(
   discovery: ReadonlyArray<D>,
 ): D[] {
@@ -23,8 +24,11 @@ export function detectedAgents<D extends DiscoveredAgent>(
 }
 
 /**
- * Configured agents the scan no longer detects, in saved order. Only ones with
+ * Configured agents the scan no longer detects, in rank order. Only ones with
  * profiles: an agent with nothing configured under it has nothing to preserve.
+ *
+ * The Agents page still renders these — via a synthetic discovery record — so a
+ * CLI going missing never hides the profiles configured against it.
  */
 export function orphanedAgents<S extends SavedAgent>(
   detected: ReadonlyArray<DiscoveredAgent>,
@@ -35,22 +39,26 @@ export function orphanedAgents<S extends SavedAgent>(
 }
 
 /**
- * `saved`, reordered to match how the Agents page lists them. Agents the scan
- * does not mention at all keep their saved order at the end, so a list is never
- * silently shortened by reordering it.
+ * `saved`, reordered by the backend's ranking.
+ *
+ * Ranks against the *whole* discovery list rather than the detected subset, so
+ * an agent whose CLI is missing keeps its place among the rest instead of being
+ * flung to the end — and so the dev-only mock agent, ranked last by the backend,
+ * lands last rather than in the middle of the agents you actually use.
+ *
+ * Agents the backend does not rank at all keep their saved order, after the
+ * ranked ones. A reorder never drops or duplicates an entry.
  */
 export function orderAgentsForDisplay<S extends SavedAgent>(
   discovery: ReadonlyArray<DiscoveredAgent>,
   saved: ReadonlyArray<S>,
 ): S[] {
   const rank = new Map<string, number>();
-  detectedAgents(discovery).forEach((agent, index) => rank.set(agent.name, index));
-  const detectedCount = rank.size;
-  // Stable: equal ranks keep their saved order, which is what the page's second
-  // group renders in.
+  discovery.forEach((agent, index) => rank.set(agent.name, index));
+  const unranked = rank.size;
   return [...saved].sort(
     (a, b) =>
-      (rank.get(a.name) ?? detectedCount + saved.indexOf(a)) -
-      (rank.get(b.name) ?? detectedCount + saved.indexOf(b)),
+      (rank.get(a.name) ?? unranked + saved.indexOf(a)) -
+      (rank.get(b.name) ?? unranked + saved.indexOf(b)),
   );
 }

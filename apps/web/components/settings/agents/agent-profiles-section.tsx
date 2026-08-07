@@ -135,7 +135,7 @@ export function ProfileRow({ agent, profile }: { agent: Agent; profile: AgentPro
       <CardContent className="flex items-center justify-between gap-2 px-3">
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
-            <RecordDot enabled={profile.enabled !== false} />
+            <RecordDot />
             <span className="truncate text-sm font-medium">{profile.name}</span>
           </div>
           {(profile.model || profile.mode) && (
