@@ -3,6 +3,8 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import type { Workflow } from "@/lib/types/http";
 import { WorkflowPromptSection } from "./workflow-prompt-section";
 
+const PROMPT_INPUT = "workflow-prompt-input";
+
 const baseWorkflow = {
   id: "workflow-1",
   workspace_id: "workspace-1",
@@ -21,7 +23,7 @@ describe("WorkflowPromptSection", () => {
     render(<WorkflowPromptSection workflow={baseWorkflow} onUpdate={vi.fn()} />);
 
     expect(screen.getByTestId("workflow-prompt-toggle")).toBeTruthy();
-    expect(screen.queryByTestId("workflow-prompt-input")).toBeNull();
+    expect(screen.queryByTestId(PROMPT_INPUT)).toBeNull();
     expect(screen.getByText(/Optional/i)).toBeTruthy();
   });
 
@@ -32,7 +34,7 @@ describe("WorkflowPromptSection", () => {
     };
     render(<WorkflowPromptSection workflow={workflow} onUpdate={vi.fn()} />);
 
-    const input = screen.getByTestId("workflow-prompt-input") as HTMLTextAreaElement;
+    const input = screen.getByTestId(PROMPT_INPUT) as HTMLTextAreaElement;
     expect(input.value).toBe(workflow.prompt);
   });
 
@@ -41,7 +43,7 @@ describe("WorkflowPromptSection", () => {
     const { rerender } = render(
       <WorkflowPromptSection workflow={baseWorkflow} onUpdate={onUpdate} />,
     );
-    expect(screen.queryByTestId("workflow-prompt-input")).toBeNull();
+    expect(screen.queryByTestId(PROMPT_INPUT)).toBeNull();
 
     rerender(
       <WorkflowPromptSection
@@ -49,20 +51,20 @@ describe("WorkflowPromptSection", () => {
         onUpdate={onUpdate}
       />,
     );
-    expect(screen.getByTestId("workflow-prompt-input")).toBeTruthy();
+    expect(screen.getByTestId(PROMPT_INPUT)).toBeTruthy();
   });
 
   it("toggles open via the header control", () => {
     render(<WorkflowPromptSection workflow={baseWorkflow} onUpdate={vi.fn()} />);
     fireEvent.click(screen.getByTestId("workflow-prompt-toggle"));
-    expect(screen.getByTestId("workflow-prompt-input")).toBeTruthy();
+    expect(screen.getByTestId(PROMPT_INPUT)).toBeTruthy();
   });
 
   it("marks the textarea dirty when the draft prompt differs from saved", () => {
     const draft = { ...baseWorkflow, prompt: "new" };
     const saved = { ...baseWorkflow, prompt: "old" };
     render(<WorkflowPromptSection workflow={draft} savedWorkflow={saved} onUpdate={vi.fn()} />);
-    const input = screen.getByTestId("workflow-prompt-input");
+    const input = screen.getByTestId(PROMPT_INPUT);
     expect(input.getAttribute("data-settings-dirty")).toBe("true");
   });
 });
