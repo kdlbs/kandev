@@ -130,6 +130,41 @@ describe("PortForwardingVisibilityProvider", () => {
   });
 });
 
+describe("PortForwardingVisibilityProvider reconciliation", () => {
+  it("keeps a successful toggle while task metadata is still stale", async () => {
+    let resolveToggle!: () => void;
+    updateTaskPortForwardingMock.mockReturnValueOnce(
+      new Promise<void>((resolve) => {
+        resolveToggle = resolve;
+      }),
+    );
+    const { result } = renderHook(() => usePortForwardingVisibility(), {
+      wrapper: ({ children }) => (
+        <PortForwardingVisibilityProvider
+          taskId="task-1"
+          metadata={{ port_forwarding_enabled: false }}
+          sessionId="session-1"
+          isAgentctlReady
+        >
+          {children}
+        </PortForwardingVisibilityProvider>
+      ),
+    });
+
+    act(() => {
+      void result.current.togglePortForwarding();
+    });
+    expect(result.current.isUpdating).toBe(true);
+
+    await act(async () => {
+      resolveToggle();
+    });
+
+    expect(result.current.enabled).toBe(true);
+    expect(result.current.isUpdating).toBe(false);
+  });
+});
+
 describe("PortForwardingVisibility context boundaries", () => {
   it("returns no visibility state outside a task provider", () => {
     const { result } = renderHook(() => useOptionalPortForwardingVisibility());

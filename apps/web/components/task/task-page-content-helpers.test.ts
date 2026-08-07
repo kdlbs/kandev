@@ -228,6 +228,13 @@ describe("syncActiveTaskSession", () => {
 });
 
 describe("resolveEffectiveTask archived state", () => {
+  it("builds a kanban-only task with its metadata", () => {
+    const metadata = { port_forwarding_enabled: true };
+    const resolved = resolveEffectiveTask(null, null, makeKanbanTask({ metadata }), "task-1");
+
+    expect(resolved?.metadata).toEqual(metadata);
+  });
+
   it("uses live kanban metadata while preserving base metadata when omitted", () => {
     const base = makeArchivedTaskDetails({ metadata: { port_forwarding_enabled: false } });
     const enabled = resolveEffectiveTask(

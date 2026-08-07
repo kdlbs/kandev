@@ -26,6 +26,7 @@ test.describe("Port forwarding on mobile", () => {
 
     await session.mobilePortForwardingToggle.tap();
 
+    await expect(session.mobilePortForwardingToggle).toBeHidden();
     await expect(session.portForwardButton).toBeVisible();
     await expect(session.portForwardDialog).toBeVisible();
     await assertLocatorWithinViewportX(session.portForwardDialog, "port forwarding dialog");
@@ -33,7 +34,12 @@ test.describe("Port forwarding on mobile", () => {
 
     await session.portForwardInput.fill("3000");
     await session.portForwardAddButton.tap();
-    await expect(session.portForwardRow(3000)).toBeVisible();
+    const row = session.portForwardRow(3000);
+    await expect(row).toBeVisible();
+    await expect(row.locator("a[target='_blank']")).toHaveAttribute(
+      "href",
+      /\/port-proxy\/[^/]+\/3000\//,
+    );
     await expect(session.portForwardOpenBrowser(3000)).toHaveCount(0);
 
     await session.portForwardDialog.getByRole("button", { name: "Close" }).tap();

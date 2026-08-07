@@ -46,7 +46,7 @@ function openBrowserPanel(api: DockviewApi, centerGroupId: string, url: string):
   focusOrAddPanel(api, {
     id: `browser:${url}`,
     component: "browser",
-    title: "Browser",
+    title: t("task:browser"),
     params: { url },
     position: { referenceGroup: centerGroupId },
   });
@@ -483,7 +483,7 @@ export function buildPanelActions(set: StoreSet, get: StoreGet) {
       addSimplePanel(api, groupId ?? centerGroupId, {
         id: browserId,
         component: "browser",
-        title: "Browser",
+        title: t("task:browser"),
         params: { url: url ?? "" },
       });
     },

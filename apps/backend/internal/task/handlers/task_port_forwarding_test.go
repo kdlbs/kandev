@@ -86,6 +86,7 @@ func TestHTTPUpdateTaskPortForwardingRejectsInvalidBodies(t *testing.T) {
 		{name: "missing enabled", body: `{}`},
 		{name: "null enabled", body: `{"enabled":null}`},
 		{name: "non boolean enabled", body: `{"enabled":"true"}`},
+		{name: "unknown field", body: `{"enabled":true,"unexpected":true}`},
 		{name: "malformed json", body: `{"enabled":`},
 		{name: "trailing json value", body: `{"enabled":true} {"enabled":false}`},
 	}

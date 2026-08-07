@@ -1,5 +1,5 @@
 import { type ButtonHTMLAttributes, type PropsWithChildren } from "react";
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { PortForwardButton } from "./port-forward-dialog";
 
@@ -133,5 +133,23 @@ describe("PortForwardButton", () => {
       expect.stringContaining("/port-proxy/session-1/3000/"),
     );
     expect(visibilityMock.setDialogOpen).toHaveBeenCalledWith(false);
+  });
+
+  it("reloads tunnels when the control becomes visible", async () => {
+    visibilityMock.enabled = false;
+    listTunnelsMock.mockResolvedValue([{ port: 3000, tunnel_port: 4000 }]);
+
+    const { rerender } = render(<PortForwardButton sessionId="session-1" />);
+    expect(listTunnelsMock).not.toHaveBeenCalled();
+
+    visibilityMock.enabled = true;
+    rerender(<PortForwardButton sessionId="session-1" />);
+
+    await waitFor(() => {
+      expect(listTunnelsMock).toHaveBeenCalledWith("session-1");
+      expect(screen.getByTestId("port-forward-button").getAttribute("data-variant")).toBe(
+        "default",
+      );
+    });
   });
 });

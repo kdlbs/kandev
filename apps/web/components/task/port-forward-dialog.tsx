@@ -524,7 +524,7 @@ export function PortForwardButton({ sessionId }: { sessionId?: string | null }) 
   );
 
   useEffect(() => {
-    if (!sessionId || !canToggle) {
+    if (!enabled || !sessionId || !canToggle) {
       setActiveTunnelsRaw(new Map());
       return;
     }
@@ -536,7 +536,7 @@ export function PortForwardButton({ sessionId }: { sessionId?: string | null }) 
     return () => {
       cancelled = true;
     };
-  }, [canToggle, sessionId]);
+  }, [canToggle, enabled, sessionId]);
 
   if (!enabled || !canToggle || !sessionId) return null;
 

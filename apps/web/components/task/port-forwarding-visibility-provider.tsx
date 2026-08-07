@@ -71,6 +71,7 @@ export function PortForwardingVisibilityProvider({
   const [dialogOpen, setDialogOpen] = useState(false);
   const lastTaskKeyRef = useRef(taskKey);
   const lastServerValueRef = useRef(persistedEnabled);
+  const pendingServerValueRef = useRef<boolean | null>(null);
   const requestRef = useRef(0);
 
   const canToggle = !isArchived && canUsePortForwarding({ sessionId, isAgentctlReady });
@@ -79,11 +80,20 @@ export function PortForwardingVisibilityProvider({
     if (lastTaskKeyRef.current !== taskKey) {
       lastTaskKeyRef.current = taskKey;
       lastServerValueRef.current = persistedEnabled;
+      pendingServerValueRef.current = null;
       requestRef.current += 1;
       setEnabled(persistedEnabled);
       setIsUpdating(false);
       setDialogOpen(false);
       return;
+    }
+    if (pendingServerValueRef.current !== null) {
+      if (pendingServerValueRef.current === persistedEnabled) {
+        pendingServerValueRef.current = null;
+        lastServerValueRef.current = persistedEnabled;
+      } else {
+        return;
+      }
     }
     if (!isUpdating && lastServerValueRef.current !== persistedEnabled) {
       lastServerValueRef.current = persistedEnabled;
@@ -110,6 +120,7 @@ export function PortForwardingVisibilityProvider({
       try {
         await updateTaskPortForwarding(taskId, nextEnabled);
         if (requestRef.current !== requestId) return;
+        pendingServerValueRef.current = nextEnabled;
         lastServerValueRef.current = nextEnabled;
         setEnabled(nextEnabled);
         if (nextEnabled && options?.openDialogOnEnable) setDialogOpen(true);

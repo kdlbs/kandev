@@ -43,7 +43,6 @@ async function seedRemoteSession(
   // registers, leaving isAgentBusy=true and the idle input never rendering. The
   // helper reloads once to re-derive state from SSR. The plain wait flaked here.
   await session.waitForChatIdle({ timeout: 30_000 });
-  await session.enablePortForwarding();
 
   // Reset workspace default executor so other tests aren't affected
   await apiClient.updateWorkspace(seedData.workspaceId, {
@@ -105,6 +104,8 @@ test.describe("Port Forward Dialog", () => {
     seedData,
   }) => {
     const { session } = await seedRemoteSession(testPage, apiClient, seedData, "Remote Port Test");
+    await expect(session.portForwardButton).toBeHidden();
+    await session.enablePortForwarding();
     await expect(session.portForwardButton).toBeVisible();
   });
 
@@ -119,6 +120,7 @@ test.describe("Port Forward Dialog", () => {
       seedData,
       "Disable Port Forwarding Test",
     );
+    await session.enablePortForwarding();
     await expect(session.portForwardButton).toBeVisible();
 
     await session.togglePortForwardingPreference();
@@ -137,6 +139,7 @@ test.describe("Port Forward Dialog", () => {
       seedData,
       "Active Tunnel Visibility Test",
     );
+    await session.enablePortForwarding();
     await session.portForwardButton.click();
     await expect(session.portForwardDialog).toBeVisible();
 
@@ -177,12 +180,14 @@ test.describe("Port Forward Dialog", () => {
 
   test("dialog opens on button click", async ({ testPage, apiClient, seedData }) => {
     const { session } = await seedRemoteSession(testPage, apiClient, seedData, "Dialog Open Test");
+    await session.enablePortForwarding();
     await session.portForwardButton.click();
     await expect(session.portForwardDialog).toBeVisible();
   });
 
   test("auto-refresh loads port list on open", async ({ testPage, apiClient, seedData }) => {
     const { session } = await seedRemoteSession(testPage, apiClient, seedData, "Refresh Test");
+    await session.enablePortForwarding();
     await session.portForwardButton.click();
     await expect(session.portForwardDialog).toBeVisible();
     // Dialog auto-refreshes on open; wait for the placeholder to disappear,
@@ -195,6 +200,7 @@ test.describe("Port Forward Dialog", () => {
 
   test("add manual port shows row with Manual badge", async ({ testPage, apiClient, seedData }) => {
     const { session } = await seedRemoteSession(testPage, apiClient, seedData, "Manual Port Test");
+    await session.enablePortForwarding();
     await session.portForwardButton.click();
     await expect(session.portForwardDialog).toBeVisible();
 
@@ -217,8 +223,11 @@ test.describe("Port Forward Dialog", () => {
       seedData,
       "Open Proxy Browser Panel Test",
     );
+    await session.enablePortForwarding();
     await session.addBrowserPanel();
     await expect(session.browserPanel).toBeVisible();
+    const browserPanelCount = await testPage.getByTestId("browser-panel").count();
+    expect(browserPanelCount).toBe(1);
 
     await session.portForwardButton.click();
     await expect(session.portForwardDialog).toBeVisible();
@@ -232,7 +241,9 @@ test.describe("Port Forward Dialog", () => {
 
     await expect(session.portForwardDialog).toBeHidden();
     await expect(session.browserPanel).toBeVisible();
+    await expect(testPage.getByTestId("browser-panel")).toHaveCount(browserPanelCount);
     await expect(session.browserAddressInput).toHaveValue(proxyUrl!);
+    await expect(session.browserPanel.locator("iframe")).toHaveAttribute("src", proxyUrl!);
   });
 
   test("opens the proxy URL in a new Browser panel", async ({ testPage, apiClient, seedData }) => {
@@ -242,6 +253,7 @@ test.describe("Port Forward Dialog", () => {
       seedData,
       "Open Proxy In New Browser Panel Test",
     );
+    await session.enablePortForwarding();
 
     await session.portForwardButton.click();
     await expect(session.portForwardDialog).toBeVisible();
@@ -261,6 +273,7 @@ test.describe("Port Forward Dialog", () => {
 
   test("rejects invalid port number", async ({ testPage, apiClient, seedData }) => {
     const { session } = await seedRemoteSession(testPage, apiClient, seedData, "Invalid Port Test");
+    await session.enablePortForwarding();
     await session.portForwardButton.click();
     await expect(session.portForwardDialog).toBeVisible();
 
@@ -278,6 +291,7 @@ test.describe("Port Forward Dialog", () => {
       seedData,
       "Duplicate Port Test",
     );
+    await session.enablePortForwarding();
     await session.portForwardButton.click();
     await expect(session.portForwardDialog).toBeVisible();
 
@@ -299,6 +313,7 @@ test.describe("Port Forward Dialog", () => {
       seedData,
       "Proxy URL Test",
     );
+    await session.enablePortForwarding();
     await session.portForwardButton.click();
     await expect(session.portForwardDialog).toBeVisible();
 
@@ -315,6 +330,7 @@ test.describe("Port Forward Dialog", () => {
 
   test("Enter key submits port", async ({ testPage, apiClient, seedData }) => {
     const { session } = await seedRemoteSession(testPage, apiClient, seedData, "Enter Key Test");
+    await session.enablePortForwarding();
     await session.portForwardButton.click();
     await expect(session.portForwardDialog).toBeVisible();
 
