@@ -103,6 +103,28 @@ describe("activateLocale", () => {
     expect(i18n.t(DISPLAY_LANGUAGE_KEY)).toMatch(/[À-ɏ]/);
   });
 
+  // `task:deleteTasksCount` shipped with a plural noun in its `_one` form
+  // ("Delete {{count}} tasks"). The only call site is behind a `length > 1`
+  // guard, so English never selected `_one` and no gate could see it — but the
+  // form is not dead for translators: Russian routes 21/31/101 through the
+  // `one` category, so every locale generated from this source needs it right.
+  it("inflects the singular of a count-driven label", async () => {
+    await activateLocale("en");
+    expect(i18n.t("task:deleteTasksCount", { count: 1 })).toBe("Delete 1 task");
+    expect(i18n.t("task:deleteTasksCount", { count: 2 })).toBe("Delete 2 tasks");
+  });
+
+  // `cliModeYourPromptWillBe` was keyed in both `common` and `task` and had
+  // already drifted by one character (em dash vs hyphen). `common` is the only
+  // home; a reintroduced `task:` twin would start the drift over.
+  it("keeps the CLI-mode hint in a single namespace", async () => {
+    await activateLocale("en");
+    expect(i18n.t("common:cliModeYourPromptWillBe")).toBe(
+      "CLI mode — your prompt will be auto-injected into the terminal",
+    );
+    expect(i18n.getResource("en", "task", "cliModeYourPromptWillBe")).toBeUndefined();
+  });
+
   it("activates Simplified Chinese and resolves its real catalog", async () => {
     const result = await activateLocale(ZH_CN_LOCALE);
     expect(result).toBe(ZH_CN_LOCALE);
