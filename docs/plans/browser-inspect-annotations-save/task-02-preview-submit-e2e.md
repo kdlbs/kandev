@@ -15,7 +15,7 @@ spec: "../../specs/browser-inspect-annotations-save/spec.md"
 - A real preview iframe test proves clicking Save creates the marker and
   Browser annotations-panel entry.
 - A real preview iframe test proves plain Enter follows the same successful
-  path.
+  path for a pin selection.
 - The test restores seeded repository settings and runs in the desktop
   Chromium project without enabling the currently unrelated skipped suite.
 

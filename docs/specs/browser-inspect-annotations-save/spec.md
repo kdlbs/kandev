@@ -35,10 +35,10 @@ users from giving the agent visual change requests.
   user enters a comment and clicks **Save**, **THEN** the popup closes, a
   numbered marker appears at the clicked point, and the parent receives one
   `annotation-added` message containing the pin and comment.
-- **GIVEN** Inspect mode is active and the user drags a rectangle, **WHEN** the
+- **GIVEN** Inspect mode is active and the user clicks an element, **WHEN** the
   user enters a comment and presses plain **Enter**, **THEN** the popup closes,
-  a numbered marker appears for the area, and the parent receives one
-  `annotation-added` message containing the area and comment.
+  a numbered marker appears at the clicked point, and the parent receives one
+  `annotation-added` message containing the pin and comment.
 - **GIVEN** a pin or area comment popup is open, **WHEN** the user presses
   **Shift+Enter**, **THEN** no annotation is submitted and the popup remains
   open with the comment newline inserted.

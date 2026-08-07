@@ -69,7 +69,7 @@ injected state transition is the same on mobile-sized previews.
   marker is present in the iframe, and the Browser annotations panel shows the
   comment.
   **File:** `apps/web/e2e/tests/preview/inspector-submission.spec.ts`.
-- **Scenario:** **GIVEN** an area or pin selection with the comment popup open,
+- **Scenario:** **GIVEN** a pin selection with the comment popup open,
   **WHEN** the user types a comment and presses plain **Enter**, **THEN** the
   same marker and annotations-panel outcomes occur.
   **File:** `apps/web/e2e/tests/preview/inspector-submission.spec.ts`.
