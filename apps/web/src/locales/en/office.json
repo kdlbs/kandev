@@ -741,7 +741,7 @@
   "sourceType": "Source Type",
   "spritesRemoteSandbox": "Sprites (remote sandbox)",
   "staleRunCancelled": "stale run cancelled",
-  "standardCronExpressionExample": "Standard cron expression (e.g. 0 9 * * MON for every Monday at 9am)",
+  "standardCronExpressionExample": "Standard cron expression (e.g. {{cron}} for every Monday at 9am)",
   "startASessionOrSendA": "Start a session or send a message to begin.",
   "started": "Started",
   "startFresh": "Start Fresh",
