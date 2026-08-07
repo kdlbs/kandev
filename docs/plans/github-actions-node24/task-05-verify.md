@@ -1,7 +1,7 @@
 ---
 id: "05-verify"
 title: "Verify no Node-20 action pins remain"
-status: pending
+status: done
 wave: 2
 depends_on: ["01-test-workflows", "02-container-workflows", "03-release-workflow", "04-review-misc-workflows"]
 plan: "plan.md"
@@ -37,3 +37,11 @@ plan.md verification section; `audit.md`.
 ## Output contract
 
 Full audit output, all test command outputs, final status of `plan.md` and tasks 01–04.
+
+## Results
+
+- Full audit (audit_final.py) over all 18 workflows: 25 distinct pinned actions, every `runs.using` = `node24` or `composite` (rust-cache/checkout v6/setup-node v6/setup-go v6/pnpm v5/import-gpg v7.0.0/create-github-app-token v3.2.0 and the three composite actions dereferenced and re-checked at their commits). Zero `node20`.
+- `lint-action-pinning.py` → all SHA-pinned; `lint-action-pinning_test.py` → 9 OK.
+- Contract tests: release 24 OK, claude-code-review 9 OK, preview-env 1 OK.
+- YAML parse: 18/18 OK; `git diff --check` clean.
+- Post-merge warning check: pending — first `backend-tests`/`e2e-tests` run after merge should show no Node-20 deprecation warning.

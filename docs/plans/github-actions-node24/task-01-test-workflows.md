@@ -1,7 +1,7 @@
 ---
 id: "01-test-workflows"
 title: "Upgrade Node-20 actions in test workflows"
-status: pending
+status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
@@ -52,3 +52,13 @@ plan.md target table + compatibility notes; `audit.md` for the runtime check.
 ## Output contract
 
 Summary, files changed, exact commands run and outcomes, final audit output for the four files, task/plan status updates.
+
+## Results
+
+- Applied 8 cache, 1 go-test-action, 9 upload-artifact, 7 download-artifact, 1 login-action replacements across backend-tests.yml / frontend-tests.yml / cargo-audit.yml / e2e-tests.yml (match-by-`uses:` verified).
+- `python3 .github/scripts/lint-action-pinning.py` → "✓ All 18 workflow file(s) use SHA-pinned action refs."
+- `python3 .github/scripts/lint-action-pinning_test.py` → 9 tests OK.
+- `python3 .github/scripts/release-workflow-contract_test.py` → 24 tests OK (unchanged pins still asserted).
+- Runtime audit (audit_final.py): every pin in the four files `node24`/`composite`, zero `node20`.
+- YAML parse of all 18 workflows OK; `git diff --check` clean.
+- No security/trust or external side-effect boundaries beyond publishing new action pins to CI.

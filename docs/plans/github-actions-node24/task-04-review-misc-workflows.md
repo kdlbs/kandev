@@ -1,7 +1,7 @@
 ---
 id: "04-review-misc-workflows"
 title: "Upgrade Node-20 actions in review and misc workflows"
-status: pending
+status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
@@ -64,3 +64,11 @@ plan.md target table + compatibility notes; `audit.md`.
 ## Output contract
 
 Summary, files changed, exact commands and outcomes, audit output for the seven files, task/plan status updates.
+
+## Results
+
+- Applied 6 checkout v4→v6, 3 github-script v7→v9.0.0, 2 upload-artifact v4→v7.0.1, 1 wrangler v3→v4.0.0, 1 semantic-pull-request v5→v6.1.1, 3 Pages trio upgrades across claude.yml / claude-code-review.yml / opencode-code-review.yml / notify-docs.yml / preview-env.yml / pr-title.yml / plugin-registry-index.yml.
+- github-script scripts audited: only injected `github`/`context`, no `require('@actions/github')` → v9.0.0 safe.
+- `wranglerVersion: 3.90.0` kept in notify-docs.yml (v4 default avoided).
+- `python3 .github/scripts/lint-action-pinning.py`, `claude-code-review-workflow-contract_test.py` (9 OK), `preview-env-workflow-contract_test.py` (1 OK) all pass.
+- Runtime audit: all pins `node24`/`composite`, zero `node20`; YAML parse OK; `git diff --check` clean. None.

@@ -1,7 +1,7 @@
 ---
 id: "02-container-workflows"
 title: "Upgrade Node-20 docker actions in container workflows"
-status: pending
+status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
@@ -42,3 +42,10 @@ plan.md target table + docker compatibility notes; `audit.md`.
 ## Output contract
 
 Summary, files changed, exact commands and outcomes, audit output for the two files, task/plan status updates.
+
+## Results
+
+- Applied 2 setup-buildx, 2 login-action, 3 build-push replacements across universal-rebuild.yml / ci-base-image.yml.
+- `python3 .github/scripts/lint-action-pinning.py` → all 18 workflows SHA-pinned.
+- Runtime audit: all pins in the two files `node24`, zero `node20`.
+- YAML parse OK; `git diff --check` clean. None.

@@ -72,13 +72,13 @@ files (safe to run in any order; wave labels only express suggested order):
 
 ```
 Wave 1 (parallel candidates — user authorization required):
-- [ ] [task-01-test-workflows](task-01-test-workflows.md)   — backend-tests.yml, frontend-tests.yml, cargo-audit.yml, e2e-tests.yml
-- [ ] [task-02-container-workflows](task-02-container-workflows.md) — universal-rebuild.yml, ci-base-image.yml
-- [ ] [task-03-release-workflow](task-03-release-workflow.md) — release.yml (all Node-20 pins)
-- [ ] [task-04-review-misc-workflows](task-04-review-misc-workflows.md) — claude.yml, claude-code-review.yml, opencode-code-review.yml, notify-docs.yml, preview-env.yml, pr-title.yml, plugin-registry-index.yml
+- [x] [task-01-test-workflows](task-01-test-workflows.md)   — backend-tests.yml, frontend-tests.yml, cargo-audit.yml, e2e-tests.yml
+- [x] [task-02-container-workflows](task-02-container-workflows.md) — universal-rebuild.yml, ci-base-image.yml
+- [x] [task-03-release-workflow](task-03-release-workflow.md) — release.yml (all Node-20 pins)
+- [x] [task-04-review-misc-workflows](task-04-review-misc-workflows.md) — claude.yml, claude-code-review.yml, opencode-code-review.yml, notify-docs.yml, preview-env.yml, pr-title.yml, plugin-registry-index.yml
 
 Wave 2:
-- [ ] [task-05-verify](task-05-verify.md) — runtime audit + lint + contract tests + YAML sanity
+- [x] [task-05-verify](task-05-verify.md) — runtime audit + lint + contract tests + YAML sanity
 ```
 
 ## Tests
@@ -93,7 +93,14 @@ No product behavior is testable — the changed artifacts are workflow YAML only
 
 ## Verification Results
 
-Pending. On completion, synchronize this section with each task's `## Results`: record exact commands and outcomes, the final audit output (all pins node24/composite), and the workflow run where the deprecation warning disappeared.
+Complete 2026-08-07. All five tasks done; every task's `## Results` records the exact commands and outcomes.
+
+- Applied 84 `uses:` replacements across 14 workflow files (checkout v4→v6, upload/download-artifact v4/v5→v7.0.1/v8.0.1, cache v4→v6.1.0, github-script v7→v9.0.0, docker login/buildx/build-push/metadata v3/v5/v6→v4.6.0/v4.2.0/v7.3.0/v6.2.0, gh-release v2→v3.0.2, wrangler v3→v4.0.0, semantic-pull-request v5→v6.1.1, Pages trio → v6.0.0/v5.0.0/v5.0.0, go-test-action v0→v1.1.0).
+- Final runtime audit (`/tmp/opencode/audit_final.py`): 25 distinct pinned actions; every `runs.using` is `node24` or `composite` — **zero `node20` pins remain**. The three annotated-tag-object pins (rust-cache, claude-code-action, pnpm/action-setup) were dereferenced to their commits and re-verified (node24 / composite / node24).
+- `python3 .github/scripts/lint-action-pinning.py` → "✓ All 18 workflow file(s) use SHA-pinned action refs."; `lint-action-pinning_test.py` → 9 OK.
+- Contract tests: `release-workflow-contract_test.py` → 24 OK, `claude-code-review-workflow-contract_test.py` → 9 OK, `preview-env-workflow-contract_test.py` → 1 OK.
+- YAML parse: 18/18 workflows OK; `git diff --check` clean.
+- Post-merge smoke: pending — first `backend-tests`/`e2e-tests`/`frontend-tests` run after merge should no longer show the Node-20 deprecation warning.
 
 ## Open Questions
 

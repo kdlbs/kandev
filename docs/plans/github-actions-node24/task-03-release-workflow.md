@@ -1,7 +1,7 @@
 ---
 id: "03-release-workflow"
 title: "Upgrade Node-20 actions in release.yml"
-status: pending
+status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
@@ -49,3 +49,11 @@ plan.md target table + compatibility notes; `audit.md`.
 ## Output contract
 
 Summary, files changed, exact commands and outcomes, audit output for release.yml, task/plan status updates.
+
+## Results
+
+- Applied 2 checkout v4→v6, 4 upload-artifact v5→v7.0.1, 7 download-artifact v4/v5→v8.0.1, 6 login v3→v4.6.0, 6 buildx v3→v4.2.0, 4 build-push v6→v7.3.0, 5 metadata v5→v6.2.0, 1 gh-release v2→v3.0.2 in release.yml (35 uses total).
+- `python3 .github/scripts/lint-action-pinning.py` → all SHA-pinned.
+- `python3 .github/scripts/release-workflow-contract_test.py` → 24 tests OK.
+- Runtime audit: all pins `node24`, zero `node20`; YAML parse OK; `git diff --check` clean.
+- `with:` blocks untouched (files/body_path/tag_name/tags inputs all preserved in targets). None.
