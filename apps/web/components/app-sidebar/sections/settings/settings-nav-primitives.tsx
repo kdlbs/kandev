@@ -21,6 +21,8 @@ type SettingsLeafProps = {
   /** Pre-rendered leading visual (e.g. AgentLogo). Takes precedence over `icon`. */
   leadingIcon?: ReactNode;
   labelSuffix?: ReactNode;
+  /** Right-aligned qualifier, e.g. a badge. Sits in the caret's column. */
+  trailing?: ReactNode;
   isActive: boolean;
   /** Nesting level — used to add left padding. */
   depth?: number;
@@ -40,6 +42,11 @@ function clampDepth(depth: number, max: number): number {
 }
 
 const GLYPH_CLASS = "h-3.5 w-3.5 shrink-0";
+// A branch ends its row with `pr-1` + a 20px caret + the 4px row gap, putting
+// its trailing badge 28px in from the row's edge. A caretless row reproduces
+// that as padding rather than as a spacer element: a spacer would sit after the
+// row's `gap-2`, pushing the badge 8px further left than the branch's.
+const CARET_GUTTER_PADDING = "pr-7";
 
 /**
  * The mark on a row built from the user's own data.
@@ -67,6 +74,12 @@ export function RecordGlyph() {
  * `flex-1` lives on this wrapper, not the title, so the title still truncates
  * and a branch's chevron still gets pushed to the edge.
  *
+ * `trailing` is the other end of the row: a qualifier badge, right-aligned
+ * rather than trailing the title the way a count does. A leaf has no caret, so
+ * it reserves the caret's width instead — otherwise a badge on a profile would
+ * sit 18px further right than one on the workspace above it, and the badges
+ * would stagger down the menu instead of forming a column.
+ *
  * Every row opens a glyph box, and a row with nothing to put in it keeps the box
  * empty. That is a fallback rather than a layout the menu relies on — records
  * carry `RecordDot` — but it costs one element and keeps a future glyphless row
@@ -76,11 +89,13 @@ export function RecordGlyph() {
 function NavRowLabel({
   label,
   labelSuffix,
+  trailing,
   icon: Icon,
   leadingIcon,
 }: {
   label: string;
   labelSuffix?: ReactNode;
+  trailing?: ReactNode;
   icon?: ComponentType<{ className?: string }>;
   leadingIcon?: ReactNode;
 }) {
@@ -92,6 +107,7 @@ function NavRowLabel({
         <span className="truncate">{label}</span>
         {labelSuffix}
       </span>
+      {trailing}
     </>
   );
 }
@@ -102,6 +118,7 @@ export function SettingsLeaf({
   icon: Icon,
   leadingIcon,
   labelSuffix,
+  trailing,
   isActive,
   depth = 0,
   isRecord = false,
@@ -119,12 +136,15 @@ export function SettingsLeaf({
         isRecord ? "font-normal" : "font-medium",
         NAV_FOCUS_CLASS,
         LEAF_DEPTH_PADDING[clampDepth(depth, LEAF_DEPTH_PADDING.length - 1)],
+        // After the depth padding so it replaces that class's own `pr-*`.
+        trailing && CARET_GUTTER_PADDING,
         isActive ? ACTIVE_CLASS : INACTIVE_CLASS,
       )}
     >
       <NavRowLabel
         label={label}
         labelSuffix={labelSuffix}
+        trailing={trailing}
         icon={Icon}
         leadingIcon={leadingIcon}
       />
@@ -138,6 +158,8 @@ type SettingsBranchProps = {
   /** Pre-rendered leading visual (e.g. AgentLogo). Takes precedence over `icon`. */
   leadingIcon?: ReactNode;
   labelSuffix?: ReactNode;
+  /** Right-aligned qualifier, e.g. a badge. Sits just inside the caret. */
+  trailing?: ReactNode;
   /**
    * The branch's own page. Omitted for a node that only discloses — an agent,
    * whose `/settings/agents/<name>` route redirects back to the index.
@@ -167,6 +189,7 @@ export function SettingsBranch({
   icon: Icon,
   leadingIcon,
   labelSuffix,
+  trailing,
   href,
   isActive = false,
   expanded,
@@ -180,6 +203,7 @@ export function SettingsBranch({
     <NavRowLabel
       label={label}
       labelSuffix={labelSuffix}
+      trailing={trailing}
       icon={Icon}
       leadingIcon={leadingIcon}
     />

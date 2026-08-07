@@ -62,7 +62,7 @@ export function SettingsMenuNodeRow({
   const leadingIcon = resolveLeadingIcon(node, isRecord);
   const isActive = node.key === activeKey;
   const children = node.children ?? [];
-  const labelSuffix = renderBadge(node.badge);
+  const trailing = renderBadge(node.badge);
 
   if (children.length === 0) {
     if (!node.href) return null;
@@ -72,7 +72,7 @@ export function SettingsMenuNodeRow({
         label={label}
         icon={node.icon}
         leadingIcon={leadingIcon}
-        labelSuffix={labelSuffix}
+        trailing={trailing}
         isActive={isActive}
         depth={depth}
         isRecord={isRecord}
@@ -85,7 +85,7 @@ export function SettingsMenuNodeRow({
       label={label}
       icon={node.icon}
       leadingIcon={leadingIcon}
-      labelSuffix={labelSuffix}
+      trailing={trailing}
       href={node.href ?? undefined}
       isActive={isActive}
       expanded={expansion.isExpanded(node.key)}
