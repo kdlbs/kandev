@@ -394,6 +394,59 @@ func TestProjectorClearsErrorWhenSessionMetadataIsRetired(t *testing.T) {
 	}
 }
 
+// The orchestrator clears a recovered failure by writing JSON null, which
+// round-trips as a nil value under an existing key. Reading that as "no
+// information" instead of "no active error" would leave a restored summary's
+// error armed forever — the restart path this whole fix is about.
+func TestProjectorClearsErrorWhenSessionMetadataIsNull(t *testing.T) {
+	store := newProjectorTestStore()
+	storedAt := time.Date(2026, 8, 1, 17, 59, 0, 0, time.UTC)
+	store.rows["task-null"] = &StoredTaskStatusSummary{
+		TaskID:      "task-null",
+		WorkspaceID: "workspace-1",
+		Summary: TaskStatusSummary{
+			Revision:       3,
+			UpdatedAt:      storedAt,
+			PrimarySession: &PrimarySessionSummary{ID: "session-null", State: "RUNNING"},
+			ActiveError: &ActiveErrorSummary{
+				SessionID:  "session-null",
+				Stamp:      "error-stored",
+				OccurredAt: storedAt,
+				Preview:    "agent crashed",
+			},
+		},
+	}
+
+	projector := NewProjector(ProjectorConfig{
+		Store: store,
+		ResolveWorkspace: func(context.Context, string) (string, error) {
+			return "workspace-1", nil
+		},
+		Now: func() time.Time { return storedAt.Add(time.Minute) },
+	})
+
+	if err := projector.HandleEvent(context.Background(), bus.NewEvent(events.TaskSessionStateChanged, "test", map[string]interface{}{
+		"task_id":      "task-null",
+		"workspace_id": "workspace-1",
+		"session_id":   "session-null",
+		"new_state":    "WAITING_FOR_INPUT",
+		"is_primary":   true,
+		"session_metadata": map[string]interface{}{
+			"last_agent_error": nil,
+		},
+	})); err != nil {
+		t.Fatalf("replay session event: %v", err)
+	}
+
+	got := store.summary("task-null")
+	if got == nil {
+		t.Fatal("summary disappeared")
+	}
+	if got.ActiveError != nil {
+		t.Fatalf("active error after null metadata = %+v, want cleared", got.ActiveError)
+	}
+}
+
 func TestProjectorConvergesConcurrentGitObservations(t *testing.T) {
 	projector, store, _, _, _ := newProjectorTest(t)
 	const taskID = "task-concurrent-git"

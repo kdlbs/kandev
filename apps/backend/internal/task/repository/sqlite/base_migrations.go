@@ -259,17 +259,20 @@ func (r *Repository) runMigrations() error {
 func (r *Repository) clearRecoveredAgentErrors() error {
 	postgres := dialect.IsPostgres(r.db.DriverName())
 
+	sessionError := func(key string) string {
+		return jsonText(postgres, "s.metadata", "last_agent_error", key)
+	}
 	recoveredSessions := `
 		SELECT s.id
 		FROM task_sessions s
-		WHERE ` + jsonText(postgres, "s.metadata", "last_agent_error", "message") + ` IS NOT NULL
+		WHERE ` + sessionError("message") + ` IS NOT NULL
 			AND EXISTS (
 				SELECT 1 FROM task_session_messages m
 				WHERE m.task_session_id = s.id
 					AND m.author_type = 'agent'
 					AND m.type NOT IN ('error', 'status')
-					AND ` + timestampExpr(postgres, "m.created_at") + ` > ` +
-		timestampExpr(postgres, jsonText(postgres, "s.metadata", "last_agent_error", "occurred_at")) + `
+					AND ` + timestampColumn(postgres, "m.created_at") + ` > ` +
+		timestampFromText(postgres, sessionError("occurred_at")) + `
 			)`
 
 	r.migrate.Apply("task_sessions.last_agent_error.recovered_cleanup",
@@ -285,35 +288,63 @@ func (r *Repository) clearRecoveredAgentErrors() error {
 		SET summary = `+jsonRemoveKey(postgres, "summary", "active_error")+`
 		WHERE `+jsonText(postgres, "summary", "active_error", "session_id")+` IN (
 			SELECT s.id FROM task_sessions s
-			WHERE `+jsonText(postgres, "s.metadata", "last_agent_error", "message")+` IS NULL
+			WHERE `+sessionError("message")+` IS NULL
 		)`)
 	return nil
 }
 
-// jsonText extracts a nested JSON text value from a TEXT-typed JSON column.
-func jsonText(postgres bool, column, parent, key string) string {
+// jsonColumn makes a TEXT-typed JSON column safe to parse. Both dialects raise
+// on an empty or malformed document — Postgres on the `::jsonb` cast, SQLite in
+// `json_extract` — and these statements scan every row before filtering, so a
+// single such row aborts the whole migration. The repository writes ” and
+// 'null' for "no metadata", so both are normalized the way the rest of the
+// package already does.
+func jsonColumn(postgres bool, column string) string {
+	empty, open := "'{}'", ""
 	if postgres {
-		return "((" + column + ")::jsonb #>> '{" + parent + "," + key + "}')"
+		empty, open = "'{}'::jsonb", "::jsonb"
 	}
-	return "json_extract(" + column + ", '$." + parent + "." + key + "')"
+	return "(CASE WHEN " + column + " IS NULL OR " + column + " = 'null' OR " + column +
+		" = '' THEN " + empty + " ELSE " + column + open + " END)"
 }
 
-// timestampExpr makes two timestamps comparable. The message column and the
-// JSON `occurred_at` use different text shapes ('2026-08-01 10:00:00+00:00' vs
-// RFC3339 '2026-08-01T10:00:00Z'), which SQLite would otherwise compare
-// lexically, so both sides are normalized to Julian days.
-func timestampExpr(postgres bool, expression string) string {
+// jsonText extracts a nested JSON text value from a TEXT-typed JSON column.
+func jsonText(postgres bool, column, parent, key string) string {
+	base := jsonColumn(postgres, column)
 	if postgres {
-		return "(" + expression + ")::timestamptz"
+		return "(" + base + " #>> '{" + parent + "," + key + "}')"
+	}
+	return "json_extract(" + base + ", '$." + parent + "." + key + "')"
+}
+
+// timestampColumn normalizes a timestamp column for comparison. SQLite stores
+// timestamps as text and would compare them lexically, so it needs Julian days;
+// on Postgres the column is already a timestamp.
+func timestampColumn(postgres bool, column string) string {
+	if postgres {
+		return "(" + column + ")::timestamptz"
+	}
+	return "julianday(" + column + ")"
+}
+
+// timestampFromText normalizes a timestamp extracted from JSON so it compares
+// against timestampColumn — the two carry different text shapes
+// ('2026-08-01 10:00:00+00:00' vs RFC3339 '2026-08-01T10:00:00Z'). NULLIF keeps
+// an empty stored timestamp from raising on the Postgres cast; it then compares
+// as NULL, so the row simply does not match.
+func timestampFromText(postgres bool, expression string) string {
+	if postgres {
+		return "(NULLIF(" + expression + ", '')::timestamptz)"
 	}
 	return "julianday(" + expression + ")"
 }
 
 func jsonRemoveKey(postgres bool, column, key string) string {
+	base := jsonColumn(postgres, column)
 	if postgres {
-		return "((" + column + ")::jsonb - '" + key + "')::text"
+		return "(" + base + " - '" + key + "')::text"
 	}
-	return "json_remove(" + column + ", '$." + key + "')"
+	return "json_remove(" + base + ", '$." + key + "')"
 }
 
 // ensureImproveKandevWorkflowTemplateUniqueness removes the broad index from

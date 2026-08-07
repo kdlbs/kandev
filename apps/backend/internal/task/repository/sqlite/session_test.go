@@ -6,7 +6,9 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -1528,6 +1530,20 @@ func TestClearRecoveredAgentErrorsBackfill(t *testing.T) {
 	seedStale(t, "task-user", "sess-user", "turn-user")
 	insertAgentMsg(t, repo, "msg-user", "sess-user", "turn-user",
 		"user", "are you stuck?", occurredAt.Add(time.Hour))
+
+	// These statements scan every session before filtering, so a row the
+	// repository wrote as "no metadata" must not abort them. migrate.Apply
+	// swallows SQL errors, so the proof is that the recovered session below is
+	// still cleared with these rows present — an aborted statement would leave
+	// it untouched.
+	for index, blank := range []string{"", "null"} {
+		id := fmt.Sprintf("sess-blank-%d", index)
+		seedForMsgTest(t, repo, "task-blank-"+strconv.Itoa(index), id, "turn-blank-"+strconv.Itoa(index))
+		if _, err := repo.db.Exec(repo.db.Rebind(
+			`UPDATE task_sessions SET metadata = ? WHERE id = ?`), blank, id); err != nil {
+			t.Fatalf("seed %q metadata: %v", blank, err)
+		}
+	}
 
 	// The cached summary keeps the icon up until it is cleared too.
 	if _, err := repo.db.Exec(repo.db.Rebind(`
