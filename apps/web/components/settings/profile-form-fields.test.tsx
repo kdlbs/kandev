@@ -79,4 +79,36 @@ describe("ProfileFormFields no-silent-model-fallback rows", () => {
     expect(trigger.className).toContain("text-destructive");
     expect(trigger.textContent).toContain("gpt-gone");
   });
+
+  it("hides the fallback selector until its attached switch is on", () => {
+    renderForm(formData({ auto_fallback: false }));
+    // The optional fallback row renders its label + switch, but the model
+    // selector only appears once the user opts in via the attached switch.
+    expect(screen.queryByTestId("profile-fallback-model-field")).not.toBeNull();
+    expect(screen.queryByRole("button", { name: "Agent fallback model settings" })).toBeNull();
+  });
+
+  it("shows the fallback selector when a fallback model is configured", () => {
+    renderForm(formData({ fallback_model: "mock-fast" }));
+    expect(screen.getByRole("button", { name: "Agent fallback model settings" })).not.toBeNull();
+  });
+
+  it("clears the fallback model when its attached switch is turned off", () => {
+    const onChange = vi.fn();
+    render(
+      <TooltipProvider>
+        <ProfileFormFields
+          profile={formData({ fallback_model: "mock-fast" })}
+          onChange={onChange}
+          modelConfig={modelConfig}
+          permissionSettings={{}}
+          passthroughConfig={null}
+          agentName="mock-agent"
+        />
+      </TooltipProvider>,
+    );
+    const fallbackToggle = screen.getByRole("switch", { name: "Agent fallback" });
+    fallbackToggle.click();
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ fallback_model: "" }));
+  });
 });

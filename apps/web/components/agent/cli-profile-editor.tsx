@@ -11,6 +11,7 @@ import { useAppStore } from "@/components/state-provider";
 import { useAvailableAgents } from "@/hooks/domains/settings/use-available-agents";
 import { ModelCombobox } from "@/components/settings/model-combobox";
 import { ModeCombobox } from "@/components/settings/mode-combobox";
+import { ModelFallbackFields } from "@/components/agent/cli-profile-fallback-fields";
 import { CLIFlagsField } from "@/components/settings/cli-flags-field";
 import {
   createAgentAction,
@@ -396,42 +397,15 @@ function ModelModeFields({
           </div>
         )}
       </div>
-      {!autoFallback && (
-        <div>
-          <Label className={fallbackModelGone ? "text-destructive" : undefined}>
-            {t("settings:agentFallback")}
-          </Label>
-          <ModelCombobox
-            value={fallbackModel}
-            onChange={onFallbackModelChange}
-            models={
-              fallbackModelGone
-                ? [
-                    ...availableModels,
-                    {
-                      id: fallbackModel,
-                      name: `${fallbackModel} (${t("settings:startModelUnavailable")})`,
-                    },
-                  ]
-                : availableModels
-            }
-            currentModelId={modelConfig.current_model_id}
-            placeholder={t("settings:agentFallbackPlaceholder")}
-          />
-          <p className="text-xs text-muted-foreground mt-1">{t("settings:agentFallbackHelper")}</p>
-        </div>
-      )}
-      <div className="flex items-center justify-between gap-3">
-        <div className="space-y-0.5">
-          <Label>{t("settings:autoFallback")}</Label>
-          <p className="text-xs text-muted-foreground">{t("settings:autoFallbackHelper")}</p>
-        </div>
-        <Switch
-          checked={autoFallback}
-          onCheckedChange={onAutoFallbackChange}
-          aria-label={t("settings:autoFallback")}
-        />
-      </div>
+      <ModelFallbackFields
+        availableModels={availableModels}
+        fallbackModel={fallbackModel}
+        fallbackModelGone={fallbackModelGone}
+        autoFallback={autoFallback}
+        currentModelId={modelConfig.current_model_id}
+        onFallbackModelChange={onFallbackModelChange}
+        onAutoFallbackChange={onAutoFallbackChange}
+      />
     </div>
   );
 }

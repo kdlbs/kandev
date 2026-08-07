@@ -333,24 +333,17 @@ function CapabilitiesRow({
   profile,
   models,
   modes,
-  commands,
-  currentModelId,
-  currentModeId,
   status,
-  onChange,
-  isCompact,
   isLoading,
   onRefresh,
   error,
   modelConfig,
   agentName,
-  baselineProfile,
+  ...props
 }: CapabilitiesRowProps) {
   const { t } = useTranslation();
-  const configOptions = modelConfigOptions(modelConfig);
-  const activeMode = findActiveMode(modes, profile.mode, currentModeId);
-  const labelCls = isCompact ? "text-xs text-muted-foreground" : undefined;
-  const gapCls = isCompact ? "space-y-1.5" : "space-y-2";
+  const labelCls = props.isCompact ? "text-xs text-muted-foreground" : undefined;
+  const gapCls = props.isCompact ? "space-y-1.5" : "space-y-2";
 
   if (isLoading && models.length === 0) {
     return (
@@ -377,6 +370,48 @@ function CapabilitiesRow({
     );
   }
 
+  return (
+    <CapabilitiesFields
+      {...props}
+      profile={profile}
+      models={models}
+      modes={modes}
+      status={status}
+      modelConfig={modelConfig}
+      isLoading={isLoading}
+      onRefresh={onRefresh}
+      error={error}
+      agentName={agentName}
+      labelCls={labelCls}
+      gapCls={gapCls}
+    />
+  );
+}
+
+// CapabilitiesFields renders the model/mode row, the no-silent-model-fallback
+// section, and the capability status for a probed agent. Split from
+// CapabilitiesRow (which owns the loading/auth early returns) to stay under
+// the function line budget.
+function CapabilitiesFields({
+  profile,
+  models,
+  modes,
+  commands,
+  currentModelId,
+  currentModeId,
+  status,
+  onChange,
+  isLoading,
+  onRefresh,
+  error,
+  modelConfig,
+  baselineProfile,
+  labelCls,
+  gapCls,
+}: CapabilitiesRowProps & { labelCls?: string; gapCls: string }) {
+  const { t } = useTranslation();
+  const configOptions = modelConfigOptions(modelConfig);
+  const activeMode = findActiveMode(modes, profile.mode, currentModeId);
   return (
     <div className={gapCls}>
       <div className="flex items-end gap-2">
@@ -425,6 +460,7 @@ function CapabilitiesRow({
         baselineProfile={baselineProfile}
         labelCls={labelCls}
         gapCls={gapCls}
+        alignSelectorWithStart={modes.length > 0}
         onChange={onChange}
       />
       {commands.length > 0 && <CommandsButton commands={commands} />}

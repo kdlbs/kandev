@@ -36,6 +36,17 @@ test.describe("No silent model fallback", () => {
       const fallbackField = testPage.getByTestId("profile-fallback-model-field");
       await expect(fallbackField).toBeVisible({ timeout: 10_000 });
 
+      // The fallback model is optional: without a value its selector stays
+      // hidden behind the attached switch, and opting in reveals it.
+      const fallbackSelector = testPage.getByRole("button", {
+        name: "Agent fallback model settings",
+      });
+      await expect(fallbackSelector).toBeHidden({ timeout: 10_000 });
+      await fallbackField.getByRole("switch", { name: "Agent fallback" }).click();
+      await expect(fallbackSelector).toBeVisible({ timeout: 10_000 });
+      await fallbackField.getByRole("switch", { name: "Agent fallback" }).click();
+      await expect(fallbackSelector).toBeHidden({ timeout: 10_000 });
+
       // Enabling "Fallback automatically to next model" hides the fallback row.
       const toggle = testPage.getByTestId("profile-auto-fallback-field").getByRole("switch");
       await toggle.click();
