@@ -94,11 +94,11 @@ describe("KanbanCardBody — task-card-tags slot", () => {
 
     render(<KanbanCardBody task={TASK} repositoryChips={[]} />);
 
-    const title = screen.getByTestId("task-card-title");
+    const titleRow = screen.getByTestId("task-card-title-row");
     const tags = screen.getByTestId(TAGS_TEST_ID);
     const indicator = screen.getByTestId(INDICATOR_TEST_ID);
-    expect(title.closest(".flex")?.contains(indicator)).toBe(true);
-    expect(title.closest(".flex")?.contains(tags)).toBe(false);
+    expect(titleRow.contains(indicator)).toBe(true);
+    expect(titleRow.contains(tags)).toBe(false);
   });
 
   it("renders both plugins registered for the slot, in registration order (AC4)", () => {
@@ -127,17 +127,18 @@ describe("KanbanCardBody — task-card-tags slot", () => {
     }
     // Suppress the expected React error-boundary console noise for this test.
     const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      pluginRegistry.forPlugin(NOTES_PLUGIN_ID).registerComponent(TAGS_SLOT, ThrowingTags);
+      pluginRegistry
+        .forPlugin(NOTES_PLUGIN_ID)
+        .registerComponent("task-card-indicators", OtherIndicator);
 
-    pluginRegistry.forPlugin(NOTES_PLUGIN_ID).registerComponent(TAGS_SLOT, ThrowingTags);
-    pluginRegistry
-      .forPlugin(NOTES_PLUGIN_ID)
-      .registerComponent("task-card-indicators", OtherIndicator);
+      render(<KanbanCardBody task={TASK} repositoryChips={[]} />);
 
-    render(<KanbanCardBody task={TASK} repositoryChips={[]} />);
-
-    expect(screen.getByTestId("task-card-title").textContent).toBe(TASK.title);
-    expect(screen.getByTestId(INDICATOR_TEST_ID)).toBeTruthy();
-
-    consoleError.mockRestore();
+      expect(screen.getByTestId("task-card-title").textContent).toBe(TASK.title);
+      expect(screen.getByTestId(INDICATOR_TEST_ID)).toBeTruthy();
+    } finally {
+      consoleError.mockRestore();
+    }
   });
 });

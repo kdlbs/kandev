@@ -297,7 +297,9 @@ interface PluginRegistry {
   // "task-card-tags" renders in its own row on every kanban card, below the
   // badges row — for contributions too wide for the cramped title-row
   // "task-card-indicators" spot (e.g. a row of tag chips) — and forwards the
-  // same `{ taskId, workspaceId, workflowStepId }` shape as `slotProps`.
+  // same `{ taskId: string, workspaceId: string | null, workflowStepId: string | null }`
+  // shape as `slotProps` (`workspaceId` is null with no active workspace, and
+  // `workflowStepId` is null when the task has no workflow step assigned).
   // "chat-input-actions" renders icon buttons in the chat composer toolbar
   // (beside the model picker, mic, and send) and forwards
   // `{ taskId, taskTitle, activeSessionId, sessionIds }` as `slotProps`.
