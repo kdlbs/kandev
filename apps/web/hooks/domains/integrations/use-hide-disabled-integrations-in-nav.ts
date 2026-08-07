@@ -45,9 +45,8 @@ export function useHideDisabledIntegrationsInNav() {
   const setHideDisabled = useCallback((next: boolean) => {
     try {
       window.localStorage.setItem(STORAGE_KEY, String(next));
-    } catch {
-      // Quota / private mode — the in-memory dispatch below still notifies
-      // this tab's subscribers even though the value won't persist.
+    } catch (error) {
+      throw new Error(`Failed to persist ${STORAGE_KEY}`, { cause: error });
     }
     window.dispatchEvent(new Event(SYNC_EVENT));
   }, []);

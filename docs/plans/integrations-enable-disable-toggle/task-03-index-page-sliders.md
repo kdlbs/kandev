@@ -38,13 +38,13 @@ spec: "../../specs/integrations/enable-disable-toggle.md"
 ## Results
 
 - Restructured each card: `Card` is the outer element (no longer wrapped in
-  a navigating `<a>`); the icon+label link stays on its own top row
-  (unchanged markup/classes from the pre-existing card, to keep the icon's
-  measured position identical), the per-integration slider sits on its own
-  right-aligned row directly below (`<div className="flex justify-end">`),
-  and the description is a separate link below that. This avoids nesting an
-  interactive `<Switch>` inside an `<a>` (invalid DOM / fragile click
-  propagation) without any absolute-positioning trick.
+  a navigating `<a>`); the icon+label link and the per-integration
+  `EnabledControl` share one top row (`flex items-center justify-between
+  gap-2`), with `EnabledControl` rendered beside the title link rather than
+  on a separate row below it, and the description is a separate link below
+  that. This avoids nesting an interactive `<Switch>` inside an `<a>`
+  (invalid DOM / fragile click propagation) without any absolute-positioning
+  trick.
 - Selecting the right slider per row required one statically-imported
   `useXEnabled` hook per component (rules of hooks forbid picking a hook
   dynamically by slug): added `ENABLED_CONTROL_BY_SLUG: Record<IntegrationSlug, ComponentType>`

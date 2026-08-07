@@ -1,30 +1,9 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { useGitLabEnabled } from "./use-gitlab-enabled";
+import { makeLocalStorageMock } from "../integrations/local-storage-mock.test-helpers";
 
 const STORAGE_KEY = "kandev:gitlab:enabled:v1";
-
-// Provide a simple in-memory localStorage mock so the tests are not sensitive
-// to how the test runner exposes window.localStorage in happy-dom.
-function makeLocalStorageMock() {
-  const store = new Map<string, string>();
-  return {
-    getItem: (key: string) => store.get(key) ?? null,
-    setItem: (key: string, value: string) => {
-      store.set(key, value);
-    },
-    removeItem: (key: string) => {
-      store.delete(key);
-    },
-    clear: () => {
-      store.clear();
-    },
-    get length() {
-      return store.size;
-    },
-    key: (index: number) => Array.from(store.keys())[index] ?? null,
-  };
-}
 
 const localStorageMock = makeLocalStorageMock();
 vi.stubGlobal("localStorage", localStorageMock);
@@ -75,5 +54,28 @@ describe("useGitLabEnabled", () => {
     });
 
     await waitFor(() => expect(result.current.enabled).toBe(false));
+  });
+
+  it("propagates updates delivered via the native storage event (cross-tab)", async () => {
+    const { result } = renderHook(() => useGitLabEnabled());
+    await waitFor(() => expect(result.current.loaded).toBe(true));
+
+    act(() => {
+      window.localStorage.setItem(STORAGE_KEY, "false");
+      window.dispatchEvent(new StorageEvent("storage", { key: STORAGE_KEY, newValue: "false" }));
+    });
+
+    await waitFor(() => expect(result.current.enabled).toBe(false));
+  });
+
+  it("migrates a legacy per-workspace key onto the canonical storage key", async () => {
+    window.localStorage.setItem("kandev:gitlab:enabled:ws-123", "false");
+
+    const { result } = renderHook(() => useGitLabEnabled());
+
+    await waitFor(() => expect(result.current.loaded).toBe(true));
+    expect(result.current.enabled).toBe(false);
+    expect(window.localStorage.getItem(STORAGE_KEY)).toBe("false");
+    expect(window.localStorage.getItem("kandev:gitlab:enabled:ws-123")).toBeNull();
   });
 });

@@ -371,7 +371,7 @@ section. Summary:
 
 ## Implementation Waves And Parallel Candidates
 
-```
+```text
 Wave 1:
 - [x] [task-01-enabled-hooks](task-01-enabled-hooks.md)
 
