@@ -33,6 +33,7 @@ import { SettingsCard } from "@/components/settings/settings-card";
 import { useSettingsSaveContributor } from "@/components/settings/settings-save-provider";
 import { SettingsTarget } from "@/components/settings/settings-target";
 import { workspaceDiscoveryTarget } from "@/lib/settings-discovery/dynamic-targets";
+import { WorkspaceSectionHeader } from "@/components/settings/workspaces/workspace-section-header";
 
 type WorkspaceEditClientProps = {
   workspaceId: string;
@@ -532,12 +533,10 @@ function WorkspaceEditForm({ workspace }: WorkspaceEditFormProps) {
 
   return (
     <div className="space-y-8">
-      <div>
-        <h2 className="text-2xl font-bold">{currentWorkspace.name}</h2>
-        <p className="text-sm text-muted-foreground mt-1">
-          {t("workspaces:manageWorkspaceDetails")}
-        </p>
-      </div>
+      <WorkspaceSectionHeader
+        tab="overview"
+        description={t("workspaces:manageWorkspaceDetails")}
+      />
       <Separator />
       <WorkspaceSettingsCard
         workspaceId={currentWorkspace.id}

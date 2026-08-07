@@ -26,6 +26,7 @@ import {
 } from "@/lib/api/domains/secrets-api";
 import { useRequest } from "@/lib/http/use-request";
 import type { SecretListItem, SecretScope, UpdateSecretRequest } from "@/lib/types/http-secrets";
+import { WorkspaceSectionHeader } from "@/components/settings/workspaces/workspace-section-header";
 
 export type SecretFormState = {
   name: string;
@@ -604,6 +605,13 @@ function SecretsSettingsContent({
     <SettingsPageTemplate
       title={secretScopeTitle(t, scope)}
       description={secretScopeDescription(t, scope)}
+      // Workspace-scoped, this is one of six tabs and heads itself like the
+      // other five. Install-wide it is a settings page and keeps the page title.
+      header={
+        scope === "workspace" ? (
+          <WorkspaceSectionHeader tab="secrets" description={secretScopeDescription(t, scope)} />
+        ) : undefined
+      }
       isDirty={isDirty}
       saveStatus="idle"
       saveId={`secrets-${scope}-item-draft`}

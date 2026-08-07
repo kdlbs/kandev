@@ -44,6 +44,7 @@ import {
 } from "@/app/settings/workspace/workspace-repositories-dirty";
 import { defaultWorktreeBranchTemplate } from "@/lib/worktree-branch-template";
 import { isValidManualRepository } from "@/app/settings/workspace/workspace-repositories-validation";
+import { WorkspaceSectionHeader } from "@/components/settings/workspaces/workspace-section-header";
 
 type RepositoryItem = RepositoryWithScripts & { __autoOpen?: boolean };
 type WorkspaceRepositoriesClientProps = {
@@ -559,19 +560,10 @@ export function WorkspaceRepositoriesClient({
 
   return (
     <div className="space-y-8">
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <h2 className="text-2xl font-bold">{workspace.name}</h2>
-          <p className="text-sm text-muted-foreground mt-1">
-            {t("workspaces:manageRepositoriesConnected")}
-          </p>
-        </div>
-        <Button asChild variant="outline" size="sm">
-          <Link href={`/settings/workspaces/${workspace.id}`}>
-            {t("workspaces:workspaceSettingsLink")}
-          </Link>
-        </Button>
-      </div>
+      <WorkspaceSectionHeader
+        tab="repositories"
+        description={t("workspaces:manageRepositoriesConnected")}
+      />
       <Separator />
       <SettingsSection
         icon={<IconGitBranch className="h-5 w-5" />}

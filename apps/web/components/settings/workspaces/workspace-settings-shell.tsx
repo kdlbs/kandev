@@ -1,8 +1,16 @@
 "use client";
 
-import type { ReactNode } from "react";
+import type { ComponentType, ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import { IconFolder } from "@tabler/icons-react";
+import {
+  IconArrowsShuffle,
+  IconBolt,
+  IconFolder,
+  IconGitBranch,
+  IconKey,
+  IconLayoutGrid,
+  IconPlugConnected,
+} from "@tabler/icons-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import Link from "@/components/routing/app-link";
 import { useAppStore } from "@/components/state-provider";
@@ -32,14 +40,35 @@ export function workspaceSettingsHref(workspaceId: string, tab: WorkspaceSetting
   return tab === "overview" ? base : `${base}/${tab}`;
 }
 
-const TAB_ORDER: Array<{ tab: WorkspaceSettingsTab; labelKey: string }> = [
-  { tab: "overview", labelKey: "workspaces:overview" },
-  { tab: "repositories", labelKey: "sidebar:repositories" },
-  { tab: "workflows", labelKey: "workflows:workflows" },
-  { tab: "integrations", labelKey: "common:integrations" },
-  { tab: "automations", labelKey: "common:automations" },
-  { tab: "secrets", labelKey: "settings:secrets" },
+type WorkspaceTabSpec = {
+  tab: WorkspaceSettingsTab;
+  labelKey: string;
+  icon: ComponentType<{ className?: string }>;
+};
+
+/**
+ * One entry per tab, carrying the name and mark of that section.
+ *
+ * The tab strip is not the only surface that names a section: each tab's page
+ * heads itself with the same name and mark (`WorkspaceSectionHeader`). Reading
+ * both from one table is what stops the strip and the page it opens from
+ * disagreeing about what the section is called.
+ */
+const TAB_ORDER: WorkspaceTabSpec[] = [
+  { tab: "overview", labelKey: "workspaces:overview", icon: IconLayoutGrid },
+  { tab: "repositories", labelKey: "sidebar:repositories", icon: IconGitBranch },
+  { tab: "workflows", labelKey: "workflows:workflows", icon: IconArrowsShuffle },
+  { tab: "integrations", labelKey: "common:integrations", icon: IconPlugConnected },
+  { tab: "automations", labelKey: "common:automations", icon: IconBolt },
+  { tab: "secrets", labelKey: "settings:secrets", icon: IconKey },
 ];
+
+/** The name and mark for a tab, for the page that tab opens. */
+export function workspaceSettingsTabSpec(tab: WorkspaceSettingsTab): WorkspaceTabSpec {
+  // Every member of the union has a row, so the fallback is unreachable; it
+  // exists so a future tab cannot crash a page before its row is added.
+  return TAB_ORDER.find((entry) => entry.tab === tab) ?? TAB_ORDER[0];
+}
 
 /**
  * The tabbed shell every workspace settings page renders through: the
