@@ -193,6 +193,30 @@ const SCREENS: Array<{ name: string; url: string; allow?: string[] }> = [
   },
   { name: "settings — task actions", url: "/settings/general/task-actions" },
   { name: "settings — plugins", url: "/settings/plugins" },
+  // Office — the last live directory to migrate (#2357 was the batch before it).
+  // All twelve routes were run under the pseudo-locale before being listed here;
+  // eleven came back with nothing, and the one `allow` below is the only string
+  // any of them renders that must stay ASCII.
+  { name: "office — dashboard", url: "/office" },
+  { name: "office — inbox", url: "/office/inbox" },
+  { name: "office — tasks", url: "/office/tasks" },
+  { name: "office — agents", url: "/office/agents" },
+  { name: "office — projects", url: "/office/projects" },
+  { name: "office — routines", url: "/office/routines" },
+  { name: "office — workspace costs", url: "/office/workspace/costs" },
+  { name: "office — workspace activity", url: "/office/workspace/activity" },
+  { name: "office — workspace routing", url: "/office/workspace/routing" },
+  { name: "office — workspace skills", url: "/office/workspace/skills" },
+  { name: "office — workspace org", url: "/office/workspace/org" },
+  {
+    name: "office — workspace settings",
+    url: "/office/workspace/settings",
+    // The clone field's placeholder is an example git URL — the SHAPE the user
+    // is meant to imitate, on the same footing as the email and CSS-function
+    // placeholders the eslint guard already excludes via its `(https?|ssh|git)://`
+    // pattern. Accenting it would show a URL that cannot be typed.
+    allow: ["https://github.com/org/config.git"],
+  },
   // NOT YET: "settings — executors", "settings — account security",
   // "settings — account tokens". All three routes' own copy is fully migrated
   // and was verified by walking them under pseudo — including every dialog and
