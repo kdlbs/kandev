@@ -3,6 +3,7 @@
 import { useTranslation } from "react-i18next";
 import { usePathname } from "@/lib/routing/client-router";
 import { IconSettings } from "@tabler/icons-react";
+import { CollapseAllButton } from "./sections/settings/collapse-all-button";
 import { SettingsTree } from "./sections/settings/settings-tree";
 
 /**
@@ -29,6 +30,7 @@ export function AppSidebarSettingsMode() {
         <span className="text-[11px] font-semibold uppercase tracking-wider">
           {t("common:settings")}
         </span>
+        <CollapseAllButton />
       </div>
       <div className="flex-1 min-h-0 overflow-y-auto flex flex-col gap-0.5">
         <SettingsTree pathname={pathname} />
