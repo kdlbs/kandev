@@ -1,7 +1,7 @@
 ---
 spec: docs/specs/integrations/github-authentication.md
 created: 2026-08-07
-status: building
+status: done
 ---
 
 # Implementation Plan: GitHub CLI account stderr fallback
