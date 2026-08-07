@@ -238,6 +238,16 @@ func buildTaskDTOsWithSessionInfo(
 			log.Warn("failed to repair missing task status summaries", zap.Error(err))
 		}
 	}
+	// Stamp the authoritative per-task queued prompt count onto every summary.
+	// The projector keeps the summary field fresh between list loads; this
+	// fresh batch read is the initial-load backstop (e.g. after a restart the
+	// projector may not have observed every queue mutation yet). Never
+	// fabricate a summary here — a synthetic summary would make the frontend
+	// treat summary fields as authoritative and hide the coarse fallbacks.
+	queuedByTask, queuedErr := svc.CountPendingQueuedByTaskIDs(ctx, taskIDs)
+	if queuedErr != nil {
+		log.Warn("failed to load queued prompt counts for task list, omitting badges", zap.Error(queuedErr))
+	}
 	result := make([]dto.TaskDTO, 0, len(tasks))
 	for _, task := range tasks {
 		sessions := sessionsByTask[task.ID]
@@ -270,6 +280,20 @@ func buildTaskDTOsWithSessionInfo(
 		taskDTO.TaskPendingAction = taskPendingActionPtr(sessions, pendingActionsBySession)
 		dto.EnrichTaskForegroundActivity(&taskDTO, sessions, activityProvider)
 		taskDTO.StatusSummary = statusSummaries[task.ID]
+		if taskDTO.StatusSummary != nil {
+			switch {
+			case queuedErr != nil:
+				// Counter failed: honor the documented no-badge fallback in the
+				// response without persisting the cleared value.
+				taskDTO.StatusSummary.QueuedPromptCount = 0
+			case queuedByTask != nil:
+				// Fresh per-task count from the queue store; the projector keeps
+				// this field live between list loads, this batch read is the
+				// authoritative initial-load backstop. See the comment above the
+				// batch load.
+				taskDTO.StatusSummary.QueuedPromptCount = queuedByTask[task.ID]
+			}
+		}
 		result = append(result, taskDTO)
 	}
 	return result, nil

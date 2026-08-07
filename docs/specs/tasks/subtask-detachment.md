@@ -79,7 +79,7 @@ The cleared parent relationship and normalized workspace mode survive backend re
 
 ## Out of scope
 
-- Reparenting a task to a different parent from the sidebar or kanban card menus.
+- Reparenting a task to a different parent from the sidebar or kanban card menus (now covered by [subtask-reparenting-drag-drop](subtask-reparenting-drag-drop.md) for the sidebar; kanban-card reparenting remains out of scope).
 - Copying or provisioning a separate workspace during detachment.
 - Removing blocker relationships or changing descendant relationships.
 - Stopping or restarting active sessions.

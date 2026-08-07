@@ -20,6 +20,7 @@ import { Input } from "@kandev/ui/input";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { cn } from "@/lib/utils";
 import type { Skill, SkillSourceType } from "@/lib/state/slices/office/types";
+import { useTranslation } from "react-i18next";
 
 interface SkillListProps {
   skills: Skill[];
@@ -43,6 +44,7 @@ function sourceIcon(sourceType: SkillSourceType) {
 }
 
 export function SkillList(props: SkillListProps) {
+  const { t } = useTranslation();
   const { skills, selectedId, onSelect, onAdd, onRefresh, onImport } = props;
   const [search, setSearch] = useState("");
   const [importSource, setImportSource] = useState("");
@@ -63,8 +65,8 @@ export function SkillList(props: SkillListProps) {
       await onImport(importSource.trim());
       setImportSource("");
     } catch (err) {
-      const msg = err instanceof Error ? err.message : "Unknown error";
-      toast.error(`Failed to import skill: ${msg}`);
+      const msg = err instanceof Error ? err.message : t("office:unknownError");
+      toast.error(t("office:failedToImportSkill", { msg }));
     } finally {
       setImporting(false);
     }
@@ -81,7 +83,7 @@ export function SkillList(props: SkillListProps) {
       />
       <div className="px-4 pb-2">
         <Input
-          placeholder="Filter skills..."
+          placeholder={t("office:filterSkills")}
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           className="h-8 text-xs"
@@ -95,7 +97,7 @@ export function SkillList(props: SkillListProps) {
           rel="noopener noreferrer"
           className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground cursor-pointer"
         >
-          Browse skills.sh
+          {t("office:browseSkillsSh")}
           <IconExternalLink className="h-3.5 w-3.5" />
         </a>
       </div>
@@ -112,12 +114,13 @@ function SkillListHeader({
   onRefresh: () => void;
   onAdd: () => void;
 }) {
+  const { t } = useTranslation();
   return (
     <div className="flex items-center justify-between px-4 pt-4 pb-2">
       <div className="flex items-center gap-2">
-        <h3 className="text-sm font-semibold">Skills</h3>
+        <h3 className="text-sm font-semibold">{t("office:skills")}</h3>
         <Badge variant="secondary" className="text-xs">
-          {count} available
+          {t("office:countAvailable", { count })}
         </Badge>
       </div>
       <div className="flex items-center gap-1">
@@ -132,7 +135,7 @@ function SkillListHeader({
               <IconRefresh className="h-4 w-4" />
             </Button>
           </TooltipTrigger>
-          <TooltipContent>Refresh skills</TooltipContent>
+          <TooltipContent>{t("office:refreshSkills")}</TooltipContent>
         </Tooltip>
         <Tooltip>
           <TooltipTrigger asChild>
@@ -145,7 +148,7 @@ function SkillListHeader({
               <IconPlus className="h-4 w-4" />
             </Button>
           </TooltipTrigger>
-          <TooltipContent>Create new skill</TooltipContent>
+          <TooltipContent>{t("office:createNewSkill")}</TooltipContent>
         </Tooltip>
       </div>
     </div>
@@ -163,11 +166,12 @@ function SkillImportInput({
   onImport: () => void;
   importing: boolean;
 }) {
+  const { t } = useTranslation();
   return (
     <div className="px-4 pb-2">
       <div className="flex gap-1">
         <Input
-          placeholder="Path, GitHub URL, or skills.sh"
+          placeholder={t("office:pathGithubUrlOrSkillsSh")}
           value={value}
           onChange={(e) => onChange(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && onImport()}
@@ -180,7 +184,7 @@ function SkillImportInput({
           disabled={!value.trim() || importing}
           className="h-8 shrink-0 cursor-pointer"
         >
-          {importing ? <IconLoader2 className="h-3.5 w-3.5 animate-spin" /> : "Add"}
+          {importing ? <IconLoader2 className="h-3.5 w-3.5 animate-spin" /> : t("office:add")}
         </Button>
       </div>
     </div>
@@ -198,6 +202,7 @@ function SkillItems({
   onSelect: (id: string) => void;
   search: string;
 }) {
+  const { t } = useTranslation();
   // System skills (`is_system = true`) are kandev-owned and live at
   // the top, read-only. Workspace skills are user-imported and editable.
   // Empty groups don't render headings to keep the rail tight on fresh
@@ -210,12 +215,12 @@ function SkillItems({
     <div className="flex-1 overflow-y-auto px-2 space-y-2">
       {empty && (
         <p className="text-sm text-muted-foreground px-3 py-2">
-          {search ? "No matching skills" : "No skills yet. Import from GitHub or create your own."}
+          {search ? t("office:noMatchingSkills") : t("office:noSkillsYetImportFromGithub")}
         </p>
       )}
       {systemItems.length > 0 && (
         <SkillItemsGroup
-          heading="System"
+          heading={t("common:system")}
           items={systemItems}
           selectedId={selectedId}
           onSelect={onSelect}
@@ -230,7 +235,7 @@ function SkillItems({
       )}
       {userItems.length > 0 && (
         <SkillItemsGroup
-          heading={systemItems.length > 0 ? "Workspace" : undefined}
+          heading={systemItems.length > 0 ? t("common:workspace") : undefined}
           items={userItems}
           selectedId={selectedId}
           onSelect={onSelect}
@@ -257,6 +262,7 @@ function SkillItemsGroup({
   defaultCollapsed?: boolean;
   forceExpanded?: boolean;
 }) {
+  const { t } = useTranslation();
   const [collapsed, setCollapsed] = useState(defaultCollapsed);
   // Always show items when the selected skill lives inside this group
   // — collapsing it would hide the active selection from the user.
@@ -300,7 +306,7 @@ function SkillItemsGroup({
             <span className="truncate flex-1">{s.name}</span>
             {s.isSystem ? (
               <Badge variant="outline" className="text-[10px] text-muted-foreground shrink-0">
-                System
+                {t("common:system")}
               </Badge>
             ) : (
               sourceIcon(s.sourceType)

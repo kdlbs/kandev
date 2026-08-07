@@ -9,6 +9,11 @@ export default defineConfig({
   server: {
     port: readPort(process.env.PORT),
     strictPort: Boolean(process.env.PORT),
+    // Remote dev hosts (cloud VMs, LAN hostnames) are otherwise blocked by
+    // Vite's DNS-rebinding host check. Opt in per environment with an
+    // explicit comma-separated host list, e.g.
+    // KANDEV_VITE_ALLOWED_HOSTS="a.example.com,b.example.com".
+    allowedHosts: readAllowedHosts(process.env.KANDEV_VITE_ALLOWED_HOSTS),
   },
   preview: {
     port: readPort(process.env.PORT),
@@ -56,4 +61,19 @@ function readPort(value: string | undefined): number | undefined {
   if (!value) return undefined;
   const port = Number(value);
   return Number.isInteger(port) && port > 0 ? port : undefined;
+}
+
+/**
+ * Reads the comma-separated KANDEV_VITE_ALLOWED_HOSTS override. Returns
+ * undefined (Vite's default host policy) when unset, or the explicit host
+ * list. Wildcards are deliberately unsupported: allowing every host would
+ * expose the dev server to DNS-rebinding attacks, so only named hosts can
+ * be opted in.
+ */
+function readAllowedHosts(value: string | undefined): string[] | undefined {
+  if (!value) return undefined;
+  return value
+    .split(",")
+    .map((host) => host.trim())
+    .filter(Boolean);
 }

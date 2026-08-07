@@ -151,6 +151,9 @@ type WorkflowStepGetter interface {
 	GetNextStepByPosition(ctx context.Context, workflowID string, currentPosition int) (*wfmodels.WorkflowStep, error)
 	GetPreviousStepByPosition(ctx context.Context, workflowID string, currentPosition int) (*wfmodels.WorkflowStep, error)
 	GetWorkflowAgentProfileID(ctx context.Context, workflowID string) (string, error)
+	// GetWorkflowPrompt returns the optional workflow-level agent instructions
+	// prepended at step entry. Empty string means the workflow has no prompt.
+	GetWorkflowPrompt(ctx context.Context, workflowID string) (string, error)
 }
 
 // PromptReferenceExpander resolves "@name" saved-prompt references embedded in
@@ -955,6 +958,24 @@ func (s *Service) authorizeSession(ctx context.Context, sessionID string) error 
 		return nil
 	}
 	return s.sessionAccessCheck(ctx, sessionID)
+}
+
+// SessionTaskID returns the task that owns a session, or "" when the session
+// is unknown. Used to enrich message.queue.status_changed events with the
+// task_id so task-scoped consumers (e.g. the status summary projector) can
+// refresh per-task queued-prompt counts.
+func (s *Service) SessionTaskID(ctx context.Context, sessionID string) (string, error) {
+	if sessionID == "" || s.repo == nil {
+		return "", nil
+	}
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		return "", err
+	}
+	if session == nil {
+		return "", nil
+	}
+	return session.TaskID, nil
 }
 
 // authorizeTask applies the configured per-user task check. No-op when unwired.
