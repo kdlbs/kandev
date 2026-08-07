@@ -31,6 +31,8 @@ import {
 import type { ContextItem, ImageContextItem, FileAttachmentContextItem } from "@/lib/types/context";
 import { deleteAttachment, uploadAttachment } from "@/lib/api/domains/attachment-api";
 import { ApiError } from "@/lib/api/client";
+import { useTranslation } from "react-i18next";
+import { t } from "@/lib/i18n";
 
 export function EnvironmentBadges({
   executorLabel,
@@ -41,6 +43,7 @@ export function EnvironmentBadges({
   worktreeBranch: string | null;
   description?: string;
 }) {
+  const { t } = useTranslation();
   return (
     <div className="flex min-w-0 flex-wrap items-center gap-2 text-xs text-muted-foreground">
       {executorLabel && (
@@ -55,7 +58,7 @@ export function EnvironmentBadges({
         </Badge>
       )}
       <span className="min-w-0 break-words">
-        {description ?? "Same environment as current session"}
+        {description ?? t("task:sameEnvironmentAsCurrentSession")}
       </span>
     </div>
   );
@@ -115,40 +118,41 @@ export function ContextSelect({
   sessionOptions: SessionOption[];
   isSummarizing: boolean;
 }) {
+  const { t } = useTranslation();
   const displayLabel = useMemo(() => {
-    if (value === "blank") return "Blank";
-    if (value === "copy_prompt") return "Copy initial prompt";
+    if (value === "blank") return t("task:blank");
+    if (value === "copy_prompt") return t("task:copyInitialPrompt");
     if (value.startsWith("summarize:")) {
       const sid = value.slice("summarize:".length);
       const opt = sessionOptions.find((o) => o.id === sid);
-      return opt ? `Summarize ${opt.label}` : "Summarize";
+      return opt ? t("task:summarizeSessionNamed", { label: opt.label }) : t("task:summarize");
     }
-    return "Blank";
+    return t("task:blank");
   }, [value, sessionOptions]);
 
   return (
     <div className="space-y-1.5">
-      <label className="text-xs font-medium text-muted-foreground">Context</label>
+      <label className="text-xs font-medium text-muted-foreground">{t("task:context")}</label>
       <div className="flex min-w-0 items-center gap-2">
         <Select value={value} onValueChange={onValueChange} disabled={isSummarizing}>
           <SelectTrigger className="w-full min-w-0 text-xs">
-            <SelectValue>{isSummarizing ? "Summarizing..." : displayLabel}</SelectValue>
+            <SelectValue>{isSummarizing ? t("task:summarizing") : displayLabel}</SelectValue>
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="blank" className="text-xs cursor-pointer">
-              Blank
+              {t("task:blank")}
             </SelectItem>
             <SelectItem
               value="copy_prompt"
               disabled={!hasInitialPrompt}
               className="text-xs cursor-pointer"
             >
-              Copy initial prompt
+              {t("task:copyInitialPrompt")}
             </SelectItem>
             {sessionOptions.length > 0 && (
               <SelectGroup>
                 <SelectLabel className="text-[11px] text-muted-foreground/70">
-                  Summarize session
+                  {t("task:summarizeSession")}
                 </SelectLabel>
                 {sessionOptions.map((opt) => (
                   <SelectItem
@@ -220,7 +224,7 @@ export function useDialogAttachments(disabled: boolean, workspaceId?: string | n
       } catch (error) {
         updateAttachment(attachment.id, {
           uploadStatus: "failed",
-          uploadError: error instanceof ApiError ? error.message : "Upload failed",
+          uploadError: error instanceof ApiError ? error.message : t("task:uploadFailed"),
         });
       }
     },
@@ -351,13 +355,14 @@ export function useDialogAttachments(disabled: boolean, workspaceId?: string | n
 }
 
 export function AttachButton({ onClick, disabled }: { onClick: () => void; disabled?: boolean }) {
+  const { t } = useTranslation();
   return (
     <div className="flex items-center px-1 pb-1">
       <Tooltip>
         <TooltipTrigger asChild>
           <button
             type="button"
-            aria-label="Attach files"
+            aria-label={t("task:attachFiles")}
             className={`h-7 w-7 inline-flex items-center justify-center rounded-md text-muted-foreground hover:bg-muted/40 hover:text-foreground ${disabled ? "cursor-not-allowed opacity-50" : "cursor-pointer"}`}
             onClick={onClick}
             disabled={disabled}
@@ -365,7 +370,7 @@ export function AttachButton({ onClick, disabled }: { onClick: () => void; disab
             <IconPaperclip className="h-4 w-4" />
           </button>
         </TooltipTrigger>
-        <TooltipContent>Attach files</TooltipContent>
+        <TooltipContent>{t("task:attachFiles")}</TooltipContent>
       </Tooltip>
     </div>
   );
@@ -381,7 +386,7 @@ export function toContextItems(
       ? ({
           kind: "image" as const,
           id: `image:${att.id}`,
-          label: `Image (${formatBytes(att.size)})`,
+          label: t("task:imageWithSize", { bytes: formatBytes(att.size) }),
           attachment: att,
           onRemove: () => onRemove(att.id),
           onRetry: onRetry ? () => onRetry(att.id) : undefined,

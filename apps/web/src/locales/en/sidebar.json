@@ -27,6 +27,7 @@
   "connectionUnstable": "Connection unstable",
   "connectionUnstableDescription": "Connection unstable. Reconnecting to Kandev.",
   "costs": "Costs",
+  "disabledBadge": "Disabled",
   "enabledBadge": "Enabled",
   "expandGroup": "Expand {{label}}",
   "expandSidebar": "Expand sidebar",

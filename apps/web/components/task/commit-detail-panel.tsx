@@ -111,6 +111,7 @@ export const CommitDiffView = memo(function CommitDiffView({
   onOpenFile,
   wordWrap = DEFAULT_DIFF_WORD_WRAP,
 }: CommitDiffViewProps) {
+  const { t } = useTranslation();
   const localCommit = useActiveCommit(target);
   const { files, commit: remoteCommit, loading, error, refetch } = useCommitDetail(target);
   const commit = headerCommit(target, localCommit, remoteCommit);
@@ -120,7 +121,7 @@ export const CommitDiffView = memo(function CommitDiffView({
     return (
       <div className="flex items-center justify-center h-full gap-2 text-muted-foreground text-sm">
         <IconLoader2 className="h-4 w-4 animate-spin" />
-        Loading commit...
+        {t("task:loadingCommit")}
       </div>
     );
   }
@@ -146,6 +147,7 @@ const CommitDetailPanel = memo(function CommitDetailPanel({
   panelId,
   params,
 }: CommitDetailPanelProps) {
+  const { t } = useTranslation();
   const target = targetFromParams(params);
   const { openFile } = usePanelActions();
   const localCommit = useActiveCommit(target);
@@ -171,7 +173,7 @@ const CommitDetailPanel = memo(function CommitDetailPanel({
         <PanelBody>
           <div className="flex items-center justify-center h-full gap-2 text-muted-foreground text-sm">
             <IconLoader2 className="h-4 w-4 animate-spin" />
-            Loading commit...
+            {t("task:loadingCommit")}
           </div>
         </PanelBody>
       </PanelRoot>
@@ -284,9 +286,12 @@ function CommitFileList({
   remote: boolean;
   wordWrap?: boolean;
 }) {
+  const { t } = useTranslation();
   if (fileEntries.length === 0 && !loading) {
     return (
-      <div className="text-sm text-muted-foreground text-center py-8">No files in this commit</div>
+      <div className="text-sm text-muted-foreground text-center py-8">
+        {t("task:noFilesInThisCommit")}
+      </div>
     );
   }
 
@@ -307,7 +312,7 @@ function CommitFileList({
             />
           ) : (
             <div className="px-3 py-2 text-xs text-muted-foreground">
-              {path} -- binary or empty diff
+              {t("task:binaryOrEmptyDiff", { path })}
             </div>
           )}
         </div>

@@ -7,6 +7,7 @@ import { useEnvironmentId } from "@/hooks/use-environment-session-id";
 import { PassthroughTerminal } from "./passthrough-terminal";
 import { Button } from "@kandev/ui/button";
 import { cn } from "@/lib/utils";
+import { useTranslation } from "react-i18next";
 
 const MIN_HEIGHT = 150;
 const MAX_HEIGHT_RATIO = 0.6;
@@ -15,6 +16,7 @@ const STORAGE_KEY_HEIGHT = "bottom-terminal-height";
 const STORAGE_KEY_OPEN = "bottom-terminal-open";
 
 export function BottomTerminalPanel() {
+  const { t } = useTranslation();
   const environmentId = useEnvironmentId();
   const visible = useAppStore((s) => s.bottomTerminal.isOpen);
   const pendingCommand = useAppStore((s) => s.bottomTerminal.pendingCommand);
@@ -87,7 +89,7 @@ export function BottomTerminalPanel() {
       />
       {/* Header */}
       <div className="flex items-center justify-between px-3 py-1 border-b border-border bg-muted/30 shrink-0">
-        <span className="text-xs font-medium text-muted-foreground">Terminal</span>
+        <span className="text-xs font-medium text-muted-foreground">{t("task:terminal")}</span>
         <Button variant="ghost" size="icon" className="h-5 w-5 cursor-pointer" onClick={toggle}>
           <IconMinus className="h-3 w-3" />
         </Button>

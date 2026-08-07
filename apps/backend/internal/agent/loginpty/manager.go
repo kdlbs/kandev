@@ -50,6 +50,7 @@ type Manager struct {
 	sessions map[string]*Session // key: internal uniqueness key
 	byID     map[string]*Session // key: sessionID
 	log      *logger.Logger
+	timeouts sessionTimeouts
 
 	// onExit is invoked from a goroutine when a session terminates (with the
 	// agent ID and exit code). Used by callers to invalidate discovery cache
@@ -69,6 +70,7 @@ func NewManager(log *logger.Logger, onExit func(agentID string, exitCode int, ex
 		byID:     map[string]*Session{},
 		log:      log.WithFields(zap.String("component", "login-pty")),
 		onExit:   onExit,
+		timeouts: defaultSessionTimeouts(),
 	}
 }
 
@@ -111,10 +113,12 @@ func (m *Manager) StartWithKey(managerKey, agentID string, cmd []string, cols, r
 		ID:          uuid.NewString(),
 		AgentID:     agentID,
 		managerKey:  managerKey,
+		lifetime:    lifetimeForAgent(agentID),
 		Cmd:         append([]string(nil), cmd...),
 		subscribers: map[chan<- []byte]struct{}{},
 		log:         m.log.WithFields(zap.String("agent", agentID)),
 		startedAt:   time.Now(),
+		done:        make(chan struct{}),
 	}
 
 	if err := sess.start(cmd, cols, rows); err != nil {
@@ -160,10 +164,29 @@ func (m *Manager) StopSession(sessionID string) error {
 	return nil
 }
 
+// StopAll terminates every currently live session and waits for manager cleanup.
+func (m *Manager) StopAll() error {
+	m.mu.Lock()
+	sessions := make([]*Session, 0, len(m.byID))
+	for _, sess := range m.byID {
+		sessions = append(sessions, sess)
+	}
+	m.mu.Unlock()
+
+	for _, sess := range sessions {
+		sess.stop()
+	}
+	for _, sess := range sessions {
+		sess.waitDone()
+	}
+	return nil
+}
+
 // supervise watches the session's lifetime: waits on the process, enforces
 // timeouts, then deletes the session from the manager and notifies onExit.
 func (m *Manager) supervise(sess *Session) {
-	ctx, cancel := context.WithTimeout(context.Background(), HardTimeout)
+	defer close(sess.done)
+	ctx, cancel := m.hardTimeoutContext(sess)
 	defer cancel()
 
 	exited := make(chan exitInfo, 1)
@@ -175,8 +198,10 @@ func (m *Manager) supervise(sess *Session) {
 		}
 	}()
 
-	idle := time.NewTimer(IdleTimeout)
-	defer idle.Stop()
+	idle, idleCh := m.newIdleTimer(sess)
+	if idle != nil {
+		defer idle.Stop()
+	}
 
 	var info exitInfo
 loop:
@@ -204,13 +229,16 @@ loop:
 			// it also unblocks a stuck Windows ConPTY Read.
 			sess.stop()
 			break loop
-		case <-idle.C:
+		case <-idleCh:
 			sess.log.Info("login session idle timeout — terminating")
 			sess.stop()
 		case <-ctx.Done():
 			sess.log.Info("login session hard timeout — terminating")
 			sess.stop()
 		case <-sess.activityCh:
+			if idle == nil {
+				continue
+			}
 			// Reset idle timer on output activity.
 			if !idle.Stop() {
 				select {
@@ -218,7 +246,7 @@ loop:
 				default:
 				}
 			}
-			idle.Reset(IdleTimeout)
+			idle.Reset(m.timeouts.idle)
 		}
 	}
 
@@ -278,6 +306,44 @@ type exitInfo struct {
 	err  error
 }
 
+type sessionLifetime int
+
+const (
+	sessionLifetimeBounded sessionLifetime = iota
+	sessionLifetimeUnbounded
+)
+
+type sessionTimeouts struct {
+	idle time.Duration
+	hard time.Duration
+}
+
+func defaultSessionTimeouts() sessionTimeouts {
+	return sessionTimeouts{idle: IdleTimeout, hard: HardTimeout}
+}
+
+func lifetimeForAgent(agentID string) sessionLifetime {
+	if agentID == HostShellAgentID {
+		return sessionLifetimeUnbounded
+	}
+	return sessionLifetimeBounded
+}
+
+func (m *Manager) hardTimeoutContext(sess *Session) (context.Context, context.CancelFunc) {
+	if sess.lifetime == sessionLifetimeUnbounded {
+		return context.Background(), func() {}
+	}
+	return context.WithTimeout(context.Background(), m.timeouts.hard)
+}
+
+func (m *Manager) newIdleTimer(sess *Session) (*time.Timer, <-chan time.Time) {
+	if sess.lifetime == sessionLifetimeUnbounded {
+		return nil, nil
+	}
+	timer := time.NewTimer(m.timeouts.idle)
+	return timer, timer.C
+}
+
 func exitCodeFromError(err error) int {
 	if err == nil {
 		return 0
@@ -297,6 +363,7 @@ type Session struct {
 	Cmd     []string
 
 	managerKey string
+	lifetime   sessionLifetime
 	mu         sync.Mutex
 	cmd        *exec.Cmd
 	pty        ptyHandle
@@ -314,8 +381,16 @@ type Session struct {
 
 	activityCh chan struct{} // notifications to supervise loop on output
 	readDone   chan struct{} // closed when readLoop exits (all PTY output drained)
+	done       chan struct{} // closed when supervise finishes cleanup
 
 	log *logger.Logger
+}
+
+func (s *Session) waitDone() {
+	if s.done == nil {
+		return
+	}
+	<-s.done
 }
 
 // ManagerKey returns the internal uniqueness key used by Manager. It is

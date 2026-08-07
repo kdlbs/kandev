@@ -32,6 +32,9 @@ plugins:
   - id: kandev-plugin-kandy
     repo: kdlbs/kandev-plugin-kandy
     categories: [tools]
+  - id: kandev-plugin-slack
+    repo: kdlbs/kandev-plugin-slack
+    categories: [integrations, automation]
   - id: kandev-plugin-tags
     repo: yattdev/kandev-plugin-tags
     categories: [tools]

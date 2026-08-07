@@ -2,12 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import {
-  createQuickTerminalTab,
-  deleteQuickTerminalTab,
-  startHostShell,
-  toQuickTerminalTab,
-} from "@/lib/api";
+import { createQuickTerminalTab, startHostShell, toQuickTerminalTab } from "@/lib/api";
 import {
   PtyTerminalView,
   type PtyTerminalState,
@@ -89,9 +84,11 @@ export function QuickTerminalTabView({ tab, onStateChange, onDescriptorReady }: 
     setDescriptorReady(false);
     createQuickTerminalTab(tab.tabId, tab.workspaceId)
       .then((descriptor) => {
-        if (cancelled) {
-          return deleteQuickTerminalTab(tab.tabId).catch(() => undefined);
-        }
+        // The descriptor is keyed by the stable tabId and the backend create is
+        // idempotent, so a cancelled mount (StrictMode remount, tab switch,
+        // reload) must NOT delete it — the next mount reuses the same row. Only
+        // an explicit tab close deletes the descriptor, via useQuickTerminalClose.
+        if (cancelled) return;
         const nextTab = toQuickTerminalTab(descriptor);
         onDescriptorReadyRef.current?.(nextTab);
         setDescriptorReady(true);
@@ -113,8 +110,17 @@ export function QuickTerminalTabView({ tab, onStateChange, onDescriptorReady }: 
 
   const shouldRenderTerminal = Boolean(tab.sessionId) || (needsDescriptor && descriptorReady);
   const startSession = useCallback<StartPtySession>(
-    (size, options) => startHostShell(size, options),
-    [],
+    async (size, options) => {
+      const session = await startHostShell(size, options);
+      onStateChange({
+        status: session.running ? "running" : "exited",
+        sessionId: session.session_id,
+        exitCode: session.exit_code ?? null,
+        error: null,
+      });
+      return session;
+    },
+    [onStateChange],
   );
 
   return (

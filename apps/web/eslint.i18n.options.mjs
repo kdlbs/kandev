@@ -493,19 +493,6 @@ export const i18nGuardFiles = [
   // icon `key`s are the persisted enum and only the labels are copy, which now
   // travel as `labelKey` and resolve at render.
   "components/integrations/action-preset-icons.ts",
-  // Settings → Integrations → Slack: the page and the whole of
-  // `components/slack`, which holds nothing else. `slack-settings-state.ts` is
-  // the form state and API actions split out of the component so it stays under
-  // the 600-line cap; it holds no JSX, so `mode: "jsx-only"` never inspects it
-  // and only the pseudo-locale can prove its toast/confirm copy stays migrated.
-  //
-  // Deliberately left in English, each a value the user must find or type
-  // verbatim rather than copy: the `xoxc-` / `xoxd-` token prefixes, the `d`
-  // cookie name, the `••••••••` mask, the `!kandev <instruction>` command
-  // example, and the six `{{Slack…}}` prompt tokens. All are interpolated as
-  // values so the pseudo-locale cannot turn them into dead pointers.
-  "app/settings/integrations/slack/**/*.{ts,tsx}",
-  "components/slack/**/*.{ts,tsx}",
   // Settings → Agents: the agents list, the per-agent setup page, the agent
   // profile editor, and the `/settings/agent/:id` redirect. The whole
   // `app/settings/agents` tree is migrated, plus the agent half of
@@ -1677,4 +1664,106 @@ export const i18nGuardFiles = [
   "components/task/share/**/*.{ts,tsx}",
   "components/task/inspector/**/*.{ts,tsx}",
   "components/task/document/**/*.{ts,tsx}",
+  // Loose components directly under `components/`. Individual file entries
+  // rather than a `components/*.tsx` glob: the sibling `components/task-*.tsx`
+  // files match the `components/(task\/|task-)` namespace rule and belong with
+  // the `components/task` batches, so a glob here would falsely claim them.
+  //
+  // These have no namespace rule of their own, so they are on `common` — except
+  // the two `vcs-*` menus and `workflow-selector-row`, which were placed on
+  // `integrations` / `workflows` by hand to sit with the copy they share.
+  //
+  // Deliberately left in English inside these files, because they are protocol
+  // or data rather than copy: the `gh` CLI binary name and the `kdlbs/kandev`
+  // repository slug in the Improve Kandev dialogs, the `esc` key name in the
+  // onboarding preview and the command-panel footer, the `make install`/`/commit`
+  // shell and slash commands, git refs reaching `ontoBranch`/`fromBranch`, and
+  // the `ActionDef.key` / `RUNTIMES[].id` discriminants that keep React keys
+  // locale-independent.
+  "components/branch-refresh-button.tsx",
+  "components/cli-mode-icon.tsx",
+  "components/command-panel-footer.tsx",
+  "components/command-panel-scope-switcher.tsx",
+  "components/create-local-repository-surface.tsx",
+  "components/discard-local-changes-dialog.tsx",
+  "components/enhance-prompt-button.tsx",
+  "components/folder-picker.tsx",
+  "components/grid-spinner.tsx",
+  "components/improve-kandev-dialog-create.tsx",
+  "components/improve-kandev-dialog.tsx",
+  "components/onboarding-dialog.tsx",
+  "components/prompt-result-recovery.tsx",
+  "components/vcs-multi-repo-menu.tsx",
+  "components/vcs-split-button.tsx",
+  "components/watcher-repository-fields.tsx",
+  "components/workflow-selector-row.tsx",
+  "components/workspace-content-search.tsx",
+  // The loose `components/task/*.tsx` level and the `components/task-*.tsx`
+  // create-dialog / preview files — the last of the task area. A single `*`,
+  // not `**`: the subdirectory globs above are separate migrations, and a `**`
+  // here would claim credit for trees this PR never touched.
+  //
+  // `chat-context-items.ts` is listed on its own because it holds no JSX;
+  // `mode: "jsx-only"` never inspects it, so the entry records that its three
+  // plural labels are migrated but only the pseudo-locale can prove it stays
+  // that way. The other loose `.ts` files at this level are deliberately
+  // absent — they are hooks and layout helpers whose copy has not been
+  // migrated, and claiming them would be false.
+  //
+  // Deliberately left in English inside this tree, because they are protocol
+  // or data rather than copy: the dockview panel ids built by
+  // `sessionPanelId()` in `session-reopen-menu.tsx` and its `.ts` siblings;
+  // ports, hosts and proxy/tunnel URLs in `port-forward-dialog.tsx`, whose
+  // `badge` prop was split into a `"detected" | "manual"` discriminant plus a
+  // translated label so the `===` comparison stays locale-independent; commit
+  // SHAs, refs and author names in `commit-row.tsx` / `commit-detail-panel.tsx`;
+  // terminal commands and the `</ kandev-system>` marker in the passthrough
+  // components; the `#1470`-style GitHub ref *shape* inside
+  // `githubIssueRefPlaceholder` / `githubPrRefPlaceholder`, which is one key
+  // each so a translator can localize the "or" without touching the URL; and
+  // console-only diagnostic prefixes such as `[ModeSelector] …`.
+  "components/task/*.tsx",
+  "components/task/chat-context-items.ts",
+  "components/task-create-dialog-footer.tsx",
+  "components/task-create-dialog-form-body.tsx",
+  "components/task-create-dialog-fresh-branch.tsx",
+  "components/task-create-dialog-header.tsx",
+  "components/task-create-dialog-options.tsx",
+  "components/task-create-dialog-remote-repo-chip.tsx",
+  "components/task-create-dialog-remote-repo-chips.tsx",
+  "components/task-create-dialog-repo-chips.tsx",
+  "components/task-create-dialog-selectors.tsx",
+  "components/task-create-dialog-source-mode.tsx",
+  "components/task-create-dialog-workspace-repo-chips.tsx",
+  "components/task-preview-panel.tsx",
+
+  // The last batch of live user-facing surfaces before `app/office`: the session
+  // prepare panel, the onboarding agents step, the host system-metrics readout
+  // and system-health issues dialog, the shared panel search bar, the mermaid
+  // diagram block, the settings agent card, the two release-notes surfaces, and
+  // the shared data-table pair.
+  //
+  // Listed FILE BY FILE rather than by directory. Every one of these directories
+  // still holds un-migrated files — `components/settings/` alone has hundreds —
+  // so a `components/settings/*.tsx` glob would claim work this PR did not do.
+  //
+  // Deliberately NOT migrated in these files, because each is protocol or data
+  // rather than copy: the `%`/`s`/`ms`/`m` unit suffixes and the `-` empty marker
+  // in the metrics readout, the `{workspaceId}` URL template token in the health
+  // dialog, the `"ellipsis"` page sentinel in the data-table pagination, the
+  // `v` version prefix and the `0 / 0` match counter, the `[-]`/`[+]` toggle
+  // glyphs in the prepare panel, and every mermaid theme/security identifier and
+  // CSS value in the diagram block. `metricLabel`'s wire ids stay untranslated
+  // on the `?? id` fallback path for the same reason.
+  "components/onboarding/step-agents.tsx",
+  "components/release-notes/release-notes-button.tsx",
+  "components/release-notes/release-notes-dialog.tsx",
+  "components/search/panel-search-bar.tsx",
+  "components/session/prepare-progress.tsx",
+  "components/settings/agent-card.tsx",
+  "components/shared/mermaid-block.tsx",
+  "components/system-health/health-indicator.tsx",
+  "components/system-metrics/status-surface-metrics.tsx",
+  "components/ui/data-table-pagination.tsx",
+  "components/ui/data-table.tsx",
 ];

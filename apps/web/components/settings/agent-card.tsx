@@ -5,12 +5,14 @@ import { IconRobot, IconChevronRight } from "@tabler/icons-react";
 import { Card, CardContent } from "@kandev/ui/card";
 import { Badge } from "@kandev/ui/badge";
 import type { AgentProfile } from "@/lib/settings/types";
+import { useTranslation } from "react-i18next";
 
 type AgentCardProps = {
   agent: AgentProfile;
 };
 
 export function AgentCard({ agent }: AgentCardProps) {
+  const { t } = useTranslation();
   const agentLabel = agent.agentDisplayName;
 
   return (
@@ -30,13 +32,13 @@ export function AgentCard({ agent }: AgentCardProps) {
                   </Badge>
                   {agent.autoApprove && (
                     <Badge variant="outline" className="text-xs text-green-600">
-                      Auto-approve
+                      {t("settings:autoApprove")}
                     </Badge>
                   )}
                 </div>
                 <div className="text-sm text-muted-foreground mt-1">
-                  <p>Model: {agent.model}</p>
-                  <p>Temperature: {agent.temperature}</p>
+                  <p>{t("settings:modelWithValue", { model: agent.model })}</p>
+                  <p>{t("settings:temperatureWithValue", { temperature: agent.temperature })}</p>
                 </div>
               </div>
             </div>

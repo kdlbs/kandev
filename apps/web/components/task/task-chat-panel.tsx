@@ -37,6 +37,7 @@ import { useAppStore } from "@/components/state-provider";
 import type { Message } from "@/lib/types/http";
 import { getSessionWorkspacePath } from "@/lib/session-workspace-path";
 import { routePanelMouseDown } from "./chat/route-panel-mouse-down";
+import { useTranslation } from "react-i18next";
 
 /**
  * Cap on how many extra pages the last-prompt background lookup will fetch
@@ -498,10 +499,11 @@ function ChatFooter({
   showScrollToStart,
   onScrollToStart,
 }: ChatFooterProps) {
+  const { t } = useTranslation();
   if (isArchived) {
     return (
       <div className="bg-muted/50 flex-shrink-0 px-4 py-3 text-center text-sm text-muted-foreground border-t">
-        This task is archived and read-only.
+        {t("task:thisTaskIsArchivedAndRead")}
       </div>
     );
   }

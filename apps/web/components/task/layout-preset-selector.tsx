@@ -63,6 +63,8 @@ import { mapUserSettingsResponse } from "@/lib/ssr/user-settings";
 import type { SavedLayout } from "@/lib/types/http";
 import { useTaskSessions } from "@/hooks/use-task-sessions";
 import { resolveLayoutApplySessionIds } from "./layout-preset-selector-session-ids";
+import { useTranslation } from "react-i18next";
+import { t } from "@/lib/i18n";
 
 type PresetOption = {
   id: BuiltInLayoutProfileId;
@@ -86,7 +88,7 @@ const BUILT_IN_PRESETS: PresetOption[] = BUILT_IN_LAYOUT_PROFILES.map((profile) 
 }));
 
 function mutationError(error: unknown): string {
-  return error instanceof Error ? error.message : "Please try again.";
+  return error instanceof Error ? error.message : t("task:pleaseTryAgain");
 }
 
 function SaveLayoutDialog({
@@ -96,6 +98,7 @@ function SaveLayoutDialog({
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
+  const { t } = useTranslation();
   const [name, setName] = useState("");
   const [isDefault, setIsDefault] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -123,7 +126,7 @@ function SaveLayoutDialog({
       setIsDefault(false);
       onOpenChange(false);
     } catch (error) {
-      toast.error("Failed to save layout", { description: mutationError(error) });
+      toast.error(t("task:failedToSaveLayout"), { description: mutationError(error) });
     } finally {
       setSaving(false);
     }
@@ -133,19 +136,17 @@ function SaveLayoutDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-sm">
         <DialogHeader>
-          <DialogTitle>Save Current Layout</DialogTitle>
-          <DialogDescription>
-            Save your current panel arrangement as a reusable layout.
-          </DialogDescription>
+          <DialogTitle>{t("task:saveCurrentLayout")}</DialogTitle>
+          <DialogDescription>{t("task:saveYourCurrentPanelArrangementAs")}</DialogDescription>
         </DialogHeader>
         <div className="space-y-4 py-2">
           <div className="space-y-2">
-            <Label htmlFor="layout-name">Name</Label>
+            <Label htmlFor="layout-name">{t("task:name")}</Label>
             <Input
               id="layout-name"
               value={name}
               onChange={(e) => setName(e.target.value)}
-              placeholder="My layout"
+              placeholder={t("task:myLayout")}
               autoFocus
             />
           </div>
@@ -156,7 +157,7 @@ function SaveLayoutDialog({
               onCheckedChange={(checked) => setIsDefault(checked === true)}
             />
             <Label htmlFor="layout-default" className="text-sm font-normal cursor-pointer">
-              Set as default layout
+              {t("task:setAsDefaultLayout")}
             </Label>
           </div>
         </div>
@@ -167,7 +168,7 @@ function SaveLayoutDialog({
             className="cursor-pointer"
             onClick={() => onOpenChange(false)}
           >
-            Cancel
+            {t("common:cancel")}
           </Button>
           <Button
             size="sm"
@@ -175,7 +176,7 @@ function SaveLayoutDialog({
             onClick={handleSave}
             disabled={!name.trim() || saving}
           >
-            {saving ? "Saving..." : "Save"}
+            {saving ? t("task:saving") : t("common:save")}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -192,8 +193,11 @@ function SavedLayoutItems({
   onApply: (layout: SavedLayout) => void | Promise<void>;
   onDelete: (layout: SavedLayout) => void;
 }) {
+  const { t } = useTranslation();
   if (layouts.length === 0) {
-    return <div className="px-2 py-1.5 text-xs text-muted-foreground">No saved layouts</div>;
+    return (
+      <div className="px-2 py-1.5 text-xs text-muted-foreground">{t("task:noSavedLayouts")}</div>
+    );
   }
   return layouts.map((layout) => (
     <div key={layout.id} className="flex items-stretch" role="presentation">
@@ -205,13 +209,13 @@ function SavedLayoutItems({
         <span className="flex-1 truncate text-xs">{layout.name}</span>
         {layout.is_default && (
           <Badge variant="secondary" className="ml-1 px-1 py-0 text-[9px]">
-            default
+            {t("common:default")}
           </Badge>
         )}
       </DropdownMenuItem>
       <DropdownMenuItem
         className="min-h-11 min-w-11 shrink-0 cursor-pointer justify-center px-2 text-destructive/60 focus:text-destructive sm:min-h-7 sm:min-w-7"
-        aria-label={`Delete ${layout.name}`}
+        aria-label={t("task:delete2", { name: layout.name })}
         data-testid="layout-saved-delete"
         data-layout-id={layout.id}
         onSelect={() => onDelete(layout)}
@@ -304,6 +308,7 @@ function DeleteLayoutDialog({
   onClose: () => void;
   onDelete: (layoutId: string) => Promise<void>;
 }) {
+  const { t } = useTranslation();
   const [deleting, setDeleting] = useState(false);
   const handleDelete = async () => {
     if (!layout) return;
@@ -312,7 +317,7 @@ function DeleteLayoutDialog({
       await onDelete(layout.id);
       onClose();
     } catch (error) {
-      toast.error("Failed to delete layout", { description: mutationError(error) });
+      toast.error(t("task:failedToDeleteLayout"), { description: mutationError(error) });
     } finally {
       setDeleting(false);
     }
@@ -321,16 +326,18 @@ function DeleteLayoutDialog({
     <AlertDialog open={Boolean(layout)} onOpenChange={(open) => !open && !deleting && onClose()}>
       <AlertDialogContent>
         <AlertDialogHeader>
-          <AlertDialogTitle>Delete {layout?.name ?? "saved layout"}?</AlertDialogTitle>
+          <AlertDialogTitle>
+            {t("task:deleteLayoutConfirm", { name: layout?.name ?? t("task:savedLayout") })}
+          </AlertDialogTitle>
           <AlertDialogDescription>
             {layout?.is_default
-              ? "The built-in Default layout will become the default."
-              : "This saved layout will be permanently removed."}
+              ? t("task:theBuiltInDefaultLayoutWill")
+              : t("task:thisSavedLayoutWillBePermanently")}
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
           <AlertDialogCancel className="cursor-pointer" disabled={deleting}>
-            Cancel
+            {t("common:cancel")}
           </AlertDialogCancel>
           <AlertDialogAction
             className="cursor-pointer"
@@ -340,7 +347,7 @@ function DeleteLayoutDialog({
               void handleDelete();
             }}
           >
-            {deleting ? "Deleting..." : "Delete"}
+            {deleting ? t("task:deleting") : t("task:delete")}
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>
@@ -349,6 +356,7 @@ function DeleteLayoutDialog({
 }
 
 export function LayoutPresetSelector() {
+  const { t } = useTranslation();
   const [saveDialogOpen, setSaveDialogOpen] = useState(false);
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [tooltipOpen, setTooltipOpen] = useState(false);
@@ -405,11 +413,11 @@ export function LayoutPresetSelector() {
               </Button>
             </DropdownMenuTrigger>
           </TooltipTrigger>
-          <TooltipContent side="bottom">Layout presets</TooltipContent>
+          <TooltipContent side="bottom">{t("task:layoutPresets")}</TooltipContent>
         </Tooltip>
         <DropdownMenuContent align="end" className="w-60">
           <DropdownMenuGroup>
-            <DropdownMenuLabel className="text-xs">Presets</DropdownMenuLabel>
+            <DropdownMenuLabel className="text-xs">{t("task:presets")}</DropdownMenuLabel>
             <BuiltInPresetItems onApply={handleApplyBuiltIn} />
           </DropdownMenuGroup>
           <DropdownMenuSeparator />
@@ -419,11 +427,11 @@ export function LayoutPresetSelector() {
             className="cursor-pointer"
           >
             <IconRestore className="h-4 w-4 mr-2 shrink-0" />
-            <span className="text-xs">Reset Layout</span>
+            <span className="text-xs">{t("task:resetLayout")}</span>
           </DropdownMenuItem>
           <DropdownMenuSeparator />
           <DropdownMenuGroup>
-            <DropdownMenuLabel className="text-xs">Saved Layouts</DropdownMenuLabel>
+            <DropdownMenuLabel className="text-xs">{t("task:savedLayouts")}</DropdownMenuLabel>
             <SavedLayoutItems
               layouts={savedLayouts.filter((layout) => !isBuiltInLayoutOverride(layout))}
               onApply={handleApplyCustom}
@@ -433,7 +441,7 @@ export function LayoutPresetSelector() {
           <DropdownMenuSeparator />
           <DropdownMenuItem onClick={() => setSaveDialogOpen(true)} className="cursor-pointer">
             <IconDeviceFloppy className="h-4 w-4 mr-2 shrink-0" />
-            <span className="text-xs">Save current layout...</span>
+            <span className="text-xs">{t("task:saveCurrentLayout2")}</span>
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>

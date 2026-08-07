@@ -46,7 +46,7 @@ Backend code is under `apps/backend/internal/`. Common owners include:
 - `agent/` for agent definitions, profiles, executor mapping, and lifecycle;
 - `agentctl/` for the sidecar server, process/protocol adapters, Git, files, shell, terminal, and workspace operations;
 - `worktree/` plus runtime implementations for local, Docker, remote Docker, SSH, and Sprites environments;
-- provider domains such as `github/`, `gitlab/`, `jira/`, `linear/`, `sentry/`, and `slack/`;
+- provider domains such as `github/`, `gitlab/`, `jira/`, `linear/`, and `sentry/`;
 - `mcp/` for Kandev tool schemas and backend handlers;
 - `gateway/websocket/` for client broadcasts;
 - `system/`, `persistence/`, and `db/` for status, storage setup, pools, and SQL dialect primitives.
