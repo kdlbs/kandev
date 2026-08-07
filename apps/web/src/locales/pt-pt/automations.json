@@ -104,7 +104,7 @@
   "prTriggerRepositoryHelp": "Os acionadores de PR usam sempre o repositório do próprio PR.",
   "pushTriggerHelp": "Aciona quando é feito push de código para branches correspondentes",
   "recentRuns": "Execuções recentes",
-  "recentRuns_one": "Execuções recentes ({{count}})",
+  "recentRuns_one": "Execução recente ({{count}})",
   "recentRuns_other": "Execuções recentes ({{count}})",
   "refresh": "Atualizar",
   "removeRepository": "Remover repositório",
