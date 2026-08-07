@@ -86,6 +86,8 @@ type Manager struct {
 	cfg    *config.InstanceConfig
 	logger *logger.Logger
 
+	backgroundWork atomic.Int64
+
 	// Process state
 	cmd                *exec.Cmd
 	processLifecycle   processLifecycleHandle
@@ -225,6 +227,25 @@ type Manager struct {
 	killGroupFn      func(int) error
 	waitGroupExitFn  func(context.Context, int) bool
 	managerWaitFn    func(context.Context, <-chan struct{}, time.Duration) bool
+}
+
+// BeginBackgroundWork marks instance-owned work that must survive browser and
+// request inactivity. The returned release function is safe to call more than
+// once.
+func (m *Manager) BeginBackgroundWork() func() {
+	m.backgroundWork.Add(1)
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			m.backgroundWork.Add(-1)
+		})
+	}
+}
+
+// HasBackgroundWork reports whether instance-owned work still requires this
+// task host. It is consumed by the instance idle reaper.
+func (m *Manager) HasBackgroundWork() bool {
+	return m.backgroundWork.Load() > 0
 }
 
 // ErrManagerStopping indicates that process admission is closed for teardown.

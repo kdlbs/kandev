@@ -275,6 +275,9 @@ func (s *Service) GetTaskEnvironmentByTaskID(ctx context.Context, taskID string)
 // If opts.PushBranch is set, the branch is pushed before teardown; a failed push
 // aborts the reset and leaves the environment intact so the user can investigate.
 func (s *Service) ResetTaskEnvironment(ctx context.Context, taskID string, opts ResetOptions) error {
+	if err := s.authorizeTaskID(ctx, taskID); err != nil {
+		return err
+	}
 	env, err := s.taskEnvironments.GetTaskEnvironmentByTaskID(ctx, taskID)
 	if err != nil {
 		return fmt.Errorf("lookup environment: %w", err)
@@ -310,6 +313,11 @@ func (s *Service) ResetTaskEnvironment(ctx context.Context, taskID string, opts 
 		}
 		if err := s.envDestroyer.PushEnvironmentBranch(ctx, env); err != nil {
 			return fmt.Errorf("push branch before reset: %w", err)
+		}
+	}
+	if s.taskLSP != nil {
+		if err := s.taskLSP.CleanupTask(ctx, taskID, "task_environment_reset"); err != nil {
+			return fmt.Errorf("stop task language servers before environment reset: %w", err)
 		}
 	}
 

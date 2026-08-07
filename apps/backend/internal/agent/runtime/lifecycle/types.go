@@ -31,6 +31,10 @@ type AgentExecution struct {
 	TaskID            string
 	SessionID         string
 	TaskEnvironmentID string // Env owning this execution; sessions in the same task share one env
+	// IsTaskHost marks an internal, task-environment-owned agentctl execution.
+	// Task hosts provide long-lived task services such as LSP and deliberately
+	// never participate in session lookup or session lifecycle events.
+	IsTaskHost bool
 	// AgentProfileID is the concrete profile used by the running CLI. The
 	// historical name is retained inside lifecycle because profile resolution,
 	// MCP, env, and command construction all consume this value.

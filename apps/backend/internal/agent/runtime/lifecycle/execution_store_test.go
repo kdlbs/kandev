@@ -149,6 +149,59 @@ func TestExecutionStore_AddNoSessionIDAlwaysSucceeds(t *testing.T) {
 	}
 }
 
+func TestExecutionStore_TaskHostHasDedicatedEnvironmentOwnership(t *testing.T) {
+	store := NewExecutionStore()
+	normal := &AgentExecution{
+		ID: "exec-session", SessionID: "session-1", TaskEnvironmentID: "env-1",
+	}
+	host := &AgentExecution{
+		ID: "exec-task-host", SessionID: "task-host-env-1", TaskEnvironmentID: "env-1", IsTaskHost: true,
+	}
+	if err := store.Add(normal); err != nil {
+		t.Fatalf("add normal execution: %v", err)
+	}
+	if err := store.Add(host); err != nil {
+		t.Fatalf("add task host: %v", err)
+	}
+
+	if got, ok := store.GetBySessionID(host.SessionID); ok || got != nil {
+		t.Fatalf("task host leaked into session index: %#v, %v", got, ok)
+	}
+	if got, ok := store.GetByTaskEnvironmentID("env-1"); !ok || got.ID != normal.ID {
+		t.Fatalf("normal environment lookup = %#v, %v; want %s", got, ok, normal.ID)
+	}
+	if got, ok := store.GetTaskHostByEnvironmentID("env-1"); !ok || got.ID != host.ID {
+		t.Fatalf("task host lookup = %#v, %v; want %s", got, ok, host.ID)
+	}
+
+	store.Remove(normal.ID)
+	if got, ok := store.GetTaskHostByEnvironmentID("env-1"); !ok || got.ID != host.ID {
+		t.Fatalf("task host after sibling removal = %#v, %v; want %s", got, ok, host.ID)
+	}
+	store.Remove(host.ID)
+	if got, ok := store.GetTaskHostByEnvironmentID("env-1"); ok || got != nil {
+		t.Fatalf("task host index after removal = %#v, %v", got, ok)
+	}
+}
+
+func TestExecutionStore_TaskHostRequiresUniqueEnvironment(t *testing.T) {
+	store := NewExecutionStore()
+	if err := store.Add(&AgentExecution{ID: "missing-env", IsTaskHost: true}); err == nil {
+		t.Fatal("task host without environment: expected error")
+	}
+	first := &AgentExecution{ID: "host-1", TaskEnvironmentID: "env-1", IsTaskHost: true}
+	if err := store.Add(first); err != nil {
+		t.Fatalf("first Add: %v", err)
+	}
+	err := store.Add(&AgentExecution{ID: "host-2", TaskEnvironmentID: "env-1", IsTaskHost: true})
+	if !errors.Is(err, ErrExecutionAlreadyExistsForTaskHost) {
+		t.Fatalf("second Add: want ErrExecutionAlreadyExistsForTaskHost, got %v", err)
+	}
+	if _, ok := store.Get("host-2"); ok {
+		t.Fatal("rejected task host must not be tracked")
+	}
+}
+
 func TestExecutionStore_BeginPromptAlwaysAdvancesGeneration(t *testing.T) {
 	store := NewExecutionStore()
 	exec := &AgentExecution{

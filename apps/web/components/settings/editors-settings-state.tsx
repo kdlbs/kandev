@@ -45,6 +45,12 @@ export function useEditorsSettingsState() {
   const [baselineLspAutoInstall, setBaselineLspAutoInstall] = useState<string[]>(
     () => currentUserSettings.lspAutoInstallLanguages ?? [],
   );
+  const [lspStatusHiddenLanguages, setLspStatusHiddenLanguages] = useState<string[]>(
+    () => currentUserSettings.lspStatusHiddenLanguages ?? [],
+  );
+  const [baselineLspStatusHiddenLanguages, setBaselineLspStatusHiddenLanguages] = useState<
+    string[]
+  >(() => currentUserSettings.lspStatusHiddenLanguages ?? []);
   const [lspStatusLocation, setLspStatusLocation] = useState<LspStatusLocation>(
     () => currentUserSettings.lspStatusLocation ?? "toolbar",
   );
@@ -89,6 +95,10 @@ export function useEditorsSettingsState() {
     setBaselineLspAutoStart,
     baselineLspAutoInstall,
     setBaselineLspAutoInstall,
+    lspStatusHiddenLanguages,
+    setLspStatusHiddenLanguages,
+    baselineLspStatusHiddenLanguages,
+    setBaselineLspStatusHiddenLanguages,
     lspStatusLocation,
     setLspStatusLocation,
     baselineLspStatusLocation,
@@ -105,6 +115,12 @@ export function useEditorsSettingsState() {
 }
 
 export type EditorsSettingsState = ReturnType<typeof useEditorsSettingsState>;
+
+function updateStatusVisibility(previous: string[], language: string, visible: boolean) {
+  if (visible) return previous.filter((id) => id !== language);
+  if (previous.includes(language)) return previous;
+  return [...previous, language];
+}
 
 export function useLspConfigActions(
   setLspConfigStrings: (updater: (prev: Record<string, string>) => Record<string, string>) => void,
@@ -153,9 +169,10 @@ export function useLspConfigActions(
   return { updateLspConfigString };
 }
 
-/** Add/remove a language id in the auto-start and auto-install sets. */
+/** Add/remove a language id in the LSP preference sets. */
 export function useLspLanguageToggles(state: EditorsSettingsState) {
-  const { setLspAutoStartLanguages, setLspAutoInstallLanguages } = state;
+  const { setLspAutoStartLanguages, setLspAutoInstallLanguages, setLspStatusHiddenLanguages } =
+    state;
   const toggleAutoStart = useCallback(
     (langId: string, checked: boolean) => {
       setLspAutoStartLanguages((prev) =>
@@ -172,7 +189,13 @@ export function useLspLanguageToggles(state: EditorsSettingsState) {
     },
     [setLspAutoInstallLanguages],
   );
-  return { toggleAutoStart, toggleAutoInstall };
+  const toggleStatusVisibility = useCallback(
+    (langId: string, visible: boolean) => {
+      setLspStatusHiddenLanguages((prev) => updateStatusVisibility(prev, langId, visible));
+    },
+    [setLspStatusHiddenLanguages],
+  );
+  return { toggleAutoStart, toggleAutoInstall, toggleStatusVisibility };
 }
 
 export function parseLspConfigStrings(
@@ -236,6 +259,7 @@ function buildSettingsPayload(
   lsp: {
     autoStartLanguages: string[];
     autoInstallLanguages: string[];
+    statusHiddenLanguages: string[];
     statusLocation: LspStatusLocation;
     serverConfigs: Record<string, Record<string, unknown>>;
   },
@@ -246,6 +270,7 @@ function buildSettingsPayload(
     default_editor_id: defaultEditorId || undefined,
     lsp_auto_start_languages: lsp.autoStartLanguages,
     lsp_auto_install_languages: lsp.autoInstallLanguages,
+    lsp_status_hidden_languages: lsp.statusHiddenLanguages,
     lsp_status_location: lsp.statusLocation,
     lsp_server_configs: lsp.serverConfigs,
   };
@@ -346,6 +371,8 @@ export function useSaveRequest(state: EditorsSettingsState) {
     setBaselineLspAutoStart,
     lspAutoInstallLanguages,
     setBaselineLspAutoInstall,
+    lspStatusHiddenLanguages,
+    setBaselineLspStatusHiddenLanguages,
     lspStatusLocation,
     setBaselineLspStatusLocation,
     lspConfigStrings,
@@ -357,6 +384,7 @@ export function useSaveRequest(state: EditorsSettingsState) {
     const payload = buildSettingsPayload(currentUserSettings, defaultEditorId, {
       autoStartLanguages: lspAutoStartLanguages,
       autoInstallLanguages: lspAutoInstallLanguages,
+      statusHiddenLanguages: lspStatusHiddenLanguages,
       statusLocation: lspStatusLocation,
       serverConfigs: parsedConfigs,
     });
@@ -364,6 +392,7 @@ export function useSaveRequest(state: EditorsSettingsState) {
     setBaselineDefaultId(defaultEditorId);
     setBaselineLspAutoStart([...lspAutoStartLanguages]);
     setBaselineLspAutoInstall([...lspAutoInstallLanguages]);
+    setBaselineLspStatusHiddenLanguages([...lspStatusHiddenLanguages]);
     setBaselineLspStatusLocation(lspStatusLocation);
     setBaselineLspConfigStrings({ ...lspConfigStrings });
     applySettingsResponseToStore(response, currentUserSettings, setUserSettings);

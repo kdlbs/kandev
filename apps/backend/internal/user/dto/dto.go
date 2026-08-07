@@ -43,6 +43,7 @@ type UserSettingsDTO struct {
 	ReleaseNotesLastSeenVersion     string                              `json:"release_notes_last_seen_version"`
 	LspAutoStartLanguages           []string                            `json:"lsp_auto_start_languages"`
 	LspAutoInstallLanguages         []string                            `json:"lsp_auto_install_languages"`
+	LspStatusHiddenLanguages        []string                            `json:"lsp_status_hidden_languages"`
 	LspServerConfigs                map[string]map[string]interface{}   `json:"lsp_server_configs,omitempty"`
 	LspStatusLocation               string                              `json:"lsp_status_location"`
 	SavedLayouts                    []models.SavedLayout                `json:"saved_layouts"`
@@ -113,6 +114,7 @@ type UpdateUserSettingsRequest struct {
 	ReleaseNotesLastSeenVersion     *string                            `json:"release_notes_last_seen_version,omitempty"`
 	LspAutoStartLanguages           *[]string                          `json:"lsp_auto_start_languages,omitempty"`
 	LspAutoInstallLanguages         *[]string                          `json:"lsp_auto_install_languages,omitempty"`
+	LspStatusHiddenLanguages        *[]string                          `json:"lsp_status_hidden_languages,omitempty"`
 	LspServerConfigs                *map[string]map[string]interface{} `json:"lsp_server_configs,omitempty"`
 	LspStatusLocation               *string                            `json:"lsp_status_location,omitempty"`
 	SavedLayouts                    *[]models.SavedLayout              `json:"saved_layouts,omitempty"`
@@ -244,6 +246,7 @@ func FromUserSettings(settings *models.UserSettings) UserSettingsDTO {
 		ReleaseNotesLastSeenVersion:     settings.ReleaseNotesLastSeenVersion,
 		LspAutoStartLanguages:           settings.LspAutoStartLanguages,
 		LspAutoInstallLanguages:         settings.LspAutoInstallLanguages,
+		LspStatusHiddenLanguages:        settings.LspStatusHiddenLanguages,
 		LspServerConfigs:                settings.LspServerConfigs,
 		LspStatusLocation:               models.NormalizeLspStatusLocation(settings.LspStatusLocation),
 		SavedLayouts:                    settings.SavedLayouts,

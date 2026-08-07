@@ -2536,6 +2536,11 @@ func (s *Service) StopTask(ctx context.Context, taskID string, reason string, fo
 	if err := s.executor.StopByTaskID(ctx, taskID, reason, force); err != nil {
 		return err
 	}
+	if s.taskStopCleanup != nil {
+		if err := s.taskStopCleanup(ctx, taskID, reason); err != nil {
+			return fmt.Errorf("clean up task-owned runtimes: %w", err)
+		}
+	}
 
 	// Move task to REVIEW state for user review
 	if err := s.taskRepo.UpdateTaskState(ctx, taskID, v1.TaskStateReview); err != nil {
@@ -2585,7 +2590,19 @@ func (s *Service) StopTaskForCoordinator(ctx context.Context, taskID string) (Co
 			accepted++
 		}
 	}
-	if accepted > 0 {
+	cleanupSucceeded := true
+	if accepted > 0 && s.taskStopCleanup != nil {
+		blockingSessionID, sessionsKnown := s.otherWorkingSessionID(ctx, taskID, "")
+		if !sessionsKnown || blockingSessionID != "" {
+			cleanupSucceeded = false
+		} else {
+			if cleanupErr := s.taskStopCleanup(ctx, taskID, coordinatorMCPStopReason); cleanupErr != nil {
+				failures = append(failures, fmt.Errorf("coordinator stop: clean up task-owned runtimes: %w", cleanupErr))
+				cleanupSucceeded = false
+			}
+		}
+	}
+	if accepted > 0 && cleanupSucceeded {
 		// This helper owns Office/archive/active-state guards and publishes
 		// through the task-service adapter. Remaining working sessions still
 		// block REVIEW on a partial stop.

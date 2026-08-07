@@ -46,6 +46,40 @@ func TestExecutionAccessChecksGateBeforeCache(t *testing.T) {
 		}
 	})
 
+	t.Run("GetExecutionForEnvironment honors environmentAccessCheck before cache", func(t *testing.T) {
+		mgr := &Manager{logger: newTestLogger(), executionStore: NewExecutionStore()}
+		if err := mgr.executionStore.Add(&AgentExecution{ID: "ex-3", SessionID: "sess-3", TaskEnvironmentID: "env-2"}); err != nil {
+			t.Fatal(err)
+		}
+		mgr.SetEnvironmentAccessChecker(func(_ context.Context, envID string) error {
+			if envID == "env-2" {
+				return denied
+			}
+			return nil
+		})
+		if _, _, err := mgr.GetExecutionForEnvironment(context.Background(), "env-2"); !errors.Is(err, denied) {
+			t.Fatalf("expected denial before cache hit, got %v", err)
+		}
+	})
+
+	t.Run("GetTaskHostForEnvironment honors environmentAccessCheck before cache", func(t *testing.T) {
+		mgr := &Manager{logger: newTestLogger(), executionStore: NewExecutionStore()}
+		if err := mgr.executionStore.Add(&AgentExecution{
+			ID: "host-1", TaskEnvironmentID: "env-host", IsTaskHost: true,
+		}); err != nil {
+			t.Fatal(err)
+		}
+		mgr.SetEnvironmentAccessChecker(func(_ context.Context, envID string) error {
+			if envID == "env-host" {
+				return denied
+			}
+			return nil
+		})
+		if _, _, err := mgr.GetTaskHostForEnvironment(context.Background(), "env-host"); !errors.Is(err, denied) {
+			t.Fatalf("expected denial before cache hit, got %v", err)
+		}
+	})
+
 	t.Run("CheckSessionAccess is a no-op without a checker", func(t *testing.T) {
 		mgr := &Manager{logger: newTestLogger(), executionStore: NewExecutionStore()}
 		if err := mgr.CheckSessionAccess(context.Background(), "sess-x"); err != nil {

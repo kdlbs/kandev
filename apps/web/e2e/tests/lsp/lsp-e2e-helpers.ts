@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import type { BackendContext } from "../../fixtures/backend";
 import type { ApiClient } from "../../helpers/api-client";
+import type { TaskLspSnapshot } from "../../../lib/types/http-lsp";
 import { GitHelper, makeGitEnv } from "../../helpers/git-helper";
 import { SessionPage } from "../../pages/session-page";
 
@@ -38,6 +39,8 @@ export type FakeLspEvent = {
   event: string;
   pid: number;
   timestamp: number;
+  controllerGeneration?: string | null;
+  generation?: string | null;
   id?: number;
   method?: string;
   params?: Record<string, unknown>;
@@ -62,8 +65,8 @@ function fakeServerLogPath(backend: BackendContext): string {
   return path.join(backend.tmpDir, "lsp-e2e-events.jsonl");
 }
 
-function crashModePath(backend: BackendContext): string {
-  return path.join(backend.tmpDir, "lsp-e2e-crash-on-open");
+function crashOnceModePath(backend: BackendContext): string {
+  return path.join(backend.tmpDir, "lsp-e2e-crash-on-open-once");
 }
 
 function initializeModePath(backend: BackendContext): string {
@@ -149,6 +152,31 @@ export async function createKotlinTask(
   };
 }
 
+export async function expectTaskLanguageDetected(
+  apiClient: ApiClient,
+  taskId: string,
+  language: string,
+): Promise<void> {
+  await expect
+    .poll(
+      async () => {
+        const response = await apiClient.rawRequest("GET", `/api/v1/tasks/${taskId}/lsp`);
+        if (!response.ok) return { detected: false, state: `http-${response.status}` };
+        const snapshot = (await response.json()) as TaskLspSnapshot;
+        const result = snapshot.languages.find((item) => item.language === language);
+        return {
+          detected: result?.detected ?? false,
+          state: result?.detection_state ?? "missing",
+        };
+      },
+      {
+        message: `${language} should be discovered from task files before an editor opens`,
+        timeout: 15_000,
+      },
+    )
+    .toMatchObject({ detected: true });
+}
+
 export function expectedMonacoModelUri(documentUri: string, sessionId: string): string {
   const document = new URL(documentUri);
   if (document.protocol !== "file:" || document.search || document.hash || !sessionId) {
@@ -169,7 +197,7 @@ export function expectedMonacoModelUri(documentUri: string, sessionId: string): 
 }
 
 export type LspDidOpenFrame = {
-  sessionId: string;
+  taskId: string;
   uri: string;
   text: string;
 };
@@ -178,9 +206,9 @@ export type LspDidOpenFrame = {
 export function attachLspDidOpenCapture(page: Page): LspDidOpenFrame[] {
   const frames: LspDidOpenFrame[] = [];
   page.on("websocket", (socket) => {
-    const sessionMatch = /\/lsp\/([^?]+)/.exec(socket.url());
-    if (!sessionMatch) return;
-    const sessionId = decodeURIComponent(sessionMatch[1]);
+    const taskMatch = /\/lsp\/tasks\/([^/]+)\//.exec(socket.url());
+    if (!taskMatch) return;
+    const taskId = decodeURIComponent(taskMatch[1]);
     socket.on("framesent", (event) => {
       if (typeof event.payload !== "string" || !event.payload.includes("textDocument/didOpen")) {
         return;
@@ -192,7 +220,7 @@ export function attachLspDidOpenCapture(page: Page): LspDidOpenFrame[] {
         };
         const document = message.params?.textDocument;
         if (message.method === "textDocument/didOpen" && document?.uri && document.text) {
-          frames.push({ sessionId, uri: document.uri, text: document.text });
+          frames.push({ taskId, uri: document.uri, text: document.text });
         }
       } catch {
         // Ignore non-JSON frames and unrelated bridge traffic.
@@ -279,32 +307,121 @@ export async function openDesktopFile(
 }
 
 export async function openLspStatus(page: Page): Promise<Locator> {
-  const trigger = page
-    .locator('[data-testid="lsp-status-button"]:visible, [data-testid="app-status-lsp"]:visible')
-    .first();
+  const language = await currentTaskLspLanguage(page);
+  const disclosure = await openTaskLspControl(page);
+  return expandTaskLspLanguage(disclosure, language);
+}
+
+export async function expandTaskLspLanguage(
+  disclosure: Locator,
+  language: string,
+): Promise<Locator> {
+  const row = disclosure.getByTestId(`task-lsp-language-${language}`);
+  await expect(row).toBeVisible();
+  const trigger = row.getByTestId(`task-lsp-language-trigger-${language}`);
   if ((await trigger.getAttribute("aria-expanded")) !== "true") {
+    await trigger.scrollIntoViewIfNeeded();
     await trigger.click();
   }
   await expect(trigger).toHaveAttribute("aria-expanded", "true");
-
-  const surface = page.locator(
-    '[data-testid="lsp-status-popover"]:visible, [data-testid="lsp-status-drawer"]:visible',
-  );
-  await expect(surface).toBeVisible();
-  return surface;
+  return row;
 }
 
 export async function performLspAction(
   page: Page,
   action: "start" | "stop" | "retry",
 ): Promise<void> {
-  const surface = await openLspStatus(page);
-  const actionButton = surface.locator(
+  await performTaskLspAction(
+    page,
+    await currentTaskLspLanguage(page),
+    action === "retry" ? "restart" : action,
+  );
+}
+
+async function currentTaskLspLanguage(page: Page): Promise<string> {
+  const shortcut = page.locator('[data-testid="lsp-status-button"][data-lsp-language]:visible');
+  if ((await shortcut.count()) === 0) return "kotlin";
+  return (await shortcut.first().getAttribute("data-lsp-language")) || "kotlin";
+}
+
+export async function openTaskLspControl(page: Page): Promise<Locator> {
+  const trigger = await firstInViewport(
+    page,
+    '[data-testid="app-status-lsp"], [data-testid="task-lsp-control"]',
+  );
+  await expect(trigger).toBeVisible();
+  if ((await trigger.getAttribute("aria-expanded")) !== "true") {
+    await trigger.click();
+  }
+  await expect(trigger).toHaveAttribute("aria-expanded", "true");
+
+  const popover = page.getByTestId("task-lsp-surface");
+  await expect(popover).toBeVisible();
+  const surface = popover.getByTestId("task-lsp-disclosure");
+  await expect(surface).toBeVisible();
+  return surface;
+}
+
+export async function performTaskLspAction(
+  page: Page,
+  language: string,
+  action: "start" | "stop" | "restart",
+): Promise<void> {
+  const surface = await openTaskLspControl(page);
+  const row = await expandTaskLspLanguage(surface, language);
+  const actionButton = row.locator(
     `[data-testid="lsp-lifecycle-action"][data-lsp-action="${action}"]`,
   );
   await expect(actionButton).toBeVisible();
   await expect(actionButton).toBeEnabled();
-  await actionButton.click();
+  await actionButton.scrollIntoViewIfNeeded();
+  await actionButton.click({ timeout: 10_000 });
+
+  if (action === "restart") {
+    const confirmation = page.getByRole("alertdialog", { name: "Restart Kotlin language server" });
+    await expect(confirmation).toContainText("stops the current Kotlin process");
+    await confirmation.getByRole("button", { name: "Restart" }).click();
+    await expect(confirmation).toBeHidden();
+  }
+
+  await page.keyboard.press("Escape");
+  const popover = page.getByTestId("task-lsp-surface");
+  try {
+    await popover.waitFor({ state: "hidden", timeout: 1_000 });
+  } catch {
+    const trigger = await firstInViewport(
+      page,
+      [
+        '[data-testid="app-status-lsp"][aria-expanded="true"]',
+        '[data-testid="task-lsp-control"][aria-expanded="true"]',
+      ].join(", "),
+    );
+    await trigger.click();
+  }
+  await expect(popover).toBeHidden();
+}
+
+async function firstInViewport(page: Page, selector: string): Promise<Locator> {
+  const candidates = page.locator(selector);
+  const viewport = page.viewportSize();
+  if (!viewport) throw new Error("Playwright viewport is unavailable");
+  await expect.poll(() => candidates.count()).toBeGreaterThan(0);
+  for (let index = 0; index < (await candidates.count()); index++) {
+    const candidate = candidates.nth(index);
+    const box = await candidate.boundingBox();
+    if (
+      box &&
+      box.width > 0 &&
+      box.height > 0 &&
+      box.x < viewport.width &&
+      box.y < viewport.height &&
+      box.x + box.width > 0 &&
+      box.y + box.height > 0
+    ) {
+      return candidate;
+    }
+  }
+  throw new Error(`No in-viewport task LSP control matched ${selector}`);
 }
 
 export function removeFakeKotlinLsp(backend: BackendContext): void {
@@ -320,7 +437,7 @@ export function removeFakeKotlinLsp(backend: BackendContext): void {
 export function installFakeKotlinLsp(
   backend: BackendContext,
   options: {
-    crashOnOpen?: boolean;
+    crashOnOpenOnce?: boolean;
     holdInitialize?: boolean;
     progress?: {
       title: string;
@@ -335,10 +452,10 @@ export function installFakeKotlinLsp(
   fs.copyFileSync(FAKE_SERVER_SOURCE, fakeServerPath(backend));
   fs.chmodSync(fakeServerPath(backend), 0o755);
   fs.rmSync(fakeServerLogPath(backend), { force: true });
-  fs.rmSync(crashModePath(backend), { force: true });
+  fs.rmSync(crashOnceModePath(backend), { force: true });
   fs.rmSync(initializeModePath(backend), { force: true });
   fs.rmSync(initializeReleasePath(backend), { force: true });
-  if (options.crashOnOpen) fs.writeFileSync(crashModePath(backend), "1\n");
+  if (options.crashOnOpenOnce) fs.writeFileSync(crashOnceModePath(backend), "1\n");
   if (options.holdInitialize || options.progress) {
     fs.writeFileSync(
       initializeModePath(backend),
@@ -351,12 +468,6 @@ export function installAdditionalFakeLspBinary(backend: BackendContext, binaryNa
   const destination = path.join(backend.tmpDir, "bin", binaryName);
   fs.copyFileSync(FAKE_SERVER_SOURCE, destination);
   fs.chmodSync(destination, 0o755);
-}
-
-export function clearFakeKotlinLspModes(backend: BackendContext): void {
-  fs.rmSync(crashModePath(backend), { force: true });
-  fs.rmSync(initializeModePath(backend), { force: true });
-  fs.rmSync(initializeReleasePath(backend), { force: true });
 }
 
 export function releaseFakeLspInitialization(backend: BackendContext): void {
@@ -393,6 +504,58 @@ export async function expectFakeLspEvent(
     )
     .toBe(true);
   return matched!;
+}
+
+export async function expectFakeLspEventCount(
+  backend: BackendContext,
+  predicate: (event: FakeLspEvent) => boolean,
+  expectedCount: number,
+  description: string,
+  timeout = 15_000,
+): Promise<FakeLspEvent[]> {
+  let matched: FakeLspEvent[] = [];
+  await expect
+    .poll(
+      () => {
+        matched = readFakeLspEvents(backend).filter(predicate);
+        return matched.length;
+      },
+      { message: `waiting for ${expectedCount} fake LSP events: ${description}`, timeout },
+    )
+    .toBe(expectedCount);
+  return matched;
+}
+
+export async function expectFakeLspGeneration(
+  backend: BackendContext,
+  expectedGeneration: number,
+  timeout = 15_000,
+): Promise<FakeLspEvent> {
+  const started = await expectFakeLspEventCount(
+    backend,
+    (event) => event.event === "started",
+    expectedGeneration,
+    `process generation ${expectedGeneration}`,
+    timeout,
+  );
+  return started[expectedGeneration - 1];
+}
+
+export async function expectFakeLspProcessStopped(pid: number, timeout = 15_000): Promise<void> {
+  await expect
+    .poll(
+      () => {
+        try {
+          process.kill(pid, 0);
+          return false;
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code === "ESRCH") return true;
+          throw error;
+        }
+      },
+      { message: `waiting for fake LSP process ${pid} to stop`, timeout },
+    )
+    .toBe(true);
 }
 
 export async function expectFakeLspMarkerCount(

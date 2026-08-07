@@ -7,7 +7,7 @@ import {
   publishDiagnostic,
   type TestModel,
 } from "./lsp-client-manager.test-harness";
-import { modelUriForDocument } from "./file-uri";
+import { filePathToUri, modelUriForDocument } from "./file-uri";
 
 const mocks = vi.hoisted(() => ({
   getMonacoInstance: vi.fn(),
@@ -61,24 +61,41 @@ function modelUri(documentUri: string, sessionId = SESSION_ID): string {
   return modelUriForDocument(documentUri, sessionId);
 }
 
+function readyWorkspaceUri(ready: Record<string, unknown>, workspacePath: string | null) {
+  if (typeof ready.workspaceUri === "string") return ready.workspaceUri;
+  return workspacePath ? filePathToUri(workspacePath) : null;
+}
+
 function beginInitialization(
   sessionId = SESSION_ID,
   ready: Record<string, unknown> = { workspacePath: WORKSPACE_PATH },
   userConfigs?: Record<string, Record<string, unknown>>,
 ) {
-  const release = lspClientManager.connect(sessionId, "typescript", userConfigs);
+  const release = lspClientManager.connect(sessionId, sessionId, "typescript", userConfigs);
   const socket = FakeWebSocket.instances.at(-1);
   if (!socket) throw new Error(EXPECTED_SOCKET_ERROR);
   socket.open();
-  socket.emitMessage(JSON.stringify({ status: "ready", ...ready }));
-  const initializeId = (JSON.parse(socket.sent[0]) as { id: number }).id;
-  return { initializeId, release, socket };
+  const workspacePath = typeof ready.workspacePath === "string" ? ready.workspacePath : null;
+  const workspaceUri = readyWorkspaceUri(ready, workspacePath);
+  const repositories = Array.isArray(ready.repoSubpaths) ? (ready.repoSubpaths as string[]) : [];
+  socket.emitMessage(
+    JSON.stringify({
+      status: "attached",
+      language: "typescript",
+      generation: 1,
+      workspaceUri,
+      workspaceFolders: repositories.map((name) => ({
+        name,
+        uri: workspaceUri ? `${workspaceUri}/${name}` : "",
+      })),
+      serverCapabilities: ready.serverCapabilities ?? {},
+    }),
+  );
+  return { initializeId: 0, release, socket };
 }
 
-function completeInitialization(socket: FakeWebSocket, initializeId: number): void {
-  socket.emitMessage(
-    JSON.stringify({ jsonrpc: "2.0", id: initializeId, result: { capabilities: {} } }),
-  );
+function completeInitialization(_socket: FakeWebSocket, _initializeId: number): void {
+  // Initialization is task-host-owned; the attachment handshake is complete.
 }
 
 beforeEach(() => {
@@ -144,7 +161,7 @@ describe("LSP editor readiness", () => {
     completeInitialization(socket, initializeId);
     await Promise.resolve();
 
-    lspClientManager.stop("session", "typescript");
+    lspClientManager.detach("session", "typescript");
     monacoReady.resolve(monaco);
     await Promise.resolve();
     await Promise.resolve();
@@ -321,7 +338,7 @@ describe("LSP client connection cleanup", () => {
 });
 
 describe("LSP workspace handshake", () => {
-  it("updates configuration on a reused connection without restarting the server", async () => {
+  it("keeps task-host configuration ownership when a connection is reused", async () => {
     createMonacoHarness([]);
     mocks.registerLspProviders.mockReturnValue([]);
     const updatedConfig = { typescript: { preferences: { quoteStyle: "double" } } };
@@ -335,54 +352,30 @@ describe("LSP workspace handshake", () => {
       expect(lspClientManager.getStatus(SESSION_ID, "typescript")).toEqual({ state: "ready" });
     });
 
-    lspClientManager.connect(SESSION_ID, "typescript", updatedConfig);
+    lspClientManager.connect(SESSION_ID, SESSION_ID, "typescript", updatedConfig);
 
     expect(FakeWebSocket.instances).toHaveLength(1);
-    expect(socket.sent.map((message) => JSON.parse(message))).toContainEqual({
-      jsonrpc: "2.0",
-      method: "workspace/didChangeConfiguration",
-      params: { settings: updatedConfig.typescript },
-    });
-
-    socket.emitMessage(
-      JSON.stringify({
-        jsonrpc: "2.0",
-        id: 99,
-        method: "workspace/configuration",
-        params: { items: [{ section: "typescript" }] },
-      }),
+    expect(socket.sent.map((message) => JSON.parse(message).method).filter(Boolean)).not.toContain(
+      "workspace/didChangeConfiguration",
     );
-    expect(JSON.parse(socket.sent.at(-1) ?? "null")).toEqual({
-      jsonrpc: "2.0",
-      id: 99,
-      result: [updatedConfig.typescript],
-    });
   });
 
   it("uses the task-host URI and repository list instead of host path metadata", async () => {
     createMonacoHarness([]);
     mocks.registerLspProviders.mockReturnValue([]);
-    lspClientManager.connect("session", "typescript");
+    lspClientManager.connect("session", "session", "typescript");
     const socket = FakeWebSocket.instances.at(-1);
     if (!socket) throw new Error(EXPECTED_SOCKET_ERROR);
     socket.open();
     socket.emitMessage(
       JSON.stringify({
-        status: "ready",
-        workspacePath: "/host/tmp/worktree",
+        status: "attached",
+        language: "typescript",
+        generation: 1,
         workspaceUri: WORKSPACE_URI,
-        repoSubpaths: ["backend"],
+        workspaceFolders: [{ uri: `${WORKSPACE_URI}/backend`, name: "backend" }],
+        serverCapabilities: {},
       }),
-    );
-
-    const initialize = JSON.parse(socket.sent[0]) as {
-      id: number;
-      params: { rootUri: string; workspaceFolders: Array<{ uri: string }> };
-    };
-    expect(initialize.params.rootUri).toBe(WORKSPACE_URI);
-    expect(initialize.params.workspaceFolders).toEqual([{ uri: WORKSPACE_URI, name: "worktree" }]);
-    socket.emitMessage(
-      JSON.stringify({ jsonrpc: "2.0", id: initialize.id, result: { capabilities: {} } }),
     );
     await vi.waitFor(() => {
       expect(lspClientManager.getStatus("session", "typescript")).toEqual({ state: "ready" });
@@ -390,28 +383,35 @@ describe("LSP workspace handshake", () => {
     expect(lspClientManager.getWorkspaceUriForSession("session")).toBe(WORKSPACE_URI);
     expect(lspClientManager.getRepositorySubpaths("session")).toEqual(["backend"]);
 
-    lspClientManager.stop("session", "typescript");
+    expect(socket.sent).toEqual([]);
+    lspClientManager.detach("session", "typescript");
     expect(lspClientManager.getWorkspaceUriForSession("session")).toBe(WORKSPACE_URI);
     expect(lspClientManager.getRepositorySubpaths("session")).toEqual(["backend"]);
   });
 
-  it("falls back to the task-host path when its URI field is malformed", () => {
+  it("does not trust a non-file workspace URI or browser host-path metadata", async () => {
     createMonacoHarness([]);
     mocks.registerLspProviders.mockReturnValue([]);
-    lspClientManager.connect("session", "typescript");
+    lspClientManager.connect("session", "session", "typescript");
     const socket = FakeWebSocket.instances.at(-1);
     if (!socket) throw new Error(EXPECTED_SOCKET_ERROR);
     socket.open();
     socket.emitMessage(
       JSON.stringify({
-        status: "ready",
+        status: "attached",
+        language: "typescript",
+        generation: 1,
         workspacePath: WORKSPACE_PATH,
         workspaceUri: "https://invalid.example/workspace",
+        workspaceFolders: [],
+        serverCapabilities: {},
       }),
     );
-
-    const initialize = JSON.parse(socket.sent[0]) as { params: { rootUri: string } };
-    expect(initialize.params.rootUri).toBe(WORKSPACE_URI);
+    await vi.waitFor(() => {
+      expect(lspClientManager.getStatus("session", "typescript")).toEqual({ state: "ready" });
+    });
+    expect(lspClientManager.getWorkspaceUriForSession("session")).toBeNull();
+    expect(socket.sent).toEqual([]);
   });
 });
 

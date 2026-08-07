@@ -34,6 +34,7 @@ import type { TaskStatusSummary } from "@/lib/types/task-status-summary";
 import type { TaskMRAutomationOptions } from "@/lib/types/gitlab";
 import type { SystemMetricsSnapshot } from "./system";
 import type { FileChangeNotificationPayload } from "./workspace-files";
+import type { TaskLspLanguageSnapshot } from "./http-lsp";
 import type {
   AgentCapabilitiesPayload,
   SessionInfoPayload,
@@ -505,6 +506,7 @@ export type BackendMessageMap = OfficeBackendMessageMap &
     "task.updated": BackendMessage<"task.updated", TaskEventPayload>;
     "task.deleted": BackendMessage<"task.deleted", TaskEventPayload>;
     "task.state_changed": BackendMessage<"task.state_changed", TaskEventPayload>;
+    "task.lsp.changed": BackendMessage<"task.lsp.changed", TaskLspLanguageSnapshot>;
     "task.status_summary.updated": BackendMessage<
       "task.status_summary.updated",
       TaskStatusSummaryUpdatedPayload

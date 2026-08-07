@@ -4,12 +4,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 	"golang.org/x/sync/singleflight"
 
+	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agent/runtime/activity"
 	"github.com/kandev/kandev/internal/agentctl/tracing"
 	"github.com/kandev/kandev/internal/agentruntime"
@@ -35,6 +37,8 @@ var ErrSessionTerminal = errors.New("session is terminal")
 // startup window while preventing blocked instance I/O from owning the shared
 // session slot and its activity lease for the lifetime of the manager.
 const coalescedExecutionCreationTimeout = time.Minute
+
+const taskHostRuntimeSessionPrefix = "task-host-"
 
 // ResolveSessionRuntime returns the runtime selected for a session without
 // creating or resuming its execution. Session-scoped handlers can use this to
@@ -178,6 +182,124 @@ func (m *Manager) GetOrEnsureExecutionForEnvironment(ctx context.Context, taskEn
 		return nil, err
 	}
 	return value.(*AgentExecution), nil
+}
+
+// GetExecutionForEnvironment returns an already-running task-host execution
+// without creating or resuming resources. Authorization deliberately runs
+// before the in-memory cache lookup.
+func (m *Manager) GetExecutionForEnvironment(
+	ctx context.Context,
+	taskEnvironmentID string,
+) (*AgentExecution, bool, error) {
+	if taskEnvironmentID == "" {
+		return nil, false, fmt.Errorf("task_environment_id is required")
+	}
+	if check := m.environmentAccessCheck; check != nil {
+		if err := check(ctx, taskEnvironmentID); err != nil {
+			return nil, false, err
+		}
+	}
+	execution, exists := m.executionStore.GetByTaskEnvironmentID(taskEnvironmentID)
+	return execution, exists, nil
+}
+
+// GetOrEnsureTaskHostForEnvironment returns the one internal task-host
+// execution owned by a task environment. Session executions are deliberately
+// ignored: they may stop independently while task services remain warm.
+func (m *Manager) GetOrEnsureTaskHostForEnvironment(
+	ctx context.Context,
+	taskEnvironmentID string,
+) (*AgentExecution, error) {
+	if taskEnvironmentID == "" {
+		return nil, fmt.Errorf("task_environment_id is required")
+	}
+	if check := m.environmentAccessCheck; check != nil {
+		if err := check(ctx, taskEnvironmentID); err != nil {
+			return nil, err
+		}
+	}
+	if execution, exists := m.executionStore.GetTaskHostByEnvironmentID(taskEnvironmentID); exists {
+		return execution, nil
+	}
+
+	value, err := m.doCoalescedExecution(ctx, taskHostRuntimeSessionPrefix+taskEnvironmentID,
+		func(sharedCtx context.Context) (interface{}, error) {
+			if execution, exists := m.executionStore.GetTaskHostByEnvironmentID(taskEnvironmentID); exists {
+				return execution, nil
+			}
+			if m.workspaceInfoProvider == nil {
+				return nil, fmt.Errorf("workspace info provider not configured")
+			}
+			info, err := m.workspaceInfoProvider.GetWorkspaceInfoForEnvironment(sharedCtx, taskEnvironmentID)
+			if err != nil {
+				return nil, fmt.Errorf("failed to get workspace info for environment %s: %w", taskEnvironmentID, err)
+			}
+			if info == nil {
+				return nil, fmt.Errorf("task environment %s not found", taskEnvironmentID)
+			}
+			if info.TaskEnvironmentID != taskEnvironmentID {
+				return nil, fmt.Errorf("workspace info resolved environment %s, want %s", info.TaskEnvironmentID, taskEnvironmentID)
+			}
+			if info.TaskID == "" {
+				return nil, fmt.Errorf("task environment %s has no task_id", taskEnvironmentID)
+			}
+			if info.WorkspacePath == "" {
+				return nil, fmt.Errorf("%w: task environment %s has no workspace path yet", ErrSessionWorkspaceNotReady, taskEnvironmentID)
+			}
+			if err := m.ensureTaskHostTaskActive(sharedCtx, info.TaskID); err != nil {
+				return nil, err
+			}
+			return m.createTaskHostExecution(sharedCtx, info.TaskID, info)
+		})
+	if err != nil {
+		return nil, err
+	}
+	return value.(*AgentExecution), nil
+}
+
+// GetTaskHostForEnvironment returns only the dedicated task-host execution.
+// Authorization runs before the cache lookup.
+func (m *Manager) GetTaskHostForEnvironment(
+	ctx context.Context,
+	taskEnvironmentID string,
+) (*AgentExecution, bool, error) {
+	if taskEnvironmentID == "" {
+		return nil, false, fmt.Errorf("task_environment_id is required")
+	}
+	if check := m.environmentAccessCheck; check != nil {
+		if err := check(ctx, taskEnvironmentID); err != nil {
+			return nil, false, err
+		}
+	}
+	execution, exists := m.executionStore.GetTaskHostByEnvironmentID(taskEnvironmentID)
+	return execution, exists, nil
+}
+
+// StopTaskHostForEnvironment reaps the task-owned agentctl process tree without
+// touching any session execution sharing the same task environment.
+func (m *Manager) StopTaskHostForEnvironment(
+	ctx context.Context,
+	taskEnvironmentID, reason string,
+) error {
+	execution, exists, err := m.GetTaskHostForEnvironment(ctx, taskEnvironmentID)
+	if err != nil || !exists {
+		return err
+	}
+	return m.StopAgentWithReason(ctx, execution.ID, reason, false)
+}
+
+func (m *Manager) ensureTaskHostTaskActive(ctx context.Context, taskID string) error {
+	if m.executorProfileReader == nil {
+		return nil
+	}
+	cleanupActive, err := m.executorProfileReader.HasActiveTaskResourceCleanupJob(ctx, taskID)
+	if err != nil {
+		return fmt.Errorf("verify task-host cleanup admission: %w", err)
+	}
+	if cleanupActive {
+		return fmt.Errorf("verify task-host cleanup admission: %w for task %q", errTaskCleanupActive, taskID)
+	}
+	return nil
 }
 
 // EnsureWorkspaceExecutionForSession ensures an agentctl execution exists for a specific task session.
@@ -537,34 +659,42 @@ func (m *Manager) verifyPassthroughEnabled(ctx context.Context, sessionID, profi
 	return profileInfo, nil
 }
 
-// createExecution creates an agentctl execution.
+// createExecution creates a session-owned agentctl execution.
 // The agent subprocess is NOT started - call ConfigureAgent + Start explicitly.
 func (m *Manager) createExecution(ctx context.Context, taskID string, info *WorkspaceInfo) (*AgentExecution, error) {
+	return m.createExecutionForPurpose(ctx, taskID, info, false)
+}
+
+// createTaskHostExecution creates the internal agentctl execution used by
+// task-owned services. It does not inherit session runtime identity, resume
+// state, persistence, traces, lifecycle events, or cleanup ownership.
+func (m *Manager) createTaskHostExecution(
+	ctx context.Context,
+	taskID string,
+	info *WorkspaceInfo,
+) (*AgentExecution, error) {
+	return m.createExecutionForPurpose(ctx, taskID, info, true)
+}
+
+func (m *Manager) createExecutionForPurpose(
+	ctx context.Context,
+	taskID string,
+	info *WorkspaceInfo,
+	isTaskHost bool,
+) (*AgentExecution, error) {
 	if info == nil {
 		return nil, fmt.Errorf("workspace info is required")
 	}
-	// A terminal session can never gain an execution, so reject it before
-	// reconciling the workspace, taking an activity lease, or creating a
-	// runtime instance. User-facing panels (terminal, git, files) reconnect on
-	// a timer; without this every retry paid for a full instance creation that
-	// the post-creation check below tore straight back down. That check stays —
-	// it guards the session that terminalizes *during* creation.
-	if err := m.ensureLaunchSessionStillActive(ctx, info.SessionID); err != nil {
-		return nil, err
-	}
-	owner := ownedDirectoryLinkOwner(taskID, info.TaskDirName)
-	if err := reconcileWorkspaceSources(ctx, info.WorkspacePath, info.WorkspaceFolders, owner); err != nil {
-		return nil, err
-	}
-	if info.ExecutorType == string(models.ExecutorTypeLocal) || info.ExecutorType == "local_pc" {
-		if err := reconcileWorkspaceRepositories(info.WorkspacePath, info.WorkspaceRepositories, m.logger, owner); err != nil {
+	// Session-owned executions must reject terminal sessions before workspace
+	// reconciliation or runtime creation. Task hosts use task-level admission
+	// and deliberately have no owning session.
+	if !isTaskHost {
+		if err := m.ensureLaunchSessionStillActive(ctx, info.SessionID); err != nil {
 			return nil, err
 		}
 	}
-	if info.ExecutorType == string(models.ExecutorTypeWorktree) {
-		if err := m.reconcileWorkspaceWorktrees(ctx, taskID, info); err != nil {
-			return nil, err
-		}
+	if err := m.prepareExecutionWorkspace(ctx, taskID, info); err != nil {
+		return nil, err
 	}
 	activityLease, err := m.acquireActivity(ctx, activity.KindExecutionStarting)
 	if err != nil {
@@ -579,34 +709,143 @@ func (m *Manager) createExecution(ctx context.Context, taskID string, info *Work
 		return nil, fmt.Errorf("no runtime configured: %w", err)
 	}
 
-	if info.AgentID == "" {
-		return nil, fmt.Errorf("agent ID is required in WorkspaceInfo")
+	plan, err := m.buildExecutionCreatePlan(ctx, taskID, info, isTaskHost)
+	if err != nil {
+		return nil, err
+	}
+	req := plan.request
+
+	if err := resumeRemoteInstancePreflight(ctx, rt, req); err != nil {
+		return nil, err
 	}
 
-	executionID := uuid.New().String()
-
-	agentConfig, ok := m.registry.Get(info.AgentID)
-	if !ok {
-		return nil, fmt.Errorf("agent type %q not found in registry", info.AgentID)
+	runtimeInstance, err := rt.CreateInstance(ctx, req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create execution: %w", err)
 	}
 
-	var profileInfo *AgentProfileInfo
-	executionProfileID := workspaceExecutionProfileID(info)
-	if executionProfileID != "" && m.profileResolver != nil {
-		resolvedProfile, err := m.profileResolver.ResolveProfile(ctx, executionProfileID)
-		if err != nil {
-			m.logger.Warn("failed to resolve profile for workspace execution",
-				zap.String("execution_profile_id", executionProfileID),
-				zap.Error(err))
-		} else {
-			profileInfo = resolvedProfile
+	execution := runtimeInstance.ToAgentExecution(req)
+	execution.RuntimeName = rt.Name()
+	// Set before executionStore.Add: concurrent passthrough callers must not
+	// observe a half-initialized session resume intent. Task-host reuse uses
+	// PreviousExecutionID only as a runtime transport detail.
+	if !isTaskHost {
+		applyResumeIntent(execution, req)
+	}
+	return m.finishCreatedExecution(ctx, taskID, info, isTaskHost, plan, rt, runtimeInstance, execution)
+}
+
+func (m *Manager) prepareExecutionWorkspace(ctx context.Context, taskID string, info *WorkspaceInfo) error {
+	owner := ownedDirectoryLinkOwner(taskID, info.TaskDirName)
+	if err := reconcileWorkspaceSources(ctx, info.WorkspacePath, info.WorkspaceFolders, owner); err != nil {
+		return err
+	}
+	if info.ExecutorType == string(models.ExecutorTypeLocal) || info.ExecutorType == legacyExecutorTypeLocalPC {
+		if err := reconcileWorkspaceRepositories(info.WorkspacePath, info.WorkspaceRepositories, m.logger, owner); err != nil {
+			return err
 		}
+	}
+	if info.ExecutorType == string(models.ExecutorTypeWorktree) {
+		if err := m.reconcileWorkspaceWorktrees(ctx, taskID, info); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+type executionCreatePlan struct {
+	executionID string
+	request     *ExecutorCreateRequest
+	profileInfo *AgentProfileInfo
+}
+
+type executionEnvironmentPlan struct {
+	env                       map[string]string
+	profileInfo               *AgentProfileInfo
+	executionProfileID        string
+	autoApprove               bool
+	autoApproveOverride       *bool
+	approvedSecretEnvironment []string
+	managedGoCachePath        string
+}
+
+func (m *Manager) buildExecutionCreatePlan(
+	ctx context.Context,
+	taskID string,
+	info *WorkspaceInfo,
+	isTaskHost bool,
+) (*executionCreatePlan, error) {
+	executionID := uuid.New().String()
+	if isTaskHost {
+		executionID = taskHostExecutionID(info.TaskEnvironmentID)
+	}
+
+	agentConfig, err := m.executionAgentConfig(info, isTaskHost)
+	if err != nil {
+		return nil, err
+	}
+	environment, err := m.buildExecutionEnvironmentPlan(ctx, taskID, info, isTaskHost, executionID, agentConfig)
+	if err != nil {
+		return nil, err
+	}
+	metadata := executionMetadata(info.Metadata, isTaskHost)
+	if environment.managedGoCachePath != "" {
+		metadata[managedGoCacheMetadataKey] = environment.managedGoCachePath
+	}
+	remoteContributions, err := remoteContributionsFromMetadata(metadata)
+	if err != nil {
+		return nil, err
+	}
+	runtimeDetails := m.executionRuntimeDetails(ctx, info, isTaskHost, executionID, metadata)
+	protocol := ""
+	if agentConfig != nil && agentConfig.Runtime() != nil {
+		protocol = string(agentConfig.Runtime().Protocol)
+	}
+	req := &ExecutorCreateRequest{
+		InstanceID:                     executionID,
+		TaskID:                         taskID,
+		SessionID:                      runtimeDetails.sessionID,
+		TaskEnvironmentID:              info.TaskEnvironmentID,
+		IsTaskHost:                     isTaskHost,
+		AgentProfileID:                 environment.executionProfileID,
+		OfficeAgentProfileID:           runtimeDetails.officeAgentProfileID,
+		WorkspacePath:                  info.WorkspacePath,
+		WorkspaceSourceRoots:           workspaceSourceRoots(info.WorkspaceFolders, info.WorkspaceRepositories),
+		Protocol:                       protocol,
+		Env:                            environment.env,
+		AutoApprovePermissions:         environment.autoApprove,
+		AutoApprovePermissionsOverride: environment.autoApproveOverride,
+		AgentConfig:                    agentConfig,
+		Metadata:                       metadata,
+		ApprovedSecretEnvKeys:          append([]string(nil), environment.approvedSecretEnvironment...),
+		RemoteContributions:            remoteContributions,
+		PreviousExecutionID:            runtimeDetails.previousExecutionID,
+		AuthToken:                      runtimeDetails.authToken,
+		BootstrapNonce:                 runtimeDetails.bootstrapNonce,
+	}
+	return &executionCreatePlan{executionID: executionID, request: req, profileInfo: environment.profileInfo}, nil
+}
+
+func (m *Manager) buildExecutionEnvironmentPlan(
+	ctx context.Context,
+	taskID string,
+	info *WorkspaceInfo,
+	isTaskHost bool,
+	executionID string,
+	agentConfig agents.Agent,
+) (*executionEnvironmentPlan, error) {
+	profileInfo, executionProfileID := m.executionProfile(ctx, info, isTaskHost)
+	managedAgentProfileID := info.AgentProfileID
+	managedSessionID := info.SessionID
+	if isTaskHost {
+		managedAgentProfileID = ""
+		managedSessionID = taskHostRuntimeSessionPrefix + info.TaskEnvironmentID
 	}
 	managedReq := &LaunchRequest{
 		TaskID:             taskID,
 		WorkspaceID:        info.WorkspaceID,
-		SessionID:          info.SessionID,
-		AgentProfileID:     info.AgentProfileID,
+		SessionID:          managedSessionID,
+		AgentProfileID:     managedAgentProfileID,
 		ExecutionProfileID: executionProfileID,
 		ExecutorType:       info.ExecutorType,
 		Env:                make(map[string]string),
@@ -630,104 +869,218 @@ func (m *Manager) createExecution(ctx context.Context, taskID string, info *Work
 	if err != nil {
 		return nil, fmt.Errorf("build recovered environment: %w", err)
 	}
-	autoApprove := false
-	var autoApproveOverride *bool
+	plan := &executionEnvironmentPlan{
+		env: env, profileInfo: profileInfo, executionProfileID: executionProfileID,
+		approvedSecretEnvironment: managedReq.ApprovedSecretEnvKeys,
+		managedGoCachePath:        managedReq.managedGoCachePath,
+	}
 	if profileInfo != nil {
-		autoApprove = profileInfo.AutoApprove
-		autoApproveOverride = boolPtr(profileInfo.AutoApprove)
+		plan.autoApprove = profileInfo.AutoApprove
+		plan.autoApproveOverride = boolPtr(profileInfo.AutoApprove)
 	}
-	if len(env) == 0 {
-		env = nil
+	if len(plan.env) == 0 {
+		plan.env = nil
 	}
-	metadata := make(map[string]interface{}, len(info.Metadata)+1)
-	for key, value := range info.Metadata {
-		metadata[key] = value
+	return plan, nil
+}
+
+func (m *Manager) executionAgentConfig(info *WorkspaceInfo, isTaskHost bool) (agents.Agent, error) {
+	if isTaskHost {
+		return nil, nil
 	}
-	if managedReq.managedGoCachePath != "" {
-		metadata[managedGoCacheMetadataKey] = managedReq.managedGoCachePath
+	if info.AgentID == "" {
+		return nil, fmt.Errorf("agent ID is required in WorkspaceInfo")
 	}
-	remoteContributions, err := remoteContributionsFromMetadata(metadata)
+	agentConfig, ok := m.registry.Get(info.AgentID)
+	if !ok {
+		return nil, fmt.Errorf("agent type %q not found in registry", info.AgentID)
+	}
+	return agentConfig, nil
+}
+
+func (m *Manager) executionProfile(
+	ctx context.Context,
+	info *WorkspaceInfo,
+	isTaskHost bool,
+) (*AgentProfileInfo, string) {
+	profileID := workspaceExecutionProfileID(info)
+	if isTaskHost {
+		return nil, ""
+	}
+	if profileID == "" || m.profileResolver == nil {
+		return nil, profileID
+	}
+	profile, err := m.profileResolver.ResolveProfile(ctx, profileID)
 	if err != nil {
+		m.logger.Warn("failed to resolve profile for workspace execution",
+			zap.String("execution_profile_id", profileID), zap.Error(err))
+		return nil, profileID
+	}
+	return profile, profileID
+}
+
+type executionRuntimeIdentity struct {
+	sessionID            string
+	previousExecutionID  string
+	officeAgentProfileID string
+	authToken            string
+	bootstrapNonce       string
+}
+
+func (m *Manager) executionRuntimeDetails(
+	ctx context.Context,
+	info *WorkspaceInfo,
+	isTaskHost bool,
+	executionID string,
+	metadata map[string]interface{},
+) executionRuntimeIdentity {
+	details := executionRuntimeIdentity{
+		sessionID: info.SessionID, previousExecutionID: info.AgentExecutionID,
+		officeAgentProfileID: info.AgentProfileID,
+	}
+	if !isTaskHost {
+		details.authToken = m.revealRuntimeSecret(ctx, info.Metadata, MetadataKeyAuthTokenSecret)
+		details.bootstrapNonce = m.revealRuntimeSecret(ctx, info.Metadata, MetadataKeyBootstrapNonceSecret)
+		return details
+	}
+	details.sessionID = taskHostRuntimeSessionPrefix + info.TaskEnvironmentID
+	details.previousExecutionID = ""
+	details.officeAgentProfileID = ""
+	metadata["task_host"] = true
+	if info.ExecutorType == string(models.ExecutorTypeLocalDocker) {
+		// A synthetic instance inside the existing task container avoids
+		// reusing a session-owned agentctl while retaining container reconnect.
+		details.previousExecutionID = executionID
+		details.authToken = m.revealRuntimeSecret(ctx, info.Metadata, MetadataKeyAuthTokenSecret)
+		details.bootstrapNonce = m.revealRuntimeSecret(ctx, info.Metadata, MetadataKeyBootstrapNonceSecret)
+	}
+	return details
+}
+
+func (m *Manager) finishCreatedExecution(
+	ctx context.Context,
+	taskID string,
+	info *WorkspaceInfo,
+	isTaskHost bool,
+	plan *executionCreatePlan,
+	rt ExecutorBackend,
+	runtimeInstance *ExecutorInstance,
+	execution *AgentExecution,
+) (*AgentExecution, error) {
+	if err := m.prepareCreatedExecution(ctx, taskID, info, isTaskHost, plan, rt, runtimeInstance, execution); err != nil {
 		return nil, err
 	}
-
-	req := &ExecutorCreateRequest{
-		InstanceID:                     executionID,
-		TaskID:                         taskID,
-		SessionID:                      info.SessionID,
-		TaskEnvironmentID:              info.TaskEnvironmentID,
-		AgentProfileID:                 executionProfileID,
-		OfficeAgentProfileID:           info.AgentProfileID,
-		WorkspacePath:                  info.WorkspacePath,
-		WorkspaceSourceRoots:           workspaceSourceRoots(info.WorkspaceFolders, info.WorkspaceRepositories),
-		Protocol:                       string(agentConfig.Runtime().Protocol),
-		Env:                            env,
-		AutoApprovePermissions:         autoApprove,
-		AutoApprovePermissionsOverride: autoApproveOverride,
-		AgentConfig:                    agentConfig,
-		Metadata:                       metadata,
-		ApprovedSecretEnvKeys:          append([]string(nil), managedReq.ApprovedSecretEnvKeys...),
-		PreviousExecutionID:            info.AgentExecutionID,
-		AuthToken:                      m.revealRuntimeSecret(ctx, info.Metadata, MetadataKeyAuthTokenSecret),
-		BootstrapNonce:                 m.revealRuntimeSecret(ctx, info.Metadata, MetadataKeyBootstrapNonceSecret),
-		RemoteContributions:            remoteContributions,
+	winner, registered, err := m.registerCreatedExecution(ctx, info, rt, runtimeInstance, execution)
+	if err != nil || !registered {
+		return winner, err
 	}
-
-	if err := resumeRemoteInstancePreflight(ctx, rt, req); err != nil {
-		return nil, err
+	if isTaskHost {
+		return m.finishTaskHostExecution(ctx, taskID, info, plan.executionID, rt, runtimeInstance, execution)
 	}
+	return m.finishSessionExecution(ctx, taskID, info, plan.executionID, rt, runtimeInstance, execution)
+}
 
-	runtimeInstance, err := rt.CreateInstance(ctx, req)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create execution: %w", err)
-	}
-
-	execution := runtimeInstance.ToAgentExecution(req)
-	execution.RuntimeName = rt.Name()
-	// Set before executionStore.Add: once the execution is registered, a
-	// concurrent EnsurePassthroughExecution can reach it, and it must never
-	// observe a half-initialised resume intent.
-	applyResumeIntent(execution, req)
-
+func (m *Manager) prepareCreatedExecution(
+	ctx context.Context,
+	taskID string,
+	info *WorkspaceInfo,
+	isTaskHost bool,
+	plan *executionCreatePlan,
+	rt ExecutorBackend,
+	runtimeInstance *ExecutorInstance,
+	execution *AgentExecution,
+) error {
 	// Cache only agent-profile values for the best-effort configure fallback.
 	// The effective runtime snapshot (including repository secrets) is already
 	// captured by ToAgentExecution and must not be mislabeled as profile data.
-	if profileInfo != nil && len(profileInfo.EnvVars) > 0 {
-		m.cacheResolvedProfileEnv(execution, m.resolveAgentProfileEnvVars(ctx, profileInfo.EnvVars))
+	if plan.profileInfo != nil && len(plan.profileInfo.EnvVars) > 0 {
+		m.cacheResolvedProfileEnv(execution, m.resolveAgentProfileEnvVars(ctx, plan.profileInfo.EnvVars))
 	}
-
-	// Set the ACP session ID for session resumption
-	if info.ACPSessionID != "" {
-		execution.ACPSessionID = info.ACPSessionID
+	if isTaskHost {
+		return nil
 	}
-
-	// Create trace span for workspace-only execution
+	execution.ACPSessionID = info.ACPSessionID
 	_, sessionSpan := tracing.TraceSessionStart(
-		context.Background(), taskID, info.SessionID, executionID,
+		context.Background(), taskID, info.SessionID, plan.executionID,
 	)
 	execution.SetSessionSpan(sessionSpan)
 	if execution.agentctl != nil {
 		execution.agentctl.SetTraceContext(execution.SessionTraceContext())
 	}
-
 	if err := m.ensureLaunchSessionStillActive(ctx, info.SessionID); err != nil {
 		m.rollbackLaunchExecution(ctx, rt, runtimeInstance, execution, "session ended during runtime creation")
+		return err
+	}
+	return nil
+}
+
+func (m *Manager) registerCreatedExecution(
+	ctx context.Context,
+	info *WorkspaceInfo,
+	rt ExecutorBackend,
+	runtimeInstance *ExecutorInstance,
+	execution *AgentExecution,
+) (*AgentExecution, bool, error) {
+	addErr := m.executionStore.Add(execution)
+	if addErr == nil {
+		return execution, true, nil
+	}
+	// Lost a race after instance creation. Reap the loser and return the
+	// already-registered task-host or session winner.
+	if errors.Is(addErr, ErrExecutionAlreadyExistsForSession) {
+		m.rollbackRacedExecution(ctx, rt, runtimeInstance, execution)
+		if existing, ok := m.executionStore.GetBySessionID(info.SessionID); ok {
+			return existing, false, nil
+		}
+	}
+	if errors.Is(addErr, ErrExecutionAlreadyExistsForTaskHost) {
+		m.rollbackRacedExecution(ctx, rt, runtimeInstance, execution)
+		if existing, ok := m.executionStore.GetTaskHostByEnvironmentID(info.TaskEnvironmentID); ok {
+			return existing, false, nil
+		}
+	}
+	return nil, false, fmt.Errorf("failed to register execution: %w", addErr)
+}
+
+func (m *Manager) finishTaskHostExecution(
+	ctx context.Context,
+	taskID string,
+	info *WorkspaceInfo,
+	executionID string,
+	rt ExecutorBackend,
+	runtimeInstance *ExecutorInstance,
+	execution *AgentExecution,
+) (*AgentExecution, error) {
+	if err := m.ensureTaskHostTaskActive(ctx, taskID); err != nil {
+		m.rollbackTaskHostExecution(rt, runtimeInstance, execution, "task cleanup won task-host registration")
 		return nil, err
 	}
-
-	if addErr := m.executionStore.Add(execution); addErr != nil {
-		// Lost a race: another path created an execution for this session
-		// between our check and our Add. Roll back the runtime instance we
-		// just spawned (otherwise its subprocess is orphaned) and return the
-		// winner so the caller observes a single execution per session.
-		if errors.Is(addErr, ErrExecutionAlreadyExistsForSession) {
-			m.rollbackRacedExecution(ctx, rt, runtimeInstance, execution)
-			if existing, ok := m.executionStore.GetBySessionID(info.SessionID); ok {
-				return existing, nil
-			}
-		}
-		return nil, fmt.Errorf("failed to register execution: %w", addErr)
+	if execution.agentctl == nil {
+		m.rollbackTaskHostExecution(rt, runtimeInstance, execution, "task host has no control client")
+		return nil, fmt.Errorf("task-host execution has no agentctl client")
 	}
+	if err := execution.agentctl.WaitForReady(ctx, coalescedExecutionCreationTimeout); err != nil {
+		m.rollbackTaskHostExecution(rt, runtimeInstance, execution, "task host did not become ready")
+		return nil, fmt.Errorf("task-host agentctl not ready: %w", err)
+	}
+	execution.MarkAgentctlReady()
+	m.logger.Info("task-host execution created",
+		zap.String("execution_id", executionID),
+		zap.String("task_id", taskID),
+		zap.String("task_environment_id", info.TaskEnvironmentID),
+		zap.Stringer("runtime", execution.RuntimeName))
+	return execution, nil
+}
+
+func (m *Manager) finishSessionExecution(
+	ctx context.Context,
+	taskID string,
+	info *WorkspaceInfo,
+	executionID string,
+	rt ExecutorBackend,
+	runtimeInstance *ExecutorInstance,
+	execution *AgentExecution,
+) (*AgentExecution, error) {
 	// Persist before the final session read so concurrent deletion cleanup can
 	// inventory this execution even if it started between Add and validation.
 	if err := m.persistExecutorRunningResult(ctx, execution); err != nil {
@@ -763,6 +1116,24 @@ func (m *Manager) createExecution(ctx context.Context, taskID string, info *Work
 		zap.Stringer("runtime", execution.RuntimeName))
 
 	return execution, nil
+}
+
+func taskHostExecutionID(taskEnvironmentID string) string {
+	return uuid.NewSHA1(
+		uuid.NameSpaceOID,
+		[]byte("kandev/task-host/"+taskEnvironmentID),
+	).String()
+}
+
+func executionMetadata(source map[string]interface{}, taskHost bool) map[string]interface{} {
+	metadata := make(map[string]interface{}, len(source)+1)
+	for key, value := range source {
+		if taskHost && (strings.HasPrefix(key, "env_secret_id_") || IsSessionScopedMetadataKey(key)) {
+			continue
+		}
+		metadata[key] = value
+	}
+	return metadata
 }
 
 func (m *Manager) reconcileWorkspaceWorktrees(ctx context.Context, taskID string, info *WorkspaceInfo) error {
@@ -827,6 +1198,31 @@ func (m *Manager) rollbackRacedExecution(ctx context.Context, rt ExecutorBackend
 		execution.agentctl.Close()
 	}
 	execution.EndSessionSpan()
+}
+
+func (m *Manager) rollbackTaskHostExecution(
+	rt ExecutorBackend,
+	runtimeInstance *ExecutorInstance,
+	execution *AgentExecution,
+	reason string,
+) {
+	m.logger.Warn("rolling back task-host execution",
+		zap.String("execution_id", execution.ID),
+		zap.String("task_environment_id", execution.TaskEnvironmentID),
+		zap.String("reason", reason))
+	m.executionStore.Remove(execution.ID)
+	cleanupCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if rt != nil && runtimeInstance != nil {
+		if err := rt.StopInstance(cleanupCtx, runtimeInstance, true); err != nil {
+			m.logger.Warn("failed to stop task-host runtime during rollback",
+				zap.String("execution_id", execution.ID),
+				zap.Error(err))
+		}
+	}
+	if execution.agentctl != nil {
+		execution.agentctl.Close()
+	}
 }
 
 const (

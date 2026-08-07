@@ -2,6 +2,7 @@ package lifecycle
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/url"
 	"path/filepath"
@@ -35,6 +36,14 @@ func getMetadataString(metadata map[string]interface{}, key string) string {
 		return v
 	}
 	return ""
+}
+
+func getMetadataBool(metadata map[string]interface{}, key string) bool {
+	if metadata == nil {
+		return false
+	}
+	value, _ := metadata[key].(bool)
+	return value
 }
 
 // getMetadataStringMap extracts a map[string]string at key from metadata. The
@@ -399,6 +408,18 @@ type reconnectControlClient interface {
 	CreateInstance(context.Context, *agentctl.CreateInstanceRequest) (*agentctl.CreateInstanceResponse, error)
 }
 
+type instanceControlDeleter interface {
+	DeleteInstance(context.Context, string) error
+}
+
+func deleteDockerTaskHostInstance(ctx context.Context, control instanceControlDeleter, instanceID string) error {
+	err := control.DeleteInstance(ctx, instanceID)
+	if errors.Is(err, agentctl.ErrInstanceNotFound) {
+		return nil
+	}
+	return err
+}
+
 // bringupAgentctl health-checks agentctl on the container, finds (or creates)
 // the agent instance, transparently re-handshakes on a 401, and returns the
 // resolved instance endpoint for the user-facing client.
@@ -665,6 +686,19 @@ func (r *DockerExecutor) StopInstance(ctx context.Context, instance *ExecutorIns
 	if instance.ContainerID == "" {
 		return nil // No container to stop
 	}
+	if getMetadataBool(instance.Metadata, "task_host") {
+		// A task host owns one agentctl instance inside the task environment's
+		// shared container; it never owns the container itself. DELETE triggers
+		// StopForTeardown, which reaps the LSP process tree while preserving every
+		// session and the durable workspace in that task environment.
+		if err := r.deleteTaskHostInstance(ctx, instance); err != nil {
+			return fmt.Errorf("failed to delete task-host agentctl instance: %w", err)
+		}
+		r.logger.Info("deleted task-host instance and preserved docker task environment",
+			zap.String("container_id", instance.ContainerID),
+			zap.String("instance_id", instance.InstanceID))
+		return nil
+	}
 
 	// Plain "stop the agent" runs (e.g. user clicks Stop, then later wants to
 	// resume) must not stop the Docker container after agentctl stopped cleanly.
@@ -715,6 +749,19 @@ func (r *DockerExecutor) StopInstance(ctx context.Context, instance *ExecutorIns
 	}
 
 	return nil
+}
+
+func (r *DockerExecutor) deleteTaskHostInstance(ctx context.Context, instance *ExecutorInstance) error {
+	dockerClient, _, err := r.ensureClient()
+	if err != nil {
+		return fmt.Errorf("docker unavailable: %w", err)
+	}
+	controlHost, controlPort := resolveDockerEndpoint(
+		ctx, dockerClient, instance.ContainerID, AgentCtlPort, instance.ContainerIP, r.logger,
+	)
+	control := agentctl.NewControlClient(controlHost, controlPort, r.logger,
+		agentctl.WithControlAuthToken(instance.AuthToken))
+	return deleteDockerTaskHostInstance(ctx, control, instance.InstanceID)
 }
 
 // shouldTeardownDockerContainer extends terminal cleanup with stale execution
