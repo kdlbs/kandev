@@ -13,6 +13,7 @@ import {
   IconLoader2,
 } from "@tabler/icons-react";
 import { cn } from "@/lib/utils";
+import { useTranslation } from "react-i18next";
 
 export type MatchInfo = {
   current: number;
@@ -89,6 +90,7 @@ function ActionButtons({
   onPrev: () => void;
   onClose: () => void;
 }) {
+  const { t } = useTranslation();
   return (
     <>
       <Button
@@ -96,7 +98,7 @@ function ActionButtons({
         variant="ghost"
         size="icon-sm"
         onClick={onPrev}
-        title="Previous (Shift+Enter)"
+        title={t("common:previousShiftEnter")}
         className="cursor-pointer"
       >
         <IconChevronUp />
@@ -106,7 +108,7 @@ function ActionButtons({
         variant="ghost"
         size="icon-sm"
         onClick={onNext}
-        title="Next (Enter)"
+        title={t("common:nextEnter")}
         className="cursor-pointer"
       >
         <IconChevronDown />
@@ -116,7 +118,7 @@ function ActionButtons({
         variant="ghost"
         size="icon-sm"
         onClick={onClose}
-        title="Close (Esc)"
+        title={t("common:closeEsc")}
         className="cursor-pointer"
       >
         <IconX />
@@ -198,13 +200,17 @@ export function PanelSearchBar({
   onClose,
   matchInfo,
   isLoading = false,
-  placeholder = "Search…",
+  placeholder,
   toggles,
   hasError = false,
   errorText,
   debounceMs = 150,
   className,
 }: PanelSearchBarProps) {
+  const { t } = useTranslation();
+  // Resolved here rather than as a default parameter: a default is evaluated
+  // before `t` exists, and a module-scope `t()` would freeze at the boot locale.
+  const resolvedPlaceholder = placeholder ?? t("common:searchEllipsis");
   const [localValue, setLocalValue] = useState(value);
   const inputRef = useRef<HTMLInputElement | null>(null);
   const { emit, flush } = useDebouncedChange(onChange, debounceMs);
@@ -257,19 +263,19 @@ export function PanelSearchBar({
           localValue={localValue}
           onChange={handleChange}
           onKeyDown={handleKeyDown}
-          placeholder={placeholder}
+          placeholder={resolvedPlaceholder}
           isLoading={isLoading}
           hasError={hasError}
           inputRef={inputRef}
         />
         {matchInfo && <MatchCounter info={matchInfo} />}
         {toggles?.caseSensitive && (
-          <ToggleButton state={toggles.caseSensitive} title="Match case">
+          <ToggleButton state={toggles.caseSensitive} title={t("common:matchCase")}>
             <IconLetterCase />
           </ToggleButton>
         )}
         {toggles?.regex && (
-          <ToggleButton state={toggles.regex} title="Regular expression">
+          <ToggleButton state={toggles.regex} title={t("common:regularExpression")}>
             <IconRegex />
           </ToggleButton>
         )}

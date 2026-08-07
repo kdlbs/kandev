@@ -1749,4 +1749,34 @@ export const i18nGuardFiles = [
   "components/task-create-dialog-source-mode.tsx",
   "components/task-create-dialog-workspace-repo-chips.tsx",
   "components/task-preview-panel.tsx",
+
+  // The last batch of live user-facing surfaces before `app/office`: the session
+  // prepare panel, the onboarding agents step, the host system-metrics readout
+  // and system-health issues dialog, the shared panel search bar, the mermaid
+  // diagram block, the settings agent card, the two release-notes surfaces, and
+  // the shared data-table pair.
+  //
+  // Listed FILE BY FILE rather than by directory. Every one of these directories
+  // still holds un-migrated files — `components/settings/` alone has hundreds —
+  // so a `components/settings/*.tsx` glob would claim work this PR did not do.
+  //
+  // Deliberately NOT migrated in these files, because each is protocol or data
+  // rather than copy: the `%`/`s`/`ms`/`m` unit suffixes and the `-` empty marker
+  // in the metrics readout, the `{workspaceId}` URL template token in the health
+  // dialog, the `"ellipsis"` page sentinel in the data-table pagination, the
+  // `v` version prefix and the `0 / 0` match counter, the `[-]`/`[+]` toggle
+  // glyphs in the prepare panel, and every mermaid theme/security identifier and
+  // CSS value in the diagram block. `metricLabel`'s wire ids stay untranslated
+  // on the `?? id` fallback path for the same reason.
+  "components/onboarding/step-agents.tsx",
+  "components/release-notes/release-notes-button.tsx",
+  "components/release-notes/release-notes-dialog.tsx",
+  "components/search/panel-search-bar.tsx",
+  "components/session/prepare-progress.tsx",
+  "components/settings/agent-card.tsx",
+  "components/shared/mermaid-block.tsx",
+  "components/system-health/health-indicator.tsx",
+  "components/system-metrics/status-surface-metrics.tsx",
+  "components/ui/data-table-pagination.tsx",
+  "components/ui/data-table.tsx",
 ];
