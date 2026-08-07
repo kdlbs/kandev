@@ -727,12 +727,19 @@ jobs:
             platform: macos-arm64
             goos: darwin
             goarch: arm64
-          - os: ubuntu-latest
+          # Windows builds natively instead of cross-compiling from Linux, so
+          # signtool can sign the binaries in place before they are packaged.
+          # The runner image ships gcc, which CGO still needs for the fts5 tag.
+          - os: windows-latest
             platform: windows-x64
             goos: windows
             goarch: amd64
-            cc: x86_64-w64-mingw32-gcc
     runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        # These steps are POSIX shell; windows-latest would otherwise run them
+        # under pwsh. Git Bash is on the image and provides tar and shasum.
+        shell: bash
     env:
       CGO_ENABLED: 1
       GOOS: ${{ matrix.goos }}
@@ -751,12 +758,6 @@ jobs:
           name: web-bundle
           path: apps/backend/internal/webapp/embedded/generated
 
-      - name: Install cross-compilation tools
-        if: matrix.cc
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y gcc-mingw-w64-x86-64
-
       # The `fts5` build tag is REQUIRED on the kandev binary. The office
       # task search migrations create a `tasks_fts` virtual table using
       # `USING fts5(...)`; without the tag, mattn/go-sqlite3 lacks the
@@ -768,7 +769,6 @@ jobs:
       # reports the released tag instead of the build-time default "dev".
       - name: Build backend binaries
         env:
-          CC: ${{ matrix.cc || '' }}
           KANDEV_VERSION: ${{ needs.nightly-prepare.result == 'success' && needs.nightly-prepare.outputs.tag || needs.prepare.outputs.tag }}
         run: |
           test -f apps/backend/internal/webapp/embedded/generated/index.html
@@ -798,6 +798,44 @@ jobs:
           GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 CC= go build -ldflags "${LDFLAGS}" -o bin/agentctl-darwin-arm64 ./cmd/agentctl
           GOOS=darwin GOARCH=amd64 CGO_ENABLED=0 CC= go build -ldflags "${LDFLAGS}" -o bin/agentctl-darwin-amd64 ./cmd/agentctl
 
+      # Signing happens here, before packaging, so the archive published to the
+      # release carries signed binaries. Previously only build-desktop signed,
+      # and only its own copy under src-tauri/resources — so Scoop, npm and
+      # direct downloads shipped unsigned executables even when a certificate
+      # was configured. Unsigned Go binaries that spawn children and open
+      # sockets are a well-known Defender heuristic target; see #2312.
+      - name: Detect Windows signing inputs
+        if: matrix.goos == 'windows'
+        env:
+          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+        run: |
+          set -euo pipefail
+          if bash scripts/release/desktop-signing-ready.sh windows >/dev/null 2>&1; then
+            echo "WINDOWS_SIGNING_ENABLED=true" >> "$GITHUB_ENV"
+          else
+            echo "WINDOWS_SIGNING_ENABLED=false" >> "$GITHUB_ENV"
+            echo "::notice::Windows signing inputs are incomplete; publishing an unsigned runtime bundle."
+          fi
+
+      - name: Sign Windows runtime binaries
+        if: matrix.goos == 'windows' && env.WINDOWS_SIGNING_ENABLED == 'true'
+        shell: pwsh
+        env:
+          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+          WINDOWS_TIMESTAMP_URL: ${{ secrets.WINDOWS_TIMESTAMP_URL }}
+          WINDOWS_SIGNTOOL_PATH: ${{ secrets.WINDOWS_SIGNTOOL_PATH }}
+        run: |
+          foreach ($binary in @("kandev.exe", "agentctl.exe")) {
+            $path = Join-Path $env:GITHUB_WORKSPACE "apps/backend/bin/$binary"
+            if (!(Test-Path -LiteralPath $path)) {
+              Write-Error "Missing Windows runtime binary at $path"
+              exit 1
+            }
+            & "$env:GITHUB_WORKSPACE/apps/desktop/src-tauri/windows-sign.ps1" -Path $path
+          }
+
       - name: Package bundle
         run: |
           rm -rf dist/kandev
@@ -818,8 +856,17 @@ jobs:
           # Chocolatey's unzip helper needs two 7-Zip passes for a .tar.gz.
           # The zip is published alongside the tarball, not instead of it —
           # Homebrew and the npm runtime packages still read the tarball.
+          # 7z rather than zip: the Windows bundle now builds on windows-latest,
+          # and Git Bash there has no zip. 7-Zip is on the image but the runner
+          # docs do not promise it on PATH, so fall back to its install path
+          # rather than failing the release on a lookup.
           if [ "${{ matrix.goos }}" = "windows" ]; then
-            zip -qr "kandev-${{ matrix.platform }}.zip" kandev
+            sevenzip=7z
+            if ! command -v "$sevenzip" >/dev/null 2>&1; then
+              sevenzip="/c/Program Files/7-Zip/7z.exe"
+              test -x "$sevenzip" || { echo "7-Zip not found on PATH or at $sevenzip" >&2; exit 1; }
+            fi
+            "$sevenzip" a -tzip -bso0 -bsp0 "kandev-${{ matrix.platform }}.zip" kandev
             shasum -a 256 "kandev-${{ matrix.platform }}.zip" > "kandev-${{ matrix.platform }}.zip.sha256"
           fi
 
