@@ -14,9 +14,10 @@ import (
 )
 
 type fakeMentionSourceClient struct {
-	records   []*store.Record
-	search    func(context.Context, string, *pluginsdk.SearchEntityReferencesRequest) (*pluginsdk.SearchEntityReferencesResponse, error)
-	authorize func(context.Context, string, *pluginsdk.AuthorizeEntityReferenceRequest) (*pluginsdk.AuthorizeEntityReferenceResponse, error)
+	records           []*store.Record
+	searchGenerations []pluginDispatchGeneration
+	search            func(context.Context, string, *pluginsdk.SearchEntityReferencesRequest) (*pluginsdk.SearchEntityReferencesResponse, error)
+	authorize         func(context.Context, string, *pluginsdk.AuthorizeEntityReferenceRequest) (*pluginsdk.AuthorizeEntityReferenceResponse, error)
 }
 
 func (c *fakeMentionSourceClient) List() []*store.Record {
@@ -24,8 +25,9 @@ func (c *fakeMentionSourceClient) List() []*store.Record {
 }
 
 func (c *fakeMentionSourceClient) SearchEntityReferences(
-	ctx context.Context, id string, _ pluginDispatchGeneration, request *pluginsdk.SearchEntityReferencesRequest,
+	ctx context.Context, id string, generation pluginDispatchGeneration, request *pluginsdk.SearchEntityReferencesRequest,
 ) (*pluginsdk.SearchEntityReferencesResponse, error) {
+	c.searchGenerations = append(c.searchGenerations, generation)
 	return c.search(ctx, id, request)
 }
 
@@ -175,6 +177,45 @@ func TestMentionSourceBridgeTransfersOwnershipInOneSync(t *testing.T) {
 	}
 	if _, active := bridge.owners[successor.ID]; !active {
 		t.Fatalf("successor owner %q was not installed by the first sync", successor.ID)
+	}
+}
+
+func TestMentionSourceBridgeRefreshesDispatchGenerationWhenManifestIsUnchanged(t *testing.T) {
+	installedAt := time.Date(2026, 8, 7, 12, 0, 0, 0, time.UTC)
+	record := testMentionSourceRecord()
+	record.Version = "1.0.0"
+	record.InstallPath = "/plugins/bitbucket/1.0.0"
+	record.InstalledAt = installedAt
+	client := &fakeMentionSourceClient{
+		records: []*store.Record{record},
+		search: func(context.Context, string, *pluginsdk.SearchEntityReferencesRequest) (*pluginsdk.SearchEntityReferencesResponse, error) {
+			return &pluginsdk.SearchEntityReferencesResponse{}, nil
+		},
+		authorize: func(context.Context, string, *pluginsdk.AuthorizeEntityReferenceRequest) (*pluginsdk.AuthorizeEntityReferenceResponse, error) {
+			return &pluginsdk.AuthorizeEntityReferenceResponse{Allowed: true}, nil
+		},
+	}
+	registry := mentions.NewRegistry()
+	bridge := NewMentionSourceBridge(client)
+	if err := bridge.RegisterMentionSources(registry); err != nil {
+		t.Fatalf("register initial mention source: %v", err)
+	}
+
+	upgraded := *record
+	upgraded.Version = "2.0.0"
+	upgraded.InstallPath = "/plugins/bitbucket/2.0.0"
+	upgraded.InstalledAt = installedAt.Add(time.Hour)
+	client.records = []*store.Record{&upgraded}
+	if err := bridge.Sync(); err != nil {
+		t.Fatalf("sync upgraded mention source: %v", err)
+	}
+	if _, err := mentions.NewService(registry).Search(t.Context(), mentions.SearchRequest{
+		WorkspaceID: "workspace-1", Query: "auth", Limit: 3,
+	}); err != nil {
+		t.Fatalf("search upgraded mention source: %v", err)
+	}
+	if len(client.searchGenerations) != 1 || !client.searchGenerations[0].matches(&upgraded) {
+		t.Fatalf("search generation = %#v, want upgraded generation %#v", client.searchGenerations, dispatchGeneration(&upgraded))
 	}
 }
 

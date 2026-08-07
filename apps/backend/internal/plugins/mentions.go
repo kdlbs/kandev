@@ -168,11 +168,16 @@ func mentionSourceFingerprint(providers []mentions.MentionProvider) string {
 	var result strings.Builder
 	for _, provider := range providers {
 		descriptor := provider.Descriptor()
+		generation := pluginDispatchGeneration{}
+		if pluginProvider, ok := provider.(pluginMentionProvider); ok {
+			generation = pluginProvider.generation
+		}
 		_, _ = fmt.Fprintf(
 			&result,
-			"%q\x00%q\x00%q\x00%q\x00%q\x00%d\x00",
+			"%q\x00%q\x00%q\x00%q\x00%q\x00%d\x00%q\x00%q\x00%d\x00",
 			descriptor.Source, descriptor.Provider, descriptor.Kind,
 			descriptor.DisplayName, descriptor.KindLabel, descriptor.Order,
+			generation.version, generation.installPath, generation.installedAt.UnixNano(),
 		)
 	}
 	return result.String()
