@@ -10,7 +10,7 @@ import {
   type TaskSession,
   type TaskSessionState,
 } from "@/lib/types/http";
-import type { QueuedMessage } from "@/lib/state/slices/session/types";
+import type { QueueStatusChangedPayload } from "@/lib/types/backend";
 import { syncKanbanPrimarySessionState } from "@/lib/ws/handlers/agent-session-kanban-sync";
 import { parseContextWindowEntry } from "@/lib/state/slices/session-runtime/context-window";
 
@@ -668,20 +668,27 @@ function handleCancellationPendingMessage(
   applyCancellationPending(store, payload);
 }
 
+/** Writes a message.queue.status_changed broadcast into the queue slice,
+ * defaulting count/max/mergeEnabled when the backend omits them. */
+function handleQueueStatusChangedMessage(
+  store: StoreApi<AppState>,
+  payload: QueueStatusChangedPayload,
+): void {
+  if (!payload.session_id) {
+    console.warn("[Queue] Missing session_id in queue status change event");
+    return;
+  }
+  const entries = payload.entries ?? [];
+  const count = typeof payload.count === "number" ? payload.count : entries.length;
+  const max = typeof payload.max === "number" ? payload.max : 0;
+  const mergeEnabled = typeof payload.merge_enabled === "boolean" ? payload.merge_enabled : true;
+  store.getState().setQueueEntries(payload.session_id, entries, { count, max, mergeEnabled });
+}
+
 export function registerTaskSessionHandlers(store: StoreApi<AppState>): WsHandlers {
   return {
-    "message.queue.status_changed": (message) => {
-      const payload = message.payload;
-      if (!payload?.session_id) {
-        console.warn("[Queue] Missing session_id in queue status change event");
-        return;
-      }
-      const sessionId = payload.session_id;
-      const entries = (payload.entries as QueuedMessage[] | null | undefined) ?? [];
-      const count = typeof payload.count === "number" ? payload.count : entries.length;
-      const max = typeof payload.max === "number" ? payload.max : 0;
-      store.getState().setQueueEntries(sessionId, entries, { count, max });
-    },
+    "message.queue.status_changed": (message) =>
+      handleQueueStatusChangedMessage(store, message.payload),
     "session.state_changed": (message) => {
       const payload = message.payload;
       if (!payload?.task_id) return;

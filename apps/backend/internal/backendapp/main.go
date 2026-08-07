@@ -850,7 +850,7 @@ func startGatewayAndServe(
 	// ============================================
 	server, err := buildHTTPServer(cfg, log, gateway, repos, services, agentSettingsController,
 		lifecycleMgr, eventBus, orchestratorSvc, notificationCtrl, msgCreator, agentRegistry, hostUtilityMgr,
-		addCleanup, repoCloner, systemSvc, storageComposition.workspaceRestorer)
+		addCleanup, repoCloner, systemSvc, storageComposition.workspaceRestorer, dbPool)
 	if err != nil {
 		log.Error("Failed to build HTTP server", zap.Error(err))
 		return false
@@ -1751,6 +1751,7 @@ func buildHTTPServer(
 	repoCloner *repoclone.Cloner,
 	systemSvc *systemsvc.Service,
 	workspaceRestorer taskhandlers.WorkspaceQuarantineRestorer,
+	dbPool *db.Pool,
 ) (*http.Server, error) {
 	gin.SetMode(gin.ReleaseMode)
 	router := gin.New()
@@ -1813,6 +1814,7 @@ func buildHTTPServer(
 		systemSvc:                     systemSvc,
 		workspaceRestorer:             workspaceRestorer,
 		runtimeFlagsSvc:               services.RuntimeFlags,
+		dbPool:                        dbPool,
 		agentSettingsController:       agentSettingsController,
 		agentSettingsRepo:             repos.AgentSettings,
 		agentList:                     agentRegistry,

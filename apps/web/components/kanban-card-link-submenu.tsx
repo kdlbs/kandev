@@ -7,8 +7,8 @@ import {
   IconLink,
   IconTicket,
 } from "@tabler/icons-react";
-import { resolvePluginIcon } from "@/lib/plugins/icons";
 import { t } from "@/lib/i18n";
+import { resolvePluginIcon } from "@/lib/plugins/icons";
 import type { KanbanCardMenuEntry, KanbanPluginLinkAction } from "./kanban-card-menu-items";
 
 type LinkSubmenuArgs = {
@@ -41,7 +41,7 @@ function buildLinkItem({
   onSelect,
 }: LinkItem): LinkMenuItem | null {
   if (!onSelect) return null;
-  return { kind: "item" as const, key, testId, icon, label, disabled, onSelect };
+  return { kind: "item", key, testId, icon, label, disabled, onSelect };
 }
 
 function builtInLinkItems(args: LinkSubmenuArgs): KanbanCardMenuEntry[] {

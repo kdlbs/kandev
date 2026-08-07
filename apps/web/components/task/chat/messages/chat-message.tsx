@@ -18,7 +18,6 @@ import { MessageActions } from "@/components/task/chat/messages/message-actions"
 import { useMessageFavorite } from "@/hooks/domains/session/use-message-favorite";
 import { useUserMessageNavigation } from "@/hooks/use-message-navigation";
 import { SenderTaskBadge, type SenderTaskInfo } from "./sender-task-badge";
-import { MemoizedMarkdown } from "@/components/shared/memoized-markdown";
 import { ImagePreviewDialog } from "@/components/task/chat/image-preview-dialog";
 import { useAppStore } from "@/components/state-provider";
 import { HoverCard, HoverCardTrigger, HoverCardContent } from "@kandev/ui/hover-card";
@@ -39,7 +38,7 @@ import { entityReferencesFromMetadata } from "@/lib/entity-references/message-re
 import type { EntityReference } from "@/lib/types/entity-reference";
 import { attachmentContentUrl } from "@/lib/api/domains/attachment-api";
 import { formatBytes } from "@/lib/utils/format-bytes";
-import { t } from "@/lib/i18n";
+import { renderUserMessageBody } from "./user-message-body";
 
 type ChatMessageProps = {
   comment: Message;
@@ -93,55 +92,6 @@ function renderContentWithFileRefs(content: string): React.ReactNode[] {
   }
 
   return parts.length > 0 ? parts : [content];
-}
-
-// ── Markdown component overrides imported from shared/markdown-components ─────
-
-type UserMessageBodyOptions = {
-  hasContent: boolean;
-  showRaw: boolean;
-  hasAttachments: boolean;
-  content: string;
-  rawContent?: string;
-  promptMentionComponents?: Components;
-  taskId: string;
-  worktreePath?: string;
-  onOpenFile?: (path: string) => void;
-};
-
-function renderUserMessageBody({
-  hasContent,
-  showRaw,
-  hasAttachments,
-  content,
-  rawContent,
-  promptMentionComponents,
-  taskId,
-  worktreePath,
-  onOpenFile,
-}: UserMessageBodyOptions): React.ReactNode {
-  if (hasContent && showRaw) {
-    return <pre className="whitespace-pre-wrap font-mono text-xs">{rawContent || content}</pre>;
-  }
-  if (hasContent) {
-    return (
-      <div className="markdown-body markdown-body-user max-w-none">
-        <MemoizedMarkdown
-          content={content}
-          taskId={taskId}
-          components={promptMentionComponents}
-          worktreePath={worktreePath}
-          onOpenFile={onOpenFile}
-        />
-      </div>
-    );
-  }
-  if (!hasAttachments) {
-    return (
-      <p className="whitespace-pre-wrap break-words overflow-wrap-anywhere">{t("task:empty")}</p>
-    );
-  }
-  return null;
 }
 
 // ── User message sub-component ──────────────────────────────────────

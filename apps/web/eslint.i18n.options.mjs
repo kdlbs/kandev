@@ -154,7 +154,10 @@ export const noLiteralStringOptions = {
       "cmd",
       ".*[Ii]dPrefix$",
       ".*[Ii]dSuffix$",
-      ".*SaveId$",
+      // Matches the bare `saveId` prop as well as composed `fooSaveId` names.
+      // The former `.*SaveId$` required at least one leading character, so it
+      // never matched the prop the codebase actually uses (`saveId`).
+      ".*[Ss]aveId$",
       "aria-labelledby",
       "aria-controls",
       "aria-describedby",
@@ -1736,4 +1739,85 @@ export const i18nGuardFiles = [
   "components/task-create-dialog-source-mode.tsx",
   "components/task-create-dialog-workspace-repo-chips.tsx",
   "components/task-preview-panel.tsx",
+
+  // The last batch of live user-facing surfaces before `app/office`: the session
+  // prepare panel, the onboarding agents step, the host system-metrics readout
+  // and system-health issues dialog, the shared panel search bar, the mermaid
+  // diagram block, the settings agent card, the two release-notes surfaces, and
+  // the shared data-table pair.
+  //
+  // Listed FILE BY FILE rather than by directory. Every one of these directories
+  // still holds un-migrated files — `components/settings/` alone has hundreds —
+  // so a `components/settings/*.tsx` glob would claim work this PR did not do.
+  //
+  // Deliberately NOT migrated in these files, because each is protocol or data
+  // rather than copy: the `%`/`s`/`ms`/`m` unit suffixes and the `-` empty marker
+  // in the metrics readout, the `{workspaceId}` URL template token in the health
+  // dialog, the `"ellipsis"` page sentinel in the data-table pagination, the
+  // `v` version prefix and the `0 / 0` match counter, the `[-]`/`[+]` toggle
+  // glyphs in the prepare panel, and every mermaid theme/security identifier and
+  // CSS value in the diagram block. `metricLabel`'s wire ids stay untranslated
+  // on the `?? id` fallback path for the same reason.
+  "components/onboarding/step-agents.tsx",
+  "components/release-notes/release-notes-button.tsx",
+  "components/release-notes/release-notes-dialog.tsx",
+  "components/search/panel-search-bar.tsx",
+  "components/session/prepare-progress.tsx",
+  "components/settings/agent-card.tsx",
+  "components/shared/mermaid-block.tsx",
+  "components/system-health/health-indicator.tsx",
+  "components/system-metrics/status-surface-metrics.tsx",
+  "components/ui/data-table-pagination.tsx",
+  "components/ui/data-table.tsx",
+
+  // Office, in full — the last un-migrated area of the app. One glob rather than
+  // a file list because every one of the 212 files under it is migrated; `**`
+  // traverses the `[id]` / `[runId]` route directories because the brackets are
+  // in the PATH, not in the pattern (verified: the entry resolves to 212 files,
+  // 69 of them inside dynamic routes).
+  //
+  // Office ships behind `KANDEV_FEATURES_OFFICE` and is marked
+  // `StabilityExperimental`, so its copy is less settled than the rest of the
+  // app. Everything here was migrated as written; nothing was reworded.
+  //
+  // Deliberately NOT translated inside this tree, because each is protocol,
+  // persisted data, or an identifier rather than copy:
+  //
+  //   - Wire enums used as VALUES: task/agent/run statuses and priorities,
+  //     tiers, wake reasons, route-attempt outcomes, provider ids, skill source
+  //     types, concurrency and catch-up policies. Their LABELS are copy and live
+  //     in `app/office/lib/label-keys.ts` and per-file `*_LABEL_KEYS` maps; the
+  //     record keys beside them are the wire values and never move.
+  //   - Persisted content: `suggestWorkspaceName`'s "Default" (a workspace
+  //     name), `DEFAULT_ONBOARDING_TASK_TITLE`, the `"CEO"` / `"KAN"` / `"local_pc"`
+  //     fallbacks `submitOnboarding` writes, the default git commit message in
+  //     `git-section.tsx`, and the `"unnamed"` filename stem in the export
+  //     bundle. Translating any of these would store a different value per
+  //     boot locale.
+  //   - Agent-facing text: `DEFAULT_ONBOARDING_TASK_DESCRIPTION` is sent to the
+  //     coordinator verbatim as its prompt.
+  //   - Syntax the user types: the `{{name}} - {{date}}` routine-title template
+  //     (routed through `t()` it would become an i18next interpolation and
+  //     resolve to nothing) and the cron expressions, which travel as `values`
+  //     so they never enter the catalog.
+  //   - Backend strings matched or echoed: the `"already exists"` / `"duplicate"`
+  //     / `"unique"` substrings in `skills-page-client.tsx`, and the field names
+  //     and messages `extractValidationDetails` reads off an API error.
+  //   - Two derived verbs with no closed union on the wire: `activityActionVerb`
+  //     in `app/office/tasks/[id]/page.tsx` and `formatReason` in
+  //     `runs-list-view.tsx`. A key map would silently fall through for any
+  //     action the backend adds; both are commented in place.
+  //   - `"Agent"` in `agent-avatar.tsx`, which seeds the initials and the tint
+  //     hash rather than being rendered, and the `?? role` / `?? status`
+  //     fallbacks in `agent-role-badge.tsx` / `agent-status-dot.tsx`, which show
+  //     the raw wire value only before `office.meta` hydrates.
+  //   - Units, symbols and acronym badges: `m`/`h`/`d`/`s`/`ms`/`B`/`KB`, `%`,
+  //     the `—` empty marker, `MTD`, `KEY`/`MODE`, and the debug field names in
+  //     the route-attempt panel.
+  //
+  // Also here: `app/office/lib/label-keys.ts` is new in this change — the shared
+  // wire-value-to-catalog-key maps the status icon, board, filters, new-task
+  // chips, routing cards and activity rows all resolve through, so the same
+  // vocabulary cannot drift apart across surfaces.
+  "app/office/**/*.{ts,tsx}",
 ];

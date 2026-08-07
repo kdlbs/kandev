@@ -21,6 +21,10 @@ export function AgentStatusDot({ status, className }: AgentStatusDotProps) {
   const meta = useAppStore((s) => s.office.meta);
   const metaStatus = meta?.agentStatuses.find((s) => s.id === status);
   const colorClass = metaStatus?.color ?? FALLBACK_STYLES[status] ?? "";
+  // Workspace metadata owns this label. The `?? status` fallback only fires
+  // before `office.meta` hydrates and renders the raw wire value, which is an
+  // identifier rather than copy — translating it would invent a label the rest
+  // of the app never shows.
   const label = metaStatus?.label ?? status;
   return (
     <span

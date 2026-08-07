@@ -9,6 +9,7 @@ import { IconSun, IconMoon, IconMessageCircle, IconSparkles } from "@tabler/icon
 import { useStaticDestinations } from "@/hooks/use-app-destinations";
 import { PALETTE_NAVIGATION_GROUP_KEY } from "@/lib/navigation/surface-policy";
 import { useRegisterCommands } from "@/hooks/use-register-commands";
+import { searchKeywords } from "@/lib/commands/search-keywords";
 import { useKeyboardShortcut } from "@/hooks/use-keyboard-shortcut";
 import { useAppShortcuts } from "@/hooks/use-app-shortcuts";
 import { usePluginShortcuts } from "@/hooks/use-plugin-shortcuts";
@@ -24,19 +25,6 @@ type PushFn = ReturnType<typeof useRouter>["push"];
 // palette groups by this resolved value, so every producer must use these.
 const GROUP_NAVIGATION = PALETTE_NAVIGATION_GROUP_KEY;
 const GROUP_ACTIONS = "common:commandGroupActions";
-
-/**
- * Search keywords are stored as one comma-separated catalog value so a
- * translator can localize the whole set in one entry. They are matched, never
- * displayed; the palette itself selects commands by `id` (see
- * `command-panel-footer.tsx`), so no behavior keys off this copy.
- */
-function searchKeywords(t: TFunction, key: string): string[] {
-  return t(key)
-    .split(",")
-    .map((keyword) => keyword.trim())
-    .filter(Boolean);
-}
 
 /**
  * The Navigation group comes from the navigation manifest

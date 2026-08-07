@@ -208,7 +208,12 @@ function TaskDebugOverlay({ entries }: { entries: ReturnType<typeof maybeBuildDe
   return <DebugOverlay title={t("task:taskDebug")} entries={entries} />;
 }
 
-export function TaskPageInner({
+/**
+ * Derives everything the task page renders from its inputs: the resolved task
+ * props plus the three prop bundles handed to the debug overlay, top bar, and
+ * layout. Kept out of `TaskPageInner` so that component stays a wiring shell.
+ */
+function useTaskPageDerivedProps({
   task,
   effectiveSessionId,
   repository,
@@ -219,8 +224,6 @@ export function TaskPageInner({
   agentctlStatus,
   connectionStatus,
   workflowSteps,
-  archivedValue,
-  isMobile,
   showDebugOverlay,
   onToggleDebugOverlay,
   initialScripts,
@@ -228,7 +231,6 @@ export function TaskPageInner({
   defaultLayouts,
   initialLayout,
   officeTaskHref,
-  ensureSession,
   onTaskUnarchived,
 }: TaskPageInnerProps) {
   const taskProps = resolveTaskProps(task, repository);
@@ -275,6 +277,14 @@ export function TaskPageInner({
     initialLayout,
   });
 
+  return { taskProps, debugEntries, topBarProps, layoutProps };
+}
+
+export function TaskPageInner(props: TaskPageInnerProps) {
+  const { effectiveSessionId, task, merged, sessionPanel, archivedValue, isMobile, ensureSession } =
+    props;
+  const { taskProps, debugEntries, topBarProps, layoutProps } = useTaskPageDerivedProps(props);
+
   return (
     <TooltipProvider>
       <VcsDialogsProvider
@@ -290,6 +300,7 @@ export function TaskPageInner({
             isAgentRunning={merged.isAgentWorking}
             hasWorktree={Boolean(merged.worktreeBranch)}
             isPassthrough={sessionPanel.isSessionPassthrough}
+            isTaskArchived={archivedValue.isArchived}
           />
           <TaskPRShortcut taskId={taskProps.taskId} />
           <TaskDebugOverlay entries={debugEntries} />

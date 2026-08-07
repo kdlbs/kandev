@@ -18,7 +18,7 @@
   "authRequiredOpenShell": "É necessária autenticação - clique para abrir uma shell e iniciar sessão",
   "authenticationRequired": "É necessária autenticação",
   "automaticallyAvailable": "Disponível automaticamente",
-  "availableCommandsCount_one": "Comandos disponíveis ({{count}})",
+  "availableCommandsCount_one": "Comando disponível ({{count}})",
   "availableCommandsCount_other": "Comandos disponíveis ({{count}})",
   "availableSlashCommands": "Comandos slash disponíveis",
   "availableSlashCommandsHelp": "Escreva-os durante o chat de uma sessão para os invocar - ex.: <0>{{example}}</0>.",

@@ -143,6 +143,18 @@ describe("toKanbanTask — HTTP DTO / WS payload parity", () => {
     expect(toKanbanTask(wsPayload(invalid)).taskPendingAction).toBeUndefined();
   });
 
+  it("maps the interrupted marker from HTTP and WS shapes", () => {
+    const marked = { interrupted: true } as Partial<TaskLike>;
+    const http = toKanbanTask(httpDTO(marked));
+    const ws = toKanbanTask(wsPayload(marked));
+    expect(http.interrupted).toBe(true);
+    expect(ws.interrupted).toBe(true);
+    // Absent field maps to undefined so a partial update can never synthesize
+    // an interrupted reading.
+    expect(toKanbanTask(httpDTO()).interrupted).toBeUndefined();
+    expect(toKanbanTask(wsPayload()).interrupted).toBeUndefined();
+  });
+
   it("maps the bounded status summary from HTTP and WS task shapes", () => {
     const statusSummary = {
       revision: 7,

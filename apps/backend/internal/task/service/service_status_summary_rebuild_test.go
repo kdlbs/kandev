@@ -39,6 +39,18 @@ func (statusSummaryRebuildActivityProvider) ForegroundActivity(string) v1.Foregr
 
 func (statusSummaryRebuildActivityProvider) ActiveSubagentCount(string) int { return 3 }
 
+type statusSummaryQueuedPromptCounter struct {
+	counts map[string]int
+}
+
+func (c statusSummaryQueuedPromptCounter) CountPendingByTaskIDs(_ context.Context, taskIDs []string) (map[string]int, error) {
+	out := make(map[string]int, len(taskIDs))
+	for _, id := range taskIDs {
+		out[id] = c.counts[id]
+	}
+	return out, nil
+}
+
 func TestHydrateMissingTaskStatusSummariesRepairsExistingTaskOnce(t *testing.T) {
 	svc, _, repo := createTestService(t)
 	ctx := context.Background()
@@ -84,6 +96,7 @@ func TestHydrateMissingTaskStatusSummariesRepairsExistingTaskOnce(t *testing.T) 
 	svc.SetForegroundActivityProvider(statusSummaryRebuildActivityProvider{})
 	prReader := &statusSummaryRebuildPRReader{}
 	svc.SetTaskStatusSummaryPRReader(prReader)
+	svc.SetQueuedPromptCounter(statusSummaryQueuedPromptCounter{counts: map[string]int{"task-1": 2}})
 	task := &models.Task{ID: "task-1", WorkspaceID: "ws-1"}
 	sessions := map[string][]*models.TaskSession{task.ID: {session}}
 	pending := map[string]models.TaskPendingAction{session.ID: models.TaskPendingActionPermission}
@@ -115,6 +128,9 @@ func TestHydrateMissingTaskStatusSummariesRepairsExistingTaskOnce(t *testing.T) 
 	}
 	if summary.PullRequest == nil || summary.PullRequest.Number != 42 || summary.PullRequest.AggregateState != "ready" {
 		t.Fatalf("pull request summary = %+v", summary.PullRequest)
+	}
+	if summary.QueuedPromptCount != 2 {
+		t.Fatalf("queued prompt count = %d, want 2 from the queued counter", summary.QueuedPromptCount)
 	}
 	if prReader.calls != 1 {
 		t.Fatalf("PR reader calls = %d, want one batch read", prReader.calls)

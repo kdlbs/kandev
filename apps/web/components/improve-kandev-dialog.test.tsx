@@ -1,26 +1,164 @@
-import { describe, expect, it } from "vitest";
-import { render } from "@testing-library/react";
-import { Trans } from "react-i18next";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { ImproveKandevDialog } from "./improve-kandev-dialog";
+import { IMPROVE_KANDEV_WORKSPACE_NAME } from "./improve-kandev-dialog-model";
+import type { ImproveKandevBootstrapResponse } from "@/lib/api/domains/improve-kandev-api";
 
-/**
- * These sentences interleave markup with a value, so the codemod half-converted
- * them: it keyed the `<code>` contents (`gh`, `kdlbs/kandev`) and left the prose
- * around them as a JSX literal. That renders correctly in English and passes
- * lint, `i18n:check`, `i18n:ratchet` and `i18n:removed` — the word order is just
- * frozen in JSX where no translator can reach it.
- *
- * Rebuilt as one `<Trans>` each. Two things are easy to get wrong and invisible
- * afterwards, so they are pinned here:
- *
- *   1. The `<n>` index must land on the element's position among ALL children,
- *      counting text and `{" "}` expression containers. Prettier reflowing a
- *      line inserts a `{" "}` and silently shifts every index after it.
- *   2. `gh` and `kdlbs/kandev` travel through `values`, not as tag content, so
- *      a translator cannot reword a binary name or a repo slug. They cannot
- *      instead be left as bare children under an empty `<1></1>` tag — that
- *      form drops plain text children (it only preserves element children),
- *      which silently renders "needs the  CLI".
- */
+const ACTIVE_WORKSPACE = { id: "ws-active", name: "Active Workspace" };
+const IMPROVE_WORKSPACE = { id: "ws-improve", name: IMPROVE_KANDEV_WORKSPACE_NAME };
+const WORKSPACE_CHOICE_CONFIRM_TESTID = "improve-kandev-create-workspace-confirm";
+
+const mocks = vi.hoisted(() => ({
+  bootstrap: vi.fn(),
+  listRepositories: vi.fn(),
+  listWorkflowSteps: vi.fn(),
+  health: vi.fn(),
+  toast: vi.fn(),
+  setRepositories: vi.fn(),
+}));
+
+const storeState = {
+  workspaces: { items: [ACTIVE_WORKSPACE] as Array<{ id: string; name: string }> },
+  setRepositories: mocks.setRepositories,
+};
+
+function setStoreWorkspaces(items: Array<{ id: string; name: string }>) {
+  storeState.workspaces.items = items;
+}
+
+vi.mock("@/components/state-provider", () => ({
+  useAppStore: (selector: (s: typeof storeState) => unknown) => selector(storeState),
+}));
+vi.mock("@/components/toast-provider", () => ({
+  useToast: () => ({ toast: mocks.toast }),
+}));
+vi.mock("@/components/routing/app-link", () => ({
+  default: ({ children }: { children: React.ReactNode }) => <a>{children}</a>,
+}));
+vi.mock("@/lib/api/domains/improve-kandev-api", () => ({
+  bootstrapImproveKandev: mocks.bootstrap,
+}));
+vi.mock("@/lib/api/domains/workspace-api", () => ({
+  listRepositories: mocks.listRepositories,
+}));
+vi.mock("@/lib/api/domains/workflow-api", () => ({
+  listWorkflowSteps: mocks.listWorkflowSteps,
+}));
+vi.mock("@/lib/api/domains/health-api", () => ({
+  fetchSystemHealth: mocks.health,
+}));
+vi.mock("./improve-kandev-dialog-create", () => ({
+  CreateModeView: (props: { workspaceId: string | null; bootstrap: { kind: string } }) => (
+    <div
+      data-testid="create-mode-view"
+      data-workspace={props.workspaceId ?? ""}
+      data-bootstrap={props.bootstrap.kind}
+    >
+      create view
+    </div>
+  ),
+}));
+
+const bootstrapResponse: ImproveKandevBootstrapResponse = {
+  workspace_id: IMPROVE_WORKSPACE.id,
+  repository_id: "r1",
+  workflow_id: "w1",
+  issue_workflow_id: "w2",
+  branch: "main",
+  bundle_dir: "/tmp/bundle",
+  bundle_file: "/tmp/bundle/diagnostic-bundle.zip",
+  github_login: "octocat",
+  has_write_access: false,
+  fork_status: "unknown",
+};
+
+function renderDialog() {
+  return render(<ImproveKandevDialog open onOpenChange={() => {}} workspaceId="ws-active" />);
+}
+
+beforeEach(() => {
+  window.localStorage.clear();
+  setStoreWorkspaces([ACTIVE_WORKSPACE]);
+  mocks.bootstrap.mockReset();
+  mocks.listRepositories.mockReset();
+  mocks.listWorkflowSteps.mockReset();
+  mocks.health.mockReset();
+  mocks.toast.mockReset();
+  mocks.setRepositories.mockReset();
+  mocks.health.mockResolvedValue({ issues: [] });
+  mocks.bootstrap.mockResolvedValue(bootstrapResponse);
+  mocks.listWorkflowSteps.mockResolvedValue({ steps: [] });
+  mocks.listRepositories.mockResolvedValue({ repositories: [{ id: "r1", name: "kandev" }] });
+});
+
+afterEach(() => cleanup());
+
+describe("ImproveKandevDialog bootstrap workspace wiring", () => {
+  it("bootstraps with the dedicated workspace and lists repositories for the returned workspace", async () => {
+    setStoreWorkspaces([ACTIVE_WORKSPACE, IMPROVE_WORKSPACE]);
+    // Skip-intro so the dialog opens directly in create mode, where
+    // bootstrap runs (the workspace exists, so there is no choice gate).
+    window.localStorage.setItem("kandev.improveKandev.skipIntro", "true");
+    renderDialog();
+
+    await waitFor(() => expect(mocks.bootstrap).toHaveBeenCalled());
+    expect(mocks.bootstrap).toHaveBeenCalledWith("ws-active", { createWorkspace: true });
+    await waitFor(() =>
+      expect(mocks.listRepositories).toHaveBeenCalledWith(IMPROVE_WORKSPACE.id, undefined, {
+        cache: "no-store",
+      }),
+    );
+    await waitFor(() =>
+      expect(mocks.setRepositories).toHaveBeenCalledWith(IMPROVE_WORKSPACE.id, [
+        { id: "r1", name: "kandev" },
+      ]),
+    );
+    // The dialog hands the active workspace to CreateModeView; the create view
+    // itself switches to the bootstrap's workspace_id once ready (covered by
+    // the e2e isolation test).
+    await waitFor(() =>
+      expect(screen.getByTestId("create-mode-view").dataset.workspace).toBe("ws-active"),
+    );
+  });
+
+  it("shows the workspace-creation choice when the dedicated workspace is missing and defers bootstrap", async () => {
+    setStoreWorkspaces([ACTIVE_WORKSPACE]);
+    window.localStorage.setItem("kandev.improveKandev.skipIntro", "true");
+    renderDialog();
+
+    expect(mocks.bootstrap).not.toHaveBeenCalled();
+    const confirm = screen.getByTestId(WORKSPACE_CHOICE_CONFIRM_TESTID);
+    expect(confirm).toBeTruthy();
+
+    act(() => fireEvent.click(confirm));
+    await waitFor(() => expect(mocks.bootstrap).toHaveBeenCalledTimes(1));
+    expect(mocks.bootstrap).toHaveBeenCalledWith("ws-active", { createWorkspace: true });
+  });
+
+  it("passes create_workspace=false when the user declines workspace creation", async () => {
+    setStoreWorkspaces([ACTIVE_WORKSPACE]);
+    window.localStorage.setItem("kandev.improveKandev.skipIntro", "true");
+    renderDialog();
+
+    const choice = screen.getByTestId("improve-kandev-create-workspace");
+    const checkbox = choice.querySelector('[role="checkbox"]');
+    expect(checkbox).toBeTruthy();
+    act(() => fireEvent.click(checkbox as Element));
+
+    act(() => fireEvent.click(screen.getByTestId(WORKSPACE_CHOICE_CONFIRM_TESTID)));
+    await waitFor(() => expect(mocks.bootstrap).toHaveBeenCalledTimes(1));
+    expect(mocks.bootstrap).toHaveBeenCalledWith("ws-active", { createWorkspace: false });
+  });
+
+  it("offers the workspace-creation checkbox in the intro when the workspace is missing", () => {
+    setStoreWorkspaces([ACTIVE_WORKSPACE]);
+    renderDialog();
+
+    expect(screen.getByTestId("improve-kandev-create-workspace")).toBeTruthy();
+  });
+});
+
+import { Trans } from "react-i18next";
 describe("improve-kandev dialog <Trans> copy", () => {
   it("renders the gh-auth notice byte-identically to the old literal", () => {
     const { container } = render(

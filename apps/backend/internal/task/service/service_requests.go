@@ -95,6 +95,7 @@ type CreateWorkflowRequest struct {
 	WorkspaceID        string  `json:"workspace_id"`
 	Name               string  `json:"name"`
 	Description        string  `json:"description"`
+	Prompt             string  `json:"prompt,omitempty"`
 	WorkflowTemplateID *string `json:"workflow_template_id,omitempty"`
 	// Hidden marks the workflow as system-only; excluded from management UI and pickers.
 	Hidden bool `json:"hidden,omitempty"`
@@ -104,6 +105,7 @@ type CreateWorkflowRequest struct {
 type UpdateWorkflowRequest struct {
 	Name           *string `json:"name,omitempty"`
 	Description    *string `json:"description,omitempty"`
+	Prompt         *string `json:"prompt,omitempty"`
 	AgentProfileID *string `json:"agent_profile_id,omitempty"`
 }
 

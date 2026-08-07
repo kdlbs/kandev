@@ -17,6 +17,7 @@ import { AgentLogo } from "@/components/agent-logo";
 import { ProfileFormFields, type ProfileFormData } from "@/components/settings/profile-form-fields";
 import type { AvailableAgent, ToolStatus } from "@/lib/types/http";
 import { copyToClipboard } from "@/lib/utils/copy-to-clipboard";
+import { Trans, useTranslation } from "react-i18next";
 
 export type AgentSetting = {
   profileId: string;
@@ -49,12 +50,13 @@ function CopyButton({ text }: { text: string }) {
 }
 
 function StatusPill({ status, error }: { status: string; error?: string }) {
+  const { t } = useTranslation();
   switch (status) {
     case "auth_required": {
       const pill = (
         <span className="flex items-center gap-1 text-xs text-amber-600 dark:text-amber-400">
           <IconLock className="h-3.5 w-3.5" />
-          No auth
+          {t("common:noAuth")}
         </span>
       );
       if (!error) return pill;
@@ -67,13 +69,15 @@ function StatusPill({ status, error }: { status: string; error?: string }) {
     }
     case "not_installed":
       return (
-        <span className="flex items-center gap-1 text-xs text-muted-foreground">Not installed</span>
+        <span className="flex items-center gap-1 text-xs text-muted-foreground">
+          {t("common:notInstalled")}
+        </span>
       );
     case "failed": {
       const pill = (
         <span className="flex items-center gap-1 text-xs text-red-600 dark:text-red-400">
           <IconAlertTriangle className="h-3.5 w-3.5" />
-          Error
+          {t("common:error")}
         </span>
       );
       if (!error) return pill;
@@ -88,16 +92,20 @@ function StatusPill({ status, error }: { status: string; error?: string }) {
       return (
         <span className="flex items-center gap-1 text-xs text-muted-foreground">
           <IconLoader2 className="h-3.5 w-3.5 animate-spin" />
-          Probing
+          {t("common:probing")}
         </span>
       );
     case "not_configured":
-      return <span className="flex items-center gap-1 text-xs text-muted-foreground">Pending</span>;
+      return (
+        <span className="flex items-center gap-1 text-xs text-muted-foreground">
+          {t("common:pending")}
+        </span>
+      );
     default:
       return (
         <span className="flex items-center gap-1 text-xs text-green-600 dark:text-green-400">
           <IconCheck className="h-3.5 w-3.5" />
-          Installed
+          {t("common:installed")}
         </span>
       );
   }
@@ -172,10 +180,13 @@ function NotInstalledItems({
   tools: ToolStatus[];
   showLabel: boolean;
 }) {
+  const { t } = useTranslation();
   if (agents.length === 0 && tools.length === 0) return null;
   return (
     <>
-      {showLabel && <p className="text-xs text-muted-foreground mt-1">Not yet installed</p>}
+      {showLabel && (
+        <p className="text-xs text-muted-foreground mt-1">{t("common:notYetInstalled")}</p>
+      )}
       {agents.map((agent) => (
         <div
           key={agent.name}
@@ -247,13 +258,14 @@ export function StepAgents({
   loading: boolean;
   onUpdateSetting: (agentName: string, formPatch: Partial<ProfileFormData>) => void;
 }) {
+  const { t } = useTranslation();
   const [openAgent, setOpenAgent] = useState<string | null>(null);
 
   if (loading) {
     return (
       <div className="flex flex-col items-center justify-center h-full gap-3 text-sm text-muted-foreground">
         <IconLoader2 className="h-6 w-6 animate-spin" />
-        Discovering agents...
+        {t("common:discoveringAgents")}
       </div>
     );
   }
@@ -281,13 +293,12 @@ export function StepAgents({
           showLabel={installedAgents.length > 0}
         />
       </div>
+      <p className="text-xs text-muted-foreground">{t("common:onboardingAgentsHelp")}</p>
       <p className="text-xs text-muted-foreground">
-        Expand an agent to configure its model and permissions. Changes are saved when you proceed.
-        You can also add custom TUI agents later in Settings &gt; Agents.
-      </p>
-      <p className="text-xs text-muted-foreground">
-        <span className="text-yellow-500 font-medium">Careful:</span> The default Agent Profiles run
-        with Auto Approve enabled (YOLO mode).
+        <Trans i18nKey="common:onboardingAgentsAutoApproveWarning">
+          <span className="text-yellow-500 font-medium">Careful:</span> The default Agent Profiles
+          run with Auto Approve enabled (YOLO mode).
+        </Trans>
       </p>
     </div>
   );

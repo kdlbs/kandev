@@ -112,7 +112,7 @@ type AgentExecution struct {
 	// case where the CLI's local conversation history is gone after a backend
 	// restart.
 	passthroughLaunchUsedResume bool
-	// passthroughResumeFailed sticks once a resume launch fast-fails, so that
+	// passthroughResumeFailed sticks once a resume launch exits non-zero, so that
 	// subsequent ResumePassthroughSession calls (e.g. from EnsurePassthroughExecution
 	// when the frontend reconnects its terminal WS) build a fresh command
 	// instead of thrashing on the same broken resume flag.

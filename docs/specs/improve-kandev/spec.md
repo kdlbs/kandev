@@ -39,8 +39,13 @@ the user's own agent picks up immediately — turning every report into a contri
   task: recent backend logs, frontend logs, and a metadata snapshot. The bundle
   lives in a temporary folder and is referenced by file path in the task
   description so the agent can read it on demand.
-- Submitting the dialog creates the task in the user's active workspace, clones
-  the kandev repo if needed, and starts the agent on the first step.
+- Submitting the dialog creates the task in the dedicated **Improve Kandev**
+  workspace, clones the kandev repo if needed, and starts the agent on the
+  first step.
+- The dedicated workspace is created automatically on first bootstrap and
+  reused on every later use, keeping improve tasks isolated and segregated
+  from the user's regular work. It is named `Improve Kandev`, is a normal
+  visible workspace (with a kanban workflow), and persists across restarts.
 - The `improve-kandev` workflow has three manually-advanced steps:
   - **Improve** — agent implements the change with TDD; adds E2E tests when the
     change touches user-facing flows.
@@ -50,7 +55,9 @@ the user's own agent picks up immediately — turning every report into a contri
     request against `main` in `kdlbs/kandev`.
 - The `improve-kandev` workflow is hidden from the workflow management page in
   workspace settings and from the workflow picker in the standard task-create
-  dialog. It is reachable only through the Improve Kandev entry point.
+  dialog, except in the dedicated `Improve Kandev` workspace itself where the
+  workflows settings page lists it (and `report-kandev-issue`) **read-only**.
+  It is reachable through the Improve Kandev entry point.
 - Hidden workflows do not count as choices in the standard task-create dialog.
   When the active workspace has exactly one visible workflow, the dialog uses
   that workflow implicitly and omits the redundant workflow selector. This
@@ -71,15 +78,22 @@ the user's own agent picks up immediately — turning every report into a contri
 
 ## API surface
 
-- `POST /api/v1/system/improve-kandev/bootstrap` continues to accept
-  `{ "workspace_id": string }`. Its success response includes the existing
-  repository, branch, context-bundle, GitHub-login, write-access, and
-  fork-status fields plus:
+- `POST /api/v1/system/improve-kandev/bootstrap` accepts an optional
+  `{ "workspace_id": string, "create_workspace": boolean }`. When the
+  dedicated `Improve Kandev` workspace exists, both fields are ignored and
+  everything is scoped to it. When it is missing, `create_workspace: true`
+  creates it (with the GitHub connection carried over from the user's default
+  workspace); `create_workspace: false` falls back to `workspace_id` (the
+  user's active workspace, legacy behavior). Its success response includes
+  the existing repository, branch, context-bundle, GitHub-login, write-access,
+  and fork-status fields plus:
+  - `workspace_id: string` — the dedicated Improve Kandev workspace the task
+    must be created in.
   - `workflow_id: string` — the workspace instance of `improve-kandev`.
   - `issue_workflow_id: string` — the workspace instance of
     `report-kandev-issue`.
-- Both workflow IDs refer to hidden, workspace-scoped workflow instances and
-  are safe to request repeatedly.
+- Both workflow IDs refer to hidden, workspace-scoped workflow instances in
+  the returned workspace and are safe to request repeatedly.
 
 ## Persistence guarantees
 
@@ -87,8 +101,11 @@ the user's own agent picks up immediately — turning every report into a contri
   `kandev.improveKandev.skipIntro = "true"` in browser local storage. It
   survives reloads and Kandev restarts for that browser profile, but is not
   synchronized between browsers or users.
-- The two hidden workflow instances are workspace-scoped and remain idempotent:
-  opening the dialog again reuses the existing workflow for each template.
+- The dedicated `Improve Kandev` workspace is a normal persisted workspace
+  row created on first bootstrap and reused thereafter; it survives restarts.
+- The two hidden workflow instances live in the dedicated workspace and remain
+  idempotent: opening the dialog again reuses the existing workflow for each
+  template.
 
 ## Failure modes
 
@@ -97,6 +114,11 @@ the user's own agent picks up immediately — turning every report into a contri
 - If the saved preference skips the intro but GitHub authentication is missing,
   the GitHub-auth recovery explanation takes precedence over the direct-open
   preference.
+- If the dedicated workspace cannot be created or resolved, bootstrap fails
+  and the dialog surfaces the error with the task form blocked.
+- Concurrent bootstrap calls that race the workspace creation converge on a
+  single workspace: a creation failure re-reads the workspace list and reuses
+  an existing `Improve Kandev` row.
 - If bootstrap cannot create or resolve either hidden workflow, the task form
   remains blocked and surfaces the bootstrap error.
 - A fork restriction blocks only **Bug fix** and **Feature request** submission.
@@ -107,9 +129,23 @@ the user's own agent picks up immediately — turning every report into a contri
 
 - **GIVEN** the user opens the Improve Kandev dialog with the logs checkbox on,
   **WHEN** they submit a title and description, **THEN** a task is created in
-  their active workspace, the description references three files in a temp
-  folder (`metadata.json`, `backend.log`, `frontend.log`), and the agent starts
-  on the **Improve** step.
+  the dedicated `Improve Kandev` workspace (created automatically on first
+  use), the description references three files in a temp folder
+  (`metadata.json`, `backend.log`, `frontend.log`), and the agent starts on
+  the **Improve** step.
+
+- **GIVEN** no `Improve Kandev` workspace exists, **WHEN** bootstrap is called,
+  **THEN** a workspace named `Improve Kandev` is created, the kandev
+  repository and both hidden workflows live in it, and the response includes
+  its `workspace_id`.
+
+- **GIVEN** an `Improve Kandev` workspace already exists, **WHEN** bootstrap is
+  called again, **THEN** the same workspace (and the same hidden workflow
+  instances) are reused and the response's `workspace_id` is unchanged.
+
+- **GIVEN** the user's active workspace is not the dedicated workspace,
+  **WHEN** the dialog submits a task, **THEN** the task appears in the
+  dedicated workspace and no task is created in the active workspace.
 
 - **GIVEN** the agent reports the implementation is complete on the **Improve**
   step, **WHEN** the user moves the task to **Test**, **THEN** the agent
@@ -156,6 +192,93 @@ the user's own agent picks up immediately — turning every report into a contri
   Improve Kandev dialog, **THEN** the dialog shows a blocking error referencing
   the health-check result and disables the submit button.
 
+- **GIVEN** the user opens the dedicated workspace's workflows settings page,
+  **WHEN** the page loads, **THEN** it lists `improve-kandev` with steps
+  Improve → Test → PR and `report-kandev-issue` read-only, and no
+  create/edit/delete/import/export controls are available.
+
+- **GIVEN** the user opens the dedicated workspace's repositories settings
+  page, **WHEN** the page loads, **THEN** the registered kandev repository is
+  listed read-only and no add/edit/delete controls are available.
+
+- **GIVEN** a mutation request (workflow create/update/delete/reorder/step
+  mutation or repository create/update/delete/initialize) is scoped to the
+  dedicated workspace, **WHEN** it reaches the backend, **THEN** it is
+  rejected with HTTP 409 before any write.
+
+- **GIVEN** bootstrap creates the `Improve Kandev` workspace for the first
+  time and the user's default workspace has a GitHub connection, **WHEN** the
+  workspace is created, **THEN** the new workspace carries the same GitHub
+  connection (and PAT secret where applicable), and no other integration
+  configurations, automations, workflows, or repositories beyond the bootstrap
+  defaults.
+
+- **GIVEN** bootstrap creates the `Improve Kandev` workspace for the first
+  time and the user's default workspace has **no** GitHub connection, **WHEN**
+  the workspace is created, **THEN** no connection is copied and the workspace
+  starts without a GitHub connection.
+
+- **GIVEN** the `Improve Kandev` workspace already exists, **WHEN** bootstrap
+  is called again, **THEN** the workspace's configuration (including its
+  GitHub connection) is untouched — nothing is re-copied.
+
+- **GIVEN** the dedicated workspace does not exist, **WHEN** the user opens
+  the Improve Kandev dialog, **THEN** the dialog offers a "Create a dedicated
+  Improve Kandev workspace" checkbox (default checked) — in the intro, or as a
+  gate before the create form when the intro was dismissed.
+
+- **GIVEN** the dedicated workspace does not exist and the user unchecks the
+  creation checkbox, **WHEN** they proceed, **THEN** bootstrap falls back to
+  the active workspace: the hidden workflows and kandev repo are scoped there
+  and the task lands in it (legacy behavior).
+
+## Dedicated workspace immutability
+
+- The dedicated `Improve Kandev` workspace is configuration-immutable for the
+  surfaces that define how tasks run there:
+  - **Workflows**: the settings page
+    (`/settings/workspace/<id>/workflows`) lists the workspace's workflows —
+    including the hidden `improve-kandev` (Improve → Test → PR) and
+    `report-kandev-issue` instances — read-only. Creating, editing, deleting,
+    reordering, importing, exporting, and GitHub-syncing workflows is not
+    possible; no workflow may be added. Step mutations are equally rejected.
+  - **Repositories**: the settings page lists the workspace's repositories
+    (the registered kandev repo) read-only. Creating, initializing, editing,
+    and deleting repositories is not possible.
+- Enforcement is backend-side: the workflow and repository mutation endpoints
+  reject requests scoped to the dedicated workspace (HTTP 409) before any
+  write. The settings pages additionally hide/disable the mutation controls so
+  the state is visible up front.
+- Task creation, agent runs, step advancement, and the kanban board are
+  unaffected — only configuration mutations are restricted.
+
+## Workspace creation semantics
+
+- Creating the dedicated `Improve Kandev` workspace is an **opt-in checkbox**
+  in the dialog, offered whenever the workspace does not exist yet: in the
+  intro screen, and as a gate before the create form for users who dismissed
+  the intro. It defaults to checked.
+- When bootstrap creates the `Improve Kandev` workspace for the **first time**
+  (the find-or-create miss path with `create_workspace: true`), it
+  additionally:
+  - **Copies the GitHub workspace connection** (source, login, installation
+    metadata, and the underlying PAT secret where applicable) from the user's
+    **default workspace** — resolved the same way legacy integrations resolve
+    it: the active workspace recorded in the user's settings, else the
+    workspace created first, else the literal `default` id. If the source
+    workspace has no GitHub connection, nothing is copied.
+  - **Copies nothing else**: no other integration configurations
+    (Jira/Linear/GitLab/Azure DevOps/Sentry stay unconfigured in the new
+    workspace; they remain manually configurable), no automations, no
+    workflow/repository rows beyond the bootstrap defaults.
+- When the workspace does not exist and the checkbox is unchecked
+  (`create_workspace: false`), bootstrap falls back to the request's
+  `workspace_id` (the user's active workspace) and scopes the repo and hidden
+  workflows there — the legacy behavior.
+- Reuse path (workspace already exists): bootstrap makes no further changes —
+  the GitHub connection and configuration are never re-copied or synced, and
+  new improve tasks land in the dedicated workspace systematically.
+
 ## Out of scope
 
 - Automatic transitions between workflow steps (user moves manually).
@@ -170,3 +293,7 @@ the user's own agent picks up immediately — turning every report into a contri
   not stored reports.
 - Cleanup of the temporary log bundle directory; left to OS/temp policy.
 - Windows-specific considerations for `make install` / `make dev`.
+- Migrating pre-existing improve tasks out of the workspace they were created
+  in before this feature shipped; old tasks stay where they are.
+- Hiding the dedicated workspace from the workspace switcher; it appears as a
+  normal workspace.

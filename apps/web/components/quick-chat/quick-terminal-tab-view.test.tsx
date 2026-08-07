@@ -46,21 +46,6 @@ vi.mock("@/components/settings/pty-terminal-view", () => ({
     </button>
   ),
 }));
-vi.mock("react-i18next", () => ({
-  useTranslation: () => ({
-    t: (key: string, values?: { code?: number; error?: string }) => {
-      if (key === "sidebar:quickChatTerminalConnecting") return "Connecting to terminal…";
-      if (key === "sidebar:quickChatTerminalExited") return "Terminal exited.";
-      if (key === "sidebar:quickChatTerminalExitedWithCode") {
-        return `Terminal exited with code ${values?.code}.`;
-      }
-      if (key === "sidebar:quickChatTerminalError") {
-        return `Terminal error: ${values?.error ?? "The terminal could not be started."}`;
-      }
-      return key;
-    },
-  }),
-}));
 
 import { QuickTerminalTabView } from "./quick-terminal-tab-view";
 

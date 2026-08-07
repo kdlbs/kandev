@@ -194,6 +194,12 @@ export type AppSidebarState = {
    * reload never traps the user in settings.
    */
   settingsMode: boolean;
+  /**
+   * Shared Improve Kandev dialog open flag. Owned by the store so the footer
+   * button and the New Task entry (inside the Improve Kandev workspace) open
+   * the same dialog instance. Transient, never persisted.
+   */
+  improveDialogOpen: boolean;
 };
 
 export type UISliceState = {
@@ -340,6 +346,8 @@ export type UISliceActions = {
   setAppSidebarWidth: (width: number) => void;
   setAppSidebarSettingsMode: (settingsMode: boolean) => void;
   toggleAppSidebarSettingsMode: () => void;
+  /** Open/close the shared Improve Kandev dialog (footer + New Task routing). */
+  setImproveDialogOpen: (open: boolean) => void;
   /** Record multiple sidebar badge acknowledgements with one localStorage merge. */
   acknowledgeAgentErrors: (stamps: Record<string, string>) => void;
   /** Record that `stamp` has been dismissed for `sessionId`. */

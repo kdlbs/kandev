@@ -114,6 +114,8 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 
 	// Wire workflow provider to workflow service for export/import
 	workflowSvc.SetWorkflowProvider(&workflowProviderAdapter{svc: taskSvc})
+	// Wire workspace provider for the read-only guard (Improve Kandev workspace)
+	workflowSvc.SetWorkspaceProvider(&workflowProviderAdapter{svc: taskSvc})
 
 	// Wire agent profile resolver/matcher for workflow export/import
 	workflowSvc.SetAgentProfileFuncs(
@@ -934,6 +936,11 @@ func (a *workflowProviderAdapter) GetWorkflow(ctx context.Context, id string) (*
 	return a.svc.GetWorkflow(ctx, id)
 }
 
+// GetWorkspace implements workflowservice.WorkspaceProvider.
+func (a *workflowProviderAdapter) GetWorkspace(ctx context.Context, id string) (*taskmodels.Workspace, error) {
+	return a.svc.GetWorkspace(ctx, id)
+}
+
 // CreateWorkflow implements workflowservice.WorkflowProvider.
 func (a *workflowProviderAdapter) CreateWorkflow(ctx context.Context, workspaceID, name, description string) (*taskmodels.Workflow, error) {
 	return a.svc.CreateWorkflow(ctx, &taskservice.CreateWorkflowRequest{
@@ -945,9 +952,11 @@ func (a *workflowProviderAdapter) CreateWorkflow(ctx context.Context, workspaceI
 
 // UpdateWorkflow implements workflowservice.WorkflowProvider.
 func (a *workflowProviderAdapter) UpdateWorkflow(ctx context.Context, workflow *taskmodels.Workflow) error {
+	prompt := workflow.Prompt
 	_, err := a.svc.UpdateWorkflow(ctx, workflow.ID, &taskservice.UpdateWorkflowRequest{
 		Name:           &workflow.Name,
 		Description:    &workflow.Description,
+		Prompt:         &prompt,
 		AgentProfileID: &workflow.AgentProfileID,
 	})
 	return err

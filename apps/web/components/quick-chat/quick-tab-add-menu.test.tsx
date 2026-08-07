@@ -27,23 +27,6 @@ vi.mock("@kandev/ui/dropdown-menu", () => ({
   ),
 }));
 
-vi.mock("react-i18next", () => ({
-  useTranslation: () => ({
-    t: (key: string, values?: { count?: number; error?: string }) => {
-      const messages: Record<string, string> = {
-        "sidebar:quickChatAdd": "Add or switch tab",
-        "common:agents": "Agents",
-        "sidebar:quickChatNewAgent": "New Agent",
-        "sidebar:quickChatTerminals": "Terminals",
-        "sidebar:quickChatNewTerminal": "New Terminal",
-        "sidebar:quickChatTerminalTab": `Terminal ${values?.count ?? ""}`,
-        "sidebar:quickChatTerminalError": `Terminal error: ${values?.error ?? ""}`,
-      };
-      return messages[key] ?? key;
-    },
-  }),
-}));
-
 afterEach(() => cleanup());
 
 describe("QuickTabAddMenu", () => {

@@ -25,17 +25,30 @@ type WorkflowProvider interface {
 
 // Service provides workflow business logic
 type Service struct {
-	repo             *repository.Repository
-	logger           *logger.Logger
-	workflowProvider WorkflowProvider
-	resolveProfile   models.AgentProfileResolver
-	matchProfile     models.AgentProfileMatcher
-	syncOps          SyncWorkflowOps
+	repo              *repository.Repository
+	logger            *logger.Logger
+	workflowProvider  WorkflowProvider
+	workspaceProvider WorkspaceProvider
+	resolveProfile    models.AgentProfileResolver
+	matchProfile      models.AgentProfileMatcher
+	syncOps           SyncWorkflowOps
+}
+
+// WorkspaceProvider resolves a workspace by ID so the read-only guard can tell
+// whether a workflow lives in the dedicated Improve Kandev workspace.
+type WorkspaceProvider interface {
+	GetWorkspace(ctx context.Context, id string) (*taskmodels.Workspace, error)
 }
 
 // SetWorkflowProvider wires the workflow provider (set during service init to break circular deps).
 func (s *Service) SetWorkflowProvider(wp WorkflowProvider) {
 	s.workflowProvider = wp
+}
+
+// SetWorkspaceProvider wires the workspace provider used by the read-only guard
+// (set during service init to break circular deps).
+func (s *Service) SetWorkspaceProvider(wp WorkspaceProvider) {
+	s.workspaceProvider = wp
 }
 
 // SetAgentProfileFuncs wires the agent profile resolver and matcher for export/import.
@@ -163,6 +176,16 @@ func (s *Service) GetWorkflowAgentProfileID(ctx context.Context, workflowID stri
 		return "", err
 	}
 	return wf.AgentProfileID, nil
+}
+
+// GetWorkflowPrompt returns the optional workflow-level agent instructions.
+// Empty string means the workflow has no prompt configured.
+func (s *Service) GetWorkflowPrompt(ctx context.Context, workflowID string) (string, error) {
+	wf, err := s.workflowProvider.GetWorkflow(ctx, workflowID)
+	if err != nil {
+		return "", err
+	}
+	return wf.Prompt, nil
 }
 
 // GetPreviousStepByPosition returns the previous step before the given position for a workflow.
@@ -554,13 +577,21 @@ func (s *Service) importSingleWorkflow(ctx context.Context, workspaceID string, 
 		return nil, fmt.Errorf("create workflow: %w", err)
 	}
 
+	needsUpdate := false
 	// Match workflow-level agent profile if present.
 	if pw.AgentProfile != nil && s.matchProfile != nil {
 		if profileID := s.matchProfile(pw.AgentProfile.AgentName, pw.AgentProfile.Model, pw.AgentProfile.Mode); profileID != "" {
 			wf.AgentProfileID = profileID
-			if err := s.workflowProvider.UpdateWorkflow(ctx, wf); err != nil {
-				return nil, fmt.Errorf("set workflow agent profile: %w", err)
-			}
+			needsUpdate = true
+		}
+	}
+	if pw.Prompt != "" {
+		wf.Prompt = pw.Prompt
+		needsUpdate = true
+	}
+	if needsUpdate {
+		if err := s.workflowProvider.UpdateWorkflow(ctx, wf); err != nil {
+			return nil, fmt.Errorf("set workflow fields: %w", err)
 		}
 	}
 

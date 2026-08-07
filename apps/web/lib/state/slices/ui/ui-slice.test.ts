@@ -77,14 +77,10 @@ describe("migrateView", () => {
 describe("mobile review selection", () => {
   it("persists a provider-neutral review id and clears selections back to chat", () => {
     const store = makeStore();
-    store
-      .getState()
-      .setMobileSessionReview("session-1", "gitlab:https://gitlab.example|group/b|22");
+    store.getState().setMobileSessionReview("session-1", "gitlab:host|group/b|22");
     expect(store.getState().mobileSession).toMatchObject({
       activePanelBySessionId: { "session-1": "review" },
-      reviewItemIdBySessionId: {
-        "session-1": "gitlab:https://gitlab.example|group/b|22",
-      },
+      reviewItemIdBySessionId: { "session-1": "gitlab:host|group/b|22" },
     });
 
     store.getState().setMobileSessionReview("session-1", null);
@@ -494,6 +490,19 @@ describe("appSidebar actions", () => {
     store.getState().toggleAppSidebarSettingsMode(); // off
     expect(store.getState().appSidebar.settingsMode).toBe(false);
     expect(store.getState().appSidebar.collapsed).toBe(false);
+  });
+});
+
+describe("appSidebar improve dialog flag", () => {
+  it("setImproveDialogOpen toggles the shared Improve Kandev dialog flag", () => {
+    const store = makeStore();
+    expect(store.getState().appSidebar.improveDialogOpen).toBe(false);
+
+    store.getState().setImproveDialogOpen(true);
+    expect(store.getState().appSidebar.improveDialogOpen).toBe(true);
+
+    store.getState().setImproveDialogOpen(false);
+    expect(store.getState().appSidebar.improveDialogOpen).toBe(false);
   });
 });
 

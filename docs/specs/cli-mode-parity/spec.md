@@ -31,12 +31,12 @@ The task-create dialog's prompt textarea is **enabled** when a CLI/passthrough-c
 When a passthrough session starts for a task that has a description:
 
 1. Kandev launches the PTY as today.
-2. After the existing **idle detector** in `InteractiveRunner` fires for the first time (i.e. the CLI has stopped emitting output and is presumed to be at its input prompt), kandev writes the task description plus a configurable **submit sequence** to the PTY's stdin.
-3. Auto-injection is opt-in per agent via a new `PassthroughConfig.AutoInjectPrompt` flag (default false). Agents that already use `PromptFlag` (headless one-shot mode) are unaffected — their prompt is already on the CLI before launch.
+2. After the existing **idle detector** in `InteractiveRunner` fires for the first time (i.e. the CLI has stopped emitting output and is presumed to be at its input prompt), kandev writes the task description plus a configurable **submit sequence** to the PTY's stdin when the agent has no `PromptFlag`.
+3. Agents that use `PromptFlag` (headless one-shot mode) are unaffected — their prompt is already on the CLI before launch. `PassthroughConfig.AutoInjectPrompt` remains in discovered metadata for compatibility, but the presence of `PromptFlag` is the runtime delivery boundary.
 
 No per-agent pattern matchers. The existing idle window is the only readiness signal. If an agent's CLI is unusual enough that an idle window misfires (writes a banner, then waits 5 seconds, then prompts), we make the idle window per-agent-configurable in `PassthroughConfig` (already exists as `IdleTimeout`). No new detection machinery.
 
-For the Claude case: `claude_acp.go` sets `AutoInjectPrompt: true`, `DisableBracketedPaste: true` (Claude Code already enables bracketed-paste *mode* in its Ink TUI — injecting `ESC[200~`…`ESC[201~` delimiters breaks the prompt), and `SubmitViaBackslashEnter: true` (PTY writes: prompt, then `\`, then `\r` per [Claude terminal docs](https://code.claude.com/docs/en/terminal-config)). Ink may still treat programmatic Enter as newline only ([anthropics/claude-code#15553](https://github.com/anthropics/claude-code/issues/15553)) — if auto-submit fails, the user confirms with Enter. Other passthrough-capable agents use bracketed-paste delimiters for multi-line prompts and stay default-off for auto-inject unless configured.
+For the Claude case: `claude_acp.go` retains `AutoInjectPrompt: true` as compatibility metadata, sets `DisableBracketedPaste: true` (Claude Code already enables bracketed-paste *mode* in its Ink TUI — injecting `ESC[200~`…`ESC[201~` delimiters breaks the prompt), and `SubmitViaBackslashEnter: true` (PTY writes: prompt, then `\`, then `\r` per [Claude terminal docs](https://code.claude.com/docs/en/terminal-config)). Ink may still treat programmatic Enter as newline only ([anthropics/claude-code#15553](https://github.com/anthropics/claude-code/issues/15553)) — if auto-submit fails, the user confirms with Enter. Other passthrough-capable agents without a `PromptFlag` use the same idle-based stdin route.
 
 ### Follow-up prompts via PTY stdin
 
@@ -64,7 +64,7 @@ Users can still press Ctrl-C directly inside the xterm terminal. A dedicated too
 - THEN the prompt textarea accepts input (today it is disabled / hidden)
 
 ### Prompt injection on fresh start
-- GIVEN a CLI-mode task whose agent has `AutoInjectPrompt: true` and a non-empty description
+- GIVEN a CLI-mode task whose agent has no `PromptFlag` and a non-empty description
 - WHEN the task starts
 - THEN the PTY launches, the idle detector fires once after the CLI settles, and the task description is written to stdin followed by `SubmitSequence`
 - AND the description appears in the terminal output
@@ -96,10 +96,10 @@ Users can still press Ctrl-C directly inside the xterm terminal. A dedicated too
 - THEN `\x03` is written to the PTY
 - AND DB reconciliation still completes so the session unsticks
 
-### Agent without AutoInjectPrompt
-- GIVEN a passthrough-capable agent with `AutoInjectPrompt: false`
+### Passthrough agent without PromptFlag
+- GIVEN a passthrough-capable agent with no `PromptFlag`, regardless of its compatibility metadata
 - WHEN a task starts
-- THEN no stdin write happens (today's behavior preserved); the user pastes their prompt manually
+- THEN the task description is written to stdin after the first idle window
 
 ## Kandev toolbar above the passthrough terminal
 
@@ -167,7 +167,7 @@ Pressing Ctrl-C inside the passthrough terminal writes `\x03` to PTY stdin. A fu
 ## Follow-ups
 
 - **Stop button overlay in `PassthroughTerminal`.** Small affordance that calls the existing cancel route. Today users press Ctrl-C inside xterm directly.
-- **AutoInjectPrompt on other passthrough agents** (Codex CLI, OpenCode TUI, etc.) — only Claude is opted in for v1. Adding others requires verifying their submit sequence and idle behavior.
+- **Agent-specific prompt-injection tuning** — passthrough agents without a `PromptFlag` use the idle-based stdin route; adding agent-specific submit behavior requires verifying its submit sequence and idle behavior.
 
 ## Open questions
 

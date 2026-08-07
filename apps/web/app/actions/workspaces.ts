@@ -138,6 +138,7 @@ export async function createWorkflowAction(payload: {
   workspace_id: string;
   name: string;
   description?: string;
+  prompt?: string;
   workflow_template_id?: string;
 }) {
   return fetchJson<Workflow>(`${apiBaseUrl}/api/v1/workflows`, {
@@ -148,7 +149,7 @@ export async function createWorkflowAction(payload: {
 
 export async function updateWorkflowAction(
   id: string,
-  payload: { name?: string; description?: string; agent_profile_id?: string },
+  payload: { name?: string; description?: string; prompt?: string; agent_profile_id?: string },
 ) {
   return fetchJson<Workflow>(`${apiBaseUrl}/api/v1/workflows/${id}`, {
     method: "PATCH",

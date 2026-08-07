@@ -2100,6 +2100,97 @@ func TestSetSessionStartingCanDeferTaskInProgress(t *testing.T) {
 	require.Empty(t, taskRepo.stateWrites)
 }
 
+// recordingTaskUpdatedPublisher captures task.updated publishes so tests can
+// assert the interrupted-marker clear republishes the task.
+type recordingTaskUpdatedPublisher struct {
+	updatedTaskIDs []string
+}
+
+func (r *recordingTaskUpdatedPublisher) PublishTaskUpdated(_ context.Context, task *models.Task, _ ...string) {
+	if task != nil {
+		r.updatedTaskIDs = append(r.updatedTaskIDs, task.ID)
+	}
+}
+func (r *recordingTaskUpdatedPublisher) PublishTaskStateChanged(context.Context, *models.Task, v1.TaskState) {
+}
+func (r *recordingTaskUpdatedPublisher) PublishTaskActivityIfChanged(context.Context, string) {}
+
+func seedInterruptedMarker(t *testing.T, repo *sqliterepo.Repository, taskID string) {
+	t.Helper()
+	if err := repo.SetTaskMetadataKey(context.Background(), taskID, models.MetaKeyInterruptedAt, time.Now().UTC().Format(time.RFC3339)); err != nil {
+		t.Fatalf("seed interrupted marker: %v", err)
+	}
+}
+
+func TestSessionStartClearsInterruptedMarker(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("state hook transition to STARTING clears and republishes", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		seedSession(t, repo, "t1", "s1", "step1")
+		seedInterruptedMarker(t, repo, "t1")
+
+		publisher := &recordingTaskUpdatedPublisher{}
+		svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+		svc.SetTaskEventPublisher(publisher)
+
+		updated, changed := svc.updateTaskSessionStateWithHook(
+			ctx, "t1", "s1", models.TaskSessionStateStarting, "", false, nil,
+		)
+		require.NotNil(t, updated)
+		require.True(t, changed)
+
+		task, err := repo.GetTask(ctx, "t1")
+		require.NoError(t, err)
+		_, marked := task.Metadata[models.MetaKeyInterruptedAt]
+		require.False(t, marked, "marker must be cleared when the session enters STARTING")
+		require.Equal(t, []string{"t1"}, publisher.updatedTaskIDs,
+			"task.updated must be republished after clearing the marker")
+	})
+
+	t.Run("launch path via setSessionStarting clears and republishes", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		seedSession(t, repo, "t1", "s1", "step1")
+		seedInterruptedMarker(t, repo, "t1")
+
+		session, err := repo.GetTaskSession(ctx, "s1")
+		require.NoError(t, err)
+		session.State = models.TaskSessionStateStarting
+		session.ErrorMessage = ""
+		session.UpdatedAt = time.Now().UTC()
+
+		publisher := &recordingTaskUpdatedPublisher{}
+		svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+		svc.SetTaskEventPublisher(publisher)
+
+		require.NoError(t, svc.setSessionStarting(ctx, "t1", session, models.TaskSessionStateRunning, true))
+
+		task, err := repo.GetTask(ctx, "t1")
+		require.NoError(t, err)
+		_, marked := task.Metadata[models.MetaKeyInterruptedAt]
+		require.False(t, marked, "marker must be cleared on the launch path")
+		require.Equal(t, []string{"t1"}, publisher.updatedTaskIDs,
+			"task.updated must be republished after clearing the marker")
+	})
+
+	t.Run("no marker means no republish", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		seedSession(t, repo, "t1", "s1", "step1")
+
+		publisher := &recordingTaskUpdatedPublisher{}
+		svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+		svc.SetTaskEventPublisher(publisher)
+
+		updated, changed := svc.updateTaskSessionStateWithHook(
+			ctx, "t1", "s1", models.TaskSessionStateStarting, "", false, nil,
+		)
+		require.NotNil(t, updated)
+		require.True(t, changed)
+		require.Empty(t, publisher.updatedTaskIDs,
+			"no task.updated may be published when no marker was removed")
+	})
+}
+
 func TestSetSessionStartingRejectsTerminalSession(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)

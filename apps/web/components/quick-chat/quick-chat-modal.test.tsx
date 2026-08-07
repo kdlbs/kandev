@@ -52,20 +52,6 @@ vi.mock("@kandev/ui/dropdown-menu", () => ({
   ),
 }));
 
-vi.mock("react-i18next", () => ({
-  useTranslation: () => ({
-    t: (key: string, values?: { count?: number }) => {
-      if (key === "sidebar:quickChatTerminalTab") return `Terminal ${values?.count}`;
-      if (key === "common:agents") return "Agents";
-      if (key === "sidebar:quickChatTerminals") return "Terminals";
-      if (key === "sidebar:quickChatNewAgent") return "New Agent";
-      if (key === "sidebar:quickChatNewTerminal") return "New Terminal";
-      if (key === "sidebar:quickChatAdd") return "Add or switch tab";
-      return key;
-    },
-  }),
-}));
-
 vi.mock("@/hooks/use-quick-chat-width", () => ({
   useQuickChatWidth: () => ({
     width: 720,

@@ -653,6 +653,35 @@ func (r *Repository) SetTaskMetadataKey(ctx context.Context, taskID, key string,
 	return err
 }
 
+// SetTaskMetadataKeyIfNotArchived writes one metadata key atomically with the
+// archived_at guard: the write only lands when the task row still has
+// archived_at IS NULL, and reports whether it landed. Startup reconciliation
+// uses it for the interrupted_at marker so an archive that commits between the
+// guard read and the metadata write can never leave a marker on an archived
+// task (the check and the write are one statement).
+func (r *Repository) SetTaskMetadataKeyIfNotArchived(ctx context.Context, taskID, key string, value interface{}) (bool, error) {
+	payload, err := json.Marshal(value)
+	if err != nil {
+		return false, err
+	}
+	var query string
+	if dialect.IsPostgres(r.db.DriverName()) {
+		query = `UPDATE tasks SET metadata = jsonb_set(CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}'::jsonb ELSE metadata::jsonb END, ARRAY[?]::text[], ?::jsonb, true)::text, updated_at = ? WHERE id = ? AND archived_at IS NULL`
+	} else {
+		query = `UPDATE tasks SET metadata = json_set(CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}' ELSE metadata END, ?, json(?)), updated_at = ? WHERE id = ? AND archived_at IS NULL`
+	}
+	path := key
+	if !dialect.IsPostgres(r.db.DriverName()) {
+		path = jsonPath(key)
+	}
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(query), path, string(payload), time.Now().UTC(), taskID)
+	if err != nil {
+		return false, err
+	}
+	rows, err := result.RowsAffected()
+	return rows > 0, err
+}
+
 func jsonPath(key string) string { return "$." + key }
 
 func agentTitlePendingPredicate(driver string) string {

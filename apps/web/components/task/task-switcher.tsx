@@ -72,6 +72,7 @@ function buildGroupSectionProps(
     showHeader,
     onReorderGroup: props.onReorderGroup,
     onReorderSubtasks: props.onReorderSubtasks,
+    onNestTask: props.onNestTask,
   };
 }
 

@@ -2,26 +2,30 @@
 
 import { usePathname } from "@/lib/routing/client-router";
 import { AppStatusDrawerTrigger } from "@/components/app-status-bar/app-status-surface-provider";
+import { useTranslation } from "react-i18next";
 
-const PAGE_TITLES: Record<string, string> = {
-  "/office": "Dashboard",
-  "/office/inbox": "Inbox",
-  "/office/tasks": "Tasks",
-  "/office/routines": "Routines",
-  "/office/projects": "Projects",
-  "/office/agents": "Agents",
-  "/office/workspace/org": "Org Chart",
-  "/office/workspace/skills": "Skills",
-  "/office/workspace/costs": "Costs",
-  "/office/workspace/activity": "Activity",
-  "/office/workspace/routing": "Provider Routing",
-  "/office/workspace/settings": "Preferences",
+// Route -> catalog key, not route -> title. The map is module scope, so a `t()`
+// here would resolve once at import and freeze at the boot locale; the keys are
+// resolved at render below. The route paths are URLs, not copy.
+const PAGE_TITLE_KEYS: Record<string, string> = {
+  "/office": "office:dashboard",
+  "/office/inbox": "office:inbox",
+  "/office/tasks": "office:tasks",
+  "/office/routines": "office:routines",
+  "/office/projects": "office:projects",
+  "/office/agents": "office:agents",
+  "/office/workspace/org": "office:orgChart",
+  "/office/workspace/skills": "office:skills",
+  "/office/workspace/costs": "office:costs",
+  "/office/workspace/activity": "office:activity",
+  "/office/workspace/routing": "office:providerRouting",
+  "/office/workspace/settings": "office:preferences",
 };
 
-function resolveTitle(pathname: string): string | null {
-  const exact = PAGE_TITLES[pathname];
+function resolveTitleKey(pathname: string): string | null {
+  const exact = PAGE_TITLE_KEYS[pathname];
   if (exact) return exact;
-  if (pathname.startsWith("/office/workspace/settings")) return "Preferences";
+  if (pathname.startsWith("/office/workspace/settings")) return "office:preferences";
   return null;
 }
 
@@ -40,8 +44,9 @@ function isDetailPage(pathname: string): boolean {
  * fills with its breadcrumb via OfficeTopbarPortal.
  */
 export function OfficeTopbar() {
+  const { t } = useTranslation();
   const pathname = usePathname();
-  const title = resolveTitle(pathname);
+  const titleKey = resolveTitleKey(pathname);
   const detail = isDetailPage(pathname);
 
   return (
@@ -52,7 +57,7 @@ export function OfficeTopbar() {
       {detail ? (
         <div id="office-topbar-slot" className="flex items-center gap-2 flex-1 min-w-0" />
       ) : (
-        title && <h1 className="truncate text-sm font-medium text-foreground">{title}</h1>
+        titleKey && <h1 className="truncate text-sm font-medium text-foreground">{t(titleKey)}</h1>
       )}
       <AppStatusDrawerTrigger className="ml-auto" />
     </div>

@@ -3,7 +3,7 @@
 import { useEffect, type Dispatch, type SetStateAction } from "react";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
-import { formatDistanceToNow } from "date-fns";
+import { formatTimeDistance, useDateLocale } from "@/lib/i18n/date-locale";
 import { IconArchive, IconArrowRight, IconHammer, IconLoader2 } from "@tabler/icons-react";
 import {
   Command,
@@ -117,6 +117,7 @@ type TaskResultItemProps = {
 };
 
 function TaskResultItem({ task, stepMap, repoMap, onSelect }: TaskResultItemProps) {
+  const locale = useDateLocale();
   const isArchived = ARCHIVED_STATES.has(task.state);
   const step = stepMap.get(task.workflow_step_id);
   const stepHex = step ? STEP_COLOR_MAP[step.color] : undefined;
@@ -128,7 +129,7 @@ function TaskResultItem({ task, stepMap, repoMap, onSelect }: TaskResultItemProp
   if (workDir) details.push(workDir);
   if (task.primary_agent_name) details.push(task.primary_agent_name);
   if (task.updated_at) {
-    details.push(formatDistanceToNow(new Date(task.updated_at), { addSuffix: true }));
+    details.push(formatTimeDistance(task.updated_at, locale));
   }
   return (
     <CommandItem

@@ -20,6 +20,18 @@ import Link from "@/components/routing/app-link";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import type { Routine, AgentProfile, RoutineTrigger } from "@/lib/state/slices/office/types";
 import { timeAgo } from "@/lib/utils/time";
+import type { TFunction } from "i18next";
+import { useTranslation } from "react-i18next";
+import { CONCURRENCY_POLICY_LABEL_KEYS } from "../lib/label-keys";
+
+/**
+ * A routine's concurrency policy is a wire value; only its label is copy.
+ * `?? policy` keeps an unknown value visible rather than blank.
+ */
+function concurrencyLabel(t: TFunction, policy: string): string {
+  const key = CONCURRENCY_POLICY_LABEL_KEYS[policy];
+  return key ? t(key) : policy;
+}
 
 type RoutineRowProps = {
   routine: Routine;
@@ -36,7 +48,7 @@ type RoutineRowProps = {
 // closest cron trigger, or "" when no cron trigger has a known next
 // fire (manual routines, disabled triggers, fresh-create with no
 // next_run_at yet). Empty string lets the caller skip rendering.
-function nextFireText(triggers: RoutineTrigger[]): string {
+function nextFireText(t: TFunction, triggers: RoutineTrigger[]): string {
   const cron = triggers
     .filter((t) => t.kind === "cron" && t.enabled && t.nextRunAt)
     .map((t) => new Date(t.nextRunAt as string).getTime())
@@ -44,7 +56,7 @@ function nextFireText(triggers: RoutineTrigger[]): string {
     .sort((a, b) => a - b);
   if (cron.length === 0) return "";
   const ms = cron[0] - Date.now();
-  if (ms <= 0) return "fires now";
+  if (ms <= 0) return t("office:firesNow");
   if (ms < 60_000) return "<1m";
   if (ms < 3_600_000) return `${Math.round(ms / 60_000)}m`;
   if (ms < 86_400_000) return `${Math.round(ms / 3_600_000)}h`;
@@ -61,6 +73,7 @@ export function RoutineRow({
   onDelete,
   onClick,
 }: RoutineRowProps) {
+  const { t } = useTranslation();
   // The API may return snake_case fields (assignee_agent_profile_id, concurrency_policy)
   // before any mapping layer converts them. Use both camelCase and snake_case lookups.
   const routineRaw = routine as unknown as Record<string, unknown>;
@@ -72,7 +85,7 @@ export function RoutineRow({
   const isActive = routine.status === "active";
   const template = routine.taskTemplate as { title?: string; description?: string } | undefined;
   const cronTrigger = triggers.find((t) => t.kind === "cron");
-  const nextFire = nextFireText(triggers);
+  const nextFire = nextFireText(t, triggers);
 
   return (
     <div>
@@ -96,12 +109,14 @@ export function RoutineRow({
             {cronTrigger?.cronExpression && (
               <span className="font-mono">{cronTrigger.cronExpression}</span>
             )}
-            {nextFire && <span>next in {nextFire}</span>}
-            <span>{routine.lastRunAt ? timeAgo(routine.lastRunAt) : "Never run"}</span>
-            <span className="capitalize">{concurrencyPolicy.replace(/_/g, " ")}</span>
+            {nextFire && <span>{t("office:nextIn", { when: nextFire })}</span>}
+            <span>{routine.lastRunAt ? timeAgo(routine.lastRunAt) : t("office:neverRun")}</span>
+            <span>{concurrencyLabel(t, concurrencyPolicy)}</span>
           </div>
         </div>
-        <Badge variant={isActive ? "default" : "secondary"}>{isActive ? "On" : "Off"}</Badge>
+        <Badge variant={isActive ? "default" : "secondary"}>
+          {isActive ? t("office:on") : t("office:off")}
+        </Badge>
         <Switch
           checked={isActive}
           onCheckedChange={(checked) => {
@@ -124,7 +139,7 @@ export function RoutineRow({
               </Link>
             </Button>
           </TooltipTrigger>
-          <TooltipContent>Edit routine</TooltipContent>
+          <TooltipContent>{t("office:editRoutine")}</TooltipContent>
         </Tooltip>
         <RoutineActions
           onRunNow={() => onRunNow(routine.id)}
@@ -139,6 +154,7 @@ export function RoutineRow({
 }
 
 function RoutineActions({ onRunNow, onDelete }: { onRunNow: () => void; onDelete: () => void }) {
+  const { t } = useTranslation();
   return (
     <DropdownMenu>
       <Tooltip>
@@ -154,7 +170,7 @@ function RoutineActions({ onRunNow, onDelete }: { onRunNow: () => void; onDelete
             </Button>
           </DropdownMenuTrigger>
         </TooltipTrigger>
-        <TooltipContent>Actions</TooltipContent>
+        <TooltipContent>{t("office:actions")}</TooltipContent>
       </Tooltip>
       <DropdownMenuContent align="end">
         <DropdownMenuItem
@@ -164,7 +180,7 @@ function RoutineActions({ onRunNow, onDelete }: { onRunNow: () => void; onDelete
             onRunNow();
           }}
         >
-          <IconPlayerPlay className="h-4 w-4 mr-2" /> Run Now
+          <IconPlayerPlay className="h-4 w-4 mr-2" /> {t("office:runNowTitleCase")}
         </DropdownMenuItem>
         <DropdownMenuItem
           className="text-red-600 cursor-pointer"
@@ -173,7 +189,7 @@ function RoutineActions({ onRunNow, onDelete }: { onRunNow: () => void; onDelete
             onDelete();
           }}
         >
-          <IconTrash className="h-4 w-4 mr-2" /> Delete
+          <IconTrash className="h-4 w-4 mr-2" /> {t("office:delete")}
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
@@ -189,25 +205,28 @@ function RoutineExpandedDetail({
   assignee: AgentProfile | undefined;
   template: { title?: string; description?: string } | undefined;
 }) {
+  const { t } = useTranslation();
   const routineRaw = routine as unknown as Record<string, unknown>;
   const concurrencyPolicy =
     routine.concurrencyPolicy ?? (routineRaw.concurrency_policy as string | undefined) ?? "";
   return (
     <div className="px-4 pb-3 pt-1 ml-7 border-t border-border/50 space-y-2 text-sm">
-      {routine.description && <DetailField label="Description" value={routine.description} />}
-      {template?.title && <DetailField label="Task title" value={template.title} />}
-      {template?.description && (
-        <DetailField label="Task description" value={template.description} />
+      {routine.description && (
+        <DetailField label={t("office:description")} value={routine.description} />
       )}
-      <DetailField label="Assignee" value={assignee?.name ?? "Unassigned"} />
+      {template?.title && <DetailField label={t("office:taskTitle")} value={template.title} />}
+      {template?.description && (
+        <DetailField label={t("office:taskDescription")} value={template.description} />
+      )}
+      <DetailField label={t("office:assignee")} value={assignee?.name ?? t("office:unassigned")} />
       <DetailField
-        label="Last run"
-        value={routine.lastRunAt ? timeAgo(routine.lastRunAt) : "Never"}
+        label={t("office:lastRun")}
+        value={routine.lastRunAt ? timeAgo(routine.lastRunAt) : t("office:lastRunNever")}
       />
-      <DetailField label="Concurrency" value={concurrencyPolicy.replace(/_/g, " ")} />
+      <DetailField label={t("office:concurrency")} value={concurrencyLabel(t, concurrencyPolicy)} />
       {routine.variables && Object.keys(routine.variables).length > 0 && (
         <div>
-          <span className="text-xs font-medium text-muted-foreground">Variables</span>
+          <span className="text-xs font-medium text-muted-foreground">{t("office:variables")}</span>
           <div className="mt-1 space-y-0.5">
             {Object.entries(routine.variables).map(([key, val]) => (
               <div key={key} className="text-xs font-mono text-muted-foreground">
