@@ -264,10 +264,28 @@ func (m *Manager) removeWorktree(ctx context.Context, wt *Worktree, removeBranch
 // branch, matching the "session.delete never runs git branch -D" invariant.
 // Unlike removeWorktree, directory-removal failure is returned rather than
 // only logged, so the caller's retry/backoff machinery can observe it.
+//
+// A task's worktree directory name is derived only from its task dir + repo
+// name (see prepareTaskWorktreePath), independent of worktree ID — so once
+// this session's row is gone, a brand-new worktree for the same task (e.g.
+// EnsureSession's auto-continuation for a workflow step that allows
+// auto-start) can legitimately be created at the exact same path this call
+// is about to remove. gitAddWorktree(Locked)/gitAddWorktreeForRecreate
+// already serialize creation against that target path via
+// acquireWorktreeTargetPath; joining the same lock here (rather than only
+// the unrelated repo-level lock) prevents `git worktree remove --force` from
+// racing a concurrent create at the same path and destroying a different,
+// newly-live worktree.
 func (m *Manager) ReclaimSessionWorktree(ctx context.Context, wt *Worktree) error {
 	if wt == nil || wt.Path == "" || wt.RepositoryPath == "" {
 		return nil
 	}
+	releaseTargetPath, err := acquireWorktreeTargetPath(ctx, wt.Path)
+	if err != nil {
+		return fmt.Errorf("acquire worktree target path %s: %w", wt.Path, err)
+	}
+	defer releaseTargetPath()
+
 	repoLock := m.getRepoLock(wt.RepositoryPath)
 	repoLock.Lock()
 	defer func() {

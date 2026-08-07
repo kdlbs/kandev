@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/kandev/kandev/internal/task/models"
 )
@@ -97,6 +98,60 @@ func TestReclaimSessionWorktree_IdempotentWhenDirectoryAlreadyAbsent(t *testing.
 
 	if err := mgr.ReclaimSessionWorktree(ctx, wt); err != nil {
 		t.Fatalf("ReclaimSessionWorktree on already-absent directory: %v", err)
+	}
+}
+
+// TestReclaimSessionWorktree_SerializesWithConcurrentTargetPathCreate
+// reproduces a data-loss race found while validating session.delete's
+// worktree reclamation: a task's worktree directory name is derived only
+// from task_dir + repo name (worktree.go's naming, independent of worktree
+// ID), so a brand-new worktree created for the task right after a session
+// delete (e.g. via EnsureSession's auto-continuation for a workflow step
+// that allows auto-start) can land at the exact same path the just-deleted
+// session's worktree occupied. gitAddWorktree(Locked) already serializes
+// worktree creation against that target path via acquireWorktreeTargetPath;
+// ReclaimSessionWorktree must join the same lock, or its
+// `git worktree remove --force <path>` can run concurrently with — and
+// destroy — a different, newly-created worktree that has since taken over
+// the path.
+func TestReclaimSessionWorktree_SerializesWithConcurrentTargetPathCreate(t *testing.T) {
+	mgr, store := newReferenceCleanupTestManager(t)
+	ctx := context.Background()
+	seedReferenceCleanupSession(t, store, "task-owner", "session-owner", models.TaskSessionStateCompleted)
+	wt := createReferenceCleanupWorktree(t, mgr, "task-owner", "session-owner")
+	simulateSessionCascadeDelete(t, store, "session-owner")
+
+	// Simulate a concurrent worktree creation already holding the target
+	// path lock for this exact path (as gitAddWorktreeLocked does before
+	// running `git worktree add`).
+	release, err := acquireWorktreeTargetPath(ctx, wt.Path)
+	if err != nil {
+		t.Fatalf("acquireWorktreeTargetPath: %v", err)
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		done <- mgr.ReclaimSessionWorktree(ctx, wt)
+	}()
+
+	select {
+	case err := <-done:
+		t.Fatalf("ReclaimSessionWorktree returned (err=%v) before the concurrent "+
+			"target-path holder released the lock — it is not serializing with "+
+			"worktree creation at the same path", err)
+	case <-time.After(200 * time.Millisecond):
+		// Expected: still blocked behind the held target-path lock.
+	}
+
+	release()
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("ReclaimSessionWorktree after lock release: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("ReclaimSessionWorktree did not complete after the target-path lock was released")
 	}
 }
 

@@ -124,11 +124,6 @@ func (r *Repository) CreateGitSnapshot(ctx context.Context, snapshot *models.Git
 }
 
 func (r *Repository) getGitSnapshotByOrder(ctx context.Context, sessionID, orderDir string) (*models.GitSnapshot, error) {
-	snapshot := &models.GitSnapshot{}
-	var snapshotType string
-	var filesJSON string
-	var metadataJSON string
-
 	query := fmt.Sprintf(`
 		SELECT id, session_id, snapshot_type, branch, remote_branch, head_commit, base_commit,
 		       ahead, behind, files, triggered_by, metadata, created_at
@@ -136,29 +131,7 @@ func (r *Repository) getGitSnapshotByOrder(ctx context.Context, sessionID, order
 		WHERE session_id = ?
 		ORDER BY created_at %s LIMIT 1
 	`, orderDir)
-	err := r.ro.QueryRowContext(ctx, r.ro.Rebind(query), sessionID).Scan(
-		&snapshot.ID, &snapshot.SessionID, &snapshotType, &snapshot.Branch,
-		&snapshot.RemoteBranch, &snapshot.HeadCommit, &snapshot.BaseCommit,
-		&snapshot.Ahead, &snapshot.Behind, &filesJSON, &snapshot.TriggeredBy,
-		&metadataJSON, &snapshot.CreatedAt,
-	)
-	if err != nil {
-		return nil, err
-	}
-
-	snapshot.SnapshotType = models.SnapshotType(snapshotType)
-	if filesJSON != "" && filesJSON != "{}" {
-		if err := json.Unmarshal([]byte(filesJSON), &snapshot.Files); err != nil {
-			return nil, fmt.Errorf("failed to deserialize git snapshot files: %w", err)
-		}
-	}
-	if metadataJSON != "" && metadataJSON != "{}" {
-		if err := json.Unmarshal([]byte(metadataJSON), &snapshot.Metadata); err != nil {
-			return nil, fmt.Errorf("failed to deserialize git snapshot metadata: %w", err)
-		}
-	}
-
-	return snapshot, nil
+	return scanGitSnapshot(r.ro.QueryRowContext(ctx, r.ro.Rebind(query), sessionID))
 }
 
 // GetLatestGitSnapshot retrieves the best git snapshot for a session.
@@ -253,11 +226,11 @@ func scanGitSnapshot(scanner gitSnapshotScanner) (*models.GitSnapshot, error) {
 		return nil, err
 	}
 	snapshot.SnapshotType = models.SnapshotType(snapshotType)
-	if filesJSON != "" && filesJSON != "{}" {
-		if err := json.Unmarshal([]byte(filesJSON), &snapshot.Files); err != nil {
-			return nil, fmt.Errorf("failed to deserialize git snapshot files: %w", err)
-		}
+	files, err := decodeSnapshotFiles(filesJSON)
+	if err != nil {
+		return nil, err
 	}
+	snapshot.Files = files
 	if metadataJSON != "" && metadataJSON != "{}" {
 		if err := json.Unmarshal([]byte(metadataJSON), &snapshot.Metadata); err != nil {
 			return nil, fmt.Errorf("failed to deserialize git snapshot metadata: %w", err)
@@ -266,13 +239,39 @@ func scanGitSnapshot(scanner gitSnapshotScanner) (*models.GitSnapshot, error) {
 	return snapshot, nil
 }
 
+// decodeSnapshotFiles turns the persisted files JSON column into a non-nil
+// map. serializeSnapshotJSON stores a genuinely-empty files set as the
+// literal "{}"; returning Go nil for that case would marshal back to JSON
+// `null` rather than `{}`, surprising any WS consumer that treats `files` as
+// always being an object (e.g. the session-delete pre-delete warning, which
+// counts Object.keys(files) across snapshots).
+func decodeSnapshotFiles(filesJSON string) (map[string]interface{}, error) {
+	if filesJSON == "" || filesJSON == "{}" {
+		return map[string]interface{}{}, nil
+	}
+	var files map[string]interface{}
+	if err := json.Unmarshal([]byte(filesJSON), &files); err != nil {
+		return nil, fmt.Errorf("failed to deserialize git snapshot files: %w", err)
+	}
+	return files, nil
+}
+
 // GetFirstGitSnapshot retrieves the oldest git snapshot for a session (first one created).
 // Returns sql.ErrNoRows if no snapshot is found.
 func (r *Repository) GetFirstGitSnapshot(ctx context.Context, sessionID string) (*models.GitSnapshot, error) {
 	return r.getGitSnapshotByOrder(ctx, sessionID, "ASC")
 }
 
-// GetGitSnapshotsBySession retrieves all git snapshots for a session, ordered by created_at descending.
+// GetGitSnapshotsBySession retrieves all git snapshots for a session.
+// Ordering mirrors GetLatestGitSnapshot's authoritative-first preference: an
+// agent_completed snapshot (captured at exact turn-completion time, always
+// carrying full file-diff data) sorts before any live_monitor snapshot (a
+// periodic poll that can land microseconds-to-seconds later with a newer
+// created_at, but whose files column is always empty), then newest-first
+// within each group. Without this, a caller that reads "the newest
+// snapshot" — e.g. the session-delete pre-delete warning — can
+// non-deterministically read a live_monitor row and silently undercount
+// uncommitted files to zero (see docs/specs/session-delete-resource-cleanup).
 // If limit > 0, only that many snapshots are returned.
 // Returns an empty slice if no snapshots are found.
 func (r *Repository) GetGitSnapshotsBySession(ctx context.Context, sessionID string, limit int) ([]*models.GitSnapshot, error) {
@@ -281,7 +280,9 @@ func (r *Repository) GetGitSnapshotsBySession(ctx context.Context, sessionID str
 		       ahead, behind, files, triggered_by, metadata, created_at
 		FROM task_session_git_snapshots
 		WHERE session_id = ?
-		ORDER BY created_at DESC
+		ORDER BY
+			CASE WHEN triggered_by = 'agent_completed' THEN 0 ELSE 1 END,
+			created_at DESC
 	`
 	if limit > 0 {
 		query += fmt.Sprintf(" LIMIT %d", limit)
@@ -295,33 +296,10 @@ func (r *Repository) GetGitSnapshotsBySession(ctx context.Context, sessionID str
 
 	var result []*models.GitSnapshot
 	for rows.Next() {
-		snapshot := &models.GitSnapshot{}
-		var snapshotType string
-		var filesJSON string
-		var metadataJSON string
-
-		err := rows.Scan(
-			&snapshot.ID, &snapshot.SessionID, &snapshotType, &snapshot.Branch,
-			&snapshot.RemoteBranch, &snapshot.HeadCommit, &snapshot.BaseCommit,
-			&snapshot.Ahead, &snapshot.Behind, &filesJSON, &snapshot.TriggeredBy,
-			&metadataJSON, &snapshot.CreatedAt,
-		)
+		snapshot, err := scanGitSnapshot(rows)
 		if err != nil {
 			return nil, err
 		}
-
-		snapshot.SnapshotType = models.SnapshotType(snapshotType)
-		if filesJSON != "" && filesJSON != "{}" {
-			if err := json.Unmarshal([]byte(filesJSON), &snapshot.Files); err != nil {
-				return nil, fmt.Errorf("failed to deserialize git snapshot files: %w", err)
-			}
-		}
-		if metadataJSON != "" && metadataJSON != "{}" {
-			if err := json.Unmarshal([]byte(metadataJSON), &snapshot.Metadata); err != nil {
-				return nil, fmt.Errorf("failed to deserialize git snapshot metadata: %w", err)
-			}
-		}
-
 		result = append(result, snapshot)
 	}
 	if err := rows.Err(); err != nil {

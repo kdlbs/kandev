@@ -40,6 +40,30 @@ async function openDeleteConfirmDialog(session: SessionPage, sessionId: string) 
 }
 
 /**
+ * Whether `branch` is currently registered as a live git worktree in
+ * `repoPath` (via `git worktree list --porcelain`). Deleting a task's sole
+ * session can auto-respawn a replacement (the task's workflow step allows
+ * auto-start — see EnsureSession), and that new session's worktree can
+ * legitimately land at the exact same directory the reclaimed one occupied
+ * (the path is derived only from task dir + repo name, not worktree ID or
+ * session ID). Checking raw path existence can't tell "leaked" apart from
+ * "reclaimed, then legitimately reoccupied by an unrelated worktree" — git's
+ * own worktree/branch registration can.
+ */
+function isBranchCheckedOutAsWorktree(
+  repoPath: string,
+  env: NodeJS.ProcessEnv,
+  branch: string,
+): boolean {
+  const output = execSync("git worktree list --porcelain", {
+    cwd: repoPath,
+    env,
+    encoding: "utf8",
+  });
+  return output.split("\n").includes(`branch refs/heads/${branch}`);
+}
+
+/**
  * Collects incoming WS response frames for `session.git.snapshots`. Used to
  * prove the delete dialog's warning fetch actually round-tripped before
  * asserting the warning lines are absent — an absence check with no such
@@ -113,19 +137,23 @@ test.describe("Session delete reclaims its worktree", () => {
       .toBe(false);
 
     // The durable cleanup job runs asynchronously after {"success":true} —
-    // poll for the worktree directory to actually disappear from disk. This
-    // is the exact bug being fixed: before the fix this directory would
-    // never be removed.
+    // poll for the ORIGINAL worktree to disappear from git's own worktree
+    // registration. This is the exact bug being fixed: before the fix this
+    // worktree would never be removed. Raw path existence isn't a reliable
+    // signal here — the task's workflow step allows auto-start, so deleting
+    // its sole session can auto-respawn a replacement session whose new
+    // worktree legitimately reoccupies the same directory (see
+    // isBranchCheckedOutAsWorktree's doc comment).
+    const gitEnv = makeGitEnv(backend.tmpDir);
     await expect
-      .poll(() => fs.existsSync(worktreePath), {
-        timeout: 15_000,
-        message: `Waiting for worktree directory ${worktreePath} to be reclaimed`,
+      .poll(() => isBranchCheckedOutAsWorktree(seedData.repositoryPath, gitEnv, worktreeBranch), {
+        timeout: 45_000,
+        message: `Waiting for worktree directory ${worktreePath} (branch ${worktreeBranch}) to be reclaimed`,
       })
       .toBe(false);
 
     // session.delete must never run `git branch -D`: the branch stays
     // resolvable in the source repository after the worktree is gone.
-    const gitEnv = makeGitEnv(backend.tmpDir);
     const branchSha = execSync(`git rev-parse --verify ${JSON.stringify(worktreeBranch)}`, {
       cwd: seedData.repositoryPath,
       env: gitEnv,
@@ -140,6 +168,11 @@ test.describe("Session delete reclaims its worktree", () => {
     apiClient,
     seedData,
   }) => {
+    // Environment prep + agent turn + snapshot persistence + UI interaction
+    // is more steps than the default 60s budget comfortably covers under
+    // load — matches the 120s budget session-tab-management.spec.ts uses
+    // for similarly multi-step session flows.
+    test.setTimeout(120_000);
     const task = await apiClient.createTaskWithAgent(
       seedData.workspaceId,
       "Session delete warning counts",
@@ -178,6 +211,21 @@ test.describe("Session delete reclaims its worktree", () => {
         { timeout: 60_000, message: "Waiting for a dirty git snapshot to persist" },
       )
       .toBe(true);
+
+    // Settle on the backend's terminal session state too — mirrors test 1/3,
+    // which wait for this before interacting with the tab, rather than
+    // racing the tab's right-click against any trailing frontend state
+    // update still in flight right after the completion message renders.
+    await waitForSessionDone(apiClient, task.id);
+
+    // A dirty worktree auto-inserts the Changes panel during the initial
+    // mount, which can race the effect that swaps the generic "chat"
+    // placeholder tab for the real session-scoped tab (session-tab.tsx's
+    // data-testid depends on that swap having completed). Reloading forces a
+    // fresh mount once the session/task state is already fully hydrated,
+    // side-stepping the race rather than depending on its timing.
+    await testPage.reload();
+    await session.waitForLoad();
 
     await openDeleteConfirmDialog(session, sessionId);
     const dialog = session.alertDialog();
