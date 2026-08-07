@@ -446,12 +446,86 @@ test.describe("Plugins — gRPC plugin install/load/live-update/uninstall", () =
     await testPage.keyboard.press("ControlOrMeta+Shift+J");
     const modal = testPage.getByTestId("hello-demo-modal");
     await expect(modal).toBeVisible();
-    await expect(modal).toHaveText("Hello from the plugin modal");
+    // toContainText, not toHaveText: the modal body also carries the tooltip
+    // trigger exercised by the hover spec below, and this assertion is about
+    // the keybinding reaching host.openModal, not the body's exact contents.
+    await expect(modal).toContainText("Hello from the plugin modal");
 
     // --- The host Dialog's built-in close button dismisses the (dismissible
     // by default) modal. ---
     await testPage.getByRole("button", { name: "Close" }).click();
     await expect(modal).not.toBeVisible();
+  });
+
+  // `PluginModalHost` mounts as a sibling of `<AppShell>` (src/main.tsx), so it
+  // is outside the app-wide TooltipProvider in app/layout.tsx and needs its
+  // own. The unit test for this asserts via focus, because jsdom does not
+  // reliably open a Radix tooltip from synthetic hover (apps/web/CLAUDE.md) —
+  // real pointer hover, and the portaled role="tooltip" it produces, are only
+  // assertable in a browser.
+  test("a Tooltip inside host.openModal content opens on real pointer hover", async ({
+    testPage,
+  }) => {
+    test.setTimeout(60_000);
+
+    await openInstallDialog(testPage);
+    await uploadPackage(testPage, PACKAGE_PATH);
+    await expect(testPage.getByTestId(`plugin-row-${PLUGIN_ID}`)).toBeVisible({ timeout: 15_000 });
+
+    await testPage.goto("/");
+    await testPage.reload();
+    await expect(testPage.getByTestId(`plugin-nav-item-${NAV_ITEM_ID}`)).toBeVisible({
+      timeout: 15_000,
+    });
+
+    await testPage.keyboard.press("ControlOrMeta+Shift+J");
+    const modal = testPage.getByTestId("hello-demo-modal");
+    await expect(modal).toBeVisible();
+
+    // Without a provider in scope the Tooltip throws during render and
+    // PluginErrorBoundary swallows the entire modal body, so the trigger
+    // being present is itself part of the assertion.
+    const trigger = testPage.getByTestId("hello-modal-tooltip-trigger");
+    await expect(trigger).toBeVisible();
+
+    await trigger.hover();
+    await expect(
+      testPage.getByRole("tooltip").filter({ hasText: "Tooltip inside a plugin modal" }),
+    ).toBeVisible();
+  });
+
+  // host.theme is a live getter and host.onThemeChange is backed by a
+  // MutationObserver on <html>'s class. jsdom's MutationObserver is a shim, so
+  // only a browser proves a real theme flip reaches a plugin subscriber.
+  test("host.onThemeChange fires in a real browser when the app theme flips", async ({
+    testPage,
+  }) => {
+    test.setTimeout(60_000);
+
+    await openInstallDialog(testPage);
+    await uploadPackage(testPage, PACKAGE_PATH);
+    await expect(testPage.getByTestId(`plugin-row-${PLUGIN_ID}`)).toBeVisible({ timeout: 15_000 });
+
+    await testPage.goto("/");
+    await testPage.reload();
+    await testPage.getByTestId(`plugin-nav-item-${NAV_ITEM_ID}`).click();
+
+    // The readout seeds from host.theme once, then only ever updates from an
+    // onThemeChange notification — so a stale value here means the
+    // subscription never fired.
+    const readout = testPage.getByTestId("hello-theme-readout");
+    await expect(readout).toBeVisible({ timeout: 15_000 });
+    const before = await readout.textContent();
+    expect(before === "light" || before === "dark").toBe(true);
+
+    // Flip through the app's own command, not by poking the DOM, so this
+    // exercises AppThemeProvider the way a user would.
+    const target = before === "dark" ? "Switch to Light Mode" : "Switch to Dark Mode";
+    await testPage.keyboard.press("ControlOrMeta+k");
+    await testPage.getByRole("option", { name: target }).click();
+
+    await expect(readout).toHaveText(before === "dark" ? "light" : "dark");
+    await expect(readout).toHaveAttribute("data-theme-changes", "1");
   });
 
   test("settings page: schema-driven form, secret masking, and Host GetConfig delivery", async ({
