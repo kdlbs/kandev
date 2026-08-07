@@ -8,6 +8,7 @@
     "prebuild": "node scripts/generate-release-notes.mjs && node scripts/generate-changelog.mjs",
     "build": "vite build",
     "build:vite": "vite build",
+    "build:e2e": "cross-env KANDEV_I18N_BUNDLE_PSEUDO=1 pnpm run build",
     "start": "vite preview --host 0.0.0.0",
     "lint": "eslint --max-warnings 0",
     "lint:i18n": "eslint --config eslint.i18n.config.mjs",

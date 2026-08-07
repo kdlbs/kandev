@@ -6,6 +6,7 @@ import {
   i18n,
   isSupportedLocale,
   normalizeLocale,
+  PSEUDO_LOCALE_BUNDLED,
   selectableLocales,
   SUPPORTED_LOCALES,
 } from "./index";
@@ -53,6 +54,22 @@ describe("locale predicates", () => {
   it("hides the pseudo locale in production builds only", () => {
     expect(selectableLocales(false)).toEqual(["en", "pt-pt", "zh-cn", "pseudo"]);
     expect(selectableLocales(true)).toEqual(["en", "pt-pt", "zh-cn"]);
+  });
+
+  /**
+   * The include half of the bundling switch, asserted end to end.
+   *
+   * `shouldBundlePseudoLocale` is unit-tested in `bundling.test.ts`, but that
+   * only covers the decision — not that `vite.config.ts` actually defines
+   * `__KANDEV_PSEUDO_LOCALE_BUNDLED__` and that the constant reaches this module.
+   * If that wiring breaks in the "exclude" direction, dev and e2e lose the
+   * pseudo oracle silently: every screen simply falls back to `en` and reads as
+   * un-externalized. This pins it, and "resolves real catalog messages for the
+   * active locale" below is what proves the catalog itself came with it.
+   */
+  it("bundles the pseudo catalog outside a production build", () => {
+    expect(PSEUDO_LOCALE_BUNDLED).toBe(true);
+    expect(selectableLocales(false)).toContain("pseudo");
   });
 });
 
