@@ -1677,4 +1677,38 @@ export const i18nGuardFiles = [
   "components/task/share/**/*.{ts,tsx}",
   "components/task/inspector/**/*.{ts,tsx}",
   "components/task/document/**/*.{ts,tsx}",
+  // Loose components directly under `components/`. Individual file entries
+  // rather than a `components/*.tsx` glob: the sibling `components/task-*.tsx`
+  // files match the `components/(task\/|task-)` namespace rule and belong with
+  // the `components/task` batches, so a glob here would falsely claim them.
+  //
+  // These have no namespace rule of their own, so they are on `common` — except
+  // the two `vcs-*` menus and `workflow-selector-row`, which were placed on
+  // `integrations` / `workflows` by hand to sit with the copy they share.
+  //
+  // Deliberately left in English inside these files, because they are protocol
+  // or data rather than copy: the `gh` CLI binary name and the `kdlbs/kandev`
+  // repository slug in the Improve Kandev dialogs, the `esc` key name in the
+  // onboarding preview and the command-panel footer, the `make install`/`/commit`
+  // shell and slash commands, git refs reaching `ontoBranch`/`fromBranch`, and
+  // the `ActionDef.key` / `RUNTIMES[].id` discriminants that keep React keys
+  // locale-independent.
+  "components/branch-refresh-button.tsx",
+  "components/cli-mode-icon.tsx",
+  "components/command-panel-footer.tsx",
+  "components/command-panel-scope-switcher.tsx",
+  "components/create-local-repository-surface.tsx",
+  "components/discard-local-changes-dialog.tsx",
+  "components/enhance-prompt-button.tsx",
+  "components/folder-picker.tsx",
+  "components/grid-spinner.tsx",
+  "components/improve-kandev-dialog-create.tsx",
+  "components/improve-kandev-dialog.tsx",
+  "components/onboarding-dialog.tsx",
+  "components/prompt-result-recovery.tsx",
+  "components/vcs-multi-repo-menu.tsx",
+  "components/vcs-split-button.tsx",
+  "components/watcher-repository-fields.tsx",
+  "components/workflow-selector-row.tsx",
+  "components/workspace-content-search.tsx",
 ];

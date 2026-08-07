@@ -1,0 +1,21 @@
+{
+  "agentProfileHeading": "Perfil de agente de configuração",
+  "agentProfileHelp": "Escolha o agente com acesso às ferramentas de configuração. Passa a ser a pré-definição da área de trabalho.",
+  "closePanel": "Fechar o chat de configuração",
+  "dialogDescription": "Peça a um agente para gerir fluxos de trabalho, perfis de agente e configuração MCP.",
+  "noAgentProfiles": "Não há perfis de agente disponíveis. Crie um primeiro nas definições de Agentes.",
+  "openInQuickChat": "Abrir no Chat rápido",
+  "profileUnavailable": "O perfil de agente selecionado ainda não está disponível. Tente novamente dentro de momentos.",
+  "promptHeading": "O que pretende configurar?",
+  "promptPlaceholder": "Pergunte o que quiser sobre a sua configuração...",
+  "startChat": "Iniciar chat",
+  "startChatAria": "Iniciar o chat de configuração",
+  "startingChat": "A iniciar o chat...",
+  "suggestionAddReviewStep": "Adiciona um passo de \"Revisão de código\" ao meu fluxo de trabalho",
+  "suggestionCreateProfile": "Cria um novo perfil de agente com aprovação automática ativada",
+  "suggestionShowWorkflow": "Mostra-me a configuração atual do fluxo de trabalho",
+  "suggestionUpdateMcp": "Atualiza os servidores MCP do perfil de agente pré-definido",
+  "tagline": "Configure o Kandev em linguagem natural",
+  "tryAsking": "Experimente perguntar",
+  "unknownError": "Erro desconhecido"
+}
