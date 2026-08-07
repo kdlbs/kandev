@@ -102,6 +102,14 @@ Complete 2026-08-07. All five tasks done; every task's `## Results` records the 
 - YAML parse: 18/18 workflows OK; `git diff --check` clean.
 - Post-merge smoke: pending — first `backend-tests`/`e2e-tests`/`frontend-tests` run after merge should no longer show the Node-20 deprecation warning.
 
+## PR Fixup (2026-08-07)
+
+PR #2401 (`ci: upgrade GitHub Actions to Node 24 runtime`):
+
+- CodeRabbit/zizmor flagged the two v4→v6 checkout blocks in the arm64 release jobs (`docker-arm64`, `docker-universal-arm64`) for missing `persist-credentials: false` (artipacked — the checked-out tree feeds the Docker build context). Fixed in `b7624fd` (`ci: disable checkout credential persistence in arm64 release jobs`), scoped to exactly the two changed blocks; the other release.yml checkouts already set the flag.
+- Final head `b7624fd32e43828c0ff50b90e73013fda3bf774e`: 47 checks passed, 0 failed, 0 pending, `mergeable_state: clean`, unresolved threads 0, hidden threads 0, actionable issue comments 0.
+- Post-merge smoke still pending as above.
+
 ## Open Questions
 
 None — target SHAs and compatibility are resolved in the table above.
