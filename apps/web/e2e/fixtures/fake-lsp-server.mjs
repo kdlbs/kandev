@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 
 const logPath = process.env.KANDEV_LSP_E2E_LOG ?? path.join(os.homedir(), "lsp-e2e-events.jsonl");
-const crashOnOpenPath = path.join(os.homedir(), "lsp-e2e-crash-on-open");
+const crashOnOpenOncePath = path.join(os.homedir(), "lsp-e2e-crash-on-open-once");
 const initializeModePath = path.join(os.homedir(), "lsp-e2e-initialize-mode.json");
 const initializeReleasePath = path.join(os.homedir(), "lsp-e2e-initialize-release");
 const controllerGeneration = process.env.KANDEV_LSP_GENERATION ?? null;
@@ -238,7 +238,8 @@ function handleDidOpen(message) {
     openDocumentUris.add(uri);
     diagnostic(uri, "Fake Kotlin diagnostic");
   }
-  if (fs.existsSync(crashOnOpenPath)) {
+  if (fs.existsSync(crashOnOpenOncePath)) {
+    fs.rmSync(crashOnOpenOncePath, { force: true });
     log("crashing", { reason: "didOpen" });
     process.exit(23);
   }
