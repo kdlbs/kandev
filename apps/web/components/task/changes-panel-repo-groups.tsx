@@ -13,6 +13,7 @@ import { CommitRow, type CommitItem } from "./commit-row";
 import type { CommitDetailTarget } from "./changes-diff-target";
 import { groupByRepositoryName } from "@/lib/group-by-repo";
 import type { ChangedFile } from "./changes-panel-helpers";
+import { useTranslation } from "react-i18next";
 
 export type RepoGroup = ReturnType<typeof groupByRepositoryName<ChangedFile>>[number];
 
@@ -167,6 +168,7 @@ export function CommitsGroupActions({
   onRepoCreatePR?: (repo: string) => void;
   stop: (e: React.MouseEvent) => void;
 }) {
+  const { t } = useTranslation();
   return (
     <div className="flex items-center gap-1" onClick={stop}>
       {onRepoPush && aheadCount > 0 && (
@@ -178,7 +180,7 @@ export function CommitsGroupActions({
           onClick={() => onRepoPush(repositoryName)}
         >
           <IconCloudUpload className="h-3 w-3" />
-          Push
+          {t("task:push")}
           <span className="text-muted-foreground">{aheadCount}</span>
         </Button>
       )}
@@ -197,7 +199,7 @@ export function CommitsGroupActions({
               PR
             </Button>
           </TooltipTrigger>
-          {prExists && <TooltipContent>A pull request already exists for this task</TooltipContent>}
+          {prExists && <TooltipContent>{t("task:aPullRequestAlreadyExistsFor")}</TooltipContent>}
         </Tooltip>
       )}
     </div>

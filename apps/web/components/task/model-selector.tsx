@@ -21,6 +21,8 @@ import type {
   ConfigOptionEntry,
   SessionModelEntry,
 } from "@/lib/state/slices/session-runtime/types";
+import { useTranslation } from "react-i18next";
+import { t } from "@/lib/i18n";
 
 type SessionModelsEntry = {
   currentModelId: string;
@@ -205,7 +207,7 @@ function resolveAvailableModels({
 }
 
 function describeError(err: unknown): string {
-  return err instanceof Error ? err.message : "Unknown error";
+  return err instanceof Error ? err.message : t("task:unknownError2");
 }
 
 /** Builds model/config change handlers with optimistic update + error toast + revert. */
@@ -213,6 +215,7 @@ function useModelChangeHandlers(
   configOptions: SelectConfigOption[],
   sessionModelsData: SessionModelsEntry | undefined,
 ) {
+  const { t } = useTranslation();
   const activeModels = useAppStore((state) => state.activeModel.bySessionId);
   const setActiveModel = useAppStore((state) => state.setActiveModel);
   const setSessionModels = useAppStore((state) => state.setSessionModels);
@@ -246,7 +249,7 @@ function useModelChangeHandlers(
         setActiveModel(sid, previousActive);
         if (previousModels) setSessionModels(sid, previousModels);
         toast({
-          title: "Failed to change model",
+          title: t("task:failedToChangeModel"),
           description: describeError(err),
           variant: "error",
         });
@@ -363,6 +366,7 @@ export const ModelSelector = memo(function ModelSelector({
   sessionId,
   triggerClassName,
 }: ModelSelectorProps) {
+  const { t } = useTranslation();
   const {
     currentModel,
     modelOptions,
@@ -414,8 +418,8 @@ export const ModelSelector = memo(function ModelSelector({
       configOptions={configOptions}
       onModelChange={onModelChange}
       onConfigChange={onConfigChange}
-      placeholder="Model"
-      ariaLabel="Session model settings"
+      placeholder={t("common:model")}
+      ariaLabel={t("task:sessionModelSettings")}
       variant="compact"
       popoverSide="top"
       triggerClassName={triggerClassName}

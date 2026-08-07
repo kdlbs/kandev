@@ -452,3 +452,153 @@ func TestProjectorRehydratesSiblingGitObservationsAfterRestart(t *testing.T) {
 		t.Fatalf("Git summary after sibling rehydration = %+v, want additions=8 changed_files=3", got.Git)
 	}
 }
+
+// A resolved permission/clarification request must clear the task-list pending
+// affordance. The resolution arrives as a message.updated on the request row
+// itself, so the projector has to read the terminal status off that row instead
+// of treating every request-typed message as evidence of a live prompt.
+func TestProjectorClearsPendingWhenRequestMessageResolves(t *testing.T) {
+	cases := []struct {
+		name        string
+		messageType string
+		arm         func(t *testing.T, eventBus *bus.MemoryEventBus, taskID, sessionID string)
+		wantArmed   string
+		status      string
+	}{
+		{
+			name:        "permission approved",
+			messageType: "permission_request",
+			arm: func(t *testing.T, eventBus *bus.MemoryEventBus, taskID, sessionID string) {
+				publishProjectorEvent(t, eventBus, events.PermissionRequestReceived, events.BuildPermissionRequestSubject(sessionID), map[string]interface{}{
+					"task_id":    taskID,
+					"session_id": sessionID,
+				})
+			},
+			wantArmed: "permission",
+			status:    "approved",
+		},
+		{
+			name:        "permission expired",
+			messageType: "permission_request",
+			arm: func(t *testing.T, eventBus *bus.MemoryEventBus, taskID, sessionID string) {
+				publishProjectorEvent(t, eventBus, events.PermissionRequestReceived, events.BuildPermissionRequestSubject(sessionID), map[string]interface{}{
+					"task_id":    taskID,
+					"session_id": sessionID,
+				})
+			},
+			wantArmed: "permission",
+			status:    "expired",
+		},
+		{
+			name:        "clarification answered",
+			messageType: "clarification_request",
+			arm: func(t *testing.T, eventBus *bus.MemoryEventBus, taskID, sessionID string) {
+				publishProjectorEvent(t, eventBus, events.MessageAdded, events.MessageAdded, map[string]interface{}{
+					"task_id":        taskID,
+					"session_id":     sessionID,
+					"author_type":    "user",
+					"type":           "clarification_request",
+					"requests_input": true,
+					"metadata":       map[string]interface{}{"status": "pending", "pending_id": "pending-1"},
+				})
+			},
+			wantArmed: "clarification",
+			status:    "answered",
+		},
+		{
+			name:        "permission rejected",
+			messageType: "permission_request",
+			arm: func(t *testing.T, eventBus *bus.MemoryEventBus, taskID, sessionID string) {
+				publishProjectorEvent(t, eventBus, events.PermissionRequestReceived, events.BuildPermissionRequestSubject(sessionID), map[string]interface{}{
+					"task_id":    taskID,
+					"session_id": sessionID,
+				})
+			},
+			wantArmed: "permission",
+			status:    "rejected",
+		},
+		{
+			name:        "clarification cancelled",
+			messageType: "clarification_request",
+			arm: func(t *testing.T, eventBus *bus.MemoryEventBus, taskID, sessionID string) {
+				publishProjectorEvent(t, eventBus, events.MessageAdded, events.MessageAdded, map[string]interface{}{
+					"task_id":        taskID,
+					"session_id":     sessionID,
+					"author_type":    "user",
+					"type":           "clarification_request",
+					"requests_input": true,
+					"metadata":       map[string]interface{}{"status": "pending", "pending_id": "pending-1"},
+				})
+			},
+			wantArmed: "clarification",
+			status:    "cancelled",
+		},
+	}
+
+	for i, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, store, eventBus, _, _ := newProjectorTest(t)
+			taskID := fmt.Sprintf("task-pending-resolve-%d", i)
+			sessionID := fmt.Sprintf("session-pending-resolve-%d", i)
+
+			publishSessionState(t, eventBus, taskID, sessionID, nil)
+			tc.arm(t, eventBus, taskID, sessionID)
+
+			if got := store.summary(taskID); got == nil || got.PendingAction != tc.wantArmed {
+				t.Fatalf("pending action before resolution = %+v, want %q", got, tc.wantArmed)
+			}
+
+			publishProjectorEvent(t, eventBus, events.MessageUpdated, events.MessageUpdated, map[string]interface{}{
+				"task_id":        taskID,
+				"session_id":     sessionID,
+				"author_type":    "user",
+				"type":           tc.messageType,
+				"requests_input": tc.messageType == "clarification_request",
+				"metadata":       map[string]interface{}{"status": tc.status, "pending_id": "pending-1"},
+			})
+
+			got := store.summary(taskID)
+			if got == nil {
+				t.Fatal("missing projected summary")
+			}
+			if got.PendingAction != "" {
+				t.Fatalf("pending action after %q resolution = %q, want empty", tc.status, got.PendingAction)
+			}
+		})
+	}
+}
+
+// A detached-but-still-answerable clarification keeps status=pending, so the
+// task-list affordance must survive that update.
+func TestProjectorKeepsPendingWhenRequestStaysAnswerable(t *testing.T) {
+	_, store, eventBus, _, _ := newProjectorTest(t)
+	const taskID = "task-pending-detached"
+	const sessionID = "session-pending-detached"
+
+	publishSessionState(t, eventBus, taskID, sessionID, nil)
+	publishProjectorEvent(t, eventBus, events.MessageAdded, events.MessageAdded, map[string]interface{}{
+		"task_id":        taskID,
+		"session_id":     sessionID,
+		"author_type":    "user",
+		"type":           "clarification_request",
+		"requests_input": true,
+		"metadata":       map[string]interface{}{"status": "pending", "pending_id": "pending-1"},
+	})
+	publishProjectorEvent(t, eventBus, events.MessageUpdated, events.MessageUpdated, map[string]interface{}{
+		"task_id":        taskID,
+		"session_id":     sessionID,
+		"author_type":    "user",
+		"type":           "clarification_request",
+		"requests_input": true,
+		"metadata": map[string]interface{}{
+			"status":             "pending",
+			"pending_id":         "pending-1",
+			"agent_disconnected": true,
+		},
+	})
+
+	got := store.summary(taskID)
+	if got == nil || got.PendingAction != "clarification" {
+		t.Fatalf("pending action after detach = %+v, want clarification", got)
+	}
+}

@@ -306,7 +306,6 @@
   "integrationDescriptionJira": "Credenciais do Atlassian Cloud e vigilâncias de issues por JQL.",
   "integrationDescriptionLinear": "Chave de API pessoal e pré-definições da equipa.",
   "integrationDescriptionSentry": "Token de autenticação, pré-definições de organização/projeto e exploração de issues.",
-  "integrationDescriptionSlack": "Credenciais de sessão do navegador e agente de triagem {{trigger}}.",
   "invalidJson": "JSON inválido",
   "keyboardShortcuts": "Atalhos de teclado",
   "language": "Idioma",

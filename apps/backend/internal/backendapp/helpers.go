@@ -74,7 +74,6 @@ import (
 	"github.com/kandev/kandev/internal/runtimeflags"
 	"github.com/kandev/kandev/internal/secrets"
 	"github.com/kandev/kandev/internal/sentry"
-	"github.com/kandev/kandev/internal/slack"
 	spriteshandlers "github.com/kandev/kandev/internal/sprites"
 	sshhandlers "github.com/kandev/kandev/internal/ssh"
 	systemsvc "github.com/kandev/kandev/internal/system"
@@ -642,9 +641,6 @@ func registerRoutes(p routeParams) {
 		p.services.Linear.SetRepositoryLookup(repoLookup)
 		p.services.Linear.SetWorkspaceAuthorizer(p.taskSvc.AuthorizeWorkspaceAccess)
 	}
-	if p.services.Slack != nil {
-		p.services.Slack.SetWorkspaceAuthorizer(p.taskSvc.AuthorizeWorkspaceAccess)
-	}
 	if p.services.Sentry != nil {
 		p.services.Sentry.SetTaskDeleter(handoffSvc)
 		p.services.Sentry.SetRepositoryLookup(repoLookup)
@@ -1052,7 +1048,14 @@ func registerSecondaryRoutes(
 	// Login PTY: spawns agent login commands under a PTY on the kandev host
 	// (claude auth login, auggie login, ...). The manager is shared with Quick
 	// Terminal so descriptor lifecycle callbacks observe the same sessions.
-	loginpty.NewHandlers(p.loginMgr, p.agentRegistry, p.log.Zap(), nil).RegisterRoutes(p.router)
+	loginHandlers := loginpty.NewHandlers(p.loginMgr, p.agentRegistry, p.log.Zap(), nil)
+	if p.quickTerminalSvc != nil {
+		// Guard the assignment: passing a nil *quickterminal.Service straight
+		// into the interface would create a typed-nil binder that is non-nil to
+		// the handler's nil check but panics when invoked.
+		loginHandlers.SetHostShellSessionBinder(p.quickTerminalSvc)
+	}
+	loginHandlers.RegisterRoutes(p.router)
 	if p.quickTerminalSvc != nil {
 		p.quickTerminalSvc.RegisterRoutes(p.router)
 	}
@@ -1141,11 +1144,6 @@ func registerSecondaryRoutes(
 		sentry.RegisterRoutes(p.router, p.gateway.Dispatcher, p.services.Sentry, p.log)
 		sentry.RegisterMockRoutes(p.router, p.services.Sentry, p.log)
 		p.log.Debug("Registered Sentry handlers (HTTP)")
-	}
-
-	if p.services.Slack != nil {
-		slack.RegisterRoutes(p.router, p.gateway.Dispatcher, p.services.Slack, p.log)
-		p.log.Debug("Registered Slack handlers (HTTP + WebSocket)")
 	}
 
 	if p.services.WorkflowSync != nil {
@@ -1265,7 +1263,7 @@ func officeWorkspaceScopeMiddleware(authSvc *auth.Service, taskSvc *taskservice.
 // gitlab) with no per-user gate of their own, so this global middleware
 // authorizes ownership for them when auth is enabled.
 var integrationWorkspacePrefixes = []string{
-	"/api/v1/jira/", "/api/v1/linear/", "/api/v1/sentry/", "/api/v1/slack/",
+	"/api/v1/jira/", "/api/v1/linear/", "/api/v1/sentry/",
 	"/api/v1/azure-devops/", "/api/v1/gitlab/", "/api/v1/github/", "/api/v1/workflow-sync/",
 }
 

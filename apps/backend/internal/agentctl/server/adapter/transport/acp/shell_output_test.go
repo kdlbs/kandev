@@ -578,6 +578,122 @@ func TestNormalizeShellToolResultStripsLeadingCommandEchoWithWorkDirResolvedPath
 	require.Equal(t, "start\nhello\n", payload.ShellExec().Output.Stdout)
 }
 
+// TestNormalizeShellToolResultStripsLeadingCommandEchoWithCRLFMultilineCommandNoWorkDir
+// is a regression for a live report: a multi-line command with no reported
+// cwd (the common case - most commands don't need an explicit cwd), run
+// through a real terminal that echoes canonical-mode input with "\r\n" line
+// endings while the command's own embedded newlines - the text the tool
+// call actually reports - stay plain "\n". stripCommandEcho's exact-match
+// prefix check then fails at the very first embedded newline, and until now
+// stripCommandEchoWithWorkDir bailed out immediately whenever workDir was
+// empty, without ever reaching the CRLF-normalizing cutLines comparison it
+// already applies for the workDir-resolved-path case - so the entire
+// multi-line echo leaked into the persisted Output verbatim, directly
+// butted against the real output with no separator.
+func TestNormalizeShellToolResultStripsLeadingCommandEchoWithCRLFMultilineCommandNoWorkDir(t *testing.T) {
+	t.Parallel()
+
+	command := "for i in 1 2; do\n  echo $i\ndone"
+	stdout := "$ for i in 1 2; do\r\n  echo $i\r\ndone\r\n1\n2\n"
+
+	normalizer := NewNormalizer("")
+	payload := normalizer.NormalizeToolCall("execute", map[string]any{
+		"kind":      "execute",
+		"raw_input": map[string]any{"command": command},
+	})
+
+	normalizer.NormalizeToolResult(payload, stdout)
+
+	require.Equal(t, "1\n2\n", payload.ShellExec().Output.Stdout)
+}
+
+// TestNormalizeShellToolResultCRLFMultilineFallbackNeverCorruptsNearMissOutput
+// is a safety regression for the above: the CRLF-normalizing comparison must
+// still decline to strip when the echoed lines genuinely diverge from the
+// reported command (e.g. a stale echo, or a provider that actually ran
+// something else), rather than guessing.
+func TestNormalizeShellToolResultCRLFMultilineFallbackNeverCorruptsNearMissOutput(t *testing.T) {
+	t.Parallel()
+
+	command := "for i in 1 2; do\n  echo $i\ndone"
+	stdout := "$ for i in 1 2; do\r\n  echo $i\r\ndone; echo extra\r\n1\n2\n"
+
+	normalizer := NewNormalizer("")
+	payload := normalizer.NormalizeToolCall("execute", map[string]any{
+		"kind":      "execute",
+		"raw_input": map[string]any{"command": command},
+	})
+
+	normalizer.NormalizeToolResult(payload, stdout)
+
+	require.Equal(t, stdout, payload.ShellExec().Output.Stdout)
+}
+
+// TestNormalizeShellToolUpdateStripsLeadingCommandEchoWithCRLFMultilineCommandNoWorkDir
+// covers the same CRLF-normalizing multiline fallback as
+// TestNormalizeShellToolResultStripsLeadingCommandEchoWithCRLFMultilineCommandNoWorkDir,
+// but on the live-update path (terminal_output plus a terminal_exit
+// completion, no rawOutput) rather than the final/committed one - a review
+// finding that NormalizeShellToolUpdate exercises the same
+// stripCommandEchoMultiline fix but had no test pinning it directly.
+func TestNormalizeShellToolUpdateStripsLeadingCommandEchoWithCRLFMultilineCommandNoWorkDir(t *testing.T) {
+	t.Parallel()
+
+	command := "for i in 1 2; do\n  echo $i\ndone"
+
+	normalizer := NewNormalizer("")
+	payload := normalizer.NormalizeToolCall("execute", map[string]any{
+		"kind":      "execute",
+		"raw_input": map[string]any{"command": command},
+	})
+
+	normalizer.NormalizeShellToolUpdate(
+		payload,
+		map[string]any{
+			"terminal_output": map[string]any{"data": "$ for i in 1 2; do\r\n  echo $i\r\ndone\r\n1\n2\n"},
+			"terminal_exit":   map[string]any{"exit_code": float64(0)},
+		},
+		nil,
+		nil,
+	)
+
+	require.Equal(t, "1\n2\n", payload.ShellExec().Output.Stdout)
+}
+
+// TestNormalizeShellToolUpdateCRLFMultilineNoWorkDirDefersPendingEchoWithoutNewline
+// is the pending (non-final, deferred) counterpart of
+// TestNormalizeShellToolUpdateStripsLeadingCommandEchoWithCRLFMultilineCommandNoWorkDir,
+// added per review: stripCommandEchoMultiline's own deferred branch
+// ("!hasMore" with commitExactMatch still false) was only exercised through
+// the workDir-resolved-path variant
+// (TestNormalizeShellToolUpdateWorkDirFallbackDefersPendingEchoWithoutNewline),
+// never through the CRLF-normalizing no-cwd fallback this file added. A
+// buffer that echoes exactly the command's own embedded newlines - with no
+// cwd, and with no trailing newline yet confirming the echo's last line is
+// complete - must be left untouched, since the real output (or even just
+// the separator newline) may still be in flight.
+func TestNormalizeShellToolUpdateCRLFMultilineNoWorkDirDefersPendingEchoWithoutNewline(t *testing.T) {
+	t.Parallel()
+
+	command := "for i in 1 2; do\n  echo $i\ndone"
+	echo := "$ " + command
+
+	normalizer := NewNormalizer("")
+	payload := normalizer.NormalizeToolCall("execute", map[string]any{
+		"kind":      "execute",
+		"raw_input": map[string]any{"command": command},
+	})
+
+	normalizer.NormalizeShellToolUpdate(
+		payload,
+		map[string]any{"terminal_output": map[string]any{"data": echo}},
+		nil,
+		nil,
+	)
+
+	require.Equal(t, echo, payload.ShellExec().Output.Stdout)
+}
+
 func TestNormalizeShellToolUpdateStripsLeadingCommandEchoFromLiveOutput(t *testing.T) {
 	t.Parallel()
 

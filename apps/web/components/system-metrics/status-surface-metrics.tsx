@@ -11,6 +11,8 @@ import {
 } from "@tabler/icons-react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { formatDistanceToNow } from "date-fns";
+import type { TFunction } from "i18next";
+import { useTranslation } from "react-i18next";
 import { useAppStore } from "@/components/state-provider";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { useSystemMetricsSubscription } from "@/hooks/use-system-metrics-subscription";
@@ -27,6 +29,7 @@ export function StatusSurfaceMetrics({
   density,
   drawerOpen,
 }: StatusSurfaceMetricsProps) {
+  const { t } = useTranslation();
   // Wire/storage name stays stable for existing user settings and API payloads.
   const enabled = useAppStore((state) => state.userSettings.systemMetricsDisplay.showInTopbar);
   const simplified = useAppStore((state) => state.userSettings.systemMetricsDisplay.simplified);
@@ -44,10 +47,10 @@ export function StatusSurfaceMetrics({
       <section
         data-testid="app-status-metrics"
         className="space-y-2 py-0.5"
-        aria-label="System metrics"
+        aria-label={t("system:systemMetrics")}
       >
         <h3 className="text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
-          System metrics
+          {t("system:systemMetrics")}
         </h3>
         {!host ? (
           <EmptyMetrics drawer />
@@ -66,7 +69,7 @@ export function StatusSurfaceMetrics({
     <div
       data-testid="app-status-metrics"
       className="flex h-full max-w-[52vw] items-center overflow-hidden leading-none text-current"
-      aria-label="System metrics"
+      aria-label={t("system:systemMetrics")}
     >
       {!host ? (
         <EmptyMetrics />
@@ -84,6 +87,7 @@ export function StatusSurfaceMetrics({
 }
 
 function EmptyMetrics({ drawer = false }: { drawer?: boolean }) {
+  const { t } = useTranslation();
   return (
     <div
       className={
@@ -93,7 +97,7 @@ function EmptyMetrics({ drawer = false }: { drawer?: boolean }) {
       }
     >
       <IconActivity className="h-3.5 w-3.5" />
-      <span>Metrics unavailable</span>
+      <span>{t("system:metricsUnavailable")}</span>
     </div>
   );
 }
@@ -154,19 +158,23 @@ function SourceBadge({
   updatedAt?: string;
   showLabel: boolean;
 }) {
+  const { t } = useTranslation();
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <span className="flex shrink-0 items-center gap-1.5 text-current" aria-label="Host metrics">
+        <span
+          className="flex shrink-0 items-center gap-1.5 text-current"
+          aria-label={t("system:hostMetrics")}
+        >
           <IconServer className="size-3.5" stroke={1.6} />
-          {showLabel ? <span className="max-w-20 truncate">Host</span> : null}
+          {showLabel ? <span className="max-w-20 truncate">{t("system:host")}</span> : null}
         </span>
       </TooltipTrigger>
       <TooltipContent>
         <div className="space-y-1">
-          <div className="font-medium">Host</div>
+          <div className="font-medium">{t("system:host")}</div>
           <div className="text-xs text-muted-foreground">{source.label}</div>
-          <div className="text-xs text-muted-foreground">{lastUpdatedText(updatedAt)}</div>
+          <div className="text-xs text-muted-foreground">{lastUpdatedText(t, updatedAt)}</div>
         </div>
       </TooltipContent>
     </Tooltip>
@@ -212,16 +220,14 @@ function MetricValue({
   updatedAt?: string;
   simplified: boolean;
 }) {
-  const help =
-    metric.id === "io_load"
-      ? "Average number of tasks running or waiting for CPU during the last minute. Compare this value with the host's CPU core count."
-      : null;
+  const { t } = useTranslation();
+  const help = metric.id === "io_load" ? t("system:ioLoadHelp") : null;
   return (
     <Tooltip>
       <TooltipTrigger asChild>
         <span
           className={`inline-flex shrink-0 items-center gap-1.5 tabular-nums ${metricColor(metric)}`}
-          aria-label={`${metricLabel(metric.id)} ${formatMetric(metric)}`}
+          aria-label={`${metricLabel(t, metric.id)} ${formatMetric(metric)}`}
         >
           {metricIcon(metric.id)}
           {!simplified ? <MetricMeter metric={metric} /> : null}
@@ -232,28 +238,32 @@ function MetricValue({
       </TooltipTrigger>
       <TooltipContent>
         <div className="space-y-1">
-          <div className="font-medium">{metricLabel(metric.id)}</div>
+          <div className="font-medium">{metricLabel(t, metric.id)}</div>
           {help ? <div className="max-w-72 text-xs text-muted-foreground">{help}</div> : null}
-          <div className="text-xs text-muted-foreground">Host: {source.label}</div>
+          <div className="text-xs text-muted-foreground">
+            {t("system:hostWithLabel", { label: source.label })}
+          </div>
           <div className="text-xs tabular-nums">{formatMetric(metric)}</div>
           {metric.error ? (
             <div className="text-xs text-muted-foreground">{metric.error}</div>
           ) : null}
-          <div className="text-xs text-muted-foreground">{lastUpdatedText(updatedAt)}</div>
+          <div className="text-xs text-muted-foreground">{lastUpdatedText(t, updatedAt)}</div>
         </div>
       </TooltipContent>
     </Tooltip>
   );
 }
 
-function metricLabel(id: string) {
+// The map keys are wire metric ids and the `?? id` fallback returns an
+// untranslated id on purpose — both are protocol. Only the values are copy.
+function metricLabel(t: TFunction, id: string) {
   return (
     {
-      cpu_percent: "CPU",
-      memory_percent: "Memory",
-      disk_percent: "Disk",
-      cpu_temp: "CPU temperature",
-      io_load: "System load (1 min)",
+      cpu_percent: t("system:metricCpuPercent"),
+      memory_percent: t("system:metricMemoryPercent"),
+      disk_percent: t("system:metricDiskPercent"),
+      cpu_temp: t("system:metricCpuTemp"),
+      io_load: t("system:metricIoLoad"),
     }[id] ?? id
   );
 }
@@ -299,9 +309,11 @@ function metricColor(metric: SystemMetricSample) {
   return "text-current";
 }
 
-function lastUpdatedText(updatedAt?: string) {
-  if (!updatedAt) return "Last update unknown";
+function lastUpdatedText(t: TFunction, updatedAt?: string) {
+  if (!updatedAt) return t("system:lastUpdateUnknown");
   const date = new Date(updatedAt);
-  if (Number.isNaN(date.getTime())) return "Last update unknown";
-  return `Updated ${formatDistanceToNow(date, { addSuffix: true })}`;
+  if (Number.isNaN(date.getTime())) return t("system:lastUpdateUnknown");
+  return t("system:updatedRelative", {
+    relative: formatDistanceToNow(date, { addSuffix: true }),
+  });
 }
