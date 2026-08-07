@@ -10,6 +10,13 @@ const POPOVER_STUB_TESTID = "mr-ci-popover-stub";
 
 const gitlabMocks = vi.hoisted(() => ({ mrs: [] as TaskMR[] }));
 const touchMocks = vi.hoisted(() => ({ usesTouchDrawer: false }));
+const dockviewMocks = vi.hoisted(() => ({ addMRPanel: vi.fn() }));
+
+vi.mock("@/lib/state/dockview-store", () => ({
+  useDockviewStore: (
+    selector: (state: { addMRPanel: typeof dockviewMocks.addMRPanel; api: object }) => unknown,
+  ) => selector({ addMRPanel: dockviewMocks.addMRPanel, api: {} }),
+}));
 
 vi.mock("@/components/state-provider", () => ({
   useAppStore: (selector: (state: unknown) => unknown) =>
@@ -81,6 +88,7 @@ describe("MRTopbarButton hover preview", () => {
   beforeEach(() => {
     vi.useFakeTimers();
     touchMocks.usesTouchDrawer = false;
+    dockviewMocks.addMRPanel.mockClear();
   });
 
   afterEach(() => {
@@ -110,7 +118,7 @@ describe("MRTopbarButton hover preview", () => {
     expect(screen.queryByTestId(POPOVER_STUB_TESTID)).toBeNull();
   });
 
-  it("AC25: clicking the trigger still opens the dropdown, closing any open hover popover", () => {
+  it("AC25: clicking the trigger opens the MR detail panel directly, closing any open hover popover", () => {
     gitlabMocks.mrs = [singleMR()];
     render(createElement(MRTopbarButton));
     const trigger = screen.getByTestId(TRIGGER_TESTID);
@@ -124,7 +132,11 @@ describe("MRTopbarButton hover preview", () => {
     fireEvent.pointerDown(trigger, { button: 0, pointerId: 1, pointerType: "mouse" });
     fireEvent.pointerUp(trigger, { button: 0, pointerId: 1, pointerType: "mouse" });
     fireEvent.click(trigger);
-    expect(trigger.getAttribute("aria-expanded")).toBe("true");
+    // Single-MR desktop click has no dropdown to open — it goes straight to
+    // the MR detail panel (mirrors GitHub's PRSingleButton), so there is no
+    // aria-expanded dropdown state to assert here, only the panel call and
+    // the hover popover closing.
+    expect(dockviewMocks.addMRPanel).toHaveBeenCalledTimes(1);
     expect(screen.queryByTestId(POPOVER_STUB_TESTID)).toBeNull();
   });
 

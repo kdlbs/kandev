@@ -1,13 +1,22 @@
 "use client";
 
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { IconCheck, IconCircleDot, IconExternalLink, IconMessageCircle } from "@tabler/icons-react";
+import {
+  IconCheck,
+  IconCircleDot,
+  IconExternalLink,
+  IconMessageCircle,
+  IconPlus,
+  IconUnlink,
+} from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { useTranslation } from "react-i18next";
 import { useAppStore } from "@/components/state-provider";
 import { useMRFeedback } from "@/hooks/domains/gitlab/use-mr-feedback";
 import { bucketJobCounts, groupJobsByStage, type JobBucket } from "@/lib/gitlab/pipeline-buckets";
 import type { GitLabPipelineJob, TaskMR } from "@/lib/types/gitlab";
+import { MRAutomationControls } from "./mr-automation-controls";
+import { MRMergeButton } from "./mr-merge-button";
 
 /**
  * Gates useMRFeedback's fetch on `enabled` by nulling its identity args
@@ -24,35 +33,91 @@ function useMRFeedbackGated(mr: TaskMR, enabled: boolean) {
   );
 }
 
+function MRPopoverTitle({ mr, onOpenDetailPanel }: { mr: TaskMR; onOpenDetailPanel?: () => void }) {
+  const titleClassName = "min-w-0 flex-1 text-left";
+  const content = (
+    <>
+      <div className="truncate text-xs font-medium text-foreground">
+        !{mr.mr_iid} {mr.mr_title}
+      </div>
+      <div className="truncate text-[11px] text-muted-foreground">{mr.project_path}</div>
+    </>
+  );
+  if (!onOpenDetailPanel) return <div className={titleClassName}>{content}</div>;
+  return (
+    <button
+      type="button"
+      data-testid="mr-popover-title"
+      className={`${titleClassName} cursor-pointer`}
+      onClick={(e) => {
+        e.stopPropagation();
+        onOpenDetailPanel();
+      }}
+    >
+      {content}
+    </button>
+  );
+}
+
 function MRPopoverHeader({
   mr,
   onOpenDetailPanel,
+  onUnlink,
 }: {
   mr: TaskMR;
   onOpenDetailPanel?: () => void;
+  onUnlink: () => void;
 }) {
   const { t } = useTranslation();
   return (
     <div className="flex items-start justify-between gap-2 px-1">
-      <div className="min-w-0">
-        <div className="truncate text-xs font-medium text-foreground">
-          !{mr.mr_iid} {mr.mr_title}
-        </div>
-        <div className="truncate text-[11px] text-muted-foreground">{mr.project_path}</div>
-      </div>
-      {onOpenDetailPanel ? (
+      <MRPopoverTitle mr={mr} onOpenDetailPanel={onOpenDetailPanel} />
+      <div className="flex shrink-0 items-center gap-0.5">
+        <a
+          data-testid="mr-popover-open-in-gitlab"
+          href={mr.mr_url}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="flex h-6 w-6 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground cursor-pointer"
+          aria-label={t("gitlab:mrPopoverOpenInGitlab", { mriid: mr.mr_iid })}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <IconExternalLink className="h-3.5 w-3.5" />
+        </a>
         <Button
           type="button"
           variant="ghost"
           size="icon"
-          className="h-6 w-6 shrink-0 cursor-pointer text-muted-foreground hover:text-foreground"
-          aria-label={t("gitlab:mrPopoverOpenDetail")}
-          onClick={onOpenDetailPanel}
+          className="h-6 w-6 shrink-0 cursor-pointer text-muted-foreground hover:text-destructive"
+          aria-label={t("gitlab:mrPopoverUnlink", { mriid: mr.mr_iid })}
+          onClick={(e) => {
+            e.stopPropagation();
+            onUnlink();
+          }}
         >
-          <IconExternalLink className="h-3.5 w-3.5" />
+          <IconUnlink className="h-3.5 w-3.5" />
         </Button>
-      ) : null}
+      </div>
     </div>
+  );
+}
+
+function MRPopoverLinkAnother({ canLink, onLink }: { canLink: boolean; onLink: () => void }) {
+  const { t } = useTranslation();
+  if (!canLink) return null;
+  return (
+    <button
+      type="button"
+      data-testid="mr-popover-link-another"
+      className="flex cursor-pointer items-center gap-1.5 rounded px-1 py-1 text-xs text-muted-foreground hover:bg-muted hover:text-foreground"
+      onClick={(e) => {
+        e.stopPropagation();
+        onLink();
+      }}
+    >
+      <IconPlus className="h-3.5 w-3.5" />
+      {t("gitlab:linkAnotherMergeRequest")}
+    </button>
   );
 }
 
@@ -227,12 +292,20 @@ function MRPopoverFooter({ lastUpdatedAt }: { lastUpdatedAt: number | null }) {
 
 export function MRCIPopover({
   mr,
+  taskId,
   enabled,
+  canLink,
   onOpenDetailPanel,
+  onLink,
+  onUnlink,
 }: {
   mr: TaskMR;
+  taskId: string;
   enabled: boolean;
+  canLink: boolean;
   onOpenDetailPanel?: () => void;
+  onLink: () => void;
+  onUnlink: () => void;
 }): ReactNode {
   const { feedback, loading, revision } = useMRFeedbackGated(mr, enabled);
   const [lastUpdatedAt, setLastUpdatedAt] = useState<number | null>(null);
@@ -259,7 +332,7 @@ export function MRCIPopover({
       className="flex flex-col gap-2"
       onClick={(e) => e.stopPropagation()}
     >
-      <MRPopoverHeader mr={mr} onOpenDetailPanel={onOpenDetailPanel} />
+      <MRPopoverHeader mr={mr} onOpenDetailPanel={onOpenDetailPanel} onUnlink={onUnlink} />
       {total > 0 ? (
         <>
           <MRPipelineProgressBar passed={passed} total={total} />
@@ -272,6 +345,9 @@ export function MRCIPopover({
         <MRApprovalRow mr={mr} />
         <MRDiscussionsRow unresolvedCount={unresolvedDiscussions} />
       </div>
+      <MRAutomationControls taskId={taskId} mr={mr} />
+      <MRMergeButton mr={mr} />
+      <MRPopoverLinkAnother canLink={canLink} onLink={onLink} />
       <MRPopoverFooter lastUpdatedAt={lastUpdatedAt} />
     </div>
   );

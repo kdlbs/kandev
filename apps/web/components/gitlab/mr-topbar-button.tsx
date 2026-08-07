@@ -1,6 +1,13 @@
 "use client";
 
-import { memo, useEffect, useState, type Ref } from "react";
+import {
+  memo,
+  useEffect,
+  useState,
+  type ComponentPropsWithoutRef,
+  type MouseEvent,
+  type Ref,
+} from "react";
 import Link from "@/components/routing/app-link";
 import {
   IconBrandGitlab,
@@ -111,13 +118,19 @@ function MRTriggerContent({
   );
 }
 
+// Bare trigger button, deliberately not wrapped in DropdownMenuTrigger here:
+// the multi-MR/touch path wraps it in one at the call site, while the
+// single-MR desktop path opens the review panel directly on click and needs
+// a plain button instead.
 function MRMenuTriggerButton({
   single,
   count,
   compact,
   mobile,
   hoverHandlers,
+  onClick,
   ref,
+  ...triggerProps
 }: {
   single: TaskMR | null;
   count: number;
@@ -127,42 +140,43 @@ function MRMenuTriggerButton({
     onTriggerEnter?: () => void;
     onTriggerLeave?: () => void;
   };
+  onClick?: (e: MouseEvent<HTMLButtonElement>) => void;
   // PopoverAnchor's `asChild` clones this element to inject its own anchor
   // ref (React 19 ref-as-prop) so floating-ui can measure the real DOM node.
   // Without forwarding it to Button, the popover never becomes positioned
   // and stays rendered off-screen at Radix's pre-measurement placeholder.
   ref?: Ref<HTMLButtonElement>;
-}) {
+} & ComponentPropsWithoutRef<"button">) {
   const { t } = useTranslation();
   return (
-    <DropdownMenuTrigger asChild>
-      <Button
-        ref={ref}
-        data-testid="mr-topbar-button"
-        data-mr-iid={single?.mr_iid}
-        data-mr-state={single?.state}
-        size={compact ? "icon-sm" : "sm"}
-        variant="outline"
-        className={mrTriggerClass(compact, mobile)}
-        aria-label={
-          single
-            ? t("gitlab:gitlabMergeRequest", { mriid: single.mr_iid })
-            : t("gitlab:gitlabMergeRequests", { length: count })
-        }
-        onMouseOver={hoverHandlers.onTriggerEnter}
-        onMouseEnter={hoverHandlers.onTriggerEnter}
-        onMouseMove={hoverHandlers.onTriggerEnter}
-        onPointerOver={hoverHandlers.onTriggerEnter}
-        onPointerEnter={hoverHandlers.onTriggerEnter}
-        onPointerMove={hoverHandlers.onTriggerEnter}
-        onMouseLeave={hoverHandlers.onTriggerLeave}
-        onPointerLeave={hoverHandlers.onTriggerLeave}
-        onFocus={hoverHandlers.onTriggerEnter}
-        onBlur={hoverHandlers.onTriggerLeave}
-      >
-        <MRTriggerContent compact={compact} single={single} count={count} />
-      </Button>
-    </DropdownMenuTrigger>
+    <Button
+      ref={ref}
+      {...triggerProps}
+      onClick={onClick}
+      data-testid="mr-topbar-button"
+      data-mr-iid={single?.mr_iid}
+      data-mr-state={single?.state}
+      size={compact ? "icon-sm" : "sm"}
+      variant="outline"
+      className={mrTriggerClass(compact, mobile)}
+      aria-label={
+        single
+          ? t("gitlab:gitlabMergeRequest", { mriid: single.mr_iid })
+          : t("gitlab:gitlabMergeRequests", { length: count })
+      }
+      onMouseOver={hoverHandlers.onTriggerEnter}
+      onMouseEnter={hoverHandlers.onTriggerEnter}
+      onMouseMove={hoverHandlers.onTriggerEnter}
+      onPointerOver={hoverHandlers.onTriggerEnter}
+      onPointerEnter={hoverHandlers.onTriggerEnter}
+      onPointerMove={hoverHandlers.onTriggerEnter}
+      onMouseLeave={hoverHandlers.onTriggerLeave}
+      onPointerLeave={hoverHandlers.onTriggerLeave}
+      onFocus={hoverHandlers.onTriggerEnter}
+      onBlur={hoverHandlers.onTriggerLeave}
+    >
+      <MRTriggerContent compact={compact} single={single} count={count} />
+    </Button>
   );
 }
 
@@ -269,7 +283,6 @@ function MRMenuButton({
 }) {
   const single = mrs.length === 1 ? mrs[0] : null;
   const openReview = useMRDesktopReviewOpener(mobile);
-  const [menuOpen, setMenuOpen] = useState(false);
   const {
     usesTouchDrawer,
     open: popoverOpen,
@@ -282,33 +295,62 @@ function MRMenuButton({
 
   // Hover preview only makes sense for the single-MR case (MRCIPopover takes
   // one TaskMR); a multi-MR aggregate popover is out of scope (§9). On touch
-  // there is no hover at all, so the popover apparatus is skipped entirely.
+  // there is no hover at all, so the popover apparatus is skipped entirely —
+  // that path keeps the click-driven dropdown unchanged, below.
   const showHoverPreview = single != null && !usesTouchDrawer;
-  const hoverHandlers = showHoverPreview
-    ? {
-        onTriggerEnter: menuOpen ? undefined : onTriggerEnter,
-        onTriggerLeave,
-      }
-    : {};
 
-  const triggerButton = (
-    <MRMenuTriggerButton
-      single={single}
-      count={mrs.length}
-      compact={compact}
-      mobile={mobile}
-      hoverHandlers={hoverHandlers}
-    />
-  );
+  if (showHoverPreview) {
+    // Single MR, desktop: click opens the MR detail panel directly (mirrors
+    // GitHub's PRSingleButton) — no intermediate dropdown. Hovering shows a
+    // popover with everything else: link/open-in-GitLab/unlink, CI + review
+    // summary, automation controls, and a merge action when ready.
+    return (
+      <Popover open={popoverOpen} onOpenChange={onPopoverOpenChange}>
+        <PopoverAnchor asChild>
+          <MRMenuTriggerButton
+            single={single}
+            count={mrs.length}
+            compact={compact}
+            mobile={mobile}
+            hoverHandlers={{ onTriggerEnter, onTriggerLeave }}
+            onClick={() => {
+              onPopoverOpenChange(false);
+              openReview(single);
+            }}
+          />
+        </PopoverAnchor>
+        <PopoverContent
+          data-testid="mr-topbar-popover"
+          align="end"
+          sideOffset={4}
+          className="w-80"
+          onMouseEnter={onContentEnter}
+          onMouseMove={onContentEnter}
+          onMouseLeave={onContentLeave}
+          onOpenAutoFocus={(e) => e.preventDefault()}
+        >
+          <MRCIPopover
+            mr={single}
+            taskId={taskId}
+            enabled={popoverOpen}
+            canLink={canLink}
+            onOpenDetailPanel={() => openReview(single)}
+            onLink={onLink}
+            onUnlink={() => onUnlink(single.id)}
+          />
+        </PopoverContent>
+      </Popover>
+    );
+  }
 
-  const dropdown = (
-    <DropdownMenu
-      onOpenChange={(next) => {
-        setMenuOpen(next);
-        if (next) onPopoverOpenChange(false);
-      }}
-    >
-      {showHoverPreview ? <PopoverAnchor asChild>{triggerButton}</PopoverAnchor> : triggerButton}
+  return (
+    <DropdownMenu>
+      <MRMenuTriggerButtonInDropdown
+        single={single}
+        count={mrs.length}
+        compact={compact}
+        mobile={mobile}
+      />
       <MRDropdownList
         taskId={taskId}
         mrs={mrs}
@@ -320,29 +362,29 @@ function MRMenuButton({
       />
     </DropdownMenu>
   );
+}
 
-  if (!showHoverPreview || !single) return dropdown;
-
+function MRMenuTriggerButtonInDropdown({
+  single,
+  count,
+  compact,
+  mobile,
+}: {
+  single: TaskMR | null;
+  count: number;
+  compact: boolean;
+  mobile: boolean;
+}) {
   return (
-    <Popover open={popoverOpen} onOpenChange={onPopoverOpenChange}>
-      {dropdown}
-      <PopoverContent
-        data-testid="mr-topbar-popover"
-        align="end"
-        sideOffset={4}
-        className="w-80"
-        onMouseEnter={onContentEnter}
-        onMouseMove={onContentEnter}
-        onMouseLeave={onContentLeave}
-        onOpenAutoFocus={(e) => e.preventDefault()}
-      >
-        <MRCIPopover
-          mr={single}
-          enabled={popoverOpen}
-          onOpenDetailPanel={() => openReview(single)}
-        />
-      </PopoverContent>
-    </Popover>
+    <DropdownMenuTrigger asChild>
+      <MRMenuTriggerButton
+        single={single}
+        count={count}
+        compact={compact}
+        mobile={mobile}
+        hoverHandlers={{}}
+      />
+    </DropdownMenuTrigger>
   );
 }
 

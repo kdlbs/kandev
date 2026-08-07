@@ -118,11 +118,17 @@ workflows are not usable end to end.
   `Auto-merge when ready` merges a linked MR only when it is open, not a
   draft, its pipeline succeeded, it has zero unresolved discussions, and
   GitLab's own merge-readiness verdict agrees.
-- Hovering the linked-MR topbar button (desktop, fine-pointer only) opens a
-  preview popover with a pass-rate bar, pipeline stage groups, an approval
-  row, and an unresolved-discussions row, without needing to open the
-  dropdown. Touch/coarse-pointer surfaces never render the hover popover;
-  tapping the button opens the existing dropdown as before.
+- For a single linked MR on desktop (fine-pointer), hovering the topbar
+  button opens a preview popover with everything: header actions (open the
+  MR detail panel, open in GitLab, unlink), a pass-rate bar and pipeline
+  stage groups, an approval row, an unresolved-discussions row, the
+  Automation controls, a compact merge action when the MR is fully ready,
+  and "Link another merge request" — mirroring GitHub's PR hover popover.
+  Clicking the button opens the MR detail panel directly (no intermediate
+  dropdown), also mirroring GitHub's single-PR topbar button. A task with
+  2+ linked MRs, and touch/coarse-pointer surfaces regardless of MR count,
+  keep the click-only dropdown (per-MR review/open/unlink rows, the
+  Automation group, and "Link another merge request") with no hover popover.
 - The Kanban card shows a merge-request badge (`IconGitMerge`, coloured by
   state/pipeline/approval) next to the existing pull-request badge when the
   task has at least one linked MR. Multiple linked MRs collapse into one badge
@@ -471,14 +477,18 @@ protocol action name for compatibility.
 - **GIVEN** a linked MR reaches `merged`, `closed`, or `locked`, **WHEN**
   auto-fix is still enabled, **THEN** no further auto-fix prompt is
   dispatched for that MR.
-- **GIVEN** a user hovers the linked-MR topbar button on desktop, **WHEN** the
-  hover persists past the open delay, **THEN** a preview popover shows the
-  pass-rate bar, approval row, and unresolved-discussions row without a
-  click; clicking the button still opens the existing dropdown and closes the
-  hover popover.
-- **GIVEN** a touch viewport, **WHEN** the user interacts with the linked-MR
-  topbar button, **THEN** no hover popover is ever rendered and tapping opens
-  the existing dropdown.
+- **GIVEN** a task with exactly one linked MR on desktop, **WHEN** the user
+  hovers the topbar button past the open delay, **THEN** a preview popover
+  shows the pass-rate bar, approval row, unresolved-discussions row,
+  Automation controls, a merge action when ready, and link/open/unlink
+  actions, all without a click.
+- **GIVEN** a task with exactly one linked MR on desktop, **WHEN** the user
+  clicks the topbar button, **THEN** the MR detail panel opens directly (no
+  dropdown) and any open hover popover closes.
+- **GIVEN** a task with two or more linked MRs, or any touch/coarse-pointer
+  viewport regardless of MR count, **WHEN** the user interacts with the
+  topbar button, **THEN** no hover popover is ever rendered and
+  clicking/tapping opens the existing per-MR dropdown.
 - **GIVEN** a task with two linked MRs, one merged and one open with a failing
   pipeline, **WHEN** the Kanban card renders its MR badge, **THEN** the badge
   shows a count of two and the open MR's (red) colour, not the merged MR's.
