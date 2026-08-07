@@ -33,5 +33,13 @@ test.describe("integrations index page enable/disable sliders", () => {
     // GitHub's own settings page reflects the same persisted state.
     await testPage.goto("/settings/integrations/github");
     await expect(testPage.locator("#github-enabled")).toHaveAttribute("aria-checked", "false");
+
+    // The GitHub page uses the same compact section header as the other
+    // integration settings pages, with its toggle in that header.
+    const githubHeading = testPage.locator("h3[data-testid='github-integration-heading']");
+    await expect(githubHeading).toBeVisible();
+    await expect(
+      testPage.locator("section").filter({ has: githubHeading }).locator("#github-enabled"),
+    ).toBeVisible();
   });
 });

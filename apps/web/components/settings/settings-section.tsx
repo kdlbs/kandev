@@ -6,6 +6,7 @@ import { useSettingsTargetRegistration } from "./settings-target-provider";
 type SettingsSectionProps = {
   icon?: ReactNode;
   title: string;
+  titleTestId?: string;
   titleAccessory?: ReactNode;
   description?: string;
   action?: ReactNode;
@@ -16,6 +17,7 @@ type SettingsSectionProps = {
 export function SettingsSection({
   icon,
   title,
+  titleTestId,
   titleAccessory,
   description,
   action,
@@ -31,7 +33,7 @@ export function SettingsSection({
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0">
           <div className="flex items-center gap-2">
-            <h3 className="text-lg font-semibold flex items-center gap-2">
+            <h3 className="text-lg font-semibold flex items-center gap-2" data-testid={titleTestId}>
               {icon}
               {title}
             </h3>

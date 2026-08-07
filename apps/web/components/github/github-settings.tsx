@@ -4,7 +4,6 @@ import { useState, useCallback } from "react";
 import { IconBrandGithub, IconPlus, IconTrashX } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Card, CardContent } from "@kandev/ui/card";
-import { Separator } from "@kandev/ui/separator";
 import { TooltipProvider } from "@kandev/ui/tooltip";
 import { useToast } from "@/components/toast-provider";
 import { SettingsSection } from "@/components/settings/settings-section";
@@ -248,29 +247,25 @@ export function GitHubConnectionSection({ workspaceId }: { workspaceId: string }
   const { t } = useTranslation();
   return (
     <>
-      <div className="flex items-start justify-between gap-2">
-        <div>
-          <h2
-            className="text-2xl font-bold flex items-center gap-2"
-            data-testid="github-integration-heading"
-          >
-            <IconBrandGithub className="h-6 w-6" />
-            {t("github:githubIntegration")}
-          </h2>
-          <p className="text-sm text-muted-foreground mt-1">
-            {t("github:chooseTheAutomationAndPersonalIdentities")}
-          </p>
-        </div>
-        <GitHubEnabledControl />
-      </div>
-      <Separator />
-      <GitHubCallbackNotice workspaceId={workspaceId} />
       <SettingsSection
         discoveryTargetId={INTEGRATION_SETTINGS_TARGETS.github}
-        title={t("github:workspaceGithubAccess")}
-        description={t("github:credentialUsedForRepositorySyncWatches")}
+        icon={<IconBrandGithub className="h-5 w-5" />}
+        title={t("github:githubIntegration")}
+        titleTestId="github-integration-heading"
+        description={t("github:chooseTheAutomationAndPersonalIdentities")}
+        action={<GitHubEnabledControl />}
       >
-        <GitHubAutomationSettings workspaceId={workspaceId} />
+        <GitHubCallbackNotice workspaceId={workspaceId} />
+        <SettingsSection
+          title={t("github:workspaceGithubAccess")}
+          description={t("github:credentialUsedForRepositorySyncWatches")}
+        >
+          <Card data-testid="github-workspace-access-card">
+            <CardContent className="pt-6">
+              <GitHubAutomationSettings workspaceId={workspaceId} />
+            </CardContent>
+          </Card>
+        </SettingsSection>
       </SettingsSection>
       <div className="pr-16 sm:pr-0">
         <GitHubPersonalSettings workspaceId={workspaceId} />

@@ -3,27 +3,25 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { SettingsSaveProvider } from "@/components/settings/settings-save-provider";
 import { DraftedIntegrationEnabledControl } from "./drafted-integration-enabled-control";
 
-afterEach(() => cleanup());
+afterEach(cleanup);
 
 describe("DraftedIntegrationEnabledControl", () => {
-  it("reflects the enabled prop via aria-checked and accessible name", () => {
+  it("exposes the current enabled state and an accessible integration name", () => {
+    const persist = vi.fn();
+
     render(
       <SettingsSaveProvider>
-        <DraftedIntegrationEnabledControl
-          id="github"
-          name="GitHub"
-          enabled={true}
-          persist={vi.fn()}
-        />
+        <DraftedIntegrationEnabledControl id="github" name="GitHub" enabled persist={persist} />
       </SettingsSaveProvider>,
     );
 
-    const control = screen.getByRole("switch", { name: "Enable GitHub" });
-    expect(control.getAttribute("aria-checked")).toBe("true");
-    expect(control.getAttribute("data-settings-dirty")).toBe("false");
+    const toggle = screen.getByRole("switch", { name: "Enable GitHub" });
+    expect(toggle.getAttribute("id")).toBe("github-enabled");
+    expect(toggle.getAttribute("aria-checked")).toBe("true");
+    expect(toggle.getAttribute("data-settings-dirty")).toBe("false");
   });
 
-  it("starts unchecked when enabled is false", () => {
+  it("starts unchecked when the integration is disabled", () => {
     render(
       <SettingsSaveProvider>
         <DraftedIntegrationEnabledControl
@@ -40,28 +38,25 @@ describe("DraftedIntegrationEnabledControl", () => {
     );
   });
 
-  it("marks the switch dirty on toggle and persists only after save", async () => {
-    const persist = vi.fn();
+  it("keeps changes local until Save changes persists the draft", async () => {
+    const persist = vi.fn().mockResolvedValue(undefined);
+
     render(
       <SettingsSaveProvider>
-        <DraftedIntegrationEnabledControl
-          id="github"
-          name="GitHub"
-          enabled={true}
-          persist={persist}
-        />
+        <DraftedIntegrationEnabledControl id="github" name="GitHub" enabled persist={persist} />
       </SettingsSaveProvider>,
     );
 
-    const control = screen.getByRole("switch", { name: "Enable GitHub" });
-    fireEvent.click(control);
+    const toggle = screen.getByRole("switch", { name: "Enable GitHub" });
+    fireEvent.click(toggle);
 
-    expect(control.getAttribute("aria-checked")).toBe("false");
-    expect(control.getAttribute("data-settings-dirty")).toBe("true");
+    expect(toggle.getAttribute("aria-checked")).toBe("false");
+    expect(toggle.getAttribute("data-settings-dirty")).toBe("true");
     expect(persist).not.toHaveBeenCalled();
 
     fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+
     await waitFor(() => expect(persist).toHaveBeenCalledWith(false));
-    await waitFor(() => expect(control.getAttribute("data-settings-dirty")).toBe("false"));
+    await waitFor(() => expect(toggle.getAttribute("data-settings-dirty")).toBe("false"));
   });
 });
