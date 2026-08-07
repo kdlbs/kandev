@@ -152,7 +152,7 @@ export default function IntegrationsIndexPage({ workspaceId }: IntegrationsIndex
                   </div>
                 </div>
                 <Link href={href} className="text-sm text-muted-foreground cursor-pointer">
-                  {t(descriptionKey, { trigger: "!kandev" })}
+                  {t(descriptionKey)}
                 </Link>
               </CardContent>
             </Card>
