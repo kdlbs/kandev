@@ -30,12 +30,27 @@ let lastTheme: ResolvedTheme | null = null;
  * theme (Tailwind state classes, the rendering-engine marker, transition
  * suppression), so an unfiltered observer would wake every plugin on
  * unrelated churn — expensive for the canvas repaints this exists to drive.
+ *
+ * Never throws. These listeners are third-party plugin callbacks and this is
+ * a cross-plugin fan-out, so one throwing listener must not starve the ones
+ * after it — the same isolation `dispatchToPluginWsHandlers` and
+ * `PluginErrorBoundary` already give every other plugin extension point.
+ * Without it the damage outlives the throw: `lastTheme` has already advanced,
+ * so the equality guard above means a repeat mutation to the same theme is a
+ * no-op and the skipped listeners stay stale until some *different* flip
+ * happens.
  */
 function handleMutation(): void {
   const next = readResolvedTheme();
   if (next === lastTheme) return;
   lastTheme = next;
-  for (const listener of [...listeners]) listener(next);
+  for (const listener of [...listeners]) {
+    try {
+      listener(next);
+    } catch (error) {
+      console.error("[plugins] theme change listener threw:", error);
+    }
+  }
 }
 
 /**
