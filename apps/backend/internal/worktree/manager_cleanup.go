@@ -280,18 +280,27 @@ func (m *Manager) ReclaimSessionWorktree(ctx context.Context, wt *Worktree) erro
 	if wt == nil || wt.Path == "" || wt.RepositoryPath == "" {
 		return nil
 	}
-	releaseTargetPath, err := acquireWorktreeTargetPath(ctx, wt.Path)
-	if err != nil {
-		return fmt.Errorf("acquire worktree target path %s: %w", wt.Path, err)
-	}
-	defer releaseTargetPath()
-
+	// Lock order MUST match every worktree-creation path (Create ->
+	// gitAddWorktree(Locked)/gitAddWorktreeForRecreate, manager_lifecycle.go),
+	// which all take repoLock first and the target-path lock second, nested
+	// inside, holding repoLock across their whole critical section. Taking
+	// the target-path lock first here would be a classic AB-BA inversion: a
+	// reclaim holding the target-path lock while waiting on repoLock can
+	// deadlock against a concurrent creator holding repoLock while waiting
+	// on the target-path lock — with no deadline on either side to break the
+	// stall.
 	repoLock := m.getRepoLock(wt.RepositoryPath)
 	repoLock.Lock()
 	defer func() {
 		repoLock.Unlock()
 		m.releaseRepoLock(wt.RepositoryPath)
 	}()
+
+	releaseTargetPath, err := acquireWorktreeTargetPath(ctx, wt.Path)
+	if err != nil {
+		return fmt.Errorf("acquire worktree target path %s: %w", wt.Path, err)
+	}
+	defer releaseTargetPath()
 
 	activeReferences, err := m.CountActiveWorktreeReferences(ctx, wt.ID, nil)
 	if err != nil {
@@ -301,11 +310,45 @@ func (m *Manager) ReclaimSessionWorktree(ctx context.Context, wt *Worktree) erro
 		return nil
 	}
 
+	replaced, err := m.pathClaimedByAnotherWorktree(ctx, wt)
+	if err != nil {
+		return fmt.Errorf("check for a replacement worktree at %s: %w", wt.Path, err)
+	}
+	if replaced {
+		return nil
+	}
+
 	m.runWorktreeCleanupScript(ctx, wt)
 	if err := m.removeWorktreeDir(ctx, wt.Path, wt.RepositoryPath); err != nil {
 		return fmt.Errorf("remove worktree directory %s: %w", wt.Path, err)
 	}
 	return nil
+}
+
+// pathClaimedByAnotherWorktree reports whether some OTHER worktree ID is
+// currently the live resident of wt.Path. Worktree directory paths are
+// derived only from task dir + repo name (prepareTaskWorktreePath),
+// independent of worktree_id, so a replacement worktree for the same task
+// can legitimately occupy the exact path a reclaim job is about to remove
+// (e.g. EnsureSession's auto-continuation launching a fresh session right
+// after this one was deleted). removeWorktreeDir operates on the raw path,
+// not an ID, so without this check a reclaim job for the worktree that was
+// replaced would destroy the replacement's live data. Scoped to wt.TaskID
+// since that is the only axis two worktrees can share a path on.
+func (m *Manager) pathClaimedByAnotherWorktree(ctx context.Context, wt *Worktree) (bool, error) {
+	if wt.TaskID == "" {
+		return false, nil
+	}
+	siblings, err := m.store.GetWorktreesByTaskID(ctx, wt.TaskID)
+	if err != nil {
+		return false, err
+	}
+	for _, sibling := range siblings {
+		if sibling.ID != wt.ID && sibling.Path == wt.Path && sibling.Status == StatusActive {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // ReleaseWorktreeReference marks one session's association deleted without
@@ -512,11 +555,21 @@ func (m *Manager) removeWorktreeDir(ctx context.Context, worktreePath, repoPath 
 			return err
 		}
 
-		// Prune stale worktree entries
+		// Prune stale worktree entries. The directory is already gone at this
+		// point (forceRemoveDir above succeeded), so per the spec's failure
+		// table (docs/specs/session-delete-resource-cleanup: "git worktree
+		// remove fails | ... Only if both fail does the attempt fail") a
+		// prune failure alone does not fail this reclamation attempt — but it
+		// can leave a stale `.git/worktrees/<id>` registration in the source
+		// repo, so it is logged at Warn (not Debug) to stay discoverable
+		// instead of silently swallowed.
 		pruneCmd := newGitCommand(ctx, "worktree", "prune")
 		pruneCmd.Dir = repoPath
 		if err := runGitCmd(ctx, pruneCmd); err != nil {
-			m.logger.Debug("git worktree prune failed", zap.Error(err))
+			m.logger.Warn("git worktree prune failed after forced directory removal",
+				zap.String("worktree_path", worktreePath),
+				zap.String("repository_path", repoPath),
+				zap.Error(err))
 		}
 	}
 	m.tryRemoveEmptyTaskDir(worktreePath)

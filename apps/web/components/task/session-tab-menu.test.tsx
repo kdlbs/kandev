@@ -29,8 +29,9 @@ describe("DeleteSessionDialog", () => {
       />,
     );
     const description = screen.getByText(/permanently delete/i);
-    expect(description.textContent?.toLowerCase()).not.toMatch(
-      /only.*conversation history|conversation history.*only/,
+    expect(description.textContent).toContain("If no other session is using its workspace");
+    expect(description.textContent).not.toContain(
+      "This will permanently delete the conversation history with this session.",
     );
   });
 
@@ -51,30 +52,6 @@ describe("DeleteSessionDialog", () => {
         expect.objectContaining({ session_id: "session-warn" }),
       );
     });
-  });
-
-  it("shows uncommitted-file and unpushed-commit counts before the confirm control is used", async () => {
-    mockRequest.mockResolvedValue({
-      snapshots: [{ branch: "main", ahead: 2, files: { "a.ts": {}, "b.ts": {}, "c.ts": {} } }],
-    });
-    render(
-      <DeleteSessionDialog
-        open
-        onOpenChange={() => {}}
-        isPrimary={false}
-        sessionCount={1}
-        sessionId="session-dirty"
-        onConfirm={() => {}}
-      />,
-    );
-
-    await waitFor(() => {
-      expect(screen.getByTestId("session-delete-uncommitted-warning").textContent).toContain("3");
-    });
-    expect(screen.getByTestId("session-delete-unpushed-warning").textContent).toContain("2");
-    // Both counts are visible before the confirm control is ever used —
-    // nothing gates the delete button on the fetch resolving.
-    expect(screen.getByRole("button", { name: /delete/i })).toBeTruthy();
   });
 
   it("shows no warning for a session that is clean and level with its remote", async () => {
@@ -108,5 +85,71 @@ describe("DeleteSessionDialog", () => {
       />,
     );
     expect(mockRequest).not.toHaveBeenCalled();
+  });
+});
+
+describe("DeleteSessionDialog confirm-control gating", () => {
+  beforeEach(() => {
+    mockRequest.mockReset();
+    mockRequest.mockResolvedValue({ snapshots: [] });
+  });
+
+  afterEach(cleanup);
+
+  it("shows uncommitted-file and unpushed-commit counts before the confirm control is used", async () => {
+    mockRequest.mockResolvedValue({
+      snapshots: [{ branch: "main", ahead: 2, files: { "a.ts": {}, "b.ts": {}, "c.ts": {} } }],
+    });
+    render(
+      <DeleteSessionDialog
+        open
+        onOpenChange={() => {}}
+        isPrimary={false}
+        sessionCount={1}
+        sessionId="session-dirty"
+        onConfirm={() => {}}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId("session-delete-uncommitted-warning").textContent).toContain("3");
+    });
+    expect(screen.getByTestId("session-delete-unpushed-warning").textContent).toContain("2");
+    // Both counts are visible before the confirm control becomes usable.
+    expect((screen.getByRole("button", { name: /delete/i }) as HTMLButtonElement).disabled).toBe(
+      false,
+    );
+  });
+
+  it("disables the confirm control until the warning fetch resolves", async () => {
+    let resolveRequest!: (value: { snapshots: unknown[] }) => void;
+    mockRequest.mockReturnValue(
+      new Promise((resolve) => {
+        resolveRequest = resolve;
+      }),
+    );
+    render(
+      <DeleteSessionDialog
+        open
+        onOpenChange={() => {}}
+        isPrimary={false}
+        sessionCount={1}
+        sessionId="session-loading"
+        onConfirm={() => {}}
+      />,
+    );
+
+    await waitFor(() => expect(mockRequest).toHaveBeenCalled());
+    expect((screen.getByRole("button", { name: /delete/i }) as HTMLButtonElement).disabled).toBe(
+      true,
+    );
+
+    resolveRequest({ snapshots: [{ branch: "main", ahead: 3, files: { "a.ts": {} } }] });
+
+    await waitFor(() => {
+      expect((screen.getByRole("button", { name: /delete/i }) as HTMLButtonElement).disabled).toBe(
+        false,
+      );
+    });
   });
 });

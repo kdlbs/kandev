@@ -163,7 +163,14 @@ type SessionDeleteResourceCleanup interface {
 	// nil error when the session holds nothing to reclaim.
 	PrepareSessionDeleteResourceCleanup(ctx context.Context, sessionID, taskID string) (operationID string, err error)
 	StartPreparedTaskResourceCleanup(ctx context.Context, operationID string) error
-	CancelPreparedTaskResourceCleanup(ctx context.Context, operationID string) error
+	// ResolveSessionDeleteResourceCleanupAfterMutationError resolves a
+	// prepared job after DeleteTaskSession returned an error whose outcome is
+	// ambiguous: the mutation may have actually committed. Checks whether the
+	// session row is really gone and activates the job if so, cancels it
+	// otherwise — unconditionally cancelling would permanently leak the
+	// worktree if the delete in fact committed, since a cancelled job is
+	// excluded from reconciliation.
+	ResolveSessionDeleteResourceCleanupAfterMutationError(ctx context.Context, operationID string)
 }
 
 // WorkflowStepGetter retrieves workflow step information for prompt building.

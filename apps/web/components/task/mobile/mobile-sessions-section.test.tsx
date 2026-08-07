@@ -406,8 +406,41 @@ describe("DeleteSessionConfirmDialog (mobile Sessions picker)", () => {
       />,
     );
     const description = screen.getByText(/permanently delete/i);
-    expect(description.textContent?.toLowerCase()).not.toMatch(
-      /only.*conversation history|conversation history.*only/,
+    expect(description.textContent).toContain("If no other session is using its workspace");
+    expect(description.textContent).not.toContain(
+      "This will permanently delete the conversation history with this session.",
     );
+  });
+
+  it("disables the confirm control until the warning fetch resolves", async () => {
+    let resolveRequest!: (value: { snapshots: unknown[] }) => void;
+    mockWsRequest.mockReturnValue(
+      new Promise((resolve) => {
+        resolveRequest = resolve;
+      }),
+    );
+    render(
+      <DeleteSessionConfirmDialog
+        open
+        onOpenChange={() => {}}
+        isPrimary={false}
+        isOnlySession={false}
+        sessionId="session-loading"
+        onConfirm={() => {}}
+      />,
+    );
+
+    await vi.waitFor(() => expect(mockWsRequest).toHaveBeenCalled());
+    expect((screen.getByRole("button", { name: /delete/i }) as HTMLButtonElement).disabled).toBe(
+      true,
+    );
+
+    resolveRequest({ snapshots: [{ branch: "main", ahead: 3, files: { "a.ts": {} } }] });
+
+    await vi.waitFor(() => {
+      expect((screen.getByRole("button", { name: /delete/i }) as HTMLButtonElement).disabled).toBe(
+        false,
+      );
+    });
   });
 });

@@ -196,6 +196,126 @@ func TestReclaimSessionWorktree_SerializesWithConcurrentTargetPathCreate(t *test
 	}
 }
 
+// TestReclaimSessionWorktree_MatchesCreatorLockOrder proves ReclaimSessionWorktree
+// cannot deadlock against a concurrent worktree creation for the same path.
+// Every creation path (Create -> gitAddWorktree(Locked)/gitAddWorktreeForRecreate,
+// manager_lifecycle.go) acquires the per-repo lock first and the target-path
+// lock second, nested inside, holding the repo lock across its whole
+// critical section. If ReclaimSessionWorktree acquired the two locks in the
+// opposite order, a reclaim holding the target-path lock while waiting on
+// the repo lock could deadlock against a concurrent creator holding the
+// repo lock while waiting on the target-path lock — a classic AB-BA lock
+// inversion, and a strictly worse failure mode (a permanent hang requiring
+// a backend restart) than the directory-clobbering race the target-path
+// lock itself was added to close.
+func TestReclaimSessionWorktree_MatchesCreatorLockOrder(t *testing.T) {
+	mgr, store := newReferenceCleanupTestManager(t)
+	ctx := context.Background()
+	seedReferenceCleanupSession(t, store, "task-owner", "session-owner", models.TaskSessionStateCompleted)
+	wt := createReferenceCleanupWorktree(t, mgr, "task-owner", "session-owner")
+	simulateSessionCascadeDelete(t, store, "session-owner")
+
+	// Simulate a concurrent worktree creator that has already taken its
+	// first lock — repoLock — matching every real creation path.
+	repoLock := mgr.getRepoLock(wt.RepositoryPath)
+	repoLock.Lock()
+
+	reclaimDone := make(chan error, 1)
+	go func() {
+		reclaimDone <- mgr.ReclaimSessionWorktree(ctx, wt)
+	}()
+
+	// Give reclaim time to reach (and, under a buggy target-path-then-repo
+	// order, acquire) the target-path lock before the simulated creator's
+	// nested acquisition attempt below — mirroring the interleaving that
+	// produces the AB-BA deadlock.
+	time.Sleep(50 * time.Millisecond)
+
+	creatorTargetPathDone := make(chan error, 1)
+	go func() {
+		release, err := acquireWorktreeTargetPath(ctx, wt.Path)
+		if err != nil {
+			creatorTargetPathDone <- err
+			return
+		}
+		release()
+		creatorTargetPathDone <- nil
+	}()
+
+	select {
+	case err := <-creatorTargetPathDone:
+		if err != nil {
+			t.Fatalf("simulated creator's nested target-path acquisition: %v", err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("deadlock: the simulated creator (holding repoLock first, matching every real " +
+			"creation path) could not acquire the target-path lock — ReclaimSessionWorktree must be " +
+			"holding it while blocked waiting on repoLock, an AB-BA lock-order inversion")
+	}
+
+	// The creator's simulated critical section is done; release repoLock so
+	// reclaim (blocked on it, under the correct order) can proceed.
+	repoLock.Unlock()
+	mgr.releaseRepoLock(wt.RepositoryPath)
+
+	select {
+	case err := <-reclaimDone:
+		if err != nil {
+			t.Fatalf("ReclaimSessionWorktree: %v", err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("ReclaimSessionWorktree did not complete after the simulated creator released repoLock")
+	}
+}
+
+// TestReclaimSessionWorktree_PreservesReplacementWorktreeAtSamePath covers
+// the second concurrency defect found in review-round 1
+// (docs/specs/session-delete-resource-cleanup, "removeWorktreeDir operates
+// by path, not worktree ID"): worktree directory paths are derived only
+// from task dir + repo name (prepareTaskWorktreePath), independent of
+// worktree_id. If a replacement worktree — a different ID, for the same
+// task — legitimately occupies wt.Path by the time this call acquires its
+// locks (e.g. EnsureSession's auto-continuation launching a fresh session
+// for the task right after this one was deleted), removeWorktreeDir must
+// not blindly force-remove whatever is currently registered at that path:
+// that would destroy the replacement's live data instead of leaving it
+// alone. The target-path lock alone does not prevent this — it only
+// prevents the two operations from running literally concurrently, not the
+// sequential case where the replacement's creation already won.
+func TestReclaimSessionWorktree_PreservesReplacementWorktreeAtSamePath(t *testing.T) {
+	mgr, store := newReferenceCleanupTestManager(t)
+	ctx := context.Background()
+	seedReferenceCleanupSession(t, store, "task-owner", "session-owner", models.TaskSessionStateCompleted)
+	wt := createReferenceCleanupWorktree(t, mgr, "task-owner", "session-owner")
+	simulateSessionCascadeDelete(t, store, "session-owner")
+
+	// Simulate the replacement: a different worktree_id, for the same task,
+	// already persisted at the exact same path. Insert the session row
+	// directly rather than via seedReferenceCleanupSession, which would also
+	// try (and fail) to re-insert the already-seeded task-owner task row.
+	if _, err := store.db.ExecContext(ctx, `
+		INSERT INTO task_sessions (id, task_id, state, started_at, updated_at)
+		VALUES (?, 'task-owner', ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+	`, "session-replacement", models.TaskSessionStateRunning); err != nil {
+		t.Fatalf("create replacement session: %v", err)
+	}
+	replacement := *wt
+	replacement.ID = "replacement-worktree-id"
+	replacement.SessionID = "session-replacement"
+	if err := store.CreateWorktree(ctx, &replacement); err != nil {
+		t.Fatalf("create replacement worktree at the same path: %v", err)
+	}
+
+	if err := mgr.ReclaimSessionWorktree(ctx, wt); err != nil {
+		t.Fatalf("ReclaimSessionWorktree: %v", err)
+	}
+
+	if _, err := os.Stat(wt.Path); err != nil {
+		t.Fatalf("replacement worktree's directory should survive reclamation of the worktree it replaced, stat error = %v", err)
+	}
+	assertWorktreeReferenceStatus(t, store, replacement.ID, "session-replacement", StatusActive)
+}
+
 func TestReclaimSessionWorktree_NilAndEmptyPathsAreNoop(t *testing.T) {
 	mgr, _ := newReferenceCleanupTestManager(t)
 	ctx := context.Background()

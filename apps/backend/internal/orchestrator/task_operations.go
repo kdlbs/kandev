@@ -2776,7 +2776,13 @@ func (s *Service) DeleteSession(ctx context.Context, sessionID string) error {
 		zap.Bool("was_primary", wasPrimary))
 
 	if err := s.repo.DeleteTaskSession(ctx, sessionID); err != nil {
-		s.cancelSessionDeleteResourceCleanup(cleanupOperationID)
+		// The error alone does not prove the mutation never committed — a
+		// realistic ambiguous-outcome class on this repo's supported Postgres
+		// deployment target (commit succeeds, ack is lost). Unconditionally
+		// cancelling the prepared job here would permanently leak the
+		// worktree if it actually did commit: a cancelled job is excluded
+		// from reconciliation. Resolve checks which happened.
+		s.resolveSessionDeleteResourceCleanupAfterMutationError(ctx, cleanupOperationID)
 		return fmt.Errorf("failed to delete session: %w", err)
 	}
 
@@ -2839,20 +2845,18 @@ func (s *Service) activateSessionDeleteResourceCleanup(ctx context.Context, oper
 	}
 }
 
-// cancelSessionDeleteResourceCleanup cancels a prepared cleanup job after the
-// session delete it was recorded for failed to commit. Detached from ctx so a
-// caller-cancelled request context does not block cleanup of its own orphaned
-// intent.
-func (s *Service) cancelSessionDeleteResourceCleanup(operationID string) {
+// resolveSessionDeleteResourceCleanupAfterMutationError resolves a prepared
+// cleanup job after the session delete it was recorded for returned an
+// ambiguous error — one that does not by itself prove the mutation never
+// committed. Detached from ctx so a caller-cancelled request context does
+// not block resolution of its own orphaned intent.
+func (s *Service) resolveSessionDeleteResourceCleanupAfterMutationError(ctx context.Context, operationID string) {
 	if operationID == "" || s.sessionResourceCleanup == nil {
 		return
 	}
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(context.Background()), 5*time.Second)
+	detachedCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 	defer cancel()
-	if err := s.sessionResourceCleanup.CancelPreparedTaskResourceCleanup(ctx, operationID); err != nil {
-		s.logger.Warn("failed to cancel session delete cleanup job",
-			zap.String("operation_id", operationID), zap.Error(err))
-	}
+	s.sessionResourceCleanup.ResolveSessionDeleteResourceCleanupAfterMutationError(detachedCtx, operationID)
 }
 
 // quiesceSessionExecutionBeforeDeletion stops the in-memory lifecycle

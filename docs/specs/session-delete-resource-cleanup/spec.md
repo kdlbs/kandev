@@ -375,6 +375,19 @@ backoff schedule are inherited unchanged from
   documented assumption, not a verified contract; revisit if `session.git.snapshots`
   gains an explicit repository/worktree identifier on each row.
 
+- **`git worktree prune` failure after a successful forced fallback removal
+  (review-round 1, P2).** `removeWorktreeDir`'s fallback path now logs a
+  prune failure at Warn instead of Debug so a stale `.git/worktrees/<id>`
+  registration stays discoverable. It still does not fail the reclamation
+  attempt: the Failure modes table's "git worktree remove fails" row is
+  explicit that "[o]nly if both [forced directory removal and prune] fail
+  does the attempt fail," and the directory removal already succeeded by the
+  time prune runs. Returning an error here to satisfy "propagate prune
+  failures too" (review finding wording) would make a prune-only failure
+  fail the attempt, contradicting that frozen row — so the fix is
+  observability (Warn-level, with the worktree and repository paths
+  attached), not attempt failure.
+
 ## REVIEW-ROUND: 1
 
 Review wave (2026-08-07) ran code-reviewer, security-reviewer, and test-supervisor

@@ -8,6 +8,7 @@ import (
 
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/worktree"
+	"go.uber.org/zap"
 )
 
 // sessionWorktreeInventoryProvider captures a session's worktree inventory
@@ -107,6 +108,36 @@ func (s *Service) sessionDeleteCleanupMutationCommitted(
 		return true, nil
 	}
 	return false, sessErr
+}
+
+// ResolveSessionDeleteResourceCleanupAfterMutationError resolves a prepared
+// session-delete cleanup job after its DeleteTaskSession call returned an
+// error whose outcome is ambiguous — the mutation may have actually
+// committed despite the error (a realistic class on this repo's supported
+// Postgres deployment target: the DELETE commits server-side while the
+// driver still reports a transport/ack failure to the caller).
+// Unconditionally cancelling in that case would permanently leak the
+// worktree: if the delete did commit, the cancelled job was the only
+// remaining pointer to it, and cancelled jobs are excluded from
+// reconciliation (docs/specs/session-delete-resource-cleanup). Mirrors
+// resolveTaskResourceCleanupAfterMutationError, which already handles this
+// correctly for the task-level triggers — that function's own commit check
+// (preparedTaskCleanupMutationCommitted) already dispatches to
+// sessionDeleteCleanupMutationCommitted for session_delete jobs, so no
+// session-specific resolve logic is needed beyond loading the job.
+func (s *Service) ResolveSessionDeleteResourceCleanupAfterMutationError(ctx context.Context, operationID string) {
+	if operationID == "" || s.resourceCleanups == nil {
+		return
+	}
+	transitionCtx, cancel := detachedCleanupTransitionContext(ctx)
+	defer cancel()
+	job, err := s.resourceCleanups.GetTaskResourceCleanupJobByOperationID(transitionCtx, operationID)
+	if err != nil {
+		s.logger.Warn("failed to load session delete cleanup job for mutation-error resolution",
+			zap.String("operation_id", operationID), zap.Error(err))
+		return
+	}
+	s.resolveTaskResourceCleanupAfterMutationError(transitionCtx, job)
 }
 
 // executeSessionDeleteResourceCleanup reclaims every worktree the deleted

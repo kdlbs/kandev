@@ -219,13 +219,17 @@ func TestExecuteSessionDeleteResourceCleanup_NoWorktreesIsNoop(t *testing.T) {
 	}
 }
 
-// TestSessionDeleteCleanupJob_FullLifecycle drives the same sequence
-// DeleteSession's orchestrator wiring performs — prepare, commit the session
-// delete, activate, let the durable worker run — and asserts the job reaches
-// succeeded and the fake reclaimer actually ran. This is the regression guard
-// from spec.md: an implementation that evaluates "other live holders" before
-// the session row is gone (instead of after, as this flow guarantees) would
-// never reclaim an exclusively-held worktree.
+// TestSessionDeleteCleanupJob_FullLifecycle drives prepare, commit the
+// session delete, activate, then lets the durable worker run, and asserts
+// the job reaches succeeded and the fake reclaimer actually ran. The calls
+// here are made directly, in a hardcoded correct order — this proves the
+// reclaim mechanism itself (reference counting evaluated after the row is
+// gone) works when given a correctly-ordered sequence. It does NOT guard
+// against orchestrator.Service.DeleteSession itself getting that ordering
+// wrong, since it never calls DeleteSession; that regression guard is
+// TestDeleteSession_ActivatesResourceCleanupAfterCommit in
+// internal/orchestrator, whose fake checks the row's real state at the
+// instant activation is called.
 func TestSessionDeleteCleanupJob_FullLifecycle(t *testing.T) {
 	taskSvc, repo := setupOfficeTest(t)
 	ctx := context.Background()
@@ -339,5 +343,95 @@ func TestSessionDeleteCleanupJob_RestartAfterCommitResumes(t *testing.T) {
 	}
 	if job.State != models.TaskResourceCleanupStateSucceeded {
 		t.Fatalf("job state = %q, want succeeded (last_error=%q)", job.State, job.LastError)
+	}
+	fake.mu.Lock()
+	defer fake.mu.Unlock()
+	if fake.reclaimedCalls != 1 || len(fake.reclaimedIDs) != 1 || fake.reclaimedIDs[0] != "wt-committed" {
+		t.Fatalf("reclaimed = %v (%d calls), want exactly [wt-committed] — job state alone does not "+
+			"prove reclamation actually ran", fake.reclaimedIDs, fake.reclaimedCalls)
+	}
+}
+
+// TestResolveSessionDeleteResourceCleanupAfterMutationError_CommittedActivatesJob
+// covers review-round-1 finding 3 (docs/specs/session-delete-resource-cleanup):
+// DeleteTaskSession can return an error for a mutation that actually
+// committed (a realistic ambiguous-outcome class on this repo's supported
+// Postgres deployment target). Unconditionally cancelling the prepared
+// cleanup job in that case permanently leaks the worktree — the cancelled
+// job was the only remaining pointer to it. The resolve method must detect
+// the commit and activate the job instead.
+func TestResolveSessionDeleteResourceCleanupAfterMutationError_CommittedActivatesJob(t *testing.T) {
+	taskSvc, repo := setupOfficeTest(t)
+	ctx := context.Background()
+	seedCleanupTaskAndSession(t, repo, "task-ambiguous-committed", "session-ambiguous-committed")
+	wt := &worktree.Worktree{ID: "wt-ambiguous-committed", SessionID: "session-ambiguous-committed", TaskID: "task-ambiguous-committed", Path: "/tmp/ambiguous-committed"}
+	fake := &fakeSessionWorktreeCleanup{
+		inventory: map[string][]*worktree.Worktree{"session-ambiguous-committed": {wt}},
+	}
+	taskSvc.SetWorktreeCleanup(fake)
+	taskSvc.setCleanupDoneForTestHook(make(chan struct{}, 1))
+
+	operationID, err := taskSvc.PrepareSessionDeleteResourceCleanup(ctx, "session-ambiguous-committed", "task-ambiguous-committed")
+	if err != nil {
+		t.Fatalf("PrepareSessionDeleteResourceCleanup: %v", err)
+	}
+	// The mutation actually commits...
+	if err := repo.DeleteTaskSession(ctx, "session-ambiguous-committed"); err != nil {
+		t.Fatalf("DeleteTaskSession: %v", err)
+	}
+	// ...but the caller only observes an ambiguous error (e.g. a lost ack)
+	// and resolves rather than unconditionally cancelling.
+	taskSvc.ResolveSessionDeleteResourceCleanupAfterMutationError(ctx, operationID)
+	waitForCleanupDone(t, taskSvc)
+
+	job, err := repo.GetTaskResourceCleanupJobByOperationID(ctx, operationID)
+	if err != nil {
+		t.Fatalf("GetTaskResourceCleanupJobByOperationID: %v", err)
+	}
+	if job.State != models.TaskResourceCleanupStateSucceeded {
+		t.Fatalf("job state = %q, want succeeded — a committed delete must not leave its cleanup job "+
+			"cancelled (last_error=%q)", job.State, job.LastError)
+	}
+	fake.mu.Lock()
+	defer fake.mu.Unlock()
+	if fake.reclaimedCalls != 1 || len(fake.reclaimedIDs) != 1 || fake.reclaimedIDs[0] != "wt-ambiguous-committed" {
+		t.Fatalf("reclaimed = %v (%d calls), want exactly [wt-ambiguous-committed]", fake.reclaimedIDs, fake.reclaimedCalls)
+	}
+}
+
+// TestResolveSessionDeleteResourceCleanupAfterMutationError_NotCommittedCancelsJob
+// covers the other half: when the mutation genuinely did not commit (the
+// session row still exists), the prepared job must still be cancelled —
+// resolving must not blindly activate every ambiguous-error job, only ones
+// that actually committed.
+func TestResolveSessionDeleteResourceCleanupAfterMutationError_NotCommittedCancelsJob(t *testing.T) {
+	taskSvc, repo := setupOfficeTest(t)
+	ctx := context.Background()
+	seedCleanupTaskAndSession(t, repo, "task-ambiguous-uncommitted", "session-ambiguous-uncommitted")
+	wt := &worktree.Worktree{ID: "wt-ambiguous-uncommitted", SessionID: "session-ambiguous-uncommitted", TaskID: "task-ambiguous-uncommitted", Path: "/tmp/ambiguous-uncommitted"}
+	fake := &fakeSessionWorktreeCleanup{
+		inventory: map[string][]*worktree.Worktree{"session-ambiguous-uncommitted": {wt}},
+	}
+	taskSvc.SetWorktreeCleanup(fake)
+
+	operationID, err := taskSvc.PrepareSessionDeleteResourceCleanup(ctx, "session-ambiguous-uncommitted", "task-ambiguous-uncommitted")
+	if err != nil {
+		t.Fatalf("PrepareSessionDeleteResourceCleanup: %v", err)
+	}
+	// The mutation genuinely fails — session row is deliberately NOT deleted.
+
+	taskSvc.ResolveSessionDeleteResourceCleanupAfterMutationError(ctx, operationID)
+
+	job, err := repo.GetTaskResourceCleanupJobByOperationID(ctx, operationID)
+	if err != nil {
+		t.Fatalf("GetTaskResourceCleanupJobByOperationID: %v", err)
+	}
+	if job.State != models.TaskResourceCleanupStateCancelled {
+		t.Fatalf("job state = %q, want cancelled — the session row still exists, so the delete never committed", job.State)
+	}
+	fake.mu.Lock()
+	defer fake.mu.Unlock()
+	if fake.reclaimedCalls != 0 {
+		t.Fatalf("reclaim was attempted for an uncommitted delete: %d calls", fake.reclaimedCalls)
 	}
 }

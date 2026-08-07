@@ -3,9 +3,11 @@ package worktree
 import (
 	"context"
 	"errors"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // archiveDeletesLocalBranch simulates what task archive does to a worktree's
@@ -61,6 +63,74 @@ func TestRecreate_FetchesBranchFromOriginWhenLocalDeleted(t *testing.T) {
 	gotSHA := strings.TrimSpace(runGit(t, wt.Path, "rev-parse", "HEAD"))
 	if gotSHA != branchSHA {
 		t.Errorf("worktree HEAD = %q, want %q (pushed branch tip)", gotSHA, branchSHA)
+	}
+}
+
+// TestRecreate_SerializesAgainstRepoLock covers the second half of the
+// review-round-1 lock finding (docs/specs/session-delete-resource-cleanup):
+// recreate()'s cleanup of an existing worktree directory (os.RemoveAll +
+// `git worktree prune`) used to run before acquiring any lock at all, so it
+// could race a concurrent ReclaimSessionWorktree call for the worktree being
+// replaced — both racing to delete/inspect the same path outside any shared
+// lock. It must now run only while holding repoLock, the same lock
+// ReclaimSessionWorktree holds across its own critical section.
+func TestRecreate_SerializesAgainstRepoLock(t *testing.T) {
+	repoPath := initGitRepoWithRemote(t)
+	mgr := newRecreateTestManager(t)
+
+	existingPath := filepath.Join(t.TempDir(), "task-1", "repo-1")
+	if err := os.MkdirAll(existingPath, 0o755); err != nil {
+		t.Fatalf("mkdir existing path: %v", err)
+	}
+	sentinel := filepath.Join(existingPath, "sentinel")
+	if err := os.WriteFile(sentinel, []byte("x"), 0o644); err != nil {
+		t.Fatalf("write sentinel file: %v", err)
+	}
+	existing := &Worktree{
+		ID:             "wt-1",
+		SessionID:      "session-1",
+		TaskID:         "task-1",
+		RepositoryID:   "repo-1",
+		RepositoryPath: repoPath,
+		Path:           existingPath,
+		Branch:         "feature/pr-branch",
+		Status:         StatusDeleted,
+	}
+
+	repoLock := mgr.getRepoLock(repoPath)
+	repoLock.Lock()
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := mgr.recreate(context.Background(), existing, CreateRequest{
+			SessionID:      "session-1",
+			TaskID:         "task-1",
+			RepositoryID:   "repo-1",
+			RepositoryPath: repoPath,
+		})
+		done <- err
+	}()
+
+	// While we hold repoLock externally, recreate() must not have touched
+	// the existing directory yet — proven by the sentinel file surviving.
+	time.Sleep(150 * time.Millisecond)
+	if _, err := os.Stat(sentinel); err != nil {
+		t.Fatalf("recreate() removed the existing directory before acquiring repoLock (sentinel gone): %v", err)
+	}
+
+	repoLock.Unlock()
+	mgr.releaseRepoLock(repoPath)
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("recreate() after lock release: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("recreate() did not complete after repoLock was released")
+	}
+	if _, err := os.Stat(sentinel); !os.IsNotExist(err) {
+		t.Fatalf("recreate() should have removed the existing directory once it acquired repoLock, stat error = %v", err)
 	}
 }
 

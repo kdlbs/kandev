@@ -1072,6 +1072,17 @@ func (m *Manager) copyConfiguredFiles(ctx context.Context, req CreateRequest, wt
 
 // recreate recreates a worktree from stored metadata.
 func (m *Manager) recreate(ctx context.Context, existing *Worktree, req CreateRequest) (*Worktree, error) {
+	// Get repository lock. Held before touching the existing directory or
+	// git's worktree registration below — the same lock ReclaimSessionWorktree
+	// takes as its outermost lock — so a concurrent reclaim for the worktree
+	// being replaced here can't race this cleanup and interleave with it.
+	repoLock := m.getRepoLock(req.RepositoryPath)
+	repoLock.Lock()
+	defer func() {
+		repoLock.Unlock()
+		m.releaseRepoLock(req.RepositoryPath)
+	}()
+
 	// Clean up existing directory if present
 	if existing.Path != "" {
 		if err := os.RemoveAll(existing.Path); err != nil {
@@ -1085,14 +1096,6 @@ func (m *Manager) recreate(ctx context.Context, existing *Worktree, req CreateRe
 	if err := runGitCmd(ctx, cmd); err != nil {
 		m.logger.Debug("git worktree prune failed", zap.Error(err))
 	}
-
-	// Get repository lock
-	repoLock := m.getRepoLock(req.RepositoryPath)
-	repoLock.Lock()
-	defer func() {
-		repoLock.Unlock()
-		m.releaseRepoLock(req.RepositoryPath)
-	}()
 
 	// Reuse the original on-disk path so the worktree is recreated in the
 	// same task-dir slot it was first created in.

@@ -230,7 +230,7 @@ export function DeleteSessionConfirmDialog({
   onConfirm: () => void;
 }) {
   const { t } = useTranslation();
-  const warning = useSessionDeleteWarning(open, sessionId);
+  const { warning, isLoaded } = useSessionDeleteWarning(open, sessionId);
   return (
     <AlertDialog open={open} onOpenChange={onOpenChange}>
       <AlertDialogContent>
@@ -252,6 +252,7 @@ export function DeleteSessionConfirmDialog({
         <AlertDialogFooter>
           <AlertDialogCancel className="cursor-pointer">{t("common:cancel")}</AlertDialogCancel>
           <AlertDialogAction
+            disabled={!isLoaded}
             onClick={() => {
               onOpenChange(false);
               onConfirm();

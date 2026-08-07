@@ -10,6 +10,13 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 )
 
+// sessionRowChecker is the minimal repo surface fakeSessionDeleteResourceCleanup
+// needs to check whether a session row still exists at call time. Satisfied
+// by *sqliterepo.Repository (setupTestRepo's return type).
+type sessionRowChecker interface {
+	GetTaskSession(ctx context.Context, id string) (*models.TaskSession, error)
+}
+
 // fakeSessionDeleteResourceCleanup is a test double for
 // SessionDeleteResourceCleanup that records every call so tests can assert
 // DeleteSession's ordering and fail-closed behavior without a real task
@@ -17,15 +24,23 @@ import (
 type fakeSessionDeleteResourceCleanup struct {
 	mu sync.Mutex
 
+	// repo, when set, lets StartPreparedTaskResourceCleanup check — at the
+	// instant it is called — whether the session row it was prepared for is
+	// still present. This makes ordering bugs (activation racing ahead of
+	// the DeleteTaskSession commit) visible instead of passing regardless of
+	// call order, which a fake that only appends to a slice cannot catch.
+	repo                 sessionRowChecker
+	sessionIDByOperation map[string]string
+
 	prepareOperationID string
 	prepareErr         error
 	prepareCalls       []struct{ sessionID, taskID string }
 
-	startErr   error
-	startCalls []string
+	startErr               error
+	startCalls             []string
+	startSessionRowWasGone []bool
 
-	cancelErr   error
-	cancelCalls []string
+	resolveCalls []string
 }
 
 func (f *fakeSessionDeleteResourceCleanup) PrepareSessionDeleteResourceCleanup(
@@ -37,21 +52,39 @@ func (f *fakeSessionDeleteResourceCleanup) PrepareSessionDeleteResourceCleanup(
 	if f.prepareErr != nil {
 		return "", f.prepareErr
 	}
+	if f.prepareOperationID != "" {
+		if f.sessionIDByOperation == nil {
+			f.sessionIDByOperation = make(map[string]string)
+		}
+		f.sessionIDByOperation[f.prepareOperationID] = sessionID
+	}
 	return f.prepareOperationID, nil
 }
 
-func (f *fakeSessionDeleteResourceCleanup) StartPreparedTaskResourceCleanup(_ context.Context, operationID string) error {
+func (f *fakeSessionDeleteResourceCleanup) StartPreparedTaskResourceCleanup(ctx context.Context, operationID string) error {
+	f.mu.Lock()
+	repo := f.repo
+	sessionID := f.sessionIDByOperation[operationID]
+	f.mu.Unlock()
+
+	rowWasGone := false
+	if repo != nil && sessionID != "" {
+		if _, err := repo.GetTaskSession(ctx, sessionID); err != nil {
+			rowWasGone = true
+		}
+	}
+
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.startCalls = append(f.startCalls, operationID)
+	f.startSessionRowWasGone = append(f.startSessionRowWasGone, rowWasGone)
 	return f.startErr
 }
 
-func (f *fakeSessionDeleteResourceCleanup) CancelPreparedTaskResourceCleanup(_ context.Context, operationID string) error {
+func (f *fakeSessionDeleteResourceCleanup) ResolveSessionDeleteResourceCleanupAfterMutationError(_ context.Context, operationID string) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.cancelCalls = append(f.cancelCalls, operationID)
-	return f.cancelErr
+	f.resolveCalls = append(f.resolveCalls, operationID)
 }
 
 // fakeWorktreeSessionCache records ForgetSession calls.
@@ -66,6 +99,16 @@ func (f *fakeWorktreeSessionCache) ForgetSession(sessionID string) {
 	f.forgets = append(f.forgets, sessionID)
 }
 
+// TestDeleteSession_ActivatesResourceCleanupAfterCommit is the regression
+// guard for the spec's ordering requirement (docs/specs/
+// session-delete-resource-cleanup: cleanup intent is captured before the row
+// is deleted, but the job is only ACTIVATED after DeleteTaskSession commits —
+// activating early would let the durable worker's reference-count query
+// observe a session row that has not been deleted yet, which can make an
+// exclusively-held worktree look shared and never get reclaimed). The fake's
+// StartPreparedTaskResourceCleanup queries the real repo for the session row
+// at the instant it is called, so an implementation that activates before
+// the delete commits fails this test instead of passing regardless of order.
 func TestDeleteSession_ActivatesResourceCleanupAfterCommit(t *testing.T) {
 	const (
 		taskID    = "task-cleanup-activate"
@@ -74,7 +117,7 @@ func TestDeleteSession_ActivatesResourceCleanupAfterCommit(t *testing.T) {
 	repo := setupTestRepo(t)
 	seedTaskAndSession(t, repo, taskID, sessionID, models.TaskSessionStateCompleted)
 	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
-	cleanup := &fakeSessionDeleteResourceCleanup{prepareOperationID: "session_delete:op-1"}
+	cleanup := &fakeSessionDeleteResourceCleanup{prepareOperationID: "session_delete:op-1", repo: repo}
 	svc.sessionResourceCleanup = cleanup
 	cache := &fakeWorktreeSessionCache{}
 	svc.worktreeSessionCache = cache
@@ -94,8 +137,12 @@ func TestDeleteSession_ActivatesResourceCleanupAfterCommit(t *testing.T) {
 	if len(cleanup.startCalls) != 1 || cleanup.startCalls[0] != "session_delete:op-1" {
 		t.Fatalf("start calls = %v, want [session_delete:op-1]", cleanup.startCalls)
 	}
-	if len(cleanup.cancelCalls) != 0 {
-		t.Fatalf("cancel calls = %v, want none on a successful delete", cleanup.cancelCalls)
+	if len(cleanup.startSessionRowWasGone) != 1 || !cleanup.startSessionRowWasGone[0] {
+		t.Fatalf("startSessionRowWasGone = %v, want [true] — activation must happen strictly after "+
+			"the session row is deleted, not before or concurrently", cleanup.startSessionRowWasGone)
+	}
+	if len(cleanup.resolveCalls) != 0 {
+		t.Fatalf("resolve calls = %v, want none on a successful delete", cleanup.resolveCalls)
 	}
 	cache.mu.Lock()
 	defer cache.mu.Unlock()
@@ -167,8 +214,8 @@ func TestDeleteSession_InventoryOrPersistFailureFailsClosed(t *testing.T) {
 	if len(cleanup.startCalls) != 0 {
 		t.Fatalf("start calls = %v, want none when prepare failed", cleanup.startCalls)
 	}
-	if len(cleanup.cancelCalls) != 0 {
-		t.Fatalf("cancel calls = %v, want none — nothing was ever persisted to cancel", cleanup.cancelCalls)
+	if len(cleanup.resolveCalls) != 0 {
+		t.Fatalf("resolve calls = %v, want none — nothing was ever persisted to resolve", cleanup.resolveCalls)
 	}
 }
 
@@ -211,5 +258,59 @@ func TestDeleteSession_NothingToReclaimSkipsActivation(t *testing.T) {
 	defer cleanup.mu.Unlock()
 	if len(cleanup.startCalls) != 0 {
 		t.Fatalf("start calls = %v, want none when there was nothing to reclaim", cleanup.startCalls)
+	}
+}
+
+// commitThenErrorSessionRepo wraps a real sessionExecutorStore and makes
+// DeleteTaskSession return an error AFTER the underlying delete actually
+// commits — simulating the ambiguous-outcome class review-round-1 finding 3
+// is about (e.g. a commit-then-lost-ack on this repo's supported Postgres
+// deployment target).
+type commitThenErrorSessionRepo struct {
+	sessionExecutorStore
+	err error
+}
+
+func (r *commitThenErrorSessionRepo) DeleteTaskSession(ctx context.Context, id string) error {
+	if err := r.sessionExecutorStore.DeleteTaskSession(ctx, id); err != nil {
+		return err
+	}
+	return r.err
+}
+
+// TestDeleteSession_AmbiguousMutationErrorResolvesRatherThanBlindlyCancels
+// covers review-round-1 finding 3 (docs/specs/session-delete-resource-cleanup):
+// DeleteSession must not unconditionally cancel the prepared cleanup job when
+// DeleteTaskSession returns an error — the mutation may have actually
+// committed, in which case a blind cancel permanently leaks the worktree
+// (the cancelled job was the only remaining pointer to it). It must resolve
+// instead, which checks whether the row is really gone.
+func TestDeleteSession_AmbiguousMutationErrorResolvesRatherThanBlindlyCancels(t *testing.T) {
+	const (
+		taskID    = "task-cleanup-ambiguous"
+		sessionID = "session-cleanup-ambiguous"
+	)
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, taskID, sessionID, models.TaskSessionStateCompleted)
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	cleanup := &fakeSessionDeleteResourceCleanup{prepareOperationID: "session_delete:op-ambiguous"}
+	svc.sessionResourceCleanup = cleanup
+	commitErr := errors.New("transport lost after commit")
+	svc.repo = &commitThenErrorSessionRepo{sessionExecutorStore: svc.repo, err: commitErr}
+
+	err := svc.DeleteSession(t.Context(), sessionID)
+	if !errors.Is(err, commitErr) {
+		t.Fatalf("DeleteSession error = %v, want it to wrap %v", err, commitErr)
+	}
+
+	if _, getErr := repo.GetTaskSession(t.Context(), sessionID); getErr == nil {
+		t.Fatal("the mutation actually committed — session row should be gone")
+	}
+
+	cleanup.mu.Lock()
+	defer cleanup.mu.Unlock()
+	if len(cleanup.resolveCalls) != 1 || cleanup.resolveCalls[0] != "session_delete:op-ambiguous" {
+		t.Fatalf("resolve calls = %v, want exactly one call for session_delete:op-ambiguous — "+
+			"an ambiguous error must resolve, not blindly cancel", cleanup.resolveCalls)
 	}
 }
