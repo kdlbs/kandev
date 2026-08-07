@@ -147,6 +147,61 @@ describe("usePRCIPopover refresh indicator", () => {
 
     await waitFor(() => expect(result.current.isRefreshing).toBe(false));
   });
+});
+
+// Split from the block above only to stay under the 100-line function limit.
+describe("usePRCIPopover refresh indicator timing", () => {
+  beforeEach(() => {
+    getPRFeedbackMock.mockReset();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("ignores a stale sync settling after the popover was reopened", async () => {
+    vi.useFakeTimers();
+    getPRFeedbackMock.mockResolvedValue(null);
+    const first = deferred<void>();
+    const second = deferred<void>();
+    const refreshTaskPR = vi
+      .fn<() => Promise<void>>()
+      .mockReturnValueOnce(first.promise)
+      .mockReturnValueOnce(second.promise);
+
+    const { result, rerender } = renderHook(
+      ({ enabled }: { enabled: boolean }) =>
+        usePRCIPopover("workspace-1", makePR(), enabled, refreshTaskPR),
+      { initialProps: { enabled: false }, wrapper },
+    );
+    rerender({ enabled: true });
+    await flushOpen();
+    rerender({ enabled: false });
+    rerender({ enabled: true });
+    await flushOpen();
+    expect(refreshTaskPR).toHaveBeenCalledTimes(2);
+
+    // The first open's sync lands late; the second is still in flight.
+    await act(async () => {
+      first.resolve();
+      await first.promise;
+    });
+    // Drain the minimum-visible window first — it would otherwise hold the
+    // indicator up on its own and hide a wrongly-cleared flag.
+    await act(async () => {
+      vi.advanceTimersByTime(2_000);
+    });
+    expect(result.current.isRefreshing).toBe(true);
+
+    await act(async () => {
+      second.resolve();
+      await second.promise;
+    });
+    await act(async () => {
+      vi.advanceTimersByTime(2_000);
+    });
+    expect(result.current.isRefreshing).toBe(false);
+  });
 
   it("keeps the indicator up long enough to read a cache-fast refresh", async () => {
     vi.useFakeTimers();
