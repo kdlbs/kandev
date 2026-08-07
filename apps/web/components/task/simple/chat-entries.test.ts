@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { buildRunErrorsFromSessions, mergeLiveSessionMetadata } from "./chat-entries";
+import {
+  buildRunErrorsFromSessions,
+  liveSessionMetadataFromStore,
+  mergeLiveSessionMetadata,
+} from "./chat-entries";
 import type { TaskSession } from "@/app/office/tasks/[id]/types";
 
 const URL = "https://opencode.ai/workspace/wrk_01KQM7K5CYT715264YKKFB17ZY/go";
@@ -89,5 +93,31 @@ describe("mergeLiveSessionMetadata", () => {
   it("prefers live metadata over the initial fetch", () => {
     const live = { last_agent_error: { message: "newer" } };
     expect(mergeLiveSessionMetadata(initial, live)).toBe(live);
+  });
+});
+
+describe("liveSessionMetadataFromStore", () => {
+  const metadata = { last_agent_error: { message: "boom", remediation_url: URL } };
+
+  it("returns undefined when no store row exists", () => {
+    expect(liveSessionMetadataFromStore({}, "s1")).toBeUndefined();
+  });
+
+  it("treats a partial row without a metadata field as metadata-absent", () => {
+    // Regression: a store row without `metadata` (e.g. a summary projection)
+    // must NOT become explicit null, which would erase the initial fetch's
+    // metadata and hide the remediation link.
+    expect(liveSessionMetadataFromStore({ s1: {} }, "s1")).toBeUndefined();
+    expect(mergeLiveSessionMetadata(metadata, liveSessionMetadataFromStore({ s1: {} }, "s1"))).toBe(
+      metadata,
+    );
+  });
+
+  it("preserves an explicit null metadata field", () => {
+    expect(liveSessionMetadataFromStore({ s1: { metadata: null } }, "s1")).toBeNull();
+  });
+
+  it("returns the live metadata object when present", () => {
+    expect(liveSessionMetadataFromStore({ s1: { metadata } }, "s1")).toBe(metadata);
   });
 });

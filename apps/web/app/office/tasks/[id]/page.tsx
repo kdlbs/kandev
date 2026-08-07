@@ -13,7 +13,10 @@ import {
   type TaskDecisionDTO,
 } from "@/lib/api/domains/office-api";
 import { listTaskSessions } from "@/lib/api/domains/session-api";
-import { mergeLiveSessionMetadata } from "@/components/task/simple/chat-entries";
+import {
+  liveSessionMetadataFromStore,
+  mergeLiveSessionMetadata,
+} from "@/components/task/simple/chat-entries";
 import { OfficeSimplePane } from "@/components/task/simple/OfficeSimplePane";
 import { TaskAdvancedMode } from "./task-advanced-mode";
 import { IssueDetailSkeleton } from "./task-detail-skeleton";
@@ -246,17 +249,14 @@ function useSessionLiveSync({
   // Same stable-key trick for the live metadata (last_agent_error etc.)
   // carried by session.state_changed, so the office chat can render the
   // remediation link without a refetch. Tri-state per session: the sentinel
-  // marks "no store entry" (undefined), explicit null means the server
-  // cleared metadata, and an object is the live metadata.
+  // marks "no metadata update" (no store row, or a partial row without a
+  // metadata field), explicit null means the server cleared metadata, and an
+  // object is the live metadata.
   const sessionMetadataKey = useAppStore((s) => {
     const items = s.taskSessions?.items ?? {};
     return baseSessions
       .map((sess) =>
-        JSON.stringify(
-          items[sess.id] === undefined
-            ? SESSION_METADATA_ABSENT
-            : (items[sess.id]?.metadata ?? null),
-        ),
+        JSON.stringify(liveSessionMetadataFromStore(items, sess.id) ?? SESSION_METADATA_ABSENT),
       )
       .join("\u0001");
   });

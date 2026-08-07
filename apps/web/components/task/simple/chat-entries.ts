@@ -80,6 +80,24 @@ export function mergeLiveSessionMetadata(
   return live === undefined ? base : live;
 }
 
+/**
+ * Live metadata for one session from the taskSessions store. Returns
+ * undefined both when no store row exists and when an existing row carries no
+ * `metadata` field (a partial row) — in both cases the initial REST fetch
+ * stays authoritative. Explicit `null` is preserved because the server uses
+ * it to clear metadata.
+ */
+export function liveSessionMetadataFromStore(
+  items: Record<string, { metadata?: Record<string, unknown> | null } | undefined>,
+  sessionId: string,
+): Record<string, unknown> | null | undefined {
+  const row = items[sessionId];
+  if (row === undefined || row.metadata === undefined) {
+    return undefined;
+  }
+  return row.metadata;
+}
+
 function remediationUrlFromSessionMetadata(metadata: Record<string, unknown> | null | undefined) {
   const lastError = metadata?.last_agent_error;
   if (!lastError || typeof lastError !== "object") return undefined;
