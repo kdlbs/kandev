@@ -41,7 +41,10 @@ export function useTaskArchiveConfirm(taskId: string | null) {
       setIsPending(true);
       try {
         await archiveAndSwitch(taskId, { cascade });
-      } catch {
+      } catch (error) {
+        // The toast is deliberately generic; keep the rejection reason in the
+        // console so a failed archive is diagnosable from a user's devtools.
+        console.error("Failed to archive task:", error);
         toast({ description: t("task:failedToArchiveTask"), variant: "error" });
       } finally {
         setIsPending(false);

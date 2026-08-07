@@ -74,8 +74,10 @@ describe("useTaskArchiveConfirm", () => {
     expect(result.current.isPending).toBe(false);
   });
 
-  it("toasts and clears pending when archiving fails", async () => {
-    mocks.archiveAndSwitch.mockRejectedValueOnce(new Error("boom"));
+  it("toasts, logs the cause, and clears pending when archiving fails", async () => {
+    const cause = new Error("boom");
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+    mocks.archiveAndSwitch.mockRejectedValueOnce(cause);
     const { result } = renderHook(() => useTaskArchiveConfirm("task-A"));
 
     await act(async () => {
@@ -86,7 +88,10 @@ describe("useTaskArchiveConfirm", () => {
       description: "Failed to archive task",
       variant: "error",
     });
+    // The toast is generic, so the rejection reason has to reach the console.
+    expect(logged).toHaveBeenCalledWith("Failed to archive task:", cause);
     await waitFor(() => expect(result.current.isPending).toBe(false));
+    logged.mockRestore();
   });
 
   it("never archives when there is no task", async () => {
