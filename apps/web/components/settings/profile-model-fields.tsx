@@ -194,6 +194,7 @@ export function ModelFallbackSection({
         <Switch
           checked={profile.auto_fallback ?? false}
           onCheckedChange={(checked) => onChange({ auto_fallback: checked })}
+          aria-label={t("settings:autoFallback")}
         />
       </div>
     </>

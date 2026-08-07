@@ -140,12 +140,15 @@ func (ss *SchedulerService) dispatchForcedFallback(
 	launch LaunchContext,
 ) (bool, bool, error) {
 	forced := forcedFallbackCandidate(run)
-	if err := ss.repo.ClearRunFallbackModelOverride(ctx, run.ID); err != nil {
-		return false, false, err
-	}
 	if forced == nil {
 		return false, false, fmt.Errorf(
 			"dispatch: fallback override present without resolved route for run %s", run.ID)
+	}
+	// Only consume the override once the candidate is known to be valid —
+	// clearing it before the nil check would leave the run without an
+	// override, unqueued, and unfailed.
+	if err := ss.repo.ClearRunFallbackModelOverride(ctx, run.ID); err != nil {
+		return false, false, err
 	}
 	seq, err := ss.recordAttemptStart(ctx, run, *forced, forced.Tier)
 	if err != nil {
@@ -155,12 +158,13 @@ func (ss *SchedulerService) dispatchForcedFallback(
 		classified := classifyLaunchError(string(forced.ProviderID), err)
 		now := time.Now().UTC()
 		_ = ss.finishAttempt(ctx, run.ID, seq, RouteAttemptOutcomeFailedOther, classified, now)
-		msg := err.Error()
 		if routingerr.IsAvailabilityCode(classified.Code) {
-			msg = routingerr.ModelUnavailableMessage(forced.Model) + ": " + msg
+			return false, false, fmt.Errorf(
+				"dispatch: fallback model %q failed for run %s: %w", forced.Model, run.ID,
+				fmt.Errorf("%s: %w", routingerr.ModelUnavailableMessage(forced.Model), err))
 		}
 		return false, false, fmt.Errorf(
-			"dispatch: fallback model %q failed for run %s: %s", forced.Model, run.ID, msg)
+			"dispatch: fallback model %q failed for run %s: %w", forced.Model, run.ID, err)
 	}
 	launched, _, err := ss.handleLaunchSuccess(ctx, run, agent, *forced)
 	return launched, false, err

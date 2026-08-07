@@ -1,8 +1,16 @@
 package websocket
 
 import (
+	"context"
+	"encoding/json"
 	"testing"
 	"time"
+
+	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
+	"github.com/kandev/kandev/internal/auth/authn"
+	"github.com/kandev/kandev/internal/events"
+	"github.com/kandev/kandev/internal/events/bus"
+	ws "github.com/kandev/kandev/pkg/websocket"
 )
 
 func TestSessionStreamBroadcaster_FileChangeBatching(t *testing.T) {
@@ -150,4 +158,72 @@ func TestExtractSessionID(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestSessionStreamBroadcaster_SubscribesFallbackSubject pins the subject
+// mapping: RegisterSessionStreamNotifications must subscribe the
+// session_model_fallback wildcard so orchestrator publishes reach the hub.
+func TestSessionStreamBroadcaster_SubscribesFallbackSubject(t *testing.T) {
+	log := testLogger()
+	eventBus := &subscriptionRecordingEventBus{MemoryEventBus: bus.NewMemoryEventBus(log)}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	hub := NewHub(nil, log)
+	b := RegisterSessionStreamNotifications(ctx, eventBus, hub, log)
+	_ = b
+
+	for _, subject := range eventBus.subjects {
+		if subject == events.BuildSessionModelFallbackWildcardSubject() {
+			return
+		}
+	}
+	t.Fatalf("session stream broadcaster must subscribe the fallback wildcard subject %q",
+		events.BuildSessionModelFallbackWildcardSubject())
+}
+
+// TestSessionStreamBroadcaster_BroadcastsFallbackNotification verifies a
+// published session_model_fallback event is routed to the session's
+// subscribers as the session.model_fallback action — the payload's
+// GetSessionID must drive extractSessionID (a broken routing key drops the
+// notification silently).
+func TestSessionStreamBroadcaster_BroadcastsFallbackNotification(t *testing.T) {
+	hub := newAccessTestHub(t)
+	eventBus := bus.NewMemoryEventBus(testLogger())
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	_ = RegisterSessionStreamNotifications(ctx, eventBus, hub, testLogger())
+
+	client := registerAccessClient(t, hub, "client-fallback", authn.Identity{UserID: "user-1", Role: authn.RoleMember})
+	raw, err := json.Marshal(map[string]interface{}{"session_id": "session-fallback-1"})
+	if err != nil {
+		t.Fatalf("marshal subscribe payload: %v", err)
+	}
+	client.handleSessionSubscribe(&ws.Message{
+		ID: "1", Type: ws.MessageTypeRequest, Action: ws.ActionSessionSubscribe, Payload: raw,
+	})
+
+	sessionID := "session-fallback-1"
+	_ = eventBus.Publish(ctx, events.BuildSessionModelFallbackSubject(sessionID), bus.NewEvent(
+		events.SessionModelFallbackUpdated,
+		"test",
+		lifecycle.SessionModelFallbackEventPayload{
+			TaskID:        "task-1",
+			SessionID:     sessionID,
+			AgentID:       "a1",
+			FallbackModel: "gpt-5",
+			Timestamp:     time.Now().UTC().Format(time.RFC3339),
+		},
+	))
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		for _, action := range receivedActions(client) {
+			if action == ws.ActionSessionModelFallback {
+				return
+			}
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatalf("client did not receive %s", ws.ActionSessionModelFallback)
 }

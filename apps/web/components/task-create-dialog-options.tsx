@@ -146,14 +146,27 @@ export function useAgentProfileOptions(agentProfiles: AgentProfileOption[]): Opt
       // advertised ("gone") is blocked from selection unless it opted into
       // an explicit fallback model (shown as a warning) or the legacy
       // auto-fallback toggle.
+      //
+      // The advertised list is the host-utility probe cache. While it has
+      // not loaded yet (empty list) gone-ness is unknown and deliberately
+      // NOT assumed: nothing is blocked and no warning is shown. The backend
+      // rejects the launch if the model is genuinely unavailable, so this
+      // startup window is cosmetic. A fallback model that is itself gone
+      // does not make the profile selectable — it would promise a switch
+      // SetModel cannot apply, so the profile is blocked like strict mode.
       const advertised = advertisedModelIDs(availableAgents, profile.agent_name);
       const startModelGone = Boolean(
         profile.model && advertised.length > 0 && !advertised.includes(profile.model),
       );
+      const fallbackGone = Boolean(
+        profile.fallback_model &&
+        advertised.length > 0 &&
+        !advertised.includes(profile.fallback_model),
+      );
       const autoFallbackOn = profile.auto_fallback === true;
-      const fallbackConfigured = Boolean(profile.fallback_model);
-      const blocked = startModelGone && !autoFallbackOn && !fallbackConfigured;
-      const fallbackWarning = startModelGone && !autoFallbackOn && fallbackConfigured;
+      const fallbackUsable = Boolean(profile.fallback_model) && !fallbackGone;
+      const blocked = startModelGone && !autoFallbackOn && !fallbackUsable;
+      const fallbackWarning = startModelGone && !autoFallbackOn && fallbackUsable;
       const disabledReason = blocked
         ? t("settings:profileStartModelUnavailable", { model: profile.model })
         : undefined;

@@ -30,6 +30,10 @@ spec: docs/specs/no-silent-model-fallback/spec.md
   "start model X is gone — fallback Y will be used".
 - auto-fallback → normal.
 - Profiles whose model is empty (agent default) are never gated.
+- A fallback model that is itself gone does not make the profile
+  selectable: it would promise a switch `SetModel` cannot apply. The
+  profile is blocked like strict mode when both the start model and the
+  fallback model are absent from the advertised list ("both-gone").
 
 `apps/web/app/office/setup/agent-profile-setup-controls.tsx`
 (`useSelectableProfileOptions`): same gating for office agent setup.

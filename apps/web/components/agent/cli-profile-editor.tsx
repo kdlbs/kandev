@@ -426,7 +426,11 @@ function ModelModeFields({
           <Label>{t("settings:autoFallback")}</Label>
           <p className="text-xs text-muted-foreground">{t("settings:autoFallbackHelper")}</p>
         </div>
-        <Switch checked={autoFallback} onCheckedChange={onAutoFallbackChange} />
+        <Switch
+          checked={autoFallback}
+          onCheckedChange={onAutoFallbackChange}
+          aria-label={t("settings:autoFallback")}
+        />
       </div>
     </div>
   );

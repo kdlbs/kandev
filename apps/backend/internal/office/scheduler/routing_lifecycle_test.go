@@ -210,3 +210,50 @@ func TestDispatch_ForcedFallbackFailureIsTerminal(t *testing.T) {
 		t.Errorf("override must be cleared after the one attempt, got %q", *got.FallbackModelOverride)
 	}
 }
+
+// TestHandlePostStartFailure_NoSecondFallbackAttempt covers the guard that
+// prevents a second post-start fallback: after the forced fallback launches
+// successfully, a later streaming failure on that fallback model must
+// escalate to the terminal failure path instead of re-dispatching the same
+// fallback model (the one-shot override was already consumed).
+func TestHandlePostStartFailure_NoSecondFallbackAttempt(t *testing.T) {
+	repo := newTestRepoSched(t)
+	starter := newFakeTaskStarter()
+	ss := buildScheduler(t, repo, starter)
+	run := seedRoutedRun(t, repo)
+	if err := repo.SetRunFallbackModelOverride(context.Background(), run.ID, "gpt-5"); err != nil {
+		t.Fatalf("set override: %v", err)
+	}
+	run.FallbackModelOverride = new("gpt-5")
+
+	launched, parked, err := ss.DispatchWithRouting(
+		context.Background(), run, agentWithFallback(false, "gpt-5"), scheduler.LaunchContext{})
+	if err != nil || !launched || parked {
+		t.Fatalf("forced fallback dispatch: launched=%v parked=%v err=%v", launched, parked, err)
+	}
+
+	// The fallback attempt (seq 2, model gpt-5) is now in flight. A streaming
+	// failure on that model must escalate — no new override, no requeue.
+	afterDispatch, err := repo.GetRun(context.Background(), run.ID)
+	if err != nil {
+		t.Fatalf("get run after dispatch: %v", err)
+	}
+	handled, err := ss.HandlePostStartFailure(
+		context.Background(), afterDispatch, agentWithFallback(false, "gpt-5"), postStartFailureMessage)
+	if err != nil {
+		t.Fatalf("HandlePostStartFailure: %v", err)
+	}
+	if handled {
+		t.Fatal("failure on the fallback model itself must NOT be handled again (escalate)")
+	}
+	got, err := repo.GetRun(context.Background(), run.ID)
+	if err != nil {
+		t.Fatalf("get run: %v", err)
+	}
+	if got.Status != "claimed" {
+		t.Errorf("must leave the run claimed (no requeue), got status %q", got.Status)
+	}
+	if got.FallbackModelOverride != nil {
+		t.Errorf("must not set a new fallback override, got %q", *got.FallbackModelOverride)
+	}
+}

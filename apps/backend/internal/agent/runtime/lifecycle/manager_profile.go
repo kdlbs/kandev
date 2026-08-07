@@ -158,6 +158,25 @@ func (m *Manager) resolveProfileSessionConfig(ctx context.Context, profileID str
 	return info.Model, info.Mode, info.ConfigOptions
 }
 
+// resolveProfileSessionConfigAndPolicy resolves the ACP session config and
+// the no-silent-model-fallback policy from a single ResolveProfile call.
+// Session start needs both, so a shared lookup avoids two DB reads of the
+// same profile per session.
+func (m *Manager) resolveProfileSessionConfigAndPolicy(ctx context.Context, profileID string) (string, string, map[string]string, StartModelPolicy) {
+	if profileID == "" || m.profileResolver == nil {
+		return "", "", nil, StartModelPolicy{}
+	}
+	info, err := m.profileResolver.ResolveProfile(ctx, profileID)
+	if err != nil || info == nil {
+		return "", "", nil, StartModelPolicy{}
+	}
+	return info.Model, info.Mode, info.ConfigOptions, StartModelPolicy{
+		Model:         info.Model,
+		FallbackModel: info.FallbackModel,
+		AutoFallback:  info.AutoFallback,
+	}
+}
+
 // resolveStartModelPolicy resolves the profile's no-silent-model-fallback
 // policy (start model + optional fallback + legacy toggle). Returns a zero
 // policy when the profile cannot be resolved, which the policy helper treats
@@ -187,9 +206,8 @@ func (m *Manager) resolveStartModelPolicy(ctx context.Context, profileID string)
 // profile defaults. This preserves user-selected model and reasoning-effort
 // values across process recovery.
 func (m *Manager) initializeACPSession(ctx context.Context, execution *AgentExecution, agentConfig agents.Agent, taskDescription string, attachments []MessageAttachment, mcpServers []agentctltypes.McpServer) error {
-	profileModel, profileMode, profileConfigOptions := m.resolveProfileSessionConfig(ctx, execution.AgentProfileID)
+	profileModel, profileMode, profileConfigOptions, policy := m.resolveProfileSessionConfigAndPolicy(ctx, execution.AgentProfileID)
 	runtimeModel, runtimeMode, runtimeConfigOptions := m.sessionRuntimeOverrides(ctx, execution)
-	policy := m.resolveStartModelPolicy(ctx, execution.AgentProfileID)
 	// The effective runtime model (user-selected, persisted session state)
 	// takes precedence over the profile's start model for the session; the
 	// policy still carries the profile's fallback settings so a gone

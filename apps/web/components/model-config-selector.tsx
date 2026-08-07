@@ -445,11 +445,14 @@ export type ModelConfigSelectorProps = {
   configBaseline?: Record<string, string>;
   /** Optional suffix appended to the trigger's model label (e.g. "(fallback)"). */
   currentModelSuffix?: string;
+
+  /** Optional title tooltip on the trigger (e.g. explains a live-only note). */
+  triggerTitle?: string;
 };
 
 type ModelConfigSelectorTriggerProps = Pick<
   ModelConfigSelectorProps,
-  "ariaLabel" | "disabled" | "placeholder" | "triggerClassName" | "variant"
+  "ariaLabel" | "disabled" | "placeholder" | "triggerClassName" | "triggerTitle" | "variant"
 > & {
   label: string;
   details?: TriggerDetail[];
@@ -462,6 +465,7 @@ function ModelConfigSelectorTrigger({
   label,
   placeholder,
   triggerClassName,
+  triggerTitle,
   variant,
 }: ModelConfigSelectorTriggerProps) {
   const compact = variant === "compact";
@@ -477,6 +481,7 @@ function ModelConfigSelectorTrigger({
         className={cn(baseClassName, triggerClassName)}
         aria-label={ariaLabel}
         disabled={disabled}
+        title={triggerTitle}
       >
         <span className="truncate">{label || placeholder}</span>
         <IconChevronDown className="h-3.5 w-3.5 shrink-0 opacity-70" />
@@ -526,6 +531,7 @@ export const ModelConfigSelector = memo(function ModelConfigSelector({
   configBaseline,
   currentModelSuffix,
 }: ModelConfigSelectorProps) {
+  const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const [activeConfigId, setActiveConfigId] = useState<string | null>(null);
   const selectConfigOptions = usableConfigOptions(configOptions);
@@ -544,6 +550,10 @@ export const ModelConfigSelector = memo(function ModelConfigSelector({
     triggerSummary === "changed"
       ? triggerDetails(modelOptions, currentModel, modelConfig, extraConfigOptions)
       : undefined;
+  // The (fallback) marker is a live WS signal, not replayed on reload. When
+  // it is active, explain on the trigger that the note is transient so users
+  // are not surprised when the marker disappears after a refresh.
+  const triggerTitle = currentModelSuffix ? t("settings:fallbackNoteLive") : undefined;
 
   const hasExtraConfigOptions = extraConfigOptions.length > 0;
   const onModelSelect = (value: string) => {
@@ -570,6 +580,7 @@ export const ModelConfigSelector = memo(function ModelConfigSelector({
         label={label}
         placeholder={placeholder}
         triggerClassName={customTriggerClassName}
+        triggerTitle={triggerTitle}
         variant={variant}
       />
       <PopoverContent

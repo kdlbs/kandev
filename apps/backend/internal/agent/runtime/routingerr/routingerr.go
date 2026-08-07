@@ -53,12 +53,13 @@ func ModelUnavailableMessage(modelID string) string {
 // IsAvailabilityCode reports whether a classified code means the provider or
 // model became unavailable (auth expired, model dropped, credentials or
 // subscription missing) — the failure class the no-silent-model-fallback
-// feature treats as "ask the user to change the model".
+// feature treats as "ask the user to change the model". Transient conditions
+// (rate limiting, quota) are deliberately excluded: they carry their own
+// AutoRetryable handling and must not trigger "change the model" guidance.
 func IsAvailabilityCode(code Code) bool {
 	switch code {
 	case CodeModelUnavailable, CodeAuthRequired, CodeMissingCredentials,
-		CodeSubscriptionRequired, CodeProviderUnavailable, CodeRateLimited,
-		CodeQuotaLimited:
+		CodeSubscriptionRequired, CodeProviderUnavailable:
 		return true
 	}
 	return false

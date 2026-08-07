@@ -53,6 +53,29 @@ func containsModel(ids []string, id string) bool {
 	return false
 }
 
+// applyFallbackModel applies the policy's fallback model after the start
+// model proved unavailable (gone from the advertised list or rejected by
+// SetModel). Shared by both failure branches so the log line, error
+// wrapping, and return shape stay in sync. reason ("is unavailable" /
+// "failed") distinguishes the failure context in the error text.
+func applyFallbackModel(
+	ctx context.Context,
+	log *logger.Logger,
+	applier modelApplier,
+	policy StartModelPolicy,
+	reason string,
+) (string, bool, error) {
+	if err := applier.SetModel(ctx, policy.FallbackModel); err != nil {
+		return "", false, fmt.Errorf(
+			"start model %q %s and fallback model %q failed to apply: %w",
+			policy.Model, reason, policy.FallbackModel, err)
+	}
+	log.Info("start model unavailable, using fallback model",
+		zap.String("start_model", policy.Model),
+		zap.String("fallback_model", policy.FallbackModel))
+	return policy.FallbackModel, true, nil
+}
+
 // applyStartModelPolicy enforces the no-silent-model-fallback rules when
 // applying the profile's start model to a session:
 //
@@ -89,15 +112,7 @@ func applyStartModelPolicy(
 	advertised := advertisedModelIDs(state)
 	if len(advertised) > 0 && !containsModel(advertised, policy.Model) {
 		if policy.FallbackModel != "" {
-			if err := applier.SetModel(ctx, policy.FallbackModel); err != nil {
-				return "", false, fmt.Errorf(
-					"start model %q is unavailable and fallback model %q failed to apply: %w",
-					policy.Model, policy.FallbackModel, err)
-			}
-			log.Info("start model unavailable, using fallback model",
-				zap.String("start_model", policy.Model),
-				zap.String("fallback_model", policy.FallbackModel))
-			return policy.FallbackModel, true, nil
+			return applyFallbackModel(ctx, log, applier, policy, "is unavailable")
 		}
 		return "", false, fmt.Errorf("%s", routingerr.ModelUnavailableMessage(policy.Model))
 	}
@@ -116,15 +131,7 @@ func applyStartModelPolicy(
 		// exactly for this: switch to it instead of failing — but never
 		// fall through to the provider default.
 		if policy.FallbackModel != "" {
-			if ferr := applier.SetModel(ctx, policy.FallbackModel); ferr != nil {
-				return "", false, fmt.Errorf(
-					"start model %q failed and fallback model %q failed to apply: %w",
-					policy.Model, policy.FallbackModel, ferr)
-			}
-			log.Info("start model unavailable, using fallback model",
-				zap.String("start_model", policy.Model),
-				zap.String("fallback_model", policy.FallbackModel))
-			return policy.FallbackModel, true, nil
+			return applyFallbackModel(ctx, log, applier, policy, "failed")
 		}
 		return "", false, fmt.Errorf("failed to set start model %q: %w", policy.Model, err)
 	}

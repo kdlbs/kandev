@@ -96,7 +96,7 @@ over `fallback_model`):
 | Session start, `SetModel` fails for another reason | Fail explicitly (strict + fallback-model modes). | Same | Legacy warn + continue. |
 | Mid-session model/auth failure (office run, post-start) | **No re-dispatch.** Run fails explicitly with an actionable message (map `model_unavailable`/`auth_required` codes to "change the model" copy). | One-shot retry: re-dispatch **once** with `fallback_model` on the same provider; if that attempt fails too ⇒ explicit failure (no further candidates). | Legacy: re-dispatch to next candidate in the provider order (`HandlePostStartFailure` requeue). |
 | Boot reconciliation | Never overwrite a gone start model (keep it; UI shows it red). Same for a gone `fallback_model`. | Same | Same (reconciler is mode-independent). |
-| New-task / new-agent profile picker | Profile **blocked** (greyed, unselectable, reason tooltip). | Profile **selectable with a warning** ("start model X is gone — fallback Y will be used"). | Selectable normally. |
+| New-task / new-agent profile picker | Profile **blocked** (greyed, unselectable, reason tooltip). | Profile **selectable with a warning** ("start model X is gone — fallback Y will be used"). If the fallback model is also gone ("both-gone"), the profile is **blocked** — a fallback the session cannot apply is not a valid opt-in. | Selectable normally. |
 | Model picker (profile editor, session toolbar) | Gone models greyed out, unselectable, visible. | Same. | Same. |
 
 `SetModel` failures that mean "this agent does not support model selection"
@@ -262,7 +262,10 @@ in the agent's `model_config.available_models`):
 - strict → `disabled: true` with `disabledReason` ("start model X is no
   longer available — change it in the agent profile").
 - fallback-model mode → selectable with an amber warning icon/tooltip
-  ("start model X is gone — fallback Y will be used").
+  ("start model X is gone — fallback Y will be used"). If the fallback
+  model is itself absent from the advertised list, the profile is blocked
+  like strict mode (both-gone): a fallback the runtime cannot apply must
+  not be presented as a valid opt-in.
 - auto-fallback → normal.
 
 `apps/web/app/office/setup/agent-profile-setup-controls.tsx`
@@ -318,10 +321,11 @@ E2E (Playwright, `apps/web/e2e`):
 - `runs.fallback_model TEXT NULL` (office one-shot fallback override,
   cleared after one attempt)
 
-Existing rows default to strict mode (`auto_fallback = 0`, no fallback) —
-the safest default: no behavior change until the user opts in. Users who
-relied on legacy automatic fallback must enable the toggle, which is the
-explicit opt-in the feature is about.
+Existing rows default to strict mode (`auto_fallback = 0`, no fallback).
+This IS a behavior change for existing profiles: a session whose start
+model is gone now fails explicitly at launch instead of silently continuing
+on the provider default. Users who relied on legacy automatic fallback must
+explicitly enable the toggle — that opt-in is the point of the feature.
 
 ## Risks & Open Questions
 

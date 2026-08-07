@@ -608,3 +608,54 @@ describe("session.models_updated stale active model", () => {
     expect(store.getState().setActiveModel).not.toHaveBeenCalled();
   });
 });
+
+describe("session.model_fallback convergence", () => {
+  const fallbackMessage = (payload: { session_id?: string; fallback_model?: string }) =>
+    ({
+      id: "message-fallback",
+      type: "notification",
+      action: "session.model_fallback",
+      payload,
+    }) as BackendMessageMap["session.model_fallback"];
+
+  it("converges the current model to the fallback model", () => {
+    const store = makeStore();
+    registerSessionModelsHandlers(store)["session.model_fallback"]!(
+      fallbackMessage({ session_id: "session-1", fallback_model: providerModelId }),
+    );
+    expect(store.getState().sessionModels.bySessionId["session-1"]).toMatchObject({
+      currentModelId: providerModelId,
+      fallbackModel: providerModelId,
+    });
+  });
+
+  it("keeps the fallback as the current model across the next models_updated", () => {
+    // The persisted runtime config still names the gone start model; the
+    // models_updated payload reports the fallback. The entry must converge
+    // on the fallback as the live model, not re-select the gone model.
+    const store = makeStore({
+      taskSessions: {
+        items: {
+          "session-1": makeTaskSession({
+            runtime_config: { model: GONE_MODEL, config_options: { model: GONE_MODEL } },
+          }),
+        },
+      },
+    });
+    const handlers = registerSessionModelsHandlers(store);
+    handlers["session.model_fallback"]!(
+      fallbackMessage({ session_id: "session-1", fallback_model: providerModelId }),
+    );
+    handlers["session.models_updated"]!(
+      makeMessage(
+        makePayload(providerModelId, {
+          models: [{ model_id: providerModelId, name: providerModelName }],
+        }),
+      ),
+    );
+    expect(store.getState().sessionModels.bySessionId["session-1"]).toMatchObject({
+      currentModelId: providerModelId,
+      fallbackModel: providerModelId,
+    });
+  });
+});

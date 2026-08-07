@@ -292,6 +292,7 @@
   "frequencySeconds": "Frequency (seconds)",
   "general": "General",
   "fallbackModelUnavailable": "Fallback model no longer available — select a different one",
+  "fallbackNoteLive": "This session started on a fallback model because the configured model was unavailable. The (fallback) marker reflects the live session and is not shown after reload.",
   "modelFallbackSuffix": "(fallback)",
   "health": "Health",
   "home": "Home",

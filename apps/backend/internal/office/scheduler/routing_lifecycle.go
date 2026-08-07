@@ -56,6 +56,16 @@ func (ss *SchedulerService) HandlePostStartFailure(
 			zap.String("error_code", string(classified.Code)))
 		return false, nil
 	}
+	// The in-flight attempt is already on the profile's fallback model (the
+	// one-shot override was consumed by dispatchForcedFallback). A failure on
+	// the fallback itself must escalate to the terminal failure path — never
+	// re-dispatch the same fallback model a second time.
+	if !agent.AutoFallback && candidate.Model == agent.FallbackModel {
+		ss.logger.Info("post-start failure on the fallback model itself, escalating",
+			zap.String("run_id", run.ID),
+			zap.String("fallback_model", agent.FallbackModel))
+		return false, nil
+	}
 	if err := ss.applyPostStartFallback(ctx, run, agent, candidate, classified); err != nil {
 		return false, err
 	}

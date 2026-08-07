@@ -554,6 +554,13 @@ func (m *Manager) ResetAgentContext(ctx context.Context, executionID string) err
 
 		m.resetStreamingStateWithHistory(exec)
 
+		// The cached model state describes the OLD ACP session. The fresh
+		// session has not advertised its models yet, so evaluating the start
+		// model against the stale list could reject a model the new session
+		// accepts (or vice versa). Clear it: reapplySessionModelAfterReset
+		// then relies on the fresh session's own SetModel result.
+		exec.SetModelState(nil)
+
 		// Drain any stale prompt completion signal
 		select {
 		case <-exec.promptDoneCh:

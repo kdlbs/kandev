@@ -553,6 +553,13 @@ type SessionModelFallbackEventPayload struct {
 	Timestamp     string `json:"timestamp"`
 }
 
+// GetSessionID returns the session ID for this event (used by event routing).
+// Without it the gateway's extractSessionID cannot route the notification to
+// the session's subscribers.
+func (p SessionModelFallbackEventPayload) GetSessionID() string {
+	return p.SessionID
+}
+
 // SessionModelsSnapshot is the persisted provider-derived state needed to
 // hydrate the task model selector before live session events reconnect.
 type SessionModelsSnapshot struct {

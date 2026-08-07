@@ -2,7 +2,10 @@ import type { StoreApi } from "zustand";
 import type { AppState } from "@/lib/state/store";
 import type { WsHandlers } from "@/lib/ws/handlers/types";
 import type { SessionModelsPayload } from "@/lib/types/backend";
-import type { ConfigOptionEntry } from "@/lib/state/slices/session-runtime/types";
+import type {
+  ConfigOptionEntry,
+  SessionModelsState,
+} from "@/lib/state/slices/session-runtime/types";
 import { createDebugLogger, isDebug } from "@/lib/debug/log";
 
 const debug = createDebugLogger("model-selector:ws");
@@ -183,6 +186,46 @@ function clearStaleContextWindow(state: AppState, sessionId: string, currentMode
   }
 }
 
+// resolveModelsUpdatedState computes the convergence target for a
+// models_updated event: which model becomes current, whether the update is
+// an empty relaunch echo, and whether the previously settled config options
+// must be preserved. The fallback note makes the payload's reported model
+// win over the persisted runtime model (which can still name the gone start
+// model) so the picker converges on the fallback as the live model instead
+// of re-selecting the unavailable configured model.
+function resolveModelsUpdatedState(
+  state: AppState,
+  sessionId: string,
+  payload: SessionModelsPayload,
+  pendingRuntime: PersistedRuntimeConfig,
+): {
+  currentModelId: string;
+  isEmpty: boolean;
+  populated: boolean;
+  preserveConfigOptions: boolean;
+  existingEntry: SessionModelsState["bySessionId"][string] | undefined;
+  existingFallback: string | undefined;
+} {
+  const payloadCurrentModelId = resolveCurrentModelId(payload);
+  const existingEntry = state.sessionModels.bySessionId[sessionId];
+  const existingFallback = existingEntry?.fallbackModel;
+  return {
+    currentModelId:
+      existingFallback && payloadCurrentModelId
+        ? payloadCurrentModelId
+        : pendingRuntime.model || payloadCurrentModelId,
+    isEmpty: isEmptyModelsUpdate(
+      payloadCurrentModelId,
+      payload.models ?? [],
+      payload.config_options,
+    ),
+    populated: hasPopulatedModels(state, sessionId),
+    preserveConfigOptions: shouldPreserveExistingConfigOptions(state, sessionId, payload),
+    existingEntry,
+    existingFallback,
+  };
+}
+
 export function registerSessionModelsHandlers(store: StoreApi<AppState>): WsHandlers {
   return {
     "session.model_fallback": (message) => {
@@ -197,8 +240,11 @@ export function registerSessionModelsHandlers(store: StoreApi<AppState>): WsHand
       const existing = state.sessionModels.bySessionId[sessionId];
       // Merge the explicit "using fallback model" signal into the session's
       // model entry so the picker can show why the start model was replaced.
+      // The fallback model also becomes the current model: the persisted
+      // runtime model may still name the unavailable start model, and the
+      // picker must not keep showing that as the live model.
       store.getState().setSessionModels(sessionId, {
-        currentModelId: existing?.currentModelId ?? "",
+        currentModelId: payload.fallback_model,
         models: existing?.models ?? [],
         configOptions: existing?.configOptions ?? [],
         configBaseline: existing?.configBaseline,
@@ -219,39 +265,23 @@ export function registerSessionModelsHandlers(store: StoreApi<AppState>): WsHand
       const matchesPersisted = payloadMatchesPersistedRuntime(payload, persisted);
       if (matchesPersisted) hydrated.add(sessionId);
       const pendingRuntime = matchesPersisted ? {} : persisted;
-      const payloadCurrentModelId = resolveCurrentModelId(payload);
-      const currentModelId = pendingRuntime.model || payloadCurrentModelId;
-      // Classify emptiness from the incoming payload alone; persisted metadata
-      // must not make a genuinely empty relaunch event look populated.
-      const isEmpty = isEmptyModelsUpdate(payloadCurrentModelId, acpModels, payload.config_options);
-      const populated = hasPopulatedModels(state, sessionId);
-      const preserveConfigOptions = shouldPreserveExistingConfigOptions(state, sessionId, payload);
-      debugModelsUpdate(state, sessionId, payload, {
-        currentModelId,
-        isEmpty,
-        populated,
-        preserveConfigOptions,
-      });
-      if (isEmpty && populated) {
+      const resolved = resolveModelsUpdatedState(state, sessionId, payload, pendingRuntime);
+      debugModelsUpdate(state, sessionId, payload, resolved);
+      if (resolved.isEmpty && resolved.populated) {
         return;
       }
-      clearStaleContextWindow(state, sessionId, currentModelId);
+      clearStaleContextWindow(state, sessionId, resolved.currentModelId);
 
-      const existingEntry = state.sessionModels.bySessionId[sessionId];
-      // Preserve the explicit "using fallback model" note across subsequent
-      // models_updated events — the convergence event after SetModel would
-      // otherwise wipe it while the session is still on the fallback.
-      const existingFallback = existingEntry?.fallbackModel;
       const configOptions = resolveConfigOptions(
-        preserveConfigOptions,
-        existingEntry?.configOptions,
+        resolved.preserveConfigOptions,
+        resolved.existingEntry?.configOptions,
         payload,
         pendingRuntime,
       );
 
       state.setSessionModels(sessionId, {
-        currentModelId,
-        fallbackModel: existingFallback,
+        currentModelId: resolved.currentModelId,
+        fallbackModel: resolved.existingFallback,
         models: acpModels.map((m) => ({
           modelId: m.model_id,
           name: m.name,

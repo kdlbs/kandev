@@ -93,3 +93,49 @@ func TestFallbackModel_DefaultsStrict(t *testing.T) {
 		t.Errorf("expected auto_fallback off, got true")
 	}
 }
+
+// TestFallbackModel_SchemaReplay verifies the fallback_model / auto_fallback
+// migration survives a same-DB replay: opening a database that already has
+// both columns (an upgraded install) and running initSchema again must be a
+// no-op, not an error, and the written data must survive. Per
+// apps/backend/AGENTS.md, startup schema changes require fresh-DB plus
+// same-DB replay tests.
+func TestFallbackModel_SchemaReplay(t *testing.T) {
+	repo := newFreshRepo(t)
+	ctx := context.Background()
+	if err := repo.CreateAgent(ctx, &models.Agent{Name: "omp-acp"}); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+	agent, err := repo.GetAgentByName(ctx, "omp-acp")
+	if err != nil {
+		t.Fatalf("get agent: %v", err)
+	}
+	profile := &models.AgentProfile{
+		AgentID:          agent.ID,
+		Name:             "hybrid",
+		AgentDisplayName: "OMP",
+		Model:            "claude-sonnet-4-5",
+		FallbackModel:    "deepseek/deepseek-v4-flash",
+		AutoFallback:     true,
+	}
+	if err := repo.CreateAgentProfile(ctx, profile); err != nil {
+		t.Fatalf("create profile: %v", err)
+	}
+
+	// Simulate a restart on an upgraded DB: the columns already exist, so the
+	// migrate.Apply duplicate-column errors must be swallowed.
+	if err := repo.initSchema(); err != nil {
+		t.Fatalf("initSchema replay on upgraded DB: %v", err)
+	}
+
+	got, err := repo.GetAgentProfile(ctx, profile.ID)
+	if err != nil {
+		t.Fatalf("get profile after replay: %v", err)
+	}
+	if got.FallbackModel != "deepseek/deepseek-v4-flash" {
+		t.Errorf("fallback_model after replay mismatch: got %q", got.FallbackModel)
+	}
+	if !got.AutoFallback {
+		t.Errorf("auto_fallback after replay mismatch: got false, want true")
+	}
+}

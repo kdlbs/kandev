@@ -165,9 +165,7 @@ describe("useAgentProfileOptions no-silent-model-fallback gating", () => {
   });
 
   it("keeps a gone-model profile with a fallback selectable and warns", () => {
-    const option = renderOptions([
-      profileOption({ model: "claude-gone", fallback_model: "gpt-5" }),
-    ]);
+    const option = renderOptions([profileOption({ model: GONE_MODEL, fallback_model: "gpt-5" })]);
     expect(option.getAttribute(DATA_DISABLED)).toBeNull();
     expect(option.getAttribute("data-reason")).toBeNull();
 
@@ -175,8 +173,16 @@ describe("useAgentProfileOptions no-silent-model-fallback gating", () => {
     expect(screen.getByTitle(/gpt-5/)).not.toBeNull();
   });
 
+  it("blocks a profile whose fallback model is also gone (both-gone)", () => {
+    const option = renderOptions([
+      profileOption({ model: GONE_MODEL, fallback_model: "other-gone" }),
+    ]);
+    expect(option.getAttribute(DATA_DISABLED)).toBe("true");
+    expect(option.getAttribute("data-reason")).toContain(GONE_MODEL);
+  });
+
   it("keeps a gone-model profile with auto-fallback selectable without a warning", () => {
-    const option = renderOptions([profileOption({ model: "claude-gone", auto_fallback: true })]);
+    const option = renderOptions([profileOption({ model: GONE_MODEL, auto_fallback: true })]);
     expect(option.getAttribute(DATA_DISABLED)).toBeNull();
     expect(screen.queryByTitle(/claude-gone/)).toBeNull();
   });
