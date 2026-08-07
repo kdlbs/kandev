@@ -798,6 +798,7 @@
   "openFile": "Abrir ficheiro",
   "openImage": "Abrir {{alt}}",
   "openInAdvancedView": "Abrir na vista avançada",
+  "openInBrowserPanel": "Abrir no painel do navegador",
   "openInBrowserTab": "Abrir num separador do navegador",
   "openInEditorNamed": "Abrir no {{name}}",
   "openInNewTab": "Abrir num novo separador",

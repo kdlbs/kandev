@@ -206,6 +206,59 @@ test.describe("Port Forward Dialog", () => {
     await expect(row.getByText("Manual")).toBeVisible();
   });
 
+  test("opens the proxy URL in the existing Browser panel", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const { session } = await seedRemoteSession(
+      testPage,
+      apiClient,
+      seedData,
+      "Open Proxy Browser Panel Test",
+    );
+    await session.addBrowserPanel();
+    await expect(session.browserPanel).toBeVisible();
+
+    await session.portForwardButton.click();
+    await expect(session.portForwardDialog).toBeVisible();
+    await session.portForwardInput.fill("3000");
+    await session.portForwardAddButton.click();
+
+    const row = session.portForwardRow(3000);
+    const proxyUrl = await row.locator("a[target='_blank']").getAttribute("href");
+    expect(proxyUrl).toBeTruthy();
+    await session.portForwardOpenBrowser(3000).click();
+
+    await expect(session.portForwardDialog).toBeHidden();
+    await expect(session.browserPanel).toBeVisible();
+    await expect(session.browserAddressInput).toHaveValue(proxyUrl!);
+  });
+
+  test("opens the proxy URL in a new Browser panel", async ({ testPage, apiClient, seedData }) => {
+    const { session } = await seedRemoteSession(
+      testPage,
+      apiClient,
+      seedData,
+      "Open Proxy In New Browser Panel Test",
+    );
+
+    await session.portForwardButton.click();
+    await expect(session.portForwardDialog).toBeVisible();
+    await session.portForwardInput.fill("3000");
+    await session.portForwardAddButton.click();
+
+    const row = session.portForwardRow(3000);
+    const proxyUrl = await row.locator("a[target='_blank']").getAttribute("href");
+    expect(proxyUrl).toBeTruthy();
+    await session.portForwardOpenBrowser(3000).click();
+
+    await expect(session.portForwardDialog).toBeHidden();
+    await expect(session.browserPanel).toBeVisible();
+    await expect(session.browserAddressInput).toHaveValue(proxyUrl!);
+    await expect(session.browserPanel.locator("iframe")).toHaveAttribute("src", proxyUrl!);
+  });
+
   test("rejects invalid port number", async ({ testPage, apiClient, seedData }) => {
     const { session } = await seedRemoteSession(testPage, apiClient, seedData, "Invalid Port Test");
     await session.portForwardButton.click();

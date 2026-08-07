@@ -436,6 +436,7 @@
   "openFile": "打开文件",
   "openImage": "打开 {{alt}}",
   "openInAdvancedView": "在高级视图中打开",
+  "openInBrowserPanel": "在浏览器面板中打开",
   "openMarkdownPreview": "打开 Markdown 预览",
   "openPlanDetails": "打开计划详情",
   "openSidebarFilters": "打开侧边栏筛选",

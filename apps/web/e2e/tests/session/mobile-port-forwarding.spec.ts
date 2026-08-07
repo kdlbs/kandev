@@ -31,6 +31,11 @@ test.describe("Port forwarding on mobile", () => {
     await assertLocatorWithinViewportX(session.portForwardDialog, "port forwarding dialog");
     await assertNoDocumentHorizontalOverflow(testPage, "mobile port forwarding");
 
+    await session.portForwardInput.fill("3000");
+    await session.portForwardAddButton.tap();
+    await expect(session.portForwardRow(3000)).toBeVisible();
+    await expect(session.portForwardOpenBrowser(3000)).toHaveCount(0);
+
     await session.portForwardDialog.getByRole("button", { name: "Close" }).tap();
   });
 });

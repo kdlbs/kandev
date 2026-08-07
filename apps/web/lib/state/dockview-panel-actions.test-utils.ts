@@ -9,6 +9,7 @@ export type MockPanel = {
   group: { id: string };
   isActive: boolean;
   api: {
+    component: string;
     setActive: () => void;
     updateParameters: (p: Record<string, unknown>) => void;
     moveTo: (opts: { group: { id: string } }) => void;
@@ -37,6 +38,7 @@ export function makeApi(
         this.title = t;
       },
       api: {
+        component: add.component,
         setActive() {
           for (const p of panels) p.isActive = false;
           panel.isActive = true;

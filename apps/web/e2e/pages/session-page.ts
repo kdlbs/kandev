@@ -69,6 +69,15 @@ export class SessionPage {
   portForwardTunnelStart(port: number) {
     return this.portForwardRow(port).getByRole("button", { name: "Start", exact: true });
   }
+  portForwardOpenBrowser(port: number) {
+    return this.portForwardRow(port).getByTestId(`port-forward-open-browser-${port}`);
+  }
+  get browserPanel() {
+    return this.page.locator('[data-testid="browser-panel"]:visible').first();
+  }
+  get browserAddressInput() {
+    return this.browserPanel.locator("input").first();
+  }
 
   async togglePortForwardingPreference(): Promise<void> {
     await this.addPanelButton().click();
@@ -1335,6 +1344,12 @@ export class SessionPage {
   /** "+" button in the dockview header to open the add-panel dropdown. */
   addPanelButton(): Locator {
     return this.page.getByTestId("dockview-add-panel-btn").first();
+  }
+
+  /** Open a blank built-in Browser panel from the dockview + menu. */
+  async addBrowserPanel(): Promise<void> {
+    await this.addPanelButton().click();
+    await this.page.getByRole("menuitem", { name: "Browser", exact: true }).click();
   }
 
   /** "New Session" menu item in the dockview + dropdown. */

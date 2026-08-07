@@ -807,6 +807,7 @@
   "openFile": "Open file",
   "openImage": "Open {{alt}}",
   "openInAdvancedView": "Open in advanced view",
+  "openInBrowserPanel": "Open in browser panel",
   "openInBrowserTab": "Open in browser tab",
   "openInEditorNamed": "Open in {{name}}",
   "openInNewTab": "Open in new tab",

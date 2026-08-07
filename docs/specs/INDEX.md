@@ -177,6 +177,7 @@ Subscription quota tracking and per-agent cheap-model profile routing.
 | [adaptive-kanban](ui/adaptive-kanban.md) | shipped |
 | [task-layout-profiles](ui/task-layout-profiles.md) | draft |
 | [port-forwarding-discovery](ui/port-forwarding-discovery.md) | building |
+| [port-proxy-browser-panel](port-proxy-browser-panel/spec.md) | shipped |
 | [task-surface-refresh](ui/task-surface-refresh.md) | draft |
 | [walkthrough-navigation-layout](walkthrough-navigation-layout/spec.md) | shipped |
 | [walkthrough-feedback-controls](walkthrough-feedback-controls/spec.md) | shipped |

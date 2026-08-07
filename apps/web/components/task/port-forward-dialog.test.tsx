@@ -1,11 +1,12 @@
-import { Children, type ButtonHTMLAttributes, type PropsWithChildren } from "react";
-import { act, cleanup, render, screen } from "@testing-library/react";
+import { type ButtonHTMLAttributes, type PropsWithChildren } from "react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { PortForwardButton } from "./port-forward-dialog";
 
 type Tunnel = { port: number; tunnel_port: number };
 
-const { listTunnelsMock, visibilityMock } = vi.hoisted(() => ({
+const { listPortsMock, listTunnelsMock, visibilityMock, dockviewMock } = vi.hoisted(() => ({
+  listPortsMock: vi.fn(),
   listTunnelsMock: vi.fn(),
   visibilityMock: {
     enabled: true,
@@ -13,11 +14,19 @@ const { listTunnelsMock, visibilityMock } = vi.hoisted(() => ({
     dialogOpen: false,
     setDialogOpen: vi.fn(),
   },
+  dockviewMock: {
+    api: {} as object | null,
+    openBrowserPanel: vi.fn(),
+  },
 }));
 
 vi.mock("@/lib/api/domains/port-api", () => ({
-  listPorts: vi.fn(),
+  listPorts: listPortsMock,
   listTunnels: listTunnelsMock,
+}));
+
+vi.mock("@/lib/state/dockview-store", () => ({
+  useDockviewStore: (selector: (state: typeof dockviewMock) => unknown) => selector(dockviewMock),
 }));
 
 vi.mock("./port-forwarding-visibility-provider", () => ({
@@ -41,8 +50,10 @@ vi.mock("@kandev/ui/button", () => ({
 }));
 
 vi.mock("@kandev/ui/dialog", () => ({
-  Dialog: ({ children }: PropsWithChildren) => <>{Children.toArray(children)[0] ?? null}</>,
-  DialogContent: () => null,
+  Dialog: ({ children }: PropsWithChildren) => <>{children}</>,
+  DialogContent: ({ children, ...props }: PropsWithChildren<Record<string, unknown>>) => (
+    <div {...props}>{children}</div>
+  ),
   DialogHeader: () => null,
   DialogTitle: () => null,
   DialogTrigger: ({ children }: PropsWithChildren) => <>{children}</>,
@@ -72,10 +83,16 @@ function deferred<T>() {
 
 describe("PortForwardButton", () => {
   beforeEach(() => {
+    listPortsMock.mockReset();
     listTunnelsMock.mockReset();
+    listPortsMock.mockResolvedValue([]);
+    listTunnelsMock.mockResolvedValue([]);
     visibilityMock.enabled = true;
     visibilityMock.canToggle = true;
     visibilityMock.dialogOpen = false;
+    visibilityMock.setDialogOpen.mockReset();
+    dockviewMock.api = {};
+    dockviewMock.openBrowserPanel.mockReset();
   });
 
   afterEach(() => cleanup());
@@ -101,5 +118,20 @@ describe("PortForwardButton", () => {
       await firstSession.promise;
     });
     expect(screen.getByTestId("port-forward-button").getAttribute("data-variant")).toBe("outline");
+  });
+
+  it("opens a proxy URL in the Browser panel and closes the dialog", () => {
+    render(<PortForwardButton sessionId="session-1" />);
+
+    fireEvent.change(screen.getByTestId("port-forward-port-input"), {
+      target: { value: "3000" },
+    });
+    fireEvent.click(screen.getByTestId("port-forward-add-button"));
+    fireEvent.click(screen.getByTestId("port-forward-open-browser-3000"));
+
+    expect(dockviewMock.openBrowserPanel).toHaveBeenCalledWith(
+      expect.stringContaining("/port-proxy/session-1/3000/"),
+    );
+    expect(visibilityMock.setDialogOpen).toHaveBeenCalledWith(false);
   });
 });

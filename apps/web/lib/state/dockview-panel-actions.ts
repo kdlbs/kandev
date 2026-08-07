@@ -32,6 +32,26 @@ function addSimplePanel(api: DockviewApi, groupId: string, opts: SimplePanelOpts
   focusOrAddPanel(api, { ...opts, position: { referenceGroup: groupId } });
 }
 
+function openBrowserPanel(api: DockviewApi, centerGroupId: string, url: string): void {
+  const browserPanel =
+    (api.activePanel?.api.component === "browser" ? api.activePanel : undefined) ??
+    api.panels.find((panel) => panel.api.component === "browser");
+
+  if (browserPanel) {
+    browserPanel.api.updateParameters({ url });
+    browserPanel.api.setActive();
+    return;
+  }
+
+  focusOrAddPanel(api, {
+    id: `browser:${url}`,
+    component: "browser",
+    title: "Browser",
+    params: { url },
+    position: { referenceGroup: centerGroupId },
+  });
+}
+
 type SidePanelOpts = { groupId?: string; quiet?: boolean; inCenter?: boolean };
 
 /**
@@ -466,6 +486,11 @@ export function buildPanelActions(set: StoreSet, get: StoreGet) {
         title: "Browser",
         params: { url: url ?? "" },
       });
+    },
+    openBrowserPanel: (url: string) => {
+      const { api, centerGroupId } = get();
+      if (!api) return;
+      openBrowserPanel(api, centerGroupId, url);
     },
     promotePreviewToPinned: (type: PreviewType): void => {
       const { api } = get();
