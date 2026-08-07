@@ -1,7 +1,7 @@
 ---
 status: building
 created: 2026-07-19
-amended: 2026-08-02
+amended: 2026-08-07
 owner: Kandev
 ---
 
@@ -40,6 +40,8 @@ automation under different GitHub Apps without operating separate Kandev deploym
 - PAT and named CLI automation act as the verified human account. A separate `My GitHub` connection
   is only offered when workspace automation uses a GitHub App, because App installations are not
   people and cannot provide authenticated-viewer semantics.
+- Named CLI account discovery accepts a successful `gh auth status` report from either stdout or
+  stderr, while preserving non-empty stdout as the authoritative command result.
 - User-triggered mutations prefer the workspace's verified personal connection, then a human
   PAT/CLI automation connection, then the App installation. The UI always identifies the effective
   actor and never labels an App mutation as human-attributed.
@@ -684,8 +686,8 @@ registration and never creates a global default.
   views the running session, **THEN** the Changes disclosure still shows its launch snapshot; a
   successful resume records and shows the newly resolved contract.
 - **GIVEN** an authenticated host GitHub CLI without structured status or named-token flags,
-  **WHEN** an operator selects its sole account, **THEN** Kandev discovers and validates that
-  account without requiring a CLI upgrade.
+  **WHEN** an operator selects its sole account and `gh auth status` reports successfully on
+  stderr, **THEN** Kandev discovers and validates that account without requiring a CLI upgrade.
 - **GIVEN** a valid migrated `legacy_shared` connection and a legacy shared managed checkout,
   **WHEN** a task needs a workspace-isolated checkout, **THEN** Kandev resolves the same automation
   identity's Git credential and clones into that workspace's managed root without persisting or
