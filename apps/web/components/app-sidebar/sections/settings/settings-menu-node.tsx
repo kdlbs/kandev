@@ -3,6 +3,7 @@
 import { useTranslation } from "react-i18next";
 
 import { AgentLogo } from "@/components/agent-logo";
+import { ActiveWorkspaceBadge, DisabledBadge } from "@/components/settings/record-badges";
 import type { SettingsMenuNode } from "./settings-menu-branches";
 import { RecordGlyph, SettingsBranch, SettingsLeaf } from "./settings-nav-primitives";
 import type { SettingsMenuExpansion } from "./use-settings-menu-expansion";
@@ -27,20 +28,6 @@ type SettingsMenuNodeRowProps = {
  * all — it could not be navigated to or opened, so it would be a dead row.
  */
 /**
- * Mirrors the integration list's EnabledBadge with an "off" colour. A disabled
- * profile stays listed so it remains editable, so the menu has to say why it
- * looks inert rather than leaving it indistinguishable from a live one.
- */
-function DisabledBadge() {
-  const { t } = useTranslation();
-  return (
-    <span className="shrink-0 rounded border border-amber-500/30 bg-amber-500/10 px-1 py-0.5 text-[9px] font-medium leading-none text-amber-600 dark:text-amber-400">
-      {t("sidebar:disabledBadge")}
-    </span>
-  );
-}
-
-/**
  * The row's leading visual: an agent's logo, the record dot, or nothing — in
  * which case `NavRowLabel` keeps the glyph box open. A node that already
  * declares an `icon` is left to it.
@@ -50,6 +37,13 @@ function resolveLeadingIcon(node: SettingsMenuNode, isRecord: boolean) {
     return <AgentLogo agentName={node.agentName} className="h-3.5 w-3.5 shrink-0" />;
   }
   if (isRecord && !node.icon) return <RecordGlyph />;
+  return undefined;
+}
+
+/** One badge per node at most; `undefined` is much the commonest case. */
+function renderBadge(badge: SettingsMenuNode["badge"]) {
+  if (badge === "disabled") return <DisabledBadge />;
+  if (badge === "active") return <ActiveWorkspaceBadge />;
   return undefined;
 }
 
@@ -68,7 +62,7 @@ export function SettingsMenuNodeRow({
   const leadingIcon = resolveLeadingIcon(node, isRecord);
   const isActive = node.key === activeKey;
   const children = node.children ?? [];
-  const labelSuffix = node.enabled === false ? <DisabledBadge /> : undefined;
+  const labelSuffix = renderBadge(node.badge);
 
   if (children.length === 0) {
     if (!node.href) return null;
@@ -91,6 +85,7 @@ export function SettingsMenuNodeRow({
       label={label}
       icon={node.icon}
       leadingIcon={leadingIcon}
+      labelSuffix={labelSuffix}
       href={node.href ?? undefined}
       isActive={isActive}
       expanded={expansion.isExpanded(node.key)}

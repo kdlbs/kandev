@@ -44,6 +44,7 @@ export function useSettingsMenuBranches(mode: SettingsMenuMode): SettingsMenuBra
   const workspaces = useAppStore((s) => s.workspaces.items);
   const agents = useAppStore((s) => s.settingsAgents.items);
   const executors = useAppStore((s) => s.executors.items);
+  const activeWorkspaceId = useAppStore((s) => s.workspaces.activeId);
   // The Agents page groups detected agents ahead of configured-but-undetected
   // ones; the branch lists the same agents and so must land them in the same
   // order. Before the scan hydrates this is empty and the saved order stands.
@@ -53,11 +54,11 @@ export function useSettingsMenuBranches(mode: SettingsMenuMode): SettingsMenuBra
     if (!isTree) return NO_BRANCHES;
     const orderedAgents = orderAgentsForDisplay(agentDiscovery, agents);
     return {
-      ...branchEntry(WORKSPACES_SETTINGS_HREF, buildWorkspacesBranch(workspaces)),
+      ...branchEntry(WORKSPACES_SETTINGS_HREF, buildWorkspacesBranch(workspaces, activeWorkspaceId)),
       ...branchEntry(AGENTS_SETTINGS_HREF, buildAgentsBranch(orderedAgents)),
       ...branchEntry(EXECUTORS_SETTINGS_HREF, buildExecutorsBranch(executors)),
     };
-  }, [isTree, workspaces, agents, executors, agentDiscovery]);
+  }, [isTree, workspaces, activeWorkspaceId, agents, executors, agentDiscovery]);
 }
 
 /**

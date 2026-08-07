@@ -12,25 +12,21 @@ import {
   workspaceSettingsHref,
   type WorkspaceSettingsTab,
 } from "@/lib/settings/workspace-settings-tabs";
+import { ActiveWorkspaceBadge } from "@/components/settings/record-badges";
 import { cn } from "@kandev/ui/lib/utils";
 
 // The tab table and href builder are data — see `workspace-settings-tabs.ts`,
 // which the settings menu's Workspaces branch reads too. Re-exported here so
 // existing callers keep one import.
+// The badge is shared with the settings menu and the workspace list — see
+// `record-badges.tsx`. Re-exported so existing callers keep one import.
+export { ActiveWorkspaceBadge } from "@/components/settings/record-badges";
+
 export {
   workspaceSettingsHref,
   workspaceSettingsTabSpec,
   type WorkspaceSettingsTab,
 } from "@/lib/settings/workspace-settings-tabs";
-
-export function ActiveWorkspaceBadge() {
-  const { t } = useTranslation();
-  return (
-    <span className="shrink-0 rounded-full border border-primary/35 bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium leading-none text-primary">
-      {t("sidebar:activeWorkspaceBadge")}
-    </span>
-  );
-}
 
 /**
  * The tabbed shell every workspace settings page renders through: the

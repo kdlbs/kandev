@@ -21,6 +21,7 @@ import { useRouter } from "@/lib/routing/client-router";
 import { toAgentProfileOption } from "@/lib/state/slices/settings/types";
 import type { Agent, AgentProfile } from "@/lib/types/http";
 import { RecordDot } from "@/components/settings/record-dot";
+import { DisabledBadge } from "@/components/settings/record-badges";
 
 function agentSetupHref(agentName: string): string {
   return `/settings/agents/${encodeURIComponent(agentName)}?mode=create`;
@@ -137,6 +138,7 @@ export function ProfileRow({ agent, profile }: { agent: Agent; profile: AgentPro
           <div className="flex items-center gap-2">
             <RecordDot />
             <span className="truncate text-sm font-medium">{profile.name}</span>
+            {profile.enabled === false && <DisabledBadge />}
           </div>
           {(profile.model || profile.mode) && (
             <div className="mt-0.5 flex flex-wrap items-center gap-1.5 pl-3.5">

@@ -65,12 +65,12 @@ export type SettingsMenuNode = {
    */
   isUserRecord?: boolean;
   /**
-   * False when the record is switched off. Only agent profiles can be: a
-   * disabled profile is hidden from task and session pickers but stays listed
-   * here so it remains editable, which is why the menu says so out loud.
-   * Omitted where the concept does not apply.
+   * A qualifier the row's name cannot carry on its own: the workspace commands
+   * act on, or a profile every picker will refuse to offer. One field rather
+   * than a flag per badge — a row shows at most one, and the renderer should
+   * not have to decide which flag outranks which.
    */
-  enabled?: boolean;
+  badge?: "active" | "disabled";
   /**
    * Routes this node owns beyond `href` and its `href/` descendants. Needed by
    * nodes with no page of their own (an agent, whose profile pages live under a
@@ -156,6 +156,7 @@ function integrationNodes(workspaceId: string, integrationsHref: string): Settin
  */
 export function buildWorkspacesBranch(
   workspaces: ReadonlyArray<BranchWorkspace>,
+  activeWorkspaceId?: string | null,
 ): SettingsMenuNode[] {
   return workspaces.map((workspace) => {
     const integrationsHref = workspaceSettingsHref(workspace.id, "integrations");
@@ -167,6 +168,9 @@ export function buildWorkspacesBranch(
       // column that already says "workspace" by where it sits. The row still
       // keeps the glyph's width, empty, so its label lines up with its peers.
       isUserRecord: true,
+      // Same badge the workspace list and the workspace switcher show, so the
+      // menu does not leave you guessing which one commands land in.
+      ...(workspace.id === activeWorkspaceId ? { badge: "active" as const } : {}),
       children: WORKSPACE_SETTINGS_TABS.filter(({ tab }) => tab !== "overview").map(
         ({ tab, labelKey, icon }) => ({
           key: `workspace:${workspace.id}:${tab}`,
@@ -211,7 +215,7 @@ export function buildAgentsBranch(agents: ReadonlyArray<BranchAgent>): SettingsM
           href: `${agentHref}/profiles/${profile.id}`,
           label: { text: profile.name },
           isUserRecord: true,
-          enabled: profile.enabled !== false,
+          ...(profile.enabled === false ? { badge: "disabled" as const } : {}),
         })),
       };
     });

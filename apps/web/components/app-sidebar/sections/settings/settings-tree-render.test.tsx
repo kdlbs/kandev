@@ -5,6 +5,9 @@ import type { SettingsMenuMode } from "@/lib/settings/settings-menu-mode";
 
 const MAIN_WORKSPACE_ID = "ws-1";
 const MAIN_WORKSPACE_NAME = "Main Workspace";
+// The active workspace carries a badge, so its row's accessible name is the
+// name plus that badge — match on the name rather than the whole string.
+const WORKSPACE_ROW = new RegExp(MAIN_WORKSPACE_NAME);
 const VOICE_MODE_LABEL = "Voice Mode";
 const SEARCH_LABEL = "Search settings";
 const WORKSPACES_ROW_KEY = "row:/settings/workspaces";
@@ -139,7 +142,7 @@ describe("SettingsTree static menu", () => {
 
     // Store has a workspace, an agent profile and an executor profile — none
     // of them may appear as menu rows.
-    expect(screen.queryByRole("link", { name: MAIN_WORKSPACE_NAME })).toBeNull();
+    expect(screen.queryByRole("link", { name: WORKSPACE_ROW })).toBeNull();
     expect(screen.queryByRole("link", { name: new RegExp(AGENT_LABEL) })).toBeNull();
     expect(screen.queryByRole("link", { name: "Local" })).toBeNull();
     expect(screen.queryByRole("link", { name: "Repositories" })).toBeNull();
@@ -229,7 +232,7 @@ describe("SettingsTree tree modes", () => {
     // Workspaces › Main Workspace › Integrations › GitHub — the same chain the
     // breadcrumb renders on that page.
     expect(screen.getByRole("link", { name: /^Workspaces/ })).toBeTruthy();
-    expect(screen.getByRole("link", { name: MAIN_WORKSPACE_NAME })).toBeTruthy();
+    expect(screen.getByRole("link", { name: WORKSPACE_ROW })).toBeTruthy();
     expect(screen.getByRole("link", { name: "Integrations" })).toBeTruthy();
     expect(screen.getByRole("link", { name: "GitHub" }).getAttribute("href")).toBe(
       `/settings/workspaces/${MAIN_WORKSPACE_ID}/integrations/github`,
@@ -256,13 +259,13 @@ describe("SettingsTree tree modes", () => {
     setMenuMode("accordion");
     render(<SettingsTree pathname={`/settings/workspaces/${MAIN_WORKSPACE_ID}`} />);
 
-    expect(screen.getByRole("link", { name: MAIN_WORKSPACE_NAME })).toBeTruthy();
+    expect(screen.getByRole("link", { name: WORKSPACE_ROW })).toBeTruthy();
     expect(screen.queryByRole("button", { name: AGENT_LABEL })).toBeNull();
 
     fireEvent.click(screen.getByRole("button", { name: "Expand Agents" }));
 
     expect(screen.getByRole("button", { name: AGENT_LABEL })).toBeTruthy();
-    expect(screen.queryByRole("link", { name: MAIN_WORKSPACE_NAME })).toBeNull();
+    expect(screen.queryByRole("link", { name: WORKSPACE_ROW })).toBeNull();
   });
 
   it("keeps several branches open at once in persistent mode", () => {
@@ -276,7 +279,7 @@ describe("SettingsTree tree modes", () => {
     ]);
     render(<SettingsTree pathname="/settings/preferences/appearance" />);
 
-    expect(screen.getByRole("link", { name: MAIN_WORKSPACE_NAME })).toBeTruthy();
+    expect(screen.getByRole("link", { name: WORKSPACE_ROW })).toBeTruthy();
     expect(screen.getByRole("link", { name: "Repositories" })).toBeTruthy();
     expect(screen.getByRole("button", { name: AGENT_LABEL })).toBeTruthy();
     expect(screen.getByRole("link", { name: "Default" })).toBeTruthy();
@@ -321,7 +324,7 @@ describe("SettingsTree record treatment", () => {
       <SettingsTree pathname={`/settings/workspaces/${MAIN_WORKSPACE_ID}/integrations/github`} />,
     );
 
-    const workspace = screen.getByRole("link", { name: MAIN_WORKSPACE_NAME });
+    const workspace = screen.getByRole("link", { name: WORKSPACE_ROW });
     // `GitHub` sits at the same indent as the workspace name but ships with the
     // app, so the split cannot be read off depth.
     const integration = screen.getByRole("link", { name: "GitHub" });
@@ -351,7 +354,7 @@ describe("SettingsTree record treatment", () => {
     setMenuMode("persistent", [AGENTS_ROW_KEY, AGENT_KEY, WORKSPACES_ROW_KEY]);
     render(<SettingsTree pathname="/settings/preferences/appearance" />);
 
-    for (const name of [MAIN_WORKSPACE_NAME, "Default"]) {
+    for (const name of [WORKSPACE_ROW, /^Default$/]) {
       const box = screen.getByRole("link", { name }).firstElementChild;
       // Same footprint as a tabler glyph, so the label lands in the same column.
       expect(box?.getAttribute("class")).toContain(GLYPH_BOX);
@@ -369,6 +372,27 @@ describe("SettingsTree record treatment", () => {
     // but stays here, so the menu has to say why it looks inert.
     expect(screen.getByRole("link", { name: /Retired/ }).textContent).toContain("Disabled");
     expect(screen.getByRole("link", { name: "Default" }).textContent).not.toContain("Disabled");
+  });
+
+  it("badges the active workspace, the way its own list does", () => {
+    setMenuMode("persistent", [WORKSPACES_ROW_KEY]);
+    render(<SettingsTree pathname="/settings/preferences/appearance" />);
+
+    // `MAIN_WORKSPACE_ID` is the active one in the mocked store.
+    expect(screen.getByRole("link", { name: new RegExp(MAIN_WORKSPACE_NAME) }).textContent)
+      .toContain("Active");
+  });
+
+  it("badges only the active workspace", () => {
+    state.workspaces.items = [
+      { id: MAIN_WORKSPACE_ID, name: MAIN_WORKSPACE_NAME },
+      { id: "ws-2", name: "Second Workspace" },
+    ];
+    setMenuMode("persistent", [WORKSPACES_ROW_KEY]);
+    render(<SettingsTree pathname="/settings/preferences/appearance" />);
+
+    expect(screen.getByRole("link", { name: /Second Workspace/ }).textContent)
+      .not.toContain("Active");
   });
 
   it("leaves a row that has a glyph of its own alone", () => {
