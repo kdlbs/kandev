@@ -166,23 +166,24 @@ These commands and options describe the installed native launcher. Unknown argum
 
 ### `dev` and the internal web port are source-checkout options
 
-The repository's TypeScript launcher supports hot-reload development with this logical CLI syntax:
+The native launcher supports hot-reload development with this CLI syntax:
 
 ```text
 kandev dev [--port <backend-port>] [--web-internal-port <web-port>]
 kandev --dev [--port <backend-port>] [--web-internal-port <web-port>]
 ```
 
-Run its normal setup path from the repository root with `make dev`. To pass the internal-port override directly, invoke the same package script used by that Make target:
+Run its normal setup path from the repository root with `make dev`. To pass the internal-port override directly, invoke the launcher binary:
 
 ```bash
-cd apps
-pnpm -C cli dev -- dev --web-internal-port 37430
+make dev WEB_PORT=37430
+# or, after `make -C apps/backend build`:
+apps/backend/bin/kandev dev --web-internal-port 37430
 ```
 
-`--web-internal-port` accepts an integer from `1` through `65535`, including the `--web-internal-port=<port>` form. It controls the Vite development server that the Go backend reverse-proxies to; `--port` continues to control the backend URL. The flag is valid only with `dev` or `--dev`. `KANDEV_WEB_PORT` is its environment equivalent in dev mode and is ignored by `run` and `start`. Without either override, the source launcher prefers web port `37429` and selects a fallback if that port is unavailable.
+`--web-internal-port` accepts an integer from `1` through `65535`, including the `--web-internal-port=<port>` form. It controls the Vite development server that the Go backend reverse-proxies to; `--port` continues to control the backend URL. The flag is valid only with `dev` or `--dev`. `KANDEV_WEB_PORT` is its environment equivalent in dev mode and is ignored by `run` and `start`. Without either override, the launcher prefers web port `37429` and selects a fallback if that port is unavailable.
 
-The old `--web-port` spelling has been removed, not retained as an alias. The TypeScript launcher rejects both `--web-port <port>` and `--web-port=<port>` and directs callers to `--web-internal-port`; the native release launcher rejects both web-port spellings because it serves embedded web assets and has no separate web process.
+The old `--web-port` spelling has been removed, not retained as an alias. The launcher rejects both `--web-port <port>` and `--web-port=<port>` and directs callers to `--web-internal-port`; outside dev mode the release launcher rejects both web-port spellings because it serves embedded web assets and has no separate web process.
 
 ### `start` is for a source build
 
