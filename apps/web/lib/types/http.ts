@@ -341,6 +341,9 @@ export type Task = ActiveSubagentCountFields & {
   primary_session_state?: TaskSessionState | null;
   primary_session_pending_action?: TaskPendingAction | null;
   task_pending_action?: TaskPendingAction | null;
+  /** True when the task's session was mid-turn when the backend died and has
+   *  not been resumed since (startup reconciliation marker). */
+  interrupted?: boolean;
   /**
    * Task-level MOST-ACTIVE-WINS activity across sessions. "generating" wins,
    * then "background"; null/absent means none is known. The count is the

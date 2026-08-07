@@ -148,9 +148,14 @@ type Task struct {
 	StartedAt        *time.Time             `json:"started_at,omitempty"`
 	CompletedAt      *time.Time             `json:"completed_at,omitempty"`
 	Metadata         map[string]interface{} `json:"metadata,omitempty"`
-	IsEphemeral      bool                   `json:"is_ephemeral"`        // Ephemeral tasks are not shown in kanban, used for quick chat
-	ParentID         string                 `json:"parent_id,omitempty"` // FK to parent task for subtasks
-	Identifier       string                 `json:"identifier,omitempty"`
+	// Interrupted reports that the task's session was mid-turn (STARTING/RUNNING)
+	// when the backend died and has not been resumed since. Derived from the
+	// interrupted_at metadata key at DTO conversion time; the orchestrator
+	// clears it when a session of the task next enters STARTING/RUNNING.
+	Interrupted bool   `json:"interrupted,omitempty"`
+	IsEphemeral bool   `json:"is_ephemeral"`        // Ephemeral tasks are not shown in kanban, used for quick chat
+	ParentID    string `json:"parent_id,omitempty"` // FK to parent task for subtasks
+	Identifier  string `json:"identifier,omitempty"`
 }
 
 // TaskRepositoryInput for creating/updating task repositories

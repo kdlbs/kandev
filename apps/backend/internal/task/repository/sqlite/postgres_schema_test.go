@@ -696,3 +696,112 @@ func TestPostgresSetSessionPrimary_ConcurrentPromotionsLeaveExactlyOnePrimary(t 
 		t.Errorf("expected exactly 1 primary session after %d concurrent promotions, got %d — FOR UPDATE lock not serializing across connections", concurrency, primaryCount)
 	}
 }
+
+// TestPostgresClearRecoveredAgentErrors is the Postgres counterpart to
+// TestClearRecoveredAgentErrorsBackfill. clearRecoveredAgentErrors is built from
+// three dialect-sensitive helpers (jsonColumn, jsonText/timestamp*,
+// jsonRemoveKey), so ADR 0027 asks for env-gated Postgres behavior coverage —
+// schema replay would not exercise the jsonb operators at all.
+//
+// migrate.Apply swallows SQL errors, so the assertions below are the only proof
+// the statements ran: a dialect mistake leaves the recovered row untouched
+// rather than returning an error. Skips unless KANDEV_TEST_POSTGRES_DSN is set.
+func TestPostgresClearRecoveredAgentErrors(t *testing.T) {
+	db := testutil.OpenIsolatedPostgres(t, testutil.PostgresDSNFromEnv(t))
+	repo, err := NewWithDB(db, db, nil)
+	if err != nil {
+		t.Fatalf("init postgres schema: %v", err)
+	}
+	ctx := context.Background()
+
+	occurredAt := time.Date(2026, 6, 14, 10, 0, 0, 0, time.UTC)
+	if _, err := db.Exec(db.Rebind(`
+		INSERT INTO tasks (id, workspace_id, title, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?)
+	`), "task-pg-recovered", "ws-pg-recovered", "Task", occurredAt, occurredAt); err != nil {
+		t.Fatalf("seed task: %v", err)
+	}
+
+	// recovered: agent output after the failure. current: none since.
+	// blank/nulled: rows the repository wrote as "no metadata" — both dialects
+	// raise on parsing those, and the statements scan every row before
+	// filtering, so an unguarded cast aborts the migration for everyone.
+	for _, sessionID := range []string{"pg-recovered", "pg-current", "pg-blank", "pg-nulled"} {
+		if err := repo.CreateTaskSession(ctx, &models.TaskSession{
+			ID: sessionID, TaskID: "task-pg-recovered", State: models.TaskSessionStateWaitingForInput,
+		}); err != nil {
+			t.Fatalf("CreateTaskSession %s: %v", sessionID, err)
+		}
+	}
+	// Seeded with plain SQL on purpose: SetSessionMetadataKey is SQLite-only
+	// (json_set/json()), so using it here would fail on the seed rather than
+	// exercise the migration under test.
+	lastAgentError := `{"last_agent_error":{"message":"agent crashed","occurred_at":"` +
+		occurredAt.Format(time.RFC3339Nano) + `"}}`
+	for _, sessionID := range []string{"pg-recovered", "pg-current"} {
+		if _, err := db.Exec(db.Rebind(
+			`UPDATE task_sessions SET metadata = ? WHERE id = ?`), lastAgentError, sessionID); err != nil {
+			t.Fatalf("seed last agent error on %s: %v", sessionID, err)
+		}
+	}
+	for value, sessionID := range map[string]string{"": "pg-blank", "null": "pg-nulled"} {
+		if _, err := db.Exec(db.Rebind(
+			`UPDATE task_sessions SET metadata = ? WHERE id = ?`), value, sessionID); err != nil {
+			t.Fatalf("seed %q metadata: %v", value, err)
+		}
+	}
+
+	if _, err := db.Exec(db.Rebind(`
+		INSERT INTO task_session_turns (id, task_session_id, task_id, started_at, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?)
+	`), "pg-turn", "pg-recovered", "task-pg-recovered", occurredAt, occurredAt, occurredAt); err != nil {
+		t.Fatalf("seed turn: %v", err)
+	}
+	if _, err := db.Exec(db.Rebind(`
+		INSERT INTO task_session_messages
+			(id, task_session_id, task_id, turn_id, author_type, content, type, metadata, created_at)
+		VALUES (?, ?, '', ?, 'agent', 'back on track', 'message', '{}', ?)
+	`), "pg-msg", "pg-recovered", "pg-turn", occurredAt.Add(time.Hour)); err != nil {
+		t.Fatalf("seed agent message: %v", err)
+	}
+
+	if _, err := db.Exec(db.Rebind(`
+		INSERT INTO task_status_summaries (task_id, workspace_id, revision, summary, updated_at)
+		VALUES (?, ?, 4, ?, ?)
+	`), "task-pg-recovered", "ws-pg-recovered",
+		`{"active_error":{"session_id":"pg-recovered","stamp":"s","preview":"agent crashed"},"pending_action":"permission"}`,
+		occurredAt); err != nil {
+		t.Fatalf("seed status summary: %v", err)
+	}
+
+	if err := repo.clearRecoveredAgentErrors(); err != nil {
+		t.Fatalf("clearRecoveredAgentErrors: %v", err)
+	}
+
+	hasError := func(sessionID string) bool {
+		session, err := repo.GetTaskSession(ctx, sessionID)
+		if err != nil {
+			t.Fatalf("get session %s: %v", sessionID, err)
+		}
+		_, ok := models.LoadLastAgentError(session.Metadata)
+		return ok
+	}
+	if hasError("pg-recovered") {
+		t.Fatal("a failure the agent recovered from must be cleared on Postgres")
+	}
+	if !hasError("pg-current") {
+		t.Fatal("a failure with no successful work after it must be left alone")
+	}
+
+	var summary string
+	if err := db.Get(&summary, db.Rebind(
+		`SELECT summary FROM task_status_summaries WHERE task_id = ?`), "task-pg-recovered"); err != nil {
+		t.Fatalf("read status summary: %v", err)
+	}
+	if strings.Contains(summary, "active_error") {
+		t.Fatalf("summary = %s, want the cached error cleared", summary)
+	}
+	if !strings.Contains(summary, "permission") {
+		t.Fatalf("summary = %s, want the rest of the projection preserved", summary)
+	}
+}

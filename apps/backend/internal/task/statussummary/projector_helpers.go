@@ -37,19 +37,51 @@ func recomputeTaskPending(state *projectionState) {
 
 func (p *Projector) clearErrorLocked(state *projectionState, sessionID string) bool {
 	state.errorsObserved = true
-	if _, ok := state.errors[sessionID]; !ok {
+	existing, ok := state.errors[sessionID]
+	if !ok {
 		return false
+	}
+	// Remember which error was cleared. Session events carry a `session_metadata`
+	// snapshot taken when the publisher read the session, which can predate the
+	// clear — without this, such an event puts the very same error straight back.
+	// A genuinely new failure has a different stamp and is still applied.
+	if existing != nil && existing.Stamp != "" {
+		state.clearedErrorStamps[sessionID] = existing.Stamp
 	}
 	delete(state.errors, sessionID)
 	return true
 }
 
-func errorFromMetadata(now time.Time, sessionID string, metadata map[string]interface{}) (*ActiveErrorSummary, bool) {
-	raw, ok := metadata["last_agent_error"].(map[string]interface{})
-	if !ok {
+// errorFromMetadata reads the session's stored error record. `observed` is true
+// whenever the `last_agent_error` key is present at all: a dismissed record, or
+// the JSON null the orchestrator writes when a turn completes, is an
+// authoritative "no active error" for that session rather than an absence of
+// information, so the caller must clear rather than ignore it.
+//
+// The key must be tested for presence before its type: a JSON null arrives as a
+// nil value, and asserting `.(map[string]interface{})` on that is
+// indistinguishable from the key being missing entirely. Reading it as missing
+// would leave a restored error armed forever on any session whose record was
+// cleared.
+func errorFromMetadata(
+	now time.Time,
+	sessionID string,
+	metadata map[string]interface{},
+) (summary *ActiveErrorSummary, observed bool) {
+	value, present := metadata["last_agent_error"]
+	if !present {
 		return nil, false
 	}
-	return errorFromMap(now, sessionID, raw)
+	raw, ok := value.(map[string]interface{})
+	if !ok {
+		// Null or malformed: the key exists, so the session has no active error.
+		return nil, true
+	}
+	active, ok := errorFromMap(now, sessionID, raw)
+	if !ok {
+		return nil, true
+	}
+	return active, true
 }
 
 func errorFromMap(now time.Time, sessionID string, data map[string]interface{}) (*ActiveErrorSummary, bool) {

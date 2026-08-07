@@ -25,17 +25,30 @@ type WorkflowProvider interface {
 
 // Service provides workflow business logic
 type Service struct {
-	repo             *repository.Repository
-	logger           *logger.Logger
-	workflowProvider WorkflowProvider
-	resolveProfile   models.AgentProfileResolver
-	matchProfile     models.AgentProfileMatcher
-	syncOps          SyncWorkflowOps
+	repo              *repository.Repository
+	logger            *logger.Logger
+	workflowProvider  WorkflowProvider
+	workspaceProvider WorkspaceProvider
+	resolveProfile    models.AgentProfileResolver
+	matchProfile      models.AgentProfileMatcher
+	syncOps           SyncWorkflowOps
+}
+
+// WorkspaceProvider resolves a workspace by ID so the read-only guard can tell
+// whether a workflow lives in the dedicated Improve Kandev workspace.
+type WorkspaceProvider interface {
+	GetWorkspace(ctx context.Context, id string) (*taskmodels.Workspace, error)
 }
 
 // SetWorkflowProvider wires the workflow provider (set during service init to break circular deps).
 func (s *Service) SetWorkflowProvider(wp WorkflowProvider) {
 	s.workflowProvider = wp
+}
+
+// SetWorkspaceProvider wires the workspace provider used by the read-only guard
+// (set during service init to break circular deps).
+func (s *Service) SetWorkspaceProvider(wp WorkspaceProvider) {
+	s.workspaceProvider = wp
 }
 
 // SetAgentProfileFuncs wires the agent profile resolver and matcher for export/import.
@@ -156,23 +169,44 @@ func (s *Service) GetNextStepByPosition(ctx context.Context, workflowID string, 
 	return nil, nil // No next step found (current step is the last one)
 }
 
+// WorkflowMeta is the subset of workflow fields needed at step entry
+// (agent profile default + optional workflow-level prompt).
+type WorkflowMeta struct {
+	AgentProfileID string
+	Prompt         string
+}
+
+// GetWorkflowMeta returns agent profile id and prompt for a workflow in one
+// provider read. Callers that previously stacked GetWorkflowAgentProfileID and
+// GetWorkflowPrompt should use this instead.
+func (s *Service) GetWorkflowMeta(ctx context.Context, workflowID string) (WorkflowMeta, error) {
+	wf, err := s.workflowProvider.GetWorkflow(ctx, workflowID)
+	if err != nil {
+		return WorkflowMeta{}, err
+	}
+	return WorkflowMeta{
+		AgentProfileID: wf.AgentProfileID,
+		Prompt:         wf.Prompt,
+	}, nil
+}
+
 // GetWorkflowAgentProfileID returns the default agent profile ID for a workflow.
 func (s *Service) GetWorkflowAgentProfileID(ctx context.Context, workflowID string) (string, error) {
-	wf, err := s.workflowProvider.GetWorkflow(ctx, workflowID)
+	meta, err := s.GetWorkflowMeta(ctx, workflowID)
 	if err != nil {
 		return "", err
 	}
-	return wf.AgentProfileID, nil
+	return meta.AgentProfileID, nil
 }
 
 // GetWorkflowPrompt returns the optional workflow-level agent instructions.
 // Empty string means the workflow has no prompt configured.
 func (s *Service) GetWorkflowPrompt(ctx context.Context, workflowID string) (string, error) {
-	wf, err := s.workflowProvider.GetWorkflow(ctx, workflowID)
+	meta, err := s.GetWorkflowMeta(ctx, workflowID)
 	if err != nil {
 		return "", err
 	}
-	return wf.Prompt, nil
+	return meta.Prompt, nil
 }
 
 // GetPreviousStepByPosition returns the previous step before the given position for a workflow.

@@ -807,6 +807,7 @@ export class ApiClient {
   async updateWorkspace(
     workspaceId: string,
     updates: {
+      name?: string;
       default_executor_id?: string;
       default_agent_profile_id?: string;
       default_config_agent_profile_id?: string;
@@ -892,6 +893,7 @@ export class ApiClient {
       mcp_task_agent_profile_default?: MCPTaskAgentProfileDefault;
       tasks_list_show_details?: boolean;
       show_transcript_auto_scroll_control?: boolean;
+      show_todo_list_panel?: boolean;
       agent_generated_task_titles?: boolean;
       [key: string]: unknown;
     };
@@ -921,6 +923,8 @@ export class ApiClient {
     default_utility_agent_id?: string;
     default_utility_model?: string;
     sidebar_views?: unknown[];
+    sidebar_active_view_id?: string;
+    sidebar_draft?: unknown;
     saved_layouts?: unknown[];
     lsp_auto_start_languages?: string[];
     lsp_auto_install_languages?: string[];
@@ -1713,6 +1717,22 @@ export class ApiClient {
       iid,
       files,
     });
+  }
+
+  // mockGitLabAddRepoFiles seeds repository content (as opposed to
+  // mockGitLabAddFiles, which seeds files changed on a merge request) — used
+  // by workflow sync e2e specs to seed the directory the sync reads.
+  async mockGitLabAddRepoFiles(
+    workspaceId: string,
+    project: string,
+    ref: string,
+    files: Array<{ path: string; content: string }>,
+  ): Promise<void> {
+    await this.request(
+      "POST",
+      this.gitLabWorkspacePath("/api/v1/gitlab/mock/repo-files", workspaceId),
+      { project, ref, files },
+    );
   }
 
   async mockGitLabAddCommits(

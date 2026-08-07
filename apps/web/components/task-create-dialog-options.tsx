@@ -148,7 +148,7 @@ export function useAgentProfileOptions(agentProfiles: AgentProfileOption[]): Opt
               {isPassthrough && (
                 <IconTerminal2
                   className="size-3.5 text-muted-foreground"
-                  title={t("task:cliModeYourPromptWillBe")}
+                  title={t("common:cliModeYourPromptWillBe")}
                 />
               )}
               {profileLabel ? (

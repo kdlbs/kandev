@@ -3,10 +3,27 @@ package github
 import (
 	"context"
 	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 )
+
+func init() {
+	if os.Getenv("KANDEV_GH_ACCOUNT_TEST_HELPER") != "1" {
+		return
+	}
+	if len(os.Args) > 3 && os.Args[3] == "--json" {
+		fmt.Fprintln(os.Stderr, "unknown flag: --json")
+		os.Exit(1)
+	}
+	fmt.Fprintln(os.Stderr, "github.com")
+	fmt.Fprintln(os.Stderr, "  ✓ Logged in to github.com as alice (/home/alice/.config/gh/hosts.yml)")
+	os.Exit(0)
+}
 
 type fakeGHAccountRunner struct {
 	output string
@@ -35,6 +52,35 @@ func TestListGHAccountsParsesAllStoredLogins(t *testing.T) {
 	}
 	if wantArgs := []string{"auth", "status", "--json", "hosts"}; !reflect.DeepEqual(runner.args[0], wantArgs) {
 		t.Fatalf("args = %#v, want %#v", runner.args[0], wantArgs)
+	}
+}
+
+func TestSystemGHAccountRunnerUsesStderrWhenStdoutEmpty(t *testing.T) {
+	testBinary, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ghPath := filepath.Join(t.TempDir(), "gh")
+	if runtime.GOOS == "windows" {
+		ghPath += ".exe"
+	}
+	binary, err := os.ReadFile(testBinary)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(ghPath, binary, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", filepath.Dir(ghPath)+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("KANDEV_GH_ACCOUNT_TEST_HELPER", "1")
+
+	accounts, err := listGHAccounts(context.Background(), systemGHAccountRunner{})
+	if err != nil {
+		t.Fatalf("listGHAccounts() error = %v", err)
+	}
+	want := []GHAccount{{Host: "github.com", Login: "alice", Active: true, State: "success"}}
+	if !reflect.DeepEqual(accounts, want) {
+		t.Fatalf("accounts = %#v, want %#v", accounts, want)
 	}
 }
 

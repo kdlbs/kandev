@@ -22,7 +22,12 @@ import { TaskItemStatsRow } from "./task-item-stats-row";
 import { useTaskColor } from "@/hooks/use-task-color";
 import { TASK_COLOR_BAR_CLASS, type TaskColor } from "@/lib/task-colors";
 import type { ForegroundActivity, TaskState, TaskSessionState } from "@/lib/types/http";
-import { shouldUseQuestionTaskIcon, shouldUsePermissionTaskIcon } from "@/lib/ui/state-icons";
+import {
+  InterruptedTaskIcon,
+  isTerminalInterruptedState,
+  shouldUseQuestionTaskIcon,
+  shouldUsePermissionTaskIcon,
+} from "@/lib/ui/state-icons";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { RemoteCloudTooltip } from "./remote-cloud-tooltip";
 import { classifyTask } from "./task-classify";
@@ -67,6 +72,8 @@ type TaskItemProps = {
   primarySessionId?: string | null;
   hasPendingClarification?: boolean;
   hasPendingPermission?: boolean;
+  /** True when the task's session was mid-turn when the backend died. */
+  interrupted?: boolean;
   parentTaskTitle?: string;
   isSubTask?: boolean;
   /** Whether the task is currently on the final ordered step of its workflow. */
@@ -185,6 +192,7 @@ function TaskStateIcon({
   hasPendingClarification,
   hasPendingPermission,
   isOnLastWorkflowStep,
+  interrupted,
 }: {
   sessionState?: TaskSessionState;
   state?: TaskState;
@@ -193,6 +201,8 @@ function TaskStateIcon({
   hasPendingClarification?: boolean;
   hasPendingPermission?: boolean;
   isOnLastWorkflowStep?: boolean;
+  /** True when the task's session was mid-turn when the backend died. */
+  interrupted?: boolean;
 }) {
   if (shouldUsePermissionTaskIcon(hasPendingPermission)) {
     return (
@@ -249,6 +259,13 @@ function TaskStateIcon({
         className="mt-[1px] h-3.5 w-3.5 shrink-0 text-yellow-500 animate-spin"
       />
     );
+  }
+  // The task's session was mid-turn when the backend died (startup
+  // reconciliation marker). Show the red interruption icon instead of the
+  // idle/done affordances; every active/pending state above already won, and
+  // terminal states keep their own icons.
+  if (interrupted && !isTerminalInterruptedState(state, sessionState)) {
+    return <InterruptedTaskIcon className="mt-[1px] h-3.5 w-3.5 shrink-0" />;
   }
   if (classifyTask(sessionState, state) === "review") {
     if (isOnLastWorkflowStep) {
@@ -430,6 +447,7 @@ export const TaskItem = memo(function TaskItem({
   primarySessionId,
   hasPendingClarification,
   hasPendingPermission,
+  interrupted,
   isSubTask,
   depth,
   subtaskCount,
@@ -445,7 +463,6 @@ export const TaskItem = memo(function TaskItem({
 }: TaskItemProps) {
   const effectiveMenuOpen = menuOpen || isDeleting === true;
   const hasDiffStats = !!diffStats && (diffStats.additions > 0 || diffStats.deletions > 0);
-  const showSubtaskToggle = !!subtaskCount && subtaskCount > 0 && !!onToggleSubtasks;
   const taskColor = useTaskColor(taskId);
   const indent = computeRowIndent(resolveRowDepth(depth, isSubTask));
 
@@ -470,6 +487,7 @@ export const TaskItem = memo(function TaskItem({
         isInProgress={computeIsInProgress(state, sessionState)}
         hasPendingClarification={hasPendingClarification}
         hasPendingPermission={hasPendingPermission}
+        interrupted={interrupted}
         isOnLastWorkflowStep={isOnLastWorkflowStep}
       />
       <TaskItemContent
@@ -498,7 +516,7 @@ export const TaskItem = memo(function TaskItem({
       ) : (
         <TaskMenuButton visible={effectiveMenuOpen} expanded={menuOpen} rowFocus />
       )}
-      {showSubtaskToggle && (
+      {!!subtaskCount && subtaskCount > 0 && !!onToggleSubtasks && (
         <SubtaskToggle
           taskId={taskId}
           count={subtaskCount!}

@@ -90,7 +90,11 @@ export interface PluginRouteOptions {
  * another plugin's page and authors don't gate on the current id themselves.
  * "task-card-indicators" (small icon/badge rendered beside the PR status icon
  * on every kanban card — receives `{ taskId, workspaceId, workflowStepId }`
- * as `slotProps`). Not a closed union — hosts may register additional slot names.
+ * as `slotProps`), and "task-card-tags" (its own row on every kanban card,
+ * rendered below the badges row — for contributions too wide for the cramped
+ * title-row `task-card-indicators` spot, e.g. a row of tag chips — receives
+ * `TaskCardTagsSlotProps` as `slotProps`). Not a closed union — hosts may
+ * register additional slot names.
  */
 export type PluginSlotName = string;
 
@@ -106,6 +110,13 @@ export type AppStatusBarSlotProps = {
   activeWorkspaceId: string | null;
   activeTaskId: string | null;
   activeSessionId: string | null;
+};
+
+/** Context the host passes to the `task-card-tags` slot on every kanban card. */
+export type TaskCardTagsSlotProps = {
+  taskId: string;
+  workspaceId: string | null;
+  workflowStepId: string | null;
 };
 
 /** Component registered for a named slot; receives host-provided `slotProps`. */
@@ -155,18 +166,63 @@ export interface PluginTaskMenuContext {
 
 /**
  * Registration accepted by `PluginRegistry.registerTaskMenuAction`:
- * contributes an item to the kanban card context/dropdown menu's `Edit`
- * submenu (group "edit" is the only group today).
+ * contributes an item to the kanban card context/dropdown menu. Group
+ * "edit" nests the item inside the card's `Edit` submenu; group "primary"
+ * renders it as a flat, top-level menu item, positioned between the "Move
+ * to"/"Send to workflow" submenus and the "Link" submenu.
  */
 export interface TaskMenuActionRegistration {
   id: string;
   label: string;
   icon?: ReactType.ReactNode;
-  group: "edit";
+  group: "edit" | "primary";
   /** Hide this item for a given card/context. Default: always visible. */
   visible?(context: PluginTaskMenuContext): boolean;
   /** A rejected promise is caught and logged; the menu still closes. */
   run(context: PluginTaskMenuContext): void | Promise<void>;
+}
+
+/** Read-only context passed to `TaskFilterRegistration.matches`. */
+export interface PluginTaskFilterContext {
+  taskId: string;
+}
+
+/** One selectable option returned by `TaskFilterRegistration.getOptions`. */
+export interface PluginTaskFilterOption {
+  value: string;
+  label: string;
+  /** Optional swatch color rendered beside the option label. */
+  color?: string;
+}
+
+/** Stable host identity for a plugin task filter (`pluginId:id`). */
+export type PluginTaskFilterRegistrationKey = `${string}:${string}`;
+
+/**
+ * Registration accepted by `PluginRegistry.registerTaskFilter`: contributes
+ * a filter section to the kanban board's Workflow/Repository filter
+ * dropdown. Filtering is evaluated client-side against tasks already loaded
+ * in the board's in-memory state — there is no host-side pagination or
+ * backend query for this filter.
+ */
+export interface TaskFilterRegistration {
+  /** Plugin-local filter id; the host namespaces it as `pluginId:id`. */
+  id: string;
+  /** Filter section label shown in the dropdown. */
+  label: string;
+  /**
+   * Options offered by this filter's multi-select, e.g. tag values. An
+   * empty selection means "All" (no filtering applied) — the plugin decides
+   * how to represent a sentinel like "untagged" as a normal option value; the
+   * host does not special-case any option value.
+   */
+  getOptions(): PluginTaskFilterOption[];
+  /**
+   * Whether `context.taskId` should remain visible given the current
+   * `selected` option values. Called only when `selected` is non-empty (an
+   * empty selection always matches, without invoking this method).
+   */
+  matches(context: PluginTaskFilterContext, selected: string[]): boolean;
 }
 
 /** One entry returned by `host.storage.list`. */
@@ -379,10 +435,16 @@ export interface PluginRegistry {
    */
   registerTaskPanel(registration: TaskPanelRegistration): void;
   /**
-   * Contributes an item to the kanban card `Edit` submenu. See
-   * `TaskMenuActionRegistration`.
+   * Contributes an item to the kanban card menu — nested in the `Edit`
+   * submenu (group "edit") or as a flat top-level item (group "primary").
+   * See `TaskMenuActionRegistration`.
    */
   registerTaskMenuAction(registration: TaskMenuActionRegistration): void;
+  /**
+   * Contributes a filter section to the kanban board's Workflow/Repository
+   * filter dropdown. See `TaskFilterRegistration`.
+   */
+  registerTaskFilter(registration: TaskFilterRegistration): void;
 }
 
 /** Shape every plugin bundle registers via `window.registerKandevPlugin(id, plugin)`. */

@@ -226,6 +226,7 @@ type QueuePanelDisclosureProps = {
   canDrain: boolean;
   isLoading: boolean;
   cancellationPending: boolean;
+  mergeEnabled: boolean;
   onClose: () => void;
   onClear: () => void;
   onDrain: () => void;
@@ -236,6 +237,7 @@ type QueuePanelDisclosureProps = {
   onSendEntryNow: (entryId: string) => void;
 };
 
+/** Wraps QueuePanel in the collapsible open/close animation shell. */
 function QueuePanelDisclosure({
   isOpen,
   onOpenChange,
@@ -246,6 +248,7 @@ function QueuePanelDisclosure({
   canDrain,
   isLoading,
   cancellationPending,
+  mergeEnabled,
   onClose,
   onClear,
   onDrain,
@@ -271,6 +274,7 @@ function QueuePanelDisclosure({
           canDrain={canDrain}
           isLoading={isLoading}
           cancellationPending={cancellationPending}
+          mergeEnabled={mergeEnabled}
           onClose={onClose}
           onClear={onClear}
           onDrain={onDrain}
@@ -319,6 +323,7 @@ export function QueueAffordance({
     count,
     max,
     isFull,
+    mergeEnabled,
     isLoading,
     clearAll,
     drainNext,
@@ -389,6 +394,7 @@ export function QueueAffordance({
         canDrain={canDrain}
         isLoading={isLoading}
         cancellationPending={cancellationPending}
+        mergeEnabled={mergeEnabled}
         onClose={close}
         onClear={handleClear}
         onDrain={handleDrain}
@@ -467,6 +473,7 @@ type QueuePanelProps = {
   canDrain: boolean;
   isLoading: boolean;
   cancellationPending: boolean;
+  mergeEnabled: boolean;
   onClose: () => void;
   onClear: () => void;
   onDrain: () => void;
@@ -477,6 +484,8 @@ type QueuePanelProps = {
   onSendEntryNow: (entryId: string) => void;
 };
 
+/** Renders the expanded queue list: header controls plus one QueuedGhostMessage
+ * row per pending entry, gating each row's merge control on `mergeEnabled`. */
 function QueuePanel({
   entries,
   count,
@@ -485,6 +494,7 @@ function QueuePanel({
   canDrain,
   isLoading,
   cancellationPending,
+  mergeEnabled,
   onClose,
   onClear,
   onDrain,
@@ -530,7 +540,7 @@ function QueuePanel({
             index={index}
             canEdit={canUserEditEntry(entry)}
             canRemove
-            canMerge={canMergeWithAbove(entry, entries[index - 1])}
+            canMerge={mergeEnabled && canMergeWithAbove(entry, entries[index - 1])}
             onSave={(content, entityReferences) => onSave(entry.id, content, entityReferences)}
             onRemove={() => onRemove(entry.id)}
             onMerge={() => onMerge(entry.id)}

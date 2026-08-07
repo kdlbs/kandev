@@ -38,6 +38,7 @@ type UserSettingsDTO struct {
 	ShowScrollToLastPrompt          bool                                `json:"show_scroll_to_last_prompt"`
 	ShowScrollToStart               bool                                `json:"show_scroll_to_start"`
 	ShowTranscriptAutoScrollControl bool                                `json:"show_transcript_auto_scroll_control"`
+	ShowTodoListPanel               bool                                `json:"show_todo_list_panel"`
 	ShowReleaseNotification         bool                                `json:"show_release_notification"`
 	ReleaseNotesLastSeenVersion     string                              `json:"release_notes_last_seen_version"`
 	LspAutoStartLanguages           []string                            `json:"lsp_auto_start_languages"`
@@ -107,6 +108,7 @@ type UpdateUserSettingsRequest struct {
 	ShowScrollToLastPrompt          *bool                              `json:"show_scroll_to_last_prompt,omitempty"`
 	ShowScrollToStart               *bool                              `json:"show_scroll_to_start,omitempty"`
 	ShowTranscriptAutoScrollControl *bool                              `json:"show_transcript_auto_scroll_control,omitempty"`
+	ShowTodoListPanel               *bool                              `json:"show_todo_list_panel,omitempty"`
 	ShowReleaseNotification         *bool                              `json:"show_release_notification,omitempty"`
 	ReleaseNotesLastSeenVersion     *string                            `json:"release_notes_last_seen_version,omitempty"`
 	LspAutoStartLanguages           *[]string                          `json:"lsp_auto_start_languages,omitempty"`
@@ -237,6 +239,7 @@ func FromUserSettings(settings *models.UserSettings) UserSettingsDTO {
 		ShowScrollToLastPrompt:          settings.ShowScrollToLastPrompt,
 		ShowScrollToStart:               settings.ShowScrollToStart,
 		ShowTranscriptAutoScrollControl: settings.ShowTranscriptAutoScrollControl,
+		ShowTodoListPanel:               settings.ShowTodoListPanel,
 		ShowReleaseNotification:         settings.ShowReleaseNotification,
 		ReleaseNotesLastSeenVersion:     settings.ReleaseNotesLastSeenVersion,
 		LspAutoStartLanguages:           settings.LspAutoStartLanguages,

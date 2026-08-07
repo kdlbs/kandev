@@ -560,7 +560,7 @@ export function insertLastAgentErrorItem(
   return [...items.slice(0, insertAt), notice, ...items.slice(insertAt)];
 }
 
-function buildTodoItems(visibleMessages: Message[]) {
+export function buildTodoItems(visibleMessages: Message[]) {
   const latestTodos = [...visibleMessages]
     .reverse()
     .find((message) => message.type === "todo" || (message.metadata as { todos?: unknown })?.todos);

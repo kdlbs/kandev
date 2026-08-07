@@ -98,6 +98,13 @@ func isPublicPath(method, path string) bool {
 	case "/api/v1/auth/me":
 		// Returns {authenticated:false, mode} for anonymous visitors.
 		return method == http.MethodGet
+	case "/api/v1/github/credentials/resolve":
+		// Opaque, task-scoped broker lease (SHA-256-hashed at rest, TTL'd,
+		// scope-matched on redeem) is the credential — containers and remote
+		// executors hold no session cookie or PAT by design. GET is the
+		// readiness probe, POST redeems the lease; both self-authenticate
+		// inside the handler, never off request identity.
+		return method == http.MethodGet || method == http.MethodPost
 	}
 	switch {
 	case strings.HasPrefix(path, "/api/v1/automations/webhook/"):
@@ -105,6 +112,10 @@ func isPublicPath(method, path string) bool {
 		return true
 	case strings.HasPrefix(path, "/api/v1/office/channels/") && strings.HasSuffix(path, "/inbound"):
 		// HMAC-SHA256 / provider token verified by the channel handler.
+		return true
+	case strings.HasPrefix(path, "/api/v1/github/app/registrations/") && strings.HasSuffix(path, "/webhook"):
+		// GitHub App webhook delivery; HMAC (X-Hub-Signature-256) verified by
+		// the handler, not request identity.
 		return true
 	case strings.HasPrefix(path, "/api/plugins/") && strings.Contains(path, "/webhooks/"):
 		// Relayed to the plugin subprocess, which owns signature validation.

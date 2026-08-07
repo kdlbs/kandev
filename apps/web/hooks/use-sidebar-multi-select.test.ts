@@ -99,7 +99,7 @@ describe("useSidebarMultiSelect", () => {
   });
 });
 
-describe("useSidebarMultiSelect — bulk actions", () => {
+describe("useSidebarMultiSelect — bulk archive", () => {
   it("bulkArchive removes all on full success and clears the selection", async () => {
     const { result } = renderHook(() => useSidebarMultiSelect("ws1"));
     await act(async () => {
@@ -121,7 +121,24 @@ describe("useSidebarMultiSelect — bulk actions", () => {
     });
     expect(removeTasksFromStore).toHaveBeenCalledWith(new Set(["a"]));
     expect(result.current.selectedIds).toEqual(new Set(["b"]));
-    expect(toast).toHaveBeenCalledWith(expect.objectContaining({ variant: "error" }));
+    // The title used to build its own "s" in a template literal. It now resolves
+    // through _one/_other, and the English must be unchanged.
+    expect(toast).toHaveBeenCalledWith({
+      title: "Failed to archive 1 task",
+      variant: "error",
+    });
+  });
+
+  it("bulkArchive pluralises the failure toast when several tasks fail", async () => {
+    archiveTaskById.mockImplementation(() => Promise.reject(new Error("nope")));
+    const { result } = renderHook(() => useSidebarMultiSelect("ws1"));
+    await act(async () => {
+      await result.current.bulkArchive(["a", "b"]);
+    });
+    expect(toast).toHaveBeenCalledWith({
+      title: "Failed to archive 2 tasks",
+      variant: "error",
+    });
   });
 
   it("bulkArchive routes the active task through the switch-aware path", async () => {
@@ -143,7 +160,9 @@ describe("useSidebarMultiSelect — bulk actions", () => {
     });
     expect(archiveTaskById).not.toHaveBeenCalled();
   });
+});
 
+describe("useSidebarMultiSelect — bulk delete", () => {
   it("bulkDelete removes all on full success and clears the selection", async () => {
     const { result } = renderHook(() => useSidebarMultiSelect("ws1"));
     await act(async () => {
@@ -164,7 +183,22 @@ describe("useSidebarMultiSelect — bulk actions", () => {
       await result.current.bulkDelete(["a", "b"]);
     });
     expect(result.current.selectedIds).toEqual(new Set(["b"]));
-    expect(toast).toHaveBeenCalledWith(expect.objectContaining({ variant: "error" }));
+    expect(toast).toHaveBeenCalledWith({
+      title: "Failed to delete 1 task",
+      variant: "error",
+    });
+  });
+
+  it("bulkDelete pluralises the failure toast when several tasks fail", async () => {
+    deleteTaskById.mockImplementation(() => Promise.reject(new Error("nope")));
+    const { result } = renderHook(() => useSidebarMultiSelect("ws1"));
+    await act(async () => {
+      await result.current.bulkDelete(["a", "b"]);
+    });
+    expect(toast).toHaveBeenCalledWith({
+      title: "Failed to delete 2 tasks",
+      variant: "error",
+    });
   });
 
   it("bulkDelete routes the active task through the switch-aware removal", async () => {

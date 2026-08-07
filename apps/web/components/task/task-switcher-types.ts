@@ -18,6 +18,8 @@ export type TaskSwitcherItem = {
   sessionState?: TaskSessionState;
   /** Task-level most-active-wins busy aggregate (ADR-0049) from the task record. */
   foregroundActivity?: ForegroundActivity | null;
+  /** True when the task's session was mid-turn when the backend died. */
+  interrupted?: boolean;
   description?: string;
   workflowId?: string;
   workflowName?: string;

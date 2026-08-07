@@ -61,7 +61,15 @@ the local single-user install with a login screen it never asked for.
   payload (`/api/v1/app-state` — returns only `{features, auth}` for
   anonymous visitors), `/api/v1/features`, credential endpoints
   (login/setup/invite-accept), and self-authenticating webhooks (automation
-  `X-Webhook-Secret`, office channel HMAC, plugin webhooks).
+  `X-Webhook-Secret`, office channel HMAC, plugin webhooks). The GitHub
+  credential broker (`/api/v1/github/credentials/resolve`, GET readiness +
+  POST resolve) is likewise public: containers and remote executors hold no
+  session cookie or PAT by design, and the opaque, task-scoped lease in the
+  request body — hashed at rest, TTL'd, scope-matched on redeem — is the
+  self-authenticating credential. The GitHub App webhook
+  (`/api/v1/github/app/registrations/{id}/webhook`) is public for the same
+  reason as the other webhooks: its own HMAC (`X-Hub-Signature-256`) is
+  verified by the handler.
 - **Session challenges are distinct from provider authentication failures.**
   The browser clears its Kandev identity and opens `/login` only when a 401 is
   a Kandev session challenge. A third-party integration may also return 401

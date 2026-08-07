@@ -23,8 +23,8 @@ import type {
   ResolveAgentModelConfigRequest,
 } from "@/lib/types/http";
 import type {
+  MessageQueueSettingsPatch,
   MessageQueueSettingsResponse,
-  MessageQueueSettingsValue,
   SystemMetricsGlobalSettings,
   SystemMetricsSettingsResponse,
 } from "@/lib/types/system";
@@ -77,6 +77,7 @@ export async function updateSystemMetricsSettings(
 
 const MESSAGE_QUEUE_SETTINGS_PATH = "/api/v1/system/message-queue/settings";
 
+/** Fetches the current message queue settings (configured + effective). */
 export async function fetchMessageQueueSettings(
   options?: ApiRequestOptions,
 ): Promise<MessageQueueSettingsResponse> {
@@ -86,8 +87,10 @@ export async function fetchMessageQueueSettings(
   });
 }
 
+/** Applies a partial update to message queue settings: fields omitted from
+ * `payload` keep their current persisted value on the backend. */
 export async function updateMessageQueueSettings(
-  payload: MessageQueueSettingsValue,
+  payload: MessageQueueSettingsPatch,
   options?: ApiRequestOptions,
 ): Promise<MessageQueueSettingsResponse> {
   return fetchJson<MessageQueueSettingsResponse>(MESSAGE_QUEUE_SETTINGS_PATH, {

@@ -2,8 +2,11 @@
 
 import { IconPencil } from "@tabler/icons-react";
 import { t } from "@/lib/i18n";
-import { pluginRegistry } from "@/lib/plugins/registry";
 import type { PluginTaskMenuContext } from "@/lib/plugins/types";
+import {
+  runnablePluginMenuEntry,
+  visiblePluginMenuActions,
+} from "./kanban-card-plugin-menu-actions";
 import type { KanbanCardMenuEntry } from "./kanban-card-menu-items";
 
 /**
@@ -25,18 +28,7 @@ export function buildEditMenuEntry({
   disabled?: boolean;
   context: PluginTaskMenuContext;
 }): KanbanCardMenuEntry {
-  const pluginActions = pluginRegistry.getTaskMenuActions("edit").filter((action) => {
-    if (!action.visible) return true;
-    try {
-      return action.visible(context);
-    } catch (error: unknown) {
-      console.error(
-        `[plugins] task menu action "${action.pluginId}:${action.id}" visible() threw`,
-        error,
-      );
-      return false;
-    }
-  });
+  const pluginActions = visiblePluginMenuActions("edit", context);
 
   const icon = <IconPencil className="mr-2 h-4 w-4" />;
 
@@ -69,35 +61,5 @@ export function buildEditMenuEntry({
       },
       ...pluginActions.map((action) => runnablePluginMenuEntry(action, context, disabled)),
     ],
-  };
-}
-
-function runnablePluginMenuEntry(
-  action: ReturnType<typeof pluginRegistry.getTaskMenuActions>[number],
-  context: PluginTaskMenuContext,
-  disabled?: boolean,
-): KanbanCardMenuEntry {
-  return {
-    kind: "item",
-    key: `plugin-edit-${action.pluginId}-${action.id}`,
-    icon: action.icon,
-    label: action.label,
-    disabled,
-    onSelect: () => {
-      // Promise.resolve().then(() => action.run(context)) — not
-      // Promise.resolve(action.run(context)) — so a *synchronous* throw
-      // inside run() also lands in the .catch() below. Calling action.run
-      // directly as the Promise.resolve() argument still throws before that
-      // expression finishes evaluating, escaping past .catch() entirely and
-      // straight out of this onSelect handler.
-      Promise.resolve()
-        .then(() => action.run(context))
-        .catch((error: unknown) => {
-          console.error(
-            `[plugins] task menu action "${action.pluginId}:${action.id}" failed`,
-            error,
-          );
-        });
-    },
   };
 }

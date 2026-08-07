@@ -482,6 +482,12 @@ async function activatePseudo(page: Page, url: string) {
     document.cookie = "kandev_locale=pseudo; path=/; max-age=31536000; SameSite=Lax";
   });
   await page.reload();
+  // `<html lang>` proves the SHELL is on the pseudo locale and nothing more: the
+  // Go shell writes it from the cookie, so it is already correct in the HTML the
+  // browser parses, before any script has run. Every stronger fact — the route
+  // rendered, and the catalog reached its copy — is `waitForScreen`'s job, and
+  // it is per-screen precisely because anything generic enough to assert here is
+  // something the app shell alone satisfies.
   await expect(page.locator("html")).toHaveAttribute("lang", "pseudo", { timeout: 15_000 });
 }
 
@@ -515,11 +521,13 @@ async function activatePseudo(page: Page, url: string) {
  *   1. it is VISIBLE — the lazy route mounted and this screen, specifically, is
  *      the one on screen;
  *   2. its text is ACCENTED — the pseudo catalog has actually been applied to
- *      copy this route owns. Locale catalogs are eagerly bundled today, but a
- *      catalog that arrives asynchronously would otherwise let the walk run
- *      against a route rendered in English fallback and report every string on
- *      it as a miss. Waiting here is robust to that without weakening anything:
- *      a wait can only delay the scan, never excuse a finding.
+ *      copy this route owns. This was written as insurance against a catalog
+ *      that arrives asynchronously; it stopped being hypothetical the moment
+ *      lazy catalog loading landed, and `pseudo` is now a fetched chunk like
+ *      every locale but `en`. Without it the walk could run against a route
+ *      rendered in English fallback and report every string on it as a miss.
+ *      Waiting here is robust to that without weakening anything: a wait can
+ *      only delay the scan, never excuse a finding.
  *
  * Both are `expect` assertions, not `waitFor`s, so an anchor that never arrives
  * FAILS this spec instead of quietly scanning whatever the shell had painted.

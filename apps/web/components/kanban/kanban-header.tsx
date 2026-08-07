@@ -16,6 +16,7 @@ import {
 import { useTranslation } from "react-i18next";
 import { PageTopbar } from "@/components/page-topbar";
 import { KanbanDisplayDropdown } from "../kanban-display-dropdown";
+import { usePluginTaskFilters } from "@/hooks/use-plugin-task-filters";
 import { ReleaseNotesDialog } from "../release-notes/release-notes-dialog";
 import { HealthIndicatorButton, HealthIssuesDialog } from "../system-health/health-indicator";
 import { TaskSearchInput } from "./task-search-input";
@@ -206,6 +207,7 @@ function TabletHeader({
 }) {
   const { t } = useTranslation();
   const isHome = title === "Home";
+  const pluginTaskFilters = usePluginTaskFilters();
 
   return (
     <PageTopbar
@@ -236,7 +238,13 @@ function TabletHeader({
           <TooltipProvider>
             <ViewToggleGroup toggleValue={toggleValue} onValueChange={handleViewChange} size="lg" />
           </TooltipProvider>
-          <KanbanDisplayDropdown triggerSize="icon-lg" currentPage={currentPage} />
+          <KanbanDisplayDropdown
+            triggerSize="icon-lg"
+            currentPage={currentPage}
+            pluginFilters={pluginTaskFilters.filters}
+            pluginFilterSelections={pluginTaskFilters.selections}
+            onPluginFilterChange={pluginTaskFilters.setFilterSelection}
+          />
           <HealthIndicatorButton
             hasIssues={showHealthIndicator}
             onClick={onOpenHealthDialog}
@@ -287,6 +295,7 @@ function DesktopHeader({
   const { t } = useTranslation();
   const headerRef = useRef<HTMLElement>(null);
   const isNarrow = useIsHeaderNarrow(headerRef);
+  const pluginTaskFilters = usePluginTaskFilters();
   const searchInput = onSearchChange ? (
     <TaskSearchInput
       value={searchQuery}
@@ -322,7 +331,13 @@ function DesktopHeader({
           <TooltipProvider>
             <ViewToggleGroup toggleValue={toggleValue} onValueChange={handleViewChange} size="lg" />
           </TooltipProvider>
-          <KanbanDisplayDropdown triggerSize="icon-lg" currentPage={currentPage} />
+          <KanbanDisplayDropdown
+            triggerSize="icon-lg"
+            currentPage={currentPage}
+            pluginFilters={pluginTaskFilters.filters}
+            pluginFilterSelections={pluginTaskFilters.selections}
+            onPluginFilterChange={pluginTaskFilters.setFilterSelection}
+          />
           <HealthIndicatorButton
             hasIssues={showHealthIndicator}
             onClick={onOpenHealthDialog}

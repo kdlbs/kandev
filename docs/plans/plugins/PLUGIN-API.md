@@ -289,11 +289,17 @@ interface PluginRegistry {
   // <PluginSlot name="..." slotProps={...}/>. Initial slots: "task-sidebar",
   // "settings-nav", "chat-input-actions", "chat-top-bar",
   // "main-top-bar", "app-status-bar-left", "app-status-bar-right",
-  // "plugin-settings", and "task-card-indicators".
+  // "plugin-settings", "task-card-indicators", and "task-card-tags".
   // "task-card-indicators" renders a small icon/badge beside the PR status
   // icon on every kanban card and forwards
   // `{ taskId, workspaceId, workflowStepId }` as `slotProps`. Not a closed
   // union — hosts may register additional slot names.
+  // "task-card-tags" renders in its own row on every kanban card, below the
+  // badges row — for contributions too wide for the cramped title-row
+  // "task-card-indicators" spot (e.g. a row of tag chips) — and forwards the
+  // same `{ taskId: string, workspaceId: string | null, workflowStepId: string | null }`
+  // shape as `slotProps` (`workspaceId` is null with no active workspace, and
+  // `workflowStepId` is null when the task has no workflow step assigned).
   // "chat-input-actions" renders icon buttons in the chat composer toolbar
   // (beside the model picker, mic, and send) and forwards
   // `{ taskId, taskTitle, activeSessionId, sessionIds }` as `slotProps`.
@@ -347,9 +353,15 @@ interface PluginRegistry {
   // `plugin:{pluginId}:{panelKey}`. See "Task panels" below.
   registerTaskPanel(registration: TaskPanelRegistration): void;
 
-  // Contributes an item to the kanban card's Edit submenu. See
-  // "Kanban card contributions" below.
+  // Contributes an item to the kanban card's Edit submenu (group "edit") or
+  // a flat, top-level card menu item between "Move to"/"Send to workflow"
+  // and "Link" (group "primary"). See "Kanban card contributions" below.
   registerTaskMenuAction(registration: TaskMenuActionRegistration): void;
+
+  // Contributes a client-side filter section to the kanban board's display
+  // dropdown, alongside the built-in Workflow/Repository sections. See
+  // "Task filters" below.
+  registerTaskFilter(registration: TaskFilterRegistration): void;
 }
 
 type PluginPresentation = "desktop" | "mobile";
@@ -381,9 +393,31 @@ interface TaskMenuActionRegistration {
   id: string;
   label: string;
   icon?: React.ReactNode;
-  group: "edit"; // only group today — the card's Edit submenu
+  // "edit" nests the item in the card's Edit submenu; "primary" renders it
+  // as a flat, top-level item between the "Move to"/"Send to workflow"
+  // submenus and the "Link" submenu.
+  group: "edit" | "primary";
   visible?(context: PluginTaskMenuContext): boolean; // default: always visible
   run(context: PluginTaskMenuContext): void | Promise<void>; // a rejection is caught and logged
+}
+
+interface PluginTaskFilterContext {
+  taskId: string;
+}
+
+interface PluginTaskFilterOption {
+  value: string;
+  label: string;
+  color?: string; // optional swatch color rendered beside the option label
+}
+
+interface TaskFilterRegistration {
+  id: string;   // plugin-local filter id (unique within the plugin, not globally)
+  label: string; // filter section label shown in the dropdown
+  getOptions(): PluginTaskFilterOption[];
+  // Called only when `selected` is non-empty — an empty selection is
+  // implicit "All" and always matches without invoking this method.
+  matches(context: PluginTaskFilterContext, selected: string[]): boolean;
 }
 ```
 
@@ -469,9 +503,43 @@ action calls `run(context)`; a rejected promise is caught and logged to the
 console, and the menu still closes either way (Radix's own close-on-select,
 independent of the async result).
 
+Group `"primary"` renders each visible action as its own flat, top-level menu
+item instead of nesting it under `Edit` — positioned between the "Move
+to"/"Send to workflow" submenus and the "Link" submenu. Visibility filtering,
+registration order, and `run()`/error handling are identical to the `"edit"`
+group; the two groups are independent lists (an action only ever belongs to
+one).
+
 `"task-card-indicators"` (documented above with the other slots) is the
 matching read-only surface: a small icon/badge rendered beside the PR status
 icon on every card, receiving `{ taskId, workspaceId, workflowStepId }`.
+
+`"task-card-tags"` is a second, sibling read-only surface for the same
+context — same `{ taskId, workspaceId, workflowStepId }` shape — but mounted
+in its own row on the card instead of the cramped title row
+`"task-card-indicators"` shares with `PRTaskIcon`. Use it for a contribution
+that needs its own width, e.g. a row of tag chips.
+
+### Task filters
+
+`registerTaskFilter` adds one section to the kanban board's display dropdown
+(the same menu that holds the built-in Workflow and Repository filters),
+rendered below Repository and above the Preview Panel section. Each
+registration's `getOptions()` supplies the section's checkbox list; the
+plugin owns option identity, ordering, and labels — including any
+"untagged"-style sentinel, which is just a normal option value the host does
+not special-case.
+
+Selections are multi-select and purely client-side against tasks already
+loaded in the board's in-memory state: there is no backend query, pagination,
+or persistence for this filter, and selections reset on reload (unlike
+Workflow/Repository, which persist to backend user settings). An empty
+selection is implicit "All" for that section — `matches()` is only invoked
+once at least one option is selected, and multiple plugin filter sections
+combine with AND (a task must match every section with an active selection),
+mirroring how Workflow/Repository combine with the search query today. If
+`matches()` throws, the task is treated as non-matching and the error is
+logged (mirroring `TaskMenuActionRegistration.visible`'s error handling).
 
 ## Registry internals (host side)
 
@@ -509,8 +577,9 @@ defaults, or the bare component when the route opted out (`topbar: false`).
   (`components/task/chat/chat-input-toolbar-desktop.tsx` and
   `-mobile.tsx`, via `chat-input-plugin-actions.tsx`) hosts the
   `chat-input-actions` slot, passing
-  `{ taskId, taskTitle, activeSessionId, sessionIds }`. `kanban-card-content.tsx`
-  hosts `task-card-indicators` beside `PRTaskIcon`.
+  `{ taskId, taskTitle, activeSessionId, sessionIds }`. `kanban-card-plugin-slots.tsx`
+  hosts `task-card-indicators` beside `PRTaskIcon` and `task-card-tags` as its
+  own row, both mounted from `kanban-card-content.tsx`'s `KanbanCardBody`.
 - `components/task/dockview-shared.tsx` / `dockview-panel-content.tsx` /
   `dockview-desktop-layout.tsx`: the generic `"plugin-panel"` dockview
   component + `pluginPanelTab`, and `renderPanel`'s `"plugin-panel"` case

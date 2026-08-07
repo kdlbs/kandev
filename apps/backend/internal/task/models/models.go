@@ -110,6 +110,12 @@ const (
 	// because the winner will (or already did) handle it.
 	// Absent on ordinary (non-watcher) auto-start tasks, which launch normally.
 	MetaKeyAutoStartClaimed = "auto_start_claimed"
+	// MetaKeyInterruptedAt is set by startup reconciliation when a task's
+	// session was mid-turn (STARTING/RUNNING) when the backend died. Its
+	// presence makes the task DTO report `interrupted: true` so task-list
+	// surfaces show the red interruption icon; the orchestrator removes the
+	// key when a session of the task next enters STARTING/RUNNING.
+	MetaKeyInterruptedAt = "interrupted_at"
 	// MetaKeyAgentTitlePending marks tasks created in prompt-first mode whose
 	// provisional title still needs the first eligible agent session to replace it.
 	MetaKeyAgentTitlePending = "agent_title_pending"
@@ -309,10 +315,13 @@ const SessionMetaKeyPendingStepCompletion = "pending_step_completion_signal"
 const SessionMetaKeyLastAgentError = "last_agent_error"
 
 // LastAgentError is persisted under TaskSession.Metadata[SessionMetaKeyLastAgentError].
+// RemediationURL is only ever set from an adapter-validated provider
+// diagnostic; it is never reconstructed from the error message.
 type LastAgentError struct {
 	Message          string     `json:"message"`
 	OccurredAt       time.Time  `json:"occurred_at"`
 	AgentExecutionID string     `json:"agent_execution_id,omitempty"`
+	RemediationURL   string     `json:"remediation_url,omitempty"`
 	DismissedAt      *time.Time `json:"dismissed_at,omitempty"`
 }
 
@@ -656,8 +665,8 @@ const (
 
 // Workflow represents a task workflow
 type Workflow struct {
-	ID                 string  `json:"id"`
-	WorkspaceID        string  `json:"workspace_id"`
+	ID          string `json:"id"`
+	WorkspaceID string `json:"workspace_id"`
 	Name        string `json:"name"`
 	Description string `json:"description"`
 	// Prompt is optional workflow-level agent instructions prepended at
@@ -682,6 +691,18 @@ type Workflow struct {
 	Style     string    `json:"style,omitempty"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// WorkspaceNameImproveKandev is the exact name of the dedicated Improve Kandev
+// workspace created by the improve-kandev bootstrap. The workspace is matched
+// by this name everywhere (bootstrap, guards, frontend) and is
+// configuration-immutable: its workflows and repositories are read-only.
+const WorkspaceNameImproveKandev = "Improve Kandev"
+
+// IsImproveKandev reports whether the workspace is the dedicated Improve
+// Kandev workspace (matched by exact name).
+func (w *Workspace) IsImproveKandev() bool {
+	return w != nil && w.Name == WorkspaceNameImproveKandev
 }
 
 // Workspace represents a workspace
@@ -1798,6 +1819,7 @@ func (t *Task) ToAPI() *v1.Task {
 		CreatedAt:    t.CreatedAt,
 		UpdatedAt:    t.UpdatedAt,
 		Metadata:     t.Metadata,
+		Interrupted:  t.Metadata[MetaKeyInterruptedAt] != nil,
 		IsEphemeral:  t.IsEphemeral,
 		ParentID:     t.ParentID,
 	}

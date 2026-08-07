@@ -33,8 +33,11 @@ const (
 	// the combined entity references past the per-message cap; the merge is
 	// rejected atomically instead of dropping persisted references.
 	queueErrorCodeMergeReferenceOverflow = "merge_reference_overflow"
-	queueInvalidReferences               = "Invalid entity references"
-	queueAccessDenied                    = "Session not found"
+	// queueErrorCodeMergeDisabled is surfaced when queued-message merging is
+	// disabled via the message queue system setting.
+	queueErrorCodeMergeDisabled = "merge_disabled"
+	queueInvalidReferences      = "Invalid entity references"
+	queueAccessDenied           = "Session not found"
 
 	// Payload field names — extracted to satisfy goconst (≥3 occurrences).
 	fieldSessionID = "session_id"
@@ -726,6 +729,9 @@ func (h *QueueHandlers) wsMergeIntoAbove(ctx context.Context, msg *ws.Message) (
 		if errors.Is(err, messagequeue.ErrMergeReferenceOverflow) {
 			return ws.NewError(msg.ID, msg.Action, queueErrorCodeMergeReferenceOverflow, err.Error(), nil)
 		}
+		if errors.Is(err, messagequeue.ErrMergeDisabled) {
+			return ws.NewError(msg.ID, msg.Action, queueErrorCodeMergeDisabled, "Message merging is disabled", nil)
+		}
 		h.logger.Error("failed to merge queued message", zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to merge queued message", nil)
 	}
@@ -834,10 +840,11 @@ func (h *QueueHandlers) publishStatus(ctx context.Context, sessionID string) {
 	}
 	status := h.queueService.GetStatus(ctx, sessionID)
 	eventData := map[string]interface{}{
-		fieldSessionID: sessionID,
-		"entries":      status.Entries,
-		"count":        status.Count,
-		fieldMax:       status.Max,
+		fieldSessionID:  sessionID,
+		"entries":       status.Entries,
+		"count":         status.Count,
+		fieldMax:        status.Max,
+		"merge_enabled": status.MergeEnabled,
 	}
 	if h.sessionTaskResolver != nil {
 		if taskID, err := h.sessionTaskResolver(ctx, sessionID); err != nil {

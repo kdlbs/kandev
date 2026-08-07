@@ -113,10 +113,9 @@ export function toSheetItem(
     workspaceMode: task.workspaceMode,
     state: task.state as TaskState | undefined,
     ...status,
-    // Task-level most-active-wins busy aggregate from the task record — the same
-    // authoritative value the desktop sidebar (toSidebarItem) and board read, so the
-    // mobile task-switcher row shows background-running and agrees with the board for
-    // multi-session tasks instead of missing it.
+    // Same interruption marker the desktop sidebar reads — the mobile
+    // task-switcher row shares TaskItem rendering.
+    interrupted: task.interrupted,
     description: task.description,
     workflowId: task._workflowId,
     workflowName: ctx.workflowNameById.get(task._workflowId),

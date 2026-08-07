@@ -404,3 +404,50 @@ func (s *Service) clearAuthCaches() {
 		s.protectionCache.clear()
 	}
 }
+
+// CopyWorkspaceConnectionToWorkspace duplicates the source workspace's GitHub
+// connection onto the destination workspace, including the PAT secret for
+// `pat` sources. No-op when the source workspace has no connection or the two
+// workspaces are the same. Used by the improve-kandev bootstrap when it
+// creates the dedicated workspace so improve tasks inherit the user's GitHub
+// access without re-authenticating.
+func (s *Service) CopyWorkspaceConnectionToWorkspace(ctx context.Context, srcWorkspaceID, dstWorkspaceID string) error {
+	if srcWorkspaceID == "" || dstWorkspaceID == "" || srcWorkspaceID == dstWorkspaceID {
+		return nil
+	}
+	src, err := s.store.GetWorkspaceConnection(ctx, srcWorkspaceID)
+	if err != nil {
+		return fmt.Errorf("load source workspace connection: %w", err)
+	}
+	if src == nil {
+		return nil
+	}
+	connection := &WorkspaceConnection{
+		WorkspaceID:              dstWorkspaceID,
+		Source:                   src.Source,
+		GitHubHost:               src.GitHubHost,
+		Login:                    src.Login,
+		InstallationID:           src.InstallationID,
+		InstallationAccountLogin: src.InstallationAccountLogin,
+		InstallationAccountType:  src.InstallationAccountType,
+		AppRegistrationID:        src.AppRegistrationID,
+		Status:                   src.Status,
+		CredentialGeneration:     nextCredentialGeneration(nil),
+		CreatedAt:                time.Now().UTC(),
+		UpdatedAt:                time.Now().UTC(),
+	}
+	if err := s.store.UpsertWorkspaceConnection(ctx, connection); err != nil {
+		return fmt.Errorf("store destination workspace connection: %w", err)
+	}
+	if src.Source == ConnectionSourcePAT {
+		token, err := s.connectionSecrets.Reveal(ctx, WorkspacePATSecretKey(srcWorkspaceID))
+		if err != nil {
+			return fmt.Errorf("reveal source workspace PAT: %w", err)
+		}
+		if err := s.connectionSecrets.Set(ctx, WorkspacePATSecretKey(dstWorkspaceID), workspacePATSecretName, token); err != nil {
+			return fmt.Errorf("store destination workspace PAT: %w", err)
+		}
+	}
+	s.invalidateWorkspaceCredential(dstWorkspaceID)
+	return nil
+}

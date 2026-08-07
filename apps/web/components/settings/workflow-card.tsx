@@ -40,6 +40,8 @@ type WorkflowCardProps = {
   isOrderDirty?: boolean;
   initialWorkflowSteps?: WorkflowStep[];
   otherWorkflows?: Workflow[];
+  /** Workflows in the dedicated Improve Kandev workspace are read-only. */
+  isImproveWorkspace?: boolean;
   onUpdateWorkflow: (updates: {
     name?: string;
     description?: string;
@@ -228,6 +230,8 @@ type WorkflowCardBodyProps = {
   savedWorkflowSteps: WorkflowStep[];
   diagnostics: WorkflowReplayCycleDiagnostic[];
   mutationPending: boolean;
+  /** Read-only reason label: Improve Kandev workspace vs GitHub sync. */
+  isImproveWorkspace?: boolean;
   stepActions: {
     handleUpdateWorkflowStep: (id: string, updates: Partial<WorkflowStep>) => Promise<void>;
     handleAddWorkflowStep: () => Promise<void>;
@@ -236,6 +240,42 @@ type WorkflowCardBodyProps = {
   };
   readOnly: boolean;
 };
+
+function WorkflowNameField({
+  workflow,
+  savedWorkflow,
+  onUpdateWorkflow,
+  readOnly,
+  isImproveWorkspace,
+}: Pick<
+  WorkflowCardBodyProps,
+  "workflow" | "savedWorkflow" | "onUpdateWorkflow" | "readOnly" | "isImproveWorkspace"
+>) {
+  const { t } = useTranslation();
+  return (
+    <div className="flex-1 space-y-1.5">
+      <Label className="flex items-center gap-2">
+        <span>{t("workflows:workflowName")}</span>
+        {readOnly && workflow.source === "github" && (
+          <WorkflowSyncedBadge sourcePath={workflow.source_path} />
+        )}
+        {readOnly && (
+          <span className="text-xs text-muted-foreground">
+            {isImproveWorkspace
+              ? t("workflows:readOnlyManagedByImproveKandev")
+              : t("workflows:readOnlyManagedBySync")}
+          </span>
+        )}
+      </Label>
+      <Input
+        value={workflow.name}
+        onChange={(e) => onUpdateWorkflow({ name: e.target.value })}
+        disabled={readOnly}
+        data-settings-dirty={isWorkflowFieldDirty(workflow, savedWorkflow, "name")}
+      />
+    </div>
+  );
+}
 
 function WorkflowCardBody({
   workflow,
@@ -246,6 +286,7 @@ function WorkflowCardBody({
   savedWorkflowSteps,
   diagnostics,
   mutationPending,
+  isImproveWorkspace,
   stepActions,
   readOnly,
 }: WorkflowCardBodyProps) {
@@ -256,23 +297,13 @@ function WorkflowCardBody({
     <>
       <Label>{t("workflows:workflowDetails")}</Label>
       <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:gap-2">
-        <div className="flex-1 space-y-1.5">
-          <Label className="flex items-center gap-2">
-            <span>{t("workflows:workflowName")}</span>
-            {readOnly && <WorkflowSyncedBadge sourcePath={workflow.source_path} />}
-            {readOnly && (
-              <span className="text-xs text-muted-foreground">
-                {t("workflows:readOnlyManagedBySync")}
-              </span>
-            )}
-          </Label>
-          <Input
-            value={workflow.name}
-            onChange={(e) => onUpdateWorkflow({ name: e.target.value })}
-            disabled={readOnly}
-            data-settings-dirty={isWorkflowFieldDirty(workflow, savedWorkflow, "name")}
-          />
-        </div>
+        <WorkflowNameField
+          workflow={workflow}
+          savedWorkflow={savedWorkflow}
+          onUpdateWorkflow={onUpdateWorkflow}
+          readOnly={readOnly}
+          isImproveWorkspace={isImproveWorkspace}
+        />
         <div className="w-full space-y-1.5 sm:w-[240px] sm:shrink-0">
           <Label className="flex items-center gap-1">
             <span>{t("workflows:agentProfile")}</span>
@@ -410,7 +441,7 @@ function useWorkflowCardState(props: WorkflowCardProps) {
   // Workflows synced from a configured GitHub repo are read-only: the
   // backend rejects definition mutations with a 409, so the UI disables the
   // matching affordances (name/agent-profile/steps/delete) up front.
-  const readOnly = workflow.source === "github";
+  const readOnly = workflow.source === "github" || props.isImproveWorkspace === true;
   const deleteWorkflowRequest = useRequest(onDeleteWorkflow);
   const {
     workflowSteps,
@@ -510,6 +541,7 @@ export function WorkflowCard(props: WorkflowCardProps) {
             savedWorkflowSteps={visibleSavedSteps}
             diagnostics={s.mutationGuard.diagnostics}
             mutationPending={s.mutationGuard.isMutationPending}
+            isImproveWorkspace={props.isImproveWorkspace}
             stepActions={s.stepActions}
             readOnly={s.readOnly}
           />

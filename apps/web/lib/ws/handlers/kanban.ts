@@ -79,6 +79,7 @@ export function registerKanbanHandlers(store: StoreApi<AppState>): WsHandlers {
               primarySessionState: existing?.primarySessionState,
               primarySessionPendingAction: existing?.primarySessionPendingAction,
               taskPendingAction: existing?.taskPendingAction,
+              interrupted: existing?.interrupted,
               foregroundActivity: existing?.foregroundActivity,
               ...queueFields(task, existing),
             };
@@ -121,6 +122,7 @@ export function registerKanbanHandlers(store: StoreApi<AppState>): WsHandlers {
                 t.foregroundActivity === undefined
                   ? fallback?.foregroundActivity
                   : t.foregroundActivity,
+              interrupted: t.interrupted === undefined ? fallback?.interrupted : t.interrupted,
             };
           });
           return {

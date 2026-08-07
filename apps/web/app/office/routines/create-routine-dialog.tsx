@@ -225,11 +225,9 @@ function TriggerFields({
         <>
           <p className="text-xs text-muted-foreground -mt-2">
             {/*
-              The cron expression is SYNTAX, not copy: it travels as a value so
-              a translator (and the pseudo-locale) leaves it verbatim. Baked into
-              the message, reordering a field or localising `MON` yields an
-              example no cron parser accepts. Same reasoning as
-              `office:aCronScheduleExample` and `settings:externalMcpEndpointsDescription`.
+              The cron expression is SYNTAX, not copy: it travels as a value so a
+              translator cannot reword it into something no parser accepts.
+              Guarded by app/office/office-cron-i18n.test.ts.
             */}
             {t("office:standardCronExpressionExample", { cron: "0 9 * * MON" })}
           </p>

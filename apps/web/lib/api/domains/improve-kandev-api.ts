@@ -10,6 +10,8 @@ import { fetchJson, type ApiRequestOptions } from "../client";
 export type ForkStatus = "writable" | "ready" | "blocked_emu" | "unknown";
 
 export type ImproveKandevBootstrapResponse = {
+  /** Dedicated Improve Kandev workspace the task must be created in. */
+  workspace_id: string;
   repository_id: string;
   workflow_id: string;
   issue_workflow_id: string;
@@ -24,14 +26,18 @@ export type ImproveKandevBootstrapResponse = {
 
 export async function bootstrapImproveKandev(
   workspaceId: string,
-  options?: ApiRequestOptions,
+  options?: ApiRequestOptions & { createWorkspace?: boolean },
 ): Promise<ImproveKandevBootstrapResponse> {
+  const { createWorkspace, ...requestOptions } = options ?? {};
   return fetchJson<ImproveKandevBootstrapResponse>("/api/v1/system/improve-kandev/bootstrap", {
-    ...options,
+    ...requestOptions,
     init: {
       method: "POST",
-      body: JSON.stringify({ workspace_id: workspaceId }),
-      ...(options?.init ?? {}),
+      body: JSON.stringify({
+        workspace_id: workspaceId,
+        ...(createWorkspace === undefined ? {} : { create_workspace: createWorkspace }),
+      }),
+      ...(requestOptions.init ?? {}),
     },
   });
 }

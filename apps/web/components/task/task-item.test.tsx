@@ -11,6 +11,7 @@ const RUNNING_ICON_TEST_ID = "task-state-running";
 const BACKGROUND_ICON_TEST_ID = "task-state-background-running";
 const WAITING_FOR_INPUT_ICON_TEST_ID = "task-state-waiting-for-input";
 const PENDING_PERMISSION_ICON_TEST_ID = "task-state-pending-permission";
+const INTERRUPTED_ICON_TEST_ID = "task-state-interrupted";
 const AGENT_ERROR_ICON_TEST_ID = "task-agent-error-icon";
 const PREPARING_PHASE = "preparing";
 const DATA_LOADING_PHASE = "data-loading-phase";
@@ -163,6 +164,54 @@ describe("TaskItem status icon", () => {
     expect(errorIcon).not.toBeNull();
     expect(errorIcon.classList.contains("cursor-help")).toBe(true);
     expect(screen.queryByTestId(TURN_FINISHED_ICON_TEST_ID)).not.toBeNull();
+  });
+});
+
+describe("TaskItem interrupted icon", () => {
+  it("shows the red interrupted icon for a task marked interrupted after a restart", () => {
+    renderTaskItem({
+      state: "REVIEW",
+      sessionState: "WAITING_FOR_INPUT",
+      interrupted: true,
+    });
+
+    expect(screen.queryByTestId(INTERRUPTED_ICON_TEST_ID)).not.toBeNull();
+    expect(screen.queryByTestId(TURN_FINISHED_ICON_TEST_ID)).toBeNull();
+    expect(screen.queryByTestId(WORKFLOW_COMPLETE_ICON_TEST_ID)).toBeNull();
+  });
+
+  it("does not show the interrupted icon while the task is running again", () => {
+    renderTaskItem({
+      state: "REVIEW",
+      sessionState: "RUNNING",
+      interrupted: true,
+    });
+
+    expect(screen.queryByTestId(INTERRUPTED_ICON_TEST_ID)).toBeNull();
+    expect(screen.queryByTestId(RUNNING_ICON_TEST_ID)).not.toBeNull();
+  });
+
+  it("does not show the interrupted icon for a terminal task", () => {
+    renderTaskItem({
+      state: "COMPLETED",
+      sessionState: "COMPLETED",
+      interrupted: true,
+    });
+
+    expect(screen.queryByTestId(INTERRUPTED_ICON_TEST_ID)).toBeNull();
+    expect(screen.queryByTestId(TURN_FINISHED_ICON_TEST_ID)).not.toBeNull();
+  });
+
+  it("keeps pending-input affordances over the interrupted icon", () => {
+    renderTaskItem({
+      state: "REVIEW",
+      sessionState: "WAITING_FOR_INPUT",
+      hasPendingClarification: true,
+      interrupted: true,
+    });
+
+    expect(screen.queryByTestId(INTERRUPTED_ICON_TEST_ID)).toBeNull();
+    expect(screen.queryByTestId(WAITING_FOR_INPUT_ICON_TEST_ID)).not.toBeNull();
   });
 });
 

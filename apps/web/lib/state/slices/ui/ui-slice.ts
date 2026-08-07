@@ -135,6 +135,7 @@ export const defaultUIState: UISliceState = {
     sectionExpanded: { ...DEFAULT_SECTION_EXPANDED },
     width: APP_SIDEBAR_EXPANDED_WIDTH,
     settingsMode: false,
+    improveDialogOpen: false,
   },
   acknowledgedAgentErrors: {},
   dismissedAgentErrors: {},

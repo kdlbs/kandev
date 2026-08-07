@@ -117,7 +117,7 @@ jobs:
       - name: Deploy preview to Cloudflare Pages
         id: deploy
         if: steps.cloudflare.outputs.enabled == 'true'
-        uses: cloudflare/wrangler-action@9acf94ace14e7dc412b076f2c5c20b8ce93c79cd # v3
+        uses: cloudflare/wrangler-action@ebbaa1584979971c8614a24965b4405ff95890e0 # v4.0.0
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
@@ -143,7 +143,7 @@ jobs:
 
     steps:
       - name: Publish docs preview link
-        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         env:
           DEPLOYMENT_URL: ${{ needs.preview.outputs.deployment_url }}
           ALIAS_URL: ${{ needs.preview.outputs.alias_url }}

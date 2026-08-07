@@ -94,9 +94,12 @@ func provideOrchestrator(
 		return nil, nil, fmt.Errorf("init message queue repo: %w", err)
 	}
 	maxPerSession := resolveQueueMaxPerSession(pool, log)
+	mergeEnabled := resolveQueueMergeEnabled(pool, log)
 	msgQueue := messagequeue.NewService(queueRepo, maxPerSession, log)
+	msgQueue.SetMergeEnabled(mergeEnabled)
 	log.Info("Message queue initialized",
-		zap.Int("max_per_session", maxPerSession))
+		zap.Int("max_per_session", maxPerSession),
+		zap.Bool("merge_enabled", mergeEnabled))
 	if taskSvc.AttachmentService() == nil && taskSvc.AttachmentRepository() != nil {
 		attachmentSvc, attachmentErr := taskservice.NewAttachmentService(
 			taskSvc.AttachmentRepository(), cfg.ResolvedHomeDir(), taskSvc.AuthorizeWorkspaceAccess, log,
@@ -267,6 +270,21 @@ func githubCredentialBrokerEndpoint(cfg *config.Config) string {
 // Values <= 0 disable the cap entirely (callers can still flood queues — only
 // useful in tests / specialized deployments).
 func resolveQueueMaxPerSession(pool *db.Pool, log *logger.Logger) int {
+	return resolveQueueSettings(pool, log).Effective.MaxPerSession
+}
+
+// resolveQueueMergeEnabled honors the persisted message queue setting,
+// falling back to enabled (the shipped default) when unset or invalid.
+// Unlike max_per_session it has no environment override.
+func resolveQueueMergeEnabled(pool *db.Pool, log *logger.Logger) bool {
+	return resolveQueueSettings(pool, log).Effective.MergeEnabled
+}
+
+// resolveQueueSettings loads the persisted message queue settings — falling
+// back to defaults when unset, invalid, or the store is unavailable — and
+// resolves them against the KANDEV_QUEUE_MAX_PER_SESSION environment
+// override.
+func resolveQueueSettings(pool *db.Pool, log *logger.Logger) queuesettings.Resolution {
 	var configured *queuesettings.Settings
 	if pool != nil {
 		rawStore, err := systemsettings.NewStore(pool)
@@ -282,14 +300,20 @@ func resolveQueueMaxPerSession(pool *db.Pool, log *logger.Logger) int {
 	}
 	resolution, err := queuesettings.Resolve(configured, queuesettings.ReadEnvironment())
 	if err != nil {
-		log.Warn("Failed to resolve message queue capacity, using default", zap.Error(err))
-		return messagequeue.DefaultMaxPerSession
+		log.Warn("Failed to resolve message queue settings, using defaults", zap.Error(err))
+		return queuesettings.Resolution{Response: queuesettings.Response{
+			Settings: queuesettings.DefaultSettings(),
+			Effective: queuesettings.Effective{
+				MaxPerSession: messagequeue.DefaultMaxPerSession,
+				MergeEnabled:  true,
+			},
+		}}
 	}
 	if resolution.InvalidEnvironment {
 		log.Warn("Ignoring invalid message queue capacity environment value",
 			zap.String("environment_variable", queuesettings.EnvironmentVariable))
 	}
-	return resolution.Effective.MaxPerSession
+	return resolution
 }
 
 func resolveEventNamespace(cfg *config.Config) string {
@@ -369,14 +393,16 @@ func (a *orchestratorWorkflowStepGetterAdapter) GetPreviousStepByPosition(ctx co
 	return a.svc.GetPreviousStepByPosition(ctx, workflowID, currentPosition)
 }
 
-// GetWorkflowAgentProfileID implements orchestrator.WorkflowStepGetter.
-func (a *orchestratorWorkflowStepGetterAdapter) GetWorkflowAgentProfileID(ctx context.Context, workflowID string) (string, error) {
-	return a.svc.GetWorkflowAgentProfileID(ctx, workflowID)
-}
-
-// GetWorkflowPrompt implements orchestrator.WorkflowStepGetter.
-func (a *orchestratorWorkflowStepGetterAdapter) GetWorkflowPrompt(ctx context.Context, workflowID string) (string, error) {
-	return a.svc.GetWorkflowPrompt(ctx, workflowID)
+// GetWorkflowMeta implements orchestrator.WorkflowStepGetter.
+func (a *orchestratorWorkflowStepGetterAdapter) GetWorkflowMeta(ctx context.Context, workflowID string) (orchestrator.WorkflowMeta, error) {
+	meta, err := a.svc.GetWorkflowMeta(ctx, workflowID)
+	if err != nil {
+		return orchestrator.WorkflowMeta{}, err
+	}
+	return orchestrator.WorkflowMeta{
+		AgentProfileID: meta.AgentProfileID,
+		Prompt:         meta.Prompt,
+	}, nil
 }
 
 // reviewTaskCreatorAdapter adapts the task service to the orchestrator's ReviewTaskCreator interface.

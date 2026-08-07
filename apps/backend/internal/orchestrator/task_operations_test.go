@@ -6382,6 +6382,84 @@ func TestReconcileSessionsOnStartup(t *testing.T) {
 			t.Fatalf("expected REVIEW write to use UpdateTaskStateIfCurrentIn, got %d unconditional UpdateTaskState call(s)", n)
 		}
 	})
+
+	// Interrupted-task marker: sessions that were mid-turn (STARTING/RUNNING)
+	// when the backend died must mark their task with the interrupted_at
+	// metadata key so the task DTO reports interrupted and the task list can
+	// show the red icon. Idle and archived tasks must never be marked.
+	for _, tc := range []struct {
+		name          string
+		sessionState  models.TaskSessionState
+		wantInterrupt bool
+	}{
+		{"running_session_marks_task_interrupted", models.TaskSessionStateRunning, true},
+		{"starting_session_marks_task_interrupted", models.TaskSessionStateStarting, true},
+		{"waiting_for_input_session_not_marked", models.TaskSessionStateWaitingForInput, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := setupTestRepo(t)
+			ctx := context.Background()
+			now := time.Now().UTC()
+
+			seedTaskAndSession(t, repo, "task1", "session1", tc.sessionState)
+
+			err := repo.UpsertExecutorRunning(ctx, &models.ExecutorRunning{
+				ID:        "er1",
+				SessionID: "session1",
+				TaskID:    "task1",
+				CreatedAt: now,
+				UpdatedAt: now,
+			})
+			if err != nil {
+				t.Fatalf("failed to upsert executor running: %v", err)
+			}
+
+			svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), &mockAgentManager{})
+			svc.reconcileSessionsOnStartup(ctx)
+
+			task, err := repo.GetTask(ctx, "task1")
+			if err != nil {
+				t.Fatalf("failed to load task: %v", err)
+			}
+			_, marked := task.Metadata[models.MetaKeyInterruptedAt]
+			if marked != tc.wantInterrupt {
+				t.Fatalf("interrupted_at marker present=%v, want %v", marked, tc.wantInterrupt)
+			}
+		})
+	}
+
+	t.Run("archived_running_session_not_marked", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		ctx := context.Background()
+		now := time.Now().UTC()
+
+		seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateRunning)
+		if err := repo.ArchiveTask(ctx, "task1"); err != nil {
+			t.Fatalf("failed to archive task: %v", err)
+		}
+
+		err := repo.UpsertExecutorRunning(ctx, &models.ExecutorRunning{
+			ID:        "er1",
+			SessionID: "session1",
+			TaskID:    "task1",
+			CreatedAt: now,
+			UpdatedAt: now,
+		})
+		if err != nil {
+			t.Fatalf("failed to upsert executor running: %v", err)
+		}
+
+		svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), &mockAgentManager{})
+		svc.reconcileSessionsOnStartup(ctx)
+
+		task, err := repo.GetTask(ctx, "task1")
+		if err != nil {
+			t.Fatalf("failed to load task: %v", err)
+		}
+		if _, marked := task.Metadata[models.MetaKeyInterruptedAt]; marked {
+			t.Fatal("archived task must not be marked interrupted")
+		}
+	})
 }
 
 // --- ensureSessionRunning: prepared workspace ---

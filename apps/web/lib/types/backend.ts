@@ -1,3 +1,4 @@
+import type { QueuedMessage } from "@/lib/state/slices/session/types";
 import type { TaskPlanEventPayload, TaskPlanRevisionEventPayload } from "./task-plan-events";
 import type { CaptureRequest } from "@/lib/logger/capture";
 
@@ -482,20 +483,12 @@ export {
 
 export type { TaskPlanEventPayload, TaskPlanRevisionEventPayload } from "./task-plan-events";
 
-export type QueuedMessagePayload = {
-  content: string;
-  model?: string;
-  plan_mode?: boolean;
-  task_id: string;
-  user_id?: string;
-  queued_at: string;
-};
-
 export type QueueStatusChangedPayload = {
   session_id: string;
-  entries?: QueuedMessagePayload[] | null;
+  entries?: QueuedMessage[] | null;
   count?: number;
   max?: number;
+  merge_enabled?: boolean;
 };
 
 export type TaskStatusSummaryUpdatedPayload = {

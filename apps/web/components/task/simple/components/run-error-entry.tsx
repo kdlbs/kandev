@@ -13,6 +13,7 @@ import { useAppStore } from "@/components/state-provider";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { formatRelativeTime } from "@/lib/utils";
 import { AgentAvatar } from "@/app/office/components/agent-avatar";
+import { RemediationLink } from "@/components/task/remediation-link";
 import type { RunError } from "@/app/office/tasks/[id]/types";
 import { useTranslation } from "react-i18next";
 
@@ -85,7 +86,8 @@ export function RunErrorEntry({ taskId, error }: RunErrorEntryProps) {
             </CollapsibleContent>
           </Collapsible>
         )}
-        <div className="mt-2 flex items-center gap-2">
+        <div className="mt-2 flex items-center gap-2 flex-wrap">
+          <RemediationLink url={error.remediationUrl} />
           <Button
             variant="outline"
             size="sm"

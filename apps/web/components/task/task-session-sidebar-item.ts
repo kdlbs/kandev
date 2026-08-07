@@ -76,6 +76,10 @@ function sidebarSessionStatus(
     sessionState: (hasSummary ? primarySession?.state : task.primarySessionState) as
       | TaskSessionState
       | undefined,
+    // The task-level MOST-ACTIVE-WINS activity aggregate (ADR-0049) is
+    // authoritative for the sidebar row: when no status summary is available,
+    // fall back to the task record's own aggregate so multi-session and
+    // off-screen rows still agree with the board card.
     foregroundActivity: hasSummary ? summary?.foreground_activity : task.foregroundActivity,
     primarySessionId: hasSummary ? (primarySession?.id ?? null) : (task.primarySessionId ?? null),
     updatedAt: hasSummary ? summary?.updated_at : (task.updatedAt ?? task.createdAt),
@@ -119,6 +123,7 @@ export function buildSidebarItem(
     id: task.id,
     title: task.title,
     state: task.state as TaskState | undefined,
+    interrupted: task.interrupted,
     ...status,
     description: task.description,
     workflowId: task._workflowId,
