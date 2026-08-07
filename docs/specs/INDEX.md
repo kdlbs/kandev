@@ -50,6 +50,7 @@ Product-wide capabilities that are not tied to a single feature area.
 | [git-subprocess-admission](platform/git-subprocess-admission.md) | building |
 | [bounded-task-status-delivery](platform/bounded-task-status-delivery.md) | approved |
 | [diagnostic-logging](platform/diagnostic-logging.md) | approved |
+| [health-endpoint-version](health-endpoint-version/spec.md) | building |
 
 ## tasks/ — task & workflow model
 

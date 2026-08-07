@@ -675,7 +675,7 @@ func registerRoutes(p routeParams) {
 	// Before that, return 503 so callers (including the e2e fixture's
 	// waitForHealth) keep polling instead of racing ahead and hitting
 	// 404s on routes that aren't wired yet.
-	p.router.GET("/health", healthHandler())
+	p.router.GET("/health", healthHandler(p))
 
 	// /api/v1/features is a public, unauthenticated read of the runtime
 	// feature-flag map. The frontend SSR-fetches it once per page render to
@@ -736,16 +736,30 @@ func registerRoutes(p routeParams) {
 	}
 }
 
-func healthHandler() gin.HandlerFunc {
+// healthHandler serves GET /health. The response always carries the
+// process's running version — in both the ready and not-ready bodies — so an
+// operator can identify the build of a backend that is stuck starting, and so
+// a monitor never needs a credential to read it (see docs/specs/
+// health-endpoint-version/spec.md).
+func healthHandler(p routeParams) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if !ready.Load() {
-			c.JSON(http.StatusServiceUnavailable, gin.H{"status": "starting", "service": "kandev"})
+			c.JSON(http.StatusServiceUnavailable, gin.H{
+				"status":  "starting",
+				"service": "kandev",
+				"version": p.version,
+			})
 			return
 		}
 		if token := desktopHealthToken(); token != "" {
 			c.Header(desktopHealthTokenHeader, token)
 		}
-		c.JSON(http.StatusOK, gin.H{"status": "ok", "service": "kandev", "mode": "websocket+http"})
+		c.JSON(http.StatusOK, gin.H{
+			"status":  "ok",
+			"service": "kandev",
+			"mode":    "websocket+http",
+			"version": p.version,
+		})
 	}
 }
 
