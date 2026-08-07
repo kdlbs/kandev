@@ -15,6 +15,8 @@ import { IconExternalLink } from "@tabler/icons-react";
 import { remarkPlugins, markdownComponents } from "@/components/shared/markdown-components";
 import { getReleaseUrl } from "@/lib/release-notes";
 import type { ChangelogEntry } from "@/lib/changelog";
+import type { TFunction } from "i18next";
+import { useTranslation } from "react-i18next";
 
 type ReleaseNotesDialogProps = {
   open: boolean;
@@ -23,11 +25,13 @@ type ReleaseNotesDialogProps = {
   latestVersion: string;
 };
 
-function buildDescription(entries: ChangelogEntry[]): string {
+function buildDescription(t: TFunction, entries: ChangelogEntry[]): string {
   if (entries.length === 1) {
-    return entries[0].date ? `Released on ${entries[0].date}` : "Latest release notes";
+    return entries[0].date
+      ? t("common:releasedOn", { date: entries[0].date })
+      : t("common:latestReleaseNotes");
   }
-  return `${entries.length} new releases`;
+  return t("common:newReleases", { count: entries.length });
 }
 
 export function ReleaseNotesDialog({
@@ -36,6 +40,7 @@ export function ReleaseNotesDialog({
   entries,
   latestVersion,
 }: ReleaseNotesDialogProps) {
+  const { t } = useTranslation();
   const releaseUrl = getReleaseUrl(latestVersion);
 
   return (
@@ -43,10 +48,10 @@ export function ReleaseNotesDialog({
       <DialogContent className="sm:max-w-[520px]">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            What&apos;s New
+            {t("common:whatSNew")}
             <Badge variant="secondary">v{latestVersion}</Badge>
           </DialogTitle>
-          <DialogDescription>{buildDescription(entries)}</DialogDescription>
+          <DialogDescription>{buildDescription(t, entries)}</DialogDescription>
         </DialogHeader>
         <ScrollArea className="max-h-[60vh] pr-4">
           <div className="space-y-4">
@@ -77,7 +82,7 @@ export function ReleaseNotesDialog({
             rel="noopener noreferrer"
             className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
           >
-            View full release on GitHub
+            {t("common:viewFullReleaseOnGithub")}
             <IconExternalLink className="h-3 w-3" />
           </a>
         </div>

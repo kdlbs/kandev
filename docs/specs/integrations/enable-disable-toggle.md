@@ -9,29 +9,30 @@ owner: platform
 ## Why
 
 Every third-party integration (Azure DevOps, GitHub, GitLab, Jira, Linear,
-Sentry, Slack) can be connected with credentials, but only Jira, Linear,
-Sentry and Slack currently expose a user-facing on/off switch for their UI
-surfaces. Azure DevOps, GitHub and GitLab have no such switch. Users who want
-to temporarily silence an integration (e.g. while its credentials are being
-rotated, or because a workspace doesn't use it) have no consistent, discoverable
-way to do that across all seven integrations, and no way to control whether a
+Sentry) can be connected with credentials, but only Jira, Linear and Sentry
+currently expose a user-facing on/off switch for their UI surfaces. Azure
+DevOps, GitHub and GitLab have no such switch. Users who want to temporarily
+silence an integration (e.g. while its credentials are being rotated, or
+because a workspace doesn't use it) have no consistent, discoverable way to do
+that across all six integrations, and no way to control whether a
 disabled-but-still-configured integration continues to clutter the left panel
-navigation.
+navigation. (Slack was retired from the core app to an external plugin after
+this spec was written and is out of scope.)
 
 ## What
 
-- Every integration (Azure DevOps, GitHub, GitLab, Jira, Linear, Sentry,
-  Slack) SHALL expose an enable/disable slider on its own settings page
+- Every integration (Azure DevOps, GitHub, GitLab, Jira, Linear, Sentry)
+  SHALL expose an enable/disable slider on its own settings page
   (`/settings/integrations/<slug>`, and the per-workspace equivalent
-  `/settings/workspace/<id>/integrations/<slug>`). Jira, Linear, Sentry and
-  Slack already have this; Azure DevOps, GitHub and GitLab gain it.
+  `/settings/workspace/<id>/integrations/<slug>`). Jira, Linear and Sentry
+  already have this; Azure DevOps, GitHub and GitLab gain it.
 - The same slider SHALL also appear on each integration's row/card on the
   integrations index page (`/settings/integrations` and its per-workspace
   equivalent), so a user can enable or disable any integration without
   opening its detail page.
 - Toggling the slider in either location SHALL keep both locations in sync
   (same underlying per-integration enabled state, install-wide — not
-  per-workspace — consistent with the existing Jira/Linear/Sentry/Slack
+  per-workspace — consistent with the existing Jira/Linear/Sentry
   toggle).
 - The enabled state for Azure DevOps, GitHub and GitLab is purely a
   presentation/navigation-visibility switch: it MUST NOT change whether their
@@ -54,7 +55,7 @@ navigation.
   keep gating on enabled-and-authed exactly as they do today, independent of
   left-panel nav visibility.
 - All new/changed toggles persist and sync the same way the existing
-  Jira/Linear/Sentry/Slack "enabled" toggle does: a `localStorage`-backed,
+  Jira/Linear/Sentry "enabled" toggle does: a `localStorage`-backed,
   install-wide boolean, synced across browser tabs, with a manual-save
   affordance consistent with the rest of the Settings UI (`data-settings-dirty`
   + the shared save bar) where the control lives on a settings page.
@@ -73,7 +74,7 @@ in `hooks/domains/integrations/use-integration-enabled.ts`:
 | `kandev:integrations:hideDisabledInNav:v1` | boolean | `false` | New. Not per-integration; one flag for the whole nav-filtering behavior. |
 
 Existing keys (`kandev:jira:enabled:v1`, `kandev:linear:enabled:v1`,
-`kandev:sentry:enabled:v1`, `kandev:slack:enabled:v1`) are unchanged.
+`kandev:sentry:enabled:v1`) are unchanged.
 
 ## API surface
 
@@ -104,7 +105,7 @@ Existing primitives reused unchanged:
 
 - `hooks/domains/integrations/use-integration-enabled.ts` (`useIntegrationEnabled`)
 - `hooks/domains/jira/use-jira-enabled.ts`, `use-linear-enabled.ts`,
-  `use-sentry-enabled.ts`, `use-slack-enabled.ts`
+  `use-sentry-enabled.ts`
 - `hooks/domains/jira/use-jira-availability.ts`'s `useJiraAuthed` and
   `hooks/domains/linear/use-linear-availability.ts`'s `useLinearAuthed` —
   these already expose the "configured and healthy, independent of the
@@ -118,7 +119,7 @@ Existing primitives reused unchanged:
   `<AzureDevOpsEnabledControl>`, `<GitHubEnabledControl>`,
   `<GitLabEnabledControl>` wrapper components, one per integration,
   mirroring `components/jira/jira-enabled-control.tsx`) and reused again for
-  the index-page per-row sliders (all seven integrations) and for the new
+  the index-page per-row sliders (all six integrations) and for the new
   "hide disabled in nav" row.
 
 Modified:
@@ -131,7 +132,7 @@ Modified:
 ## Permissions
 
 No change. The toggle is a per-browser-profile, install-wide UI preference
-with no authorization dimension (same as the existing Jira/Linear/Sentry/Slack
+with no authorization dimension (same as the existing Jira/Linear/Sentry
 toggle).
 
 ## Failure modes
@@ -182,7 +183,7 @@ is not synced across devices/browsers.
   import popover remains hidden exactly as it does today when Jira is
   disabled — the new setting does not change that unrelated gate.
 - **GIVEN** the integrations index page, **WHEN** it renders, **THEN** every
-  one of the seven integration rows/cards shows its own enable/disable
+  one of the six integration rows/cards shows its own enable/disable
   slider reflecting that integration's current stored state, and toggling a
   slider does not navigate to that integration's detail page.
 - **GIVEN** the integrations index page and the Azure DevOps settings page
@@ -199,7 +200,7 @@ is not synced across devices/browsers.
 - No change to Azure DevOps/GitHub/GitLab's PR, work-item, board, or MR
   features when disabled — the new toggle for these three integrations only
   controls settings-page/index-page slider state and left-panel nav
-  visibility, not functional gating (unlike Jira/Linear/Sentry/Slack's
+  visibility, not functional gating (unlike Jira/Linear/Sentry's
   existing toggle, which already gates other surfaces and is unchanged by
   this feature).
 - No change to the Settings-page navigation tree
@@ -211,10 +212,10 @@ is not synced across devices/browsers.
   section's own workspace/integration tree, which has a different,
   unrelated status-badge convention and is not user-navigable "left panel
   navigation" in the product sense used by this request.
-- Sentry and Slack have no left-panel nav destination today (see
+- Sentry has no left-panel nav destination today (see
   `lib/navigation/core-destinations.ts` — only Azure DevOps, GitHub, GitLab,
   Jira and Linear are nav-gated). The new "hide disabled" setting therefore
-  has no observable effect for Sentry/Slack; their existing slider (own page
+  has no observable effect for Sentry; its existing slider (own page
   + new index-page row) still works for the enable/disable state itself.
 - No new command-palette entries or keyboard shortcuts for the new toggles.
 

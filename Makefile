@@ -399,6 +399,16 @@ build-web:
 	@printf "$(CYAN)Building web app...$(RESET)\n"
 	@cd $(APPS_DIR) && VITE_KANDEV_API_PORT= VITE_KANDEV_DEBUG= $(PNPM) --filter @kandev/web build
 
+## Web build for the E2E harness. Identical to build-web except that it keeps the
+## pseudo QA catalog, which a production build drops (see
+## apps/web/lib/i18n/bundling.ts). e2e/tests/i18n/pseudo-coverage.spec.ts is the
+## only oracle for copy the jsx-only eslint guard cannot see, and it needs the
+## catalog present in the artifact it runs against.
+.PHONY: build-web-e2e
+build-web-e2e:
+	@printf "$(CYAN)Building web app (with the pseudo QA locale)...$(RESET)\n"
+	@cd $(APPS_DIR) && VITE_KANDEV_API_PORT= VITE_KANDEV_DEBUG= $(PNPM) --filter @kandev/web build:e2e
+
 .PHONY: build-web-quiet
 build-web-quiet:
 	@printf "  $(DIM)Web app$(RESET)\n"
@@ -508,17 +518,17 @@ test-scripts:
 	@node --test scripts/validate-public-docs.test.mjs
 
 .PHONY: test-e2e
-test-e2e: build-backend build-web build-e2e-plugin-package
+test-e2e: build-backend build-web-e2e build-e2e-plugin-package
 	@printf "$(CYAN)Running E2E tests (headless, parallel)...$(RESET)\n"
 	@cd $(APPS_DIR) && $(PNPM) --filter @kandev/web e2e
 
 .PHONY: test-e2e-headed
-test-e2e-headed: build-backend build-web build-e2e-plugin-package
+test-e2e-headed: build-backend build-web-e2e build-e2e-plugin-package
 	@printf "$(CYAN)Running E2E tests (headed)...$(RESET)\n"
 	@cd $(APPS_DIR) && $(PNPM) --filter @kandev/web e2e:headed
 
 .PHONY: test-e2e-ui
-test-e2e-ui: build-backend build-web build-e2e-plugin-package
+test-e2e-ui: build-backend build-web-e2e build-e2e-plugin-package
 	@printf "$(CYAN)Opening Playwright UI mode...$(RESET)\n"
 	@cd $(APPS_DIR) && $(PNPM) --filter @kandev/web e2e:ui
 

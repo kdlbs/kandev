@@ -57,7 +57,7 @@ function AppSidebarNavigation({ collapsed, inOffice, settingsMode }: AppSidebarN
         <>
           <div
             className={cn(
-              "flex flex-col gap-2 overflow-y-auto",
+              "flex flex-col gap-1 overflow-y-auto",
               inOffice ? "flex-1 min-h-0 pb-8 scroll-pb-8" : "shrink-0",
             )}
             data-testid="app-sidebar-scroll"

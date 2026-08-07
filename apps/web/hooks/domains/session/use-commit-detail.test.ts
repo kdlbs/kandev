@@ -20,10 +20,6 @@ vi.mock("@/components/toast-provider", () => ({
   useToast: () => ({ toast: mocks.toast }),
 }));
 
-vi.mock("react-i18next", () => ({
-  useTranslation: () => ({ t: (key: string) => key }),
-}));
-
 vi.mock("@/components/task/commit-detail-request", () => ({
   CommitDetailProtocolError: class CommitDetailProtocolError extends Error {},
   requestCommitDetail: mocks.requestCommitDetail,
@@ -129,7 +125,7 @@ describe("useCommitDetail", () => {
     const { result } = renderHook(() => useCommitDetail(remoteTarget));
 
     await waitFor(() => expect(result.current.loading).toBe(false));
-    expect(result.current.error).toBe("unexpectedResponseFromTheServer");
+    expect(result.current.error).toBe("Unexpected response from the server");
     expect(result.current.files).toBeNull();
     expect(mocks.toast).toHaveBeenCalled();
   });

@@ -513,8 +513,8 @@ func (h *Handlers) handleListWorkflowSteps(ctx context.Context, msg *ws.Message)
 
 // handleListRepositories lists repositories for a workspace. Exposes the same
 // data the kanban "Edit task → Repositories" picker reads, so an MCP-driven
-// agent (e.g. the Slack triage runner) can match a request against an actual
-// repo instead of guessing or making up an ID.
+// agent can match a request against an actual repo instead of guessing or
+// making up an ID.
 func (h *Handlers) handleListRepositories(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 	return h.handleListByField(ctx, msg, "workspace_id", "failed to list repositories", "Failed to list repositories",
 		func(ctx context.Context, workspaceID string) (any, error) {
@@ -1127,6 +1127,14 @@ func (h *Handlers) resolveMCPAutoStartConfigWithError(ctx context.Context, task 
 		if executorID == "" {
 			executorID = sourceExecutorID
 		}
+	}
+
+	// A workflow step's pinned profile outranks the caller's, because that is
+	// what the orchestrator launches (resolveEffectiveAgentProfile). Resolving
+	// it here too keeps the profile reported back to the caller equal to the
+	// one that will actually run.
+	if stepProfileID, _ := h.resolveWorkflowControllerAgentProfile(ctx, task.WorkflowStepID, task.WorkflowID); stepProfileID != "" {
+		agentProfileID = stepProfileID
 	}
 
 	if agentProfileID == "" {

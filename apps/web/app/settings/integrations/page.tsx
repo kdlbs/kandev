@@ -5,7 +5,6 @@ import {
   IconBrandGitlab,
   IconBrandAzure,
   IconBrandSentry,
-  IconBrandSlack,
   IconHexagon,
   IconTicket,
 } from "@tabler/icons-react";
@@ -21,16 +20,8 @@ import { GitLabEnabledControl } from "@/components/gitlab/gitlab-enabled-control
 import { JiraEnabledControl } from "@/components/jira/jira-enabled-control";
 import { LinearEnabledControl } from "@/components/linear/linear-enabled-control";
 import { SentryEnabledControl } from "@/components/sentry/sentry-enabled-control";
-import { SlackEnabledControl } from "@/components/slack/slack-enabled-control";
 
-type IntegrationSlug =
-  | "azure-devops"
-  | "github"
-  | "gitlab"
-  | "jira"
-  | "linear"
-  | "sentry"
-  | "slack";
+type IntegrationSlug = "azure-devops" | "github" | "gitlab" | "jira" | "linear" | "sentry";
 
 const INTEGRATIONS: Array<{
   slug: IntegrationSlug;
@@ -74,12 +65,6 @@ const INTEGRATIONS: Array<{
     descriptionKey: "settings:integrationDescriptionSentry",
     Icon: IconBrandSentry,
   },
-  {
-    slug: "slack",
-    label: "Slack",
-    descriptionKey: "settings:integrationDescriptionSlack",
-    Icon: IconBrandSlack,
-  },
 ];
 
 // Each row's slider is a per-integration hook wrapper (rules of hooks forbid
@@ -92,7 +77,6 @@ const ENABLED_CONTROL_BY_SLUG: Record<IntegrationSlug, ComponentType> = {
   jira: JiraEnabledControl,
   linear: LinearEnabledControl,
   sentry: SentryEnabledControl,
-  slack: SlackEnabledControl,
 };
 
 type IntegrationsIndexPageProps = {

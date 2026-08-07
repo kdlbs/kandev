@@ -34,9 +34,6 @@ vi.mock("@/hooks/domains/linear/use-linear-enabled", () => ({
 vi.mock("@/hooks/domains/sentry/use-sentry-enabled", () => ({
   useSentryEnabled: makeEnabledMock(true),
 }));
-vi.mock("@/hooks/domains/slack/use-slack-enabled", () => ({
-  useSlackEnabled: makeEnabledMock(true),
-}));
 
 beforeEach(() => {
   pushNavigationStateSpy.mockClear();
@@ -65,7 +62,7 @@ describe("IntegrationsIndexPage", () => {
     renderPage();
 
     const switches = screen.getAllByRole("switch");
-    expect(switches).toHaveLength(8);
+    expect(switches).toHaveLength(7);
 
     expect(ariaChecked(document.getElementById("azure-devops-enabled"))).toBe(ARIA_CHECKED_TRUE);
     expect(ariaChecked(document.getElementById("github-enabled"))).toBe(ARIA_CHECKED_FALSE);

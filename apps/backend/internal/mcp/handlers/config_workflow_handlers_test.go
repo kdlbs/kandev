@@ -531,3 +531,28 @@ func TestHandleImportWorkflow_ValidationError(t *testing.T) {
 	require.NoError(t, err)
 	assertWSError(t, resp, ws.ErrorCodeValidation)
 }
+
+// A step's pinned agent profile outranks an explicit agent_profile_id, matching
+// what the orchestrator launches. Reporting the caller's profile back would
+// confirm an agent that never runs.
+func TestResolveMCPAutoStartConfig_StepPinnedProfileOutranksExplicit(t *testing.T) {
+	h, _, repo := setupImportHandlers(t)
+	ctx := context.Background()
+	h.workflowCtrl = workflowctrl.NewController(h.workflowSvc)
+
+	require.NoError(t, repo.CreateStep(ctx, &wfmodels.WorkflowStep{
+		ID:             "step-pinned",
+		WorkflowID:     "wf-test",
+		Name:           "In Progress",
+		Position:       0,
+		IsStartStep:    true,
+		AgentProfileID: "step-pinned-profile",
+	}))
+
+	config, err := h.resolveMCPAutoStartConfigWithError(ctx, &taskmodels.Task{
+		WorkflowID:     "wf-test",
+		WorkflowStepID: "step-pinned",
+	}, "explicit-profile", "", "")
+	require.NoError(t, err)
+	assert.Equal(t, "step-pinned-profile", config.AgentProfileID)
+}

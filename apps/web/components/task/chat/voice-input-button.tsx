@@ -203,6 +203,14 @@ function useVoiceShortcut(
 
 // ── Unsupported fallback ────────────────────────────────────────────────
 
+// URL schemes the reader has to reproduce verbatim in the address bar, not copy.
+// Interpolated so the pseudo-locale and translators leave them intact — baked
+// into the message, `https://` pseudolocalizes to `ĥţţƥś://`, a scheme that does
+// not exist. Same reasoning as `settings:voiceUnavailableInsecure`, which
+// already passes its scheme and host as values.
+const VOICE_SECURE_SCHEME_URL = "https://";
+const VOICE_LOCALHOST_URL = "http://localhost";
+
 function buildUnsupportedReasonKey(): string {
   if (typeof window === "undefined") return "task:voiceInputUnavailableHere";
   if (!window.isSecureContext) return "task:voiceInputNeedsHttps";
@@ -215,7 +223,12 @@ function UnsupportedVoiceButton({ disabled }: { disabled?: boolean }) {
   const handleClick = () => {
     toast({
       title: t("task:voiceInputUnavailable"),
-      description: t(buildUnsupportedReasonKey()),
+      // Only `voiceInputNeedsHttps` reads these; i18next ignores values a
+      // message does not reference, so they can be passed unconditionally.
+      description: t(buildUnsupportedReasonKey(), {
+        secureSchemeUrl: VOICE_SECURE_SCHEME_URL,
+        localhostUrl: VOICE_LOCALHOST_URL,
+      }),
       variant: "error",
     });
   };

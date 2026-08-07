@@ -10,6 +10,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@kandev/ui/alert-dialog";
+import { useTranslation } from "react-i18next";
 
 type TreeCancelDialogProps = {
   open: boolean;
@@ -26,20 +27,20 @@ export function TreeCancelDialog({
   activeRunCount,
   onConfirm,
 }: TreeCancelDialogProps) {
+  const { t } = useTranslation();
   return (
     <AlertDialog open={open} onOpenChange={onOpenChange}>
       <AlertDialogContent>
         <AlertDialogHeader>
-          <AlertDialogTitle>Cancel task tree</AlertDialogTitle>
+          <AlertDialogTitle>{t("task:cancelTaskTree")}</AlertDialogTitle>
           <AlertDialogDescription>
-            This will cancel {taskCount} tasks and interrupt {activeRunCount} active agent sessions.
-            This action can be undone with Restore.
+            {t("task:treeCancelDescription", { taskCount, activeRunCount })}
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
-          <AlertDialogCancel className="cursor-pointer">Keep running</AlertDialogCancel>
+          <AlertDialogCancel className="cursor-pointer">{t("task:keepRunning")}</AlertDialogCancel>
           <AlertDialogAction className="cursor-pointer" onClick={onConfirm}>
-            Cancel tree
+            {t("task:cancelTree")}
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>

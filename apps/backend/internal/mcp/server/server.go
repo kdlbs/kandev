@@ -818,7 +818,7 @@ WHEN TO OMIT parent_id (top-level task):
 
 IMPORTANT:
 - Subtasks inherit task workspace, workflow, agent profile, executor, and materialized workspace from the parent by default. Pass workspace_id/workflow_id only when deliberately targeting a different task workspace/workflow; any supplied workflow_id must belong to the effective workspace_id. Pass workspace_mode='new_workspace' when the subtask needs its own materialized workspace/worktree.
-- An explicit agent_profile_id always wins. When omitted, the saved user policy applies: current_task inherits from the current/source task or parent before workflow and target-workspace defaults; workspace_default skips current/source and parent profiles, honors workflow profiles first, then uses the target workspace default.
+- A workflow step's pinned agent profile outranks an explicit agent_profile_id — that profile is what launches, and it is the one reported back in the created task's metadata. Otherwise an explicit agent_profile_id wins. When both are absent, the saved user policy applies: current_task inherits from the current/source task or parent before workflow and target-workspace defaults; workspace_default skips current/source and parent profiles, honors workflow profiles first, then uses the target workspace default.
 - Executor and executor-profile inheritance from the current/source task or parent is unchanged by either saved agent-profile policy.
 - Every created task must have a resolvable agent profile. start_agent=false still records the profile for a later manual start.
 - Subtasks inherit the parent's repository unless you supply repository_url, repository_id, or local_path — in which case the subtask targets that repo instead
@@ -831,7 +831,7 @@ IMPORTANT:
 - start_agent defaults to true and is what you want in nearly every case — the new task auto-launches an agent that immediately works on the prompt. Pass start_agent=false ONLY for an explicit placeholder (e.g. queuing work the user will start later, or creating a tracking task with no immediate work), and still pass agent_profile_id unless it can be inherited. When in doubt, leave it true.
 - Kanban subtasks cannot have their own subtasks (max nesting depth is 1). To break work down further, create a sibling under the same parent. (Office task trees are exempt.)`
 	parentDesc := "Parent task ID for subtasks. Use 'self' to create a subtask of your current task (RECOMMENDED for plan phases, delegated work). Omit only for unrelated top-level tasks."
-	agentProfileDesc := "Agent profile ID to use. Explicit agent_profile_id always wins. When omitted, current_task inherits the current/source or parent profile before workflow/workspace defaults; workspace_default skips those task profiles, then uses workflow profiles before the target workspace default. start_agent=false still needs a resolvable profile for later manual start."
+	agentProfileDesc := "Agent profile ID to use. A workflow step's pinned profile outranks it; otherwise an explicit agent_profile_id wins. When both are absent, current_task inherits the current/source or parent profile before workflow/workspace defaults; workspace_default skips those task profiles, then uses workflow profiles before the target workspace default. start_agent=false still needs a resolvable profile for later manual start."
 
 	if s.mode == ModeExternal {
 		toolDesc = `Create a new top-level task and auto-start an agent on it.
@@ -839,14 +839,14 @@ IMPORTANT:
 IMPORTANT:
 - Provide a repository via repository_url, repository_id, or local_path
 - workspace_id and workflow_id are auto-resolved if only one exists; provide explicitly if ambiguous
-- An explicit agent_profile_id always wins. When omitted, the saved user policy applies: current_task inherits a parent profile before workflow and target-workspace defaults; workspace_default skips the parent profile, honors workflow profiles first, then uses the target workspace default. External mode has no current/source task.
+- A workflow step's pinned agent profile outranks an explicit agent_profile_id — that profile is what launches, and it is the one reported back in the created task's metadata. Otherwise an explicit agent_profile_id wins. When both are absent, the saved user policy applies: current_task inherits a parent profile before workflow and target-workspace defaults; workspace_default skips the parent profile, honors workflow profiles first, then uses the target workspace default. External mode has no current/source task.
 - Executor and executor-profile inheritance from a parent is unchanged by either saved agent-profile policy.
 - Every created task must have a resolvable agent profile. start_agent=false still records the profile for a later manual start.
 - 'prompt' is the agent's initial prompt — be specific and detailed
 - start_agent defaults to true and is what you want in nearly every case — the new task auto-launches an agent that immediately works on the prompt. Pass start_agent=false ONLY for an explicit placeholder (e.g. queuing work the user will start later), and still pass agent_profile_id unless a default exists. When in doubt, leave it true.
 - Use parent_id only when delegating to a known existing task by its ID`
 		parentDesc = "Optional parent task ID. Omit for top-level tasks; provide an existing task ID only to create a subtask of that task."
-		agentProfileDesc = "Agent profile ID to use. Explicit agent_profile_id always wins. When omitted, current_task inherits a parent profile before workflow/workspace defaults; workspace_default skips the parent profile, then uses workflow profiles before the target workspace default. External mode has no current/source task. start_agent=false still needs a resolvable profile for later manual start."
+		agentProfileDesc = "Agent profile ID to use. A workflow step's pinned profile outranks it; otherwise an explicit agent_profile_id wins. When both are absent, current_task inherits a parent profile before workflow/workspace defaults; workspace_default skips the parent profile, then uses workflow profiles before the target workspace default. External mode has no current/source task. start_agent=false still needs a resolvable profile for later manual start."
 	}
 
 	s.mcpServer.AddTool(

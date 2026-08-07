@@ -22,16 +22,16 @@ async function waitForTerminalReady(page: Page) {
     .not.toBe("");
 }
 
-async function sendMarker(page: Page, marker: string) {
+async function runCommandAndWaitForOutput(page: Page, command: string, expected: string) {
   await page.getByTestId("quick-terminal-terminal").click();
-  await page.keyboard.type(`echo ${marker}`);
+  await page.keyboard.type(command);
   await page.keyboard.press("Enter");
   await expect
     .poll(() => readQuickTerminalBuffer(page), {
       timeout: 10_000,
-      message: `Waiting for terminal marker ${marker}`,
+      message: `Waiting for terminal output ${expected}`,
     })
-    .toContain(marker);
+    .toContain(expected);
 }
 
 function terminalTab(dialog: Locator, sequence: number) {
@@ -81,19 +81,23 @@ test.describe("quick terminal tabs", () => {
       await expect(dialog.getByTestId("quick-terminal-terminal")).toBeVisible();
       await expect(dialog.getByTestId("host-shell-done")).toHaveCount(0);
       await waitForTerminalReady(testPage);
-      await sendMarker(testPage, "QUICK_TERMINAL_ONE");
+      await runCommandAndWaitForOutput(
+        testPage,
+        "export KANDEV_QT_ONE=QUICK_TERMINAL_ONE && echo $KANDEV_QT_ONE",
+        "QUICK_TERMINAL_ONE",
+      );
       await expect(dialog.locator('[data-testid="quick-terminal-tab"]')).toHaveCount(1);
 
       // The descriptor and detached PTY survive a full page reload. The
-      // launcher must reattach the existing session instead of creating a
-      // second terminal, including the buffered marker output.
+      // launcher must reattach the existing shell instead of creating a
+      // second terminal.
       await testPage.reload();
       await expect(terminalButton).toBeVisible();
       await terminalButton.click();
       await expect(dialog).toBeVisible();
       await expect(dialog.locator('[data-testid="quick-terminal-tab"]')).toHaveCount(1);
       await expect(dialog.getByTestId("quick-terminal-tab-panel")).toBeVisible();
-      await expect.poll(() => readQuickTerminalBuffer(testPage)).toContain("QUICK_TERMINAL_ONE");
+      await runCommandAndWaitForOutput(testPage, "echo $KANDEV_QT_ONE", "QUICK_TERMINAL_ONE");
 
       // Dismissing the shared surface detaches the terminal but does not stop it.
       await testPage.keyboard.press("Escape");
@@ -104,28 +108,45 @@ test.describe("quick terminal tabs", () => {
       await terminalButton.click();
       await expect(dialog).toBeVisible();
       await expect(dialog.locator('[data-testid="quick-terminal-tab"]')).toHaveCount(1);
-      await expect.poll(() => readQuickTerminalBuffer(testPage)).toContain("QUICK_TERMINAL_ONE");
+      await runCommandAndWaitForOutput(testPage, "echo $KANDEV_QT_ONE", "QUICK_TERMINAL_ONE");
 
       // The grouped menu's New Terminal action always creates a second PTY.
-      await dialog.getByTestId("quick-chat-add-menu-trigger").click();
+      // Radix marks the rest of the page aria-hidden while the menu is open, so
+      // the `dialog` role locator stops resolving; measure the trigger before
+      // opening and reference the menu content by its page-level test id.
+      const addMenuTrigger = testPage.getByTestId("quick-chat-add-menu-trigger");
+      await expect(addMenuTrigger).toBeVisible();
+      const addMenuTriggerBox = await addMenuTrigger.boundingBox();
+      await addMenuTrigger.click();
+      const addMenu = testPage.getByTestId("quick-chat-add-menu-content");
+      await expect(addMenu).toBeVisible();
+      const addMenuBox = await addMenu.boundingBox();
+      expect(addMenuTriggerBox).not.toBeNull();
+      expect(addMenuBox).not.toBeNull();
+      expect(addMenuBox!.x).toBeGreaterThanOrEqual(addMenuTriggerBox!.x - 2);
+      await assertLocatorWithinViewportX(addMenu, "desktop quick chat add menu");
       await expect(testPage.getByText("Agents", { exact: true })).toBeVisible();
       await expect(testPage.getByText("Terminals", { exact: true })).toBeVisible();
       await testPage.getByTestId("quick-chat-new-terminal").click();
       await expect(dialog.locator('[data-testid="quick-terminal-tab"]')).toHaveCount(2);
       await waitForTerminalReady(testPage);
-      await sendMarker(testPage, "QUICK_TERMINAL_TWO");
+      await runCommandAndWaitForOutput(
+        testPage,
+        "export KANDEV_QT_TWO=QUICK_TERMINAL_TWO && echo $KANDEV_QT_TWO",
+        "QUICK_TERMINAL_TWO",
+      );
 
       const firstTab = terminalTab(dialog, 1);
       const secondTab = terminalTab(dialog, 2);
       await firstTab.getByRole("button", { name: "Terminal 1", exact: true }).click();
-      await expect.poll(() => readQuickTerminalBuffer(testPage)).toContain("QUICK_TERMINAL_ONE");
+      await runCommandAndWaitForOutput(testPage, "echo $KANDEV_QT_ONE", "QUICK_TERMINAL_ONE");
       await secondTab.getByRole("button", { name: "Terminal 2", exact: true }).click();
-      await expect.poll(() => readQuickTerminalBuffer(testPage)).toContain("QUICK_TERMINAL_TWO");
+      await runCommandAndWaitForOutput(testPage, "echo $KANDEV_QT_TWO", "QUICK_TERMINAL_TWO");
 
       // Closing one tab stops/removes only that tab and falls back to its sibling.
       await secondTab.getByRole("button", { name: "Close Terminal 2" }).click();
       await expect(dialog.locator('[data-testid="quick-terminal-tab"]')).toHaveCount(1);
-      await expect.poll(() => readQuickTerminalBuffer(testPage)).toContain("QUICK_TERMINAL_ONE");
+      await runCommandAndWaitForOutput(testPage, "echo $KANDEV_QT_ONE", "QUICK_TERMINAL_ONE");
 
       // The chat launcher switches content kind without discarding the terminal.
       await testPage.keyboard.press("Escape");

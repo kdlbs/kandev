@@ -109,7 +109,7 @@ Per-workspace credentials and triage triggers for external services.
 | Spec | Status |
 |---|---|
 | [azure-devops-integration](azure-devops-integration/spec.md) | shipped |
-| [slack](integrations/slack.md) | shipped |
+| [slack](integrations/slack.md) | archived — moved to `kandev-plugin-slack` |
 | [external-mcp](integrations/external-mcp.md) | draft |
 | [mcp-tool-argument-validation](integrations/mcp-tool-argument-validation.md) | shipped |
 | [provider-aware-review-automation](integrations/provider-aware-review-automation.md) | approved |
@@ -143,6 +143,7 @@ Subscription quota tracking and per-agent cheap-model profile routing.
 | [ci-pr-automation](ui/ci-pr-automation.md) | building |
 | [github-pr-review-actions](ui/github-pr-review-actions.md) | shipped |
 | [comment-markdown](ui/comment-markdown.md) | shipped |
+| [resizable-markdown-tables](ui/resizable-markdown-tables.md) | building |
 | [transcript-auto-scroll](ui/transcript-auto-scroll.md) | building |
 | [empty-turn-notice](ui/empty-turn-notice.md) | shipped |
 | [acp-shell-command-output](ui/acp-shell-command-output.md) | shipped |

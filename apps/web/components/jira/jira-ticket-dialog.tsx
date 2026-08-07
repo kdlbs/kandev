@@ -21,6 +21,7 @@ import {
   type TicketState,
 } from "./jira-ticket-common";
 import type { JiraTaskPreset } from "./my-jira/presets";
+import { useDateLocale } from "@/lib/i18n/date-locale";
 import { useTranslation } from "react-i18next";
 
 type JiraTicketDialogProps = {
@@ -348,7 +349,7 @@ function DetailRow({ label, children }: { label: string; children: React.ReactNo
 
 function MetaFooter({ ticket }: { ticket: JiraTicket }) {
   const { t } = useTranslation();
-  const updated = formatRelative(ticket.updated);
+  const updated = formatRelative(ticket.updated, useDateLocale());
   if (!updated) return null;
   return (
     <div className="text-xs text-muted-foreground px-1" title={ticket.updated}>

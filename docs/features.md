@@ -35,7 +35,7 @@ This page expands the short feature list in the README without turning the READM
 
 ## Integrations And MCP
 
-- **Integrations:** GitHub, GitLab, Jira, Linear, Sentry, and Slack connect external work back into Kandev tasks.
+- **Integrations:** GitHub, GitLab, Jira, Linear, and Sentry connect external work back into Kandev tasks. Slack ships separately as the `kandev-plugin-slack` plugin.
 - **External MCP:** Kandev exposes streamable HTTP and SSE MCP endpoints so external coding agents can manage Kandev from outside the app. Settings include copyable snippets for Claude Code, Cursor, Codex, Auggie CLI, OpenCode, and GitHub Copilot CLI.
 - **Automatic session MCP:** agents launched normally inside Kandev receive the Kandev task MCP automatically.
 - **Passthrough MCP:** passthrough agents can also use the Kandev MCP endpoint while keeping their native CLI interface.

@@ -72,7 +72,7 @@ function ReviewChip({
         Icon={IconClockHour4}
         label={t("github:pending", { pending })}
         tone="pending"
-        title={t("github:pendingReviewS", { pending })}
+        title={t("github:pendingReviews", { count: pending })}
       />
     );
   return null;

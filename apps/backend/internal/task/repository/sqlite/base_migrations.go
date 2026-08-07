@@ -76,6 +76,9 @@ func (r *Repository) runMigrations() error {
 	if err := r.migrateTasksRemoveWorkflowFK(); err != nil {
 		return err
 	}
+	if err := r.dropRetiredSlackIntegration(); err != nil {
+		return err
+	}
 	r.migrate.Apply("idx_tasks_queued_for_step", `CREATE INDEX IF NOT EXISTS idx_tasks_queued_for_step ON tasks(queued_for_step_id, queued_at)`)
 	// Remove deprecated workflow_step_id column from task_sessions
 	if err := r.migrateSessionsRemoveWorkflowStepID(); err != nil {
