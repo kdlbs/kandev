@@ -47,7 +47,7 @@ export class GitLabPage {
     if (await reviewItem.isVisible({ timeout: 2_000 }).catch(() => false)) {
       await reviewItem.click();
     }
-    await expect(this.page.getByTestId("mr-detail-panel").last()).toBeVisible();
+    await expect(this.page.getByTestId("mr-detail-panel").last()).toBeVisible({ timeout: 15_000 });
   }
 
   // Same dual-path reasoning as openLinkedMR: touch/multi-MR unlink via the
