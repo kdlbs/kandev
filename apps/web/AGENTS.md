@@ -4,7 +4,7 @@ Scoped guidance for `apps/web/`. Repo-wide rules (commit format, code-quality li
 
 ## Plugin authoring
 
-For plugin UI work, begin with the [canonical plugin authoring guide](../../docs/public/plugins-authoring.md). Follow: choose recipe → edit `manifest.yaml` → implement → validate → package → smoke test. The frontend contract pair is `../../docs/plans/plugins/PLUGIN-API.md` plus `lib/plugins/types.ts`; concrete shared Host UI exports are in `lib/plugins/host-api.ts`, and registration/cleanup behavior is in `lib/plugins/registry.ts` and `lib/plugins/host.ts`. Keep the guide and that contract pair synchronized; do not invent hooks such as task panels, task-menu actions, per-user `host.storage`, rich-text components, or Kanban-card injection when they are absent from the current source.
+For plugin UI work, begin with the [canonical plugin authoring guide](../../docs/public/plugins-authoring.md). Follow: choose recipe → edit `manifest.yaml` → implement → validate → package → smoke test. The frontend contract pair is `../../docs/plans/plugins/PLUGIN-API.md` plus `lib/plugins/types.ts`; concrete shared Host UI exports are in `lib/plugins/host-api.ts`, and registration/cleanup behavior is in `lib/plugins/registry.ts` and `lib/plugins/host.ts`. Treat that pair as the source of truth for which hooks exist, and extend it in the same change rather than shipping a signature it does not declare.
 
 ## UI Components
 
