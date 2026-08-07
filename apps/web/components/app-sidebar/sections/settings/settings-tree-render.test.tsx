@@ -18,6 +18,8 @@ const AGENT_LABEL = "Claude Code";
 // Anchored: the caret beside the row is labelled "Expand/Collapse Claude Code",
 // and a badge can extend the row's own name past an exact match.
 const AGENT_ROW = /^Claude Code/;
+// Which integrations the probe reports as connected, per test.
+const integrationsEnabled = new Set<string>();
 
 const state = {
   workspaces: {
@@ -84,6 +86,10 @@ vi.mock("@/hooks/domains/features/use-feature", () => ({
 
 vi.mock("@/hooks/domains/settings/use-secrets", () => ({
   useSecrets: () => ({ items: [{ id: "secret-1" }, { id: "secret-2" }], loaded: true, loading: false }),
+}));
+
+vi.mock("@/hooks/domains/integrations/use-enabled-integrations", () => ({
+  useEnabledIntegrations: () => integrationsEnabled,
 }));
 
 vi.mock("@/hooks/domains/plugins/use-plugins", () => ({
@@ -224,6 +230,7 @@ describe("SettingsTree tree modes", () => {
     state.workspaces.items = [{ id: MAIN_WORKSPACE_ID, name: MAIN_WORKSPACE_NAME }];
     state.agentDiscovery.items = [];
     state.agentDiscovery.loaded = false;
+    integrationsEnabled.clear();
   });
 
   afterEach(() => {
@@ -319,6 +326,7 @@ describe("SettingsTree record treatment", () => {
     state.workspaces.items = [{ id: MAIN_WORKSPACE_ID, name: MAIN_WORKSPACE_NAME }];
     state.agentDiscovery.items = [];
     state.agentDiscovery.loaded = false;
+    integrationsEnabled.clear();
   });
 
   afterEach(() => {
@@ -369,6 +377,37 @@ describe("SettingsTree record treatment", () => {
       // The dot the Agents page puts in front of a profile.
       expect(box?.firstElementChild?.getAttribute("class")).toContain(RECORD_DOT);
     }
+  });
+
+  it("leaves a row that has a glyph of its own alone", () => {
+    setMenuMode("persistent", [AGENTS_ROW_KEY, AGENT_KEY, WORKSPACES_ROW_KEY, WORKSPACE_KEY]);
+    render(<SettingsTree pathname="/settings/preferences/appearance" />);
+
+    // An agent keeps its logo, and a workspace tab its icon — neither is a
+    // record, and neither gains a dot.
+    for (const row of [
+      screen.getByRole("button", { name: AGENT_LABEL }),
+      screen.getByRole("link", { name: "Repositories" }),
+    ]) {
+      expect(row.querySelector("svg, img")).not.toBeNull();
+      expect(row.innerHTML).not.toContain(RECORD_DOT);
+    }
+  });
+
+});
+
+describe("SettingsTree badges", () => {
+  beforeEach(() => {
+    state.workspaces.activeId = MAIN_WORKSPACE_ID;
+    state.workspaces.items = [{ id: MAIN_WORKSPACE_ID, name: MAIN_WORKSPACE_NAME }];
+    state.agentDiscovery.items = [];
+    state.agentDiscovery.loaded = false;
+    integrationsEnabled.clear();
+  });
+
+  afterEach(() => {
+    setMenuMode("flat");
+    cleanup();
   });
 
   it("badges a disabled profile, which stays listed so it can be re-enabled", () => {
@@ -426,21 +465,18 @@ describe("SettingsTree record treatment", () => {
       .not.toContain("Not installed");
   });
 
-  it("leaves a row that has a glyph of its own alone", () => {
-    setMenuMode("persistent", [AGENTS_ROW_KEY, AGENT_KEY, WORKSPACES_ROW_KEY, WORKSPACE_KEY]);
+  it("badges an integration the workspace has connected", () => {
+    integrationsEnabled.add("github");
+    setMenuMode("persistent", [
+      WORKSPACES_ROW_KEY,
+      WORKSPACE_KEY,
+      `${WORKSPACE_KEY}:integrations`,
+    ]);
     render(<SettingsTree pathname="/settings/preferences/appearance" />);
 
-    // An agent keeps its logo, and a workspace tab its icon — neither is a
-    // record, and neither gains a dot.
-    for (const row of [
-      screen.getByRole("button", { name: AGENT_LABEL }),
-      screen.getByRole("link", { name: "Repositories" }),
-    ]) {
-      expect(row.querySelector("svg, img")).not.toBeNull();
-      expect(row.innerHTML).not.toContain(RECORD_DOT);
-    }
+    expect(screen.getByRole("link", { name: /GitHub/ }).textContent).toContain("Enabled");
+    expect(screen.getByRole("link", { name: /GitLab/ }).textContent).not.toContain("Enabled");
   });
-
 });
 
 describe("SettingsTree search", () => {

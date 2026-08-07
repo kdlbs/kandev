@@ -1,5 +1,6 @@
 "use client";
 
+import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 
 import { AgentLogo } from "@/components/agent-logo";
@@ -9,6 +10,10 @@ import {
   NotInstalledBadge,
 } from "@/components/settings/record-badges";
 import type { SettingsMenuNode } from "./settings-menu-branches";
+import {
+  IntegrationEnabledBadgeFor,
+  IntegrationsEnabledProvider,
+} from "./integration-enabled";
 import { RecordGlyph, SettingsBranch, SettingsLeaf } from "./settings-nav-primitives";
 import type { SettingsMenuExpansion } from "./use-settings-menu-expansion";
 
@@ -52,6 +57,19 @@ function renderBadge(badge: SettingsMenuNode["badge"]) {
   return undefined;
 }
 
+/**
+ * Wraps the Integrations branch's rows in one shared probe. Sits here, inside
+ * the collapsible body, so a closed branch never fetches.
+ */
+function withIntegrationProbe(node: SettingsMenuNode, rows: ReactNode) {
+  if (!node.integrationsWorkspaceId) return rows;
+  return (
+    <IntegrationsEnabledProvider workspaceId={node.integrationsWorkspaceId}>
+      {rows}
+    </IntegrationsEnabledProvider>
+  );
+}
+
 export function SettingsMenuNodeRow({
   node,
   depth,
@@ -67,7 +85,13 @@ export function SettingsMenuNodeRow({
   const leadingIcon = resolveLeadingIcon(node, isRecord);
   const isActive = node.key === activeKey;
   const children = node.children ?? [];
-  const trailing = renderBadge(node.badge);
+  // An integration's badge needs a probe, so it resolves in the row rather than
+  // in the node; everything else is decided when the branch is built.
+  const trailing = node.integrationSlug ? (
+    <IntegrationEnabledBadgeFor slug={node.integrationSlug} />
+  ) : (
+    renderBadge(node.badge)
+  );
 
   if (children.length === 0) {
     if (!node.href) return null;
@@ -98,15 +122,18 @@ export function SettingsMenuNodeRow({
       depth={depth}
       isRecord={isRecord}
     >
-      {children.map((child) => (
-        <SettingsMenuNodeRow
-          key={child.key}
-          node={child}
-          depth={depth + 1}
-          activeKey={activeKey}
-          expansion={expansion}
-        />
-      ))}
+      {withIntegrationProbe(
+        node,
+        children.map((child) => (
+          <SettingsMenuNodeRow
+            key={child.key}
+            node={child}
+            depth={depth + 1}
+            activeKey={activeKey}
+            expansion={expansion}
+          />
+        )),
+      )}
     </SettingsBranch>
   );
 }

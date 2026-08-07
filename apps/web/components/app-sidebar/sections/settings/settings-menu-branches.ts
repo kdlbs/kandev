@@ -31,6 +31,8 @@ import {
  * `{ text }` for a record name or brand) so `t()` runs at render.
  */
 
+type IntegrationSlug = (typeof WORKSPACE_INTEGRATIONS)[number][0];
+
 export type SettingsMenuNodeLabel =
   /** A catalog key, translated at render. */
   | { key: string }
@@ -71,6 +73,17 @@ export type SettingsMenuNode = {
    * not have to decide which flag outranks which.
    */
   badge?: "active" | "disabled" | "not-installed";
+  /**
+   * An integration row, by catalog slug. Whether it is connected is not known
+   * here — it takes a network probe — so the node names the integration and the
+   * renderer resolves the badge.
+   */
+  integrationSlug?: IntegrationSlug;
+  /**
+   * Set on the Integrations row: its children need one shared probe of this
+   * workspace, run only while the branch is open.
+   */
+  integrationsWorkspaceId?: string;
   /**
    * Routes this node owns beyond `href` and its `href/` descendants. Needed by
    * nodes with no page of their own (an agent, whose profile pages live under a
@@ -142,6 +155,7 @@ function integrationNodes(workspaceId: string, integrationsHref: string): Settin
     href: `${integrationsHref}/${slug}`,
     label: { text: label },
     icon: INTEGRATION_ICONS[slug],
+    integrationSlug: slug,
   }));
 }
 
@@ -178,7 +192,10 @@ export function buildWorkspacesBranch(
           label: { key: labelKey },
           icon,
           ...(tab === "integrations"
-            ? { children: integrationNodes(workspace.id, integrationsHref) }
+            ? {
+                children: integrationNodes(workspace.id, integrationsHref),
+                integrationsWorkspaceId: workspace.id,
+              }
             : {}),
         }),
       ),
