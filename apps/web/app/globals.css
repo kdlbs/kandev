@@ -305,6 +305,21 @@ html[data-rendering-engine="webkit"] [data-webkit-safe-motion="true"][data-state
   animation-name: kandev-dialog-webkit-exit;
 }
 
+/*
+ * Tooltip content is `pointer-events: none` (@kandev/ui/tooltip.tsx) so a
+ * bubble never blocks clicks on whatever it's covering — but that class only
+ * reaches the inner content, not Radix Popper's auto-generated positioning
+ * wrapper around it, which keeps the browser default `pointer-events: auto`.
+ * A tooltip anchored deep inside a scrollable/nested surface (e.g. an
+ * automation help icon inside the MR hover popover) can end up geometrically
+ * overlapping unrelated interactive elements above it; without this, that
+ * wrapper silently intercepts clicks meant for whatever sits underneath,
+ * even after the tooltip's own trigger is no longer hovered.
+ */
+[data-radix-popper-content-wrapper]:has(> [data-slot="tooltip-content"]) {
+  pointer-events: none;
+}
+
 @media (min-width: 640px) {
   html[data-rendering-engine="webkit"] [data-webkit-safe-motion="true"] {
     height: fit-content;
