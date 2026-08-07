@@ -80,6 +80,12 @@ Select an agent, create a profile, then open **Settings > Agents > _Agent_ > _Pr
 
 Model, mode, command, and configuration choices are probed from the locally installed CLI and cached. The managed **Update agent** action refreshes them automatically; after other CLI changes, refresh the profile manually. Probe status can report **auth required**, **not installed**, **not configured**, or **failed**; a saved model name does not prove that the current provider account can use it.
 
+Configuration options are resolved for the model selected in the profile. An
+agent can therefore show a different option set for each model. If a model
+change makes a saved option value unsupported, Kandev removes that value after
+a successful resolution; a failed resolution keeps the draft unchanged so you
+can retry it.
+
 ### Monitor capability and subscription status
 
 Use the profile refresh control after installing, authenticating, or upgrading an agent. A manual refresh updates both the advertised models, modes, and commands and the visible capability status, so an old failure banner does not remain authoritative after the local CLI recovers.

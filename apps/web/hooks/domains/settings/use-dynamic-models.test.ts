@@ -1,15 +1,27 @@
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import type { DynamicModelsResponse, ModelConfig } from "@/lib/types/http";
+import type {
+  AgentModelConfigResponse,
+  ConfigOptionEntry,
+  DynamicModelsResponse,
+  ModelConfig,
+} from "@/lib/types/http";
 
 const fetchDynamicModelsMock = vi.fn();
+const resolveAgentModelConfigMock = vi.fn();
 
 vi.mock("@/lib/api/domains/settings-api", () => ({
   fetchDynamicModels: (...args: unknown[]) => fetchDynamicModelsMock(...args),
+  resolveAgentModelConfig: (...args: unknown[]) => resolveAgentModelConfigMock(...args),
 }));
 
-import { useAgentCapabilities } from "./use-dynamic-models";
+import { useProfileModelCapabilities } from "./use-profile-model-capabilities";
+import {
+  invalidateModelConfigResolutionCache,
+  useAgentCapabilities,
+  useResolvedModelConfig,
+} from "./use-dynamic-models";
 
 const initialConfig: ModelConfig = {
   default_model: "",
@@ -34,8 +46,23 @@ function response(status: DynamicModelsResponse["status"]): DynamicModelsRespons
 
 afterEach(() => {
   cleanup();
+  invalidateModelConfigResolutionCache();
   fetchDynamicModelsMock.mockReset();
+  resolveAgentModelConfigMock.mockReset();
 });
+
+function resolvedResponse(
+  model: string,
+  configOptions: ConfigOptionEntry[],
+): AgentModelConfigResponse {
+  return {
+    agent_name: "opencode",
+    model,
+    status: "ok",
+    config_options: configOptions,
+    error: null,
+  };
+}
 
 describe("useAgentCapabilities", () => {
   it("exposes the status returned by a forced capability refresh", async () => {
@@ -145,5 +172,157 @@ describe("useAgentCapabilities", () => {
     const { result } = renderHook(() => useAgentCapabilities("grok-acp", initialConfig));
 
     await waitFor(() => expect(result.current.error).toBe("probe timed out"));
+  });
+});
+
+describe("useResolvedModelConfig", () => {
+  it("loads options for the selected model and ignores an older response", async () => {
+    let resolveFirst: ((response: AgentModelConfigResponse) => void) | undefined;
+    let resolveSecond: ((response: AgentModelConfigResponse) => void) | undefined;
+    resolveAgentModelConfigMock.mockImplementation((_, request: { model: string }) => {
+      if (request.model === "model-a") {
+        return new Promise<AgentModelConfigResponse>((resolve) => {
+          resolveFirst = resolve;
+        });
+      }
+      return new Promise<AgentModelConfigResponse>((resolve) => {
+        resolveSecond = resolve;
+      });
+    });
+
+    const baseline: ConfigOptionEntry[] = [
+      { type: "select", id: "effort", name: "Effort", current_value: "low", options: [] },
+    ];
+    const { result, rerender } = renderHook(
+      ({ model }) =>
+        useResolvedModelConfig("opencode", model, {
+          mode: "build",
+          configOptions: { effort: "low" },
+          initialConfigOptions: baseline,
+        }),
+      { initialProps: { model: "model-a" } },
+    );
+
+    await waitFor(() => expect(resolveAgentModelConfigMock).toHaveBeenCalledTimes(1));
+    expect(resolveAgentModelConfigMock).toHaveBeenLastCalledWith("opencode", {
+      model: "model-a",
+      mode: "build",
+      config_options: { effort: "low" },
+    });
+
+    rerender({ model: "model-b" });
+    await waitFor(() => expect(resolveAgentModelConfigMock).toHaveBeenCalledTimes(2));
+
+    const secondOptions: ConfigOptionEntry[] = [
+      {
+        type: "select",
+        id: "reasoning_effort",
+        name: "Reasoning effort",
+        current_value: "max",
+        options: [],
+      },
+    ];
+    await act(async () => {
+      resolveSecond?.(resolvedResponse("model-b", secondOptions));
+    });
+    expect(result.current.configOptions).toEqual(secondOptions);
+
+    await act(async () => {
+      resolveFirst?.(resolvedResponse("model-a", baseline));
+    });
+    expect(result.current.configOptions).toEqual(secondOptions);
+  });
+});
+
+describe("useResolvedModelConfig draft updates", () => {
+  it("does not re-resolve when a settings draft option changes", async () => {
+    const configOptions: ConfigOptionEntry[] = [
+      {
+        type: "select",
+        id: "effort",
+        name: "Effort",
+        current_value: "low",
+        options: [
+          { value: "low", name: "Low" },
+          { value: "high", name: "High" },
+        ],
+      },
+    ];
+    fetchDynamicModelsMock.mockResolvedValue(response("ok"));
+    resolveAgentModelConfigMock.mockResolvedValue(
+      resolvedResponse("profile-draft-model", configOptions),
+    );
+
+    const initialProfile = {
+      model: "profile-draft-model",
+      mode: "build",
+      config_options: { effort: "low" },
+    };
+    const modelConfig: ModelConfig = {
+      ...initialConfig,
+      current_model_id: initialProfile.model,
+      default_model: initialProfile.model,
+      config_options: configOptions,
+    };
+    const { rerender } = renderHook(
+      ({ profile }) => useProfileModelCapabilities("profile-draft-agent", profile, modelConfig),
+      { initialProps: { profile: initialProfile } },
+    );
+
+    await waitFor(() => expect(resolveAgentModelConfigMock).toHaveBeenCalledTimes(1));
+
+    rerender({
+      profile: {
+        ...initialProfile,
+        config_options: { effort: "high" },
+      },
+    });
+
+    await waitFor(() => expect(resolveAgentModelConfigMock).toHaveBeenCalledTimes(1));
+  });
+});
+
+describe("useResolvedModelConfig cache invalidation", () => {
+  const cacheRefreshModel = "cache-refresh-model";
+
+  it("invalidates model option resolutions when capabilities refresh", async () => {
+    const firstOptions: ConfigOptionEntry[] = [
+      { type: "select", id: "effort", name: "Effort", current_value: "low", options: [] },
+    ];
+    const secondOptions: ConfigOptionEntry[] = [
+      { type: "select", id: "effort", name: "Effort", current_value: "high", options: [] },
+    ];
+    fetchDynamicModelsMock.mockResolvedValue(response("ok"));
+    resolveAgentModelConfigMock
+      .mockResolvedValueOnce(resolvedResponse(cacheRefreshModel, firstOptions))
+      .mockResolvedValueOnce(resolvedResponse(cacheRefreshModel, secondOptions));
+
+    const modelConfig: ModelConfig = {
+      ...initialConfig,
+      current_model_id: cacheRefreshModel,
+      default_model: cacheRefreshModel,
+    };
+    const cacheRefreshAgent = "cache-refresh-agent";
+    const firstResolution = renderHook(() =>
+      useResolvedModelConfig(cacheRefreshAgent, cacheRefreshModel, {
+        initialConfigOptions: firstOptions,
+      }),
+    );
+    await waitFor(() => expect(resolveAgentModelConfigMock).toHaveBeenCalledTimes(1));
+
+    const capabilities = renderHook(() => useAgentCapabilities(cacheRefreshAgent, modelConfig));
+    await waitFor(() => expect(fetchDynamicModelsMock).toHaveBeenCalledTimes(1));
+    await act(async () => {
+      await capabilities.result.current.refresh();
+    });
+
+    const secondResolution = renderHook(() =>
+      useResolvedModelConfig(cacheRefreshAgent, cacheRefreshModel, {
+        initialConfigOptions: firstOptions,
+      }),
+    );
+    await waitFor(() => expect(resolveAgentModelConfigMock).toHaveBeenCalledTimes(2));
+    expect(firstResolution.result.current.configOptions).toEqual(firstOptions);
+    expect(secondResolution.result.current.configOptions).toEqual(secondOptions);
   });
 });

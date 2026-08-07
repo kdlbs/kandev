@@ -60,6 +60,27 @@ vi.mock("@/hooks/domains/settings/use-available-agents", () => ({
   }),
 }));
 
+vi.mock("@/lib/api/domains/settings-api", () => ({
+  resolveAgentModelConfig: vi.fn(async (_agentName: string, request: { model: string }) => ({
+    agent_name: "codex",
+    model: request.model,
+    status: "ok",
+    config_options: [
+      {
+        type: "select",
+        id: "reasoning_effort",
+        name: "Effort",
+        current_value: "high",
+        options: [
+          { value: "high", name: "High" },
+          { value: "max", name: "Max" },
+        ],
+      },
+    ],
+    error: null,
+  })),
+}));
+
 afterEach(cleanup);
 
 function step(id: string, position: number, events?: WorkflowStep["events"]): WorkflowStep {
@@ -186,5 +207,62 @@ describe("SessionConfigEditor", () => {
       screen.getByLabelText("Override original session options").getAttribute("disabled"),
     ).not.toBeNull();
     expect(screen.queryByTestId("work-session-config-editor")).toBeNull();
+  });
+});
+
+describe("SessionConfigRuleCard model options", () => {
+  it("loads model-specific options in a workflow session override", async () => {
+    const currentStep = step("work", 0, {
+      on_enter: [
+        {
+          type: "configure_session",
+          config: { rules: [{ agent_name: CODEX_AGENT, operation: "set", model: MODEL_ID }] },
+        },
+      ],
+    });
+
+    render(
+      <SessionConfigEditorHarness
+        currentStep={currentStep}
+        steps={[currentStep]}
+        onUpdate={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Settings for codex" }));
+    expect(await screen.findByTestId("config-option-trigger-reasoning_effort")).toBeTruthy();
+  });
+
+  it("preserves a saved option value during the initial resolution", async () => {
+    const onUpdate = vi.fn();
+    const currentStep = step("work", 0, {
+      on_enter: [
+        {
+          type: "configure_session",
+          config: {
+            rules: [
+              {
+                agent_name: CODEX_AGENT,
+                operation: "set",
+                model: MODEL_ID,
+                config_options: { reasoning_effort: "medium" },
+              },
+            ],
+          },
+        },
+      ],
+    });
+
+    render(
+      <SessionConfigEditorHarness
+        currentStep={currentStep}
+        steps={[currentStep]}
+        onUpdate={onUpdate}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Settings for codex" }));
+    expect(await screen.findByTestId("config-option-trigger-reasoning_effort")).toBeTruthy();
+    expect(onUpdate).not.toHaveBeenCalled();
   });
 });

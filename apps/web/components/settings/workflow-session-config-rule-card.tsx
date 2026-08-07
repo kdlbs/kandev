@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useRef } from "react";
 import { IconTrash } from "@tabler/icons-react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@kandev/ui/button";
@@ -11,14 +12,38 @@ import {
   ModelConfigSelector,
   type SelectConfigOption,
 } from "@/components/model-config-selector";
+import { ModelConfigResolutionStatus } from "@/components/settings/model-config-resolution-status";
 import type { AvailableAgent } from "@/lib/types/http";
 import type { ConfigureSessionOperation, ConfigureSessionRule } from "@/lib/types/workflow-actions";
+import { reconcileConfigOptionValues } from "./profile-model-config";
+import { useSessionConfigModelOptions } from "./use-session-config-model-options";
 import {
   type AgentChoice,
   defaultModelForAgent,
-  modelConfigOptions,
   operationRule,
 } from "./workflow-session-config-shared";
+
+function modelSelectionForRule(
+  rule: ConfigureSessionRule,
+  configOptions: SelectConfigOption[],
+  selectedAgent: AvailableAgent | undefined,
+) {
+  const modelConfigOption = configOptions.find(isModelConfigOption);
+  const modelOptions = modelConfigOption
+    ? configOptionToModelOptions(modelConfigOption)
+    : (selectedAgent?.model_config?.available_models ?? []).map((model) => ({
+        id: model.id,
+        name: model.name,
+        description: model.description ?? (model.id !== model.name ? model.id : undefined),
+        usageMultiplier:
+          typeof model.meta?.copilotUsage === "string" ? model.meta.copilotUsage : undefined,
+      }));
+
+  return {
+    modelOptions,
+    currentModel: currentModelForRule(rule, modelConfigOption, selectedAgent),
+  };
+}
 
 export function SessionConfigRuleCard({
   rule,
@@ -38,18 +63,52 @@ export function SessionConfigRuleCard({
   onRemove: () => void;
 }) {
   const selectedAgent = availableAgents.find((agent) => agent.name === rule.agent_name);
-  const configOptions = modelConfigOptions(selectedAgent?.model_config, rule);
-  const modelConfigOption = configOptions.find(isModelConfigOption);
-  const modelOptions = modelConfigOption
-    ? configOptionToModelOptions(modelConfigOption)
-    : (selectedAgent?.model_config?.available_models ?? []).map((model) => ({
-        id: model.id,
-        name: model.name,
-        description: model.description ?? (model.id !== model.name ? model.id : undefined),
-        usageMultiplier:
-          typeof model.meta?.copilotUsage === "string" ? model.meta.copilotUsage : undefined,
-      }));
-  const currentModel = currentModelForRule(rule, modelConfigOption, selectedAgent);
+  const {
+    configOptions,
+    configStatus,
+    configError,
+    configIsLoading,
+    refreshConfig,
+    isConfigResolvedForRequest,
+    resolvedConfigOptions,
+  } = useSessionConfigModelOptions(selectedAgent, rule);
+  const selectedRuleModel = rule.operation === "set" ? rule.model : undefined;
+  const initialRuleModel = useRef(selectedRuleModel);
+  const hasUserSelectedModel = useRef(false);
+
+  useEffect(() => {
+    if (selectedRuleModel !== initialRuleModel.current) {
+      hasUserSelectedModel.current = true;
+    }
+  }, [selectedRuleModel]);
+
+  useEffect(() => {
+    if (
+      readOnly ||
+      !hasUserSelectedModel.current ||
+      rule.operation !== "set" ||
+      configStatus !== "ok" ||
+      !isConfigResolvedForRequest
+    ) {
+      return;
+    }
+    const nextConfigOptions = reconcileConfigOptionValues(
+      rule.config_options,
+      resolvedConfigOptions,
+    );
+    if (JSON.stringify(nextConfigOptions) === JSON.stringify(rule.config_options ?? {})) {
+      return;
+    }
+    const nextRule = { ...rule };
+    if (Object.keys(nextConfigOptions).length > 0) {
+      nextRule.config_options = nextConfigOptions;
+    } else {
+      delete nextRule.config_options;
+    }
+    onChange(nextRule);
+  }, [configStatus, isConfigResolvedForRequest, onChange, readOnly, resolvedConfigOptions, rule]);
+
+  const { modelOptions, currentModel } = modelSelectionForRule(rule, configOptions, selectedAgent);
 
   return (
     <div
@@ -72,8 +131,18 @@ export function SessionConfigRuleCard({
           modelOptions={modelOptions}
           currentModel={currentModel}
           configOptions={configOptions}
+          configStatus={configStatus}
+          configError={configError}
+          configIsLoading={configIsLoading}
+          onRetryConfig={refreshConfig}
           readOnly={readOnly}
-          onChange={onChange}
+          onChange={(nextRule) => {
+            const nextModel = nextRule.operation === "set" ? nextRule.model : undefined;
+            if (nextModel !== selectedRuleModel) {
+              hasUserSelectedModel.current = true;
+            }
+            onChange(nextRule);
+          }}
         />
       )}
     </div>
@@ -183,6 +252,10 @@ function SessionConfigRuleSettings({
   modelOptions,
   currentModel,
   configOptions,
+  configStatus,
+  configError,
+  configIsLoading,
+  onRetryConfig,
   readOnly,
   onChange,
 }: {
@@ -190,6 +263,10 @@ function SessionConfigRuleSettings({
   modelOptions: { id: string; name: string; description?: string; usageMultiplier?: string }[];
   currentModel: string | null;
   configOptions: SelectConfigOption[];
+  configStatus: ReturnType<typeof useSessionConfigModelOptions>["configStatus"];
+  configError: string | null;
+  configIsLoading: boolean;
+  onRetryConfig: () => Promise<void>;
   readOnly: boolean;
   onChange: (rule: ConfigureSessionRule) => void;
 }) {
@@ -197,22 +274,30 @@ function SessionConfigRuleSettings({
   return (
     <div className="space-y-2 border-t border-border/60 pt-3">
       {modelOptions.length > 0 || configOptions.length > 0 ? (
-        <ModelConfigSelector
-          modelOptions={modelOptions}
-          currentModel={currentModel}
-          configOptions={configOptions}
-          onModelChange={(model) => onChange({ ...rule, model })}
-          onConfigChange={(configId, value) =>
-            onChange({
-              ...rule,
-              config_options: { ...(rule.config_options ?? {}), [configId]: value },
-            })
-          }
-          disabled={readOnly}
-          placeholder={t("workflows:chooseModelAndSessionSettings")}
-          ariaLabel={t("workflows:settingsForAgent", { agent: rule.agent_name })}
-          triggerClassName="min-h-11 w-full sm:min-h-10"
-        />
+        <>
+          <ModelConfigSelector
+            modelOptions={modelOptions}
+            currentModel={currentModel}
+            configOptions={configOptions}
+            onModelChange={(model) => onChange({ ...rule, model })}
+            onConfigChange={(configId, value) =>
+              onChange({
+                ...rule,
+                config_options: { ...(rule.config_options ?? {}), [configId]: value },
+              })
+            }
+            disabled={readOnly}
+            placeholder={t("workflows:chooseModelAndSessionSettings")}
+            ariaLabel={t("workflows:settingsForAgent", { agent: rule.agent_name })}
+            triggerClassName="min-h-11 w-full sm:min-h-10"
+          />
+          <ModelConfigResolutionStatus
+            status={configStatus}
+            error={configError}
+            isLoading={configIsLoading}
+            onRetry={onRetryConfig}
+          />
+        </>
       ) : (
         <p className="rounded-md border border-border/60 p-2 text-xs text-muted-foreground">
           {t("workflows:sessionConfigModelOptionsUnavailable")}

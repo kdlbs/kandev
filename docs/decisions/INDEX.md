@@ -127,3 +127,4 @@ Read individual ADRs for full context. Create new ones via `/record decision` or
 | 2026-08-05-server-owned-quick-terminal-descriptors | [Server-Owned Quick Terminal Descriptors](2026-08-05-server-owned-quick-terminal-descriptors.md) | accepted | backend, frontend, protocol, security | 2026-08-05 |
 | 2026-08-05-nested-submodules-as-repository-scopes | [Model Nested Submodules as Repository Scopes](2026-08-05-nested-submodules-as-repository-scopes.md) | accepted | backend, frontend, protocol | 2026-08-05 |
 | 2026-08-05-homebrew-remote-helper-audit | [Preserve Remote Helpers in Homebrew Installs](2026-08-05-homebrew-remote-helper-audit.md) | accepted | infra, workflow | 2026-08-05 |
+| 2026-08-07-model-aware-provider-capability-resolution | [Model-aware provider capability resolution](2026-08-07-model-aware-provider-capability-resolution.md) | accepted | backend, frontend, protocol | 2026-08-07 |

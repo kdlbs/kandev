@@ -99,6 +99,7 @@ Roles, governance gates, and granular permissions that apply across human users 
 |---|---|
 | [runtime-updates](agents/runtime-updates.md) | approved |
 | [profile-disable](agents/profile-disable.md) | draft |
+| [dynamic-provider-options](agents/dynamic-provider-options.md) | shipped |
 | [roles](agents/roles.md) | shipped |
 | [governance](agents/governance.md) | shipped |
 | [granular-permissions](agents/granular-permissions.md) | draft |

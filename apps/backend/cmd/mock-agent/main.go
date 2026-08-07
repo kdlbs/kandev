@@ -167,13 +167,35 @@ func mockSessionModes() *acp.SessionModeState {
 }
 
 func mockSessionConfigOptions() []acp.SessionConfigOption {
+	return mockSessionConfigOptionsForModel("mock-fast")
+}
+
+func mockSessionConfigOptionsForModel(model string) []acp.SessionConfigOption {
 	modelCat := acp.SessionConfigOptionCategoryModel
 	modeCat := acp.SessionConfigOptionCategoryMode
 	thoughtCat := acp.SessionConfigOptionCategoryThoughtLevel
+	effortID := acp.SessionConfigId("effort")
+	effortName := "Effort"
+	effortDescription := "Controls how much reasoning the mock model uses"
+	effortValue := acp.SessionConfigValueId("medium")
+	effortOptions := acp.SessionConfigSelectOptionsUngrouped{
+		{Value: "low", Name: "Low", Description: ptr("Faster responses with less reasoning")},
+		{Value: "medium", Name: "Medium", Description: ptr("Balanced speed and reasoning")},
+		{Value: "high", Name: "High", Description: ptr("More reasoning for complex tasks")},
+	}
+	if model == "mock-smart" {
+		effortDescription = "Controls the reasoning depth for the smart mock model"
+		effortValue = "high"
+		effortOptions = acp.SessionConfigSelectOptionsUngrouped{
+			{Value: "low", Name: "Low", Description: ptr("Use less reasoning")},
+			{Value: "high", Name: "High", Description: ptr("Use deeper reasoning")},
+			{Value: "max", Name: "Max", Description: ptr("Use maximum reasoning")},
+		}
+	}
 	return []acp.SessionConfigOption{
 		{Select: &acp.SessionConfigOptionSelect{
 			Category:     &modelCat,
-			CurrentValue: "mock-fast",
+			CurrentValue: acp.SessionConfigValueId(model),
 			Id:           "model",
 			Name:         "Model",
 			Options: acp.SessionConfigSelectOptions{Ungrouped: &acp.SessionConfigSelectOptionsUngrouped{
@@ -195,16 +217,12 @@ func mockSessionConfigOptions() []acp.SessionConfigOption {
 		}},
 		{Select: &acp.SessionConfigOptionSelect{
 			Category:     &thoughtCat,
-			CurrentValue: "medium",
-			Id:           "effort",
-			Name:         "Effort",
-			Description:  ptr("Controls how much reasoning the mock model uses"),
-			Options: acp.SessionConfigSelectOptions{Ungrouped: &acp.SessionConfigSelectOptionsUngrouped{
-				{Value: "low", Name: "Low", Description: ptr("Faster responses with less reasoning")},
-				{Value: "medium", Name: "Medium", Description: ptr("Balanced speed and reasoning")},
-				{Value: "high", Name: "High", Description: ptr("More reasoning for complex tasks")},
-			}},
-			Type: "select",
+			CurrentValue: effortValue,
+			Id:           effortID,
+			Name:         effortName,
+			Description:  ptr(effortDescription),
+			Options:      acp.SessionConfigSelectOptions{Ungrouped: &effortOptions},
+			Type:         "select",
 		}},
 	}
 }
@@ -338,8 +356,28 @@ func (a *mockAgent) SetSessionConfigOption(_ context.Context, req acp.SetSession
 	if !found {
 		return acp.SetSessionConfigOptionResponse{}, fmt.Errorf("unknown mock config option %q", req.ValueId.ConfigId)
 	}
+	if req.ValueId.ConfigId == "model" {
+		modeValue := mockConfigOptionValue(options, "mode")
+		options = mockSessionConfigOptionsForModel(string(req.ValueId.Value))
+		for i := range options {
+			if options[i].Select != nil && options[i].Select.Id == "mode" && modeValue != "" {
+				if mockConfigOptionContainsValue(options[i].Select.Options, modeValue) {
+					options[i].Select.CurrentValue = modeValue
+				}
+			}
+		}
+	}
 	a.sessionConfig[req.ValueId.SessionId] = options
 	return acp.SetSessionConfigOptionResponse{ConfigOptions: cloneSessionConfigOptions(options)}, nil
+}
+
+func mockConfigOptionValue(options []acp.SessionConfigOption, id acp.SessionConfigId) acp.SessionConfigValueId {
+	for _, option := range options {
+		if option.Select != nil && option.Select.Id == id {
+			return option.Select.CurrentValue
+		}
+	}
+	return ""
 }
 
 func mockConfigOptionContainsValue(options acp.SessionConfigSelectOptions, value acp.SessionConfigValueId) bool {

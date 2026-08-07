@@ -124,7 +124,7 @@ test.describe("Workflow settings", () => {
     await settings.click();
     await testPage.getByText("Mock Smart", { exact: true }).click();
     await testPage.getByTestId("config-option-trigger-effort").click();
-    await testPage.getByRole("button", { name: "High", exact: true }).click();
+    await testPage.getByRole("button", { name: "Max", exact: true }).click();
     await testPage.keyboard.press("Escape");
     await prCapture.screenshot("desktop-original-session-editor", {
       caption: "Workflow step editor with a conditional original-session model and effort rule.",
@@ -141,7 +141,7 @@ test.describe("Workflow settings", () => {
               agent_name: agent!.name,
               operation: "set",
               model: "mock-smart",
-              config_options: { effort: "high" },
+              config_options: { effort: "max" },
             },
           ],
         },

@@ -1,12 +1,15 @@
-import { useState, useEffect, useCallback } from "react";
-import { fetchDynamicModels } from "@/lib/api/domains/settings-api";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import { fetchDynamicModels, resolveAgentModelConfig } from "@/lib/api/domains/settings-api";
 import type {
+  AgentModelConfigResponse,
   CommandEntry,
+  ConfigOptionEntry,
   ModeEntry,
   ModelEntry,
   CapabilityStatus,
   DynamicModelsResponse,
   ModelConfig,
+  ResolveAgentModelConfigRequest,
 } from "@/lib/types/http";
 // Set from an async catch rather than rendered as a literal, so this uses the
 // module-level `t`, which resolves at call time. The message surfaces in the
@@ -24,6 +27,135 @@ type UseAgentCapabilitiesState = {
   error: string | null;
   refresh: () => Promise<void>;
 };
+
+type UseResolvedModelConfigOptions = {
+  mode?: string;
+  configOptions?: Record<string, string>;
+  initialConfigOptions?: ConfigOptionEntry[];
+  enabled?: boolean;
+};
+
+type UseResolvedModelConfigState = {
+  configOptions: ConfigOptionEntry[];
+  status: CapabilityStatus | undefined;
+  isResolvedForRequest: boolean;
+  isLoading: boolean;
+  error: string | null;
+  refresh: () => Promise<void>;
+};
+
+type CachedModelConfigResolution = {
+  response: AgentModelConfigResponse;
+  expiresAt: number;
+};
+
+const MODEL_CONFIG_RESOLUTION_TTL_MS = 5 * 60 * 1000;
+const modelConfigResolutionCache = new Map<string, CachedModelConfigResolution>();
+const modelConfigResolutionInflight = new Map<string, Promise<AgentModelConfigResponse>>();
+let modelConfigResolutionGeneration = 0;
+
+export function invalidateModelConfigResolutionCache(agentName?: string): void {
+  modelConfigResolutionGeneration += 1;
+  if (!agentName) {
+    modelConfigResolutionCache.clear();
+    modelConfigResolutionInflight.clear();
+    return;
+  }
+  for (const key of modelConfigResolutionCache.keys()) {
+    if (modelConfigResolutionKeyAgent(key) === agentName) {
+      modelConfigResolutionCache.delete(key);
+    }
+  }
+  for (const key of modelConfigResolutionInflight.keys()) {
+    if (modelConfigResolutionKeyAgent(key) === agentName) {
+      modelConfigResolutionInflight.delete(key);
+    }
+  }
+}
+
+function modelConfigResolutionKeyAgent(key: string): string | undefined {
+  try {
+    const parsed = JSON.parse(key);
+    return Array.isArray(parsed) && typeof parsed[0] === "string" ? parsed[0] : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function stableRecordKey(values: Record<string, string> | undefined): string {
+  return JSON.stringify(
+    Object.entries(values ?? {}).sort(([left], [right]) => left.localeCompare(right)),
+  );
+}
+
+function modelConfigResolutionKey(
+  agentName: string,
+  request: ResolveAgentModelConfigRequest,
+): string {
+  return JSON.stringify([
+    agentName,
+    request.model,
+    request.mode ?? "",
+    stableRecordKey(request.config_options),
+  ]);
+}
+
+function cloneModelConfigResponse(response: AgentModelConfigResponse): AgentModelConfigResponse {
+  return {
+    ...response,
+    config_options: (response.config_options ?? []).map((option) => ({
+      ...option,
+      options: option.options?.map((item) => ({ ...item })),
+    })),
+  };
+}
+
+async function fetchResolvedModelConfig(
+  agentName: string,
+  request: ResolveAgentModelConfigRequest,
+  forceRefresh: boolean,
+): Promise<AgentModelConfigResponse> {
+  const key = modelConfigResolutionKey(agentName, request);
+  if (!forceRefresh) {
+    const cached = modelConfigResolutionCache.get(key);
+    if (cached && cached.expiresAt > Date.now()) {
+      return cloneModelConfigResponse(cached.response);
+    }
+    if (cached) {
+      modelConfigResolutionCache.delete(key);
+    }
+  }
+
+  const existing = modelConfigResolutionInflight.get(key);
+  if (existing) return existing.then(cloneModelConfigResponse);
+
+  const generation = modelConfigResolutionGeneration;
+  const payload = forceRefresh ? { ...request, refresh: true } : request;
+  const promise = resolveAgentModelConfig(agentName, payload).then((response) => {
+    const cloned = cloneModelConfigResponse(response);
+    if (cloned.status === "ok" && generation === modelConfigResolutionGeneration) {
+      modelConfigResolutionCache.set(key, {
+        response: cloned,
+        expiresAt: Date.now() + MODEL_CONFIG_RESOLUTION_TTL_MS,
+      });
+    }
+    return cloned;
+  });
+  modelConfigResolutionInflight.set(key, promise);
+  void promise.then(
+    () => {
+      if (modelConfigResolutionInflight.get(key) === promise) {
+        modelConfigResolutionInflight.delete(key);
+      }
+    },
+    () => {
+      if (modelConfigResolutionInflight.get(key) === promise) {
+        modelConfigResolutionInflight.delete(key);
+      }
+    },
+  );
+  return promise.then(cloneModelConfigResponse);
+}
 
 /**
  * useAgentCapabilities fetches the full ACP probe cache for an agent
@@ -56,6 +188,9 @@ export function useAgentCapabilities(
         return;
       }
       setIsLoading(true);
+      if (forceRefresh) {
+        invalidateModelConfigResolutionCache(agentName);
+      }
       setError(null);
       try {
         const response: DynamicModelsResponse = await fetchDynamicModels(agentName, {
@@ -103,6 +238,106 @@ export function useAgentCapabilities(
     currentModelId,
     currentModeId,
     status,
+    isLoading,
+    error,
+    refresh,
+  };
+}
+
+/**
+ * Resolve the complete provider option snapshot for the selected model.
+ *
+ * The response is model-aware. A provider can therefore return a different
+ * option list for every model without adding provider-specific frontend code.
+ */
+export function useResolvedModelConfig(
+  agentName: string | undefined,
+  model: string | undefined,
+  options: UseResolvedModelConfigOptions = {},
+): UseResolvedModelConfigState {
+  const { mode, configOptions, initialConfigOptions = [], enabled = true } = options;
+  const configOptionsKey = stableRecordKey(configOptions);
+  const initialConfigOptionsKey = JSON.stringify(initialConfigOptions);
+  const stableConfigOptions = useMemo(() => configOptions, [configOptionsKey]);
+  const stableInitialConfigOptions = useMemo(() => initialConfigOptions, [initialConfigOptionsKey]);
+  const request = useMemo<ResolveAgentModelConfigRequest | null>(() => {
+    if (!model) return null;
+    return {
+      model,
+      ...(mode ? { mode } : {}),
+      ...(stableConfigOptions && Object.keys(stableConfigOptions).length > 0
+        ? { config_options: stableConfigOptions }
+        : {}),
+    };
+  }, [mode, model, stableConfigOptions]);
+  const requestKey = useMemo(
+    () => (request ? modelConfigResolutionKey(agentName ?? "", request) : undefined),
+    [agentName, request],
+  );
+  const [resolvedOptions, setResolvedOptions] = useState<ConfigOptionEntry[]>(
+    stableInitialConfigOptions,
+  );
+  const [status, setStatus] = useState<CapabilityStatus>();
+  const [resolvedRequestKey, setResolvedRequestKey] = useState<string>();
+  const [isLoading, setIsLoading] = useState(Boolean(enabled && agentName && request));
+  const [error, setError] = useState<string | null>(null);
+  const requestSequence = useRef(0);
+
+  const run = useCallback(
+    async (forceRefresh: boolean) => {
+      const sequence = ++requestSequence.current;
+      if (!enabled || !agentName || !request) {
+        setResolvedOptions(stableInitialConfigOptions);
+        setStatus(undefined);
+        setResolvedRequestKey(undefined);
+        setError(null);
+        setIsLoading(false);
+        return;
+      }
+
+      setResolvedRequestKey(undefined);
+      setResolvedOptions(stableInitialConfigOptions);
+      setStatus(forceRefresh ? "probing" : undefined);
+      setError(null);
+      setIsLoading(true);
+      try {
+        const response = await fetchResolvedModelConfig(agentName, request, forceRefresh);
+        if (sequence !== requestSequence.current) return;
+        setStatus(response.status);
+        setError(response.error ?? null);
+        setResolvedOptions(
+          response.status === "ok" ? (response.config_options ?? []) : stableInitialConfigOptions,
+        );
+        if (response.status === "ok" && requestKey) {
+          setResolvedRequestKey(requestKey);
+        }
+      } catch (err) {
+        if (sequence !== requestSequence.current) return;
+        setStatus("failed");
+        setError(err instanceof Error ? err.message : t("agents:failedToFetchCapabilities"));
+        setResolvedOptions(stableInitialConfigOptions);
+      } finally {
+        if (sequence === requestSequence.current) {
+          setIsLoading(false);
+        }
+      }
+    },
+    [agentName, enabled, request, requestKey, stableInitialConfigOptions],
+  );
+
+  useEffect(() => {
+    void run(false);
+    return () => {
+      requestSequence.current += 1;
+    };
+  }, [run]);
+
+  const refresh = useCallback(() => run(true), [run]);
+
+  return {
+    configOptions: resolvedOptions,
+    status,
+    isResolvedForRequest: requestKey !== undefined && resolvedRequestKey === requestKey,
     isLoading,
     error,
     refresh,

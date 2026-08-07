@@ -134,6 +134,12 @@ test.describe("Agent profile — ACP-first", () => {
       // Shared profile selectors retain the all-values summary; baseline
       // compaction applies only to task chat.
       await expect(selector).toHaveText("Mock Fast / High", { timeout: 10_000 });
+      await expect(testPage.getByTestId("model-config-resolution-loading")).toBeHidden({
+        timeout: 15_000,
+      });
+      await expect(testPage.getByTestId("profile-refresh-capabilities")).toBeEnabled({
+        timeout: 15_000,
+      });
 
       await selector.click();
       await expect(
@@ -144,6 +150,30 @@ test.describe("Agent profile — ACP-first", () => {
       await effortTrigger.click();
       await testPage.getByRole("button", { name: "Low", exact: true }).click();
       await expect(selector).toHaveText("Mock Fast / Low");
+
+      // Changing the model must replace the option snapshot. mock-smart
+      // exposes Max while mock-fast exposes Medium, so this also proves the
+      // profile selector does not keep the previous model's option list.
+      await testPage.getByRole("option", { name: /Mock Smart/ }).click();
+      await expect(testPage.getByTestId("model-config-resolution-loading")).toBeHidden({
+        timeout: 15_000,
+      });
+      await expect(selector).toContainText("Mock Smart", { timeout: 10_000 });
+      await expect(testPage.getByTestId("config-option-trigger-effort")).toBeVisible();
+      await testPage.getByTestId("config-option-trigger-effort").click();
+      await expect(testPage.getByRole("button", { name: "Max", exact: true })).toBeVisible();
+      await testPage.getByRole("button", { name: "Max", exact: true }).click();
+      await expect(selector).toHaveText("Mock Smart / Max");
+
+      // Restore the original model before exercising persistence below.
+      await testPage.getByRole("option", { name: /Mock Fast/ }).click();
+      await expect(testPage.getByTestId("model-config-resolution-loading")).toBeHidden({
+        timeout: 15_000,
+      });
+      await testPage.getByTestId("config-option-trigger-effort").click();
+      await testPage.getByRole("button", { name: "Low", exact: true }).click();
+      await expect(selector).toHaveText("Mock Fast / Low");
+      await selector.click();
 
       const saveButton = testPage.getByRole("button", { name: /^Save( changes)?$/i }).first();
       await expect(saveButton).toBeEnabled({ timeout: 10_000 });
