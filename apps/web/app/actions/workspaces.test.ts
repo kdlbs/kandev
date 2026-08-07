@@ -5,10 +5,12 @@ vi.mock("@/lib/config", () => ({
 }));
 
 import {
+  createWorkflowAction,
   createWorkflowStepAction,
   deleteWorkspaceAction,
   exportAllWorkflowsAction,
   listWorkflowStepsAction,
+  updateWorkflowAction,
   updateWorkflowStepAction,
 } from "./workspaces";
 
@@ -242,5 +244,84 @@ describe("workflow step cancellation fields", () => {
     expect(JSON.parse(init.body as string)).toMatchObject({
       cancel_triggers_turn_complete: false,
     });
+  });
+});
+
+const WORKFLOW_PROMPT = "If the PR is merged or closed, move the Task to Done.";
+
+function mockWorkflowJsonResponse(extra: Record<string, unknown> = {}) {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () =>
+      Response.json({
+        id: "wf-1",
+        workspace_id: "ws-1",
+        name: "Feature Dev",
+        created_at: "",
+        updated_at: "",
+        ...extra,
+      }),
+    ),
+  );
+}
+
+describe("workflow prompt fields", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  it("serializes prompt when creating a workflow", async () => {
+    mockWorkflowJsonResponse({ prompt: WORKFLOW_PROMPT });
+
+    const result = await createWorkflowAction({
+      workspace_id: "ws-1",
+      name: "Feature Dev",
+      prompt: WORKFLOW_PROMPT,
+    });
+
+    const fetchMock = fetch as unknown as ReturnType<typeof vi.fn>;
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe("http://backend.test/api/v1/workflows");
+    expect(init.method).toBe("POST");
+    expect(JSON.parse(init.body as string)).toMatchObject({
+      workspace_id: "ws-1",
+      name: "Feature Dev",
+      prompt: WORKFLOW_PROMPT,
+    });
+    expect(result.prompt).toBe(WORKFLOW_PROMPT);
+  });
+
+  it("serializes prompt when updating a workflow", async () => {
+    mockWorkflowJsonResponse({ prompt: WORKFLOW_PROMPT });
+
+    await updateWorkflowAction("wf-1", { prompt: WORKFLOW_PROMPT });
+
+    const fetchMock = fetch as unknown as ReturnType<typeof vi.fn>;
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe("http://backend.test/api/v1/workflows/wf-1");
+    expect(init.method).toBe("PATCH");
+    expect(JSON.parse(init.body as string)).toEqual({ prompt: WORKFLOW_PROMPT });
+  });
+
+  it("serializes an empty string when clearing the workflow prompt", async () => {
+    mockWorkflowJsonResponse();
+
+    await updateWorkflowAction("wf-1", { prompt: "" });
+
+    const fetchMock = fetch as unknown as ReturnType<typeof vi.fn>;
+    const [, init] = fetchMock.mock.calls[0];
+    // omit would leave the stored prompt unchanged; "" is the clear contract.
+    expect(JSON.parse(init.body as string)).toEqual({ prompt: "" });
+  });
+
+  it("omits prompt from the update body when the field is not provided", async () => {
+    mockWorkflowJsonResponse();
+
+    await updateWorkflowAction("wf-1", { name: "Renamed" });
+
+    const fetchMock = fetch as unknown as ReturnType<typeof vi.fn>;
+    const [, init] = fetchMock.mock.calls[0];
+    expect(JSON.parse(init.body as string)).toEqual({ name: "Renamed" });
   });
 });

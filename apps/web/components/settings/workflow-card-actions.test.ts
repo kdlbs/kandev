@@ -415,6 +415,104 @@ describe("persistWorkflowDraft cancellation policy", () => {
   });
 });
 
+const WORKFLOW_PROMPT = "If the PR is merged or closed, move the Task to Done.";
+
+describe("persistWorkflowDraft workflow prompt", () => {
+  beforeEach(() => {
+    vi.mocked(reorderWorkflowStepsAction).mockResolvedValue({ steps: [], total: 0 });
+  });
+
+  it("includes prompt when creating a temporary workflow", async () => {
+    const draftWorkflow = {
+      ...workflow,
+      id: CLIENT_WORKFLOW_ID,
+      prompt: WORKFLOW_PROMPT,
+      description: "Shared instructions",
+    } as Workflow;
+    const created = { ...workflow, id: "wf-created", prompt: WORKFLOW_PROMPT } as Workflow;
+    vi.mocked(createWorkflowAction).mockResolvedValue(created);
+    vi.mocked(updateWorkflowAction).mockResolvedValue(created);
+
+    await persistWorkflowDraft({
+      workflow: draftWorkflow,
+      draftSteps: [],
+      savedSteps: [],
+      progress: createWorkflowDraftSaveProgress(),
+    });
+
+    expect(createWorkflowAction).toHaveBeenCalledWith({
+      workspace_id: "ws-1",
+      name: "Workflow",
+      description: "Shared instructions",
+      prompt: WORKFLOW_PROMPT,
+      workflow_template_id: undefined,
+    });
+  });
+
+  it("sends prompt on every metadata update for an existing workflow", async () => {
+    const draftWorkflow = {
+      ...workflow,
+      prompt: WORKFLOW_PROMPT,
+      description: "desc",
+    } as Workflow;
+    vi.mocked(updateWorkflowAction).mockResolvedValue(draftWorkflow);
+
+    await persistWorkflowDraft({
+      workflow: draftWorkflow,
+      draftSteps: [],
+      savedSteps: [],
+      progress: createWorkflowDraftSaveProgress(),
+    });
+
+    expect(createWorkflowAction).not.toHaveBeenCalled();
+    expect(updateWorkflowAction).toHaveBeenCalledWith("wf-1", {
+      name: "Workflow",
+      description: "desc",
+      prompt: WORKFLOW_PROMPT,
+      agent_profile_id: "",
+    });
+  });
+
+  it("clears the workflow prompt with an empty string", async () => {
+    const draftWorkflow = {
+      ...workflow,
+      prompt: "",
+      agent_profile_id: "profile-1",
+    } as Workflow;
+    vi.mocked(updateWorkflowAction).mockResolvedValue(draftWorkflow);
+
+    await persistWorkflowDraft({
+      workflow: draftWorkflow,
+      draftSteps: [],
+      savedSteps: [],
+      progress: createWorkflowDraftSaveProgress(),
+    });
+
+    expect(updateWorkflowAction).toHaveBeenCalledWith(
+      "wf-1",
+      expect.objectContaining({ prompt: "" }),
+    );
+  });
+
+  it("normalizes a missing prompt to empty string on update", async () => {
+    // create uses `?? undefined` (omit when unset); update always sends "" so
+    // omit-vs-clear remains an intentional wire contract difference.
+    vi.mocked(updateWorkflowAction).mockResolvedValue(workflow);
+
+    await persistWorkflowDraft({
+      workflow,
+      draftSteps: [],
+      savedSteps: [],
+      progress: createWorkflowDraftSaveProgress(),
+    });
+
+    expect(updateWorkflowAction).toHaveBeenCalledWith(
+      "wf-1",
+      expect.objectContaining({ prompt: "" }),
+    );
+  });
+});
+
 describe("useWorkflowDeleteHandlers", () => {
   it("refuses to open the delete-workflow dialog when readOnly", async () => {
     const wfDel = {

@@ -166,4 +166,40 @@ describe("useWorkflowDraftContributor", () => {
     expect(view.onDeleteWorkflow).toHaveBeenCalledOnce();
     expect(view.result.current.isRemovingDraft).toBe(false);
   });
+
+  it("includes prompt in the save revision fingerprint", () => {
+    const withoutPrompt = workflow();
+    renderContributor({ draftWorkflow: withoutPrompt });
+    const baseline = contributor().revision;
+
+    renderContributor({
+      draftWorkflow: { ...withoutPrompt, prompt: "Keep multi-PR work in subtasks." },
+    });
+    expect(contributor().revision).not.toBe(baseline);
+  });
+
+  it("changes revision when only the prompt is edited", () => {
+    const base = { ...workflow(), prompt: "old instructions" } as Workflow;
+    renderContributor({ draftWorkflow: base });
+    const before = contributor().revision;
+
+    renderContributor({
+      draftWorkflow: { ...base, prompt: "new instructions" },
+    });
+    expect(contributor().revision).not.toBe(before);
+
+    renderContributor({ draftWorkflow: base });
+    expect(contributor().revision).toBe(before);
+  });
+
+  it("treats clearing the prompt as a distinct revision", () => {
+    const withPrompt = { ...workflow(), prompt: "clear me" } as Workflow;
+    renderContributor({ draftWorkflow: withPrompt });
+    const withPromptRevision = contributor().revision;
+
+    renderContributor({
+      draftWorkflow: { ...withPrompt, prompt: "" },
+    });
+    expect(contributor().revision).not.toBe(withPromptRevision);
+  });
 });
