@@ -1,6 +1,6 @@
 import { formatDistanceToNow } from "date-fns";
 import { enUS } from "date-fns/locale/en-US";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { dateLocale, formatTimeDistance, primeDateLocale, resolveDateLocale } from "./date-locale";
 import { activateLocale, DEFAULT_LOCALE } from "./index";
@@ -86,6 +86,14 @@ describe("resolveDateLocale", () => {
 });
 
 describe("dateLocale", () => {
+  // Restore in a hook rather than at the end of each test body: a failing
+  // assertion would skip inline cleanup and leak `pt-pt` and fake timers into
+  // whatever runs next.
+  afterEach(async () => {
+    vi.useRealTimers();
+    await activateLocale(DEFAULT_LOCALE);
+  });
+
   it("follows the active i18next language once primed", async () => {
     await activateLocale("pt-pt");
     await primeDateLocale("pt-pt");
@@ -104,8 +112,5 @@ describe("dateLocale", () => {
     // The gap this PR closes: previously "about 1 hour ago" in Portuguese prose.
     expect(formatTimeDistance(ago(HOUR))).toBe("há aproximadamente 1 hora");
     expect(formatTimeDistance(ago(3 * DAY))).toBe("há 3 dias");
-
-    await activateLocale(DEFAULT_LOCALE);
-    vi.useRealTimers();
   });
 });

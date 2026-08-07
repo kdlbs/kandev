@@ -8,7 +8,7 @@ import { IconTrash, IconLoader, IconArchive } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Badge } from "@kandev/ui/badge";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
-import { formatTimeDistance } from "@/lib/i18n/date-locale";
+import { formatTimeDistance, useDateLocale } from "@/lib/i18n/date-locale";
 import { TaskDeleteConfirmDialog } from "@/components/task/task-delete-confirm-dialog";
 import { TaskArchiveConfirmDialog } from "@/components/task/task-archive-confirm-dialog";
 import { linkToTask } from "@/lib/links";
@@ -138,6 +138,17 @@ function ActionsCell({ row, ctx }: { row: Row<TaskWithResolution>; ctx: ActionsC
   );
 }
 
+// A component rather than an inline cell expression so it can subscribe to the
+// date locale: `getColumns` is a plain builder and cannot call hooks, so an
+// inline cell would keep the `enUS` fallback until some unrelated render.
+function UpdatedAtCell({ updatedAt }: { updatedAt?: string }) {
+  return (
+    <span className="text-xs text-muted-foreground">
+      {formatTimeDistance(updatedAt, useDateLocale())}
+    </span>
+  );
+}
+
 export function getColumns({
   workflows,
   steps,
@@ -178,13 +189,7 @@ export function getColumns({
     {
       accessorKey: "updated_at",
       header: t("tasks:columnUpdated"),
-      cell: ({ row }) => (
-        <span className="text-xs text-muted-foreground">
-          {/* `getColumns` is a plain builder, not a component, so it resolves
-              the locale from the module rather than through `useDateLocale`. */}
-          {formatTimeDistance(row.original.updated_at)}
-        </span>
-      ),
+      cell: ({ row }) => <UpdatedAtCell updatedAt={row.original.updated_at} />,
     },
     {
       id: "actions",

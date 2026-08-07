@@ -1,8 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import type { Locale } from "date-fns";
-import { dateLocale, formatTimeDistance } from "@/lib/i18n/date-locale";
+import { formatTimeDistance } from "@/lib/i18n/date-locale";
 import { Avatar, AvatarFallback, AvatarImage } from "@kandev/ui/avatar";
 import { getJiraTicket, transitionJiraTicket } from "@/lib/api/domains/jira-api";
 import type { JiraStatusCategory, JiraTicket } from "@/lib/types/jira";
@@ -34,13 +33,11 @@ export function statusBadgeClass(category: JiraStatusCategory | undefined): stri
   }
 }
 
-// Distance phrasing comes from date-fns' locale data, so it needs the active
-// locale handed to it — see `@/lib/i18n/date-locale`. Callers inside React
-// should pass `useDateLocale()` so the value re-renders when a lazily loaded
-// locale lands; the default keeps non-component callers correct.
-export function formatRelative(iso: string | undefined, locale?: Locale): string {
-  return formatTimeDistance(iso, locale ?? dateLocale());
-}
+// Alias of the one canonical distance formatter, kept under this module's
+// historical name so existing consumers and their imports are unchanged.
+// Callers inside React should pass `useDateLocale()` so the value re-renders
+// when a lazily loaded locale lands; the default keeps other callers correct.
+export const formatRelative = formatTimeDistance;
 
 export function PersonCell({ name, avatar }: { name?: string; avatar?: string }) {
   const { t } = useTranslation();
