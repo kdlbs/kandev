@@ -226,6 +226,10 @@ export function ModelFallbackSection({
                 {fallbackSelector}
               </div>
               {alignSelectorWithStart && <div className="flex-1 min-w-0" aria-hidden />}
+              {/* Mirrors the refresh-capabilities column (w-7 icon button) so
+                  the fallback selector matches the start-model cell width
+                  exactly. */}
+              {alignSelectorWithStart && <div className="w-7 shrink-0" aria-hidden />}
             </div>
           )}
           {fallbackEnabled && (
