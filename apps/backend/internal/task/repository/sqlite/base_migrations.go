@@ -237,7 +237,83 @@ func (r *Repository) runMigrations() error {
 		CREATE INDEX IF NOT EXISTS idx_task_status_summaries_workspace
 			ON task_status_summaries(workspace_id)`)
 
+	if err := r.clearRecoveredAgentErrors(); err != nil {
+		return err
+	}
+
 	return nil
+}
+
+// clearRecoveredAgentErrors repairs sessions whose stored agent failure was
+// overtaken by successful work before the orchestrator learned to clear it.
+//
+// Nothing used to retire `last_agent_error`, so a failure the agent recovered
+// from weeks ago still reads as live and keeps a red error icon on the task list
+// forever. The orchestrator now clears the record on turn completion; this
+// applies the same rule to history.
+//
+// Deliberately narrow: a record is cleared only when the session has an ordinary
+// agent message newer than the failure — the same "the agent has produced good
+// output since" signal. A failure with no successful work after it is current
+// and is left alone.
+func (r *Repository) clearRecoveredAgentErrors() error {
+	postgres := dialect.IsPostgres(r.db.DriverName())
+
+	recoveredSessions := `
+		SELECT s.id
+		FROM task_sessions s
+		WHERE ` + jsonText(postgres, "s.metadata", "last_agent_error", "message") + ` IS NOT NULL
+			AND EXISTS (
+				SELECT 1 FROM task_session_messages m
+				WHERE m.task_session_id = s.id
+					AND m.author_type = 'agent'
+					AND m.type NOT IN ('error', 'status')
+					AND ` + timestampExpr(postgres, "m.created_at") + ` > ` +
+		timestampExpr(postgres, jsonText(postgres, "s.metadata", "last_agent_error", "occurred_at")) + `
+			)`
+
+	r.migrate.Apply("task_sessions.last_agent_error.recovered_cleanup",
+		`UPDATE task_sessions SET metadata = `+jsonRemoveKey(postgres, "metadata", "last_agent_error")+
+			` WHERE id IN (`+recoveredSessions+`)`)
+
+	// The summary row caches the derived error, so clearing the session record
+	// alone would leave the icon up until that session next emitted an event.
+	// A cached error naming a session that has no stored failure is stale by
+	// definition, which also sweeps up any earlier drift.
+	r.migrate.Apply("task_status_summaries.active_error.recovered_cleanup", `
+		UPDATE task_status_summaries
+		SET summary = `+jsonRemoveKey(postgres, "summary", "active_error")+`
+		WHERE `+jsonText(postgres, "summary", "active_error", "session_id")+` IN (
+			SELECT s.id FROM task_sessions s
+			WHERE `+jsonText(postgres, "s.metadata", "last_agent_error", "message")+` IS NULL
+		)`)
+	return nil
+}
+
+// jsonText extracts a nested JSON text value from a TEXT-typed JSON column.
+func jsonText(postgres bool, column, parent, key string) string {
+	if postgres {
+		return "((" + column + ")::jsonb #>> '{" + parent + "," + key + "}')"
+	}
+	return "json_extract(" + column + ", '$." + parent + "." + key + "')"
+}
+
+// timestampExpr makes two timestamps comparable. The message column and the
+// JSON `occurred_at` use different text shapes ('2026-08-01 10:00:00+00:00' vs
+// RFC3339 '2026-08-01T10:00:00Z'), which SQLite would otherwise compare
+// lexically, so both sides are normalized to Julian days.
+func timestampExpr(postgres bool, expression string) string {
+	if postgres {
+		return "(" + expression + ")::timestamptz"
+	}
+	return "julianday(" + expression + ")"
+}
+
+func jsonRemoveKey(postgres bool, column, key string) string {
+	if postgres {
+		return "((" + column + ")::jsonb - '" + key + "')::text"
+	}
+	return "json_remove(" + column + ", '$." + key + "')"
 }
 
 // ensureImproveKandevWorkflowTemplateUniqueness removes the broad index from

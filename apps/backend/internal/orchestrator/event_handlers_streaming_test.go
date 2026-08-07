@@ -2191,6 +2191,79 @@ func TestSessionStartClearsInterruptedMarker(t *testing.T) {
 	})
 }
 
+// Nothing else ever retires a stored agent failure, so without this clear every
+// path that re-derives task status from session metadata resurrects it and the
+// error icon never goes away.
+func TestClearRecoveredAgentErrorOnTurnCompletion(t *testing.T) {
+	ctx := context.Background()
+
+	seedError := func(t *testing.T, repo *sqliterepo.Repository) {
+		t.Helper()
+		require.NoError(t, repo.SetSessionMetadataKey(
+			ctx, "s1", models.SessionMetaKeyLastAgentError,
+			models.LastAgentError{Message: "agent crashed", OccurredAt: time.Now().UTC().Add(-time.Hour)},
+		))
+	}
+
+	errorEvents := func(eb *recordingEventBus) []recordedEvent {
+		var out []recordedEvent
+		for _, recorded := range eb.events {
+			if recorded.event != nil && recorded.event.Type == events.TaskSessionErrorChanged {
+				out = append(out, recorded)
+			}
+		}
+		return out
+	}
+
+	newService := func(repo *sqliterepo.Repository) (*Service, *recordingEventBus) {
+		eb := &recordingEventBus{}
+		svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+		svc.eventBus = eb
+		return svc, eb
+	}
+
+	t.Run("clears the record and publishes it inactive", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		seedSession(t, repo, "t1", "s1", "step1")
+		seedError(t, repo)
+		svc, eb := newService(repo)
+
+		session, err := repo.GetTaskSession(ctx, "s1")
+		require.NoError(t, err)
+		svc.clearRecoveredAgentError(ctx, "t1", session)
+
+		stored, err := repo.GetTaskSession(ctx, "s1")
+		require.NoError(t, err)
+		_, ok := models.LoadLastAgentError(stored.Metadata)
+		require.False(t, ok, "a recovered failure must not keep driving the error icon")
+
+		// The session-state publish that follows reads session_metadata straight
+		// off this object, so a stale copy would re-arm the icon immediately.
+		_, ok = models.LoadLastAgentError(session.Metadata)
+		require.False(t, ok, "the in-memory copy must be cleared too")
+
+		published := errorEvents(eb)
+		require.Len(t, published, 1, "clients need one event to drop the icon")
+		data, ok := published[0].event.Data.(map[string]interface{})
+		require.True(t, ok)
+		require.Equal(t, false, data["active"])
+		require.Equal(t, "s1", data["session_id"])
+	})
+
+	t.Run("stays silent when the session has no stored error", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		seedSession(t, repo, "t1", "s1", "step1")
+		svc, eb := newService(repo)
+
+		session, err := repo.GetTaskSession(ctx, "s1")
+		require.NoError(t, err)
+		svc.clearRecoveredAgentError(ctx, "t1", session)
+
+		require.Empty(t, errorEvents(eb),
+			"every later completion must stay silent so turns do not churn the row")
+	})
+}
+
 func TestSetSessionStartingRejectsTerminalSession(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)

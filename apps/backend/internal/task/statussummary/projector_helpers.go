@@ -37,19 +37,39 @@ func recomputeTaskPending(state *projectionState) {
 
 func (p *Projector) clearErrorLocked(state *projectionState, sessionID string) bool {
 	state.errorsObserved = true
-	if _, ok := state.errors[sessionID]; !ok {
+	existing, ok := state.errors[sessionID]
+	if !ok {
 		return false
+	}
+	// Remember which error was cleared. Session events carry a `session_metadata`
+	// snapshot taken when the publisher read the session, which can predate the
+	// clear — without this, such an event puts the very same error straight back.
+	// A genuinely new failure has a different stamp and is still applied.
+	if existing != nil && existing.Stamp != "" {
+		state.clearedErrorStamps[sessionID] = existing.Stamp
 	}
 	delete(state.errors, sessionID)
 	return true
 }
 
-func errorFromMetadata(now time.Time, sessionID string, metadata map[string]interface{}) (*ActiveErrorSummary, bool) {
+// errorFromMetadata reads the session's stored error record. `observed` is true
+// whenever a `last_agent_error` object is present at all: a dismissed record is
+// an authoritative "no active error" for that session, not an absence of
+// information, so the caller must clear rather than ignore it.
+func errorFromMetadata(
+	now time.Time,
+	sessionID string,
+	metadata map[string]interface{},
+) (summary *ActiveErrorSummary, observed bool) {
 	raw, ok := metadata["last_agent_error"].(map[string]interface{})
 	if !ok {
 		return nil, false
 	}
-	return errorFromMap(now, sessionID, raw)
+	active, ok := errorFromMap(now, sessionID, raw)
+	if !ok {
+		return nil, true
+	}
+	return active, true
 }
 
 func errorFromMap(now time.Time, sessionID string, data map[string]interface{}) (*ActiveErrorSummary, bool) {
