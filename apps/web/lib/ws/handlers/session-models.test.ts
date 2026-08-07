@@ -365,6 +365,29 @@ describe("session.models_updated live updates", () => {
   });
 });
 
+describe("session.models_updated fallback note preservation", () => {
+  it("keeps the fallback model note across a models_updated event", () => {
+    const store = makeStore({
+      sessionModels: {
+        bySessionId: {
+          "session-1": {
+            currentModelId: "gpt-5",
+            models: [{ modelId: "gpt-5", name: "GPT-5" }],
+            configOptions: [],
+            fallbackModel: "gpt-5",
+          },
+        },
+      },
+    });
+    const handlers = registerSessionModelsHandlers(store);
+    const payload = makePayload("gpt-5", {
+      models: [{ model_id: "gpt-5", name: "GPT-5" }],
+    });
+    handlers["session.models_updated"]!(makeMessage(payload));
+    expect(store.getState().sessionModels.bySessionId["session-1"]?.fallbackModel).toBe("gpt-5");
+  });
+});
+
 describe("session.models_updated stale active model", () => {
   it("keeps the active model when it disappears from the ACP list (no silent clear)", () => {
     const store = makeStore({

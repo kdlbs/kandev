@@ -2414,6 +2414,14 @@ func (s *Service) handleSessionModelsEvent(ctx context.Context, payload *lifecyc
 // start model is unavailable).
 func (s *Service) handleSessionModelFallbackEvent(ctx context.Context, payload *lifecycle.AgentStreamEventPayload) {
 	sessionID := payload.SessionID
+	// The fallback event fires during session init, before the execution's
+	// task-session id is always linked. Resolve it from the task when the
+	// payload carries no session id so the note is not dropped.
+	if sessionID == "" && payload.TaskID != "" && s.repo != nil {
+		if sess, err := s.repo.GetActiveTaskSessionByTaskID(ctx, payload.TaskID); err == nil && sess != nil {
+			sessionID = sess.ID
+		}
+	}
 	if sessionID == "" || s.eventBus == nil || payload.Data == nil {
 		return
 	}

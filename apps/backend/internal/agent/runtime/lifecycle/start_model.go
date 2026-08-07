@@ -110,6 +110,22 @@ func applyStartModelPolicy(
 				zap.String("model", policy.Model), zap.Error(err))
 			return "", false, nil
 		}
+		// SetModel failed even though the model appeared available (the
+		// advertised list may not have arrived yet at session start, or the
+		// agent rejected the model itself). The explicit fallback exists
+		// exactly for this: switch to it instead of failing — but never
+		// fall through to the provider default.
+		if policy.FallbackModel != "" {
+			if ferr := applier.SetModel(ctx, policy.FallbackModel); ferr != nil {
+				return "", false, fmt.Errorf(
+					"start model %q failed and fallback model %q failed to apply: %w",
+					policy.Model, policy.FallbackModel, ferr)
+			}
+			log.Info("start model unavailable, using fallback model",
+				zap.String("start_model", policy.Model),
+				zap.String("fallback_model", policy.FallbackModel))
+			return policy.FallbackModel, true, nil
+		}
 		return "", false, fmt.Errorf("failed to set start model %q: %w", policy.Model, err)
 	}
 	return policy.Model, false, nil

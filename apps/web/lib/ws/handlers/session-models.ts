@@ -126,8 +126,14 @@ export function registerSessionModelsHandlers(store: StoreApi<AppState>): WsHand
       const currentModelId = pendingRuntime.model || resolveCurrentModelId(payload);
       clearStaleContextWindow(state, sessionId, currentModelId);
 
+      // Preserve the explicit "using fallback model" note across subsequent
+      // models_updated events — the convergence event after SetModel would
+      // otherwise wipe it while the session is still on the fallback.
+      const existingFallback = state.sessionModels.bySessionId[sessionId]?.fallbackModel;
+
       state.setSessionModels(sessionId, {
         currentModelId,
+        fallbackModel: existingFallback,
         models: acpModels.map((m) => ({
           modelId: m.model_id,
           name: m.name,

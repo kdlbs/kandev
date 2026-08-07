@@ -94,6 +94,7 @@
   "frequencySeconds": "Frequency (seconds)",
   "general": "General",
   "fallbackModelUnavailable": "Fallback model no longer available — select a different one",
+  "modelFallbackSuffix": "(fallback)",
   "home": "Home",
   "hostedUrl": "Hosted URL",
   "icons": "Icons",

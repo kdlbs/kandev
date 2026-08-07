@@ -269,6 +269,54 @@ describe("ModelConfigSelector provider descriptions", () => {
   });
 });
 
+describe("ModelConfigSelector fallback suffix", () => {
+  it("appends the suffix to the trigger label when provided", () => {
+    render(
+      <TooltipProvider>
+        <ModelConfigSelector
+          modelOptions={[{ id: "gpt-5", name: "GPT-5" }]}
+          currentModel="gpt-5"
+          onModelChange={() => {}}
+          currentModelSuffix=" (fallback)"
+          triggerSummary="changed"
+        />
+      </TooltipProvider>,
+    );
+
+    expect(screen.getByRole("button", { name: modelSettingsButtonName }).textContent).toContain(
+      "GPT-5 (fallback)",
+    );
+  });
+
+  it("renders a config-option model with the suffix on the trigger", () => {
+    render(
+      <TooltipProvider>
+        <ModelConfigSelector
+          modelOptions={[{ id: "gpt-5", name: "GPT-5" }]}
+          currentModel="gpt-5"
+          onModelChange={() => {}}
+          currentModelSuffix=" (fallback)"
+          triggerSummary="changed"
+          configOptions={[
+            {
+              type: "select",
+              id: "model",
+              name: "Model",
+              currentValue: "gpt-5",
+              category: "model",
+              options: [{ value: "gpt-5", name: "GPT-5" }],
+            },
+          ]}
+        />
+      </TooltipProvider>,
+    );
+
+    expect(screen.getByRole("button", { name: modelSettingsButtonName }).textContent).toContain(
+      "GPT-5 (fallback)",
+    );
+  });
+});
+
 describe("ModelConfigSelector disabled (gone) models", () => {
   it("renders a disabled model greyed out with its reason and blocks selection", () => {
     const onModelChange = vi.fn();

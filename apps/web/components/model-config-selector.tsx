@@ -46,6 +46,8 @@ export type SelectConfigOption = DynamicConfigOption & {
 type TriggerLabelOptions = {
   summary: "changed";
   configBaseline?: Record<string, string>;
+  /** Appended to the trigger's model label (e.g. "(fallback)"). */
+  currentModelSuffix?: string;
 };
 
 type TriggerDetail = {
@@ -117,9 +119,9 @@ export function triggerLabel(
   options?: TriggerLabelOptions,
 ): string {
   const modelConfig = configOptions.find(isModelConfigOption);
-  const modelValue = modelConfig
-    ? currentOptionName(modelConfig)
-    : displayModelName(modelOptions, currentModel);
+  const modelValue =
+    (modelConfig ? currentOptionName(modelConfig) : displayModelName(modelOptions, currentModel)) +
+    (options?.currentModelSuffix ?? "");
   const baseline = options?.configBaseline;
   const extras = configOptions
     .filter((option) => !isModelConfigOption(option))
@@ -438,6 +440,8 @@ export type ModelConfigSelectorProps = {
   triggerClassName?: string;
   triggerSummary?: "all" | "changed";
   configBaseline?: Record<string, string>;
+  /** Optional suffix appended to the trigger's model label (e.g. "(fallback)"). */
+  currentModelSuffix?: string;
 };
 
 type ModelConfigSelectorTriggerProps = Pick<
@@ -497,9 +501,10 @@ function ModelConfigSelectorTrigger({
 function triggerLabelOptions(
   triggerSummary: "all" | "changed",
   configBaseline: Record<string, string> | undefined,
+  currentModelSuffix?: string,
 ): TriggerLabelOptions | undefined {
   if (triggerSummary !== "changed") return undefined;
-  return { summary: "changed", configBaseline };
+  return { summary: "changed", configBaseline, currentModelSuffix };
 }
 
 export const ModelConfigSelector = memo(function ModelConfigSelector({
@@ -516,6 +521,7 @@ export const ModelConfigSelector = memo(function ModelConfigSelector({
   triggerClassName: customTriggerClassName,
   triggerSummary = "all",
   configBaseline,
+  currentModelSuffix,
 }: ModelConfigSelectorProps) {
   const [open, setOpen] = useState(false);
   const [activeConfigId, setActiveConfigId] = useState<string | null>(null);
@@ -529,7 +535,7 @@ export const ModelConfigSelector = memo(function ModelConfigSelector({
     currentModel,
     modelConfig,
     configOptions,
-    triggerLabelOptions(triggerSummary, configBaseline),
+    triggerLabelOptions(triggerSummary, configBaseline, currentModelSuffix),
   );
   const details =
     triggerSummary === "changed"

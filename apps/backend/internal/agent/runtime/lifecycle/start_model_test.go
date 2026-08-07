@@ -11,15 +11,23 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 )
 
-// fakeModelApplier records SetModel calls and returns a scripted error.
+// fakeModelApplier records SetModel calls and returns scripted errors, one
+// per call; the last error repeats for any further calls.
 type fakeModelApplier struct {
 	calls []string
-	err   error
+	errs  []error
 }
 
 func (f *fakeModelApplier) SetModel(_ context.Context, modelID string) error {
 	f.calls = append(f.calls, modelID)
-	return f.err
+	if len(f.errs) == 0 {
+		return nil
+	}
+	err := f.errs[0]
+	if len(f.errs) > 1 {
+		f.errs = f.errs[1:]
+	}
+	return err
 }
 
 func newPolicyTestLogger() *logger.Logger {
@@ -61,7 +69,7 @@ func TestApplyStartModelPolicy_StrictGoneModelFails(t *testing.T) {
 
 func TestApplyStartModelPolicy_StrictGoneModelNoSession(t *testing.T) {
 	// Empty advertised list = "unknown" — fall back to SetModel result.
-	applier := &fakeModelApplier{err: errors.New("model rejected")}
+	applier := &fakeModelApplier{errs: []error{errors.New("model rejected")}}
 	_, _, err := applyStartModelPolicy(
 		context.Background(), newPolicyTestLogger(), applier,
 		&CachedModelState{}, StartModelPolicy{Model: "claude-sonnet"},
@@ -72,7 +80,7 @@ func TestApplyStartModelPolicy_StrictGoneModelNoSession(t *testing.T) {
 }
 
 func TestApplyStartModelPolicy_StrictGoneModelUnsupportedContinues(t *testing.T) {
-	applier := &fakeModelApplier{err: methodNotFoundErr()}
+	applier := &fakeModelApplier{errs: []error{methodNotFoundErr()}}
 	applied, usingFallback, err := applyStartModelPolicy(
 		context.Background(), newPolicyTestLogger(), applier,
 		&CachedModelState{}, StartModelPolicy{Model: "claude-sonnet"},
@@ -119,8 +127,32 @@ func TestApplyStartModelPolicy_FallbackModelUsedWhenGone(t *testing.T) {
 	}
 }
 
+func TestApplyStartModelPolicy_FallbackWhenSetModelRejectsGoneModel(t *testing.T) {
+	// Regression: at session start the advertised model list may not have
+	// arrived yet (empty = "unknown"). The adapter still rejects the gone
+	// start model — the fallback must be applied then too, not only when
+	// the list is known.
+	applier := &fakeModelApplier{errs: []error{
+		errors.New(`model "claude-gone" is not in the agent's 2 available models`),
+		nil,
+	}}
+	applied, usingFallback, err := applyStartModelPolicy(
+		context.Background(), newPolicyTestLogger(), applier,
+		&CachedModelState{}, StartModelPolicy{Model: "claude-gone", FallbackModel: "gpt-5"},
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if applied != "gpt-5" || !usingFallback {
+		t.Errorf("expected applied=gpt-5 fallback=true, got applied=%q fallback=%v", applied, usingFallback)
+	}
+	if len(applier.calls) != 2 || applier.calls[0] != "claude-gone" || applier.calls[1] != "gpt-5" {
+		t.Errorf("SetModel calls = %v, want [claude-gone gpt-5]", applier.calls)
+	}
+}
+
 func TestApplyStartModelPolicy_FallbackModelFailureFails(t *testing.T) {
-	applier := &fakeModelApplier{err: errors.New("rejected")}
+	applier := &fakeModelApplier{errs: []error{errors.New("rejected")}}
 	_, _, err := applyStartModelPolicy(
 		context.Background(), newPolicyTestLogger(), applier,
 		modelState("gpt-5"), StartModelPolicy{Model: "claude-gone", FallbackModel: "gpt-5"},
@@ -135,7 +167,7 @@ func TestApplyStartModelPolicy_FallbackModelFailureFails(t *testing.T) {
 
 func TestApplyStartModelPolicy_AutoFallbackLegacyBestEffort(t *testing.T) {
 	// Gone model + auto-fallback: legacy behavior — try, warn, continue.
-	applier := &fakeModelApplier{err: errors.New("not in available models")}
+	applier := &fakeModelApplier{errs: []error{errors.New("not in available models")}}
 	applied, usingFallback, err := applyStartModelPolicy(
 		context.Background(), newPolicyTestLogger(), applier,
 		modelState("gpt-5"), StartModelPolicy{Model: "claude-gone", AutoFallback: true},
