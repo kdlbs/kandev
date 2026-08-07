@@ -20,7 +20,9 @@ the package to what npm actually publishes.
 - `apps/cli/bin/native-shim.test.mjs` runs on the Node built-in test runner
   (`node:test` + `node:assert`) instead of Vitest, with equivalent coverage;
   `apps/cli/package.json` has no `devDependencies` and its `test` script is
-  `node --test bin/`. The `dev`, `bundle`, and `prepublishOnly` scripts are removed or
+  `node --test "bin/*.test.mjs"` (implemented as such; a bare `node --test bin/`
+  fails on this Node version, and bare `node --test` picks up the file by
+  pattern). The `dev`, `bundle`, and `prepublishOnly` scripts are removed or
   reduced to what still applies.
 - `name`, `version`, `bin`, `files`, `main`, `license`, `engines`, and
   `optionalDependencies` in `apps/cli/package.json` are byte-identical to before, so
@@ -36,6 +38,7 @@ the package to what npm actually publishes.
 
 ~~~bash
 cd apps && pnpm install && pnpm --filter kandev test && pnpm run format:check && pnpm run dead-code
+cd ..
 make typecheck && make test-cli
 ~~~
 

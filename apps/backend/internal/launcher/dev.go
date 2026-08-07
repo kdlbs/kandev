@@ -36,6 +36,7 @@ func runDev(ctx context.Context, opts Options) int {
 
 	healthToken, err := newHealthToken()
 	if err != nil {
+		supervisor.shutdown("health token failure")
 		fmt.Fprintln(os.Stderr, "[kandev] "+err.Error())
 		return 1
 	}
@@ -52,6 +53,7 @@ func runDev(ctx context.Context, opts Options) int {
 		Supervisor: supervisor,
 	})
 	if err != nil {
+		supervisor.shutdown("backend launch failure")
 		fmt.Fprintln(os.Stderr, "[kandev] "+err.Error())
 		return 1
 	}

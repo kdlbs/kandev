@@ -152,6 +152,26 @@ func TestResolveDevBackendEnvHonorsExplicitDatabasePath(t *testing.T) {
 	}
 }
 
+func TestResolveDevBackendEnvIgnoresWhitespaceOnlyOverride(t *testing.T) {
+	repo := makeRepoTree(t)
+	t.Setenv("KANDEV_TASK_ID", "")
+	t.Setenv("KANDEV_DATABASE_PATH", "   ")
+
+	dbPath, extra := resolveDevBackendEnv(repo)
+	env := devEnvToMap(extra)
+	wantHome := filepath.Join(repo, ".kandev-dev")
+
+	if dbPath != filepath.Join(wantHome, "data", "kandev.db") {
+		t.Fatalf("dbPath = %q, want the repo-local dev db for a blank override", dbPath)
+	}
+	if env["KANDEV_HOME_DIR"] != wantHome {
+		t.Fatalf("KANDEV_HOME_DIR = %q, want %q", env["KANDEV_HOME_DIR"], wantHome)
+	}
+	if env["KANDEV_DATABASE_PATH"] != "" {
+		t.Fatalf("KANDEV_DATABASE_PATH = %q, want empty", env["KANDEV_DATABASE_PATH"])
+	}
+}
+
 func TestResolveDevBackendEnvClearsLeakedPathInTaskWorkspace(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)

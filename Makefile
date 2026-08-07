@@ -656,6 +656,8 @@ typecheck-web:
 .PHONY: typecheck
 typecheck:
 	@printf "$(CYAN)Type-checking all apps...$(RESET)\n"
+	# apps/cli has no tsconfig (publish-only shim), so the workspace must be
+	# listed explicitly — add new TypeScript packages here.
 	@cd $(APPS_DIR) && $(PNPM) -r --filter @kandev/web --filter @kandev/desktop --filter @kandev/theme --filter @kandev/types --filter @kandev/ui exec tsc -p tsconfig.json --noEmit
 
 #

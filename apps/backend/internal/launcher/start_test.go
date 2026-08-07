@@ -42,10 +42,11 @@ func TestResolveLogThresholdsByMode(t *testing.T) {
 }
 
 func TestBackendEnvCarriesIndependentThresholds(t *testing.T) {
-	// The surrounding task environment may set dev-mode selectors; start/run
-	// must not inherit them as active values.
-	t.Setenv("KANDEV_DEBUG_DEV_MODE", "")
-	t.Setenv("KANDEV_WEB_INTERNAL_URL", "")
+	// The surrounding task environment may set dev-mode selectors. start/run
+	// inherit the ambient env untouched (matching the TypeScript process.env
+	// spread) but must never introduce their own selectors or a web URL.
+	t.Setenv("KANDEV_DEBUG_DEV_MODE", "true")
+	t.Setenv("KANDEV_WEB_INTERNAL_URL", "http://localhost:9999")
 	env := backendEnv(portConfig{BackendPort: 1234, AgentctlPort: 5678}, "debug", "warn", true, "health-token", nil)
 	joined := strings.Join(env, "\n")
 	for _, expected := range []string{
@@ -58,11 +59,13 @@ func TestBackendEnvCarriesIndependentThresholds(t *testing.T) {
 			t.Fatalf("backend environment missing %q", expected)
 		}
 	}
-	if strings.Contains(joined, "KANDEV_WEB_INTERNAL_URL=http") {
-		t.Fatal("backend environment emitted a web internal URL without a web port")
+	// Inherited selectors pass through unchanged, but no web port is present
+	// so backendEnv must not synthesize a URL for it.
+	if !strings.Contains(joined, "KANDEV_WEB_INTERNAL_URL=http://localhost:9999") {
+		t.Fatalf("backend environment dropped an inherited selector:\n%s", joined)
 	}
-	if strings.Contains(joined, "KANDEV_DEBUG_DEV_MODE=true") {
-		t.Fatal("backend environment emitted dev-mode env without dev extra")
+	if strings.Contains(joined, "KANDEV_WEB_INTERNAL_URL=http://localhost:5678") {
+		t.Fatal("backend environment introduced a web internal URL without a web port")
 	}
 }
 

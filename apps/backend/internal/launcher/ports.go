@@ -119,13 +119,16 @@ func pickDevPorts(backendPort int, backendSource string, webPort int, webSource 
 	used[backend] = true
 
 	web := webPort
-	if web == 0 {
+	switch {
+	case web == 0:
 		p, err := pickAvailablePortExcept(defaultWebPort, used)
 		if err != nil {
 			return portConfig{}, err
 		}
 		web = p
-	} else if !canBind(web) {
+	case used[web]:
+		return portConfig{}, fmt.Errorf("web port %d conflicts with the backend port", web)
+	case !canBind(web):
 		sourceSuffix := ""
 		if webSource != "" {
 			sourceSuffix = fmt.Sprintf(" from %s", webSource)

@@ -16,7 +16,7 @@ Users start Kandev from the terminal through `kandev`, but the current launcher 
 - `kandev` remains the public command for Homebrew, npm/npx, global npm installs, service units, and local development.
 - Homebrew and release bundle installs provide a native `bin/kandev` executable that can launch Kandev without executing the TypeScript CLI bundle.
 - The native `kandev` executable supports the public launcher commands users need after the web runtime merge: default run, `run`, `start`, `service`, `--help`, `--version`, `--port`, `--backend-port`, `--verbose`, `--debug`, and `--headless`.
-- Native `dev` mode is deferred until it can be ported with parity; the native launcher does not advertise or accept `dev`/`--dev`.
+- Native `dev` mode is supported for source checkouts through the Go launcher (`kandev dev` / `--dev`); installed release entrypoints do not expose it — it requires the repository checkout that `make dev` provides.
 - The native launcher starts the backend as a supervised child process by re-executing the same `bin/kandev` binary in a hidden backend mode.
 - The hidden backend mode is not a public command and is not shown in normal help output.
 - Backend restarts restart only the backend child process; the launcher/supervisor remains alive unless the shutdown policy requires the whole app to exit.

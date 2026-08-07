@@ -145,6 +145,25 @@ func TestPickDevPortsBackendAndWebStayDistinct(t *testing.T) {
 	}
 }
 
+func TestPickDevPortsRejectsWebPortDuplicatingBackendPort(t *testing.T) {
+	// Pick a free port and request it for both services: the explicit web
+	// port must be rejected rather than silently assigned twice.
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	port := ln.Addr().(*net.TCPAddr).Port
+	_ = ln.Close()
+
+	cfg, err := pickDevPorts(port, "--port", port, "--web-internal-port")
+	if err == nil {
+		t.Fatalf("pickDevPorts accepted duplicate backend/web port: %+v", cfg)
+	}
+	if !strings.Contains(err.Error(), "conflicts with the backend port") {
+		t.Fatalf("error = %v, want a backend-port conflict message", err)
+	}
+}
+
 func TestPickPortsWithoutWebPortMatchesStartSemantics(t *testing.T) {
 	cfg, err := pickPorts(0, "")
 	if err != nil {

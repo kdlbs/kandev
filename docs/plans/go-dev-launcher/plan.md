@@ -1,5 +1,5 @@
 ---
-status: draft
+status: implemented
 created: 2026-08-07
 spec: "../../specs/go-dev-launcher/spec.md"
 ---
@@ -64,7 +64,7 @@ token, so it needs its own probe that accepts any HTTP response. Do not weaken
 
 ## Dependency order
 
-```
+```text
 wave 1  task-01 dev paths      task-02 db backup      task-03 web child
             │                       │                      │
 wave 2      └────────┬──────────────┴──────────────────────┘

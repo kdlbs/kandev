@@ -121,7 +121,7 @@ second shipped binary.
 
 ### `make dev` stops depending on Node and winjob
 
-```
+```makefile
 dev: doctor
 	@$(MAKE) -C $(BACKEND_DIR) build build-agentctl-remote
 	@cp bin/kandev → bin/kandev-launcher
@@ -138,7 +138,7 @@ After `dev` lands in Go, `apps/cli/src/**` has no consumer and is deleted in ful
 together with `tsconfig.json` and `vitest.config.ts`. What remains is exactly what npm
 publishes plus its test:
 
-```
+```text
 apps/cli/
 ├── package.json
 └── bin/

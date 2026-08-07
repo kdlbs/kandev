@@ -3,7 +3,7 @@ id: "03-web-child"
 title: "Vite dev-server child and URL readiness"
 status: done
 wave: 1
-depends_on: []
+depends_on: ["04-dev-command"]
 plan: "plan.md"
 spec: "../../specs/go-dev-launcher/spec.md"
 ---

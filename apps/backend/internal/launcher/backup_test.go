@@ -43,6 +43,23 @@ func TestBackupProductionDbSkipsMissingSource(t *testing.T) {
 	}
 }
 
+func TestBackupProductionDbPropagatesSourceErrors(t *testing.T) {
+	// A regular file used as a directory component yields ENOTDIR (not
+	// ErrNotExist), which must fail the backup rather than being treated as a
+	// missing database.
+	file := filepath.Join(t.TempDir(), "not-a-dir")
+	if err := os.WriteFile(file, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	path, err := backupProductionDb(filepath.Join(file, "kandev.db"), t.TempDir(), time.Now())
+	if err == nil {
+		t.Fatal("backupProductionDb() = nil error for an unreadable source")
+	}
+	if path != "" {
+		t.Fatalf("backupProductionDb(unreadable) = %q, want empty path", path)
+	}
+}
+
 func TestBackupProductionDbCreatesStampedSnapshot(t *testing.T) {
 	home := t.TempDir()
 	dbPath := filepath.Join(home, ".kandev", "data", "kandev.db")
