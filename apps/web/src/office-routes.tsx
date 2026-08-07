@@ -121,10 +121,7 @@ export function OfficeRoutes({ pathname }: { pathname: string }) {
             rendered while `OfficeRouteLoading` holds, and its VALUE identifies
             the specific route, so a mis-pointed URL cannot match another
             screen's anchor. */}
-        <main
-          className="flex-1 min-h-0 overflow-y-auto"
-          data-office-route={normalizedPathname}
-        >
+        <main className="flex-1 min-h-0 overflow-y-auto" data-office-route={normalizedPathname}>
           {renderOfficeRoute(normalizedPathname)}
         </main>
       </div>

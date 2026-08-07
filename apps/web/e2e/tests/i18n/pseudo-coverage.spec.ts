@@ -35,11 +35,12 @@ import { test, expect } from "../../fixtures/test-base";
  * pseudo-locale), or is on an allowlist that says why it must not be translated.
  *
  * That guarantee rests on the scan having run against the screen it names, which
- * for a while it did not. Each `SCREENS` entry carries a required `anchor` — an
- * element that screen alone renders — and `waitForScreen` blocks on it before
- * anything is inspected. Read its comment before touching the readiness logic:
- * the wait it replaced was a one-second settle, and with the lazy settings chunk
- * blocked so that NO screen rendered, all nine screen tests passed.
+ * for a while it did not. Each `SCREENS` entry carries a required `anchor` — a
+ * selector that cannot match until that route rendered — and `waitForScreen`
+ * blocks on it before anything is inspected. Read its comment before touching
+ * the readiness logic: the wait it replaced was a one-second settle, and with
+ * both lazy route chunks blocked so that NO screen rendered, 13-16 of the 21
+ * tests still reported clean.
  *
  * It is a floor, not a proof of total coverage. Two limits are deliberate and
  * both are documented where they are implemented, because relaxing either
@@ -279,12 +280,49 @@ const SCREENS: Screen[] = [
   // settings screens above — their own lazy chunk, loaded by `office-routes`
   // rather than `settings-routes` — so they need their own anchors and were
   // proved separately; see `waitForScreen`.
-  { name: "office — dashboard", url: "/office", anchor: 'main[data-office-route="/office"]' },
-  { name: "office — inbox", url: "/office/inbox", anchor: 'main[data-office-route="/office/inbox"]' },
-  { name: "office — tasks", url: "/office/tasks", anchor: 'main[data-office-route="/office/tasks"]' },
-  { name: "office — agents", url: "/office/agents", anchor: 'main[data-office-route="/office/agents"]' },
-  { name: "office — projects", url: "/office/projects", anchor: 'main[data-office-route="/office/projects"]' },
-  { name: "office — routines", url: "/office/routines", anchor: 'main[data-office-route="/office/routines"]' },
+  // NOT YET: "office — dashboard" (`/office`). The entry existed and passed, and
+  // it was not testing the dashboard.
+  //
+  // `/office` renders the dashboard only for a workspace that has an
+  // `office_workflow_id` (`hasOfficeWorkspace` in src/office-routes.tsx). The
+  // shared e2e fixture never seeds one, so `resolveOfficeHomeSetupRedirect`
+  // sends `/office` to `/office/setup?mode=new` on every run, and the screen the
+  // walk actually scanned was the SETUP WIZARD — "Set up your Office workspace",
+  // a different screen from the one the test named. It reported clean because
+  // the wizard is itself fully migrated, so the pass was real and was about
+  // something else.
+  //
+  // The anchor is what surfaced this: the redirect is invisible to a walk that
+  // only asks "is anything accented". Restoring real dashboard coverage needs an
+  // office workflow seeded in the fixture, which is a change to shared
+  // `test-base` state and belongs with whoever owns that fixture — not an
+  // allowlist entry and not a renamed screen, either of which would keep the
+  // false claim alive in a new form.
+  {
+    name: "office — inbox",
+    url: "/office/inbox",
+    anchor: 'main[data-office-route="/office/inbox"]',
+  },
+  {
+    name: "office — tasks",
+    url: "/office/tasks",
+    anchor: 'main[data-office-route="/office/tasks"]',
+  },
+  {
+    name: "office — agents",
+    url: "/office/agents",
+    anchor: 'main[data-office-route="/office/agents"]',
+  },
+  {
+    name: "office — projects",
+    url: "/office/projects",
+    anchor: 'main[data-office-route="/office/projects"]',
+  },
+  {
+    name: "office — routines",
+    url: "/office/routines",
+    anchor: 'main[data-office-route="/office/routines"]',
+  },
   {
     name: "office — workspace costs",
     url: "/office/workspace/costs",
@@ -454,24 +492,26 @@ async function activatePseudo(page: Page, url: string) {
  * thing in this file worth reading twice: THE SETTLE LET THE ORACLE REPORT A
  * PASS IT HAD NOT EARNED, and it did so in the direction that hurts.
  *
- * `SCREENS` are lazy routes in a 2.8 MB `settings-routes` chunk. Nothing in the
- * old wait was tied to that chunk arriving:
+ * `SCREENS` are lazy routes in two separate chunks — `settings-routes` (2.8 MB)
+ * and `office-routes`. Nothing in the old wait was tied to either arriving:
  *   - `activatePseudo`'s `lang="pseudo"` assertion is written server-side by
  *     shell.go before a single script runs, so it is true immediately;
  *   - the `inspectedAttributes > 0` control below is satisfied by the sidebar,
  *     topbar and status bar, which are accented long before the route renders;
  *   - so the only thing standing between "route rendered" and "scan the DOM"
  *     was one second of wall clock.
- * Measured on this branch: with the chunk blocked outright, so that not one
- * screen rendered at all, ALL NINE screen tests still passed. The failure mode
+ * Measured with BOTH chunks blocked outright, so that not one screen rendered:
+ * 13-16 of the 21 tests reported clean, varying run to run — because whether a
+ * screen "passed" came down to a race the settle could not see. The failure mode
  * is worse than flakiness — under CI load a slow render makes a green result
  * MORE likely, so the gate is at its most permissive exactly when the tree is
- * most likely to be broken.
+ * most likely to be broken. With the anchors below the same probe fails all 21,
+ * every run.
  *
  * The fix has to be per-screen. Any signal generic enough to share is a signal
  * the app shell already satisfies, which is how this happened in the first
- * place. So each screen names an element it owns, and this waits on two facts
- * about it:
+ * place. So each screen names a selector nothing but that route can satisfy, and
+ * this waits on two facts about it:
  *   1. it is VISIBLE — the lazy route mounted and this screen, specifically, is
  *      the one on screen;
  *   2. its text is ACCENTED — the pseudo catalog has actually been applied to
