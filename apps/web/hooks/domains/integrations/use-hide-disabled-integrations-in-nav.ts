@@ -2,17 +2,10 @@
 
 import { useCallback, useMemo, useSyncExternalStore } from "react";
 
-// useHideDisabledIntegrationsInNav backs the integrations index page's "Hide
-// disabled integrations from left panel navigation" setting: a single,
-// install-wide, localStorage-backed boolean (not per-integration), defaulting
-// to false. Shares the useSyncExternalStore + `storage` event + custom-event
-// broadcast shape with hooks/domains/integrations/use-integration-enabled.ts,
-// but has no per-integration key and no legacy migration — this setting is
-// new, there is nothing to migrate.
-
 const STORAGE_KEY = "kandev:integrations:hideDisabledInNav:v1";
 const SYNC_EVENT = "kandev:integrations:hide-disabled-in-nav-changed";
 
+/** Reads the persisted "hide disabled integrations from nav" flag, defaulting to `false`. */
 function readHideDisabled(): boolean {
   if (typeof window === "undefined") return false;
   try {
@@ -23,6 +16,15 @@ function readHideDisabled(): boolean {
   }
 }
 
+/**
+ * The integrations index page's "Hide disabled integrations from left panel
+ * navigation" setting: a single, install-wide, `localStorage`-backed boolean
+ * (not per-integration), defaulting to `false`. Shares the
+ * `useSyncExternalStore` + `storage` event + custom-event broadcast shape
+ * with `hooks/domains/integrations/use-integration-enabled.ts`, but has no
+ * per-integration key and no legacy migration — this setting is new, there
+ * is nothing to migrate.
+ */
 export function useHideDisabledIntegrationsInNav() {
   const subscribe = useMemo(
     () => (notify: () => void) => {

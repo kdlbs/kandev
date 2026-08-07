@@ -412,6 +412,7 @@ function useLinearSettings(workspaceId: string) {
   };
 }
 
+/** Linear connection card: title/enable toggle, API key form, and save/test actions. */
 export function LinearConnectionSection({ workspaceId }: { workspaceId: string }) {
   const { t } = useTranslation();
   const s = useLinearSettings(workspaceId);
@@ -479,6 +480,7 @@ type LinearIntegrationPageProps = {
   workspaceId?: string;
 };
 
+/** Linear's own settings page: connection card plus issue-watchers section. */
 export function LinearIntegrationPage({ workspaceId }: LinearIntegrationPageProps = {}) {
   return (
     <div className="space-y-8">

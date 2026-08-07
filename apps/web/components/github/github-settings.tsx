@@ -243,21 +243,25 @@ function useIssueWatchActions(workspaceId?: string | null) {
   };
 }
 
+/** Top-of-page GitHub settings: title + enable toggle, callback notice, and workspace credentials. */
 export function GitHubConnectionSection({ workspaceId }: { workspaceId: string }) {
   const { t } = useTranslation();
   return (
     <>
-      <div>
-        <h2
-          className="text-2xl font-bold flex items-center gap-2"
-          data-testid="github-integration-heading"
-        >
-          <IconBrandGithub className="h-6 w-6" />
-          {t("github:githubIntegration")}
-        </h2>
-        <p className="text-sm text-muted-foreground mt-1">
-          {t("github:chooseTheAutomationAndPersonalIdentities")}
-        </p>
+      <div className="flex items-start justify-between gap-2">
+        <div>
+          <h2
+            className="text-2xl font-bold flex items-center gap-2"
+            data-testid="github-integration-heading"
+          >
+            <IconBrandGithub className="h-6 w-6" />
+            {t("github:githubIntegration")}
+          </h2>
+          <p className="text-sm text-muted-foreground mt-1">
+            {t("github:chooseTheAutomationAndPersonalIdentities")}
+          </p>
+        </div>
+        <GitHubEnabledControl />
       </div>
       <Separator />
       <GitHubCallbackNotice workspaceId={workspaceId} />
@@ -265,7 +269,6 @@ export function GitHubConnectionSection({ workspaceId }: { workspaceId: string }
         discoveryTargetId={INTEGRATION_SETTINGS_TARGETS.github}
         title={t("github:workspaceGithubAccess")}
         description={t("github:credentialUsedForRepositorySyncWatches")}
-        action={<GitHubEnabledControl />}
       >
         <GitHubAutomationSettings workspaceId={workspaceId} />
       </SettingsSection>
@@ -300,6 +303,7 @@ type GitHubIntegrationPageProps = {
   workspaceId?: string;
 };
 
+/** GitHub's own settings page: resolves the active workspace, then renders its connection, review/issue watch, repo-scope, and automation sections. */
 export function GitHubIntegrationPage({ workspaceId }: GitHubIntegrationPageProps = {}) {
   return (
     <TooltipProvider>

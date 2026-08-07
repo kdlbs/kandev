@@ -474,6 +474,7 @@ function ConnectionActions({ state, disabled }: { state: SettingsState; disabled
   );
 }
 
+/** Azure DevOps connection card: title/enable toggle, credential form, and test-connection actions. */
 export function AzureDevOpsConnectionSection({ workspaceId }: { workspaceId: string }) {
   const { t } = useTranslation();
   const state = useAzureDevOpsSettings(workspaceId);
@@ -512,6 +513,7 @@ export function AzureDevOpsConnectionSection({ workspaceId }: { workspaceId: str
   );
 }
 
+/** Azure DevOps's own settings page: connection, watch settings, quick actions, and default queries. */
 export function AzureDevOpsIntegrationPage({ workspaceId }: { workspaceId?: string } = {}) {
   return (
     <WorkspaceScopedSection workspaceId={workspaceId}>

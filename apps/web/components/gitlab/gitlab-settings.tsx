@@ -261,6 +261,7 @@ function useGitLabCredentialDraft({
   return { method, token, setToken, selectMethod, isDirty };
 }
 
+/** Credential form (PAT or OAuth) for connecting a workspace's GitLab account. */
 export function GitLabCredentialsForm(props: GitLabCredentialsFormProps) {
   const { t } = useTranslation();
   const draft = useGitLabCredentialDraft(props);
@@ -359,6 +360,7 @@ type GitLabIntegrationPageProps = {
   workspaceId?: string;
 };
 
+/** GitLab's own settings page: connection, action presets, and watch settings. */
 export function GitLabIntegrationPage({ workspaceId }: GitLabIntegrationPageProps = {}) {
   return (
     <WorkspaceScopedSection workspaceId={workspaceId}>

@@ -4,6 +4,13 @@ import { expect } from "../../fixtures/test-base";
 // Cards own the vertical padding (py-4 = 16px); allow border/subpixel slack, but catch extra content top padding.
 const MAX_ICON_TOP_INSET_PX = 22;
 
+/**
+ * Asserts the integrations index page's per-integration cards render with a
+ * stable layout: every card has equal height (row stretch is not masking a
+ * content-length difference) and the leading icon sits within its
+ * original top-inset budget (catches the header row silently growing,
+ * e.g. from a squeezed/wrapped label).
+ */
 export async function expectStableIntegrationCardLayout(page: Page) {
   const cards = await integrationCards(page);
   const heights = await integrationCardHeights(cards);
@@ -13,6 +20,7 @@ export async function expectStableIntegrationCardLayout(page: Page) {
   expect(Math.max(...topInsets)).toBeLessThanOrEqual(MAX_ICON_TOP_INSET_PX);
 }
 
+/** Measured height (px) of each integration card, in DOM order. */
 async function integrationCardHeights(cards: Locator[]) {
   const heights = await Promise.all(
     cards.map(async (card, index) => {
@@ -25,6 +33,7 @@ async function integrationCardHeights(cards: Locator[]) {
   return heights;
 }
 
+/** Vertical offset (px) of each card's leading icon from its card's top edge. */
 async function integrationCardIconTopInsets(cards: Locator[]) {
   const topInsets = await Promise.all(
     cards.map(async (card, index) => {
@@ -39,6 +48,7 @@ async function integrationCardIconTopInsets(cards: Locator[]) {
   return topInsets;
 }
 
+/** Locates every rendered integration card on the settings index page. */
 async function integrationCards(page: Page): Promise<Locator[]> {
   const cards = page
     .getByTestId("settings-scroll-container")

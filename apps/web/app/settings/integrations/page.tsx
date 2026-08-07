@@ -83,6 +83,7 @@ type IntegrationsIndexPageProps = {
   workspaceId?: string;
 };
 
+/** Row for the "Hide disabled integrations from left panel navigation" setting, drafted/saved like the per-integration toggles. */
 function HideDisabledIntegrationsSetting() {
   const { t } = useTranslation();
   const { hideDisabled, setHideDisabled } = useHideDisabledIntegrationsInNav();
@@ -112,6 +113,7 @@ function HideDisabledIntegrationsSetting() {
   );
 }
 
+/** `/settings/integrations` (and its per-workspace equivalent): one card per integration with an enable/disable slider, plus the hide-disabled-in-nav setting. */
 export default function IntegrationsIndexPage({ workspaceId }: IntegrationsIndexPageProps = {}) {
   const { t } = useTranslation();
   const rootHref = workspaceId

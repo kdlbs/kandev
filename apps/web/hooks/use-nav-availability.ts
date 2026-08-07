@@ -15,10 +15,12 @@ import { useHideDisabledIntegrationsInNav } from "@/hooks/domains/integrations/u
 import type { AvailabilityMap } from "@/lib/navigation/types";
 import type { GitHubStatus } from "@/lib/types/github";
 
+/** Human-readable status label for a not-yet-connected integration destination. */
 function getStatusLabel(loading: boolean | undefined): string {
   return loading ? "Checking" : "Setup";
 }
 
+/** Derives the GitHub nav destination's ready/label pair from its auth status. */
 export function getGitHubIntegrationStatus(status: GitHubStatus | null, loading: boolean) {
   if (status?.authenticated) return { ready: true, label: "Connected" };
   if (status?.token_configured) return { ready: true, label: "Configured" };

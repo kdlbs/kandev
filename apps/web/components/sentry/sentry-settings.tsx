@@ -160,6 +160,7 @@ function useDeleteInstance(workspaceId: string, reload: () => Promise<void>) {
   );
 }
 
+/** Sentry connection card: title/enable toggle plus the list of configured Sentry instances. */
 export function SentryConnectionSection({ workspaceId }: { workspaceId: string }) {
   const { t } = useTranslation();
   const { instances, loading, reload } = useInstanceList(workspaceId);
@@ -249,6 +250,7 @@ type SentryIntegrationPageProps = {
   workspaceId?: string;
 };
 
+/** Sentry's own settings page: connection card plus issue-watchers section. */
 export function SentryIntegrationPage({ workspaceId }: SentryIntegrationPageProps = {}) {
   return (
     <div className="space-y-8">
