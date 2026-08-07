@@ -10,8 +10,10 @@ import pseudoOffice from "@/src/locales/pseudo/office.json";
  * an example no cron parser accepts — and the pseudo-locale mangles it outright.
  * Both office cron examples therefore carry the expression as a `values` entry.
  *
- * `standardCronExpressionExample` is rendered by the routine trigger fields in
- * `create-routine-dialog.tsx`; `aCronScheduleExample` by the routine editor.
+ * The two live in different files — `standardCronExpressionExample` in
+ * `routines/create-routine-dialog.tsx`, `aCronScheduleExample` in
+ * `agents/[id]/layout.tsx` — so the guard sits at the `office` namespace root
+ * rather than beside either call site.
  */
 describe("office cron example messages", () => {
   const CRON_KEYS = ["standardCronExpressionExample", "aCronScheduleExample"] as const;
