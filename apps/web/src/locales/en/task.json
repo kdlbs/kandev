@@ -240,6 +240,7 @@
   "contextWindowUsagePendingPercent": "—%",
   "contextWindowUsagePendingTokens": "— of {{size}} tokens",
   "contextWindowUsed": "Context window: {{percent}}% used",
+  "contextWindowUsedTokens": "{{used}} of {{size}} tokens",
   "control": "Control",
   "controlC": "Control C",
   "controlD": "Control D",

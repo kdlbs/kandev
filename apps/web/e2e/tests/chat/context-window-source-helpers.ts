@@ -118,8 +118,8 @@ export async function seedContextWindowTask(
   const triggerName =
     contextWindowFixture.used === 0
       ? "Context window: usage not measured"
-      : `Context window: ${Math.round(
-          (contextWindowFixture.used / contextWindowFixture.size) * 100,
+      : `Context window: ${((contextWindowFixture.used / contextWindowFixture.size) * 100).toFixed(
+          0,
         )}% used`;
   await expect(testPage.getByRole("button", { name: triggerName })).toBeVisible();
 }

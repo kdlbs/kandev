@@ -261,7 +261,10 @@ export const TokenUsageDisplay = memo(function TokenUsageDisplay({
     : `${usagePercent.toFixed(0)}%`;
   const usageTokenLabel = pendingUsage
     ? t("task:contextWindowUsagePendingTokens", { size: formatNumber(size) })
-    : `${formatNumber(used)} of ${formatNumber(size)} tokens`;
+    : t("task:contextWindowUsedTokens", {
+        used: formatNumber(used),
+        size: formatNumber(size),
+      });
 
   return (
     // The UI wrapper defaults this to true; the source control must remain reachable inside.

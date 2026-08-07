@@ -1,7 +1,7 @@
 ---
 spec: docs/specs/ui/context-window-unmeasured-state.md
 created: 2026-08-07
-status: draft
+status: completed
 ---
 
 # Implementation Plan: Context Window Unmeasured State

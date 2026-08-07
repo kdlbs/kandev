@@ -23,6 +23,8 @@ test("pending context usage is reachable by touch without overflow", async ({
   const contextTooltip = testPage
     .locator('[data-slot="tooltip-content"]:not([data-state="closed"])')
     .filter({ has: testPage.getByTestId("context-window-usage") });
+  // Radix renders a visually-hidden accessibility copy of the content with the
+  // same testid; scope to the visible instance like the sibling positive test.
   const contextUsage = contextTooltip.getByTestId("context-window-usage").first();
   await expect(contextUsage).toBeVisible();
   await expect(contextUsage.getByText("—%", { exact: true })).toBeVisible();
