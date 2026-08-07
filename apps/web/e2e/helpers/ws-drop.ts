@@ -273,7 +273,12 @@ export async function routeMainWebSocketWithDelayedActionResponse(
 /**
  * Rewrites the FIRST server response frame for `action` into a `type:
  * "error"` frame, preserving its `id` so the client's pending-request map
- * still resolves (rejects) it, and forwards every other frame unchanged.
+ * still resolves (rejects) it. Every other frame — including siblings
+ * batched into the SAME newline-joined WS message as the matched response —
+ * is preserved unchanged, matching filterServerFrame/
+ * filterMessageAddResponses above: rewriting per-line rather than replacing
+ * the whole message avoids silently dropping unrelated frames that happen
+ * to arrive batched alongside the one being targeted.
  * Used to prove a fetch-failure path doesn't strand dependent UI state
  * (e.g. a confirm control gated on the fetch settling) against a real
  * WS error response instead of a mocked rejection.
@@ -288,26 +293,41 @@ export async function routeMainWebSocketWithFailedActionResponse(
     const server = ws.connectToServer();
     ws.onMessage((message) => server.send(message));
     server.onMessage((message) => {
-      if (armed && typeof message === "string") {
-        for (const frame of parseJSONFrames(message)) {
+      if (!armed || typeof message !== "string") {
+        ws.send(message);
+        return;
+      }
+      const rewritten = message
+        .split("\n")
+        .map((part) => {
+          if (!armed) return part;
+          const trimmed = part.trim();
+          if (!trimmed) return part;
+          const frame = asRecord(
+            (() => {
+              try {
+                return JSON.parse(trimmed);
+              } catch {
+                return null;
+              }
+            })(),
+          );
           if (
-            frame.action === action &&
+            frame?.action === action &&
             frame.type === "response" &&
             typeof frame.id === "string"
           ) {
             armed = false;
-            ws.send(
-              JSON.stringify({
-                id: frame.id,
-                type: "error",
-                payload: { message: "simulated failure" },
-              }),
-            );
-            return;
+            return JSON.stringify({
+              id: frame.id,
+              type: "error",
+              payload: { message: "simulated failure" },
+            });
           }
-        }
-      }
-      ws.send(message);
+          return part;
+        })
+        .join("\n");
+      ws.send(rewritten);
     });
   });
 }
