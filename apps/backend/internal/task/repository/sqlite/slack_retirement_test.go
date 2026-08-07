@@ -24,13 +24,25 @@ func TestDropRetiredSlackIntegrationRemovesConfigAndSecrets(t *testing.T) {
 		encrypted_value BLOB NOT NULL, nonce BLOB NOT NULL)`); err != nil {
 		t.Fatalf("create secrets: %v", err)
 	}
-	for _, id := range []string{
-		"slack:ws-1:token", "slack:ws-1:cookie", "slack:singleton:token", "jira:ws-1:token",
+	// id is the vault key, name is the human label — exactly what
+	// secretadapter.Set stores. Seeding them with different values is the point:
+	// with id == name the test would pass just as well against a migration that
+	// filtered on `name`, which in production matches nothing (the label is
+	// "Slack token", not "slack:...") and would leave the credentials on disk.
+	for _, secret := range []struct{ id, name string }{
+		{"slack:ws-1:token", "Slack token"},
+		{"slack:ws-1:cookie", "Slack d cookie"},
+		{"slack:singleton:token", "Slack token"},
+		{"jira:ws-1:token", "Jira token"},
+		// A non-Slack key whose *label* starts with "slack:". Matching on the
+		// label would delete an unrelated provider's credential.
+		{"github:ws-1:token", "slack:not-a-key"},
 	} {
 		if _, err := repo.db.Exec(
-			`INSERT INTO secrets (id, name, encrypted_value, nonce) VALUES (?, ?, x'00', x'00')`, id, id,
+			`INSERT INTO secrets (id, name, encrypted_value, nonce) VALUES (?, ?, x'00', x'00')`,
+			secret.id, secret.name,
 		); err != nil {
-			t.Fatalf("seed secret %s: %v", id, err)
+			t.Fatalf("seed secret %s: %v", secret.id, err)
 		}
 	}
 
@@ -64,8 +76,14 @@ func TestDropRetiredSlackIntegrationRemovesConfigAndSecrets(t *testing.T) {
 	if err := rows.Err(); err != nil {
 		t.Fatalf("iterate secrets: %v", err)
 	}
-	if len(remaining) != 1 || remaining[0] != "jira:ws-1:token" {
-		t.Fatalf("secrets = %v, want only the unrelated jira entry", remaining)
+	want := []string{"github:ws-1:token", "jira:ws-1:token"}
+	if len(remaining) != len(want) {
+		t.Fatalf("secrets = %v, want %v", remaining, want)
+	}
+	for i := range want {
+		if remaining[i] != want[i] {
+			t.Fatalf("secrets = %v, want %v", remaining, want)
+		}
 	}
 }
 
