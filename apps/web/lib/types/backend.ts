@@ -208,6 +208,7 @@ export type WorkflowPayload = {
   workspace_id: string;
   name: string;
   description?: string;
+  prompt?: string;
   agent_profile_id?: string;
   hidden?: boolean;
   /** Phase 2 (ADR-0004) UX hint — frontend-only. */

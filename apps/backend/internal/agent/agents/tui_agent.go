@@ -75,6 +75,15 @@ func NewTUIAgent(cfg TUIAgentConfig) *TUIAgent {
 				IdleTimeout:     cfg.IdleTimeout,
 				BufferMaxBytes:  cfg.BufferMax,
 				WaitForTerminal: cfg.WaitForTerm,
+				// Ink-based TUIs (Claude Code and similar) coalesce multi-byte
+				// stdin reads into a paste burst, absorbing a trailing "\r" into
+				// the pasted content instead of dispatching Enter, and enable
+				// bracketed-paste mode so ESC[200~…ESC[201~ delimiters break
+				// input. Send prompt bytes verbatim and split the submit byte
+				// into a discrete keystroke so programmatic PTY prompts submit.
+				// Matches the built-in Claude passthrough agent.
+				DisableBracketedPaste: true,
+				SubmitDelay:           150 * time.Millisecond,
 			},
 		},
 		cfg: cfg,

@@ -8,6 +8,7 @@ import { Textarea } from "@kandev/ui/textarea";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@kandev/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { floatingBounds, placeFloatingRect } from "@/components/task/floating-selection-position";
+import { useTranslation } from "react-i18next";
 
 type SelectionPosition = {
   x: number;
@@ -153,19 +154,20 @@ function PopoverActions({
   addButtonTestId?: string;
   runButtonTestId?: string;
 }) {
+  const { t } = useTranslation();
   return (
     <div className="mt-2 flex items-center justify-between">
       <div className="flex items-center gap-2">
         <span className="text-[10px] text-muted-foreground/70">
-          ⌘+Enter to {isEditing ? "update" : "add"}
-          {onSubmitAndRun && !isEditing ? ", ⌘+Shift+Enter to run" : ""}
+          {isEditing ? t("task:cmdEnterToUpdate") : t("task:cmdEnterToAdd")}
+          {onSubmitAndRun && !isEditing ? t("task:shiftEnterToRun") : ""}
         </span>
         {isEditing && onDelete && (
           <Button
             size="sm"
             variant="ghost"
             onClick={onDelete}
-            aria-label="Delete comment"
+            aria-label={t("task:deleteComment")}
             className="h-6 px-1.5 text-muted-foreground hover:text-destructive cursor-pointer"
           >
             <IconTrash className="h-3 w-3" />
@@ -185,11 +187,11 @@ function PopoverActions({
                 className={`h-7 gap-1 text-xs cursor-pointer ${onSubmitAndRun && !isEditing ? "rounded-r-none border-r-0" : ""}`}
               >
                 <IconPlus className="h-3 w-3" />
-                {isEditing ? "Update" : "Add"}
+                {isEditing ? t("task:update") : t("task:add")}
               </Button>
             </TooltipTrigger>
             <TooltipContent side="bottom">
-              <p>{isEditing ? "Update comment" : "Save comment for review"}</p>
+              <p>{isEditing ? t("task:updateComment") : t("task:saveCommentForReview")}</p>
             </TooltipContent>
           </Tooltip>
           {onSubmitAndRun && !isEditing && (
@@ -203,11 +205,11 @@ function PopoverActions({
                   className="h-7 gap-1 rounded-l-none text-xs cursor-pointer"
                 >
                   <IconPlayerPlay className="h-3 w-3" />
-                  Run
+                  {t("task:run")}
                 </Button>
               </TooltipTrigger>
               <TooltipContent side="bottom">
-                <p>Save and send to agent</p>
+                <p>{t("task:saveAndSendToAgent")}</p>
               </TooltipContent>
             </Tooltip>
           )}
@@ -232,6 +234,7 @@ export function PlanSelectionPopover({
   portalContainer,
   errorMessage,
 }: PlanSelectionPopoverProps) {
+  const { t } = useTranslation();
   const [comment, setComment] = useState(editingComment || "");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const popoverRef = useRef<HTMLDivElement>(null);
@@ -291,7 +294,7 @@ export function PlanSelectionPopover({
           value={comment}
           onChange={(e) => setComment(e.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder="Add your comment or instruction..."
+          placeholder={t("task:addYourCommentOrInstruction")}
           className="min-h-[60px] resize-none text-sm border-border/50 focus:border-primary/50"
           data-testid={inputTestId}
         />

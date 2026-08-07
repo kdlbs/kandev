@@ -10,6 +10,8 @@ import {
   IconFolder,
   IconGitBranch,
 } from "@tabler/icons-react";
+import type { TFunction } from "i18next";
+import { Trans, useTranslation } from "react-i18next";
 import { useAppStore } from "@/components/state-provider";
 import { ExpandableRow } from "@/components/task/chat/messages/expandable-row";
 import { isFallbackNoticeStep } from "@/lib/prepare/summarize";
@@ -87,6 +89,7 @@ function StepDetails({ step, blockCommand }: { step: PrepareStepInfo; blockComma
 }
 
 function StepWarning({ warning, warningDetail }: { warning: string; warningDetail?: string }) {
+  const { t } = useTranslation();
   const [detailExpanded, setDetailExpanded] = useState(false);
   return (
     <div data-testid="prepare-warning-banner">
@@ -98,7 +101,7 @@ function StepWarning({ warning, warningDetail }: { warning: string; warningDetai
             className="text-amber-500/70 hover:text-amber-500 mt-0.5 flex cursor-pointer items-center gap-0.5 text-xs"
             onClick={() => setDetailExpanded(!detailExpanded)}
           >
-            Details
+            {t("task:details")}
           </button>
           {detailExpanded && (
             <pre className="text-amber-500/60 mt-0.5 max-w-full whitespace-pre-wrap break-words text-xs">
@@ -125,6 +128,7 @@ function StepMessages({ step }: { step: PrepareStepInfo }) {
 }
 
 function StepRow({ step }: { step: PrepareStepInfo }) {
+  const { t } = useTranslation();
   const inlineCommand = step.command && isInlineCommand(step.command) ? step.command : undefined;
   const blockCommand = step.command && !isInlineCommand(step.command) ? step.command : undefined;
   const hasExpandable = Boolean(step.output) || Boolean(blockCommand);
@@ -144,7 +148,7 @@ function StepRow({ step }: { step: PrepareStepInfo }) {
         <div className="flex-shrink-0">
           <StepIcon status={step.status} hasWarning={Boolean(step.warning)} />
         </div>
-        <span className={nameClass}>{step.name || "Preparing..."}</span>
+        <span className={nameClass}>{step.name || t("task:preparingEllipsis")}</span>
         {inlineCommand && (
           <code className="text-muted-foreground/50 min-w-0 break-all font-mono text-[10px]">
             {inlineCommand}
@@ -279,20 +283,24 @@ function HeaderIcon({ status }: { status: EffectiveStatus }) {
   return <IconTerminal2 className="h-4 w-4 text-muted-foreground" />;
 }
 
-function getHeaderLabel(status: EffectiveStatus, prepareState: SessionPrepareState): string {
-  if (status === "preparing") return "Preparing environment...";
-  if (status === "failed") return "Environment setup failed";
+function getHeaderLabel(
+  t: TFunction,
+  status: EffectiveStatus,
+  prepareState: SessionPrepareState,
+): string {
+  if (status === "preparing") return t("task:preparingEnvironmentEllipsis");
+  if (status === "failed") return t("task:environmentSetupFailed");
   if (status === "completed_with_error") {
-    return "Environment setup finished with errors";
+    return t("task:environmentSetupFinishedWithErrors");
   }
   if (status === "completed_with_warnings") {
     const warningSteps = prepareState.steps.filter((s) => s.warning);
     if (warningSteps.length === 1 && isFallbackNoticeStep(warningSteps[0])) {
-      return "Environment prepared on a fresh sandbox";
+      return t("task:environmentPreparedOnFreshSandbox");
     }
-    return "Environment prepared with warnings";
+    return t("task:environmentPreparedWithWarnings");
   }
-  return "Environment prepared";
+  return t("task:environmentPrepared");
 }
 
 function InfoLine({ icon, children }: { icon: React.ReactNode; children: React.ReactNode }) {
@@ -347,7 +355,7 @@ type ScriptMetadata = {
 // Convert a setup-script `script_execution` message into the same step shape
 // the existing prepare panel renders, so it slots in alongside Validate/Sync/
 // Create-worktree without a parallel render path.
-function setupScriptMessageToStep(message: Message): PrepareStepInfo {
+function setupScriptMessageToStep(t: TFunction, message: Message): PrepareStepInfo {
   const meta = (message.metadata ?? {}) as ScriptMetadata;
   const command = meta.command ?? "";
   const status = scriptStatusToStepStatus(meta.status, meta.exit_code);
@@ -355,11 +363,11 @@ function setupScriptMessageToStep(message: Message): PrepareStepInfo {
     status === "failed"
       ? meta.error ||
         (meta.exit_code !== undefined && meta.exit_code !== 0
-          ? `Script exited with code ${meta.exit_code}`
-          : "Script failed")
+          ? t("task:scriptExitedWithCode", { code: meta.exit_code })
+          : t("task:scriptFailed"))
       : undefined;
   return {
-    name: "Run repository setup script",
+    name: t("task:runRepositorySetupScript"),
     command,
     status,
     output: message.content || undefined,
@@ -370,9 +378,10 @@ function setupScriptMessageToStep(message: Message): PrepareStepInfo {
 }
 
 function useSetupScriptSteps(sessionId: string): PrepareStepInfo[] {
+  const { t } = useTranslation();
   const messages = useAppStore((state) => state.messages.bySession[sessionId]);
   if (!messages || messages.length === 0) return [];
-  return messages.filter(isSetupScriptMessage).map(setupScriptMessageToStep);
+  return messages.filter(isSetupScriptMessage).map((m) => setupScriptMessageToStep(t, m));
 }
 
 function SessionInfo({ sessionId }: { sessionId: string }) {
@@ -389,24 +398,31 @@ function SessionInfo({ sessionId }: { sessionId: string }) {
     <div className="border-muted mt-2 space-y-1 border-t pt-2">
       {isWorktree && worktree_path && (
         <InfoLine icon={<IconFolder className="h-3 w-3" />}>
-          Isolated worktree at <Mono>{worktree_path}</Mono>
+          <Trans i18nKey="task:isolatedWorktreeAt" values={{ path: worktree_path }}>
+            Isolated worktree at <Mono>{worktree_path}</Mono>
+          </Trans>
         </InfoLine>
       )}
       {!isWorktree && worktree_path && (
         <InfoLine icon={<IconFolder className="h-3 w-3" />}>
-          Working in <Mono>{worktree_path}</Mono>
+          <Trans i18nKey="task:workingIn" values={{ path: worktree_path }}>
+            Working in <Mono>{worktree_path}</Mono>
+          </Trans>
         </InfoLine>
       )}
       {worktree_branch && (
         <InfoLine icon={<IconGitBranch className="h-3 w-3" />}>
           {base_branch ? (
-            <>
+            <Trans
+              i18nKey="task:branchBasedOn"
+              values={{ branch: worktree_branch, base: base_branch }}
+            >
               Branch <Mono>{worktree_branch}</Mono>, based on <Mono>{base_branch}</Mono>
-            </>
+            </Trans>
           ) : (
-            <>
+            <Trans i18nKey="task:onBranch" values={{ branch: worktree_branch }}>
               On branch <Mono>{worktree_branch}</Mono>
-            </>
+            </Trans>
           )}
         </InfoLine>
       )}
@@ -461,6 +477,7 @@ function hasPrepareDetails(
 }
 
 export function PrepareProgress({ sessionId }: PrepareProgressProps) {
+  const { t } = useTranslation();
   const { status, prepareState } = usePrepareStatus(sessionId);
   const session = useAppStore((state) => state.taskSessions.items[sessionId]);
   const setupScriptSteps = useSetupScriptSteps(sessionId);
@@ -501,7 +518,7 @@ export function PrepareProgress({ sessionId }: PrepareProgressProps) {
   // belong after Create-worktree finishes. Appending keeps the existing prepare
   // step order intact.
   const visibleSteps = [...prepareState.steps.filter(isVisibleStep), ...setupScriptSteps];
-  const headerLabel = getHeaderLabel(status, prepareState);
+  const headerLabel = getHeaderLabel(t, status, prepareState);
   const isErrorStatus = status === "failed" || status === "completed_with_error";
   const headerClass = cn("text-xs", isErrorStatus ? "text-destructive" : "text-muted-foreground");
   const hasFailureDetails = isErrorStatus && Boolean(prepareState.errorMessage);
@@ -532,14 +549,16 @@ export function PrepareProgress({ sessionId }: PrepareProgressProps) {
               <button
                 type="button"
                 aria-expanded={expanded}
-                aria-label={expanded ? "Hide preparation details" : "Show preparation details"}
+                aria-label={
+                  expanded ? t("task:hidePreparationDetails") : t("task:showPreparationDetails")
+                }
                 className="min-h-11 cursor-pointer text-xs text-muted-foreground underline-offset-4 hover:underline sm:min-h-0"
                 onClick={(event) => {
                   event.stopPropagation();
                   setExpanded(!expanded);
                 }}
               >
-                {expanded ? "Hide details" : "Show details"}
+                {expanded ? t("task:hideDetails") : t("task:showDetails")}
               </button>
             )}
           </div>

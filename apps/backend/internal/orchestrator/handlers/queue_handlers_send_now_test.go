@@ -38,7 +38,7 @@ func TestWsSendNowValidatesScopeAndReturnsSentCount(t *testing.T) {
 	require.NoError(t, err)
 	dispatcher := &mockQueueSendNow{sentCount: 3}
 	events := &mockEventBus{}
-	handlers := NewQueueHandlers(messagequeue.NewServiceMemory(log), events, log, dispatcher, allowQueueAccess{})
+	handlers := NewQueueHandlers(messagequeue.NewServiceMemory(log), events, log, dispatcher, allowQueueAccess{}, nil)
 
 	response, err := handlers.wsSendNow(context.Background(), createTestMessage(t, ws.ActionMessageQueueSendNow, map[string]interface{}{
 		"session_id": "session-1", "scope": orchestrator.QueueSendNowScopeAll,
@@ -100,7 +100,7 @@ func TestWsSendNowMapsStableErrors(t *testing.T) {
 			log, logErr := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "console", OutputPath: "stderr"})
 			require.NoError(t, logErr)
 			dispatcher := &mockQueueSendNow{err: tc.err}
-			handlers := NewQueueHandlers(messagequeue.NewServiceMemory(log), &mockEventBus{}, log, dispatcher, allowQueueAccess{})
+			handlers := NewQueueHandlers(messagequeue.NewServiceMemory(log), &mockEventBus{}, log, dispatcher, allowQueueAccess{}, nil)
 			response, callErr := handlers.wsSendNow(context.Background(), createTestMessage(t, ws.ActionMessageQueueSendNow, map[string]interface{}{
 				"session_id": "session-1", "scope": orchestrator.QueueSendNowScopeAll,
 			}))

@@ -60,9 +60,9 @@ func (r *Repository) insertWorkflow(ctx context.Context, exec sqlx.ExtContext, w
 	workflow.SortOrder = maxOrder + 1
 
 	_, err = exec.ExecContext(ctx, r.db.Rebind(`
-		INSERT INTO workflows (id, workspace_id, name, description, agent_profile_id, workflow_template_id, sort_order, hidden, style, source, source_path, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`), workflow.ID, workflow.WorkspaceID, workflow.Name, workflow.Description, workflow.AgentProfileID, workflow.WorkflowTemplateID, workflow.SortOrder, dialect.BoolToInt(workflow.Hidden), normalizeWorkflowStyle(workflow.Style), normalizeWorkflowSource(workflow.Source), workflow.SourcePath, workflow.CreatedAt, workflow.UpdatedAt)
+		INSERT INTO workflows (id, workspace_id, name, description, prompt, agent_profile_id, workflow_template_id, sort_order, hidden, style, source, source_path, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`), workflow.ID, workflow.WorkspaceID, workflow.Name, workflow.Description, workflow.Prompt, workflow.AgentProfileID, workflow.WorkflowTemplateID, workflow.SortOrder, dialect.BoolToInt(workflow.Hidden), normalizeWorkflowStyle(workflow.Style), normalizeWorkflowSource(workflow.Source), workflow.SourcePath, workflow.CreatedAt, workflow.UpdatedAt)
 
 	return err
 }
@@ -89,7 +89,7 @@ func normalizeWorkflowStyle(style string) string {
 }
 
 const workflowSelectColumns = `
-	id, workspace_id, name, description, agent_profile_id,
+	id, workspace_id, name, description, prompt, agent_profile_id,
 	workflow_template_id, sort_order, hidden, style, source, source_path, created_at, updated_at
 `
 
@@ -106,6 +106,7 @@ func scanWorkflowRow(scanner workflowScanner) (*models.Workflow, error) {
 		&workflow.WorkspaceID,
 		&workflow.Name,
 		&workflow.Description,
+		&workflow.Prompt,
 		&agentProfileID,
 		&workflowTemplateID,
 		&workflow.SortOrder,
@@ -169,8 +170,8 @@ func (r *Repository) UpdateWorkflow(ctx context.Context, workflow *models.Workfl
 	workflow.UpdatedAt = time.Now().UTC()
 
 	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
-		UPDATE workflows SET name = ?, description = ?, agent_profile_id = ?, workflow_template_id = ?, hidden = ?, style = ?, source = ?, source_path = ?, updated_at = ? WHERE id = ?
-	`), workflow.Name, workflow.Description, workflow.AgentProfileID, workflow.WorkflowTemplateID, dialect.BoolToInt(workflow.Hidden), normalizeWorkflowStyle(workflow.Style), normalizeWorkflowSource(workflow.Source), workflow.SourcePath, workflow.UpdatedAt, workflow.ID)
+		UPDATE workflows SET name = ?, description = ?, prompt = ?, agent_profile_id = ?, workflow_template_id = ?, hidden = ?, style = ?, source = ?, source_path = ?, updated_at = ? WHERE id = ?
+	`), workflow.Name, workflow.Description, workflow.Prompt, workflow.AgentProfileID, workflow.WorkflowTemplateID, dialect.BoolToInt(workflow.Hidden), normalizeWorkflowStyle(workflow.Style), normalizeWorkflowSource(workflow.Source), workflow.SourcePath, workflow.UpdatedAt, workflow.ID)
 	if err != nil {
 		return err
 	}

@@ -10,6 +10,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { useAppStore } from "@/components/state-provider";
 import { listSkills, updateAgentProfile } from "@/lib/api/domains/office-api";
 import type { AgentProfile } from "@/lib/state/slices/office/types";
+import { useTranslation } from "react-i18next";
 
 type AgentSkillsTabProps = {
   agent: AgentProfile;
@@ -45,6 +46,7 @@ function useHydrateSkills() {
 }
 
 export function AgentSkillsTab({ agent }: AgentSkillsTabProps) {
+  const { t } = useTranslation();
   useHydrateSkills();
   const skills = useAppStore((s) => s.office.skills);
   const updateStore = useAppStore((s) => s.updateOfficeAgentProfile);
@@ -66,9 +68,9 @@ export function AgentSkillsTab({ agent }: AgentSkillsTabProps) {
       await updateAgentProfile(agent.id, { skillIds });
       updateStore(agent.id, { skillIds });
       setDirty(false);
-      toast.success("Skills updated");
+      toast.success(t("office:skillsUpdated"));
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Failed to update skills");
+      toast.error(err instanceof Error ? err.message : t("office:failedToUpdateSkills"));
     } finally {
       setSaving(false);
     }
@@ -77,9 +79,9 @@ export function AgentSkillsTab({ agent }: AgentSkillsTabProps) {
   if (skills.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center py-12 gap-3">
-        <p className="text-sm text-muted-foreground">No skills registered yet.</p>
+        <p className="text-sm text-muted-foreground">{t("office:noSkillsRegisteredYet")}</p>
         <Button asChild variant="outline" size="sm" className="cursor-pointer">
-          <Link href="/office/workspace/skills">Manage skills in Company</Link>
+          <Link href="/office/workspace/skills">{t("office:manageSkillsInCompany")}</Link>
         </Button>
       </div>
     );
@@ -89,10 +91,7 @@ export function AgentSkillsTab({ agent }: AgentSkillsTabProps) {
 
   return (
     <div className="space-y-4 mt-4">
-      <p className="text-xs text-muted-foreground">
-        Skills this agent owns. Skills are injected into the agent&apos;s system prompt at session
-        start.
-      </p>
+      <p className="text-xs text-muted-foreground">{t("office:skillsThisAgentOwnsSkillsAre")}</p>
       <div className="space-y-1.5">
         {skills.map((skill) => {
           const isDefault = skill.isSystem && (skill.defaultForRoles ?? []).includes(agent.role);
@@ -113,24 +112,25 @@ export function AgentSkillsTab({ agent }: AgentSkillsTabProps) {
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <Badge variant="outline" className="text-[10px] text-muted-foreground">
-                      System
+                      {t("office:system")}
                     </Badge>
                   </TooltipTrigger>
                   <TooltipContent>
-                    Bundled with kandev{skill.systemVersion ? ` v${skill.systemVersion}` : ""}
+                    {t("office:bundledWithKandev")}
+                    {skill.systemVersion ? ` v${skill.systemVersion}` : ""}
                   </TooltipContent>
                 </Tooltip>
               )}
               {isDefault && (
                 <Tooltip>
                   <TooltipTrigger asChild>
+                    {/* `agent.role` is the wire role id, interpolated as data. */}
                     <span className="text-[10px] text-muted-foreground">
-                      default for {agent.role}
+                      {t("office:defaultForRole", { role: agent.role })}
                     </span>
                   </TooltipTrigger>
                   <TooltipContent>
-                    This skill is auto-attached to new {agent.role} agents. You can still untick it
-                    for this agent.
+                    {t("office:skillAutoAttachedToRole", { role: agent.role })}
                   </TooltipContent>
                 </Tooltip>
               )}
@@ -142,7 +142,7 @@ export function AgentSkillsTab({ agent }: AgentSkillsTabProps) {
       {dirty && (
         <div className="flex justify-end">
           <Button onClick={handleSave} disabled={saving} className="cursor-pointer">
-            {saving ? "Saving..." : "Save skills"}
+            {saving ? t("office:saving") : t("office:saveSkills")}
           </Button>
         </div>
       )}

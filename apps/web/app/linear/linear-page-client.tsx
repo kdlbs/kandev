@@ -32,6 +32,7 @@ import {
 } from "@/components/linear/use-linear-issue-search";
 import type { LinearIssue, LinearTeam } from "@/lib/types/linear";
 import type { Workflow, WorkflowStep } from "@/lib/types/http";
+import { useDateLocale } from "@/lib/i18n/date-locale";
 import { Trans, useTranslation } from "react-i18next";
 
 type LinearPageClientProps = {
@@ -123,7 +124,7 @@ function IssueRow({
   onStartTask: (i: LinearIssue) => void;
 }) {
   const { t } = useTranslation();
-  const relative = formatRelative(issue.updated);
+  const relative = formatRelative(issue.updated, useDateLocale());
   return (
     <div className="flex items-start gap-3 py-3 border-b last:border-b-0">
       <button

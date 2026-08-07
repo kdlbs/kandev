@@ -21,6 +21,8 @@ import { usePanelSearch } from "@/hooks/use-panel-search";
 import { suppressIOSKeyboardAssists } from "@/lib/terminal/suppress-ios-keyboard-assists";
 import { sendShellInput } from "@/lib/terminal/send-shell-input";
 import { WorkspaceUnavailable } from "./workspace-unavailable";
+import { useTranslation } from "react-i18next";
+import { t } from "@/lib/i18n";
 
 type ShellTerminalProps = {
   sessionId?: string;
@@ -189,7 +191,7 @@ function useShellSubscription({
         .catch((err) => {
           if (cancelled || subscriptionIdRef.current !== currentSubscriptionId) return;
           const message = err instanceof Error ? err.message : String(err);
-          if (message.includes("no agent running")) {
+          if (message.includes(t("task:noAgentRunning"))) {
             retryTimeoutRef.current = setTimeout(() => {
               if (!cancelled && subscriptionIdRef.current === currentSubscriptionId)
                 attemptSubscribe();
@@ -398,6 +400,7 @@ export function ShellTerminal({
   processId,
   isStopping = false,
 }: ShellTerminalProps) {
+  const { t } = useTranslation();
   const terminalRef = useRef<HTMLDivElement>(null);
   const xtermRef = useRef<Terminal | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
@@ -492,7 +495,9 @@ export function ShellTerminal({
           <div ref={terminalRef} className="h-full w-full" />
         </div>
         {isStopping && (
-          <div className="absolute right-3 top-2 text-xs text-muted-foreground">Stopping…</div>
+          <div className="absolute right-3 top-2 text-xs text-muted-foreground">
+            {t("task:stopping")}
+          </div>
         )}
         {searchBar}
       </div>

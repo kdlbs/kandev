@@ -11,6 +11,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@kandev/ui/alert-dialog";
+import { useTranslation } from "react-i18next";
 
 type TaskDetachConfirmDialogProps = {
   open: boolean;
@@ -29,6 +30,7 @@ export function TaskDetachConfirmDialog({
   isDetaching,
   onConfirm,
 }: TaskDetachConfirmDialogProps) {
+  const { t } = useTranslation();
   return (
     <AlertDialog
       open={open}
@@ -38,29 +40,24 @@ export function TaskDetachConfirmDialog({
     >
       <AlertDialogContent onClick={(event) => event.stopPropagation()}>
         <AlertDialogHeader>
-          <AlertDialogTitle>Detach task from parent?</AlertDialogTitle>
+          <AlertDialogTitle>{t("task:detachTaskFromParent")}</AlertDialogTitle>
           <AlertDialogDescription asChild>
             <div className="space-y-2">
               <p>
-                &quot;{taskTitle || "This task"}&quot; will become a top-level task. Its workflow,
-                subtasks, and state will not change.
+                {t("task:detachWillBecomeTopLevel", {
+                  taskTitle: taskTitle || t("task:thisTask2"),
+                })}
               </p>
-              <p>
-                Detaching changes the hierarchy only. Access to any shared workspace remains
-                unchanged.
-              </p>
+              <p>{t("task:detachingChangesTheHierarchyOnlyAccess")}</p>
               {sharesParentWorkspace && (
-                <p className="font-medium text-foreground">
-                  This task shares its parent&apos;s workspace. Current and future sessions will
-                  keep using that shared workspace.
-                </p>
+                <p className="font-medium text-foreground">{t("task:thisTaskSharesItsParentS")}</p>
               )}
             </div>
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
           <AlertDialogCancel disabled={isDetaching} className="cursor-pointer">
-            Cancel
+            {t("common:cancel")}
           </AlertDialogCancel>
           <AlertDialogAction
             disabled={isDetaching}
@@ -72,7 +69,7 @@ export function TaskDetachConfirmDialog({
             }}
           >
             {isDetaching && <IconLoader className="mr-2 h-4 w-4 animate-spin" />}
-            Detach
+            {t("task:detach")}
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>

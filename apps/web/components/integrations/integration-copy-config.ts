@@ -1,4 +1,3 @@
-import { copySlackConfig } from "@/lib/api/domains/slack-api";
 import { copyJiraConfig } from "@/lib/api/domains/jira-api";
 import { copyLinearConfig } from "@/lib/api/domains/linear-api";
 import { copySentryInstances } from "@/lib/api/domains/sentry-api";
@@ -8,19 +7,11 @@ import { copyGitLabConfig } from "@/lib/api/domains/gitlab-api";
 
 // IntegrationSlug is the set of integration settings pages that support copying
 // their per-workspace config to another workspace.
-export type IntegrationSlug =
-  | "azure-devops"
-  | "slack"
-  | "jira"
-  | "linear"
-  | "sentry"
-  | "github"
-  | "gitlab";
+export type IntegrationSlug = "azure-devops" | "jira" | "linear" | "sentry" | "github" | "gitlab";
 
 // integrationLabels maps each slug to how the rest of the app spells it.
 const integrationLabels: Record<IntegrationSlug, string> = {
   "azure-devops": "Azure DevOps",
-  slack: "Slack",
   jira: "Jira",
   linear: "Linear",
   sentry: "Sentry",
@@ -29,8 +20,8 @@ const integrationLabels: Record<IntegrationSlug, string> = {
 };
 
 // integrationFromPathname returns the integration slug for a settings pathname
-// like /settings/integrations/slack or
-// /settings/workspace/<id>/integrations/slack, or null when the current page is
+// like /settings/integrations/jira or
+// /settings/workspace/<id>/integrations/jira, or null when the current page is
 // not a copyable integration page.
 export function integrationFromPathname(pathname: string): IntegrationSlug | null {
   const match = pathname.match(/^\/settings(?:\/workspace\/[^/]+)?\/integrations\/([^/]+)/);
@@ -58,9 +49,6 @@ export async function copyIntegrationConfig(
   switch (slug) {
     case "azure-devops":
       await copyAzureDevOpsConfig(sourceWorkspaceId, targetWorkspaceId);
-      return;
-    case "slack":
-      await copySlackConfig(targetWorkspaceId, options);
       return;
     case "jira":
       await copyJiraConfig(targetWorkspaceId, options);

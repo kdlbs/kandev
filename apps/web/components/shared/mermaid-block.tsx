@@ -12,6 +12,7 @@ import {
 import { useMermaidScale, useMermaidViewportWidth } from "./mermaid-block-hooks";
 import { useToast } from "@/components/toast-provider";
 import { showMermaidErrorToast } from "./mermaid-error-toast";
+import { useTranslation } from "react-i18next";
 
 type MermaidAPI = typeof import("mermaid").default;
 
@@ -119,6 +120,7 @@ function useMermaidRender(
 }
 
 export function MermaidBlock({ code, taskId }: MermaidBlockProps) {
+  const { t } = useTranslation();
   const containerRef = useRef<HTMLDivElement>(null);
   const svgSizeRef = useRef<{ w: number; h: number } | null>(null);
   const [svgSize, setSvgSize] = useState<{ w: number; h: number } | null>(null);
@@ -164,7 +166,7 @@ export function MermaidBlock({ code, taskId }: MermaidBlockProps) {
   if (error !== null && svg === null) {
     return (
       <div className="my-3 rounded-md border border-destructive/30 bg-destructive/5 p-3">
-        <p className="text-xs text-destructive mb-2">Failed to render diagram</p>
+        <p className="text-xs text-destructive mb-2">{t("common:failedToRenderDiagram")}</p>
         <pre className="text-xs whitespace-pre-wrap font-mono text-muted-foreground">{code}</pre>
       </div>
     );
@@ -229,6 +231,7 @@ function MermaidToolbar({
   onReset,
   onToggleCode,
 }: MermaidToolbarProps) {
+  const { t } = useTranslation();
   return (
     <div className="absolute top-1.5 right-1.5 flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-background/80 border border-border/50 backdrop-blur-sm opacity-0 group-hover/mermaid:opacity-100 transition-opacity z-10">
       {!showCode && onZoomOut && onReset && onZoomIn && scale != null && (
@@ -261,7 +264,7 @@ function MermaidToolbar({
         type="button"
         onClick={onToggleCode}
         className="p-0.5 text-muted-foreground hover:text-foreground cursor-pointer"
-        title={showCode ? "Show diagram" : "Show code"}
+        title={showCode ? t("common:showDiagram") : t("common:showCode")}
       >
         <IconCode className="h-3.5 w-3.5" />
       </button>

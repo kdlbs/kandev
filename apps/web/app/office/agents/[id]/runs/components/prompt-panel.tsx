@@ -4,6 +4,7 @@ import { useState } from "react";
 import { IconChevronDown } from "@tabler/icons-react";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@kandev/ui/collapsible";
 import type { RunDetail } from "@/lib/api/domains/office-extended-api";
+import { useTranslation } from "react-i18next";
 
 type Props = {
   run: Pick<RunDetail, "assembled_prompt" | "summary_injected" | "result_json">;
@@ -20,6 +21,7 @@ type Props = {
  * the rework (every field empty).
  */
 export function PromptPanel({ run }: Props) {
+  const { t } = useTranslation();
   const assembled = run.assembled_prompt ?? "";
   const summary = run.summary_injected ?? "";
   const result = run.result_json ?? "";
@@ -30,22 +32,22 @@ export function PromptPanel({ run }: Props) {
   return (
     <div className="rounded-lg border border-border" data-testid="prompt-panel">
       <div className="px-4 py-2 border-b border-border">
-        <h2 className="text-sm font-semibold">Prompt</h2>
+        <h2 className="text-sm font-semibold">{t("office:prompt")}</h2>
         <p className="text-xs text-muted-foreground mt-0.5">
-          What the agent received and produced.
+          {t("office:whatTheAgentReceivedAndProduced")}
         </p>
       </div>
       <div className="divide-y divide-border">
         {summary !== "" && (
           <PromptSection
-            label="Injected continuation summary"
+            label={t("office:injectedContinuationSummary")}
             content={summary}
             testid="prompt-summary-injected"
           />
         )}
         {assembled !== "" && (
           <PromptSection
-            label="Assembled prompt"
+            label={t("office:assembledPrompt")}
             content={assembled}
             testid="prompt-assembled"
             defaultOpen
@@ -53,7 +55,7 @@ export function PromptPanel({ run }: Props) {
         )}
         {hasResult && (
           <PromptSection
-            label="Structured result"
+            label={t("office:structuredResult")}
             content={formatJSONIfPossible(result)}
             testid="prompt-result-json"
           />

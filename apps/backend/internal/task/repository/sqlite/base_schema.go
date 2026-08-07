@@ -278,6 +278,7 @@ const infraSchemaDDL = `
 		workflow_template_id TEXT DEFAULT '',
 		name TEXT NOT NULL,
 		description TEXT DEFAULT '',
+		prompt TEXT NOT NULL DEFAULT '',
 		hidden INTEGER NOT NULL DEFAULT 0,
 		created_at TIMESTAMP NOT NULL,
 		updated_at TIMESTAMP NOT NULL

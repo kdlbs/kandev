@@ -1,7 +1,10 @@
 "use client";
 
 import { useCallback, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 import {
+  IconArchive,
   IconPlayerStop,
   IconGitCommit,
   IconArrowUp,
@@ -28,6 +31,9 @@ import { createFile } from "@/lib/ws/workspace-files";
 import { useDockviewStore } from "@/lib/state/dockview-store";
 import { NewSessionDialog } from "@/components/task/new-session-dialog";
 import { NewSubtaskDialog } from "@/components/task/new-subtask-dialog";
+import { TaskArchiveConfirmFlow } from "@/components/task/task-archive-confirm-flow";
+import { useTaskArchiveConfirm } from "@/hooks/use-task-archive-confirm";
+import { searchKeywords } from "@/lib/commands/search-keywords";
 import type { CommandItem } from "@/lib/commands/types";
 
 type SessionCommandsProps = {
@@ -36,6 +42,8 @@ type SessionCommandsProps = {
   isAgentRunning?: boolean;
   hasWorktree?: boolean;
   isPassthrough?: boolean;
+  /** Archived tasks are read-only, so the palette hides the archive command. */
+  isTaskArchived?: boolean;
 };
 
 type GitRunFn = (
@@ -154,13 +162,25 @@ function buildWorkspaceCommands(sessionId: string): CommandItem[] {
   ];
 }
 
-function buildTaskCommands(
-  activeTaskId: string | null,
-  openNewAgent: () => void,
-  openSubtask: () => void,
-): CommandItem[] {
+type TaskCommandOptions = {
+  activeTaskId: string | null;
+  isTaskArchived: boolean;
+  t: TFunction;
+  openNewAgent: () => void;
+  openSubtask: () => void;
+  requestArchive: () => void;
+};
+
+export function buildTaskCommands({
+  activeTaskId,
+  isTaskArchived,
+  t,
+  openNewAgent,
+  openSubtask,
+  requestArchive,
+}: TaskCommandOptions): CommandItem[] {
   if (!activeTaskId) return [];
-  return [
+  const items: CommandItem[] = [
     {
       id: "agent-new",
       label: "New Agent",
@@ -172,12 +192,25 @@ function buildTaskCommands(
     {
       id: "subtask-create",
       label: "Create Subtask",
-      group: "Tasks",
+      group: t("common:commandGroupTasks"),
       icon: <IconSubtask className="size-3.5" />,
       keywords: ["subtask", "create", "new subtask", "new sub-task", "child task"],
       action: openSubtask,
     },
   ];
+  // An archived task cannot be archived again; the palette offers no archive
+  // entry for it rather than surfacing a command that always fails.
+  if (!isTaskArchived) {
+    items.push({
+      id: "task-archive",
+      label: t("tasks:archiveTask"),
+      group: t("common:commandGroupTasks"),
+      icon: <IconArchive className="size-3.5" />,
+      keywords: searchKeywords(t, "common:commandArchiveTaskKeywords"),
+      action: requestArchive,
+    });
+  }
+  return items;
 }
 
 function buildPanelCommands(
@@ -230,13 +263,72 @@ function buildPanelCommands(
   return items;
 }
 
+function useCancelTurn(sessionId: string | null) {
+  return useCallback(async () => {
+    if (!sessionId) return;
+    const client = getWebSocketClient();
+    if (!client) return;
+    try {
+      await client.request("agent.cancel", { session_id: sessionId }, 15000);
+    } catch (error) {
+      console.error("Failed to cancel agent turn:", error);
+    }
+  }, [sessionId]);
+}
+
+function useCommandDialogState() {
+  const [newAgentOpen, setNewAgentOpen] = useState(false);
+  const [subtaskOpen, setSubtaskOpen] = useState(false);
+  const openNewAgent = useCallback(() => setNewAgentOpen(true), []);
+  const openSubtask = useCallback(() => setSubtaskOpen(true), []);
+  return { newAgentOpen, setNewAgentOpen, subtaskOpen, setSubtaskOpen, openNewAgent, openSubtask };
+}
+
+type SessionCommandDialogsProps = {
+  activeTaskId: string;
+  activeTaskTitle: string;
+  dialogs: ReturnType<typeof useCommandDialogState>;
+  archive: ReturnType<typeof useTaskArchiveConfirm>;
+};
+
+/** Dialogs the task-scoped palette commands open. */
+function SessionCommandDialogs({
+  activeTaskId,
+  activeTaskTitle,
+  dialogs,
+  archive,
+}: SessionCommandDialogsProps) {
+  return (
+    <>
+      <NewSessionDialog
+        open={dialogs.newAgentOpen}
+        onOpenChange={dialogs.setNewAgentOpen}
+        taskId={activeTaskId}
+      />
+      <NewSubtaskDialog
+        open={dialogs.subtaskOpen}
+        onOpenChange={dialogs.setSubtaskOpen}
+        parentTaskId={activeTaskId}
+        parentTaskTitle={activeTaskTitle}
+      />
+      <TaskArchiveConfirmFlow
+        taskId={activeTaskId}
+        archive={archive}
+        confirmTestId="palette-archive-confirm"
+      />
+    </>
+  );
+}
+
 export function SessionCommands({
   sessionId,
   baseBranch,
   isAgentRunning,
   hasWorktree,
   isPassthrough,
+  isTaskArchived,
 }: SessionCommandsProps) {
+  const { t } = useTranslation();
   const git = useGitOperations(sessionId);
   const panels = usePanelActions();
   const { openCommitDialog, openPRDialog } = useVcsDialogs();
@@ -249,21 +341,9 @@ export function SessionCommands({
     return s.kanban.tasks.find((t: { id: string }) => t.id === id)?.title ?? "";
   });
 
-  const [showNewAgentDialog, setShowNewAgentDialog] = useState(false);
-  const [showSubtaskDialog, setShowSubtaskDialog] = useState(false);
-  const openNewAgent = useCallback(() => setShowNewAgentDialog(true), []);
-  const openSubtask = useCallback(() => setShowSubtaskDialog(true), []);
-
-  const cancelTurn = useCallback(async () => {
-    if (!sessionId) return;
-    const client = getWebSocketClient();
-    if (!client) return;
-    try {
-      await client.request("agent.cancel", { session_id: sessionId }, 15000);
-    } catch (error) {
-      console.error("Failed to cancel agent turn:", error);
-    }
-  }, [sessionId]);
+  const dialogs = useCommandDialogState();
+  const { openNewAgent, openSubtask } = dialogs;
+  const cancelTurn = useCancelTurn(sessionId);
 
   const runGitWithFeedback = useCallback(
     async (
@@ -276,16 +356,32 @@ export function SessionCommands({
     [panels, gitWithFeedback],
   );
 
+  const archive = useTaskArchiveConfirm(activeTaskId);
+  const { requestArchive } = archive;
+
+  // Session-scoped commands need a live session; task-scoped ones only need the
+  // task, so they stay available while a session is still being ensured.
   const commands = useMemo<CommandItem[]>(() => {
-    if (!sessionId) return [];
+    const sessionScoped = sessionId
+      ? [
+          ...buildSessionCommands(isAgentRunning, cancelTurn),
+          ...(hasWorktree
+            ? buildGitCommands(git, baseBranch, openCommitDialog, openPRDialog, runGitWithFeedback)
+            : []),
+          ...(hasWorktree ? buildWorkspaceCommands(sessionId) : []),
+          ...buildPanelCommands(panels, isPassthrough),
+        ]
+      : [];
     const items = [
-      ...buildSessionCommands(isAgentRunning, cancelTurn),
-      ...(hasWorktree
-        ? buildGitCommands(git, baseBranch, openCommitDialog, openPRDialog, runGitWithFeedback)
-        : []),
-      ...(hasWorktree ? buildWorkspaceCommands(sessionId) : []),
-      ...buildPanelCommands(panels, isPassthrough),
-      ...buildTaskCommands(activeTaskId, openNewAgent, openSubtask),
+      ...sessionScoped,
+      ...buildTaskCommands({
+        activeTaskId,
+        isTaskArchived: Boolean(isTaskArchived),
+        t,
+        openNewAgent,
+        openSubtask,
+        requestArchive,
+      }),
     ];
     return items.map((cmd) => ({ ...cmd, priority: 0 }));
   }, [
@@ -298,32 +394,26 @@ export function SessionCommands({
     isAgentRunning,
     hasWorktree,
     isPassthrough,
+    isTaskArchived,
+    t,
     openCommitDialog,
     openPRDialog,
     runGitWithFeedback,
     openNewAgent,
     openSubtask,
+    requestArchive,
   ]);
 
   useRegisterCommands(commands);
 
+  if (!activeTaskId) return null;
+
   return (
-    <>
-      {activeTaskId && (
-        <NewSessionDialog
-          open={showNewAgentDialog}
-          onOpenChange={setShowNewAgentDialog}
-          taskId={activeTaskId}
-        />
-      )}
-      {activeTaskId && (
-        <NewSubtaskDialog
-          open={showSubtaskDialog}
-          onOpenChange={setShowSubtaskDialog}
-          parentTaskId={activeTaskId}
-          parentTaskTitle={activeTaskTitle}
-        />
-      )}
-    </>
+    <SessionCommandDialogs
+      activeTaskId={activeTaskId}
+      activeTaskTitle={activeTaskTitle}
+      dialogs={dialogs}
+      archive={archive}
+    />
   );
 }

@@ -3,6 +3,8 @@
 import { cn } from "@/lib/utils";
 import type { OfficeTaskStatus } from "@/lib/state/slices/office/types";
 import { normalizeTaskStatus } from "./normalize-status";
+import { STATUS_LABEL_KEYS } from "../lib/label-keys";
+import { useTranslation } from "react-i18next";
 
 /**
  * Status icon for office tasks. Colored outline ring per status, with an
@@ -18,16 +20,6 @@ const statusStyles: Record<OfficeTaskStatus, string> = {
   cancelled: "border-neutral-500 text-neutral-500",
 };
 
-const statusLabels: Record<OfficeTaskStatus, string> = {
-  backlog: "Backlog",
-  todo: "Todo",
-  in_progress: "In Progress",
-  in_review: "In Review",
-  blocked: "Blocked",
-  done: "Done",
-  cancelled: "Cancelled",
-};
-
 type StatusIconProps = {
   /** Accepts any backend / display status string; gets normalised internally. */
   status: string;
@@ -35,8 +27,9 @@ type StatusIconProps = {
 };
 
 export function StatusIcon({ status, className }: StatusIconProps) {
+  const { t } = useTranslation();
   const normalised = normalizeTaskStatus(status);
-  const label = statusLabels[normalised];
+  const label = t(STATUS_LABEL_KEYS[normalised]);
   return (
     <span
       className={cn(

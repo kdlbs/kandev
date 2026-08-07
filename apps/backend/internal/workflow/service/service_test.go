@@ -713,6 +713,33 @@ func TestImportWorkflows(t *testing.T) {
 		assert.Len(t, steps, 2)
 	})
 
+	t.Run("imports workflow-level prompt", func(t *testing.T) {
+		svc, _, provider := setupTestServiceWithProvider(t)
+		ctx := context.Background()
+
+		export := &models.WorkflowExport{
+			Version: models.ExportVersion,
+			Type:    models.ExportType,
+			Workflows: []models.WorkflowPortable{
+				{
+					Name:   "Prompted WF",
+					Prompt: "If the PR is merged or closed, move the Task to Done.",
+					Steps: []models.StepPortable{
+						{Name: "Todo", Position: 0, Color: "gray"},
+					},
+				},
+			},
+		}
+
+		result, err := svc.ImportWorkflows(ctx, "ws-1", export)
+		require.NoError(t, err)
+		assert.Equal(t, []string{"Prompted WF"}, result.Created)
+
+		wf, err := provider.GetWorkflow(ctx, "imported-Prompted WF")
+		require.NoError(t, err)
+		assert.Equal(t, "If the PR is merged or closed, move the Task to Done.", wf.Prompt)
+	})
+
 	t.Run("normalizes duplicate start steps on import", func(t *testing.T) {
 		svc, _, _ := setupTestServiceWithProvider(t)
 		ctx := context.Background()

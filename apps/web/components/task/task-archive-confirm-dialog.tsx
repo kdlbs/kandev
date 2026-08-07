@@ -18,6 +18,7 @@ import { useSubtaskCount } from "@/hooks/use-subtask-count";
 import { useTaskInFlight } from "@/hooks/use-task-in-flight";
 import { getCleanupSummary, getBulkCleanupSummary } from "./task-cleanup-summary";
 import { StillWorkingWarning } from "./task-still-working-warning";
+import { useTranslation } from "react-i18next";
 
 type TaskArchiveConfirmDialogProps = {
   open: boolean;
@@ -94,13 +95,15 @@ export function TaskArchiveConfirmDialog({
   onConfirm,
   confirmTestId,
 }: TaskArchiveConfirmDialogProps) {
+  const { t } = useTranslation();
   const confirmTaskArchive = useAppStore((state) => state.userSettings?.confirmTaskArchive ?? true);
   const safeCount = count ?? 0;
-  const label = isBulkOperation ? `task${safeCount !== 1 ? "s" : ""}` : "task";
-  const title = isBulkOperation ? `Archive ${safeCount} ${label}?` : "Archive task?";
+  const title = isBulkOperation
+    ? t("task:archiveTasksTitle", { count: safeCount })
+    : t("task:archiveTaskTitle");
   const firstLine = isBulkOperation
-    ? `Are you sure you want to archive ${safeCount} ${label}?`
-    : `Are you sure you want to archive "${taskTitle}"?`;
+    ? t("task:archiveTasksConfirm", { count: safeCount })
+    : t("task:archiveTaskConfirm", { taskTitle });
   const cleanup = isBulkOperation
     ? getBulkCleanupSummary(executorTypes ?? [])
     : getCleanupSummary(executorType);
@@ -150,15 +153,15 @@ export function TaskArchiveConfirmDialog({
               data-testid="archive-cascade-checkbox"
             />
             <span>
-              Also archive {subtaskCount} subtask{subtaskCount === 1 ? "" : "s"}
+              {t("task:alsoArchiveSubtasks", { count: subtaskCount })}
               <span className="block text-xs text-muted-foreground">
-                Subtasks stay active unless you tick this. They may still be in progress.
+                {t("task:subtasksStayActiveUnlessYouTick")}
               </span>
             </span>
           </label>
         )}
         <AlertDialogFooter>
-          <AlertDialogCancel className="cursor-pointer">Cancel</AlertDialogCancel>
+          <AlertDialogCancel className="cursor-pointer">{t("common:cancel")}</AlertDialogCancel>
           <AlertDialogAction
             disabled={isArchiving}
             className="cursor-pointer"
@@ -170,7 +173,7 @@ export function TaskArchiveConfirmDialog({
             }}
           >
             {isArchiving ? <IconLoader className="mr-2 h-4 w-4 animate-spin" /> : null}
-            Archive
+            {t("task:archive")}
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>

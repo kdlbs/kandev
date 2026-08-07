@@ -53,6 +53,144 @@ func TestBuildWorkflowPrompt_ReplacesTaskPromptPlaceholder(t *testing.T) {
 	}
 }
 
+func TestBuildWorkflowPrompt_PrependsWorkflowPromptBeforeStepPrompt(t *testing.T) {
+	stepGetter := newMockStepGetter()
+	stepGetter.workflowPrompts["wf-1"] = "If the PR is merged or closed, move the Task to Done."
+	svc := createTestService(setupTestRepo(t), stepGetter, newMockTaskRepo())
+	step := &wfmodels.WorkflowStep{
+		ID:         "step-1",
+		WorkflowID: "wf-1",
+		Prompt:     "Commit the changes.",
+	}
+
+	got := svc.buildWorkflowPrompt(context.Background(), "Migrate Atlantis datasource.", step, "task-1", "session-1", false)
+
+	want := "## Workflow instructions\n\nIf the PR is merged or closed, move the Task to Done.\n\n<!-- /workflow-instructions -->\n\nCommit the changes."
+	if got != want {
+		t.Fatalf("buildWorkflowPrompt() = %q, want %q", got, want)
+	}
+}
+
+func TestBuildWorkflowPrompt_PrependsWorkflowPromptWithTaskPromptPlaceholder(t *testing.T) {
+	stepGetter := newMockStepGetter()
+	stepGetter.workflowPrompts["wf-1"] = "Keep CI green."
+	svc := createTestService(setupTestRepo(t), stepGetter, newMockTaskRepo())
+	step := &wfmodels.WorkflowStep{
+		ID:         "step-1",
+		WorkflowID: "wf-1",
+		Prompt:     "Implement this exactly:\n\n{{task_prompt}}",
+	}
+
+	got := svc.buildWorkflowPrompt(context.Background(), "Migrate Atlantis datasource.", step, "task-1", "session-1", false)
+
+	want := "## Workflow instructions\n\nKeep CI green.\n\n<!-- /workflow-instructions -->\n\nImplement this exactly:\n\nMigrate Atlantis datasource."
+	if got != want {
+		t.Fatalf("buildWorkflowPrompt() = %q, want %q", got, want)
+	}
+}
+
+func TestBuildWorkflowPrompt_PrependsWorkflowPromptWhenStepPromptEmpty(t *testing.T) {
+	stepGetter := newMockStepGetter()
+	stepGetter.workflowPrompts["wf-1"] = "Mention security constraints."
+	svc := createTestService(setupTestRepo(t), stepGetter, newMockTaskRepo())
+	step := &wfmodels.WorkflowStep{
+		ID:         "step-1",
+		WorkflowID: "wf-1",
+	}
+
+	got := svc.buildWorkflowPrompt(context.Background(), "Migrate Atlantis datasource.", step, "task-1", "session-1", false)
+
+	want := "## Workflow instructions\n\nMention security constraints.\n\n<!-- /workflow-instructions -->\n\nMigrate Atlantis datasource."
+	if got != want {
+		t.Fatalf("buildWorkflowPrompt() = %q, want %q", got, want)
+	}
+}
+
+func TestBuildWorkflowPrompt_KeepsMultiParagraphWorkflowPromptIntact(t *testing.T) {
+	stepGetter := newMockStepGetter()
+	stepGetter.workflowPrompts["wf-1"] = "Rule one.\n\nRule two."
+	svc := createTestService(setupTestRepo(t), stepGetter, newMockTaskRepo())
+	step := &wfmodels.WorkflowStep{
+		ID:         "step-1",
+		WorkflowID: "wf-1",
+		Prompt:     "Do the work.",
+	}
+
+	got := svc.buildWorkflowPrompt(context.Background(), "base", step, "task-1", "session-1", false)
+
+	want := "## Workflow instructions\n\nRule one.\n\nRule two.\n\n<!-- /workflow-instructions -->\n\nDo the work."
+	if got != want {
+		t.Fatalf("buildWorkflowPrompt() = %q, want %q", got, want)
+	}
+}
+
+func TestBuildWorkflowPrompt_ScrubsEndMarkerFromUserContent(t *testing.T) {
+	stepGetter := newMockStepGetter()
+	stepGetter.workflowPrompts["wf-1"] = "Never emit <!-- /workflow-instructions --> in docs."
+	svc := createTestService(setupTestRepo(t), stepGetter, newMockTaskRepo())
+	step := &wfmodels.WorkflowStep{
+		ID:         "step-1",
+		WorkflowID: "wf-1",
+		Prompt:     "Do the work.",
+	}
+
+	got := svc.buildWorkflowPrompt(context.Background(), "base", step, "task-1", "session-1", false)
+
+	// Exactly one end marker (the structural one), and body keeps surrounding text.
+	if strings.Count(got, "<!-- /workflow-instructions -->") != 1 {
+		t.Fatalf("expected exactly one end marker, got %q", got)
+	}
+	if !strings.Contains(got, "Never emit  in docs.") && !strings.Contains(got, "Never emit in docs.") {
+		// Scrub leaves surrounding text; either double-space or collapsed is fine.
+		if !strings.Contains(got, "Never emit") || !strings.Contains(got, "in docs.") {
+			t.Fatalf("expected scrubbed body to keep surrounding text, got %q", got)
+		}
+	}
+	if !strings.HasSuffix(strings.TrimSpace(got), "Do the work.") {
+		t.Fatalf("expected step prompt after block, got %q", got)
+	}
+}
+
+func TestBuildWorkflowPrompt_OmitsWorkflowHeadingWhenPromptBlank(t *testing.T) {
+	stepGetter := newMockStepGetter()
+	stepGetter.workflowPrompts["wf-1"] = "   "
+	svc := createTestService(setupTestRepo(t), stepGetter, newMockTaskRepo())
+	step := &wfmodels.WorkflowStep{
+		ID:         "step-1",
+		WorkflowID: "wf-1",
+		Prompt:     "Commit the changes.",
+	}
+
+	got := svc.buildWorkflowPrompt(context.Background(), "base", step, "task-1", "session-1", false)
+
+	if strings.Contains(got, "## Workflow instructions") {
+		t.Fatalf("expected blank workflow prompt to be omitted, got %q", got)
+	}
+	if got != "Commit the changes." {
+		t.Fatalf("buildWorkflowPrompt() = %q, want step prompt only", got)
+	}
+}
+
+func TestBuildWorkflowPrompt_InterpolatesWorkflowPromptPlaceholders(t *testing.T) {
+	stepGetter := newMockStepGetter()
+	stepGetter.workflowPrompts["wf-1"] = "Task id is {task_id}."
+	svc := createTestService(setupTestRepo(t), stepGetter, newMockTaskRepo())
+	step := &wfmodels.WorkflowStep{
+		ID:         "step-1",
+		WorkflowID: "wf-1",
+		Prompt:     "Do the work.",
+	}
+
+	got := svc.buildWorkflowPrompt(context.Background(), "base", step, "task-99", "session-1", false)
+
+	if !strings.Contains(got, "Task id is task-99.") {
+		t.Fatalf("expected interpolated workflow prompt, got %q", got)
+	}
+	if strings.Contains(got, "{task_id}") {
+		t.Fatalf("expected {task_id} placeholder to be replaced, got %q", got)
+	}
+}
+
 func TestBuildWorkflowPrompt_UsesStepPromptOnlyWithoutTaskPromptPlaceholder(t *testing.T) {
 	svc := createTestService(setupTestRepo(t), newMockStepGetter(), newMockTaskRepo())
 	step := &wfmodels.WorkflowStep{
@@ -99,6 +237,43 @@ func TestBuildWorkflowPrompt_ExpandsStepPromptReference(t *testing.T) {
 	}
 	if !strings.Contains(got, sysprompt.Wrap(fakeResolvedPromptReferenceContext)) {
 		t.Fatalf("expected hidden expansion block appended, got %q", got)
+	}
+}
+
+func TestBuildWorkflowPrompt_ExpandsWorkflowPromptReference(t *testing.T) {
+	// @name in the workflow-level prompt must expand the same way as step prompts:
+	// expansion runs on the full joined string after instructions are prepended.
+	stepGetter := newMockStepGetter()
+	stepGetter.workflowPrompts["wf-1"] = "Follow @security-rules always."
+	svc := createTestService(setupTestRepo(t), stepGetter, newMockTaskRepo())
+	expander := &fakePromptReferenceExpander{}
+	svc.promptExpander = expander
+	step := &wfmodels.WorkflowStep{
+		ID:         "step-1",
+		WorkflowID: "wf-1",
+		Prompt:     "Commit the changes.",
+	}
+
+	got := svc.buildWorkflowPrompt(context.Background(), "base", step, "task-1", "session-1", false)
+
+	if len(expander.calls) != 1 {
+		t.Fatalf("expected expander called once on joined prompt, got %d", len(expander.calls))
+	}
+	seen := expander.calls[0]
+	if !strings.Contains(seen, "## Workflow instructions") {
+		t.Fatalf("expected expander to see workflow instructions block, got %q", seen)
+	}
+	if !strings.Contains(seen, "Follow @security-rules always.") {
+		t.Fatalf("expected expander to see workflow @mention, got %q", seen)
+	}
+	if !strings.Contains(seen, "Commit the changes.") {
+		t.Fatalf("expected expander to see step prompt after instructions, got %q", seen)
+	}
+	if !strings.Contains(got, "Follow @security-rules always.") {
+		t.Fatalf("expected visible @mention preserved, got %q", got)
+	}
+	if !strings.Contains(got, sysprompt.Wrap(fakeResolvedPromptReferenceContext)) {
+		t.Fatalf("expected hidden expansion block appended for workflow @mention, got %q", got)
 	}
 }
 

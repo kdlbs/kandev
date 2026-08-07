@@ -8,7 +8,6 @@ import {
   IconBrandGithub,
   IconBrandGitlab,
   IconBrandSentry,
-  IconBrandSlack,
   IconFolder,
   IconGitBranch,
   IconHexagon,
@@ -24,7 +23,6 @@ import { useGitLabAvailable } from "@/hooks/domains/gitlab/use-task-mr";
 import { useJiraAuthed } from "@/hooks/domains/jira/use-jira-availability";
 import { useLinearAuthed } from "@/hooks/domains/linear/use-linear-availability";
 import { useSentryAvailable } from "@/hooks/domains/sentry/use-sentry-availability";
-import { useSlackAuthed } from "@/hooks/domains/slack/use-slack-availability";
 import { WORKSPACE_INTEGRATIONS } from "@/lib/settings-discovery/catalog/integrations";
 import { WORKSPACES_SETTINGS_HREF } from "@/lib/settings-discovery/catalog/workspaces";
 import { SettingsGroup, SettingsLeaf } from "./settings-nav-primitives";
@@ -38,7 +36,6 @@ const INTEGRATION_ICONS: Record<(typeof WORKSPACE_INTEGRATIONS)[number][0], Inte
   jira: IconTicket,
   linear: IconHexagon,
   sentry: IconBrandSentry,
-  slack: IconBrandSlack,
 };
 
 // Rendered as components, not module-scope JSX constants: `t()` must resolve at
@@ -76,7 +73,6 @@ function WorkspaceIntegrationItems({
   const jira = useJiraAuthed(workspaceId);
   const linear = useLinearAuthed(workspaceId);
   const sentry = useSentryAvailable(workspaceId);
-  const slack = useSlackAuthed(workspaceId);
   const enabled = new Set([
     ...(azureDevOps ? ["azure-devops"] : []),
     ...(githubStatus?.authenticated || githubStatus?.token_configured ? ["github"] : []),
@@ -84,7 +80,6 @@ function WorkspaceIntegrationItems({
     ...(jira ? ["jira"] : []),
     ...(linear ? ["linear"] : []),
     ...(sentry ? ["sentry"] : []),
-    ...(slack ? ["slack"] : []),
   ]);
 
   return WORKSPACE_INTEGRATIONS.map(([slug, label]) => {

@@ -32,8 +32,14 @@ plugins:
   - id: kandev-plugin-kandy
     repo: kdlbs/kandev-plugin-kandy
     categories: [tools]
+  - id: kandev-plugin-slack
+    repo: kdlbs/kandev-plugin-slack
+    categories: [integrations, automation]
   - id: kandev-plugin-tags
     repo: yattdev/kandev-plugin-tags
+    categories: [tools]
+  - id: kandev-plugin-notes
+    repo: yattdev/kandev-plugin-notes
     categories: [tools]
 # Example entry (copy, uncomment, and fill in when adding a plugin):
 #

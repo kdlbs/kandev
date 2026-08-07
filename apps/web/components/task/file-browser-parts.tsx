@@ -312,10 +312,13 @@ export function SearchResultsList({
   showTouchActions,
   onAddToChatContext,
 }: SearchResultsListProps) {
+  const { t } = useTranslation();
   if (!searchResults) return null;
 
   if (searchResults.length === 0) {
-    return <div className="p-4 text-sm text-muted-foreground text-center">No files found</div>;
+    return (
+      <div className="p-4 text-sm text-muted-foreground text-center">{t("task:noFilesFound")}</div>
+    );
   }
 
   return (
@@ -475,6 +478,7 @@ function FileTreeView(props: FileBrowserContentAreaProps) {
 }
 
 export function FileBrowserContentArea(props: FileBrowserContentAreaProps) {
+  const { t } = useTranslation();
   if (props.isSearchActive && props.searchResults !== null) {
     return (
       <SearchResultsList
@@ -497,5 +501,5 @@ export function FileBrowserContentArea(props: FileBrowserContentAreaProps) {
   });
   if (loadStateResult) return loadStateResult;
   if (props.tree) return <FileTreeView {...props} />;
-  return <div className="p-4 text-sm text-muted-foreground">No files found</div>;
+  return <div className="p-4 text-sm text-muted-foreground">{t("task:noFilesFound")}</div>;
 }

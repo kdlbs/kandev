@@ -40,10 +40,14 @@ import (
 type mockStepGetter struct {
 	steps                  map[string]*wfmodels.WorkflowStep // stepID -> step
 	workflowAgentProfileID string                            // returned by GetWorkflowAgentProfileID
+	workflowPrompts        map[string]string                 // workflowID -> prompt
 }
 
 func newMockStepGetter() *mockStepGetter {
-	return &mockStepGetter{steps: make(map[string]*wfmodels.WorkflowStep)}
+	return &mockStepGetter{
+		steps:           make(map[string]*wfmodels.WorkflowStep),
+		workflowPrompts: make(map[string]string),
+	}
 }
 
 func (m *mockStepGetter) GetStep(_ context.Context, stepID string) (*wfmodels.WorkflowStep, error) {
@@ -82,6 +86,13 @@ func (m *mockStepGetter) GetWorkflowAgentProfileID(_ context.Context, workflowID
 		return m.workflowAgentProfileID, nil
 	}
 	return "", nil
+}
+
+func (m *mockStepGetter) GetWorkflowPrompt(_ context.Context, workflowID string) (string, error) {
+	if m.workflowPrompts == nil {
+		return "", nil
+	}
+	return m.workflowPrompts[workflowID], nil
 }
 
 // mockTaskRepo implements scheduler.TaskRepository for testing.

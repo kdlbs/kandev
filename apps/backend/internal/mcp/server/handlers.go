@@ -214,6 +214,9 @@ func (s *Server) createTaskHandler() server.ToolHandlerFunc {
 		if err := s.backend.RequestPayload(ctx, ws.ActionMCPCreateTask, payload, &result); err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
+		// The created task's description is the prompt this call just sent;
+		// echoing it back only duplicates it in the caller's context.
+		delete(result, descriptionArg)
 		data, _ := json.MarshalIndent(result, "", "  ")
 		return mcp.NewToolResultText(string(data)), nil
 	}
@@ -239,6 +242,11 @@ func (s *Server) updateTaskHandler() server.ToolHandlerFunc {
 		if err := s.backend.RequestPayload(ctx, ws.ActionMCPUpdateTask, payload, &result); err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
+		// A write tool confirms the write; it is not a way to read a task's
+		// prose back. The description is either what this call just sent or
+		// unrelated to it — echoing it costs the caller thousands of tokens
+		// either way. Read it deliberately via list_related_tasks_kandev.
+		delete(result, descriptionArg)
 		data, _ := json.MarshalIndent(result, "", "  ")
 		return mcp.NewToolResultText(string(data)), nil
 	}
@@ -833,6 +841,35 @@ func (s *Server) resolveTaskID(req mcp.CallToolRequest) (string, error) {
 	return "", fmt.Errorf("task_id is required")
 }
 
+// stringField reads a string value from a decoded backend response, returning
+// "" for a missing key or a non-string value.
+func stringField(result map[string]interface{}, key string) string {
+	value, _ := result[key].(string)
+	return value
+}
+
+// planWriteAck renders the acknowledgement returned by the plan create/update
+// tools. The backend echoes the stored plan in full, and handing that back to
+// the agent that just sent it duplicated the plan in the agent's context on
+// every sync — measurably the largest single contributor to context growth in
+// plan-heavy sessions. Confirm the write, its identity and its size instead,
+// and leave the content to get_task_plan_kandev.
+func planWriteAck(action string, result map[string]interface{}, sentContent string) *mcp.CallToolResult {
+	// Prefer the stored length: it confirms what the backend persisted rather
+	// than what this call happened to send.
+	size := len(sentContent)
+	if stored, ok := result["content"].(string); ok {
+		size = len(stored)
+	}
+	ack := fmt.Sprintf("Plan %s successfully: task_id=%s, title=%q, %d bytes",
+		action, stringField(result, mcpKeyTaskID), stringField(result, titleArg), size)
+	if updatedAt := stringField(result, "updated_at"); updatedAt != "" {
+		ack += ", updated_at=" + updatedAt
+	}
+	return mcp.NewToolResultText(ack +
+		". Plan content is omitted from this response; read it back with get_task_plan_kandev if needed.")
+}
+
 func (s *Server) createTaskPlanHandler() server.ToolHandlerFunc {
 	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		taskID, err := s.resolveTaskID(req)
@@ -855,8 +892,7 @@ func (s *Server) createTaskPlanHandler() server.ToolHandlerFunc {
 		if err := s.backend.RequestPayload(ctx, ws.ActionMCPCreateTaskPlan, payload, &result); err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
-		data, _ := json.MarshalIndent(result, "", "  ")
-		return mcp.NewToolResultText(fmt.Sprintf("Plan created successfully:\n%s", string(data))), nil
+		return planWriteAck("created", result, content), nil
 	}
 }
 
@@ -913,8 +949,7 @@ func (s *Server) updateTaskPlanHandler() server.ToolHandlerFunc {
 		if err := s.backend.RequestPayload(ctx, ws.ActionMCPUpdateTaskPlan, payload, &result); err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
-		data, _ := json.MarshalIndent(result, "", "  ")
-		return mcp.NewToolResultText(fmt.Sprintf("Plan updated successfully:\n%s", string(data))), nil
+		return planWriteAck("updated", result, content), nil
 	}
 }
 
