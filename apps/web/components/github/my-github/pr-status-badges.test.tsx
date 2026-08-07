@@ -49,14 +49,16 @@ describe("PRStatusBadges review chip tooltip", () => {
   // not `count`, so the parenthetical was the only way English could stay
   // truthful — and every translation inherited it. These two cases pin the
   // plural-aware replacement.
+  // The query is deliberately loose and the assertion exact: a wrong plural then
+  // fails on the value ("expected '1 pending reviews' to be '1 pending review'")
+  // rather than on the lookup, which would only report a missing element.
   it("uses the singular form for exactly one pending review", () => {
     render(<PRStatusBadges pr={makePR()} status={makeStatus(1)} />);
-    // getByTitle throws when absent, so this pins the exact rendered string.
-    expect(screen.getByTitle("1 pending review")).toBeTruthy();
+    expect(screen.getByTitle(/pending review/).getAttribute("title")).toBe("1 pending review");
   });
 
   it("uses the plural form for more than one pending review", () => {
     render(<PRStatusBadges pr={makePR()} status={makeStatus(3)} />);
-    expect(screen.getByTitle("3 pending reviews")).toBeTruthy();
+    expect(screen.getByTitle(/pending review/).getAttribute("title")).toBe("3 pending reviews");
   });
 });
