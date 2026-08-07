@@ -10,6 +10,7 @@ import {
 } from "./changes-panel-timeline";
 import { mergeCommits, firstVisibleSection } from "./changes-panel-helpers";
 import type { ChangesPanelBodyProps } from "./changes-panel-data";
+import { useTranslation } from "react-i18next";
 
 function ChangesPanelDialogsSection({
   dialogs,
@@ -93,6 +94,7 @@ type WorkingTreeProps = Pick<
   | "unstagedFiles"
   | "stagedFiles"
   | "pendingStageFiles"
+  | "isLoading"
   | "loadingOperation"
   | "dialogs"
   | "onOpenDiffFile"
@@ -111,6 +113,7 @@ type WorkingTreeProps = Pick<
 >;
 
 function WorkingTreeSections(props: WorkingTreeProps) {
+  const { t } = useTranslation();
   const isBulkOp = props.pendingStageFiles.size === 0;
   return (
     <>
@@ -119,8 +122,8 @@ function WorkingTreeSections(props: WorkingTreeProps) {
           variant="unstaged"
           files={props.unstagedFiles}
           pendingStageFiles={props.pendingStageFiles}
-          actionLabel="Stage all"
-          isActionLoading={isBulkOp && props.loadingOperation === "stage"}
+          actionLabel={t("task:stageAll")}
+          isActionLoading={props.isLoading || (isBulkOp && props.loadingOperation === "stage")}
           onAction={props.onStageAll}
           onOpenDiff={props.onOpenDiffFile}
           onEditFile={props.onEditFile}
@@ -138,11 +141,13 @@ function WorkingTreeSections(props: WorkingTreeProps) {
           variant="staged"
           files={props.stagedFiles}
           pendingStageFiles={props.pendingStageFiles}
-          actionLabel="Commit"
-          isActionLoading={props.loadingOperation === "commit"}
+          actionLabel={t("task:commit")}
+          isActionLoading={props.isLoading || props.loadingOperation === "commit"}
           onAction={() => props.dialogs.openCommitDialog()}
-          secondaryActionLabel="Unstage all"
-          isSecondaryActionLoading={isBulkOp && props.loadingOperation === "unstage"}
+          secondaryActionLabel={t("task:unstageAll")}
+          isSecondaryActionLoading={
+            props.isLoading || (isBulkOp && props.loadingOperation === "unstage")
+          }
           onSecondaryAction={props.onUnstageAll}
           onOpenDiff={props.onOpenDiffFile}
           onEditFile={props.onEditFile}
@@ -161,10 +166,11 @@ function WorkingTreeSections(props: WorkingTreeProps) {
 }
 
 function ChangesPanelTimeline(props: TimelineProps) {
+  const { t } = useTranslation();
   if (!props.hasAnything) {
     return (
       <div className="flex items-center justify-center h-full text-muted-foreground text-xs">
-        Your changed files will appear here
+        {t("task:yourChangedFilesWillAppearHere")}
       </div>
     );
   }

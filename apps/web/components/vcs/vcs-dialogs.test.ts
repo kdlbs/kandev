@@ -26,13 +26,15 @@ describe("pickRepoLabel", () => {
   });
 
   it("translates the multi-repo fan-out label when no repo is scoped", () => {
-    expect(pickRepoLabel("", true, noDisplayName, t)).toBe(t("integrations:allRepos"));
-    expect(pickRepoLabel("", true, noDisplayName, t)).toBe("All repos");
+    expect(pickRepoLabel(undefined, true, noDisplayName, t)).toBe(t("integrations:allRepos"));
+  });
+
+  it("translates an explicit workspace-root scope separately from fan-out", () => {
+    expect(pickRepoLabel("", true, noDisplayName, t)).toBe(t("integrations:repository"));
   });
 
   it("translates the single-repo fallback when the primary repo has no display name", () => {
-    expect(pickRepoLabel("", false, noDisplayName, t)).toBe(t("integrations:repository"));
-    expect(pickRepoLabel("", false, noDisplayName, t)).toBe("Repository");
+    expect(pickRepoLabel(undefined, false, noDisplayName, t)).toBe(t("integrations:repository"));
   });
 
   it("prefers the primary repo's display name over the translated fallback", () => {

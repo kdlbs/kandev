@@ -431,7 +431,7 @@ func (m *Manager) launchResolveWorkspacePath(ctx context.Context, req *LaunchReq
 	// For tasks without a repository, create a scratch workspace.
 	// - Non-ephemeral repo-less tasks: <homeDir>/tasks/<workspaceID>/<taskID>/
 	//   (task-scoped, persists across sessions, mirrors the worktree task layout).
-	// - Ephemeral tasks (slack triage / quick chat): <dataDir>/quick-chat/<sessionID>/
+	// - Ephemeral tasks (quick chat): <dataDir>/quick-chat/<sessionID>/
 	//   (session-scoped, cleaned up on task delete via performTaskCleanup).
 	// Office tasks that have no repo (onboarding, planning) take the
 	// non-ephemeral branch and land under <homeDir>/tasks/...
@@ -484,7 +484,7 @@ func (m *Manager) resolveScratchWorkspace(ctx context.Context, req *LaunchReques
 func (m *Manager) scratchWorkspacePath(req *LaunchRequest) string {
 	if req.IsEphemeral {
 		// Legacy quick-chat path — session-scoped, kept for backward compat with
-		// slack triage and other ephemeral one-shot flows.
+		// ephemeral one-shot flows.
 		if strings.ContainsAny(req.SessionID, `/\`) {
 			m.logger.Warn("session ID contains path separator, rejecting",
 				zap.String("session_id", req.SessionID))

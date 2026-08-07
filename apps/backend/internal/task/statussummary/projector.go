@@ -56,8 +56,13 @@ type ProjectorConfig struct {
 	EventBus            bus.EventBus
 	ResolveWorkspace    WorkspaceResolver
 	LoadGitObservations GitObservationLoader
-	Logger              *logger.Logger
-	Now                 func() time.Time
+	// CountQueuedPrompts returns the number of prompts currently en-queued for
+	// a task across all of its sessions (pending semantics identical to
+	// message.queue.get). Wired from the messagequeue service at the
+	// composition root; nil disables queued-prompt projection.
+	CountQueuedPrompts func(context.Context, string) (int, error)
+	Logger             *logger.Logger
+	Now                func() time.Time
 }
 
 // Projector converts authoritative, bounded occurrences into one complete
@@ -69,6 +74,7 @@ type Projector struct {
 	eventBus            bus.EventBus
 	resolveWorkspace    WorkspaceResolver
 	loadGitObservations GitObservationLoader
+	countQueuedPrompts  func(context.Context, string) (int, error)
 	logger              *logger.Logger
 	now                 func() time.Time
 
@@ -88,6 +94,7 @@ type projectionState struct {
 	workspaceID      string
 	revision         uint64
 	current          *TaskStatusSummary
+	queuedCount      int
 	sessions         map[string]sessionObservation
 	pending          map[string]string
 	taskPending      string
@@ -139,6 +146,7 @@ func NewProjector(cfg ProjectorConfig) *Projector {
 		eventBus:            cfg.EventBus,
 		resolveWorkspace:    cfg.ResolveWorkspace,
 		loadGitObservations: cfg.LoadGitObservations,
+		countQueuedPrompts:  cfg.CountQueuedPrompts,
 		logger:              log.WithFields(zap.String("component", "task-status-summary-projector")),
 		now:                 now,
 		state:               make(map[string]*projectionState),
@@ -168,6 +176,7 @@ func (p *Projector) Start(ctx context.Context) error {
 		events.BuildPermissionRequestWildcardSubject(),
 		events.BuildGitEventWildcardSubject(),
 		events.GitHubTaskPRUpdated,
+		events.MessageQueueStatusChanged,
 	}
 	for _, pattern := range patterns {
 		sub, err := p.eventBus.Subscribe(pattern, p.handleEvent)
@@ -238,11 +247,57 @@ func (p *Projector) handleEvent(ctx context.Context, event *bus.Event) error {
 		return fmt.Errorf("task status summary %q has no workspace", taskID)
 	}
 
+	if event.Type == events.MessageQueueStatusChanged {
+		return p.applyQueueStatusEvent(ctx, state, taskID)
+	}
+
 	changed := p.applySourceEventLocked(state, event.Type, data)
 	if !changed {
 		return nil
 	}
-	return p.persistAndPublishLocked(ctx, taskID, state)
+	_, err = p.persistAndPublishLocked(ctx, taskID, state)
+	return err
+}
+
+// maxQueueCountPersistAttempts bounds the retry loop when a competing writer
+// keeps winning the compare-and-set. Each attempt re-reads the stored summary
+// (which persistAndPublishLocked syncs into state on rejection) and re-queries
+// the authoritative count, so a rejection can never suppress the update by
+// leaving state.queuedCount ahead of the persisted value.
+const maxQueueCountPersistAttempts = 3
+
+// applyQueueStatusEvent refreshes the task's queued prompt count from the
+// authoritative queue store. The event payload's per-session count is not
+// reused: the badge is per-task across all sessions, and the queue may have
+// changed between the status snapshot and this projection.
+func (p *Projector) applyQueueStatusEvent(ctx context.Context, state *projectionState, taskID string) error {
+	if p.countQueuedPrompts == nil {
+		return nil
+	}
+	for attempt := 0; attempt < maxQueueCountPersistAttempts; attempt++ {
+		count, err := p.countQueuedPrompts(ctx, taskID)
+		if err != nil {
+			return fmt.Errorf("count queued prompts for task %q: %w", taskID, err)
+		}
+		if count == state.queuedCount {
+			return nil
+		}
+		state.queuedCount = count
+		accepted, err := p.persistAndPublishLocked(ctx, taskID, state)
+		if err != nil {
+			return err
+		}
+		if accepted {
+			return nil
+		}
+	}
+	// The count self-corrects on the next queue event or list load, but a
+	// sustained contention run is worth surfacing so a repeated rejector is not
+	// silently starved.
+	p.logger.Warn("exhausted CAS retries updating queued prompt count",
+		zap.String("task_id", taskID),
+		zap.Int("attempts", maxQueueCountPersistAttempts))
+	return nil
 }
 
 func (p *Projector) applySourceEventLocked(state *projectionState, eventType string, data map[string]interface{}) bool {
@@ -455,6 +510,7 @@ func (p *Projector) restorePersistedState(ctx context.Context, taskID string, st
 	}
 	state.current = cloneSummary(summary)
 	state.revision = summary.Revision
+	state.queuedCount = summary.QueuedPromptCount
 	state.taskPending = summary.PendingAction
 	if summary.PrimarySession != nil && summary.PrimarySession.ID != "" {
 		state.sessions[summary.PrimarySession.ID] = sessionObservation{
@@ -620,7 +676,14 @@ func (p *Projector) applyPendingMessageLocked(state *projectionState, eventType 
 		return false
 	}
 	state.pendingObserved = true
-	if eventType == events.MessageDeleted || (!isPendingMessage && status != "" && status != statusPending) {
+	// A terminal status means the prompt is no longer awaiting the user, whatever
+	// the message type. Resolutions land as a message.updated on the request row
+	// itself (approved/rejected/expired for permissions, answered/rejected/
+	// cancelled/expired for clarifications), so gating the clear on "not a
+	// request message" left the task-list affordance armed after the user had
+	// already answered. Only the empty and "pending" statuses keep it armed —
+	// that covers a detached-but-answerable clarification, which stays pending.
+	if eventType == events.MessageDeleted || (status != "" && status != statusPending) {
 		return p.clearPendingLocked(state, sessionID)
 	}
 	action := pendingPermission
@@ -719,21 +782,26 @@ func pullRequestObservationKey(data map[string]interface{}) string {
 	return ""
 }
 
-func (p *Projector) persistAndPublishLocked(ctx context.Context, taskID string, state *projectionState) error {
+// persistAndPublishLocked persists the projected summary and publishes the
+// replacement event. The boolean reports whether the write was accepted (or a
+// no-op because the derived summary is already current); false means a
+// competing writer won and the stored summary was reloaded into state,
+// including queuedCount, so callers can retry against the refreshed revision.
+func (p *Projector) persistAndPublishLocked(ctx context.Context, taskID string, state *projectionState) (bool, error) {
 	next := deriveSummary(state)
 	if state.current != nil && state.current.SemanticEqual(next) {
-		return nil
+		return true, nil
 	}
 	if state.revision == ^uint64(0) {
-		return fmt.Errorf("task status summary %q revision overflow", taskID)
+		return false, fmt.Errorf("task status summary %q revision overflow", taskID)
 	}
 	next.Revision = state.revision + 1
 	next.UpdatedAt = p.now().UTC()
 	if err := next.Validate(); err != nil {
-		return fmt.Errorf("validate projected task status summary %q: %w", taskID, err)
+		return false, fmt.Errorf("validate projected task status summary %q: %w", taskID, err)
 	}
 	if p.store == nil {
-		return fmt.Errorf("task status summary store is unavailable")
+		return false, fmt.Errorf("task status summary store is unavailable")
 	}
 	accepted, err := p.store.CompareAndUpdateTaskStatusSummary(ctx, &StoredTaskStatusSummary{
 		TaskID:      taskID,
@@ -741,18 +809,19 @@ func (p *Projector) persistAndPublishLocked(ctx context.Context, taskID string, 
 		Summary:     next,
 	})
 	if err != nil {
-		return fmt.Errorf("persist projected task status summary %q: %w", taskID, err)
+		return false, fmt.Errorf("persist projected task status summary %q: %w", taskID, err)
 	}
 	if !accepted {
 		rows, loadErr := p.store.LoadTaskStatusSummaries(ctx, []string{taskID})
 		if loadErr != nil {
-			return fmt.Errorf("reload projected task status summary %q: %w", taskID, loadErr)
+			return false, fmt.Errorf("reload projected task status summary %q: %w", taskID, loadErr)
 		}
 		if stored := rows[taskID]; stored != nil {
 			state.current = cloneSummary(stored)
 			state.revision = stored.Revision
+			state.queuedCount = stored.QueuedPromptCount
 		}
-		return nil
+		return false, nil
 	}
 	state.current = cloneSummary(&next)
 	state.revision = next.Revision
@@ -760,10 +829,10 @@ func (p *Projector) persistAndPublishLocked(ctx context.Context, taskID string, 
 		payload := SummaryUpdated{TaskID: taskID, WorkspaceID: state.workspaceID, Summary: next}
 		if err := p.eventBus.Publish(ctx, events.TaskStatusSummaryUpdated,
 			bus.NewEvent(events.TaskStatusSummaryUpdated, "task-status-summary", payload)); err != nil {
-			return fmt.Errorf("publish task status summary %q: %w", taskID, err)
+			return false, fmt.Errorf("publish task status summary %q: %w", taskID, err)
 		}
 	}
-	return nil
+	return true, nil
 }
 
 func deriveSummary(state *projectionState) TaskStatusSummary {
@@ -776,6 +845,7 @@ func deriveSummary(state *projectionState) TaskStatusSummary {
 		ActiveError:         deriveActiveError(state),
 		Git:                 deriveGitSummary(state),
 		PullRequest:         derivePullRequestSummary(state),
+		QueuedPromptCount:   state.queuedCount,
 	}
 }
 

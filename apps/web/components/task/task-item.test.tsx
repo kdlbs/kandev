@@ -391,3 +391,38 @@ describe("TaskItem background-running lifecycle", () => {
     expect(screen.queryByTestId(RUNNING_ICON_TEST_ID)).toBeNull();
   });
 });
+
+describe("TaskItem queued prompt count badge", () => {
+  const QUEUED_BADGE_TEST_ID = "sidebar-task-queued-count";
+
+  it("shows a mail badge with the count when prompts are queued", () => {
+    renderTaskItem({ queuedCount: 3 });
+
+    const badge = screen.getByTestId(QUEUED_BADGE_TEST_ID);
+    expect(badge.textContent).toBe("3");
+    expect(badge.querySelector("svg")).not.toBeNull();
+  });
+
+  it("hides the badge when nothing is queued", () => {
+    renderTaskItem({ queuedCount: 0 });
+    expect(screen.queryByTestId(QUEUED_BADGE_TEST_ID)).toBeNull();
+
+    renderTaskItem({ queuedCount: undefined });
+    expect(screen.queryByTestId(QUEUED_BADGE_TEST_ID)).toBeNull();
+  });
+
+  it("renders the metadata line for a row whose only metadata is the queued count", () => {
+    renderTaskItem({ queuedCount: 2, updatedAt: undefined });
+
+    const badge = screen.getByTestId(QUEUED_BADGE_TEST_ID);
+    expect(badge.textContent).toBe("2");
+  });
+
+  it("localizes the accessible label with the count", () => {
+    renderTaskItem({ queuedCount: 1 });
+
+    expect(screen.getByTestId(QUEUED_BADGE_TEST_ID).getAttribute("aria-label")).toContain(
+      "queued prompt",
+    );
+  });
+});

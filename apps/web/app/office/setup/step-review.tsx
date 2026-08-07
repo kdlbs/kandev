@@ -3,6 +3,7 @@
 import { Badge } from "@kandev/ui/badge";
 import { Card } from "@kandev/ui/card";
 import { useAppStore } from "@/components/state-provider";
+import { useTranslation } from "react-i18next";
 
 type StepReviewProps = {
   workspaceName: string;
@@ -14,10 +15,12 @@ type StepReviewProps = {
 };
 
 // Fallback used only when meta has not been hydrated yet (graceful degradation).
-const FALLBACK_EXECUTOR_LABELS: Record<string, string> = {
-  local_pc: "Local (standalone)",
-  local_docker: "Local Docker",
-  sprites: "Sprites (remote sandbox)",
+// Catalog keys, not copy — module scope freezes a `t()` at the boot locale. The
+// record keys are the persisted executor-type values.
+const FALLBACK_EXECUTOR_LABEL_KEYS: Record<string, string> = {
+  local_pc: "office:localStandalone",
+  local_docker: "office:localDocker",
+  sprites: "office:spritesRemoteSandbox",
 };
 
 export function StepReview({
@@ -28,34 +31,44 @@ export function StepReview({
   executorPreference,
   taskTitle,
 }: StepReviewProps) {
+  const { t } = useTranslation();
   const meta = useAppStore((s) => s.office.meta);
 
+  const fallbackExecutorKey = FALLBACK_EXECUTOR_LABEL_KEYS[executorPreference];
   const executorLabel =
     meta?.executorTypes.find((e) => e.id === executorPreference)?.label ??
-    FALLBACK_EXECUTOR_LABELS[executorPreference] ??
-    executorPreference;
+    // `?? executorPreference` keeps an unknown wire value visible rather than blank.
+    (fallbackExecutorKey ? t(fallbackExecutorKey) : executorPreference);
 
   return (
     <div className="space-y-6">
       <div>
-        <h2 className="text-xl font-semibold">Review and launch</h2>
+        <h2 className="text-xl font-semibold">{t("office:reviewAndLaunch")}</h2>
         <p className="text-sm text-muted-foreground mt-1">
-          Confirm the details below. Everything can be changed later.
+          {t("office:confirmTheDetailsBelowEverythingCan")}
         </p>
       </div>
       <Card className="divide-y divide-border">
-        <ReviewRow label="Workspace" value={workspaceName || "Default Workspace"}>
+        {/*
+          `"KAN"` and `"CEO"` stay literal: they are the exact fallbacks
+          `submitOnboarding` persists as the task prefix and the agent name, so a
+          translated preview here would not match what gets created.
+        */}
+        <ReviewRow
+          label={t("common:workspace")}
+          value={workspaceName || t("office:defaultWorkspace")}
+        >
           <Badge variant="secondary" className="ml-2">
             {taskPrefix || "KAN"}
           </Badge>
         </ReviewRow>
-        <ReviewRow label="Coordinator agent" value={agentName || "CEO"}>
+        <ReviewRow label={t("office:coordinatorAgent")} value={agentName || "CEO"}>
           {agentProfileLabel && (
             <span className="text-xs text-muted-foreground ml-2">({agentProfileLabel})</span>
           )}
         </ReviewRow>
-        <ReviewRow label="Executor" value={executorLabel} />
-        <ReviewRow label="First task" value={taskTitle || "No initial task"} />
+        <ReviewRow label={t("office:executor")} value={executorLabel} />
+        <ReviewRow label={t("office:firstTask")} value={taskTitle || t("office:noInitialTask")} />
       </Card>
     </div>
   );

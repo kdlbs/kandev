@@ -46,7 +46,9 @@ function setup(runs: AutomationRun[]) {
   });
   render(<RunsSection automationId="auto-1" workspaceId="ws-1" />);
   // The runs table only renders once the "Recent Runs" disclosure is expanded.
-  fireEvent.click(screen.getByText(/Recent Runs/));
+  // The heading is count-aware ("Recent Run (1)" / "Recent Runs (2)"), so the
+  // matcher must tolerate both forms rather than pinning the plural.
+  fireEvent.click(screen.getByText(/Recent Runs?\s*\(/));
 }
 
 describe("RunsSection status badges", () => {

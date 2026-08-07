@@ -15,6 +15,7 @@ import { shouldConfirmTerminalClose } from "@/lib/terminal/terminal-busy-registr
 import { CloseTerminalConfirmDialog } from "./close-terminal-confirm-dialog";
 import { TabRenameInput } from "./tab-rename-input";
 import { markTerminalPanelTerminateClose } from "./dockview-layout-setup";
+import { useTranslation } from "react-i18next";
 
 /**
  * Custom dockview tab for terminal panels.
@@ -317,9 +318,10 @@ function TerminalTabBody({
 }
 
 function TerminalTabClosingSpinner({ terminalId }: { terminalId: string }) {
+  const { t } = useTranslation();
   return (
     <span
-      aria-label="Closing terminal"
+      aria-label={t("task:closingTerminal")}
       data-testid={`terminal-tab-closing-${terminalId}`}
       className="dv-default-tab-action inline-flex h-4 w-4 shrink-0 items-center justify-center"
     >
@@ -347,6 +349,7 @@ function TerminalTabMenu({
   onClosePanel: () => void;
   onTerminatePanel: () => void;
 }) {
+  const { t } = useTranslation();
   const removeUserShellStore = useAppStore((s) => s.removeUserShell);
 
   const handleTerminate = useCallback(async () => {
@@ -378,7 +381,7 @@ function TerminalTabMenu({
     <ContextMenuContent>
       {canMutate && (
         <>
-          <ContextMenuItem onClick={onStartRename}>Rename…</ContextMenuItem>
+          <ContextMenuItem onClick={onStartRename}>{t("task:rename2")}</ContextMenuItem>
           <ContextMenuSeparator />
         </>
       )}
@@ -387,7 +390,7 @@ function TerminalTabMenu({
         disabled={isClosing}
         className="text-destructive focus:text-destructive"
       >
-        Terminate
+        {t("task:terminate")}
       </ContextMenuItem>
     </ContextMenuContent>
   );

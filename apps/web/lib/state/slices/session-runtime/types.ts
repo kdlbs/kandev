@@ -58,6 +58,8 @@ export type FileInfo = {
    * per-repository headers.
    */
   repository_name?: string;
+  /** True when the file belongs to an initialized Git submodule scope. */
+  is_submodule?: boolean;
 };
 
 export type GitStatusEntry = {
@@ -80,6 +82,8 @@ export type GitStatusEntry = {
    * GitStatusState.byEnvironmentRepo.
    */
   repository_name?: string;
+  /** True when this status belongs to an initialized Git submodule scope. */
+  is_submodule?: boolean;
 };
 
 export type GitStatusState = {

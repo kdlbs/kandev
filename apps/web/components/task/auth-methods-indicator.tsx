@@ -6,6 +6,7 @@ import { Button } from "@kandev/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@kandev/ui/popover";
 import { useAppStore } from "@/components/state-provider";
 import { authenticateSession } from "@/lib/api/domains/session-api";
+import { useTranslation } from "react-i18next";
 
 type AuthMethodsIndicatorProps = {
   sessionId: string | null;
@@ -14,6 +15,7 @@ type AuthMethodsIndicatorProps = {
 export const AuthMethodsIndicator = memo(function AuthMethodsIndicator({
   sessionId,
 }: AuthMethodsIndicatorProps) {
+  const { t } = useTranslation();
   const authMethods = useAppStore((state) => {
     if (!sessionId) return undefined;
     return state.agentCapabilities.bySessionId[sessionId]?.authMethods;
@@ -48,7 +50,9 @@ export const AuthMethodsIndicator = memo(function AuthMethodsIndicator({
       </PopoverTrigger>
       <PopoverContent align="end" side="top" className="w-72 p-3">
         <div className="space-y-2">
-          <div className="text-xs font-medium text-muted-foreground">Authentication</div>
+          <div className="text-xs font-medium text-muted-foreground">
+            {t("task:authentication")}
+          </div>
           {authMethods.map((method) => (
             <div key={method.id} className="space-y-1">
               <div className="text-sm">{method.name}</div>
@@ -70,7 +74,7 @@ export const AuthMethodsIndicator = memo(function AuthMethodsIndicator({
                   className="h-6 text-xs cursor-pointer"
                   onClick={() => handleAuthenticate(method.id)}
                 >
-                  Login
+                  {t("task:login")}
                 </Button>
               )}
             </div>

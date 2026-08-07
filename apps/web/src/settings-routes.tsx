@@ -19,7 +19,6 @@ import IntegrationsGitLabPage from "@/app/settings/integrations/gitlab/page";
 import IntegrationsJiraPage from "@/app/settings/integrations/jira/page";
 import IntegrationsLinearPage from "@/app/settings/integrations/linear/page";
 import IntegrationsSentryPage from "@/app/settings/integrations/sentry/page";
-import IntegrationsSlackPage from "@/app/settings/integrations/slack/page";
 import PluginsSettingsPage from "@/app/settings/plugins/page";
 import PluginDetailPage from "@/app/settings/plugins/[pluginId]/page";
 import MessageQueueSettingsPage from "@/app/settings/general/message-queue/page";
@@ -169,7 +168,6 @@ const SETTINGS_ROUTES: Record<string, RouteRenderer> = {
   "/settings/integrations/jira": () => renderIntegrationSettingsRoute("jira"),
   "/settings/integrations/linear": () => renderIntegrationSettingsRoute("linear"),
   "/settings/integrations/sentry": () => renderIntegrationSettingsRoute("sentry"),
-  "/settings/integrations/slack": () => renderIntegrationSettingsRoute("slack"),
   "/settings/system": () => <SettingsRedirect to="/settings/system/status" />,
   "/settings/system/users": () => (
     <SystemRouteShell titleKey="system:navUsers" descriptionKey="system:usersPageDescription">
@@ -394,8 +392,6 @@ function renderIntegrationSettingsRoute(section: string | null, workspaceId?: st
       return <IntegrationsLinearPage workspaceId={workspaceId} />;
     case "sentry":
       return <IntegrationsSentryPage workspaceId={workspaceId} />;
-    case "slack":
-      return <IntegrationsSlackPage workspaceId={workspaceId} />;
     default:
       return null;
   }

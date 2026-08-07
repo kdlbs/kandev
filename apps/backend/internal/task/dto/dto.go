@@ -14,6 +14,7 @@ type WorkflowDTO struct {
 	WorkspaceID    string  `json:"workspace_id"`
 	Name           string  `json:"name"`
 	Description    *string `json:"description,omitempty"`
+	Prompt         *string `json:"prompt,omitempty"`
 	AgentProfileID string  `json:"agent_profile_id,omitempty"`
 	SortOrder      int     `json:"sort_order"`
 	Hidden         bool    `json:"hidden,omitempty"`
@@ -523,12 +524,17 @@ func FromWorkflow(workflow *models.Workflow) WorkflowDTO {
 	if workflow.Description != "" {
 		description = &workflow.Description
 	}
+	var prompt *string
+	if workflow.Prompt != "" {
+		prompt = &workflow.Prompt
+	}
 
 	return WorkflowDTO{
 		ID:             workflow.ID,
 		WorkspaceID:    workflow.WorkspaceID,
 		Name:           workflow.Name,
 		Description:    description,
+		Prompt:         prompt,
 		AgentProfileID: workflow.AgentProfileID,
 		SortOrder:      workflow.SortOrder,
 		Hidden:         workflow.Hidden,

@@ -17,6 +17,38 @@ func contributionRemoteName(binding *models.RemoteContribution) string {
 	return binding.ContributionRemoteName()
 }
 
+func (m *Manager) ensureContributionRemote(
+	ctx context.Context, repoPath, remoteName, remoteURL string,
+) error {
+	getURL := m.newNonInteractiveGitCmd(ctx, repoPath, "config", "--get", "remote."+remoteName+".url")
+	configuredURL, getErr := runGitCmdOutput(ctx, getURL)
+	if getErr == nil {
+		if strings.TrimSpace(string(configuredURL)) != remoteURL {
+			return fmt.Errorf("contribution remote %q is already configured for another URL", remoteName)
+		}
+		return nil
+	}
+
+	add := m.newNonInteractiveGitCmd(ctx, repoPath, "remote", "add", remoteName, remoteURL)
+	output, addErr := runGitCmdCombinedOutput(ctx, add)
+	if addErr == nil {
+		return nil
+	}
+
+	// Another materialization can add the same remote between the config read
+	// and this command. Re-read after a failed add and accept the result only
+	// when it has the exact binding URL.
+	readAfterAdd := m.newNonInteractiveGitCmd(ctx, repoPath, "config", "--get", "remote."+remoteName+".url")
+	configuredAfterAdd, readErr := runGitCmdOutput(ctx, readAfterAdd)
+	if readErr == nil && strings.TrimSpace(string(configuredAfterAdd)) == remoteURL {
+		return nil
+	}
+	if readErr == nil {
+		return fmt.Errorf("contribution remote %q is already configured for another URL", remoteName)
+	}
+	return fmt.Errorf("add contribution remote: %s: %w", strings.TrimSpace(string(output)), addErr)
+}
+
 func (m *Manager) materializeRemoteContribution(ctx context.Context, repoPath string, binding *models.RemoteContribution) (string, string, error) {
 	if binding == nil {
 		return "", "", errors.New("remote contribution binding is required")
@@ -25,17 +57,8 @@ func (m *Manager) materializeRemoteContribution(ctx context.Context, repoPath st
 		return "", "", fmt.Errorf("validate remote contribution: %w", err)
 	}
 	remoteName := contributionRemoteName(binding)
-	getURL := m.newNonInteractiveGitCmd(ctx, repoPath, "config", "--get", "remote."+remoteName+".url")
-	configuredURL, getErr := runGitCmdOutput(ctx, getURL)
-	if getErr == nil {
-		if strings.TrimSpace(string(configuredURL)) != binding.SourceRepository.RemoteURL {
-			return "", "", fmt.Errorf("contribution remote %q is already configured for another URL", remoteName)
-		}
-	} else {
-		add := m.newNonInteractiveGitCmd(ctx, repoPath, "remote", "add", remoteName, binding.SourceRepository.RemoteURL)
-		if output, err := runGitCmdCombinedOutput(ctx, add); err != nil {
-			return "", "", fmt.Errorf("add contribution remote: %s: %w", strings.TrimSpace(string(output)), err)
-		}
+	if err := m.ensureContributionRemote(ctx, repoPath, remoteName, binding.SourceRepository.RemoteURL); err != nil {
+		return "", "", err
 	}
 	remoteRef := "refs/remotes/" + remoteName + "/" + binding.HeadBranch
 	refspec := "+refs/heads/" + binding.HeadBranch + ":" + remoteRef

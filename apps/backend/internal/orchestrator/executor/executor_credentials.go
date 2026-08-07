@@ -312,7 +312,10 @@ func (e *Executor) issueGitHubContributionCredentialScope(
 	if err := binding.Validate(); err != nil {
 		return nil, fmt.Errorf("validate remote contribution credential scope: %w", err)
 	}
-	if binding.Provider != models.RemoteContributionProviderGitHub || !strings.EqualFold(binding.SourceRepository.Host, defaultGitHubHost) {
+	if binding.Provider != models.RemoteContributionProviderGitHub {
+		return nil, nil
+	}
+	if !strings.EqualFold(binding.SourceRepository.Host, defaultGitHubHost) {
 		return nil, fmt.Errorf("remote contribution source is not a GitHub repository")
 	}
 	parts := strings.Split(binding.SourceRepository.Path, "/")

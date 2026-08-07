@@ -44,6 +44,7 @@ const QUEUED_BY_USER = "user";
 const MERGE_BUTTON_ID = "queue-entry-merge";
 const EDIT_BUTTON_ID = "queue-entry-edit";
 const REMOVE_BUTTON_ID = "queue-entry-remove";
+const SEND_NOW_BUTTON_ID = "queue-entry-send-now";
 
 function entry(overrides: Partial<QueuedMessage> = {}): QueuedMessage {
   return {
@@ -89,6 +90,9 @@ function baseState(entries: QueuedMessage[]) {
     editEntry: vi.fn(async () => {}),
     removeEntry: vi.fn(async () => {}),
     mergeEntry: vi.fn(async () => {}),
+    sendEntryNow: vi.fn(async () => {}),
+    sendAllNow: vi.fn(async () => {}),
+    cancellationPending: false,
     refetch: vi.fn(async () => {}),
   };
 }
@@ -212,7 +216,40 @@ describe("QueueAffordance", () => {
     fireEvent.click(screen.getByTestId("queue-drain-next"));
     expect(state.drainNext).toHaveBeenCalledTimes(1);
   });
+});
 
+describe("QueueAffordance Send Now", () => {
+  it("sends the whole visible queue from the header", () => {
+    const state = queueState([entry(), entry({ id: "q-2", content: "second" })]);
+    useQueueMock.mockReturnValue(state);
+    render(<QueueAffordance sessionId={SESSION_ID}>{CHILD}</QueueAffordance>);
+    fireEvent.click(screen.getByTestId(CHIP_ID));
+    fireEvent.click(screen.getByTestId("queue-send-now"));
+    expect(state.sendAllNow).toHaveBeenCalledTimes(1);
+  });
+
+  it("sends the selected row now", () => {
+    const state = queueState([
+      entry({ id: "q-1", content: "first" }),
+      entry({ id: "q-2", content: "second" }),
+    ]);
+    useQueueMock.mockReturnValue(state);
+    render(<QueueAffordance sessionId={SESSION_ID}>{CHILD}</QueueAffordance>);
+    fireEvent.click(screen.getByTestId(CHIP_ID));
+    fireEvent.click(screen.getAllByTestId(SEND_NOW_BUTTON_ID)[1]);
+    expect(state.sendEntryNow).toHaveBeenCalledWith("q-2");
+  });
+
+  it("disables row and header Send Now while cancellation is pending", () => {
+    useQueueMock.mockReturnValue(queueState([entry()], { cancellationPending: true }));
+    render(<QueueAffordance sessionId={SESSION_ID}>{CHILD}</QueueAffordance>);
+    fireEvent.click(screen.getByTestId(CHIP_ID));
+    expect((screen.getByTestId("queue-send-now") as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByTestId(SEND_NOW_BUTTON_ID) as HTMLButtonElement).disabled).toBe(true);
+  });
+});
+
+describe("QueueAffordance busy controls", () => {
   it("hides the run-next action while the agent is busy", () => {
     useQueueMock.mockReturnValue(queueState([entry()]));
     render(

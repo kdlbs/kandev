@@ -121,12 +121,13 @@ function addReviewSource(
     diff?: string;
   },
 ): void {
-  const collidesWithHigherPriority = source.repositoryName
-    ? winningDiffs.has(source.path)
+  const isScoped = source.repositoryName !== undefined;
+  const collidesWithHigherPriority = isScoped
+    ? source.repositoryName !== "" && winningDiffs.has(source.path)
     : paths.has(source.path);
   if (winningDiffs.has(source.key) || collidesWithHigherPriority) return;
   winningDiffs.set(source.key, source.diff);
-  paths.add(source.path);
+  if (!isScoped) paths.add(source.path);
 }
 
 function buildReviewProgressIndex(

@@ -2,6 +2,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
 import { StackedBars, type StackedBarRow } from "./stacked-bars";
 import type { AgentSuccessRateDay } from "@/lib/api/domains/office-extended-api";
 import { formatBarLabel } from "./format-date";
+import { useTranslation } from "react-i18next";
 
 type Props = { days: AgentSuccessRateDay[] };
 
@@ -37,6 +38,7 @@ function rowsFromDays(days: AgentSuccessRateDay[]): StackedBarRow[] {
 }
 
 export function SuccessRateChart({ days }: Props) {
+  const { t } = useTranslation();
   const totals = days.reduce(
     (acc, d) => ({ succeeded: acc.succeeded + d.succeeded, total: acc.total + d.total }),
     { succeeded: 0, total: 0 },
@@ -46,9 +48,9 @@ export function SuccessRateChart({ days }: Props) {
     <Card data-testid="success-rate-card">
       <CardHeader className="pb-2">
         <CardTitle className="flex items-baseline justify-between text-sm">
-          <span>Success rate</span>
+          <span>{t("office:agentSuccessRate")}</span>
           <span className="text-xs font-normal text-muted-foreground">
-            {totals.total === 0 ? "—" : `${overall}% over ${totals.total} runs`}
+            {totals.total === 0 ? "—" : t("office:overRuns", { overall, total: totals.total })}
           </span>
         </CardTitle>
       </CardHeader>
@@ -57,7 +59,7 @@ export function SuccessRateChart({ days }: Props) {
           rows={rowsFromDays(days)}
           heightPx={120}
           maxValue={100}
-          ariaLabel="Daily success rate"
+          ariaLabel={t("office:dailySuccessRate")}
         />
       </CardContent>
     </Card>

@@ -16,6 +16,12 @@ type GitStatusUpdate struct {
 	// state on this name.
 	RepositoryName string `json:"repository_name,omitempty"`
 
+	// IsSubmodule identifies initialized Git submodule repositories. The
+	// frontend uses this explicit boundary metadata when rendering review
+	// scope headers; repository names alone cannot distinguish submodules
+	// from sibling repositories.
+	IsSubmodule bool `json:"is_submodule,omitempty"`
+
 	// Modified contains paths of modified files.
 	Modified []string `json:"modified"`
 

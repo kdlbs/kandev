@@ -13,24 +13,25 @@ import type {
   OfficeTaskPriority,
 } from "@/lib/state/slices/office/types";
 import { StatusIcon } from "./status-icon";
+import { PRIORITY_LABEL_KEYS, STATUS_LABEL_KEYS } from "../lib/label-keys";
+import { useTranslation } from "react-i18next";
 
-const FALLBACK_STATUSES: { value: OfficeTaskStatus; label: string }[] = [
-  { value: "backlog", label: "Backlog" },
-  { value: "todo", label: "Todo" },
-  { value: "in_progress", label: "In Progress" },
-  { value: "in_review", label: "In Review" },
-  { value: "blocked", label: "Blocked" },
-  { value: "done", label: "Done" },
-  { value: "cancelled", label: "Cancelled" },
+// `labelKey`, not `label` — module scope, so a `t()` here would freeze at the
+// boot locale; the component resolves at render. The `value`s are the wire
+// status/priority ids and stay untranslated.
+const FALLBACK_STATUSES: { value: OfficeTaskStatus; labelKey: string }[] = [
+  { value: "backlog", labelKey: STATUS_LABEL_KEYS.backlog },
+  { value: "todo", labelKey: STATUS_LABEL_KEYS.todo },
+  { value: "in_progress", labelKey: STATUS_LABEL_KEYS.in_progress },
+  { value: "in_review", labelKey: STATUS_LABEL_KEYS.in_review },
+  { value: "blocked", labelKey: STATUS_LABEL_KEYS.blocked },
+  { value: "done", labelKey: STATUS_LABEL_KEYS.done },
+  { value: "cancelled", labelKey: STATUS_LABEL_KEYS.cancelled },
 ];
 
-const FALLBACK_PRIORITIES: { value: OfficeTaskPriority; label: string }[] = [
-  { value: "critical", label: "Critical" },
-  { value: "high", label: "High" },
-  { value: "medium", label: "Medium" },
-  { value: "low", label: "Low" },
-  { value: "none", label: "None" },
-];
+const FALLBACK_PRIORITIES: { value: OfficeTaskPriority; labelKey: string }[] = (
+  ["critical", "high", "medium", "low", "none"] as const
+).map((value) => ({ value, labelKey: PRIORITY_LABEL_KEYS[value] }));
 
 type IssueFiltersProps = {
   filters: TaskFilterState;
@@ -42,13 +43,14 @@ function toggleInArray<T>(arr: T[], value: T): T[] {
 }
 
 export function TaskFilters({ filters, onFilterChange }: IssueFiltersProps) {
+  const { t } = useTranslation();
   const meta = useAppStore((s) => s.office.meta);
   const STATUSES = meta
     ? meta.statuses.map((s) => ({ value: s.id as OfficeTaskStatus, label: s.label }))
-    : FALLBACK_STATUSES;
+    : FALLBACK_STATUSES.map((s) => ({ value: s.value, label: t(s.labelKey) }));
   const PRIORITIES = meta
     ? meta.priorities.map((p) => ({ value: p.id as OfficeTaskPriority, label: p.label }))
-    : FALLBACK_PRIORITIES;
+    : FALLBACK_PRIORITIES.map((p) => ({ value: p.value, label: t(p.labelKey) }));
 
   const activeCount =
     filters.statuses.length +
@@ -75,10 +77,10 @@ export function TaskFilters({ filters, onFilterChange }: IssueFiltersProps) {
             </Button>
           </PopoverTrigger>
         </TooltipTrigger>
-        <TooltipContent>Filter</TooltipContent>
+        <TooltipContent>{t("office:filter")}</TooltipContent>
       </Tooltip>
       <PopoverContent className="w-56 p-3" align="end">
-        <p className="text-xs font-medium mb-2">Status</p>
+        <p className="text-xs font-medium mb-2">{t("common:status")}</p>
         <div className="flex flex-col gap-1.5">
           {STATUSES.map((s) => (
             <label key={s.value} className="flex items-center gap-2 text-sm cursor-pointer">
@@ -95,7 +97,7 @@ export function TaskFilters({ filters, onFilterChange }: IssueFiltersProps) {
           ))}
         </div>
         <Separator className="my-2" />
-        <p className="text-xs font-medium mb-2">Priority</p>
+        <p className="text-xs font-medium mb-2">{t("office:priority")}</p>
         <div className="flex flex-col gap-1.5">
           {PRIORITIES.map((p) => (
             <label key={p.value} className="flex items-center gap-2 text-sm cursor-pointer">
@@ -121,7 +123,7 @@ export function TaskFilters({ filters, onFilterChange }: IssueFiltersProps) {
                 onFilterChange({ statuses: [], priorities: [], assigneeIds: [], projectIds: [] })
               }
             >
-              Clear filters
+              {t("office:clearFilters")}
             </Button>
           </>
         )}

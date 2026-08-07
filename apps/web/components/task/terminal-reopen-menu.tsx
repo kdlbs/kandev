@@ -14,6 +14,7 @@ import type { UserShellInfo } from "@/lib/state/slices";
 import { destroyUserShell, resumeUserShell } from "@/lib/api/domains/user-shell-api";
 import { useEnvironmentId } from "@/hooks/use-environment-session-id";
 import { markTerminalPanelTerminateClose } from "./dockview-layout-setup";
+import { useTranslation } from "react-i18next";
 
 const EMPTY_SHELLS: UserShellInfo[] = [];
 
@@ -40,6 +41,7 @@ export function TerminalReopenMenuItems({
    */
   onNewTerminal?: () => void;
 }) {
+  const { t } = useTranslation();
   const environmentId = useEnvironmentId();
   const taskID = useAppStore((s) => s.tasks?.activeTaskId ?? null);
   const shells = useAppStore((s) => {
@@ -73,7 +75,9 @@ export function TerminalReopenMenuItems({
 
   return (
     <>
-      <DropdownMenuLabel className="text-xs text-muted-foreground">Terminals</DropdownMenuLabel>
+      <DropdownMenuLabel className="text-xs text-muted-foreground">
+        {t("task:terminals")}
+      </DropdownMenuLabel>
       {onNewTerminal && (
         <DropdownMenuItem
           onClick={onNewTerminal}
@@ -81,7 +85,7 @@ export function TerminalReopenMenuItems({
           data-testid="new-terminal-button"
         >
           <IconTerminal2 className="h-3.5 w-3.5 shrink-0" />
-          <span className="flex-1 truncate">New Terminal</span>
+          <span className="flex-1 truncate">{t("task:newTerminal2")}</span>
         </DropdownMenuItem>
       )}
       {ordinary
@@ -113,13 +117,15 @@ function useDestroyTerminalRow({
   taskID,
   removeUserShellStore,
 }: DestroyTerminalRowOptions) {
+  const { t } = useTranslation();
   return useCallback(
     async (event: React.MouseEvent, shell: UserShellInfo) => {
       event.preventDefault();
       event.stopPropagation();
       if (!environmentId) return;
-      const label = shell.seq != null ? `terminal #${shell.seq}` : "this terminal";
-      if (!window.confirm(`Terminate ${label}? This kills the running PTY.`)) return;
+      const label =
+        shell.seq != null ? t("task:terminalNumbered", { seq: shell.seq }) : t("task:thisTerminal");
+      if (!window.confirm(t("task:terminateThisKillsTheRunningPty", { label }))) return;
 
       try {
         await destroyUserShell(environmentId, shell.terminalId, taskID ?? undefined);
@@ -222,6 +228,7 @@ function TerminalReopenRow({
   onClick: (terminalId: string, state: string | undefined, label: string) => void;
   onDestroy: (event: React.MouseEvent, shell: ShellRow) => void;
 }) {
+  const { t } = useTranslation();
   // Ordinary terminals don't need the backend "Terminal {seq}" suffix
   // in the label — the seq lives in the adjacent badge, so the row
   // reads "[N] Terminal" (or "[N] custom name") with no duplication.
@@ -244,8 +251,8 @@ function TerminalReopenRow({
       <span className="flex-1 truncate">{label}</span>
       <button
         type="button"
-        aria-label={`Terminate terminal #${shell.seq ?? ""}`}
-        title="Terminate"
+        aria-label={t("task:terminateTerminal", { seq: shell.seq ?? "" })}
+        title={t("task:terminate")}
         className="shrink-0 ml-1 rounded p-0.5 text-muted-foreground hover:bg-destructive/15 hover:text-destructive cursor-pointer"
         data-testid="destroy-terminal-row"
         onClick={(e) => onDestroy(e, shell)}

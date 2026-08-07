@@ -63,4 +63,20 @@ describe("setGitStatus change reporting (single deep compare)", () => {
     );
     expect(changed).toBe(true);
   });
+
+  it("returns true when only the submodule marker changes", () => {
+    store.getState().setGitStatus(SESSION, status({ is_submodule: false }));
+
+    expect(store.getState().setGitStatus(SESSION, status({ is_submodule: true }))).toBe(true);
+  });
+
+  it("returns false when the submodule marker is unchanged", () => {
+    store.getState().setGitStatus(SESSION, status({ is_submodule: true }));
+
+    expect(
+      store
+        .getState()
+        .setGitStatus(SESSION, status({ is_submodule: true, timestamp: "2026-05-28T00:01:00Z" })),
+    ).toBe(false);
+  });
 });

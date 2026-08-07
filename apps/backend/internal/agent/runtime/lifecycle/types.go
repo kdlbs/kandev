@@ -754,6 +754,7 @@ func (r *LaunchRequest) RepoSpecs() []RepoLaunchSpec {
 		DefaultBranch:          r.DefaultBranch,
 		CheckoutBranch:         r.CheckoutBranch,
 		PRNumber:               r.PRNumber,
+		RemoteContribution:     r.RemoteContribution,
 		WorktreeID:             r.WorktreeID,
 		WorktreeBranchPrefix:   r.WorktreeBranchPrefix,
 		WorktreeBranchTemplate: r.WorktreeBranchTemplate,

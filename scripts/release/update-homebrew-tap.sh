@@ -118,7 +118,6 @@ mkdir -p "$(dirname "$FORMULA_PATH")"
 GITHUB_BASE="https://github.com/kdlbs/kandev/releases/download/${TAG}"
 
 sed \
-  -e "s|__VERSION__|$VERSION|g" \
   -e "s|__GITHUB_BASE__|$GITHUB_BASE|g" \
   -e "s|__SHA_MACOS_ARM64__|$SHA_MACOS_ARM64|g" \
   -e "s|__SHA_MACOS_X64__|$SHA_MACOS_X64|g" \

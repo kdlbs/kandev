@@ -419,10 +419,8 @@ func (a *Adapter) Initialize(ctx context.Context) error {
 	defer span.End()
 
 	resp, err := a.acpConn.Initialize(ctx, acp.InitializeRequest{
-		ProtocolVersion: acp.ProtocolVersionNumber,
-		ClientCapabilities: acp.ClientCapabilities{
-			Meta: map[string]any{"terminal_output": true},
-		},
+		ProtocolVersion:    acp.ProtocolVersionNumber,
+		ClientCapabilities: clientCapabilitiesForAgent(a.agentID),
 		ClientInfo: &acp.Implementation{
 			Name:    "kandev-agentctl",
 			Version: "1.0.0",

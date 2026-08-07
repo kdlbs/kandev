@@ -14,13 +14,16 @@ import type { OfficeTask } from "@/lib/state/slices/office/types";
 import type { Task } from "@/app/office/tasks/[id]/types";
 import { MultiSelectPopover, type MultiSelectItem } from "./multi-select-popover";
 import { useTranslation } from "react-i18next";
+import { t } from "@/lib/i18n";
 
 // formatBlockerCycleMessage renders the toast text for a 400 response
 // whose body carries a `cycle` array. The backend already substitutes
 // identifiers when available; we just join with the arrow separator and
 // prepend a human label.
+// Module-level `t` rather than a hook: this runs when the API rejects the edit,
+// not at import. The task identifiers in `cycle` are data and stay verbatim.
 export function formatBlockerCycleMessage(cycle: string[]): string {
-  return `Would create a blocker cycle: ${cycle.join(" → ")}`;
+  return t("task:wouldCreateABlockerCycle", { cycle: cycle.join(" → ") });
 }
 
 // extractCycle reads the `cycle` field from a structured ApiError body.

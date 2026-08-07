@@ -2,11 +2,14 @@
 
 import { ToggleGroup, ToggleGroupItem } from "@kandev/ui/toggle-group";
 import type { Tier } from "@/lib/state/slices/office/types";
+import { useTranslation } from "react-i18next";
 
-const TIER_OPTIONS: Array<{ value: Tier; label: string; hint: string }> = [
-  { value: "frontier", label: "Frontier", hint: "Best capability per provider" },
-  { value: "balanced", label: "Balanced", hint: "Standard capability" },
-  { value: "economy", label: "Economy", hint: "Cheapest viable model" },
+// Catalog keys, not copy — module scope freezes a `t()` at the boot locale. The
+// `value`s are the wire `Tier` ids.
+const TIER_OPTIONS: Array<{ value: Tier; labelKey: string; hintKey: string }> = [
+  { value: "frontier", labelKey: "office:tierFrontier", hintKey: "office:tierFrontierHint" },
+  { value: "balanced", labelKey: "office:tierBalanced", hintKey: "office:tierBalancedHint" },
+  { value: "economy", labelKey: "office:tierEconomy", hintKey: "office:tierEconomyHint" },
 ];
 
 type Props = {
@@ -16,13 +19,13 @@ type Props = {
 };
 
 export function DefaultTierSelector({ value, onChange, disabled }: Props) {
+  const { t } = useTranslation();
   return (
     <div className="rounded-lg border border-border p-4 space-y-3">
       <div>
-        <p className="text-sm font-medium">Default tier</p>
+        <p className="text-sm font-medium">{t("office:defaultTier")}</p>
         <p className="text-xs text-muted-foreground mt-0.5">
-          Agents inherit this tier unless they override it. Every routed provider must map this tier
-          to a model.
+          {t("office:agentsInheritThisTierUnlessThey")}
         </p>
       </div>
       <ToggleGroup
@@ -37,10 +40,10 @@ export function DefaultTierSelector({ value, onChange, disabled }: Props) {
             key={opt.value}
             value={opt.value}
             className="cursor-pointer flex flex-col items-center px-4 py-2 h-auto"
-            title={opt.hint}
+            title={t(opt.hintKey)}
           >
-            <span className="text-sm">{opt.label}</span>
-            <span className="text-[10px] text-muted-foreground">{opt.hint}</span>
+            <span className="text-sm">{t(opt.labelKey)}</span>
+            <span className="text-[10px] text-muted-foreground">{t(opt.hintKey)}</span>
           </ToggleGroupItem>
         ))}
       </ToggleGroup>

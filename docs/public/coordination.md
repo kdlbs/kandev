@@ -102,7 +102,7 @@ Call `create_task_kandev` with `parent_id: "self"`. `workspace_mode` defaults to
 - Inherited repository attachments deliberately do not copy an explicit checkout branch.
 - An explicit same-repository child uses the inherited base branch. An explicit cross-repository child defaults to that repository's default branch unless `base_branch` is supplied.
 - Every created task must resolve an agent profile, even with `start_agent: false`.
-- Profile precedence is explicit profile, parent/current/source task metadata or primary-session profile, destination-step profile override, workflow default, then workspace default. With no explicit workflow step, the destination is the workflow's start step.
+- Profile precedence when the task lands on a workflow step is the destination step's launch profile first (the step's pinned profile, or the workflow default when the step is unpinned), because that is what the orchestrator launches; it overrides an explicit `agent_profile_id`, and the created task records it. With no explicit `workflow_step_id`, the destination is the workflow's start step, so a workflow with steps still applies its start-step launch profile. Off a workflow step (no workflow, or a workflow with no steps), the order is explicit profile, then parent/current/source task metadata or primary-session profile, then the workspace default.
 - If no executor or executor profile is explicit or inherited, task MCP uses the built-in **git-worktree** executor. It does not consult the workspace's **Default Executor** for this fallback.
 - The one-level Kanban depth rule still applies.
 - An ephemeral Quick Chat task cannot be a parent; omit `parent_id` and create a top-level task instead.
@@ -123,6 +123,13 @@ For predictable top-level creation, pass `repository_url`, `repository_id`, or `
 The default delivery mode is queued. Each session accepts 10 queued messages by default. An admin can change the install-wide limit under **Settings > General > Message Queue**; `0` means unlimited. The saved value applies immediately to new admissions without removing messages already waiting. `KANDEV_QUEUE_MAX_PER_SESSION` has higher precedence, locks the UI field, and requires a restart when changed; zero or a negative value means unlimited. Only one queued message drains per agent turn. When the cap is reached, the sender receives a structured `queue_full` error and should retry after space becomes available.
 
 In the task workbench, expand the queue chip to manage pending messages. Every visible pending row has **Remove**, whether it came from a user, another agent, workflow automation, or a server action. **Clear all** removes all visible pending rows in that session and releases their capacity. After removal, merge, or drain, displayed positions compact to `#1` through `#N` while FIFO order stays unchanged. Provenance still matters for editing and merging: only user-origin content can be edited. A row already reserved for delivery is hidden from the panel and cannot be cancelled there.
+
+Use the queue controls according to the outcome you want:
+
+- **Run next** dispatches the promptable FIFO head without interrupting an active turn. It is available when the session can accept a prompt.
+- **Send Now** sends directly when the session is promptable; when an agent turn is active, it waits for the backend to acknowledge cancellation and then replaces that captured turn with either the selected row or the click-time snapshot of every visible row. Bulk Send Now joins non-empty bodies with a blank line, keeps attachments in FIFO order, and deduplicates references. It creates a replacement turn but does not apply normal Cancel side effects: it does not record a cancellation message, complete the cancelled workflow step, or move the task to review. New rows added after the click remain queued.
+- **Clear all** removes every visible pending row without sending a prompt.
+- **Cancel** in the chat toolbar stops the active turn as a user cancellation. It may record the cancellation, complete an eligible workflow step, and move the task to review; it does not send queued content.
 
 Choose the control by intent:
 

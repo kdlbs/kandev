@@ -25,6 +25,7 @@ import { timeAgo } from "@/lib/utils/time";
 
 import { UtilizationBars } from "./components/utilization-bars";
 import { formatDollars } from "@/lib/utils";
+import { useTranslation } from "react-i18next";
 
 // formatMonthSpend renders the subcents value from /office dashboard
 // as USD. The shared formatDollars helper owns the unit boundary; this
@@ -65,6 +66,7 @@ function extractMetrics(dashboard: DashboardData | null) {
 }
 
 function MetricsGrid({ m }: { m: ReturnType<typeof extractMetrics> }) {
+  const { t } = useTranslation();
   const tb = m.taskBreakdown;
   return (
     <div className="grid grid-cols-2 xl:grid-cols-4 gap-2">
@@ -72,32 +74,36 @@ function MetricsGrid({ m }: { m: ReturnType<typeof extractMetrics> }) {
         <MetricCard
           icon={IconRobot}
           value={m.agentCount}
-          label="Agents Enabled"
-          description={`${m.running} running, ${m.paused} paused, ${m.errors} errors`}
+          label={t("office:agentsEnabled")}
+          description={t("office:runningPausedErrors", {
+            running: m.running,
+            paused: m.paused,
+            errors: m.errors,
+          })}
         />
       </Link>
       <Link href="/office/tasks" className="cursor-pointer">
         <MetricCard
           icon={IconCircleDot}
           value={m.tasksInProgress}
-          label="Tasks In Progress"
-          description={`${tb.open} open, ${tb.blocked} blocked`}
+          label={t("office:tasksInProgress")}
+          description={t("office:openBlocked", { open: tb.open, blocked: tb.blocked })}
         />
       </Link>
       <Link href="/office/workspace/costs" className="cursor-pointer">
         <MetricCard
           icon={IconCurrencyDollar}
           value={formatMonthSpend(m.monthSpend)}
-          label="Month Spend"
-          description="Total API costs this billing period"
+          label={t("office:monthSpend")}
+          description={t("office:totalApiCostsThisBillingPeriod")}
         />
       </Link>
       <Link href="/office/inbox" className="cursor-pointer">
         <MetricCard
           icon={IconShieldCheck}
           value={m.pendingApprovals}
-          label="Pending Approvals"
-          description="Items waiting for your review"
+          label={t("office:pendingApprovals")}
+          description={t("office:itemsWaitingForYourReview")}
         />
       </Link>
     </div>
@@ -109,15 +115,16 @@ function RecentActivityCard({
 }: {
   entries: ReturnType<typeof extractMetrics>["recentActivity"];
 }) {
+  const { t } = useTranslation();
   return (
     <Card>
       <div className="p-4 border-b border-border">
-        <h2 className="text-sm font-semibold">Recent Activity</h2>
+        <h2 className="text-sm font-semibold">{t("office:recentActivity")}</h2>
       </div>
       <div className="divide-y divide-border">
         {entries.length === 0 ? (
           <div className="px-4 py-6 text-center text-sm text-muted-foreground">
-            No recent activity. Actions by agents and users will appear here.
+            {t("office:noRecentActivityActionsByAgents")}
           </div>
         ) : (
           entries.map((entry) => <ActivityRow key={entry.id} entry={entry} />)
@@ -159,15 +166,16 @@ function RecentTaskRow({ task, agents }: { task: RecentTask; agents: AgentProfil
 }
 
 function RecentTasksCard({ tasks, agents }: { tasks: RecentTask[]; agents: AgentProfile[] }) {
+  const { t } = useTranslation();
   return (
     <Card>
       <div className="p-4 border-b border-border">
-        <h2 className="text-sm font-semibold">Recent Tasks</h2>
+        <h2 className="text-sm font-semibold">{t("office:recentTasks")}</h2>
       </div>
       <div className="divide-y divide-border">
         {tasks.length === 0 ? (
           <div className="px-4 py-6 text-center text-sm text-muted-foreground">
-            No recent tasks.
+            {t("office:noRecentTasks")}
           </div>
         ) : (
           tasks.map((task) => <RecentTaskRow key={task.id} task={task} agents={agents} />)
@@ -189,6 +197,7 @@ function maxUtilization(agents: AgentProfile[]): number {
 }
 
 function SubscriptionUsageCard({ agents }: { agents: AgentProfile[] }) {
+  const { t } = useTranslation();
   const subscriptionAgents = agents.filter(
     (a) => a.billingType === "subscription" && a.utilization,
   );
@@ -198,7 +207,7 @@ function SubscriptionUsageCard({ agents }: { agents: AgentProfile[] }) {
   return (
     <Card>
       <div className="p-4 border-b border-border">
-        <h2 className="text-sm font-semibold">Subscription Quota</h2>
+        <h2 className="text-sm font-semibold">{t("office:subscriptionQuota")}</h2>
       </div>
       <div className="divide-y divide-border">
         {subscriptionAgents.map((agent) => (
@@ -213,6 +222,7 @@ function SubscriptionUsageCard({ agents }: { agents: AgentProfile[] }) {
 }
 
 export function OfficePageClient({ initialDashboard }: OfficePageClientProps) {
+  const { t } = useTranslation();
   const workspaceId = useAppStore((s) => s.workspaces.activeId);
   const dashboard = useAppStore((s) => s.office.dashboard);
   const agents = useAppStore((s) => s.office.agentProfiles);
@@ -268,8 +278,8 @@ export function OfficePageClient({ initialDashboard }: OfficePageClientProps) {
           <MetricCard
             icon={IconChartBar}
             value={quotaLabel}
-            label="Subscription Quota"
-            description="Highest utilization across subscription agents"
+            label={t("office:subscriptionQuota")}
+            description={t("office:highestUtilizationAcrossSubscriptionAgents")}
           />
         </div>
       )}

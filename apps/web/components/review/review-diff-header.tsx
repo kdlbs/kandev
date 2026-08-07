@@ -107,8 +107,16 @@ function MobileReviewFileDetails({ file, isStale }: { file: ReviewFile; isStale:
   return (
     <span
       className="flex min-w-0 flex-1 flex-col justify-center overflow-hidden text-left leading-none"
-      title={file.path}
+      title={file.repository_name ? `${file.repository_name}/${file.path}` : file.path}
     >
+      {file.repository_name && (
+        <span
+          data-testid="review-file-repository"
+          className="truncate text-[10px] font-medium leading-3 text-primary"
+        >
+          {file.repository_name}
+        </span>
+      )}
       <span data-review-file-name className="truncate text-[13px] font-medium leading-4">
         {name}
       </span>

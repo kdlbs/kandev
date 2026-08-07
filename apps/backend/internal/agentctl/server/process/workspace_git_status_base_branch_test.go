@@ -271,6 +271,33 @@ func TestSetBaseBranch_RejectsUnsafeRefs(t *testing.T) {
 	}
 }
 
+func TestSetBaseBranchIfNotSubmodulePreservesComparisonAnchor(t *testing.T) {
+	repoDir, cleanup := setupTestRepo(t)
+	defer cleanup()
+
+	wt := NewWorkspaceTracker(repoDir, newTestLogger(t))
+	anchor := strings.Repeat("a", 40)
+	wt.SetComparisonAnchor(anchor)
+
+	if wt.SetBaseBranchIfNotSubmodule("main") {
+		t.Fatal("SetBaseBranchIfNotSubmodule returned true for a submodule")
+	}
+	if got := wt.BaseBranch(); got != anchor {
+		t.Fatalf("BaseBranch after guarded update = %q, want anchor %q", got, anchor)
+	}
+	if !wt.IsSubmodule() {
+		t.Fatal("guarded update cleared submodule state")
+	}
+
+	nonSubmodule := NewWorkspaceTracker(repoDir, newTestLogger(t))
+	if !nonSubmodule.SetBaseBranchIfNotSubmodule("main") {
+		t.Fatal("SetBaseBranchIfNotSubmodule returned false for a regular tracker")
+	}
+	if got := nonSubmodule.BaseBranch(); got != "main" {
+		t.Fatalf("regular tracker BaseBranch() = %q, want main", got)
+	}
+}
+
 // TestLookupBaseBranch_FallbackToEmptyKey covers the map lookup the process
 // manager uses to hand each tracker its base branch. Per-repo entry wins;
 // missing per-repo falls back to the empty-key (single-repo) entry; legacy

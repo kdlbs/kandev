@@ -1267,11 +1267,10 @@ func convertGHPR(raw *ghPR, owner, repo string) *PR {
 		pr.HeadRepoCloneURL = raw.HeadRepository.HTTPSURL
 	}
 	// gh pr view does not expose baseRepository. The --repo arguments are the
-	// trusted target identity, while the PR response supplies the immutable
-	// base ref. Keep these separate from the source repository identity above.
+	// trusted target identity. Do not treat the PR base ref as the repository's
+	// default branch; they can differ for a PR that targets a release branch.
 	pr.BaseRepoOwner = owner
 	pr.BaseRepoName = repo
-	pr.BaseDefaultBranch = raw.BaseRefName
 	return pr
 }
 

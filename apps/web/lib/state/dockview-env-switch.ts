@@ -90,8 +90,11 @@ export type EnvSwitchParams = {
   currentSessionIds?: string[];
   safeWidth: number;
   safeHeight: number;
-  buildDefault: (api: DockviewApi) => void;
+  /** Build the effective default, optionally honoring a route layout intent. */
+  buildDefault: (api: DockviewApi, intentName?: string) => void;
   getDefaultLayout: () => LayoutState;
+  /** Explicit layout from the task route, such as `?layout=plan`. */
+  initialLayout?: string | null;
 };
 
 /** Close non-session env-scoped panels before the new env's panels are restored. */
@@ -503,6 +506,14 @@ function addIncomingSessionPanel(
   });
 }
 
+/** Apply a route layout intent that raced the first environment hydration. */
+function applyInitialRouteLayout(params: EnvSwitchParams): LayoutGroupIds | null {
+  if (params.oldEnvId !== null || !params.initialLayout) return null;
+  params.buildDefault(params.api, params.initialLayout);
+  params.api.layout(params.safeWidth, params.safeHeight);
+  return applyLayoutFixups(params.api);
+}
+
 /**
  * Switch the dockview layout between task environments.
  *
@@ -531,6 +542,14 @@ export function performEnvSwitch(params: EnvSwitchParams): LayoutGroupIds {
       livePanelIdsBefore: api.panels.map((p) => p.id),
     });
   }
+
+  // A task route can render before its session's environment id has hydrated.
+  // In that window onReady applies the explicit route intent (for example,
+  // ?layout=plan) to a temporary global layout. First adoption must replay the
+  // intent instead of restoring the env's saved/default layout over it.
+  // Later env switches intentionally ignore this one-shot route override.
+  const initialRouteLayout = applyInitialRouteLayout(params);
+  if (initialRouteLayout) return initialRouteLayout;
 
   const fastResult = tryFastEnvSwitch(params);
   if (fastResult) {

@@ -96,10 +96,6 @@ func buildGitHubRemoteContribution(rawURL, owner, repo string, number int, pr *P
 	if err := binding.Validate(); err != nil {
 		return nil, err
 	}
-	targetDefault := pr.BaseDefaultBranch
-	if targetDefault == "" {
-		targetDefault = pr.BaseBranch
-	}
 	return &taskmodels.RemoteContributionResolution{
 		Binding:             binding,
 		TargetProvider:      taskmodels.RemoteContributionProviderGitHub,
@@ -107,7 +103,7 @@ func buildGitHubRemoteContribution(rawURL, owner, repo string, number int, pr *P
 		TargetPath:          owner + "/" + repo,
 		TargetProviderID:    positiveID(pr.BaseRepoID),
 		TargetRemoteURL:     fmt.Sprintf("https://github.com/%s/%s.git", owner, repo),
-		TargetDefaultBranch: targetDefault,
+		TargetDefaultBranch: pr.BaseDefaultBranch,
 	}, nil
 }
 

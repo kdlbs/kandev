@@ -537,6 +537,46 @@ func (r *sqliteRepository) CountBySession(ctx context.Context, sessionID string)
 	return n, err
 }
 
+// CountPendingByTaskIDs counts pending entries per task, excluding durable
+// lifecycle rows reserved in flight (filtered in Go via IsReservedInFlight).
+func (r *sqliteRepository) CountPendingByTaskIDs(ctx context.Context, taskIDs []string) (map[string]int, error) {
+	counts := make(map[string]int, len(taskIDs))
+	for _, taskID := range taskIDs {
+		counts[taskID] = 0
+	}
+	if len(taskIDs) == 0 {
+		return counts, nil
+	}
+	query, args, err := sqlx.In(`
+		SELECT id, session_id, task_id, position, content, model, plan_mode,
+		       attachments_json, metadata_json, queued_at, queued_by
+		FROM queued_messages
+		WHERE task_id IN (?)
+	`, taskIDs)
+	if err != nil {
+		return nil, fmt.Errorf("count pending by task ids: %w", err)
+	}
+	rows, err := r.ro.QueryxContext(ctx, r.ro.Rebind(query), args...)
+	if err != nil {
+		return nil, fmt.Errorf("count pending by task ids: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		msg, err := scanQueuedRow(rows)
+		if err != nil {
+			return nil, fmt.Errorf("count pending by task ids scan: %w", err)
+		}
+		if msg.IsReservedInFlight() {
+			continue
+		}
+		counts[msg.TaskID]++
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("count pending by task ids rows: %w", err)
+	}
+	return counts, nil
+}
+
 func (r *sqliteRepository) TakeHead(ctx context.Context, sessionID string) (*QueuedMessage, error) {
 	// Share the per-session lock with MergeIntoAbove so a drain and a merge on
 	// the same queue are serialized in-process, not just at the DB layer.
@@ -727,6 +767,411 @@ func (r *sqliteRepository) TakeByID(ctx context.Context, sessionID, entryID stri
 		return nil, err
 	}
 	return msg, nil
+}
+
+func (r *sqliteRepository) ClaimSendNow(ctx context.Context, sessionID string, expected []QueuedMessage) (*SendNowClaim, error) {
+	if len(expected) == 0 {
+		return nil, ErrSendNowEmpty
+	}
+	unlock := r.withSessionLock(sessionID)
+	defer unlock()
+
+	requested, err := requestedSendNowIDs(expected)
+	if err != nil {
+		return nil, err
+	}
+
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("begin send-now claim tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	ordered, storedByID, err := r.listOrderedStoredSessionEntries(ctx, tx, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	sources, err := selectSQLiteSendNowSources(ordered, storedByID, requested, expected)
+	if err != nil {
+		return nil, err
+	}
+	envelope, err := BuildSendNowEnvelope(sources)
+	if err != nil {
+		return nil, err
+	}
+	generations := make(map[string]int64)
+	for _, source := range sources {
+		if source.TaskID == "" {
+			continue
+		}
+		generation, generationErr := lifecycleGenerationInTx(ctx, tx, r.db, source.TaskID)
+		if generationErr != nil {
+			return nil, generationErr
+		}
+		generations[source.TaskID] = generation
+	}
+
+	if err := r.applySQLiteSendNowClaim(ctx, tx, sessionID, sources, storedByID); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return &SendNowClaim{Sources: sources, Dispatch: *envelope, SourceGenerations: generations}, nil
+}
+
+func (r *sqliteRepository) RestoreSendNowClaim(ctx context.Context, claim *SendNowClaim) error {
+	tx, sessionID, unlock, err := r.beginSendNowClaimTx(ctx, claim, "restore")
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	defer func() { _ = tx.Rollback() }()
+	stored, err := r.listStoredSessionEntries(ctx, tx, sessionID)
+	if err != nil {
+		return err
+	}
+	generations := make(map[string]int64)
+	for _, source := range claim.Sources {
+		if source.TaskID == "" {
+			continue
+		}
+		generation, generationErr := lifecycleGenerationInTx(ctx, tx, r.db, source.TaskID)
+		if generationErr != nil {
+			return generationErr
+		}
+		generations[source.TaskID] = generation
+	}
+	if err := validateSQLiteSendNowRestore(claim, sessionID, stored, generations); err != nil {
+		return err
+	}
+
+	for _, source := range claim.Sources {
+		if sendNowSourceGenerationChanged(claim, source, generations[source.TaskID]) {
+			continue
+		}
+		if err := r.restoreSQLiteSendNowSource(ctx, tx, sessionID, source, stored); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+func (r *sqliteRepository) AcknowledgeSendNowClaim(ctx context.Context, claim *SendNowClaim) error {
+	tx, sessionID, unlock, err := r.beginSendNowClaimTx(ctx, claim, "acknowledge")
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	defer func() { _ = tx.Rollback() }()
+	stored, err := r.listStoredSessionEntries(ctx, tx, sessionID)
+	if err != nil {
+		return err
+	}
+	if err := validateSQLiteSendNowAcknowledge(claim, sessionID, stored); err != nil {
+		return err
+	}
+	for _, source := range claim.Sources {
+		if err := r.acknowledgeSQLiteSendNowSource(ctx, tx, sessionID, source, stored); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+func (r *sqliteRepository) beginSendNowClaimTx(
+	ctx context.Context,
+	claim *SendNowClaim,
+	action string,
+) (*sqlx.Tx, string, func(), error) {
+	if claim == nil || len(claim.Sources) == 0 {
+		return nil, "", nil, ErrSendNowEmpty
+	}
+	sessionID := claim.Sources[0].SessionID
+	unlock := r.withSessionLock(sessionID)
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		unlock()
+		return nil, "", nil, fmt.Errorf("begin send-now %s tx: %w", action, err)
+	}
+	return tx, sessionID, unlock, nil
+}
+
+type storedQueueEntry struct {
+	message         *QueuedMessage
+	raw             string
+	attachmentsJSON string
+}
+
+func (r *sqliteRepository) listStoredSessionEntries(ctx context.Context, tx *sqlx.Tx, sessionID string) (map[string]storedQueueEntry, error) {
+	_, entries, err := r.listOrderedStoredSessionEntries(ctx, tx, sessionID)
+	return entries, err
+}
+
+func (r *sqliteRepository) listOrderedStoredSessionEntries(ctx context.Context, tx *sqlx.Tx, sessionID string) ([]storedQueueEntry, map[string]storedQueueEntry, error) {
+	rows, err := tx.QueryxContext(ctx, r.db.Rebind(`
+		SELECT id, session_id, task_id, position, content, model, plan_mode,
+		       attachments_json, metadata_json, queued_at, queued_by
+		FROM queued_messages
+		WHERE session_id = ?
+		ORDER BY position ASC
+	`), sessionID)
+	if err != nil {
+		return nil, nil, fmt.Errorf("list stored send-now entries: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	ordered := make([]storedQueueEntry, 0)
+	entries := make(map[string]storedQueueEntry)
+	for rows.Next() {
+		message, raw, scanErr := scanQueuedRowWithMetadataJSON(rows)
+		if scanErr != nil {
+			return nil, nil, scanErr
+		}
+		attachmentsJSON, marshalErr := marshalAttachments(message.Attachments)
+		if marshalErr != nil {
+			return nil, nil, marshalErr
+		}
+		entry := storedQueueEntry{message: message, raw: raw, attachmentsJSON: attachmentsJSON}
+		ordered = append(ordered, entry)
+		entries[message.ID] = entry
+	}
+	if err := rows.Err(); err != nil {
+		return nil, nil, err
+	}
+	return ordered, entries, nil
+}
+
+func selectSQLiteSendNowSources(
+	ordered []storedQueueEntry,
+	byID map[string]storedQueueEntry,
+	requested map[string]struct{},
+	expected []QueuedMessage,
+) ([]QueuedMessage, error) {
+	for _, expectedEntry := range expected {
+		entryID := expectedEntry.ID
+		entry, ok := byID[entryID]
+		if !ok {
+			return nil, ErrSendNowClaimChanged
+		}
+		if entry.message.IsReservedInFlight() {
+			return nil, ErrSendNowReservationConflict
+		}
+	}
+
+	selected := make([]*QueuedMessage, 0, len(expected))
+	for _, entry := range ordered {
+		if _, ok := requested[entry.message.ID]; ok {
+			selected = append(selected, entry.message)
+		}
+	}
+	if len(selected) != len(expected) {
+		return nil, ErrSendNowClaimChanged
+	}
+	if err := validateSendNowSnapshot(selected, expected); err != nil {
+		return nil, err
+	}
+	return cloneSendNowSources(selected), nil
+}
+
+func (r *sqliteRepository) applySQLiteSendNowClaim(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	sessionID string,
+	sources []QueuedMessage,
+	storedByID map[string]storedQueueEntry,
+) error {
+	for _, source := range sources {
+		storedEntry := storedByID[source.ID]
+		if source.IsDurableLifecycle() {
+			if err := r.reserveSQLiteSendNowSource(ctx, tx, sessionID, source, storedEntry); err != nil {
+				return err
+			}
+			continue
+		}
+		if err := r.removeSQLiteSendNowSource(ctx, tx, sessionID, source, storedEntry); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (r *sqliteRepository) reserveSQLiteSendNowSource(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	sessionID string,
+	source QueuedMessage,
+	stored storedQueueEntry,
+) error {
+	metadataJSON, err := marshalMetadata(markReservedMetadata(source.Metadata))
+	if err != nil {
+		return err
+	}
+	result, err := tx.ExecContext(ctx, r.db.Rebind(`
+		UPDATE queued_messages SET metadata_json = ?
+		WHERE id = ? AND session_id = ? AND metadata_json = ?
+	`), metadataJSON, source.ID, sessionID, stored.raw)
+	if err != nil {
+		return fmt.Errorf("reserve send-now lifecycle entry: %w", err)
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected != 1 {
+		return ErrSendNowClaimChanged
+	}
+	return nil
+}
+
+func (r *sqliteRepository) removeSQLiteSendNowSource(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	sessionID string,
+	source QueuedMessage,
+	stored storedQueueEntry,
+) error {
+	result, err := tx.ExecContext(ctx, r.db.Rebind(`
+		DELETE FROM queued_messages
+		WHERE id = ? AND session_id = ? AND content = ? AND attachments_json = ? AND metadata_json = ?
+	`), source.ID, sessionID, source.Content, stored.attachmentsJSON, stored.raw)
+	if err != nil {
+		return fmt.Errorf("remove send-now entry: %w", err)
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected != 1 {
+		return ErrSendNowClaimChanged
+	}
+	return nil
+}
+
+func validateSQLiteSendNowRestore(
+	claim *SendNowClaim,
+	sessionID string,
+	stored map[string]storedQueueEntry,
+	generations map[string]int64,
+) error {
+	for _, source := range claim.Sources {
+		if source.SessionID != sessionID {
+			return ErrSendNowClaimChanged
+		}
+		if sendNowSourceGenerationChanged(claim, source, generations[source.TaskID]) {
+			continue
+		}
+		entry, ok := stored[source.ID]
+		if !ok {
+			if source.IsDurableLifecycle() {
+				return ErrSendNowClaimChanged
+			}
+			continue
+		}
+		if entry.message.IsReservedInFlight() && !source.IsDurableLifecycle() {
+			return ErrSendNowClaimChanged
+		}
+	}
+	return nil
+}
+
+func (r *sqliteRepository) restoreSQLiteSendNowSource(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	sessionID string,
+	source QueuedMessage,
+	stored map[string]storedQueueEntry,
+) error {
+	entry, ok := stored[source.ID]
+	if !ok {
+		return r.insertSQLiteSendNowSource(ctx, tx, source)
+	}
+	if !source.IsDurableLifecycle() || !entry.message.IsReservedInFlight() {
+		return nil
+	}
+	metadataJSON, err := marshalMetadata(restoreSendNowMetadata(entry.message.Metadata, source.Metadata))
+	if err != nil {
+		return err
+	}
+	result, err := tx.ExecContext(ctx, r.db.Rebind(`
+		UPDATE queued_messages SET metadata_json = ?
+		WHERE id = ? AND session_id = ? AND metadata_json = ?
+	`), metadataJSON, source.ID, sessionID, entry.raw)
+	if err != nil {
+		return fmt.Errorf("clear send-now lifecycle reservation: %w", err)
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected != 1 {
+		return ErrSendNowClaimChanged
+	}
+	return nil
+}
+
+func (r *sqliteRepository) insertSQLiteSendNowSource(ctx context.Context, tx *sqlx.Tx, source QueuedMessage) error {
+	attachmentsJSON, err := marshalAttachments(source.Attachments)
+	if err != nil {
+		return err
+	}
+	metadataJSON, err := marshalMetadata(clearReservedMetadata(source.Metadata))
+	if err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, r.db.Rebind(`
+		INSERT INTO queued_messages
+			(id, session_id, task_id, position, content, model, plan_mode, attachments_json, metadata_json, queued_at, queued_by)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`), source.ID, source.SessionID, source.TaskID, source.Position, source.Content, source.Model,
+		boolToInt(source.PlanMode), attachmentsJSON, metadataJSON, source.QueuedAt, source.QueuedBy); err != nil {
+		return fmt.Errorf("restore send-now entry: %w", err)
+	}
+	return nil
+}
+
+func validateSQLiteSendNowAcknowledge(claim *SendNowClaim, sessionID string, stored map[string]storedQueueEntry) error {
+	for _, source := range claim.Sources {
+		if source.SessionID != sessionID {
+			return ErrSendNowClaimChanged
+		}
+		if !source.IsDurableLifecycle() {
+			continue
+		}
+		if entry, ok := stored[source.ID]; ok && !entry.message.IsReservedInFlight() {
+			return ErrSendNowClaimChanged
+		}
+	}
+	return nil
+}
+
+func (r *sqliteRepository) acknowledgeSQLiteSendNowSource(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	sessionID string,
+	source QueuedMessage,
+	stored map[string]storedQueueEntry,
+) error {
+	if !source.IsDurableLifecycle() {
+		return nil
+	}
+	entry, ok := stored[source.ID]
+	if !ok {
+		return nil
+	}
+	result, err := tx.ExecContext(ctx, r.db.Rebind(`
+		DELETE FROM queued_messages WHERE id = ? AND session_id = ? AND metadata_json = ?
+	`), source.ID, sessionID, entry.raw)
+	if err != nil {
+		return fmt.Errorf("acknowledge send-now lifecycle entry: %w", err)
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected != 1 {
+		return ErrSendNowClaimChanged
+	}
+	return nil
 }
 
 func (r *sqliteRepository) UpdateContent(ctx context.Context, sessionID, entryID, content string, attachments []MessageAttachment, queuedBy string) error {

@@ -54,7 +54,10 @@ func TestBranchNameCommandInjection_Regression(t *testing.T) {
 			Env: map[string]string{},
 		}
 
-		script := exec.resolvePrepareScript(req)
+		script, err := exec.resolvePrepareScript(req)
+		if err != nil {
+			t.Fatalf("resolvePrepareScript() error = %v", err)
+		}
 
 		// The raw, unquoted `$(...)` must NOT appear naked. It may only appear
 		// inside single quotes, where the shell treats it as a literal.
@@ -89,7 +92,10 @@ func TestBranchNameCommandInjection_Regression(t *testing.T) {
 			Env: map[string]string{},
 		}
 
-		script := exec.resolvePrepareScript(req)
+		script, err := exec.resolvePrepareScript(req)
+		if err != nil {
+			t.Fatalf("resolvePrepareScript() error = %v", err)
+		}
 		assertNoUnquotedPayload(t, script, maliciousBranch)
 
 		cloneLine := extractLine(t, script, "git clone --depth=1 --branch")
@@ -132,7 +138,10 @@ func TestBranchNameCommandInjection_Regression(t *testing.T) {
 			Env: map[string]string{},
 		}
 
-		script := exec.resolvePrepareScript(req)
+		script, err := exec.resolvePrepareScript(req)
+		if err != nil {
+			t.Fatalf("resolvePrepareScript() error = %v", err)
+		}
 		assertNoUnquotedPayload(t, script, "main;touch "+markerClone+";#")
 		assertNoUnquotedPayload(t, script, "$(touch "+markerCheckout+")")
 

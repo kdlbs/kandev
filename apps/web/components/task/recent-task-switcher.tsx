@@ -16,8 +16,10 @@ import {
   type RecentTaskSwitcherController,
 } from "./recent-task-switcher-hooks";
 import type { RecentTaskDisplayItem } from "./recent-task-switcher-model";
+import { useTranslation } from "react-i18next";
 
 function TaskBadges({ item }: { item: RecentTaskDisplayItem }) {
+  const { t } = useTranslation();
   return (
     <div className="flex min-w-0 flex-wrap items-center gap-1.5">
       <Badge
@@ -52,7 +54,7 @@ function TaskBadges({ item }: { item: RecentTaskDisplayItem }) {
       )}
       {item.isCurrent && (
         <Badge variant="outline" data-testid="recent-task-switcher-badge-current">
-          Current
+          {t("task:current2")}
         </Badge>
       )}
     </div>
@@ -94,10 +96,11 @@ function RecentTaskRow({
 }
 
 function EmptyState() {
+  const { t } = useTranslation();
   return (
     <div className="flex flex-col items-center justify-center gap-2 py-10 text-center">
       <IconHistory className="size-6 text-muted-foreground/60" />
-      <p className="text-sm text-muted-foreground">No recent tasks yet</p>
+      <p className="text-sm text-muted-foreground">{t("task:noRecentTasksYet")}</p>
     </div>
   );
 }
@@ -135,19 +138,21 @@ function SwitcherFooter({
   shortcutLabel: string;
   reverseShortcutLabel: string;
 }) {
+  const { t } = useTranslation();
   return (
     <div className="flex items-center gap-3 border-t px-4 py-2 text-[11px] text-muted-foreground">
       <span className="flex items-center gap-1.5">
-        <Kbd>{shortcutLabel}</Kbd> Next
+        <Kbd>{shortcutLabel}</Kbd> {t("task:next")}
       </span>
       <span className="flex items-center gap-1.5">
-        <Kbd>{reverseShortcutLabel}</Kbd> Previous
+        <Kbd>{reverseShortcutLabel}</Kbd> {t("task:previous")}
       </span>
     </div>
   );
 }
 
 function RecentTaskSwitcherDialog(props: RecentTaskSwitcherController) {
+  const { t } = useTranslation();
   return (
     <Dialog open={props.open} onOpenChange={props.setOpen}>
       <DialogContent
@@ -159,9 +164,9 @@ function RecentTaskSwitcherDialog(props: RecentTaskSwitcherController) {
         <DialogHeader className="border-b px-4 py-3">
           <DialogTitle className="flex items-center gap-2 text-sm">
             <IconRefresh className="size-4 text-muted-foreground" />
-            Recent Tasks
+            {t("task:recentTasks")}
           </DialogTitle>
-          <DialogDescription className="sr-only">Switch recent tasks.</DialogDescription>
+          <DialogDescription className="sr-only">{t("task:switchRecentTasks")}</DialogDescription>
         </DialogHeader>
         <div className="max-h-[60vh] overflow-y-auto p-2">
           <RecentTaskList

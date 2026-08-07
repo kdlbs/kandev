@@ -13,6 +13,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/registry"
 	"github.com/kandev/kandev/internal/agent/settings/models"
 	"github.com/kandev/kandev/internal/agent/settings/store"
+	"github.com/kandev/kandev/internal/agentctl/acpcompat"
 	"github.com/kandev/kandev/internal/common/logger"
 )
 
@@ -306,7 +307,7 @@ func (r *ProfileReconciler) reconcileAgent(ctx context.Context, ag agents.Agent)
 	}
 
 	for _, p := range profiles {
-		r.healProfile(ctx, p, caps)
+		r.healProfile(ctx, p, caps, ag.ID())
 	}
 }
 
@@ -374,8 +375,18 @@ func (r *ProfileReconciler) healProfile(
 	ctx context.Context,
 	p *models.AgentProfile,
 	caps hostutility.AgentCapabilities,
+	agentID string,
 ) {
 	changed := healProfileName(p, caps)
+	if model, options, migrated := acpcompat.MigrateCursorModel(agentID, p.Model, p.ConfigOptions); migrated {
+		r.log.Info("migrating Cursor variant profile model",
+			zap.String("profile_id", p.ID),
+			zap.String("old_model", p.Model),
+			zap.String("new_model", model))
+		p.Model = model
+		p.ConfigOptions = options
+		changed = true
+	}
 
 	if p.Model != "" && !modelExists(p.Model, caps.Models) {
 		r.log.Info("profile model no longer available, auto-healing",

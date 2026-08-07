@@ -21,6 +21,7 @@ import { useAppStore } from "@/components/state-provider";
 import type { Skill, SkillSourceType } from "@/lib/state/slices/office/types";
 import { FileTree, type FileTreeNode } from "@/components/shared/file-tree";
 import { ScriptEditor } from "@/components/settings/profile-edit/script-editor";
+import { useTranslation } from "react-i18next";
 
 interface SkillDetailProps {
   skill: Skill;
@@ -28,13 +29,16 @@ interface SkillDetailProps {
   onDelete: (id: string) => void;
 }
 
-const FALLBACK_SOURCE_LABELS: Record<SkillSourceType, string> = {
-  inline: "Inline",
-  local_path: "Local",
-  git: "GitHub",
-  skills_sh: "skills.sh",
-  user_home: "User home",
-  system: "Kandev",
+// Catalog keys, not copy — module scope freezes a `t()` at the boot locale. The
+// record keys are the wire `SkillSourceType` values. `skills.sh` and `Kandev`
+// are product names and resolve to themselves.
+const FALLBACK_SOURCE_LABEL_KEYS: Record<SkillSourceType, string> = {
+  inline: "office:skillSourceInline",
+  local_path: "office:skillSourceLocal",
+  git: "office:skillSourceGithub",
+  skills_sh: "office:skillSourceSkillsSh",
+  user_home: "office:skillSourceUserHome",
+  system: "office:skillSourceKandev",
 };
 
 function SourceIcon({ sourceType }: { sourceType: SkillSourceType }) {
@@ -50,20 +54,27 @@ function SourceIcon({ sourceType }: { sourceType: SkillSourceType }) {
 }
 
 function useSkillSourceMeta(sourceType: SkillSourceType) {
+  const { t } = useTranslation();
   const meta = useAppStore((s) => s.office.meta);
   const metaSource = meta?.skillSourceTypes.find((s) => s.id === sourceType);
+  const fallbackKey = FALLBACK_SOURCE_LABEL_KEYS[sourceType];
   return {
-    label: metaSource?.label ?? FALLBACK_SOURCE_LABELS[sourceType] ?? sourceType,
+    // `?? sourceType` keeps an unknown wire value visible rather than blank.
+    label: metaSource?.label ?? (fallbackKey ? t(fallbackKey) : sourceType),
     readOnly: metaSource?.readOnly ?? sourceType !== "inline",
     readOnlyReason: metaSource?.readOnlyReason,
   };
 }
 
 export function SkillDetail({ skill, onSave, onDelete }: SkillDetailProps) {
+  const { t } = useTranslation();
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
   const [draft, setDraft] = useState(skill.content ?? "");
   const [isSaving, setIsSaving] = useState(false);
   const sourceMeta = useSkillSourceMeta(skill.sourceType);
+  const bundledReason = skill.systemVersion
+    ? t("office:bundledWithKandevVersion", { version: skill.systemVersion })
+    : t("office:bundledWithKandev");
   // System skills are kandev-owned; they refresh on backend start so
   // local edits would just get overwritten. Lock both edit and delete
   // for them regardless of what the source meta says.
@@ -100,11 +111,7 @@ export function SkillDetail({ skill, onSave, onDelete }: SkillDetailProps) {
       <SkillDetailHeader
         skill={skill}
         readOnly={readOnly}
-        readOnlyReason={
-          skill.isSystem
-            ? `Bundled with kandev${skill.systemVersion ? ` v${skill.systemVersion}` : ""}`
-            : sourceMeta.readOnlyReason
-        }
+        readOnlyReason={skill.isSystem ? bundledReason : sourceMeta.readOnlyReason}
         onDelete={!skill.isSystem ? () => onDelete(skill.id) : undefined}
       />
       <Separator />
@@ -133,7 +140,7 @@ export function SkillDetail({ skill, onSave, onDelete }: SkillDetailProps) {
               className="cursor-pointer"
             >
               <IconDeviceFloppy className="h-4 w-4 mr-1" />
-              {isSaving ? "Saving…" : "Save"}
+              {isSaving ? t("office:savingEllipsis") : t("common:save")}
             </Button>
           )}
         </div>
@@ -156,10 +163,12 @@ export function SkillDetail({ skill, onSave, onDelete }: SkillDetailProps) {
   );
 }
 
-const FALLBACK_READ_ONLY_REASONS: Partial<Record<SkillSourceType, string>> = {
-  git: "GitHub-managed skills are read-only",
-  skills_sh: "skills.sh-managed skills are read-only",
-  local_path: "Local path skills are read-only",
+// Catalog keys, not copy — module scope freezes a `t()` at the boot locale. The
+// record keys are the wire `SkillSourceType` values.
+const FALLBACK_READ_ONLY_REASON_KEYS: Partial<Record<SkillSourceType, string>> = {
+  git: "office:readOnlyReasonGit",
+  skills_sh: "office:readOnlyReasonSkillsSh",
+  local_path: "office:readOnlyReasonLocalPath",
 };
 
 function SkillDetailHeader({
@@ -177,7 +186,9 @@ function SkillDetailHeader({
   // refresh from the kandev binary on every backend start.
   onDelete?: () => void;
 }) {
+  const { t } = useTranslation();
   const { copied, copy } = useCopyToClipboard();
+  const fallbackReadOnlyReasonKey = FALLBACK_READ_ONLY_REASON_KEYS[skill.sourceType];
 
   return (
     <div className="flex items-start justify-between">
@@ -195,10 +206,11 @@ function SkillDetailHeader({
       <div className="flex items-center gap-2 shrink-0">
         {readOnly && (
           <>
-            <Badge variant="outline">Read only</Badge>
-            {(readOnlyReason ?? FALLBACK_READ_ONLY_REASONS[skill.sourceType]) && (
+            <Badge variant="outline">{t("office:readOnly")}</Badge>
+            {(readOnlyReason ?? fallbackReadOnlyReasonKey) && (
               <span className="text-xs text-muted-foreground">
-                {readOnlyReason ?? FALLBACK_READ_ONLY_REASONS[skill.sourceType]}
+                {readOnlyReason ??
+                  (fallbackReadOnlyReasonKey ? t(fallbackReadOnlyReasonKey) : null)}
               </span>
             )}
           </>
@@ -218,11 +230,11 @@ function SkillDetailHeader({
               )}
             </Button>
           </TooltipTrigger>
-          <TooltipContent>{copied ? "Copied!" : "Copy slug"}</TooltipContent>
+          <TooltipContent>{copied ? t("office:copied") : t("office:copySlug")}</TooltipContent>
         </Tooltip>
         {onEdit && (
           <Button variant="ghost" size="sm" onClick={onEdit} className="cursor-pointer">
-            Edit
+            {t("common:edit")}
           </Button>
         )}
         {onDelete && (
@@ -237,7 +249,7 @@ function SkillDetailHeader({
                 <IconTrash className="h-4 w-4" />
               </Button>
             </TooltipTrigger>
-            <TooltipContent>Remove skill</TooltipContent>
+            <TooltipContent>{t("office:removeSkill")}</TooltipContent>
           </Tooltip>
         )}
       </div>
@@ -277,30 +289,32 @@ function SkillMetadataRow({
   readOnly: boolean;
   usedByCount: number;
 }) {
+  const { t } = useTranslation();
+  // `count` + `_one`/`_other`, never a hand-written "s".
   const usedByLabel =
     usedByCount === 0
-      ? "No agents attached"
-      : `${usedByCount} agent${usedByCount !== 1 ? "s" : ""}`;
+      ? t("office:noAgentsAttached")
+      : t("office:agentCount", { count: usedByCount });
 
   const roles = skill.defaultForRoles ?? [];
   return (
     <div className="grid grid-cols-4 gap-4 text-sm">
-      <MetadataItem label="SOURCE">
+      <MetadataItem label={t("office:metaSource")}>
         <SourceValue skill={skill} />
       </MetadataItem>
-      <MetadataItem label="KEY">
+      <MetadataItem label={t("office:metaKey")}>
         <span className="font-mono">{skill.slug}</span>
       </MetadataItem>
-      <MetadataItem label="MODE" hint="Whether this skill's content can be edited in Kandev">
-        <span>{readOnly ? "Read only" : "Editable"}</span>
+      <MetadataItem label={t("office:metaMode")} hint={t("office:whetherThisSkillSContentCan")}>
+        <span>{readOnly ? t("office:readOnly") : t("office:editable")}</span>
       </MetadataItem>
-      <MetadataItem label="USED BY" hint="Agents that have this skill assigned to them">
+      <MetadataItem label={t("office:usedBy")} hint={t("office:agentsThatHaveThisSkillAssigned")}>
         <span>{usedByLabel}</span>
       </MetadataItem>
       {skill.isSystem && roles.length > 0 && (
         <MetadataItem
-          label="DEFAULT FOR"
-          hint="New agents matching these roles get this skill auto-attached"
+          label={t("office:defaultFor")}
+          hint={t("office:newAgentsMatchingTheseRolesGet")}
         >
           <span>{roles.join(", ")}</span>
         </MetadataItem>

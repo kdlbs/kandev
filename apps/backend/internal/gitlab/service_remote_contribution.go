@@ -85,10 +85,6 @@ func buildGitLabRemoteContribution(rawURL, configuredHost, projectPath string, i
 	if err := binding.Validate(); err != nil {
 		return nil, err
 	}
-	targetDefault := mr.TargetDefaultBranch
-	if targetDefault == "" {
-		targetDefault = mr.BaseBranch
-	}
 	return &taskmodels.RemoteContributionResolution{
 		Binding:             binding,
 		TargetProvider:      taskmodels.RemoteContributionProviderGitLab,
@@ -96,7 +92,7 @@ func buildGitLabRemoteContribution(rawURL, configuredHost, projectPath string, i
 		TargetPath:          projectPath,
 		TargetProviderID:    positiveGitLabID(firstGitLabID(mr.TargetProjectID, mr.ProjectID)),
 		TargetRemoteURL:     fmt.Sprintf("%s/%s.git", strings.TrimRight(hostOrigin, "/"), projectPath),
-		TargetDefaultBranch: targetDefault,
+		TargetDefaultBranch: mr.TargetDefaultBranch,
 	}, nil
 }
 

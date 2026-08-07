@@ -11,12 +11,14 @@ import { toast } from "@/lib/toast/sonner";
 import { useAppStore } from "@/components/state-provider";
 import { updateAgentProfile } from "@/lib/api/domains/office-api";
 import type { AgentProfile } from "@/lib/state/slices/office/types";
+import { useTranslation } from "react-i18next";
 
 type AgentPermissionsTabProps = {
   agent: AgentProfile;
 };
 
 export function AgentPermissionsTab({ agent }: AgentPermissionsTabProps) {
+  const { t } = useTranslation();
   const meta = useAppStore((s) => s.office.meta);
   const updateStore = useAppStore((s) => s.updateOfficeAgentProfile);
 
@@ -42,9 +44,9 @@ export function AgentPermissionsTab({ agent }: AgentPermissionsTabProps) {
       } as Partial<AgentProfile>);
       updateStore(agent.id, { permissions: perms });
       setDirty(false);
-      toast.success("Permissions updated");
+      toast.success(t("office:permissionsUpdated"));
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Failed to save");
+      toast.error(err instanceof Error ? err.message : t("office:failedToSave"));
     } finally {
       setSaving(false);
     }
@@ -61,9 +63,9 @@ export function AgentPermissionsTab({ agent }: AgentPermissionsTabProps) {
     <div className="space-y-4 mt-4">
       <Card>
         <CardHeader>
-          <CardTitle className="text-sm">Permissions</CardTitle>
+          <CardTitle className="text-sm">{t("office:permissions")}</CardTitle>
           <p className="text-xs text-muted-foreground">
-            Control what this agent is allowed to do. Defaults are based on the agent&apos;s role.
+            {t("office:controlWhatThisAgentIsAllowed")}
           </p>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -84,7 +86,7 @@ export function AgentPermissionsTab({ agent }: AgentPermissionsTabProps) {
       {dirty && (
         <div className="flex justify-end">
           <Button onClick={handleSave} disabled={saving} className="cursor-pointer">
-            {saving ? "Saving..." : "Save Permissions"}
+            {saving ? t("office:saving") : t("office:savePermissions")}
           </Button>
         </div>
       )}
@@ -109,13 +111,14 @@ function PermissionRow({
   isDefault: boolean;
   onChange: (v: unknown) => void;
 }) {
+  const { t } = useTranslation();
   if (type === "int") {
     return (
       <div className="flex items-center justify-between gap-4">
         <div className="flex-1">
           <div className="flex items-center gap-2">
             <Label htmlFor={permKey}>{label}</Label>
-            {isDefault && <Badge variant="outline">role default</Badge>}
+            {isDefault && <Badge variant="outline">{t("office:roleDefault")}</Badge>}
           </div>
           <p className="text-xs text-muted-foreground mt-0.5">{description}</p>
         </div>
@@ -136,7 +139,7 @@ function PermissionRow({
       <div className="flex-1">
         <div className="flex items-center gap-2">
           <Label htmlFor={permKey}>{label}</Label>
-          {isDefault && <Badge variant="outline">role default</Badge>}
+          {isDefault && <Badge variant="outline">{t("office:roleDefault")}</Badge>}
         </div>
         <p className="text-xs text-muted-foreground mt-0.5">{description}</p>
       </div>
