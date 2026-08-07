@@ -2,7 +2,6 @@ package lifecycle
 
 import (
 	"context"
-	"strings"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -96,7 +95,15 @@ func TestApplyResumeIntentRoutesPassthroughLaunch(t *testing.T) {
 			// Both paths bail on the missing interactive runner, but with
 			// distinct messages: startPassthroughSession's carries the
 			// "for passthrough mode" suffix, ResumePassthroughSession's does not.
-			gotFreshLaunch := strings.Contains(err.Error(), "interactive runner not available for passthrough mode")
+			const (
+				freshLaunchError = "interactive runner not available for passthrough mode"
+				resumeError      = "interactive runner not available"
+			)
+			errText := err.Error()
+			gotFreshLaunch := errText == freshLaunchError
+			if !gotFreshLaunch && errText != resumeError {
+				t.Fatalf("unexpected runner-missing error: %v", err)
+			}
 			if gotFreshLaunch != tt.wantFreshLaunch {
 				t.Errorf("fresh-launch path taken = %v, want %v (error: %v)", gotFreshLaunch, tt.wantFreshLaunch, err)
 			}
