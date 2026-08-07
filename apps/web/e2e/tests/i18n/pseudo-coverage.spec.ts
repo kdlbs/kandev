@@ -30,9 +30,23 @@ import { test, expect } from "../../fixtures/test-base";
  *   pnpm e2e -- e2e/tests/i18n/pseudo-coverage.spec.ts
  *
  * WHAT IT GUARANTEES: on each screen in `SCREENS`, every rendered text node and
- * every value of a `COPY_ATTRIBUTES` attribute either came through `t()` /
- * `<Trans>` (and so renders accented under the pseudo-locale), or is on an
- * allowlist that says why it must not be translated.
+ * every value of a `COPY_ATTRIBUTES` attribute that the detector below can see
+ * either came through `t()` / `<Trans>` (and so renders accented under the
+ * pseudo-locale), or is on an allowlist that says why it must not be translated.
+ *
+ * It is a floor, not a proof of total coverage. Two limits are deliberate and
+ * both are documented where they are implemented, because relaxing either
+ * reddens every screen today:
+ *   - `wordlike` requires a 4-letter ASCII run, so a hardcoded string shorter
+ *     than that ("Add", "of") is not reported. Lowering it to 2 was measured:
+ *     9 of the 10 tests here go red, on real but out-of-scope copy owned by
+ *     `@kandev/ui` and sonner (e.g. the `alt+T` in sonner's toast-region label).
+ *   - the text pass clears a node on ANY accented character, so an un-migrated
+ *     word sharing one text node with migrated copy is missed. The attribute
+ *     pass does NOT have this limit — it strips allowlisted tokens first and
+ *     reports the remainder as `English frame, migrated value`. docs/i18n.md
+ *     covers the text-node case under "…and it is weakest at an interpolated
+ *     value"; it is why the by-hand pseudo walk is still step 9 of a migration.
  *
  * IF YOUR PR JUST WENT RED HERE, the failure names the exact strings and the
  * screen. Read them: each one is copy your change put on screen without routing
