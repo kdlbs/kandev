@@ -153,15 +153,17 @@ export default function IntegrationsIndexPage({ workspaceId }: IntegrationsIndex
               className="h-full w-full transition-colors hover:border-primary/40"
             >
               <CardContent className="space-y-2">
-                <Link
-                  href={href}
-                  className="flex items-center gap-2 text-base font-semibold hover:underline cursor-pointer"
-                >
-                  <Icon className="h-5 w-5" />
-                  {label}
-                </Link>
-                <div className="flex justify-end">
-                  <EnabledControl />
+                <div className="flex items-center justify-between gap-2">
+                  <Link
+                    href={href}
+                    className="flex min-w-0 items-center gap-2 text-base font-semibold hover:underline cursor-pointer"
+                  >
+                    <Icon className="h-5 w-5 shrink-0" />
+                    <span className="truncate">{label}</span>
+                  </Link>
+                  <div className="shrink-0">
+                    <EnabledControl />
+                  </div>
                 </div>
                 <Link href={href} className="text-sm text-muted-foreground cursor-pointer">
                   {t(descriptionKey, { trigger: "!kandev" })}
