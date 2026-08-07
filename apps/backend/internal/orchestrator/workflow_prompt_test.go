@@ -6,6 +6,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"go.uber.org/zap"
 
@@ -645,10 +646,13 @@ func TestGetWorkflowMeta_StepProfileOverrideStillReadsPromptOnce(t *testing.T) {
 }
 
 func TestGetWorkflowMeta_ConcurrentReadersSinglePopulate(t *testing.T) {
-	// First-writer-wins cache under concurrent dual consumers.
+	// singleflight + map cache: concurrent same-ID dual consumers share one load.
 	stepGetter := newMockStepGetter()
 	stepGetter.workflowAgentProfileID = "profile-wf"
 	stepGetter.workflowPrompts["wf-1"] = "Keep CI green."
+	// Hold the first provider call long enough that sibling goroutines enter
+	// singleflight.Do while it is still in flight.
+	stepGetter.workflowMetaDelay = 25 * time.Millisecond
 	svc := createTestService(setupTestRepo(t), stepGetter, newMockTaskRepo())
 
 	ctx := withWorkflowMetaCache(context.Background())
@@ -676,18 +680,13 @@ func TestGetWorkflowMeta_ConcurrentReadersSinglePopulate(t *testing.T) {
 	for msg := range errs {
 		t.Error(msg)
 	}
-	// Concurrent first-load may race before first-writer-wins settles; expect
-	// small >1 is possible without singleflight. Assert we did not multiply by n.
-	calls := stepGetter.metaCalls()
-	if calls < 1 || calls > n {
-		t.Fatalf("concurrent cache populate calls = %d, want 1..%d", calls, n)
+	if calls := stepGetter.metaCalls(); calls != 1 {
+		t.Fatalf("concurrent same-ID load: GetWorkflowMeta calls = %d, want 1", calls)
 	}
-	// After the storm, a follow-up read must hit the cache (no additional call
-	// once the map has an entry — wait for quiescence by reading again).
-	before := calls
+	// Follow-up after quiescence must stay on the map cache.
 	_ = svc.resolveStepAgentProfile(ctx, step)
 	_ = svc.buildWorkflowPrompt(ctx, "base", step, "task-1", "session-1", false)
-	if stepGetter.metaCalls() != before {
-		t.Fatalf("post-storm cache miss: calls %d → %d", before, stepGetter.metaCalls())
+	if stepGetter.metaCalls() != 1 {
+		t.Fatalf("post-storm cache miss: calls = %d, want 1", stepGetter.metaCalls())
 	}
 }

@@ -43,6 +43,7 @@ type mockStepGetter struct {
 	workflowPrompts        map[string]string                 // workflowID -> prompt
 	workflowMetaCalls      int                               // GetWorkflowMeta invocations
 	workflowMetaErr        error                             // optional error from GetWorkflowMeta
+	workflowMetaDelay      time.Duration                     // optional sleep before returning meta
 	workflowMetaMu         sync.Mutex                        // guards workflowMetaCalls for concurrent tests
 }
 
@@ -87,7 +88,11 @@ func (m *mockStepGetter) GetPreviousStepByPosition(_ context.Context, workflowID
 func (m *mockStepGetter) GetWorkflowMeta(_ context.Context, workflowID string) (WorkflowMeta, error) {
 	m.workflowMetaMu.Lock()
 	m.workflowMetaCalls++
+	delay := m.workflowMetaDelay
 	m.workflowMetaMu.Unlock()
+	if delay > 0 {
+		time.Sleep(delay)
+	}
 	if m.workflowMetaErr != nil {
 		return WorkflowMeta{}, m.workflowMetaErr
 	}

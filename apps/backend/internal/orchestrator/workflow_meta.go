@@ -3,6 +3,8 @@ package orchestrator
 import (
 	"context"
 	"sync"
+
+	"golang.org/x/sync/singleflight"
 )
 
 // workflowMetaCacheKey is the context key for a request-scoped WorkflowMeta cache.
@@ -18,6 +20,9 @@ type workflowMetaCacheEntry struct {
 type workflowMetaCache struct {
 	mu   sync.Mutex
 	byID map[string]workflowMetaCacheEntry
+	// group coalesces concurrent same-ID loads within one request so dual
+	// consumers (and any accidental parallel fan-out) share one provider call.
+	group singleflight.Group
 }
 
 // withWorkflowMetaCache returns a context carrying a mutable per-request cache
@@ -41,25 +46,43 @@ func (s *Service) getWorkflowMeta(ctx context.Context, workflowID string) (Workf
 		return WorkflowMeta{}, nil
 	}
 
-	if cache, ok := ctx.Value(workflowMetaCacheKey{}).(*workflowMetaCache); ok {
-		cache.mu.Lock()
-		if entry, hit := cache.byID[workflowID]; hit {
-			cache.mu.Unlock()
-			return entry.meta, entry.err
-		}
-		cache.mu.Unlock()
-
-		meta, err := s.workflowStepGetter.GetWorkflowMeta(ctx, workflowID)
-		cache.mu.Lock()
-		// First writer wins if two goroutines raced the same id.
-		if entry, hit := cache.byID[workflowID]; hit {
-			cache.mu.Unlock()
-			return entry.meta, entry.err
-		}
-		cache.byID[workflowID] = workflowMetaCacheEntry{meta: meta, err: err}
-		cache.mu.Unlock()
-		return meta, err
+	cache, ok := ctx.Value(workflowMetaCacheKey{}).(*workflowMetaCache)
+	if !ok {
+		return s.workflowStepGetter.GetWorkflowMeta(ctx, workflowID)
 	}
 
-	return s.workflowStepGetter.GetWorkflowMeta(ctx, workflowID)
+	cache.mu.Lock()
+	if entry, hit := cache.byID[workflowID]; hit {
+		cache.mu.Unlock()
+		return entry.meta, entry.err
+	}
+	cache.mu.Unlock()
+
+	// Coalesce concurrent same-ID loads; first writer still wins on the map.
+	v, err, _ := cache.group.Do(workflowID, func() (any, error) {
+		cache.mu.Lock()
+		if entry, hit := cache.byID[workflowID]; hit {
+			cache.mu.Unlock()
+			return entry, nil
+		}
+		cache.mu.Unlock()
+
+		meta, loadErr := s.workflowStepGetter.GetWorkflowMeta(ctx, workflowID)
+		entry := workflowMetaCacheEntry{meta: meta, err: loadErr}
+		cache.mu.Lock()
+		if existing, hit := cache.byID[workflowID]; hit {
+			cache.mu.Unlock()
+			return existing, nil
+		}
+		cache.byID[workflowID] = entry
+		cache.mu.Unlock()
+		return entry, nil
+	})
+	if err != nil {
+		// singleflight only surfaces the loader's returned error; we pack errors
+		// into the entry so this path should not run for normal loads.
+		return WorkflowMeta{}, err
+	}
+	entry := v.(workflowMetaCacheEntry)
+	return entry.meta, entry.err
 }
