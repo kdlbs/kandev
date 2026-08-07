@@ -174,6 +174,25 @@ func TestWaitForHealthReturnsWhenContextCanceled(t *testing.T) {
 	}
 }
 
+func TestWaitForHealthCallsOnFailureWhenContextCanceled(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	var failures atomic.Int32
+	err := waitForHealth(ctx, "http://127.0.0.1:1", fakeChild{}, time.Minute, "", func() {
+		failures.Add(1)
+	})
+	if err == nil {
+		t.Fatal("waitForHealth() = nil, want cancellation error")
+	}
+	if !strings.Contains(err.Error(), "canceled") {
+		t.Fatalf("error = %v, want a cancellation error", err)
+	}
+	if got := failures.Load(); got != 1 {
+		t.Fatalf("onFailure called %d times, want 1", got)
+	}
+}
+
 func TestWaitForHealthFailsFastWhenBackendExited(t *testing.T) {
 	var failures int
 	err := waitForHealth(

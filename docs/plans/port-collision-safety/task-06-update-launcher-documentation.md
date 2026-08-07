@@ -57,8 +57,10 @@ work but intentionally waits for the final behavior wording.
   without exposing implementation details.
 - Do not claim the service installer’s separate KANDEV_SERVER_PORT behavior was repaired.
 
-## Output contract
+## Completion
 
-Report the public pages changed, the final wording decision, validator results, and any docs
-impact that remains intentionally out of scope. Update this task to done and the corresponding
-wave/status entry in plan.md after implementation.
+- Pages: contributing, CLI, remote-cloud, and Windows-support public guides were updated.
+- Wording: explicit `run`/`start`/development port failures and Windows retry behavior are
+  documented, while the service installer’s separate port semantics remain explicitly out of
+  scope.
+- Verification: public-doc validators pass, including the final CLI scope clarification.

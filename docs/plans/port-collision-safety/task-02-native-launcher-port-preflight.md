@@ -64,8 +64,12 @@ default. Task 04 owns the same native managed-launch context and depends on this
   the reported run/start paths.
 - The source-aware preflight must not claim ownership; Task 04 handles the remaining race.
 
-## Output contract
+## Completion
 
-Report the source-aware error behavior, files changed, red and green test commands/results, and
-cross-platform checks. Update this task to done and the corresponding wave/status entry in plan.md
-after implementation.
+- Behavior: native run/start launchers preflight explicit backend ports and preserve their source
+  metadata in configuration errors.
+- Files: native launcher port-resolution, run/start wiring, and launcher test files listed above.
+- Verification: launcher race tests are green in the fixup run; the focused test first failed until
+  the source-aware preflight and collision wiring were implemented.
+- Cross-platform: the Windows-specific bind classifier and targeted CI coverage are recorded in
+  Task 05; the preflight itself remains platform-neutral.

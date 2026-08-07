@@ -225,6 +225,22 @@ async function prepareBundleForLaunch({
   };
 }
 
+export function buildReleaseLaunchOptions({
+  runtimeVersion,
+  backendPort,
+  backendPortSource,
+  verbose = false,
+  debug = false,
+}: RunOptions): RunOptions {
+  return {
+    runtimeVersion,
+    backendPort,
+    backendPortSource,
+    verbose,
+    debug,
+  };
+}
+
 /**
  * Attach a ring buffer to a readable stream, keeping roughly the last `maxChars`
  * characters. Note: the limit is measured in JS string length (UTF-16 code units),
@@ -294,16 +310,20 @@ async function launchBundle(prepared: PreparedBundle): Promise<{
 export async function runRelease({
   runtimeVersion,
   backendPort,
+  backendPortSource,
   verbose = false,
   debug = false,
   headless = false,
 }: RunOptions): Promise<void> {
-  const prepared = await prepareBundleForLaunch({
-    runtimeVersion,
-    backendPort,
-    verbose,
-    debug,
-  });
+  const prepared = await prepareBundleForLaunch(
+    buildReleaseLaunchOptions({
+      runtimeVersion,
+      backendPort,
+      backendPortSource,
+      verbose,
+      debug,
+    }),
+  );
   const { backendProc, dumpBackendLogs } = await launchBundle(prepared);
   const healthTimeoutMs = resolveHealthTimeoutMs(HEALTH_TIMEOUT_MS_RELEASE);
   console.log("[kandev] starting backend...");

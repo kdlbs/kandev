@@ -74,8 +74,12 @@ default. It does not share implementation files with the launcher preflight/heal
 - Keep port allocator release/MarkUnavailable semantics unchanged for non-collision failures.
 - Keep the Makefile test-windows target and GitHub Windows job package lists aligned.
 
-## Output contract
+## Completion
 
-Report the shared classifier behavior, allocator/tunnel changes, real double-bind test results,
-Windows build/test results, files changed, and any platform skips. Update this task to done and
-the corresponding wave/status entry in plan.md after implementation.
+- Behavior: shared Unix/Windows address-in-use classification drives allocator retry and tunnel
+  errors without string matching.
+- Files: netutil classifier, allocator/tunnel callers and tests, plus Windows Makefile/CI scope.
+- Verification: real double-bind and occupied-tunnel tests pass under the race detector; the
+  Windows job now runs the new collision tests separately from the incompatible broad MCP fixture.
+- Platform note: the full instance package remains out of the Windows-sensitive broad list because
+  its stdio fixture expects a Unix command; targeted port tests still run on Windows.

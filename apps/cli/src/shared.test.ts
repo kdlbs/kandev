@@ -4,6 +4,8 @@ import { PassThrough } from "node:stream";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { DEFAULT_AGENTCTL_PORT, DEFAULT_WEB_PORT } from "./constants";
+import { __testing as portsTesting } from "./ports";
 import {
   buildBackendEnv,
   buildWebEnv,
@@ -11,6 +13,7 @@ import {
   listHostNetworkAddresses,
   logStartupInfo,
   networkUrlsForPort,
+  pickPorts,
   pickBackendPorts,
   resolveBackendLogLevels,
   type PortConfig,
@@ -98,6 +101,12 @@ describe("buildBackendEnv", () => {
     expect(second).not.toBe(first);
   });
 
+  it("uses a caller-provided backend health token", () => {
+    const env = buildBackendEnv({ ports, healthToken: "launch-owned-token" });
+
+    expect(env.KANDEV_DESKTOP_HEALTH_TOKEN).toBe("launch-owned-token");
+  });
+
   it("uses independent file and console thresholds", () => {
     expect(resolveBackendLogLevels({ env: {} })).toEqual({ file: "info", console: "warn" });
     expect(resolveBackendLogLevels({ debug: true, env: {} })).toEqual({
@@ -154,6 +163,28 @@ describe("explicit backend port selection", () => {
     } finally {
       await new Promise<void>((resolve) => server.close(() => resolve()));
     }
+  });
+
+  it("does not reuse an explicit backend port for the automatic web port", async () => {
+    if (!(await portsTesting.isPortAvailable(DEFAULT_WEB_PORT))) return;
+
+    const resolved = await pickPorts({
+      backendPort: DEFAULT_WEB_PORT,
+      backendPortSource: "--port",
+    });
+
+    expect(resolved.webPort).not.toBe(DEFAULT_WEB_PORT);
+  });
+
+  it("does not reuse an explicit backend port for the automatic agentctl port", async () => {
+    if (!(await portsTesting.isPortAvailable(DEFAULT_AGENTCTL_PORT))) return;
+
+    const resolved = await pickBackendPorts({
+      backendPort: DEFAULT_AGENTCTL_PORT,
+      backendPortSource: "--port",
+    });
+
+    expect(resolved.agentctlPort).not.toBe(DEFAULT_AGENTCTL_PORT);
   });
 });
 

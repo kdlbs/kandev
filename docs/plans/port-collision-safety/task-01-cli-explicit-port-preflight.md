@@ -71,8 +71,12 @@ default. Task 03 owns the same CLI launch context and depends on this task.
 - Do not turn a probe failure into a random fallback for an explicitly requested port.
 - The preflight does not eliminate the bind race; Task 03 supplies the ownership proof.
 
-## Output contract
+## Completion
 
-Report the source-aware error behavior, files changed, red and green test commands/results, and
-any platform-specific caveats. Update this task to done and the corresponding wave/status entry
-in plan.md after implementation.
+- Behavior: explicit CLI backend ports are preflighted and fail with the configuration source;
+  automatic web and agentctl selection excludes already selected service ports.
+- Files: CLI argument, port-selection, launcher, and focused test files listed above.
+- Verification: the focused CLI suite is green (`62 passed` in the fixup run); the original red
+  case was the missing preflight/collision behavior.
+- Caveat: preflight remains a check immediately before launch, while health-token ownership covers
+  the remaining bind/readiness race.

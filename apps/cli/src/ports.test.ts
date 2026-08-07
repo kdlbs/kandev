@@ -2,7 +2,13 @@ import net from "node:net";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { assertPortAvailable, ensureValidPort, pickAvailablePort, __testing } from "./ports";
+import {
+  assertPortAvailable,
+  ensureValidPort,
+  pickAvailablePort,
+  pickAvailablePortExcluding,
+  __testing,
+} from "./ports";
 
 describe("ensureValidPort", () => {
   it("returns undefined for undefined input", () => {
@@ -116,6 +122,14 @@ describe("pickAvailablePort", () => {
   it("returns the preferred port when it is free", async () => {
     const port = await findReportedAvailablePort();
     expect(await pickAvailablePort(port)).toBe(port);
+  });
+
+  it("skips an excluded preferred port", async () => {
+    const preferred = await findReportedAvailablePort();
+    const picked = await pickAvailablePortExcluding(preferred, new Set([preferred]), 5);
+
+    expect(picked).not.toBe(preferred);
+    expect(picked).toBeGreaterThan(0);
   });
 
   it("returns a fallback port when the preferred port is taken", async () => {

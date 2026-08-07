@@ -113,12 +113,20 @@ export async function pickAvailablePort(
   preferred: number,
   retries = RANDOM_PORT_RETRIES,
 ): Promise<number> {
-  if (await isPortAvailable(preferred)) {
+  return pickAvailablePortExcluding(preferred, new Set(), retries);
+}
+
+export async function pickAvailablePortExcluding(
+  preferred: number,
+  excludedPorts: ReadonlySet<number>,
+  retries = RANDOM_PORT_RETRIES,
+): Promise<number> {
+  if (!excludedPorts.has(preferred) && (await isPortAvailable(preferred))) {
     return preferred;
   }
   for (let i = 0; i < retries; i += 1) {
     const candidate = crypto.randomInt(RANDOM_PORT_MIN, RANDOM_PORT_MAX + 1);
-    if (await isPortAvailable(candidate)) {
+    if (!excludedPorts.has(candidate) && (await isPortAvailable(candidate))) {
       return candidate;
     }
   }

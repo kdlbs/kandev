@@ -70,8 +70,12 @@ but the primary conversation executes sequentially by default.
 - Keep the manifest allowlist narrow and preserve owner-only manifest permissions.
 - Do not require a token from unrelated direct backend health requests.
 
-## Output contract
+## Completion
 
-Report the token lifecycle, health matching, restart retention, files changed, red and green test
-commands/results, and cross-platform checks. Update this task to done and the corresponding
-wave/status entry in plan.md after implementation.
+- Behavior: native launches generate one token before the first backend process, require the exact
+  token on health success, and preserve it through supervisor restarts.
+- Files: native launcher environment/health/supervisor, backend health handler, and test files
+  listed above.
+- Verification: launcher/backend race tests are green; the fixup adds coverage that cancellation
+  invokes the health failure callback exactly once.
+- Cross-platform: token matching uses ordinary HTTP headers and the existing manifest allowlist.

@@ -180,10 +180,12 @@ port and selected source are present.
 Implementation is complete. The following checks passed:
 
 - `make -C apps/backend test` — all backend packages passed.
-- `pnpm --filter kandev test` — 30 files and 292 CLI tests passed.
+- `pnpm --filter kandev test` — 30 files and 297 CLI tests passed.
 - `pnpm --filter kandev exec tsc --noEmit` — passed.
-- `go test -race -tags fts5 ./internal/launcher ./internal/backendapp ./internal/common/netutil ./internal/agentctl/server/instance ./internal/gateway/websocket` — 642 tests passed.
+- `go test -race -tags fts5 ./internal/launcher ./internal/backendapp ./internal/common/netutil ./internal/agentctl/server/instance ./internal/gateway/websocket` — affected packages passed.
 - Windows cross-compilation checks passed for netutil, instance, and websocket packages.
+- `make -C apps/backend test-windows` — original Windows-sensitive packages plus targeted
+  netutil, instance allocator, and websocket tunnel tests passed.
 - Public-doc tests passed (58 tests); `validate-public-docs.mjs` validated 41 pages.
 - `git diff --check`, Go formatting, and Prettier checks passed.
 

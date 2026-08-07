@@ -69,8 +69,12 @@ stable, but the primary conversation executes sequentially by default.
 - Override any stale inherited token rather than trusting process environment state.
 - Keep the token out of logs, errors, ring buffers, and tests' diagnostic output.
 
-## Output contract
+## Completion
 
-Report the token lifecycle, response-matching behavior, manifest retention, files changed, red and
-green test commands/results, and any remaining compatibility risks. Update this task to done and
-the corresponding wave/status entry in plan.md after implementation.
+- Behavior: each CLI launch owns one health token, passes it through the backend environment, and
+  requires an exact token match on a successful health response; the supervisor manifest retains
+  the allowlisted token.
+- Files: shared CLI environment/health/supervisor and launcher test files listed above.
+- Verification: CLI health, environment, manifest, and launch tests are green; the fixup adds
+  explicit-token coverage so token ownership is visible to future callers.
+- Compatibility: direct backend health requests without an expected token remain supported.
