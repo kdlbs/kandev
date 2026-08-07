@@ -43,6 +43,7 @@ type mockStepGetter struct {
 	workflowPrompts        map[string]string                 // workflowID -> prompt
 	workflowMetaCalls      int                               // GetWorkflowMeta invocations
 	workflowMetaErr        error                             // optional error from GetWorkflowMeta
+	workflowMetaMu         sync.Mutex                        // guards workflowMetaCalls for concurrent tests
 }
 
 func newMockStepGetter() *mockStepGetter {
@@ -84,7 +85,9 @@ func (m *mockStepGetter) GetPreviousStepByPosition(_ context.Context, workflowID
 }
 
 func (m *mockStepGetter) GetWorkflowMeta(_ context.Context, workflowID string) (WorkflowMeta, error) {
+	m.workflowMetaMu.Lock()
 	m.workflowMetaCalls++
+	m.workflowMetaMu.Unlock()
 	if m.workflowMetaErr != nil {
 		return WorkflowMeta{}, m.workflowMetaErr
 	}
@@ -96,6 +99,12 @@ func (m *mockStepGetter) GetWorkflowMeta(_ context.Context, workflowID string) (
 		AgentProfileID: m.workflowAgentProfileID,
 		Prompt:         prompt,
 	}, nil
+}
+
+func (m *mockStepGetter) metaCalls() int {
+	m.workflowMetaMu.Lock()
+	defer m.workflowMetaMu.Unlock()
+	return m.workflowMetaCalls
 }
 
 // mockTaskRepo implements scheduler.TaskRepository for testing.

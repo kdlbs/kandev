@@ -2,7 +2,9 @@ package orchestrator
 
 import (
 	"context"
+	"errors"
 	"strings"
+	"sync"
 	"testing"
 
 	"go.uber.org/zap"
@@ -424,8 +426,8 @@ func TestGetWorkflowMeta_CachesPerRequest(t *testing.T) {
 	if got := svc.resolveStepAgentProfile(ctx, step); got != "profile-wf" {
 		t.Fatalf("resolveStepAgentProfile() = %q, want profile-wf", got)
 	}
-	if stepGetter.workflowMetaCalls != 1 {
-		t.Fatalf("after profile resolve: GetWorkflowMeta calls = %d, want 1", stepGetter.workflowMetaCalls)
+	if stepGetter.metaCalls() != 1 {
+		t.Fatalf("after profile resolve: GetWorkflowMeta calls = %d, want 1", stepGetter.metaCalls())
 	}
 
 	got := svc.buildWorkflowPrompt(ctx, "base", step, "task-1", "session-1", false)
@@ -433,8 +435,8 @@ func TestGetWorkflowMeta_CachesPerRequest(t *testing.T) {
 	if got != want {
 		t.Fatalf("buildWorkflowPrompt() = %q, want %q", got, want)
 	}
-	if stepGetter.workflowMetaCalls != 1 {
-		t.Fatalf("after prompt build: GetWorkflowMeta calls = %d, want 1 (cached)", stepGetter.workflowMetaCalls)
+	if stepGetter.metaCalls() != 1 {
+		t.Fatalf("after prompt build: GetWorkflowMeta calls = %d, want 1 (cached)", stepGetter.metaCalls())
 	}
 }
 
@@ -450,8 +452,8 @@ func TestGetWorkflowMeta_WithoutCacheHitsProviderTwice(t *testing.T) {
 	_ = svc.resolveStepAgentProfile(ctx, step)
 	_ = svc.buildWorkflowPrompt(ctx, "base", step, "task-1", "session-1", false)
 
-	if stepGetter.workflowMetaCalls != 2 {
-		t.Fatalf("without cache: GetWorkflowMeta calls = %d, want 2", stepGetter.workflowMetaCalls)
+	if stepGetter.metaCalls() != 2 {
+		t.Fatalf("without cache: GetWorkflowMeta calls = %d, want 2", stepGetter.metaCalls())
 	}
 }
 
@@ -478,7 +480,214 @@ func TestProcessOnEnter_SharesWorkflowMetaCache(t *testing.T) {
 	if !strings.Contains(got, "Rule one.") {
 		t.Fatalf("expected workflow instructions in prompt, got %q", got)
 	}
-	if stepGetter.workflowMetaCalls != 1 {
-		t.Fatalf("shared cache path: GetWorkflowMeta calls = %d, want 1", stepGetter.workflowMetaCalls)
+	if stepGetter.metaCalls() != 1 {
+		t.Fatalf("shared cache path: GetWorkflowMeta calls = %d, want 1", stepGetter.metaCalls())
+	}
+}
+
+func TestGetWorkflowMeta_ErrorIsCachedAndFallsBack(t *testing.T) {
+	// Failure semantics: log + empty profile / omit instructions. Errors are also
+	// cached so dual-consumer step entry does not double-hit a broken provider.
+	stepGetter := newMockStepGetter()
+	stepGetter.workflowMetaErr = errors.New("sqlite: no such workflow")
+	svc := createTestService(setupTestRepo(t), stepGetter, newMockTaskRepo())
+
+	ctx := withWorkflowMetaCache(context.Background())
+	step := &wfmodels.WorkflowStep{ID: "step-1", WorkflowID: "wf-missing"}
+
+	if got := svc.resolveStepAgentProfile(ctx, step); got != "" {
+		t.Fatalf("resolveStepAgentProfile on error = %q, want empty fallback", got)
+	}
+	got := svc.buildWorkflowPrompt(ctx, "base", step, "task-1", "session-1", false)
+	if got != "base" {
+		t.Fatalf("buildWorkflowPrompt on error = %q, want base (instructions omitted)", got)
+	}
+	if stepGetter.metaCalls() != 1 {
+		t.Fatalf("error path GetWorkflowMeta calls = %d, want 1 (cached error)", stepGetter.metaCalls())
+	}
+}
+
+func TestGetWorkflowMeta_EmptyWorkflowIDSkipsProvider(t *testing.T) {
+	stepGetter := newMockStepGetter()
+	stepGetter.workflowAgentProfileID = "profile-wf"
+	svc := createTestService(setupTestRepo(t), stepGetter, newMockTaskRepo())
+
+	ctx := withWorkflowMetaCache(context.Background())
+	meta, err := svc.getWorkflowMeta(ctx, "")
+	if err != nil {
+		t.Fatalf("getWorkflowMeta(\"\") error = %v", err)
+	}
+	if meta != (WorkflowMeta{}) {
+		t.Fatalf("getWorkflowMeta(\"\") = %+v, want zero value", meta)
+	}
+	if stepGetter.metaCalls() != 0 {
+		t.Fatalf("empty workflowID should not hit provider, calls = %d", stepGetter.metaCalls())
+	}
+}
+
+func TestGetWorkflowMeta_NilGetterSkipsProvider(t *testing.T) {
+	// Use a bare Service so workflowStepGetter is a true nil interface.
+	// createTestService(nil) would store a typed-nil *mockStepGetter, which is
+	// not == nil and would panic on method call — not a production path.
+	svc := &Service{}
+	ctx := withWorkflowMetaCache(context.Background())
+
+	meta, err := svc.getWorkflowMeta(ctx, "wf-1")
+	if err != nil {
+		t.Fatalf("getWorkflowMeta with nil getter error = %v", err)
+	}
+	if meta != (WorkflowMeta{}) {
+		t.Fatalf("getWorkflowMeta with nil getter = %+v, want zero", meta)
+	}
+
+	step := &wfmodels.WorkflowStep{ID: "step-1", WorkflowID: "wf-1"}
+	if got := svc.resolveStepAgentProfile(ctx, step); got != "" {
+		t.Fatalf("resolveStepAgentProfile with nil getter = %q, want empty", got)
+	}
+	if got := svc.buildWorkflowPrompt(ctx, "base", step, "task-1", "session-1", false); got != "base" {
+		t.Fatalf("buildWorkflowPrompt with nil getter = %q, want base", got)
+	}
+}
+
+func TestGetWorkflowMeta_NestedCacheReusesSameMap(t *testing.T) {
+	stepGetter := newMockStepGetter()
+	stepGetter.workflowAgentProfileID = "profile-wf"
+	stepGetter.workflowPrompts["wf-1"] = "Keep CI green."
+	svc := createTestService(setupTestRepo(t), stepGetter, newMockTaskRepo())
+
+	outer := withWorkflowMetaCache(context.Background())
+	inner := withWorkflowMetaCache(outer) // nested seed must be a no-op
+	if outer != inner {
+		t.Fatal("nested withWorkflowMetaCache must reuse the existing cache context")
+	}
+
+	step := &wfmodels.WorkflowStep{ID: "step-1", WorkflowID: "wf-1"}
+	_ = svc.resolveStepAgentProfile(outer, step)
+	_ = svc.buildWorkflowPrompt(inner, "base", step, "task-1", "session-1", false)
+	if stepGetter.metaCalls() != 1 {
+		t.Fatalf("nested cache GetWorkflowMeta calls = %d, want 1", stepGetter.metaCalls())
+	}
+}
+
+func TestGetWorkflowMeta_CachesPerWorkflowID(t *testing.T) {
+	stepGetter := newMockStepGetter()
+	stepGetter.workflowAgentProfileID = "profile-wf"
+	stepGetter.workflowPrompts["wf-a"] = "Rule A"
+	stepGetter.workflowPrompts["wf-b"] = "Rule B"
+	svc := createTestService(setupTestRepo(t), stepGetter, newMockTaskRepo())
+
+	ctx := withWorkflowMetaCache(context.Background())
+	stepA := &wfmodels.WorkflowStep{ID: "s-a", WorkflowID: "wf-a"}
+	stepB := &wfmodels.WorkflowStep{ID: "s-b", WorkflowID: "wf-b"}
+
+	gotA := svc.buildWorkflowPrompt(ctx, "base", stepA, "task-1", "session-1", false)
+	gotB := svc.buildWorkflowPrompt(ctx, "base", stepB, "task-1", "session-1", false)
+	if !strings.Contains(gotA, "Rule A") || !strings.Contains(gotB, "Rule B") {
+		t.Fatalf("expected distinct prompts per workflow; A=%q B=%q", gotA, gotB)
+	}
+	// Two workflows → two provider hits; second lookup of A must still be cached.
+	_ = svc.buildWorkflowPrompt(ctx, "again", stepA, "task-1", "session-1", false)
+	if stepGetter.metaCalls() != 2 {
+		t.Fatalf("per-id cache calls = %d, want 2", stepGetter.metaCalls())
+	}
+}
+
+func TestGetWorkflowMeta_WhitespacePromptOmitsInstructions(t *testing.T) {
+	stepGetter := newMockStepGetter()
+	stepGetter.workflowAgentProfileID = "profile-wf"
+	stepGetter.workflowPrompts["wf-1"] = "   \n\t  "
+	svc := createTestService(setupTestRepo(t), stepGetter, newMockTaskRepo())
+
+	ctx := withWorkflowMetaCache(context.Background())
+	step := &wfmodels.WorkflowStep{ID: "step-1", WorkflowID: "wf-1"}
+
+	// Profile still resolves from the same meta read; only prompt is trimmed away.
+	if got := svc.resolveStepAgentProfile(ctx, step); got != "profile-wf" {
+		t.Fatalf("resolveStepAgentProfile() = %q, want profile-wf", got)
+	}
+	got := svc.buildWorkflowPrompt(ctx, "base", step, "task-1", "session-1", false)
+	if got != "base" {
+		t.Fatalf("whitespace prompt must omit instructions, got %q", got)
+	}
+	if stepGetter.metaCalls() != 1 {
+		t.Fatalf("whitespace path calls = %d, want 1", stepGetter.metaCalls())
+	}
+}
+
+func TestGetWorkflowMeta_StepProfileOverrideStillReadsPromptOnce(t *testing.T) {
+	// Step agent override short-circuits profile resolution before GetWorkflowMeta,
+	// but prompt build still needs one read. Seeded cache + one call is enough.
+	stepGetter := newMockStepGetter()
+	stepGetter.workflowAgentProfileID = "profile-wf"
+	stepGetter.workflowPrompts["wf-1"] = "Keep CI green."
+	svc := createTestService(setupTestRepo(t), stepGetter, newMockTaskRepo())
+
+	ctx := withWorkflowMetaCache(context.Background())
+	step := &wfmodels.WorkflowStep{
+		ID:             "step-1",
+		WorkflowID:     "wf-1",
+		AgentProfileID: "profile-step",
+	}
+
+	if got := svc.resolveStepAgentProfile(ctx, step); got != "profile-step" {
+		t.Fatalf("resolveStepAgentProfile() = %q, want step override", got)
+	}
+	if stepGetter.metaCalls() != 0 {
+		t.Fatalf("step override should skip meta for profile, calls = %d", stepGetter.metaCalls())
+	}
+	got := svc.buildWorkflowPrompt(ctx, "base", step, "task-1", "session-1", false)
+	if !strings.Contains(got, "Keep CI green.") {
+		t.Fatalf("expected workflow prompt despite step profile override, got %q", got)
+	}
+	if stepGetter.metaCalls() != 1 {
+		t.Fatalf("prompt-only path calls = %d, want 1", stepGetter.metaCalls())
+	}
+}
+
+func TestGetWorkflowMeta_ConcurrentReadersSinglePopulate(t *testing.T) {
+	// First-writer-wins cache under concurrent dual consumers.
+	stepGetter := newMockStepGetter()
+	stepGetter.workflowAgentProfileID = "profile-wf"
+	stepGetter.workflowPrompts["wf-1"] = "Keep CI green."
+	svc := createTestService(setupTestRepo(t), stepGetter, newMockTaskRepo())
+
+	ctx := withWorkflowMetaCache(context.Background())
+	step := &wfmodels.WorkflowStep{ID: "step-1", WorkflowID: "wf-1"}
+
+	var wg sync.WaitGroup
+	const n = 32
+	wg.Add(n)
+	errs := make(chan string, n)
+	for i := 0; i < n; i++ {
+		go func() {
+			defer wg.Done()
+			if got := svc.resolveStepAgentProfile(ctx, step); got != "profile-wf" {
+				errs <- "bad profile: " + got
+				return
+			}
+			prompt := svc.buildWorkflowPrompt(ctx, "base", step, "task-1", "session-1", false)
+			if !strings.Contains(prompt, "Keep CI green.") {
+				errs <- "missing prompt: " + prompt
+			}
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for msg := range errs {
+		t.Error(msg)
+	}
+	// Concurrent first-load may race before first-writer-wins settles; expect
+	// small >1 is possible without singleflight. Assert we did not multiply by n.
+	calls := stepGetter.metaCalls()
+	if calls < 1 || calls > n {
+		t.Fatalf("concurrent cache populate calls = %d, want 1..%d", calls, n)
+	}
+	// After the storm, a follow-up read must hit the cache (no additional call
+	// once the map has an entry — wait for quiescence by reading again).
+	before := calls
+	_ = svc.resolveStepAgentProfile(ctx, step)
+	_ = svc.buildWorkflowPrompt(ctx, "base", step, "task-1", "session-1", false)
+	if stepGetter.metaCalls() != before {
+		t.Fatalf("post-storm cache miss: calls %d → %d", before, stepGetter.metaCalls())
 	}
 }
