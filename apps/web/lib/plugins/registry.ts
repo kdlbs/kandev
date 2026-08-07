@@ -14,6 +14,7 @@ import { useSyncExternalStore } from "react";
 import type {
   NavItem,
   PluginRegistry,
+  PluginTaskFilterRegistrationKey,
   PluginRouteOptions,
   SlotComponent,
   TaskFilterRegistration,
@@ -94,7 +95,7 @@ export interface PluginTaskFilterRegistration extends TaskFilterRegistration {
 /** Stable UI/state identity for plugin-local task filter ids. */
 export function pluginTaskFilterRegistrationKey(
   registration: Pick<PluginTaskFilterRegistration, "pluginId" | "id">,
-): string {
+): PluginTaskFilterRegistrationKey {
   return `${registration.pluginId}:${registration.id}`;
 }
 

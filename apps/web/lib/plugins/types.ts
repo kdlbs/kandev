@@ -184,6 +184,9 @@ export interface PluginTaskFilterOption {
   color?: string;
 }
 
+/** Stable host identity for a plugin task filter (`pluginId:id`). */
+export type PluginTaskFilterRegistrationKey = `${string}:${string}`;
+
 /**
  * Registration accepted by `PluginRegistry.registerTaskFilter`: contributes
  * a filter section to the kanban board's Workflow/Repository filter
@@ -192,7 +195,7 @@ export interface PluginTaskFilterOption {
  * backend query for this filter.
  */
 export interface TaskFilterRegistration {
-  /** Plugin-local filter id (unique within the plugin, not globally). */
+  /** Plugin-local filter id; the host namespaces it as `pluginId:id`. */
   id: string;
   /** Filter section label shown in the dropdown. */
   label: string;

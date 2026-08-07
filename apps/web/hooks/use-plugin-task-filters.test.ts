@@ -52,6 +52,22 @@ describe("usePluginTaskFilters", () => {
 
     expect(result.current.filters).toEqual([]);
   });
+
+  it("keeps the matching callback stable when the registry is unchanged", () => {
+    pluginRegistry.forPlugin(PLUGIN_ID).registerTaskFilter({
+      id: "tags",
+      label: "Tags",
+      getOptions: () => [],
+      matches: () => true,
+    });
+
+    const { result, rerender } = renderHook(() => usePluginTaskFilters());
+    const initialMatcher = result.current.taskMatchesPluginFilters;
+
+    rerender();
+
+    expect(result.current.taskMatchesPluginFilters).toBe(initialMatcher);
+  });
 });
 
 describe("usePluginTaskFilters matching", () => {

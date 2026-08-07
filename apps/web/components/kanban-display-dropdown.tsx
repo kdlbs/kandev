@@ -18,7 +18,7 @@ import {
 } from "@/lib/plugins/registry";
 import type { Repository } from "@/lib/types/http";
 import type { WorkflowsState } from "@/lib/state/slices";
-import type { ComponentProps } from "react";
+import { useMemo, type ComponentProps } from "react";
 import { useTranslation } from "react-i18next";
 import { getRepositoryPlaceholderKey } from "@/lib/kanban/repository-placeholder";
 
@@ -108,26 +108,28 @@ function RepositorySection({
 
 function PluginFilterSection({
   filter,
+  filterKey,
   selected,
   onChange,
 }: {
   filter: PluginTaskFilterRegistration;
+  filterKey: string;
   selected: string[];
   onChange: (values: string[]) => void;
 }) {
-  const options = filter.getOptions();
+  const options = useMemo(() => filter.getOptions(), [filter]);
   const toggleOption = (value: string, checked: boolean) => {
     onChange(checked ? [...selected, value] : selected.filter((v) => v !== value));
   };
 
   return (
-    <div className="space-y-1.5" data-testid={`display-plugin-filter-${filter.id}`}>
+    <div className="space-y-1.5" data-testid={`display-plugin-filter-${filterKey}`}>
       <DropdownMenuLabel className="px-0 text-foreground">{filter.label}</DropdownMenuLabel>
       <div className="space-y-1">
         {options.map((option) => (
           <label key={option.value} className="flex items-center gap-2 cursor-pointer">
             <Checkbox
-              data-testid={`display-plugin-filter-${filter.id}-option-${option.value}`}
+              data-testid={`display-plugin-filter-${filterKey}-option-${option.value}`}
               checked={selected.includes(option.value)}
               onCheckedChange={(checked) => toggleOption(option.value, checked === true)}
             />
@@ -254,18 +256,20 @@ export function KanbanDisplayDropdown({
             repositoriesLoading={repositoriesLoading}
             onRepositoryChange={onRepositoryChange}
           />
-          {pluginFilters?.map((filter) => (
-            <div key={pluginTaskFilterRegistrationKey(filter)} className="contents">
-              <DropdownMenuSeparator />
-              <PluginFilterSection
-                filter={filter}
-                selected={pluginFilterSelections?.[pluginTaskFilterRegistrationKey(filter)] ?? []}
-                onChange={(values) =>
-                  onPluginFilterChange?.(pluginTaskFilterRegistrationKey(filter), values)
-                }
-              />
-            </div>
-          ))}
+          {pluginFilters?.map((filter) => {
+            const filterKey = pluginTaskFilterRegistrationKey(filter);
+            return (
+              <div key={filterKey} className="contents">
+                <DropdownMenuSeparator />
+                <PluginFilterSection
+                  filter={filter}
+                  filterKey={filterKey}
+                  selected={pluginFilterSelections?.[filterKey] ?? []}
+                  onChange={(values) => onPluginFilterChange?.(filterKey, values)}
+                />
+              </div>
+            );
+          })}
           <DropdownMenuSeparator />
           <PreviewPanelSection
             enablePreviewOnClick={enablePreviewOnClick}

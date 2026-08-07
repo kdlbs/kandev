@@ -1,5 +1,5 @@
-import { useCallback, useSyncExternalStore } from "react";
-import { pluginTaskFilterRegistrationKey, usePluginRegistry } from "@/lib/plugins/registry";
+import { useCallback, useMemo, useSyncExternalStore } from "react";
+import { pluginRegistry, pluginTaskFilterRegistrationKey } from "@/lib/plugins/registry";
 import type { PluginTaskFilterContext } from "@/lib/plugins/types";
 
 /** Selected option values, keyed by owning plugin plus `TaskFilterRegistration.id`. */
@@ -59,14 +59,18 @@ export function resetPluginTaskFilterSelectionsForTests(): void {
  * component updates a selection via `setFilterSelection`.
  */
 export function usePluginTaskFilters() {
-  const registry = usePluginRegistry();
+  const registryVersion = useSyncExternalStore(
+    pluginRegistry.subscribe,
+    pluginRegistry.getVersion,
+    pluginRegistry.getVersion,
+  );
   const selections = useSyncExternalStore(
     pluginTaskFilterStore.subscribe,
     pluginTaskFilterStore.getSelections,
     pluginTaskFilterStore.getSelections,
   );
 
-  const filters = registry.getTaskFilters();
+  const filters = useMemo(() => pluginRegistry.getTaskFilters(), [registryVersion]);
 
   const setFilterSelection = useCallback((filterKey: string, values: string[]) => {
     pluginTaskFilterStore.setFilterSelection(filterKey, values);
