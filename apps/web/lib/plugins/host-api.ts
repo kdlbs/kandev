@@ -64,7 +64,7 @@ import { Switch } from "@kandev/ui/switch";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@kandev/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@kandev/ui/tabs";
 import { Textarea } from "@kandev/ui/textarea";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@kandev/ui/tooltip";
 import { Combobox } from "@/components/combobox";
 import { RichTextEditor, RichTextReadOnly } from "@/components/editors/tiptap/rich-text-editor";
 import { PageTopbar } from "@/components/page-topbar";
@@ -74,6 +74,7 @@ import { generateUUID } from "@/lib/utils";
 import { softNavigate } from "@/lib/routing/client-router";
 import type { AppState } from "@/lib/state/store";
 import { pluginModalManager } from "./modal-manager";
+import { readResolvedTheme, subscribeToThemeChanges } from "./theme";
 import { composeWriterId, subscribeToUserStateChanges } from "./user-state-sync";
 import {
   PluginStorageConflictError,
@@ -159,6 +160,11 @@ const PLUGIN_UI: Record<string, unknown> = {
   Textarea,
   Tooltip,
   TooltipContent,
+  // The host already wraps plugin routes, slots, and `openModal` content in a
+  // TooltipProvider, so a plain Tooltip works without one. This is exported
+  // for plugins that want their own `delayDuration`/`skipDelayDuration` for a
+  // dense cluster of tooltips — nesting a provider is supported by Radix.
+  TooltipProvider,
   TooltipTrigger,
   // App UI (not shadcn primitives), exposed so plugins compose kandev-native
   // surfaces instead of re-implementing them:
@@ -212,11 +218,7 @@ function effectiveWriterId(surfaceId: string | undefined): string {
   return composeWriterId(TAB_WRITER_ID, surfaceId);
 }
 
-export function buildHostApi(
-  pluginId: string,
-  storeApi: StoreApi<AppState>,
-  theme: "light" | "dark",
-): PluginHostApi {
+export function buildHostApi(pluginId: string, storeApi: StoreApi<AppState>): PluginHostApi {
   return {
     pluginId,
     React,
@@ -235,7 +237,14 @@ export function buildHostApi(
       },
     },
     ui: PLUGIN_UI,
-    theme,
+    // Getter, not a value captured at boot: a plugin built once at page load
+    // would otherwise read the boot-time theme forever, and one that paints
+    // imperatively (canvas, inline SVG colors) could never follow a
+    // light/dark switch without a full reload.
+    get theme() {
+      return readResolvedTheme();
+    },
+    onThemeChange: (listener) => subscribeToThemeChanges(listener),
     navigate: (href, options) => softNavigate(href, options?.replace ? "replace" : "push"),
     openModal: (options) => pluginModalManager.openModal(pluginId, options),
     storage: buildStorageApi(pluginId),

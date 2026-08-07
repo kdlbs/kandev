@@ -34,6 +34,7 @@ function makeHostFactory(pluginId: string): PluginHostApi {
     api: { fetch: async () => new Response(), baseUrl: "" },
     ui: {},
     theme: "light",
+    onThemeChange: () => () => {},
     navigate: () => {},
     openModal: () => ({ close: () => {} }),
     storage: {

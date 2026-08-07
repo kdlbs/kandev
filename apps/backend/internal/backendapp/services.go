@@ -139,6 +139,11 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 	workflowSyncSvc := initWorkflowSyncService(dbPool, githubSvc, gitlabSvc, workflowSvc, taskSvc, log)
 	pluginsSvc := initPluginsService(cfg, dbPool, eventBus, repos.Secrets, log)
 	if pluginsSvc != nil {
+		// The ldflags-injected build version, so Install can enforce a
+		// package's manifest.min_kandev_version. This is the only production
+		// caller; without it the check stays a no-op. An un-stamped local
+		// build passes "dev", which the service treats as "don't enforce".
+		pluginsSvc.SetKandevVersion(version)
 		pluginsSvc.SetDataSources(taskSvc, taskSvc, workflowSvc, agentSettingsController, analyticsservice.New(repos.Analytics), taskSvc, pluginsTaskWriterAdapter{svc: taskSvc})
 	}
 	shareHTTP := initShareHandlers(dbPool, repos.Task, githubSvc, log, version)

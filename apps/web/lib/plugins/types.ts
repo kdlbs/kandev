@@ -376,7 +376,22 @@ export interface PluginHostApi {
    * `lib/plugins/host-api.ts` for the full list.
    */
   ui: Record<string, unknown>;
-  theme: "light" | "dark";
+  /**
+   * The resolved light/dark theme, read live on every access — a plugin's
+   * `host` object is built once, so this must not be captured into a local
+   * variable that outlives a render if you want it to stay current.
+   * Components that read it during render re-read it on every re-render;
+   * anything that paints imperatively (canvas, inline SVG colors) should pair
+   * it with `onThemeChange`.
+   */
+  readonly theme: "light" | "dark";
+  /**
+   * Subscribes to light/dark changes — the settings picker, its live preview,
+   * and an OS `prefers-color-scheme` flip while the app is on "system".
+   * Returns an unsubscribe function; call it on teardown (component unmount,
+   * `KandevPlugin.destroy`) or the listener outlives the surface that owns it.
+   */
+  onThemeChange(listener: (theme: "light" | "dark") => void): () => void;
   /** Soft SPA navigation (history push/replace + re-render), same as the app's router. */
   navigate(href: string, options?: { replace?: boolean }): void;
   /**

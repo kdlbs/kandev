@@ -57,7 +57,16 @@ interface PluginHostApi {
     baseUrl: string;
   };
   ui: Record<string, unknown>;              // curated @kandev/ui components + app UI (see below)
-  theme: "light" | "dark";
+  // The resolved light/dark theme, read live on every access. `host` is built
+  // once per plugin load, so copying this into a variable that outlives a
+  // render freezes it; read it during render, and pair it with onThemeChange
+  // for anything that paints imperatively (canvas, inline SVG colors).
+  readonly theme: "light" | "dark";
+  // Fires on every light/dark change — the settings picker, its live preview,
+  // and an OS prefers-color-scheme flip while the app is set to "system".
+  // Returns an unsubscribe function; call it on teardown (component unmount,
+  // KandevPlugin.destroy) or the listener outlives the surface that owns it.
+  onThemeChange(listener: (theme: "light" | "dark") => void): () => void;
   // Soft SPA navigation (history push/replace + SPA re-render) — same code
   // path as the app router, so plugin pages can link into native routes
   // (e.g. /t/{taskId}) without a full reload.
@@ -156,7 +165,7 @@ interface PluginModalHandle {
 `host.ui` contents: shadcn primitives (Alert*, Badge, Button, Card*, Checkbox,
 Dialog*, DropdownMenu*, Input, Label, Pagination*, ScrollArea, Select*,
 Separator, Sheet*, Skeleton, Spinner, Switch, Table*, Tabs*, Textarea,
-Tooltip*) plus first-party app UI: `PageTopbar` (the kandev title bar, for
+Tooltip*, including `TooltipProvider`) plus first-party app UI: `PageTopbar` (the kandev title bar, for
 routes that opt out of the default chrome and own their layout),
 `TaskCreateDialog` (kandev's real create-task modal, prefilled via
 `initialValues`), `Combobox` (the app's Command+Popover picker), and
@@ -168,6 +177,12 @@ Plugins must use these host instances — bundling copies of anything
 Radix/portal/context-based would split React context across instances and
 break refs/`asChild`. Pure-React libs (e.g. `@tabler/icons-react`) bundle
 fine.
+
+The host wraps plugin routes, slots, and `openModal` content in a
+`TooltipProvider`, so a plain `Tooltip` works anywhere without one.
+`TooltipProvider` is exported for plugins that want their own
+`delayDuration`/`skipDelayDuration` over a dense cluster of tooltips; Radix
+supports nesting it.
 
 ### `host.ui.RichTextEditor` / `host.ui.RichTextReadOnly`
 
