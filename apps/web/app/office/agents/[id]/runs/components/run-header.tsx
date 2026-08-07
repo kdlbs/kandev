@@ -13,6 +13,7 @@ import { Button } from "@kandev/ui/button";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import type { RunDetail } from "@/lib/api/domains/office-extended-api";
 import { formatDollars } from "@/lib/utils";
+import { useTranslation } from "react-i18next";
 
 type Props = {
   run: RunDetail;
@@ -87,6 +88,7 @@ export function RunHeader({ run }: Props) {
 // per-attempt panel lives in route-attempt-list and is not duplicated
 // here; this strip just calls out resolved vs intended + block state.
 function RoutingStrip({ routing }: { routing?: RunDetail["routing"] }) {
+  const { t } = useTranslation();
   if (!routing) return null;
   const resolved = routing.resolved_provider_id ?? "";
   const intended = routing.logical_provider_order?.[0] ?? "";
@@ -96,7 +98,9 @@ function RoutingStrip({ routing }: { routing?: RunDetail["routing"] }) {
     <div className="space-y-1 text-xs" data-testid="run-routing-strip">
       {resolved !== "" && (
         <div className="flex items-center gap-2 flex-wrap" data-testid="run-routing-resolved">
-          <span className="text-muted-foreground uppercase tracking-wide">Resolved</span>
+          <span className="text-muted-foreground uppercase tracking-wide">
+            {t("office:resolved")}
+          </span>
           <span className="font-mono">
             {resolved}
             {routing.resolved_model ? ` · ${routing.resolved_model}` : ""}
@@ -105,7 +109,9 @@ function RoutingStrip({ routing }: { routing?: RunDetail["routing"] }) {
       )}
       {fellBack && (
         <div className="flex items-center gap-2 flex-wrap" data-testid="run-routing-intended">
-          <span className="text-muted-foreground uppercase tracking-wide">Intended</span>
+          <span className="text-muted-foreground uppercase tracking-wide">
+            {t("office:intended")}
+          </span>
           <span className="font-mono">{intended}</span>
         </div>
       )}
@@ -115,17 +121,19 @@ function RoutingStrip({ routing }: { routing?: RunDetail["routing"] }) {
 }
 
 function RoutingBlockBadge({ status, retryAt }: { status: string; retryAt?: string }) {
+  const { t } = useTranslation();
   if (status === "blocked_provider_action_required") {
     return (
       <Badge variant="destructive" data-testid="run-routing-blocked">
-        Blocked — action required
+        {t("office:blockedActionRequired")}
       </Badge>
     );
   }
   if (status === "waiting_for_provider_capacity") {
     return (
       <Badge variant="secondary" data-testid="run-routing-waiting">
-        Waiting for capacity{retryAt ? ` · retry ${retryAt}` : ""}
+        {t("office:waitingForCapacity")}
+        {retryAt ? t("office:retryAtSuffix", { retryAt }) : ""}
       </Badge>
     );
   }
@@ -150,25 +158,30 @@ function TopRow({ run }: { run: RunDetail }) {
 }
 
 function StatsGrid({ run }: { run: RunDetail }) {
+  const { t } = useTranslation();
   return (
     <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
       <div>
-        <div className="text-xs text-muted-foreground uppercase tracking-wider">Started</div>
+        <div className="text-xs text-muted-foreground uppercase tracking-wider">
+          {t("office:started")}
+        </div>
         <div data-testid="run-started-at">{run.claimed_at || run.requested_at}</div>
       </div>
       <div>
-        <div className="text-xs text-muted-foreground uppercase tracking-wider">Finished</div>
+        <div className="text-xs text-muted-foreground uppercase tracking-wider">
+          {t("office:finished")}
+        </div>
         <div data-testid="run-finished-at">{run.finished_at || "—"}</div>
       </div>
       <div>
         <div className="text-xs text-muted-foreground uppercase tracking-wider flex items-center gap-1">
-          <IconClock className="h-3 w-3" /> Duration
+          <IconClock className="h-3 w-3" /> {t("office:duration")}
         </div>
         <div data-testid="run-duration">{formatDuration(run.duration_ms)}</div>
       </div>
       <div>
         <div className="text-xs text-muted-foreground uppercase tracking-wider flex items-center gap-1">
-          <IconCoin className="h-3 w-3" /> Cost
+          <IconCoin className="h-3 w-3" /> {t("office:cost")}
         </div>
         <div data-testid="run-cost">{formatCostSubcents(run.costs.cost_subcents)}</div>
       </div>
@@ -177,16 +190,19 @@ function StatsGrid({ run }: { run: RunDetail }) {
 }
 
 function TokensRow({ run }: { run: RunDetail }) {
+  const { t } = useTranslation();
   return (
     <div className="flex items-center gap-4 text-xs text-muted-foreground" data-testid="run-tokens">
       <span>
-        <span className="font-medium">In:</span> {formatTokens(run.costs.input_tokens)}
+        <span className="font-medium">{t("office:in")}</span> {formatTokens(run.costs.input_tokens)}
       </span>
       <span>
-        <span className="font-medium">Out:</span> {formatTokens(run.costs.output_tokens)}
+        <span className="font-medium">{t("office:out")}</span>{" "}
+        {formatTokens(run.costs.output_tokens)}
       </span>
       <span>
-        <span className="font-medium">Cached:</span> {formatTokens(run.costs.cached_tokens)}
+        <span className="font-medium">{t("office:cached")}</span>{" "}
+        {formatTokens(run.costs.cached_tokens)}
       </span>
     </div>
   );
@@ -214,6 +230,7 @@ type ActionBarProps = {
 };
 
 function ActionBar({ runId, sessionId, isRunning, isFailed }: ActionBarProps) {
+  const { t } = useTranslation();
   const handleRecover = async (action: "resume" | "fresh_start") => {
     const client = getWebSocketClient();
     if (!client || !runId || !sessionId) return;
@@ -248,7 +265,7 @@ function ActionBar({ runId, sessionId, isRunning, isFailed }: ActionBarProps) {
           className="cursor-pointer gap-1.5"
           data-testid="run-cancel-button"
         >
-          <IconPlayerStop className="h-3.5 w-3.5" /> Cancel
+          <IconPlayerStop className="h-3.5 w-3.5" /> {t("common:cancel")}
         </Button>
       )}
       {isFailed && sessionId && (
@@ -260,7 +277,7 @@ function ActionBar({ runId, sessionId, isRunning, isFailed }: ActionBarProps) {
             className="cursor-pointer gap-1.5"
             data-testid="run-resume-button"
           >
-            <IconRefresh className="h-3.5 w-3.5" /> Resume session
+            <IconRefresh className="h-3.5 w-3.5" /> {t("office:resumeSession")}
           </Button>
           <Button
             variant="outline"
@@ -269,7 +286,7 @@ function ActionBar({ runId, sessionId, isRunning, isFailed }: ActionBarProps) {
             className="cursor-pointer gap-1.5"
             data-testid="run-fresh-start-button"
           >
-            <IconPlayerPlay className="h-3.5 w-3.5" /> Start fresh
+            <IconPlayerPlay className="h-3.5 w-3.5" /> {t("office:startFreshSentence")}
           </Button>
         </>
       )}

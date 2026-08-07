@@ -165,6 +165,16 @@ func (s *Service) GetWorkflowAgentProfileID(ctx context.Context, workflowID stri
 	return wf.AgentProfileID, nil
 }
 
+// GetWorkflowPrompt returns the optional workflow-level agent instructions.
+// Empty string means the workflow has no prompt configured.
+func (s *Service) GetWorkflowPrompt(ctx context.Context, workflowID string) (string, error) {
+	wf, err := s.workflowProvider.GetWorkflow(ctx, workflowID)
+	if err != nil {
+		return "", err
+	}
+	return wf.Prompt, nil
+}
+
 // GetPreviousStepByPosition returns the previous step before the given position for a workflow.
 // Returns nil if there is no previous step (i.e., current step is the first one).
 func (s *Service) GetPreviousStepByPosition(ctx context.Context, workflowID string, currentPosition int) (*models.WorkflowStep, error) {
@@ -554,13 +564,21 @@ func (s *Service) importSingleWorkflow(ctx context.Context, workspaceID string, 
 		return nil, fmt.Errorf("create workflow: %w", err)
 	}
 
+	needsUpdate := false
 	// Match workflow-level agent profile if present.
 	if pw.AgentProfile != nil && s.matchProfile != nil {
 		if profileID := s.matchProfile(pw.AgentProfile.AgentName, pw.AgentProfile.Model, pw.AgentProfile.Mode); profileID != "" {
 			wf.AgentProfileID = profileID
-			if err := s.workflowProvider.UpdateWorkflow(ctx, wf); err != nil {
-				return nil, fmt.Errorf("set workflow agent profile: %w", err)
-			}
+			needsUpdate = true
+		}
+	}
+	if pw.Prompt != "" {
+		wf.Prompt = pw.Prompt
+		needsUpdate = true
+	}
+	if needsUpdate {
+		if err := s.workflowProvider.UpdateWorkflow(ctx, wf); err != nil {
+			return nil, fmt.Errorf("set workflow fields: %w", err)
 		}
 	}
 

@@ -4,6 +4,11 @@ import { useAppStore } from "@/components/state-provider";
 import { listTasks, type ListTasksParams } from "@/lib/api/domains/office-extended-api";
 import type { TaskFilterState, TaskSortDir, TaskSortField } from "@/lib/state/slices/office/types";
 import { canonicalStatusesToBackend } from "./normalize-status";
+// Module-level `t` (resolved at call time, not import time): these strings are
+// error-only and live inside a fetching effect and its callbacks. Putting the
+// hook's `t` in those dep arrays would re-issue the task list request on every
+// locale switch.
+import { t } from "@/lib/i18n";
 
 const DEFAULT_PAGE_LIMIT = 200;
 
@@ -118,7 +123,8 @@ export function usePaginatedTasks(
         setPage({ cursor: res.next_cursor || undefined, id: res.next_id || undefined, key });
       })
       .catch((err) => {
-        if (!cancelled) toast.error(err instanceof Error ? err.message : "Failed to load tasks");
+        if (!cancelled)
+          toast.error(err instanceof Error ? err.message : t("office:failedToLoadTasks"));
       })
       .finally(() => {
         if (!cancelled) setTasksLoading(false);
@@ -144,7 +150,7 @@ export function usePaginatedTasks(
         });
       })
       .catch((err) => {
-        toast.error(err instanceof Error ? err.message : "Failed to load more tasks");
+        toast.error(err instanceof Error ? err.message : t("office:failedToLoadMoreTasks"));
       })
       .finally(() => setIsLoadingMore(false));
   }, [workspaceId, page, paramsKey, params, isLoadingMore, appendTasks]);
@@ -164,7 +170,7 @@ export function usePaginatedTasks(
         key: liveKey,
       });
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Failed to refresh tasks");
+      toast.error(err instanceof Error ? err.message : t("office:failedToRefreshTasks"));
     }
   }, [workspaceId, setTasks]);
 

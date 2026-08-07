@@ -52,27 +52,22 @@ function preservePrimaryExecutorFields(
   }
 }
 
-function preserveOmittedStatusSummary(
-  existing: KanbanTask,
+// A lightweight task.updated may omit an unchanged field; only an explicit
+// value (true/false, null, an object) may change the cached reading. This is
+// the shared preserve guard for every field that follows that contract —
+// interrupted, status_summary, and parent_id (an explicit `parent_id: null`
+// means detach; see parentIDEventField in service_tasks.go).
+function preserveOmittedField<K extends keyof KanbanTask>(
+  existing: KanbanTask | undefined,
   merged: KanbanTask,
+  payload: TaskEventPayload,
   nextTask: KanbanTask,
-  payload: TaskEventPayload,
+  field: { payloadKey: keyof TaskEventPayload; taskField: K },
 ): void {
-  if (!hasPayloadField(payload, "status_summary") && nextTask.statusSummary === undefined) {
-    merged.statusSummary = existing.statusSummary;
-  }
-}
-
-// Task lifecycle events may omit parent_id when the parent is unchanged. Only
-// an explicit `parent_id: null` means detach (see parentIDEventField in
-// service_tasks.go), so an omitted link must not un-nest a cached child.
-function preserveOmittedParent(
-  existing: KanbanTask,
-  merged: KanbanTask,
-  payload: TaskEventPayload,
-): void {
-  if (!hasPayloadField(payload, "parent_id")) {
-    merged.parentTaskId = existing.parentTaskId;
+  if (!hasPayloadField(payload, field.payloadKey) && nextTask[field.taskField] === undefined) {
+    // The three call sites pass optional fields (interrupted, statusSummary,
+    // parentTaskId), so the undefined value is the safe "not present" reading.
+    merged[field.taskField] = existing?.[field.taskField] as KanbanTask[K];
   }
 }
 
@@ -86,7 +81,10 @@ function mergeTaskUpdate(
     ...nextTask,
     ...mergeTaskRepositoryFields(existing, nextTask),
   };
-  preserveOmittedParent(existing, merged, payload);
+  preserveOmittedField(existing, merged, payload, nextTask, {
+    payloadKey: "parent_id",
+    taskField: "parentTaskId",
+  });
   if (!hasPayloadField(payload, "primary_session_id") && nextTask.primarySessionId === undefined) {
     merged.primarySessionId = existing.primarySessionId;
   }
@@ -118,13 +116,20 @@ function mergeTaskUpdate(
   ) {
     merged.foregroundActivity = existing.foregroundActivity;
   }
+  preserveOmittedField(existing, merged, payload, nextTask, {
+    payloadKey: "interrupted",
+    taskField: "interrupted",
+  });
   if (
     !hasPayloadField(payload, "active_subagent_count") &&
     nextTask.activeSubagentCount === undefined
   ) {
     merged.activeSubagentCount = existing.activeSubagentCount;
   }
-  preserveOmittedStatusSummary(existing, merged, nextTask, payload);
+  preserveOmittedField(existing, merged, payload, nextTask, {
+    payloadKey: "status_summary",
+    taskField: "statusSummary",
+  });
   return merged;
 }
 

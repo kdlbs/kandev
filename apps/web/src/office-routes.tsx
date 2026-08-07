@@ -108,7 +108,20 @@ export function OfficeRoutes({ pathname }: { pathname: string }) {
     <TooltipProvider>
       <div className="flex h-full min-h-0 flex-col">
         <OfficeTopbar />
-        <main className="flex-1 min-h-0 overflow-y-auto">
+        {/* `data-office-route` stamps the RESOLVED route onto the outlet, and is
+            the render anchor the pseudo-coverage oracle waits on for every
+            `office — …` screen (e2e/tests/i18n/pseudo-coverage.spec.ts).
+
+            It is an attribute on the outlet rather than a testid inside each
+            page because these pages are mounted with empty collections
+            (`initialItems={[]}`), so they legitimately render empty states in
+            e2e — an anchor inside the populated branch would never match. This
+            attribute is present whichever branch a page takes, and it is not
+            shell-satisfiable: this element lives in the office chunk, is not
+            rendered while `OfficeRouteLoading` holds, and its VALUE identifies
+            the specific route, so a mis-pointed URL cannot match another
+            screen's anchor. */}
+        <main className="flex-1 min-h-0 overflow-y-auto" data-office-route={normalizedPathname}>
           {renderOfficeRoute(normalizedPathname)}
         </main>
       </div>

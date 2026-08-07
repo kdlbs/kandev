@@ -16,8 +16,10 @@ import { toast } from "@/lib/toast/sonner";
 import { useAppStore } from "@/components/state-provider";
 import * as officeApi from "@/lib/api/domains/office-api";
 import type { GitStatusData } from "@/lib/api/domains/office-api";
+import { useTranslation } from "react-i18next";
 
 function useGitOperations(activeWorkspaceId: string) {
+  const { t } = useTranslation();
   const [gitStatus, setGitStatus] = useState<GitStatusData | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -37,24 +39,27 @@ function useGitOperations(activeWorkspaceId: string) {
     fetchStatus();
   }, [fetchStatus]);
 
+  // Catalog KEYS, not messages: `failureKey` used to be a verb ("Clone") dropped
+  // into a `${verb} failed` frame, which no language can reorder or inflect.
+  // Each operation now carries a whole failure sentence of its own.
   const runOp = useCallback(
-    async (op: () => Promise<unknown>, successMsg: string, failPrefix: string) => {
+    async (op: () => Promise<unknown>, successKey: string, failureKey: string) => {
       if (!activeWorkspaceId) return;
       setLoading(true);
       setError(null);
       try {
         await op();
-        toast.success(successMsg);
+        toast.success(t(successKey));
         await fetchStatus();
       } catch (err) {
-        const msg = err instanceof Error ? err.message : `${failPrefix} failed`;
+        const msg = err instanceof Error ? err.message : t(failureKey);
         setError(msg);
         toast.error(msg);
       } finally {
         setLoading(false);
       }
     },
-    [activeWorkspaceId, fetchStatus],
+    [activeWorkspaceId, fetchStatus, t],
   );
 
   return { gitStatus, loading, error, fetchStatus, runOp };
@@ -77,14 +82,19 @@ export function GitSection() {
             workspaceName: activeWorkspaceId,
           });
         },
-        "Repository cloned",
-        "Clone",
+        "office:repositoryCloned",
+        "office:cloneFailed",
       ),
     [activeWorkspaceId, repoUrl, branch, runOp],
   );
 
   const handlePull = useCallback(
-    () => runOp(() => officeApi.gitPull(activeWorkspaceId), "Pulled latest changes", "Pull"),
+    () =>
+      runOp(
+        () => officeApi.gitPull(activeWorkspaceId),
+        "office:pulledLatestChanges",
+        "office:pullFailed",
+      ),
     [activeWorkspaceId, runOp],
   );
 
@@ -93,12 +103,15 @@ export function GitSection() {
       runOp(
         async () => {
           await officeApi.gitPush(activeWorkspaceId, {
+            // Literal: this becomes the git COMMIT MESSAGE, so it is persisted
+            // content rather than UI copy. The input placeholder that shows it
+            // is translated; the value written to history stays English.
             message: commitMessage || "Update workspace configuration",
           });
           setCommitMessage("");
         },
-        "Changes pushed",
-        "Push",
+        "office:changesPushed",
+        "office:pushFailed",
       ),
     [activeWorkspaceId, commitMessage, runOp],
   );
@@ -159,13 +172,12 @@ function CloneForm({
   onBranchChange: (v: string) => void;
   onClone: () => void;
 }) {
+  const { t } = useTranslation();
   return (
     <div className="space-y-3">
-      <p className="text-xs text-muted-foreground">
-        Connect a git repository to version-control this workspace configuration.
-      </p>
+      <p className="text-xs text-muted-foreground">{t("office:connectAGitRepositoryToVersion")}</p>
       <div>
-        <label className="text-sm text-muted-foreground">Repository URL</label>
+        <label className="text-sm text-muted-foreground">{t("office:repositoryUrl")}</label>
         <Input
           value={repoUrl}
           onChange={(e) => onRepoUrlChange(e.target.value)}
@@ -174,17 +186,17 @@ function CloneForm({
         />
       </div>
       <div>
-        <label className="text-sm text-muted-foreground">Branch</label>
+        <label className="text-sm text-muted-foreground">{t("office:branch")}</label>
         <Input
           value={branch}
           onChange={(e) => onBranchChange(e.target.value)}
-          placeholder="main"
+          placeholder={t("office:main")}
           className="mt-1"
         />
       </div>
       <Button onClick={onClone} disabled={loading || !repoUrl} className="cursor-pointer">
         <IconGitBranch className="h-4 w-4 mr-1" />
-        {loading ? "Cloning..." : "Clone"}
+        {loading ? t("office:cloning") : t("office:clone")}
       </Button>
     </div>
   );
@@ -207,6 +219,7 @@ function GitStatusDisplay({
   onPush: () => void;
   onRefresh: () => void;
 }) {
+  const { t } = useTranslation();
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
@@ -215,7 +228,7 @@ function GitStatusDisplay({
           <span className="text-sm font-mono">{status.branch}</span>
           {status.is_dirty ? (
             <Badge variant="outline" className="text-yellow-600 border-yellow-300 text-[10px]">
-              dirty
+              {t("office:dirty")}
             </Badge>
           ) : (
             <Badge variant="outline" className="text-green-600 border-green-300 text-[10px]">
@@ -255,7 +268,7 @@ function GitStatusDisplay({
           className="cursor-pointer"
         >
           <IconArrowDown className="h-3.5 w-3.5 mr-1" />
-          {loading ? "Pulling..." : "Pull"}
+          {loading ? t("office:pulling") : t("common:commandPreviewPull")}
         </Button>
         <Button
           variant="outline"
@@ -265,16 +278,16 @@ function GitStatusDisplay({
           className="cursor-pointer"
         >
           <IconArrowUp className="h-3.5 w-3.5 mr-1" />
-          {loading ? "Pushing..." : "Push"}
+          {loading ? t("office:pushing") : t("office:push")}
         </Button>
       </div>
 
       <div>
-        <label className="text-sm text-muted-foreground">Commit message</label>
+        <label className="text-sm text-muted-foreground">{t("office:commitMessage")}</label>
         <Input
           value={commitMessage}
           onChange={(e) => onCommitMessageChange(e.target.value)}
-          placeholder="Update workspace configuration"
+          placeholder={t("office:updateWorkspaceConfiguration")}
           className="mt-1"
         />
       </div>

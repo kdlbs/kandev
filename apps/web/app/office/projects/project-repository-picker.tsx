@@ -17,6 +17,7 @@ import { cn, formatUserHomePath } from "@/lib/utils";
 import type { Repository } from "@/lib/types/http";
 import { normalizeRepoValue, shouldShowCustomEntry } from "./repo-entry";
 import { useDiscoveredRepositories } from "./use-discovered-repositories";
+import { useTranslation } from "react-i18next";
 
 type Props = {
   workspaceId: string | null;
@@ -55,6 +56,7 @@ export function ProjectRepositoryPicker({
   onSelect,
   triggerLabel,
 }: Props) {
+  const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const discovered = useDiscoveredRepositories(open, workspaceId);
@@ -109,17 +111,15 @@ export function ProjectRepositoryPicker({
       <Tooltip>
         <TooltipTrigger asChild>
           <PopoverTrigger asChild>
-            <PickerTriggerButton label={triggerLabel ?? "Add repository"} />
+            <PickerTriggerButton label={triggerLabel ?? t("office:addRepository")} />
           </PopoverTrigger>
         </TooltipTrigger>
-        <TooltipContent>
-          Pick a workspace repo, a discovered local path, or paste a URL.
-        </TooltipContent>
+        <TooltipContent>{t("office:pickAWorkspaceRepoADiscovered")}</TooltipContent>
       </Tooltip>
       <PopoverContent className="w-[420px] p-0" align="start" portal={false}>
         <Command>
           <CommandInput
-            placeholder="Search or paste a URL or path…"
+            placeholder={t("office:searchOrPasteAUrlOr")}
             value={query}
             onValueChange={setQuery}
             className="h-9"
@@ -170,11 +170,14 @@ function PickerCommandList({
   customQuery: string;
   onSelect: (value: string) => void;
 }) {
+  const { t } = useTranslation();
   return (
     <CommandList>
-      <CommandEmpty>{discoveryLoading ? "Searching your machine…" : "No matches."}</CommandEmpty>
+      <CommandEmpty>
+        {discoveryLoading ? t("office:searchingYourMachine") : t("office:noMatches")}
+      </CommandEmpty>
       {showCustom && (
-        <CommandGroup heading="Add custom">
+        <CommandGroup heading={t("office:addCustom")}>
           <CommandItem
             value={`__custom__:${customQuery}`}
             onSelect={() => onSelect(customQuery)}
@@ -183,23 +186,25 @@ function PickerCommandList({
           >
             <IconWorld className="h-3.5 w-3.5 text-muted-foreground" />
             <span className="flex flex-col min-w-0">
-              <span className="truncate">Use “{customQuery}”</span>
+              <span className="truncate">{t("office:useQuery", { query: customQuery })}</span>
               <span className="text-[11px] text-muted-foreground">
-                {looksLikeUrl(customQuery) ? "Add as remote URL" : "Add as local path"}
+                {looksLikeUrl(customQuery)
+                  ? t("office:addAsRemoteUrl")
+                  : t("office:addAsLocalPath")}
               </span>
             </span>
           </CommandItem>
         </CommandGroup>
       )}
       {workspaceOptions.length > 0 && (
-        <RepoGroup heading="Workspace" options={workspaceOptions} onSelect={onSelect} />
+        <RepoGroup heading={t("common:workspace")} options={workspaceOptions} onSelect={onSelect} />
       )}
       {discoveredOptions.length > 0 && (
         <RepoGroup
-          heading="On disk"
+          heading={t("office:onDisk")}
           options={discoveredOptions}
           onSelect={onSelect}
-          badge="on disk"
+          badge={t("office:onDiskBadge")}
         />
       )}
     </CommandList>

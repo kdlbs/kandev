@@ -358,6 +358,79 @@ func TestCreateExecutionRollsBackWhenRegistrationCannotPersist(t *testing.T) {
 	}
 }
 
+const (
+	terminalSessionID     = "session-terminal-shell"
+	terminalEnvironmentID = "env-terminal-shell"
+	terminalTaskID        = "task-terminal-shell"
+)
+
+func newTerminalSessionManager(t *testing.T, state models.TaskSessionState) (*Manager, *createInstanceExecutor) {
+	t.Helper()
+	mgr, backend := newEnvironmentExecutionTestManager(t, &mockWorkspaceInfoProvider{
+		infos: map[string]*WorkspaceInfo{
+			terminalSessionID: {
+				TaskID: terminalTaskID, SessionID: terminalSessionID,
+				TaskEnvironmentID: terminalEnvironmentID, WorkspacePath: "/workspace/task",
+				AgentID: "auggie",
+			},
+		},
+	})
+	mgr.SetExecutorProfileReader(&fakeExecutorProfileReader{session: &models.TaskSession{
+		ID: terminalSessionID, TaskID: terminalTaskID, State: state,
+	}})
+	return mgr, backend
+}
+
+// A shell terminal left open on a terminal session reconnects on a timer, and
+// the file, git, LSP and port panels poll their own session-keyed path. Every
+// entry point must be rejected from the session state alone: creating the
+// runtime instance first and rolling it back turned an idle panel into a
+// spawn/teardown loop for as long as the tab stayed open.
+func TestEnsureExecutionRejectsTerminalSessionWithoutCreatingInstance(t *testing.T) {
+	entryPoints := []struct {
+		name string
+		call func(*Manager) error
+	}{
+		{"GetOrEnsureExecutionForEnvironment", func(m *Manager) error {
+			_, err := m.GetOrEnsureExecutionForEnvironment(context.Background(), terminalEnvironmentID)
+			return err
+		}},
+		{"GetOrEnsureExecution", func(m *Manager) error {
+			_, err := m.GetOrEnsureExecution(context.Background(), terminalSessionID)
+			return err
+		}},
+		{"EnsureWorkspaceExecutionForSession", func(m *Manager) error {
+			_, err := m.EnsureWorkspaceExecutionForSession(context.Background(), terminalTaskID, terminalSessionID)
+			return err
+		}},
+	}
+	states := []models.TaskSessionState{
+		models.TaskSessionStateFailed,
+		models.TaskSessionStateCancelled,
+		models.TaskSessionStateCompleted,
+	}
+	for _, entryPoint := range entryPoints {
+		for _, state := range states {
+			t.Run(entryPoint.name+"/"+string(state), func(t *testing.T) {
+				mgr, backend := newTerminalSessionManager(t, state)
+
+				if err := entryPoint.call(mgr); !errors.Is(err, ErrSessionTerminal) {
+					t.Fatalf("%s error = %v, want ErrSessionTerminal", entryPoint.name, err)
+				}
+				if got := backend.createCount.Load(); got != 0 {
+					t.Fatalf("CreateInstance calls = %d, want 0", got)
+				}
+				if got := backend.stopCount.Load(); got != 0 {
+					t.Fatalf("StopInstance calls = %d, want 0", got)
+				}
+				if _, exists := mgr.executionStore.GetBySessionID(terminalSessionID); exists {
+					t.Fatal("terminal session must not register an execution")
+				}
+			})
+		}
+	}
+}
+
 func TestResolveTaskEnvironmentID(t *testing.T) {
 	t.Run("returns TaskEnvironmentID when execution carries it", func(t *testing.T) {
 		store := NewExecutionStore()

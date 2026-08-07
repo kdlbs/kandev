@@ -59,6 +59,7 @@ Kandev's task model: documents, execution stages, labels, blocker escalation, su
 |---|---|
 | [documents](tasks/documents.md) | shipped |
 | [execution-stages](tasks/execution-stages.md) | shipped |
+| [interrupted-task-indicator](tasks/interrupted-task-indicator.md) | complete |
 | [labels](tasks/labels.md) | shipped |
 | [title-length-limit](tasks/title-length-limit.md) | complete |
 | [model-unification](tasks/model-unification.md) | draft |
@@ -68,6 +69,7 @@ Kandev's task model: documents, execution stages, labels, blocker escalation, su
 | [remote-contribution-tasks](tasks/remote-contribution-tasks.md) | approved |
 | [subtask-checklist](tasks/subtask-checklist.md) | shipped |
 | [subtask-detachment](tasks/subtask-detachment.md) | shipped |
+| [subtask-reparenting-drag-drop](tasks/subtask-reparenting-drag-drop.md) | building |
 | [subtask-completion-trigger](tasks/subtask-completion-trigger.md) | draft |
 | [subtree-controls](tasks/subtree-controls.md) | shipped |
 | [blocked-task-escalation](tasks/blocked-task-escalation.md) | draft |
@@ -109,7 +111,7 @@ Per-workspace credentials and triage triggers for external services.
 | Spec | Status |
 |---|---|
 | [azure-devops-integration](azure-devops-integration/spec.md) | shipped |
-| [slack](integrations/slack.md) | shipped |
+| [slack](integrations/slack.md) | archived — moved to `kandev-plugin-slack` |
 | [external-mcp](integrations/external-mcp.md) | draft |
 | [mcp-tool-argument-validation](integrations/mcp-tool-argument-validation.md) | shipped |
 | [provider-aware-review-automation](integrations/provider-aware-review-automation.md) | approved |
@@ -142,6 +144,7 @@ Subscription quota tracking and per-agent cheap-model profile routing.
 | [ci-pr-automation](ui/ci-pr-automation.md) | building |
 | [github-pr-review-actions](ui/github-pr-review-actions.md) | shipped |
 | [comment-markdown](ui/comment-markdown.md) | shipped |
+| [resizable-markdown-tables](ui/resizable-markdown-tables.md) | building |
 | [transcript-auto-scroll](ui/transcript-auto-scroll.md) | building |
 | [empty-turn-notice](ui/empty-turn-notice.md) | shipped |
 | [acp-shell-command-output](ui/acp-shell-command-output.md) | shipped |
@@ -152,6 +155,7 @@ Subscription quota tracking and per-agent cheap-model profile routing.
 | [sidebar-view-creation](ui/sidebar-view-creation.md) | shipped |
 | [command-panel sidebar task reveal](ui/command-panel-sidebar-task-reveal.md) | draft |
 | [sidebar-task-completion-icons](ui/sidebar-task-completion-icons.md) | shipped |
+| [sidebar-queued-prompt-count](ui/sidebar-queued-prompt-count.md) | shipped |
 | [session-tab-delete-feedback](ui/session-tab-delete-feedback.md) | shipped |
 | [slash-command-composer](ui/slash-command-composer.md) | shipped |
 | [subagent-observability](ui/subagent-observability.md) | building |
@@ -214,7 +218,7 @@ System pages (Radarr/Sonarr-style) for status, disk usage, database maintenance,
 | [create-local-repository](create-local-repository/spec.md) | shipped |
 | [workflow-cycle-guardrails](workflow-cycle-guardrails/spec.md) | building |
 | [improve-kandev](improve-kandev/spec.md) | building |
-| [homebrew-core](homebrew-core/spec.md) | draft |
+| [homebrew-core](homebrew-core/spec.md) | building |
 | [native-kandev-cli](native-kandev-cli/spec.md) | draft |
 | [desktop-tauri-app](desktop-tauri-app/spec.md) | shipped |
 | [lsp-file-intelligence](lsp-file-intelligence/spec.md) | building |

@@ -30,7 +30,12 @@ import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { initializeLocalRepository } from "@/lib/api/domains/workspace-api";
 import { createDirectory } from "@/lib/api/domains/fs-api";
 import type { Repository } from "@/lib/types/http";
+import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 
+// The returned strings are never rendered: the only caller uses this as a
+// boolean gate (`!nameError`), so they stay English rather than becoming dead
+// catalog entries.
 export function validateLocalRepositoryName(name: string): string | null {
   const trimmed = name.trim();
   if (!trimmed) return "Enter a repository name.";
@@ -57,20 +62,27 @@ export type CreateLocalRepositorySurfaceProps = {
   onCreated: (repository: Repository) => void;
 };
 
+// `context` and `requiresSwitch` stay logic; only the notices they select are
+// copy. The profile name is user data, interpolated rather than translated.
 function executorNotice(
+  t: TFunction,
   selection: DirectLocalExecutorSelection | null,
   context: NonNullable<CreateLocalRepositorySurfaceProps["context"]>,
 ): string {
   if (context === "workspace") {
-    return "Creates an empty Git repository and registers it in this workspace.";
+    return t("common:createsAnEmptyGitRepository");
   }
   if (!selection) {
-    return "A direct local executor profile is required to create and use an empty repository.";
+    return t("common:aDirectLocalExecutorProfileIsRequired");
   }
   if (selection.requiresSwitch) {
-    return `Empty repositories run directly on this machine. This task will switch to “${selection.executorProfileName}”.`;
+    return t("common:emptyRepositoriesRunDirectlySwitch", {
+      profile: selection.executorProfileName,
+    });
   }
-  return `This empty repository will run with “${selection.executorProfileName}” on this machine.`;
+  return t("common:thisEmptyRepositoryWillRunWith", {
+    profile: selection.executorProfileName,
+  });
 }
 
 type RepositoryLocationFieldsProps = {
@@ -90,10 +102,11 @@ function RepositoryLocationFields({
   onParentPathChange,
   onLoadTypedDirectory,
 }: RepositoryLocationFieldsProps) {
+  const { t } = useTranslation();
   return (
     <>
       <label className="block space-y-1.5 text-xs font-medium">
-        <span>Repository name</span>
+        <span>{t("common:repositoryName")}</span>
         <Input
           value={name}
           onChange={(event) => onNameChange(event.target.value)}
@@ -104,7 +117,7 @@ function RepositoryLocationFields({
       </label>
       <div className="space-y-1.5">
         <label htmlFor="local-repository-parent" className="text-xs font-medium">
-          Parent directory
+          {t("common:parentDirectory")}
         </label>
         <div className="flex min-w-0 items-center gap-2">
           <Input
@@ -126,8 +139,8 @@ function RepositoryLocationFields({
             className="size-11 sm:size-8"
             onClick={onLoadTypedDirectory}
             disabled={!parentPath}
-            aria-label="Browse parent directory"
-            title="Browse parent directory"
+            aria-label={t("common:browseParentDirectory")}
+            title={t("common:browseParentDirectory")}
           >
             <IconFolderOpen />
           </Button>
@@ -135,9 +148,9 @@ function RepositoryLocationFields({
       </div>
       <div className="flex min-w-0 items-center gap-2 border-t border-border/70 pt-2 sm:col-span-2">
         <IconFolder className="size-4 shrink-0 text-muted-foreground" />
-        <span className="shrink-0 text-xs text-muted-foreground">Destination</span>
+        <span className="shrink-0 text-xs text-muted-foreground">{t("common:destination")}</span>
         <span className="truncate font-mono text-xs" title={targetPath || parentPath}>
-          {targetPath || parentPath || "Loading folder…"}
+          {targetPath || parentPath || t("common:loadingFolder")}
         </span>
       </div>
     </>
@@ -156,6 +169,7 @@ function RepositoryFormDetails({
   submitError,
   ...locationFields
 }: RepositoryFormDetailsProps) {
+  const { t } = useTranslation();
   return (
     <div className="shrink-0 space-y-3 px-4 py-4">
       <div className="grid gap-3 sm:grid-cols-[minmax(0,0.8fr)_minmax(0,1.6fr)]">
@@ -169,7 +183,7 @@ function RepositoryFormDetails({
         }
       >
         <IconInfoCircle className="mt-0.5 size-3.5 shrink-0" />
-        <p>{executorNotice(executorSelection, context)}</p>
+        <p>{executorNotice(t, executorSelection, context)}</p>
       </div>
       {submitError ? (
         <div
@@ -191,6 +205,7 @@ function CreateRepositoryFooter({
   canSubmit: boolean;
   submitting: boolean;
 }) {
+  const { t } = useTranslation();
   return (
     <div className="flex shrink-0 justify-end border-t border-border px-4 pt-3 pb-[max(1rem,env(safe-area-inset-bottom))]">
       <Button
@@ -199,7 +214,7 @@ function CreateRepositoryFooter({
         disabled={!canSubmit}
       >
         <IconFolderPlus className="h-4 w-4" />
-        {submitting ? "Creating…" : "Create repository"}
+        {submitting ? t("common:creating") : t("common:createRepository")}
       </Button>
     </div>
   );
@@ -213,6 +228,7 @@ function CreateRepositoryForm({
   onCreated,
   onDismiss,
 }: CreateLocalRepositorySurfaceProps & { onDismiss: () => void }) {
+  const { t } = useTranslation();
   const [name, setName] = useState("");
   const [parentPath, setParentPath] = useState("");
   const [editingParentPath, setEditingParentPath] = useState(false);
@@ -250,7 +266,7 @@ function CreateRepositoryForm({
       setName("");
       onDismiss();
     } catch (err) {
-      setSubmitError(err instanceof Error ? err.message : "Failed to create repository");
+      setSubmitError(err instanceof Error ? err.message : t("common:failedToCreateRepository"));
     } finally {
       setSubmitting(false);
     }
@@ -313,6 +329,7 @@ function CreateRepositoryForm({
 }
 
 export function CreateLocalRepositorySurface(props: CreateLocalRepositorySurfaceProps) {
+  const { t } = useTranslation();
   const { isMobile } = useResponsiveBreakpoint();
   const handleOpenChange = (open: boolean) => props.onOpenChange(open);
   const form = <CreateRepositoryForm {...props} onDismiss={() => handleOpenChange(false)} />;
@@ -325,10 +342,8 @@ export function CreateLocalRepositorySurface(props: CreateLocalRepositorySurface
           className="h-[88dvh] max-h-[88dvh] min-w-0 overflow-hidden pb-0"
         >
           <DrawerHeader className="shrink-0 border-b border-border text-left">
-            <DrawerTitle>Create new repository</DrawerTitle>
-            <DrawerDescription>
-              Choose a folder or enter a new path on this machine.
-            </DrawerDescription>
+            <DrawerTitle>{t("common:createNewRepository")}</DrawerTitle>
+            <DrawerDescription>{t("common:chooseAFolderOrEnterA")}</DrawerDescription>
           </DrawerHeader>
           {form}
         </DrawerContent>
@@ -343,10 +358,8 @@ export function CreateLocalRepositorySurface(props: CreateLocalRepositorySurface
         className="flex h-[min(640px,85dvh)] max-w-xl min-w-0 flex-col overflow-hidden p-0"
       >
         <DialogHeader className="shrink-0 border-b border-border px-4 py-3 pr-12">
-          <DialogTitle>Create new repository</DialogTitle>
-          <DialogDescription>
-            Choose a folder or enter a new path on this machine.
-          </DialogDescription>
+          <DialogTitle>{t("common:createNewRepository")}</DialogTitle>
+          <DialogDescription>{t("common:chooseAFolderOrEnterA")}</DialogDescription>
         </DialogHeader>
         {form}
       </DialogContent>

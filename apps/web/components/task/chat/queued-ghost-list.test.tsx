@@ -83,6 +83,7 @@ function baseState(entries: QueuedMessage[]) {
     count: entries.length,
     max: 10,
     isFull: false,
+    mergeEnabled: true,
     isLoading: false,
     queue: vi.fn(async () => {}),
     clearAll: vi.fn(async () => {}),
@@ -403,7 +404,7 @@ describe("QueueAffordance entity-reference edits", () => {
   });
 });
 
-describe("QueueAffordance merge wiring", () => {
+describe("QueueAffordance merge wiring — eligibility", () => {
   it("shows a merge control on the second row and calls mergeEntry with its id", () => {
     const state = queueState([
       entry({ id: "q-1", content: "first", queued_by: QUEUED_BY_USER }),
@@ -454,7 +455,9 @@ describe("QueueAffordance merge wiring", () => {
     fireEvent.click(screen.getByTestId(CHIP_ID));
     expect(screen.queryByTestId(MERGE_BUTTON_ID)).toBeNull();
   });
+});
 
+describe("QueueAffordance merge wiring — dispatch", () => {
   it("toasts an error when the merge fails", async () => {
     const { toast } = await import("sonner");
     const state = queueState([
@@ -506,5 +509,20 @@ describe("QueueAffordance merge wiring", () => {
     fireEvent.click(button);
     fireEvent.click(button);
     await waitFor(() => expect(state.mergeEntry).toHaveBeenCalledTimes(1));
+  });
+
+  it("hides the merge control entirely when merging is disabled", () => {
+    const state = queueState(
+      [
+        entry({ id: "q-1", content: "first", queued_by: QUEUED_BY_USER }),
+        entry({ id: "q-2", content: "second", queued_by: QUEUED_BY_USER }),
+      ],
+      { mergeEnabled: false },
+    );
+    useQueueMock.mockReturnValue(state);
+    render(<QueueAffordance sessionId={SESSION_ID}>{CHILD}</QueueAffordance>);
+
+    fireEvent.click(screen.getByTestId(CHIP_ID));
+    expect(screen.queryAllByTestId(MERGE_BUTTON_ID)).toHaveLength(0);
   });
 });

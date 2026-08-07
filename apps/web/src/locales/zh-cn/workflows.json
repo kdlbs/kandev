@@ -225,6 +225,7 @@
   "wipLimit": "在制品限制",
   "wipLimitHelp": "此步骤中允许的最大活动任务数。溢出的任务在队列中可见。使用 0 表示无限制。",
   "wipLimitsNote": "在制品限制约束的是活动工作，而非可见性。溢出任务会留在看板上直到有容量；若所选馈送步骤也已满，则拒绝创建新任务。",
+  "workflow": "工作流",
   "workflowCycleBlocked": "工作流循环已阻止",
   "workflowCycleBlockedDescription": "继续前请更改工作流步骤以消除自动循环。",
   "workflowCycleBlockingBody": "此路径会重新进入「{{stepName}}」，并可能在没有用户再次操作的情况下重新启动代理。",

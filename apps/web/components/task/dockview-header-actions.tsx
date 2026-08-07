@@ -36,6 +36,7 @@ import { NewSessionDialog } from "./new-session-dialog";
 import { NewTaskDropdown } from "./new-task-dropdown";
 import { useActiveSessionDevScript } from "./repository-scripts-menu";
 import { GroupSplitCloseActionsView, useDockviewGroupWidth } from "./dockview-group-actions";
+import { useTranslation } from "react-i18next";
 
 const HEADER_ACTION_BUTTON_CLASS =
   "h-6 w-6 p-0 cursor-pointer text-muted-foreground hover:bg-muted/70 hover:text-foreground focus-visible:ring-1 focus-visible:ring-ring";
@@ -91,6 +92,7 @@ function useLeftHeaderState(
 }
 
 export function LeftHeaderActions(props: IDockviewHeaderActionsProps) {
+  const { t } = useTranslation();
   const { group, containerApi } = props;
   const state = useLeftHeaderState(group.id, containerApi);
   const environmentId = useEnvironmentId();
@@ -165,9 +167,9 @@ export function LeftHeaderActions(props: IDockviewHeaderActionsProps) {
     try {
       const result = await createUserShell(environmentId, {
         command: devScript,
-        label: "Dev Server",
+        label: t("task:devServer"),
       });
-      addTerminalPanel(result.terminalId, group.id, environmentId, undefined, "Dev Server");
+      addTerminalPanel(result.terminalId, group.id, environmentId, undefined, t("task:devServer"));
     } catch (error) {
       console.error("Failed to start dev script:", error);
     }
@@ -184,8 +186,8 @@ export function LeftHeaderActions(props: IDockviewHeaderActionsProps) {
             variant="ghost"
             className={HEADER_ACTION_BUTTON_CLASS}
             data-testid="dockview-add-panel-btn"
-            aria-label="Add panel"
-            title="Add panel"
+            aria-label={t("task:addPanel")}
+            title={t("task:addPanel")}
           >
             <IconPlus className={HEADER_ICON_CLASS} />
           </Button>
@@ -362,6 +364,7 @@ function SidebarRightActions() {
 }
 
 function RightTopGroupActions() {
+  const { t } = useTranslation();
   const toggleRightPanels = useDockviewStore((s) => s.toggleRightPanels);
   return (
     <Tooltip>
@@ -370,17 +373,18 @@ function RightTopGroupActions() {
           type="button"
           className={RAW_HEADER_ACTION_BUTTON_CLASS}
           onClick={toggleRightPanels}
-          aria-label="Hide right panels"
+          aria-label={t("task:hideRightPanels")}
         >
           <IconLayoutSidebarRightCollapse className={HEADER_ICON_CLASS} />
         </button>
       </TooltipTrigger>
-      <TooltipContent>Hide right panels</TooltipContent>
+      <TooltipContent>{t("task:hideRightPanels")}</TooltipContent>
     </Tooltip>
   );
 }
 
 function CenterRightActions() {
+  const { t } = useTranslation();
   const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
   const repository = useAppStore((state) => {
     if (!activeSessionId) return null;
@@ -421,8 +425,8 @@ function CenterRightActions() {
           variant="ghost"
           className={HEADER_ACTION_BUTTON_CLASS}
           onClick={handleStartBrowser}
-          aria-label="Open browser preview"
-          title="Open browser preview"
+          aria-label={t("task:openBrowserPreview")}
+          title={t("task:openBrowserPreview")}
         >
           <IconDeviceDesktop className={HEADER_ICON_CLASS} />
         </Button>
@@ -471,6 +475,7 @@ function TerminalScriptsDropdown({
   environmentId,
   rightBottomGroupId,
 }: TerminalScriptsDropdownProps) {
+  const { t } = useTranslation();
   const addTerminalPanel = useDockviewStore((s) => s.addTerminalPanel);
 
   const handleRunScript = useCallback(
@@ -501,8 +506,8 @@ function TerminalScriptsDropdown({
           size="sm"
           variant="ghost"
           className={HEADER_ACTION_BUTTON_CLASS}
-          aria-label="Run script"
-          title="Run script"
+          aria-label={t("task:runScript")}
+          title={t("task:runScript")}
         >
           <IconPlayerPlay className={HEADER_ICON_CLASS} />
         </Button>
@@ -544,6 +549,7 @@ function TerminalDevPreviewButton({
   rightBottomGroupId,
   visible,
 }: TerminalDevPreviewButtonProps) {
+  const { t } = useTranslation();
   const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
   const taskID = useAppStore((state) => state.tasks?.activeTaskId ?? null);
   const addBrowserPanel = useDockviewStore((s) => s.addBrowserPanel);
@@ -595,8 +601,8 @@ function TerminalDevPreviewButton({
       variant="ghost"
       className={HEADER_ACTION_BUTTON_CLASS}
       onClick={handleStartPreview}
-      aria-label="Start dev server preview"
-      title="Start dev server preview"
+      aria-label={t("task:startDevServerPreview")}
+      title={t("task:startDevServerPreview")}
     >
       <IconDeviceDesktop className={HEADER_ICON_CLASS} />
     </Button>

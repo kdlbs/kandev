@@ -151,6 +151,9 @@ type WorkflowStepGetter interface {
 	GetNextStepByPosition(ctx context.Context, workflowID string, currentPosition int) (*wfmodels.WorkflowStep, error)
 	GetPreviousStepByPosition(ctx context.Context, workflowID string, currentPosition int) (*wfmodels.WorkflowStep, error)
 	GetWorkflowAgentProfileID(ctx context.Context, workflowID string) (string, error)
+	// GetWorkflowPrompt returns the optional workflow-level agent instructions
+	// prepended at step entry. Empty string means the workflow has no prompt.
+	GetWorkflowPrompt(ctx context.Context, workflowID string) (string, error)
 }
 
 // PromptReferenceExpander resolves "@name" saved-prompt references embedded in
@@ -243,6 +246,16 @@ type sessionExecutorStore interface {
 	// than an idempotent same-owner observation.
 	ClaimTaskTitleSession(ctx context.Context, taskID, sessionID string) (owned bool, newlyClaimed bool, err error)
 	UpdateTask(ctx context.Context, task *models.Task) error
+	// SetTaskMetadataKey / RemoveTaskMetadataKey are concurrent-key-safe JSON
+	// patch helpers on tasks.metadata (implemented by the sqlite/Postgres
+	// repository). Used by startup reconciliation to mark interrupted tasks
+	// and by the session-start funnel to clear the marker.
+	SetTaskMetadataKey(ctx context.Context, taskID, key string, value interface{}) error
+	// SetTaskMetadataKeyIfNotArchived writes one metadata key only when the
+	// task row still has archived_at IS NULL (single statement — the archive
+	// check and the write cannot be separated by a concurrent archive).
+	SetTaskMetadataKeyIfNotArchived(ctx context.Context, taskID, key string, value interface{}) (bool, error)
+	RemoveTaskMetadataKey(ctx context.Context, taskID, key string) (bool, error)
 	ListChildCompletionRows(ctx context.Context, parentID string) ([]models.ChildCompletionRow, error)
 	// Git snapshots and commits
 	GetLatestGitSnapshot(ctx context.Context, sessionID string) (*models.GitSnapshot, error)
@@ -955,6 +968,24 @@ func (s *Service) authorizeSession(ctx context.Context, sessionID string) error 
 		return nil
 	}
 	return s.sessionAccessCheck(ctx, sessionID)
+}
+
+// SessionTaskID returns the task that owns a session, or "" when the session
+// is unknown. Used to enrich message.queue.status_changed events with the
+// task_id so task-scoped consumers (e.g. the status summary projector) can
+// refresh per-task queued-prompt counts.
+func (s *Service) SessionTaskID(ctx context.Context, sessionID string) (string, error) {
+	if sessionID == "" || s.repo == nil {
+		return "", nil
+	}
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		return "", err
+	}
+	if session == nil {
+		return "", nil
+	}
+	return session.TaskID, nil
 }
 
 // authorizeTask applies the configured per-user task check. No-op when unwired.
@@ -1787,6 +1818,21 @@ func (s *Service) reconcileOneSessionOnStartup(ctx context.Context, running *mod
 					zap.String("task_id", running.TaskID),
 					zap.Error(updateErr))
 			}
+		}
+	}
+
+	// Mark the task interrupted when its session was mid-turn when the backend
+	// died (STARTING/RUNNING) so task-list surfaces can show the red
+	// interruption icon. WAITING_FOR_INPUT sessions were idle, not interrupted.
+	// The write is archive-atomic (SetTaskMetadataKeyIfNotArchived), so an
+	// archive that commits after this check cannot leave a stale marker on an
+	// archived task. The marker is cleared when a session of the task next
+	// enters STARTING/RUNNING (see updateTaskSessionStateWithHook).
+	if running.TaskID != "" && (previousState == models.TaskSessionStateStarting || previousState == models.TaskSessionStateRunning) {
+		if _, setErr := s.repo.SetTaskMetadataKeyIfNotArchived(ctx, running.TaskID, models.MetaKeyInterruptedAt, time.Now().UTC().Format(time.RFC3339)); setErr != nil {
+			s.logger.Warn("failed to mark task interrupted on startup",
+				zap.String("task_id", running.TaskID),
+				zap.Error(setErr))
 		}
 	}
 

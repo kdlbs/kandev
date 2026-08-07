@@ -18,9 +18,9 @@ import (
 	utilitytemplate "github.com/kandev/kandev/internal/utility/template"
 )
 
-// The adapters below live in this package for the same cycle-avoidance reason as
-// slackHostUtilityAdapter: internal/review must not import the agent runtime, and
-// the runtime must not import review. Both are already visible here.
+// The adapters below live in this package for cycle avoidance: internal/review
+// must not import the agent runtime, and the runtime must not import review.
+// Both are already visible here.
 
 // reviewComponents is the assembled native code-review subsystem.
 type reviewComponents struct {

@@ -22,6 +22,10 @@ export function AgentRoleBadge({ role }: AgentRoleBadgeProps) {
   const meta = useAppStore((s) => s.office.meta);
   const metaRole = meta?.roles.find((r) => r.id === role);
   const colorClass = metaRole?.color ?? FALLBACK_COLORS[role] ?? "";
+  // Workspace metadata owns this label. The `?? role` fallback only fires
+  // before `office.meta` hydrates and renders the raw wire value, which is an
+  // identifier rather than copy — translating it would invent a label the rest
+  // of the app never shows.
   const label = metaRole?.label ?? role;
   return <Badge className={colorClass}>{label}</Badge>;
 }

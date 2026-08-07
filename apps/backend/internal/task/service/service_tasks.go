@@ -1256,6 +1256,11 @@ func (s *Service) UpdateTask(ctx context.Context, id string, req *UpdateTaskRequ
 		}
 		parentCleared = *req.ParentID == ""
 		task.ParentID = *req.ParentID
+		// Re-parenting (or un-nesting) an inherit_parent subtask keeps its
+		// materialized workspace as shared_group instead of silently
+		// inheriting a different parent's workspace — the same composite
+		// semantics as detach-then-nest.
+		normalizeWorkspaceModeAfterReparent(task)
 	}
 	task.UpdatedAt = time.Now().UTC()
 
@@ -1386,6 +1391,22 @@ const parentIDEventField = "parent_id"
 // handlers can classify a bad re-parent request as a client error (400)
 // rather than an internal error (500).
 var ErrInvalidParent = errors.New("invalid parent")
+
+// normalizeWorkspaceModeAfterReparent applies the detach operation's
+// workspace policy to an explicit parent change: an inherit_parent subtask
+// whose hierarchy is being changed must not silently start inheriting a
+// different parent's workspace, so its mode becomes shared_group (its
+// materialized workspace and group membership are unchanged). Other modes
+// pass through.
+func normalizeWorkspaceModeAfterReparent(task *models.Task) {
+	workspace, ok := task.Metadata["workspace"].(map[string]interface{})
+	if !ok {
+		return
+	}
+	if workspace["mode"] == workspaceModeInheritParent {
+		workspace["mode"] = workspaceModeSharedGroup
+	}
+}
 
 // resolveParentID validates a proposed parent assignment for task. An empty
 // parentID (un-nest) is always allowed. A non-empty parentID must reference a

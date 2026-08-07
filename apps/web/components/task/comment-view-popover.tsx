@@ -7,6 +7,7 @@ import { cn } from "@/lib/utils";
 import type { DiffComment } from "@/lib/diff/types";
 import { CommentForm } from "@/components/diff/comment-form";
 import { useDraggablePopover, usePopoverDismiss } from "@/components/task/use-draggable-popover";
+import { useTranslation } from "react-i18next";
 
 type CommentViewPopoverProps = {
   comments: DiffComment[];
@@ -35,6 +36,7 @@ function CommentItem({
   onStartEdit: (id: string) => void;
   onCancelEdit: () => void;
 }) {
+  const { t } = useTranslation();
   const handleUpdate = useCallback(
     (text: string) => {
       onUpdate?.(comment.id, text);
@@ -55,8 +57,8 @@ function CommentItem({
               size="sm"
               variant="ghost"
               className="h-6 w-6 p-0 cursor-pointer text-muted-foreground hover:text-foreground"
-              aria-label="Edit comment"
-              title="Edit comment"
+              aria-label={t("task:editComment")}
+              title={t("task:editComment")}
               onClick={() => onStartEdit(comment.id)}
             >
               <IconEdit className="h-3.5 w-3.5" />
@@ -66,8 +68,8 @@ function CommentItem({
             size="sm"
             variant="ghost"
             className="h-6 w-6 p-0 cursor-pointer text-muted-foreground hover:text-destructive"
-            aria-label="Delete comment"
-            title="Delete comment"
+            aria-label={t("task:deleteComment")}
+            title={t("task:deleteComment")}
             onClick={() => onDelete(comment.id)}
           >
             <IconTrash className="h-3.5 w-3.5" />
@@ -104,6 +106,7 @@ export function CommentViewPopover({
   onUpdate,
   onClose,
 }: CommentViewPopoverProps) {
+  const { t } = useTranslation();
   const popoverRef = useRef<HTMLDivElement>(null);
   const [editingCommentId, setEditingCommentId] = useState<string | null>(null);
   const { pos, onDragStart } = useDraggablePopover(position, 350, 200);
@@ -123,7 +126,7 @@ export function CommentViewPopover({
         onMouseDown={onDragStart}
       >
         <span className="text-xs text-muted-foreground">
-          {comments.length} comment{comments.length !== 1 ? "s" : ""}
+          {t("task:commentCount", { count: comments.length })}
         </span>
         <IconGripHorizontal className="h-3.5 w-3.5 text-muted-foreground/40" />
       </div>

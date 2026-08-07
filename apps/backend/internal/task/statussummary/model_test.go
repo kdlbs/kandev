@@ -56,6 +56,40 @@ func TestTaskStatusSummarySemanticJSONIsBoundedAndOmitsTransportMetadata(t *test
 	}
 }
 
+func TestTaskStatusSummaryQueuedPromptCountRoundTripsThroughSemanticJSON(t *testing.T) {
+	summary := TaskStatusSummary{QueuedPromptCount: 4}
+	payload, err := summary.SemanticJSON()
+	if err != nil {
+		t.Fatalf("semantic JSON: %v", err)
+	}
+	var decoded TaskStatusSummary
+	if err := json.Unmarshal(payload, &decoded); err != nil {
+		t.Fatalf("decode semantic JSON: %v", err)
+	}
+	if decoded.QueuedPromptCount != 4 {
+		t.Fatalf("queued prompt count after round trip = %d, want 4", decoded.QueuedPromptCount)
+	}
+	if !summary.SemanticEqual(decoded) {
+		t.Fatalf("semantic round trip changed value: %#v", decoded)
+	}
+}
+
+func TestTaskStatusSummaryQueuedPromptCountValidateRejectsNegative(t *testing.T) {
+	if err := (TaskStatusSummary{QueuedPromptCount: -1}).Validate(); err == nil {
+		t.Fatal("negative queued prompt count should be rejected")
+	}
+	if err := (TaskStatusSummary{QueuedPromptCount: 0}).Validate(); err != nil {
+		t.Fatalf("zero queued prompt count rejected: %v", err)
+	}
+}
+
+func TestTaskStatusSummaryQueuedPromptCountAffectsSemanticEquality(t *testing.T) {
+	base := TaskStatusSummary{}
+	if base.SemanticEqual(TaskStatusSummary{QueuedPromptCount: 2}) {
+		t.Fatal("different queued prompt counts must not compare equal")
+	}
+}
+
 func TestTaskStatusSummaryValidateBoundsErrorPreview(t *testing.T) {
 	valid := TaskStatusSummary{ActiveError: &ActiveErrorSummary{Preview: strings.Repeat("é", MaxActiveErrorPreviewBytes/2)}}
 	if err := valid.Validate(); err != nil {

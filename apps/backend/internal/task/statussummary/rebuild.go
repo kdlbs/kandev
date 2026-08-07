@@ -55,7 +55,10 @@ type RebuildInput struct {
 	GitObserved      bool
 	PullRequests     []PullRequestInput
 	PRObserved       bool
-	Now              time.Time
+	// QueuedPromptCount is the authoritative pending prompt count for the task
+	// (all sessions). Supplied by the caller; 0 means nothing is queued.
+	QueuedPromptCount int
+	Now               time.Time
 }
 
 // BuildFromAuthoritative derives the same summary semantics used by the live
@@ -131,6 +134,7 @@ func BuildFromAuthoritative(input RebuildInput) TaskStatusSummary {
 			checksPassing:         maxInt(pullRequest.ChecksPassing, 0),
 		}
 	}
+	state.queuedCount = maxInt(input.QueuedPromptCount, 0)
 	return deriveSummary(state)
 }
 

@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { Input } from "@kandev/ui/input";
 import { Label } from "@kandev/ui/label";
+import { useTranslation } from "react-i18next";
 
 type StepWorkspaceProps = {
   workspaceName: string;
@@ -16,6 +17,7 @@ export function derivePrefix(name: string): string {
 }
 
 export function StepWorkspace({ workspaceName, taskPrefix, onChange }: StepWorkspaceProps) {
+  const { t } = useTranslation();
   const [prefixDirty, setPrefixDirty] = useState(false);
 
   useEffect(() => {
@@ -30,31 +32,28 @@ export function StepWorkspace({ workspaceName, taskPrefix, onChange }: StepWorks
   return (
     <div className="space-y-6">
       <div>
-        <h2 className="text-xl font-semibold">Set up your Office workspace</h2>
+        <h2 className="text-xl font-semibold">{t("office:setUpYourOfficeWorkspace")}</h2>
         <p className="text-sm text-muted-foreground mt-1">
-          Office turns your backlog into autonomous work. A coordinator agent breaks each task down,
-          delegates to specialized worker agents, and reports progress back to you. In the next
-          steps you&apos;ll name this workspace, create your coordinator, and optionally hand it a
-          first task to kick things off.
+          {t("office:officeTurnsYourBacklogIntoAutonomous")}
         </p>
       </div>
       <div className="space-y-4">
         <div>
-          <Label htmlFor="workspace-name">Workspace name</Label>
+          <Label htmlFor="workspace-name">{t("office:workspaceName")}</Label>
           <Input
             id="workspace-name"
             value={workspaceName}
             onChange={(e) => onChange({ workspaceName: e.target.value })}
-            placeholder="Default Workspace"
+            placeholder={t("office:defaultWorkspace")}
             className="mt-1"
             autoFocus
           />
           <p className="text-xs text-muted-foreground mt-1">
-            A name for your workspace. You can change this later.
+            {t("office:aNameForYourWorkspaceYou")}
           </p>
         </div>
         <div>
-          <Label htmlFor="task-prefix">Task prefix</Label>
+          <Label htmlFor="task-prefix">{t("office:taskPrefix")}</Label>
           <Input
             id="task-prefix"
             value={taskPrefix}
@@ -66,8 +65,10 @@ export function StepWorkspace({ workspaceName, taskPrefix, onChange }: StepWorks
             className="mt-1 max-w-32"
             maxLength={6}
           />
+          {/* `"KAN"` is the exact prefix `submitOnboarding` persists when the
+              field is left empty, so the preview keeps it literal. */}
           <p className="text-xs text-muted-foreground mt-1">
-            Tasks will be numbered {taskPrefix || "KAN"}-1, {taskPrefix || "KAN"}-2, etc.
+            {t("office:tasksWillBeNumbered", { prefix: taskPrefix || "KAN" })}
           </p>
         </div>
       </div>

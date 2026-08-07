@@ -14,6 +14,7 @@ type WorkflowDTO struct {
 	WorkspaceID    string  `json:"workspace_id"`
 	Name           string  `json:"name"`
 	Description    *string `json:"description,omitempty"`
+	Prompt         *string `json:"prompt,omitempty"`
 	AgentProfileID string  `json:"agent_profile_id,omitempty"`
 	SortOrder      int     `json:"sort_order"`
 	Hidden         bool    `json:"hidden,omitempty"`
@@ -181,6 +182,10 @@ type TaskDTO struct {
 	CreatedAt           time.Time              `json:"created_at"`
 	UpdatedAt           time.Time              `json:"updated_at"`
 	Metadata            map[string]interface{} `json:"metadata,omitempty"`
+	// Interrupted reports that the task's session was mid-turn when the backend
+	// died and has not been resumed since. Derived from the interrupted_at
+	// metadata key at DTO conversion time (see FromTaskWithSessionInfo).
+	Interrupted bool `json:"interrupted,omitempty"`
 
 	// Office extensions
 	AssigneeAgentProfileID string `json:"assignee_agent_profile_id,omitempty"`
@@ -523,12 +528,17 @@ func FromWorkflow(workflow *models.Workflow) WorkflowDTO {
 	if workflow.Description != "" {
 		description = &workflow.Description
 	}
+	var prompt *string
+	if workflow.Prompt != "" {
+		prompt = &workflow.Prompt
+	}
 
 	return WorkflowDTO{
 		ID:             workflow.ID,
 		WorkspaceID:    workflow.WorkspaceID,
 		Name:           workflow.Name,
 		Description:    description,
+		Prompt:         prompt,
 		AgentProfileID: workflow.AgentProfileID,
 		SortOrder:      workflow.SortOrder,
 		Hidden:         workflow.Hidden,
@@ -751,6 +761,7 @@ func FromTaskWithSessionInfo(
 		CreatedAt:                   task.CreatedAt,
 		UpdatedAt:                   task.UpdatedAt,
 		Metadata:                    task.Metadata,
+		Interrupted:                 task.Metadata[models.MetaKeyInterruptedAt] != nil,
 		// Office extensions. AssigneeAgentProfileID is a read-time
 		// projection from workflow_step_participants (ADR 0005 Wave F);
 		// the repo's task SELECTs hydrate it via a correlated subquery.

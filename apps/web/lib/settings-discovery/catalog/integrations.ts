@@ -7,7 +7,6 @@ const INTEGRATIONS = [
   ["jira", "Jira"],
   ["linear", "Linear"],
   ["sentry", "Sentry"],
-  ["slack", "Slack"],
 ] as const;
 
 export const INTEGRATION_SETTINGS_TARGETS = {
@@ -17,7 +16,6 @@ export const INTEGRATION_SETTINGS_TARGETS = {
   jira: "setting-integration-jira-connection",
   linear: "setting-integration-linear-connection",
   sentry: "setting-integration-sentry-connection",
-  slack: "setting-integration-slack-connection",
 } as const;
 
 export const INTEGRATION_DISCOVERY_DEFINITIONS: SettingsDiscoveryDefinition[] = [

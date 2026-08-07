@@ -110,6 +110,12 @@ const (
 	// because the winner will (or already did) handle it.
 	// Absent on ordinary (non-watcher) auto-start tasks, which launch normally.
 	MetaKeyAutoStartClaimed = "auto_start_claimed"
+	// MetaKeyInterruptedAt is set by startup reconciliation when a task's
+	// session was mid-turn (STARTING/RUNNING) when the backend died. Its
+	// presence makes the task DTO report `interrupted: true` so task-list
+	// surfaces show the red interruption icon; the orchestrator removes the
+	// key when a session of the task next enters STARTING/RUNNING.
+	MetaKeyInterruptedAt = "interrupted_at"
 	// MetaKeyAgentTitlePending marks tasks created in prompt-first mode whose
 	// provisional title still needs the first eligible agent session to replace it.
 	MetaKeyAgentTitlePending = "agent_title_pending"
@@ -658,8 +664,11 @@ const (
 type Workflow struct {
 	ID                 string  `json:"id"`
 	WorkspaceID        string  `json:"workspace_id"`
-	Name               string  `json:"name"`
-	Description        string  `json:"description"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	// Prompt is optional workflow-level agent instructions prepended at
+	// every step entry before the step prompt. Empty means off.
+	Prompt             string  `json:"prompt,omitempty"`
 	AgentProfileID     string  `json:"agent_profile_id,omitempty"`
 	WorkflowTemplateID *string `json:"workflow_template_id,omitempty"`
 	SortOrder          int     `json:"sort_order"`
@@ -1795,6 +1804,7 @@ func (t *Task) ToAPI() *v1.Task {
 		CreatedAt:    t.CreatedAt,
 		UpdatedAt:    t.UpdatedAt,
 		Metadata:     t.Metadata,
+		Interrupted:  t.Metadata[MetaKeyInterruptedAt] != nil,
 		IsEphemeral:  t.IsEphemeral,
 		ParentID:     t.ParentID,
 	}

@@ -10,6 +10,7 @@ import {
 
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@kandev/ui/table";
 import { DataTablePagination } from "./data-table-pagination";
+import { useTranslation } from "react-i18next";
 
 interface DataTableProps<TData, TValue> {
   columns: ColumnDef<TData, TValue>[];
@@ -32,6 +33,7 @@ export function DataTable<TData, TValue>({
   isLoading = false,
   onRowClick,
 }: DataTableProps<TData, TValue>) {
+  const { t } = useTranslation();
   // eslint-disable-next-line react-hooks/incompatible-library -- TanStack Table's API is designed this way
   const table = useReactTable({
     data,
@@ -74,7 +76,7 @@ export function DataTable<TData, TValue>({
                 return (
                   <TableRow>
                     <TableCell colSpan={columns.length} className="h-24 text-center">
-                      Loading...
+                      {t("common:loadingEllipsis")}
                     </TableCell>
                   </TableRow>
                 );
@@ -98,7 +100,7 @@ export function DataTable<TData, TValue>({
               return (
                 <TableRow>
                   <TableCell colSpan={columns.length} className="h-24 text-center">
-                    No results.
+                    {t("common:noResults")}
                   </TableCell>
                 </TableRow>
               );

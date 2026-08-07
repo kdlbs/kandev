@@ -104,7 +104,7 @@
   "prTriggerRepositoryHelp": "PR triggers always use the PR's own repository.",
   "pushTriggerHelp": "Triggers when code is pushed to matching branches",
   "recentRuns": "Recent runs",
-  "recentRuns_one": "Recent Runs ({{count}})",
+  "recentRuns_one": "Recent Run ({{count}})",
   "recentRuns_other": "Recent Runs ({{count}})",
   "refresh": "Refresh",
   "removeRepository": "Remove repository",

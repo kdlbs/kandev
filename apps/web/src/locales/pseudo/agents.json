@@ -18,7 +18,7 @@
   "authRequiredOpenShell": "Àũţĥēńţĩćàţĩōń ŕēqũĩŕēď - ćĺĩćķ ţō ōƥēń à śĥēĺĺ àńď śĩĝń ĩń",
   "authenticationRequired": "Àũţĥēńţĩćàţĩōń ŕēqũĩŕēď",
   "automaticallyAvailable": "Àũţōḿàţĩćàĺĺŷ àvàĩĺàƀĺē",
-  "availableCommandsCount_one": "Àvàĩĺàƀĺē ćōḿḿàńďś ({{count}})",
+  "availableCommandsCount_one": "Àvàĩĺàƀĺē ćōḿḿàńď ({{count}})",
   "availableCommandsCount_other": "Àvàĩĺàƀĺē ćōḿḿàńďś ({{count}})",
   "availableSlashCommands": "Àvàĩĺàƀĺē śĺàśĥ ćōḿḿàńďś",
   "availableSlashCommandsHelp": "Ţŷƥē ţĥēśē ďũŕĩńĝ à śēśśĩōń ćĥàţ ţō ĩńvōķē ţĥēḿ - ē.ĝ. <0>{{example}}</0>.",

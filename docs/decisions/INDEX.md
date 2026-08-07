@@ -126,3 +126,4 @@ Read individual ADRs for full context. Create new ones via `/record decision` or
 | 2026-08-03-scope-and-merge-repository-secrets | [Scope and Merge Repository Secrets](2026-08-03-scope-and-merge-repository-secrets.md) | accepted | backend, frontend, security, protocol | 2026-08-03 |
 | 2026-08-05-server-owned-quick-terminal-descriptors | [Server-Owned Quick Terminal Descriptors](2026-08-05-server-owned-quick-terminal-descriptors.md) | accepted | backend, frontend, protocol, security | 2026-08-05 |
 | 2026-08-05-nested-submodules-as-repository-scopes | [Model Nested Submodules as Repository Scopes](2026-08-05-nested-submodules-as-repository-scopes.md) | accepted | backend, frontend, protocol | 2026-08-05 |
+| 2026-08-05-homebrew-remote-helper-audit | [Preserve Remote Helpers in Homebrew Installs](2026-08-05-homebrew-remote-helper-audit.md) | accepted | infra, workflow | 2026-08-05 |
