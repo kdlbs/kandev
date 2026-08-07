@@ -560,3 +560,155 @@ steps ahead of `promoteNextPrimaryAfterRemoval` makes worth closing now); no
 test proves `ReclaimSessionWorktree` *returns* (vs. only logs) a removal
 failure, which is what the retry budget and "reclamation failure SHALL be
 observable" actually depend on.
+
+## REVIEW-ROUND: 2
+
+Review wave (2026-08-07/08) ran code-reviewer, security-reviewer, and
+test-supervisor (ksdd subagents), a fresh inline `code-review` skill pass, and
+a cross-vendor Codex review over `main...HEAD` (all 8 commits, base `main`).
+**Verdict: production-bug residual, round >= 2 — staying parked here rather
+than cycling back to Build a second time; documenting for human triage rather
+than auto-merging.** All three round-1 CRITICAL/HIGH fixes (lock-order
+inversion, path-based destructive removal, ambiguous-error blind-cancel) and
+the P1/P2 fixes were independently re-verified as genuinely correct this round
+— by code-reviewer, security-reviewer (APPROVE), and by directly reading the
+code myself — and are **not** the residual below. This is a different,
+previously-unflagged defect, first caught this round by Codex and independently
+confirmed by tracing the exact code path myself before recording it here.
+
+### CRITICAL — pre-delete warning can silently undercount uncommitted files to
+zero, so the worktree removal that follows destroys unwarned-about work
+(Codex; independently verified against the code, not taken on the reviewer's
+word)
+
+The spec requires (line 52-54): "the user SHALL be shown the count of
+uncommitted files and the count of unpushed commits in the session's
+worktrees whenever either is non-zero." The Confirmation-surface scenario
+(line 320-322) requires the dialog to state the count of uncommitted files
+before the confirm control is used. Both can be violated by ordinary use:
+
+1. An agent turn completes. `saveGitStatusSnapshot` (unchanged, pre-existing)
+   writes an `agent_completed` DB snapshot with a full `files` map.
+2. The user manually edits a file — through the embedded terminal, an IDE, or
+   any means outside an agent turn — after that turn completed. The
+   live-git-status watcher fires and `persistGitStatusSnapshot`
+   (`apps/backend/internal/orchestrator/event_handlers_git.go:198`) upserts a
+   `live_monitor` DB row for the throttled sidebar badge. That row is written
+   with `Files: nil, // intentional: badge only needs totals` — **by design**,
+   for an unrelated feature (the sidebar diff badge only needs aggregate
+   counts, not a file list).
+3. The user opens the delete confirmation. `useSessionDeleteWarning`
+   (`apps/web/hooks/use-session-delete-warning.ts:68-72`) fetches
+   `session.git.snapshots`, which is served by
+   `GetGitSnapshotsBySession` (`apps/backend/internal/task/repository/sqlite/git_snapshots.go:277-289`).
+   Its `ORDER BY` (line 284: `CASE WHEN triggered_by = 'agent_completed' THEN
+   0 ELSE 1 END, created_at DESC`) always sorts **every** `agent_completed`
+   row ahead of **every** `live_monitor` row for that session, regardless of
+   which is actually newer.
+4. `summarizeSnapshots` (`use-session-delete-warning.ts:95-107`) dedupes to
+   the *first-seen* row per branch and sums `Object.keys(files ?? {}).length`
+   and `ahead`. Because step 3's ordering puts the stale `agent_completed`
+   row first, the newer `live_monitor` row for that branch — the one that
+   would actually reflect the terminal edit — is skipped entirely: not just
+   its (empty) `files`, but also its `ahead` count. The dialog can show **0
+   uncommitted files and 0 unpushed commits** while real, uncommitted work
+   sits in the worktree.
+5. Nothing gates the delete on this being accurate. The user, seeing no
+   warning, confirms. `ReclaimSessionWorktree` →
+   `removeWorktreeDir` (`apps/backend/internal/worktree/manager_cleanup.go`)
+   runs `git worktree remove --force` (or the `os.RemoveAll` fallback),
+   permanently destroying the directory — including the edit nobody was ever
+   warned about.
+
+This is not hypothetical or rare: "finish an agent turn, tweak one more thing
+by hand in the terminal, then clean up the session" is an ordinary workflow
+for this product, not an edge case.
+
+**A fix already has a natural home.** The live WS push event this same watcher
+publishes (`GitEventPayload.Status.Files`,
+`apps/backend/internal/agent/runtime/lifecycle/event_types.go:291`) **does**
+carry the real file list in real time — only the *DB-persisted* `live_monitor`
+row drops it, deliberately, for the sidebar badge's sake. The frontend's own
+`gitStatus.byEnvironmentId`/`byEnvironmentRepo` store slice
+(`apps/web/lib/state/slices/session-runtime/types.ts:65-101`) is kept live
+and accurate from that same event stream and already backs the Git changes
+panel. `useSessionDeleteWarning` reinvented a new, weaker data path (historical
+DB snapshot rows) instead of reading the store slice that already has the
+right answer. Two independent fix directions, either sufficient on its own:
+(a) have the warning hook prefer the live `gitStatus` store entry for the
+session's repo(s) when present, falling back to snapshot history only when
+no live entry exists yet; or (b) stop discarding `Files` when persisting a
+`live_monitor` row (or carry the aggregate `modified`/`added`/`deleted`/
+`untracked`/`renamed` counts already sitting unused in `Metadata` as a
+fallback count when a row's `files` is empty), and change the ordering to
+true `created_at DESC` per branch rather than an unconditional
+`agent_completed`-always-wins rule, since that ordering choice is what lets a
+staler-but-higher-priority row shadow a fresher one in the first place.
+
+No test anywhere catches this — it's a data-freshness/data-source defect, not
+a logic-inversion a unit test targeting the wrong assumption would exercise
+by accident. Whoever fixes this should add a regression test that seeds an
+`agent_completed` snapshot with clean files, then a *later* `live_monitor` row
+whose `Metadata` (or, if fix direction (a) is taken, the live `gitStatus`
+store) reflects new uncommitted files, and asserts the warning reflects the
+newer state.
+
+### Test-supervisor's fresh mutation audit (round 2) — for the same handoff,
+not itself the reason this round is parked
+
+test-supervisor mutation-tested both new commits (not just re-checked round
+1) and returned FAIL with three Must-fix test-rigor gaps, all confirmed by
+an actual mutation that survived (production code intentionally broken, full
+package suite stayed green):
+
+1. **`TestExecuteSessionDeleteResourceCleanup_ReclaimsEveryWorktreeIndependently`
+   (`apps/backend/internal/task/service/resource_cleanup_session_delete_test.go:181`)
+   only asserts a call *count*.** Mutating the production loop
+   (`resource_cleanup_session_delete.go:165`) to reclaim the same worktree
+   twice instead of two distinct worktrees — i.e. reclaim one of a
+   multi-repo session's worktrees and silently leak the other — left every
+   package green. Fix: assert `reclaimedIDs` set-equality, and add a mixed
+   shared+exclusive case against real reference counting.
+2. **No test proves `ReclaimSessionWorktree` *returns* a directory-removal
+   failure** (`apps/backend/internal/worktree/manager_cleanup.go:323`)
+   despite its own doc comment's claim. Swapping the `return
+   fmt.Errorf(...)` for a `Warn` log + `return nil` left the whole
+   `internal/worktree` package green. This is exactly what the retry budget
+   and the spec's "Reclamation failure SHALL be observable" depend on.
+3. **No test proves a failed `session_delete` reclamation actually retries**
+   (`apps/backend/internal/task/service/resource_cleanup_jobs.go:350`).
+   Making a failed reclamation swallow its error and report `succeeded`
+   anyway left every package green. This kills the Durability scenarios for
+   transient-retry and eight-attempt exhaustion.
+
+Also should-fix, carried forward unclosed from round 1: `Manager.ForgetSession`
+has zero direct tests (mutating it to a no-op stays green); the Invariant
+scenarios and the stale-`worktree_id`-on-relaunch idempotency scenario still
+have no test anywhere; `simulateSessionCascadeDelete` still deletes the child
+row directly rather than the parent `task_sessions` row (confirmed low-risk —
+the cascade was independently verified to actually fire in both stores — but
+still untested by the helper itself).
+
+These three Must-fix items are test-rigor gaps, not proof the current code is
+broken in the ways they probe — the mutations had to actively break working
+code to go undetected. They do not independently drive this round's verdict;
+the CRITICAL finding above does. Both should be addressed in the same Build
+pass since they touch overlapping code.
+
+### Everything else re-confirmed clean this round
+
+Auth-first ordering, durable-worker snapshot isolation, the WS gateway
+backstop, no `git branch -D` in the reclaim path, no command-injection
+surface, no secrets/PII in the new snapshot data, and the correctness of all
+three round-1 CRITICAL/HIGH fixes — re-verified independently by
+security-reviewer (full APPROVE) and code-reviewer (0 blockers) this round,
+each reading the code directly rather than trusting commit messages or prior
+review notes.
+
+A minor test-infra bug found during this round's self-review — the new
+`routeMainWebSocketWithFailedActionResponse` e2e helper
+(`apps/web/e2e/helpers/ws-drop.ts`) rewrote an entire batched WS message down
+to a single synthetic error frame, silently dropping any sibling frame that
+happened to arrive batched alongside the targeted response — was fixed and
+committed in this round (`9dcc00214`) since it's test infrastructure, not
+production code, and was re-verified green before and after.
