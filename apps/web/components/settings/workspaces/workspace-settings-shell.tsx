@@ -88,9 +88,14 @@ export function WorkspaceSettingsShell({
           )}
         </div>
       </div>
+      {/* Pills on a phone, an underline rail from `md` up — the same boundary
+          the sidebar uses, so the strip changes shape exactly when the sidebar
+          that would otherwise carry this navigation disappears. Scrolls
+          horizontally at both sizes; six sections outrun a phone's width, and
+          wrapping them would push the page content below the fold. */}
       <nav
         aria-label={t("common:workspace")}
-        className="flex gap-1 overflow-x-auto border-b border-border"
+        className="flex gap-2 overflow-x-auto pb-1 scrollbar-hide md:gap-1 md:border-b md:border-border md:pb-0"
         data-testid="workspace-settings-tabs"
       >
         {WORKSPACE_SETTINGS_TABS.map(({ tab, labelKey }) => (
@@ -99,10 +104,16 @@ export function WorkspaceSettingsShell({
             href={workspaceSettingsHref(workspaceId, tab)}
             aria-current={activeTab === tab ? "page" : undefined}
             className={cn(
-              "whitespace-nowrap border-b-2 px-3 py-2 text-sm transition-colors",
+              "flex shrink-0 items-center whitespace-nowrap px-3 py-2 text-sm transition-colors",
+              "rounded-full border",
               activeTab === tab
-                ? "border-primary font-medium text-foreground"
-                : "border-transparent text-muted-foreground hover:text-foreground",
+                ? "border-primary/40 bg-primary/10 font-medium text-primary"
+                : "border-border/60 bg-muted/40 text-muted-foreground",
+              // From `md`, drop the pill and restore the rail.
+              "md:rounded-none md:border-0 md:border-b-2 md:bg-transparent",
+              activeTab === tab
+                ? "md:border-primary md:text-foreground"
+                : "md:border-transparent md:text-muted-foreground md:hover:text-foreground",
             )}
           >
             {t(labelKey)}
