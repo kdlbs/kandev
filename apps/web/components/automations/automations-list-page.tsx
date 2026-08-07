@@ -53,11 +53,13 @@ export function AutomationsListPage({ workspaceId }: AutomationsListPageProps) {
         description={t("automations:listDescription")}
         action={
           <Button
+            type="button"
+            size="sm"
             data-testid="new-automation-button"
             className="cursor-pointer"
             onClick={() => router.push(`/settings/workspaces/${workspaceId}/automations/new`)}
           >
-            <IconPlus className="h-4 w-4 mr-1" />
+            <IconPlus className="h-4 w-4 mr-2" />
             {t("automations:newAutomation")}
           </Button>
         }

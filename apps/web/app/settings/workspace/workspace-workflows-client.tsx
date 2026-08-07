@@ -20,7 +20,6 @@ import {
   useSortable,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { Separator } from "@kandev/ui/separator";
 import { SettingsSection } from "@/components/settings/settings-section";
 import { WorkflowCard } from "@/components/settings/workflow-card";
 import { WorkflowSectionActions } from "@/components/settings/workflow-section-actions";
@@ -44,7 +43,6 @@ import {
 import { WorkflowDialogs } from "@/app/settings/workspace/workspace-workflows-dialogs";
 import { useWorkflowCreation } from "@/app/settings/workspace/use-workflow-creation";
 import { WorkspaceNotFoundCard } from "@/app/settings/workspace/workspace-not-found-card";
-import { WorkspaceSectionHeader } from "@/components/settings/workspaces/workspace-section-header";
 
 type WorkspaceWorkflowsClientProps = {
   workspace: Workspace | null;
@@ -431,19 +429,19 @@ export function WorkspaceWorkflowsClient({
 
   return (
     <div className="space-y-8">
-      <WorkspaceSectionHeader
-        tab="workflows"
-        description={
-          isImproveWorkspace
-            ? t("workflows:workflowsReadOnlyImprove")
-            : t("workflows:manageWorkflowsForThisWorkspace")
-        }
-      />
-      <Separator />
+      {/* No section header — see the Repositories tab: the section below is
+          already named, marked and described. */}
       <SettingsSection
         icon={<IconArrowsShuffle className="h-5 w-5" />}
         title={t("workflows:workflows")}
-        description={t("workflows:workflowsSectionDescription")}
+        // The read-only note is the section's description here rather than a
+        // heading above it: the duplicated heading is gone, and this workspace
+        // being immutable is the one thing the static description omits.
+        description={
+          isImproveWorkspace
+            ? t("workflows:workflowsReadOnlyImprove")
+            : t("workflows:workflowsSectionDescription")
+        }
         action={
           isImproveWorkspace ? undefined : (
             <WorkflowSectionActions

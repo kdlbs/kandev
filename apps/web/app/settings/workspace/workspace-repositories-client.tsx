@@ -6,7 +6,6 @@ import type { TFunction } from "i18next";
 import { useRouter } from "@/lib/routing/client-router";
 import { IconGitBranch } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
-import { Separator } from "@kandev/ui/separator";
 import { SettingsSection } from "@/components/settings/settings-section";
 import { RepositoryCard } from "@/components/settings/repository-card";
 import { generateUUID } from "@/lib/utils";
@@ -44,7 +43,6 @@ import {
 } from "@/app/settings/workspace/workspace-repositories-dirty";
 import { defaultWorktreeBranchTemplate } from "@/lib/worktree-branch-template";
 import { isValidManualRepository } from "@/app/settings/workspace/workspace-repositories-validation";
-import { WorkspaceSectionHeader } from "@/components/settings/workspaces/workspace-section-header";
 
 type RepositoryItem = RepositoryWithScripts & { __autoOpen?: boolean };
 type WorkspaceRepositoriesClientProps = {
@@ -560,11 +558,9 @@ export function WorkspaceRepositoriesClient({
 
   return (
     <div className="space-y-8">
-      <WorkspaceSectionHeader
-        tab="repositories"
-        description={t("workspaces:manageRepositoriesConnected")}
-      />
-      <Separator />
+      {/* No section header: the Repositories section below already carries the
+          name, mark and description, and the tab strip above says which tab you
+          are on. A second copy of all three read as the page repeating itself. */}
       <SettingsSection
         icon={<IconGitBranch className="h-5 w-5" />}
         title={t("workspaces:repositories")}

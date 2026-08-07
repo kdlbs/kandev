@@ -99,7 +99,6 @@
   "lastAttempt": "last attempt {{when}}",
   "lastSynced": "last synced {{when}}",
   "loadingWorkflowSteps": "Loading workflow steps...",
-  "manageWorkflowsForThisWorkspace": "Manage workflows for this workspace.",
   "migrateAndDelete": "Migrate & Delete",
   "migrateAndDeleteStep": "Migrate & Delete Step",
   "migrating": "Migrating...",
