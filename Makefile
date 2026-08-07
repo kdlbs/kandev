@@ -58,7 +58,11 @@ SERVICE_HOME_DIR_FLAG := $(if $(HOME_DIR),--home-dir "$(HOME_DIR)",)
 SERVICE_NO_BOOT_START_FLAG := $(if $(filter 1 true yes,$(NO_BOOT_START)),--no-boot-start,)
 SERVICE_INSTALL_FLAGS := $(PORT_FLAG) $(SERVICE_HOME_DIR_FLAG) $(SERVICE_NO_BOOT_START_FLAG)
 DEV_WEB_PORT_FLAG := $(if $(WEB_PORT),--web-internal-port $(WEB_PORT),)
-DEV_FLAGS := $(strip $(PORT_FLAG) $(DEV_WEB_PORT_FLAG) $(DEV_ARGS))
+DEV_FLAGS := $(PORT_FLAG) $(DEV_WEB_PORT_FLAG) $(DEV_ARGS)
+# $(if …) does not strip its condition, so an all-whitespace DEV_FLAGS reads as
+# true. Test and print this instead, and forward DEV_FLAGS itself — stripping
+# what reaches the CLI would collapse whitespace inside a quoted DEV_ARGS value.
+DEV_FLAGS_DISPLAY := $(strip $(DEV_FLAGS))
 DESKTOP_BUNDLES ?= dmg
 
 # Phase headers
@@ -191,7 +195,7 @@ ifeq ($(OS),Windows_NT)
 	@echo "Building winjob (Ctrl-C-safe wrapper for Windows)..."
 	@$(MAKE) -C $(BACKEND_DIR) build-winjob
 endif
-	@echo "Launching via CLI$(if $(DEV_FLAGS), ($(DEV_FLAGS)), (auto ports))..."
+	@echo "Launching via CLI$(if $(DEV_FLAGS_DISPLAY), ($(DEV_FLAGS_DISPLAY)), (auto ports))..."
 	@cd $(APPS_DIR) && $(PNPM) -C cli dev -- dev $(DEV_FLAGS)
 
 .PHONY: dev-prod-db
