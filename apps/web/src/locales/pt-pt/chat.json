@@ -119,5 +119,6 @@
   "composerSteerPlaceholder": "Enviar agora — entregue ao turno em curso",
   "unknownError": "Erro desconhecido",
   "useWorkspaceDefault": "Usar a pré-definição da área de trabalho...",
-  "useWorkspaceDefaultOption": "Usar a pré-definição da área de trabalho"
+  "useWorkspaceDefaultOption": "Usar a pré-definição da área de trabalho",
+  "openProviderPage": "Abrir a página do fornecedor"
 }

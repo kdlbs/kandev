@@ -26,7 +26,7 @@ func runStart(ctx context.Context, opts Options) int {
 		fmt.Fprintln(os.Stderr, "[kandev] "+err.Error())
 		return 2
 	}
-	ports, err := pickPorts(backendPort)
+	ports, err := pickPorts(backendPort, backendPortSource(opts))
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "[kandev] "+err.Error())
 		return 1
@@ -92,7 +92,12 @@ func runManagedApp(ctx context.Context, cfg managedAppConfig) int {
 	supervisor := newSupervisorFn()
 	attachSignalsFn(supervisor)
 	shutdownDebugf("runManagedApp signal handler attached")
-	env := backendEnv(cfg.Ports, cfg.LogLevel, resolveConsoleLogLevel(cfg.Opts), cfg.Opts.Debug)
+	healthToken, err := newHealthToken()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "[kandev] "+err.Error())
+		return 1
+	}
+	env := backendEnv(cfg.Ports, cfg.LogLevel, resolveConsoleLogLevel(cfg.Opts), cfg.Opts.Debug, healthToken)
 	backend, dumpLogs, err := launchBackendFn(
 		cfg.Backend, []string{"__backend"}, cfg.BackendCWD, env, false, cfg.Ports, cfg.Mode, supervisor,
 	)
@@ -102,7 +107,7 @@ func runManagedApp(ctx context.Context, cfg managedAppConfig) int {
 	}
 	shutdownDebugf("runManagedApp backend launched")
 	fmt.Println("[kandev] starting backend...")
-	if err := waitForHealthFn(ctx, cfg.Ports.BackendURL, backend, healthTimeout(healthTimeoutReleaseMS), dumpLogs); err != nil {
+	if err := waitForHealthFn(ctx, cfg.Ports.BackendURL, backend, healthTimeout(healthTimeoutReleaseMS), healthToken, dumpLogs); err != nil {
 		supervisor.shutdown("backend health failure")
 		fmt.Fprintln(os.Stderr, "[kandev] "+err.Error())
 		return 1

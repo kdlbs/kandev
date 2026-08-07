@@ -169,23 +169,44 @@ func (s *Service) GetNextStepByPosition(ctx context.Context, workflowID string, 
 	return nil, nil // No next step found (current step is the last one)
 }
 
+// WorkflowMeta is the subset of workflow fields needed at step entry
+// (agent profile default + optional workflow-level prompt).
+type WorkflowMeta struct {
+	AgentProfileID string
+	Prompt         string
+}
+
+// GetWorkflowMeta returns agent profile id and prompt for a workflow in one
+// provider read. Callers that previously stacked GetWorkflowAgentProfileID and
+// GetWorkflowPrompt should use this instead.
+func (s *Service) GetWorkflowMeta(ctx context.Context, workflowID string) (WorkflowMeta, error) {
+	wf, err := s.workflowProvider.GetWorkflow(ctx, workflowID)
+	if err != nil {
+		return WorkflowMeta{}, err
+	}
+	return WorkflowMeta{
+		AgentProfileID: wf.AgentProfileID,
+		Prompt:         wf.Prompt,
+	}, nil
+}
+
 // GetWorkflowAgentProfileID returns the default agent profile ID for a workflow.
 func (s *Service) GetWorkflowAgentProfileID(ctx context.Context, workflowID string) (string, error) {
-	wf, err := s.workflowProvider.GetWorkflow(ctx, workflowID)
+	meta, err := s.GetWorkflowMeta(ctx, workflowID)
 	if err != nil {
 		return "", err
 	}
-	return wf.AgentProfileID, nil
+	return meta.AgentProfileID, nil
 }
 
 // GetWorkflowPrompt returns the optional workflow-level agent instructions.
 // Empty string means the workflow has no prompt configured.
 func (s *Service) GetWorkflowPrompt(ctx context.Context, workflowID string) (string, error) {
-	wf, err := s.workflowProvider.GetWorkflow(ctx, workflowID)
+	meta, err := s.GetWorkflowMeta(ctx, workflowID)
 	if err != nil {
 		return "", err
 	}
-	return wf.Prompt, nil
+	return meta.Prompt, nil
 }
 
 // GetPreviousStepByPosition returns the previous step before the given position for a workflow.

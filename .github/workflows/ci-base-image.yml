@@ -37,7 +37,7 @@ jobs:
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
 
       - name: Set up Buildx
-        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
 
       # Push the built images to GHCR on any `push` to main (the default
       # publish path) or on manual `workflow_dispatch` (used to seed new tag
@@ -48,7 +48,7 @@ jobs:
         if: |
           github.event_name == 'workflow_dispatch'
           || (github.event_name == 'push' && github.ref == 'refs/heads/main')
-        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -99,7 +99,7 @@ jobs:
       # Consumed by the `e2e` shards and `e2e-report`, where the smaller pull
       # is the speedup that pays for the split.
       - name: Build and push runtime
-        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
         with:
           context: .
           file: .github/docker/ci-base/Dockerfile
@@ -117,7 +117,7 @@ jobs:
       # `cache-from` includes the runtime scope so the shared lower layers
       # only build once across both pushes.
       - name: Build and push build
-        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
         with:
           context: .
           file: .github/docker/ci-base/Dockerfile

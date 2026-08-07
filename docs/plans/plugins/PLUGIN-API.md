@@ -289,11 +289,17 @@ interface PluginRegistry {
   // <PluginSlot name="..." slotProps={...}/>. Initial slots: "task-sidebar",
   // "settings-nav", "chat-input-actions", "chat-top-bar",
   // "main-top-bar", "app-status-bar-left", "app-status-bar-right",
-  // "plugin-settings", and "task-card-indicators".
+  // "plugin-settings", "task-card-indicators", and "task-card-tags".
   // "task-card-indicators" renders a small icon/badge beside the PR status
   // icon on every kanban card and forwards
   // `{ taskId, workspaceId, workflowStepId }` as `slotProps`. Not a closed
   // union — hosts may register additional slot names.
+  // "task-card-tags" renders in its own row on every kanban card, below the
+  // badges row — for contributions too wide for the cramped title-row
+  // "task-card-indicators" spot (e.g. a row of tag chips) — and forwards the
+  // same `{ taskId: string, workspaceId: string | null, workflowStepId: string | null }`
+  // shape as `slotProps` (`workspaceId` is null with no active workspace, and
+  // `workflowStepId` is null when the task has no workflow step assigned).
   // "chat-input-actions" renders icon buttons in the chat composer toolbar
   // (beside the model picker, mic, and send) and forwards
   // `{ taskId, taskTitle, activeSessionId, sessionIds }` as `slotProps`.
@@ -508,6 +514,12 @@ one).
 matching read-only surface: a small icon/badge rendered beside the PR status
 icon on every card, receiving `{ taskId, workspaceId, workflowStepId }`.
 
+`"task-card-tags"` is a second, sibling read-only surface for the same
+context — same `{ taskId, workspaceId, workflowStepId }` shape — but mounted
+in its own row on the card instead of the cramped title row
+`"task-card-indicators"` shares with `PRTaskIcon`. Use it for a contribution
+that needs its own width, e.g. a row of tag chips.
+
 ### Task filters
 
 `registerTaskFilter` adds one section to the kanban board's display dropdown
@@ -565,8 +577,9 @@ defaults, or the bare component when the route opted out (`topbar: false`).
   (`components/task/chat/chat-input-toolbar-desktop.tsx` and
   `-mobile.tsx`, via `chat-input-plugin-actions.tsx`) hosts the
   `chat-input-actions` slot, passing
-  `{ taskId, taskTitle, activeSessionId, sessionIds }`. `kanban-card-content.tsx`
-  hosts `task-card-indicators` beside `PRTaskIcon`.
+  `{ taskId, taskTitle, activeSessionId, sessionIds }`. `kanban-card-plugin-slots.tsx`
+  hosts `task-card-indicators` beside `PRTaskIcon` and `task-card-tags` as its
+  own row, both mounted from `kanban-card-content.tsx`'s `KanbanCardBody`.
 - `components/task/dockview-shared.tsx` / `dockview-panel-content.tsx` /
   `dockview-desktop-layout.tsx`: the generic `"plugin-panel"` dockview
   component + `pluginPanelTab`, and `renderPanel`'s `"plugin-panel"` case

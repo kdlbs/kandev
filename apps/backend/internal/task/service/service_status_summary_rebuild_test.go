@@ -151,3 +151,50 @@ func TestHydrateMissingTaskStatusSummariesRepairsExistingTaskOnce(t *testing.T) 
 		t.Fatalf("PR reader calls after existing summary = %d, want one", prReader.calls)
 	}
 }
+
+// The rebuild path is what runs after a restart, so it is where a stale record
+// used to come back. A session whose error was cleared must rebuild clean.
+func TestHydrateMissingTaskStatusSummariesSkipsClearedAgentErrors(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	createTaskWithoutRepositories(t, ctx, repo)
+
+	session := &models.TaskSession{
+		ID:        "session-1",
+		TaskID:    "task-1",
+		State:     models.TaskSessionStateWaitingForInput,
+		IsPrimary: true,
+	}
+	if err := repo.CreateTaskSession(ctx, session); err != nil {
+		t.Fatalf("CreateTaskSession: %v", err)
+	}
+	// The orchestrator writes JSON null on turn completion rather than deleting
+	// the key, so the rebuild must treat that as "no failure".
+	if err := repo.SetSessionMetadataKey(ctx, session.ID, models.SessionMetaKeyLastAgentError, nil); err != nil {
+		t.Fatalf("clear last agent error: %v", err)
+	}
+	stored, err := repo.GetTaskSession(ctx, session.ID)
+	if err != nil {
+		t.Fatalf("GetTaskSession: %v", err)
+	}
+
+	svc.statusSummaries = repo
+	task := &models.Task{ID: "task-1", WorkspaceID: "ws-1"}
+	got, err := svc.HydrateMissingTaskStatusSummaries(
+		ctx,
+		[]*models.Task{task},
+		map[string][]*models.TaskSession{task.ID: {stored}},
+		map[string]models.TaskPendingAction{},
+		map[string]*statussummary.TaskStatusSummary{},
+	)
+	if err != nil {
+		t.Fatalf("HydrateMissingTaskStatusSummaries: %v", err)
+	}
+	summary := got[task.ID]
+	if summary == nil {
+		t.Fatal("repaired summary missing from returned map")
+	}
+	if summary.ActiveError != nil {
+		t.Fatalf("active error = %+v, want a cleared record to stay invisible", summary.ActiveError)
+	}
+}

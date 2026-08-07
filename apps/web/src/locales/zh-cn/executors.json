@@ -130,7 +130,7 @@
   "noEnvironmentVariablesConfigured": "未配置环境变量。",
   "noEnvironmentVariablesConfiguredAddOne": "未配置环境变量。请在下方添加。",
   "noNetworkPolicyRulesConfigured": "未配置网络策略规则。",
-  "noProfilesConfigured": "未配置配置文件。",
+  "noProfilesConfigured": "尚未配置任何配置文件。",
   "noResponseBody": "无响应正文",
   "noTransferableCredentialsFound": "未找到可传输的凭据。",
   "none": "无",

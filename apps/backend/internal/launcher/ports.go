@@ -15,20 +15,39 @@ type portConfig struct {
 	BackendURL   string
 }
 
+const (
+	backendPortFlag      = "--port"
+	backendPortEnv       = "KANDEV_BACKEND_PORT"
+	legacyBackendPortEnv = "KANDEV_PORT"
+)
+
 func resolvePorts(opts Options) (int, error) {
 	backend := opts.BackendPort
 	if backend == 0 {
-		if p, err := envPort("KANDEV_BACKEND_PORT"); err != nil {
+		if p, err := envPort(backendPortEnv); err != nil {
 			return 0, err
 		} else if p != 0 {
 			backend = p
-		} else if p, err := envPort("KANDEV_PORT"); err != nil {
+		} else if p, err := envPort(legacyBackendPortEnv); err != nil {
 			return 0, err
 		} else {
 			backend = p
 		}
 	}
 	return backend, nil
+}
+
+func backendPortSource(opts Options) string {
+	if opts.BackendPort != 0 {
+		return backendPortFlag
+	}
+	if _, ok := os.LookupEnv(backendPortEnv); ok {
+		return backendPortEnv
+	}
+	if _, ok := os.LookupEnv(legacyBackendPortEnv); ok {
+		return legacyBackendPortEnv
+	}
+	return ""
 }
 
 func envPort(name string) (int, error) {
@@ -43,7 +62,7 @@ func envPort(name string) (int, error) {
 	return n, nil
 }
 
-func pickPorts(backendPort int) (portConfig, error) {
+func pickPorts(backendPort int, source string) (portConfig, error) {
 	used := map[int]bool{}
 	backend := backendPort
 	if backend == 0 {
@@ -52,6 +71,12 @@ func pickPorts(backendPort int) (portConfig, error) {
 			return portConfig{}, err
 		}
 		backend = p
+	} else if !canBind(backend) {
+		sourceSuffix := ""
+		if source != "" {
+			sourceSuffix = fmt.Sprintf(" from %s", source)
+		}
+		return portConfig{}, fmt.Errorf("backend port %d%s is already in use", backend, sourceSuffix)
 	}
 	used[backend] = true
 	agentctl, err := pickAvailablePortExcept(defaultAgentctlPort, used)

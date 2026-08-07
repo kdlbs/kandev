@@ -821,6 +821,11 @@ export class SessionPage {
     return this.prTopbarPopover().getByTestId("pr-popover-updated-at");
   }
 
+  /** Footer spinner + "Updating…", shown while a refresh is in flight. */
+  prPopoverUpdating(): Locator {
+    return this.prTopbarPopover().getByTestId("pr-popover-updating");
+  }
+
   /** Empty-state row when the PR has no checks yet. */
   prChecksEmpty(): Locator {
     return this.prTopbarPopover().getByTestId("pr-checks-empty");
@@ -1054,6 +1059,7 @@ export class SessionPage {
    */
   async sendMessage(text: string) {
     const editor = await this.composerReady();
+    await this.waitForDirectInput();
     await editor.click();
     await editor.fill(text);
     const modifier = process.platform === "darwin" ? "Meta" : "Control";
@@ -1066,6 +1072,7 @@ export class SessionPage {
    */
   async sendMessageViaButton(text: string) {
     const editor = await this.composerReady();
+    await this.waitForDirectInput();
     await editor.click();
     await editor.fill(text);
     const isTouch = await this.page.evaluate(() => window.matchMedia("(pointer: coarse)").matches);
@@ -1074,6 +1081,24 @@ export class SessionPage {
       return;
     }
     await this.clickSubmitWhenReady();
+  }
+
+  /**
+   * Wait until the composer is in direct-input mode — the idle placeholder
+   * ("Continue working on the task...") visible, not the queue affordance
+   * ("Queue instructions to the agent...").
+   *
+   * The submit button stays enabled while the session is busy (the queue
+   * affordance lets you type-and-queue), and `composerReady()` only checks
+   * editability, so a send right after a turn completes can race the store's
+   * RUNNING→WAITING_FOR_INPUT transition and silently queue the message
+   * instead of delivering it. Gating the send on the idle placeholder makes
+   * sends to an idle session deterministic: typing only starts once the store
+   * session state is genuinely promptable. Must run on an empty editor — the
+   * placeholder decoration is only rendered while the editor has no content.
+   */
+  async waitForDirectInput(timeout = 15_000) {
+    await expect(this.anyIdleInput()).toBeVisible({ timeout });
   }
 
   /** The composer's send/submit button (scoped to the active chat panel). */

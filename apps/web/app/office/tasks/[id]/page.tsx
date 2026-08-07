@@ -13,6 +13,10 @@ import {
   type TaskDecisionDTO,
 } from "@/lib/api/domains/office-api";
 import { listTaskSessions } from "@/lib/api/domains/session-api";
+import {
+  liveSessionMetadataFromStore,
+  mergeLiveSessionMetadata,
+} from "@/components/task/simple/chat-entries";
 import { OfficeSimplePane } from "@/components/task/simple/OfficeSimplePane";
 import { TaskAdvancedMode } from "./task-advanced-mode";
 import { IssueDetailSkeleton } from "./task-detail-skeleton";
@@ -34,6 +38,11 @@ import { t } from "@/lib/i18n";
 type IssueDetailPageProps = {
   params: Promise<{ id: string }>;
 };
+
+// Sentinel for the live-session metadata key: distinguishes "no store entry"
+// (keep the initial fetch) from an explicit server-side null (metadata was
+// cleared and must not be resurrected).
+const SESSION_METADATA_ABSENT = "\u0000absent\u0000";
 
 function mapDecisionDTO(d: TaskDecisionDTO): TaskDecision {
   return {
@@ -166,6 +175,7 @@ function mapTaskSession(session: ApiTaskSession): TaskSession {
     completedAt: session.completed_at ?? undefined,
     updatedAt: session.updated_at,
     errorMessage: session.error_message ?? undefined,
+    metadata: session.metadata ?? undefined,
     commandCount: session.command_count,
   };
 }
@@ -236,6 +246,34 @@ function useSessionLiveSync({
     [sessionStatesKey],
   );
 
+  // Same stable-key trick for the live metadata (last_agent_error etc.)
+  // carried by session.state_changed, so the office chat can render the
+  // remediation link without a refetch. Tri-state per session: the sentinel
+  // marks "no metadata update" (no store row, or a partial row without a
+  // metadata field), explicit null means the server cleared metadata, and an
+  // object is the live metadata.
+  const sessionMetadataKey = useAppStore((s) => {
+    const items = s.taskSessions?.items ?? {};
+    return baseSessions
+      .map((sess) =>
+        JSON.stringify(liveSessionMetadataFromStore(items, sess.id) ?? SESSION_METADATA_ABSENT),
+      )
+      .join("\u0001");
+  });
+  const sessionStoreMetadata = useMemo(
+    () =>
+      sessionMetadataKey.split("\u0001").map((chunk) => {
+        try {
+          const parsed = JSON.parse(chunk);
+          if (parsed === SESSION_METADATA_ABSENT) return undefined;
+          return parsed && typeof parsed === "object" ? (parsed as Record<string, unknown>) : null;
+        } catch {
+          return null;
+        }
+      }),
+    [sessionMetadataKey],
+  );
+
   const connectionStatus = useAppStore((s) => s.connection.status);
   useSessionLiveSyncSubscriptions({
     connectionStatus,
@@ -261,7 +299,7 @@ function useSessionLiveSync({
     void onCommentsRefetch();
   }, [sessionStatesKey, taskId, onTaskRefetch, onCommentsRefetch]);
 
-  return sessionStoreStates;
+  return { sessionStoreStates, sessionStoreMetadata };
 }
 
 // ---------------------------------------------------------------------------
@@ -391,7 +429,7 @@ function useIssueData(id: string) {
     setTimeline(updatedTimeline);
   }, []);
 
-  const sessionStoreStates = useSessionLiveSync({
+  const { sessionStoreStates, sessionStoreMetadata } = useSessionLiveSync({
     task,
     baseSessions,
     onTaskRefetch,
@@ -402,8 +440,11 @@ function useIssueData(id: string) {
       baseSessions.map((s, i) => ({
         ...s,
         state: (sessionStoreStates[i] ?? s.state) as TaskSession["state"],
+        // Live session.state_changed metadata wins over the initial fetch;
+        // explicit null (server cleared metadata) is preserved.
+        metadata: mergeLiveSessionMetadata(s.metadata, sessionStoreMetadata[i]),
       })),
-    [baseSessions, sessionStoreStates],
+    [baseSessions, sessionStoreStates, sessionStoreMetadata],
   );
 
   // Refetch comments when a new comment is created via office WS event

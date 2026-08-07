@@ -393,14 +393,16 @@ func (a *orchestratorWorkflowStepGetterAdapter) GetPreviousStepByPosition(ctx co
 	return a.svc.GetPreviousStepByPosition(ctx, workflowID, currentPosition)
 }
 
-// GetWorkflowAgentProfileID implements orchestrator.WorkflowStepGetter.
-func (a *orchestratorWorkflowStepGetterAdapter) GetWorkflowAgentProfileID(ctx context.Context, workflowID string) (string, error) {
-	return a.svc.GetWorkflowAgentProfileID(ctx, workflowID)
-}
-
-// GetWorkflowPrompt implements orchestrator.WorkflowStepGetter.
-func (a *orchestratorWorkflowStepGetterAdapter) GetWorkflowPrompt(ctx context.Context, workflowID string) (string, error) {
-	return a.svc.GetWorkflowPrompt(ctx, workflowID)
+// GetWorkflowMeta implements orchestrator.WorkflowStepGetter.
+func (a *orchestratorWorkflowStepGetterAdapter) GetWorkflowMeta(ctx context.Context, workflowID string) (orchestrator.WorkflowMeta, error) {
+	meta, err := a.svc.GetWorkflowMeta(ctx, workflowID)
+	if err != nil {
+		return orchestrator.WorkflowMeta{}, err
+	}
+	return orchestrator.WorkflowMeta{
+		AgentProfileID: meta.AgentProfileID,
+		Prompt:         meta.Prompt,
+	}, nil
 }
 
 // reviewTaskCreatorAdapter adapts the task service to the orchestrator's ReviewTaskCreator interface.

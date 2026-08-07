@@ -145,15 +145,21 @@ type taskQueuePromotionPublisher interface {
 	PublishTaskQueuePromoted(ctx context.Context, task *models.Task)
 }
 
+// WorkflowMeta is the subset of workflow fields needed at step entry
+// (agent profile default + optional workflow-level prompt).
+type WorkflowMeta struct {
+	AgentProfileID string
+	Prompt         string
+}
+
 // WorkflowStepGetter retrieves workflow step information for prompt building.
 type WorkflowStepGetter interface {
 	GetStep(ctx context.Context, stepID string) (*wfmodels.WorkflowStep, error)
 	GetNextStepByPosition(ctx context.Context, workflowID string, currentPosition int) (*wfmodels.WorkflowStep, error)
 	GetPreviousStepByPosition(ctx context.Context, workflowID string, currentPosition int) (*wfmodels.WorkflowStep, error)
-	GetWorkflowAgentProfileID(ctx context.Context, workflowID string) (string, error)
-	// GetWorkflowPrompt returns the optional workflow-level agent instructions
-	// prepended at step entry. Empty string means the workflow has no prompt.
-	GetWorkflowPrompt(ctx context.Context, workflowID string) (string, error)
+	// GetWorkflowMeta returns agent profile id and prompt for a workflow in one
+	// read. Step-entry paths that need both fields should call this once.
+	GetWorkflowMeta(ctx context.Context, workflowID string) (WorkflowMeta, error)
 }
 
 // PromptReferenceExpander resolves "@name" saved-prompt references embedded in

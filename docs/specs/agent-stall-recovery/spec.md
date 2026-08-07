@@ -1,7 +1,7 @@
 ---
 status: approved
 created: 2026-07-29
-updated: 2026-08-02
+updated: 2026-08-07
 owner: Kandev
 ---
 
@@ -11,11 +11,13 @@ Decisions:
 
 - [ADR-2026-07-29-agent-stall-user-controlled-recovery](../../decisions/2026-07-29-agent-stall-user-controlled-recovery.md)
 - [ADR-2026-08-02-agent-terminal-diagnostics-over-stderr](../../decisions/2026-08-02-agent-terminal-diagnostics-over-stderr.md)
+- [ADR-2026-08-07-allowlisted-provider-action-links](../../decisions/2026-08-07-allowlisted-provider-action-links.md)
 
 Implementation plans:
 
 - [Agent stall recovery](../../plans/agent-stall-recovery/plan.md)
 - [OpenCode terminal error surfacing](../../plans/opencode-terminal-error-surfacing/plan.md)
+- [OpenCode actionable error links](../../plans/opencode-actionable-error-links/plan.md)
 
 ## Why
 
@@ -79,6 +81,27 @@ mere inactivity so a failed turn is not presented as healthy work.
   proof of failure. The prompt continues and the advisory inactivity recovery
   remains available.
 
+### Allowlisted actionable diagnostics
+
+- A validated OpenCode remediation URL may cross the agentctl boundary as a
+  separate `remediation_url` field. It is not appended to the sanitized
+  provider message and is never sourced from an arbitrary raw error string.
+- The only accepted URL shape is HTTPS on the exact `opencode.ai` host with a
+  path of `/workspace/<safe-workspace-id>/go`, with no userinfo, query, or
+  fragment. The workspace identifier and complete URL are bounded before they
+  are retained.
+- Kandev extracts this field from a structured ACP error field when OpenCode
+  supplies one, or from a correlated structured OpenCode stderr record. If the
+  source does not carry the URL, Kandev keeps the existing short error and does
+  not attempt to reconstruct it from private OpenCode files.
+- Kanban recovery cards, the persisted last-agent-error notice, and Office's
+  failed-session entry expose the same safe destination as a localized,
+  keyboard- and touch-accessible external link. The sanitized message and
+  collapsed technical details remain unchanged.
+- A missing, malformed, untrusted, or unsupported URL produces no link and no
+  URL-bearing fallback text. Existing recovery actions and generic error copy
+  remain available.
+
 ## Diagnostic contract
 
 The internal normalized provider diagnostic contains only:
@@ -91,6 +114,7 @@ The internal normalized provider diagnostic contains only:
 | `message` | Sanitized provider message with URLs and identifiers removed |
 | `occurred_at` | Parsed diagnostic timestamp |
 | `reset_at` | Derived by adding a relative reset duration to `occurred_at`; absolute reset timestamps are not accepted in this version |
+| `remediation_url` | Optional, exact-host OpenCode action URL accepted by the adapter-specific validator |
 
 The persisted recovery-message metadata uses
 `failure_kind: provider_quota_limited`, plus the safe model and reset fields,
@@ -120,6 +144,10 @@ sanitized diagnostic message for the collapsed technical-details surface.
 - Advisory stall notices retain their existing persisted-message behavior.
 - Sanitized provider failures use the existing session error and recovery
   message persistence. They survive reloads like other recoverable failures.
+- A validated `remediation_url` is persisted only in the structured recovery
+  metadata and remains available after reloads and through the Office
+  `session.state_changed` snapshot. It is omitted from generic error text and
+  raw stderr.
 - Raw agent stderr remains a bounded, executor-local in-memory diagnostic. It
   is not added to session metadata, messages, debug exports, or durable logs by
   this feature.
@@ -164,6 +192,16 @@ sanitized diagnostic message for the collapsed technical-details surface.
 - **GIVEN** an OpenCode build without usable diagnostic stderr, **WHEN** its ACP
   prompt hangs without further events, **THEN** the five-minute advisory notice
   remains the recovery path.
+- **GIVEN** a correlated OpenCode diagnostic containing a valid remediation URL,
+  **WHEN** the recovery surface settles, **THEN** Kanban and Office show a
+  localized external link while the sanitized message contains no URL or
+  workspace identifier.
+- **GIVEN** a URL with the wrong host, scheme, path, query, fragment, or
+  malformed workspace identifier, **WHEN** it crosses the adapter boundary,
+  **THEN** Kandev drops the URL and shows the existing generic recovery copy.
+- **GIVEN** OpenCode 1.18.5 returns only its current short ACP failure,
+  **WHEN** Kandev handles the error, **THEN** it shows the short failure without
+  pretending that the TUI-only URL was received.
 - **GIVEN** the provider-limit recovery renders on a phone viewport, **WHEN**
   the user reads details or selects a recovery action, **THEN** the same outcome
   is available through touch targets of at least 44px with no horizontal page
@@ -177,7 +215,10 @@ sanitized diagnostic message for the collapsed technical-details surface.
 - Reading, tailing, or exposing an agent vendor's private log files.
 - Treating arbitrary stderr text as trusted terminal evidence.
 - Persisting raw stderr or raw OpenCode log records.
-- Following or exposing OpenCode account/balance URLs from provider errors.
+- Following or exposing arbitrary provider URLs, account URLs, or balance URLs;
+  only the exact allowlisted OpenCode remediation route is in scope.
+- Recovering a URL that was never present in ACP or managed structured stderr,
+  including by reading or tailing OpenCode's private log files.
 - Automatically purchasing capacity, changing models, or scheduling a retry at
   the reset time.
 - Repairing OpenCode's ACP implementation upstream; OpenCode should still be

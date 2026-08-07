@@ -117,6 +117,7 @@ Per-workspace credentials and triage triggers for external services.
 | [provider-aware-review-automation](integrations/provider-aware-review-automation.md) | approved |
 | [github-authentication](integrations/github-authentication.md) | draft |
 | [gitlab-integration](gitlab-integration/spec.md) | shipped |
+| [gitlab-workflow-sync](gitlab-workflow-sync/spec.md) | shipped |
 | [jira-status-filter](jira-status-filter/spec.md) | shipped |
 | [enable-disable-toggle](integrations/enable-disable-toggle.md) | shipped |
 
@@ -150,6 +151,7 @@ Subscription quota tracking and per-agent cheap-model profile routing.
 | [empty-turn-notice](ui/empty-turn-notice.md) | shipped |
 | [acp-shell-command-output](ui/acp-shell-command-output.md) | shipped |
 | [acp-model-configuration-summary](ui/acp-model-configuration-summary.md) | shipped |
+| [context-window-unmeasured-state](ui/context-window-unmeasured-state.md) | building |
 | [review-file-status](ui/review-file-status.md) | building |
 | [submodule-review](ui/submodule-review.md) | shipped |
 | [review-markdown-preview](ui/review-markdown-preview.md) | draft |
@@ -225,6 +227,7 @@ System pages (Radarr/Sonarr-style) for status, disk usage, database maintenance,
 | [homebrew-core](homebrew-core/spec.md) | building |
 | [native-kandev-cli](native-kandev-cli/spec.md) | draft |
 | [desktop-tauri-app](desktop-tauri-app/spec.md) | shipped |
+| [port-collision-safety](port-collision-safety/spec.md) | building |
 | [lsp-file-intelligence](lsp-file-intelligence/spec.md) | building |
 | [public-share-links](public-share-links/spec.md) | draft |
 | [ssh-executor](ssh-executor/spec.md) | draft |

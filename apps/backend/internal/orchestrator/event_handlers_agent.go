@@ -1054,6 +1054,10 @@ func (s *Service) handleAgentCompletedLocked(ctx context.Context, data watcher.A
 	s.scheduler.HandleTaskCompleted(data.TaskID, true)
 	s.scheduler.RemoveTask(data.TaskID)
 
+	// The agent finished a turn, so any stored failure no longer describes the
+	// session. `session` was read above, so the guard costs nothing.
+	s.clearRecoveredAgentError(context.WithoutCancel(ctx), data.TaskID, session)
+
 	s.completeTurnForSession(context.WithoutCancel(ctx), data.SessionID)
 
 	if s.sessionHasPendingClarification(ctx, data.SessionID) {
@@ -1472,6 +1476,7 @@ func (s *Service) persistLastAgentError(ctx context.Context, data watcher.AgentE
 		Message:          errMsg,
 		OccurredAt:       time.Now().UTC(),
 		AgentExecutionID: data.AgentExecutionID,
+		RemediationURL:   providerRemediationURL(data),
 	}
 	if err := s.repo.SetSessionMetadataKey(ctx, data.SessionID, models.SessionMetaKeyLastAgentError, lastErr); err != nil {
 		s.logger.Warn("failed to persist last agent error",
@@ -1490,6 +1495,9 @@ func (s *Service) persistLastAgentError(ctx context.Context, data watcher.AgentE
 			"stamp":              lastErr.Stamp(),
 			"agent_execution_id": lastErr.AgentExecutionID,
 		}
+		if lastErr.RemediationURL != "" {
+			eventData["remediation_url"] = lastErr.RemediationURL
+		}
 		if err := s.eventBus.Publish(ctx, events.TaskSessionErrorChanged, bus.NewEvent(
 			events.TaskSessionErrorChanged,
 			"orchestrator",
@@ -1501,6 +1509,69 @@ func (s *Service) persistLastAgentError(ctx context.Context, data watcher.AgentE
 				zap.Error(err))
 		}
 	}
+}
+
+// clearRecoveredAgentError drops a session's stored agent failure once the agent
+// completes a turn, and publishes the inactive error event so open clients drop
+// the red error affordance.
+//
+// persistLastAgentError deliberately keeps the record across a successful turn
+// as an investigation breadcrumb, but nothing ever retired it, so a failure the
+// agent recovered from weeks ago still read as live: every path that re-derives
+// task status from session metadata (a status-summary rebuild, a backend
+// restart, a later session event) put it straight back. The failure also lands
+// in the transcript as a recovery message, which is where an investigation
+// actually looks, so the metadata copy is not the durable record.
+//
+// Writes JSON null rather than a delete: LoadLastAgentError already treats that
+// as absent, so no new repository surface is needed.
+func (s *Service) clearRecoveredAgentError(ctx context.Context, taskID string, session *models.TaskSession) {
+	if session == nil || session.ID == "" {
+		return
+	}
+	if _, ok := models.LoadLastAgentError(session.Metadata); !ok {
+		return
+	}
+	if err := s.repo.SetSessionMetadataKey(
+		ctx, session.ID, models.SessionMetaKeyLastAgentError, nil,
+	); err != nil {
+		s.logger.Warn("failed to clear recovered agent error",
+			zap.String("task_id", taskID),
+			zap.String("session_id", session.ID),
+			zap.Error(err))
+		return
+	}
+	// Keep the in-memory copy in step: the session-state publish below reads
+	// its `session_metadata` straight off this object.
+	delete(session.Metadata, models.SessionMetaKeyLastAgentError)
+	if s.eventBus == nil {
+		return
+	}
+	if err := s.eventBus.Publish(ctx, events.TaskSessionErrorChanged, bus.NewEvent(
+		events.TaskSessionErrorChanged,
+		"orchestrator",
+		map[string]interface{}{
+			"task_id":    taskID,
+			"session_id": session.ID,
+			"active":     false,
+		},
+	)); err != nil {
+		s.logger.Warn("failed to publish recovered task session error event",
+			zap.String("task_id", taskID),
+			zap.String("session_id", session.ID),
+			zap.Error(err))
+	}
+}
+
+// providerRemediationURL returns the adapter-validated remediation URL from the
+// normalized provider diagnostic, or "" when the failure carried none. The URL
+// is only ever set by the adapter's allowlist validator; the orchestrator does
+// not validate or reconstruct URLs from prose.
+func providerRemediationURL(data watcher.AgentEventData) string {
+	if data.ProviderError == nil || !data.ProviderError.Valid() {
+		return ""
+	}
+	return data.ProviderError.RemediationURL
 }
 
 // createRecoveryStatusMessage builds and persists the ActionMessage shown
@@ -1536,6 +1607,11 @@ func (s *Service) createRecoveryStatusMessage(ctx context.Context, data watcher.
 		"has_resume_token": hasResumeToken,
 		"is_auth_error":    authErr,
 		"resume_corrupted": resumeCorrupted,
+	}
+	// The validated remediation URL is carried independently of quota
+	// classification so the generic recoverable card can still show the link.
+	if remediationURL := providerRemediationURL(data); remediationURL != "" {
+		meta["remediation_url"] = remediationURL
 	}
 	applyProviderQuotaMetadata(meta, data)
 

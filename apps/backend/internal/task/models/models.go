@@ -318,10 +318,13 @@ const SessionMetaKeyPendingStepCompletion = "pending_step_completion_signal"
 const SessionMetaKeyLastAgentError = "last_agent_error"
 
 // LastAgentError is persisted under TaskSession.Metadata[SessionMetaKeyLastAgentError].
+// RemediationURL is only ever set from an adapter-validated provider
+// diagnostic; it is never reconstructed from the error message.
 type LastAgentError struct {
 	Message          string     `json:"message"`
 	OccurredAt       time.Time  `json:"occurred_at"`
 	AgentExecutionID string     `json:"agent_execution_id,omitempty"`
+	RemediationURL   string     `json:"remediation_url,omitempty"`
 	DismissedAt      *time.Time `json:"dismissed_at,omitempty"`
 }
 

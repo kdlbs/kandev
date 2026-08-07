@@ -3,6 +3,7 @@ package gitlab
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -41,6 +42,7 @@ type MockClient struct {
 	requiredApprovals  map[mockMRKey]int
 	issues             map[mockIssueKey]*Issue
 	branches           map[string][]RepoBranch
+	repoFiles          map[mockRepoFileKey][]byte
 	members            map[string][]ProjectMember
 	mrSubscriptions    map[mockMRKey]bool
 	issueSubscriptions map[mockIssueKey]bool
@@ -55,6 +57,14 @@ type mockMRKey struct {
 type mockIssueKey struct {
 	Project string
 	IID     int
+}
+
+// mockRepoFileKey identifies a seeded repository file. Ref is part of the key
+// so a test can seed different content per branch.
+type mockRepoFileKey struct {
+	Project string
+	Ref     string
+	Path    string
 }
 
 // NewMockClient builds a fresh mock with a small canned dataset.
@@ -86,6 +96,7 @@ func (c *MockClient) resetLocked() {
 	c.requiredApprovals = make(map[mockMRKey]int)
 	c.issues = make(map[mockIssueKey]*Issue)
 	c.branches = make(map[string][]RepoBranch)
+	c.repoFiles = make(map[mockRepoFileKey][]byte)
 	c.members = make(map[string][]ProjectMember)
 	c.mrSubscriptions = make(map[mockMRKey]bool)
 	c.issueSubscriptions = make(map[mockIssueKey]bool)
@@ -439,6 +450,68 @@ func (c *MockClient) ListProjectBranches(_ context.Context, projectPath string) 
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.branches[projectPath], nil
+}
+
+// SeedRepoFile registers repository file content the mock will serve from
+// ListRepoTree and GetRepoFileContent.
+func (c *MockClient) SeedRepoFile(projectPath, ref, path string, content []byte) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.repoFiles[mockRepoFileKey{Project: projectPath, Ref: ref, Path: path}] = content
+}
+
+// ListRepoTree returns the seeded files directly under path. Like the real
+// endpoint this is non-recursive, so a file nested deeper surfaces as its
+// intermediate directory entry rather than as a blob.
+func (c *MockClient) ListRepoTree(
+	_ context.Context, projectPath, path, ref string,
+) ([]RepoTreeEntry, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	prefix := ""
+	if path != "" {
+		prefix = strings.TrimSuffix(path, "/") + "/"
+	}
+	seen := make(map[string]bool)
+	entries := make([]RepoTreeEntry, 0)
+	for key := range c.repoFiles {
+		if key.Project != projectPath || key.Ref != ref || !strings.HasPrefix(key.Path, prefix) {
+			continue
+		}
+		rest := strings.TrimPrefix(key.Path, prefix)
+		if rest == "" {
+			continue
+		}
+		name, entryType := rest, TreeEntryTypeBlob
+		if idx := strings.Index(rest, "/"); idx >= 0 {
+			name, entryType = rest[:idx], TreeEntryTypeTree
+		}
+		if seen[name] {
+			continue
+		}
+		seen[name] = true
+		entries = append(entries, RepoTreeEntry{
+			Name: name,
+			Type: entryType,
+			Path: prefix + name,
+		})
+	}
+	// Map iteration is unordered; sort so seeded fixtures list deterministically.
+	sort.Slice(entries, func(i, j int) bool { return entries[i].Path < entries[j].Path })
+	return entries, nil
+}
+
+func (c *MockClient) GetRepoFileContent(
+	_ context.Context, projectPath, path, ref string,
+) ([]byte, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	content, ok := c.repoFiles[mockRepoFileKey{Project: projectPath, Ref: ref, Path: path}]
+	if !ok {
+		return nil, fmt.Errorf("mock: file %q not found in %s@%s", path, projectPath, ref)
+	}
+	return content, nil
 }
 
 func (c *MockClient) ListIssues(context.Context, string, string) ([]*Issue, error) {

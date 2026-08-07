@@ -29,6 +29,7 @@ afterEach(() => {
 const CANCEL_TEST_ID = "recovery-cancel-retry-button";
 const TECHNICAL_DETAILS = "Technical details";
 const RECOVERY_MESSAGE = "Agent encountered an error";
+const RESUME_LABEL = "Resume session";
 const RESUME_TEST_ID = "recovery-resume-button";
 const STALL_CANCEL_TEST_ID = "stall-cancel-turn-button";
 
@@ -75,7 +76,7 @@ function recoveryMessage(withParams = false): Message {
       actions: [
         {
           type: "ws_request",
-          label: "Resume session",
+          label: RESUME_LABEL,
           test_id: RESUME_TEST_ID,
           ...(withParams
             ? {
@@ -334,7 +335,7 @@ describe("ActionMessage — provider quota recovery", () => {
           actions: [
             {
               type: "ws_request",
-              label: "Resume session",
+              label: RESUME_LABEL,
               test_id: RESUME_TEST_ID,
             },
           ],
@@ -374,5 +375,68 @@ describe("ActionMessage — provider quota recovery", () => {
 
     expect(screen.getByTestId("provider-quota-recovery")).toBeTruthy();
     expect(screen.getByText(/when the provider makes capacity available/i)).toBeTruthy();
+  });
+});
+
+describe("ActionMessage — remediation link", () => {
+  const REMEDIATION_URL = "https://opencode.ai/workspace/wrk_01KQM7K5CYT715264YKKFB17ZY/go";
+  const QUOTA_OUTPUT = "5-hour usage limit reached";
+
+  function recoveryMeta(remediationUrl?: string): Message {
+    return retryMessage({
+      content: RECOVERY_MESSAGE,
+      metadata: {
+        variant: "error",
+        recovery_actions: true,
+        remediation_url: remediationUrl,
+        error_output: "usage limit reached",
+        actions: [{ type: "ws_request", label: RESUME_LABEL, test_id: RESUME_TEST_ID }],
+      },
+    } as Partial<Message>);
+  }
+
+  it("renders a validated remediation link for quota recovery", () => {
+    renderAction(
+      retryMessage({
+        content: "provider quota reached",
+        metadata: {
+          variant: "error",
+          recovery_actions: true,
+          failure_kind: "provider_quota_limited",
+          provider_name: "OpenCode",
+          error_output: QUOTA_OUTPUT,
+          remediation_url: REMEDIATION_URL,
+          actions: [{ type: "ws_request", label: RESUME_LABEL, test_id: RESUME_TEST_ID }],
+        },
+      } as Partial<Message>),
+      "WAITING_FOR_INPUT",
+    );
+
+    const link = screen.getByTestId("remediation-link") as HTMLAnchorElement;
+    expect(link.href).toBe(REMEDIATION_URL);
+    expect(link.target).toBe("_blank");
+    expect(link.rel).toBe("noopener noreferrer");
+    expect(link.className).toContain("min-h-11");
+    // The sanitized message and collapsed details stay URL-free.
+    expect(screen.queryByText(/opencode\.ai\/workspace/i)).toBeNull();
+    expect(screen.getByTestId("provider-quota-recovery").textContent).toContain(QUOTA_OUTPUT);
+  });
+
+  it("renders a remediation link for a generic recovery card too", () => {
+    renderAction(recoveryMeta(REMEDIATION_URL), "WAITING_FOR_INPUT");
+
+    const link = screen.getByTestId("remediation-link") as HTMLAnchorElement;
+    expect(link.href).toBe(REMEDIATION_URL);
+    expect(screen.getByTestId(RESUME_TEST_ID)).toBeTruthy();
+  });
+
+  it("renders no link for an invalid remediation URL", () => {
+    renderAction(
+      recoveryMeta("https://evil.example.com/workspace/wrk_123/go"),
+      "WAITING_FOR_INPUT",
+    );
+
+    expect(screen.queryByTestId("remediation-link")).toBeNull();
+    expect(screen.getByTestId(RESUME_TEST_ID)).toBeTruthy();
   });
 });

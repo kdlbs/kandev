@@ -284,7 +284,7 @@ plugin leaks a stale registration.
   (`session-mobile-bottom-nav.tsx`) with `presentation: "mobile"`.
 - **Kanban card contributions:** `registerTaskMenuAction({ group: "edit", ... })` turns the flat
   `Edit` item into an `Edit` submenu (`kanban-card-edit-submenu.tsx`);
-  `registerComponent("task-card-indicators", ...)` renders beside `PRTaskIcon` via `<PluginSlot/>`.
+  `registerComponent("task-card-indicators", ...)` renders beside `PRTaskIcon` via `<PluginSlot/>`; `task-card-tags` renders in its own row below the badges (for contributions too wide for the title-row indicators spot, e.g. tag chips).
 - **`host.storage`:** authenticated per-user key/value storage (`lib/plugins/host-api.ts`), backed by
   `/api/plugins/{id}/user-state/...` (`docs/decisions/2026-08-01-per-user-plugin-storage.md`).
   `subscribe` (`lib/plugins/user-state-sync.ts`) wraps `registerWsHandler` with own-plugin filtering

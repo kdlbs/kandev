@@ -83,6 +83,8 @@ export type TaskSession = {
   updatedAt?: string;
   /** Verbatim error payload populated when state === "FAILED". */
   errorMessage?: string;
+  /** Server metadata (incl. last_agent_error); refreshed by session.state_changed. */
+  metadata?: Record<string, unknown> | null;
   /** Server-resolved tool_call count; powers the "ran N commands" segment
    *  of the timeline entry header without a per-session message fetch. */
   commandCount?: number;
@@ -99,6 +101,8 @@ export type RunError = {
   agentProfileId?: string;
   rawPayload: string;
   failedAt: string;
+  /** Adapter-validated provider remediation URL from last_agent_error metadata. */
+  remediationUrl?: string;
 };
 
 export type TaskLabelLocal = {

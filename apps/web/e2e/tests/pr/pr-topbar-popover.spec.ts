@@ -609,4 +609,63 @@ test.describe("PR top-bar CI popover", () => {
     });
     await expect(session.prCheckGroupCount("passed")).toHaveText("25", { timeout: 5_000 });
   });
+
+  test("footer reports the refresh instead of claiming the data is fresh", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(120_000);
+    const title = "Refresh Indicator";
+    const seed = await seedTask(
+      apiClient,
+      seedData.workspaceId,
+      seedData.agentProfileId,
+      seedData.repositoryId,
+      title,
+    );
+    await associatePR(apiClient, seed.taskId, {
+      checks_state: "success",
+      checks_total: 3,
+      checks_passing: 3,
+    });
+    // Feedback must actually resolve to something cacheable, or the footer has
+    // no timestamp to fall back to once the refresh settles.
+    await apiClient.mockGitHubSeedPRFeedback({
+      owner: OWNER,
+      repo: REPO,
+      pr_number: PR_NUMBER,
+      checks: [
+        { name: "CI / build", status: "completed", conclusion: "success", html_url: "" },
+        { name: "CI / lint", status: "completed", conclusion: "success", html_url: "" },
+        { name: "CI / test", status: "completed", conclusion: "success", html_url: "" },
+      ],
+    });
+
+    // Hold the PRFeedback fetch open so the indicator is observable. Asserting
+    // on a real refresh would race the response, which usually lands in well
+    // under a frame against the mock backend.
+    let releaseFeedback: () => void = () => {};
+    const feedbackHeld = new Promise<void>((resolve) => {
+      releaseFeedback = resolve;
+    });
+    await testPage.route(
+      (url) => /\/api\/v1\/github\/prs\/[^/]+\/[^/]+\/\d+$/.test(url.pathname),
+      async (route) => {
+        await feedbackHeld;
+        await route.continue();
+      },
+    );
+
+    const session = await openTaskAndWait(testPage, seed, title);
+    await session.hoverPRTopbar();
+    await session.prTopbarPopover().hover();
+
+    await expect(session.prPopoverUpdating()).toBeVisible({ timeout: 10_000 });
+    await expect(session.prPopoverUpdatedAt()).toHaveCount(0);
+
+    releaseFeedback();
+    await expect(session.prPopoverUpdatedAt()).toBeVisible({ timeout: 10_000 });
+    await expect(session.prPopoverUpdating()).toHaveCount(0);
+  });
 });

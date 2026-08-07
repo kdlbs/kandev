@@ -22,6 +22,7 @@ import { useArchiveAndSwitchTask } from "@/hooks/use-task-actions";
 import { useTaskRemoval } from "@/hooks/use-task-removal";
 import { deleteTask } from "@/lib/api/domains/kanban-api";
 import { AuthMethodsPanel, GenericAuthPanel } from "./auth-methods-panel";
+import { RemediationLink } from "@/components/task/remediation-link";
 import { HostShellDialog } from "@/components/settings/host-shell-dialog";
 import type { Message, TaskSessionState } from "@/lib/types/http";
 import type { MessageAction, RecoveryAuthMethod } from "@/components/task/chat/types";
@@ -51,6 +52,7 @@ type ActionMeta = {
   provider_name?: string;
   model_id?: string;
   reset_at?: string;
+  remediation_url?: string;
 };
 
 function isSessionActive(state?: TaskSessionState) {
@@ -360,6 +362,7 @@ function ActionMessageDetails({
   const errorOutput = metadata.error_output || technicalDetails;
   return (
     <>
+      {metadata.remediation_url && <RemediationLink url={metadata.remediation_url} />}
       {errorOutput && <TechnicalDetails>{errorOutput}</TechnicalDetails>}
       {metadata.is_auth_error && metadata.auth_methods && metadata.auth_methods.length > 0 && (
         <AuthMethodsPanel

@@ -520,6 +520,7 @@
   "updated": "Updated ",
   "updatedAgo": "updated {{elapsed}} ago",
   "updatedJustNow": "updated just now",
+  "updatingStatus": "Updating…",
   "useAnAppWhenAutomationNeeds": "Use an App when automation needs its own identity, short-lived tokens, and repository-level installation control. Setup is more involved and requires a publicly reachable HTTPS URL.",
   "useCommaSeparatedOwnerRepoValues": "Use comma-separated owner/repo values.",
   "useDefault": "Use default",
