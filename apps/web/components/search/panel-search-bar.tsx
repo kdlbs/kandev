@@ -208,8 +208,7 @@ export function PanelSearchBar({
   className,
 }: PanelSearchBarProps) {
   const { t } = useTranslation();
-  // Resolved here rather than as a default parameter: a default is evaluated
-  // before `t` exists, and a module-scope `t()` would freeze at the boot locale.
+  // Can't stay a default parameter: `t` is declared later in the function body.
   const resolvedPlaceholder = placeholder ?? t("common:searchEllipsis");
   const [localValue, setLocalValue] = useState(value);
   const inputRef = useRef<HTMLInputElement | null>(null);
