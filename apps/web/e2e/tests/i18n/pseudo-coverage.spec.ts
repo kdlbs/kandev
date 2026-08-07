@@ -21,12 +21,34 @@ import { test, expect } from "../../fixtures/test-base";
  * only sees plain literals in JSX, so it and this spec cover different halves of
  * the same question — add to both in the PR that migrates a directory.
  *
- * Gated on `KANDEV_I18N_COVERAGE=1` rather than run in CI: with the migration
- * proceeding one directory at a time, a screen's own copy can be clean while
- * shared chrome it renders is not yet. It becomes a hard gate when the last
- * directory lands and the env guard comes off.
+ * THIS IS A HARD CI GATE. It ran behind `KANDEV_I18N_COVERAGE=1` only while the
+ * migration was mid-flight, because a screen's own copy could be clean while
+ * shared chrome it renders was not yet. The last live directory has landed and
+ * the env guard is gone: it now runs unconditionally in the `chromium` project
+ * alongside every other spec.
  *
- *   KANDEV_I18N_COVERAGE=1 pnpm e2e -- e2e/tests/i18n/pseudo-coverage.spec.ts
+ *   pnpm e2e -- e2e/tests/i18n/pseudo-coverage.spec.ts
+ *
+ * WHAT IT GUARANTEES: on each screen in `SCREENS`, every rendered text node and
+ * every value of a `COPY_ATTRIBUTES` attribute either came through `t()` /
+ * `<Trans>` (and so renders accented under the pseudo-locale), or is on an
+ * allowlist that says why it must not be translated.
+ *
+ * IF YOUR PR JUST WENT RED HERE, the failure names the exact strings and the
+ * screen. Read them: each one is copy your change put on screen without routing
+ * it through `t()`. This spec is the ONLY gate that can see most of them —
+ * `i18next/no-literal-string` inspects literals in JSX and nothing else, so copy
+ * in a variable, a default parameter, a `.ts` helper or a SCREAMING_CASE config
+ * table is invisible to lint and visible only here. Repeated by-hand sweeps
+ * found 15-60 such strings that every other gate passed.
+ *
+ * The fix is to externalize the string: add it to `src/locales/en/<ns>.json` and
+ * call `t("<ns>:<key>")`. See docs/i18n.md. Adding an `allow:` entry is NOT the
+ * fix and is the one failure mode this file has actually shipped twice — an
+ * entry asserting a path was migrated while it still rendered English. `allow`
+ * is for text the frontend must not translate but cannot avoid rendering (a
+ * backend-owned record, a product name), and it must say where the value comes
+ * from.
  *
  * BOTH passes walk `document.body`, deliberately, and NOT the page's `<main>`.
  * Scoping to the page under test is the obvious reading of what each test claims,
@@ -46,8 +68,6 @@ import { test, expect } from "../../fixtures/test-base";
  * only because the walk is body-wide. The fix for chrome noise is migrating
  * chrome, not narrowing the oracle.
  */
-
-const COVERAGE_ENABLED = process.env.KANDEV_I18N_COVERAGE === "1";
 
 /**
  * Migrated screens whose visible text is overwhelmingly UI chrome, not user data.
@@ -494,11 +514,6 @@ async function findUnlocalizedCopy(
 }
 
 test.describe("i18n pseudo-locale coverage", () => {
-  test.skip(
-    !COVERAGE_ENABLED,
-    "Set KANDEV_I18N_COVERAGE=1 to run the string-externalization oracle (hard gate at task-40).",
-  );
-
   for (const screen of SCREENS) {
     test(`no un-externalized copy on ${screen.name}`, async ({ testPage }) => {
       await activatePseudo(testPage, screen.url);
