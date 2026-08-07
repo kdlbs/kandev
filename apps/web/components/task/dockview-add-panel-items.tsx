@@ -26,7 +26,6 @@ import { mrTaskKey } from "@/components/gitlab/mr-detail-panel";
 import { RepositoryScriptsMenuItems } from "./repository-scripts-menu";
 import { SessionReopenMenuItems } from "./session-reopen-menu";
 import { TerminalReopenMenuItems } from "./terminal-reopen-menu";
-import { useTranslation } from "react-i18next";
 
 export type AddPanelMenuState = {
   taskId: string | null;
@@ -147,7 +146,6 @@ export function AddPanelMenuItems({
   const addChangesPanel = useDockviewStore((s) => s.addChangesPanel);
   const addPRPanel = useDockviewStore((s) => s.addPRPanel);
   const addMRPanel = useDockviewStore((s) => s.addMRPanel);
-  const { t } = useTranslation();
 
   return (
     <>
