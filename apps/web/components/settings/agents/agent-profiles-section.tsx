@@ -20,6 +20,7 @@ import { deleteAgentProfileAction } from "@/app/actions/agents";
 import { useRouter } from "@/lib/routing/client-router";
 import { toAgentProfileOption } from "@/lib/state/slices/settings/types";
 import type { Agent, AgentProfile } from "@/lib/types/http";
+import { RecordDot } from "@/components/settings/record-dot";
 
 function agentSetupHref(agentName: string): string {
   return `/settings/agents/${encodeURIComponent(agentName)}?mode=create`;
@@ -134,7 +135,7 @@ export function ProfileRow({ agent, profile }: { agent: Agent; profile: AgentPro
       <CardContent className="flex items-center justify-between gap-2 px-3">
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
-            <span aria-hidden className="h-1.5 w-1.5 shrink-0 rounded-full bg-primary/70" />
+            <RecordDot enabled={profile.enabled !== false} />
             <span className="truncate text-sm font-medium">{profile.name}</span>
           </div>
           {(profile.model || profile.mode) && (

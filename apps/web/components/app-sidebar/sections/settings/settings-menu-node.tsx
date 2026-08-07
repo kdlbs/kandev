@@ -4,7 +4,7 @@ import { useTranslation } from "react-i18next";
 
 import { AgentLogo } from "@/components/agent-logo";
 import type { SettingsMenuNode } from "./settings-menu-branches";
-import { RecordDot, SettingsBranch, SettingsLeaf } from "./settings-nav-primitives";
+import { RecordGlyph, SettingsBranch, SettingsLeaf } from "./settings-nav-primitives";
 import type { SettingsMenuExpansion } from "./use-settings-menu-expansion";
 
 type SettingsMenuNodeRowProps = {
@@ -35,7 +35,7 @@ function resolveLeadingIcon(node: SettingsMenuNode, isRecord: boolean) {
   if (node.agentName) {
     return <AgentLogo agentName={node.agentName} className="h-3.5 w-3.5 shrink-0" />;
   }
-  if (isRecord && !node.icon) return <RecordDot />;
+  if (isRecord && !node.icon) return <RecordGlyph enabled={node.enabled} />;
   return undefined;
 }
 

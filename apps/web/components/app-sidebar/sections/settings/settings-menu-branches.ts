@@ -65,6 +65,12 @@ export type SettingsMenuNode = {
    */
   isUserRecord?: boolean;
   /**
+   * Whether this record is turned on, for the records that can be turned off —
+   * only agent profiles today. Omitted where the concept does not apply, which
+   * is not the same as `false`: a workspace is never "off".
+   */
+  enabled?: boolean;
+  /**
    * Routes this node owns beyond `href` and its `href/` descendants. Needed by
    * nodes with no page of their own (an agent, whose profile pages live under a
    * path the agent itself does not resolve to) and by branch roots, which
@@ -79,7 +85,13 @@ export type SettingsMenuNode = {
 export type BranchWorkspace = { id: string; name: string };
 export type BranchAgent = {
   name: string;
-  profiles: ReadonlyArray<{ id: string; name: string; agentDisplayName?: string }>;
+  profiles: ReadonlyArray<{
+    id: string;
+    name: string;
+    agentDisplayName?: string;
+    /** Absent on older payloads, which is why the check is `!== false`. */
+    enabled?: boolean;
+  }>;
 };
 export type BranchExecutor = {
   id: string;
@@ -198,6 +210,7 @@ export function buildAgentsBranch(agents: ReadonlyArray<BranchAgent>): SettingsM
           href: `${agentHref}/profiles/${profile.id}`,
           label: { text: profile.name },
           isUserRecord: true,
+          enabled: profile.enabled !== false,
         })),
       };
     });
