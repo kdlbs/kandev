@@ -31,6 +31,7 @@ import { SystemGroup } from "./system-group";
 import { WorkspacesGroup } from "./workspaces-group";
 
 const SECRETS_HREF = "/settings/general/secrets";
+const INTEGRATIONS_SETTINGS_HREF = "/settings/integrations";
 const DEFAULT_OPEN_GROUP = "workspaces";
 
 // Single-open accordion: each top-level group owns a route prefix. The group
@@ -128,6 +129,12 @@ export function SettingsTree({ pathname }: { pathname: string }) {
             label={t("common:externalMcp")}
             icon={IconPlugConnected}
             isActive={pathname === EXTERNAL_MCP_SETTINGS_HREF}
+          />
+          <SettingsLeaf
+            href={INTEGRATIONS_SETTINGS_HREF}
+            label={t("common:integrations")}
+            icon={IconPlugConnected}
+            isActive={pathname === INTEGRATIONS_SETTINGS_HREF}
           />
           <PluginSlot name="settings-nav" />
           <SettingsLeaf

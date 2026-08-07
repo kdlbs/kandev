@@ -1,7 +1,7 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SettingsSaveProvider } from "@/components/settings/settings-save-provider";
-import IntegrationsIndexPage from "./page";
+import { IntegrationsIndexPage } from "@/components/integrations/integrations-index-page";
 
 const { pushNavigationStateSpy } = vi.hoisted(() => ({
   pushNavigationStateSpy: vi.fn(),
@@ -42,10 +42,10 @@ beforeEach(() => {
 
 afterEach(cleanup);
 
-function renderPage() {
+function renderPage(workspaceId?: string) {
   return render(
     <SettingsSaveProvider>
-      <IntegrationsIndexPage />
+      <IntegrationsIndexPage workspaceId={workspaceId} />
     </SettingsSaveProvider>,
   );
 }
@@ -93,6 +93,14 @@ describe("IntegrationsIndexPage", () => {
       "",
       "/settings/integrations/azure-devops",
       expect.any(Function),
+    );
+  });
+
+  it("keeps workspace-scoped integration links on the workspace route", () => {
+    renderPage("ws-1");
+
+    expect(screen.getByRole("link", { name: "Azure DevOps" }).getAttribute("href")).toBe(
+      "/settings/workspace/ws-1/integrations/azure-devops",
     );
   });
 

@@ -14,6 +14,7 @@ import CreateProfilePage from "@/app/settings/executors/new/[type]/page";
 import SSHExecutorPage from "@/app/settings/executors/ssh/[executorId]/page";
 import ExternalMcpPage from "@/app/settings/external-mcp/page";
 import IntegrationsIndexPage from "@/app/settings/integrations/page";
+import { IntegrationsIndexPage as IntegrationsIndexPageClient } from "@/components/integrations/integrations-index-page";
 import IntegrationsGitHubPage from "@/app/settings/integrations/github/page";
 import IntegrationsAzureDevOpsPage from "@/app/settings/integrations/azure-devops/page";
 import IntegrationsGitLabPage from "@/app/settings/integrations/gitlab/page";
@@ -379,7 +380,11 @@ function renderWorkspaceSettingsRoute(pathname: string) {
 function renderIntegrationSettingsRoute(section: string | null, workspaceId?: string) {
   switch (section) {
     case null:
-      return <IntegrationsIndexPage workspaceId={workspaceId} />;
+      return workspaceId ? (
+        <IntegrationsIndexPageClient workspaceId={workspaceId} />
+      ) : (
+        <IntegrationsIndexPage />
+      );
     case "azure-devops":
       return <IntegrationsAzureDevOpsPage workspaceId={workspaceId} />;
     case "github":
