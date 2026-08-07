@@ -195,7 +195,7 @@
   "draftCreated": "Rascunho de {{longName}} criado",
   "duration": "duração",
   "durationValue": "Duração: {{duration}}",
-  "earlierUpdates_one": "Atualizações anteriores ({{count}})",
+  "earlierUpdates_one": "Atualização anterior ({{count}})",
   "earlierUpdates_other": "Atualizações anteriores ({{count}})",
   "editComment": "Editar comentário",
   "empty": "(vazio)",
