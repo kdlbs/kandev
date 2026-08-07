@@ -7,7 +7,9 @@ import { Card } from "@kandev/ui/card";
 import type { AgentSummary, SessionSummary } from "@/lib/api/domains/office-api";
 import { AgentAvatar as RoleAwareAgentAvatar } from "./agent-avatar";
 import { timeAgo } from "@/lib/utils/time";
-import { useNow } from "./shared/use-now";
+import { useNow } from "@/hooks/use-now";
+import type { TFunction } from "i18next";
+import { useTranslation } from "react-i18next";
 
 type Props = { summary: AgentSummary };
 
@@ -23,9 +25,10 @@ type Props = { summary: AgentSummary };
  * spec acceptance #1: N agents → N cards, no shrinking on idle.
  */
 function AgentCardInner({ summary }: Props) {
+  const { t } = useTranslation();
   const isLive = summary.status === "live";
   const isErrored = isAutoPaused(summary) || summary.last_run_status === "failed";
-  const subtitle = pickSubtitle(summary);
+  const subtitle = pickSubtitle(t, summary);
   const pill = pickActiveTask(summary);
   const recent = summary.recent_sessions ?? [];
 
@@ -108,6 +111,7 @@ function CardHeader({
   isLive: boolean;
   isErrored: boolean;
 }) {
+  const { t } = useTranslation();
   return (
     <div className="flex items-center gap-2 min-w-0">
       <StatusDot isLive={isLive} isErrored={isErrored} />
@@ -115,7 +119,7 @@ function CardHeader({
       <span className="font-medium truncate flex-1">{summary.agent_name}</span>
       <Link
         href={`/office/agents/${summary.agent_id}`}
-        aria-label={`Open ${summary.agent_name}`}
+        aria-label={t("office:openAgent", { name: summary.agent_name })}
         className="cursor-pointer text-muted-foreground hover:text-foreground"
       >
         <IconExternalLink className="h-3.5 w-3.5" />
@@ -147,6 +151,7 @@ function StatusDot({ isLive, isErrored }: { isLive: boolean; isErrored: boolean 
 type ActivePill = { taskId: string; identifier: string; title: string };
 
 function TaskPill({ pill, isLive }: { pill: ActivePill; isLive: boolean }) {
+  const { t } = useTranslation();
   return (
     <Link
       href={`/office/tasks/${pill.taskId}`}
@@ -157,7 +162,7 @@ function TaskPill({ pill, isLive }: { pill: ActivePill; isLive: boolean }) {
         <IconLoader2
           data-testid="agent-card-task-pill-spinner"
           className="h-3.5 w-3.5 shrink-0 animate-spin text-primary"
-          aria-label="being worked on"
+          aria-label={t("office:beingWorkedOn")}
         />
       ) : null}
       {pill.identifier ? (
@@ -168,11 +173,38 @@ function TaskPill({ pill, isLive }: { pill: ActivePill; isLive: boolean }) {
   );
 }
 
+/**
+ * The whole row is one key per variant rather than a sentence assembled from a
+ * verb, a duration and an optional command clause. The verb used to be a value
+ * (`isLive ? "working" : "worked"`) dropped into a fixed English word order,
+ * which no language can reorder or inflect; the command clause used a bare
+ * plural noun. Four keys, two of them pluralized on `count`, keep the English
+ * byte-identical and leave every language free.
+ */
+function sessionSummaryLine(
+  t: TFunction,
+  agent: string,
+  isLive: boolean,
+  seconds: number,
+  commandCount: number,
+): string {
+  if (commandCount > 0) {
+    const key = isLive
+      ? "office:agentWorkingForSecondsRanCommands"
+      : "office:agentWorkedForSecondsRanCommands";
+    return t(key, { agent, seconds, count: commandCount });
+  }
+  return t(isLive ? "office:agentWorkingForSeconds" : "office:agentWorkedForSeconds", {
+    agent,
+    seconds,
+  });
+}
+
 function SessionRow({ session, agentName }: { session: SessionSummary; agentName: string }) {
+  const { t } = useTranslation();
   const isLive = session.state === "RUNNING";
   // 1s tick when live (duration counter), 30s otherwise (timeAgo label).
   const now = useNow(isLive ? 1000 : 30_000);
-  const verb = isLive ? "working" : "worked";
   // Backend-computed duration is the source of truth for IDLE / COMPLETED
   // sessions — `completed_at` may be unset on office IDLE rows, so a
   // wall-clock fallback would grow forever. For RUNNING sessions we DO
@@ -181,11 +213,10 @@ function SessionRow({ session, agentName }: { session: SessionSummary; agentName
   const durationS = isLive
     ? Math.max(0, Math.floor((now - new Date(session.started_at).getTime()) / 1000))
     : session.duration_seconds;
-  const cmds = session.command_count > 0 ? ` · ran ${session.command_count} commands` : "";
   return (
     <div className="flex items-center gap-2 text-xs text-muted-foreground">
       <span className="truncate">
-        {agentName} {verb} for {durationS}s{cmds}
+        {sessionSummaryLine(t, agentName, isLive, durationS, session.command_count)}
       </span>
       <span className="flex-1" />
       <span className="shrink-0">{timeAgo(session.started_at)}</span>
@@ -193,18 +224,27 @@ function SessionRow({ session, agentName }: { session: SessionSummary; agentName
   );
 }
 
-function pickSubtitle(summary: AgentSummary): string {
+/**
+ * `{{ago}}` carries `timeAgo`'s output, a locale-formatted relative timestamp
+ * ("5m ago") rather than a translated label — the same shape as a formatted
+ * date, so interpolating it is safe. The em-dash placeholder is a symbol and
+ * stays a literal.
+ */
+function pickSubtitle(t: TFunction, summary: AgentSummary): string {
   if (isAutoPaused(summary)) {
-    const n = summary.consecutive_failures ?? 0;
-    return `Paused — ${n} consecutive failure${n === 1 ? "" : "s"}`;
+    // `count` + `_one`/`_other`, never a hand-written "s": the plural rule
+    // belongs in the catalog, not at this call site.
+    return t("office:pausedConsecutiveFailures", { count: summary.consecutive_failures ?? 0 });
   }
-  if (summary.status === "live") return "Live now";
-  if (summary.status === "never_run") return "Never run";
+  if (summary.status === "live") return t("office:liveNow");
+  if (summary.status === "never_run") return t("office:neverRun");
   const last = summary.last_session;
   if (!last) return "—";
   const ts = last.completed_at ?? last.started_at;
-  if (summary.last_run_status === "failed") return `Last run failed ${timeAgo(ts)}`;
-  return `Finished ${timeAgo(ts)}`;
+  if (summary.last_run_status === "failed") {
+    return t("office:lastRunFailedAgo", { ago: timeAgo(ts) });
+  }
+  return t("office:finishedAgo", { ago: timeAgo(ts) });
 }
 
 function isAutoPaused(summary: AgentSummary): boolean {

@@ -18,6 +18,17 @@ func TestMapUserSettingsStateIncludesArchiveConfirmation(t *testing.T) {
 	}
 }
 
+func TestMapUserSettingsStateIncludesAgentGeneratedTaskTitles(t *testing.T) {
+	state := mapUserSettingsState(userdto.UserSettingsResponse{
+		Settings: userdto.UserSettingsDTO{AgentGeneratedTaskTitles: true},
+	}, "workspace-1")
+
+	got, ok := state["agentGeneratedTaskTitles"].(bool)
+	if !ok || !got {
+		t.Fatalf("agentGeneratedTaskTitles = %#v, want true", state["agentGeneratedTaskTitles"])
+	}
+}
+
 func TestMapUserSettingsStateIncludesTasksListShowDetails(t *testing.T) {
 	state := mapUserSettingsState(userdto.UserSettingsResponse{
 		Settings: userdto.UserSettingsDTO{TasksListShowDetails: true},
@@ -64,6 +75,30 @@ func TestMapUserSettingsStateIncludesAppStatusBarOrder(t *testing.T) {
 	}
 	if left, ok := got["leftItemIds"].([]string); !ok || len(left) != 1 || left[0] != "left" {
 		t.Fatalf("leftItemIds = %#v, want [left]", got["leftItemIds"])
+	}
+}
+
+func TestMapUserSettingsStateNormalizesLspStatusLocation(t *testing.T) {
+	tests := []struct {
+		name  string
+		value string
+		want  string
+	}{
+		{name: "status bar is preserved", value: usermodels.LspStatusLocationStatusBar, want: usermodels.LspStatusLocationStatusBar},
+		{name: "empty uses toolbar", value: "", want: usermodels.LspStatusLocationToolbar},
+		{name: "unknown uses toolbar", value: "future_location", want: usermodels.LspStatusLocationToolbar},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			state := mapUserSettingsState(userdto.UserSettingsResponse{
+				Settings: userdto.UserSettingsDTO{LspStatusLocation: tt.value},
+			}, "workspace-1")
+
+			if got := state["lspStatusLocation"]; got != tt.want {
+				t.Fatalf("lspStatusLocation = %#v, want %q", got, tt.want)
+			}
+		})
 	}
 }
 

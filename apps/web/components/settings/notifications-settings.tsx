@@ -25,6 +25,8 @@ import {
   type NotificationsState,
   type AppriseFormMode,
 } from "@/components/settings/notifications-settings-actions";
+import { SettingsTarget } from "@/components/settings/settings-target";
+import { GENERAL_SETTINGS_TARGETS } from "@/lib/settings-discovery/catalog/general";
 
 function AppriseProviderCardActions({
   provider,
@@ -211,7 +213,7 @@ function ExternalProvidersSection({
 }: ExternalProvidersSectionProps) {
   const { t } = useTranslation();
   return (
-    <div className="space-y-4">
+    <SettingsTarget targetId={GENERAL_SETTINGS_TARGETS.notificationProviders} className="space-y-4">
       <div>
         <div className="text-base font-medium">{t("settings:externalProviders")}</div>
         <p className="text-sm text-muted-foreground">
@@ -285,7 +287,7 @@ function ExternalProvidersSection({
           )}
         </div>
       )}
-    </div>
+    </SettingsTarget>
   );
 }
 
@@ -410,7 +412,7 @@ export function NotificationsSettings() {
         onTextareaInput={handleTextareaInput}
       />
       <Separator className="my-4" />
-      <div className="space-y-4">
+      <SettingsTarget targetId={GENERAL_SETTINGS_TARGETS.notificationEvents} className="space-y-4">
         <div>
           <div className="text-base font-medium">{t("settings:notificationEvents")}</div>
           <p className="text-sm text-muted-foreground">
@@ -426,7 +428,7 @@ export function NotificationsSettings() {
             onTestProvider={actions.handleTestProvider}
           />
         )}
-      </div>
+      </SettingsTarget>
     </SettingsPageTemplate>
   );
 }

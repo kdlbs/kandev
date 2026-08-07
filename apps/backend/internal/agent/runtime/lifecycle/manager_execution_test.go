@@ -24,7 +24,10 @@ import (
 	"github.com/kandev/kandev/internal/agent/runtime/activity"
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	settingsmodels "github.com/kandev/kandev/internal/agent/settings/models"
+	"github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/secrets"
+	"github.com/kandev/kandev/internal/task/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
@@ -51,6 +54,47 @@ func TestErrSessionWorkspaceNotReady_UnrelatedError(t *testing.T) {
 
 	if errors.Is(unrelated, ErrSessionWorkspaceNotReady) {
 		t.Errorf("expected errors.Is to be false for unrelated error")
+	}
+}
+
+func TestResolveSessionRuntimeDoesNotCreateUnsupportedExecution(t *testing.T) {
+	provider := &mockWorkspaceInfoProvider{infos: map[string]*WorkspaceInfo{
+		"session-ssh": {
+			SessionID:    "session-ssh",
+			ExecutorType: string(models.ExecutorTypeSSH),
+		},
+	}}
+	mgr, backend := newEnvironmentExecutionTestManager(t, provider)
+
+	runtimeName, err := mgr.ResolveSessionRuntime(context.Background(), "session-ssh")
+	if err != nil {
+		t.Fatalf("ResolveSessionRuntime() error = %v", err)
+	}
+	if runtimeName != agentruntime.RuntimeSSH {
+		t.Fatalf("ResolveSessionRuntime() = %q, want %q", runtimeName, agentruntime.RuntimeSSH)
+	}
+	if got := backend.createCount.Load(); got != 0 {
+		t.Fatalf("CreateInstance calls = %d, want 0", got)
+	}
+	if _, exists := mgr.GetExecutionBySessionID("session-ssh"); exists {
+		t.Fatal("ResolveSessionRuntime() must not create an in-memory execution")
+	}
+}
+
+func TestResolveSessionRuntimeChecksSessionAccessBeforeLookup(t *testing.T) {
+	denied := errors.New("session access denied")
+	provider := &mockWorkspaceInfoProvider{infos: map[string]*WorkspaceInfo{
+		"session-ssh": {SessionID: "session-ssh", ExecutorType: string(models.ExecutorTypeSSH)},
+	}}
+	mgr, _ := newEnvironmentExecutionTestManager(t, provider)
+	mgr.SetSessionAccessChecker(func(context.Context, string) error { return denied })
+
+	_, err := mgr.ResolveSessionRuntime(context.Background(), "session-ssh")
+	if !errors.Is(err, denied) {
+		t.Fatalf("ResolveSessionRuntime() error = %v, want access error", err)
+	}
+	if provider.sessionCalls != 0 {
+		t.Fatalf("workspace provider calls = %d, want 0 before authorization", provider.sessionCalls)
 	}
 }
 
@@ -280,6 +324,111 @@ func TestCoalescedExecutionCreationHasManagerDeadline(t *testing.T) {
 		}
 		maintenance.Release()
 	})
+}
+
+func TestCreateExecutionRollsBackWhenRegistrationCannotPersist(t *testing.T) {
+	const sessionID = "session-create-persist-failure"
+	mgr, backend := newEnvironmentExecutionTestManager(t, &mockWorkspaceInfoProvider{
+		infos: map[string]*WorkspaceInfo{
+			sessionID: {
+				TaskID: "task-create-persist-failure", SessionID: sessionID,
+				TaskEnvironmentID: "env-create-persist-failure", WorkspacePath: "/workspace/task",
+				AgentID: "auggie",
+			},
+		},
+	})
+	mgr.SetExecutorProfileReader(&fakeExecutorProfileReader{session: &models.TaskSession{
+		ID: sessionID, TaskID: "task-create-persist-failure", State: models.TaskSessionStateStarting,
+	}})
+	writer := &launchRegistrationWriter{
+		upserted:  make(chan struct{}),
+		upsertErr: errors.New("database is locked"),
+	}
+	mgr.SetExecutorRunningWriter(writer)
+
+	_, err := mgr.GetOrEnsureExecution(context.Background(), sessionID)
+	if err == nil || !strings.Contains(err.Error(), "persist execution registration") {
+		t.Fatalf("GetOrEnsureExecution error = %v, want persistence failure", err)
+	}
+	if got := backend.stopCount.Load(); got != 1 {
+		t.Fatalf("StopInstance calls = %d, want 1", got)
+	}
+	if _, exists := mgr.executionStore.GetBySessionID(sessionID); exists {
+		t.Fatal("workspace execution survived failed durable registration")
+	}
+}
+
+const (
+	terminalSessionID     = "session-terminal-shell"
+	terminalEnvironmentID = "env-terminal-shell"
+	terminalTaskID        = "task-terminal-shell"
+)
+
+func newTerminalSessionManager(t *testing.T, state models.TaskSessionState) (*Manager, *createInstanceExecutor) {
+	t.Helper()
+	mgr, backend := newEnvironmentExecutionTestManager(t, &mockWorkspaceInfoProvider{
+		infos: map[string]*WorkspaceInfo{
+			terminalSessionID: {
+				TaskID: terminalTaskID, SessionID: terminalSessionID,
+				TaskEnvironmentID: terminalEnvironmentID, WorkspacePath: "/workspace/task",
+				AgentID: "auggie",
+			},
+		},
+	})
+	mgr.SetExecutorProfileReader(&fakeExecutorProfileReader{session: &models.TaskSession{
+		ID: terminalSessionID, TaskID: terminalTaskID, State: state,
+	}})
+	return mgr, backend
+}
+
+// A shell terminal left open on a terminal session reconnects on a timer, and
+// the file, git, LSP and port panels poll their own session-keyed path. Every
+// entry point must be rejected from the session state alone: creating the
+// runtime instance first and rolling it back turned an idle panel into a
+// spawn/teardown loop for as long as the tab stayed open.
+func TestEnsureExecutionRejectsTerminalSessionWithoutCreatingInstance(t *testing.T) {
+	entryPoints := []struct {
+		name string
+		call func(*Manager) error
+	}{
+		{"GetOrEnsureExecutionForEnvironment", func(m *Manager) error {
+			_, err := m.GetOrEnsureExecutionForEnvironment(context.Background(), terminalEnvironmentID)
+			return err
+		}},
+		{"GetOrEnsureExecution", func(m *Manager) error {
+			_, err := m.GetOrEnsureExecution(context.Background(), terminalSessionID)
+			return err
+		}},
+		{"EnsureWorkspaceExecutionForSession", func(m *Manager) error {
+			_, err := m.EnsureWorkspaceExecutionForSession(context.Background(), terminalTaskID, terminalSessionID)
+			return err
+		}},
+	}
+	states := []models.TaskSessionState{
+		models.TaskSessionStateFailed,
+		models.TaskSessionStateCancelled,
+		models.TaskSessionStateCompleted,
+	}
+	for _, entryPoint := range entryPoints {
+		for _, state := range states {
+			t.Run(entryPoint.name+"/"+string(state), func(t *testing.T) {
+				mgr, backend := newTerminalSessionManager(t, state)
+
+				if err := entryPoint.call(mgr); !errors.Is(err, ErrSessionTerminal) {
+					t.Fatalf("%s error = %v, want ErrSessionTerminal", entryPoint.name, err)
+				}
+				if got := backend.createCount.Load(); got != 0 {
+					t.Fatalf("CreateInstance calls = %d, want 0", got)
+				}
+				if got := backend.stopCount.Load(); got != 0 {
+					t.Fatalf("StopInstance calls = %d, want 0", got)
+				}
+				if _, exists := mgr.executionStore.GetBySessionID(terminalSessionID); exists {
+					t.Fatal("terminal session must not register an execution")
+				}
+			})
+		}
+	}
 }
 
 func TestResolveTaskEnvironmentID(t *testing.T) {
@@ -861,6 +1010,89 @@ func TestCreateExecutionResolvesProfileOnceForEnvAndAutoApprove(t *testing.T) {
 	if got := backend.lastRequest.Env["CLAUDE_CONFIG_DIR"]; got != "/tmp/claude" {
 		t.Fatalf("CLAUDE_CONFIG_DIR = %q, want %q", got, "/tmp/claude")
 	}
+}
+
+func TestCreateExecutionRecoversRepositoryEnvironmentAndSSHApprovals(t *testing.T) {
+	profileResolver := &countingProfileResolver{info: &AgentProfileInfo{
+		ProfileID: "agent-profile", AgentID: "auggie", EnvVars: []settingsmodels.ProfileEnvVar{{Key: "PROFILE_ONLY", Value: "profile-value"}},
+	}}
+	mgr, backend := newEnvironmentExecutionTestManagerWithProfileResolver(t, &mockWorkspaceInfoProvider{}, profileResolver)
+	store := newInMemorySecretStore()
+	if err := store.Create(context.Background(), &secrets.SecretWithValue{Secret: secrets.Secret{
+		ID: "workspace-token", Scope: secrets.ScopeWorkspace, WorkspaceID: "workspace-1",
+	}, Value: "repository-value"}); err != nil {
+		t.Fatalf("seed repository secret: %v", err)
+	}
+	mgr.secretStore = store
+	reader := &recoveryEnvironmentReader{
+		fakeExecutorProfileReader: fakeExecutorProfileReader{
+			session: &models.TaskSession{ID: "session-1", TaskID: "task-1", State: models.TaskSessionStateStarting},
+			profiles: map[string]*models.ExecutorProfile{
+				"executor-profile": {ID: "executor-profile", EnvVars: []models.ProfileEnvVar{{Key: "EXECUTOR_ONLY", Value: "executor-value"}}},
+			},
+		},
+		taskRepositories: []*models.TaskRepository{{RepositoryID: "repo-1"}},
+		repositories: map[string]*models.Repository{
+			"repo-1": {ID: "repo-1", WorkspaceID: "workspace-1", Name: "app", SecretBindings: []models.RepositorySecretBinding{{Key: "NPM_TOKEN", SecretID: "workspace-token"}}},
+		},
+	}
+	mgr.SetExecutorProfileReader(reader)
+
+	execution, err := mgr.createExecution(context.Background(), "task-1", &WorkspaceInfo{
+		SessionID: "session-1", WorkspaceID: "workspace-1", AgentProfileID: "agent-profile", ExecutionProfileID: "agent-profile",
+		ExecutorProfileID: "executor-profile",
+		AgentID:           "auggie", WorkspacePath: "/workspace/task-1",
+	})
+	if err != nil {
+		t.Fatalf("createExecution returned error: %v", err)
+	}
+	if got := backend.lastRequest.Env["NPM_TOKEN"]; got != "repository-value" {
+		t.Fatalf("recovered NPM_TOKEN = %q, want repository value", got)
+	}
+	if got := backend.lastRequest.Env["PROFILE_ONLY"]; got != "profile-value" {
+		t.Fatalf("recovered profile env = %q, want profile value", got)
+	}
+	if got := backend.lastRequest.Env["EXECUTOR_ONLY"]; got != "executor-value" {
+		t.Fatalf("recovered executor env = %q, want executor value", got)
+	}
+	if got := reader.profileArgs; len(got) != 1 || got[0] != "executor-profile" {
+		t.Fatalf("executor profile lookups = %v, want [executor-profile]", got)
+	}
+	if got := backend.lastRequest.ApprovedSecretEnvKeys; len(got) != 1 || got[0] != "NPM_TOKEN" {
+		t.Fatalf("recovered SSH approvals = %#v, want NPM_TOKEN", got)
+	}
+	if got := execution.RuntimeEnvironment()["NPM_TOKEN"]; got != "repository-value" {
+		t.Fatalf("execution runtime NPM_TOKEN = %q, want repository value", got)
+	}
+}
+
+func TestWorkspaceProfileIDsKeepAgentAndExecutorProfilesDistinct(t *testing.T) {
+	info := &WorkspaceInfo{
+		AgentProfileID:     "office-agent-instance",
+		ExecutionProfileID: "cli-profile",
+		ExecutorProfileID:  "executor-profile",
+	}
+
+	if got := workspaceExecutionProfileID(info); got != "cli-profile" {
+		t.Fatalf("workspaceExecutionProfileID = %q, want cli-profile", got)
+	}
+	if got := workspaceExecutorProfileID(info); got != "executor-profile" {
+		t.Fatalf("workspaceExecutorProfileID = %q, want executor-profile", got)
+	}
+}
+
+type recoveryEnvironmentReader struct {
+	fakeExecutorProfileReader
+	taskRepositories []*models.TaskRepository
+	repositories     map[string]*models.Repository
+}
+
+func (r *recoveryEnvironmentReader) ListTaskRepositories(context.Context, string) ([]*models.TaskRepository, error) {
+	return r.taskRepositories, nil
+}
+
+func (r *recoveryEnvironmentReader) GetRepository(_ context.Context, id string) (*models.Repository, error) {
+	return r.repositories[id], nil
 }
 
 func TestCreateExecutionRunsRemoteResumePreflightBeforeCreatingWorkspaceExecution(t *testing.T) {

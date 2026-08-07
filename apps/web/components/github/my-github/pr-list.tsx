@@ -23,6 +23,7 @@ import type { LaunchPayload, TaskPreset } from "./quick-task-launcher";
 import { PRStatusBadges } from "./pr-status-badges";
 import { prStatusKey, usePRStatuses } from "./use-pr-statuses";
 import { PRRowTaskIndicator } from "./pr-row-task-indicator";
+import { useTranslation } from "react-i18next";
 
 type PRListProps = {
   workspaceId: string | null;
@@ -59,6 +60,7 @@ function StartTaskMenu({
   presets: TaskPreset[];
   onStartTask: PRListProps["onStartTask"];
 }) {
+  const { t } = useTranslation();
   const launch = (preset: TaskPreset) => onStartTask({ kind: "pr", pr, preset });
   return (
     <DropdownMenu>
@@ -70,7 +72,7 @@ function StartTaskMenu({
           data-testid="pr-start-task-trigger"
         >
           <IconPlus className="h-3.5 w-3.5" />
-          Task
+          {t("github:task")}
           <IconChevronDown className="h-3 w-3" />
         </Button>
       </DropdownMenuTrigger>
@@ -112,6 +114,7 @@ function PRRow({
   tasks: TaskPR[] | undefined;
 }) {
   const { Icon: StateIcon, className: stateIconClass } = prStateIcon(pr);
+  const { t } = useTranslation();
   return (
     <div
       className="flex items-start gap-3 px-4 py-3 hover:bg-muted/40 transition-colors"
@@ -134,7 +137,10 @@ function PRRow({
           </span>
           <span>·</span>
           <span className="whitespace-nowrap">
-            by {pr.author_login} · opened {formatRelativeTime(pr.created_at)}
+            {t("github:byAuthorOpenedAgo", {
+              author: pr.author_login,
+              time: formatRelativeTime(pr.created_at),
+            })}
           </span>
           <PRStatusBadges pr={pr} status={status} />
           <PRRowTaskIndicator tasks={tasks} />
@@ -160,6 +166,7 @@ function PRListBody({
   onStartTask,
   prKeyToTasks,
 }: PRListProps) {
+  const { t } = useTranslation();
   const statuses = usePRStatuses(workspaceId, items);
   if (loading) {
     return (
@@ -174,7 +181,7 @@ function PRListBody({
   if (items.length === 0) {
     return (
       <div className="text-center py-10 text-muted-foreground text-sm">
-        No pull requests match this filter.
+        {t("github:noPullRequestsMatchThisFilter")}
       </div>
     );
   }

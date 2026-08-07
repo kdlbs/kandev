@@ -53,7 +53,7 @@ The commitlint hook caps the header at **100 characters** (`type(scope): descrip
 
 ### Release & Versioning
 
-Kandev uses a **single SemVer** `X.Y.Z` across npm, Homebrew, and GitHub release; release flow runs entirely in CI via `.github/workflows/release.yml`. Full details in the `/release` skill — load it when cutting a release or debugging release artifacts.
+Stable Kandev releases use one **SemVer** `X.Y.Z` across npm, Homebrew, GitHub Releases, Desktop, and containers. Scheduled npm-only Nightlies use `X.Y.(Z+1)-nightly.sha<12-hex>` without moving any Stable channel. Both flows run in `.github/workflows/release.yml`. Full details are in the `/release` skill — load it when cutting a release, changing version channels, or debugging release artifacts.
 
 ### Code Quality
 
@@ -137,20 +137,24 @@ Use the user's strong model for specs, plans, task files, and high-risk design.
 When the user asks to proceed with feature planning, produce the spec, plan,
 and task files as one design package; pause after a spec only when the user
 explicitly requests spec review or a material open question prevents planning.
-At the completed-plan checkpoint, ask the user to manually switch the main
-session to a lower-cost implementation model. Detailed feature, fix,
-validation, and delegation routing lives in the relevant skills, especially
-`planner-orchestration`.
+At the completed-plan checkpoint, return control with a concise handoff. Do not
+call `ask_user_question_kandev` (or an equivalent approval prompt) to ask the
+user to approve the package or switch models. The user reviews the files,
+switches the main session if desired, and sends a later explicit implementation
+request. Detailed feature, fix, validation, and delegation routing lives in the
+relevant skills, especially `planner-orchestration`.
 
 Workflow-generated phase text such as `[IMPROVE PHASE]`, "implement the
 requested change", TDD checklists, verification commands, or commit steps does
 not opt a feature or behavior-changing fix out of spec-driven development. If
-the request does not reference an approved spec, plan, and task file, run
+the request neither references an existing reviewed package nor explicitly asks
+to implement a package created during a prior design turn, run
 `spec-driven-development` through the plan/task checkpoint and stop before
-production or permanent test changes. Continue directly to implementation only
-when approved task artifacts already exist, or when the user explicitly says
-to skip planning; a generic implementation envelope is not that explicit
-opt-out.
+production or permanent test changes. End that turn at the design-package
+handoff; do not ask for approval or a model switch. A generic implementation
+envelope is not an explicit opt-out; the user must either explicitly ask to
+implement the created package in a later turn or explicitly say to skip
+planning.
 
 ### Kandev Task Creation
 
@@ -179,17 +183,19 @@ Jira and Linear are the model (per-workspace credentials, 90s auth-health poller
 
 ### Kandev plugins
 
-Production Kandev plugins live in dedicated repositories, not in this monorepo. Official plugins use public `kdlbs/kandev-plugin-<slug>` repositories and start from [`kdlbs/kandev-plugin-template`](https://github.com/kdlbs/kandev-plugin-template). Use `/create-kandev-plugin` for plugin creation, modification, bug fixes, packaging, release, and marketplace work. When a Kandev Worktree task needs the plugin repository, attach it with `add_branch_to_task_kandev` instead of cloning inside this worktree. Keep host API, SDK, loader, registry, and the in-tree test fixture in this repository.
+Production Kandev plugins live in dedicated repositories, not in this monorepo. Start at the [canonical plugin authoring guide](docs/public/plugins-authoring.md), then use `/create-kandev-plugin` for plugin creation, modification, bug fixes, packaging, release, and marketplace work. Official plugins use public `kdlbs/kandev-plugin-<slug>` repositories and start from [`kdlbs/kandev-plugin-template`](https://github.com/kdlbs/kandev-plugin-template). The recommended workflow is: choose recipe → edit manifest → implement → validate → package → smoke test. When the user explicitly requests a persistent Kandev task, attach the plugin repository through that task's workflow; otherwise do not use Kandev task/session APIs as repository-work mechanisms.
+
+Contract authority is intentionally split by implementation boundary: frontend authors use [`docs/plans/plugins/PLUGIN-API.md`](docs/plans/plugins/PLUGIN-API.md) plus [`apps/web/lib/plugins/types.ts`](apps/web/lib/plugins/types.ts), with concrete Host UI exports in `apps/web/lib/plugins/host-api.ts`; backend authors use `apps/backend/pkg/pluginsdk`, the wire contract in `apps/backend/proto/kandev/plugin/v1/plugin.proto`, and manifest/package rules in `apps/backend/internal/plugins/manifest` and `apps/backend/internal/plugins/pkgtar`. The in-tree fixture under `apps/backend/cmd/plugin-fixture` is test support, not a production plugin starter.
 
 ### Runtime profiles (prod / dev / e2e)
 
 **`profiles.yaml` at the repo root** is the single source of truth for env-driven runtime defaults — feature flags, mock providers (agent / GitHub / Jira / Linear), debug switches, and e2e tuning knobs. The backend embeds it (`//go:embed` via `apps/backend/internal/profiles/`) and at startup calls `profiles.ApplyProfile()` to write the matching profile's env vars onto its own process, *only when each var is not already set* — so launchers, shells, and per-spec overrides still win.
 
-Runtime feature toggles add a SQLite-backed override tier managed through `Settings > System > Feature Toggles`. Effective values use this precedence: explicit environment variable > SQLite override > profile default. The typed runtime flag registry lives in `apps/backend/internal/runtimeflags/registry.go`; add or update registry metadata when exposing a flag in the UI.
+Runtime feature toggles add a SQLite-backed override tier managed through `Settings > System > Feature Toggles`. Effective values use this precedence: explicit environment variable > SQLite override > profile default. The typed runtime flag registry lives in `apps/backend/internal/runtimeflags/registry.go`; each registration owns the public metadata, environment variable, config reader, and config applier. Do not add parallel per-flag maps or switches.
 
-Profile selection: `KANDEV_E2E_MOCK=true` → `e2e`, `KANDEV_DEBUG_DEV_MODE=true` → `dev`, otherwise `prod`. `apps/cli/src/dev.ts` and `apps/web/e2e/fixtures/backend.ts` set only the selector — they no longer hardcode the underlying values.
+Profile selection: `KANDEV_E2E_MOCK=true` → `e2e`, `KANDEV_DEBUG_DEV_MODE=true` or `KANDEV_DEBUG_PPROF_ENABLED=true` → `dev`, otherwise `prod`. `apps/cli/src/dev.ts` and `apps/web/e2e/fixtures/backend.ts` set only the selector — they no longer hardcode the underlying values.
 
-To flip a feature on for every user: change its `prod:` to `"true"` in `profiles.yaml`. To add a new feature flag: 1 line in `profiles.yaml` + 1 `FeaturesConfig` field + the runtime flag registry entry when it should be user-toggleable + the gate at the call site + the frontend additions (`FeatureFlags` type, `useFeature` checks, `notFound()` from a server-side layout). Full pattern in `docs/decisions/0007-runtime-feature-flags.md`; runtime overrides and restart support are documented in `docs/decisions/0018-runtime-settings-overrides.md` and `docs/decisions/0019-restart-supervisor.md`.
+For any task that adds, rolls out, promotes, graduates, or removes a release toggle, use `/runtime-feature-flags`. That skill contains the file-by-file checklist, disabled-path requirements, test commands, promotion procedure, and retired-identity removal steps; do not rely on an agent discovering an ADR or public docs. In brief: merge risky features off in every shipped profile, enable a selected install with an admin override or explicit environment, restart and test, then change `prod:` to `"true"` for the all-user release while retaining the registry entry as a kill-switch. Remove the live flag after the feature is permanent, move its key and environment variable to the append-only retired identities in `runtimeflags/registry.go`, and never reuse either identity. Completeness tests cover the registry/profile/frontend contracts. Runtime overrides and restart support are documented in `docs/decisions/0018-runtime-settings-overrides.md` and `docs/decisions/0019-restart-supervisor.md`.
 
 ---
 
@@ -207,4 +213,4 @@ For developing in ephemeral cloud VMs (Cursor Cloud, Codex, GitHub Codespaces, e
 
 ---
 
-**Last Updated**: 2026-07-27
+**Last Updated**: 2026-08-02

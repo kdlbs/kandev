@@ -24,6 +24,8 @@ import {
 import { PanelHeaderBarSplit } from "@/components/task/panel-primitives";
 import { LspStatusButton } from "@/components/editors/lsp-status-button";
 import type { LspStatus } from "@/lib/lsp/lsp-client-manager";
+import type { LspProgressSnapshot } from "@/lib/lsp/lsp-progress";
+import { useTranslation } from "react-i18next";
 
 const SAVE_SHORTCUT =
   typeof navigator !== "undefined" && navigator.platform.includes("Mac") ? "\u2318" : "Ctrl";
@@ -37,6 +39,7 @@ function SaveButton({
   isSaving: boolean;
   onSave: () => void;
 }) {
+  const { t } = useTranslation();
   return (
     <Button
       size="sm"
@@ -48,12 +51,12 @@ function SaveButton({
       {isSaving ? (
         <>
           <IconLoader2 className="h-4 w-4 animate-spin" />
-          Saving...
+          {t("editors:saving")}
         </>
       ) : (
         <>
           <IconDeviceFloppy className="h-4 w-4" />
-          Save
+          {t("common:save")}
           <span className="text-xs text-muted-foreground">({SAVE_SHORTCUT}+S)</span>
         </>
       )}
@@ -95,14 +98,13 @@ function CommentCountBadge({
   sessionId?: string;
   commentCount: number;
 }) {
+  const { t } = useTranslation();
   if (!enableComments || !sessionId || commentCount <= 0) return null;
 
   return (
     <div className="flex items-center gap-1 px-2 py-1 text-xs text-primary">
       <IconMessagePlus className="h-3.5 w-3.5" />
-      <span>
-        {commentCount} comment{commentCount > 1 ? "s" : ""}
-      </span>
+      <span>{t("editors:commentCount", { count: commentCount })}</span>
     </div>
   );
 }
@@ -114,6 +116,7 @@ function DiffIndicatorsButton({
   isVisible: boolean;
   onToggle: () => void;
 }) {
+  const { t } = useTranslation();
   const buttonClass = `h-8 w-8 p-0 cursor-pointer ${isVisible ? "text-foreground" : "text-muted-foreground"}`;
   return (
     <Tooltip>
@@ -122,7 +125,9 @@ function DiffIndicatorsButton({
           <IconArrowsDiff className="h-4 w-4" />
         </Button>
       </TooltipTrigger>
-      <TooltipContent>{isVisible ? "Hide diff indicators" : "Show diff indicators"}</TooltipContent>
+      <TooltipContent>
+        {isVisible ? t("editors:hideDiffIndicators") : t("editors:showDiffIndicators")}
+      </TooltipContent>
     </Tooltip>
   );
 }
@@ -134,13 +139,14 @@ function WrapButton({
   wrapEnabled: boolean;
   onToggleWrap: () => void;
 }) {
+  const { t } = useTranslation();
   const wrapClass = `h-8 w-8 p-0 cursor-pointer ${wrapEnabled ? "text-foreground" : "text-muted-foreground"}`;
   const wrapIcon = wrapEnabled ? (
     <IconTextWrap className="h-4 w-4" />
   ) : (
     <IconTextWrapDisabled className="h-4 w-4" />
   );
-  const wrapLabel = wrapEnabled ? "Disable word wrap" : "Enable word wrap";
+  const wrapLabel = wrapEnabled ? t("editors:disableWordWrap") : t("editors:enableWordWrap");
 
   return (
     <Tooltip>
@@ -161,6 +167,7 @@ function ReloadFromAgentButton({
   hasRemoteUpdate?: boolean;
   onReloadFromAgent?: () => void;
 }) {
+  const { t } = useTranslation();
   if (!hasRemoteUpdate || !onReloadFromAgent) return null;
 
   return (
@@ -173,15 +180,16 @@ function ReloadFromAgentButton({
           onClick={onReloadFromAgent}
         >
           <IconRefresh className="h-3.5 w-3.5" />
-          Reload
+          {t("editors:reload")}
         </Button>
       </TooltipTrigger>
-      <TooltipContent>Apply latest agent changes to this file</TooltipContent>
+      <TooltipContent>{t("editors:applyLatestAgentChangesToFile")}</TooltipContent>
     </Tooltip>
   );
 }
 
 function DeleteButton({ onDelete }: { onDelete?: () => void }) {
+  const { t } = useTranslation();
   if (!onDelete) return null;
 
   return (
@@ -196,12 +204,13 @@ function DeleteButton({ onDelete }: { onDelete?: () => void }) {
           <IconTrash className="h-4 w-4" />
         </Button>
       </TooltipTrigger>
-      <TooltipContent>Delete file</TooltipContent>
+      <TooltipContent>{t("editors:deleteFile")}</TooltipContent>
     </Tooltip>
   );
 }
 
 function MarkdownPreviewButton({ onTogglePreview }: { onTogglePreview: () => void }) {
+  const { t } = useTranslation();
   return (
     <Tooltip>
       <TooltipTrigger asChild>
@@ -215,7 +224,7 @@ function MarkdownPreviewButton({ onTogglePreview }: { onTogglePreview: () => voi
           <IconEye className="h-4 w-4" />
         </Button>
       </TooltipTrigger>
-      <TooltipContent>Preview markdown</TooltipContent>
+      <TooltipContent>{t("editors:previewMarkdown")}</TooltipContent>
     </Tooltip>
   );
 }
@@ -235,7 +244,9 @@ interface MonacoEditorToolbarProps {
   hasRemoteUpdate?: boolean;
   hasVcsDiff?: boolean;
   lspStatus: LspStatus;
+  lspProgress: LspProgressSnapshot;
   lspLanguage: string | null;
+  showLspStatus?: boolean;
   onToggleLsp: () => void;
   onToggleWrap: () => void;
   onToggleDiffIndicators: () => void;
@@ -260,7 +271,9 @@ export function MonacoEditorToolbar({
   hasRemoteUpdate = false,
   hasVcsDiff = false,
   lspStatus,
+  lspProgress,
   lspLanguage,
+  showLspStatus = true,
   onToggleLsp,
   onToggleWrap,
   onToggleDiffIndicators,
@@ -287,7 +300,14 @@ export function MonacoEditorToolbar({
             sessionId={sessionId}
             commentCount={commentCount}
           />
-          <LspStatusButton status={lspStatus} lspLanguage={lspLanguage} onToggle={onToggleLsp} />
+          {showLspStatus ? (
+            <LspStatusButton
+              status={lspStatus}
+              progress={lspProgress}
+              lspLanguage={lspLanguage}
+              onToggle={onToggleLsp}
+            />
+          ) : null}
           {(isDirty || hasVcsDiff) && (
             <DiffIndicatorsButton
               isVisible={showDiffIndicators}

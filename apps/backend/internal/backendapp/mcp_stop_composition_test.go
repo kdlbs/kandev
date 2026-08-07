@@ -66,6 +66,7 @@ func TestRegisterMCPAndDebugRoutesWiresCoordinatorTaskStopper(t *testing.T) {
 		lifecycleMgr:    lifecycleMgr,
 		eventBus:        eventBus,
 		services:        &Services{Workflow: harness.workflowSvc},
+		devMode:         true,
 		log:             log,
 		addCleanup: func(cleanup func() error) {
 			registerMCPStopTestCleanup(t, "MCP server", cleanup)

@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { IconDeviceFloppy } from "@tabler/icons-react";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast/sonner";
 import { Button } from "@kandev/ui/button";
 import { useAppStore } from "@/components/state-provider";
 import { ApiError } from "@/lib/api/client";
@@ -25,6 +25,7 @@ import {
   RoutingEnableCard,
   WakeReasonTierCard,
 } from "./components";
+import { useTranslation } from "react-i18next";
 
 const DEFAULT_PROFILE: ProviderProfile = { tier_map: {} };
 
@@ -39,6 +40,7 @@ function emptyConfig(): WorkspaceRouting {
 }
 
 export default function ProviderRoutingPage() {
+  const { t } = useTranslation();
   const workspaceId = useAppStore((s) => s.workspaces.activeId);
   const routing = useWorkspaceRouting(workspaceId);
   const health = useProviderHealth(workspaceId);
@@ -65,18 +67,18 @@ export default function ProviderRoutingPage() {
     try {
       await routing.update(draft);
       void preview.refresh();
-      toast.success("Routing settings saved");
+      toast.success(t("office:routingSettingsSaved"));
     } catch (err) {
       const errs = extractValidationDetails(err);
       if (errs.length > 0) setFieldErrors(errs);
-      toast.error(err instanceof Error ? err.message : "Failed to save");
+      toast.error(err instanceof Error ? err.message : t("office:failedToSave"));
     } finally {
       setSaving(false);
     }
-  }, [draft, workspaceId, routing, preview]);
+  }, [draft, workspaceId, routing, preview, t]);
 
   if (!workspaceId || !draft) {
-    return <div className="p-6 text-sm text-muted-foreground">Loading…</div>;
+    return <div className="p-6 text-sm text-muted-foreground">{t("common:loading")}</div>;
   }
 
   return (
@@ -126,8 +128,10 @@ function PageBody({
   previewAgents,
   previewLoading,
 }: PageBodyProps) {
+  const { t } = useTranslation();
   const setEnabled = (v: boolean) => setDraft({ ...draft, enabled: v });
-  const setTier = (t: Tier) => setDraft({ ...draft, default_tier: t });
+  // Named `tier`, not `t`: a parameter called `t` shadows the translate function.
+  const setTier = (tier: Tier) => setDraft({ ...draft, default_tier: tier });
   const setTierPerReason = (m: TierPerReason) => setDraft({ ...draft, tier_per_reason: m });
   const setOrder = (next: string[]) => {
     const profiles = { ...draft.provider_profiles };
@@ -144,11 +148,8 @@ function PageBody({
   return (
     <div className="max-w-4xl mx-auto p-6 space-y-4">
       <div>
-        <h1 className="text-lg font-semibold">Provider routing</h1>
-        <p className="text-sm text-muted-foreground">
-          Map Office agents to providers and tiers with controlled fallback. Advanced; off by
-          default.
-        </p>
+        <h1 className="text-lg font-semibold">{t("office:providerRoutingHeading")}</h1>
+        <p className="text-sm text-muted-foreground">{t("office:mapOfficeAgentsToProvidersAnd")}</p>
       </div>
 
       <RoutingEnableCard enabled={draft.enabled} onChange={setEnabled} disabled={saving} />
@@ -198,7 +199,7 @@ function PageBody({
         <div className="flex justify-end">
           <Button onClick={onSave} disabled={saving} className="cursor-pointer gap-1.5">
             <IconDeviceFloppy className="h-4 w-4" />
-            {saving ? "Saving…" : "Save"}
+            {saving ? t("office:savingEllipsis") : t("common:save")}
           </Button>
         </div>
       )}
@@ -206,6 +207,10 @@ function PageBody({
   );
 }
 
+/**
+ * Composes the BACKEND's own field names and error messages. Protocol, not copy
+ * — the strings here are echoed from the API response, never authored in the UI.
+ */
 function extractValidationDetails(err: unknown): string[] {
   if (!(err instanceof ApiError)) return [];
   const body = err.body;

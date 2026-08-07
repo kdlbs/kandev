@@ -1,11 +1,17 @@
 package worktree
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+
+	storageworkspaces "github.com/kandev/kandev/internal/system/storage/workspaces"
 )
+
+const errWorkspaceOwnershipMarkerConflict = "workspace ownership marker conflicts with requested task root"
 
 // CreateOwnedDirectoryLink creates a live directory reference below root.
 // root is created only through real (non-symlink) ancestors, and name must be
@@ -26,7 +32,16 @@ func CreateOwnedDirectoryLink(root, name, target string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	_, err = os.Lstat(link)
+	release, err := acquireWorktreeTargetPath(context.Background(), link)
+	if err != nil {
+		return "", fmt.Errorf("acquire owned link lock: %w", err)
+	}
+	defer release()
+	return createOwnedDirectoryLinkLocked(root, name, link, canonicalTarget)
+}
+
+func createOwnedDirectoryLinkLocked(root, name, link, canonicalTarget string) (string, error) {
+	_, err := os.Lstat(link)
 	if err == nil {
 		return "", fmt.Errorf("owned link entry already exists: %s", name)
 	}
@@ -40,6 +55,61 @@ func CreateOwnedDirectoryLink(root, name, target string) (string, error) {
 		return "", err
 	}
 	return link, nil
+}
+
+// RestoreOwnedDirectoryLink updates or recreates a live directory reference
+// below root so it points at target, preserving the current link if the
+// replacement cannot be completed safely.
+func RestoreOwnedDirectoryLink(root, name, target string) error {
+	if !isOwnedDirectoryLinkPath(root, name) {
+		return fmt.Errorf("invalid owned link path")
+	}
+	if err := mkdirOwned(root); err != nil {
+		return err
+	}
+	link, err := ownedDirectoryLinkPath(root, name)
+	if err != nil {
+		return err
+	}
+	release, err := acquireWorktreeTargetPath(context.Background(), link)
+	if err != nil {
+		return fmt.Errorf("acquire owned link lock: %w", err)
+	}
+	defer release()
+	return restoreOwnedDirectoryLinkLocked(root, name, link, target)
+}
+
+// RemoveOwnedDirectoryLink removes root/name only while it is still the
+// directory link inspected under the per-link lock. A missing entry is already
+// rolled back and is therefore treated as success.
+func RemoveOwnedDirectoryLink(root, name string) error {
+	if !isOwnedDirectoryLinkPath(root, name) {
+		return fmt.Errorf("invalid owned link path")
+	}
+	link, err := ownedDirectoryLinkPath(root, name)
+	if err != nil {
+		return err
+	}
+	release, err := acquireWorktreeTargetPath(context.Background(), link)
+	if err != nil {
+		return fmt.Errorf("acquire owned link lock: %w", err)
+	}
+	defer release()
+
+	info, err := os.Lstat(link)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("inspect owned link entry: %w", err)
+	}
+	if !isPlatformDirectoryLink(info, link) {
+		return fmt.Errorf("owned link entry is not a directory link: %s", name)
+	}
+	if err := removeInspectedDirectoryLink(link, info); err != nil {
+		return fmt.Errorf("remove owned link: %w", err)
+	}
+	return nil
 }
 
 func isOwnedDirectoryLinkPath(root, name string) bool {
@@ -78,9 +148,24 @@ func verifyCreatedOwnedDirectoryLink(root, link string) error {
 	return nil
 }
 
-// EnsureOwnedDirectoryLink returns an existing matching live link or creates
-// it. A non-link/collision, or a link to another directory, fails closed and is
-// never replaced.
+// OwnedDirectoryLinkOwner identifies the task that is allowed to repoint a
+// Kandev-owned directory link under a shared task root.
+type OwnedDirectoryLinkOwner struct {
+	TaskID      string
+	TaskDirName string
+}
+
+// OwnedDirectoryLinkResult describes the durable effect of EnsureOwnedDirectoryLink.
+type OwnedDirectoryLinkResult struct {
+	Path        string
+	Created     bool
+	PriorTarget string
+}
+
+// EnsureOwnedDirectoryLink returns an existing matching live link, repoints an
+// owned link whose target drifted, or creates the link. A non-link/collision
+// still fails closed and is never removed; only a Kandev-owned directory link
+// (a pointer, not content) is replaced when its target no longer matches.
 //
 // The existing link is matched by filesystem identity, not by resolved path.
 // filepath.EvalSymlinks does not traverse a Windows junction — it returns the
@@ -89,31 +174,163 @@ func verifyCreatedOwnedDirectoryLink(root, link string) error {
 // workspace source links failed. os.Stat follows a junction and a Unix symlink
 // alike, and os.SameFile compares volume and file index, which is also immune
 // to 8.3 short paths and path case.
-func EnsureOwnedDirectoryLink(root, name, target string) (string, bool, error) {
-	link := filepath.Join(root, name)
+//
+// Repoint-on-mismatch is deliberately scoped here to the Kandev-owned task root:
+// the entry lives below a root built through real ancestors, and the entry is a
+// directory link, so removing and recreating it is safe. This is distinct from
+// IsSelfReferentialDirectoryLink, which stays report-only because it concerns
+// entries inside a user's own repository.
+//
+// The full inspect, create, and repoint flow is serialized per owned-link path
+// with the shared target-path lock used by other Kandev writers. Unix still
+// stages a sibling temp link and renames it into place; Windows still removes
+// and recreates, but only while that exclusive slot is held.
+func EnsureOwnedDirectoryLink(root, name, target string, owner OwnedDirectoryLinkOwner) (OwnedDirectoryLinkResult, error) {
+	link, err := ownedDirectoryLinkPath(root, name)
+	if err != nil {
+		return OwnedDirectoryLinkResult{}, err
+	}
+	release, err := acquireWorktreeTargetPath(context.Background(), link)
+	if err != nil {
+		return OwnedDirectoryLinkResult{}, fmt.Errorf("acquire owned link lock: %w", err)
+	}
+	defer release()
+	canonicalTarget, err := canonicalDirectoryLinkTarget(target)
+	if err != nil {
+		return OwnedDirectoryLinkResult{}, err
+	}
 	info, err := os.Lstat(link)
 	if err == nil {
 		if !isPlatformDirectoryLink(info, link) {
-			return "", false, fmt.Errorf("owned link entry already exists: %s", name)
+			return OwnedDirectoryLinkResult{}, fmt.Errorf("owned link entry already exists: %s", name)
 		}
 		actual, err := os.Stat(link)
 		if err != nil {
-			return "", false, fmt.Errorf("resolve owned link: %w", err)
+			return OwnedDirectoryLinkResult{}, fmt.Errorf("resolve owned link: %w", err)
 		}
-		expected, err := os.Stat(target)
+		expected, err := os.Stat(canonicalTarget)
 		if err != nil {
-			return "", false, fmt.Errorf("inspect link target: %w", err)
+			return OwnedDirectoryLinkResult{}, fmt.Errorf("inspect link target: %w", err)
 		}
-		if !os.SameFile(actual, expected) {
-			return "", false, fmt.Errorf("owned link target mismatch: %s", name)
+		if os.SameFile(actual, expected) {
+			return OwnedDirectoryLinkResult{Path: link}, nil
 		}
-		return link, false, nil
+		priorTarget, err := platformDirectoryLinkTarget(link)
+		if err != nil {
+			return OwnedDirectoryLinkResult{}, fmt.Errorf("read owned link target: %w", err)
+		}
+		if err := ensureOwnedLinkRepointAllowed(root, owner); err != nil {
+			return OwnedDirectoryLinkResult{}, err
+		}
+		if err := repointOwnedDirectoryLink(root, name, link, info, priorTarget, canonicalTarget); err != nil {
+			return OwnedDirectoryLinkResult{}, err
+		}
+		return OwnedDirectoryLinkResult{Path: link, Created: true, PriorTarget: priorTarget}, nil
 	}
 	if !os.IsNotExist(err) {
-		return "", false, fmt.Errorf("inspect owned link entry: %w", err)
+		return OwnedDirectoryLinkResult{}, fmt.Errorf("inspect owned link entry: %w", err)
 	}
-	created, err := CreateOwnedDirectoryLink(root, name, target)
-	return created, err == nil, err
+	if err := mkdirOwned(root); err != nil {
+		return OwnedDirectoryLinkResult{}, err
+	}
+	created, err := createOwnedDirectoryLinkLocked(root, name, link, canonicalTarget)
+	if err != nil {
+		return OwnedDirectoryLinkResult{}, err
+	}
+	return OwnedDirectoryLinkResult{Path: created, Created: true}, nil
+}
+
+func repointOwnedDirectoryLink(root, name, link string, inspected os.FileInfo, priorTarget, target string) error {
+	if err := replacePlatformDirectoryLink(link, inspected, target, priorTarget); err != nil {
+		return err
+	}
+	if err := verifyCreatedOwnedDirectoryLink(root, link); err != nil {
+		if restoreErr := restoreOwnedDirectoryLinkLocked(root, name, link, priorTarget); restoreErr != nil {
+			return errors.Join(err, restoreErr)
+		}
+		return err
+	}
+	return nil
+}
+
+func restoreOwnedDirectoryLinkLocked(root, name, link, target string) error {
+	if target == "" {
+		return nil
+	}
+	canonicalTarget, err := canonicalDirectoryLinkTarget(target)
+	if err != nil {
+		return fmt.Errorf("restore prior directory link: %w", err)
+	}
+	info, err := os.Lstat(link)
+	if os.IsNotExist(err) {
+		if _, err := createOwnedDirectoryLinkLocked(root, name, link, canonicalTarget); err != nil {
+			return fmt.Errorf("restore prior directory link: %w", err)
+		}
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("restore prior directory link: inspect owned link entry: %w", err)
+	}
+	if !isPlatformDirectoryLink(info, link) {
+		return fmt.Errorf("restore prior directory link: owned link entry already exists: %s", name)
+	}
+	actual, err := os.Stat(link)
+	if err != nil {
+		return fmt.Errorf("restore prior directory link: resolve owned link: %w", err)
+	}
+	expected, err := os.Stat(canonicalTarget)
+	if err != nil {
+		return fmt.Errorf("restore prior directory link: inspect link target: %w", err)
+	}
+	if os.SameFile(actual, expected) {
+		return nil
+	}
+	currentTarget, err := platformDirectoryLinkTarget(link)
+	if err != nil {
+		return fmt.Errorf("restore prior directory link: read owned link target: %w", err)
+	}
+	if err := replacePlatformDirectoryLink(link, info, canonicalTarget, currentTarget); err != nil {
+		return fmt.Errorf("restore prior directory link: %w", err)
+	}
+	if err := verifyCreatedOwnedDirectoryLink(root, link); err != nil {
+		return fmt.Errorf("restore prior directory link: %w", err)
+	}
+	return nil
+}
+
+func ensureOwnedLinkRepointAllowed(root string, owner OwnedDirectoryLinkOwner) error {
+	marker, found, err := storageworkspaces.ReadOwnershipMarker(root)
+	if err != nil {
+		return fmt.Errorf("inspect workspace ownership marker: %w", err)
+	}
+	if !found {
+		return nil
+	}
+	if marker.TaskID != owner.TaskID || marker.TaskDirName != owner.TaskDirName {
+		return errors.New(errWorkspaceOwnershipMarkerConflict)
+	}
+	return nil
+}
+
+func revalidateInspectedDirectoryLink(link string, inspected os.FileInfo) error {
+	current, err := os.Lstat(link)
+	if err != nil {
+		return fmt.Errorf("re-inspect owned link: %w", err)
+	}
+	if !isPlatformDirectoryLink(current, link) || !os.SameFile(current, inspected) {
+		return fmt.Errorf("owned link entry changed during repoint: %s", filepath.Base(link))
+	}
+	return nil
+}
+
+func renameInspectedDirectoryLink(tempLink, link string, inspected os.FileInfo) error {
+	if err := revalidateInspectedDirectoryLink(link, inspected); err != nil {
+		return err
+	}
+	if err := os.Rename(tempLink, link); err != nil {
+		return fmt.Errorf("repoint owned link: %w", err)
+	}
+	return nil
 }
 
 // IsSelfReferentialDirectoryLink reports whether root/name is a platform

@@ -148,9 +148,14 @@ type Task struct {
 	StartedAt        *time.Time             `json:"started_at,omitempty"`
 	CompletedAt      *time.Time             `json:"completed_at,omitempty"`
 	Metadata         map[string]interface{} `json:"metadata,omitempty"`
-	IsEphemeral      bool                   `json:"is_ephemeral"`        // Ephemeral tasks are not shown in kanban, used for quick chat
-	ParentID         string                 `json:"parent_id,omitempty"` // FK to parent task for subtasks
-	Identifier       string                 `json:"identifier,omitempty"`
+	// Interrupted reports that the task's session was mid-turn (STARTING/RUNNING)
+	// when the backend died and has not been resumed since. Derived from the
+	// interrupted_at metadata key at DTO conversion time; the orchestrator
+	// clears it when a session of the task next enters STARTING/RUNNING.
+	Interrupted bool   `json:"interrupted,omitempty"`
+	IsEphemeral bool   `json:"is_ephemeral"`        // Ephemeral tasks are not shown in kanban, used for quick chat
+	ParentID    string `json:"parent_id,omitempty"` // FK to parent task for subtasks
+	Identifier  string `json:"identifier,omitempty"`
 }
 
 // TaskRepositoryInput for creating/updating task repositories
@@ -201,9 +206,11 @@ type TaskEvent struct {
 // "resource" → ResourceBlock (text or blob based on MIME type).
 type MessageAttachment struct {
 	Type         string `json:"type"`                    // "image", "audio", "resource"
+	AttachmentID string `json:"attachment_id,omitempty"` // File-backed attachment descriptor ID
 	Data         string `json:"data,omitempty"`          // Base64-encoded data
 	MimeType     string `json:"mime_type,omitempty"`     // MIME type (e.g., "image/png")
 	Name         string `json:"name,omitempty"`          // Display name (e.g., filename)
+	SizeBytes    int64  `json:"size_bytes,omitempty"`    // Raw byte size for file-backed descriptors
 	DeliveryMode string `json:"delivery_mode,omitempty"` // "prompt" (native/default) or "path"
 }
 
@@ -211,10 +218,12 @@ func (a MessageAttachment) HasValidDeliveryMode() bool {
 	return a.DeliveryMode == "" || a.DeliveryMode == "prompt" || a.DeliveryMode == "path"
 }
 
-// ContextFileMeta represents a context file reference attached to a message
+// ContextFileMeta represents a context file reference attached to a message.
+// IsDirectory is optional for compatibility with older file-only entries.
 type ContextFileMeta struct {
-	Path string `json:"path"`
-	Name string `json:"name"`
+	Path        string `json:"path"`
+	Name        string `json:"name"`
+	IsDirectory *bool  `json:"is_directory,omitempty"`
 }
 
 // Message represents a message in a task session (user or agent)

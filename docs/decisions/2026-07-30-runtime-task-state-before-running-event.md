@@ -20,8 +20,11 @@ before publishing `session.state_changed(RUNNING)`.
 
 The reconciliation runs only after the session compare-and-set succeeds and
 before its event publication. If it changes the task, the existing
-`task.state_changed` event is therefore published first. Repeated stream events
-for an already-`RUNNING` session retain the existing no-write fast path.
+`task.state_changed` event is therefore published first. The follow-on session
+event is appended to the same per-task publication FIFO, so an already-draining
+task publication cannot be overtaken and the handler never waits reentrantly on
+its own queue. Repeated stream events for an already-`RUNNING` session retain the
+existing no-write fast path.
 Archive, terminal-session, clarification, cancellation, and Office guards
 remain authoritative. The executor-success reconciliation remains as a healing
 fallback.

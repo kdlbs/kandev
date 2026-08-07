@@ -15,6 +15,12 @@ import type {
   GitOperationResult as RawGitOperationResult,
   PRCreateResult,
 } from "@/hooks/use-git-operations";
+import { t } from "@/lib/i18n";
+import {
+  repositoryScopesWithAvailableAncestors,
+  runRepositoryScopeWaves,
+} from "./use-session-git-repository-order";
+import { useMultiRepoSummary } from "./use-session-git-summary";
 
 /**
  * Per-repo result emitted by frontend-side fan-outs (commit, push, pull,
@@ -158,6 +164,34 @@ export function groupPathsByRepoName(
 }
 
 /**
+ * Returns mutation scopes that have a live status tracker. A file can still
+ * appear under the empty scope when the parent repository only reports a
+ * changed gitlink; that scope is not a runnable repository unless it is also
+ * present in statusByRepo. Legacy single-repository hydration has no per-repo
+ * list, so it keeps the historical empty-scope fallback.
+ */
+export function repositoryScopesForMutation(
+  allFiles: Pick<FileInfo, "repository_name">[],
+  availableScopes: Iterable<string>,
+): string[] {
+  const available = Array.from(new Set(availableScopes));
+  if (available.length === 0) {
+    return repositoryScopesWithAvailableAncestors(
+      new Set(allFiles.map((file) => file.repository_name ?? "")),
+      available,
+    );
+  }
+
+  const availableSet = new Set(available);
+  const requested = new Set<string>();
+  for (const file of allFiles) {
+    const scope = file.repository_name ?? "";
+    if (availableSet.has(scope)) requested.add(scope);
+  }
+  return repositoryScopesWithAvailableAncestors(requested, available);
+}
+
+/**
  * Builds the SessionGit's flat file list. For multi-repo workspaces it
  * stamps each FileInfo with its repository_name so consumers can group;
  * for single-repo it returns the legacy single-status files unchanged.
@@ -239,37 +273,44 @@ function aggregatePerRepoResults(
   };
 }
 
-/**
- * Runs `op` against each repo in `repos`, collecting per-repo results.
- * Continues past failures so partial-success state is surfaced (instead of
- * stopping at the first error and leaving the user blind to repo A having
- * already mutated).
- */
-async function fanOutAcrossRepos(
+async function fanOutAcrossRepositoryWaves(
   repos: string[],
   operation: string,
   op: (repo: string) => Promise<RawGitOperationResult>,
 ): Promise<GitOperationResult> {
-  const perRepo: PerRepoOperationResult[] = [];
-  for (const repo of repos) {
-    try {
-      const r = await op(repo);
-      perRepo.push({
-        repository_name: repo,
-        success: r.success,
-        output: r.output,
-        error: r.error,
-      });
-    } catch (e) {
-      perRepo.push({
-        repository_name: repo,
-        success: false,
-        output: "",
-        error: e instanceof Error ? e.message : String(e),
-      });
-    }
-  }
-  return aggregatePerRepoResults(perRepo, operation);
+  const results = await runRepositoryScopeWaves(
+    repos,
+    async (repo) => {
+      try {
+        return await op(repo);
+      } catch (e) {
+        return {
+          success: false,
+          operation,
+          output: "",
+          error: e instanceof Error ? e.message : String(e),
+        };
+      }
+    },
+    (repo, failedScopes) => ({
+      success: false,
+      operation,
+      output: "",
+      error: t("common:gitScopeSkipped", {
+        scope: repo || t("common:workspace"),
+        failedScopes: failedScopes.join(", "),
+      }),
+    }),
+  );
+  return aggregatePerRepoResults(
+    results.map(({ repository_name, result }) => ({
+      repository_name,
+      success: result.success,
+      output: result.output,
+      error: result.error,
+    })),
+    operation,
+  );
 }
 
 /**
@@ -295,7 +336,7 @@ function useStageDispatch({
   const stageAll = useCallback(
     async (): Promise<GitOperationResult> => {
       if (reposInFiles.length <= 1) return gitOps.stage(undefined, reposInFiles[0]);
-      return fanOutAcrossRepos(reposInFiles, "stage", (r) => gitOps.stage(undefined, r));
+      return fanOutAcrossRepositoryWaves(reposInFiles, "stage", (r) => gitOps.stage(undefined, r));
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps -- stable fn ref
     [reposInFiles, gitOps.stage],
@@ -303,7 +344,9 @@ function useStageDispatch({
   const unstageAll = useCallback(
     async (): Promise<GitOperationResult> => {
       if (reposInFiles.length <= 1) return gitOps.unstage(undefined, reposInFiles[0]);
-      return fanOutAcrossRepos(reposInFiles, "unstage", (r) => gitOps.unstage(undefined, r));
+      return fanOutAcrossRepositoryWaves(reposInFiles, "unstage", (r) =>
+        gitOps.unstage(undefined, r),
+      );
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps -- stable fn ref
     [reposInFiles, gitOps.unstage],
@@ -320,32 +363,36 @@ function useStageDispatch({
       amend: boolean = false,
       repo?: string,
     ): Promise<GitOperationResult> => {
-      if (repo !== undefined) return gitOps.commit(message, stageAllOpt, amend, repo || undefined);
-      const reposWithStaged = Array.from(
-        new Set(stagedFiles.map((f) => f.repository_name).filter((n): n is string => Boolean(n))),
-      );
-      if (reposWithStaged.length === 0) return gitOps.commit(message, stageAllOpt, amend);
-      if (reposWithStaged.length === 1) {
-        return gitOps.commit(message, stageAllOpt, amend, reposWithStaged[0]);
+      if (repo !== undefined) return gitOps.commit(message, stageAllOpt, amend, repo);
+      const reposWithStaged = Array.from(new Set(stagedFiles.map((f) => f.repository_name ?? "")));
+      const reposToCommit = stageAllOpt ? reposInFiles : reposWithStaged;
+      if (reposToCommit.length === 0) return gitOps.commit(message, stageAllOpt, amend);
+      if (reposToCommit.length === 1) {
+        return gitOps.commit(message, stageAllOpt, amend, reposToCommit[0]);
       }
-      return fanOutAcrossRepos(reposWithStaged, "commit", (r) =>
+      return fanOutAcrossRepositoryWaves(reposToCommit, "commit", (r) =>
         gitOps.commit(message, stageAllOpt, amend, r),
       );
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps -- stable fn ref
-    [gitOps.commit, stagedFiles],
+    [gitOps.commit, reposInFiles, stagedFiles],
   );
   const runPerRepo = useCallback(
     async (
       paths: string[],
       explicitRepo: string | undefined,
+      operation: string,
       op: (paths: string[], repo: string | undefined) => Promise<GitOperationResult>,
     ): Promise<GitOperationResult> => {
-      if (explicitRepo !== undefined) return op(paths, explicitRepo || undefined);
+      if (explicitRepo !== undefined) return op(paths, explicitRepo);
       const buckets = groupPathsByRepo(paths);
-      let last: GitOperationResult | undefined;
-      for (const [repo, repoPaths] of buckets) last = await op(repoPaths, repo || undefined);
-      return last as GitOperationResult;
+      if (buckets.size <= 1) {
+        const [repo, repoPaths] = buckets.entries().next().value as [string, string[]];
+        return op(repoPaths, repo);
+      }
+      return fanOutAcrossRepositoryWaves(Array.from(buckets.keys()), operation, (repo) =>
+        op(buckets.get(repo) ?? [], repo),
+      );
     },
     [groupPathsByRepo],
   );
@@ -354,6 +401,7 @@ function useStageDispatch({
       paths: string[],
       repo: string | undefined,
       op: (rp: string[], r: string | undefined) => Promise<GitOperationResult>,
+      operation: string,
     ) => {
       // Bug 6: key pending entries by `repo::path` so an in-flight stage in
       // repo B isn't cleared when repo A's status update lands. The consumer
@@ -367,7 +415,7 @@ function useStageDispatch({
         return next;
       });
       try {
-        return await runPerRepo(paths, repo, op);
+        return await runPerRepo(paths, repo, operation, op);
       } catch (err) {
         setPendingStageFiles((prev) => {
           const next = new Set(prev);
@@ -381,80 +429,25 @@ function useStageDispatch({
   );
   const stageFile = useCallback(
     async (paths: string[], repo?: string) =>
-      wrapPending(paths, repo, (rp, r) => gitOps.stage(rp, r)),
+      wrapPending(paths, repo, (rp, r) => gitOps.stage(rp, r), "stage"),
     // eslint-disable-next-line react-hooks/exhaustive-deps -- stable fn ref
     [gitOps.stage, wrapPending],
   );
   const unstageFile = useCallback(
     async (paths: string[], repo?: string) =>
-      wrapPending(paths, repo, (rp, r) => gitOps.unstage(rp, r)),
+      wrapPending(paths, repo, (rp, r) => gitOps.unstage(rp, r), "unstage"),
     // eslint-disable-next-line react-hooks/exhaustive-deps -- stable fn ref
     [gitOps.unstage, wrapPending],
   );
   const discard = useCallback(
     async (paths?: string[], repo?: string) => {
       if (!paths || paths.length === 0) return gitOps.discard(paths, repo);
-      return runPerRepo(paths, repo, (rp, r) => gitOps.discard(rp, r));
+      return runPerRepo(paths, repo, "discard", (rp, r) => gitOps.discard(rp, r));
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps -- stable fn ref
     [gitOps.discard, runPerRepo],
   );
   return { stageAll, unstageAll, commit, stageFile, unstageFile, discard };
-}
-
-/**
- * Multi-repo summary for the per-repo Pull/Push/Commit controls. Returns the
- * full list of repo names known to the session (even ones with no file
- * changes) plus a per-repo `branch / ahead / behind / hasStaged / hasUnstaged`
- * row for each. Empty for single-repo workspaces.
- */
-function useMultiRepoSummary(
-  statusByRepo: ReturnType<typeof useSessionGitStatusByRepo>,
-  allFiles: FileInfo[],
-  reposInFiles: string[],
-) {
-  // Include every repo known to the session, including the empty-name entry
-  // for single-repo. Components render the same per-repo group structure in
-  // both modes — the empty name routes ops to the workspace root, named
-  // entries route to their respective subdirectories.
-  //
-  // Defensive filter: when there are named entries (multi-repo), drop the
-  // empty entry. The bare task-root tracker is supposed to stay quiet for
-  // multi-repo (see workspace_tracker.go's gitIndexPath guard) but a stale
-  // entry can linger from older builds or a bugged code path; without this
-  // filter the dropdown would show an extra "Repository" / primary-name row
-  // alongside the real per-repo entries.
-  const repoNamesForControls = useMemo(() => {
-    const seen = new Set<string>();
-    for (const { repository_name } of statusByRepo) seen.add(repository_name);
-    for (const r of reposInFiles) seen.add(r);
-    const all = Array.from(seen).sort((a, b) => a.localeCompare(b));
-    const named = all.filter((r) => r !== "");
-    return named.length > 0 ? named : all;
-  }, [statusByRepo, reposInFiles]);
-
-  const perRepoStatus = useMemo(() => {
-    if (statusByRepo.length === 0) return [];
-    const stagedByRepo = new Map<string, boolean>();
-    const unstagedByRepo = new Map<string, boolean>();
-    for (const f of allFiles) {
-      const r = f.repository_name ?? "";
-      if (f.staged) stagedByRepo.set(r, true);
-      else unstagedByRepo.set(r, true);
-    }
-    const hasNamed = statusByRepo.some((s) => s.repository_name !== "");
-    const filtered = hasNamed ? statusByRepo.filter((s) => s.repository_name !== "") : statusByRepo;
-    return filtered.map(({ repository_name, status }) => ({
-      repository_name,
-      branch: status?.branch ?? null,
-      ahead: status?.ahead ?? 0,
-      behind: status?.behind ?? 0,
-      hasStaged: stagedByRepo.get(repository_name) ?? false,
-      hasUnstaged: unstagedByRepo.get(repository_name) ?? false,
-    }));
-  }, [statusByRepo, allFiles]);
-
-  return { repoNamesForControls, perRepoStatus };
 }
 
 /**
@@ -518,14 +511,8 @@ type RemoteOpsArgs = {
  * push. Pull/Rebase/Merge/Abort fan out across every repo unconditionally.
  */
 function useRemoteOpsFanOut({ gitOps, repoNamesForControls, perRepoStatus }: RemoteOpsArgs) {
-  // Filter out the legacy empty-name entry; it represents the workspace root
-  // which isn't a real git repo in multi-repo task workspaces. We only want
-  // to iterate the named repos.
-  const namedRepos = useMemo(
-    () => repoNamesForControls.filter((r) => r !== ""),
-    [repoNamesForControls],
-  );
-  const isMultiRepo = namedRepos.length > 1;
+  const namedRepos = useMemo(() => repoNamesForControls, [repoNamesForControls]);
+  const isMultiRepo = repoNamesForControls.length > 1;
   const aheadByRepo = useMemo(() => {
     const m = new Map<string, number>();
     for (const s of perRepoStatus) m.set(s.repository_name, s.ahead);
@@ -535,7 +522,7 @@ function useRemoteOpsFanOut({ gitOps, repoNamesForControls, perRepoStatus }: Rem
   const pull = useCallback(
     async (rebase = false, repo?: string): Promise<GitOperationResult> => {
       if (repo !== undefined || !isMultiRepo) return gitOps.pull(rebase, repo);
-      return fanOutAcrossRepos(namedRepos, "pull", (r) => gitOps.pull(rebase, r));
+      return fanOutAcrossRepositoryWaves(namedRepos, "pull", (r) => gitOps.pull(rebase, r));
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps -- stable fn ref
     [gitOps.pull, isMultiRepo, namedRepos],
@@ -551,7 +538,7 @@ function useRemoteOpsFanOut({ gitOps, repoNamesForControls, perRepoStatus }: Rem
       if (reposWithAhead.length === 0) {
         return { success: true, operation: "push", output: "No commits to push" };
       }
-      return fanOutAcrossRepos(reposWithAhead, "push", (r) => gitOps.push(options, r));
+      return fanOutAcrossRepositoryWaves(reposWithAhead, "push", (r) => gitOps.push(options, r));
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps -- stable fn ref
     [gitOps.push, isMultiRepo, namedRepos, aheadByRepo],
@@ -560,7 +547,7 @@ function useRemoteOpsFanOut({ gitOps, repoNamesForControls, perRepoStatus }: Rem
   const rebase = useCallback(
     async (baseBranch: string, repo?: string): Promise<GitOperationResult> => {
       if (repo !== undefined || !isMultiRepo) return gitOps.rebase(baseBranch, repo);
-      return fanOutAcrossRepos(namedRepos, "rebase", (r) => gitOps.rebase(baseBranch, r));
+      return fanOutAcrossRepositoryWaves(namedRepos, "rebase", (r) => gitOps.rebase(baseBranch, r));
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps -- stable fn ref
     [gitOps.rebase, isMultiRepo, namedRepos],
@@ -569,7 +556,7 @@ function useRemoteOpsFanOut({ gitOps, repoNamesForControls, perRepoStatus }: Rem
   const merge = useCallback(
     async (baseBranch: string, repo?: string): Promise<GitOperationResult> => {
       if (repo !== undefined || !isMultiRepo) return gitOps.merge(baseBranch, repo);
-      return fanOutAcrossRepos(namedRepos, "merge", (r) => gitOps.merge(baseBranch, r));
+      return fanOutAcrossRepositoryWaves(namedRepos, "merge", (r) => gitOps.merge(baseBranch, r));
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps -- stable fn ref
     [gitOps.merge, isMultiRepo, namedRepos],
@@ -578,7 +565,7 @@ function useRemoteOpsFanOut({ gitOps, repoNamesForControls, perRepoStatus }: Rem
   const abort = useCallback(
     async (operation: "merge" | "rebase", repo?: string): Promise<GitOperationResult> => {
       if (repo !== undefined || !isMultiRepo) return gitOps.abort(operation, repo);
-      return fanOutAcrossRepos(namedRepos, "abort", (r) => gitOps.abort(operation, r));
+      return fanOutAcrossRepositoryWaves(namedRepos, "abort", (r) => gitOps.abort(operation, r));
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps -- stable fn ref
     [gitOps.abort, isMultiRepo, namedRepos],
@@ -622,10 +609,11 @@ function useFileDerivations(
     return m;
   }, [allFiles]);
   const reposInFiles = useMemo(() => {
-    const seen = new Set<string>();
-    for (const f of allFiles) if (f.repository_name) seen.add(f.repository_name);
-    return Array.from(seen);
-  }, [allFiles]);
+    return repositoryScopesForMutation(
+      allFiles,
+      statusByRepo.map(({ repository_name }) => repository_name),
+    );
+  }, [allFiles, statusByRepo]);
   const { repoNamesForControls, perRepoStatus } = useMultiRepoSummary(
     statusByRepo,
     allFiles,
@@ -723,14 +711,14 @@ export function useSessionGit(sessionId: string | null | undefined): SessionGit 
     // (single-repo). With paths, we route to the right repo per file.
     stage: (paths?: string[], repo?: string) => {
       if (paths && paths.length > 0) return stageFile(paths, repo);
-      if (repo) return gitOps.stage(undefined, repo);
+      if (repo !== undefined) return gitOps.stage(undefined, repo);
       return stageAll();
     },
     stageFile,
     stageAll,
     unstage: (paths?: string[], repo?: string) => {
       if (paths && paths.length > 0) return unstageFile(paths, repo);
-      if (repo) return gitOps.unstage(undefined, repo);
+      if (repo !== undefined) return gitOps.unstage(undefined, repo);
       return unstageAll();
     },
     unstageFile,

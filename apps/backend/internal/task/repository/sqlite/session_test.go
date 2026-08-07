@@ -8,6 +8,7 @@ import (
 	"errors"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -16,6 +17,7 @@ import (
 	"github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/db/dialect"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/testutil"
 	"github.com/stretchr/testify/require"
 )
 
@@ -123,6 +125,106 @@ func TestTaskSessionWorkspacePathFallsBackWithoutEnvironment(t *testing.T) {
 	}
 	if got.WorkspacePath != "/legacy/repository" {
 		t.Fatalf("WorkspacePath = %q, want legacy fallback", got.WorkspacePath)
+	}
+}
+
+func TestCreateOfficeTaskSessionMarksOnlyTheFirstConcurrentSessionAsOrigin(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	const taskID = "task-office-origin-race"
+	if err := repo.CreateTask(ctx, &models.Task{ID: taskID, Title: "Office origin race"}); err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+
+	sessions := []*models.TaskSession{
+		{ID: "office-origin-agent-1", TaskID: taskID, AgentProfileID: "agent-1", State: models.TaskSessionStateCreated},
+		{ID: "office-origin-agent-2", TaskID: taskID, AgentProfileID: "agent-2", State: models.TaskSessionStateCreated},
+	}
+	errs := make([]error, len(sessions))
+	var wg sync.WaitGroup
+	for i, session := range sessions {
+		wg.Add(1)
+		go func(i int, session *models.TaskSession) {
+			defer wg.Done()
+			errs[i] = repo.CreateOfficeTaskSession(ctx, session)
+		}(i, session)
+	}
+	wg.Wait()
+	for i, err := range errs {
+		if err != nil {
+			t.Fatalf("CreateOfficeTaskSession(%d): %v", i, err)
+		}
+	}
+
+	created, err := repo.ListTaskSessions(ctx, taskID)
+	if err != nil {
+		t.Fatalf("ListTaskSessions: %v", err)
+	}
+	if len(created) != len(sessions) {
+		t.Fatalf("created sessions = %d, want %d", len(created), len(sessions))
+	}
+	originCount := 0
+	for _, session := range created {
+		if models.IsOriginalTaskSession(session.Metadata) {
+			originCount++
+		}
+	}
+	if originCount != 1 {
+		t.Fatalf("origin-marked sessions = %d, want exactly one", originCount)
+	}
+}
+
+func TestPostgresCreateOfficeTaskSessionMarksOnlyTheFirstConcurrentSessionAsOrigin(t *testing.T) {
+	db := openIsolatedPostgresMultiConn(t, testutil.PostgresDSNFromEnv(t), 2)
+	repo, err := NewWithDB(db, db, nil)
+	if err != nil {
+		t.Fatalf("init postgres schema: %v", err)
+	}
+	ctx := context.Background()
+	const taskID = "task-office-origin-race-postgres"
+	now := time.Now().UTC()
+	if _, err := db.Exec(db.Rebind(`
+		INSERT INTO tasks (id, workspace_id, title, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?)
+	`), taskID, "", "Office origin race (Postgres)", now, now); err != nil {
+		t.Fatalf("seed task: %v", err)
+	}
+
+	sessions := []*models.TaskSession{
+		{ID: "office-origin-postgres-agent-1", TaskID: taskID, AgentProfileID: "agent-1", State: models.TaskSessionStateCreated},
+		{ID: "office-origin-postgres-agent-2", TaskID: taskID, AgentProfileID: "agent-2", State: models.TaskSessionStateCreated},
+	}
+	errs := make([]error, len(sessions))
+	var wg sync.WaitGroup
+	for i, session := range sessions {
+		wg.Add(1)
+		go func(i int, session *models.TaskSession) {
+			defer wg.Done()
+			errs[i] = repo.CreateOfficeTaskSession(ctx, session)
+		}(i, session)
+	}
+	wg.Wait()
+	for i, err := range errs {
+		if err != nil {
+			t.Fatalf("CreateOfficeTaskSession(%d): %v", i, err)
+		}
+	}
+
+	created, err := repo.ListTaskSessions(ctx, taskID)
+	if err != nil {
+		t.Fatalf("ListTaskSessions: %v", err)
+	}
+	if len(created) != len(sessions) {
+		t.Fatalf("created sessions = %d, want %d", len(created), len(sessions))
+	}
+	originCount := 0
+	for _, session := range created {
+		if models.IsOriginalTaskSession(session.Metadata) {
+			originCount++
+		}
+	}
+	if originCount != 1 {
+		t.Fatalf("origin-marked sessions = %d, want exactly one", originCount)
 	}
 }
 
@@ -546,6 +648,51 @@ func TestSetSessionMetadataKeyIfAbsentSQLiteIsWriteOnce(t *testing.T) {
 	}
 }
 
+func TestUpdateSessionContextWindowSQLiteCountsStrictUsageDrops(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	seedForMsgTest(t, repo, "task-context-count", "session-context-count", "turn-context-count")
+	require.NoError(t, repo.SetSessionMetadataKey(ctx, "session-context-count", "unrelated", "kept"))
+
+	count, err := repo.UpdateSessionContextWindow(ctx, "session-context-count", map[string]interface{}{
+		"size": int64(200000), "used": int64(120000), "remaining": int64(80000),
+	})
+	require.NoError(t, err)
+	require.Equal(t, int64(0), count)
+
+	count, err = repo.UpdateSessionContextWindow(ctx, "session-context-count", map[string]interface{}{
+		"size": int64(200000), "used": int64(120000), "remaining": int64(80000),
+	})
+	require.NoError(t, err)
+	require.Equal(t, int64(0), count)
+
+	count, err = repo.UpdateSessionContextWindow(ctx, "session-context-count", map[string]interface{}{
+		"size": int64(200000), "used": int64(80000), "remaining": int64(120000),
+	})
+	require.NoError(t, err)
+	require.Equal(t, int64(1), count)
+
+	count, err = repo.UpdateSessionContextWindow(ctx, "session-context-count", map[string]interface{}{
+		"size": int64(200000), "used": int64(80000), "remaining": int64(120000),
+	})
+	require.NoError(t, err)
+	require.Equal(t, int64(1), count)
+
+	count, err = repo.UpdateSessionContextWindow(ctx, "session-context-count", map[string]interface{}{
+		"size": int64(200000), "used": int64(100000), "remaining": int64(100000),
+	})
+	require.NoError(t, err)
+	require.Equal(t, int64(1), count)
+
+	session, err := repo.GetTaskSession(ctx, "session-context-count")
+	require.NoError(t, err)
+	require.Equal(t, "kept", session.Metadata["unrelated"])
+	require.Equal(t, float64(1), session.Metadata[models.SessionMetaKeyContextCompactionCount])
+	window, ok := session.Metadata[models.SessionMetaKeyContextWindow].(map[string]interface{})
+	require.True(t, ok)
+	require.Equal(t, float64(100000), window["used"])
+}
+
 func TestSetSessionMetadataKeyIfAbsentQueryUsesPostgresJSONB(t *testing.T) {
 	query := setSessionMetadataKeyIfAbsentQuery(dialect.PGX)
 	if strings.Contains(query, "json_set") || strings.Contains(query, "json_type") || strings.Contains(query, "json(?)") {
@@ -666,6 +813,23 @@ func TestUpdateTaskSessionWorktreeBranchByRepositoryScopesUpdate(t *testing.T) {
 	if branches["repo-2"] != "feature/old-two" {
 		t.Fatalf("repo-2 branch = %q, want feature/old-two", branches["repo-2"])
 	}
+}
+
+func TestUpdateTaskSessionWorktreeBranchByWorktreeScopesRepeatedRepository(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	seedForMsgTest(t, repo, "task-repeated-repo", "session-repeated-repo", "turn-repeated-repo")
+	for _, wt := range []*models.TaskSessionWorktree{
+		{ID: "wt-repeated-one", SessionID: "session-repeated-repo", WorktreeID: "worktree-repeated-one", RepositoryID: "repo-repeated", WorktreeBranch: "feature/one", Position: 0},
+		{ID: "wt-repeated-two", SessionID: "session-repeated-repo", WorktreeID: "worktree-repeated-two", RepositoryID: "repo-repeated", WorktreeBranch: "feature/two", Position: 1},
+	} {
+		require.NoError(t, repo.CreateTaskSessionWorktree(ctx, wt))
+	}
+	require.NoError(t, repo.UpdateTaskSessionWorktreeBranchByWorktree(ctx, "session-repeated-repo", "worktree-repeated-two", "feature/two-renamed"))
+	worktrees, err := repo.ListTaskSessionWorktrees(ctx, "session-repeated-repo")
+	require.NoError(t, err)
+	require.Equal(t, "feature/one", worktrees[0].WorktreeBranch)
+	require.Equal(t, "feature/two-renamed", worktrees[1].WorktreeBranch)
 }
 
 // TestGetLastAgentMessage_NoMessages verifies that a session with no messages

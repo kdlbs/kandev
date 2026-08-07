@@ -43,6 +43,7 @@ func newSearchTestRepo(t *testing.T) *sqlite.Repository {
 			labels TEXT DEFAULT '[]',
 			identifier TEXT DEFAULT '',
 			is_ephemeral INTEGER DEFAULT 0,
+			origin TEXT DEFAULT 'manual',
 			archived_at TIMESTAMP,
 			created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
 			updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -748,5 +749,115 @@ func TestCountActionableTasksForAgent_AgentIsolation(t *testing.T) {
 	}
 	if countB != 2 {
 		t.Errorf("agent-b: expected 2, got %d", countB)
+	}
+}
+
+// Automation runs are hidden from the task list by their origin, not by
+// is_ephemeral: they are ordinary persistent tasks with their own destination
+// (docs/specs/office/automations-settings.md). The quick chat alongside them
+// still behaves exactly as it did.
+func TestOfficeTaskListsExcludeAutomationOriginTasks(t *testing.T) {
+	repo := newSearchTestRepo(t)
+	ctx := context.Background()
+
+	insertTask(t, repo, ctx, "human", "ws-auto", "Nightly sweep report", "", "KAN-1")
+	now := "2025-01-01 00:00:00"
+	if _, err := repo.ExecRaw(ctx, `
+		INSERT INTO tasks
+			(id, workspace_id, title, identifier, origin, created_at, updated_at)
+		VALUES ('auto', 'ws-auto', 'Nightly sweep run', 'KAN-2', 'automation_run', ?, ?)
+	`, now, now); err != nil {
+		t.Fatalf("insert automation task: %v", err)
+	}
+
+	listed, err := repo.ListTasksByWorkspace(ctx, "ws-auto", true)
+	if err != nil {
+		t.Fatalf("ListTasksByWorkspace: %v", err)
+	}
+	if len(listed) != 1 || listed[0].ID != "human" {
+		t.Fatalf("expected only the human task, got %+v", listed)
+	}
+
+	found, err := repo.SearchTasks(ctx, "ws-auto", "Nightly sweep", 10)
+	if err != nil {
+		t.Fatalf("SearchTasks: %v", err)
+	}
+	for _, task := range found {
+		if task.ID == "auto" {
+			t.Fatalf("automation-origin task must not be searchable in the task list, got %+v", found)
+		}
+	}
+
+	count, err := repo.CountTasksByWorkspace(ctx, "ws-auto")
+	if err != nil {
+		t.Fatalf("CountTasksByWorkspace: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("CountTasksByWorkspace = %d, want 1", count)
+	}
+}
+
+// An automation configured against a workflow step resolves to that step's
+// runner. Its run is long-lived and never leaves IN_PROGRESS on its own, so
+// counting it would inflate the agent's load permanently and starve it of the
+// real work the count exists to balance.
+func TestCountActionableTasksForAgent_ExcludesAutomationRuns(t *testing.T) {
+	repo := newSearchTestRepo(t)
+	ctx := context.Background()
+
+	agentID := "agent-automation"
+	insertAssignedTask(t, repo, ctx, "task-human", "ws1", agentID, "IN_PROGRESS", "")
+	insertAssignedTask(t, repo, ctx, "task-automation", "ws1", agentID, "IN_PROGRESS", "")
+	if _, err := repo.ExecRaw(ctx,
+		`UPDATE tasks SET origin = 'automation_run' WHERE id = ?`, "task-automation",
+	); err != nil {
+		t.Fatalf("tag automation origin: %v", err)
+	}
+
+	count, err := repo.CountActionableTasksForAgent(ctx, agentID)
+	if err != nil {
+		t.Fatalf("CountActionableTasksForAgent: %v", err)
+	}
+	if count != 1 {
+		t.Errorf("expected 1 actionable task (automation run excluded), got %d", count)
+	}
+}
+
+// Scheduler recovery launches whatever this returns. An automation run is
+// started once, explicitly, at trigger time; recovery picking it up would
+// start it a second time through a path that knows nothing about the run row
+// or the automation's concurrency cap.
+func TestListUnstartedTasks_ExcludesAutomationRuns(t *testing.T) {
+	repo := newSearchTestRepo(t)
+	ctx := context.Background()
+
+	insertAssignedTask(t, repo, ctx, "unstarted-human", "ws1", "agent-recovery", "TODO", "")
+	insertAssignedTask(t, repo, ctx, "unstarted-automation", "ws1", "agent-recovery", "TODO", "")
+	// ListUnstartedTasks only considers office tasks, so both rows need a
+	// project before origin can be what separates them — otherwise the query
+	// returns nothing and the test passes for the wrong reason.
+	if _, err := repo.ExecRaw(ctx,
+		`UPDATE tasks SET project_id = 'project-recovery' WHERE id IN (?, ?)`,
+		"unstarted-human", "unstarted-automation",
+	); err != nil {
+		t.Fatalf("scope tasks to a project: %v", err)
+	}
+	if _, err := repo.ExecRaw(ctx,
+		`UPDATE tasks SET origin = 'automation_run' WHERE id = ?`, "unstarted-automation",
+	); err != nil {
+		t.Fatalf("tag automation origin: %v", err)
+	}
+
+	rows, err := repo.ListUnstartedTasks(ctx, 24, 50)
+	if err != nil {
+		t.Fatalf("ListUnstartedTasks: %v", err)
+	}
+	for _, row := range rows {
+		if row.ID == "unstarted-automation" {
+			t.Fatalf("scheduler recovery must not pick up an automation run, got %+v", rows)
+		}
+	}
+	if len(rows) != 1 || rows[0].ID != "unstarted-human" {
+		t.Fatalf("expected only the human task, got %+v", rows)
 	}
 }

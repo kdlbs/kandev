@@ -336,8 +336,10 @@ type PassthroughConfig struct {
 	// without touching the user's global config. Nil means no MCP injection.
 	MCPStrategy     mcpconfig.PassthroughMCPStrategy
 	WaitForTerminal bool
-	// AutoInjectPrompt enables writing the task description to the PTY stdin
-	// after the first idle window. Default false preserves today's behavior.
+	// AutoInjectPrompt is retained in discovered passthrough metadata for
+	// compatibility. Initial prompt delivery is selected by PromptFlag: when it
+	// is empty, the lifecycle manager writes the task description to PTY stdin.
+	// The value no longer gates that delivery.
 	AutoInjectPrompt bool
 	// SubmitSequence is appended after the prompt text when auto-injecting
 	// and when routing chat-compose messages to the PTY. "\r" for most TUIs.

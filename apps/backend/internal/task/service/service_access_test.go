@@ -194,6 +194,31 @@ func TestAuthorizeSessionAccess(t *testing.T) {
 	}
 }
 
+func TestAuthorizeTaskSessionAccessRejectsMismatchedPair(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	seedScopedWorkspaces(t, repo)
+	if err := repo.CreateTask(context.Background(), &models.Task{
+		ID: "task-b-other", WorkspaceID: "ws-b", WorkflowID: "wf-b", WorkflowStepID: "step-1",
+		Title: "B's other task", State: v1.TaskStateCreated, Priority: "medium",
+	}); err != nil {
+		t.Fatalf("create other task: %v", err)
+	}
+
+	for name, ctx := range map[string]context.Context{
+		"owner":    ctxAs("user-b"),
+		"internal": context.Background(),
+	} {
+		err := svc.AuthorizeTaskSessionAccess(ctx, "task-b-other", "sess-b")
+		if !errors.Is(err, repoerrors.ErrTaskNotFound) {
+			t.Fatalf("%s mismatched pair error = %v, want ErrTaskNotFound", name, err)
+		}
+	}
+
+	if err := svc.AuthorizeTaskSessionAccess(ctxAs("user-b"), "task-b", "sess-b"); err != nil {
+		t.Fatalf("matching pair: %v", err)
+	}
+}
+
 // TestMessageScopingBlocksForeignSession covers the read/search paths the
 // security audit flagged as unscoped (agent-conversation cross-user read).
 func TestMessageScopingBlocksForeignSession(t *testing.T) {

@@ -16,6 +16,8 @@ import { buildStartRequest } from "@/lib/services/session-launch-helpers";
 import { MessageRenderer } from "@/components/task/chat/message-renderer";
 import type { Message } from "@/lib/types/http";
 import { getSessionWorkspacePath } from "@/lib/session-workspace-path";
+import { generateUUID } from "@/lib/utils";
+import { useTranslation } from "react-i18next";
 
 type AdvancedChatPanelProps = {
   taskId: string;
@@ -33,12 +35,11 @@ function StartSessionPrompt({
   isLaunching: boolean;
   onStart: () => void;
 }) {
+  const { t } = useTranslation();
   return (
     <div className="flex-1 flex flex-col items-center justify-center p-6 text-center">
-      <p className="text-sm text-muted-foreground mb-1">No active session for this task.</p>
-      <p className="text-xs text-muted-foreground mb-4">
-        Start a session or send a message to begin.
-      </p>
+      <p className="text-sm text-muted-foreground mb-1">{t("office:noActiveSessionForThisTask")}</p>
+      <p className="text-xs text-muted-foreground mb-4">{t("office:startASessionOrSendA")}</p>
       {defaultProfile && (
         <Button
           size="sm"
@@ -51,7 +52,7 @@ function StartSessionPrompt({
           ) : (
             <IconPlayerPlay className="h-3.5 w-3.5" />
           )}
-          {isLaunching ? "Starting..." : "Start session"}
+          {isLaunching ? t("office:starting") : t("office:startSession")}
         </Button>
       )}
     </div>
@@ -130,7 +131,12 @@ function useChatActions(
       if (!client || !sessionId) return;
       await client.request(
         "message.add",
-        { task_id: taskId, session_id: sessionId, content: text },
+        {
+          task_id: taskId,
+          session_id: sessionId,
+          client_message_id: generateUUID(),
+          content: text,
+        },
         10_000,
       );
     },
@@ -141,6 +147,7 @@ function useChatActions(
 }
 
 export function AdvancedChatPanel({ taskId, sessionId, hideInput }: AdvancedChatPanelProps) {
+  const { t } = useTranslation();
   const [message, setMessage] = useState("");
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -195,8 +202,8 @@ export function AdvancedChatPanel({ taskId, sessionId, hideInput }: AdvancedChat
             disabled={!defaultProfile}
             placeholder={
               defaultProfile
-                ? "Send a message to start a session..."
-                : "No agent profile configured"
+                ? t("office:sendAMessageToStartA")
+                : t("office:noAgentProfileConfigured")
             }
           />
         )}
@@ -223,7 +230,7 @@ export function AdvancedChatPanel({ taskId, sessionId, hideInput }: AdvancedChat
           onSend={handleSend}
           disabled={!canSend && sessionId !== null}
           placeholder={
-            isAgentBusy ? "Agent is working... message will be queued" : "Send a message..."
+            isAgentBusy ? t("office:agentIsWorkingMessageWillBe") : t("office:sendAMessage")
           }
         />
       )}
@@ -244,6 +251,7 @@ function ChatInput({
   disabled: boolean;
   placeholder: string;
 }) {
+  const { t } = useTranslation();
   return (
     <div className="border-t border-border p-3 shrink-0">
       <div className="flex gap-2">
@@ -270,7 +278,7 @@ function ChatInput({
               <IconSend className="h-4 w-4" />
             </Button>
           </TooltipTrigger>
-          <TooltipContent>Send message</TooltipContent>
+          <TooltipContent>{t("office:sendMessage")}</TooltipContent>
         </Tooltip>
       </div>
     </div>

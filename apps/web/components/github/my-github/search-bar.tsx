@@ -19,6 +19,14 @@ export type PresetOption = {
   icon: Icon;
 };
 
+// NOTE: `label` here is NOT translated, and must not be. `toStored()` in
+// use-default-query-presets.ts copies it verbatim into `StoredQueryPreset`,
+// which is persisted to `github_default_query_presets` in user and workspace
+// settings and is user-editable in Settings → Integrations → GitHub. Translating
+// it in place would write locale-dependent values into saved settings and leave
+// them there after a locale switch. Localizing these needs a key/persisted-value
+// split in this module, the same open item as the built-in layout profile names.
+// `value`, `filter` and `group` are wire values and a GitHub search query.
 export const PR_PRESETS: PresetOption[] = [
   {
     value: "review_requested",

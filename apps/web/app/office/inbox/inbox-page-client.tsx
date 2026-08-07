@@ -4,12 +4,13 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { IconSearch } from "@tabler/icons-react";
 import { Tabs, TabsList, TabsTrigger } from "@kandev/ui/tabs";
 import { Input } from "@kandev/ui/input";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast/sonner";
 import { useAppStore } from "@/components/state-provider";
 import { useOfficeRefetch } from "@/hooks/use-office-refetch";
 import * as officeApi from "@/lib/api/domains/office-api";
 import type { InboxItem } from "@/lib/state/slices/office/types";
 import { InboxItemRow } from "./inbox-item-row";
+import { useTranslation } from "react-i18next";
 
 type TabValue = "mine" | "recent" | "all";
 
@@ -54,17 +55,18 @@ function useInboxData(workspaceId: string | null, initialItems: InboxItem[], ini
 }
 
 function useApprovalActions(fetchInbox: () => Promise<void>) {
+  const { t } = useTranslation();
   const handleApprove = useCallback(
     async (id: string) => {
       try {
         await officeApi.decideApproval(id, { status: "approved" });
         void fetchInbox();
-        toast.success("Approved");
+        toast.success(t("office:approved"));
       } catch (err) {
-        toast.error(err instanceof Error ? err.message : "Failed to approve");
+        toast.error(err instanceof Error ? err.message : t("office:failedToApprove"));
       }
     },
-    [fetchInbox],
+    [fetchInbox, t],
   );
 
   const handleReject = useCallback(
@@ -72,12 +74,12 @@ function useApprovalActions(fetchInbox: () => Promise<void>) {
       try {
         await officeApi.decideApproval(id, { status: "rejected" });
         void fetchInbox();
-        toast.success("Rejected");
+        toast.success(t("office:rejected"));
       } catch (err) {
-        toast.error(err instanceof Error ? err.message : "Failed to reject");
+        toast.error(err instanceof Error ? err.message : t("office:failedToReject"));
       }
     },
-    [fetchInbox],
+    [fetchInbox, t],
   );
 
   return { handleApprove, handleReject };
@@ -94,24 +96,25 @@ function InboxToolbar({
   onTabChange: (v: TabValue) => void;
   onSearchChange: (v: string) => void;
 }) {
+  const { t } = useTranslation();
   return (
     <Tabs value={tab} onValueChange={(v) => onTabChange(v as TabValue)}>
       <div className="flex items-center justify-between">
         <TabsList>
           <TabsTrigger value="mine" className="cursor-pointer">
-            Mine
+            {t("office:mine")}
           </TabsTrigger>
           <TabsTrigger value="recent" className="cursor-pointer">
-            Recent
+            {t("office:recent")}
           </TabsTrigger>
           <TabsTrigger value="all" className="cursor-pointer">
-            All
+            {t("office:all")}
           </TabsTrigger>
         </TabsList>
         <div className="relative">
           <IconSearch className="absolute left-2.5 top-2 h-3.5 w-3.5 text-muted-foreground" />
           <Input
-            placeholder="Search..."
+            placeholder={t("office:search")}
             className="w-[220px] h-8 pl-8 text-xs"
             value={search}
             onChange={(e) => onSearchChange(e.target.value)}
@@ -123,6 +126,7 @@ function InboxToolbar({
 }
 
 export function InboxPageClient({ initialItems, initialCount }: InboxPageClientProps) {
+  const { t } = useTranslation();
   const workspaceId = useAppStore((s) => s.workspaces.activeId);
   const inboxItems = useAppStore((s) => s.office.inboxItems);
   const [tab, setTab] = useState<TabValue>("mine");
@@ -163,9 +167,9 @@ export function InboxPageClient({ initialItems, initialCount }: InboxPageClientP
       <div className="border border-border rounded-lg divide-y divide-border overflow-hidden">
         {filteredItems.length === 0 ? (
           <div className="px-4 py-8 text-center">
-            <p className="text-sm text-muted-foreground">All clear.</p>
+            <p className="text-sm text-muted-foreground">{t("office:allClear")}</p>
             <p className="text-xs text-muted-foreground mt-1">
-              Approvals, alerts, and items needing your attention appear here.
+              {t("office:approvalsAlertsAndItemsNeedingYour")}
             </p>
           </div>
         ) : (

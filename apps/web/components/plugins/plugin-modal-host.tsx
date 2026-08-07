@@ -42,6 +42,8 @@ function PluginModalInstance({ modal }: { modal: OpenPluginModal }) {
         onEscapeKeyDown={guardClose}
         onInteractOutside={guardClose}
       >
+        {/* `options.title` is supplied by the plugin author, so it is
+            third-party data rather than host copy. */}
         {options.title && (
           <DialogHeader>
             <DialogTitle>{options.title}</DialogTitle>

@@ -11,6 +11,7 @@ EMBEDDED_WEB_DIR := $(BACKEND_DIR)/internal/webapp/embedded/generated
 
 # Tools
 PNPM := pnpm
+GOFLAGS ?= -v
 MAKE := make
 
 # Cross-platform commands
@@ -46,14 +47,19 @@ MAGENTA := \033[35m
 
 VERBOSE ?= 0
 NODE ?= $(shell command -v node $(NULL_REDIR) || echo node)
-SERVICE_LAUNCHER := $(CURDIR)/dist/kandev/bin/kandev
-SERVICE_BUNDLE_DIR := $(CURDIR)/dist/kandev
-SERVICE_VERSION := $(shell git rev-parse --short HEAD $(NULL_REDIR) || echo dev)
-SERVICE_ENV := KANDEV_BUNDLE_DIR="$(SERVICE_BUNDLE_DIR)" KANDEV_VERSION="$(SERVICE_VERSION)"
+RUNTIME_BUNDLE_DIR ?= $(CURDIR)/dist/kandev
+RUNTIME_VERSION ?= $(shell git describe --tags --always --dirty $(NULL_REDIR) || echo dev)
+SERVICE_BUNDLE_DIR ?= $(CURDIR)/dist/kandev
+SERVICE_LAUNCHER = $(SERVICE_BUNDLE_DIR)/bin/kandev
+SERVICE_VERSION ?= $(RUNTIME_VERSION)
+SERVICE_ENV = KANDEV_BUNDLE_DIR="$(SERVICE_BUNDLE_DIR)" KANDEV_VERSION="$(SERVICE_VERSION)"
 SERVICE_PORT_FLAG := $(if $(PORT),--port $(PORT),)
 SERVICE_HOME_DIR_FLAG := $(if $(HOME_DIR),--home-dir "$(HOME_DIR)",)
 SERVICE_NO_BOOT_START_FLAG := $(if $(filter 1 true yes,$(NO_BOOT_START)),--no-boot-start,)
 SERVICE_INSTALL_FLAGS := $(SERVICE_PORT_FLAG) $(SERVICE_HOME_DIR_FLAG) $(SERVICE_NO_BOOT_START_FLAG)
+DEV_PORT_FLAG := $(if $(PORT),--port $(PORT),)
+DEV_WEB_PORT_FLAG := $(if $(WEB_PORT),--web-internal-port $(WEB_PORT),)
+DEV_FLAGS := $(DEV_PORT_FLAG) $(DEV_WEB_PORT_FLAG) $(DEV_ARGS)
 DESKTOP_BUNDLES ?= dmg
 
 # Phase headers
@@ -81,6 +87,7 @@ help:
 	@echo "  bootstrap        Install mise tools, workspace deps, and git hooks"
 	@echo "  bootstrap-e2e    Bootstrap plus Playwright browser/system deps"
 	@echo "  dev              Run backend + web via local CLI (auto ports)"
+	@echo "  dev PORT=38430   Run dev on a fixed backend port (beats KANDEV_BACKEND_PORT)"
 	@echo "  dev-prod-db      Run dev mode against the production db at ~/.kandev"
 	@echo "  dev-backend      Run backend in development mode (port 38429)"
 	@echo "  dev-web          Run web app in development mode (port 37429)"
@@ -111,6 +118,7 @@ help:
 	@echo "  build            Build backend and web app"
 	@echo "  build-backend    Build backend binary"
 	@echo "  build-web        Build web app for production"
+	@echo "  runtime-bundle   Build the package-manager runtime bundle (deps must exist)"
 	@echo "  desktop-runtime  Build/copy runtime resources for the macOS desktop app"
 	@echo "  desktop-build    Build the macOS Tauri app bundle/DMG"
 	@echo "  desktop-open     Build and open the macOS app"
@@ -137,7 +145,10 @@ help:
 	@echo "  lint             Run linters for both components"
 	@echo "  lint-backend     Run Go linters"
 	@echo "  lint-web         Run ESLint"
+	@echo "  lint-architecture  Enforce architecture budgets and compatibility expiry"
 	@echo "  lint-format      Check formatting with Prettier (web/cli/packages)"
+	@echo "  dead-code-workspaces Find unused TypeScript workspace files, exports, and dependencies"
+	@echo "  dead-code-go     Find unreachable Go functions (host config; verify other targets before deletion)"
 	@echo "  fmt              Format all code"
 	@echo "  fmt-backend      Format Go code"
 	@echo "  fmt-web          Format web/cli/packages with Prettier, then ESLint --fix (web)"
@@ -181,7 +192,7 @@ ifeq ($(OS),Windows_NT)
 	@$(MAKE) -C $(BACKEND_DIR) build-winjob
 endif
 	@echo "Launching via CLI (auto ports)..."
-	@cd $(APPS_DIR) && $(PNPM) -C cli dev -- dev
+	@cd $(APPS_DIR) && $(PNPM) -C cli dev -- dev $(DEV_FLAGS)
 
 .PHONY: dev-prod-db
 dev-prod-db: export KANDEV_DATABASE_PATH := $(HOME)/.kandev/data/kandev.db
@@ -307,22 +318,41 @@ start-windows-debug:
 # Service
 #
 
-.PHONY: service-bundle
-service-bundle: install build
-	$(call phase,Packaging Service Bundle)
-	@test -n "$(SERVICE_BUNDLE_DIR)" || { echo "SERVICE_BUNDLE_DIR is empty; aborting."; exit 1; }
-	@test "$(SERVICE_BUNDLE_DIR)" != "/" || { echo "SERVICE_BUNDLE_DIR must not be /; aborting."; exit 1; }
-	@$(MAKE) -C $(BACKEND_DIR) build-agentctl-remote
-	@$(RMDIR) "$(SERVICE_BUNDLE_DIR)/bin"
-	@mkdir -p "$(SERVICE_BUNDLE_DIR)/bin"
-	@cp "$(BACKEND_DIR)/bin/kandev" "$(BACKEND_DIR)/bin/agentctl" \
+.PHONY: runtime-bundle
+runtime-bundle:
+	$(call phase,Packaging Runtime Bundle)
+	@test -n "$(RUNTIME_BUNDLE_DIR)" || { echo "RUNTIME_BUNDLE_DIR is empty; aborting."; exit 1; }
+	@test "$(RUNTIME_BUNDLE_DIR)" != "/" || { echo "RUNTIME_BUNDLE_DIR must not be /; aborting."; exit 1; }
+	@$(MAKE) -s build-web
+	@$(MAKE) -s sync-embedded-web
+	@$(MAKE) -C $(BACKEND_DIR) build-runtime VERSION="$(RUNTIME_VERSION)" GOFLAGS="$(GOFLAGS)"
+	@set -eu; \
+		requested_bundle_dir="$(RUNTIME_BUNDLE_DIR)"; \
+		mkdir -p "$$requested_bundle_dir"; \
+		resolved_bundle_dir="$$(cd "$$requested_bundle_dir" && pwd -P)"; \
+		test -n "$$resolved_bundle_dir" || { echo "RUNTIME_BUNDLE_DIR could not be resolved; aborting."; exit 1; }; \
+		test "$$resolved_bundle_dir" != "/" || { echo "RUNTIME_BUNDLE_DIR must not resolve to /; aborting."; exit 1; }; \
+		staging_bundle_dir="$$(mktemp -d "$$resolved_bundle_dir/.runtime-bundle.XXXXXX")"; \
+		trap 'rm -rf "$$staging_bundle_dir"' EXIT; \
+		mkdir -p "$$staging_bundle_dir/bin"; \
+		cp "$(BACKEND_DIR)/bin/kandev" "$(BACKEND_DIR)/bin/agentctl" \
 		"$(BACKEND_DIR)/bin/agentctl-linux-amd64" \
 		"$(BACKEND_DIR)/bin/agentctl-linux-arm64" \
 		"$(BACKEND_DIR)/bin/agentctl-darwin-arm64" \
 		"$(BACKEND_DIR)/bin/agentctl-darwin-amd64" \
-		"$(SERVICE_BUNDLE_DIR)/bin/"
-	@scripts/release/package-bundle.sh
-	$(call success,Service bundle packaged at $(SERVICE_BUNDLE_DIR))
+		"$$staging_bundle_dir/bin/"; \
+		scripts/release/package-bundle.sh --bundle-dir "$$staging_bundle_dir"; \
+		rm -rf "$$resolved_bundle_dir/bin"; \
+		mv "$$staging_bundle_dir/bin" "$$resolved_bundle_dir/bin"; \
+		rmdir "$$staging_bundle_dir"; \
+		trap - EXIT
+	$(call success,Runtime bundle packaged at $(RUNTIME_BUNDLE_DIR))
+
+.PHONY: service-bundle
+service-bundle: install
+	@$(MAKE) -s runtime-bundle \
+		RUNTIME_BUNDLE_DIR="$(SERVICE_BUNDLE_DIR)" \
+		RUNTIME_VERSION="$(SERVICE_VERSION)"
 
 .PHONY: service-cli-check
 service-cli-check:
@@ -395,6 +425,16 @@ build-e2e-plugin-package:
 build-web:
 	@printf "$(CYAN)Building web app...$(RESET)\n"
 	@cd $(APPS_DIR) && VITE_KANDEV_API_PORT= VITE_KANDEV_DEBUG= $(PNPM) --filter @kandev/web build
+
+## Web build for the E2E harness. Identical to build-web except that it keeps the
+## pseudo QA catalog, which a production build drops (see
+## apps/web/lib/i18n/bundling.ts). e2e/tests/i18n/pseudo-coverage.spec.ts is the
+## only oracle for copy the jsx-only eslint guard cannot see, and it needs the
+## catalog present in the artifact it runs against.
+.PHONY: build-web-e2e
+build-web-e2e:
+	@printf "$(CYAN)Building web app (with the pseudo QA locale)...$(RESET)\n"
+	@cd $(APPS_DIR) && VITE_KANDEV_API_PORT= VITE_KANDEV_DEBUG= $(PNPM) --filter @kandev/web build:e2e
 
 .PHONY: build-web-quiet
 build-web-quiet:
@@ -497,22 +537,26 @@ test-scripts:
 	@bash scripts/opencode-code-review.test.sh
 	@python3 scripts/opencode-code-review.test.py
 	@python3 scripts/lint-harness-files.test.py
+	@python3 scripts/lint-architecture.test.py
 	@bash scripts/release-desktop.test.sh
+	@bash scripts/release/runtime-bundle.test.sh
 	@node --test apps/desktop/e2e/desktop-launch-smoke.test.mjs
+	@python3 .github/scripts/release-workflow-contract_test.py
+	@node --test scripts/release/nightly-version.test.mjs scripts/release/nightly-release.test.mjs scripts/release/npm-view-version.test.mjs scripts/release/publish-npm.test.mjs
 	@node --test scripts/validate-public-docs.test.mjs
 
 .PHONY: test-e2e
-test-e2e: build-backend build-web build-e2e-plugin-package
+test-e2e: build-backend build-web-e2e build-e2e-plugin-package
 	@printf "$(CYAN)Running E2E tests (headless, parallel)...$(RESET)\n"
 	@cd $(APPS_DIR) && $(PNPM) --filter @kandev/web e2e
 
 .PHONY: test-e2e-headed
-test-e2e-headed: build-backend build-web build-e2e-plugin-package
+test-e2e-headed: build-backend build-web-e2e build-e2e-plugin-package
 	@printf "$(CYAN)Running E2E tests (headed)...$(RESET)\n"
 	@cd $(APPS_DIR) && $(PNPM) --filter @kandev/web e2e:headed
 
 .PHONY: test-e2e-ui
-test-e2e-ui: build-backend build-web build-e2e-plugin-package
+test-e2e-ui: build-backend build-web-e2e build-e2e-plugin-package
 	@printf "$(CYAN)Opening Playwright UI mode...$(RESET)\n"
 	@cd $(APPS_DIR) && $(PNPM) --filter @kandev/web e2e:ui
 
@@ -543,7 +587,7 @@ test-e2e-ci:
 #
 
 .PHONY: lint
-lint: lint-backend lint-web lint-harness
+lint: lint-backend lint-web lint-harness lint-architecture
 	@printf "\n$(GREEN)$(BOLD)✓ Linting complete!$(RESET)\n"
 
 .PHONY: lint-backend
@@ -561,10 +605,25 @@ lint-harness:
 	@printf "$(CYAN)Linting harness files...$(RESET)\n"
 	@python3 .github/scripts/lint-harness-files.py --all
 
+.PHONY: lint-architecture
+lint-architecture:
+	@printf "$(CYAN)Linting architecture...$(RESET)\n"
+	@python3 scripts/lint-architecture.py --all
+
 .PHONY: lint-format
 lint-format:
 	@printf "$(CYAN)Checking formatting...$(RESET)\n"
 	@cd $(APPS_DIR) && $(PNPM) run format:check
+
+.PHONY: dead-code-workspaces
+dead-code-workspaces:
+	@printf "$(CYAN)Auditing TypeScript workspace dead code...$(RESET)\n"
+	@cd $(APPS_DIR) && $(PNPM) run dead-code
+
+.PHONY: dead-code-go
+dead-code-go:
+	@printf "$(CYAN)Auditing Go dead code...$(RESET)\n"
+	@$(MAKE) -C $(BACKEND_DIR) deadcode
 
 .PHONY: fmt
 fmt: fmt-backend fmt-web

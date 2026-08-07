@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { useRouter } from "@/lib/routing/client-router";
 import { runWithNavigationBlockerBypassed } from "@/lib/routing/navigation-guard";
 import { Button } from "@kandev/ui/button";
@@ -28,7 +29,7 @@ import {
   rowsToEnvVars,
   envVarsToRows,
 } from "@/components/settings/profile-edit/env-vars-card";
-import { ScriptCard } from "@/components/settings/profile-edit/script-card";
+import { ProfileScriptCards } from "@/components/settings/profile-edit/profile-script-cards";
 import { SSHAgentReadinessCard } from "@/components/settings/ssh-agent-readiness-card";
 import {
   type GitIdentityMode,
@@ -59,6 +60,7 @@ import {
 } from "@/components/settings/profile-edit/executor-profile-baselines";
 import type { Executor, ExecutorProfile, ExecutorType, ProfileEnvVar } from "@/lib/types/http";
 import type { NetworkPolicyRule } from "@/lib/api/domains/settings-api";
+import { executorProfileDiscoveryTarget } from "@/lib/settings-discovery/dynamic-targets";
 
 const EXECUTORS_ROUTE = "/settings/executors";
 const SPRITES_TOKEN_KEY = "SPRITES_API_TOKEN";
@@ -172,6 +174,7 @@ function useGitIdentityState(isRemote: boolean, profile: ExecutorProfile) {
 }
 
 export default function ProfileEditPage({ profileId }: { profileId: string }) {
+  const { t } = useTranslation();
   const router = useRouter();
   const result = useProfileFromStore(profileId);
 
@@ -179,9 +182,9 @@ export default function ProfileEditPage({ profileId }: { profileId: string }) {
     return (
       <Card>
         <CardContent className="py-12 text-center">
-          <p className="text-muted-foreground">Profile not found</p>
+          <p className="text-muted-foreground">{t("executors:profileNotFound")}</p>
           <Button className="mt-4 cursor-pointer" onClick={() => router.push(EXECUTORS_ROUTE)}>
-            Back to Executors
+            {t("executors:backToExecutors")}
           </Button>
         </CardContent>
       </Card>
@@ -194,6 +197,7 @@ export default function ProfileEditPage({ profileId }: { profileId: string }) {
 }
 
 function useProfilePersistence(executor: Executor, profile: ExecutorProfile) {
+  const { t } = useTranslation();
   const router = useRouter();
   const { toast } = useToast();
   const executors = useAppStore((state) => state.executors.items);
@@ -217,18 +221,22 @@ function useProfilePersistence(executor: Executor, profile: ExecutorProfile) {
       try {
         const updated = await updateExecutorProfile(executor.id, profile.id, data);
         setSaveStatus("success");
-        toast({ title: "Profile saved", variant: "success" });
+        toast({ title: t("executors:profileSaved"), variant: "success" });
         setExecutors(upsertExecutorProfile(executors, executor, updated));
         window.setTimeout(() => setSaveStatus("idle"), 1500);
       } catch (err) {
-        const message = err instanceof Error ? err.message : "Failed to save profile";
+        const message = err instanceof Error ? err.message : t("executors:failedToSaveProfile");
         setError(message);
         setSaveStatus("error");
-        toast({ title: "Failed to save profile", description: message, variant: "error" });
+        toast({
+          title: t("executors:failedToSaveProfile"),
+          description: message,
+          variant: "error",
+        });
         throw err;
       }
     },
-    [executor, profile.id, executors, setExecutors, toast],
+    [executor, profile.id, executors, setExecutors, toast, t],
   );
 
   const remove = useCallback(
@@ -257,6 +265,7 @@ function useProfilePersistence(executor: Executor, profile: ExecutorProfile) {
 }
 
 function useProfileFormState(executor: Executor, profile: ExecutorProfile) {
+  const { t } = useTranslation();
   const [name, setName] = useState(profile.name);
   const [mcpPolicy, setMcpPolicy] = useState(profile.mcp_policy ?? "");
   const [prepareScript, setPrepareScript] = useState(profile.prepare_script ?? "");
@@ -272,7 +281,7 @@ function useProfileFormState(executor: Executor, profile: ExecutorProfile) {
   const flags = useRemoteExecutorFlags(executor.type);
   const remoteAuth = useRemoteAuthState(profile);
   const gitIdentity = useGitIdentityState(flags.isRemote, profile);
-  const mcpPolicyError = useMemo(() => validateMcpPolicy(mcpPolicy), [mcpPolicy]);
+  const mcpPolicyErrorKey = useMemo(() => validateMcpPolicy(mcpPolicy), [mcpPolicy]);
 
   useEffect(() => {
     listScriptPlaceholders()
@@ -289,8 +298,8 @@ function useProfileFormState(executor: Executor, profile: ExecutorProfile) {
   }, [envVarRows, flags.isSprites, spritesSecretId]);
 
   const prepareDesc = flags.isRemote
-    ? "Runs inside the execution environment before the agent starts. Type {{ to see available placeholders."
-    : "Runs on the host machine before the agent starts.";
+    ? t("executors:prepareScriptDescriptionRemote", { trigger: "{{" })
+    : t("executors:prepareScriptDescriptionLocal");
 
   return {
     name,
@@ -332,7 +341,7 @@ function useProfileFormState(executor: Executor, profile: ExecutorProfile) {
     isDocker: flags.isDocker,
     isSprites: flags.isSprites,
     isSSH: executor.type === "ssh",
-    mcpPolicyError,
+    mcpPolicyErrorKey,
     buildEnvVars,
     prepareDesc,
   };
@@ -409,15 +418,10 @@ type ProfileEditSectionsProps = {
   secrets: ReturnType<typeof useSecrets>["items"];
 };
 
-function ProfileEditSections({ executor, profile, form, secrets }: ProfileEditSectionsProps) {
+function ExecutorSpecificSections({ executor, profile, form, secrets }: ProfileEditSectionsProps) {
   const gitIdentityBaseline = getGitIdentityBaseline(profile, form.localGitIdentity);
   return (
     <>
-      <ProfileDetailsCard
-        name={form.name}
-        baselineName={profile.name}
-        onNameChange={form.setName}
-      />
       {executor.type === "ssh" && (
         <SSHAgentReadinessCard
           executorId={executor.id}
@@ -470,6 +474,25 @@ function ProfileEditSections({ executor, profile, form, secrets }: ProfileEditSe
           secrets={secrets}
         />
       )}
+    </>
+  );
+}
+
+function ProfileEditSections({ executor, profile, form, secrets }: ProfileEditSectionsProps) {
+  return (
+    <>
+      <ProfileDetailsCard
+        name={form.name}
+        baselineName={profile.name}
+        onNameChange={form.setName}
+        discoveryTargetId={executorProfileDiscoveryTarget(profile.id, "profile-details")}
+      />
+      <ExecutorSpecificSections
+        executor={executor}
+        profile={profile}
+        form={form}
+        secrets={secrets}
+      />
       <EnvVarsCard
         rows={form.envVarRows}
         baselineRows={envVarsToRows(profile.env_vars)}
@@ -477,40 +500,36 @@ function ProfileEditSections({ executor, profile, form, secrets }: ProfileEditSe
         onAdd={form.addEnvVar}
         onUpdate={form.updateEnvVar}
         onRemove={form.removeEnvVar}
+        discoveryTargetId={executorProfileDiscoveryTarget(profile.id, "environment-variables")}
       />
-      <ScriptCard
-        title="Prepare Script"
-        description={form.prepareDesc}
-        value={form.prepareScript}
-        baselineValue={profile.prepare_script ?? ""}
-        onChange={form.setPrepareScript}
-        height="300px"
-        placeholders={form.placeholders}
+      <ProfileScriptCards
         executorType={executor.type}
+        profileId={profile.id}
+        scripts={{
+          isRemote: form.isRemote,
+          prepareDescription: form.prepareDesc,
+          prepareValue: form.prepareScript,
+          prepareBaseline: profile.prepare_script ?? "",
+          onPrepareChange: form.setPrepareScript,
+          cleanupValue: form.cleanupScript,
+          cleanupBaseline: profile.cleanup_script ?? "",
+          onCleanupChange: form.setCleanupScript,
+          placeholders: form.placeholders,
+        }}
       />
-      {form.isRemote && (
-        <ScriptCard
-          title="Cleanup Script"
-          description="Runs after the agent session ends for cleanup tasks."
-          value={form.cleanupScript}
-          baselineValue={profile.cleanup_script ?? ""}
-          onChange={form.setCleanupScript}
-          height="200px"
-          placeholders={form.placeholders}
-          executorType={executor.type}
-        />
-      )}
       <McpPolicyCard
         mcpPolicy={form.mcpPolicy}
         baselinePolicy={profile.mcp_policy ?? ""}
-        mcpPolicyError={form.mcpPolicyError}
+        mcpPolicyErrorKey={form.mcpPolicyErrorKey}
         onPolicyChange={form.setMcpPolicy}
+        discoveryTargetId={executorProfileDiscoveryTarget(profile.id, "mcp-policy")}
       />
     </>
   );
 }
 
 function ProfileEditForm({ executor, profile }: { executor: Executor; profile: ExecutorProfile }) {
+  const { t } = useTranslation();
   const router = useRouter();
   const { items: secrets } = useSecrets();
   const persistence = useProfilePersistence(executor, profile);
@@ -527,7 +546,7 @@ function ProfileEditForm({ executor, profile }: { executor: Executor; profile: E
         data-testid="ssh-connection-settings-link"
       >
         <IconShieldLock className="mr-1.5 h-4 w-4" />
-        Connection Settings
+        {t("executors:connectionSettings")}
       </Button>
     ) : undefined;
 
@@ -555,15 +574,15 @@ function ProfileEditForm({ executor, profile }: { executor: Executor; profile: E
     setSavedRevision(submittedRevision);
   };
   let invalidReason: string | undefined;
-  if (!form.name.trim()) invalidReason = "Profile name is required.";
-  else if (form.mcpPolicyError) invalidReason = form.mcpPolicyError;
-  else if (spritesTokenMissing) invalidReason = "Sprites token is required.";
+  if (!form.name.trim()) invalidReason = t("executors:profileNameIsRequired");
+  else if (form.mcpPolicyErrorKey) invalidReason = t(form.mcpPolicyErrorKey);
+  else if (spritesTokenMissing) invalidReason = t("executors:spritesTokenIsRequired");
   useSettingsSaveContributor({
     id: `executor-profile:${profile.id}`,
     revision: saveRevision,
     isDirty: baselineReady && saveRevision !== savedRevision,
     canSave:
-      baselineReady && Boolean(form.name.trim()) && !form.mcpPolicyError && !spritesTokenMissing,
+      baselineReady && Boolean(form.name.trim()) && !form.mcpPolicyErrorKey && !spritesTokenMissing,
     invalidReason,
     save: handleSave,
     discard: () => undefined,
@@ -591,12 +610,12 @@ function ProfileEditForm({ executor, profile }: { executor: Executor; profile: E
       />
       <fieldset
         disabled={!baselineReady || persistence.saveStatus === "loading"}
-        className="contents"
+        className="space-y-8"
       >
         <ProfileEditSections executor={executor} profile={profile} form={form} secrets={secrets} />
       </fieldset>
       {spritesTokenMissing && (
-        <p className="text-sm text-destructive">Sprites API key is required.</p>
+        <p className="text-sm text-destructive">{t("executors:spritesApiKeyIsRequired")}</p>
       )}
       {persistence.error && <p className="text-sm text-destructive">{persistence.error}</p>}
       <ProfileFormActions onDelete={() => persistence.setDeleteDialogOpen(true)} />

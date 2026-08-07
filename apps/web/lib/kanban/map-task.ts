@@ -10,6 +10,7 @@ import type {
   TaskState,
   TaskSessionState,
 } from "@/lib/types/http";
+import type { TaskStatusSummary } from "@/lib/types/task-status-summary";
 
 type KanbanTask = KanbanState["tasks"][number];
 
@@ -25,6 +26,8 @@ type KanbanTask = KanbanState["tasks"][number];
 export type TaskLike = {
   id?: string;
   task_id?: string;
+  workspace_id?: string;
+  workflow_id?: string;
   workflow_step_id?: string;
   title?: string;
   description?: string | null;
@@ -48,6 +51,8 @@ export type TaskLike = {
   primary_session_state?: TaskSessionState | string | null;
   primary_session_pending_action?: TaskPendingAction | null;
   task_pending_action?: TaskPendingAction | null;
+  /** True when the task's session was mid-turn when the backend died. */
+  interrupted?: boolean;
   foreground_activity?: ForegroundActivity | null;
   active_subagent_count?: number;
   session_count?: number | null;
@@ -63,6 +68,8 @@ export type TaskLike = {
   queued_for_step_id?: string | null;
   queued_at?: string | null;
   metadata?: Record<string, unknown> | null;
+  archived_at?: string | null;
+  status_summary?: TaskStatusSummary | null;
 };
 
 export type WorkspaceMode = "inherit_parent" | "new_workspace" | "shared_group";
@@ -127,6 +134,8 @@ function pickWorkspaceFolders(source: TaskLike): KanbanTask["workspaceFolders"] 
 export function toKanbanTask(source: TaskLike): KanbanTask {
   return {
     id: pickId(source),
+    workspaceId: source.workspace_id,
+    workflowId: source.workflow_id,
     workflowStepId: source.workflow_step_id ?? "",
     title: source.title ?? "",
     description: source.description ?? undefined,
@@ -139,6 +148,7 @@ export function toKanbanTask(source: TaskLike): KanbanTask {
     primarySessionState: source.primary_session_state ?? undefined,
     primarySessionPendingAction: pickPendingAction(source.primary_session_pending_action),
     taskPendingAction: pickPendingAction(source.task_pending_action),
+    interrupted: source.interrupted,
     foregroundActivity: pickForegroundActivity(source.foreground_activity),
     activeSubagentCount: source.active_subagent_count ?? undefined,
     sessionCount: source.session_count ?? undefined,
@@ -154,6 +164,8 @@ export function toKanbanTask(source: TaskLike): KanbanTask {
     wipAdmitted: source.wip_admitted,
     queuedForStepId: source.queued_for_step_id,
     queuedAt: source.queued_at,
+    statusSummary: source.status_summary,
+    isArchived: source.archived_at != null,
     isPRReview: isPRReviewFromMetadata(source.metadata),
     isIssueWatch: isIssueWatchFromMetadata(source.metadata),
     ...issueFieldsFromMetadata(source.metadata),

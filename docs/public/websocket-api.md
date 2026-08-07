@@ -125,7 +125,7 @@ Malformed JSON produces a `BAD_REQUEST` error with empty `id` and `action`, beca
 
 | Behavior | Current value | Client consequence |
 |----------|---------------|--------------------|
-| Maximum inbound message | 32 MiB | A larger request closes/fails the connection. Base64 attachments consume the same limit. |
+| Maximum inbound message | 32 MiB | A larger request closes/fails the connection. Current file-backed attachments use HTTP staging and send only descriptors over this socket; legacy inline base64 data still consumes the limit. |
 | Write deadline | 10 seconds | A peer that cannot accept a frame in time is disconnected. |
 | Pong deadline | 60 seconds | The connection closes if the peer stops answering pings. |
 | Server ping interval | 54 seconds | WebSocket libraries must process ping/pong control frames. Browsers do this automatically. |
@@ -134,6 +134,20 @@ Malformed JSON produces a `BAD_REQUEST` error with empty `id` and `action`, beca
 | Request dispatch | One goroutine per inbound message | Handlers execute concurrently and responses can arrive out of request order. Correlate only by `id`. |
 
 There is no sequence number, durable replay, acknowledgement, or exactly-once guarantee. Notifications are invalidation hints: after a reconnect, gap, or dropped frame, refetch authoritative state through the appropriate list/get request or HTTP route.
+
+### Prompt attachments
+
+The web client uploads prompt files with authenticated multipart HTTP at
+`POST /api/v1/attachments` before sending `task.create`, `session.launch`,
+`message.add`, or `message.queue.*`. Those WebSocket payloads carry an opaque
+`attachment_id` plus `name`, `mime_type`, `type`, `delivery_mode`, and raw
+`size_bytes`; they do not carry file bytes or host paths. A submission may
+contain up to ten files and up to 100 MiB in raw bytes per file and in total.
+
+Older clients may still send inline `data` descriptors during the compatibility
+window, but they must stay within the existing lower inline-data validation and
+the 32 MiB frame limit. Inline data is not a way to bypass the 100 MiB staged
+upload contract.
 
 Request handlers use the server hub's lifetime context, not the socket's lifetime. If a client disconnects after sending a mutation, Git command, or `session.launch`, that work normally continues until completion even though its response cannot reach the old socket. Do not blindly retry an uncertain mutation. First reconcile state with a get/list/status request; use application-level idempotency only where the specific handler provides it.
 
@@ -239,6 +253,8 @@ A successful response returns the normalized query and an ordered `groups` array
 
 `message.queue.add` accepts the same optional array. `message.queue.update` also accepts it and treats the array as a replacement: send `[]` after removing every generated reference link so stale metadata is cleared. Queue status and message responses return validated entries under `metadata.entity_references`.
 
+`message.queue.merge` folds a queued entry into the entry directly above it. The payload requires `session_id` and `entry_id` (the source entry being merged away); `user_id` is optional and defaults to `user`. On success the response carries the surviving merged entry's `entry_id` (the target's id) and the server broadcasts an updated `message.queue.status_changed`. The request is rejected with `entry_not_found` when the entry was already drained or is not owned by the caller, with a validation error when no mergeable entry exists above it, and with `merge_reference_overflow` when the combined entity-reference lists would exceed the per-message cap (the merge is rejected atomically — neither row changes).
+
 If the agent is busy, use the `message.queue.*` operations rather than retrying `message.add`. Permission prompts are represented in persisted/session message data; answer one with `permission.respond`. Its payload requires `session_id` and `pending_id`, plus `option_id` unless `cancelled:true`; optional `rejected:true` distinguishes an explicit denial from dismissing the prompt.
 
 For a raw diagnostic session, install a WebSocket client such as `websocat`, connect, then paste one request object per line:
@@ -339,6 +355,7 @@ message.queue.append
 message.queue.cancel
 message.queue.drain
 message.queue.get
+message.queue.merge
 message.queue.remove
 message.queue.update
 message.search
@@ -467,6 +484,9 @@ automation.list
 automation.run.delete
 automation.runs.delete_all
 automation.runs.list
+automation.runs.list_workspace
+automation.summaries
+automation.summary
 automation.trigger
 automation.trigger.add
 automation.trigger.delete
@@ -513,6 +533,7 @@ github.task_prs.list
 gitlab.action_presets.list
 gitlab.action_presets.reset
 gitlab.action_presets.update
+gitlab.check_session_mr
 gitlab.cleanup.issue_tasks
 gitlab.cleanup.review_tasks
 gitlab.issue_watches.create
@@ -552,7 +573,7 @@ gitlab.task_mrs.list
 
 Provider actions make outbound calls with the backend's configured GitHub or GitLab identity. Status and registration do not imply a provider is authenticated, reachable, or authorized for a repository.
 
-### Jira, Linear, Slack, and Sprites
+### Jira, Linear, and Sprites
 
 ```text
 jira.config.delete
@@ -570,11 +591,6 @@ linear.config.test
 linear.issue.get
 linear.issue.transition
 linear.teams.list
-
-slack.config.delete
-slack.config.get
-slack.config.set
-slack.config.test
 
 sprites.instances.destroy
 sprites.instances.list

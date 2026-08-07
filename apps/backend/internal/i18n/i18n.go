@@ -44,6 +44,8 @@ const LocaleCookie = "kandev_locale"
 // with SUPPORTED_LOCALES in apps/web/lib/i18n/index.ts.
 var supportedLocales = map[string]bool{
 	"en":     true,
+	"pt-pt":  true,
+	"zh-cn":  true,
 	"pseudo": true,
 }
 
@@ -77,15 +79,20 @@ func load() {
 }
 
 // Supported reports whether locale has a committed catalog.
-func Supported(locale string) bool { return supportedLocales[locale] }
+func Supported(locale string) bool { return supportedLocales[canonicalLocale(locale)] }
 
 // Normalize returns locale when it is supported, otherwise DefaultLocale. Used
 // for both `<html lang>` and message lookup so they can never disagree.
 func Normalize(locale string) string {
-	if supportedLocales[locale] {
-		return locale
+	canonical := canonicalLocale(locale)
+	if supportedLocales[canonical] {
+		return canonical
 	}
 	return DefaultLocale
+}
+
+func canonicalLocale(locale string) string {
+	return strings.ToLower(strings.TrimSpace(locale))
 }
 
 // FromRequest resolves the active locale: the kandev_locale cookie first (the
@@ -96,7 +103,7 @@ func FromRequest(r *http.Request) string {
 		return DefaultLocale
 	}
 	if cookie, err := r.Cookie(LocaleCookie); err == nil && Supported(cookie.Value) {
-		return cookie.Value
+		return Normalize(cookie.Value)
 	}
 	for _, tag := range parseAcceptLanguage(r.Header.Get("Accept-Language")) {
 		if Supported(tag) {

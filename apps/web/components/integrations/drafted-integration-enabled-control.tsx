@@ -3,6 +3,7 @@
 import { Label } from "@kandev/ui/label";
 import { Switch } from "@kandev/ui/switch";
 import { useDraftedIntegrationEnabled } from "./use-drafted-integration-enabled";
+import { useTranslation } from "react-i18next";
 
 type Props = {
   id: string;
@@ -11,6 +12,7 @@ type Props = {
 };
 
 export function DraftedIntegrationEnabledControl({ id, enabled, persist }: Props) {
+  const { t } = useTranslation();
   const draft = useDraftedIntegrationEnabled({ id: `${id}-enabled`, enabled, persist });
   return (
     <div
@@ -26,7 +28,7 @@ export function DraftedIntegrationEnabledControl({ id, enabled, persist }: Props
         className="cursor-pointer"
       />
       <Label htmlFor={`${id}-enabled`} className="text-xs cursor-pointer">
-        {draft.enabled ? "Enabled" : "Disabled"}
+        {draft.enabled ? t("integrations:enabled") : t("integrations:disabled")}
       </Label>
     </div>
   );

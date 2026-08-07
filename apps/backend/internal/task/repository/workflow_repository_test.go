@@ -60,6 +60,80 @@ func TestSQLiteRepository_WorkflowCRUD(t *testing.T) {
 	}
 }
 
+func TestSQLiteRepository_WorkflowPromptRoundTrip(t *testing.T) {
+	repo, cleanup := createTestSQLiteRepo(t)
+	t.Cleanup(cleanup)
+	ctx := context.Background()
+
+	workspace := &models.Workspace{ID: "ws-prompt", Name: "Workspace"}
+	if err := repo.CreateWorkspace(ctx, workspace); err != nil {
+		t.Fatalf("failed to create workspace: %v", err)
+	}
+
+	workflow := &models.Workflow{
+		WorkspaceID: workspace.ID,
+		Name:        "Prompted Workflow",
+		Description: "desc",
+		Prompt:      "If the PR is merged or closed, move the Task to Done.",
+	}
+	if err := repo.CreateWorkflow(ctx, workflow); err != nil {
+		t.Fatalf("failed to create workflow: %v", err)
+	}
+
+	retrieved, err := repo.GetWorkflow(ctx, workflow.ID)
+	if err != nil {
+		t.Fatalf("failed to get workflow: %v", err)
+	}
+	if retrieved.Prompt != workflow.Prompt {
+		t.Fatalf("expected prompt %q, got %q", workflow.Prompt, retrieved.Prompt)
+	}
+
+	workflow.Prompt = "Updated shared workflow instructions."
+	if err := repo.UpdateWorkflow(ctx, workflow); err != nil {
+		t.Fatalf("failed to update workflow prompt: %v", err)
+	}
+	retrieved, err = repo.GetWorkflow(ctx, workflow.ID)
+	if err != nil {
+		t.Fatalf("failed to get workflow after update: %v", err)
+	}
+	if retrieved.Prompt != "Updated shared workflow instructions." {
+		t.Fatalf("expected updated prompt, got %q", retrieved.Prompt)
+	}
+
+	// Clearing the prompt must persist as empty, not leave the previous value.
+	workflow.Prompt = ""
+	if err := repo.UpdateWorkflow(ctx, workflow); err != nil {
+		t.Fatalf("failed to clear workflow prompt: %v", err)
+	}
+	retrieved, err = repo.GetWorkflow(ctx, workflow.ID)
+	if err != nil {
+		t.Fatalf("failed to get workflow after clear: %v", err)
+	}
+	if retrieved.Prompt != "" {
+		t.Fatalf("expected empty prompt after clear, got %q", retrieved.Prompt)
+	}
+
+	// Updating an unrelated field must not wipe a stored prompt.
+	workflow.Prompt = "Keep me"
+	if err := repo.UpdateWorkflow(ctx, workflow); err != nil {
+		t.Fatalf("failed to set prompt before name-only update: %v", err)
+	}
+	workflow.Name = "Renamed"
+	if err := repo.UpdateWorkflow(ctx, workflow); err != nil {
+		t.Fatalf("failed to update workflow name: %v", err)
+	}
+	retrieved, err = repo.GetWorkflow(ctx, workflow.ID)
+	if err != nil {
+		t.Fatalf("failed to get workflow after name update: %v", err)
+	}
+	if retrieved.Name != "Renamed" {
+		t.Fatalf("expected renamed workflow, got %q", retrieved.Name)
+	}
+	if retrieved.Prompt != "Keep me" {
+		t.Fatalf("expected prompt to survive name update, got %q", retrieved.Prompt)
+	}
+}
+
 func TestSQLiteRepository_WorkflowNotFound(t *testing.T) {
 	repo, cleanup := createTestSQLiteRepo(t)
 	defer cleanup()

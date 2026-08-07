@@ -30,14 +30,40 @@ import (
 
 type messageAddSwitchRepo struct {
 	mockRepository
-	tasks        map[string]*models.Task
-	sessions     map[string]*models.TaskSession
-	primaryID    string
-	messages     []*models.Message
-	turns        []*models.Turn
-	getCalls     map[string]int
-	failReload   bool
-	taskGetCalls int
+	tasks     map[string]*models.Task
+	sessions  map[string]*models.TaskSession
+	primaryID string
+	// messagesMu guards messages: async dispatch goroutines (e.g. a steer that
+	// falls back and writes an error message) can append while a test reads.
+	messagesMu        sync.Mutex
+	messages          []*models.Message
+	turns             []*models.Turn
+	idempotentMessage *models.Message
+	getCalls          map[string]int
+	failReload        bool
+	taskGetCalls      int
+}
+
+func (r *messageAddSwitchRepo) messageCount() int {
+	r.messagesMu.Lock()
+	defer r.messagesMu.Unlock()
+	return len(r.messages)
+}
+
+func (r *messageAddSwitchRepo) firstMessageContent() string {
+	r.messagesMu.Lock()
+	defer r.messagesMu.Unlock()
+	if len(r.messages) == 0 {
+		return ""
+	}
+	return r.messages[0].Content
+}
+
+func (r *messageAddSwitchRepo) GetMessage(_ context.Context, id string) (*models.Message, error) {
+	if r.idempotentMessage != nil && r.idempotentMessage.ID == id {
+		return r.idempotentMessage, nil
+	}
+	return nil, sql.ErrNoRows
 }
 
 func (r *messageAddSwitchRepo) GetTask(_ context.Context, id string) (*models.Task, error) {
@@ -112,6 +138,16 @@ func (o *firstTurnCaptureOrchestrator) StepRequiresCompletionSignal(context.Cont
 
 func (*firstTurnCaptureOrchestrator) ForegroundActivity(string) v1.ForegroundActivity {
 	return ""
+}
+
+func (*firstTurnCaptureOrchestrator) SteerEligible(string, models.TaskSessionState) bool {
+	return false
+}
+
+func (*firstTurnCaptureOrchestrator) SteerTask(
+	context.Context, string, string, string, string, bool, []v1.MessageAttachment,
+) (*orchestrator.PromptResult, error) {
+	return &orchestrator.PromptResult{}, nil
 }
 
 func TestWSAddMessage_CreatedSessionPreservesReferencesThroughCanonicalizationAndDispatch(t *testing.T) {
@@ -312,7 +348,9 @@ func (r *messageAddSwitchRepo) GetPrimarySessionByTaskID(_ context.Context, task
 }
 
 func (r *messageAddSwitchRepo) CreateMessage(_ context.Context, message *models.Message) error {
+	r.messagesMu.Lock()
 	r.messages = append(r.messages, message)
+	r.messagesMu.Unlock()
 	return nil
 }
 
@@ -517,6 +555,16 @@ func (o *switchingTurnStartOrchestrator) ForegroundActivity(string) v1.Foregroun
 	return v1.ForegroundActivityGenerating
 }
 
+func (*switchingTurnStartOrchestrator) SteerEligible(string, models.TaskSessionState) bool {
+	return false
+}
+
+func (*switchingTurnStartOrchestrator) SteerTask(
+	context.Context, string, string, string, string, bool, []v1.MessageAttachment,
+) (*orchestrator.PromptResult, error) {
+	return &orchestrator.PromptResult{}, nil
+}
+
 func (o *switchingTurnStartOrchestrator) StepRequiresCompletionSignal(context.Context, string) bool {
 	return false
 }
@@ -578,6 +626,51 @@ func TestWSAddMessageUsesSessionSelectedByOnTurnStart(t *testing.T) {
 	}
 	assert.Equal(t, "s2", orch.getStartedSession())
 	assert.Empty(t, orch.getForwardedSession())
+}
+
+func TestWSAddMessageRetryAcceptsMessagePersistedAfterSessionSwitch(t *testing.T) {
+	now := time.Now().UTC()
+	repo := &messageAddSwitchRepo{
+		tasks: map[string]*models.Task{
+			"t1": {ID: "t1", State: v1.TaskStateReview, UpdatedAt: now},
+		},
+		sessions: map[string]*models.TaskSession{
+			"s1": {ID: "s1", TaskID: "t1", State: models.TaskSessionStateWaitingForInput, UpdatedAt: now},
+			"s2": {ID: "s2", TaskID: "t1", State: models.TaskSessionStateCreated, UpdatedAt: now},
+		},
+		primaryID: "s1",
+		idempotentMessage: &models.Message{
+			ID:            "client-1",
+			TaskID:        "t1",
+			TaskSessionID: "s2",
+			AuthorType:    models.MessageAuthorUser,
+			Content:       "continue here",
+			CreatedAt:     now,
+		},
+	}
+	log, err := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json"})
+	require.NoError(t, err)
+	svc := service.NewService(service.Repos{
+		Workspaces: repo, Tasks: repo, TaskRepos: repo,
+		Workflows: repo, Messages: repo, Turns: repo,
+		Sessions: repo, GitSnapshots: repo, RepoEntities: repo,
+		Executors: repo, Environments: repo, TaskEnvironments: repo,
+		Reviews: repo,
+	}, nil, log, service.RepositoryDiscoveryConfig{})
+	h := NewMessageHandlers(svc, &switchingTurnStartOrchestrator{repo: repo}, log)
+
+	req, err := ws.NewRequest("req-retry", ws.ActionMessageAdd, map[string]interface{}{
+		"task_id":           "t1",
+		"session_id":        "s1",
+		"client_message_id": "client-1",
+		"content":           "continue here",
+	})
+	require.NoError(t, err)
+
+	resp, err := h.wsAddMessage(context.Background(), req)
+	require.NoError(t, err)
+	require.Equal(t, ws.MessageTypeResponse, resp.Type)
+	assert.Empty(t, repo.messages, "an idempotent retry must not create a second message")
 }
 
 func TestWSAddMessageFailsWhenOnTurnStartCompletesSessionWithoutReplacement(t *testing.T) {
@@ -683,6 +776,14 @@ type recordingAdmissionOrchestrator struct {
 	prompted chan string
 }
 
+func (fgActivityOrchestrator) SteerEligible(string, models.TaskSessionState) bool { return false }
+
+func (fgActivityOrchestrator) SteerTask(
+	context.Context, string, string, string, string, bool, []v1.MessageAttachment,
+) (*orchestrator.PromptResult, error) {
+	return &orchestrator.PromptResult{}, nil
+}
+
 func (o *recordingAdmissionOrchestrator) PromptTask(_ context.Context, _ string, sessionID string, _ string, _ string, _ bool, _ []v1.MessageAttachment, _ bool) (*orchestrator.PromptResult, error) {
 	o.prompted <- sessionID
 	return &orchestrator.PromptResult{}, nil
@@ -701,6 +802,164 @@ func (*recordingAdmissionOrchestrator) StepRequiresCompletionSignal(context.Cont
 }
 func (o *recordingAdmissionOrchestrator) ForegroundActivity(string) v1.ForegroundActivity {
 	return o.activity
+}
+
+func (*recordingAdmissionOrchestrator) SteerEligible(string, models.TaskSessionState) bool {
+	return false
+}
+
+func (*recordingAdmissionOrchestrator) SteerTask(
+	context.Context, string, string, string, string, bool, []v1.MessageAttachment,
+) (*orchestrator.PromptResult, error) {
+	return &orchestrator.PromptResult{}, nil
+}
+
+// steerRecordingOrchestrator advertises a generating, steer-eligible RUNNING
+// session and records which dispatch path the handler took. steerErr lets a test
+// force the not-eligible sentinel to exercise the prompt fallback.
+type steerRecordingOrchestrator struct {
+	steerErr       error
+	steered        chan string
+	prompted       chan string
+	mu             sync.Mutex
+	steeredContent string
+}
+
+func (o *steerRecordingOrchestrator) getSteeredContent() string {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return o.steeredContent
+}
+
+func (*steerRecordingOrchestrator) ResumeTaskSession(context.Context, string, string) error {
+	return nil
+}
+func (*steerRecordingOrchestrator) StartCreatedSession(context.Context, string, string, string, string, bool, bool, bool, []v1.MessageAttachment, []v1.EntityReference) error {
+	return nil
+}
+func (*steerRecordingOrchestrator) ProcessOnTurnStart(context.Context, string, string) error {
+	return nil
+}
+func (*steerRecordingOrchestrator) StepRequiresCompletionSignal(context.Context, string) bool {
+	return false
+}
+func (*steerRecordingOrchestrator) ForegroundActivity(string) v1.ForegroundActivity {
+	return v1.ForegroundActivityGenerating
+}
+func (*steerRecordingOrchestrator) SteerEligible(string, models.TaskSessionState) bool {
+	return true
+}
+
+func (o *steerRecordingOrchestrator) SteerTask(
+	_ context.Context, _ string, sessionID string, content string, _ string, _ bool, _ []v1.MessageAttachment,
+) (*orchestrator.PromptResult, error) {
+	o.mu.Lock()
+	o.steeredContent = content
+	o.mu.Unlock()
+	o.steered <- sessionID
+	if o.steerErr != nil {
+		return nil, o.steerErr
+	}
+	return &orchestrator.PromptResult{}, nil
+}
+
+func (o *steerRecordingOrchestrator) PromptTask(
+	_ context.Context, _ string, sessionID string, _ string, _ string, _ bool, _ []v1.MessageAttachment, _ bool,
+) (*orchestrator.PromptResult, error) {
+	o.prompted <- sessionID
+	return &orchestrator.PromptResult{}, nil
+}
+
+// TestWSAddMessage_SteerEligibleDispatchesSteer proves the end-to-end steer path:
+// a generating RUNNING session that is steer-eligible is admitted past the busy
+// guard (the P1 regression) and dispatched via SteerTask, and a session that has
+// since become ineligible falls back to PromptTask.
+func TestWSAddMessage_SteerEligibleDispatchesSteer(t *testing.T) {
+	tests := []struct {
+		name        string
+		steerErr    error
+		wantSteered bool
+		wantPrompt  bool
+		wantErrMsg  bool
+	}{
+		{name: "eligible steers", wantSteered: true},
+		{name: "not-eligible falls back to prompt", steerErr: orchestrator.ErrSteerNotEligible, wantSteered: true, wantPrompt: true},
+		// A genuine dispatch error may mean the steer was already written to the
+		// agent (ack failed after the write), so the handler must NOT re-send it as
+		// an ordinary prompt — that would double-deliver the operator's message.
+		// Instead it surfaces an operator-visible error.
+		{name: "dispatch error surfaces, does not re-send", steerErr: errors.New("stream disconnected while waiting for response"), wantSteered: true, wantPrompt: false, wantErrMsg: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			now := time.Now().UTC()
+			repo := &messageAddSwitchRepo{
+				tasks: map[string]*models.Task{
+					"t1": {ID: "t1", State: v1.TaskStateInProgress, UpdatedAt: now},
+				},
+				sessions: map[string]*models.TaskSession{
+					"s1": {ID: "s1", TaskID: "t1", State: models.TaskSessionStateRunning, AgentProfileID: "profile-1", UpdatedAt: now},
+				},
+				primaryID: "s1",
+			}
+			log, err := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json"})
+			require.NoError(t, err)
+			svc := service.NewService(service.Repos{
+				Workspaces: repo, Tasks: repo, TaskRepos: repo,
+				Workflows: repo, Messages: repo, Turns: repo,
+				Sessions: repo, GitSnapshots: repo, RepoEntities: repo,
+				Executors: repo, Environments: repo, TaskEnvironments: repo,
+				Reviews: repo,
+			}, nil, log, service.RepositoryDiscoveryConfig{})
+			orch := &steerRecordingOrchestrator{
+				steerErr: tt.steerErr,
+				steered:  make(chan string, 1),
+				prompted: make(chan string, 1),
+			}
+			h := NewMessageHandlers(svc, orch, log)
+			req, err := ws.NewRequest("req-steer", ws.ActionMessageAdd, map[string]interface{}{
+				"task_id": "t1", "session_id": "s1", "content": "steer this",
+			})
+			require.NoError(t, err)
+
+			resp, err := h.wsAddMessage(t.Context(), req)
+			require.NoError(t, err)
+			require.Equal(t, ws.MessageTypeResponse, resp.Type, "steer-eligible RUNNING must be admitted, not blocked")
+
+			if tt.wantSteered {
+				select {
+				case <-orch.steered:
+				case <-time.After(time.Second):
+					t.Fatal("steer-eligible message was not dispatched via SteerTask")
+				}
+				// The steer forwards the same canonicalized content the transcript
+				// row stored — references/context are not stripped on the steer path.
+				assert.Equal(t, repo.firstMessageContent(), orch.getSteeredContent(),
+					"steered content must match the persisted message (no divergence)")
+			}
+			if tt.wantPrompt {
+				select {
+				case <-orch.prompted:
+				case <-time.After(time.Second):
+					t.Fatal("ineligible steer did not fall back to PromptTask")
+				}
+			} else {
+				// A steer that succeeded or that hit a dispatch error must never
+				// also dispatch an ordinary prompt (a fallback would double-deliver).
+				select {
+				case <-orch.prompted:
+					t.Fatal("steer path must not also dispatch an ordinary prompt")
+				case <-time.After(100 * time.Millisecond):
+				}
+			}
+			if tt.wantErrMsg {
+				// The operator is still informed: the dispatch error surfaces as a
+				// second (error) message rather than being silently dropped.
+				require.Eventually(t, func() bool { return repo.messageCount() == 2 }, time.Second, 5*time.Millisecond,
+					"a dispatch error must surface an operator-visible error message")
+			}
+		})
+	}
 }
 
 func TestWSAddMessage_ForegroundActivityAdmissionWiring(t *testing.T) {

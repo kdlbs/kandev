@@ -24,7 +24,8 @@
 #
 # Set its `prod` value to `true`. Ship the next release. Once the
 # feature has been on by default for a release or two and is
-# permanent, rip the flag out of the codebase entirely.
+# permanent, remove its live wiring and move its key/environment pair
+# to runtimeflags' append-only retired-identity set.
 #
 # ── See also ───────────────────────────────────────────────────────
 #
@@ -63,6 +64,14 @@ features:
   # High-risk Claude-only background prompt handoff experiment. Off in every
   # profile so it is exercised only by contributors who deliberately opt in.
   KANDEV_FEATURES_CLAUDE_BACKGROUND_PROMPT_HANDOFF:
+    prod: "false"
+    dev:  "false"
+    e2e:  "false"
+
+  # High-risk mid-turn steering experiment: deliver a prompt into a turn that is
+  # still generating. Off in every profile; e2e specs that need it set the env
+  # var per-spec so the default stays honest.
+  KANDEV_FEATURES_CLAUDE_MID_TURN_STEERING:
     prod: "false"
     dev:  "false"
     e2e:  "false"

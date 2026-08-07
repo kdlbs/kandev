@@ -72,30 +72,28 @@ function makeMessage(payload: Record<string, unknown>) {
   } as Parameters<NonNullable<ReturnType<typeof registerTasksHandlers>["task.updated"]>>[0];
 }
 
+type StoreTaskSeed = { id: string } & Record<string, unknown>;
+
+// Shared by the activity-aggregate and interrupted-marker describes below;
+// kept at module scope so the two identical builders cannot drift apart.
+function storeWithTask(existing: StoreTaskSeed) {
+  const task = { workflowStepId: "step1", title: "T", position: 0, ...existing };
+  return makeStore({
+    kanban: {
+      workflowId: "wf1",
+      steps: [],
+      tasks: [task],
+    } as unknown as AppState["kanban"],
+    kanbanMulti: {
+      isLoading: false,
+      snapshots: {
+        wf1: { workflowId: "wf1", workflowName: "WF1", steps: [], tasks: [task] },
+      },
+    } as unknown as AppState["kanbanMulti"],
+  });
+}
+
 describe("task.updated task-level activity aggregate (live propagation + safe fallback)", () => {
-  type ExistingTask = {
-    id: string;
-    foregroundActivity?: "generating" | "background";
-    activeSubagentCount?: number;
-  };
-
-  function storeWithTask(existing: ExistingTask) {
-    const task = { workflowStepId: "step1", title: "T", position: 0, ...existing };
-    return makeStore({
-      kanban: {
-        workflowId: "wf1",
-        steps: [],
-        tasks: [task],
-      } as unknown as AppState["kanban"],
-      kanbanMulti: {
-        isLoading: false,
-        snapshots: {
-          wf1: { workflowId: "wf1", workflowName: "WF1", steps: [], tasks: [task] },
-        },
-      } as unknown as AppState["kanbanMulti"],
-    });
-  }
-
   function activityFor(store: ReturnType<typeof makeStore>, id: string) {
     const kanban = store.getState().kanban.tasks.find((t) => t.id === id)?.foregroundActivity;
     const multi = store
@@ -185,5 +183,46 @@ describe("task.updated task-level activity aggregate (live propagation + safe fa
       store.getState().kanbanMulti.snapshots.wf1.tasks.find((task) => task.id === "t1")
         ?.activeSubagentCount,
     ).toBe(3);
+  });
+});
+
+describe("task.updated interrupted marker (live propagation + safe fallback)", () => {
+  function interruptedFor(store: ReturnType<typeof makeStore>, id: string) {
+    const kanban = store.getState().kanban.tasks.find((t) => t.id === id)?.interrupted;
+    const multi = store
+      .getState()
+      .kanbanMulti.snapshots.wf1.tasks.find((t) => t.id === id)?.interrupted;
+    return { kanban, multi };
+  }
+
+  it("applies the marker from task.updated", () => {
+    const store = storeWithTask({ id: "t1" });
+    const handlers = registerTasksHandlers(store);
+
+    handlers["task.updated"]!(
+      makeMessage({ ...makeTask("t1"), state: "REVIEW", interrupted: true }),
+    );
+
+    expect(interruptedFor(store, "t1")).toEqual({ kanban: true, multi: true });
+  });
+
+  it("clears the marker on an explicit false", () => {
+    const store = storeWithTask({ id: "t1", interrupted: true });
+    const handlers = registerTasksHandlers(store);
+
+    handlers["task.updated"]!(makeMessage({ ...makeTask("t1"), interrupted: false }));
+
+    expect(interruptedFor(store, "t1")).toEqual({ kanban: false, multi: false });
+  });
+
+  it("preserves the marker when a partial update omits interrupted", () => {
+    // Clobber guard: a lightweight task.updated (e.g. a rename) must not wipe
+    // the interruption reading between real marker events.
+    const store = storeWithTask({ id: "t1", interrupted: true });
+    const handlers = registerTasksHandlers(store);
+
+    handlers["task.updated"]!(makeMessage({ ...makeTask("t1"), title: "Renamed" }));
+
+    expect(interruptedFor(store, "t1")).toEqual({ kanban: true, multi: true });
   });
 });

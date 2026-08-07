@@ -30,6 +30,7 @@ func newPromptTurnState(
 		rpcDone:          make(chan struct{}),
 		abortCh:          make(chan struct{}),
 		handoffCh:        make(chan struct{}),
+		providerErrorCh:  make(chan openCodeStderrDiagnostic, 1),
 		promptGeneration: promptGeneration,
 		allowHandoff:     allowHandoff,
 	}
@@ -148,11 +149,47 @@ func (a *Adapter) markPromptHandoff(sessionID string, promptGeneration uint64) b
 	a.promptTurnMu.Lock()
 	defer a.promptTurnMu.Unlock()
 	turn := a.promptTurn
-	if turn == nil ||
-		turn.promptGeneration != promptGeneration ||
-		!turn.allowHandoff ||
-		!turn.gateOwned ||
-		turn.finishing {
+	if turn == nil || turn.promptGeneration != promptGeneration {
+		return false
+	}
+	return a.handOffTurnLocked(turn, sessionID)
+}
+
+// beginSteerHandoff hands the in-flight turn off at the operator's request
+// rather than on a provider-attested foreground-idle event. It deliberately does
+// not match a prompt generation: the trigger is the arriving successor, not a
+// frame belonging to the predecessor, so there is no generation to compare.
+//
+// Reports whether a handoff is now pending, which lets a caller distinguish
+// "steering" from "there was nothing to steer" for logging. Callers must treat
+// false as benign: an idle session, or a synthetic wakeup holding the gate
+// (allowHandoff is false for those), both land here and correctly fall through
+// to ordinary gate acquisition.
+func (a *Adapter) beginSteerHandoff() bool {
+	a.mu.RLock()
+	sessionID := a.sessionID
+	a.mu.RUnlock()
+
+	a.promptTurnMu.Lock()
+	defer a.promptTurnMu.Unlock()
+	turn := a.promptTurn
+	if turn == nil {
+		return false
+	}
+	return a.handOffTurnLocked(turn, sessionID)
+}
+
+// handOffTurnLocked marks turn handed off and wakes any waiting human successor.
+// Callers hold promptTurnMu.
+//
+// It deliberately leaves the physical gate token in place so a synthetic wakeup
+// cannot consume the handoff, and protects the background work that was live at
+// the boundary so the successor's prompt-end sweeps cannot retire a predecessor's
+// still-running workload. Both properties are load-bearing: a backgrounded shell
+// has been observed outliving two prompt resolutions and reporting only much
+// later, as assistant text with no tool update.
+func (a *Adapter) handOffTurnLocked(turn *promptTurnState, sessionID string) bool {
+	if !turn.allowHandoff || !turn.gateOwned || turn.finishing {
 		return false
 	}
 	if !turn.handedOff {
@@ -221,26 +258,43 @@ func waitForPromptRPCAfterCancel(turn *promptTurnState) error {
 }
 
 // waitForPromptRPCAfterUserCancel blocks until the in-flight session/prompt RPC
-// finishes. If the user cancels while this RPC is running, it waits briefly for
-// the agent to stop; otherwise it abandons the RPC so the prompt gate is released.
-func (a *Adapter) waitForPromptRPCAfterUserCancel(turn *promptTurnState) error {
+// finishes or a correlated OpenCode provider diagnostic settles it. If the user
+// cancels while this RPC is running, it waits briefly for the agent to stop;
+// otherwise it abandons the RPC so the prompt gate is released.
+func (a *Adapter) waitForPromptRPCAfterUserCancel(turn *promptTurnState, sessionID string) error {
 	if turn == nil {
 		return nil
 	}
-	select {
-	case <-turn.rpcDone:
-		return nil
-	case <-turn.abortCh:
+	for {
 		select {
 		case <-turn.rpcDone:
 			return nil
-		case <-time.After(promptCancelJoinTimeout):
-			if turn.endTurn != nil {
-				turn.endTurn(ErrTurnCancelNotAcknowledged)
+		case diagnostic := <-turn.providerErrorCh:
+			if sessionID == "" || diagnostic.SessionID != sessionID {
+				continue
 			}
-			a.logger.Warn("in-flight session/prompt did not end after cancel; releasing prompt gate",
-				zap.Duration("timeout", promptCancelJoinTimeout))
-			return errPromptAbandonedAfterCancel
+			providerErr := &providerPromptError{ProviderError: diagnostic.ProviderError}
+			if turn.endTurn != nil {
+				turn.endTurn(providerErr)
+			}
+			select {
+			case <-turn.rpcDone:
+				return providerErr
+			case <-time.After(promptCancelJoinTimeout):
+				return providerErr
+			}
+		case <-turn.abortCh:
+			select {
+			case <-turn.rpcDone:
+				return nil
+			case <-time.After(promptCancelJoinTimeout):
+				if turn.endTurn != nil {
+					turn.endTurn(ErrTurnCancelNotAcknowledged)
+				}
+				a.logger.Warn("in-flight session/prompt did not end after cancel; releasing prompt gate",
+					zap.Duration("timeout", promptCancelJoinTimeout))
+				return errPromptAbandonedAfterCancel
+			}
 		}
 	}
 }

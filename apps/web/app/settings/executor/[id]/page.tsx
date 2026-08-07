@@ -25,10 +25,16 @@ import { SettingsCard } from "@/components/settings/settings-card";
 import { useSettingsSaveContributor } from "@/components/settings/settings-save-provider";
 import type { Executor, ExecutorType } from "@/lib/types/http";
 import { EXECUTOR_ICON_MAP } from "@/lib/executor-icons";
+import { useTranslation } from "react-i18next";
 
 const EXECUTORS_ROUTE = "/settings/executors";
+// The word the user must type to arm the delete button. It is compared with
+// `!==`, so it must never be translated — the copy interpolates it instead, so
+// the shown and compared values cannot drift.
+const DELETE_CONFIRM_TOKEN = "delete";
 
 export default function ExecutorEditPage({ executorId }: { executorId: string }) {
+  const { t } = useTranslation();
   const router = useRouter();
   const executor = useAppStore(
     (state) => state.executors.items.find((item: Executor) => item.id === executorId) ?? null,
@@ -39,9 +45,9 @@ export default function ExecutorEditPage({ executorId }: { executorId: string })
       <div>
         <Card>
           <CardContent className="py-12 text-center">
-            <p className="text-muted-foreground">Executor not found</p>
+            <p className="text-muted-foreground">{t("executors:executorNotFound")}</p>
             <Button className="mt-4 cursor-pointer" onClick={() => router.push(EXECUTORS_ROUTE)}>
-              Go to Executors
+              {t("executors:goToExecutors")}
             </Button>
           </CardContent>
         </Card>
@@ -52,13 +58,16 @@ export default function ExecutorEditPage({ executorId }: { executorId: string })
   return <ExecutorEditForm key={executor.id} executor={executor} />;
 }
 
-function getExecutorDescription(type: ExecutorType): string {
-  if (type === "local_pc") return "Runs agents directly in the repository folder.";
-  if (type === "worktree") return "Creates git worktrees for isolated agent sessions.";
-  if (type === "local_docker") return "Runs Docker containers on this machine.";
-  if (type === "remote_docker") return "Connects to a remote Docker host.";
-  if (type === "sprites") return "Runs agents in Sprites.dev cloud sandboxes.";
-  return "Custom executor.";
+// Returns a catalog key rather than copy: this is module scope, so calling
+// `t()` here would freeze the description at the boot locale. The caller
+// resolves it at render.
+function executorDescriptionKey(type: ExecutorType): string {
+  if (type === "local_pc") return "executors:descriptionLocalPc";
+  if (type === "worktree") return "executors:descriptionWorktree";
+  if (type === "local_docker") return "executors:descriptionLocalDocker";
+  if (type === "remote_docker") return "executors:descriptionRemoteDocker";
+  if (type === "sprites") return "executors:descriptionSprites";
+  return "executors:descriptionCustom";
 }
 
 function parseMcpPolicyJson(currentPolicy: string | undefined): Record<string, unknown> {
@@ -88,14 +97,15 @@ function McpPresetButton({ label, onClick }: { label: string; onClick: () => voi
 function McpPolicyCard({
   mcpPolicy,
   isDirty,
-  mcpPolicyError,
+  mcpPolicyErrorKey,
   onPolicyChange,
 }: {
   mcpPolicy: string;
   isDirty: boolean;
-  mcpPolicyError: string | null;
+  mcpPolicyErrorKey: string | null;
   onPolicyChange: (value: string) => void;
 }) {
+  const { t } = useTranslation();
   const applyPreset = (updater: (parsed: Record<string, unknown>) => Record<string, unknown>) => {
     const parsed = parseMcpPolicyJson(mcpPolicy);
     const next = updater(parsed);
@@ -106,15 +116,15 @@ function McpPolicyCard({
     <SettingsCard isDirty={isDirty}>
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
-          MCP Policy
+          {t("executors:mcpPolicy")}
           <span className="rounded-full border border-muted-foreground/30 px-2 py-0.5 text-[10px] uppercase tracking-wide text-muted-foreground">
-            Advanced
+            {t("executors:advanced")}
           </span>
         </CardTitle>
-        <CardDescription>JSON policy overrides for MCP servers on this executor.</CardDescription>
+        <CardDescription>{t("executors:mcpPolicyOverridesForExecutor")}</CardDescription>
       </CardHeader>
       <CardContent className="space-y-2">
-        <Label htmlFor="mcp-policy">MCP policy JSON</Label>
+        <Label htmlFor="mcp-policy">{t("executors:mcpPolicyJson")}</Label>
         <Textarea
           id="mcp-policy"
           value={mcpPolicy}
@@ -123,23 +133,23 @@ function McpPolicyCard({
           placeholder='{"allow_stdio":true,"allow_http":true}'
           rows={8}
         />
-        {mcpPolicyError && <p className="text-xs text-destructive">{mcpPolicyError}</p>}
+        {mcpPolicyErrorKey && <p className="text-xs text-destructive">{t(mcpPolicyErrorKey)}</p>}
         <div className="flex flex-wrap items-center gap-2">
-          <p className="text-xs font-medium text-muted-foreground">Quick presets</p>
+          <p className="text-xs font-medium text-muted-foreground">{t("executors:quickPresets")}</p>
           <McpPresetButton
-            label="Only HTTP/SSE"
+            label={t("executors:onlyHttpSse")}
             onClick={() =>
               applyPreset((p) => ({ ...p, allow_stdio: false, allow_http: true, allow_sse: true }))
             }
           />
           <McpPresetButton
-            label="Only stdio"
+            label={t("executors:onlyStdio")}
             onClick={() =>
               applyPreset((p) => ({ ...p, allow_stdio: true, allow_http: false, allow_sse: false }))
             }
           />
           <McpPresetButton
-            label="Allowlist GitHub + Playwright"
+            label={t("executors:allowlistGithubPlaywright")}
             onClick={() =>
               applyPreset((p) => {
                 const existing = Array.isArray(p.allowlist_servers)
@@ -153,7 +163,7 @@ function McpPolicyCard({
             }
           />
           <McpPresetButton
-            label="Rewrite localhost for Docker"
+            label={t("executors:rewriteLocalhostForDocker")}
             onClick={() =>
               applyPreset((p) => {
                 const existing =
@@ -176,20 +186,23 @@ function McpPolicyCard({
   );
 }
 
+// Returns a catalog key (or null when valid) so the message resolves at render
+// rather than at module load.
 function validateMcpPolicy(value: string | undefined): string | null {
   const raw = value ?? "";
   if (!raw.trim()) return null;
   try {
     const parsed = JSON.parse(raw);
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed))
-      return "MCP policy must be a JSON object";
+      return "executors:mcpPolicyMustBeAJsonObject";
   } catch {
-    return "Invalid JSON";
+    return "executors:invalidJson";
   }
   return null;
 }
 
 function DeleteExecutorSection({ executor }: { executor: Executor }) {
+  const { t } = useTranslation();
   const router = useRouter();
   const executors = useAppStore((state) => state.executors.items);
   const setExecutors = useAppStore((state) => state.setExecutors);
@@ -198,7 +211,7 @@ function DeleteExecutorSection({ executor }: { executor: Executor }) {
   const [isDeleting, setIsDeleting] = useState(false);
 
   const handleDelete = async () => {
-    if (deleteConfirmText !== "delete") return;
+    if (deleteConfirmText !== DELETE_CONFIRM_TOKEN) return;
     setIsDeleting(true);
     try {
       const client = getWebSocketClient();
@@ -219,12 +232,14 @@ function DeleteExecutorSection({ executor }: { executor: Executor }) {
     <>
       <Card className="border-destructive">
         <CardHeader>
-          <CardTitle className="text-destructive">Delete Executor</CardTitle>
+          <CardTitle className="text-destructive">{t("executors:deleteExecutor")}</CardTitle>
         </CardHeader>
         <CardContent className="flex items-center justify-between">
           <div>
-            <p className="text-sm font-medium">Remove this executor</p>
-            <p className="text-xs text-muted-foreground">This action cannot be undone.</p>
+            <p className="text-sm font-medium">{t("executors:removeThisExecutor")}</p>
+            <p className="text-xs text-muted-foreground">
+              {t("executors:thisActionCannotBeUndone")}
+            </p>
           </div>
           <Button
             variant="destructive"
@@ -232,25 +247,25 @@ function DeleteExecutorSection({ executor }: { executor: Executor }) {
             className="cursor-pointer"
           >
             <IconTrash className="h-4 w-4 mr-2" />
-            Delete
+            {t("executors:delete")}
           </Button>
         </CardContent>
       </Card>
       <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Delete Executor</DialogTitle>
+            <DialogTitle>{t("executors:deleteExecutor")}</DialogTitle>
             <DialogDescription>
-              Type &quot;delete&quot; to confirm deletion. This action cannot be undone.
+              {t("executors:typeTokenToConfirmDeletion", { token: DELETE_CONFIRM_TOKEN })}
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-2">
-            <Label htmlFor="confirm-delete">Confirm Delete</Label>
+            <Label htmlFor="confirm-delete">{t("executors:confirmDelete")}</Label>
             <Input
               id="confirm-delete"
               value={deleteConfirmText}
               onChange={(event) => setDeleteConfirmText(event.target.value)}
-              placeholder="delete"
+              placeholder={DELETE_CONFIRM_TOKEN}
             />
           </div>
           <DialogFooter>
@@ -259,15 +274,15 @@ function DeleteExecutorSection({ executor }: { executor: Executor }) {
               onClick={() => setDeleteDialogOpen(false)}
               className="cursor-pointer"
             >
-              Cancel
+              {t("common:cancel")}
             </Button>
             <Button
               variant="destructive"
               onClick={handleDelete}
-              disabled={deleteConfirmText !== "delete" || isDeleting}
+              disabled={deleteConfirmText !== DELETE_CONFIRM_TOKEN || isDeleting}
               className="cursor-pointer"
             >
-              {isDeleting ? "Deleting..." : "Delete"}
+              {isDeleting ? t("executors:deleting") : t("executors:delete")}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -277,6 +292,7 @@ function DeleteExecutorSection({ executor }: { executor: Executor }) {
 }
 
 function ExecutorEditForm({ executor }: { executor: Executor }) {
+  const { t } = useTranslation();
   const router = useRouter();
   const executors = useAppStore((state) => state.executors.items);
   const setExecutors = useAppStore((state) => state.setExecutors);
@@ -285,7 +301,7 @@ function ExecutorEditForm({ executor }: { executor: Executor }) {
 
   const isSystem = executor.is_system ?? false;
   const ExecutorIcon = EXECUTOR_ICON_MAP[executor.type] ?? EXECUTOR_ICON_MAP.local;
-  const mcpPolicyError = useMemo(() => validateMcpPolicy(mcpPolicy), [mcpPolicy]);
+  const mcpPolicyErrorKey = useMemo(() => validateMcpPolicy(mcpPolicy), [mcpPolicy]);
   const isDirty = mcpPolicy !== savedMcpPolicy;
 
   const handleSave = async () => {
@@ -304,8 +320,8 @@ function ExecutorEditForm({ executor }: { executor: Executor }) {
     id: `executor:${executor.id}`,
     revision: mcpPolicy,
     isDirty,
-    canSave: !mcpPolicyError,
-    invalidReason: mcpPolicyError ?? undefined,
+    canSave: !mcpPolicyErrorKey,
+    invalidReason: mcpPolicyErrorKey ? t(mcpPolicyErrorKey) : undefined,
     save: handleSave,
     discard: () => setMcpPolicy(savedMcpPolicy),
   });
@@ -319,7 +335,7 @@ function ExecutorEditForm({ executor }: { executor: Executor }) {
             <h2 className="text-2xl font-bold">{executor.name}</h2>
           </div>
           <p className="text-sm text-muted-foreground mt-1">
-            {getExecutorDescription(executor.type)}
+            {t(executorDescriptionKey(executor.type))}
           </p>
         </div>
         <Button
@@ -328,7 +344,7 @@ function ExecutorEditForm({ executor }: { executor: Executor }) {
           onClick={() => router.push(EXECUTORS_ROUTE)}
           className="cursor-pointer"
         >
-          Back to Executors
+          {t("executors:backToExecutors")}
         </Button>
       </div>
       <Separator />
@@ -338,7 +354,7 @@ function ExecutorEditForm({ executor }: { executor: Executor }) {
       <McpPolicyCard
         mcpPolicy={mcpPolicy}
         isDirty={isDirty}
-        mcpPolicyError={mcpPolicyError}
+        mcpPolicyErrorKey={mcpPolicyErrorKey}
         onPolicyChange={setMcpPolicy}
       />
 

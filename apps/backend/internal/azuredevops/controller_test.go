@@ -21,20 +21,64 @@ type fakeReadClient struct {
 	threads    []Thread
 	refs       []WorkItemRef
 	policies   []PolicyEvaluation
+	teams      []Team
+	boards     []BoardReference
+	snapshot   *BoardSnapshot
+	updated    *BoardWorkItem
+	assigned   *WorkItem
+	assignment *WorkItemAssignmentRequest
+	detail     *WorkItemDetail
+	comments   *WorkItemCommentPage
+	identity   *Identity
 	lastFilter PullRequestFilter
+	prPage     *PullRequestPage
 }
 
 func (f *fakeReadClient) ListPullRequests(_ context.Context, filter PullRequestFilter) (*PullRequestPage, error) {
 	f.lastFilter = filter
+	if f.prPage != nil {
+		return f.prPage, nil
+	}
 	return &PullRequestPage{}, nil
 }
 
 func (f *fakeReadClient) TestAuth(context.Context) (*TestConnectionResult, error) {
 	return &TestConnectionResult{OK: true, ID: "me", DisplayName: "Ada"}, nil
 }
-func (f *fakeReadClient) ListProjects(context.Context) ([]Project, error) { return f.projects, nil }
+func (f *fakeReadClient) ListProjects(context.Context) ([]Project, error)   { return f.projects, nil }
+func (f *fakeReadClient) ListTeams(context.Context, string) ([]Team, error) { return f.teams, nil }
+func (f *fakeReadClient) ListBoards(context.Context, string, string) ([]BoardReference, error) {
+	return f.boards, nil
+}
+func (f *fakeReadClient) GetBoardSnapshot(context.Context, string, string, string) (*BoardSnapshot, error) {
+	return f.snapshot, nil
+}
+func (f *fakeReadClient) UpdateBoardWorkItem(context.Context, string, string, string, int, BoardWorkItemUpdateRequest) (*BoardWorkItem, error) {
+	if f.updated != nil {
+		return f.updated, nil
+	}
+	return &BoardWorkItem{WorkItem: WorkItem{ID: 101, Revision: 8, Title: "Updated"}}, nil
+}
+func (f *fakeReadClient) UpdateWorkItem(_ context.Context, _ string, id int, request WorkItemAssignmentRequest) (*WorkItem, error) {
+	f.assignment = &request
+	if f.assigned != nil {
+		copy := *f.assigned
+		copy.ID = id
+		return &copy, nil
+	}
+	return &WorkItem{ID: id, Revision: request.Revision + 1, AssignedTo: "Ada"}, nil
+}
 func (f *fakeReadClient) QueryWIQL(context.Context, string, string, int) (*WorkItemSearchResult, error) {
 	return f.work, nil
+}
+func (f *fakeReadClient) GetWorkItemDetail(context.Context, string, int) (*WorkItemDetail, error) {
+	return f.detail, nil
+}
+func (f *fakeReadClient) ListWorkItemComments(context.Context, string, int, string) (*WorkItemCommentPage, error) {
+	return f.comments, nil
+}
+func (f *fakeReadClient) GetCurrentIdentity(context.Context) (*Identity, error) {
+	return f.identity, nil
 }
 func (f *fakeReadClient) GetPullRequest(context.Context, string, string, int) (*PullRequest, error) {
 	return f.pr, nil
@@ -68,6 +112,13 @@ func newControllerFixture(t *testing.T) (*gin.Engine, *Service) {
 		threads:   []Thread{{ID: 7, Status: "active"}},
 		refs:      []WorkItemRef{{ID: 101}},
 		policies:  []PolicyEvaluation{{ID: "p1", Status: "approved", IsBlocking: true}},
+		teams:     []Team{{ID: "team-1", Name: "Platform Team", ProjectID: "project-1"}},
+		boards:    []BoardReference{{ID: "board-1", Name: "Stories"}},
+		snapshot:  &BoardSnapshot{Board: Board{ID: "board-1", Name: "Stories"}, Items: []BoardWorkItem{{WorkItem: WorkItem{ID: 101, Title: "Fix build"}}}},
+		updated:   &BoardWorkItem{WorkItem: WorkItem{ID: 101, Revision: 8, Title: "Updated"}},
+		detail:    &WorkItemDetail{WorkItem: WorkItem{ID: 101, Revision: 8, Title: "Fix build", Description: "Useful detail"}},
+		comments:  &WorkItemCommentPage{Comments: []WorkItemComment{{ID: 9, Content: "Looks good"}}},
+		identity:  &Identity{ID: "me", DisplayName: "Ada"},
 	}
 	service := NewService(store, newFakeSecretStore(), func(*Config, string) Client { return client }, logger.Default())
 	if _, err := service.SetConfigForWorkspace(context.Background(), "ws-1", &SetConfigRequest{
@@ -78,6 +129,89 @@ func newControllerFixture(t *testing.T) (*gin.Engine, *Service) {
 	router := gin.New()
 	RegisterRoutes(router, service, logger.Default())
 	return router, service
+}
+
+func TestControllerGetWorkItemDetail(t *testing.T) {
+	router, _ := newControllerFixture(t)
+	response := performRequest(t, router, http.MethodGet, "/api/v1/azure-devops/work-items/101?workspace_id=ws-1&project=project-1", nil)
+	if response.Code != http.StatusOK || !bytes.Contains(response.Body.Bytes(), []byte("Useful detail")) {
+		t.Fatalf("detail response %d: %s", response.Code, response.Body.String())
+	}
+}
+
+func TestControllerListWorkItemComments(t *testing.T) {
+	router, _ := newControllerFixture(t)
+	response := performRequest(t, router, http.MethodGet, "/api/v1/azure-devops/work-items/101/comments?workspace_id=ws-1&project=project-1&continuation_token=opaque", nil)
+	if response.Code != http.StatusOK || !bytes.Contains(response.Body.Bytes(), []byte("Looks good")) {
+		t.Fatalf("comments response %d: %s", response.Code, response.Body.String())
+	}
+}
+
+func TestControllerGetIdentity(t *testing.T) {
+	router, _ := newControllerFixture(t)
+	response := performRequest(t, router, http.MethodGet, "/api/v1/azure-devops/identity?workspace_id=ws-1", nil)
+	if response.Code != http.StatusOK || !bytes.Contains(response.Body.Bytes(), []byte("Ada")) {
+		t.Fatalf("identity response %d: %s", response.Code, response.Body.String())
+	}
+}
+
+func TestControllerBoardReads(t *testing.T) {
+	router, _ := newControllerFixture(t)
+	teams := performRequest(t, router, http.MethodGet, "/api/v1/azure-devops/teams?workspace_id=ws-1&project=project-1", nil)
+	if teams.Code != http.StatusOK || !bytes.Contains(teams.Body.Bytes(), []byte("Platform Team")) {
+		t.Fatalf("teams response %d: %s", teams.Code, teams.Body.String())
+	}
+	boards := performRequest(t, router, http.MethodGet, "/api/v1/azure-devops/boards?workspace_id=ws-1&project=project-1&team=team-1", nil)
+	if boards.Code != http.StatusOK || !bytes.Contains(boards.Body.Bytes(), []byte("Stories")) {
+		t.Fatalf("boards response %d: %s", boards.Code, boards.Body.String())
+	}
+	snapshot := performRequest(t, router, http.MethodGet, "/api/v1/azure-devops/boards/board-1?workspace_id=ws-1&project=project-1&team=team-1", nil)
+	if snapshot.Code != http.StatusOK || !bytes.Contains(snapshot.Body.Bytes(), []byte("Fix build")) {
+		t.Fatalf("snapshot response %d: %s", snapshot.Code, snapshot.Body.String())
+	}
+}
+
+func TestControllerUpdateBoardWorkItem(t *testing.T) {
+	router, _ := newControllerFixture(t)
+	columnID := "column-active"
+	updated := performRequest(t, router, http.MethodPatch, "/api/v1/azure-devops/boards/board-1/work-items/101?workspace_id=ws-1&project=project-1&team=team-1", map[string]any{
+		"revision": 7, "columnId": columnID,
+	})
+	if updated.Code != http.StatusOK || !bytes.Contains(updated.Body.Bytes(), []byte("Updated")) {
+		t.Fatalf("updated response %d: %s", updated.Code, updated.Body.String())
+	}
+}
+
+func TestControllerRejectsUnsupportedBoardWorkItemFields(t *testing.T) {
+	router, _ := newControllerFixture(t)
+	updated := performRequest(t, router, http.MethodPatch, "/api/v1/azure-devops/boards/board-1/work-items/101?workspace_id=ws-1&project=project-1&team=team-1", map[string]any{
+		"revision": 7, "title": "Cannot edit",
+	})
+	if updated.Code != http.StatusBadRequest {
+		t.Fatalf("updated response %d: %s", updated.Code, updated.Body.String())
+	}
+	unknown := performRequest(t, router, http.MethodPatch, "/api/v1/azure-devops/boards/board-1/work-items/101?workspace_id=ws-1&project=project-1&team=team-1", map[string]any{
+		"revision": 7, "columnId": "column-active", "description": "Cannot edit",
+	})
+	if unknown.Code != http.StatusBadRequest {
+		t.Fatalf("unknown-field response %d: %s", unknown.Code, unknown.Body.String())
+	}
+}
+
+func TestControllerUpdatesWorkItemAssignmentWithoutEditingFields(t *testing.T) {
+	router, _ := newControllerFixture(t)
+	updated := performRequest(t, router, http.MethodPatch, "/api/v1/azure-devops/work-items/101?workspace_id=ws-1&project=project-1", map[string]any{
+		"revision": 7, "assigneeAction": assignCurrentUserAction,
+	})
+	if updated.Code != http.StatusOK || !bytes.Contains(updated.Body.Bytes(), []byte("Ada")) {
+		t.Fatalf("assignment response %d: %s", updated.Code, updated.Body.String())
+	}
+	invalid := performRequest(t, router, http.MethodPatch, "/api/v1/azure-devops/work-items/101?workspace_id=ws-1&project=project-1", map[string]any{
+		"revision": 7, "title": "Cannot edit",
+	})
+	if invalid.Code != http.StatusBadRequest {
+		t.Fatalf("unsupported field response %d: %s", invalid.Code, invalid.Body.String())
+	}
 }
 
 func TestControllerConfigAndWorkspaceScopedReads(t *testing.T) {
@@ -96,6 +230,44 @@ func TestControllerConfigAndWorkspaceScopedReads(t *testing.T) {
 	})
 	if search.Code != http.StatusOK || !bytes.Contains(search.Body.Bytes(), []byte("Fix build")) {
 		t.Fatalf("search response %d: %s", search.Code, search.Body.String())
+	}
+}
+
+func TestControllerWorkItemWatchCRUDAndReset(t *testing.T) {
+	router, _ := newControllerFixture(t)
+	path := "/api/v1/azure-devops/watches/work-items"
+	query := "?workspace_id=ws-1"
+	created := performRequest(t, router, http.MethodPost, path+query, map[string]any{
+		"workflowId": "wf-1", "workflowStepId": "step-1", "projectId": "project-1",
+		"wiql": "SELECT [System.Id] FROM WorkItems", "repositoryId": "repo-1",
+		"baseBranch": "main", "agentProfileId": "agent-1", "executorProfileId": "executor-1",
+		"prompt": "Fix {{title}}", "pollIntervalSeconds": 1,
+	})
+	if created.Code != http.StatusOK || !bytes.Contains(created.Body.Bytes(), []byte("project-1")) {
+		t.Fatalf("create watch response %d: %s", created.Code, created.Body.String())
+	}
+	var watch WorkItemWatch
+	if err := json.Unmarshal(created.Body.Bytes(), &watch); err != nil {
+		t.Fatalf("decode watch: %v", err)
+	}
+	if watch.ID == "" || !watch.Enabled || watch.PollIntervalSeconds != minWatchPollIntervalSeconds {
+		t.Fatalf("created watch = %+v", watch)
+	}
+	listed := performRequest(t, router, http.MethodGet, path+query, nil)
+	if listed.Code != http.StatusOK || !bytes.Contains(listed.Body.Bytes(), []byte(watch.ID)) {
+		t.Fatalf("list watch response %d: %s", listed.Code, listed.Body.String())
+	}
+	updated := performRequest(t, router, http.MethodPatch, path+"/"+watch.ID+query, map[string]any{"enabled": false})
+	if updated.Code != http.StatusOK || bytes.Contains(updated.Body.Bytes(), []byte(`"enabled":true`)) {
+		t.Fatalf("update watch response %d: %s", updated.Code, updated.Body.String())
+	}
+	preview := performRequest(t, router, http.MethodGet, path+"/"+watch.ID+"/reset/preview"+query, nil)
+	if preview.Code != http.StatusOK || !bytes.Contains(preview.Body.Bytes(), []byte(`"taskCount":0`)) {
+		t.Fatalf("reset preview response %d: %s", preview.Code, preview.Body.String())
+	}
+	reset := performRequest(t, router, http.MethodPost, path+"/"+watch.ID+"/reset"+query, nil)
+	if reset.Code != http.StatusOK || !bytes.Contains(reset.Body.Bytes(), []byte(`"generation":2`)) {
+		t.Fatalf("reset response %d: %s", reset.Code, reset.Body.String())
 	}
 }
 

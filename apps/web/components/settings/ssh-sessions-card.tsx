@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Badge } from "@kandev/ui/badge";
 import { Button } from "@kandev/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@kandev/ui/card";
@@ -16,6 +17,7 @@ export interface SSHSessionsCardProps {
 const REFRESH_INTERVAL_MS = 90_000;
 
 export function SSHSessionsCard({ executorId }: SSHSessionsCardProps) {
+  const { t } = useTranslation();
   const [sessions, setSessions] = useState<SSHSession[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -34,11 +36,11 @@ export function SSHSessionsCard({ executorId }: SSHSessionsCardProps) {
       setSessions(rows);
     } catch (e) {
       if (seq !== seqRef.current) return;
-      setError(e instanceof Error ? e.message : "Failed to load sessions");
+      setError(e instanceof Error ? e.message : t("executors:sshFailedToLoadSessions"));
     } finally {
       if (seq === seqRef.current) setLoading(false);
     }
-  }, [executorId]);
+  }, [executorId, t]);
 
   useEffect(() => {
     // Reset sequence so a previous executor's pending response can't land
@@ -59,10 +61,8 @@ export function SSHSessionsCard({ executorId }: SSHSessionsCardProps) {
       <CardHeader>
         <div className="flex items-center justify-between">
           <div>
-            <CardTitle>Active sessions</CardTitle>
-            <CardDescription>
-              Sessions currently running on this SSH host. Refreshes every 90 seconds.
-            </CardDescription>
+            <CardTitle>{t("executors:sshActiveSessions")}</CardTitle>
+            <CardDescription>{t("executors:sshActiveSessionsDescription")}</CardDescription>
           </div>
           <Button
             variant="outline"
@@ -73,7 +73,7 @@ export function SSHSessionsCard({ executorId }: SSHSessionsCardProps) {
             className="cursor-pointer"
           >
             {loading ? <IconLoader2 className="mr-1.5 h-4 w-4 animate-spin" /> : null}
-            Refresh
+            {t("executors:refresh")}
           </Button>
         </div>
       </CardHeader>
@@ -93,6 +93,7 @@ function SSHSessionsBody({
   error: string | null;
   sessions: SSHSession[];
 }) {
+  const { t } = useTranslation();
   if (error) {
     return (
       <p data-testid="ssh-sessions-error" className="text-sm text-red-600">
@@ -103,7 +104,7 @@ function SSHSessionsBody({
   if (sessions.length === 0 && !loading) {
     return (
       <p data-testid="ssh-sessions-empty" className="text-sm text-muted-foreground">
-        No active sessions.
+        {t("executors:sshNoActiveSessions")}
       </p>
     );
   }
@@ -112,17 +113,18 @@ function SSHSessionsBody({
 }
 
 function SSHSessionsTable({ sessions }: { sessions: SSHSession[] }) {
+  const { t } = useTranslation();
   return (
     <Table data-testid="ssh-sessions-table">
       <TableHeader>
         <TableRow>
-          <TableHead>Task</TableHead>
-          <TableHead>Session</TableHead>
-          <TableHead>Host</TableHead>
-          <TableHead>Remote port</TableHead>
-          <TableHead>Local fwd</TableHead>
-          <TableHead>Uptime</TableHead>
-          <TableHead>Status</TableHead>
+          <TableHead>{t("executors:task")}</TableHead>
+          <TableHead>{t("executors:session")}</TableHead>
+          <TableHead>{t("executors:host")}</TableHead>
+          <TableHead>{t("executors:sshRemotePort")}</TableHead>
+          <TableHead>{t("executors:sshLocalForward")}</TableHead>
+          <TableHead>{t("executors:uptime")}</TableHead>
+          <TableHead>{t("executors:status")}</TableHead>
         </TableRow>
       </TableHeader>
       <TableBody>

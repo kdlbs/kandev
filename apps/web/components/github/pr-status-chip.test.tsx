@@ -129,6 +129,7 @@ afterEach(() => {
 
 const CHIP_TESTID = "pr-status-chip";
 const ATTR_PR_NUMBER = "data-pr-number";
+const ATTR_PR_COUNT = "data-pr-count";
 const ATTR_STATUS = "data-status";
 const ATTR_READY_TO_MERGE = "data-pr-ready-to-merge";
 const DRAWER_SELECTOR = "[data-testid='pr-status-chip-drawer']";
@@ -636,8 +637,7 @@ describe("PRStatusChip — multiple PRs", () => {
   it("renders one aggregate chip with a PR count and worst-of status", () => {
     renderWithStore(multiState(TWO_OPEN), <PRStatusChip taskId="task-1" />);
     const chip = screen.getByTestId(CHIP_TESTID);
-    expect(chip.getAttribute("data-pr-count")).toBe("2");
-    // PR #2 is failing, so the aggregate glyph is red.
+    expect(chip.getAttribute(ATTR_PR_COUNT)).toBe("2");
     expect(chip.getAttribute(ATTR_STATUS)).toBe("failed");
   });
 
@@ -646,21 +646,14 @@ describe("PRStatusChip — multiple PRs", () => {
     await expectDesktopHoverPopoverConstrained();
   });
 
-  it("stays visible while at least one PR is still open", () => {
+  it("keeps terminal siblings in the multi-PR unlink surface", () => {
     renderWithStore(
       multiState([makePR({ id: "a", state: "merged" }), makePR({ id: "b", pr_number: 2 })]),
       <PRStatusChip taskId="task-1" />,
     );
-    // Only one PR is open, so it renders as the single-PR chip (its number).
-    expect(screen.getByTestId(CHIP_TESTID).getAttribute(ATTR_PR_NUMBER)).toBe("2");
-  });
-
-  it("returns null only when every PR is terminal", () => {
-    renderWithStore(
-      multiState([makePR({ id: "a", state: "merged" }), makePR({ id: "b", state: "closed" })]),
-      <PRStatusChip taskId="task-1" />,
-    );
-    expect(screen.queryByTestId(CHIP_TESTID)).toBeNull();
+    const chip = screen.getByTestId(CHIP_TESTID);
+    expect(chip.getAttribute(ATTR_PR_COUNT)).toBe("2");
+    expect(chip.getAttribute(ATTR_STATUS)).toBe("passed");
   });
 
   describe("mobile drawer", () => {
@@ -676,8 +669,6 @@ describe("PRStatusChip — multiple PRs", () => {
       });
       expect(document.querySelector(DRAWER_SELECTOR)).not.toBeNull();
       expect(document.querySelector("[data-testid='pr-multi-popover']")).not.toBeNull();
-      // One tab per PR (testid is owner+repo-scoped so same-number PRs on
-      // different repos, or repos sharing a name across owners, stay unique).
       expect(document.querySelector("[data-testid='pr-popover-tab-acme-demo-1']")).not.toBeNull();
       expect(document.querySelector("[data-testid='pr-popover-tab-acme-demo-2']")).not.toBeNull();
     });

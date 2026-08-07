@@ -1,11 +1,12 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { formatDistanceToNow } from "date-fns";
+import { formatTimeDistance } from "@/lib/i18n/date-locale";
 import { Avatar, AvatarFallback, AvatarImage } from "@kandev/ui/avatar";
 import { getJiraTicket, transitionJiraTicket } from "@/lib/api/domains/jira-api";
 import type { JiraStatusCategory, JiraTicket } from "@/lib/types/jira";
 import { IntegrationAuthErrorMessage } from "@/components/integrations/auth-error-message";
+import { useTranslation } from "react-i18next";
 
 // Matches PROJECT-123 anywhere in the string. Jira keys start with letters and
 // include an uppercase prefix, followed by a dash and one or more digits.
@@ -32,15 +33,15 @@ export function statusBadgeClass(category: JiraStatusCategory | undefined): stri
   }
 }
 
-export function formatRelative(iso: string | undefined): string {
-  if (!iso) return "";
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return "";
-  return formatDistanceToNow(d, { addSuffix: true });
-}
+// Alias of the one canonical distance formatter, kept under this module's
+// historical name so existing consumers and their imports are unchanged.
+// Callers inside React should pass `useDateLocale()` so the value re-renders
+// when a lazily loaded locale lands; the default keeps other callers correct.
+export const formatRelative = formatTimeDistance;
 
 export function PersonCell({ name, avatar }: { name?: string; avatar?: string }) {
-  if (!name) return <span className="text-muted-foreground">Unassigned</span>;
+  const { t } = useTranslation();
+  if (!name) return <span className="text-muted-foreground">{t("jira:unassigned")}</span>;
   return (
     <>
       <Avatar size="sm" className="size-5">
@@ -160,13 +161,14 @@ type JiraErrorMessageProps = {
 };
 
 export function JiraErrorMessage({ error, compact }: JiraErrorMessageProps) {
+  const { t } = useTranslation();
   return (
     <IntegrationAuthErrorMessage
       error={error}
       name="Jira"
       reconnectHref="/settings/integrations/jira"
       isAuthError={isJiraAuthError}
-      authErrorBody="Your Jira session expired or needs step-up authentication. Reconnect to view this ticket."
+      authErrorBody={t("jira:yourJiraSessionExpiredOrNeeds")}
       compact={compact}
     />
   );

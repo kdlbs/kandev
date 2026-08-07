@@ -13,6 +13,7 @@ import {
 import { TaskCreateDialog } from "@/components/task-create-dialog";
 import { NewSubtaskDialog } from "./new-subtask-dialog";
 import type { Task } from "@/lib/types/http";
+import { useTranslation } from "react-i18next";
 
 type NewTaskDropdownProps = {
   workspaceId: string | null;
@@ -35,6 +36,7 @@ export function NewTaskDropdown({
   activeTaskTitle,
   onTaskCreated,
 }: NewTaskDropdownProps) {
+  const { t } = useTranslation();
   const [showTaskDialog, setShowTaskDialog] = useState(false);
   const [showSubtaskDialog, setShowSubtaskDialog] = useState(false);
 
@@ -49,7 +51,7 @@ export function NewTaskDropdown({
           data-testid="new-task-primary"
         >
           <IconPlus className="h-3.5 w-3.5" />
-          Task
+          {t("task:task")}
         </Button>
         {activeTaskId && (
           <DropdownMenu>
@@ -70,7 +72,7 @@ export function NewTaskDropdown({
                 data-testid="new-subtask-button"
               >
                 <IconSubtask className="h-3.5 w-3.5" />
-                Subtask
+                {t("task:subtask")}
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>

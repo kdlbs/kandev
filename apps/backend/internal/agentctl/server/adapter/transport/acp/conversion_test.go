@@ -3,12 +3,66 @@ package acp
 import (
 	"encoding/json"
 	"testing"
+	"time"
 
 	"github.com/coder/acp-go-sdk"
 	"github.com/kandev/kandev/internal/agentctl/server/adapter/transport/shared"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/logger"
 )
+
+func TestSendUpdateAppliesCancelableBackpressure(t *testing.T) {
+	a := newTestAdapter()
+
+	for index := 0; index < cap(a.updatesCh); index++ {
+		a.sendUpdate(AgentEvent{Type: streams.EventTypeReasoning, ReasoningText: "chunk"})
+	}
+
+	done := make(chan struct{})
+	go func() {
+		a.sendUpdate(AgentEvent{Type: streams.EventTypeReasoning, ReasoningText: "final"})
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		t.Fatal("sendUpdate bypassed a full per-agent queue")
+	case <-time.After(20 * time.Millisecond):
+	}
+
+	<-a.updatesCh
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("sendUpdate did not resume after queue space became available")
+	}
+
+	if err := a.Close(); err != nil {
+		t.Fatalf("close adapter: %v", err)
+	}
+}
+
+func TestSendUpdateBackpressureIsCanceledOnClose(t *testing.T) {
+	a := newTestAdapter()
+	for index := 0; index < cap(a.updatesCh); index++ {
+		a.sendUpdate(AgentEvent{Type: streams.EventTypeReasoning, ReasoningText: "chunk"})
+	}
+
+	done := make(chan struct{})
+	go func() {
+		a.sendUpdate(AgentEvent{Type: streams.EventTypeReasoning, ReasoningText: "final"})
+		close(done)
+	}()
+
+	if err := a.Close(); err != nil {
+		t.Fatalf("close adapter: %v", err)
+	}
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("sendUpdate remained blocked after adapter close")
+	}
+}
 
 func TestConvertACPConfigOptions_PreservesDescriptions(t *testing.T) {
 	description := "Controls how much reasoning the model performs."

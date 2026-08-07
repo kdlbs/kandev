@@ -1,17 +1,20 @@
 "use client";
 
 import { memo, useEffect, useMemo } from "react";
-import { IconLoader2 } from "@tabler/icons-react";
+import { IconAlertCircle, IconLoader2, IconRefresh } from "@tabler/icons-react";
+import { Button } from "@kandev/ui/button";
+import { useTranslation } from "react-i18next";
 import { PanelRoot, PanelBody } from "./panel-primitives";
 import { FileDiffViewer } from "@/components/diff";
 import { DEFAULT_DIFF_WORD_WRAP } from "@/components/diff/diff-defaults";
 import { useAppStore } from "@/components/state-provider";
 import { useSessionCommits } from "@/hooks/domains/session/use-session-commits";
-import { useCommitDiff } from "@/hooks/domains/session/use-commit-diff";
+import { useCommitDetail } from "@/hooks/domains/session/use-commit-detail";
 import { usePanelActions } from "@/hooks/use-panel-actions";
 import { setPanelTitle } from "@/lib/layout/panel-portal-manager";
 import { formatRelativeTime } from "@/lib/utils";
 import type { FileInfo } from "@/lib/state/store";
+import type { CommitDetailTarget } from "./changes-diff-target";
 
 type CommitDetailPanelProps = {
   panelId: string;
@@ -19,11 +22,43 @@ type CommitDetailPanelProps = {
 };
 
 type CommitDiffViewProps = {
-  sha: string;
-  repo?: string;
+  target: CommitDetailTarget;
   onOpenFile?: (path: string) => void;
   wordWrap?: boolean;
 };
+
+function isCommitDetailTarget(value: unknown): value is CommitDetailTarget {
+  if (!value || typeof value !== "object") return false;
+  const target = value as {
+    source?: unknown;
+    sha?: unknown;
+    repo?: unknown;
+    workspaceId?: unknown;
+    owner?: unknown;
+  };
+  if (typeof target.sha !== "string" || target.sha.length === 0) return false;
+  if (target.source === "local") {
+    return target.repo === undefined || typeof target.repo === "string";
+  }
+  return (
+    target.source === "github" &&
+    typeof target.workspaceId === "string" &&
+    target.workspaceId.length > 0 &&
+    typeof target.owner === "string" &&
+    target.owner.length > 0 &&
+    typeof target.repo === "string" &&
+    target.repo.length > 0
+  );
+}
+
+function targetFromParams(params: Record<string, unknown>): CommitDetailTarget {
+  if (isCommitDetailTarget(params.target)) return params.target;
+  return {
+    source: "local",
+    sha: typeof params.commitSha === "string" ? params.commitSha : "",
+    ...(typeof params.repo === "string" && params.repo ? { repo: params.repo } : {}),
+  };
+}
 
 function getInitials(name: string): string {
   return name
@@ -42,41 +77,66 @@ function useSortedFileEntries(files: Record<string, FileInfo> | null): [string, 
   }, [files]);
 }
 
-function useActiveCommit(commitSha: string) {
+function useActiveCommit(target: CommitDetailTarget) {
   const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
   const { commits } = useSessionCommits(activeSessionId ?? null);
-  return useMemo(() => commits.find((c) => c.commit_sha === commitSha), [commits, commitSha]);
+  return useMemo(() => {
+    if (target.source !== "local") return undefined;
+    return commits.find(
+      (c) =>
+        c.commit_sha === target.sha &&
+        (!target.repo || !c.repository_name || c.repository_name === target.repo),
+    );
+  }, [commits, target]);
+}
+
+function headerCommit(
+  target: CommitDetailTarget,
+  localCommit: ReturnType<typeof useActiveCommit>,
+  remoteCommit: ReturnType<typeof useCommitDetail>["commit"],
+) {
+  if (target.source === "github" && remoteCommit) {
+    return {
+      author_name: remoteCommit.author_name || remoteCommit.author_login,
+      commit_message: remoteCommit.message,
+      committed_at: remoteCommit.author_date,
+    };
+  }
+  return localCommit;
 }
 
 /** Standalone commit diff viewer — no dockview dependencies. */
 export const CommitDiffView = memo(function CommitDiffView({
-  sha: commitSha,
-  repo,
+  target,
   onOpenFile,
   wordWrap = DEFAULT_DIFF_WORD_WRAP,
 }: CommitDiffViewProps) {
-  const commit = useActiveCommit(commitSha);
-  const { files, loading } = useCommitDiff(commitSha, repo);
+  const { t } = useTranslation();
+  const localCommit = useActiveCommit(target);
+  const { files, commit: remoteCommit, loading, error, refetch } = useCommitDetail(target);
+  const commit = headerCommit(target, localCommit, remoteCommit);
   const fileEntries = useSortedFileEntries(files);
 
   if (loading) {
     return (
       <div className="flex items-center justify-center h-full gap-2 text-muted-foreground text-sm">
         <IconLoader2 className="h-4 w-4 animate-spin" />
-        Loading commit...
+        {t("task:loadingCommit")}
       </div>
     );
   }
+  if (error) return <CommitDetailErrorState error={error} onRetry={refetch} />;
 
   return (
     <div className="overflow-y-auto">
-      <div className="p-3">{commit && <CommitHeader commit={commit} commitSha={commitSha} />}</div>
+      <div className="p-3">{commit && <CommitHeader commit={commit} commitSha={target.sha} />}</div>
       <CommitFileList
         fileEntries={fileEntries}
         loading={loading}
-        onOpenFile={onOpenFile ?? (() => {})}
-        baseRef={`${commitSha}^`}
-        repo={repo}
+        onOpenFile={target.source === "local" ? onOpenFile : undefined}
+        baseRef={target.source === "local" ? `${target.sha}^` : undefined}
+        repo={target.source === "local" ? target.repo : undefined}
+        remote={target.source === "github"}
         wordWrap={wordWrap}
       />
     </div>
@@ -87,24 +147,25 @@ const CommitDetailPanel = memo(function CommitDetailPanel({
   panelId,
   params,
 }: CommitDetailPanelProps) {
-  const commitSha = params.commitSha as string;
-  const repo = (params.repo as string | undefined) ?? undefined;
+  const { t } = useTranslation();
+  const target = targetFromParams(params);
   const { openFile } = usePanelActions();
-  const commit = useActiveCommit(commitSha);
-  const { files, loading } = useCommitDiff(commitSha, repo);
+  const localCommit = useActiveCommit(target);
+  const { files, commit: remoteCommit, loading, error, refetch } = useCommitDetail(target);
+  const commit = headerCommit(target, localCommit, remoteCommit);
   const fileEntries = useSortedFileEntries(files);
 
   // Update tab title via dockview API stored in portal manager
   useEffect(() => {
     if (commit) {
-      const shortSha = commitSha.slice(0, 7);
+      const shortSha = target.sha.slice(0, 7);
       const msg =
         commit.commit_message.length > 30
           ? commit.commit_message.slice(0, 30) + "..."
           : commit.commit_message;
       setPanelTitle(panelId, `${shortSha} ${msg}`);
     }
-  }, [commit, commitSha, panelId]);
+  }, [commit, panelId, target.sha]);
 
   if (loading) {
     return (
@@ -112,8 +173,17 @@ const CommitDetailPanel = memo(function CommitDetailPanel({
         <PanelBody>
           <div className="flex items-center justify-center h-full gap-2 text-muted-foreground text-sm">
             <IconLoader2 className="h-4 w-4 animate-spin" />
-            Loading commit...
+            {t("task:loadingCommit")}
           </div>
+        </PanelBody>
+      </PanelRoot>
+    );
+  }
+  if (error) {
+    return (
+      <PanelRoot>
+        <PanelBody>
+          <CommitDetailErrorState error={error} onRetry={refetch} />
         </PanelBody>
       </PanelRoot>
     );
@@ -123,14 +193,15 @@ const CommitDetailPanel = memo(function CommitDetailPanel({
     <PanelRoot>
       <PanelBody padding={false} scroll>
         <div className="p-3">
-          {commit && <CommitHeader commit={commit} commitSha={commitSha} />}
+          {commit && <CommitHeader commit={commit} commitSha={target.sha} />}
         </div>
         <CommitFileList
           fileEntries={fileEntries}
           loading={loading}
-          onOpenFile={openFile}
-          baseRef={`${commitSha}^`}
-          repo={repo}
+          onOpenFile={target.source === "local" ? openFile : undefined}
+          baseRef={target.source === "local" ? `${target.sha}^` : undefined}
+          repo={target.source === "local" ? target.repo : undefined}
+          remote={target.source === "github"}
         />
       </PanelBody>
     </PanelRoot>
@@ -168,6 +239,35 @@ function CommitHeader({
   );
 }
 
+function CommitDetailErrorState({
+  error,
+  onRetry,
+}: {
+  error: string;
+  onRetry: () => Promise<void>;
+}) {
+  const { t } = useTranslation();
+  return (
+    <div
+      role="alert"
+      className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center text-sm text-muted-foreground"
+    >
+      <IconAlertCircle className="h-5 w-5 text-destructive" />
+      <span>{error}</span>
+      <Button
+        type="button"
+        className="min-h-11 cursor-pointer"
+        variant="outline"
+        size="sm"
+        onClick={() => void onRetry()}
+      >
+        <IconRefresh className="h-4 w-4" />
+        {t("system:featureTogglesRetry")}
+      </Button>
+    </div>
+  );
+}
+
 /** List of file diffs in a commit */
 function CommitFileList({
   fileEntries,
@@ -175,18 +275,23 @@ function CommitFileList({
   onOpenFile,
   baseRef,
   repo,
+  remote,
   wordWrap,
 }: {
   fileEntries: [string, FileInfo][];
   loading: boolean;
-  onOpenFile: (path: string) => void;
-  baseRef: string;
+  onOpenFile?: (path: string) => void;
+  baseRef?: string;
   repo?: string;
+  remote: boolean;
   wordWrap?: boolean;
 }) {
+  const { t } = useTranslation();
   if (fileEntries.length === 0 && !loading) {
     return (
-      <div className="text-sm text-muted-foreground text-center py-8">No files in this commit</div>
+      <div className="text-sm text-muted-foreground text-center py-8">
+        {t("task:noFilesInThisCommit")}
+      </div>
     );
   }
 
@@ -200,14 +305,14 @@ function CommitFileList({
               diff={file.diff}
               status={file.status}
               onOpenFile={onOpenFile}
-              enableExpansion={true}
+              enableExpansion={!remote}
               baseRef={baseRef}
-              repo={repo}
+              repo={remote ? undefined : repo}
               wordWrap={wordWrap}
             />
           ) : (
             <div className="px-3 py-2 text-xs text-muted-foreground">
-              {path} -- binary or empty diff
+              {t("task:binaryOrEmptyDiff", { path })}
             </div>
           )}
         </div>

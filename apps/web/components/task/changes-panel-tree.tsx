@@ -181,6 +181,7 @@ type RepoTreeGroupProps = {
   secondaryLabel?: string;
   onRepoAction?: (repo: string) => void;
   onRepoSecondaryAction?: (repo: string) => void;
+  disabled?: boolean;
   multiSelect: ReturnType<typeof useMultiSelect>;
 };
 
@@ -197,6 +198,7 @@ export function RepoTreeGroup(props: RepoTreeGroupProps) {
     secondaryLabel,
     onRepoAction,
     onRepoSecondaryAction,
+    disabled = false,
   } = props;
   const label = displayName || repositoryName || "Repository";
   const stop = (e: React.MouseEvent) => e.stopPropagation();
@@ -232,6 +234,7 @@ export function RepoTreeGroup(props: RepoTreeGroupProps) {
                 variant="ghost"
                 className="h-5 text-[10px] px-1.5 cursor-pointer"
                 data-testid="repo-group-action"
+                disabled={disabled}
                 onClick={() => onRepoAction(repositoryName)}
               >
                 {primaryLabel}
@@ -243,6 +246,7 @@ export function RepoTreeGroup(props: RepoTreeGroupProps) {
                 variant="ghost"
                 className="h-5 text-[10px] px-1.5 cursor-pointer text-muted-foreground"
                 data-testid="repo-group-secondary-action"
+                disabled={disabled}
                 onClick={() => onRepoSecondaryAction(repositoryName)}
               >
                 {secondaryLabel}

@@ -11,6 +11,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@kandev/ui/alert-dialog";
+import { useTranslation } from "react-i18next";
 
 export function DeleteWatchDialog({
   open,
@@ -23,6 +24,7 @@ export function DeleteWatchDialog({
   watchLabel: string;
   onConfirm: () => Promise<void>;
 }) {
+  const { t } = useTranslation();
   const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState("");
   useEffect(() => {
@@ -32,10 +34,11 @@ export function DeleteWatchDialog({
     <AlertDialog open={open} onOpenChange={onOpenChange}>
       <AlertDialogContent>
         <AlertDialogHeader>
-          <AlertDialogTitle>Delete {watchLabel}?</AlertDialogTitle>
+          {/* One message, not "Delete" + label: the label's position in the
+              sentence is the translator's to choose. */}
+          <AlertDialogTitle>{t("gitlab:deleteWatchTitle", { label: watchLabel })}</AlertDialogTitle>
           <AlertDialogDescription>
-            This will delete every task created by this watch, including archived tasks, and remove
-            its polling history. This cannot be undone.
+            {t("gitlab:thisWillDeleteEveryTaskCreated")}
           </AlertDialogDescription>
           {error && (
             <p className="text-sm text-destructive" role="alert">
@@ -45,7 +48,7 @@ export function DeleteWatchDialog({
         </AlertDialogHeader>
         <AlertDialogFooter>
           <AlertDialogCancel disabled={deleting} className="cursor-pointer">
-            Cancel
+            {t("common:cancel")}
           </AlertDialogCancel>
           <AlertDialogAction
             disabled={deleting}
@@ -58,13 +61,13 @@ export function DeleteWatchDialog({
                 await onConfirm();
                 onOpenChange(false);
               } catch (cause) {
-                setError(cause instanceof Error ? cause.message : "Watch deletion failed");
+                setError(cause instanceof Error ? cause.message : t("gitlab:watchDeletionFailed"));
               } finally {
                 setDeleting(false);
               }
             }}
           >
-            {deleting ? "Deleting..." : "Delete watch"}
+            {deleting ? t("gitlab:deleting") : t("gitlab:deleteWatch")}
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>

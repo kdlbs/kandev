@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Button } from "@kandev/ui/button";
 import { Input } from "@kandev/ui/input";
 import { Label } from "@kandev/ui/label";
@@ -10,13 +11,20 @@ type ScheduledConfigProps = {
   onUpdate: (config: Record<string, unknown>) => void;
 };
 
+// `expression` is the cron shorthand the backend parses and persists — syntax,
+// never translated. Only the label is copy.
 const PRESETS = [
-  { label: "Every hour", expression: "@hourly" },
-  { label: "Every day", expression: "@daily" },
-  { label: "Every week", expression: "@weekly" },
+  { labelKey: "automations:cronEveryHour", expression: "@hourly" },
+  { labelKey: "automations:cronEveryDay", expression: "@daily" },
+  { labelKey: "automations:cronEveryWeek", expression: "@weekly" },
 ] as const;
 
+// Shown inside the help text as an example; interpolated so the pseudo-locale
+// cannot accent it into syntax that no longer parses.
+const CRON_SHORTCUT_EXAMPLES = "@hourly, @daily, @weekly, @every 5m";
+
 export function ScheduledConfig({ config, onUpdate }: ScheduledConfigProps) {
+  const { t } = useTranslation();
   const configExpr = (config.cron_expression as string) ?? "";
   const [cronExpression, setCronExpression] = useState(configExpr);
   useEffect(() => {
@@ -47,12 +55,12 @@ export function ScheduledConfig({ config, onUpdate }: ScheduledConfigProps) {
             className="cursor-pointer"
             onClick={() => handlePreset(preset.expression)}
           >
-            {preset.label}
+            {t(preset.labelKey)}
           </Button>
         ))}
       </div>
       <div className="space-y-1.5">
-        <Label className="text-xs">Cron expression</Label>
+        <Label className="text-xs">{t("automations:cronExpressionLabel")}</Label>
         <Input
           value={cronExpression}
           onChange={(e) => handleCustomChange(e.target.value)}
@@ -61,7 +69,7 @@ export function ScheduledConfig({ config, onUpdate }: ScheduledConfigProps) {
           className="font-mono text-sm"
         />
         <p className="text-xs text-muted-foreground">
-          Standard 5-field cron or shortcuts (@hourly, @daily, @weekly, @every 5m)
+          {t("automations:cronHelp", { shortcuts: CRON_SHORTCUT_EXAMPLES })}
         </p>
       </div>
     </div>

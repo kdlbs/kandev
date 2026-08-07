@@ -13,25 +13,34 @@ export type LinearPriority = 0 | 1 | 2 | 3 | 4;
 
 // Linear priorities: 0=None, 1=Urgent, 2=High, 3=Medium, 4=Low. Rendered as
 // toggle chips, mirroring the States and Labels multi-selects.
-export const PRIORITY_OPTIONS: { value: LinearPriority; label: string }[] = [
-  { value: 1, label: "Urgent" },
-  { value: 2, label: "High" },
-  { value: 3, label: "Medium" },
-  { value: 4, label: "Low" },
-  { value: 0, label: "No priority" },
+//
+// `value` is a numeric union sent to the backend as the filter's priority list
+// — never translated. The chip text travels as `labelKey` and resolves at
+// render through `resolveOptionLabel`; a module-scope `t()` here would freeze
+// the copy at the boot locale (see docs/i18n.md).
+export const PRIORITY_OPTIONS: { value: LinearPriority; labelKey: string }[] = [
+  { value: 1, labelKey: "linear:priorityUrgent" },
+  { value: 2, labelKey: "linear:priorityHigh" },
+  { value: 3, labelKey: "linear:priorityMedium" },
+  { value: 4, labelKey: "linear:priorityLow" },
+  { value: 0, labelKey: "linear:priorityNone" },
 ];
 
 // Dispatch order applied when the in-flight cap limits how many matched issues
 // run at once. Order matters — most useful first; the empty value is Linear's
 // natural (recently-updated) order.
-export const SORT_BY_OPTIONS: { value: LinearIssueSortBy; label: string }[] = [
-  { value: "priority", label: "Priority (high → low)" },
-  { value: "priority_asc", label: "Priority (low → high)" },
-  { value: "created_desc", label: "Created (newest first)" },
-  { value: "created_asc", label: "Created (oldest first)" },
-  { value: "updated_desc", label: "Updated (recently updated first)" },
-  { value: "updated_asc", label: "Updated (least recently updated first)" },
-  { value: "", label: "Default (Linear order)" },
+//
+// `value` is a `LinearIssueSortBy` string-literal union: persisted on the
+// watch, compared against `form.sortBy`, and sent upstream. Only `labelKey` is
+// copy.
+export const SORT_BY_OPTIONS: { value: LinearIssueSortBy; labelKey: string }[] = [
+  { value: "priority", labelKey: "linear:sortPriorityDesc" },
+  { value: "priority_asc", labelKey: "linear:sortPriorityAsc" },
+  { value: "created_desc", labelKey: "linear:sortCreatedDesc" },
+  { value: "created_asc", labelKey: "linear:sortCreatedAsc" },
+  { value: "updated_desc", labelKey: "linear:sortUpdatedDesc" },
+  { value: "updated_asc", labelKey: "linear:sortUpdatedAsc" },
+  { value: "", labelKey: "linear:sortDefault" },
 ];
 
 export interface FormState {
@@ -243,14 +252,27 @@ export function buildFilterPayload(form: FormState): LinearSearchFilter {
   };
 }
 
+/**
+ * Display text for one Linear user in the Creator picker. Every branch is user
+ * data straight from the Linear API — a display name, a full name, an email
+ * address, or the raw id — so nothing here is translatable copy.
+ */
 export function userOptionLabel(u: LinearUser): string {
   const name = u.displayName?.trim() || u.name?.trim() || u.email?.trim() || u.id;
   if (u.email && u.email !== name) return `${name} (${u.email})`;
   return name;
 }
 
-export function creatorPlaceholder(teamKey: string, loadingUsers: boolean): string {
-  if (loadingUsers) return "Loading…";
-  if (!teamKey) return "Pick a team first";
-  return "(any)";
+// `t` is threaded in rather than read from a hook: this is a plain function in a
+// `.ts` module, and `mode: "jsx-only"` means the guard never inspects this file,
+// so a literal here would survive lint. The caller passes its `useTranslation`
+// `t`, which keeps the copy resolving at render.
+export function creatorPlaceholder(
+  t: (key: string) => string,
+  teamKey: string,
+  loadingUsers: boolean,
+): string {
+  if (loadingUsers) return t("linear:loadingEllipsis");
+  if (!teamKey) return t("linear:pickATeamFirst");
+  return t("linear:any");
 }

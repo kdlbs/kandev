@@ -8,8 +8,11 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/jmoiron/sqlx"
+
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events/bus"
+	"github.com/kandev/kandev/internal/secrets"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
@@ -21,6 +24,25 @@ import (
 type WorktreeCleanup interface {
 	// OnTaskDeleted is called when a task is deleted to clean up its worktree.
 	OnTaskDeleted(ctx context.Context, taskID string) error
+}
+
+// WorkspaceSecretDeleter removes secrets owned by a workspace. It is optional
+// for isolated task-service users.
+type WorkspaceSecretDeleter interface {
+	DeleteWorkspaceSecrets(ctx context.Context, workspaceID string) error
+}
+
+type transactionalWorkspaceCascade interface {
+	DeleteWorkspaceCascadeWithSecretCleanup(
+		ctx context.Context,
+		id string,
+		cleanup func(context.Context, *sqlx.Tx) error,
+	) ([]*models.Task, []*models.Workflow, error)
+	DeleteWorkspaceCascadeWithNameAndSecretCleanup(
+		ctx context.Context,
+		id, name string,
+		cleanup func(context.Context, *sqlx.Tx) error,
+	) ([]*models.Task, []*models.Workflow, error)
 }
 
 // WorktreeProvider extends WorktreeCleanup with query capabilities.
@@ -51,6 +73,15 @@ type TaskExecutionStopper interface {
 	// RegisterExecutionStopOwner records exact teardown ownership before a
 	// terminal session mutation. It never replaces the explicit stop call.
 	RegisterExecutionStopOwner(sessionID, executionID string, force bool)
+}
+
+// TaskRowLivenessProber classifies an executors_running row's backing-process
+// liveness in a runtime-aware way (a local process check is never applied to a
+// remote/SSH row). It is optional and satisfied by the lifecycle adapter. When
+// unwired, cleanup treats every row as Unknown so a not-found stop is never
+// mistaken for an absent runtime.
+type TaskRowLivenessProber interface {
+	RowLiveness(row *models.ExecutorRunning) models.ProcessLiveness
 }
 
 // TaskResourceCleanupActivityGate serializes durable cleanup with install-wide maintenance.
@@ -131,6 +162,12 @@ type WorkspaceBootstrapper interface {
 	CreateWorkspaceWithKanban(ctx context.Context, workspace *models.Workspace) (*models.Workflow, error)
 }
 
+// WorkspaceDefaultsInitializer persists integration defaults after a
+// workspace row exists and before its creation event is published.
+type WorkspaceDefaultsInitializer interface {
+	InitializeWorkspaceDefaults(ctx context.Context, workspaceID string) error
+}
+
 // WorkflowStepGetter retrieves workflow step information.
 type WorkflowStepGetter interface {
 	GetStep(ctx context.Context, stepID string) (*wfmodels.WorkflowStep, error)
@@ -199,6 +236,7 @@ type Repos struct {
 	WorkspaceFolders  repository.TaskWorkspaceFolderRepository
 	Workflows         repository.WorkflowRepository
 	Messages          repository.MessageRepository
+	Attachments       repository.AttachmentRepository
 	Turns             repository.TurnRepository
 	Sessions          repository.SessionRepository
 	GitSnapshots      repository.GitSnapshotRepository
@@ -209,6 +247,7 @@ type Repos struct {
 	TaskEnvironments  repository.TaskEnvironmentRepository
 	Reviews           repository.ReviewRepository
 	ResourceCleanups  repository.TaskResourceCleanupRepository
+	StatusSummaries   repository.TaskStatusSummaryRepository
 }
 
 // Service provides task business logic
@@ -219,6 +258,7 @@ type Service struct {
 	workspaceFolders            repository.TaskWorkspaceFolderRepository
 	workflows                   repository.WorkflowRepository
 	messages                    repository.MessageRepository
+	attachments                 repository.AttachmentRepository
 	turns                       repository.TurnRepository
 	sessions                    repository.SessionRepository
 	gitSnapshots                repository.GitSnapshotRepository
@@ -229,11 +269,17 @@ type Service struct {
 	taskEnvironments            repository.TaskEnvironmentRepository
 	reviews                     repository.ReviewRepository
 	resourceCleanups            repository.TaskResourceCleanupRepository
+	statusSummaries             repository.TaskStatusSummaryRepository
+	attachmentSvc               *AttachmentService
+	statusSummaryPRs            TaskStatusSummaryPRReader
+	queuedPromptCounter         QueuedPromptCounter
 	eventBus                    bus.EventBus
 	logger                      *logger.Logger
 	discoveryConfig             RepositoryDiscoveryConfig
 	worktreeCleanup             WorktreeCleanup
 	executionStopper            TaskExecutionStopper
+	rowLivenessProber           TaskRowLivenessProber
+	contextWindowResetter       func(context.Context, string) error
 	cleanupActivity             TaskResourceCleanupActivityGate
 	branchMaterializer          BranchMaterializer
 	workspaceSourceMaterializer WorkspaceSourceMaterializer
@@ -254,8 +300,14 @@ type Service struct {
 	repoCloneLocation           RepoCloneLocation
 	blockers                    BlockerRepository
 	comments                    CommentRepository
+	secretStore                 secrets.SecretStore
+	workspaceSecretDeleter      WorkspaceSecretDeleter
 	baseBranchPusher            AgentBaseBranchPusher
 	runtimeOverridesMu          sync.Mutex
+
+	workspaceSourceProviderRefresher WorkspaceSourceProviderRefresher
+
+	workspaceDefaultsInitializer WorkspaceDefaultsInitializer
 	// foregroundActivity resolves the live fine-grained busy substate of a RUNNING
 	// session (satisfied by the orchestrator). Used to compute the task-level
 	// MOST-ACTIVE-WINS activity aggregate carried on task.updated events. Optional.
@@ -289,6 +341,38 @@ type Service struct {
 	repoResolveMu sync.Mutex
 }
 
+// SetAttachmentService wires the file-backed prompt attachment owner into the
+// task service. It is optional for focused unit-test harnesses that never send
+// file-backed descriptors.
+func (s *Service) SetAttachmentService(attachments *AttachmentService) {
+	s.attachmentSvc = attachments
+}
+
+// AttachmentService returns the optional file-backed attachment owner wired
+// into this task service. It lets route and maintenance composition reuse the
+// same storage boundary instead of creating competing service instances.
+func (s *Service) AttachmentService() *AttachmentService {
+	return s.attachmentSvc
+}
+
+// AttachmentRepository returns the attachment registry repository used by the
+// task service. It is exposed for composition of the storage maintenance hook.
+func (s *Service) AttachmentRepository() repository.AttachmentRepository {
+	return s.attachments
+}
+
+// SetSecretStore wires metadata-only validation for shared executor profiles.
+// Workspace-scoped secret references are rejected before a profile is saved.
+func (s *Service) SetSecretStore(secretStore secrets.SecretStore) {
+	s.secretStore = secretStore
+}
+
+// SetWorkspaceSecretDeleter wires workspace-secret cleanup to workspace
+// deletion. The callback runs only after the repository cascade succeeds.
+func (s *Service) SetWorkspaceSecretDeleter(deleter WorkspaceSecretDeleter) {
+	s.workspaceSecretDeleter = deleter
+}
+
 // NewService creates a new task service
 func NewService(repos Repos, eventBus bus.EventBus, log *logger.Logger, discoveryConfig RepositoryDiscoveryConfig) *Service {
 	return &Service{
@@ -298,6 +382,7 @@ func NewService(repos Repos, eventBus bus.EventBus, log *logger.Logger, discover
 		workspaceFolders:      repos.WorkspaceFolders,
 		workflows:             repos.Workflows,
 		messages:              repos.Messages,
+		attachments:           repos.Attachments,
 		turns:                 repos.Turns,
 		sessions:              repos.Sessions,
 		gitSnapshots:          repos.GitSnapshots,
@@ -308,6 +393,7 @@ func NewService(repos Repos, eventBus bus.EventBus, log *logger.Logger, discover
 		taskEnvironments:      repos.TaskEnvironments,
 		reviews:               repos.Reviews,
 		resourceCleanups:      repos.ResourceCleanups,
+		statusSummaries:       repos.StatusSummaries,
 		eventBus:              eventBus,
 		logger:                log,
 		discoveryConfig:       discoveryConfig,
@@ -337,6 +423,12 @@ func (s *Service) SetWorkspaceSourceMaterializer(m WorkspaceSourceMaterializer) 
 	s.workspaceSourceMaterializer = m
 }
 
+// SetWorkspaceSourceProviderRefresher wires the best-effort live MCP provider
+// reconciliation used after workspace-source and legacy branch attachments.
+func (s *Service) SetWorkspaceSourceProviderRefresher(r WorkspaceSourceProviderRefresher) {
+	s.workspaceSourceProviderRefresher = r
+}
+
 // SetAgentBaseBranchPusher wires the live-update push for
 // UpdateRepositoryBaseBranch. Optional — when unset, the persisted DB value
 // is the source of truth and the new base branch takes effect at next
@@ -358,6 +450,27 @@ func (s *Service) SetExecutionStopper(stopper TaskExecutionStopper) {
 	s.executionStopper = stopper
 }
 
+// SetRowLivenessProber wires the runtime-aware executors_running liveness probe
+// (satisfied by the lifecycle adapter). It is optional; when unwired, cleanup
+// treats every row as Unknown.
+func (s *Service) SetRowLivenessProber(prober TaskRowLivenessProber) {
+	s.rowLivenessProber = prober
+}
+
+// SetContextWindowResetter wires the guarded context-window reset callback
+// owned by the orchestrator. It is optional for isolated task-service users;
+// those callers fall back to clearing the session metadata directly.
+func (s *Service) SetContextWindowResetter(resetter func(context.Context, string) error) {
+	s.contextWindowResetter = resetter
+}
+
+func (s *Service) resetContextWindow(ctx context.Context, sessionID string) error {
+	if s.contextWindowResetter != nil {
+		return s.contextWindowResetter(ctx, sessionID)
+	}
+	return s.sessions.SetSessionMetadataKey(ctx, sessionID, models.SessionMetaKeyContextWindow, nil)
+}
+
 func (s *Service) SetTaskResourceCleanupActivityGate(gate TaskResourceCleanupActivityGate) {
 	s.cleanupActivity = gate
 }
@@ -374,6 +487,13 @@ func (s *Service) SetWorkflowStepCreator(creator WorkflowStepCreator) {
 
 func (s *Service) SetWorkspaceBootstrapper(bootstrapper WorkspaceBootstrapper) {
 	s.workspaceBootstrapper = bootstrapper
+}
+
+// SetWorkspaceDefaultsInitializer wires the integration initializer used by
+// workspace creation. It is optional so the task service remains usable in
+// deployments without GitHub.
+func (s *Service) SetWorkspaceDefaultsInitializer(initializer WorkspaceDefaultsInitializer) {
+	s.workspaceDefaultsInitializer = initializer
 }
 
 // SetWorkflowStepGetter wires the workflow step getter for MoveTask.

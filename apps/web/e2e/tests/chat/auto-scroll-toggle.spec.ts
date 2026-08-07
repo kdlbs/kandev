@@ -2,6 +2,7 @@ import { type Page } from "@playwright/test";
 import { test, expect } from "../../fixtures/test-base";
 import type { SeedData } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
+import { waitForSessionDone } from "../../helpers/session";
 import { KanbanPage } from "../../pages/kanban-page";
 import { SessionPage } from "../../pages/session-page";
 
@@ -35,6 +36,15 @@ async function seedOverflowingTask(
   );
   if (!task.session_id) throw new Error("createTaskWithAgent did not return a session_id");
 
+  // This fixture needs persisted history, not a live initial stream. Under CI
+  // load, rendering every seed frame can make the turn outlive the UI's idle
+  // wait and fail setup while the agent is still legitimately running.
+  await waitForSessionDone(
+    apiClient,
+    task.id,
+    task.session_id,
+    "overflow seed session should finish before opening the transcript",
+  );
   await testPage.goto(`/t/${task.id}`);
   const session = new SessionPage(testPage);
   await session.waitForLoad();

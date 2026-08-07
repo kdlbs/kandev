@@ -6,7 +6,13 @@ import { Button } from "@kandev/ui/button";
 import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard";
 import type { PrepareGitHubAppImportResponse } from "@/lib/types/github";
 import { GitHubAppPolicyDialog } from "./github-app-policy-dialog";
+import { Trans, useTranslation } from "react-i18next";
+import { formatDateTime } from "@/lib/i18n/formats";
 
+// These are the verbatim field names on GitHub's own "Register a new GitHub App"
+// form, which is English-only. The guide tells the user which field to paste each
+// value into, so translating them would break that mapping — they are references
+// to another product's UI, not our copy.
 const urlLabels: [keyof PrepareGitHubAppImportResponse, string][] = [
   ["public_base_url", "Homepage URL"],
   ["personal_callback_url", "User authorization callback URL"],
@@ -21,6 +27,7 @@ export function GitHubAppImportGuide({
   preparation: PrepareGitHubAppImportResponse;
   settingsUrl?: string;
 }) {
+  const { t } = useTranslation();
   const { copy } = useCopyToClipboard();
   const [copied, setCopied] = useState("");
   async function copyValue(value: string) {
@@ -28,16 +35,24 @@ export function GitHubAppImportGuide({
     setCopied(value);
   }
   return (
-    <section className="space-y-3" aria-label="GitHub App configuration instructions">
+    <section className="space-y-3" aria-label={t("github:githubAppConfigurationInstructions")}>
       <div className="space-y-1">
-        <h3 className="text-sm font-medium">Configure the existing App on GitHub</h3>
+        <h3 className="text-sm font-medium">{t("github:configureTheExistingAppOnGithub")}</h3>
         <p className="text-xs leading-5 text-muted-foreground">
-          Set these exact URLs, create a client secret and webhook secret, and download a private
-          key. This one-time setup expires {new Date(preparation.expires_at).toLocaleString()}.
+          {t("github:setTheseExactUrlsCreateAClientSecret", {
+            expiresAt: formatDateTime(preparation.expires_at),
+          })}
         </p>
         <p className="text-xs leading-5 text-muted-foreground">
-          For webhooks, choose <strong>application/json</strong> as the content type and keep SSL
-          verification enabled.
+          {/* The content-type value is a literal the user selects on GitHub, so it
+              is interpolated rather than written into the catalog. */}
+          <Trans
+            i18nKey="github:forWebhooksChooseContentType"
+            values={{ contentType: "application/json" }}
+          >
+            For webhooks, choose <strong>{"{{contentType}}"}</strong> as the content type and keep
+            SSL verification enabled.
+          </Trans>
         </p>
       </div>
       <div className="divide-y rounded-md border">
@@ -53,7 +68,7 @@ export function GitHubAppImportGuide({
                   variant="ghost"
                   size="icon"
                   className="h-11 w-11 shrink-0 cursor-pointer"
-                  aria-label={`Copy ${label}`}
+                  aria-label={t("github:copy", { label })}
                   onClick={() => void copyValue(value)}
                 >
                   {copied === value ? (
@@ -71,13 +86,13 @@ export function GitHubAppImportGuide({
         {settingsUrl ? (
           <Button asChild variant="outline" className="h-11 cursor-pointer">
             <a href={settingsUrl} target="_blank" rel="noreferrer">
-              Open GitHub App settings
+              {t("github:openGithubAppSettings")}
               <IconExternalLink className="ml-2 h-4 w-4" />
             </a>
           </Button>
         ) : (
           <Button type="button" variant="outline" className="h-11" disabled>
-            Open GitHub App settings
+            {t("github:openGithubAppSettings")}
             <IconExternalLink className="ml-2 h-4 w-4" />
           </Button>
         )}

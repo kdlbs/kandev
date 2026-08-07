@@ -3,6 +3,7 @@
 import { useCallback, useState } from "react";
 import { useSecrets } from "@/hooks/domains/settings/use-secrets";
 import type { AgentProfile, ProfileEnvVar } from "@/lib/types/http";
+import type { SecretListItem } from "@/lib/types/http-secrets";
 import {
   EnvVarsCard,
   envVarsToRows,
@@ -25,8 +26,9 @@ export function areEnvVarsEqual(a?: ProfileEnvVar[], b?: ProfileEnvVar[]): boole
 type ProfileEnvVarsEditorProps = {
   envVars?: ProfileEnvVar[];
   baselineEnvVars?: ProfileEnvVar[];
-  secrets: { id: string; name: string }[];
+  secrets: SecretListItem[];
   onChange: (envVars: ProfileEnvVar[]) => void;
+  discoveryTargetId?: string;
 };
 
 export function ProfileEnvVarsEditor({
@@ -34,6 +36,7 @@ export function ProfileEnvVarsEditor({
   baselineEnvVars,
   secrets,
   onChange,
+  discoveryTargetId,
 }: ProfileEnvVarsEditorProps) {
   // `synced` is what we've acknowledged from the parent (either via the prop
   // or our own last emission). When the prop diverges from it we re-seed
@@ -88,6 +91,7 @@ export function ProfileEnvVarsEditor({
       onAdd={handleAdd}
       onUpdate={handleUpdate}
       onRemove={handleRemove}
+      discoveryTargetId={discoveryTargetId}
     />
   );
 }
@@ -96,14 +100,17 @@ type ProfileEnvVarsSectionProps = {
   envVars?: ProfileEnvVar[];
   baselineEnvVars?: ProfileEnvVar[];
   onChange: (patch: Partial<AgentProfile>) => void;
+  discoveryTargetId?: string;
 };
 
 export function ProfileEnvVarsSection({
   envVars,
   baselineEnvVars,
   onChange,
+  discoveryTargetId,
 }: ProfileEnvVarsSectionProps) {
-  const { items: secrets } = useSecrets();
+  const { items } = useSecrets();
+  const secrets = items.filter((secret) => secret.scope !== "workspace");
   const handleChange = useCallback(
     (next: ProfileEnvVar[]) => onChange({ envVars: next }),
     [onChange],
@@ -115,6 +122,7 @@ export function ProfileEnvVarsSection({
       baselineEnvVars={baselineEnvVars}
       secrets={secrets}
       onChange={handleChange}
+      discoveryTargetId={discoveryTargetId}
     />
   );
 }

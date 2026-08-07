@@ -46,13 +46,23 @@ export async function reorderWorkflows(
 }
 
 // Task operations
+type CreateTaskTitlePayload =
+  | {
+      title: string;
+      auto_title?: false;
+      description?: string;
+    }
+  | {
+      title?: never;
+      auto_title: true;
+      description: string;
+    };
+
 export async function createTask(
-  payload: {
+  payload: CreateTaskTitlePayload & {
     workspace_id: string;
     workflow_id: string;
     workflow_step_id?: string;
-    title: string;
-    description?: string;
     position?: number;
     repositories?: Array<{
       repository_id: string;
@@ -81,9 +91,11 @@ export async function createTask(
     plan_mode?: boolean;
     attachments?: Array<{
       type: string;
-      data: string;
+      data?: string;
+      attachment_id?: string;
       mime_type: string;
       name?: string;
+      size_bytes?: number;
       delivery_mode?: "prompt" | "path";
     }>;
     parent_id?: string;
@@ -255,6 +267,7 @@ export async function listTasksByWorkspace(
     pageSize?: number;
     query?: string;
     includeArchived?: boolean;
+    onlyArchived?: boolean;
     workflowId?: string | null;
     repositoryId?: string | null;
     sort?: string;
@@ -267,6 +280,7 @@ export async function listTasksByWorkspace(
   if (params.pageSize) url.searchParams.set("page_size", String(params.pageSize));
   if (params.query) url.searchParams.set("query", params.query);
   if (params.includeArchived) url.searchParams.set("include_archived", "true");
+  if (params.onlyArchived) url.searchParams.set("only_archived", "true");
   if (params.workflowId) url.searchParams.set("workflow_id", params.workflowId);
   if (params.repositoryId) url.searchParams.set("repository_id", params.repositoryId);
   if (params.sort) url.searchParams.set("sort", params.sort);

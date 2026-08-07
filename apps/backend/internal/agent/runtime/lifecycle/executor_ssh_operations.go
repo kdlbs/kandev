@@ -456,9 +456,8 @@ func ensureRemoteSessionDir(ctx context.Context, client *ssh.Client, taskDir, se
 //	<sessionDir>/agentctl.log   — agentctl's own stdout+stderr
 //
 // agentctl honors AGENTCTL_PORT from its environment (default 39429). We pick
-// a per-session port from a wide ephemeral range; collisions on the remote are
-// vanishingly unlikely and would surface as a clear bind failure that the
-// caller can retry.
+// a per-session port from a wide ephemeral range and retry bind collisions on
+// the remote before failing the launch.
 func startRemoteAgentctl(
 	ctx context.Context,
 	client *ssh.Client,
@@ -466,11 +465,51 @@ func startRemoteAgentctl(
 	env map[string]string,
 	log *logger.Logger,
 ) (port int, pid int, err error) {
-	port = pickRemoteAgentctlPort()
 	envScript, err := buildSSHEnvInitScript(env)
 	if err != nil {
 		return 0, 0, fmt.Errorf("ssh: launch agentctl: %w", err)
 	}
+	return retryRemoteAgentctlPort(pickRemoteAgentctlPort, func(port int) (int, error) {
+		return startRemoteAgentctlOnPort(
+			ctx, client, shell, agentctlBin, workspacePath, sessionDir, envScript, port, log,
+		)
+	})
+}
+
+var errSSHAgentctlPortInUse = errors.New("ssh: remote agentctl port is already in use")
+
+const sshAgentctlPortAttempts = 5
+
+func retryRemoteAgentctlPort(
+	pickPort func() int,
+	start func(port int) (pid int, err error),
+) (port int, pid int, err error) {
+	var lastErr error
+	for range sshAgentctlPortAttempts {
+		port = pickPort()
+		pid, err = start(port)
+		if err == nil {
+			return port, pid, nil
+		}
+		lastErr = err
+		if !errors.Is(err, errSSHAgentctlPortInUse) {
+			return 0, 0, err
+		}
+	}
+	return 0, 0, fmt.Errorf(
+		"ssh: agentctl exhausted %d remote port attempts: %w",
+		sshAgentctlPortAttempts,
+		lastErr,
+	)
+}
+
+func startRemoteAgentctlOnPort(
+	ctx context.Context,
+	client *ssh.Client,
+	shell, agentctlBin, workspacePath, sessionDir, envScript string,
+	port int,
+	log *logger.Logger,
+) (pid int, err error) {
 
 	// Wrap the agentctl exec in a login shell so the spawned process
 	// inherits the user's $PATH (nvm/asdf/brew etc.). Without this, even
@@ -502,11 +541,11 @@ echo "$AGENTCTL_PID"
 	)
 	out, stderr, err := runSSHCommandStdin(ctx, client, WrapLoginShell(shell, innerScript), strings.NewReader(envScript))
 	if err != nil {
-		return 0, 0, fmt.Errorf("ssh: launch agentctl: %w (stderr: %s)", err, strings.TrimSpace(stderr))
+		return 0, fmt.Errorf("ssh: launch agentctl: %w (stderr: %s)", err, strings.TrimSpace(stderr))
 	}
 	pid, err = strconv.Atoi(strings.TrimSpace(out))
 	if err != nil {
-		return 0, 0, fmt.Errorf("ssh: agentctl wrapper returned non-numeric pid %q", out)
+		return 0, fmt.Errorf("ssh: agentctl wrapper returned non-numeric pid %q", out)
 	}
 
 	// Poll the on-disk log for the "bound successfully" line; until then the
@@ -520,17 +559,17 @@ echo "$AGENTCTL_PID"
 				zap.Int("port", port),
 				zap.Int("pid", pid),
 				zap.String("session_dir", sessionDir))
-			return port, pid, nil
+			return pid, nil
 		}
 		if strings.Contains(logOut, "HTTP server failed to bind") {
-			return 0, 0, fmt.Errorf(
-				"ssh: agentctl failed to bind port %d on remote; log:\n%s", port,
+			return 0, fmt.Errorf(
+				"%w (port %d); log:\n%s", errSSHAgentctlPortInUse, port,
 				lastLines(logOut, sshAgentctlLogTailLines))
 		}
 		// Also catch "exited without binding" via pid check — if the wrapper
 		// exited before logging, kill -0 fails and we fail fast.
 		if !isRemoteAgentctlAlive(ctx, client, pid) {
-			return 0, 0, fmt.Errorf(
+			return 0, fmt.Errorf(
 				"ssh: agentctl exited before becoming ready; log tail:\n%s",
 				lastLines(logOut, sshAgentctlLogTailLines))
 		}
@@ -538,11 +577,34 @@ echo "$AGENTCTL_PID"
 	}
 	tail, _, _ := runSSHCommand(ctx, client,
 		"tail -n 50 "+shellQuote(sessionDir+"/agentctl.log")+" 2>/dev/null")
-	return 0, 0, fmt.Errorf("ssh: agentctl did not become ready within %v; log tail:\n%s",
+	return 0, fmt.Errorf("ssh: agentctl did not become ready within %v; log tail:\n%s",
 		sshAgentctlReadyTimeout, tail)
 }
 
 const sshAgentctlLogTailLines = 25
+
+func buildSSHCreateInstanceRequest(req *ExecutorCreateRequest, workspacePath string) agentctl.CreateInstanceRequest {
+	return agentctl.CreateInstanceRequest{
+		ID:            req.InstanceID,
+		WorkspacePath: workspacePath,
+		SessionID:     req.SessionID,
+		TaskID:        req.TaskID,
+		Protocol:      req.Protocol,
+		AgentType:     sshAgentTypeFromReq(req),
+		AutoApprovePermissions: autoApprovePermissionsOverride(
+			req.AutoApprovePermissions,
+			req.AutoApprovePermissionsOverride,
+		),
+		McpServers:          req.McpServers,
+		McpMode:             req.McpMode,
+		McpProviders:        req.McpProviders,
+		RequiresProcessKill: requiresProcessKillFromReq(req),
+		StripEnv:            stripEnvFromReq(req),
+		BaseBranches:        getMetadataStringMap(req.Metadata, MetadataKeyBaseBranches),
+		RemoteContributions: req.RemoteContributions,
+		Env:                 sshRemoteAgentEnv(req),
+	}
+}
 
 // createRemoteAgentInstance creates a per-session agent instance on the
 // remote agentctl control server by POSTing to /api/v1/instances over a
@@ -559,24 +621,7 @@ func createRemoteAgentInstance(
 	authToken string,
 	log *logger.Logger,
 ) (int, error) {
-	body, err := json.Marshal(agentctl.CreateInstanceRequest{
-		ID:            req.InstanceID,
-		WorkspacePath: workspacePath,
-		SessionID:     req.SessionID,
-		TaskID:        req.TaskID,
-		Protocol:      req.Protocol,
-		AgentType:     sshAgentTypeFromReq(req),
-		AutoApprovePermissions: autoApprovePermissionsOverride(
-			req.AutoApprovePermissions,
-			req.AutoApprovePermissionsOverride,
-		),
-		McpServers:          req.McpServers,
-		McpMode:             req.McpMode,
-		RequiresProcessKill: requiresProcessKillFromReq(req),
-		StripEnv:            stripEnvFromReq(req),
-		BaseBranches:        getMetadataStringMap(req.Metadata, MetadataKeyBaseBranches),
-		Env:                 sshRemoteAgentEnv(req),
-	})
+	body, err := json.Marshal(buildSSHCreateInstanceRequest(req, workspacePath))
 	if err != nil {
 		return 0, fmt.Errorf("ssh: marshal create-instance: %w", err)
 	}
@@ -692,6 +737,9 @@ const (
 	envKeyGoogleAPIKey         = "GOOGLE_API_KEY"
 	envKeyGitHubToken          = "GITHUB_TOKEN"
 	envKeyGHToken              = "GH_TOKEN"
+	envKeyGitLabToken          = "GITLAB_TOKEN"
+	envKeyGitLabHost           = "GITLAB_HOST"
+	envKeyKandevGitLabHost     = "KANDEV_GITLAB_HOST"
 )
 
 var sshRemoteAgentCredentialEnvKeys = []string{
@@ -702,6 +750,9 @@ var sshRemoteAgentCredentialEnvKeys = []string{
 	envKeyGoogleAPIKey,
 	envKeyGitHubToken,
 	envKeyGHToken,
+	envKeyGitLabToken,
+	envKeyGitLabHost,
+	envKeyKandevGitLabHost,
 }
 
 // sshRemoteAgentEnv builds the env map sent to the remote agent instance. Each
@@ -725,6 +776,25 @@ func sshRemoteAgentEnv(req *ExecutorCreateRequest) map[string]string {
 	}
 	for key, value := range managedGitHubBrokerEnv(req.Env) {
 		env[key] = value
+	}
+	// GitLab workspace credentials use the indexed Git config helper rather
+	// than a GitHub broker lease. Preserve that credential-free routing shape
+	// for the remote agentctl process as well.
+	copyIndexedGitConfig(req.Env, env)
+
+	for _, key := range req.ApprovedSecretEnvKeys {
+		if !posixSSHEnvIdentifier.MatchString(key) {
+			continue
+		}
+		// Repository approval grants forwarding of an otherwise non-managed
+		// key; it must never replace a credential or broker value selected by
+		// the executor composition boundary.
+		if _, exists := env[key]; exists {
+			continue
+		}
+		if value := req.Env[key]; value != "" {
+			env[key] = value
+		}
 	}
 	if len(env) == 0 {
 		return nil
@@ -751,17 +821,30 @@ func pickRemoteAgentctlPort() int {
 	return 40000 + mrand.IntN(20000)
 }
 
-// stopRemoteAgentctl best-effort kills a remote agentctl by PID and removes
-// the session runtime dir.
+const sshAgentctlStopPollAttempts = 50
+
+// stopRemoteAgentctl stops a remote agentctl by PID, waits for graceful exit,
+// escalates if necessary, and only then removes the session runtime dir.
 func stopRemoteAgentctl(ctx context.Context, client *ssh.Client, sessionDir string, pid int) error {
-	if pid > 0 {
-		if _, _, err := runSSHCommand(ctx, client, fmt.Sprintf("kill %d 2>/dev/null || true", pid)); err != nil {
-			return err
-		}
+	_, _, err := runSSHCommand(ctx, client, remoteAgentctlStopCommand(sessionDir, pid))
+	return err
+}
+
+func remoteAgentctlStopCommand(sessionDir string, pid int) string {
+	removeSessionDir := "rm -rf " + shellQuote(sessionDir)
+	if pid <= 0 {
+		return removeSessionDir
 	}
-	// Leave the task dir intact (mirrors spec); only wipe session runtime.
-	_, _, _ = runSSHCommand(ctx, client, "rm -rf "+shellQuote(sessionDir))
-	return nil
+	return fmt.Sprintf(`kill %[1]d 2>/dev/null || true
+attempt=0
+while kill -0 %[1]d 2>/dev/null && [ "$attempt" -lt %[2]d ]; do
+  sleep 0.1
+  attempt=$((attempt + 1))
+done
+if kill -0 %[1]d 2>/dev/null; then
+  kill -9 %[1]d 2>/dev/null || true
+fi
+%[3]s`, pid, sshAgentctlStopPollAttempts, removeSessionDir)
 }
 
 // isRemoteAgentctlAlive returns true when a kill -0 on the pid succeeds.

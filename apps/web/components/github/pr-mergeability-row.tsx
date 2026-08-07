@@ -12,6 +12,7 @@ import {
 import type { TaskPR } from "@/lib/types/github";
 import { isPRAwaitingReview, isPRWaitingOnBranchProtection } from "./pr-task-icon";
 import { PRMergeabilityNotice, buildConflictResolutionMessage } from "./pr-mergeability-notice";
+import { useTranslation } from "react-i18next";
 
 /**
  * Wires the "Resolve conflicts" CTA to chat context, mirroring the PR detail
@@ -22,6 +23,7 @@ function useResolveConflicts(pr: TaskPR): {
   onResolveConflicts: (() => void) | null;
   conflictQueued: boolean;
 } {
+  const { t } = useTranslation();
   const sessionId = useAppStore((s) => s.tasks.activeSessionId);
   const addComment = useCommentsStore((s) => s.addComment);
   const { toast } = useToast();
@@ -59,7 +61,7 @@ function useResolveConflicts(pr: TaskPR): {
       content,
     };
     addComment(comment);
-    toast({ description: "Added to chat context" });
+    toast({ description: t("github:addedToChatContext") });
   }, [sessionId, conflictQueued, prNumber, headBranch, baseBranch, addComment, toast]);
 
   return { onResolveConflicts: sessionId ? handler : null, conflictQueued };
@@ -74,6 +76,7 @@ function useResolveConflicts(pr: TaskPR): {
  * mergeable" while GitHub recomputes).
  */
 export function PRMergeabilityRow({ pr }: { pr: TaskPR }) {
+  const { t } = useTranslation();
   const { onResolveConflicts, conflictQueued } = useResolveConflicts(pr);
   // "blocked" gets a richer note than the bare chip: it explains *why* the
   // merge is gated. But when the block is only an outstanding requested review,
@@ -84,9 +87,9 @@ export function PRMergeabilityRow({ pr }: { pr: TaskPR }) {
   if (pr.state === "open" && pr.mergeable_state === "blocked") {
     if (isPRAwaitingReview(pr)) return null;
     if (isPRWaitingOnBranchProtection(pr)) {
-      return <BranchProtectionWaitNote reason={blockedReason(pr)} />;
+      return <BranchProtectionWaitNote reason={blockedReason(pr, t)} />;
     }
-    return <BlockedNote reason={blockedReason(pr)} />;
+    return <BlockedNote reason={blockedReason(pr, t)} />;
   }
   return (
     <PRMergeabilityNotice
@@ -108,21 +111,25 @@ export function PRMergeabilityRow({ pr }: { pr: TaskPR }) {
  * fields we do have (required reviews, CI state) and fall back to a generic
  * note for the rest (code owners, required conversations, etc.).
  */
-export function blockedReason(pr: TaskPR): string {
+export function blockedReason(
+  pr: TaskPR,
+  t: (key: string, values?: Record<string, unknown>) => string,
+): string {
   const required = pr.required_reviews ?? null;
   if (required != null && pr.review_count < required) {
     const missing = required - pr.review_count;
-    return `Needs ${missing} more approval${missing === 1 ? "" : "s"} before it can merge.`;
+    return t("github:blockedNeedsApprovals", { count: missing });
   }
   // Only "failure"/"pending" indicate an actual check problem; "" means no CI
   // is configured (or it hasn't loaded), which isn't a status-check block.
   if (pr.checks_state === "failure" || pr.checks_state === "pending") {
-    return "A required status check hasn't passed yet.";
+    return t("github:blockedStatusCheck");
   }
-  return "Required reviews, code owners, or repository rules still need to clear.";
+  return t("github:blockedGeneric");
 }
 
 function BlockedNote({ reason }: { reason: string }) {
+  const { t } = useTranslation();
   return (
     <div data-testid="pr-blocked-note" className="flex items-start gap-1.5 px-1 py-1 text-xs">
       <IconShield
@@ -131,7 +138,7 @@ function BlockedNote({ reason }: { reason: string }) {
       />
       <div className="min-w-0">
         <div className="font-medium text-amber-600 dark:text-amber-400">
-          Blocked by branch protection
+          {t("github:blockedByBranchProtection")}
         </div>
         <p className="text-[11px] leading-snug text-muted-foreground">{reason}</p>
       </div>
@@ -140,6 +147,7 @@ function BlockedNote({ reason }: { reason: string }) {
 }
 
 function BranchProtectionWaitNote({ reason }: { reason: string }) {
+  const { t } = useTranslation();
   return (
     <div
       data-testid="pr-branch-protection-wait-note"
@@ -147,7 +155,9 @@ function BranchProtectionWaitNote({ reason }: { reason: string }) {
     >
       <IconClock className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" />
       <div className="min-w-0">
-        <div className="font-medium text-muted-foreground">Waiting on branch protection</div>
+        <div className="font-medium text-muted-foreground">
+          {t("github:waitingOnBranchProtection")}
+        </div>
         <p className="text-[11px] leading-snug text-muted-foreground">{reason}</p>
       </div>
     </div>

@@ -24,9 +24,26 @@ import {
   type SentryConfig,
   type TestSentryConnectionResult,
 } from "@/lib/types/sentry";
+import { useTranslation } from "react-i18next";
 
 const FIELD = "space-y-1.5";
 const HELP = "text-xs text-muted-foreground";
+
+// None of the four below is copy, so none reaches the catalog — the
+// pseudo-locale would transliterate them into values the user cannot act on.
+// SECRET_MASK is a glyph run standing in for a stored token; AUTH_TOKEN_HINT is
+// the literal prefix every Sentry auth token carries; SELF_HOSTED_EXAMPLE_URL is
+// a hostname; and each TOKEN_SCOPES `scope` is an API scope identifier the user
+// must tick verbatim in Sentry. Only the scope descriptions are translatable, so
+// they travel as `descriptionKey` and resolve at render.
+const SECRET_MASK = "••••••••";
+const AUTH_TOKEN_HINT = "sntrys_...";
+const SELF_HOSTED_EXAMPLE_URL = "https://sentry.your-company.com";
+const TOKEN_SCOPES: { scope: string; descriptionKey: string }[] = [
+  { scope: "org:read", descriptionKey: "sentry:scopeOrgRead" },
+  { scope: "project:read", descriptionKey: "sentry:scopeProjectRead" },
+  { scope: "event:read", descriptionKey: "sentry:scopeEventRead" },
+];
 
 type FormState = { name: string; url: string; secret: string };
 
@@ -43,27 +60,29 @@ type FieldProps = {
 };
 
 function NameField({ form, baseline, idPrefix, loading, update }: FieldProps) {
+  const { t } = useTranslation();
   return (
     <div className={FIELD}>
-      <Label htmlFor={`${idPrefix}-name`}>Name</Label>
+      <Label htmlFor={`${idPrefix}-name`}>{t("sentry:name")}</Label>
       <Input
         id={`${idPrefix}-name`}
         data-testid={`${idPrefix}-name-input`}
-        placeholder="Production, Self-hosted, …"
+        placeholder={t("sentry:namePlaceholder")}
         value={form.name}
         data-settings-dirty={form.name !== baseline.name}
         onChange={(e) => update("name", e.target.value)}
         disabled={loading}
       />
-      <p className={HELP}>A label for this instance. Must be unique within the workspace.</p>
+      <p className={HELP}>{t("sentry:nameHelp")}</p>
     </div>
   );
 }
 
 function UrlField({ form, baseline, idPrefix, loading, update }: FieldProps) {
+  const { t } = useTranslation();
   return (
     <div className={FIELD}>
-      <Label htmlFor={`${idPrefix}-url`}>Instance URL</Label>
+      <Label htmlFor={`${idPrefix}-url`}>{t("sentry:instanceUrl")}</Label>
       <Input
         id={`${idPrefix}-url`}
         data-testid={`${idPrefix}-url-input`}
@@ -74,9 +93,13 @@ function UrlField({ form, baseline, idPrefix, loading, update }: FieldProps) {
         onChange={(e) => update("url", e.target.value)}
         disabled={loading}
       />
+      {/* Both URLs are interpolated rather than written into the message: the
+          pseudo-locale must not transliterate a hostname the user has to type. */}
       <p className={HELP}>
-        Base URL of your Sentry instance. Leave as {SENTRY_DEFAULT_URL} for Sentry SaaS, or point it
-        at a self-hosted install (e.g. https://sentry.your-company.com).
+        {t("sentry:instanceUrlHelp", {
+          defaultUrl: SENTRY_DEFAULT_URL,
+          exampleUrl: SELF_HOSTED_EXAMPLE_URL,
+        })}
       </p>
     </div>
   );
@@ -90,14 +113,15 @@ function SecretField({
   update,
   hasSavedSecret,
 }: FieldProps & { hasSavedSecret: boolean }) {
+  const { t } = useTranslation();
   return (
     <div className={FIELD}>
       <div className="flex items-center gap-1.5">
         <Label htmlFor={`${idPrefix}-secret`}>
-          Auth token
+          {t("sentry:authToken")}
           {hasSavedSecret && (
             <span className="text-xs text-muted-foreground ml-2">
-              (saved — leave blank to keep the current value)
+              {t("sentry:savedLeaveBlank")}
             </span>
           )}
         </Label>
@@ -105,26 +129,18 @@ function SecretField({
           <TooltipTrigger asChild>
             <IconInfoCircle
               className="h-3.5 w-3.5 text-muted-foreground/50 hover:text-muted-foreground cursor-help shrink-0"
-              aria-label="Required token scopes"
+              aria-label={t("sentry:requiredTokenScopes")}
             />
           </TooltipTrigger>
           <TooltipContent className="max-w-xs" align="start">
-            <p className="text-xs font-medium mb-1">Grant Read access to these scopes:</p>
+            <p className="text-xs font-medium mb-1">{t("sentry:grantReadAccess")}</p>
             <ul className="text-xs space-y-0.5">
-              <li>
-                <code className="text-[10px] bg-white/15 px-1 rounded">org:read</code>{" "}
-                <span className="opacity-70">Organization — resolve the org and list issues</span>
-              </li>
-              <li>
-                <code className="text-[10px] bg-white/15 px-1 rounded">project:read</code>{" "}
-                <span className="opacity-70">Project — list projects and scope searches</span>
-              </li>
-              <li>
-                <code className="text-[10px] bg-white/15 px-1 rounded">event:read</code>{" "}
-                <span className="opacity-70">
-                  Issue &amp; Event — browse issues and run watchers
-                </span>
-              </li>
+              {TOKEN_SCOPES.map(({ scope, descriptionKey }) => (
+                <li key={scope}>
+                  <code className="text-[10px] bg-white/15 px-1 rounded">{scope}</code>{" "}
+                  <span className="opacity-70">{t(descriptionKey)}</span>
+                </li>
+              ))}
             </ul>
           </TooltipContent>
         </Tooltip>
@@ -133,7 +149,7 @@ function SecretField({
         id={`${idPrefix}-secret`}
         data-testid={`${idPrefix}-secret-input`}
         type="password"
-        placeholder={hasSavedSecret ? "••••••••" : "sntrys_..."}
+        placeholder={hasSavedSecret ? SECRET_MASK : AUTH_TOKEN_HINT}
         value={form.secret}
         data-settings-dirty={form.secret !== baseline.secret}
         onChange={(e) => update("secret", e.target.value)}
@@ -144,13 +160,18 @@ function SecretField({
 }
 
 function TestResultAlert({ result }: { result: TestSentryConnectionResult | null }) {
+  const { t } = useTranslation();
   if (!result) return null;
   return (
     <Alert variant={result.ok ? "default" : "destructive"}>
+      {/* The identity and the error text are both server data, interpolated so
+          neither is ever routed through the catalog. */}
       <AlertDescription>
         {result.ok
-          ? `Connected as ${result.displayName || result.email || result.userId}`
-          : `Failed: ${result.error}`}
+          ? t("sentry:connectedAs", {
+              name: result.displayName || result.email || result.userId,
+            })
+          : t("sentry:testFailed", { error: result.error })}
       </AlertDescription>
     </Alert>
   );
@@ -163,6 +184,7 @@ type UseInstanceFormArgs = {
 };
 
 function useInstanceForm({ workspaceId, instance, form }: UseInstanceFormArgs) {
+  const { t } = useTranslation();
   const { toast } = useToast();
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
@@ -207,19 +229,21 @@ function useInstanceForm({ workspaceId, instance, form }: UseInstanceFormArgs) {
             url: form.url,
             secret: form.secret,
           });
-      toast({ description: "Sentry instance saved", variant: "success" });
+      toast({ description: t("sentry:instanceSaved"), variant: "success" });
       return saved;
     } catch (err) {
+      // The name is the user's own; the fallback carries the raw server error.
+      // Both are interpolated so neither is translated.
       const message =
         sentryErrorCode(err) === SENTRY_ERROR_CODES.nameTaken
-          ? `An instance named "${form.name.trim()}" already exists in this workspace.`
-          : `Save failed: ${String(err)}`;
+          ? t("sentry:instanceNameTaken", { name: form.name.trim() })
+          : t("sentry:saveFailed", { error: String(err) });
       toast({ description: message, variant: "error" });
       throw err;
     } finally {
       setSaving(false);
     }
-  }, [workspaceId, instance, form, toast]);
+  }, [workspaceId, instance, form, toast, t]);
 
   return { saving, testing, testResult, candidateTest, handleTest, handleSave };
 }
@@ -253,6 +277,7 @@ function useCoordinatedInstanceSave({
   onSaved,
   canSave,
 }: CoordinatedSaveOptions) {
+  const { t } = useTranslation();
   const [baseline, setBaseline] = useState<FormState>(() => instanceToForm(instance));
   const revision = JSON.stringify(form);
   const latestRevision = useRef(revision);
@@ -264,7 +289,7 @@ function useCoordinatedInstanceSave({
     revision,
     isDirty,
     canSave,
-    invalidReason: canSave ? undefined : "Enter an instance name and auth token before saving.",
+    invalidReason: canSave ? undefined : t("sentry:enterNameAndTokenBeforeSaving"),
     save: async (submittedRevision) => {
       const submitted = form;
       const saved = await handleSave();
@@ -294,6 +319,7 @@ function FormActions({
   onTest,
   onCancel,
 }: FormActionsProps) {
+  const { t } = useTranslation();
   return (
     <div className="flex flex-wrap items-center gap-2">
       <Button
@@ -302,10 +328,10 @@ function FormActions({
         onClick={onTest}
         disabled={disableTest}
         className="cursor-pointer"
-        title={requiresTestSecret ? "Paste an auth token to test the connection" : undefined}
+        title={requiresTestSecret ? t("sentry:pasteAnAuthTokenToTest") : undefined}
         data-testid={`${idPrefix}-test-button`}
       >
-        {testing ? "Testing..." : "Test connection"}
+        {testing ? t("sentry:testing") : t("sentry:testConnection")}
       </Button>
       <Button
         type="button"
@@ -314,7 +340,7 @@ function FormActions({
         className="ml-auto cursor-pointer"
         data-testid={`${idPrefix}-cancel-button`}
       >
-        Cancel
+        {t("common:cancel")}
       </Button>
     </div>
   );
@@ -328,6 +354,7 @@ export function SentryInstanceForm({
   onCancel,
   onDirtyChange,
 }: SentryInstanceFormProps) {
+  const { t } = useTranslation();
   const [form, setForm] = useState<FormState>(() => instanceToForm(instance));
   const update = useCallback(
     <K extends keyof FormState>(key: K, value: FormState[K]) =>
@@ -365,7 +392,7 @@ export function SentryInstanceForm({
     >
       {instance === null && (
         <h4 data-testid={`${idPrefix}-form-heading`} className="text-sm font-semibold">
-          New Instance
+          {t("sentry:newInstance")}
         </h4>
       )}
       <NameField

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { IconSelector } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import {
@@ -27,6 +28,7 @@ type ModeComboboxProps = {
  * trigger text (which happens with Radix Select).
  */
 export function ModeCombobox({ value, onChange, modes, currentModeId }: ModeComboboxProps) {
+  const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const selected = value || currentModeId || modes[0]?.id || "";
   const activeMode = modes.find((m) => m.id === selected);
@@ -43,7 +45,7 @@ export function ModeCombobox({ value, onChange, modes, currentModeId }: ModeComb
           <span className="flex items-center gap-2 truncate">
             {activeMode?.name ?? selected}
             {activeMode?.id === currentModeId && (
-              <span className="text-muted-foreground">(default)</span>
+              <span className="text-muted-foreground">{t("agents:defaultSuffix")}</span>
             )}
           </span>
           <IconSelector className="ml-2 h-4 w-4 shrink-0 opacity-50" />
@@ -55,12 +57,12 @@ export function ModeCombobox({ value, onChange, modes, currentModeId }: ModeComb
         onWheel={(e) => e.stopPropagation()}
       >
         <Command>
-          <CommandInput placeholder="Search modes..." />
+          <CommandInput placeholder={t("agents:searchModes")} />
           <CommandList
             className="max-h-[min(60vh,24rem)] overflow-y-auto overscroll-contain"
             onWheel={(e) => e.stopPropagation()}
           >
-            <CommandEmpty>No mode found.</CommandEmpty>
+            <CommandEmpty>{t("agents:noModeFound")}</CommandEmpty>
             <CommandGroup>
               {modes.map((m) => (
                 <CommandItem
@@ -77,7 +79,9 @@ export function ModeCombobox({ value, onChange, modes, currentModeId }: ModeComb
                     <div className="flex items-center gap-2 truncate">
                       <span className="truncate">{m.name}</span>
                       {m.id === currentModeId && (
-                        <span className="text-muted-foreground text-xs">(default)</span>
+                        <span className="text-muted-foreground text-xs">
+                          {t("agents:defaultSuffix")}
+                        </span>
                       )}
                     </div>
                     {m.description && m.description !== m.name && (

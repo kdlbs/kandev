@@ -272,6 +272,33 @@ describe("setTaskPR", () => {
   });
 });
 
+describe("removeTaskPR", () => {
+  it("removes only the selected association and preserves sibling tasks", () => {
+    const store = makeStore();
+    const first = makePR({ id: "remove", pr_number: 1 });
+    const sibling = makePR({ id: "keep", pr_number: 2 });
+    const otherTask = makePR({ id: "other", task_id: "task-2", pr_number: 3 });
+    store.getState().setTaskPRs({
+      "task-1": [first, sibling],
+      "task-2": [otherTask],
+    });
+
+    store.getState().removeTaskPR("task-1", "remove");
+
+    expect(store.getState().taskPRs.byTaskId["task-1"]?.map((pr) => pr.id)).toEqual(["keep"]);
+    expect(store.getState().taskPRs.byTaskId["task-2"]?.map((pr) => pr.id)).toEqual(["other"]);
+  });
+
+  it("removes an empty task bucket after the last association is detached", () => {
+    const store = makeStore();
+    store.getState().setTaskPRs({ "task-1": [makePR({ id: "remove" })] });
+
+    store.getState().removeTaskPR("task-1", "remove");
+
+    expect(store.getState().taskPRs.byTaskId["task-1"]).toBeUndefined();
+  });
+});
+
 describe("setTaskIssues", () => {
   const link: TaskIssueLink = {
     task_id: "task-1",

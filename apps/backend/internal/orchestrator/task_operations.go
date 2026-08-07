@@ -21,6 +21,8 @@ import (
 	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
 	"github.com/kandev/kandev/internal/common/constants"
 	"github.com/kandev/kandev/internal/editors/capabilities"
+	"github.com/kandev/kandev/internal/events"
+	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/orchestrator/dto"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
@@ -212,7 +214,6 @@ func (s *Service) PrepareTaskSession(ctx context.Context, taskID string, agentPr
 			zap.Error(err))
 		return "", err
 	}
-
 	// Resolve agent/executor profile from task metadata if not explicitly provided
 	if agentProfileID == "" {
 		if v, ok := task.Metadata[models.MetaKeyAgentProfileID].(string); ok && v != "" {
@@ -270,7 +271,7 @@ func (s *Service) PrepareTaskSession(ctx context.Context, taskID string, agentPr
 	// EnsureSessionForAgent so runs + advanced-mode reuse one row.
 	// prepareSessionForStart also propagates any inherited workspace
 	// environment (inherit_parent / shared_group) onto the new session.
-	sessionID, err := s.prepareSessionForStart(ctx, task, agentProfileID, executorID, executorProfileID, workflowStepID)
+	sessionID, sessionCreated, err := s.prepareSessionForStart(ctx, task, agentProfileID, executorID, executorProfileID, workflowStepID)
 	if err != nil {
 		s.logger.Error("failed to prepare session",
 			zap.String("task_id", taskID),
@@ -282,7 +283,9 @@ func (s *Service) PrepareTaskSession(ctx context.Context, taskID string, agentPr
 	// transitions through updateTaskSessionState which broadcasts; the prepare
 	// path writes the row directly, so without this the per-task session list
 	// stays empty until a manual reload.
-	s.publishSessionCreatedEvent(ctx, taskID, sessionID, workflowStepID)
+	if sessionCreated {
+		s.publishSessionCreatedEvent(ctx, taskID, sessionID, workflowStepID)
+	}
 
 	if launchWorkspace {
 		// Launch workspace infrastructure (agentctl) in the background so the WS response
@@ -471,15 +474,24 @@ func (s *Service) StartCreatedSession(
 	if err != nil {
 		return nil, fmt.Errorf("failed to reload task after on_turn_start: %w", err)
 	}
+	configMode := false
+	if cm, ok := session.Metadata["config_mode"].(bool); ok && cm {
+		configMode = true
+	}
+	titleOwner := false
+	if !configMode {
+		titleOwner, err = s.ClaimTaskTitleSession(ctx, taskID, sessionID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to claim first-turn task title: %w", err)
+		}
+	}
 	effectivePrompt, planModeActive, promptReferenceContext := s.applyWorkflowAndPlanMode(
 		ctx, effectivePrompt, taskID, sessionID, dbTask.WorkflowStepID,
 		planMode, task.IsEphemeral, session.IsPassthrough,
 	)
 
 	// Inject config context for config-mode sessions (dedicated settings chat)
-	configMode := false
-	if cm, ok := session.Metadata["config_mode"].(bool); ok && cm {
-		configMode = true
+	if configMode {
 		effectivePrompt = sysprompt.InjectConfigContext(sessionID, effectivePrompt)
 	}
 
@@ -490,19 +502,11 @@ func (s *Service) StartCreatedSession(
 	// Passthrough profiles skip the wrap: the prompt is typed straight into the
 	// agent CLI's TTY and the user sees it verbatim — they don't want a wall of
 	// MCP-tool boilerplate prepended to "hello".
-	if (effectivePrompt != "" || len(attachments) > 0) && !session.IsPassthrough {
-		referenceContext := EntityReferenceContext(references)
-		if isOfficeTask {
-			effectivePrompt = sysprompt.InjectOfficeContext(
-				taskID, sessionID, effectivePrompt,
-				referenceContext, promptReferenceContext,
-			)
-		} else {
-			effectivePrompt = sysprompt.InjectKandevContextWithOptions(taskID, sessionID, effectivePrompt, sysprompt.KandevContextOptions{
-				RequiresCompletionSignal:       s.WorkflowStepRequiresCompletionSignal(ctx, dbTask.WorkflowStepID),
-				IncludeCoordinatorTaskControls: !configMode,
-			}, referenceContext, promptReferenceContext)
-		}
+	if effectivePrompt != "" || len(attachments) > 0 {
+		effectivePrompt = s.wrapCreatedSessionPrompt(
+			ctx, effectivePrompt, taskID, sessionID, session, dbTask,
+			isOfficeTask, configMode, titleOwner, references, promptReferenceContext,
+		)
 	}
 
 	executorID := session.ExecutorID
@@ -533,6 +537,38 @@ func (s *Service) StartCreatedSession(
 	go s.ensureSessionPRWatch(context.Background(), taskID, execution.SessionID, execution.WorktreeBranch)
 
 	return execution, nil
+}
+
+// wrapCreatedSessionPrompt adds the first-turn context for a prepared session.
+// Passthrough sessions intentionally receive only the short pending-title
+// instruction; structured sessions receive the normal task or Office block.
+func (s *Service) wrapCreatedSessionPrompt(
+	ctx context.Context,
+	prompt, taskID, sessionID string,
+	session *models.TaskSession,
+	dbTask *models.Task,
+	isOfficeTask, configMode, titleOwner bool,
+	references []v1.EntityReference,
+	promptReferenceContext string,
+) string {
+	referenceContext := EntityReferenceContext(references)
+	switch {
+	case session.IsPassthrough:
+		if !configMode && titleOwner {
+			return sysprompt.PendingTaskTitlePassthroughInstruction() + "\n\n" + prompt
+		}
+		return prompt
+	case isOfficeTask:
+		return sysprompt.InjectOfficeContext(
+			taskID, sessionID, prompt, referenceContext, promptReferenceContext,
+		)
+	default:
+		return sysprompt.InjectKandevContextWithOptions(taskID, sessionID, prompt, sysprompt.KandevContextOptions{
+			RequiresCompletionSignal:       s.WorkflowStepRequiresCompletionSignal(ctx, dbTask.WorkflowStepID),
+			IncludeCoordinatorTaskControls: !configMode,
+			IncludeTaskTitleTool:           !configMode && titleOwner,
+		}, referenceContext, promptReferenceContext)
+	}
 }
 
 // handleSessionLaunchFailure covers launch and resume failures that have not
@@ -763,6 +799,19 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 			return nil, err
 		}
 	}
+	workflowSessionConfigStepID := workflowStepID
+	// Manual starts often omit workflow_step_id because the task is already
+	// bound to its current step. Resolve that canonical step before profile
+	// selection and launch-layer session configuration so a start-step rule is
+	// applied before the first prompt as well.
+	if workflowSessionConfigStepID == "" {
+		if dbTask, taskErr := s.repo.GetTask(ctx, taskID); taskErr != nil {
+			s.logger.Warn("failed to fetch task for workflow step fallback",
+				zap.String("task_id", taskID), zap.Error(taskErr))
+		} else if dbTask != nil {
+			workflowSessionConfigStepID = dbTask.WorkflowStepID
+		}
+	}
 
 	// Office tasks do NOT transition through SCHEDULING / IN_PROGRESS on
 	// every run. Their lifecycle status (todo / in_review / done /
@@ -832,9 +881,21 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 	// Prepare session first so we have the sessionID for config context injection.
 	// For office tasks, replace the per-launch PrepareSession with the per-(task,
 	// agent) EnsureSessionForAgent so runs reuse one row across turns.
-	sessionID, err := s.prepareSessionForStart(ctx, task, agentProfileID, executorID, executorProfileID, workflowStepID)
+	sessionID, sessionCreated, err := s.prepareSessionForStart(ctx, task, agentProfileID, executorID, executorProfileID, workflowStepID)
 	if err != nil {
 		return nil, err
+	}
+	// Seed a matching conditional session configuration before lifecycle
+	// startup. The ACP manager applies this durable runtime layer after the
+	// selected profile and before the first prompt, preserving the original
+	// session tab.
+	s.applyWorkflowSessionConfigBeforeLaunchForStep(ctx, taskID, sessionID, workflowSessionConfigStepID)
+	// Surface the newly created session before LaunchPreparedSession performs
+	// potentially slow environment setup (for example, a Docker health check).
+	// The frontend adopts this CREATED session and can render
+	// executor.prepare.progress events while the launch request is still pending.
+	if sessionCreated {
+		s.publishSessionCreatedEvent(ctx, taskID, sessionID, workflowStepID)
 	}
 
 	// When the workflow step overrode the caller's profile, tag the session
@@ -856,6 +917,10 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 	// strictly less harmful than leaking hidden <kandev-system> content into
 	// a real passthrough session's PTY.
 	isPassthrough := s.resolveIsPassthroughForLaunch(ctx, sessionID)
+	launchSession, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to reload launch session: %w", err)
+	}
 
 	effectivePrompt, planModeActive, promptReferenceContext := s.applyWorkflowAndPlanMode(
 		ctx, effectivePrompt, task.ID, sessionID, workflowStepID,
@@ -864,9 +929,16 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 
 	// Inject config context for config-mode sessions (dedicated settings chat)
 	configMode := false
-	if cm, ok := task.Metadata["config_mode"].(bool); ok && cm {
+	if cm, ok := launchSession.Metadata["config_mode"].(bool); ok && cm {
 		configMode = true
 		effectivePrompt = sysprompt.InjectConfigContext(sessionID, effectivePrompt)
+	}
+	titleOwner := false
+	if !configMode && !isOfficeTask {
+		titleOwner, err = s.ClaimTaskTitleSession(ctx, task.ID, sessionID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to claim first-turn task title: %w", err)
+		}
 	}
 
 	// Wrap the first prompt with the Kandev MCP system block (task/session IDs +
@@ -887,14 +959,15 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 	// while the task is already bound to a signal-gated step in the DB.
 	if effectivePrompt != "" || len(attachments) > 0 {
 		effectivePrompt = s.applyLaunchPromptContext(ctx, launchPromptContext{
-			prompt:           effectivePrompt,
-			taskID:           task.ID,
-			sessionID:        sessionID,
-			isOfficeTask:     isOfficeTask,
-			isPassthrough:    skipKandevMCPWrap,
-			configMode:       configMode,
-			referenceContext: promptReferenceContext,
-			spawnOrigin:      opts.SpawnOrigin,
+			prompt:               effectivePrompt,
+			taskID:               task.ID,
+			sessionID:            sessionID,
+			isOfficeTask:         isOfficeTask,
+			isPassthrough:        skipKandevMCPWrap,
+			configMode:           configMode,
+			referenceContext:     promptReferenceContext,
+			includeTaskTitleTool: !configMode && titleOwner,
+			spawnOrigin:          opts.SpawnOrigin,
 		})
 	}
 
@@ -934,17 +1007,45 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 	return execution, nil
 }
 
+func (s *Service) applyWorkflowSessionConfigBeforeLaunchForStep(
+	ctx context.Context,
+	taskID string,
+	sessionID string,
+	workflowStepID string,
+) {
+	if s.workflowStepGetter == nil || workflowStepID == "" {
+		return
+	}
+	workflowStep, err := s.workflowStepGetter.GetStep(ctx, workflowStepID)
+	if err != nil {
+		s.logger.Warn("failed to load workflow step for session configuration",
+			zap.String("task_id", taskID), zap.String("step_id", workflowStepID), zap.Error(err))
+		return
+	}
+	if workflowStep == nil {
+		return
+	}
+	preparedSession, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		s.logger.Warn("failed to reload session for session configuration",
+			zap.String("task_id", taskID), zap.String("session_id", sessionID), zap.Error(err))
+		return
+	}
+	s.applyWorkflowSessionConfigBeforeLaunch(ctx, taskID, preparedSession, workflowStep)
+}
+
 // launchPromptContext carries what the first turn of a launch needs in order to
 // compose its system context.
 type launchPromptContext struct {
-	prompt           string
-	taskID           string
-	sessionID        string
-	isOfficeTask     bool
-	isPassthrough    bool
-	configMode       bool
-	referenceContext string
-	spawnOrigin      *SpawnOrigin
+	prompt               string
+	taskID               string
+	sessionID            string
+	isOfficeTask         bool
+	isPassthrough        bool
+	configMode           bool
+	includeTaskTitleTool bool
+	referenceContext     string
+	spawnOrigin          *SpawnOrigin
 }
 
 // applyLaunchPromptContext prepends the first-turn system context to a launch
@@ -955,7 +1056,11 @@ type launchPromptContext struct {
 // applySpawnOriginText for why they skip the MCP block entirely.
 func (s *Service) applyLaunchPromptContext(ctx context.Context, p launchPromptContext) string {
 	if p.isPassthrough {
-		return applySpawnOriginText(p.prompt, p.spawnOrigin)
+		prompt := applySpawnOriginText(p.prompt, p.spawnOrigin)
+		if p.includeTaskTitleTool {
+			return sysprompt.PendingTaskTitlePassthroughInstruction() + "\n\n" + prompt
+		}
+		return prompt
 	}
 	// Spawner attribution is built here, not by the MCP handler that filled
 	// SpawnOrigin: the injectors below strip every <kandev-system> block they do
@@ -970,6 +1075,7 @@ func (s *Service) applyLaunchPromptContext(ctx context.Context, p launchPromptCo
 	return sysprompt.InjectKandevContextWithOptions(p.taskID, p.sessionID, prompt, sysprompt.KandevContextOptions{
 		RequiresCompletionSignal:       s.StepRequiresCompletionSignal(ctx, p.taskID),
 		IncludeCoordinatorTaskControls: !p.configMode,
+		IncludeTaskTitleTool:           p.includeTaskTitleTool,
 	}, p.referenceContext, spawnContext)
 }
 
@@ -1086,13 +1192,13 @@ func validateOfficeLaunchEnv(taskID string, env map[string]string) error {
 func (s *Service) prepareSessionForStart(
 	ctx context.Context, task *v1.Task,
 	agentProfileID, executorID, executorProfileID, workflowStepID string,
-) (string, error) {
-	sessionID, err := s.createStartSession(ctx, task, agentProfileID, executorID, executorProfileID, workflowStepID)
+) (string, bool, error) {
+	sessionID, created, err := s.createStartSession(ctx, task, agentProfileID, executorID, executorProfileID, workflowStepID)
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
 	s.propagateInheritedEnvironment(ctx, task, sessionID)
-	return sessionID, nil
+	return sessionID, created, nil
 }
 
 // resolveIsPassthroughForLaunch reloads the session snapshot to decide
@@ -1119,18 +1225,19 @@ func (s *Service) resolveIsPassthroughForLaunch(ctx context.Context, sessionID s
 func (s *Service) createStartSession(
 	ctx context.Context, task *v1.Task,
 	agentProfileID, executorID, executorProfileID, workflowStepID string,
-) (string, error) {
+) (string, bool, error) {
 	dbTask, err := s.repo.GetTask(ctx, task.ID)
 	if err == nil && dbTask != nil && dbTask.IsFromOffice && dbTask.AssigneeAgentProfileID != "" {
-		session, ensureErr := s.executor.EnsureSessionForAgent(
+		session, created, ensureErr := s.executor.EnsureSessionForAgentWithCreation(
 			ctx, task, dbTask.AssigneeAgentProfileID, agentProfileID, executorID, executorProfileID,
 		)
 		if ensureErr != nil {
-			return "", ensureErr
+			return "", false, ensureErr
 		}
-		return session.ID, nil
+		return session.ID, created, nil
 	}
-	return s.executor.PrepareSession(ctx, task, agentProfileID, executorID, executorProfileID, workflowStepID)
+	sessionID, err := s.executor.PrepareSession(ctx, task, agentProfileID, executorID, executorProfileID, workflowStepID)
+	return sessionID, err == nil, err
 }
 
 // moveTaskToWorkflowStep moves a task to the target workflow step if provided and different from current.
@@ -1335,6 +1442,16 @@ func (s *Service) buildWorkflowPrompt(ctx context.Context, basePrompt string, st
 	return prompt
 }
 
+// workflowInstructionsHeading/End are stable, agent-facing markers for the
+// optional workflow-level prompt block. Chat collapses everything between
+// them by default. Do not i18n (sent to the model, same as step prompt English).
+// The end marker is required so multi-paragraph workflow prompts do not break
+// the frontend split (a first-blank-line heuristic would cut mid-body).
+const (
+	workflowInstructionsHeading = "## Workflow instructions"
+	workflowInstructionsEnd     = "<!-- /workflow-instructions -->"
+)
+
 func (s *Service) buildWorkflowPromptWithContext(
 	ctx context.Context,
 	basePrompt string,
@@ -1345,6 +1462,10 @@ func (s *Service) buildWorkflowPromptWithContext(
 ) (string, string) {
 	_ = sessionID
 	var parts []string
+
+	if block := s.workflowInstructionsBlock(ctx, step, taskID); block != "" {
+		parts = append(parts, block)
+	}
 
 	// Build the prompt from step.Prompt template and base prompt
 	if step.Prompt != "" {
@@ -1364,6 +1485,40 @@ func (s *Service) buildWorkflowPromptWithContext(
 
 	joined := strings.Join(parts, "\n\n")
 	return s.expandPromptReferencesWithContext(ctx, joined, isPassthrough)
+}
+
+// workflowInstructionsBlock returns the visible "## Workflow instructions"
+// section when the step's workflow has a non-empty prompt. Empty/whitespace
+// prompts and missing getters/workflows omit the section entirely.
+func (s *Service) workflowInstructionsBlock(ctx context.Context, step *wfmodels.WorkflowStep, taskID string) string {
+	if s.workflowStepGetter == nil || step == nil || step.WorkflowID == "" {
+		return ""
+	}
+	prompt, err := s.workflowStepGetter.GetWorkflowPrompt(ctx, step.WorkflowID)
+	if err != nil {
+		if s.logger != nil {
+			s.logger.Warn("failed to get workflow prompt for prompt building",
+				zap.String("workflow_id", step.WorkflowID),
+				zap.Error(err))
+		}
+		return ""
+	}
+	prompt = strings.TrimSpace(prompt)
+	if prompt == "" {
+		return ""
+	}
+	interpolated := strings.TrimSpace(sysprompt.InterpolatePlaceholders(prompt, taskID))
+	if interpolated == "" {
+		return ""
+	}
+	// Drop any accidental end-marker text from user content so chat split
+	// cannot cut the block early (frontend also prefers the final marker).
+	interpolated = strings.ReplaceAll(interpolated, workflowInstructionsEnd, "")
+	interpolated = strings.TrimSpace(interpolated)
+	if interpolated == "" {
+		return ""
+	}
+	return workflowInstructionsHeading + "\n\n" + interpolated + "\n\n" + workflowInstructionsEnd
 }
 
 // expandPromptReferences resolves "@name" saved-prompt references in prompt
@@ -1648,6 +1803,11 @@ func (s *Service) StartSessionForWorkflowStep(ctx context.Context, taskID, sessi
 		return err
 	}
 
+	// Apply conditional session settings after a manual resume and before the
+	// step prompt. The helper reloads the session so a resume-created runtime
+	// state cannot be overwritten by the stale request snapshot.
+	s.applyWorkflowSessionConfigOnEnter(ctx, taskID, session, step)
+
 	stepPlanMode := step.HasOnEnterAction(wfmodels.OnEnterEnablePlanMode)
 	_, err = s.PromptTask(ctx, taskID, sessionID, effectivePrompt, "", stepPlanMode, nil, false)
 	if err != nil {
@@ -1705,13 +1865,9 @@ func (s *Service) ensureSessionRunning(ctx context.Context, sessionID string, se
 			if isOfficeTask {
 				return errOfficeTaskResumeRequiresScheduler
 			}
-			recoveryCtx := context.WithoutCancel(ctx)
-			if stopErr := s.reapPromptUnreadyExecution(recoveryCtx, sessionID, err); stopErr != nil {
-				return fmt.Errorf("failed to stop prompt-unready execution: %w", stopErr)
-			}
-			refreshed, refreshErr := s.repo.GetTaskSession(recoveryCtx, sessionID)
-			if refreshErr != nil {
-				return fmt.Errorf("failed to reload session after prompt-readiness recovery: %w", refreshErr)
+			refreshed, reapErr := s.reapAndReloadSession(ctx, sessionID, err)
+			if reapErr != nil {
+				return reapErr
 			}
 			session = refreshed
 		} else {
@@ -1723,6 +1879,61 @@ func (s *Service) ensureSessionRunning(ctx context.Context, sessionID string, se
 		zap.String("session_id", sessionID),
 		zap.String("session_state", string(session.State)))
 
+	// Bounded to two attempts: a fresh cold resume, and — if the launched
+	// agent never reports prompt-ready — one reap-and-retry, mirroring the
+	// already-tracked-execution branch above. Without this, a wedged launch
+	// right after a backend restart (the common "kandev restart" cold-resume
+	// shape: in-memory execution store empty, executors_running row intact)
+	// surfaced a bare "agent not ready after resume: ... context deadline
+	// exceeded" with no self-heal, unlike every other resume path in this
+	// file.
+	for attempt := 1; ; attempt++ {
+		retryable, err := s.attemptColdResume(ctx, sessionID, session, isOfficeTask)
+		if err == nil {
+			return nil
+		}
+		if attempt >= 2 || !retryable {
+			return err
+		}
+		refreshed, reapErr := s.reapAndReloadSession(ctx, sessionID, err)
+		if reapErr != nil {
+			return reapErr
+		}
+		session = refreshed
+	}
+}
+
+// reapAndReloadSession stops a prompt-unready execution and reloads the
+// session row afterward. Shared by ensureSessionRunning's already-tracked-
+// execution branch and its cold-resume retry loop so both recovery paths
+// stay in lockstep.
+func (s *Service) reapAndReloadSession(ctx context.Context, sessionID string, cause error) (*models.TaskSession, error) {
+	recoveryCtx := context.WithoutCancel(ctx)
+	if stopErr := s.reapPromptUnreadyExecution(recoveryCtx, sessionID, cause); stopErr != nil {
+		return nil, fmt.Errorf("failed to stop prompt-unready execution: %w", stopErr)
+	}
+	refreshed, refreshErr := s.repo.GetTaskSession(recoveryCtx, sessionID)
+	if refreshErr != nil {
+		return nil, fmt.Errorf("failed to reload session after prompt-readiness recovery: %w", refreshErr)
+	}
+	return refreshed, nil
+}
+
+// attemptColdResume performs one resume attempt for ensureSessionRunning's
+// cold-resume loop (no execution currently tracked in memory). retryable is
+// true only when the caller should reap the stuck execution and retry —
+// specifically the main-path prompt-readiness timeout below, which is the
+// exact "kandev restart" wedged-launch shape this loop exists to self-heal.
+// The concurrent-resume-race branch (ErrExecutionAlreadyRunning) reports its
+// own timeout as non-retryable: that failure is against an execution this
+// attempt never launched, not a wedged cold launch, so retrying it here would
+// blur two distinct failure modes the caller's tests pin down separately.
+func (s *Service) attemptColdResume(
+	ctx context.Context,
+	sessionID string,
+	session *models.TaskSession,
+	isOfficeTask bool,
+) (retryable bool, err error) {
 	// If the session is in CREATED state with an existing workspace (executors_running
 	// row exists), the workspace was prepared but the agent was never started. Use
 	// LaunchPreparedSession which routes to startAgentOnExistingWorkspace to reuse
@@ -1731,20 +1942,20 @@ func (s *Service) ensureSessionRunning(ctx context.Context, sessionID string, se
 	if session.State == models.TaskSessionStateCreated {
 		hasRunning, _ := s.repo.HasExecutorRunningRow(ctx, sessionID)
 		if hasRunning {
-			return s.startAgentOnPreparedWorkspace(ctx, sessionID, session)
+			return false, s.startAgentOnPreparedWorkspace(ctx, sessionID, session)
 		}
 	}
 	if isOfficeTask {
-		return errOfficeTaskResumeRequiresScheduler
+		return false, errOfficeTaskResumeRequiresScheduler
 	}
 
-	running, err := s.repo.GetExecutorRunningBySessionID(ctx, sessionID)
-	if err != nil || running == nil {
-		return fmt.Errorf("session is not resumable: no executor record (state: %s)", session.State)
+	running, lookupErr := s.repo.GetExecutorRunningBySessionID(ctx, sessionID)
+	if lookupErr != nil || running == nil {
+		return false, fmt.Errorf("session is not resumable: no executor record (state: %s)", session.State)
 	}
 
 	if err := validateSessionWorktrees(session); err != nil {
-		return err
+		return false, err
 	}
 
 	// Use context.WithoutCancel to prevent WebSocket request timeout from canceling the resume.
@@ -1752,19 +1963,19 @@ func (s *Service) ensureSessionRunning(ctx context.Context, sessionID string, se
 	// when the agent's ACP session initializes — that's what unblocks waitForSessionReady,
 	// no flag-tracking needed.
 	resumeCtx := context.WithoutCancel(ctx)
-	if _, err = s.executor.ResumeSession(resumeCtx, session, true); err != nil {
-		if errors.Is(err, executor.ErrExecutionAlreadyRunning) {
+	if _, launchErr := s.executor.ResumeSession(resumeCtx, session, true); launchErr != nil {
+		if errors.Is(launchErr, executor.ErrExecutionAlreadyRunning) {
 			s.recoverAgentPromptStreamIfNeeded(resumeCtx, sessionID)
 			if readyErr := s.waitForAgentPromptReady(resumeCtx, sessionID); readyErr != nil {
-				return fmt.Errorf("agent not ready after resume race: %w", readyErr)
+				return false, fmt.Errorf("agent not ready after resume race: %w", readyErr)
 			}
-			return nil
+			return false, nil
 		}
-		return s.handleSessionLaunchFailure(
+		return false, s.handleSessionLaunchFailure(
 			resumeCtx,
 			session.TaskID,
 			sessionID,
-			fmt.Errorf("failed to resume session: %w", err),
+			fmt.Errorf("failed to resume session: %w", launchErr),
 			session,
 		)
 	}
@@ -1781,14 +1992,14 @@ func (s *Service) ensureSessionRunning(ctx context.Context, sessionID string, se
 	// own bounded timeouts (waitForSessionReady's AgentLaunchTimeout launch
 	// budget, and waitForAgentPromptReady's 30s below).
 	if err := s.waitForSessionReady(resumeCtx, sessionID); err != nil {
-		return fmt.Errorf("session not ready after resume: %w", err)
+		return false, fmt.Errorf("session not ready after resume: %w", err)
 	}
-	if err := s.waitForAgentPromptReady(resumeCtx, sessionID); err != nil {
-		return fmt.Errorf("agent not ready after resume: %w", err)
+	readyErr := s.waitForAgentPromptReady(resumeCtx, sessionID)
+	if readyErr == nil {
+		s.logger.Debug("session resumed and ready for prompt")
+		return false, nil
 	}
-
-	s.logger.Debug("session resumed and ready for prompt")
-	return nil
+	return errors.Is(readyErr, ErrAgentNotReadyForPrompt), fmt.Errorf("agent not ready after resume: %w", readyErr)
 }
 
 func (s *Service) recoverAgentPromptStreamIfNeeded(ctx context.Context, sessionID string) {
@@ -1914,6 +2125,9 @@ func (s *Service) startAgentOnPreparedWorkspace(ctx context.Context, sessionID s
 	task, err := s.scheduler.GetTask(launchCtx, session.TaskID)
 	if err != nil {
 		return fmt.Errorf("failed to get task for prepared session: %w", err)
+	}
+	if _, err := s.ClaimTaskTitleSession(launchCtx, session.TaskID, sessionID); err != nil {
+		return fmt.Errorf("failed to claim first-turn task title: %w", err)
 	}
 	if _, err = s.executor.LaunchPreparedSession(launchCtx, task, sessionID, executor.LaunchOptions{
 		AgentProfileID: session.AgentProfileID,
@@ -2398,15 +2612,26 @@ func coordinatorStopSessionID(session *models.TaskSession) string {
 }
 
 func (s *Service) stopTaskSessionForCoordinator(ctx context.Context, taskID, sessionID string) (bool, error) {
+	endCancel := s.beginCancelInFlight(sessionID)
+	defer endCancel()
+
 	lock, release := s.acquireCancelInFlightGuard(sessionID)
 	lock.Lock()
 
 	result, teardownClaimed, err := s.stopTaskSessionForCoordinatorLocked(ctx, taskID, sessionID)
 	lock.Unlock()
 	release()
+	// The detached teardown callback is allowed to observe coordinator state;
+	// clear the cancellation ownership marker before handing it off. The defer
+	// above remains as an idempotent safety net for error returns.
+	endCancel()
 	if err != nil {
 		return false, err
 	}
+	// Detached teardown must not observe this operation as an in-flight
+	// cancellation. ScheduleTeardown starts a goroutine, so relying on the
+	// deferred release above makes the ordering scheduler-dependent.
+	endCancel()
 	if result.Changed && teardownClaimed {
 		result.ScheduleTeardown()
 	}
@@ -2446,6 +2671,12 @@ func (s *Service) stopTaskSessionForCoordinatorLocked(
 	result, err := s.executor.StopSessionDetailed(ctx, session, coordinatorMCPStopReason, false)
 	if err != nil {
 		return result, false, fmt.Errorf("coordinator stop: session %q: %w", sessionID, err)
+	}
+	if result.Changed {
+		// Cancellation takes effect before detached runtime teardown. Tombstone
+		// the execution immediately so buffered agent frames cannot recreate
+		// session output after the coordinator has acknowledged the stop.
+		s.markExecutionFailed(sessionID, result.ExecutionID)
 	}
 	teardownClaimed := result.Changed && s.claimExecutionTeardown(
 		sessionID,
@@ -2964,13 +3195,12 @@ func (s *Service) PromptTask(ctx context.Context, taskID, sessionID string, prom
 }
 
 // promptTask is PromptTask's implementation, taking an additional
-// claimEntryID parameter used only by executeQueuedMessage's internal
-// call. When non-empty, this acquires sessionID's cancelInFlight guard
-// around a "confirm I still own this dispatch, then mark the session
-// RUNNING" step, immediately before startTurnForSession and the
-// (potentially long-blocking) executor.Prompt call below it — see
-// isCurrentQueuedDispatch and the Service.dispatchingQueued field doc
-// comment for the race this closes.
+// claimEntryID parameter used only by queued dispatches. When non-empty, this
+// acquires sessionID's cancelInFlight guard around a second ownership check
+// and the "mark the session RUNNING" step immediately before startTurnForSession
+// and the (potentially long-blocking) executor.Prompt call below it. The worker
+// claims the handoff before visible side effects; this check keeps the final
+// session transition tied to that same ownership record.
 //
 // A bare (unguarded) "check the token, then separately call
 // setSessionRunning" would still let two settling dispatches for the same
@@ -2986,10 +3216,10 @@ func (s *Service) PromptTask(ctx context.Context, taskID, sessionID string, prom
 // bounded-hold-time contract in this file.
 //
 // Every return path *before* this step (invalid session, not promptable,
-// ensureSessionRunning failure, a model switch) never claims anything —
-// those are covered by executeQueuedMessage's own deferred cleanup
-// instead (clearQueuedDispatchInFlightIfCurrent), which is safe since
-// none of them block on an agent turn.
+// ensureSessionRunning failure, a model switch) is covered by
+// executeQueuedMessage's own deferred cleanup instead
+// (clearQueuedDispatchInFlightIfCurrent), which is safe since none of them
+// block on an agent turn.
 func (s *Service) promptTask(ctx context.Context, taskID, sessionID string, prompt string, model string, planMode bool, attachments []v1.MessageAttachment, dispatchOnly bool, claimEntryID string, lifecyclePrompt bool, afterClaim func() error) (*PromptResult, error) {
 	s.logPromptTaskCall(taskID, sessionID, prompt, model, planMode, attachments, dispatchOnly)
 	if err := s.validatePromptTaskStart(sessionID); err != nil {
@@ -3441,10 +3671,9 @@ func (e *lifecyclePromptReselectedError) Error() string {
 // this turn" decision atomic with coordinator stop; the potentially blocking
 // executor.Prompt call remains outside the guard.
 //
-// When claimEntryID is set (a queued dispatch claiming its reserved token —
-// see the Service.dispatchingQueued field doc comment), the claim happens
-// under the same per-session cancelInFlightGuard every other cancel/take-
-// and-dispatch decision in this file serializes through. Re-verifying
+// When claimEntryID is set, the final claim happens under the same per-session
+// cancelInFlightGuard every other cancel/take-and-dispatch decision in this
+// file serializes through. Re-verifying
 // ownership *and* promptability inside this same critical section,
 // immediately before writing RUNNING, closes a gap that checking the token
 // alone would leave open: nothing would otherwise stop this call from
@@ -3464,6 +3693,9 @@ func (s *Service) claimSessionRunningForPrompt(
 	defer release()
 	lock.Lock()
 	defer lock.Unlock()
+	if err := s.waitForCancellationWithGuard(ctx, sessionID, lock.Unlock, lock.Lock); err != nil {
+		return nil, err
+	}
 
 	if claimEntryID != "" && !s.isCurrentQueuedDispatch(sessionID, claimEntryID) {
 		return nil, errQueuedDispatchSuperseded
@@ -3490,15 +3722,14 @@ func (s *Service) claimSessionRunningForPrompt(
 			State:     freshSession.State,
 		}
 	}
-	// Clear the token now, inside the same lock, rather than deferring to
-	// executeQueuedMessage's cleanup after this entire (potentially
-	// long-blocking) call returns: from this point session.State is the
-	// authoritative "busy" signal for this dispatch, so holding the marker
-	// any longer would only risk the natural agent.ready firing when *this*
-	// turn completes seeing it still set and skipping the *next* queued
-	// entry — see the Service.dispatchingQueued field doc comment.
+	// Remove only the pre-acceptance marker here. The accepted ownership record
+	// remains until the turn settles, so Send Now cannot cancel or duplicate
+	// this successor while the executor call is still in progress.
 	if claimEntryID != "" {
-		s.clearQueuedDispatchInFlightIfCurrent(sessionID, claimEntryID)
+		s.releaseQueuedDispatchPendingIfCurrent(
+			sessionID,
+			s.queuedDispatchReservationForEntry(sessionID, claimEntryID),
+		)
 	}
 	return freshSession, nil
 }
@@ -3511,6 +3742,9 @@ func (s *Service) claimLifecycleSessionRunning(
 	defer release()
 	lock.Lock()
 	defer lock.Unlock()
+	if err := s.waitForCancellationWithGuard(ctx, sessionID, lock.Unlock, lock.Lock); err != nil {
+		return nil, "", err
+	}
 
 	if claimEntryID != "" && !s.isCurrentQueuedDispatch(sessionID, claimEntryID) {
 		return nil, "", errQueuedDispatchSuperseded
@@ -3541,7 +3775,10 @@ func (s *Service) claimLifecycleSessionRunning(
 		s.restoreLifecycleClaim(ctx, taskID, sessionID, claim.PreviousState)
 		return nil, "", errLifecyclePromptInactive
 	}
-	s.clearQueuedDispatchInFlightIfCurrent(sessionID, claimEntryID)
+	s.releaseQueuedDispatchPendingIfCurrent(
+		sessionID,
+		s.queuedDispatchReservationForEntry(sessionID, claimEntryID),
+	)
 	return freshSession, claim.PreviousState, nil
 }
 
@@ -3802,7 +4039,21 @@ func (s *Service) DrainQueuedMessage(ctx context.Context, sessionID string) (boo
 	lock, release := s.acquireCancelInFlightGuard(sessionID)
 	defer release()
 	lock.Lock()
-	defer lock.Unlock()
+	guardLocked := true
+	defer func() {
+		if guardLocked {
+			lock.Unlock()
+		}
+	}()
+	for s.isCancelInFlight(sessionID) {
+		lock.Unlock()
+		guardLocked = false
+		if err := s.waitForCancelInFlight(ctx, sessionID); err != nil {
+			return false, err
+		}
+		lock.Lock()
+		guardLocked = true
+	}
 
 	session, err := s.repo.GetTaskSession(ctx, sessionID)
 	if err != nil {
@@ -3826,6 +4077,54 @@ type cancelInFlightGuard struct {
 	refs int
 }
 
+type cancellationKind string
+
+const (
+	cancellationKindExplicit     cancellationKind = "explicit"
+	cancellationKindSilent       cancellationKind = "silent"
+	cancellationKindPeer         cancellationKind = "peer"
+	cancellationKindInternal     cancellationKind = "internal"
+	cancellationKindQueueSendNow cancellationKind = "queue_send_now"
+	cancellationOperationTTL                      = 30 * time.Second
+)
+
+type cancellationIdentity struct {
+	executionID      string
+	promptGeneration uint64
+	turnID           string
+}
+
+type cancelOperation struct {
+	done                       chan struct{}
+	joined                     chan struct{}
+	joinObserved               bool
+	err                        error
+	projectionRelease          func()
+	kind                       cancellationKind
+	identity                   cancellationIdentity
+	identityReady              bool
+	expectedTurnID             string
+	expectedTurnReady          bool
+	completionEligible         bool
+	completionEligibilityReady bool
+	actions                    []*cancellationAction
+	nextAction                 int
+	explicitReconcileOnce      sync.Once
+	explicitReconcileErr       error
+}
+
+// cancellationAction is source-specific work that must run after the shared
+// lifecycle cancellation/reconciliation, but before the coordinator releases
+// the operation to other state-mutating paths. The action runs while holding
+// the session guard, so a manual drain or ready event cannot slip between the
+// shared cancel and the source's own queue/visible-message decision.
+type cancellationAction struct {
+	done       chan struct{}
+	run        func(context.Context, *cancelOperation) (bool, error)
+	dispatched bool
+	err        error
+}
+
 // acquireCancelInFlightGuard returns the shared per-session mutex guarding
 // cancel/interrupt/queue-take decisions for sessionID, creating one if it
 // doesn't exist yet and registering the caller's reference to it. Callers
@@ -3838,12 +4137,12 @@ type cancelInFlightGuard struct {
 // session ever created.
 func (s *Service) acquireCancelInFlightGuard(sessionID string) (*sync.Mutex, func()) {
 	s.cancelInFlightMu.Lock()
+	if s.cancelInFlight == nil {
+		s.cancelInFlight = make(map[string]*cancelInFlightGuard)
+	}
 	guard, ok := s.cancelInFlight[sessionID]
 	if !ok {
 		guard = &cancelInFlightGuard{}
-		if s.cancelInFlight == nil {
-			s.cancelInFlight = make(map[string]*cancelInFlightGuard)
-		}
 		s.cancelInFlight[sessionID] = guard
 	}
 	guard.refs++
@@ -3865,20 +4164,650 @@ func (s *Service) acquireCancelInFlightGuard(sessionID string) (*sync.Mutex, fun
 	return &guard.mu, release
 }
 
-// isCancelInFlight reports whether sessionID's cancelInFlight guard is
-// currently held by someone else, without itself claiming it — a
-// TryLock-then-immediately-Unlock peek rather than a real acquisition. The
-// guard entry this creates to perform the peek is released (and pruned if
-// nothing else references it) before this returns, so a passive readiness
-// probe never leaves permanent state behind.
+// claimCancellation establishes the single owner for every cancellation source
+// targeting one session. The operation stays registered until its owner has
+// finished lifecycle cancellation and source-specific reconciliation.
+func (s *Service) claimCancellation(sessionID string, kind cancellationKind) (*cancelOperation, bool) {
+	operation, owner, _ := s.claimCancellationWithAction(sessionID, kind, nil)
+	return operation, owner
+}
+
+func (s *Service) claimCancellationWithAction(
+	sessionID string,
+	kind cancellationKind,
+	action func(context.Context, *cancelOperation) (bool, error),
+) (*cancelOperation, bool, *cancellationAction) {
+	s.cancellationOperationsMu.Lock()
+	defer s.cancellationOperationsMu.Unlock()
+	if s.cancellationOperations == nil {
+		s.cancellationOperations = make(map[string]*cancelOperation)
+	}
+	if operation, ok := s.cancellationOperations[sessionID]; ok {
+		operation.markJoinedLocked()
+		if action == nil {
+			return operation, false, nil
+		}
+		registered := &cancellationAction{done: make(chan struct{}), run: action}
+		operation.actions = append(operation.actions, registered)
+		return operation, false, registered
+	}
+	operation := &cancelOperation{done: make(chan struct{}), joined: make(chan struct{}), kind: kind}
+	var registered *cancellationAction
+	if action != nil {
+		registered = &cancellationAction{done: make(chan struct{}), run: action}
+		operation.actions = append(operation.actions, registered)
+	}
+	s.cancellationOperations[sessionID] = operation
+	return operation, true, registered
+}
+
+// claimCancellationWithActionExclusive establishes a cancellation owner only
+// when no source is already active for the session. Send Now uses this stricter
+// variant because joining an explicit cancel (or another Send Now click) would
+// otherwise let the shared cancellation finish with the wrong source
+// semantics. The accepted result is false when a caller must fail closed.
+func (s *Service) claimCancellationWithActionExclusive(
+	sessionID string,
+	kind cancellationKind,
+	action func(context.Context, *cancelOperation) (bool, error),
+) (*cancelOperation, bool, *cancellationAction, bool) {
+	s.cancellationOperationsMu.Lock()
+	defer s.cancellationOperationsMu.Unlock()
+	if s.cancellationOperations == nil {
+		s.cancellationOperations = make(map[string]*cancelOperation)
+	}
+	if operation, ok := s.cancellationOperations[sessionID]; ok {
+		return operation, false, nil, false
+	}
+	operation := &cancelOperation{done: make(chan struct{}), joined: make(chan struct{}), kind: kind}
+	var registered *cancellationAction
+	if action != nil {
+		registered = &cancellationAction{done: make(chan struct{}), run: action}
+		operation.actions = append(operation.actions, registered)
+	}
+	s.cancellationOperations[sessionID] = operation
+	return operation, true, registered, true
+}
+
+func (s *Service) claimExplicitCancellation(
+	sessionID string,
+	action func(context.Context, *cancelOperation) (bool, error),
+) (*cancelOperation, bool, *cancellationAction) {
+	s.cancellationOperationsMu.Lock()
+	defer s.cancellationOperationsMu.Unlock()
+	if s.cancellationOperations == nil {
+		s.cancellationOperations = make(map[string]*cancelOperation)
+	}
+	if operation, ok := s.cancellationOperations[sessionID]; ok {
+		if operation.kind == cancellationKindQueueSendNow {
+			return operation, false, nil
+		}
+		operation.markJoinedLocked()
+		if operation.kind == cancellationKindExplicit || action == nil {
+			return operation, false, nil
+		}
+		registered := &cancellationAction{done: make(chan struct{}), run: action}
+		operation.actions = append(operation.actions, registered)
+		return operation, false, registered
+	}
+	operation := &cancelOperation{
+		done:   make(chan struct{}),
+		joined: make(chan struct{}),
+		kind:   cancellationKindExplicit,
+	}
+	s.cancellationOperations[sessionID] = operation
+	return operation, true, nil
+}
+
+// markJoinedLocked records that another accepted cancellation source has
+// attached to this operation. cancellationOperationsMu must be held.
+func (operation *cancelOperation) markJoinedLocked() {
+	if operation == nil || operation.joinObserved {
+		return
+	}
+	operation.joinObserved = true
+	close(operation.joined)
+}
+
+func (s *Service) currentCancellation(sessionID string) *cancelOperation {
+	s.cancellationOperationsMu.Lock()
+	defer s.cancellationOperationsMu.Unlock()
+	return s.cancellationOperations[sessionID]
+}
+
+func (s *Service) setCancellationIdentity(sessionID string, operation *cancelOperation, identity cancellationIdentity) {
+	s.cancellationOperationsMu.Lock()
+	defer s.cancellationOperationsMu.Unlock()
+	if current := s.cancellationOperations[sessionID]; current == operation {
+		operation.identity = identity
+		operation.identityReady = true
+	}
+}
+
+func (s *Service) setCancellationExpectedTurn(sessionID string, operation *cancelOperation, turnID string) {
+	s.cancellationOperationsMu.Lock()
+	defer s.cancellationOperationsMu.Unlock()
+	if current := s.cancellationOperations[sessionID]; current == operation {
+		operation.expectedTurnID = turnID
+		operation.expectedTurnReady = true
+	}
+}
+
+func (s *Service) cancellationExpectedTurnSnapshot(operation *cancelOperation) (string, bool) {
+	s.cancellationOperationsMu.Lock()
+	defer s.cancellationOperationsMu.Unlock()
+	if operation == nil {
+		return "", false
+	}
+	return operation.expectedTurnID, operation.expectedTurnReady
+}
+
+func (s *Service) setCancellationCompletionEligible(sessionID string, operation *cancelOperation, eligible bool) {
+	s.cancellationOperationsMu.Lock()
+	defer s.cancellationOperationsMu.Unlock()
+	if current := s.cancellationOperations[sessionID]; current == operation {
+		operation.completionEligible = eligible
+		operation.completionEligibilityReady = true
+	}
+}
+
+func (s *Service) cancellationIdentitySnapshot(operation *cancelOperation) (cancellationIdentity, bool) {
+	s.cancellationOperationsMu.Lock()
+	defer s.cancellationOperationsMu.Unlock()
+	if operation == nil {
+		return cancellationIdentity{}, false
+	}
+	return operation.identity, operation.identityReady
+}
+
+func (s *Service) cancellationPreparationSnapshot(operation *cancelOperation) (cancellationIdentity, bool, bool) {
+	s.cancellationOperationsMu.Lock()
+	defer s.cancellationOperationsMu.Unlock()
+	if operation == nil {
+		return cancellationIdentity{}, false, false
+	}
+	return operation.identity, operation.completionEligible, operation.completionEligibilityReady
+}
+
+func (s *Service) finishCancellation(sessionID string, operation *cancelOperation, err error) {
+	s.finishCancellationWithActions(context.Background(), sessionID, operation, err)
+}
+
+// finishCancellationWithActions runs all source-specific actions that joined
+// the operation before removing it from the coordinator. The global
+// coordinator mutex is reacquired between actions; a joiner that claims the
+// operation before the final removal is therefore included, while a caller
+// arriving after removal starts a fresh operation and re-evaluates state.
+func (s *Service) finishCancellationWithActions(
+	ctx context.Context,
+	sessionID string,
+	operation *cancelOperation,
+	err error,
+) {
+	for {
+		s.cancellationOperationsMu.Lock()
+		if current := s.cancellationOperations[sessionID]; current != operation {
+			s.cancellationOperationsMu.Unlock()
+			return
+		}
+		if operation.nextAction >= len(operation.actions) {
+			releaseProjection := operation.projectionRelease
+			operation.projectionRelease = nil
+			operation.err = err
+			delete(s.cancellationOperations, sessionID)
+			s.cancellationOperationsMu.Unlock()
+			if releaseProjection != nil {
+				releaseProjection()
+			}
+			close(operation.done)
+			return
+		}
+		action := operation.actions[operation.nextAction]
+		operation.nextAction++
+		s.cancellationOperationsMu.Unlock()
+
+		actionErr := err
+		var dispatched bool
+		if actionErr == nil && action.run != nil {
+			lock, release := s.acquireCancelInFlightGuard(sessionID)
+			lock.Lock()
+			dispatched, actionErr = action.run(ctx, operation)
+			lock.Unlock()
+			release()
+		}
+
+		s.cancellationOperationsMu.Lock()
+		action.dispatched = dispatched
+		action.err = actionErr
+		close(action.done)
+		s.cancellationOperationsMu.Unlock()
+	}
+}
+
+// beginCancelInFlight keeps the legacy marker seam used by coordinator-stop
+// and focused tests, but its marker is now the same ownership record used by
+// explicit, silent, and peer cancellation paths.
+func (s *Service) beginCancelInFlight(sessionID string) func() {
+	if sessionID == "" {
+		return func() {}
+	}
+	endProjection := s.beginCancellationProjection(sessionID)
+	operation, owner := s.claimCancellation(sessionID, cancellationKindInternal)
+	if !owner {
+		return endProjection
+	}
+	operation.projectionRelease = endProjection
+
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			s.finishCancellation(sessionID, operation, nil)
+			endProjection()
+		})
+	}
+}
+
+// beginCancellationProjection records accepted cancellation work for the
+// backend-owned progress projection. It is deliberately separate from the
+// lifecycle ownership coordinator above: stream persistence can use the
+// per-session guard without changing the user-visible cancellation state.
+func (s *Service) beginCancellationProjection(sessionID string) func() {
+	if sessionID == "" {
+		return func() {}
+	}
+	s.cancelOperationsMu.Lock()
+	if s.cancelOperations == nil {
+		s.cancelOperations = make(map[string]*cancellationOperationState)
+	}
+	state := s.cancelOperations[sessionID]
+	if state == nil {
+		state = &cancellationOperationState{}
+		s.cancelOperations[sessionID] = state
+	}
+	state.count++
+	startDrain := false
+	if state.count == 1 {
+		state.revision++
+		startDrain = s.enqueueCancellationPendingLocked(sessionID, state, true)
+	}
+	s.cancelOperationsMu.Unlock()
+	if startDrain {
+		s.drainCancellationPublicationQueue(sessionID, state)
+	}
+
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			startDrain := false
+			s.cancelOperationsMu.Lock()
+			state := s.cancelOperations[sessionID]
+			if state != nil && state.count > 0 {
+				state.count--
+				if state.count == 0 {
+					state.revision++
+					startDrain = s.enqueueCancellationPendingLocked(sessionID, state, false)
+				}
+			}
+			s.cancelOperationsMu.Unlock()
+			if startDrain {
+				s.drainCancellationPublicationQueue(sessionID, state)
+			}
+		})
+	}
+}
+
+// CancellationPending reports whether at least one accepted cancellation
+// operation is active for sessionID. The projection is intentionally runtime
+// scoped: a backend restart clears it because no cancellation work survives
+// the process restart.
+func (s *Service) CancellationPending(sessionID string) bool {
+	pending, _ := s.CancellationPendingSnapshot(sessionID)
+	return pending
+}
+
+// CancellationPendingSnapshot returns the pending projection and its
+// process-local transition revision from one critical section. Keeping these
+// values together prevents REST/boot hydration from observing a boolean from
+// one generation with the revision from another.
+func (s *Service) CancellationPendingSnapshot(sessionID string) (bool, uint64) {
+	if sessionID == "" {
+		return false, 0
+	}
+	s.cancelOperationsMu.Lock()
+	defer s.cancelOperationsMu.Unlock()
+	state := s.cancelOperations[sessionID]
+	if state == nil {
+		return false, 0
+	}
+	return state.count > 0, state.revision
+}
+
+func (s *Service) publishCancellationPending(sessionID string, pending bool, revision uint64) {
+	if s.eventBus == nil || sessionID == "" {
+		return
+	}
+	payload := map[string]interface{}{
+		"session_id":            sessionID,
+		"cancellation_pending":  pending,
+		"cancellation_revision": revision,
+	}
+	if err := s.eventBus.Publish(context.Background(), events.TaskSessionCancellationChanged,
+		bus.NewEvent(events.TaskSessionCancellationChanged, "orchestrator", payload)); err != nil {
+		if s.logger != nil {
+			s.logger.Warn("failed to publish cancellation state",
+				zap.String("session_id", sessionID),
+				zap.Bool("cancellation_pending", pending),
+				zap.Uint64("cancellation_revision", revision),
+				zap.Error(err))
+		}
+	}
+}
+
+type cancellationOperationState struct {
+	count        int
+	revision     uint64
+	publications cancellationPublicationQueue
+}
+
+type cancellationPublication struct {
+	pending  bool
+	revision uint64
+}
+
+type cancellationPublicationQueue struct {
+	pending    []cancellationPublication
+	publishing bool
+}
+
+// enqueueCancellationPendingLocked appends a transition while the count and
+// revision are still protected by cancelOperationsMu. The caller must drain
+// the queue after releasing that mutex when this returns true.
+func (s *Service) enqueueCancellationPendingLocked(
+	sessionID string,
+	state *cancellationOperationState,
+	pending bool,
+) bool {
+	if s.eventBus == nil || sessionID == "" {
+		return false
+	}
+	queue := &state.publications
+	queue.pending = append(queue.pending, cancellationPublication{pending: pending, revision: state.revision})
+	if queue.publishing {
+		return false
+	}
+	queue.publishing = true
+	return true
+}
+
+func (s *Service) drainCancellationPublicationQueue(
+	sessionID string,
+	state *cancellationOperationState,
+) {
+	for {
+		s.cancelOperationsMu.Lock()
+		queue := &state.publications
+		if len(queue.pending) == 0 {
+			queue.publishing = false
+			s.cancelOperationsMu.Unlock()
+			return
+		}
+		publication := queue.pending[0]
+		queue.pending = queue.pending[1:]
+		s.cancelOperationsMu.Unlock()
+
+		s.publishCancellationPending(sessionID, publication.pending, publication.revision)
+	}
+}
+
+// isCancelInFlight reports whether an actual cancellation operation for
+// sessionID is active or waiting on the shared guard. It deliberately does
+// not inspect the guard mutex itself because stream/lifecycle handlers also
+// use that mutex for non-cancelling side effects.
 func (s *Service) isCancelInFlight(sessionID string) bool {
-	lock, release := s.acquireCancelInFlightGuard(sessionID)
-	defer release()
-	if lock.TryLock() {
-		lock.Unlock()
+	if sessionID == "" {
+		return false
+	}
+	return s.currentCancellation(sessionID) != nil
+}
+
+// waitForCancelInFlight blocks until all cancellation intents for sessionID
+// have finished. Callers that hold the per-session guard must release it
+// before waiting; the cancellation owner may need that mutex for terminal
+// stream persistence and final reconciliation.
+func (s *Service) waitForCancelInFlight(ctx context.Context, sessionID string) error {
+	operation := s.currentCancellation(sessionID)
+	if operation == nil {
+		return nil
+	}
+	return operation.wait(ctx)
+}
+
+// waitForCancellationWithGuard releases a caller-held per-session mutex while
+// a cancellation owner completes, then reacquires it before returning. The
+// loop closes the small handoff window where a fresh cancellation can claim
+// the session immediately after the first operation finishes.
+func (s *Service) waitForCancellationWithGuard(
+	ctx context.Context,
+	sessionID string,
+	unlock func(),
+	relock func(),
+) error {
+	for {
+		operation := s.currentCancellation(sessionID)
+		if operation == nil {
+			return nil
+		}
+		unlock()
+		err := operation.wait(ctx)
+		relock()
+		if err != nil {
+			return err
+		}
+	}
+}
+
+func (s *Service) cancellationOwnsStreamEvent(sessionID, executionID string, promptGeneration uint64) bool {
+	operation := s.currentCancellation(sessionID)
+	if operation == nil {
+		return true
+	}
+	identity, ready := s.cancellationIdentitySnapshot(operation)
+	if !ready {
+		// The owner has claimed the operation but has not yet reached the
+		// guarded identity snapshot. The stream event is ordered before the
+		// yielded lifecycle wait and may proceed to let the owner capture it.
+		return true
+	}
+	if identity.executionID != "" && executionID != "" && identity.executionID != executionID {
+		return false
+	}
+	if identity.promptGeneration != 0 && promptGeneration != 0 && identity.promptGeneration != promptGeneration {
 		return false
 	}
 	return true
+}
+
+func (operation *cancelOperation) wait(ctx context.Context) error {
+	select {
+	case <-operation.done:
+		return operation.err
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func (action *cancellationAction) wait(ctx context.Context) (bool, error) {
+	if action == nil {
+		return false, nil
+	}
+	select {
+	case <-action.done:
+		return action.dispatched, action.err
+	case <-ctx.Done():
+		return false, ctx.Err()
+	}
+}
+
+// reconcileCancelledTurn durably settles the cancelled session and its turn.
+// A user cancellation may trigger workflow completion only after both pieces
+// of bookkeeping have been confirmed from their authoritative stores. The
+// best-effort lifecycle helpers intentionally remain unchanged for other event
+// paths; this path fails closed so a persistence or turn-service failure cannot
+// advance the task while the cancelled turn is still running.
+func (s *Service) reconcileCancelledTurn(
+	ctx context.Context,
+	taskID string,
+	sessionID string,
+	session *models.TaskSession,
+	requireWaiting bool,
+) (*models.TaskSession, error) {
+	return s.reconcileCancelledTurnOwned(ctx, taskID, sessionID, session, requireWaiting, "")
+}
+
+// reconcileCancelledTurnOwned settles cancellation bookkeeping for the turn
+// captured by the caller. An expected turn ID makes every authoritative check
+// fail closed when a successor turn has appeared, rather than allowing the
+// generic cleanup sweep to close unrelated work.
+func (s *Service) reconcileCancelledTurnOwned(
+	ctx context.Context,
+	taskID string,
+	sessionID string,
+	session *models.TaskSession,
+	requireWaiting bool,
+	expectedTurnID string,
+) (*models.TaskSession, error) {
+	if err := s.verifyCapturedCancelledTurn(ctx, sessionID, expectedTurnID); err != nil {
+		return nil, err
+	}
+	authoritativeSession, err := s.reconcileCancelledSessionState(ctx, taskID, session, requireWaiting)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.verifyCapturedCancelledTurn(ctx, sessionID, expectedTurnID); err != nil {
+		return nil, err
+	}
+	if err := s.completeTurnForTaskSessionCheckedOwned(ctx, taskID, sessionID, expectedTurnID); err != nil {
+		return nil, fmt.Errorf("settle cancelled turn: %w", err)
+	}
+
+	if session == nil {
+		return nil, nil
+	}
+	if err := validateCancelledSessionState(session.ID, authoritativeSession, requireWaiting); err != nil {
+		return nil, err
+	}
+	if err := s.verifyCancelledTurnClosedOwned(ctx, sessionID, expectedTurnID); err != nil {
+		return nil, err
+	}
+
+	return authoritativeSession, nil
+}
+
+func (s *Service) verifyCapturedCancelledTurn(ctx context.Context, sessionID, expectedTurnID string) error {
+	if s.turnService == nil || expectedTurnID == "" {
+		return nil
+	}
+	activeTurn, err := s.turnService.GetActiveTurn(ctx, sessionID)
+	if err != nil {
+		if isNoActiveTurnError(err) {
+			return nil
+		}
+		return fmt.Errorf("inspect captured cancelled turn: %w", err)
+	}
+	if activeTurn != nil && activeTurn.ID != expectedTurnID {
+		return fmt.Errorf("captured cancelled turn %s was superseded by active turn %s", expectedTurnID, activeTurn.ID)
+	}
+	return nil
+}
+
+func (s *Service) reconcileCancelledSessionState(
+	ctx context.Context,
+	taskID string,
+	session *models.TaskSession,
+	requireWaiting bool,
+) (*models.TaskSession, error) {
+	if session == nil || !requireWaiting {
+		return session, nil
+	}
+	updated := s.updateTaskSessionState(
+		ctx,
+		taskID,
+		session.ID,
+		models.TaskSessionStateWaitingForInput,
+		"",
+		true,
+		session,
+	)
+	if updated == nil {
+		return nil, fmt.Errorf("persist cancelled session %s as WAITING_FOR_INPUT", session.ID)
+	}
+	if updated.State != models.TaskSessionStateWaitingForInput {
+		return nil, fmt.Errorf(
+			"cancelled session %s persisted as %s, want WAITING_FOR_INPUT",
+			session.ID,
+			updated.State,
+		)
+	}
+	authoritative, err := s.repo.GetTaskSession(ctx, session.ID)
+	if err != nil {
+		return nil, fmt.Errorf("verify cancelled session %s state: %w", session.ID, err)
+	}
+	if authoritative == nil {
+		return nil, fmt.Errorf(
+			"cancelled session %s is missing before turn settlement, want WAITING_FOR_INPUT",
+			session.ID,
+		)
+	}
+	if authoritative.State != models.TaskSessionStateWaitingForInput {
+		return nil, fmt.Errorf(
+			"cancelled session %s is %s before turn settlement, want WAITING_FOR_INPUT",
+			session.ID,
+			authoritative.State,
+		)
+	}
+	return authoritative, nil
+}
+
+func validateCancelledSessionState(
+	sessionID string,
+	authoritativeSession *models.TaskSession,
+	requireWaiting bool,
+) error {
+	if authoritativeSession == nil {
+		return fmt.Errorf("cancelled session %s has no authoritative state", sessionID)
+	}
+	if requireWaiting && authoritativeSession.State != models.TaskSessionStateWaitingForInput {
+		return fmt.Errorf(
+			"cancelled session %s settled as %s, want WAITING_FOR_INPUT",
+			sessionID,
+			authoritativeSession.State,
+		)
+	}
+	return nil
+}
+
+func (s *Service) verifyCancelledTurnClosed(ctx context.Context, sessionID string) error {
+	return s.verifyCancelledTurnClosedOwned(ctx, sessionID, "")
+}
+
+func (s *Service) verifyCancelledTurnClosedOwned(ctx context.Context, sessionID, expectedTurnID string) error {
+	if s.turnService == nil {
+		return nil
+	}
+	activeTurn, err := s.turnService.GetActiveTurn(ctx, sessionID)
+	if err != nil {
+		if isNoActiveTurnError(err) {
+			return nil
+		}
+		return fmt.Errorf("verify cancelled turn closure: %w", err)
+	}
+	if activeTurn != nil {
+		if expectedTurnID != "" && activeTurn.ID != expectedTurnID {
+			return fmt.Errorf("captured cancelled turn %s was superseded by active turn %s", expectedTurnID, activeTurn.ID)
+		}
+		return fmt.Errorf("cancelled turn %s remains open", activeTurn.ID)
+	}
+	return nil
 }
 
 // CancelAgent interrupts the current agent turn without terminating the process,
@@ -3889,121 +4818,339 @@ func (s *Service) isCancelInFlight(sessionID string) bool {
 // DB state (transitions to WAITING_FOR_INPUT, records the cancel message, completes the
 // turn) so the user can unstick a session whose agent subprocess crashed. Other errors
 // still fail the cancel.
-func (s *Service) CancelAgent(ctx context.Context, sessionID string) error {
+type cancelAgentPreparation struct {
+	session            *models.TaskSession
+	completionEligible bool
+	capturedTurnID     string
+	cancelTurnID       string
+	identity           cancellationIdentity
+}
+
+func (s *Service) CancelAgent(ctx context.Context, sessionID string) (err error) {
 	if err := s.authorizeSession(ctx, sessionID); err != nil {
 		return err
 	}
+	if s.repo == nil {
+		return errors.New("cancel agent: repository is not configured")
+	}
+	var operation *cancelOperation
+	var owner bool
+	var action *cancellationAction
+	operation, owner, action = s.claimExplicitCancellation(sessionID, func(actionCtx context.Context, operation *cancelOperation) (bool, error) {
+		return false, s.reconcileJoinedExplicitCancellationLocked(actionCtx, sessionID, operation)
+	})
+	if !owner {
+		if err := operation.wait(ctx); err != nil {
+			return err
+		}
+		if operation.kind == cancellationKindExplicit {
+			return nil
+		}
+		if operation.kind == cancellationKindQueueSendNow {
+			return ErrSendNowConflict
+		}
+		if action == nil {
+			return s.reconcileJoinedExplicitCancellation(ctx, sessionID, operation)
+		}
+		_, err := action.wait(ctx)
+		return err
+	}
+	go s.runExplicitCancellation(ctx, sessionID, operation)
+	return operation.wait(ctx)
+}
 
+func (s *Service) runExplicitCancellation(requestCtx context.Context, sessionID string, operation *cancelOperation) {
+	endProjection := s.beginCancellationProjection(sessionID)
+	operation.projectionRelease = endProjection
+	defer endProjection()
+	operationCtx, cancel := context.WithTimeout(context.WithoutCancel(requestCtx), cancellationOperationTTL)
+	defer cancel()
+	err := s.runExplicitCancellationOwned(operationCtx, sessionID, operation)
+	s.finishCancellationWithActions(operationCtx, sessionID, operation, err)
+}
+
+func (s *Service) runExplicitCancellationOwned(ctx context.Context, sessionID string, operation *cancelOperation) (err error) {
 	s.logger.Debug("cancelling agent turn", zap.String("session_id", sessionID))
 
-	// Deduplicate concurrent retries. The UI's cancel button has no in-flight
-	// disable, so impatient users click it multiple times while the agent is
-	// still tearing down the turn (e.g. unwinding a Claude Monitor tool can take
-	// several seconds). Without this guard each click produces a duplicate
-	// "Turn cancelled by user" message and races on turn cleanup — the second
-	// call's getActiveTurnID lazily starts a phantom turn after the first call
-	// already closed the real one.
 	lock, release := s.acquireCancelInFlightGuard(sessionID)
 	defer release()
-	if !lock.TryLock() {
-		s.logger.Debug("cancel already in flight; skipping duplicate",
-			zap.String("session_id", sessionID))
-		return nil
-	}
-	unlocked := false
+	lock.Lock()
+	guardLocked := true
 	unlockGuard := func() {
-		if !unlocked {
-			unlocked = true
+		if guardLocked {
 			lock.Unlock()
+			guardLocked = false
+		}
+	}
+	relockGuard := func() {
+		if !guardLocked {
+			lock.Lock()
+			guardLocked = true
 		}
 	}
 	defer unlockGuard()
 
-	// Fetch session for state updates and message creation
+	prepared, err := s.prepareCancelAgent(ctx, sessionID)
+	if err != nil {
+		return err
+	}
+	s.setCancellationIdentity(sessionID, operation, prepared.identity)
+	s.setCancellationCompletionEligible(sessionID, operation, prepared.completionEligible)
+	if err := s.cancelAgentWhileUnlocked(ctx, sessionID, unlockGuard, relockGuard); err != nil {
+		return err
+	}
+	if err := s.finishCancelledAgentTurn(ctx, sessionID, prepared); err != nil {
+		return err
+	}
+
+	s.logger.Debug("agent turn cancelled", zap.String("session_id", sessionID))
+	return nil
+}
+
+// reconcileJoinedExplicitCancellation applies the user-facing part of an
+// explicit cancel after joining a silent/internal operation. The joined caller
+// never invokes lifecycle cancellation; it only re-evaluates the current
+// session and performs the explicit source's reconciliation once.
+func (s *Service) reconcileJoinedExplicitCancellation(
+	requestCtx context.Context,
+	sessionID string,
+	operation *cancelOperation,
+) error {
+	operationCtx, cancel := context.WithTimeout(context.WithoutCancel(requestCtx), cancellationOperationTTL)
+	defer cancel()
+	lock, release := s.acquireCancelInFlightGuard(sessionID)
+	defer release()
+	lock.Lock()
+	defer lock.Unlock()
+	return s.reconcileJoinedExplicitCancellationLocked(operationCtx, sessionID, operation)
+}
+
+// reconcileJoinedExplicitCancellationLocked is the source-specific action for
+// a user cancel that joined a silent/internal cancellation. The caller must
+// already hold the session guard; the cancellation coordinator uses this form
+// so the explicit reconciliation is completed before the shared operation is
+// released to other state-mutating paths.
+func (s *Service) reconcileJoinedExplicitCancellationLocked(
+	operationCtx context.Context,
+	sessionID string,
+	operation *cancelOperation,
+) error {
+	if _, _, ready := s.cancellationPreparationSnapshot(operation); !ready {
+		return errors.New("joined cancellation preparation is incomplete")
+	}
+	operation.explicitReconcileOnce.Do(func() {
+		identity, completionEligible, ready := s.cancellationPreparationSnapshot(operation)
+		if !ready {
+			operation.explicitReconcileErr = errors.New("joined cancellation preparation became incomplete")
+			return
+		}
+		session, err := s.repo.GetTaskSession(operationCtx, sessionID)
+		if err != nil {
+			operation.explicitReconcileErr = fmt.Errorf("load session after joined cancel: %w", err)
+			return
+		}
+		if session == nil || isTerminalSessionState(session.State) {
+			return
+		}
+		prepared := cancelAgentPreparation{
+			session:            session,
+			completionEligible: completionEligible,
+			capturedTurnID:     identity.turnID,
+			cancelTurnID:       identity.turnID,
+			identity:           identity,
+		}
+		operation.explicitReconcileErr = s.finishCancelledAgentTurn(operationCtx, sessionID, prepared)
+	})
+	return operation.explicitReconcileErr
+}
+
+func (s *Service) prepareCancelAgent(ctx context.Context, sessionID string) (cancelAgentPreparation, error) {
 	session, err := s.repo.GetTaskSession(ctx, sessionID)
 	if err != nil {
 		s.logger.Warn("failed to get session for cancel",
 			zap.String("session_id", sessionID),
 			zap.Error(err))
 	}
-
-	// Capture the active turn before cancelling so the cancel message attaches
-	// to the turn the user was actually cancelling. If we waited until after
-	// agentManager.CancelAgent, the agent's complete event could have already
-	// closed the turn, and getActiveTurnID would lazily create a phantom turn
-	// just to host the cancel message.
-	cancelTurnID := s.getActiveTurnID(sessionID)
-
-	// The agent manager routes the cancel to the right signal: ACP cancel for
-	// regular sessions, Ctrl-C via PTY stdin for passthrough sessions. Service
-	// stays protocol-agnostic; the seam is in lifecycle.Manager.CancelAgentBySessionID.
-	if err := s.agentManager.CancelAgent(ctx, sessionID); err != nil {
-		switch {
-		case errors.Is(err, lifecycle.ErrNoExecutionForSession):
-			// The session was live but there is no execution to cancel — the agent process
-			// crashed, exited, or never re-registered after a backend restart. Log at error
-			// level so operators notice the stuck state; we still reconcile DB state below
-			// so the UI unsticks.
-			s.logger.Error("agent process appears to have crashed: no live execution for session on cancel",
-				zap.String("session_id", sessionID),
-				zap.Error(err))
-		case errors.Is(err, lifecycle.ErrCancelEscalated):
-			// The agent accepted the ACP cancel but never published a completion event.
-			// The lifecycle manager already unblocked the in-flight prompt and marked the
-			// execution ready; reconcile DB state below so the UI unsticks.
-			s.logger.Warn("agent did not acknowledge cancel; reconciling session state",
-				zap.String("session_id", sessionID),
-				zap.Error(err))
-		default:
-			return fmt.Errorf("cancel agent: %w", err)
-		}
+	completionEligible, err := s.cancelTurnCompletionEligible(ctx, session, sessionID)
+	if err != nil {
+		return cancelAgentPreparation{}, err
 	}
 
-	// Transition session to WAITING_FOR_INPUT so the user can send a new
-	// prompt, and reconcile the task row to REVIEW so the sidebar shows the
-	// green check rather than the yellow "needs input" question icon — a
-	// cancelled turn is treated as finished work the user may want to review.
+	identity, err := s.captureCancellationIdentity(ctx, sessionID)
+	if err != nil {
+		return cancelAgentPreparation{}, err
+	}
+	capturedTurnID := identity.turnID
+	cancelTurnID := capturedTurnID
+	if cancelTurnID == "" {
+		cancelTurnID = s.getActiveTurnID(sessionID)
+	}
+	return cancelAgentPreparation{
+		session:            session,
+		completionEligible: completionEligible,
+		capturedTurnID:     capturedTurnID,
+		cancelTurnID:       cancelTurnID,
+		identity:           identity,
+	}, nil
+}
+
+func (s *Service) captureCancellationIdentity(ctx context.Context, sessionID string) (cancellationIdentity, error) {
+	executionID, promptGeneration := s.captureCancellationAgentIdentity(ctx, sessionID)
+	identity := cancellationIdentity{executionID: executionID, promptGeneration: promptGeneration}
+	if s.turnService != nil {
+		turnID, err := s.peekActiveTurnID(ctx, sessionID)
+		if err != nil {
+			return cancellationIdentity{}, fmt.Errorf("inspect active turn before cancel: %w", err)
+		}
+		identity.turnID = turnID
+	}
+	return identity, nil
+}
+
+func (s *Service) captureCancellationAgentIdentity(ctx context.Context, sessionID string) (string, uint64) {
+	if s.agentManager == nil {
+		return "", 0
+	}
+	executionID, err := s.agentManager.GetExecutionIDForSession(ctx, sessionID)
+	if err != nil && !errors.Is(err, lifecycle.ErrNoExecutionForSession) {
+		s.logger.Debug("could not capture execution identity before cancellation",
+			zap.String("session_id", sessionID), zap.Error(err))
+	}
+
+	generationReader, ok := s.agentManager.(interface {
+		GetPromptGenerationForSession(context.Context, string) (uint64, error)
+	})
+	if !ok {
+		return executionID, 0
+	}
+	generation, generationErr := generationReader.GetPromptGenerationForSession(ctx, sessionID)
+	if generationErr != nil && !errors.Is(generationErr, lifecycle.ErrNoExecutionForSession) {
+		s.logger.Debug("could not capture prompt generation before cancellation",
+			zap.String("session_id", sessionID), zap.Error(generationErr))
+	}
+	return executionID, generation
+}
+
+func (s *Service) cancelTurnCompletionEligible(ctx context.Context, session *models.TaskSession, sessionID string) (bool, error) {
+	if session == nil {
+		return false, nil
+	}
+	switch session.State {
+	case models.TaskSessionStateRunning, models.TaskSessionStateStarting:
+		return true, nil
+	case models.TaskSessionStateWaitingForInput:
+		activeTurnID, err := s.peekActiveTurnID(ctx, sessionID)
+		if err != nil {
+			return false, fmt.Errorf("inspect active turn before cancel retry: %w", err)
+		}
+		return activeTurnID != "", nil
+	default:
+		return false, nil
+	}
+}
+
+func (s *Service) cancelAgentWhileUnlocked(ctx context.Context, sessionID string, unlockGuard, relockGuard func()) error {
+	if s.agentManager == nil {
+		return nil
+	}
+	// The lifecycle manager waits for the in-flight prompt to consume terminal
+	// stream frames delivered through the same per-session guard. Keep the
+	// operation marker and guard registry reference active, but release only the
+	// mutex around that blocking wait.
+	unlockGuard()
+	cancelErr := s.agentManager.CancelAgent(ctx, sessionID)
+	relockGuard()
+	if cancelErr == nil {
+		return nil
+	}
+	switch {
+	case errors.Is(cancelErr, lifecycle.ErrNoExecutionForSession):
+		// A crashed or unregistered process still needs DB reconciliation so the
+		// session does not remain stuck.
+		s.logger.Error("agent process appears to have crashed: no live execution for session on cancel",
+			zap.String("session_id", sessionID),
+			zap.Error(cancelErr))
+	case errors.Is(cancelErr, lifecycle.ErrCancelEscalated):
+		// The lifecycle manager already unblocked the prompt and marked the
+		// execution ready; reconcile the session state below.
+		s.logger.Warn("agent did not acknowledge cancel; reconciling session state",
+			zap.String("session_id", sessionID),
+			zap.Error(cancelErr))
+	default:
+		return fmt.Errorf("cancel agent: %w", cancelErr)
+	}
+	return nil
+}
+
+func (s *Service) finishCancelledAgentTurn(ctx context.Context, sessionID string, prepared cancelAgentPreparation) error {
+	session := prepared.session
 	if session != nil {
-		s.updateTaskSessionState(ctx, session.TaskID, sessionID, models.TaskSessionStateWaitingForInput, "", true, session)
-		s.writeTaskReviewStateOnCancel(ctx, session.TaskID, sessionID)
-	}
-
-	// Record cancellation in the message history
-	if s.messageCreator != nil && session != nil {
-		metadata := map[string]interface{}{
-			"cancelled": true,
-			"variant":   "warning",
-		}
-		if err := s.messageCreator.CreateSessionMessage(
+		reconciled, err := s.reconcileCancelledTurnOwned(
 			ctx,
 			session.TaskID,
-			"Turn cancelled by user",
 			sessionID,
-			string(v1.MessageTypeStatus),
-			cancelTurnID,
-			metadata,
-			false,
-		); err != nil {
-			s.logger.Warn("failed to create cancel message",
-				zap.String("session_id", sessionID),
-				zap.Error(err))
+			session,
+			prepared.completionEligible,
+			prepared.capturedTurnID,
+		)
+		if err != nil {
+			return fmt.Errorf("reconcile cancelled turn: %w", err)
 		}
+		if reconciled != nil {
+			session = reconciled
+		}
+	} else if _, err := s.reconcileCancelledTurnOwned(ctx, "", sessionID, nil, false, prepared.capturedTurnID); err != nil {
+		return fmt.Errorf("reconcile cancelled turn: %w", err)
 	}
 
-	// Complete the turn since the agent was cancelled. Idempotent w.r.t. a
-	// concurrent agent.complete event having already closed the turn.
-	s.completeTurnForSession(ctx, sessionID)
-
-	// Release the cancel/interrupt guard now that this session's cancel is
-	// fully resolved. Do not drain here: a user cancellation must not itself
-	// start the next queued message. Both unlockGuard and release are
-	// idempotent, so the deferred calls above become safe no-op error-path
-	// safety nets once this fires.
-	unlockGuard()
-	release()
-
-	s.logger.Debug("agent turn cancelled", zap.String("session_id", sessionID))
+	s.recordCancelledAgentMessage(ctx, session, sessionID, prepared.cancelTurnID)
+	s.reconcileCancelledAgentWorkflow(ctx, session, prepared.completionEligible)
 	return nil
+}
+
+func (s *Service) recordCancelledAgentMessage(ctx context.Context, session *models.TaskSession, sessionID, cancelTurnID string) {
+	if s.messageCreator == nil || session == nil {
+		return
+	}
+	metadata := map[string]interface{}{
+		"cancelled": true,
+		"variant":   "warning",
+	}
+	if err := s.messageCreator.CreateSessionMessage(
+		ctx,
+		session.TaskID,
+		"Turn cancelled by user",
+		sessionID,
+		string(v1.MessageTypeStatus),
+		cancelTurnID,
+		metadata,
+		false,
+	); err != nil {
+		s.logger.Warn("failed to create cancel message",
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+	}
+}
+
+func (s *Service) reconcileCancelledAgentWorkflow(ctx context.Context, session *models.TaskSession, completionEligible bool) {
+	if session == nil {
+		return
+	}
+	if completionEligible {
+		s.processOnTurnCompleteViaEngineWithCause(ctx, session.TaskID, session, turnCompletionCauseUserCancellation)
+	}
+	s.reconcileCancelledTaskReview(ctx, session.TaskID, session.ID)
+}
+
+func (s *Service) reconcileCancelledTaskReview(ctx context.Context, taskID, sessionID string) {
+	task, err := s.repo.GetTask(ctx, taskID)
+	if err == nil && task != nil && task.WorkflowStepID != "" && s.workflowStepGetter != nil {
+		step, stepErr := s.workflowStepGetter.GetStep(ctx, task.WorkflowStepID)
+		if stepErr == nil && step != nil && s.workflowStepIsTerminal(ctx, step.ID) {
+			return
+		}
+	}
+	s.writeTaskReviewState(ctx, taskID, sessionID)
 }
 
 // takeAndDispatchEntryLocked takes entryID from sessionID's queue and
@@ -4085,33 +5232,25 @@ func (s *Service) takeIfPromptableLocked(ctx context.Context, taskID, sessionID,
 // signal from the parent, not a user action, so unlike the cancel button it
 // must not write a visible "Turn cancelled" message and must not move the
 // task to REVIEW (writeTaskReviewStateOnCancel).
-func (s *Service) cancelAndTakeForPeerMessage(ctx context.Context, taskID, sessionID, entryID string) (bool, error) {
-	if cancelErr := s.cancelAgentSilent(ctx, taskID, sessionID); cancelErr != nil {
-		// A genuine (non-tolerated — cancelAgentSilent already swallows "no
-		// active execution") cancel failure leaves session state untouched
-		// by this call: cancelAgentSilent returns before reaching its own
-		// updateTaskSessionState/completeTurnForSession reconciliation on
-		// that path. Every other decision-maker that could independently
-		// mark the session promptable — handleAgentReady,
-		// handleAgentBootReady, CancelAgent, clarification recovery — now
-		// serializes through this same cancelInFlight guard (see the
-		// Service.cancelInFlight field doc comment), so none of them can be
-		// racing this exact call while we hold it. This recheck is a
-		// defensive backstop for any not-yet-guarded completion path or a
-		// stale read further up the call chain: if the session turns out to
-		// already be promptable despite the cancel error, take-and-dispatch
-		// anyway instead of leaving the message stranded with nothing left
-		// to trigger it.
-		session, sessErr := s.repo.GetTaskSession(ctx, sessionID)
-		if sessErr != nil || session == nil || s.checkSessionPromptable(taskID, sessionID, session.State) != nil {
-			return false, fmt.Errorf("interrupt for peer message: %w", cancelErr)
-		}
-		s.logger.Warn("cancel failed but session is already promptable; taking queued message directly instead of relying on a future drain",
-			zap.String("task_id", taskID),
-			zap.String("session_id", sessionID),
-			zap.Error(cancelErr))
-	}
-	return s.takeAndDispatchEntryLocked(ctx, sessionID, entryID)
+func (s *Service) cancelAndTakeForPeerMessage(
+	ctx context.Context,
+	taskID string,
+	sessionID string,
+	entryID string,
+	unlockGuard func(),
+	relockGuard func(),
+) (bool, error) {
+	return s.cancelAgentSilentWithGuardActionKind(
+		ctx,
+		taskID,
+		sessionID,
+		unlockGuard,
+		relockGuard,
+		func(actionCtx context.Context) (bool, error) {
+			return s.takeAndDispatchEntryLocked(actionCtx, sessionID, entryID)
+		},
+		cancellationKindPeer,
+	)
 }
 
 // QueueAndInterruptForPeerMessage atomically queues prompt for sessionID
@@ -4194,15 +5333,41 @@ func (s *Service) QueueAndInterruptForPeerMessage(ctx context.Context, taskID, s
 	}
 
 	lock, release := s.acquireCancelInFlightGuard(sessionID)
-	defer release()
 	lock.Lock()
-	defer lock.Unlock()
+	guardLocked := true
+	unlockGuard := func() {
+		if guardLocked {
+			lock.Unlock()
+			guardLocked = false
+		}
+	}
+	relockGuard := func() {
+		if !guardLocked {
+			lock.Lock()
+			guardLocked = true
+		}
+	}
+	defer func() {
+		unlockGuard()
+		release()
+	}()
 
 	queued, err := s.messageQueue.QueueMessageWithMetadata(ctx, sessionID, taskID, prompt, "", messagequeue.QueuedByAgent, false, nil, metadata)
 	if err != nil {
 		return nil, false, err
 	}
 	s.publishQueueStatusEvent(ctx, sessionID)
+	if operation := s.currentCancellation(sessionID); operation != nil && operation.kind != cancellationKindPeer {
+		s.logger.Debug("leaving peer message queued while a different cancellation source is in progress",
+			zap.String("task_id", taskID),
+			zap.String("session_id", sessionID),
+			zap.String("queue_id", queued.ID))
+		unlockGuard()
+		if waitErr := s.waitForCancelInFlight(ctx, sessionID); waitErr != nil {
+			return queued, false, waitErr
+		}
+		return queued, false, nil
+	}
 
 	if s.turnService != nil {
 		turnNow, turnNowErr := s.peekActiveTurnID(ctx, sessionID)
@@ -4218,7 +5383,7 @@ func (s *Service) QueueAndInterruptForPeerMessage(ctx context.Context, taskID, s
 		}
 	}
 
-	dispatched, err := s.cancelAndTakeForPeerMessage(ctx, taskID, sessionID, queued.ID)
+	dispatched, err := s.cancelAndTakeForPeerMessage(ctx, taskID, sessionID, queued.ID, unlockGuard, relockGuard)
 	return queued, dispatched, err
 }
 

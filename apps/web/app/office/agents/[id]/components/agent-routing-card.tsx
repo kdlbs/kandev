@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast/sonner";
 import { Card, CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
 import { Switch } from "@kandev/ui/switch";
 import { Button } from "@kandev/ui/button";
@@ -17,6 +17,9 @@ import type {
 } from "@/lib/state/slices/office/types";
 import { ProviderOrderEditor } from "../../../workspace/routing/components/provider-order-editor";
 import { AgentWakeReasonOverrides } from "./agent-wake-reason-overrides";
+import type { TFunction } from "i18next";
+import { Trans, useTranslation } from "react-i18next";
+import { TIER_NAME_KEYS } from "../../../lib/label-keys";
 
 const TIERS: Tier[] = ["frontier", "balanced", "economy"];
 
@@ -36,6 +39,7 @@ const DEFAULT_INHERIT: AgentRoutingOverrides = {
 };
 
 export function AgentRoutingCard({ agentId, initial }: Props) {
+  const { t } = useTranslation();
   const workspaceId = useAppStore((s) => s.workspaces.activeId);
   const workspace = useWorkspaceRouting(workspaceId);
   const route = useAgentRoute(agentId);
@@ -66,15 +70,15 @@ export function AgentRoutingCard({ agentId, initial }: Props) {
     setSaving(true);
     try {
       await route.updateOverrides(overrides);
-      toast.success("Routing overrides saved");
+      toast.success(t("office:routingOverridesSaved"));
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Failed to save");
+      toast.error(err instanceof Error ? err.message : t("office:failedToSave"));
     } finally {
       setSaving(false);
     }
   };
 
-  const tierWarning = tierMissingMappingWarning(overrides, workspace.config);
+  const tierWarning = tierMissingMappingWarning(t, overrides, workspace.config);
 
   return (
     <Card>
@@ -104,7 +108,7 @@ export function AgentRoutingCard({ agentId, initial }: Props) {
             disabled={saving || tierWarning !== null}
             className="cursor-pointer"
           >
-            {saving ? "Saving…" : "Save overrides"}
+            {saving ? t("office:savingEllipsis") : t("office:saveOverrides")}
           </Button>
         </div>
       </CardContent>
@@ -118,6 +122,7 @@ export function AgentRoutingCard({ agentId, initial }: Props) {
 // broken config and bouncing on a 400. Returns null when the chosen
 // tier is mapped on at least one provider in the effective order.
 function tierMissingMappingWarning(
+  t: TFunction,
   overrides: AgentRoutingOverrides,
   cfg: WorkspaceRouting | undefined,
 ): string | null {
@@ -135,15 +140,18 @@ function tierMissingMappingWarning(
     const executionProfileIDs = profile.execution_profile_ids ?? profile.tier_profile_ids;
     if (executionProfileIDs?.[tier]) return null;
   }
-  return `No provider in the effective order has the ${tier} tier mapped. Select an execution profile for ${tier} on at least one provider in Workspace → Provider routing.`;
+  // One key: the tier appears twice in the sentence, so fragments would freeze
+  // both the order and the repetition.
+  return t("office:noProviderMappedForTierHelp", { tier: t(TIER_NAME_KEYS[tier]) });
 }
 
 function Header() {
+  const { t } = useTranslation();
   return (
     <CardHeader>
-      <CardTitle className="text-sm">Provider routing</CardTitle>
+      <CardTitle className="text-sm">{t("office:providerRoutingHeading")}</CardTitle>
       <p className="text-xs text-muted-foreground">
-        Override the workspace tier or provider order for this agent.
+        {t("office:overrideTheWorkspaceTierOrProvider")}
       </p>
     </CardHeader>
   );
@@ -164,6 +172,7 @@ function RoutingFields({
   knownProviders,
   saving,
 }: FieldsProps) {
+  const { t } = useTranslation();
   const overrideTier = overrides.tier_source === "override";
   const overrideOrder = overrides.provider_order_source === "override";
 
@@ -184,7 +193,11 @@ function RoutingFields({
 
   return (
     <>
-      <InheritRow label="Override workspace tier" checked={overrideTier} onChange={setTierSource} />
+      <InheritRow
+        label={t("office:overrideWorkspaceTier")}
+        checked={overrideTier}
+        onChange={setTierSource}
+      />
       {overrideTier ? (
         <TierToggleGroup
           value={overrides.tier || ""}
@@ -194,7 +207,7 @@ function RoutingFields({
         <InheritedTierHint defaultTier={workspaceConfig?.default_tier} />
       )}
       <InheritRow
-        label="Override workspace provider order"
+        label={t("office:overrideWorkspaceProviderOrder")}
         checked={overrideOrder}
         onChange={setOrderSource}
       />
@@ -228,14 +241,22 @@ function TierToggleGroup({ value, onChange }: { value: string; onChange: (t: Tie
 }
 
 function InheritedTierHint({ defaultTier }: { defaultTier?: Tier }) {
+  const { t } = useTranslation();
   if (!defaultTier) return null;
   return (
+    // One sentence, one key: "Inherits" + a bare tier id + "from workspace"
+    // froze the English order and rendered the wire value as display copy.
     <p className="text-xs text-muted-foreground">
-      Inherits{" "}
-      <Badge variant="secondary" className="capitalize">
-        {defaultTier}
-      </Badge>{" "}
-      from workspace.
+      <Trans
+        i18nKey="office:inheritsTierFromWorkspace"
+        values={{ tier: t(TIER_NAME_KEYS[defaultTier]) }}
+      >
+        Inherits
+        <Badge variant="secondary" className="capitalize">
+          tier
+        </Badge>
+        from workspace.
+      </Trans>
     </p>
   );
 }

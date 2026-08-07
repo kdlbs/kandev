@@ -9,9 +9,13 @@ import (
 	"sync"
 	"testing"
 
+	runtimeapi "github.com/kandev/kandev/internal/agent/runtime"
+	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/common/logger"
 	githubsvc "github.com/kandev/kandev/internal/github"
+	orchestratorexecutor "github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/repoclone"
+	taskmodels "github.com/kandev/kandev/internal/task/models"
 	taskrepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	taskservice "github.com/kandev/kandev/internal/task/service"
 )
@@ -22,6 +26,33 @@ func newTestLogger() *logger.Logger {
 		Format: "json",
 	})
 	return log
+}
+
+func TestBuildLifecycleLaunchRequestForwardsRemoteContributions(t *testing.T) {
+	binding := &taskmodels.RemoteContribution{CanonicalURL: "https://github.com/acme/widget/pull/7"}
+	req := &orchestratorexecutor.LaunchAgentRequest{
+		RemoteContribution: binding,
+		Repositories:       []orchestratorexecutor.RepoSpec{{RemoteContribution: binding}},
+	}
+
+	launchReq := buildLifecycleLaunchRequest(req, "/workspace", "office-profile")
+
+	if launchReq.RemoteContribution != binding {
+		t.Fatalf("top-level remote contribution was not forwarded")
+	}
+	if len(launchReq.Repositories) != 1 || launchReq.Repositories[0].RemoteContribution != binding {
+		t.Fatalf("per-repository remote contribution was not forwarded: %#v", launchReq.Repositories)
+	}
+}
+
+func TestBuildLifecycleLaunchRequestCarriesMCPProviders(t *testing.T) {
+	want := []string{"github", "gitlab"}
+	got := buildLifecycleLaunchRequest(&orchestratorexecutor.LaunchAgentRequest{
+		McpProviders: want,
+	}, "", "")
+	if len(got.McpProviders) != len(want) || got.McpProviders[0] != want[0] || got.McpProviders[1] != want[1] {
+		t.Fatalf("McpProviders = %#v, want %#v", got.McpProviders, want)
+	}
 }
 
 func TestDetectGitDefaultBranchDetachedHEADReturnsEmpty(t *testing.T) {
@@ -223,7 +254,7 @@ func TestResolveForReviewRedetectsStoredMasterAfterClonePath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateWorkspace: %v", err)
 	}
-	basePath := t.TempDir()
+	basePath := canonicalTempDir(t)
 	cloner := repoclone.NewCloner(
 		repoclone.Config{BasePath: basePath}, repoclone.ProtocolHTTPS, "", newTestLogger(),
 	)
@@ -411,6 +442,30 @@ func TestWrapGitHubTaskIssueStoreError(t *testing.T) {
 	otherErr := errors.New("database unavailable")
 	if got := wrapGitHubTaskIssueStoreError(otherErr); got != otherErr {
 		t.Fatalf("non-not-found error changed: got %v, want %v", got, otherErr)
+	}
+}
+
+// TestNormalizeRuntimeStopError asserts the lifecycle adapter maps the backend
+// lifecycle not-found sentinel onto the public runtime not-found sentinel, so
+// orchestrator/reconciliation can depend only on runtimeapi.ErrNotFound and
+// never has to import runtime/lifecycle. Unrelated errors pass through unchanged.
+func TestNormalizeRuntimeStopError(t *testing.T) {
+	if got := normalizeRuntimeStopError(nil); got != nil {
+		t.Fatalf("normalizeRuntimeStopError(nil) = %v, want nil", got)
+	}
+
+	wrapped := fmt.Errorf("stop agent: %w", lifecycle.ErrExecutionNotFound)
+	got := normalizeRuntimeStopError(wrapped)
+	if !errors.Is(got, runtimeapi.ErrNotFound) {
+		t.Fatalf("lifecycle not-found must normalize to runtimeapi.ErrNotFound; got %v", got)
+	}
+	if !errors.Is(got, lifecycle.ErrExecutionNotFound) {
+		t.Fatalf("original lifecycle sentinel must be preserved for diagnostics; got %v", got)
+	}
+
+	other := errors.New("agentctl unreachable")
+	if got := normalizeRuntimeStopError(other); got != other {
+		t.Fatalf("unrelated error must pass through unchanged; got %v, want %v", got, other)
 	}
 }
 

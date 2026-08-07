@@ -4,6 +4,7 @@ import { RadioGroup, RadioGroupItem } from "@kandev/ui/radio-group";
 import { Textarea } from "@kandev/ui/textarea";
 import type { GitHubAppOwnerType, GitHubAppVisibility } from "@/lib/types/github";
 import type { AppSetupErrors } from "./github-app-onboarding-model";
+import { useTranslation } from "react-i18next";
 
 export type GitHubAppImportValues = {
   displayName: string;
@@ -30,24 +31,25 @@ export function GitHubAppImportIdentityFields({
   errors: AppSetupErrors;
   update: Update;
 }) {
+  const { t } = useTranslation();
   return (
     <div className="space-y-3">
       <div className="grid gap-3 sm:grid-cols-2">
-        <Field label="Name in Kandev" error={errors.displayName}>
+        <Field label={t("github:nameInKandev")} error={errors.displayName}>
           <Input
             className="h-11"
             value={values.displayName}
             onChange={(e) => update("displayName", e.target.value)}
           />
         </Field>
-        <Field label="GitHub App slug" error={errors.slug}>
+        <Field label={t("github:githubAppSlug")} error={errors.slug}>
           <Input
             className="h-11"
             value={values.slug}
             onChange={(e) => update("slug", e.target.value)}
           />
         </Field>
-        <Field label="GitHub owner login" error={errors.ownerLogin}>
+        <Field label={t("github:githubOwnerLogin")} error={errors.ownerLogin}>
           <Input
             className="h-11"
             value={values.ownerLogin}
@@ -61,10 +63,10 @@ export function GitHubAppImportIdentityFields({
         className="flex min-h-11 flex-wrap items-center gap-5"
       >
         <Label className="flex cursor-pointer items-center gap-2">
-          <RadioGroupItem value="Organization" /> Organization
+          <RadioGroupItem value="Organization" /> {t("github:organization")}
         </Label>
         <Label className="flex cursor-pointer items-center gap-2">
-          <RadioGroupItem value="User" /> Personal account
+          <RadioGroupItem value="User" /> {t("github:personalAccount")}
         </Label>
       </RadioGroup>
     </div>
@@ -80,11 +82,14 @@ export function GitHubAppImportSecretFields({
   errors: AppSetupErrors;
   update: Update;
 }) {
+  const { t } = useTranslation();
+  // Keys are the value/error field names; only the labels are copy. Resolved
+  // here rather than at module scope so they follow a locale switch.
   const labels = {
-    appId: "App ID",
-    clientId: "Client ID",
-    clientSecret: "Client secret",
-    webhookSecret: "Webhook secret",
+    appId: t("github:appId"),
+    clientId: t("github:clientId"),
+    clientSecret: t("github:clientSecret"),
+    webhookSecret: t("github:webhookSecret"),
   } as const;
   return (
     <div className="grid gap-3 sm:grid-cols-2">
@@ -100,7 +105,7 @@ export function GitHubAppImportSecretFields({
         </Field>
       ))}
       <div className="sm:col-span-2">
-        <Field label="Private key (.pem)" error={errors.privateKey}>
+        <Field label={t("github:privateKeyPem", { extension: ".pem" })} error={errors.privateKey}>
           <Textarea
             className="min-h-28 font-mono text-xs"
             value={values.privateKey}

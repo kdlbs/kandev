@@ -22,7 +22,7 @@ describe("executor profile dirty fields", () => {
       <McpPolicyCard
         mcpPolicy='{"allow_http":true}'
         baselinePolicy='{"allow_http":true}'
-        mcpPolicyError={null}
+        mcpPolicyErrorKey={null}
         onPolicyChange={onChange}
       />,
     );
@@ -33,7 +33,7 @@ describe("executor profile dirty fields", () => {
       <McpPolicyCard
         mcpPolicy='{"allow_http":false}'
         baselinePolicy='{"allow_http":true}'
-        mcpPolicyError={null}
+        mcpPolicyErrorKey={null}
         onPolicyChange={onChange}
       />,
     );

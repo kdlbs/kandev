@@ -61,6 +61,25 @@ func (s *Store) GetMRWatchBySessionAndRepo(ctx context.Context, sessionID, repos
 	return &w, nil
 }
 
+// GetMRWatchBySessionRepoAndBranch returns the MR watch for the precise
+// (session, repository, branch) triple. Required for multi-branch tasks
+// where each branch needs its own watch — querying by (session, repo) alone
+// would collapse a secondary branch's push detection onto the first watch
+// found.
+func (s *Store) GetMRWatchBySessionRepoAndBranch(ctx context.Context, sessionID, repositoryID, branch string) (*MRWatch, error) {
+	var w MRWatch
+	err := s.ro.GetContext(ctx, &w,
+		`SELECT `+mrWatchSelectCols+` FROM gitlab_mr_watches
+		 WHERE session_id = ? AND repository_id = ? AND branch = ? LIMIT 1`, sessionID, repositoryID, branch)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &w, nil
+}
+
 // ListMRWatchesBySession returns every MR watch for a session.
 func (s *Store) ListMRWatchesBySession(ctx context.Context, sessionID string) ([]*MRWatch, error) {
 	var ws []MRWatch

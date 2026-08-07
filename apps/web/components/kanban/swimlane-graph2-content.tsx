@@ -7,6 +7,7 @@ import { ORPHAN_STEP, ORPHAN_STEP_ID, remapOrphanTasks } from "./swimlane-kanban
 import type { ViewContentProps } from "@/lib/kanban/view-registry";
 import type { Task } from "@/components/kanban-card";
 import type { WorkflowStep } from "@/components/kanban-column";
+import { useTranslation } from "react-i18next";
 
 export function getGraph2DisplayState(
   tasks: Task[],
@@ -35,6 +36,7 @@ export function SwimlaneGraph2Content({
   onToggleSelect,
   isMultiSelectMode,
 }: ViewContentProps) {
+  const { t } = useTranslation();
   const { moveTask } = useSwimlaneMove(workflowId, {
     onMoveError,
   });
@@ -67,7 +69,7 @@ export function SwimlaneGraph2Content({
   if (displayTasks.length === 0) {
     return (
       <div className="px-3 pb-3">
-        <div className="text-xs text-muted-foreground text-center py-4">No tasks</div>
+        <div className="text-xs text-muted-foreground text-center py-4">{t("kanban:noTasks")}</div>
       </div>
     );
   }

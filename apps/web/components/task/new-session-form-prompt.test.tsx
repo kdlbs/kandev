@@ -1,7 +1,8 @@
-import { act, fireEvent, render, renderHook, screen } from "@testing-library/react";
-import { useRef, useState } from "react";
+import { act, renderHook } from "@testing-library/react";
+import { useCallback, useRef, useState } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import type { TaskFormInputsHandle } from "@/components/task-create-dialog-types";
 import type { UtilityGenerationResult } from "@/hooks/use-utility-agent-generator";
 
 const mockToast = vi.fn();
@@ -18,23 +19,6 @@ vi.mock("@/hooks/use-utility-agent-generator", () => ({
   }),
 }));
 
-vi.mock("@/components/enhance-prompt-button", () => ({
-  EnhancePromptButton: ({ onClick }: { onClick: () => void }) => (
-    <button type="button" onClick={onClick}>
-      Enhance
-    </button>
-  ),
-}));
-
-vi.mock("./session-dialog-shared", () => ({
-  AttachButton: ({ onClick }: { onClick: () => void }) => (
-    <button type="button" onClick={onClick}>
-      Attach
-    </button>
-  ),
-}));
-
-import { SessionPromptField } from "./new-session-form-prompt";
 import { useSessionPromptController } from "./new-session-dialog";
 
 const GENERATED_RESULT = {
@@ -45,104 +29,33 @@ const GENERATED_RESULT = {
 const ORIGINAL_PROMPT = "original prompt";
 
 function useSessionPromptHarness(initialPrompt = ORIGINAL_PROMPT, hasTarget = true) {
-  const promptRef = useRef<HTMLTextAreaElement | null>(
-    hasTarget ? ({ value: initialPrompt } as HTMLTextAreaElement) : null,
-  );
+  const valueRef = useRef(initialPrompt);
   const [promptValue, setPromptValue] = useState(initialPrompt);
   const [hasPrompt, setHasPrompt] = useState(Boolean(initialPrompt.trim()));
-  const controller = useSessionPromptController(
-    promptRef,
-    promptValue,
-    setPromptValue,
-    setHasPrompt,
-    "task-1",
+  const updatePrompt = useCallback((value: string) => {
+    valueRef.current = value;
+    setPromptValue(value);
+    setHasPrompt(value.trim().length > 0);
+  }, []);
+  const promptRef = useRef<TaskFormInputsHandle | null>(
+    hasTarget
+      ? {
+          getValue: () => valueRef.current,
+          setValue: updatePrompt,
+          getAttachments: () => [],
+        }
+      : null,
   );
+  const controller = useSessionPromptController(promptRef, "task-1");
 
   return {
     ...controller,
     promptRef,
     promptValue,
-    setPromptValue,
+    setPromptValue: updatePrompt,
     hasPrompt,
   };
 }
-
-describe("SessionPromptField", () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-  });
-
-  it("shows inline recovery controls only when an enhanced prompt is pending", async () => {
-    const onApplyPending = vi.fn();
-    const onCopyPending = vi.fn();
-
-    const { rerender } = render(
-      <SessionPromptField
-        promptRef={{ current: null }}
-        promptValue={ORIGINAL_PROMPT}
-        contextItems={[]}
-        isBusy={false}
-        isDragging={false}
-        isSummarizing={false}
-        hasPrompt={true}
-        hasProfiles={true}
-        isUtilityConfigured={true}
-        isEnhancingPrompt={false}
-        pendingResult={null}
-        fileInputRef={{ current: null }}
-        onPromptChange={vi.fn()}
-        onPaste={vi.fn()}
-        onSubmit={vi.fn()}
-        onAttachClick={vi.fn()}
-        onEnhancePrompt={vi.fn()}
-        onApplyPending={onApplyPending}
-        onCopyPending={onCopyPending}
-        onDragOver={vi.fn()}
-        onDragLeave={vi.fn()}
-        onDrop={vi.fn()}
-        onFileInputChange={vi.fn()}
-      />,
-    );
-
-    expect(screen.queryByTestId("prompt-result-recovery")).toBeNull();
-
-    rerender(
-      <SessionPromptField
-        promptRef={{ current: null }}
-        promptValue={ORIGINAL_PROMPT}
-        contextItems={[]}
-        isBusy={false}
-        isDragging={false}
-        isSummarizing={false}
-        hasPrompt={true}
-        hasProfiles={true}
-        isUtilityConfigured={true}
-        isEnhancingPrompt={false}
-        pendingResult={GENERATED_RESULT}
-        fileInputRef={{ current: null }}
-        onPromptChange={vi.fn()}
-        onPaste={vi.fn()}
-        onSubmit={vi.fn()}
-        onAttachClick={vi.fn()}
-        onEnhancePrompt={vi.fn()}
-        onApplyPending={onApplyPending}
-        onCopyPending={onCopyPending}
-        onDragOver={vi.fn()}
-        onDragLeave={vi.fn()}
-        onDrop={vi.fn()}
-        onFileInputChange={vi.fn()}
-      />,
-    );
-
-    expect(screen.getByTestId("prompt-result-recovery")).not.toBeNull();
-
-    fireEvent.click(screen.getByRole("button", { name: "Apply" }));
-    fireEvent.click(screen.getByRole("button", { name: "Copy" }));
-
-    expect(onApplyPending).toHaveBeenCalledTimes(1);
-    expect(onCopyPending).toHaveBeenCalledTimes(1);
-  });
-});
 
 describe("useSessionPromptController", () => {
   beforeEach(() => {
@@ -233,15 +146,24 @@ describe("useSessionPromptController", () => {
   });
 
   it("retains the enhanced prompt when the target is unavailable", async () => {
+    let deliverResult: ((result: UtilityGenerationResult) => Promise<boolean>) | undefined;
     mockEnhancePrompt.mockImplementation(
       async (_source: string, deliver: (result: UtilityGenerationResult) => Promise<boolean>) =>
-        deliver(GENERATED_RESULT),
+        void (deliverResult = deliver),
     );
 
-    const { result } = renderHook(() => useSessionPromptHarness(ORIGINAL_PROMPT, false));
+    const { result } = renderHook(() => useSessionPromptHarness(ORIGINAL_PROMPT));
 
     await act(async () => {
       await result.current.handleEnhancePrompt();
+    });
+
+    act(() => {
+      result.current.promptRef.current = null;
+    });
+
+    await act(async () => {
+      await deliverResult?.(GENERATED_RESULT);
     });
 
     expect(result.current.promptValue).toBe(ORIGINAL_PROMPT);

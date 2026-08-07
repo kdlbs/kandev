@@ -22,6 +22,9 @@ import {
 } from "@/components/task-create-dialog-defaults";
 import { useRemoteAuthSpecs } from "@/hooks/domains/settings/use-remote-auth-specs";
 import { isAgentConfiguredOnExecutor } from "@/lib/agent-executor-compat";
+import type { RemoteAuthSpec } from "@/lib/api/domains/settings-api";
+import type { AgentProfileOption } from "@/lib/state/slices/settings/types";
+import { isSelectableAgentProfile } from "@/lib/state/slices/settings/types";
 import { getMultiRepoExecutorDisabledReason } from "@/components/task-create-dialog-multi-repo-guard";
 
 /**
@@ -86,6 +89,20 @@ export function computeSelectedRepoCount(fs: DialogFormState): number {
   return fs.repositories.filter((r) => r.repositoryId || r.localPath).length;
 }
 
+/** Filter raw store profiles before executor compatibility or autopick runs. */
+export function filterCompatibleAgentProfiles(
+  agentProfiles: AgentProfileOption[],
+  selectedExecutorProfile: ExecutorProfile | null,
+  authLoaded: boolean,
+  authSpecs: RemoteAuthSpec[],
+): AgentProfileOption[] {
+  const selectable = agentProfiles.filter(isSelectableAgentProfile);
+  if (!selectedExecutorProfile || !authLoaded) return selectable;
+  return selectable.filter((profile) =>
+    isAgentConfiguredOnExecutor(profile, selectedExecutorProfile, authSpecs),
+  );
+}
+
 function useExecutorProfileCompat(
   allExecutorProfiles: ExecutorProfile[],
   selectedProfileId: string,
@@ -102,9 +119,11 @@ function useExecutorProfileCompat(
   );
   const { specs: authSpecs, loaded: authLoaded } = useRemoteAuthSpecs();
   const compatibleAgentProfiles = useMemo(() => {
-    if (!selectedExecutorProfile || !authLoaded) return agentProfiles;
-    return agentProfiles.filter((ap) =>
-      isAgentConfiguredOnExecutor(ap, selectedExecutorProfile, authSpecs),
+    return filterCompatibleAgentProfiles(
+      agentProfiles,
+      selectedExecutorProfile,
+      authLoaded,
+      authSpecs,
     );
   }, [agentProfiles, selectedExecutorProfile, authSpecs, authLoaded]);
   // `noCompatibleAgent` gates the submit button. It must catch BOTH cases:

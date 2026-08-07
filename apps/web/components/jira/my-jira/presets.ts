@@ -40,15 +40,19 @@ export type JiraStoredPreset = {
   prompt_template: string;
 };
 
-export const PRESET_ICON_CHOICES: { key: JiraPresetIcon; icon: Icon; label: string }[] = [
-  { key: "code", icon: IconCode, label: "Code" },
-  { key: "search", icon: IconSearch, label: "Search" },
-  { key: "eye", icon: IconEye, label: "Eye" },
-  { key: "message", icon: IconMessageDots, label: "Message" },
-  { key: "tool", icon: IconTool, label: "Tool" },
-  { key: "bug", icon: IconBug, label: "Bug" },
-  { key: "sparkle", icon: IconSparkles, label: "Sparkle" },
-  { key: "check", icon: IconChecks, label: "Check" },
+// `key` is the persisted `JiraPresetIcon` enum; only the label is copy, so it
+// travels as a catalog key resolved at render (module-scope `t()` would freeze
+// at the boot locale — see docs/i18n.md). Same shape as
+// `PRESET_ICON_CHOICES` in components/github/my-github/action-presets.ts.
+export const PRESET_ICON_CHOICES: { key: JiraPresetIcon; icon: Icon; labelKey: string }[] = [
+  { key: "code", icon: IconCode, labelKey: "jira:presetIconCode" },
+  { key: "search", icon: IconSearch, labelKey: "jira:presetIconSearch" },
+  { key: "eye", icon: IconEye, labelKey: "jira:presetIconEye" },
+  { key: "message", icon: IconMessageDots, labelKey: "jira:presetIconMessage" },
+  { key: "tool", icon: IconTool, labelKey: "jira:presetIconTool" },
+  { key: "bug", icon: IconBug, labelKey: "jira:presetIconBug" },
+  { key: "sparkle", icon: IconSparkles, labelKey: "jira:presetIconSparkle" },
+  { key: "check", icon: IconChecks, labelKey: "jira:presetIconCheck" },
 ];
 
 const ICON_BY_KEY: Record<string, Icon> = Object.fromEntries(
@@ -63,6 +67,10 @@ export function iconForPresetKey(key: string | undefined): Icon {
 // Interpolate `{{url}}`, `{{key}}`, `{{title}}`, `{{description}}` placeholders.
 // Also supports single-brace `{foo}` for convenience. Empty description falls
 // back to "(no description)" so prompts read naturally.
+//
+// That fallback is NOT translated: it is substituted into a prompt sent to the
+// agent, not rendered as UI copy, and the agent reads the whole template as one
+// instruction in whatever language the user wrote it.
 export function interpolateJiraTemplate(
   template: string,
   opts: { url: string; key: string; title: string; description: string },
@@ -94,6 +102,11 @@ export function toTaskPreset(stored: JiraStoredPreset): JiraTaskPreset {
   };
 }
 
+// NOTE: `label`, `hint` and `prompt_template` below are NOT translated, and must
+// not be. These seed the user's editable preset list and are PERSISTED verbatim
+// into user settings on the first save, so a locale-dependent value would be
+// written into the user's data and stay there after a locale switch. The prompt
+// templates are also sent to the agent as instructions rather than shown as copy.
 export const DEFAULT_JIRA_PRESETS: JiraStoredPreset[] = [
   {
     id: "implement",

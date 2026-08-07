@@ -5,6 +5,9 @@ import { hydrateState, hydrateUI } from "./hydrator";
 import { defaultUIState } from "@/lib/state/slices/ui/ui-slice";
 import { defaultState, mergeInitialState } from "@/lib/state/default-state";
 import type { AppState } from "@/lib/state/store";
+import type { MCPAttachmentHistory } from "@/lib/state/slices/session-runtime/types";
+
+const TERMINAL_TAB_ID = "terminal-1";
 
 function makeDraft(): AppState {
   // hydrateUI only touches UI-slice fields; an empty object cast satisfies
@@ -124,6 +127,38 @@ describe("hydrateUI — typed quick chat sessions", () => {
 
     expect(result.quickChat.sessions.map((s) => s.name)).toEqual(["Renamed A", "Original B"]);
   });
+});
+
+describe("hydrateUI — quick chat lifecycle", () => {
+  it("restores server-owned terminal tabs during a fresh hydration", () => {
+    const result = produce(makeDraft(), (draft: Draft<AppState>) => {
+      hydrateUI(draft, {
+        quickChat: {
+          isOpen: false,
+          activeSessionId: null,
+          sessions: [],
+          terminalTabs: [
+            {
+              tabId: TERMINAL_TAB_ID,
+              workspaceId: "ws-1",
+              sessionId: "pty-1",
+              sequence: 1,
+              status: "running",
+            },
+          ],
+          activeKind: "terminal",
+          activeTerminalTabId: TERMINAL_TAB_ID,
+          lastTerminalTabIdByWorkspace: { "ws-1": TERMINAL_TAB_ID },
+        },
+      });
+    });
+
+    expect(result.quickChat.terminalTabs).toEqual([
+      expect.objectContaining({ tabId: TERMINAL_TAB_ID, sessionId: "pty-1" }),
+    ]);
+    expect(result.quickChat.activeKind).toBe("terminal");
+    expect(result.quickChat.activeTerminalTabId).toBe(TERMINAL_TAB_ID);
+  });
 
   it("clears stale quick chat sessions when the backend returns none", () => {
     const result = produce(makeDraft(), (draft: Draft<AppState>) => {
@@ -133,6 +168,10 @@ describe("hydrateUI — typed quick chat sessions", () => {
         sessions: [
           { sessionId: "stale-session", workspaceId: "ws-1", name: "Stale", kind: "chat" },
         ],
+        terminalTabs: [],
+        activeKind: "conversation",
+        activeTerminalTabId: null,
+        lastTerminalTabIdByWorkspace: {},
       };
       hydrateUI(draft, {
         quickChat: {
@@ -146,6 +185,78 @@ describe("hydrateUI — typed quick chat sessions", () => {
     expect(result.quickChat.sessions).toEqual([]);
     expect(result.quickChat.isOpen).toBe(false);
     expect(result.quickChat.activeSessionId).toBeNull();
+  });
+
+  it("preserves browser-local terminal tabs when server conversations resync", () => {
+    const result = produce(makeDraft(), (draft: Draft<AppState>) => {
+      draft.quickChat = {
+        isOpen: true,
+        activeSessionId: "chat-1",
+        sessions: [{ sessionId: "chat-1", workspaceId: "ws-1", kind: "chat" }],
+        terminalTabs: [
+          {
+            tabId: TERMINAL_TAB_ID,
+            workspaceId: "ws-1",
+            sessionId: "pty-1",
+            sequence: 1,
+            status: "running",
+          },
+        ],
+        activeKind: "terminal",
+        activeTerminalTabId: TERMINAL_TAB_ID,
+        lastTerminalTabIdByWorkspace: { "ws-1": TERMINAL_TAB_ID },
+      };
+      hydrateUI(draft, {
+        quickChat: {
+          isOpen: false,
+          activeSessionId: null,
+          sessions: [],
+        },
+      });
+    });
+
+    expect(result.quickChat.sessions).toEqual([]);
+    expect(result.quickChat.terminalTabs).toHaveLength(1);
+    expect(result.quickChat.activeKind).toBe("terminal");
+    expect(result.quickChat.activeTerminalTabId).toBe(TERMINAL_TAB_ID);
+    expect(result.quickChat.isOpen).toBe(true);
+  });
+});
+
+describe("hydrateUI — terminal descriptor reconciliation", () => {
+  it("treats an empty server terminal list as authoritative during hydration", () => {
+    const result = produce(makeDraft(), (draft: Draft<AppState>) => {
+      draft.quickChat = {
+        isOpen: true,
+        activeSessionId: null,
+        sessions: [],
+        terminalTabs: [
+          {
+            tabId: TERMINAL_TAB_ID,
+            workspaceId: "ws-1",
+            sessionId: "pty-stale",
+            sequence: 1,
+            status: "running",
+          },
+        ],
+        activeKind: "terminal",
+        activeTerminalTabId: TERMINAL_TAB_ID,
+        lastTerminalTabIdByWorkspace: { "ws-1": TERMINAL_TAB_ID },
+      };
+      hydrateUI(draft, {
+        quickChat: {
+          isOpen: false,
+          activeSessionId: null,
+          sessions: [],
+          terminalTabs: [],
+        },
+      });
+    });
+
+    expect(result.quickChat.terminalTabs).toEqual([]);
+    expect(result.quickChat.activeKind).toBe("conversation");
+    expect(result.quickChat.activeTerminalTabId).toBeNull();
+    expect(result.quickChat.isOpen).toBe(false);
   });
 });
 
@@ -237,6 +348,28 @@ describe("mergeInitialState — sidebar views from boot settings", () => {
       orderedTaskIds: ["task-2", "task-1"],
       subtaskOrderByParentId: { "task-1": ["subtask-1"] },
     });
+  });
+
+  it("preserves an archived clause in the boot draft", () => {
+    const result = mergeInitialState({
+      userSettings: {
+        sidebarDraft: {
+          baseViewId: "server",
+          filters: [
+            { id: "archived", dimension: "archived", op: "is", value: true },
+            { id: "title", dimension: "titleMatch", op: "matches", value: "keep" },
+          ],
+          sort: { key: "state", direction: "asc" },
+          group: "none",
+        },
+        loaded: true,
+      },
+    } as unknown as Partial<AppState>);
+
+    expect(result.sidebarViews.draft?.filters).toEqual([
+      { id: "archived", dimension: "archived", op: "is", value: true },
+      { id: "title", dimension: "titleMatch", op: "matches", value: "keep" },
+    ]);
   });
 });
 
@@ -344,6 +477,121 @@ describe("hydrateState — sidebar views from user settings", () => {
       subtaskOrderByParentId: { shared: ["server-child"], serverOnly: ["child"] },
       syncError: "retry",
     });
+  });
+});
+
+describe("hydrateState — sidebar draft migration", () => {
+  it("preserves an archived clause during hydration", () => {
+    const result = produce(makeAppDraft(), (draft: Draft<AppState>) => {
+      hydrateState(draft, {
+        userSettings: {
+          sidebarDraft: {
+            baseViewId: "server",
+            filters: [{ id: "archived", dimension: "archived", op: "is", value: true }],
+            sort: { key: "state", direction: "asc" },
+            group: "none",
+          },
+        },
+      } as unknown as Partial<AppState>);
+    });
+
+    expect(result.sidebarViews.draft?.filters).toEqual([
+      { id: "archived", dimension: "archived", op: "is", value: true },
+    ]);
+  });
+});
+
+describe("hydrateState — session runtime model state", () => {
+  const sessionId = "session-1";
+  const modelId = "claude-opus-4-8";
+  const liveModelId = "live-model";
+
+  it("force-merges sessionModels over live state so the selector survives resume", () => {
+    const result = produce(makeAppDraft(), (draft: Draft<AppState>) => {
+      draft.sessionModels.bySessionId[sessionId] = {
+        currentModelId: liveModelId,
+        models: [{ modelId: liveModelId, name: "Live" }],
+        configOptions: [],
+      };
+      hydrateState(
+        draft,
+        {
+          sessionModels: {
+            bySessionId: {
+              [sessionId]: {
+                currentModelId: modelId,
+                models: [{ modelId, name: "Opus" }],
+                configOptions: [],
+              },
+            },
+          },
+        } as unknown as Partial<AppState>,
+        { activeSessionId: sessionId, forceMergeSessionId: sessionId },
+      );
+    });
+
+    expect(result.sessionModels.bySessionId[sessionId]).toEqual({
+      currentModelId: modelId,
+      models: [{ modelId, name: "Opus" }],
+      configOptions: [],
+    });
+  });
+
+  it("force-merges sessionMcpStatus over live state", () => {
+    const bootHistory: MCPAttachmentHistory = {
+      version: 1,
+      current: {
+        attachment_attempt_id: "attempt-boot",
+        started_at: "2026-06-11T00:00:00.000Z",
+        servers: [{ name: "fs", status: "connected" }],
+      },
+    };
+    const result = produce(makeAppDraft(), (draft: Draft<AppState>) => {
+      draft.sessionMcpStatus.bySessionId[sessionId] = {
+        version: 1,
+        current: {
+          attachment_attempt_id: "attempt-live",
+          started_at: "2026-06-10T00:00:00.000Z",
+          servers: [{ name: "stale", status: "failed" }],
+        },
+      };
+      hydrateState(
+        draft,
+        {
+          sessionMcpStatus: { bySessionId: { [sessionId]: bootHistory } },
+        } as unknown as Partial<AppState>,
+        { activeSessionId: sessionId, forceMergeSessionId: sessionId },
+      );
+    });
+
+    expect(result.sessionMcpStatus.bySessionId[sessionId]).toEqual(bootHistory);
+  });
+
+  it("does not overwrite live model state for the active (non-force-merged) session", () => {
+    const result = produce(makeAppDraft(), (draft: Draft<AppState>) => {
+      draft.sessionModels.bySessionId["active-session"] = {
+        currentModelId: liveModelId,
+        models: [],
+        configOptions: [],
+      };
+      hydrateState(
+        draft,
+        {
+          sessionModels: {
+            bySessionId: {
+              "active-session": {
+                currentModelId: "stale-model",
+                models: [],
+                configOptions: [],
+              },
+            },
+          },
+        } as unknown as Partial<AppState>,
+        { activeSessionId: "active-session" },
+      );
+    });
+
+    expect(result.sessionModels.bySessionId["active-session"].currentModelId).toBe(liveModelId);
   });
 });
 

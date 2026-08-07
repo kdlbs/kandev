@@ -11,6 +11,7 @@ const RUNNING_ICON_TEST_ID = "task-state-running";
 const BACKGROUND_ICON_TEST_ID = "task-state-background-running";
 const WAITING_FOR_INPUT_ICON_TEST_ID = "task-state-waiting-for-input";
 const PENDING_PERMISSION_ICON_TEST_ID = "task-state-pending-permission";
+const INTERRUPTED_ICON_TEST_ID = "task-state-interrupted";
 const AGENT_ERROR_ICON_TEST_ID = "task-agent-error-icon";
 const PREPARING_PHASE = "preparing";
 const DATA_LOADING_PHASE = "data-loading-phase";
@@ -20,6 +21,7 @@ const VIOLET_SPINNER_CLASS = "text-violet-500";
 const PREPARING_SPINNER_CLASS = "text-muted-foreground/40";
 const SPIN_CLASS = "animate-spin";
 const SLOW_SPIN_CLASS = "[animation-duration:2s]";
+const TASK_ACTIONS_LABEL = "Task actions";
 
 afterEach(() => cleanup());
 
@@ -165,11 +167,98 @@ describe("TaskItem status icon", () => {
   });
 });
 
+describe("TaskItem interrupted icon", () => {
+  it("shows the red interrupted icon for a task marked interrupted after a restart", () => {
+    renderTaskItem({
+      state: "REVIEW",
+      sessionState: "WAITING_FOR_INPUT",
+      interrupted: true,
+    });
+
+    expect(screen.queryByTestId(INTERRUPTED_ICON_TEST_ID)).not.toBeNull();
+    expect(screen.queryByTestId(TURN_FINISHED_ICON_TEST_ID)).toBeNull();
+    expect(screen.queryByTestId(WORKFLOW_COMPLETE_ICON_TEST_ID)).toBeNull();
+  });
+
+  it("does not show the interrupted icon while the task is running again", () => {
+    renderTaskItem({
+      state: "REVIEW",
+      sessionState: "RUNNING",
+      interrupted: true,
+    });
+
+    expect(screen.queryByTestId(INTERRUPTED_ICON_TEST_ID)).toBeNull();
+    expect(screen.queryByTestId(RUNNING_ICON_TEST_ID)).not.toBeNull();
+  });
+
+  it("does not show the interrupted icon for a terminal task", () => {
+    renderTaskItem({
+      state: "COMPLETED",
+      sessionState: "COMPLETED",
+      interrupted: true,
+    });
+
+    expect(screen.queryByTestId(INTERRUPTED_ICON_TEST_ID)).toBeNull();
+    expect(screen.queryByTestId(TURN_FINISHED_ICON_TEST_ID)).not.toBeNull();
+  });
+
+  it("keeps pending-input affordances over the interrupted icon", () => {
+    renderTaskItem({
+      state: "REVIEW",
+      sessionState: "WAITING_FOR_INPUT",
+      hasPendingClarification: true,
+      interrupted: true,
+    });
+
+    expect(screen.queryByTestId(INTERRUPTED_ICON_TEST_ID)).toBeNull();
+    expect(screen.queryByTestId(WAITING_FOR_INPUT_ICON_TEST_ID)).not.toBeNull();
+  });
+});
+
 describe("TaskItem actions", () => {
+  it("keeps row-focus actions visible when no diff stats are available", () => {
+    renderTaskItem({ isSelected: true });
+
+    const actionButton = screen.getByRole("button", { name: TASK_ACTIONS_LABEL });
+    const actionContainer = actionButton.parentElement;
+
+    expect(actionContainer?.className).toContain("group-focus-within:opacity-100");
+    expect(actionContainer?.className.split(/\s+/)).not.toContain("focus-within:opacity-100");
+  });
+
+  it("keeps diff stats as the idle affordance when the selected row owns focus", () => {
+    renderTaskItem({
+      isSelected: true,
+      diffStats: { additions: 3488, deletions: 199 },
+    });
+
+    const diffStats = screen.getByTestId("sidebar-task-diff-stats");
+    const actionButton = screen.getByRole("button", { name: TASK_ACTIONS_LABEL });
+    const actionContainer = actionButton.parentElement;
+
+    expect(diffStats.className).not.toContain("group-focus-within:opacity-0");
+    expect(actionContainer?.className).not.toContain("group-focus-within:opacity-100");
+    expect(actionContainer?.className).toContain("focus-within:opacity-100");
+  });
+
+  it("hides diff stats and keeps the action trigger visible when the context menu is open", () => {
+    renderTaskItem({
+      menuOpen: true,
+      diffStats: { additions: 42, deletions: 7 },
+    });
+
+    const diffStats = screen.getByTestId("sidebar-task-diff-stats");
+    const actionButton = screen.getByRole("button", { name: TASK_ACTIONS_LABEL });
+    const actionContainer = actionButton.parentElement;
+
+    expect(diffStats.className).toContain("opacity-0");
+    expect(actionContainer?.className).toContain("opacity-100");
+  });
+
   it("announces the task menu state", () => {
     renderTaskItem({ menuOpen: true });
 
-    const actions = screen.getByRole("button", { name: "Task actions" });
+    const actions = screen.getByRole("button", { name: TASK_ACTIONS_LABEL });
     expect(actions.getAttribute("aria-haspopup")).toBe("menu");
     expect(actions.getAttribute("aria-expanded")).toBe("true");
   });
@@ -177,9 +266,9 @@ describe("TaskItem actions", () => {
   it("does not announce a closed menu as expanded while deleting", () => {
     renderTaskItem({ isDeleting: true });
 
-    expect(screen.getByRole("button", { name: "Task actions" }).getAttribute("aria-expanded")).toBe(
-      "false",
-    );
+    expect(
+      screen.getByRole("button", { name: TASK_ACTIONS_LABEL }).getAttribute("aria-expanded"),
+    ).toBe("false");
   });
 });
 
@@ -349,5 +438,40 @@ describe("TaskItem background-running lifecycle", () => {
     expect(screen.queryByTestId(TURN_FINISHED_ICON_TEST_ID)).not.toBeNull();
     expect(screen.queryByTestId(BACKGROUND_ICON_TEST_ID)).toBeNull();
     expect(screen.queryByTestId(RUNNING_ICON_TEST_ID)).toBeNull();
+  });
+});
+
+describe("TaskItem queued prompt count badge", () => {
+  const QUEUED_BADGE_TEST_ID = "sidebar-task-queued-count";
+
+  it("shows a mail badge with the count when prompts are queued", () => {
+    renderTaskItem({ queuedCount: 3 });
+
+    const badge = screen.getByTestId(QUEUED_BADGE_TEST_ID);
+    expect(badge.textContent).toBe("3");
+    expect(badge.querySelector("svg")).not.toBeNull();
+  });
+
+  it("hides the badge when nothing is queued", () => {
+    renderTaskItem({ queuedCount: 0 });
+    expect(screen.queryByTestId(QUEUED_BADGE_TEST_ID)).toBeNull();
+
+    renderTaskItem({ queuedCount: undefined });
+    expect(screen.queryByTestId(QUEUED_BADGE_TEST_ID)).toBeNull();
+  });
+
+  it("renders the metadata line for a row whose only metadata is the queued count", () => {
+    renderTaskItem({ queuedCount: 2, updatedAt: undefined });
+
+    const badge = screen.getByTestId(QUEUED_BADGE_TEST_ID);
+    expect(badge.textContent).toBe("2");
+  });
+
+  it("localizes the accessible label with the count", () => {
+    renderTaskItem({ queuedCount: 1 });
+
+    expect(screen.getByTestId(QUEUED_BADGE_TEST_ID).getAttribute("aria-label")).toContain(
+      "queued prompt",
+    );
   });
 });

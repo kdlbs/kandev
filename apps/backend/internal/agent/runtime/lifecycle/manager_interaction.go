@@ -109,6 +109,28 @@ func (m *Manager) PromptAgentWithDispatchCallback(ctx context.Context, execution
 	return result, err
 }
 
+// SteerAgentWithDispatchCallback delivers a steer: it hands the prompt into a
+// turn that is still generating rather than serializing behind it. It mirrors
+// PromptAgentWithDispatchCallback's activity accounting; only the underlying
+// session-manager call differs.
+func (m *Manager) SteerAgentWithDispatchCallback(ctx context.Context, executionID string, prompt string, attachments []v1.MessageAttachment, dispatchOnly bool, onDispatched func()) (*PromptResult, error) {
+	execution, exists := m.executionStore.Get(executionID)
+	if !exists {
+		return nil, fmt.Errorf("execution %q not found: %w", executionID, ErrExecutionNotFound)
+	}
+	lease, err := m.acquireActivity(ctx, activity.KindExecutionRunning)
+	if err != nil {
+		return nil, err
+	}
+	key := executionActivityKey(executionID)
+	m.trackActivity(key, lease)
+	result, err := m.sessionManager.SendPromptSteerWithDispatchCallback(ctx, execution, prompt, true, attachments, dispatchOnly, onDispatched)
+	if err != nil || !dispatchOnly {
+		m.releaseActivity(key)
+	}
+	return result, err
+}
+
 // cancelWaitTimeout bounds how long CancelAgent waits for the in-flight SendPrompt
 // to exit after the in-flight session/prompt RPC has ended (cancel acknowledged).
 // Exposed as a var (not const) so tests can shorten it without fake clocks.
@@ -144,7 +166,10 @@ func (m *Manager) CancelAgent(ctx context.Context, executionID string) error {
 		zap.String("session_id", execution.SessionID))
 
 	cancelErr := execution.agentctl.Cancel(ctx)
-	if cancelErr != nil && !errors.Is(cancelErr, agentctlclient.ErrTurnCancelNotAcknowledged) {
+	streamDisconnected := errors.Is(cancelErr, agentctlclient.ErrAgentStreamNotConnected)
+	if cancelErr != nil &&
+		!errors.Is(cancelErr, agentctlclient.ErrTurnCancelNotAcknowledged) &&
+		!streamDisconnected {
 		m.logger.Error("failed to cancel agent turn",
 			zap.String("execution_id", executionID),
 			zap.Error(cancelErr))
@@ -161,7 +186,22 @@ func (m *Manager) CancelAgent(ctx context.Context, executionID string) error {
 	execution.promptFinishedMu.Unlock()
 
 	if ch == nil {
+		if streamDisconnected {
+			m.logger.Info("agent stream already disconnected; cancel is complete",
+				zap.String("execution_id", executionID))
+		}
 		return nil
+	}
+
+	// Teardown may close the stream immediately before an explicit cancel (for
+	// example, archive followed by cancel). Treat it like an unacknowledged
+	// cancel: locally release any in-flight prompt and let orchestration perform
+	// its idempotent DB reconciliation.
+	if streamDisconnected {
+		m.logger.Warn("agent stream disconnected before cancel; escalating locally",
+			zap.String("execution_id", executionID),
+			zap.Error(cancelErr))
+		return m.escalateStuckCancel(ctx, execution, ch)
 	}
 
 	// The agent did not end the in-flight session/prompt RPC after cancel (e.g. it
@@ -1208,6 +1248,18 @@ func (m *Manager) BeginPrompt(executionID string) (uint64, error) {
 // prompt generation still identify the lifecycle prompt active for sessionID.
 func (m *Manager) OwnsPromptGeneration(sessionID, executionID string, generation uint64) bool {
 	return m.executionStore.OwnsPromptGeneration(sessionID, executionID, generation)
+}
+
+// GetPromptGenerationForSession returns the generation currently owned by the
+// active prompt for sessionID. Orchestrator cancellation uses this together
+// with the execution and turn IDs to reject stale terminal events while the
+// lifecycle manager waits for an acknowledged cancel to settle.
+func (m *Manager) GetPromptGenerationForSession(_ context.Context, sessionID string) (uint64, error) {
+	execution, exists := m.executionStore.GetBySessionID(sessionID)
+	if !exists {
+		return 0, fmt.Errorf("%w: %s", ErrNoExecutionForSession, sessionID)
+	}
+	return execution.promptGenerationSnapshot(), nil
 }
 
 // MarkReady marks an execution as ready for follow-up prompts AFTER A TURN.

@@ -10,6 +10,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@kandev/ui/alert-dialog";
+import { useTranslation } from "react-i18next";
 
 type QuickChatDeleteDialogProps = {
   sessionToDelete: string | null;
@@ -22,30 +23,31 @@ export function QuickChatDeleteDialog({
   onOpenChange,
   onConfirm,
 }: QuickChatDeleteDialogProps) {
+  const { t } = useTranslation();
   return (
     <AlertDialog open={!!sessionToDelete} onOpenChange={onOpenChange}>
       <AlertDialogContent>
         <AlertDialogHeader>
-          <AlertDialogTitle>Delete Quick Chat?</AlertDialogTitle>
+          <AlertDialogTitle>{t("chat:deleteQuickChat")}</AlertDialogTitle>
           <AlertDialogDescription asChild>
             <div>
-              <p>This will permanently delete this quick chat session, including:</p>
+              <p>{t("chat:deleteQuickChatIntro")}</p>
               <ul className="list-disc list-inside mt-2 space-y-1">
-                <li>All conversation history</li>
-                <li>The task and its data</li>
-                <li>The associated worktree</li>
+                <li>{t("chat:allConversationHistory")}</li>
+                <li>{t("chat:theTaskAndItsData")}</li>
+                <li>{t("chat:theAssociatedWorktree")}</li>
               </ul>
-              <p className="mt-2">This action cannot be undone.</p>
+              <p className="mt-2">{t("chat:thisActionCannotBeUndone")}</p>
             </div>
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
-          <AlertDialogCancel className="cursor-pointer">Cancel</AlertDialogCancel>
+          <AlertDialogCancel className="cursor-pointer">{t("common:cancel")}</AlertDialogCancel>
           <AlertDialogAction
             onClick={onConfirm}
             className="cursor-pointer bg-destructive text-destructive-foreground hover:bg-destructive/90"
           >
-            Delete
+            {t("chat:delete")}
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>

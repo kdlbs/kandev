@@ -6,23 +6,25 @@ import { Button } from "@kandev/ui/button";
 import { Input } from "@kandev/ui/input";
 import { Textarea } from "@kandev/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast/sonner";
 import { updateProject } from "@/lib/api/domains/office-api";
 import { useAppStore } from "@/components/state-provider";
 import type { Project, ProjectStatus } from "@/lib/state/slices/office/types";
+import { PROJECT_STATUS_LABEL_KEYS } from "../../lib/label-keys";
+import { useTranslation } from "react-i18next";
 
-const STATUS_OPTIONS: { value: ProjectStatus; label: string }[] = [
-  { value: "active", label: "Active" },
-  { value: "completed", label: "Completed" },
-  { value: "on_hold", label: "On Hold" },
-  { value: "archived", label: "Archived" },
-];
+// `labelKey`, not `label` — module scope freezes a `t()` at the boot locale.
+// The `value`s are the persisted project-status ids and stay untranslated.
+const STATUS_OPTIONS: { value: ProjectStatus; labelKey: string }[] = (
+  ["active", "completed", "on_hold", "archived"] as const
+).map((value) => ({ value, labelKey: PROJECT_STATUS_LABEL_KEYS[value] }));
 
 type ProjectHeaderProps = {
   project: Project;
 };
 
 export function ProjectHeader({ project }: ProjectHeaderProps) {
+  const { t } = useTranslation();
   const updateProjectStore = useAppStore((s) => s.updateProject);
 
   const [name, setName] = useState(project.name);
@@ -44,9 +46,9 @@ export function ProjectHeader({ project }: ProjectHeaderProps) {
         updateProjectStore(project.id, patch);
       }
       setDirty(false);
-      toast.success("Project saved");
+      toast.success(t("office:projectSaved"));
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Failed to save project");
+      toast.error(err instanceof Error ? err.message : t("office:failedToSaveProject"));
     } finally {
       setSaving(false);
     }
@@ -80,7 +82,7 @@ export function ProjectHeader({ project }: ProjectHeaderProps) {
           <SelectContent>
             {STATUS_OPTIONS.map((opt) => (
               <SelectItem key={opt.value} value={opt.value} className="cursor-pointer">
-                {opt.label}
+                {t(opt.labelKey)}
               </SelectItem>
             ))}
           </SelectContent>
@@ -88,7 +90,7 @@ export function ProjectHeader({ project }: ProjectHeaderProps) {
         {dirty && (
           <Button size="sm" onClick={handleSave} disabled={saving} className="cursor-pointer">
             <IconDeviceFloppy className="h-4 w-4 mr-1" />
-            {saving ? "Saving..." : "Save"}
+            {saving ? t("office:saving") : t("common:save")}
           </Button>
         )}
       </div>
@@ -98,7 +100,7 @@ export function ProjectHeader({ project }: ProjectHeaderProps) {
           setDescription(e.target.value);
           setDirty(true);
         }}
-        placeholder="Add a description..."
+        placeholder={t("office:addADescription")}
         className="min-h-[60px] text-sm resize-none"
       />
     </div>

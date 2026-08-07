@@ -1,5 +1,5 @@
 import { act, renderHook } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Workflow, WorkflowTemplate, Workspace } from "@/lib/types/http";
 import { createDraftWorkflowSteps, useWorkflowCreation } from "./use-workflow-creation";
 
@@ -8,7 +8,14 @@ const template = {
   id: "template-1",
   name: "Template",
   description: "Template description",
-  default_steps: [{ name: "Template Step", position: 0, color: "bg-blue-500" }],
+  default_steps: [
+    {
+      name: "Template Step",
+      position: 0,
+      color: "bg-blue-500",
+      cancel_triggers_turn_complete: true,
+    },
+  ],
 } as WorkflowTemplate;
 
 function renderCreationHook(workflowTemplates: WorkflowTemplate[] = []) {
@@ -25,6 +32,11 @@ function renderCreationHook(workflowTemplates: WorkflowTemplate[] = []) {
 beforeEach(() => {
   vi.clearAllMocks();
   vi.spyOn(crypto, "randomUUID").mockReturnValue("00000000-0000-4000-8000-000000000001");
+});
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+  vi.restoreAllMocks();
 });
 
 describe("useWorkflowCreation", () => {
@@ -67,6 +79,21 @@ describe("useWorkflowCreation", () => {
     expect(result.current.initialStepsByWorkflowId.get(workflow.id)).toHaveLength(4);
   });
 
+  it("creates a workflow when crypto.randomUUID is unavailable", () => {
+    vi.stubGlobal("crypto", {});
+    const { result, getWorkflows } = renderCreationHook();
+
+    act(() => {
+      result.current.setNewWorkflowName("HTTP Workflow");
+      result.current.setSelectedTemplateId(null);
+    });
+    act(() => result.current.handleCreateWorkflow());
+
+    const [workflow] = getWorkflows();
+    expect(workflow.id).toMatch(/^temp-workflow-[0-9a-f-]{36}$/);
+    expect(result.current.initialStepsByWorkflowId.get(workflow.id)).toHaveLength(4);
+  });
+
   it("uses template fields without persisting from the dialog", () => {
     const { result, getWorkflows } = renderCreationHook([template]);
 
@@ -82,6 +109,7 @@ describe("useWorkflowCreation", () => {
     expect(result.current.initialStepsByWorkflowId.get(workflow.id)?.[0]).toMatchObject({
       name: "Template Step",
       color: "bg-blue-500",
+      cancel_triggers_turn_complete: true,
     });
   });
 });

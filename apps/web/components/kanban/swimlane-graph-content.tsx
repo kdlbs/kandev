@@ -25,6 +25,7 @@ import type { MoveTaskError } from "@/hooks/use-drag-and-drop";
 import type { KanbanState } from "@/lib/state/slices/kanban/types";
 import { useTaskPendingInput } from "@/hooks/use-task-pending-input";
 import { compareTasksByCreatedDesc } from "@/lib/kanban/task-order";
+import { useTranslation } from "react-i18next";
 
 export type SwimlaneGraphContentProps = {
   workflowId: string;
@@ -80,13 +81,12 @@ function DraggableTaskChip({
     primarySessionState: task.primarySessionState,
     primarySessionPendingAction: task.primarySessionPendingAction,
   });
-  const statusIcon = getTaskStateIcon(
-    task.state,
-    "h-3 w-3",
-    pendingInput.clarification,
-    task.foregroundActivity,
-    pendingInput.permission,
-  );
+  const statusIcon = getTaskStateIcon(task.state, "h-3 w-3", {
+    hasPendingClarification: pendingInput.clarification,
+    foregroundActivity: task.foregroundActivity,
+    hasPendingPermission: pendingInput.permission,
+    interrupted: task.interrupted,
+  });
 
   return (
     <button
@@ -118,13 +118,12 @@ function TaskChipPreview({ task }: { task: Task }) {
     primarySessionState: task.primarySessionState,
     primarySessionPendingAction: task.primarySessionPendingAction,
   });
-  const statusIcon = getTaskStateIcon(
-    task.state,
-    "h-3 w-3",
-    pendingInput.clarification,
-    task.foregroundActivity,
-    pendingInput.permission,
-  );
+  const statusIcon = getTaskStateIcon(task.state, "h-3 w-3", {
+    hasPendingClarification: pendingInput.clarification,
+    foregroundActivity: task.foregroundActivity,
+    hasPendingPermission: pendingInput.permission,
+    interrupted: task.interrupted,
+  });
   return (
     <div
       className={cn(
@@ -295,6 +294,7 @@ export function SwimlaneGraphContent({
   onPreviewTask,
   onMoveError,
 }: SwimlaneGraphContentProps) {
+  const { t } = useTranslation();
   const {
     sensors,
     clampVertical,
@@ -309,7 +309,7 @@ export function SwimlaneGraphContent({
   if (tasks.length === 0) {
     return (
       <div className="px-3 pb-3">
-        <div className="text-xs text-muted-foreground text-center py-4">No tasks</div>
+        <div className="text-xs text-muted-foreground text-center py-4">{t("kanban:noTasks")}</div>
       </div>
     );
   }

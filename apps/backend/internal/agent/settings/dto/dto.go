@@ -26,6 +26,10 @@ type AgentProfileDTO struct {
 	CLIFlags       []CLIFlagDTO       `json:"cli_flags"`
 	EnvVars        []ProfileEnvVarDTO `json:"env_vars,omitempty"`
 	CLIPassthrough bool               `json:"cli_passthrough"`
+	// Enabled gates the profile from new-work selection. When false the
+	// profile is hidden from task/session creation pickers but still serves
+	// existing sessions and remains editable in settings.
+	Enabled bool `json:"enabled"`
 	// CommandPrefix is an optional launcher prefix prepended to the agent
 	// command (e.g. "greywall --"). Shell-tokenised at launch time.
 	CommandPrefix string `json:"command_prefix,omitempty"`

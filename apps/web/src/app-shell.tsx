@@ -1,3 +1,5 @@
+import { useTranslation } from "react-i18next";
+
 import { AppSidebar } from "@/components/app-sidebar/app-sidebar";
 import { AppStatusSurfaceProvider } from "@/components/app-status-bar/app-status-surface-provider";
 import { CommandPanel } from "@/components/command-panel";
@@ -24,6 +26,26 @@ type AppShellProps = {
   children: React.ReactNode;
 };
 
+/**
+ * sonner names its toast region `Notifications alt+T` by default — copy a
+ * screen-reader user hears on every screen, and the last un-migrated
+ * `aria-label` the pseudo-coverage oracle reported.
+ *
+ * Deliberately its own component rather than a `t()` call in `AppShell`:
+ * `<I18nProvider>` is mounted BY `AppShell`, so `AppShell`'s own render runs
+ * outside the provider and would not re-render on a locale switch.
+ */
+function AppToaster() {
+  const { t } = useTranslation();
+  return (
+    <SonnerToaster
+      richColors
+      position="top-right"
+      containerAriaLabel={t("common:toastRegionLabel")}
+    />
+  );
+}
+
 export function AppShell({ children }: AppShellProps) {
   return (
     <I18nProvider>
@@ -31,7 +53,7 @@ export function AppShell({ children }: AppShellProps) {
         <DiffWorkerPoolProvider>
           <TooltipProvider>
             <ToastProvider>
-              <SonnerToaster richColors position="top-right" />
+              <AppToaster />
               <SessionFailureToastBridge />
               <TaskDeletedToastBridge />
               <UpdateAvailableToastBridge />

@@ -93,6 +93,12 @@ export type AgentProfile = {
   /** Environment variables injected when this profile starts an agent session. */
   envVars?: ProfileEnvVar[];
   cliPassthrough: boolean;
+  /**
+   * False hides the profile from task/session creation pickers. Existing
+   * sessions keep running and the profile stays editable in settings.
+   * Absent on old payloads — treat as enabled.
+   */
+  enabled?: boolean;
   userModified?: boolean;
 
   // --- Office orchestration (always populated by office API,
@@ -166,6 +172,7 @@ export type AgentProfilePayload = {
   command_prefix?: string;
   env_vars?: ProfileEnvVar[];
   cli_passthrough: boolean;
+  enabled?: boolean;
   user_modified?: boolean;
   created_at: string;
   updated_at: string;

@@ -13,6 +13,7 @@ import { MobilePillButton } from "./mobile-pill-button";
 import { MobilePickerSheet } from "./mobile-picker-sheet";
 import { useMobileTerminalsContext } from "./mobile-terminals-context";
 import type { Terminal } from "@/hooks/domains/session/use-terminals";
+import { useTranslation } from "react-i18next";
 
 function TerminalRow({
   terminal,
@@ -27,6 +28,7 @@ function TerminalRow({
   onSelect: (id: string) => void;
   onAskClose: (terminal: Terminal) => void;
 }) {
+  const { t } = useTranslation();
   return (
     <div
       role="button"
@@ -47,14 +49,14 @@ function TerminalRow({
       <span className="text-sm truncate flex-1">{terminal.label}</span>
       {isRunning && (
         <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 leading-none">
-          running
+          {t("task:running")}
         </span>
       )}
       {terminal.closable && (
         <Button
           variant="ghost"
           size="icon-sm"
-          aria-label={`Close ${terminal.label}`}
+          aria-label={t("task:close2", { label: terminal.label })}
           className="cursor-pointer h-7 w-7"
           onClick={(e) => {
             e.stopPropagation();
@@ -133,6 +135,7 @@ const MobileTerminalsList = memo(function MobileTerminalsList({
   sessionId: string | null;
   onClose: () => void;
 }) {
+  const { t } = useTranslation();
   const { terminals, terminalTabValue, addTerminal, removeTerminal, environmentId } =
     useMobileTerminalsContext();
   const setRightPanelActiveTab = useAppStore((s) => s.setRightPanelActiveTab);
@@ -179,7 +182,9 @@ const MobileTerminalsList = memo(function MobileTerminalsList({
 
   if (!sessionId) {
     return (
-      <div className="text-xs text-muted-foreground px-2 py-6 text-center">No active session</div>
+      <div className="text-xs text-muted-foreground px-2 py-6 text-center">
+        {t("task:noActiveSession")}
+      </div>
     );
   }
 
@@ -187,7 +192,7 @@ const MobileTerminalsList = memo(function MobileTerminalsList({
     <div className="flex flex-col gap-2 px-1">
       <div className="flex items-center justify-between px-1">
         <span className="text-xs font-medium text-muted-foreground">
-          {terminals.length} terminal{terminals.length === 1 ? "" : "s"}
+          {t("task:terminalCount", { count: terminals.length })}
         </span>
         <Button
           size="sm"
@@ -197,13 +202,13 @@ const MobileTerminalsList = memo(function MobileTerminalsList({
           data-testid="mobile-add-terminal"
         >
           <IconPlus className="h-4 w-4" />
-          New terminal
+          {t("task:newTerminal")}
         </Button>
       </div>
       <div className="flex flex-col gap-0.5">
         {terminals.length === 0 && (
           <div className="text-xs text-muted-foreground px-2 py-4 text-center">
-            No terminals yet.
+            {t("task:noTerminalsYet")}
           </div>
         )}
         {terminals.map((t) => (
@@ -219,7 +224,7 @@ const MobileTerminalsList = memo(function MobileTerminalsList({
       </div>
       <CloseTerminalConfirmDialog
         open={pendingClose !== null}
-        terminalName={pendingClose?.label || "Terminal"}
+        terminalName={pendingClose?.label || t("task:terminal")}
         onOpenChange={(open) => {
           if (!open) setPendingClose(null);
         }}
@@ -230,6 +235,7 @@ const MobileTerminalsList = memo(function MobileTerminalsList({
 });
 
 function useActiveTerminalPillLabel(): { label: string; count: string | undefined } {
+  const { t } = useTranslation();
   const { terminals, terminalTabValue } = useMobileTerminalsContext();
   const activeIdx = terminals.findIndex((t) => t.id === terminalTabValue);
   const idx = activeIdx >= 0 ? activeIdx : 0;
@@ -237,7 +243,7 @@ function useActiveTerminalPillLabel(): { label: string; count: string | undefine
   const total = terminals.length;
   let count: string | undefined;
   if (total > 1) count = `${idx + 1}/${total}`;
-  return { label: active?.label ?? "Terminal", count };
+  return { label: active?.label ?? t("task:terminal"), count };
 }
 
 export const MobileTerminalsPicker = memo(function MobileTerminalsPicker({
@@ -249,6 +255,7 @@ export const MobileTerminalsPicker = memo(function MobileTerminalsPicker({
   compact?: boolean;
   fullWidth?: boolean;
 }) {
+  const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const { label, count } = useActiveTerminalPillLabel();
   if (!sessionId) return null;
@@ -262,9 +269,9 @@ export const MobileTerminalsPicker = memo(function MobileTerminalsPicker({
         isOpen={open}
         onClick={() => setOpen(true)}
         data-testid="mobile-terminals-pill"
-        ariaLabel={`Active terminal: ${label}. Tap to switch.`}
+        ariaLabel={t("task:activeTerminalTapToSwitch", { label })}
       />
-      <MobilePickerSheet open={open} onOpenChange={setOpen} title="Terminals">
+      <MobilePickerSheet open={open} onOpenChange={setOpen} title={t("task:terminals")}>
         <MobileTerminalsList sessionId={sessionId} onClose={() => setOpen(false)} />
       </MobilePickerSheet>
     </>

@@ -1,11 +1,13 @@
 "use client";
 
 import { cloneElement, isValidElement, useState } from "react";
+import { useTranslation } from "react-i18next";
 import {
   IconBrandGitlab,
   IconBrandSentry,
   IconCopy,
   IconCircleDot,
+  IconEdit,
   IconGitPullRequest,
   IconLink,
   IconPencil,
@@ -37,14 +39,8 @@ import {
   TaskDeleteItem,
   TaskDetachItem,
 } from "./task-switcher-action-items";
-import type { TaskSwitcherItem } from "./task-switcher";
-
-export type StepDef = {
-  id: string;
-  title: string;
-  color?: string;
-  events?: { on_enter?: Array<{ type: string; config?: Record<string, unknown> }> };
-};
+import type { StepDef, TaskSwitcherItem } from "./task-switcher-types";
+export type { StepDef } from "./task-switcher-types";
 
 type ContextMenuProps = {
   task: TaskSwitcherItem;
@@ -52,6 +48,7 @@ type ContextMenuProps = {
   stepsByWorkflowId?: Record<string, StepDef[]>;
   steps?: StepDef[];
   children: React.ReactElement<{ menuOpen?: boolean }>;
+  onEditTask?: (task: TaskSwitcherItem) => void;
   onRenameTask?: (taskId: string, currentTitle: string) => void;
   onArchiveTask?: (taskId: string) => void;
   onCreateSubtask?: (taskId: string, taskTitle: string) => void;
@@ -85,6 +82,7 @@ export function TaskItemWithContextMenu({
   stepsByWorkflowId,
   steps,
   children,
+  onEditTask,
   onRenameTask,
   onArchiveTask,
   onCreateSubtask,
@@ -128,6 +126,7 @@ export function TaskItemWithContextMenu({
           workflows={workflows}
           stepsByWorkflowId={stepsByWorkflowId}
           steps={steps}
+          onEditTask={onEditTask}
           onRenameTask={onRenameTask}
           onArchiveTask={onArchiveTask}
           onCreateSubtask={onCreateSubtask}
@@ -165,11 +164,13 @@ type TaskContextMenuItemsProps = Omit<ContextMenuProps, "children"> & {
 };
 
 function TaskContextMenuItems(props: TaskContextMenuItemsProps) {
+  const { t } = useTranslation();
   const {
     task,
     workflows,
     stepsByWorkflowId,
     steps,
+    onEditTask,
     onRenameTask,
     onArchiveTask,
     onCreateSubtask,
@@ -221,29 +222,25 @@ function TaskContextMenuItems(props: TaskContextMenuItemsProps) {
 
   // Acting on a lone selected row (Pin / Delete) must drop it from the selection
   // so later plain clicks navigate instead of toggling.
-  const withClear = (handler?: (id: string) => void) =>
-    actingOnSelection && onClearSelection && handler
-      ? (id: string) => {
-          onClearSelection();
-          handler(id);
-        }
-      : handler;
-  const onDelete = withClear(onDeleteTask);
-  const onDetach = withClear(onDetachTask);
+  const onDelete = withSelectionClear(actingOnSelection, onClearSelection, onDeleteTask);
+  const onDetach = withSelectionClear(actingOnSelection, onClearSelection, onDetachTask);
   return (
     <>
       <TaskPinItem
         taskId={task.id}
         isPinned={isPinned}
         disabled={isDeleting}
-        onTogglePin={withClear(onTogglePin)}
+        onTogglePin={withSelectionClear(actingOnSelection, onClearSelection, onTogglePin)}
       />
+      <TaskEditItem task={task} disabled={isDeleting} onEditTask={onEditTask} />
       <TaskRenameItem task={task} disabled={isDeleting} onRenameTask={onRenameTask} />
       <TaskCreateSubtaskItem task={task} disabled={isDeleting} onCreateSubtask={onCreateSubtask} />
-      <ContextMenuItem disabled>
-        <IconCopy className="mr-2 h-4 w-4" />
-        Duplicate
-      </ContextMenuItem>
+      {!task.isArchived && (
+        <ContextMenuItem disabled>
+          <IconCopy className="mr-2 h-4 w-4" />
+          {t("settings:duplicate")}
+        </ContextMenuItem>
+      )}
       <TaskArchiveItem
         taskId={task.id}
         actingIds={actingIds}
@@ -252,27 +249,41 @@ function TaskContextMenuItems(props: TaskContextMenuItemsProps) {
         onArchiveTask={onArchiveTask}
         onBulkArchive={onBulkArchive}
       />
-      <TaskColorMenu taskId={task.id} disabled={isDeleting} />
+      {!task.isArchived && <TaskColorMenu taskId={task.id} disabled={isDeleting} />}
       <TaskNestContextMenuItems task={task} disabled={isDeleting} />
       <TaskLinkMenu disabled={isDeleting} {...selectTaskLinkActions(task, closeMenu, props)} />
-      <TaskMoveItems
-        task={task}
-        workflows={workflows}
-        stepsByWorkflowId={stepsByWorkflowId}
-        steps={steps}
-        isDeleting={isDeleting}
-        onMoveToStep={onMoveToStep}
-        actingIds={actingIds}
-        actingOnSelection={actingOnSelection}
-        onBulkMove={onBulkMove}
-        isMixedWorkflowSelection={isMixedWorkflowSelection}
-        closeMenu={closeMenu}
-        moveTasks={moveTasks}
-      />
+      {!task.isArchived && (
+        <TaskMoveItems
+          task={task}
+          workflows={workflows}
+          stepsByWorkflowId={stepsByWorkflowId}
+          steps={steps}
+          isDeleting={isDeleting}
+          onMoveToStep={onMoveToStep}
+          actingIds={actingIds}
+          actingOnSelection={actingOnSelection}
+          onBulkMove={onBulkMove}
+          isMixedWorkflowSelection={isMixedWorkflowSelection}
+          closeMenu={closeMenu}
+          moveTasks={moveTasks}
+        />
+      )}
       <TaskDetachItem task={task} disabled={isDeleting} onDetachTask={onDetach} />
       <TaskDeleteItem taskId={task.id} isDeleting={isDeleting} onDeleteTask={onDelete} />
     </>
   );
+}
+
+function withSelectionClear(
+  actingOnSelection: boolean,
+  onClearSelection: (() => void) | undefined,
+  handler: ((id: string) => void) | undefined,
+) {
+  if (!actingOnSelection || !onClearSelection || !handler) return handler;
+  return (id: string) => {
+    onClearSelection();
+    handler(id);
+  };
 }
 
 /** Reduced menu shown when 2+ tasks are selected — only bulk-valid actions. */
@@ -305,10 +316,13 @@ function BulkSelectionMenuItems({
   closeMenu: () => void;
   moveTasks: ReturnType<typeof useTaskWorkflowMove>;
 }) {
+  const { t } = useTranslation();
   const n = actingIds.length;
   const allPinned =
     actingIds.length > 0 && actingIds.every((id) => pinnedTaskIds?.includes(id) ?? false);
-  const pinLabel = `${allPinned ? "Unpin" : "Pin"} ${n} ${n === 1 ? "task" : "tasks"}`;
+  const pinLabel = allPinned
+    ? t("task:unpinTasksCount", { count: n })
+    : t("task:pinTasksCount", { count: n });
   return (
     <>
       {onBulkPin && (
@@ -346,7 +360,7 @@ function BulkSelectionMenuItems({
           <ContextMenuSeparator />
           <ContextMenuItem variant="destructive" onSelect={() => onBulkDelete(actingIds)}>
             <IconTrash className="mr-2 h-4 w-4" />
-            Delete {n} tasks
+            {t("task:deleteTasksCount", { count: n })}
           </ContextMenuItem>
         </>
       )}
@@ -408,11 +422,12 @@ function TaskPinItem({
   disabled?: boolean;
   onTogglePin?: (taskId: string) => void;
 }) {
+  const { t } = useTranslation();
   if (!onTogglePin) return null;
   return (
     <ContextMenuItem disabled={disabled} onSelect={() => onTogglePin(taskId)}>
       {isPinned ? <IconPinFilled className="mr-2 h-4 w-4" /> : <IconPin className="mr-2 h-4 w-4" />}
-      {isPinned ? "Unpin" : "Pin"}
+      {isPinned ? t("task:unpin") : t("task:annotationPin")}
     </ContextMenuItem>
   );
 }
@@ -426,11 +441,31 @@ function TaskRenameItem({
   disabled?: boolean;
   onRenameTask?: (taskId: string, currentTitle: string) => void;
 }) {
+  const { t } = useTranslation();
   if (!onRenameTask) return null;
   return (
     <ContextMenuItem disabled={disabled} onSelect={() => onRenameTask(task.id, task.title)}>
       <IconPencil className="mr-2 h-4 w-4" />
-      Rename
+      {t("task:rename")}
+    </ContextMenuItem>
+  );
+}
+
+function TaskEditItem({
+  task,
+  disabled,
+  onEditTask,
+}: {
+  task: TaskSwitcherItem;
+  disabled?: boolean;
+  onEditTask?: (task: TaskSwitcherItem) => void;
+}) {
+  const { t } = useTranslation();
+  if (!onEditTask || task.isArchived || !task.workflowId || !task.workflowStepId) return null;
+  return (
+    <ContextMenuItem disabled={disabled} onSelect={() => onEditTask(task)}>
+      <IconEdit className="mr-2 h-4 w-4" />
+      {t("common:edit")}
     </ContextMenuItem>
   );
 }
@@ -535,6 +570,7 @@ function TaskLinkMenu({
   onLinkLinearIssue?: () => void;
   onLinkSentryIssue?: () => void;
 }) {
+  const { t } = useTranslation();
   if (
     !onLinkPullRequest &&
     !onLinkIssue &&
@@ -549,19 +585,19 @@ function TaskLinkMenu({
     <ContextMenuSub>
       <ContextMenuSubTrigger disabled={disabled}>
         <IconLink className="mr-2 h-4 w-4" />
-        Link
+        {t("task:link")}
       </ContextMenuSubTrigger>
       <ContextMenuSubContent className="w-56">
         {onLinkPullRequest && (
           <ContextMenuItem disabled={disabled} onSelect={onLinkPullRequest}>
             <IconGitPullRequest className="mr-2 h-4 w-4" />
-            GitHub Pull Request
+            {t("task:githubPullRequest")}
           </ContextMenuItem>
         )}
         {onLinkIssue && (
           <ContextMenuItem disabled={disabled} onSelect={onLinkIssue}>
             <IconCircleDot className="mr-2 h-4 w-4" />
-            GitHub Issue
+            {t("task:githubIssue")}
           </ContextMenuItem>
         )}
         {onLinkMergeRequest && (
@@ -571,25 +607,25 @@ function TaskLinkMenu({
             onSelect={onLinkMergeRequest}
           >
             <IconBrandGitlab className="mr-2 h-4 w-4" />
-            GitLab Merge Request
+            {t("task:gitlabMergeRequest")}
           </ContextMenuItem>
         )}
         {onLinkJiraTicket && (
           <ContextMenuItem disabled={disabled} onSelect={onLinkJiraTicket}>
             <IconTicket className="mr-2 h-4 w-4" />
-            Jira Ticket
+            {t("task:jiraTicket")}
           </ContextMenuItem>
         )}
         {onLinkLinearIssue && (
           <ContextMenuItem disabled={disabled} onSelect={onLinkLinearIssue}>
             <IconCircleDot className="mr-2 h-4 w-4" />
-            Linear Issue
+            {t("task:linearIssue")}
           </ContextMenuItem>
         )}
         {onLinkSentryIssue && (
           <ContextMenuItem disabled={disabled} onSelect={onLinkSentryIssue}>
             <IconBrandSentry className="mr-2 h-4 w-4" />
-            Sentry Issue
+            {t("task:sentryIssue")}
           </ContextMenuItem>
         )}
       </ContextMenuSubContent>

@@ -213,6 +213,49 @@ const taskSessionFromClause = `FROM task_sessions ts
 
 // CreateTaskSession creates a new agent session
 func (r *Repository) CreateTaskSession(ctx context.Context, session *models.TaskSession) error {
+	return r.createTaskSession(ctx, r.db, session)
+}
+
+// CreateOfficeTaskSession creates an Office session and atomically marks it as
+// the task's initial session when no earlier session exists. The task row lock
+// serializes callers across PostgreSQL connections; SQLite's single writer
+// connection serializes the transaction.
+func (r *Repository) CreateOfficeTaskSession(ctx context.Context, session *models.TaskSession) error {
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	if dialect.IsPostgres(r.db.DriverName()) {
+		var lockedTaskID string
+		if err := tx.QueryRowContext(ctx, r.db.Rebind(
+			`SELECT id FROM tasks WHERE id = ? FOR UPDATE`,
+		), session.TaskID).Scan(&lockedTaskID); err != nil {
+			return fmt.Errorf("lock task for office session: %w", err)
+		}
+	}
+
+	var sessionCount int
+	if err := tx.QueryRowContext(ctx, r.db.Rebind(
+		`SELECT COUNT(*) FROM task_sessions WHERE task_id = ?`,
+	), session.TaskID).Scan(&sessionCount); err != nil {
+		return fmt.Errorf("check task sessions before office session: %w", err)
+	}
+	if sessionCount == 0 {
+		if session.Metadata == nil {
+			session.Metadata = make(map[string]interface{})
+		}
+		session.Metadata[models.SessionMetaKeyOrigin] = models.SessionOriginTaskInitial
+	}
+
+	if err := r.createTaskSession(ctx, tx, session); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (r *Repository) createTaskSession(ctx context.Context, exec taskSessionExecutor, session *models.TaskSession) error {
 	if session.ID == "" {
 		session.ID = uuid.New().String()
 	}
@@ -259,7 +302,7 @@ func (r *Repository) CreateTaskSession(ctx context.Context, session *models.Task
 	if session.AgentProfileID != "" {
 		agentProfileID = session.AgentProfileID
 	}
-	_, err = r.db.ExecContext(ctx, r.db.Rebind(`
+	_, err = exec.ExecContext(ctx, r.db.Rebind(`
 		INSERT INTO task_sessions (
 			id, task_id, agent_profile_id, execution_profile_id, executor_id, executor_profile_id, environment_id,
 			repository_id, base_branch, base_commit_sha, workspace_path,
@@ -1025,6 +1068,104 @@ func (r *Repository) SetSessionMetadataKey(ctx context.Context, sessionID, key s
 	return nil
 }
 
+// UpdateSessionContextWindow stores a context-window sample and atomically
+// increments the session's inferred compaction count when the new used-token
+// value is lower than the previous persisted sample.
+func (r *Repository) UpdateSessionContextWindow(
+	ctx context.Context,
+	sessionID string,
+	contextWindow map[string]interface{},
+) (int64, error) {
+	windowJSON, err := json.Marshal(contextWindow)
+	if err != nil {
+		return 0, fmt.Errorf("failed to serialize context window: %w", err)
+	}
+	used, err := contextWindowUsed(contextWindow)
+	if err != nil {
+		return 0, err
+	}
+	now := time.Now().UTC()
+	var count int64
+	row := r.db.QueryRowxContext(ctx, r.db.Rebind(updateSessionContextWindowQuery(r.db.DriverName())), string(windowJSON), used, now, sessionID)
+	if err := row.Scan(&count); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return 0, fmt.Errorf("agent session not found: %s", sessionID)
+		}
+		return 0, err
+	}
+	return count, nil
+}
+
+func contextWindowUsed(contextWindow map[string]interface{}) (int64, error) {
+	value, ok := contextWindow["used"]
+	if !ok {
+		return 0, errors.New("context window is missing used tokens")
+	}
+	switch typed := value.(type) {
+	case int:
+		return int64(typed), nil
+	case int32:
+		return int64(typed), nil
+	case int64:
+		return typed, nil
+	case float64:
+		return int64(typed), nil
+	case json.Number:
+		used, err := typed.Int64()
+		if err != nil {
+			return 0, fmt.Errorf("invalid context window used tokens: %w", err)
+		}
+		return used, nil
+	default:
+		return 0, fmt.Errorf("invalid context window used tokens: %T", value)
+	}
+}
+
+//nolint:dupword // nested JSON setter calls are intentional in the atomic SQL.
+func updateSessionContextWindowQuery(driver string) string {
+	if dialect.IsPostgres(driver) {
+		base := "CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}'::jsonb ELSE metadata::jsonb END"
+		count := "GREATEST(COALESCE(NULLIF((" + base + ") #>> '{context_compaction_count}', '')::bigint, 0), 0)"
+		previousUsed := "(" + base + ") #>> '{context_window,used}'"
+		return `
+			UPDATE task_sessions
+			SET metadata = jsonb_set(
+				jsonb_set(` + base + `, '{context_window}', ?::jsonb, true),
+				'{context_compaction_count}',
+				to_jsonb(CASE
+					WHEN jsonb_typeof((` + base + `) #> '{context_window,used}') = 'number'
+						AND (` + previousUsed + `)::bigint > ?
+					THEN ` + count + ` + 1
+					ELSE ` + count + `
+				END),
+				true
+			)::text,
+				updated_at = ?
+			WHERE id = ?
+			RETURNING ((metadata::jsonb) #>> '{context_compaction_count}')::bigint
+		`
+	}
+	base := "CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}' ELSE metadata END"
+	count := "MAX(COALESCE(CAST(json_extract(" + base + ", '$.context_compaction_count') AS INTEGER), 0), 0)"
+	previousUsed := "json_extract(" + base + ", '$.context_window.used')"
+	return `
+		UPDATE task_sessions
+		SET metadata = json_set(
+			json_set(` + base + `, '$.context_window', json(?)),
+			'$.context_compaction_count',
+			CASE
+				WHEN json_type(` + base + `, '$.context_window.used') IN ('integer', 'real')
+					AND CAST(` + previousUsed + ` AS INTEGER) > ?
+				THEN ` + count + ` + 1
+				ELSE ` + count + `
+			END
+		),
+			updated_at = ?
+		WHERE id = ?
+		RETURNING CAST(json_extract(metadata, '$.context_compaction_count') AS INTEGER)
+	`
+}
+
 // SetSessionMetadataKeyIfAbsent atomically writes a metadata key only when it
 // does not already exist. The returned bool reports whether this call stored
 // the value.
@@ -1484,13 +1625,20 @@ func (r *Repository) BatchGetSessionsByTaskIDs(ctx context.Context, taskIDs []st
 
 func (r *Repository) HasActiveTaskSessionsByAgentProfile(ctx context.Context, agentProfileID string) (bool, error) {
 	var exists int
-	// Exclude ephemeral tasks (quick chat, config chat) - they shouldn't block profile deletion
+	// Exclude ephemeral tasks (quick chat, config chat) - they shouldn't block profile deletion.
+	// Automation runs are excluded only where they are parked: a finished run
+	// rests in WAITING_FOR_INPUT so it stays answerable, and counting those would
+	// let one nightly report block its agent profile from ever being deleted. A
+	// run that is still working is using the profile now and blocks like any
+	// other task — see GetActiveTaskInfoByAgentProfile for the same split.
 	err := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
 		SELECT 1 FROM task_sessions ts
 		JOIN tasks t ON ts.task_id = t.id
 		WHERE ts.agent_profile_id = ?
 		  AND ts.state IN ('CREATED', 'STARTING', 'RUNNING', 'WAITING_FOR_INPUT')
 		  AND t.is_ephemeral = 0
+		  AND NOT (COALESCE(t.origin, '') = '`+models.TaskOriginAutomationRun+`'
+		           AND ts.state = 'WAITING_FOR_INPUT')
 		LIMIT 1
 	`), agentProfileID).Scan(&exists)
 	if err == sql.ErrNoRows {
@@ -1500,11 +1648,27 @@ func (r *Repository) HasActiveTaskSessionsByAgentProfile(ctx context.Context, ag
 }
 
 func (r *Repository) GetActiveTaskInfoByAgentProfile(ctx context.Context, agentProfileID string) ([]agentdto.ActiveTaskInfo, error) {
+	// This list is "what is blocking this deletion", and automation runs sit on
+	// both sides of that question.
+	//
+	// A run that is CREATED, STARTING or RUNNING is using the profile right now.
+	// Deleting it out from under live work is the same failure as for any other
+	// task, so it blocks — the row names a task the user cannot find on a board,
+	// but the alternative is a silent kill.
+	//
+	// A run parked in WAITING_FOR_INPUT is different. That is where every
+	// finished automation run comes to rest, by design, so counting those would
+	// let one nightly report block its profile's deletion forever. Those are
+	// excluded, which makes them non-resumable if the profile goes: replying to
+	// an old run afterwards fails. That is the accepted trade — see
+	// docs/specs/office/automations-settings.md.
 	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(`
 		SELECT DISTINCT t.id, t.title, t.is_ephemeral
 		FROM task_sessions ts
 		JOIN tasks t ON t.id = ts.task_id
 		WHERE ts.agent_profile_id = ? AND ts.state IN ('CREATED', 'STARTING', 'RUNNING', 'WAITING_FOR_INPUT')
+		  AND NOT (COALESCE(t.origin, '') = '`+models.TaskOriginAutomationRun+`'
+		           AND ts.state = 'WAITING_FOR_INPUT')
 	`), agentProfileID)
 	if err != nil {
 		return nil, err
@@ -1794,6 +1958,22 @@ func (r *Repository) UpdateTaskSessionWorktreeBranchByRepository(ctx context.Con
 		  AND deleted_at IS NULL
 		  AND status = 'active'
 	`), branch, now, sessionID, repositoryID)
+	return err
+}
+
+// UpdateTaskSessionWorktreeBranchByWorktree updates exactly one worktree row.
+// This is the repository-scoped variant needed when a task attaches multiple
+// branches from the same repository.
+func (r *Repository) UpdateTaskSessionWorktreeBranchByWorktree(ctx context.Context, sessionID, worktreeID, branch string) error {
+	now := time.Now().UTC()
+	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
+		UPDATE task_session_worktrees
+		SET worktree_branch = ?, updated_at = ?
+		WHERE session_id = ?
+		  AND worktree_id = ?
+		  AND deleted_at IS NULL
+		  AND status = 'active'
+	`), branch, now, sessionID, worktreeID)
 	return err
 }
 

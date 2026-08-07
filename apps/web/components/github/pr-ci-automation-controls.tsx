@@ -27,10 +27,12 @@ import type {
   TaskCIPRAutomationState,
   TaskPR,
 } from "@/lib/types/github";
+import { Trans, useTranslation } from "react-i18next";
 
 const PR_FEEDBACK_PLACEHOLDER = "{{pr.feedback}}";
 
 function CIAutomationInfoButton() {
+  const { t } = useTranslation();
   return (
     <Tooltip>
       <TooltipTrigger asChild>
@@ -39,17 +41,13 @@ function CIAutomationInfoButton() {
           variant="ghost"
           size="icon"
           className="h-6 w-6 cursor-help text-muted-foreground hover:text-foreground"
-          aria-label="Explain CI automation options"
+          aria-label={t("github:explainCiAutomationOptions")}
         >
           <IconInfoCircle className="h-3.5 w-3.5" />
         </Button>
       </TooltipTrigger>
       <TooltipContent side="top" align="end" className="max-w-[280px] text-xs leading-relaxed">
-        Watches this task's linked pull request during the 1 minute PR refresh loop. Auto-fix queues
-        task prompts for newly observed feedback, auto-merge waits for the PR to be ready, and the
-        notification switches wake the task's agent when the workspace's connected GitHub account is
-        requested for review or the PR reaches a terminal state. Review requests silently baseline
-        the account's current request state before notifying on a later request.
+        {t("github:watchesThisTaskSLinkedPull")}
       </TooltipContent>
     </Tooltip>
   );
@@ -79,27 +77,29 @@ function CIAutomationPromptDialog({
   onSave: () => void;
   onReset: () => void;
 }) {
+  const { t } = useTranslation();
   const trimmed = prompt.trim();
   return (
     <Dialog open={open} onOpenChange={(next) => !next && onClose()}>
       <DialogContent className="sm:max-w-2xl">
         <DialogHeader>
-          <DialogTitle>Auto-fix prompt</DialogTitle>
+          <DialogTitle>{t("github:autoFixPrompt")}</DialogTitle>
           <DialogDescription>
-            This prompt is used only for this task. Leave it blank to use the default prompt. Add{" "}
-            <code
-              data-testid="ci-auto-fix-pr-feedback-placeholder"
-              className="rounded bg-muted px-1 py-0.5 text-[11px]"
+            <Trans
+              i18nKey="github:autoFixPromptDescription"
+              values={{ placeholder: PR_FEEDBACK_PLACEHOLDER }}
             >
-              {PR_FEEDBACK_PLACEHOLDER}
-            </code>{" "}
-            when you want Kandev to include its PR feedback snapshot.
+              <code
+                data-testid="ci-auto-fix-pr-feedback-placeholder"
+                className="rounded bg-muted px-1 py-0.5 text-[11px]"
+              />
+            </Trans>
           </DialogDescription>
         </DialogHeader>
         <div className="flex flex-col gap-3">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <Label htmlFor="task-ci-auto-fix-prompt" className="text-xs">
-              Task auto-fix prompt
+              {t("github:taskAutoFixPrompt")}
             </Label>
             <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
               <Button
@@ -109,14 +109,14 @@ function CIAutomationPromptDialog({
                 className="h-7 cursor-pointer px-2 text-xs"
                 onClick={() => onPromptChange(insertPRFeedbackPlaceholder(prompt))}
               >
-                Insert PR feedback
+                {t("github:insertPrFeedback")}
               </Button>
               <a
                 href="/settings/prompts"
                 className="cursor-pointer text-xs text-primary hover:underline"
                 onClick={(e) => e.stopPropagation()}
               >
-                Edit default prompt
+                {t("github:editDefaultPrompt")}
               </a>
             </div>
           </div>
@@ -124,14 +124,8 @@ function CIAutomationPromptDialog({
             data-testid="ci-auto-fix-pr-feedback-help"
             className="rounded-md border border-border/70 bg-muted/30 p-3 text-xs leading-relaxed text-muted-foreground"
           >
-            <p>
-              The placeholder inserts the current PR identifier, new or changed failing checks with
-              GitHub job links, and new or changed review comments with file, line, and body text.
-            </p>
-            <p className="mt-2">
-              Omit the placeholder if you want the agent to pull or fetch the branch and inspect
-              GitHub itself instead of receiving Kandev's snapshot.
-            </p>
+            <p>{t("github:thePlaceholderInsertsTheCurrentPr")}</p>
+            <p className="mt-2">{t("github:omitThePlaceholderIfYouWant")}</p>
           </div>
           <Textarea
             id="task-ci-auto-fix-prompt"
@@ -143,17 +137,17 @@ function CIAutomationPromptDialog({
         </div>
         <DialogFooter>
           <Button variant="ghost" className="cursor-pointer" disabled={saving} onClick={onClose}>
-            Cancel
+            {t("common:cancel")}
           </Button>
           <Button variant="outline" className="cursor-pointer" disabled={saving} onClick={onReset}>
-            Use default
+            {t("github:useDefault")}
           </Button>
           <Button
             className="cursor-pointer"
             disabled={saving || trimmed.length === 0}
             onClick={onSave}
           >
-            Save prompt
+            {t("github:savePrompt")}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -210,6 +204,7 @@ function CIAutomationErrorRow({
   loading: boolean;
   onRetry: () => void;
 }) {
+  const { t } = useTranslation();
   return (
     <div
       role="alert"
@@ -225,7 +220,7 @@ function CIAutomationErrorRow({
         onClick={onRetry}
       >
         <IconRefresh className={`h-3 w-3 ${loading ? "animate-spin" : ""}`} />
-        Retry
+        {t("github:retry")}
       </Button>
     </div>
   );
@@ -286,17 +281,15 @@ function CIAutoFixRoundHelpButton({
   state: TaskCIPRAutomationState | undefined;
   maxRounds: number | null | undefined;
 }) {
+  const { t } = useTranslation();
   const round = autoFixRoundForState(state, maxRounds);
   return (
-    <CIAutomationHelpButton testId="ci-auto-fix-round-help" ariaLabel="Explain auto-fix rounds">
+    <CIAutomationHelpButton
+      testId="ci-auto-fix-round-help"
+      ariaLabel={t("github:explainAutoFixRounds")}
+    >
       <span data-testid="ci-auto-fix-round-explanation">
-        Auto-fix has used {round.current} of {round.max} rounds for this PR. A round is counted when
-        Kandev sends or queues a CI auto-fix message. Kandev waits for all PR checks to finish
-        before starting a new CI auto-fix turn, so the agent gets the final failed checks and
-        current comments together. Updating an already queued auto-fix message does not use another
-        round. When this is at {round.max}/{round.max} and there is no pending auto-fix message left
-        to update, Kandev pauses auto-fix for this PR so it cannot loop forever. Disable and
-        re-enable auto-fix after manual review to start over.
+        {t("github:autoFixRoundExplanation", { current: round.current, max: round.max })}
       </span>
     </CIAutomationHelpButton>
   );
@@ -313,6 +306,7 @@ function PRAgentPromptRows({
   disabled: boolean;
   patchOption: (patch: TaskCIAutomationPatch) => void;
 }) {
+  const { t } = useTranslation();
   const terminalHelpID = `task-pr-terminal-help-${taskId}`;
   const terminalHelp = "Wake the agent when review work ends. Choose either or both outcomes.";
   return (
@@ -328,7 +322,7 @@ function PRAgentPromptRows({
       </span>
       <CIAutomationRow
         id={`task-pr-merged-prompt-${taskId}`}
-        label="PR merged"
+        label={t("github:prMerged")}
         describedBy={terminalHelpID}
         checked={Boolean(options?.prompt_on_merged)}
         disabled={disabled}
@@ -336,7 +330,7 @@ function PRAgentPromptRows({
         help={
           <CIAutomationHelpButton
             testId="ci-pr-terminal-help"
-            ariaLabel="Explain final PR state notifications"
+            ariaLabel={t("github:explainFinalPrStateNotifications")}
           >
             {terminalHelp}
           </CIAutomationHelpButton>
@@ -344,7 +338,7 @@ function PRAgentPromptRows({
       />
       <CIAutomationRow
         id={`task-pr-closed-prompt-${taskId}`}
-        label="PR closed without merging"
+        label={t("github:prClosedWithoutMerging")}
         describedBy={terminalHelpID}
         checked={Boolean(options?.prompt_on_closed)}
         disabled={disabled}
@@ -365,6 +359,7 @@ function ReviewFollowUpSection({
   disabled: boolean;
   patchOption: (patch: TaskCIAutomationPatch) => void;
 }) {
+  const { t } = useTranslation();
   const { isFinePointer, isMobile } = useResponsiveBreakpoint();
   const [open, setOpen] = useState(false);
   const lifecycleEnabled = Boolean(
@@ -384,10 +379,10 @@ function ReviewFollowUpSection({
           variant="ghost"
           size="sm"
           data-testid="ci-review-follow-up-trigger"
-          aria-label="Toggle review follow-up automation"
+          aria-label={t("github:toggleReviewFollowUpAutomation")}
           className={`w-full cursor-pointer justify-between px-1 text-xs text-muted-foreground ${minHeight}`}
         >
-          Review follow-up
+          {t("github:reviewFollowUp")}
           <IconChevronDown
             aria-hidden="true"
             className={`h-3.5 w-3.5 transition-transform ${open ? "rotate-180" : ""}`}
@@ -417,6 +412,7 @@ function ReviewRequestedPromptRow({
   disabled: boolean;
   patchOption: (patch: TaskCIAutomationPatch) => void;
 }) {
+  const { t } = useTranslation();
   const helpID = `task-pr-review-requested-prompt-${taskId}-description`;
   const help = "Wake the agent for any new request, including re-review after changes.";
   return (
@@ -426,7 +422,7 @@ function ReviewRequestedPromptRow({
       </span>
       <CIAutomationRow
         id={`task-pr-review-requested-prompt-${taskId}`}
-        label="Your review is requested"
+        label={t("github:yourReviewIsRequested")}
         describedBy={helpID}
         checked={Boolean(options?.prompt_on_review_requested)}
         disabled={disabled}
@@ -434,7 +430,7 @@ function ReviewRequestedPromptRow({
         help={
           <CIAutomationHelpButton
             testId="ci-review-requested-help"
-            ariaLabel="Explain review request notifications"
+            ariaLabel={t("github:explainReviewRequestNotifications")}
           >
             {help}
           </CIAutomationHelpButton>
@@ -451,9 +447,10 @@ function CIAutomationHeader({
   disabled: boolean;
   onEditPrompt: () => void;
 }) {
+  const { t } = useTranslation();
   return (
     <div className="flex items-center justify-between gap-2 px-1">
-      <div className="text-xs font-medium text-foreground">Automation</div>
+      <div className="text-xs font-medium text-foreground">{t("github:automation")}</div>
       <div className="flex items-center gap-1">
         <CIAutomationInfoButton />
         <Button
@@ -461,7 +458,7 @@ function CIAutomationHeader({
           variant="ghost"
           size="icon"
           className="h-6 w-6 cursor-pointer text-muted-foreground hover:text-foreground"
-          aria-label="Edit auto-fix prompt for this task"
+          aria-label={t("github:editAutoFixPromptForThis")}
           disabled={disabled}
           onClick={onEditPrompt}
         >
@@ -485,11 +482,12 @@ function CIAutomationOptionRows({
   patchOption: (patch: TaskCIAutomationPatch) => void;
   automationState: TaskCIPRAutomationState | undefined;
 }) {
+  const { t } = useTranslation();
   return (
     <>
       <CIAutomationRow
         id={`task-ci-auto-fix-${pr.task_id}`}
-        label="Auto-fix CI and address comments"
+        label={t("github:autoFixCiAndAddressComments")}
         checked={Boolean(options?.auto_fix_enabled)}
         disabled={disabled}
         onCheckedChange={(checked) => patchOption({ auto_fix_enabled: checked })}
@@ -504,7 +502,7 @@ function CIAutomationOptionRows({
       />
       <CIAutomationRow
         id={`task-ci-auto-merge-${pr.task_id}`}
-        label="Auto-merge when ready"
+        label={t("github:autoMergeWhenReady")}
         checked={Boolean(options?.auto_merge_enabled)}
         disabled={disabled}
         onCheckedChange={(checked) => patchOption({ auto_merge_enabled: checked })}

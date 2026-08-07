@@ -7,11 +7,14 @@ import (
 	"net/url"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/events/bus"
+	"github.com/kandev/kandev/internal/watchreset"
 )
 
 var (
@@ -40,16 +43,89 @@ type SecretStore interface {
 // Service coordinates workspace configuration, encrypted PATs, and auth
 // probes.
 type Service struct {
-	store      *Store
-	secrets    SecretStore
-	clientFn   ClientFactory
-	log        *logger.Logger
-	mock       *MockClient
-	repoLookup RepositoryLookup
+	store                    *Store
+	secrets                  SecretStore
+	clientFn                 ClientFactory
+	log                      *logger.Logger
+	mock                     *MockClient
+	repoLookup               RepositoryLookup
+	watchRepositoryLookup    WatchRepositoryLookup
+	watchDependencyValidator WatchDependencyValidator
+	// workspaceAuthorizer is wired to the task service when per-user auth is
+	// enabled. A nil authorizer preserves the unscoped local-development path.
+	workspaceAuthorizer func(context.Context, string) error
+	eventBus            bus.EventBus
+	mu                  sync.RWMutex
+	cascadeTaskDeleter  watchreset.TaskDeleter
+	taskSessionChecker  TaskSessionChecker
+}
+
+// SetEventBus wires watcher events and preserves the nil-safe local test path.
+func (s *Service) SetEventBus(eventBus bus.EventBus) {
+	if s != nil {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		s.eventBus = eventBus
+	}
+}
+
+// SetCascadeTaskDeleter wires the shared task-tree cleanup used by watcher
+// reset and delete operations. A nil deleter keeps persistence usable in
+// local tests while production still clears reservations safely.
+func (s *Service) SetCascadeTaskDeleter(deleter watchreset.TaskDeleter) {
+	if s != nil {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		s.cascadeTaskDeleter = deleter
+	}
+}
+
+func (s *Service) getCascadeTaskDeleter() watchreset.TaskDeleter {
+	if s == nil {
+		return nil
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.cascadeTaskDeleter
+}
+
+// SetTaskSessionChecker wires the user-engagement check used by the "auto"
+// watcher cleanup policy. It is optional for local tests; production wires
+// the same task repository adapter used by the other integrations.
+func (s *Service) SetTaskSessionChecker(checker TaskSessionChecker) {
+	if s != nil {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		s.taskSessionChecker = checker
+	}
+}
+
+func (s *Service) getTaskSessionChecker() TaskSessionChecker {
+	if s == nil {
+		return nil
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.taskSessionChecker
 }
 
 // MockClient returns the E2E mock when the provider is in mock mode.
 func (s *Service) MockClient() *MockClient { return s.mock }
+
+// SetWorkspaceAuthorizer installs the per-user workspace access boundary for
+// Azure DevOps configuration and provider operations.
+func (s *Service) SetWorkspaceAuthorizer(authorizer func(context.Context, string) error) {
+	if s != nil {
+		s.workspaceAuthorizer = authorizer
+	}
+}
+
+func (s *Service) authorizeWorkspaceAccess(ctx context.Context, workspaceID string) error {
+	if s == nil || s.workspaceAuthorizer == nil {
+		return nil
+	}
+	return s.workspaceAuthorizer(ctx, workspaceID)
+}
 
 // NewService constructs the Azure DevOps configuration service.
 func NewService(store *Store, secrets SecretStore, clientFn ClientFactory, log *logger.Logger) *Service {
@@ -90,6 +166,9 @@ func (s *Service) GetConfigForWorkspace(ctx context.Context, workspaceID string)
 	if err := validateWorkspaceID(workspaceID); err != nil {
 		return nil, err
 	}
+	if err := s.authorizeWorkspaceAccess(ctx, workspaceID); err != nil {
+		return nil, err
+	}
 	cfg, err := s.store.GetConfig(ctx, workspaceID)
 	if err != nil || cfg == nil || s.secrets == nil {
 		return cfg, err
@@ -109,6 +188,9 @@ func (s *Service) SetConfigForWorkspace(
 	req *SetConfigRequest,
 ) (*Config, error) {
 	if err := validateWorkspaceID(workspaceID); err != nil {
+		return nil, err
+	}
+	if err := s.authorizeWorkspaceAccess(ctx, workspaceID); err != nil {
 		return nil, err
 	}
 	cfg, err := configFromRequest(workspaceID, req)
@@ -171,6 +253,7 @@ func (s *Service) finishConfigUpdate(
 		if err := s.store.ResetAuthHealth(ctx, workspaceID); err != nil {
 			return nil, fmt.Errorf("reset azure devops auth health: %w", err)
 		}
+		s.RecordAuthHealthForWorkspace(ctx, workspaceID)
 	}
 	return s.GetConfigForWorkspace(ctx, workspaceID)
 }
@@ -178,6 +261,9 @@ func (s *Service) finishConfigUpdate(
 // DeleteConfigForWorkspace removes both configuration and its encrypted PAT.
 func (s *Service) DeleteConfigForWorkspace(ctx context.Context, workspaceID string) error {
 	if err := validateWorkspaceID(workspaceID); err != nil {
+		return err
+	}
+	if err := s.authorizeWorkspaceAccess(ctx, workspaceID); err != nil {
 		return err
 	}
 	previous, err := s.readStoredPAT(ctx, workspaceID)
@@ -293,6 +379,9 @@ func (s *Service) resolveCredentials(
 	req *SetConfigRequest,
 ) (*Config, string, error) {
 	if err := validateWorkspaceID(workspaceID); err != nil {
+		return nil, "", err
+	}
+	if err := s.authorizeWorkspaceAccess(ctx, workspaceID); err != nil {
 		return nil, "", err
 	}
 	if req == nil {

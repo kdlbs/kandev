@@ -13,9 +13,10 @@ import { Input } from "@kandev/ui/input";
 import { Badge } from "@kandev/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@kandev/ui/dialog";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast/sonner";
 import type { AgentProfile } from "@/lib/state/slices/office/types";
 import * as officeApi from "@/lib/api/domains/office-api";
+import { useTranslation } from "react-i18next";
 
 type MemoryEntry = {
   id: string;
@@ -31,6 +32,7 @@ type AgentMemoryTabProps = {
 };
 
 function useMemoryActions(agent: AgentProfile) {
+  const { t } = useTranslation();
   const [entries, setEntries] = useState<MemoryEntry[]>([]);
 
   useEffect(() => {
@@ -43,7 +45,7 @@ function useMemoryActions(agent: AgentProfile) {
         }
       })
       .catch((err) => {
-        toast.error(err instanceof Error ? err.message : "Failed to load memory");
+        toast.error(err instanceof Error ? err.message : t("office:failedToLoadMemory"));
       });
     return () => {
       cancelled = true;
@@ -55,9 +57,9 @@ function useMemoryActions(agent: AgentProfile) {
       try {
         await officeApi.deleteMemory(agent.id, entryId);
         setEntries((prev) => prev.filter((e) => e.id !== entryId));
-        toast.success("Memory entry deleted");
+        toast.success(t("office:memoryEntryDeleted"));
       } catch (err) {
-        toast.error(err instanceof Error ? err.message : "Failed to delete memory entry");
+        toast.error(err instanceof Error ? err.message : t("office:failedToDeleteMemoryEntry"));
       }
     },
     [agent.id],
@@ -67,9 +69,9 @@ function useMemoryActions(agent: AgentProfile) {
     try {
       await officeApi.deleteAllMemory(agent.id);
       setEntries([]);
-      toast.success("All memory cleared");
+      toast.success(t("office:allMemoryCleared"));
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Failed to clear memory");
+      toast.error(err instanceof Error ? err.message : t("office:failedToClearMemory"));
     }
   }, [agent.id]);
 
@@ -122,11 +124,12 @@ function MemoryGroupsList({
 }
 
 function EmptyMemoryState() {
+  const { t } = useTranslation();
   return (
     <div className="flex flex-col items-center justify-center py-12 text-center">
-      <p className="text-sm text-muted-foreground">No memory entries yet.</p>
+      <p className="text-sm text-muted-foreground">{t("office:noMemoryEntriesYet")}</p>
       <p className="text-xs text-muted-foreground mt-1">
-        Memory is accumulated as the agent works on tasks.
+        {t("office:memoryIsAccumulatedAsTheAgent")}
       </p>
     </div>
   );
@@ -211,12 +214,13 @@ function MemoryToolbar({
   onExport: () => void;
   isEmpty: boolean;
 }) {
+  const { t } = useTranslation();
   return (
     <div className="flex items-center gap-2">
       <div className="relative flex-1 max-w-[300px]">
         <IconSearch className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
         <Input
-          placeholder="Search memory..."
+          placeholder={t("office:searchMemory")}
           value={search}
           onChange={(e) => onSearchChange(e.target.value)}
           className="pl-8"
@@ -231,7 +235,7 @@ function MemoryToolbar({
           className="cursor-pointer"
         >
           <IconDownload className="h-4 w-4 mr-1" />
-          Export
+          {t("office:export")}
         </Button>
         <Button
           variant="destructive"
@@ -240,7 +244,7 @@ function MemoryToolbar({
           disabled={isEmpty}
           className="cursor-pointer"
         >
-          Clear All
+          {t("office:clearAll")}
         </Button>
       </div>
     </div>
@@ -305,6 +309,7 @@ function MemoryEntryRow({
   onToggle: () => void;
   onDelete: () => void;
 }) {
+  const { t } = useTranslation();
   return (
     <div className="px-4 py-2.5">
       <div className="flex items-center gap-2 text-sm cursor-pointer" onClick={onToggle}>
@@ -332,7 +337,7 @@ function MemoryEntryRow({
               <IconTrash className="h-3.5 w-3.5" />
             </Button>
           </TooltipTrigger>
-          <TooltipContent>Delete entry</TooltipContent>
+          <TooltipContent>{t("office:deleteEntry")}</TooltipContent>
         </Tooltip>
       </div>
       {expanded && (
@@ -353,22 +358,22 @@ function ClearAllDialog({
   onOpenChange: (v: boolean) => void;
   onConfirm: () => void;
 }) {
+  const { t } = useTranslation();
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Clear all memory?</DialogTitle>
+          <DialogTitle>{t("office:clearAllMemory")}</DialogTitle>
         </DialogHeader>
         <p className="text-sm text-muted-foreground">
-          This will permanently delete all memory entries for this agent. This action cannot be
-          undone.
+          {t("office:thisWillPermanentlyDeleteAllMemory")}
         </p>
         <DialogFooter>
           <Button variant="ghost" onClick={() => onOpenChange(false)} className="cursor-pointer">
-            Cancel
+            {t("common:cancel")}
           </Button>
           <Button variant="destructive" onClick={onConfirm} className="cursor-pointer">
-            Clear All
+            {t("office:clearAll")}
           </Button>
         </DialogFooter>
       </DialogContent>

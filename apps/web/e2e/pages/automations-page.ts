@@ -9,7 +9,11 @@ export class AutomationsPage {
   readonly nameInput: Locator;
   readonly saveButton: Locator;
   readonly deleteButton: Locator;
+  readonly frequencySelector: Locator;
   readonly customScheduleInput: Locator;
+  readonly timeInput: Locator;
+  readonly timezoneButton: Locator;
+  readonly nextRun: Locator;
   readonly addConditionButton: Locator;
   readonly workflowSelector: Locator;
   readonly workflowStepSelector: Locator;
@@ -28,7 +32,11 @@ export class AutomationsPage {
       .getByTestId("settings-floating-save")
       .getByRole("button", { name: /save changes/i });
     this.deleteButton = page.getByTestId("automation-delete-button");
+    this.frequencySelector = page.getByTestId("schedule-frequency");
     this.customScheduleInput = page.getByTestId("schedule-custom-input");
+    this.timeInput = page.getByTestId("schedule-time");
+    this.timezoneButton = page.getByTestId("schedule-timezone");
+    this.nextRun = page.getByTestId("schedule-next-run");
     this.addConditionButton = page.getByTestId("add-condition-button");
     this.workflowSelector = page.getByTestId("workflow-selector");
     this.workflowStepSelector = page.getByTestId("workflow-step-selector");
@@ -48,12 +56,36 @@ export class AutomationsPage {
     return this.page.getByTestId(`automation-row-${id}`);
   }
 
+  /**
+   * Open an automation from the listings by name.
+   *
+   * Clicks the name cell rather than the row, because a click on the row is
+   * aimed at its centre — which lands on whichever column happens to be in the
+   * middle, and the Enabled and actions cells deliberately stop propagation.
+   * Targeting the name keeps this independent of the column layout.
+   */
+  async openByName(name: string) {
+    await this.table.locator("tr", { hasText: name }).getByText(name, { exact: true }).click();
+  }
+
   enabledSwitch(id: string): Locator {
     return this.page.getByTestId(`automation-enabled-${id}`);
   }
 
-  schedulePreset(expression: string): Locator {
-    return this.page.getByTestId(`schedule-preset-${expression}`);
+  /**
+   * Pick a schedule frequency by its label, e.g. "every day" or
+   * "a custom schedule". The detail controls that follow depend on the choice.
+   */
+  async selectFrequency(label: string) {
+    await this.frequencySelector.click();
+    await this.page.getByRole("option", { name: label, exact: true }).click();
+  }
+
+  /** Switch to the cron escape hatch and set an expression. */
+  async setCustomSchedule(expression: string) {
+    await this.selectFrequency("a custom schedule");
+    await this.customScheduleInput.fill(expression);
+    await this.customScheduleInput.blur();
   }
 
   /** Select a workflow by clicking the selector and picking an item by name. */

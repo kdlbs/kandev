@@ -13,6 +13,7 @@ import (
 
 	"github.com/kandev/kandev/internal/agent/mcpconfig"
 	agentsettingscontroller "github.com/kandev/kandev/internal/agent/settings/controller"
+	"github.com/kandev/kandev/internal/auth/authn"
 	"github.com/kandev/kandev/internal/clarification"
 	"github.com/kandev/kandev/internal/common/constants"
 	"github.com/kandev/kandev/internal/common/logger"
@@ -105,6 +106,14 @@ type TaskRepository interface {
 	UpdateTaskState(ctx context.Context, taskID string, state v1.TaskState) error
 }
 
+// RemoteContributionService resolves provider URLs before task creation and
+// associates an already-existing PR/MR after the target task-repository row
+// exists. Implementations must return only server-authored identity data.
+type RemoteContributionService interface {
+	Resolve(ctx context.Context, workspaceID, userID, rawURL string) (*models.RemoteContributionResolution, bool, error)
+	Associate(ctx context.Context, workspaceID, userID, taskID, repositoryID string, resolution *models.RemoteContributionResolution) error
+}
+
 // sessionOwnedTaskStateUpdater atomically guards a task-state write with the
 // current state of its owning session. Production SQLite implements this so a
 // clarification answer cannot restore IN_PROGRESS after coordinator stop has
@@ -155,6 +164,12 @@ type TaskStopper interface {
 	StopTaskForCoordinator(ctx context.Context, taskID string) (orchestrator.CoordinatorTaskStopResult, error)
 }
 
+// TaskTitleBranchRenamer performs the best-effort branch side effect after an
+// owner session accepts a prompt-first task title.
+type TaskTitleBranchRenamer interface {
+	RenameGeneratedBranchesForTaskTitle(ctx context.Context, taskID, sessionID, title string) (orchestrator.TitleBranchRenameResult, error)
+}
+
 // MessageQueuer queues a prompt message for delivery to a session on its next turn.
 // TakeQueued is exposed so move_task can roll back the hand-off prompt when the
 // underlying MoveTask call fails — without it, a queued "you were moved..."
@@ -193,6 +208,7 @@ type Handlers struct {
 	walkthroughService   *service.WalkthroughService
 	sessionLauncher      SessionLauncher
 	taskStopper          TaskStopper
+	titleBranchRenamer   TaskTitleBranchRenamer
 	stopTaskGetter       func(context.Context, string) (*models.Task, error)
 	messageQueue         MessageQueuer
 	promptResolver       PromptReferenceResolver
@@ -219,7 +235,12 @@ type Handlers struct {
 	reviewRunner  ReviewRunner
 
 	// Optional task-bound GitHub PR automation controls.
-	taskPRAutomation TaskPRAutomationService
+	taskPRAutomation       TaskPRAutomationService
+	remoteContributionSvc  RemoteContributionService
+	diagnosticBundles      DiagnosticBundleProvider
+	diagnosticMaterializer DiagnosticBundleMaterializer
+	// Optional task-bound GitLab MR automation controls.
+	taskMRAutomation TaskMRAutomationService
 }
 
 // NewHandlers creates new MCP handlers.
@@ -277,9 +298,21 @@ func (h *Handlers) SetTaskStopper(stopper TaskStopper) {
 	h.taskStopper = stopper
 }
 
+// SetTaskTitleBranchRenamer wires the best-effort branch rename performed
+// after an accepted agent-generated title.
+func (h *Handlers) SetTaskTitleBranchRenamer(renamer TaskTitleBranchRenamer) {
+	h.titleBranchRenamer = renamer
+}
+
 // SetUserSettingsProvider wires portable user preferences into MCP task creation.
 func (h *Handlers) SetUserSettingsProvider(provider UserSettingsProvider) {
 	h.userSettingsProvider = provider
+}
+
+// SetRemoteContributionService wires provider-backed PR/MR resolution for
+// repository_url values that identify an existing contribution.
+func (h *Handlers) SetRemoteContributionService(svc RemoteContributionService) {
+	h.remoteContributionSvc = svc
 }
 
 // SetConfigDeps sets the config-mode dependencies for agent-native configuration handlers.
@@ -296,6 +329,8 @@ func (h *Handlers) SetConfigDeps(
 
 // RegisterHandlers registers all MCP handlers with the dispatcher.
 func (h *Handlers) RegisterHandlers(d *ws.Dispatcher) {
+	before := d.HandlerCount()
+
 	// Task-mode handlers (always registered)
 	d.RegisterFunc(ws.ActionMCPListWorkspaces, h.handleListWorkspaces)
 	d.RegisterFunc(ws.ActionMCPListWorkflows, h.handleListWorkflows)
@@ -304,8 +339,11 @@ func (h *Handlers) RegisterHandlers(d *ws.Dispatcher) {
 	d.RegisterFunc(ws.ActionMCPListTasks, h.handleListTasks)
 	d.RegisterFunc(ws.ActionMCPCreateTask, h.handleCreateTask)
 	d.RegisterFunc(ws.ActionMCPUpdateTask, h.handleUpdateTask)
+	d.RegisterFunc(ws.ActionMCPSetTaskTitle, h.handleSetTaskTitle)
 	d.RegisterFunc(ws.ActionMCPGetTaskPRAutomation, h.handleGetTaskPRAutomation)
 	d.RegisterFunc(ws.ActionMCPUpdateTaskPRAutomation, h.handleUpdateTaskPRAutomation)
+	d.RegisterFunc(ws.ActionMCPGetTaskMRAutomation, h.handleGetTaskMRAutomation)
+	d.RegisterFunc(ws.ActionMCPUpdateTaskMRAutomation, h.handleUpdateTaskMRAutomation)
 	d.RegisterFunc(ws.ActionMCPAddBranchToTask, h.handleAddBranchToTask)
 	d.RegisterFunc(ws.ActionMCPAddWorkspaceSources, h.handleAddWorkspaceSources)
 	d.RegisterFunc(ws.ActionMCPUpdateRepositoryBaseBranch, h.handleUpdateRepositoryBaseBranch)
@@ -328,9 +366,10 @@ func (h *Handlers) RegisterHandlers(d *ws.Dispatcher) {
 	d.RegisterFunc(ws.ActionTaskWalkthroughGet, h.handleGetWalkthrough)
 	d.RegisterFunc(ws.ActionTaskWalkthroughDelete, h.handleDeleteWalkthrough)
 	d.RegisterFunc(ws.ActionMCPClarificationTimeout, h.handleClarificationTimeout)
-	count := 25
-	count += h.registerReviewHandlers(d)
-	count += 2 // task PR automation get/update
+	if h.diagnosticBundles != nil && h.diagnosticMaterializer != nil {
+		d.RegisterFunc(ws.ActionMCPGetDiagnosticBundle, h.handleGetDiagnosticBundle)
+	}
+	h.registerReviewHandlers(d)
 
 	// Config-mode handlers (registered when config deps are set)
 	if h.workflowSvc != nil {
@@ -342,7 +381,6 @@ func (h *Handlers) RegisterHandlers(d *ws.Dispatcher) {
 		d.RegisterFunc(ws.ActionMCPUpdateWorkflowStep, h.handleUpdateWorkflowStep)
 		d.RegisterFunc(ws.ActionMCPDeleteWorkflowStep, h.handleDeleteWorkflowStep)
 		d.RegisterFunc(ws.ActionMCPReorderWorkflowStep, h.handleReorderWorkflowSteps)
-		count += 8
 	}
 	if h.agentSettingsCtrl != nil {
 		d.RegisterFunc(ws.ActionMCPListAgents, h.handleListAgents)
@@ -351,43 +389,38 @@ func (h *Handlers) RegisterHandlers(d *ws.Dispatcher) {
 		d.RegisterFunc(ws.ActionMCPCreateAgentProfile, h.handleCreateAgentProfile)
 		d.RegisterFunc(ws.ActionMCPUpdateAgentProfile, h.handleUpdateAgentProfile)
 		d.RegisterFunc(ws.ActionMCPDeleteAgentProfile, h.handleDeleteAgentProfile)
-		count += 6
 	}
 	// Executor discovery/profile listing is always available (read-only, used in task mode for create_task)
 	if h.taskSvc != nil {
 		d.RegisterFunc(ws.ActionMCPListExecutors, h.handleListExecutors)
 		d.RegisterFunc(ws.ActionMCPListExecutorProfiles, h.handleListExecutorProfiles)
-		count += 2
 	}
 	if h.mcpConfigSvc != nil {
 		d.RegisterFunc(ws.ActionMCPGetMcpConfig, h.handleGetMcpConfig)
 		d.RegisterFunc(ws.ActionMCPUpdateMcpConfig, h.handleUpdateMcpConfig)
-		count += 2
 	}
 	if h.handoffSvc != nil {
 		d.RegisterFunc(ws.ActionMCPListRelatedTasks, h.handleListRelatedTasks)
 		d.RegisterFunc(ws.ActionMCPListTaskDocuments, h.handleListTaskDocuments)
 		d.RegisterFunc(ws.ActionMCPGetTaskDocument, h.handleGetTaskDocument)
 		d.RegisterFunc(ws.ActionMCPWriteTaskDocument, h.handleWriteTaskDocument)
-		count += 4
 	}
 	if h.taskSvc != nil {
 		d.RegisterFunc(ws.ActionMCPMoveTask, h.handleMoveTask)
 		d.RegisterFunc(ws.ActionMCPDeleteTask, h.handleDeleteTask)
 		d.RegisterFunc(ws.ActionMCPArchiveTask, h.handleArchiveTask)
 		d.RegisterFunc(ws.ActionMCPUpdateTaskState, h.handleUpdateTaskState)
-		count += 4
 
 		// Executor mutation handlers (config-mode only)
 		if h.workflowSvc != nil {
 			d.RegisterFunc(ws.ActionMCPCreateExecutorProfile, h.handleCreateExecutorProfile)
 			d.RegisterFunc(ws.ActionMCPUpdateExecutorProfile, h.handleUpdateExecutorProfile)
 			d.RegisterFunc(ws.ActionMCPDeleteExecutorProfile, h.handleDeleteExecutorProfile)
-			count += 3
 		}
 	}
 
-	h.logger.Info("registered MCP handlers", zap.Int("count", count))
+	after := d.HandlerCount()
+	h.logger.Info("registered MCP handlers", zap.Int("count", after-before))
 }
 
 // handleListWorkspaces lists all workspaces.
@@ -480,8 +513,8 @@ func (h *Handlers) handleListWorkflowSteps(ctx context.Context, msg *ws.Message)
 
 // handleListRepositories lists repositories for a workspace. Exposes the same
 // data the kanban "Edit task → Repositories" picker reads, so an MCP-driven
-// agent (e.g. the Slack triage runner) can match a request against an actual
-// repo instead of guessing or making up an ID.
+// agent can match a request against an actual repo instead of guessing or
+// making up an ID.
 func (h *Handlers) handleListRepositories(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 	return h.handleListByField(ctx, msg, "workspace_id", "failed to list repositories", "Failed to list repositories",
 		func(ctx context.Context, workspaceID string) (any, error) {
@@ -621,6 +654,12 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		return ws.NewError(msg.ID, msg.Action, code, message, nil)
 	}
 
+	identity, _ := authn.IdentityFromContext(ctx)
+	contributions, err := h.resolveMCPRemoteContributions(ctx, req.WorkspaceID, identity.UserID, repos)
+	if err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, err.Error(), nil)
+	}
+
 	workspacePolicy, err := h.resolveMCPWorkspacePolicy(req.ParentID, req.WorkspaceMode)
 	if err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, err.Error(), nil)
@@ -673,6 +712,28 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		return ws.NewError(msg.ID, msg.Action, code, message, nil)
 	}
 
+	for index, resolution := range contributions {
+		if resolution == nil {
+			continue
+		}
+		if index >= len(task.Repositories) || task.Repositories[index] == nil {
+			if delErr := h.taskSvc.DeleteTask(ctx, task.ID); delErr != nil {
+				h.logger.Error("rollback delete failed after missing task repository",
+					zap.String("task_id", task.ID), zap.Error(delErr))
+			}
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "failed to attach remote contribution: task repository is missing", nil)
+		}
+		if err := h.remoteContributionSvc.Associate(ctx, req.WorkspaceID, identity.UserID, task.ID, task.Repositories[index].ID, resolution); err != nil {
+			h.logger.Error("associate remote contribution; rolling back task creation",
+				zap.String("task_id", task.ID), zap.Error(err))
+			if delErr := h.taskSvc.DeleteTask(ctx, task.ID); delErr != nil {
+				h.logger.Error("rollback delete failed after contribution association error",
+					zap.String("task_id", task.ID), zap.Error(delErr))
+			}
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "failed to attach remote contribution: "+err.Error(), nil)
+		}
+	}
+
 	if h.handoffSvc != nil && workspacePolicy.NeedsAttachment() {
 		if attachErr := h.handoffSvc.AttachWorkspacePolicy(ctx, task.ID, req.ParentID, workspacePolicy); attachErr != nil {
 			h.logger.Error("attach workspace policy; rolling back task creation",
@@ -713,6 +774,65 @@ type taskRepoResult struct {
 	Repos       []service.TaskRepositoryInput
 	WorkspaceID string // inherited from parent, empty otherwise
 	WorkflowID  string // inherited from parent, empty otherwise
+}
+
+func (h *Handlers) resolveMCPRemoteContributions(
+	ctx context.Context, workspaceID, userID string, repos []service.TaskRepositoryInput,
+) ([]*models.RemoteContributionResolution, error) {
+	resolutions := make([]*models.RemoteContributionResolution, len(repos))
+	if h.remoteContributionSvc == nil {
+		return resolutions, nil
+	}
+	for index := range repos {
+		rawURL := strings.TrimSpace(repos[index].RemoteURL)
+		if rawURL == "" {
+			rawURL = strings.TrimSpace(repos[index].GitHubURL)
+		}
+		if rawURL == "" {
+			continue
+		}
+		resolution, matched, err := h.remoteContributionSvc.Resolve(ctx, workspaceID, userID, rawURL)
+		if err != nil {
+			return nil, err
+		}
+		if !matched {
+			continue
+		}
+		if resolution == nil {
+			return nil, errors.New("remote contribution resolver returned no binding")
+		}
+		owner, name, err := splitRemoteContributionTarget(resolution.TargetPath)
+		if err != nil {
+			return nil, err
+		}
+		repo := &repos[index]
+		repo.RepositoryID = ""
+		repo.LocalPath = ""
+		repo.GitHubURL = ""
+		repo.RemoteURL = resolution.TargetRemoteURL
+		repo.Provider = resolution.TargetProvider
+		repo.ProviderHost = resolution.TargetHost
+		repo.ProviderRepoID = resolution.TargetProviderID
+		repo.ProviderOwner = owner
+		repo.ProviderName = name
+		if resolution.TargetDefaultBranch != "" {
+			repo.DefaultBranch = resolution.TargetDefaultBranch
+		}
+		repo.BaseBranch = resolution.Binding.BaseBranch
+		repo.CheckoutBranch = resolution.Binding.HeadBranch
+		repo.RemoteContribution = &resolution.Binding
+		repo.TrustedRemote = true
+		resolutions[index] = resolution
+	}
+	return resolutions, nil
+}
+
+func splitRemoteContributionTarget(path string) (string, string, error) {
+	parts := strings.Split(strings.Trim(path, "/"), "/")
+	if len(parts) < 2 || parts[len(parts)-1] == "" {
+		return "", "", fmt.Errorf("remote contribution target repository %q is invalid", path)
+	}
+	return strings.Join(parts[:len(parts)-1], "/"), parts[len(parts)-1], nil
 }
 
 // resolveTaskRepositories builds the repository list for a new task.
@@ -1009,12 +1129,22 @@ func (h *Handlers) resolveMCPAutoStartConfigWithError(ctx context.Context, task 
 		}
 	}
 
-	if agentProfileID == "" {
-		var err error
-		agentProfileID, err = h.resolveWorkflowAgentProfileWithError(ctx, task.WorkflowStepID, task.WorkflowID)
-		if err != nil {
-			return mcpAutoStartConfig{}, fmt.Errorf("resolve workflow agent profile: %w", err)
-		}
+	// Mirror the orchestrator's launch-time precedence so the profile reported
+	// back to the caller (and stored in task metadata) equals the one that will
+	// actually run. At launch resolveEffectiveAgentProfile applies the step's
+	// launch profile (the step's pinned profile, or the workflow default when the
+	// step has none) over any caller-provided profile, but only when the task
+	// sits on a workflow step. A create_task_kandev task lands on a step whenever
+	// its workflow has steps: the explicit workflow_step_id, or the start step
+	// CreateTask assigns when the step is omitted. When the task will be on a
+	// step, the workflow-derived profile overrides the caller; otherwise it only
+	// fills an omitted profile.
+	workflowProfileID, onStepAtLaunch, err := h.resolveWorkflowLaunchProfile(ctx, task.WorkflowStepID, task.WorkflowID)
+	if err != nil {
+		return mcpAutoStartConfig{}, fmt.Errorf("resolve workflow agent profile: %w", err)
+	}
+	if workflowProfileID != "" && (onStepAtLaunch || agentProfileID == "") {
+		agentProfileID = workflowProfileID
 	}
 	if agentProfileID == "" && h.taskSvc != nil {
 		workspace, err := h.taskSvc.GetWorkspace(ctx, task.WorkspaceID)
@@ -1048,6 +1178,36 @@ func (h *Handlers) mcpTaskAgentProfileDefault(ctx context.Context, explicitAgent
 		return usermodels.MCPTaskAgentProfileDefaultCurrentTask, nil
 	}
 	return usermodels.NormalizeMCPTaskAgentProfileDefault(settings.MCPTaskAgentProfileDefault), nil
+}
+
+// resolveWorkflowLaunchProfile returns the workflow-derived agent profile a task
+// launches with and whether the task will sit on a workflow step at launch.
+// onStepAtLaunch is true when the task has an explicit step, or when it has no
+// step yet but its workflow has at least one step (CreateTask assigns that start
+// step). Callers apply the returned profile over an explicit caller profile only
+// when onStepAtLaunch is true; off a step it may only fill an omitted profile.
+func (h *Handlers) resolveWorkflowLaunchProfile(ctx context.Context, workflowStepID, workflowID string) (string, bool, error) {
+	profileID, err := h.resolveWorkflowAgentProfileWithError(ctx, workflowStepID, workflowID)
+	if err != nil {
+		return "", false, err
+	}
+	if workflowStepID != "" {
+		return profileID, true, nil
+	}
+	return profileID, h.workflowHasSteps(ctx, workflowID), nil
+}
+
+// workflowHasSteps reports whether the workflow has at least one step, i.e. a
+// stepless task created on it will be assigned a start step at CreateTask time.
+func (h *Handlers) workflowHasSteps(ctx context.Context, workflowID string) bool {
+	if workflowID == "" || h.workflowCtrl == nil {
+		return false
+	}
+	resp, err := h.workflowCtrl.ListStepsByWorkflow(ctx, workflowctrl.ListStepsRequest{WorkflowID: workflowID})
+	if err != nil || resp == nil {
+		return false
+	}
+	return len(resp.Steps) > 0
 }
 
 func (h *Handlers) resolveWorkflowAgentProfileWithError(ctx context.Context, workflowStepID, workflowID string) (string, error) {
@@ -1312,6 +1472,64 @@ func (h *Handlers) handleUpdateTask(ctx context.Context, msg *ws.Message) (*ws.M
 	}
 
 	return ws.NewResponse(msg.ID, msg.Action, dto.FromTask(task))
+}
+
+// handleSetTaskTitle resolves the one-shot provisional title created for a
+// prompt-first task. The MCP server supplies the bound task and session IDs;
+// only the atomically claimed owner may resolve it.
+func (h *Handlers) handleSetTaskTitle(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	var req struct {
+		TaskID    string `json:"task_id"`
+		SessionID string `json:"session_id"`
+		Title     string `json:"title"`
+	}
+	if err := json.Unmarshal(msg.Payload, &req); err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
+	}
+	if req.TaskID == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "task_id is required", nil)
+	}
+	if req.SessionID == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "session_id is required", nil)
+	}
+	if strings.TrimSpace(req.Title) == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "title is required", nil)
+	}
+
+	task, accepted, reason, err := h.taskSvc.SetPendingAgentTitle(ctx, req.TaskID, req.SessionID, req.Title)
+	if err != nil {
+		if errors.Is(err, taskrepo.ErrTaskNotFound) {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "task not found", nil)
+		}
+		if errors.Is(err, service.ErrTaskTitleTooLong) {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, err.Error(), nil)
+		}
+		h.logger.Error("failed to set pending task title", zap.String("task_id", req.TaskID), zap.Error(err))
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to set task title", nil)
+	}
+	result := map[string]interface{}{
+		"accepted": accepted,
+		"task_id":  req.TaskID,
+		"title":    task.Title,
+	}
+	if !accepted {
+		result["reason"] = reason
+		return ws.NewResponse(msg.ID, msg.Action, result)
+	}
+	if h.titleBranchRenamer != nil {
+		branchResult, branchErr := h.titleBranchRenamer.RenameGeneratedBranchesForTaskTitle(ctx, req.TaskID, req.SessionID, task.Title)
+		if branchErr != nil {
+			h.logger.Warn("failed to rename generated task branches", zap.String("task_id", req.TaskID), zap.Error(branchErr))
+			branchResult = orchestrator.TitleBranchRenameResult{
+				Status: orchestrator.TitleBranchStatusFailed,
+				Failed: []orchestrator.TitleBranchFailure{{Message: branchErr.Error()}},
+			}
+		}
+		result["branch_rename"] = branchResult
+	} else {
+		result["branch_rename"] = orchestrator.TitleBranchRenameResult{Status: orchestrator.TitleBranchStatusNotApplicable}
+	}
+	return ws.NewResponse(msg.ID, msg.Action, result)
 }
 
 // handleAddBranchToTask attaches a new (repository, checkout_branch) pair to
@@ -3056,9 +3274,7 @@ func (h *Handlers) setSessionRunning(ctx context.Context, taskID, sessionID stri
 			h.logger.Warn("failed to update task state to IN_PROGRESS",
 				zap.String("task_id", taskID),
 				zap.Error(err))
-			return
-		}
-		if !taskStateChanged {
+		} else if !taskStateChanged {
 			h.logger.Debug("skipping stale clarification resume after session state changed",
 				zap.String("task_id", taskID),
 				zap.String("session_id", sessionID))
@@ -3066,34 +3282,51 @@ func (h *Handlers) setSessionRunning(ctx context.Context, taskID, sessionID stri
 		}
 	}
 
-	// Publish session state changed event
-	if h.eventBus != nil {
-		eventData := map[string]any{
-			"task_id":    taskID,
-			"session_id": sessionID,
-			"new_state":  string(models.TaskSessionStateRunning),
-		}
-		if !updatedAt.IsZero() {
-			eventData["updated_at"] = updatedAt.UTC().Format(time.RFC3339Nano)
-		} else if persistedUpdatedAt, ok := h.sessionUpdatedAtForStateEvent(ctx, sessionID); ok {
-			eventData["updated_at"] = persistedUpdatedAt
-		} else {
-			h.logger.Warn("skipping session state_changed publish; could not load authoritative updated_at",
-				zap.String("session_id", sessionID))
-			return
-		}
-		_ = h.eventBus.Publish(ctx, events.TaskSessionStateChanged, bus.NewEvent(
+	// Publish session state changed event after any task event for this task.
+	if h.eventBus == nil {
+		return
+	}
+	eventData := map[string]any{
+		"task_id":    taskID,
+		"session_id": sessionID,
+		"new_state":  string(models.TaskSessionStateRunning),
+	}
+	if !updatedAt.IsZero() {
+		eventData["updated_at"] = updatedAt.UTC().Format(time.RFC3339Nano)
+	} else if persistedUpdatedAt, ok := h.sessionUpdatedAtForStateEvent(ctx, sessionID); ok {
+		eventData["updated_at"] = persistedUpdatedAt
+	} else {
+		h.logger.Warn("skipping session state_changed publish; could not load authoritative updated_at",
+			zap.String("session_id", sessionID))
+		return
+	}
+	publish := func(publicationCtx context.Context) {
+		_ = h.eventBus.Publish(publicationCtx, events.TaskSessionStateChanged, bus.NewEvent(
 			events.TaskSessionStateChanged,
 			"mcp-handlers",
 			eventData,
 		))
 	}
+	if h.taskSvc != nil && taskID != "" {
+		h.taskSvc.PublishAfterTaskEvents(ctx, taskID, events.TaskSessionStateChanged, publish)
+		return
+	}
+	publish(ctx)
 }
 
 func (h *Handlers) setTaskInProgressForClarification(
 	ctx context.Context,
 	taskID, sessionID string,
 ) (bool, error) {
+	if h.taskSvc != nil {
+		return h.taskSvc.UpdateTaskStateIfSessionState(
+			ctx,
+			taskID,
+			sessionID,
+			models.TaskSessionStateRunning,
+			v1.TaskStateInProgress,
+		)
+	}
 	if updater, ok := h.taskRepo.(sessionOwnedTaskStateUpdater); ok {
 		_, updated, err := updater.UpdateTaskStateIfSessionState(
 			ctx,

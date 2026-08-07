@@ -1,13 +1,16 @@
 import os from "node:os";
+import { PassThrough } from "node:stream";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   buildBackendEnv,
   buildWebEnv,
+  createOutputRingBuffer,
   listHostNetworkAddresses,
   logStartupInfo,
   networkUrlsForPort,
+  resolveBackendLogLevels,
   type PortConfig,
 } from "./shared";
 
@@ -82,6 +85,41 @@ describe("buildBackendEnv", () => {
     const env = buildBackendEnv({ ports, webProxy: false });
 
     expect(env.KANDEV_WEB_INTERNAL_URL).toBeUndefined();
+  });
+
+  it("uses independent file and console thresholds", () => {
+    expect(resolveBackendLogLevels({ env: {} })).toEqual({ file: "info", console: "warn" });
+    expect(resolveBackendLogLevels({ debug: true, env: {} })).toEqual({
+      file: "debug",
+      console: "warn",
+    });
+    expect(resolveBackendLogLevels({ verbose: true, env: {} })).toEqual({
+      file: "info",
+      console: "info",
+    });
+    expect(resolveBackendLogLevels({ debug: true, env: { KANDEV_LOG_LEVEL: "error" } })).toEqual({
+      file: "error",
+      console: "warn",
+    });
+  });
+
+  it("tees backend output while retaining a bounded startup tail", () => {
+    const stream = new PassThrough();
+    let forwarded = "";
+    const capture = createOutputRingBuffer(
+      {
+        write: (chunk) => {
+          forwarded += chunk.toString();
+          return true;
+        },
+      },
+      5,
+    );
+    capture.attach(stream);
+    stream.write("hello");
+    stream.write("world");
+    expect(forwarded).toBe("helloworld");
+    expect(capture.read()).toBe("world");
   });
 });
 

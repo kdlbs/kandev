@@ -37,22 +37,30 @@ import { GitHubAccessHelp } from "./github-access-help";
 import { GitHubPermissionsDialog } from "./github-permissions-dialog";
 import { GitHubRateLimitDisplay } from "./github-rate-limit";
 import { GitHubTaskAccessSummary } from "./github-task-credentials-section";
+import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 
-const sourceLabels: Record<GitHubConnectionSource, string> = {
-  pat: "Personal access token",
-  gh_cli: "GitHub CLI",
-  github_app_installation: "GitHub App",
-  legacy_shared: "Legacy shared connection",
+// Keyed by the wire enum, which is never translated; only the label is copy.
+// Catalog keys rather than `t()` calls because this is module scope — a `t()`
+// here would freeze at the boot locale (see docs/i18n.md).
+const sourceLabelKeys: Record<GitHubConnectionSource, string> = {
+  pat: "github:personalAccessToken",
+  gh_cli: "github:githubCli",
+  github_app_installation: "github:githubApp",
+  legacy_shared: "github:legacySharedConnection",
 };
 
-function connectionLabel(status: GitHubStatus): string {
+// `t` is threaded in rather than imported at module level so the label follows a
+// locale switch and stays a pure function of its arguments.
+function connectionLabel(t: TFunction, status: GitHubStatus): string {
   const connection = status.automation;
   if (!connection) return "";
+  // The first three are GitHub account logins — data, never translated.
   return (
     connection.actor?.login ??
     connection.login ??
     connection.installation_account_login ??
-    "GitHub App"
+    t("github:githubApp")
   );
 }
 
@@ -62,12 +70,13 @@ function automationActor(status: GitHubStatus): string | null {
 }
 
 function StatusLine({ status }: { status: GitHubStatus }) {
+  const { t } = useTranslation();
   const connection = status.automation;
   if (!connection) {
     return (
       <div className="flex items-center gap-2 text-sm">
         <IconX className="h-4 w-4 shrink-0 text-destructive" />
-        <span>No automation connection</span>
+        <span>{t("github:noAutomationConnection")}</span>
       </div>
     );
   }
@@ -82,10 +91,12 @@ function StatusLine({ status }: { status: GitHubStatus }) {
       )}
       <span className="min-w-0 break-words font-medium">
         {actor ??
-          (connection.status === "active" ? "Authentication unavailable" : connectionLabel(status))}
+          (connection.status === "active"
+            ? t("github:authenticationUnavailable")
+            : connectionLabel(t, status))}
       </span>
       <Badge variant={active ? "secondary" : "destructive"}>
-        {sourceLabels[connection.source]}
+        {t(sourceLabelKeys[connection.source])}
       </Badge>
       {connection.status !== "active" && <Badge variant="outline">{connection.status}</Badge>}
       <GitHubRateLimitDisplay info={status.rate_limit} />
@@ -93,10 +104,11 @@ function StatusLine({ status }: { status: GitHubStatus }) {
   );
 }
 
-async function redirectFrom(start: () => Promise<{ url?: string; URL?: string }>) {
+async function redirectFrom(t: TFunction, start: () => Promise<{ url?: string; URL?: string }>) {
   const response = await start();
   const url = response.url ?? response.URL;
-  if (!url) throw new Error("GitHub did not return a redirect URL");
+  // Surfaced to the user through the caller's toast, so it is copy.
+  if (!url) throw new Error(t("github:githubDidNotReturnARedirectUrl"));
   window.location.assign(url);
 }
 
@@ -132,31 +144,31 @@ function AutomationActorExplanation({
   status: GitHubStatus;
   appAutomation: boolean;
 }) {
+  const { t } = useTranslation();
   const actor = status.automation?.actor?.login;
   if (!status.authenticated || !actor) return null;
   const humanIdentity = status.effective_personal_actor?.kind === "human";
   return (
     <div className="flex items-start gap-1 text-xs text-muted-foreground">
       <GitHubAccessHelp
-        label="Explain workspace GitHub identity"
-        title="Workspace GitHub identity"
-        description="Kandev uses this workspace connection for repository sync, watches, background jobs, and managed agent GitHub commands. With a PAT or GitHub CLI account, My GitHub and actions you trigger use the same human identity."
+        label={t("github:explainWorkspaceGithubIdentity")}
+        title={t("github:workspaceGithubIdentity")}
+        description={t("github:kandevUsesThisWorkspaceConnectionFor")}
       />
       <div className="min-w-0 space-y-1 pt-3 sm:pt-1">
         <p>
           {appAutomation
-            ? `Kandev-managed operations use the GitHub App installed for ${actor}.`
-            : `Kandev-managed operations act as ${actor}.`}
+            ? t("github:kandevManagedOperationsUseTheGithub", { actor })
+            : t("github:kandevManagedOperationsActAs", { actor })}
         </p>
-        {!appAutomation && humanIdentity && (
-          <p>This account also powers My GitHub and user-triggered actions.</p>
-        )}
+        {!appAutomation && humanIdentity && <p>{t("github:thisAccountAlsoPowersMyGithub")}</p>}
       </div>
     </div>
   );
 }
 
 function AppRegistrationDetails({ app }: { app?: GitHubAppRegistrationCatalogItem }) {
+  const { t } = useTranslation();
   if (!app) return null;
   return (
     <>
@@ -166,14 +178,13 @@ function AppRegistrationDetails({ app }: { app?: GitHubAppRegistrationCatalogIte
           {app.visibility}
         </Badge>
         <Badge variant="outline" className="capitalize">
-          Webhook {app.webhook_status}
+          {t("github:webhook")} {app.webhook_status}
         </Badge>
-        <span>{app.source === "managed" ? "Created by Kandev" : "Imported"}</span>
+        <span>{app.source === "managed" ? t("github:createdByKandev") : t("github:imported")}</span>
       </div>
       {app.shared && (
         <p className="text-xs text-amber-600 dark:text-amber-400">
-          This App registration is shared by {app.workspace_binding_count} workspaces. Registration
-          changes affect every workspace using it; installation access remains workspace-specific.
+          {t("github:thisAppRegistrationIsShared", { count: app.workspace_binding_count })}
         </p>
       )}
     </>
@@ -202,6 +213,7 @@ function AutomationActions({
   onRefresh: () => void;
   taskAccess: TaskGitCredentialsState;
 }) {
+  const { t } = useTranslation();
   return (
     <div className="flex flex-wrap gap-2">
       <GitHubPermissionsDialog status={status} />
@@ -218,7 +230,7 @@ function AutomationActions({
         disabled={refreshing}
         aria-busy={refreshing}
         className="h-11 w-11 cursor-pointer"
-        aria-label="Refresh GitHub connection"
+        aria-label={t("github:refreshGithubConnection")}
       >
         <IconRefresh className={`h-4 w-4 ${refreshing ? "animate-spin" : ""}`} />
       </Button>
@@ -230,7 +242,7 @@ function AutomationActions({
           className="h-11 cursor-pointer text-destructive"
         >
           <IconTrash className="mr-2 h-4 w-4" />
-          Disconnect
+          {t("github:disconnect")}
         </Button>
       )}
     </div>
@@ -238,6 +250,7 @@ function AutomationActions({
 }
 
 export function GitHubAutomationSettings({ workspaceId }: { workspaceId: string }) {
+  const { t } = useTranslation();
   const { status, loaded, loading, refresh } = useGitHubStatus(workspaceId);
   const appRegistrations = useGitHubAppRegistrations(workspaceId);
   const taskAccess = useTaskGitCredentials(workspaceId);
@@ -247,11 +260,11 @@ export function GitHubAutomationSettings({ workspaceId }: { workspaceId: string 
     setBusy(true);
     try {
       await disconnectGitHubWorkspace(workspaceId);
-      toast({ description: "Workspace GitHub connection removed", variant: "success" });
+      toast({ description: t("github:workspaceGithubConnectionRemoved"), variant: "success" });
       refresh();
     } catch (error) {
       toast({
-        description: error instanceof Error ? error.message : "Disconnect failed",
+        description: error instanceof Error ? error.message : t("github:disconnectFailed"),
         variant: "error",
       });
     } finally {
@@ -299,6 +312,7 @@ function personalIdentityView(status: GitHubStatus): PersonalIdentityView {
 }
 
 function PersonalIdentityStatus({ view }: { view: PersonalIdentityView }) {
+  const { t } = useTranslation();
   return (
     <div className="flex min-w-0 flex-wrap items-center gap-2 text-sm">
       {view.active ? (
@@ -307,7 +321,7 @@ function PersonalIdentityStatus({ view }: { view: PersonalIdentityView }) {
         <IconX className="h-4 w-4 text-destructive" />
       )}
       <span className="break-words font-medium">{view.actor}</span>
-      {view.personalActive && <Badge variant="secondary">Personal OAuth</Badge>}
+      {view.personalActive && <Badge variant="secondary">{t("github:personalOauth")}</Badge>}
       {view.status && view.status !== "active" && (
         <Badge variant="destructive">{view.status}</Badge>
       )}
@@ -326,12 +340,13 @@ function PersonalIdentityActions({
   onConnect: () => void;
   onDisconnect: () => void;
 }) {
+  const { t } = useTranslation();
   return (
     <div className="flex flex-col gap-2 sm:flex-row">
       {status.app_available && status.automation?.source === "github_app_installation" && (
         <Button disabled={busy} onClick={onConnect} className="h-11 cursor-pointer">
           <IconBrandGithub className="mr-2 h-4 w-4" />
-          {status.personal ? "Reconnect identity" : "Connect identity"}
+          {status.personal ? t("github:reconnectIdentity") : t("github:connectIdentity")}
           <IconExternalLink className="ml-2 h-4 w-4" />
         </Button>
       )}
@@ -343,7 +358,7 @@ function PersonalIdentityActions({
           className="h-11 cursor-pointer text-destructive"
         >
           <IconTrash className="mr-2 h-4 w-4" />
-          Disconnect
+          {t("github:disconnect")}
         </Button>
       )}
     </div>
@@ -351,6 +366,7 @@ function PersonalIdentityActions({
 }
 
 export function GitHubPersonalSettings({ workspaceId }: { workspaceId: string }) {
+  const { t } = useTranslation();
   const { status, loaded, refresh } = useGitHubStatus(workspaceId);
   const [busy, setBusy] = useState(false);
   const { toast } = useToast();
@@ -363,11 +379,11 @@ export function GitHubPersonalSettings({ workspaceId }: { workspaceId: string })
     setBusy(true);
     try {
       await disconnectGitHubPersonal(workspaceId);
-      toast({ description: "Personal GitHub identity disconnected", variant: "success" });
+      toast({ description: t("github:personalGithubIdentityDisconnected"), variant: "success" });
       refresh();
     } catch (error) {
       toast({
-        description: error instanceof Error ? error.message : "Disconnect failed",
+        description: error instanceof Error ? error.message : t("github:disconnectFailed"),
         variant: "error",
       });
     } finally {
@@ -375,17 +391,17 @@ export function GitHubPersonalSettings({ workspaceId }: { workspaceId: string })
     }
   };
   const connect = () => {
-    void redirectFrom(() => startGitHubPersonalConnect(workspaceId)).catch((error: unknown) =>
+    void redirectFrom(t, () => startGitHubPersonalConnect(workspaceId)).catch((error: unknown) =>
       toast({
-        description: errorMessage(error, "Identity connection failed"),
+        description: errorMessage(error, t("github:identityConnectionFailed")),
         variant: "error",
       }),
     );
   };
   return (
     <SettingsSection
-      title="My GitHub identity"
-      description="Optionally connect your GitHub user for My GitHub and human-attributed actions. This identity is never given to managed agents; workspace automation continues as the App."
+      title={t("github:myGithubIdentity")}
+      description={t("github:optionallyConnectYourGithubUserFor")}
     >
       <div className="space-y-4" data-testid="github-personal-identity">
         <PersonalIdentityStatus view={view} />
@@ -404,10 +420,11 @@ export function GitHubPersonalSettings({ workspaceId }: { workspaceId: string })
 }
 
 function LoadingStatus() {
+  const { t } = useTranslation();
   return (
     <div className="flex min-h-11 items-center gap-2 text-sm text-muted-foreground">
       <Spinner className="h-4 w-4" />
-      Checking GitHub connection...
+      {t("github:checkingGithubConnection")}
     </div>
   );
 }

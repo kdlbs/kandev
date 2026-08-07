@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useCallback, useRef, useState } from "react";
-import { listWorkspaceTaskPRs } from "@/lib/api/domains/github-api";
+import { deleteTaskPR, listWorkspaceTaskPRs } from "@/lib/api/domains/github-api";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { useAppStore } from "@/components/state-provider";
 import type { TaskPR } from "@/lib/types/github";
@@ -76,6 +76,8 @@ export function useTaskPR(taskId: string | null) {
   const prs = useAppStore((state) => (taskId ? (state.taskPRs.byTaskId[taskId] ?? null) : null));
   const pr = getPrimaryTaskPR(prs ?? undefined);
   const setTaskPR = useAppStore((state) => state.setTaskPR);
+  const removeTaskPR = useAppStore((state) => state.removeTaskPR);
+  const workspaceId = useAppStore((state) => state.workspaces.activeId);
   const connectionStatus = useAppStore((state) => state.connection.status);
   const retryRef = useRef(0);
   const permanentRef = useRef(false);
@@ -86,6 +88,7 @@ export function useTaskPR(taskId: string | null) {
   // Bumped on each reconnect transition so the retry-polling effect below
   // tears down and recreates its interval (see that effect's dependency list).
   const [reconnectGeneration, setReconnectGeneration] = useState(0);
+  const [loadedTaskId, setLoadedTaskId] = useState<string | null>(null);
   // Monotonic counter incremented before each WS request, snapshotted in
   // the .then() closure. Mirrors useWorkspacePRs above. Without this, a
   // stale response from a previous taskId can land after the user
@@ -125,6 +128,7 @@ export function useTaskPR(taskId: string | null) {
           retryRef.current = SYNC_MAX_RETRIES;
         }
         const list = normalizeSyncResponse(result);
+        setLoadedTaskId(requestedTaskId);
         if (list.length === 0) return;
         for (const pr of list) {
           if (pr.task_id) setTaskPR(requestedTaskId, pr);
@@ -132,9 +136,23 @@ export function useTaskPR(taskId: string | null) {
         retryRef.current = 0;
       })
       .catch(() => {
-        // Ignore - sync may fail if no watch exists
+        if (requestRef.current !== requestId) return;
+        // Keep transient failures pending while retries remain, then settle the
+        // loading state so review-panel cleanup cannot be blocked forever.
+        if (retryRef.current >= SYNC_MAX_RETRIES) {
+          setLoadedTaskId(requestedTaskId);
+        }
       });
   }, [taskId, setTaskPR]);
+
+  const unlink = useCallback(
+    async (associationId: string) => {
+      if (!taskId || !workspaceId) throw new Error("No active workspace is selected.");
+      await deleteTaskPR(associationId, workspaceId);
+      removeTaskPR(taskId, associationId);
+    },
+    [removeTaskPR, taskId, workspaceId],
+  );
 
   // Reset retry/permanent state when taskId changes. Bumping requestRef
   // here invalidates any still-in-flight .then() closure from the prior
@@ -143,6 +161,7 @@ export function useTaskPR(taskId: string | null) {
     retryRef.current = 0;
     permanentRef.current = false;
     requestRef.current++;
+    setLoadedTaskId(null);
   }, [taskId]);
 
   // Sync once when the task becomes active (freshness check).
@@ -198,10 +217,18 @@ export function useTaskPR(taskId: string | null) {
     setReconnectGeneration((g) => g + 1);
   }, [taskId, connectionStatus, refresh]);
 
-  return { pr, prs: prs ?? [], refresh } as {
+  return {
+    pr,
+    prs: prs ?? [],
+    refresh,
+    unlink,
+    loaded: loadedTaskId === taskId || prs !== null,
+  } as {
     pr: TaskPR | null;
     prs: TaskPR[];
     refresh: () => void;
+    unlink: (associationId: string) => Promise<void>;
+    loaded: boolean;
   };
 }
 

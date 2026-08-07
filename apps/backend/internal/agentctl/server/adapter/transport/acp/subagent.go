@@ -276,7 +276,41 @@ func claudeSubagentResponse(meta map[string]any, res *SubagentTaskResult) bool {
 	res.IsAsync, _ = resp["isAsync"].(bool)
 	res.OutputFile, _ = resp["outputFile"].(string)
 	res.CanReadOutputFile, _ = resp["canReadOutputFile"].(bool)
+	res.Model, _ = resp["resolvedModel"].(string)
+	res.ResultText = contentBlocksText(resp["content"])
 	return true
+}
+
+// contentBlocksText concatenates the text of an ACP content-block array, in
+// order, newline-separated. Non-text blocks (image, audio) and blank text are
+// skipped; anything that isn't an array of block maps yields "". Defensive over
+// untyped maps because the shape is provider-reported, and an absent result
+// must read as "no result" rather than as a failure.
+func contentBlocksText(v any) string {
+	blocks, ok := v.([]any)
+	if !ok {
+		return ""
+	}
+	parts := make([]string, 0, len(blocks))
+	for _, b := range blocks {
+		block, isMap := b.(map[string]any)
+		if !isMap {
+			continue
+		}
+		if kind, _ := block["type"].(string); kind != contentTypeText {
+			continue
+		}
+		text, _ := block["text"].(string)
+		if strings.TrimSpace(text) == "" {
+			continue
+		}
+		parts = append(parts, text)
+	}
+	// Joined verbatim: TrimSpace is used only to decide whether a block is
+	// blank, never applied to the text that is stored. A verdict that opens
+	// with an indented code block must survive intact; truncation and
+	// first-line extraction are rendering concerns.
+	return strings.Join(parts, "\n")
 }
 
 // openCodeSubagentMetadata reads OpenCode's `rawOutput.metadata` into res and

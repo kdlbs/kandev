@@ -228,13 +228,17 @@ func TestChangedFileKeyAndIndex(t *testing.T) {
 	if single.Key() != "a.go" {
 		t.Fatalf("single-repo key must be the bare path, got %q", single.Key())
 	}
+	root := ChangedFile{Path: "a.go", RepositoryID: "repo-root"}
+	if root.Key() != "\x00a.go" {
+		t.Fatalf("explicit workspace-root key must keep its scope, got %q", root.Key())
+	}
 	multi := ChangedFile{Path: "a.go", RepositoryName: "backend"}
 	if multi.Key() != "backend\x00a.go" {
 		t.Fatalf("multi-repo key mismatch, got %q", multi.Key())
 	}
-	index := FileByKey([]ChangedFile{single, multi})
-	if len(index) != 2 {
-		t.Fatalf("expected both keys indexed, got %d", len(index))
+	index := FileByKey([]ChangedFile{single, root, multi})
+	if len(index) != 3 {
+		t.Fatalf("expected all scoped keys indexed, got %d", len(index))
 	}
 }
 

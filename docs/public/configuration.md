@@ -38,7 +38,6 @@ Viper maps a nested YAML key by replacing `.` with `_`, adding `KANDEV_`, and up
 
 ```text
 database.dbName       -> KANDEV_DATABASE_DBNAME
-logging.maxSizeMb     -> KANDEV_LOGGING_MAXSIZEMB
 repoClone.basePath    -> KANDEV_REPOCLONE_BASEPATH
 ```
 
@@ -126,11 +125,10 @@ The launcher starts `agentctl`, performs a one-time nonce handshake, and supplie
 | `office.jwtSigningKey` | `KANDEV_OFFICE_JWTSIGNINGKEY` | random per start | HMAC key for Office agent-runtime JWTs. Set a stable secret when Office tasks must survive restarts. |
 | `voice.openAIApiKey` | `KANDEV_VOICE_OPENAI_API_KEY` | empty | Server-side transcription fallback when browser speech recognition is unavailable. Empty disables the fallback and its endpoint returns unavailable. |
 | `features.office` | `KANDEV_FEATURES_OFFICE` | `false` in production | Experimental Office UI, routes, services, and automation. |
-| `features.plugins` | `KANDEV_FEATURES_PLUGINS` | `false` in production | Extensible plugin system: install/manage plugins, spawn plugin backends, and load native UI bundles. Loaded plugin code runs with backend privileges. |
 | `features.app_status_bar` | `KANDEV_FEATURES_APP_STATUS_BAR` | `false` in production | Opt-in global connection/host-metrics/plugin surface: bottom bar on tablet/desktop and Status drawer on phones. Disabling it does not suppress active WebSocket connectivity warnings. |
-| `features.plugins` | `KANDEV_FEATURES_PLUGINS` | `false` in production | Extensible plugin system: install/manage plugins, spawn plugin backends, and load native UI bundles. Loaded plugin code runs with backend privileges. |
-| `features.app_status_bar` | `KANDEV_FEATURES_APP_STATUS_BAR` | `false` in production | Opt-in global connection/host-metrics/plugin surface: bottom bar on tablet/desktop and Status drawer on phones. Disabling it does not suppress active WebSocket connectivity warnings. |
+| `features.auth` | `KANDEV_FEATURES_AUTH` | `false` in production | Opt-in authentication and per-user workspaces. The first visitor after enabling completes setup and becomes the admin. |
 | `features.claude_background_prompt_handoff` | `KANDEV_FEATURES_CLAUDE_BACKGROUND_PROMPT_HANDOFF` | `false` | High-risk experiment that lets Claude Code accept a new prompt after its foreground yields while adapter-attested background work remains active. Other providers keep the coarse busy gate. |
+| `features.claude_mid_turn_steering` | `KANDEV_FEATURES_CLAUDE_MID_TURN_STEERING` | `false` | High-risk experiment that delivers a new prompt into a Claude turn that is still generating (mid-turn steering) instead of queuing it, for agents that advertise prompt queueing. Whether the agent folds the prompt into the running turn or runs it next is the agent's decision; other providers keep the coarse busy gate. |
 
 Do not infer security from `auth.jwtSecret`: setting it currently does not turn the local server into an authenticated public service. Office's JWT key has a narrower, active purpose. Store both active secrets and third-party API keys in your deployment secret manager; never commit them in `config.yaml`.
 
@@ -140,15 +138,12 @@ The voice fallback sends audio to the configured OpenAI transcription service an
 
 | YAML key | Environment variable | Default | Current behavior |
 |---|---|---|---|
-| `logging.level` | `KANDEV_LOG_LEVEL` | `info` | `debug`, `info`, `warn`, or `error`. The CLI normally supplies `warn`, `info`, or `debug`. |
+| `logging.level` | `KANDEV_LOG_LEVEL` | `info` | File threshold: `debug`, `info`, `warn`, or `error`. `--debug` selects `debug`; normal and `--verbose` launches select `info`. |
 | `logging.format` | `KANDEV_LOGGING_FORMAT` | `text`, or `json` in production/Kubernetes | `text` or `json`; `auto` is not accepted. |
-| `logging.outputPath` | `KANDEV_LOGGING_OUTPUTPATH` | `stdout` | `stdout`, `stderr`, or a file path. |
-| `logging.maxSizeMb` | `KANDEV_LOGGING_MAXSIZEMB` | `100` | File-output rotation threshold. Zero uses lumberjack's 100 MiB default. |
-| `logging.maxBackups` | `KANDEV_LOGGING_MAXBACKUPS` | `5` | Rotated-file count; zero means unlimited. |
-| `logging.maxAgeDays` | `KANDEV_LOGGING_MAXAGEDAYS` | `30` | Rotated-file age; zero means unlimited. |
-| `logging.compress` | `KANDEV_LOGGING_COMPRESS` | `true` | Gzip rotated files. |
 
-The format default becomes JSON when `KUBERNETES_SERVICE_HOST` is non-empty or `KANDEV_ENV` is exactly `production`/`prod`; otherwise it is text. Rotation settings apply only to file output. Active log files are created owner-only (`0600`) on Unix, so a log shipper running as another user cannot read them without an explicit permission design.
+Every backend launch writes to `<home>/logs/backend-logs.log` and prints that resolved path at startup. The active file appends across same-day restarts and accepts at most 256 MiB; later entries are dropped until the next UTC day rather than allowing diagnostics to fill the disk. At the next UTC day it rolls to `backend-logs-YYYY-MM-DD.log`; Kandev retains the current UTC day and the two preceding days. Files are owner-only (`0600`) on Unix.
+
+Normal launches write info and above to the file and warn and above to stdout. `--debug` writes debug and above to the file while stdout remains warn and above. `--verbose` writes info and above to both. The format default becomes JSON when `KUBERNETES_SERVICE_HOST` is non-empty or `KANDEV_ENV` is exactly `production`/`prod`; otherwise it is text.
 
 Debug output may contain repository paths, subprocess output, prompts, file content, and tool-call data. Treat it as sensitive.
 
@@ -197,7 +192,6 @@ server:
 
 logging:
   format: "json"
-  outputPath: "/var/log/kandev/backend.log"
 
 repositoryDiscovery:
   roots:
@@ -259,11 +253,6 @@ auth:
 logging:
   level: "info"
   format: "text"
-  outputPath: "stdout"
-  maxSizeMb: 100
-  maxBackups: 5
-  maxAgeDays: 30
-  compress: true
 
 repositoryDiscovery:
   roots: []                # automatic scan roots; explicit paths need not be included
@@ -291,9 +280,9 @@ voice:
 
 features:
   office: false
-  plugins: false
-  app_status_bar: true
-  app_status_bar: true
+  app_status_bar: false
+  auth: false
+  claude_background_prompt_handoff: false
 ```
 
 Copying this entire file is unnecessary and can freeze old defaults in a deployment. Keep only deliberate overrides. On Windows, do not copy the Unix Docker host/path literals from this example.
@@ -307,16 +296,23 @@ Copying this entire file is unnecessary and can freeze old defaults in a deploym
 | Key | Environment lock | Production default | Effect |
 |---|---|---|---|
 | `features.office` | `KANDEV_FEATURES_OFFICE` | off | Experimental autonomous-agent Office surfaces and automation. |
-| `features.plugins` | `KANDEV_FEATURES_PLUGINS` | off | Extensible plugin system: install/manage plugins and load their backends and native UI bundles. |
 | `features.appStatusBar` | `KANDEV_FEATURES_APP_STATUS_BAR` | off | Global status bar on tablet/desktop and Status drawer entry on phones. Enabling changes visibility only; urgent WebSocket connectivity warnings remain visible when it is off. |
-| `features.plugins` | `KANDEV_FEATURES_PLUGINS` | off | Extensible plugin system: install/manage plugins and load their backends and native UI bundles. |
-| `features.appStatusBar` | `KANDEV_FEATURES_APP_STATUS_BAR` | off | Global status bar on tablet/desktop and Status drawer entry on phones. Enabling changes visibility only; urgent WebSocket connectivity warnings remain visible when it is off. |
+| `features.auth` | `KANDEV_FEATURES_AUTH` | off | Authentication and per-user workspaces for the whole install. |
 | `features.claudeBackgroundPromptHandoff` | `KANDEV_FEATURES_CLAUDE_BACKGROUND_PROMPT_HANDOFF` | off | High-risk Claude Code experiment that exposes recognized background-only activity and admits a successor prompt. |
+| `features.claudeMidTurnSteering` | `KANDEV_FEATURES_CLAUDE_MID_TURN_STEERING` | off | High-risk Claude Code experiment that delivers a prompt into a still-generating turn (mid-turn steering) instead of queuing it, for agents advertising prompt queueing. |
 | `debug.devMode` | `KANDEV_DEBUG_DEV_MODE` (also locked by explicit legacy/debug-message vars) | off | High-risk diagnostic endpoints and ACP frame logging. |
 
 UI changes are persisted in the database and require a restart. An explicitly set environment value wins and locks the UI control. Otherwise a database override wins over the embedded profile/default. Resetting a toggle removes its database override.
 
-The source checkout's `make dev` activates the embedded development profile, which enables Office, debug surfaces, ACP logging, and a mock agent; the App status bar and Claude background prompt handoff remain opt-in. Installed `run`/desktop builds select the safe production profile unless the environment explicitly opts in. E2E mock variables and routes are test-only and must never be enabled on a public deployment.
+For a risky release feature, keep the flag off in the shipped profiles, enable it
+only on a selected install through an admin override or explicit environment,
+restart, and test it there. Promote the `prod` profile default only after the
+feature is ready for everyone; keep the registry entry as a kill-switch until
+the rollout is complete, then remove the live flag and move its key and
+environment variable to the runtime registry's append-only retired identities.
+Plugins are part of the base product and are not a runtime toggle.
+
+The source checkout's `make dev` activates the embedded development profile, which enables Office, debug surfaces, ACP logging, and a mock agent; the App status bar, authentication, and Claude background prompt handoff remain opt-in. Installed `run`/desktop builds select the safe production profile unless the environment explicitly opts in. E2E mock variables and routes are test-only and must never be enabled on a public deployment.
 
 ## Credentials and product settings
 The **Unread Messages** preference in **Settings > General > Task Actions** controls the Slack-style **New** divider in session transcripts. It defaults off for each user, persists with user settings, and takes effect immediately. Enabling it also allows that user's active transcript view to advance the session read cursor.
@@ -339,13 +335,14 @@ Profile environment variables are eventually injected into agent subprocesses or
 
 ## Advanced operator tuning
 
-These startup-only variables are supported by specific runtime components but are not YAML fields. Leave them at defaults unless diagnosing a measured problem.
+These variables are supported by specific runtime components but are not YAML fields. Most are startup-only; the message queue limit also has a live database-backed setting described below. Leave them at defaults unless diagnosing a measured problem.
 
 | Variable | Default | Parsing and effect |
 |---|---:|---|
 | `KANDEV_GH_MAX_CONCURRENT` | `8` | Positive integer process-wide cap for `gh` subprocesses; invalid/non-positive uses default. |
 | `KANDEV_GIT_MAX_CONCURRENT` | `12` | Positive integer process-wide cap for `git` subprocesses; invalid/non-positive uses default. |
-| `KANDEV_QUEUE_MAX_PER_SESSION` | `10` | Queued user messages per session. Invalid uses default; zero/negative disables the cap. |
+| `KANDEV_LSP_MAX_CONNECTIONS` | `8` | Positive integer process-wide cap for active browser-to-task-host language-server streams; invalid/non-positive uses default. |
+| `KANDEV_QUEUE_MAX_PER_SESSION` | `10` | Pending messages per session. A valid value overrides and locks the saved UI setting; zero/negative means unlimited, while invalid falls through to the saved setting or default. |
 | `KANDEV_ACP_IDLE_TIMEOUT` | `1h` | Go duration after which idle agentctl instances are reaped; `0` disables. Invalid uses default. |
 | `KANDEV_ACP_IDLE_REAPER_INTERVAL` | `1m` | Go duration between idle scans. Intended mainly for testing; use the default in production. |
 | `KANDEV_ACP_NOTIF_QUEUE` | `131072` | Per-connection ACP inbound notification capacity; positive values clamp to `1024`-`131072`, invalid uses default. |
@@ -354,7 +351,7 @@ These startup-only variables are supported by specific runtime components but ar
 | `KANDEV_MCP_LOG_FILE` | unset | File path for per-agentctl MCP debug logs. Logs tool names, arguments, session IDs, results for tool errors, and timings; invalid paths warn and disable this sink. |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | unset | Enables OTLP/HTTP tracing for backend and agentctl spans; unset uses a no-op tracer. See the transport warning below. |
 
-Changing concurrency/queue values trades memory and process pressure against throughput. Values are captured during process/component initialization and need a restart.
+Changing concurrency values trades process pressure against throughput and requires a restart. The queue environment value is also read at startup. Without that environment override, an admin can use **Settings > General > Message Queue** to save an install-wide limit that applies live. `0` means unlimited. Lowering the live limit does not prune existing rows; new admissions remain blocked until the pending count drops below the limit, while retries of already accepted work remain eligible.
 
 The current OTLP exporter strips an `http://` or `https://` prefix from the configured endpoint and always uses `WithInsecure()`. Treat this as implementation-bound cleartext transport: send it only to a trusted private collector over a protected network, not directly across an untrusted network. The service name is `kandev-agentctl`, and spans can include task/session/execution IDs plus raw agent-event JSON truncated to 8192 characters. That payload can contain prompts, files, and tool data. Use collector-side access controls and retention accordingly.
 

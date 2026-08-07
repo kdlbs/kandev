@@ -1,5 +1,6 @@
 "use client";
 
+import { useTranslation } from "react-i18next";
 import { Button } from "@kandev/ui/button";
 import {
   Dialog,
@@ -25,18 +26,19 @@ export function DeleteRepositoryDialog({
   activeSessionCount,
   deleteLoading,
 }: DeleteRepositoryDialogProps) {
+  const { t } = useTranslation();
   const hasActiveSessions = activeSessionCount > 0;
-  const isOne = activeSessionCount === 1;
-  const sessionWord = isOne ? "session" : "sessions";
-  const pronoun = isOne ? "it" : "them";
+  // The noun and the pronoun used to be inflected here with a ternary, which put
+  // the plural rule at the call site — untranslatable in a language with more
+  // than two forms. Both now fold into the `_one` / `_other` catalog entries.
   const description = hasActiveSessions
-    ? `This repository is used by ${activeSessionCount} active agent ${sessionWord}. Stop or finish ${pronoun} before deleting the repository.`
-    : "This will remove the repository and its scripts. This action cannot be undone.";
+    ? t("workspaces:deleteRepositoryActiveSessions", { count: activeSessionCount })
+    : t("workspaces:deleteRepositoryConfirm");
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Delete repository</DialogTitle>
+          <DialogTitle>{t("workspaces:deleteRepositoryTitle")}</DialogTitle>
           <DialogDescription>{description}</DialogDescription>
         </DialogHeader>
         <DialogFooter>
@@ -46,7 +48,7 @@ export function DeleteRepositoryDialog({
             className="cursor-pointer"
             onClick={() => onOpenChange(false)}
           >
-            {hasActiveSessions ? "Close" : "Cancel"}
+            {hasActiveSessions ? t("workspaces:close") : t("common:cancel")}
           </Button>
           {!hasActiveSessions && (
             <Button
@@ -56,7 +58,7 @@ export function DeleteRepositoryDialog({
               onClick={onDelete}
               disabled={deleteLoading}
             >
-              Delete Repository
+              {t("workspaces:deleteRepository")}
             </Button>
           )}
         </DialogFooter>

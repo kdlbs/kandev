@@ -14,6 +14,7 @@ import {
   resolveBaseBranch,
   resolveRepositoryId,
 } from "@/lib/watcher-repository-default";
+import { useTranslation } from "react-i18next";
 
 type PickItem = { id: string; label: string };
 
@@ -74,6 +75,7 @@ export function WatcherRepositoryFields({
   onRepositoryChange: (repositoryId: string) => void;
   onBaseBranchChange: (baseBranch: string) => void;
 }) {
+  const { t } = useTranslation();
   // forceRefresh: a repo created in settings doesn't update the shared store
   // slice, and the lazy fetch is gated by isLoaded — so without this the picker
   // could miss repositories created since the slice first loaded. The hook owns
@@ -89,8 +91,8 @@ export function WatcherRepositoryFields({
   return (
     <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
       <PickSelect
-        label="Repository"
-        description="Optional — the repository the agent works in."
+        label={t("common:repository")}
+        description={t("common:optionalTheRepositoryTheAgentWorks")}
         value={repositoryId || NO_REPOSITORY}
         onChange={(v) => onRepositoryChange(resolveRepositoryId(v))}
         placeholder={NO_REPOSITORY_LABEL}
@@ -100,8 +102,8 @@ export function WatcherRepositoryFields({
         ]}
       />
       <PickSelect
-        label="Base Branch"
-        description="The base branch the agent starts from."
+        label={t("common:baseBranch")}
+        description={t("common:theBaseBranchTheAgentStarts")}
         value={baseBranch || DEFAULT_BRANCH}
         onChange={(v) => onBaseBranchChange(resolveBaseBranch(v))}
         placeholder={branchPlaceholder(repositoryId, branchesLoading)}

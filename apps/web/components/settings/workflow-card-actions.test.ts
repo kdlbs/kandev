@@ -1,5 +1,5 @@
 import { act, renderHook } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   createWorkflowAction,
   createWorkflowStepAction,
@@ -17,6 +17,7 @@ import {
   createWorkflowDraftSaveProgress,
   persistWorkflowDraft,
   useWorkflowStepActions,
+  areStepDraftsEqual,
 } from "./workflow-card-actions";
 
 vi.mock("@/app/actions/workspaces", () => ({
@@ -36,6 +37,10 @@ vi.mock("@/app/actions/workspaces", () => ({
 
 beforeEach(() => {
   vi.clearAllMocks();
+});
+
+afterEach(() => {
+  vi.unstubAllGlobals();
 });
 
 const workflow = {
@@ -142,6 +147,42 @@ describe("useWorkflowStepActions", () => {
       name: "New Step",
     });
     expect(createWorkflowStepAction).not.toHaveBeenCalled();
+  });
+
+  it("adds a client-only step when crypto.randomUUID is unavailable", async () => {
+    vi.stubGlobal("crypto", {});
+    const setWorkflowSteps = vi.fn();
+    const { result } = renderHook(() =>
+      useWorkflowStepActions({
+        workflow,
+        workflowSteps: [step("step-1", "Todo", 0, true)],
+        setWorkflowSteps,
+        refreshWorkflowSteps: vi.fn(),
+        setStepToDelete: vi.fn(),
+        setStepTaskCount: vi.fn(),
+        setTargetStepForMigration: vi.fn(),
+        setStepDeleteOpen: vi.fn(),
+        toast: vi.fn(),
+      }),
+    );
+
+    await act(() => result.current.handleAddWorkflowStep());
+
+    const updater = setWorkflowSteps.mock.calls[0][0] as (steps: WorkflowStep[]) => WorkflowStep[];
+    expect(updater([])[0]).toMatchObject({
+      id: expect.stringMatching(/^temp-step-[0-9a-f-]{36}$/),
+      name: "New Step",
+    });
+  });
+});
+
+describe("workflow step cancel completion policy", () => {
+  it("treats a persisted policy change as a dirty draft", () => {
+    const saved = step("step-1", "Todo", 0, true);
+    const draft = { ...saved, cancel_triggers_turn_complete: true } as WorkflowStep;
+
+    expect(areStepDraftsEqual(saved, draft)).toBe(false);
+    expect(areStepDraftsEqual(draft, { ...draft })).toBe(true);
   });
 });
 
@@ -333,6 +374,43 @@ describe("persistWorkflowDraft", () => {
     expect(updateWorkflowStepAction).toHaveBeenCalledWith(
       SERVER_STEP_TWO,
       expect.objectContaining({ pull_from_step_id: SERVER_STEP_ONE }),
+    );
+  });
+});
+
+describe("persistWorkflowDraft cancellation policy", () => {
+  it("forwards cancellation policy when creating a missing template step", async () => {
+    const draftWorkflow = { ...workflow, id: CLIENT_WORKFLOW_ID } as Workflow;
+    const drafts = [
+      {
+        ...step(CLIENT_STEP_ONE, "Todo", 0, true),
+        workflow_id: draftWorkflow.id,
+        cancel_triggers_turn_complete: true,
+      },
+    ] as WorkflowStep[];
+    vi.mocked(createWorkflowAction).mockResolvedValue({
+      ...workflow,
+      id: "wf-created",
+    } as Workflow);
+    vi.mocked(updateWorkflowAction).mockResolvedValue({
+      ...workflow,
+      id: "wf-created",
+    } as Workflow);
+    vi.mocked(createWorkflowStepAction).mockResolvedValueOnce(
+      step(SERVER_STEP_ONE, "Todo", 0, true),
+    );
+
+    await persistWorkflowDraft({
+      workflow: draftWorkflow,
+      draftSteps: drafts,
+      savedSteps: [],
+      progress: createWorkflowDraftSaveProgress(),
+    });
+
+    expect(createWorkflowStepAction).toHaveBeenCalledWith(
+      expect.objectContaining({
+        cancel_triggers_turn_complete: true,
+      }),
     );
   });
 });

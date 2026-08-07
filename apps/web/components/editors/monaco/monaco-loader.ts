@@ -2,7 +2,8 @@ import * as monacoImport from "monaco-editor";
 import type { Monaco } from "@monaco-editor/react";
 import type { IDisposable } from "monaco-editor";
 import { loader } from "@monaco-editor/react";
-import { isBuiltinTsSuppressed } from "./builtin-providers";
+import { isBuiltinTsSuppressed, isLspProviderRegistrationActive } from "./builtin-providers";
+import type { LspMonacoProviderMethod } from "@/lib/lsp/lsp-provider-capabilities";
 
 // Cast to Monaco type (from @monaco-editor/react) which has the full
 // languages.typescript typings. The main 'monaco-editor' export marks
@@ -16,13 +17,14 @@ const monaco = monacoImport as unknown as Monaco;
 // Monaco v0.55.1's setModeConfiguration fires onDidChange, but the
 // tsMode.js setupMode() function never subscribes to it — providers are
 // registered once and never torn down. So we intercept provider registration
-// to wrap built-in TS/JS providers with a suppression flag check. When LSP
-// is active, the wrappers return null/empty instead of calling the original.
+// to wrap built-in TS/JS providers with a model-ownership check. When an LSP
+// owns the requested model and advertises the overlapping feature, the wrapper
+// returns null/empty instead of calling the original. Built-ins remain available
+// to unrelated sessions, models, and features the external server did not offer.
 //
-// Key: we check `isBuiltinTsSuppressed()` at REGISTRATION time. If the flag
-// is already true when a provider is registered, it means the LSP client is
-// registering its own providers — those should NOT be wrapped. Only providers
-// registered while the flag is false (Monaco's built-in ones) get wrapped.
+// Key: the LSP client marks its own synchronous provider registration with a
+// dedicated guard. Every other TS/JS provider is treated as a Monaco built-in
+// and wrapped, even if it loads lazily while runtime suppression is already on.
 // ---------------------------------------------------------------------------
 
 const TS_LANGUAGES = new Set(["typescript", "javascript", "typescriptreact", "javascriptreact"]);
@@ -88,24 +90,22 @@ if (typeof window !== "undefined") {
 
   function wrapRegistration(
     original: ProviderRegistrationFn,
-    methodName: string,
+    methodName: LspMonacoProviderMethod,
     emptyResult: unknown,
   ): ProviderRegistrationFn {
     return function (selector: string, provider: Record<string, unknown>, ...rest: unknown[]) {
-      // Only wrap providers for TS/JS languages that are registered while
-      // suppression is OFF (= Monaco's built-in providers). When suppression
-      // is already ON at registration time, it means the LSP client is
-      // registering its own providers — pass those through unwrapped.
+      // Only the LSP client's explicitly guarded registrations pass through.
+      // Lazy Monaco registrations remain wrapped regardless of suppression.
       if (
         typeof selector === "string" &&
         TS_LANGUAGES.has(selector) &&
         typeof provider[methodName] === "function" &&
-        !isBuiltinTsSuppressed()
+        !isLspProviderRegistrationActive()
       ) {
         const origMethod = (provider[methodName] as (...a: unknown[]) => unknown).bind(provider);
         const wrapped = Object.create(provider);
         wrapped[methodName] = function (...args: unknown[]) {
-          if (isBuiltinTsSuppressed()) return emptyResult;
+          if (isBuiltinTsSuppressed(args[0], methodName)) return emptyResult;
           return origMethod(...args);
         };
         return original.call(langs, selector, wrapped, ...rest);
@@ -139,26 +139,6 @@ if (typeof window !== "undefined") {
   l.registerReferenceProvider = wrapRegistration(
     l.registerReferenceProvider.bind(langs),
     "provideReferences",
-    null,
-  );
-  l.registerDocumentHighlightProvider = wrapRegistration(
-    l.registerDocumentHighlightProvider.bind(langs),
-    "provideDocumentHighlights",
-    null,
-  );
-  l.registerCodeActionProvider = wrapRegistration(
-    l.registerCodeActionProvider.bind(langs),
-    "provideCodeActions",
-    null,
-  );
-  l.registerRenameProvider = wrapRegistration(
-    l.registerRenameProvider.bind(langs),
-    "provideRenameEdits",
-    null,
-  );
-  l.registerInlayHintsProvider = wrapRegistration(
-    l.registerInlayHintsProvider.bind(langs),
-    "provideInlayHints",
     null,
   );
 }

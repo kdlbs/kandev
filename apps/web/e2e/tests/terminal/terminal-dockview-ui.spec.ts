@@ -53,7 +53,16 @@ async function openTask(page: Page, title: string): Promise<SessionPage> {
 
 async function clickNewTerminalInPlusMenu(page: Page, session: SessionPage) {
   await session.addPanelButton().click();
-  await page.getByTestId("new-terminal-button").click();
+  const menu = page
+    .locator('[data-slot="dropdown-menu-content"]')
+    .filter({ has: page.getByTestId("new-terminal-button") });
+  await expect(menu).toBeVisible();
+  await menu.getByTestId("new-terminal-button").click();
+  // Radix keeps the portal mounted for its 100 ms close animation. Returning
+  // sooner lets a second trigger click land while the first menu is closing;
+  // that click is swallowed and leaves the dropdown closed. Wait for the
+  // captured portal to detach so callers can safely reopen the menu.
+  await expect(menu).toHaveCount(0);
 }
 
 test.describe("Terminals — dockview UI", () => {

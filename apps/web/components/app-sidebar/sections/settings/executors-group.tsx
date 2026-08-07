@@ -1,11 +1,11 @@
 "use client";
 
 import { IconCpu } from "@tabler/icons-react";
+import { useTranslation } from "react-i18next";
 import { useAppStore } from "@/components/state-provider";
 import { getExecutorIcon } from "@/lib/executor-icons";
+import { EXECUTORS_SETTINGS_HREF } from "@/lib/settings-discovery/catalog/executors";
 import { SettingsGroup, SettingsLeaf } from "./settings-nav-primitives";
-
-const ROOT_HREF = "/settings/executors";
 
 type ExecutorsGroupProps = {
   pathname: string;
@@ -14,6 +14,7 @@ type ExecutorsGroupProps = {
 };
 
 export function ExecutorsGroup({ pathname, expanded, onToggle }: ExecutorsGroupProps) {
+  const { t } = useTranslation();
   const executors = useAppStore((s) => s.executors.items);
   const allProfiles = executors.flatMap((executor) =>
     (executor.profiles ?? []).map((profile) => ({ ...profile, executorType: executor.type })),
@@ -21,16 +22,16 @@ export function ExecutorsGroup({ pathname, expanded, onToggle }: ExecutorsGroupP
 
   return (
     <SettingsGroup
-      label="Executors"
+      label={t("common:executors")}
       icon={IconCpu}
-      href={ROOT_HREF}
-      isActive={pathname === ROOT_HREF}
+      href={EXECUTORS_SETTINGS_HREF}
+      isActive={pathname === EXECUTORS_SETTINGS_HREF}
       expanded={expanded}
       onToggle={onToggle}
     >
       {allProfiles.map((profile) => {
         const Icon = getExecutorIcon(profile.executorType);
-        const profilePath = `${ROOT_HREF}/${profile.id}`;
+        const profilePath = `${EXECUTORS_SETTINGS_HREF}/${profile.id}`;
         return (
           <SettingsLeaf
             key={profile.id}

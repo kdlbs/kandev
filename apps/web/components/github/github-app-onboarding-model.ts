@@ -5,6 +5,7 @@ import type {
   GitHubAppRegistrationErrorBody,
   GitHubAppVisibility,
 } from "@/lib/types/github";
+import { t } from "@/lib/i18n";
 
 const ownerPattern = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?$/;
 const slugPattern = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,98}[A-Za-z0-9])?$/;
@@ -29,19 +30,19 @@ export function normalizePublicBaseUrl(rawValue: string, errors: AppSetupErrors)
   try {
     url = new URL(rawValue.trim());
   } catch {
-    errors.publicBaseUrl = "Enter a public HTTPS origin.";
+    errors.publicBaseUrl = t("github:enterAPublicHttpsOrigin");
     return null;
   }
   if (url.protocol !== "https:" || url.username || url.password) {
-    errors.publicBaseUrl = "Enter a public HTTPS origin.";
+    errors.publicBaseUrl = t("github:enterAPublicHttpsOrigin");
     return null;
   }
   if (url.hostname === "localhost" || url.hostname.endsWith(".localhost")) {
-    errors.publicBaseUrl = "Enter a public host, not localhost.";
+    errors.publicBaseUrl = t("github:enterAPublicHostNotLocalhost");
     return null;
   }
   if ((url.pathname && url.pathname !== "/") || url.search || url.hash) {
-    errors.publicBaseUrl = "Enter an origin without a path, query, or fragment.";
+    errors.publicBaseUrl = t("github:enterAnOriginWithoutAPath");
     return null;
   }
   return url.origin;
@@ -57,8 +58,8 @@ export function validateRegistrationBasics(input: {
   const displayName = input.displayName.trim();
   const ownerLogin = input.ownerLogin.trim();
   if (!displayName || displayName.length > 100)
-    errors.displayName = "Enter a name up to 100 characters.";
-  if (!ownerPattern.test(ownerLogin)) errors.ownerLogin = "Enter a valid GitHub account login.";
+    errors.displayName = t("github:enterANameUpTo100Characters");
+  if (!ownerPattern.test(ownerLogin)) errors.ownerLogin = t("github:enterAValidGithubAccountLogin");
   const publicBaseUrl = normalizePublicBaseUrl(input.publicBaseUrl, errors);
   return { displayName, ownerLogin, publicBaseUrl, errors };
 }
@@ -73,12 +74,13 @@ export function validateImportSecrets(input: {
 }) {
   const errors: AppSetupErrors = {};
   const appId = Number(input.appId);
-  if (!Number.isSafeInteger(appId) || appId <= 0) errors.appId = "Enter the numeric GitHub App ID.";
-  if (!input.clientId.trim()) errors.clientId = "Enter the App client ID.";
-  if (!input.clientSecret) errors.clientSecret = "Enter the App client secret.";
-  if (!input.privateKey.trim()) errors.privateKey = "Paste the App private key.";
-  if (!input.webhookSecret) errors.webhookSecret = "Enter the webhook secret.";
-  if (!slugPattern.test(input.slug.trim())) errors.slug = "Enter the GitHub App slug.";
+  if (!Number.isSafeInteger(appId) || appId <= 0)
+    errors.appId = t("github:enterTheNumericGithubAppId");
+  if (!input.clientId.trim()) errors.clientId = t("github:enterTheAppClientId");
+  if (!input.clientSecret) errors.clientSecret = t("github:enterTheAppClientSecret");
+  if (!input.privateKey.trim()) errors.privateKey = t("github:pasteTheAppPrivateKey");
+  if (!input.webhookSecret) errors.webhookSecret = t("github:enterTheWebhookSecret");
+  if (!slugPattern.test(input.slug.trim())) errors.slug = t("github:enterTheGithubAppSlug");
   return { appId, errors };
 }
 
@@ -105,31 +107,31 @@ export function callbackNotice(code: string): CallbackNotice {
   if (code === "app_registered")
     return {
       tone: "success",
-      title: "GitHub App added",
-      description: "The App is ready to select and install for this workspace.",
+      title: t("github:githubAppAdded"),
+      description: t("github:theAppIsReadyToSelect"),
     };
   if (code === "app_connected")
     return {
       tone: "success",
-      title: "GitHub App connected",
-      description: "Workspace automation now uses the verified App installation.",
+      title: t("github:githubAppConnected"),
+      description: t("github:workspaceAutomationNowUsesTheVerified"),
     };
   if (code === "personal_connected")
     return {
       tone: "success",
-      title: "GitHub identity connected",
-      description: "My GitHub now uses your verified personal identity.",
+      title: t("github:githubIdentityConnected"),
+      description: t("github:myGithubNowUsesYourVerified"),
     };
   if (code === "github_app_registration_cancelled")
     return {
       tone: "info",
-      title: "GitHub App setup cancelled",
-      description: "The existing workspace connection was not changed.",
+      title: t("github:githubAppSetupCancelled"),
+      description: t("github:theExistingWorkspaceConnectionWasNot"),
     };
   return {
     tone: "error",
-    title: "GitHub setup was not completed",
-    description: "The GitHub response could not be verified. Review the connection and try again.",
+    title: t("github:githubSetupWasNotCompleted"),
+    description: t("github:theGithubResponseCouldNotBe"),
   };
 }
 

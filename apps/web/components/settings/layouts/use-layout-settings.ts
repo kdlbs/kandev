@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState, type Dispatch, type SetStateAction } from "react";
 import { useAppStore } from "@/components/state-provider";
 import { updateUserSettings } from "@/lib/api";
+import { t } from "@/lib/i18n";
 import {
   createLayoutProfileId,
   deleteLayoutProfile,
@@ -34,13 +35,13 @@ function defaultSelection(profiles: SavedLayout[]): LayoutProfileSelection {
 }
 
 function errorMessage(error: unknown) {
-  return error instanceof Error ? error.message : "Failed to save layout profiles";
+  return error instanceof Error ? error.message : t("settings:failedToSaveLayoutProfiles");
 }
 
 function getDefaultActionLabel(isCustomDefault: boolean, selectedIsDefault: boolean) {
-  if (isCustomDefault) return "Use built-in Default";
-  if (selectedIsDefault) return "Default";
-  return "Use as default";
+  if (isCustomDefault) return t("settings:useBuiltInDefault");
+  if (selectedIsDefault) return t("settings:default");
+  return t("settings:useAsDefault");
 }
 
 function attempt(setError: Dispatch<SetStateAction<string | null>>, action: () => void) {
@@ -150,7 +151,8 @@ function updateBuiltInDefault(drafts: Drafts, selected: SelectedState) {
 }
 
 function useProfileActions(drafts: Drafts, selected: SelectedState) {
-  const selectedName = selected.selectedBuiltIn?.name ?? selected.selectedCustom?.name ?? "Layout";
+  const selectedName =
+    selected.selectedBuiltIn?.name ?? selected.selectedCustom?.name ?? t("settings:layout");
   const duplicate = () =>
     attempt(drafts.setError, () => {
       const id = createLayoutProfileId();
@@ -159,7 +161,8 @@ function useProfileActions(drafts: Drafts, selected: SelectedState) {
       drafts.replaceProfiles(
         duplicateLayoutProfile(drafts.profiles, source, {
           id,
-          name: `${selectedName} copy`,
+          // The copy's name is user data from here on, but its initial value is copy.
+          name: t("settings:layoutProfileCopyName", { name: selectedName }),
           createdAt: new Date().toISOString(),
         }),
       );
@@ -171,7 +174,7 @@ function useProfileActions(drafts: Drafts, selected: SelectedState) {
       drafts.replaceProfiles(
         duplicateLayoutProfile(drafts.profiles, getBuiltInLayoutProfile("default"), {
           id,
-          name: "Untitled layout",
+          name: t("settings:untitledLayout"),
           createdAt: new Date().toISOString(),
         }),
       );
@@ -251,7 +254,7 @@ function useSaveProfiles(drafts: Drafts) {
   return async () => {
     if (!drafts.isDirty || drafts.saveStatus === "loading") return;
     if (drafts.profiles.some((profile) => !profile.name.trim())) {
-      drafts.setError("Layout profile names must not be empty");
+      drafts.setError(t("settings:layoutProfileNamesMustNotBe"));
       drafts.setSaveStatus("error");
       return;
     }
@@ -302,7 +305,7 @@ function getDefaultActionState(drafts: Drafts, selected: SelectedState) {
     drafts.selection.kind === "built-in" && drafts.selection.id === "default";
   const label =
     builtInDefaultSelected && selectedIsDefault
-      ? "Default"
+      ? t("settings:default")
       : getDefaultActionLabel(selectedSavedDefault, selectedIsDefault);
   return { disabled, label, selectedIsDefault, selectedSavedDefault };
 }

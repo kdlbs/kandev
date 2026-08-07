@@ -445,13 +445,15 @@ func (r *Repository) insertTemplateStep(
 			id, workflow_id, name, position, color, prompt, events,
 			allow_manual_move, is_start_step, show_in_command_panel,
 			auto_archive_after_hours, agent_profile_id, stage_type,
+			auto_advance_requires_signal, cancel_triggers_turn_complete,
 			created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`),
 		idMap[def.ID], workflowID, def.Name, def.Position, def.Color, def.Prompt,
 		string(eventsJSON), dialect.BoolToInt(def.AllowManualMove),
 		dialect.BoolToInt(def.IsStartStep), dialect.BoolToInt(def.ShowInCommandPanel),
 		def.AutoArchiveAfterHours, def.AgentProfileID, string(stage),
+		dialect.BoolToInt(def.AutoAdvanceRequiresSignal), dialect.BoolToInt(def.CancelTriggersTurnComplete),
 		now, now,
 	)
 	if err != nil {

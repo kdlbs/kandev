@@ -17,6 +17,7 @@ import {
 } from "@/lib/api/domains/settings-api";
 import type { DockerContainer } from "@/lib/api/domains/settings-api";
 import { SettingsCard } from "@/components/settings/settings-card";
+import { useTranslation } from "react-i18next";
 
 const DEFAULT_IMAGE_TAG = "kandev/multi-agent:latest";
 // Self-contained default that produces a working image:
@@ -60,20 +61,21 @@ function parseDockerLine(raw: string): string | null {
 }
 
 function BuildStatusBadge({ status }: { status: BuildStatus }) {
+  const { t } = useTranslation();
   if (status === "idle") return null;
-  if (status === "building") return <Badge variant="secondary">Building...</Badge>;
+  if (status === "building") return <Badge variant="secondary">{t("executors:building")}</Badge>;
   if (status === "success") {
     return (
       <Badge variant="default" className="bg-green-600">
         <IconCheck className="mr-1 h-3 w-3" />
-        Success
+        {t("executors:success")}
       </Badge>
     );
   }
   return (
     <Badge variant="destructive">
       <IconX className="mr-1 h-3 w-3" />
-      Failed
+      {t("executors:failed")}
     </Badge>
   );
 }
@@ -106,6 +108,7 @@ async function readDockerStream(
 }
 
 function useBuildStream(onBuildSuccess?: (result: DockerBuildSuccess) => void) {
+  const { t } = useTranslation();
   const [buildStatus, setBuildStatus] = useState<BuildStatus>("idle");
   const [buildLog, setBuildLog] = useState("");
 
@@ -113,6 +116,9 @@ function useBuildStream(onBuildSuccess?: (result: DockerBuildSuccess) => void) {
     setBuildLog((prev) => prev + text);
   }, []);
 
+  // Only the lines this client writes into the log pane are translated. The
+  // rest of the pane is `docker build`'s own stdout, streamed through
+  // `parseDockerLine` verbatim.
   const runBuild = useCallback(
     async (dockerfile: string, tag: string) => {
       setBuildStatus("building");
@@ -122,13 +128,13 @@ function useBuildStream(onBuildSuccess?: (result: DockerBuildSuccess) => void) {
         if (!response.ok) {
           const text = await response.text();
           setBuildStatus("failed");
-          setBuildLog(`Build failed (${response.status}): ${text}`);
+          setBuildLog(t("executors:buildFailedWithStatus", { status: response.status, text }));
           return;
         }
         const reader = response.body?.getReader();
         if (!reader) {
           setBuildStatus("failed");
-          setBuildLog("No response body");
+          setBuildLog(t("executors:noResponseBody"));
           return;
         }
         const hasError = await readDockerStream(reader, appendLog);
@@ -139,11 +145,13 @@ function useBuildStream(onBuildSuccess?: (result: DockerBuildSuccess) => void) {
         }
       } catch (err) {
         setBuildStatus("failed");
-        const msg = err instanceof Error ? err.message : "Unknown error";
-        setBuildLog((prev) => prev + `\nBuild failed: ${msg}`);
+        const msg = err instanceof Error ? err.message : t("executors:unknownError");
+        setBuildLog(
+          (prev) => prev + `\n${t("executors:buildFailedWithMessage", { message: msg })}`,
+        );
       }
     },
-    [appendLog, onBuildSuccess],
+    [appendLog, onBuildSuccess, t],
   );
 
   return { buildStatus, buildLog, runBuild };
@@ -168,6 +176,7 @@ export function DockerfileBuildCard({
   onImageTagChange,
   onBuildSuccess,
 }: DockerfileBuildCardProps) {
+  const { t } = useTranslation();
   const { buildStatus, buildLog, runBuild } = useBuildStream(onBuildSuccess);
   const logRef = useRef<HTMLPreElement>(null);
 
@@ -193,8 +202,8 @@ export function DockerfileBuildCard({
       <CardHeader>
         <div className="flex items-center justify-between">
           <div className="space-y-1">
-            <CardTitle>Dockerfile</CardTitle>
-            <CardDescription>Define the Docker image. Build and test it here.</CardDescription>
+            <CardTitle>{t("executors:dockerfile")}</CardTitle>
+            <CardDescription>{t("executors:defineTheDockerImageBuildAnd")}</CardDescription>
           </div>
           {canFillDefaults && (
             <Button
@@ -203,14 +212,14 @@ export function DockerfileBuildCard({
               onClick={fillDefaults}
               className="cursor-pointer text-xs text-muted-foreground"
             >
-              Use defaults
+              {t("executors:useDefaults")}
             </Button>
           )}
         </div>
       </CardHeader>
       <CardContent className="space-y-4">
         <div className="space-y-2">
-          <Label htmlFor="image-tag">Image Tag</Label>
+          <Label htmlFor="image-tag">{t("executors:imageTag")}</Label>
           <Input
             id="image-tag"
             value={imageTag}
@@ -221,7 +230,7 @@ export function DockerfileBuildCard({
           />
         </div>
         <div className="space-y-2">
-          <Label>Dockerfile Content</Label>
+          <Label>{t("executors:dockerfileContent")}</Label>
           <div
             className="overflow-hidden rounded-md border"
             data-settings-dirty={dockerfileDirty}
@@ -246,7 +255,7 @@ export function DockerfileBuildCard({
             ) : (
               <IconPlayerPlay className="mr-1.5 h-4 w-4" />
             )}
-            Build Image
+            {t("executors:buildImage")}
           </Button>
           <BuildStatusBadge status={buildStatus} />
         </div>
@@ -264,15 +273,16 @@ export function DockerfileBuildCard({
 }
 
 function ContainersEmptyState({ loading }: { loading: boolean }) {
+  const { t } = useTranslation();
   if (loading) {
     return (
       <div className="flex items-center gap-2 py-4 text-sm text-muted-foreground">
         <IconLoader2 className="h-4 w-4 animate-spin" />
-        Loading...
+        {t("executors:loading")}
       </div>
     );
   }
-  return <p className="py-4 text-sm text-muted-foreground">No Docker containers.</p>;
+  return <p className="py-4 text-sm text-muted-foreground">{t("executors:noDockerContainers")}</p>;
 }
 
 export function useDockerProfileContainers(profileId: string, enabled = true) {
@@ -305,9 +315,14 @@ export function useDockerProfileContainers(profileId: string, enabled = true) {
   return { containers, loading, refresh };
 }
 
-export function containerTaskLabel(container: DockerContainer) {
+/**
+ * The container's task title, falling back to its task id. Returns `null` when
+ * neither label is present so the caller can render translated copy — the
+ * fallback is the only part of this value that is copy rather than user data.
+ */
+export function containerTaskLabel(container: DockerContainer): string | null {
   const title = container.labels?.["kandev.task_title"]?.trim();
-  return title || container.labels?.["kandev.task_id"] || "Untracked";
+  return title || container.labels?.["kandev.task_id"] || null;
 }
 
 function ContainerRow({
@@ -321,13 +336,14 @@ function ContainerRow({
   onStop: (id: string) => void;
   onRemove: (id: string) => void;
 }) {
+  const { t } = useTranslation();
   const isLoading = actionLoading === container.id;
   return (
     <TableRow data-testid={`docker-container-row-${container.id}`}>
       <TableCell className="font-mono text-sm">{container.name}</TableCell>
       <TableCell className="text-sm">{container.image}</TableCell>
       <TableCell className="text-sm" data-testid="docker-container-task">
-        {containerTaskLabel(container)}
+        {containerTaskLabel(container) ?? t("executors:untrackedTask")}
       </TableCell>
       <TableCell>
         <Badge variant={container.state === "running" ? "default" : "secondary"}>
@@ -343,7 +359,7 @@ function ContainerRow({
               onClick={() => onStop(container.id)}
               disabled={isLoading}
               className="cursor-pointer"
-              title="Stop"
+              title={t("executors:stop")}
             >
               {isLoading ? (
                 <IconLoader2 className="h-4 w-4 animate-spin" />
@@ -358,7 +374,7 @@ function ContainerRow({
             onClick={() => onRemove(container.id)}
             disabled={isLoading}
             className="cursor-pointer"
-            title="Remove"
+            title={t("executors:remove")}
           >
             <IconTrash className="h-4 w-4" />
           </Button>
@@ -369,6 +385,7 @@ function ContainerRow({
 }
 
 export function DockerContainersCard({ profileId }: { profileId: string }) {
+  const { t } = useTranslation();
   const { containers, loading, refresh } = useDockerProfileContainers(profileId);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
 
@@ -388,8 +405,8 @@ export function DockerContainersCard({ profileId }: { profileId: string }) {
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Docker Containers</CardTitle>
-        <CardDescription>Docker containers created by this profile.</CardDescription>
+        <CardTitle>{t("executors:dockerContainers")}</CardTitle>
+        <CardDescription>{t("executors:dockerContainersCreatedByThisProfile")}</CardDescription>
       </CardHeader>
       <CardContent>
         {containers.length === 0 ? (
@@ -398,10 +415,10 @@ export function DockerContainersCard({ profileId }: { profileId: string }) {
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>Name</TableHead>
-                <TableHead>Image</TableHead>
-                <TableHead>Task</TableHead>
-                <TableHead>Status</TableHead>
+                <TableHead>{t("executors:name")}</TableHead>
+                <TableHead>{t("executors:image")}</TableHead>
+                <TableHead>{t("executors:task")}</TableHead>
+                <TableHead>{t("common:status")}</TableHead>
                 <TableHead className="w-[100px]" />
               </TableRow>
             </TableHeader>

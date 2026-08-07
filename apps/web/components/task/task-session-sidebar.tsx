@@ -1,9 +1,10 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState, memo } from "react";
+import { useCallback, useMemo, useState, memo } from "react";
+import { useTranslation } from "react-i18next";
 import { usePathname, useRouter } from "@/lib/routing/client-router";
-import { linkToTask } from "@/lib/links";
-import type { Repository, TaskSession, TaskSessionState } from "@/lib/types/http";
+import { linkToTask, replaceTaskUrl } from "@/lib/links";
+import type { Repository, TaskSessionState } from "@/lib/types/http";
 import { PluginSlot } from "@/components/plugins/plugin-slot";
 import { TaskSwitcher, type TaskSwitcherItem } from "./task-switcher";
 import { buildTaskSwitcherProps } from "./task-session-sidebar-switcher-props";
@@ -16,32 +17,20 @@ import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { useWorkspaceSidebarTasks } from "@/hooks/domains/kanban/use-workspace-sidebar-tasks";
 import { useTaskActions, useArchiveAndSwitchTask } from "@/hooks/use-task-actions";
 import { useTaskDetachDialog } from "@/hooks/use-detach-task";
+import { useNestTaskByDrag } from "@/hooks/use-nest-task";
 import { useSidebarSelection, SidebarBulkDialogs } from "./task-session-sidebar-selection";
 import { useTaskRemoval } from "@/hooks/use-task-removal";
 import { findTaskInSnapshots } from "@/lib/kanban/find-task";
 import { repositorySlug } from "@/lib/repository-slug";
 import { buildSwitchToSession, selectTaskWithLayout } from "./task-select-helpers";
-import { getWebSocketClient } from "@/lib/ws/connection";
 import { useArchivedTaskState } from "./task-archived-context";
 import { useRepositories } from "@/hooks/domains/workspace/use-repositories";
-import { useWorkspacePRs } from "@/hooks/domains/github/use-task-pr";
-import { buildPendingFlags } from "./task-session-sidebar-aggregate";
 import { useGroupedSidebarView } from "./task-session-sidebar-grouped-view";
 import { useSidebarLinkActions } from "./task-session-sidebar-link-actions";
 import { buildArchivedSidebarItem } from "./task-session-sidebar-archived-item";
 import { useSidebarTaskLinking } from "./task-session-sidebar-task-linking";
-import { useShallow } from "zustand/react/shallow";
 import { buildSidebarItem } from "./task-session-sidebar-item";
-import {
-  agentErrorAcknowledgementSessionIds,
-  stablePrimarySessionIdsKey,
-  usePersistResolvedAgentErrorAcknowledgements,
-} from "./use-agent-error-acknowledgements";
-
-function useStablePrimarySessionIds(allTasks: Array<{ primarySessionId?: string | null }>) {
-  const key = useMemo(() => stablePrimarySessionIdsKey(allTasks), [allTasks]);
-  return useMemo(() => (key ? key.split("\0") : []), [key]);
-}
+import { useSidebarTaskEdit } from "./task-session-sidebar-edit";
 
 type TaskSessionSidebarProps = {
   workspaceId: string | null;
@@ -50,36 +39,23 @@ type TaskSessionSidebarProps = {
   hideFilterBar?: boolean;
 };
 
-function usePendingSessionIds(
-  primarySessionIds: string[],
-  sessionsByTaskId: Record<string, TaskSession[]>,
-) {
-  return useMemo(
-    () =>
-      Array.from(
-        new Set([
-          ...primarySessionIds,
-          ...Object.values(sessionsByTaskId)
-            .flat()
-            .map((session) => session.id),
-        ]),
-      ),
-    [primarySessionIds, sessionsByTaskId],
-  );
+function findSidebarTask(state: ReturnType<StoreApi["getState"]>, taskId: string) {
+  const activeTask = findTaskInSnapshots(taskId, state.kanbanMulti.snapshots, state.kanban.tasks);
+  if (activeTask) return activeTask;
+  for (const tasks of Object.values(state.sidebarArchivedTasks?.itemsByWorkspaceId ?? {})) {
+    const archivedTask = tasks.find((task) => task.id === taskId);
+    if (archivedTask) return archivedTask;
+  }
+  return undefined;
 }
 
 function useSidebarData(workspaceId: string | null) {
   const activeTaskId = useAppStore((state) => state.tasks.activeTaskId);
   const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
   const sessionsById = useAppStore((state) => state.taskSessions.items);
-  const sessionsByTaskId = useAppStore((state) => state.taskSessionsByTask.itemsByTaskId);
-  const gitStatusByEnvId = useAppStore((state) => state.gitStatus.byEnvironmentId);
-  const envIdBySessionId = useAppStore((state) => state.environmentIdBySessionId);
-  const repositoriesByWorkspace = useAppStore((state) => state.repositories.itemsByWorkspaceId);
-  const taskPRsByTaskId = useAppStore((state) => state.taskPRs.byTaskId);
-  const messagesBySession = useAppStore((state) => state.messages.bySession);
-  const dismissedAgentErrors = useAppStore((state) => state.dismissedAgentErrors);
   const acknowledgedAgentErrors = useAppStore((state) => state.acknowledgedAgentErrors);
+  const dismissedAgentErrors = useAppStore((state) => state.dismissedAgentErrors);
+  const repositoriesByWorkspace = useAppStore((state) => state.repositories.itemsByWorkspaceId);
   const archivedState = useArchivedTaskState();
 
   const selectedTaskId = useMemo(() => {
@@ -93,23 +69,9 @@ function useSidebarData(workspaceId: string | null) {
     stepsByWorkflowId,
     workflows,
     isLoading: isLoadingWorkflow,
+    archivedError,
+    retryArchivedTasks,
   } = useWorkspaceSidebarTasks(workspaceId);
-
-  const primarySessionIds = useStablePrimarySessionIds(allTasks);
-  const pendingSessionIds = usePendingSessionIds(primarySessionIds, sessionsByTaskId);
-  const acknowledgementSessionIds = useMemo(
-    () => agentErrorAcknowledgementSessionIds(allTasks, sessionsByTaskId),
-    [allTasks, sessionsByTaskId],
-  );
-  usePersistResolvedAgentErrorAcknowledgements({
-    sessionsById,
-    sessionIds: acknowledgementSessionIds,
-    messagesBySession,
-    dismissedAgentErrors,
-  });
-  const pendingFlags = useAppStore(
-    useShallow((state) => buildPendingFlags(state.messages.bySession, pendingSessionIds)),
-  );
 
   const tasksWithRepositories = useMemo(() => {
     const repositories = workspaceId ? (repositoriesByWorkspace[workspaceId] ?? []) : [];
@@ -120,19 +82,12 @@ function useSidebarData(workspaceId: string | null) {
     const workflowNameById = new Map(workflows.map((w) => [w.id, w.name]));
     const stepTitleById = new Map(allSteps.map((s) => [s.id, s.title]));
     const mapCtx = {
-      sessionsById,
-      sessionsByTaskId,
-      gitStatusByEnvId,
-      envIdBySessionId,
       repositorySlugById,
-      taskPRsByTaskId,
-      pendingFlags,
       titleById,
       workflowNameById,
       stepTitleById,
-      dismissedAgentErrors,
       acknowledgedAgentErrors,
-      messagesBySession,
+      dismissedAgentErrors,
     };
     const items: TaskSwitcherItem[] = allTasks.map((task) => buildSidebarItem(task, mapCtx));
     if (
@@ -149,16 +104,9 @@ function useSidebarData(workspaceId: string | null) {
     allSteps,
     workflows,
     workspaceId,
-    sessionsByTaskId,
-    sessionsById,
-    gitStatusByEnvId,
-    envIdBySessionId,
-    taskPRsByTaskId,
-    pendingFlags,
-    dismissedAgentErrors,
-    acknowledgedAgentErrors,
-    messagesBySession,
     archivedState,
+    acknowledgedAgentErrors,
+    dismissedAgentErrors,
   ]);
 
   return {
@@ -167,8 +115,9 @@ function useSidebarData(workspaceId: string | null) {
     allSteps,
     stepsByWorkflowId,
     isLoadingWorkflow,
+    archivedError,
+    retryArchivedTasks,
     tasksWithRepositories,
-    primarySessionIds,
     workflows,
   };
 }
@@ -244,7 +193,7 @@ function useArchiveActions(store: StoreApi) {
   const handleArchiveTask = useCallback(
     (taskId: string) => {
       const state = store.getState();
-      const task = findTaskInSnapshots(taskId, state.kanbanMulti.snapshots, state.kanban.tasks);
+      const task = findSidebarTask(state, taskId);
       setArchivingTask({
         id: taskId,
         title: task?.title ?? "this task",
@@ -298,7 +247,7 @@ function useDeleteActions(
   const handleDeleteTask = useCallback(
     (taskId: string) => {
       const state = store.getState();
-      const task = findTaskInSnapshots(taskId, state.kanbanMulti.snapshots, state.kanban.tasks);
+      const task = findSidebarTask(state, taskId);
       setDeletingTask({
         id: taskId,
         title: task?.title ?? "this task",
@@ -372,7 +321,12 @@ export function useSidebarActions(store: StoreApi) {
         return;
       }
       const state = store.getState();
-      const task = findTaskInSnapshots(taskId, state.kanbanMulti.snapshots, state.kanban.tasks);
+      const task = findSidebarTask(state, taskId);
+      if (task?.isArchived) {
+        setActiveTask(taskId);
+        replaceTaskUrl(taskId);
+        return;
+      }
       selectTaskWithLayout({
         taskId,
         task: task ?? undefined,
@@ -389,7 +343,9 @@ export function useSidebarActions(store: StoreApi) {
   const archiveActions = useArchiveActions(store);
   const deleteActions = useDeleteActions(store, removeTaskFromBoard);
   const detachActions = useTaskDetachDialog(store);
+  const handleNestTask = useNestTaskByDrag();
   const linkActions = useSidebarLinkActions(store);
+  const editActions = useSidebarTaskEdit();
 
   const [renamingTask, setRenamingTask] = useState<{ id: string; title: string } | null>(null);
   const [creatingSubtask, setCreatingSubtask] = useState<{ id: string; title: string } | null>(
@@ -423,6 +379,7 @@ export function useSidebarActions(store: StoreApi) {
     preparingTaskId,
     handleSelectTask,
     handleMoveToStep,
+    handleNestTask,
     renamingTask,
     setRenamingTask,
     handleRenameTask,
@@ -434,22 +391,8 @@ export function useSidebarActions(store: StoreApi) {
     ...archiveActions,
     ...deleteActions,
     ...detachActions,
+    ...editActions,
   };
-}
-
-function useBulkGitStatusSubscription(primarySessionIds: string[]) {
-  const connectionStatus = useAppStore((state) => state.connection.status);
-  const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
-  useEffect(() => {
-    if (connectionStatus !== "connected" || primarySessionIds.length === 0) return;
-    const client = getWebSocketClient();
-    if (!client) return;
-    const backgroundIds = activeSessionId
-      ? primarySessionIds.filter((id) => id !== activeSessionId)
-      : primarySessionIds;
-    const unsubscribes = backgroundIds.map((id) => client.subscribeSession(id));
-    return () => unsubscribes.forEach((u) => u());
-  }, [primarySessionIds, connectionStatus, activeSessionId]);
 }
 
 export const TaskSessionSidebar = memo(function TaskSessionSidebar({
@@ -457,8 +400,8 @@ export const TaskSessionSidebar = memo(function TaskSessionSidebar({
   hideFilterBar,
 }: TaskSessionSidebarProps) {
   const store = useAppStoreApi();
+  const { t } = useTranslation();
   useRepositories(workspaceId);
-  useWorkspacePRs(workspaceId);
   const pathname = usePathname();
 
   const {
@@ -467,8 +410,9 @@ export const TaskSessionSidebar = memo(function TaskSessionSidebar({
     stepsByWorkflowId,
     workflows,
     isLoadingWorkflow,
+    archivedError,
+    retryArchivedTasks,
     tasksWithRepositories,
-    primarySessionIds,
   } = useSidebarData(workspaceId);
 
   // Only highlight while viewing a task route; AppSidebar is global and activeTaskId lingers.
@@ -476,8 +420,6 @@ export const TaskSessionSidebar = memo(function TaskSessionSidebar({
     !!pathname && (pathname.startsWith("/t/") || pathname.startsWith("/office/tasks/"));
   const highlightedTaskId = onTaskRoute ? activeTaskId : null;
   const highlightedSelectedTaskId = onTaskRoute ? selectedTaskId : null;
-
-  useBulkGitStatusSubscription(primarySessionIds);
 
   const sidebarActions = useSidebarActions(store);
   const { preparingTaskId } = sidebarActions;
@@ -528,7 +470,12 @@ export const TaskSessionSidebar = memo(function TaskSessionSidebar({
     togglePinnedTask,
     handleReorderGroup,
     handleReorderSubtasks,
+    handleNestTask: sidebarActions.handleNestTask,
     isLoadingWorkflow,
+    archivedError,
+    retryArchivedTasks,
+    archivedLoadErrorLabel: t("sidebar:archivedLoadFailed"),
+    archivedRetryLabel: t("sidebar:retry"),
     totalTaskCount: displayTasks.length,
     selection,
   });
@@ -543,6 +490,7 @@ export const TaskSessionSidebar = memo(function TaskSessionSidebar({
         actions={sidebarActions}
         repositories={repositories}
         workspaceId={workspaceId}
+        stepsByWorkflowId={stepsByWorkflowId}
       />
       <SidebarBulkDialogs selection={selection} />
     </PanelRoot>

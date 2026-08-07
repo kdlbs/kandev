@@ -7,6 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
 import { StackedBars, type StackedBarRow } from "./stacked-bars";
 import type { AgentRunActivityDay } from "@/lib/api/domains/office-extended-api";
 import { formatBarLabel } from "./format-date";
+import { useTranslation } from "react-i18next";
 
 type Props = { days: AgentRunActivityDay[] };
 
@@ -28,24 +29,29 @@ function rowsFromDays(days: AgentRunActivityDay[]): StackedBarRow[] {
 }
 
 export function RunActivityChart({ days }: Props) {
+  const { t } = useTranslation();
   const total = days.reduce((sum, d) => sum + d.total, 0);
   return (
     <Card data-testid="run-activity-card">
       <CardHeader className="pb-2">
         <CardTitle className="flex items-baseline justify-between text-sm">
-          <span>Run activity</span>
+          <span>{t("office:agentRunActivity")}</span>
           <span className="text-xs font-normal text-muted-foreground">
-            {total} run{total === 1 ? "" : "s"}
+            {t("office:runCount", { count: total })}
           </span>
         </CardTitle>
       </CardHeader>
       <CardContent className="pt-0">
-        <StackedBars rows={rowsFromDays(days)} heightPx={120} ariaLabel="Run activity" />
+        <StackedBars
+          rows={rowsFromDays(days)}
+          heightPx={120}
+          ariaLabel={t("office:agentRunActivity")}
+        />
         <ChartLegend
           items={[
-            { label: "Succeeded", className: "bg-emerald-500" },
-            { label: "Failed", className: "bg-red-500" },
-            { label: "Other", className: "bg-muted-foreground/40" },
+            { label: t("office:succeeded"), className: "bg-emerald-500" },
+            { label: t("office:failed"), className: "bg-red-500" },
+            { label: t("office:other"), className: "bg-muted-foreground/40" },
           ]}
         />
       </CardContent>

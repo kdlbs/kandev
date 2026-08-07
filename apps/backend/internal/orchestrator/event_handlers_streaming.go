@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"go.uber.org/zap"
@@ -17,12 +18,45 @@ import (
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
+const sessionModelConfigKey = "model"
+
 // handleAgentStreamEvent handles agent stream events (tool calls, message chunks, etc.)
 func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle.AgentStreamEventPayload) {
 	if payload == nil || payload.Data == nil {
 		return
 	}
-
+	if payload.SessionID != "" {
+		// Serialize stream side effects with cancellation/interrupt decisions.
+		// Checking the terminal-execution marker alone is insufficient: a stream
+		// handler can pass that check, then block while persisting a message while
+		// a coordinator stop marks the execution terminal. Holding the shared
+		// per-session guard makes the check and its side effects one decision.
+		lock, release := s.acquireCancelInFlightGuard(payload.SessionID)
+		defer release()
+		lock.Lock()
+		defer lock.Unlock()
+	}
+	// Cancellation owns the yielded interval between the guarded preparation
+	// and lifecycle wait. Terminal frames from that captured execution/prompt
+	// remain admissible so the lifecycle manager can drain them; frames from a
+	// successor or stale execution must not mutate the session while the owner
+	// is reconciling the cancelled turn.
+	eventExecutionID := payload.ExecutionID
+	if eventExecutionID == "" {
+		eventExecutionID = payload.AgentID
+	}
+	if !s.cancellationOwnsStreamEvent(
+		payload.SessionID,
+		eventExecutionID,
+		payload.Data.PromptGeneration,
+	) {
+		s.logger.Debug("ignoring stream event for execution outside cancellation identity",
+			zap.String("task_id", payload.TaskID),
+			zap.String("session_id", payload.SessionID),
+			zap.String("event_execution_id", eventExecutionID),
+			zap.Uint64("event_prompt_generation", payload.Data.PromptGeneration))
+		return
+	}
 	taskID := payload.TaskID
 	sessionID := payload.SessionID
 	eventType := payload.Data.Type
@@ -805,6 +839,12 @@ func (s *Service) updateTaskSessionStateWithHook(
 	if onChanged != nil {
 		onChanged()
 	}
+	// Work has resumed: a session entering STARTING/RUNNING clears the
+	// startup interruption marker and republishes the task so open clients
+	// drop the red interruption icon. No-op when the marker is absent.
+	if nextState == models.TaskSessionStateStarting || nextState == models.TaskSessionStateRunning {
+		s.clearTaskInterruptedMarker(ctx, taskID)
+	}
 	if authoritativeUpdatedAt == nil {
 		s.logger.Warn("skipping session state_changed publish; could not read authoritative updated_at",
 			zap.String("task_id", taskID),
@@ -1116,11 +1156,13 @@ func (s *Service) publishTaskSessionStateChanged(
 		metaKeyAgentProfileID:    agentProfileID,
 		"agent_profile_snapshot": session.AgentProfileSnapshot,
 		"is_passthrough":         session.IsPassthrough,
+		"is_primary":             session.IsPrimary,
 		// Carry activity only while the durable session is RUNNING. Every other
 		// state gets an explicit null so partial client-store merges clear a
 		// previously-live busy signal during settlement or teardown.
 		"foreground_activity":   foregroundActivity,
 		"active_subagent_count": s.ActiveSubagentCount(sessionID),
+		"supports_steering":     s.SteerEligible(sessionID, nextState),
 	}
 	if stateUpdatedAt != nil && !stateUpdatedAt.IsZero() {
 		eventData[metaKeyUpdatedAt] = stateUpdatedAt.Format(time.RFC3339Nano)
@@ -1379,10 +1421,44 @@ func (s *Service) setSessionStarting(
 		s.writeTaskInProgressForRuntime(ctx, taskID, session.ID)
 	}
 
+	// The launch path moves a session to STARTING without going through
+	// updateTaskSessionStateWithHook, so clear the interruption marker here
+	// too (no-op when absent).
+	s.clearTaskInterruptedMarker(ctx, taskID)
+
 	if publishSession != nil {
 		s.publishTaskSessionStateChanged(ctx, taskID, session.ID, oldState, session.State, session.ErrorMessage, stateUpdatedAt, publishSession)
 	}
 	return nil
+}
+
+// clearTaskInterruptedMarker removes the startup interruption marker from a
+// task and republishes task.updated when it was actually present, so open
+// clients drop the red interruption icon. Called from the session-start
+// funnel when a session enters STARTING/RUNNING — work has resumed, so the
+// task is no longer interrupted. No-op when the marker is absent.
+func (s *Service) clearTaskInterruptedMarker(ctx context.Context, taskID string) {
+	if taskID == "" {
+		return
+	}
+	removed, err := s.repo.RemoveTaskMetadataKey(ctx, taskID, models.MetaKeyInterruptedAt)
+	if err != nil {
+		s.logger.Warn("failed to clear interrupted marker",
+			zap.String("task_id", taskID),
+			zap.Error(err))
+		return
+	}
+	if !removed {
+		return
+	}
+	task, err := s.repo.GetTask(ctx, taskID)
+	if err != nil || task == nil {
+		s.logger.Warn("failed to load task for interrupted-clear publish",
+			zap.String("task_id", taskID),
+			zap.Error(err))
+		return
+	}
+	s.publishTaskUpdated(ctx, task)
 }
 
 func (s *Service) persistFullTaskSessionIfCurrent(
@@ -2098,7 +2174,7 @@ func resolvePromptUsageLabels(
 	agentType := ""
 	if session != nil && session.AgentProfileSnapshot != nil {
 		if model == "" {
-			if m, ok := session.AgentProfileSnapshot["model"].(string); ok {
+			if m, ok := session.AgentProfileSnapshot[sessionModelConfigKey].(string); ok {
 				model = m
 			}
 		}
@@ -2166,7 +2242,7 @@ func (s *Service) persistPromptMetadataOnTurn(
 	}
 	metadata["prompt_usage"] = promptUsageMetadata(payload.Data.Usage)
 	if model != "" {
-		metadata["model"] = model
+		metadata[sessionModelConfigKey] = model
 	}
 	if agentType != "" {
 		metadata["agent_type"] = agentType
@@ -2349,7 +2425,16 @@ func (s *Service) persistSessionMode(ctx context.Context, sessionID, modeID stri
 // handleAgentCapabilitiesEvent broadcasts agent_capabilities events to the WebSocket.
 func (s *Service) handleAgentCapabilitiesEvent(ctx context.Context, payload *lifecycle.AgentStreamEventPayload) {
 	sessionID := payload.SessionID
-	if sessionID == "" || s.eventBus == nil {
+	if sessionID == "" {
+		return
+	}
+	// Record the negotiated prompt-queueing advertisement before the event-bus
+	// guard. It gates prompt handoff and mid-turn steering, so it must land as
+	// soon as the agent advertises it — recording is admission state, whereas the
+	// bus below is only broadcast. Skipping it when no bus is configured would
+	// silently make a capable agent ineligible.
+	s.recordSessionPromptQueueing(sessionID, payload.Data.SupportsPromptQueueing)
+	if s.eventBus == nil {
 		return
 	}
 	eventPayload := lifecycle.AgentCapabilitiesEventPayload{
@@ -2359,6 +2444,7 @@ func (s *Service) handleAgentCapabilitiesEvent(ctx context.Context, payload *lif
 		SupportsImage:           payload.Data.SupportsImage,
 		SupportsAudio:           payload.Data.SupportsAudio,
 		SupportsEmbeddedContext: payload.Data.SupportsEmbeddedContext,
+		SupportsPromptQueueing:  payload.Data.SupportsPromptQueueing,
 		AuthMethods:             payload.Data.AuthMethods,
 		Timestamp:               time.Now().UTC().Format(time.RFC3339),
 	}
@@ -2373,6 +2459,22 @@ func (s *Service) handleSessionModelsEvent(ctx context.Context, payload *lifecyc
 	sessionID := payload.SessionID
 	if sessionID == "" || s.eventBus == nil {
 		return
+	}
+	if failures := workflowSessionConfigFailures(payload.Data.Data); len(failures) > 0 {
+		stepID := ""
+		if s.repo != nil && payload.TaskID != "" {
+			if task, err := s.repo.GetTask(ctx, payload.TaskID); err == nil && task != nil {
+				stepID = task.WorkflowStepID
+			}
+		}
+		s.warnWorkflowSessionConfig(ctx, payload.TaskID, sessionID, stepID,
+			fmt.Sprintf("Some session settings could not be applied at startup: %s.", strings.Join(failures, ", ")))
+		return
+	}
+	if _, err := s.sessionOriginalEffectiveConfigurationForEvent(ctx, sessionID, payload.Data); err != nil {
+		s.logger.Warn("failed to persist original effective session configuration",
+			zap.String("session_id", sessionID),
+			zap.Error(err))
 	}
 
 	// Store the write-once baseline before the mutable selector snapshot so a
@@ -2437,6 +2539,104 @@ func (s *Service) handleSessionModelFallbackEvent(ctx context.Context, payload *
 		zap.String("fallback_model", eventPayload.FallbackModel))
 	subject := events.BuildSessionModelFallbackSubject(sessionID)
 	_ = s.eventBus.Publish(ctx, subject, bus.NewEvent(events.SessionModelFallbackUpdated, "orchestrator", eventPayload))
+}
+
+func workflowSessionConfigFailures(raw any) []string {
+	data, ok := raw.(map[string]any)
+	if !ok || data == nil {
+		return nil
+	}
+	switch values := data["workflow_session_config_failures"].(type) {
+	case []string:
+		return values
+	case []any:
+		failures := make([]string, 0, len(values))
+		for _, value := range values {
+			if failure, ok := value.(string); ok && failure != "" {
+				failures = append(failures, failure)
+			}
+		}
+		return failures
+	default:
+		return nil
+	}
+}
+
+func (s *Service) sessionOriginalEffectiveConfigurationForEvent(
+	ctx context.Context,
+	sessionID string,
+	data *lifecycle.AgentStreamEventData,
+) (*models.SessionOriginalEffectiveConfiguration, error) {
+	if data == nil || !originalConfigSettled(data.Data) || s.repo == nil {
+		return nil, nil
+	}
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	if session == nil || !models.IsOriginalTaskSession(session.Metadata) {
+		return nil, nil
+	}
+	if existing, ok := models.LoadOriginalSessionEffectiveConfiguration(session.Metadata); ok {
+		return &existing, nil
+	}
+	config := originalConfigurationFromEvent(data)
+	if config.Model == "" && len(config.ConfigOptions) == 0 {
+		return nil, nil
+	}
+	return s.persistOriginalSessionConfiguration(ctx, sessionID, session, config)
+}
+
+func originalConfigurationFromEvent(data *lifecycle.AgentStreamEventData) models.SessionOriginalEffectiveConfiguration {
+	options := data.OriginalConfigCandidate
+	if len(options) == 0 {
+		options = data.ConfigOptions
+	}
+	return models.SessionOriginalEffectiveConfiguration{
+		Model:         data.CurrentModelID,
+		ConfigOptions: configOptionValuesWithoutModel(options),
+	}
+}
+
+func (s *Service) persistOriginalSessionConfiguration(
+	ctx context.Context,
+	sessionID string,
+	session *models.TaskSession,
+	config models.SessionOriginalEffectiveConfiguration,
+) (*models.SessionOriginalEffectiveConfiguration, error) {
+	writeCtx := context.WithoutCancel(ctx)
+	stored, err := s.repo.SetSessionMetadataKeyIfAbsent(
+		writeCtx, sessionID, models.SessionMetaKeyOriginalEffectiveConfig, config,
+	)
+	if err != nil {
+		return nil, err
+	}
+	if stored {
+		return &config, nil
+	}
+	return s.originalSessionConfigurationAfterRace(writeCtx, sessionID, session, config)
+}
+
+func (s *Service) originalSessionConfigurationAfterRace(
+	ctx context.Context,
+	sessionID string,
+	session *models.TaskSession,
+	config models.SessionOriginalEffectiveConfiguration,
+) (*models.SessionOriginalEffectiveConfiguration, error) {
+	if existing, ok := models.LoadOriginalSessionEffectiveConfiguration(session.Metadata); ok {
+		return &existing, nil
+	}
+	fresh, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	if fresh == nil {
+		return &config, nil
+	}
+	if existing, ok := models.LoadOriginalSessionEffectiveConfiguration(fresh.Metadata); ok {
+		return &existing, nil
+	}
+	return &config, nil
 }
 
 // handleSessionMCPAttachmentEvent reduces safe attachment observations into
@@ -2538,9 +2738,41 @@ func configOptionValues(options []streams.ConfigOption) map[string]string {
 	return values
 }
 
+func configOptionValuesWithoutModel(options []streams.ConfigOption) map[string]string {
+	values := configOptionValues(options)
+	for key, option := range optionsByID(options) {
+		// The immutable restore snapshot contains only selectable ACP options.
+		// Toggle/boolean values are provider state, not model configuration, and
+		// may be invalid when replayed after a model switch.
+		if option.Type != "select" || key == sessionModelConfigKey || option.Category == sessionModelConfigKey {
+			delete(values, key)
+		}
+	}
+	if len(values) == 0 {
+		return nil
+	}
+	return values
+}
+
+func optionsByID(options []streams.ConfigOption) map[string]streams.ConfigOption {
+	result := make(map[string]streams.ConfigOption, len(options))
+	for _, option := range options {
+		if option.ID != "" {
+			result[option.ID] = option
+		}
+	}
+	return result
+}
+
 func configOptionsSettled(data any) bool {
 	metadata, _ := data.(map[string]any)
 	result, _ := metadata["config_options_settled"].(bool)
+	return result
+}
+
+func originalConfigSettled(data any) bool {
+	metadata, _ := data.(map[string]any)
+	result, _ := metadata["original_config_settled"].(bool)
 	return result
 }
 
@@ -2663,11 +2895,11 @@ func (s *Service) persistSessionRuntimeConfigOnSession(ctx context.Context, sess
 		s.runtimeModelBySession.Store(sessionID, cfg.Model)
 	}
 	if cfg.Model != "" && cfg.Model != previousModel {
-		if err := s.repo.SetSessionMetadataKey(writeCtx, sessionID, "context_window", nil); err != nil {
+		if err := s.clearContextWindowForReset(writeCtx, sessionID); err != nil {
 			s.logger.Warn("failed to clear stale context window after runtime model change",
 				zap.String("session_id", sessionID),
 				zap.String("previous_model", previousModel),
-				zap.String("model", cfg.Model),
+				zap.String(sessionModelConfigKey, cfg.Model),
 				zap.Error(err))
 		}
 	}
@@ -2677,10 +2909,10 @@ func (s *Service) persistSessionModelOnSession(ctx context.Context, sessionID st
 	if session.AgentProfileSnapshot == nil {
 		session.AgentProfileSnapshot = make(map[string]interface{})
 	}
-	if existing, _ := session.AgentProfileSnapshot["model"].(string); existing == model {
+	if existing, _ := session.AgentProfileSnapshot[sessionModelConfigKey].(string); existing == model {
 		return
 	}
-	session.AgentProfileSnapshot["model"] = model
+	session.AgentProfileSnapshot[sessionModelConfigKey] = model
 	if updater, ok := s.repo.(taskSessionAgentProfileSnapshotUpdater); ok {
 		_ = updater.UpdateTaskSessionAgentProfileSnapshot(ctx, sessionID, session.AgentProfileSnapshot)
 	} else {
@@ -2715,7 +2947,7 @@ func applySessionRuntimeConfigUpdate(cfg *models.SessionRuntimeConfig, model, mo
 			cfg.ConfigOptions = make(map[string]string)
 		}
 		cfg.ConfigOptions[option.ID] = option.CurrentValue
-		if option.ID == "model" || option.Category == "model" {
+		if option.ID == sessionModelConfigKey || option.Category == sessionModelConfigKey {
 			cfg.Model = option.CurrentValue
 		}
 	}

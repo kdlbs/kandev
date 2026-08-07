@@ -3,13 +3,19 @@
 import { useEffect, useState } from "react";
 import { Button } from "@kandev/ui/button";
 import { IconPlus } from "@tabler/icons-react";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast/sonner";
 import { listBudgets, deleteBudget } from "@/lib/api/domains/office-api";
 import type { BudgetPolicy } from "@/lib/state/slices/office/types";
 import { BudgetPolicyCard } from "./budget-policy-card";
 import { CreateBudgetForm } from "./create-budget-form";
+import { useTranslation } from "react-i18next";
+// Module-level `t` for the error-only strings inside the fetching effect below:
+// putting the hook's `t` in that dep array would re-issue the request on every
+// locale switch.
+import { t as staticT } from "@/lib/i18n";
 
 export function BudgetsTab({ workspaceId }: { workspaceId: string }) {
+  const { t } = useTranslation();
   const [policies, setPolicies] = useState<BudgetPolicy[]>([]);
   const [showCreate, setShowCreate] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
@@ -18,7 +24,7 @@ export function BudgetsTab({ workspaceId }: { workspaceId: string }) {
     listBudgets(workspaceId)
       .then((res) => setPolicies(res.budgets ?? []))
       .catch((err) => {
-        toast.error(err instanceof Error ? err.message : "Failed to load budgets");
+        toast.error(err instanceof Error ? err.message : staticT("office:failedToLoadBudgets"));
       });
   }, [workspaceId, reloadKey]);
 
@@ -26,9 +32,9 @@ export function BudgetsTab({ workspaceId }: { workspaceId: string }) {
     try {
       await deleteBudget(id);
       setPolicies((prev) => prev.filter((p) => p.id !== id));
-      toast.success("Budget policy deleted");
+      toast.success(t("office:budgetPolicyDeleted"));
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Failed to delete budget policy");
+      toast.error(err instanceof Error ? err.message : t("office:failedToDeleteBudgetPolicy"));
     }
   };
 
@@ -41,9 +47,9 @@ export function BudgetsTab({ workspaceId }: { workspaceId: string }) {
     <div className="space-y-4">
       <div className="flex justify-between items-center">
         <div>
-          <h2 className="text-sm font-semibold">Budget Policies</h2>
+          <h2 className="text-sm font-semibold">{t("office:budgetPolicies")}</h2>
           <p className="text-xs text-muted-foreground mt-0.5">
-            Set spending limits per agent or project. Agents pause when limits are exceeded.
+            {t("office:setSpendingLimitsPerAgentOr")}
           </p>
         </div>
         <Button
@@ -53,7 +59,7 @@ export function BudgetsTab({ workspaceId }: { workspaceId: string }) {
           onClick={() => setShowCreate(!showCreate)}
         >
           <IconPlus className="h-4 w-4 mr-1" />
-          Add Policy
+          {t("office:addPolicy")}
         </Button>
       </div>
 
@@ -67,7 +73,7 @@ export function BudgetsTab({ workspaceId }: { workspaceId: string }) {
 
       {policies.length === 0 && !showCreate && (
         <p className="text-sm text-muted-foreground">
-          No budget policies configured. Add one to enforce spending limits.
+          {t("office:noBudgetPoliciesConfiguredAddOne")}
         </p>
       )}
 

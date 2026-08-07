@@ -6,7 +6,14 @@ import { devKandevHome, HEALTH_TIMEOUT_MS_DEV } from "./constants";
 import { resolveHealthTimeoutMs, waitForHealth, waitForUrlReady } from "./health";
 import { isInsideKandevTask } from "./kandev-env";
 import { createProcessSupervisor } from "./process";
-import { buildBackendEnv, buildWebEnv, logStartupInfo, pickPorts } from "./shared";
+import {
+  buildBackendEnv,
+  buildWebEnv,
+  createOutputRingBuffer,
+  logStartupInfo,
+  pickPorts,
+  resolveBackendLogLevels,
+} from "./shared";
 import { launchRestartableBackend } from "./supervisor/backend";
 import { launchWebApp, openBrowser } from "./web";
 
@@ -36,10 +43,15 @@ export async function runDev({ repoRoot, backendPort, webPort }: DevOptions): Pr
     }
   }
 
-  const backendEnv = buildBackendEnv({ ports, extra });
+  const levels = resolveBackendLogLevels();
+  const backendEnv = buildBackendEnv({
+    ports,
+    logLevel: levels.file,
+    consoleLogLevel: levels.console,
+    extra,
+  });
   const webEnv = buildWebEnv({ ports, debug: true });
-  const logLevel =
-    process.env.KANDEV_LOGGING_LEVEL?.trim() || process.env.KANDEV_LOG_LEVEL?.trim() || "info";
+  const logLevel = levels.file;
   const webUrl = `http://localhost:${ports.webPort}`;
   const appUrl = ports.backendUrl;
 
@@ -58,6 +70,7 @@ export async function runDev({ repoRoot, backendPort, webPort }: DevOptions): Pr
     path.join("apps", "backend"),
     "dev",
   ]);
+  const output = createOutputRingBuffer(process.stdout);
   const backend = await launchRestartableBackend({
     command: backendCmd,
     args: backendArgs,
@@ -66,13 +79,20 @@ export async function runDev({ repoRoot, backendPort, webPort }: DevOptions): Pr
     homeDir: backendEnv.KANDEV_HOME_DIR ?? devKandevHome(repoRoot),
     ports,
     mode: "dev",
-    stdio: "inherit",
+    stdio: ["ignore", "pipe", "inherit"],
     supervisor,
+    onProcess: (proc) => output.attach(proc.stdout),
   });
 
   const healthTimeoutMs = resolveHealthTimeoutMs(HEALTH_TIMEOUT_MS_DEV);
   console.log("[kandev] starting backend...");
-  await waitForHealth(ports.backendUrl, backend.proc, healthTimeoutMs);
+  await waitForHealth(ports.backendUrl, backend.proc, healthTimeoutMs, () => {
+    const buffered = output.read();
+    if (buffered.trim().length === 0) return;
+    console.error("[kandev] --- backend stdout (last captured output) ---");
+    console.error(buffered.trimEnd());
+    console.error("[kandev] --- end backend stdout ---");
+  });
   console.log(`[kandev] backend ready at ${ports.backendUrl}`);
 
   console.log("[kandev] starting web...");

@@ -32,6 +32,7 @@ import { applySummarizeSessionResult, type SummaryToastFn } from "./session-cont
 import { useSubtaskPromptZone, useSubtaskSubmit } from "./use-subtask-submit";
 import type { KanbanState } from "@/lib/state/slices/kanban/types";
 import type { Message, TaskSession } from "@/lib/types/http";
+import { useTranslation } from "react-i18next";
 
 type NewSubtaskDialogProps = {
   open: boolean;
@@ -345,6 +346,7 @@ type SubtaskFormProps = {
   /** Whether the parent dialog is open — required for the GitHub URL effect. */
   isOpen: boolean;
   onClose: () => void;
+  autoTitle: boolean;
 };
 
 // eslint-disable-next-line max-lines-per-function
@@ -363,6 +365,7 @@ function NewSubtaskForm({
   availableRepositories,
   isOpen,
   onClose,
+  autoTitle,
 }: SubtaskFormProps) {
   const { toast } = useToast();
   const isUtilityConfigured = useIsUtilityConfigured();
@@ -389,6 +392,7 @@ function NewSubtaskForm({
   useExecutorDefault(allExecutorProfiles, fs.executorProfileId, fs.setExecutorProfileId);
   const promptZone = useSubtaskPromptZone({
     parentTaskId,
+    workspaceId,
     taskTitle: title,
     inputDisabled: isCreating || isSummarizing,
     contextValue,
@@ -417,6 +421,7 @@ function NewSubtaskForm({
     attachments: promptZone.attachments.attachments,
     resolvePrompt: promptZone.resolvePrompt,
     title,
+    autoTitle,
     setIsCreating,
     onClose,
     workspaceMode,
@@ -426,6 +431,7 @@ function NewSubtaskForm({
     handlers,
     title,
     setTitle,
+    autoTitle,
     workspaceId,
     availableRepositories,
     parentRepositoryId,
@@ -476,6 +482,7 @@ export function NewSubtaskDialog({
   parentTaskId,
   parentTaskTitle,
 }: NewSubtaskDialogProps) {
+  const { t } = useTranslation();
   const { sessions: parentSessions } = useTaskSessions(parentTaskId);
   const {
     agentProfiles,
@@ -497,9 +504,10 @@ export function NewSubtaskDialog({
   const siblingCount = useAppStore(
     (s) => s.kanban.tasks.filter((t) => t.parentTaskId === parentTaskId).length,
   );
+  const autoTitle = useAppStore((s) => s.userSettings.agentGeneratedTaskTitles);
 
   const defaultTitle = useMemo(
-    () => `${parentTaskTitle} / Subtask ${siblingCount + 1}`,
+    () => t("task:defaultSubtaskTitle", { parent: parentTaskTitle, index: siblingCount + 1 }),
     [parentTaskTitle, siblingCount],
   );
 
@@ -511,7 +519,7 @@ export function NewSubtaskDialog({
       >
         <DialogHeader>
           <DialogTitle className="min-w-0 wrap-break-word pr-6 text-sm font-medium">
-            New subtask for <span className="text-foreground">{parentTaskTitle}</span>
+            {t("task:newSubtaskFor")} <span className="text-foreground">{parentTaskTitle}</span>
           </DialogTitle>
         </DialogHeader>
         <NewSubtaskForm
@@ -530,6 +538,7 @@ export function NewSubtaskDialog({
           availableRepositories={availableRepositories}
           isOpen={open}
           onClose={() => onOpenChange(false)}
+          autoTitle={autoTitle}
         />
       </DialogContent>
     </Dialog>

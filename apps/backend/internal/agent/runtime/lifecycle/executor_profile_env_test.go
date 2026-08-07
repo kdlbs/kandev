@@ -24,6 +24,10 @@ func (f *fakeExecutorProfileReader) GetTaskSession(_ context.Context, _ string) 
 	return f.session, f.sessionErr
 }
 
+func (*fakeExecutorProfileReader) HasActiveTaskResourceCleanupJob(context.Context, string) (bool, error) {
+	return false, nil
+}
+
 func (f *fakeExecutorProfileReader) GetTaskEnvironment(_ context.Context, _ string) (*models.TaskEnvironment, error) {
 	return f.env, f.envErr
 }

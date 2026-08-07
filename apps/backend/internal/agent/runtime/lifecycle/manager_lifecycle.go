@@ -94,12 +94,22 @@ func (m *Manager) Start(ctx context.Context) error {
 				initSpan.End()
 				continue
 			}
+			m.setRuntimeInterest(execution.SessionID, true)
 
 			// Reconcile the persistence row to match the recovered in-memory ID.
 			// If executors_running.agent_execution_id had drifted (e.g. from a
 			// prior bug or manual edit), the recovered runtime instance is the
 			// truth — overwrite the row to match. No-op if already in sync.
 			m.persistExecutorRunning(ctx, execution)
+
+			// Re-seed the base-branch map before reconnecting. A surviving
+			// agentctl instance never passes through waitForAgentctlReady, so
+			// without this its trackers keep whatever map they had — or none,
+			// if it was created by a path that could not supply one — and
+			// their diff stats stay pinned to an integration-branch fallback.
+			if client := execution.GetAgentCtlClient(); client != nil {
+				m.pushTaskBaseBranches(ctx, execution.TaskID, execution.ID, client)
+			}
 
 			// Reconnect to workspace streams (shell, git, file changes) in background
 			// This is needed so shell.input, git status, etc. work after backend restart
@@ -118,8 +128,8 @@ func (m *Manager) Start(ctx context.Context) error {
 	if standaloneRT, err := m.executorRegistry.GetBackend(executor.NameStandalone); err == nil {
 		if interactiveRunner := standaloneRT.GetInteractiveRunner(); interactiveRunner != nil {
 			// Turn complete callback
-			interactiveRunner.SetTurnCompleteCallback(func(sessionID string) {
-				m.handlePassthroughTurnComplete(sessionID)
+			interactiveRunner.SetTurnCompleteCallback(func(sessionID, processID string) {
+				m.handlePassthroughTurnComplete(sessionID, processID)
 			})
 
 			// Output callback for standalone passthrough (no WorkspaceTracker)
@@ -311,7 +321,9 @@ func (m *Manager) CleanupStaleExecutionBySessionID(ctx context.Context, sessionI
 func (m *Manager) RemoveExecution(executionID string) {
 	m.releaseActivity(executionActivityKey(executionID))
 	if execution, ok := m.executionStore.Get(executionID); ok {
+		m.closeStreamCoalescer(execution)
 		m.cleanupPassthroughMCPConfig(execution)
+		m.setRuntimeInterest(execution.SessionID, false)
 	}
 	m.executionStore.Remove(executionID)
 	m.logger.Debug("removed execution from tracking",

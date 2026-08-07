@@ -1,6 +1,7 @@
 "use client";
 
 import { IconCheck, IconCopy } from "@tabler/icons-react";
+import { useTranslation } from "react-i18next";
 import { Button } from "@kandev/ui/button";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@kandev/ui/dialog";
 import { Textarea } from "@kandev/ui/textarea";
@@ -19,6 +20,7 @@ export function WorkflowExportDialog({
   title,
   content,
 }: WorkflowExportDialogProps) {
+  const { t } = useTranslation();
   const { copied, copy } = useCopyToClipboard();
 
   return (
@@ -30,7 +32,7 @@ export function WorkflowExportDialog({
         <Textarea readOnly value={content} className="font-mono text-xs max-h-96 overflow-y-auto" />
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)} className="cursor-pointer">
-            Close
+            {t("workflows:close")}
           </Button>
           <Button onClick={() => copy(content)} className="cursor-pointer">
             {copied ? (
@@ -38,7 +40,7 @@ export function WorkflowExportDialog({
             ) : (
               <IconCopy className="h-4 w-4 mr-2" />
             )}
-            {copied ? "Copied" : "Copy"}
+            {copied ? t("workflows:copied") : t("workflows:copy")}
           </Button>
         </DialogFooter>
       </DialogContent>

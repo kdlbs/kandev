@@ -100,12 +100,29 @@ Check every changed file for the following layers. Skip layers that don't apply 
 - Workspace and office boundaries are enforced; no cross-workspace data, credentials, logs, or agent context leakage
 - Agent/tool execution is constrained by code, not prompt text alone
 
-**Architecture:**
+**Architectural fit (highest priority):**
+- Changes belong in the correct layer/module and follow the dependency direction used by the codebase
+- Business/domain logic is not placed in controllers, transport handlers, repositories, data sources, or infrastructure code
+- Controllers handle protocol concerns, use cases orchestrate workflows, repositories define persistence needs, and data sources handle external systems
+- Domain/application code does not depend on frameworks, transport models, database models, or vendor-specific types
+- Changes do not bypass existing boundaries, duplicate responsibilities, or introduce unnecessary coupling between modules or domains
+- New interfaces and abstractions have clear ownership and represent a meaningful boundary, rather than wrapping a single implementation
+- Compare with neighbouring features and established patterns, but flag deviations only when they create a real architectural or maintainability problem
+- Treat fundamental architectural misplacement or broken dependency direction as a blocker
 - Frontend: no direct data fetching in components (must go through store), shadcn imports from `@kandev/ui` not `@/components/ui/*`
 - Backend: provider pattern for DI, context passed through call chains, event bus for cross-component communication
 - Search `docs/specs/` and `docs/decisions/` for the affected subsystem; flag an accepted spec or ADR that the change makes inaccurate
 - New abstractions justified — no over-engineering
 - Concerns cleanly separated (single responsibility)
+
+**Data & state modelling:**
+- Domain entities, value objects, DTOs, persistence models, and external API models remain separate where their responsibilities differ
+- State transitions and invariants are explicit and cannot create invalid or partially updated state
+- There is a single clear source of truth; state or business rules are not duplicated across layers
+- Nullability, optional fields, defaults, and invalid combinations are modelled deliberately
+- Persistence schemas or transport types are not leaking implementation details into domain/application contracts
+- Concurrency, retries, partial failures, and duplicate requests cannot corrupt state or apply transitions more than once
+- Backward compatibility, migrations, and mixed-version behaviour are considered when contracts or persisted data change
 
 **Logic & correctness:**
 - Edge cases handled (empty input, nil/null, zero, max values)

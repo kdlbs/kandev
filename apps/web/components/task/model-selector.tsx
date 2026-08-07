@@ -2,6 +2,7 @@
 
 import { memo, useCallback, useMemo, useRef } from "react";
 import { useTranslation } from "react-i18next";
+import { t } from "@/lib/i18n";
 
 import {
   configOptionToModelOptions,
@@ -13,6 +14,7 @@ import {
 } from "@/components/model-config-selector";
 import { useAppStore } from "@/components/state-provider";
 import { useToast } from "@/components/toast-provider";
+import { createDebugLogger, isDebug } from "@/lib/debug/log";
 import { useAvailableAgents } from "@/hooks/domains/settings/use-available-agents";
 import { useSettingsData } from "@/hooks/domains/settings/use-settings-data";
 import { setSessionConfigOption, setSessionModel } from "@/lib/api/domains/session-api";
@@ -21,7 +23,6 @@ import type {
   ConfigOptionEntry,
   SessionModelEntry,
 } from "@/lib/state/slices/session-runtime/types";
-
 type SessionModelsEntry = {
   currentModelId: string;
   models: SessionModelEntry[];
@@ -36,6 +37,8 @@ type ModelSelectorProps = {
   triggerClassName?: string;
 };
 
+const debug = createDebugLogger("model-selector:gate");
+
 function configValueKeys(value: unknown): string[] {
   if (!value || typeof value !== "object" || Array.isArray(value)) return [];
   return Object.entries(value)
@@ -43,7 +46,9 @@ function configValueKeys(value: unknown): string[] {
     .map(([key]) => key);
 }
 
-function requiredConfigKeys(session: TaskSession | null, agents: Agent[]): string[] {
+const MODEL_CONFIG_KEY = "model";
+
+export function requiredConfigKeys(session: TaskSession | null, agents: Agent[]): string[] {
   if (!session) return [];
   const keys = new Set(configValueKeys(session.agent_profile_snapshot?.config_options));
   for (const agent of agents) {
@@ -62,7 +67,7 @@ function requiredConfigKeys(session: TaskSession | null, agents: Agent[]): strin
   return [...keys];
 }
 
-function hasCompleteDynamicConfig(
+export function hasCompleteDynamicConfig(
   session: TaskSession | null,
   sessionModelsData: SessionModelsEntry | undefined,
   agents: Agent[],
@@ -71,7 +76,16 @@ function hasCompleteDynamicConfig(
   if (required.length === 0) return true;
   if (!sessionModelsData) return false;
   const available = new Set(sessionModelsData.configOptions.map((option) => option.id));
-  return required.every((key) => available.has(key));
+  // Flat-model-list agents (e.g. claude-opus) expose their models via the ACP
+  // top-level `models` list and switch with session/set_model rather than a
+  // SessionConfigOption(category="model"). For those the persisted runtime
+  // config still records a "model" key, but it will never appear in
+  // configOptions. Treat that key as satisfied when the session has a flat model
+  // list — the selector renders fine from it.
+  const hasFlatModelList = !!sessionModelsData.models.length;
+  return required.every(
+    (key) => available.has(key) || (key === MODEL_CONFIG_KEY && hasFlatModelList),
+  );
 }
 
 function resolveSessionState(
@@ -122,6 +136,22 @@ function sessionModelsToOptions(models: SessionModelEntry[]): ModelSelectorOptio
     description: m.description,
     usageMultiplier: m.usageMultiplier,
   }));
+}
+
+// annotateFallbackOptions marks the fallback model so the user sees the
+// session is not on the configured start model. Returns the same array when
+// no fallback note is active.
+function annotateFallbackOptions(
+  options: ModelSelectorOption[],
+  fallbackModel: string | undefined,
+): ModelSelectorOption[] {
+  if (!fallbackModel) return options;
+  for (const option of options) {
+    if (option.id === fallbackModel && !option.name.includes("(fallback)")) {
+      option.name = `${option.name} (fallback)`;
+    }
+  }
+  return options;
 }
 
 function buildModelOptions(
@@ -202,7 +232,7 @@ function resolveAvailableModels({
 }
 
 function describeError(err: unknown): string {
-  return err instanceof Error ? err.message : "Unknown error";
+  return err instanceof Error ? err.message : t("task:unknownError2");
 }
 
 /** Builds model/config change handlers with optimistic update + error toast + revert. */
@@ -210,6 +240,7 @@ function useModelChangeHandlers(
   configOptions: SelectConfigOption[],
   sessionModelsData: SessionModelsEntry | undefined,
 ) {
+  const { t } = useTranslation();
   const activeModels = useAppStore((state) => state.activeModel.bySessionId);
   const setActiveModel = useAppStore((state) => state.setActiveModel);
   const setSessionModels = useAppStore((state) => state.setSessionModels);
@@ -250,7 +281,7 @@ function useModelChangeHandlers(
         setActiveModel(sid, previousActive);
         if (previousModels) setSessionModels(sid, previousModels);
         toast({
-          title: "Failed to change model",
+          title: t("task:failedToChangeModel"),
           description: describeError(err),
           variant: "error",
         });
@@ -307,6 +338,43 @@ function useModelChangeHandlers(
   return { handleModelChange, handleConfigChange };
 }
 
+// resolveModelSelectorInputs derives the model list, config options and
+// current model from store state, independent of the hook lifecycle.
+function resolveModelSelectorInputs({
+  session,
+  sessionModelsData,
+  activeModel,
+  settingsAgents,
+  availableAgents,
+  profileModel,
+}: {
+  session: TaskSession | null;
+  sessionModelsData: SessionModelsEntry | undefined;
+  activeModel: string | null;
+  settingsAgents: Agent[];
+  availableAgents: AvailableAgent[];
+  profileModel: string | null;
+}) {
+  const usingAcpModels = !!sessionModelsData?.models?.length;
+  const configOptions = usableConfigOptions(sessionModelsData?.configOptions);
+  const modelConfig = configOptions.find(isModelConfigOption);
+  const availableModels = resolveAvailableModels({
+    modelConfig,
+    usingAcpModels,
+    sessionModels: sessionModelsData?.models ?? [],
+    settingsAgents,
+    profileId: session?.agent_profile_id,
+    availableAgents,
+  });
+  const currentModel = resolveCurrentModel(
+    activeModel,
+    sessionModelsData?.currentModelId || null,
+    resolveSnapshotModel(session?.agent_profile_snapshot),
+    profileModel,
+  );
+  return { configOptions, currentModel, availableModels };
+}
+
 /** Resolves available models, config options and current model from store state. */
 function useModelSelectorState(sessionId: string | null) {
   useSettingsData(true);
@@ -324,45 +392,27 @@ function useModelSelectorState(sessionId: string | null) {
     activeModels,
     selectedSessionModels,
   );
-  const snapshotModel = resolveSnapshotModel(session?.agent_profile_snapshot);
   const profileModel = useMemo(
     () => resolveProfileModel(session?.agent_profile_id, settingsAgents as Agent[]),
     [session?.agent_profile_id, settingsAgents],
   );
 
-  const usingAcpModels = !!sessionModelsData?.models?.length;
-  const configOptions = usableConfigOptions(sessionModelsData?.configOptions);
-  const modelConfig = configOptions.find(isModelConfigOption);
-  const availableModels = resolveAvailableModels({
-    modelConfig,
-    usingAcpModels,
-    sessionModels: sessionModelsData?.models ?? [],
-    settingsAgents: settingsAgents as Agent[],
-    profileId: session?.agent_profile_id,
-    availableAgents,
-  });
-
-  const acpCurrentModel = sessionModelsData?.currentModelId || null;
-  const currentModel = resolveCurrentModel(
+  const { configOptions, currentModel, availableModels } = resolveModelSelectorInputs({
+    session,
+    sessionModelsData,
     activeModel,
-    acpCurrentModel,
-    snapshotModel,
+    settingsAgents: settingsAgents as Agent[],
+    availableAgents,
     profileModel,
+  });
+  const modelOptions = useMemo(
+    () =>
+      annotateFallbackOptions(
+        buildModelOptions(availableModels, currentModel),
+        sessionModelsData?.fallbackModel,
+      ),
+    [availableModels, currentModel, sessionModelsData?.fallbackModel],
   );
-  const modelOptions = useMemo(() => {
-    const options = buildModelOptions(availableModels, currentModel);
-    const fallbackModel = sessionModelsData?.fallbackModel;
-    // Explicit "using fallback" signal: annotate the fallback model so the
-    // user sees the session is not on the configured start model.
-    if (fallbackModel) {
-      for (const option of options) {
-        if (option.id === fallbackModel && !option.name.includes("(fallback)")) {
-          option.name = `${option.name} (fallback)`;
-        }
-      }
-    }
-    return options;
-  }, [availableModels, currentModel, sessionModelsData?.fallbackModel]);
 
   const { handleModelChange, handleConfigChange } = useModelChangeHandlers(
     configOptions,
@@ -376,6 +426,8 @@ function useModelSelectorState(sessionId: string | null) {
     configBaseline: sessionModelsData?.configBaseline,
     fallbackModel: sessionModelsData?.fallbackModel ?? null,
     configHydrated: hasCompleteDynamicConfig(session, sessionModelsData, settingsAgents as Agent[]),
+    requiredKeys: requiredConfigKeys(session, settingsAgents as Agent[]),
+    rawConfigOptionIds: (sessionModelsData?.configOptions ?? []).map((o) => o.id),
     handleModelChange,
     handleConfigChange,
   };
@@ -385,6 +437,7 @@ export const ModelSelector = memo(function ModelSelector({
   sessionId,
   triggerClassName,
 }: ModelSelectorProps) {
+  const { t } = useTranslation();
   const {
     currentModel,
     modelOptions,
@@ -392,11 +445,12 @@ export const ModelSelector = memo(function ModelSelector({
     configBaseline,
     fallbackModel,
     configHydrated,
+    requiredKeys,
+    rawConfigOptionIds,
     handleModelChange,
     handleConfigChange,
   } = useModelSelectorState(sessionId);
   const modelConfig = configOptions.find(isModelConfigOption);
-  const { t } = useTranslation();
   // Explicit "using fallback" signal: annotate the trigger so the user sees
   // the session is not on the configured start model.
   const currentModelSuffix = fallbackModel ? ` ${t("settings:modelFallbackSuffix")}` : undefined;
@@ -417,6 +471,19 @@ export const ModelSelector = memo(function ModelSelector({
     [sessionId, handleConfigChange],
   );
 
+  if (isDebug()) {
+    debug("render", {
+      sessionId: sessionId ?? "",
+      configHydrated,
+      currentModel: currentModel ?? "",
+      hasModelConfig: !!modelConfig,
+      modelOptionsLen: modelOptions.length,
+      configOptionIds: configOptions.map((o) => o.id),
+      rawConfigOptionIds,
+      requiredKeys,
+      willHide: !sessionId || !configHydrated || (!currentModel && !modelConfig),
+    });
+  }
   if (!sessionId || !configHydrated || (!currentModel && !modelConfig)) return null;
 
   return (
@@ -426,8 +493,8 @@ export const ModelSelector = memo(function ModelSelector({
       configOptions={configOptions}
       onModelChange={onModelChange}
       onConfigChange={onConfigChange}
-      placeholder="Model"
-      ariaLabel="Session model settings"
+      placeholder={t("common:model")}
+      ariaLabel={t("task:sessionModelSettings")}
       variant="compact"
       popoverSide="top"
       triggerClassName={triggerClassName}

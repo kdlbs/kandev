@@ -145,19 +145,22 @@ Start by matching CI as closely as possible, then add pressure deliberately:
    full spec file or full shard with the same resource limits before declaring
    a flake non-reproducible.
 
-A test that passes only after a Playwright retry is still a failure signal.
-During triage disable per-spec retry overrides and use `--retries=0`. When
-isolated repeats pass but the same shard position fails, binary-search the
-preceding spec files under one worker until the smallest ordered sequence
-reproduces the shared-state leak; the fix is complete only when that sequence
-passes with retries disabled.
+The config uses `failOnFlakyTests: !CI`: local runs fail on a flaky retry, while
+CI temporarily tolerates one. Either result is a failure signal for agents:
+reproduce it locally with per-spec overrides disabled and `--retries=0`; never
+rerun until it happens to pass. If isolated repeats stay green but the shard
+fails, binary-search preceding specs in one worker. The fix is complete only
+when the smallest reproducing sequence passes without retries.
 
 Record the exact command, resource limits, repeat number, and failure artifact
 path. Always inspect `error-context.md`; mobile/terminal flakes often show
 state that the stack trace alone hides, such as duplicate active terminals or a
 terminal stuck on "Starting terminal...".
 
-When a PR-specific E2E shard fails, first identify the failed spec(s). If failures are in unrelated existing specs and no changed code plausibly affects that surface, record the failure as unrelated in the PR fixup summary instead of changing unrelated tests.
+When a PR E2E shard fails, investigate every spec, including those outside the
+diff; never dismiss, rerun, or merely record a failure as unrelated. Reproduce
+the exact test, then preserve shard ordering and CI pressure. Fix every valid
+defect with retries disabled, or evidence a concrete external blocker.
 
 **CRITICAL: E2E tests run against the production Vite build served by the Go backend**, not dev mode. After any frontend code change, you **must** rebuild before running tests (`pnpm e2e:run` does this for you):
 

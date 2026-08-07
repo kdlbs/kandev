@@ -18,6 +18,8 @@ import { useToast } from "@/components/toast-provider";
 import { getShortcut } from "@/lib/keyboard/shortcut-overrides";
 import { whisperModelConfig } from "@/lib/voice/whisper-web-models";
 import { VoiceModelLoadIndicator } from "./voice-model-load-indicator";
+import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 
 type VoiceInputButtonProps = {
   /** Inserts the recognized transcript at the current cursor position. */
@@ -28,18 +30,20 @@ type VoiceInputButtonProps = {
   disabled?: boolean;
 };
 
-const TOOLTIP_BY_STATE: Record<VoiceInputState, string> = {
-  idle: "Voice input",
-  requesting: "Requesting microphone…",
-  recording: "Stop recording",
-  processing: "Transcribing…",
+// Catalog keys, not copy: both tables are built at module load, where a `t()`
+// call would freeze at the boot locale. They resolve at render.
+const TOOLTIP_KEY_BY_STATE: Record<VoiceInputState, string> = {
+  idle: "task:voiceInput",
+  requesting: "task:requestingMicrophone",
+  recording: "task:stopRecording",
+  processing: "task:transcribing",
 };
 
-const ARIA_BY_STATE: Record<VoiceInputState, string> = {
-  idle: "Start voice input",
-  requesting: "Requesting microphone permission",
-  recording: "Stop voice input",
-  processing: "Transcribing voice input",
+const ARIA_KEY_BY_STATE: Record<VoiceInputState, string> = {
+  idle: "task:startVoiceInput",
+  requesting: "task:requestingMicrophonePermission",
+  recording: "task:stopVoiceInput",
+  processing: "task:transcribingVoiceInput",
 };
 
 function ButtonIcon({
@@ -199,20 +203,32 @@ function useVoiceShortcut(
 
 // ── Unsupported fallback ────────────────────────────────────────────────
 
-function buildUnsupportedReason(): string {
-  if (typeof window === "undefined") return "Voice input is unavailable here.";
-  if (!window.isSecureContext) {
-    return "Voice input needs HTTPS. Open this site over https:// (or http://localhost) — most mobile browsers block microphone APIs on insecure origins.";
-  }
-  return "Voice input isn't supported in this browser. Try Chrome, Edge, or Safari 14.5+.";
+// URL schemes the reader has to reproduce verbatim in the address bar, not copy.
+// Interpolated so the pseudo-locale and translators leave them intact — baked
+// into the message, `https://` pseudolocalizes to `ĥţţƥś://`, a scheme that does
+// not exist. Same reasoning as `settings:voiceUnavailableInsecure`, which
+// already passes its scheme and host as values.
+const VOICE_SECURE_SCHEME_URL = "https://";
+const VOICE_LOCALHOST_URL = "http://localhost";
+
+function buildUnsupportedReasonKey(): string {
+  if (typeof window === "undefined") return "task:voiceInputUnavailableHere";
+  if (!window.isSecureContext) return "task:voiceInputNeedsHttps";
+  return "task:voiceInputUnsupportedBrowser";
 }
 
 function UnsupportedVoiceButton({ disabled }: { disabled?: boolean }) {
+  const { t } = useTranslation();
   const { toast } = useToast();
   const handleClick = () => {
     toast({
-      title: "Voice input unavailable",
-      description: buildUnsupportedReason(),
+      title: t("task:voiceInputUnavailable"),
+      // Only `voiceInputNeedsHttps` reads these; i18next ignores values a
+      // message does not reference, so they can be passed unconditionally.
+      description: t(buildUnsupportedReasonKey(), {
+        secureSchemeUrl: VOICE_SECURE_SCHEME_URL,
+        localhostUrl: VOICE_LOCALHOST_URL,
+      }),
       variant: "error",
     });
   };
@@ -223,7 +239,7 @@ function UnsupportedVoiceButton({ disabled }: { disabled?: boolean }) {
           type="button"
           variant="ghost"
           size="icon"
-          aria-label="Voice input unavailable"
+          aria-label={t("task:voiceInputUnavailable")}
           data-testid="voice-input-button"
           data-state="unsupported"
           disabled={!!disabled}
@@ -233,7 +249,7 @@ function UnsupportedVoiceButton({ disabled }: { disabled?: boolean }) {
           <IconMicrophone className="h-4 w-4" />
         </Button>
       </TooltipTrigger>
-      <TooltipContent>Voice input unavailable — tap for details</TooltipContent>
+      <TooltipContent>{t("task:voiceInputUnavailableTapForDetails")}</TooltipContent>
     </Tooltip>
   );
 }
@@ -269,19 +285,21 @@ function resolveEffectiveMode(
 }
 
 function resolveTooltip(args: {
+  translate: TFunction;
   modelLoad: VoiceModelLoadState;
   modelLabel: string;
   state: VoiceInputState;
   holdMode: boolean;
 }): string {
-  const { modelLoad, modelLabel, state, holdMode } = args;
+  const { translate: t, modelLoad, modelLabel, state, holdMode } = args;
   if (modelLoad.state === "loading") {
     const pct = Number.isFinite(modelLoad.progress)
       ? Math.min(100, Math.max(0, Math.round(modelLoad.progress * 100)))
       : 0;
-    return `Downloading ${modelLabel}… ${pct}%`;
+    return t("task:downloadingModelPercent", { modelLabel, pct });
   }
-  return `${TOOLTIP_BY_STATE[state]}${holdMode && state === "idle" ? " (hold)" : ""}`;
+  const tooltip = t(TOOLTIP_KEY_BY_STATE[state]);
+  return holdMode && state === "idle" ? t("task:voiceTooltipHold", { tooltip }) : tooltip;
 }
 
 type VoiceMicButtonProps = {
@@ -311,6 +329,7 @@ function VoiceMicButton({
   pointerHandlers,
   onClick,
 }: VoiceMicButtonProps) {
+  const { t } = useTranslation();
   const isRecording = state === "recording";
   const isBusy = state === "requesting" || state === "processing" || modelLoad.state === "loading";
   return (
@@ -318,7 +337,7 @@ function VoiceMicButton({
       type="button"
       variant="ghost"
       size="icon"
-      aria-label={ARIA_BY_STATE[state]}
+      aria-label={t(ARIA_KEY_BY_STATE[state])}
       aria-pressed={isRecording}
       data-testid="voice-input-button"
       data-state={state}
@@ -346,6 +365,7 @@ function VoiceMicButton({
 }
 
 function EnabledVoiceInputButton({ onTranscript, onAutoSend, disabled }: VoiceInputButtonProps) {
+  const { t } = useTranslation();
   const { toast } = useToast();
   const voiceMode = useAppStore((s) => s.userSettings.voiceMode);
   const handleError = useCallback((err: VoiceError) => toastForError(toast, err), [toast]);
@@ -376,7 +396,7 @@ function EnabledVoiceInputButton({ onTranscript, onAutoSend, disabled }: VoiceIn
   const pointerHandlers = holdMode ? buildHoldHandlers(start, stop) : {};
   const onClick = holdMode ? undefined : buildToggleHandler(state, start, stop);
   const modelLabel = whisperModelConfig(voiceMode.whisperWebModel).label;
-  const tooltipText = resolveTooltip({ modelLoad, modelLabel, state, holdMode });
+  const tooltipText = resolveTooltip({ translate: t, modelLoad, modelLabel, state, holdMode });
 
   return (
     <div className="flex items-center gap-1.5">

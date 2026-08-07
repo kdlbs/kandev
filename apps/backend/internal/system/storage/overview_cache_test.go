@@ -256,6 +256,13 @@ func (o *countingOverview) Capabilities(context.Context, StorageMaintenanceSetti
 	return Capabilities{}
 }
 
+func (o *countingOverview) SettingsCapabilities(
+	context.Context,
+	StorageMaintenanceSettings,
+) Capabilities {
+	return Capabilities{}
+}
+
 type overviewResult struct {
 	snapshot OverviewSnapshot
 	err      error
@@ -293,6 +300,13 @@ func (*firstCallBlockingOverview) Capabilities(
 	return Capabilities{}
 }
 
+func (*firstCallBlockingOverview) SettingsCapabilities(
+	context.Context,
+	StorageMaintenanceSettings,
+) Capabilities {
+	return Capabilities{}
+}
+
 func (o *cancellableOverview) Summary(ctx context.Context) (Summary, error) {
 	o.calls++
 	close(o.started)
@@ -305,5 +319,12 @@ func (o *cancellableOverview) Summary(ctx context.Context) (Summary, error) {
 }
 
 func (o *cancellableOverview) Capabilities(context.Context, StorageMaintenanceSettings) Capabilities {
+	return Capabilities{}
+}
+
+func (o *cancellableOverview) SettingsCapabilities(
+	context.Context,
+	StorageMaintenanceSettings,
+) Capabilities {
 	return Capabilities{}
 }

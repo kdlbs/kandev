@@ -5,6 +5,8 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/jmoiron/sqlx"
+
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/task/models"
@@ -41,6 +43,32 @@ func TestDeleteWorkspaceCascadeWithNameDeletesWorkspaceChildren(t *testing.T) {
 		t.Fatalf("workspace workflows should be deleted, got %d", len(workflows))
 	}
 	assertNoWorkspaceCascadeDependents(t, repo)
+}
+
+func TestDeleteWorkspaceCascadeWithSecretCleanupRollsBackOnCleanupFailure(t *testing.T) {
+	ctx := context.Background()
+	repo := newRepoForHealTests(t)
+	seedWorkspaceCascadeRows(t, repo, "ws-delete")
+
+	_, _, err := repo.DeleteWorkspaceCascadeWithSecretCleanup(ctx, "ws-delete", func(context.Context, *sqlx.Tx) error {
+		return errors.New("injected secret cleanup failure")
+	})
+	if err == nil {
+		t.Fatal("delete succeeded, want cleanup failure")
+	}
+	if _, err := repo.GetWorkspace(ctx, "ws-delete"); err != nil {
+		t.Fatalf("workspace was deleted after cleanup failure: %v", err)
+	}
+	if _, err := repo.GetTask(ctx, "task-delete"); err != nil {
+		t.Fatalf("workspace task was deleted after cleanup failure: %v", err)
+	}
+	workflows, err := repo.ListWorkflows(ctx, "ws-delete", true)
+	if err != nil {
+		t.Fatalf("ListWorkflows: %v", err)
+	}
+	if len(workflows) != 1 {
+		t.Fatalf("workflows after cleanup failure = %#v, want one", workflows)
+	}
 }
 
 func TestDeleteWorkspaceCascadeDeletesWorkspaceChildren(t *testing.T) {

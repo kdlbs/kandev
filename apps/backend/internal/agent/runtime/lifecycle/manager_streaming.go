@@ -16,6 +16,69 @@ func (e *AgentExecution) clearProtocolMessageCorrelationLocked() {
 	e.protocolThinkingIDs = nil
 }
 
+func (m *Manager) streamCoalescer(execution *AgentExecution) *streamCoalescer {
+	execution.streamMu.Lock()
+	defer execution.streamMu.Unlock()
+	if execution.stream == nil {
+		execution.stream = newStreamCoalescer(defaultStreamCoalesceWindow, func(chunk coalescedStreamChunk) {
+			m.publishStreamingContentNow(
+				execution,
+				chunk.eventType,
+				chunk.messageID,
+				chunk.content,
+				chunk.isAppend,
+			)
+		})
+	}
+	return execution.stream
+}
+
+func (m *Manager) flushStreamCoalescer(execution *AgentExecution) {
+	execution.streamMu.Lock()
+	stream := execution.stream
+	execution.streamMu.Unlock()
+	if stream != nil {
+		stream.flushBoundary()
+	}
+}
+
+func (m *Manager) closeStreamCoalescer(execution *AgentExecution) {
+	execution.streamMu.Lock()
+	stream := execution.stream
+	execution.stream = nil
+	execution.streamMu.Unlock()
+	if stream != nil {
+		stream.close()
+		stats := stream.stats()
+		if stats.received > 0 {
+			m.logger.Info("agent stream coalescer closed",
+				zap.String("execution_id", execution.ID),
+				zap.String("session_id", execution.SessionID),
+				zap.Int("stream_chunks_received", stats.received),
+				zap.Int("stream_chunks_coalesced", stats.coalesced),
+				zap.Int("stream_segments_flushed", stats.flushed))
+		}
+	}
+}
+
+func (m *Manager) enqueueStreamingContent(
+	execution *AgentExecution,
+	eventType string,
+	messageID string,
+	content string,
+	isAppend bool,
+) {
+	if content == "" {
+		return
+	}
+	m.streamCoalescer(execution).add(coalescedStreamChunk{
+		eventType: eventType,
+		messageID: messageID,
+		content:   content,
+		isAppend:  isAppend,
+	})
+}
+
 func (e *AgentExecution) resetStreamingStateLocked() {
 	e.messageBuffer.Reset()
 	e.thinkingBuffer.Reset()
@@ -89,6 +152,12 @@ func resetStreamingStateWithHistory(
 	historyManager *SessionHistoryManager,
 	log *logger.Logger,
 ) {
+	execution.streamMu.Lock()
+	stream := execution.stream
+	execution.streamMu.Unlock()
+	if stream != nil {
+		stream.flushBoundary()
+	}
 	execution.messageMu.Lock()
 	content := execution.detachAssistantHistoryLocked()
 	execution.resetStreamingStateLocked()
@@ -133,6 +202,9 @@ func (m *Manager) flushPendingLegacyMessage(execution *AgentExecution) {
 		return
 	}
 	if messageID != "" {
+		// The final direct append must follow any coalesced legacy chunk that
+		// was already emitted for this record.
+		m.flushStreamCoalescer(execution)
 		m.publishStreamingMessageFinal(execution, messageID, trimmed)
 		return
 	}
@@ -157,6 +229,9 @@ func (m *Manager) flushPendingLegacyThinking(execution *AgentExecution) {
 		return
 	}
 	if messageID != "" {
+		// The final direct append must follow any coalesced legacy chunk that
+		// was already emitted for this record.
+		m.flushStreamCoalescer(execution)
 		m.publishStreamingThinkingFinal(execution, messageID, trimmed)
 		return
 	}
@@ -175,10 +250,20 @@ func (m *Manager) publishProtocolThinking(
 	messageID, isAppend := protocolRecordID(&execution.protocolThinkingIDs, protocolMessageID)
 	execution.messageMu.Unlock()
 
-	m.publishStreamingContent(execution, thinkingStreamingEventType, messageID, content, isAppend)
+	m.enqueueStreamingContent(execution, thinkingStreamingEventType, messageID, content, isAppend)
 }
 
 func (m *Manager) publishStreamingContent(
+	execution *AgentExecution,
+	eventType string,
+	messageID string,
+	content string,
+	isAppend bool,
+) {
+	m.enqueueStreamingContent(execution, eventType, messageID, content, isAppend)
+}
+
+func (m *Manager) publishStreamingContentNow(
 	execution *AgentExecution,
 	eventType string,
 	messageID string,
@@ -222,32 +307,13 @@ func (m *Manager) publishStreamingMessage(execution *AgentExecution, content str
 	}
 	execution.messageMu.Unlock()
 
-	event := AgentStreamEventData{
-		Type:      "message_streaming",
-		Text:      content,
-		MessageID: messageID,
-		IsAppend:  isAppend,
-	}
-
-	// Create payload manually to include streaming-specific fields
-	payload := &AgentStreamEventPayload{
-		Type:        "agent/event",
-		Timestamp:   time.Now().UTC().Format(time.RFC3339Nano),
-		AgentID:     execution.ID,
-		ExecutionID: execution.ID,
-		TaskID:      execution.TaskID,
-		SessionID:   execution.SessionID,
-		Data:        &event,
-	}
-
 	m.logger.Debug("publishing streaming message",
 		zap.String("execution_id", execution.ID),
 		zap.String("message_id", messageID),
 		zap.Bool("is_append", isAppend),
 		zap.Int("content_length", len(content)))
 
-	// Publish the streaming event - orchestrator will handle create/append logic
-	m.eventPublisher.PublishAgentStreamEventPayload(payload)
+	m.enqueueStreamingContent(execution, "message_streaming", messageID, content, isAppend)
 }
 
 // flushMessageBuffer extracts any accumulated message from the buffer and returns it.
@@ -255,6 +321,7 @@ func (m *Manager) publishStreamingMessage(execution *AgentExecution, content str
 // It also clears the currentMessageID to start fresh for the next message segment.
 // Additionally flushes any accumulated thinking content.
 func (m *Manager) flushMessageBuffer(execution *AgentExecution) string {
+	m.flushStreamCoalescer(execution)
 	execution.messageMu.Lock()
 	agentMessage := execution.messageBuffer.String()
 	thinkingContent := execution.thinkingBuffer.String()
@@ -311,29 +378,12 @@ func (m *Manager) flushMessageBuffer(execution *AgentExecution) string {
 // publishStreamingMessageFinal publishes the final chunk of a streaming message.
 // This is called during flush to append any remaining buffered content.
 func (m *Manager) publishStreamingMessageFinal(execution *AgentExecution, messageID, content string) {
-	event := AgentStreamEventData{
-		Type:      "message_streaming",
-		Text:      content,
-		MessageID: messageID,
-		IsAppend:  true,
-	}
-
-	payload := &AgentStreamEventPayload{
-		Type:        "agent/event",
-		Timestamp:   time.Now().UTC().Format(time.RFC3339Nano),
-		AgentID:     execution.ID,
-		ExecutionID: execution.ID,
-		TaskID:      execution.TaskID,
-		SessionID:   execution.SessionID,
-		Data:        &event,
-	}
-
 	m.logger.Debug("publishing final streaming message chunk",
 		zap.String("execution_id", execution.ID),
 		zap.String("message_id", messageID),
 		zap.Int("content_length", len(content)))
 
-	m.eventPublisher.PublishAgentStreamEventPayload(payload)
+	m.publishStreamingContentNow(execution, "message_streaming", messageID, content, true)
 }
 
 // publishStreamingThinking publishes a streaming thinking event for real-time thinking updates.
@@ -351,56 +401,18 @@ func (m *Manager) publishStreamingThinking(execution *AgentExecution, content st
 	}
 	execution.messageMu.Unlock()
 
-	event := AgentStreamEventData{
-		Type:        thinkingStreamingEventType,
-		Text:        content,
-		MessageID:   thinkingID,
-		IsAppend:    isAppend,
-		MessageType: "thinking",
-	}
-
-	// Create payload manually to include streaming-specific fields
-	payload := &AgentStreamEventPayload{
-		Type:        "agent/event",
-		Timestamp:   time.Now().UTC().Format(time.RFC3339Nano),
-		AgentID:     execution.ID,
-		ExecutionID: execution.ID,
-		TaskID:      execution.TaskID,
-		SessionID:   execution.SessionID,
-		Data:        &event,
-	}
-
-	// Publish the streaming event - orchestrator will handle create/append logic
-	m.eventPublisher.PublishAgentStreamEventPayload(payload)
+	m.enqueueStreamingContent(execution, thinkingStreamingEventType, thinkingID, content, isAppend)
 }
 
 // publishStreamingThinkingFinal publishes the final chunk of a streaming thinking message.
 // This is called during flush to append any remaining buffered thinking content.
 func (m *Manager) publishStreamingThinkingFinal(execution *AgentExecution, thinkingID, content string) {
-	event := AgentStreamEventData{
-		Type:        thinkingStreamingEventType,
-		Text:        content,
-		MessageID:   thinkingID,
-		IsAppend:    true,
-		MessageType: "thinking",
-	}
-
-	payload := &AgentStreamEventPayload{
-		Type:        "agent/event",
-		Timestamp:   time.Now().UTC().Format(time.RFC3339Nano),
-		AgentID:     execution.ID,
-		ExecutionID: execution.ID,
-		TaskID:      execution.TaskID,
-		SessionID:   execution.SessionID,
-		Data:        &event,
-	}
-
 	m.logger.Debug("publishing final streaming thinking chunk",
 		zap.String("execution_id", execution.ID),
 		zap.String("thinking_id", thinkingID),
 		zap.Int("content_length", len(content)))
 
-	m.eventPublisher.PublishAgentStreamEventPayload(payload)
+	m.publishStreamingContentNow(execution, thinkingStreamingEventType, thinkingID, content, true)
 }
 
 // updateExecutionError updates an execution with an error

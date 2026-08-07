@@ -17,6 +17,8 @@ import {
   USE_AGENT_TIER,
   WAKE_REASONS,
 } from "../../../workspace/routing/components/wake-reason-info";
+import { TIER_NAME_KEYS } from "../../../lib/label-keys";
+import { useTranslation } from "react-i18next";
 
 type Props = {
   overrides: AgentRoutingOverrides;
@@ -29,6 +31,7 @@ type Props = {
 // the workspace policy. When expanded, the user can flip a switch to
 // override and pick a tier (or "use agent's normal tier") per reason.
 export function AgentWakeReasonOverrides({ overrides, setOverrides, workspaceConfig }: Props) {
+  const { t } = useTranslation();
   const isOverriding = overrides.tier_per_reason_source === "override";
   const [open, setOpen] = useState(isOverriding);
   const wsPolicy = workspaceConfig?.tier_per_reason ?? {};
@@ -65,7 +68,7 @@ export function AgentWakeReasonOverrides({ overrides, setOverrides, workspaceCon
           className="flex w-full items-center justify-between p-3 cursor-pointer hover:bg-muted/50"
         >
           <div className="text-left space-y-0.5">
-            <p className="text-sm font-medium">Override wake-reason tiers</p>
+            <p className="text-sm font-medium">{t("office:overrideWakeReasonTiers")}</p>
             <InheritedSummary wsPolicy={wsPolicy} overriding={isOverriding} />
           </div>
           <IconChevronDown
@@ -91,16 +94,15 @@ export function AgentWakeReasonOverrides({ overrides, setOverrides, workspaceCon
 }
 
 function ToggleHeader({ checked, onChange }: { checked: boolean; onChange: (v: boolean) => void }) {
+  const { t } = useTranslation();
   return (
     <div className="space-y-1.5">
       <div className="flex items-center justify-between">
-        <span className="text-sm">Override workspace policy for this agent</span>
+        <span className="text-sm">{t("office:overrideWorkspacePolicyForThisAgent")}</span>
         <Switch checked={checked} onCheckedChange={onChange} className="cursor-pointer" />
       </div>
       <p className="text-xs text-muted-foreground leading-relaxed">
-        This is rare. Override only if this agent specifically needs different behaviour for its
-        background work — for example, a security-critical agent that must use Frontier even for
-        routine checks. Most agents should inherit the workspace policy.
+        {t("office:overrideWakeReasonTiersHelp")}
       </p>
     </div>
   );
@@ -113,34 +115,37 @@ function InheritedSummary({
   wsPolicy: TierPerReason;
   overriding: boolean;
 }) {
+  const { t } = useTranslation();
   if (overriding) {
     return (
       <p className="text-xs text-muted-foreground">
-        Using this agent&apos;s wake-reason overrides.
+        {t("office:usingThisAgentsWakeReasonOverrides")}
       </p>
     );
   }
+  // `tier`, not `t`: a local named `t` would shadow the translate function.
   const parts = WAKE_REASONS.map((r) => {
-    const t = wsPolicy[r.id];
-    if (!t) return null;
-    return `${r.label} → ${t}`;
-  }).filter((s): s is string => s !== null);
+    const tier = wsPolicy[r.id];
+    if (!tier) return null;
+    return `${t(r.labelKey)} → ${t(TIER_NAME_KEYS[tier])}`;
+  }).filter((part): part is string => part !== null);
   if (parts.length === 0) {
     return (
-      <p className="text-xs text-muted-foreground">
-        Inherits workspace policy (no wake-reason tiers set yet).
-      </p>
+      <p className="text-xs text-muted-foreground">{t("office:inheritsWorkspacePolicyNoneSet")}</p>
     );
   }
   return (
-    <p className="text-xs text-muted-foreground">Inherits workspace policy: {parts.join(", ")}.</p>
+    <p className="text-xs text-muted-foreground">
+      {t("office:inheritsWorkspacePolicyList", { list: parts.join(", ") })}
+    </p>
   );
 }
 
-const TIER_OPTIONS: Array<{ value: Tier; label: string }> = [
-  { value: "frontier", label: "Frontier" },
-  { value: "balanced", label: "Balanced" },
-  { value: "economy", label: "Economy" },
+// Catalog keys, not copy — module scope freezes a `t()` at the boot locale.
+const TIER_OPTIONS: Array<{ value: Tier; labelKey: string }> = [
+  { value: "frontier", labelKey: "office:tierFrontier" },
+  { value: "balanced", labelKey: "office:tierBalanced" },
+  { value: "economy", labelKey: "office:tierEconomy" },
 ];
 
 type OverrideTableProps = {
@@ -151,6 +156,7 @@ type OverrideTableProps = {
 };
 
 function OverrideTable({ wsPolicy, agentMap, workspaceConfig, onChange }: OverrideTableProps) {
+  const { t } = useTranslation();
   return (
     <div className="divide-y divide-border">
       {WAKE_REASONS.map((row) => {
@@ -159,32 +165,34 @@ function OverrideTable({ wsPolicy, agentMap, workspaceConfig, onChange }: Overri
         return (
           <div key={row.id} className="py-2 space-y-1.5 first:pt-0 last:pb-0">
             <div className="flex items-center justify-between gap-3">
-              <span className="text-xs font-medium uppercase tracking-wide">{row.label}</span>
+              <span className="text-xs font-medium uppercase tracking-wide">{t(row.labelKey)}</span>
               <Select
                 value={tier ?? USE_AGENT_TIER}
                 onValueChange={(v) => onChange(row.id, v as Tier | typeof USE_AGENT_TIER)}
               >
                 <SelectTrigger className="w-[220px] cursor-pointer">
-                  <SelectValue placeholder="Use agent's normal tier" />
+                  <SelectValue placeholder={t("office:useAgentSNormalTier")} />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value={USE_AGENT_TIER} className="cursor-pointer">
-                    Use agent&apos;s normal tier
+                    {t("office:useAgentSNormalTier")}
                   </SelectItem>
                   {TIER_OPTIONS.map((opt) => (
                     <SelectItem key={opt.value} value={opt.value} className="cursor-pointer">
-                      {opt.label}
+                      {t(opt.labelKey)}
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
             </div>
-            <p className="text-[11px] text-muted-foreground pl-1 leading-relaxed">{row.short}</p>
+            <p className="text-[11px] text-muted-foreground pl-1 leading-relaxed">
+              {t(row.shortKey)}
+            </p>
             {inheritedTier && !tier && (
               <p className="text-[11px] text-muted-foreground/80 pl-1">
-                Workspace default for this reason:{" "}
+                {t("office:workspaceDefaultForThisReason")}{" "}
                 <Badge variant="secondary" className="capitalize">
-                  {inheritedTier}
+                  {t(TIER_NAME_KEYS[inheritedTier])}
                 </Badge>
               </p>
             )}
@@ -197,6 +205,7 @@ function OverrideTable({ wsPolicy, agentMap, workspaceConfig, onChange }: Overri
 }
 
 function UnmappedWarning({ tier, config }: { tier: Tier | undefined; config: WorkspaceRouting }) {
+  const { t } = useTranslation();
   if (!tier) return null;
   const order =
     config.provider_order && config.provider_order.length > 0 ? config.provider_order : [];
@@ -207,7 +216,7 @@ function UnmappedWarning({ tier, config }: { tier: Tier | undefined; config: Wor
   return (
     <p className="text-[11px] text-destructive flex items-center gap-1 pl-1">
       <IconAlertTriangle className="h-3 w-3" />
-      No provider in the effective order has {tier} mapped.
+      {t("office:noProviderInOrderHasTierMapped", { tier: t(TIER_NAME_KEYS[tier]) })}
     </p>
   );
 }

@@ -81,6 +81,25 @@ func TestFromWorkflowStep_PreservesWIPFields(t *testing.T) {
 	}
 }
 
+func TestFromWorkflowStep_PreservesCancelTriggersTurnComplete(t *testing.T) {
+	got := FromWorkflowStep(&wfmodels.WorkflowStep{
+		ID:                         "step-cancel",
+		WorkflowID:                 "wf-1",
+		CancelTriggersTurnComplete: true,
+	})
+	payload, err := json.Marshal(got)
+	if err != nil {
+		t.Fatalf("marshal workflow step DTO: %v", err)
+	}
+	var fields map[string]any
+	if err := json.Unmarshal(payload, &fields); err != nil {
+		t.Fatalf("decode workflow step DTO: %v", err)
+	}
+	if gotValue, ok := fields["cancel_triggers_turn_complete"].(bool); !ok || !gotValue {
+		t.Fatalf("cancel trigger DTO field = %#v, want true", fields["cancel_triggers_turn_complete"])
+	}
+}
+
 func TestFromTaskSession_IncludesAllWorktrees(t *testing.T) {
 	session := &models.TaskSession{
 		ID:            "session-1",
@@ -112,5 +131,51 @@ func TestFromTaskSession_IncludesAllWorktrees(t *testing.T) {
 	}
 	if summary.WorkspacePath != "/task-root" {
 		t.Fatalf("summary WorkspacePath = %q, want /task-root", summary.WorkspacePath)
+	}
+}
+
+func TestFromTask_DerivesInterruptedFromMetadata(t *testing.T) {
+	now := time.Now().UTC()
+
+	t.Run("marked", func(t *testing.T) {
+		task := &models.Task{
+			ID:        "t1",
+			CreatedAt: now,
+			UpdatedAt: now,
+			Metadata: map[string]interface{}{
+				models.MetaKeyInterruptedAt: "2026-08-02T10:00:00Z",
+			},
+		}
+		got := FromTask(task)
+		if !got.Interrupted {
+			t.Fatal("Interrupted = false, want true when interrupted_at metadata is present")
+		}
+	})
+
+	t.Run("unmarked", func(t *testing.T) {
+		task := &models.Task{ID: "t1", CreatedAt: now, UpdatedAt: now}
+		got := FromTask(task)
+		if got.Interrupted {
+			t.Fatal("Interrupted = true, want false when interrupted_at metadata is absent")
+		}
+	})
+}
+
+func TestTaskToAPI_DerivesInterruptedFromMetadata(t *testing.T) {
+	now := time.Now().UTC()
+
+	marked := (&models.Task{
+		ID:        "t1",
+		CreatedAt: now,
+		UpdatedAt: now,
+		Metadata:  map[string]interface{}{models.MetaKeyInterruptedAt: "2026-08-02T10:00:00Z"},
+	}).ToAPI()
+	if !marked.Interrupted {
+		t.Fatal("ToAPI Interrupted = false, want true when interrupted_at metadata is present")
+	}
+
+	unmarked := (&models.Task{ID: "t1", CreatedAt: now, UpdatedAt: now}).ToAPI()
+	if unmarked.Interrupted {
+		t.Fatal("ToAPI Interrupted = true, want false when interrupted_at metadata is absent")
 	}
 }

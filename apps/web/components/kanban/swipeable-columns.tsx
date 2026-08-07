@@ -3,12 +3,13 @@
 import { useEffect, useCallback, useRef, useMemo, useState } from "react";
 import useEmblaCarousel from "embla-carousel-react";
 import { KanbanColumn, WorkflowStep } from "../kanban-column";
-import { Task } from "../kanban-card";
+import { Task, type KanbanPresentation } from "../kanban-card";
 import { compareTasksByCreatedDesc } from "@/lib/kanban/task-order";
 import type { KanbanExternalLinkAvailability } from "../kanban-external-link-availability";
 
 type SwipeableColumnsProps = {
   steps: WorkflowStep[];
+  presentation: KanbanPresentation;
   // Real workflow steps only (excludes the "Needs Reassignment" sentinel) —
   // passed to KanbanColumn purely for move-menu targets.
   moveTargetSteps: WorkflowStep[];
@@ -69,6 +70,7 @@ function useEmblaIndexSync(
 
 export function SwipeableColumns({
   steps,
+  presentation,
   moveTargetSteps,
   tasks,
   activeIndex,
@@ -124,6 +126,7 @@ export function SwipeableColumns({
             <KanbanColumn
               step={step}
               tasks={getTasksForStep(step.id)}
+              presentation={presentation}
               onPreviewTask={onPreviewTask}
               onOpenTask={onOpenTask}
               onEditTask={onEditTask}

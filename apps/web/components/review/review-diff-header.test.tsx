@@ -160,6 +160,31 @@ describe("ReviewDiffHeader responsive composition", () => {
     );
   });
 
+  it("keeps the submodule scope visible in the mobile sticky identity", () => {
+    mocks.isMobile = true;
+    render(
+      <ReviewDiffHeader
+        file={{ ...file, repository_name: "vendor/outer/vendor/inner" }}
+        isReviewed={false}
+        isStale={false}
+        sessionId={SESSION_ID}
+        collapsed={false}
+        wordWrap={false}
+        expandUnchanged={false}
+        baseBranchByRepo={{ "vendor/outer/vendor/inner": "abc123" }}
+        onCheckboxChange={vi.fn()}
+        onDiscard={vi.fn()}
+        onToggleCollapse={vi.fn()}
+        onToggleExpandUnchanged={vi.fn()}
+        onToggleWordWrap={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByTestId("review-file-repository").textContent).toBe(
+      "vendor/outer/vendor/inner",
+    );
+  });
+
   it("keeps the desktop toolbar in its existing inline actions slot", () => {
     render(
       <ReviewDiffHeader

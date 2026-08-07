@@ -71,7 +71,7 @@ func (s *Service) pollerLoop(ctx context.Context, interval time.Duration) {
 
 // tickOnce performs a single poll iteration. Intentionally package-internal
 // so deterministic tests can drive the loop without spinning up synctest.
-// GitHub rate-limit responses are logged at info; everything else at warn.
+// GitHub rate-limit responses are logged at info; other source errors at warn.
 func (s *Service) tickOnce(ctx context.Context) {
 	if ctx.Err() != nil {
 		return

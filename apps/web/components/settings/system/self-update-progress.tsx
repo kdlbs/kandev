@@ -1,5 +1,7 @@
 "use client";
 
+import type { TFunction } from "i18next";
+import { useTranslation } from "react-i18next";
 import { Button } from "@kandev/ui/button";
 import { Spinner } from "@kandev/ui/spinner";
 import { IconCheck, IconAlertTriangle } from "@tabler/icons-react";
@@ -12,15 +14,23 @@ type SelfUpdateProgressProps = {
   onDismiss: () => void;
 };
 
-function activeText(phase: SelfUpdatePhase, target: string | null): string {
-  const version = target ?? "the new version";
+/**
+ * The version string is a value; only the frame around it is copy. When the
+ * target version is not known yet the whole sentence switches to a variant
+ * that does not name one, rather than interpolating a translated noun phrase.
+ */
+function activeText(phase: SelfUpdatePhase, target: string | null, t: TFunction): string {
   switch (phase) {
     case "starting":
-      return `Starting update to ${version}…`;
+      return target
+        ? t("system:selfUpdateStarting", { version: target })
+        : t("system:selfUpdateStartingUnknown");
     case "installing":
-      return `Downloading and installing ${version}…`;
+      return target
+        ? t("system:selfUpdateInstalling", { version: target })
+        : t("system:selfUpdateInstallingUnknown");
     case "restarting":
-      return "Restarting Kandev — this can take up to a minute.";
+      return t("system:selfUpdateRestarting");
     default:
       return "";
   }
@@ -33,25 +43,29 @@ function ActiveRow({
   phase: SelfUpdatePhase;
   targetVersion: string | null;
 }) {
+  const { t } = useTranslation();
   return (
     <div className="space-y-1">
       <div className="flex items-center gap-2 text-sm">
         <Spinner className="size-4" />
-        <span>{activeText(phase, targetVersion)}</span>
+        <span>{activeText(phase, targetVersion, t)}</span>
       </div>
-      <p className="text-xs text-muted-foreground">
-        Keep this page open. It will refresh automatically when the update finishes.
-      </p>
+      <p className="text-xs text-muted-foreground">{t("system:selfUpdateKeepOpen")}</p>
     </div>
   );
 }
 
 function DoneRow({ targetVersion }: { targetVersion: string | null }) {
+  const { t } = useTranslation();
   return (
     <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
       <div className="flex items-center gap-2 text-sm">
         <IconCheck className="size-4 text-emerald-500" />
-        <span>Updated to {targetVersion ?? "the latest version"}.</span>
+        <span>
+          {targetVersion
+            ? t("system:selfUpdateDone", { version: targetVersion })
+            : t("system:selfUpdateDoneUnknown")}
+        </span>
       </div>
       <Button
         variant="outline"
@@ -60,18 +74,20 @@ function DoneRow({ targetVersion }: { targetVersion: string | null }) {
         onClick={() => window.location.reload()}
         data-testid="system-updates-progress-reload"
       >
-        Reload page
+        {t("system:reloadPage")}
       </Button>
     </div>
   );
 }
 
 function ErrorRow({ message, onDismiss }: { message: string | null; onDismiss: () => void }) {
+  const { t } = useTranslation();
   return (
     <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
       <div className="flex items-start gap-2 text-sm text-destructive">
         <IconAlertTriangle className="size-4 shrink-0" />
-        <span>{message ?? "The update failed."}</span>
+        {/* `message` comes from the update API and stays as sent. */}
+        <span>{message ?? t("system:selfUpdateFailed")}</span>
       </div>
       <Button
         variant="outline"
@@ -80,7 +96,7 @@ function ErrorRow({ message, onDismiss }: { message: string | null; onDismiss: (
         onClick={onDismiss}
         data-testid="system-updates-progress-dismiss"
       >
-        Dismiss
+        {t("system:dismiss")}
       </Button>
     </div>
   );

@@ -120,4 +120,27 @@ describe("RemoteCredentialsCard", () => {
       ).toBe("true");
     });
   });
+
+  // The `<Trans>` in EnvOption addresses its JSX children positionally, so a
+  // prettier reflow can silently reassemble the sentence into fragments with an
+  // empty <code>. Assert the whole reconstructed sentence, not just a fragment.
+  it("renders the env-var secret hint as one sentence with the variable inline", async () => {
+    renderRemoteCredentialsCard();
+
+    fireEvent.click(await screen.findByText("Codex"));
+    const envOption = screen.getByRole("radio", { name: "Provide secret" });
+
+    expect(envOption.textContent).toContain("Set OPENAI_API_KEY via a stored secret");
+    expect(envOption.querySelector("code")?.textContent).toBe("OPENAI_API_KEY");
+  });
+
+  it("appends the not-found note to the auth file list as one string", async () => {
+    renderRemoteCredentialsCard();
+
+    fireEvent.click(await screen.findByText("Codex"));
+
+    expect(
+      screen.getByText(".codex/auth.json, .codex/config.toml — files not found on this machine"),
+    ).toBeTruthy();
+  });
 });

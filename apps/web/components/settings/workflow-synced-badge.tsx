@@ -1,7 +1,9 @@
+import { useTranslation } from "react-i18next";
 import { Badge } from "@kandev/ui/badge";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 
 export function WorkflowSyncedBadge({ sourcePath }: { sourcePath?: string }) {
+  const { t } = useTranslation();
   return (
     <Tooltip>
       <TooltipTrigger asChild>
@@ -11,12 +13,13 @@ export function WorkflowSyncedBadge({ sourcePath }: { sourcePath?: string }) {
           className="text-xs cursor-default"
           data-testid="workflow-synced-badge"
         >
-          Synced
+          {t("workflows:synced")}
         </Badge>
       </TooltipTrigger>
       <TooltipContent>
-        Read-only - managed by workflow sync from {sourcePath || "a configured repository"}. Edit or
-        remove it in the synced repository.
+        {t("workflows:syncedBadgeTooltip", {
+          source: sourcePath || t("workflows:aConfiguredRepository"),
+        })}
       </TooltipContent>
     </Tooltip>
   );

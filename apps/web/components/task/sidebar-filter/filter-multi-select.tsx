@@ -14,6 +14,7 @@ import {
 } from "@kandev/ui/command";
 import { cn } from "@/lib/utils";
 import { buildOptionGroups, hasGroupedOptions } from "./filter-option-groups";
+import { useTranslation } from "react-i18next";
 
 export type MultiSelectOption = { value: string; label: string; color?: string; group?: string };
 
@@ -29,9 +30,12 @@ export function FilterMultiSelect({
   options,
   selected,
   onChange,
-  placeholder = "Select values",
-  searchPlaceholder = "Search…",
+  placeholder,
+  searchPlaceholder,
 }: Props) {
+  const { t } = useTranslation();
+  const resolvedPlaceholder = placeholder ?? t("task:selectValues");
+  const resolvedSearchPlaceholder = searchPlaceholder ?? t("task:searchEllipsis");
   const [open, setOpen] = useState(false);
   const selectedSet = new Set(selected);
   const labelByValue = new Map(options.map((o) => [o.value, o.label]));
@@ -56,7 +60,7 @@ export function FilterMultiSelect({
             selected={selected}
             labelByValue={labelByValue}
             colorByValue={colorByValue}
-            placeholder={placeholder}
+            placeholder={resolvedPlaceholder}
           />
           <IconChevronDown className="ml-auto h-3 w-3 shrink-0 opacity-50" />
         </button>
@@ -67,9 +71,9 @@ export function FilterMultiSelect({
         data-testid="filter-value-multi-popover"
       >
         <Command>
-          <CommandInput placeholder={searchPlaceholder} />
+          <CommandInput placeholder={resolvedSearchPlaceholder} />
           <CommandList>
-            <CommandEmpty>No options.</CommandEmpty>
+            <CommandEmpty>{t("task:noOptions2")}</CommandEmpty>
             <GroupedOptions options={options} selectedSet={selectedSet} onToggle={toggle} />
           </CommandList>
         </Command>

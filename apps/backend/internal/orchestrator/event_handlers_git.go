@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -16,6 +17,7 @@ import (
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/orchestrator/watcher"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/service"
 )
 
 // gitSnapshotPersistInterval is the minimum time between persisted live git
@@ -27,6 +29,12 @@ const gitSnapshotPersistInterval = 30 * time.Second
 // backend with many sessions can't grow it without limit. When the cache is
 // full and a new session arrives, the oldest entry by lastWrite is evicted.
 const gitSnapshotCacheMaxEntries = 4096
+
+// gitlabProviderName is the repositories.provider value used for GitLab,
+// mirrored locally the same way githubPRStateOpen mirrors the github
+// package's vocabulary rather than importing task/service's unexported
+// equivalent.
+const gitlabProviderName = "gitlab"
 
 type gitSnapshotCacheEntry struct {
 	hash      string
@@ -206,17 +214,30 @@ func (s *Service) persistGitStatusSnapshot(ctx context.Context, data watcher.Git
 	}
 }
 
-// trackPushAndAssociatePR detects git pushes by tracking the "ahead" count.
-// Two cases trigger detection:
+// pushTrackerUnsynced is the pushTracker sentinel for "no upstream
+// configured yet" (RemoteBranch == ""). Deliberately distinct from 0 (a real
+// RemoteAhead of zero, meaning "has an upstream, nothing left to push") —
+// collapsing both into 0 would make "never pushed" and "just pushed"
+// indistinguishable to the transition check below, since a task's very
+// first status observation (no upstream, no commits yet) would itself read
+// as "already synced" and silently consume the one-time first-observation
+// fast path before any real push ever happens.
+const pushTrackerUnsynced = -1
+
+// trackPushAndAssociatePR detects git pushes by tracking the "remote ahead"
+// count — commits not yet present on the branch's own upstream (see
+// lifecycle.GitStatusData.RemoteAhead). Two cases trigger detection:
 //
-//  1. Transition: ahead went from >0 to 0 with a remote branch set — the
-//     normal in-session push, observed across two status events.
+//  1. Transition: the branch was unsynced (no upstream yet, or remote-ahead
+//     >0 with a remote branch set) on the previous observation, and this one
+//     shows remote-ahead=0 with a remote branch — the normal in-session
+//     push, observed across two status events.
 //  2. First-observation sync: the very first status event for this
-//     (session, repo) already shows ahead=0 with a remote branch. This means
-//     a push happened before agentctl's poller saw the ahead>0 phase (the
-//     poll cadence missed it, or the session resumed after a restart). For a
-//     fresh task branch, RemoteBranch is only populated after `git push -u`,
-//     so seeing it pre-synced is itself a push signal.
+//     (session, repo) already shows remote-ahead=0 with a remote branch.
+//     This means a push happened before agentctl's poller saw the unsynced
+//     phase (the poll cadence missed it, or the session resumed after a
+//     restart). For a fresh task branch, RemoteBranch is only populated
+//     after `git push -u`, so seeing it pre-synced is itself a push signal.
 //
 // Without (2), multi-repo tasks routinely lose PR associations for any repo
 // whose first poll happens to land after the push completes — the
@@ -224,13 +245,23 @@ func (s *Service) persistGitStatusSnapshot(ctx context.Context, data watcher.Git
 //
 // Multi-repo: keyed per (session, repository_name) so each repo's
 // transitions are tracked independently. Without this, agentctl's per-repo
-// status events race-overwrote each other's ahead counts and only one
+// status events race-overwrote each other's remote-ahead counts and only one
 // repo's push got detected.
+//
+// Deliberately keys off RemoteAhead, not the base-branch-relative Ahead:
+// Ahead reflects "commits ahead of origin/main" for the Push/Pull UI badge
+// and stays > 0 for the entire life of a normal feature branch — it never
+// drops to 0 just because the branch itself was pushed, so it could never
+// signal "a push just happened" for real feature-branch work.
 func (s *Service) trackPushAndAssociatePR(ctx context.Context, data watcher.GitEventData) {
 	key := pushTrackerKey(data.SessionID, data.Status.RepositoryName)
-	prevAheadVal, loaded := s.pushTracker.Swap(key, data.Status.Ahead)
-	prevAhead, _ := prevAheadVal.(int)
-	if !shouldFirePushDetection(loaded, prevAhead, data.Status) {
+	trackedValue := data.Status.RemoteAhead
+	if data.Status.RemoteBranch == "" {
+		trackedValue = pushTrackerUnsynced
+	}
+	prevValueVal, loaded := s.pushTracker.Swap(key, trackedValue)
+	prevValue, _ := prevValueVal.(int)
+	if !shouldFirePushDetection(loaded, prevValue, data.Status) {
 		return
 	}
 	s.logger.Info("git push detected, starting PR association",
@@ -239,7 +270,7 @@ func (s *Service) trackPushAndAssociatePR(ctx context.Context, data watcher.GitE
 		zap.String("repository_name", data.Status.RepositoryName),
 		zap.String("branch", data.Status.Branch),
 		zap.Bool("first_observation", !loaded))
-	go s.detectPushAndAssociatePR(
+	go s.dispatchPushDetection(
 		context.Background(),
 		data.SessionID,
 		data.TaskID,
@@ -248,28 +279,110 @@ func (s *Service) trackPushAndAssociatePR(ctx context.Context, data watcher.GitE
 	)
 }
 
+// dispatchPushDetection routes one push-detection run to the right
+// provider's association logic, so the two providers' code paths issue zero
+// calls into each other's client. GitHub's proven detectPushAndAssociatePR is
+// called verbatim for every non-GitLab (including unknown/legacy-empty
+// provider) repository — this wraps it, it does not replace it. Extracted
+// from trackPushAndAssociatePR to keep that function inside the statement
+// budget.
+func (s *Service) dispatchPushDetection(ctx context.Context, sessionID, taskID, repositoryName, branch string) {
+	if s.resolvePushRepositoryProvider(ctx, sessionID, taskID, repositoryName) == gitlabProviderName {
+		s.detectPushAndAssociateMR(ctx, sessionID, taskID, repositoryName, branch)
+		return
+	}
+	s.detectPushAndAssociatePR(ctx, sessionID, taskID, repositoryName, branch)
+}
+
+// resolvePushRepositoryProvider looks up the provider ("github", "gitlab", or
+// "" when unknown/unresolvable) of the repository backing this push, reusing
+// resolvePushRepo's owner/name matching rather than re-deriving it, so
+// dispatchPushDetection can route without duplicating that logic.
+func (s *Service) resolvePushRepositoryProvider(ctx context.Context, sessionID, taskID, repositoryName string) string {
+	_, _, repositoryID := s.resolvePushRepo(ctx, sessionID, taskID, repositoryName)
+	if repositoryID == "" {
+		return ""
+	}
+	store, ok := s.repo.(repoStore)
+	if !ok {
+		return ""
+	}
+	repoObj, err := store.GetRepository(ctx, repositoryID)
+	if err != nil || repoObj == nil {
+		return ""
+	}
+	if repoObj.Provider != "" {
+		return repoObj.Provider
+	}
+	// The row may not yet reflect a provider resolvePushRepo's own call just
+	// derived from the local git remote: matchPushRepo/resolveSessionRepo
+	// compute it in-memory and persist it via a detached backfill goroutine,
+	// so this read can race ahead of that write on the very first push from a
+	// repository with no durable provider yet. Recompute live from the same
+	// local checkout instead of trusting a possibly-stale empty column.
+	// ResolveGitRemoteProviderIdentity recognizes both github.com and
+	// gitlab.com remotes (the same helper resolveRepositoryProviderIdentity
+	// uses to backfill Repository rows in production), so this closes the
+	// race for either provider rather than only GitHub.
+	if repoObj.LocalPath != "" {
+		if provider, _, owner, _ := service.ResolveGitRemoteProviderIdentity(repoObj.LocalPath); provider != "" && owner != "" {
+			return provider
+		}
+	}
+	// Self-managed GitLab instances never get a durable "gitlab" Provider tag
+	// at all — resolveRepositoryProviderIdentity only recognizes github.com
+	// and gitlab.com at discovery time, so the well-known-host fallback above
+	// can never resolve them either; this is a permanent gap for self-managed
+	// repositories, not just a narrow backfill race. remote_url is their only
+	// durable identity signal (still populated by the same production
+	// backfill), so compare it against the workspace's own configured GitLab
+	// connection instead of a hostname allowlist.
+	if s.gitlabMRLinkService != nil && repoObj.RemoteURL != "" {
+		if workspaceID := s.taskWorkspaceID(ctx, taskID); workspaceID != "" &&
+			s.gitlabMRLinkService.IsConfiguredGitLabHost(ctx, workspaceID, repoObj.RemoteURL) {
+			return gitlabProviderName
+		}
+	}
+	return ""
+}
+
 // shouldFirePushDetection decides whether to kick off PR association for one
 // status event. It fires in two cases (see trackPushAndAssociatePR doc):
 //
-//   - Transition: the previous observation had ahead>0 and this one has ahead=0
-//     with a remote branch set.
-//   - First observation: no previous entry, this one has ahead=0 with a
-//     remote branch set — meaning a push happened before agentctl's poller
-//     observed the ahead>0 phase.
+//   - Transition: the previous observation was unsynced — either no upstream
+//     yet (pushTrackerUnsynced) or a remote branch with remote-ahead>0 — and
+//     this one has remote-ahead=0 with a remote branch set.
+//   - First observation: no previous entry, this one has remote-ahead=0 with
+//     a remote branch set — meaning a push happened before agentctl's poller
+//     observed the unsynced phase.
+//
+// Reads RemoteAhead (commits not yet on this branch's own upstream), not the
+// base-branch-relative Ahead — see lifecycle.GitStatusData.RemoteAhead and
+// trackPushAndAssociatePR's doc comment for why Ahead can never signal this.
+//
+// prevValue must come from pushTracker's stored value, not a raw prior
+// RemoteAhead: comparing against pushTrackerUnsynced (not 0) for "was this
+// unsynced before" is what lets a task's first-ever observation (no
+// upstream, no commits) correctly NOT count as "already synced" — otherwise
+// it would consume the first-observation fast path before any real push
+// happens, and the genuine no-upstream-to-synced transition on the next
+// observation would never fire (prevValue would already read 0 == "was
+// already synced", identical to "had nothing to push", not ">0" or
+// "unsynced").
 //
 // Pulled out as a pure function so the decision logic can be tested without
 // spawning the goroutine that calls the GitHub API.
-func shouldFirePushDetection(loaded bool, prevAhead int, status *lifecycle.GitStatusData) bool {
+func shouldFirePushDetection(loaded bool, prevValue int, status *lifecycle.GitStatusData) bool {
 	if status == nil {
 		return false
 	}
-	if status.RemoteBranch == "" || status.Ahead != 0 {
+	if status.RemoteBranch == "" || status.RemoteAhead != 0 {
 		return false
 	}
 	if !loaded {
 		return true
 	}
-	return prevAhead > 0
+	return prevValue != 0
 }
 
 // pushTrackerKey builds the per-(session, repo) key used by pushTracker.
@@ -352,30 +465,29 @@ func (s *Service) handleContextWindowUpdated(ctx context.Context, data watcher.C
 		"source":     source,
 	}
 
-	// Persist to database asynchronously using json_set to atomically set one
-	// key without clobbering other metadata keys (plan_mode, prepare_result).
-	// The generation check prevents a pre-reset update from resurrecting stale
-	// usage after resetAgentContext clears the metadata.
-	go func() {
-		persisted, err := s.persistAndPublishContextWindowUpdate(
-			context.Background(), data.TaskID, data.TaskSessionID, generation, contextWindowData,
-		)
-		switch {
-		case err != nil:
-			s.logger.Error("failed to update session with context window",
-				zap.String("task_id", data.TaskID),
-				zap.String("session_id", data.TaskSessionID),
-				zap.Error(err))
-		case !persisted:
-			s.logger.Debug("discarded stale context window update after reset",
-				zap.String("task_id", data.TaskID),
-				zap.String("session_id", data.TaskSessionID))
-		default:
-			s.logger.Debug("persisted context window to session",
-				zap.String("task_id", data.TaskID),
-				zap.String("session_id", data.TaskSessionID))
-		}
-	}()
+	// Persist synchronously using json_set to atomically set one key without
+	// clobbering other metadata keys (plan_mode, prepare_result). The watcher
+	// delivers updates in arrival order; keeping persistence in this callback
+	// preserves that order instead of letting independent goroutines reorder
+	// samples and produce an incorrect compaction count.
+	persisted, err := s.persistAndPublishContextWindowUpdate(
+		context.Background(), data.TaskID, data.TaskSessionID, generation, contextWindowData,
+	)
+	switch {
+	case err != nil:
+		s.logger.Error("failed to update session with context window",
+			zap.String("task_id", data.TaskID),
+			zap.String("session_id", data.TaskSessionID),
+			zap.Error(err))
+	case !persisted:
+		s.logger.Debug("discarded stale context window update after reset",
+			zap.String("task_id", data.TaskID),
+			zap.String("session_id", data.TaskSessionID))
+	default:
+		s.logger.Debug("persisted context window to session",
+			zap.String("task_id", data.TaskID),
+			zap.String("session_id", data.TaskSessionID))
+	}
 }
 
 func (s *Service) persistAndPublishContextWindowUpdate(
@@ -384,7 +496,7 @@ func (s *Service) persistAndPublishContextWindowUpdate(
 	generation uint64,
 	contextWindowData map[string]interface{},
 ) (bool, error) {
-	persisted, err := s.persistContextWindowUpdate(ctx, sessionID, generation, contextWindowData)
+	persisted, count, err := s.persistContextWindowUpdate(ctx, sessionID, generation, contextWindowData)
 	if !persisted || err != nil || s.eventBus == nil {
 		return persisted, err
 	}
@@ -395,7 +507,8 @@ func (s *Service) persistAndPublishContextWindowUpdate(
 			"task_id":    taskID,
 			"session_id": sessionID,
 			"metadata": map[string]interface{}{
-				contextWindowMetadataKey: contextWindowData,
+				contextWindowMetadataKey:                    contextWindowData,
+				models.SessionMetaKeyContextCompactionCount: count,
 			},
 		},
 	))
@@ -488,14 +601,14 @@ func (s *Service) handlePermissionRequest(ctx context.Context, data watcher.Perm
 		}
 	}
 
-	// Run-mode automation tasks are hidden from the kanban, so there is no UI
-	// for the user to answer a permission prompt. Auto-reject and mark the run
-	// failed so the failure shows up in the automation's Recent Runs.
+	// Automation tasks are hidden from the kanban, so there is no UI for the
+	// user to answer a permission prompt. Auto-reject and mark the run failed
+	// so the failure shows up in the automation's Recent Runs.
 	s.failAutomationRunOnPermission(ctx, data)
 }
 
 // failAutomationRunOnPermission checks whether the permission request belongs
-// to a run-mode automation task and, if so, rejects the prompt and marks the
+// to an automation task and, if so, rejects the prompt and marks the
 // corresponding automation_run row as failed.
 func (s *Service) failAutomationRunOnPermission(ctx context.Context, data watcher.PermissionRequestData) {
 	if s.automationService == nil || data.TaskID == "" {
@@ -505,7 +618,10 @@ func (s *Service) failAutomationRunOnPermission(ctx context.Context, data watche
 	if err != nil || task == nil {
 		return
 	}
-	if !task.IsEphemeral || task.Origin != models.TaskOriginAutomationRun {
+	// Keyed on origin alone — automation tasks are no longer ephemeral, and a
+	// prompt nobody can answer would otherwise hang the run at task_created
+	// forever, holding a max_concurrent_runs slot.
+	if task.Origin != models.TaskOriginAutomationRun {
 		return
 	}
 
@@ -513,13 +629,13 @@ func (s *Service) failAutomationRunOnPermission(ctx context.Context, data watche
 	// also true here because the session is going to be marked failed anyway.
 	optionID := pickRejectOption(data.Options)
 	if err := s.RespondToPermission(ctx, data.TaskSessionID, data.PendingID, optionID, true, true); err != nil {
-		s.logger.Warn("failed to auto-reject permission for run-mode automation",
+		s.logger.Warn("failed to auto-reject permission for automation run",
 			zap.String("task_id", data.TaskID),
 			zap.String("pending_id", data.PendingID),
 			zap.Error(err))
 	}
 
-	errMsg := fmt.Sprintf("Permission required: %s — run-mode automations cannot answer prompts", data.Title)
+	errMsg := fmt.Sprintf("Permission required: %s — automation runs cannot answer prompts", data.Title)
 	if err := s.automationService.MarkRunFailedByTaskID(ctx, data.TaskID, errMsg); err != nil {
 		s.logger.Warn("failed to mark automation run failed after permission prompt",
 			zap.String("task_id", data.TaskID), zap.Error(err))
@@ -645,7 +761,7 @@ func (s *Service) handleBranchSwitched(ctx context.Context, data watcher.GitEven
 	// renaming or switching branches (e.g. `git branch -m`, `git checkout`)
 	// leaves PR auto-association stuck on the original branch.
 	if data.BranchSwitch.CurrentBranch != "" {
-		if err := s.repo.UpdateTaskSessionWorktreeBranch(ctx, data.SessionID, data.BranchSwitch.CurrentBranch); err != nil {
+		if err := s.updateBranchSwitchWorktreeSnapshot(ctx, data.SessionID, data.BranchSwitch.RepositoryName, data.BranchSwitch.CurrentBranch); err != nil {
 			s.logger.Error("failed to update session worktree branch after branch switch",
 				zap.String("session_id", data.SessionID),
 				zap.String("current_branch", data.BranchSwitch.CurrentBranch),
@@ -676,6 +792,72 @@ func (s *Service) handleBranchSwitched(ctx context.Context, data watcher.GitEven
 		})
 		_ = s.eventBus.Publish(ctx, events.BuildGitWSEventSubject(data.SessionID), event)
 	}
+}
+
+// updateBranchSwitchWorktreeSnapshot scopes a multi-repository branch event to
+// the worktree whose path basename matches agentctl's RepositoryName tag. Older
+// events and single-repository rows retain the all-worktrees fallback.
+func (s *Service) updateBranchSwitchWorktreeSnapshot(ctx context.Context, sessionID, repositoryName, branch string) error {
+	if repositoryName == "" {
+		return s.repo.UpdateTaskSessionWorktreeBranch(ctx, sessionID, branch)
+	}
+	scoped, ok := s.repo.(titleBranchScopedSnapshotStore)
+	if !ok {
+		return s.repo.UpdateTaskSessionWorktreeBranch(ctx, sessionID, branch)
+	}
+	lister, ok := s.repo.(titleBranchWorktreeLister)
+	if !ok {
+		return s.repo.UpdateTaskSessionWorktreeBranch(ctx, sessionID, branch)
+	}
+	worktrees, err := lister.ListTaskSessionWorktrees(ctx, sessionID)
+	if err != nil {
+		return err
+	}
+	matched := matchingBranchSwitchWorktrees(worktrees, repositoryName)
+	if len(matched) == 0 {
+		if repositoryName != "" {
+			return nil
+		}
+		return s.repo.UpdateTaskSessionWorktreeBranch(ctx, sessionID, branch)
+	}
+	return s.persistBranchSwitchWorktrees(ctx, scoped, sessionID, branch, matched)
+}
+
+func matchingBranchSwitchWorktrees(worktrees []*models.TaskSessionWorktree, repositoryName string) map[string]string {
+	matched := make(map[string]string)
+	for _, worktree := range worktrees {
+		if worktree == nil || worktree.RepositoryID == "" {
+			continue
+		}
+		if filepath.Base(filepath.Clean(worktree.WorktreePath)) == repositoryName {
+			matched[worktree.RepositoryID] = worktree.WorktreeID
+		}
+	}
+	if len(matched) == 0 && len(worktrees) == 1 && worktrees[0] != nil {
+		matched[worktrees[0].RepositoryID] = worktrees[0].WorktreeID
+	}
+	return matched
+}
+
+func (s *Service) persistBranchSwitchWorktrees(
+	ctx context.Context,
+	scoped titleBranchScopedSnapshotStore,
+	sessionID string,
+	branch string,
+	matched map[string]string,
+) error {
+	for repositoryID, worktreeID := range matched {
+		if exact, exactOK := s.repo.(titleBranchWorktreeSnapshotStore); exactOK && worktreeID != "" {
+			if err := exact.UpdateTaskSessionWorktreeBranchByWorktree(ctx, sessionID, worktreeID, branch); err != nil {
+				return err
+			}
+			continue
+		}
+		if err := scoped.UpdateTaskSessionWorktreeBranchByRepository(ctx, sessionID, repositoryID, branch); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // resetPRWatchForBranchSwitch re-points the session's existing PR watch to the

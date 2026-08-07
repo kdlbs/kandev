@@ -10,7 +10,7 @@ owner: tbd
 
 Today, settings-style operational concerns (health, disk usage, current version, OSS attribution, log access, database maintenance) have no home in kandev's UI. The existing settings sidebar is product-configuration only (executors, agents, integrations); the only system-shaped entry — Changelog — sits awkwardly inside it. When something goes wrong, users have no path inside the app to see "where is my database, how big is it, what version am I on, is there an update, where are the logs." This forces them into the filesystem and into GitHub, and it makes recoverable problems (bloated SQLite, corrupt state) look unrecoverable.
 
-Radarr and Sonarr solve this with a dedicated **System** area: a group of read-only diagnostic pages plus a small number of gated maintenance actions. This spec brings the same shape to kandev, scoped to the kandev-specific surface (database diagnostics, SQLite backups/maintenance, worktrees, GitHub releases, and lumberjack log files).
+Radarr and Sonarr solve this with a dedicated **System** area: a group of read-only diagnostic pages plus a small number of gated maintenance actions. This spec brings the same shape to kandev, scoped to the kandev-specific surface (database diagnostics, SQLite backups/maintenance, worktrees, GitHub releases, and daily backend log files).
 
 ## What (v1)
 
@@ -35,12 +35,27 @@ A new **System** group is added to the existing settings sidebar (`apps/web/comp
    - Per-row actions: **Download**, **Restore** (gated like Factory Reset), **Delete** (confirm-only).
    - **Create snapshot** button at the top of the list; uses the existing `VACUUM INTO` path.
 5. **Logs** — `/settings/system/logs`
-   - Static log viewer: last 1000 lines of the current lumberjack log file, with a **Refresh** button. No live tail in v1.
-   - List of rotated log files with name/size/mtime and a per-row **Download** button.
-   - **Download current** button at the top.
+   - One **Customize bundle** action that opens source selection with backend
+     and frontend evidence selected by default; the runtime index and
+     debug-only ACP evidence remain explicit opt-ins. Bundle collection keeps
+     collecting/preparing/partial/busy/error feedback on the page.
+   - Visible disclosure that the ZIP contains up to three days of install-wide
+     backend logs and up to four connected browser profiles subject to fixed
+     byte limits, including URLs, console arguments, stacks, and runtime
+     metadata.
+   - The page does not render a tail, file table, copy/refresh controls, or individual-file downloads.
+   - If a source is unavailable, truncated by the fixed diagnostic budgets, or
+     reports queue loss, the page still downloads a partial ZIP and names the
+     omission without blocking normal application work.
+   - The active files, browser capture, ZIP lifecycle, sink thresholds, and
+     frontend-error ingestion contracts are defined by
+     [Diagnostic logging](../platform/diagnostic-logging.md).
 6. **Updates** — `/settings/system/updates`
    - Shows running version, latest available version, and a "new version available" badge if newer.
    - **Check now** button — forces a re-poll (rate-limited 30s per process).
+   - **Update channel** — Stable is the install-wide default. A verified managed npm/npx user
+     service can select Nightly through the shared Settings save flow. Desktop, Homebrew,
+     unmanaged, system-service, local, and unknown installs remain Stable with a visible reason.
    - A service update keeps its progress surface while the backend restarts. Once `/system/info` confirms the target version, the page reloads the document so the tab runs the new frontend bundle.
    - Update alerts are configured with the existing provider/event matrix under
      **Settings > General > Notifications**. The Updates page does not own a
@@ -65,7 +80,10 @@ The **System** group header (and the **Status** child entry) show a numeric badg
 
 ### Backend surface
 
-A new package `apps/backend/internal/system/` owns these endpoints. It absorbs the existing `internal/health/` package as a sub-component. Endpoints use the same auth model as the rest of `/api/v1/settings/*` (no separate admin tier); see [Permissions](#permissions) for the destructive-action confirmation pattern.
+A new package `apps/backend/internal/system/` owns these endpoints. It absorbs the existing
+`internal/health/` package as a sub-component. Read routes use the normal authenticated install
+identity; selected mutation routes use the existing admin guard. See [Permissions](#permissions)
+for the exact split and destructive-action confirmation pattern.
 
 ```
 GET    /api/v1/system/health                      (existing; unchanged)
@@ -81,13 +99,24 @@ POST   /api/v1/system/backups                     - create snapshot; 202 + jobId
 GET    /api/v1/system/backups/:name/download      - stream snapshot file
 POST   /api/v1/system/backups/:name/restore       - restore; body { confirm: "RESTORE" }
 DELETE /api/v1/system/backups/:name               - delete snapshot
-GET    /api/v1/system/logs                        - { files: [{ name, size, mtime }] }
-GET    /api/v1/system/logs/tail?n=1000            - last N lines of current log
-GET    /api/v1/system/logs/:name/download         - stream log file
-GET    /api/v1/system/updates                     - { current, latest, latestCheckedAt, releaseUrl, install, applySupported }
-POST   /api/v1/system/updates/check               - force GitHub re-poll; rate-limited 30s
-POST   /api/v1/system/updates/apply               - queue service-only self-update; body { confirm: "UPDATE" }
+POST   /api/v1/system/logs/bundles                - create source-selectable diagnostic ZIP job
+GET    /api/v1/system/logs/bundles/:id            - bundle collection/build status
+POST   /api/v1/system/logs/bundles/:id/frontend   - bounded frontend capture chunk
+GET    /api/v1/system/logs/bundles/:id/download   - stream ready/partial ZIP
+POST   /api/v1/system/logs/frontend-errors        - bounded/rate-limited error-toast report
+POST   /api/v1/system/improve-kandev/bundle/lease - owner-verified 24h task-context copy
+GET    /api/v1/system/updates                     - { current, latest, latest_url, latest_checked_at, update_available, channel, channel_editable, channel_unsupported_reason, install: { running_as_service, managed_service, mode?, manager?, kind?, metadata_path? }, apply_supported, apply_unsupported_reason?, manual_commands? }
+POST   /api/v1/system/updates/check               - force selected-source re-poll; rate-limited 30s
+PATCH  /api/v1/system/updates/channel             - persist Stable/Nightly for a verified managed npm/npx user service; body { channel }
+POST   /api/v1/system/updates/apply               - queue service-only self-update; body { confirm: "UPDATE", target_version }
+GET    /api/v1/system/message-queue/settings       - configured/effective queue limit and source
+PATCH  /api/v1/system/message-queue/settings       - save and live-apply admin queue limit
 ```
+
+The System API has no global casing convention. Updates and Info use the snake_case JSON fields
+shown above, while endpoints such as Disk Usage and Database use their documented camelCase
+fields. Earlier camelCase Updates names in this draft (`latestCheckedAt`, `releaseUrl`, and
+`applySupported`) were documentation errors, corrected here without renaming any wire field.
 
 Storage endpoints are defined separately in [Storage Maintenance](storage-maintenance.md).
 
@@ -95,15 +124,31 @@ Long-running operations (vacuum, optimize, reset, restore, snapshot create, disk
 
 ### Updates poller
 
-A background goroutine in `internal/system/updates/poller.go` starts on backend boot and polls GitHub releases for `kdlbs/kandev` every 6 hours (unauthenticated; well under the 60 req/hr/IP unauth limit). It compares `tag_name` to the running version (semver) and persists the result to `kandev_meta`:
+A background goroutine in `internal/system/updates/poller.go` starts on backend boot and polls the
+selected channel every 6 hours. Stable reads GitHub Releases for `kdlbs/kandev`; Nightly reads the
+public npm `kandev@nightly` dist-tag. It persists isolated channel targets in `kandev_meta`:
 
 - `latest_version TEXT` — highest published semver tag (e.g., `1.2.4`)
 - `latest_version_url TEXT` — URL to that GitHub release
 - `latest_version_checked_at INTEGER` — unix timestamp of last successful poll
+- `latest_version_nightly`, `latest_version_nightly_url`,
+  `latest_version_nightly_checked_at` — equivalent npm Nightly cache keys
 
-The `GET /api/v1/system/updates` handler reads from `kandev_meta` only; it never calls GitHub synchronously. It also reports the current service install state (`running_as_service`, `managed_service`, `mode`, `manager`, `kind`) so the UI can decide whether one-click apply is allowed. `POST /api/v1/system/updates/check` triggers an out-of-band refresh, rate-limited per-process to one call per 30 seconds. If the GitHub call fails (offline, rate limited, 5xx), the handler returns the last-known value and the `latestCheckedAt` exposes the staleness.
+The `GET /api/v1/system/updates` handler reads from `kandev_meta` only; it never contacts an
+upstream synchronously. Its nested `install` object reports the current service install state
+(`running_as_service`, `managed_service`, `mode`, `manager`, `kind`, and `metadata_path`) so the UI
+can decide whether one-click apply is allowed. The response's `channel` is the effective selected
+source for this install. Only a
+verified managed npm/npx user service can persist and expose Nightly; unsupported installs report
+Stable even if an old Nightly preference remains stored, set `channel_editable=false`, and include
+`channel_unsupported_reason`. The PATCH write path repeats the managed-service verification before
+resolving or persisting either channel and returns `409 Conflict` for an unsupported install.
+`channel_unsupported_reason` remains present with an empty string when channel editing is supported.
+`POST /api/v1/system/updates/check` triggers a selected-source refresh, rate-limited
+per-process to one call per 30 seconds. If the GitHub or npm call fails (offline, rate limited,
+5xx), the channel's last-known value remains cached and `latest_checked_at` exposes the staleness.
 
-`POST /api/v1/system/updates/apply` is available only when Kandev is running as a kandev-managed user service (`systemd --user` or launchd user agent) and the latest release is newer than the current binary. It writes an update intent under `<KANDEV_HOME_DIR>/service/update-intents/`, starts a manager-owned helper (`systemd-run --user` on Linux, or a one-shot transient LaunchAgent plist bootstrapped via `launchctl bootstrap` on macOS), and returns a `self-update` system job id. Under `KANDEV_E2E_MOCK=true`, the helper path is fake so UI and backend tests can exercise the flow without mutating npm/Homebrew or restarting the service.
+`POST /api/v1/system/updates/apply` is available only when Kandev is running as a kandev-managed user service (`systemd --user` or launchd user agent) and the selected channel exposes an applicable target. The request includes the exact `target_version` shown to the user. While holding the update-cache lock, the backend rejects a stale target with `409 Conflict`; otherwise it writes that version to an update intent under `<KANDEV_HOME_DIR>/service/update-intents/`, starts a manager-owned helper (`systemd-run --user` on Linux, or a one-shot transient LaunchAgent plist bootstrapped via `launchctl bootstrap` on macOS), and returns a `self-update` system job id. Under `KANDEV_E2E_MOCK=true`, the helper path is fake so UI and backend tests can exercise the flow without mutating npm/Homebrew or restarting the service.
 
 ### Disk-usage cache
 
@@ -141,6 +186,11 @@ The page reads the JSON statically; no backend endpoint is needed.
   Notifications provider/event settings instead of rendering a separate
   update-notification channel control.
 - **GIVEN** the user is running a kandev-managed user service and a newer release exists, **WHEN** they open `/settings/system/updates`, **THEN** the page shows **Apply update** and the confirmation queues a `self-update` job.
+- **GIVEN** the user runs a verified managed npm/npx user service, **WHEN** they select and save
+  Nightly, **THEN** the choice survives reload and update discovery follows `kandev@nightly`.
+- **GIVEN** the install is Desktop, Homebrew, unmanaged, system-service, local, or unknown,
+  **WHEN** Updates renders, **THEN** Stable remains effective and Nightly shows a visible
+  unsupported reason.
 - **GIVEN** a service update is in progress, **WHEN** `/system/info` first reports the requested target version, **THEN** the tab reloads exactly once and renders from the confirmed backend's frontend assets; an older version or temporary outage does not trigger the reload.
 - **GIVEN** the user is not running as a kandev-managed service or is running a `--system` service, **WHEN** they open `/settings/system/updates`, **THEN** the page does not render an update-apply control and instead shows the manual update commands.
 - **GIVEN** the user clicks **VACUUM** on the Database page, **WHEN** the operation completes, **THEN** the DB size delta is shown ("Reclaimed 12.3 MB"), the page Database stats refresh, and a transient info issue appears on the Status page.
@@ -148,20 +198,21 @@ The page reads the JSON statically; no backend endpoint is needed.
 - **GIVEN** the user clicks **Factory Reset**, types `RESET`, and confirms, **WHEN** the backend executes, **THEN** a fresh snapshot is created first, all tables are dropped and migrations re-run, the backend restarts, and the frontend redirects to the empty onboarding state once it reconnects.
 - **GIVEN** the backend cannot reach GitHub, **WHEN** the poller fires, **THEN** the failure is logged but the previous `latest_version` and `latest_version_checked_at` remain in `kandev_meta`; the Updates page surfaces the stale value with a "Last checked <time>" subtitle.
 - **GIVEN** the user clicks **Check now** twice within 30 seconds, **WHEN** the second click fires, **THEN** the endpoint returns `429 Too Many Requests` and the UI shows "Already checked, try again in <N>s".
-- **GIVEN** lumberjack has rotated the current log into `kandev.log.1`, **WHEN** the user opens `/settings/system/logs`, **THEN** the viewer shows the tail of the current `kandev.log` and the rotated files appear in the list with download buttons.
+- **GIVEN** retained backend logs and a connected browser with local console history, **WHEN** the user downloads diagnostics from `/settings/system/logs`, **THEN** one ZIP contains separate backend/frontend directories and a manifest describing both captures.
 - **GIVEN** the user opens `/settings/system/licenses` while offline, **WHEN** the page renders, **THEN** every dependency's license text is available locally (no network calls).
+- **GIVEN** no queue-limit environment variable is set, **WHEN** an admin saves
+  a new limit on `/settings/general/message-queue`, **THEN** later queue
+  admissions use it immediately without deleting existing messages or
+  requiring a restart.
 
 ## Data model
 
-Two new columns on the existing `kandev_meta` table (key/value or pivoted to columns — match the existing schema). One new in-memory cache in the system package. No new SQLite tables.
-
-```
-ALTER TABLE kandev_meta ADD COLUMN latest_version TEXT;
-ALTER TABLE kandev_meta ADD COLUMN latest_version_url TEXT;
-ALTER TABLE kandev_meta ADD COLUMN latest_version_checked_at INTEGER;
-```
-
-(If `kandev_meta` is key/value-shaped, write three rows with these keys instead.)
+The existing key/value `kandev_meta` table stores stable target keys `latest_version`,
+`latest_version_url`, and `latest_version_checked_at`. Nightly uses the isolated keys
+`latest_version_nightly`, `latest_version_nightly_url`, and
+`latest_version_nightly_checked_at`. The install-wide `settings` table contains
+`updates_channel` with value `stable` or `nightly`; missing or invalid values read as Stable.
+No new SQLite table is required.
 
 ## State machine — long-running jobs
 
@@ -176,17 +227,26 @@ Each transition publishes `system.job.update` with `{ jobId, kind, state, messag
 
 ## Permissions
 
-All System endpoints require the same "logged-in install user" check as the existing `/api/v1/settings/*` endpoints — there is no admin tier in v1. Factory reset and restore endpoints additionally validate the `confirm` body field server-side as a defence-in-depth check against accidental fetches.
+System read endpoints use the normal authenticated/synthetic install identity. The existing admin
+guard covers database vacuum/optimize/reset, manual update checks, update-channel changes, and
+update apply. Backup create/restore/delete and disk-usage
+refresh currently remain on the base authenticated group. Reset and restore additionally validate
+their confirmation bodies server-side as defence in depth.
+The Message Queue settings GET is readable by members, while its PATCH is admin-only.
 
 ## Failure modes
 
 - **GitHub poll failure** — log + keep the previous `kandev_meta` row; `/api/v1/system/updates` returns the stale value.
+- **npm Nightly poll failure** — log + keep the previous Nightly cache; malformed or missing
+  `dist-tags.nightly` fails closed and is never offered.
 - **Disk walk failure** (permission error on a subdir) — return the partial result with a `warnings: [...]` array per subdir; the page renders a per-row warning icon.
 - **VACUUM failure** — DB is unaffected (VACUUM is atomic); the job ends `failed` with the SQLite error string. Status page shows a recoverable error issue.
 - **Non-SQLite maintenance call** — `vacuum`, `optimize`, and `reset` jobs fail with `not supported for <driver> driver` before running SQLite-only SQL; factory reset also rejects before stopping active executions.
 - **Factory reset failure mid-run** — the pre-reset snapshot remains in `<data-dir>/backups/`; the user can restore it from the Backups page on next boot. Recovery is documented inline in the failure UI.
 - **Restore failure** — original DB file is left untouched; restore writes to a temp file and atomic-renames only on success.
-- **Log file missing / unreadable** — viewer renders an empty state with the file path so the user can investigate manually.
+- **Log file missing / unreadable** — bundle creation continues with available
+  sources, marks the result partial, and records the missing/unreadable backend
+  source in `manifest.json`.
 
 ## Persistence guarantees
 
@@ -201,9 +261,8 @@ All System endpoints require the same "logged-in install user" check as the exis
 ## Out of scope (v1)
 
 - Live log tail (WS streaming of new lines as they're written).
-- Channel-aware upgrade hints (npm vs homebrew vs binary install path).
-- Admin/role gating of destructive actions; everyone who can sign in can VACUUM/Reset.
-- Importing or analyzing older log files beyond filename listing + download.
+- Importing or analyzing logs outside the diagnostic bundle's retained
+  three-day and byte/profile limits.
 - Inline editing of `kandev_meta` or other system tables.
 - A separate top-level "System" nav entry alongside "Settings" (chose nested-in-Settings instead).
 - Tasks/Cron page (Radarr-equivalent) — kandev's office routines surface already covers this.
@@ -212,7 +271,6 @@ All System endpoints require the same "logged-in install user" check as the exis
 ## Future scope
 
 - Live log tail via WS subscription.
-- Channel-aware update flow (detect install method, surface the right upgrade command, optionally invoke `kandev upgrade` from the UI for binary installs).
 - Selective reset (drop only tasks, only sessions, etc.) — only if users actually need finer-grained recovery than Restore-from-snapshot.
 - Backup scheduling (e.g., daily snapshot) beyond the existing pre-migration trigger.
 - Health-issue → action wiring (e.g., a "VACUUM" CTA inline on the "Database is XYZ MB" health issue).

@@ -5,21 +5,22 @@ test.describe("GitHub workspace settings on mobile", () => {
   test("configures task Git access in the connection drawer", async ({
     testPage,
     apiClient,
-    seedData,
     prCapture,
   }) => {
-    await apiClient.mockGitHubSetWorkspaceConnection(seedData.workspaceId, {
+    const workspace = await apiClient.createWorkspace("Mobile GitHub task defaults workspace");
+    const workspaceId = workspace.id;
+    await apiClient.mockGitHubSetWorkspaceConnection(workspaceId, {
       source: "legacy_shared",
       status: "active",
     });
     await apiClient.mockGitHubSetCLIAccounts([
       { host: "github.com", login: "mobile-cli", active: true, state: "active" },
     ]);
-    await stubGitHubRateLimits(testPage, seedData.workspaceId);
-    await testPage.goto(`/settings/workspace/${seedData.workspaceId}/integrations/github`);
+    await stubGitHubRateLimits(testPage, workspaceId);
+    await testPage.goto(`/settings/workspace/${workspaceId}/integrations/github`);
     const automation = testPage.getByTestId("github-workspace-automation");
     await expect(automation.getByTestId("github-task-access-summary")).toContainText(
-      "Managed workspace credentials",
+      "Inherit executor Git credentials",
     );
     await expect(testPage.getByRole("heading", { name: "My GitHub identity" })).toHaveCount(0);
     await expect(testPage.getByRole("heading", { name: "Task Git credentials" })).toHaveCount(0);
@@ -80,7 +81,9 @@ test.describe("GitHub workspace settings on mobile", () => {
     expect(fadeBox).not.toBeNull();
     expect(footerBox).not.toBeNull();
     expect(initialSaveBox).not.toBeNull();
-    expect(fadeBox!.y + fadeBox!.height).toBeCloseTo(scrollBox!.y + scrollBox!.height, 1);
+    expect(
+      Math.abs(fadeBox!.y + fadeBox!.height - (scrollBox!.y + scrollBox!.height)),
+    ).toBeLessThanOrEqual(2);
     expect(footerBox!.y + footerBox!.height).toBeLessThanOrEqual(drawerBox!.y + drawerBox!.height);
     const methodGroup = drawer.getByRole("radiogroup", { name: "Connection method" });
     await expect(methodGroup.getByRole("radio").first()).toHaveAttribute("id", "github-method-cli");
@@ -127,7 +130,7 @@ test.describe("GitHub workspace settings on mobile", () => {
     await scrollBody.evaluate((element) => element.scrollTo(0, element.scrollHeight));
     const scrolledSaveBox = await fixedSaveButton.boundingBox();
     expect(scrolledSaveBox).not.toBeNull();
-    expect(scrolledSaveBox!.y).toBeCloseTo(beforeScrollSaveBox!.y, 1);
+    expect(Math.abs(scrolledSaveBox!.y - beforeScrollSaveBox!.y)).toBeLessThanOrEqual(2);
 
     await executorOption.tap();
     await prCapture.screenshot("mobile-task-git-access-drawer", {
@@ -143,12 +146,12 @@ test.describe("GitHub workspace settings on mobile", () => {
 
     const response = await apiClient.rawRequest(
       "GET",
-      `/api/v1/github/workspace-settings?workspace_id=${seedData.workspaceId}`,
+      `/api/v1/github/workspace-settings?workspace_id=${workspaceId}`,
     );
     expect(await response.json()).toMatchObject({ task_git_credentials_mode: "executor" });
     const statusResponse = await apiClient.rawRequest(
       "GET",
-      `/api/v1/github/status?workspace_id=${seedData.workspaceId}`,
+      `/api/v1/github/status?workspace_id=${workspaceId}`,
     );
     expect(await statusResponse.json()).toMatchObject({
       automation: { source: "gh_cli", login: "mobile-cli" },

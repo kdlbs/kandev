@@ -12,6 +12,10 @@ import (
 func TestEnqueueACPUpdateSnapshotsPromptGenerationBeforeWorkerConversion(t *testing.T) {
 	a := newTestAdapter()
 	a.agentID = claudeAgentID
+	// Foreground-idle delivery is gated on the negotiated prompt-queueing
+	// advertisement, which Initialize normally derives; these tests drive
+	// handleACPUpdate directly, so set it explicitly.
+	a.promptQueueing = true
 	t.Cleanup(func() { _ = a.Close() })
 
 	var notification sdk.SessionNotification
@@ -61,6 +65,10 @@ func TestEnqueueACPUpdateSnapshotsPromptGenerationBeforeWorkerConversion(t *test
 func TestHandleACPUpdate_HumanOriginDeliversLeadingContextWindowThenForegroundIdle(t *testing.T) {
 	a := newTestAdapter()
 	a.agentID = claudeAgentID
+	// Foreground-idle delivery is gated on the negotiated prompt-queueing
+	// advertisement, which Initialize normally derives; these tests drive
+	// handleACPUpdate directly, so set it explicitly.
+	a.promptQueueing = true
 	t.Cleanup(func() { _ = a.Close() })
 
 	var notification sdk.SessionNotification

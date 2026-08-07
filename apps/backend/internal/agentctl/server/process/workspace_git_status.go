@@ -3,12 +3,14 @@ package process
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/kandev/kandev/internal/agentctl/types"
+	"github.com/kandev/kandev/internal/common/subproc"
 	"go.uber.org/zap"
 )
 
@@ -23,15 +25,22 @@ var safeBranchRefPattern = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._/-]*$`)
 
 // updateGitStatus updates the git status. Callers must coordinate access
 // via updateMu — use tryUpdateGitStatus for polling loops, RefreshGitStatus
-// for user-triggered operations.
-func (wt *WorkspaceTracker) updateGitStatus(ctx context.Context) {
-	status, err := wt.getGitStatus(ctx)
+// for user-triggered operations. Returns whether a new status was computed
+// and published; false on a getGitStatus failure or a context already
+// cancelled, so callers that must not lose the event they're reacting to
+// (see tryUpdateGitStatus) know a retry is needed.
+func (wt *WorkspaceTracker) updateGitStatus(ctx context.Context) bool {
+	return wt.updateGitStatusClass(ctx, gitWorkClass(ctx))
+}
+
+func (wt *WorkspaceTracker) updateGitStatusClass(ctx context.Context, class subproc.GitWorkClass) bool {
+	status, err := wt.getGitStatusClass(ctx, class)
 	if err != nil {
 		wt.logger.Warn("updateGitStatus: getGitStatus failed", zap.Error(err))
-		return
+		return false
 	}
 	if ctx.Err() != nil || wt.cancelCtx.Err() != nil {
-		return
+		return false
 	}
 
 	wt.mu.Lock()
@@ -40,17 +49,23 @@ func (wt *WorkspaceTracker) updateGitStatus(ctx context.Context) {
 
 	// Notify workspace stream subscribers
 	wt.notifyWorkspaceStreamGitStatus(status)
+	return true
 }
 
 // tryUpdateGitStatus attempts a non-blocking git status update. If another
 // update is already in progress (from the other polling loop or an explicit
-// refresh), the call is skipped — the running update will produce the same result.
-func (wt *WorkspaceTracker) tryUpdateGitStatus(ctx context.Context) {
+// refresh), the call is skipped — the running update will produce the same
+// result. Returns whether it actually published a new status: false either
+// because it was skipped (lock contention) or because updateGitStatus itself
+// failed. Callers reacting to a specific change (e.g. an upstream ref move)
+// must check this before treating that change as observed — see
+// handleUpstreamOnlyChange in workspace_git_poll.go.
+func (wt *WorkspaceTracker) tryUpdateGitStatus(ctx context.Context) bool {
 	if !wt.updateMu.TryLock() {
-		return
+		return false
 	}
 	defer wt.updateMu.Unlock()
-	wt.updateGitStatus(ctx)
+	return wt.updateGitStatusClass(ctx, subproc.GitBackground)
 }
 
 // RefreshGitStatus forces a git status refresh and notifies subscribers.
@@ -59,7 +74,7 @@ func (wt *WorkspaceTracker) tryUpdateGitStatus(ctx context.Context) {
 func (wt *WorkspaceTracker) RefreshGitStatus(ctx context.Context) {
 	wt.updateMu.Lock()
 	defer wt.updateMu.Unlock()
-	wt.updateGitStatus(ctx)
+	wt.updateGitStatusClass(ctx, subproc.GitInteractive)
 }
 
 // GetCurrentGitStatus returns the current cached git status. If no status has
@@ -75,7 +90,7 @@ func (wt *WorkspaceTracker) GetCurrentGitStatus(ctx context.Context) (types.GitS
 // fresh=true.
 func (wt *WorkspaceTracker) GetGitStatus(ctx context.Context, fresh bool) (types.GitStatusUpdate, error) {
 	if fresh {
-		return wt.getGitStatus(ctx)
+		return wt.getGitStatusClass(ctx, subproc.GitInteractive)
 	}
 
 	wt.mu.RLock()
@@ -83,7 +98,7 @@ func (wt *WorkspaceTracker) GetGitStatus(ctx context.Context, fresh bool) (types
 	wt.mu.RUnlock()
 
 	if status.Timestamp.IsZero() {
-		return wt.getGitStatus(ctx)
+		return wt.getGitStatusClass(ctx, subproc.GitInteractive)
 	}
 
 	return status, nil
@@ -93,11 +108,19 @@ func (wt *WorkspaceTracker) GetGitStatus(ctx context.Context, fresh bool) (types
 // computation is owned by the tracker rather than the first caller, while each
 // waiter can still return promptly when its own context is canceled.
 func (wt *WorkspaceTracker) getGitStatus(ctx context.Context) (types.GitStatusUpdate, error) {
+	return wt.getGitStatusClass(ctx, gitWorkClass(ctx))
+}
+
+func (wt *WorkspaceTracker) getGitStatusClass(ctx context.Context, class subproc.GitWorkClass) (types.GitStatusUpdate, error) {
 	if err := ctx.Err(); err != nil {
 		return types.GitStatusUpdate{}, err
 	}
 
-	resultCh := wt.gitStatusGroup.DoChan("live", func() (interface{}, error) {
+	// Observations are coalesced only within the same admission class. A
+	// background poll already in flight must not capture a fresh interactive
+	// request and make its Git commands run on the background queue.
+	key := "live:" + string(class)
+	resultCh := wt.gitStatusGroup.DoChan(key, func() (interface{}, error) {
 		sharedCtx, finish, err := wt.beginGitStatusObservation()
 		if err != nil {
 			return types.GitStatusUpdate{}, err
@@ -108,7 +131,7 @@ func (wt *WorkspaceTracker) getGitStatus(ctx context.Context) (types.GitStatusUp
 		if observer == nil {
 			observer = wt.computeGitStatus
 		}
-		status, err := observer(sharedCtx)
+		status, err := observer(withGitWorkClass(sharedCtx, class))
 		if err != nil {
 			return types.GitStatusUpdate{}, err
 		}
@@ -179,6 +202,7 @@ func (wt *WorkspaceTracker) computeGitStatus(ctx context.Context) (types.GitStat
 	update := types.GitStatusUpdate{
 		Timestamp:      time.Now(),
 		RepositoryName: wt.repositoryName,
+		IsSubmodule:    wt.IsSubmodule(),
 		Modified:       []string{},
 		Added:          []string{},
 		Deleted:        []string{},
@@ -212,6 +236,11 @@ func (wt *WorkspaceTracker) computeGitStatus(ctx context.Context) (types.GitStat
 	}
 
 	wt.getAheadBehindCounts(ctx, &update, prior)
+	if err := ctx.Err(); err != nil {
+		return update, err
+	}
+
+	wt.getRemoteAheadBehindCounts(ctx, &update, prior)
 	if err := ctx.Err(); err != nil {
 		return update, err
 	}
@@ -253,7 +282,9 @@ func (wt *WorkspaceTracker) getGitBranchInfo(ctx context.Context, update *types.
 	}
 	update.Branch = strings.TrimSpace(string(branchOut))
 
-	// Get remote branch
+	// Get remote branch. A non-nil error here is the normal, expected case
+	// for a branch with no upstream yet (not logged — this fires on every
+	// poll of every unpushed branch).
 	if remoteOut, err := wt.runGitOutput(ctx, "rev-parse", "--abbrev-ref", "@{upstream}"); err == nil {
 		update.RemoteBranch = strings.TrimSpace(string(remoteOut))
 	}
@@ -292,6 +323,16 @@ func (wt *WorkspaceTracker) getGitBranchInfo(ctx context.Context, update *types.
 // baseBranch is treated as user-controlled and re-sanitised here so static
 // analysis sees the regex barrier inline with the `git` invocation.
 func (wt *WorkspaceTracker) computeBaseCommit(ctx context.Context, baseBranch string) string {
+	if wt.IsSubmodule() {
+		if !sha1HexPattern.MatchString(baseBranch) {
+			return ""
+		}
+		out, err := wt.runGitOutput(ctx, "rev-parse", "--verify", baseBranch+"^{commit}")
+		if err != nil {
+			return ""
+		}
+		return strings.TrimSpace(string(out))
+	}
 	// Same inline regex barrier as resolveStoredRef so CodeQL's
 	// taint-tracker sees it co-located with the `git` subprocess call.
 	rest, hasOriginPrefix := strings.CutPrefix(baseBranch, "origin/")
@@ -393,6 +434,37 @@ func (wt *WorkspaceTracker) getAheadBehindCounts(ctx context.Context, update *ty
 	update.Behind, _ = strconv.Atoi(parts[1])
 }
 
+// getRemoteAheadBehindCounts populates RemoteAhead/RemoteBehind relative to
+// this branch's own upstream (@{upstream}) — the counts push-detection needs
+// to tell "has this branch been pushed" apart from Ahead/Behind, which are
+// deliberately base-branch-relative (see getAheadBehindCounts) and never
+// reach zero just because a push happened. Left at 0/0 when RemoteBranch is
+// empty (no upstream configured yet — nothing to compare against).
+//
+// Same carry-forward-on-failure treatment as getAheadBehindCounts: a
+// transient rev-list failure keeps the prior counts instead of flashing 0/0
+// (which would look like "just pushed" to a push-detection consumer).
+func (wt *WorkspaceTracker) getRemoteAheadBehindCounts(ctx context.Context, update *types.GitStatusUpdate, prior types.GitStatusUpdate) {
+	if update.RemoteBranch == "" {
+		update.RemoteAhead = 0
+		update.RemoteBehind = 0
+		return
+	}
+	countOut, err := wt.runGitOutput(ctx, "rev-list", "--left-right", "--count", "HEAD..."+update.RemoteBranch)
+	if err != nil {
+		wt.logger.Debug("getRemoteAheadBehindCounts: rev-list failed, carrying forward", zap.Error(err))
+		carryRemoteAheadBehind(update, prior)
+		return
+	}
+	parts := strings.Fields(string(countOut))
+	if len(parts) != 2 {
+		carryRemoteAheadBehind(update, prior)
+		return
+	}
+	update.RemoteAhead, _ = strconv.Atoi(parts[0])
+	update.RemoteBehind, _ = strconv.Atoi(parts[1])
+}
+
 // branchDiffCandidates is the integration-branch priority list used when the
 // task has no recorded base_branch (legacy tasks / external branches). Kept
 // in sync between base-commit and ahead/behind resolution.
@@ -419,17 +491,102 @@ var aheadBehindFallbackCandidates = integrationBranchRefs(false)
 // stats/commits mismatch even though both sides are computing correctly
 // for the ref name they happened to resolve first.
 func (wt *WorkspaceTracker) resolveBaseBranch(ctx context.Context) string {
-	if stored := wt.BaseBranch(); stored != "" {
-		if ref := wt.resolveStoredRef(ctx, stored); ref != "" {
-			return ref
+	resolution := wt.resolveBaseBranchWithReason(ctx)
+	resolution.log(wt)
+	return resolution.ref
+}
+
+// baseBranchReason records why resolveBaseBranch landed on the ref it did.
+// The two fallback reasons have different fixes — one means the task's base
+// branch never reached this tracker, the other means it did but no longer
+// exists in git — so a wrong diff stat must be attributable to one of them
+// without re-deriving the resolution by hand.
+type baseBranchReason int
+
+const (
+	baseBranchStored baseBranchReason = iota
+	baseBranchFallbackNoStored
+	baseBranchFallbackStoredUnresolved
+	baseBranchUnresolved
+)
+
+// baseBranchResolution is resolveBaseBranch's decision plus the evidence
+// needed to explain it.
+type baseBranchResolution struct {
+	ref    string
+	stored string
+	reason baseBranchReason
+}
+
+// log reports a fallback resolution once per change. The stored case is the
+// norm and stays silent.
+//
+// Two constraints shape this. resolveBaseBranch runs on every status poll — as
+// often as every couple of seconds, per repository — so logging unconditionally
+// would bury the signal in its own repetition; only a *changed* outcome is
+// reported. And a recorded base branch that does not resolve is an anomaly the
+// operator needs to see without turning on debug logging, so it warns, while a
+// task that simply has no recorded base is ordinary and stays at debug.
+func (r baseBranchResolution) log(wt *WorkspaceTracker) {
+	key := strconv.Itoa(int(r.reason)) + "|" + r.stored + "|" + r.ref
+	wt.baseBranchLogMu.Lock()
+	repeat := wt.lastBaseBranchLog == key
+	wt.lastBaseBranchLog = key
+	wt.baseBranchLogMu.Unlock()
+	if repeat || r.reason == baseBranchStored {
+		return
+	}
+	repository := wt.repositoryName
+	if repository == "" && wt.workDir != "" {
+		repository = filepath.Base(filepath.Clean(wt.workDir))
+	}
+
+	switch r.reason {
+	case baseBranchFallbackNoStored:
+		wt.logger.Debug("no base branch recorded for workspace, using integration fallback for diff stats",
+			zap.String("repository", repository),
+			zap.String("candidate", r.ref))
+	case baseBranchFallbackStoredUnresolved:
+		wt.logger.Warn("recorded base branch does not resolve in git, diff stats fall back to an integration branch",
+			zap.String("repository", repository),
+			zap.String("stored_base_branch", r.stored),
+			zap.String("candidate", r.ref))
+	case baseBranchUnresolved:
+		wt.logger.Warn("no base branch or integration candidate resolved, diff stats unavailable",
+			zap.String("repository", repository),
+			zap.String("stored_base_branch", r.stored))
+	case baseBranchStored:
+	}
+}
+
+// resolveBaseBranchWithReason is resolveBaseBranch's decision, separated so the
+// outcome is assertable in tests rather than only observable through logs.
+func (wt *WorkspaceTracker) resolveBaseBranchWithReason(ctx context.Context) baseBranchResolution {
+	stored := wt.BaseBranch()
+	if wt.IsSubmodule() {
+		anchor := wt.ComparisonAnchor()
+		if anchor != "" {
+			if ref := wt.resolveStoredRef(ctx, anchor); ref != "" {
+				return baseBranchResolution{ref: ref, stored: anchor, reason: baseBranchStored}
+			}
 		}
+		return baseBranchResolution{stored: anchor, reason: baseBranchUnresolved}
+	}
+	if stored != "" {
+		if ref := wt.resolveStoredRef(ctx, stored); ref != "" {
+			return baseBranchResolution{ref: ref, stored: stored, reason: baseBranchStored}
+		}
+	}
+	fallbackReason := baseBranchFallbackNoStored
+	if stored != "" {
+		fallbackReason = baseBranchFallbackStoredUnresolved
 	}
 	for _, candidate := range branchDiffCandidates {
 		if err := wt.runGit(ctx, "rev-parse", "--verify", candidate); err == nil {
-			return candidate
+			return baseBranchResolution{ref: candidate, stored: stored, reason: fallbackReason}
 		}
 	}
-	return ""
+	return baseBranchResolution{stored: stored, reason: baseBranchUnresolved}
 }
 
 // resolveAheadBehindRef is the ahead/behind variant of resolveBaseBranch.
@@ -437,6 +594,9 @@ func (wt *WorkspaceTracker) resolveBaseBranch(ctx context.Context) string {
 // aheadBehindFallbackCandidates list — local main/master are excluded
 // because they can show stale, in-progress work for divergence counts.
 func (wt *WorkspaceTracker) resolveAheadBehindRef(ctx context.Context) string {
+	if wt.IsSubmodule() {
+		return wt.resolveBaseBranch(ctx)
+	}
 	if stored := wt.BaseBranch(); stored != "" {
 		if ref := wt.resolveStoredRef(ctx, stored); ref != "" {
 			return ref
@@ -503,12 +663,27 @@ func carryAheadBehind(update *types.GitStatusUpdate, prior types.GitStatusUpdate
 	update.Behind = prior.Behind
 }
 
+// carryRemoteAheadBehind mirrors carryAheadBehind for RemoteAhead/RemoteBehind.
+func carryRemoteAheadBehind(update *types.GitStatusUpdate, prior types.GitStatusUpdate) {
+	if prior.HeadCommit == "" || prior.HeadCommit != update.HeadCommit {
+		return
+	}
+	update.RemoteAhead = prior.RemoteAhead
+	update.RemoteBehind = prior.RemoteBehind
+}
+
 // parseGitStatusOutput runs git status --porcelain and populates the file lists and map.
 func (wt *WorkspaceTracker) parseGitStatusOutput(ctx context.Context, update *types.GitStatusUpdate) error {
-	// --untracked-files=all shows all files in untracked directories, not just the directory name.
-	// GIT_OPTIONAL_LOCKS=0 (via runPollingGitOutput) prevents the background poll loop from
-	// taking .git/index.lock, which would race with concurrent user-initiated git operations.
-	statusOut, err := wt.runPollingGitOutput(ctx, "status", "--porcelain", "--untracked-files=all")
+	// --untracked-files=all shows all files in untracked directories, not just
+	// the directory name. GIT_OPTIONAL_LOCKS=0 prevents the status read from
+	// taking .git/index.lock, while the carried observation class keeps fresh
+	// user requests interactive.
+	statusOut, err := wt.runGitOutputClass(
+		ctx,
+		gitWorkClass(ctx),
+		true,
+		"status", "--porcelain", "--untracked-files=all",
+	)
 	if err != nil {
 		return err
 	}

@@ -68,7 +68,20 @@ const (
 	// operator-facing composer and status indicator can distinguish
 	// "generating" from "waiting on spawned background work".
 	TaskSessionActivityChanged = "task_session.activity_changed"
+	// TaskSessionCancellationChanged fires when a cancellation request starts
+	// or the last overlapping request finishes for a session.
+	TaskSessionCancellationChanged = "task_session.cancellation_changed"
+	// TaskSessionErrorChanged is emitted when a recoverable agent error is
+	// created, replaced, or dismissed. It is a bounded status source; the
+	// error message itself is projected into the task summary rather than
+	// streamed to task-list subscribers.
+	TaskSessionErrorChanged = "task_session.error_changed"
 )
+
+// TaskStatusSummaryUpdated is a complete replacement projection for one
+// task. Consumers should subscribe to this event instead of session streams
+// when they only need sidebar/task-switcher status.
+const TaskStatusSummaryUpdated = "task.status_summary.updated"
 
 // Event types for task plans
 const (
@@ -107,6 +120,12 @@ const (
 	RepositoryDeleted = "repository.deleted"
 )
 
+// Event types emitted by Azure DevOps watcher polling.
+const (
+	AzureDevOpsWorkItemWatchMatch    = "azure_devops.work_item_watch.match"
+	AzureDevOpsPullRequestWatchMatch = "azure_devops.pull_request_watch.match"
+)
+
 // Event types for repository scripts
 const (
 	RepositoryScriptCreated = "repository.script.created"
@@ -138,6 +157,14 @@ const (
 const (
 	UserSettingsUpdated = "user.settings.updated"
 )
+
+// PluginUserStateUpdated fires after a successful write/delete on a
+// plugin's per-user storage route (/api/plugins/:id/user-state/...). The
+// event payload carries only keys (pluginId/scope/scopeId/key/writerId),
+// never the stored value — see
+// docs/decisions/2026-08-01-per-user-plugin-storage.md. Routed to the
+// writing user's own WS connections only, via UserEventBroadcaster.
+const PluginUserStateUpdated = "plugin.user-state.updated"
 
 // Event types for system maintenance jobs (VACUUM, factory reset, snapshot
 // create/restore, disk walk). Published by internal/system/jobs.Tracker on
@@ -261,6 +288,7 @@ const (
 	GitHubNewReviewPR          = "github.new_pr_to_review"        // New PR found needing review
 	GitHubNewIssue             = "github.new_issue"               // New issue found matching issue watch
 	GitHubTaskPRUpdated        = "github.task_pr.updated"         // TaskPR record updated (for UI refresh)
+	GitHubTaskPRDeleted        = "github.task_pr.deleted"         // TaskPR association detached (for UI refresh)
 	GitHubTaskCIOptionsUpdated = "github.task_ci_options.updated" // Task CI automation options updated
 	GitHubWatchEvent           = "github.watch.event"             // Watch created/deleted
 	GitHubRateLimitUpdated     = "github.rate_limit.updated"      // GitHub API rate-limit snapshot changed
@@ -276,6 +304,10 @@ const (
 	GitLabNewIssue       = "gitlab.new_issue"        // New issue found matching issue watch
 	GitLabTaskMRUpdated  = "gitlab.task_mr.updated"  // TaskMR record updated (for UI refresh)
 	GitLabWatchEvent     = "gitlab.watch.event"      // Watch created/deleted
+
+	// GitLabTaskMROptionsUpdated fires after a task's MR lifecycle
+	// notification switches change (HTTP PATCH or MCP tool call).
+	GitLabTaskMROptionsUpdated = "gitlab.task_mr_options.updated"
 )
 
 // Event types for Jira integration

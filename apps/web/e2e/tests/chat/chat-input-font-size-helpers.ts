@@ -23,6 +23,7 @@ export async function openTaskChat(page: Page, taskId: string): Promise<SessionP
   const session = new SessionPage(page);
   await session.waitForLoad();
   await session.waitForChatIdle({ timeout: 30_000 });
+  await session.composerReady();
   return session;
 }
 

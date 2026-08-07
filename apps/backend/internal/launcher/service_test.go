@@ -460,7 +460,7 @@ func TestServiceNodeToolBinDirsResolvesFnmMultishellSymlinks(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("service PATH rendering is POSIX-only")
 	}
-	tmp := t.TempDir()
+	tmp := canonicalTempDir(t)
 	stableBin := filepath.Join(tmp, "home", "alice", ".local", "share", "fnm", "node-versions", "v25.2.1", "installation", "bin")
 	multishellBin := filepath.Join(tmp, "run", "user", "1000", "fnm_multishells", "12345_67890", "bin")
 	for _, dir := range []string{stableBin, multishellBin} {
@@ -521,4 +521,15 @@ func TestBackupUnmanagedServiceFileSkipsManagedFile(t *testing.T) {
 	if _, err := os.Stat(path + ".bak"); !os.IsNotExist(err) {
 		t.Fatalf("managed file should not create backup, stat err=%v", err)
 	}
+}
+
+// canonicalTempDir returns t.TempDir() with symlinks resolved so tests agree
+// with production code that reports canonical paths (macOS /var -> /private/var).
+func canonicalTempDir(t *testing.T) string {
+	t.Helper()
+	resolved, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return resolved
 }

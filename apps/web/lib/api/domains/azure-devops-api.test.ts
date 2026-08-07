@@ -6,17 +6,25 @@ vi.mock("@/lib/config", () => ({
 
 import {
   associateAzureDevOpsPullRequest,
+  associateAzureDevOpsWorkItem,
   copyAzureDevOpsConfig,
   deleteAzureDevOpsConfig,
   getAzureDevOpsConfig,
+  getAzureDevOpsWorkspaceSettings,
   getAzureDevOpsPullRequestFeedback,
   listAzureDevOpsProjects,
   listAzureDevOpsBranches,
+  listAzureDevOpsTeams,
+  listAzureDevOpsBoards,
+  getAzureDevOpsBoardSnapshot,
+  updateAzureDevOpsBoardWorkItem,
   listAzureDevOpsPullRequests,
   listAzureDevOpsRepositories,
   listWorkspaceAzureDevOpsTaskPullRequests,
+  listWorkspaceAzureDevOpsTaskWorkItems,
   searchAzureDevOpsWorkItems,
   setAzureDevOpsConfig,
+  updateAzureDevOpsWorkspaceSettings,
   syncAzureDevOpsTaskPullRequest,
   testAzureDevOpsConnection,
 } from "./azure-devops-api";
@@ -88,7 +96,53 @@ describe("Azure DevOps config API", () => {
   });
 });
 
+describe("Azure DevOps workspace settings API", () => {
+  it("reads and patches workspace-scoped query and action presets", async () => {
+    fetchSpy.mockImplementation(async () => jsonResponse({ workspaceId: "ws-1" }));
+    await getAzureDevOpsWorkspaceSettings("ws / one");
+    expect(lastCall().url).toBe(`${BASE}/workspace-settings?workspace_id=ws+%2F+one`);
+
+    const payload = { workItemActions: [] };
+    await updateAzureDevOpsWorkspaceSettings("ws-1", payload);
+    expect(lastCall()).toMatchObject({
+      url: `${BASE}/workspace-settings?workspace_id=ws-1`,
+      init: { method: "PATCH", body: JSON.stringify(payload) },
+    });
+  });
+});
+
 describe("Azure DevOps read API", () => {
+  it("reads team boards and updates a board work item with workspace scope", async () => {
+    fetchSpy.mockResolvedValue(jsonResponse({ teams: [] }));
+    await listAzureDevOpsTeams("ws-1", "project / one");
+    expect(lastCall().url).toBe(`${BASE}/teams?project=project+%2F+one&workspace_id=ws-1`);
+
+    fetchSpy.mockResolvedValue(jsonResponse({ boards: [] }));
+    await listAzureDevOpsBoards("ws-1", "project-1", "team/one");
+    expect(lastCall().url).toBe(
+      `${BASE}/boards?project=project-1&team=team%2Fone&workspace_id=ws-1`,
+    );
+
+    fetchSpy.mockResolvedValue(jsonResponse({ board: {}, items: [] }));
+    await getAzureDevOpsBoardSnapshot("ws-1", "project-1", "team-1", "board/1");
+    expect(lastCall().url).toBe(
+      `${BASE}/boards/board%2F1?project=project-1&team=team-1&workspace_id=ws-1`,
+    );
+
+    fetchSpy.mockResolvedValue(jsonResponse({ id: 101 }));
+    await updateAzureDevOpsBoardWorkItem("ws-1", "project-1", "team-1", "board-1", 101, {
+      revision: 7,
+      assigneeAction: "assign_current_user",
+    });
+    expect(lastCall()).toMatchObject({
+      url: `${BASE}/boards/board-1/work-items/101?project=project-1&team=team-1&workspace_id=ws-1`,
+      init: {
+        method: "PATCH",
+        body: JSON.stringify({ revision: 7, assigneeAction: "assign_current_user" }),
+      },
+    });
+  });
+
   it("encodes project and repository filters with workspace scope", async () => {
     fetchSpy.mockResolvedValueOnce(jsonResponse({ projects: [] }));
     await listAzureDevOpsProjects("ws-1");
@@ -179,5 +233,21 @@ describe("Azure DevOps task pull request API", () => {
 
     await syncAzureDevOpsTaskPullRequest("ws-1", "task/1", payload);
     expect(lastCall().url).toBe(`${BASE}/tasks/task%2F1/pull-requests/sync?workspace_id=ws-1`);
+  });
+});
+
+describe("Azure DevOps task work-item API", () => {
+  it("lists and associates work items with explicit workspace scope", async () => {
+    fetchSpy.mockImplementation(async () => jsonResponse({ taskWorkItems: {} }));
+
+    await listWorkspaceAzureDevOpsTaskWorkItems("ws / one");
+    expect(lastCall().url).toBe(`${BASE}/workspaces/ws%20%2F%20one/task-work-items`);
+
+    const payload = { projectId: "project-1", workItemId: 42 };
+    await associateAzureDevOpsWorkItem("ws-1", "task/1", payload);
+    expect(lastCall()).toMatchObject({
+      url: `${BASE}/tasks/task%2F1/work-items?workspace_id=ws-1`,
+      init: { method: "POST", body: JSON.stringify(payload) },
+    });
   });
 });

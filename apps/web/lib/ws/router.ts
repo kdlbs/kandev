@@ -13,7 +13,7 @@ import { registerSessionTodosHandlers } from "@/lib/ws/handlers/session-todos";
 import { registerPromptUsageHandlers } from "@/lib/ws/handlers/prompt-usage";
 import { registerWorkflowsHandlers } from "@/lib/ws/handlers/workflows";
 
-import { registerMessagesHandlers } from "@/lib/ws/handlers/messages";
+import { createMessagesHandlerRegistration } from "@/lib/ws/handlers/messages";
 import { registerNotificationsHandlers } from "@/lib/ws/handlers/notifications";
 import { registerDiffsHandlers } from "@/lib/ws/handlers/diffs";
 import { registerExecutorsHandlers } from "@/lib/ws/handlers/executors";
@@ -37,7 +37,8 @@ import { registerOfficeHandlers } from "@/lib/ws/handlers/office";
 import { registerRunHandlers } from "@/lib/ws/handlers/run";
 
 export function registerWsHandlers(store: StoreApi<AppState>) {
-  return {
+  const messages = createMessagesHandlerRegistration(store);
+  const handlers = {
     ...registerKanbanHandlers(store),
     ...registerTasksHandlers(store),
     ...registerTaskPlansHandlers(store),
@@ -63,15 +64,16 @@ export function registerWsHandlers(store: StoreApi<AppState>) {
     ...registerUsersHandlers(store),
     ...registerTerminalsHandlers(store),
     ...registerDiffsHandlers(store),
-    ...registerMessagesHandlers(store),
+    ...messages.handlers,
     ...registerNotificationsHandlers(store),
     ...registerSecretsHandlers(store),
     ...registerGitStatusHandlers(store),
     ...registerSystemEventsHandlers(store),
-    ...registerTurnsHandlers(store),
+    ...registerTurnsHandlers(store, messages.scheduler),
     ...registerGitHubHandlers(store),
     ...registerGitLabHandlers(store),
     ...registerOfficeHandlers(store),
     ...registerRunHandlers(),
   };
+  return { handlers, dispose: messages.dispose };
 }

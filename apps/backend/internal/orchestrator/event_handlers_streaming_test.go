@@ -357,6 +357,7 @@ func TestUpdateTaskSessionState_EnabledClaudePublishesSettledBackground(t *testi
 	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
 	enableClaudeBackgroundPromptHandoffForTest(t, svc)
 	setSessionAgentNameForTest(t, svc, "session-state-claude", "claude-acp")
+	advertisePromptQueueingForTest(t, svc, "session-state-claude")
 	svc.eventBus = eb
 	svc.registerBackgroundTask("session-state-claude", "background-1")
 	svc.markForegroundIdle("session-state-claude")
@@ -1068,6 +1069,75 @@ func TestToolCallFromCompletedExecutionDoesNotCreateMessage(t *testing.T) {
 		"stale completed-execution tool calls must be dropped before message side effects")
 }
 
+type blockingToolCallMessageCreator struct {
+	mockMessageCreator
+	entered chan struct{}
+	release chan struct{}
+}
+
+func (m *blockingToolCallMessageCreator) CreateToolCallMessage(
+	context.Context,
+	string, string, string, string, string, string, string, *streams.NormalizedPayload,
+) error {
+	close(m.entered)
+	<-m.release
+	m.toolCallWrites++
+	return nil
+}
+
+func TestAgentStreamEventWaitsForCancellationGuard(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "")
+
+	creator := &blockingToolCallMessageCreator{
+		entered: make(chan struct{}),
+		release: make(chan struct{}),
+	}
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	svc.messageCreator = creator
+
+	lock, releaseGuard := svc.acquireCancelInFlightGuard("s1")
+	lock.Lock()
+
+	eventDone := make(chan struct{})
+	go func() {
+		svc.handleAgentStreamEvent(ctx, &lifecycle.AgentStreamEventPayload{
+			TaskID:      "t1",
+			SessionID:   "s1",
+			ExecutionID: "exec-1",
+			Data: &lifecycle.AgentStreamEventData{
+				Type:       agentEventToolCall,
+				ToolCallID: "tool-1",
+				ToolStatus: "running",
+			},
+		})
+		close(eventDone)
+	}()
+
+	select {
+	case <-creator.entered:
+		t.Fatal("stream side effect bypassed the cancellation guard")
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	lock.Unlock()
+	releaseGuard()
+
+	select {
+	case <-creator.entered:
+	case <-time.After(time.Second):
+		t.Fatal("stream handler did not proceed after cancellation guard release")
+	}
+	close(creator.release)
+	select {
+	case <-eventDone:
+	case <-time.After(time.Second):
+		t.Fatal("stream handler did not finish")
+	}
+	require.Equal(t, 1, creator.toolCallWrites)
+}
+
 func TestToolCallStreamFromCompletedExecutionDoesNotSaveAgentText(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
@@ -1258,7 +1328,7 @@ func TestCompleteStreamFromCompletedExecutionSkipsDuplicateOfficeTeardown(t *tes
 func TestCompleteStreamFromCompletedExecutionSkipsDuplicateAutomationFinalize(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
-	seedRunModeAutomationSession(t, repo, "t-auto-terminal", "s-auto-terminal", "exec-auto-terminal")
+	seedAutomationRunSession(t, repo, "t-auto-terminal", "s-auto-terminal", "exec-auto-terminal")
 
 	taskRepo := newMockTaskRepo()
 	mgr := &mockAgentManager{}
@@ -2030,6 +2100,97 @@ func TestSetSessionStartingCanDeferTaskInProgress(t *testing.T) {
 	require.Empty(t, taskRepo.stateWrites)
 }
 
+// recordingTaskUpdatedPublisher captures task.updated publishes so tests can
+// assert the interrupted-marker clear republishes the task.
+type recordingTaskUpdatedPublisher struct {
+	updatedTaskIDs []string
+}
+
+func (r *recordingTaskUpdatedPublisher) PublishTaskUpdated(_ context.Context, task *models.Task, _ ...string) {
+	if task != nil {
+		r.updatedTaskIDs = append(r.updatedTaskIDs, task.ID)
+	}
+}
+func (r *recordingTaskUpdatedPublisher) PublishTaskStateChanged(context.Context, *models.Task, v1.TaskState) {
+}
+func (r *recordingTaskUpdatedPublisher) PublishTaskActivityIfChanged(context.Context, string) {}
+
+func seedInterruptedMarker(t *testing.T, repo *sqliterepo.Repository, taskID string) {
+	t.Helper()
+	if err := repo.SetTaskMetadataKey(context.Background(), taskID, models.MetaKeyInterruptedAt, time.Now().UTC().Format(time.RFC3339)); err != nil {
+		t.Fatalf("seed interrupted marker: %v", err)
+	}
+}
+
+func TestSessionStartClearsInterruptedMarker(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("state hook transition to STARTING clears and republishes", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		seedSession(t, repo, "t1", "s1", "step1")
+		seedInterruptedMarker(t, repo, "t1")
+
+		publisher := &recordingTaskUpdatedPublisher{}
+		svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+		svc.SetTaskEventPublisher(publisher)
+
+		updated, changed := svc.updateTaskSessionStateWithHook(
+			ctx, "t1", "s1", models.TaskSessionStateStarting, "", false, nil,
+		)
+		require.NotNil(t, updated)
+		require.True(t, changed)
+
+		task, err := repo.GetTask(ctx, "t1")
+		require.NoError(t, err)
+		_, marked := task.Metadata[models.MetaKeyInterruptedAt]
+		require.False(t, marked, "marker must be cleared when the session enters STARTING")
+		require.Equal(t, []string{"t1"}, publisher.updatedTaskIDs,
+			"task.updated must be republished after clearing the marker")
+	})
+
+	t.Run("launch path via setSessionStarting clears and republishes", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		seedSession(t, repo, "t1", "s1", "step1")
+		seedInterruptedMarker(t, repo, "t1")
+
+		session, err := repo.GetTaskSession(ctx, "s1")
+		require.NoError(t, err)
+		session.State = models.TaskSessionStateStarting
+		session.ErrorMessage = ""
+		session.UpdatedAt = time.Now().UTC()
+
+		publisher := &recordingTaskUpdatedPublisher{}
+		svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+		svc.SetTaskEventPublisher(publisher)
+
+		require.NoError(t, svc.setSessionStarting(ctx, "t1", session, models.TaskSessionStateRunning, true))
+
+		task, err := repo.GetTask(ctx, "t1")
+		require.NoError(t, err)
+		_, marked := task.Metadata[models.MetaKeyInterruptedAt]
+		require.False(t, marked, "marker must be cleared on the launch path")
+		require.Equal(t, []string{"t1"}, publisher.updatedTaskIDs,
+			"task.updated must be republished after clearing the marker")
+	})
+
+	t.Run("no marker means no republish", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		seedSession(t, repo, "t1", "s1", "step1")
+
+		publisher := &recordingTaskUpdatedPublisher{}
+		svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+		svc.SetTaskEventPublisher(publisher)
+
+		updated, changed := svc.updateTaskSessionStateWithHook(
+			ctx, "t1", "s1", models.TaskSessionStateStarting, "", false, nil,
+		)
+		require.NotNil(t, updated)
+		require.True(t, changed)
+		require.Empty(t, publisher.updatedTaskIDs,
+			"no task.updated may be published when no marker was removed")
+	})
+}
+
 func TestSetSessionStartingRejectsTerminalSession(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
@@ -2259,7 +2420,9 @@ func TestHandleCompleteStreamEvent_NaturalOfficeCompleteStillIdle(t *testing.T) 
 		"natural office turn completion must still call StopAgent to tear down the executor")
 }
 
-func seedRunModeAutomationSession(
+// Automation tasks are ordinary, non-ephemeral tasks tagged by origin — the
+// task/run execution mode is withdrawn, so nothing here sets IsEphemeral.
+func seedAutomationRunSession(
 	t *testing.T,
 	repo *sqliterepo.Repository,
 	taskID, sessionID, executionID string,
@@ -2279,13 +2442,9 @@ func seedRunModeAutomationSession(
 		Title:       "Automation run",
 		Description: "run this",
 		State:       v1.TaskStateInProgress,
-		IsEphemeral: true,
 		Origin:      models.TaskOriginAutomationRun,
-		Metadata: map[string]interface{}{
-			"execution_mode": string(automation.ExecutionModeRun),
-		},
-		CreatedAt: now,
-		UpdatedAt: now,
+		CreatedAt:   now,
+		UpdatedAt:   now,
 	}))
 	require.NoError(t, repo.CreateTaskSession(ctx, &models.TaskSession{
 		ID:        sessionID,
@@ -2297,10 +2456,10 @@ func seedRunModeAutomationSession(
 	seedExecutorRunning(t, repo, sessionID, taskID, executionID)
 }
 
-func TestHandleCompleteStreamEvent_RunModeAutomationStopsAndFinalizes(t *testing.T) {
+func TestHandleCompleteStreamEvent_AutomationRunStopsAndFinalizes(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
-	seedRunModeAutomationSession(t, repo, "t-auto-run", "s-auto-run", "exec-auto-run")
+	seedAutomationRunSession(t, repo, "t-auto-run", "s-auto-run", "exec-auto-run")
 
 	mgr := &mockAgentManager{}
 	automationSvc := &mockAutomationRunService{}
@@ -2325,7 +2484,9 @@ func TestHandleCompleteStreamEvent_RunModeAutomationStopsAndFinalizes(t *testing
 	require.Empty(t, automationSvc.failedTaskIDs)
 	gotSession, err := repo.GetTaskSession(ctx, "s-auto-run")
 	require.NoError(t, err)
-	require.Equal(t, models.TaskSessionStateCompleted, gotSession.State)
+	// Not COMPLETED: that state refuses resume, which would make a finished
+	// report unanswerable. Success lives on the AutomationRun row instead.
+	require.Equal(t, models.TaskSessionStateWaitingForInput, gotSession.State)
 
 	mgr.mu.Lock()
 	stopCalls := append([]stopAgentCall(nil), mgr.stopAgentArgs...)
@@ -2333,7 +2494,7 @@ func TestHandleCompleteStreamEvent_RunModeAutomationStopsAndFinalizes(t *testing
 	require.Equal(t, []stopAgentCall{{ExecutionID: "exec-auto-run"}}, stopCalls)
 }
 
-func TestHandleCompleteStreamEvent_RunModeAutomationFailureStopsAndFinalizes(t *testing.T) {
+func TestHandleCompleteStreamEvent_AutomationRunFailureStopsAndFinalizes(t *testing.T) {
 	cases := []struct {
 		name        string
 		data        map[string]interface{}
@@ -2375,7 +2536,7 @@ func TestHandleCompleteStreamEvent_RunModeAutomationFailureStopsAndFinalizes(t *
 			taskID := "t-auto-" + tc.name
 			sessionID := "s-auto-" + tc.name
 			executionID := "exec-auto-" + tc.name
-			seedRunModeAutomationSession(t, repo, taskID, sessionID, executionID)
+			seedAutomationRunSession(t, repo, taskID, sessionID, executionID)
 
 			mgr := &mockAgentManager{}
 			automationSvc := &mockAutomationRunService{}
@@ -2696,6 +2857,53 @@ func TestHandleSessionModelsEventCapturesSettledConfigBaselineOnce(t *testing.T)
 	require.Len(t, eb.events, 2)
 	lastPayload := eb.events[1].event.Data.(lifecycle.SessionModelsEventPayload)
 	require.Equal(t, baseline, lastPayload.ConfigBaseline)
+}
+
+func TestHandleSessionModelsEventCapturesOriginalEffectiveConfigurationOnce(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+	require.NoError(t, repo.SetSessionMetadataKey(ctx, "s1", models.SessionMetaKeyOrigin, models.SessionOriginTaskInitial))
+	svc := &Service{logger: testLogger(), repo: repo, eventBus: &recordingEventBus{}}
+
+	svc.handleSessionModelsEvent(ctx, &lifecycle.AgentStreamEventPayload{
+		TaskID:    "t1",
+		SessionID: "s1",
+		Data: &lifecycle.AgentStreamEventData{
+			CurrentModelID: "gpt-5.6-sol",
+			OriginalConfigCandidate: []streams.ConfigOption{
+				{Type: "select", ID: "reasoning_effort", CurrentValue: "high"},
+				{Type: "toggle", ID: "fast_mode", CurrentValue: "on"},
+			},
+			Data: map[string]any{"original_config_settled": true},
+		},
+	})
+
+	updated, err := repo.GetTaskSession(ctx, "s1")
+	require.NoError(t, err)
+	original, ok := models.LoadOriginalSessionEffectiveConfiguration(updated.Metadata)
+	require.True(t, ok)
+	require.Equal(t, "gpt-5.6-sol", original.Model)
+	require.Equal(t, map[string]string{"reasoning_effort": "high"}, original.ConfigOptions)
+
+	svc.handleSessionModelsEvent(ctx, &lifecycle.AgentStreamEventPayload{
+		TaskID:    "t1",
+		SessionID: "s1",
+		Data: &lifecycle.AgentStreamEventData{
+			CurrentModelID: "gpt-5.6-luna",
+			OriginalConfigCandidate: []streams.ConfigOption{
+				{ID: "reasoning_effort", CurrentValue: "low"},
+			},
+			Data: map[string]any{"original_config_settled": true},
+		},
+	})
+
+	updated, err = repo.GetTaskSession(ctx, "s1")
+	require.NoError(t, err)
+	original, ok = models.LoadOriginalSessionEffectiveConfiguration(updated.Metadata)
+	require.True(t, ok)
+	require.Equal(t, "gpt-5.6-sol", original.Model)
+	require.Equal(t, map[string]string{"reasoning_effort": "high"}, original.ConfigOptions)
 }
 
 func TestHandleSessionModelsEventStoresBaselineCandidateAndPublishesLiveState(t *testing.T) {

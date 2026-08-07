@@ -1,14 +1,19 @@
 package loginpty
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
+	"io"
 	"net/http"
 	"net/url"
 	"os"
 	"os/exec"
+	"runtime"
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	gorillaws "github.com/gorilla/websocket"
 	"go.uber.org/zap"
 
@@ -22,12 +27,23 @@ type LoginCommandLookup interface {
 	Get(id string) (agents.Agent, bool)
 }
 
+// ErrNoHostShellDescriptor is the sentinel a HostShellSessionBinder returns
+// when the client_id has no durable descriptor to bind. It is not fatal: the
+// host shell PTY still starts and streams, there is simply nothing persistent
+// to reconcile against.
+var ErrNoHostShellDescriptor = errors.New("no host shell descriptor for client")
+
+type HostShellSessionBinder interface {
+	BindHostShellSession(ctx context.Context, tabID, sessionID string) error
+}
+
 // Handlers wraps the manager + agent registry to expose HTTP/WS endpoints.
 type Handlers struct {
-	mgr      *Manager
-	registry *registry.Registry
-	logger   *zap.Logger
-	upgrader gorillaws.Upgrader
+	mgr             *Manager
+	registry        *registry.Registry
+	logger          *zap.Logger
+	upgrader        gorillaws.Upgrader
+	hostShellBinder HostShellSessionBinder
 }
 
 // NewHandlers constructs Handlers. If checkOrigin is nil, the upgrader uses
@@ -49,6 +65,10 @@ func NewHandlers(mgr *Manager, reg *registry.Registry, log *zap.Logger, checkOri
 		logger:   log,
 		upgrader: up,
 	}
+}
+
+func (h *Handlers) SetHostShellSessionBinder(binder HostShellSessionBinder) {
+	h.hostShellBinder = binder
 }
 
 // defaultCheckOrigin mirrors the policy used by the existing terminal
@@ -104,43 +124,118 @@ func (h *Handlers) RegisterRoutes(r *gin.Engine) {
 
 // hostShellAgentID is the synthetic key the session manager uses for host
 // shell sessions so they don't collide with agent login sessions.
-const hostShellAgentID = "_host_shell"
+const HostShellAgentID = "_host_shell"
 
-// httpStartHostShell spawns the user's $SHELL (or /bin/bash, then /bin/sh)
-// under a PTY. Returns the standard session snapshot — the client uses the
-// same stop/resize/stream endpoints.
+const hostShellAgentID = HostShellAgentID
+
+// httpStartHostShell spawns the user's interactive shell under a PTY. Returns
+// the standard session snapshot — the client uses the same
+// stop/resize/stream endpoints.
 func (h *Handlers) httpStartHostShell(c *gin.Context) {
 	var req startRequest
-	_ = c.ShouldBindJSON(&req)
+	if err := c.ShouldBindJSON(&req); err != nil && !errors.Is(err, io.EOF) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+		return
+	}
 
-	shell := detectShell()
-	sess, err := h.mgr.Start(hostShellAgentID, []string{shell}, req.Cols, req.Rows)
-	if err != nil && err != ErrSessionAlreadyRunning {
+	managerKey := hostShellAgentID
+	tabID := ""
+	if len(req.ClientID) > 0 {
+		var clientID string
+		if err := json.Unmarshal(req.ClientID, &clientID); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "client_id must be a UUID"})
+			return
+		}
+		parsedClientID, err := uuid.Parse(clientID)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "client_id must be a UUID"})
+			return
+		}
+		tabID = parsedClientID.String()
+		managerKey += ":" + tabID
+	}
+
+	shell, shellArgs := detectShell()
+	command := append([]string{shell}, shellArgs...)
+	sess, err := h.mgr.StartWithKey(managerKey, hostShellAgentID, command, req.Cols, req.Rows)
+	reused := errors.Is(err, ErrSessionAlreadyRunning)
+	if err != nil && !reused {
 		h.logger.Warn("host shell start failed", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
+	if tabID != "" && h.hostShellBinder != nil {
+		if handled := h.bindHostShellSession(c, tabID, sess, reused); handled {
+			return
+		}
+	}
 	c.JSON(http.StatusOK, sess.Status())
 }
 
-// detectShell picks a sensible interactive shell, preferring $SHELL.
-func detectShell() string {
-	if s := os.Getenv("SHELL"); s != "" {
-		if _, err := exec.LookPath(s); err == nil {
-			return s
+// bindHostShellSession reconciles a started host-shell PTY with its durable
+// descriptor. It returns true when it has already written an error response, so
+// the caller must stop processing.
+//
+// A missing descriptor (ErrNoHostShellDescriptor) is not fatal: the PTY is a
+// generic host shell keyed by client_id and callers may attach without ever
+// persisting a Quick Terminal tab, so the session keeps running. Any other bind
+// error is a 500; a freshly created session is stopped to avoid leaking it,
+// while a reused session belongs to an existing attachment and must survive.
+func (h *Handlers) bindHostShellSession(c *gin.Context, tabID string, sess *Session, reused bool) bool {
+	bindErr := h.hostShellBinder.BindHostShellSession(c.Request.Context(), tabID, sess.ID)
+	if bindErr == nil {
+		return false
+	}
+	if errors.Is(bindErr, ErrNoHostShellDescriptor) {
+		h.logger.Debug("host shell started without durable descriptor", zap.String("tab_id", tabID))
+		return false
+	}
+	if !reused {
+		sess.stop()
+	}
+	h.logger.Warn("host shell bind failed", zap.String("tab_id", tabID), zap.Error(bindErr))
+	c.JSON(http.StatusInternalServerError, gin.H{"error": bindErr.Error()})
+	return true
+}
+
+// detectShell picks a sensible interactive shell, preferring $SHELL on Unix
+// and PowerShell on Windows. The returned arguments are part of the shell
+// command because PowerShell needs flags to remain an interactive PTY shell.
+func detectShell() (string, []string) {
+	return detectShellForOS(runtime.GOOS, os.Getenv, func(candidate string) bool {
+		_, err := exec.LookPath(candidate)
+		return err == nil
+	})
+}
+
+func detectShellForOS(goos string, getenv func(string) string, exists func(string) bool) (string, []string) {
+	if goos == "windows" {
+		for _, candidate := range []string{"pwsh.exe", "powershell.exe"} {
+			if exists(candidate) {
+				return candidate, []string{"-NoLogo", "-NoExit"}
+			}
 		}
+		if comspec := strings.TrimSpace(getenv("COMSPEC")); comspec != "" {
+			return comspec, nil
+		}
+		return "cmd.exe", nil
+	}
+
+	if shell := strings.TrimSpace(getenv("SHELL")); shell != "" && exists(shell) {
+		return shell, nil
 	}
 	for _, candidate := range []string{"/bin/bash", "/bin/zsh", "/bin/sh"} {
-		if _, err := os.Stat(candidate); err == nil {
-			return candidate
+		if exists(candidate) {
+			return candidate, nil
 		}
 	}
-	return "/bin/sh"
+	return "/bin/sh", nil
 }
 
 type startRequest struct {
-	Cols uint16 `json:"cols"`
-	Rows uint16 `json:"rows"`
+	Cols     uint16          `json:"cols"`
+	Rows     uint16          `json:"rows"`
+	ClientID json.RawMessage `json:"client_id"`
 }
 
 func (h *Handlers) httpStart(c *gin.Context) {

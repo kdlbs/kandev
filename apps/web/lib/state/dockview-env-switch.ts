@@ -25,6 +25,10 @@ import {
 } from "./layout-manager";
 import { resolveResponsiveRightWidth } from "./layout-manager/right-width";
 import type { LayoutState, LayoutGroupIds } from "./layout-manager";
+import {
+  restoreDefaultActiveViews,
+  restoreSavedActiveViews,
+} from "./dockview-env-switch-active-views";
 import { ENV_SCOPED_DOCKVIEW_COMPONENTS } from "./dockview-env-scoped-components";
 import { createDebugLogger, isDebug } from "@/lib/debug/log";
 import {
@@ -76,60 +80,6 @@ function savedLayoutHasEphemeralPanels(serialized: SerializedDockview): boolean 
   return Object.values(panels).some((p) => EPHEMERAL_COMPONENTS.has(p.contentComponent ?? ""));
 }
 
-/** Walk the serialized grid tree collecting (groupId, activeView) for each leaf. */
-function collectSavedActiveViews(
-  saved: SerializedDockview,
-): Array<{ groupId: string; activeView: string }> {
-  const out: Array<{ groupId: string; activeView: string }> = [];
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const walk = (node: any): void => {
-    if (!node) return;
-    if (Array.isArray(node.data)) {
-      for (const child of node.data) walk(child);
-      return;
-    }
-    const data = node.data;
-    if (data?.id && data.activeView) out.push({ groupId: data.id, activeView: data.activeView });
-  };
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  walk((saved as any).grid?.root);
-  return out;
-}
-
-/**
- * Restore each group's `activeView` from the saved layout. The fast path
- * doesn't call `fromJSON`, so per-group active tabs would otherwise carry
- * over from the outgoing env (e.g. Task B left "changes" focused in the
- * right group, and switching back to Task A would still show "changes"
- * even though Task A had "plan" active when it was last saved).
- *
- * The saved `activeGroup` is applied last so the resulting global focus
- * matches what was persisted.
- */
-function restoreSavedActiveViews(api: DockviewApi, saved: SerializedDockview): void {
-  const entries = collectSavedActiveViews(saved);
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const savedActiveGroup = (saved as any).activeGroup as string | undefined;
-  const ordered = savedActiveGroup
-    ? [
-        ...entries.filter((e) => e.groupId !== savedActiveGroup),
-        ...entries.filter((e) => e.groupId === savedActiveGroup),
-      ]
-    : entries;
-  for (const { groupId, activeView } of ordered) {
-    const group = api.groups.find((g) => g.id === groupId);
-    if (!group) continue;
-    const panel = group.panels.find((p) => p.id === activeView);
-    if (panel) {
-      try {
-        panel.api.setActive();
-      } catch {
-        /* panel may be in a transient state */
-      }
-    }
-  }
-}
-
 export type EnvSwitchParams = {
   api: DockviewApi;
   oldEnvId: string | null;
@@ -140,8 +90,11 @@ export type EnvSwitchParams = {
   currentSessionIds?: string[];
   safeWidth: number;
   safeHeight: number;
-  buildDefault: (api: DockviewApi) => void;
+  /** Build the effective default, optionally honoring a route layout intent. */
+  buildDefault: (api: DockviewApi, intentName?: string) => void;
   getDefaultLayout: () => LayoutState;
+  /** Explicit layout from the task route, such as `?layout=plan`. */
+  initialLayout?: string | null;
 };
 
 /** Close non-session env-scoped panels before the new env's panels are restored. */
@@ -367,7 +320,16 @@ function tryFastEnvSwitch(params: EnvSwitchParams): LayoutGroupIds | null {
   // The fast path skips `fromJSON`, so per-group active tabs from the
   // outgoing env would otherwise persist into the incoming env. Reapply
   // them from the saved layout to match what `fromJSON` would have done.
-  if (saved) restoreSavedActiveViews(api, saved as SerializedDockview);
+  if (saved) {
+    restoreSavedActiveViews(api, saved as SerializedDockview, activeSessionId);
+  } else {
+    restoreDefaultActiveViews(
+      api,
+      params.getDefaultLayout(),
+      fromDockviewApi(api),
+      activeSessionId,
+    );
+  }
 
   // Column widths from the outgoing env stay live across the switch because
   // we skipped fromJSON. Apply the target env's widths explicitly:
@@ -544,6 +506,14 @@ function addIncomingSessionPanel(
   });
 }
 
+/** Apply a route layout intent that raced the first environment hydration. */
+function applyInitialRouteLayout(params: EnvSwitchParams): LayoutGroupIds | null {
+  if (params.oldEnvId !== null || !params.initialLayout) return null;
+  params.buildDefault(params.api, params.initialLayout);
+  params.api.layout(params.safeWidth, params.safeHeight);
+  return applyLayoutFixups(params.api);
+}
+
 /**
  * Switch the dockview layout between task environments.
  *
@@ -572,6 +542,14 @@ export function performEnvSwitch(params: EnvSwitchParams): LayoutGroupIds {
       livePanelIdsBefore: api.panels.map((p) => p.id),
     });
   }
+
+  // A task route can render before its session's environment id has hydrated.
+  // In that window onReady applies the explicit route intent (for example,
+  // ?layout=plan) to a temporary global layout. First adoption must replay the
+  // intent instead of restoring the env's saved/default layout over it.
+  // Later env switches intentionally ignore this one-shot route override.
+  const initialRouteLayout = applyInitialRouteLayout(params);
+  if (initialRouteLayout) return initialRouteLayout;
 
   const fastResult = tryFastEnvSwitch(params);
   if (fastResult) {
@@ -612,6 +590,7 @@ export function performEnvSwitch(params: EnvSwitchParams): LayoutGroupIds {
       // useAutoSessionTab will still no-op if the panel was just added here.
       replaceStaleSessionPanels(api, activeSessionId, currentSessionIds);
       if (activeSessionId) restoreMissingSessionPanel(api, activeSessionId);
+      restoreSavedActiveViews(api, saved as SerializedDockview, activeSessionId);
       api.layout(safeWidth, safeHeight);
       if (isDebug()) {
         debug("performEnvSwitch: completed via slow path (fromJSON)", {

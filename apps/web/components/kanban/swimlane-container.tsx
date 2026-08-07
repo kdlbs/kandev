@@ -46,6 +46,8 @@ export type SwimlaneContainerProps = {
   showMaximizeButton?: boolean;
   searchQuery?: string;
   selectedRepositoryIds?: string[];
+  /** Predicate combining every active plugin `registerTaskFilter` selection (AND semantics). */
+  matchesPluginTaskFilters?: (taskId: string) => boolean;
   selectedIds?: Set<string>;
   onToggleSelect?: (taskId: string) => void;
   onSelectRange?: (taskId: string, orderedIds: string[]) => void;
@@ -91,11 +93,13 @@ function renderEmptyState(emptyMessage: string) {
   );
 }
 
-function filterTasks(
+/** Exported for unit testing; not part of the module's public component API. */
+export function filterTasks(
   snapshots: Record<string, { tasks: Task[] }>,
   workflowId: string,
   repoFilter: ReturnType<typeof mapSelectedRepositoryIds>,
   searchQuery?: string,
+  matchesPluginTaskFilters?: (taskId: string) => boolean,
 ): Task[] {
   const snapshot = snapshots[workflowId];
   if (!snapshot) return [];
@@ -108,6 +112,9 @@ function filterTasks(
         t.title.toLowerCase().includes(q) ||
         (t.description && t.description.toLowerCase().includes(q)),
     );
+  }
+  if (matchesPluginTaskFilters) {
+    tasks = tasks.filter((t) => matchesPluginTaskFilters(t.id));
   }
   return tasks;
 }
@@ -241,6 +248,7 @@ function useSwimlaneData(
   workflowFilter: string | null | undefined,
   selectedRepositoryIds: string[],
   searchQuery: string,
+  matchesPluginTaskFilters?: (taskId: string) => boolean,
 ) {
   const snapshots = useAppStore((state) => state.kanbanMulti.snapshots);
   const isLoading = useAppStore((state) => state.kanbanMulti.isLoading);
@@ -268,8 +276,9 @@ function useSwimlaneData(
   }, [workflowFilter, allOrderedWorkflows]);
 
   const getFilteredTasks = useCallback(
-    (wfId: string) => filterTasks(snapshots, wfId, repoFilter, searchQuery),
-    [snapshots, repoFilter, searchQuery],
+    (wfId: string) =>
+      filterTasks(snapshots, wfId, repoFilter, searchQuery, matchesPluginTaskFilters),
+    [snapshots, repoFilter, searchQuery, matchesPluginTaskFilters],
   );
 
   return { snapshots, isLoading, orderedWorkflows, allOrderedWorkflows, getFilteredTasks };
@@ -378,7 +387,12 @@ export function SwimlaneContainer(containerProps: SwimlaneContainerProps) {
   const { isMobile } = useResponsiveBreakpoint();
   const { isCollapsed, toggleCollapse } = useSwimlaneCollapse();
   const { snapshots, isLoading, orderedWorkflows, allOrderedWorkflows, getFilteredTasks } =
-    useSwimlaneData(workflowFilter, selectedRepositoryIds, searchQuery ?? "");
+    useSwimlaneData(
+      workflowFilter,
+      selectedRepositoryIds,
+      searchQuery ?? "",
+      containerProps.matchesPluginTaskFilters,
+    );
   const {
     sensors: workflowSensors,
     canSort: canSortWorkflows,

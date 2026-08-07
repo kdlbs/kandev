@@ -199,6 +199,24 @@ func fixedDelay(ms int) {
 	time.Sleep(time.Duration(ms) * time.Millisecond)
 }
 
+// waitForDelay is the cancellation-aware counterpart used by inline E2E
+// scripts. Real ACP prompts stop producing work when the request context is
+// cancelled; honoring that context keeps the mock fixture suitable for
+// testing acknowledged cancellation instead of forcing every test to wait
+// for an artificial sleep to expire.
+func waitForDelay(ctx context.Context, ms int) {
+	if ctx == nil {
+		fixedDelay(ms)
+		return
+	}
+	timer := time.NewTimer(time.Duration(ms) * time.Millisecond)
+	defer timer.Stop()
+	select {
+	case <-timer.C:
+	case <-ctx.Done():
+	}
+}
+
 // stripKandevSystem removes all <kandev-system>...</kandev-system> blocks from the
 // prompt. Tags can be prepended (backend system context injection) or appended
 // (frontend plan/document context), so we strip all occurrences.

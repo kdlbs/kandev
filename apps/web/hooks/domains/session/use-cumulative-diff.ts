@@ -7,6 +7,9 @@ import type { CumulativeDiff } from "@/lib/state/slices/session-runtime/types";
 const debug = createDebugLogger("review:cumulative");
 
 const cumulativeDiffCache: Record<string, CumulativeDiff | null> = {};
+// Survives invalidateCumulativeDiffCache. Used to restore the shared cache
+// when a terminal-session response means we cannot recompute a fresh diff.
+const lastKnownDiffByEnvKey: Record<string, CumulativeDiff | null> = {};
 const loadingState: Record<string, boolean> = {};
 // Invalidations that arrived while a fetch was in flight. The in-flight
 // request can't be guaranteed to capture the working-tree state it was
@@ -75,6 +78,7 @@ function commitFetchedDiff(
   setDiff: (d: CumulativeDiff | null) => void,
 ) {
   cumulativeDiffCache[envKey] = diff;
+  lastKnownDiffByEnvKey[envKey] = diff;
   setDiff(diff);
   if (isDebug()) {
     debug("fetch.success", {
@@ -88,6 +92,35 @@ function commitFetchedDiff(
   // fresh value. Without this, only the subscriber that "won" the fetch race
   // calls setDiff — others stay stale on the value they had at mount time.
   listeners.forEach((fn) => fn({ envKey, kind: "populated" }));
+}
+
+type CumulativeDiffResponse = {
+  cumulative_diff?: CumulativeDiff | null;
+  ready?: boolean;
+  reason?: string;
+};
+
+// applyCumulativeDiffResponse commits a successful fetch unless the backend
+// reports a permanent terminal-session envelope. On terminal, restore the
+// last known snapshot into the shared cache so later mounts still see it
+// after invalidateCumulativeDiffCache cleared the live entry.
+function applyCumulativeDiffResponse(
+  envKey: string,
+  sessionId: string,
+  response: CumulativeDiffResponse | null | undefined,
+  setDiff: (d: CumulativeDiff | null) => void,
+): void {
+  if (response?.ready === false && response.reason === "session_terminal") {
+    const known = lastKnownDiffByEnvKey[envKey] ?? null;
+    debug("fetch.terminal", { sessionId, envKey, restored: known != null });
+    // Restore into the live cache + notify subscribers without treating the
+    // terminal envelope as a fresh authoritative empty diff.
+    cumulativeDiffCache[envKey] = known;
+    setDiff(known);
+    listeners.forEach((fn) => fn({ envKey, kind: "populated" }));
+    return;
+  }
+  commitFetchedDiff(envKey, sessionId, response?.cumulative_diff ?? null, setDiff);
 }
 
 export function useCumulativeDiff(sessionId: string | null) {
@@ -131,15 +164,14 @@ export function useCumulativeDiff(sessionId: string | null) {
 
     try {
       // Backend routes by session_id, but we cache by envKey
-      const response = await client.request<{ cumulative_diff?: CumulativeDiff }>(
-        "session.cumulative_diff",
-        { session_id: sessionId },
-      );
+      const response = await client.request<CumulativeDiffResponse>("session.cumulative_diff", {
+        session_id: sessionId,
+      });
 
       // Discard if the environment changed while the request was in flight
       if (version !== requestVersionRef.current) return;
 
-      commitFetchedDiff(envKey, sessionId, response?.cumulative_diff ?? null, setDiff);
+      applyCumulativeDiffResponse(envKey, sessionId, response, setDiff);
     } catch (err) {
       if (version !== requestVersionRef.current) return;
       console.error("Failed to fetch cumulative diff:", err);

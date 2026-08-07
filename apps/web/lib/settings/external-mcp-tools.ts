@@ -1,111 +1,155 @@
 // Static catalog of MCP tools exposed by the Kandev backend's external endpoint.
 // Mirrors apps/backend/internal/mcp/server (ModeExternal). Keep in sync when
 // tools are added, removed, or renamed.
+//
+// KNOWN DRIFT: `ModeExternal` registers 32 tools, this lists 29 —
+// `list_repositories_kandev`, `import_workflow_kandev` and one task tool are
+// missing, so the settings page under-advertises the endpoint. See the note in
+// `external-mcp-tools.test.ts`.
+//
+// The `name`s are the protocol identifiers an external agent calls, so they stay
+// literal in every locale. Only the group titles and the human descriptions are
+// copy, and they travel as catalog keys resolved at render — this module is
+// evaluated at import, so a `t()` here would freeze at the boot locale.
 
-export type ExternalMcpTool = { name: string; description: string };
+export type ExternalMcpTool = {
+  name: string;
+  descriptionKey: string;
+  /** Interpolated into `descriptionKey`; wire tokens the user must type verbatim. */
+  descriptionValues?: Record<string, string>;
+};
 
 export type ExternalMcpToolGroup = {
-  title: string;
-  description: string;
+  titleKey: string;
+  descriptionKey: string;
   tools: ExternalMcpTool[];
 };
 
+/** Task-state enum accepted by `update_task_state_kandev`, verbatim wire values. */
+const TASK_STATES = "open, in_progress, complete, blocked, cancelled";
+
+/** Request field on `create_task_kandev`, verbatim wire value. */
+const PARENT_ID_PARAM = "parent_id";
+
 export const EXTERNAL_MCP_TOOL_GROUPS: ExternalMcpToolGroup[] = [
   {
-    title: "Workspaces & Workflows",
-    description: "Discover workspaces and CRUD workflows.",
+    titleKey: "settings:externalMcpGroupWorkspaces",
+    descriptionKey: "settings:externalMcpGroupWorkspacesDescription",
     tools: [
-      { name: "list_workspaces_kandev", description: "List all workspaces." },
-      { name: "list_workflows_kandev", description: "List workflows in a workspace." },
-      { name: "create_workflow_kandev", description: "Create a workflow." },
-      { name: "update_workflow_kandev", description: "Rename or update a workflow." },
-      {
-        name: "delete_workflow_kandev",
-        description: "Delete a workflow and all its steps (destructive).",
-      },
+      { name: "list_workspaces_kandev", descriptionKey: "settings:externalMcpToolListWorkspaces" },
+      { name: "list_workflows_kandev", descriptionKey: "settings:externalMcpToolListWorkflows" },
+      { name: "create_workflow_kandev", descriptionKey: "settings:externalMcpToolCreateWorkflow" },
+      { name: "update_workflow_kandev", descriptionKey: "settings:externalMcpToolUpdateWorkflow" },
+      { name: "delete_workflow_kandev", descriptionKey: "settings:externalMcpToolDeleteWorkflow" },
     ],
   },
   {
-    title: "Workflow steps (columns)",
-    description: "Manage the columns that make up a workflow.",
+    titleKey: "settings:externalMcpGroupWorkflowSteps",
+    descriptionKey: "settings:externalMcpGroupWorkflowStepsDescription",
     tools: [
-      { name: "list_workflow_steps_kandev", description: "List all steps in a workflow." },
+      {
+        name: "list_workflow_steps_kandev",
+        descriptionKey: "settings:externalMcpToolListWorkflowSteps",
+      },
       {
         name: "create_workflow_step_kandev",
-        description: "Add a new column with prompt, color, and event hooks.",
+        descriptionKey: "settings:externalMcpToolCreateWorkflowStep",
       },
-      { name: "update_workflow_step_kandev", description: "Edit a step's settings or events." },
-      { name: "delete_workflow_step_kandev", description: "Delete a step (destructive)." },
+      {
+        name: "update_workflow_step_kandev",
+        descriptionKey: "settings:externalMcpToolUpdateWorkflowStep",
+      },
+      {
+        name: "delete_workflow_step_kandev",
+        descriptionKey: "settings:externalMcpToolDeleteWorkflowStep",
+      },
       {
         name: "reorder_workflow_steps_kandev",
-        description: "Set the full ordered list of step IDs.",
+        descriptionKey: "settings:externalMcpToolReorderWorkflowSteps",
       },
     ],
   },
   {
-    title: "Agents",
-    description: "Inspect and configure the agent catalog.",
+    titleKey: "settings:externalMcpGroupAgents",
+    descriptionKey: "settings:externalMcpGroupAgentsDescription",
     tools: [
-      {
-        name: "list_agents_kandev",
-        description: "List configured agents and their profiles.",
-      },
-      { name: "update_agent_kandev", description: "Toggle MCP support or set the config path." },
+      { name: "list_agents_kandev", descriptionKey: "settings:externalMcpToolListAgents" },
+      { name: "update_agent_kandev", descriptionKey: "settings:externalMcpToolUpdateAgent" },
       {
         name: "create_agent_profile_kandev",
-        description: "Create a new agent profile (model, auto-approve).",
+        descriptionKey: "settings:externalMcpToolCreateAgentProfile",
       },
-      { name: "delete_agent_profile_kandev", description: "Delete an agent profile." },
+      {
+        name: "delete_agent_profile_kandev",
+        descriptionKey: "settings:externalMcpToolDeleteAgentProfile",
+      },
     ],
   },
   {
-    title: "Agent profiles & MCP config",
-    description: "Manage profile-level MCP server configuration.",
+    titleKey: "settings:externalMcpGroupAgentProfiles",
+    descriptionKey: "settings:externalMcpGroupAgentProfilesDescription",
     tools: [
-      { name: "list_agent_profiles_kandev", description: "List profiles for an agent." },
-      { name: "update_agent_profile_kandev", description: "Update name, model, or auto-approve." },
-      { name: "get_mcp_config_kandev", description: "Read the MCP server map for a profile." },
+      {
+        name: "list_agent_profiles_kandev",
+        descriptionKey: "settings:externalMcpToolListAgentProfiles",
+      },
+      {
+        name: "update_agent_profile_kandev",
+        descriptionKey: "settings:externalMcpToolUpdateAgentProfile",
+      },
+      { name: "get_mcp_config_kandev", descriptionKey: "settings:externalMcpToolGetMcpConfig" },
       {
         name: "update_mcp_config_kandev",
-        description: "Replace the MCP server map for a profile.",
+        descriptionKey: "settings:externalMcpToolUpdateMcpConfig",
       },
     ],
   },
   {
-    title: "Executors",
-    description: "CRUD executor profiles (Docker, standalone, Sprites...).",
+    titleKey: "settings:externalMcpGroupExecutors",
+    descriptionKey: "settings:externalMcpGroupExecutorsDescription",
     tools: [
-      { name: "list_executors_kandev", description: "List all executors." },
-      { name: "list_executor_profiles_kandev", description: "List profiles for an executor." },
+      { name: "list_executors_kandev", descriptionKey: "settings:externalMcpToolListExecutors" },
+      {
+        name: "list_executor_profiles_kandev",
+        descriptionKey: "settings:externalMcpToolListExecutorProfiles",
+      },
       {
         name: "create_executor_profile_kandev",
-        description: "Create a profile with config, prepare/cleanup scripts.",
+        descriptionKey: "settings:externalMcpToolCreateExecutorProfile",
       },
-      { name: "update_executor_profile_kandev", description: "Update an executor profile." },
-      { name: "delete_executor_profile_kandev", description: "Delete an executor profile." },
+      {
+        name: "update_executor_profile_kandev",
+        descriptionKey: "settings:externalMcpToolUpdateExecutorProfile",
+      },
+      {
+        name: "delete_executor_profile_kandev",
+        descriptionKey: "settings:externalMcpToolDeleteExecutorProfile",
+      },
     ],
   },
   {
-    title: "Tasks",
-    description: "List, move, archive, and update task state.",
+    titleKey: "settings:externalMcpGroupTasks",
+    descriptionKey: "settings:externalMcpGroupTasksDescription",
     tools: [
-      { name: "list_tasks_kandev", description: "List tasks in a workflow." },
-      { name: "move_task_kandev", description: "Move a task to a different step or position." },
-      { name: "delete_task_kandev", description: "Delete a task permanently." },
-      { name: "archive_task_kandev", description: "Archive a task." },
+      { name: "list_tasks_kandev", descriptionKey: "settings:externalMcpToolListTasks" },
+      { name: "move_task_kandev", descriptionKey: "settings:externalMcpToolMoveTask" },
+      { name: "delete_task_kandev", descriptionKey: "settings:externalMcpToolDeleteTask" },
+      { name: "archive_task_kandev", descriptionKey: "settings:externalMcpToolArchiveTask" },
       {
         name: "update_task_state_kandev",
-        description: "Set task state: open, in_progress, complete, blocked, cancelled.",
+        descriptionKey: "settings:externalMcpToolUpdateTaskState",
+        descriptionValues: { states: TASK_STATES },
       },
     ],
   },
   {
-    title: "Task creation",
-    description: "Spawn new top-level tasks or subtasks from external agents.",
+    titleKey: "settings:externalMcpGroupTaskCreation",
+    descriptionKey: "settings:externalMcpGroupTaskCreationDescription",
     tools: [
       {
         name: "create_task_kandev",
-        description: "Create a top-level task or a subtask under an explicit parent_id.",
+        descriptionKey: "settings:externalMcpToolCreateTask",
+        descriptionValues: { parentIdParam: PARENT_ID_PARAM },
       },
     ],
   },

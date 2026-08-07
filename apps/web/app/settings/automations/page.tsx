@@ -1,12 +1,14 @@
 "use client";
 
 import { useEffect } from "react";
+import { useTranslation } from "react-i18next";
 
 import Link from "@/components/routing/app-link";
 import { useAppStore } from "@/components/state-provider";
 import { useRouter } from "@/lib/routing/client-router";
 
 export default function AutomationsTopLevelPage() {
+  const { t } = useTranslation();
   const router = useRouter();
   const workspaces = useAppStore((s) => s.workspaces.items);
 
@@ -24,15 +26,15 @@ export default function AutomationsTopLevelPage() {
   if (workspaces.length === 0) {
     return (
       <div className="rounded-lg border border-dashed p-8 text-center">
-        <p className="text-sm font-medium">No workspaces yet</p>
+        <p className="text-sm font-medium">{t("automations:noWorkspacesYet")}</p>
         <p className="mt-1 text-xs text-muted-foreground">
-          Create a workspace first, then schedule automations inside it.
+          {t("automations:noWorkspacesDescription")}
         </p>
         <Link
           href="/settings/workspace"
           className="mt-4 inline-block rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90 cursor-pointer"
         >
-          Create workspace
+          {t("automations:createWorkspace")}
         </Link>
       </div>
     );
@@ -41,8 +43,8 @@ export default function AutomationsTopLevelPage() {
   return (
     <div className="space-y-4">
       <div>
-        <h2 className="text-lg font-semibold">Automations</h2>
-        <p className="text-sm text-muted-foreground">Pick a workspace to manage its automations.</p>
+        <h2 className="text-lg font-semibold">{t("common:automations")}</h2>
+        <p className="text-sm text-muted-foreground">{t("automations:pickWorkspace")}</p>
       </div>
       <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
         {workspaces.map((ws) => (

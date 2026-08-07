@@ -66,6 +66,7 @@ export type ChatInputToolbarProps = {
 function MinimalToolbar({
   isAgentBusy,
   canCancelAgent,
+  sessionId,
   hasContent,
   isDisabled,
   submitDisabledReason,
@@ -77,6 +78,7 @@ function MinimalToolbar({
   ChatInputToolbarProps,
   | "isAgentBusy"
   | "canCancelAgent"
+  | "sessionId"
   | "hasContent"
   | "isDisabled"
   | "submitDisabledReason"
@@ -91,6 +93,7 @@ function MinimalToolbar({
       <SubmitButton
         isAgentBusy={isAgentBusy}
         canCancelAgent={canCancelAgent}
+        sessionId={sessionId}
         hasContent={hasContent ?? false}
         isDisabled={isDisabled}
         submitDisabledReason={submitDisabledReason}
@@ -129,6 +132,7 @@ export const ChatInputToolbar = memo(function ChatInputToolbar(rawProps: ChatInp
       <MinimalToolbar
         isAgentBusy={props.isAgentBusy}
         canCancelAgent={props.canCancelAgent}
+        sessionId={props.sessionId}
         hasContent={props.hasContent}
         isDisabled={props.isDisabled}
         submitDisabledReason={props.submitDisabledReason}

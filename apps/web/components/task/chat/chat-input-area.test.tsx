@@ -230,3 +230,44 @@ describe("useSubmitHandler", () => {
     expect(markCommentsSent).toHaveBeenCalledWith(["comment-1"]);
   });
 });
+
+describe("context file send retention", () => {
+  it("keeps ephemeral context files when sending fails", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const clearEphemeral = vi.fn();
+    handleSendMessageMock.mockRejectedValueOnce(new Error("send failed"));
+    const { result } = renderHook(() =>
+      useSubmitHandler(
+        panelState({
+          contextFiles: [{ path: "src", name: "src", isDirectory: true }],
+          clearEphemeral,
+        }),
+      ),
+    );
+
+    await act(async () => {
+      await result.current.handleSubmit({ message: "hello" });
+    });
+
+    expect(clearEphemeral).not.toHaveBeenCalled();
+  });
+
+  it("clears ephemeral context files after a successful send", async () => {
+    const clearEphemeral = vi.fn();
+    handleSendMessageMock.mockResolvedValueOnce(undefined);
+    const { result } = renderHook(() =>
+      useSubmitHandler(
+        panelState({
+          contextFiles: [{ path: "src", name: "src", isDirectory: true }],
+          clearEphemeral,
+        }),
+      ),
+    );
+
+    await act(async () => {
+      await result.current.handleSubmit({ message: "hello" });
+    });
+
+    expect(clearEphemeral).toHaveBeenCalledWith("session-1");
+  });
+});

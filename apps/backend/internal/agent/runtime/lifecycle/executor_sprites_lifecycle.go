@@ -209,7 +209,7 @@ func (r *SpritesExecutor) resolveTokenFromMetadata(ctx context.Context, instance
 	if secretID == "" {
 		return ""
 	}
-	revealed, err := r.secretStore.Reveal(ctx, secretID)
+	revealed, err := revealGlobalSecret(ctx, r.secretStore, secretID)
 	if err != nil || revealed == "" {
 		return ""
 	}

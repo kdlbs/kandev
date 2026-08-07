@@ -25,6 +25,7 @@ import {
 import { type ChatInputToolbarProps } from "./chat-input-toolbar";
 import type { ContextFile } from "@/lib/state/context-files-store";
 import type { SHORTCUTS } from "@/lib/keyboard/constants";
+import { useTranslation } from "react-i18next";
 
 type ToolbarItemConfig = {
   id: string;
@@ -48,6 +49,7 @@ type DesktopToolbarProps = ChatInputToolbarProps & {
 };
 
 function ToolbarExpandToggle(props: { isExpanded: boolean; onToggle: () => void }) {
+  const { t } = useTranslation();
   return (
     <Tooltip>
       <TooltipTrigger asChild>
@@ -55,7 +57,7 @@ function ToolbarExpandToggle(props: { isExpanded: boolean; onToggle: () => void 
           type="button"
           variant="ghost"
           size="icon"
-          aria-label={props.isExpanded ? "Collapse toolbar" : "More toolbar actions"}
+          aria-label={props.isExpanded ? t("task:collapseToolbar") : t("task:moreToolbarActions")}
           aria-expanded={props.isExpanded}
           className="h-7 w-7 cursor-pointer hover:bg-muted/40"
           data-testid="toolbar-overflow-menu"
@@ -68,7 +70,9 @@ function ToolbarExpandToggle(props: { isExpanded: boolean; onToggle: () => void 
           )}
         </Button>
       </TooltipTrigger>
-      <TooltipContent>{props.isExpanded ? "Collapse" : "More actions"}</TooltipContent>
+      <TooltipContent>
+        {props.isExpanded ? t("task:collapse") : t("task:moreActions")}
+      </TooltipContent>
     </Tooltip>
   );
 }
@@ -185,6 +189,7 @@ function DesktopRightSection(props: {
         <SubmitButton
           isAgentBusy={props.isAgentBusy}
           canCancelAgent={props.canCancelAgent}
+          sessionId={props.sessionId}
           hasContent={props.hasContent}
           isDisabled={props.isDisabled}
           submitDisabledReason={props.submitDisabledReason}
@@ -200,6 +205,7 @@ function DesktopRightSection(props: {
 }
 
 export function DesktopChatInputToolbar(props: DesktopToolbarProps) {
+  const { t } = useTranslation();
   const toolbarRef = useRef<HTMLDivElement>(null);
   const isCollapsed = useToolbarCollapsed(toolbarRef);
   const [isExpanded, setIsExpanded] = useState(false);
@@ -237,7 +243,7 @@ export function DesktopChatInputToolbar(props: DesktopToolbarProps) {
               size="sm"
               className="h-7 gap-1.5 px-2 cursor-pointer hover:bg-muted/40 relative"
               data-testid="chat-context-button"
-              aria-label="Session context"
+              aria-label={t("task:sessionContext")}
             >
               <IconAt className="h-4 w-4" />
               {props.contextCount > 0 && !isCollapsed && (

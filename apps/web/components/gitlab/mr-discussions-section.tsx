@@ -7,6 +7,7 @@ import { Button } from "@kandev/ui/button";
 import { Textarea } from "@kandev/ui/textarea";
 import type { GitLabMRDiscussion } from "@/lib/types/gitlab";
 import { CollapsibleSection, formatTimeAgo, PRMarkdownBody } from "@/components/github/pr-shared";
+import { useTranslation } from "react-i18next";
 
 function discussionLocation(discussion: GitLabMRDiscussion): string {
   if (!discussion.path) return "";
@@ -51,6 +52,7 @@ function Discussion({
   onAddContext,
   mrUrl,
 }: DiscussionProps) {
+  const { t } = useTranslation();
   const [reply, setReply] = useState("");
   const submitReply = async () => {
     const body = reply.trim();
@@ -72,14 +74,14 @@ function Discussion({
         )}
         {discussion.resolved && (
           <Badge variant="outline" className="ml-auto text-[10px]">
-            Resolved
+            {t("gitlab:resolved")}
           </Badge>
         )}
         <Button
           size="icon-sm"
           variant="ghost"
           className="ml-auto h-9 w-9 shrink-0 cursor-pointer sm:h-7 sm:w-7"
-          aria-label="Add discussion to task context"
+          aria-label={t("gitlab:addDiscussionToTaskContext")}
           onClick={() => onAddContext(buildDiscussionContext(discussion, mrUrl))}
         >
           <IconMessagePlus className="h-3.5 w-3.5" />
@@ -102,8 +104,8 @@ function Discussion({
         <Textarea
           value={reply}
           onChange={(event) => setReply(event.target.value)}
-          placeholder="Reply to this discussion"
-          aria-label="Discussion reply"
+          placeholder={t("gitlab:replyToThisDiscussion")}
+          aria-label={t("gitlab:discussionReply")}
           className="min-h-20 flex-1 resize-y text-sm"
         />
         <div className="flex gap-2">
@@ -115,7 +117,7 @@ function Discussion({
               disabled={busy}
               onClick={() => void onResolve(discussion.id)}
             >
-              <IconCheck className="h-3.5 w-3.5" /> Resolve
+              <IconCheck className="h-3.5 w-3.5" /> {t("gitlab:resolve")}
             </Button>
           )}
           <Button
@@ -124,7 +126,7 @@ function Discussion({
             disabled={busy || !reply.trim()}
             onClick={() => void submitReply()}
           >
-            <IconSend className="h-3.5 w-3.5" /> Reply
+            <IconSend className="h-3.5 w-3.5" /> {t("gitlab:reply")}
           </Button>
         </div>
       </div>
@@ -147,9 +149,10 @@ export function MRDiscussionsSection({
   onResolve: DiscussionProps["onResolve"];
   onAddContext: DiscussionProps["onAddContext"];
 }) {
+  const { t } = useTranslation();
   return (
     <CollapsibleSection
-      title="Discussions"
+      title={t("gitlab:discussions")}
       count={discussions.length}
       defaultOpen
       onAddAll={
@@ -157,10 +160,10 @@ export function MRDiscussionsSection({
           ? () => onAddContext(buildAllDiscussionsContext(discussions, mrUrl))
           : undefined
       }
-      addAllLabel="Add all discussions to task context"
+      addAllLabel={t("gitlab:addAllDiscussionsToTaskContext")}
     >
       {discussions.length === 0 && (
-        <p className="px-2 py-2 text-xs text-muted-foreground">No discussions yet</p>
+        <p className="px-2 py-2 text-xs text-muted-foreground">{t("gitlab:noDiscussionsYet")}</p>
       )}
       {discussions.map((discussion) => (
         <Discussion

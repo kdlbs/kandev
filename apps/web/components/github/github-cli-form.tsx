@@ -5,6 +5,8 @@ import { Label } from "@kandev/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import { fetchGitHubCLIAccounts } from "@/lib/api/domains/github-api";
 import type { GitHubCLIAccount } from "@/lib/types/github";
+import { Trans, useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 
 function GitHubCLIAccountNotice({
   loadError,
@@ -15,25 +17,32 @@ function GitHubCLIAccountNotice({
   loading: boolean;
   hasAccounts: boolean;
 }) {
+  const { t } = useTranslation();
   if (loading || hasAccounts) return null;
   if (loadError) {
     return (
       <p role="alert" className="text-xs text-destructive">
-        Could not load GitHub CLI accounts. {loadError}
+        {t("github:couldNotLoadGithubCliAccounts", { error: loadError })}
       </p>
     );
   }
   return (
     <p className="text-xs text-muted-foreground">
-      Sign in with <code>gh auth login</code>, then reopen this dialog.
+      {/* The command is a value, not copy: writing it into the catalog lets the
+          pseudo-locale transliterate it into something the user cannot type. */}
+      <Trans i18nKey="github:signInWithGhAuthLogin" values={{ command: "gh auth login" }}>
+        Sign in with <code>{"{{command}}"}</code>, then reopen this dialog.
+      </Trans>
     </p>
   );
 }
 
-function accountPlaceholder(loading: boolean, loadError: string | null) {
-  if (loading) return "Loading accounts...";
-  if (loadError) return "Accounts unavailable";
-  return "No gh accounts found";
+// Plain function, so `t` is threaded in rather than taken from the hook. The
+// guard never inspects this shape — `mode: "jsx-only"` only sees JSX literals.
+function accountPlaceholder(t: TFunction, loading: boolean, loadError: string | null) {
+  if (loading) return t("github:loadingAccounts");
+  if (loadError) return t("github:accountsUnavailable");
+  return t("github:noGhAccountsFound");
 }
 
 export function GitHubCLIForm({
@@ -45,6 +54,7 @@ export function GitHubCLIForm({
   onAccountChange: (account: GitHubCLIAccount | null) => void;
   disabled?: boolean;
 }) {
+  const { t } = useTranslation();
   const [accounts, setAccounts] = useState<GitHubCLIAccount[]>([]);
   const [selected, setSelected] = useState("");
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -71,7 +81,7 @@ export function GitHubCLIForm({
         if (!current) return;
         setAccounts([]);
         setLoadError(
-          error instanceof Error ? error.message : "Unexpected response from the server",
+          error instanceof Error ? error.message : t("github:unexpectedResponseFromTheServer"),
         );
       })
       .finally(() => current && setLoading(false));
@@ -92,9 +102,9 @@ export function GitHubCLIForm({
   return (
     <div className="space-y-3">
       <div className="space-y-1">
-        <Label htmlFor="github-cli-account">GitHub CLI account</Label>
+        <Label htmlFor="github-cli-account">{t("github:githubCliAccount")}</Label>
         <p className="text-xs text-muted-foreground">
-          Choose the exact account. Kandev does not silently follow the CLI's active-account change.
+          {t("github:chooseTheExactAccountKandevDoes")}
         </p>
       </div>
       <div className="flex flex-col gap-2 sm:flex-row sm:items-stretch">
@@ -104,12 +114,12 @@ export function GitHubCLIForm({
           disabled={disabled || loading || !accounts.length}
         >
           <SelectTrigger id="github-cli-account" className="min-h-11 min-w-0 flex-1">
-            <SelectValue placeholder={accountPlaceholder(loading, loadError)} />
+            <SelectValue placeholder={accountPlaceholder(t, loading, loadError)} />
           </SelectTrigger>
           <SelectContent>
             {accounts.map((item) => (
               <SelectItem key={`${item.host}:${item.login}`} value={`${item.host}\n${item.login}`}>
-                {item.login} ({item.host}){item.active ? " - active" : ""}
+                {item.login} ({item.host}){item.active ? t("github:cliAccountActiveSuffix") : ""}
               </SelectItem>
             ))}
           </SelectContent>

@@ -1,5 +1,6 @@
 import { test, expect } from "../../fixtures/test-base";
 import {
+  expectCompactionCount,
   expectSourceRightOfTokenCount,
   seedContextWindowTask,
 } from "./context-window-source-helpers";
@@ -14,11 +15,12 @@ test("context source help is reachable by touch without overflow", async ({
   const contextTrigger = testPage.getByRole("button", { name: "Context window: 21% used" });
   await contextTrigger.tap();
   const contextTooltip = testPage
-    .locator('[data-slot="tooltip-content"][data-state]')
+    .locator('[data-slot="tooltip-content"]:not([data-state="closed"])')
     .filter({ has: testPage.getByTestId("context-window-usage") });
   const contextUsage = contextTooltip.getByTestId("context-window-usage").first();
   await expect(contextUsage).toBeVisible();
   await expectSourceRightOfTokenCount(contextTooltip);
+  await expectCompactionCount(contextTooltip);
 
   const sourceHelpButton = contextUsage.locator('button[aria-label="About context window source"]');
   const sourceHelpId = await sourceHelpButton.getAttribute("aria-describedby");
@@ -27,6 +29,18 @@ test("context source help is reachable by touch without overflow", async ({
 
   await expect(contextUsage).toBeVisible();
   await expect(testPage.locator(`[id="${sourceHelpId}"]`)).toHaveCSS("opacity", "1");
+
+  const compactionHelpButton = contextUsage.locator(
+    'button[aria-label="About inferred compaction count"]',
+  );
+  const compactionHelpId = await compactionHelpButton.getAttribute("aria-describedby");
+  if (!compactionHelpId) throw new Error("Expected compaction help to be described");
+  await compactionHelpButton.tap();
+
+  await expect(contextUsage).toBeVisible();
+  await expect(testPage.locator(`[id="${compactionHelpId}"]`)).toHaveCSS("opacity", "1");
+  await compactionHelpButton.tap();
+  await expect(testPage.locator(`[id="${compactionHelpId}"]`)).toHaveCSS("opacity", "0");
   const hasHorizontalOverflow = await testPage.evaluate(() => {
     const root = document.scrollingElement ?? document.documentElement;
     return root.scrollWidth > root.clientWidth + 1;

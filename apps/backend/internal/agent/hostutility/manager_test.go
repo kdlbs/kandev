@@ -242,6 +242,111 @@ func TestStopCancelsInFlightBootstrap(t *testing.T) {
 	}
 }
 
+func TestStartLimitsConcurrentBootstraps(t *testing.T) {
+	log := newTestLogger(t)
+	reg := registry.NewRegistry(log)
+	started := make(chan string, 8)
+	release := make(chan struct{})
+	var active atomic.Int32
+	var peak atomic.Int32
+	var attempted atomic.Int32
+
+	for i := 0; i < maxConcurrentBootstraps+2; i++ {
+		ag := &trackingInferenceAgent{
+			installedInferenceAgent: installedInferenceAgent{id: "tracking-acp-" + strconv.Itoa(i)},
+			started:                 started,
+			release:                 release,
+			active:                  &active,
+			peak:                    &peak,
+			attempted:               &attempted,
+		}
+		require.NoError(t, reg.Register(ag))
+	}
+
+	mgr := NewManager(reg, "127.0.0.1", 1, nil, log)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { done <- mgr.Start(ctx) }()
+
+	waitForStartedAgents(t, started, maxConcurrentBootstraps)
+	require.LessOrEqual(t, peak.Load(), int32(maxConcurrentBootstraps))
+	close(release)
+
+	select {
+	case err := <-done:
+		require.NoError(t, err)
+	case <-time.After(time.Second):
+		t.Fatal("host utility bootstrap did not finish after releasing agents")
+	}
+	require.Equal(t, int32(maxConcurrentBootstraps+2), attempted.Load())
+	require.LessOrEqual(t, peak.Load(), int32(maxConcurrentBootstraps))
+	mgr.Stop(context.Background())
+}
+
+func TestStopCancelsQueuedBootstrap(t *testing.T) {
+	log := newTestLogger(t)
+	reg := registry.NewRegistry(log)
+	started := make(chan string, 8)
+	canceled := make(chan string, 8)
+	var active atomic.Int32
+	var peak atomic.Int32
+	var attempted atomic.Int32
+
+	for i := 0; i < maxConcurrentBootstraps+2; i++ {
+		ag := &trackingInferenceAgent{
+			installedInferenceAgent: installedInferenceAgent{id: "queued-acp-" + strconv.Itoa(i)},
+			started:                 started,
+			canceled:                canceled,
+			active:                  &active,
+			peak:                    &peak,
+			attempted:               &attempted,
+		}
+		require.NoError(t, reg.Register(ag))
+	}
+
+	mgr := NewManager(reg, "127.0.0.1", 1, nil, log)
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- mgr.Start(ctx) }()
+
+	waitForStartedAgents(t, started, maxConcurrentBootstraps)
+	mgr.Stop(context.Background())
+
+	select {
+	case err := <-done:
+		require.NoError(t, err)
+	case <-time.After(time.Second):
+		t.Fatal("host utility Start did not return after queued cancellation")
+	}
+	cancel()
+	require.Equal(t, int32(maxConcurrentBootstraps+2), attempted.Load())
+	waitForCanceledAgents(t, canceled, maxConcurrentBootstraps+2)
+	require.LessOrEqual(t, peak.Load(), int32(maxConcurrentBootstraps))
+}
+
+func waitForStartedAgents(t *testing.T, started <-chan string, count int) {
+	t.Helper()
+	for i := 0; i < count; i++ {
+		select {
+		case <-started:
+		case <-time.After(time.Second):
+			t.Fatalf("timed out waiting for bootstrap %d/%d to start", i+1, count)
+		}
+	}
+}
+
+func waitForCanceledAgents(t *testing.T, canceled <-chan string, count int) {
+	t.Helper()
+	for i := 0; i < count; i++ {
+		select {
+		case <-canceled:
+		case <-time.After(time.Second):
+			t.Fatalf("timed out waiting for bootstrap %d/%d to observe cancellation", i+1, count)
+		}
+	}
+}
+
 func TestProbePreservesConfigOptionDescriptions(t *testing.T) {
 	log := newTestLogger(t)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -629,6 +734,42 @@ type blockingInferenceAgent struct {
 	once     sync.Once
 	started  chan struct{}
 	canceled chan struct{}
+}
+
+type trackingInferenceAgent struct {
+	installedInferenceAgent
+	started   chan<- string
+	canceled  chan<- string
+	release   <-chan struct{}
+	active    *atomic.Int32
+	peak      *atomic.Int32
+	attempted *atomic.Int32
+}
+
+func (a *trackingInferenceAgent) IsInstalled(ctx context.Context) (*agents.DiscoveryResult, error) {
+	a.attempted.Add(1)
+	current := a.active.Add(1)
+	for {
+		previous := a.peak.Load()
+		if current <= previous || a.peak.CompareAndSwap(previous, current) {
+			break
+		}
+	}
+	a.started <- a.id
+	defer a.active.Add(-1)
+
+	if a.release == nil {
+		<-ctx.Done()
+		a.canceled <- a.id
+		return nil, ctx.Err()
+	}
+	select {
+	case <-a.release:
+		return &agents.DiscoveryResult{Available: false}, nil
+	case <-ctx.Done():
+		a.canceled <- a.id
+		return nil, ctx.Err()
+	}
 }
 
 func (a *blockingInferenceAgent) ID() string          { return "blocking-acp" }

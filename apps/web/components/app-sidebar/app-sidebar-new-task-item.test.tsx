@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { act, cleanup, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { TooltipProvider } from "@kandev/ui/tooltip";
 
 const mocks = vi.hoisted(() => ({
@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   setActiveTask: vi.fn(),
   setActiveSession: vi.fn(),
   openQuickChat: vi.fn(),
+  openQuickTerminal: vi.fn(),
   dialogTaskSessionId: null as string | null,
   dialogWillNavigate: false,
 }));
@@ -28,6 +29,8 @@ const state = {
   setActiveTask: mocks.setActiveTask,
   setActiveSession: mocks.setActiveSession,
 };
+const QUICK_TERMINAL_TEST_ID = "sidebar-quick-terminal-shortcut";
+const QUICK_CHAT_TEST_ID = "sidebar-quick-chat-shortcut";
 let officeEnabled = false;
 let pathname = "/";
 
@@ -36,6 +39,9 @@ vi.mock("@/components/state-provider", () => ({
 }));
 vi.mock("@/hooks/use-quick-chat-launcher", () => ({
   useQuickChatLauncher: () => mocks.openQuickChat,
+}));
+vi.mock("@/hooks/use-quick-terminal-launcher", () => ({
+  useQuickTerminalLauncher: () => mocks.openQuickTerminal,
 }));
 vi.mock("@/hooks/domains/features/use-feature", () => ({
   useFeature: () => officeEnabled,
@@ -88,6 +94,7 @@ function resetTestState() {
   mocks.setActiveTask.mockClear();
   mocks.setActiveSession.mockClear();
   mocks.openQuickChat.mockClear();
+  mocks.openQuickTerminal.mockClear();
   mocks.dialogTaskSessionId = null;
   mocks.dialogWillNavigate = false;
   officeEnabled = false;
@@ -149,21 +156,57 @@ describe("AppSidebarNewTaskItem dialog routing", () => {
 });
 
 describe("AppSidebarNewTaskItem row actions", () => {
+  it("opens quick terminal from the action immediately left of Quick Chat", () => {
+    renderItem(false);
+
+    const terminal = screen.getByTestId(QUICK_TERMINAL_TEST_ID);
+    const quickChat = screen.getByTestId(QUICK_CHAT_TEST_ID);
+    expect(terminal.nextElementSibling).toBe(quickChat);
+
+    terminal.click();
+    expect(mocks.openQuickTerminal).toHaveBeenCalledOnce();
+  });
+
+  it("does not show the terminal tooltip when focus returns after closing", async () => {
+    renderItem(false);
+
+    const terminal = screen.getByTestId(QUICK_TERMINAL_TEST_ID);
+    fireEvent.pointerEnter(terminal);
+    expect(await screen.findByRole("tooltip")).toBeTruthy();
+    fireEvent.focus(terminal);
+
+    expect(screen.queryByRole("tooltip")).toBeNull();
+  });
+
+  it("shows the terminal tooltip on pointer hover", async () => {
+    renderItem(false);
+
+    const terminal = screen.getByTestId(QUICK_TERMINAL_TEST_ID);
+    fireEvent.pointerEnter(terminal);
+
+    expect((await screen.findByRole("tooltip")).textContent).toBe("Quick terminal");
+
+    fireEvent.pointerLeave(terminal);
+    expect(screen.queryByRole("tooltip")).toBeNull();
+  });
+
   it("opens quick chat from the trailing action beside New Task", () => {
     renderItem(false);
-    screen.getByTestId("sidebar-quick-chat-shortcut").click();
+    screen.getByTestId(QUICK_CHAT_TEST_ID).click();
     expect(mocks.openQuickChat).toHaveBeenCalledOnce();
   });
 
   it("hides the quick chat shortcut when the rail is collapsed", () => {
     renderItem(true);
-    expect(screen.queryByTestId("sidebar-quick-chat-shortcut")).toBeNull();
+    expect(screen.queryByTestId(QUICK_CHAT_TEST_ID)).toBeNull();
+    expect(screen.queryByTestId(QUICK_TERMINAL_TEST_ID)).toBeNull();
   });
 
   it("hides the quick chat shortcut when there is no active workspace", () => {
     state.workspaces.activeId = null;
     renderItem(false);
-    expect(screen.queryByTestId("sidebar-quick-chat-shortcut")).toBeNull();
+    expect(screen.queryByTestId(QUICK_CHAT_TEST_ID)).toBeNull();
+    expect(screen.queryByTestId(QUICK_TERMINAL_TEST_ID)).toBeNull();
   });
 });
 

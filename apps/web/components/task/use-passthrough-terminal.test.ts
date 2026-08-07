@@ -1,9 +1,16 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { buildTerminalWsUrl } from "./use-passthrough-terminal";
+import { computeCanConnect } from "./passthrough-terminal";
 import { reconnectDelayMs, startReconnectLoop } from "./ws-reconnect";
 import type { Terminal } from "@xterm/xterm";
 
 const WS_BASE_URL = "ws://localhost:38429";
+
+describe("computeCanConnect", () => {
+  it("lets the backend wait for an agent passthrough session that is not cached as ready", () => {
+    expect(computeCanConnect("agent", "session-1", "session-1")).toBe(true);
+  });
+});
 
 describe("reconnectDelayMs", () => {
   it("returns 300ms for attempt 0", () => {

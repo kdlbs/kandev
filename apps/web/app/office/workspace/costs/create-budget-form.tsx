@@ -5,8 +5,9 @@ import { Button } from "@kandev/ui/button";
 import { Input } from "@kandev/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import { Card, CardContent } from "@kandev/ui/card";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast/sonner";
 import { createBudget } from "@/lib/api/domains/office-api";
+import { useTranslation } from "react-i18next";
 
 type Props = {
   workspaceId: string;
@@ -39,35 +40,36 @@ function FormFields({
   state: FormState;
   onChange: (patch: Partial<FormState>) => void;
 }) {
+  const { t } = useTranslation();
   return (
     <div className="grid grid-cols-2 gap-3">
-      <FormField label="Scope Type">
+      <FormField label={t("office:scopeType")}>
         <Select value={state.scopeType} onValueChange={(v) => onChange({ scopeType: v })}>
           <SelectTrigger className="h-8 text-sm cursor-pointer">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="workspace" className="cursor-pointer">
-              Workspace
+              {t("common:workspace")}
             </SelectItem>
             <SelectItem value="agent" className="cursor-pointer">
-              Agent
+              {t("office:agent")}
             </SelectItem>
             <SelectItem value="project" className="cursor-pointer">
-              Project
+              {t("office:project")}
             </SelectItem>
           </SelectContent>
         </Select>
       </FormField>
-      <FormField label="Scope ID">
+      <FormField label={t("office:scopeId")}>
         <Input
           className="h-8 text-sm"
           value={state.scopeId}
           onChange={(e) => onChange({ scopeId: e.target.value })}
-          placeholder="Entity ID"
+          placeholder={t("office:entityId")}
         />
       </FormField>
-      <FormField label="Limit ($)">
+      <FormField label={t("office:limit")}>
         <Input
           className="h-8 text-sm"
           type="number"
@@ -76,22 +78,22 @@ function FormFields({
           placeholder="10.00"
         />
       </FormField>
-      <FormField label="Period">
+      <FormField label={t("office:period")}>
         <Select value={state.period} onValueChange={(v) => onChange({ period: v })}>
           <SelectTrigger className="h-8 text-sm cursor-pointer">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="monthly" className="cursor-pointer">
-              Monthly
+              {t("office:monthly")}
             </SelectItem>
             <SelectItem value="total" className="cursor-pointer">
-              Total
+              {t("office:total")}
             </SelectItem>
           </SelectContent>
         </Select>
       </FormField>
-      <FormField label="Alert Threshold (%)">
+      <FormField label={t("office:alertThreshold")}>
         <Input
           className="h-8 text-sm"
           type="number"
@@ -99,20 +101,20 @@ function FormFields({
           onChange={(e) => onChange({ alertPct: e.target.value })}
         />
       </FormField>
-      <FormField label="Action on Exceed">
+      <FormField label={t("office:actionOnExceed")}>
         <Select value={state.action} onValueChange={(v) => onChange({ action: v })}>
           <SelectTrigger className="h-8 text-sm cursor-pointer">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="notify_only" className="cursor-pointer">
-              Notify Only
+              {t("office:notifyOnly")}
             </SelectItem>
             <SelectItem value="pause_agent" className="cursor-pointer">
-              Pause Agent
+              {t("office:pauseAgent")}
             </SelectItem>
             <SelectItem value="block_new_tasks" className="cursor-pointer">
-              Block New Tasks
+              {t("office:blockNewTasks")}
             </SelectItem>
           </SelectContent>
         </Select>
@@ -122,6 +124,7 @@ function FormFields({
 }
 
 export function CreateBudgetForm({ workspaceId, onCreated, onCancel }: Props) {
+  const { t } = useTranslation();
   const [state, setState] = useState<FormState>({
     scopeType: "workspace",
     scopeId: workspaceId,
@@ -148,9 +151,9 @@ export function CreateBudgetForm({ workspaceId, onCreated, onCancel }: Props) {
         actionOnExceed: state.action as "notify_only" | "pause_agent" | "block_new_tasks",
       });
       onCreated();
-      toast.success("Budget policy created");
+      toast.success(t("office:budgetPolicyCreated"));
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Failed to create budget policy");
+      toast.error(err instanceof Error ? err.message : t("office:failedToCreateBudgetPolicy"));
     } finally {
       setSaving(false);
     }
@@ -162,10 +165,10 @@ export function CreateBudgetForm({ workspaceId, onCreated, onCancel }: Props) {
         <FormFields state={state} onChange={handleChange} />
         <div className="flex justify-end gap-2 pt-2">
           <Button variant="ghost" size="sm" className="cursor-pointer" onClick={onCancel}>
-            Cancel
+            {t("common:cancel")}
           </Button>
           <Button size="sm" className="cursor-pointer" disabled={saving} onClick={handleSubmit}>
-            {saving ? "Creating..." : "Create Policy"}
+            {saving ? t("office:creating") : t("office:createPolicy")}
           </Button>
         </div>
       </CardContent>

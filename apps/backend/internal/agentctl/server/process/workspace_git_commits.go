@@ -2,12 +2,10 @@ package process
 
 import (
 	"context"
-	"os/exec"
 	"strings"
 	"time"
 
 	"github.com/kandev/kandev/internal/agentctl/types"
-	"github.com/kandev/kandev/internal/common/subproc"
 	"go.uber.org/zap"
 )
 
@@ -16,12 +14,12 @@ import (
 func (wt *WorkspaceTracker) getCommitsSince(ctx context.Context, baseCommit string) []*types.GitCommitNotification {
 	// Record separator (\x1e) placed BEFORE fields so --shortstat output stays
 	// within the same record:  \x1e<fields>\n <stat summary>\n\x1e<fields>\n...
-	cmd := exec.CommandContext(ctx, "git", "log",
+	out, err := wt.runPollingGitOutput(ctx,
+		"log",
 		"--format=\x1e%H\x1f%P\x1f%an\x1f%ae\x1f%s\x1f%aI",
 		"--shortstat",
-		baseCommit+"..HEAD")
-	cmd.Dir = wt.workDir
-	out, err := subproc.RunGitOutput(ctx, cmd)
+		baseCommit+"..HEAD",
+	)
 	if err != nil {
 		wt.logger.Debug("failed to get commits since base",
 			zap.String("base", baseCommit),

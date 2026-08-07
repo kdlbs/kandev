@@ -19,6 +19,7 @@ func newTreeHoldTestRepo(t *testing.T) *sqlite.Repository {
 			state TEXT NOT NULL DEFAULT 'TODO',
 			parent_id TEXT DEFAULT '',
 			is_ephemeral INTEGER DEFAULT 0,
+			origin TEXT DEFAULT 'manual',
 			checkout_agent_id TEXT,
 			checkout_at DATETIME,
 			archived_at DATETIME,

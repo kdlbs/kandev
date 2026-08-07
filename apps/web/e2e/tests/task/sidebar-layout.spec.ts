@@ -5,7 +5,7 @@
  *   - Repo group headers: letter avatar, task count, collapsible
  *   - Subtasks (parent_id): nested under parent with arrow indicator
  *   - Unassigned group: tasks with no repo
- *   - Context menu: Create Subtask, Rename, Archive, Delete options via right-click
+ *   - Context menu: Edit, Create Subtask, Rename, Archive, Delete options via right-click
  *   - Active task highlight: selected task has aria/visual selection state
  */
 import { test, expect } from "../../fixtures/test-base";
@@ -215,6 +215,9 @@ test.describe("Sidebar layout — context menu", () => {
     await taskRow.click({ button: "right" });
 
     // Context menu items should be visible
+    await expect(testPage.getByRole("menuitem", { name: "Edit", exact: true })).toBeVisible({
+      timeout: 5_000,
+    });
     await expect(testPage.getByRole("menuitem", { name: "Rename" })).toBeVisible({
       timeout: 5_000,
     });
@@ -233,6 +236,57 @@ test.describe("Sidebar layout — context menu", () => {
 
     // Dismiss
     await testPage.keyboard.press("Escape");
+  });
+
+  test("opens the existing editor and persists sidebar task edits", async ({
+    testPage,
+    apiClient,
+    seedData,
+    prCapture,
+  }) => {
+    const originalTitle = "Sidebar edit target";
+    const updatedTitle = "Sidebar edit target updated";
+    const task = await apiClient.createTask(seedData.workspaceId, originalTitle, {
+      description: "Sidebar edit description",
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+      repository_ids: [seedData.repositoryId],
+    });
+    const navigationTask = await apiClient.createTask(
+      seedData.workspaceId,
+      "Sidebar edit navigation task",
+      {
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+      },
+    );
+    await apiClient.updateTaskState(task.id, "IN_PROGRESS");
+    await testPage.goto(`/t/${navigationTask.id}`);
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+    const initialUrl = testPage.url();
+
+    const taskRow = session.sidebar
+      .locator("[data-testid='sidebar-task-item']")
+      .filter({ hasText: originalTitle });
+    await expect(taskRow).toBeVisible({ timeout: 10_000 });
+    await taskRow.click({ button: "right" });
+    await testPage.getByRole("menuitem", { name: "Edit", exact: true }).click();
+
+    const dialog = testPage.getByRole("dialog");
+    await expect(dialog.getByTestId("task-title-input")).toHaveValue(originalTitle);
+    await expect(dialog.getByTestId("task-description-input")).toHaveValue(
+      "Sidebar edit description",
+    );
+    await prCapture.screenshot("desktop-sidebar-task-edit-dialog", {
+      caption: "Desktop sidebar task editor",
+    });
+    await dialog.getByTestId("task-title-input").fill(updatedTitle);
+    await dialog.getByRole("button", { name: "Update", exact: true }).click();
+
+    await expect(dialog).toHaveCount(0);
+    await expect(testPage).toHaveURL(initialUrl);
+    await expect.poll(async () => (await apiClient.getTask(task.id)).title).toBe(updatedTitle);
   });
 });
 

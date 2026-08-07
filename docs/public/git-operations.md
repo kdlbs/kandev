@@ -49,6 +49,14 @@ feature/{title}-{suffix}
 
 When a task opens an existing branch or GitHub PR, Kandev fetches that branch; for a numbered GitHub PR it can fetch `refs/pull/NUMBER/head`, including fork PRs. If the intended branch is already checked out in another worktree, the new worktree uses a suffixed local branch and tracks the original `origin` branch when available. If remote fetch fails but the local branch exists, Kandev can continue with that possibly stale branch and reports the fallback.
 
+Tasks created without an initial title can expose the one-shot `set_task_title_kandev` handoff when
+**Settings → General → Task Actions → Agent-generated task titles** is enabled. After the owning
+session accepts its final title, Kandev regenerates Kandev-managed branch names from that title and
+updates the stored branch snapshots. It never renames a repository row with an explicit checkout
+branch (for example, a GitHub PR branch) or a Local/Local PC checkout. A branch manually selected
+before the title call is preserved as well. Multi-repository tasks apply these rules independently to
+each repository, and a Git or snapshot persistence failure does not undo the accepted title.
+
 After creation, Kandev copies any repository-configured files and runs its setup script. Setup-script failure is non-fatal: the worktree remains and the session surfaces a warning. Cleanup scripts run before worktree removal, but their failure also does not prevent removal.
 
 ## Everyday operations

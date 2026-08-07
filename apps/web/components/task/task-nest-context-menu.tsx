@@ -12,6 +12,7 @@ import { useAppStore } from "@/components/state-provider";
 import { useNestTask } from "@/hooks/use-nest-task";
 import { computeNestCandidates } from "@/lib/sidebar/nest-candidates";
 import type { TaskSwitcherItem } from "./task-switcher";
+import { useTranslation } from "react-i18next";
 
 type TaskNestContextMenuItemsProps = {
   task: TaskSwitcherItem;
@@ -25,6 +26,7 @@ type TaskNestContextMenuItemsProps = {
  * (which would create a cycle) and its current parent.
  */
 export function TaskNestContextMenuItems({ task, disabled }: TaskNestContextMenuItemsProps) {
+  const { t } = useTranslation();
   const workflowId = task.workflowId;
   // Prefer the all-workflows snapshot; fall back to the active kanban tasks,
   // which the sidebar also renders from before the multi-snapshot fetch
@@ -39,7 +41,7 @@ export function TaskNestContextMenuItems({ task, disabled }: TaskNestContextMenu
   });
   const nestTask = useNestTask();
 
-  if (!workflowId) return null;
+  if (!workflowId || task.isArchived) return null;
 
   const candidates = computeNestCandidates(tasks ?? [], task.id);
   const hasParent = Boolean(task.parentTaskId);
@@ -48,7 +50,7 @@ export function TaskNestContextMenuItems({ task, disabled }: TaskNestContextMenu
     <ContextMenuSub>
       <ContextMenuSubTrigger disabled={disabled}>
         <IconSubtask className="mr-2 h-4 w-4" />
-        Nest under
+        {t("task:nestUnder")}
       </ContextMenuSubTrigger>
       <ContextMenuSubContent className="max-h-72 w-56 overflow-y-auto">
         {hasParent && (
@@ -58,13 +60,13 @@ export function TaskNestContextMenuItems({ task, disabled }: TaskNestContextMenu
               onSelect={() => void nestTask(task.id, workflowId, null)}
             >
               <IconArrowUpRight className="mr-2 h-4 w-4" />
-              Un-nest (remove parent)
+              {t("task:unNestRemoveParent")}
             </ContextMenuItem>
             <ContextMenuSeparator />
           </>
         )}
         {candidates.length === 0 ? (
-          <ContextMenuItem disabled>No other tasks</ContextMenuItem>
+          <ContextMenuItem disabled>{t("task:noOtherTasks")}</ContextMenuItem>
         ) : (
           candidates.map((candidate) => (
             <ContextMenuItem

@@ -188,14 +188,31 @@ func (m *Manager) resolveStartModelPolicy(ctx context.Context, profileID string)
 // values across process recovery.
 func (m *Manager) initializeACPSession(ctx context.Context, execution *AgentExecution, agentConfig agents.Agent, taskDescription string, attachments []MessageAttachment, mcpServers []agentctltypes.McpServer) error {
 	profileModel, profileMode, profileConfigOptions := m.resolveProfileSessionConfig(ctx, execution.AgentProfileID)
-	model, mode, configOptions := m.effectiveSessionRuntimeConfig(ctx, execution, profileModel, profileMode, profileConfigOptions)
+	runtimeModel, runtimeMode, runtimeConfigOptions := m.sessionRuntimeOverrides(ctx, execution)
 	policy := m.resolveStartModelPolicy(ctx, execution.AgentProfileID)
 	// The effective runtime model (user-selected, persisted session state)
 	// takes precedence over the profile's start model for the session; the
 	// policy still carries the profile's fallback settings so a gone
-	// effective model is handled the same way.
-	policy.Model = model
-	return m.sessionManager.InitializeAndPrompt(ctx, execution, agentConfig, taskDescription, attachments, mcpServers, m.MarkBootReady, policy, mode, configOptions)
+	// effective model is handled the same way (InitializeAndPromptWithLayers
+	// resolves the effective model and applies the policy).
+	return m.sessionManager.InitializeAndPromptWithLayers(
+		ctx, execution, agentConfig, taskDescription, attachments, mcpServers, m.MarkBootReady,
+		profileModel, profileMode, profileConfigOptions,
+		runtimeModel, runtimeMode, runtimeConfigOptions,
+		policy,
+	)
+}
+
+func (m *Manager) sessionRuntimeOverrides(ctx context.Context, execution *AgentExecution) (string, string, map[string]string) {
+	info := m.sessionWorkspaceInfo(ctx, execution)
+	if info == nil {
+		return "", "", nil
+	}
+	var options map[string]string
+	if info.RuntimeConfigOptionsSet {
+		options = maps.Clone(info.RuntimeConfigOptions)
+	}
+	return info.RuntimeModel, info.SessionMode, options
 }
 
 func (m *Manager) effectiveSessionRuntimeConfig(ctx context.Context, execution *AgentExecution, profileModel, profileMode string, profileConfigOptions map[string]string) (string, string, map[string]string) {

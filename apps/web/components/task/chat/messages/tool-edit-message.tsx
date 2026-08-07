@@ -11,12 +11,14 @@ import {
 } from "@tabler/icons-react";
 import { GridSpinner } from "@/components/grid-spinner";
 import { transformPathsInText } from "@/lib/utils";
+import { copyToClipboard } from "@/lib/utils/copy-to-clipboard";
 import type { Message } from "@/lib/types/http";
 import { DiffViewBlock } from "./diff-view-block";
 import { ExpandableRow } from "./expandable-row";
 import { transformFileMutation, type FileMutation } from "@/lib/diff";
 import { useExpandState } from "./use-expand-state";
 import { useOpenFileAtLine } from "@/hooks/use-file-editors";
+import { useTranslation } from "react-i18next";
 
 type ModifyFilePayload = {
   file_path?: string;
@@ -32,6 +34,7 @@ type ToolEditMetadata = {
 type ToolEditMessageProps = {
   comment: Message;
   worktreePath?: string;
+  sessionId?: string;
   onOpenFile?: (path: string) => void;
 };
 
@@ -73,6 +76,7 @@ function FileActionButton({
   copied,
   onCopyPath,
 }: FileActionButtonProps) {
+  const { t } = useTranslation();
   const isFileInWorktree = worktreePath && filePath.startsWith(worktreePath);
   if (onOpenFile && isFileInWorktree) {
     return (
@@ -83,7 +87,7 @@ function FileActionButton({
           onOpenFile(filePath);
         }}
         className="opacity-0 group-hover/expandable:opacity-100 transition-opacity text-muted-foreground hover:text-foreground shrink-0 cursor-pointer"
-        title="Open file"
+        title={t("task:openFile")}
       >
         <IconExternalLink className="h-3.5 w-3.5" />
       </button>
@@ -95,7 +99,7 @@ function FileActionButton({
         type="button"
         onClick={onCopyPath}
         className="opacity-0 group-hover/expandable:opacity-100 transition-opacity text-muted-foreground hover:text-foreground shrink-0 cursor-pointer"
-        title={copied ? "Copied!" : "Copy path"}
+        title={copied ? t("task:copied") : t("task:copyPath")}
       >
         {copied ? (
           <IconCheck className="h-3.5 w-3.5 text-green-500" />
@@ -159,6 +163,7 @@ function parseEditMetadata(comment: Message) {
 export const ToolEditMessage = memo(function ToolEditMessage({
   comment,
   worktreePath,
+  sessionId,
   onOpenFile,
 }: ToolEditMessageProps) {
   const {
@@ -181,13 +186,16 @@ export const ToolEditMessage = memo(function ToolEditMessage({
   const handleCopyPath = (e: React.MouseEvent) => {
     e.stopPropagation();
     if (filePath) {
-      navigator.clipboard?.writeText(filePath);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
+      void copyToClipboard(filePath).then((success) => {
+        if (success) {
+          setCopied(true);
+          setTimeout(() => setCopied(false), 1500);
+        }
+      });
     }
   };
 
-  const handleOpenFile = useOpenFileAtLine(onOpenFile, startLine, worktreePath);
+  const handleOpenFile = useOpenFileAtLine(onOpenFile, startLine, worktreePath, sessionId);
 
   return (
     <ExpandableRow

@@ -416,6 +416,20 @@ func TestExecuteScriptSkipsEmptyAndComments(t *testing.T) {
 	}
 }
 
+func TestExecuteScriptStopsWhenPromptContextIsCancelled(t *testing.T) {
+	e, mock := newTestEmitter()
+	resetState()
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	e.ctx = ctx
+
+	executeScript(e, "", "e2e:message(\"before cancellation\")")
+
+	if updates := mock.getUpdates(); len(updates) != 0 {
+		t.Fatalf("expected no updates after prompt cancellation, got %d", len(updates))
+	}
+}
+
 // TestExecuteScriptToolUse verifies e2e:tool_use emits a tool_call update.
 func TestExecuteScriptToolUse(t *testing.T) {
 	e, mock := newTestEmitter()

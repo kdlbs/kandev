@@ -8,7 +8,12 @@ import { formatBytes } from "@/lib/utils/format-bytes";
 
 export type FileAttachment = {
   id: string;
-  data: string; // Base64-encoded content (without data: prefix)
+  /** Legacy inline data. New uploads use `file` + `attachmentId` instead. */
+  data?: string;
+  file?: File;
+  attachmentId?: string;
+  uploadStatus?: "pending" | "uploading" | "ready" | "failed";
+  uploadError?: string;
   mimeType: string; // MIME type
   fileName: string; // Original file name
   size: number; // File size in bytes
@@ -19,9 +24,10 @@ export type FileAttachment = {
 
 export const PREVIEWABLE_IMAGE_TYPES = ["image/png", "image/jpeg", "image/gif", "image/webp"];
 
-export const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB per file
-export const MAX_TOTAL_SIZE = 20 * 1024 * 1024; // 20MB total
+export const MAX_FILE_SIZE = 100 * 1024 * 1024; // 100 MiB per file
+export const MAX_TOTAL_SIZE = 100 * 1024 * 1024; // 100 MiB total
 export const MAX_FILES = 10;
+const MAX_INLINE_PREVIEW_BYTES = 5 * 1024 * 1024;
 
 function isPreviewableImage(mimeType: string): boolean {
   return PREVIEWABLE_IMAGE_TYPES.includes(mimeType);
@@ -29,7 +35,9 @@ function isPreviewableImage(mimeType: string): boolean {
 
 /**
  * Process a file into a FileAttachment.
- * Images get a preview data URL; other files just get base64 data.
+ * Small images get a preview data URL; larger files retain the File object so
+ * the browser can stream them to the attachment endpoint without creating a
+ * 100 MiB base64 copy in memory.
  * Returns null if the file is invalid (too large, etc.)
  */
 export function processFile(file: File): Promise<FileAttachment | null> {
@@ -48,6 +56,22 @@ export function processFile(file: File): Promise<FileAttachment | null> {
       return;
     }
 
+    const mimeType = file.type || "application/octet-stream";
+    const isImage = isPreviewableImage(mimeType);
+    if (file.size > MAX_INLINE_PREVIEW_BYTES) {
+      resolve({
+        id: generateUUID(),
+        file,
+        mimeType,
+        fileName: file.name,
+        size: file.size,
+        isImage,
+        deliveryMode: isImage ? "prompt" : "path",
+        uploadStatus: "pending",
+      });
+      return;
+    }
+
     const reader = new FileReader();
     reader.onload = (event) => {
       const dataUrl = event.target?.result as string;
@@ -57,23 +81,25 @@ export function processFile(file: File): Promise<FileAttachment | null> {
       }
 
       const base64 = dataUrl.split(",")[1];
-      const mimeType =
+      const resolvedMimeType =
         file.type || dataUrl.split(";")[0].split(":")[1] || "application/octet-stream";
-      const isImage = isPreviewableImage(mimeType);
+      const resolvedIsImage = isPreviewableImage(resolvedMimeType);
 
-      if (isImage) {
+      if (resolvedIsImage) {
         // For images, load to verify and generate preview
         const img = new Image();
         img.onload = () => {
           resolve({
             id: generateUUID(),
             data: base64,
-            mimeType,
+            file,
+            mimeType: resolvedMimeType,
             fileName: file.name,
             size: file.size,
             preview: dataUrl,
             isImage: true,
             deliveryMode: "prompt",
+            uploadStatus: "pending",
           });
         };
         img.onerror = () => resolve(null);
@@ -82,11 +108,13 @@ export function processFile(file: File): Promise<FileAttachment | null> {
         resolve({
           id: generateUUID(),
           data: base64,
-          mimeType,
+          file,
+          mimeType: resolvedMimeType,
           fileName: file.name,
           size: file.size,
           isImage: false,
           deliveryMode: "path",
+          uploadStatus: "pending",
         });
       }
     };

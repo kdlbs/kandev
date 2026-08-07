@@ -81,6 +81,22 @@ type StderrProvider interface {
 	GetRecentStderr() []string
 }
 
+// StderrLineConsumer receives cleaned stderr lines as they are emitted by the
+// managed agent process. Implementations must return promptly; a consumer is
+// an optional diagnostic signal and must never apply backpressure to the child
+// process's stderr pipe.
+type StderrLineConsumer interface {
+	ConsumeStderrLine(line string)
+}
+
+// StderrLineSanitizer projects stderr lines before they are logged, buffered,
+// or included in process-exit events. Returning keep=false excludes a line
+// from those generic diagnostics while allowing a protocol-specific consumer
+// to inspect the original line in memory.
+type StderrLineSanitizer interface {
+	SanitizeStderrLine(line string) (safeLine string, keep bool)
+}
+
 // StderrProviderSetter is an optional interface implemented by adapters that can use
 // stderr output for error context. The process manager checks for this interface
 // and calls SetStderrProvider if available.
@@ -308,4 +324,26 @@ func (c *Config) ToSharedConfig() *shared.Config {
 		AssumeMcpHttp:       c.AssumeMcpHttp,
 		RequiresProcessKill: c.RequiresProcessKill,
 	}
+}
+
+// SteerablePrompter is implemented by an adapter that can deliver a prompt into
+// a turn that is still generating, instead of holding it until the turn ends.
+//
+// It is an optional interface rather than a method on AgentAdapter so transports
+// that cannot steer need no change — the same shape the process manager uses for
+// RequiresProcessKill. Callers must type-assert and must also check
+// SupportsSteering(), which reflects the connected agent's negotiated
+// advertisement and is therefore only known after initialize.
+//
+// Delivery is opportunistic: whether the agent folds the prompt into the running
+// turn or runs it as the next turn is the agent's decision and is not advertised
+// over the protocol. See docs/specs/platform/mid-turn-steering.md.
+type SteerablePrompter interface {
+	SupportsSteering() bool
+	PromptSteer(
+		ctx context.Context,
+		message string,
+		attachments []v1.MessageAttachment,
+		promptGeneration uint64,
+	) error
 }

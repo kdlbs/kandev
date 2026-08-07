@@ -53,6 +53,7 @@ func registerWSHandlers(dispatcher *ws.Dispatcher, svc *Service, log *logger.Log
 	dispatcher.RegisterFunc(ws.ActionGitHubPRWatchDelete, wsDeletePRWatch(svc, log))
 	dispatcher.RegisterFunc(ws.ActionGitHubPRFilesGet, wsGetPRFiles(svc, log))
 	dispatcher.RegisterFunc(ws.ActionGitHubPRCommitsGet, wsGetPRCommits(svc, log))
+	dispatcher.RegisterFunc(ws.ActionGitHubPRCommitGet, wsGetPRCommitDetail(svc, log))
 	dispatcher.RegisterFunc(ws.ActionGitHubTaskPRSync, wsSyncTaskPR(svc, log))
 	dispatcher.RegisterFunc(ws.ActionGitHubStats, wsGetStats(svc, log))
 
@@ -461,6 +462,35 @@ func wsGetPRCommits(svc *Service, _ *logger.Logger) func(ctx context.Context, ms
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)
 		}
 		return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{"commits": commits})
+	}
+}
+
+func wsGetPRCommitDetail(svc *Service, _ *logger.Logger) func(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	return func(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+		payload, parseErr := parseMap(msg)
+		if parseErr != nil {
+			resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, errMsgInvalidPayload, nil)
+			return resp, nil
+		}
+		workspaceID, _ := payload["workspace_id"].(string)
+		owner, _ := payload["owner"].(string)
+		repo, _ := payload["repo"].(string)
+		sha, _ := payload["sha"].(string)
+		if workspaceID == "" || owner == "" || repo == "" || sha == "" {
+			resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "workspace_id, owner, repo, sha required", nil)
+			return resp, nil
+		}
+		if err := validateGitHubCommitSHA(sha); err != nil {
+			resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, err.Error(), nil)
+			return resp, nil
+		}
+		detail, err := svc.GetPRCommitDetailForWorkspace(
+			ctx, workspaceID, githubUserID(ctx), owner, repo, sha,
+		)
+		if err != nil {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)
+		}
+		return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{"commit": detail})
 	}
 }
 

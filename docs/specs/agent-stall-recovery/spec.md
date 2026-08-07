@@ -1,30 +1,33 @@
 ---
-status: draft
+status: approved
 created: 2026-07-29
+updated: 2026-08-02
 owner: Kandev
 ---
 
 # Agent Stall Recovery
 
-Decision:
-[ADR-2026-07-29-agent-stall-user-controlled-recovery](../../decisions/2026-07-29-agent-stall-user-controlled-recovery.md)
+Decisions:
+
+- [ADR-2026-07-29-agent-stall-user-controlled-recovery](../../decisions/2026-07-29-agent-stall-user-controlled-recovery.md)
+- [ADR-2026-08-02-agent-terminal-diagnostics-over-stderr](../../decisions/2026-08-02-agent-terminal-diagnostics-over-stderr.md)
+
+Implementation plans:
+
+- [Agent stall recovery](../../plans/agent-stall-recovery/plan.md)
+- [OpenCode terminal error surfacing](../../plans/opencode-terminal-error-surfacing/plan.md)
 
 ## Why
 
-An agent turn can remain `RUNNING` forever after its active tool stops emitting
-events. Users currently see only “Agent is running,” while Resume is correctly
-blocked by the active-session guard and the backend repeats a diagnostic that
-the UI never receives.
-
-## Broken behavior
-
-`waitForPromptDone` detects five minutes without events but only logs the
-condition every 30 seconds. A top-level shell tool that remains `in_progress`
-can therefore hold the prompt waiter and session state indefinitely even
-though Kandev already has a bounded cancel-escalation path capable of releasing
-the turn.
+An agent turn can remain `RUNNING` after it stops emitting events. Silence alone
+is ambiguous because a legitimate long-running tool may also be quiet, but some
+agents know that their provider stream has failed and fail to close the ACP
+prompt. Users need Kandev to distinguish trustworthy terminal evidence from
+mere inactivity so a failed turn is not presented as healthy work.
 
 ## What
+
+### Advisory inactivity recovery
 
 - Kandev checks running prompts for inactivity once per 60 seconds.
 - After five minutes without agent events, Kandev creates at most one
@@ -46,16 +49,80 @@ the turn.
 - The backend logs the first stall detected for a prompt generation and does
   not emit another notice or log entry on every watchdog check.
 
+### Correlated terminal diagnostics
+
+- When an agent emits a terminal provider diagnostic outside ACP, Kandev acts
+  on it only when the diagnostic identifies the current agent type, active
+  provider session, and active foreground prompt.
+- OpenCode provider diagnostics are collected from the managed `opencode acp`
+  process's error-only stderr stream. Kandev does not read OpenCode's private
+  files under `~/.local/share/opencode/log`.
+- A correlated OpenCode `stream error` ends the affected prompt through the
+  existing agent-error lifecycle instead of waiting for the inactivity
+  threshold. The session stops presenting itself as `RUNNING` and retains the
+  existing recovery actions.
+- Kandev preserves only allowlisted diagnostic fields needed for recovery:
+  source agent, provider, model, sanitized message, occurrence time, and a
+  reset time when one can be derived. Raw log lines, workspace URLs, account or
+  workspace identifiers, paths, credentials, and unrelated stderr are not
+  persisted or sent to the browser.
+- A recognized OpenCode usage-limit message is classified as
+  `quota_limited`. Its recovery surface names the affected model when known,
+  explains when capacity resets, and keeps sanitized technical details
+  collapsed by default.
+- The user-facing provider-limit copy is localized. Desktop and phone layouts
+  expose the same failure explanation, technical details, and recovery actions.
+- A diagnostic for a background/title request, another OpenCode session, an
+  earlier prompt generation, or a prompt that has already settled cannot fail
+  the active turn.
+- An unrecognized, malformed, or unavailable diagnostic stream does not become
+  proof of failure. The prompt continues and the advisory inactivity recovery
+  remains available.
+
+## Diagnostic contract
+
+The internal normalized provider diagnostic contains only:
+
+| Field | Meaning |
+| --- | --- |
+| `source` | Stable diagnostic source identifier, initially `opencode_stderr` |
+| `provider_id` | Provider identifier reported by the agent, when present |
+| `model_id` | Model identifier reported by the agent, when present |
+| `message` | Sanitized provider message with URLs and identifiers removed |
+| `occurred_at` | Parsed diagnostic timestamp |
+| `reset_at` | Derived by adding a relative reset duration to `occurred_at`; absolute reset timestamps are not accepted in this version |
+
+The persisted recovery-message metadata uses
+`failure_kind: provider_quota_limited`, plus the safe model and reset fields,
+to select localized presentation. `error_output` may contain the same bounded,
+sanitized diagnostic message for the collapsed technical-details surface.
+
 ## Failure modes
 
-- If active tool identity is unavailable, the generic notice and cancel action
-  still appear.
+- If active tool identity is unavailable, the generic inactivity notice and
+  cancel action still appear.
 - If the agent acknowledges cancellation, normal cancellation reconciliation
   makes the session input-ready.
 - If the agent does not acknowledge cancellation, the existing bounded
   cancel-escalation path releases the prompt and reconciles the session.
 - If notice-message persistence fails, the failure is logged without changing
   or terminating the running session.
+- If OpenCode does not support error-only stderr emission, changes its log
+  format, or emits a line that fails validation, Kandev ignores the line and
+  retains normal ACP plus inactivity behavior.
+- If a validated terminal diagnostic races with an ACP prompt response, only
+  one terminal event settles the prompt generation.
+- If sanitization removes all usable provider text, Kandev surfaces a generic
+  OpenCode provider failure without exposing the raw diagnostic.
+
+## Persistence guarantees
+
+- Advisory stall notices retain their existing persisted-message behavior.
+- Sanitized provider failures use the existing session error and recovery
+  message persistence. They survive reloads like other recoverable failures.
+- Raw agent stderr remains a bounded, executor-local in-memory diagnostic. It
+  is not added to session metadata, messages, debug exports, or durable logs by
+  this feature.
 
 ## Scenarios
 
@@ -81,13 +148,37 @@ the turn.
 - **GIVEN** a quiet but legitimate long-running turn, **WHEN** the inactivity
   threshold passes and the user does not cancel, **THEN** Kandev leaves the
   turn and process running.
+- **GIVEN** the active OpenCode prompt emits a `stream error` for its own ACP
+  session, **WHEN** the diagnostic says the model's five-hour usage limit was
+  reached, **THEN** Kandev ends the running state and shows a localized
+  quota-limit recovery message with the model and reset time.
+- **GIVEN** that quota-limit recovery is shown, **WHEN** the user expands
+  technical details, **THEN** the sanitized provider message is visible and no
+  OpenCode workspace URL or identifier is present.
+- **GIVEN** OpenCode emits a title-generation error or an error for another
+  session, **WHEN** a foreground prompt is active, **THEN** Kandev ignores that
+  diagnostic and does not settle the foreground prompt.
+- **GIVEN** a correlated diagnostic and the ACP response arrive concurrently,
+  **WHEN** the turn settles, **THEN** exactly one terminal outcome is emitted
+  for that prompt generation.
+- **GIVEN** an OpenCode build without usable diagnostic stderr, **WHEN** its ACP
+  prompt hangs without further events, **THEN** the five-minute advisory notice
+  remains the recovery path.
+- **GIVEN** the provider-limit recovery renders on a phone viewport, **WHEN**
+  the user reads details or selects a recovery action, **THEN** the same outcome
+  is available through touch targets of at least 44px with no horizontal page
+  overflow.
 
 ## Out of scope
 
-- Automatically timing out, failing, cancelling, or killing quiet turns.
+- Automatically timing out, failing, cancelling, or killing a turn based only
+  on inactivity.
 - Making the inactivity threshold user-configurable.
-- Provider-specific repair of shell commands that hold child-process streams
-  open.
-- Treating event silence as proof that an agent process crashed.
-- Allowing Resume or direct prompt admission while the session remains
-  `RUNNING`.
+- Reading, tailing, or exposing an agent vendor's private log files.
+- Treating arbitrary stderr text as trusted terminal evidence.
+- Persisting raw stderr or raw OpenCode log records.
+- Following or exposing OpenCode account/balance URLs from provider errors.
+- Automatically purchasing capacity, changing models, or scheduling a retry at
+  the reset time.
+- Repairing OpenCode's ACP implementation upstream; OpenCode should still be
+  encouraged to return the provider failure directly from `session/prompt`.

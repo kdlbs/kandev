@@ -20,6 +20,7 @@ func (r *Repository) initSchema() error {
 		r.initWalkthroughsSchema,
 		r.initDocumentsSchema,
 		r.initSessionSchema,
+		r.initAttachmentsSchema,
 		r.initTaskResourceCleanupSchema,
 		r.initGitSchema,
 		r.initReviewSchema,
@@ -137,6 +138,8 @@ func (r *Repository) ensureRunnerProjectionTables() {
 			auto_archive_after_hours INTEGER DEFAULT 0,
 			agent_profile_id TEXT NOT NULL DEFAULT '',
 			stage_type TEXT NOT NULL DEFAULT 'custom',
+			auto_advance_requires_signal INTEGER NOT NULL DEFAULT 0,
+			cancel_triggers_turn_complete INTEGER NOT NULL DEFAULT 0,
 			created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
 			updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 		)`)
@@ -159,7 +162,29 @@ func (r *Repository) initCoreSchema() error {
 	if err := r.initTaskSchema(); err != nil {
 		return err
 	}
+	if err := r.initTaskStatusSummarySchema(); err != nil {
+		return err
+	}
 	return r.initCoreIndexes()
+}
+
+const taskStatusSummarySchemaDDL = `
+	CREATE TABLE IF NOT EXISTS task_status_summaries (
+		task_id TEXT PRIMARY KEY,
+		workspace_id TEXT NOT NULL,
+		revision INTEGER NOT NULL DEFAULT 0,
+		summary TEXT NOT NULL DEFAULT '{}',
+		updated_at TIMESTAMP NOT NULL,
+		FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
+	);
+
+	CREATE INDEX IF NOT EXISTS idx_task_status_summaries_workspace
+		ON task_status_summaries(workspace_id);
+`
+
+func (r *Repository) initTaskStatusSummarySchema() error {
+	_, err := r.db.Exec(taskStatusSummarySchemaDDL)
+	return err
 }
 
 // infraSchemaDDL is the concatenated CREATE TABLE block for infrastructure
@@ -253,6 +278,7 @@ const infraSchemaDDL = `
 		workflow_template_id TEXT DEFAULT '',
 		name TEXT NOT NULL,
 		description TEXT DEFAULT '',
+		prompt TEXT NOT NULL DEFAULT '',
 		hidden INTEGER NOT NULL DEFAULT 0,
 		created_at TIMESTAMP NOT NULL,
 		updated_at TIMESTAMP NOT NULL
@@ -310,6 +336,19 @@ func (r *Repository) initTaskSchema() error {
 		deleted_at TIMESTAMP,
 		FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE
 	);
+
+	CREATE TABLE IF NOT EXISTS repository_secret_bindings (
+		repository_id TEXT NOT NULL,
+		key TEXT NOT NULL,
+		secret_id TEXT NOT NULL,
+		created_at TIMESTAMP NOT NULL,
+		updated_at TIMESTAMP NOT NULL,
+		PRIMARY KEY (repository_id, key),
+		FOREIGN KEY (repository_id) REFERENCES repositories(id) ON DELETE CASCADE
+	);
+
+	CREATE INDEX IF NOT EXISTS idx_repository_secret_bindings_repository
+		ON repository_secret_bindings(repository_id);
 
 	CREATE TABLE IF NOT EXISTS task_repositories (
 		id TEXT PRIMARY KEY,
@@ -531,6 +570,42 @@ func (r *Repository) initDocumentsSchema() error {
 	return nil
 }
 
+// initAttachmentsSchema creates the descriptor registry for file-backed prompt
+// attachments. The storage key is intentionally opaque and never exposed in
+// API responses; bytes are owned by the attachment service.
+func (r *Repository) initAttachmentsSchema() error {
+	_, err := r.db.Exec(`
+	CREATE TABLE IF NOT EXISTS task_message_attachments (
+		id TEXT PRIMARY KEY,
+		owner_id TEXT NOT NULL DEFAULT '',
+		workspace_id TEXT NOT NULL,
+		task_id TEXT NOT NULL DEFAULT '',
+		session_id TEXT NOT NULL DEFAULT '',
+		message_id TEXT NOT NULL DEFAULT '',
+		queue_id TEXT NOT NULL DEFAULT '',
+		name TEXT NOT NULL DEFAULT '',
+		mime_type TEXT NOT NULL DEFAULT 'application/octet-stream',
+		kind TEXT NOT NULL DEFAULT 'resource',
+		delivery_mode TEXT NOT NULL DEFAULT 'prompt',
+		size_bytes INTEGER NOT NULL,
+		storage_key TEXT NOT NULL UNIQUE,
+		state TEXT NOT NULL DEFAULT 'staged',
+		expires_at TIMESTAMP NOT NULL,
+		created_at TIMESTAMP NOT NULL,
+		updated_at TIMESTAMP NOT NULL,
+		FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE
+	);
+	CREATE INDEX IF NOT EXISTS idx_task_message_attachments_owner_state
+		ON task_message_attachments(owner_id, state, expires_at);
+	CREATE INDEX IF NOT EXISTS idx_task_message_attachments_scope
+		ON task_message_attachments(workspace_id, task_id, session_id, state);
+	`)
+	if err != nil {
+		return fmt.Errorf("init attachments schema: %w", err)
+	}
+	return nil
+}
+
 func (r *Repository) initSessionSchema() error {
 	if err := r.initSessionWorktreeSchema(); err != nil {
 		return err
@@ -577,6 +652,12 @@ func (r *Repository) initMessageTurnSchema() error {
 	CREATE INDEX IF NOT EXISTS idx_messages_created_at ON task_session_messages(created_at);
 	CREATE INDEX IF NOT EXISTS idx_messages_session_created ON task_session_messages(task_session_id, created_at);
 	CREATE INDEX IF NOT EXISTS idx_messages_turn_id ON task_session_messages(turn_id);
+	-- The automation run log reads each run's last agent message by task_id
+	-- (automation.listRunsWithTaskState). Every other index here leads with
+	-- task_session_id, so without this that lookup falls back to the global
+	-- created_at index and rescans it once per run row.
+	CREATE INDEX IF NOT EXISTS idx_messages_task_author_created
+		ON task_session_messages(task_id, author_type, type, created_at DESC);
 	-- idx_messages_session_updated is created in runMigrations() after the
 	-- updated_at ADD COLUMN + backfill. Creating it here would fail on existing
 	-- DBs where CREATE TABLE IF NOT EXISTS is a no-op and the column does not

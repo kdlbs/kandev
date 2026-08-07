@@ -45,6 +45,7 @@ function httpDTO(overrides: Partial<TaskLike> = {}): TaskLike {
 function wsPayload(overrides: Partial<TaskLike> = {}): TaskLike {
   return {
     task_id: "task-1",
+    workspace_id: "ws-1",
     workflow_id: "wf-1",
     ...BASE_SCALARS,
     // Backend WS task.updated emits both the primary repository_id *and* the
@@ -66,6 +67,16 @@ function wsPayload(overrides: Partial<TaskLike> = {}): TaskLike {
 }
 
 describe("toKanbanTask — HTTP DTO / WS payload parity", () => {
+  it("carries workspace identity and archived state through both task shapes", () => {
+    const archivedAt = "2026-08-04T10:00:00Z";
+    const http = toKanbanTask(httpDTO({ archived_at: archivedAt } as Partial<TaskLike>));
+    const ws = toKanbanTask(wsPayload({ archived_at: archivedAt } as Partial<TaskLike>));
+
+    expect(http.workspaceId).toBe("ws-1");
+    expect(http.isArchived).toBe(true);
+    expect(ws.workspaceId).toBe("ws-1");
+    expect(ws.isArchived).toBe(true);
+  });
   it("plain task: both shapes produce identical KanbanTask", () => {
     expect(toKanbanTask(httpDTO())).toEqual(toKanbanTask(wsPayload()));
   });
@@ -130,6 +141,34 @@ describe("toKanbanTask — HTTP DTO / WS payload parity", () => {
     } as Record<string, unknown> as Partial<TaskLike>;
     expect(toKanbanTask(httpDTO(invalid)).taskPendingAction).toBeUndefined();
     expect(toKanbanTask(wsPayload(invalid)).taskPendingAction).toBeUndefined();
+  });
+
+  it("maps the interrupted marker from HTTP and WS shapes", () => {
+    const marked = { interrupted: true } as Partial<TaskLike>;
+    const http = toKanbanTask(httpDTO(marked));
+    const ws = toKanbanTask(wsPayload(marked));
+    expect(http.interrupted).toBe(true);
+    expect(ws.interrupted).toBe(true);
+    // Absent field maps to undefined so a partial update can never synthesize
+    // an interrupted reading.
+    expect(toKanbanTask(httpDTO()).interrupted).toBeUndefined();
+    expect(toKanbanTask(wsPayload()).interrupted).toBeUndefined();
+  });
+
+  it("maps the bounded status summary from HTTP and WS task shapes", () => {
+    const statusSummary = {
+      revision: 7,
+      updated_at: "2026-08-01T18:56:13.512Z",
+      pending_action: "permission" as const,
+      git: { additions: 4, deletions: 2, changed_files: 3 },
+      pull_request: { count: 1, open_count: 1, attention: true, number: 42 },
+    };
+    const http = toKanbanTask(httpDTO({ status_summary: statusSummary }));
+    const ws = toKanbanTask(wsPayload({ status_summary: statusSummary }));
+
+    expect(http.statusSummary).toEqual(statusSummary);
+    expect(ws.statusSummary).toEqual(statusSummary);
+    expect(http).toEqual(ws);
   });
 });
 

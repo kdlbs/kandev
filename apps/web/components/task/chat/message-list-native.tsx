@@ -17,6 +17,7 @@ import {
   MessageListStatus,
   MessageItem,
   UnreadDivider,
+  anchoredBarScrollOffsetPx,
   getItemKey,
   getConversationLoadingState,
   getEffectiveActiveTurnId,
@@ -71,6 +72,85 @@ function useTranscriptEdgeTracking(
   ]);
 }
 
+type NativeMessageListScrollParams = {
+  scrollRef: React.RefObject<HTMLDivElement | null>;
+  ref: React.ForwardedRef<MessageListHandle>;
+  items: RenderItem[];
+  messages: Message[];
+  isWorking: boolean;
+  sessionId: string | null;
+  enabled: boolean;
+  dividerBeforeItemKey?: string | null;
+  anchoredBarHeight?: number;
+  hasMore: boolean;
+  isLoadingMore: boolean;
+  loadMore: () => Promise<number>;
+  lastPromptMessageId: string | null | undefined;
+  onLastPromptEdgeChange: ((edge: LastPromptEdge) => void) | undefined;
+  firstMessageId: string | null | undefined;
+  onFirstMessageHiddenChange: ((isHidden: boolean) => void) | undefined;
+  /** Changes when transcript status rows can add/remove space above messages. */
+  scrollLayoutKey: string;
+};
+
+type ScrollToDividerOptions = {
+  onDividerScroll?: () => void;
+  scrollLayoutKey?: string;
+};
+
+function useNativeMessageListScroll(params: NativeMessageListScrollParams) {
+  const {
+    scrollRef,
+    ref,
+    items,
+    messages,
+    isWorking,
+    sessionId,
+    enabled,
+    dividerBeforeItemKey,
+    anchoredBarHeight,
+    hasMore,
+    isLoadingMore,
+    loadMore,
+    lastPromptMessageId,
+    onLastPromptEdgeChange,
+    firstMessageId,
+    onFirstMessageHiddenChange,
+    scrollLayoutKey,
+  } = params;
+  const { handleScrollToMessage, sentinelRef, markNotNearBottom } = useNativeScrollManagement({
+    scrollRef,
+    items,
+    messages,
+    isWorking,
+    sessionId,
+    enabled,
+    hasUnreadDivider: Boolean(dividerBeforeItemKey),
+    hasMore,
+    isLoadingMore,
+    loadMore,
+  });
+  const anchoredBarOffsetPx = anchoredBarScrollOffsetPx(anchoredBarHeight);
+  useEffect(() => {
+    scrollRef.current?.style.setProperty("--anchored-bar-h", `${anchoredBarOffsetPx}px`);
+  }, [anchoredBarOffsetPx]);
+  useScrollToDividerOrBottom(scrollRef, items.length, dividerBeforeItemKey, anchoredBarOffsetPx, {
+    onDividerScroll: markNotNearBottom,
+    scrollLayoutKey,
+  });
+  useImperativeHandle(ref, () => ({ scrollToMessage: handleScrollToMessage }), [
+    handleScrollToMessage,
+  ]);
+  useTranscriptEdgeTracking(
+    scrollRef,
+    lastPromptMessageId,
+    onLastPromptEdgeChange,
+    firstMessageId,
+    onFirstMessageHiddenChange,
+  );
+  return { handleScrollToMessage, sentinelRef };
+}
+
 type MessageRowProps = {
   item: RenderItem;
   sessionId: string | null;
@@ -106,7 +186,7 @@ function MessageRow({
   return (
     <div
       id={`msg-${key}`}
-      className="pb-2 scroll-mt-[calc(4rem+env(safe-area-inset-top))] sm:scroll-mt-0"
+      className="pb-2 scroll-mt-[calc(4rem+env(safe-area-inset-top))] sm:scroll-mt-[var(--anchored-bar-h,0px)]"
       style={{ overflowAnchor: "none" }}
     >
       {dividerBeforeItemKey === key && <UnreadDivider />}
@@ -184,15 +264,20 @@ type NativeMessageListBodyProps = {
  * - didScrollToDivider and didInitialScroll are separate latches so the
  *   bottom-fallback firing first (before dividerBeforeItemKey resolves)
  *   doesn't block the divider correction from still applying once it
- *   does. Embedded, always-invisible previews (isVisible hardcoded false,
+ *   does. The caller also supplies a layout key so a loading-state transition
+ *   with an unchanged item count can re-assert the target. Embedded, always-
+ *   invisible previews (isVisible hardcoded false,
  *   see TaskChatPanel) never resolve a divider, so they keep the
  *   original, unconditional scroll-to-bottom-on-mount behavior untouched.
  */
-function useScrollToDividerOrBottom(
+export function useScrollToDividerOrBottom(
   scrollRef: React.RefObject<HTMLDivElement | null>,
   itemCount: number,
   dividerBeforeItemKey: string | null | undefined,
+  anchoredBarOffsetPx: number,
+  options: ScrollToDividerOptions = {},
 ) {
+  const { onDividerScroll, scrollLayoutKey = "" } = options;
   const isUserScrollingRef = useRef(false);
   useEffect(() => {
     const el = scrollRef.current;
@@ -236,7 +321,14 @@ function useScrollToDividerOrBottom(
       if (useDockviewStore.getState().pendingChatScrollTop === null) {
         const dividerEl = el.querySelector<HTMLElement>(`[id="msg-${dividerBeforeItemKey}"]`);
         if (dividerEl) {
-          dividerEl.scrollIntoView({ block: "start" });
+          // scrollIntoView aligns against the viewport, which puts the target
+          // behind the fixed mobile session header instead of inside this
+          // nested scroll container. Move by the relative geometry instead;
+          // the desktop anchored prompt bar still reserves its measured height.
+          const containerRect = el.getBoundingClientRect();
+          const dividerRect = dividerEl.getBoundingClientRect();
+          el.scrollTop += dividerRect.top - containerRect.top - anchoredBarOffsetPx;
+          onDividerScroll?.();
           didScrollToDivider.current = true;
           didInitialScroll.current = true;
           return;
@@ -252,7 +344,7 @@ function useScrollToDividerOrBottom(
     }
     el.scrollTop = el.scrollHeight;
     didInitialScroll.current = true;
-  }, [itemCount, dividerBeforeItemKey]);
+  }, [itemCount, dividerBeforeItemKey, anchoredBarOffsetPx, onDividerScroll, scrollLayoutKey]);
 }
 
 /** Sentinel, status/footer, and transcript rows — everything below the
@@ -361,6 +453,7 @@ export const NativeMessageList = memo(
       onFirstMessageHiddenChange,
       stickyPromptBar,
       dividerBeforeItemKey,
+      anchoredBarHeight,
     }: MessageListProps,
     ref,
   ) {
@@ -378,28 +471,32 @@ export const NativeMessageList = memo(
     const streamingMessageId = getStreamingAgentMessageId(messages);
     const lastTurnGroupId = useMemo(() => getLastTurnGroupId(items), [items]);
     const autoScrollEnabled = useTranscriptAutoScrollEnabled(sessionId);
-    const { handleScrollToMessage, sentinelRef } = useNativeScrollManagement({
+    const { handleScrollToMessage, sentinelRef } = useNativeMessageListScroll({
       scrollRef,
+      ref,
       items,
       messages,
       isWorking,
       sessionId,
       enabled: autoScrollEnabled,
+      dividerBeforeItemKey,
+      anchoredBarHeight,
       hasMore,
       isLoadingMore,
       loadMore,
-    });
-    useScrollToDividerOrBottom(scrollRef, items.length, dividerBeforeItemKey);
-    useImperativeHandle(ref, () => ({ scrollToMessage: handleScrollToMessage }), [
-      handleScrollToMessage,
-    ]);
-    useTranscriptEdgeTracking(
-      scrollRef,
       lastPromptMessageId,
       onLastPromptEdgeChange,
       firstMessageId,
       onFirstMessageHiddenChange,
-    );
+      scrollLayoutKey: [
+        messagesLoading,
+        isInitialLoading,
+        showLoadingState,
+        isLoadingMore,
+        hasMore,
+        isWorking,
+      ].join(":"),
+    });
 
     return (
       <SessionPanelContent

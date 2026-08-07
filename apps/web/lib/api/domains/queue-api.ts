@@ -27,6 +27,45 @@ export class QueueEntryNotFoundError extends Error {
   }
 }
 
+/** Error thrown when a merge would push the combined entity references past
+ * the per-message cap; the server rejects the merge atomically instead of
+ * dropping references that were already persisted. */
+export class MergeReferenceOverflowError extends Error {
+  readonly code = "merge_reference_overflow";
+  constructor() {
+    super("Merging would exceed the per-message entity reference limit.");
+    this.name = "MergeReferenceOverflowError";
+  }
+}
+
+export type QueueSendNowErrorCode =
+  | "queue_empty"
+  | "queue_changed"
+  | "send_now_conflict"
+  | "turn_changed"
+  | "send_now_attachment_overflow"
+  | "send_now_reference_overflow";
+
+const QUEUE_SEND_NOW_ERROR_CODES: ReadonlySet<QueueSendNowErrorCode> = new Set([
+  "queue_empty",
+  "queue_changed",
+  "send_now_conflict",
+  "turn_changed",
+  "send_now_attachment_overflow",
+  "send_now_reference_overflow",
+]);
+
+/** Error returned when Send Now cannot safely claim its click-time selection. */
+export class QueueSendNowError extends Error {
+  readonly code: QueueSendNowErrorCode;
+
+  constructor(code: QueueSendNowErrorCode, message?: string) {
+    super(message ?? "Queued messages could not be sent now.");
+    this.name = "QueueSendNowError";
+    this.code = code;
+  }
+}
+
 type WSError = {
   code?: string;
   message?: string;
@@ -47,18 +86,31 @@ function asWSError(err: unknown): WSError | undefined {
   return undefined;
 }
 
+function knownQueueError(wsErr: WSError): Error | undefined {
+  switch (wsErr.code) {
+    case "queue_full": {
+      const size = typeof wsErr.details?.queue_size === "number" ? wsErr.details.queue_size : 0;
+      const max = typeof wsErr.details?.max === "number" ? wsErr.details.max : 0;
+      return new QueueFullError(size, max);
+    }
+    case "entry_not_found":
+      return new QueueEntryNotFoundError();
+    case "merge_reference_overflow":
+      return new MergeReferenceOverflowError();
+    default:
+      if (wsErr.code && QUEUE_SEND_NOW_ERROR_CODES.has(wsErr.code as QueueSendNowErrorCode)) {
+        return new QueueSendNowError(wsErr.code as QueueSendNowErrorCode, wsErr.message);
+      }
+      return undefined;
+  }
+}
+
 export function rethrowQueueError(err: unknown): never {
   const wsErr = asWSError(err);
-  if (wsErr?.code === "queue_full") {
-    const size = typeof wsErr.details?.queue_size === "number" ? wsErr.details.queue_size : 0;
-    const max = typeof wsErr.details?.max === "number" ? wsErr.details.max : 0;
-    throw new QueueFullError(size, max);
-  }
-  if (wsErr?.code === "entry_not_found") {
-    throw new QueueEntryNotFoundError();
-  }
-  if (wsErr?.message) {
-    throw new Error(wsErr.message);
+  if (wsErr) {
+    const known = knownQueueError(wsErr);
+    if (known) throw known;
+    if (wsErr.message) throw new Error(wsErr.message);
   }
   throw err instanceof Error ? err : new Error(String(err));
 }
@@ -71,11 +123,14 @@ export type QueueMessageParams = {
   plan_mode?: boolean;
   attachments?: Array<{
     type: string;
-    data: string;
+    data?: string;
+    attachment_id?: string;
     mime_type: string;
     name?: string;
+    size_bytes?: number;
     delivery_mode?: "prompt" | "path";
   }>;
+  context_files?: Array<{ path: string; name: string; is_directory?: boolean }>;
   entity_references?: EntityReference[];
   user_id?: string;
 };
@@ -109,6 +164,31 @@ export async function drainQueuedMessage(sessionId: string): Promise<{ drained: 
     throw new Error(WS_CLIENT_UNAVAILABLE);
   }
   return client.request<{ drained: boolean }>("message.queue.drain", { session_id: sessionId });
+}
+
+export type SendQueuedNowParams = {
+  session_id: string;
+  scope: "entry" | "all";
+  entry_id?: string;
+};
+
+/** Interrupt the active turn and replace it with an exact queue selection. */
+export async function sendQueuedNow(
+  params: SendQueuedNowParams,
+): Promise<{ session_id: string; dispatched: boolean; sent_count: number }> {
+  const client = getWebSocketClient();
+  if (!client) {
+    throw new Error(WS_CLIENT_UNAVAILABLE);
+  }
+  try {
+    return await client.request<{
+      session_id: string;
+      dispatched: boolean;
+      sent_count: number;
+    }>("message.queue.send_now", params);
+  } catch (err) {
+    rethrowQueueError(err);
+  }
 }
 
 /** Fetch the full queue snapshot (entries + capacity). */
@@ -150,9 +230,11 @@ export async function updateQueuedMessage(params: {
   content: string;
   attachments?: Array<{
     type: string;
-    data: string;
+    data?: string;
+    attachment_id?: string;
     mime_type: string;
     name?: string;
+    size_bytes?: number;
     delivery_mode?: "prompt" | "path";
   }>;
   entity_references: EntityReference[];
@@ -183,6 +265,23 @@ export async function removeQueuedEntry(params: {
   }
   try {
     return await client.request<{ entry_id: string }>("message.queue.remove", params);
+  } catch (err) {
+    rethrowQueueError(err);
+  }
+}
+
+/** Fold a queued entry into the entry directly above it. Throws QueueEntryNotFoundError if drained. */
+export async function mergeQueuedEntry(params: {
+  session_id: string;
+  entry_id: string;
+  user_id?: string;
+}): Promise<{ entry_id: string }> {
+  const client = getWebSocketClient();
+  if (!client) {
+    throw new Error(WS_CLIENT_UNAVAILABLE);
+  }
+  try {
+    return await client.request<{ entry_id: string }>("message.queue.merge", params);
   } catch (err) {
     rethrowQueueError(err);
   }

@@ -7,6 +7,7 @@ import (
 	agentdto "github.com/kandev/kandev/internal/agent/dto"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
+	"github.com/kandev/kandev/internal/task/statussummary"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
@@ -126,6 +127,16 @@ type TaskRepository interface {
 	GetWorkspaceTaskPrefix(ctx context.Context, workspaceID string) (prefix, officeWorkflowID string, err error)
 }
 
+// TaskStatusSummaryRepository stores the bounded task-level projection used by
+// list and switcher surfaces. Implementations must compare revisions and the
+// semantic payload atomically so retries and concurrent source observations do
+// not regress a task or create a revision for a no-op.
+type TaskStatusSummaryRepository interface {
+	LoadTaskStatusSummaries(ctx context.Context, taskIDs []string) (map[string]*statussummary.TaskStatusSummary, error)
+	CompareAndUpdateTaskStatusSummary(ctx context.Context, stored *statussummary.StoredTaskStatusSummary) (bool, error)
+	DeleteTaskStatusSummary(ctx context.Context, taskID string) error
+}
+
 // TaskRepoRepository handles the task↔repository junction table (models.TaskRepository rows).
 // Named TaskRepoRepository to reduce reader confusion with the TaskRepository sub-interface above.
 type TaskRepoRepository interface {
@@ -177,6 +188,20 @@ type MessageRepository interface {
 	ListMessagesForPlugin(ctx context.Context, filter models.PluginMessageFilter) ([]*models.Message, error)
 	SearchMessages(ctx context.Context, sessionID string, opts models.SearchMessagesOptions) ([]*models.Message, error)
 	DeleteMessage(ctx context.Context, id string) error
+}
+
+// AttachmentRepository stores file-backed prompt attachment descriptors.
+// Implementations must keep ownership and aggregate-claim checks in the same
+// transaction as state transitions so a retry cannot partially claim a batch.
+type AttachmentRepository interface {
+	CreateMessageAttachment(ctx context.Context, attachment *models.TaskMessageAttachment) error
+	GetMessageAttachment(ctx context.Context, id string) (*models.TaskMessageAttachment, error)
+	ListMessageAttachments(ctx context.Context, ids []string) ([]*models.TaskMessageAttachment, error)
+	ClaimMessageAttachments(ctx context.Context, ids []string, ownerID, workspaceID, taskID, sessionID string) error
+	DeleteClaimedMessageAttachments(ctx context.Context, ids []string, ownerID, taskID, sessionID string) ([]*models.TaskMessageAttachment, error)
+	DeleteMessageAttachmentsByTask(ctx context.Context, taskID string) ([]*models.TaskMessageAttachment, error)
+	DeleteMessageAttachment(ctx context.Context, id, ownerID string) error
+	MarkExpiredMessageAttachments(ctx context.Context, now time.Time) ([]*models.TaskMessageAttachment, error)
 }
 
 // TurnRepository handles conversation turn persistence.
@@ -249,6 +274,7 @@ type SessionWorktreeRepository interface {
 // TaskResourceCleanupRepository persists restart-safe task lifecycle cleanup.
 type TaskResourceCleanupRepository interface {
 	CreateTaskResourceCleanupJob(ctx context.Context, job *models.TaskResourceCleanupJob) error
+	HasActiveTaskResourceCleanupJob(ctx context.Context, taskID string) (bool, error)
 	GetTaskResourceCleanupJob(ctx context.Context, id string) (*models.TaskResourceCleanupJob, error)
 	GetTaskResourceCleanupJobByOperationID(ctx context.Context, operationID string) (*models.TaskResourceCleanupJob, error)
 	ListPreparedTaskResourceCleanupJobs(ctx context.Context) ([]*models.TaskResourceCleanupJob, error)
@@ -265,6 +291,7 @@ type TaskResourceCleanupRepository interface {
 type GitSnapshotRepository interface {
 	CreateGitSnapshot(ctx context.Context, snapshot *models.GitSnapshot) error
 	GetLatestGitSnapshot(ctx context.Context, sessionID string) (*models.GitSnapshot, error)
+	GetLatestGitSnapshotsBySessionIDs(ctx context.Context, sessionIDs []string) (map[string]*models.GitSnapshot, error)
 	GetFirstGitSnapshot(ctx context.Context, sessionID string) (*models.GitSnapshot, error)
 	GetGitSnapshotsBySession(ctx context.Context, sessionID string, limit int) ([]*models.GitSnapshot, error)
 	CreateSessionCommit(ctx context.Context, commit *models.SessionCommit) error
@@ -298,6 +325,22 @@ type RepositoryEntityRepository interface {
 	// single-process race; it is not a substitute for a database-level
 	// uniqueness constraint against writers outside this process.
 	GetRepositoryByLocalPath(ctx context.Context, workspaceID, localPath string) (*models.Repository, error)
+}
+
+// RepositorySecretBindingRepository stores normalized repository environment
+// references. It is optional on RepositoryEntityRepository to keep legacy
+// adapters source-compatible while the SQLite implementation rolls out.
+type RepositorySecretBindingRepository interface {
+	ListRepositorySecretBindings(ctx context.Context, repositoryID string) ([]*models.RepositorySecretBinding, error)
+	ListRepositorySecretBindingsByRepositoryIDs(ctx context.Context, repositoryIDs []string) (map[string][]*models.RepositorySecretBinding, error)
+	ReplaceRepositorySecretBindings(ctx context.Context, repositoryID string, bindings []models.RepositorySecretBinding) error
+}
+
+// RepositorySecretBindingMutator adds atomic repository-plus-binding writes.
+type RepositorySecretBindingMutator interface {
+	RepositorySecretBindingRepository
+	CreateRepositoryWithSecretBindings(ctx context.Context, repository *models.Repository, bindings []models.RepositorySecretBinding) error
+	UpdateRepositoryWithSecretBindings(ctx context.Context, repository *models.Repository, bindings []models.RepositorySecretBinding) error
 }
 
 // RepositoryCleanupRepository performs guarded deletion of repositories

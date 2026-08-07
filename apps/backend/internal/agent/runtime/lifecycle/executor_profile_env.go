@@ -8,17 +8,20 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 )
 
-// ExecutorProfileReader loads the executor profile selected for a session.
-// Implemented by the task repository; wired via SetExecutorProfileReader.
+// ExecutorProfileReader loads session state, task-cleanup admission, and the
+// executor profile selected for a session. Production launch safety requires
+// the task repository implementation wired via SetExecutorProfileReader.
 type ExecutorProfileReader interface {
 	GetTaskSession(ctx context.Context, id string) (*models.TaskSession, error)
+	HasActiveTaskResourceCleanupJob(ctx context.Context, taskID string) (bool, error)
 	GetTaskEnvironment(ctx context.Context, id string) (*models.TaskEnvironment, error)
 	GetExecutorProfile(ctx context.Context, id string) (*models.ExecutorProfile, error)
 }
 
-// SetExecutorProfileReader wires the reader used to expose executor-profile env
-// vars to user shell terminals. Nil → terminals fall back to inheriting only the
-// backend process environment.
+// SetExecutorProfileReader wires launch admission and the reader used to expose
+// executor-profile env vars to user shell terminals. Production must provide a
+// reader; nil is supported by isolated lifecycle tests, and terminals then fall
+// back to inheriting only the backend process environment.
 func (m *Manager) SetExecutorProfileReader(reader ExecutorProfileReader) {
 	m.executorProfileReader = reader
 }

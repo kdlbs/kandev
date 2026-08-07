@@ -204,6 +204,22 @@ func TestMCPStopTask_DirectParentStopsLongRunningChild(t *testing.T) {
 		}
 	}()
 
+	initialToolCallPersisted := make(chan struct{})
+	var initialToolCallOnce sync.Once
+	messageSubscription, err := ts.EventBus.Subscribe(events.MessageAdded, func(_ context.Context, event *bus.Event) error {
+		data, ok := event.Data.(map[string]interface{})
+		if ok && data["task_id"] == child.ID && data["type"] == string(models.MessageTypeToolCall) {
+			initialToolCallOnce.Do(func() { close(initialToolCallPersisted) })
+		}
+		return nil
+	})
+	require.NoError(t, err)
+	defer func() {
+		if err := messageSubscription.Unsubscribe(); err != nil {
+			t.Errorf("unsubscribe message observer: %v", err)
+		}
+	}()
+
 	launch, err := orchestratorSvc.LaunchSession(context.Background(), &orchestrator.LaunchSessionRequest{
 		TaskID: child.ID, Intent: orchestrator.IntentStart, AgentProfileID: "integration-agent",
 		Prompt: "Keep working until explicitly stopped.",
@@ -212,6 +228,7 @@ func TestMCPStopTask_DirectParentStopsLongRunningChild(t *testing.T) {
 	require.True(t, launch.Success)
 	require.NotEmpty(t, launch.SessionID)
 	mcpStopAwaitSignal(t, running, 2*time.Second, "child RUNNING state")
+	mcpStopAwaitSignal(t, initialToolCallPersisted, 2*time.Second, "initial tool-call persistence")
 
 	sessionBefore, err := ts.TaskRepo.GetTaskSession(context.Background(), launch.SessionID)
 	require.NoError(t, err)
@@ -221,6 +238,23 @@ func TestMCPStopTask_DirectParentStopsLongRunningChild(t *testing.T) {
 	require.Equal(t, v1.TaskStateInProgress, taskBefore.State)
 	require.True(t, manager.IsAgentRunningForSession(context.Background(), launch.SessionID))
 	promptsBefore := manager.promptCalls.Load()
+	// Agent stream delivery is asynchronous with respect to the RUNNING state
+	// notification. Wait for the simulated tool-call message before taking the
+	// baseline so a legitimate in-flight stream event is not mistaken for output
+	// created after the coordinator stop.
+	require.Eventually(t, func() bool {
+		messages, listErr := ts.TaskRepo.ListMessages(context.Background(), launch.SessionID)
+		if listErr != nil {
+			return false
+		}
+		for _, message := range messages {
+			if message.Type == models.MessageTypeToolCall &&
+				message.Metadata["tool_call_id"] == "long-running-work" {
+				return true
+			}
+		}
+		return false
+	}, 2*time.Second, 10*time.Millisecond)
 	messagesBefore, err := ts.TaskRepo.ListMessages(context.Background(), launch.SessionID)
 	require.NoError(t, err)
 

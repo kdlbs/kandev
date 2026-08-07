@@ -50,6 +50,7 @@ const reference: EntityReference = {
   url: "https://github.com/acme/repo/issues/42",
   scope: "acme/repo",
 };
+const REFERENCE_MARKDOWN = "[#acme/repo#42](https://github.com/acme/repo/issues/42)";
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -106,7 +107,7 @@ describe("useChatInputState", () => {
     const { result } = renderInputState(onSubmit);
 
     act(() => {
-      result.current.handleChange("[#acme/repo#42](https://github.com/acme/repo/issues/42)");
+      result.current.handleChange(REFERENCE_MARKDOWN);
       attachInputHandle(result.current.inputRef, vi.fn(), [reference]);
     });
     await waitFor(() => expect(result.current.value).toContain("acme/repo#42"));
@@ -117,7 +118,7 @@ describe("useChatInputState", () => {
 
     await waitFor(() =>
       expect(onSubmit).toHaveBeenCalledWith({
-        message: "[#acme/repo#42](https://github.com/acme/repo/issues/42)",
+        message: REFERENCE_MARKDOWN,
         entityReferences: [reference],
       }),
     );
@@ -185,6 +186,24 @@ describe("useChatInputState", () => {
   });
 });
 
+describe("useChatInputState immediate submission", () => {
+  it("submits a structured reference immediately after the editor change", () => {
+    const onSubmit = vi.fn<(...args: Parameters<SubmitHandler>) => ReturnType<SubmitHandler>>();
+    const { result } = renderInputState(onSubmit);
+
+    act(() => {
+      result.current.handleChange(REFERENCE_MARKDOWN);
+      attachInputHandle(result.current.inputRef, vi.fn(), [reference]);
+      result.current.handleSubmit(vi.fn());
+    });
+
+    expect(onSubmit).toHaveBeenCalledWith({
+      message: REFERENCE_MARKDOWN,
+      entityReferences: [reference],
+    });
+  });
+});
+
 describe("useChatInputState attachment feedback", () => {
   it("warns when a batch exceeds the maximum number of files", async () => {
     const { result } = renderInputState(vi.fn());
@@ -241,7 +260,7 @@ describe("useChatInputState attachment feedback", () => {
   it("warns when a pasted attachment exceeds the file size limit", async () => {
     const { result } = renderInputState(vi.fn());
     const oversizedFile = new File(["video"], "recording.mov", { type: "video/quicktime" });
-    Object.defineProperty(oversizedFile, "size", { value: 11 * 1024 * 1024 });
+    Object.defineProperty(oversizedFile, "size", { value: MAX_FILE_SIZE + 1 });
 
     await act(async () => {
       await result.current.addFiles([oversizedFile]);
@@ -249,7 +268,7 @@ describe("useChatInputState attachment feedback", () => {
 
     expect(toastMessage()).toContain("Attachment is too large");
     expect(toastMessage()).toContain(
-      `recording.mov is 11.0 MB. The maximum file size is ${formatBytes(MAX_FILE_SIZE)}.`,
+      `recording.mov is ${formatBytes(MAX_FILE_SIZE + 1)}. The maximum file size is ${formatBytes(MAX_FILE_SIZE)}.`,
     );
     expect(result.current.attachments).toEqual([]);
   });

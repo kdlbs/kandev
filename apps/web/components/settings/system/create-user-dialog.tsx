@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Button } from "@kandev/ui/button";
 import {
   Dialog,
@@ -44,11 +45,12 @@ function CreateUserFields({
   setRole,
   error,
 }: FormFields) {
+  const { t } = useTranslation();
   return (
     <div className="space-y-3">
       <div className="flex flex-col gap-1">
         <label htmlFor="create-user-display-name" className="text-xs text-muted-foreground">
-          Display name
+          {t("system:createUserDisplayName")}
         </label>
         <Input
           id="create-user-display-name"
@@ -59,7 +61,7 @@ function CreateUserFields({
       </div>
       <div className="flex flex-col gap-1">
         <label htmlFor="create-user-email" className="text-xs text-muted-foreground">
-          Email
+          {t("system:createUserEmail")}
         </label>
         <Input
           id="create-user-email"
@@ -71,7 +73,7 @@ function CreateUserFields({
       </div>
       <div className="flex flex-col gap-1">
         <label htmlFor="create-user-password" className="text-xs text-muted-foreground">
-          Password
+          {t("system:createUserPassword")}
         </label>
         <Input
           id="create-user-password"
@@ -84,15 +86,16 @@ function CreateUserFields({
       </div>
       <div className="flex flex-col gap-1">
         <label htmlFor="create-user-role" className="text-xs text-muted-foreground">
-          Role
+          {t("system:createUserRole")}
         </label>
         <Select value={role} onValueChange={setRole}>
           <SelectTrigger id="create-user-role" data-testid="create-user-role">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="member">Member</SelectItem>
-            <SelectItem value="admin">Admin</SelectItem>
+            {/* `value` is the wire role sent to the API; only the child text is copy. */}
+            <SelectItem value="member">{t("system:usersRoleMember")}</SelectItem>
+            <SelectItem value="admin">{t("system:usersRoleAdmin")}</SelectItem>
           </SelectContent>
         </Select>
       </div>
@@ -106,6 +109,7 @@ function CreateUserFields({
 }
 
 export function CreateUserDialog({ open, onOpenChange, onCreated }: Props) {
+  const { t } = useTranslation();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [displayName, setDisplayName] = useState("");
@@ -130,7 +134,7 @@ export function CreateUserDialog({ open, onOpenChange, onCreated }: Props) {
       onOpenChange(false);
       reset();
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Could not create user.");
+      setError(err instanceof ApiError ? err.message : t("system:createUserFailed"));
     } finally {
       setSubmitting(false);
     }
@@ -146,11 +150,8 @@ export function CreateUserDialog({ open, onOpenChange, onCreated }: Props) {
     >
       <DialogContent data-testid="create-user-dialog">
         <DialogHeader>
-          <DialogTitle>Add a user</DialogTitle>
-          <DialogDescription>
-            Creates an account directly with a password you set. Prefer an invite link when the user
-            should choose their own password.
-          </DialogDescription>
+          <DialogTitle>{t("system:createUserTitle")}</DialogTitle>
+          <DialogDescription>{t("system:createUserDescription")}</DialogDescription>
         </DialogHeader>
         <CreateUserFields
           displayName={displayName}
@@ -165,7 +166,7 @@ export function CreateUserDialog({ open, onOpenChange, onCreated }: Props) {
         />
         <DialogFooter>
           <Button variant="outline" className="cursor-pointer" onClick={() => onOpenChange(false)}>
-            Cancel
+            {t("common:cancel")}
           </Button>
           <Button
             className="cursor-pointer"
@@ -173,7 +174,7 @@ export function CreateUserDialog({ open, onOpenChange, onCreated }: Props) {
             onClick={() => void onSubmit()}
             data-testid="create-user-submit"
           >
-            {submitting ? "Creating..." : "Create user"}
+            {submitting ? t("system:createUserSubmitting") : t("system:createUserSubmit")}
           </Button>
         </DialogFooter>
       </DialogContent>

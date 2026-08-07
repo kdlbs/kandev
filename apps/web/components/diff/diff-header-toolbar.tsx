@@ -19,6 +19,8 @@ import type { FileDiffMetadata } from "@pierre/diffs";
 import { ExternalVcsFileLink } from "@/components/editors/external-vcs-file-link";
 import type { ViewMode } from "@/hooks/use-global-view-mode";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
+import { copyToClipboard } from "@/lib/utils/copy-to-clipboard";
+import { useTranslation } from "react-i18next";
 
 const iconBtn = "h-6 w-6 p-0 cursor-pointer opacity-60 hover:opacity-100";
 
@@ -99,16 +101,17 @@ function DiffHeaderToolbarButtons({
   externalLink,
   externalLinkSize,
 }: ToolbarButtonsProps) {
+  const { t } = useTranslation();
   return (
     <div className="flex items-center gap-1">
-      <ToolbarBtn onClick={onCopyDiff} tooltip="Copy diff">
+      <ToolbarBtn onClick={onCopyDiff} tooltip={t("diff:copyDiff")}>
         <IconCopy className="h-3.5 w-3.5" />
       </ToolbarBtn>
 
       <ExternalVcsFileLink {...externalLink} filePath={resolvedPath} size={externalLinkSize} />
 
       {onRevert && (
-        <ToolbarBtn onClick={() => onRevert(resolvedPath)} tooltip="Revert changes">
+        <ToolbarBtn onClick={() => onRevert(resolvedPath)} tooltip={t("diff:revertChanges")}>
           <IconArrowBackUp className="h-3.5 w-3.5" />
         </ToolbarBtn>
       )}
@@ -116,7 +119,7 @@ function DiffHeaderToolbarButtons({
       {onToggleExpandUnchanged && (
         <ToolbarBtn
           onClick={onToggleExpandUnchanged}
-          tooltip={expandUnchanged ? "Collapse unchanged lines" : "Expand all lines"}
+          tooltip={expandUnchanged ? t("diff:collapseUnchangedLines") : t("diff:expandAllLines")}
           className={expandUnchanged ? "opacity-100 bg-muted" : undefined}
         >
           {expandUnchanged ? (
@@ -129,7 +132,7 @@ function DiffHeaderToolbarButtons({
 
       <ToolbarBtn
         onClick={onToggleWordWrap}
-        tooltip="Toggle word wrap"
+        tooltip={t("diff:toggleWordWrap")}
         className={wordWrap ? "opacity-100 bg-muted" : undefined}
       >
         <IconTextWrap className="h-3.5 w-3.5" />
@@ -137,7 +140,7 @@ function DiffHeaderToolbarButtons({
 
       <ToolbarBtn
         onClick={onToggleViewMode}
-        tooltip={viewMode === "split" ? "Switch to unified view" : "Switch to split view"}
+        tooltip={viewMode === "split" ? t("diff:switchToUnifiedView") : t("diff:switchToSplitView")}
       >
         {viewMode === "split" ? (
           <IconLayoutRows className="h-3.5 w-3.5" />
@@ -149,7 +152,7 @@ function DiffHeaderToolbarButtons({
       {isMarkdownFile && onPreviewMarkdown && (
         <ToolbarBtn
           onClick={() => onPreviewMarkdown(resolvedPath)}
-          tooltip="Preview markdown"
+          tooltip={t("diff:previewMarkdown")}
           className={iconBtn}
         >
           <IconEye className="h-3.5 w-3.5" />
@@ -157,7 +160,7 @@ function DiffHeaderToolbarButtons({
       )}
 
       {onOpenFile && (
-        <ToolbarBtn onClick={() => onOpenFile(resolvedPath, repo)} tooltip="Edit">
+        <ToolbarBtn onClick={() => onOpenFile(resolvedPath, repo)} tooltip={t("common:edit")}>
           <IconPencil className="h-3.5 w-3.5" />
         </ToolbarBtn>
       )}
@@ -201,7 +204,7 @@ export function useDiffHeaderToolbar(opts: DiffHeaderToolbarOptions) {
         <DiffHeaderToolbarButtons
           resolvedPath={resolvedPath}
           isMarkdownFile={checkIsMarkdown(resolvedPath)}
-          onCopyDiff={() => navigator.clipboard.writeText(diff || "")}
+          onCopyDiff={() => void copyToClipboard(diff || "")}
           wordWrap={wordWrap}
           onToggleWordWrap={onToggleWordWrap}
           viewMode={viewMode}

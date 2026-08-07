@@ -387,7 +387,18 @@ func (g *GitOperator) ShowCommit(ctx context.Context, commitSHA string) (*Commit
 	}
 
 	// Get the diff with stats
-	diffOutput, err := g.runGitCommand(ctx, "show", "--format=", "--stat", "--numstat", "-p", commitSHA)
+	// Merge commits must be compared with their first parent so the patch
+	// matches the branch history shown by the commit list and GitHub.
+	diffOutput, err := g.runGitCommand(
+		ctx,
+		"show",
+		"--first-parent",
+		"--format=",
+		"--stat",
+		"--numstat",
+		"-p",
+		commitSHA,
+	)
 	if err != nil {
 		result.Error = fmt.Sprintf("failed to get commit diff: %s", err.Error())
 		return result, nil

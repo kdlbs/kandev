@@ -1,141 +1,116 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useRef } from "react";
+import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 import { useRouter } from "@/lib/routing/client-router";
 import { useTheme } from "@/components/theme/app-theme";
-import {
-  IconHome,
-  IconList,
-  IconSettings,
-  IconChartBar,
-  IconSun,
-  IconMoon,
-  IconRobot,
-  IconCpu,
-  IconFolder,
-  IconMessageCircle,
-  IconSparkles,
-  IconBrandGithub,
-} from "@tabler/icons-react";
+import { IconSun, IconMoon, IconMessageCircle, IconSparkles } from "@tabler/icons-react";
+import { useStaticDestinations } from "@/hooks/use-app-destinations";
+import { PALETTE_NAVIGATION_GROUP_KEY } from "@/lib/navigation/surface-policy";
 import { useRegisterCommands } from "@/hooks/use-register-commands";
+import { searchKeywords } from "@/lib/commands/search-keywords";
 import { useKeyboardShortcut } from "@/hooks/use-keyboard-shortcut";
 import { useAppShortcuts } from "@/hooks/use-app-shortcuts";
 import { usePluginShortcuts } from "@/hooks/use-plugin-shortcuts";
 import { useAppStore } from "@/components/state-provider";
 import { useQuickChatLauncher } from "@/hooks/use-quick-chat-launcher";
 import { getShortcut } from "@/lib/keyboard/shortcut-overrides";
-import { linkToTaskOverview } from "@/lib/links";
 import type { CommandItem } from "@/lib/commands/types";
+import { SettingsDiscoveryCommands } from "@/components/settings-discovery-commands";
 
 type PushFn = ReturnType<typeof useRouter>["push"];
 
-function buildNavigationCommands(push: PushFn): CommandItem[] {
-  return [
-    {
-      id: "nav-home",
-      label: "Go to Home",
-      group: "Navigation",
-      icon: <IconHome className="size-3.5" />,
-      keywords: ["home", "kanban", "board"],
-      action: () => push(linkToTaskOverview()),
-    },
-    {
-      id: "nav-tasks",
-      label: "Go to All Tasks",
-      group: "Navigation",
-      icon: <IconList className="size-3.5" />,
-      keywords: ["tasks", "list", "all"],
-      action: () => push("/tasks"),
-    },
-    {
-      id: "nav-settings",
-      label: "Go to Settings",
-      group: "Navigation",
-      icon: <IconSettings className="size-3.5" />,
-      keywords: ["settings", "preferences", "config", "general settings"],
-      action: () => push("/settings/general"),
-    },
-    {
-      id: "nav-stats",
-      label: "Go to Stats",
-      group: "Navigation",
-      icon: <IconChartBar className="size-3.5" />,
-      keywords: ["stats", "statistics", "analytics", "metrics"],
-      action: () => push("/stats"),
-    },
-    {
-      id: "nav-github",
-      label: "Go to GitHub Dashboard",
-      group: "Navigation",
-      icon: <IconBrandGithub className="size-3.5" />,
-      keywords: ["github", "dashboard", "pr", "pull request", "code review", "issues", "review"],
-      action: () => push("/github"),
-    },
-    {
-      id: "settings-agents",
-      label: "Agents Settings",
-      group: "Settings",
-      icon: <IconRobot className="size-3.5" />,
-      keywords: ["agents", "agent settings", "agent profiles", "installed agents", "claude"],
-      action: () => push("/settings/agents"),
-    },
-    {
-      id: "settings-executors",
-      label: "Executors Settings",
-      group: "Settings",
-      icon: <IconCpu className="size-3.5" />,
-      keywords: [
-        "executors",
-        "executor profiles",
-        "execution environment",
-        "environment variables",
-        "runtime",
-        "compute",
-      ],
-      action: () => push("/settings/executors"),
-    },
-    {
-      id: "settings-workspace",
-      label: "Workspace Settings",
-      group: "Settings",
-      icon: <IconFolder className="size-3.5" />,
-      keywords: ["workspace", "workspaces"],
-      action: () => push("/settings/workspace"),
-    },
-    {
-      id: "settings-prompts",
-      label: "Prompts Settings",
-      group: "Settings",
-      icon: <IconMessageCircle className="size-3.5" />,
-      keywords: [
-        "prompts",
-        "prompt settings",
-        "custom prompts",
-        "prompt snippets",
-        "prompt templates",
-      ],
-      action: () => push("/settings/prompts"),
-    },
-  ];
+// Catalog keys, not copy — safe at module scope (no `t()` call here). The
+// palette groups by this resolved value, so every producer must use these.
+const GROUP_NAVIGATION = PALETTE_NAVIGATION_GROUP_KEY;
+const GROUP_ACTIONS = "common:commandGroupActions";
+
+/**
+ * The Navigation group comes from the navigation manifest
+ * (`lib/navigation/core-destinations.ts`), so a destination cannot reach the palette
+ * without also being offered on the surfaces it declares. Command ids and copy
+ * live in each destination's `palette` block — they are stable API for tests and
+ * telemetry. The Settings group below stays hand-written: those are deep links
+ * into one destination, not destinations of their own.
+ */
+function useNavigationCommands(push: PushFn, t: TFunction): CommandItem[] {
+  // `useStaticDestinations`, not `useAppDestinations`: this component is mounted
+  // for the whole session, and the palette's one gated entry (GitHub) opts out of
+  // the availability check, so subscribing to integration polling here would add
+  // background requests for nothing.
+  const destinations = useStaticDestinations("palette");
+  // Cached on a value signature so the command array keeps its identity across
+  // unrelated re-renders — `useRegisterCommands` re-registers whenever the array
+  // changes. Same render-time cache pattern as `use-responsive-breakpoint.ts`;
+  // a `useMemo` cannot work here because the resolved list is rebuilt each render.
+  const group = t(GROUP_NAVIGATION);
+  const resolved = destinations.map((destination) => ({
+    destination,
+    keywords: destination.palette?.keywordsKey
+      ? searchKeywords(t, destination.palette.keywordsKey)
+      : [],
+  }));
+  const signature = JSON.stringify(
+    resolved.map(({ destination, keywords }) => [
+      destination.id,
+      destination.palette?.id,
+      destination.href,
+      destination.label,
+      group,
+      keywords,
+    ]),
+  );
+  const cacheRef = useRef<{
+    signature: string;
+    push: PushFn;
+    commands: CommandItem[];
+  } | null>(null);
+
+  if (
+    !cacheRef.current ||
+    cacheRef.current.signature !== signature ||
+    cacheRef.current.push !== push
+  ) {
+    cacheRef.current = {
+      signature,
+      push,
+      commands: resolved.map(({ destination, keywords }) => {
+        const Icon = destination.icon;
+        return {
+          id: destination.palette?.id ?? `nav-${destination.id}`,
+          label: destination.label,
+          group,
+          icon: <Icon className="size-3.5" />,
+          keywords,
+          action: () => push(destination.href),
+        };
+      }),
+    };
+  }
+
+  return cacheRef.current.commands;
 }
 
 function buildThemeCommand(
   resolvedTheme: string | undefined,
   setTheme: (theme: string) => void,
+  t: TFunction,
 ): CommandItem {
   const isDark = resolvedTheme === "dark";
   const destinationTheme = isDark ? "light" : "dark";
   return {
     id: "pref-theme",
-    label: isDark ? "Switch to Light Mode" : "Switch to Dark Mode",
-    group: "Preferences",
+    label: isDark ? t("common:commandSwitchToLightMode") : t("common:commandSwitchToDarkMode"),
+    group: t("common:commandGroupPreferences"),
     icon: isDark ? <IconSun className="size-3.5" /> : <IconMoon className="size-3.5" />,
-    keywords: ["theme", "color theme", "appearance"],
+    keywords: searchKeywords(t, "common:commandThemeKeywords"),
     action: () => setTheme(destinationTheme),
   };
 }
 
 export function GlobalCommands() {
+  const { t } = useTranslation();
   const router = useRouter();
   const { resolvedTheme, setTheme } = useTheme();
   const activeWorkspaceId = useAppStore((s) => s.workspaces.activeId);
@@ -148,42 +123,46 @@ export function GlobalCommands() {
   const quickChatCommand: CommandItem = useMemo(
     () => ({
       id: "quick-chat",
-      label: "Quick Chat",
-      group: "Actions",
+      label: t("common:commandQuickChat"),
+      group: t(GROUP_ACTIONS),
       icon: <IconMessageCircle className="size-3.5" />,
-      keywords: ["quick chat", "new quick chat", "quick question", "ask agent"],
+      keywords: searchKeywords(t, "common:commandQuickChatKeywords"),
       shortcut: quickChatShortcut,
       action: handleOpenQuickChat,
     }),
-    [handleOpenQuickChat, quickChatShortcut],
+    [handleOpenQuickChat, quickChatShortcut, t],
   );
 
   const configChatCommand: CommandItem = useMemo(
     () => ({
       id: "config-chat",
-      label: "Configuration Chat",
-      group: "Actions",
+      label: t("common:configurationChat"),
+      group: t(GROUP_ACTIONS),
       icon: <IconSparkles className="size-3.5" />,
-      keywords: [
-        "config chat",
-        "config mode",
-        "configure kandev",
-        "workflow configuration",
-        "mcp configuration",
-      ],
+      keywords: searchKeywords(t, "common:commandConfigChatKeywords"),
       action: handleOpenConfigChat,
     }),
-    [handleOpenConfigChat],
+    [handleOpenConfigChat, t],
   );
+
+  const navigationCommands = useNavigationCommands(router.push, t);
 
   const commands = useMemo<CommandItem[]>(
     () => [
-      ...buildNavigationCommands(router.push),
-      buildThemeCommand(resolvedTheme, setTheme),
+      ...navigationCommands,
+      buildThemeCommand(resolvedTheme, setTheme, t),
       quickChatCommand,
       configChatCommand,
     ],
-    [router.push, resolvedTheme, setTheme, quickChatCommand, configChatCommand],
+    [
+      navigationCommands,
+      router.push,
+      resolvedTheme,
+      setTheme,
+      quickChatCommand,
+      configChatCommand,
+      t,
+    ],
   );
 
   useRegisterCommands(commands);
@@ -194,5 +173,5 @@ export function GlobalCommands() {
   useAppShortcuts();
   usePluginShortcuts();
 
-  return null;
+  return <SettingsDiscoveryCommands />;
 }

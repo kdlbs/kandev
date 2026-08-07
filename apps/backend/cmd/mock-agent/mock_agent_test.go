@@ -1,11 +1,246 @@
 package main
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
+	"time"
+
+	acp "github.com/coder/acp-go-sdk"
 )
+
+type promptCancelUpdater struct {
+	started chan struct{}
+	once    sync.Once
+}
+
+func (u *promptCancelUpdater) SessionUpdate(context.Context, acp.SessionNotification) error {
+	u.once.Do(func() { close(u.started) })
+	return nil
+}
+
+func (u *promptCancelUpdater) RequestPermission(context.Context, acp.RequestPermissionRequest) (acp.RequestPermissionResponse, error) {
+	return acp.RequestPermissionResponse{}, nil
+}
+
+func TestMockAgentCancelStopsPrompt(t *testing.T) {
+	const sessionID = acp.SessionId("cancel-session")
+	updater := &promptCancelUpdater{started: make(chan struct{})}
+	agent := &mockAgent{
+		model:           "mock-fast",
+		conn:            updater,
+		sessions:        map[acp.SessionId]bool{sessionID: true},
+		promptCancels:   make(map[acp.SessionId]context.CancelFunc),
+		commandsEmitted: make(map[acp.SessionId]bool),
+	}
+
+	result := make(chan struct {
+		response acp.PromptResponse
+		err      error
+	}, 1)
+	go func() {
+		response, err := agent.Prompt(context.Background(), acp.PromptRequest{
+			SessionId: sessionID,
+			Prompt:    []acp.ContentBlock{acp.TextBlock("e2e:message(\"started\")\ne2e:delay(5000)")},
+		})
+		result <- struct {
+			response acp.PromptResponse
+			err      error
+		}{response: response, err: err}
+	}()
+
+	select {
+	case <-updater.started:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for the prompt to start")
+	}
+	if err := agent.Cancel(context.Background(), acp.CancelNotification{SessionId: sessionID}); err != nil {
+		t.Fatalf("cancel prompt: %v", err)
+	}
+
+	select {
+	case outcome := <-result:
+		if outcome.err != nil {
+			t.Fatalf("prompt returned error: %v", outcome.err)
+		}
+		if outcome.response.StopReason != acp.StopReasonCancelled {
+			t.Fatalf("stop reason = %q, want cancelled", outcome.response.StopReason)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("prompt did not stop after cancellation")
+	}
+}
+
+func TestInitializePromptQueueingCanBeDisabled(t *testing.T) {
+	t.Setenv("KANDEV_MOCK_AGENT_PROMPT_QUEUEING", "false")
+
+	agent := &mockAgent{}
+	response, err := agent.Initialize(context.Background(), acp.InitializeRequest{})
+	if err != nil {
+		t.Fatalf("initialize: %v", err)
+	}
+	if response.AgentCapabilities.Meta != nil {
+		if _, advertised := response.AgentCapabilities.Meta["claudeCode"]; advertised {
+			t.Fatal("prompt queueing capability advertised while disabled")
+		}
+	}
+}
+
+// capturingUpdater records every SessionUpdate it receives and exposes two
+// one-shot signals: anySeen (first notification of any kind — in practice the
+// available_commands_update Prompt emits before handlePrompt runs) and
+// textSeen (first agent_message_chunk). Tests for the steer replay setup
+// scenarios use these to synchronize on real events instead of sleeping.
+type capturingUpdater struct {
+	mu       sync.Mutex
+	notes    []acp.SessionNotification
+	anySeen  chan struct{}
+	textSeen chan struct{}
+	anyOnce  sync.Once
+	textOnce sync.Once
+}
+
+func newCapturingUpdater() *capturingUpdater {
+	return &capturingUpdater{anySeen: make(chan struct{}), textSeen: make(chan struct{})}
+}
+
+func (u *capturingUpdater) SessionUpdate(_ context.Context, n acp.SessionNotification) error {
+	u.mu.Lock()
+	u.notes = append(u.notes, n)
+	u.mu.Unlock()
+	u.anyOnce.Do(func() { close(u.anySeen) })
+	if n.Update.AgentMessageChunk != nil {
+		u.textOnce.Do(func() { close(u.textSeen) })
+	}
+	return nil
+}
+
+func (u *capturingUpdater) RequestPermission(context.Context, acp.RequestPermissionRequest) (acp.RequestPermissionResponse, error) {
+	return acp.RequestPermissionResponse{}, nil
+}
+
+func (u *capturingUpdater) textMessages() []string {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	var texts []string
+	for _, n := range u.notes {
+		if n.Update.AgentMessageChunk != nil && n.Update.AgentMessageChunk.Content.Text != nil {
+			texts = append(texts, n.Update.AgentMessageChunk.Content.Text.Text)
+		}
+	}
+	return texts
+}
+
+func newSteerSetupAgent(sessionID acp.SessionId, conn sessionUpdater) *mockAgent {
+	return &mockAgent{
+		model:           "mock-fast",
+		conn:            conn,
+		sessions:        map[acp.SessionId]bool{sessionID: true},
+		promptCancels:   make(map[acp.SessionId]context.CancelFunc),
+		commandsEmitted: make(map[acp.SessionId]bool),
+	}
+}
+
+// TestSteerFoldSetupEmitsNoAnswerUntilCancelled pins the "folded" replay mode
+// (docs/plans/mid-turn-steering/task-08-mock-agent-and-e2e.md): the
+// predecessor scenario must hold the turn open without ever answering on its
+// own, so a mid-turn steer sent against it can only be answered by the
+// steer's own successor turn.
+func TestSteerFoldSetupEmitsNoAnswerUntilCancelled(t *testing.T) {
+	const sessionID = acp.SessionId("steer-fold-session")
+	updater := newCapturingUpdater()
+	agent := newSteerSetupAgent(sessionID, updater)
+
+	result := make(chan acp.PromptResponse, 1)
+	go func() {
+		resp, err := agent.Prompt(context.Background(), acp.PromptRequest{
+			SessionId: sessionID,
+			Prompt:    []acp.ContentBlock{acp.TextBlock("/e2e:steer-fold-setup")},
+		})
+		if err != nil {
+			t.Errorf("prompt returned error: %v", err)
+		}
+		result <- resp
+	}()
+
+	select {
+	case <-updater.anySeen:
+		// Only proves the RPC is dispatched (the available_commands_update
+		// fires before handlePrompt runs) — not that it produced an answer.
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for the prompt to start")
+	}
+
+	if err := agent.Cancel(context.Background(), acp.CancelNotification{SessionId: sessionID}); err != nil {
+		t.Fatalf("cancel prompt: %v", err)
+	}
+
+	select {
+	case resp := <-result:
+		if resp.StopReason != acp.StopReasonCancelled {
+			t.Fatalf("stop reason = %q, want cancelled", resp.StopReason)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("fold setup did not stop holding after cancellation")
+	}
+	if texts := updater.textMessages(); len(texts) != 0 {
+		t.Fatalf("fold setup emitted its own answer %v, want none: a folded predecessor must never answer", texts)
+	}
+}
+
+// TestSteerDeferSetupAnswersBeforeHolding pins the "deferred" replay mode: the
+// predecessor scenario answers its own prompt for real, then keeps the turn
+// open so a mid-turn steer sent afterward runs as a genuinely separate turn.
+func TestSteerDeferSetupAnswersBeforeHolding(t *testing.T) {
+	const sessionID = acp.SessionId("steer-defer-session")
+	const wantAnswer = "Predecessor turn's own answer, delivered before any steer arrives."
+	updater := newCapturingUpdater()
+	agent := newSteerSetupAgent(sessionID, updater)
+
+	result := make(chan acp.PromptResponse, 1)
+	go func() {
+		resp, err := agent.Prompt(context.Background(), acp.PromptRequest{
+			SessionId: sessionID,
+			Prompt:    []acp.ContentBlock{acp.TextBlock("/e2e:steer-defer-setup")},
+		})
+		if err != nil {
+			t.Errorf("prompt returned error: %v", err)
+		}
+		result <- resp
+	}()
+
+	select {
+	case <-updater.textSeen:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for the predecessor's own answer")
+	}
+	texts := updater.textMessages()
+	if len(texts) != 1 || texts[0] != wantAnswer {
+		t.Fatalf("predecessor answer = %v, want exactly [%q]", texts, wantAnswer)
+	}
+
+	if err := agent.Cancel(context.Background(), acp.CancelNotification{SessionId: sessionID}); err != nil {
+		t.Fatalf("cancel prompt: %v", err)
+	}
+
+	select {
+	case resp := <-result:
+		if resp.StopReason != acp.StopReasonCancelled {
+			t.Fatalf("stop reason = %q, want cancelled", resp.StopReason)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("defer setup did not stop holding after cancellation")
+	}
+	// The hold must not itself produce a second answer — only the predecessor's
+	// own text, matching "predecessor answers, then the steer runs as its own
+	// turn" rather than the predecessor speaking twice.
+	if texts := updater.textMessages(); len(texts) != 1 {
+		t.Fatalf("defer setup emitted %v after its own answer, want exactly one message total", texts)
+	}
+}
 
 func TestParseModelFromArgs(t *testing.T) {
 	tests := []struct {

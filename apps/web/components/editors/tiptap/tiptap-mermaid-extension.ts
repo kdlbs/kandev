@@ -8,6 +8,8 @@ import type { Node as PmNode } from "@tiptap/pm/model";
 import type { NodeView } from "@tiptap/pm/view";
 import CodeBlockLowlight from "@tiptap/extension-code-block-lowlight";
 import mermaid from "mermaid";
+// Resolved inside the node view, which is a ProseMirror callback with no hook scope.
+import { t } from "@/lib/i18n";
 import {
   DEFAULT_SCALE,
   SCALE_STEP,
@@ -180,7 +182,7 @@ class MermaidNodeView implements NodeView {
     codeToggle.type = "button";
     codeToggle.className = "mermaid-zoom-btn";
     codeToggle.innerHTML = CODE_ICON_SVG;
-    codeToggle.title = "Toggle code";
+    codeToggle.title = t("editors:toggleCode");
     codeToggle.addEventListener("click", () => this.toggleCode());
 
     this.toolbar.append(

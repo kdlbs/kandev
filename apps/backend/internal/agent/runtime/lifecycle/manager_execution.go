@@ -12,6 +12,7 @@ import (
 
 	"github.com/kandev/kandev/internal/agent/runtime/activity"
 	"github.com/kandev/kandev/internal/agentctl/tracing"
+	"github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/common/appctx"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/secrets"
@@ -23,10 +24,51 @@ import (
 // have a resolved workspace path (typically while worktree preparation is in progress).
 var ErrSessionWorkspaceNotReady = errors.New("session workspace not ready")
 
+// ErrSessionTerminal indicates the task session has reached a terminal state
+// (cancelled/completed/failed) and no execution can be created for it. User-facing
+// workspace handlers treat this like ErrSessionWorkspaceNotReady: a graceful
+// not-ready envelope rather than an ERROR-logged failure, since a terminal session
+// will never recover an execution.
+var ErrSessionTerminal = errors.New("session is terminal")
+
 // coalescedExecutionCreationTimeout matches the runtime's 60-second agentctl
 // startup window while preventing blocked instance I/O from owning the shared
 // session slot and its activity lease for the lifetime of the manager.
 const coalescedExecutionCreationTimeout = time.Minute
+
+// ResolveSessionRuntime returns the runtime selected for a session without
+// creating or resuming its execution. Session-scoped handlers can use this to
+// reject unsupported runtimes before GetOrEnsureExecution starts resources.
+func (m *Manager) ResolveSessionRuntime(ctx context.Context, sessionID string) (agentruntime.Runtime, error) {
+	if sessionID == "" {
+		return "", fmt.Errorf("session_id is required")
+	}
+	if check := m.sessionAccessCheck; check != nil {
+		if err := check(ctx, sessionID); err != nil {
+			return "", err
+		}
+	}
+	if execution, exists := m.executionStore.GetBySessionID(sessionID); exists {
+		return execution.RuntimeName, nil
+	}
+	if m.workspaceInfoProvider == nil {
+		return "", fmt.Errorf("workspace info provider not configured")
+	}
+	info, err := m.workspaceInfoProvider.GetWorkspaceInfoForSession(ctx, "", sessionID)
+	if err != nil {
+		return "", fmt.Errorf("failed to resolve runtime for session %s: %w", sessionID, err)
+	}
+	if info == nil {
+		return "", fmt.Errorf("session %s not found", sessionID)
+	}
+	if info.ExecutorType != "" {
+		return models.ExecutorType(info.ExecutorType).Runtime(), nil
+	}
+	if info.RuntimeName != "" {
+		return info.RuntimeName, nil
+	}
+	return agentruntime.RuntimeStandalone, nil
+}
 
 // GetOrEnsureExecution returns an existing execution or creates one on-demand.
 // Use this for workspace-oriented operations (files, shell, inference, ports, vscode, LSP)
@@ -377,6 +419,10 @@ func (m *Manager) resumeExistingExecution(ctx context.Context, sessionID string,
 
 // createExecutionFromSessionInfo creates a new execution for a passthrough session
 // when no execution exists (e.g., backend restarted and execution store was cleared).
+//
+// Terminal sessions are rejected by the guard at the top of createExecution, the
+// same one every other creation path goes through, so this recovery path never
+// spawns a runtime for a session that ended before the restart.
 func (m *Manager) createExecutionFromSessionInfo(ctx context.Context, sessionID string) (*AgentExecution, error) {
 	if m.workspaceInfoProvider == nil {
 		return nil, fmt.Errorf("cannot restore session %s: workspace info provider not configured", sessionID)
@@ -468,11 +514,21 @@ func (m *Manager) createExecution(ctx context.Context, taskID string, info *Work
 	if info == nil {
 		return nil, fmt.Errorf("workspace info is required")
 	}
-	if err := reconcileWorkspaceSources(ctx, info.WorkspacePath, info.WorkspaceFolders); err != nil {
+	// A terminal session can never gain an execution, so reject it before
+	// reconciling the workspace, taking an activity lease, or creating a
+	// runtime instance. User-facing panels (terminal, git, files) reconnect on
+	// a timer; without this every retry paid for a full instance creation that
+	// the post-creation check below tore straight back down. That check stays —
+	// it guards the session that terminalizes *during* creation.
+	if err := m.ensureLaunchSessionStillActive(ctx, info.SessionID); err != nil {
+		return nil, err
+	}
+	owner := ownedDirectoryLinkOwner(taskID, info.TaskDirName)
+	if err := reconcileWorkspaceSources(ctx, info.WorkspacePath, info.WorkspaceFolders, owner); err != nil {
 		return nil, err
 	}
 	if info.ExecutorType == string(models.ExecutorTypeLocal) || info.ExecutorType == "local_pc" {
-		if err := reconcileWorkspaceRepositories(info.WorkspacePath, info.WorkspaceRepositories, m.logger); err != nil {
+		if err := reconcileWorkspaceRepositories(info.WorkspacePath, info.WorkspaceRepositories, m.logger, owner); err != nil {
 			return nil, err
 		}
 	}
@@ -505,16 +561,6 @@ func (m *Manager) createExecution(ctx context.Context, taskID string, info *Work
 		return nil, fmt.Errorf("agent type %q not found in registry", info.AgentID)
 	}
 
-	// Forward AgentProfile.EnvVars to the runtime instance. The Launch /
-	// ResumeSession paths merge these into req.Env via buildEnvForExecution
-	// before calling LaunchAgent; the lazy workspace-only path (any
-	// GetOrEnsureExecution* caller after backend restart) lands here directly,
-	// so without this merge the runtime instance gets spawned with empty env
-	// and CLAUDE_CONFIG_DIR (and any other workspace profile var) is lost.
-	// The agent subprocess inherits the instance env via agentctl, and ACP
-	// session/load then looks under the wrong SDK root → -32002 Resource not
-	// found.
-	env := map[string]string{}
 	var profileInfo *AgentProfileInfo
 	executionProfileID := workspaceExecutionProfileID(info)
 	if executionProfileID != "" && m.profileResolver != nil {
@@ -527,12 +573,34 @@ func (m *Manager) createExecution(ctx context.Context, taskID string, info *Work
 			profileInfo = resolvedProfile
 		}
 	}
-	m.mergeAgentProfileEnvFromInfo(ctx, profileInfo, env)
-	managedReq := &LaunchRequest{ExecutorType: info.ExecutorType, Env: env}
+	managedReq := &LaunchRequest{
+		TaskID:             taskID,
+		WorkspaceID:        info.WorkspaceID,
+		SessionID:          info.SessionID,
+		AgentProfileID:     info.AgentProfileID,
+		ExecutionProfileID: executionProfileID,
+		ExecutorType:       info.ExecutorType,
+		Env:                make(map[string]string),
+	}
 	if err := m.prepareManagedGoCacheEnvironment(ctx, managedReq); err != nil {
 		return nil, err
 	}
-	env = managedReq.Env
+	definitions, err := m.repositoryEnvironmentDefinitions(ctx, taskID, info.WorkspaceID)
+	if err != nil {
+		return nil, err
+	}
+	managedReq.EnvironmentDefinitions = append(managedReq.EnvironmentDefinitions, definitions...)
+	executorDefinitions, err := m.executorProfileEnvironmentDefinitions(ctx, workspaceExecutorProfileID(info))
+	if err != nil {
+		return nil, err
+	}
+	managedReq.EnvironmentDefinitions = append(managedReq.EnvironmentDefinitions, executorDefinitions...)
+	managedReq.ApprovedSecretEnvKeys = approvedSecretEnvironmentKeys(managedReq.EnvironmentDefinitions)
+	managedReq.EnvironmentResolutionRequired = true
+	env, err := m.buildEnvForExecution(ctx, executionID, managedReq, agentConfig, profileInfo)
+	if err != nil {
+		return nil, fmt.Errorf("build recovered environment: %w", err)
+	}
 	autoApprove := false
 	var autoApproveOverride *bool
 	if profileInfo != nil {
@@ -548,6 +616,10 @@ func (m *Manager) createExecution(ctx context.Context, taskID string, info *Work
 	}
 	if managedReq.managedGoCachePath != "" {
 		metadata[managedGoCacheMetadataKey] = managedReq.managedGoCachePath
+	}
+	remoteContributions, err := remoteContributionsFromMetadata(metadata)
+	if err != nil {
+		return nil, err
 	}
 
 	req := &ExecutorCreateRequest{
@@ -565,9 +637,11 @@ func (m *Manager) createExecution(ctx context.Context, taskID string, info *Work
 		AutoApprovePermissionsOverride: autoApproveOverride,
 		AgentConfig:                    agentConfig,
 		Metadata:                       metadata,
+		ApprovedSecretEnvKeys:          append([]string(nil), managedReq.ApprovedSecretEnvKeys...),
 		PreviousExecutionID:            info.AgentExecutionID,
 		AuthToken:                      m.revealRuntimeSecret(ctx, info.Metadata, MetadataKeyAuthTokenSecret),
 		BootstrapNonce:                 m.revealRuntimeSecret(ctx, info.Metadata, MetadataKeyBootstrapNonceSecret),
+		RemoteContributions:            remoteContributions,
 	}
 
 	if err := resumeRemoteInstancePreflight(ctx, rt, req); err != nil {
@@ -582,12 +656,11 @@ func (m *Manager) createExecution(ctx context.Context, taskID string, info *Work
 	execution := runtimeInstance.ToAgentExecution(req)
 	execution.RuntimeName = rt.Name()
 
-	// Cache the resolved profile env on the execution so a subsequent
-	// configureAndStartAgent (when this workspace-only execution is promoted)
-	// reuses it via mergeAgentProfileEnvForExecution instead of doing another
-	// secret-store round-trip. Mirrors the Launch path (manager_launch.go).
-	if env != nil {
-		m.cacheResolvedProfileEnv(execution, env)
+	// Cache only agent-profile values for the best-effort configure fallback.
+	// The effective runtime snapshot (including repository secrets) is already
+	// captured by ToAgentExecution and must not be mislabeled as profile data.
+	if profileInfo != nil && len(profileInfo.EnvVars) > 0 {
+		m.cacheResolvedProfileEnv(execution, m.resolveAgentProfileEnvVars(ctx, profileInfo.EnvVars))
 	}
 
 	// Set the ACP session ID for session resumption
@@ -604,6 +677,11 @@ func (m *Manager) createExecution(ctx context.Context, taskID string, info *Work
 		execution.agentctl.SetTraceContext(execution.SessionTraceContext())
 	}
 
+	if err := m.ensureLaunchSessionStillActive(ctx, info.SessionID); err != nil {
+		m.rollbackLaunchExecution(ctx, rt, runtimeInstance, execution, "session ended during runtime creation")
+		return nil, err
+	}
+
 	if addErr := m.executionStore.Add(execution); addErr != nil {
 		// Lost a race: another path created an execution for this session
 		// between our check and our Add. Roll back the runtime instance we
@@ -617,12 +695,21 @@ func (m *Manager) createExecution(ctx context.Context, taskID string, info *Work
 		}
 		return nil, fmt.Errorf("failed to register execution: %w", addErr)
 	}
-
-	// Persist executors_running row in lockstep with the in-memory Add so the
-	// DB never holds an execution_id the store doesn't know about. This is the
-	// structural fix for the divergence bug — pre-refactor, the orchestrator
-	// wrote the row later via a full-row UPDATE that could race with the store.
-	m.persistExecutorRunning(ctx, execution)
+	// Persist before the final session read so concurrent deletion cleanup can
+	// inventory this execution even if it started between Add and validation.
+	if err := m.persistExecutorRunningResult(ctx, execution); err != nil {
+		m.rollbackRegisteredLaunchAfterPersistFailure(rt, runtimeInstance, execution)
+		return nil, fmt.Errorf("persist execution registration: %w", err)
+	}
+	if err := m.ensureLaunchSessionStillActive(ctx, info.SessionID); err != nil {
+		if errors.Is(err, errTaskCleanupActive) {
+			m.rollbackRegisteredLaunchForTaskCleanup(rt, runtimeInstance, execution)
+		} else {
+			m.rollbackRegisteredLaunch(rt, runtimeInstance, execution, "session ended during execution registration")
+		}
+		return nil, err
+	}
+	m.setRuntimeInterest(execution.SessionID, true)
 
 	// Persist agentctl auth token only after the execution is tracked, so a
 	// race-lost rollback never leaves an orphaned secret in the store.
@@ -679,6 +766,13 @@ func workspaceExecutionProfileID(info *WorkspaceInfo) string {
 		return info.ExecutionProfileID
 	}
 	return info.AgentProfileID
+}
+
+func workspaceExecutorProfileID(info *WorkspaceInfo) string {
+	if info == nil {
+		return ""
+	}
+	return info.ExecutorProfileID
 }
 
 // rollbackRacedExecution tears down an execution that lost a session-conflict
@@ -759,8 +853,7 @@ func (m *Manager) persistRuntimeSecret(
 
 	m.logger.Debug("persisted runtime secret in secret store",
 		zap.String("instance_id", instance.InstanceID),
-		zap.String("metadata_key", metadataKey),
-		zap.String("secret_id", secret.ID))
+		zap.String("metadata_key", metadataKey))
 }
 
 func (m *Manager) revealRuntimeSecret(ctx context.Context, metadata map[string]interface{}, metadataKey string) string {
@@ -771,11 +864,10 @@ func (m *Manager) revealRuntimeSecret(ctx context.Context, metadata map[string]i
 	if secretID == "" {
 		return ""
 	}
-	value, err := m.secretStore.Reveal(ctx, secretID)
+	value, err := revealGlobalSecret(ctx, m.secretStore, secretID)
 	if err != nil {
 		m.logger.Warn("failed to reveal runtime secret",
 			zap.String("metadata_key", metadataKey),
-			zap.String("secret_id", secretID),
 			zap.Error(err))
 		return ""
 	}

@@ -15,9 +15,10 @@ import { Input } from "@kandev/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@kandev/ui/dialog";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast/sonner";
 import type { AgentProfile } from "@/lib/state/slices/office/types";
 import * as officeApi from "@/lib/api/domains/office-api";
+import { useTranslation } from "react-i18next";
 
 type Channel = {
   id: string;
@@ -40,6 +41,7 @@ const PLATFORM_ICONS: Record<string, typeof IconBrandTelegram> = {
 };
 
 export function AgentChannelsTab({ agent }: AgentChannelsTabProps) {
+  const { t } = useTranslation();
   const [channels, setChannels] = useState<Channel[]>([]);
   const [addDialogOpen, setAddDialogOpen] = useState(false);
 
@@ -53,7 +55,7 @@ export function AgentChannelsTab({ agent }: AgentChannelsTabProps) {
         }
       })
       .catch((err) => {
-        toast.error(err instanceof Error ? err.message : "Failed to load channels");
+        toast.error(err instanceof Error ? err.message : t("office:failedToLoadChannels"));
       });
     return () => {
       cancelled = true;
@@ -65,9 +67,9 @@ export function AgentChannelsTab({ agent }: AgentChannelsTabProps) {
       try {
         await officeApi.deleteChannel(agent.id, channelId);
         setChannels((prev) => prev.filter((c) => c.id !== channelId));
-        toast.success("Channel deleted");
+        toast.success(t("office:channelDeleted"));
       } catch (err) {
-        toast.error(err instanceof Error ? err.message : "Failed to delete channel");
+        toast.error(err instanceof Error ? err.message : t("office:failedToDeleteChannel"));
       }
     },
     [agent.id],
@@ -88,14 +90,14 @@ export function AgentChannelsTab({ agent }: AgentChannelsTabProps) {
           className="cursor-pointer"
         >
           <IconPlus className="h-4 w-4 mr-1" />
-          Add Channel
+          {t("office:addChannel")}
         </Button>
       </div>
 
       {channels.length === 0 ? (
         <div className="flex items-center justify-center py-12">
           <p className="text-sm text-muted-foreground">
-            No channels configured. Add a channel to enable external messaging.
+            {t("office:noChannelsConfiguredAddAChannel")}
           </p>
         </div>
       ) : (
@@ -121,6 +123,7 @@ export function AgentChannelsTab({ agent }: AgentChannelsTabProps) {
 }
 
 function ChannelRow({ channel, onDelete }: { channel: Channel; onDelete: () => void }) {
+  const { t } = useTranslation();
   const PlatformIcon = PLATFORM_ICONS[channel.platform] ?? IconWebhook;
   const statusColor =
     channel.status === "active"
@@ -133,7 +136,7 @@ function ChannelRow({ channel, onDelete }: { channel: Channel; onDelete: () => v
       <div className="flex-1 min-w-0">
         <p className="text-sm font-medium capitalize">{channel.platform}</p>
         <p className="text-xs text-muted-foreground">
-          Created {new Date(channel.created_at).toLocaleDateString()}
+          {t("office:sortCreated")} {new Date(channel.created_at).toLocaleDateString()}
         </p>
       </div>
       <Badge className={statusColor}>{channel.status}</Badge>
@@ -148,7 +151,7 @@ function ChannelRow({ channel, onDelete }: { channel: Channel; onDelete: () => v
             <IconTrash className="h-4 w-4" />
           </Button>
         </TooltipTrigger>
-        <TooltipContent>Delete channel</TooltipContent>
+        <TooltipContent>{t("office:deleteChannel")}</TooltipContent>
       </Tooltip>
     </div>
   );
@@ -165,6 +168,7 @@ function AddChannelDialog({
   agent: AgentProfile;
   onCreated: (channel: Channel) => void;
 }) {
+  const { t } = useTranslation();
   const [platform, setPlatform] = useState("telegram");
   const [config, setConfig] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -179,9 +183,9 @@ function AddChannelDialog({
         status: "active",
       });
       onCreated((res as { channel: Channel }).channel);
-      toast.success("Channel added");
+      toast.success(t("office:channelAdded"));
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Failed to add channel");
+      toast.error(err instanceof Error ? err.message : t("office:failedToAddChannel"));
     } finally {
       setSubmitting(false);
     }
@@ -191,35 +195,35 @@ function AddChannelDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Add Channel</DialogTitle>
+          <DialogTitle>{t("office:addChannel")}</DialogTitle>
         </DialogHeader>
         <div className="space-y-4">
           <div>
-            <label className="text-sm font-medium">Platform</label>
+            <label className="text-sm font-medium">{t("office:platform")}</label>
             <Select value={platform} onValueChange={setPlatform}>
               <SelectTrigger className="mt-1 cursor-pointer">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="telegram" className="cursor-pointer">
-                  Telegram
+                  {t("office:telegram")}
                 </SelectItem>
                 <SelectItem value="slack" className="cursor-pointer">
                   Slack
                 </SelectItem>
                 <SelectItem value="discord" className="cursor-pointer">
-                  Discord
+                  {t("office:discord")}
                 </SelectItem>
                 <SelectItem value="webhook" className="cursor-pointer">
-                  Webhook
+                  {t("office:webhook")}
                 </SelectItem>
               </SelectContent>
             </Select>
           </div>
           <div>
-            <label className="text-sm font-medium">Config (JSON)</label>
+            <label className="text-sm font-medium">{t("office:configJson")}</label>
             <Input
-              placeholder='{"bot_token": "...", "chat_id": "..."}'
+              placeholder={t("office:botTokenChatId")}
               value={config}
               onChange={(e) => setConfig(e.target.value)}
               className="mt-1 font-mono text-xs"
@@ -228,10 +232,10 @@ function AddChannelDialog({
         </div>
         <DialogFooter>
           <Button variant="ghost" onClick={() => onOpenChange(false)} className="cursor-pointer">
-            Cancel
+            {t("common:cancel")}
           </Button>
           <Button onClick={handleSubmit} disabled={submitting} className="cursor-pointer">
-            {submitting ? "Creating..." : "Add Channel"}
+            {submitting ? t("office:creating") : t("office:addChannel")}
           </Button>
         </DialogFooter>
       </DialogContent>

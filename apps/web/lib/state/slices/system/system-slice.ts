@@ -7,11 +7,10 @@ export const defaultSystemState: SystemSliceState = {
     diskUsage: null,
     database: null,
     backups: { items: [], loaded: false },
-    logs: { files: [], tail: [], tailLoaded: false },
     updates: null,
     jobs: {},
     metrics: null,
-    storage: { overview: null, runs: [], quarantine: [] },
+    storage: { policy: null, overview: null, runs: [], quarantine: [] },
   },
 };
 
@@ -42,15 +41,6 @@ export const createSystemSlice: StateCreator<
     set((draft) => {
       draft.system.backups = { items, loaded: true };
     }),
-  setSystemLogs: (files) =>
-    set((draft) => {
-      draft.system.logs.files = files;
-    }),
-  setSystemLogTail: (lines) =>
-    set((draft) => {
-      draft.system.logs.tail = lines;
-      draft.system.logs.tailLoaded = true;
-    }),
   setSystemUpdates: (updates) =>
     set((draft) => {
       draft.system.updates = updates;
@@ -66,6 +56,10 @@ export const createSystemSlice: StateCreator<
   setSystemMetricsSnapshot: (snapshot) =>
     set((draft) => {
       draft.system.metrics = snapshot;
+    }),
+  setSystemStoragePolicy: (policy) =>
+    set((draft) => {
+      draft.system.storage.policy = policy;
     }),
   setSystemStorageOverview: (overview) =>
     set((draft) => {

@@ -13,6 +13,7 @@ import (
 	"github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/common/constants"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/common/subproc"
 	"github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/task/models"
 	taskservice "github.com/kandev/kandev/internal/task/service"
@@ -158,32 +159,35 @@ func (a *environmentDestroyerAdapter) PushEnvironmentBranch(ctx context.Context,
 	if env.WorktreePath == "" {
 		return fmt.Errorf("push-before-reset is not supported for this environment type; please push manually first")
 	}
-	pushCtx, cancel := context.WithTimeout(ctx, pushBranchTimeout)
-	defer cancel()
-
 	branch := strings.TrimSpace(env.WorktreeBranch)
-	var cmd *exec.Cmd
+	var args []string
 	if branch == "" {
-		cmd = exec.CommandContext(pushCtx, "git", "push")
+		args = []string{"push"}
 	} else {
 		// Prefer the branch's configured upstream remote so this works for
 		// repos whose primary remote isn't called "origin" (e.g. fork
 		// workflows with "upstream"/"github"). Fall back to "origin" only
 		// when no upstream is set, matching the historical behaviour.
-		remote := detectBranchRemote(pushCtx, env.WorktreePath, branch)
-		cmd = exec.CommandContext(pushCtx, "git", "push", remote, branch)
+		remote := detectBranchRemote(ctx, env.WorktreePath, branch)
+		args = []string{"push", remote, branch}
 	}
-	cmd.Dir = env.WorktreePath
-	// Disable interactive credential prompts — without this, a missing
-	// credential helper can hang waiting on stdin even with the timeout above
-	// (signal delivery is gated behind the prompt read).
-	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		if errors.Is(pushCtx.Err(), context.DeadlineExceeded) {
+	out, runErr, execCtxErr := subproc.RunGitCombinedAfterAcquire(ctx, subproc.GitInteractive, pushBranchTimeout, func(execCtx context.Context) *exec.Cmd {
+		cmd := subproc.NewGitCommand(execCtx, args...)
+		cmd.Dir = env.WorktreePath
+		// Disable interactive credential prompts — without this, a missing
+		// credential helper can hang waiting on stdin even with the timeout
+		// above (signal delivery is gated behind the prompt read).
+		cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
+		return cmd
+	})
+	if runErr != nil || execCtxErr != nil {
+		if errors.Is(execCtxErr, context.DeadlineExceeded) {
 			return fmt.Errorf("git push timed out after %s in %s (branch %q); push manually and retry", pushBranchTimeout, env.WorktreePath, branch)
 		}
-		return fmt.Errorf("git push failed: %s: %w", strings.TrimSpace(string(out)), err)
+		if runErr == nil {
+			runErr = execCtxErr
+		}
+		return fmt.Errorf("git push failed: %s: %w", strings.TrimSpace(string(out)), runErr)
 	}
 	return nil
 }
@@ -197,10 +201,17 @@ const defaultGitRemote = "origin"
 // the worktree's git config. Falls back to defaultGitRemote when no upstream
 // is set (matching the historical hard-coded behaviour).
 func detectBranchRemote(ctx context.Context, dir, branch string) string {
-	cmd := exec.CommandContext(ctx, "git", "config", "--get", "branch."+branch+".remote")
-	cmd.Dir = dir
-	out, err := cmd.Output()
-	if err != nil {
+	out, runErr, execCtxErr := subproc.RunGitOutputAfterAcquire(
+		ctx,
+		subproc.GitInteractive,
+		pushBranchTimeout,
+		func(execCtx context.Context) *exec.Cmd {
+			cmd := subproc.NewGitCommand(execCtx, "config", "--get", "branch."+branch+".remote")
+			cmd.Dir = dir
+			return cmd
+		},
+	)
+	if runErr != nil || execCtxErr != nil {
 		return defaultGitRemote
 	}
 	remote := strings.TrimSpace(string(out))

@@ -12,6 +12,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/task/models"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
+	"github.com/kandev/kandev/internal/worktree"
 )
 
 type remoteWorkspaceMaterializerStub struct {
@@ -269,7 +270,7 @@ func TestWorkspaceSourceMaterializer_RemoteRejectsLocalOnlyAdditionalRepositoryB
 func TestWorkspaceSourceMaterializer_LocalFolderCreatesLiveTaskEntryAndRebindsSessions(t *testing.T) {
 	ctx := context.Background()
 	repo := newMaterializerRepo(t)
-	tasksBase := filepath.Join(t.TempDir(), "tasks")
+	tasksBase := filepath.Join(canonicalTempDir(t), "tasks")
 	mgr := newMaterializerWorktreeMgr(t, filepath.Join(tasksBase, "task-1"))
 	source := filepath.Join(t.TempDir(), "notes")
 	if err := os.MkdirAll(source, 0o755); err != nil {
@@ -319,7 +320,7 @@ func TestWorkspaceSourceMaterializer_LocalFolderCreatesLiveTaskEntryAndRebindsSe
 func TestWorkspaceSourceMaterializer_LocalFolderUsesPersistedBatchSourceOnlyOnce(t *testing.T) {
 	ctx := context.Background()
 	repo := newMaterializerRepo(t)
-	tasksBase := filepath.Join(t.TempDir(), "tasks")
+	tasksBase := filepath.Join(canonicalTempDir(t), "tasks")
 	mgr := newMaterializerWorktreeMgr(t, filepath.Join(tasksBase, "task-1"))
 	source := filepath.Join(t.TempDir(), "notes")
 	if err := os.MkdirAll(source, 0o755); err != nil {
@@ -356,7 +357,7 @@ func TestWorkspaceSourceMaterializer_LocalFolderUsesPersistedBatchSourceOnlyOnce
 func TestWorkspaceSourceMaterializer_LocalPromotionPreservesPrimaryRepository(t *testing.T) {
 	ctx := context.Background()
 	repo := newMaterializerRepo(t)
-	tasksBase := filepath.Join(t.TempDir(), "tasks")
+	tasksBase := filepath.Join(canonicalTempDir(t), "tasks")
 	mgr := newMaterializerWorktreeMgr(t, filepath.Join(tasksBase, "task-1"))
 	primary := filepath.Join(t.TempDir(), "primary")
 	folder := filepath.Join(t.TempDir(), "notes")
@@ -402,10 +403,10 @@ func TestWorkspaceSourceMaterializer_LocalPromotionPreservesPrimaryRepository(t 
 func TestWorkspaceSourceMaterializer_LocalClonesProviderRepositoryBeforeLinking(t *testing.T) {
 	ctx := context.Background()
 	repo := newMaterializerRepo(t)
-	tasksBase := filepath.Join(t.TempDir(), "tasks")
+	tasksBase := filepath.Join(canonicalTempDir(t), "tasks")
 	mgr := newMaterializerWorktreeMgr(t, filepath.Join(tasksBase, "task-1"))
 	seedWorkspaceSourceTask(t, repo, t.TempDir())
-	clonePath := filepath.Join(t.TempDir(), "cloned")
+	clonePath := filepath.Join(canonicalTempDir(t), "cloned")
 	if err := os.MkdirAll(clonePath, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -478,12 +479,59 @@ func TestWorkspaceSourceMaterializer_RollsBackLinkAndPathWhenAdoptionFails(t *te
 	}
 }
 
+func TestRollbackOwnedDirectoryLinkPreservesReplacementFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "notes")
+	const contents = "user replacement"
+	if err := os.WriteFile(path, []byte(contents), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	err := rollbackOwnedDirectoryLink(ownedDirectoryLinkUndo{Path: path})
+	if err == nil {
+		t.Fatal("rollbackOwnedDirectoryLink removed a replacement file")
+	}
+	if got, readErr := os.ReadFile(path); readErr != nil || string(got) != contents {
+		t.Fatalf("replacement file = %q, %v; want it preserved", got, readErr)
+	}
+}
+
+func TestWorkspaceSourceMaterializer_RestoresRepointedLinkWhenAdoptionFails(t *testing.T) {
+	ctx := context.Background()
+	repo := newMaterializerRepo(t)
+	tasksBase := filepath.Join(canonicalTempDir(t), "tasks")
+	root := filepath.Join(tasksBase, "task-1")
+	mgr := newMaterializerWorktreeMgr(t, root)
+	original := filepath.Join(canonicalTempDir(t), "original-notes")
+	replacement := filepath.Join(canonicalTempDir(t), "replacement-notes")
+	for path, content := range map[string]string{original: "before", replacement: "after"} {
+		if err := os.MkdirAll(path, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(path, "note.txt"), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	seedWorkspaceSourceTask(t, repo, original)
+	if _, err := worktree.CreateOwnedDirectoryLink(root, "notes", original); err != nil {
+		t.Fatalf("seed owned directory link: %v", err)
+	}
+
+	materializer := &workspaceSourceMaterializer{repo: repo, worktreeMgr: mgr, rescanner: &workspaceSourceRescanStub{err: os.ErrPermission}, logger: newTestLogger()}
+	batch := &models.WorkspaceSourceBatch{TaskID: "task-1", Sources: []models.WorkspaceSource{{Folder: &models.TaskWorkspaceFolder{DisplayName: "notes", LocalPath: replacement}}}}
+	if _, err := materializer.MaterializeWorkspaceSources(ctx, "task-1", batch); err == nil {
+		t.Fatal("MaterializeWorkspaceSources succeeded despite failed adoption")
+	}
+	if got, err := os.ReadFile(filepath.Join(root, "notes", "note.txt")); err != nil || string(got) != "before" {
+		t.Fatalf("repointed link after rollback = %q, %v; want original target restored", got, err)
+	}
+}
+
 func TestWorkspaceSourceMaterializer_RebindFailureRestoresEarlierSessionsInReverseOrder(t *testing.T) {
 	ctx := context.Background()
 	repo := newMaterializerRepo(t)
-	tasksBase := filepath.Join(t.TempDir(), "tasks")
+	tasksBase := filepath.Join(canonicalTempDir(t), "tasks")
 	mgr := newMaterializerWorktreeMgr(t, filepath.Join(tasksBase, "task-1"))
-	source := filepath.Join(t.TempDir(), "notes")
+	source := filepath.Join(canonicalTempDir(t), "notes")
 	if err := os.MkdirAll(source, 0o755); err != nil {
 		t.Fatal(err)
 	}

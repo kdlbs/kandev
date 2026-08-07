@@ -4,6 +4,7 @@ import { useEffect, useId, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { cn } from "@/lib/utils";
 import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard";
+import { useTranslation } from "react-i18next";
 
 type InlineCodeProps = {
   children: React.ReactNode;
@@ -15,6 +16,7 @@ type TooltipAnchor = { left: number; top: number };
 
 // Tooltip is portaled to document.body so overflow-hidden ancestors (e.g. the user-message bubble) can't clip it.
 export function InlineCode({ children }: InlineCodeProps) {
+  const { t } = useTranslation();
   const { copy } = useCopyToClipboard();
   const [anchor, setAnchor] = useState<TooltipAnchor | null>(null);
   const [hovered, setHovered] = useState(false);
@@ -88,7 +90,7 @@ export function InlineCode({ children }: InlineCodeProps) {
               "animate-in fade-in-0 duration-150",
             )}
           >
-            {copied ? "Copied!" : "Copy to clipboard"}
+            {copied ? t("task:copied") : t("task:copyToClipboard")}
           </span>,
           document.body,
         )}

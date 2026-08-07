@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "@/lib/routing/client-router";
 import { IconTrash } from "@tabler/icons-react";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast/sonner";
 import { Button } from "@kandev/ui/button";
 import { Input } from "@kandev/ui/input";
 import { Label } from "@kandev/ui/label";
@@ -25,6 +25,7 @@ import {
   isOfficeWorkspace,
   workspaceHomeHref,
 } from "@/components/app-sidebar/app-sidebar-workspace-navigation";
+import { useTranslation } from "react-i18next";
 
 type Workspace = WorkspaceState["items"][number];
 
@@ -65,14 +66,18 @@ function DeleteWorkspaceDialog({
   onConfirmTextChange: (value: string) => void;
   onDelete: () => void;
 }) {
+  const { t } = useTranslation();
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent data-testid="workspace-delete-dialog">
         <DialogHeader>
-          <DialogTitle>Delete workspace</DialogTitle>
+          <DialogTitle>{t("office:deleteWorkspace")}</DialogTitle>
           <DialogDescription>
-            This will permanently delete {summary?.agents ?? 0} agents, {summary?.tasks ?? 0} tasks,{" "}
-            {summary?.skills ?? 0} skills, and the workspace folder.
+            {t("office:deleteWorkspaceSummary", {
+              agents: summary?.agents ?? 0,
+              tasks: summary?.tasks ?? 0,
+              skills: summary?.skills ?? 0,
+            })}
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-4">
@@ -80,7 +85,15 @@ function DeleteWorkspaceDialog({
             {summary?.config_path}
           </div>
           <div className="space-y-2">
-            <Label htmlFor="delete-workspace-confirm">Type {confirmName} to confirm</Label>
+            {/*
+              `confirmName` is the workspace's own name — user data, interpolated
+              and never translated, so `confirmText === confirmName` above stays
+              typeable in every locale. One key, so the instruction can put the
+              name wherever the language needs it.
+            */}
+            <Label htmlFor="delete-workspace-confirm">
+              {t("office:typeNameToConfirm", { name: confirmName })}
+            </Label>
             <Input
               id="delete-workspace-confirm"
               data-testid="workspace-delete-confirm-input"
@@ -92,7 +105,7 @@ function DeleteWorkspaceDialog({
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)} className="cursor-pointer">
-            Cancel
+            {t("common:cancel")}
           </Button>
           <Button
             variant="destructive"
@@ -101,7 +114,7 @@ function DeleteWorkspaceDialog({
             className="cursor-pointer"
             data-testid="workspace-delete-confirm-button"
           >
-            {deleting ? "Deleting..." : "Delete"}
+            {deleting ? t("office:deleting") : t("office:delete")}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -120,6 +133,7 @@ export function DangerZoneSection({
   setWorkspaces: (items: Workspace[]) => void;
   setActiveWorkspace: (id: string | null) => void;
 }) {
+  const { t } = useTranslation();
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [confirmText, setConfirmText] = useState("");
@@ -137,7 +151,7 @@ export function DangerZoneSection({
       setConfirmText("");
       setOpen(true);
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Failed to load deletion summary");
+      toast.error(err instanceof Error ? err.message : t("office:failedToLoadDeletionSummary"));
     } finally {
       setLoading(false);
     }
@@ -153,9 +167,9 @@ export function DangerZoneSection({
       setWorkspaces(remaining);
       setActiveWorkspace(nextWorkspace?.id ?? null);
       router.push(postDeleteWorkspaceHref(nextWorkspace));
-      toast.success("Workspace deleted");
+      toast.success(t("office:workspaceDeleted"));
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Failed to delete workspace");
+      toast.error(err instanceof Error ? err.message : t("office:failedToDeleteWorkspace"));
     } finally {
       setDeleting(false);
     }
@@ -165,9 +179,9 @@ export function DangerZoneSection({
     <SettingCard>
       <div className="flex items-start justify-between gap-4">
         <div>
-          <p className="text-sm font-medium text-destructive">Delete workspace</p>
+          <p className="text-sm font-medium text-destructive">{t("office:deleteWorkspace")}</p>
           <p className="text-xs text-muted-foreground mt-1">
-            This permanently deletes agents, tasks, skills, routines, and configuration.
+            {t("office:thisPermanentlyDeletesAgentsTasksSkills")}
           </p>
         </div>
         <Button
@@ -179,7 +193,7 @@ export function DangerZoneSection({
           data-testid="workspace-delete-button"
         >
           <IconTrash className="h-4 w-4 mr-1.5" />
-          {loading ? "Loading..." : "Delete workspace"}
+          {loading ? t("common:loadingEllipsis") : t("office:deleteWorkspace")}
         </Button>
       </div>
       <DeleteWorkspaceDialog

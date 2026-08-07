@@ -1,12 +1,12 @@
 "use client";
 
 import { useState, memo } from "react";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
 import { IconBrain } from "@tabler/icons-react";
 import type { Message } from "@/lib/types/http";
 import type { RichMetadata } from "@/components/task/chat/types";
+import { MemoizedMarkdown } from "@/components/shared/memoized-markdown";
 import { ExpandableRow } from "./expandable-row";
+import { useTranslation } from "react-i18next";
 
 // Strip markdown formatting for inline display
 function stripMarkdown(text: string): string {
@@ -28,7 +28,16 @@ function stripMarkdown(text: string): string {
   );
 }
 
-export const ThinkingMessage = memo(function ThinkingMessage({ comment }: { comment: Message }) {
+export const ThinkingMessage = memo(function ThinkingMessage({
+  comment,
+  worktreePath,
+  onOpenFile,
+}: {
+  comment: Message;
+  worktreePath?: string;
+  onOpenFile?: (path: string) => void;
+}) {
+  const { t } = useTranslation();
   const [isExpanded, setIsExpanded] = useState(false);
   const metadata = comment.metadata as RichMetadata | undefined;
   const text = metadata?.thinking ?? comment.content;
@@ -46,7 +55,7 @@ export const ThinkingMessage = memo(function ThinkingMessage({ comment }: { comm
       header={
         <div className="flex items-center gap-2 text-xs">
           <span className="inline-flex items-center gap-1.5">
-            <span className="font-mono text-xs text-muted-foreground">Thinking</span>
+            <span className="font-mono text-xs text-muted-foreground">{t("task:thinking")}</span>
             {isShort && <span className="text-xs text-muted-foreground/80">{displayText}</span>}
           </span>
         </div>
@@ -58,7 +67,7 @@ export const ThinkingMessage = memo(function ThinkingMessage({ comment }: { comm
       {!isShort && (
         <div className="pl-4 border-l-2 border-border/30">
           <div className="markdown-body max-w-none text-xs text-foreground/70 [&>*]:my-1 [&>p]:my-1 [&>ul]:my-1 [&>ol]:my-1 [&_strong]:text-foreground/80">
-            <ReactMarkdown remarkPlugins={[remarkGfm]}>{text}</ReactMarkdown>
+            <MemoizedMarkdown content={text} worktreePath={worktreePath} onOpenFile={onOpenFile} />
           </div>
         </div>
       )}

@@ -14,28 +14,39 @@ import {
   IconUsers,
 } from "@tabler/icons-react";
 import type { Icon as TablerIcon } from "@tabler/icons-react";
+import { useTranslation } from "react-i18next";
 import { useAppStore } from "@/components/state-provider";
 import { useFeature } from "@/hooks/domains/features/use-feature";
+import {
+  SYSTEM_DISCOVERY_DEFINITIONS,
+  SYSTEM_SETTINGS_HREF,
+  SYSTEM_STATUS_SETTINGS_HREF,
+} from "@/lib/settings-discovery/catalog/system";
 import { SettingsGroup, SettingsLeaf } from "./settings-nav-primitives";
 
-const ROOT_HREF = "/settings/system";
-const DEFAULT_HREF = `${ROOT_HREF}/status`;
+const SYSTEM_ITEM_ICONS: Record<string, TablerIcon> = {
+  "system-status": IconActivity,
+  "system-feature-toggles": IconFlask,
+  "system-database": IconDatabase,
+  "system-backups": IconArchive,
+  "system-storage": IconTrash,
+  "system-logs": IconFileText,
+  "system-updates": IconRefresh,
+  "system-about": IconInfoCircle,
+  "system-licenses": IconScale,
+  "system-users": IconUsers,
+};
 
-const BASE_ITEMS: Array<{ href: string; label: string; icon: TablerIcon }> = [
-  { href: `${ROOT_HREF}/status`, label: "Status", icon: IconActivity },
-  { href: `${ROOT_HREF}/feature-toggles`, label: "Feature Toggles", icon: IconFlask },
-  { href: `${ROOT_HREF}/database`, label: "Database", icon: IconDatabase },
-  { href: `${ROOT_HREF}/backups`, label: "Backups", icon: IconArchive },
-  { href: `${ROOT_HREF}/storage`, label: "Storage", icon: IconTrash },
-  { href: `${ROOT_HREF}/logs`, label: "Logs", icon: IconFileText },
-  { href: `${ROOT_HREF}/updates`, label: "Updates", icon: IconRefresh },
-  { href: `${ROOT_HREF}/about`, label: "About", icon: IconInfoCircle },
-  { href: `${ROOT_HREF}/licenses`, label: "Licenses", icon: IconScale },
-];
+const SYSTEM_ITEMS = SYSTEM_DISCOVERY_DEFINITIONS.filter(
+  (item) => item.parentId === "system" && item.labelKey,
+).map((item) => ({
+  ...item,
+  labelKey: item.labelKey as string,
+  icon: SYSTEM_ITEM_ICONS[item.id],
+}));
 
-const AUTH_ITEMS: Array<{ href: string; label: string; icon: TablerIcon }> = [
-  { href: `${ROOT_HREF}/users`, label: "Users", icon: IconUsers },
-];
+const BASE_ITEMS = SYSTEM_ITEMS.filter((item) => item.requires !== "users");
+const AUTH_ITEMS = SYSTEM_ITEMS.filter((item) => item.requires === "users");
 
 type SystemGroupProps = {
   pathname: string;
@@ -50,24 +61,25 @@ function useIsAdmin(): boolean {
 }
 
 export function SystemGroup({ pathname, expanded, onToggle }: SystemGroupProps) {
+  const { t } = useTranslation();
   const authEnabled = useFeature("auth");
   const isAdmin = useIsAdmin();
   const items = authEnabled && isAdmin ? [...BASE_ITEMS, ...AUTH_ITEMS] : BASE_ITEMS;
 
   return (
     <SettingsGroup
-      label="System"
+      label={t("common:system")}
       icon={IconServerCog}
-      href={DEFAULT_HREF}
-      isActive={pathname.startsWith(ROOT_HREF)}
+      href={SYSTEM_STATUS_SETTINGS_HREF}
+      isActive={pathname.startsWith(SYSTEM_SETTINGS_HREF)}
       expanded={expanded}
       onToggle={onToggle}
     >
-      {items.map(({ href, label, icon }) => (
+      {items.map(({ href, labelKey, icon }) => (
         <SettingsLeaf
           key={href}
           href={href}
-          label={label}
+          label={t(labelKey)}
           icon={icon}
           isActive={pathname === href}
           depth={1}

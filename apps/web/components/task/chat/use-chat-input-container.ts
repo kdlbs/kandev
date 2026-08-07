@@ -2,6 +2,7 @@
 
 import { useCallback, useRef, useState, useEffect, useImperativeHandle } from "react";
 import type React from "react";
+import { useTranslation } from "react-i18next";
 import { useResizableInput } from "@/hooks/use-resizable-input";
 import { useChatInputState } from "./use-chat-input-state";
 import type { TipTapInputHandle } from "./tiptap-input";
@@ -14,10 +15,12 @@ import type {
   MessageAttachment,
   ChatInputContainerHandle,
 } from "./chat-input-container";
+import { t } from "@/lib/i18n";
 
 type UseChatInputContainerParams = {
   ref: React.ForwardedRef<ChatInputContainerHandle>;
   sessionId: string | null;
+  workspaceId?: string | null;
   isSending: boolean;
   isStarting: boolean;
   /** True only during a real Docker/Sprites prepare phase. Different from
@@ -33,6 +36,10 @@ type UseChatInputContainerParams = {
   needsRecovery: boolean;
   executorUnavailable: boolean;
   isAgentBusy: boolean;
+  // supportsSteering is true when a send would be delivered into the running
+  // turn (mid-turn steering) instead of queued. Drives the composer's
+  // delivery-now affordance.
+  supportsSteering: boolean;
   hasAgentCommands: boolean;
   placeholder: string | undefined;
   contextItems: ContextItem[];
@@ -81,12 +88,20 @@ function getInputPlaceholder(
   isAgentBusy: boolean,
   hasAgentCommands: boolean,
   isStarting: boolean,
+  steerPlaceholder: string | undefined,
 ): string {
-  if (isStarting) return "Preparing workspace...";
+  if (isStarting) return t("task:preparingWorkspace");
+  // The steer label wins over a caller-supplied placeholder: when a send would be
+  // delivered into the running turn, that is the one thing the operator most needs
+  // to know, and it must not be masked by a generic "Continue working…" prompt the
+  // task composer passes. It promises delivery, never that the agent will fold it.
+  // steerPlaceholder is set only when the session is steer-eligible, so this
+  // branch is inert for every non-steering composer.
+  if (steerPlaceholder) return steerPlaceholder;
   if (placeholder) return placeholder;
-  if (isAgentBusy) return "Queue more instructions...";
-  if (hasAgentCommands) return "Ask to make changes, @mention files, run /commands";
-  return "Ask to make changes, @mention files";
+  if (isAgentBusy) return t("task:queueMoreInstructions");
+  if (hasAgentCommands) return t("task:askToMakeChangesWithCommands");
+  return t("task:askToMakeChanges");
 }
 
 export function shouldShowChatFocusHint(args: {
@@ -115,11 +130,13 @@ function computeDerivedState(params: {
   onClarificationResolved: (() => void) | undefined;
   pendingCommentsByFile: Record<string, DiffComment[]> | undefined;
   allItemsLength: number;
+  hasPendingAttachmentUploads: boolean;
   isInputFocused: boolean;
   value: string;
   placeholder: string | undefined;
   isAgentBusy: boolean;
   hasAgentCommands: boolean;
+  steerPlaceholder: string | undefined;
 }) {
   const hasClarification = !!(params.pendingClarification && params.onClarificationResolved);
   // STARTING blocks regular messages until the session reaches RUNNING. An
@@ -132,7 +149,7 @@ function computeDerivedState(params: {
     params.isFailed ||
     params.needsRecovery ||
     params.executorUnavailable;
-  const submitDisabled = isDisabled;
+  const submitDisabled = isDisabled || params.hasPendingAttachmentUploads;
   // The "agent still being set up" tooltip is only meaningful while a
   // container/sandbox is actively bootstrapping. The brief STARTING
   // transition for local quick-chat sessions doesn't deserve its own
@@ -154,6 +171,7 @@ function computeDerivedState(params: {
     params.isAgentBusy,
     params.hasAgentCommands,
     params.isStarting && !hasClarification,
+    params.steerPlaceholder,
   );
   return {
     isDisabled,
@@ -168,8 +186,10 @@ function computeDerivedState(params: {
 }
 
 export function useChatInputContainer(params: UseChatInputContainerParams) {
+  const { t } = useTranslation("chat");
   const { ref, sessionId, isSending, isStarting, isPreparingEnvironment, isMoving } = params;
   const { isFailed, needsRecovery, executorUnavailable, isAgentBusy, hasAgentCommands } = params;
+  const { supportsSteering } = params;
   const { placeholder, contextItems, pendingClarification, onClarificationResolved } = params;
   const { pendingCommentsByFile, showRequestChangesTooltip } = params;
   const { onRequestChangesTooltipDismiss, onSubmit } = params;
@@ -185,17 +205,26 @@ export function useChatInputContainer(params: UseChatInputContainerParams) {
     getContentElement,
   );
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const { value, inputRef, addFiles, handleChange, handleSubmit, allItems, getAttachments } =
-    useChatInputState({
-      sessionId,
-      isSending,
-      contextItems,
-      pendingCommentsByFile,
-      hasContextComments: params.hasContextComments,
-      showRequestChangesTooltip,
-      onRequestChangesTooltipDismiss,
-      onSubmit,
-    });
+  const {
+    value,
+    inputRef,
+    addFiles,
+    handleChange,
+    handleSubmit,
+    allItems,
+    getAttachments,
+    hasPendingAttachmentUploads,
+  } = useChatInputState({
+    sessionId,
+    workspaceId: params.workspaceId,
+    isSending,
+    contextItems,
+    pendingCommentsByFile,
+    hasContextComments: params.hasContextComments,
+    showRequestChangesTooltip,
+    onRequestChangesTooltipDismiss,
+    onSubmit,
+  });
 
   useSyncTipTapRef(tiptapRef, inputRef);
 
@@ -231,11 +260,13 @@ export function useChatInputContainer(params: UseChatInputContainerParams) {
     onClarificationResolved,
     pendingCommentsByFile,
     allItemsLength: allItems.length,
+    hasPendingAttachmentUploads,
     isInputFocused,
     value,
     placeholder,
     isAgentBusy,
     hasAgentCommands,
+    steerPlaceholder: supportsSteering ? t("composerSteerPlaceholder") : undefined,
   });
 
   return {
@@ -255,6 +286,7 @@ export function useChatInputContainer(params: UseChatInputContainerParams) {
     handleChange: handleChangeWithAutoExpand,
     handleSubmitWithReset,
     allItems,
+    hasPendingAttachmentUploads,
     ...derived,
   };
 }

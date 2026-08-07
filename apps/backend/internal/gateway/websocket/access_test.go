@@ -65,6 +65,11 @@ func receivedActions(client *Client) []string {
 	actions := []string{}
 	for {
 		select {
+		case raw := <-client.controlSend:
+			var msg ws.Message
+			if err := json.Unmarshal(raw, &msg); err == nil {
+				actions = append(actions, msg.Action)
+			}
 		case raw := <-client.send:
 			var msg ws.Message
 			if err := json.Unmarshal(raw, &msg); err == nil {
@@ -204,6 +209,14 @@ func TestUserSubscribeScopedToOwnUser(t *testing.T) {
 func assertErrorResponse(t *testing.T, client *Client, label string) {
 	t.Helper()
 	select {
+	case raw := <-client.controlSend:
+		var msg ws.Message
+		if err := json.Unmarshal(raw, &msg); err != nil {
+			t.Fatalf("%s: bad frame: %v", label, err)
+		}
+		if msg.Type != ws.MessageTypeError {
+			t.Fatalf("%s: got %s frame, want error", label, msg.Type)
+		}
 	case raw := <-client.send:
 		var msg ws.Message
 		if err := json.Unmarshal(raw, &msg); err != nil {
@@ -220,6 +233,14 @@ func assertErrorResponse(t *testing.T, client *Client, label string) {
 func assertSuccessResponse(t *testing.T, client *Client, label string) {
 	t.Helper()
 	select {
+	case raw := <-client.controlSend:
+		var msg ws.Message
+		if err := json.Unmarshal(raw, &msg); err != nil {
+			t.Fatalf("%s: bad frame: %v", label, err)
+		}
+		if msg.Type == ws.MessageTypeError {
+			t.Fatalf("%s: got error frame: %s", label, string(raw))
+		}
 	case raw := <-client.send:
 		var msg ws.Message
 		if err := json.Unmarshal(raw, &msg); err != nil {

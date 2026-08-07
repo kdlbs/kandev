@@ -1,11 +1,12 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast/sonner";
 import type { AgentProfile } from "@/lib/state/slices/office/types";
 import * as officeApi from "@/lib/api/domains/office-api";
 import { InstructionFileList } from "./instruction-file-list";
 import { InstructionEditor } from "./instruction-editor";
+import { useTranslation } from "react-i18next";
 
 export type InstructionFile = {
   id: string;
@@ -21,6 +22,7 @@ type AgentInstructionsTabProps = {
 };
 
 export function AgentInstructionsTab({ agent }: AgentInstructionsTabProps) {
+  const { t } = useTranslation();
   const [files, setFiles] = useState<InstructionFile[]>([]);
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -34,7 +36,7 @@ export function AgentInstructionsTab({ agent }: AgentInstructionsTabProps) {
         setSelectedFile(items[0].filename);
       }
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Failed to load instructions");
+      toast.error(err instanceof Error ? err.message : t("office:failedToLoadInstructions"));
     } finally {
       setIsLoading(false);
     }
@@ -48,10 +50,10 @@ export function AgentInstructionsTab({ agent }: AgentInstructionsTabProps) {
     async (filename: string, content: string) => {
       try {
         await officeApi.upsertInstruction(agent.id, filename, content);
-        toast.success(`Saved ${filename}`);
+        toast.success(t("office:saved", { filename }));
         await fetchFiles();
       } catch (err) {
-        toast.error(err instanceof Error ? err.message : "Failed to save");
+        toast.error(err instanceof Error ? err.message : t("office:failedToSave"));
       }
     },
     [agent.id, fetchFiles],
@@ -61,11 +63,11 @@ export function AgentInstructionsTab({ agent }: AgentInstructionsTabProps) {
     async (filename: string) => {
       try {
         await officeApi.deleteInstruction(agent.id, filename);
-        toast.success(`Deleted ${filename}`);
+        toast.success(t("office:deleted", { filename }));
         setSelectedFile(null);
         await fetchFiles();
       } catch (err) {
-        toast.error(err instanceof Error ? err.message : "Failed to delete");
+        toast.error(err instanceof Error ? err.message : t("office:failedToDelete"));
       }
     },
     [agent.id, fetchFiles],
@@ -78,7 +80,7 @@ export function AgentInstructionsTab({ agent }: AgentInstructionsTabProps) {
         await fetchFiles();
         setSelectedFile(filename);
       } catch (err) {
-        toast.error(err instanceof Error ? err.message : "Failed to create file");
+        toast.error(err instanceof Error ? err.message : t("office:failedToCreateFile"));
       }
     },
     [agent.id, fetchFiles],
@@ -89,7 +91,7 @@ export function AgentInstructionsTab({ agent }: AgentInstructionsTabProps) {
   if (isLoading) {
     return (
       <div className="mt-4 flex items-center justify-center py-12">
-        <p className="text-sm text-muted-foreground">Loading instructions...</p>
+        <p className="text-sm text-muted-foreground">{t("office:loadingInstructions")}</p>
       </div>
     );
   }

@@ -4,11 +4,12 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"os/exec"
 	"strings"
 	"time"
 
 	acp "github.com/coder/acp-go-sdk"
+
+	"github.com/kandev/kandev/internal/common/subproc"
 )
 
 // Predefined e2e test scenarios with fixed timing for deterministic test assertions.
@@ -42,6 +43,45 @@ var scenarioRegistry = map[string]func(e *emitter){
 	"symlink-file-setup":      scenarioSymlinkFileSetup,
 	"markdown-table":          scenarioMarkdownTable,
 	"empty-turn":              scenarioEmptyTurn,
+	"push-current-branch":     scenarioPushCurrentBranch,
+	"steer-fold-setup":        scenarioSteerFoldSetup,
+	"steer-defer-setup":       scenarioSteerDeferSetup,
+}
+
+// steerSetupHoldMillis is how long steer-fold-setup and steer-defer-setup
+// keep their prompt open after any setup output, so the session reads
+// "generating" (steer-eligible) for long enough that an e2e test can reliably
+// deliver a mid-turn steer against it. Cancellation (turn end, session
+// cleanup) interrupts the hold immediately via waitForDelay's ctx.Done case.
+const steerSetupHoldMillis = 30_000
+
+// scenarioSteerFoldSetup holds the foreground turn open without ever emitting
+// text of its own, so a mid-turn steer delivered while it runs can only be
+// answered by the steer's own successor turn. This reproduces the "folded"
+// outcome from the mid-turn steering spec's outcome taxonomy
+// (docs/specs/platform/mid-turn-steering.md): the predecessor settles without
+// having produced an answer, and the operator sees a single, combined reply.
+func scenarioSteerFoldSetup(e *emitter) {
+	waitForDelay(e.ctx, steerSetupHoldMillis)
+}
+
+// scenarioSteerDeferSetup answers its own prompt immediately, then continues
+// to hold the turn open silently. A mid-turn steer delivered during the hold
+// still reaches the agent as a concurrent prompt, but runs as a genuinely
+// separate turn with its own answer -- the "deferred" outcome from the
+// outcome taxonomy. The transcript therefore shows two independent answers in
+// submission order, matching an installation whose agent CLI never folds.
+func scenarioSteerDeferSetup(e *emitter) {
+	e.text("Predecessor turn's own answer, delivered before any steer arrives.")
+	// A tool-call boundary flushes the buffered text above into its own
+	// message row (cmd/mock-agent/AGENTS.md: "flushMessageBuffer only fires
+	// on a tool-call/turn boundary"). Without it the answer stays buffered
+	// server-side for as long as this turn holds open below, so an operator
+	// (or an e2e assertion) would see nothing until the turn eventually ends.
+	flushID := nextToolID()
+	e.startTool(flushID, "Acknowledge predecessor answer", acp.ToolKindOther, map[string]any{})
+	e.completeTool(flushID, map[string]any{"result": "ok"})
+	waitForDelay(e.ctx, steerSetupHoldMillis)
 }
 
 // scenarioEmptyTurn emits no content and no tool calls, so the turn ends
@@ -450,6 +490,66 @@ func scenarioDiffUpdateModify(e *emitter) {
 
 	fixedDelay(100)
 	e.text("diff-update-modify complete: diff_update_test.txt now has SECOND_MODIFICATION")
+}
+
+// scenarioPushCurrentBranch pushes the worktree's current branch to origin
+// directly, with no Kandev "Create MR"/"Create PR" action involved. Used by
+// push-detection auto-link e2e tests to reproduce an agent running a raw
+// `git push` on its own — the same shape as a real user/agent pushing and
+// then opening the MR/PR through `glab mr create`, `gh pr create`, or the
+// code host's web UI, rather than through Kandev's own runtime action.
+// Expects a prior turn (e.g. diff-update-setup) to have already committed
+// something to push.
+//
+// Explicitly writes the remote-tracking ref and upstream config after
+// pushing rather than relying on `git push -u` alone: the e2e fixture's mock
+// git remote only implements the receive-pack (push) side of the smart-HTTP
+// protocol, not upload-pack/info-refs (fetch/clone) — confirmed by
+// worktree-manager's own "git fetch failed before worktree creation;
+// continuing with fallback ref" warning during task setup, and reproducible
+// directly (`git fetch` against it fails with "not valid: is this a git
+// repository?"). A real code host's push response updates
+// refs/remotes/origin/<branch> as a side effect of the exchange; here that
+// has to be reproduced by hand with `update-ref`, using the local HEAD this
+// process just successfully pushed as the known-good value — no fetch
+// required, since the pushed content is exactly what's already local.
+func scenarioPushCurrentBranch(e *emitter) {
+	fixedDelay(50)
+
+	wd, err := os.Getwd()
+	if err != nil {
+		e.text("push-current-branch: getwd failed: " + err.Error())
+		return
+	}
+	branchNameOut, err := runGitOutput(wd, "rev-parse", "--abbrev-ref", "HEAD")
+	if err != nil {
+		e.text("push-current-branch: resolve branch name failed: " + err.Error())
+		return
+	}
+	branchName := strings.TrimSpace(string(branchNameOut))
+	headSHAOut, err := runGitOutput(wd, "rev-parse", "HEAD")
+	if err != nil {
+		e.text("push-current-branch: resolve HEAD sha failed: " + err.Error())
+		return
+	}
+	headSHA := strings.TrimSpace(string(headSHAOut))
+
+	runGitCmd := makeGitRunner(wd)
+	if err := runGitCmd("push", "origin", branchName); err != nil {
+		e.text("push-current-branch: git push failed")
+		return
+	}
+	if err := runGitCmd("update-ref", "refs/remotes/origin/"+branchName, headSHA); err != nil {
+		e.text("push-current-branch: git update-ref failed")
+		return
+	}
+	if err := runGitCmd("branch", "--set-upstream-to=origin/"+branchName, branchName); err != nil {
+		e.text("push-current-branch: git branch --set-upstream-to failed")
+		return
+	}
+
+	fixedDelay(100)
+	e.text("push-current-branch complete: pushed directly, no Create MR/PR action used")
 }
 
 // scenarioDiffUpdateStreaming modifies the file mid-turn, emitting text both
@@ -1015,6 +1115,11 @@ func scenarioSymlinkFileSetup(e *emitter) {
 	e.text("symlink-file-setup complete")
 }
 
+func runGitOutput(wd string, args ...string) ([]byte, error) {
+	cmd := subproc.NewGitCommand(context.Background(), append([]string{"-C", wd}, args...)...)
+	return subproc.RunGitOutputClass(context.Background(), subproc.GitLifecycle, cmd)
+}
+
 // makeGitRunner returns a function that runs git commands in the given directory.
 func makeGitRunner(wd string) func(args ...string) error {
 	gitEnv := append(os.Environ(),
@@ -1024,13 +1129,13 @@ func makeGitRunner(wd string) func(args ...string) error {
 		"GIT_COMMITTER_EMAIL=mock@test.local",
 	)
 	return func(args ...string) error {
-		cmd := exec.Command("git", append([]string{
+		cmd := subproc.NewGitCommand(context.Background(), append([]string{
 			"-c", "commit.gpgsign=false",
 			"-c", "tag.gpgsign=false",
 		}, args...)...)
 		cmd.Dir = wd
 		cmd.Env = gitEnv
-		out, cmdErr := cmd.CombinedOutput()
+		out, cmdErr := subproc.RunGitCombinedOutputClass(context.Background(), subproc.GitLifecycle, cmd)
 		if cmdErr != nil {
 			_, _ = fmt.Fprintf(logOutput, "mock-agent: git %v failed: %v\nOutput: %s\n", args, cmdErr, out)
 		}

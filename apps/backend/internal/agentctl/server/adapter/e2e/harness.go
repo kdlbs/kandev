@@ -34,6 +34,7 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/server/config"
 	"github.com/kandev/kandev/internal/agentctl/server/process"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/common/subproc"
 	"github.com/kandev/kandev/pkg/agent"
 )
 
@@ -215,9 +216,9 @@ func setupWorkspace(t *testing.T) string {
 	}
 
 	dir := t.TempDir()
-	cmd := exec.Command("git", "init")
+	cmd := subproc.NewGitCommand(context.Background(), "init")
 	cmd.Dir = dir
-	if out, err := cmd.CombinedOutput(); err != nil {
+	if out, err := subproc.RunGitCombinedOutputClass(context.Background(), subproc.GitLifecycle, cmd); err != nil {
 		t.Fatalf("git init failed in %s: %v\n%s", dir, err, out)
 	}
 
@@ -226,17 +227,17 @@ func setupWorkspace(t *testing.T) string {
 		t.Fatalf("failed to create README.md: %v", err)
 	}
 
-	cmd = exec.Command("git", "add", ".")
+	cmd = subproc.NewGitCommand(context.Background(), "add", ".")
 	cmd.Dir = dir
-	_ = cmd.Run()
+	_ = subproc.RunGitClass(context.Background(), subproc.GitLifecycle, cmd)
 
-	cmd = exec.Command("git", "commit", "-m", "init", "--allow-empty")
+	cmd = subproc.NewGitCommand(context.Background(), "commit", "-m", "init", "--allow-empty")
 	cmd.Dir = dir
 	cmd.Env = append(os.Environ(),
 		"GIT_AUTHOR_NAME=test", "GIT_AUTHOR_EMAIL=test@test.com",
 		"GIT_COMMITTER_NAME=test", "GIT_COMMITTER_EMAIL=test@test.com",
 	)
-	_ = cmd.Run()
+	_ = subproc.RunGitClass(context.Background(), subproc.GitLifecycle, cmd)
 
 	return dir
 }

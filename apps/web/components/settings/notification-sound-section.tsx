@@ -17,6 +17,8 @@ import {
   type SoundPresetId,
 } from "@/lib/notifications/sound";
 import { useSettingsSaveContributor } from "./settings-save-provider";
+import { SettingsTarget } from "./settings-target";
+import { GENERAL_SETTINGS_TARGETS } from "@/lib/settings-discovery/catalog/general";
 
 /**
  * Catalog keys for the preset names, keyed by the preset id — the id is the
@@ -56,7 +58,8 @@ export function NotificationSoundSection({
   });
 
   return (
-    <div
+    <SettingsTarget
+      targetId={GENERAL_SETTINGS_TARGETS.notificationSound}
       className="space-y-4 rounded-md border p-4"
       data-settings-dirty={isDirty}
       data-testid="notification-sound-group"
@@ -119,6 +122,6 @@ export function NotificationSoundSection({
           </TooltipProvider>
         </div>
       )}
-    </div>
+    </SettingsTarget>
   );
 }

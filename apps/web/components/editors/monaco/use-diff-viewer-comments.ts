@@ -3,6 +3,7 @@ import type { editor as monacoEditor } from "monaco-editor";
 import type { DiffOnMount } from "@monaco-editor/react";
 import type { DiffComment, DiffCommentUpdate } from "@/lib/diff/types";
 import { buildDiffComment, useCommentedLines, useCommentActions } from "@/lib/diff/comment-utils";
+import { copyToClipboard } from "@/lib/utils/copy-to-clipboard";
 import { useDiffComments } from "@/components/diff/use-diff-comments";
 import { useGutterComments } from "@/hooks/use-gutter-comments";
 import type { ContextMenuState } from "./diff-viewer-context-menu";
@@ -323,7 +324,7 @@ export function useDiffViewerComments(opts: UseDiffViewerCommentsOpts) {
         }
       }
     }
-    navigator.clipboard.writeText(changedLines.join("\n"));
+    void copyToClipboard(changedLines.join("\n"));
     setContextMenu(null);
   }, []);
 

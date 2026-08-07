@@ -1,6 +1,6 @@
 "use client";
 
-import { formatDistanceToNow } from "date-fns";
+import { Trans, useTranslation } from "react-i18next";
 import {
   IconAlertTriangle,
   IconCheck,
@@ -12,6 +12,8 @@ import { Alert, AlertDescription } from "@kandev/ui/alert";
 import { Badge } from "@kandev/ui/badge";
 import { Button } from "@kandev/ui/button";
 import { useTick } from "@/components/integrations/auth-status-banner";
+import type { TFunction } from "i18next";
+import { formatRelative } from "@/lib/i18n/formats";
 import type { WorkflowSyncConfig } from "@/lib/types/workflow-sync";
 
 type SyncState = "waiting" | "ok" | "failed";
@@ -27,20 +29,27 @@ function StateIcon({ state }: { state: SyncState }) {
   return <IconClock className="h-4 w-4 text-muted-foreground" />;
 }
 
-function lastSyncedLabel(config: WorkflowSyncConfig): string {
+function lastSyncedLabel(t: TFunction, config: WorkflowSyncConfig): string {
   if (config.last_synced_at) {
-    const when = formatDistanceToNow(new Date(config.last_synced_at), { addSuffix: true });
-    return config.last_ok ? `last synced ${when}` : `last attempt ${when}`;
+    // `formatRelative` routes its buckets through i18next; date-fns'
+    // `formatDistanceToNow` would render English inside a translated sentence.
+    const when = formatRelative(config.last_synced_at);
+    return config.last_ok
+      ? t("workflows:lastSynced", { when })
+      : t("workflows:lastAttempt", { when });
   }
-  return config.poll_enabled ? "waiting for first sync…" : "not synced yet — use Sync now";
+  return config.poll_enabled ? t("workflows:waitingForFirstSync") : t("workflows:notSyncedYet");
 }
 
 function MetadataLine({ config }: { config: WorkflowSyncConfig }) {
+  const { t } = useTranslation();
   useTick(30_000);
   const parts = [
-    `Directory ${config.path || "(repository root)"}`,
-    config.poll_enabled ? `every ${config.interval_seconds}s` : "auto-sync off",
-    lastSyncedLabel(config),
+    t("workflows:directoryLine", { path: config.path || t("workflows:repositoryRoot") }),
+    config.poll_enabled
+      ? t("workflows:everySeconds", { count: config.interval_seconds })
+      : t("workflows:autoSyncOff"),
+    lastSyncedLabel(t, config),
   ];
   return <p className="text-xs text-muted-foreground">{parts.join(" · ")}</p>;
 }
@@ -83,6 +92,7 @@ export function WorkflowSyncStatusCard({
   syncing,
   onSyncNow,
 }: WorkflowSyncStatusCardProps) {
+  const { t } = useTranslation();
   const state = syncState(config);
   return (
     <div
@@ -94,10 +104,12 @@ export function WorkflowSyncStatusCard({
         <div className="flex items-center gap-2 text-sm">
           <StateIcon state={state} />
           <span>
-            Syncing from{" "}
-            <span className="font-semibold">
-              {config.repo_owner}/{config.repo_name}
-            </span>
+            <Trans
+              i18nKey="workflows:syncingFromRepository"
+              values={{ repository: `${config.repo_owner}/${config.repo_name}` }}
+            >
+              Syncing from <span className="font-semibold" />
+            </Trans>
           </span>
           <Badge variant="secondary">{config.branch}</Badge>
         </div>
@@ -115,12 +127,12 @@ export function WorkflowSyncStatusCard({
           ) : (
             <IconRefresh className="h-4 w-4 mr-2" />
           )}
-          Sync now
+          {t("workflows:syncNow")}
         </Button>
       </div>
       <MetadataLine config={config} />
       {state === "failed" && (
-        <p className="text-xs text-destructive">{config.last_error || "Sync failed"}</p>
+        <p className="text-xs text-destructive">{config.last_error || t("workflows:syncFailed")}</p>
       )}
       <WarningsAlert warnings={config.last_warnings ?? []} />
     </div>

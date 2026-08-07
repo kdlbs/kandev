@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kandev/kandev/internal/agent/loginpty"
 	"github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/common/logger"
 	"go.uber.org/goleak"
@@ -27,6 +28,31 @@ func TestBuildHTTPServerAbortsWhenInterlockTokenGenerationFails(t *testing.T) {
 	}
 	if server != nil {
 		t.Fatal("buildHTTPServer returned a server after token generation failed")
+	}
+}
+
+func TestBuildLoginPTYServicesRegistersStopAllCleanup(t *testing.T) {
+	var cleanups []func() error
+	loginMgr, _ := buildLoginPTYServices(testLogger(t), nil, nil, nil, func(fn func() error) {
+		cleanups = append(cleanups, fn)
+	})
+	if len(cleanups) != 1 {
+		t.Fatalf("cleanup count = %d, want 1", len(cleanups))
+	}
+
+	sess, err := loginMgr.StartWithKey("_host_shell:tab-a", loginpty.HostShellAgentID, []string{"sh", "-c", "sleep 1"}, 80, 24)
+	if err != nil {
+		t.Fatalf("StartWithKey: %v", err)
+	}
+	t.Cleanup(func() { _ = loginMgr.StopAll() })
+	if err := cleanups[0](); err != nil {
+		t.Fatalf("cleanup: %v", err)
+	}
+	if loginMgr.GetByID(sess.ID) != nil {
+		t.Fatal("cleanup returned before login session stopped")
+	}
+	if err := cleanups[0](); err != nil {
+		t.Fatalf("second cleanup: %v", err)
 	}
 }
 
@@ -50,6 +76,21 @@ func freePort(t *testing.T) int {
 		t.Fatalf("close temp listener: %v", err)
 	}
 	return port
+}
+
+// requireLoopbackAlias skips the test when host cannot be bound. Linux treats
+// all of 127.0.0.0/8 as loopback, but macOS only configures 127.0.0.1 by
+// default, so multi-loopback binding tests are unrunnable there without an
+// explicit lo0 alias.
+func requireLoopbackAlias(t *testing.T, host string) {
+	t.Helper()
+	ln, err := net.Listen("tcp", net.JoinHostPort(host, "0"))
+	if err != nil {
+		t.Skipf("loopback alias %s not available on this host: %v", host, err)
+	}
+	if err := ln.Close(); err != nil {
+		t.Fatalf("close loopback probe listener: %v", err)
+	}
 }
 
 func noContentServer() *http.Server {
@@ -109,6 +150,7 @@ func shutdown(t *testing.T, listeners *serverListeners, server *http.Server) {
 }
 
 func TestStartHTTPServersMultipleLoopbackAddresses(t *testing.T) {
+	requireLoopbackAlias(t, "127.0.0.2")
 	log := testLogger(t)
 	port := freePort(t)
 	server := noContentServer()
@@ -152,6 +194,7 @@ func TestStartHTTPServersAllFailIsFatal(t *testing.T) {
 }
 
 func TestStartHTTPServersPartialFailSelfHeals(t *testing.T) {
+	requireLoopbackAlias(t, "127.0.0.2")
 	defer goleak.VerifyNone(t)
 
 	// Shorten the retry cadence for the test and restore it after.

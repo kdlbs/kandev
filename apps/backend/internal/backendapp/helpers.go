@@ -53,6 +53,7 @@ import (
 	"github.com/kandev/kandev/internal/improvekandev"
 	"github.com/kandev/kandev/internal/jira"
 	"github.com/kandev/kandev/internal/linear"
+	lspinstaller "github.com/kandev/kandev/internal/lsp/installer"
 	mcphandlers "github.com/kandev/kandev/internal/mcp/handlers"
 	mcpscope "github.com/kandev/kandev/internal/mcp/scope"
 	mcpserver "github.com/kandev/kandev/internal/mcp/server"
@@ -68,14 +69,15 @@ import (
 	"github.com/kandev/kandev/internal/profiles"
 	promptcontroller "github.com/kandev/kandev/internal/prompts/controller"
 	prompthandlers "github.com/kandev/kandev/internal/prompts/handlers"
+	"github.com/kandev/kandev/internal/quickterminal"
 	"github.com/kandev/kandev/internal/repoclone"
 	"github.com/kandev/kandev/internal/runtimeflags"
 	"github.com/kandev/kandev/internal/secrets"
 	"github.com/kandev/kandev/internal/sentry"
-	"github.com/kandev/kandev/internal/slack"
 	spriteshandlers "github.com/kandev/kandev/internal/sprites"
 	sshhandlers "github.com/kandev/kandev/internal/ssh"
 	systemsvc "github.com/kandev/kandev/internal/system"
+	taskdto "github.com/kandev/kandev/internal/task/dto"
 	taskhandlers "github.com/kandev/kandev/internal/task/handlers"
 	"github.com/kandev/kandev/internal/task/models"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
@@ -105,7 +107,12 @@ const (
 
 // buildSessionDataProvider constructs the session data provider function used by the WebSocket hub
 // to send initial data (git status, context window, available commands) when a client subscribes.
-func buildSessionDataProvider(taskRepo *sqliterepo.Repository, lifecycleMgr *lifecycle.Manager, log *logger.Logger) func(context.Context, string) ([]*ws.Message, error) {
+func buildSessionDataProvider(
+	taskRepo *sqliterepo.Repository,
+	lifecycleMgr *lifecycle.Manager,
+	cancellationProvider taskdto.CancellationPendingProvider,
+	log *logger.Logger,
+) func(context.Context, string) ([]*ws.Message, error) {
 	return func(ctx context.Context, sessionID string) ([]*ws.Message, error) {
 		session, err := taskRepo.GetTaskSession(ctx, sessionID)
 		if err != nil {
@@ -113,7 +120,7 @@ func buildSessionDataProvider(taskRepo *sqliterepo.Repository, lifecycleMgr *lif
 		}
 
 		var result []*ws.Message
-		result = appendSessionStateMessage(sessionID, session, result)
+		result = appendSessionStateMessageWithCancellation(sessionID, session, cancellationProvider, result)
 		result = appendAgentctlStatusMessage(ctx, lifecycleMgr, sessionID, result, log)
 		result = appendLiveGitStatusMessage(ctx, taskRepo, lifecycleMgr, sessionID, session, result, log)
 		result = appendContextWindowMessage(sessionID, session, result)
@@ -121,6 +128,19 @@ func buildSessionDataProvider(taskRepo *sqliterepo.Repository, lifecycleMgr *lif
 		result = appendSessionModeMessage(sessionID, session, lifecycleMgr, result)
 		result = appendSessionModelsMessage(sessionID, session, lifecycleMgr, result)
 		return result, nil
+	}
+}
+
+// buildSessionGitDataProvider constructs the narrow provider used by the diff
+// panel's explicit refresh request. It intentionally does not hydrate session
+// state, agent readiness, commands, mode, models, or context-window data.
+func buildSessionGitDataProvider(taskRepo *sqliterepo.Repository, lifecycleMgr *lifecycle.Manager, log *logger.Logger) func(context.Context, string) ([]*ws.Message, error) {
+	return func(ctx context.Context, sessionID string) ([]*ws.Message, error) {
+		session, err := taskRepo.GetTaskSession(ctx, sessionID)
+		if err != nil {
+			return nil, nil
+		}
+		return appendLiveGitStatusMessage(ctx, taskRepo, lifecycleMgr, sessionID, session, nil, log), nil
 	}
 }
 
@@ -188,12 +208,38 @@ func appendAgentctlStatusMessage(
 // (page reload, task switch, WS reconnect) can seed environmentIdBySessionId
 // — without it, env-routed shell terminals stall on "Connecting terminal...".
 func appendSessionStateMessage(sessionID string, session *models.TaskSession, result []*ws.Message) []*ws.Message {
+	return appendSessionStateMessageWithCancellation(sessionID, session, nil, result)
+}
+
+func cancellationPendingSnapshot(
+	provider taskdto.CancellationPendingProvider,
+	sessionID string,
+) (bool, uint64) {
+	if snapshotProvider, ok := provider.(taskdto.CancellationPendingSnapshotProvider); ok {
+		return snapshotProvider.CancellationPendingSnapshot(sessionID)
+	}
+	return provider.CancellationPending(sessionID), 0
+}
+
+func appendSessionStateMessageWithCancellation(
+	sessionID string,
+	session *models.TaskSession,
+	cancellationProvider taskdto.CancellationPendingProvider,
+	result []*ws.Message,
+) []*ws.Message {
 	payload := map[string]interface{}{
 		sessionIDPayloadKey:        sessionID,
 		taskIDPayloadKey:           session.TaskID,
 		newStatePayloadKey:         string(session.State),
 		sessionUpdatedAtPayloadKey: session.UpdatedAt.UTC().Format(time.RFC3339Nano),
 		"name":                     session.Name,
+		"cancellation_pending":     false,
+		"cancellation_revision":    uint64(0),
+	}
+	if cancellationProvider != nil {
+		pending, revision := cancellationPendingSnapshot(cancellationProvider, sessionID)
+		payload["cancellation_pending"] = pending
+		payload["cancellation_revision"] = revision
 	}
 	if session.ReviewStatus != models.ReviewStatusNone {
 		payload["review_status"] = string(session.ReviewStatus)
@@ -297,6 +343,7 @@ func buildGitStatusNotification(sessionID, repositoryName string, status client.
 		"renamed":          status.Renamed,
 		"branch_additions": status.BranchAdditions,
 		"branch_deletions": status.BranchDeletions,
+		"is_submodule":     status.IsSubmodule,
 	}
 	if repositoryName != "" {
 		statusPayload["repository_name"] = repositoryName
@@ -368,16 +415,20 @@ func appendContextWindowMessage(sessionID string, session *models.TaskSession, r
 	if session.Metadata == nil {
 		return result
 	}
-	contextWindow, ok := session.Metadata["context_window"]
+	contextWindow, ok := session.Metadata[models.SessionMetaKeyContextWindow]
 	if !ok {
 		return result
+	}
+	metadata := map[string]interface{}{
+		models.SessionMetaKeyContextWindow: contextWindow,
+	}
+	if count, present := session.Metadata[models.SessionMetaKeyContextCompactionCount]; present {
+		metadata[models.SessionMetaKeyContextCompactionCount] = count
 	}
 	notification, err := ws.NewNotification(ws.ActionSessionStateChanged, map[string]interface{}{
 		"session_id": sessionID,
 		"task_id":    session.TaskID,
-		"metadata": map[string]interface{}{
-			"context_window": contextWindow,
-		},
+		"metadata":   metadata,
 	})
 	if err == nil {
 		result = append(result, notification)
@@ -467,6 +518,8 @@ type routeParams struct {
 	analyticsRepo                 analyticsrepository.Repository
 	orchestratorSvc               *orchestrator.Service
 	lifecycleMgr                  *lifecycle.Manager
+	loginMgr                      *loginpty.Manager
+	quickTerminalSvc              *quickterminal.Service
 	hostUtilityMgr                *hostutility.Manager
 	eventBus                      bus.EventBus
 	services                      *Services
@@ -495,6 +548,7 @@ type routeParams struct {
 	httpPort                      int
 	features                      config.FeaturesConfig
 	voice                         config.VoiceConfig
+	homeDir                       string
 	interimSettingsInterlockToken string
 	log                           *logger.Logger
 }
@@ -557,6 +611,9 @@ func registerRoutes(p routeParams) {
 	if p.services.GitLab != nil {
 		p.services.GitLab.SetCascadeTaskDeleter(handoffSvc)
 	}
+	if p.services.AzureDevOps != nil {
+		p.services.AzureDevOps.SetCascadeTaskDeleter(handoffSvc)
+	}
 	// repoLookup validates a watcher's optional repository binding (workspace
 	// ownership + default-branch fill) on create/update. Shared across the three
 	// repo-less watchers; one concrete adapter satisfies each package's
@@ -565,6 +622,12 @@ func registerRoutes(p routeParams) {
 	if p.services.GitLab != nil {
 		p.services.GitLab.SetRepositoryLookup(repoLookup)
 		p.services.GitLab.SetWatchDependencyValidator(&gitLabWatchDependencyValidator{
+			tasks: p.taskSvc, workflows: p.services.Workflow, agents: p.agentSettingsRepo,
+		})
+	}
+	if p.services.AzureDevOps != nil {
+		p.services.AzureDevOps.SetWatchRepositoryLookup(repoLookup)
+		p.services.AzureDevOps.SetWatchDependencyValidator(&gitLabWatchDependencyValidator{
 			tasks: p.taskSvc, workflows: p.services.Workflow, agents: p.agentSettingsRepo,
 		})
 	}
@@ -577,9 +640,6 @@ func registerRoutes(p routeParams) {
 		p.services.Linear.SetTaskDeleter(handoffSvc)
 		p.services.Linear.SetRepositoryLookup(repoLookup)
 		p.services.Linear.SetWorkspaceAuthorizer(p.taskSvc.AuthorizeWorkspaceAccess)
-	}
-	if p.services.Slack != nil {
-		p.services.Slack.SetWorkspaceAuthorizer(p.taskSvc.AuthorizeWorkspaceAccess)
 	}
 	if p.services.Sentry != nil {
 		p.services.Sentry.SetTaskDeleter(handoffSvc)
@@ -713,9 +773,10 @@ func webAppHandlerOptions(p routeParams) []webapp.HandlerOption {
 // client can activate the right catalog before first paint.
 func webRuntimeConfig(debug bool, req *http.Request) webapp.RuntimeConfig {
 	return webapp.RuntimeConfig{
-		APIPrefix:     "/api/v1",
-		WebSocketPath: "/ws",
-		Debug:         debug,
+		APIPrefix:                         "/api/v1",
+		WebSocketPath:                     "/ws",
+		LSPAutoInstallPreferenceLanguages: lspinstaller.AutoInstallPreferenceLanguages(),
+		Debug:                             debug,
 		// Gates QA-only UI (the pseudo-locale option). Separate from Debug: the
 		// e2e harness serves a PRODUCTION bundle, so the frontend cannot infer
 		// this from its own build mode.
@@ -725,15 +786,31 @@ func webRuntimeConfig(debug bool, req *http.Request) webapp.RuntimeConfig {
 }
 
 func bootPayload(ctx context.Context, req *http.Request, p routeParams, route webapp.RouteClassification) webapp.BootPayload {
+	initialState := bootInitialState(ctx, req, p, route)
+	routeData := bootRouteData(ctx, req, p, route)
+	if route.Route == webapp.RouteTaskDetail && routeData == nil && canLoadTaskDetailFallback(req, p.authSvc) {
+		bootStateBuilder{p: p}.addHomeKanbanRouteState(ctx, req, initialState)
+	}
 	payload := webapp.NewBootPayload(
 		route,
 		webRuntimeConfig(p.devMode, req),
-		bootInitialState(ctx, req, p, route),
+		initialState,
 	)
-	payload.RouteData = bootRouteData(ctx, req, p, route)
+	payload.RouteData = routeData
 	payload.Plugins = bootActivePlugins(p)
 	payload.InterimSettingsInterlockToken = p.interimSettingsInterlockToken
 	return payload
+}
+
+func canLoadTaskDetailFallback(req *http.Request, authSvc *auth.Service) bool {
+	if authSvc == nil || authSvc.Mode() == auth.ModeDisabled {
+		return true
+	}
+	if req == nil {
+		return false
+	}
+	_, ok := authn.IdentityFromContext(req.Context())
+	return ok
 }
 
 // bootActivePlugins populates the boot payload's Plugins list from every
@@ -889,6 +966,11 @@ func resolveRepositoryIDForSessionSubpath(ctx context.Context, taskRepo *sqliter
 
 // registerTaskRoutes registers all task-related HTTP and WebSocket routes.
 func registerTaskRoutes(p routeParams, planService *taskservice.PlanService, handoffSvc *taskservice.HandoffService) {
+	if attachmentSvc := p.taskSvc.AttachmentService(); attachmentSvc != nil {
+		taskhandlers.RegisterAttachmentRoutes(p.router, attachmentSvc, p.log)
+	} else {
+		p.log.Warn("prompt attachment routes disabled: attachment service is unavailable")
+	}
 	taskhandlers.RegisterWorkspaceRoutes(p.router, p.gateway.Dispatcher, p.taskSvc, p.log)
 	if p.services != nil {
 		registerMentionRoutes(p.router, p.services.Mentions)
@@ -964,15 +1046,19 @@ func registerSecondaryRoutes(
 	p.log.Debug("Registered Agent Settings handlers (HTTP)")
 
 	// Login PTY: spawns agent login commands under a PTY on the kandev host
-	// (claude auth login, auggie login, ...). The user explicitly closes the
-	// dialog when done, so invalidate the discovery cache on every session
-	// end regardless of exit code — rescanning is cheap and correctly picks
-	// up new auth state for agents whose login flow lives inside the TUI
-	// (e.g. gemini) where the process keeps running after auth completes.
-	loginMgr := loginpty.NewManager(p.log, func(_ string, _ int, _ error) {
-		p.agentSettingsController.InvalidateDiscoveryCache()
-	})
-	loginpty.NewHandlers(loginMgr, p.agentRegistry, p.log.Zap(), nil).RegisterRoutes(p.router)
+	// (claude auth login, auggie login, ...). The manager is shared with Quick
+	// Terminal so descriptor lifecycle callbacks observe the same sessions.
+	loginHandlers := loginpty.NewHandlers(p.loginMgr, p.agentRegistry, p.log.Zap(), nil)
+	if p.quickTerminalSvc != nil {
+		// Guard the assignment: passing a nil *quickterminal.Service straight
+		// into the interface would create a typed-nil binder that is non-nil to
+		// the handler's nil check but panics when invoked.
+		loginHandlers.SetHostShellSessionBinder(p.quickTerminalSvc)
+	}
+	loginHandlers.RegisterRoutes(p.router)
+	if p.quickTerminalSvc != nil {
+		p.quickTerminalSvc.RegisterRoutes(p.router)
+	}
 	p.log.Debug("Registered Login PTY handlers (HTTP + WebSocket)")
 
 	userhandlers.RegisterRoutes(p.router, p.gateway.Dispatcher, p.userCtrl, p.log)
@@ -1060,11 +1146,6 @@ func registerSecondaryRoutes(
 		p.log.Debug("Registered Sentry handlers (HTTP)")
 	}
 
-	if p.services.Slack != nil {
-		slack.RegisterRoutes(p.router, p.gateway.Dispatcher, p.services.Slack, p.log)
-		p.log.Debug("Registered Slack handlers (HTTP + WebSocket)")
-	}
-
 	if p.services.WorkflowSync != nil {
 		workflowsync.RegisterRoutes(p.router, p.services.WorkflowSync, p.log)
 		p.log.Debug("Registered workflow sync handlers (HTTP)")
@@ -1097,6 +1178,9 @@ func registerSecondaryRoutes(
 
 	if p.repoCloner != nil {
 		ikHandler := improvekandev.NewHandler(p.taskSvc, p.repoCloner, p.version, p.log)
+		if p.systemSvc != nil {
+			ikHandler.SetLogBundles(p.systemSvc.LogBundles)
+		}
 		improvekandev.RegisterRoutes(p.router, ikHandler)
 		improvekandev.CleanupStaleBundles(func(path string, err error) {
 			p.log.Warn("Improve Kandev: failed to clean stale bundle", zap.String("path", path), zap.Error(err))
@@ -1179,7 +1263,7 @@ func officeWorkspaceScopeMiddleware(authSvc *auth.Service, taskSvc *taskservice.
 // gitlab) with no per-user gate of their own, so this global middleware
 // authorizes ownership for them when auth is enabled.
 var integrationWorkspacePrefixes = []string{
-	"/api/v1/jira/", "/api/v1/linear/", "/api/v1/sentry/", "/api/v1/slack/",
+	"/api/v1/jira/", "/api/v1/linear/", "/api/v1/sentry/",
 	"/api/v1/azure-devops/", "/api/v1/gitlab/", "/api/v1/github/", "/api/v1/workflow-sync/",
 }
 
@@ -1397,18 +1481,26 @@ func registerMCPAndDebugRoutes(
 		p.taskSvc, wfCtrl,
 		clarificationStore, clarificationCanceller, p.msgCreator, p.taskRepo, p.taskRepo, p.eventBus, planService, walkthroughService, p.orchestratorSvc, p.orchestratorSvc.GetMessageQueue(), p.log,
 	)
+	mcpHandlers.SetRemoteContributionService(newRemoteContributionCoordinator(p.services.GitHub, p.services.GitLab))
 	// Wire config-mode dependencies for agent-native configuration
 	mcpHandlers.SetConfigDeps(p.services.Workflow, p.agentSettingsController, p.mcpConfigSvc)
 	mcpHandlers.SetClarificationInputPauser(p.orchestratorSvc)
 	mcpHandlers.SetPromptReferenceResolver(p.services.Prompts)
 	mcpHandlers.SetTaskStopper(p.orchestratorSvc)
+	mcpHandlers.SetTaskTitleBranchRenamer(p.orchestratorSvc)
 	mcpHandlers.SetUserSettingsProvider(p.services.User)
+	if p.systemSvc != nil && p.systemSvc.LogBundles != nil {
+		mcpHandlers.SetDiagnosticBundleServices(p.systemSvc.LogBundles, p.lifecycleMgr)
+	}
 
 	// Enrich list_tasks responses with associated GitHub PRs (link, title,
 	// number, state) when the github service is available.
 	if p.services.GitHub != nil {
 		mcpHandlers.SetTaskPRLister(mcpTaskPRListerAdapter{gh: p.services.GitHub})
 		mcpHandlers.SetTaskPRAutomationService(p.services.GitHub)
+	}
+	if p.services.GitLab != nil {
+		mcpHandlers.SetTaskMRAutomationService(p.services.GitLab)
 	}
 
 	// Reuse the cross-task handoff service constructed in registerRoutes —
@@ -1469,7 +1561,6 @@ func registerMCPAndDebugRoutes(
 	p.log.Debug("Registered Debug handlers (HTTP)")
 
 	if p.devMode {
-		debughandlers.RegisterExportRoute(p.router, p.version, Commit, p.log)
 		debughandlers.RegisterPprofRoutes(p.router, p.log)
 		debughandlers.RegisterMemoryRoute(p.router, p.log)
 	}

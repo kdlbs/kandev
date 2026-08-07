@@ -771,6 +771,11 @@ func (h *GitHandlers) wsGitCommits(ctx context.Context, msg *ws.Message) (*ws.Me
 	}
 }
 
+// sessionTerminalReason is the ready:false reason clients use to stop
+// retrying. Transient not-ready paths leave reason unset (or use another
+// code); a terminal session will never gain an execution.
+const sessionTerminalReason = "session_terminal"
+
 // computeGitCommits is the singleflight body for wsGitCommits. Returns
 // a JSON-ready payload — the not-ready / agent-client-nil cases return
 // the same `{commits:[], ready:false}` envelope as before, just packaged
@@ -778,8 +783,17 @@ func (h *GitHandlers) wsGitCommits(ctx context.Context, msg *ws.Message) (*ws.Me
 func (h *GitHandlers) computeGitCommits(ctx context.Context, req *GitCommitsRequest) (interface{}, error) {
 	execution, err := h.lifecycleMgr.GetOrEnsureExecution(ctx, req.SessionID)
 	if err != nil {
-		// "Not ready" errors map to ready:false so the client retries; any
-		// other error (DB failure, etc.) propagates as a real error.
+		// Terminal sessions will never recover an execution — return a
+		// distinct reason so clients stop retrying instead of polling forever.
+		if errors.Is(err, lifecycle.ErrSessionTerminal) {
+			return map[string]any{
+				"commits": []any{},
+				"ready":   false,
+				"reason":  sessionTerminalReason,
+			}, nil
+		}
+		// "Not ready" errors map to ready:false so the client retries.
+		// Any other error (DB failure, etc.) propagates as a real error.
 		if errors.Is(err, lifecycle.ErrSessionWorkspaceNotReady) || isSessionNotReadyError(err) {
 			return map[string]any{"commits": []any{}, "ready": false}, nil
 		}
@@ -852,6 +866,16 @@ func (h *GitHandlers) wsCumulativeDiff(ctx context.Context, msg *ws.Message) (*w
 func (h *GitHandlers) computeCumulativeDiff(ctx context.Context, req *CumulativeDiffRequest) (interface{}, error) {
 	execution, err := h.lifecycleMgr.GetOrEnsureExecution(ctx, req.SessionID)
 	if err != nil {
+		// Distinct terminal reason: clients must not treat this as an
+		// authoritative empty diff (that would clear a previously cached
+		// snapshot) and should not retry.
+		if errors.Is(err, lifecycle.ErrSessionTerminal) {
+			return map[string]any{
+				"cumulative_diff": nil,
+				"ready":           false,
+				"reason":          sessionTerminalReason,
+			}, nil
+		}
 		if errors.Is(err, lifecycle.ErrSessionWorkspaceNotReady) || isSessionNotReadyError(err) {
 			return map[string]any{"cumulative_diff": nil, "ready": false}, nil
 		}

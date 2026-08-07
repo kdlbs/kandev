@@ -182,4 +182,64 @@ test.describe("shell command output echo stripping", () => {
       fullPage: true,
     });
   });
+
+  test("does not repeat a CRLF multi-line echo with no cwd inside the expanded Output disclosure", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    // Regression for a live report: a multi-line command with no reported
+    // cwd (the common case - most commands don't need one), echoed by a
+    // real terminal using canonical-mode "\r\n" line endings, while the
+    // command's own embedded newlines - the literal bytes of the reported
+    // "command" field - stay plain "\n". The workDir-resolved-path fix
+    // above only reached its CRLF-normalizing comparison when a cwd was
+    // present, so a multi-line command with no cwd at all still leaked its
+    // entire echo verbatim into the Output disclosure.
+    const command = "echo start\necho hello";
+    const echoedOutput = "$ echo start\r\necho hello\r\nstart\nhello\n";
+
+    const script = [
+      `e2e:shell_result("${command.replace(/\n/g, "\\n")}", "${echoedOutput.replace(/\n/g, "\\n")}")`,
+      'e2e:message("done")',
+    ].join("\n");
+
+    const task = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      "Shell echo CRLF multiline regression",
+      seedData.agentProfileId,
+      {
+        description: script,
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+      },
+    );
+
+    await testPage.goto(`/t/${task.id}`);
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+    await session.waitForChatIdle({ timeout: 30_000 });
+
+    const chat = session.activeChat();
+    const commandRow = chat.getByTestId("tool-execute-command").filter({ hasText: "echo start" });
+    await expect(commandRow).toBeVisible();
+    await expect(commandRow).toHaveText(command);
+
+    const disclosure = chat.getByRole("button", { name: "Show command output" });
+    const responsePromise = testPage.waitForResponse(
+      (response) => response.url().endsWith("/shell-output") && response.status() === 200,
+    );
+    await disclosure.click();
+    await responsePromise;
+
+    const outputRegion = chat.getByTestId("tool-execute-output");
+    await expect(outputRegion).toContainText("start");
+    await expect(outputRegion).toContainText("hello");
+    // Critical: the CRLF-echoed command lines must not also appear inside
+    // the Output disclosure - they're already shown once in the command
+    // row above.
+    await expect(outputRegion).not.toContainText("echo start");
+    await expect(outputRegion).not.toContainText("$ echo");
+  });
 });

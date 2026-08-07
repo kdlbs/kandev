@@ -74,7 +74,9 @@ type DirectOutputWriter interface {
 }
 
 // TurnCompleteCallback is called when turn detection determines the agent is waiting for input.
-type TurnCompleteCallback func(sessionID string)
+// The process ID is included so consumers can ignore completion signals from a
+// process that was replaced while an idle timer callback was already queued.
+type TurnCompleteCallback func(sessionID, processID string)
 
 // OutputCallback is called when process output is received.
 // Used when running without a WorkspaceTracker (e.g., standalone passthrough mode).

@@ -151,7 +151,7 @@ func (cs *CronScheduler) fire(ctx context.Context, t *AutomationTrigger, now tim
 	})
 	dedupKey := fmt.Sprintf("scheduled:%s:%d", t.ID, now.Unix()/60) // Dedup by minute
 
-	if err := cs.svc.FireTrigger(ctx, t.AutomationID, t.ID, TriggerTypeScheduled, data, dedupKey); err != nil {
+	if _, err := cs.svc.FireTrigger(ctx, t.AutomationID, t.ID, TriggerTypeScheduled, data, dedupKey); err != nil {
 		cs.logger.Error("failed to fire scheduled trigger",
 			zap.String("trigger_id", t.ID),
 			zap.String("automation_id", t.AutomationID),

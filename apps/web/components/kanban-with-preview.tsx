@@ -26,6 +26,7 @@ import {
   useEnsureTaskSession,
   type UseEnsureTaskSessionResult,
 } from "@/hooks/domains/session/use-ensure-task-session";
+import { useTranslation } from "react-i18next";
 
 type KanbanWithPreviewProps = {
   initialTaskId?: string;
@@ -428,6 +429,7 @@ function FloatingPreviewLayout({
   onSessionChange,
   onResizeMouseDown,
 }: PreviewLayoutProps) {
+  const { t } = useTranslation();
   return (
     <>
       <div className="flex-1 overflow-hidden" style={{ width: `${kanbanWidth}px` }}>
@@ -440,7 +442,7 @@ function FloatingPreviewLayout({
       <div
         className="fixed inset-0 bg-black/30 z-30"
         onClick={onClose}
-        aria-label="Close preview"
+        aria-label={t("kanban:closePreview")}
       />
       <div
         className="fixed top-0 right-0 bottom-[var(--app-status-bar-height)] z-40 flex bg-background shadow-2xl"

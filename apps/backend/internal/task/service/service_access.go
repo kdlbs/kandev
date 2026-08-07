@@ -129,6 +129,23 @@ func (s *Service) AuthorizeSessionAccess(ctx context.Context, sessionID string) 
 	return s.authorizeTaskID(ctx, session.TaskID)
 }
 
+// AuthorizeTaskSessionAccess checks that both identifiers are visible to the
+// caller and that the session belongs to the supplied task. Mismatches use the
+// task not-found sentinel so callers cannot enumerate another task's sessions.
+func (s *Service) AuthorizeTaskSessionAccess(ctx context.Context, taskID, sessionID string) error {
+	if err := s.AuthorizeTaskAccess(ctx, taskID); err != nil {
+		return err
+	}
+	session, err := s.sessions.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		return err
+	}
+	if session == nil || session.TaskID != taskID {
+		return repoerrors.ErrTaskNotFound
+	}
+	return nil
+}
+
 // AuthorizeEnvironmentAccess checks visibility of a task environment via its
 // task's workspace. Used by the terminal environment-shell route, which
 // resolves executions by environment ID rather than session ID.

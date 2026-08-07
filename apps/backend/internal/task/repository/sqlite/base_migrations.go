@@ -76,6 +76,9 @@ func (r *Repository) runMigrations() error {
 	if err := r.migrateTasksRemoveWorkflowFK(); err != nil {
 		return err
 	}
+	if err := r.dropRetiredSlackIntegration(); err != nil {
+		return err
+	}
 	r.migrate.Apply("idx_tasks_queued_for_step", `CREATE INDEX IF NOT EXISTS idx_tasks_queued_for_step ON tasks(queued_for_step_id, queued_at)`)
 	// Remove deprecated workflow_step_id column from task_sessions
 	if err := r.migrateSessionsRemoveWorkflowStepID(); err != nil {
@@ -110,6 +113,19 @@ func (r *Repository) runMigrations() error {
 	// column added earlier.
 	r.migrate.Apply("task_sessions.name", `ALTER TABLE task_sessions ADD COLUMN name TEXT DEFAULT ''`)
 	r.migrate.Apply("repositories.copy_files", `ALTER TABLE repositories ADD COLUMN copy_files TEXT DEFAULT ''`)
+	r.migrate.Apply("repository_secret_bindings.table", `
+		CREATE TABLE IF NOT EXISTS repository_secret_bindings (
+			repository_id TEXT NOT NULL,
+			key TEXT NOT NULL,
+			secret_id TEXT NOT NULL,
+			created_at TIMESTAMP NOT NULL,
+			updated_at TIMESTAMP NOT NULL,
+			PRIMARY KEY (repository_id, key),
+			FOREIGN KEY (repository_id) REFERENCES repositories(id) ON DELETE CASCADE
+		)`)
+	r.migrate.Apply("repository_secret_bindings.index", `
+		CREATE INDEX IF NOT EXISTS idx_repository_secret_bindings_repository
+		ON repository_secret_bindings(repository_id)`)
 	r.migrate.Apply("repositories.remote_url", `ALTER TABLE repositories ADD COLUMN remote_url TEXT DEFAULT ''`)
 	r.migrate.Apply("repositories.provider_host", `ALTER TABLE repositories ADD COLUMN provider_host TEXT DEFAULT ''`)
 	r.migrate.Apply("repositories.provider_host.github_backfill", `
@@ -175,6 +191,7 @@ func (r *Repository) runMigrations() error {
 	// file path it was synced from.
 	r.migrate.Apply("workflows.source", `ALTER TABLE workflows ADD COLUMN source TEXT NOT NULL DEFAULT 'manual'`)
 	r.migrate.Apply("workflows.source_path", `ALTER TABLE workflows ADD COLUMN source_path TEXT NOT NULL DEFAULT ''`)
+	r.migrate.Apply("workflows.prompt", `ALTER TABLE workflows ADD COLUMN prompt TEXT NOT NULL DEFAULT ''`)
 	if err := r.ensureImproveKandevWorkflowTemplateUniqueness(); err != nil {
 		return err
 	}
@@ -192,12 +209,33 @@ func (r *Repository) runMigrations() error {
 	// fail. Required for tests and any environment where the workflow
 	// repo hasn't run yet.
 	r.ensureRunnerProjectionTables()
+	// Keep the projection table compatible with databases whose workflow
+	// repository has not replayed its own migrations yet. These additive
+	// migrations are idempotent and preserve the false default for legacy rows.
+	r.migrate.Apply("workflow_steps.auto_advance_requires_signal", `ALTER TABLE workflow_steps ADD COLUMN auto_advance_requires_signal INTEGER NOT NULL DEFAULT 0`)
+	r.migrate.Apply("workflow_steps.cancel_triggers_turn_complete", `ALTER TABLE workflow_steps ADD COLUMN cancel_triggers_turn_complete INTEGER NOT NULL DEFAULT 0`)
 
 	// Slack-style unread divider: the read cursor a session advances to the
 	// latest message id whenever it becomes the visible chat panel. The
 	// frontend snapshots the prior value before the advance to position the
 	// "New" divider (see models.TaskSession.LastReadMessageID).
 	r.migrate.Apply("task_sessions.last_read_message_id", `ALTER TABLE task_sessions ADD COLUMN last_read_message_id TEXT DEFAULT ''`)
+
+	// Bounded task-level status projection. Keep this on the replay path as well
+	// as the fresh schema path so an existing installation gets the table
+	// without a destructive rebuild.
+	r.migrate.Apply("task_status_summaries.table", `
+		CREATE TABLE IF NOT EXISTS task_status_summaries (
+			task_id TEXT PRIMARY KEY,
+			workspace_id TEXT NOT NULL,
+			revision INTEGER NOT NULL DEFAULT 0,
+			summary TEXT NOT NULL DEFAULT '{}',
+			updated_at TIMESTAMP NOT NULL,
+			FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
+		)`)
+	r.migrate.Apply("task_status_summaries.workspace", `
+		CREATE INDEX IF NOT EXISTS idx_task_status_summaries_workspace
+			ON task_status_summaries(workspace_id)`)
 
 	return nil
 }

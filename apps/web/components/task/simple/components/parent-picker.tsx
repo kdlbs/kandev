@@ -10,6 +10,8 @@ import { TaskDetachConfirmDialog } from "@/components/task/task-detach-confirm-d
 import type { OfficeTask } from "@/lib/state/slices/office/types";
 import type { Task } from "@/app/office/tasks/[id]/types";
 import { workspaceModeFromMetadata, type WorkspaceMode } from "@/lib/kanban/map-task";
+import { useTranslation } from "react-i18next";
+import { t } from "@/lib/i18n";
 
 type ParentPickerProps = {
   task: Task;
@@ -45,9 +47,9 @@ function useTaskWorkspaceMode(task: Task) {
 function buildOptions(candidates: OfficeTask[], currentTaskId: string): ComboboxOption[] {
   const noOpt: ComboboxOption = {
     value: NO_PARENT,
-    label: "No parent",
+    label: t("task:noParent"),
     keywords: ["none"],
-    renderLabel: () => <span className="text-muted-foreground">No parent</span>,
+    renderLabel: () => <span className="text-muted-foreground">{t("task:noParent")}</span>,
   };
   const taskOpts = candidates
     .filter((t) => t.id !== currentTaskId)
@@ -66,6 +68,7 @@ function buildOptions(candidates: OfficeTask[], currentTaskId: string): Combobox
 }
 
 export function ParentPicker({ task }: ParentPickerProps) {
+  const { t, i18n } = useTranslation();
   const storeTasks = useAppStore((s) => s.office.tasks.items);
   const workspaceId = useAppStore((s) => s.workspaces.activeId);
   const [fetched, setFetched] = useState<OfficeTask[]>([]);
@@ -92,7 +95,14 @@ export function ParentPicker({ task }: ParentPickerProps) {
 
   const candidates = storeTasks.length > 0 ? storeTasks : fetched;
 
-  const options = useMemo(() => buildOptions(candidates, task.id), [candidates, task.id]);
+  // `buildOptions` resolves its "No parent" label through the module-level `t`.
+  // Keeping the language in the deps is what makes that label follow a runtime
+  // locale switch; without it the memo only recomputes when the data changes.
+  const options = useMemo(
+    () => buildOptions(candidates, task.id),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- i18n.language is the locale trigger
+    [candidates, task.id, i18n.language],
+  );
 
   const currentValue = task.parentId || NO_PARENT;
 
@@ -146,9 +156,9 @@ export function ParentPicker({ task }: ParentPickerProps) {
         options={options}
         value={currentValue}
         onValueChange={handleSelect}
-        placeholder="No parent"
-        searchPlaceholder="Search tasks..."
-        emptyMessage="No tasks found."
+        placeholder={t("task:noParent")}
+        searchPlaceholder={t("task:searchTasks")}
+        emptyMessage={t("task:noTasksFound")}
         disabled={isDetaching}
         triggerClassName="h-7 w-full justify-end px-2"
         popoverAlign="end"

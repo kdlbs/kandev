@@ -2,6 +2,7 @@
 
 import { IconGitPullRequest, IconLoader2 } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
+import { Trans, useTranslation } from "react-i18next";
 
 export function MobilePRBranchSummary({
   displayBranch,
@@ -16,14 +17,24 @@ export function MobilePRBranchSummary({
     <div className="text-sm text-muted-foreground">
       {baseBranch ? (
         <span>
-          Creating {terminology.shortName} from{" "}
-          <span className="font-medium text-foreground">{displayBranch}</span> to{" "}
-          <span className="font-medium text-foreground">{baseBranch}</span>
+          <Trans
+            i18nKey="task:creatingFromTo"
+            values={{ shortName: terminology.shortName, displayBranch, baseBranch }}
+          >
+            Creating {{ shortName: terminology.shortName }} from{" "}
+            <span className="font-medium text-foreground">{displayBranch}</span> to{" "}
+            <span className="font-medium text-foreground">{baseBranch}</span>
+          </Trans>
         </span>
       ) : (
         <span>
-          Creating {terminology.shortName} from{" "}
-          <span className="font-medium text-foreground">{displayBranch}</span>
+          <Trans
+            i18nKey="task:creatingFrom"
+            values={{ shortName: terminology.shortName, displayBranch }}
+          >
+            Creating {{ shortName: terminology.shortName }} from{" "}
+            <span className="font-medium text-foreground">{displayBranch}</span>
+          </Trans>
         </span>
       )}
     </div>
@@ -39,11 +50,17 @@ export function CommitSummary({
   uncommittedAdditions: number;
   uncommittedDeletions: number;
 }) {
-  if (uncommittedCount <= 0) return <span>No changes to commit</span>;
+  const { t } = useTranslation();
+  if (uncommittedCount <= 0) return <span>{t("task:noChangesToCommit")}</span>;
   return (
     <span>
-      <span className="font-medium text-foreground">{uncommittedCount}</span> file
-      {uncommittedCount !== 1 ? "s" : ""} changed
+      <Trans
+        i18nKey="task:filesChanged"
+        count={uncommittedCount}
+        values={{ count: uncommittedCount }}
+      >
+        <span className="font-medium text-foreground">{uncommittedCount}</span> files changed
+      </Trans>
       {(uncommittedAdditions > 0 || uncommittedDeletions > 0) && (
         <span className="ml-2">
           (<span className="text-green-600">+{uncommittedAdditions}</span>
@@ -72,6 +89,7 @@ export function PRSubmitButton({
   terminology: { shortName: string };
   branchPushed: boolean;
 }) {
+  const { t } = useTranslation();
   return (
     <Button
       onClick={() => onCreatePR(prTitle.trim(), prBody.trim(), prDraft)}
@@ -81,12 +99,14 @@ export function PRSubmitButton({
       {isGitLoading ? (
         <>
           <IconLoader2 className="h-4 w-4 animate-spin mr-2" />
-          Creating...
+          {t("task:creatingEllipsis")}
         </>
       ) : (
         <>
           <IconGitPullRequest className="h-4 w-4 mr-2" />
-          {branchPushed ? "Retry" : "Create"} {terminology.shortName}
+          {branchPushed
+            ? t("task:retryChangeRequest", { shortName: terminology.shortName })
+            : t("task:createChangeRequest", { shortName: terminology.shortName })}
         </>
       )}
     </Button>

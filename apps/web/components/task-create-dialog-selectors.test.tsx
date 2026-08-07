@@ -3,7 +3,12 @@ import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { TooltipProvider } from "@kandev/ui/tooltip";
 import { ToastProvider } from "@/components/toast-provider";
-import { MAX_FILES, MAX_TOTAL_SIZE, processFile } from "@/components/task/chat/file-attachment";
+import {
+  MAX_FILES,
+  MAX_FILE_SIZE,
+  MAX_TOTAL_SIZE,
+  processFile,
+} from "@/components/task/chat/file-attachment";
 import { formatBytes } from "@/lib/utils/format-bytes";
 import { TaskFormInputs } from "./task-create-dialog-selectors";
 import type { TaskFormInputsHandle } from "./task-create-dialog-types";
@@ -300,7 +305,7 @@ describe("TaskFormInputs attachment feedback", () => {
   it("warns when a pasted image exceeds the attachment limit", async () => {
     const { textarea } = renderTaskFormInputs("");
     const image = new File(["image"], "copied-image.png", { type: "image/png" });
-    Object.defineProperty(image, "size", { value: 14 * 1024 * 1024 });
+    Object.defineProperty(image, "size", { value: MAX_FILE_SIZE + 1 });
 
     fireEvent.paste(textarea, {
       clipboardData: {
@@ -313,7 +318,7 @@ describe("TaskFormInputs attachment feedback", () => {
     const warning = await screen.findByTestId(TOAST_MESSAGE_TEST_ID);
     expect(warning.textContent).toContain("Attachment is too large");
     expect(warning.textContent).toContain(
-      "copied-image.png is 14.0 MB. The maximum file size is 10.0 MB.",
+      `copied-image.png is ${formatBytes(MAX_FILE_SIZE + 1)}. The maximum file size is ${formatBytes(MAX_FILE_SIZE)}.`,
     );
   });
 

@@ -150,6 +150,50 @@ func TestSQLiteRepository_ReserveHeadMarksLifecycleRowInFlight(t *testing.T) {
 	}
 }
 
+func TestSQLiteRepository_ReserveHeadUsesStoredMetadataGuard(t *testing.T) {
+	repo := newTestSQLiteRepo(t)
+	ctx := context.Background()
+
+	msg := &QueuedMessage{
+		SessionID: "s1", TaskID: "t1", Content: "pr merged", QueuedBy: QueuedByWorkflow,
+		Metadata: map[string]interface{}{
+			MetadataLifecycleDurable: true,
+			"priority":               float64(1),
+		},
+	}
+	if err := repo.Insert(ctx, msg, 0); err != nil {
+		t.Fatalf("insert: %v", err)
+	}
+	sqliteRepo, ok := repo.(*sqliteRepository)
+	if !ok {
+		t.Fatalf("repository type = %T, want *sqliteRepository", repo)
+	}
+	const storedMetadata = `{ "priority": 1.0, "lifecycle_durable_until_accepted": true }`
+	if _, err := sqliteRepo.db.ExecContext(ctx, sqliteRepo.db.Rebind(`
+		UPDATE queued_messages SET metadata_json = ? WHERE id = ?
+	`), storedMetadata, msg.ID); err != nil {
+		t.Fatalf("rewrite metadata representation: %v", err)
+	}
+
+	reserved, err := repo.ReserveHead(ctx, "s1")
+	if err != nil {
+		t.Fatalf("reserve: %v", err)
+	}
+	if reserved == nil {
+		t.Fatal("reserve returned nil for semantically valid non-canonical metadata JSON")
+	}
+	if !reserved.IsReservedLifecycleDelivery() {
+		t.Fatal("reserved copy lost process-local lifecycle reservation evidence")
+	}
+	entries, err := repo.ListBySession(ctx, "s1")
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(entries) != 1 || !entries[0].IsReservedInFlight() {
+		t.Fatalf("stored row was not marked in flight: %+v", entries)
+	}
+}
+
 func TestSQLiteRepository_ReserveAfterRestartReturnsRetryableLifecycleMetadata(t *testing.T) {
 	ctx := context.Background()
 	dbPath := filepath.Join(t.TempDir(), "queue.db")
@@ -430,16 +474,16 @@ func TestSQLiteRepository_DeleteByID(t *testing.T) {
 	if err := repo.Insert(ctx, agentMsg, 0); err != nil {
 		t.Fatalf("insert agent message: %v", err)
 	}
-	if err := repo.DeleteByID(ctx, "s1", agentMsg.ID); !errors.Is(err, ErrEntryNotFound) {
-		t.Errorf("expected ErrEntryNotFound for agent-authored entry delete, got %v", err)
+	if err := repo.DeleteByID(ctx, "s1", agentMsg.ID); err != nil {
+		t.Errorf("delete agent-authored entry: %v", err)
 	}
 	count, _ = repo.CountBySession(ctx, "s1")
-	if count != 1 {
-		t.Errorf("agent-authored entry should survive delete attempt, got count=%d", count)
+	if count != 0 {
+		t.Errorf("agent-authored entry should be deleted, got count=%d", count)
 	}
 }
 
-func TestSQLiteRepository_ClientMutationsRejectWorkflowOwnedEntry(t *testing.T) {
+func TestSQLiteRepository_WorkflowEntryCanBeRemovedButNotEdited(t *testing.T) {
 	repo := newTestSQLiteRepo(t)
 	ctx := context.Background()
 
@@ -459,17 +503,103 @@ func TestSQLiteRepository_ClientMutationsRejectWorkflowOwnedEntry(t *testing.T) 
 	); !errors.Is(err, ErrEntryNotFound) {
 		t.Errorf("workflow-owned update error = %v, want ErrEntryNotFound", err)
 	}
-	if err := repo.DeleteByID(ctx, "s1", msg.ID); !errors.Is(err, ErrEntryNotFound) {
-		t.Errorf("workflow-owned delete error = %v, want ErrEntryNotFound", err)
+	if err := repo.DeleteByID(ctx, "s1", msg.ID); err != nil {
+		t.Errorf("workflow-owned delete error = %v", err)
 	}
 
 	entries, err := repo.ListBySession(ctx, "s1")
 	if err != nil {
 		t.Fatalf("list workflow entries: %v", err)
 	}
-	if len(entries) != 1 || entries[0].Content != "lifecycle prompt" {
-		t.Fatalf("workflow entry changed after hostile mutations: %+v", entries)
+	if len(entries) != 0 {
+		t.Fatalf("workflow entry survived removal: %+v", entries)
 	}
+}
+
+func TestSQLiteRepository_DeletePreservesReservedLifecycleEntry(t *testing.T) {
+	repo := newTestSQLiteRepo(t)
+	ctx := context.Background()
+
+	msg := &QueuedMessage{
+		SessionID: "s1",
+		TaskID:    "t1",
+		Content:   "lifecycle prompt",
+		QueuedBy:  QueuedByWorkflow,
+		Metadata: map[string]interface{}{
+			MetadataLifecycleDurable: true,
+			"origin":                 "github_pr_automation",
+		},
+	}
+	if err := repo.Insert(ctx, msg, 0); err != nil {
+		t.Fatalf("insert workflow entry: %v", err)
+	}
+	reserved, err := repo.ReserveHead(ctx, "s1")
+	if err != nil || reserved == nil {
+		t.Fatalf("reserve lifecycle entry: msg=%+v err=%v", reserved, err)
+	}
+
+	if err := repo.DeleteByID(ctx, "s1", msg.ID); !errors.Is(err, ErrEntryNotFound) {
+		t.Fatalf("delete reserved entry error = %v, want ErrEntryNotFound", err)
+	}
+	removed, err := repo.DeleteAllBySession(ctx, "s1")
+	if err != nil {
+		t.Fatalf("clear queue: %v", err)
+	}
+	if removed != 0 {
+		t.Fatalf("clear removed %d reserved entries, want 0", removed)
+	}
+	if err := repo.AcknowledgeByID(ctx, "s1", msg.ID); err != nil {
+		t.Fatalf("acknowledge reserved entry after cancellation attempts: %v", err)
+	}
+}
+
+func TestSQLiteRepository_CancellationReservationOrdering(t *testing.T) {
+	t.Run("individual cancellation wins before reservation", func(t *testing.T) {
+		repo := newTestSQLiteRepo(t)
+		ctx := context.Background()
+		msg := insertDurableLifecycleEntry(t, repo, "cancel-first")
+
+		if err := repo.DeleteByID(ctx, "cancel-first", msg.ID); err != nil {
+			t.Fatalf("cancel: %v", err)
+		}
+		reserved, err := repo.ReserveHead(ctx, "cancel-first")
+		if err != nil || reserved != nil {
+			t.Fatalf("reserve after cancel: msg=%+v err=%v", reserved, err)
+		}
+	})
+
+	t.Run("reservation wins before clear", func(t *testing.T) {
+		repo := newTestSQLiteRepo(t)
+		ctx := context.Background()
+		msg := insertDurableLifecycleEntry(t, repo, "reserve-first")
+
+		reserved, err := repo.ReserveHead(ctx, "reserve-first")
+		if err != nil || reserved == nil {
+			t.Fatalf("reserve: msg=%+v err=%v", reserved, err)
+		}
+		removed, err := repo.DeleteAllBySession(ctx, "reserve-first")
+		if err != nil || removed != 0 {
+			t.Fatalf("clear after reserve: removed=%d err=%v", removed, err)
+		}
+		if err := repo.AcknowledgeByID(ctx, "reserve-first", msg.ID); err != nil {
+			t.Fatalf("acknowledge: %v", err)
+		}
+	})
+}
+
+func insertDurableLifecycleEntry(t *testing.T, repo Repository, sessionID string) *QueuedMessage {
+	t.Helper()
+	msg := &QueuedMessage{
+		SessionID: sessionID,
+		TaskID:    "t1",
+		Content:   "lifecycle prompt",
+		QueuedBy:  QueuedByWorkflow,
+		Metadata:  map[string]interface{}{MetadataLifecycleDurable: true},
+	}
+	if err := repo.Insert(context.Background(), msg, 0); err != nil {
+		t.Fatalf("insert durable lifecycle entry: %v", err)
+	}
+	return msg
 }
 
 // TestSQLiteRepository_TakeByID covers TakeByID's cross-session guard,
@@ -549,8 +679,8 @@ func TestSQLiteRepository_DeleteAllBySession(t *testing.T) {
 	repo := newTestSQLiteRepo(t)
 	ctx := context.Background()
 
-	for i := 0; i < 5; i++ {
-		_ = repo.Insert(ctx, &QueuedMessage{SessionID: "s1", TaskID: "t1", QueuedBy: "u"}, 0)
+	for _, queuedBy := range []string{QueuedByUser, QueuedByAgent, QueuedByWorkflow, QueuedByServer} {
+		_ = repo.Insert(ctx, &QueuedMessage{SessionID: "s1", TaskID: "t1", QueuedBy: queuedBy}, 0)
 	}
 	_ = repo.Insert(ctx, &QueuedMessage{SessionID: "s2", TaskID: "t1", QueuedBy: "u"}, 0)
 
@@ -558,8 +688,8 @@ func TestSQLiteRepository_DeleteAllBySession(t *testing.T) {
 	if err != nil {
 		t.Fatalf("delete all: %v", err)
 	}
-	if n != 5 {
-		t.Errorf("deleted: got %d, want 5", n)
+	if n != 4 {
+		t.Errorf("deleted: got %d, want 4", n)
 	}
 	count, _ := repo.CountBySession(ctx, "s1")
 	if count != 0 {

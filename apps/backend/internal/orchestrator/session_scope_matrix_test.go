@@ -89,6 +89,10 @@ func sessionScopeCases() []deniedCase {
 			_, err := s.EnsureSession(context.Background(), taskID)
 			return err
 		}},
+		{"SteerTask", func(s *Service) error {
+			_, err := s.SteerTask(context.Background(), taskID, sessionID, "steer", "", false, nil)
+			return err
+		}},
 	}
 }
 

@@ -24,6 +24,11 @@ export type GitLabWatchForm = {
   cleanupPolicy: "auto" | "always" | "never";
 };
 
+// Seeded into the dialog's prompt field, then persisted on the watch and sent to
+// the agent verbatim. Deliberately NOT translated: a watch created under one
+// locale would keep that locale's prompt forever, and the agent reads it as an
+// instruction rather than as UI copy. Same contract as
+// DEFAULT_ISSUE_WATCH_PROMPT in components/github/issue-watch-placeholders.ts.
 const DEFAULT_REVIEW_PROMPT =
   "Review GitLab merge request {{mr.url}}. Summarize risks and leave actionable feedback.";
 const DEFAULT_ISSUE_PROMPT =

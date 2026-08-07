@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { IconSelector } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@kandev/ui/popover";
@@ -23,6 +24,41 @@ type ModelComboboxProps = {
   disabled?: boolean;
 };
 
+function copilotUsage(model: ModelEntry): string | undefined {
+  const raw = model.meta?.copilotUsage;
+  return typeof raw === "string" ? raw : undefined;
+}
+
+/** Selected-model summary shown on the closed trigger, or the placeholder. */
+function TriggerLabel({
+  selectedModel,
+  currentModelId,
+  placeholderLabel,
+}: {
+  selectedModel: ModelEntry | undefined;
+  currentModelId: string | undefined;
+  placeholderLabel: string;
+}) {
+  const { t } = useTranslation();
+  if (!selectedModel) {
+    return <span className="text-muted-foreground">{placeholderLabel}</span>;
+  }
+  const usage = copilotUsage(selectedModel);
+  return (
+    <span className="flex items-center gap-2 truncate">
+      {selectedModel.name}
+      {selectedModel.id === currentModelId && (
+        <span className="text-muted-foreground">{t("agents:defaultSuffix")}</span>
+      )}
+      {usage && (
+        <span className="text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground font-medium">
+          {usage}
+        </span>
+      )}
+    </span>
+  );
+}
+
 /**
  * Searchable model picker. The user can only choose from the agent's
  * advertised model list — custom model IDs are not allowed for ACP agents
@@ -33,17 +69,16 @@ export function ModelCombobox({
   onChange,
   models,
   currentModelId,
-  placeholder = "Select a model",
+  placeholder,
   disabled,
 }: ModelComboboxProps) {
+  const { t } = useTranslation();
   const [open, setOpen] = useState(false);
+  // A parameter default is evaluated before the component body, so `t` is not
+  // in scope there — resolve the fallback here instead.
+  const placeholderLabel = placeholder ?? t("agents:selectAModelShort");
   const effectiveValue = value || currentModelId || "";
   const selectedModel = models.find((m) => m.id === effectiveValue);
-
-  const copilotUsage = (model: ModelEntry): string | undefined => {
-    const raw = model.meta?.copilotUsage;
-    return typeof raw === "string" ? raw : undefined;
-  };
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -56,21 +91,11 @@ export function ModelCombobox({
           className="w-full justify-between font-normal cursor-pointer"
           data-testid="profile-model-combobox-trigger"
         >
-          {selectedModel ? (
-            <span className="flex items-center gap-2 truncate">
-              {selectedModel.name}
-              {selectedModel.id === currentModelId && (
-                <span className="text-muted-foreground">(default)</span>
-              )}
-              {copilotUsage(selectedModel) && (
-                <span className="text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground font-medium">
-                  {copilotUsage(selectedModel)}
-                </span>
-              )}
-            </span>
-          ) : (
-            <span className="text-muted-foreground">{placeholder}</span>
-          )}
+          <TriggerLabel
+            selectedModel={selectedModel}
+            currentModelId={currentModelId}
+            placeholderLabel={placeholderLabel}
+          />
           <IconSelector className="ml-2 h-4 w-4 shrink-0 opacity-50" />
         </Button>
       </PopoverTrigger>
@@ -80,12 +105,12 @@ export function ModelCombobox({
         onWheel={(e) => e.stopPropagation()}
       >
         <Command>
-          <CommandInput placeholder="Search models..." />
+          <CommandInput placeholder={t("agents:searchModels")} />
           <CommandList
             className="max-h-[min(60vh,24rem)] overflow-y-auto overscroll-contain"
             onWheel={(e) => e.stopPropagation()}
           >
-            <CommandEmpty>No model found.</CommandEmpty>
+            <CommandEmpty>{t("agents:noModelFound")}</CommandEmpty>
             <CommandGroup>
               {models.map((model) => {
                 const usage = copilotUsage(model);
@@ -104,7 +129,9 @@ export function ModelCombobox({
                       <div className="flex items-center gap-2 truncate">
                         <span className="truncate">{model.name}</span>
                         {model.id === currentModelId && (
-                          <span className="text-muted-foreground text-xs">(default)</span>
+                          <span className="text-muted-foreground text-xs">
+                            {t("agents:defaultSuffix")}
+                          </span>
                         )}
                       </div>
                       {model.description && model.description !== model.name && (

@@ -630,6 +630,37 @@ func (s *Service) clientForTask(ctx context.Context, taskID string) (Client, err
 	return s.ClientForWorkspace(ctx, workspaceID)
 }
 
+// ErrWorkspaceClientRequired marks every failure path of clientForTaskStrict.
+// Unlike clientForTask, this helper never falls back to the ambient/legacy
+// Service.Client() singleton — that fallback resolved reviewer identity and
+// MR fetches against the wrong GitLab account twice during PR #2038's
+// review (commits c7116a228, 8a8d3f1e1), and TaskMR has no workspace column
+// of its own, making GitLab structurally more exposed to the same class of
+// bug than GitHub was. Every MR lifecycle-automation call site must resolve
+// its client through this helper, not clientForTask.
+var ErrWorkspaceClientRequired = errors.New("gitlab: workspace-scoped client required")
+
+func (s *Service) clientForTaskStrict(ctx context.Context, taskID string) (Client, error) {
+	s.mu.RLock()
+	store := s.store
+	secretsUnavailable := s.workspaceSecrets == nil
+	s.mu.RUnlock()
+	if store == nil {
+		return nil, fmt.Errorf("%w: gitlab store not configured", ErrWorkspaceClientRequired)
+	}
+	if secretsUnavailable {
+		return nil, fmt.Errorf("%w: workspace secret store not configured", ErrWorkspaceClientRequired)
+	}
+	workspaceID, err := store.WorkspaceIDForTask(ctx, taskID)
+	if err != nil {
+		return nil, fmt.Errorf("%w: resolve task workspace: %w", ErrWorkspaceClientRequired, err)
+	}
+	if strings.TrimSpace(workspaceID) == "" {
+		return nil, fmt.Errorf("%w: workspace_id is required", ErrWorkspaceClientRequired)
+	}
+	return s.ClientForWorkspace(ctx, workspaceID)
+}
+
 // DeleteConfigForWorkspace deletes one workspace's metadata and PAT.
 func (s *Service) DeleteConfigForWorkspace(ctx context.Context, workspaceID string) error {
 	workspaceID = strings.TrimSpace(workspaceID)

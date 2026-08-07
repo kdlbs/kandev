@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"reflect"
 	"testing"
 	"time"
 
@@ -111,6 +112,30 @@ func (m *mockWorkflowProvider) addWorkflow(id, workspaceID, name string) {
 func createStep(t *testing.T, svc *Service, step *models.WorkflowStep) {
 	err := svc.CreateStep(context.Background(), step)
 	require.NoError(t, err)
+}
+
+func TestCreateStepRejectsConfigureSessionWithProfile(t *testing.T) {
+	svc, db := setupTestService(t)
+	insertWorkflow(t, db, "wf-1", "Test Workflow")
+
+	step := &models.WorkflowStep{
+		WorkflowID:     "wf-1",
+		Name:           "Work",
+		AgentProfileID: "profile-1",
+		Events: models.StepEvents{OnEnter: []models.OnEnterAction{{
+			Type: models.OnEnterConfigureSession,
+			Config: map[string]interface{}{"rules": []interface{}{
+				map[string]interface{}{"agent_name": "codex", "operation": "keep"},
+			}}},
+		}},
+	}
+
+	err := svc.CreateStep(context.Background(), step)
+	require.ErrorContains(t, err, "cannot be combined with agent_profile_id")
+
+	steps, err := svc.repo.ListStepsByWorkflow(context.Background(), "wf-1")
+	require.NoError(t, err)
+	require.Empty(t, steps)
 }
 
 // TestListTemplates_FiltersHidden verifies that templates marked
@@ -431,6 +456,30 @@ func TestCreateStepsFromTemplate_RemapsStepIDs(t *testing.T) {
 	assert.Equal(t, nameToID["In Progress"], done.Events.OnTurnStart[0].Config["step_id"])
 }
 
+func TestCreateStepsFromTemplate_PreservesCancelTriggersTurnComplete(t *testing.T) {
+	svc, db := setupTestService(t)
+	ctx := context.Background()
+	insertWorkflow(t, db, "wf-cancel-defaults", "Cancel defaults")
+
+	require.NoError(t, svc.CreateStepsFromTemplate(ctx, "wf-cancel-defaults", "simple"))
+	steps, err := svc.repo.ListStepsByWorkflow(ctx, "wf-cancel-defaults")
+	require.NoError(t, err)
+	want := map[string]bool{"Backlog": true, "In Progress": true, "Review": false, "Done": false}
+	for _, step := range steps {
+		wantValue, ok := want[step.Name]
+		if !ok {
+			continue
+		}
+		field := reflect.ValueOf(step).Elem().FieldByName("CancelTriggersTurnComplete")
+		if !field.IsValid() {
+			t.Fatalf("WorkflowStep is missing CancelTriggersTurnComplete")
+		}
+		if got := field.Bool(); got != wantValue {
+			t.Errorf("created step %q cancel trigger = %t, want %t", step.Name, got, wantValue)
+		}
+	}
+}
+
 func TestCreateStepsFromTemplate_NormalizesDuplicateStartSteps(t *testing.T) {
 	svc, db := setupTestService(t)
 	ctx := context.Background()
@@ -453,6 +502,37 @@ func TestCreateStepsFromTemplate_NormalizesDuplicateStartSteps(t *testing.T) {
 	steps, err := svc.repo.ListStepsByWorkflow(ctx, "wf-1")
 	require.NoError(t, err)
 	assert.Equal(t, []string{"Latest Start"}, startStepNames(steps))
+}
+
+func TestCreateStepsFromTemplateRejectsInvalidConfigureSession(t *testing.T) {
+	svc, db := setupTestService(t)
+	ctx := context.Background()
+
+	insertWorkflow(t, db, "wf-1", "Test Workflow")
+	err := svc.repo.CreateTemplate(ctx, &models.WorkflowTemplate{
+		ID:   "invalid-session-config",
+		Name: "Invalid Session Config",
+		Steps: []models.StepDefinition{{
+			ID:             "work",
+			Name:           "Work",
+			Position:       0,
+			AgentProfileID: "profile-1",
+			Events: models.StepEvents{OnEnter: []models.OnEnterAction{{
+				Type: models.OnEnterConfigureSession,
+				Config: map[string]interface{}{"rules": []interface{}{
+					map[string]interface{}{"agent_name": "codex", "operation": "keep"},
+				}},
+			}}},
+		}},
+	})
+	require.NoError(t, err)
+
+	err = svc.CreateStepsFromTemplate(ctx, "wf-1", "invalid-session-config")
+	require.ErrorContains(t, err, "cannot be combined with agent_profile_id")
+
+	steps, err := svc.repo.ListStepsByWorkflow(ctx, "wf-1")
+	require.NoError(t, err)
+	require.Empty(t, steps)
 }
 
 func findStepByName(steps []*models.WorkflowStep, name string) *models.WorkflowStep {
@@ -631,6 +711,33 @@ func TestImportWorkflows(t *testing.T) {
 		steps, err := svc.repo.ListStepsByWorkflow(ctx, "imported-Imported WF")
 		require.NoError(t, err)
 		assert.Len(t, steps, 2)
+	})
+
+	t.Run("imports workflow-level prompt", func(t *testing.T) {
+		svc, _, provider := setupTestServiceWithProvider(t)
+		ctx := context.Background()
+
+		export := &models.WorkflowExport{
+			Version: models.ExportVersion,
+			Type:    models.ExportType,
+			Workflows: []models.WorkflowPortable{
+				{
+					Name:   "Prompted WF",
+					Prompt: "If the PR is merged or closed, move the Task to Done.",
+					Steps: []models.StepPortable{
+						{Name: "Todo", Position: 0, Color: "gray"},
+					},
+				},
+			},
+		}
+
+		result, err := svc.ImportWorkflows(ctx, "ws-1", export)
+		require.NoError(t, err)
+		assert.Equal(t, []string{"Prompted WF"}, result.Created)
+
+		wf, err := provider.GetWorkflow(ctx, "imported-Prompted WF")
+		require.NoError(t, err)
+		assert.Equal(t, "If the PR is merged or closed, move the Task to Done.", wf.Prompt)
 	})
 
 	t.Run("normalizes duplicate start steps on import", func(t *testing.T) {

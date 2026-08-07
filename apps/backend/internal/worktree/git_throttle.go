@@ -24,21 +24,15 @@ import (
 // anywhere we exec a git binary from the worktree package — calling
 // cmd.Run() directly bypasses the throttle.
 func runGitCmd(ctx context.Context, cmd *exec.Cmd) error {
-	return subproc.RunGit(ctx, cmd)
+	return subproc.RunGitClass(ctx, subproc.GitLifecycle, cmd)
 }
 
 // runGitCmdCombinedOutput is runGitCmd's CombinedOutput sibling.
 func runGitCmdCombinedOutput(ctx context.Context, cmd *exec.Cmd) ([]byte, error) {
-	return subproc.RunGitCombinedOutput(ctx, cmd)
+	return subproc.RunGitCombinedOutputClass(ctx, subproc.GitLifecycle, cmd)
 }
 
 // runGitCmdOutput is runGitCmd's Output sibling.
 func runGitCmdOutput(ctx context.Context, cmd *exec.Cmd) ([]byte, error) {
-	return subproc.RunGitOutput(ctx, cmd)
-}
-
-// setGitThrottleCapForTest swaps the git throttle pool to the given
-// capacity and returns a restore closure. Test-only.
-func setGitThrottleCapForTest(cap int) func() {
-	return subproc.Git().SetCapForTest(cap)
+	return subproc.RunGitOutputClass(ctx, subproc.GitLifecycle, cmd)
 }

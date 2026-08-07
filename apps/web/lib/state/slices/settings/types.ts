@@ -10,6 +10,7 @@ import type {
   NotificationProvider,
   SavedLayout,
   ToolStatus,
+  LspStatusLocation,
   MCPTaskAgentProfileDefault,
   StartupPage,
 } from "@/lib/types/http";
@@ -23,6 +24,7 @@ import type { SidebarTaskPrefsState } from "@/lib/state/slices/ui/types";
 import type { SecretListItem } from "@/lib/types/http-secrets";
 import type { SpritesStatus, SpritesInstance } from "@/lib/types/http-sprites";
 import type { TasksListGroup, TasksListSort } from "@/lib/tasks/tasks-list-options";
+import type { SleepInhibitionResponse } from "@/lib/types/system";
 
 export type ExecutorsState = {
   items: Executor[];
@@ -58,6 +60,11 @@ export type AgentProfileOption = {
   /** Legacy automatic-fallback opt-in. */
   auto_fallback?: boolean;
   /**
+   * False hides the profile from task/session creation pickers. Existing
+   * sessions keep their labels and the profile stays editable in settings.
+   */
+  enabled?: boolean;
+  /**
    * Host utility probe status for the agent this profile belongs to.
    * Used by pickers and the settings sidebar to flag profiles whose agent
    * needs login or reinstallation.
@@ -65,6 +72,11 @@ export type AgentProfileOption = {
   capability_status?: CapabilityStatus;
   capability_error?: string;
 };
+
+/** Profiles with an omitted enabled field remain selectable for compatibility. */
+export function isSelectableAgentProfile(profile: Pick<AgentProfileOption, "enabled">): boolean {
+  return profile.enabled !== false;
+}
 
 /** Single source of truth for mapping an API Agent+Profile to a store AgentProfileOption. */
 export function toAgentProfileOption(
@@ -74,6 +86,7 @@ export function toAgentProfileOption(
     model?: string;
     fallbackModel?: string;
     autoFallback?: boolean;
+    enabled?: boolean;
   },
 ): AgentProfileOption {
   return {
@@ -85,6 +98,7 @@ export function toAgentProfileOption(
     model: profile.model ?? undefined,
     fallback_model: profile.fallbackModel ?? undefined,
     auto_fallback: profile.autoFallback ?? undefined,
+    enabled: profile.enabled ?? true,
     capability_status: agent.capability_status,
     capability_error: agent.capability_error,
   };
@@ -180,6 +194,14 @@ export type SettingsDataState = {
   agentsLoaded: boolean;
 };
 
+/** Install-wide sleep-inhibition settings and runtime status. */
+export type SleepInhibitionStoreState = {
+  response: SleepInhibitionResponse | null;
+  loaded: boolean;
+  loading: boolean;
+  error: boolean;
+};
+
 export type UserSettingsState = {
   workspaceId: string | null;
   kanbanViewMode: string | null;
@@ -197,6 +219,7 @@ export type UserSettingsState = {
   reviewAutoMarkOnScroll: boolean;
   confirmTaskArchive: boolean;
   unreadDivider: boolean;
+  agentGeneratedTaskTitles: boolean;
   mcpTaskAgentProfileDefault: MCPTaskAgentProfileDefault;
   showAnchoredPromptBar: boolean;
   showScrollToLastPrompt: boolean;
@@ -207,6 +230,7 @@ export type UserSettingsState = {
   lspAutoStartLanguages: string[];
   lspAutoInstallLanguages: string[];
   lspServerConfigs: Record<string, Record<string, unknown>>;
+  lspStatusLocation: LspStatusLocation;
   savedLayouts: SavedLayout[];
   sidebarViews: SidebarView[];
   sidebarActiveViewId: string | null;
@@ -218,6 +242,7 @@ export type UserSettingsState = {
   githubSavedPresets: unknown;
   githubDefaultQueryPresets: unknown;
   gitlabSavedPresets: unknown;
+  azureDevOpsBrowsePreferences: unknown;
   defaultUtilityAgentId: string | null;
   keyboardShortcuts: Record<string, { key: string; modifiers?: Record<string, boolean> }>;
   terminalLinkBehavior: "new_tab" | "browser_panel";
@@ -276,6 +301,7 @@ export type SettingsSliceState = {
   sprites: SpritesState;
   notificationProviders: NotificationProvidersState;
   settingsData: SettingsDataState;
+  sleepInhibition: SleepInhibitionStoreState;
   userSettings: UserSettingsState;
 };
 
@@ -314,6 +340,9 @@ export type SettingsSliceActions = {
   setNotificationProviders: (state: NotificationProvidersState) => void;
   setNotificationProvidersLoading: (loading: boolean) => void;
   setSettingsData: (next: Partial<SettingsDataState>) => void;
+  setSleepInhibition: (response: SleepInhibitionResponse) => void;
+  setSleepInhibitionLoading: (loading: boolean) => void;
+  setSleepInhibitionError: (error: boolean) => void;
   setUserSettings: (settings: UserSettingsState) => void;
   bumpAgentProfilesVersion: () => void;
 };

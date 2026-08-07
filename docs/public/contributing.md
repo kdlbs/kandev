@@ -32,7 +32,13 @@ make bootstrap
 make dev
 ```
 
-This is the normal development path. The TypeScript supervisor starts the Go backend and Vite, selects available ports, points Go at Vite, and isolates application state under the checkout's `.kandev-dev/`. Use the printed URLs.
+This is the normal development path. The TypeScript supervisor starts the Go backend and Vite, selects available ports, points Go at Vite, and isolates application state under the checkout's `.kandev-dev/`. Use the printed URLs. Backend logs append to `.kandev-dev/logs/backend-logs.log`; startup prints the resolved path.
+
+Automatic port selection only applies when no port was requested, and `KANDEV_BACKEND_PORT` or `KANDEV_PORT` in the environment counts as a request. An installed Kandev service that exported one therefore pins development mode to the port its own backend already occupies, and the development backend fails to listen. Pass `PORT=` to override both the environment and the automatic choice, `WEB_PORT=` for the internal Vite port, and `DEV_ARGS=` for any other launcher flag.
+
+```bash
+make dev PORT=38430 WEB_PORT=37430
+```
 
 `make dev-web` starts only Vite on its fixed development port; it has no live API by itself. `make dev-backend` starts only the backend with the normal production-profile home unless you override it. For an intentionally isolated backend-only run:
 
@@ -40,7 +46,7 @@ This is the normal development path. The TypeScript supervisor starts the Go bac
 KANDEV_HOME_DIR="$PWD/.kandev-dev" KANDEV_DEBUG_DEV_MODE=true make dev-backend
 ```
 
-Use `make build` for a production build. Use `make start` for a production-shaped local start; it installs dependencies, builds and synchronizes the embedded web application, then launches Kandev.
+Use `make build` for a production build. Use `make start` for a production-shaped local start; it installs dependencies, builds and synchronizes the embedded web application, then launches Kandev and writes `<resolved-home>/logs/backend-logs.log`.
 
 ## Find the owner
 

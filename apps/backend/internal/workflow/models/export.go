@@ -36,25 +36,27 @@ type AgentProfileMatcher func(agentName, model, mode string) string
 type WorkflowPortable struct {
 	Name         string                `json:"name" yaml:"name"`
 	Description  string                `json:"description,omitempty" yaml:"description,omitempty"`
+	Prompt       string                `json:"prompt,omitempty" yaml:"prompt,omitempty"`
 	AgentProfile *AgentProfilePortable `json:"agent_profile,omitempty" yaml:"agent_profile,omitempty"`
 	Steps        []StepPortable        `json:"steps" yaml:"steps"`
 }
 
 // StepPortable is a workflow step without instance-specific fields.
 type StepPortable struct {
-	Name                      string                `json:"name" yaml:"name"`
-	Position                  int                   `json:"position" yaml:"position"`
-	Color                     string                `json:"color" yaml:"color"`
-	Prompt                    string                `json:"prompt,omitempty" yaml:"prompt,omitempty"`
-	Events                    StepEvents            `json:"events" yaml:"events"`
-	IsStartStep               bool                  `json:"is_start_step" yaml:"is_start_step"`
-	ShowInCommandPanel        bool                  `json:"show_in_command_panel" yaml:"show_in_command_panel"`
-	AllowManualMove           bool                  `json:"allow_manual_move" yaml:"allow_manual_move"`
-	AutoArchiveAfterHours     int                   `json:"auto_archive_after_hours,omitempty" yaml:"auto_archive_after_hours,omitempty"`
-	AgentProfile              *AgentProfilePortable `json:"agent_profile,omitempty" yaml:"agent_profile,omitempty"`
-	AutoAdvanceRequiresSignal bool                  `json:"auto_advance_requires_signal" yaml:"auto_advance_requires_signal"`
-	WIPLimit                  int                   `json:"wip_limit,omitempty" yaml:"wip_limit,omitempty"`
-	PullFromStepPosition      *int                  `json:"pull_from_step_position,omitempty" yaml:"pull_from_step_position,omitempty"`
+	Name                       string                `json:"name" yaml:"name"`
+	Position                   int                   `json:"position" yaml:"position"`
+	Color                      string                `json:"color" yaml:"color"`
+	Prompt                     string                `json:"prompt,omitempty" yaml:"prompt,omitempty"`
+	Events                     StepEvents            `json:"events" yaml:"events"`
+	IsStartStep                bool                  `json:"is_start_step" yaml:"is_start_step"`
+	ShowInCommandPanel         bool                  `json:"show_in_command_panel" yaml:"show_in_command_panel"`
+	AllowManualMove            bool                  `json:"allow_manual_move" yaml:"allow_manual_move"`
+	AutoArchiveAfterHours      int                   `json:"auto_archive_after_hours,omitempty" yaml:"auto_archive_after_hours,omitempty"`
+	AgentProfile               *AgentProfilePortable `json:"agent_profile,omitempty" yaml:"agent_profile,omitempty"`
+	AutoAdvanceRequiresSignal  bool                  `json:"auto_advance_requires_signal" yaml:"auto_advance_requires_signal"`
+	CancelTriggersTurnComplete bool                  `json:"cancel_triggers_turn_complete" yaml:"cancel_triggers_turn_complete"`
+	WIPLimit                   int                   `json:"wip_limit,omitempty" yaml:"wip_limit,omitempty"`
+	PullFromStepPosition       *int                  `json:"pull_from_step_position,omitempty" yaml:"pull_from_step_position,omitempty"`
 }
 
 // BuildWorkflowExport builds a portable WorkflowExport from domain models.
@@ -82,17 +84,18 @@ func buildWorkflowPortable(wf *taskmodels.Workflow, steps []*WorkflowStep, resol
 	}
 	for _, s := range steps {
 		sp := StepPortable{
-			Name:                      s.Name,
-			Position:                  s.Position,
-			Color:                     s.Color,
-			Prompt:                    s.Prompt,
-			Events:                    ConvertReviewProfileToPortable(convertStepIDToPosition(s.Events, idToPos), resolveProfile),
-			IsStartStep:               s.IsStartStep,
-			ShowInCommandPanel:        s.ShowInCommandPanel,
-			AllowManualMove:           s.AllowManualMove,
-			AutoArchiveAfterHours:     s.AutoArchiveAfterHours,
-			AutoAdvanceRequiresSignal: s.AutoAdvanceRequiresSignal,
-			WIPLimit:                  s.WIPLimit,
+			Name:                       s.Name,
+			Position:                   s.Position,
+			Color:                      s.Color,
+			Prompt:                     s.Prompt,
+			Events:                     ConvertReviewProfileToPortable(convertStepIDToPosition(s.Events, idToPos), resolveProfile),
+			IsStartStep:                s.IsStartStep,
+			ShowInCommandPanel:         s.ShowInCommandPanel,
+			AllowManualMove:            s.AllowManualMove,
+			AutoArchiveAfterHours:      s.AutoArchiveAfterHours,
+			AutoAdvanceRequiresSignal:  s.AutoAdvanceRequiresSignal,
+			CancelTriggersTurnComplete: s.CancelTriggersTurnComplete,
+			WIPLimit:                   s.WIPLimit,
 		}
 		if pos, ok := idToPos[s.PullFromStepID]; ok {
 			sp.PullFromStepPosition = &pos
@@ -106,6 +109,7 @@ func buildWorkflowPortable(wf *taskmodels.Workflow, steps []*WorkflowStep, resol
 	wp := WorkflowPortable{
 		Name:        wf.Name,
 		Description: wf.Description,
+		Prompt:      wf.Prompt,
 		Steps:       portableSteps,
 	}
 	if resolveProfile != nil && wf.AgentProfileID != "" {
@@ -223,13 +227,8 @@ func (s StepPortable) PullFromStepID(posToID map[int]string) string {
 // an import would "succeed" with an inert action. See issue #1183. This mirrors
 // the embedded-YAML loader's allow-list check.
 func validateOnEnterActions(step StepPortable) error {
-	for _, a := range step.Events.OnEnter {
-		if a.Type != OnEnterSetSessionMode {
-			continue
-		}
-		if mode, _ := a.Config["mode"].(string); mode == "" {
-			return fmt.Errorf("step %q on_enter: set_session_mode requires a non-empty string \"mode\" config", step.Name)
-		}
+	if err := ValidateStepEvents(step.Events, step.AgentProfile != nil); err != nil {
+		return fmt.Errorf("step %q on_enter: %w", step.Name, err)
 	}
 	return nil
 }

@@ -6,6 +6,7 @@ import { replaceTaskUrl } from "@/lib/links";
 import { useAppStore } from "@/components/state-provider";
 import {
   buildRepositoriesPayload,
+  hasPendingAttachmentUploads,
   toMessageAttachments,
 } from "@/components/task-create-dialog-helpers";
 import { useToast } from "@/components/toast-provider";
@@ -25,11 +26,76 @@ type UseSubtaskSubmitOpts = {
   attachments: ReturnType<typeof useDialogAttachments>["attachments"];
   resolvePrompt: () => string;
   title: string;
+  autoTitle?: boolean;
   setIsCreating: (v: boolean) => void;
   onClose: () => void;
   /** Workspace mode for the new subtask (handoffs phase 5). */
   workspaceMode: SubtaskWorkspaceMode;
 };
+
+type CreateSubtaskArgs = {
+  fs: UseSubtaskSubmitOpts["fs"];
+  parentTaskId: string;
+  defaultProfileId: string;
+  workspaceId: string;
+  workflowId: string;
+  availableRepositories: Repository[];
+  attachments: UseSubtaskSubmitOpts["attachments"];
+  trimmedTitle: string;
+  prompt: string;
+  autoTitle: boolean;
+  workspaceMode: SubtaskWorkspaceMode;
+  setActiveTask: (taskId: string) => void;
+  setActiveSession: (taskId: string, sessionId: string) => void;
+};
+
+async function createSubtask({
+  fs,
+  parentTaskId,
+  defaultProfileId,
+  workspaceId,
+  workflowId,
+  availableRepositories,
+  attachments,
+  trimmedTitle,
+  prompt,
+  autoTitle,
+  workspaceMode,
+  setActiveTask,
+  setActiveSession,
+}: CreateSubtaskArgs) {
+  const repositories =
+    workspaceMode === "inherit_parent"
+      ? undefined
+      : buildRepositoriesPayload({
+          useRemote: fs.useRemote,
+          remoteRepos: fs.remoteRepos,
+          prInfoByUrl: fs.prInfoByUrl,
+          repositories: fs.repositories,
+          discoveredRepositories: fs.discoveredRepositories,
+          workspaceRepositories: availableRepositories,
+        });
+  const response = await createTask({
+    workspace_id: workspaceId,
+    workflow_id: workflowId,
+    ...(autoTitle ? { auto_title: true } : { title: trimmedTitle }),
+    description: prompt,
+    repositories,
+    start_agent: true,
+    agent_profile_id: fs.agentProfileId || defaultProfileId || undefined,
+    executor_profile_id:
+      workspaceMode === "inherit_parent" ? undefined : fs.executorProfileId || undefined,
+    parent_id: parentTaskId,
+    attachments: toMessageAttachments(attachments),
+    workspace_mode: workspaceMode,
+  });
+  const newSessionId = response.session_id ?? response.primary_session_id ?? null;
+  if (newSessionId) {
+    setActiveTask(response.id);
+    setActiveSession(response.id, newSessionId);
+    replaceTaskUrl(response.id);
+  }
+}
 
 /**
  * Encapsulates the subtask creation flow: builds the repositories payload,
@@ -47,6 +113,7 @@ export function useSubtaskSubmit(opts: UseSubtaskSubmitOpts) {
     attachments,
     resolvePrompt,
     title,
+    autoTitle = false,
     setIsCreating,
     onClose,
     workspaceMode,
@@ -59,73 +126,33 @@ export function useSubtaskSubmit(opts: UseSubtaskSubmitOpts) {
   // double-click) can re-enter handleSubmit and call createTask twice.
   const isSubmittingRef = useRef(false);
 
-  const performCreate = useCallback(
-    async (trimmedTitle: string, prompt: string) => {
-      // inherit_parent: omit repositories — backend inherits parent repos
-      // and records workspace-group membership for launch reuse.
-      const repositories =
-        workspaceMode === "inherit_parent"
-          ? undefined
-          : buildRepositoriesPayload({
-              useRemote: fs.useRemote,
-              remoteRepos: fs.remoteRepos,
-              prInfoByUrl: fs.prInfoByUrl,
-              repositories: fs.repositories,
-              discoveredRepositories: fs.discoveredRepositories,
-              workspaceRepositories: availableRepositories,
-            });
-      const response = await createTask({
-        workspace_id: workspaceId!,
-        workflow_id: workflowId!,
-        title: trimmedTitle,
-        description: prompt,
-        repositories,
-        start_agent: true,
-        agent_profile_id: fs.agentProfileId || defaultProfileId || undefined,
-        // inherit_parent reuses the parent's materialized environment, so the
-        // executor is inherited too — never send a chosen executor profile.
-        executor_profile_id:
-          workspaceMode === "inherit_parent" ? undefined : fs.executorProfileId || undefined,
-        parent_id: parentTaskId,
-        attachments: toMessageAttachments(attachments),
-        workspace_mode: workspaceMode,
-      });
-      const newSessionId = response.session_id ?? response.primary_session_id ?? null;
-      if (newSessionId) {
-        setActiveTask(response.id);
-        setActiveSession(response.id, newSessionId);
-        replaceTaskUrl(response.id);
-      }
-    },
-    // The fs object is referenced as a whole so React's deep dependency
-    // tracking re-runs performCreate when any of its fields change.
-    [
-      fs,
-      availableRepositories,
-      defaultProfileId,
-      workspaceId,
-      workflowId,
-      parentTaskId,
-      attachments,
-      setActiveTask,
-      setActiveSession,
-      workspaceMode,
-    ],
-  );
-
   const handleSubmit = useCallback(
     async (e: React.FormEvent) => {
       e.preventDefault();
       if (isSubmittingRef.current) return;
       const trimmedTitle = title.trim();
-      if (!trimmedTitle || !workspaceId || !workflowId) return;
-      const prompt = resolvePrompt();
-      if (!prompt) return;
+      const prompt = resolvePrompt().trim();
+      if ((!autoTitle && !trimmedTitle) || !prompt || !workspaceId || !workflowId) return;
+      if (hasPendingAttachmentUploads(attachments)) return;
 
       isSubmittingRef.current = true;
       setIsCreating(true);
       try {
-        await performCreate(trimmedTitle, prompt);
+        await createSubtask({
+          fs,
+          parentTaskId,
+          defaultProfileId,
+          workspaceId,
+          workflowId,
+          availableRepositories,
+          attachments,
+          trimmedTitle,
+          prompt,
+          autoTitle,
+          workspaceMode,
+          setActiveTask,
+          setActiveSession,
+        });
         onClose();
       } catch (error) {
         toast({
@@ -138,7 +165,24 @@ export function useSubtaskSubmit(opts: UseSubtaskSubmitOpts) {
         setIsCreating(false);
       }
     },
-    [title, workspaceId, workflowId, resolvePrompt, performCreate, setIsCreating, onClose, toast],
+    [
+      title,
+      autoTitle,
+      workspaceId,
+      workflowId,
+      resolvePrompt,
+      fs,
+      parentTaskId,
+      defaultProfileId,
+      availableRepositories,
+      attachments,
+      setActiveTask,
+      setActiveSession,
+      workspaceMode,
+      setIsCreating,
+      onClose,
+      toast,
+    ],
   );
 
   return { handleSubmit };
@@ -151,6 +195,7 @@ export function useSubtaskSubmit(opts: UseSubtaskSubmitOpts) {
  */
 export function useSubtaskPromptZone(opts: {
   parentTaskId: string;
+  workspaceId?: string | null;
   taskTitle: string;
   inputDisabled: boolean;
   contextValue: string;
@@ -161,6 +206,7 @@ export function useSubtaskPromptZone(opts: {
 }) {
   const {
     parentTaskId,
+    workspaceId,
     taskTitle,
     inputDisabled,
     contextValue,
@@ -173,7 +219,7 @@ export function useSubtaskPromptZone(opts: {
   const latestPromptValueRef = useRef(promptValue);
   latestPromptValueRef.current = promptValue;
   const { toast } = useToast();
-  const attachments = useDialogAttachments(inputDisabled);
+  const attachments = useDialogAttachments(inputDisabled, workspaceId);
   const { enhancePrompt, isEnhancingPrompt } = useUtilityAgentGenerator({
     sessionId: null,
     taskTitle,
@@ -206,8 +252,17 @@ export function useSubtaskPromptZone(opts: {
     });
   }, [enhancePrompt, promptResultDelivery, toast]);
   const contextItems = useMemo(
-    () => toContextItems(attachments.attachments, attachments.handleRemoveAttachment),
-    [attachments.attachments, attachments.handleRemoveAttachment],
+    () =>
+      toContextItems(
+        attachments.attachments,
+        attachments.handleRemoveAttachment,
+        attachments.handleRetryAttachment,
+      ),
+    [
+      attachments.attachments,
+      attachments.handleRemoveAttachment,
+      attachments.handleRetryAttachment,
+    ],
   );
   const resolvePrompt = useCallback(() => {
     const typed = promptValue.trim();

@@ -1,144 +1,28 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import type { DockviewApi, AddPanelOptions } from "dockview-react";
-import { buildPanelActions, buildExtraPanelActions } from "./dockview-panel-actions";
+import type { DockviewApi } from "dockview-react";
+import { buildPanelActions } from "./dockview-panel-actions";
 import { CENTER_GROUP } from "./layout-manager";
-
-// ---------------------------------------------------------------------------
-// Minimal DockviewApi mock
-// ---------------------------------------------------------------------------
-
-type MockPanel = {
-  id: string;
-  title: string;
-  params: Record<string, unknown>;
-  group: { id: string };
-  isActive: boolean;
-  api: {
-    setActive: () => void;
-    updateParameters: (p: Record<string, unknown>) => void;
-    moveTo: (opts: { group: { id: string } }) => void;
-  };
-  setTitle: (t: string) => void;
-};
-
-function makeApi(options: { centerGroupId?: string; extraGroupIds?: string[] } = {}): DockviewApi {
-  const centerId = options.centerGroupId ?? CENTER_GROUP;
-  const panels: MockPanel[] = [];
-  const groups = [{ id: centerId }, ...(options.extraGroupIds ?? []).map((id) => ({ id }))];
-
-  function makePanel(add: AddPanelOptions & { id: string }): MockPanel {
-    const groupId =
-      (add.position as { referenceGroup?: string } | undefined)?.referenceGroup ?? centerId;
-    if (!groups.some((g) => g.id === groupId)) groups.push({ id: groupId });
-    const panel: MockPanel = {
-      id: add.id,
-      title: (add.title as string) ?? "",
-      params: { ...(add.params ?? {}) },
-      group: { id: groupId },
-      isActive: false,
-      setTitle(t: string) {
-        this.title = t;
-      },
-      api: {
-        setActive() {
-          for (const p of panels) p.isActive = false;
-          panel.isActive = true;
-        },
-        updateParameters(p: Record<string, unknown>) {
-          Object.assign(panel.params, p);
-        },
-        moveTo({ group }: { group: { id: string } }) {
-          panel.group = { id: group.id };
-        },
-      },
-    };
-    return panel;
-  }
-
-  const api = {
-    get groups() {
-      return groups;
-    },
-    get panels() {
-      return panels;
-    },
-    getPanel(id: string) {
-      return panels.find((p) => p.id === id);
-    },
-    getGroup(id: string) {
-      return groups.find((g) => g.id === id);
-    },
-    addPanel(opts: AddPanelOptions & { id: string }) {
-      const p = makePanel(opts);
-      panels.push(p);
-      if (!opts.inactive) p.api.setActive();
-      return p;
-    },
-    removePanel(panel: { id: string }) {
-      const i = panels.findIndex((p) => p.id === panel.id);
-      if (i >= 0) panels.splice(i, 1);
-    },
-    get activePanel() {
-      return panels.find((p) => p.isActive);
-    },
-  } as unknown as DockviewApi;
-  return api;
-}
-
-// ---------------------------------------------------------------------------
-// Store adapter: panel actions take (set, get) closures
-// ---------------------------------------------------------------------------
-
-type StoreShape = {
-  api: DockviewApi | null;
-  centerGroupId: string;
-  rightTopGroupId: string;
-  rightBottomGroupId: string;
-  selectedDiff: { path: string; content?: string } | null;
-};
-
-function makeStore(api: DockviewApi) {
-  const state: StoreShape = {
-    api,
-    centerGroupId: CENTER_GROUP,
-    rightTopGroupId: "group-right-top",
-    rightBottomGroupId: "group-right-bottom",
-    selectedDiff: null,
-  };
-  return {
-    get: () => state,
-    set: (partial: Partial<StoreShape>) => Object.assign(state, partial),
-    state,
-  };
-}
-
-function build(api: DockviewApi) {
-  const store = makeStore(api);
-  const actions = buildPanelActions(store.set, store.get);
-  return { api, actions, store };
-}
-
-// ---------------------------------------------------------------------------
-// Test fixtures
-// ---------------------------------------------------------------------------
-
-const PATH_A = "src/a.ts";
-const PATH_B = "src/b.ts";
-const PATH_NESTED_B = "src/nested/b.ts";
-const SHARED_PATH = "README.md";
-const NAME_A = "a.ts";
-const NAME_B = "b.ts";
-const SHARED_NAME = "README.md";
-const PINNED_FILE_A_ID = "file:src/a.ts";
-const PREVIEW_FILE_ID = "preview:file-editor";
-const PREVIEW_DIFF_ID = "preview:file-diff";
-const PREVIEW_COMMIT_ID = "preview:commit-detail";
-const SHA_A = "abcdef1234567890";
-const SHA_B = "fedcba0987654321";
-const DIFF_FILE_PREFIX = "diff:file:";
-const FILE_PREFIX_ID = "file:";
-const COMMIT_PREFIX_ID = "commit:";
-const TYPE_FILE_EDITOR = "file-editor" as const;
+import { build, makeApi } from "./dockview-panel-actions.test-utils";
+import type { MockPanel } from "./dockview-panel-actions.test-utils";
+import {
+  COMMIT_PREFIX_ID,
+  DIFF_FILE_PREFIX,
+  FILE_PREFIX_ID,
+  NAME_A,
+  NAME_B,
+  PATH_A,
+  PATH_B,
+  PATH_NESTED_B,
+  PINNED_FILE_A_ID,
+  PREVIEW_COMMIT_ID,
+  PREVIEW_DIFF_ID,
+  PREVIEW_FILE_ID,
+  SHA_A,
+  SHA_B,
+  SHARED_NAME,
+  SHARED_PATH,
+  TYPE_FILE_EDITOR,
+} from "./dockview-panel-actions.test-utils";
 
 // ---------------------------------------------------------------------------
 // Tests
@@ -456,6 +340,27 @@ describe("addCommitDetailPanel — preview behavior", () => {
     expect(preview.params.commitSha).toBe(SHA_B);
     expect(preview.params.promoted).toBeUndefined();
   });
+
+  it("serializes remote provenance and keeps repositories with equal SHAs distinct", () => {
+    const first = {
+      source: "github" as const,
+      sha: SHA_A,
+      workspaceId: "workspace-1",
+      owner: "acme",
+      repo: "frontend",
+    };
+    const second = { ...first, repo: "backend" };
+
+    actions.addCommitDetailPanel(first, { pin: true });
+    actions.addCommitDetailPanel(second, { pin: true });
+
+    const firstPanel = api.getPanel(`commit:github:workspace-1:acme/frontend:${SHA_A}`);
+    const secondPanel = api.getPanel(`commit:github:workspace-1:acme/backend:${SHA_A}`);
+    expect(firstPanel).toBeDefined();
+    expect(secondPanel).toBeDefined();
+    expect((secondPanel as unknown as MockPanel).params.target).toEqual(second);
+    expect((secondPanel as unknown as MockPanel).params.commitSha).toBe(SHA_A);
+  });
 });
 
 describe("preview slots are independent across types", () => {
@@ -469,210 +374,5 @@ describe("preview slots are independent across types", () => {
     expect(api.getPanel(PREVIEW_FILE_ID)).toBeDefined();
     expect(api.getPanel(PREVIEW_DIFF_ID)).toBeDefined();
     expect(api.getPanel(PREVIEW_COMMIT_ID)).toBeDefined();
-  });
-});
-
-describe("addPRPanel — dedup with legacy auto-shown panel", () => {
-  const PR_KEY = "testorg/testrepo/101";
-  const OTHER_PR_KEY = "testorg/testrepo/202";
-  const LEGACY_PR_ID = "pr-detail";
-  const KEYED_PR_ID = `pr-detail|${PR_KEY}`;
-  const OTHER_KEYED_PR_ID = `pr-detail|${OTHER_PR_KEY}`;
-
-  function buildExtra(api: DockviewApi) {
-    const store = makeStore(api);
-    return { api, actions: buildExtraPanelActions(store.get) };
-  }
-
-  /** Canonical PR Details panels retain the key currently shown for the task. */
-  function seedLegacyPanel(api: DockviewApi, prKey: string): void {
-    api.addPanel({
-      id: LEGACY_PR_ID,
-      component: "pr-detail",
-      title: "Pull Request",
-      params: { prKey },
-      position: { referenceGroup: CENTER_GROUP },
-    });
-  }
-
-  it("reuses the legacy panel when the requested PR is what it's already showing", () => {
-    const { api, actions } = buildExtra(makeApi());
-    seedLegacyPanel(api, PR_KEY);
-
-    actions.addPRPanel(PR_KEY);
-
-    const prPanels = api.panels.filter(
-      (p) => p.id === LEGACY_PR_ID || p.id.startsWith(`${LEGACY_PR_ID}|`),
-    );
-    expect(prPanels).toHaveLength(1);
-    expect(api.getPanel(KEYED_PR_ID)).toBeUndefined();
-    expect((api.getPanel(LEGACY_PR_ID) as unknown as MockPanel).isActive).toBe(true);
-  });
-
-  it("opens a distinct tab for a different PR instead of overwriting the legacy tab", () => {
-    const { api, actions } = buildExtra(makeApi());
-    seedLegacyPanel(api, PR_KEY);
-
-    // Multi-repo "+" menu click for a PR other than the one the legacy tab
-    // is showing must NOT repurpose that tab — it must open its own tab.
-    actions.addPRPanel(OTHER_PR_KEY);
-
-    const legacy = api.getPanel(LEGACY_PR_ID) as unknown as MockPanel;
-    expect(legacy.params.prKey).toBe(PR_KEY);
-
-    const other = api.getPanel(OTHER_KEYED_PR_ID) as unknown as MockPanel;
-    expect(other).toBeDefined();
-    expect(other.isActive).toBe(true);
-
-    const prPanels = api.panels.filter(
-      (p) => p.id === LEGACY_PR_ID || p.id.startsWith(`${LEGACY_PR_ID}|`),
-    );
-    expect(prPanels).toHaveLength(2);
-  });
-
-  it("creates a new keyed panel when no legacy panel exists", () => {
-    const { api, actions } = buildExtra(makeApi());
-
-    actions.addPRPanel(PR_KEY);
-
-    expect(api.getPanel(KEYED_PR_ID)).toBeDefined();
-    expect(api.getPanel(LEGACY_PR_ID)).toBeUndefined();
-  });
-
-  it("focuses an existing keyed panel exactly once", () => {
-    const { api, actions } = buildExtra(makeApi());
-
-    actions.addPRPanel(PR_KEY);
-    actions.addPRPanel(PR_KEY);
-
-    const prPanels = api.panels.filter(
-      (p) => p.id === LEGACY_PR_ID || p.id.startsWith(`${LEGACY_PR_ID}|`),
-    );
-    expect(prPanels).toHaveLength(1);
-    const keyed = api.getPanel(KEYED_PR_ID) as unknown as MockPanel;
-    expect(keyed.isActive).toBe(true);
-  });
-});
-
-describe("addPRPanel — layout-owned group placement", () => {
-  const PR_KEY = "testorg/testrepo/202";
-  const KEYED_PR_ID = `pr-detail|${PR_KEY}`;
-  const SESSION_ID = "s-1";
-  const SESSION_PANEL_ID = `session:${SESSION_ID}`;
-  const SESSION_GROUP = "group-session-host";
-  const PR_DETAILS_GROUP = "group-configured-pr-details";
-
-  function buildExtra(api: DockviewApi) {
-    const store = makeStore(api);
-    return { api, actions: buildExtraPanelActions(store.get) };
-  }
-
-  function seedSessionInGroup(api: DockviewApi, groupId: string): void {
-    api.addPanel({
-      id: SESSION_PANEL_ID,
-      component: "chat",
-      title: "Session",
-      params: { sessionId: SESSION_ID },
-      position: { referenceGroup: groupId },
-    });
-  }
-
-  function seedCanonicalPRDetails(api: DockviewApi, groupId = PR_DETAILS_GROUP): void {
-    api.addPanel({
-      id: "pr-detail",
-      component: "pr-detail",
-      title: "PR Details",
-      position: { referenceGroup: groupId },
-    });
-  }
-
-  it("places a new PR tab in PR Details' configured group, not beside Agent", () => {
-    const { api, actions } = buildExtra(makeApi());
-    seedSessionInGroup(api, SESSION_GROUP);
-    seedCanonicalPRDetails(api);
-
-    actions.addPRPanel(PR_KEY);
-
-    const pr = api.getPanel(KEYED_PR_ID) as unknown as MockPanel;
-    expect(pr).toBeDefined();
-    expect(pr.group.id).toBe(PR_DETAILS_GROUP);
-    expect(pr.group.id).not.toBe(SESSION_GROUP);
-  });
-
-  it("falls back to centerGroupId when no PR Details panel exists", () => {
-    const { api, actions } = buildExtra(makeApi());
-    actions.addPRPanel(PR_KEY);
-
-    const pr = api.getPanel(KEYED_PR_ID) as unknown as MockPanel;
-    expect(pr).toBeDefined();
-    expect(pr.group.id).toBe(CENTER_GROUP);
-  });
-
-  it("focuses an existing keyed PR tab without relocating it", () => {
-    const { api, actions } = buildExtra(makeApi());
-    seedCanonicalPRDetails(api);
-    api.addPanel({
-      id: KEYED_PR_ID,
-      component: "pr-detail",
-      title: "Pull Request",
-      params: { prKey: PR_KEY },
-      position: { referenceGroup: SESSION_GROUP },
-    });
-
-    actions.addPRPanel(PR_KEY);
-
-    const pr = api.getPanel(KEYED_PR_ID) as unknown as MockPanel;
-    expect(pr.group.id).toBe(SESSION_GROUP);
-    expect(pr.isActive).toBe(true);
-  });
-});
-
-describe("addMRPanel — layout-owned review tabs", () => {
-  const MR_KEY = "https://gitlab.example.test|platform/kandev|81";
-  const OTHER_MR_KEY = "https://gitlab.example.test|platform/kandev|82";
-  const LEGACY_MR_ID = "mr-detail";
-
-  function buildExtra(api: DockviewApi) {
-    const store = makeStore(api);
-    return { api, actions: buildExtraPanelActions(store.get) };
-  }
-
-  function seedLegacyPanel(api: DockviewApi, mrKey: string): void {
-    api.addPanel({
-      id: LEGACY_MR_ID,
-      component: "mr-detail",
-      title: "Merge Request",
-      params: { mrKey },
-      position: { referenceGroup: CENTER_GROUP },
-    });
-  }
-
-  it("focuses a matching legacy panel in place", () => {
-    const { api, actions } = buildExtra(makeApi());
-    seedLegacyPanel(api, MR_KEY);
-
-    actions.addMRPanel(MR_KEY);
-
-    expect(api.panels.filter((panel) => panel.id.startsWith(LEGACY_MR_ID))).toHaveLength(1);
-    expect(api.getPanel(`${LEGACY_MR_ID}|${MR_KEY}`)).toBeUndefined();
-    expect((api.getPanel(LEGACY_MR_ID) as unknown as MockPanel).isActive).toBe(true);
-  });
-
-  it("opens a keyed panel in the canonical PR Details group", () => {
-    const { api, actions } = buildExtra(makeApi());
-    seedLegacyPanel(api, MR_KEY);
-    api.addPanel({
-      id: "pr-detail",
-      component: "pr-detail",
-      title: "PR Details",
-      position: { referenceGroup: "group-configured-pr-details" },
-    });
-
-    actions.addMRPanel(OTHER_MR_KEY);
-
-    const keyed = api.getPanel(`${LEGACY_MR_ID}|${OTHER_MR_KEY}`) as unknown as MockPanel;
-    expect(keyed).toBeDefined();
-    expect(keyed.group.id).toBe("group-configured-pr-details");
-    expect(api.panels.filter((panel) => panel.id.startsWith(LEGACY_MR_ID))).toHaveLength(2);
   });
 });

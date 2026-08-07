@@ -247,7 +247,7 @@ Tracked by `WebSocketClient.status`. Server-side, the connection is just an open
 | `error` | `socket.onerror` fired, or reconnect cap exceeded. Pending requests are rejected. | `connect()` → `connecting`. |
 | `reconnecting` | Socket closed unexpectedly, reconnect is enabled, attempts < cap. A timer is armed with exponential backoff (initial 1s, multiplier 1.5, max 30s, cap 10 attempts). | Timer fires → `connecting`. `disconnect()` → `closed`. |
 
-Server-side ping/pong: every `pingPeriod` (54s = 60s pong-wait × 0.9) the server sends a WS ping; missing the pong before `pongWait` (60s) closes the connection. Max inbound frame is 32 MiB (raised to accommodate base64 image attachments).
+Server-side ping/pong: every `pingPeriod` (54s = 60s pong-wait × 0.9) the server sends a WS ping; missing the pong before `pongWait` (60s) closes the connection. Max inbound frame is 32 MiB. Current prompt files are staged over authenticated HTTP and only bounded descriptors cross this socket; legacy inline base64 attachments remain subject to the frame and compatibility limits.
 
 ### Subscription state (per `(client, key)` pair)
 

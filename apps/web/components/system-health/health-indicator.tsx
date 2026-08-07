@@ -12,6 +12,7 @@ import {
   DialogDescription,
 } from "@kandev/ui/dialog";
 import { IconAlertTriangle, IconExternalLink } from "@tabler/icons-react";
+import { useTranslation } from "react-i18next";
 import { useAppStore } from "@/components/state-provider";
 import type { HealthIssue } from "@/lib/types/health";
 
@@ -26,6 +27,7 @@ export function HealthIndicatorButton({
   onClick,
   size = "icon",
 }: HealthIndicatorButtonProps) {
+  const { t } = useTranslation();
   if (!hasIssues) return null;
 
   return (
@@ -34,10 +36,10 @@ export function HealthIndicatorButton({
         <Button variant="outline" size={size} onClick={onClick} className="cursor-pointer relative">
           <IconAlertTriangle className="h-4 w-4 text-amber-500" />
           <span className="absolute -top-1 -right-1 h-2.5 w-2.5 rounded-full bg-amber-500 border-2 border-background" />
-          <span className="sr-only">Setup Issues</span>
+          <span className="sr-only">{t("system:setupIssues")}</span>
         </Button>
       </TooltipTrigger>
-      <TooltipContent>Setup Issues</TooltipContent>
+      <TooltipContent>{t("system:setupIssues")}</TooltipContent>
     </Tooltip>
   );
 }
@@ -49,6 +51,7 @@ type HealthIssuesDialogProps = {
 };
 
 export function HealthIssuesDialog({ open, onOpenChange, issues }: HealthIssuesDialogProps) {
+  const { t } = useTranslation();
   const router = useRouter();
   const workspaceId = useAppStore((state) => state.workspaces.activeId);
 
@@ -60,12 +63,10 @@ export function HealthIssuesDialog({ open, onOpenChange, issues }: HealthIssuesD
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <IconAlertTriangle className="h-5 w-5 text-amber-500" />
-            Setup Issues
+            {t("system:setupIssues")}
           </DialogTitle>
           <DialogDescription>
-            {issues.length === 1
-              ? "1 issue needs your attention"
-              : `${issues.length} issues need your attention`}
+            {t("system:issuesNeedAttention", { count: issues.length })}
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-4 pt-2">

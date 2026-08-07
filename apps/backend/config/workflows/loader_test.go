@@ -2,12 +2,63 @@ package workflows
 
 import (
 	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/kandev/kandev/internal/workflow/models"
 	"gopkg.in/yaml.v3"
 )
+
+func boolFieldForTest(t *testing.T, value any, name string) bool {
+	t.Helper()
+	v := reflect.ValueOf(value)
+	if v.Kind() == reflect.Pointer {
+		v = v.Elem()
+	}
+	field := v.FieldByName(name)
+	if !field.IsValid() {
+		t.Fatalf("%T is missing %s", value, name)
+	}
+	if field.Kind() != reflect.Bool {
+		t.Fatalf("%T.%s has kind %s, want bool", value, name, field.Kind())
+	}
+	return field.Bool()
+}
+
+func TestLoadTemplates_CancelTriggersTurnCompleteDefaults(t *testing.T) {
+	templates, err := LoadTemplates()
+	if err != nil {
+		t.Fatalf("LoadTemplates() returned error: %v", err)
+	}
+	var simple *models.WorkflowTemplate
+	for _, template := range templates {
+		if template.ID == "simple" {
+			simple = template
+			break
+		}
+	}
+	if simple == nil {
+		t.Fatal("simple template not found")
+	}
+	want := map[string]bool{"Backlog": true, "In Progress": true, "Review": false, "Done": false}
+	seen := make(map[string]bool, len(want))
+	for _, step := range simple.Steps {
+		wantValue, ok := want[step.Name]
+		if !ok {
+			continue
+		}
+		seen[step.Name] = true
+		if got := boolFieldForTest(t, step, "CancelTriggersTurnComplete"); got != wantValue {
+			t.Errorf("simple template step %q cancel trigger = %t, want %t", step.Name, got, wantValue)
+		}
+	}
+	for name := range want {
+		if !seen[name] {
+			t.Errorf("simple template step %q not found", name)
+		}
+	}
+}
 
 func TestLoadTemplates_AllValid(t *testing.T) {
 	templates, err := LoadTemplates()
@@ -261,6 +312,51 @@ func TestLoadTemplates_ReportKandevIssuePromptContract(t *testing.T) {
 	} {
 		if !strings.Contains(step.Prompt, required) {
 			t.Errorf("issue prompt must contain %q", required)
+		}
+	}
+}
+
+// TestLoadTemplates_PRReviewMRAutomationInstruction is AC30: the pr-review
+// template's review step must instruct the agent to enable lifecycle
+// notifications on whichever provider the task's linked review target is
+// on — update_task_pr_automation_kandev for a GitHub PR,
+// update_task_mr_automation_kandev for a GitLab MR.
+func TestLoadTemplates_PRReviewMRAutomationInstruction(t *testing.T) {
+	templates, err := LoadTemplates()
+	if err != nil {
+		t.Fatalf("LoadTemplates() returned error: %v", err)
+	}
+
+	var prReview *models.WorkflowTemplate
+	for _, tmpl := range templates {
+		if tmpl.ID == "pr-review" {
+			prReview = tmpl
+			break
+		}
+	}
+	if prReview == nil {
+		t.Fatal("pr-review template not found")
+	}
+
+	var review *models.StepDefinition
+	for i := range prReview.Steps {
+		if prReview.Steps[i].ID == "review" {
+			review = &prReview.Steps[i]
+			break
+		}
+	}
+	if review == nil {
+		t.Fatal("pr-review template has no review step")
+	}
+	for _, required := range []string{
+		"update_task_pr_automation_kandev",
+		"update_task_mr_automation_kandev",
+		"prompt_on_review_requested",
+		"prompt_on_merged",
+		"prompt_on_closed",
+	} {
+		if !strings.Contains(review.Prompt, required) {
+			t.Errorf("review prompt must contain %q", required)
 		}
 	}
 }

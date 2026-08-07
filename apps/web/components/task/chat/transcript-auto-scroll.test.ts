@@ -1,12 +1,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
-  shouldAutoScrollOnMessagesChange,
-  shouldAutoScrollOnWorkingStart,
   hasTranscriptProgressedPastView,
   hasTranscriptAppendedSinceBaseline,
   shouldCatchUpOnAutoScrollEnable,
   resolveNativeInitialScrollTop,
-  resolveFollowOutput,
   isPrependUpdate,
   createFrameCoalescer,
 } from "./transcript-auto-scroll";
@@ -65,30 +62,6 @@ describe("isPrependUpdate", () => {
         nextFirstKey: "msg-0",
       }),
     ).toBe(false);
-  });
-});
-
-describe("shouldAutoScrollOnMessagesChange", () => {
-  it("scrolls when enabled and near the bottom", () => {
-    expect(shouldAutoScrollOnMessagesChange(true, true)).toBe(true);
-  });
-
-  it("does not scroll when enabled but scrolled away from the bottom", () => {
-    expect(shouldAutoScrollOnMessagesChange(true, false)).toBe(false);
-  });
-
-  it("never scrolls while auto-scroll is disabled, even near the bottom", () => {
-    expect(shouldAutoScrollOnMessagesChange(false, true)).toBe(false);
-  });
-});
-
-describe("shouldAutoScrollOnWorkingStart", () => {
-  it("forces scroll on turn start when enabled", () => {
-    expect(shouldAutoScrollOnWorkingStart(true)).toBe(true);
-  });
-
-  it("suppresses the forced scroll when disabled", () => {
-    expect(shouldAutoScrollOnWorkingStart(false)).toBe(false);
   });
 });
 
@@ -311,21 +284,6 @@ describe("resolveNativeInitialScrollTop", () => {
         scrollHeight: 900,
       }),
     ).toBe(900);
-  });
-});
-
-describe("resolveFollowOutput", () => {
-  it("never follows while auto-scroll is disabled", () => {
-    expect(resolveFollowOutput(false, true)).toBe(false);
-    expect(resolveFollowOutput(false, false)).toBe(false);
-  });
-
-  it("follows smoothly when enabled and at the bottom", () => {
-    expect(resolveFollowOutput(true, true)).toBe("smooth");
-  });
-
-  it("does not follow when enabled but scrolled away from the bottom", () => {
-    expect(resolveFollowOutput(true, false)).toBe(false);
   });
 });
 

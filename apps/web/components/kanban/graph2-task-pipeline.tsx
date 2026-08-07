@@ -20,6 +20,7 @@ import { Graph2Connector } from "./graph2-connector";
 import { isOrphanMoveTarget } from "./swimlane-kanban-content";
 import type { Task } from "@/components/kanban-card";
 import type { WorkflowStep } from "@/components/kanban-column";
+import { useTranslation } from "react-i18next";
 
 type ConnectorType = "past" | "transition" | "future";
 
@@ -138,6 +139,7 @@ function TaskActions({
   Graph2TaskPipelineProps,
   "task" | "onDeleteTask" | "onArchiveTask" | "isDeleting" | "isArchiving"
 >) {
+  const { t } = useTranslation();
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [showArchiveConfirm, setShowArchiveConfirm] = useState(false);
 
@@ -160,7 +162,7 @@ function TaskActions({
               className="cursor-pointer"
             >
               <IconArchive className="h-3.5 w-3.5 mr-2" />
-              Archive task
+              {t("kanban:archiveTask")}
             </DropdownMenuItem>
           )}
           <DropdownMenuItem
@@ -169,7 +171,7 @@ function TaskActions({
             className="text-destructive focus:text-destructive cursor-pointer"
           >
             <IconTrash className="h-3.5 w-3.5 mr-2" />
-            Delete task
+            {t("kanban:deleteTask")}
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
@@ -206,6 +208,7 @@ function TaskButton({
   isSelected?: boolean;
   onClick: () => void;
 }) {
+  const { t } = useTranslation();
   const hasAction = needsAction(task);
   const sessionCount = task.sessionCount ?? 0;
   return (
@@ -237,7 +240,7 @@ function TaskButton({
         )}
         {sessionCount > 0 && (
           <span className="text-[10px] text-muted-foreground/60">
-            {sessionCount} {sessionCount === 1 ? "session" : "sessions"}
+            {t("kanban:sessionCount", { count: sessionCount })}
           </span>
         )}
       </div>
@@ -273,6 +276,7 @@ export function Graph2TaskPipeline({
   onToggleSelect,
   isMultiSelectMode,
 }: Graph2TaskPipelineProps) {
+  const { t } = useTranslation();
   const currentStepIndex = useMemo(
     () => steps.findIndex((s) => s.id === task.workflowStepId),
     [steps, task.workflowStepId],
@@ -307,7 +311,7 @@ export function Graph2TaskPipeline({
           >
             <Checkbox
               checked={!!isSelected}
-              aria-label={`Select task ${task.title}`}
+              aria-label={t("kanban:selectTask", { title: task.title })}
               className="cursor-pointer border-muted-foreground/50"
             />
           </div>

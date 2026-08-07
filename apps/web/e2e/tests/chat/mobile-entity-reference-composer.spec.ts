@@ -1,4 +1,4 @@
-import { type Locator, type Page } from "@playwright/test";
+import { type Page } from "@playwright/test";
 import { test, expect, type SeedData } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
 import { SessionPage } from "../../pages/session-page";
@@ -59,10 +59,6 @@ async function openTaskChat(page: Page, taskId: string): Promise<SessionPage> {
   await session.waitForLoad();
   await session.waitForChatIdle({ timeout: 30_000 });
   return session;
-}
-
-function visibleEditor(scope: Locator | Page): Locator {
-  return scope.locator(".tiptap.ProseMirror:visible").first();
 }
 
 async function expectPersistedReference(
@@ -152,7 +148,7 @@ test.describe("Mobile entity reference composer", () => {
       });
     });
 
-    const editor = visibleEditor(session.activeChat());
+    const editor = await session.composerReady();
     await editor.tap();
     await editor.fill("");
     await editor.pressSequentially("#Mobile Reference");

@@ -11,7 +11,9 @@ package system
 
 import (
 	"context"
+	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 
@@ -23,16 +25,21 @@ import (
 	"github.com/kandev/kandev/internal/system/backups"
 	"github.com/kandev/kandev/internal/system/database"
 	"github.com/kandev/kandev/internal/system/disk"
+	"github.com/kandev/kandev/internal/system/frontenderrors"
 	"github.com/kandev/kandev/internal/system/info"
 	"github.com/kandev/kandev/internal/system/jobs"
-	"github.com/kandev/kandev/internal/system/logs"
+	"github.com/kandev/kandev/internal/system/logbundle"
 	"github.com/kandev/kandev/internal/system/metrics"
+	"github.com/kandev/kandev/internal/system/queuesettings"
 	"github.com/kandev/kandev/internal/system/restart"
 	systemsettings "github.com/kandev/kandev/internal/system/settings"
+	"github.com/kandev/kandev/internal/system/sleepinhibition"
 	"github.com/kandev/kandev/internal/system/storage"
 	"github.com/kandev/kandev/internal/system/updates"
 	"go.uber.org/zap"
 )
+
+const e2eNPMRegistryURLEnv = "KANDEV_E2E_NPM_REGISTRY_URL"
 
 // BuildInfo holds the ldflag-injected build metadata that cmd/kandev
 // passes to Provide.
@@ -42,29 +49,34 @@ type BuildInfo struct {
 	BuildTime string
 }
 
-// Wiring holds the runtime hooks the destructive endpoints need —
-// currently only OrchestratorShutdown, which stops in-flight agent
-// executions before factory reset wipes their backing data. The frontend
-// dialog prompts the user to relaunch after a successful reset/restore;
-// no in-process re-exec is performed.
+// Wiring supplies the runtime hooks and repositories owned by the wider
+// application. OrchestratorShutdown stops in-flight agent executions before
+// destructive resets; TaskSessions is the authoritative session reader used
+// by the install-wide sleep-inhibition service.
 type Wiring struct {
 	OrchestratorShutdown func()
+	MessageQueue         queuesettings.Target
+	TaskSessions         sleepinhibition.SessionReader
 }
 
 // Service exposes the composed system sub-services. Each field is
 // addressable so the cmd/kandev wiring can attach callbacks (Restart)
 // after construction.
 type Service struct {
-	Info     *info.Service
-	Jobs     *jobs.Tracker
-	Disk     *disk.Service
-	Database *database.Service
-	Backups  *backups.Service
-	Logs     *logs.Service
-	Metrics  *metrics.Service
-	Updates  *updates.Service
-	Restart  restart.Manager
-	Storage  *storage.Handler
+	logger          *logger.Logger
+	Info            *info.Service
+	Jobs            *jobs.Tracker
+	Disk            *disk.Service
+	Database        *database.Service
+	Backups         *backups.Service
+	LogBundles      *logbundle.Service
+	FrontendErrors  *frontenderrors.Service
+	Metrics         *metrics.Service
+	MessageQueue    *queuesettings.Service
+	SleepInhibition *sleepinhibition.Service
+	Updates         *updates.Service
+	Restart         restart.Manager
+	Storage         *storage.Handler
 	// StorageRuntime owns the scheduler, reconciliation, and durable cleanup worker.
 	StorageRuntime *storage.Runtime
 }
@@ -90,30 +102,64 @@ func Provide(cfg *config.Config, log *logger.Logger, pool *db.Pool, eventBus bus
 
 	backupsSvc := backups.NewService(dataDir, pool, tracker, log)
 
-	logDir := log.LogDirectory()
-	logFile := log.LogFilename()
 	settingsStore, err := systemsettings.NewStore(pool)
 	if err != nil {
 		log.Error("Failed to initialize system settings store", zap.Error(err))
 	}
 	var metricsSvc *metrics.Service
+	var queueSettingsSvc *queuesettings.Service
+	var sleepInhibitionSvc *sleepinhibition.Service
 	updatesOpts := []updates.Option{updates.WithHomeDir(homeDir), updates.WithJobs(tracker)}
 	if settingsStore != nil {
 		metricsStore := metrics.NewStore(settingsStore)
 		metricsSvc = metrics.NewService(metricsStore, metrics.NewCollector())
+		if wiring.MessageQueue != nil {
+			queueSettingsSvc = queuesettings.NewService(
+				queuesettings.NewStore(settingsStore), wiring.MessageQueue, nil, log,
+			)
+		}
+		if wiring.TaskSessions != nil {
+			sleepInhibitionSvc = sleepinhibition.NewService(
+				sleepinhibition.NewStore(settingsStore),
+				wiring.TaskSessions,
+				sleepinhibition.NewPlatformInhibitor(),
+				eventBus,
+				log,
+			)
+		}
+		updatesOpts = append(updatesOpts, updates.WithSettingsStore(settingsStore))
+	}
+
+	updatesSvc := updates.NewService(pool, build.Version, nil, log, updatesOpts...)
+	if registryURL := e2eNPMRegistryURL(); registryURL != "" {
+		updatesSvc.SetNightlyURL(registryURL)
 	}
 
 	return &Service{
+		logger:   log,
 		Info:     info.NewService(build.Version, build.Commit, build.BuildTime),
 		Jobs:     tracker,
 		Disk:     disk.NewService(homeDir, tracker, log),
 		Database: dbSvc,
 		Backups:  backupsSvc,
-		Logs:     logs.NewService(logDir, logFile, log),
-		Metrics:  metricsSvc,
-		Updates:  updates.NewService(pool, build.Version, nil, log, updatesOpts...),
-		Restart:  restart.NewManagerFromEnv(),
+		LogBundles: logbundle.New(logbundle.Config{
+			HomeDir: homeDir, Version: build.Version, Commit: build.Commit,
+			BuildTime: build.BuildTime, Log: log,
+		}),
+		FrontendErrors:  frontenderrors.New(log, nil),
+		Metrics:         metricsSvc,
+		MessageQueue:    queueSettingsSvc,
+		SleepInhibition: sleepInhibitionSvc,
+		Updates:         updatesSvc,
+		Restart:         restart.NewManagerFromEnv(),
 	}
+}
+
+func e2eNPMRegistryURL() string {
+	if os.Getenv("KANDEV_E2E_MOCK") != "true" {
+		return ""
+	}
+	return strings.TrimSpace(os.Getenv(e2eNPMRegistryURLEnv))
 }
 
 // RegisterRoutes mounts every system endpoint under /api/v1/system.
@@ -142,16 +188,26 @@ func (s *Service) RegisterRoutes(router *gin.Engine, log *logger.Logger) {
 
 	backups.RegisterRoutes(g, s.Backups)
 
-	g.GET("/logs", logs.HandleList(s.Logs))
-	g.GET("/logs/tail", logs.HandleTail(s.Logs))
-	g.GET("/logs/:name/download", logs.HandleDownload(s.Logs))
+	if s.FrontendErrors != nil {
+		g.POST("/logs/frontend-errors", frontenderrors.Handle(s.FrontendErrors))
+	}
+	if s.LogBundles != nil {
+		logbundle.RegisterRoutes(g, s.LogBundles)
+	}
 
 	if s.Metrics != nil {
 		metrics.RegisterRoutes(g, s.Metrics)
 	}
+	if s.MessageQueue != nil {
+		queuesettings.RegisterRoutes(g, admin, s.MessageQueue)
+	}
+	if s.SleepInhibition != nil {
+		sleepinhibition.RegisterRoutes(g, admin, s.SleepInhibition)
+	}
 
 	g.GET("/updates", updates.HandleGet(s.Updates))
 	admin.POST("/updates/check", updates.HandleCheck(s.Updates))
+	admin.PATCH("/updates/channel", updates.HandleSetChannel(s.Updates))
 	admin.POST("/updates/apply", updates.HandleApply(s.Updates))
 	g.GET("/restart-capability", restart.HandleCapability(s.Restart))
 	admin.POST("/restart", restart.HandleRequest(s.Restart))
@@ -161,19 +217,35 @@ func (s *Service) RegisterRoutes(router *gin.Engine, log *logger.Logger) {
 	log.Debug("Registered System routes (HTTP)")
 }
 
-// StartBackground kicks off the updates poller goroutine. The poller
-// stops when ctx is cancelled.
+// StartBackground starts the System-owned pollers and reconciliation loops.
+// They stop when the application cleanup path calls StopBackground.
 func (s *Service) StartBackground(ctx context.Context) {
+	if s.LogBundles != nil {
+		s.LogBundles.Start(ctx)
+	}
 	if s.Updates != nil {
 		s.Updates.StartPoller(ctx)
 	}
 	if s.StorageRuntime != nil {
 		_ = s.StorageRuntime.Start(ctx)
 	}
+	if s.SleepInhibition != nil {
+		if err := s.SleepInhibition.Start(ctx); err != nil {
+			if s.logger != nil {
+				s.logger.Warn("failed to start sleep inhibition service", zap.Error(err))
+			}
+		}
+	}
 }
 
 // StopBackground joins owned storage background workers.
 func (s *Service) StopBackground() {
+	if s.SleepInhibition != nil {
+		s.SleepInhibition.Stop()
+	}
+	if s.LogBundles != nil {
+		s.LogBundles.Stop()
+	}
 	if s.StorageRuntime != nil {
 		s.StorageRuntime.Stop()
 	}

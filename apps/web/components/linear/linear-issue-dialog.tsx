@@ -14,6 +14,8 @@ import {
   useIssueState,
   type IssueState,
 } from "./linear-issue-common";
+import { useDateLocale } from "@/lib/i18n/date-locale";
+import { useTranslation } from "react-i18next";
 
 type LinearIssueDialogProps = {
   open: boolean;
@@ -26,8 +28,12 @@ type LinearIssueDialogProps = {
   onStartTask?: (issue: LinearIssue) => void;
 };
 
-function dialogTitle(issue: LinearIssue | null, identifier: string | null | undefined): string {
-  return issue?.title ?? identifier ?? "Linear issue";
+function dialogTitle(
+  issue: LinearIssue | null,
+  identifier: string | null | undefined,
+  t: (key: string, values?: Record<string, unknown>) => string,
+): string {
+  return issue?.title ?? identifier ?? t("linear:fallbackIssue");
 }
 
 function effectiveIdentifier(
@@ -45,6 +51,7 @@ export function LinearIssueDialog({
   initialIssue,
   onStartTask,
 }: LinearIssueDialogProps) {
+  const { t } = useTranslation();
   const enabled = open && !!workspaceId && !!identifier;
   const state = useIssueState(workspaceId ?? "", identifier ?? "", enabled);
   const issue = state.issue ?? initialIssue ?? null;
@@ -64,7 +71,7 @@ export function LinearIssueDialog({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="!max-w-[min(1280px,95vw)] w-[95vw] max-h-[90vh] overflow-hidden flex flex-col gap-0 p-0 sm:rounded-lg">
-        <DialogTitle className="sr-only">{dialogTitle(issue, identifier)}</DialogTitle>
+        <DialogTitle className="sr-only">{dialogTitle(issue, identifier, t)}</DialogTitle>
         {errorOnly ? (
           <div className="flex-1 flex items-center justify-center px-8 py-16">
             <LinearErrorMessage error={state.error ?? ""} />
@@ -90,11 +97,12 @@ export function LinearIssueDialog({
 }
 
 function IssueFooter({ onStart }: { onStart: () => void }) {
+  const { t } = useTranslation();
   return (
     <div className="flex items-center justify-end gap-2 px-6 py-3 border-t bg-muted/20 shrink-0">
       <Button size="sm" variant="default" className="cursor-pointer gap-1.5" onClick={onStart}>
         <IconPlus className="h-4 w-4" />
-        Start task
+        {t("linear:startTask")}
       </Button>
     </div>
   );
@@ -109,6 +117,7 @@ function DialogBody({
   state: IssueState;
   identifier: string;
 }) {
+  const { t } = useTranslation();
   return (
     <div className="flex-1 overflow-y-auto">
       {state.error && issue && (
@@ -117,7 +126,9 @@ function DialogBody({
         </div>
       )}
       {!issue && state.loading && (
-        <div className="text-sm text-muted-foreground py-16 text-center">Loading issue…</div>
+        <div className="text-sm text-muted-foreground py-16 text-center">
+          {t("linear:loadingIssue")}
+        </div>
       )}
       {issue && <IssueBody issue={issue} state={state} identifier={identifier} />}
     </div>
@@ -131,6 +142,7 @@ type TopBarProps = {
 };
 
 function IssueTopBar({ issue, loading, onRefresh }: TopBarProps) {
+  const { t } = useTranslation();
   return (
     <div className="flex items-center justify-end gap-1 pl-4 pr-12 py-2 border-b shrink-0">
       {issue?.url && (
@@ -139,7 +151,7 @@ function IssueTopBar({ issue, loading, onRefresh }: TopBarProps) {
           variant="ghost"
           size="icon-sm"
           className="cursor-pointer"
-          title="Open in Linear"
+          title={t("linear:openInLinear")}
         >
           <a href={issue.url} target="_blank" rel="noreferrer">
             <IconExternalLink className="h-4 w-4" />
@@ -152,7 +164,7 @@ function IssueTopBar({ issue, loading, onRefresh }: TopBarProps) {
         className="cursor-pointer"
         onClick={onRefresh}
         disabled={loading}
-        title="Refresh"
+        title={t("linear:refresh")}
       >
         <IconRefresh className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
       </Button>
@@ -211,14 +223,15 @@ function SectionHeading({ children }: { children: React.ReactNode }) {
 }
 
 function DescriptionSection({ description }: { description: string }) {
+  const { t } = useTranslation();
   return (
     <section className="space-y-2">
-      <SectionHeading>Description</SectionHeading>
+      <SectionHeading>{t("linear:description")}</SectionHeading>
       <div className="rounded-md border bg-muted/30 px-4 py-3">
         {description ? (
           <div className="text-sm whitespace-pre-wrap leading-relaxed">{description}</div>
         ) : (
-          <div className="text-sm text-muted-foreground italic">No description.</div>
+          <div className="text-sm text-muted-foreground italic">{t("linear:noDescription")}</div>
         )}
       </div>
     </section>
@@ -274,22 +287,23 @@ function StateBlock({ issue, states, pending, onChange }: StateBlockProps) {
 }
 
 function DetailsCard({ issue }: { issue: LinearIssue }) {
+  const { t } = useTranslation();
   return (
     <section className="rounded-md border bg-background overflow-hidden">
       <div className="px-4 py-3 border-b bg-muted/30">
-        <SectionHeading>Details</SectionHeading>
+        <SectionHeading>{t("linear:details")}</SectionHeading>
       </div>
       <div className="px-4 py-3 space-y-3 text-sm">
-        <DetailRow label="Assignee">
+        <DetailRow label={t("linear:assignee")}>
           <PersonCell name={issue.assigneeName} avatar={issue.assigneeIcon} />
         </DetailRow>
-        <DetailRow label="Creator">
+        <DetailRow label={t("linear:creator")}>
           <PersonCell name={issue.creatorName} avatar={issue.creatorIcon} />
         </DetailRow>
-        <DetailRow label="Priority">
+        <DetailRow label={t("linear:priority")}>
           <span className={priorityClass(issue.priority)}>{issue.priorityLabel || "—"}</span>
         </DetailRow>
-        <DetailRow label="Team">
+        <DetailRow label={t("linear:team")}>
           <span className="font-mono text-xs">{issue.teamKey}</span>
         </DetailRow>
       </div>
@@ -307,11 +321,12 @@ function DetailRow({ label, children }: { label: string; children: React.ReactNo
 }
 
 function MetaFooter({ issue }: { issue: LinearIssue }) {
-  const updated = formatRelative(issue.updated);
+  const { t } = useTranslation();
+  const updated = formatRelative(issue.updated, useDateLocale());
   if (!updated) return null;
   return (
     <div className="text-xs text-muted-foreground px-1" title={issue.updated}>
-      Updated {updated}
+      {t("linear:updatedTime", { time: updated })}
     </div>
   );
 }

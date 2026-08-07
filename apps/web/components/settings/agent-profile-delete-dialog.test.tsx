@@ -49,6 +49,22 @@ function renderConflictDialog(conflict: AgentProfileDeleteConflict | null) {
 }
 
 describe("AgentProfileDeleteConflictDialog", () => {
+  // An automation is configuration, not a session: nothing is running, so it
+  // never reaches activeSessions. Before this was rendered, an automation-only
+  // conflict popped a dialog that listed nothing at all and then offered
+  // "Delete Anyway".
+  it("names the automations on an automation-only conflict", () => {
+    renderConflictDialog({
+      activeSessions: [],
+      watchers: [],
+      routingTiers: [],
+      automations: [{ id: "auto-1", name: "Nightly dependency sweep", workspace_id: "ws-1" }],
+    });
+
+    expect(screen.getByTestId("delete-conflict-automations")).toBeTruthy();
+    screen.getByText("Nightly dependency sweep");
+  });
+
   it("renders the watcher list grouped by kind on a watcher-only conflict", () => {
     renderConflictDialog({
       activeSessions: [],
@@ -58,6 +74,7 @@ describe("AgentProfileDeleteConflictDialog", () => {
         { id: "github-w1", kind: "github_issue", label: "kdlbs/kandev" },
       ],
       routingTiers: [],
+      automations: [],
     });
 
     // Watcher group headings render the human-friendly kind label, and
@@ -78,6 +95,7 @@ describe("AgentProfileDeleteConflictDialog", () => {
       activeSessions: [{ task_id: "t1", task_title: "Live task", is_ephemeral: false }],
       watchers: [],
       routingTiers: [],
+      automations: [],
     });
 
     expect(screen.getByText(/Tasks:/)).toBeTruthy();
@@ -90,6 +108,7 @@ describe("AgentProfileDeleteConflictDialog", () => {
       activeSessions: [{ task_id: "t1", task_title: "Live task", is_ephemeral: false }],
       watchers: [{ id: "jira-w1", kind: "jira", label: "project = ENG" }],
       routingTiers: [],
+      automations: [],
     });
 
     expect(screen.getByText("Live task")).toBeTruthy();
@@ -102,6 +121,7 @@ describe("AgentProfileDeleteConflictDialog", () => {
       activeSessions: [],
       watchers: [],
       routingTiers: [{ workspace_id: "ws-1", provider_id: "codex-acp", tier: "balanced" }],
+      automations: [],
     });
 
     expect(screen.getByText(/Cannot delete agent profile/i)).toBeTruthy();
@@ -117,6 +137,32 @@ describe("AgentProfileDeleteConflictDialog", () => {
       ),
     ).toBeTruthy();
     expect(screen.queryByText(/Delete Anyway/)).toBeNull();
+  });
+
+  // The watcher `kind` is the wire enum and its label is a catalog key, so a
+  // renamed key or a dropped entry must fail here rather than silently render
+  // the raw enum value to the user.
+  it("resolves every known watcher kind to its label, and echoes an unknown one", () => {
+    renderConflictDialog({
+      activeSessions: [],
+      watchers: [
+        { id: "w1", kind: "linear", label: "team ENG" },
+        { id: "w2", kind: "jira", label: "project = ENG" },
+        { id: "w3", kind: "github_issue", label: "kdlbs/kandev" },
+        { id: "w4", kind: "github_review", label: "kdlbs/kandev PRs" },
+        // A kind the frontend does not know yet — the raw value is echoed
+        // rather than rendering an empty label.
+        { id: "w5", kind: "sentry" as never, label: "proj/backend" },
+      ],
+      routingTiers: [],
+      automations: [],
+    });
+
+    expect(screen.getByText(/Linear:/)).toBeTruthy();
+    expect(screen.getByText(/Jira:/)).toBeTruthy();
+    expect(screen.getByText(/GitHub Issues:/)).toBeTruthy();
+    expect(screen.getByText(/GitHub PR Reviews:/)).toBeTruthy();
+    expect(screen.getByText(/sentry:/)).toBeTruthy();
   });
 
   it("does not render the dialog when conflict is null", () => {

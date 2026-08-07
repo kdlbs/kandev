@@ -32,6 +32,7 @@ import {
   resizeGroup,
   splitPanel,
 } from "./layout-editor-actions";
+import { useTranslation } from "react-i18next";
 
 export type LayoutEditorActionAnchor = {
   left: number;
@@ -55,11 +56,38 @@ type ActionState = LayoutEditorActionsProps & {
 };
 
 const touchButtonClass = "min-h-11 min-w-11 cursor-pointer sm:min-h-8 sm:min-w-8";
+
+/**
+ * `direction` is the sentinel handed to the layout commands and must never be
+ * translated. The two label keys are resolved at render — `labelKey` for the
+ * standalone menu item, `inlineKey` for the mid-sentence form, because
+ * lower-casing a translated word is not safe in every locale.
+ */
 const directions = [
-  { direction: "left" as const, label: "Left", icon: IconArrowLeft },
-  { direction: "right" as const, label: "Right", icon: IconArrowRight },
-  { direction: "above" as const, label: "Above", icon: IconArrowUp },
-  { direction: "below" as const, label: "Below", icon: IconArrowDown },
+  {
+    direction: "left" as const,
+    labelKey: "settings:layoutDirectionLeft",
+    inlineKey: "settings:layoutDirectionLeftInline",
+    icon: IconArrowLeft,
+  },
+  {
+    direction: "right" as const,
+    labelKey: "settings:layoutDirectionRight",
+    inlineKey: "settings:layoutDirectionRightInline",
+    icon: IconArrowRight,
+  },
+  {
+    direction: "above" as const,
+    labelKey: "settings:layoutDirectionAbove",
+    inlineKey: "settings:layoutDirectionAboveInline",
+    icon: IconArrowUp,
+  },
+  {
+    direction: "below" as const,
+    labelKey: "settings:layoutDirectionBelow",
+    inlineKey: "settings:layoutDirectionBelowInline",
+    icon: IconArrowDown,
+  },
 ];
 
 function ActionTooltip({
@@ -132,6 +160,7 @@ function MenuTrigger({
 }
 
 function AddPanelAction({ state }: { state: ActionState }) {
+  const { t } = useTranslation();
   const missing = REUSABLE_PANEL_IDS.filter((id) => !state.api?.getPanel(id));
   const disabled = !state.editable || !state.api || missing.length === 0;
   return (
@@ -147,21 +176,21 @@ function AddPanelAction({ state }: { state: ActionState }) {
                   variant="secondary"
                   className="min-h-11 cursor-pointer shadow-md sm:min-h-8"
                   disabled={disabled}
-                  aria-label="Add panel"
+                  aria-label={t("settings:addPanel")}
                 >
-                  <IconPlus className="mr-1.5 h-4 w-4" /> Add panel
+                  <IconPlus className="mr-1.5 h-4 w-4" /> {t("settings:addPanel")}
                 </Button>
               </DropdownMenuTrigger>
             </span>
           </TooltipTrigger>
-          <TooltipContent>Add a missing tool tab beside the selected split.</TooltipContent>
+          <TooltipContent>{t("settings:addAMissingToolTabBeside")}</TooltipContent>
         </Tooltip>
         <DropdownMenuContent align="start">
           {missing.map((id) => (
             <DropdownMenuItem
               key={id}
               className="cursor-pointer"
-              title={`Add the ${PANEL_REGISTRY[id].title} tab to the selected split.`}
+              title={t("settings:addTheTabToTheSelected", { panel: PANEL_REGISTRY[id].title })}
               onSelect={() =>
                 state.perform(() => addReusablePanel(state.api!, id, state.selected?.group.id))
               }
@@ -176,27 +205,28 @@ function AddPanelAction({ state }: { state: ActionState }) {
 }
 
 function SplitMenu({ state }: { state: ActionState }) {
+  const { t } = useTranslation();
   const disabled = state.disabled || (state.selected?.group.panels.length ?? 0) < 2;
   return (
     <DropdownMenu>
       <MenuTrigger
-        label="Split tab"
-        help="Move this tab into a new split beside its current split."
+        label={t("settings:splitTab")}
+        help={t("settings:moveThisTabIntoANewSplit")}
         disabled={disabled}
       >
         <IconLayoutColumns className="h-4 w-4" />
       </MenuTrigger>
       <DropdownMenuContent align="start">
-        {directions.map(({ direction, label, icon: Icon }) => (
+        {directions.map(({ direction, labelKey, inlineKey, icon: Icon }) => (
           <DropdownMenuItem
             key={direction}
             className="cursor-pointer"
-            title={`Create a new split ${direction} of the selected split.`}
+            title={t("settings:createANewSplitOfThe", { direction: t(inlineKey) })}
             onSelect={() =>
               state.perform(() => splitPanel(state.api!, state.selectedPanelId!, direction))
             }
           >
-            <Icon className="mr-2 h-4 w-4" /> {label}
+            <Icon className="mr-2 h-4 w-4" /> {t(labelKey)}
           </DropdownMenuItem>
         ))}
       </DropdownMenuContent>
@@ -205,11 +235,12 @@ function SplitMenu({ state }: { state: ActionState }) {
 }
 
 function MovePanelMenu({ state }: { state: ActionState }) {
+  const { t } = useTranslation();
   return (
     <DropdownMenu>
       <MenuTrigger
-        label="Move tab to split"
-        help="Move this tab into another existing split."
+        label={t("settings:moveTabToSplit")}
+        help={t("settings:moveThisTabIntoAnotherExisting")}
         disabled={state.disabled || state.targetGroups.length === 0}
       >
         <IconArrowRight className="h-4 w-4" />
@@ -219,7 +250,9 @@ function MovePanelMenu({ state }: { state: ActionState }) {
           <DropdownMenuItem
             key={group.id}
             className="cursor-pointer"
-            title={`Move this tab into the split containing ${group.activePanel?.title ?? group.id}.`}
+            title={t("settings:moveThisTabIntoTheSplit", {
+              target: group.activePanel?.title ?? group.id,
+            })}
             onSelect={() =>
               state.perform(() => movePanelToGroup(state.api!, state.selectedPanelId!, group.id))
             }
@@ -233,13 +266,14 @@ function MovePanelMenu({ state }: { state: ActionState }) {
 }
 
 function ArrangeSplitMenu({ state }: { state: ActionState }) {
+  const { t } = useTranslation();
   const resize = (axis: "width" | "height", delta: number) =>
     state.perform(() => resizeGroup(state.api!, state.selected!.group.id, axis, delta));
   return (
     <DropdownMenu>
       <MenuTrigger
-        label="Arrange split"
-        help="Resize, reposition, or merge the selected split."
+        label={t("settings:arrangeSplit")}
+        help={t("settings:resizeRepositionOrMergeTheSelected")}
         disabled={state.disabled}
       >
         <IconLayoutRows className="h-4 w-4" />
@@ -247,69 +281,80 @@ function ArrangeSplitMenu({ state }: { state: ActionState }) {
       <DropdownMenuContent align="end" className="max-h-72 overflow-y-auto">
         <DropdownMenuItem
           className="cursor-pointer"
-          title="Make the selected split 40 pixels narrower."
+          title={t("settings:makeTheSelectedSplit40Pixels")}
           onSelect={() => resize("width", -40)}
         >
           <IconLayoutColumns className="mr-2 h-4 w-4" />
-          <IconMinus className="mr-2 h-3 w-3" /> Decrease width
+          <IconMinus className="mr-2 h-3 w-3" /> {t("settings:decreaseWidth")}
         </DropdownMenuItem>
         <DropdownMenuItem
           className="cursor-pointer"
-          title="Make the selected split 40 pixels wider."
+          title={t("settings:makeTheSelectedSplit40Pixels2")}
           onSelect={() => resize("width", 40)}
         >
           <IconLayoutColumns className="mr-2 h-4 w-4" />
-          <IconPlus className="mr-2 h-3 w-3" /> Increase width
+          <IconPlus className="mr-2 h-3 w-3" /> {t("settings:increaseWidth")}
         </DropdownMenuItem>
         <DropdownMenuItem
           className="cursor-pointer"
-          title="Make the selected split 40 pixels shorter."
+          title={t("settings:makeTheSelectedSplit40Pixels3")}
           onSelect={() => resize("height", -40)}
         >
           <IconLayoutRows className="mr-2 h-4 w-4" />
-          <IconMinus className="mr-2 h-3 w-3" /> Decrease height
+          <IconMinus className="mr-2 h-3 w-3" /> {t("settings:decreaseHeight")}
         </DropdownMenuItem>
         <DropdownMenuItem
           className="cursor-pointer"
-          title="Make the selected split 40 pixels taller."
+          title={t("settings:makeTheSelectedSplit40Pixels4")}
           onSelect={() => resize("height", 40)}
         >
           <IconLayoutRows className="mr-2 h-4 w-4" />
-          <IconPlus className="mr-2 h-3 w-3" /> Increase height
+          <IconPlus className="mr-2 h-3 w-3" /> {t("settings:increaseHeight")}
         </DropdownMenuItem>
         {state.targetGroups.length > 0 && <DropdownMenuSeparator />}
-        {state.targetGroups.flatMap((target) => [
-          ...directions.map(({ direction, label, icon: Icon }) => (
+        {state.targetGroups.flatMap((target) => {
+          const targetName = target.activePanel?.title ?? target.id;
+          return [
+            ...directions.map(({ direction, labelKey, inlineKey, icon: Icon }) => (
+              <DropdownMenuItem
+                key={`${target.id}-${direction}`}
+                className="cursor-pointer"
+                title={t("settings:moveThisSplitOf", {
+                  direction: t(inlineKey),
+                  target: targetName,
+                })}
+                onSelect={() =>
+                  state.perform(() =>
+                    moveGroup(state.api!, state.selected!.group.id, target.id, direction),
+                  )
+                }
+              >
+                <Icon className="mr-2 h-4 w-4" />{" "}
+                {t("settings:layoutDirectionOfTarget", {
+                  direction: t(labelKey),
+                  target: targetName,
+                })}
+              </DropdownMenuItem>
+            )),
             <DropdownMenuItem
-              key={`${target.id}-${direction}`}
+              key={`${target.id}-merge`}
               className="cursor-pointer"
-              title={`Move this split ${direction} of ${target.activePanel?.title ?? target.id}.`}
+              title={t("settings:mergeThisSplitIntoTheSplit", { target: targetName })}
               onSelect={() =>
-                state.perform(() =>
-                  moveGroup(state.api!, state.selected!.group.id, target.id, direction),
-                )
+                state.perform(() => mergeGroup(state.api!, state.selected!.group.id, target.id))
               }
             >
-              <Icon className="mr-2 h-4 w-4" /> {label} of {target.activePanel?.title ?? target.id}
-            </DropdownMenuItem>
-          )),
-          <DropdownMenuItem
-            key={`${target.id}-merge`}
-            className="cursor-pointer"
-            title={`Merge this split into the split containing ${target.activePanel?.title ?? target.id}.`}
-            onSelect={() =>
-              state.perform(() => mergeGroup(state.api!, state.selected!.group.id, target.id))
-            }
-          >
-            Merge with {target.activePanel?.title ?? target.id}
-          </DropdownMenuItem>,
-        ])}
+              {t("settings:mergeWithTarget", { target: targetName })}
+            </DropdownMenuItem>,
+          ];
+        })}
       </DropdownMenuContent>
     </DropdownMenu>
   );
 }
 
 function SelectedPanelActions({ state }: { state: ActionState }) {
+  const { t } = useTranslation();
   if (!state.anchor || !state.selected) return null;
   const first = state.selected.group.panels[0]?.id === state.selectedPanelId;
   const last = state.selected.group.panels.at(-1)?.id === state.selectedPanelId;
@@ -319,22 +364,22 @@ function SelectedPanelActions({ state }: { state: ActionState }) {
       style={{ left: state.anchor.left, top: state.anchor.top, width: state.anchor.width }}
       data-testid="layout-editor-context-actions"
       data-legacy-testid="layout-editor-toolbar"
-      aria-label={`Actions for ${state.selected.title ?? state.selected.id}`}
+      aria-label={t("settings:actionsFor", { target: state.selected.title ?? state.selected.id })}
     >
       <span className="hidden max-w-28 truncate px-2 text-xs font-medium sm:inline">
         {state.selected.title ?? state.selected.id}
       </span>
       <ActionTooltip
-        label="Move tab left"
-        help="Move this tab one position left within its split."
+        label={t("settings:moveTabLeft")}
+        help={t("settings:moveThisTabOnePositionLeft")}
         disabled={state.disabled || first}
         onClick={() => state.perform(() => reorderTab(state.api!, state.selectedPanelId!, -1))}
       >
         <IconArrowLeft className="h-4 w-4" />
       </ActionTooltip>
       <ActionTooltip
-        label="Move tab right"
-        help="Move this tab one position right within its split."
+        label={t("settings:moveTabRight")}
+        help={t("settings:moveThisTabOnePositionRight")}
         disabled={state.disabled || last}
         onClick={() => state.perform(() => reorderTab(state.api!, state.selectedPanelId!, 1))}
       >
@@ -344,8 +389,8 @@ function SelectedPanelActions({ state }: { state: ActionState }) {
       <MovePanelMenu state={state} />
       <ArrangeSplitMenu state={state} />
       <ActionTooltip
-        label="Remove panel"
-        help="Remove this tab from the saved layout."
+        label={t("settings:removePanel")}
+        help={t("settings:removeThisTabFromTheSaved")}
         disabled={state.disabled || state.selectedPanelId === "chat"}
         onClick={() => state.perform(() => removeReusablePanel(state.api!, state.selectedPanelId!))}
       >

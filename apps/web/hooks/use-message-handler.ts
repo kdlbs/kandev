@@ -1,6 +1,7 @@
 import { useCallback } from "react";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { MessageSendError } from "@/lib/chat/message-send-error";
+import { generateUUID } from "@/lib/utils";
 import { useAppStoreApi } from "@/components/state-provider";
 import { useQueue } from "./domains/session/use-queue";
 import type {
@@ -103,8 +104,10 @@ export function buildContextFilesContext(
   let context = "";
 
   if (files.length > 0) {
-    const fileList = files.map((f) => `- ${f.path}`).join("\n");
-    context += `\n\n<kandev-system>\nCONTEXT FILES: The user has attached the following files as context. Read these files to understand what the user is referring to:\n${fileList}\n</kandev-system>`;
+    const pathList = files
+      .map((f) => `- ${f.isDirectory ? "directory" : "file"}: ${sanitizeForPrompt(f.path)}`)
+      .join("\n");
+    context += `\n\n<kandev-system>\nCONTEXT PATHS: The user has attached the following file and directory paths as context. Inspect these paths to understand what the user is referring to:\n${pathList}\n</kandev-system>`;
   }
 
   if (promptFiles.length > 0) {
@@ -156,14 +159,74 @@ export interface UseMessageHandlerParams {
 type SendMessagePayload = {
   taskId: string;
   resolvedSessionId: string;
+  clientMessageId?: string;
   finalMessage: string;
   modelToSend: string | undefined;
   planMode: boolean;
   hasReviewComments?: boolean;
   attachments?: MessageAttachment[];
-  contextFilesMeta?: Array<{ path: string; name: string }>;
+  contextFilesMeta?: Array<{ path: string; name: string; is_directory?: boolean }>;
   entityReferences?: EntityReference[];
 };
+
+type MessageListResponse = { messages?: Message[] };
+
+function isUncertainMessageTransportError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  const message = error.message.toLowerCase();
+  return (
+    message.includes("websocket request timed out") || message === "websocket connection closed"
+  );
+}
+
+async function findMessageByID(
+  client: ReturnType<typeof getWebSocketClient>,
+  sessionId: string,
+  messageId: string,
+): Promise<Message | undefined> {
+  if (!client) return undefined;
+  try {
+    const response = await client.request<MessageListResponse>(
+      "message.list",
+      { session_id: sessionId, limit: 100, sort: "desc" },
+      5000,
+    );
+    return response.messages?.find((message) => message.id === messageId);
+  } catch {
+    return undefined;
+  }
+}
+
+async function waitForConnected(client: NonNullable<ReturnType<typeof getWebSocketClient>>) {
+  const getStatus = client.getStatus?.bind(client);
+  if (!getStatus || getStatus() === "connected") return true;
+  const deadline = Date.now() + 3000;
+  while (Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    if (getStatus() === "connected") return true;
+  }
+  return false;
+}
+
+async function reconcileUncertainMessage(
+  client: NonNullable<ReturnType<typeof getWebSocketClient>>,
+  sessionId: string,
+  messageId: string,
+  request: () => Promise<Message | undefined>,
+  originalError: unknown,
+) {
+  const committed = await findMessageByID(client, sessionId, messageId);
+  if (committed) return committed;
+  if (!(await waitForConnected(client))) throw originalError;
+
+  try {
+    return await request();
+  } catch (retryError) {
+    const retriedMessage = await findMessageByID(client, sessionId, messageId);
+    if (retriedMessage) return retriedMessage;
+    throw retryError;
+  }
+}
 
 export async function sendMessageRequest(
   payload: SendMessagePayload,
@@ -179,6 +242,7 @@ export async function sendMessageRequest(
   const {
     taskId,
     resolvedSessionId,
+    clientMessageId,
     finalMessage,
     modelToSend,
     planMode,
@@ -188,22 +252,33 @@ export async function sendMessageRequest(
     entityReferences,
   } = payload;
   const hasAttachments = attachments && attachments.length > 0;
+  const stableMessageId = clientMessageId ?? generateUUID();
+  const requestPayload = {
+    task_id: taskId,
+    session_id: resolvedSessionId,
+    client_message_id: stableMessageId,
+    content: finalMessage,
+    ...(modelToSend && { model: modelToSend }),
+    ...(planMode && { plan_mode: true }),
+    ...(hasReviewComments && { has_review_comments: true }),
+    ...(hasAttachments && { attachments }),
+    ...(contextFilesMeta && { context_files: contextFilesMeta }),
+    ...(entityReferences && { entity_references: entityReferences }),
+  };
 
-  return client.request<Message | undefined>(
-    "message.add",
-    {
-      task_id: taskId,
-      session_id: resolvedSessionId,
-      content: finalMessage,
-      ...(modelToSend && { model: modelToSend }),
-      ...(planMode && { plan_mode: true }),
-      ...(hasReviewComments && { has_review_comments: true }),
-      ...(hasAttachments && { attachments }),
-      ...(contextFilesMeta && { context_files: contextFilesMeta }),
-      ...(entityReferences && { entity_references: entityReferences }),
-    },
-    hasAttachments ? 30000 : 10000,
-  );
+  const request = () =>
+    client.request<Message | undefined>(
+      "message.add",
+      requestPayload,
+      hasAttachments ? 30000 : 10000,
+    );
+
+  try {
+    return await request();
+  } catch (error) {
+    if (!isUncertainMessageTransportError(error)) throw error;
+    return reconcileUncertainMessage(client, resolvedSessionId, stableMessageId, request, error);
+  }
 }
 
 const TERMINAL_SESSION_STATES = new Set(["FAILED", "CANCELLED", "COMPLETED"]);
@@ -222,6 +297,17 @@ function requireSessionInputMode(state: AppState, selectedSessionId: string): Se
     throw new MessageSendError("session-unavailable", message);
   }
   return inputMode;
+}
+
+function buildQueueAttachments(attachments?: MessageAttachment[]) {
+  return attachments?.map((att) => ({
+    type: att.type,
+    ...(att.attachment_id ? { attachment_id: att.attachment_id } : { data: att.data ?? "" }),
+    mime_type: att.mime_type,
+    name: att.name,
+    size_bytes: att.size_bytes,
+    delivery_mode: att.delivery_mode,
+  }));
 }
 
 export function useMessageHandler({
@@ -276,17 +362,17 @@ export function useMessageHandler({
         (f) => !f.path.startsWith("prompt:") && f.path !== "plan:context",
       );
       const contextFilesMeta =
-        realFiles.length > 0 ? realFiles.map((f) => ({ path: f.path, name: f.name })) : undefined;
+        realFiles.length > 0
+          ? realFiles.map((f) => ({
+              path: f.path,
+              name: f.name,
+              ...(f.isDirectory !== undefined ? { is_directory: f.isDirectory } : {}),
+            }))
+          : undefined;
 
       const inputMode = requireSessionInputMode(storeApi.getState(), resolvedSessionId);
       if (hasPendingClarification || inputMode === "queue") {
-        const queueAttachments = payload.attachments?.map((att) => ({
-          type: att.type,
-          data: att.data,
-          mime_type: att.mime_type,
-          name: att.name,
-          delivery_mode: att.delivery_mode,
-        }));
+        const queueAttachments = buildQueueAttachments(payload.attachments);
         await queue({
           taskId,
           content: finalMessage,
@@ -294,6 +380,7 @@ export function useMessageHandler({
           planMode: planModeEnabled,
           attachments: queueAttachments,
           entityReferences: payload.entityReferences,
+          ...(contextFilesMeta ? { contextFilesMeta } : {}),
         });
         return;
       }
@@ -304,6 +391,7 @@ export function useMessageHandler({
       const created = await sendMessageRequest({
         taskId,
         resolvedSessionId,
+        clientMessageId: generateUUID(),
         finalMessage,
         modelToSend,
         planMode: planModeEnabled,

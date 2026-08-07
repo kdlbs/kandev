@@ -10,9 +10,11 @@ export type SessionIntent =
 
 export type MessageAttachment = {
   type: "image" | "audio" | "resource";
-  data: string;
+  data?: string;
+  attachment_id?: string;
   mime_type: string;
   name?: string;
+  size_bytes?: number;
   delivery_mode?: "prompt" | "path";
 };
 

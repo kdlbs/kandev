@@ -13,10 +13,13 @@ import { cn } from "@/lib/utils";
 import { useOptimisticTaskMutation } from "@/hooks/use-optimistic-task-mutation";
 import { updateTask } from "@/lib/api/domains/office-extended-api";
 import type { Task, TaskPriority } from "@/app/office/tasks/[id]/types";
+import { useTranslation } from "react-i18next";
 
 type PriorityMeta = {
   value: TaskPriority;
-  label: string;
+  // A catalog key, not copy: this table is module scope, so a resolved `t()`
+  // here would freeze at the boot locale.
+  labelKey: string;
   icon: React.ComponentType<{ className?: string }>;
   iconClass: string;
 };
@@ -24,13 +27,18 @@ type PriorityMeta = {
 export const PRIORITY_OPTIONS: PriorityMeta[] = [
   {
     value: "critical",
-    label: "Critical",
+    labelKey: "task:priorityCritical",
     icon: IconAlertTriangle,
     iconClass: "text-red-600",
   },
-  { value: "high", label: "High", icon: IconArrowUp, iconClass: "text-orange-600" },
-  { value: "medium", label: "Medium", icon: IconMinus, iconClass: "text-orange-500" },
-  { value: "low", label: "Low", icon: IconArrowDown, iconClass: "text-blue-500" },
+  { value: "high", labelKey: "task:priorityHigh", icon: IconArrowUp, iconClass: "text-orange-600" },
+  {
+    value: "medium",
+    labelKey: "task:priorityMedium",
+    icon: IconMinus,
+    iconClass: "text-orange-500",
+  },
+  { value: "low", labelKey: "task:priorityLow", icon: IconArrowDown, iconClass: "text-blue-500" },
 ];
 
 const BY_VALUE: Record<TaskPriority, PriorityMeta> = PRIORITY_OPTIONS.reduce(
@@ -46,6 +54,7 @@ type PriorityPickerProps = {
 };
 
 export function PriorityPicker({ task }: PriorityPickerProps) {
+  const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const mutate = useOptimisticTaskMutation();
 
@@ -74,7 +83,7 @@ export function PriorityPicker({ task }: PriorityPickerProps) {
           className="inline-flex items-center gap-1.5 cursor-pointer rounded px-2 py-1 hover:bg-muted ml-auto"
         >
           <CurrentIcon className={cn("h-3.5 w-3.5", current.iconClass)} />
-          <span>{current.label}</span>
+          <span>{t(current.labelKey)}</span>
           <IconChevronDown className="h-3 w-3 opacity-50" />
         </button>
       </PopoverTrigger>
@@ -95,7 +104,7 @@ export function PriorityPicker({ task }: PriorityPickerProps) {
               onClick={() => handleSelect(opt.value)}
             >
               <Icon className={cn("h-3.5 w-3.5", opt.iconClass)} />
-              <span>{opt.label}</span>
+              <span>{t(opt.labelKey)}</span>
             </button>
           );
         })}

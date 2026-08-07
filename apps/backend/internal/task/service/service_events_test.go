@@ -405,6 +405,32 @@ func TestTaskPublication_TaskCreatedAfterTombstoneClearsAndPublishes(t *testing.
 	}
 }
 
+func TestTaskPublication_TaskUpdatedIncludesNullArchivedAtForActiveTasks(t *testing.T) {
+	svc, eventBus, repo := createTestService(t)
+	ctx := context.Background()
+	createTaskWithoutRepositories(t, ctx, repo)
+
+	svc.PublishTaskUpdated(ctx, &models.Task{
+		ID:             "task-1",
+		WorkspaceID:    "ws-1",
+		WorkflowID:     "wf-1",
+		WorkflowStepID: "step-1",
+	})
+
+	published := eventBus.GetPublishedEvents()
+	if len(published) != 1 {
+		t.Fatalf("published events = %d, want 1", len(published))
+	}
+	data, _ := published[0].Data.(map[string]interface{})
+	archivedAt, ok := data["archived_at"]
+	if !ok {
+		t.Fatal("task.updated payload omitted archived_at")
+	}
+	if archivedAt != nil {
+		t.Fatalf("active task archived_at = %#v, want nil", archivedAt)
+	}
+}
+
 type failingTaskRepoRepository struct {
 	repository.TaskRepoRepository
 	err error

@@ -2,12 +2,14 @@
 
 import type { TaskPR } from "@/lib/types/github";
 import { TaskRowIndicator } from "./task-row-indicator";
+import { useTranslation } from "react-i18next";
 
 type PRRowTaskIndicatorProps = {
   tasks: TaskPR[] | undefined;
 };
 
 export function PRRowTaskIndicator({ tasks }: PRRowTaskIndicatorProps) {
+  const { t } = useTranslation();
   return (
     <TaskRowIndicator
       tasks={tasks?.map((task) => ({
@@ -16,7 +18,7 @@ export function PRRowTaskIndicator({ tasks }: PRRowTaskIndicatorProps) {
         fallbackTitle: task.pr_title,
       }))}
       testIdPrefix="pr-row-task-indicator"
-      emptyLabel="No task created yet"
+      emptyLabel={t("github:noTaskCreatedYet")}
     />
   );
 }

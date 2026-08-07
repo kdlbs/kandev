@@ -8,6 +8,7 @@ import { FilePathButton } from "./file-path-button";
 import type { Message } from "@/lib/types/http";
 import { ExpandableRow } from "./expandable-row";
 import { useExpandState } from "./use-expand-state";
+import { useTranslation } from "react-i18next";
 
 type CodeSearchOutput = {
   files?: string[];
@@ -59,6 +60,7 @@ type SearchResultsProps = {
 };
 
 function SearchResultFiles({ files, worktreePath, onOpenFile, truncated }: SearchResultsProps) {
+  const { t } = useTranslation();
   return (
     <div className="rounded-md border border-border/50 overflow-hidden bg-muted/20">
       <div className="text-xs space-y-0.5 max-h-[200px] overflow-y-auto p-1">
@@ -72,7 +74,7 @@ function SearchResultFiles({ files, worktreePath, onOpenFile, truncated }: Searc
           />
         ))}
         {truncated && (
-          <div className="text-amber-500/80 mt-1 px-2">...and more files (truncated)</div>
+          <div className="text-amber-500/80 mt-1 px-2">{t("task:andMoreFilesTruncated")}</div>
         )}
       </div>
     </div>

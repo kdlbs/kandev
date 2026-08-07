@@ -30,12 +30,15 @@ import { ArchiveConfirmationSettings } from "@/components/settings/archive-confi
 import { LanguageSettings } from "@/components/settings/language-settings";
 import { MCPTaskAgentProfileDefaultSettings } from "@/components/settings/mcp-task-agent-profile-default-settings";
 import { UnreadDividerSettings } from "@/components/settings/unread-divider-settings";
+import { AgentGeneratedTaskTitleSettings } from "@/components/settings/agent-generated-task-title-settings";
 import { AnchoredPromptBarSettings } from "@/components/settings/anchored-prompt-bar-settings";
 import { useSettingsSaveContributor } from "@/components/settings/settings-save-provider";
 import type { StoredShortcutOverrides } from "@/lib/keyboard/shortcut-overrides";
 import { buildPluginShortcutEntries } from "@/lib/keyboard/plugin-shortcuts";
 import { usePlugins } from "@/hooks/domains/plugins/use-plugins";
 import { StartupPageSettingsCard } from "@/components/settings/startup-page-settings-card";
+import { GENERAL_SETTINGS_TARGETS } from "@/lib/settings-discovery/catalog/general";
+import { SleepInhibitionSettings } from "@/components/settings/sleep-inhibition-settings";
 
 function ThemeSettingsCard({
   theme,
@@ -48,7 +51,11 @@ function ThemeSettingsCard({
 }) {
   const { t } = useTranslation();
   return (
-    <SettingsCard isDirty={isDirty} data-testid="theme-settings-card">
+    <SettingsCard
+      isDirty={isDirty}
+      discoveryTargetId={GENERAL_SETTINGS_TARGETS.colorTheme}
+      data-testid="theme-settings-card"
+    >
       <CardHeader>
         <CardTitle className="text-base">{t("settings:colorTheme")}</CardTitle>
       </CardHeader>
@@ -81,7 +88,11 @@ function ChatSubmitKeyCard({
 }) {
   const { t } = useTranslation();
   return (
-    <SettingsCard isDirty={isDirty} data-testid="chat-submit-key-card">
+    <SettingsCard
+      isDirty={isDirty}
+      discoveryTargetId={GENERAL_SETTINGS_TARGETS.submitShortcut}
+      data-testid="chat-submit-key-card"
+    >
       <CardHeader>
         <CardTitle className="text-base">{t("settings:submitShortcut")}</CardTitle>
       </CardHeader>
@@ -119,7 +130,11 @@ function ChangesPanelLayoutCard({
 }) {
   const { t } = useTranslation();
   return (
-    <SettingsCard isDirty={isDirty} data-testid="changes-panel-layout-card">
+    <SettingsCard
+      isDirty={isDirty}
+      discoveryTargetId={GENERAL_SETTINGS_TARGETS.changesPanelLayout}
+      data-testid="changes-panel-layout-card"
+    >
       <CardHeader>
         <CardTitle className="text-base">{t("settings:changesPanelLayout")}</CardTitle>
       </CardHeader>
@@ -249,8 +264,10 @@ export function TaskActionsSettings() {
       >
         <div className="space-y-4">
           <MCPTaskAgentProfileDefaultSettings />
+          <AgentGeneratedTaskTitleSettings />
           <ArchiveConfirmationSettings />
           <UnreadDividerSettings />
+          <SleepInhibitionSettings />
         </div>
       </SettingsSection>
 

@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -45,6 +46,12 @@ const createTablesSQL = `
 		repository_id TEXT NOT NULL DEFAULT '',
 		prompt TEXT DEFAULT '',
 		task_title_template TEXT DEFAULT '',
+		-- execution_mode is retained so existing rows need no migration. The
+		-- task/run choice is withdrawn: no firing path consults it. The one
+		-- surviving reader is the migration notice, which derives a single
+		-- boolean from it (see automationColumns). New rows are written with
+		-- an explicit '' — the 'task' DEFAULT below only ever describes rows
+		-- that predate the withdrawal.
 		execution_mode TEXT NOT NULL DEFAULT 'task',
 		enabled BOOLEAN DEFAULT 1,
 		max_concurrent_runs INTEGER DEFAULT 1,
@@ -82,6 +89,14 @@ const createTablesSQL = `
 
 	CREATE INDEX IF NOT EXISTS idx_automation_runs_automation ON automation_runs(automation_id);
 	CREATE INDEX IF NOT EXISTS idx_automation_runs_dedup ON automation_runs(automation_id, dedup_key);
+	CREATE INDEX IF NOT EXISTS idx_automation_runs_created_at ON automation_runs(created_at DESC);
+	-- The summary query asks each automation for its newest run, ordered by
+	-- (created_at, id) — the ordering every run query uses. Without the
+	-- composite the per-automation lookup sorts that automation's whole run
+	-- history, once per candidate row, which is quadratic in a workspace's run
+	-- count. /automations runs this on load and every poll while anything is
+	-- running, so the sort shows up as seconds of latency, not milliseconds.
+	CREATE INDEX IF NOT EXISTS idx_automation_runs_automation_created ON automation_runs(automation_id, created_at DESC, id DESC);
 
 	CREATE TABLE IF NOT EXISTS automation_repositories (
 		id TEXT PRIMARY KEY,
@@ -108,18 +123,35 @@ const createTablesSQL = `
 // this package doesn't have yet. Every query that scans a full Automation
 // row uses the explicit automationColumns list, which omits it, so its
 // continued presence in the table is inert.
+//
+// migrateExecutionModeSQL still runs because the notice derivation in
+// automationColumns needs the column to exist on every DB it queries,
+// including one initialised before the column was ever added.
 const (
 	migrateTaskTitleSQL     = `ALTER TABLE automations ADD COLUMN task_title_template TEXT DEFAULT ''`
 	migrateExecutionModeSQL = `ALTER TABLE automations ADD COLUMN execution_mode TEXT NOT NULL DEFAULT 'task'`
 	migrateRepositoryIDSQL  = `ALTER TABLE automations ADD COLUMN repository_id TEXT NOT NULL DEFAULT ''`
 )
 
-// automationColumns is the explicit column list for every query that scans
-// a full Automation row. Excludes the legacy repository_id column — see
-// the comment above migrateRepositoryIDSQL.
+// automationColumns is the explicit column list for every query that scans a
+// full Automation row. Spelled out rather than `SELECT *` because the table
+// carries columns the Automation struct does not: the legacy repository_id
+// (superseded by automation_repositories — see the comment above
+// migrateRepositoryIDSQL) and the withdrawn execution_mode, neither of which
+// sqlx could map. sqlx runs in safe mode, so a returned column with no struct
+// destination is a runtime error, not a compile-time one.
+//
+// execution_mode is read here, and only here, as the comparison
+// `execution_mode = 'task'` aliased to legacy_board_card. The raw value is
+// deliberately never selected: what the reader needs is the one bit "did this
+// automation used to put a card on the board", for a migration notice that
+// closes once. Projecting the mode itself would hand every future caller a
+// mode to branch on, and the whole point of withdrawing it is that no firing
+// path has one. See docs/specs/office/automations-settings.md § Migration.
 const automationColumns = `id, workspace_id, name, description, workflow_id, workflow_step_id,
-	agent_profile_id, executor_profile_id, prompt, task_title_template, execution_mode,
-	enabled, max_concurrent_runs, webhook_secret, last_triggered_at, created_at, updated_at`
+	agent_profile_id, executor_profile_id, prompt, task_title_template,
+	enabled, max_concurrent_runs, webhook_secret, last_triggered_at, created_at, updated_at,
+	execution_mode = 'task' AS legacy_board_card`
 
 func (s *Store) initSchema() error {
 	if _, err := s.db.Exec(createTablesSQL); err != nil {
@@ -190,25 +222,30 @@ func (s *Store) CreateAutomation(ctx context.Context, a *Automation) error {
 	now := time.Now().UTC()
 	a.CreatedAt = now
 	a.UpdatedAt = now
-	if a.ExecutionMode == "" {
-		a.ExecutionMode = ExecutionModeTask
-	}
 	tx, err := s.db.BeginTxx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
 
+	// execution_mode is written as the empty string rather than left to the
+	// column's DEFAULT. Nothing reads the mode to decide anything — but the
+	// DEFAULT is 'task', which is exactly the value the migration notice
+	// treats as "this automation used to put a card on the board". Letting
+	// the DEFAULT fill it would make every automation created from here on
+	// indistinguishable from a pre-upgrade one, and the one-time notice would
+	// never stop being true. Empty means "no mode was ever chosen", which is
+	// the honest record for a row created after the choice was withdrawn.
 	_, err = tx.ExecContext(ctx, `
 		INSERT INTO automations (id, workspace_id, name, description, workflow_id, workflow_step_id,
 			agent_profile_id, executor_profile_id,
 			prompt, task_title_template, execution_mode,
 			enabled, max_concurrent_runs,
 			webhook_secret, last_triggered_at, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', ?, ?, ?, ?, ?, ?)`,
 		a.ID, a.WorkspaceID, a.Name, a.Description, a.WorkflowID, a.WorkflowStepID,
 		a.AgentProfileID, a.ExecutorProfileID,
-		a.Prompt, a.TaskTitleTemplate, string(a.ExecutionMode),
+		a.Prompt, a.TaskTitleTemplate,
 		a.Enabled, a.MaxConcurrentRuns,
 		a.WebhookSecret, a.LastTriggeredAt, a.CreatedAt, a.UpdatedAt)
 	if err != nil {
@@ -292,6 +329,63 @@ func (s *Store) listRepositoryIDsForAutomations(ctx context.Context, automationI
 	return result, nil
 }
 
+// AgentProfileBinding names one automation bound to an agent profile.
+type AgentProfileBinding struct {
+	ID          string `db:"id"`
+	Name        string `db:"name"`
+	WorkspaceID string `db:"workspace_id"`
+}
+
+// ListEnabledByAgentProfile returns the enabled automations that would launch
+// against the given agent profile.
+//
+// Only enabled ones: a disabled automation is not going to fire, so naming it
+// as a reason you cannot delete a profile is noise. Triggers and repositories
+// are deliberately not hydrated — the caller wants identity, not the object.
+func (s *Store) ListEnabledByAgentProfile(ctx context.Context, agentProfileID string) ([]AgentProfileBinding, error) {
+	if agentProfileID == "" {
+		return nil, nil
+	}
+	var rows []AgentProfileBinding
+	err := s.ro.SelectContext(ctx, &rows, s.ro.Rebind(`
+		SELECT id, name, workspace_id FROM automations
+		WHERE agent_profile_id = ? AND enabled = 1
+		ORDER BY name
+	`), agentProfileID)
+	if err != nil {
+		return nil, err
+	}
+	return rows, nil
+}
+
+// DisableByAgentProfile turns off every enabled automation bound to the given
+// agent profile, returning the ones it disabled so the caller can report.
+//
+// Used when a profile is force-deleted: an automation left enabled would keep
+// firing on its schedule into a profile that no longer exists. Disabling rather
+// than deleting keeps the automation recoverable — the user picks a new profile
+// and toggles it back on.
+func (s *Store) DisableByAgentProfile(ctx context.Context, agentProfileID string) ([]AgentProfileBinding, error) {
+	if agentProfileID == "" {
+		return nil, nil
+	}
+	bindings, err := s.ListEnabledByAgentProfile(ctx, agentProfileID)
+	if err != nil {
+		return nil, err
+	}
+	if len(bindings) == 0 {
+		return nil, nil
+	}
+	_, err = s.db.ExecContext(ctx, s.db.Rebind(`
+		UPDATE automations SET enabled = 0, updated_at = ?
+		WHERE agent_profile_id = ? AND enabled = 1
+	`), time.Now().UTC(), agentProfileID)
+	if err != nil {
+		return nil, fmt.Errorf("disable automations for agent profile: %w", err)
+	}
+	return bindings, nil
+}
+
 // ListAutomations returns all automations for a workspace with triggers and
 // repository_ids hydrated.
 func (s *Store) ListAutomations(ctx context.Context, workspaceID string) ([]*Automation, error) {
@@ -365,12 +459,12 @@ func (s *Store) UpdateAutomation(ctx context.Context, id string, req *UpdateAuto
 		UPDATE automations SET name = ?, description = ?, workflow_id = ?, workflow_step_id = ?,
 			agent_profile_id = ?, executor_profile_id = ?,
 			prompt = ?, task_title_template = ?,
-			execution_mode = ?, enabled = ?, max_concurrent_runs = ?, updated_at = ?
+			enabled = ?, max_concurrent_runs = ?, updated_at = ?
 		WHERE id = ?`,
 		a.Name, a.Description, a.WorkflowID, a.WorkflowStepID,
 		a.AgentProfileID, a.ExecutorProfileID,
 		a.Prompt, a.TaskTitleTemplate,
-		string(a.ExecutionMode), a.Enabled, a.MaxConcurrentRuns, a.UpdatedAt, id)
+		a.Enabled, a.MaxConcurrentRuns, a.UpdatedAt, id)
 	if err != nil {
 		return err
 	}
@@ -416,12 +510,6 @@ func applyAutomationUpdate(a *Automation, req *UpdateAutomationRequest) {
 	if req.TaskTitleTemplate != nil {
 		a.TaskTitleTemplate = *req.TaskTitleTemplate
 	}
-	if req.ExecutionMode != nil {
-		a.ExecutionMode = *req.ExecutionMode
-	}
-	if !a.ExecutionMode.Valid() {
-		a.ExecutionMode = ExecutionModeTask
-	}
 }
 
 // DeleteAutomation removes an automation and its triggers/runs (CASCADE).
@@ -463,6 +551,20 @@ func (s *Store) GetTriggerAutomationID(ctx context.Context, triggerID string) (s
 	err := s.ro.GetContext(ctx, &automationID,
 		`SELECT automation_id FROM automation_triggers WHERE id = ?`, triggerID)
 	return automationID, err
+}
+
+// GetTrigger returns a single trigger, or nil when it no longer exists.
+func (s *Store) GetTrigger(ctx context.Context, id string) (*AutomationTrigger, error) {
+	var triggers []AutomationTrigger
+	if err := s.ro.SelectContext(ctx, &triggers,
+		`SELECT * FROM automation_triggers WHERE id = ?`, id); err != nil {
+		return nil, err
+	}
+	if len(triggers) == 0 {
+		return nil, nil
+	}
+	hydrateTriggers(triggers)
+	return &triggers[0], nil
 }
 
 // ListTriggers returns all triggers for an automation.
@@ -572,7 +674,7 @@ func (s *Store) CreateRun(ctx context.Context, r *AutomationRun) error {
 
 // MarkRunFailedByTaskID flips the most recent task_created run for a task
 // into the failed state. Used when a downstream condition (e.g. a permission
-// prompt that a run-mode automation can't answer) makes the run effectively
+// prompt an automation run can't answer) makes the run effectively
 // dead. No-op if no matching run is found.
 func (s *Store) MarkRunFailedByTaskID(ctx context.Context, taskID, errMsg string) error {
 	return s.updateRunTerminalStatus(ctx, taskID, RunStatusFailed, errMsg)
@@ -626,64 +728,277 @@ func (s *Store) ListRuns(ctx context.Context, automationID string, limit int) ([
 	return runs, nil
 }
 
-func (s *Store) listRunsWithTaskState(ctx context.Context, automationID string, limit int) ([]*AutomationRun, error) {
-	// Assumes a task_created run always carries a non-empty ar.task_id: the
-	// sole production write path (orchestrator's recordSuccessRun) sets
-	// TaskID and Status together in the same INSERT. If that's ever
-	// violated, the LEFT JOIN never matches an empty task_id against a
-	// real task row, so the run falls into the "no live task" branch below
-	// and displays as cancelled rather than its raw stored status —
-	// reachable today only through the e2e run-seeding endpoint, never in
-	// production.
-	//
-	// Three read-time overrides of a still-open task_created run, in
-	// priority order: (1) the task row is gone entirely — deleted, outcome
-	// unrecoverable — shown as cancelled; (2) the task was archived
-	// (archived_at set, via the UI or by the agent itself, e.g. an
-	// "archive this task" instruction) — shown as archived, which takes
-	// precedence over the session check below; (3) the task's current
-	// (is_primary) session is CANCELLED — set only when an agent run was
-	// manually stopped (coordinator/MCP stop_task, or the UI Stop button)
-	// — a deliberate cancellation, shown as cancelled. Task.state is
-	// deliberately NOT consulted here: stopping an agent leaves the task
-	// itself at whatever state the stop caller chose (e.g. REVIEW) and
-	// only ever marks the *session* CANCELLED — see
-	// orchestrator.handleAgentStopped's "we do NOT update task state
-	// here" note. Filtering on is_primary picks the task's current
-	// session, so a resumed-and-completed task isn't misclassified by a
-	// stale cancelled session left over from an earlier stop. EXISTS
-	// (rather than a LEFT JOIN) keeps the query correct even if the
-	// "at most one is_primary=1 row per task" invariant is ever violated
-	// — a join would fan out and duplicate the run.
-	var runs []*AutomationRun
-	err := s.ro.SelectContext(ctx, &runs, `
-		SELECT ar.id, ar.automation_id, ar.trigger_id, ar.trigger_type, ar.task_id,
-			CASE
-				WHEN ar.status = ? AND t.id IS NULL THEN ?
-				WHEN ar.status = ? AND t.archived_at IS NOT NULL THEN ?
-				WHEN ar.status = ? AND EXISTS (
-					SELECT 1 FROM task_sessions ts
-					WHERE ts.task_id = ar.task_id AND ts.is_primary = 1 AND ts.state = ?
-				) THEN ?
-				ELSE ar.status
-			END AS status,
-			ar.dedup_key, ar.trigger_data, ar.error_message, ar.created_at
-		FROM automation_runs ar
-		LEFT JOIN tasks t ON t.id = ar.task_id
-		WHERE ar.automation_id = ?
-		ORDER BY ar.created_at DESC LIMIT ?`,
+// runTaskStateColumnsSQL is the read-time projection of a run, shared
+// verbatim by the per-automation and workspace-wide list queries. It is a
+// const rather than duplicated SQL because the status derivation below is
+// the app's definition of what a run's status *means* to a reader: two
+// copies would drift, and the same run would then report one status on the
+// automation's settings page and another in the workspace feed. Assumes
+// the caller aliases automation_runs as ar and LEFT JOINs tasks as t, and
+// binds runTaskStateArgs() ahead of its own WHERE/LIMIT parameters.
+//
+// Assumes a task_created run always carries a non-empty ar.task_id: the
+// sole production write path (orchestrator's recordSuccessRun) sets TaskID
+// and Status together in the same INSERT. If that's ever violated, the
+// LEFT JOIN never matches an empty task_id against a real task row, so the
+// run falls into the "no live task" branch below and displays as cancelled
+// rather than its raw stored status — reachable today only through the e2e
+// run-seeding endpoint, never in production.
+//
+// Three read-time overrides of a still-open task_created run, in priority
+// order: (1) the task row is gone entirely — deleted, outcome
+// unrecoverable — shown as cancelled; (2) the task was archived
+// (archived_at set, via the UI or by the agent itself, e.g. an "archive
+// this task" instruction) — shown as archived, which takes precedence over
+// the session check below; (3) the task's current (is_primary) session is
+// CANCELLED — set only when an agent run was manually stopped
+// (coordinator/MCP stop_task, or the UI Stop button) — a deliberate
+// cancellation, shown as cancelled. Task.state is deliberately NOT
+// consulted here: stopping an agent leaves the task itself at whatever
+// state the stop caller chose (e.g. REVIEW) and only ever marks the
+// *session* CANCELLED — see orchestrator.handleAgentStopped's "we do NOT
+// update task state here" note. Filtering on is_primary picks the task's
+// current session, so a resumed-and-completed task isn't misclassified by
+// a stale cancelled session left over from an earlier stop. EXISTS (rather
+// than a LEFT JOIN) keeps the query correct even if the "at most one
+// is_primary=1 row per task" invariant is ever violated — a join would fan
+// out and duplicate the run.
+const runTaskStateColumnsSQL = `
+		ar.id, ar.automation_id, ar.trigger_id, ar.trigger_type,
+		-- A run keeps its task_id after the task row is deleted, which reads as a
+		-- transcript that can still be opened. Report no task rather than a link
+		-- that dead-ends; the derived cancelled status below already says why.
+		CASE WHEN t.id IS NULL THEN '' ELSE ar.task_id END AS task_id,
+		CASE
+			WHEN ar.status = ? AND t.id IS NULL THEN ?
+			WHEN ar.status = ? AND t.archived_at IS NOT NULL THEN ?
+			WHEN ar.status = ? AND EXISTS (
+				SELECT 1 FROM task_sessions ts
+				WHERE ts.task_id = ar.task_id AND ts.is_primary = 1 AND ts.state = ?
+			) THEN ?
+			ELSE ar.status
+		END AS status,
+		ar.dedup_key, ar.trigger_data, ar.error_message, ar.created_at,
+		COALESCE((
+			SELECT substr(m.content, 1, 280) FROM task_session_messages m
+			WHERE m.task_id = ar.task_id
+				AND m.author_type = 'agent'
+				AND m.type = 'message'
+			ORDER BY m.created_at DESC, m.id DESC LIMIT 1
+		), '') AS summary,
+		-- The run's conversation. The detail view reads the transcript in place
+		-- rather than sending the reader to the task page, and the chat panel is
+		-- driven by a session id, not a task id — resolving it here keeps that
+		-- one query instead of one per run on the client.
+		COALESCE((
+			SELECT ts.id FROM task_sessions ts
+			WHERE ts.task_id = ar.task_id AND ts.is_primary = 1
+			LIMIT 1
+		), '') AS session_id`
+
+// runTaskStateArgs binds the placeholders in runTaskStateColumnsSQL, in
+// order. Kept next to the SQL so a new WHEN can't be added without the
+// matching argument being obvious.
+func runTaskStateArgs() []any {
+	return []any{
 		string(RunStatusTaskCreated), string(RunStatusCancelled),
 		string(RunStatusTaskCreated), string(RunStatusArchived),
 		string(RunStatusTaskCreated), string(taskmodels.TaskSessionStateCancelled), string(RunStatusCancelled),
-		automationID, limit)
+	}
+}
+
+func (s *Store) listRunsWithTaskState(ctx context.Context, automationID string, limit int) ([]*AutomationRun, error) {
+	var runs []*AutomationRun
+	err := s.ro.SelectContext(ctx, &runs, `
+		SELECT`+runTaskStateColumnsSQL+`
+		FROM automation_runs ar
+		LEFT JOIN tasks t ON t.id = ar.task_id
+		WHERE ar.automation_id = ?
+		ORDER BY `+runOrderSQL("ar")+` LIMIT ?`,
+		append(runTaskStateArgs(), automationID, limit)...)
 	return runs, err
 }
 
 func (s *Store) listRunsRaw(ctx context.Context, automationID string, limit int) ([]*AutomationRun, error) {
 	var runs []*AutomationRun
 	err := s.ro.SelectContext(ctx, &runs,
-		`SELECT * FROM automation_runs WHERE automation_id = ? ORDER BY created_at DESC LIMIT ?`,
+		`SELECT * FROM automation_runs WHERE automation_id = ? ORDER BY created_at DESC, id DESC LIMIT ?`,
 		automationID, limit)
+	return runs, err
+}
+
+// maxWorkspaceRunsLimit caps the workspace-wide feed. Unlike ListRuns, which
+// is scoped to one automation the user is already looking at, this query
+// spans every automation in the workspace — an uncapped limit would let a
+// single client pull the entire run history over the socket.
+const maxWorkspaceRunsLimit = 200
+
+// ListWorkspaceRuns returns recent runs across every automation in a
+// workspace, newest first, each attributed to its automation. Status
+// derivation and summary are identical to ListRuns — same
+// runTaskStateColumnsSQL — so a run reads the same way in the workspace
+// feed as it does on its own automation's page. Falls back to raw stored
+// status when the tasks table isn't present, for the same reason ListRuns
+// does (isolated automation-only tests; production always has it).
+func (s *Store) ListWorkspaceRuns(ctx context.Context, workspaceID string, limit int) ([]*WorkspaceAutomationRun, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	if limit > maxWorkspaceRunsLimit {
+		limit = maxWorkspaceRunsLimit
+	}
+	runs, err := s.listWorkspaceRunsWithTaskState(ctx, workspaceID, limit)
+	if db.IsMissingTableError(err) {
+		runs, err = s.listWorkspaceRunsRaw(ctx, workspaceID, limit)
+	}
+	if err != nil {
+		return nil, err
+	}
+	for _, r := range runs {
+		r.TriggerData = json.RawMessage(r.TriggerDataJSON)
+	}
+	return runs, nil
+}
+
+func (s *Store) listWorkspaceRunsWithTaskState(ctx context.Context, workspaceID string, limit int) ([]*WorkspaceAutomationRun, error) {
+	// The automations join is an INNER join, not a LEFT one: a run whose
+	// automation is gone can't be attributed to anything the reader can
+	// open, and the ON DELETE CASCADE means it shouldn't exist anyway.
+	var runs []*WorkspaceAutomationRun
+	err := s.ro.SelectContext(ctx, &runs, `
+		SELECT`+runTaskStateColumnsSQL+`,
+			a.name AS automation_name
+		FROM automation_runs ar
+		JOIN automations a ON a.id = ar.automation_id
+		LEFT JOIN tasks t ON t.id = ar.task_id
+		WHERE a.workspace_id = ?
+		ORDER BY `+runOrderSQL("ar")+` LIMIT ?`,
+		append(runTaskStateArgs(), workspaceID, limit)...)
+	return runs, err
+}
+
+// ListAutomationSummaries returns one row per automation in a workspace that
+// has ever run: its newest run and how many of its runs are still open.
+//
+// The runs list used to derive both by scanning the workspace feed, which is
+// capped. Past the cap an automation's newest run falls out of the window and
+// its row reports "No runs yet" and idle — the two things a health indicator
+// must never get wrong — and the open count backing "won't fire: still
+// running" silently drops to zero. Answering per automation makes the row's
+// claims independent of how noisy its neighbours are.
+func (s *Store) ListAutomationSummaries(ctx context.Context, workspaceID string) ([]*AutomationSummary, error) {
+	return s.listSummaries(ctx, "a.workspace_id = ?", workspaceID)
+}
+
+// GetAutomationSummary returns one automation's summary, or nil if it has never
+// run. The detail page needs the same authoritative open count the list uses:
+// its own run window is capped too, so an open run older than the window would
+// otherwise leave the page reporting that nothing is in flight.
+func (s *Store) GetAutomationSummary(ctx context.Context, automationID string) (*AutomationSummary, error) {
+	summaries, err := s.listSummaries(ctx, "ar.automation_id = ?", automationID)
+	if err != nil || len(summaries) == 0 {
+		return nil, err
+	}
+	return summaries[0], nil
+}
+
+// listSummaries answers both facts in ONE statement.
+//
+// Two queries would be two snapshots: a run created between them reads as
+// `last_run = task_created` with `open_runs = 0`, so the row renders idle and
+// the client never starts polling — permanently stale until a manual refresh.
+// The open count is a correlated subquery over the same automation, which also
+// means an automation with an open run always has a latest run, so no second
+// pass is needed to invent rows for counts without runs.
+func (s *Store) listSummaries(ctx context.Context, scope string, arg any) ([]*AutomationSummary, error) {
+	rows, err := s.selectSummaries(ctx, scope, arg)
+	if db.IsMissingTableError(err) {
+		rows, err = s.selectSummariesRaw(ctx, scope, arg)
+	}
+	if err != nil {
+		return nil, err
+	}
+	summaries := make([]*AutomationSummary, 0, len(rows))
+	for _, row := range rows {
+		run := row.AutomationRun
+		run.TriggerData = json.RawMessage(run.TriggerDataJSON)
+		summaries = append(summaries, &AutomationSummary{
+			AutomationID: run.AutomationID,
+			OpenRuns:     row.OpenRuns,
+			LastRun:      &run,
+		})
+	}
+	return summaries, nil
+}
+
+// summaryRow is the wire shape of the single summary query: a run plus its
+// automation's open count.
+type summaryRow struct {
+	AutomationRun
+	OpenRuns int `db:"open_runs"`
+}
+
+// openRunsSubquerySQL counts an automation's outstanding runs alongside its
+// latest one. Aliased aro/tro so it can nest inside a query that already uses
+// ar/t, and it binds openRunArgs() like every other user of the predicate.
+var openRunsSubquerySQL = `(
+			SELECT COUNT(*) FROM automation_runs aro
+			LEFT JOIN tasks tro ON tro.id = aro.task_id
+			WHERE aro.automation_id = ar.automation_id AND ` + openRunPredicateAliased("aro", "tro") + `
+		) AS open_runs`
+
+// latestRunPerAutomationSQL picks each automation's newest run by the same
+// ordering every other run query uses (created_at then id), so "the newest run"
+// means the row that leads the feed rather than an arbitrary tie-break.
+var latestRunPerAutomationSQL = `ar.id = (
+			SELECT ar2.id FROM automation_runs ar2
+			WHERE ar2.automation_id = ar.automation_id
+			ORDER BY ` + runOrderSQL("ar2") + ` LIMIT 1
+		)`
+
+func (s *Store) selectSummaries(ctx context.Context, scope string, arg any) ([]summaryRow, error) {
+	var rows []summaryRow
+	args := runTaskStateArgs()
+	args = append(args, openRunArgs()...)
+	args = append(args, arg)
+	err := s.ro.SelectContext(ctx, &rows, `
+		SELECT`+runTaskStateColumnsSQL+`,
+			`+openRunsSubquerySQL+`
+		FROM automation_runs ar
+		JOIN automations a ON a.id = ar.automation_id
+		LEFT JOIN tasks t ON t.id = ar.task_id
+		WHERE `+scope+` AND `+latestRunPerAutomationSQL,
+		args...)
+	return rows, err
+}
+
+// selectSummariesRaw is the no-tasks-table fallback the run lists also carry
+// (isolated automation-only tests; production always has the table). Without
+// tasks there is nothing to derive from, so the stored status stands and the
+// open count is a plain status match.
+func (s *Store) selectSummariesRaw(ctx context.Context, scope string, arg any) ([]summaryRow, error) {
+	var rows []summaryRow
+	err := s.ro.SelectContext(ctx, &rows, `
+		SELECT ar.*, (
+			SELECT COUNT(*) FROM automation_runs aro
+			WHERE aro.automation_id = ar.automation_id AND aro.status = ?
+		) AS open_runs
+		FROM automation_runs ar
+		JOIN automations a ON a.id = ar.automation_id
+		WHERE `+scope+` AND `+latestRunPerAutomationSQL,
+		string(RunStatusTaskCreated), arg)
+	return rows, err
+}
+
+func (s *Store) listWorkspaceRunsRaw(ctx context.Context, workspaceID string, limit int) ([]*WorkspaceAutomationRun, error) {
+	var runs []*WorkspaceAutomationRun
+	err := s.ro.SelectContext(ctx, &runs, `
+		SELECT ar.*, a.name AS automation_name
+		FROM automation_runs ar
+		JOIN automations a ON a.id = ar.automation_id
+		WHERE a.workspace_id = ?
+		ORDER BY `+runOrderSQL("ar")+` LIMIT ?`,
+		workspaceID, limit)
 	return runs, err
 }
 
@@ -714,24 +1029,55 @@ func (s *Store) CountActiveRuns(ctx context.Context, automationID string) (int, 
 	return count, err
 }
 
+// openRunPredicateSQL is what "this run is still outstanding" means, shared by
+// the concurrency-cap count and the per-automation summary the runs list reads.
+// One definition, for the same reason runTaskStateColumnsSQL is one: the cap
+// deciding a run is open while the list shows the automation idle is a
+// contradiction the user cannot resolve from the screen. Assumes automation_runs
+// aliased ar with tasks LEFT JOINed as t, and binds two arguments —
+// RunStatusTaskCreated and the cancelled session state.
+//
+// Same non-empty-task_id assumption as listRunsWithTaskState: an empty
+// ar.task_id never matches a real task row, so such a run falls out of the
+// open set instead of erroring. See listRunsWithTaskState for why the current
+// (is_primary) session's state, not the task's own state, is the cancellation
+// signal, and why NOT EXISTS rather than a LEFT JOIN.
+const openRunPredicateSQL = `ar.status = ?
+		AND t.id IS NOT NULL AND t.archived_at IS NULL
+		AND NOT EXISTS (
+			SELECT 1 FROM task_sessions ts
+			WHERE ts.task_id = ar.task_id AND ts.is_primary = 1 AND ts.state = ?
+		)`
+
+// openRunPredicateAliased is the same predicate under different table aliases,
+// for the summary query where it nests inside a statement already using ar/t.
+// Derived from openRunPredicateSQL rather than written twice so the definition
+// of "open" stays in one place.
+func openRunPredicateAliased(runAlias, taskAlias string) string {
+	replaced := strings.ReplaceAll(openRunPredicateSQL, "ar.", runAlias+".")
+	return strings.ReplaceAll(replaced, "t.", taskAlias+".")
+}
+
+// runOrderSQL is how every run query orders: newest first, with the id breaking
+// ties. Without the tie-break two runs written in the same second can order one
+// way in the feed and the other way in the summary, so the list's "last said"
+// would disagree with the entry that leads the automation's own activity.
+func runOrderSQL(alias string) string {
+	return alias + ".created_at DESC, " + alias + ".id DESC"
+}
+
+// openRunArgs binds openRunPredicateSQL's placeholders, in order.
+func openRunArgs() []any {
+	return []any{string(RunStatusTaskCreated), string(taskmodels.TaskSessionStateCancelled)}
+}
+
 func (s *Store) countActiveRunsWithTaskState(ctx context.Context, automationID string) (int, error) {
-	// Same non-empty-task_id assumption as listRunsWithTaskState above: an
-	// empty ar.task_id never matches a real task row either, so such a run
-	// silently falls out of the active count below instead of erroring.
-	// See listRunsWithTaskState for why the current (is_primary) session's
-	// state, not the task's own state, is the cancellation signal, and why
-	// NOT EXISTS rather than a LEFT JOIN.
 	var count int
 	err := s.ro.GetContext(ctx, &count, `
 		SELECT COUNT(*) FROM automation_runs ar
 		LEFT JOIN tasks t ON t.id = ar.task_id
-		WHERE ar.automation_id = ? AND ar.status = ?
-			AND t.id IS NOT NULL AND t.archived_at IS NULL
-			AND NOT EXISTS (
-				SELECT 1 FROM task_sessions ts
-				WHERE ts.task_id = ar.task_id AND ts.is_primary = 1 AND ts.state = ?
-			)`,
-		automationID, string(RunStatusTaskCreated), string(taskmodels.TaskSessionStateCancelled))
+		WHERE ar.automation_id = ? AND `+openRunPredicateSQL,
+		append([]any{automationID}, openRunArgs()...)...)
 	return count, err
 }
 

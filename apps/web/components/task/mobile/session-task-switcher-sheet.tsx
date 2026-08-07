@@ -1,12 +1,13 @@
 "use client";
 
 import { useCallback, useMemo, useState, memo } from "react";
+import { useTranslation } from "react-i18next";
 import { IconMessageCircle, IconPlus } from "@tabler/icons-react";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@kandev/ui/sheet";
 import { Drawer, DrawerContent, DrawerHeader, DrawerTitle } from "@kandev/ui/drawer";
 import { Button } from "@kandev/ui/button";
 import { TaskSwitcher } from "../task-switcher";
-import type { TaskSwitcherItem } from "../task-switcher";
+import type { TaskSwitcherItem, TaskSwitcherProps } from "../task-switcher";
 import { SidebarFilterBar } from "../sidebar-filter/sidebar-filter-bar";
 import type { StepDef } from "../task-switcher-context-menu";
 import type { TaskMoveWorkflow } from "../task-move-context-menu";
@@ -28,6 +29,7 @@ import { useSidebarTaskLinking } from "../task-session-sidebar-task-linking";
 import { useSheetData, useSheetActions } from "./session-task-switcher-sheet-hooks";
 import { useQuickChatLauncher } from "@/hooks/use-quick-chat-launcher";
 import { useMobileTaskRename } from "./use-mobile-task-rename";
+import { SidebarTaskEditDialog, useSidebarTaskEdit } from "../task-session-sidebar-edit";
 
 type SessionTaskSwitcherSheetProps = {
   open: boolean;
@@ -50,38 +52,28 @@ function useMobileTaskLinking(workspaceId: string | null) {
   };
 }
 
-export function MobileTaskList({
-  tasks,
-  workflows,
-  stepsByWorkflowId,
-  activeTaskId,
-  selectedTaskId,
-  onSelectTask,
-  onRenameTask,
-  onCreateSubtask,
-  onArchiveTask,
-  onDeleteTask,
-  onDetachTask,
-  onLinkPullRequest,
-  onLinkIssue,
-  onLinkMergeRequest,
-  onLinkJiraTicket,
-  onLinkLinearIssue,
-  onLinkSentryIssue,
-  deletingTaskId,
-  isLoading,
-}: {
+function useSidebarGroupToggle(viewId: string) {
+  const toggleSidebarGroupCollapsed = useAppStore((s) => s.toggleSidebarGroupCollapsed);
+  return useCallback(
+    (groupKey: string) => toggleSidebarGroupCollapsed(viewId, groupKey),
+    [toggleSidebarGroupCollapsed, viewId],
+  );
+}
+
+type MobileTaskListProps = {
   tasks: TaskSwitcherItem[];
   workflows: TaskMoveWorkflow[];
   stepsByWorkflowId: Record<string, StepDef[]>;
   activeTaskId: string | null;
   selectedTaskId: string | null;
   onSelectTask: (taskId: string) => void;
+  onEditTask?: (task: TaskSwitcherItem) => void;
   onRenameTask?: (taskId: string, currentTitle: string) => void;
   onCreateSubtask?: (taskId: string, taskTitle: string) => void;
   onArchiveTask: (taskId: string) => void;
   onDeleteTask: (taskId: string) => Promise<void> | void;
   onDetachTask: (taskId: string) => Promise<void> | void;
+  onNestTask?: (taskId: string, parentTaskId: string) => void;
   onLinkPullRequest?: (taskId: string, taskTitle?: string) => void;
   onLinkIssue?: (taskId: string, taskTitle?: string) => void;
   onLinkMergeRequest?: (taskId: string, taskTitle?: string) => void;
@@ -90,7 +82,72 @@ export function MobileTaskList({
   onLinkSentryIssue?: (taskId: string, taskTitle?: string) => void;
   deletingTaskId: string | null;
   isLoading?: boolean;
-}) {
+  loadError?: string | null;
+  onRetryLoad?: () => void;
+  retryLabel?: string;
+};
+
+/**
+ * Assembles the TaskSwitcher props for the mobile task list, mirroring the
+ * desktop `buildTaskSwitcherProps` so the prop-forwarding surface stays a
+ * thin mapping layer.
+ */
+function buildMobileTaskSwitcherProps(
+  props: MobileTaskListProps,
+  helpers: {
+    grouped: TaskSwitcherProps["grouped"];
+    collapsedGroupKeys: string[];
+    onToggleGroup: (groupKey: string) => void;
+    collapsedSubtaskParentIds: string[];
+    onToggleSubtasks: (parentTaskId: string) => void;
+    onTogglePin: (taskId: string) => void;
+    onReorderGroup: (groupTaskIds: string[]) => void;
+    onReorderSubtasks: (parentTaskId: string, orderedSubtaskIds: string[]) => void;
+    pinnedTaskIds: string[];
+  },
+): TaskSwitcherProps {
+  return {
+    grouped: helpers.grouped,
+    workflows: props.workflows,
+    stepsByWorkflowId: props.stepsByWorkflowId,
+    activeTaskId: props.activeTaskId,
+    selectedTaskId: props.selectedTaskId,
+    collapsedGroupKeys: helpers.collapsedGroupKeys,
+    onToggleGroup: helpers.onToggleGroup,
+    collapsedSubtaskParentIds: helpers.collapsedSubtaskParentIds,
+    onToggleSubtasks: helpers.onToggleSubtasks,
+    onSelectTask: props.onSelectTask,
+    onEditTask: props.onEditTask,
+    onRenameTask: props.onRenameTask,
+    onCreateSubtask: props.onCreateSubtask,
+    onArchiveTask: props.onArchiveTask,
+    onDeleteTask: props.onDeleteTask,
+    onDetachTask: props.onDetachTask,
+    onNestTask: props.onNestTask,
+    onLinkPullRequest: props.onLinkPullRequest,
+    onLinkIssue: props.onLinkIssue,
+    onLinkMergeRequest: props.onLinkMergeRequest,
+    onLinkJiraTicket: props.onLinkJiraTicket,
+    onLinkLinearIssue: props.onLinkLinearIssue,
+    onLinkSentryIssue: props.onLinkSentryIssue,
+    onTogglePin: helpers.onTogglePin,
+    onReorderGroup: helpers.onReorderGroup,
+    onReorderSubtasks: helpers.onReorderSubtasks,
+    pinnedTaskIds: helpers.pinnedTaskIds,
+    deletingTaskId: props.deletingTaskId,
+    isLoading: props.isLoading,
+    loadError: props.loadError,
+    onRetryLoad: props.onRetryLoad,
+    retryLabel: props.retryLabel,
+    totalTaskCount: props.tasks.length,
+  };
+}
+
+/**
+ * The mobile task tree surface: renders the shared TaskSwitcher with the
+ * mobile drawer's view state (grouping, ordering, collapse, reorder, nest).
+ */
+export function MobileTaskList(props: MobileTaskListProps) {
   const view = useEffectiveSidebarView();
   const {
     pinnedTaskIds,
@@ -100,54 +157,32 @@ export function MobileTaskList({
     handleReorderGroup,
     handleReorderSubtasks,
   } = useSidebarTaskPrefs();
-  const toggleSidebarGroupCollapsed = useAppStore((s) => s.toggleSidebarGroupCollapsed);
   const collapsedSubtaskParents = useAppStore((s) => s.collapsedSubtaskParents);
   const toggleSubtaskCollapsed = useAppStore((s) => s.toggleSubtaskCollapsed);
-  const handleToggleGroup = useCallback(
-    (groupKey: string) => toggleSidebarGroupCollapsed(view.id, groupKey),
-    [toggleSidebarGroupCollapsed, view.id],
-  );
+  const handleToggleGroup = useSidebarGroupToggle(view.id);
+  // See useGroupedSidebarView: the executorType group label is catalog-backed.
+  const { i18n } = useTranslation();
   const grouped = useMemo(
     () =>
-      applyView(tasks, view, {
+      applyView(props.tasks, view, {
         pinnedTaskIds,
         orderedTaskIds,
         subtaskOrderByParentId,
       }),
-    [tasks, view, pinnedTaskIds, orderedTaskIds, subtaskOrderByParentId],
+    [props.tasks, view, pinnedTaskIds, orderedTaskIds, subtaskOrderByParentId, i18n.language],
   );
-  return (
-    <TaskSwitcher
-      grouped={grouped}
-      workflows={workflows}
-      stepsByWorkflowId={stepsByWorkflowId}
-      activeTaskId={activeTaskId}
-      selectedTaskId={selectedTaskId}
-      collapsedGroupKeys={view.collapsedGroups}
-      onToggleGroup={handleToggleGroup}
-      collapsedSubtaskParentIds={collapsedSubtaskParents}
-      onToggleSubtasks={toggleSubtaskCollapsed}
-      onSelectTask={onSelectTask}
-      onRenameTask={onRenameTask}
-      onCreateSubtask={onCreateSubtask}
-      onArchiveTask={onArchiveTask}
-      onDeleteTask={onDeleteTask}
-      onDetachTask={onDetachTask}
-      onLinkPullRequest={onLinkPullRequest}
-      onLinkIssue={onLinkIssue}
-      onLinkMergeRequest={onLinkMergeRequest}
-      onLinkJiraTicket={onLinkJiraTicket}
-      onLinkLinearIssue={onLinkLinearIssue}
-      onLinkSentryIssue={onLinkSentryIssue}
-      onTogglePin={togglePinnedTask}
-      onReorderGroup={handleReorderGroup}
-      onReorderSubtasks={handleReorderSubtasks}
-      pinnedTaskIds={pinnedTaskIds}
-      deletingTaskId={deletingTaskId}
-      isLoading={isLoading}
-      totalTaskCount={tasks.length}
-    />
-  );
+  const switcherProps = buildMobileTaskSwitcherProps(props, {
+    grouped,
+    collapsedGroupKeys: view.collapsedGroups,
+    onToggleGroup: handleToggleGroup,
+    collapsedSubtaskParentIds: collapsedSubtaskParents,
+    onToggleSubtasks: toggleSubtaskCollapsed,
+    onTogglePin: togglePinnedTask,
+    onReorderGroup: handleReorderGroup,
+    onReorderSubtasks: handleReorderSubtasks,
+    pinnedTaskIds,
+  });
+  return <TaskSwitcher {...switcherProps} />;
 }
 
 function TaskSwitcherSurfaceHeader({
@@ -165,13 +200,14 @@ function TaskSwitcherSurfaceHeader({
   onNewTask: () => void;
   presentation: "sheet" | "drawer";
 }) {
+  const { t } = useTranslation();
   const content = (
     <>
       <div className="flex items-center justify-between">
         {presentation === "drawer" ? (
-          <DrawerTitle className="text-base">Tasks</DrawerTitle>
+          <DrawerTitle className="text-base">{t("task:tasks")}</DrawerTitle>
         ) : (
-          <SheetTitle className="text-base">Tasks</SheetTitle>
+          <SheetTitle className="text-base">{t("task:tasks")}</SheetTitle>
         )}
         <div className="flex items-center gap-2">
           {workspaceId && (
@@ -183,7 +219,7 @@ function TaskSwitcherSurfaceHeader({
               data-testid="mobile-sheet-quick-chat"
             >
               <IconMessageCircle className="h-4 w-4" />
-              Chat
+              {t("task:chat")}
             </Button>
           )}
           <Button
@@ -193,7 +229,7 @@ function TaskSwitcherSurfaceHeader({
             onClick={onNewTask}
           >
             <IconPlus className="h-4 w-4" />
-            New
+            {t("task:new")}
           </Button>
         </div>
       </div>
@@ -248,6 +284,7 @@ type TaskSwitcherSurfaceContentProps = {
   data: ReturnType<typeof useSheetData>;
   actions: ReturnType<typeof useSheetActions>;
   rename: ReturnType<typeof useMobileTaskRename>;
+  edit: ReturnType<typeof useSidebarTaskEdit>;
   linking: ReturnType<typeof useMobileTaskLinking>;
 };
 
@@ -280,8 +317,10 @@ function TaskSwitcherSurfaceContent({
   data,
   actions,
   rename,
+  edit,
   linking,
 }: TaskSwitcherSurfaceContentProps) {
+  const { t } = useTranslation();
   return (
     <>
       <TaskSwitcherSurfaceHeader
@@ -295,7 +334,7 @@ function TaskSwitcherSurfaceContent({
       <div className="shrink-0">
         <SidebarFilterBar />
       </div>
-      <div className="flex-1 min-h-0 overflow-y-auto p-2">
+      <div className="flex-1 min-h-0 overflow-y-auto p-2" data-testid="mobile-task-switcher-list">
         <MobileTaskList
           tasks={data.tasksWithRepositories}
           workflows={data.workflows}
@@ -303,11 +342,13 @@ function TaskSwitcherSurfaceContent({
           activeTaskId={data.activeTaskId}
           selectedTaskId={data.selectedTaskId}
           onSelectTask={actions.handleSelectTask}
+          onEditTask={surfaceAction(presentation, onOpenChange, edit.handleEditTask)}
           onRenameTask={surfaceAction(presentation, onOpenChange, rename.handleRenameTask)}
           onCreateSubtask={onCreateSubtask}
           onArchiveTask={surfaceAction(presentation, onOpenChange, actions.handleArchiveTask)}
           onDeleteTask={surfaceAction(presentation, onOpenChange, actions.handleDeleteTask)}
           onDetachTask={surfaceAction(presentation, onOpenChange, actions.handleDetachTask)}
+          onNestTask={actions.handleNestTask}
           onLinkPullRequest={surfaceAction(
             presentation,
             onOpenChange,
@@ -340,6 +381,9 @@ function TaskSwitcherSurfaceContent({
           )}
           deletingTaskId={actions.deletingTaskId}
           isLoading={data.tasksLoading}
+          loadError={data.archivedError ? t("sidebar:archivedLoadFailed") : null}
+          onRetryLoad={data.retryArchivedTasks}
+          retryLabel={t("sidebar:retry")}
         />
       </div>
     </>
@@ -354,6 +398,7 @@ function TaskSwitcherDialogs({
   data,
   actions,
   rename,
+  edit,
   linking,
   subtaskTarget,
   onSubtaskTargetChange,
@@ -365,6 +410,7 @@ function TaskSwitcherDialogs({
   data: ReturnType<typeof useSheetData>;
   actions: ReturnType<typeof useSheetActions>;
   rename: ReturnType<typeof useMobileTaskRename>;
+  edit: ReturnType<typeof useSidebarTaskEdit>;
   linking: ReturnType<typeof useMobileTaskLinking>;
   subtaskTarget: { id: string; title: string } | null;
   onSubtaskTargetChange: (target: { id: string; title: string } | null) => void;
@@ -382,6 +428,12 @@ function TaskSwitcherDialogs({
         onSuccess={actions.handleTaskCreated}
       />
       <MobileSubtaskDialog target={subtaskTarget} onTargetChange={onSubtaskTargetChange} />
+      <SidebarTaskEditDialog
+        target={edit.editingTask}
+        onTargetChange={edit.setEditingTask}
+        workspaceId={workspaceId}
+        stepsByWorkflowId={data.stepsByWorkflowId}
+      />
       <TaskArchiveConfirmDialog
         open={actions.archivingTask !== null}
         onOpenChange={(open) => {
@@ -439,6 +491,7 @@ export const SessionTaskSwitcherSheet = memo(function SessionTaskSwitcherSheet({
   const data = useSheetData(workspaceId);
   const actions = useSheetActions(workspaceId, onOpenChange);
   const rename = useMobileTaskRename();
+  const edit = useSidebarTaskEdit();
   const linking = useMobileTaskLinking(workspaceId);
   const openQuickChat = useQuickChatLauncher(workspaceId);
   const handleQuickChat = useCallback(() => {
@@ -467,6 +520,7 @@ export const SessionTaskSwitcherSheet = memo(function SessionTaskSwitcherSheet({
       data={data}
       actions={actions}
       rename={rename}
+      edit={edit}
       linking={linking}
     />
   );
@@ -501,6 +555,7 @@ export const SessionTaskSwitcherSheet = memo(function SessionTaskSwitcherSheet({
         data={data}
         actions={actions}
         rename={rename}
+        edit={edit}
         linking={linking}
         subtaskTarget={subtaskTarget}
         onSubtaskTargetChange={setSubtaskTarget}

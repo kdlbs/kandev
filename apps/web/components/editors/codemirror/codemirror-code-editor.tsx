@@ -33,6 +33,7 @@ import {
   revealCodeMirrorCursor,
   revealPendingCodeMirrorCursor,
 } from "./codemirror-cursor-navigation";
+import { useTranslation } from "react-i18next";
 
 const SAVE_SHORTCUT =
   typeof navigator !== "undefined" && navigator.platform.includes("Mac") ? "\u2318" : "Ctrl";
@@ -67,14 +68,13 @@ function CodeMirrorCommentBadge({
   sessionId?: string;
   commentCount: number;
 }) {
+  const { t } = useTranslation();
   if (!enableComments || !sessionId || commentCount <= 0) return null;
 
   return (
     <div className="flex items-center gap-1 px-2 py-1 text-xs text-primary">
       <IconMessagePlus className="h-3.5 w-3.5" />
-      <span>
-        {commentCount} comment{commentCount > 1 ? "s" : ""}
-      </span>
+      <span>{t("editors:commentCount", { count: commentCount })}</span>
     </div>
   );
 }
@@ -86,6 +86,7 @@ function CodeMirrorWrapButton({
   wrapEnabled: boolean;
   onToggleWrap: () => void;
 }) {
+  const { t } = useTranslation();
   return (
     <Tooltip>
       <TooltipTrigger asChild>
@@ -102,7 +103,9 @@ function CodeMirrorWrapButton({
           )}
         </Button>
       </TooltipTrigger>
-      <TooltipContent>{wrapEnabled ? "Disable word wrap" : "Enable word wrap"}</TooltipContent>
+      <TooltipContent>
+        {wrapEnabled ? t("editors:disableWordWrap") : t("editors:enableWordWrap")}
+      </TooltipContent>
     </Tooltip>
   );
 }
@@ -114,6 +117,7 @@ function CodeMirrorReloadButton({
   hasRemoteUpdate?: boolean;
   onReloadFromAgent?: () => void;
 }) {
+  const { t } = useTranslation();
   if (!hasRemoteUpdate || !onReloadFromAgent) return null;
 
   return (
@@ -126,15 +130,16 @@ function CodeMirrorReloadButton({
           onClick={onReloadFromAgent}
         >
           <IconRefresh className="h-3.5 w-3.5" />
-          Reload
+          {t("editors:reload")}
         </Button>
       </TooltipTrigger>
-      <TooltipContent>Apply latest agent changes to this file</TooltipContent>
+      <TooltipContent>{t("editors:applyLatestAgentChangesToFile")}</TooltipContent>
     </Tooltip>
   );
 }
 
 function CodeMirrorDeleteButton({ onDelete }: { onDelete?: () => void }) {
+  const { t } = useTranslation();
   if (!onDelete) return null;
 
   return (
@@ -149,7 +154,7 @@ function CodeMirrorDeleteButton({ onDelete }: { onDelete?: () => void }) {
           <IconTrash className="h-4 w-4" />
         </Button>
       </TooltipTrigger>
-      <TooltipContent>Delete file</TooltipContent>
+      <TooltipContent>{t("editors:deleteFile")}</TooltipContent>
     </Tooltip>
   );
 }
@@ -163,6 +168,7 @@ function CodeMirrorSaveButton({
   isSaving: boolean;
   onSave: () => void;
 }) {
+  const { t } = useTranslation();
   return (
     <Button
       size="sm"
@@ -174,12 +180,12 @@ function CodeMirrorSaveButton({
       {isSaving ? (
         <>
           <IconLoader2 className="h-4 w-4 animate-spin" />
-          Saving...
+          {t("editors:saving")}
         </>
       ) : (
         <>
           <IconDeviceFloppy className="h-4 w-4" />
-          Save
+          {t("common:save")}
           <span className="text-xs text-muted-foreground">({SAVE_SHORTCUT}+S)</span>
         </>
       )}
@@ -188,6 +194,7 @@ function CodeMirrorSaveButton({
 }
 
 function CodeMirrorMarkdownPreviewButton({ onToggle }: { onToggle: () => void }) {
+  const { t } = useTranslation();
   return (
     <Tooltip>
       <TooltipTrigger asChild>
@@ -201,7 +208,7 @@ function CodeMirrorMarkdownPreviewButton({ onToggle }: { onToggle: () => void })
           <IconEye className="h-4 w-4" />
         </Button>
       </TooltipTrigger>
-      <TooltipContent>Preview markdown</TooltipContent>
+      <TooltipContent>{t("editors:previewMarkdown")}</TooltipContent>
     </Tooltip>
   );
 }
@@ -297,6 +304,7 @@ function CodeMirrorToolbar({
 type CodeMirrorEditorState = ReturnType<typeof useCodeMirrorEditorState>;
 
 function CodeMirrorOverlays({ state }: { state: CodeMirrorEditorState }) {
+  const { t } = useTranslation();
   return (
     <>
       {state.floatingButtonPos && !state.textSelection && (
@@ -309,7 +317,7 @@ function CodeMirrorOverlays({ state }: { state: CodeMirrorEditorState }) {
           onClick={state.handleFloatingButtonClick}
         >
           <IconMessagePlus className="h-3.5 w-3.5" />
-          Comment
+          {t("editors:comment")}
         </Button>
       )}
       {state.textSelection && (
@@ -362,14 +370,14 @@ function useCodeMirrorCodeEditorSetup(props: FileEditorContentProps) {
     repo,
   });
   useEffect(() => {
-    if (editorView) revealPendingCodeMirrorCursor(editorView, path, repo);
+    if (editorView) revealPendingCodeMirrorCursor(editorView, path, repo, sessionId);
   });
   useEffect(() => {
     if (!editorView) return;
-    return registerCodeMirrorCursorRevealer(path, repo, (line, column) =>
+    return registerCodeMirrorCursorRevealer(path, repo, sessionId, (line, column) =>
       revealCodeMirrorCursor(editorView, line, column),
     );
-  }, [editorView, path, repo]);
+  }, [editorView, path, repo, sessionId]);
   const handleCreateEditor = useCallback((view: EditorView) => setEditorView(view), []);
   return { wrapperRef, editorAreaRef, editorRef, state, walkthroughRange, handleCreateEditor };
 }

@@ -65,8 +65,12 @@ func (s *DashboardService) UpdateTaskProjectID(ctx context.Context, taskID, proj
 }
 
 // UpdateTaskParentID sets the parent_id field. Empty string clears the
-// parent. Rejects only direct self-reference (parentID == taskID); deeper
-// cycle detection is intentionally not enforced.
+// parent (via the canonical detacher). A non-empty value must reference an
+// existing task and also applies the canonical re-parent workspace policy:
+// an inherit_parent subtask keeps its materialized workspace as shared_group
+// instead of inheriting the new parent's. Rejects only direct self-reference
+// (parentID == taskID); deeper cycle detection is intentionally not enforced
+// on this surface.
 func (s *DashboardService) UpdateTaskParentID(ctx context.Context, taskID, parentID string) error {
 	if parentID != "" && parentID == taskID {
 		return fmt.Errorf("task cannot be its own parent")
@@ -80,10 +84,20 @@ func (s *DashboardService) UpdateTaskParentID(ctx context.Context, taskID, paren
 		}
 		return nil
 	}
+	// Preflight existence so a concurrent parent deletion (or a direct hit on
+	// the endpoint) cannot write a dangling parent_id — mirroring the
+	// canonical resolveParentID guard.
+	parent, err := s.repo.GetTaskByID(ctx, parentID)
+	if err != nil {
+		return fmt.Errorf("resolve parent task: %w", err)
+	}
+	if parent == nil {
+		return fmt.Errorf("parent task not found: %s", parentID)
+	}
 	if err := s.repo.UpdateTaskParentID(ctx, taskID, parentID); err != nil {
 		return err
 	}
-	s.publishTaskUpdated(ctx, taskID, []string{"parent_id"})
+	s.publishTaskUpdated(ctx, taskID, []string{"parent_id", "metadata"})
 	return nil
 }
 

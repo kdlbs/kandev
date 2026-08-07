@@ -12,7 +12,11 @@ import {
   type VoiceModeState,
 } from "@/lib/state/slices/settings/types";
 import type { SidebarTaskPrefsApi, UserSettings, UserSettingsResponse } from "@/lib/types/http";
-import type { MCPTaskAgentProfileDefault, StartupPage } from "@/lib/types/http-user-settings";
+import type {
+  LspStatusLocation,
+  MCPTaskAgentProfileDefault,
+  StartupPage,
+} from "@/lib/types/http-user-settings";
 import type { VoiceModeSettings } from "@/lib/types/http-voice";
 
 export type UserSettingsData = Omit<Partial<UserSettings>, "workspace_id"> & {
@@ -37,6 +41,7 @@ export function createDefaultUserSettings(): UserSettingsState {
     reviewAutoMarkOnScroll: true,
     confirmTaskArchive: true,
     unreadDivider: false,
+    agentGeneratedTaskTitles: true,
     mcpTaskAgentProfileDefault: "current_task",
     showAnchoredPromptBar: false,
     showScrollToLastPrompt: true,
@@ -47,6 +52,7 @@ export function createDefaultUserSettings(): UserSettingsState {
     lspAutoStartLanguages: [],
     lspAutoInstallLanguages: [],
     lspServerConfigs: {},
+    lspStatusLocation: "toolbar",
     savedLayouts: [],
     sidebarViews: [],
     sidebarActiveViewId: null,
@@ -64,6 +70,7 @@ export function createDefaultUserSettings(): UserSettingsState {
     githubSavedPresets: undefined,
     githubDefaultQueryPresets: undefined,
     gitlabSavedPresets: undefined,
+    azureDevOpsBrowsePreferences: undefined,
     defaultUtilityAgentId: null,
     keyboardShortcuts: {},
     terminalLinkBehavior: "new_tab",
@@ -93,6 +100,10 @@ export function parseMCPTaskAgentProfileDefault(
 
 export function parseStartupPage(value: string | undefined): StartupPage {
   return value === "last_task" ? "last_task" : "task_overview";
+}
+
+export function parseLspStatusLocation(value: string | undefined): LspStatusLocation {
+  return value === "status_bar" ? "status_bar" : "toolbar";
 }
 
 export function parseSystemMetricsDisplay(value: UserSettingsData["system_metrics_display"]) {
@@ -228,6 +239,7 @@ function buildBehaviorFields(s: UserSettingsData, current: UserSettingsState) {
     reviewAutoMarkOnScroll: s.review_auto_mark_on_scroll ?? current.reviewAutoMarkOnScroll,
     confirmTaskArchive: s.confirm_task_archive ?? current.confirmTaskArchive,
     unreadDivider: s.unread_divider ?? current.unreadDivider,
+    agentGeneratedTaskTitles: s.agent_generated_task_titles ?? current.agentGeneratedTaskTitles,
     mcpTaskAgentProfileDefault: mapDefined(
       s.mcp_task_agent_profile_default,
       current.mcpTaskAgentProfileDefault,
@@ -290,6 +302,11 @@ export function buildCoreFields(
       current.gitlabSavedPresets,
       (value) => value,
     ),
+    azureDevOpsBrowsePreferences: mapDefined(
+      s.azure_devops_browse_preferences,
+      current.azureDevOpsBrowsePreferences,
+      (value) => value,
+    ),
     appStatusBarOrder: mapDefined(
       s.app_status_bar_order,
       current.appStatusBarOrder,
@@ -309,6 +326,10 @@ export function buildLspFields(
     lspAutoStartLanguages: s?.lsp_auto_start_languages ?? current.lspAutoStartLanguages,
     lspAutoInstallLanguages: s?.lsp_auto_install_languages ?? current.lspAutoInstallLanguages,
     lspServerConfigs: s?.lsp_server_configs ?? current.lspServerConfigs,
+    lspStatusLocation:
+      s?.lsp_status_location === undefined
+        ? current.lspStatusLocation
+        : parseLspStatusLocation(s.lsp_status_location),
   };
 }
 

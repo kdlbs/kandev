@@ -80,7 +80,7 @@ func (h *WebhookHandler) Handle(c *gin.Context) {
 		triggerData, _ = json.Marshal(map[string]string{"body": string(body)})
 	}
 
-	if fireErr := h.svc.FireTrigger(c.Request.Context(), automationID, triggerID, TriggerTypeWebhook, triggerData, ""); fireErr != nil {
+	if _, fireErr := h.svc.FireTrigger(c.Request.Context(), automationID, triggerID, TriggerTypeWebhook, triggerData, ""); fireErr != nil {
 		h.logger.Error("failed to fire webhook trigger",
 			zap.String("automation_id", automationID),
 			zap.Error(fireErr))

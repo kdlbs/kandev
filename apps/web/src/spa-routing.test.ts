@@ -64,6 +64,75 @@ describe("resolveSpaRoute", () => {
     expect(resolveSpaRoute("/gitlab", new URLSearchParams())).toEqual({ kind: "gitlab" });
     expect(resolveSpaRoute("/jira", new URLSearchParams())).toEqual({ kind: "jira" });
     expect(resolveSpaRoute("/linear", new URLSearchParams())).toEqual({ kind: "linear" });
+    // The automation list is top-level, not a settings page.
+    expect(resolveSpaRoute("/automations", new URLSearchParams())).toEqual({
+      kind: "runs",
+      view: undefined,
+    });
+  });
+
+  it("keeps the flat cross-automation feed reachable as a view of the list", () => {
+    expect(resolveSpaRoute("/automations", new URLSearchParams("view=feed"))).toEqual({
+      kind: "runs",
+      view: "feed",
+    });
+  });
+});
+
+describe("resolveSpaRoute — automations", () => {
+  it("still answers to the path this destination shipped under", () => {
+    // Renaming a URL breaks every link already shared or bookmarked, so /runs
+    // keeps resolving rather than 404ing on someone's saved tab.
+    expect(resolveSpaRoute("/runs", new URLSearchParams())).toEqual({
+      kind: "runs",
+      view: undefined,
+    });
+    expect(resolveSpaRoute("/runs/auto-1", new URLSearchParams())).toEqual({
+      kind: "runDetail",
+      automationId: "auto-1",
+      tab: undefined,
+      runId: undefined,
+    });
+  });
+
+  it("routes an automation's own history to the detail view", () => {
+    expect(resolveSpaRoute("/automations/auto-1", new URLSearchParams())).toEqual({
+      kind: "runDetail",
+      automationId: "auto-1",
+      tab: undefined,
+      runId: undefined,
+    });
+    expect(resolveSpaRoute("/automations/auto-1/", new URLSearchParams("tab=configure"))).toEqual({
+      kind: "runDetail",
+      automationId: "auto-1",
+      tab: "configure",
+      runId: undefined,
+    });
+  });
+
+  it("carries the selected run through, so a linked run survives a reload", () => {
+    expect(resolveSpaRoute("/automations/auto-1", new URLSearchParams("run=run-9"))).toEqual({
+      kind: "runDetail",
+      automationId: "auto-1",
+      tab: undefined,
+      runId: "run-9",
+    });
+  });
+
+  it("does not read a deeper path as an automation id", () => {
+    // An id is one segment. Anything longer belongs to whatever owns that path,
+    // not to a detail view that would then query a nonexistent automation.
+    expect(resolveSpaRoute("/automations/auto-1/extra", new URLSearchParams()).kind).not.toBe(
+      "runDetail",
+    );
+  });
+
+  it("does not throw on a malformed escape in the automation id", () => {
+    // decodeURIComponent throws on "%", and route resolution runs for every
+    // navigation — an unguarded throw here takes the whole SPA down rather
+    // than declining one bad link.
+    expect(() => resolveSpaRoute("/automations/%", new URLSearchParams())).not.toThrow();
+    expect(resolveSpaRoute("/automations/%", new URLSearchParams()).kind).not.toBe("runDetail");
   });
 
   it("preserves root kanban query params for SPA bootstrap", () => {

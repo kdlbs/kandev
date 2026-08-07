@@ -13,6 +13,10 @@ import (
 func TestApplyProfile_DefaultsToProd(t *testing.T) {
 	clearProfileSelectors(t)
 	clearProfilesYAMLVars(t)
+	defaults, err := FeatureFlagDefaults()
+	if err != nil {
+		t.Fatalf("FeatureFlagDefaults: %v", err)
+	}
 
 	count, env, err := ApplyProfile()
 	if err != nil {
@@ -21,9 +25,16 @@ func TestApplyProfile_DefaultsToProd(t *testing.T) {
 	if env != EnvProd {
 		t.Errorf("env = %q, want %q (no selector env vars set)", env, EnvProd)
 	}
-	// Prod writes each registered feature flag with its safe shipped default.
-	if count != 4 {
-		t.Errorf("ApplyProfile wrote %d vars in prod; want 4", count)
+	// Prod writes every declared feature flag with its shipped default. Derive
+	// the count so adding a flag cannot require another hard-coded update here.
+	if count != len(defaults) {
+		t.Errorf("ApplyProfile wrote %d vars in prod; want %d profile feature defaults", count, len(defaults))
+	}
+	for shortName, want := range defaults {
+		envVar := featurePrefix + strings.ToUpper(shortName)
+		if got := os.Getenv(envVar); got != want {
+			t.Errorf("%s = %q after prod ApplyProfile; want %q", envVar, got, want)
+		}
 	}
 	if v := os.Getenv("KANDEV_FEATURES_OFFICE"); v != "false" {
 		t.Errorf("KANDEV_FEATURES_OFFICE = %q after prod ApplyProfile; want %q", v, "false")
@@ -172,6 +183,18 @@ func TestFeatureFlagDefaults_LowercasesShortName(t *testing.T) {
 			"claude_background_prompt_handoff",
 			defaults,
 		)
+	}
+}
+
+func TestProfilesYAMLFeatureKeysUseRequiredPrefix(t *testing.T) {
+	file, err := parse(profilesYAML)
+	if err != nil {
+		t.Fatalf("parse profiles YAML: %v", err)
+	}
+	for envVar := range file["features"] {
+		if _, ok := stripFeaturePrefix(envVar); !ok {
+			t.Errorf("profiles.yaml feature key %q must start with %q and include a name", envVar, featurePrefix)
+		}
 	}
 }
 

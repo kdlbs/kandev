@@ -15,8 +15,8 @@ import { IntegrationCopyConfigMenu } from "@/components/integrations/integration
 import { integrationFromPathname } from "@/components/integrations/integration-copy-config";
 import { safeDecodePathSegment } from "@/lib/routing/path";
 import { SettingsSaveProvider } from "@/components/settings/settings-save-provider";
+import { SettingsTargetProvider } from "@/components/settings/settings-target-provider";
 import { useTranslation } from "react-i18next";
-import { t } from "@/lib/i18n";
 import { connectionIssueDetails } from "@/components/app-status-bar/connection-status-item";
 import { linkToTaskOverview } from "@/lib/links";
 import { cn } from "@/lib/utils";
@@ -29,7 +29,6 @@ const SEGMENT_LABEL_OVERRIDES: Record<string, string> = {
   github: "GitHub",
   jira: "Jira",
   linear: "Linear",
-  slack: "Slack",
   mcp: "MCP",
   ui: "UI",
   vscode: "VS Code",
@@ -58,17 +57,20 @@ const SEGMENT_LABEL_KEYS: Record<string, string> = {
   integrations: "common:integrations",
   "keyboard-shortcuts": "settings:keyboardShortcuts",
   layouts: "settings:layouts",
+  "message-queue": "system:messageQueueTitle",
   new: "settings:new",
   notifications: "settings:notifications",
   plugins: "common:plugins",
   prompts: "common:prompts",
   "resource-metrics": "settings:resourceMetrics",
   secrets: "settings:secrets",
+  security: "settings:security",
   shell: "common:shell",
   sprites: "settings:sprites",
   system: "common:system",
   "task-actions": "settings:taskActions",
   terminal: "settings:terminal",
+  tokens: "settings:tokens",
   "utility-agents": "settings:utilityAgents",
   "voice-mode": "settings:voiceMode",
   workspace: "common:workspace",
@@ -104,16 +106,27 @@ function deriveCurrentPageLabel(pathname: string, t: (key: string) => string): s
 }
 
 // Build the intermediate breadcrumb crumbs between the back link and the
-// current page title. For workspace-scoped automation pages, inject an
-// "Automations" crumb so the breadcrumb reads e.g.
-// Home > Settings > Automations > New.
-function deriveParents(pathname: string): Array<{ label: string; href: string }> {
+// current page title. Workspace-scoped pages include the routed workspace so
+// the breadcrumb identifies which workspace owns the settings being edited.
+function deriveParents(
+  pathname: string,
+  workspaceName: string | null,
+  t: (key: string) => string,
+): Array<{ label: string; href: string }> {
   const segments = pathname.split("/").filter(Boolean);
   if (segments.length <= 1) return [];
 
   const parents: Array<{ label: string; href: string }> = [
     { label: t("common:settings"), href: "/settings" },
   ];
+
+  const workspaceId = workspaceIdFromPathname(pathname);
+  if (workspaceId) {
+    parents.push({
+      label: workspaceName ?? t("common:workspace"),
+      href: `/settings/workspace/${encodeURIComponent(workspaceId)}`,
+    });
+  }
 
   const automationsMatch = pathname.match(
     /^\/settings\/workspace\/([^/]+)\/automations(?:\/(.+))?/,
@@ -134,6 +147,7 @@ function deriveParents(pathname: string): Array<{ label: string; href: string }>
 export function SettingsLayoutClient({ children }: { children: React.ReactNode }) {
   const { t } = useTranslation();
   const pathname = usePathname();
+  const workspaces = useAppStore((s) => s.workspaces.items);
   const isAgentDetail = pathname.startsWith("/settings/agents/") && pathname !== "/settings/agents";
   const showIntegrationCopyAction = integrationFromPathname(pathname) !== null;
 
@@ -153,7 +167,10 @@ export function SettingsLayoutClient({ children }: { children: React.ReactNode }
 
   const pageLabel = deriveCurrentPageLabel(pathname, t);
   const title = pageLabel ?? t("settings:settings");
-  const parents = deriveParents(pathname);
+  const routeWorkspaceId = workspaceIdFromPathname(pathname);
+  const workspaceName =
+    workspaces.find((workspace) => workspace.id === routeWorkspaceId)?.name ?? null;
+  const parents = deriveParents(pathname, workspaceName, t);
 
   return (
     <SettingsShell
@@ -317,14 +334,14 @@ function SettingsMobileMenu({ pathname }: { pathname: string }) {
           )}
           <Link
             href={linkToTaskOverview()}
-            className="flex h-10 cursor-pointer items-center gap-2.5 rounded-md px-2.5 text-sm font-medium text-foreground/80 transition-colors hover:bg-muted hover:text-foreground"
+            className="flex h-11 cursor-pointer items-center gap-2.5 rounded-md px-2.5 text-sm font-medium text-foreground/80 transition-colors hover:bg-muted hover:text-foreground"
             onClick={() => setOpen(false)}
           >
             <IconHome className="h-4 w-4 shrink-0" />
             <span className="truncate">{t("settings:home")}</span>
           </Link>
           <div
-            className="flex flex-col gap-0.5 [&_a]:min-h-10 [&_a]:text-sm [&_button]:min-h-10 [&_button]:text-sm [&_svg]:h-4 [&_svg]:w-4"
+            className="flex flex-col gap-0.5 [&_a]:min-h-11 [&_a]:text-sm [&_button]:min-h-11 [&_button]:min-w-11 [&_button]:text-sm [&_svg]:h-4 [&_svg]:w-4"
             onClick={closeOnLinkClick}
           >
             <SettingsTree pathname={pathname} />
@@ -360,26 +377,28 @@ function SettingsShell({
   return (
     <TooltipProvider>
       <SettingsSaveProvider key={pathname}>
-        <main className="flex min-h-0 flex-1 flex-col">
-          <PageTopbar
-            title={title}
-            backHref={backHref}
-            backLabel={backLabel}
-            parents={parents}
-            leading={<SettingsMobileMenu pathname={pathname} />}
-            showStatusTrigger={false}
-            className="h-10"
-            actions={showIntegrationCopyAction ? <IntegrationCopyConfigAction /> : undefined}
-          />
-          {/* Scroll the content, not the topbar: min-h-0 lets this flex child
+        <SettingsTargetProvider>
+          <main className="flex min-h-0 flex-1 flex-col">
+            <PageTopbar
+              title={title}
+              backHref={backHref}
+              backLabel={backLabel}
+              parents={parents}
+              leading={<SettingsMobileMenu pathname={pathname} />}
+              showStatusTrigger={false}
+              className="h-10"
+              actions={showIntegrationCopyAction ? <IntegrationCopyConfigAction /> : undefined}
+            />
+            {/* Scroll the content, not the topbar: min-h-0 lets this flex child
               shrink below its content height so overflow-y-auto can take effect. */}
-          <div
-            data-testid="settings-scroll-container"
-            className="flex min-w-0 min-h-0 flex-1 flex-col gap-4 overflow-y-auto overscroll-contain p-4 pb-[calc(11rem_+_env(safe-area-inset-bottom)_+_var(--app-status-bar-height))]"
-          >
-            {children}
-          </div>
-        </main>
+            <div
+              data-testid="settings-scroll-container"
+              className="flex min-w-0 min-h-0 flex-1 flex-col gap-4 overflow-y-auto overscroll-contain p-4 pb-[calc(11rem_+_env(safe-area-inset-bottom)_+_var(--app-status-bar-height))]"
+            >
+              {children}
+            </div>
+          </main>
+        </SettingsTargetProvider>
       </SettingsSaveProvider>
     </TooltipProvider>
   );

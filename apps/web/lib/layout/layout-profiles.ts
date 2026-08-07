@@ -10,6 +10,7 @@ import {
   type LayoutState,
 } from "@/lib/state/layout-manager";
 import type { SavedLayout } from "@/lib/types/http";
+import { generateUUID } from "@/lib/utils";
 
 export type BuiltInLayoutProfileId = Exclude<BuiltInPreset, "compact">;
 
@@ -27,7 +28,7 @@ export const BUILT_IN_LAYOUT_PROFILES: readonly BuiltInLayoutProfileDescriptor[]
   {
     id: "default",
     name: "Default",
-    description: "Agent with Files, Changes, PR Details, and Terminal",
+    description: "Agent with Files, Changes, and Terminal",
   },
   {
     id: "plan",
@@ -96,7 +97,7 @@ const REUSABLE_PANEL_ID_SET = new Set<string>(REUSABLE_PANEL_IDS);
 const BUILT_IN_OVERRIDE_PREFIX = "layout-override-";
 
 export function createLayoutProfileId(): string {
-  return `layout-${globalThis.crypto.randomUUID()}`;
+  return `layout-${generateUUID()}`;
 }
 
 export function getBuiltInLayoutProfile(id: BuiltInLayoutProfileId): BuiltInLayoutProfile {

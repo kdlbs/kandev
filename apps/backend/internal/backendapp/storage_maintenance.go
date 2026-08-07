@@ -12,6 +12,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/runtime/activity"
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/common/config"
+	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/system/jobs"
 	systemsettings "github.com/kandev/kandev/internal/system/settings"
@@ -36,6 +37,8 @@ func provideStorageComposition(
 	lifecycleMgr *lifecycle.Manager,
 	worktreeMgr *worktree.Manager,
 	taskSvc *taskservice.Service,
+	log *logger.Logger,
+	logError func(string, error),
 ) (*storageComposition, error) {
 	rawSettings, err := systemsettings.NewStore(pool)
 	if err != nil {
@@ -75,6 +78,21 @@ func provideStorageComposition(
 		activity: coordinator,
 	}
 	providers := storageCleanupProviders(settings, workspaceFactory, goCache, dockerProvider, quarantine)
+	if taskSvc.AttachmentService() == nil && taskSvc.AttachmentRepository() != nil {
+		attachmentSvc, attachmentErr := taskservice.NewAttachmentService(
+			taskSvc.AttachmentRepository(), cfg.ResolvedHomeDir(), taskSvc.AuthorizeWorkspaceAccess, log,
+		)
+		if attachmentErr != nil {
+			return nil, fmt.Errorf("initialize prompt attachment storage: %w", attachmentErr)
+		}
+		taskSvc.SetAttachmentService(attachmentSvc)
+	}
+	if attachmentSvc := taskSvc.AttachmentService(); attachmentSvc != nil {
+		if lifecycleMgr != nil {
+			lifecycleMgr.SetAttachmentReader(attachmentSvc)
+		}
+		providers = append(providers, attachmentCleanupProvider{service: attachmentSvc})
+	}
 	runner := storagepkg.NewRunner(storagepkg.RunnerConfig{
 		Activity: coordinator, Store: store, Providers: providers, Overview: cachedOverview,
 	})
@@ -89,7 +107,7 @@ func provideStorageComposition(
 	})
 	handler := storagepkg.NewHandler(storagepkg.HandlerConfig{
 		Settings: settings, Runs: store, Quarantine: store, Overview: cachedOverview,
-		Mutations: operations, OnSettingsChanged: runtime.ApplySettings,
+		Mutations: operations, OnSettingsChanged: runtime.ApplySettings, LogError: logError,
 	})
 	return &storageComposition{
 		handler: handler, runtime: runtime, workspaceRestorer: quarantine,
@@ -98,6 +116,17 @@ func provideStorageComposition(
 
 type taskCleanupActivityGate struct {
 	coordinator *activity.Coordinator
+}
+
+type attachmentCleanupProvider struct {
+	service *taskservice.AttachmentService
+}
+
+func (p attachmentCleanupProvider) Name() string { return "prompt_attachments" }
+
+func (p attachmentCleanupProvider) Cleanup(ctx context.Context) (map[string]any, error) {
+	deleted, err := p.service.CleanupExpired(ctx)
+	return map[string]any{"deleted": deleted}, err
 }
 
 func (g *taskCleanupActivityGate) AcquireTaskResourceCleanup(
@@ -167,11 +196,18 @@ func (o *storageOverview) Capabilities(
 	ctx context.Context,
 	settings storagepkg.StorageMaintenanceSettings,
 ) storagepkg.Capabilities {
-	dockerAvailable := o.dockerClient.Ping(ctx) == nil
+	return o.SettingsCapabilities(ctx, settings)
+}
+
+func (o *storageOverview) SettingsCapabilities(
+	ctx context.Context,
+	settings storagepkg.StorageMaintenanceSettings,
+) storagepkg.Capabilities {
 	goPath := settings.GoCache.AdoptedPath
 	if goPath == "" {
 		goPath = filepath.Join(o.homeDir, "cache", "go-build")
 	}
+	dockerAvailable := o.dockerClient != nil && o.dockerClient.Ping(ctx) == nil
 	return storagepkg.Capabilities{
 		ManagedGoCachePath: goPath, GoCacheAdoptionAvailable: true,
 		DockerAvailable: dockerAvailable, DockerHost: o.dockerHost,

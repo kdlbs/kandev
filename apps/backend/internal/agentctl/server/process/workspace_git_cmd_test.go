@@ -104,6 +104,53 @@ func TestRunGitOutput_PollingVariantReleasesThrottleOnTimeout(t *testing.T) {
 	}
 }
 
+func TestWorkspaceGitAdmissionWaitDoesNotConsumeTimeout(t *testing.T) {
+	prev := gitCommandTimeout
+	// The execution budget must comfortably exceed a cold shell-shim start
+	// (slow on macOS), or the freshly-admitted command is SIGKILLed before it
+	// can print. The hold below is still longer than this budget, so the test
+	// still proves the queued command gets a fresh budget after admission.
+	gitCommandTimeout = 2 * time.Second
+	t.Cleanup(func() { gitCommandTimeout = prev })
+
+	restoreCap := subproc.Git().SetCapForTest(1)
+	t.Cleanup(restoreCap)
+	shimDir := installFastGitShim(t)
+	t.Setenv("PATH", shimDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	_, wt := setupTestDir(t)
+	hold, err := subproc.AcquireGit(context.Background(), subproc.GitInteractive)
+	if err != nil {
+		t.Fatalf("hold git slot: %v", err)
+	}
+	resultCh := make(chan struct {
+		out []byte
+		err error
+	}, 1)
+	go func() {
+		out, runErr := wt.runGitOutput(context.Background(), "status")
+		resultCh <- struct {
+			out []byte
+			err error
+		}{out: out, err: runErr}
+	}()
+	waitForAnyGitWaiter(t, 1)
+	// Hold the slot longer than the execution timeout. The queued command
+	// should still receive a fresh execution budget after release.
+	timer := time.NewTimer(2500 * time.Millisecond)
+	<-timer.C
+	hold()
+
+	select {
+	case result := <-resultCh:
+		if result.err != nil || string(result.out) != "ok" {
+			t.Fatalf("result = (%q, %v), want fast command after queued admission", result.out, result.err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("queued git command did not complete")
+	}
+}
+
 // installSleepGitShim writes an executable shell script named 'git' into a
 // fresh tmpdir that blocks for an hour, and returns the dir. Callers must
 // prepend it to $PATH so exec.Command("git", ...) picks it up before the
@@ -124,4 +171,30 @@ func installSleepGitShim(t *testing.T) string {
 		t.Fatalf("write shim: %v", err)
 	}
 	return dir
+}
+
+func installFastGitShim(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	shim := filepath.Join(dir, "git")
+	if err := os.WriteFile(shim, []byte("#!/bin/sh\nprintf ok\n"), 0o755); err != nil {
+		t.Fatalf("write fast git shim: %v", err)
+	}
+	return dir
+}
+
+func waitForAnyGitWaiter(t *testing.T, want int) {
+	t.Helper()
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		snapshot := subproc.AdmissionSnapshot()
+		total := 0
+		for _, class := range snapshot.Classes {
+			total += int(class.Waiters)
+		}
+		if total == want {
+			return
+		}
+	}
+	t.Fatalf("total git waiters did not reach %d", want)
 }

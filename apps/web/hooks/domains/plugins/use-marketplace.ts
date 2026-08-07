@@ -6,6 +6,7 @@ import {
   refreshMarketplace,
   type CatalogQuery,
 } from "@/lib/api/domains/marketplace-api";
+import { t } from "@/lib/i18n";
 import type { MarketplaceCatalog } from "@/lib/types/plugins";
 
 const EMPTY_CATALOG: MarketplaceCatalog = { plugins: [], sources: [] };
@@ -37,7 +38,7 @@ export function useMarketplace(query: CatalogQuery) {
       })
       .catch((err) => {
         if (cancelled) return;
-        setError(err instanceof Error ? err.message : "Failed to load marketplace");
+        setError(err instanceof Error ? err.message : t("plugins:failedToLoadMarketplace"));
       })
       .finally(() => {
         if (!cancelled) setLoading(false);

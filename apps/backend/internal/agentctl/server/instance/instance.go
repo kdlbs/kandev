@@ -8,6 +8,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/kandev/kandev/internal/task/models"
 )
 
 type processManager interface {
@@ -162,6 +164,9 @@ type CreateRequest struct {
 	// McpMode controls which MCP tools are registered: "task" (default), "config", or "office".
 	McpMode string `json:"mcp_mode,omitempty"`
 
+	// McpProviders limits task-mode review automation tools to attached providers.
+	McpProviders []string `json:"mcp_providers,omitempty"`
+
 	// RequiresProcessKill forces the agent's process group to be killed on
 	// shutdown instead of relying on stdin close. Required for agents whose
 	// runtime keeps child processes alive when stdin closes (notably
@@ -177,8 +182,9 @@ type CreateRequest struct {
 	// Each WorkspaceTracker reads its entry at startup and uses it as the
 	// first candidate when resolving BaseCommit / Ahead / Behind. Empty
 	// disables the override.
-	BaseBranches         map[string]string `json:"base_branches,omitempty"`
-	WorkspaceSourceRoots []string          `json:"workspace_source_roots,omitempty"`
+	BaseBranches         map[string]string                    `json:"base_branches,omitempty"`
+	RemoteContributions  map[string]models.RemoteContribution `json:"remote_contributions,omitempty"`
+	WorkspaceSourceRoots []string                             `json:"workspace_source_roots,omitempty"`
 }
 
 // CreateResponse contains the result of creating a new agent instance.

@@ -19,16 +19,21 @@ import { sortVersionsDesc } from "./version";
 import { pickAvailablePort } from "./ports";
 import { createProcessSupervisor } from "./process";
 import { resolveRuntime, validateBundle } from "./runtime";
-import { buildBackendEnv, logStartupInfo } from "./shared";
+import {
+  buildBackendEnv,
+  createOutputRingBuffer,
+  logStartupInfo,
+  resolveBackendLogLevels,
+} from "./shared";
 import { launchRestartableBackend } from "./supervisor/backend";
 import { openBrowser } from "./web";
 
 export type RunOptions = {
   runtimeVersion?: string;
   backendPort?: number;
-  /** Show info logs from backend + web */
+  /** Show backend info logs on stdout */
   verbose?: boolean;
-  /** Show debug logs + agent message dumps */
+  /** Retain backend debug logs in its file + agent message dumps */
   debug?: boolean;
   /** Skip browser open. Set by service units. */
   headless?: boolean;
@@ -43,7 +48,6 @@ type PreparedBundle = {
   agentctlPort: number;
   dbPath: string;
   logLevel: string;
-  showOutput: boolean;
 };
 
 /**
@@ -181,9 +185,8 @@ async function prepareBundleForLaunch({
   const actualBackendPort = backendPort ?? (await pickAvailablePort(DEFAULT_BACKEND_PORT));
   const agentctlPort = await pickAvailablePort(DEFAULT_AGENTCTL_PORT);
   const backendUrl = `http://localhost:${actualBackendPort}`;
-  const showOutput = verbose || debug;
-  const logLevel =
-    process.env.KANDEV_LOG_LEVEL?.trim() || (debug ? "debug" : verbose ? "info" : "warn");
+  const levels = resolveBackendLogLevels({ verbose, debug });
+  const logLevel = levels.file;
 
   const dataDir = resolveDataDir();
   fs.mkdirSync(dataDir, { recursive: true });
@@ -198,6 +201,7 @@ async function prepareBundleForLaunch({
       backendUrl,
     },
     logLevel,
+    consoleLogLevel: levels.console,
     webProxy: false,
     extra: {
       KANDEV_DATABASE_PATH: dbPath,
@@ -214,7 +218,6 @@ async function prepareBundleForLaunch({
     agentctlPort,
     dbPath,
     logLevel,
-    showOutput,
   };
 }
 
@@ -227,14 +230,9 @@ export function attachRingBuffer(
   stream: NodeJS.ReadableStream | null,
   maxChars = 64 * 1024,
 ): () => string {
-  let buf = "";
-  stream?.on("data", (chunk: Buffer | string) => {
-    buf += typeof chunk === "string" ? chunk : chunk.toString("utf8");
-    if (buf.length > maxChars) {
-      buf = buf.slice(buf.length - maxChars);
-    }
-  });
-  return () => buf;
+  const capture = createOutputRingBuffer(null, maxChars);
+  capture.attach(stream);
+  return capture.read;
 }
 
 async function launchBundle(prepared: PreparedBundle): Promise<{
@@ -255,6 +253,7 @@ async function launchBundle(prepared: PreparedBundle): Promise<{
 
   const supervisor = createProcessSupervisor();
   supervisor.attachSignalHandlers();
+  const output = createOutputRingBuffer(process.stdout);
 
   const backend = await launchRestartableBackend({
     command: prepared.backendBin,
@@ -268,17 +267,17 @@ async function launchBundle(prepared: PreparedBundle): Promise<{
       backendUrl: prepared.backendUrl,
     },
     mode: "run",
-    stdio: prepared.showOutput ? ["ignore", "inherit", "inherit"] : ["ignore", "pipe", "inherit"],
+    stdio: ["ignore", "pipe", "inherit"],
     supervisor,
+    onProcess: (proc) => output.attach(proc.stdout),
   });
   const backendProc = backend.proc;
 
-  const readBuffered = prepared.showOutput ? () => "" : attachRingBuffer(backendProc.stdout);
   let dumped = false;
   const dumpBackendLogs = (): void => {
     if (dumped) return;
     dumped = true;
-    const buffered = readBuffered();
+    const buffered = output.read();
     if (buffered.trim().length === 0) return;
     console.error("[kandev] --- backend stdout (last captured output) ---");
     console.error(buffered.trimEnd());

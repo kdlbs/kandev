@@ -29,17 +29,7 @@ test.describe("Unread divider", () => {
     const sessionId = task.session_id;
 
     let session = await openTaskSession(testPage, task.id);
-    // attemptTimeout must be raised explicitly, not just `timeout` — its
-    // default is capped at min(15_000, ...) regardless of `timeout` (see
-    // SessionPage.waitForChatIdle). Past that cap it does a page.reload()
-    // to recover from a stuck WS subscription, which is a *real*
-    // navigate-away-and-back from this feature's own perspective — it
-    // would legitimately (and correctly) re-capture a fresh divider
-    // anchor, making later assertions in this test fail for a reason
-    // unrelated to what they're testing (the cursor advancing live while
-    // the session stays genuinely, continuously visible in one browser
-    // session).
-    await session.waitForChatIdle({ timeout: 60_000, attemptTimeout: 60_000 });
+    await session.waitForChatIdle({ timeout: 60_000 });
 
     // First-ever visit: there is no prior read cursor, so nothing renders as
     // "New" — but the cursor must still advance to the latest message so a
@@ -57,7 +47,7 @@ test.describe("Unread divider", () => {
     // cursor keeps advancing live while the session stays in view, so this
     // alone must not produce a divider either.
     await session.sendMessageViaButton("second question");
-    await session.waitForChatIdle({ timeout: 60_000, attemptTimeout: 60_000 });
+    await session.waitForChatIdle({ timeout: 60_000 });
     await expect(session.activeChat().getByTestId("unread-divider")).toHaveCount(0);
 
     const fullTranscript = await apiClient.listSessionMessages(sessionId);
@@ -134,7 +124,10 @@ test.describe("Unread divider", () => {
     if (!task.session_id) throw new Error("createTaskWithAgent did not return a session_id");
 
     let session = await openTaskSession(testPage, task.id);
-    await session.waitForChatIdle({ timeout: 60_000, attemptTimeout: 60_000 });
+    // No live-tail observation has happened yet, so the normal reload recovery
+    // is safe here. The post-send wait below stays reload-free because that
+    // interval is the continuously-visible behavior under test.
+    await session.waitForChatIdle({ timeout: 60_000 });
     const initialMessages = await apiClient.listSessionMessages(task.session_id);
     const initialTail = initialMessages.messages[initialMessages.messages.length - 1];
     if (!initialTail) throw new Error("expected the initial transcript to contain a message");
@@ -152,7 +145,7 @@ test.describe("Unread divider", () => {
     await expect(session.activeChat().getByTestId("unread-divider")).toHaveCount(0);
 
     await session.sendMessageViaButton("prompt while actively reading");
-    await session.waitForChatIdle({ timeout: 60_000, attemptTimeout: 60_000 });
+    await session.waitForChatIdle({ timeout: 60_000 });
     await expect(session.activeChat().getByTestId("unread-divider")).toHaveCount(0);
   });
 
@@ -186,5 +179,45 @@ test.describe("Unread divider", () => {
     // instead.
     const newestRow = activeChat.locator(`[id="msg-${newestMessageId}"]`);
     expect(await isScrolledIntoView(scrollContainer, newestRow)).toBe(false);
+  });
+
+  test("reserves room for the anchored last-prompt bar so it does not cover the New divider on visit start", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(60_000);
+    await apiClient.saveUserSettings({ show_anchored_prompt_bar: true });
+
+    const { taskId } = await seedScrollTestConversation(
+      apiClient,
+      seedData,
+      "Unread Divider Anchored Bar Overlap Test",
+    );
+
+    // First visit: the divider lands at the unread boundary while the task
+    // description (the session's only user-authored message, seeded far
+    // above it) is scrolled well past — exactly the condition that opens
+    // the anchored bar at the same moment the divider is placed.
+    const session = await openTaskSession(testPage, taskId);
+    const activeChat = session.activeChat();
+
+    const bar = activeChat.getByTestId("anchored-last-prompt-bar");
+    await expect(bar).toHaveAttribute("data-state", "open", { timeout: 10_000 });
+
+    const divider = activeChat.getByTestId("unread-divider");
+    await expect(divider).toBeVisible();
+
+    const barContent = activeChat.getByTestId("anchored-last-prompt-content");
+    await expect
+      .poll(async () => {
+        const [barBox, dividerBox] = await Promise.all([
+          barContent.boundingBox(),
+          divider.boundingBox(),
+        ]);
+        if (!barBox || !dividerBox) return null;
+        return dividerBox.y - (barBox.y + barBox.height);
+      })
+      .toBeGreaterThanOrEqual(0);
   });
 });

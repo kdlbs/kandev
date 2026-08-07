@@ -23,57 +23,34 @@ import (
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
+type turnCompletionCause string
+
+const (
+	turnCompletionCauseAgentTurn        turnCompletionCause = "agent_turn"
+	turnCompletionCauseUserCancellation turnCompletionCause = "user_cancellation"
+)
+
 // processOnTurnComplete processes the on_turn_complete events for the current step.
 // Returns true if a transition occurred (step change happened).
 func (s *Service) processOnTurnComplete(ctx context.Context, task *models.Task, session *models.TaskSession) bool {
-	if session.ID == "" || s.workflowStepGetter == nil {
+	return s.processOnTurnCompleteWithCause(ctx, task, session, turnCompletionCauseAgentTurn)
+}
+
+func (s *Service) processOnTurnCompleteWithCause(
+	ctx context.Context,
+	task *models.Task,
+	session *models.TaskSession,
+	cause turnCompletionCause,
+) bool {
+	if s.shouldSkipLegacyTurnCompletion(task, session, cause) {
 		return false
 	}
 
 	taskID := task.ID
 	sessionID := session.ID
-
-	if task.WorkflowStepID == "" {
-		s.logger.Debug("task has no workflow step, skipping transition",
-			zap.String("session_id", sessionID))
+	currentStep, ok := s.loadLegacyTurnCompletionStep(ctx, task, session)
+	if !ok || !s.shouldRunLegacyTurnCompletion(ctx, task, session, currentStep, cause) {
 		return false
-	}
-
-	workflowStepID := task.WorkflowStepID
-
-	// Get the current workflow step
-	currentStep, err := s.workflowStepGetter.GetStep(ctx, workflowStepID)
-	if err != nil {
-		s.logger.Warn("failed to get workflow step for transition",
-			zap.String("workflow_step_id", workflowStepID),
-			zap.Error(err))
-		return false
-	}
-	// If no on_turn_complete actions, do nothing (manual step)
-	if len(currentStep.Events.OnTurnComplete) == 0 {
-		s.logger.Debug("step has no on_turn_complete actions, waiting for user",
-			zap.String("step_id", currentStep.ID),
-			zap.String("step_name", currentStep.Name))
-		s.setSessionWaitingForInput(ctx, taskID, sessionID, session)
-		return false
-	}
-
-	if s.turnCompleteBlockedByUserInput(ctx, taskID, sessionID, session) {
-		return false
-	}
-
-	// ADR 0015 — explicit completion signal gating (legacy path mirror of
-	// processOnTurnCompleteViaEngine). Steps marked
-	// `auto_advance_requires_signal=true` wait for a step_complete_kandev
-	// signal before evaluating their transition actions.
-	if currentStep.AutoAdvanceRequiresSignal {
-		signal, has := models.LoadPendingStepSignal(session.Metadata)
-		if !has || signal.StepID != currentStep.ID {
-			s.logger.Debug("on_turn_complete gated on explicit signal (legacy path)",
-				zap.String("step_id", currentStep.ID))
-			s.setSessionWaitingForInput(ctx, taskID, sessionID, session)
-			return false
-		}
 	}
 
 	// Process side-effect actions first, then find the first transition action
@@ -89,6 +66,83 @@ func (s *Service) processOnTurnComplete(ctx context.Context, task *models.Task, 
 		return false
 	}
 	s.executeStepTransition(ctx, taskID, sessionID, currentStep, targetStepID, true)
+	return true
+}
+
+func (s *Service) shouldSkipLegacyTurnCompletion(
+	task *models.Task,
+	session *models.TaskSession,
+	cause turnCompletionCause,
+) bool {
+	if task == nil || session == nil || session.ID == "" || s.workflowStepGetter == nil {
+		return true
+	}
+	if cause != turnCompletionCauseUserCancellation {
+		return false
+	}
+	if isTerminalSessionState(session.State) {
+		return true
+	}
+	if task.IsEphemeral || task.IsFromOffice || taskArchived(task) {
+		s.logger.Debug("skipping user cancellation completion for ineligible task",
+			zap.String("task_id", task.ID))
+		return true
+	}
+	return false
+}
+
+func (s *Service) loadLegacyTurnCompletionStep(
+	ctx context.Context,
+	task *models.Task,
+	session *models.TaskSession,
+) (*wfmodels.WorkflowStep, bool) {
+	if task.WorkflowStepID == "" {
+		s.logger.Debug("task has no workflow step, skipping transition",
+			zap.String("session_id", session.ID))
+		return nil, false
+	}
+	currentStep, err := s.workflowStepGetter.GetStep(ctx, task.WorkflowStepID)
+	if err != nil || currentStep == nil {
+		s.logger.Warn("failed to get workflow step for transition",
+			zap.String("workflow_step_id", task.WorkflowStepID),
+			zap.Error(err))
+		return nil, false
+	}
+	return currentStep, true
+}
+
+func (s *Service) shouldRunLegacyTurnCompletion(
+	ctx context.Context,
+	task *models.Task,
+	session *models.TaskSession,
+	currentStep *wfmodels.WorkflowStep,
+	cause turnCompletionCause,
+) bool {
+	if len(currentStep.Events.OnTurnComplete) == 0 {
+		s.logger.Debug("step has no on_turn_complete actions, waiting for user",
+			zap.String("step_id", currentStep.ID),
+			zap.String("step_name", currentStep.Name))
+		s.setSessionWaitingForInput(ctx, task.ID, session.ID, session)
+		return false
+	}
+	if cause == turnCompletionCauseUserCancellation && !currentStep.CancelTriggersTurnComplete {
+		s.logger.Debug("user cancellation completion is disabled for step",
+			zap.String("step_id", currentStep.ID),
+			zap.String("step_name", currentStep.Name))
+		return false
+	}
+	if s.turnCompleteBlockedByUserInput(ctx, task.ID, session.ID, session) {
+		return false
+	}
+	if cause != turnCompletionCauseUserCancellation && currentStep.AutoAdvanceRequiresSignal {
+		signal, has := models.LoadPendingStepSignal(session.Metadata)
+		if !has || signal.StepID != currentStep.ID {
+			s.logger.Debug("on_turn_complete gated on explicit signal (legacy path)",
+				zap.String("step_id", currentStep.ID))
+			s.setSessionWaitingForInput(ctx, task.ID, session.ID, session)
+			return false
+		}
+	}
 	return true
 }
 
@@ -214,6 +268,9 @@ func (s *Service) ProcessOnTurnStart(ctx context.Context, taskID, sessionID stri
 	defer release()
 	lock.Lock()
 	defer lock.Unlock()
+	if err := s.waitForCancellationWithGuard(ctx, sessionID, lock.Unlock, lock.Lock); err != nil {
+		return err
+	}
 
 	session, err := s.repo.GetTaskSession(ctx, sessionID)
 	if err != nil {
@@ -1071,6 +1128,11 @@ func (s *Service) processOnEnter(ctx context.Context, taskID string, session *mo
 		s.markIdleAfterReset(ctx, taskID, sessionID, session, step, isPassthrough)
 	}
 
+	// Conditional session configuration is applied after a context reset so the
+	// new ACP session receives the workflow-selected settings before any
+	// auto-start prompt is dispatched. It never switches or creates a tab.
+	s.applyWorkflowSessionConfigOnEnter(ctx, taskID, session, step)
+
 	hasAutoStart := false
 	for _, action := range step.Events.OnEnter {
 		switch action.Type {
@@ -1089,8 +1151,8 @@ func (s *Service) processOnEnter(ctx context.Context, taskID string, session *mo
 	}
 
 	switch {
-	case hasAutoStart && isPassthrough:
-		// Passthrough path: write prompt directly to PTY stdin.
+	case hasAutoStart && isPassthrough && session.State != models.TaskSessionStateCreated:
+		// Started passthrough path: write prompt directly to PTY stdin.
 		// By the time processOnEnter runs (from an on_turn_complete transition),
 		// the agent has finished its previous turn and the PTY is waiting for input.
 		effectivePrompt := s.buildWorkflowPrompt(ctx, taskDescription, step, taskID, sessionID, isPassthrough)
@@ -1364,6 +1426,11 @@ func (s *Service) drainQueuedMessageForPromptableSession(ctx context.Context, se
 	defer release()
 	lock.Lock()
 	defer lock.Unlock()
+	if s.isCancelInFlight(sessionID) {
+		s.logger.Debug("skipping drain while cancellation is in progress",
+			zap.String("session_id", sessionID))
+		return false
+	}
 
 	session, err := s.repo.GetTaskSession(ctx, sessionID)
 	if err != nil {
@@ -1386,12 +1453,11 @@ func (s *Service) drainQueuedMessageForPromptableSession(ctx context.Context, se
 // public drainQueuedMessageForPromptableSession instead when the guard is
 // not already held.
 //
-// Backs off without taking anything when isQueuedDispatchInFlight reports
-// a different dispatch already handed off for this session — see the
-// Service.dispatchingQueued field doc comment for the double-dispatch
-// window this closes.
+// Backs off without taking anything when any queued dispatch is still settling
+// for this session. Send Now uses the phase-specific helpers to supersede only
+// a pending automatic FIFO reservation.
 func (s *Service) drainQueuedMessageForPromptableSessionLocked(ctx context.Context, sessionID string) bool {
-	if s.messageQueue == nil || s.isQueuedDispatchInFlight(sessionID) {
+	if s.messageQueue == nil || s.isCancelInFlight(sessionID) || s.isQueuedDispatchInFlight(sessionID) {
 		return false
 	}
 	queuedMsg, ok := s.messageQueue.ReserveQueued(ctx, sessionID)
@@ -1414,13 +1480,11 @@ func (s *Service) dispatchTakenQueuedMessage(ctx context.Context, sessionID stri
 			zap.String("queue_id", queuedMsg.ID))
 		return false
 	}
-	// Reserve entryID as sessionID's "dispatch in flight" token *before*
-	// handing off to the async goroutine — see the Service.dispatchingQueued
-	// field doc comment for why session.State alone isn't a reliable busy
-	// signal until executeQueuedMessage's own promptTask call reaches its
-	// guarded claim step, several DB round-trips later.
-	s.markQueuedDispatchInFlight(sessionID, queuedMsg.ID)
-	go s.executeQueuedMessage(sessionID, queuedMsg)
+	// Reserve entryID before handing off to the async goroutine. The worker
+	// transitions this reservation to accepted under the same guard used by
+	// Send Now before it performs any visible prompt side effects.
+	reservation := s.markQueuedDispatchInFlightWithSourceLocked(sessionID, queuedMsg.ID, queuedMsg)
+	go s.executeQueuedMessageWithReservation(sessionID, queuedMsg, reservation)
 	return true
 }
 
@@ -1518,6 +1582,42 @@ func workflowMessageMetadata(planMode bool, origin workflowMessageOrigin, refere
 	return meta
 }
 
+// handleCreatedAutoStartLaunchFailure preserves a workflow prompt when the
+// created-session launch loses a concurrent-start race. The prompt was already
+// recorded in chat history, so queueing it is the only way to deliver it after
+// the session becomes ready. If queueing is not applicable or fails, restore
+// the hand-off message that was taken before the prompt was merged.
+func (s *Service) handleCreatedAutoStartLaunchFailure(
+	ctx context.Context,
+	taskID, sessionID, stepName, prompt string,
+	launchErr error,
+	planMode, shouldQueueIfBusy, userMessageRecorded bool,
+	attachments []v1.MessageAttachment,
+	origin workflowMessageOrigin,
+	references []v1.EntityReference,
+	takenMsg *messagequeue.QueuedMessage,
+) {
+	promptQueued := false
+	if shouldQueueIfBusy && (isAgentAlreadyRunningError(launchErr) ||
+		isSessionBusyError(launchErr) || isTransientPromptError(launchErr)) {
+		if queueErr := s.queueAutoStartPrompt(
+			ctx, taskID, sessionID, prompt, planMode,
+			attachments, origin, userMessageRecorded, references,
+		); queueErr != nil {
+			s.logger.Warn("failed to queue auto-start prompt after launch failure",
+				zap.String("task_id", taskID),
+				zap.String("session_id", sessionID),
+				zap.String("step_name", stepName),
+				zap.Error(queueErr))
+		} else {
+			promptQueued = true
+		}
+	}
+	if !promptQueued && takenMsg != nil {
+		s.requeueMessage(ctx, takenMsg, takenMsg.QueuedBy)
+	}
+}
+
 func (s *Service) autoStartStepPrompt(
 	ctx context.Context,
 	taskID string, session *models.TaskSession, step *wfmodels.WorkflowStep, prompt string,
@@ -1570,12 +1670,26 @@ func (s *Service) autoStartStepPrompt(
 	// Passthrough sessions skip the wrap: the prompt is typed straight into
 	// the agent CLI's TTY and the user sees it verbatim.
 	recordedPrompt := agentPrompt
-	if session.State == models.TaskSessionStateCreated && !session.IsPassthrough && (agentPrompt != "" || len(attachments) > 0) {
-		isOfficeTask, err := s.lookupOfficeTask(ctx, taskID)
-		if err != nil {
+	titleOwner := false
+	isOfficeTask := false
+	if session.State == models.TaskSessionStateCreated {
+		var officeErr error
+		isOfficeTask, officeErr = s.lookupOfficeTask(ctx, taskID)
+		if officeErr != nil {
 			requeueTaken()
-			return fmt.Errorf("resolve MCP mode for workflow auto-start: %w", err)
+			return fmt.Errorf("resolve MCP mode for workflow auto-start: %w", officeErr)
 		}
+		configMode, _ := session.Metadata["config_mode"].(bool)
+		if !configMode && !isOfficeTask {
+			var claimErr error
+			titleOwner, claimErr = s.ClaimTaskTitleSession(ctx, taskID, sessionID)
+			if claimErr != nil {
+				requeueTaken()
+				return fmt.Errorf("claim task title for workflow auto-start: %w", claimErr)
+			}
+		}
+	}
+	if session.State == models.TaskSessionStateCreated && !session.IsPassthrough && (agentPrompt != "" || len(attachments) > 0) {
 		configMode, _ := session.Metadata["config_mode"].(bool)
 		requiresSignal := step != nil && step.AutoAdvanceRequiresSignal
 		referenceContext := EntityReferenceContext(references)
@@ -1585,6 +1699,7 @@ func (s *Service) autoStartStepPrompt(
 			recordedPrompt = sysprompt.InjectKandevContextWithOptions(taskID, sessionID, agentPrompt, sysprompt.KandevContextOptions{
 				RequiresCompletionSignal:       requiresSignal,
 				IncludeCoordinatorTaskControls: !configMode,
+				IncludeTaskTitleTool:           !configMode && titleOwner,
 			}, referenceContext)
 		}
 	}
@@ -1604,7 +1719,11 @@ func (s *Service) autoStartStepPrompt(
 			recordedPrompt, true, planMode, true, attachments, references,
 		)
 		if err != nil {
-			requeueTaken()
+			s.handleCreatedAutoStartLaunchFailure(
+				ctx, taskID, sessionID, stepName, prompt, err,
+				planMode, shouldQueueIfBusy, userMsgRecorded,
+				attachments, origin, references, takenMsg,
+			)
 		}
 		return err
 	}
@@ -1704,6 +1823,12 @@ func (s *Service) fallbackFreshLaunchOnMissingExecution(
 	// the guarded state CAS below sees CANCELLED and aborts the replacement.
 	cancelLock, releaseCancelLock := s.acquireCancelInFlightGuard(sessionID)
 	cancelLock.Lock()
+	if s.isCancelInFlight(sessionID) {
+		cancelLock.Unlock()
+		releaseCancelLock()
+		requeue()
+		return &executor.SessionStateSupersededError{SessionID: sessionID, State: models.TaskSessionStateCancelled}
+	}
 	fresh, err := s.resetSessionForFreshFallback(ctx, sessionID)
 	cancelLock.Unlock()
 	releaseCancelLock()
@@ -1791,9 +1916,11 @@ func (s *Service) takeAndMergeHandoffMessage(ctx context.Context, sessionID, bas
 		for _, a := range msg.Attachments {
 			attachments = append(attachments, v1.MessageAttachment{
 				Type:         a.Type,
+				AttachmentID: a.AttachmentID,
 				Data:         a.Data,
 				MimeType:     a.MimeType,
 				Name:         a.Name,
+				SizeBytes:    a.SizeBytes,
 				DeliveryMode: a.DeliveryMode,
 			})
 		}
@@ -1876,9 +2003,11 @@ func toQueuedAttachments(attachments []v1.MessageAttachment) []messagequeue.Mess
 	for _, attachment := range attachments {
 		queued = append(queued, messagequeue.MessageAttachment{
 			Type:         attachment.Type,
+			AttachmentID: attachment.AttachmentID,
 			Data:         attachment.Data,
 			MimeType:     attachment.MimeType,
 			Name:         attachment.Name,
+			SizeBytes:    attachment.SizeBytes,
 			DeliveryMode: attachment.DeliveryMode,
 		})
 	}
@@ -2048,6 +2177,22 @@ func (s *Service) markIdleAfterReset(
 // the agent's conversation context. The workspace environment is preserved.
 func (s *Service) resetAgentContext(ctx context.Context, taskID string, session *models.TaskSession, stepName string) bool {
 	sessionID := session.ID
+
+	// A CREATED session has never been prompted, so there is no agent
+	// conversation to clear. Its execution may still be workspace-only
+	// (prepared, never started), in which case a "restart" here would *start*
+	// the subprocess — and auto_start_agent, which reads State==CREATED as
+	// "the agent was never started", would then start it a second time. The
+	// second start is rejected by agentctl's running-process guard, failing
+	// the task and dropping the step prompt. Leave the start to
+	// autoStartStepPrompt: the process it launches begins on a fresh ACP
+	// session regardless, so nothing is lost by skipping.
+	if session.State == models.TaskSessionStateCreated {
+		s.logger.Debug("session has no agent context to reset, skipping",
+			zap.String("session_id", sessionID),
+			zap.String("step_name", stepName))
+		return true
+	}
 
 	executionID, err := s.agentManager.GetExecutionIDForSession(ctx, sessionID)
 	if err != nil || executionID == "" {
@@ -2378,6 +2523,15 @@ func assembleMachineState(task *models.Task, session *models.TaskSession, isPass
 // actions and drive step transitions. Falls back to the legacy method when the engine
 // is not initialized. Returns true if a step transition occurred.
 func (s *Service) processOnTurnCompleteViaEngine(ctx context.Context, taskID string, session *models.TaskSession) bool {
+	return s.processOnTurnCompleteViaEngineWithCause(ctx, taskID, session, turnCompletionCauseAgentTurn)
+}
+
+func (s *Service) processOnTurnCompleteViaEngineWithCause(
+	ctx context.Context,
+	taskID string,
+	session *models.TaskSession,
+	cause turnCompletionCause,
+) bool {
 	task, err := s.repo.GetTask(ctx, taskID)
 	if err != nil {
 		s.logger.Warn("failed to load task for on_turn_complete",
@@ -2387,66 +2541,11 @@ func (s *Service) processOnTurnCompleteViaEngine(ctx context.Context, taskID str
 	}
 
 	if s.workflowEngine == nil {
-		return s.processOnTurnComplete(ctx, task, session)
+		return s.processOnTurnCompleteWithCause(ctx, task, session, cause)
 	}
 
-	if session.ID == "" || s.workflowStepGetter == nil {
+	if !s.prepareEngineTurnCompletion(ctx, taskID, task, session, cause) {
 		return false
-	}
-
-	if task.WorkflowStepID == "" {
-		s.setSessionWaitingForInput(ctx, taskID, session.ID, session)
-		return false
-	}
-
-	// Skip workflow step actions for ephemeral tasks (quick chat) - they have no workflow
-	if task.IsEphemeral {
-		s.setSessionWaitingForInput(ctx, taskID, session.ID, session)
-		return false
-	}
-
-	// ADR 0015 — explicit completion signal gating. Steps marked
-	// `auto_advance_requires_signal=true` only transition when the agent
-	// (or the manual fallback button) has written the pending bag entry.
-	// On gate-fail we set the session to WAITING_FOR_INPUT and bail —
-	// either the user replies (clearing the bag) or a later
-	// step_complete_kandev call triggers the out-of-band subscriber.
-	//
-	// Fail closed on step-load errors: a missing/broken step record must
-	// not silently bypass the gate (which would let a signal-required step
-	// auto-advance whenever the loader hiccups). Block the transition and
-	// let the next turn re-evaluate after the underlying error clears.
-	currentStep, stepErr := s.workflowStepGetter.GetStep(ctx, task.WorkflowStepID)
-	if stepErr != nil || currentStep == nil {
-		s.logger.Warn("on_turn_complete: failed to load current step for signal gating, blocking transition",
-			zap.String("task_id", taskID),
-			zap.String("session_id", session.ID),
-			zap.String("step_id", task.WorkflowStepID),
-			zap.Error(stepErr))
-		s.setSessionWaitingForInput(ctx, taskID, session.ID, session)
-		return false
-	}
-	if s.turnCompleteBlockedByUserInput(ctx, taskID, session.ID, session) {
-		return false
-	}
-	if currentStep.AutoAdvanceRequiresSignal {
-		signal, has := models.LoadPendingStepSignal(session.Metadata)
-		if !has || signal.StepID != task.WorkflowStepID {
-			s.logger.Debug("on_turn_complete gated on explicit signal (none received yet)",
-				zap.String("task_id", taskID),
-				zap.String("session_id", session.ID),
-				zap.String("step_id", task.WorkflowStepID))
-			s.setSessionWaitingForInput(ctx, taskID, session.ID, session)
-			return false
-		}
-		s.logger.Info("on_turn_complete consuming explicit signal",
-			zap.String("task_id", taskID),
-			zap.String("session_id", session.ID),
-			zap.String("step_id", task.WorkflowStepID),
-			zap.String("source", signal.Source))
-		// Bag is consumed once the transition executes (in
-		// applyEngineTransition's stamp + clear), so don't clear here —
-		// otherwise a failed transition would lose the signal.
 	}
 
 	state := s.buildMachineState(ctx, task, session)
@@ -2478,6 +2577,105 @@ func (s *Service) processOnTurnCompleteViaEngine(ctx context.Context, taskID str
 		zap.String("to_step_id", result.ToStepID))
 
 	return s.applyEngineTransition(ctx, taskID, session, result, engine.TriggerOnTurnComplete, task.Description, true)
+}
+
+func (s *Service) prepareEngineTurnCompletion(
+	ctx context.Context,
+	taskID string,
+	task *models.Task,
+	session *models.TaskSession,
+	cause turnCompletionCause,
+) bool {
+	if s.shouldSkipEngineTurnCompletion(ctx, taskID, task, session, cause) {
+		return false
+	}
+
+	// ADR 0015 — explicit completion signal gating. Steps marked
+	// `auto_advance_requires_signal=true` only transition when the agent
+	// (or the manual fallback button) has written the pending bag entry.
+	// On gate-fail we set the session to WAITING_FOR_INPUT and bail —
+	// either the user replies (clearing the bag) or a later
+	// step_complete_kandev call triggers the out-of-band subscriber.
+	//
+	// Fail closed on step-load errors: a missing/broken step record must
+	// not silently bypass the gate (which would let a signal-required step
+	// auto-advance whenever the loader hiccups). Block the transition and
+	// let the next turn re-evaluate after the underlying error clears.
+	currentStep, stepErr := s.workflowStepGetter.GetStep(ctx, task.WorkflowStepID)
+	if stepErr != nil || currentStep == nil {
+		s.logger.Warn("on_turn_complete: failed to load current step for signal gating, blocking transition",
+			zap.String("task_id", taskID),
+			zap.String("session_id", session.ID),
+			zap.String("step_id", task.WorkflowStepID),
+			zap.Error(stepErr))
+		s.setSessionWaitingForInput(ctx, taskID, session.ID, session)
+		return false
+	}
+	if s.turnCompleteBlockedByUserInput(ctx, taskID, session.ID, session) {
+		return false
+	}
+	if cause == turnCompletionCauseUserCancellation && !currentStep.CancelTriggersTurnComplete {
+		s.logger.Debug("user cancellation completion is disabled for step",
+			zap.String("task_id", taskID),
+			zap.String("session_id", session.ID),
+			zap.String("step_id", currentStep.ID))
+		return false
+	}
+	return s.allowEngineSignalCompletion(ctx, taskID, session, currentStep, cause)
+}
+
+func (s *Service) shouldSkipEngineTurnCompletion(
+	ctx context.Context,
+	taskID string,
+	task *models.Task,
+	session *models.TaskSession,
+	cause turnCompletionCause,
+) bool {
+	if session == nil || session.ID == "" || s.workflowStepGetter == nil {
+		return true
+	}
+	if task.WorkflowStepID == "" {
+		s.setSessionWaitingForInput(ctx, taskID, session.ID, session)
+		return true
+	}
+	// Skip workflow step actions for ephemeral tasks (quick chat) - they have no workflow.
+	// Explicit user cancellation also excludes Office and archived tasks: their
+	// lifecycle is owned by their scheduler/archive path, not Kanban completion.
+	if task.IsEphemeral || (cause == turnCompletionCauseUserCancellation && (task.IsFromOffice || taskArchived(task))) {
+		s.setSessionWaitingForInput(ctx, taskID, session.ID, session)
+		return true
+	}
+	return false
+}
+
+func (s *Service) allowEngineSignalCompletion(
+	ctx context.Context,
+	taskID string,
+	session *models.TaskSession,
+	currentStep *wfmodels.WorkflowStep,
+	cause turnCompletionCause,
+) bool {
+	if cause == turnCompletionCauseUserCancellation || !currentStep.AutoAdvanceRequiresSignal {
+		return true
+	}
+	signal, has := models.LoadPendingStepSignal(session.Metadata)
+	if !has || signal.StepID != currentStep.ID {
+		s.logger.Debug("on_turn_complete gated on explicit signal (none received yet)",
+			zap.String("task_id", taskID),
+			zap.String("session_id", session.ID),
+			zap.String("step_id", currentStep.ID))
+		s.setSessionWaitingForInput(ctx, taskID, session.ID, session)
+		return false
+	}
+	s.logger.Info("on_turn_complete consuming explicit signal",
+		zap.String("task_id", taskID),
+		zap.String("session_id", session.ID),
+		zap.String("step_id", currentStep.ID),
+		zap.String("source", signal.Source))
+	// Bag is consumed once the transition executes (in
+	// applyEngineTransition's stamp + clear), so don't clear here —
+	// otherwise a failed transition would lose the signal.
+	return true
 }
 
 // applyEngineTransition applies an engine-evaluated transition: on_exit, DB transition,

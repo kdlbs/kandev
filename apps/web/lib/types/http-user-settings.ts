@@ -3,6 +3,7 @@ import type { VoiceModeSettings } from "./http-voice";
 
 export type MCPTaskAgentProfileDefault = "current_task" | "workspace_default";
 export type StartupPage = "task_overview" | "last_task";
+export type LspStatusLocation = "toolbar" | "status_bar";
 
 export type SavedLayout = {
   id: string;
@@ -68,12 +69,14 @@ export type UserSettings = {
   review_auto_mark_on_scroll?: boolean;
   confirm_task_archive?: boolean;
   unread_divider?: boolean;
+  agent_generated_task_titles?: boolean;
   mcp_task_agent_profile_default?: MCPTaskAgentProfileDefault;
   show_release_notification?: boolean;
   release_notes_last_seen_version?: string;
   lsp_auto_start_languages?: string[];
   lsp_auto_install_languages?: string[];
   lsp_server_configs?: Record<string, Record<string, unknown>>;
+  lsp_status_location?: LspStatusLocation;
   saved_layouts?: SavedLayout[];
   sidebar_views?: SidebarViewApi[];
   sidebar_active_view_id?: string;
@@ -85,6 +88,7 @@ export type UserSettings = {
   github_saved_presets?: unknown;
   github_default_query_presets?: unknown;
   gitlab_saved_presets?: unknown;
+  azure_devops_browse_preferences?: unknown;
   default_utility_agent_id?: string;
   default_utility_model?: string;
   keyboard_shortcuts?: Record<string, { key: string; modifiers?: Record<string, boolean> }>;
@@ -123,12 +127,14 @@ export type UserSettingsUpdatePayload = {
   review_auto_mark_on_scroll?: boolean;
   confirm_task_archive?: boolean;
   unread_divider?: boolean;
+  agent_generated_task_titles?: boolean;
   mcp_task_agent_profile_default?: MCPTaskAgentProfileDefault;
   show_release_notification?: boolean;
   release_notes_last_seen_version?: string;
   lsp_auto_start_languages?: string[];
   lsp_auto_install_languages?: string[];
   lsp_server_configs?: Record<string, Record<string, unknown>>;
+  lsp_status_location?: LspStatusLocation;
   saved_layouts?: SavedLayout[];
   sidebar_views?: SidebarViewApi[];
   sidebar_active_view_id?: string;
@@ -140,6 +146,7 @@ export type UserSettingsUpdatePayload = {
   github_saved_presets?: unknown[] | null;
   github_default_query_presets?: object | null;
   gitlab_saved_presets?: unknown[] | null;
+  azure_devops_browse_preferences?: object | null;
   default_utility_agent_id?: string;
   default_utility_model?: string;
   keyboard_shortcuts?: Record<string, { key: string; modifiers?: Record<string, boolean> }>;

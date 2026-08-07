@@ -8,12 +8,13 @@ import (
 	"regexp"
 	"sort"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/kandev/kandev/internal/agentctl/server/process"
+	"github.com/kandev/kandev/internal/common/subproc"
 	"go.uber.org/zap"
+	"golang.org/x/sync/errgroup"
 )
 
 // safeBranchRefPattern mirrors the one in workspace_git_status.go so the
@@ -56,6 +57,11 @@ type GitPushRequest struct {
 	Force       bool   `json:"force"`
 	SetUpstream bool   `json:"set_upstream"`
 	Repo        string `json:"repo,omitempty"`
+}
+
+// GitPushPreflightRequest for POST /api/v1/git/push-preflight.
+type GitPushPreflightRequest struct {
+	Repo string `json:"repo,omitempty"`
 }
 
 // GitRebaseRequest for POST /api/v1/git/rebase
@@ -213,6 +219,26 @@ func (s *Server) handleGitPush(c *gin.Context) {
 		return
 	}
 
+	c.JSON(http.StatusOK, result)
+}
+
+func (s *Server) handleGitPushPreflight(c *gin.Context) {
+	var req GitPushPreflightRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, process.GitOperationResult{
+			Success: false, Operation: "push_preflight", Error: "invalid request: " + err.Error(),
+		})
+		return
+	}
+	gitOp := s.gitOpForRepo(c, "push preflight", req.Repo)
+	if gitOp == nil {
+		return
+	}
+	result, err := gitOp.PushPreflight(c.Request.Context())
+	if err != nil {
+		s.handleGitError(c, "push preflight", err)
+		return
+	}
 	c.JSON(http.StatusOK, result)
 }
 
@@ -667,13 +693,17 @@ func (s *Server) handleGitLog(c *gin.Context) {
 	}
 
 	if req.Repo == "" {
-		if subs := s.procMgr.RepoSubpaths(); len(subs) > 0 {
-			s.handleGitLogMultiRepo(c, req, subs, limit)
+		if scopes := s.procMgr.RepositoryScopes(); shouldFanOutRepositoryScopes(scopes) {
+			s.handleGitLogMultiRepo(c, req, scopes, limit)
 			return
 		}
 	}
 
-	result, err := s.runGitLogForRepo(c, req, limit, req.Repo)
+	// c.Request.Context(), not c: *gin.Context satisfies context.Context, so
+	// passing c compiles but hands over a context whose Done() is nil unless
+	// ContextWithFallback is set — which it is not here. The git subprocesses
+	// would then outlive a client disconnect.
+	result, err := s.runGitLogForRepo(c.Request.Context(), req, limit, req.Repo)
 	if err != nil {
 		s.handleGitError(c, "log", err)
 		return
@@ -700,7 +730,7 @@ func (s *Server) computeMergeBase(
 // runGitLogForRepo runs git log against a single repo subpath. Returns a
 // result-with-error or a non-nil error for transport failures.
 func (s *Server) runGitLogForRepo(
-	c *gin.Context,
+	ctx context.Context,
 	req GitLogRequest,
 	limit int,
 	repo string,
@@ -726,7 +756,7 @@ func (s *Server) runGitLogForRepo(
 		req.TargetBranch = ""
 	}
 	if req.TargetBranch != "" {
-		mergeBase, err := s.computeMergeBase(c.Request.Context(), gitOp, req.TargetBranch)
+		mergeBase, err := s.computeMergeBase(ctx, gitOp, req.TargetBranch)
 		if err == nil && mergeBase != "" {
 			baseCommit = mergeBase
 		} else {
@@ -738,7 +768,7 @@ func (s *Server) runGitLogForRepo(
 			// into the workspace's full HEAD history, mismatching the
 			// numstat-driven stats which fall through cleanly to per-file
 			// sums in the same scenario.
-			if tip, tipErr := gitOp.GetRevParse(c.Request.Context(), req.TargetBranch); tipErr == nil && tip != "" {
+			if tip, tipErr := gitOp.GetRevParse(ctx, req.TargetBranch); tipErr == nil && tip != "" {
 				baseCommit = tip
 			} else if err != nil {
 				s.logger.Warn("failed to compute merge-base and branch tip, falling back to since",
@@ -753,13 +783,13 @@ func (s *Server) runGitLogForRepo(
 		// ref, so a live non-default target (e.g. origin/develop) keeps its own
 		// authoritative merge-base. No-op when the base is already current.
 		baseCommit = gitOp.CorrectStaleComparisonBase(
-			c.Request.Context(),
+			ctx,
 			baseCommit,
 			req.TargetBranch,
 		)
 	}
 
-	return gitOp.GetLog(c.Request.Context(), baseCommit, limit)
+	return gitOp.GetLog(ctx, baseCommit, limit)
 }
 
 // perRepoLogOutcome captures the outcome of running git log against a single
@@ -851,37 +881,51 @@ func (s *Server) handleGitLogMultiRepo(
 	subpaths []string,
 	limit int,
 ) {
-	outcomes := make([]perRepoLogOutcome, 0, len(subpaths))
-	for _, sub := range subpaths {
-		// Multi-repo: the caller-supplied `since` is a SHA that only exists in
-		// the primary repo, and `target_branch` is the primary repo's base
-		// branch (e.g. "main"). Both can be wrong for sibling repos — running
-		// `git log <foreign-sha>..HEAD` in lvc fails outright and the repo's
-		// commits silently disappear from the merged response. Compute a
-		// per-repo base through the workspace tracker so the task's configured
-		// base branch and normal integration-branch fallbacks both work.
-		perRepoReq := req
-		perRepoReq.Since = ""
-		perRepoReq.TargetBranch = ""
-		if base := s.resolvePerRepoBase(c, sub); base != "" {
-			perRepoReq.Since = base
-		}
-		result, err := s.runGitLogForRepo(c, perRepoReq, limit, sub)
-		if err != nil {
-			s.logger.Warn("git log for repo failed",
-				zap.String("repo", sub), zap.Error(err))
-		} else if !result.Success {
-			s.logger.Warn("git log for repo returned failure",
-				zap.String("repo", sub), zap.String("error", result.Error))
-		}
-		outcomes = append(outcomes, perRepoLogOutcome{
-			subpath: sub,
-			result:  result,
-			err:     err,
-		})
-	}
+	// Parallel fan-out, mirroring handleGitStatusMulti. Each repo is an
+	// independent git invocation against its own worktree, so running them
+	// serially made latency the sum over repositories: on Windows, where a git
+	// spawn alone costs ~150ms, an 11-repo task could exceed the gateway's
+	// 60s singleflight budget and the caller would see a timeout rather than a
+	// slow answer. Writing by index keeps the merge order deterministic.
+	ctx := c.Request.Context()
+	outcomes := fanOutRepos(ctx, subpaths, func(ctx context.Context, sub string) perRepoLogOutcome {
+		return s.collectLogForRepo(ctx, req, limit, sub)
+	})
 
 	c.JSON(http.StatusOK, mergeGitLogResults(outcomes, limit))
+}
+
+// collectLogForRepo runs git log for one repository of a multi-repo fan-out.
+// It takes a plain context and never touches the gin context, which is what
+// makes it safe to call from several goroutines at once.
+func (s *Server) collectLogForRepo(
+	ctx context.Context,
+	req GitLogRequest,
+	limit int,
+	sub string,
+) perRepoLogOutcome {
+	// Multi-repo: the caller-supplied `since` is a SHA that only exists in
+	// the primary repo, and `target_branch` is the primary repo's base
+	// branch (e.g. "main"). Both can be wrong for sibling repos — running
+	// `git log <foreign-sha>..HEAD` in lvc fails outright and the repo's
+	// commits silently disappear from the merged response. Compute a
+	// per-repo base through the workspace tracker so the task's configured
+	// base branch and normal integration-branch fallbacks both work.
+	perRepoReq := req
+	perRepoReq.Since = ""
+	perRepoReq.TargetBranch = ""
+	if base := s.resolvePerRepoBase(ctx, sub); base != "" {
+		perRepoReq.Since = base
+	}
+	result, err := s.runGitLogForRepo(ctx, perRepoReq, limit, sub)
+	if err != nil {
+		s.logger.Warn("git log for repo failed",
+			zap.String("repo", sub), zap.Error(err))
+	} else if !result.Success {
+		s.logger.Warn("git log for repo returned failure",
+			zap.String("repo", sub), zap.String("error", result.Error))
+	}
+	return perRepoLogOutcome{subpath: sub, result: result, err: err}
 }
 
 // handleGitCumulativeDiff handles GET /api/v1/git/cumulative-diff.
@@ -917,15 +961,19 @@ func (s *Server) handleGitCumulativeDiff(c *gin.Context) {
 	}
 
 	if req.Repo == "" {
-		if subs := s.procMgr.RepoSubpaths(); len(subs) > 0 {
-			s.handleGitCumulativeDiffMultiRepo(c, req, subs)
+		if scopes := s.procMgr.RepositoryScopes(); shouldFanOutRepositoryScopes(scopes) {
+			s.handleGitCumulativeDiffMultiRepo(c, req, scopes)
 			return
 		}
 	}
 
-	result := s.runGitCumulativeDiffForRepo(c, req.Base, req.TargetBranch, req.Repo)
-	if result == nil {
-		return // gitOp lookup error already wrote the response
+	result, status, err := s.runGitCumulativeDiffForRepo(c.Request.Context(), req.Base, req.TargetBranch, req.Repo)
+	if err != nil {
+		c.JSON(status, process.CumulativeDiffResult{
+			Success: false,
+			Error:   err.Error(),
+		})
+		return
 	}
 	c.JSON(http.StatusOK, result)
 }
@@ -940,19 +988,15 @@ func (s *Server) handleGitCumulativeDiff(c *gin.Context) {
 // the diff updates as main moves forward and excludes file changes brought
 // in via merges from main.
 func (s *Server) runGitCumulativeDiffForRepo(
-	c *gin.Context,
+	ctx context.Context,
 	base, targetBranch, repo string,
-) *process.CumulativeDiffResult {
+) (*process.CumulativeDiffResult, int, error) {
 	gitOp, gitOpErr := s.procMgr.GitOperatorFor(repo)
 	if gitOpErr != nil {
-		c.JSON(http.StatusBadRequest, process.CumulativeDiffResult{
-			Success: false,
-			Error:   gitOpErr.Error(),
-		})
-		return nil
+		return nil, http.StatusBadRequest, gitOpErr
 	}
 	if targetBranch != "" {
-		switch mb, err := s.computeMergeBase(c.Request.Context(), gitOp, targetBranch); {
+		switch mb, err := s.computeMergeBase(ctx, gitOp, targetBranch); {
 		case err != nil:
 			s.logger.Warn("cumulative diff: merge-base failed, using stored base",
 				zap.String("target_branch", targetBranch),
@@ -973,21 +1017,17 @@ func (s *Server) runGitCumulativeDiffForRepo(
 		// the diff excludes changes that already landed on the integration
 		// branch. Only fires when the target has no live upstream ref. No-op
 		// when the base is already current.
-		base = gitOp.CorrectStaleComparisonBase(c.Request.Context(), base, targetBranch)
+		base = gitOp.CorrectStaleComparisonBase(ctx, base, targetBranch)
 	}
-	result, err := gitOp.GetCumulativeDiff(c.Request.Context(), base)
+	result, err := gitOp.GetCumulativeDiff(ctx, base)
 	if err != nil {
 		s.logger.Error("git cumulative diff failed",
 			zap.String("base", base),
 			zap.String("repo", repo),
 			zap.Error(err))
-		c.JSON(http.StatusInternalServerError, process.CumulativeDiffResult{
-			Success: false,
-			Error:   err.Error(),
-		})
-		return nil
+		return nil, http.StatusInternalServerError, err
 	}
-	return result
+	return result, http.StatusOK, nil
 }
 
 // handleGitCumulativeDiffMultiRepo fans cumulative diff out across every
@@ -1002,39 +1042,128 @@ func (s *Server) handleGitCumulativeDiffMultiRepo(
 	req GitCumulativeDiffRequest,
 	subpaths []string,
 ) {
+	// Parallel fan-out for the same reason as handleGitLogMultiRepo: each repo
+	// is an independent git invocation, and serially the request took the sum
+	// over repositories, which on Windows is enough to blow the gateway's 60s
+	// budget on a task with many repos.
+	ctx := c.Request.Context()
+	outcomes := fanOutRepos(ctx, subpaths, func(ctx context.Context, sub string) perRepoDiffOutcome {
+		return s.collectCumulativeDiffForRepo(ctx, sub)
+	})
+
+	// Merging stays sequential: it writes into one shared map, and doing it in
+	// subpath order keeps the merged output independent of goroutine timing.
 	merged := process.CumulativeDiffResult{
 		Files:   make(map[string]interface{}),
 		Success: true,
 	}
 	anyOK := false
-	for _, sub := range subpaths {
-		base := s.resolvePerRepoBase(c, sub)
-		if base == "" {
-			s.logger.Warn("cumulative diff: no per-repo base, skipping",
-				zap.String("repo", sub))
-			continue
+	for _, outcome := range outcomes {
+		// A hard failure still aborts the whole request, as it did serially.
+		// Reporting the first one in subpath order rather than the first to
+		// occur keeps the response deterministic now that the repos race.
+		if outcome.err != nil {
+			c.JSON(outcome.status, process.CumulativeDiffResult{
+				Success: false,
+				Error:   outcome.err.Error(),
+			})
+			return
 		}
-		// Multi-repo: base is already resolved per-repo via resolvePerRepoBase,
-		// so we pass empty target_branch to skip the second merge-base attempt.
-		result := s.runGitCumulativeDiffForRepo(c, base, "", sub)
-		if result == nil {
-			return // response already written
+		if outcome.result == nil {
+			continue // no per-repo base; already logged
 		}
-		if !result.Success {
+		if !outcome.result.Success {
 			s.logger.Warn("cumulative diff for repo returned failure",
-				zap.String("repo", sub),
-				zap.String("error", result.Error))
+				zap.String("repo", outcome.subpath),
+				zap.String("error", outcome.result.Error))
 			continue
 		}
 		anyOK = true
-		merged.TotalCommits += result.TotalCommits
-		mergeCumulativeFiles(merged.Files, result.Files, sub, result.BaseCommit)
+		merged.TotalCommits += outcome.result.TotalCommits
+		mergeCumulativeFiles(
+			merged.Files,
+			outcome.result.Files,
+			outcome.subpath,
+			outcome.result.BaseCommit,
+			outcome.isSubmodule,
+		)
 	}
 	if !anyOK {
 		merged.Success = false
 		merged.Error = fmt.Sprintf("cumulative diff failed for all %d repositories", len(subpaths))
 	}
 	c.JSON(http.StatusOK, merged)
+}
+
+// perRepoDiffOutcome carries one repository's cumulative-diff result out of the
+// fan-out. A nil result with a nil error means the repo had no resolvable base
+// and was skipped; a non-nil error is a hard failure that aborts the request,
+// with status holding the code the serial version would have written.
+type perRepoDiffOutcome struct {
+	subpath     string
+	result      *process.CumulativeDiffResult
+	status      int
+	err         error
+	isSubmodule bool
+}
+
+// collectCumulativeDiffForRepo runs the cumulative diff for one repository of a
+// multi-repo fan-out. Like collectLogForRepo it takes a plain context and never
+// writes to the gin context, so it is safe to run concurrently.
+func (s *Server) collectCumulativeDiffForRepo(ctx context.Context, sub string) perRepoDiffOutcome {
+	base, isSubmodule := s.resolvePerRepoBaseAndScope(ctx, sub)
+	if base == "" {
+		s.logger.Warn("cumulative diff: no per-repo base, skipping",
+			zap.String("repo", sub))
+		return perRepoDiffOutcome{subpath: sub, isSubmodule: isSubmodule}
+	}
+	// Multi-repo: base is already resolved per-repo via resolvePerRepoBase,
+	// so we pass empty target_branch to skip the second merge-base attempt.
+	result, status, err := s.runGitCumulativeDiffForRepo(ctx, base, "", sub)
+	return perRepoDiffOutcome{
+		subpath:     sub,
+		result:      result,
+		status:      status,
+		err:         err,
+		isSubmodule: isSubmodule,
+	}
+}
+
+// fanOutRepos runs collect once per repository, concurrently, and returns the
+// results in subpath order regardless of which finished first. Every repository
+// is an independent git invocation against its own worktree, so serial
+// execution made request latency the sum over repositories rather than the
+// slowest one — on Windows, where a git spawn costs ~150ms before doing any
+// work, a task with a dozen repositories could exceed the gateway's 60s budget
+// and the caller would see a timeout instead of a slow answer.
+//
+// Concurrency is bounded by the process-wide Git admission capacity shared with
+// background polling and lifecycle work. The admission controller remains the
+// authority on active subprocesses; this limit only bounds goroutines and queued
+// repository work created by one request.
+
+func fanOutRepos[T any](ctx context.Context, subpaths []string, collect func(context.Context, string) T) []T {
+	results := make([]T, len(subpaths))
+	var group errgroup.Group
+	limit := len(subpaths)
+	if capacity := subproc.GitCapacity(); capacity > 0 && capacity < limit {
+		limit = capacity
+	}
+	group.SetLimit(limit)
+	for i, sub := range subpaths {
+		group.Go(func() error {
+			// collect owns the per-repository result and never returns an
+			// errgroup error. Preserve the caller's context identity here so
+			// request cancellation and context-aware singleflight observers see
+			// the original request boundary rather than an internal wrapper.
+			results[i] = collect(ctx, sub)
+			return nil
+		})
+	}
+	// collect never returns an error — per-repository failures travel inside T
+	// so the merge can report them — so Wait only surfaces context cancellation.
+	_ = group.Wait()
+	return results
 }
 
 // resolvePerRepoBase returns the comparison anchor owned by the repository's
@@ -1046,33 +1175,46 @@ func (s *Server) handleGitCumulativeDiffMultiRepo(
 // comparison policy here using the tracker's resolved base branch.
 // Without this, a repo whose base branch is a merged/deleted stacked parent
 // lingering only as a local ref keeps inflating the commit count and diff.
-func (s *Server) resolvePerRepoBase(c *gin.Context, repo string) string {
+func (s *Server) resolvePerRepoBase(ctx context.Context, repo string) string {
+	base, _ := s.resolvePerRepoBaseAndScope(ctx, repo)
+	return base
+}
+
+// resolvePerRepoBaseAndScope returns the repository's comparison anchor and
+// whether its workspace is a submodule. The metadata travels with cumulative
+// diff results so the frontend can distinguish nested repository scopes from
+// ordinary sibling repositories that merely happen to have a named path.
+func (s *Server) resolvePerRepoBaseAndScope(ctx context.Context, repo string) (string, bool) {
 	tracker, err := s.procMgr.GetWorkspaceTrackerFor(repo)
 	if err != nil {
-		return ""
+		return "", false
 	}
-	ctx := c.Request.Context()
+	isSubmodule := tracker.IsSubmodule()
 	base, baseBranch := tracker.ResolveBaseAnchor(ctx)
 	if base == "" || baseBranch == "" {
-		return base
+		return base, isSubmodule
+	}
+	if isSubmodule {
+		return base, true
 	}
 	gitOp, gitOpErr := s.procMgr.GitOperatorFor(repo)
 	if gitOpErr != nil {
-		return base
+		return base, false
 	}
-	return gitOp.CorrectStaleComparisonBase(ctx, base, baseBranch)
+	return gitOp.CorrectStaleComparisonBase(ctx, base, baseBranch), false
 }
 
 // mergeCumulativeFiles copies per-repo files into the merged map under a
 // `<repo> <path>` key (NUL-separated) and decorates each file payload
-// with `repository_name`, the repo-relative `path`, and the exact old-side
-// `base_ref` used to produce its cumulative diff.
+// with `repository_name`, the repo-relative `path`, the exact old-side
+// `base_ref` used to produce its cumulative diff, and (for nested repository
+// scopes) `is_submodule`.
 // The composite key keeps `README.md` in two repos from clashing in the map;
 // the frontend reads `path` and `repository_name` off the payload so the
 // file tree groups under the repo header without the prefix bleeding into
 // the displayed path. NUL is impossible in real paths, so the key is
 // always uniquely splittable and the displayed path is unaffected.
-func mergeCumulativeFiles(dst, src map[string]interface{}, repo, baseRef string) {
+func mergeCumulativeFiles(dst, src map[string]interface{}, repo, baseRef string, isSubmodule bool) {
 	for path, payload := range src {
 		m, ok := payload.(map[string]interface{})
 		if !ok {
@@ -1086,7 +1228,7 @@ func mergeCumulativeFiles(dst, src map[string]interface{}, repo, baseRef string)
 		// path, and base_ref so the caller's source map isn't mutated. Earlier
 		// code wrote directly to `m`, which permanently rewrote the per-repo result
 		// before it could be reused (e.g. emitted to a second consumer).
-		copied := make(map[string]interface{}, len(m)+3)
+		copied := make(map[string]interface{}, len(m)+4)
 		for k, v := range m {
 			copied[k] = v
 		}
@@ -1095,6 +1237,9 @@ func mergeCumulativeFiles(dst, src map[string]interface{}, repo, baseRef string)
 		if baseRef != "" {
 			copied["base_ref"] = baseRef
 		}
+		if isSubmodule {
+			copied["is_submodule"] = true
+		}
 		dst[fmt.Sprintf("%s\x00%s", repo, path)] = copied
 	}
 }
@@ -1102,6 +1247,7 @@ func mergeCumulativeFiles(dst, src map[string]interface{}, repo, baseRef string)
 // GitStatusResult represents the result of a git status query.
 type GitStatusResult struct {
 	Success         bool                   `json:"success"`
+	IsSubmodule     bool                   `json:"is_submodule,omitempty"`
 	Branch          string                 `json:"branch"`
 	RemoteBranch    string                 `json:"remote_branch"`
 	HeadCommit      string                 `json:"head_commit"`
@@ -1140,6 +1286,17 @@ type MultiRepoGitStatusResult struct {
 	Error   string             `json:"error,omitempty"`
 }
 
+func shouldFanOutRepositoryScopes(scopes []string) bool {
+	if len(scopes) == 0 {
+		return false
+	}
+	return len(scopes) > 1 || scopes[0] != ""
+}
+
+func requiresExplicitRepositoryScope(scopes []string) bool {
+	return len(scopes) > 0 && scopes[0] != ""
+}
+
 // handleGitStatusMulti returns one git status entry per repo for multi-repo
 // task workspaces (or one untagged entry for single-repo). Used by the
 // session-subscribe handler in the main backend to seed per-repo state on
@@ -1149,7 +1306,7 @@ type MultiRepoGitStatusResult struct {
 // status and run a fresh git query — used on WS subscribe so a new observer
 // always validates the cache against the live worktree.
 func (s *Server) handleGitStatusMulti(c *gin.Context) {
-	subpaths := s.procMgr.RepoSubpaths()
+	subpaths := s.procMgr.RepositoryScopes()
 	// Single-repo: fall back to the workspace-root status with an empty repo
 	// name so the response shape stays uniform.
 	if len(subpaths) == 0 {
@@ -1159,15 +1316,10 @@ func (s *Server) handleGitStatusMulti(c *gin.Context) {
 	// Parallel fan-out: fresh=true skips the cache, so serial scales linearly and would blow the 2s subscribe timeout for multi-repo workspaces.
 	result := MultiRepoGitStatusResult{Success: true, Repos: make([]PerRepoGitStatus, len(subpaths))}
 	ctx := c.Request.Context()
-	var wg sync.WaitGroup
-	for i, sub := range subpaths {
-		wg.Add(1)
-		go func(i int, sub string) {
-			defer wg.Done()
-			result.Repos[i] = s.collectStatusForRepo(ctx, sub, fresh)
-		}(i, sub)
-	}
-	wg.Wait()
+	outcomes := fanOutRepos(ctx, subpaths, func(ctx context.Context, sub string) PerRepoGitStatus {
+		return s.collectStatusForRepo(ctx, sub, fresh)
+	})
+	copy(result.Repos, outcomes)
 	c.JSON(http.StatusOK, result)
 }
 
@@ -1206,6 +1358,7 @@ func (s *Server) collectStatusForRepo(ctx context.Context, sub string, fresh boo
 		RepositoryName: sub,
 		Status: GitStatusResult{
 			Success:         true,
+			IsSubmodule:     status.IsSubmodule,
 			Branch:          status.Branch,
 			RemoteBranch:    status.RemoteBranch,
 			HeadCommit:      status.HeadCommit,
@@ -1264,6 +1417,7 @@ func (s *Server) handleGitStatus(c *gin.Context) {
 
 	c.JSON(http.StatusOK, GitStatusResult{
 		Success:         true,
+		IsSubmodule:     status.IsSubmodule,
 		Branch:          status.Branch,
 		RemoteBranch:    status.RemoteBranch,
 		HeadCommit:      status.HeadCommit,

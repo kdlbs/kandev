@@ -1,11 +1,50 @@
 import { test, expect } from "../../fixtures/test-base";
+import type { ApiClient } from "../../helpers/api-client";
 import { SessionPage } from "../../pages/session-page";
+
+type GitSnapshotResponse = {
+  snapshots: Array<{
+    metadata?: { branch_additions?: number; branch_deletions?: number };
+  }>;
+};
+
+async function waitForPersistedDiffSnapshot(apiClient: ApiClient, sessionId: string) {
+  await expect
+    .poll(
+      async () => {
+        const response = await apiClient.wsRequest<GitSnapshotResponse>("session.git.snapshots", {
+          session_id: sessionId,
+          limit: 1,
+        });
+        const metadata = response.snapshots[0]?.metadata;
+        return (metadata?.branch_additions ?? 0) + (metadata?.branch_deletions ?? 0);
+      },
+      { timeout: 60_000, message: `Waiting for persisted diff snapshot for ${sessionId}` },
+    )
+    .toBeGreaterThan(0);
+}
+
+async function waitForPersistedTaskDiffSummary(
+  apiClient: ApiClient,
+  workspaceId: string,
+  taskId: string,
+) {
+  await expect
+    .poll(
+      async () => {
+        const response = await apiClient.listTasks(workspaceId);
+        const git = response.tasks.find((task) => task.id === taskId)?.status_summary?.git;
+        return (git?.additions ?? 0) + (git?.deletions ?? 0);
+      },
+      { timeout: 60_000, message: `Waiting for persisted diff summary for ${taskId}` },
+    )
+    .toBeGreaterThan(0);
+}
 
 /**
  * Regression test for the task sidebar diff badge bug.
  *
- * The sidebar bulk-subscribes to every task's primary session on connect and
- * expects an initial git status snapshot per session, including the global
+ * The sidebar consumes the task status summary, including the global
  * branch_additions/branch_deletions diff against the merge-base. Before the
  * fix, the backend's `tryGetLiveGitStatus` only returned data when an
  * agentctl execution was actively running for that session. For any task
@@ -18,8 +57,8 @@ import { SessionPage } from "../../pages/session-page";
  * keeping the DB-snapshot fallback fresh across restarts and unavailability.
  *
  * This test creates two tasks that produce diffs, restarts the backend
- * (which kills all running executors), then asserts the sidebar still shows
- * +N/-N badges for BOTH tasks — not just an active one.
+ * (which kills all running executors), then asserts the inactive sidebar row
+ * still shows its +N/-N badge from the persisted task summary.
  */
 test.describe("Task sidebar diff stats", () => {
   test("badges survive backend restart for non-active tasks", async ({
@@ -74,9 +113,23 @@ test.describe("Task sidebar diff stats", () => {
       betaSession.chat.getByText("diff-update-setup complete", { exact: false }),
     ).toBeVisible({ timeout: 60_000 });
 
-    // Both tasks now have diffs and the live monitor has run at least once
-    // — meaning the orchestrator should have persisted a live_monitor
-    // snapshot row for each session via UpsertLatestLiveGitSnapshot.
+    if (!taskAlpha.session_id || !taskBeta.session_id) {
+      throw new Error("Diff tasks must start sessions");
+    }
+    // The mock response text is published before the ACP complete frame that
+    // captures the final git status. Establish that both snapshots are durable
+    // before restarting the backend, rather than racing that terminal frame.
+    await Promise.all([
+      waitForPersistedDiffSnapshot(apiClient, taskAlpha.session_id),
+      waitForPersistedDiffSnapshot(apiClient, taskBeta.session_id),
+    ]);
+    // Snapshot persistence and task-summary projection are separate ordered
+    // writes. Restart only after the sidebar's own durable source reflects
+    // both snapshots; otherwise a stale non-null summary is validly reused.
+    await Promise.all([
+      waitForPersistedTaskDiffSummary(apiClient, seedData.workspaceId, taskAlpha.id),
+      waitForPersistedTaskDiffSummary(apiClient, seedData.workspaceId, taskBeta.id),
+    ]);
 
     // Restart the backend. This destroys all in-memory executions, so
     // GetExecutionBySessionID will return nil for both sessions on the next
@@ -104,5 +157,32 @@ test.describe("Task sidebar diff stats", () => {
 
     // Diff badge is rendered as "+N -N" inside a font-mono span.
     await expect(alphaRow.getByText(/\+\d+\s+-\d+/)).toBeVisible({ timeout: 30_000 });
+
+    // The active row keeps its diff totals visible after the row receives focus.
+    // Only fine-pointer hover should swap them for the actions trigger.
+    await alphaRow.click();
+    await expect.poll(() => testPage.url(), { timeout: 10_000 }).toContain(taskAlpha.id);
+
+    const activeAlphaRow = betaSession.sidebar
+      .getByTestId("sidebar-task-item")
+      .filter({ hasText: "Diff Alpha" });
+    const activeDiffStats = activeAlphaRow.getByTestId("sidebar-task-diff-stats");
+    const activeActions = activeAlphaRow.getByRole("button", { name: "Task actions" });
+    const activeActionContainer = activeActions.locator("..");
+
+    await testPage.mouse.move(0, 0);
+    await expect
+      .poll(() => activeDiffStats.evaluate((element) => getComputedStyle(element).opacity))
+      .toBe("1");
+    await expect
+      .poll(() => activeActionContainer.evaluate((element) => getComputedStyle(element).opacity))
+      .toBe("0");
+
+    await activeAlphaRow.hover();
+    await expect(activeActionContainer).toHaveCSS("opacity", "1");
+    await expect(activeDiffStats).toHaveCSS("opacity", "0");
+
+    await activeActions.click();
+    await expect(testPage.getByRole("menuitem", { name: "Archive", exact: true })).toBeVisible();
   });
 });

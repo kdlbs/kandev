@@ -70,6 +70,15 @@ describe("AppSidebarPrimaryNav", () => {
     expect(screen.queryByRole("button", { name: "Quick Chat" })).toBeNull();
   });
 
+  it("no longer carries a Runs row — automations are their own section", () => {
+    // The destination moved into the Automations section, whose header links to
+    // it and whose rows are the automations themselves. Two nav entries pointing
+    // at the same place is the thing that made "Runs" hard to place.
+    renderNav(false);
+
+    expect(screen.queryByRole("link", { name: "Runs" })).toBeNull();
+  });
+
   it("omits Quick Chat when the rail is collapsed but there is no workspace", () => {
     state.workspaces.activeId = null;
     renderNav(true);

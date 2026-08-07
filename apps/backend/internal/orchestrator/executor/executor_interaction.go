@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -21,6 +22,14 @@ import (
 func (e *Executor) Stop(ctx context.Context, sessionID string, reason string, force bool) error {
 	session, err := e.repo.GetTaskSession(ctx, sessionID)
 	if err != nil {
+		// A genuinely missing session row means the runtime this stop would
+		// target is gone; normalize to the public not-found sentinel so durable
+		// cleanup can treat a confirmed-dead local runtime as already stopped.
+		// An unrelated store error is NOT reclassified — it stays a plain
+		// ErrExecutionNotFound so a transient failure remains retryable.
+		if errors.Is(err, models.ErrTaskSessionNotFound) {
+			return fmt.Errorf("%w: %w: %w", ErrExecutionNotFound, runtimeapi.ErrNotFound, err)
+		}
 		return ErrExecutionNotFound
 	}
 	return e.stopWithSession(ctx, session, reason, force)
@@ -251,14 +260,57 @@ func (e *Executor) Prompt(ctx context.Context, taskID, sessionID string, prompt 
 // PromptWithDispatchCallback invokes onDispatched after agentctl accepts the
 // prompt but before waiting for the turn to complete.
 func (e *Executor) PromptWithDispatchCallback(ctx context.Context, taskID, sessionID string, prompt string, attachments []v1.MessageAttachment, dispatchOnly bool, onDispatched func(), preloadedSession ...*models.TaskSession) (*PromptResult, error) {
-	return e.prompt(ctx, taskID, sessionID, prompt, attachments, dispatchOnly, onDispatched, preloadedSession...)
+	return e.prompt(ctx, taskID, sessionID, prompt, attachments, dispatchOnly, onDispatched, false, preloadedSession...)
+}
+
+// SteerWithDispatchCallback delivers a steer into a still-generating turn. It
+// always uses the dispatch-callback path: steering is a dispatch-and-continue
+// action, so the caller keeps admission serialized until agentctl accepts it.
+func (e *Executor) SteerWithDispatchCallback(ctx context.Context, taskID, sessionID string, prompt string, attachments []v1.MessageAttachment, dispatchOnly bool, onDispatched func(), preloadedSession ...*models.TaskSession) (*PromptResult, error) {
+	return e.prompt(ctx, taskID, sessionID, prompt, attachments, dispatchOnly, onDispatched, true, preloadedSession...)
 }
 
 type promptAgentWithDispatchCallback interface {
 	PromptAgentWithDispatchCallback(context.Context, string, string, []v1.MessageAttachment, bool, func()) (*PromptResult, error)
 }
 
-func (e *Executor) prompt(ctx context.Context, taskID, sessionID string, prompt string, attachments []v1.MessageAttachment, dispatchOnly bool, onDispatched func(), preloadedSession ...*models.TaskSession) (*PromptResult, error) {
+// steerAgentWithDispatchCallback is the optional capability an agent manager
+// implements to accept steers. It is a separate interface (like
+// promptAgentWithDispatchCallback) so the core agentManager interface and its
+// test mocks need no change when steering is unused.
+type steerAgentWithDispatchCallback interface {
+	SteerAgentWithDispatchCallback(context.Context, string, string, []v1.MessageAttachment, bool, func()) (*PromptResult, error)
+}
+
+// dispatchToAgent selects the agent-manager call for a prompt, a dispatch-callback
+// prompt, or a steer. Extracted from prompt() to keep that function under the
+// cyclomatic limit.
+func (e *Executor) dispatchToAgent(
+	ctx context.Context,
+	executionID, prompt string,
+	attachments []v1.MessageAttachment,
+	dispatchOnly bool,
+	onDispatched func(),
+	steer bool,
+) (*PromptResult, error) {
+	if steer {
+		steerer, ok := e.agentManager.(steerAgentWithDispatchCallback)
+		if !ok {
+			return nil, ErrPromptDispatchCallbackUnsupported
+		}
+		return steerer.SteerAgentWithDispatchCallback(ctx, executionID, prompt, attachments, dispatchOnly, onDispatched)
+	}
+	if onDispatched != nil {
+		notifier, ok := e.agentManager.(promptAgentWithDispatchCallback)
+		if !ok {
+			return nil, ErrPromptDispatchCallbackUnsupported
+		}
+		return notifier.PromptAgentWithDispatchCallback(ctx, executionID, prompt, attachments, dispatchOnly, onDispatched)
+	}
+	return e.agentManager.PromptAgent(ctx, executionID, prompt, attachments, dispatchOnly)
+}
+
+func (e *Executor) prompt(ctx context.Context, taskID, sessionID string, prompt string, attachments []v1.MessageAttachment, dispatchOnly bool, onDispatched func(), steer bool, preloadedSession ...*models.TaskSession) (*PromptResult, error) {
 	var session *models.TaskSession
 	if len(preloadedSession) > 0 && preloadedSession[0] != nil {
 		session = preloadedSession[0]
@@ -299,16 +351,7 @@ func (e *Executor) prompt(ctx context.Context, taskID, sessionID string, prompt 
 		return result, err
 	}
 
-	var result *PromptResult
-	if onDispatched != nil {
-		notifier, ok := e.agentManager.(promptAgentWithDispatchCallback)
-		if !ok {
-			return nil, ErrPromptDispatchCallbackUnsupported
-		}
-		result, err = notifier.PromptAgentWithDispatchCallback(ctx, executionID, prompt, attachments, dispatchOnly, onDispatched)
-	} else {
-		result, err = e.agentManager.PromptAgent(ctx, executionID, prompt, attachments, dispatchOnly)
-	}
+	result, err := e.dispatchToAgent(ctx, executionID, prompt, attachments, dispatchOnly, onDispatched, steer)
 	if err != nil {
 		if errors.Is(err, lifecycle.ErrExecutionNotFound) {
 			return nil, ErrExecutionNotFound
@@ -378,7 +421,7 @@ func (e *Executor) buildPassthroughPromptWithAttachments(ctx context.Context, se
 	}
 	attachMgr := agentctlshared.NewAttachmentManager(workDir, e.logger.Zap())
 	attachMgr.SetSessionID(session.ID)
-	saved, err := attachMgr.SaveAttachments(attachments)
+	saved, err := e.savePassthroughAttachments(ctx, session, attachMgr, attachments)
 	if err != nil {
 		return "", fmt.Errorf("save passthrough attachments: %w", err)
 	}
@@ -396,6 +439,77 @@ func (e *Executor) buildPassthroughPromptWithAttachments(ctx context.Context, se
 		return attachmentPrompt, nil
 	}
 	return prompt + "\n\n" + attachmentPrompt, nil
+}
+
+func (e *Executor) savePassthroughAttachments(
+	ctx context.Context,
+	session *models.TaskSession,
+	attachMgr *agentctlshared.AttachmentManager,
+	attachments []v1.MessageAttachment,
+) ([]agentctlshared.SavedAttachment, error) {
+	var saved []agentctlshared.SavedAttachment
+	rollback := func() {
+		for _, attachment := range saved {
+			if attachment.AbsPath == "" {
+				continue
+			}
+			if err := os.Remove(attachment.AbsPath); err != nil && !errors.Is(err, os.ErrNotExist) {
+				e.logger.Debug("failed to roll back passthrough attachment",
+					zap.String("path", attachment.AbsPath), zap.Error(err))
+			}
+		}
+	}
+	for _, attachment := range attachments {
+		if attachment.AttachmentID != "" && attachment.Data == "" {
+			streamed, err := e.savePassthroughAttachment(ctx, session, attachMgr, attachment)
+			if streamed.AbsPath != "" {
+				saved = append(saved, streamed)
+			}
+			if err != nil {
+				rollback()
+				return nil, err
+			}
+			continue
+		}
+
+		inline, inlineErr := attachMgr.SaveAttachments([]v1.MessageAttachment{attachment})
+		saved = append(saved, inline...)
+		if inlineErr != nil {
+			rollback()
+			return nil, inlineErr
+		}
+	}
+	return saved, nil
+}
+
+func (e *Executor) savePassthroughAttachment(
+	ctx context.Context,
+	session *models.TaskSession,
+	attachMgr *agentctlshared.AttachmentManager,
+	attachment v1.MessageAttachment,
+) (agentctlshared.SavedAttachment, error) {
+	if e.attachmentReader == nil {
+		return agentctlshared.SavedAttachment{}, fmt.Errorf("attachment reader is unavailable for %q", attachment.AttachmentID)
+	}
+	reader, name, mimeType, sizeBytes, err := e.attachmentReader.OpenClaimed(
+		ctx, attachment.AttachmentID, session.TaskID, session.ID,
+	)
+	if err != nil {
+		return agentctlshared.SavedAttachment{}, fmt.Errorf("open attachment %q: %w", attachment.AttachmentID, err)
+	}
+	materialized := attachment
+	materialized.Name = name
+	materialized.MimeType = mimeType
+	materialized.SizeBytes = sizeBytes
+	streamed, saveErr := attachMgr.SaveAttachmentStream(materialized, reader)
+	closeErr := reader.Close()
+	if saveErr != nil {
+		return streamed, fmt.Errorf("write attachment %q: %w", attachment.AttachmentID, saveErr)
+	}
+	if closeErr != nil {
+		return streamed, fmt.Errorf("close attachment %q: %w", attachment.AttachmentID, closeErr)
+	}
+	return streamed, nil
 }
 
 func (e *Executor) passthroughAttachmentWorkspace(ctx context.Context, session *models.TaskSession) string {
@@ -597,10 +711,9 @@ func (e *Executor) buildSwitchModelRequest(ctx context.Context, task *models.Tas
 		IsEphemeral:       task.IsEphemeral,
 		IsPassthrough:     session.IsPassthrough,
 		TaskEnvironmentID: session.TaskEnvironmentID,
-		Env:               cloneStringMap(execConfig.ProfileEnv),
 	}
 
-	mcpMode, err := e.resolveTaskSessionMCPMode(ctx, task.ID, session)
+	mcpMode, err := e.resolveTaskSessionMCPMode(ctx, task.ID, session, true)
 	if err != nil {
 		return nil, err
 	}
@@ -617,6 +730,13 @@ func (e *Executor) buildSwitchModelRequest(ctx context.Context, task *models.Tas
 		req.RepositoryURL = running.WorktreePath
 	}
 	e.injectGitLabWorkspaceCredentials(ctx, req)
+	allRepos, err := e.resolveAllRepoInfo(ctx, task.ID)
+	if err != nil {
+		return nil, err
+	}
+	if err := e.resolveLaunchEnvironment(ctx, req, execConfig.ProfileEnvVars, allRepos); err != nil {
+		return nil, err
+	}
 
 	return req, nil
 }
@@ -741,7 +861,13 @@ func (e *Executor) persistRuntimeModelMetadata(ctx context.Context, sessionID st
 			zap.Error(err))
 		return
 	}
-	if err := e.repo.SetSessionMetadataKey(writeCtx, sessionID, "context_window", nil); err != nil {
+	resetContextWindow := e.onContextWindowReset
+	if resetContextWindow == nil {
+		resetContextWindow = func(ctx context.Context, sessionID string) error {
+			return e.repo.SetSessionMetadataKey(ctx, sessionID, models.SessionMetaKeyContextWindow, nil)
+		}
+	}
+	if err := resetContextWindow(writeCtx, sessionID); err != nil {
 		e.logger.Warn("failed to clear context window after model switch",
 			zap.String("session_id", sessionID),
 			zap.String("model", modelID),

@@ -27,7 +27,9 @@ const (
 	envGitLabHost       = "GITLAB_HOST"
 	envKandevGitLabHost = "KANDEV_GITLAB_HOST"
 
-	gitHubCredentialHelper         = "!agentctl git-credential"
+	gitHubCredentialHelper         = githubauth.ManagedGitCredentialHelper
+	legacyShimGitCredentialHelper  = githubauth.LegacyShimGitCredentialHelper
+	legacyGitHubCredentialHelper   = githubauth.LegacyGitCredentialHelper
 	defaultGitHubHost              = "github.com"
 	gitLabCredentialHelper         = `!f() { echo "username=oauth2"; echo "password=$GITLAB_TOKEN"; }; f`
 	taskGitCredentialsModeManaged  = "managed"
@@ -81,6 +83,12 @@ type TaskGitCredentialPolicyResolver interface {
 func (e *Executor) SetGitHubCredentialBroker(issuer GitHubCredentialLeaseIssuer, brokerURL string) {
 	e.githubCredentialIssuer = issuer
 	e.githubCredentialBrokerURL = strings.TrimSpace(brokerURL)
+}
+
+// SetAgentctlBinaryPath configures the launcher-owned helper executable used
+// by host-side Local and Worktree preparation before agentctl startup.
+func (e *Executor) SetAgentctlBinaryPath(path string) {
+	e.agentctlBinaryPath = strings.TrimSpace(path)
 }
 
 // SetTaskGitCredentialPolicyResolver configures workspace-specific task Git routing.
@@ -169,13 +177,11 @@ func (e *Executor) configureGitHubCredentialBrokerForRepositories(
 	}
 	scopes := make([]githubCredentialScope, 0, len(infos))
 	for _, info := range infos {
-		scope, err := e.issueGitHubCredentialScope(ctx, req, info)
+		infoScopes, err := e.issueGitHubCredentialScopes(ctx, req, info)
 		if err != nil {
 			return err
 		}
-		if scope != nil {
-			scopes = append(scopes, *scope)
-		}
+		scopes = append(scopes, infoScopes...)
 	}
 	if len(scopes) == 0 {
 		return nil
@@ -195,6 +201,12 @@ func (e *Executor) configureGitHubCredentialBrokerForRepositories(
 	req.Env[githubauth.CredentialHostEnv] = primary.Host
 	req.Env[githubauth.CredentialScopesEnv] = string(encodedScopes)
 	req.Env["GIT_TERMINAL_PROMPT"] = "0"
+	switch models.ExecutorType(req.ExecutorType) {
+	case "", models.ExecutorTypeLocal, models.ExecutorTypeWorktree:
+		if e.agentctlBinaryPath != "" {
+			req.Env[githubauth.CredentialHelperPathEnv] = e.agentctlBinaryPath
+		}
+	}
 	// An empty helper resets inherited GitHub HTTPS helpers before the scoped
 	// broker helper is appended. Other indexed Git configuration remains intact.
 	appendGitConfig(req.Env, "credential.https://github.com.helper", "")
@@ -209,6 +221,7 @@ func removeManagedGitHubCredentials(req *LaunchAgentRequest) error {
 	}
 	for _, key := range []string{
 		githubauth.CredentialBrokerURLEnv,
+		githubauth.CredentialHelperPathEnv,
 		githubauth.CredentialLeaseEnv,
 		githubauth.CredentialTaskIDEnv,
 		githubauth.CredentialSessionIDEnv,
@@ -222,18 +235,23 @@ func removeManagedGitHubCredentials(req *LaunchAgentRequest) error {
 	}
 	entries, err := gitconfigenv.Filter(req.Env, func(index int, entries []gitconfigenv.Entry) bool {
 		entry := entries[index]
-		if entry.Key == "credential.https://github.com.helper" && entry.Value == gitHubCredentialHelper {
+		if entry.Key == "credential.https://github.com.helper" && isManagedGitHubCredentialHelper(entry.Value) {
 			return false
 		}
 		return entry.Key != "credential.https://github.com.helper" || entry.Value != "" ||
 			index+1 >= len(entries) || entries[index+1].Key != entry.Key ||
-			entries[index+1].Value != gitHubCredentialHelper
+			!isManagedGitHubCredentialHelper(entries[index+1].Value)
 	})
 	if err != nil {
 		return fmt.Errorf("remove managed GitHub credential helper: %w", err)
 	}
 	req.Env = entries
 	return nil
+}
+
+func isManagedGitHubCredentialHelper(value string) bool {
+	return value == gitHubCredentialHelper || value == legacyShimGitCredentialHelper ||
+		value == legacyGitHubCredentialHelper
 }
 
 func (e *Executor) issueGitHubCredentialScope(
@@ -253,12 +271,79 @@ func (e *Executor) issueGitHubCredentialScope(
 	if owner == "" || repo == "" || info.RepositoryID == "" {
 		return nil, nil
 	}
+	return e.issueGitHubCredentialScopeForIdentity(ctx, req, info.RepositoryID, owner, repo, defaultGitHubHost)
+}
+
+func (e *Executor) issueGitHubCredentialScopes(
+	ctx context.Context,
+	req *LaunchAgentRequest,
+	info *repoInfo,
+) ([]githubCredentialScope, error) {
+	if info == nil || info.Repository == nil {
+		return nil, nil
+	}
+	scope, err := e.issueGitHubCredentialScope(ctx, req, info)
+	if err != nil {
+		return nil, err
+	}
+	scopes := make([]githubCredentialScope, 0, 2)
+	if scope != nil {
+		scopes = append(scopes, *scope)
+	}
+	sourceScope, err := e.issueGitHubContributionCredentialScope(ctx, req, info)
+	if err != nil {
+		return nil, err
+	}
+	if sourceScope != nil {
+		scopes = append(scopes, *sourceScope)
+	}
+	return scopes, nil
+}
+
+func (e *Executor) issueGitHubContributionCredentialScope(
+	ctx context.Context,
+	req *LaunchAgentRequest,
+	info *repoInfo,
+) (*githubCredentialScope, error) {
+	binding := info.RemoteContribution
+	if binding == nil {
+		return nil, nil
+	}
+	if err := binding.Validate(); err != nil {
+		return nil, fmt.Errorf("validate remote contribution credential scope: %w", err)
+	}
+	if binding.Provider != models.RemoteContributionProviderGitHub {
+		return nil, nil
+	}
+	if !strings.EqualFold(binding.SourceRepository.Host, defaultGitHubHost) {
+		return nil, fmt.Errorf("remote contribution source is not a GitHub repository")
+	}
+	parts := strings.Split(binding.SourceRepository.Path, "/")
+	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+		return nil, fmt.Errorf("remote contribution GitHub source identity is invalid")
+	}
+	targetOwner := strings.TrimSpace(info.Repository.ProviderOwner)
+	targetRepo := strings.TrimSpace(info.Repository.ProviderName)
+	if strings.EqualFold(parts[0], targetOwner) && strings.EqualFold(parts[1], targetRepo) {
+		return nil, nil
+	}
+	if !binding.CollaborationAllowed {
+		return nil, fmt.Errorf("remote contribution does not permit collaboration")
+	}
+	return e.issueGitHubCredentialScopeForIdentity(ctx, req, info.RepositoryID, parts[0], parts[1], defaultGitHubHost)
+}
+
+func (e *Executor) issueGitHubCredentialScopeForIdentity(
+	ctx context.Context,
+	req *LaunchAgentRequest,
+	repositoryID, owner, repo, host string,
+) (*githubCredentialScope, error) {
 	if err := validateGitHubCredentialBrokerURL(e.githubCredentialBrokerURL, req.ExecutorType); err != nil {
 		return nil, err
 	}
 	lease, err := e.githubCredentialIssuer.IssueGitHubCredentialLease(ctx, GitHubCredentialLeaseRequest{
 		WorkspaceID: req.WorkspaceID, TaskID: req.TaskID, SessionID: req.SessionID,
-		RepositoryID: info.RepositoryID, Owner: owner, Repo: repo, Host: defaultGitHubHost,
+		RepositoryID: repositoryID, Owner: owner, Repo: repo, Host: host,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("issue GitHub credential lease: %w", err)
@@ -268,7 +353,7 @@ func (e *Executor) issueGitHubCredentialScope(
 	}
 	return &githubCredentialScope{
 		Lease: lease.Token, TaskID: req.TaskID, SessionID: req.SessionID,
-		RepositoryID: info.RepositoryID, Owner: owner, Repo: repo, Host: defaultGitHubHost,
+		RepositoryID: repositoryID, Owner: owner, Repo: repo, Host: host,
 	}, nil
 }
 
@@ -426,11 +511,10 @@ func (e *Executor) resolveAuthSecrets(ctx context.Context, req *LaunchAgentReque
 			continue
 		}
 
-		value, err := e.secretStore.Reveal(ctx, secretID)
+		value, err := e.revealGlobalSecret(ctx, secretID)
 		if err != nil {
 			e.logger.Debug("failed to resolve auth secret",
 				zap.String("method_id", methodID),
-				zap.String("secret_id", secretID),
 				zap.Error(err))
 			continue
 		}

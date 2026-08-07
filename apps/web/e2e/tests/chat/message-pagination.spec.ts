@@ -7,11 +7,8 @@
 // re-arms and older messages stop loading. The explicit button does not depend
 // on scroll/intersection state, so it always makes progress.
 //
-// Covers the native renderer (the production default — `STRATEGY = "native"`).
-// The virtuoso renderer shares the same MessageListStatus button, but its
-// windowed rendering keeps off-screen items out of the DOM, so asserting the
-// oldest message is *visible* there is a virtualization concern, not a
-// pagination one — out of scope for this regression.
+// Covers the native transcript renderer, including its explicit load-more
+// path and visible oldest-message assertion.
 import { test, expect } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
 import type { SeedData } from "../../fixtures/test-base";
@@ -52,6 +49,21 @@ async function seedBigConversation(apiClient: ApiClient, seedData: SeedData): Pr
       { timeout: 60_000, message: "Waiting for the boot turn to persist" },
     )
     .toBe(true);
+
+  // A mock-agent text reply is persisted before the session reaches its idle
+  // state. Wait for that transition before adding the long history, otherwise
+  // the boot turn can still mutate the same transcript while pagination is
+  // under test.
+  await expect
+    .poll(
+      async () => {
+        const { sessions } = await apiClient.listTaskSessions(task.id);
+        return sessions.find((session) => session.id === sessionId)?.state;
+      },
+      { timeout: 60_000, message: "Waiting for the boot turn to become idle" },
+    )
+    .toBe("WAITING_FOR_INPUT");
+
   await apiClient.seedSessionMessage(sessionId, { type: "message", content: INITIAL_PROMPT });
   await apiClient.seedAgentMessages(sessionId, FILLER_COUNT);
   return task.id;
@@ -97,7 +109,16 @@ test.describe("@chat message pagination", () => {
             return "reached";
           }
           if (await loadOlder.isVisible().catch(() => false)) {
-            await loadOlder.click().catch(() => undefined);
+            // An actionability click scrolls the button into the adjacent
+            // IntersectionObserver sentinel. The observer can then load the
+            // page and detach the button while Playwright waits to click it,
+            // consuming the poll's entire timeout even though pagination won.
+            // An atomic DOM click avoids that scroll race and returns
+            // immediately if the observer already removed the control.
+            await loadOlder.evaluateAll((buttons) => {
+              const button = buttons[0];
+              if (button instanceof HTMLButtonElement) button.click();
+            });
           }
           return "loading";
         },

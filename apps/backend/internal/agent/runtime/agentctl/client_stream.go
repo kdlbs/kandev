@@ -3,7 +3,9 @@ package client
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
@@ -12,6 +14,11 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/propagation"
 )
+
+// ErrAgentStreamNotConnected identifies requests that cannot be delivered
+// because the agent updates stream has already disconnected. Callers use this
+// to distinguish an already-stopped agent from a live transport failure.
+var ErrAgentStreamNotConnected = errors.New("agent stream not connected")
 
 // sendStreamRequest sends a request over the agent WebSocket stream and waits for a response.
 // It creates a ws.Message with a UUID, registers a pending response channel,
@@ -22,7 +29,7 @@ func (c *Client) sendStreamRequest(ctx context.Context, action string, payload i
 	c.mu.RUnlock()
 
 	if conn == nil {
-		return nil, fmt.Errorf("agent stream not connected")
+		return nil, ErrAgentStreamNotConnected
 	}
 
 	reqID := uuid.New().String()
@@ -61,7 +68,16 @@ func (c *Client) sendStreamRequest(ctx context.Context, action string, payload i
 	}
 
 	c.streamWriteMu.Lock()
+	// Honor a caller deadline for the write itself, not just the response wait:
+	// a stalled conn.WriteMessage (full send buffer to a half-open peer) would
+	// otherwise block uninterruptibly and, for a steer, pin the lifecycle lock the
+	// caller holds across this RPC. streamWriteMu serializes writers, so setting
+	// and clearing the shared deadline here cannot race a concurrent write.
+	if deadline, ok := ctx.Deadline(); ok {
+		_ = conn.SetWriteDeadline(deadline)
+	}
 	writeErr := conn.WriteMessage(websocket.TextMessage, data)
+	_ = conn.SetWriteDeadline(time.Time{}) // clear so later writers are unbounded
 	c.streamWriteMu.Unlock()
 	if writeErr != nil {
 		tracing.TraceWSResponse(span, "", writeErr)
@@ -72,7 +88,7 @@ func (c *Client) sendStreamRequest(ctx context.Context, action string, payload i
 	select {
 	case resp := <-respCh:
 		if resp == nil {
-			disconnErr := fmt.Errorf("agent stream disconnected while waiting for response")
+			disconnErr := fmt.Errorf("%w while waiting for response", ErrAgentStreamNotConnected)
 			tracing.TraceWSResponse(span, "", disconnErr)
 			return nil, disconnErr
 		}

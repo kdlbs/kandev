@@ -125,6 +125,38 @@ func TestBuildContainerConfigPreflightsBrokerBeforePrepareClone(t *testing.T) {
 	}
 }
 
+func TestBuildContainerConfigPublishesManagedGitCredentialHelperBeforeAgentctlStartup(t *testing.T) {
+	cm := newCMTest(t)
+	cfg := ContainerConfig{
+		AgentConfig: newConfigStubAgent(),
+		InstanceID:  "0123456789abcdef",
+		TaskID:      "task-1",
+		Credentials: map[string]string{
+			envKeyGitHubCredentialBrokerURL: "https://kandev.example/api/v1/github/credentials/resolve",
+			envKeyGitHubCredentialLease:     "lease",
+		},
+		PrepareScript: "git clone https://github.com/acme/widgets.git /workspace",
+	}
+
+	got, err := cm.buildContainerConfig(cfg)
+	if err != nil {
+		t.Fatalf("buildContainerConfig: %v", err)
+	}
+	want := "KANDEV_GITHUB_CREDENTIAL_HELPER_PATH=/usr/local/bin/agentctl"
+	if !containsExactString(got.Env, want) {
+		t.Fatalf("container env missing pre-start credential helper %q: %#v", want, got.Env)
+	}
+}
+
+func containsExactString(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
+}
+
 func TestBuildContainerConfig_ImageDefaultsToRuntime(t *testing.T) {
 	cm := newCMTest(t)
 	cfg := ContainerConfig{

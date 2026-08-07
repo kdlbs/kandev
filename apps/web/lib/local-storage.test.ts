@@ -9,6 +9,7 @@ import {
   getStoredAutoScrollTop,
   markPRClosedBannerDismissed,
   markPRMergedBannerDismissed,
+  markPRPanelOffered,
   restoreAttachmentPreview,
   setGlobalSidebarWidth,
   setManualRightWidth,
@@ -18,6 +19,7 @@ import {
   setStoredAutoScrollTop,
   wasPRClosedBannerDismissed,
   wasPRMergedBannerDismissed,
+  wasPRPanelOffered,
 } from "./local-storage";
 import {
   loadSessionFavorites,
@@ -97,6 +99,31 @@ describe("PR closed banner dismissal storage", () => {
 
     expect(wasPRClosedBannerDismissed("task-a")).toBe(false);
     expect(wasPRClosedBannerDismissed("task-b")).toBe(true);
+  });
+});
+
+describe("PR panel offered storage", () => {
+  beforeEach(() => {
+    window.sessionStorage.clear();
+  });
+
+  it("persists the offered flag per session", () => {
+    expect(wasPRPanelOffered("session-a")).toBe(false);
+
+    markPRPanelOffered("session-a");
+
+    expect(wasPRPanelOffered("session-a")).toBe(true);
+    expect(wasPRPanelOffered("session-b")).toBe(false);
+  });
+
+  it("clears the offered flag via cleanupTaskStorage", () => {
+    markPRPanelOffered("session-a");
+    markPRPanelOffered("session-b");
+
+    cleanupTaskStorage("task-a", ["session-a"]);
+
+    expect(wasPRPanelOffered("session-a")).toBe(false);
+    expect(wasPRPanelOffered("session-b")).toBe(true);
   });
 });
 

@@ -11,6 +11,7 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/server/instance"
 	"github.com/kandev/kandev/internal/common/httpmw"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/common/subproc"
 	"go.uber.org/zap"
 )
 
@@ -60,6 +61,11 @@ func (m *ControlServer) setupRoutes() {
 	api.GET("/instances", m.handleListInstances)
 	api.GET("/instances/:id", m.handleGetInstance)
 	api.DELETE("/instances/:id", m.handleDeleteInstance)
+	api.GET("/debug/subprocess-admission", m.handleSubprocessAdmission)
+}
+
+func (m *ControlServer) handleSubprocessAdmission(c *gin.Context) {
+	c.JSON(http.StatusOK, subproc.AdmissionSnapshot())
 }
 
 func (m *ControlServer) handleHealth(c *gin.Context) {

@@ -30,6 +30,7 @@ import type { CheckRun, TaskPR } from "@/lib/types/github";
 import { PRCIAutomationControls } from "./pr-ci-automation-controls";
 import { PRMergeButton } from "./pr-merge-button";
 import { PRMergeabilityRow } from "./pr-mergeability-row";
+import { useTranslation } from "react-i18next";
 
 type CountsView = {
   passed: number;
@@ -89,6 +90,7 @@ function PRPopoverTitle({
   title: string;
   onOpenDetailPanel?: () => void;
 }) {
+  const { t } = useTranslation();
   const className = "min-w-0 truncate text-sm font-medium";
   if (!onOpenDetailPanel) {
     return (
@@ -103,7 +105,7 @@ function PRPopoverTitle({
       data-testid="pr-popover-title"
       className={`${className} cursor-pointer text-left hover:underline`}
       title={title}
-      aria-label={`Open ${title} details`}
+      aria-label={t("github:openDetails", { title })}
       onClick={(e) => {
         e.stopPropagation();
         onOpenDetailPanel();
@@ -121,7 +123,8 @@ function PRCIPopoverHeader({
   pr: TaskPR;
   onOpenDetailPanel?: () => void;
 }) {
-  const title = `#${pr.pr_number} ${pr.pr_title || "Untitled PR"}`;
+  const { t } = useTranslation();
+  const title = `#${pr.pr_number} ${pr.pr_title || t("github:untitledPr")}`;
   return (
     <div
       data-testid="pr-popover-header"
@@ -136,7 +139,7 @@ function PRCIPopoverHeader({
         target="_blank"
         rel="noopener noreferrer"
         className="cursor-pointer text-muted-foreground hover:text-foreground"
-        aria-label="View pull request on GitHub"
+        aria-label={t("github:viewPullRequestOnGithub")}
         onClick={(e) => e.stopPropagation()}
       >
         <IconGitPullRequest className="h-3.5 w-3.5" />
@@ -152,14 +155,16 @@ function CheckGroupIcon({ kind }: { kind: CheckBucket }) {
   return <IconCircleX className="h-3.5 w-3.5 text-red-500" />;
 }
 
-function bucketLabel(kind: CheckBucket): string {
-  if (kind === "passed") return "Passed";
-  if (kind === "in_progress") return "In progress";
-  return "Failed";
-}
+/** `kind` is the persisted CheckBucket; only the catalog key is copy. */
+const BUCKET_LABEL_KEYS: Record<CheckBucket, string> = {
+  passed: "github:checkBucketPassed",
+  in_progress: "github:checkBucketInProgress",
+  failed: "github:checkBucketFailed",
+};
 
 function CheckGroupHeader({ kind, count }: { kind: CheckBucket; count: number }) {
-  const label = bucketLabel(kind);
+  const { t } = useTranslation();
+  const label = t(BUCKET_LABEL_KEYS[kind]);
   return (
     <div className="flex items-center justify-between gap-2 px-1 py-1">
       <div className="flex items-center gap-1.5">
@@ -183,6 +188,7 @@ function PRWorkflowRow({
   group: WorkflowGroup;
   onAddAsContext: ((message: string) => void) | null;
 }) {
+  const { t } = useTranslation();
   // For an in-progress workflow, "0/1 ran" reads as "nothing finished"
   // and confuses people: did it start? It's clearer to just report how
   // many jobs are running. (Failed workflows go to a different bucket,
@@ -215,7 +221,7 @@ function PRWorkflowRow({
             e.stopPropagation();
             void openExternalLink(group.htmlUrl).catch(() => undefined);
           }}
-          aria-label={`Open ${group.workflow} on GitHub`}
+          aria-label={t("github:openOnGithub", { workflow: group.workflow })}
         >
           <IconExternalLink className="h-3 w-3" />
         </Button>
@@ -230,7 +236,7 @@ function PRWorkflowRow({
             e.stopPropagation();
             onAddAsContext(buildWorkflowMessage(group));
           }}
-          aria-label={`Add ${group.workflow} failures to chat context`}
+          aria-label={t("github:addFailuresToChatContext", { workflow: group.workflow })}
         >
           <IconPlus className="h-3 w-3" />
         </Button>
@@ -239,6 +245,11 @@ function PRWorkflowRow({
   );
 }
 
+/**
+ * Agent-facing content, not UI copy: the returned string is queued into the chat
+ * by `addAsContext` and sent to the agent verbatim, so it stays English for the
+ * same reason the integration prompt templates do.
+ */
 function buildWorkflowMessage(group: WorkflowGroup): string {
   const failed = group.jobs.filter((j) => bucketCheck(j) === "failed");
   const lines: string[] = [
@@ -309,6 +320,7 @@ function PRCheckGroup({
  * picture: how close are we to "all green".
  */
 function PRChecksProgressBar({ counts }: { counts: CountsView }) {
+  const { t } = useTranslation();
   const total = counts.passed + counts.inProgress + counts.failed;
   if (total === 0) return null;
   const pct = (n: number) => (n / total) * 100;
@@ -319,7 +331,7 @@ function PRChecksProgressBar({ counts }: { counts: CountsView }) {
   return (
     <div data-testid="pr-checks-progress" className="flex flex-col gap-1.5 px-1 pt-1 pb-1.5">
       <div className="flex items-center justify-between text-xs">
-        <span className="font-medium text-foreground">Pass rate</span>
+        <span className="font-medium text-foreground">{t("github:passRate")}</span>
         <span className="text-muted-foreground tabular-nums">
           {counts.passed}/{total} ({completePct}%)
         </span>
@@ -362,6 +374,7 @@ function PRChecksSection({
   isFetching: boolean;
   onAddAsContext: ((message: string) => void) | null;
 }) {
+  const { t } = useTranslation();
   const aggregateCounts = useMemo(() => deriveAggregateCounts(pr), [pr]);
 
   const { precise, byBucket } = useMemo(() => {
@@ -393,7 +406,7 @@ function PRChecksSection({
     return (
       <div data-testid="pr-checks-section" className="flex flex-col">
         <div data-testid="pr-checks-empty" className="px-1 py-2 text-xs text-muted-foreground">
-          No checks have started
+          {t("github:noChecksHaveStarted")}
         </div>
       </div>
     );
@@ -461,25 +474,27 @@ function PRReviewRow({ pr }: { pr: TaskPR }) {
 }
 
 function PRCommentsRow({ pr }: { pr: TaskPR }) {
+  const { t } = useTranslation();
   if (!pr.unresolved_review_threads || pr.unresolved_review_threads <= 0) return null;
   return (
     <div data-testid="pr-comments-row" className="flex items-center gap-1.5 px-1 py-1 text-xs">
       <IconMessageCircle className="h-3.5 w-3.5 text-muted-foreground" />
-      <span>
-        {pr.unresolved_review_threads} unresolved comment
-        {pr.unresolved_review_threads === 1 ? "" : "s"}
-      </span>
+      <span>{t("github:unresolvedComments", { count: pr.unresolved_review_threads })}</span>
     </div>
   );
 }
 
-function elapsedLabel(elapsed: number | null): string {
+function elapsedLabel(
+  elapsed: number | null,
+  t: (k: string, v?: Record<string, unknown>) => string,
+): string {
   if (elapsed == null) return "";
-  if (elapsed === 0) return "updated just now";
-  return `updated ${formatElapsedShort(elapsed)} ago`;
+  if (elapsed === 0) return t("github:updatedJustNow");
+  return t("github:updatedAgo", { elapsed: formatElapsedShort(elapsed) });
 }
 
 function PRPopoverFooter({ lastUpdatedAt }: { lastUpdatedAt: number | null }) {
+  const { t } = useTranslation();
   // Capture a "now" snapshot only inside the setInterval callback (an event
   // handler — no impurity in render, no setState during commit). When no
   // tick has fired yet, fall back to lastUpdatedAt so the rendered elapsed
@@ -504,7 +519,7 @@ function PRPopoverFooter({ lastUpdatedAt }: { lastUpdatedAt: number | null }) {
         data-testid="pr-popover-updated-at"
         className="text-[10px] text-muted-foreground tabular-nums"
       >
-        {elapsedLabel(elapsed)}
+        {elapsedLabel(elapsed, t)}
       </span>
     </div>
   );
@@ -519,18 +534,19 @@ function formatElapsedShort(seconds: number): string {
 }
 
 function ReconnectGitHubBlock() {
+  const { t } = useTranslation();
   return (
     <div
       data-testid="pr-popover-auth-error"
       className="flex flex-col items-start gap-1 px-1 py-2 text-xs"
     >
-      <span className="text-foreground">GitHub authentication lost.</span>
+      <span className="text-foreground">{t("github:githubAuthenticationLost")}</span>
       <a
         data-testid="pr-popover-reconnect-link"
         href="/settings#github"
         className="cursor-pointer text-primary hover:underline"
       >
-        Reconnect GitHub
+        {t("github:reconnectGithub")}
       </a>
     </div>
   );
@@ -591,6 +607,7 @@ export function PRCIPopover({
 
 // --- Add-to-context wiring (mirrors pr-detail-panel.tsx for failed checks) ---
 function useAddCheckToContext(pr: TaskPR): ((message: string) => void) | null {
+  const { t } = useTranslation();
   const sessionId = useAppStore((s) => s.tasks.activeSessionId);
   const addComment = useCommentsStore((s) => s.addComment);
   const { toast } = useToast();
@@ -614,7 +631,7 @@ function useAddCheckToContext(pr: TaskPR): ((message: string) => void) | null {
         content: message,
       };
       addComment(comment);
-      toast({ description: "Added to chat context" });
+      toast({ description: t("github:addedToChatContext") });
     },
     [sessionId, prNumber, addComment, toast],
   );

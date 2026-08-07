@@ -5,6 +5,7 @@ import type { Icon } from "@tabler/icons-react";
 import { cn } from "@/lib/utils";
 import { PR_PRESETS, ISSUE_PRESETS, type PresetOption, type PresetGroup } from "./search-bar";
 import type { SavedPreset } from "./use-saved-presets";
+import { useTranslation } from "react-i18next";
 
 export type SidebarSelection = {
   kind: "pr" | "issue";
@@ -30,6 +31,7 @@ function KindToggle({
   kind: "pr" | "issue";
   onChange: (k: "pr" | "issue") => void;
 }) {
+  const { t } = useTranslation();
   return (
     <div className="mx-2 mb-3 grid grid-cols-2 rounded-md border p-0.5 text-xs">
       {(["pr", "issue"] as const).map((value) => (
@@ -44,7 +46,7 @@ function KindToggle({
               : "text-muted-foreground hover:text-foreground",
           )}
         >
-          {value === "pr" ? "Pull requests" : "Issues"}
+          {value === "pr" ? t("github:pullRequests") : t("github:issues")}
         </button>
       ))}
     </div>
@@ -111,11 +113,12 @@ function PresetGroupList({
   onSelect: (s: SidebarSelection) => void;
   kind: "pr" | "issue";
 }) {
+  const { t } = useTranslation();
   const items = presets.filter((p) => p.group === group);
   if (items.length === 0) return null;
   return (
     <>
-      <SectionHeader title={group === "inbox" ? "Inbox" : "Created"} />
+      <SectionHeader title={group === "inbox" ? t("github:inbox") : t("github:created")} />
       {items.map((p) => (
         <PresetItem
           key={`${kind}-${p.value}`}
@@ -146,12 +149,13 @@ function SavedSection({
   canSaveCurrent: boolean;
   onSaveCurrent: () => void;
 }) {
+  const { t } = useTranslation();
   return (
     <>
-      <SectionHeader title="Saved" />
+      <SectionHeader title={t("github:saved")} />
       {saved.length === 0 && (
         <div className="mx-2 px-2 py-1 text-xs text-muted-foreground/80 italic">
-          No saved queries yet.
+          {t("github:noSavedQueriesYet")}
         </div>
       )}
       {saved.map((s) => (
@@ -169,7 +173,7 @@ function SavedSection({
                 onDelete(s.id);
               }}
               className="opacity-0 group-hover/item:opacity-100 transition-opacity text-muted-foreground hover:text-foreground cursor-pointer"
-              title="Delete saved query"
+              title={t("github:deleteSavedQuery")}
             >
               <IconX className="h-3.5 w-3.5" />
             </button>
@@ -186,10 +190,10 @@ function SavedSection({
             ? "text-muted-foreground hover:bg-muted/50 hover:text-foreground cursor-pointer"
             : "text-muted-foreground/50 cursor-not-allowed",
         )}
-        title={canSaveCurrent ? "Save current query" : "Type a custom query first"}
+        title={canSaveCurrent ? t("github:saveCurrentQuery") : t("github:typeACustomQueryFirst")}
       >
         <IconDeviceFloppy className="h-4 w-4 shrink-0" />
-        <span>Save current query</span>
+        <span>{t("github:saveCurrentQuery")}</span>
       </button>
     </>
   );

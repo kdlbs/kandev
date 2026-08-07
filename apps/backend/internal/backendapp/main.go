@@ -40,7 +40,6 @@ import (
 	jirapkg "github.com/kandev/kandev/internal/jira"
 	linearpkg "github.com/kandev/kandev/internal/linear"
 	sentrypkg "github.com/kandev/kandev/internal/sentry"
-	slackpkg "github.com/kandev/kandev/internal/slack"
 	workflowsyncpkg "github.com/kandev/kandev/internal/workflowsync"
 
 	// Agent infrastructure
@@ -206,14 +205,11 @@ func Run(args []string, build BuildInfo) int {
 	}
 
 	// 2. Initialize logger
-	log, err := logger.NewLogger(logger.LoggingConfig{
-		Level:      cfg.Logging.Level,
-		Format:     cfg.Logging.Format,
-		OutputPath: cfg.Logging.OutputPath,
-		MaxSizeMB:  cfg.Logging.MaxSizeMB,
-		MaxBackups: cfg.Logging.MaxBackups,
-		MaxAgeDays: cfg.Logging.MaxAgeDays,
-		Compress:   cfg.Logging.Compress,
+	log, err := logger.NewBackendLogger(logger.BackendLoggingConfig{
+		HomeDir:      cfg.ResolvedHomeDir(),
+		Level:        cfg.Logging.Level,
+		Format:       cfg.Logging.Format,
+		ConsoleLevel: os.Getenv("KANDEV_CONSOLE_LOG_LEVEL"),
 	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to initialize logger: %v\n", err)
@@ -415,7 +411,7 @@ func startAgentInfrastructure(
 	// ============================================
 	// AGENT MANAGER
 	// ============================================
-	lifecycleMgr, err := provideLifecycleManager(ctx, cfg, log, eventBus, repos.AgentSettings, agentRegistry, userSecretStore)
+	lifecycleMgr, err := provideLifecycleManager(ctx, cfg, log, eventBus, repos.AgentSettings, agentRegistry, userSecretStore, services.Task.TaskBaseBranches)
 	if err != nil {
 		log.Error("Failed to initialize agent manager", zap.Error(err))
 		return false
@@ -439,6 +435,7 @@ func startAgentInfrastructure(
 	services.Task.SetBranchMaterializer(newBranchMaterializer(repos.Task, worktreeMgr, lifecycleMgr, log))
 	workspaceSourceMaterializer := newWorkspaceSourceMaterializer(repos.Task, worktreeMgr, lifecycleMgr, log)
 	services.Task.SetWorkspaceSourceMaterializer(workspaceSourceMaterializer)
+	services.Task.SetWorkspaceSourceProviderRefresher(newTaskMCPProviderRefresher(repos.Task, lifecycleMgr, log))
 	services.Task.SetAgentBaseBranchPusher(lifecycleMgr)
 
 	lifecycleMgr.SetWorkspaceInfoProvider(services.Task)
@@ -503,6 +500,7 @@ func startAgentInfrastructure(
 		log.Error("Failed to initialize orchestrator", zap.Error(err))
 		return false
 	}
+	orchestratorSvc.SetAgentctlBinaryPath(agentctlBinaryPath)
 
 	// Wire the soft-deleted-profile pre-flight into the watcher dispatch.
 	// Orphan watchers (their agent profile was soft-deleted by the
@@ -525,6 +523,15 @@ func startAgentInfrastructure(
 	agentSettingsController.SetRoutingTierDependencyChecker(&routingTierDepsAdapter{
 		repo: repos.Office,
 	})
+	// An enabled automation is a standing instruction to launch against a
+	// profile. Nothing is running, so it never reaches the active-session list,
+	// but deleting the profile would leave the schedule firing into nothing —
+	// quietly, hours later. Name them in the confirmation instead.
+	if services.Automation != nil {
+		agentSettingsController.SetAutomationDependencyChecker(&automationDepsAdapter{
+			store: services.Automation.Service.Store(),
+		})
+	}
 
 	// Wire GitHub service into orchestrator for PR auto-detection on push
 	if services.GitHub != nil {
@@ -546,9 +553,12 @@ func startAgentInfrastructure(
 	// orchestrator so review/issue watch events get turned into tasks.
 	if services.GitLab != nil {
 		orchestratorSvc.SetGitLabService(services.GitLab)
+		orchestratorSvc.SetGitLabMRLinkService(services.GitLab)
 		orchestratorSvc.SetGitLabCredentialResolver(services.GitLab)
+		orchestratorSvc.SetGitLabMRAutomationService(services.GitLab)
 		services.GitLab.SetTaskDeleter(&taskDeleterAdapter{svc: services.Task})
 		services.GitLab.SetTaskSessionChecker(&taskSessionCheckerAdapter{repo: repos.Task})
+		services.GitLab.SetTaskAuthorizer(services.Task)
 		glPoller := gitlabpkg.NewPoller(services.GitLab, eventBus, log)
 		glPoller.Start(ctx)
 		addCleanup(func() error { glPoller.Stop(); return nil })
@@ -558,9 +568,11 @@ func startAgentInfrastructure(
 	// and workspace-scoped GitLab credential resolver are both configured.
 	workspaceSourceMaterializer.SetHostRepositoryCloner(orchestratorSvc)
 
-	// Azure DevOps v1 owns only connection-health polling. PR summaries are
-	// refreshed explicitly through their task association routes.
+	// Azure DevOps owns connection-health and work-item/pull-request watcher
+	// polling. Watch matches flow through the shared orchestrator coordinator.
 	if services.AzureDevOps != nil {
+		orchestratorSvc.SetAzureDevOpsService(services.AzureDevOps)
+		services.AzureDevOps.SetTaskSessionChecker(&taskSessionCheckerAdapter{repo: repos.Task})
 		azureLifecycle, lifecycleErr := azuredevopspkg.RegisterLifecycleCleanup(eventBus, services.AzureDevOps)
 		if lifecycleErr != nil {
 			log.Warn("Azure DevOps lifecycle cleanup unavailable", zap.Error(lifecycleErr))
@@ -602,20 +614,6 @@ func startAgentInfrastructure(
 		sentryPoller := sentrypkg.NewPoller(services.Sentry, log)
 		sentryPoller.Start(ctx)
 		addCleanup(func() error { sentryPoller.Stop(); return nil })
-	}
-
-	// Start Slack auth-health poller and the trigger loop. The trigger
-	// polls each configured workspace every 30s for new `!kandev …`
-	// messages from the authenticated user and turns them into Kandev
-	// tasks via taskSvc.
-	if services.Slack != nil {
-		slackPoller := slackpkg.NewPoller(services.Slack, log)
-		slackPoller.Start(ctx)
-		addCleanup(func() error { slackPoller.Stop(); return nil })
-
-		slackTrigger := slackpkg.NewTrigger(services.Slack, log)
-		slackTrigger.Start(ctx)
-		addCleanup(func() error { slackTrigger.Stop(); return nil })
 	}
 
 	// Start workflow-sync poller: periodically pulls workflow definition
@@ -695,7 +693,8 @@ func startGatewayAndServe(
 	}
 
 	gateways.RegisterSessionStreamNotifications(ctx, eventBus, gateway.Hub, log)
-	gateway.Hub.SetSessionDataProvider(buildSessionDataProvider(repos.Task, lifecycleMgr, log))
+	gateway.Hub.SetSessionDataProvider(buildSessionDataProvider(repos.Task, lifecycleMgr, orchestratorSvc, log))
+	gateway.Hub.SetSessionGitDataProvider(buildSessionGitDataProvider(repos.Task, lifecycleMgr, log))
 	log.Info("Session data provider configured for session subscriptions (git status from snapshots)")
 
 	// WS gateway per-user scoping (opt-in auth): connection auth on upgrade
@@ -738,28 +737,10 @@ func startGatewayAndServe(
 		return nil
 	})
 
-	// Wire the Slack agent runner. Slack triage uses the host-utility
-	// inference path (single-shot ACP subprocess) with the Kandev MCP
-	// server attached so the agent can call list_workflows_kandev /
-	// create_task_kandev / etc. mid-prompt. Both deps land here at the
-	// same time: hostUtilityMgr just bootstrapped above, services.Utility
-	// was constructed in provideServices.
-	if services.Slack != nil && services.Utility != nil {
-		mcpURL := buildKandevMCPURL(cfg.Server.Port)
-		slackRunner := slackpkg.NewRunner(
-			services.Utility,
-			services.User,
-			slackHostUtilityAdapter{mgr: hostUtilityMgr},
-			[]slackpkg.MCPDescriptor{{Name: "kandev", URL: mcpURL}},
-			log,
-		)
-		services.Slack.SetRunner(slackRunner)
-	}
-
 	// Wire Host.InvokeUtilityAgent (ADR 0048): plugins delegate one-shot LLM
 	// calls to the utility agent selected in each plugin's configuration and
-	// runs them through the sessionless host-utility
-	// tier. Same landing point as the Slack runner — hostUtilityMgr is live.
+	// runs them through the sessionless host-utility tier, at the first point
+	// where hostUtilityMgr is live.
 	if services.Plugins != nil && services.Utility != nil {
 		services.Plugins.SetUtilityAgent(pluginsUtilityAgentAdapter{svc: services.Utility}, pluginsHostUtilityAdapter{mgr: hostUtilityMgr})
 	}
@@ -823,9 +804,13 @@ func startGatewayAndServe(
 		BuildTime: BuildTime,
 	}, systemsvc.Wiring{
 		OrchestratorShutdown: func() { _ = orchestratorSvc.Stop() },
+		MessageQueue:         orchestratorSvc.GetMessageQueue(),
+		TaskSessions:         repos.Task,
 	})
 	storageComposition, err := provideStorageComposition(
 		cfg, dbPool, systemSvc.Jobs, lifecycleMgr, services.WorktreeMgr, services.Task,
+		log,
+		func(message string, err error) { log.Error(message, zap.Error(err)) },
 	)
 	if err != nil {
 		log.Error("Failed to initialize storage maintenance", zap.Error(err))
@@ -833,6 +818,11 @@ func startGatewayAndServe(
 	}
 	systemSvc.Storage = storageComposition.handler
 	systemSvc.StorageRuntime = storageComposition.runtime
+	if systemSvc.LogBundles != nil {
+		systemSvc.LogBundles.SetNotifier(gateway.Hub)
+		systemSvc.LogBundles.SetSessionProvider(newDiagnosticSessionProvider(services.Task))
+		systemSvc.LogBundles.SetACPExporter(newDiagnosticACPExporter(lifecycleMgr))
+	}
 	if systemSvc.Metrics != nil {
 		systemSvc.Metrics.SetBroadcaster(gateway.Hub.BroadcastToSystemMetrics)
 		gateway.Hub.SetSystemMetricsInterestTracker(systemSvc.Metrics)
@@ -1783,6 +1773,16 @@ func buildHTTPServer(
 		return nil, fmt.Errorf("generate interim settings interlock token: %w", err)
 	}
 	userSecretStore := secrets.NewUserVisibleStore(repos.Secrets)
+	// The login PTY manager is shared by agent-login dialogs and Quick
+	// Terminal tabs. The latter uses an owner-aware exit callback to keep its
+	// durable descriptor accurate even while no browser is attached.
+	loginMgr, quickTerminalSvc := buildLoginPTYServices(
+		log,
+		repos.QuickTerminal,
+		services.Task,
+		agentSettingsController,
+		addCleanup,
+	)
 
 	// Opt-in authentication. Runs after CORS; in disabled mode it only
 	// injects the synthetic single-user identity (behavior unchanged).
@@ -1792,6 +1792,8 @@ func buildHTTPServer(
 	// workspace_id with no gate of their own. No-op when auth is disabled.
 	router.Use(integrationWorkspaceScopeMiddleware(services.Auth, services.Task))
 
+	secretsSvc := secrets.NewService(userSecretStore, log)
+	secretsSvc.SetWorkspaceAuthorizer(services.Task.AuthorizeWorkspaceAccess)
 	registerRoutes(routeParams{
 		router:                        router,
 		gateway:                       gateway,
@@ -1801,6 +1803,8 @@ func buildHTTPServer(
 		analyticsRepo:                 repos.Analytics,
 		orchestratorSvc:               orchestratorSvc,
 		lifecycleMgr:                  lifecycleMgr,
+		loginMgr:                      loginMgr,
+		quickTerminalSvc:              quickTerminalSvc,
 		hostUtilityMgr:                hostUtilityMgr,
 		eventBus:                      eventBus,
 		services:                      services,
@@ -1817,7 +1821,7 @@ func buildHTTPServer(
 		promptCtrl:                    promptcontroller.NewController(services.Prompts),
 		utilityCtrl:                   utilitycontroller.NewController(services.Utility),
 		msgCreator:                    msgCreator,
-		secretsSvc:                    secrets.NewService(userSecretStore, log),
+		secretsSvc:                    secretsSvc,
 		secretStore:                   userSecretStore,
 		mcpConfigSvc:                  mcpconfig.NewService(repos.AgentSettings),
 		authSvc:                       services.Auth,
@@ -1829,6 +1833,7 @@ func buildHTTPServer(
 		httpPort:                      resolvedHTTPPort(cfg),
 		features:                      cfg.Features,
 		voice:                         cfg.Voice,
+		homeDir:                       cfg.ResolvedHomeDir(),
 		interimSettingsInterlockToken: interimSettingsInterlockToken,
 		log:                           log,
 	})

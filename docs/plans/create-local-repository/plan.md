@@ -1,18 +1,19 @@
 ---
 spec: docs/specs/create-local-repository/spec.md
 created: 2026-07-21
-status: completed
+updated: 2026-08-05
+status: implemented
 ---
 
 # Implementation Plan: Create a Local Repository During Task Creation
 
 ## Overview
 
-Add an explicit backend operation that owns directory creation, commitless Git initialization, and
-workspace repository persistence. Then add a selector action that opens a shared directory-browser
-form, merges the returned repository into workspace state, selects it in the originating task row,
-and moves the first task to a compatible direct local executor. Desktop and mobile use the same
-mutation/state logic with purpose-built Dialog and Drawer shells.
+The original implementation owns directory creation, Git initialization, and workspace repository
+persistence, then merges the returned repository into the task-create selector on desktop and
+mobile. This follow-up changes the initialization contract so the new repository has one empty root
+commit on `main`; the existing branch endpoint can therefore return a real local branch and the
+selector can offer it as a base without a frontend production-code change.
 
 ## Backend
 
@@ -24,7 +25,10 @@ mutation/state logic with purpose-built Dialog and Drawer shells.
 - Validate that `Name` is a single non-empty host path segment and `ParentPath` is an existing,
   writable absolute directory. Canonicalize the parent before joining the target, atomically create
   the absent target, and never modify an existing path.
-- Run `git init --initial-branch=main` without creating files, configuring an author, or committing.
+- Run `git init --initial-branch=main`, then create one empty, unsigned initial commit on `main`
+  without adding working-tree files. Use the existing classified Git subprocess seam and fixed
+  Kandev commit identity so the operation does not depend on the host user's Git identity; both
+  commands remain bound to the opened staging directory on descriptor-safe platforms.
 - Register the canonical target through the existing `CreateRepository` path with `source_type=local`
   and `default_branch=main`, preserving validation and `repository.created` publication.
 - On a partial failure, leave no repository row and remove only the target created by this request
@@ -75,6 +79,14 @@ mutation/state logic with purpose-built Dialog and Drawer shells.
   `apps/web/components/task-create-dialog-handlers.test.ts` for action visibility, row targeting,
   cache merge, success, conflict, retry, and cancel behavior.
 
+### Branch selector follow-up
+
+- Keep the existing repository and branch picker wiring unchanged. Once the backend creates
+  `refs/heads/main`, `useBranches` and `Pill` will expose `main` as a selectable local option for
+  the newly returned repository.
+- Update the existing desktop and mobile creation E2E assertions to open the branch picker, verify
+  that `main` is enabled and listed, and select it as the task's base branch.
+
 ## Mobile Design Contract
 
 - Desktop keeps the repository search popover and opens a compact creation Dialog from its visible
@@ -93,8 +105,8 @@ mutation/state logic with purpose-built Dialog and Drawer shells.
 
 - **Initialization success:**
   `apps/backend/internal/task/service/local_repository_initialization_test.go` uses `t.TempDir()` and
-  real Git to assert canonical path, unborn `main`, the absence of `HEAD` commits, persisted workspace
-  record, and repository-created event.
+  real Git to assert canonical path, a real `refs/heads/main` pointing at one empty initial commit,
+  no user files in the working tree, the persisted workspace record, and the repository-created event.
 - **Input and conflict safety:** the same service test table covers invalid names, relative/missing/
   non-directory parents, existing empty/non-empty targets, and no mutation or persistence.
 - **Partial failure cleanup:** service tests inject or induce Git/persistence failures and assert no
@@ -110,15 +122,15 @@ mutation/state logic with purpose-built Dialog and Drawer shells.
 
 ## E2E Tests
 
-- Desktop: add `apps/web/e2e/tests/task/create-task-new-local-repository.spec.ts`. Open **New Task**,
-  create a repository under the isolated backend home, assert it is selected with `main`, submit the
-  task, and verify the task is bound to the persisted repository, uses a direct local executor, and
-  the filesystem has no commit. Add a target-conflict case that proves the existing directory remains
-  unchanged.
-- Mobile: add `apps/web/e2e/tests/task/mobile-create-task-new-local-repository.spec.ts`. Enter through
-  `MobileKanbanPage.mobileFab`, complete the same create-and-submit outcome, and assert Drawer
-  containment, a scrollable internal list, 44px action rows, visible safe-area footer, focus/dismiss
-  behavior, and zero document horizontal overflow.
+- Desktop: update `apps/web/e2e/tests/task/create-task-new-local-repository.spec.ts`. Open **New
+  Task**, create a repository under the isolated backend home, assert it is selected with `main`,
+  open the branch picker and select the listed local `main`, submit the task, and verify the task is
+  bound to the persisted repository, uses the existing direct local executor policy, and the
+  filesystem has one empty commit with no user files. Keep the target-conflict case unchanged.
+- Mobile: update `apps/web/e2e/tests/task/mobile-create-task-new-local-repository.spec.ts`. Enter
+  through `MobileKanbanPage.mobileFab`, complete the same create-and-select outcome, open the branch
+  picker and select `main`, and retain the Drawer containment, internal scroll, 44px action rows,
+  safe-area footer, focus/dismiss, and zero-horizontal-overflow assertions.
 
 ## Implementation Waves
 
@@ -134,34 +146,31 @@ Wave 3 (after integrated backend and frontend):
 
 - [x] [task-03-e2e-and-verification](task-03-e2e-and-verification.md) - done
 
+Wave 4 (follow-up):
+
+- [x] [task-04-real-main-branch](task-04-real-main-branch.md) - done
+
 The frontend task is sequential because the shared picker, task-create handlers, and state wiring are
 one behavior and edit overlapping files. E2E follows the integrated product path.
 
-## Verification
+## Verification Results
 
-```bash
-make fmt
-make typecheck
-(cd apps/backend && go test ./internal/task/service ./internal/task/handlers)
-(cd apps && pnpm --filter @kandev/web test -- --run \
-  components/create-local-repository-surface.test.tsx \
-  components/task-create-dialog-pill.test.tsx \
-  components/task-create-dialog-repo-chips.test.tsx \
-  components/task-create-dialog-handlers.test.ts)
-(cd apps/web && pnpm e2e:run tests/task/create-task-new-local-repository.spec.ts)
-(cd apps/web && pnpm e2e:run --no-build --project mobile-chrome \
-  tests/task/mobile-create-task-new-local-repository.spec.ts)
-make test
-make lint
-```
+Task 04 completed with the requested change-aware checks:
+
+- `(cd apps && pnpm install --frozen-lockfile)` passed.
+- `(cd apps/backend && go test ./internal/task/service ./internal/task/handlers)` passed.
+- `(cd apps/backend && go test ./internal/task/gitinit)` passed.
+- `(cd apps/web && pnpm e2e:run tests/task/create-task-new-local-repository.spec.ts)` passed (2 tests).
+- `(cd apps/web && pnpm e2e:run --project mobile-chrome tests/task/mobile-create-task-new-local-repository.spec.ts)` passed (1 test).
+- Changed E2E files passed Prettier checks and `git diff --check` passed.
 
 ## Risks
 
 - Filesystem and database persistence cannot share a transaction. The service must narrowly own and
   test partial-failure cleanup without ever deleting a pre-existing target.
-- An unborn Git repository cannot support the existing branch/worktree flow. The form must switch
-  the first task to a direct local executor and must not silently fall back to worktree, container, or
-  remote execution.
+- The initial commit changes the repository history contract. The commit must remain empty and use a
+  deterministic, non-interactive identity so branch availability does not introduce user files,
+  signing prompts, or a dependency on host Git configuration.
 - The repository list may already be hydrated while the event arrives asynchronously. Selection must
   use the returned DTO directly and cache insertion must be idempotent.
 - Nested overlays inside the full-height mobile task dialog can break scroll and focus ownership. The

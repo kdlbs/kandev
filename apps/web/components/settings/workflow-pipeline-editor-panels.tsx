@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { IconRobot, IconTrash } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Input } from "@kandev/ui/input";
@@ -9,18 +10,11 @@ import { Label } from "@kandev/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import type { WorkflowStep } from "@/lib/types/http";
 import { useHealthyAgentProfiles } from "@/hooks/domains/settings/use-healthy-agent-profiles";
-import { useCustomPrompts } from "@/hooks/domains/settings/use-custom-prompts";
 import { useDebouncedCallback } from "@/hooks/use-debounce";
 import { cn } from "@/lib/utils";
 import {
-  ScriptEditor,
-  computeEditorHeight,
-} from "@/components/settings/profile-edit/script-editor";
-import {
   HelpTip,
   STEP_COLORS,
-  STEP_PROMPT_PLACEHOLDERS,
-  PROMPT_TEMPLATES,
   hasOnEnterAction,
   hasOnExitAction,
 } from "./workflow-pipeline-editor-helpers";
@@ -31,6 +25,8 @@ import {
   ChildrenCompletedSelect,
 } from "./workflow-pipeline-editor-step-actions";
 import { StepWipControls } from "./workflow-pipeline-editor-wip-controls";
+import { SessionConfigEditor, SessionConfigToggle } from "./workflow-session-config-editor";
+import { StepPromptSection } from "./workflow-step-prompt-section";
 import { isWorkflowStepDirty, isWorkflowStepValueDirty } from "./workflow-dirty-state";
 
 // --- StepAgentProfileSelect ---
@@ -46,17 +42,19 @@ function StepAgentProfileSelect({
   onUpdate: (updates: Partial<WorkflowStep>) => void;
   readOnly: boolean;
 }) {
+  const { t } = useTranslation();
   const healthyProfiles = useHealthyAgentProfiles(step.agent_profile_id);
+  const hasConditionalSessionConfig = hasOnEnterAction(step, "configure_session");
 
   return (
-    <div className="flex w-full min-w-0 items-center gap-1.5 sm:w-auto">
+    <div className="flex w-full min-w-0 flex-wrap items-center gap-2 sm:w-auto">
       <Select
         value={step.agent_profile_id || "none"}
         onValueChange={(value) => {
-          if (readOnly) return;
+          if (readOnly || hasConditionalSessionConfig) return;
           onUpdate({ agent_profile_id: value === "none" ? "" : value });
         }}
-        disabled={readOnly}
+        disabled={readOnly || hasConditionalSessionConfig}
       >
         <SelectTrigger
           className="h-8 w-full min-w-0 cursor-pointer sm:w-[220px]"
@@ -68,11 +66,11 @@ function StepAgentProfileSelect({
           )}
         >
           <IconRobot className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-          <SelectValue placeholder="No profile override" />
+          <SelectValue placeholder={t("workflows:noProfileOverride")} />
         </SelectTrigger>
         <SelectContent>
           <SelectItem value="none" className="cursor-pointer">
-            No profile override
+            {t("workflows:noProfileOverride")}
           </SelectItem>
           {healthyProfiles.map((p) => (
             <SelectItem key={p.id} value={p.id} className="cursor-pointer">
@@ -81,7 +79,20 @@ function StepAgentProfileSelect({
           ))}
         </SelectContent>
       </Select>
-      <HelpTip text="Override the agent profile for this step. A different profile creates a new session with fresh context when entering this step." />
+      <HelpTip
+        testId={`${step.id}-agent-profile-help`}
+        text={
+          hasConditionalSessionConfig
+            ? t("workflows:removeConditionalSessionConfigBeforeProfile")
+            : t("workflows:overrideAgentProfileHelp")
+        }
+      />
+      <SessionConfigToggle
+        step={step}
+        savedStep={savedStep}
+        onUpdate={onUpdate}
+        readOnly={readOnly}
+      />
     </div>
   );
 }
@@ -109,6 +120,7 @@ function StepConfigHeader({
   readOnly,
   debouncedUpdateName,
 }: StepConfigHeaderProps) {
+  const { t } = useTranslation();
   return (
     <div className="flex flex-col gap-3 border-b border-border px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
       <div className="flex min-w-0 flex-1 flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
@@ -120,7 +132,7 @@ function StepConfigHeader({
             onLocalNameChange(e.target.value);
             debouncedUpdateName(e.target.value);
           }}
-          placeholder="Step name"
+          placeholder={t("workflows:stepNamePlaceholder")}
           disabled={readOnly}
           className="h-8 w-full sm:max-w-[240px]"
           data-settings-dirty={!savedStep || localName !== savedStep.name}
@@ -137,14 +149,14 @@ function StepConfigHeader({
             className="h-8 w-full sm:w-[120px]"
             data-settings-dirty={isWorkflowStepValueDirty(step, savedStep, (item) => item.color)}
           >
-            <SelectValue placeholder="Color" />
+            <SelectValue placeholder={t("workflows:color")} />
           </SelectTrigger>
           <SelectContent position="popper" side="bottom" align="start">
             {STEP_COLORS.map((color) => (
               <SelectItem key={color.value} value={color.value}>
                 <div className="flex items-center gap-2">
                   <div className={cn("w-3 h-3 rounded-full", color.value)} />
-                  {color.label}
+                  {t(color.labelKey)}
                 </div>
               </SelectItem>
             ))}
@@ -166,13 +178,11 @@ function StepConfigHeader({
         className="h-8 self-end cursor-pointer text-destructive hover:text-destructive sm:self-auto"
       >
         <IconTrash className="h-3.5 w-3.5 mr-1" />
-        Delete
+        {t("workflows:delete")}
       </Button>
     </div>
   );
 }
-
-// --- StepAutoArchiveRow ---
 
 type StepAutoArchiveRowProps = {
   step: WorkflowStep;
@@ -182,6 +192,7 @@ type StepAutoArchiveRowProps = {
 };
 
 function StepAutoArchiveRow({ step, savedStep, onUpdate, readOnly }: StepAutoArchiveRowProps) {
+  const { t } = useTranslation();
   const isDirty = isWorkflowStepValueDirty(
     step,
     savedStep,
@@ -200,12 +211,12 @@ function StepAutoArchiveRow({ step, savedStep, onUpdate, readOnly }: StepAutoArc
         data-settings-dirty={isDirty}
       />
       <Label htmlFor={`${step.id}-auto-archive`} className="text-sm">
-        Auto-archive
+        {t("workflows:autoArchive")}
       </Label>
-      <HelpTip text="Automatically archive tasks after they have been in this step for a set number of hours. Useful for the last step of a workflow (e.g., Done) to keep the board clean." />
+      <HelpTip text={t("workflows:autoArchiveHelp")} />
       {(step.auto_archive_after_hours ?? 0) > 0 && (
         <>
-          <span className="text-sm text-muted-foreground">after</span>
+          <span className="text-sm text-muted-foreground">{t("workflows:autoArchiveAfter")}</span>
           <Input
             id={`${step.id}-auto-archive-hours`}
             type="number"
@@ -220,14 +231,12 @@ function StepAutoArchiveRow({ step, savedStep, onUpdate, readOnly }: StepAutoArc
             disabled={readOnly}
             data-settings-dirty={isDirty}
           />
-          <span className="text-sm text-muted-foreground">hours</span>
+          <span className="text-sm text-muted-foreground">{t("workflows:autoArchiveHours")}</span>
         </>
       )}
     </div>
   );
 }
-
-// --- StepCheckboxRow ---
 
 type StepCheckboxRowProps = {
   id: string;
@@ -276,6 +285,102 @@ type StepBehaviorSectionProps = {
   readOnly: boolean;
 };
 
+type StepToggleRowsProps = Omit<StepBehaviorSectionProps, "steps">;
+
+// The six on-enter / board-behavior toggles. Split out of StepBehaviorSection
+// so that component stays under the 100-line function cap.
+function StepToggleRows({
+  step,
+  savedStep,
+  onUpdate,
+  toggleOnEnterAction,
+  readOnly,
+}: StepToggleRowsProps) {
+  const { t } = useTranslation();
+  return (
+    <>
+      <StepCheckboxRow
+        id={`${step.id}-start-step`}
+        checked={step.is_start_step === true}
+        onCheckedChange={(c) => !readOnly && onUpdate({ is_start_step: c })}
+        disabled={readOnly}
+        label={t("workflows:startStep")}
+        helpText={t("workflows:startStepHelp")}
+        isDirty={isWorkflowStepValueDirty(step, savedStep, (item) => item.is_start_step ?? false)}
+      />
+      <StepCheckboxRow
+        id={`${step.id}-auto-start`}
+        checked={hasOnEnterAction(step, "auto_start_agent")}
+        onCheckedChange={() => !readOnly && toggleOnEnterAction("auto_start_agent")}
+        disabled={readOnly}
+        label={t("workflows:autoStartAgent")}
+        helpText={t("workflows:autoStartAgentHelp")}
+        isDirty={isWorkflowStepValueDirty(step, savedStep, (item) =>
+          hasOnEnterAction(item, "auto_start_agent"),
+        )}
+      />
+      <StepCheckboxRow
+        id={`${step.id}-plan-mode`}
+        checked={hasOnEnterAction(step, "enable_plan_mode")}
+        onCheckedChange={() => !readOnly && toggleOnEnterAction("enable_plan_mode")}
+        disabled={readOnly}
+        label={t("workflows:planMode")}
+        helpText={t("workflows:planModeHelp")}
+        isDirty={isWorkflowStepValueDirty(step, savedStep, (item) =>
+          hasOnEnterAction(item, "enable_plan_mode"),
+        )}
+      />
+      <StepCheckboxRow
+        id={`${step.id}-reset-context`}
+        checked={hasOnEnterAction(step, "reset_agent_context")}
+        onCheckedChange={() => !readOnly && toggleOnEnterAction("reset_agent_context")}
+        disabled={readOnly || !!step.agent_profile_id}
+        label={t("workflows:resetAgentContext")}
+        helpText={
+          step.agent_profile_id
+            ? t("workflows:resetAgentContextHelpWithProfile")
+            : t("workflows:resetAgentContextHelp")
+        }
+        isDirty={isWorkflowStepValueDirty(step, savedStep, (item) =>
+          hasOnEnterAction(item, "reset_agent_context"),
+        )}
+      />
+      <StepCheckboxRow
+        id={`${step.id}-manual-move`}
+        checked={step.allow_manual_move !== false}
+        onCheckedChange={(c) => !readOnly && onUpdate({ allow_manual_move: c })}
+        disabled={readOnly}
+        label={t("workflows:allowManualMove")}
+        helpText={t("workflows:allowManualMoveHelp")}
+        isDirty={isWorkflowStepValueDirty(
+          step,
+          savedStep,
+          (item) => item.allow_manual_move ?? true,
+        )}
+      />
+      <StepCheckboxRow
+        id={`${step.id}-command-panel`}
+        checked={step.show_in_command_panel !== false}
+        onCheckedChange={(c) => !readOnly && onUpdate({ show_in_command_panel: c })}
+        disabled={readOnly}
+        label={t("workflows:showInCommandPanel")}
+        helpText={t("workflows:showInCommandPanelHelp")}
+        isDirty={isWorkflowStepValueDirty(
+          step,
+          savedStep,
+          (item) => item.show_in_command_panel ?? false,
+        )}
+      />
+      <StepAutoArchiveRow
+        step={step}
+        savedStep={savedStep}
+        onUpdate={onUpdate}
+        readOnly={readOnly}
+      />
+    </>
+  );
+}
+
 function StepBehaviorSection({
   step,
   savedStep,
@@ -287,82 +392,11 @@ function StepBehaviorSection({
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
-        <StepCheckboxRow
-          id={`${step.id}-start-step`}
-          checked={step.is_start_step === true}
-          onCheckedChange={(c) => !readOnly && onUpdate({ is_start_step: c })}
-          disabled={readOnly}
-          label="Start step"
-          helpText="New tasks start in this step. Only one step per workflow can be the start step."
-          isDirty={isWorkflowStepValueDirty(step, savedStep, (item) => item.is_start_step ?? false)}
-        />
-        <StepCheckboxRow
-          id={`${step.id}-auto-start`}
-          checked={hasOnEnterAction(step, "auto_start_agent")}
-          onCheckedChange={() => !readOnly && toggleOnEnterAction("auto_start_agent")}
-          disabled={readOnly}
-          label="Auto-start agent"
-          helpText="Automatically start the agent when a task enters this step."
-          isDirty={isWorkflowStepValueDirty(step, savedStep, (item) =>
-            hasOnEnterAction(item, "auto_start_agent"),
-          )}
-        />
-        <StepCheckboxRow
-          id={`${step.id}-plan-mode`}
-          checked={hasOnEnterAction(step, "enable_plan_mode")}
-          onCheckedChange={() => !readOnly && toggleOnEnterAction("enable_plan_mode")}
-          disabled={readOnly}
-          label="Plan mode"
-          helpText="Agent proposes a plan instead of making changes directly."
-          isDirty={isWorkflowStepValueDirty(step, savedStep, (item) =>
-            hasOnEnterAction(item, "enable_plan_mode"),
-          )}
-        />
-        <StepCheckboxRow
-          id={`${step.id}-reset-context`}
-          checked={hasOnEnterAction(step, "reset_agent_context")}
-          onCheckedChange={() => !readOnly && toggleOnEnterAction("reset_agent_context")}
-          disabled={readOnly || !!step.agent_profile_id}
-          label="Reset agent context"
-          helpText={
-            step.agent_profile_id
-              ? "Not needed — switching agent profiles already creates a new session with fresh context."
-              : "Restart the agent with a fresh conversation context when entering this step. Useful for review steps that need an unbiased perspective."
-          }
-          isDirty={isWorkflowStepValueDirty(step, savedStep, (item) =>
-            hasOnEnterAction(item, "reset_agent_context"),
-          )}
-        />
-        <StepCheckboxRow
-          id={`${step.id}-manual-move`}
-          checked={step.allow_manual_move !== false}
-          onCheckedChange={(c) => !readOnly && onUpdate({ allow_manual_move: c })}
-          disabled={readOnly}
-          label="Allow manual move"
-          helpText="Allow dragging tasks into this step on the board."
-          isDirty={isWorkflowStepValueDirty(
-            step,
-            savedStep,
-            (item) => item.allow_manual_move ?? true,
-          )}
-        />
-        <StepCheckboxRow
-          id={`${step.id}-command-panel`}
-          checked={step.show_in_command_panel !== false}
-          onCheckedChange={(c) => !readOnly && onUpdate({ show_in_command_panel: c })}
-          disabled={readOnly}
-          label="Show in command panel"
-          helpText="Show tasks in this step when opening the command panel (Cmd+K). Useful for hiding backlog or done steps from quick access."
-          isDirty={isWorkflowStepValueDirty(
-            step,
-            savedStep,
-            (item) => item.show_in_command_panel ?? false,
-          )}
-        />
-        <StepAutoArchiveRow
+        <StepToggleRows
           step={step}
           savedStep={savedStep}
           onUpdate={onUpdate}
+          toggleOnEnterAction={toggleOnEnterAction}
           readOnly={readOnly}
         />
       </div>
@@ -404,6 +438,7 @@ function StepTransitionsSection({
   toggleOnExitAction,
   readOnly,
 }: StepTransitionsSectionProps) {
+  const { t } = useTranslation();
   const otherSteps = steps.filter((s) => s.id !== step.id);
   const planModeEnabled = hasOnEnterAction(step, "enable_plan_mode");
 
@@ -411,7 +446,7 @@ function StepTransitionsSection({
     <div className="space-y-3">
       <div className="flex items-center gap-1.5">
         <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
-          Transitions
+          {t("workflows:transitions")}
         </Label>
       </div>
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
@@ -445,8 +480,8 @@ function StepTransitionsSection({
       {planModeEnabled && (
         <div className="space-y-2">
           <div className="flex items-center gap-1.5">
-            <Label className="text-xs font-medium">On Exit</Label>
-            <HelpTip text="Runs when leaving this step (before entering the next step)." />
+            <Label className="text-xs font-medium">{t("workflows:onExit")}</Label>
+            <HelpTip text={t("workflows:onExitHelp")} />
           </div>
           <div className="flex items-center gap-2">
             <Checkbox
@@ -462,92 +497,12 @@ function StepTransitionsSection({
               )}
             />
             <Label htmlFor={`${step.id}-exit-disable-plan`} className="text-sm">
-              Disable plan mode
+              {t("workflows:disablePlanMode")}
             </Label>
-            <HelpTip text="Keep plan mode on for every turn in this step, then turn it off only when the task moves to another step." />
+            <HelpTip text={t("workflows:disablePlanModeOnExitHelp")} />
           </div>
         </div>
       )}
-    </div>
-  );
-}
-
-// --- StepPromptSection ---
-
-type StepPromptSectionProps = {
-  step: WorkflowStep;
-  savedStep?: WorkflowStep;
-  localPrompt: string;
-  onLocalPromptChange: (prompt: string) => void;
-  debouncedUpdatePrompt: (prompt: string) => void;
-  readOnly: boolean;
-};
-
-function StepPromptSection({
-  step,
-  savedStep,
-  localPrompt,
-  onLocalPromptChange,
-  debouncedUpdatePrompt,
-  readOnly,
-}: StepPromptSectionProps) {
-  const { prompts } = useCustomPrompts();
-  return (
-    <div className="space-y-2">
-      <div className="flex items-center gap-1.5">
-        <Label
-          htmlFor={`${step.id}-prompt`}
-          className="text-xs font-medium text-muted-foreground uppercase tracking-wider"
-        >
-          Step Prompt
-        </Label>
-        <HelpTip text="Custom instructions for the agent on this step. Use {{task_prompt}} to include the task description." />
-      </div>
-      {!readOnly && (
-        <div className="flex items-center gap-1.5 flex-wrap">
-          <span className="text-[11px] text-muted-foreground/60">Templates:</span>
-          {PROMPT_TEMPLATES.map((template) => (
-            <button
-              key={template.label}
-              type="button"
-              onClick={() => {
-                onLocalPromptChange(template.prompt);
-                debouncedUpdatePrompt(template.prompt);
-              }}
-              className="text-[11px] px-2 py-0.5 rounded-md border border-border bg-muted/50 text-muted-foreground hover:bg-muted hover:text-foreground transition-colors cursor-pointer"
-            >
-              {template.label}
-            </button>
-          ))}
-        </div>
-      )}
-      <div
-        className="rounded-md border overflow-hidden"
-        data-settings-dirty={!savedStep || localPrompt !== (savedStep.prompt ?? "")}
-      >
-        <ScriptEditor
-          value={localPrompt}
-          onChange={(v) => {
-            if (readOnly) return;
-            onLocalPromptChange(v);
-            debouncedUpdatePrompt(v);
-          }}
-          language="markdown"
-          height={computeEditorHeight(localPrompt)}
-          lineNumbers="off"
-          readOnly={readOnly}
-          placeholders={STEP_PROMPT_PLACEHOLDERS}
-          mentionPrompts={prompts}
-        />
-      </div>
-      <p className="text-[11px] text-muted-foreground/60">
-        Type {"{{"} for placeholders (
-        <code className="bg-muted px-1 py-0.5 rounded text-[10px]">{"{{task_prompt}}"}</code>{" "}
-        inserts the task description) or {"@"} to reference a saved prompt by name — its content is
-        attached as hidden context, and editing the saved prompt updates every step that references
-        it. Note: {"{{task_prompt}}"} only expands in the step prompt itself, not inside a
-        referenced saved prompt.
-      </p>
     </div>
   );
 }
@@ -608,6 +563,7 @@ export function StepConfigPanel({
           toggleOnEnterAction={actions.toggleOnEnterAction}
           readOnly={readOnly}
         />
+        <SessionConfigEditor {...{ step, savedStep, steps, onUpdate, readOnly }} />
         <StepTransitionsSection
           step={step}
           savedStep={savedStep}

@@ -1,6 +1,7 @@
 "use client";
 
 import { IconDownload, IconTrash } from "@tabler/icons-react";
+import { useTranslation } from "react-i18next";
 import { Button } from "@kandev/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { useToast } from "@/components/toast-provider";
@@ -17,9 +18,6 @@ type WorkflowCardHeaderActionsProps = {
   readOnly: boolean;
 };
 
-const SYNCED_READ_ONLY_REASON =
-  "Managed by workflow sync — edit or remove it in the synced repository";
-
 export function WorkflowCardHeaderActions({
   workflowId,
   setExportYaml,
@@ -30,13 +28,14 @@ export function WorkflowCardHeaderActions({
   exportDisabled,
   readOnly,
 }: WorkflowCardHeaderActionsProps) {
+  const { t } = useTranslation();
   return (
     <div className="flex flex-wrap justify-end gap-2">
       <Tooltip>
         <TooltipTrigger asChild>
           <span
             tabIndex={exportDisabled ? 0 : undefined}
-            aria-label={exportDisabled ? "Save the workflow before exporting." : undefined}
+            aria-label={exportDisabled ? t("workflows:saveBeforeExporting") : undefined}
           >
             <Button
               type="button"
@@ -48,11 +47,11 @@ export function WorkflowCardHeaderActions({
               disabled={exportDisabled}
             >
               <IconDownload className="h-4 w-4 mr-2" />
-              Export
+              {t("workflows:export")}
             </Button>
           </span>
         </TooltipTrigger>
-        {exportDisabled && <TooltipContent>Save the workflow before exporting.</TooltipContent>}
+        {exportDisabled && <TooltipContent>{t("workflows:saveBeforeExporting")}</TooltipContent>}
       </Tooltip>
       <Tooltip>
         <TooltipTrigger asChild>
@@ -63,8 +62,8 @@ export function WorkflowCardHeaderActions({
               onClick={() => {
                 void onDeleteClick().catch((error) => {
                   toast({
-                    title: "Failed to delete workflow",
-                    description: error instanceof Error ? error.message : "Request failed",
+                    title: t("workflows:failedToDeleteWorkflow"),
+                    description: error instanceof Error ? error.message : t("common:requestFailed"),
                     variant: "error",
                   });
                 });
@@ -74,11 +73,11 @@ export function WorkflowCardHeaderActions({
               data-testid="delete-workflow-button"
             >
               <IconTrash className="h-4 w-4 mr-2" />
-              Delete Workflow
+              {t("workflows:deleteWorkflow")}
             </Button>
           </span>
         </TooltipTrigger>
-        {readOnly && <TooltipContent>{SYNCED_READ_ONLY_REASON}</TooltipContent>}
+        {readOnly && <TooltipContent>{t("workflows:syncedReadOnlyReason")}</TooltipContent>}
       </Tooltip>
     </div>
   );

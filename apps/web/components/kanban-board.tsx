@@ -25,6 +25,7 @@ import { useWorkspacePRs } from "@/hooks/domains/github/use-task-pr";
 import { useWorkspaceMRs } from "@/hooks/domains/gitlab/use-task-mr";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { useTaskMultiSelect } from "@/hooks/use-task-multi-select";
+import { usePluginTaskFilters } from "@/hooks/use-plugin-task-filters";
 import { HomepageCommands } from "./homepage-commands";
 import { linkToTask } from "@/lib/links";
 import {
@@ -38,6 +39,7 @@ import {
   AlertDialogAction,
 } from "@kandev/ui/alert-dialog";
 import { IconAlertTriangle } from "@tabler/icons-react";
+import { useTranslation } from "react-i18next";
 
 function useWorkflowSelection({
   store,
@@ -391,6 +393,11 @@ export function KanbanBoard({ onPreviewTask, onOpenTask, onBeforeEdit }: KanbanB
   const s = useKanbanBoardSetup(onPreviewTask, onOpenTask, onBeforeEdit);
   const isMobileSearchOpen = useAppStore((state) => state.mobileKanban.isSearchOpen);
   const setMobileSearchOpen = useAppStore((state) => state.setMobileKanbanSearchOpen);
+  const { taskMatchesPluginFilters } = usePluginTaskFilters();
+  const matchesPluginTaskFilters = useCallback(
+    (taskId: string) => taskMatchesPluginFilters({ taskId }),
+    [taskMatchesPluginFilters],
+  );
 
   // Collapse search on unmount so the global flag doesn't auto-open (and focus)
   // the search bar after navigating to another route.
@@ -451,6 +458,7 @@ export function KanbanBoard({ onPreviewTask, onOpenTask, onBeforeEdit }: KanbanB
         showMaximizeButton={s.enablePreviewOnClick}
         searchQuery={s.searchQuery}
         selectedRepositoryIds={s.userSettings.repositoryIds}
+        matchesPluginTaskFilters={matchesPluginTaskFilters}
         selectedIds={s.multiSelect.selectedIds}
         onToggleSelect={s.multiSelect.toggleSelect}
         onSelectRange={s.multiSelect.selectRange}
@@ -572,20 +580,21 @@ function ApprovalWarningDialog({
   setMoveError: (error: MoveTaskError | null) => void;
   handleGoToTask: () => void;
 }) {
+  const { t } = useTranslation();
   return (
     <AlertDialog open={!!moveError} onOpenChange={(open) => !open && setMoveError(null)}>
       <AlertDialogContent>
         <AlertDialogHeader>
           <AlertDialogTitle className="flex items-center gap-2">
             <IconAlertTriangle className="h-5 w-5 text-amber-500" />
-            Approval Required
+            {t("kanban:approvalRequired")}
           </AlertDialogTitle>
           <AlertDialogDescription>{moveError?.message}</AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
-          <AlertDialogCancel>Dismiss</AlertDialogCancel>
+          <AlertDialogCancel>{t("kanban:dismiss")}</AlertDialogCancel>
           {moveError?.taskId && (
-            <AlertDialogAction onClick={handleGoToTask}>Go to Task</AlertDialogAction>
+            <AlertDialogAction onClick={handleGoToTask}>{t("kanban:goToTask")}</AlertDialogAction>
           )}
         </AlertDialogFooter>
       </AlertDialogContent>

@@ -1,5 +1,9 @@
-import { describe, expect, it } from "vitest";
-import { getChangeRequestTerminology } from "./use-git-operations";
+import { describe, expect, it, vi } from "vitest";
+import {
+  buildGitOperationCallbacks,
+  getChangeRequestTerminology,
+  repositoryScopePayload,
+} from "./use-git-operations";
 
 describe("getChangeRequestTerminology", () => {
   it("uses merge request terminology for GitLab", () => {
@@ -13,6 +17,25 @@ describe("getChangeRequestTerminology", () => {
     expect(getChangeRequestTerminology("github")).toEqual({
       longName: "Pull Request",
       shortName: "PR",
+    });
+  });
+});
+
+describe("repository scope payloads", () => {
+  it("keeps an explicit empty repository name", () => {
+    expect(repositoryScopePayload("")).toEqual({ repo: "" });
+    expect(repositoryScopePayload(undefined)).toEqual({});
+  });
+
+  it("sends the root sentinel to scoped git operations", async () => {
+    const executeOperation = vi.fn() as unknown as Parameters<typeof buildGitOperationCallbacks>[0];
+    const operations = buildGitOperationCallbacks(executeOperation);
+
+    await operations.stage(undefined, "");
+
+    expect(executeOperation).toHaveBeenCalledWith("worktree.stage", {
+      paths: [],
+      repo: "",
     });
   });
 });

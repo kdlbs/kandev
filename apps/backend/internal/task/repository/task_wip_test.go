@@ -287,3 +287,50 @@ func TestTaskMetadataKeyHelpersRoundTripNestedValue(t *testing.T) {
 		t.Fatalf("deferred launch metadata still present: %#v", got.Metadata)
 	}
 }
+
+// TestSetTaskMetadataKeyIfNotArchivedSkipsArchivedTasks pins the archive-atomic
+// contract of the interrupted-marker write: an archive that commits between a
+// guard read and the metadata write must not leave a marker on an archived
+// task, so the conditional write itself must be the guard (the check and the
+// write are one statement).
+func TestSetTaskMetadataKeyIfNotArchivedSkipsArchivedTasks(t *testing.T) {
+	repo, cleanup := createTestSQLiteRepo(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	live := &models.Task{ID: "live-task", WorkspaceID: "metadata-workspace", Title: "Live"}
+	if err := repo.CreateTask(ctx, live); err != nil {
+		t.Fatalf("create live task: %v", err)
+	}
+	archived := &models.Task{ID: "archived-task", WorkspaceID: "metadata-workspace", Title: "Archived"}
+	if err := repo.CreateTask(ctx, archived); err != nil {
+		t.Fatalf("create archived task: %v", err)
+	}
+	if err := repo.ArchiveTask(ctx, archived.ID); err != nil {
+		t.Fatalf("archive task: %v", err)
+	}
+
+	changed, err := repo.SetTaskMetadataKeyIfNotArchived(ctx, live.ID, models.MetaKeyInterruptedAt, "2026-08-07T00:00:00Z")
+	if err != nil || !changed {
+		t.Fatalf("live task write changed=%t err=%v, want true/nil", changed, err)
+	}
+	changed, err = repo.SetTaskMetadataKeyIfNotArchived(ctx, archived.ID, models.MetaKeyInterruptedAt, "2026-08-07T00:00:00Z")
+	if err != nil || changed {
+		t.Fatalf("archived task write changed=%t err=%v, want false/nil", changed, err)
+	}
+
+	got, err := repo.GetTask(ctx, archived.ID)
+	if err != nil {
+		t.Fatalf("reload archived task: %v", err)
+	}
+	if _, marked := got.Metadata[models.MetaKeyInterruptedAt]; marked {
+		t.Fatalf("archived task must not carry the interrupted marker: %#v", got.Metadata)
+	}
+	got, err = repo.GetTask(ctx, live.ID)
+	if err != nil {
+		t.Fatalf("reload live task: %v", err)
+	}
+	if _, marked := got.Metadata[models.MetaKeyInterruptedAt]; !marked {
+		t.Fatalf("live task must carry the interrupted marker: %#v", got.Metadata)
+	}
+}

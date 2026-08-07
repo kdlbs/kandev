@@ -161,7 +161,7 @@ export async function prepareAndSwitchTask(
 
 export function selectTaskWithLayout(params: {
   taskId: string;
-  task: { primarySessionId?: string | null } | undefined;
+  task: { primarySessionId?: string | null; isArchived?: boolean } | undefined;
   store: StoreApi<AppState>;
   switchToSession: SwitchToSessionFn;
   loadTaskSessionsForTask: (taskId: string) => Promise<TaskSession[]>;
@@ -197,6 +197,12 @@ export function selectTaskWithLayout(params: {
       oldSessionId: oldSessionId ?? null,
       prevActiveTaskId: state.tasks.activeTaskId ?? null,
     });
+  }
+  if (task?.isArchived) {
+    disposeSelectionGuard();
+    params.setActiveTask(taskId);
+    replaceTaskUrl(taskId);
+    return;
   }
   if (task?.primarySessionId) {
     const targetSessionId = resolvePreferredSessionId({

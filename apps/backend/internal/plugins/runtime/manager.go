@@ -88,7 +88,7 @@ func WithStartTimeout(d time.Duration) Option {
 type Manager struct {
 	pluginsDir     string
 	log            *logger.Logger
-	onStatusChange func(id string, healthy bool)
+	onStatusChange func(id string, healthy bool, reason error)
 
 	pingInterval           time.Duration
 	maxConsecutiveFailures int
@@ -124,9 +124,11 @@ type Manager struct {
 // store.FSStore persists records under — KANDEV_PLUGIN_DATA_DIR for plugin
 // id "x" is pluginsDir/x/data). onStatusChange is invoked from the
 // supervision loop's own goroutine whenever a running plugin's health
-// transitions (degraded -> unhealthy, or a restart recovers it); it must
-// not block. May be nil (e.g. tests that don't care about transitions).
-func NewManager(pluginsDir string, onStatusChange func(id string, healthy bool), log *logger.Logger, opts ...Option) *Manager {
+// transitions (degraded -> unhealthy, or a restart recovers it); reason is
+// the triggering ping/process/restart error for unhealthy transitions and nil
+// on recovery. The callback must not block. May be nil (e.g. tests that don't
+// care about transitions).
+func NewManager(pluginsDir string, onStatusChange func(id string, healthy bool, reason error), log *logger.Logger, opts ...Option) *Manager {
 	m := &Manager{
 		pluginsDir:             pluginsDir,
 		log:                    log,
@@ -236,27 +238,34 @@ func (m *Manager) consumeStopRequested(id string) bool {
 // tracked entry for id has already permanently given up (exhausted its
 // restart attempts — current==nil, gaveUp==true), it is dropped so a fresh
 // Start can respawn cleanly rather than being rejected as "already
-// running" against a dead entry. p.stop() on a gave-up process is a fast,
-// safe no-op (its supervision loop has already exited), so this is safe to
-// do while holding m.mu.
+// running" against a dead entry. The exhausted process is stopped after m.mu
+// is released: p.stop() waits for the supervision goroutine, and its final
+// status callback may call back into Manager and need the same mutex.
 func (m *Manager) claimStart(id string) error {
 	m.mu.Lock()
-	defer m.mu.Unlock()
 
 	if _, inFlight := m.starting[id]; inFlight {
+		m.mu.Unlock()
 		return fmt.Errorf("plugins/runtime: plugin %q is already starting", id)
 	}
+	var exhausted *process
 	if p, exists := m.processes[id]; exists {
 		if !p.isGaveUp() {
+			m.mu.Unlock()
 			return fmt.Errorf("plugins/runtime: plugin %q is already running", id)
 		}
 		delete(m.processes, id)
-		p.stop()
+		exhausted = p
 	}
 	if m.starting == nil {
 		m.starting = make(map[string]struct{})
 	}
 	m.starting[id] = struct{}{}
+	m.mu.Unlock()
+
+	if exhausted != nil {
+		exhausted.stop()
+	}
 	return nil
 }
 

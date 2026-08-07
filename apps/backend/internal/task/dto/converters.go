@@ -9,20 +9,22 @@ import (
 // This is the base conversion without timestamps.
 func FromWorkflowStep(step *wfmodels.WorkflowStep) WorkflowStepDTO {
 	result := WorkflowStepDTO{
-		ID:                    step.ID,
-		WorkflowID:            step.WorkflowID,
-		Name:                  step.Name,
-		Position:              step.Position,
-		Color:                 step.Color,
-		Prompt:                step.Prompt,
-		AllowManualMove:       step.AllowManualMove,
-		IsStartStep:           step.IsStartStep,
-		ShowInCommandPanel:    step.ShowInCommandPanel,
-		AutoArchiveAfterHours: step.AutoArchiveAfterHours,
-		AgentProfileID:        step.AgentProfileID,
-		WIPLimit:              step.WIPLimit,
-		PullFromStepID:        step.PullFromStepID,
-		StageType:             string(step.StageType),
+		ID:                         step.ID,
+		WorkflowID:                 step.WorkflowID,
+		Name:                       step.Name,
+		Position:                   step.Position,
+		Color:                      step.Color,
+		Prompt:                     step.Prompt,
+		AllowManualMove:            step.AllowManualMove,
+		IsStartStep:                step.IsStartStep,
+		ShowInCommandPanel:         step.ShowInCommandPanel,
+		AutoArchiveAfterHours:      step.AutoArchiveAfterHours,
+		AgentProfileID:             step.AgentProfileID,
+		WIPLimit:                   step.WIPLimit,
+		PullFromStepID:             step.PullFromStepID,
+		StageType:                  string(step.StageType),
+		AutoAdvanceRequiresSignal:  step.AutoAdvanceRequiresSignal,
+		CancelTriggersTurnComplete: step.CancelTriggersTurnComplete,
 	}
 	if hasStepEvents(step.Events) {
 		events := &StepEventsDTO{}

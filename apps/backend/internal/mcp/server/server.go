@@ -14,6 +14,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/logger"
+	mcpproviders "github.com/kandev/kandev/internal/mcp/providers"
 	"github.com/kandev/kandev/internal/task/service"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"github.com/mark3labs/mcp-go/mcp"
@@ -33,6 +34,9 @@ type BackendClient interface {
 const (
 	// ModeTask registers kanban, plan, and interaction tools (default for task-solving agents).
 	ModeTask = "task"
+	// ModeTaskTitlePending registers the task-mode tools plus the one-shot
+	// title tool used while a prompt-first task still has its provisional title.
+	ModeTaskTitlePending = "task-title-pending"
 	// ModeConfig registers configuration tools for workflows, agents, and MCP servers.
 	ModeConfig = "config"
 	// ModeExternal registers config tools plus create_task_kandev for external coding agents
@@ -75,7 +79,7 @@ func locatorCount(locators ...string) int {
 // normalizeMode returns a valid MCP mode, defaulting unknown values to ModeTask.
 func normalizeMode(mode string) string {
 	switch mode {
-	case ModeConfig, ModeExternal, ModeOffice:
+	case ModeConfig, ModeExternal, ModeOffice, ModeTaskTitlePending:
 		return mode
 	default:
 		return ModeTask
@@ -88,7 +92,8 @@ type Server struct {
 	sessionID          string
 	taskID             string
 	disableAskQuestion bool
-	mode               string // "task" (default), "config", or "office"
+	mode               string // "task" (default), "task-title-pending", "config", or "office"
+	mcpProviders       []string
 	mcpServer          *server.MCPServer
 	sseServer          *server.SSEServer
 	httpServer         *server.StreamableHTTPServer
@@ -107,8 +112,12 @@ type Server struct {
 // New creates a new MCP server for agentctl.
 // port is the HTTP server port used to build the SSE base URL (http://localhost:<port>).
 // mcpLogFile is an optional file path for MCP debug logging; pass "" to disable.
-func New(backend BackendClient, sessionID, taskID string, port int, log *logger.Logger, mcpLogFile string, disableAskQuestion bool, mcpMode string) *Server {
-	s := newServer(backend, sessionID, taskID, log, mcpLogFile, disableAskQuestion, mcpMode)
+func New(backend BackendClient, sessionID, taskID string, port int, log *logger.Logger, mcpLogFile string, disableAskQuestion bool, mcpMode string, mcpProviders ...[]string) *Server {
+	var providers []string
+	if len(mcpProviders) > 0 {
+		providers = mcpProviders[0]
+	}
+	s := newServer(backend, sessionID, taskID, log, mcpLogFile, disableAskQuestion, mcpMode, providers)
 
 	// Create SSE server for Claude Desktop, Cursor, etc.
 	// WithBaseURL ensures the SSE endpoint event includes the full message URL
@@ -130,7 +139,7 @@ func New(backend BackendClient, sessionID, taskID string, port int, log *logger.
 // configuration and create tasks. Routes are mounted under /mcp on the backend.
 func NewExternal(backend BackendClient, log *logger.Logger, mcpLogFile string) *Server {
 	// External mode has no live session, so disable ask-question and use empty IDs.
-	s := newServer(backend, "", "", log, mcpLogFile, true, ModeExternal)
+	s := newServer(backend, "", "", log, mcpLogFile, true, ModeExternal, nil)
 
 	// SSE handlers are mounted at /mcp/sse and /mcp/message — the static base path
 	// makes the SSE endpoint event emit /mcp/message. Keeping the message endpoint
@@ -152,7 +161,7 @@ func NewExternal(backend BackendClient, log *logger.Logger, mcpLogFile string) *
 // newServer builds the shared parts of a Server (logger, mcp-go server, tools).
 // Callers are responsible for constructing sseServer and httpServer with the
 // transport configuration appropriate for their hosting environment.
-func newServer(backend BackendClient, sessionID, taskID string, log *logger.Logger, mcpLogFile string, disableAskQuestion bool, mcpMode string) *Server {
+func newServer(backend BackendClient, sessionID, taskID string, log *logger.Logger, mcpLogFile string, disableAskQuestion bool, mcpMode string, mcpProviders []string) *Server {
 	mcpMode = normalizeMode(mcpMode)
 	s := &Server{
 		backend:            backend,
@@ -160,6 +169,7 @@ func newServer(backend BackendClient, sessionID, taskID string, log *logger.Logg
 		taskID:             taskID,
 		disableAskQuestion: disableAskQuestion,
 		mode:               mcpMode,
+		mcpProviders:       mcpproviders.Normalize(mcpProviders),
 		logger:             log.WithFields(zap.String("component", "mcp-server")),
 		attachmentAttempts: make(map[string]streams.MCPAttachmentAttempt),
 	}
@@ -424,10 +434,65 @@ func (s *Server) SetMode(mode string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	s.mode = normalizeMode(mode)
-	// Clear all existing tools and re-register for the new mode.
-	s.mcpServer.SetTools() // empty call clears all tools
+	normalizedMode := normalizeMode(mode)
+	if s.mode == normalizedMode {
+		return
+	}
+	s.mode = normalizedMode
+	s.rebuildTools()
+}
+
+// SetProviders replaces the provider capabilities advertised by task mode.
+// The MCP mode itself is preserved while the effective tool registry is rebuilt.
+func (s *Server) SetProviders(providerValues []string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	normalizedProviders := mcpproviders.Normalize(providerValues)
+	if sameProviderSet(s.mcpProviders, normalizedProviders) {
+		return
+	}
+	s.mcpProviders = normalizedProviders
+	s.rebuildTools()
+}
+
+func (s *Server) rebuildTools() {
+	// Build against an isolated registry so the live server remains unchanged
+	// until the complete replacement is ready. mcp-go emits one notification
+	// for SetTools, while registering directly would expose every intermediate
+	// AddTool state to initialized clients.
+	s.mcpServer.SetTools(s.assembleTools()...)
+}
+
+func sameProviderSet(left, right []string) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for i := range left {
+		if left[i] != right[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func (s *Server) assembleTools() []server.ServerTool {
+	activeServer := s.mcpServer
+	assemblyServer := server.NewMCPServer(
+		"kandev-mcp",
+		"1.0.0",
+		server.WithToolCapabilities(true),
+	)
+	s.mcpServer = assemblyServer
+	defer func() { s.mcpServer = activeServer }()
+
 	s.registerTools()
+	registered := assemblyServer.ListTools()
+	tools := make([]server.ServerTool, 0, len(registered))
+	for _, entry := range registered {
+		tools = append(tools, *entry)
+	}
+	return tools
 }
 
 // registerTools registers MCP tools based on the server mode.
@@ -485,12 +550,20 @@ func (s *Server) registerTools() {
 		count++
 		s.registerTaskDocumentTools()
 		count += 3
-	default: // ModeTask
+	case ModeTask, ModeTaskTitlePending:
 		// Kanban tasks get list_related_tasks_kandev (useful for finding
 		// a sibling to message_task_kandev) but NOT the task-document
 		// tools — those are office coordination plumbing.
 		s.registerKanbanTools()
-		count += 17
+		count += 15
+		if mcpproviders.Contains(s.mcpProviders, mcpproviders.GitHub) {
+			s.registerPRAutomationTools()
+			count += 2
+		}
+		if mcpproviders.Contains(s.mcpProviders, mcpproviders.GitLab) {
+			s.registerMRAutomationTools()
+			count += 2
+		}
 		if !s.disableAskQuestion {
 			s.registerInteractionTools()
 			count++
@@ -515,12 +588,32 @@ func (s *Server) registerTools() {
 		// session.
 		s.registerStepCompleteTool()
 		count++
+		if s.mode == ModeTaskTitlePending {
+			s.registerSetTaskTitleTool()
+			count++
+		}
+		s.registerDiagnosticBundleTool()
+		count++
 	}
 	s.logger.Info("registered MCP tools",
 		zap.String("mode", s.mode),
 		zap.Int("count", count),
 		zap.Bool("disable_ask_question", s.disableAskQuestion))
 	s.rebuildToolArgumentValidators()
+}
+
+func (s *Server) registerDiagnosticBundleTool() {
+	s.mcpServer.AddTool(
+		mcp.NewTool("get_diagnostic_bundle_kandev",
+			mcp.WithDescription("Collect a bounded diagnostic ZIP for the current task session and materialize it inside this execution workspace. Request backend first for backend/runtime issues, frontend for browser issues, or all only when correlation requires both."),
+			mcp.WithString("source",
+				mcp.Required(),
+				mcp.Enum("backend", "frontend", "all"),
+				mcp.Description("Diagnostic source to collect: backend, frontend, or all"),
+			),
+		),
+		s.wrapHandler("get_diagnostic_bundle_kandev", s.getDiagnosticBundleHandler()),
+	)
 }
 
 func (s *Server) registerKanbanTools() {
@@ -662,6 +755,9 @@ If the child has no live execution, the call succeeds idempotently with status="
 		),
 		s.wrapHandler("get_task_conversation_kandev", s.getTaskConversationHandler()),
 	)
+}
+
+func (s *Server) registerPRAutomationTools() {
 	s.mcpServer.AddTool(
 		mcp.NewToolWithRawSchema("get_task_pr_automation_kandev",
 			"Get the current task's GitHub PR automation settings, including lifecycle notification switches.",
@@ -680,6 +776,25 @@ If the child has no live execution, the call succeeds idempotently with status="
 			mcp.WithBoolean("prompt_on_closed", mcp.Description("Prompt this task's agent once when the linked PR becomes closed without merge")),
 		),
 		s.wrapHandler("update_task_pr_automation_kandev", s.updateTaskPRAutomationHandler()),
+	)
+}
+
+func (s *Server) registerMRAutomationTools() {
+	s.mcpServer.AddTool(
+		mcp.NewToolWithRawSchema("get_task_mr_automation_kandev",
+			"Get the current task's GitLab MR automation settings, including lifecycle notification switches.",
+			json.RawMessage(`{"type":"object","properties":{}}`),
+		),
+		s.wrapHandler("get_task_mr_automation_kandev", s.getTaskMRAutomationHandler()),
+	)
+	s.mcpServer.AddTool(
+		mcp.NewTool("update_task_mr_automation_kandev",
+			mcp.WithDescription("Update this task's GitLab merge request lifecycle notification switches."),
+			mcp.WithBoolean("prompt_on_review_requested", mcp.Description("Prompt this task's agent when a review is requested for the authenticated user")),
+			mcp.WithBoolean("prompt_on_merged", mcp.Description("Prompt this task's agent once when the linked MR becomes merged")),
+			mcp.WithBoolean("prompt_on_closed", mcp.Description("Prompt this task's agent once when the linked MR becomes closed without merge")),
+		),
+		s.wrapHandler("update_task_mr_automation_kandev", s.updateTaskMRAutomationHandler()),
 	)
 }
 
@@ -703,7 +818,7 @@ WHEN TO OMIT parent_id (top-level task):
 
 IMPORTANT:
 - Subtasks inherit task workspace, workflow, agent profile, executor, and materialized workspace from the parent by default. Pass workspace_id/workflow_id only when deliberately targeting a different task workspace/workflow; any supplied workflow_id must belong to the effective workspace_id. Pass workspace_mode='new_workspace' when the subtask needs its own materialized workspace/worktree.
-- An explicit agent_profile_id always wins. When omitted, the saved user policy applies: current_task inherits from the current/source task or parent before workflow and target-workspace defaults; workspace_default skips current/source and parent profiles, honors workflow profiles first, then uses the target workspace default.
+- A workflow step's launch profile outranks an explicit agent_profile_id when the task is on a step: that is the step's pinned profile, or the workflow default when the step has none. That profile is what launches, and it is the one reported back in the created task's metadata. Off a step, or when the step and workflow resolve no profile, an explicit agent_profile_id wins. When both are absent, the saved user policy applies: current_task inherits from the current/source task or parent before workflow and target-workspace defaults; workspace_default skips current/source and parent profiles, honors workflow profiles first, then uses the target workspace default.
 - Executor and executor-profile inheritance from the current/source task or parent is unchanged by either saved agent-profile policy.
 - Every created task must have a resolvable agent profile. start_agent=false still records the profile for a later manual start.
 - Subtasks inherit the parent's repository unless you supply repository_url, repository_id, or local_path — in which case the subtask targets that repo instead
@@ -716,7 +831,7 @@ IMPORTANT:
 - start_agent defaults to true and is what you want in nearly every case — the new task auto-launches an agent that immediately works on the prompt. Pass start_agent=false ONLY for an explicit placeholder (e.g. queuing work the user will start later, or creating a tracking task with no immediate work), and still pass agent_profile_id unless it can be inherited. When in doubt, leave it true.
 - Kanban subtasks cannot have their own subtasks (max nesting depth is 1). To break work down further, create a sibling under the same parent. (Office task trees are exempt.)`
 	parentDesc := "Parent task ID for subtasks. Use 'self' to create a subtask of your current task (RECOMMENDED for plan phases, delegated work). Omit only for unrelated top-level tasks."
-	agentProfileDesc := "Agent profile ID to use. Explicit agent_profile_id always wins. When omitted, current_task inherits the current/source or parent profile before workflow/workspace defaults; workspace_default skips those task profiles, then uses workflow profiles before the target workspace default. start_agent=false still needs a resolvable profile for later manual start."
+	agentProfileDesc := "Agent profile ID to use. On a workflow step, the step's launch profile (its pinned profile, or the workflow default when unpinned) outranks it; otherwise an explicit agent_profile_id wins. When both are absent, current_task inherits the current/source or parent profile before workflow/workspace defaults; workspace_default skips those task profiles, then uses workflow profiles before the target workspace default. start_agent=false still needs a resolvable profile for later manual start."
 
 	if s.mode == ModeExternal {
 		toolDesc = `Create a new top-level task and auto-start an agent on it.
@@ -724,14 +839,14 @@ IMPORTANT:
 IMPORTANT:
 - Provide a repository via repository_url, repository_id, or local_path
 - workspace_id and workflow_id are auto-resolved if only one exists; provide explicitly if ambiguous
-- An explicit agent_profile_id always wins. When omitted, the saved user policy applies: current_task inherits a parent profile before workflow and target-workspace defaults; workspace_default skips the parent profile, honors workflow profiles first, then uses the target workspace default. External mode has no current/source task.
+- A workflow step's launch profile outranks an explicit agent_profile_id when the task is on a step: that is the step's pinned profile, or the workflow default when the step has none. That profile is what launches, and it is the one reported back in the created task's metadata. Off a step, or when the step and workflow resolve no profile, an explicit agent_profile_id wins. When both are absent, the saved user policy applies: current_task inherits a parent profile before workflow and target-workspace defaults; workspace_default skips the parent profile, honors workflow profiles first, then uses the target workspace default. External mode has no current/source task.
 - Executor and executor-profile inheritance from a parent is unchanged by either saved agent-profile policy.
 - Every created task must have a resolvable agent profile. start_agent=false still records the profile for a later manual start.
 - 'prompt' is the agent's initial prompt — be specific and detailed
 - start_agent defaults to true and is what you want in nearly every case — the new task auto-launches an agent that immediately works on the prompt. Pass start_agent=false ONLY for an explicit placeholder (e.g. queuing work the user will start later), and still pass agent_profile_id unless a default exists. When in doubt, leave it true.
 - Use parent_id only when delegating to a known existing task by its ID`
 		parentDesc = "Optional parent task ID. Omit for top-level tasks; provide an existing task ID only to create a subtask of that task."
-		agentProfileDesc = "Agent profile ID to use. Explicit agent_profile_id always wins. When omitted, current_task inherits a parent profile before workflow/workspace defaults; workspace_default skips the parent profile, then uses workflow profiles before the target workspace default. External mode has no current/source task. start_agent=false still needs a resolvable profile for later manual start."
+		agentProfileDesc = "Agent profile ID to use. On a workflow step, the step's launch profile (its pinned profile, or the workflow default when unpinned) outranks it; otherwise an explicit agent_profile_id wins. When both are absent, current_task inherits a parent profile before workflow/workspace defaults; workspace_default skips the parent profile, then uses workflow profiles before the target workspace default. External mode has no current/source task. start_agent=false still needs a resolvable profile for later manual start."
 	}
 
 	s.mcpServer.AddTool(
@@ -749,7 +864,7 @@ IMPORTANT:
 			mcp.WithBoolean("start_agent", mcp.Description("Whether to auto-start an agent on the created task. Default: true — leave it true unless you specifically want a placeholder task with no agent running. Setting false leaves the task waiting for the user to click 'Start agent' in the UI; the prompt is preserved but no work happens automatically.")),
 			mcp.WithString("repository_id", mcp.Description("Repository ID. Required for top-level tasks unless local_path or repository_url is provided. For subtasks: optional — supply only when the subtask should target a different repo than the parent.")),
 			mcp.WithString("local_path", mcp.Description("Local repository folder path (e.g. '/Users/me/projects/myrepo'). Will create/find the repository automatically. Preferred for local worktree flow. For subtasks: supply only when the subtask should target a different repo than the parent.")),
-			mcp.WithString("repository_url", mcp.Description("GitHub repository URL (e.g. 'https://github.com/owner/repo'). The repository will be cloned automatically on first use. For subtasks: supply only when the subtask should target a different repo than the parent.")),
+			mcp.WithString("repository_url", mcp.Description("Repository URL, GitHub pull request URL, or GitLab merge request URL (for example 'https://github.com/owner/repo'). A contribution URL attaches the task to that existing contribution and prepares its source branch. For subtasks: supply only when the subtask should target a different repo than the parent.")),
 			mcp.WithString("base_branch", mcp.Description("Base branch for the repository (e.g. 'main'). Optional. Defaults: same-repo subtasks inherit the parent's base_branch; cross-repo subtasks and top-level tasks fall back to the repository's default_branch (visible via list_repositories_kandev).")),
 		),
 		s.wrapHandler("create_task_kandev", s.createTaskHandler()),
@@ -990,6 +1105,55 @@ The summary you provide is shown to the user in chat and may be forwarded to the
 		),
 		s.wrapHandler("step_complete_kandev", s.stepCompleteHandler()),
 	)
+}
+
+// registerSetTaskTitleTool registers the one-shot title handoff used by
+// prompt-first task sessions. The server is bound to the current task, so the
+// agent only supplies the short user-facing title it wants to keep.
+func (s *Server) registerSetTaskTitleTool() {
+	s.mcpServer.AddTool(
+		mcp.NewTool("set_task_title_kandev",
+			mcp.WithDescription(`Set the user-facing title for the CURRENT task.
+
+Call this as your first action in the session, before planning, inspecting files,
+or doing any other work. The task currently has a provisional title derived from
+the prompt; call this tool even when that provisional title looks usable.
+
+Use a concise title targeting about 6 words.
+Write a short title phrase, not a sentence or a progress update. Your title should
+summarize the requested outcome and will replace the provisional title. For tasks created
+without a title, Kandev also uses this final title when naming Kandev-generated branches;
+branches checked out from a remote link (such as a GitHub PR) and local-executor branches
+are intentionally preserved. Use sentence case:
+capitalize only the first word and proper nouns (for example, "Improve task title casing", not
+"Improve Task Title Casing").`),
+			mcp.WithString(titleArg, mcp.Required(), mcp.Description("Short sentence-case task title targeting about 6 words.")),
+		),
+		s.wrapHandler("set_task_title_kandev", s.setTaskTitleHandler()),
+	)
+}
+
+func (s *Server) setTaskTitleHandler() server.ToolHandlerFunc {
+	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		if s.taskID == "" {
+			return mcp.NewToolResultError("set_task_title_kandev requires a bound task"), nil
+		}
+		title := strings.TrimSpace(req.GetString(titleArg, ""))
+		if title == "" {
+			return mcp.NewToolResultError("title is required"), nil
+		}
+		payload := map[string]interface{}{
+			mcpKeyTaskID: s.taskID,
+			"session_id": s.sessionID,
+			titleArg:     title,
+		}
+		var result map[string]interface{}
+		if err := s.backend.RequestPayload(ctx, ws.ActionMCPSetTaskTitle, payload, &result); err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		data, _ := json.MarshalIndent(result, "", "  ")
+		return mcp.NewToolResultText(string(data)), nil
+	}
 }
 
 func (s *Server) stepCompleteHandler() server.ToolHandlerFunc {

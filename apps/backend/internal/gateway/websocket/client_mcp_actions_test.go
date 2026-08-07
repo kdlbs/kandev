@@ -116,6 +116,12 @@ func receiveClientMessage(t *testing.T, client *Client) *ws.Message {
 	t.Helper()
 
 	select {
+	case data := <-client.controlSend:
+		var message ws.Message
+		if err := json.Unmarshal(data, &message); err != nil {
+			t.Fatalf("decode client message: %v", err)
+		}
+		return &message
 	case data := <-client.send:
 		var message ws.Message
 		if err := json.Unmarshal(data, &message); err != nil {

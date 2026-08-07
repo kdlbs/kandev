@@ -118,6 +118,40 @@ func TestApplySyncedWorkflows_CreatesNewWorkflows(t *testing.T) {
 	assert.True(t, steps[0].IsStartStep)
 }
 
+func TestApplySyncedWorkflows_UpdatesAndClearsWorkflowPrompt(t *testing.T) {
+	svc, provider, _ := setupSyncService(t)
+	ctx := context.Background()
+	wf := addSyncedWorkflow(provider, "wf-1", "ws-1", "Dev Flow", "flows/dev.yml")
+	wf.Prompt = "Old shared instructions."
+	createStep(t, svc, &models.WorkflowStep{ID: "step-todo", WorkflowID: wf.ID, Name: "Todo", Position: 0, IsStartStep: true})
+
+	// Update prompt from portable definition.
+	updated := portableWorkflow("Dev Flow", "Todo")
+	updated.Prompt = "If the PR is merged or closed, move the Task to Done."
+	result, err := svc.ApplySyncedWorkflows(ctx, "ws-1", []SyncFileExport{
+		{Path: "flows/dev.yml", Export: exportOf(updated)},
+	})
+	require.NoError(t, err)
+	assert.Contains(t, result.Updated, "Dev Flow")
+
+	got, err := provider.GetWorkflow(ctx, wf.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "If the PR is merged or closed, move the Task to Done.", got.Prompt)
+
+	// Omitting prompt in the portable file clears it on sync.
+	cleared := portableWorkflow("Dev Flow", "Todo")
+	cleared.Prompt = ""
+	result, err = svc.ApplySyncedWorkflows(ctx, "ws-1", []SyncFileExport{
+		{Path: "flows/dev.yml", Export: exportOf(cleared)},
+	})
+	require.NoError(t, err)
+	assert.Contains(t, result.Updated, "Dev Flow")
+
+	got, err = provider.GetWorkflow(ctx, wf.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "", got.Prompt)
+}
+
 func TestApplySyncedWorkflows_UpdatesMatchedWorkflowPreservingStepIDs(t *testing.T) {
 	svc, provider, _ := setupSyncService(t)
 	ctx := context.Background()
@@ -301,6 +335,36 @@ func TestApplySyncedWorkflows_RemapsStepEventPositions(t *testing.T) {
 	require.Len(t, steps, 2)
 	require.Len(t, steps[0].Events.OnTurnComplete, 1)
 	assert.Equal(t, steps[1].ID, steps[0].Events.OnTurnComplete[0].Config["step_id"])
+}
+
+func TestApplySyncedWorkflows_PreservesCancelTriggersTurnComplete(t *testing.T) {
+	svc, _, _ := setupSyncService(t)
+	ctx := context.Background()
+	first := models.WorkflowPortable{
+		Name: "Cancel Flow",
+		Steps: []models.StepPortable{
+			{Name: "Work", Position: 0, IsStartStep: true, CancelTriggersTurnComplete: true},
+			{Name: "Review", Position: 1},
+		},
+	}
+	result, err := svc.ApplySyncedWorkflows(ctx, "ws-1", []SyncFileExport{{Path: "flows/cancel.yml", Export: exportOf(first)}})
+	require.NoError(t, err)
+	require.Equal(t, []string{"Cancel Flow"}, result.Created)
+
+	steps, err := svc.ListStepsByWorkflow(ctx, "imported-Cancel Flow")
+	require.NoError(t, err)
+	require.Len(t, steps, 2)
+	assert.True(t, steps[0].CancelTriggersTurnComplete)
+
+	updated := first
+	updated.Steps = append([]models.StepPortable(nil), first.Steps...)
+	updated.Steps[0].CancelTriggersTurnComplete = false
+	result, err = svc.ApplySyncedWorkflows(ctx, "ws-1", []SyncFileExport{{Path: "flows/cancel.yml", Export: exportOf(updated)}})
+	require.NoError(t, err)
+	require.Equal(t, []string{"Cancel Flow"}, result.Updated)
+	steps, err = svc.ListStepsByWorkflow(ctx, "imported-Cancel Flow")
+	require.NoError(t, err)
+	assert.False(t, steps[0].CancelTriggersTurnComplete)
 }
 
 func TestApplySyncedWorkflows_SecondApplyIsNoOp(t *testing.T) {

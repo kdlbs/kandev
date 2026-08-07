@@ -4,6 +4,7 @@ package lifecycle
 
 import (
 	"context"
+	"io"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/kandev/kandev/internal/agent/mcpconfig"
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
+	runtimeenv "github.com/kandev/kandev/internal/agent/runtime/environment"
 	settingsmodels "github.com/kandev/kandev/internal/agent/settings/models"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/agentruntime"
@@ -52,15 +54,27 @@ type AgentExecution struct {
 	FinishedAt           *time.Time
 	ExitCode             *int
 	ErrorMessage         string
+	ProviderError        *streams.ProviderError
 	Metadata             map[string]interface{}
+	metadataMu           sync.RWMutex
 	// runtimeEnv is the effective environment used to create the task's
 	// runtime instance. It is kept in memory only so authorized task-scoped
 	// terminals and passthrough processes can inherit the same credentials and
 	// PATH as the agent subprocess without persisting secrets in metadata.
-	runtimeEnv        map[string]string
-	runtimeEnvMu      sync.RWMutex
-	promptGeneration  uint64
-	promptLifecycleMu sync.Mutex
+	runtimeEnv       map[string]string
+	runtimeEnvMu     sync.RWMutex
+	promptGeneration uint64
+	// promptCompletionGeneration prevents duplicate terminal events for the
+	// same prompt from replacing the first terminal outcome or provider error.
+	promptCompletionGeneration uint64
+	// dispatchedPromptGeneration is the generation of the prompt that has been
+	// accepted by agentctl and is still in flight. It is set only after the
+	// ordinary prompt's triggerPrompt succeeds and reset by beginExecutionPrompt.
+	// A mid-turn steer reuses this exact generation, so the getter must not hand
+	// out a generation that was merely admitted (not yet dispatched — its buffers
+	// are still being reset) or already completed.
+	dispatchedPromptGeneration uint64
+	promptLifecycleMu          sync.Mutex
 
 	// PrepareResult carries the environment preparation result back to the caller
 	// so it can be persisted synchronously before UpdateTaskSession clobbers metadata.
@@ -113,6 +127,8 @@ type AgentExecution struct {
 	messageBuffer  strings.Builder
 	thinkingBuffer strings.Builder
 	messageMu      sync.Mutex
+	streamMu       sync.Mutex
+	stream         *streamCoalescer
 
 	// Legacy streaming message tracking for agents that omit protocol message IDs.
 	// These are set when we create a streaming message and cleared on tool_call/complete.
@@ -562,7 +578,8 @@ type RepoLaunchSpec struct {
 	BaseBranch             string
 	DefaultBranch          string // Repository's default_branch, used as fallback when BaseBranch is missing
 	CheckoutBranch         string
-	PRNumber               int    // GitHub PR number when CheckoutBranch is a PR head; enables refs/pull/<N>/head fetch for fork PRs.
+	PRNumber               int // GitHub PR number when CheckoutBranch is a PR head; enables refs/pull/<N>/head fetch for fork PRs.
+	RemoteContribution     *models.RemoteContribution
 	WorktreeID             string // Existing worktree ID to reuse (skip creation if set)
 	WorktreeBranchPrefix   string
 	WorktreeBranchTemplate string
@@ -637,10 +654,21 @@ type LaunchRequest struct {
 	TaskDescription    string              // Task description to send via ACP prompt
 	Attachments        []MessageAttachment // Attachments (images/files) for the initial prompt
 	Env                map[string]string   // Additional env vars
-	ACPSessionID       string              // ACP session ID to resume, if available
-	Metadata           map[string]interface{}
-	ModelOverride      string         // If set, use this model instead of the profile's model
-	RouteOverride      *RouteOverride // If set, overrides agent_id/model/mode/etc per provider routing
+	// ApprovedSecretEnvKeys contains repository binding keys that SSH may
+	// forward in addition to its managed credential allowlist.
+	ApprovedSecretEnvKeys []string
+	// EnvironmentDefinitions preserve source identity until lifecycle has added
+	// every managed runtime value and can perform the final strict resolution.
+	EnvironmentDefinitions        []runtimeenv.Definition
+	EnvironmentResolutionRequired bool
+	// EnvironmentFinalized marks the immutable effective snapshot passed to the
+	// runtime. Later lifecycle steps must not merge profile or credential values
+	// over this snapshot.
+	EnvironmentFinalized bool
+	ACPSessionID         string // ACP session ID to resume, if available
+	Metadata             map[string]interface{}
+	ModelOverride        string         // If set, use this model instead of the profile's model
+	RouteOverride        *RouteOverride // If set, overrides agent_id/model/mode/etc per provider routing
 
 	// Ephemeral tasks (quick chat) get fallback workspace directories when no repo is configured.
 	// Non-ephemeral tasks without a workspace path will not receive a fallback directory.
@@ -660,6 +688,7 @@ type LaunchRequest struct {
 	ExecutorConfig      map[string]string // Executor config (docker_host, git_token, etc.)
 	PreviousExecutionID string            // Previous execution ID for runtime reconnect
 	McpMode             string            // MCP tool mode: "task" (default), "config", or "office"
+	McpProviders        []string          // Normalized provider capabilities attached to the task
 
 	// Environment preparation
 	SetupScript string // Setup script to run before agent starts
@@ -680,6 +709,7 @@ type LaunchRequest struct {
 	DefaultBranch          string // Repository's default_branch, used as fallback when BaseBranch is missing
 	CheckoutBranch         string // Branch to fetch and checkout after worktree creation (e.g., PR head branch)
 	PRNumber               int    // GitHub PR number when CheckoutBranch is a PR head; enables refs/pull/<N>/head fetch for fork PRs.
+	RemoteContribution     *models.RemoteContribution
 	WorktreeBranchPrefix   string // Branch prefix for worktree branches
 	WorktreeBranchTemplate string // Branch name template for worktree branches
 	WorktreeBranchTicket   string // External ticket value for branch templates
@@ -724,6 +754,7 @@ func (r *LaunchRequest) RepoSpecs() []RepoLaunchSpec {
 		DefaultBranch:          r.DefaultBranch,
 		CheckoutBranch:         r.CheckoutBranch,
 		PRNumber:               r.PRNumber,
+		RemoteContribution:     r.RemoteContribution,
 		WorktreeID:             r.WorktreeID,
 		WorktreeBranchPrefix:   r.WorktreeBranchPrefix,
 		WorktreeBranchTemplate: r.WorktreeBranchTemplate,
@@ -737,11 +768,20 @@ func (r *LaunchRequest) RepoSpecs() []RepoLaunchSpec {
 
 // MessageAttachment represents an image or file attachment for agent prompts.
 type MessageAttachment struct {
+	AttachmentID string // file-backed descriptor ID; Data is empty for staged files
 	Type         string // "image", "audio", or "resource"
 	Data         string // base64-encoded data
 	MimeType     string // MIME type
 	Name         string // optional filename for resource attachments
+	SizeBytes    int64  // raw byte size for file-backed descriptors
 	DeliveryMode string // "prompt" (native/default) or "path"
+}
+
+// AttachmentReader opens an authorized, claimed backend attachment for
+// streaming into the active agent execution. Implementations must enforce the
+// task/session ownership checks before returning any bytes.
+type AttachmentReader interface {
+	OpenClaimed(ctx context.Context, id, taskID, sessionID string) (io.ReadCloser, string, string, int64, error)
 }
 
 // CredentialsManager interface for credential retrieval
@@ -821,6 +861,7 @@ type WorkspaceInfo struct {
 	WorkspaceID           string
 	AgentProfileID        string // Stable Office agent identity (or the execution profile for legacy sessions)
 	ExecutionProfileID    string // Concrete CLI profile selected for this execution
+	ExecutorProfileID     string // Concrete executor profile selected for this execution
 	AgentID               string // Agent type ID (e.g., "auggie", "codex") - required for runtime creation
 	ACPSessionID          string // Agent's session ID for conversation resumption (from session metadata)
 	// SessionMode is the persisted session permission mode (e.g. "acceptEdits")

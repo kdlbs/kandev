@@ -32,7 +32,7 @@ Choose based on task frequency and content depth. A frequently revisited primary
 
 ## Composition and Feel
 
-- Phone breakpoint is below 640px. Use `useResponsiveBreakpoint`; it distinguishes phone, tablet, compact desktop, and full desktop using width plus pointer mode.
+- Phone breakpoint is below 768px, matching the width at which the desktop sidebar appears. Use `useResponsiveBreakpoint`; it distinguishes phone, tablet, compact desktop, and full desktop using width plus pointer mode. Tablet is a coarse-pointer fallback between 768px and 1024px. The bottom-sheet treatment for Radix menus in `app/globals.css` is deliberately narrower at 640px — pick the boundary that matches what you are changing.
 - Reuse `@kandev/ui` primitives. `Drawer` is the standard bottom surface; `Sheet` remains useful for tablet/desktop side panels.
 - Use inset, rounded card surfaces with restrained borders/backgrounds and shadow, matching nearby components. Prefer existing component classes over copying a frozen class list.
 - Give new primary touch actions, standalone icon buttons, and menu rows an actual hitbox of at least 44px in the active dimension (`min-h-11`, `h-11 w-11`). Existing compact chrome such as `MobilePillButton` is a deliberate density exception, not a sizing precedent for unrelated controls; do not claim surrounding spacing enlarges its hitbox. Provide pressed feedback such as the existing short `active:scale-*` treatment where nearby controls use it.

@@ -3,7 +3,13 @@ id: "05-integration-regression"
 title: "Integrated stop regression"
 status: done
 wave: 5
-depends_on: ["01-execution-stop-semantics", "02-coordinator-stop-operation", "03-mcp-stop-handler", "04-task-mcp-tool"]
+depends_on:
+  [
+    "01-execution-stop-semantics",
+    "02-coordinator-stop-operation",
+    "03-mcp-stop-handler",
+    "04-task-mcp-tool",
+  ]
 plan: "plan.md"
 spec: "../../specs/tasks/parent-child-task-stop.md"
 ---
@@ -58,5 +64,11 @@ files changed, tests run, blockers, and any unverified process-cleanup risks.
 - Verified no replacement prompt or queued message is created, runtime stop
   completes after release, and a repeat returns `not_running` without mutation.
 - Passed the focused test, 20 repeated runs, and the focused race-detector run.
+- After CI exposed a `RUNNING`-versus-stream ordering race, added a deterministic
+  `message.added` barrier for the persisted initial tool call before capturing
+  the pre-stop message baseline. The strict no-new-message assertion remains;
+  no sleep, retry, or relaxed expectation was added.
+- Passed 300 race-detector repetitions across `-cpu=1,2,4`, the complete
+  integration package, and the full 133-package shard-2 race test.
 - Remaining lifecycle boundary: the test proves the simulated runtime reaches
   stopped status, not operating-system cleanup for every production provider.

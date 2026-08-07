@@ -20,7 +20,11 @@ import {
   PR_PRESETS as BUILTIN_PR_PRESETS,
   ISSUE_PRESETS as BUILTIN_ISSUE_PRESETS,
 } from "@/components/github/my-github/search-bar";
+import { useTranslation } from "react-i18next";
 
+// `label` is PERSISTED as part of `StoredQueryPreset` (github_default_query_presets)
+// and is editable in the row below, so it must stay locale-neutral — see
+// `newPreset` in action-presets-section.tsx for the same contract.
 function newPreset(): StoredQueryPreset {
   return {
     value: `q_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`,
@@ -41,6 +45,7 @@ function QueryRow({
   onPatch: (patch: Partial<StoredQueryPreset>) => void;
   onRemove: () => void;
 }) {
+  const { t } = useTranslation();
   return (
     <div
       className="flex items-center gap-2 rounded-md border p-2"
@@ -48,27 +53,27 @@ function QueryRow({
       data-settings-dirty-level="container"
     >
       <div className="flex flex-col gap-0.5">
-        <span className="text-[10px] text-muted-foreground">Label</span>
+        <span className="text-[10px] text-muted-foreground">{t("github:label")}</span>
         <Input
           className="h-8 w-36"
           value={preset.label}
           data-settings-dirty={preset.label !== baseline?.label}
-          placeholder="Label"
+          placeholder={t("github:label")}
           onChange={(e) => onPatch({ label: e.target.value })}
         />
       </div>
       <div className="flex flex-col gap-0.5 flex-1">
-        <span className="text-[10px] text-muted-foreground">Query</span>
+        <span className="text-[10px] text-muted-foreground">{t("github:query")}</span>
         <Input
           className="h-8 font-mono text-xs"
           value={preset.filter}
           data-settings-dirty={preset.filter !== baseline?.filter}
-          placeholder="e.g. review-requested:@me is:open"
+          placeholder={t("github:queryExample", { query: "review-requested:@me is:open" })}
           onChange={(e) => onPatch({ filter: e.target.value })}
         />
       </div>
       <div className="flex flex-col gap-0.5">
-        <span className="text-[10px] text-muted-foreground">Group</span>
+        <span className="text-[10px] text-muted-foreground">{t("github:group")}</span>
         <Select
           value={preset.group}
           onValueChange={(v) => onPatch({ group: v as "inbox" | "created" })}
@@ -81,10 +86,10 @@ function QueryRow({
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="inbox" className="cursor-pointer">
-              Inbox
+              {t("github:inbox")}
             </SelectItem>
             <SelectItem value="created" className="cursor-pointer">
-              Created
+              {t("github:created")}
             </SelectItem>
           </SelectContent>
         </Select>
@@ -94,7 +99,7 @@ function QueryRow({
         size="icon"
         className="h-8 w-8 cursor-pointer text-destructive mt-3.5"
         onClick={onRemove}
-        aria-label="Remove"
+        aria-label={t("github:remove")}
       >
         <IconTrash className="h-3.5 w-3.5" />
       </Button>
@@ -145,6 +150,7 @@ function QueryEditor({
 }
 
 function useDefaultQueryDrafts(workspaceId?: string) {
+  const { t } = useTranslation();
   const { toast } = useToast();
   const { prPresets, issuePresets, save, reset, isCustomized, isReady } = useDefaultQueryPresets(
     workspaceId ?? null,
@@ -193,12 +199,12 @@ function useDefaultQueryDrafts(workspaceId?: string) {
         JSON.stringify(current) === JSON.stringify(submittedIssue) ? submittedIssue : current,
       );
       setResetRequested(false);
-      toast({ description: "Default queries saved", variant: "success" });
+      toast({ description: t("github:defaultQueriesSaved"), variant: "success" });
     } catch {
-      toast({ description: "Failed to save default queries", variant: "error" });
+      toast({ description: t("github:failedToSaveDefaultQueries"), variant: "error" });
       throw new Error("Failed to save default queries");
     }
-  }, [issueDraft, prDraft, reset, resetRequested, save, toast]);
+  }, [issueDraft, prDraft, reset, resetRequested, save, t, toast]);
 
   const handleReset = useCallback(() => {
     setPrDraft(toStored(BUILTIN_PR_PRESETS));
@@ -221,7 +227,7 @@ function useDefaultQueryDrafts(workspaceId?: string) {
     revision: JSON.stringify([prDraft, issueDraft]),
     isDirty: dirty,
     canSave: isReady,
-    invalidReason: isReady ? undefined : "Default queries are still loading.",
+    invalidReason: isReady ? undefined : t("github:defaultQueriesAreStillLoading"),
     save: handleSave,
     discard,
   });
@@ -247,12 +253,13 @@ function useDefaultQueryDrafts(workspaceId?: string) {
 }
 
 export function DefaultQueriesSection({ workspaceId }: { workspaceId?: string }) {
+  const { t } = useTranslation();
   const drafts = useDefaultQueryDrafts(workspaceId);
 
   return (
     <SettingsSection
-      title="Default queries"
-      description="Sidebar queries shown on /github for pull requests and issues."
+      title={t("github:defaultQueries")}
+      description={t("github:sidebarQueriesShownOnGithubFor", { route: "/github" })}
       action={
         <div className="flex gap-2">
           <Button
@@ -263,7 +270,7 @@ export function DefaultQueriesSection({ workspaceId }: { workspaceId?: string })
             className="cursor-pointer"
           >
             <IconRefresh className="h-3.5 w-3.5 mr-1" />
-            Reset
+            {t("common:reset")}
           </Button>
         </div>
       }
@@ -273,10 +280,10 @@ export function DefaultQueriesSection({ workspaceId }: { workspaceId?: string })
           <Tabs defaultValue="pr">
             <TabsList>
               <TabsTrigger value="pr" className="cursor-pointer">
-                Pull requests
+                {t("github:pullRequests")}
               </TabsTrigger>
               <TabsTrigger value="issue" className="cursor-pointer">
-                Issues
+                {t("github:issues")}
               </TabsTrigger>
             </TabsList>
             <TabsContent value="pr">
@@ -284,7 +291,7 @@ export function DefaultQueriesSection({ workspaceId }: { workspaceId?: string })
                 presets={drafts.prDraft}
                 baseline={drafts.prBaseline}
                 onChange={drafts.setPrDraft}
-                addLabel="Add PR query"
+                addLabel={t("github:addPrQuery")}
               />
             </TabsContent>
             <TabsContent value="issue">
@@ -292,7 +299,7 @@ export function DefaultQueriesSection({ workspaceId }: { workspaceId?: string })
                 presets={drafts.issueDraft}
                 baseline={drafts.issueBaseline}
                 onChange={drafts.setIssueDraft}
-                addLabel="Add issue query"
+                addLabel={t("github:addIssueQuery")}
               />
             </TabsContent>
           </Tabs>

@@ -1,22 +1,12 @@
 "use client";
 import { type ReactNode, type RefObject, useRef, useState } from "react";
 import { useRouter } from "@/lib/routing/client-router";
-import Link from "@/components/routing/app-link";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@kandev/ui/sheet";
 import { Drawer, DrawerContent, DrawerHeader, DrawerTitle } from "@kandev/ui/drawer";
-import { Button } from "@kandev/ui/button";
 import { Checkbox } from "@kandev/ui/checkbox";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import { ToggleGroup, ToggleGroupItem } from "@kandev/ui/toggle-group";
-import {
-  IconAlertTriangle,
-  IconActivity,
-  IconLayoutKanban,
-  IconList,
-  IconSettings,
-  IconStethoscope,
-  IconTimeline,
-} from "@tabler/icons-react";
+import { IconLayoutKanban, IconList, IconTimeline } from "@tabler/icons-react";
 import { AppSidebarWorkspacePicker } from "@/components/app-sidebar/app-sidebar-workspace-picker";
 import { MobileIntegrationsSection } from "@/components/integrations/integrations-menu";
 import { MobilePluginNavSection } from "@/components/plugins/mobile-plugin-nav-section";
@@ -31,9 +21,18 @@ import { cn } from "@/lib/utils";
 import type { Repository, Task } from "@/lib/types/http";
 import type { WorkflowsState } from "@/lib/state/slices";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
-import { useAppStatusDrawer } from "@/components/app-status-bar/app-status-surface-provider";
-import { connectionIssueDetails } from "@/components/app-status-bar/connection-status-item";
 import { ImproveKandevDialog } from "@/components/improve-kandev-dialog";
+import { useTranslation } from "react-i18next";
+import { getRepositoryPlaceholderKey } from "@/lib/kanban/repository-placeholder";
+import { MobileUtilityActions } from "./mobile-menu-utility-actions";
+import {
+  mobileControlClass,
+  mobileControlIconClass,
+  mobileFieldClass,
+  mobileFieldLabelClass,
+  mobileSectionClass,
+  mobileSectionTitleClass,
+} from "./mobile-menu-styles";
 type MobileMenuSheetProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -46,19 +45,6 @@ type MobileMenuSheetProps = {
   showHealthIndicator: boolean;
   onOpenHealthDialog: () => void;
 };
-
-const mobileSectionClass = "space-y-2";
-const mobileSectionTitleClass = "text-sm font-medium";
-const mobileFieldClass = "space-y-1.5";
-const mobileFieldLabelClass = "text-xs font-medium text-muted-foreground";
-const mobileControlClass = "h-10 w-full px-3 text-sm";
-const mobileControlIconClass = "h-4 w-4 shrink-0";
-
-function getRepositoryPlaceholder(loading: boolean, empty: boolean): string {
-  if (loading) return "Loading repositories...";
-  if (empty) return "No repositories";
-  return "Select repository";
-}
 
 type MobileDisplayOptionsProps = {
   activeWorkflowId: string | null;
@@ -95,20 +81,21 @@ function MobileDisplaySelects({
   | "showTaskDetails"
   | "tasksListOptions"
 >) {
+  const { t } = useTranslation();
   return (
     <>
       {showWorkflow && (
         <div className={mobileFieldClass}>
-          <label className={mobileFieldLabelClass}>Workflow</label>
+          <label className={mobileFieldLabelClass}>{t("kanban:workflow")}</label>
           <Select
             value={activeWorkflowId ?? "all"}
             onValueChange={(value) => onWorkflowChange(value === "all" ? null : value)}
           >
             <SelectTrigger className={mobileControlClass}>
-              <SelectValue placeholder="All workflows" />
+              <SelectValue placeholder={t("kanban:allWorkflows")} />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="all">All workflows</SelectItem>
+              <SelectItem value="all">{t("kanban:allWorkflows")}</SelectItem>
               {workflows.map((workflow: WorkflowsState["items"][number]) => (
                 <SelectItem key={workflow.id} value={workflow.id}>
                   {workflow.name}
@@ -120,7 +107,7 @@ function MobileDisplaySelects({
       )}
 
       <div className={mobileFieldClass}>
-        <label className={mobileFieldLabelClass}>Repository</label>
+        <label className={mobileFieldLabelClass}>{t("kanban:repository")}</label>
         <Select
           value={repositoryValue}
           onValueChange={(value) => onRepositoryChange(value as string | "all")}
@@ -128,11 +115,13 @@ function MobileDisplaySelects({
         >
           <SelectTrigger className={mobileControlClass}>
             <SelectValue
-              placeholder={getRepositoryPlaceholder(repositoriesLoading, repositories.length === 0)}
+              placeholder={t(
+                getRepositoryPlaceholderKey(repositoriesLoading, repositories.length === 0),
+              )}
             />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="all">All repositories</SelectItem>
+            <SelectItem value="all">{t("kanban:allRepositories")}</SelectItem>
             {repositories.map((repo: Repository) => (
               <SelectItem key={repo.id} value={repo.id}>
                 {repo.name}
@@ -146,6 +135,7 @@ function MobileDisplaySelects({
 }
 
 function MobileDisplayOptions(props: MobileDisplayOptionsProps) {
+  const { t } = useTranslation();
   const {
     enablePreviewOnClick,
     onTogglePreviewOnClick,
@@ -157,10 +147,10 @@ function MobileDisplayOptions(props: MobileDisplayOptionsProps) {
   } = props;
   return (
     <div className="space-y-4">
-      <label className={mobileSectionTitleClass}>Display Options</label>
+      <label className={mobileSectionTitleClass}>{t("kanban:displayOptions")}</label>
       <MobileDisplaySelects {...selectProps} />
       <div className={mobileFieldClass}>
-        <label className={mobileFieldLabelClass}>Preview Panel</label>
+        <label className={mobileFieldLabelClass}>{t("kanban:previewPanel")}</label>
         <label className="flex h-10 cursor-pointer items-center gap-3 rounded-md px-0 text-sm font-medium">
           <Checkbox
             checked={enablePreviewOnClick ?? false}
@@ -168,21 +158,21 @@ function MobileDisplayOptions(props: MobileDisplayOptionsProps) {
               onTogglePreviewOnClick?.(!!checked);
             }}
           />
-          <span className="text-sm">Open preview on click</span>
+          <span className="text-sm">{t("kanban:openPreviewOnClick")}</span>
         </label>
       </div>
       {showTaskDetails && (
         <div className={mobileFieldClass}>
-          <label className={mobileFieldLabelClass}>List rows</label>
+          <label className={mobileFieldLabelClass}>{t("kanban:listRows")}</label>
           <label className="flex min-h-11 cursor-pointer items-center gap-3 rounded-md px-0 text-sm font-medium">
             <Checkbox
               checked={tasksListShowDetails}
               onCheckedChange={(checked) => onToggleTasksListShowDetails(checked === true)}
             />
-            <span>Show task details</span>
+            <span>{t("kanban:showTaskDetails")}</span>
           </label>
           <p className="pl-6 text-xs text-muted-foreground">
-            Add repository, pull request, session, parent, and review context to List rows.
+            {t("kanban:addRepositoryPullRequestSessionParent")}
           </p>
         </div>
       )}
@@ -200,15 +190,16 @@ function MobileSearchSection({
   onSearchChange?: (query: string) => void;
   isSearchLoading: boolean;
 }) {
+  const { t } = useTranslation();
   if (!onSearchChange) return null;
 
   return (
     <div className={mobileSectionClass}>
-      <label className={mobileSectionTitleClass}>Search</label>
+      <label className={mobileSectionTitleClass}>{t("kanban:searchSection")}</label>
       <TaskSearchInput
         value={searchQuery}
         onChange={onSearchChange}
-        placeholder="Search tasks..."
+        placeholder={t("kanban:searchTasksPlaceholder")}
         isLoading={isSearchLoading}
         className="w-full [&_[data-slot=input]]:h-10 [&_[data-slot=input]]:pl-9 [&_[data-slot=input]]:pr-9 [&_[data-slot=input]]:text-sm"
       />
@@ -217,9 +208,10 @@ function MobileSearchSection({
 }
 
 function MobileWorkspaceSection({ onOpenChange }: { onOpenChange: (open: boolean) => void }) {
+  const { t } = useTranslation();
   return (
     <div className={mobileSectionClass}>
-      <label className={mobileSectionTitleClass}>Workspace</label>
+      <label className={mobileSectionTitleClass}>{t("common:workspace")}</label>
       <AppSidebarWorkspacePicker
         modal={false}
         onActionComplete={() => onOpenChange(false)}
@@ -242,9 +234,10 @@ function MobileViewSection({
   onViewChange: (value: string) => void;
   showPipeline: boolean;
 }) {
+  const { t } = useTranslation();
   return (
     <div className={mobileSectionClass}>
-      <label className={mobileSectionTitleClass}>View</label>
+      <label className={mobileSectionTitleClass}>{t("kanban:view")}</label>
       <ToggleGroup
         type="single"
         value={viewValue}
@@ -257,7 +250,7 @@ function MobileViewSection({
           className="h-10 min-w-0 flex-1 cursor-pointer gap-2 text-sm data-[state=on]:bg-muted data-[state=on]:text-foreground"
         >
           <IconLayoutKanban className={mobileControlIconClass} />
-          Kanban
+          {t("kanban:kanban")}
         </ToggleGroupItem>
         {showPipeline && (
           <ToggleGroupItem
@@ -265,7 +258,7 @@ function MobileViewSection({
             className="h-10 min-w-0 flex-1 cursor-pointer gap-2 text-sm data-[state=on]:bg-muted data-[state=on]:text-foreground"
           >
             <IconTimeline className={mobileControlIconClass} />
-            Pipeline
+            {t("kanban:pipeline")}
           </ToggleGroupItem>
         )}
         <ToggleGroupItem
@@ -273,94 +266,9 @@ function MobileViewSection({
           className="h-10 min-w-0 flex-1 cursor-pointer gap-2 text-sm data-[state=on]:bg-muted data-[state=on]:text-foreground"
         >
           <IconList className={mobileControlIconClass} />
-          List
+          {t("kanban:list")}
         </ToggleGroupItem>
       </ToggleGroup>
-    </div>
-  );
-}
-
-function MobileUtilityActions({
-  showHealthIndicator,
-  onOpenHealthDialog,
-  onOpenImproveKandev,
-  onOpenChange,
-}: {
-  showHealthIndicator: boolean;
-  onOpenHealthDialog: () => void;
-  onOpenImproveKandev: () => void;
-  onOpenChange: (open: boolean) => void;
-}) {
-  const { enabled: statusDrawerEnabled, issueSeverity, openStatusDrawer } = useAppStatusDrawer();
-  const issueDetails = issueSeverity === "none" ? null : connectionIssueDetails(issueSeverity);
-  const closeSheet = () => onOpenChange(false);
-  const openHealth = () => {
-    closeSheet();
-    onOpenHealthDialog();
-  };
-  const openStatus = () => {
-    closeSheet();
-    requestAnimationFrame(openStatusDrawer);
-  };
-
-  return (
-    <div className="mt-auto flex flex-col gap-3 pt-4 border-t border-border">
-      <div className={mobileSectionTitleClass}>Utilities</div>
-      {statusDrawerEnabled && (
-        <Button
-          type="button"
-          variant="outline"
-          className={cn(
-            "relative h-11 w-full cursor-pointer justify-start gap-3 px-3 text-sm",
-            issueSeverity === "lost" && "border-destructive/40 text-destructive",
-            issueSeverity === "unstable" && "border-amber-500/40 text-amber-500",
-          )}
-          onClick={openStatus}
-          data-testid="mobile-home-status-button"
-          aria-label={issueDetails?.description}
-          data-connection-severity={issueSeverity === "none" ? undefined : issueSeverity}
-        >
-          <IconActivity className={mobileControlIconClass} />
-          Status
-          {issueDetails && (
-            <span
-              className={cn("ml-auto size-2 rounded-full", issueDetails.dotClass)}
-              aria-hidden="true"
-            />
-          )}
-        </Button>
-      )}
-      <Button
-        asChild
-        variant="outline"
-        className={cn(mobileControlClass, "cursor-pointer justify-start gap-3")}
-      >
-        <Link href="/settings" onClick={closeSheet}>
-          <IconSettings className={mobileControlIconClass} />
-          Settings
-        </Link>
-      </Button>
-      <Button
-        type="button"
-        variant="outline"
-        className="h-11 w-full cursor-pointer justify-start gap-3 px-3 text-sm"
-        onClick={onOpenImproveKandev}
-        data-testid="mobile-improve-kandev-button"
-      >
-        <IconStethoscope className={mobileControlIconClass} />
-        Improve Kandev
-      </Button>
-      {showHealthIndicator && (
-        <Button
-          type="button"
-          variant="outline"
-          className={cn(mobileControlClass, "cursor-pointer justify-start gap-3")}
-          onClick={openHealth}
-        >
-          <IconAlertTriangle className={cn(mobileControlIconClass, "text-warning")} />
-          Health issues
-        </Button>
-      )}
     </div>
   );
 }
@@ -380,6 +288,7 @@ function ResponsiveMenuSurface({
   onOpenAutoFocus: (event: Event) => void;
   children: ReactNode;
 }) {
+  const { t } = useTranslation();
   if (isMobile) {
     return (
       <Drawer open={open} onOpenChange={onOpenChange}>
@@ -394,7 +303,7 @@ function ResponsiveMenuSurface({
             className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl bg-background shadow-2xl shadow-black/20"
           >
             <DrawerHeader className="shrink-0 border-b border-border/70 pb-3 text-left">
-              <DrawerTitle>Menu</DrawerTitle>
+              <DrawerTitle>{t("kanban:menu")}</DrawerTitle>
             </DrawerHeader>
             <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain pb-[env(safe-area-inset-bottom,0px)]">
               {children}
@@ -415,7 +324,7 @@ function ResponsiveMenuSurface({
         className="w-full overflow-y-auto outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 sm:max-w-sm"
       >
         <SheetHeader>
-          <SheetTitle>Menu</SheetTitle>
+          <SheetTitle>{t("kanban:menu")}</SheetTitle>
         </SheetHeader>
         {children}
       </SheetContent>

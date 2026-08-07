@@ -7,11 +7,12 @@ import { Label } from "@kandev/ui/label";
 import { Button } from "@kandev/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import { IconRefresh } from "@tabler/icons-react";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast/sonner";
 import { useAppStore } from "@/components/state-provider";
 import { updateAgentProfile, getAgentUtilization } from "@/lib/api/domains/office-api";
 import type { AgentProfile, AgentRole, ProviderUsage } from "@/lib/state/slices/office/types";
 import { UtilizationBars } from "@/app/office/components/utilization-bars";
+import { useTranslation } from "react-i18next";
 
 type AgentOverviewTabProps = {
   agent: AgentProfile;
@@ -32,22 +33,23 @@ function IdentityCard({
   onNameChange: (v: string) => void;
   onRoleChange: (v: AgentRole) => void;
 }) {
+  const { t } = useTranslation();
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="text-sm">Identity</CardTitle>
+        <CardTitle className="text-sm">{t("office:identity")}</CardTitle>
         <p className="text-xs text-muted-foreground">
-          Name, role, and reporting structure for this agent.
+          {t("office:nameRoleAndReportingStructureFor")}
         </p>
       </CardHeader>
       <CardContent className="space-y-3">
         <div>
-          <Label>Name</Label>
+          <Label>{t("office:name")}</Label>
           <Input value={name} onChange={(e) => onNameChange(e.target.value)} className="mt-1" />
         </div>
         <div className="flex gap-4">
           <div className="flex-1">
-            <Label>Role</Label>
+            <Label>{t("office:role")}</Label>
             <Select value={role} onValueChange={(v) => onRoleChange(v as AgentRole)}>
               <SelectTrigger className="mt-1 cursor-pointer">
                 <SelectValue />
@@ -62,7 +64,7 @@ function IdentityCard({
             </Select>
           </div>
           <div className="flex-1">
-            <Label>Reports to</Label>
+            <Label>{t("office:reportsTo")}</Label>
             <Input value={reportsToName} disabled className="mt-1" />
           </div>
         </div>
@@ -88,18 +90,19 @@ function ConfigurationCard({
   onMaxConcurrentChange: (v: number) => void;
   onExecutorTypeChange: (v: string) => void;
 }) {
+  const { t } = useTranslation();
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="text-sm">Configuration</CardTitle>
+        <CardTitle className="text-sm">{t("office:configuration")}</CardTitle>
         <p className="text-xs text-muted-foreground">
-          Budget limits, concurrency, and execution environment.
+          {t("office:budgetLimitsConcurrencyAndExecutionEnvironment")}
         </p>
       </CardHeader>
       <CardContent className="space-y-3">
         <div className="flex gap-4">
           <div className="flex-1">
-            <Label>Monthly budget ($)</Label>
+            <Label>{t("office:monthlyBudget")}</Label>
             <Input
               type="number"
               min={0}
@@ -109,7 +112,7 @@ function ConfigurationCard({
             />
           </div>
           <div className="flex-1">
-            <Label>Max concurrent sessions</Label>
+            <Label>{t("office:maxConcurrentSessions")}</Label>
             <Input
               type="number"
               min={1}
@@ -121,17 +124,17 @@ function ConfigurationCard({
           </div>
         </div>
         <div>
-          <Label>Executor preference</Label>
+          <Label>{t("office:executorPreference")}</Label>
           <Select
             value={executorType || "__inherit__"}
             onValueChange={(v) => onExecutorTypeChange(v === "__inherit__" ? "" : v)}
           >
             <SelectTrigger className="mt-1 cursor-pointer">
-              <SelectValue placeholder="Inherit from project/workspace" />
+              <SelectValue placeholder={t("office:inheritFromProjectWorkspace")} />
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="__inherit__" className="cursor-pointer">
-                Inherit
+                {t("office:inherit")}
               </SelectItem>
               {executorTypes.map((et) => (
                 <SelectItem key={et.id} value={et.id} className="cursor-pointer">
@@ -153,6 +156,7 @@ function QuotaCard({
   agentId: string;
   initialUsage: ProviderUsage | null | undefined;
 }) {
+  const { t } = useTranslation();
   const [usage, setUsage] = useState<ProviderUsage | null>(initialUsage ?? null);
   const [refreshing, setRefreshing] = useState(false);
 
@@ -162,7 +166,7 @@ function QuotaCard({
       const result = await getAgentUtilization(agentId);
       setUsage(result.utilization);
     } catch {
-      toast.error("Failed to refresh utilization");
+      toast.error(t("office:failedToRefreshUtilization"));
     } finally {
       setRefreshing(false);
     }
@@ -173,9 +177,9 @@ function QuotaCard({
       <CardHeader>
         <div className="flex items-center justify-between">
           <div>
-            <CardTitle className="text-sm">Subscription Quota</CardTitle>
+            <CardTitle className="text-sm">{t("office:subscriptionQuota")}</CardTitle>
             <p className="text-xs text-muted-foreground mt-1">
-              Current utilization of subscription rate-limit windows.
+              {t("office:currentUtilizationOfSubscriptionRateLimit")}
             </p>
           </div>
           <Button
@@ -184,7 +188,7 @@ function QuotaCard({
             onClick={handleRefresh}
             disabled={refreshing}
             className="cursor-pointer h-7 w-7"
-            title="Refresh utilization"
+            title={t("office:refreshUtilization")}
           >
             <IconRefresh className={`h-4 w-4 ${refreshing ? "animate-spin" : ""}`} />
           </Button>
@@ -195,7 +199,7 @@ function QuotaCard({
           <UtilizationBars usage={usage} />
         ) : (
           <p className="text-xs text-muted-foreground">
-            No utilization data. Click refresh to fetch current usage.
+            {t("office:noUtilizationDataClickRefreshTo")}
           </p>
         )}
       </CardContent>
@@ -203,27 +207,33 @@ function QuotaCard({
   );
 }
 
+// Catalog keys, not copy — module scope freezes a `t()` at the boot locale.
+// The `id`s are the wire role / executor-type values.
 const FALLBACK_ROLES = [
-  { id: "ceo", label: "CEO" },
-  { id: "worker", label: "Worker" },
-  { id: "specialist", label: "Specialist" },
-  { id: "assistant", label: "Assistant" },
+  { id: "ceo", labelKey: "office:roleCeo" },
+  { id: "worker", labelKey: "office:roleWorker" },
+  { id: "specialist", labelKey: "office:roleSpecialist" },
+  { id: "assistant", labelKey: "office:roleAssistant" },
 ];
 
 const FALLBACK_EXECUTOR_TYPES = [
-  { id: "local_pc", label: "Local (standalone)" },
-  { id: "local_docker", label: "Local Docker" },
-  { id: "sprites", label: "Sprites (remote sandbox)" },
+  { id: "local_pc", labelKey: "office:localStandalone" },
+  { id: "local_docker", labelKey: "office:localDocker" },
+  { id: "sprites", labelKey: "office:spritesRemoteSandbox" },
 ];
 
 export function AgentOverviewTab({ agent }: AgentOverviewTabProps) {
+  const { t } = useTranslation();
   const agents = useAppStore((s) => s.office.agentProfiles);
   const meta = useAppStore((s) => s.office.meta);
   const updateStore = useAppStore((s) => s.updateOfficeAgentProfile);
 
-  const roles = meta?.roles.map((r) => ({ id: r.id, label: r.label })) ?? FALLBACK_ROLES;
+  const roles =
+    meta?.roles.map((r) => ({ id: r.id, label: r.label })) ??
+    FALLBACK_ROLES.map((r) => ({ id: r.id, label: t(r.labelKey) }));
   const executorTypes =
-    meta?.executorTypes.map((e) => ({ id: e.id, label: e.label })) ?? FALLBACK_EXECUTOR_TYPES;
+    meta?.executorTypes.map((e) => ({ id: e.id, label: e.label })) ??
+    FALLBACK_EXECUTOR_TYPES.map((e) => ({ id: e.id, label: t(e.labelKey) }));
 
   const [name, setName] = useState(agent.name);
   const [role, setRole] = useState<AgentRole>(agent.role);
@@ -253,9 +263,9 @@ export function AgentOverviewTab({ agent }: AgentOverviewTabProps) {
         executorPreference: executorType ? { type: executorType } : undefined,
       });
       setDirty(false);
-      toast.success("Agent updated");
+      toast.success(t("office:agentUpdated"));
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Failed to update agent");
+      toast.error(err instanceof Error ? err.message : t("office:failedToUpdateAgent"));
     } finally {
       setSaving(false);
     }
@@ -270,7 +280,7 @@ export function AgentOverviewTab({ agent }: AgentOverviewTabProps) {
       <IdentityCard
         name={name}
         role={role}
-        reportsToName={reportsToAgent?.name ?? "None"}
+        reportsToName={reportsToAgent?.name ?? t("office:none")}
         roles={roles}
         onNameChange={(v) => {
           setName(v);
@@ -303,7 +313,7 @@ export function AgentOverviewTab({ agent }: AgentOverviewTabProps) {
       {dirty && (
         <div className="flex justify-end">
           <Button onClick={handleSave} disabled={saving} className="cursor-pointer">
-            {saving ? "Saving..." : "Save Changes"}
+            {saving ? t("office:saving") : t("office:saveChanges")}
           </Button>
         </div>
       )}

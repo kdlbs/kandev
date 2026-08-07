@@ -1,0 +1,4 @@
+export {
+  SETTINGS_DISCOVERY_DEFINITIONS,
+  SETTINGS_DISCOVERY_ROUTE_EXCLUSIONS,
+} from "./catalog/index";

@@ -1,7 +1,9 @@
 "use client";
 
 import { useEffect, type Dispatch, type SetStateAction } from "react";
-import { formatDistanceToNow } from "date-fns";
+import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
+import { formatTimeDistance, useDateLocale } from "@/lib/i18n/date-locale";
 import { IconArchive, IconArrowRight, IconHammer, IconLoader2 } from "@tabler/icons-react";
 import {
   Command,
@@ -80,8 +82,23 @@ function CommandItemRow({
       keywords={getCommandSearchTerms(cmd)}
       onSelect={() => onSelect(cmd)}
     >
-      {cmd.icon && <span className="text-muted-foreground">{cmd.icon}</span>}
-      <span>{cmd.label}</span>
+      {cmd.icon && (
+        <span
+          className={
+            cmd.context ? "self-start pt-0.5 text-muted-foreground" : "text-muted-foreground"
+          }
+        >
+          {cmd.icon}
+        </span>
+      )}
+      <span className="min-w-0 flex-1">
+        <span className="block truncate">{cmd.label}</span>
+        {cmd.context && (
+          <span className="block truncate text-[0.625rem] leading-4 text-muted-foreground">
+            {cmd.context}
+          </span>
+        )}
+      </span>
       {cmd.shortcut && <CommandShortcut>{formatShortcut(cmd.shortcut)}</CommandShortcut>}
       {cmd.enterMode && (
         <span className="ml-auto text-muted-foreground">
@@ -100,6 +117,7 @@ type TaskResultItemProps = {
 };
 
 function TaskResultItem({ task, stepMap, repoMap, onSelect }: TaskResultItemProps) {
+  const locale = useDateLocale();
   const isArchived = ARCHIVED_STATES.has(task.state);
   const step = stepMap.get(task.workflow_step_id);
   const stepHex = step ? STEP_COLOR_MAP[step.color] : undefined;
@@ -111,7 +129,7 @@ function TaskResultItem({ task, stepMap, repoMap, onSelect }: TaskResultItemProp
   if (workDir) details.push(workDir);
   if (task.primary_agent_name) details.push(task.primary_agent_name);
   if (task.updated_at) {
-    details.push(formatDistanceToNow(new Date(task.updated_at), { addSuffix: true }));
+    details.push(formatTimeDistance(task.updated_at, locale));
   }
   return (
     <CommandItem
@@ -159,6 +177,45 @@ type CommandsListContentProps = {
   onTaskSelect: (task: Task) => void;
 };
 
+function SearchCommandGroups({
+  commands,
+  search,
+  onSelect,
+}: Pick<CommandsListContentProps, "commands" | "search" | "onSelect">) {
+  const { t } = useTranslation();
+  const matches = sortCommandsForSearch(commands, search).filter(
+    (cmd) => scoreCommandSearch(cmd.id, search, getCommandSearchTerms(cmd)) > 0,
+  );
+  const regularMatches = matches.filter((cmd) => !cmd.searchOnly);
+  const searchOnlyGroups = new Map<string, CommandItemType[]>();
+
+  for (const cmd of matches) {
+    if (!cmd.searchOnly) continue;
+    const groupItems = searchOnlyGroups.get(cmd.group) ?? [];
+    groupItems.push(cmd);
+    searchOnlyGroups.set(cmd.group, groupItems);
+  }
+
+  return (
+    <>
+      {regularMatches.length > 0 && (
+        <CommandGroup heading={t("common:commandGroupCommands")}>
+          {regularMatches.map((cmd) => (
+            <CommandItemRow key={cmd.id} cmd={cmd} onSelect={onSelect} />
+          ))}
+        </CommandGroup>
+      )}
+      {[...searchOnlyGroups].map(([group, items]) => (
+        <CommandGroup key={group} heading={group}>
+          {items.map((cmd) => (
+            <CommandItemRow key={cmd.id} cmd={cmd} onSelect={onSelect} />
+          ))}
+        </CommandGroup>
+      ))}
+    </>
+  );
+}
+
 function CommandsListContent({
   commands,
   grouped,
@@ -170,19 +227,25 @@ function CommandsListContent({
   repoMap,
   onTaskSelect,
 }: CommandsListContentProps) {
+  const { t } = useTranslation();
   const hasInlineResults = taskResults.length > 0 || isSearching;
   return (
     <>
-      {!hasInlineResults && !isSearching && <CommandEmpty>No commands found.</CommandEmpty>}
+      {!hasInlineResults && !isSearching && (
+        <CommandEmpty>{t("common:noCommandsFound")}</CommandEmpty>
+      )}
       {isSearching && taskResults.length === 0 && (
-        <CommandGroup heading="Active Tasks" forceMount>
+        <CommandGroup heading={t("common:activeTasks")} forceMount>
           <div className="flex items-center justify-center py-3">
             <IconLoader2 className="size-3.5 animate-spin text-muted-foreground" />
           </div>
         </CommandGroup>
       )}
       {taskResults.length > 0 && (
-        <CommandGroup heading={search.trim() ? "Tasks" : "Active Tasks"} forceMount>
+        <CommandGroup
+          heading={search.trim() ? t("common:tasks") : t("common:activeTasks")}
+          forceMount
+        >
           {taskResults.map((task) => (
             <TaskResultItem
               key={task.id}
@@ -195,21 +258,19 @@ function CommandsListContent({
         </CommandGroup>
       )}
       {search.trim() ? (
-        <CommandGroup heading="Commands">
-          {sortCommandsForSearch(commands, search)
-            .filter((cmd) => scoreCommandSearch(cmd.id, search, getCommandSearchTerms(cmd)) > 0)
-            .map((cmd) => (
-              <CommandItemRow key={cmd.id} cmd={cmd} onSelect={onSelect} />
-            ))}
-        </CommandGroup>
+        <SearchCommandGroups commands={commands} search={search} onSelect={onSelect} />
       ) : (
-        grouped.map(([group, items]) => (
-          <CommandGroup key={group} heading={group}>
-            {items.map((cmd) => (
-              <CommandItemRow key={cmd.id} cmd={cmd} onSelect={onSelect} />
-            ))}
-          </CommandGroup>
-        ))
+        grouped.map(([group, items]) => {
+          const visibleItems = items.filter((cmd) => !cmd.searchOnly);
+          if (visibleItems.length === 0) return null;
+          return (
+            <CommandGroup key={group} heading={group}>
+              {visibleItems.map((cmd) => (
+                <CommandItemRow key={cmd.id} cmd={cmd} onSelect={onSelect} />
+              ))}
+            </CommandGroup>
+          );
+        })
       )}
     </>
   );
@@ -230,6 +291,7 @@ function FileSearchContent({
   sessionId,
   onSelect,
 }: FileSearchContentProps) {
+  const { t } = useTranslation();
   const getRepoDisplayName = useRepoDisplayName(sessionId);
   if (isSearching && files.length === 0) {
     return (
@@ -238,8 +300,9 @@ function FileSearchContent({
       </div>
     );
   }
-  if (search.trim() && files.length === 0) return <CommandEmpty>No files found.</CommandEmpty>;
-  if (!search.trim()) return <CommandEmpty>Type to search files...</CommandEmpty>;
+  if (search.trim() && files.length === 0)
+    return <CommandEmpty>{t("common:noFilesFound")}</CommandEmpty>;
+  if (!search.trim()) return <CommandEmpty>{t("common:typeToSearchFiles")}</CommandEmpty>;
 
   const groups = groupByRepositoryName(files, (file) => file.repository_name);
   const singleRepo = isSingleRepoGroup(groups);
@@ -248,8 +311,10 @@ function FileSearchContent({
       key={group.repositoryName || "workspace"}
       heading={
         singleRepo
-          ? "Files"
-          : (getRepoDisplayName(group.repositoryName) ?? group.repositoryName ?? "Workspace")
+          ? t("common:files")
+          : (getRepoDisplayName(group.repositoryName) ??
+            group.repositoryName ??
+            t("common:workspace"))
       }
       forceMount
       data-testid="file-search-repo-group"
@@ -280,27 +345,33 @@ function FileSearchContent({
   ));
 }
 
-function getInputPlaceholder(mode: CommandPanelMode, inputCommand: CommandItemType | null) {
-  if (mode === "input") return inputCommand?.inputPlaceholder ?? "Enter value...";
-  if (mode === "search-tasks") return "Search for tasks...";
-  if (mode === MODE_SEARCH_FILES) return "Search for files...";
-  if (mode === MODE_SEARCH_CONTENT) return "Search task contents…";
-  return "Type a command...";
+// `mode` stays an untranslated discriminant — it is compared with `===`
+// throughout. Only the labels it selects are copy.
+function getInputPlaceholder(
+  t: TFunction,
+  mode: CommandPanelMode,
+  inputCommand: CommandItemType | null,
+) {
+  if (mode === "input") return inputCommand?.inputPlaceholder ?? t("common:enterValue");
+  if (mode === "search-tasks") return t("common:searchForTasks");
+  if (mode === MODE_SEARCH_FILES) return t("common:searchForFiles");
+  if (mode === MODE_SEARCH_CONTENT) return t("common:searchTaskContents");
+  return t("common:typeACommand");
 }
 
-function getEnterLabel(mode: CommandPanelMode) {
-  if (mode === "input") return "Confirm";
+function getEnterLabel(t: TFunction, mode: CommandPanelMode) {
+  if (mode === "input") return t("common:confirm");
   if (mode === "search-tasks" || mode === MODE_SEARCH_FILES || mode === MODE_SEARCH_CONTENT) {
-    return "Open";
+    return t("common:open");
   }
-  return "Select";
+  return t("common:select");
 }
 
-function getModeLabel(mode: CommandPanelMode, inputCommand: CommandItemType | null) {
+function getModeLabel(t: TFunction, mode: CommandPanelMode, inputCommand: CommandItemType | null) {
   if (mode === "input") return inputCommand?.label;
-  if (mode === "search-tasks") return "Tasks";
-  if (mode === MODE_SEARCH_FILES) return "Files";
-  if (mode === MODE_SEARCH_CONTENT) return "Contents";
+  if (mode === "search-tasks") return t("common:tasks");
+  if (mode === MODE_SEARCH_FILES) return t("common:files");
+  if (mode === MODE_SEARCH_CONTENT) return t("common:contents");
   return null;
 }
 
@@ -311,6 +382,7 @@ function CommandPanelFooter({
   mode: CommandPanelMode;
   workspaceSearchAvailable: boolean;
 }) {
+  const { t } = useTranslation();
   const isScopeMode = isCommandPanelScopeMode(mode);
   const canSwitchScope = workspaceSearchAvailable && isScopeMode;
   return (
@@ -320,29 +392,30 @@ function CommandPanelFooter({
           <KbdGroup>
             <Kbd>↑</Kbd>
             <Kbd>↓</Kbd>
-            <span>Navigate</span>
+            <span>{t("common:navigate")}</span>
           </KbdGroup>
           {canSwitchScope && (
             <KbdGroup>
               <Kbd>Tab</Kbd>
-              <span>Switch mode</span>
+              <span>{t("common:switchMode")}</span>
             </KbdGroup>
           )}
         </>
       )}
       <KbdGroup>
         <Kbd>↵</Kbd>
-        <span>{getEnterLabel(mode)}</span>
+        <span>{getEnterLabel(t, mode)}</span>
       </KbdGroup>
       {!isScopeMode && (
         <KbdGroup>
           <Kbd>⌫</Kbd>
-          <span>Back</span>
+          <span>{t("common:back")}</span>
         </KbdGroup>
       )}
       <KbdGroup>
+        {/* A key name, not copy — it labels the physical key. */}
         <Kbd>esc</Kbd>
-        <span>Close</span>
+        <span>{t("common:close")}</span>
       </KbdGroup>
     </div>
   );
@@ -389,9 +462,10 @@ function CommandPanelInputHeader({
   goBack,
   workspaceSearchAvailable,
 }: CommandPanelViewProps) {
+  const { t } = useTranslation();
   const isTopLevelMode = isCommandPanelScopeMode(mode);
   const canSwitchScope = workspaceSearchAvailable && isTopLevelMode;
-  const modeLabel = getModeLabel(mode, inputCommand);
+  const modeLabel = getModeLabel(t, mode, inputCommand);
   const onInputKeyDown = (event: React.KeyboardEvent) => {
     if (
       canSwitchScope &&
@@ -420,7 +494,7 @@ function CommandPanelInputHeader({
         </button>
       )}
       <CommandInput
-        placeholder={getInputPlaceholder(mode, inputCommand)}
+        placeholder={getInputPlaceholder(t, mode, inputCommand)}
         value={search}
         onValueChange={setSearch}
         onKeyDown={onInputKeyDown}
@@ -431,6 +505,7 @@ function CommandPanelInputHeader({
 }
 
 function CommandPanelResultList(props: CommandPanelViewProps) {
+  const { t } = useTranslation();
   const {
     mode,
     inputCommand,
@@ -488,9 +563,9 @@ function CommandPanelResultList(props: CommandPanelViewProps) {
       )}
       {mode === "input" &&
         (!search.trim() ? (
-          <CommandEmpty>{inputCommand?.inputPlaceholder ?? "Enter a value..."}</CommandEmpty>
+          <CommandEmpty>{inputCommand?.inputPlaceholder ?? t("common:enterAValue")}</CommandEmpty>
         ) : (
-          <CommandEmpty>Press Enter to confirm</CommandEmpty>
+          <CommandEmpty>{t("common:pressEnterToConfirm")}</CommandEmpty>
         ))}
     </CommandList>
   );

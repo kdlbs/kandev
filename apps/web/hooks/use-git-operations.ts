@@ -102,36 +102,41 @@ type ExecuteOperation = <T extends GitOperationResult>(
   payload: Record<string, unknown>,
 ) => Promise<T>;
 
-function buildGitOperationCallbacks(executeOperation: ExecuteOperation) {
+/** Preserve an explicitly selected workspace-root scope (`repo === ""`). */
+export function repositoryScopePayload(repo?: string): { repo?: string } {
+  return repo === undefined ? {} : { repo };
+}
+
+export function buildGitOperationCallbacks(executeOperation: ExecuteOperation) {
   const pull = async (rebase = false, repo?: string) =>
     executeOperation<GitOperationResult>("worktree.pull", {
       rebase,
-      ...(repo ? { repo } : {}),
+      ...repositoryScopePayload(repo),
     });
 
   const push = async (options?: { force?: boolean; setUpstream?: boolean }, repo?: string) =>
     executeOperation<GitOperationResult>("worktree.push", {
       force: options?.force ?? false,
       set_upstream: options?.setUpstream ?? false,
-      ...(repo ? { repo } : {}),
+      ...repositoryScopePayload(repo),
     });
 
   const rebase = async (baseBranch: string, repo?: string) =>
     executeOperation<GitOperationResult>("worktree.rebase", {
       base_branch: baseBranch,
-      ...(repo ? { repo } : {}),
+      ...repositoryScopePayload(repo),
     });
 
   const merge = async (baseBranch: string, repo?: string) =>
     executeOperation<GitOperationResult>("worktree.merge", {
       base_branch: baseBranch,
-      ...(repo ? { repo } : {}),
+      ...repositoryScopePayload(repo),
     });
 
   const abort = async (operation: "merge" | "rebase", repo?: string) =>
     executeOperation<GitOperationResult>("worktree.abort", {
       operation,
-      ...(repo ? { repo } : {}),
+      ...repositoryScopePayload(repo),
     });
 
   const commit = async (message: string, stageAll = true, amend = false, repo?: string) =>
@@ -139,44 +144,44 @@ function buildGitOperationCallbacks(executeOperation: ExecuteOperation) {
       message,
       stage_all: stageAll,
       amend,
-      ...(repo ? { repo } : {}),
+      ...repositoryScopePayload(repo),
     });
 
   const stage = async (paths?: string[], repo?: string) =>
     executeOperation<GitOperationResult>("worktree.stage", {
       paths: paths ?? [],
-      ...(repo ? { repo } : {}),
+      ...repositoryScopePayload(repo),
     });
 
   const unstage = async (paths?: string[], repo?: string) =>
     executeOperation<GitOperationResult>("worktree.unstage", {
       paths: paths ?? [],
-      ...(repo ? { repo } : {}),
+      ...repositoryScopePayload(repo),
     });
 
   const discard = async (paths?: string[], repo?: string) =>
     executeOperation<GitOperationResult>("worktree.discard", {
       paths: paths ?? [],
-      ...(repo ? { repo } : {}),
+      ...repositoryScopePayload(repo),
     });
 
   const revertCommit = async (commitSHA: string, repo?: string) =>
     executeOperation<GitOperationResult>("worktree.revert_commit", {
       commit_sha: commitSHA,
-      ...(repo ? { repo } : {}),
+      ...repositoryScopePayload(repo),
     });
 
   const renameBranch = async (newName: string, repo?: string) =>
     executeOperation<GitOperationResult>("worktree.rename_branch", {
       new_name: newName,
-      ...(repo ? { repo } : {}),
+      ...repositoryScopePayload(repo),
     });
 
   const reset = async (commitSHA: string, mode: "soft" | "hard", repo?: string) =>
     executeOperation<GitOperationResult>("worktree.reset", {
       commit_sha: commitSHA,
       mode,
-      ...(repo ? { repo } : {}),
+      ...repositoryScopePayload(repo),
     });
 
   const createPR = async (
@@ -191,7 +196,7 @@ function buildGitOperationCallbacks(executeOperation: ExecuteOperation) {
       body,
       base_branch: baseBranch ?? "",
       draft: draft ?? true,
-      ...(repo ? { repo } : {}),
+      ...repositoryScopePayload(repo),
     });
 
   return {

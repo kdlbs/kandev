@@ -4,7 +4,9 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/orchestrator/watcher"
 )
 
@@ -91,5 +93,48 @@ func TestCreateRecoveryStatusMessage_ResumeCorrupted(t *testing.T) {
 	}
 	if msg.metadata["resume_corrupted"] != true {
 		t.Errorf("expected resume_corrupted=true in metadata, got %v", msg.metadata["resume_corrupted"])
+	}
+}
+
+func TestCreateRecoveryStatusMessage_OpenCodeQuotaCarriesSafeMetadata(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t-quota", "s-quota", "step1")
+	agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
+	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
+	mc := &mockMessageCreator{}
+	svc.messageCreator = mc
+	resetAt := time.Date(2026, 8, 2, 19, 34, 44, 0, time.UTC)
+
+	svc.createRecoveryStatusMessage(ctx, watcher.AgentEventData{
+		TaskID:       "t-quota",
+		SessionID:    "s-quota",
+		AgentID:      "opencode-acp",
+		ErrorMessage: "5-hour usage limit reached",
+		ProviderError: &streams.ProviderError{
+			Source:     streams.ProviderErrorSourceOpenCodeStderr,
+			ProviderID: "opencode-go",
+			ModelID:    "kimi-k3",
+			Message:    "5-hour usage limit reached",
+			OccurredAt: time.Date(2026, 8, 2, 15, 15, 44, 0, time.UTC),
+			ResetAt:    &resetAt,
+		},
+	})
+
+	if len(mc.sessionMessages) != 1 {
+		t.Fatalf("expected 1 session message, got %d", len(mc.sessionMessages))
+	}
+	meta := mc.sessionMessages[0].metadata
+	if meta["failure_kind"] != "provider_quota_limited" {
+		t.Fatalf("failure_kind = %#v", meta["failure_kind"])
+	}
+	if meta["provider_name"] != "OpenCode" || meta["model_id"] != "kimi-k3" {
+		t.Fatalf("provider metadata = %#v", meta)
+	}
+	if meta["reset_at"] != resetAt.Format(time.RFC3339) {
+		t.Fatalf("reset_at = %#v", meta["reset_at"])
+	}
+	if meta["error_output"] != "5-hour usage limit reached" {
+		t.Fatalf("error_output = %#v", meta["error_output"])
 	}
 }

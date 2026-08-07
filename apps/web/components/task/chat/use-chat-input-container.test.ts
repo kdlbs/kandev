@@ -1,9 +1,11 @@
 import React, { createRef } from "react";
-import { renderHook } from "@testing-library/react";
+import { act, renderHook, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { ToastProvider } from "@/components/toast-provider";
 import { shouldShowChatFocusHint, useChatInputContainer } from "./use-chat-input-container";
 import type { ChatInputContainerHandle } from "./chat-input-container";
+
+const callerPlaceholder = "Continue working on the task...";
 
 function renderInputState(overrides: Partial<Parameters<typeof useChatInputContainer>[0]> = {}) {
   return renderHook(
@@ -19,6 +21,7 @@ function renderInputState(overrides: Partial<Parameters<typeof useChatInputConta
         needsRecovery: false,
         executorUnavailable: false,
         isAgentBusy: false,
+        supportsSteering: false,
         hasAgentCommands: true,
         placeholder: undefined,
         contextItems: [],
@@ -75,6 +78,69 @@ describe("useChatInputContainer", () => {
     expect(result.current.inputPlaceholder).toBe(
       "Queue instructions while the question is pending...",
     );
+  });
+
+  it("disables submit while a staged attachment upload is pending", async () => {
+    const originalFetch = globalThis.fetch;
+    let resolveUpload!: (response: Response) => void;
+    const uploadResponse = new Promise<Response>((resolve) => {
+      resolveUpload = resolve;
+    });
+    globalThis.fetch = vi.fn(() => uploadResponse) as typeof globalThis.fetch;
+    try {
+      const { result } = renderInputState({ workspaceId: "workspace-1" });
+      await act(async () => {
+        await result.current.addFiles([
+          new File([new Uint8Array(6 * 1024 * 1024)], "large.bin", {
+            type: "application/octet-stream",
+          }),
+        ]);
+      });
+
+      await waitFor(() => expect(result.current.hasPendingAttachmentUploads).toBe(true));
+      expect(result.current.isDisabled).toBe(false);
+      expect(result.current.submitDisabled).toBe(true);
+
+      resolveUpload(
+        new Response(
+          JSON.stringify({
+            attachment_id: "attachment-1",
+            name: "large.bin",
+            mime_type: "application/octet-stream",
+            kind: "resource",
+            delivery_mode: "path",
+            size_bytes: 6 * 1024 * 1024,
+          }),
+          { status: 201, headers: { "Content-Type": "application/json" } },
+        ),
+      );
+      await waitFor(() => expect(result.current.hasPendingAttachmentUploads).toBe(false));
+      expect(result.current.submitDisabled).toBe(false);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("shows the steer affordance over a caller placeholder when the session can steer", () => {
+    const { result } = renderInputState({
+      supportsSteering: true,
+      placeholder: callerPlaceholder,
+    });
+
+    // The steer label must win: a send here is delivered into the running turn,
+    // and the generic "Continue working…" prompt would mask that. Assert the
+    // resolved chat:composerSteerPlaceholder itself — asserting only that it
+    // differs from the caller's would also pass on any other generic label.
+    expect(result.current.inputPlaceholder).toBe("Send now — delivered to the running turn");
+  });
+
+  it("keeps the caller placeholder when the session cannot steer", () => {
+    const { result } = renderInputState({
+      supportsSteering: false,
+      placeholder: callerPlaceholder,
+    });
+
+    expect(result.current.inputPlaceholder).toBe(callerPlaceholder);
   });
 });
 

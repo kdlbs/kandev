@@ -13,6 +13,7 @@ import (
 	"runtime"
 	"strings"
 
+	"github.com/kandev/kandev/internal/common/subproc"
 	"github.com/kandev/kandev/internal/task/gitinit"
 	"github.com/kandev/kandev/internal/task/models"
 	"go.uber.org/zap"
@@ -204,9 +205,29 @@ func initializeGitRepository(ctx context.Context, targetPath string, targetDirec
 	if err != nil {
 		return err
 	}
-	output, err := command.CombinedOutput()
+	output, err := subproc.RunGitCombinedOutputClass(ctx, subproc.GitLifecycle, command)
 	if err != nil {
 		return fmt.Errorf("%w: %s", err, strings.TrimSpace(string(output)))
+	}
+	hooksPath, err := os.MkdirTemp("", "kandev-initial-commit-hooks-")
+	if err != nil {
+		return fmt.Errorf("prepare initial commit hooks: %w", err)
+	}
+	defer func() { _ = os.Remove(hooksPath) }()
+
+	commit, err := gitinit.CommitCommandContext(ctx, targetPath, targetDirectory,
+		"-c", "user.name=Kandev Quick Chat",
+		"-c", "user.email=quickchat@kandev.local",
+		"-c", "commit.gpgsign=false",
+		"-c", "core.hooksPath="+hooksPath,
+		"commit", "--allow-empty", "--no-verify", "-m", "Initial commit",
+	)
+	if err != nil {
+		return fmt.Errorf("prepare initial commit: %w", err)
+	}
+	output, err = subproc.RunGitCombinedOutputClass(ctx, subproc.GitLifecycle, commit)
+	if err != nil {
+		return fmt.Errorf("create initial commit: %w: %s", err, strings.TrimSpace(string(output)))
 	}
 	return nil
 }

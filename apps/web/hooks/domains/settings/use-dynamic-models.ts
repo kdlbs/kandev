@@ -8,6 +8,10 @@ import type {
   DynamicModelsResponse,
   ModelConfig,
 } from "@/lib/types/http";
+// Set from an async catch rather than rendered as a literal, so this uses the
+// module-level `t`, which resolves at call time. The message surfaces in the
+// profile editor through `agents:failedToRefresh`.
+import { t } from "@/lib/i18n";
 
 type UseAgentCapabilitiesState = {
   models: ModelEntry[];
@@ -70,7 +74,7 @@ export function useAgentCapabilities(
           setCurrentModeId(response.current_mode_id);
         }
       } catch (err) {
-        setError(err instanceof Error ? err.message : "Failed to fetch capabilities");
+        setError(err instanceof Error ? err.message : t("agents:failedToFetchCapabilities"));
       } finally {
         setIsLoading(false);
       }

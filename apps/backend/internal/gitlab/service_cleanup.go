@@ -133,6 +133,22 @@ func (s *Service) deleteReviewMRTaskIfTerminal(ctx context.Context, t *ReviewMRT
 	if state != gitlabStateMerged && state != gitlabStateClosed {
 		return false
 	}
+	if policy == CleanupPolicyAuto {
+		// A review task with any MR lifecycle notification switch enabled is
+		// retained even with zero user engagement — its whole point is to
+		// still receive the merged/closed prompt. A lookup error retains
+		// too: silently deleting a task that might be lifecycle-subscribed
+		// is a worse outcome than leaving an orphan for the next sweep.
+		enabled, err := s.HasEnabledTaskMRAgentPrompts(ctx, t.TaskID)
+		if err != nil {
+			s.logger.Warn("check MR lifecycle prompts during cleanup",
+				zap.String("task_id", t.TaskID), zap.Error(err))
+			return false
+		}
+		if enabled {
+			return false
+		}
+	}
 	if policy == CleanupPolicyAuto && checker != nil {
 		// On a transient DB error preserve the task — silently deleting
 		// something the user might have engaged with is a much worse

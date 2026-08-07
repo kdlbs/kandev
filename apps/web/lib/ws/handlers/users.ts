@@ -4,7 +4,7 @@ import type { UserSettingsUpdatedPayload } from "@/lib/types/backend";
 import type { WsHandlers } from "@/lib/ws/handlers/types";
 import { mapUserSettingsData } from "@/lib/ssr/user-settings";
 import { fromApiSidebarDraft, fromApiSidebarView } from "@/lib/state/slices/ui/sidebar-view-wire";
-import { migrateView } from "@/lib/state/slices/ui/ui-slice";
+import { migrateSidebarViewDraft, migrateView } from "@/lib/state/slices/ui/ui-slice";
 
 export function registerUsersHandlers(store: StoreApi<AppState>): WsHandlers {
   return {
@@ -61,5 +61,5 @@ function buildSidebarViewsState(state: AppState, payload: UserSettingsUpdatedPay
 function parseSidebarDraftForViews(state: AppState, payload: UserSettingsUpdatedPayload) {
   if (payload.sidebar_draft === undefined) return state.sidebarViews.draft;
   if (payload.sidebar_draft === null) return null;
-  return fromApiSidebarDraft(payload.sidebar_draft);
+  return migrateSidebarViewDraft(fromApiSidebarDraft(payload.sidebar_draft));
 }

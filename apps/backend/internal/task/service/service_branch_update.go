@@ -11,6 +11,7 @@ import (
 	"github.com/kandev/kandev/internal/common/securityutil"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/worktree"
 )
 
 // UpdateRepositoryBaseBranchRequest carries the parameters for the
@@ -167,30 +168,69 @@ func isSafeBaseBranchRef(ref string) bool {
 	return securityutil.IsValidBranchName(ref)
 }
 
-// collectTaskBaseBranches builds the per-repo {RepositoryName → base_branch}
-// map the agentctl WorkspaceTracker reads. Mirrors lifecycle.collectBaseBranches
-// but at update time the LaunchRequest is gone, so we hydrate from the DB:
-// list task_repositories, resolve each Repository to recover its Name (which
-// matches the worktree dir basename and therefore the tracker's
-// repositoryName), and key the map with both Name and the empty fallback for
-// single-repo tasks.
+// TaskBaseBranches exposes the stored per-repo base-branch map so the agent
+// runtime can seed a workspace at agentctl-ready time. Wired as
+// lifecycle.BaseBranchProvider; the launch path builds the same shape from the
+// LaunchRequest, and this is the DB-backed equivalent for every other path.
+func (s *Service) TaskBaseBranches(ctx context.Context, taskID string) (map[string]string, error) {
+	if taskID == "" {
+		return nil, nil
+	}
+	return s.collectTaskBaseBranches(ctx, taskID)
+}
+
+// collectTaskBaseBranches builds the per-worktree {trackerName → base_branch}
+// map the agentctl WorkspaceTracker reads. Mirrors
+// lifecycle.baseBranchMetadataKey but at update time the LaunchRequest is gone,
+// so we hydrate from the DB: list task_repositories, resolve each Repository to
+// recover its Name, and derive the same branch-identity path slug the launch
+// path derives, so the key equals the worktree directory basename — which is
+// what the tracker reports as its repositoryName.
+//
+// Keying by the bare repository name is NOT sufficient. A task may attach the
+// same repository on several branches (task_repositories is unique on
+// task+repo+base+checkout), and those siblings live in
+// `{RepoName}-{BranchSlug}` directories. Collapsing them under `{RepoName}`
+// leaves every sibling tracker without a key, and because SetBaseBranches
+// *replaces* the stored map, pushing that collapsed map actively overwrites the
+// correctly-keyed map the launch path already seeded — sending the siblings
+// back to the origin/main fallback.
 func (s *Service) collectTaskBaseBranches(ctx context.Context, taskID string) (map[string]string, error) {
 	taskRepos, err := s.taskRepos.ListTaskRepositories(ctx, taskID)
 	if err != nil {
 		return nil, fmt.Errorf("list task repositories: %w", err)
 	}
+	repos, err := s.resolveBaseBranchRepositories(ctx, taskRepos)
+	if err != nil {
+		return nil, err
+	}
+	// Plans are computed over *every* row, including rows without a base
+	// branch: BuildBranchIdentityPlans groups by repository and picks which
+	// member of a group keeps the flat legacy path. Filtering first would
+	// change that choice and desync these keys from the launch path's.
+	inputs := make([]worktree.BranchIdentityInput, len(taskRepos))
+	for i, tr := range taskRepos {
+		defaultBranch := ""
+		if repos[i] != nil {
+			defaultBranch = repos[i].DefaultBranch
+		}
+		inputs[i] = worktree.BranchIdentityInput{
+			RepositoryID:   tr.RepositoryID,
+			BaseBranch:     tr.BaseBranch,
+			CheckoutBranch: tr.CheckoutBranch,
+			DefaultBranch:  defaultBranch,
+			PRNumber:       taskRepositoryPRNumber(tr.Metadata),
+			Position:       tr.Position,
+		}
+	}
+	plans := worktree.BuildBranchIdentityPlans(inputs)
+
 	out := make(map[string]string, len(taskRepos)+1)
-	for _, tr := range taskRepos {
+	for i, tr := range taskRepos {
 		if tr.BaseBranch == "" {
 			continue
 		}
-		repo, err := s.repoEntities.GetRepository(ctx, tr.RepositoryID)
-		if err != nil || repo == nil {
-			continue
-		}
-		if repo.Name != "" {
-			out[repo.Name] = tr.BaseBranch
-		}
+		out[baseBranchTrackerKey(repos[i].Name, plans[i].PathSlug)] = tr.BaseBranch
 	}
 	// Single-repo legacy fallback: when only one row, duplicate under the
 	// empty key so the root WorkspaceTracker (repositoryName == "") picks it
@@ -205,4 +245,58 @@ func (s *Service) collectTaskBaseBranches(ctx context.Context, taskID string) (m
 		return nil, nil
 	}
 	return out, nil
+}
+
+// resolveBaseBranchRepositories resolves the Repository entity for each row,
+// positionally aligned with taskRepos so the branch-identity plans can be
+// indexed alongside.
+//
+// A row that records a base branch but cannot resolve its repository makes the
+// map INCOMPLETE, not merely smaller. agentctl's SetBaseBranches replaces the
+// stored map wholesale, so pushing a partial map silently drops the base branch
+// of every repository that failed to resolve — and the caller's len(map) > 0
+// guard cannot detect it, because the map is non-empty. Fail instead: callers
+// already skip the push on error, leaving the previously-correct map in place.
+//
+// A row *without* a base branch contributes no key, so an unresolvable one is
+// tolerated (nil entry) rather than failing the whole map; it still occupies
+// its index so the plans stay aligned.
+func (s *Service) resolveBaseBranchRepositories(
+	ctx context.Context,
+	taskRepos []*models.TaskRepository,
+) ([]*models.Repository, error) {
+	repos := make([]*models.Repository, len(taskRepos))
+	for i, tr := range taskRepos {
+		repo, err := s.repoEntities.GetRepository(ctx, tr.RepositoryID)
+		if err != nil {
+			if tr.BaseBranch == "" {
+				continue
+			}
+			return nil, fmt.Errorf("resolve repository %s for base-branch map: %w", tr.RepositoryID, err)
+		}
+		if repo == nil || repo.Name == "" {
+			if tr.BaseBranch == "" {
+				continue
+			}
+			return nil, fmt.Errorf("repository %s for base-branch map is missing or unnamed", tr.RepositoryID)
+		}
+		repos[i] = repo
+	}
+	return repos, nil
+}
+
+// baseBranchTrackerKey builds the map key a WorkspaceTracker looks itself up
+// under: the worktree directory basename. Mirrors
+// lifecycle.baseBranchMetadataKey exactly — same sanitiser, same raw-name
+// fallback, same `-`-joined path slug — so the DB-hydrated map and the
+// launch-time map agree on every key.
+func baseBranchTrackerKey(repoName, pathSlug string) string {
+	key := worktree.SanitizeRepoDirName(repoName)
+	if key == "" {
+		key = repoName
+	}
+	if pathSlug == "" {
+		return key
+	}
+	return key + "-" + pathSlug
 }

@@ -63,6 +63,10 @@ Stopping is not deletion. Resume succeeds only while the executor still has the 
 
 Stopping a turn does not itself run the next queued message. Expand the queue and select **Run next** when you want processing to continue.
 
+The expanded queue also lets you discard stale work. **Remove** is available for every visible pending row, including messages from users, peer agents, workflows, and server actions; **Clear all** removes all visible pending rows in that session. Only user-origin rows remain editable. A message already reserved for delivery is hidden from the queue and cannot be cancelled with these controls.
+
+The queue panel separates four actions. **Run next** sends the promptable FIFO head and leaves a running turn alone. **Send Now** sends directly when the session is promptable; otherwise it waits for backend cancellation acknowledgement, then replaces the active turn with one selected row or the click-time snapshot of all visible rows as one FIFO-ordered prompt. It does not record ordinary Cancel side effects or complete the cancelled workflow step. **Clear all** discards the visible queue. The chat toolbar's **Cancel** is the normal user cancellation for the active turn; it sends no queued prompt and may complete an eligible workflow step or move the task to review.
+
 A CLI-passthrough profile displays the agent's native terminal interface in a PTY. It still belongs to the task, but it does not provide Kandev's structured chat messages and tool-call presentation.
 
 <details>
@@ -83,7 +87,7 @@ Delivery follows the target state:
 - a created session starts with the message as its first prompt;
 - a failed or cancelled session rejects the message.
 
-The default pending-message limit is 10 per session. Operators can change it with `KANDEV_QUEUE_MAX_PER_SESSION`; a value of `0` or less removes the cap, so the queue can grow without that bound. Interrupt delivery is restricted to a direct parent task messaging its child. Other senders must queue.
+The default pending-message limit is 10 per session. An admin can change it live under **Settings > General > Message Queue**; `0` removes the cap. A valid `KANDEV_QUEUE_MAX_PER_SESSION` value takes precedence and makes the UI field read-only; changing the environment still requires a restart. Malformed environment values are logged and ignored, so the saved setting or default applies instead. Lowering the saved limit does not delete entries already waiting. Interrupt delivery is restricted to a direct parent task messaging its child. Other senders must queue.
 
 For urgent replacement work, the parent should use `message_task_kandev` with `delivery_mode: "interrupt"`; this cancels the current approach and immediately tries to dispatch the new prompt, with a safe queued fallback. Use `stop_task_kandev` only for halt-only intent. A successful stop marks every accepted live child session `CANCELLED` and schedules graceful teardown asynchronously. Kandev then attempts to move an eligible unarchived, non-Office task from `IN_PROGRESS` or `SCHEDULING` to `REVIEW`; other task states remain unchanged. A child with no live execution returns idempotent `not_running`, and its worktrees, environment, commits, task record, descendants, and queued messages are preserved. See [Coordination](coordination.md) for the complete authority and lifecycle contract.
 
@@ -111,7 +115,7 @@ direct shortcut.
 
 Open **Settings > General > Layouts** to configure reusable desktop workbench profiles. Select a tab in a built-in layout to reveal its nearby edit controls, arrange or remove tabs and splits, then use the floating **Save changes** control. Kandev keeps the built-in row visible, marks it **Customized**, and stores your override without requiring a duplicate. Choose **Reset** beside a customized built-in to restore its original definition.
 
-**PR Details** is a reusable Layouts panel. The built-in Default puts it beside **Agent** in the center group, with Agent selected first; **Files** and **Changes** remain in the top-right group. You can move PR Details to another group or remove it with the same editor controls. When included in a layout, it shows the active task's linked GitHub pull request or GitLab merge request and remains as an empty panel when no review is linked. Removing it is respected: Kandev does not re-add it when a review appears. Changing the default applies to fresh task environments and **Reset Layout**, not a layout already saved for a task. Removing Terminal from the Default layout also prevents Kandev from creating its initial user shell.
+**PR Details** is a reusable Layouts panel whose visibility follows the active task's review association. Without a linked GitHub pull request or GitLab merge request, the tab stays hidden—even when the selected layout includes it. Once a review is linked, Kandev adds PR Details as an inactive tab: beside **Agent** for the built-in Default, or in the group and tab position you configured in the Layouts editor. Closing that tab prevents it from reappearing automatically in the same session. Changing the default applies to task environments without a saved task-specific layout and **Reset Layout**, not a layout already saved for a task. Removing Terminal from the Default layout also prevents Kandev from creating its initial user shell.
 
 All panels for a task point at the same task environment. In a multi-repository task, check the repository label before editing, committing, or reviewing. A preview also requires the application to listen on a reachable interface and expose a forwarded port.
 
@@ -119,7 +123,10 @@ Structured shell-command activity keeps the command, working directory, status, 
 
 The ring in the chat-input toolbar shows the active session's context-window use
 when the agent reports a trustworthy window size. Open it to see used and total
-tokens; it focuses on the active session's context window. For account-wide
+tokens; it focuses on the active session's context window. The hover also shows
+a session compaction count inferred from observed drops in used tokens. ACP does
+not report compaction events, so missing samples or provider resets can make the
+count approximate. For account-wide
 provider usage, install the [Provider Usage
 plugin](https://github.com/kdlbs/kandev-plugin-provider-usage), which adds a
 provider pill to the session top bar and can add a compact display to the global
@@ -154,9 +161,13 @@ Kandev hides the action instead of guessing when a repository is local-only, uns
 
 ## Review a diff
 
-Select **Review** in the Changes header. Kandev builds a repository-aware file list by merging available uncommitted, cumulative committed, and linked-PR files. When a path occurs in more than one source, the uncommitted version wins deduplication.
+Select **Review** in the Changes header. Kandev builds a repository-aware file list by merging available uncommitted, cumulative committed, and linked-PR files. Initialized direct and nested Git submodules appear under their task-workspace scopes, so a submodule's `README.md` remains distinct from the parent repository's `README.md`. When a path occurs in more than one source within the same repository, the uncommitted version wins deduplication.
+
+Review compares each submodule with the gitlink commit recorded by its parent and marks the submodule boundaries in the file hierarchy and diff headers. If a declared submodule is unavailable or uninitialized, Kandev keeps the parent's gitlink change visible instead of hiding the only available evidence. Pull requests for submodule repositories remain separate repository workflows; Review does not create or coordinate them.
 
 When a task has multiple linked pull requests, use the PR selector in the Changes diff header or Review toolbar to inspect one PR revision at a time. The selection is scoped to that task for the current app session. Switching PRs replaces only the remote PR contribution; uncommitted and committed sources keep their normal precedence. Selecting a file from a specific PR row opens that exact PR revision, even when a sibling PR changes the same path.
+
+When several pull requests are linked to a task, hover the PR control in the desktop top bar—or tap the PR status chip on mobile—to open the tabbed CI surface. Each PR tab has a **Remove from task** button. Removing a tab only detaches that Kandev task association; it does not close or modify the GitHub pull request, its branch or commits, the task repositories, or sibling PR associations. Explicitly linking that PR again restores the association.
 
 <DocsVideo
   webm="./media/feature-guides/diff-line-feedback.webm"
@@ -235,6 +246,15 @@ Lifecycle messages only report the observed event and canonical PR URL; the task
 
 </details>
 
+### GitLab MR automation
+
+The GitLab MR topbar control has a **Review follow-up** group with the same three notification switches as GitHub's. The switches are task-level and apply to every merge request linked to the task:
+
+- **Your review is requested** wakes the agent when the workspace's connected GitLab account is newly added as a reviewer on the MR. Staying assigned across MR updates does not re-fire it; being removed and re-added — for example, for a re-review after changes — does.
+- **MR merged** and **MR closed without merging** independently wake the agent when review work ends.
+
+GitLab has no auto-fix or auto-merge automation. Lifecycle messages only report the observed event and canonical MR URL, and Kandev delivers them through the same task-session queue as GitHub's. See [Integrations](integrations.md#gitlab).
+
 > **Confidentiality:** redaction is heuristic, a secret Gist is accessible to anyone with its URL, and the snapshot is rendered through a third-party service. Inspect the preview and do not share material that must remain private.
 
 <details>
@@ -269,7 +289,7 @@ Before moving a task to done:
 - **New Agent has no profiles:** create a profile compatible with the task executor. A profile for another executor is intentionally hidden.
 - **Summary or generated text fails:** configure the corresponding utility agent and a reachable model in **Settings > Utility Agents**.
 - **Resume fails:** start fresh when the executor no longer has resumable session state, then supply a summary or copy the relevant context.
-- **A peer message never arrives:** check the target session state and ID. Running sessions queue messages; failed or cancelled sessions reject them; a full queue must drain before another message can be accepted.
+- **A peer message never arrives:** check the target session state and ID. Running sessions queue messages; failed or cancelled sessions reject them. For a full queue, expand its chip and run, remove, or clear pending work before retrying; an admin can also review the install-wide limit under **Settings > General > Message Queue**.
 - **Changes is empty:** select the correct repository and comparison, then confirm the agent wrote inside the materialized task path.
 - **Review marks became stale:** the underlying diff changed. Re-review the new hash before marking the file complete.
 - **Walkthrough does not appear:** confirm an active task-MCP session exists and that the saved `changes-walkthrough` prompt was not removed or made invalid.

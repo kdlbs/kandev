@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useMemo } from "react";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast/sonner";
 import { updateProject } from "@/lib/api/domains/office-api";
 import { useAppStore } from "@/components/state-provider";
 import { useRepositories } from "@/hooks/domains/workspace/use-repositories";
@@ -9,35 +9,39 @@ import type { Project } from "@/lib/state/slices/office/types";
 import { ProjectRepositoryPicker } from "../project-repository-picker";
 import { RepoChip } from "../repo-chip";
 import { normalizeRepos } from "../normalize-repos";
+import { useTranslation } from "react-i18next";
 
 type ProjectReposSectionProps = {
   project: Project;
 };
 
 export function ProjectReposSection({ project }: ProjectReposSectionProps) {
+  const { t } = useTranslation();
   const workspaceId = useAppStore((s) => s.workspaces.activeId);
   const updateProjectStore = useAppStore((s) => s.updateProject);
   const { repositories } = useRepositories(workspaceId);
   const repos = useMemo(() => normalizeRepos(project.repositories), [project.repositories]);
 
+  // Catalog KEYS, not messages: the call sites are memoized callbacks, so a
+  // pre-resolved English string would be captured once and never re-resolve.
   const persist = useCallback(
-    async (next: string[], successMessage: string, failureMessage: string) => {
+    async (next: string[], successKey: string, failureKey: string) => {
       try {
         await updateProject(project.id, { repositories: next });
         updateProjectStore(project.id, { repositories: next });
-        toast.success(successMessage);
+        toast.success(t(successKey));
       } catch (err) {
-        toast.error(err instanceof Error ? err.message : failureMessage);
+        toast.error(err instanceof Error ? err.message : t(failureKey));
       }
     },
-    [project.id, updateProjectStore],
+    [project.id, updateProjectStore, t],
   );
 
   const handleAdd = useCallback(
     (value: string) => {
       const trimmed = value.trim();
       if (!trimmed || repos.includes(trimmed)) return;
-      void persist([...repos, trimmed], "Repository added", "Failed to add repository");
+      void persist([...repos, trimmed], "office:repositoryAdded", "office:failedToAddRepository");
     },
     [repos, persist],
   );
@@ -46,8 +50,8 @@ export function ProjectReposSection({ project }: ProjectReposSectionProps) {
     (repo: string) => {
       void persist(
         repos.filter((r) => r !== repo),
-        "Repository removed",
-        "Failed to remove repository",
+        "office:repositoryRemoved",
+        "office:failedToRemoveRepository",
       );
     },
     [repos, persist],
@@ -56,10 +60,8 @@ export function ProjectReposSection({ project }: ProjectReposSectionProps) {
   return (
     <div className="space-y-3">
       <div>
-        <h2 className="text-sm font-semibold">Repositories</h2>
-        <p className="text-xs text-muted-foreground">
-          Git URLs or local paths where agents will work on this project.
-        </p>
+        <h2 className="text-sm font-semibold">{t("office:repositories")}</h2>
+        <p className="text-xs text-muted-foreground">{t("office:gitUrlsOrLocalPathsWhere")}</p>
       </div>
       <div className="flex flex-wrap items-center gap-2" data-testid="project-repo-chips">
         {repos.map((repo) => (
@@ -78,7 +80,7 @@ export function ProjectReposSection({ project }: ProjectReposSectionProps) {
         />
       </div>
       {repos.length === 0 && (
-        <p className="text-xs text-muted-foreground">No repositories added yet.</p>
+        <p className="text-xs text-muted-foreground">{t("office:noRepositoriesAddedYet")}</p>
       )}
     </div>
   );

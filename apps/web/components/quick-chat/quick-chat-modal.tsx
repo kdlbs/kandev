@@ -1,59 +1,82 @@
 "use client";
 
 import { memo, type CSSProperties } from "react";
+import { useTranslation } from "react-i18next";
 import { Dialog, DialogContent, DialogTitle } from "@kandev/ui/dialog";
 import { Button } from "@kandev/ui/button";
-import { IconPlus, IconX } from "@tabler/icons-react";
+import { IconX } from "@tabler/icons-react";
 import { useAppStore } from "@/components/state-provider";
+import dynamic from "@/lib/routing/client-dynamic";
 import { QuickChatDeleteDialog } from "./quick-chat-delete-dialog";
 import { QuickChatSessionView } from "./quick-chat-session-view";
 import { QuickChatTabItem } from "./quick-chat-tab-item";
+import { QuickTerminalTabItem } from "./quick-terminal-tab-item";
+import { QuickTabAddMenu } from "./quick-tab-add-menu";
 import { QuickChatSetup } from "./quick-chat-setup";
 import { useQuickChatModal } from "./use-quick-chat-modal";
 import { useQuickChatWidth } from "@/hooks/use-quick-chat-width";
 import { ConfigChatSetup } from "@/components/config-chat/config-chat-setup";
 import { useConfigChat } from "@/components/config-chat/use-config-chat";
-import type { QuickChatSession } from "@/lib/state/slices/ui/types";
+import type { QuickChatSession, QuickTerminalTab } from "@/lib/state/slices/ui/types";
 import { isQuickChatSetupSessionId } from "@/lib/state/slices/ui/quick-chat-session";
+import type { TFunction } from "i18next";
+
+const QuickTerminalTabView = dynamic(
+  () => import("./quick-terminal-tab-view").then((module) => module.QuickTerminalTabView),
+  { ssr: false },
+);
 
 type QuickChatModalProps = {
   workspaceId: string;
 };
 
-function quickChatTabName(session: QuickChatSession, index: number) {
-  if (!isQuickChatSetupSessionId(session.sessionId)) return session.name || `Chat ${index + 1}`;
-  return session.kind === "config" ? "Configuration Chat" : "New Chat";
+function quickChatTabName(t: TFunction, session: QuickChatSession, index: number) {
+  if (!isQuickChatSetupSessionId(session.sessionId)) {
+    return session.name || t("chat:chatTabName", { index: index + 1 });
+  }
+  return session.kind === "config" ? t("chat:configurationChatTab") : t("chat:newChatTab");
 }
 
 function QuickChatTabs({
   sessions,
+  terminalTabs,
+  activeKind,
   activeSessionId,
+  activeTerminalTabId,
   onTabChange,
   onTabClose,
   onNewChat,
+  onNewTerminal,
+  onTerminalClose,
+  onTerminalActivate,
   onRename,
   onCloseModal,
 }: {
   sessions: QuickChatSession[];
-  activeSessionId: string;
+  terminalTabs: QuickTerminalTab[];
+  activeKind: "conversation" | "terminal";
+  activeSessionId: string | null;
+  activeTerminalTabId: string | null;
   onTabChange: (sessionId: string) => void;
   onTabClose: (sessionId: string) => void;
   onNewChat: () => void;
+  onNewTerminal: () => void;
+  onTerminalClose: (tabId: string) => void;
+  onTerminalActivate: (tabId: string) => void;
   onRename: (sessionId: string, name: string) => void;
   onCloseModal: () => void;
 }) {
-  if (sessions.length === 0) return null;
-
+  const { t } = useTranslation();
   return (
     <div className="flex items-center gap-1 px-2 py-1 border-b bg-muted/20">
       <div className="flex items-center gap-1 overflow-x-auto flex-1 scrollbar-hide">
         {sessions.map((s, index) => {
-          const tabName = quickChatTabName(s, index);
+          const tabName = quickChatTabName(t, s, index);
           return (
             <QuickChatTabItem
               key={s.sessionId || `new-${index}`}
               name={tabName}
-              isActive={s.sessionId === activeSessionId}
+              isActive={activeKind === "conversation" && s.sessionId === activeSessionId}
               isRenameable={!isQuickChatSetupSessionId(s.sessionId)}
               kind={s.kind}
               onActivate={() => onTabChange(s.sessionId)}
@@ -62,15 +85,17 @@ function QuickChatTabs({
             />
           );
         })}
-        <Button
-          size="icon"
-          variant="ghost"
-          className="h-11 w-11 shrink-0 cursor-pointer sm:h-6 sm:w-6"
-          onClick={onNewChat}
-          aria-label="Start new chat"
-        >
-          <IconPlus className="h-4 w-4 sm:h-3.5 sm:w-3.5" />
-        </Button>
+        {terminalTabs.map((tab) => (
+          <QuickTerminalTabItem
+            key={tab.tabId}
+            sequence={tab.sequence}
+            isActive={activeKind === "terminal" && tab.tabId === activeTerminalTabId}
+            error={tab.error}
+            onActivate={() => onTerminalActivate(tab.tabId)}
+            onClose={() => onTerminalClose(tab.tabId)}
+          />
+        ))}
+        <QuickTabAddMenu onNewAgent={onNewChat} onNewTerminal={onNewTerminal} />
       </div>
       {/* Touch devices have no Escape key or visible overlay to dismiss the
           full-screen dialog, so give them an explicit close control. */}
@@ -79,12 +104,103 @@ function QuickChatTabs({
         variant="ghost"
         className="h-11 w-11 shrink-0 cursor-pointer p-0 sm:hidden"
         onClick={onCloseModal}
-        aria-label="Close quick chat"
+        aria-label={t("sidebar:quickChatClose")}
         data-testid="quick-chat-close"
       >
         <IconX className="h-3.5 w-3.5" />
       </Button>
     </div>
+  );
+}
+
+type QuickChatContentProps = {
+  workspaceId: string;
+  configChat: ReturnType<typeof useConfigChat>;
+  quickChat: ReturnType<typeof useQuickChatModal>;
+  setQuickChatInitialPrompt: (sessionId: string, prompt?: string) => void;
+};
+
+function QuickChatContent({
+  workspaceId,
+  configChat,
+  quickChat,
+  setQuickChatInitialPrompt,
+}: QuickChatContentProps) {
+  const canCreateConfigurationChat = !quickChat.sessions.some(
+    (session) => session.kind === "config",
+  );
+  const setupKind =
+    quickChat.activeSession && isQuickChatSetupSessionId(quickChat.activeSession.sessionId)
+      ? quickChat.activeSession.kind
+      : null;
+
+  return (
+    <>
+      <QuickChatTabs
+        sessions={quickChat.sessions}
+        terminalTabs={quickChat.terminalTabs}
+        activeKind={quickChat.activeKind}
+        activeSessionId={quickChat.activeSessionId}
+        activeTerminalTabId={quickChat.activeTerminalTabId}
+        onTabChange={quickChat.setActiveQuickChatSession}
+        onTabClose={quickChat.handleCloseTab}
+        onNewChat={quickChat.handleNewChat}
+        onNewTerminal={quickChat.handleNewTerminal}
+        onTerminalActivate={quickChat.handleActivateTerminal}
+        onTerminalClose={quickChat.handleCloseTerminal}
+        onRename={quickChat.handleRename}
+        onCloseModal={() => quickChat.handleOpenChange(false)}
+      />
+      {quickChat.activeKind === "terminal" && quickChat.activeTerminalTab && (
+        <QuickTerminalTabView
+          key={quickChat.activeTerminalTab.tabId}
+          tab={quickChat.activeTerminalTab}
+          onStateChange={(state) =>
+            quickChat.handleTerminalStateChange(quickChat.activeTerminalTab!.tabId, state)
+          }
+          onDescriptorReady={(descriptor) =>
+            quickChat.handleTerminalDescriptorReady(quickChat.activeTerminalTab!.tabId, descriptor)
+          }
+        />
+      )}
+      {quickChat.activeKind === "conversation" &&
+        quickChat.activeSessionId &&
+        quickChat.activeSession &&
+        !quickChat.activeSessionNeedsAgent && (
+          <QuickChatSessionView
+            session={quickChat.activeSession}
+            onInitialPromptSent={() =>
+              setQuickChatInitialPrompt(quickChat.activeSessionId!, undefined)
+            }
+          />
+        )}
+      {quickChat.activeKind === "conversation" &&
+        quickChat.activeSessionNeedsAgent &&
+        setupKind === "chat" && (
+          <QuickChatSetup
+            key={`${workspaceId}:${quickChat.setupKey}`}
+            workspaceId={workspaceId}
+            canCreateConfigurationChat={canCreateConfigurationChat}
+            pendingAgentId={quickChat.pendingAgentId}
+            onStart={quickChat.handleSelectAgent}
+            onCancel={() => quickChat.handleOpenChange(false)}
+            onKindChange={quickChat.handleSetupKindChange}
+          />
+        )}
+      {quickChat.activeKind === "conversation" &&
+        quickChat.activeSessionNeedsAgent &&
+        setupKind === "config" && (
+          <ConfigChatSetup
+            key={`${workspaceId}:config:${quickChat.setupKey}`}
+            defaultProfileId={configChat.defaultProfileId}
+            isStarting={configChat.isStarting}
+            error={configChat.error}
+            onStart={(profileId, prompt) => configChat.startSession(profileId, prompt)}
+            onCancel={() => quickChat.handleOpenChange(false)}
+            onKindChange={quickChat.handleSetupKindChange}
+          />
+        )}
+    </>
   );
 }
 
@@ -95,11 +211,14 @@ function QuickChatResizeHandle({
   edge: "left" | "right";
   onMouseDown: (event: React.MouseEvent) => void;
 }) {
+  const { t } = useTranslation();
   return (
     <button
       type="button"
       tabIndex={-1}
-      aria-label={`Resize quick chat from ${edge}`}
+      aria-label={
+        edge === "left" ? t("chat:resizeQuickChatFromLeft") : t("chat:resizeQuickChatFromRight")
+      }
       data-testid={`quick-chat-resize-${edge}`}
       onMouseDown={onMouseDown}
       className={`group absolute inset-y-0 z-20 hidden w-2 cursor-ew-resize items-center justify-center sm:flex ${
@@ -116,87 +235,36 @@ function QuickChatResizeHandle({
 }
 
 export const QuickChatModal = memo(function QuickChatModal({ workspaceId }: QuickChatModalProps) {
+  const { t } = useTranslation();
   const configChat = useConfigChat(workspaceId);
-  const {
-    isOpen,
-    sessions,
-    activeSessionId,
-    activeSession,
-    sessionToClose,
-    setupKey,
-    activeSessionNeedsAgent,
-    pendingAgentId,
-    setActiveQuickChatSession,
-    setSessionToClose,
-    handleOpenChange,
-    handleNewChat,
-    handleSetupKindChange,
-    handleSelectAgent,
-    handleCloseTab,
-    handleConfirmClose,
-    handleRename,
-  } = useQuickChatModal(workspaceId, configChat.reset);
+  const quickChat = useQuickChatModal(workspaceId, configChat.reset);
   const setQuickChatInitialPrompt = useAppStore((state) => state.setQuickChatInitialPrompt);
   const { width, leftResizeHandleProps, rightResizeHandleProps } = useQuickChatWidth();
-  const canCreateConfigurationChat = !sessions.some((session) => session.kind === "config");
-  const setupKind =
-    activeSession && isQuickChatSetupSessionId(activeSession.sessionId) ? activeSession.kind : null;
   return (
     <>
-      <Dialog open={isOpen} onOpenChange={handleOpenChange}>
+      <Dialog open={quickChat.isOpen} onOpenChange={quickChat.handleOpenChange}>
         <DialogContent
-          className="!left-0 !top-0 !h-dvh !max-h-dvh !w-screen !max-w-none !translate-x-0 !translate-y-0 flex flex-col gap-0 p-0 shadow-2xl sm:!left-1/2 sm:!top-1/2 sm:!h-[85vh] sm:!max-h-[85vh] sm:!w-[var(--quick-chat-width)] sm:!max-w-[calc(100vw-2rem)] sm:!-translate-x-1/2 sm:!-translate-y-1/2"
+          className="!left-0 !top-0 !h-dvh !max-h-dvh !w-screen !max-w-none !translate-x-0 !translate-y-0 flex flex-col gap-0 p-0 pt-safe pb-safe shadow-2xl sm:!left-1/2 sm:!top-1/2 sm:!h-[85vh] sm:!max-h-[85vh] sm:!w-[var(--quick-chat-width)] sm:!max-w-[calc(100vw-2rem)] sm:!-translate-x-1/2 sm:!-translate-y-1/2"
           style={{ "--quick-chat-width": `${width}px` } as CSSProperties}
           showCloseButton={false}
-          overlayClassName="bg-transparent"
+          overlayClassName="bg-black/20"
         >
-          <DialogTitle className="sr-only">Quick Chat</DialogTitle>
+          <DialogTitle className="sr-only">{t("common:commandQuickChat")}</DialogTitle>
           <QuickChatResizeHandle edge="left" {...leftResizeHandleProps} />
           <QuickChatResizeHandle edge="right" {...rightResizeHandleProps} />
-          <QuickChatTabs
-            sessions={sessions}
-            activeSessionId={activeSessionId || ""}
-            onTabChange={setActiveQuickChatSession}
-            onTabClose={handleCloseTab}
-            onNewChat={handleNewChat}
-            onRename={handleRename}
-            onCloseModal={() => handleOpenChange(false)}
+          <QuickChatContent
+            workspaceId={workspaceId}
+            configChat={configChat}
+            quickChat={quickChat}
+            setQuickChatInitialPrompt={setQuickChatInitialPrompt}
           />
-          {activeSessionId && activeSession && !activeSessionNeedsAgent && (
-            <QuickChatSessionView
-              session={activeSession}
-              onInitialPromptSent={() => setQuickChatInitialPrompt(activeSessionId, undefined)}
-            />
-          )}
-          {activeSessionNeedsAgent && setupKind === "chat" && (
-            <QuickChatSetup
-              key={`${workspaceId}:${setupKey}`}
-              workspaceId={workspaceId}
-              canCreateConfigurationChat={canCreateConfigurationChat}
-              pendingAgentId={pendingAgentId}
-              onStart={handleSelectAgent}
-              onCancel={() => handleOpenChange(false)}
-              onKindChange={handleSetupKindChange}
-            />
-          )}
-          {activeSessionNeedsAgent && setupKind === "config" && (
-            <ConfigChatSetup
-              key={`${workspaceId}:config:${setupKey}`}
-              defaultProfileId={configChat.defaultProfileId}
-              isStarting={configChat.isStarting}
-              error={configChat.error}
-              onStart={(profileId, prompt) => configChat.startSession(profileId, prompt)}
-              onCancel={() => handleOpenChange(false)}
-              onKindChange={handleSetupKindChange}
-            />
-          )}
         </DialogContent>
       </Dialog>
 
       <QuickChatDeleteDialog
-        sessionToDelete={sessionToClose}
-        onOpenChange={(open) => !open && setSessionToClose(null)}
-        onConfirm={handleConfirmClose}
+        sessionToDelete={quickChat.sessionToClose}
+        onOpenChange={(open) => !open && quickChat.setSessionToClose(null)}
+        onConfirm={quickChat.handleConfirmClose}
       />
     </>
   );

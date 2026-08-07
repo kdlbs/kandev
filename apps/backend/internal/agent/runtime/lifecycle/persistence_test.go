@@ -12,8 +12,9 @@ import (
 )
 
 type captureExecutorRunningWriter struct {
-	prior   *models.ExecutorRunning
-	running *models.ExecutorRunning
+	prior     *models.ExecutorRunning
+	running   *models.ExecutorRunning
+	upsertErr error
 }
 
 func (w *captureExecutorRunningWriter) GetExecutorRunningBySessionID(
@@ -27,7 +28,7 @@ func (w *captureExecutorRunningWriter) GetExecutorRunningBySessionID(
 
 func (w *captureExecutorRunningWriter) UpsertExecutorRunning(_ context.Context, running *models.ExecutorRunning) error {
 	w.running = running
-	return nil
+	return w.upsertErr
 }
 
 func (w *captureExecutorRunningWriter) DeleteExecutorRunningBySessionID(_ context.Context, _ string) error {
@@ -110,6 +111,20 @@ func TestPersistExecutorRunningRestoresRecoveredExecutionProfile(t *testing.T) {
 	}
 	if writer.running.ResumeToken != "claude-session" || writer.running.LastMessageUUID != "last-message" {
 		t.Fatalf("recovered resume state was cleared: %+v", writer.running)
+	}
+}
+
+func TestPersistExecutorRunningReturnsUpsertFailure(t *testing.T) {
+	writer := &captureExecutorRunningWriter{upsertErr: errors.New("database is locked")}
+	mgr := newTestManager(t)
+	mgr.SetExecutorRunningWriter(writer)
+
+	err := mgr.persistExecutorRunningResult(context.Background(), &AgentExecution{
+		ID: "exec-failed-persist", TaskID: "task-1", SessionID: "session-1",
+		Status: v1.AgentStatusStarting,
+	})
+	if err == nil || !errors.Is(err, writer.upsertErr) {
+		t.Fatalf("persistExecutorRunning error = %v, want %v", err, writer.upsertErr)
 	}
 }
 

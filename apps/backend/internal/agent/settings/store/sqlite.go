@@ -77,6 +77,7 @@ func (r *sqliteRepository) initSchema() error {
 		dangerously_skip_permissions INTEGER NOT NULL DEFAULT 0,
 		allow_indexing INTEGER NOT NULL DEFAULT 1,
 		cli_passthrough INTEGER NOT NULL DEFAULT 0,
+		enabled INTEGER NOT NULL DEFAULT 1,
 		user_modified INTEGER NOT NULL DEFAULT 0,
 		plan TEXT DEFAULT '',
 		cli_flags TEXT DEFAULT NULL,
@@ -137,6 +138,9 @@ func (r *sqliteRepository) initSchema() error {
 	// Rows where cli_flags IS NULL are backfilled on first read - see scanAgentProfile.
 	r.migrate.Apply("agent_profiles.cli_flags", `ALTER TABLE agent_profiles ADD COLUMN cli_flags TEXT DEFAULT NULL`)
 	r.migrate.Apply("agent_profiles.env_vars", `ALTER TABLE agent_profiles ADD COLUMN env_vars TEXT NOT NULL DEFAULT '[]'`)
+	// Rows backfill to enabled=1 via the column default; disabling is an
+	// explicit user action through the settings UI.
+	r.migrate.Apply("agent_profiles.enabled", `ALTER TABLE agent_profiles ADD COLUMN enabled INTEGER NOT NULL DEFAULT 1`)
 
 	// Migration: drop CHECK(model != '') constraint from agent_profiles.
 	//
@@ -274,6 +278,7 @@ func (r *sqliteRepository) recreateAgentProfilesWithoutModelCheck() error {
 	// include it in the copy only when it exists on the source table.
 	srcHasCLIFlags := columnExists(tx, "agent_profiles", "cli_flags")
 	srcHasEnvVars := columnExists(tx, "agent_profiles", "env_vars")
+	srcHasEnabled := columnExists(tx, "agent_profiles", "enabled")
 	srcCols := `id, agent_id, name, agent_display_name, model, mode, migrated_from,
 		auto_approve, dangerously_skip_permissions, allow_indexing,
 		cli_passthrough, user_modified, plan, created_at, updated_at, deleted_at`
@@ -285,6 +290,10 @@ func (r *sqliteRepository) recreateAgentProfilesWithoutModelCheck() error {
 	if srcHasEnvVars {
 		srcCols += ", env_vars"
 		dstCols += ", env_vars"
+	}
+	if srcHasEnabled {
+		srcCols += ", enabled"
+		dstCols += ", enabled"
 	}
 
 	if _, err := tx.Exec(`CREATE TABLE agent_profiles_new (
@@ -299,6 +308,7 @@ func (r *sqliteRepository) recreateAgentProfilesWithoutModelCheck() error {
 		dangerously_skip_permissions INTEGER NOT NULL DEFAULT 0,
 		allow_indexing INTEGER NOT NULL DEFAULT 1,
 		cli_passthrough INTEGER NOT NULL DEFAULT 0,
+		enabled INTEGER NOT NULL DEFAULT 1,
 		user_modified INTEGER NOT NULL DEFAULT 0,
 		plan TEXT DEFAULT '',
 		cli_flags TEXT DEFAULT NULL,
@@ -492,11 +502,15 @@ func (r *sqliteRepository) CreateAgentProfile(ctx context.Context, profile *mode
 	if err != nil {
 		return err
 	}
+	// New profiles are created enabled — the DB column default is 1 and
+	// nothing creates a profile pre-disabled. Setting the field here keeps
+	// callers' in-memory copy consistent with the row.
+	profile.Enabled = true
 	_, err = r.db.ExecContext(ctx, r.db.Rebind(`
 		INSERT INTO agent_profiles (
 			id, agent_id, name, agent_display_name, model, mode, migrated_from,
 			auto_approve, dangerously_skip_permissions, allow_indexing, cli_passthrough,
-			user_modified, plan, cli_flags, env_vars, created_at, updated_at, deleted_at,
+			enabled, user_modified, plan, cli_flags, env_vars, created_at, updated_at, deleted_at,
 			workspace_id, role, icon, reports_to,
 			skill_ids, desired_skills, custom_prompt,
 			status, pause_reason, last_run_finished_at,
@@ -507,7 +521,7 @@ func (r *sqliteRepository) CreateAgentProfile(ctx context.Context, profile *mode
 		) VALUES (
 			?, ?, ?, ?, ?, ?, ?,
 			?, ?, ?, ?,
-			?, '', ?, ?, ?, ?, ?,
+			?, ?, '', ?, ?, ?, ?, ?,
 			?, ?, ?, ?,
 			?, ?, ?,
 			?, ?, ?,
@@ -521,7 +535,7 @@ func (r *sqliteRepository) CreateAgentProfile(ctx context.Context, profile *mode
 		nullableString(profile.Mode), nullableString(profile.MigratedFrom),
 		dialect.BoolToInt(profile.AutoApprove),
 		dialect.BoolToInt(profile.DangerouslySkipPermissions), dialect.BoolToInt(profile.AllowIndexing), dialect.BoolToInt(profile.CLIPassthrough),
-		dialect.BoolToInt(profile.UserModified), cliFlagsJSON, envVarsJSON, profile.CreatedAt, profile.UpdatedAt, profile.DeletedAt,
+		dialect.BoolToInt(profile.Enabled), dialect.BoolToInt(profile.UserModified), cliFlagsJSON, envVarsJSON, profile.CreatedAt, profile.UpdatedAt, profile.DeletedAt,
 		enrich.workspaceID, enrich.role, enrich.icon, enrich.reportsTo,
 		enrich.skillIDs, enrich.desiredSkills, enrich.customPrompt,
 		enrich.status, enrich.pauseReason, profile.LastRunFinishedAt,
@@ -754,7 +768,7 @@ func (r *sqliteRepository) UpdateAgentProfile(ctx context.Context, profile *mode
 		UPDATE agent_profiles
 		SET agent_id = ?, name = ?, agent_display_name = ?, model = ?, mode = ?, migrated_from = ?,
 			auto_approve = ?, dangerously_skip_permissions = ?, allow_indexing = ?,
-			cli_passthrough = ?, user_modified = ?, cli_flags = ?, env_vars = ?, updated_at = ?,
+			cli_passthrough = ?, enabled = ?, user_modified = ?, cli_flags = ?, env_vars = ?, updated_at = ?,
 			workspace_id = ?, role = ?, icon = ?, reports_to = ?,
 			skill_ids = ?, desired_skills = ?, custom_prompt = ?,
 			status = ?, pause_reason = ?, last_run_finished_at = ?,
@@ -768,7 +782,7 @@ func (r *sqliteRepository) UpdateAgentProfile(ctx context.Context, profile *mode
 		nullableString(profile.Mode), nullableString(profile.MigratedFrom),
 		dialect.BoolToInt(profile.AutoApprove),
 		dialect.BoolToInt(profile.DangerouslySkipPermissions), dialect.BoolToInt(profile.AllowIndexing),
-		dialect.BoolToInt(profile.CLIPassthrough), dialect.BoolToInt(profile.UserModified), cliFlagsJSON, envVarsJSON, profile.UpdatedAt,
+		dialect.BoolToInt(profile.CLIPassthrough), dialect.BoolToInt(profile.Enabled), dialect.BoolToInt(profile.UserModified), cliFlagsJSON, envVarsJSON, profile.UpdatedAt,
 		enrich.workspaceID, enrich.role, enrich.icon, enrich.reportsTo,
 		enrich.skillIDs, enrich.desiredSkills, enrich.customPrompt,
 		enrich.status, enrich.pauseReason, profile.LastRunFinishedAt,
@@ -788,6 +802,26 @@ func (r *sqliteRepository) UpdateAgentProfile(ctx context.Context, profile *mode
 		return fmt.Errorf("agent profile not found: %s", profile.ID)
 	}
 	return nil
+}
+
+// UpdateAgentProfileEnabled changes only the selection flag. Keeping this
+// update narrow avoids a settings-page toggle overwriting fields that were
+// read by another profile editor before its save completed.
+func (r *sqliteRepository) UpdateAgentProfileEnabled(ctx context.Context, id string, enabled bool) (time.Time, error) {
+	now := time.Now().UTC()
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
+		UPDATE agent_profiles
+		SET enabled = ?, user_modified = 1, updated_at = ?
+		WHERE id = ? AND deleted_at IS NULL
+	`), dialect.BoolToInt(enabled), now, id)
+	if err != nil {
+		return time.Time{}, err
+	}
+	rows, _ := result.RowsAffected()
+	if rows == 0 {
+		return time.Time{}, fmt.Errorf("agent profile not found: %s", id)
+	}
+	return now, nil
 }
 
 func (r *sqliteRepository) DeleteAgentProfile(ctx context.Context, id string) error {
@@ -815,7 +849,7 @@ func (r *sqliteRepository) DeleteAgentProfile(ctx context.Context, id string) er
 const agentProfileSelectColumns = `
 	SELECT id, agent_id, name, agent_display_name, model, mode, migrated_from,
 		auto_approve, dangerously_skip_permissions, allow_indexing,
-		cli_passthrough, user_modified, plan, cli_flags,
+		cli_passthrough, enabled, user_modified, plan, cli_flags,
 		COALESCE(env_vars, '[]'),
 		created_at, updated_at, deleted_at,
 		COALESCE(workspace_id, ''), COALESCE(role, ''), COALESCE(icon, ''),
@@ -994,6 +1028,7 @@ func scanAgentProfile(scanner interface {
 	var skipPermissions int
 	var allowIndexing int
 	var cliPassthrough int
+	var enabled int
 	var userModified int
 	var plan string // unused, kept for backwards compatibility
 	var cliFlagsRaw sql.NullString
@@ -1014,6 +1049,7 @@ func scanAgentProfile(scanner interface {
 		&skipPermissions,
 		&allowIndexing,
 		&cliPassthrough,
+		&enabled,
 		&userModified,
 		&plan,
 		&cliFlagsRaw,
@@ -1056,6 +1092,7 @@ func scanAgentProfile(scanner interface {
 	profile.DangerouslySkipPermissions = skipPermissions == 1
 	profile.AllowIndexing = allowIndexing == 1
 	profile.CLIPassthrough = cliPassthrough == 1
+	profile.Enabled = enabled == 1
 	profile.UserModified = userModified == 1
 	profile.SkipIdleRuns = skipIdleRuns == 1
 	profile.AutoFallback = autoFallback == 1

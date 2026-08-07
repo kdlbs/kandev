@@ -1,11 +1,13 @@
 "use client";
 
+import { useTranslation } from "react-i18next";
 import { startHostShell } from "@/lib/api";
 import { PtyTerminalDialog } from "@/components/settings/pty-terminal-dialog";
 
 type Props = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  presentation?: "standard" | "quick";
   /** Optional callback when the user clicks Done (e.g. trigger a rescan). */
   onClose?: () => void;
   /**
@@ -19,17 +21,25 @@ type Props = {
  * Opens a PTY-backed terminal running the user's shell on the kandev host.
  * Used for ad-hoc setup commands that don't fit the install/login flows.
  */
-export function HostShellDialog({ open, onOpenChange, onClose, initialInput }: Props) {
+export function HostShellDialog({
+  open,
+  onOpenChange,
+  onClose,
+  initialInput,
+  presentation = "standard",
+}: Props) {
+  const { t } = useTranslation();
   return (
     <PtyTerminalDialog
       open={open}
       onOpenChange={onOpenChange}
-      title="Host terminal"
-      description="Runs a shell on the kandev host. Use it to install or configure agents manually."
+      title={presentation === "quick" ? t("sidebar:quickTerminal") : t("agents:hostTerminal")}
+      description={t("agents:hostTerminalDescription")}
       testIdPrefix="host-shell"
       startSession={startHostShell}
       onDone={onClose}
       initialInput={initialInput}
+      presentation={presentation}
     />
   );
 }

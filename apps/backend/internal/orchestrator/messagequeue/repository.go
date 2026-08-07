@@ -45,6 +45,13 @@ type Repository interface {
 	// CountBySession returns the number of entries for a session.
 	CountBySession(ctx context.Context, sessionID string) (int, error)
 
+	// CountPendingByTaskIDs returns the number of pending entries per task,
+	// keyed by task_id, for every requested task ID (zero when a task has no
+	// pending entries). Pending excludes durable lifecycle rows already
+	// reserved in flight, matching GetStatus semantics. The reserved exclusion
+	// is applied in Go via IsReservedInFlight, never by matching JSON in SQL.
+	CountPendingByTaskIDs(ctx context.Context, taskIDs []string) (map[string]int, error)
+
 	// TakeHead atomically returns and deletes the lowest-position entry for the
 	// session. Returns nil, nil if the queue is empty.
 	TakeHead(ctx context.Context, sessionID string) (*QueuedMessage, error)
@@ -66,6 +73,23 @@ type Repository interface {
 	// Returns nil, nil if no entry matches (already taken or never existed).
 	TakeByID(ctx context.Context, sessionID, entryID string) (*QueuedMessage, error)
 
+	// ClaimSendNow atomically claims the exact ordered source snapshot for an
+	// interrupt-and-replace dispatch. The repository compares every requested
+	// row with the snapshot before mutation, then orders the returned sources by
+	// their persisted FIFO positions. Ordinary rows are removed, and durable
+	// lifecycle rows are reserved until AcknowledgeSendNowClaim or
+	// RestoreSendNowClaim.
+	ClaimSendNow(ctx context.Context, sessionID string, expected []QueuedMessage) (*SendNowClaim, error)
+
+	// RestoreSendNowClaim puts every source back at its original position and
+	// clears durable lifecycle reservations. It must restore the complete claim
+	// or leave the queue unchanged.
+	RestoreSendNowClaim(ctx context.Context, claim *SendNowClaim) error
+
+	// AcknowledgeSendNowClaim removes every durable source after the replacement
+	// prompt has been accepted. Ordinary sources were already removed by claim.
+	AcknowledgeSendNowClaim(ctx context.Context, claim *SendNowClaim) error
+
 	// UpdateContent replaces the content/attachments of an entry. The session
 	// scope (`AND session_id = ?`) is mandatory so a caller can't update an
 	// entry by guessing its UUID across sessions. If queuedBy is non-empty the
@@ -78,16 +102,31 @@ type Repository interface {
 	// unrelated metadata remains unchanged.
 	UpdateContentAndMetadata(ctx context.Context, sessionID, entryID, content string, attachments []MessageAttachment, metadataUpdates map[string]interface{}, queuedBy string) error
 
+	// MergeIntoAbove folds the entry identified by sourceID into the entry
+	// immediately above it (greatest position strictly below the source) within
+	// the same session. Content, attachments, and entity references are merged
+	// and the source row is removed, all in one transaction.
+	//
+	// The merge is allowed only between entries of the same sender kind: a
+	// user-owned source merges into a user-owned target owned by queuedBy; an
+	// agent-owned source merges into an agent-owned target whose
+	// sender_task_id metadata matches the source's. Anything else — head source,
+	// mismatched kinds, agent sender-task mismatch, caller not owning both rows,
+	// or a reserved in-flight lifecycle target — returns ErrNoMergeTarget. A
+	// missing source returns ErrEntryNotFound.
+	MergeIntoAbove(ctx context.Context, sessionID, sourceID, queuedBy string) (*QueuedMessage, error)
+
 	// DeleteByID removes a single entry. The session scope (`AND session_id = ?`)
 	// is mandatory so a caller can't delete an entry by guessing its UUID across
 	// sessions — the queue_full MCP payload deliberately discloses sibling-task
 	// entry IDs, so without this guard a hostile agent could prune another
-	// task's queue. Server-owned entries are immutable from this path and
-	// return ErrEntryNotFound.
+	// task's queue. A durable lifecycle entry already reserved in flight is not
+	// pending and returns ErrEntryNotFound.
 	DeleteByID(ctx context.Context, sessionID, entryID string) error
 
-	// DeleteAllBySession removes every user-owned entry for a session. Reserved
-	// agent/workflow/server entries remain. Returns the count removed.
+	// DeleteAllBySession removes every pending entry for a session, regardless
+	// of provenance. Durable lifecycle entries already reserved in flight remain.
+	// Returns the exact count removed.
 	DeleteAllBySession(ctx context.Context, sessionID string) (int, error)
 
 	// TransferSession moves all entries (and any pending move) from oldSessionID

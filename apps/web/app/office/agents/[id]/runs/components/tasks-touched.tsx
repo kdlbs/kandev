@@ -7,6 +7,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { getTask } from "@/lib/api/domains/office-extended-api";
 import type { OfficeTask } from "@/lib/state/slices/office/types";
 import { StatusIcon } from "@/app/office/tasks/status-icon";
+import { useTranslation } from "react-i18next";
 
 type TasksTouchedProps = {
   runId: string;
@@ -29,13 +30,14 @@ type TasksTouchedProps = {
  * stream in even before the tasks API responds.
  */
 export function TasksTouched({ runId, taskIds }: TasksTouchedProps) {
+  const { t } = useTranslation();
   if (taskIds.length === 0) {
     return <EmptyState />;
   }
   return (
     <Card data-testid="tasks-touched" data-run-id={runId}>
       <CardHeader className="pb-2">
-        <CardTitle className="text-sm">Tasks touched</CardTitle>
+        <CardTitle className="text-sm">{t("office:tasksTouched")}</CardTitle>
       </CardHeader>
       <CardContent className="pt-0">
         <TasksTable taskIds={taskIds} />
@@ -45,13 +47,14 @@ export function TasksTouched({ runId, taskIds }: TasksTouchedProps) {
 }
 
 function EmptyState() {
+  const { t } = useTranslation();
   return (
     <Card data-testid="tasks-touched-empty">
       <CardHeader className="pb-2">
-        <CardTitle className="text-sm">Tasks touched</CardTitle>
+        <CardTitle className="text-sm">{t("office:tasksTouched")}</CardTitle>
       </CardHeader>
       <CardContent className="pt-0">
-        <p className="text-xs text-muted-foreground">No tasks were modified during this run.</p>
+        <p className="text-xs text-muted-foreground">{t("office:noTasksWereModifiedDuringThis")}</p>
       </CardContent>
     </Card>
   );
@@ -63,15 +66,16 @@ type RowState =
   | { kind: "error"; id: string };
 
 function TasksTable({ taskIds }: { taskIds: string[] }) {
+  const { t } = useTranslation();
   const rows = useTaskRows(taskIds);
   return (
     <Table>
       <TableHeader>
         <TableRow>
-          <TableHead className="w-[110px]">Identifier</TableHead>
-          <TableHead>Title</TableHead>
-          <TableHead className="w-[120px]">Status</TableHead>
-          <TableHead className="w-[100px]">Priority</TableHead>
+          <TableHead className="w-[110px]">{t("office:identifier")}</TableHead>
+          <TableHead>{t("office:title")}</TableHead>
+          <TableHead className="w-[120px]">{t("common:status")}</TableHead>
+          <TableHead className="w-[100px]">{t("office:priority")}</TableHead>
         </TableRow>
       </TableHeader>
       <TableBody>
@@ -89,11 +93,12 @@ function rowKey(row: RowState): string {
 }
 
 function TaskTableRow({ row }: { row: RowState }) {
+  const { t } = useTranslation();
   if (row.kind === "loading") {
     return (
       <TableRow data-testid="tasks-touched-row-loading">
         <TableCell colSpan={4} className="text-xs text-muted-foreground">
-          Loading {shortId(row.id)}…
+          {t("common:loadingIndicatorLabel")} {shortId(row.id)}…
         </TableCell>
       </TableRow>
     );
@@ -102,7 +107,7 @@ function TaskTableRow({ row }: { row: RowState }) {
     return (
       <TableRow data-testid="tasks-touched-row-error">
         <TableCell colSpan={4} className="text-xs text-muted-foreground">
-          Failed to load {shortId(row.id)}
+          {t("office:failedToLoad")} {shortId(row.id)}
         </TableCell>
       </TableRow>
     );
@@ -125,7 +130,7 @@ function TaskTableRow({ row }: { row: RowState }) {
           className="hover:underline"
           data-testid="tasks-touched-row-title"
         >
-          {task.title || "(untitled)"}
+          {task.title || t("office:untitled")}
         </Link>
       </TableCell>
       <TableCell>

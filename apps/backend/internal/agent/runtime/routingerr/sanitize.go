@@ -13,6 +13,14 @@ type redaction struct {
 }
 
 var redactions = []redaction{
+	// Provider diagnostics may include account/workspace links and opaque
+	// session identifiers. These are not useful recovery details and must not
+	// cross the lifecycle or message boundaries.
+	// Keep only the scheme and host. This preserves the existing safe-endpoint
+	// contract used by MCP diagnostics while dropping paths, query strings, and
+	// fragments that can carry account or workspace identifiers.
+	{regexp.MustCompile(`(https?://)(?:[^@\s/]+@)?([^/\s?#]+)[^\s]*`), "$1$2"},
+	{regexp.MustCompile(`\b(?:wrk|ses|run)_[A-Za-z0-9_-]+\b`), "[redacted-id]"},
 	{regexp.MustCompile(`sk-[A-Za-z0-9_-]{12,}`), "sk-" + redactionMask},
 	{regexp.MustCompile(`github_pat_[A-Za-z0-9_]{50,}`), "github_pat_" + redactionMask},
 	{regexp.MustCompile(`ghp_[A-Za-z0-9]{30,}`), "ghp_" + redactionMask},

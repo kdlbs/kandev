@@ -4,6 +4,7 @@ import { useLayoutEffect, useRef, useState } from "react";
 import { Input } from "@kandev/ui/input";
 import { Button } from "@kandev/ui/button";
 import type { SidebarView } from "@/lib/state/slices/ui/sidebar-view-types";
+import { useTranslation } from "react-i18next";
 
 type HeaderMode = "view" | "rename" | "saveAs";
 
@@ -21,6 +22,7 @@ type HeaderProps = {
 };
 
 export function ViewHeaderRow(props: HeaderProps) {
+  const { t } = useTranslation();
   const [mode, setMode] = useState<HeaderMode>("view");
   const [nameDraft, setNameDraft] = useState("");
   const [editingViewId, setEditingViewId] = useState<string | null>(null);
@@ -71,7 +73,9 @@ export function ViewHeaderRow(props: HeaderProps) {
   return (
     <div className="flex items-center justify-between gap-2">
       <div className="flex flex-1 items-center gap-2 text-xs">
-        <span className="text-muted-foreground">{mode === "saveAs" ? "Save as:" : "View:"}</span>
+        <span className="text-muted-foreground">
+          {mode === "saveAs" ? t("task:saveAs") : t("task:view")}
+        </span>
         {isEditing ? (
           <NameInput
             mode={mode}
@@ -107,6 +111,7 @@ function NameDisplay({
   activeView: SidebarView | undefined;
   hasDraft: boolean;
 }) {
+  const { t } = useTranslation();
   return (
     <>
       <span className="font-medium" data-testid="sidebar-filter-active-view-name">
@@ -116,7 +121,7 @@ function NameDisplay({
         <span
           className="h-1.5 w-1.5 rounded-full bg-amber-500"
           data-testid="sidebar-filter-dirty-indicator"
-          title="Unsaved changes"
+          title={t("common:unsavedChanges")}
         />
       )}
     </>
@@ -136,6 +141,7 @@ function NameInput({
   onSubmit: () => void;
   onCancel: () => void;
 }) {
+  const { t } = useTranslation();
   const inputRef = useRef<HTMLInputElement>(null);
 
   useLayoutEffect(() => {
@@ -146,14 +152,14 @@ function NameInput({
   return (
     <Input
       ref={inputRef}
-      aria-label={mode === "rename" ? "View name" : "New view name"}
+      aria-label={mode === "rename" ? t("task:viewName") : t("task:newViewName")}
       value={value}
       onChange={(e) => onChange(e.target.value)}
       onKeyDown={(e) => {
         if (e.key === "Enter") onSubmit();
         if (e.key === "Escape") onCancel();
       }}
-      placeholder={mode === "saveAs" ? "New view name" : undefined}
+      placeholder={mode === "saveAs" ? t("task:newViewName") : undefined}
       className="h-6 flex-1 text-xs"
       data-testid={mode === "rename" ? "view-rename-input" : "view-save-as-name-input"}
     />
@@ -171,6 +177,7 @@ function EditingActions({
   onSubmit: () => void;
   onCancel: () => void;
 }) {
+  const { t } = useTranslation();
   return (
     <>
       <Button
@@ -181,7 +188,7 @@ function EditingActions({
         disabled={!canSubmit}
         data-testid={mode === "rename" ? "view-rename-confirm" : "view-save-as-confirm"}
       >
-        {mode === "rename" ? "Save" : "Create"}
+        {mode === "rename" ? t("common:save") : t("task:create")}
       </Button>
       <Button
         type="button"
@@ -190,7 +197,7 @@ function EditingActions({
         className="h-6 cursor-pointer text-xs"
         onClick={onCancel}
       >
-        Cancel
+        {t("common:cancel")}
       </Button>
     </>
   );
@@ -215,6 +222,7 @@ function ViewActions({
   onDiscard: () => void;
   onDelete: () => void;
 }) {
+  const { t } = useTranslation();
   const canOverwrite = hasDraft && !!activeView;
   return (
     <>
@@ -227,7 +235,7 @@ function ViewActions({
           onClick={onSaveOverwrite}
           data-testid="view-save-button"
         >
-          Save
+          {t("common:save")}
         </Button>
       )}
       {hasDraft && (
@@ -239,7 +247,7 @@ function ViewActions({
           onClick={onSaveAs}
           data-testid="view-save-as-button"
         >
-          Save as…
+          {t("task:saveAs2")}
         </Button>
       )}
       {hasDraft && (
@@ -251,7 +259,7 @@ function ViewActions({
           onClick={onDiscard}
           data-testid="view-discard-button"
         >
-          Discard
+          {t("task:discard")}
         </Button>
       )}
       {!hasDraft && activeView && (
@@ -263,7 +271,7 @@ function ViewActions({
           onClick={onRename}
           data-testid="view-rename-button"
         >
-          Rename
+          {t("task:rename")}
         </Button>
       )}
       {!hasDraft && activeView && canDelete && (
@@ -275,7 +283,7 @@ function ViewActions({
           onClick={onDelete}
           data-testid="view-delete-button"
         >
-          Delete
+          {t("task:delete")}
         </Button>
       )}
     </>

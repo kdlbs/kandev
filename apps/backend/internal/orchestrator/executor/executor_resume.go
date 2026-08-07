@@ -66,6 +66,7 @@ type repoInfo struct {
 	BaseBranch             string
 	CheckoutBranch         string
 	PRNumber               int // GitHub PR number when CheckoutBranch is a PR head; sourced from task_repositories.metadata["pr_number"].
+	RemoteContribution     *models.RemoteContribution
 	Position               int
 	WorktreeBranchPrefix   string
 	WorktreeBranchTemplate string
@@ -149,6 +150,19 @@ func (e *Executor) resolveTaskRepoInfo(ctx context.Context, tr *models.TaskRepos
 		CheckoutBranch: tr.CheckoutBranch,
 		PRNumber:       prNumberFromMetadata(tr.Metadata),
 		Position:       tr.Position,
+	}
+	if binding, found, err := models.LoadRemoteContribution(tr.Metadata); err != nil {
+		return nil, fmt.Errorf("load remote contribution for task repository %q: %w", tr.ID, err)
+	} else if found {
+		if tr.BaseBranch != "" && tr.BaseBranch != binding.BaseBranch {
+			return nil, fmt.Errorf("task repository %q base branch does not match remote contribution", tr.ID)
+		}
+		if tr.CheckoutBranch != "" && tr.CheckoutBranch != binding.HeadBranch {
+			return nil, fmt.Errorf("task repository %q checkout branch does not match remote contribution", tr.ID)
+		}
+		info.RemoteContribution = &binding
+		info.BaseBranch = binding.BaseBranch
+		info.CheckoutBranch = binding.HeadBranch
 	}
 	if info.RepositoryID == "" {
 		return info, nil
@@ -898,6 +912,7 @@ func (e *Executor) buildResumeRequestAtCredentialBoundary(
 	if err != nil {
 		return nil, "", execConfig, nil, nil, err
 	}
+	req.McpProviders = deriveMCPProviders(allRepos)
 	repositoryID, err := e.applyResumeRepoConfig(ctx, task, session, req, existingEnv, allRepos)
 	if err != nil {
 		return nil, "", execConfig, nil, nil, err
@@ -905,7 +920,7 @@ func (e *Executor) buildResumeRequestAtCredentialBoundary(
 
 	e.reuseExistingEnvironment(ctx, req, existingEnv)
 
-	req.McpMode, err = e.resolveTaskSessionMCPMode(ctx, task.ID, session)
+	req.McpMode, err = e.resolveTaskSessionMCPMode(ctx, task.ID, session, true)
 	if err != nil {
 		return nil, "", execConfig, nil, nil, err
 	}
@@ -920,6 +935,9 @@ func (e *Executor) buildResumeRequestAtCredentialBoundary(
 		return nil, "", execConfig, existingEnv, existingRunning, err
 	}
 	e.injectGitLabWorkspaceCredentials(ctx, req)
+	if err := e.resolveLaunchEnvironment(ctx, req, execConfig.ProfileEnvVars, allRepos); err != nil {
+		return nil, "", execConfig, existingEnv, existingRunning, err
+	}
 
 	return req, repositoryID, execConfig, existingEnv, existingRunning, nil
 }
@@ -984,15 +1002,6 @@ func (e *Executor) applyExecutorConfigToResumeRequest(ctx context.Context, req *
 	req.ExecutorType = execConfig.ExecutorType
 	req.ExecutorConfig = execConfig.ExecutorCfg
 	req.SetupScript = execConfig.SetupScript
-	if len(execConfig.ProfileEnv) > 0 {
-		if req.Env == nil {
-			req.Env = make(map[string]string)
-		}
-		for k, v := range execConfig.ProfileEnv {
-			req.Env[k] = v
-		}
-	}
-
 	if executorWasEmpty && session.ExecutorID != "" {
 		session.UpdatedAt = time.Now().UTC()
 		if err := e.repo.UpdateTaskSession(ctx, session); err != nil {
@@ -1285,7 +1294,7 @@ func resolveResumeTaskDirName(existingEnv *models.TaskEnvironment, task *v1.Task
 	if existingEnv != nil && existingEnv.TaskDirName != "" {
 		return existingEnv.TaskDirName
 	}
-	return worktree.SemanticWorktreeName(task.Title, worktree.SmallSuffix(3))
+	return worktree.SemanticWorktreeName(task.Title, worktree.TaskDirSuffix(task.ID))
 }
 
 // persistResumeState updates the session row for a resume launch. For an agent

@@ -9,8 +9,8 @@ import { writeLocaleCookie } from "./cookie";
  * `en` is the source locale; `pseudo` is a QA-only accented/padded locale used
  * to visually prove every string was externalized (any plain-ASCII text on
  * screen under `pseudo` is a literal that was never routed through `t`).
- * `pseudo` is filtered out of the language switcher in production builds, but
- * the runtime can still activate it if a `kandev_locale=pseudo` cookie is set.
+ * `pseudo` is filtered out of the language switcher in production builds, and
+ * its catalog is not compiled into them at all — see `PSEUDO_LOCALE_BUNDLED`.
  *
  * Catalogs live at `src/locales/<locale>/<namespace>.json` and are loaded
  * eagerly per locale via Vite's glob import, so a locale switch needs no
@@ -18,28 +18,53 @@ import { writeLocaleCookie } from "./cookie";
  */
 export const DEFAULT_LOCALE = "en";
 export const DEFAULT_NAMESPACE = "common";
-export const SUPPORTED_LOCALES = ["en", "pseudo"] as const;
+export const SUPPORTED_LOCALES = ["en", "pt-pt", "zh-cn", "pseudo"] as const;
 export type SupportedLocale = (typeof SUPPORTED_LOCALES)[number];
 
 /** Human-readable labels for the language switcher. */
 export const LOCALE_LABELS: Record<SupportedLocale, string> = {
   en: "English",
+  "pt-pt": "Português (Portugal)",
+  "zh-cn": "简体中文",
   pseudo: "Pseudo (QA)",
 };
 
-export function isSupportedLocale(value: unknown): value is SupportedLocale {
-  return typeof value === "string" && (SUPPORTED_LOCALES as readonly string[]).includes(value);
-}
-
-/** Coerce any value to a supported locale, defaulting to `en`. */
-export function normalizeLocale(value: unknown): SupportedLocale {
-  return isSupportedLocale(value) ? value : DEFAULT_LOCALE;
+/** Canonicalize locale input the same way the Go shell does (trim + lower). */
+function canonicalLocale(value: string): string {
+  return value.trim().toLowerCase();
 }
 
 /**
- * Locales offered in the language switcher. The `pseudo` QA locale is hidden in
- * production builds.
+ * Whether `value` names a shipped locale. Accepts case variants such as
+ * `zh-CN`; prefer `normalizeLocale` when you need the canonical id to pass on.
  */
+export function isSupportedLocale(value: unknown): boolean {
+  if (typeof value !== "string") return false;
+  return (SUPPORTED_LOCALES as readonly string[]).includes(canonicalLocale(value));
+}
+
+/**
+ * Coerce any value to a supported canonical locale, defaulting to `en`.
+ * Case-insensitive so a hand-edited `zh-CN` cookie matches the backend.
+ */
+export function normalizeLocale(value: unknown): SupportedLocale {
+  if (typeof value !== "string") return DEFAULT_LOCALE;
+  const canonical = canonicalLocale(value);
+  return (SUPPORTED_LOCALES as readonly string[]).includes(canonical)
+    ? (canonical as SupportedLocale)
+    : DEFAULT_LOCALE;
+}
+
+/**
+ * Whether this bundle contains the pseudo catalog at all.
+ *
+ * `pseudo` stays in `SUPPORTED_LOCALES` unconditionally — that type drives the
+ * `en` ↔ `pseudo` parity gate in `i18n:check` and the generator — so this is the
+ * only thing that distinguishes "shipped" from "supported". `false` in a plain
+ * `vite build`; see `./bundling.ts`.
+ */
+export const PSEUDO_LOCALE_BUNDLED: boolean = __KANDEV_PSEUDO_LOCALE_BUNDLED__;
+
 /**
  * Locales offered by the switcher. The pseudo QA locale is hidden in production.
  *
@@ -47,18 +72,42 @@ export function normalizeLocale(value: unknown): SupportedLocale {
  * `import.meta.env.PROD`: the e2e harness serves a production bundle, so that
  * constant is true there too and would hide the locale the QA tests need. The
  * boot payload's `nonProduction` flag is the authoritative signal.
+ *
+ * `PSEUDO_LOCALE_BUNDLED` is checked as well, because those two signals can now
+ * disagree: a released binary started with `KANDEV_DEBUG_DEV_MODE=true` reports
+ * `nonProduction` while serving a bundle that has no pseudo catalog. Offering it
+ * there would switch the user to a locale that resolves entirely through the
+ * `en` fallback — plain English under a "Pseudo (QA)" label, which reads exactly
+ * like a total externalization failure.
  */
 export function selectableLocales(isProd: boolean): SupportedLocale[] {
-  return SUPPORTED_LOCALES.filter((locale) => locale !== "pseudo" || !isProd);
+  return SUPPORTED_LOCALES.filter(
+    (locale) => locale !== "pseudo" || (!isProd && PSEUDO_LOCALE_BUNDLED),
+  );
 }
 
 type CatalogModule = Record<string, unknown>;
 
-// Vite resolves this at build time; each entry is `../../src/locales/<locale>/<ns>.json`.
-const catalogModules = import.meta.glob<CatalogModule>("../../src/locales/*/*.json", {
-  eager: true,
-  import: "default",
-});
+// Vite resolves these at build time; each entry is `../../src/locales/<locale>/<ns>.json`.
+//
+// `pseudo` is globbed separately, behind the build-time constant, so a production
+// build folds the branch away and rolldown never pulls those JSON modules into
+// the graph. Filtering the merged object at runtime instead would still ship
+// every byte — and the bytes are the entire problem: pseudo is the LARGEST
+// catalog we have (accented characters are multi-byte) and no production user
+// can select it.
+const catalogModules: Record<string, CatalogModule> = {
+  ...import.meta.glob<CatalogModule>(
+    ["../../src/locales/*/*.json", "!../../src/locales/pseudo/*.json"],
+    { eager: true, import: "default" },
+  ),
+  ...(__KANDEV_PSEUDO_LOCALE_BUNDLED__
+    ? import.meta.glob<CatalogModule>("../../src/locales/pseudo/*.json", {
+        eager: true,
+        import: "default",
+      })
+    : {}),
+};
 
 function localeResources(locale: SupportedLocale): Record<string, CatalogModule> {
   const resources: Record<string, CatalogModule> = {};
@@ -87,6 +136,7 @@ function ensureInitialized(locale: SupportedLocale) {
   if (initialized) return;
   void i18next.use(initReactI18next).init({
     lng: locale,
+    lowerCaseLng: true,
     fallbackLng: DEFAULT_LOCALE,
     defaultNS: DEFAULT_NAMESPACE,
     ns: knownNamespaces(),

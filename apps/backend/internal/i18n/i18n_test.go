@@ -7,10 +7,18 @@ import (
 	"testing"
 )
 
+// localePtPT is the canonical European Portuguese id, spelled once so the
+// catalog, negotiation, and parity assertions cannot drift apart.
+const localePtPT = "pt-pt"
+
 func TestNormalize(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct{ in, want string }{
 		{"en", "en"},
+		{"zh-cn", "zh-cn"},
+		{"zh-CN", "zh-cn"},
+		{localePtPT, localePtPT},
+		{"pt-PT", localePtPT},
 		{"pseudo", "pseudo"},
 		{"", "en"},
 		{"fr", "en"},
@@ -32,6 +40,12 @@ func TestTranslatesAndFallsBack(t *testing.T) {
 	// externalization oracle.
 	if pseudo := T("pseudo", "webapp.shellUnavailable"); pseudo == en {
 		t.Fatalf("pseudo message should differ from en, both %q", en)
+	}
+	if chinese := T("zh-cn", "webapp.shellUnavailable"); chinese == en {
+		t.Fatalf("zh-cn message should differ from en, both %q", en)
+	}
+	if portuguese := T(localePtPT, "webapp.shellUnavailable"); portuguese == en {
+		t.Fatalf("pt-pt message should differ from en, both %q", en)
 	}
 	// An unknown locale falls back to en rather than erroring or blanking.
 	if got := T("klingon", "webapp.shellUnavailable"); got != en {
@@ -111,11 +125,22 @@ func TestTfPseudoLocaleKeepsPlaceholderValues(t *testing.T) {
 
 func TestCatalogsHaveMatchingKeys(t *testing.T) {
 	t.Parallel()
-	// Every en key must exist in pseudo, otherwise the QA locale silently shows
-	// English and stops proving that a string was externalized.
-	for _, key := range Keys() {
-		if T("pseudo", key) == key {
-			t.Fatalf("pseudo catalog is missing key %q", key)
+	load()
+	source := catalogs[DefaultLocale]
+	for _, locale := range []string{"pseudo", "zh-cn", localePtPT} {
+		translated := catalogs[locale]
+		if len(translated) != len(source) {
+			t.Fatalf("%s catalog has %d keys, want %d", locale, len(translated), len(source))
+		}
+		for key := range source {
+			if _, ok := translated[key]; !ok {
+				t.Fatalf("%s catalog is missing key %q", locale, key)
+			}
+		}
+		for key := range translated {
+			if _, ok := source[key]; !ok {
+				t.Fatalf("%s catalog has extra key %q", locale, key)
+			}
 		}
 	}
 }
@@ -130,6 +155,16 @@ func TestFromRequest(t *testing.T) {
 		r.Header.Set("Accept-Language", "en")
 		if got := FromRequest(r); got != "pseudo" {
 			t.Fatalf("got %q, want pseudo", got)
+		}
+	})
+
+	t.Run("zh-cn cookie wins over accept-language", func(t *testing.T) {
+		t.Parallel()
+		r := httptest.NewRequest(http.MethodGet, "/", nil)
+		r.AddCookie(&http.Cookie{Name: LocaleCookie, Value: "zh-cn"})
+		r.Header.Set("Accept-Language", "en")
+		if got := FromRequest(r); got != "zh-cn" {
+			t.Fatalf("got %q, want zh-cn", got)
 		}
 	})
 
@@ -148,6 +183,15 @@ func TestFromRequest(t *testing.T) {
 		r.Header.Set("Accept-Language", "fr;q=0.9, pseudo;q=1.0")
 		if got := FromRequest(r); got != "pseudo" {
 			t.Fatalf("got %q, want pseudo", got)
+		}
+	})
+
+	t.Run("accept-language canonicalizes zh-CN and honors q-value", func(t *testing.T) {
+		t.Parallel()
+		r := httptest.NewRequest(http.MethodGet, "/", nil)
+		r.Header.Set("Accept-Language", "en;q=0.4, zh-CN;q=0.9")
+		if got := FromRequest(r); got != "zh-cn" {
+			t.Fatalf("got %q, want zh-cn", got)
 		}
 	})
 

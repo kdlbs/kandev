@@ -45,17 +45,19 @@ func (f *fakeSpawnedProcess) isKilled() bool {
 	return f.killed
 }
 
-// statusRecorder records every (id, healthy) pair passed to
-// onStatusChange, for assertion.
+// statusRecorder records every status transition and its failure cause passed
+// to onStatusChange, for assertion.
 type statusRecorder struct {
-	mu    sync.Mutex
-	calls []bool
+	mu      sync.Mutex
+	calls   []bool
+	reasons []error
 }
 
-func (r *statusRecorder) record(_ string, healthy bool) {
+func (r *statusRecorder) record(_ string, healthy bool, reason error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.calls = append(r.calls, healthy)
+	r.reasons = append(r.reasons, reason)
 }
 
 func (r *statusRecorder) snapshot() []bool {
@@ -63,6 +65,14 @@ func (r *statusRecorder) snapshot() []bool {
 	defer r.mu.Unlock()
 	out := make([]bool, len(r.calls))
 	copy(out, r.calls)
+	return out
+}
+
+func (r *statusRecorder) snapshotReasons() []error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := make([]error, len(r.reasons))
+	copy(out, r.reasons)
 	return out
 }
 
@@ -171,6 +181,9 @@ func TestProcess_Tick_ThresholdReachedRestartsAndNotifiesUnhealthyThenHealthy(t 
 	if want := []bool{false, true}; !equalBoolSlices(rec.snapshot(), want) {
 		t.Fatalf("onStatusChange calls = %v, want %v", rec.snapshot(), want)
 	}
+	if reasons := rec.snapshotReasons(); reasons[0] == nil || reasons[0].Error() != "boom" || reasons[1] != nil {
+		t.Fatalf("onStatusChange reasons = %v, want [boom nil]", reasons)
+	}
 }
 
 func TestProcess_Tick_ExitedTriggersImmediateRestartRegardlessOfFailureCount(t *testing.T) {
@@ -189,6 +202,9 @@ func TestProcess_Tick_ExitedTriggersImmediateRestartRegardlessOfFailureCount(t *
 	if want := []bool{false, true}; !equalBoolSlices(rec.snapshot(), want) {
 		t.Fatalf("onStatusChange calls = %v, want %v (immediate restart on exit)", rec.snapshot(), want)
 	}
+	if reasons := rec.snapshotReasons(); reasons[0] == nil || reasons[0].Error() != "plugin process exited unexpectedly" || reasons[1] != nil {
+		t.Fatalf("onStatusChange reasons = %v, want [process exit nil]", reasons)
+	}
 }
 
 func TestProcess_HandleFailureAndRestart_GivesUpAfterMaxAttempts(t *testing.T) {
@@ -204,14 +220,17 @@ func TestProcess_HandleFailureAndRestart_GivesUpAfterMaxAttempts(t *testing.T) {
 	p.maxRestartAttempts = 3
 	p.restartBackoff = []time.Duration{0, 0, 0}
 
-	if gaveUp := p.handleFailureAndRestart(); !gaveUp {
+	if gaveUp := p.handleFailureAndRestart(errors.New("initial failure")); !gaveUp {
 		t.Fatal("handleFailureAndRestart() = false, want true after exhausting every attempt")
 	}
 	if spawnCalls != 3 {
 		t.Fatalf("spawnFn called %d times, want 3 (maxRestartAttempts)", spawnCalls)
 	}
-	if want := []bool{false}; !equalBoolSlices(rec.snapshot(), want) {
-		t.Fatalf("onStatusChange calls = %v, want %v (only the initial degradation, no false recovery)", rec.snapshot(), want)
+	if want := []bool{false, false}; !equalBoolSlices(rec.snapshot(), want) {
+		t.Fatalf("onStatusChange calls = %v, want %v (initial degradation plus final restart failure)", rec.snapshot(), want)
+	}
+	if reasons := rec.snapshotReasons(); reasons[0] == nil || reasons[0].Error() != "initial failure" || reasons[1] == nil || reasons[1].Error() != "plugin restart attempts exhausted: spawn failed" {
+		t.Fatalf("onStatusChange reasons = %v, want [initial cause, exhausted restart cause]", reasons)
 	}
 	if _, ok := p.remote(); ok {
 		t.Fatal("remote() ok = true after giving up, want false")
@@ -231,7 +250,7 @@ func TestProcess_HandleFailureAndRestart_StopDuringBackoffSkipsSpawn(t *testing.
 	close(p.stopCh) // simulate Stop() racing the backoff wait
 	p.sleepFn = sleepOrStop
 
-	if gaveUp := p.handleFailureAndRestart(); gaveUp {
+	if gaveUp := p.handleFailureAndRestart(errors.New("initial failure")); gaveUp {
 		t.Fatal("handleFailureAndRestart() = true, want false: stopping is not the same as giving up")
 	}
 	if spawnCalls != 0 {

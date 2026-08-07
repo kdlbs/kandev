@@ -9,6 +9,7 @@ import { ReviewDiffList } from "./review-diff-list";
 import { ReviewFileTree } from "./review-file-tree";
 import { ReviewPRDiffBoundary, shouldBlockReviewForPR } from "./review-dialog-pr-state";
 import { ReviewTopBar } from "./review-top-bar";
+import { useTranslation } from "react-i18next";
 
 type ReviewDialogSurfaceProps = {
   open: boolean;
@@ -44,6 +45,7 @@ function ReviewDialogDiffContent({
   | "onRetryPRDiff"
   | "state"
 >) {
+  const { t } = useTranslation();
   const blockReviewForPR = shouldBlockReviewForPR(state.allFiles);
   return (
     <ReviewPRDiffBoundary
@@ -69,7 +71,7 @@ function ReviewDialogDiffContent({
         />
       ) : (
         <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
-          {state.filter.trim() ? "No files match the filter" : "No changes to review"}
+          {state.filter.trim() ? t("review:noFilesMatchTheFilter") : t("review:noChangesToReview")}
         </div>
       )}
     </ReviewPRDiffBoundary>
@@ -77,6 +79,7 @@ function ReviewDialogDiffContent({
 }
 
 export function ReviewDialogSurface(props: ReviewDialogSurfaceProps) {
+  const { t } = useTranslation();
   const { open, onOpenChange, sessionId, state } = props;
   const splitRowRef = useRef<HTMLDivElement>(null);
   const sidebar = useReviewSidebarResize(splitRowRef, open, state.reviewSourceKey);
@@ -96,11 +99,11 @@ export function ReviewDialogSurface(props: ReviewDialogSurfaceProps) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
-        className="!max-w-[100vw] !w-[100vw] sm:!max-w-[80vw] sm:!w-[80vw] max-h-[85vh] h-[85vh] p-0 gap-0 flex flex-col shadow-2xl"
+        className="!max-w-[100vw] !w-[100vw] md:!max-w-[80vw] md:!w-[80vw] max-h-[85vh] h-[85vh] p-0 gap-0 flex flex-col shadow-2xl"
         showCloseButton={false}
         overlayClassName="bg-black/40"
       >
-        <DialogTitle className="sr-only">Review Changes</DialogTitle>
+        <DialogTitle className="sr-only">{t("review:reviewChangesTitle")}</DialogTitle>
         <ReviewTopBar
           sessionId={sessionId}
           reviewedCount={state.reviewedFiles.size}
@@ -126,7 +129,7 @@ export function ReviewDialogSurface(props: ReviewDialogSurfaceProps) {
         <div key={state.reviewSourceKey} ref={splitRowRef} className="flex min-h-0 flex-1">
           <div
             data-testid="review-dialog-sidebar"
-            className="hidden flex-shrink-0 flex-col overflow-hidden border-r border-border sm:flex"
+            className="hidden flex-shrink-0 flex-col overflow-hidden border-r border-border md:flex"
             style={{ width: `${sidebar.width}px` }}
           >
             <ReviewFileTree
@@ -145,8 +148,8 @@ export function ReviewDialogSurface(props: ReviewDialogSurfaceProps) {
             data-testid="review-dialog-sidebar-resize"
             type="button"
             tabIndex={-1}
-            aria-label="Resize file list"
-            className="group relative hidden w-1 flex-shrink-0 cursor-col-resize bg-border p-0 transition-colors hover:bg-primary sm:block"
+            aria-label={t("review:resizeFileList")}
+            className="group relative hidden w-1 flex-shrink-0 cursor-col-resize bg-border p-0 transition-colors hover:bg-primary md:block"
             {...sidebar.resizeHandleProps}
           >
             <span className="absolute inset-y-0 -left-1 -right-1" />

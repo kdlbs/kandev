@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -398,6 +399,34 @@ func settledConfigEventData(data any) bool {
 	return settled
 }
 
+func TestPublishWorkflowSessionConfigFailures(t *testing.T) {
+	log := newSessionTestLogger()
+	eventBus := &MockEventBusWithTracking{}
+	sm := NewSessionManager(log, nil)
+	sm.SetDependencies(NewEventPublisher(eventBus, log), nil, nil, nil)
+	execution := &AgentExecution{ID: "exec-1", TaskID: "task-1", SessionID: "session-1"}
+
+	sm.publishWorkflowSessionConfigFailures(execution, "acp-session-1", []string{"model", "reasoning_effort"})
+
+	events := eventBus.getStreamEvents()
+	if len(events) != 1 {
+		t.Fatalf("stream events = %d, want one failure event", len(events))
+	}
+	metadata, ok := events[0].Data.Data.(map[string]any)
+	if !ok {
+		t.Fatalf("event data = %#v, want metadata map", events[0].Data.Data)
+	}
+	if got := metadata["workflow_session_config_failures"]; !reflect.DeepEqual(got, []string{"model", "reasoning_effort"}) {
+		t.Fatalf("failure metadata = %#v, want model and option", got)
+	}
+}
+
+func originalConfigEventData(data any) bool {
+	metadata, _ := data.(map[string]any)
+	settled, _ := metadata["original_config_settled"].(bool)
+	return settled
+}
+
 func configValueByID(options []streams.ConfigOption, id string) string {
 	for _, option := range options {
 		if option.ID == id {
@@ -506,6 +535,79 @@ func TestConfigBaselineRetainsProviderDefaultsWhenProfileOverrideSettles(t *test
 	}
 	if got := configValueByID(settled.ConfigBaselineCandidate, "fast_mode"); got != "off" {
 		t.Errorf("baseline fast_mode = %q, want provider default off", got)
+	}
+}
+
+func TestPublishOriginalConfigOptionsUsesProfileSettledState(t *testing.T) {
+	log := newSessionTestLogger()
+	eventBus := &MockEventBusWithTracking{}
+	publisher := NewEventPublisher(eventBus, log)
+	sm := NewSessionManager(log, nil)
+	sm.SetDependencies(publisher, nil, nil, nil)
+	execution := &AgentExecution{ID: "exec-1", TaskID: "task-1", SessionID: "session-1"}
+	execution.SetModelState(&CachedModelState{
+		CurrentModelID: "gpt-5.6-sol",
+		Models:         []streams.SessionModelInfo{{ModelID: "gpt-5.6-sol"}},
+		ConfigOptions: []streams.ConfigOption{
+			{ID: "model", Category: "model", CurrentValue: "gpt-5.6-sol"},
+			{ID: "reasoning_effort", CurrentValue: "high"},
+		},
+	})
+
+	sm.publishOriginalConfigOptions(execution, "acp-session-1")
+
+	events := eventBus.getStreamEvents()
+	if len(events) != 1 {
+		t.Fatalf("published events = %d, want 1", len(events))
+	}
+	payload := events[0].Data
+	if payload == nil {
+		t.Fatal("expected stream payload")
+	}
+	if got := payload.CurrentModelID; got != "gpt-5.6-sol" {
+		t.Fatalf("original model = %q, want profile model", got)
+	}
+	if got := configValueByID(payload.OriginalConfigCandidate, "reasoning_effort"); got != "high" {
+		t.Fatalf("original reasoning effort = %q, want high", got)
+	}
+	if !originalConfigEventData(payload.Data) {
+		t.Fatalf("event data = %#v, want original_config_settled marker", payload.Data)
+	}
+}
+
+func TestPublishOriginalConfigOptionsAppliesProfileValuesWhenStreamStateLags(t *testing.T) {
+	log := newSessionTestLogger()
+	eventBus := &MockEventBusWithTracking{}
+	publisher := NewEventPublisher(eventBus, log)
+	sm := NewSessionManager(log, nil)
+	sm.SetDependencies(publisher, nil, nil, nil)
+	execution := &AgentExecution{ID: "exec-1", TaskID: "task-1", SessionID: "session-1"}
+	execution.SetModelState(&CachedModelState{
+		CurrentModelID: "provider-default",
+		ConfigOptions: []streams.ConfigOption{
+			{ID: "model", Category: "model", CurrentValue: "provider-default"},
+			{ID: "reasoning_effort", CurrentValue: "medium"},
+			{ID: "fast_mode", CurrentValue: "off"},
+		},
+	})
+
+	sm.publishOriginalConfigOptionsWithProfile(execution, "acp-session-1", "gpt-5.6-sol", map[string]string{
+		"reasoning_effort": "max",
+	})
+
+	events := eventBus.getStreamEvents()
+	if len(events) != 1 {
+		t.Fatalf("published events = %d, want 1", len(events))
+	}
+	payload := events[0].Data
+	if payload.CurrentModelID != "gpt-5.6-sol" {
+		t.Fatalf("original model = %q, want profile model", payload.CurrentModelID)
+	}
+	if got := configValueByID(payload.OriginalConfigCandidate, "reasoning_effort"); got != "max" {
+		t.Fatalf("original reasoning effort = %q, want max", got)
+	}
+	if got := configValueByID(payload.OriginalConfigCandidate, "fast_mode"); got != "off" {
+		t.Fatalf("provider default fast mode = %q, want off", got)
 	}
 }
 

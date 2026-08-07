@@ -298,6 +298,32 @@ Goal: clicking "Create PR" on a GitLab task opens a real MR.
 - Add the new spec/plan to `docs/specs/INDEX.md` (already done) and
   flip status to `shipped` once merged.
 
+### Phase 8 — MR auto-link (post-ship follow-on)
+
+Goal: close the gap where an MR opened outside Kandev's own MR-creation action
+(`glab mr create`, or opening the MR directly in the GitLab web UI) never got
+linked — only manual URL linking and the Create-PR callback did. Mirrors
+GitHub's push-detection auto-link.
+
+- `internal/gitlab/service_task_mr_autolink.go` — `Service.AutoLinkMRForBranch`
+  (find-MR-by-branch → validate repository identity → upsert association →
+  ensure refresh watch → publish `gitlab.task_mr.updated`).
+- `internal/gitlab/service_watches.go` — `EnsureMRWatch` (idempotent
+  get-or-create) and `CheckMRWatch` now refresh `gitlab_task_mrs` on every
+  poll, not just watch timestamps.
+- `gitlab_mr_watches` unique key widened to `(session_id, repository_id,
+  branch)` via an idempotent table-rebuild migration, so multi-branch tasks
+  don't collide on the second branch's watch insert.
+- `internal/orchestrator/event_handlers_gitlab_mr.go` — `detectPushAndAssociateMR`
+  (GitLab twin of GitHub's `detectPushAndAssociatePR`, same `[0, 30s, 60s]`
+  retry shape) and `CheckSessionMR` (on-demand check, mirrors `CheckSessionPR`).
+  `event_handlers_git.go`'s push-tracking dispatches by repository provider so
+  the two providers' code paths never call into each other's client.
+  `Status: shipped.`
+
+Out of scope for this phase (unchanged from the root spec): webhook-driven
+linking, and backfilling associations for MRs opened before this shipped.
+
 ## 4. Risks / open points
 
 - **API shape mismatches.** GitLab's MR discussions are nested

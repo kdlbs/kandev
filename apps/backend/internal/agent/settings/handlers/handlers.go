@@ -560,6 +560,7 @@ type updateProfileRequest struct {
 	AllowIndexing  *bool                   `json:"allow_indexing,omitempty"`
 	AutoApprove    *bool                   `json:"auto_approve,omitempty"`
 	CLIPassthrough *bool                   `json:"cli_passthrough,omitempty"`
+	Enabled        *bool                   `json:"enabled,omitempty"`
 	CLIFlags       *[]dto.CLIFlagDTO       `json:"cli_flags,omitempty"`
 	EnvVars        *[]dto.ProfileEnvVarDTO `json:"env_vars,omitempty"`
 	CommandPrefix  *string                 `json:"command_prefix,omitempty"`
@@ -586,6 +587,7 @@ func (h *Handlers) httpUpdateProfile(c *gin.Context) {
 		AllowIndexing:  body.AllowIndexing,
 		AutoApprove:    body.AutoApprove,
 		CLIPassthrough: body.CLIPassthrough,
+		Enabled:        body.Enabled,
 		CLIFlags:       body.CLIFlags,
 		EnvVars:        body.EnvVars,
 		CommandPrefix:  body.CommandPrefix,
@@ -627,6 +629,7 @@ func (h *Handlers) httpDeleteProfile(c *gin.Context) {
 				"active_sessions": inUseErr.ActiveSessions,
 				"watchers":        inUseErr.Watchers,
 				"routing_tiers":   inUseErr.RoutingTiers,
+				"automations":     inUseErr.Automations,
 			})
 			return
 		}

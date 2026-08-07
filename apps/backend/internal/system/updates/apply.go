@@ -13,8 +13,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-
-	"github.com/kandev/kandev/internal/persistence"
 )
 
 type applyRunner func(context.Context, applyRequest) (map[string]interface{}, error)
@@ -43,23 +41,37 @@ type updateIntent struct {
 	CreatedAt     string                 `json:"created_at"`
 }
 
-func (s *Service) applyPreflight() (UpdatesResponse, *serviceInstallMetadata, error) {
-	version, releaseURL, checkedAt, err := persistence.ReadLatestVersion(s.pool.Reader())
+func (s *Service) applyPreflight(
+	ctx context.Context,
+	expectedTarget string,
+) (UpdatesResponse, *serviceInstallMetadata, error) {
+	s.updateMu.Lock()
+	defer s.updateMu.Unlock()
+
+	// Read install state once so channel capability, ApplySupported, and the
+	// intent file all reflect the same service metadata snapshot.
+	install, metadata := s.detectInstallState()
+	applySupported, reason := install.applySupport()
+	if !applySupported {
+		return UpdatesResponse{}, nil, fmt.Errorf("%w: %s", ErrApplyUnsupported, reason)
+	}
+	channel, err := s.effectiveChannel(ctx, install)
 	if err != nil {
 		return UpdatesResponse{}, nil, err
 	}
-	// Read install state once so the ApplySupported gate below and the intent
-	// file written by the caller both reflect the same snapshot.
-	install, metadata := s.detectInstallState()
-	resp := s.buildResponseFrom(install, version, releaseURL, checkedAt)
+	version, releaseURL, checkedAt, err := s.readLatestVersion(channel)
+	if err != nil {
+		return UpdatesResponse{}, nil, err
+	}
+	// Bind Apply to the exact immutable version presented to the user. Update
+	// discovery may move the cache between rendering and confirmation; reject
+	// that stale request instead of silently installing a different artifact.
+	if expectedTarget == "" || version != expectedTarget {
+		return UpdatesResponse{}, nil, ErrUpdateTargetChanged
+	}
+	resp := s.buildResponseFromChannel(channel, install, version, releaseURL, checkedAt)
 	if !resp.UpdateAvailable {
 		return UpdatesResponse{}, nil, ErrNoUpdateAvailable
-	}
-	if !resp.ApplySupported {
-		return UpdatesResponse{}, nil, fmt.Errorf("%w: %s", ErrApplyUnsupported, resp.ApplyUnsupportedReason)
-	}
-	if metadata == nil {
-		return UpdatesResponse{}, nil, ErrApplyUnsupported
 	}
 	return resp, metadata, nil
 }
@@ -284,6 +296,9 @@ func selfUpdateEnvironment() []string {
 	return env
 }
 
+// Install-wide mutations use exact browser same-origin checks, stricter than
+// general UI CORS allowances. Requests without Origin remain available to
+// trusted non-browser clients such as the local CLI.
 func sameOriginOrNoOrigin(r *http.Request) bool {
 	origin := r.Header.Get("Origin")
 	if origin == "" {

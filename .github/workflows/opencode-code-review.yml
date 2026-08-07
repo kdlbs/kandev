@@ -143,6 +143,8 @@ jobs:
           - When needed, inspect nearby files, callers, interfaces, tests, and scoped AGENTS.md files related to patched files.
           - Review only the attached patch scope. Do not report unrelated pre-existing issues.
           - Report only findings you are at least 80 percent confident about.
+          - Treat architectural fit as the highest-priority review layer: verify the change is in the correct module and follows dependency direction; domain logic must not move into transport, persistence, or infrastructure layers; and new abstractions must have clear ownership.
+          - Check data and state modelling: keep domain entities, DTOs, persistence models, and external API models separate when their responsibilities differ; verify explicit invariants, one source of truth, deliberate nullability/defaults, safe retries and partial failures, and backward-compatible contract or schema changes.
           - Focus on correctness, security, data loss, missing tests for changed logic, regressions, and architecture violations.
           - Avoid style-only feedback and anything linters or typecheckers already catch.
 
@@ -248,7 +250,7 @@ jobs:
       contains(github.event.pull_request.labels.*.name, 'safe-to-review')
     runs-on: ubuntu-latest
     permissions:
-      issues: write
+      pull-requests: write
     steps:
       - uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
         with:
@@ -398,6 +400,8 @@ jobs:
           - When needed, inspect nearby files, callers, interfaces, tests, and scoped AGENTS.md files related to patched files.
           - Review only the attached patch scope. Do not report unrelated pre-existing issues.
           - Report only findings you are at least 80 percent confident about.
+          - Treat architectural fit as the highest-priority review layer: verify the change is in the correct module and follows dependency direction; domain logic must not move into transport, persistence, or infrastructure layers; and new abstractions must have clear ownership.
+          - Check data and state modelling: keep domain entities, DTOs, persistence models, and external API models separate when their responsibilities differ; verify explicit invariants, one source of truth, deliberate nullability/defaults, safe retries and partial failures, and backward-compatible contract or schema changes.
           - Focus on correctness, security, data loss, missing tests for changed logic, regressions, and architecture violations.
           - Avoid style-only feedback and anything linters or typecheckers already catch.
 

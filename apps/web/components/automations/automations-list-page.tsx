@@ -1,11 +1,14 @@
 "use client";
 
+import { useTranslation } from "react-i18next";
 import { useRouter } from "@/lib/routing/client-router";
 import { Button } from "@kandev/ui/button";
 import { Separator } from "@kandev/ui/separator";
 import { IconPlus, IconBolt } from "@tabler/icons-react";
+import { toast } from "@/lib/toast/sonner";
 import { useAutomations } from "@/hooks/domains/settings/use-automations";
 import { AutomationsTable } from "./automations-table";
+import { AutomationBoardMoveNotice } from "./board-move-notice";
 import { useAutomationEnabledDrafts } from "./use-automation-enabled-drafts";
 
 type AutomationsListPageProps = {
@@ -13,12 +16,29 @@ type AutomationsListPageProps = {
 };
 
 export function AutomationsListPage({ workspaceId }: AutomationsListPageProps) {
+  const { t } = useTranslation();
   const router = useRouter();
   const { items, loading, enable, disable, trigger, remove } = useAutomations(workspaceId);
   const enabledDrafts = useAutomationEnabledDrafts({ automations: items, enable, disable });
 
   const handleTrigger = async (id: string) => {
-    await trigger(id);
+    // Triggering can legitimately do nothing — the concurrency cap turns the
+    // request away while an earlier run is still going. Saying so is the whole
+    // point of the click having any feedback at all.
+    try {
+      const result = await trigger(id);
+      if (result?.skipped) {
+        toast.info(
+          result.reason
+            ? t("automations:skipped", { reason: result.reason })
+            : t("automations:skippedAlreadyRunning"),
+        );
+        return;
+      }
+      toast.success(t("automations:triggered"));
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : t("automations:couldNotTrigger"));
+    }
   };
 
   const handleDelete = async (id: string) => {
@@ -31,11 +51,9 @@ export function AutomationsListPage({ workspaceId }: AutomationsListPageProps) {
         <div>
           <h2 className="text-lg font-semibold flex items-center gap-2">
             <IconBolt className="h-5 w-5" />
-            Automations
+            {t("common:automations")}
           </h2>
-          <p className="text-sm text-muted-foreground">
-            Create rules that automatically trigger agent tasks.
-          </p>
+          <p className="text-sm text-muted-foreground">{t("automations:listDescription")}</p>
         </div>
         <Button
           data-testid="new-automation-button"
@@ -43,12 +61,18 @@ export function AutomationsListPage({ workspaceId }: AutomationsListPageProps) {
           onClick={() => router.push(`/settings/workspace/${workspaceId}/automations/new`)}
         >
           <IconPlus className="h-4 w-4 mr-1" />
-          New Automation
+          {t("automations:newAutomation")}
         </Button>
       </div>
       <Separator />
+      {/* Above the table on purpose: it explains why the table's automations
+          stopped showing up where the reader last saw them, so it has to be
+          read before the table, not after it. */}
+      <AutomationBoardMoveNotice workspaceId={workspaceId} automations={items} />
       {loading && items.length === 0 ? (
-        <div className="py-12 text-center text-muted-foreground">Loading automations...</div>
+        <div className="py-12 text-center text-muted-foreground">
+          {t("automations:loadingAutomations")}
+        </div>
       ) : (
         <AutomationsTable
           automations={enabledDrafts.automations}

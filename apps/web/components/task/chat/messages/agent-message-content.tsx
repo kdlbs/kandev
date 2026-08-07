@@ -8,6 +8,7 @@ import { MemoizedMarkdown } from "@/components/shared/memoized-markdown";
 import { MessageCommentSurface } from "./message-comment-surface";
 import { useMessageFavorite } from "@/hooks/domains/session/use-message-favorite";
 import { cn } from "@/lib/utils";
+import { useTranslation } from "react-i18next";
 
 type AgentMessageContentProps = {
   comment: Message;
@@ -30,6 +31,7 @@ export const AgentMessageContent = memo(function AgentMessageContent({
   sessionId,
   isTurnActive,
 }: AgentMessageContentProps) {
+  const { t } = useTranslation();
   const { isFavorite, toggleFavorite } = useMessageFavorite(comment.session_id, comment.id);
   return (
     <div className="flex items-start gap-2 sm:gap-3 w-full group">
@@ -42,7 +44,7 @@ export const AgentMessageContent = memo(function AgentMessageContent({
       >
         {showRaw ? (
           <pre className="whitespace-pre-wrap font-mono text-xs bg-muted/20 p-3 rounded-md">
-            {comment.raw_content || comment.content || "(empty)"}
+            {comment.raw_content || comment.content || t("task:empty")}
           </pre>
         ) : (
           <MessageCommentSurface
@@ -52,7 +54,7 @@ export const AgentMessageContent = memo(function AgentMessageContent({
           >
             <div className="markdown-body max-w-none">
               <MemoizedMarkdown
-                content={comment.content || "(empty)"}
+                content={comment.content || t("task:empty")}
                 taskId={comment.task_id}
                 worktreePath={worktreePath}
                 onOpenFile={onOpenFile}

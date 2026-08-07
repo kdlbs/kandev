@@ -4,6 +4,7 @@ import type { AppState } from "@/lib/state/store";
 import type { WsHandlers } from "@/lib/ws/handlers/types";
 import { sessionId, taskId } from "@/lib/types/http";
 import { maybeEmitEmptyTurnNotice } from "@/lib/ws/handlers/empty-turn-notice";
+import type { MessageUpdateScheduler } from "@/lib/ws/handlers/messages";
 
 const debug = createDebugLogger("session:turns");
 
@@ -23,7 +24,10 @@ function completePendingToolCalls(store: StoreApi<AppState>, sessionId: string):
   }
 }
 
-export function registerTurnsHandlers(store: StoreApi<AppState>): WsHandlers {
+export function registerTurnsHandlers(
+  store: StoreApi<AppState>,
+  messageScheduler?: Pick<MessageUpdateScheduler, "flush">,
+): WsHandlers {
   return {
     "session.turn.started": (message) => {
       const payload = message.payload;
@@ -53,6 +57,7 @@ export function registerTurnsHandlers(store: StoreApi<AppState>): WsHandlers {
       if (!payload.session_id || !payload.id) {
         return;
       }
+      messageScheduler?.flush();
       debug("turn.completed", {
         sessionId: payload.session_id,
         task_id: payload.task_id ?? "-",

@@ -12,6 +12,7 @@ import {
 } from "@kandev/ui/command";
 import { Popover, PopoverContent, PopoverTrigger } from "@kandev/ui/popover";
 import { cn } from "@/lib/utils";
+import { useTranslation } from "react-i18next";
 
 export type MultiSelectItem = {
   id: string;
@@ -64,11 +65,15 @@ export function MultiSelectPopover<T extends MultiSelectItem>({
   onRemove,
   renderChip,
   renderItem,
-  addLabel = "+ Add",
-  emptyMessage = "No items found.",
-  searchPlaceholder = "Search...",
+  addLabel,
+  emptyMessage,
+  searchPlaceholder,
   testId,
 }: MultiSelectPopoverProps<T>) {
+  const { t } = useTranslation();
+  const resolvedAddLabel = addLabel ?? t("task:addShort");
+  const resolvedEmptyMessage = emptyMessage ?? t("task:noItemsFound");
+  const resolvedSearchPlaceholder = searchPlaceholder ?? t("task:searchEllipsis2");
   const [open, setOpen] = useState(false);
 
   const selected = useMemo(
@@ -98,17 +103,17 @@ export function MultiSelectPopover<T extends MultiSelectItem>({
             selected={selected}
             renderChip={renderChip}
             onRemove={onRemove}
-            addLabel={addLabel}
+            addLabel={resolvedAddLabel}
           />
         </button>
       </PopoverTrigger>
       <PopoverContent align="end" className="w-72 p-0" portal={false}>
         <Command>
-          <CommandInput placeholder={searchPlaceholder} className="h-9" />
+          <CommandInput placeholder={resolvedSearchPlaceholder} className="h-9" />
           <CommandList>
-            <CommandEmpty>{emptyMessage}</CommandEmpty>
+            <CommandEmpty>{resolvedEmptyMessage}</CommandEmpty>
             {selected.length > 0 && (
-              <CommandGroup heading="Selected">
+              <CommandGroup heading={t("task:selected")}>
                 {selected.map((item) => (
                   <CommandItem
                     key={item.id}
@@ -127,7 +132,7 @@ export function MultiSelectPopover<T extends MultiSelectItem>({
               </CommandGroup>
             )}
             {addable.length > 0 && (
-              <CommandGroup heading={selected.length > 0 ? "Add more" : undefined}>
+              <CommandGroup heading={selected.length > 0 ? t("task:addMore") : undefined}>
                 {addable.map((item) => (
                   <CommandItem
                     key={item.id}
