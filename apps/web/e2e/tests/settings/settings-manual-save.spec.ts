@@ -4,6 +4,9 @@ import type { ApiClient } from "../../helpers/api-client";
 const APPEARANCE_PATH = "/settings/preferences/appearance";
 const TERMINAL_PATH = "/settings/preferences/terminal-editors";
 const NOTIFICATIONS_PATH = "/settings/preferences/notifications";
+// The menu row the Terminal page now sits on; it was plain "Terminal" before
+// the settings restructure merged Terminal and Editors into one page.
+const TERMINAL_ROW = "Terminal & Editors";
 const CLARIFICATION_REQUESTED = "session.clarification_requested";
 const PROVIDER_NAME = "E2E semantic notifications";
 
@@ -55,7 +58,7 @@ test.describe("Settings manual save", () => {
         initial.settings.changes_panel_layout,
       );
 
-      await testPage.getByRole("link", { name: "Terminal", exact: true }).first().click();
+      await testPage.getByRole("link", { name: TERMINAL_ROW, exact: true }).first().click();
       const navigationDialog = testPage.getByRole("alertdialog", {
         name: "Save changes before leaving?",
       });
@@ -63,7 +66,7 @@ test.describe("Settings manual save", () => {
       await navigationDialog.getByRole("button", { name: "Continue editing" }).click();
       await expect(testPage).toHaveURL(new RegExp(`${APPEARANCE_PATH}$`));
 
-      await testPage.getByRole("link", { name: "Terminal", exact: true }).first().click();
+      await testPage.getByRole("link", { name: TERMINAL_ROW, exact: true }).first().click();
       await expect(navigationDialog).toBeVisible();
       await navigationDialog.getByRole("button", { name: "Save and leave" }).click();
       await expect(testPage).toHaveURL(new RegExp(`${TERMINAL_PATH}$`));

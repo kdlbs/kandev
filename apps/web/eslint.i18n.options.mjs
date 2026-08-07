@@ -273,6 +273,7 @@ export const i18nGuardFiles = [
   "components/settings/archive-confirmation-settings.tsx",
   "components/settings/keyboard-shortcuts-card.tsx",
   "components/settings/mcp-task-agent-profile-default-settings.tsx",
+  "components/settings/settings-menu-mode-card.tsx",
   "components/settings/unread-divider-settings.tsx",
   // Settings → Integrations → GitHub, connection and authentication half: the
   // page, the settings shell, the status/identity panels, the connection dialog
@@ -869,6 +870,15 @@ export const i18nGuardFiles = [
   "components/app-sidebar/sections/*.tsx",
   "components/app-sidebar/sections/settings/settings-nav-primitives.tsx",
   "components/app-sidebar/sections/settings/settings-tree.tsx",
+  // The optional tree modes the menu grows under Workspaces, Agents and
+  // Executors. `settings-menu-node.tsx` is the only one with JSX; the three
+  // `.ts` entries hold branch data, expansion state and the store read, and
+  // carry catalog *keys* rather than copy — `mode: "jsx-only"` never inspects
+  // them, so the entries record that they were read, not that lint guards them.
+  "components/app-sidebar/sections/settings/settings-menu-branches.ts",
+  "components/app-sidebar/sections/settings/settings-menu-node.tsx",
+  "components/app-sidebar/sections/settings/use-settings-menu-branches.ts",
+  "components/app-sidebar/sections/settings/use-settings-menu-expansion.ts",
   "components/app-status-bar/**/*.{ts,tsx}",
   "components/theme-toggle.tsx",
   // The command palette's own copy. `group` doubles as the palette's Map key and

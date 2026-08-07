@@ -1,10 +1,17 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+import type { SettingsMenuMode } from "@/lib/settings/settings-menu-mode";
 
 const MAIN_WORKSPACE_ID = "ws-1";
 const MAIN_WORKSPACE_NAME = "Main Workspace";
 const VOICE_MODE_LABEL = "Voice Mode";
 const SEARCH_LABEL = "Search settings";
+const WORKSPACES_ROW_KEY = "row:/settings/workspaces";
+const AGENTS_ROW_KEY = "row:/settings/agents";
+const WORKSPACE_KEY = `workspace:${MAIN_WORKSPACE_ID}`;
+const AGENT_KEY = "agent:claude-code";
+const AGENT_LABEL = "Claude Code";
 
 const state = {
   workspaces: {
@@ -15,12 +22,19 @@ const state = {
     items: [
       {
         name: "claude-code",
-        profiles: [{ id: "profile-1", name: "Default", agentDisplayName: "Claude Code" }],
+        profiles: [{ id: "profile-1", name: "Default", agentDisplayName: AGENT_LABEL }],
       },
     ],
   },
   executors: {
-    items: [{ id: "exec-1", type: "local", profiles: [{ id: "exec-profile-1", name: "Local" }] }],
+    items: [
+      {
+        id: "exec-1",
+        name: "Local Executor",
+        type: "local",
+        profiles: [{ id: "exec-profile-1", name: "Local" }],
+      },
+    ],
   },
   settingsData: {
     executorsLoaded: true,
@@ -34,6 +48,14 @@ const state = {
     mode: "disabled" as const,
     authenticated: true,
     user: null,
+  },
+  settingsMenu: {
+    mode: "flat" as SettingsMenuMode,
+    savedMode: "flat" as SettingsMenuMode,
+    expandedKeys: [] as string[],
+  },
+  setSettingsMenuExpandedKeys: (keys: string[]) => {
+    state.settingsMenu.expandedKeys = keys;
   },
 };
 
@@ -55,10 +77,41 @@ vi.mock("@/hooks/domains/plugins/use-plugins", () => ({
 
 import { SettingsTree } from "./settings-tree";
 
+function setMenuMode(mode: SettingsMenuMode, expandedKeys: string[] = []) {
+  state.settingsMenu.mode = mode;
+  state.settingsMenu.savedMode = mode;
+  state.settingsMenu.expandedKeys = expandedKeys;
+}
+
+const FONT_NORMAL = "font-normal";
+const FONT_MEDIUM = "font-medium";
+/** The glyph box every row opens, whether or not a glyph fills it. */
+const GLYPH_BOX = "h-3.5 w-3.5";
+/** The record mark, copied from the dot the Agents page renders per profile. */
+const RECORD_DOT = "h-1.5 w-1.5 rounded-full bg-primary/70";
+
+/**
+ * `data-record` for a row, whether it is a leaf (which carries the attribute
+ * itself) or a branch (whose wrapper carries it, so an href-less agent row gets
+ * it too). Deliberately not `closest`: every row inside an open record branch
+ * has a marked ancestor, which would make the negative assertions vacuous.
+ */
+function recordFlag(row: HTMLElement): string | null {
+  return row.getAttribute("data-record") ?? row.parentElement?.getAttribute("data-record") ?? null;
+}
+
+/** Every row claiming to be the page you are on. Must always be exactly one. */
+function activeRowNames(): string[] {
+  return Array.from(document.querySelectorAll("[data-active='true']")).map(
+    (element) => element.textContent ?? "",
+  );
+}
+
 describe("SettingsTree static menu", () => {
   beforeEach(() => {
     state.workspaces.activeId = MAIN_WORKSPACE_ID;
     state.workspaces.items = [{ id: MAIN_WORKSPACE_ID, name: MAIN_WORKSPACE_NAME }];
+    setMenuMode("flat");
   });
 
   afterEach(() => cleanup());
@@ -79,7 +132,7 @@ describe("SettingsTree static menu", () => {
     // Store has a workspace, an agent profile and an executor profile — none
     // of them may appear as menu rows.
     expect(screen.queryByRole("link", { name: MAIN_WORKSPACE_NAME })).toBeNull();
-    expect(screen.queryByRole("link", { name: /Claude Code/ })).toBeNull();
+    expect(screen.queryByRole("link", { name: new RegExp(AGENT_LABEL) })).toBeNull();
     expect(screen.queryByRole("link", { name: "Local" })).toBeNull();
     expect(screen.queryByRole("link", { name: "Repositories" })).toBeNull();
 
@@ -122,6 +175,19 @@ describe("SettingsTree static menu", () => {
     expect(link.getAttribute("data-active")).toBe("true");
   });
 
+  it("puts the count straight after the title, not out at the row's edge", () => {
+    render(<SettingsTree pathname="/settings" />);
+
+    const row = screen.getByRole("link", { name: "Workspaces 1" });
+    const title = within(row).getByText("Workspaces");
+    const count = title.nextElementSibling;
+
+    // Immediately after the title and sharing its parent — a right-aligned
+    // badge would sit outside the title's wrapper instead.
+    expect(count?.textContent).toBe("1");
+    expect(count?.parentElement).toBe(title.parentElement);
+  });
+
   it("shows item counts on rows whose page owns a list", () => {
     render(<SettingsTree pathname="/settings" />);
 
@@ -135,6 +201,172 @@ describe("SettingsTree static menu", () => {
     // Rows without a list never carry a badge.
     expect(screen.getByRole("link", { name: "Appearance" }).textContent).toBe("Appearance");
   });
+});
+
+describe("SettingsTree tree modes", () => {
+  beforeEach(() => {
+    state.workspaces.activeId = MAIN_WORKSPACE_ID;
+    state.workspaces.items = [{ id: MAIN_WORKSPACE_ID, name: MAIN_WORKSPACE_NAME }];
+  });
+
+  afterEach(() => {
+    setMenuMode("flat");
+    cleanup();
+  });
+
+  it("grows the branched rows into their records and opens the route's path", () => {
+    setMenuMode("accordion");
+    render(<SettingsTree pathname={`/settings/workspaces/${MAIN_WORKSPACE_ID}/integrations/github`} />);
+
+    // Workspaces › Main Workspace › Integrations › GitHub — the same chain the
+    // breadcrumb renders on that page.
+    expect(screen.getByRole("link", { name: /^Workspaces/ })).toBeTruthy();
+    expect(screen.getByRole("link", { name: MAIN_WORKSPACE_NAME })).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Integrations" })).toBeTruthy();
+    expect(screen.getByRole("link", { name: "GitHub" }).getAttribute("href")).toBe(
+      `/settings/workspaces/${MAIN_WORKSPACE_ID}/integrations/github`,
+    );
+  });
+
+  it("marks only the deepest row active, never its ancestors", () => {
+    setMenuMode("accordion");
+    render(<SettingsTree pathname={`/settings/workspaces/${MAIN_WORKSPACE_ID}/integrations/github`} />);
+
+    expect(activeRowNames()).toEqual(["GitHub"]);
+  });
+
+  it("falls back to the owning row when no branch node claims the route", () => {
+    setMenuMode("accordion");
+    // `/settings/agents/browse` is the install catalogue, not an agent, so no
+    // node holds it — the Agents row has to keep the active mark itself.
+    render(<SettingsTree pathname="/settings/agents/browse" />);
+
+    expect(activeRowNames()).toEqual(["Agents1"]);
+  });
+
+  it("collapses the other branches when one is opened in accordion mode", () => {
+    setMenuMode("accordion");
+    render(<SettingsTree pathname={`/settings/workspaces/${MAIN_WORKSPACE_ID}`} />);
+
+    expect(screen.getByRole("link", { name: MAIN_WORKSPACE_NAME })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: AGENT_LABEL })).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Expand Agents" }));
+
+    expect(screen.getByRole("button", { name: AGENT_LABEL })).toBeTruthy();
+    expect(screen.queryByRole("link", { name: MAIN_WORKSPACE_NAME })).toBeNull();
+  });
+
+  it("keeps several branches open at once in persistent mode", () => {
+    setMenuMode("persistent", [
+      WORKSPACES_ROW_KEY,
+      `workspace:${MAIN_WORKSPACE_ID}`,
+      AGENTS_ROW_KEY,
+      AGENT_KEY,
+      "row:/settings/executors",
+      "executor:exec-1",
+    ]);
+    render(<SettingsTree pathname="/settings/preferences/appearance" />);
+
+    expect(screen.getByRole("link", { name: MAIN_WORKSPACE_NAME })).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Repositories" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: AGENT_LABEL })).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Default" })).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Local" })).toBeTruthy();
+    // A page outside every branch still leaves exactly one active row.
+    expect(activeRowNames()).toEqual(["Appearance"]);
+  });
+
+  it("links an agent's profile under the agent, which only discloses", () => {
+    setMenuMode("persistent", [AGENTS_ROW_KEY, AGENT_KEY]);
+    render(<SettingsTree pathname="/settings/agents/claude-code/profiles/profile-1" />);
+
+    // `/settings/agents/<name>` redirects back to the index for a saved agent,
+    // so the agent row must not be a link.
+    expect(screen.queryByRole("link", { name: new RegExp(AGENT_LABEL) })).toBeNull();
+    expect(screen.getByRole("link", { name: "Default" }).getAttribute("href")).toBe(
+      "/settings/agents/claude-code/profiles/profile-1",
+    );
+    expect(activeRowNames()).toEqual(["Default"]);
+  });
+});
+
+/**
+ * The visual split between rows kandev ships and rows the user made. Its own
+ * block: the tree-mode suite is about what the menu contains, this one is about
+ * how a record is drawn, and together they overran the per-function line limit.
+ */
+describe("SettingsTree record treatment", () => {
+  beforeEach(() => {
+    state.workspaces.activeId = MAIN_WORKSPACE_ID;
+    state.workspaces.items = [{ id: MAIN_WORKSPACE_ID, name: MAIN_WORKSPACE_NAME }];
+  });
+
+  afterEach(() => {
+    setMenuMode("flat");
+    cleanup();
+  });
+
+  it("lightens rows from the user's data, leaving navigation alone", () => {
+    setMenuMode("accordion");
+    render(
+      <SettingsTree pathname={`/settings/workspaces/${MAIN_WORKSPACE_ID}/integrations/github`} />,
+    );
+
+    const workspace = screen.getByRole("link", { name: MAIN_WORKSPACE_NAME });
+    // `GitHub` sits at the same indent as the workspace name but ships with the
+    // app, so the split cannot be read off depth.
+    const integration = screen.getByRole("link", { name: "GitHub" });
+
+    expect(recordFlag(workspace)).toBe("true");
+    expect(recordFlag(integration)).toBeNull();
+    expect(workspace.className).toContain(FONT_NORMAL);
+    expect(integration.className).toContain(FONT_MEDIUM);
+  });
+
+  it("treats a profile as the record, not the agent it belongs to", () => {
+    setMenuMode("persistent", [AGENTS_ROW_KEY, AGENT_KEY]);
+    render(<SettingsTree pathname="/settings/agents/claude-code/profiles/profile-1" />);
+
+    const agent = screen.getByRole("button", { name: AGENT_LABEL });
+    const profile = screen.getByRole("link", { name: "Default" });
+
+    // The agent ships with kandev: full weight.
+    expect(recordFlag(agent)).toBeNull();
+    expect(agent.className).toContain(FONT_MEDIUM);
+    // Its profile is the user's.
+    expect(recordFlag(profile)).toBe("true");
+    expect(profile.className).toContain(FONT_NORMAL);
+  });
+
+  it("marks a record with the dot its own page uses, in a full glyph box", () => {
+    setMenuMode("persistent", [AGENTS_ROW_KEY, AGENT_KEY, WORKSPACES_ROW_KEY]);
+    render(<SettingsTree pathname="/settings/preferences/appearance" />);
+
+    for (const name of [MAIN_WORKSPACE_NAME, "Default"]) {
+      const box = screen.getByRole("link", { name }).firstElementChild;
+      // Same footprint as a tabler glyph, so the label lands in the same column.
+      expect(box?.getAttribute("class")).toContain(GLYPH_BOX);
+      // The dot the Agents page puts in front of a profile.
+      expect(box?.firstElementChild?.getAttribute("class")).toContain(RECORD_DOT);
+    }
+  });
+
+  it("leaves a row that has a glyph of its own alone", () => {
+    setMenuMode("persistent", [AGENTS_ROW_KEY, AGENT_KEY, WORKSPACES_ROW_KEY, WORKSPACE_KEY]);
+    render(<SettingsTree pathname="/settings/preferences/appearance" />);
+
+    // An agent keeps its logo, and a workspace tab its icon — neither is a
+    // record, and neither gains a dot.
+    for (const row of [
+      screen.getByRole("button", { name: AGENT_LABEL }),
+      screen.getByRole("link", { name: "Repositories" }),
+    ]) {
+      expect(row.querySelector("svg, img")).not.toBeNull();
+      expect(row.innerHTML).not.toContain(RECORD_DOT);
+    }
+  });
+
 });
 
 describe("SettingsTree search", () => {

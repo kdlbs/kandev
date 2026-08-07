@@ -42,7 +42,9 @@ test.describe("Mobile settings discovery", () => {
     expect(resultBox!.height).toBeGreaterThanOrEqual(44);
     await result.click();
 
-    await expect(testPage).toHaveURL(/\/settings\/general\/terminal#setting-terminal-font-size$/);
+    await expect(testPage).toHaveURL(
+      /\/settings\/preferences\/terminal-editors#setting-terminal-font-size$/,
+    );
     const target = testPage.locator('[data-settings-target="setting-terminal-font-size"]');
     await expect(target).toHaveAttribute("data-settings-target-highlight", "true");
     await expect(testPage.getByTestId("terminal-font-size-input")).toBeFocused();

@@ -115,7 +115,7 @@ test.describe("Settings sidebar takeover", () => {
 
     // The gear pushes `/settings`, which on desktop hands off to the settings
     // page this device was last on — Appearance in a fresh profile.
-    await expect(testPage).toHaveURL(/\/settings\/general\/appearance$/);
+    await expect(testPage).toHaveURL(/\/settings\/preferences\/appearance$/);
     await expect(takeover).toBeVisible();
   });
 

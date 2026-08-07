@@ -9,8 +9,15 @@ import { usePlugins } from "@/hooks/domains/plugins/use-plugins";
 import { useSecrets } from "@/hooks/domains/settings/use-secrets";
 import { useSettingsDiscovery } from "@/hooks/domains/settings/use-settings-discovery";
 import { BUILT_IN_LAYOUT_PROFILES, isBuiltInLayoutOverride } from "@/lib/layout/layout-profiles";
-import { SettingsLeaf, SettingsSectionHeader } from "./settings-nav-primitives";
+import { SettingsBranch, SettingsLeaf, SettingsSectionHeader } from "./settings-nav-primitives";
 import { SettingsSearch } from "./settings-search";
+import { SettingsMenuNodeRow } from "./settings-menu-node";
+import type { SettingsMenuNode } from "./settings-menu-branches";
+import { useSettingsMenuBranches, useSettingsMenuForest } from "./use-settings-menu-branches";
+import {
+  useSettingsMenuExpansion,
+  type SettingsMenuExpansion,
+} from "./use-settings-menu-expansion";
 import {
   SETTINGS_MENU_SECTIONS,
   settingsMenuItemIsActive,
@@ -82,8 +89,77 @@ function MenuCountBadge({ count }: { count: number }) {
 }
 
 /**
- * The settings nav: a fixed two-level menu. Group labels are static section
- * headers — not clickable, no expand/collapse — and every row is a page.
+ * One menu row: a plain link, or — in a tree mode, for a row whose page owns
+ * records — a disclosure holding them.
+ *
+ * The active rule is what keeps the two shapes honest. `settingsMenuItemIsActive`
+ * marks a row for its own page *and* everything under it, which is right when
+ * the sub-page has no row of its own. Once a branch renders that sub-page as a
+ * row, the deeper row is the page you are on and the ancestor is merely the way
+ * there — so the row defers whenever a node claims the route, and exactly one
+ * row in the menu carries `data-active` in every mode.
+ */
+function SettingsMenuRow({
+  item,
+  pathname,
+  count,
+  branch,
+  expansion,
+}: {
+  item: SettingsMenuItem;
+  pathname: string;
+  count: number | undefined;
+  branch: SettingsMenuNode | undefined;
+  expansion: SettingsMenuExpansion;
+}) {
+  const { t } = useTranslation();
+  const label = t(item.labelKey);
+  const labelSuffix = count !== undefined ? <MenuCountBadge count={count} /> : undefined;
+
+  if (!branch) {
+    return (
+      <SettingsLeaf
+        href={item.href}
+        label={label}
+        icon={item.icon}
+        isActive={settingsMenuItemIsActive(item, pathname) && expansion.activeKey === null}
+        labelSuffix={labelSuffix}
+      />
+    );
+  }
+
+  return (
+    <SettingsBranch
+      label={label}
+      icon={item.icon}
+      labelSuffix={labelSuffix}
+      href={item.href}
+      isActive={expansion.activeKey === branch.key}
+      expanded={expansion.isExpanded(branch.key)}
+      onToggle={() => expansion.toggle(branch.key)}
+    >
+      {(branch.children ?? []).map((node) => (
+        <SettingsMenuNodeRow
+          key={node.key}
+          node={node}
+          depth={1}
+          activeKey={expansion.activeKey}
+          expansion={expansion}
+        />
+      ))}
+    </SettingsBranch>
+  );
+}
+
+/**
+ * The settings nav. Group labels are static section headers — not clickable, no
+ * expand/collapse — and every row is a page.
+ *
+ * How deep it goes is a per-device preference (Settings → Appearance):
+ * `flat` is the fixed two-level menu and the default; `accordion` and
+ * `persistent` additionally grow the Workspaces, Agents and Executors rows into
+ * their records, differing only in whether opening one branch closes the others.
+ * See `settings-menu-branches.ts` for what those branches contain.
  *
  * Rendered both inside the sidebar settings takeover and, on a phone, as the
  * `/settings` index page body.
@@ -105,6 +181,10 @@ export function SettingsTree({
   const discoveryItems = useSettingsDiscovery();
   const counts = useSettingsMenuCounts();
   const [query, setQuery] = useState("");
+  const mode = useAppStore((s) => s.settingsMenu.mode);
+  const branches = useSettingsMenuBranches(mode);
+  const forest = useSettingsMenuForest(branches);
+  const expansion = useSettingsMenuExpansion(mode, forest, pathname);
 
   const itemVisible = (item: SettingsMenuItem) => {
     if (item.requires === "account") return showAccountItems;
@@ -129,21 +209,16 @@ export function SettingsTree({
             return (
               <div key={section.id} className="flex flex-col gap-0.5">
                 <SettingsSectionHeader label={t(section.labelKey)} />
-                {items.map((item) => {
-                  const count = item.countKey ? counts[item.countKey] : undefined;
-                  return (
-                    <SettingsLeaf
-                      key={item.href}
-                      href={item.href}
-                      label={t(item.labelKey)}
-                      icon={item.icon}
-                      isActive={settingsMenuItemIsActive(item, pathname)}
-                      {...(count !== undefined
-                        ? { labelSuffix: <MenuCountBadge count={count} /> }
-                        : {})}
-                    />
-                  );
-                })}
+                {items.map((item) => (
+                  <SettingsMenuRow
+                    key={item.href}
+                    item={item}
+                    pathname={pathname}
+                    count={item.countKey ? counts[item.countKey] : undefined}
+                    branch={branches[item.href]}
+                    expansion={expansion}
+                  />
+                ))}
                 {/* Plugins may add rows here, directly below the Plugins page. */}
                 {section.id === "workspaces" && <PluginSlot name="settings-nav" />}
               </div>
