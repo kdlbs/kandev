@@ -154,6 +154,7 @@ type httpCreateWorkflowRequest struct {
 	WorkspaceID        string  `json:"workspace_id"`
 	Name               string  `json:"name"`
 	Description        string  `json:"description,omitempty"`
+	Prompt             string  `json:"prompt,omitempty"`
 	WorkflowTemplateID *string `json:"workflow_template_id,omitempty"`
 }
 
@@ -167,10 +168,14 @@ func (h *WorkflowHandlers) httpCreateWorkflow(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "workspace_id and name are required"})
 		return
 	}
+	if h.rejectReadOnlyWorkspaceHTTP(c, body.WorkspaceID) {
+		return
+	}
 	workflow, err := h.service.CreateWorkflow(c.Request.Context(), &service.CreateWorkflowRequest{
 		WorkspaceID:        body.WorkspaceID,
 		Name:               body.Name,
 		Description:        body.Description,
+		Prompt:             body.Prompt,
 		WorkflowTemplateID: body.WorkflowTemplateID,
 	})
 	if err != nil {
@@ -186,33 +191,83 @@ func (h *WorkflowHandlers) httpCreateWorkflow(c *gin.Context) {
 // service layer directly and never hits these handlers.
 const workflowReadOnlyMsg = "workflow is managed by GitHub sync and is read-only; edit its definition in the synced repository"
 
-// isWorkflowReadOnly reports whether the workflow is managed by workflow
-// sync. Lookup errors surface as (false, err) so callers keep their existing
-// not-found handling.
-func (h *WorkflowHandlers) isWorkflowReadOnly(ctx context.Context, id string) (bool, error) {
+// workspaceReadOnlyMsg is returned when a UI mutation targets the dedicated
+// Improve Kandev workspace, whose workflows and repositories are read-only.
+const workspaceReadOnlyMsg = "this workspace is managed by Improve Kandev and is read-only"
+
+// readOnlyWorkflowMessage returns the reason a workflow is read-only, when it
+// is: GitHub-sync-managed workflows and workflows living in the dedicated
+// Improve Kandev workspace are both immutable. Lookup errors surface as
+// ("", false) so callers keep their existing not-found handling.
+func (h *WorkflowHandlers) readOnlyWorkflowMessage(ctx context.Context, id string) (string, bool) {
 	workflow, err := h.service.GetWorkflow(ctx, id)
 	if err != nil {
-		return false, err
+		return "", false
 	}
-	return workflow.Source == models.WorkflowSourceGitHub, nil
+	if workflow.Source == models.WorkflowSourceGitHub {
+		return workflowReadOnlyMsg, true
+	}
+	if workflow.WorkspaceID != "" {
+		workspace, err := h.service.GetWorkspace(ctx, workflow.WorkspaceID)
+		if err != nil {
+			return "", false
+		}
+		if workspace.IsImproveKandev() {
+			return workspaceReadOnlyMsg, true
+		}
+	}
+	return "", false
 }
 
 func (h *WorkflowHandlers) rejectReadOnlyWorkflowHTTP(c *gin.Context, id string) bool {
-	readOnly, err := h.isWorkflowReadOnly(c.Request.Context(), id)
-	if err != nil {
-		handleNotFound(c, h.logger, err, "workflow not found")
-		return true
-	}
-	if readOnly {
-		c.JSON(http.StatusConflict, gin.H{"error": workflowReadOnlyMsg})
+	if msg, readOnly := h.readOnlyWorkflowMessage(c.Request.Context(), id); readOnly {
+		c.JSON(http.StatusConflict, gin.H{"error": msg})
 		return true
 	}
 	return false
 }
 
+// rejectReadOnlyWorkspaceHTTP returns 409 when the workspace is the dedicated
+// Improve Kandev workspace (matched by exact name). Lookup errors surface as
+// not-found so callers keep their existing error handling.
+func (h *WorkflowHandlers) rejectReadOnlyWorkspaceHTTP(c *gin.Context, workspaceID string) bool {
+	if workspaceID == "" {
+		return false
+	}
+	workspace, err := h.service.GetWorkspace(c.Request.Context(), workspaceID)
+	if err != nil {
+		handleNotFound(c, h.logger, err, "workspace not found")
+		return true
+	}
+	if workspace.IsImproveKandev() {
+		c.JSON(http.StatusConflict, gin.H{"error": workspaceReadOnlyMsg})
+		return true
+	}
+	return false
+}
+
+// wsRejectReadOnlyWorkspace returns a conflict WS error when the workspace is
+// the dedicated Improve Kandev workspace. Returns (nil, false) when allowed.
+func (h *WorkflowHandlers) wsRejectReadOnlyWorkspace(ctx context.Context, msg *ws.Message, workspaceID string) (*ws.Message, bool) {
+	if workspaceID == "" {
+		return nil, false
+	}
+	workspace, err := h.service.GetWorkspace(ctx, workspaceID)
+	if err != nil {
+		errMsg, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "Workspace not found", nil)
+		return errMsg, true
+	}
+	if workspace.IsImproveKandev() {
+		errMsg, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeConflict, workspaceReadOnlyMsg, nil)
+		return errMsg, true
+	}
+	return nil, false
+}
+
 type httpUpdateWorkflowRequest struct {
 	Name           *string `json:"name"`
 	Description    *string `json:"description"`
+	Prompt         *string `json:"prompt"`
 	AgentProfileID *string `json:"agent_profile_id"`
 }
 
@@ -229,6 +284,7 @@ func (h *WorkflowHandlers) httpUpdateWorkflow(c *gin.Context) {
 	workflow, err := h.service.UpdateWorkflow(c.Request.Context(), id, &service.UpdateWorkflowRequest{
 		Name:           body.Name,
 		Description:    body.Description,
+		Prompt:         body.Prompt,
 		AgentProfileID: body.AgentProfileID,
 	})
 	if err != nil {
@@ -385,6 +441,7 @@ type wsCreateWorkflowRequest struct {
 	WorkspaceID        string  `json:"workspace_id"`
 	Name               string  `json:"name"`
 	Description        string  `json:"description,omitempty"`
+	Prompt             string  `json:"prompt,omitempty"`
 	WorkflowTemplateID *string `json:"workflow_template_id,omitempty"`
 }
 
@@ -399,11 +456,15 @@ func (h *WorkflowHandlers) wsCreateWorkflow(ctx context.Context, msg *ws.Message
 	if req.WorkspaceID == "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "workspace_id is required", nil)
 	}
+	if errMsg, blocked := h.wsRejectReadOnlyWorkspace(ctx, msg, req.WorkspaceID); blocked {
+		return errMsg, nil
+	}
 
 	workflow, err := h.service.CreateWorkflow(ctx, &service.CreateWorkflowRequest{
 		WorkspaceID:        req.WorkspaceID,
 		Name:               req.Name,
 		Description:        req.Description,
+		Prompt:             req.Prompt,
 		WorkflowTemplateID: req.WorkflowTemplateID,
 	})
 	if err != nil {
@@ -437,6 +498,7 @@ type wsUpdateWorkflowRequest struct {
 	ID             string  `json:"id"`
 	Name           *string `json:"name,omitempty"`
 	Description    *string `json:"description,omitempty"`
+	Prompt         *string `json:"prompt,omitempty"`
 	AgentProfileID *string `json:"agent_profile_id,omitempty"`
 }
 
@@ -448,13 +510,14 @@ func (h *WorkflowHandlers) wsUpdateWorkflow(ctx context.Context, msg *ws.Message
 	if req.ID == "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "id is required", nil)
 	}
-	if readOnly, roErr := h.isWorkflowReadOnly(ctx, req.ID); roErr == nil && readOnly {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeConflict, workflowReadOnlyMsg, nil)
+	if reason, readOnly := h.readOnlyWorkflowMessage(ctx, req.ID); readOnly {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeConflict, reason, nil)
 	}
 
 	workflow, err := h.service.UpdateWorkflow(ctx, req.ID, &service.UpdateWorkflowRequest{
 		Name:           req.Name,
 		Description:    req.Description,
+		Prompt:         req.Prompt,
 		AgentProfileID: req.AgentProfileID,
 	})
 	if err != nil {
@@ -471,8 +534,8 @@ func (h *WorkflowHandlers) wsDeleteWorkflow(ctx context.Context, msg *ws.Message
 		ID string `json:"id"`
 	}
 	if err := msg.ParsePayload(&req); err == nil && req.ID != "" {
-		if readOnly, roErr := h.isWorkflowReadOnly(ctx, req.ID); roErr == nil && readOnly {
-			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeConflict, workflowReadOnlyMsg, nil)
+		if reason, readOnly := h.readOnlyWorkflowMessage(ctx, req.ID); readOnly {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeConflict, reason, nil)
 		}
 	}
 	return wsHandleIDRequest(ctx, msg, h.logger, "failed to delete workflow",
@@ -499,6 +562,9 @@ func (h *WorkflowHandlers) httpReorderWorkflows(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "workflow_ids is required"})
 		return
 	}
+	if h.rejectReadOnlyWorkspaceHTTP(c, workspaceID) {
+		return
+	}
 	if err := h.service.ReorderWorkflows(c.Request.Context(), workspaceID, req.WorkflowIDs); err != nil {
 		h.logger.Error("failed to reorder workflows", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to reorder workflows"})
@@ -520,6 +586,9 @@ func (h *WorkflowHandlers) wsReorderWorkflows(ctx context.Context, msg *ws.Messa
 	}
 	if len(req.WorkflowIDs) == 0 {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "workflow_ids is required", nil)
+	}
+	if errMsg, blocked := h.wsRejectReadOnlyWorkspace(ctx, msg, req.WorkspaceID); blocked {
+		return errMsg, nil
 	}
 	if err := h.service.ReorderWorkflows(ctx, req.WorkspaceID, req.WorkflowIDs); err != nil {
 		h.logger.Error("failed to reorder workflows", zap.Error(err))

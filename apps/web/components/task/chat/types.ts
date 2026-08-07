@@ -103,6 +103,14 @@ export type ShellExecOutputSummary = {
   truncated?: boolean;
 };
 
+export function hasProjectedShellOutput(output: ShellExecOutputSummary | undefined): boolean {
+  return (
+    Boolean(output?.has_output) ||
+    (output?.stdout_bytes ?? 0) > 0 ||
+    (output?.stderr_bytes ?? 0) > 0
+  );
+}
+
 export type ShellExecPayload = {
   command?: string;
   work_dir?: string;

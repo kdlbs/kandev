@@ -227,8 +227,7 @@
         "/settings/integrations/gitlab",
         "/settings/integrations/jira",
         "/settings/integrations/linear",
-        "/settings/integrations/sentry",
-        "/settings/integrations/slack"
+        "/settings/integrations/sentry"
       ],
       "mcpTools": [
         "get_task_mr_automation_kandev",

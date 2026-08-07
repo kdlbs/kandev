@@ -537,6 +537,46 @@ func (r *sqliteRepository) CountBySession(ctx context.Context, sessionID string)
 	return n, err
 }
 
+// CountPendingByTaskIDs counts pending entries per task, excluding durable
+// lifecycle rows reserved in flight (filtered in Go via IsReservedInFlight).
+func (r *sqliteRepository) CountPendingByTaskIDs(ctx context.Context, taskIDs []string) (map[string]int, error) {
+	counts := make(map[string]int, len(taskIDs))
+	for _, taskID := range taskIDs {
+		counts[taskID] = 0
+	}
+	if len(taskIDs) == 0 {
+		return counts, nil
+	}
+	query, args, err := sqlx.In(`
+		SELECT id, session_id, task_id, position, content, model, plan_mode,
+		       attachments_json, metadata_json, queued_at, queued_by
+		FROM queued_messages
+		WHERE task_id IN (?)
+	`, taskIDs)
+	if err != nil {
+		return nil, fmt.Errorf("count pending by task ids: %w", err)
+	}
+	rows, err := r.ro.QueryxContext(ctx, r.ro.Rebind(query), args...)
+	if err != nil {
+		return nil, fmt.Errorf("count pending by task ids: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		msg, err := scanQueuedRow(rows)
+		if err != nil {
+			return nil, fmt.Errorf("count pending by task ids scan: %w", err)
+		}
+		if msg.IsReservedInFlight() {
+			continue
+		}
+		counts[msg.TaskID]++
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("count pending by task ids rows: %w", err)
+	}
+	return counts, nil
+}
+
 func (r *sqliteRepository) TakeHead(ctx context.Context, sessionID string) (*QueuedMessage, error) {
 	// Share the per-session lock with MergeIntoAbove so a drain and a merge on
 	// the same queue are serialized in-process, not just at the DB layer.

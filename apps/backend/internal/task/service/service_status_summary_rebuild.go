@@ -55,6 +55,13 @@ func (s *Service) HydrateMissingTaskStatusSummaries(
 	}
 	prByTask, prObserved := s.loadSummaryPRs(ctx, taskIDs(missing))
 	gitBySession, gitObserved := s.loadSummaryGit(ctx, sessionIDsForTasks(missing, sessionsByTask))
+	queuedByTask, queuedErr := s.CountPendingQueuedByTaskIDs(ctx, taskIDs(missing))
+	if queuedErr != nil {
+		if s.logger != nil {
+			s.logger.Warn("failed to load queued prompt counts for status summary repair", zap.Error(queuedErr))
+		}
+		queuedByTask = map[string]int{}
+	}
 	now := time.Now().UTC()
 	for _, task := range missing {
 		if task == nil || task.ID == "" {
@@ -67,6 +74,7 @@ func (s *Service) HydrateMissingTaskStatusSummaries(
 			gitObserved,
 			prByTask[task.ID],
 			prObserved,
+			queuedByTask[task.ID],
 			now,
 		)
 		next := statussummary.BuildFromAuthoritative(input)
@@ -192,16 +200,18 @@ func (s *Service) rebuildInput(
 	gitObserved bool,
 	prs []statussummary.PullRequestInput,
 	prObserved bool,
+	queuedPromptCount int,
 	now time.Time,
 ) statussummary.RebuildInput {
 	input := statussummary.RebuildInput{
-		Sessions:         make([]statussummary.RebuildSession, 0, len(sessions)),
-		PendingActions:   make(map[string]string),
-		ActivityObserved: s.foregroundActivity != nil,
-		PullRequests:     prs,
-		PRObserved:       prObserved,
-		GitObserved:      gitObserved,
-		Now:              now,
+		Sessions:          make([]statussummary.RebuildSession, 0, len(sessions)),
+		PendingActions:    make(map[string]string),
+		ActivityObserved:  s.foregroundActivity != nil,
+		PullRequests:      prs,
+		PRObserved:        prObserved,
+		GitObserved:       gitObserved,
+		QueuedPromptCount: maxInt(queuedPromptCount, 0),
+		Now:               now,
 	}
 	countProvider, hasCountProvider := s.foregroundActivity.(activeSubagentCountProvider)
 	for _, session := range sessions {

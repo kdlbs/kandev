@@ -24,11 +24,6 @@ const mocks = vi.hoisted(() => ({
       }>,
     },
   },
-  t: vi.fn((key: string) => key),
-}));
-
-vi.mock("react-i18next", () => ({
-  useTranslation: () => ({ t: mocks.t }),
 }));
 
 vi.mock("@/components/state-provider", () => ({

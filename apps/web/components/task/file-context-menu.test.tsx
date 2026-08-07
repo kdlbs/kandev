@@ -7,11 +7,10 @@ vi.mock("@/components/toast-provider", () => ({
   useToast: () => ({ toast: vi.fn() }),
 }));
 
-vi.mock("react-i18next", () => ({
-  useTranslation: () => ({
-    t: (key: string) => ({ "chat:addToChatContext": "Add to chat context" })[key] ?? key,
-  }),
-}));
+// No `react-i18next` stub: `vitest.setup.ts` bootstraps a real i18next instance
+// from the shipped catalogs, so these assertions exercise the copy a user
+// actually sees. A key-echoing stub silently turns every migrated label into a
+// raw `ns:key` and the assertions then only prove the stub works.
 
 import { FileContextMenu } from "./file-context-menu";
 

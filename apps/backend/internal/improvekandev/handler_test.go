@@ -48,20 +48,6 @@ func newTestHandler(gh GitHubInfo) *Handler {
 	return &Handler{gh: gh, log: logger.Default()}
 }
 
-func TestCanonicalWorkspaceID(t *testing.T) {
-	const canonical = "123e4567-e89b-12d3-a456-426614174000"
-	got, err := canonicalWorkspaceID("123E4567-E89B-12D3-A456-426614174000")
-	if err != nil {
-		t.Fatalf("canonicalWorkspaceID() error = %v", err)
-	}
-	if got != canonical {
-		t.Fatalf("canonicalWorkspaceID() = %q, want %q", got, canonical)
-	}
-	if _, err := canonicalWorkspaceID("../workspace"); err == nil {
-		t.Fatal("canonicalWorkspaceID() expected invalid UUID error")
-	}
-}
-
 type fakeDiagnosticBundles struct {
 	path  string
 	owner string

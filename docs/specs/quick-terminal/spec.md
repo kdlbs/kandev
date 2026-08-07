@@ -1,7 +1,7 @@
 ---
-status: shipped
+status: building
 created: 2026-08-03
-updated: 2026-08-05
+updated: 2026-08-06
 owner: kandev
 ---
 
@@ -27,7 +27,9 @@ them without losing work, and return to the most recent terminal without managin
 - The tab-strip plus button opens a creation menu grouped like the task-detail Dockview add menu:
   an **Agents** section with **New Agent**, a separator, and a **Terminals** section with
   **New Terminal**. Existing tabs remain directly selectable in the tab strip rather than being
-  duplicated in the creation menu.
+  duplicated in the creation menu. Because the plus button sits at the leading edge of the tab
+  strip, its menu opens toward the trailing edge (aligned to the button's start) so it does not
+  overhang the workspace edge.
 - Choosing **New Agent** preserves the current ordinary/configuration setup flow. Choosing
   **New Terminal** always creates and activates a distinct host-shell terminal, even when another
   terminal exists.
@@ -42,6 +44,10 @@ them without losing work, and return to the most recent terminal without managin
 - Switching to another tab or dismissing the shared dialog detaches the terminal presentation but
   leaves its host-shell session running. Reopening the dialog or reselecting the tab reconnects to
   that same session and replays the backend's available recent output.
+- A quick-terminal host-shell session has no idle or wall-clock timeout. Once started it runs until
+  the user closes its tab, the shell process exits, or the backend stops. A long-running or quiet
+  process therefore keeps running while the dialog is closed and survives page reloads. This differs
+  from the Agents-page agent-login sessions, which retain their existing idle and hard timeouts.
 - Closing a terminal tab stops that tab's host-shell session and removes only that tab. Closing a
   chat tab retains the existing Quick Chat confirmation and task-deletion behavior.
 - After the active tab is removed, the dialog selects the nearest remaining tab in the same
@@ -151,6 +157,7 @@ legacy singleton login surface retains its existing behavior and authorization c
 | Connecting | Host-shell start succeeds | Store the returned session ID, attach its stream, and mark the tab running. |
 | Running | Chat/terminal tab switch or dialog dismissal | Detach the rendered terminal; keep the backend PTY and tab descriptor alive. |
 | Detached | Tab selected or terminal launcher used | Reattach to the same session and replay available buffered output. |
+| Running or detached | Quiet or long-running work | The session has no idle or hard timeout; it stays running across tab switches, dialog dismissal, and page reloads until closed, exited, or the backend stops. |
 | Running or detached | PTY exits | Mark the tab exited when observed; retain it for inspection. |
 | Connecting, running, exited, or error | Terminal tab close | Stop the session when one exists, remove the tab, select the nearest remaining same-workspace tab, or close the dialog when none remains. |
 
@@ -168,9 +175,9 @@ checks, and Agents-page authorization behavior remain unchanged.
 - Closing a terminal tab while its start request is pending removes the tab and stops the session if
   that request later succeeds. Development StrictMode replay uses the stable client ID and cannot
   create or stop a sibling session.
-- A detached session may exit or reach the existing backend idle/hard timeout. Reattaching to a
-  session that no longer exists marks the tab exited or unavailable; it does not create a
-  replacement implicitly.
+- A detached session may exit on its own (for example the user runs `exit` or the shell process
+  crashes). It is not reaped by an idle or hard timeout. Reattaching to a session that no longer
+  exists marks the tab exited or unavailable; it does not create a replacement implicitly.
 - A descriptor whose PTY disappeared during a backend restart or while no client was attached is
   retained with an exited/unavailable status and a cleared session association. The user must
   choose **New Terminal** to create a replacement.
@@ -191,9 +198,11 @@ checks, and Agents-page authorization behavior remain unchanged.
   for the same authenticated user and workspace. The backend is the durable source of descriptor
   membership, sequence, lifecycle snapshot, and latest session association.
 - Host-shell processes and their rolling output buffers live only in backend memory. Dismissing the
-  shared dialog does not stop them, but explicit tab close, process exit, the existing idle/hard
-  timeout, or a backend restart does. A backend restart leaves the descriptor behind and marks it
-  unavailable until the user explicitly creates a new terminal.
+  shared dialog does not stop them, and quick-terminal sessions have no idle or hard timeout, so
+  only explicit tab close, the shell process exiting, or the backend stopping ends one. A backend
+  restart leaves the descriptor behind and marks it unavailable until the user explicitly creates a
+  new terminal. On graceful backend shutdown all live quick-terminal sessions are stopped rather
+  than left to leak.
 - Reconnection can replay only the backend's existing rolling output buffer; this feature does not
   add durable terminal history.
 
@@ -217,6 +226,13 @@ checks, and Agents-page authorization behavior remain unchanged.
 - **GIVEN** a running terminal tab with a persisted descriptor, **WHEN** the user refreshes the page,
   **THEN** the Quick Chat dialog restores one terminal tab with the same sequence and reattaches to
   the same live session without creating a duplicate PTY.
+- **GIVEN** a running terminal tab whose process has produced no output and stayed detached for
+  longer than the agent-login idle timeout, **WHEN** the user refreshes the page and reopens Quick
+  Chat, **THEN** the tab reattaches to the same still-running session rather than showing exited and
+  rather than starting a new numbered terminal.
+- **GIVEN** the plus button at the leading edge of the tab strip, **WHEN** the user opens the
+  creation menu on a pointer device, **THEN** the menu opens toward the trailing edge and stays
+  within the viewport instead of overhanging the leading edge.
 - **GIVEN** a persisted terminal descriptor whose PTY was lost during a backend restart, **WHEN** the
   user opens Quick Chat, **THEN** the tab remains visible as exited/unavailable and no replacement
   session starts until **New Terminal** is chosen.
@@ -244,6 +260,10 @@ checks, and Agents-page authorization behavior remain unchanged.
 
 - Persisting terminal output or keeping a PTY process alive across a backend restart. The durable
   descriptor only makes the tab discoverable and reports that its old session is unavailable.
+  Removing the idle/hard timeout keeps a quiet session alive while the backend runs; it does not
+  make the process survive the backend stopping.
+- Changing the Agents-page agent-login session lifecycle, which keeps its existing idle and hard
+  timeouts.
 - Synchronizing terminal input or output streams between multiple attached clients beyond the
   existing PTY subscription and rolling buffer behavior.
 - Task-workspace terminals, repository working-directory selection, or moving terminals between
@@ -257,3 +277,5 @@ checks, and Agents-page authorization behavior remain unchanged.
 [Quick Chat and Terminal Tabs implementation](../../plans/quick-terminal/plan.md)
 
 [Quick Terminal refresh persistence repair](../../plans/quick-terminal-refresh-persistence/plan.md)
+
+[Quick Terminal durable session lifecycle and menu alignment](../../plans/quick-terminal-durable-lifecycle/plan.md)

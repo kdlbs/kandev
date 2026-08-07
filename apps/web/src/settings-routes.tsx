@@ -19,7 +19,6 @@ import IntegrationsGitLabPage from "@/app/settings/integrations/gitlab/page";
 import IntegrationsJiraPage from "@/app/settings/integrations/jira/page";
 import IntegrationsLinearPage from "@/app/settings/integrations/linear/page";
 import IntegrationsSentryPage from "@/app/settings/integrations/sentry/page";
-import IntegrationsSlackPage from "@/app/settings/integrations/slack/page";
 import PluginsSettingsPage from "@/app/settings/plugins/page";
 import PluginDetailPage from "@/app/settings/plugins/[pluginId]/page";
 import MessageQueueSettingsPage from "@/app/settings/general/message-queue/page";
@@ -88,7 +87,13 @@ import {
 import { listWorkflowTemplates } from "@/lib/api/domains/workflow-api";
 import { listRepositories, listWorkspaces } from "@/lib/api/domains/workspace-api";
 import { useRouter } from "@/lib/routing/client-router";
-import { safeDecodePathSegment } from "@/lib/routing/path";
+import {
+  matchSingle,
+  matchDouble,
+  normalizeSettingsPath,
+  safeDecodePathSegment,
+} from "@/lib/routing/path";
+import { IMPROVE_KANDEV_WORKSPACE_NAME } from "@/components/improve-kandev-dialog-model";
 import {
   mapWorkspaceItem,
   readActiveWorkspaceCookie,
@@ -169,7 +174,6 @@ const SETTINGS_ROUTES: Record<string, RouteRenderer> = {
   "/settings/integrations/jira": () => renderIntegrationSettingsRoute("jira"),
   "/settings/integrations/linear": () => renderIntegrationSettingsRoute("linear"),
   "/settings/integrations/sentry": () => renderIntegrationSettingsRoute("sentry"),
-  "/settings/integrations/slack": () => renderIntegrationSettingsRoute("slack"),
   "/settings/system": () => <SettingsRedirect to="/settings/system/status" />,
   "/settings/system/users": () => (
     <SystemRouteShell titleKey="system:navUsers" descriptionKey="system:usersPageDescription">
@@ -394,8 +398,6 @@ function renderIntegrationSettingsRoute(section: string | null, workspaceId?: st
       return <IntegrationsLinearPage workspaceId={workspaceId} />;
     case "sentry":
       return <IntegrationsSentryPage workspaceId={workspaceId} />;
-    case "slack":
-      return <IntegrationsSlackPage workspaceId={workspaceId} />;
     default:
       return null;
   }
@@ -572,7 +574,11 @@ function WorkspaceRepositoriesRoute({ workspaceId }: { workspaceId: string }) {
 
   if (!state) return null;
   return (
-    <WorkspaceRepositoriesClient workspace={state.workspace} repositories={state.repositories} />
+    <WorkspaceRepositoriesClient
+      workspace={state.workspace}
+      repositories={state.repositories}
+      isImproveWorkspace={state.workspace?.name === IMPROVE_KANDEV_WORKSPACE_NAME}
+    />
   );
 }
 
@@ -600,6 +606,7 @@ function WorkspaceWorkflowsRoute({ workspaceId }: { workspaceId: string }) {
       workspace={state.workspace}
       workflows={state.workflows}
       workflowTemplates={state.workflowTemplates}
+      isImproveWorkspace={state.workspace?.name === IMPROVE_KANDEV_WORKSPACE_NAME}
     />
   );
 }
@@ -624,9 +631,17 @@ async function loadWorkspaceRepositoriesRoute(
 async function loadWorkspaceWorkflowsRoute(
   workspaceId: string,
 ): Promise<WorkspaceWorkflowsRouteState> {
-  const [workspace, workflowResponse, templateResponse] = await Promise.all([
-    fetchJson<Workspace>(`/api/v1/workspaces/${workspaceId}`, { cache: "no-store" }),
-    listWorkflows(workspaceId, { cache: "no-store" }),
+  const workspace = await fetchJson<Workspace>(`/api/v1/workspaces/${workspaceId}`, {
+    cache: "no-store",
+  });
+  // The dedicated Improve Kandev workspace lists its hidden workflows
+  // (improve-kandev, report-kandev-issue) read-only; other workspaces keep
+  // them hidden.
+  const [workflowResponse, templateResponse] = await Promise.all([
+    listWorkflows(workspaceId, {
+      includeHidden: workspace.name === IMPROVE_KANDEV_WORKSPACE_NAME,
+      cache: "no-store",
+    }),
     listWorkflowTemplates({ cache: "no-store" }),
   ]);
 
@@ -647,22 +662,4 @@ function SettingsRouteFallback({ pathname }: { pathname: string }) {
       </Trans>
     </div>
   );
-}
-
-function matchSingle(pathname: string, pattern: RegExp): string | null {
-  const match = pathname.match(pattern);
-  return safeDecodePathSegment(match?.[1]);
-}
-
-function matchDouble(pathname: string, pattern: RegExp): [string, string] | null {
-  const match = pathname.match(pattern);
-  if (!match?.[1] || !match[2]) return null;
-  const first = safeDecodePathSegment(match[1]);
-  const second = safeDecodePathSegment(match[2]);
-  return first && second ? [first, second] : null;
-}
-
-function normalizeSettingsPath(pathname: string): string {
-  if (!pathname || pathname === "/settings/") return "/settings";
-  return pathname.length > 1 && pathname.endsWith("/") ? pathname.slice(0, -1) : pathname;
 }

@@ -81,7 +81,7 @@ export function TaskTopBarTitle({ taskId, taskTitle, isArchived }: TaskTopBarTit
     return (
       <Input
         data-testid="task-title-rename-input"
-        aria-label="Task title"
+        aria-label={t("task:taskTitle")}
         autoFocus
         value={draft}
         onChange={(e) => setDraft(clampTaskTitleInput(e.target.value))}
@@ -110,13 +110,13 @@ export function TaskTopBarTitle({ taskId, taskTitle, isArchived }: TaskTopBarTit
                 onDoubleClick={startEditing}
                 onKeyDown={canRename ? handleTitleKeyDown : undefined}
               >
-                {taskTitle ?? "Task details"}
+                {taskTitle ?? t("task:taskDetails")}
               </BreadcrumbPage>
             </TooltipTrigger>
             <TooltipContent className="max-w-sm whitespace-normal break-words">
-              <span className="block">{taskTitle ?? "Task details"}</span>
+              <span className="block">{taskTitle ?? t("task:taskDetails")}</span>
               {canRename && (
-                <span className="mt-1 block">Double-click to edit (or press Enter)</span>
+                <span className="mt-1 block">{t("task:doubleClickToEditOrPress")}</span>
               )}
             </TooltipContent>
           </Tooltip>

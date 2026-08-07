@@ -134,3 +134,21 @@ describe("toSheetItem", () => {
     ).toBe(ERROR_PREVIEW);
   });
 });
+
+describe("toSheetItem queued prompt count", () => {
+  it("carries the queued prompt count from the task status summary", () => {
+    const item = toSheetItem(
+      task({ statusSummary: { revision: 3, updated_at: UPDATED_AT, queued_prompt_count: 2 } }),
+      emptyCtx(),
+    );
+    expect(item.queuedCount).toBe(2);
+  });
+
+  it("leaves queuedCount undefined when nothing is queued", () => {
+    const item = toSheetItem(
+      task({ statusSummary: { revision: 4, updated_at: UPDATED_AT } }),
+      emptyCtx(),
+    );
+    expect(item.queuedCount).toBeUndefined();
+  });
+});

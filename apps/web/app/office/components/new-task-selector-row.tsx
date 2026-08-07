@@ -14,6 +14,7 @@ import { useAppStore } from "@/components/state-provider";
 import type { AgentProfile, Project } from "@/lib/state/slices/office/types";
 import type { IssueDraft } from "./new-task-draft";
 import { ParticipantRow } from "./new-task-participant-row";
+import { Trans, useTranslation } from "react-i18next";
 
 type Props = {
   draft: IssueDraft;
@@ -29,12 +30,13 @@ function AgentPickerPopover({
   selectedId: string;
   onSelect: (id: string) => void;
 }) {
+  const { t } = useTranslation();
   const selected = agents.find((a) => a.id === selectedId);
   return (
     <Popover>
       <PopoverTrigger asChild>
         <Button variant="outline" size="sm" className="cursor-pointer h-7 text-xs">
-          {selected?.name ?? "Assignee"}
+          {selected?.name ?? t("office:assignee")}
         </Button>
       </PopoverTrigger>
       <PopoverContent className="w-48 p-1" align="start">
@@ -43,7 +45,7 @@ function AgentPickerPopover({
           className="w-full text-left px-2 py-1.5 text-sm rounded hover:bg-muted cursor-pointer"
           onClick={() => onSelect("")}
         >
-          Unassigned
+          {t("office:unassigned")}
         </button>
         {agents.map((agent) => (
           <button
@@ -69,12 +71,13 @@ function ProjectPickerPopover({
   selectedId: string;
   onSelect: (id: string) => void;
 }) {
+  const { t } = useTranslation();
   const selected = projects.find((p) => p.id === selectedId);
   return (
     <Popover>
       <PopoverTrigger asChild>
         <Button variant="outline" size="sm" className="cursor-pointer h-7 text-xs">
-          {selected?.name ?? "Project"}
+          {selected?.name ?? t("office:project")}
         </Button>
       </PopoverTrigger>
       <PopoverContent className="w-48 p-1" align="start">
@@ -83,7 +86,7 @@ function ProjectPickerPopover({
           className="w-full text-left px-2 py-1.5 text-sm rounded hover:bg-muted cursor-pointer"
           onClick={() => onSelect("")}
         >
-          No project
+          {t("office:noProject")}
         </button>
         {projects.map((project) => (
           <button
@@ -107,24 +110,34 @@ function ProjectPickerPopover({
 }
 
 export function NewTaskSelectorRow({ draft, onUpdate }: Props) {
+  const { t } = useTranslation();
   const agents = useAppStore((s) => s.office.agentProfiles);
   const projects = useAppStore((s) => s.office.projects);
 
   return (
     <div className="space-y-2">
       <div className="flex items-center gap-2 text-sm text-muted-foreground">
-        <span>For</span>
-        <AgentPickerPopover
-          agents={agents}
-          selectedId={draft.assigneeId}
-          onSelect={(id) => onUpdate({ assigneeId: id })}
-        />
-        <span>in</span>
-        <ProjectPickerPopover
-          projects={projects}
-          selectedId={draft.projectId}
-          onSelect={(id) => onUpdate({ projectId: id })}
-        />
+        {/*
+          One key, not four: "For <agent> in <project>" is a sentence whose word
+          order changes per language, and two separately-keyed fragments would
+          freeze the English order. The pickers are element children so a
+          translator can move them; `<Trans>` renders into a fragment, so they
+          stay direct children of this flex row.
+        */}
+        <Trans i18nKey="office:forAgentInProject">
+          <span>For</span>
+          <AgentPickerPopover
+            agents={agents}
+            selectedId={draft.assigneeId}
+            onSelect={(id) => onUpdate({ assigneeId: id })}
+          />
+          <span>in</span>
+          <ProjectPickerPopover
+            projects={projects}
+            selectedId={draft.projectId}
+            onSelect={(id) => onUpdate({ projectId: id })}
+          />
+        </Trans>
         <DropdownMenu>
           <Tooltip>
             <TooltipTrigger asChild>
@@ -134,7 +147,7 @@ export function NewTaskSelectorRow({ draft, onUpdate }: Props) {
                 </Button>
               </DropdownMenuTrigger>
             </TooltipTrigger>
-            <TooltipContent>More options</TooltipContent>
+            <TooltipContent>{t("office:moreOptions")}</TooltipContent>
           </Tooltip>
           <DropdownMenuContent align="start">
             <DropdownMenuItem
@@ -142,14 +155,14 @@ export function NewTaskSelectorRow({ draft, onUpdate }: Props) {
               onClick={() => onUpdate({ showReviewer: !draft.showReviewer })}
             >
               <IconEye className="h-4 w-4 mr-2" />
-              {draft.showReviewer ? "Hide reviewer" : "Add reviewer"}
+              {draft.showReviewer ? t("office:hideReviewer") : t("office:addReviewer")}
             </DropdownMenuItem>
             <DropdownMenuItem
               className="cursor-pointer"
               onClick={() => onUpdate({ showApprover: !draft.showApprover })}
             >
               <IconCircleCheck className="h-4 w-4 mr-2" />
-              {draft.showApprover ? "Hide approver" : "Add approver"}
+              {draft.showApprover ? t("office:hideApprover") : t("office:addApprover")}
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
@@ -157,7 +170,7 @@ export function NewTaskSelectorRow({ draft, onUpdate }: Props) {
 
       {draft.showReviewer && (
         <ParticipantRow
-          label="Reviewer"
+          kind="reviewer"
           agents={agents}
           selectedIds={draft.reviewerIds}
           onSelect={(ids) => onUpdate({ reviewerIds: ids })}
@@ -167,7 +180,7 @@ export function NewTaskSelectorRow({ draft, onUpdate }: Props) {
 
       {draft.showApprover && (
         <ParticipantRow
-          label="Approver"
+          kind="approver"
           agents={agents}
           selectedIds={draft.approverIds}
           onSelect={(ids) => onUpdate({ approverIds: ids })}

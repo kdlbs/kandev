@@ -19,6 +19,8 @@ import type {
 import type { Editor } from "@tiptap/core";
 import { PanelSearchBar } from "@/components/search/panel-search-bar";
 import { usePlanFindShortcut } from "./use-plan-find-shortcut";
+import { Trans, useTranslation } from "react-i18next";
+import { t } from "@/lib/i18n";
 
 // Dynamic import to avoid SSR issues with TipTap
 const PlanEditor = dynamic(
@@ -28,7 +30,7 @@ const PlanEditor = dynamic(
     ssr: false,
     loading: () => (
       <div className="flex h-full items-center justify-center text-muted-foreground text-sm">
-        Loading editor...
+        {t("task:loadingEditor")}
       </div>
     ),
   },
@@ -146,6 +148,7 @@ export const TaskPlanPanel = memo(function TaskPlanPanel({
   taskId,
   visible = true,
 }: TaskPlanPanelProps) {
+  const { t } = useTranslation();
   const state = useTaskPlanPanelState(taskId, visible);
   // Ctrl+S to save immediately
   useSaveShortcut(
@@ -160,7 +163,7 @@ export const TaskPlanPanel = memo(function TaskPlanPanel({
     return (
       <div className="flex h-full items-center justify-center text-muted-foreground">
         <IconLoader2 className="h-5 w-5 animate-spin mr-2" />
-        <span className="text-sm">Loading plan...</span>
+        <span className="text-sm">{t("task:loadingPlan")}</span>
       </div>
     );
   }
@@ -168,7 +171,7 @@ export const TaskPlanPanel = memo(function TaskPlanPanel({
   if (!taskId) {
     return (
       <div className="flex h-full items-center justify-center text-muted-foreground">
-        <span className="text-sm">No task selected</span>
+        <span className="text-sm">{t("task:noTaskSelected")}</span>
       </div>
     );
   }
@@ -183,6 +186,7 @@ function PlanPanelContent({
   taskId: string;
   state: ReturnType<typeof useTaskPlanPanelState>;
 }) {
+  const { t } = useTranslation();
   const { editorWrapperRef, editorInstanceRef, editorInstance, selectionState } = state;
   const { textSelection, setTextSelection } = selectionState;
   // Ctrl+F in-document find (registers a keydown listener on the editor wrapper)
@@ -225,7 +229,7 @@ function PlanPanelContent({
           taskId={taskId}
           value={state.draftContent}
           onChange={state.setDraftContent}
-          placeholder="Start typing your plan..."
+          placeholder={t("task:startTypingYourPlan")}
           onSelectionChange={state.activeSessionId ? setTextSelection : undefined}
           comments={state.commentHighlights}
           onCommentClick={selectionState.handleCommentHighlightClick}
@@ -515,6 +519,7 @@ function PlanEmptyState({
   isAgentCreatingPlan: boolean;
   onClick: () => void;
 }) {
+  const { t } = useTranslation();
   if (isLoading || draftContent.trim() !== "" || isEditorFocused || isAgentCreatingPlan)
     return null;
   return (
@@ -527,32 +532,32 @@ function PlanEmptyState({
           <IconFileText className="h-6 w-6 text-muted-foreground" />
         </div>
         <div className="text-center">
-          <h3 className="text-sm font-medium text-foreground mb-1">Plan your implementation</h3>
-          <p className="text-xs text-muted-foreground">
-            A shared document for you and the agent to collaborate on the approach
-          </p>
+          <h3 className="text-sm font-medium text-foreground mb-1">
+            {t("task:planYourImplementation")}
+          </h3>
+          <p className="text-xs text-muted-foreground">{t("task:aSharedDocumentForYouAnd")}</p>
         </div>
         <div className="flex flex-col gap-3 w-full">
           <div className="flex items-start gap-3">
             <IconRobot className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
-            <p className="text-xs text-muted-foreground">
-              The agent can write and update the plan as it works
-            </p>
+            <p className="text-xs text-muted-foreground">{t("task:theAgentCanWriteAndUpdate")}</p>
           </div>
           <div className="flex items-start gap-3">
             <IconMessage className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
             <p className="text-xs text-muted-foreground">
-              Select text and press{" "}
-              <kbd className="px-1.5 py-0.5 rounded bg-muted text-muted-foreground font-mono text-[10px]">
-                &#8984;&#8679;C
-              </kbd>{" "}
-              to comment
+              <Trans i18nKey="task:selectTextAndPressToComment">
+                Select text and press{" "}
+                <kbd className="px-1.5 py-0.5 rounded bg-muted text-muted-foreground font-mono text-[10px]">
+                  &#8984;&#8679;C
+                </kbd>{" "}
+                to comment
+              </Trans>
             </p>
           </div>
         </div>
         <div className="flex items-center gap-2 text-xs text-muted-foreground/70">
           <IconClick className="h-3.5 w-3.5" />
-          <span>Click anywhere to start writing</span>
+          <span>{t("task:clickAnywhereToStartWriting")}</span>
         </div>
       </div>
     </div>

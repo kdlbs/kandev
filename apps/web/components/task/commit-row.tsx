@@ -17,6 +17,7 @@ import {
 } from "@kandev/ui/context-menu";
 import { timeAgo } from "@/lib/utils/time";
 import type { CommitDetailTarget } from "./changes-diff-target";
+import { useTranslation } from "react-i18next";
 
 export type CommitItem = {
   commit_sha: string;
@@ -50,6 +51,7 @@ function CommitContextMenu({
   onRevertCommit?: (sha: string, repo?: string) => void;
   onResetToCommit?: (sha: string, repo?: string) => void;
 }) {
+  const { t } = useTranslation();
   const hasActions =
     commit.detailTarget.source === "local" && (onAmendCommit || onRevertCommit || onResetToCommit);
 
@@ -66,7 +68,7 @@ function CommitContextMenu({
             onSelect={() => onAmendCommit(commit.commit_message, commit.repository_name)}
           >
             <IconPencil className="h-3.5 w-3.5" />
-            Amend message
+            {t("task:amendMessage")}
           </ContextMenuItem>
         )}
         {isLatest && onRevertCommit && (
@@ -74,7 +76,7 @@ function CommitContextMenu({
             onSelect={() => onRevertCommit(commit.commit_sha, commit.repository_name)}
           >
             <IconArrowBackUp className="h-3.5 w-3.5" />
-            Revert commit
+            {t("task:revertCommit")}
           </ContextMenuItem>
         )}
         {onResetToCommit && (
@@ -82,7 +84,7 @@ function CommitContextMenu({
             onSelect={() => onResetToCommit(commit.commit_sha, commit.repository_name)}
           >
             <IconHistoryToggle className="h-3.5 w-3.5" />
-            Reset to this commit
+            {t("task:resetToThisCommit")}
           </ContextMenuItem>
         )}
       </ContextMenuContent>
@@ -107,6 +109,7 @@ function CommitRowActions({
   onRevertCommit?: (sha: string, repo?: string) => void;
   onResetToCommit?: (sha: string, repo?: string) => void;
 }) {
+  const { t } = useTranslation();
   return (
     <span className="hidden group-hover:flex items-center gap-1">
       {isLatest && onAmendCommit && (
@@ -114,7 +117,7 @@ function CommitRowActions({
           <TooltipTrigger asChild>
             <button
               type="button"
-              aria-label="Amend commit message"
+              aria-label={t("task:amendCommitMessage2")}
               className="p-0.5 text-muted-foreground hover:text-foreground cursor-pointer"
               onClick={(e) => {
                 e.stopPropagation();
@@ -124,7 +127,7 @@ function CommitRowActions({
               <IconPencil className="h-3.5 w-3.5" />
             </button>
           </TooltipTrigger>
-          <TooltipContent>Amend commit message</TooltipContent>
+          <TooltipContent>{t("task:amendCommitMessage2")}</TooltipContent>
         </Tooltip>
       )}
       {isLatest && onRevertCommit && (
@@ -132,7 +135,7 @@ function CommitRowActions({
           <TooltipTrigger asChild>
             <button
               type="button"
-              aria-label="Revert commit"
+              aria-label={t("task:revertCommit")}
               className="p-0.5 text-muted-foreground hover:text-foreground cursor-pointer"
               onClick={(e) => {
                 e.stopPropagation();
@@ -142,7 +145,7 @@ function CommitRowActions({
               <IconArrowBackUp className="h-3.5 w-3.5" />
             </button>
           </TooltipTrigger>
-          <TooltipContent>Revert commit</TooltipContent>
+          <TooltipContent>{t("task:revertCommit")}</TooltipContent>
         </Tooltip>
       )}
       {onResetToCommit && (
@@ -150,7 +153,7 @@ function CommitRowActions({
           <TooltipTrigger asChild>
             <button
               type="button"
-              aria-label="Reset to this commit"
+              aria-label={t("task:resetToThisCommit")}
               className="p-0.5 text-muted-foreground hover:text-foreground cursor-pointer"
               onClick={(e) => {
                 e.stopPropagation();
@@ -160,7 +163,7 @@ function CommitRowActions({
               <IconHistoryToggle className="h-3.5 w-3.5" />
             </button>
           </TooltipTrigger>
-          <TooltipContent>Reset to this commit</TooltipContent>
+          <TooltipContent>{t("task:resetToThisCommit")}</TooltipContent>
         </Tooltip>
       )}
     </span>
@@ -189,6 +192,7 @@ export function CommitRow({
   onRevertCommit?: (sha: string, repo?: string) => void;
   onResetToCommit?: (sha: string, repo?: string) => void;
 }) {
+  const { t } = useTranslation();
   const isLocalCommit = commit.detailTarget.source === "local";
   const showActions =
     isLocalCommit && (onResetToCommit || (isLatest && (onAmendCommit || onRevertCommit)));
@@ -216,10 +220,12 @@ export function CommitRow({
       >
         <span
           className="shrink-0"
-          title={commit.pushed === true ? "Pushed to remote" : "Local commit (not yet pushed)"}
+          title={
+            commit.pushed === true ? t("task:pushedToRemote") : t("task:localCommitNotYetPushed")
+          }
         >
           <span className="sr-only">
-            {commit.pushed === true ? "Pushed commit" : "Unpushed commit"}
+            {commit.pushed === true ? t("task:pushedCommit") : t("task:unpushedCommit")}
           </span>
           {commit.pushed === true ? (
             <IconGitCommit aria-hidden="true" className="h-3.5 w-3.5 text-muted-foreground" />

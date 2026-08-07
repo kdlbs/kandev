@@ -19,17 +19,6 @@ vi.mock("@kandev/ui/context-menu", () => ({
   ),
 }));
 
-vi.mock("react-i18next", () => ({
-  useTranslation: () => ({
-    t: (key: string) =>
-      ({
-        "common:rename": "Rename",
-        "chat:renameChat": "Rename chat",
-        "chat:configurationChat": "Configuration chat",
-      })[key] ?? key,
-  }),
-}));
-
 afterEach(cleanup);
 
 function makeProps(overrides: Partial<Parameters<typeof QuickChatTabItem>[0]> = {}) {

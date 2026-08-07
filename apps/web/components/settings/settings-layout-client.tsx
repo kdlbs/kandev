@@ -29,7 +29,6 @@ const SEGMENT_LABEL_OVERRIDES: Record<string, string> = {
   github: "GitHub",
   jira: "Jira",
   linear: "Linear",
-  slack: "Slack",
   mcp: "MCP",
   ui: "UI",
   vscode: "VS Code",

@@ -148,6 +148,77 @@ func TestGitHubCredentialHelperIgnoresStoreAndErase(t *testing.T) {
 	}
 }
 
+func TestGitHubCredentialHelperSurfacesBrokerErrorBody(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = io.WriteString(w, `{"error":"authentication required"}`)
+	}))
+	t.Cleanup(server.Close)
+	env := githubCredentialTestEnv(server.URL)
+
+	err := runGitHubCredentialHelper(
+		context.Background(), []string{"get"},
+		strings.NewReader("protocol=https\nhost=github.com\npath=acme/widgets.git\n\n"),
+		io.Discard, lookupEnv(env), server.Client(),
+	)
+	if err == nil {
+		t.Fatal("runGitHubCredentialHelper() error = nil, want broker denial")
+	}
+	want := `resolve GitHub credential: broker returned HTTP 401: {"error":"authentication required"}`
+	if err.Error() != want {
+		t.Fatalf("error = %q, want %q", err.Error(), want)
+	}
+}
+
+func TestGitHubCredentialHelperTruncatesAndSanitizesBrokerErrorBody(t *testing.T) {
+	rawBody := "prefix\x00\x01\x1f control chars" + strings.Repeat("x", 600)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = io.WriteString(w, rawBody)
+	}))
+	t.Cleanup(server.Close)
+	env := githubCredentialTestEnv(server.URL)
+
+	err := runGitHubCredentialHelper(
+		context.Background(), []string{"get"},
+		strings.NewReader("protocol=https\nhost=github.com\npath=acme/widgets.git\n\n"),
+		io.Discard, lookupEnv(env), server.Client(),
+	)
+	if err == nil {
+		t.Fatal("runGitHubCredentialHelper() error = nil, want broker denial")
+	}
+	if !strings.HasPrefix(err.Error(), "resolve GitHub credential: broker returned HTTP 500: ") {
+		t.Fatalf("error = %q, want HTTP 500 prefix", err.Error())
+	}
+	appended := strings.TrimPrefix(err.Error(), "resolve GitHub credential: broker returned HTTP 500: ")
+	if len(appended) > 512 {
+		t.Fatalf("appended body length = %d, want <= 512", len(appended))
+	}
+	for _, r := range appended {
+		if r < 0x20 {
+			t.Fatalf("appended body contains control char %q: %q", r, appended)
+		}
+	}
+}
+
+func TestGitHubCredentialHelperOmitsAppendedBodyWhenEmpty(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusBadGateway)
+	}))
+	t.Cleanup(server.Close)
+	env := githubCredentialTestEnv(server.URL)
+
+	err := runGitHubCredentialHelper(
+		context.Background(), []string{"get"},
+		strings.NewReader("protocol=https\nhost=github.com\npath=acme/widgets.git\n\n"),
+		io.Discard, lookupEnv(env), server.Client(),
+	)
+	want := "resolve GitHub credential: broker returned HTTP 502"
+	if err == nil || err.Error() != want {
+		t.Fatalf("error = %v, want %q", err, want)
+	}
+}
+
 func githubCredentialTestEnv(url string) map[string]string {
 	return map[string]string{
 		envGitHubCredentialBrokerURL:  url,

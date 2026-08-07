@@ -17,6 +17,7 @@ import { useSubtaskCount } from "@/hooks/use-subtask-count";
 import { useTaskInFlight } from "@/hooks/use-task-in-flight";
 import { getCleanupSummary, getBulkCleanupSummary } from "./task-cleanup-summary";
 import { StillWorkingWarning } from "./task-still-working-warning";
+import { useTranslation } from "react-i18next";
 
 type TaskDeleteConfirmDialogProps = {
   open: boolean;
@@ -51,12 +52,14 @@ export function TaskDeleteConfirmDialog({
   onConfirm,
   confirmTestId,
 }: TaskDeleteConfirmDialogProps) {
+  const { t } = useTranslation();
   const safeCount = count ?? 0;
-  const label = isBulkOperation ? `task${safeCount !== 1 ? "s" : ""}` : "task";
-  const title = isBulkOperation ? `Delete ${safeCount} ${label}` : "Delete task";
+  const title = isBulkOperation
+    ? t("task:deleteTasksTitle", { count: safeCount })
+    : t("task:deleteTaskTitle");
   const description = isBulkOperation
-    ? `Are you sure you want to delete ${safeCount} ${label}? This action cannot be undone.`
-    : `Are you sure you want to delete "${taskTitle}"? This action cannot be undone.`;
+    ? t("task:deleteTasksConfirm", { count: safeCount })
+    : t("task:deleteTaskConfirm", { taskTitle });
   const cleanup = isBulkOperation
     ? getBulkCleanupSummary(executorTypes ?? [])
     : getCleanupSummary(executorType);
@@ -98,15 +101,15 @@ export function TaskDeleteConfirmDialog({
               data-testid="delete-cascade-checkbox"
             />
             <span>
-              Also delete {subtaskCount} subtask{subtaskCount === 1 ? "" : "s"}
+              {t("task:alsoDeleteSubtasks", { count: subtaskCount })}
               <span className="block text-xs text-muted-foreground">
-                Subtasks become root tasks unless you tick this. They may still be in progress.
+                {t("task:subtasksBecomeRootTasksUnlessYou")}
               </span>
             </span>
           </label>
         )}
         <AlertDialogFooter>
-          <AlertDialogCancel className="cursor-pointer">Cancel</AlertDialogCancel>
+          <AlertDialogCancel className="cursor-pointer">{t("common:cancel")}</AlertDialogCancel>
           <AlertDialogAction
             disabled={isDeleting}
             className="cursor-pointer bg-destructive text-destructive-foreground hover:bg-destructive/90"
@@ -118,7 +121,7 @@ export function TaskDeleteConfirmDialog({
             }}
           >
             {isDeleting ? <IconLoader className="mr-2 h-4 w-4 animate-spin" /> : null}
-            Delete
+            {t("task:delete")}
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>

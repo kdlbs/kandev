@@ -1,10 +1,30 @@
 ---
-status: shipped
+status: archived
 created: 2026-05-02
+archived: 2026-08-05
 owner: tbd
 ---
 
 # Slack Integration
+
+> **Archived — moved out of this repository.** Slack now ships as the
+> standalone `kandev-plugin-slack` plugin
+> ([kdlbs/kandev-plugin-slack](https://github.com/kdlbs/kandev-plugin-slack)),
+> installed from Settings → Plugins. The in-tree `internal/slack` package, its
+> `/api/v1/slack/*` routes, and the `/settings/integrations/slack` page were
+> removed, and the retired `slack_configs` table plus the `slack:*` vault
+> entries are dropped on upgrade.
+>
+> **The plugin's contract differs from what is described below.** It installs
+> as a real Slack app over Socket Mode, so events are pushed over a WebSocket
+> and nothing is polled, and requests are addressed with `@Kandev …` or the
+> `/kandev` slash command rather than the `!kandev` text marker. The
+> browser-session (`xoxc-` + `d` cookie) credentials described below survive
+> only as a fallback for workspaces that forbid app installs — that fallback is
+> the one place `!kandev` and polling still apply.
+>
+> Everything from "Why" onwards is the historical record of what shipped
+> in-tree. See the plugin's README for current behaviour.
 
 ## Why
 

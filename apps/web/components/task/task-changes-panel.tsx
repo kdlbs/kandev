@@ -30,6 +30,7 @@ import {
 } from "./task-changes-panel-state";
 import type { SelectedDiff } from "./task-layout";
 import { useIsTaskArchived, ArchivedPanelPlaceholder } from "./task-archived-context";
+import { useTranslation } from "react-i18next";
 
 type TaskChangesPanelProps = {
   mode?: "all" | "file";
@@ -231,6 +232,7 @@ function useChangesActions(
   allFiles: ReviewFile[],
   defaultWordWrap = DEFAULT_DIFF_WORD_WRAP,
 ) {
+  const { t } = useTranslation();
   const activeTaskId = useAppStore((state) => state.tasks.activeTaskId);
   const autoMarkOnScroll = useAppStore((s) => s.userSettings.reviewAutoMarkOnScroll);
   const setUserSettings = useAppStore((state) => state.setUserSettings);
@@ -271,18 +273,18 @@ function useChangesActions(
       try {
         const result = await discard([path], repositoryName || undefined);
         if (result.success) {
-          toast({ title: "Changes discarded", description: path, variant: "success" });
+          toast({ title: t("task:changesDiscarded"), description: path, variant: "success" });
         } else {
           toast({
-            title: "Discard failed",
-            description: result.error || "An error occurred",
+            title: t("task:discardFailed"),
+            description: result.error || t("task:anErrorOccurred"),
             variant: "error",
           });
         }
       } catch (e) {
         toast({
-          title: "Discard failed",
-          description: e instanceof Error ? e.message : "An error occurred",
+          title: t("task:discardFailed"),
+          description: e instanceof Error ? e.message : t("task:anErrorOccurred"),
           variant: "error",
         });
       }
@@ -315,7 +317,7 @@ function useChangesActions(
           client_message_id: generateUUID(),
           content: markdown,
         })
-        .catch(() => toast({ title: "Failed to send comments", variant: "error" }));
+        .catch(() => toast({ title: t("task:failedToSendComments"), variant: "error" }));
     markCommentsSent(comments.map((c) => c.id));
   }, [activeSessionId, activeTaskId, getPendingComments, markCommentsSent, toast]);
 
@@ -464,17 +466,18 @@ function ChangesPanelContent({
   onPreviewMarkdown?: (path: string, repo?: string) => void;
   fileRefs: Map<string, React.RefObject<HTMLDivElement | null>>;
 }) {
+  const { t } = useTranslation();
   if (isLoading && files.length === 0) {
     return (
       <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
-        Loading changes...
+        {t("task:loadingChanges")}
       </div>
     );
   }
   if (files.length === 0) {
     return (
       <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
-        No changes
+        {t("task:noChanges")}
       </div>
     );
   }

@@ -67,7 +67,7 @@ External MCP clients (Claude Code, Cursor connecting to `/mcp`) must be configur
 
 ## What is isolated
 
-When authentication is on, everything in a workspace is private to its owner and returns "not found" to anyone else — even if they know the ID: workspaces, tasks, workflows, sessions, plans, walkthroughs, terminals, VS Code, port previews, git snapshots, Workspace secrets, repository bindings, **and the workspace's third-party integration settings (GitHub/GitLab/Jira/Linear/Sentry/Slack/Azure) and automations**. A user's Global secrets are also private to that user. Admins manage users but do not see other users' workspaces or secrets.
+When authentication is on, everything in a workspace is private to its owner and returns "not found" to anyone else — even if they know the ID: workspaces, tasks, workflows, sessions, plans, walkthroughs, terminals, VS Code, port previews, git snapshots, Workspace secrets, repository bindings, **and the workspace's third-party integration settings (GitHub/GitLab/Jira/Linear/Sentry/Azure) and automations**. A user's Global secrets are also private to that user. Admins manage users but do not see other users' workspaces or secrets.
 
 Shared across the instance (by design): executors, agent profiles, environments, editors, prompts, and system pages.
 

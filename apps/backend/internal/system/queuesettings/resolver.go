@@ -23,6 +23,7 @@ func Resolve(configured *Settings, environment Environment) (Resolution, error) 
 		Effective: Effective{
 			MaxPerSession: settings.MaxPerSession,
 			Source:        source,
+			MergeEnabled:  settings.MergeEnabled,
 		},
 	}}
 	raw := strings.TrimSpace(environment.Value)
@@ -41,6 +42,7 @@ func Resolve(configured *Settings, environment Environment) (Resolution, error) 
 		MaxPerSession: value,
 		Source:        SourceEnvironment,
 		Locked:        true,
+		MergeEnabled:  settings.MergeEnabled,
 	}
 	return resolution, nil
 }

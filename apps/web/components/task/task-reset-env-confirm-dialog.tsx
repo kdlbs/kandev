@@ -13,6 +13,7 @@ import {
   AlertDialogTitle,
 } from "@kandev/ui/alert-dialog";
 import { Checkbox } from "@kandev/ui/checkbox";
+import { useTranslation } from "react-i18next";
 
 export type TaskResetEnvConfirmDialogProps = {
   open: boolean;
@@ -29,6 +30,7 @@ export function TaskResetEnvConfirmDialog({
   isResetting,
   onConfirm,
 }: TaskResetEnvConfirmDialogProps) {
+  const { t } = useTranslation();
   const [acknowledged, setAcknowledged] = useState(false);
   const [pushBranch, setPushBranch] = useState(false);
 
@@ -45,16 +47,11 @@ export function TaskResetEnvConfirmDialog({
     <AlertDialog open={open} onOpenChange={handleOpenChange}>
       <AlertDialogContent onClick={(e) => e.stopPropagation()}>
         <AlertDialogHeader>
-          <AlertDialogTitle>Reset environment?</AlertDialogTitle>
+          <AlertDialogTitle>{t("task:resetEnvironment")}</AlertDialogTitle>
           <AlertDialogDescription asChild>
             <div className="space-y-2">
-              <p>
-                This tears down the current container, sandbox, and/or worktree for this task so the
-                next session starts with a fresh environment.
-              </p>
-              <p className="text-destructive">
-                Any uncommitted or unpushed changes in the workspace will be lost.
-              </p>
+              <p>{t("task:thisTearsDownTheCurrentContainer")}</p>
+              <p className="text-destructive">{t("task:anyUncommittedOrUnpushedChangesIn")}</p>
             </div>
           </AlertDialogDescription>
         </AlertDialogHeader>
@@ -68,9 +65,9 @@ export function TaskResetEnvConfirmDialog({
                 disabled={isResetting}
               />
               <span>
-                Push the current branch to its remote before resetting.
+                {t("task:pushCurrentBranchBeforeResetting")}
                 <span className="block text-xs text-muted-foreground">
-                  Helps preserve committed work. Uncommitted changes cannot be pushed.
+                  {t("task:helpsPreserveCommittedWorkUncommittedChanges")}
                 </span>
               </span>
             </label>
@@ -82,12 +79,12 @@ export function TaskResetEnvConfirmDialog({
               onCheckedChange={(v) => setAcknowledged(v === true)}
               disabled={isResetting}
             />
-            <span>I understand any uncommitted changes will be lost.</span>
+            <span>{t("task:iUnderstandAnyUncommittedChangesWill")}</span>
           </label>
         </div>
 
         <AlertDialogFooter>
-          <AlertDialogCancel className="cursor-pointer">Cancel</AlertDialogCancel>
+          <AlertDialogCancel className="cursor-pointer">{t("common:cancel")}</AlertDialogCancel>
           <AlertDialogAction
             disabled={isResetting || !acknowledged}
             className="cursor-pointer bg-destructive text-destructive-foreground hover:bg-destructive/90"
@@ -104,7 +101,7 @@ export function TaskResetEnvConfirmDialog({
             }}
           >
             {isResetting ? <IconLoader className="mr-2 h-4 w-4 animate-spin" /> : null}
-            Reset environment
+            {t("task:resetEnvironment2")}
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>

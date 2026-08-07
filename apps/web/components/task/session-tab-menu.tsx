@@ -20,6 +20,7 @@ import { ShareDialog } from "@/components/task/share/share-dialog";
 import { HandoffContextMenuSub } from "@/components/task/handoff-profile-menu-items";
 import { NewSessionDialog, type HandoffPreset } from "@/components/task/new-session-dialog";
 import type { TaskSessionState } from "@/lib/types/http";
+import { useTranslation } from "react-i18next";
 
 /** Lifecycle callbacks the context menu needs from the owning tab. */
 export type SessionTabMenuActions = {
@@ -42,27 +43,26 @@ export function DeleteSessionDialog({
   sessionCount: number;
   onConfirm: () => void;
 }) {
+  const { t } = useTranslation();
   return (
     <AlertDialog open={open} onOpenChange={onOpenChange}>
       <AlertDialogContent>
         <AlertDialogHeader>
-          <AlertDialogTitle>Delete session?</AlertDialogTitle>
+          <AlertDialogTitle>{t("task:deleteSession")}</AlertDialogTitle>
           <AlertDialogDescription asChild>
             <div>
-              <p>This will permanently delete the conversation history with this session.</p>
+              <p>{t("task:thisWillPermanentlyDeleteTheConversation")}</p>
               {isPrimary && sessionCount > 1 && (
-                <p className="mt-2 font-medium">
-                  This is the primary session. Another session will be set as primary.
-                </p>
+                <p className="mt-2 font-medium">{t("task:thisIsThePrimarySessionAnother")}</p>
               )}
               {sessionCount === 1 && (
-                <p className="mt-2 font-medium">This is the only session for this task.</p>
+                <p className="mt-2 font-medium">{t("task:thisIsTheOnlySessionFor")}</p>
               )}
             </div>
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
-          <AlertDialogCancel className="cursor-pointer">Cancel</AlertDialogCancel>
+          <AlertDialogCancel className="cursor-pointer">{t("common:cancel")}</AlertDialogCancel>
           <AlertDialogAction
             onClick={() => {
               onOpenChange(false);
@@ -70,7 +70,7 @@ export function DeleteSessionDialog({
             }}
             className="cursor-pointer bg-destructive text-destructive-foreground hover:bg-destructive/90"
           >
-            Delete
+            {t("task:delete")}
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>
@@ -101,39 +101,40 @@ export function SessionContextMenuItems({
   onHandoffProfile: (profileId: string) => void;
   onStartRename: () => void;
 }) {
+  const { t } = useTranslation();
   return (
     <ContextMenuContent>
       <ContextMenuItem className="cursor-pointer" onSelect={onStartRename}>
-        Rename…
+        {t("task:rename2")}
       </ContextMenuItem>
       <ContextMenuItem
         className="cursor-pointer"
         onSelect={actions.handleSetPrimary}
         disabled={isPrimary || !sessionState || !isStoppable(sessionState)}
       >
-        Set as Primary
+        {t("task:setAsPrimary")}
       </ContextMenuItem>
       <ContextMenuSeparator />
       {sessionState && isStoppable(sessionState) && (
         <ContextMenuItem className="cursor-pointer" onSelect={actions.handleStop}>
-          Stop
+          {t("task:stop")}
         </ContextMenuItem>
       )}
       {sessionState && isResumable(sessionState) && (
         <ContextMenuItem className="cursor-pointer" onSelect={actions.handleResume}>
-          Resume
+          {t("task:resume")}
         </ContextMenuItem>
       )}
       {sessionState && isDeletable(sessionState) && (
         <ContextMenuItem className="cursor-pointer text-destructive" onSelect={onDelete}>
-          Delete
+          {t("task:delete")}
         </ContextMenuItem>
       )}
       {canShare && (
         <>
           <ContextMenuSeparator />
           <ContextMenuItem className="cursor-pointer" onSelect={onShare}>
-            Share
+            {t("task:share")}
           </ContextMenuItem>
         </>
       )}
@@ -145,7 +146,7 @@ export function SessionContextMenuItems({
       )}
       <ContextMenuSeparator />
       <ContextMenuItem className="cursor-pointer" onSelect={actions.handleCloseOthers}>
-        Close Others
+        {t("task:closeOthers")}
       </ContextMenuItem>
     </ContextMenuContent>
   );
