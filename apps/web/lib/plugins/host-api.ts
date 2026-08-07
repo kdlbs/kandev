@@ -256,6 +256,19 @@ const PLUGIN_UI: Record<string, unknown> = {
 };
 
 /**
+ * `host.utils` — plain functions, deliberately not on `host.ui` (a component
+ * map). Shared rather than reimplemented per plugin: `cn` must be the host's
+ * so Tailwind class merging matches the components it styles, and
+ * `formatRelativeTime` must be the host's so a plugin's timestamps follow the
+ * user's locale instead of the hand-rolled English-only ladders several
+ * published plugins ship today.
+ */
+const PLUGIN_UTILS = {
+  cn,
+  formatRelativeTime,
+};
+
+/**
  * Per-browser-tab id stamped on every `host.storage.set`/`delete` call and
  * echoed back in the `plugin.user-state.updated` WS payload, so
  * `host.storage.subscribe` can suppress a tab's own write (AC25) — one id
@@ -328,19 +341,6 @@ export function buildHostApi(pluginId: string, storeApi: StoreApi<AppState>): Pl
     storage: buildStorageApi(pluginId),
   };
 }
-
-/**
- * `host.utils` — plain functions, deliberately not on `host.ui` (a component
- * map). Shared rather than reimplemented per plugin: `cn` must be the host's
- * so Tailwind class merging matches the components it styles, and
- * `formatRelativeTime` must be the host's so a plugin's timestamps follow the
- * user's locale instead of the hand-rolled English-only ladders several
- * published plugins ship today.
- */
-const PLUGIN_UTILS = {
-  cn,
-  formatRelativeTime,
-};
 
 /**
  * fetch scoped to `/api/plugins/{pluginId}/...` via the kandev reverse proxy.

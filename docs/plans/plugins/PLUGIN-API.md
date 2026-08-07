@@ -207,13 +207,28 @@ attach to the wrong tree, and responsive containers stop resizing. Compose the
 ### `host.toast` and `host.utils`
 
 ```ts
-// Sonner's imperative toast — the host owns the single <Toaster/>.
+// Sonner's imperative toast — the host owns the single <Toaster/>, so there
+// is nothing to render and it works from any plugin code path, modals
+// included.
 host.toast.success("Synced 12 issues");
-// .error also logs `[plugins] toast.error from "<pluginId>":` to the console.
-// It does NOT file a report into kandev's frontend error log: that log is for
-// kandev's own application errors, and a plugin toasting an expected
-// condition (a failed poll, say) would otherwise record one every cycle.
 host.toast.error("Sync failed");
+
+interface PluginToastApi {
+  (message: string, options?: Record<string, unknown>): string | number;
+  success(message: string, options?: Record<string, unknown>): string | number;
+  // Renders the same toast as any other variant, and additionally logs
+  // `[plugins] toast.error from "<pluginId>":` to the browser console.
+  // It does NOT file a report into kandev's frontend error log — that log is
+  // for kandev's own application errors, and a plugin toasting an expected
+  // condition (a failed poll, say) would otherwise record an Error-level
+  // entry every cycle. Console is where every plugin failure surfaces.
+  error(message: string, options?: Record<string, unknown>): string | number;
+  warning(message: string, options?: Record<string, unknown>): string | number;
+  info(message: string, options?: Record<string, unknown>): string | number;
+  // Dismisses one toast by the id a variant returned, or all of them when
+  // called with no argument.
+  dismiss(id?: string | number): unknown;
+}
 
 interface PluginUtilsApi {
   // The host's clsx + tailwind-merge combiner, so class merging matches the
