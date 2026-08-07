@@ -10,6 +10,7 @@ import { useAdvancedSession } from "./use-advanced-session";
 import { ExecutionIndicator } from "../../components/execution-indicator";
 import { OfficeTopbarPortal } from "../../components/office-topbar-portal";
 import type { Task } from "./types";
+import { useTranslation } from "react-i18next";
 
 const OfficeDockviewLayout = dynamic(
   () => import("./office-dockview-layout").then((m) => ({ default: m.OfficeDockviewLayout })),
@@ -22,6 +23,7 @@ type TaskAdvancedModeProps = {
 };
 
 export function TaskAdvancedMode({ task, onToggleSimple }: TaskAdvancedModeProps) {
+  const { t } = useTranslation();
   const { sessionId, isSessionEnded } = useAdvancedSession(task.id);
 
   return (
@@ -34,7 +36,7 @@ export function TaskAdvancedMode({ task, onToggleSimple }: TaskAdvancedModeProps
         <ExecutionIndicator status={task.status} />
         <div className="flex items-center gap-2">
           <Label htmlFor="advanced-toggle" className="text-xs text-muted-foreground cursor-pointer">
-            Advanced
+            {t("office:advanced")}
           </Label>
           <Switch id="advanced-toggle" checked onCheckedChange={() => onToggleSimple()} />
         </div>
@@ -43,13 +45,13 @@ export function TaskAdvancedMode({ task, onToggleSimple }: TaskAdvancedModeProps
           className="text-xs text-muted-foreground underline-offset-2 hover:underline cursor-pointer whitespace-nowrap"
           data-testid="task-cross-link"
         >
-          Open in advanced view
+          {t("office:openInAdvancedView")}
         </Link>
       </OfficeTopbarPortal>
       {isSessionEnded && (
         <div className="flex items-center gap-2 px-4 py-2 bg-muted border-b border-border shrink-0">
           <IconInfoCircle className="h-4 w-4 text-muted-foreground" />
-          <span className="text-sm text-muted-foreground">Agent session ended</span>
+          <span className="text-sm text-muted-foreground">{t("office:agentSessionEnded")}</span>
         </div>
       )}
       <OfficeDockviewLayout taskId={task.id} sessionId={sessionId} />

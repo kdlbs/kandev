@@ -8,6 +8,7 @@ import {
   DEFAULT_ONBOARDING_TASK_DESCRIPTION,
   DEFAULT_ONBOARDING_TASK_TITLE,
 } from "./setup-task-defaults";
+import { useTranslation } from "react-i18next";
 
 type StepTaskProps = {
   agentName: string;
@@ -17,21 +18,22 @@ type StepTaskProps = {
 };
 
 export function StepTask({ agentName, taskTitle, taskDescription, onChange }: StepTaskProps) {
+  const { t } = useTranslation();
   // The coordinator step requires a non-empty agentName before advancing,
   // so by the time this step renders we always have a real value.
   const name = agentName.trim() || "coordinator";
   return (
     <div className="space-y-6">
       <div>
-        <h2 className="text-xl font-semibold">Give your {name} something to do</h2>
+        {/* `name` is the coordinator's own name — user data, interpolated, never translated. */}
+        <h2 className="text-xl font-semibold">{t("office:giveAgentSomethingToDo", { name })}</h2>
         <p className="text-sm text-muted-foreground mt-1">
-          {name} will use this starter task to inspect the repos, set up the team, and propose the
-          next work for approval.
+          {t("office:agentWillUseThisStarterTask", { name })}
         </p>
       </div>
       <div className="space-y-4">
         <div>
-          <Label htmlFor="task-title">Task title</Label>
+          <Label htmlFor="task-title">{t("office:taskTitle")}</Label>
           <Input
             id="task-title"
             value={taskTitle}
@@ -42,7 +44,7 @@ export function StepTask({ agentName, taskTitle, taskDescription, onChange }: St
           />
         </div>
         <div>
-          <Label htmlFor="task-desc">Description</Label>
+          <Label htmlFor="task-desc">{t("office:description")}</Label>
           <Textarea
             id="task-desc"
             value={taskDescription}

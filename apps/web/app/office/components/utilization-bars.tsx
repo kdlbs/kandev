@@ -2,6 +2,8 @@
 
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import type { ProviderUsage } from "@/lib/state/slices/office/types";
+import type { TFunction } from "i18next";
+import { useTranslation } from "react-i18next";
 
 type Props = {
   usage: ProviderUsage;
@@ -19,18 +21,21 @@ function getTextColor(pct: number): string {
   return "text-muted-foreground";
 }
 
-function formatResetTime(resetAt: string): string {
+// Takes `t` rather than calling the module-level one: the copy here is rendered,
+// not logged, so it has to re-resolve when the locale changes.
+function formatResetTime(t: TFunction, resetAt: string): string {
   const now = Date.now();
   const reset = new Date(resetAt).getTime();
   const diffMs = reset - now;
-  if (diffMs <= 0) return "resetting soon";
+  if (diffMs <= 0) return t("office:resettingSoon");
   const diffH = Math.floor(diffMs / (1000 * 60 * 60));
   const diffM = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60));
-  if (diffH > 0) return `Resets in ${diffH}h ${diffM}m`;
-  return `Resets in ${diffM}m`;
+  if (diffH > 0) return t("office:resetsInHoursMinutes", { hours: diffH, minutes: diffM });
+  return t("office:resetsInMinutes", { minutes: diffM });
 }
 
 function WindowBar({ label, pct, resetAt }: { label: string; pct: number; resetAt: string }) {
+  const { t } = useTranslation();
   const clampedPct = Math.min(100, Math.max(0, pct));
   const barColor = getBarColor(clampedPct);
   const textColor = getTextColor(clampedPct);
@@ -52,15 +57,18 @@ function WindowBar({ label, pct, resetAt }: { label: string; pct: number; resetA
         </div>
       </TooltipTrigger>
       <TooltipContent>
-        <p className="text-xs">{formatResetTime(resetAt)}</p>
+        <p className="text-xs">{formatResetTime(t, resetAt)}</p>
       </TooltipContent>
     </Tooltip>
   );
 }
 
 export function UtilizationBars({ usage }: Props) {
+  const { t } = useTranslation();
   if (!usage || usage.windows.length === 0) {
-    return <p className="text-xs text-muted-foreground">No utilization data available.</p>;
+    return (
+      <p className="text-xs text-muted-foreground">{t("office:noUtilizationDataAvailable")}</p>
+    );
   }
 
   return (
