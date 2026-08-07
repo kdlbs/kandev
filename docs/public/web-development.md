@@ -93,7 +93,7 @@ Three mistakes cause silent bugs: never translate a string compared with `===`, 
 pnpm run i18n:check     # gate: plurals, module-scope t(), Trans indices
 pnpm run i18n:ratchet   # gate: no new hardcoded literals in changed lines
 pnpm run i18n:parity    # advisory report: per-locale missing and extra keys
-pnpm run i18n:sweep     # advisory report: copy the jsx-only lint rule cannot see
+pnpm run i18n:sweep <path>  # advisory report: copy the jsx-only lint rule cannot see
 ```
 
 The first two run in pre-commit and CI. The last two are reports that always exit zero and are wired into neither, because real-locale translation is maintained out of band and must not fail an English-only change. A clean lint does not prove a file is done: the rule only inspects JSX literals and skips anything assigned to a SCREAMING_CASE identifier, so review config tables by eye and use the pseudo-locale (**Settings > General > Appearance** in development builds) as the completeness check. Shared `@kandev/ui` primitives cannot import the app's i18n runtime, so their accessibility labels are localized at the call site. Full guide: [`docs/i18n.md`](../i18n.md).
