@@ -280,6 +280,9 @@ func (s *Service) preparedTaskCleanupMutationCommitted(
 	if job == nil || s.tasks == nil {
 		return false, errors.New("task repository is unavailable")
 	}
+	if job.Trigger == models.TaskResourceCleanupTriggerSessionDelete {
+		return s.sessionDeleteCleanupMutationCommitted(ctx, job)
+	}
 	task, err := s.tasks.GetTask(ctx, job.TaskID)
 	if err != nil && !errors.Is(err, taskrepo.ErrTaskNotFound) {
 		return false, err
@@ -327,12 +330,8 @@ func (s *Service) processTaskResourceCleanupJob(ctx context.Context, id string) 
 		}
 		return nil
 	}
-	var snapshot taskResourceCleanupSnapshot
-	if err := json.Unmarshal([]byte(job.ResourceSnapshot), &snapshot); err != nil {
-		return s.retryTaskResourceCleanupJob(runCtx, job, fmt.Errorf("decode resource snapshot: %w", err))
-	}
 	defer s.signalCleanupDoneForTest()
-	cleanupErr := s.executeTaskResourceCleanupJob(runCtx, job, snapshot)
+	cleanupErr := s.executeClaimedTaskResourceCleanupJob(runCtx, job)
 	if cleanupErr != nil {
 		return s.retryTaskResourceCleanupJob(runCtx, job, cleanupErr)
 	}
@@ -340,6 +339,21 @@ func (s *Service) processTaskResourceCleanupJob(ctx context.Context, id string) 
 		runCtx, job.ID, job.Attempts, models.TaskResourceCleanupStateSucceeded, "", nil,
 	)
 	return err
+}
+
+// executeClaimedTaskResourceCleanupJob dispatches a claimed job to its
+// trigger-specific execution path. session_delete carries a session-shaped
+// snapshot (sessionDeleteCleanupSnapshot), not the task-shaped
+// taskResourceCleanupSnapshot every other trigger uses.
+func (s *Service) executeClaimedTaskResourceCleanupJob(ctx context.Context, job *models.TaskResourceCleanupJob) error {
+	if job.Trigger == models.TaskResourceCleanupTriggerSessionDelete {
+		return s.executeSessionDeleteResourceCleanup(ctx, job)
+	}
+	var snapshot taskResourceCleanupSnapshot
+	if err := json.Unmarshal([]byte(job.ResourceSnapshot), &snapshot); err != nil {
+		return fmt.Errorf("decode resource snapshot: %w", err)
+	}
+	return s.executeTaskResourceCleanupJob(ctx, job, snapshot)
 }
 
 func (s *Service) registerTaskResourceCleanupRun(

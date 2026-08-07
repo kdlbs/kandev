@@ -64,6 +64,14 @@ type automationWorktreeReaper interface {
 	RemoveByID(ctx context.Context, worktreeID string, removeBranch bool) error
 }
 
+// worktreeSessionCacheForgetter evicts a deleted session's in-memory worktree
+// cache entries so a stale slot doesn't outlive its session row. DeleteSession
+// uses this after removing the session; unrelated to automation retention,
+// but satisfied by the same *worktree.Manager wired via SetWorktreeManager.
+type worktreeSessionCacheForgetter interface {
+	ForgetSession(sessionID string)
+}
+
 // SetAutomationService sets the automation service for handling automation triggers.
 func (s *Service) SetAutomationService(svc AutomationService) {
 	s.automationService = svc
@@ -80,6 +88,7 @@ func (s *Service) SetWorktreeManager(mgr *worktree.Manager) {
 		return
 	}
 	s.worktreeReaper = mgr
+	s.worktreeSessionCache = mgr
 }
 
 // subscribeAutomationEvents subscribes to automation-related events on the event bus.

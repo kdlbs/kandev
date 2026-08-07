@@ -163,6 +163,23 @@ func (m *Manager) GetAllBySessionID(ctx context.Context, sessionID string) ([]*W
 	return []*Worktree{wt}, nil
 }
 
+// ForgetSession evicts every in-memory worktree cache entry for a session.
+// Called when a session is deleted: no future lookup will ever key off that
+// session ID again, so leaving its entries cached is pure dead weight.
+func (m *Manager) ForgetSession(sessionID string) {
+	if sessionID == "" {
+		return
+	}
+	prefix := sessionID + "|"
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for k := range m.worktrees {
+		if strings.HasPrefix(k, prefix) {
+			delete(m.worktrees, k)
+		}
+	}
+}
+
 // GetBySessionAndRepo returns the active worktree for the
 // (session, repo, branchSlug) triple, or ErrWorktreeNotFound if none exists.
 // branchSlug scopes multi-branch tasks; passing "" matches the legacy

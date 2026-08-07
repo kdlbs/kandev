@@ -31,8 +31,10 @@ import {
 } from "@/hooks/domains/session/use-session-actions";
 import { HandoffDropdownMenuSub } from "../handoff-profile-menu-items";
 import { NewSessionDialog, type HandoffPreset } from "../new-session-dialog";
+import { SessionDeleteWarningLines } from "../session-delete-warning";
 import { MobilePillButton } from "./mobile-pill-button";
 import { MobilePickerSheet } from "./mobile-picker-sheet";
+import { useSessionDeleteWarning } from "@/hooks/use-session-delete-warning";
 import { formatTaskSessionStateLabel } from "@/lib/ui/state-labels";
 import { getSessionStateIcon } from "@/lib/ui/state-icons";
 import { repositorySlug } from "@/lib/repository-slug";
@@ -217,15 +219,18 @@ function DeleteSessionConfirmDialog({
   onOpenChange,
   isPrimary,
   isOnlySession,
+  sessionId,
   onConfirm,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   isPrimary: boolean;
   isOnlySession: boolean;
+  sessionId: string;
   onConfirm: () => void;
 }) {
   const { t } = useTranslation();
+  const warning = useSessionDeleteWarning(open, sessionId);
   return (
     <AlertDialog open={open} onOpenChange={onOpenChange}>
       <AlertDialogContent>
@@ -234,6 +239,7 @@ function DeleteSessionConfirmDialog({
           <AlertDialogDescription asChild>
             <div>
               <p>{t("task:thisWillPermanentlyDeleteTheConversation")}</p>
+              <SessionDeleteWarningLines warning={warning} />
               {isPrimary && !isOnlySession && (
                 <p className="mt-2 font-medium">{t("task:thisIsThePrimarySessionAnother")}</p>
               )}
@@ -364,6 +370,7 @@ function SessionRowItem({
         onOpenChange={setConfirmDelete}
         isPrimary={row.isPrimary}
         isOnlySession={isOnly}
+        sessionId={row.id}
         onConfirm={() => void actions.remove()}
       />
     </>

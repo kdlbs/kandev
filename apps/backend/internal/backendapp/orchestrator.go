@@ -130,6 +130,11 @@ func provideOrchestrator(
 	// them the one task kind nothing else ever cleans up; the orchestrator needs
 	// the manager to enforce the per-automation retention window.
 	orchestratorSvc.SetWorktreeManager(lifecycleMgr.WorktreeManager())
+	// DeleteSession's worktree reclamation is a durable task-service job; the
+	// orchestrator only knows sessions, so it delegates intent capture and
+	// activation back to the task service. See
+	// docs/specs/session-delete-resource-cleanup.
+	orchestratorSvc.SetSessionDeleteResourceCleanup(taskSvc)
 
 	msgCreator := &messageCreatorAdapter{svc: taskSvc, logger: log}
 	orchestratorSvc.SetMessageCreator(msgCreator)

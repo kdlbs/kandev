@@ -152,6 +152,20 @@ type WorkflowMeta struct {
 	Prompt         string
 }
 
+// SessionDeleteResourceCleanup captures a session's worktree inventory before
+// its row is deleted — the row is the only pointer to its worktrees, and
+// deleting it cascades their task_session_worktrees rows away — persists a
+// durable cleanup intent, and activates that intent once the row is actually
+// gone. Implemented by the task service. See
+// docs/specs/session-delete-resource-cleanup.
+type SessionDeleteResourceCleanup interface {
+	// PrepareSessionDeleteResourceCleanup returns an empty operationID and a
+	// nil error when the session holds nothing to reclaim.
+	PrepareSessionDeleteResourceCleanup(ctx context.Context, sessionID, taskID string) (operationID string, err error)
+	StartPreparedTaskResourceCleanup(ctx context.Context, operationID string) error
+	CancelPreparedTaskResourceCleanup(ctx context.Context, operationID string) error
+}
+
 // WorkflowStepGetter retrieves workflow step information for prompt building.
 type WorkflowStepGetter interface {
 	GetStep(ctx context.Context, stepID string) (*wfmodels.WorkflowStep, error)
@@ -354,6 +368,12 @@ type Service struct {
 	// session.ensure). Nil = unscoped.
 	taskAccessCheck func(ctx context.Context, taskID string) error
 
+	// sessionResourceCleanup persists and activates the durable worktree
+	// reclamation intent DeleteSession relies on. Nil-safe: without it,
+	// DeleteSession skips inventory capture entirely (isolated tests). See
+	// SetSessionDeleteResourceCleanup.
+	sessionResourceCleanup SessionDeleteResourceCleanup
+
 	// titleBranchRuntime performs the lifecycle-owned Git branch rename after
 	// an agent resolves a prompt-first task title. It is optional for tests and
 	// installations that do not configure an agent runtime.
@@ -507,6 +527,11 @@ type Service struct {
 	// construct the service without one, and an install with no worktree
 	// manager simply keeps every run's checkout. Set via SetWorktreeManager.
 	worktreeReaper automationWorktreeReaper
+
+	// worktreeSessionCache evicts a deleted session's in-memory worktree cache
+	// entries. Same underlying *worktree.Manager as worktreeReaper, set
+	// together via SetWorktreeManager. Nil-safe.
+	worktreeSessionCache worktreeSessionCacheForgetter
 
 	// unreclaimedWorkspaces holds the automation runs whose workspace removal
 	// was attempted and did not actually free the directory. Retention selects
@@ -952,6 +977,16 @@ func (s *Service) SetTurnService(turnService TurnService) {
 // on those paths). Task service's own publishTaskEvent calls are unaffected.
 func (s *Service) SetTaskEventPublisher(publisher TaskEventPublisher) {
 	s.taskEvents = publisher
+}
+
+// SetSessionDeleteResourceCleanup wires the durable worktree-reclamation
+// intent recorder DeleteSession relies on to avoid leaking a session's
+// worktrees when the DB cascade removes the only row that tracked them.
+//
+// If not set: DeleteSession skips inventory capture and no cleanup job is
+// created (isolated tests without a task service).
+func (s *Service) SetSessionDeleteResourceCleanup(cleanup SessionDeleteResourceCleanup) {
+	s.sessionResourceCleanup = cleanup
 }
 
 // SetSessionAccessChecker installs the per-user workspace scoping check used by

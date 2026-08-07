@@ -12,6 +12,11 @@ const (
 	TaskResourceCleanupTriggerWorkspaceDelete TaskResourceCleanupTrigger = "workspace_delete"
 	TaskResourceCleanupTriggerQuickChatExpire TaskResourceCleanupTrigger = "quick_chat_expire"
 	TaskResourceCleanupTriggerReconcile       TaskResourceCleanupTrigger = "reconcile"
+	// TaskResourceCleanupTriggerSessionDelete reclaims the worktrees a single
+	// deleted session exclusively held. Unlike the task-scoped triggers above,
+	// its resource snapshot is session-shaped (see
+	// docs/specs/session-delete-resource-cleanup/spec.md).
+	TaskResourceCleanupTriggerSessionDelete TaskResourceCleanupTrigger = "session_delete"
 )
 
 type TaskResourceCleanupState string

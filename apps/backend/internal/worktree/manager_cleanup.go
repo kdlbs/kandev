@@ -254,6 +254,42 @@ func (m *Manager) removeWorktree(ctx context.Context, wt *Worktree, removeBranch
 	return nil
 }
 
+// ReclaimSessionWorktree removes a worktree's directory and git registration
+// if no other session still holds it. It is used by the durable session-delete
+// cleanup job (see docs/specs/session-delete-resource-cleanup), which runs
+// only after the deleted session's own task_session_worktrees row is already
+// gone — so, unlike removeWorktree, no explicit session exclusion is needed:
+// a non-zero reference count can only mean another, still-live session holds
+// this worktree_id, and the worktree is left untouched. Never deletes the
+// branch, matching the "session.delete never runs git branch -D" invariant.
+// Unlike removeWorktree, directory-removal failure is returned rather than
+// only logged, so the caller's retry/backoff machinery can observe it.
+func (m *Manager) ReclaimSessionWorktree(ctx context.Context, wt *Worktree) error {
+	if wt == nil || wt.Path == "" || wt.RepositoryPath == "" {
+		return nil
+	}
+	repoLock := m.getRepoLock(wt.RepositoryPath)
+	repoLock.Lock()
+	defer func() {
+		repoLock.Unlock()
+		m.releaseRepoLock(wt.RepositoryPath)
+	}()
+
+	activeReferences, err := m.CountActiveWorktreeReferences(ctx, wt.ID, nil)
+	if err != nil {
+		return fmt.Errorf("count active references for worktree %s: %w", wt.ID, err)
+	}
+	if activeReferences > 0 {
+		return nil
+	}
+
+	m.runWorktreeCleanupScript(ctx, wt)
+	if err := m.removeWorktreeDir(ctx, wt.Path, wt.RepositoryPath); err != nil {
+		return fmt.Errorf("remove worktree directory %s: %w", wt.Path, err)
+	}
+	return nil
+}
+
 // ReleaseWorktreeReference marks one session's association deleted without
 // removing the shared directory or branch.
 func (m *Manager) ReleaseWorktreeReference(ctx context.Context, wt *Worktree) error {

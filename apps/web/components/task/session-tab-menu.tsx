@@ -19,6 +19,8 @@ import {
 import { ShareDialog } from "@/components/task/share/share-dialog";
 import { HandoffContextMenuSub } from "@/components/task/handoff-profile-menu-items";
 import { NewSessionDialog, type HandoffPreset } from "@/components/task/new-session-dialog";
+import { SessionDeleteWarningLines } from "@/components/task/session-delete-warning";
+import { useSessionDeleteWarning } from "@/hooks/use-session-delete-warning";
 import type { TaskSessionState } from "@/lib/types/http";
 import { useTranslation } from "react-i18next";
 
@@ -35,15 +37,18 @@ export function DeleteSessionDialog({
   onOpenChange,
   isPrimary,
   sessionCount,
+  sessionId,
   onConfirm,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   isPrimary: boolean;
   sessionCount: number;
+  sessionId?: string;
   onConfirm: () => void;
 }) {
   const { t } = useTranslation();
+  const warning = useSessionDeleteWarning(open, sessionId);
   return (
     <AlertDialog open={open} onOpenChange={onOpenChange}>
       <AlertDialogContent>
@@ -52,6 +57,7 @@ export function DeleteSessionDialog({
           <AlertDialogDescription asChild>
             <div>
               <p>{t("task:thisWillPermanentlyDeleteTheConversation")}</p>
+              <SessionDeleteWarningLines warning={warning} />
               {isPrimary && sessionCount > 1 && (
                 <p className="mt-2 font-medium">{t("task:thisIsThePrimarySessionAnother")}</p>
               )}
@@ -191,6 +197,7 @@ export function SessionTabDialogs({
         onOpenChange={setConfirmDelete}
         isPrimary={isPrimary}
         sessionCount={sessionCount}
+        sessionId={sessionId}
         onConfirm={onConfirmDelete}
       />
       {taskId && sessionId && (

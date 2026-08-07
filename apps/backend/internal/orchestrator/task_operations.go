@@ -2758,6 +2758,17 @@ func (s *Service) DeleteSession(ctx context.Context, sessionID string) error {
 		return err
 	}
 
+	// Capture the session's worktree inventory and durably record a cleanup
+	// intent BEFORE the row is deleted: task_session_worktrees cascades away
+	// with the session row, so the row is the only pointer to its worktrees.
+	// An un-recorded worktree at this point is unrecoverable, so a failure
+	// here fails the delete closed and leaves the session in place — see
+	// docs/specs/session-delete-resource-cleanup.
+	cleanupOperationID, err := s.prepareSessionDeleteResourceCleanup(ctx, sessionID, taskID)
+	if err != nil {
+		return fmt.Errorf("failed to record session delete cleanup intent: %w", err)
+	}
+
 	s.logger.Info("deleting session",
 		zap.String("session_id", sessionID),
 		zap.String("task_id", taskID),
@@ -2765,7 +2776,19 @@ func (s *Service) DeleteSession(ctx context.Context, sessionID string) error {
 		zap.Bool("was_primary", wasPrimary))
 
 	if err := s.repo.DeleteTaskSession(ctx, sessionID); err != nil {
+		s.cancelSessionDeleteResourceCleanup(cleanupOperationID)
 		return fmt.Errorf("failed to delete session: %w", err)
+	}
+
+	// The row is gone; activate the prepared job so the durable worker
+	// reclaims any exclusively-held worktrees. {"success":true} on this call
+	// asserts reclamation is durably owned, not that it has finished yet.
+	s.activateSessionDeleteResourceCleanup(ctx, cleanupOperationID)
+
+	// Evict this session's in-memory worktree cache entries — no future
+	// lookup will ever key off this session ID again.
+	if s.worktreeSessionCache != nil {
+		s.worktreeSessionCache.ForgetSession(sessionID)
 	}
 
 	// Drop the in-memory git snapshot throttle entry — the session will
@@ -2788,6 +2811,48 @@ func (s *Service) DeleteSession(ctx context.Context, sessionID string) error {
 	}
 
 	return nil
+}
+
+// prepareSessionDeleteResourceCleanup captures the session's worktree
+// inventory and persists a prepared cleanup job, returning its operation ID.
+// Returns ("", nil) when no cleanup collaborator is wired or the session has
+// nothing to reclaim — callers must treat that as "no job to activate/cancel".
+func (s *Service) prepareSessionDeleteResourceCleanup(ctx context.Context, sessionID, taskID string) (string, error) {
+	if s.sessionResourceCleanup == nil {
+		return "", nil
+	}
+	return s.sessionResourceCleanup.PrepareSessionDeleteResourceCleanup(ctx, sessionID, taskID)
+}
+
+// activateSessionDeleteResourceCleanup flips a prepared cleanup job to
+// pending and wakes the durable worker, once the session row it snapshotted
+// is confirmed gone. A failure here is not fatal to the delete itself — the
+// job stays in `prepared` and restart reconciliation activates it — but is
+// logged since it delays reclamation.
+func (s *Service) activateSessionDeleteResourceCleanup(ctx context.Context, operationID string) {
+	if operationID == "" || s.sessionResourceCleanup == nil {
+		return
+	}
+	if err := s.sessionResourceCleanup.StartPreparedTaskResourceCleanup(ctx, operationID); err != nil {
+		s.logger.Warn("failed to activate session delete cleanup job",
+			zap.String("operation_id", operationID), zap.Error(err))
+	}
+}
+
+// cancelSessionDeleteResourceCleanup cancels a prepared cleanup job after the
+// session delete it was recorded for failed to commit. Detached from ctx so a
+// caller-cancelled request context does not block cleanup of its own orphaned
+// intent.
+func (s *Service) cancelSessionDeleteResourceCleanup(operationID string) {
+	if operationID == "" || s.sessionResourceCleanup == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(context.Background()), 5*time.Second)
+	defer cancel()
+	if err := s.sessionResourceCleanup.CancelPreparedTaskResourceCleanup(ctx, operationID); err != nil {
+		s.logger.Warn("failed to cancel session delete cleanup job",
+			zap.String("operation_id", operationID), zap.Error(err))
+	}
 }
 
 // quiesceSessionExecutionBeforeDeletion stops the in-memory lifecycle
