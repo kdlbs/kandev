@@ -140,7 +140,7 @@ export function KanbanCardBody({
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0 flex-1">
           <RepoChipRow chips={repositoryChips} />
-          <div className="flex items-center gap-1 min-w-0" data-testid="task-card-title-row">
+          <div className="flex items-center gap-1 min-w-0" data-testid="kanban-card-title-row">
             <p
               data-testid="task-card-title"
               className="text-sm font-medium leading-tight line-clamp-1 min-w-0"

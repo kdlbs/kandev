@@ -921,6 +921,8 @@ export class ApiClient {
     default_utility_agent_id?: string;
     default_utility_model?: string;
     sidebar_views?: unknown[];
+    sidebar_active_view_id?: string;
+    sidebar_draft?: unknown;
     saved_layouts?: unknown[];
     lsp_auto_start_languages?: string[];
     lsp_auto_install_languages?: string[];

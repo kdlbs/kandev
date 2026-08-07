@@ -94,7 +94,7 @@ describe("KanbanCardBody — task-card-tags slot", () => {
 
     render(<KanbanCardBody task={TASK} repositoryChips={[]} />);
 
-    const titleRow = screen.getByTestId("task-card-title-row");
+    const titleRow = screen.getByTestId("kanban-card-title-row");
     const tags = screen.getByTestId(TAGS_TEST_ID);
     const indicator = screen.getByTestId(INDICATOR_TEST_ID);
     expect(titleRow.contains(indicator)).toBe(true);
