@@ -185,7 +185,7 @@ function SummaryRow({ row }: { row: PRTaskSummaryRow }) {
   return (
     <div
       data-testid={`pr-task-status-${row.kind}`}
-      className="grid grid-cols-[4.25rem_minmax(0,1fr)] items-center gap-x-3"
+      className="grid grid-cols-[min-content_minmax(0,1fr)] items-start gap-x-3"
     >
       <span className="text-muted-foreground">{t(ROW_LABEL_KEYS[row.kind])}</span>
       <span className={cn("flex min-w-0 items-center gap-1.5 font-medium", TONE_CLASSES[row.tone])}>
