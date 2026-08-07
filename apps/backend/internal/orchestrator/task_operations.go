@@ -1817,13 +1817,9 @@ func (s *Service) ensureSessionRunning(ctx context.Context, sessionID string, se
 			if isOfficeTask {
 				return errOfficeTaskResumeRequiresScheduler
 			}
-			recoveryCtx := context.WithoutCancel(ctx)
-			if stopErr := s.reapPromptUnreadyExecution(recoveryCtx, sessionID, err); stopErr != nil {
-				return fmt.Errorf("failed to stop prompt-unready execution: %w", stopErr)
-			}
-			refreshed, refreshErr := s.repo.GetTaskSession(recoveryCtx, sessionID)
-			if refreshErr != nil {
-				return fmt.Errorf("failed to reload session after prompt-readiness recovery: %w", refreshErr)
+			refreshed, reapErr := s.reapAndReloadSession(ctx, sessionID, err)
+			if reapErr != nil {
+				return reapErr
 			}
 			session = refreshed
 		} else {
@@ -1844,88 +1840,118 @@ func (s *Service) ensureSessionRunning(ctx context.Context, sessionID string, se
 	// exceeded" with no self-heal, unlike every other resume path in this
 	// file.
 	for attempt := 1; ; attempt++ {
-		// If the session is in CREATED state with an existing workspace (executors_running
-		// row exists), the workspace was prepared but the agent was never started. Use
-		// LaunchPreparedSession which routes to startAgentOnExistingWorkspace to reuse
-		// the workspace rather than ResumeSession which tries a full LaunchAgent and
-		// conflicts with the existing execution.
-		if session.State == models.TaskSessionStateCreated {
-			hasRunning, _ := s.repo.HasExecutorRunningRow(ctx, sessionID)
-			if hasRunning {
-				return s.startAgentOnPreparedWorkspace(ctx, sessionID, session)
-			}
-		}
-		if isOfficeTask {
-			return errOfficeTaskResumeRequiresScheduler
-		}
-
-		running, err := s.repo.GetExecutorRunningBySessionID(ctx, sessionID)
-		if err != nil || running == nil {
-			return fmt.Errorf("session is not resumable: no executor record (state: %s)", session.State)
-		}
-
-		if err := validateSessionWorktrees(session); err != nil {
-			return err
-		}
-
-		// Use context.WithoutCancel to prevent WebSocket request timeout from canceling the resume.
-		// The lifecycle layer publishes events.AgentBootReady (handled by handleAgentBootReady)
-		// when the agent's ACP session initializes — that's what unblocks waitForSessionReady,
-		// no flag-tracking needed.
-		resumeCtx := context.WithoutCancel(ctx)
-		if _, err = s.executor.ResumeSession(resumeCtx, session, true); err != nil {
-			if errors.Is(err, executor.ErrExecutionAlreadyRunning) {
-				s.recoverAgentPromptStreamIfNeeded(resumeCtx, sessionID)
-				if readyErr := s.waitForAgentPromptReady(resumeCtx, sessionID); readyErr != nil {
-					return fmt.Errorf("agent not ready after resume race: %w", readyErr)
-				}
-				return nil
-			}
-			return s.handleSessionLaunchFailure(
-				resumeCtx,
-				session.TaskID,
-				sessionID,
-				fmt.Errorf("failed to resume session: %w", err),
-				session,
-			)
-		}
-
-		// ResumeSession launches the agent asynchronously. Wait for it to finish
-		// initializing before returning, so the caller can send a prompt immediately.
-		//
-		// Use resumeCtx (context.WithoutCancel) here too, not the original ctx: the
-		// resume itself is already shielded from the caller's request deadline (see
-		// comment above), but a short-lived caller context (WebSocket request,
-		// MCP tool-call timeout, etc.) would otherwise still abort these polling
-		// waits early with a misleading "context deadline exceeded" even though the
-		// resume is progressing fine in the background and would succeed within its
-		// own bounded timeouts (waitForSessionReady's AgentLaunchTimeout launch
-		// budget, and waitForAgentPromptReady's 30s below).
-		if err := s.waitForSessionReady(resumeCtx, sessionID); err != nil {
-			return fmt.Errorf("session not ready after resume: %w", err)
-		}
-		readyErr := s.waitForAgentPromptReady(resumeCtx, sessionID)
-		if readyErr == nil {
-			s.logger.Debug("session resumed and ready for prompt")
+		retryable, err := s.attemptColdResume(ctx, sessionID, session, isOfficeTask)
+		if err == nil {
 			return nil
 		}
-		if attempt >= 2 || !errors.Is(readyErr, ErrAgentNotReadyForPrompt) {
-			return fmt.Errorf("agent not ready after resume: %w", readyErr)
+		if attempt >= 2 || !retryable {
+			return err
 		}
-
-		// First attempt launched an agent that never reported prompt-ready.
-		// Reap it and retry once, exactly as the already-tracked-execution
-		// branch above does on the same error.
-		recoveryCtx := context.WithoutCancel(ctx)
-		if stopErr := s.reapPromptUnreadyExecution(recoveryCtx, sessionID, readyErr); stopErr != nil {
-			return fmt.Errorf("failed to stop prompt-unready execution: %w", stopErr)
-		}
-		refreshed, refreshErr := s.repo.GetTaskSession(recoveryCtx, sessionID)
-		if refreshErr != nil {
-			return fmt.Errorf("failed to reload session after prompt-readiness recovery: %w", refreshErr)
+		refreshed, reapErr := s.reapAndReloadSession(ctx, sessionID, err)
+		if reapErr != nil {
+			return reapErr
 		}
 		session = refreshed
 	}
+}
+
+// reapAndReloadSession stops a prompt-unready execution and reloads the
+// session row afterward. Shared by ensureSessionRunning's already-tracked-
+// execution branch and its cold-resume retry loop so both recovery paths
+// stay in lockstep.
+func (s *Service) reapAndReloadSession(ctx context.Context, sessionID string, cause error) (*models.TaskSession, error) {
+	recoveryCtx := context.WithoutCancel(ctx)
+	if stopErr := s.reapPromptUnreadyExecution(recoveryCtx, sessionID, cause); stopErr != nil {
+		return nil, fmt.Errorf("failed to stop prompt-unready execution: %w", stopErr)
+	}
+	refreshed, refreshErr := s.repo.GetTaskSession(recoveryCtx, sessionID)
+	if refreshErr != nil {
+		return nil, fmt.Errorf("failed to reload session after prompt-readiness recovery: %w", refreshErr)
+	}
+	return refreshed, nil
+}
+
+// attemptColdResume performs one resume attempt for ensureSessionRunning's
+// cold-resume loop (no execution currently tracked in memory). retryable is
+// true only when the caller should reap the stuck execution and retry —
+// specifically the main-path prompt-readiness timeout below, which is the
+// exact "kandev restart" wedged-launch shape this loop exists to self-heal.
+// The concurrent-resume-race branch (ErrExecutionAlreadyRunning) reports its
+// own timeout as non-retryable: that failure is against an execution this
+// attempt never launched, not a wedged cold launch, so retrying it here would
+// blur two distinct failure modes the caller's tests pin down separately.
+func (s *Service) attemptColdResume(
+	ctx context.Context,
+	sessionID string,
+	session *models.TaskSession,
+	isOfficeTask bool,
+) (retryable bool, err error) {
+	// If the session is in CREATED state with an existing workspace (executors_running
+	// row exists), the workspace was prepared but the agent was never started. Use
+	// LaunchPreparedSession which routes to startAgentOnExistingWorkspace to reuse
+	// the workspace rather than ResumeSession which tries a full LaunchAgent and
+	// conflicts with the existing execution.
+	if session.State == models.TaskSessionStateCreated {
+		hasRunning, _ := s.repo.HasExecutorRunningRow(ctx, sessionID)
+		if hasRunning {
+			return false, s.startAgentOnPreparedWorkspace(ctx, sessionID, session)
+		}
+	}
+	if isOfficeTask {
+		return false, errOfficeTaskResumeRequiresScheduler
+	}
+
+	running, lookupErr := s.repo.GetExecutorRunningBySessionID(ctx, sessionID)
+	if lookupErr != nil || running == nil {
+		return false, fmt.Errorf("session is not resumable: no executor record (state: %s)", session.State)
+	}
+
+	if err := validateSessionWorktrees(session); err != nil {
+		return false, err
+	}
+
+	// Use context.WithoutCancel to prevent WebSocket request timeout from canceling the resume.
+	// The lifecycle layer publishes events.AgentBootReady (handled by handleAgentBootReady)
+	// when the agent's ACP session initializes — that's what unblocks waitForSessionReady,
+	// no flag-tracking needed.
+	resumeCtx := context.WithoutCancel(ctx)
+	if _, launchErr := s.executor.ResumeSession(resumeCtx, session, true); launchErr != nil {
+		if errors.Is(launchErr, executor.ErrExecutionAlreadyRunning) {
+			s.recoverAgentPromptStreamIfNeeded(resumeCtx, sessionID)
+			if readyErr := s.waitForAgentPromptReady(resumeCtx, sessionID); readyErr != nil {
+				return false, fmt.Errorf("agent not ready after resume race: %w", readyErr)
+			}
+			return false, nil
+		}
+		return false, s.handleSessionLaunchFailure(
+			resumeCtx,
+			session.TaskID,
+			sessionID,
+			fmt.Errorf("failed to resume session: %w", launchErr),
+			session,
+		)
+	}
+
+	// ResumeSession launches the agent asynchronously. Wait for it to finish
+	// initializing before returning, so the caller can send a prompt immediately.
+	//
+	// Use resumeCtx (context.WithoutCancel) here too, not the original ctx: the
+	// resume itself is already shielded from the caller's request deadline (see
+	// comment above), but a short-lived caller context (WebSocket request,
+	// MCP tool-call timeout, etc.) would otherwise still abort these polling
+	// waits early with a misleading "context deadline exceeded" even though the
+	// resume is progressing fine in the background and would succeed within its
+	// own bounded timeouts (waitForSessionReady's AgentLaunchTimeout launch
+	// budget, and waitForAgentPromptReady's 30s below).
+	if err := s.waitForSessionReady(resumeCtx, sessionID); err != nil {
+		return false, fmt.Errorf("session not ready after resume: %w", err)
+	}
+	readyErr := s.waitForAgentPromptReady(resumeCtx, sessionID)
+	if readyErr == nil {
+		s.logger.Debug("session resumed and ready for prompt")
+		return false, nil
+	}
+	return errors.Is(readyErr, ErrAgentNotReadyForPrompt), fmt.Errorf("agent not ready after resume: %w", readyErr)
 }
 
 func (s *Service) recoverAgentPromptStreamIfNeeded(ctx context.Context, sessionID string) {

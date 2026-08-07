@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -74,7 +75,20 @@ func TestEnsureSessionRunning_ColdResumeReapsAndRetriesOnPromptReadyTimeout(t *t
 	// constants.AgentLaunchTimeout in this test) — only agent-level
 	// prompt-readiness (isAgentReadyFn) distinguishes the wedged first
 	// attempt from the healthy replacement.
+	//
+	// The launch goroutines below are bound to the test lifetime via
+	// launchCtx/launchWG: without that, a goroutine can still be polling
+	// (and calling into the test repo) after setupTestRepo's own t.Cleanup
+	// closes the database, which panics or logs after test completion.
+	// t.Cleanup runs LIFO, so this cancel-and-wait cleanup (registered after
+	// setupTestRepo's) drains every goroutine before the repo closes.
 	var launchCalls atomic.Int32
+	launchCtx, cancelLaunches := context.WithCancel(ctx)
+	var launchWG sync.WaitGroup
+	t.Cleanup(func() {
+		cancelLaunches()
+		launchWG.Wait()
+	})
 	agentMgr := &mockAgentManager{
 		repoForExecutionLookup: repo,
 		isAgentRunningFn: func(_ context.Context, _ string) bool {
@@ -89,18 +103,22 @@ func TestEnsureSessionRunning_ColdResumeReapsAndRetriesOnPromptReadyTimeout(t *t
 		},
 		launchAgentFunc: func(_ context.Context, req *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
 			n := launchCalls.Add(1)
+			launchWG.Add(1)
 			go func(sessID string) {
+				defer launchWG.Done()
 				tick := time.NewTicker(time.Millisecond)
 				defer tick.Stop()
 				timeout := time.After(5 * time.Second)
 				for {
 					select {
+					case <-launchCtx.Done():
+						return
 					case <-tick.C:
-						sess, err := repo.GetTaskSession(context.Background(), sessID)
+						sess, err := repo.GetTaskSession(launchCtx, sessID)
 						if err == nil && sess != nil && sess.State == models.TaskSessionStateStarting {
 							sess.State = models.TaskSessionStateWaitingForInput
 							sess.UpdatedAt = time.Now().UTC()
-							_ = repo.UpdateTaskSession(context.Background(), sess)
+							_ = repo.UpdateTaskSession(launchCtx, sess)
 							return
 						}
 					case <-timeout:
