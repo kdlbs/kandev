@@ -122,7 +122,7 @@ export function MultiPRCIPopover({
   prs: TaskPR[];
   enabled: boolean;
   onOpenDetailPanel?: (pr: TaskPR) => void;
-  refreshTaskPR?: () => void;
+  refreshTaskPR?: () => void | Promise<void>;
   onRemovePR?: (pr: TaskPR) => Promise<void>;
   onCollapseFocus?: (remainingPR: TaskPR) => void;
 }) {

@@ -773,6 +773,11 @@ export class SessionPage {
     return this.prTopbarPopover().getByTestId("pr-popover-updated-at");
   }
 
+  /** Footer spinner + "Updating…", shown while a refresh is in flight. */
+  prPopoverUpdating(): Locator {
+    return this.prTopbarPopover().getByTestId("pr-popover-updating");
+  }
+
   /** Empty-state row when the PR has no checks yet. */
   prChecksEmpty(): Locator {
     return this.prTopbarPopover().getByTestId("pr-checks-empty");

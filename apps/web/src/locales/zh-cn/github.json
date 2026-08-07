@@ -520,6 +520,7 @@
   "updated": "已更新 ",
   "updatedAgo": "{{elapsed}} 前更新",
   "updatedJustNow": "刚刚更新",
+  "updatingStatus": "更新中…",
   "useAnAppWhenAutomationNeeds": "当自动化需要独立身份、短期令牌和仓库级安装控制时，请使用应用。设置过程更复杂，并且需要可公开访问的 HTTPS URL。",
   "useCommaSeparatedOwnerRepoValues": "使用逗号分隔的 owner/repo 值。",
   "useDefault": "使用默认",
