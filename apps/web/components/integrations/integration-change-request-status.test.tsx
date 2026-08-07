@@ -39,7 +39,13 @@ function statusItem(overrides: Partial<IntegrationChangeRequestStatusItem> = {})
           detail: "Passed in 1m",
           url: "https://ci.example.com/build/42",
         },
-        { id: "test", label: "Tests", state: "pending", detail: "Running" },
+        {
+          id: "test",
+          label: "Tests",
+          state: "pending",
+          detail: "Running",
+          url: "https://ci.example.com/test/42",
+        },
       ],
       onRefresh,
       onOpenReview,
@@ -79,6 +85,9 @@ describe("IntegrationChangeRequestStatus", () => {
     const popover = screen.getByTestId(STATUS_POPOVER_TEST_ID);
     expect(popover).toBeTruthy();
     expect(screen.getByTestId("pr-topbar-popover-inner").parentElement).toBe(popover);
+    const passed = popover.querySelector("[data-testid='pr-check-group'][data-kind='passed']");
+    expect(passed?.querySelector("[data-testid='pr-check-group-count']")?.textContent).toBe("1");
+    expect(popover.querySelector("[data-testid='pr-workflow-open']")).toBeTruthy();
     expect(screen.getByText("Tests")).toBeTruthy();
     expect(onRefresh).toHaveBeenCalledOnce();
   });

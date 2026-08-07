@@ -179,7 +179,11 @@ test.describe("mobile PR re-request review", () => {
 
     await testPage.getByTestId("review-item-selector-trigger").tap();
     await testPage
-      .getByTestId(`review-item-selector-item-github:${OWNER}/${REPO}/${SWITCH_SECOND_PR_NUMBER}`)
+      .getByTestId(
+        `review-item-selector-item-github:${encodeURIComponent(
+          `${OWNER}/${REPO}/${SWITCH_SECOND_PR_NUMBER}`,
+        )}`,
+      )
       .tap();
     await secondFeedbackRequested;
 

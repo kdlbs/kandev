@@ -197,6 +197,10 @@ test.describe("Bitbucket plugin contract", () => {
     await row.getByRole("button", { name: "Enable" }).click();
     await expect(row.getByText("Active", { exact: true })).toBeVisible();
     await testPage.goto(`/t/${task.id}`);
+    // Re-enabling restores the provider registration, but must not override
+    // the native per-session rule that a previously offered review panel stays
+    // dismissed until the user opens it again.
+    await testPage.getByText("Bitbucket Pull Request #42", { exact: true }).click();
     await expect(testPage.getByTestId("fixture-review-panel-desktop")).toBeVisible();
   });
 });

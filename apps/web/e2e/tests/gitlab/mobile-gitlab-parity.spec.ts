@@ -107,7 +107,7 @@ test.describe("Mobile GitLab parity", () => {
           "window.__KANDEV_E2E_STORE__?.getState().mobileSession.reviewItemIdBySessionId[window.__KANDEV_E2E_STORE__?.getState().tasks.activeSessionId ?? '']",
         ),
       )
-      .toBe(`gitlab:${GITLAB_HOST}|${GITLAB_PROJECT}|${selectedIID}`);
+      .toBe(`gitlab:${encodeURIComponent(`${GITLAB_HOST}|${GITLAB_PROJECT}|${selectedIID}`)}`);
   });
 
   test("browses, quick launches, reviews, subscribes, and unlinks without overflow", async ({

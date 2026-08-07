@@ -9,6 +9,7 @@ import {
   IconExternalLink,
   IconGitPullRequest,
   IconMessageCircle,
+  IconPlus,
 } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { openExternalLink } from "@/lib/desktop/external-links";
@@ -121,6 +122,13 @@ function countForState(
   return 0;
 }
 
+function checkBucketName(state: IntegrationChangeRequestPipelineState): string {
+  if (state === "success") return "passed";
+  if (state === "pending") return "in_progress";
+  if (state === "failure") return "failed";
+  return "neutral";
+}
+
 const CHECK_STATES: IntegrationChangeRequestPipelineState[] = ["success", "pending", "failure"];
 
 function ChecksProgress({
@@ -144,22 +152,42 @@ function ChecksProgress({
         </span>
       </div>
       <div className="flex h-1.5 w-full overflow-hidden rounded-full bg-muted/70">
-        <div className="h-full bg-green-500" style={{ width: `${percent(counts.passed)}%` }} />
-        <div className="h-full bg-yellow-500" style={{ width: `${percent(counts.pending)}%` }} />
-        <div className="h-full bg-red-500" style={{ width: `${percent(counts.failed)}%` }} />
+        {counts.passed > 0 ? (
+          <div
+            data-segment="passed"
+            className="h-full bg-green-500 transition-[width]"
+            style={{ width: `${percent(counts.passed)}%` }}
+          />
+        ) : null}
+        {counts.pending > 0 ? (
+          <div
+            data-segment="in_progress"
+            className="h-full bg-yellow-500 transition-[width]"
+            style={{ width: `${percent(counts.pending)}%` }}
+          />
+        ) : null}
+        {counts.failed > 0 ? (
+          <div
+            data-segment="failed"
+            className="h-full bg-red-500 transition-[width]"
+            style={{ width: `${percent(counts.failed)}%` }}
+          />
+        ) : null}
       </div>
     </div>
   );
 }
 
 function CheckRow({ row }: { row: ChangeRequestCheckRow }) {
+  const bucket = checkBucketName(row.state);
+  const url = row.url;
   return (
     <div
       data-testid="pr-workflow-row"
       data-workflow={row.label}
-      data-bucket={row.state}
+      data-bucket={bucket}
       className="flex cursor-pointer items-center gap-2 rounded-sm px-2 py-1 hover:bg-accent/50"
-      onClick={() => row.url && void openExternalLink(row.url).catch(() => undefined)}
+      onClick={() => url && void openExternalLink(url).catch(() => undefined)}
     >
       <span className="min-w-0 flex-1 truncate text-xs font-medium" title={row.label}>
         {row.label}
@@ -167,9 +195,25 @@ function CheckRow({ row }: { row: ChangeRequestCheckRow }) {
       {row.detail ? (
         <span className="shrink-0 text-[10px] text-muted-foreground">{row.detail}</span>
       ) : null}
-      {row.url ? <IconExternalLink className="h-3 w-3 shrink-0" /> : null}
+      {url ? (
+        <Button
+          data-testid="pr-workflow-open"
+          type="button"
+          size="sm"
+          variant="ghost"
+          className="h-5 w-5 shrink-0 cursor-pointer p-0"
+          aria-label={t("integrations:openDetails", { title: row.label })}
+          onClick={(event) => {
+            event.stopPropagation();
+            void openExternalLink(url).catch(() => undefined);
+          }}
+        >
+          <IconExternalLink className="h-3 w-3" />
+        </Button>
+      ) : null}
       {row.state === "failure" && row.onAddAsContext ? (
         <Button
+          data-testid="pr-workflow-add-context"
           type="button"
           size="sm"
           variant="ghost"
@@ -180,7 +224,7 @@ function CheckRow({ row }: { row: ChangeRequestCheckRow }) {
             row.onAddAsContext?.();
           }}
         >
-          +
+          <IconPlus className="h-3 w-3" />
         </Button>
       ) : null}
     </div>
@@ -220,13 +264,23 @@ export function ChangeRequestChecksSection({
         const count = countForState(counts, state);
         if (count === 0 && stateRows.length === 0) return null;
         return (
-          <div key={state} data-testid="pr-check-group" data-kind={state}>
+          <div
+            key={state}
+            data-testid="pr-check-group"
+            data-kind={checkBucketName(state)}
+            className="flex flex-col"
+          >
             <div className="flex items-center justify-between gap-2 px-1 py-1">
               <div className="flex items-center gap-1.5">
                 <GroupIcon state={state} />
                 <span className="text-xs font-medium">{groupLabel(state, groupLabels)}</span>
               </div>
-              <span className="text-xs tabular-nums text-muted-foreground">{count}</span>
+              <span
+                data-testid="pr-check-group-count"
+                className="text-xs tabular-nums text-muted-foreground"
+              >
+                {count}
+              </span>
             </div>
             {state !== "success" ? (
               <div className="flex flex-col pl-5">
