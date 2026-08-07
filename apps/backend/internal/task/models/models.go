@@ -662,8 +662,8 @@ const (
 
 // Workflow represents a task workflow
 type Workflow struct {
-	ID                 string  `json:"id"`
-	WorkspaceID        string  `json:"workspace_id"`
+	ID          string `json:"id"`
+	WorkspaceID string `json:"workspace_id"`
 	Name        string `json:"name"`
 	Description string `json:"description"`
 	// Prompt is optional workflow-level agent instructions prepended at

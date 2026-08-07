@@ -279,6 +279,174 @@ func TestProjectorDerivesBoundedStatusAcrossSources(t *testing.T) {
 	}
 }
 
+// Session events carry a `session_metadata` snapshot taken when the publisher
+// read the session, so one taken before the error was cleared must not re-arm an
+// error this projection already cleared.
+func TestProjectorDoesNotResurrectClearedErrorFromSessionMetadata(t *testing.T) {
+	_, store, eventBus, _, _ := newProjectorTest(t)
+	const taskID = "task-error-replay"
+	const sessionID = "session-error-replay"
+
+	occurredAt := "2026-08-01T18:01:00.000000000Z"
+	breadcrumb := map[string]interface{}{
+		"last_agent_error": map[string]interface{}{
+			"message":     "agent crashed",
+			"occurred_at": occurredAt,
+		},
+	}
+
+	publishSessionState(t, eventBus, taskID, sessionID, map[string]interface{}{
+		"session_metadata": breadcrumb,
+	})
+	if got := store.summary(taskID); got == nil || got.ActiveError == nil {
+		t.Fatalf("active error after failure = %+v", got)
+	}
+
+	// The agent recovers and posts an ordinary message.
+	publishProjectorEvent(t, eventBus, events.MessageAdded, events.MessageAdded, map[string]interface{}{
+		"task_id":     taskID,
+		"session_id":  sessionID,
+		"author_type": "agent",
+		"type":        "text",
+		"content":     "recovered",
+	})
+	if got := store.summary(taskID); got.ActiveError != nil {
+		t.Fatalf("active error after recovery = %+v, want cleared", got.ActiveError)
+	}
+
+	// Turn end republishes the session, metadata breadcrumb and all.
+	publishSessionState(t, eventBus, taskID, sessionID, map[string]interface{}{
+		"new_state":        "WAITING_FOR_INPUT",
+		"session_metadata": breadcrumb,
+	})
+	if got := store.summary(taskID); got.ActiveError != nil {
+		t.Fatalf("active error after metadata replay = %+v, want it to stay cleared", got.ActiveError)
+	}
+
+	// A genuinely new failure is still authoritative.
+	publishProjectorEvent(t, eventBus, events.TaskSessionErrorChanged, events.TaskSessionErrorChanged, map[string]interface{}{
+		"task_id":     taskID,
+		"session_id":  sessionID,
+		"active":      true,
+		"message":     "agent crashed again",
+		"occurred_at": "2026-08-01T18:05:00.000000000Z",
+		"stamp":       "error-stamp-2",
+	})
+	got := store.summary(taskID)
+	if got.ActiveError == nil || got.ActiveError.Stamp != "error-stamp-2" {
+		t.Fatalf("active error after a new failure = %+v, want the new error", got.ActiveError)
+	}
+}
+
+// A retired record is an authoritative "no active error" for the session, so it
+// must clear an error the projection restored from its persisted row rather than
+// being read as an absence of information.
+func TestProjectorClearsErrorWhenSessionMetadataIsRetired(t *testing.T) {
+	store := newProjectorTestStore()
+	storedAt := time.Date(2026, 8, 1, 17, 59, 0, 0, time.UTC)
+	store.rows["task-superseded"] = &StoredTaskStatusSummary{
+		TaskID:      "task-superseded",
+		WorkspaceID: "workspace-1",
+		Summary: TaskStatusSummary{
+			Revision:       3,
+			UpdatedAt:      storedAt,
+			PrimarySession: &PrimarySessionSummary{ID: "session-superseded", State: "RUNNING"},
+			ActiveError: &ActiveErrorSummary{
+				SessionID:  "session-superseded",
+				Stamp:      "error-stored",
+				OccurredAt: storedAt,
+				Preview:    "agent crashed",
+			},
+		},
+	}
+
+	projector := NewProjector(ProjectorConfig{
+		Store: store,
+		ResolveWorkspace: func(context.Context, string) (string, error) {
+			return "workspace-1", nil
+		},
+		Now: func() time.Time { return storedAt.Add(time.Minute) },
+	})
+
+	if err := projector.HandleEvent(context.Background(), bus.NewEvent(events.TaskSessionStateChanged, "test", map[string]interface{}{
+		"task_id":      "task-superseded",
+		"workspace_id": "workspace-1",
+		"session_id":   "session-superseded",
+		"new_state":    "WAITING_FOR_INPUT",
+		"is_primary":   true,
+		"session_metadata": map[string]interface{}{
+			"last_agent_error": map[string]interface{}{
+				"message":      "agent crashed",
+				"occurred_at":  storedAt.Format(time.RFC3339Nano),
+				"dismissed_at": storedAt.Add(30 * time.Second).Format(time.RFC3339Nano),
+			},
+		},
+	})); err != nil {
+		t.Fatalf("replay session event: %v", err)
+	}
+
+	got := store.summary("task-superseded")
+	if got == nil {
+		t.Fatal("summary disappeared")
+	}
+	if got.ActiveError != nil {
+		t.Fatalf("active error after retired metadata = %+v, want cleared", got.ActiveError)
+	}
+}
+
+// The orchestrator clears a recovered failure by writing JSON null, which
+// round-trips as a nil value under an existing key. Reading that as "no
+// information" instead of "no active error" would leave a restored summary's
+// error armed forever — the restart path this whole fix is about.
+func TestProjectorClearsErrorWhenSessionMetadataIsNull(t *testing.T) {
+	store := newProjectorTestStore()
+	storedAt := time.Date(2026, 8, 1, 17, 59, 0, 0, time.UTC)
+	store.rows["task-null"] = &StoredTaskStatusSummary{
+		TaskID:      "task-null",
+		WorkspaceID: "workspace-1",
+		Summary: TaskStatusSummary{
+			Revision:       3,
+			UpdatedAt:      storedAt,
+			PrimarySession: &PrimarySessionSummary{ID: "session-null", State: "RUNNING"},
+			ActiveError: &ActiveErrorSummary{
+				SessionID:  "session-null",
+				Stamp:      "error-stored",
+				OccurredAt: storedAt,
+				Preview:    "agent crashed",
+			},
+		},
+	}
+
+	projector := NewProjector(ProjectorConfig{
+		Store: store,
+		ResolveWorkspace: func(context.Context, string) (string, error) {
+			return "workspace-1", nil
+		},
+		Now: func() time.Time { return storedAt.Add(time.Minute) },
+	})
+
+	if err := projector.HandleEvent(context.Background(), bus.NewEvent(events.TaskSessionStateChanged, "test", map[string]interface{}{
+		"task_id":      "task-null",
+		"workspace_id": "workspace-1",
+		"session_id":   "session-null",
+		"new_state":    "WAITING_FOR_INPUT",
+		"is_primary":   true,
+		"session_metadata": map[string]interface{}{
+			"last_agent_error": nil,
+		},
+	})); err != nil {
+		t.Fatalf("replay session event: %v", err)
+	}
+
+	got := store.summary("task-null")
+	if got == nil {
+		t.Fatal("summary disappeared")
+	}
+	if got.ActiveError != nil {
+		t.Fatalf("active error after null metadata = %+v, want cleared", got.ActiveError)
+	}
+}
+
 func TestProjectorConvergesConcurrentGitObservations(t *testing.T) {
 	projector, store, _, _, _ := newProjectorTest(t)
 	const taskID = "task-concurrent-git"

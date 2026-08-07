@@ -101,13 +101,17 @@ type projectionState struct {
 	pendingObserved  bool
 	activityObserved bool
 	errors           map[string]*ActiveErrorSummary
-	errorsObserved   bool
-	git              map[string]GitSummary
-	gitBaseline      *GitSummary
-	gitObserved      bool
-	prs              map[string]pullRequestObservation
-	prBaseline       *PullRequestSummary
-	prObserved       bool
+	// clearedErrorStamps records, per session, the stamp of the last error this
+	// projection cleared, so a durable breadcrumb replayed on a later session
+	// event cannot re-arm an error affordance the agent already recovered from.
+	clearedErrorStamps map[string]string
+	errorsObserved     bool
+	git                map[string]GitSummary
+	gitBaseline        *GitSummary
+	gitObserved        bool
+	prs                map[string]pullRequestObservation
+	prBaseline         *PullRequestSummary
+	prObserved         bool
 }
 
 type sessionObservation struct {
@@ -463,11 +467,12 @@ func updateSessionPendingLocked(state *projectionState, sessionID, action string
 
 func newProjectionState() *projectionState {
 	return &projectionState{
-		sessions: make(map[string]sessionObservation),
-		pending:  make(map[string]string),
-		errors:   make(map[string]*ActiveErrorSummary),
-		git:      make(map[string]GitSummary),
-		prs:      make(map[string]pullRequestObservation),
+		sessions:           make(map[string]sessionObservation),
+		pending:            make(map[string]string),
+		errors:             make(map[string]*ActiveErrorSummary),
+		clearedErrorStamps: make(map[string]string),
+		git:                make(map[string]GitSummary),
+		prs:                make(map[string]pullRequestObservation),
 	}
 }
 
@@ -591,13 +596,34 @@ func (p *Projector) applySessionEventLocked(state *projectionState, data map[str
 
 	changed := true
 	if metadata, ok := data["session_metadata"].(map[string]interface{}); ok {
-		if errSummary, present := errorFromMetadata(p.now().UTC(), sessionID, metadata); present {
-			state.errorsObserved = true
-			changed = !errorEqual(state.errors[sessionID], errSummary) || changed
-			state.errors[sessionID] = errSummary
-		}
+		p.applySessionMetadataErrorLocked(state, sessionID, metadata)
 	}
 	return changed
+}
+
+// applySessionMetadataErrorLocked folds the session's durable error record into
+// the projection. A dismissed or superseded record clears the affordance, and a
+// record this projection already cleared is not re-applied — session metadata
+// keeps failures as a breadcrumb, so replaying it verbatim would re-arm errors
+// the agent has since recovered from.
+func (p *Projector) applySessionMetadataErrorLocked(
+	state *projectionState,
+	sessionID string,
+	metadata map[string]interface{},
+) {
+	errSummary, observed := errorFromMetadata(p.now().UTC(), sessionID, metadata)
+	if !observed {
+		return
+	}
+	state.errorsObserved = true
+	if errSummary == nil {
+		p.clearErrorLocked(state, sessionID)
+		return
+	}
+	if state.clearedErrorStamps[sessionID] == errSummary.Stamp {
+		return
+	}
+	state.errors[sessionID] = errSummary
 }
 
 func (p *Projector) applyActivityEventLocked(state *projectionState, data map[string]interface{}) bool {
@@ -635,6 +661,10 @@ func (p *Projector) applyErrorEventLocked(state *projectionState, data map[strin
 	if errorEqual(state.errors[sessionID], errSummary) {
 		return false
 	}
+	// An explicit error event is authoritative: it re-arms even a stamp this
+	// projection cleared earlier, which is what makes an identical failure
+	// recurring after a recovery visible again.
+	delete(state.clearedErrorStamps, sessionID)
 	state.errors[sessionID] = errSummary
 	return true
 }

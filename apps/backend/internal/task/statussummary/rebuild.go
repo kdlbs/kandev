@@ -67,16 +67,17 @@ type RebuildInput struct {
 // replaying any session stream.
 func BuildFromAuthoritative(input RebuildInput) TaskStatusSummary {
 	state := &projectionState{
-		sessions:         make(map[string]sessionObservation, len(input.Sessions)),
-		pending:          make(map[string]string, len(input.PendingActions)),
-		errors:           make(map[string]*ActiveErrorSummary),
-		git:              make(map[string]GitSummary, len(input.Git)),
-		prs:              make(map[string]pullRequestObservation, len(input.PullRequests)),
-		pendingObserved:  true,
-		activityObserved: input.ActivityObserved,
-		errorsObserved:   true,
-		gitObserved:      input.GitObserved,
-		prObserved:       input.PRObserved,
+		sessions:           make(map[string]sessionObservation, len(input.Sessions)),
+		pending:            make(map[string]string, len(input.PendingActions)),
+		errors:             make(map[string]*ActiveErrorSummary),
+		clearedErrorStamps: make(map[string]string),
+		git:                make(map[string]GitSummary, len(input.Git)),
+		prs:                make(map[string]pullRequestObservation, len(input.PullRequests)),
+		pendingObserved:    true,
+		activityObserved:   input.ActivityObserved,
+		errorsObserved:     true,
+		gitObserved:        input.GitObserved,
+		prObserved:         input.PRObserved,
 	}
 	for _, inputSession := range input.Sessions {
 		if strings.TrimSpace(inputSession.ID) == "" {

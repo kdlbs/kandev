@@ -6,7 +6,9 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -1491,6 +1493,102 @@ func TestDismissLastAgentErrorMatchesEquivalentTimestampText(t *testing.T) {
 	}
 	if !got.IsDismissed() {
 		t.Fatalf("last agent error = %#v, want dismissed", got)
+	}
+}
+
+// Nothing used to retire a stored agent failure, so installations carry records
+// whose errors the agent recovered from long ago — each one still painting a red
+// icon on the task list.
+func TestClearRecoveredAgentErrorsBackfill(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+
+	occurredAt := time.Date(2026, 6, 14, 10, 0, 0, 0, time.UTC)
+	seedStale := func(t *testing.T, taskID, sessionID, turnID string) {
+		t.Helper()
+		seedForMsgTest(t, repo, taskID, sessionID, turnID)
+		if err := repo.SetSessionMetadataKey(ctx, sessionID, models.SessionMetaKeyLastAgentError,
+			models.LastAgentError{Message: "agent crashed", OccurredAt: occurredAt}); err != nil {
+			t.Fatalf("seed last agent error on %s: %v", sessionID, err)
+		}
+	}
+
+	// Recovered: an ordinary agent message lands after the failure.
+	seedStale(t, "task-recovered", "sess-recovered", "turn-recovered")
+	insertAgentMsg(t, repo, "msg-recovered", "sess-recovered", "turn-recovered",
+		"agent", "back on track", occurredAt.Add(time.Hour))
+
+	// Still failing: nothing successful has happened since.
+	seedStale(t, "task-current", "sess-current", "turn-current")
+
+	// Recovery that predates the failure must not count.
+	seedStale(t, "task-older", "sess-older", "turn-older")
+	insertAgentMsg(t, repo, "msg-older", "sess-older", "turn-older",
+		"agent", "earlier output", occurredAt.Add(-time.Hour))
+
+	// A user message after the failure is not the agent producing good output.
+	seedStale(t, "task-user", "sess-user", "turn-user")
+	insertAgentMsg(t, repo, "msg-user", "sess-user", "turn-user",
+		"user", "are you stuck?", occurredAt.Add(time.Hour))
+
+	// These statements scan every session before filtering, so a row the
+	// repository wrote as "no metadata" must not abort them. migrate.Apply
+	// swallows SQL errors, so the proof is that the recovered session below is
+	// still cleared with these rows present — an aborted statement would leave
+	// it untouched.
+	for index, blank := range []string{"", "null"} {
+		id := fmt.Sprintf("sess-blank-%d", index)
+		seedForMsgTest(t, repo, "task-blank-"+strconv.Itoa(index), id, "turn-blank-"+strconv.Itoa(index))
+		if _, err := repo.db.Exec(repo.db.Rebind(
+			`UPDATE task_sessions SET metadata = ? WHERE id = ?`), blank, id); err != nil {
+			t.Fatalf("seed %q metadata: %v", blank, err)
+		}
+	}
+
+	// The cached summary keeps the icon up until it is cleared too.
+	if _, err := repo.db.Exec(repo.db.Rebind(`
+		INSERT INTO task_status_summaries (task_id, workspace_id, revision, summary, updated_at)
+		VALUES (?, '', 4, ?, ?)
+	`), "task-recovered",
+		`{"active_error":{"session_id":"sess-recovered","stamp":"s","preview":"agent crashed"},"pending_action":"permission"}`,
+		time.Now().UTC()); err != nil {
+		t.Fatalf("seed status summary: %v", err)
+	}
+
+	if err := repo.clearRecoveredAgentErrors(); err != nil {
+		t.Fatalf("clearRecoveredAgentErrors: %v", err)
+	}
+
+	hasError := func(t *testing.T, sessionID string) bool {
+		t.Helper()
+		session, err := repo.GetTaskSession(ctx, sessionID)
+		if err != nil {
+			t.Fatalf("get session %s: %v", sessionID, err)
+		}
+		_, ok := models.LoadLastAgentError(session.Metadata)
+		return ok
+	}
+
+	if hasError(t, "sess-recovered") {
+		t.Fatalf("a failure the agent recovered from must be cleared")
+	}
+	for _, sessionID := range []string{"sess-current", "sess-older", "sess-user"} {
+		if !hasError(t, sessionID) {
+			t.Fatalf("%s has no successful agent work after the failure; it must stay", sessionID)
+		}
+	}
+
+	var summary string
+	if err := repo.db.QueryRow(repo.db.Rebind(
+		`SELECT summary FROM task_status_summaries WHERE task_id = ?`), "task-recovered",
+	).Scan(&summary); err != nil {
+		t.Fatalf("read status summary: %v", err)
+	}
+	if strings.Contains(summary, "active_error") {
+		t.Fatalf("summary = %s, want the cached error cleared", summary)
+	}
+	if !strings.Contains(summary, "permission") {
+		t.Fatalf("summary = %s, want the rest of the projection preserved", summary)
 	}
 }
 

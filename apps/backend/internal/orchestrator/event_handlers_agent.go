@@ -1054,6 +1054,10 @@ func (s *Service) handleAgentCompletedLocked(ctx context.Context, data watcher.A
 	s.scheduler.HandleTaskCompleted(data.TaskID, true)
 	s.scheduler.RemoveTask(data.TaskID)
 
+	// The agent finished a turn, so any stored failure no longer describes the
+	// session. `session` was read above, so the guard costs nothing.
+	s.clearRecoveredAgentError(context.WithoutCancel(ctx), data.TaskID, session)
+
 	s.completeTurnForSession(context.WithoutCancel(ctx), data.SessionID)
 
 	if s.sessionHasPendingClarification(ctx, data.SessionID) {
@@ -1500,6 +1504,58 @@ func (s *Service) persistLastAgentError(ctx context.Context, data watcher.AgentE
 				zap.String("session_id", data.SessionID),
 				zap.Error(err))
 		}
+	}
+}
+
+// clearRecoveredAgentError drops a session's stored agent failure once the agent
+// completes a turn, and publishes the inactive error event so open clients drop
+// the red error affordance.
+//
+// persistLastAgentError deliberately keeps the record across a successful turn
+// as an investigation breadcrumb, but nothing ever retired it, so a failure the
+// agent recovered from weeks ago still read as live: every path that re-derives
+// task status from session metadata (a status-summary rebuild, a backend
+// restart, a later session event) put it straight back. The failure also lands
+// in the transcript as a recovery message, which is where an investigation
+// actually looks, so the metadata copy is not the durable record.
+//
+// Writes JSON null rather than a delete: LoadLastAgentError already treats that
+// as absent, so no new repository surface is needed.
+func (s *Service) clearRecoveredAgentError(ctx context.Context, taskID string, session *models.TaskSession) {
+	if session == nil || session.ID == "" {
+		return
+	}
+	if _, ok := models.LoadLastAgentError(session.Metadata); !ok {
+		return
+	}
+	if err := s.repo.SetSessionMetadataKey(
+		ctx, session.ID, models.SessionMetaKeyLastAgentError, nil,
+	); err != nil {
+		s.logger.Warn("failed to clear recovered agent error",
+			zap.String("task_id", taskID),
+			zap.String("session_id", session.ID),
+			zap.Error(err))
+		return
+	}
+	// Keep the in-memory copy in step: the session-state publish below reads
+	// its `session_metadata` straight off this object.
+	delete(session.Metadata, models.SessionMetaKeyLastAgentError)
+	if s.eventBus == nil {
+		return
+	}
+	if err := s.eventBus.Publish(ctx, events.TaskSessionErrorChanged, bus.NewEvent(
+		events.TaskSessionErrorChanged,
+		"orchestrator",
+		map[string]interface{}{
+			"task_id":    taskID,
+			"session_id": session.ID,
+			"active":     false,
+		},
+	)); err != nil {
+		s.logger.Warn("failed to publish recovered task session error event",
+			zap.String("task_id", taskID),
+			zap.String("session_id", session.ID),
+			zap.Error(err))
 	}
 }
 
