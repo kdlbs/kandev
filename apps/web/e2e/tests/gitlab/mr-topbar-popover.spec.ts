@@ -140,6 +140,15 @@ test.describe("GitLab MR topbar hover popover", () => {
     await trigger.hover();
     await expect(popover).toBeVisible({ timeout: 5_000 });
 
+    // Regression guard: `toBeVisible()` only checks CSS visibility, not
+    // viewport placement, so it stays green even when Radix Popper's
+    // floating-ui position never resolves (stuck at its pre-measurement
+    // `translate(0, -200%)` placeholder, rendering the popover entirely
+    // off-screen). That happens if the trigger element ever stops
+    // forwarding its ref to PopoverAnchor's `asChild` clone.
+    const box = await popover.boundingBox();
+    expect(box?.y).toBeGreaterThanOrEqual(0);
+
     // AC18: pass-rate bar reflects the live per-job breakdown (6/10, 60%).
     const progress = popover.getByTestId("mr-pipeline-progress");
     await expect(progress).toBeVisible();

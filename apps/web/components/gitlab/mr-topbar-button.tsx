@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useEffect, useState } from "react";
+import { memo, useEffect, useState, type Ref } from "react";
 import Link from "@/components/routing/app-link";
 import {
   IconBrandGitlab,
@@ -117,6 +117,7 @@ function MRMenuTriggerButton({
   compact,
   mobile,
   hoverHandlers,
+  ref,
 }: {
   single: TaskMR | null;
   count: number;
@@ -126,11 +127,17 @@ function MRMenuTriggerButton({
     onTriggerEnter?: () => void;
     onTriggerLeave?: () => void;
   };
+  // PopoverAnchor's `asChild` clones this element to inject its own anchor
+  // ref (React 19 ref-as-prop) so floating-ui can measure the real DOM node.
+  // Without forwarding it to Button, the popover never becomes positioned
+  // and stays rendered off-screen at Radix's pre-measurement placeholder.
+  ref?: Ref<HTMLButtonElement>;
 }) {
   const { t } = useTranslation();
   return (
     <DropdownMenuTrigger asChild>
       <Button
+        ref={ref}
         data-testid="mr-topbar-button"
         data-mr-iid={single?.mr_iid}
         data-mr-state={single?.state}
