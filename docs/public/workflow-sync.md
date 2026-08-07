@@ -9,7 +9,7 @@ Workflow Sync makes a GitHub or GitLab directory the source of truth for selecte
 
 Choose sync when workflow changes should be reviewed and versioned in Git. Choose [Workflow Import / Export](workflow-import-export.md) for a one-time copy that remains editable in Kandev.
 
-A workspace has at most one sync configuration, pointed at exactly one provider (GitHub or GitLab). Switching provider on an existing configuration replaces it on the next save.
+A workspace has at most one sync configuration, pointed at exactly one provider (GitHub or GitLab). Switching provider on an existing configuration replaces it on the next save; the following sync reconciles the workspace's workflows from scratch against the new provider's file set and applies the usual [deletion rules](#reconciliation-rules).
 
 ## Quick path
 

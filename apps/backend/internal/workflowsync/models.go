@@ -126,7 +126,7 @@ func (r *SetConfigRequest) normalizeGitLabTarget() error {
 	if r.ProjectPath == "" {
 		return fmt.Errorf("%w: project_path is required", ErrInvalidConfig)
 	}
-	if strings.ContainsAny(r.ProjectPath, " ") {
+	if strings.Contains(r.ProjectPath, " ") {
 		return fmt.Errorf("%w: project_path cannot contain spaces", ErrInvalidConfig)
 	}
 	segments := strings.Split(r.ProjectPath, "/")

@@ -1,5 +1,5 @@
 ---
-status: draft
+status: shipped
 created: 2026-08-06
 updated: 2026-08-06
 owner: tbd
@@ -68,10 +68,11 @@ on every method. Overloading `repo_owner` to hold a namespace would make the
 field's meaning provider-dependent and would require relaxing slash validation
 for both providers.
 
-A new nullable `project_path` column is populated when `provider = "gitlab"`
-and left empty for GitHub. Validation is provider-conditional: GitHub requires
-`repo_owner` and `repo_name` and forbids `project_path`; GitLab requires
-`project_path` and forbids `repo_owner`/`repo_name`.
+A new `project_path` column (`TEXT NOT NULL DEFAULT ''`) is populated when
+`provider = "gitlab"` and holds an empty string for GitHub rows. Validation
+is provider-conditional: GitHub requires `repo_owner` and `repo_name` and
+forbids `project_path`; GitLab requires `project_path` and forbids
+`repo_owner`/`repo_name`.
 
 ### Host comes from the workspace GitLab connection
 
@@ -115,25 +116,20 @@ provider-conditional:
 
 ### Backend
 
-`workflowsync.ClientProvider` is replaced by two provider-specific interfaces
-plus a provider-neutral entry shape, so `workflowsync` no longer imports
-`internal/github` types into its core path:
+`workflowsync.ClientProvider` is replaced by two provider-specific interfaces.
+Each keeps its own upstream listing shape at the boundary (`[]github.RepoContentEntry`
+for GitHub, `[]gitlab.RepoTreeEntry` for GitLab), and `workflowsync` converts
+both to a provider-neutral `dirEntry` inside its fetch loop — provider-typed
+values never leak past that conversion:
 
 ```go
-// RepoEntry is one directory entry, provider-neutral.
-type RepoEntry struct {
-    Name string
-    Path string
-    Type string // "file" | "dir"
-}
-
 type GitHubClientProvider interface {
     ListRepoDirectoryForWorkspace(ctx, workspaceID, owner, repo, path, ref string) ([]github.RepoContentEntry, error)
     GetRepoFileContentForWorkspace(ctx, workspaceID, owner, repo, path, ref string) ([]byte, error)
 }
 
 type GitLabClientProvider interface {
-    ListRepoTreeForWorkspace(ctx, workspaceID, projectPath, path, ref string) ([]RepoEntry, error)
+    ListRepoTreeForWorkspace(ctx, workspaceID, projectPath, path, ref string) ([]gitlab.RepoTreeEntry, error)
     GetRepoFileContentForWorkspace(ctx, workspaceID, projectPath, path, ref string) ([]byte, error)
 }
 ```

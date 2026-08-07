@@ -72,8 +72,14 @@ function parseNonSshRef(raw: string): ParsedGitLabProjectUrl | null {
     segments = splitPath(url.pathname);
   } else {
     segments = splitPath(raw);
-    if (segments && segments.length > 2 && looksLikeBareHost(segments[0])) {
+    if (segments && segments.length >= 2 && looksLikeBareHost(segments[0])) {
       segments = segments.slice(1);
+      // A bare host plus a single remaining segment is a malformed ref
+      // ("gitlab.com/project"): after stripping the presumed host there is
+      // no namespace left, so it cannot be a valid project path. The final
+      // guard below catches it, but slicing first keeps the domain-looking
+      // segment from being stored as a namespace.
+      if (segments.length < 2) return null;
     }
   }
   if (!segments || segments.length < 2) return null;

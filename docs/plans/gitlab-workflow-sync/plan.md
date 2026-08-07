@@ -2,7 +2,7 @@
 spec: docs/specs/gitlab-workflow-sync/spec.md
 created: 2026-08-06
 updated: 2026-08-06
-status: building
+status: done
 ---
 
 # GitLab Workflow Sync Plan
@@ -39,9 +39,11 @@ URL parse/build helpers. Everything downstream of fetching bytes is untouched.
 
 ## Architecture
 
-`workflowsync` stops importing GitHub types into its core path. `Config.Provider`
-selects one of two injected provider clients; each adapts its own upstream shape
-into a neutral `RepoEntry`. Credential and host resolution stay inside the
+`Config.Provider` selects one of two injected provider clients. Each interface
+keeps its own upstream listing shape (`github.RepoContentEntry` /
+`gitlab.RepoTreeEntry`) at the boundary, and `workflowsync` converts both to a
+provider-neutral `dirEntry` inside its fetch loop, so no provider-typed value
+leaks past that conversion. Credential and host resolution stay inside the
 respective integration packages — `workflowsync` never touches tokens.
 
 ```

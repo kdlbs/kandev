@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -166,6 +168,62 @@ func TestPATClient_GetRepoFileContent_Forbidden(t *testing.T) {
 	var apiErr *APIError
 	if !errors.As(err, &apiErr) || apiErr.StatusCode != http.StatusForbidden {
 		t.Fatalf("err = %v, want an *APIError with status 403", err)
+	}
+}
+
+// A credential-bearing request must never follow a redirect to a different
+// origin: net/http strips the standard sensitive headers (Authorization,
+// Cookie, ...) on cross-host redirects but would forward the custom
+// PRIVATE-TOKEN header unchanged, leaking the PAT to an untrusted host.
+func TestPATClient_RejectsCrossHostRedirect(t *testing.T) {
+	attackerHit := false
+	attacker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		attackerHit = true
+	}))
+	defer attacker.Close()
+
+	host, stop := newTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, attacker.URL+"/api/v4/projects/g%2Fp/repository/tree", http.StatusFound)
+	}))
+	defer stop()
+
+	c := NewPATClient(host, "tok")
+	_, err := c.ListRepoTree(context.Background(), "g/p", "", "main")
+	if err == nil {
+		t.Fatal("err = nil, want a cross-host redirect rejection")
+	}
+	if !strings.Contains(err.Error(), "cross-host redirect") {
+		t.Errorf("err = %v, want cross-host redirect context", err)
+	}
+	if attackerHit {
+		t.Fatal("redirect target received a request, leaking the PRIVATE-TOKEN header")
+	}
+}
+
+// A same-host redirect (e.g. http -> https upgrade or a trailing-slash
+// normalization) is expected GitLab behavior and must keep working.
+func TestPATClient_FollowsSameHostRedirect(t *testing.T) {
+	var gotToken string
+	var host string
+	var stop func()
+	host, stop = newTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/projects/g%2Fp/repository/tree" && r.URL.Query().Get("redirect") == "" {
+			q := r.URL.Query()
+			q.Set("redirect", "1")
+			http.Redirect(w, r, host+"/api/v4/projects/g%2Fp/repository/tree?"+q.Encode(), http.StatusFound)
+			return
+		}
+		gotToken = r.Header.Get("PRIVATE-TOKEN")
+		_ = json.NewEncoder(w).Encode([]map[string]any{})
+	}))
+	defer stop()
+
+	c := NewPATClient(host, "tok")
+	if _, err := c.ListRepoTree(context.Background(), "g/p", "", "main"); err != nil {
+		t.Fatalf("err = %v, want same-host redirect followed", err)
+	}
+	if gotToken != "tok" {
+		t.Errorf("PRIVATE-TOKEN on redirected request = %q, want tok", gotToken)
 	}
 }
 

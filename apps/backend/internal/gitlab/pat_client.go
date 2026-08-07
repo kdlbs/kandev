@@ -58,9 +58,26 @@ func NewPATClient(host, token string) *PATClient {
 	}
 	host = strings.TrimRight(host, "/")
 	return &PATClient{
-		host:       host,
-		token:      token,
-		httpClient: &http.Client{Timeout: requestTimeout},
+		host:  host,
+		token: token,
+		httpClient: &http.Client{
+			Timeout: requestTimeout,
+			// net/http only strips the standard sensitive headers
+			// (Authorization, Cookie, ...) when a redirect leaves the
+			// original host; a custom PRIVATE-TOKEN header would be forwarded
+			// to the redirect target unchanged. Reject any redirect that
+			// leaves the configured origin so the credential can never be
+			// delivered to an untrusted host.
+			CheckRedirect: func(req *http.Request, via []*http.Request) error {
+				if len(via) == 0 {
+					return nil
+				}
+				if !strings.EqualFold(req.URL.Host, via[0].URL.Host) {
+					return fmt.Errorf("refusing cross-host redirect to %s", req.URL.Host)
+				}
+				return nil
+			},
+		},
 	}
 }
 

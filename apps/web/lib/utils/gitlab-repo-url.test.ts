@@ -100,6 +100,12 @@ describe("parseGitLabProjectUrl", () => {
     expect(parseGitLabProjectUrl("   ")).toBeNull();
   });
 
+  it("rejects a bare host with only one following segment", () => {
+    // Two segments where the first looks like a domain would otherwise be
+    // stored as projectPath "gitlab.com/project" and every sync would 404.
+    expect(parseGitLabProjectUrl("gitlab.com/only-project")).toBeNull();
+  });
+
   it("returns null instead of throwing on malformed percent escapes", () => {
     expect(parseGitLabProjectUrl(`${HOST}/${PROJECT}/-/tree/main/%`)).toBeNull();
   });
