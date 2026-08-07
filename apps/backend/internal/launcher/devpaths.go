@@ -81,7 +81,7 @@ func resolveDevBackendEnv(repoRoot string) (dbPath string, extra []string) {
 		)
 	}
 
-	if override := os.Getenv("KANDEV_DATABASE_PATH"); override != "" {
+	if override := strings.TrimSpace(os.Getenv("KANDEV_DATABASE_PATH")); override != "" {
 		return override, append(baseExtra, "KANDEV_DATABASE_PATH="+override)
 	}
 

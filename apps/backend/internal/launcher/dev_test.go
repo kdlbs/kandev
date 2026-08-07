@@ -16,19 +16,8 @@ func itoa(n int) string { return strconv.Itoa(n) }
 
 var errTestHealth = errors.New("test health failure")
 
-func makeDevTree(t *testing.T) string {
-	t.Helper()
-	root := t.TempDir()
-	for _, dir := range []string{"apps/backend", "apps/web"} {
-		if err := os.MkdirAll(filepath.Join(root, dir), 0o700); err != nil {
-			t.Fatal(err)
-		}
-	}
-	return root
-}
-
 func TestRunDevLaunchesBackendThenWebAndOpensBrowser(t *testing.T) {
-	repo := makeDevTree(t)
+	repo := makeRepoTree(t)
 	t.Chdir(repo)
 	t.Setenv("KANDEV_TASK_ID", "")
 	t.Setenv("KANDEV_DATABASE_PATH", "")
@@ -161,7 +150,7 @@ func TestRunDevLaunchesBackendThenWebAndOpensBrowser(t *testing.T) {
 }
 
 func TestRunDevHeadlessSkipsBrowser(t *testing.T) {
-	repo := makeDevTree(t)
+	repo := makeRepoTree(t)
 	t.Chdir(repo)
 	t.Setenv("KANDEV_TASK_ID", "")
 	t.Setenv("KANDEV_DATABASE_PATH", "")
@@ -210,7 +199,7 @@ func TestRunDevHeadlessSkipsBrowser(t *testing.T) {
 }
 
 func TestRunDevAbortsOnBackupFailureBeforeLaunch(t *testing.T) {
-	repo := makeDevTree(t)
+	repo := makeRepoTree(t)
 	t.Chdir(repo)
 	t.Setenv("KANDEV_TASK_ID", "")
 	// A path without a .kandev-dev segment is treated as production; making it
@@ -240,7 +229,7 @@ func TestRunDevAbortsOnBackupFailureBeforeLaunch(t *testing.T) {
 }
 
 func TestRunDevShutsDownTreeOnBackendHealthFailure(t *testing.T) {
-	repo := makeDevTree(t)
+	repo := makeRepoTree(t)
 	t.Chdir(repo)
 	t.Setenv("KANDEV_TASK_ID", "")
 	t.Setenv("KANDEV_DATABASE_PATH", "")

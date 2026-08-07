@@ -1,7 +1,9 @@
 package launcher
 
 import (
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -45,9 +47,14 @@ func isProductionDb(dbPath string) bool {
 // homeDir and now are injectable for tests: an explicit timestamp makes
 // back-to-back calls produce distinct filenames and mtimes without sleeping.
 func backupProductionDb(dbPath, homeDir string, now time.Time) (string, error) {
-	if _, err := os.Stat(dbPath); err != nil {
+	src, err := os.Open(dbPath)
+	if errors.Is(err, os.ErrNotExist) {
 		return "", nil
 	}
+	if err != nil {
+		return "", fmt.Errorf("open database for backup: %w", err)
+	}
+	defer func() { _ = src.Close() }()
 
 	backupDir := filepath.Join(homeDir, ".kandev", "data", "backups")
 	if err := os.MkdirAll(backupDir, 0o755); err != nil {
@@ -56,12 +63,25 @@ func backupProductionDb(dbPath, homeDir string, now time.Time) (string, error) {
 
 	name := backupPrefix + backupTimestamp(now) + backupSuffix
 	dest := filepath.Join(backupDir, name)
-	if err := copyFile(dbPath, dest); err != nil {
+	// Stream the copy so a multi-GB production database never has to fit in
+	// memory, matching the TypeScript launcher's copyFileSync.
+	dst, err := os.OpenFile(dest, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		return "", fmt.Errorf("create backup file: %w", err)
+	}
+	if _, err := io.Copy(dst, src); err != nil {
+		_ = dst.Close()
+		_ = os.Remove(dest)
 		return "", fmt.Errorf("copy database to backup: %w", err)
+	}
+	if err := dst.Close(); err != nil {
+		_ = os.Remove(dest)
+		return "", fmt.Errorf("finalize backup file: %w", err)
 	}
 	// Stamp both atime and mtime so pruning (which sorts by mtime) is
 	// deterministic.
 	if err := os.Chtimes(dest, now, now); err != nil {
+		_ = os.Remove(dest)
 		return "", fmt.Errorf("stamp backup mtime: %w", err)
 	}
 
@@ -76,14 +96,6 @@ func backupTimestamp(now time.Time) string {
 	raw := now.UTC().Format("2006-01-02T15:04:05.000Z")
 	raw = strings.ReplaceAll(raw, ":", "")
 	return strings.ReplaceAll(raw, ".", "")
-}
-
-func copyFile(src, dst string) error {
-	data, err := os.ReadFile(src)
-	if err != nil {
-		return err
-	}
-	return os.WriteFile(dst, data, 0o600)
 }
 
 // pruneBackups keeps only the maxBackups newest dev-prod-db-*.db files in dir

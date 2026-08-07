@@ -66,15 +66,14 @@ For desktop release builds, `scripts/release/prepare-desktop-runtime.sh` extract
 
 ## CLI Options
 
-| Option                     | Description                                                |
-| -------------------------- | ---------------------------------------------------------- |
-| `--version`, `-V`          | Print CLI version and exit                                 |
-| `--port`, `--backend-port` | Backend port                                               |
-| `--web-internal-port`      | Override internal Vite dev web port                        |
-| `--verbose`, `-v`          | Show info logs                                             |
-| `--debug`                  | Show debug logs + agent message dumps                      |
-| `--runtime-version <tag>`  | **Advanced/debug**: download a specific GitHub runtime tag |
-| `--help`, `-h`             | Show help                                                  |
+| Option                     | Description                                         |
+| -------------------------- | --------------------------------------------------- |
+| `--version`, `-V`          | Print CLI version and exit                          |
+| `--port`, `--backend-port` | Backend port                                        |
+| `--web-internal-port`      | Override internal Vite dev web port (dev mode only) |
+| `--verbose`, `-v`          | Show info logs                                      |
+| `--debug`                  | Show debug logs + agent message dumps               |
+| `--help`, `-h`             | Show help                                           |
 
 ## Updates (package-manager owned)
 
@@ -149,7 +148,7 @@ Versioning:
 | Windows (x64)         | `@kdlbs/runtime-win32-x64`                  | `kandev-windows-x64.tar.gz` |
 | Windows (ARM64)       | Falls back to `windows-x64` (x64 emulation) |                             |
 
-Note: `platform.ts` uses internal naming (`macos`, `windows`); npm `os` field uses npm conventions (`darwin`, `win32`). `runtime.ts` maps between the two.
+Note: the shim's platform naming (`macos`, `windows` internally) differs from the npm `os` field conventions (`darwin`, `win32`); `platformPackage()` in `native-shim.js` maps between the two.
 
 ## npm requirements
 

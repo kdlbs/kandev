@@ -24,7 +24,7 @@ spec: "../../specs/go-dev-launcher/spec.md"
 ## Verification
 
 ~~~bash
-grep -rn "cli/src/dev.ts\|pnpm -C cli\|tsx src/cli.ts" --include='*.md' --include='Makefile' --include='*.yml' . | grep -v docs/plans/
+grep -rn -E "apps/cli/src|cli/src/dev.ts|pnpm -C cli|tsx src/cli.ts" --include='*.md' --include='Makefile' --include='*.yml' . | grep -v docs/plans/
 ~~~
 
 Returns nothing outside historical plan records under `docs/plans/`, which are
