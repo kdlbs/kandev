@@ -741,7 +741,7 @@
   "sourceType": "Śōũŕćē Ţŷƥē",
   "spritesRemoteSandbox": "Śƥŕĩţēś (ŕēḿōţē śàńďƀōx)",
   "staleRunCancelled": "śţàĺē ŕũń ćàńćēĺĺēď",
-  "standardCronExpressionExample": "Śţàńďàŕď ćŕōń ēxƥŕēśśĩōń (ē.ĝ. 0 9 * * ḾŌŃ ƒōŕ ēvēŕŷ Ḿōńďàŷ àţ 9àḿ)",
+  "standardCronExpressionExample": "Śţàńďàŕď ćŕōń ēxƥŕēśśĩōń (ē.ĝ. {{cron}} ƒōŕ ēvēŕŷ Ḿōńďàŷ àţ 9àḿ)",
   "startASessionOrSendA": "Śţàŕţ à śēśśĩōń ōŕ śēńď à ḿēśśàĝē ţō ƀēĝĩń.",
   "started": "Śţàŕţēď",
   "startFresh": "Śţàŕţ Ƒŕēśĥ",

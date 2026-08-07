@@ -224,7 +224,14 @@ function TriggerFields({
       {state.triggerKind === "cron" && (
         <>
           <p className="text-xs text-muted-foreground -mt-2">
-            {t("office:standardCronExpressionExample")}
+            {/*
+              The cron expression is SYNTAX, not copy: it travels as a value so
+              a translator (and the pseudo-locale) leaves it verbatim. Baked into
+              the message, reordering a field or localising `MON` yields an
+              example no cron parser accepts. Same reasoning as
+              `office:aCronScheduleExample` and `settings:externalMcpEndpointsDescription`.
+            */}
+            {t("office:standardCronExpressionExample", { cron: "0 9 * * MON" })}
           </p>
           <div>
             <Label htmlFor="routine-timezone">{t("office:timezone")}</Label>
