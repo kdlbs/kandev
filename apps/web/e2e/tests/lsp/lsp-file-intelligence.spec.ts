@@ -9,8 +9,8 @@ import {
   assertNoElementHorizontalOverflow,
 } from "../../helpers/layout-assertions";
 import {
-  clearFakeKotlinLspModes,
   createKotlinTask,
+  expectTaskLanguageDetected,
   expectedMonacoModelUri,
   expectFakeLspEvent,
   expectFakeLspEventCount,
@@ -264,6 +264,24 @@ test.describe("LSP file intelligence", () => {
       );
       expect((await apiClient.getUserSettings()).settings.lsp_status_location).toBe("toolbar");
 
+      const repositoryName = `lsp-status-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      const repositoryDirectory = path.join(backend.tmpDir, "repos", repositoryName);
+      const gitEnv = makeGitEnv(backend.tmpDir);
+      fs.mkdirSync(repositoryDirectory, { recursive: true });
+      execSync("git init -b main", { cwd: repositoryDirectory, env: gitEnv });
+      fs.writeFileSync(path.join(repositoryDirectory, "fixture.txt"), "isolated LSP status repo\n");
+      execSync("git add fixture.txt", { cwd: repositoryDirectory, env: gitEnv });
+      execSync('git commit -m "init isolated LSP status fixture"', {
+        cwd: repositoryDirectory,
+        env: gitEnv,
+      });
+      const repository = await apiClient.createRepository(
+        seedData.workspaceId,
+        repositoryDirectory,
+        "main",
+        { name: repositoryName },
+      );
+
       installFakeKotlinLsp(backend, {
         progress: {
           title: "Importing Kotlin project",
@@ -280,7 +298,10 @@ test.describe("LSP file intelligence", () => {
           "# Unsupported editor\n",
           Buffer.from([0x00, 0x01, 0x02, 0xff]),
         ],
+        repositoryDirectory: repositoryName,
+        repositoryIds: [repository.id],
       });
+      await expectTaskLanguageDetected(apiClient, task.taskId, "kotlin");
       await openDesktopFile(testPage, task.session, task.filePaths[0]);
 
       await expect(testPage.getByTestId("lsp-status-button")).toBeVisible();
@@ -992,27 +1013,32 @@ test.describe("LSP file intelligence", () => {
     seedData,
     backend,
   }) => {
-    installFakeKotlinLsp(backend, { crashOnOpen: true });
+    installFakeKotlinLsp(backend, { crashOnOpenOnce: true });
     const task = await createKotlinTask(testPage, apiClient, seedData, backend, {
       title: "Kotlin LSP Crash Recovery",
     });
     await openDesktopFile(testPage, task.session, task.filePaths[0]);
     const statusButton = testPage.locator('[data-testid="lsp-status-button"]:visible');
-    await performLspAction(testPage, "start");
+    const crashStatus = await openLspStatus(testPage);
+    const startButton = crashStatus.locator(
+      '[data-testid="lsp-lifecycle-action"][data-lsp-action="start"]',
+    );
+    await expect(startButton).toBeEnabled();
+    const errorEvidence = Promise.all([
+      expect(statusButton).toHaveAttribute("data-lsp-state", "error", {
+        timeout: 15_000,
+      }),
+      expect(crashStatus).toContainText("Error", { timeout: 15_000 }),
+      expect(crashStatus).toContainText("language server exited", { timeout: 15_000 }),
+    ]);
+    await startButton.click();
     await expectFakeLspEvent(
       backend,
       (event) => event.event === "crashing" && event.reason === "didOpen",
       "intentional server crash",
     );
-    await expect(statusButton).toHaveAttribute("data-lsp-state", "error", {
-      timeout: 15_000,
-    });
-    const crashStatus = await openLspStatus(testPage);
-    await expect(crashStatus).toContainText("Error");
-    await expect(crashStatus).toContainText("language server exited");
-    await expectFakeLspMarkerCount(testPage, 0);
+    await errorEvidence;
 
-    clearFakeKotlinLspModes(backend);
     await expect(statusButton).toHaveAttribute("data-lsp-state", "ready", { timeout: 15_000 });
     await expectFakeLspMarkerCount(testPage, 1);
     expect(readFakeLspEvents(backend).filter((event) => event.event === "started")).toHaveLength(2);

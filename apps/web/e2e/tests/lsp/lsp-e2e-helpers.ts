@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import type { BackendContext } from "../../fixtures/backend";
 import type { ApiClient } from "../../helpers/api-client";
+import type { TaskLspSnapshot } from "../../../lib/types/http-lsp";
 import { GitHelper, makeGitEnv } from "../../helpers/git-helper";
 import { SessionPage } from "../../pages/session-page";
 
@@ -64,8 +65,8 @@ function fakeServerLogPath(backend: BackendContext): string {
   return path.join(backend.tmpDir, "lsp-e2e-events.jsonl");
 }
 
-function crashModePath(backend: BackendContext): string {
-  return path.join(backend.tmpDir, "lsp-e2e-crash-on-open");
+function crashOnceModePath(backend: BackendContext): string {
+  return path.join(backend.tmpDir, "lsp-e2e-crash-on-open-once");
 }
 
 function initializeModePath(backend: BackendContext): string {
@@ -149,6 +150,31 @@ export async function createKotlinTask(
     session,
     filePaths,
   };
+}
+
+export async function expectTaskLanguageDetected(
+  apiClient: ApiClient,
+  taskId: string,
+  language: string,
+): Promise<void> {
+  await expect
+    .poll(
+      async () => {
+        const response = await apiClient.rawRequest("GET", `/api/v1/tasks/${taskId}/lsp`);
+        if (!response.ok) return { detected: false, state: `http-${response.status}` };
+        const snapshot = (await response.json()) as TaskLspSnapshot;
+        const result = snapshot.languages.find((item) => item.language === language);
+        return {
+          detected: result?.detected ?? false,
+          state: result?.detection_state ?? "missing",
+        };
+      },
+      {
+        message: `${language} should be discovered from task files before an editor opens`,
+        timeout: 15_000,
+      },
+    )
+    .toMatchObject({ detected: true });
 }
 
 export function expectedMonacoModelUri(documentUri: string, sessionId: string): string {
@@ -430,7 +456,7 @@ export function removeFakeKotlinLsp(backend: BackendContext): void {
 export function installFakeKotlinLsp(
   backend: BackendContext,
   options: {
-    crashOnOpen?: boolean;
+    crashOnOpenOnce?: boolean;
     holdInitialize?: boolean;
     progress?: {
       title: string;
@@ -445,10 +471,10 @@ export function installFakeKotlinLsp(
   fs.copyFileSync(FAKE_SERVER_SOURCE, fakeServerPath(backend));
   fs.chmodSync(fakeServerPath(backend), 0o755);
   fs.rmSync(fakeServerLogPath(backend), { force: true });
-  fs.rmSync(crashModePath(backend), { force: true });
+  fs.rmSync(crashOnceModePath(backend), { force: true });
   fs.rmSync(initializeModePath(backend), { force: true });
   fs.rmSync(initializeReleasePath(backend), { force: true });
-  if (options.crashOnOpen) fs.writeFileSync(crashModePath(backend), "1\n");
+  if (options.crashOnOpenOnce) fs.writeFileSync(crashOnceModePath(backend), "1\n");
   if (options.holdInitialize || options.progress) {
     fs.writeFileSync(
       initializeModePath(backend),
@@ -461,12 +487,6 @@ export function installAdditionalFakeLspBinary(backend: BackendContext, binaryNa
   const destination = path.join(backend.tmpDir, "bin", binaryName);
   fs.copyFileSync(FAKE_SERVER_SOURCE, destination);
   fs.chmodSync(destination, 0o755);
-}
-
-export function clearFakeKotlinLspModes(backend: BackendContext): void {
-  fs.rmSync(crashModePath(backend), { force: true });
-  fs.rmSync(initializeModePath(backend), { force: true });
-  fs.rmSync(initializeReleasePath(backend), { force: true });
 }
 
 export function releaseFakeLspInitialization(backend: BackendContext): void {
