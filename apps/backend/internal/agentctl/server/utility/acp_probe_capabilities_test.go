@@ -255,7 +255,7 @@ func TestProbeACPSessionWithModel_UsesConfigUpdateNotification(t *testing.T) {
 		ctx, c2aW, a2cR, t.TempDir(), "opencode-acp", "legacy-model-with-effort", "", nil,
 	)
 	if err != nil {
-		t.Fatalf("probeACPSessionWithContext(): %v (calls: %v)", err, fake.calls)
+		t.Fatalf("probeACPSessionWithContext(): %v (calls: %v)", err, fake.recordedCalls())
 	}
 
 	var found bool
@@ -340,9 +340,9 @@ func TestProbeACPSessionWithContextAppliesModeBeforeModelAndOptions(t *testing.T
 		map[string]string{"reasoning_effort": "low"},
 	)
 	if err != nil {
-		t.Fatalf("probeACPSessionWithContext(): %v (calls: %v)", err, fake.calls)
+		t.Fatalf("probeACPSessionWithContext(): %v (calls: %v)", err, fake.recordedCalls())
 	}
-	if got, want := strings.Join(fake.calls, ","), "mode,model,config"; got != want {
+	if got, want := strings.Join(fake.recordedCalls(), ","), "mode,model,config"; got != want {
 		t.Fatalf("ACP mutation order = %q, want %q", got, want)
 	}
 
@@ -427,6 +427,7 @@ func (*probeModelConfigAgent) SetSessionConfigOption(context.Context, acp.SetSes
 type probeNotificationConfigAgent struct {
 	*probeCaptureAgent
 	conn  *acp.AgentSideConnection
+	mu    sync.Mutex
 	calls []string
 }
 
@@ -437,7 +438,32 @@ type probeRequestedConfigAgent struct {
 type probeModeConfigAgent struct {
 	*probeCaptureAgent
 	conn  *acp.AgentSideConnection
+	mu    sync.Mutex
 	calls []string
+}
+
+func (a *probeNotificationConfigAgent) record(call string) {
+	a.mu.Lock()
+	a.calls = append(a.calls, call)
+	a.mu.Unlock()
+}
+
+func (a *probeNotificationConfigAgent) recordedCalls() []string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return append([]string(nil), a.calls...)
+}
+
+func (a *probeModeConfigAgent) record(call string) {
+	a.mu.Lock()
+	a.calls = append(a.calls, call)
+	a.mu.Unlock()
+}
+
+func (a *probeModeConfigAgent) recordedCalls() []string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return append([]string(nil), a.calls...)
 }
 
 func (*probeModeConfigAgent) NewSession(context.Context, acp.NewSessionRequest) (acp.NewSessionResponse, error) {
@@ -451,7 +477,7 @@ func (a *probeModeConfigAgent) SetSessionMode(
 	ctx context.Context,
 	request acp.SetSessionModeRequest,
 ) (acp.SetSessionModeResponse, error) {
-	a.calls = append(a.calls, "mode")
+	a.record("mode")
 	options := probeModelConfigOptions("default-model")
 	options[1].Select.Options = acp.SessionConfigSelectOptions{
 		Ungrouped: &acp.SessionConfigSelectOptionsUngrouped{
@@ -472,9 +498,9 @@ func (a *probeModeConfigAgent) SetSessionConfigOption(
 	request acp.SetSessionConfigOptionRequest,
 ) (acp.SetSessionConfigOptionResponse, error) {
 	if request.ValueId.ConfigId == "model" {
-		a.calls = append(a.calls, "model")
+		a.record("model")
 	} else {
-		a.calls = append(a.calls, "config")
+		a.record("config")
 	}
 	options := probeModelConfigOptions("model-with-effort")
 	options[1].Select.Options = acp.SessionConfigSelectOptions{
@@ -521,7 +547,7 @@ func (*probeNotificationConfigAgent) NewSession(context.Context, acp.NewSessionR
 }
 
 func (a *probeNotificationConfigAgent) SetSessionConfigOption(ctx context.Context, req acp.SetSessionConfigOptionRequest) (acp.SetSessionConfigOptionResponse, error) {
-	a.calls = append(a.calls, "config")
+	a.record("config")
 	err := a.conn.SessionUpdate(ctx, acp.SessionNotification{
 		SessionId: req.ValueId.SessionId,
 		Update: acp.SessionUpdate{

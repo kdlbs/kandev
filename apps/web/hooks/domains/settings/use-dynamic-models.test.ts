@@ -16,7 +16,6 @@ vi.mock("@/lib/api/domains/settings-api", () => ({
   resolveAgentModelConfig: (...args: unknown[]) => resolveAgentModelConfigMock(...args),
 }));
 
-import { useProfileModelCapabilities } from "./use-profile-model-capabilities";
 import {
   invalidateModelConfigResolutionCache,
   useAgentCapabilities,
@@ -235,7 +234,7 @@ describe("useResolvedModelConfig", () => {
 });
 
 describe("useResolvedModelConfig draft updates", () => {
-  it("does not re-resolve when a settings draft option changes", async () => {
+  it("does not re-resolve for an equivalent draft option object", async () => {
     const configOptions: ConfigOptionEntry[] = [
       {
         type: "select",
@@ -253,32 +252,25 @@ describe("useResolvedModelConfig draft updates", () => {
       resolvedResponse("profile-draft-model", configOptions),
     );
 
-    const initialProfile = {
-      model: "profile-draft-model",
-      mode: "build",
-      config_options: { effort: "low" },
-    };
-    const modelConfig: ModelConfig = {
-      ...initialConfig,
-      current_model_id: initialProfile.model,
-      default_model: initialProfile.model,
-      config_options: configOptions,
-    };
     const { rerender } = renderHook(
-      ({ profile }) => useProfileModelCapabilities("profile-draft-agent", profile, modelConfig),
-      { initialProps: { profile: initialProfile } },
+      ({ draft }) =>
+        useResolvedModelConfig("profile-draft-agent", "profile-draft-model", {
+          configOptions: draft,
+          initialConfigOptions: configOptions,
+        }),
+      { initialProps: { draft: { effort: "low" } } },
     );
 
     await waitFor(() => expect(resolveAgentModelConfigMock).toHaveBeenCalledTimes(1));
 
-    rerender({
-      profile: {
-        ...initialProfile,
-        config_options: { effort: "high" },
-      },
-    });
+    rerender({ draft: { effort: "low" } });
+    await act(async () => Promise.resolve());
 
-    await waitFor(() => expect(resolveAgentModelConfigMock).toHaveBeenCalledTimes(1));
+    expect(resolveAgentModelConfigMock).toHaveBeenCalledTimes(1);
+    expect(resolveAgentModelConfigMock).toHaveBeenCalledWith("profile-draft-agent", {
+      model: "profile-draft-model",
+      config_options: { effort: "low" },
+    });
   });
 });
 
