@@ -149,6 +149,7 @@ Subscription quota tracking and per-agent cheap-model profile routing.
 | [empty-turn-notice](ui/empty-turn-notice.md) | shipped |
 | [acp-shell-command-output](ui/acp-shell-command-output.md) | shipped |
 | [acp-model-configuration-summary](ui/acp-model-configuration-summary.md) | shipped |
+| [context-window-unmeasured-state](ui/context-window-unmeasured-state.md) | building |
 | [review-file-status](ui/review-file-status.md) | building |
 | [submodule-review](ui/submodule-review.md) | shipped |
 | [review-markdown-preview](ui/review-markdown-preview.md) | draft |
