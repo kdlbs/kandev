@@ -8,7 +8,6 @@ import { useGitLabAvailable } from "@/hooks/domains/gitlab/use-task-mr";
 import { useJiraAuthed } from "@/hooks/domains/jira/use-jira-availability";
 import { useLinearAuthed } from "@/hooks/domains/linear/use-linear-availability";
 import { useSentryAvailable } from "@/hooks/domains/sentry/use-sentry-availability";
-import { useSlackAuthed } from "@/hooks/domains/slack/use-slack-availability";
 import { WORKSPACE_INTEGRATIONS } from "@/lib/settings-discovery/catalog/integrations";
 
 export type IntegrationSlug = (typeof WORKSPACE_INTEGRATIONS)[number][0];
@@ -35,7 +34,6 @@ export function useEnabledIntegrations(workspaceId: string): ReadonlySet<Integra
   const jira = useJiraAuthed(workspaceId);
   const linear = useLinearAuthed(workspaceId);
   const sentry = useSentryAvailable(workspaceId);
-  const slack = useSlackAuthed(workspaceId);
   // GitHub reports a device-flow login and a configured PAT separately; either
   // one is a working connection.
   const github = Boolean(githubStatus?.authenticated || githubStatus?.token_configured);
@@ -51,8 +49,7 @@ export function useEnabledIntegrations(workspaceId: string): ReadonlySet<Integra
       jira,
       linear,
       sentry,
-      slack,
     };
     return new Set(WORKSPACE_INTEGRATIONS.map(([slug]) => slug).filter((slug) => connected[slug]));
-  }, [azureDevOps, github, gitlab, jira, linear, sentry, slack]);
+  }, [azureDevOps, github, gitlab, jira, linear, sentry]);
 }

@@ -13,7 +13,6 @@ import { getGitLabConfig } from "@/lib/api/domains/gitlab-api";
 import { getJiraConfig } from "@/lib/api/domains/jira-api";
 import { getLinearConfig } from "@/lib/api/domains/linear-api";
 import { listSentryInstances } from "@/lib/api/domains/sentry-api";
-import { getSlackConfig } from "@/lib/api/domains/slack-api";
 import Link from "@/components/routing/app-link";
 import {
   workspaceSettingsHref,
@@ -41,7 +40,6 @@ async function countConfiguredIntegrations(workspaceId: string): Promise<number>
     getJiraConfig({ workspaceId }).then((config) => config !== null),
     getLinearConfig({ workspaceId }).then((config) => config !== null),
     listSentryInstances(workspaceId).then((instances) => instances.length > 0),
-    getSlackConfig({ workspaceId }).then((config) => config !== null),
   ];
   const results = await Promise.allSettled(probes);
   return results.filter((result) => result.status === "fulfilled" && result.value).length;

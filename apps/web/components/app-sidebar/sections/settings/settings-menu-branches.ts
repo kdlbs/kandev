@@ -65,6 +65,13 @@ export type SettingsMenuNode = {
    */
   isUserRecord?: boolean;
   /**
+   * False when the record is switched off. Only agent profiles can be: a
+   * disabled profile is hidden from task and session pickers but stays listed
+   * here so it remains editable, which is why the menu says so out loud.
+   * Omitted where the concept does not apply.
+   */
+  enabled?: boolean;
+  /**
    * Routes this node owns beyond `href` and its `href/` descendants. Needed by
    * nodes with no page of their own (an agent, whose profile pages live under a
    * path the agent itself does not resolve to) and by branch roots, which
@@ -79,7 +86,13 @@ export type SettingsMenuNode = {
 export type BranchWorkspace = { id: string; name: string };
 export type BranchAgent = {
   name: string;
-  profiles: ReadonlyArray<{ id: string; name: string; agentDisplayName?: string }>;
+  profiles: ReadonlyArray<{
+    id: string;
+    name: string;
+    agentDisplayName?: string;
+    /** Absent on older payloads, hence `!== false` rather than `=== true`. */
+    enabled?: boolean;
+  }>;
 };
 export type BranchExecutor = {
   id: string;
@@ -198,6 +211,7 @@ export function buildAgentsBranch(agents: ReadonlyArray<BranchAgent>): SettingsM
           href: `${agentHref}/profiles/${profile.id}`,
           label: { text: profile.name },
           isUserRecord: true,
+          enabled: profile.enabled !== false,
         })),
       };
     });

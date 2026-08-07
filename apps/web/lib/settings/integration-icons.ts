@@ -3,7 +3,6 @@ import {
   IconBrandGithub,
   IconBrandGitlab,
   IconBrandSentry,
-  IconBrandSlack,
   IconHexagon,
   IconTicket,
 } from "@tabler/icons-react";
@@ -31,5 +30,4 @@ export const INTEGRATION_ICONS: Record<
   jira: IconTicket,
   linear: IconHexagon,
   sentry: IconBrandSentry,
-  slack: IconBrandSlack,
 };

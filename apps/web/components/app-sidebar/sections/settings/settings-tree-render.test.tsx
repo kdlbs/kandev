@@ -22,7 +22,10 @@ const state = {
     items: [
       {
         name: "claude-code",
-        profiles: [{ id: "profile-1", name: "Default", agentDisplayName: AGENT_LABEL }],
+        profiles: [
+          { id: "profile-1", name: "Default", agentDisplayName: AGENT_LABEL },
+          { id: "profile-2", name: "Retired", agentDisplayName: AGENT_LABEL, enabled: false },
+        ],
       },
     ],
   },
@@ -196,10 +199,10 @@ describe("SettingsTree static menu", () => {
   it("shows item counts on rows whose page owns a list", () => {
     render(<SettingsTree pathname="/settings" />);
 
-    // One workspace, one agent profile, one executor profile, two secrets,
-    // one plugin (from the store/hook mocks above).
+    // One workspace, two agent profiles (one disabled — the badge does not
+    // change the count), one executor profile, two secrets, one plugin.
     expect(screen.getByRole("link", { name: "Workspaces 1" })).toBeTruthy();
-    expect(screen.getByRole("link", { name: "Agents 1" })).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Agents 2" })).toBeTruthy();
     expect(screen.getByRole("link", { name: "Executors 1" })).toBeTruthy();
     expect(screen.getByRole("link", { name: "Global Secrets 2" })).toBeTruthy();
     expect(screen.getByRole("link", { name: "Plugins 1" })).toBeTruthy();
@@ -246,7 +249,7 @@ describe("SettingsTree tree modes", () => {
     // node holds it — the Agents row has to keep the active mark itself.
     render(<SettingsTree pathname="/settings/agents/browse" />);
 
-    expect(activeRowNames()).toEqual(["Agents1"]);
+    expect(activeRowNames()).toEqual(["Agents2"]);
   });
 
   it("collapses the other branches when one is opened in accordion mode", () => {
@@ -355,6 +358,17 @@ describe("SettingsTree record treatment", () => {
       // The dot the Agents page puts in front of a profile.
       expect(box?.firstElementChild?.getAttribute("class")).toContain(RECORD_DOT);
     }
+  });
+
+  it("badges a disabled profile, which stays listed so it can be re-enabled", () => {
+    setMenuMode("persistent", [AGENTS_ROW_KEY, AGENT_KEY]);
+    render(<SettingsTree pathname="/settings/preferences/appearance" />);
+
+    // Ported from #2339, which added this to the accordion tree the static menu
+    // replaced. A disabled profile is hidden from every task and session picker
+    // but stays here, so the menu has to say why it looks inert.
+    expect(screen.getByRole("link", { name: /Retired/ }).textContent).toContain("Disabled");
+    expect(screen.getByRole("link", { name: "Default" }).textContent).not.toContain("Disabled");
   });
 
   it("leaves a row that has a glyph of its own alone", () => {

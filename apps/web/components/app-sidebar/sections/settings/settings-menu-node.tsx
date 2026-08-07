@@ -27,6 +27,20 @@ type SettingsMenuNodeRowProps = {
  * all — it could not be navigated to or opened, so it would be a dead row.
  */
 /**
+ * Mirrors the integration list's EnabledBadge with an "off" colour. A disabled
+ * profile stays listed so it remains editable, so the menu has to say why it
+ * looks inert rather than leaving it indistinguishable from a live one.
+ */
+function DisabledBadge() {
+  const { t } = useTranslation();
+  return (
+    <span className="shrink-0 rounded border border-amber-500/30 bg-amber-500/10 px-1 py-0.5 text-[9px] font-medium leading-none text-amber-600 dark:text-amber-400">
+      {t("sidebar:disabledBadge")}
+    </span>
+  );
+}
+
+/**
  * The row's leading visual: an agent's logo, the record dot, or nothing — in
  * which case `NavRowLabel` keeps the glyph box open. A node that already
  * declares an `icon` is left to it.
@@ -54,6 +68,7 @@ export function SettingsMenuNodeRow({
   const leadingIcon = resolveLeadingIcon(node, isRecord);
   const isActive = node.key === activeKey;
   const children = node.children ?? [];
+  const labelSuffix = node.enabled === false ? <DisabledBadge /> : undefined;
 
   if (children.length === 0) {
     if (!node.href) return null;
@@ -63,6 +78,7 @@ export function SettingsMenuNodeRow({
         label={label}
         icon={node.icon}
         leadingIcon={leadingIcon}
+        labelSuffix={labelSuffix}
         isActive={isActive}
         depth={depth}
         isRecord={isRecord}
