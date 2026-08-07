@@ -13,6 +13,7 @@ export function deriveSessionInputMode(
     | Pick<TaskSession, "state" | "foreground_activity" | "supports_steering">
     | null
     | undefined,
+  queuedCount = 0,
 ): SessionInputMode {
   if (!session) return "unavailable";
   if (
@@ -30,7 +31,7 @@ export function deriveSessionInputMode(
   // turn, so it is direct rather than queued. Whether the agent folds it or runs
   // it next is the agent's call and not distinguishable here — the composer copy
   // promises delivery, not folding (see mid-turn-steering spec).
-  if (session.supports_steering) return "direct";
+  if (session.supports_steering && queuedCount === 0) return "direct";
   return "queue";
 }
 

@@ -51,6 +51,11 @@ describe("deriveSessionInputMode", () => {
     expect(deriveSessionInputMode(selected)).toBe("direct");
   });
 
+  it("queues a steer-capable session when a message is already queued", () => {
+    const selected = session("RUNNING", "generating", true);
+    expect(deriveSessionInputMode(selected, 1)).toBe("queue");
+  });
+
   it("still queues a generating session when steering is not supported", () => {
     const selected = session("RUNNING", "generating", false);
     expect(deriveSessionInputMode(selected)).toBe("queue");
