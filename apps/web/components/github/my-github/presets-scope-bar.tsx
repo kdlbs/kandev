@@ -14,6 +14,8 @@ type PresetsScopeBarProps = {
   onDeleteSaved: (id: string) => void;
   canSaveCurrent: boolean;
   onSaveCurrent: () => void;
+  onToggleSavedDefault: (preset: SavedPreset) => void;
+  defaultMutationPending: boolean;
   prPresets?: PresetOption[];
   issuePresets?: PresetOption[];
 };
@@ -32,12 +34,19 @@ const KINDS = [
 export function PresetsScopeBar({
   prPresets = PR_PRESETS,
   issuePresets = ISSUE_PRESETS,
+  savedPresets,
+  onToggleSavedDefault,
   ...props
 }: PresetsScopeBarProps) {
   const { t } = useTranslation();
   return (
     <IntegrationScopeBar
       {...props}
+      savedPresets={savedPresets}
+      onToggleSavedDefault={(id) => {
+        const preset = savedPresets.find((candidate) => candidate.id === id);
+        if (preset) void onToggleSavedDefault(preset);
+      }}
       testId="github-presets-scope-bar"
       savedMenuTestId="github-saved-queries-menu"
       kinds={KINDS.map(({ value, labelKey }) => ({ value, label: t(labelKey) }))}

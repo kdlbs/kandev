@@ -141,6 +141,7 @@ Subscription quota tracking and per-agent cheap-model profile routing.
 |---|---|
 | [ci-pr-automation](ui/ci-pr-automation.md) | building |
 | [github-pr-review-actions](ui/github-pr-review-actions.md) | shipped |
+| [github-saved-query-defaults](ui/github-saved-query-defaults.md) | shipped |
 | [comment-markdown](ui/comment-markdown.md) | shipped |
 | [resizable-markdown-tables](ui/resizable-markdown-tables.md) | building |
 | [transcript-auto-scroll](ui/transcript-auto-scroll.md) | building |

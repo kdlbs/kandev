@@ -10,6 +10,7 @@ import { __resetSnapshotForTests, useSavedPresets, type SavedPreset } from "./us
 const STORAGE_KEY = "kandev:github-presets:v1";
 const WORKSPACE_ID = "ws-1";
 const SETTINGS_TIMESTAMP = "2026-01-01T00:00:00Z";
+const SETTINGS_DOWN = "settings down";
 
 vi.mock("@/lib/api/domains/settings-api", () => ({
   fetchUserSettings: vi.fn(),
@@ -26,14 +27,24 @@ function set(raw: string | null) {
   else window.localStorage.setItem(STORAGE_KEY, raw);
 }
 
-const valid: SavedPreset = {
+const legacyValid = {
   id: "p_1",
-  kind: "pr",
+  kind: "pr" as const,
   label: "My PRs",
   customQuery: "author:@me",
   repoFilter: "",
   createdAt: SETTINGS_TIMESTAMP,
 };
+
+const valid: SavedPreset = { ...legacyValid, isDefault: false };
+
+type DefaultSetter = (kind: SavedPreset["kind"], id: string | null) => Promise<void>;
+
+function defaultSetter(current: ReturnType<typeof useSavedPresets>): DefaultSetter {
+  const setDefault = (current as unknown as { setDefault?: DefaultSetter }).setDefault;
+  expect(setDefault, "setDefault hook action").toBeTypeOf("function");
+  return setDefault as DefaultSetter;
+}
 
 function resetTestState() {
   window.localStorage.clear();
@@ -123,7 +134,7 @@ describe("useSavedPresets workspace sync", () => {
   });
 
   it("does not save after workspace presets fail to load", async () => {
-    vi.mocked(fetchGitHubWorkspaceSettings).mockRejectedValue(new Error("settings down"));
+    vi.mocked(fetchGitHubWorkspaceSettings).mockRejectedValue(new Error(SETTINGS_DOWN));
 
     const { result } = renderHook(() => useSavedPresets(WORKSPACE_ID));
 
@@ -156,7 +167,7 @@ describe("useSavedPresets workspace sync", () => {
   });
 
   it("does not remove after workspace presets fail to load", async () => {
-    vi.mocked(fetchGitHubWorkspaceSettings).mockRejectedValue(new Error("settings down"));
+    vi.mocked(fetchGitHubWorkspaceSettings).mockRejectedValue(new Error(SETTINGS_DOWN));
 
     const { result } = renderHook(() => useSavedPresets(WORKSPACE_ID));
 
@@ -183,14 +194,17 @@ describe("useSavedPresets repository defaults", () => {
     const { result } = renderHook(() => useSavedPresets(WORKSPACE_ID));
 
     await waitFor(() => expect(result.current.presets).toEqual([server]));
+    let created: SavedPreset | null = null;
     act(() => {
-      result.current.save({
+      created = result.current.save({
         kind: "pr",
         label: "Kandev PRs",
         customQuery: "is:open",
         repoFilter: "kdlbs/kandev",
       });
     });
+
+    expect((created as SavedPreset | null)?.isDefault).toBe(false);
 
     await waitFor(() =>
       expect(updateGitHubWorkspaceSettings).toHaveBeenCalledWith({
@@ -236,7 +250,111 @@ describe("useSavedPresets repository defaults", () => {
     const { result } = renderHook(() => useSavedPresets(WORKSPACE_ID));
 
     await waitFor(() =>
-      expect(result.current.presets).toEqual([{ ...serverPreset, repoFilter: "" }]),
+      expect(result.current.presets).toEqual([
+        { ...serverPreset, repoFilter: "", isDefault: false },
+      ]),
     );
+  });
+
+  it("normalizes a legacy saved query to a non-default view", async () => {
+    vi.mocked(fetchGitHubWorkspaceSettings).mockResolvedValue(workspaceSettings([legacyValid]));
+
+    const { result } = renderHook(() => useSavedPresets(WORKSPACE_ID));
+
+    await waitFor(() =>
+      expect(result.current.presets).toEqual([{ ...legacyValid, isDefault: false }]),
+    );
+  });
+
+  it("keeps only the first persisted default for each result kind", async () => {
+    const issue = { ...valid, id: "issue-1", kind: "issue", isDefault: true };
+    const duplicates = [
+      { ...valid, id: "pr-1", isDefault: true },
+      { ...valid, id: "pr-2", isDefault: true },
+      issue,
+    ];
+    vi.mocked(fetchGitHubWorkspaceSettings).mockResolvedValue(workspaceSettings(duplicates));
+
+    const { result } = renderHook(() => useSavedPresets(WORKSPACE_ID));
+
+    await waitFor(() =>
+      expect(result.current.presets.map(({ id, isDefault }) => ({ id, isDefault }))).toEqual([
+        { id: "pr-1", isDefault: true },
+        { id: "pr-2", isDefault: false },
+        { id: "issue-1", isDefault: true },
+      ]),
+    );
+  });
+});
+
+describe("useSavedPresets default persistence", () => {
+  beforeEach(() => {
+    resetTestState();
+  });
+
+  it("publishes a workspace default only after persistence succeeds", async () => {
+    const prA = { ...valid, id: "pr-a", isDefault: true };
+    const prB = { ...valid, id: "pr-b" };
+    const issue = { ...valid, id: "issue-a", kind: "issue" as const, isDefault: true };
+    vi.mocked(fetchGitHubWorkspaceSettings).mockResolvedValue(workspaceSettings([prA, prB, issue]));
+    let resolveUpdate!: (value: Awaited<ReturnType<typeof updateGitHubWorkspaceSettings>>) => void;
+    vi.mocked(updateGitHubWorkspaceSettings).mockReturnValue(
+      new Promise((resolve) => {
+        resolveUpdate = resolve;
+      }),
+    );
+    const { result } = renderHook(() => useSavedPresets(WORKSPACE_ID));
+    await waitFor(() => expect(result.current.presets).toHaveLength(3));
+
+    let mutation!: Promise<void>;
+    act(() => {
+      mutation = defaultSetter(result.current)("pr", "pr-b");
+    });
+    expect(result.current.presets.map((preset) => preset.isDefault)).toEqual([true, false, true]);
+
+    await act(async () => {
+      resolveUpdate(workspaceSettings());
+      await mutation;
+    });
+
+    expect(updateGitHubWorkspaceSettings).toHaveBeenCalledWith({
+      workspace_id: WORKSPACE_ID,
+      saved_presets: [{ ...prA, isDefault: false }, { ...prB, isDefault: true }, issue],
+    });
+    expect(result.current.presets.map((preset) => preset.isDefault)).toEqual([false, true, true]);
+  });
+
+  it("retains the prior workspace default when persistence fails", async () => {
+    const prA = { ...valid, id: "pr-a", isDefault: true };
+    const prB = { ...valid, id: "pr-b" };
+    vi.mocked(fetchGitHubWorkspaceSettings).mockResolvedValue(workspaceSettings([prA, prB]));
+    vi.mocked(updateGitHubWorkspaceSettings).mockRejectedValue(new Error(SETTINGS_DOWN));
+    const { result } = renderHook(() => useSavedPresets(WORKSPACE_ID));
+    await waitFor(() => expect(result.current.presets).toHaveLength(2));
+
+    await expect(defaultSetter(result.current)("pr", "pr-b")).rejects.toThrow(SETTINGS_DOWN);
+
+    expect(result.current.presets.map((preset) => preset.isDefault)).toEqual([true, false]);
+  });
+
+  it("persists and publishes a portable user default", async () => {
+    const prA = { ...valid, id: "pr-a" };
+    vi.mocked(fetchUserSettings).mockResolvedValue({
+      settings: { github_saved_presets: [prA] },
+    } as Awaited<ReturnType<typeof fetchUserSettings>>);
+    vi.mocked(updateUserSettings).mockResolvedValue(
+      undefined as unknown as Awaited<ReturnType<typeof updateUserSettings>>,
+    );
+    const { result } = renderHook(() => useSavedPresets());
+    await waitFor(() => expect(result.current.presets).toEqual([prA]));
+
+    await act(async () => {
+      await defaultSetter(result.current)("pr", "pr-a");
+    });
+
+    expect(updateUserSettings).toHaveBeenCalledWith({
+      github_saved_presets: [{ ...prA, isDefault: true }],
+    });
+    expect(result.current.presets).toEqual([{ ...prA, isDefault: true }]);
   });
 });

@@ -7,15 +7,14 @@ import {
   updateGitHubWorkspaceSettings,
 } from "@/lib/api/domains/github-api";
 import { createQueuedUserSettingsSync } from "@/lib/user-settings-sync";
+import {
+  readSavedPresets,
+  setSavedPresetDefault,
+  type SavedPreset,
+  type SavedPresetKind,
+} from "./saved-preset-model";
 
-export type SavedPreset = {
-  id: string;
-  kind: "pr" | "issue";
-  label: string;
-  customQuery: string;
-  repoFilter: string;
-  createdAt: string;
-};
+export type { SavedPreset } from "./saved-preset-model";
 
 const listeners = new Set<() => void>();
 let snapshot: SavedPreset[] = [];
@@ -41,28 +40,6 @@ function publish(next: SavedPreset[]) {
   snapshot = next;
   snapshotVersion += 1;
   for (const l of listeners) l();
-}
-
-function readServerPresets(value: unknown): SavedPreset[] | null {
-  if (!Array.isArray(value)) return null;
-  return value.flatMap((candidate): SavedPreset[] => {
-    if (typeof candidate !== "object" || candidate === null) return [];
-    const preset = candidate as Record<string, unknown>;
-    const kind = preset.kind;
-    if (
-      typeof preset.id !== "string" ||
-      (kind !== "pr" && kind !== "issue") ||
-      typeof preset.label !== "string"
-    ) {
-      return [];
-    }
-    return [
-      {
-        ...(preset as SavedPreset),
-        repoFilter: typeof preset.repoFilter === "string" ? preset.repoFilter : "",
-      },
-    ];
-  });
 }
 
 const syncServer = createQueuedUserSettingsSync<SavedPreset[]>((next) => ({
@@ -96,7 +73,7 @@ function useUserSavedPresetsSync(enabled: boolean) {
     const initialVersion = snapshotVersion;
     fetchUserSettings({ cache: "no-store" })
       .then((response) => {
-        const serverPresets = readServerPresets(response.settings.github_saved_presets);
+        const serverPresets = readSavedPresets(response.settings.github_saved_presets);
         if (cancelled || !serverPresets || snapshotVersion !== initialVersion) return;
         publish(serverPresets);
       })
@@ -121,7 +98,7 @@ function useWorkspaceSavedPresets(workspaceId: string | null) {
     fetchGitHubWorkspaceSettings(workspaceId)
       .then((settings) => {
         if (cancelled || seq !== writeSeq.current) return;
-        const serverPresets = readServerPresets(settings.saved_presets) ?? [];
+        const serverPresets = readSavedPresets(settings.saved_presets) ?? [];
         setWorkspacePresets(serverPresets);
       })
       .catch(() => {
@@ -142,15 +119,16 @@ export function useSavedPresets(workspaceId: string | null = null) {
   const presets = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
   const { workspacePresets, setWorkspacePresets } = useWorkspaceSavedPresets(workspaceId);
   useUserSavedPresetsSync(!workspaceId);
-  const activePresets = workspaceId ? (workspacePresets ?? []) : presets;
+  const activePresets = workspaceId ? (workspacePresets ?? emptySnapshot) : presets;
 
   const save = useCallback(
-    (input: Omit<SavedPreset, "id" | "createdAt">) => {
+    (input: Omit<SavedPreset, "id" | "createdAt" | "isDefault">) => {
       if (workspaceId && workspacePresets === undefined) return null;
       const preset: SavedPreset = {
         ...input,
         id: `p_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`,
         createdAt: new Date().toISOString(),
+        isDefault: false,
       };
       const next = [...activePresets, preset];
       if (workspaceId) {
@@ -180,5 +158,23 @@ export function useSavedPresets(workspaceId: string | null = null) {
     [activePresets, workspaceId, workspacePresets, setWorkspacePresets],
   );
 
-  return { presets: activePresets, save, remove };
+  const setDefault = useCallback(
+    async (kind: SavedPresetKind, id: string | null) => {
+      if (workspaceId && workspacePresets === undefined) {
+        throw new Error("Saved queries are not loaded");
+      }
+      const next = setSavedPresetDefault(activePresets, kind, id);
+      if (next === activePresets) return;
+      if (workspaceId) {
+        await syncWorkspaceSavedPresets(workspaceId, next);
+        setWorkspacePresets(next);
+        return;
+      }
+      await syncServer(next);
+      publish(next);
+    },
+    [activePresets, workspaceId, workspacePresets, setWorkspacePresets],
+  );
+
+  return { presets: activePresets, save, remove, setDefault };
 }

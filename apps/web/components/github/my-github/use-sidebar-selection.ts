@@ -1,0 +1,122 @@
+"use client";
+
+import { useCallback, useEffect, useRef, useState, type MutableRefObject } from "react";
+import type { PresetOption } from "./search-bar";
+import type { SidebarSelection } from "./presets-sidebar";
+import type { SavedPreset } from "./use-saved-presets";
+import { resolveDefaultSidebarTarget } from "./saved-preset-model";
+
+type InitialSidebarSelectionOptions = {
+  workspaceId: string | null;
+  resolvedPrPresets: PresetOption[];
+  autoResetSearchRef: MutableRefObject<boolean>;
+  setQueryImmediate: (query: string) => void;
+  setRepoFilter: (repo: string) => void;
+  savedPresets?: SavedPreset[];
+};
+
+export function useInitialSidebarSelection({
+  workspaceId,
+  resolvedPrPresets,
+  autoResetSearchRef,
+  setQueryImmediate,
+  setRepoFilter,
+  savedPresets = [],
+}: InitialSidebarSelectionOptions) {
+  const userSelectedRef = useRef(false);
+  const [selection, setSelection] = useState<SidebarSelection>(
+    () => resolveDefaultSidebarTarget("pr", savedPresets, resolvedPrPresets).selection,
+  );
+
+  useEffect(() => {
+    userSelectedRef.current = false;
+    autoResetSearchRef.current = true;
+  }, [workspaceId, autoResetSearchRef]);
+
+  useEffect(() => {
+    if (userSelectedRef.current || !autoResetSearchRef.current) return;
+    const target = resolveDefaultSidebarTarget("pr", savedPresets, resolvedPrPresets);
+    setSelection((current) =>
+      current.kind === target.selection.kind &&
+      current.source === target.selection.source &&
+      current.id === target.selection.id
+        ? current
+        : target.selection,
+    );
+    setQueryImmediate(target.query);
+    setRepoFilter(target.repoFilter);
+  }, [
+    workspaceId,
+    savedPresets,
+    resolvedPrPresets,
+    autoResetSearchRef,
+    setQueryImmediate,
+    setRepoFilter,
+  ]);
+
+  const setUserSelection = useCallback((next: SidebarSelection) => {
+    userSelectedRef.current = true;
+    setSelection(next);
+  }, []);
+
+  return { selection, setProgrammaticSelection: setSelection, setUserSelection };
+}
+
+export function useSidebarSelectionHandler({
+  savedPresets,
+  resolvedPrPresets,
+  resolvedIssuePresets,
+  setQueryImmediate,
+  setRepoFilter,
+  setUserSelection,
+  markSearchInteracted,
+  currentKind,
+}: {
+  savedPresets: SavedPreset[];
+  resolvedPrPresets: PresetOption[];
+  resolvedIssuePresets: PresetOption[];
+  setQueryImmediate: (query: string) => void;
+  setRepoFilter: (repo: string) => void;
+  setUserSelection: (next: SidebarSelection) => void;
+  markSearchInteracted: () => void;
+  currentKind?: SidebarSelection["kind"];
+}) {
+  return useCallback(
+    (selection: SidebarSelection) => {
+      markSearchInteracted();
+      if (currentKind && selection.kind !== currentKind) {
+        const target = resolveDefaultSidebarTarget(
+          selection.kind,
+          savedPresets,
+          selection.kind === "pr" ? resolvedPrPresets : resolvedIssuePresets,
+        );
+        setUserSelection(target.selection);
+        setQueryImmediate(target.query);
+        setRepoFilter(target.repoFilter);
+        return;
+      }
+      setUserSelection(selection);
+      if (selection.source === "saved") {
+        const found = savedPresets.find((preset) => preset.id === selection.id);
+        setQueryImmediate(found?.customQuery ?? "");
+        setRepoFilter(found?.repoFilter ?? "");
+        return;
+      }
+      const preset = (selection.kind === "pr" ? resolvedPrPresets : resolvedIssuePresets).find(
+        (candidate) => candidate.value === selection.id,
+      );
+      setQueryImmediate(preset?.filter ?? "");
+      setRepoFilter("");
+    },
+    [
+      savedPresets,
+      setQueryImmediate,
+      resolvedPrPresets,
+      resolvedIssuePresets,
+      setUserSelection,
+      markSearchInteracted,
+      setRepoFilter,
+      currentKind,
+    ],
+  );
+}

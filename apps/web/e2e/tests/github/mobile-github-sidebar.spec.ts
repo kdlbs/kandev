@@ -5,8 +5,93 @@ const DEFAULT_REPO = "mobileorg/defaultrepo";
 const DEFAULT_REPO_ISSUE = "Mobile issue in saved default repo";
 const OTHER_REPO_ISSUE = "Mobile issue outside saved default repo";
 const SAVED_QUERY_FILTER = "assignee:@me is:open mobile-saved-default-repo-e2e";
+const DEFAULTS_TIMESTAMP = "2026-08-07T00:00:00Z";
+
+test.afterEach(async ({ testPage, seedData }) => {
+  await testPage.request.put("/api/v1/github/workspace-settings", {
+    data: { workspace_id: seedData.workspaceId, saved_presets: [] },
+  });
+});
 
 test.describe("Mobile /github sidebar", () => {
+  test("saved default action is touch-sized, isolated, and persistent", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const savedLabel = "Mobile future issues";
+    await apiClient.mockGitHubReset();
+    await apiClient.mockGitHubSetUser("test-user");
+    await apiClient.mockGitHubAddIssues([
+      {
+        number: 190,
+        title: DEFAULT_REPO_ISSUE,
+        state: "open",
+        author_login: "test-user",
+        repo_owner: "mobileorg",
+        repo_name: "defaultrepo",
+        assignees: ["test-user"],
+      },
+    ]);
+    const seedResponse = await testPage.request.put("/api/v1/github/workspace-settings", {
+      data: {
+        workspace_id: seedData.workspaceId,
+        saved_presets: [
+          {
+            id: "mobile-saved-issue",
+            kind: "issue",
+            label: savedLabel,
+            customQuery: "assignee:@me is:open",
+            repoFilter: DEFAULT_REPO,
+            createdAt: DEFAULTS_TIMESTAMP,
+            isDefault: false,
+          },
+        ],
+      },
+    });
+    expect(seedResponse.ok()).toBe(true);
+
+    const page = new MobileGitHubPage(testPage);
+    await page.goto();
+    await page.mobileMenuButton.tap();
+    await page.mobileSidebar.getByRole("button", { name: "Issues", exact: true }).tap();
+    await expect(page.toolbarTitle).toContainText("Assigned");
+    await page.mobileMenuButton.tap();
+
+    const defaultAction = page.savedQueryDefaultAction(savedLabel);
+    const actionBox = await defaultAction.boundingBox();
+    expect(actionBox).not.toBeNull();
+    expect(actionBox!.height).toBeGreaterThanOrEqual(44);
+    expect(actionBox!.width).toBeGreaterThanOrEqual(44);
+    const setResponse = testPage.waitForResponse(
+      (response) =>
+        response.url().includes("/api/v1/github/workspace-settings") &&
+        response.request().method() === "PUT" &&
+        response.status() === 200,
+    );
+    await defaultAction.tap();
+    await setResponse;
+
+    await expect(page.mobileSidebar).toBeVisible();
+    await expect(page.toolbarTitle).toContainText("Assigned");
+    await expect(page.savedQueryDefaultAction(savedLabel, "Clear")).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    expect(
+      await testPage.evaluate(
+        () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
+      ),
+    ).toBe(true);
+
+    await testPage.reload();
+    await page.mobileMenuButton.waitFor({ state: "visible" });
+    await page.mobileMenuButton.tap();
+    await page.mobileSidebar.getByRole("button", { name: "Issues", exact: true }).tap();
+    await expect(page.toolbarTitle).toContainText(savedLabel);
+    await expect(page.repoFilterTrigger).toContainText(DEFAULT_REPO);
+  });
+
   test("hamburger opens sheet and selecting a preset updates the toolbar", async ({
     testPage,
     apiClient,

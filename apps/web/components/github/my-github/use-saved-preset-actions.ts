@@ -1,11 +1,13 @@
 "use client";
 
+import { useState } from "react";
+import { useTranslation } from "react-i18next";
+import { useToast } from "@/components/toast-provider";
 import type { PresetOption } from "./search-bar";
 import type { SidebarSelection } from "./presets-sidebar";
-import { useSavedPresets } from "./use-saved-presets";
+import type { SavedPreset, useSavedPresets } from "./use-saved-presets";
 
 type SavedPresetActionsOptions = {
-  workspaceId: string | null;
   selection: SidebarSelection;
   customQuery: string;
   resolvedPrPresets: PresetOption[];
@@ -13,6 +15,8 @@ type SavedPresetActionsOptions = {
   setProgrammaticSelection: (selection: SidebarSelection) => void;
   setQueryImmediate: (query: string) => void;
   setRepoFilter: (repo: string) => void;
+  savedPresetStore: ReturnType<typeof useSavedPresets>;
+  markSearchInteracted: () => void;
 };
 
 function firstPresetSelection(
@@ -28,7 +32,6 @@ function firstPresetSelection(
 }
 
 export function useSavedPresetActions({
-  workspaceId,
   selection,
   customQuery,
   resolvedPrPresets,
@@ -36,14 +39,21 @@ export function useSavedPresetActions({
   setProgrammaticSelection,
   setQueryImmediate,
   setRepoFilter,
+  savedPresetStore,
+  markSearchInteracted,
 }: SavedPresetActionsOptions) {
+  const { t } = useTranslation();
+  const { toast } = useToast();
+  const [defaultMutationPending, setDefaultMutationPending] = useState(false);
   const {
     presets: savedPresets,
     save: saveSavedPreset,
     remove: removeSavedPreset,
-  } = useSavedPresets(workspaceId);
+    setDefault: setSavedPresetDefault,
+  } = savedPresetStore;
 
   const onConfirmSave = (label: string, defaultRepoFilter: string) => {
+    markSearchInteracted();
     const created = saveSavedPreset({
       kind: selection.kind,
       label,
@@ -57,6 +67,7 @@ export function useSavedPresetActions({
   };
 
   const onDeleteSaved = (id: string) => {
+    markSearchInteracted();
     removeSavedPreset(id);
     if (selection.source !== "saved" || selection.id !== id) return;
     const fallback = firstPresetSelection(selection.kind, resolvedPrPresets, resolvedIssuePresets);
@@ -65,5 +76,27 @@ export function useSavedPresetActions({
     setRepoFilter("");
   };
 
-  return { savedPresets, onConfirmSave, onDeleteSaved };
+  const onToggleSavedDefault = async (preset: SavedPreset) => {
+    if (defaultMutationPending) return;
+    markSearchInteracted();
+    setDefaultMutationPending(true);
+    try {
+      await setSavedPresetDefault(preset.kind, preset.isDefault ? null : preset.id);
+    } catch {
+      toast({
+        description: t("integrations:failedToUpdateDefaultView"),
+        variant: "error",
+      });
+    } finally {
+      setDefaultMutationPending(false);
+    }
+  };
+
+  return {
+    savedPresets,
+    onConfirmSave,
+    onDeleteSaved,
+    onToggleSavedDefault,
+    defaultMutationPending,
+  };
 }
