@@ -6,6 +6,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/kandev/kandev/internal/task/models"
 )
@@ -312,5 +313,68 @@ func TestDeleteSession_AmbiguousMutationErrorResolvesRatherThanBlindlyCancels(t 
 	if len(cleanup.resolveCalls) != 1 || cleanup.resolveCalls[0] != "session_delete:op-ambiguous" {
 		t.Fatalf("resolve calls = %v, want exactly one call for session_delete:op-ambiguous — "+
 			"an ambiguous error must resolve, not blindly cancel", cleanup.resolveCalls)
+	}
+}
+
+// TestDeleteSession_PromotesAnotherSessionWithoutTouchingItsResources covers
+// the spec's "Primary promotion (regression)" scenario (docs/specs/
+// session-delete-resource-cleanup: "GIVEN a task with a primary session and
+// one other session, WHEN the primary is deleted, THEN the other session
+// becomes primary and its worktree is untouched") — previously untested
+// anywhere in the repo despite being explicit spec text. Deleting the
+// primary session must both (a) promote the surviving session and (b) never
+// route the surviving session's own resources through the cleanup path that
+// was only prepared for the deleted one.
+func TestDeleteSession_PromotesAnotherSessionWithoutTouchingItsResources(t *testing.T) {
+	const (
+		taskID          = "task-cleanup-promotion"
+		primarySession  = "session-cleanup-promotion-primary"
+		survivorSession = "session-cleanup-promotion-survivor"
+	)
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, taskID, primarySession, models.TaskSessionStateCompleted)
+	now := time.Now().UTC()
+	if err := repo.CreateTaskSession(t.Context(), &models.TaskSession{
+		ID:        survivorSession,
+		TaskID:    taskID,
+		State:     models.TaskSessionStateCompleted,
+		StartedAt: now,
+		UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("seed survivor session: %v", err)
+	}
+
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	cleanup := &fakeSessionDeleteResourceCleanup{prepareOperationID: "session_delete:op-promotion"}
+	svc.sessionResourceCleanup = cleanup
+
+	if err := repo.SetSessionPrimary(t.Context(), primarySession); err != nil {
+		t.Fatalf("seed primary session: %v", err)
+	}
+
+	if err := svc.DeleteSession(t.Context(), primarySession); err != nil {
+		t.Fatalf("DeleteSession: %v", err)
+	}
+
+	survivor, err := repo.GetTaskSession(t.Context(), survivorSession)
+	if err != nil {
+		t.Fatalf("GetTaskSession(survivor): %v", err)
+	}
+	if !survivor.IsPrimary {
+		t.Fatal("the surviving session should have been auto-promoted to primary")
+	}
+
+	cleanup.mu.Lock()
+	defer cleanup.mu.Unlock()
+	for _, call := range cleanup.prepareCalls {
+		if call.sessionID == survivorSession {
+			t.Fatalf("cleanup was prepared for the surviving session %s — promotion must never route "+
+				"the surviving session's resources through the deleted session's cleanup path",
+				survivorSession)
+		}
+	}
+	if len(cleanup.prepareCalls) != 1 || cleanup.prepareCalls[0].sessionID != primarySession {
+		t.Fatalf("prepare calls = %+v, want exactly one call for the deleted primary session %s",
+			cleanup.prepareCalls, primarySession)
 	}
 }

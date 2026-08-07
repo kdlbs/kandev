@@ -6,6 +6,10 @@ import { test, expect } from "../../fixtures/test-base";
 import { SessionPage } from "../../pages/session-page";
 import { makeGitEnv } from "../../helpers/git-helper";
 import type { ApiClient } from "../../helpers/api-client";
+import {
+  routeMainWebSocketWithDelayedActionResponse,
+  routeMainWebSocketWithFailedActionResponse,
+} from "../../helpers/ws-drop";
 
 type GitSnapshotResponse = {
   // The backend marshals a nil Go slice as JSON null, not [], when no
@@ -300,5 +304,95 @@ test.describe("Session delete reclaims its worktree", () => {
 
     await expect(dialog.getByTestId("session-delete-uncommitted-warning")).toHaveCount(0);
     await expect(dialog.getByTestId("session-delete-unpushed-warning")).toHaveCount(0);
+  });
+
+  test("disables the confirm control until the warning fetch actually resolves, then enables it", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const task = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      "Session delete confirm gating",
+      seedData.agentProfileId,
+      {
+        description: "/e2e:simple-message",
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+        executor_profile_id: seedData.worktreeExecutorProfileId,
+      },
+    );
+    if (!task.session_id) throw new Error("expected task creation to auto-start a session");
+    const sessionId = task.session_id;
+    await waitForSessionDone(apiClient, task.id);
+
+    // Must attach before navigation: routeWebSocket only affects connections
+    // opened after it is registered.
+    const delayed = await routeMainWebSocketWithDelayedActionResponse(
+      testPage,
+      "session.git.snapshots",
+    );
+    await testPage.goto(`/t/${task.id}`);
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+
+    await openDeleteConfirmDialog(session, sessionId);
+    const dialog = session.alertDialog();
+    await expect(dialog).toBeVisible();
+
+    // The dialog issues the fetch immediately on open, but the response is
+    // held — this is the real WS round trip, not a mocked hook return value,
+    // so it also proves the request actually went out before asserting the
+    // gated state rather than racing an assertion against nothing in flight.
+    const confirmButton = dialog.getByRole("button", { name: "Delete" });
+    await expect(confirmButton).toBeDisabled();
+
+    delayed.release();
+
+    await expect(confirmButton).toBeEnabled({ timeout: 10_000 });
+
+    // The gate does not block the request itself, and once armed correctly,
+    // the button really is clickable — not merely enabled in markup.
+    await confirmButton.click();
+    await expect(session.sessionTabBySessionId(sessionId)).toHaveCount(0, { timeout: 15_000 });
+  });
+
+  test("still enables the confirm control after the warning fetch fails, rather than stranding it disabled", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const task = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      "Session delete gating survives fetch failure",
+      seedData.agentProfileId,
+      {
+        description: "/e2e:simple-message",
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+        executor_profile_id: seedData.worktreeExecutorProfileId,
+      },
+    );
+    if (!task.session_id) throw new Error("expected task creation to auto-start a session");
+    const sessionId = task.session_id;
+    await waitForSessionDone(apiClient, task.id);
+
+    // A failed warning fetch must not permanently lock the user out of
+    // deleting the session — the gate exists to make sure the counts are
+    // seen before confirming, not to hold the control hostage to a flaky
+    // network call.
+    await routeMainWebSocketWithFailedActionResponse(testPage, "session.git.snapshots");
+    await testPage.goto(`/t/${task.id}`);
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+
+    await openDeleteConfirmDialog(session, sessionId);
+    const dialog = session.alertDialog();
+    await expect(dialog).toBeVisible();
+
+    const confirmButton = dialog.getByRole("button", { name: "Delete" });
+    await expect(confirmButton).toBeEnabled({ timeout: 10_000 });
   });
 });

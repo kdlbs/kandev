@@ -222,3 +222,92 @@ export async function routeMainWebSocketWithMessageAddResponseDrop(
     droppedCount: () => dropped.value,
   };
 }
+
+type ActionResponseDelayController = {
+  /** Resolves the held response frame, letting it reach the page. */
+  release: () => void;
+};
+
+/**
+ * Holds the FIRST server response frame for `action` (matched on the raw
+ * JSON text, not parsed — response payloads can be large) until `release()`
+ * is called, forwarding every other frame immediately, including later
+ * responses for the same action. Used to prove UI gating behavior against
+ * the WS response's real round trip instead of a mocked hook return value,
+ * which can't catch a race between the fetch settling and whatever reads
+ * its result. Single-shot by design: a second held frame while the first is
+ * still pending would silently orphan whichever one `release()` doesn't
+ * target, so this only ever arms once.
+ */
+export async function routeMainWebSocketWithDelayedActionResponse(
+  page: Page,
+  action: string,
+): Promise<ActionResponseDelayController> {
+  let armed = true;
+  let releaseSignal: (() => void) | null = null;
+
+  await page.routeWebSocket(/\/ws$/, (ws) => {
+    const server = ws.connectToServer();
+    ws.onMessage((message) => server.send(message));
+    server.onMessage(async (message) => {
+      if (
+        armed &&
+        typeof message === "string" &&
+        message.includes(`"action":"${action}"`) &&
+        message.includes('"type":"response"')
+      ) {
+        armed = false;
+        await new Promise<void>((resolve) => {
+          releaseSignal = resolve;
+        });
+      }
+      ws.send(message);
+    });
+  });
+
+  return {
+    release: () => releaseSignal?.(),
+  };
+}
+
+/**
+ * Rewrites the FIRST server response frame for `action` into a `type:
+ * "error"` frame, preserving its `id` so the client's pending-request map
+ * still resolves (rejects) it, and forwards every other frame unchanged.
+ * Used to prove a fetch-failure path doesn't strand dependent UI state
+ * (e.g. a confirm control gated on the fetch settling) against a real
+ * WS error response instead of a mocked rejection.
+ */
+export async function routeMainWebSocketWithFailedActionResponse(
+  page: Page,
+  action: string,
+): Promise<void> {
+  let armed = true;
+
+  await page.routeWebSocket(/\/ws$/, (ws) => {
+    const server = ws.connectToServer();
+    ws.onMessage((message) => server.send(message));
+    server.onMessage((message) => {
+      if (armed && typeof message === "string") {
+        for (const frame of parseJSONFrames(message)) {
+          if (
+            frame.action === action &&
+            frame.type === "response" &&
+            typeof frame.id === "string"
+          ) {
+            armed = false;
+            ws.send(
+              JSON.stringify({
+                id: frame.id,
+                type: "error",
+                payload: { message: "simulated failure" },
+              }),
+            );
+            return;
+          }
+        }
+      }
+      ws.send(message);
+    });
+  });
+}
