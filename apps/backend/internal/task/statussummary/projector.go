@@ -734,12 +734,15 @@ func (p *Projector) applyPendingMessageLocked(state *projectionState, eventType 
 // whenever a turn ended before its last tool_update landed), while their
 // terminal updates tore down a genuinely pending prompt — a background tool
 // completing would clear the icon while the foreground turn was still blocked.
+// The exact request types are matched before the generic requests_input flag, so
+// a permission row that ever starts carrying the flag stays a permission rather
+// than silently degrading to a clarification.
 func pendingActionForMessage(messageType string, requestsInput bool) string {
-	if messageType == messageTypeClarificationRequest || requestsInput {
-		return pendingClarification
-	}
 	if messageType == messageTypePermissionRequest {
 		return pendingPermission
+	}
+	if messageType == messageTypeClarificationRequest || requestsInput {
+		return pendingClarification
 	}
 	return ""
 }

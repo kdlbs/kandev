@@ -863,3 +863,29 @@ func TestProjectorKeepsPendingAcrossUnrelatedToolTraffic(t *testing.T) {
 		}
 	}
 }
+
+// The exact request type wins over the generic requests_input flag, so a
+// permission row is never classified as a clarification.
+func TestPendingActionForMessagePrefersExactRequestType(t *testing.T) {
+	cases := []struct {
+		messageType   string
+		requestsInput bool
+		want          string
+	}{
+		{messageTypePermissionRequest, false, pendingPermission},
+		{messageTypePermissionRequest, true, pendingPermission},
+		{messageTypeClarificationRequest, false, pendingClarification},
+		{messageTypeClarificationRequest, true, pendingClarification},
+		{"message", true, pendingClarification},
+		{"tool_execute", false, ""},
+		{"tool_execute", true, pendingClarification},
+		{"", false, ""},
+	}
+	for _, tc := range cases {
+		got := pendingActionForMessage(tc.messageType, tc.requestsInput)
+		if got != tc.want {
+			t.Errorf("pendingActionForMessage(%q, %t) = %q, want %q",
+				tc.messageType, tc.requestsInput, got, tc.want)
+		}
+	}
+}
