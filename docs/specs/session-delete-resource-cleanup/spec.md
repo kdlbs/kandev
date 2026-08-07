@@ -478,3 +478,72 @@ regression-guard reference-exclusion invariant (re-verified against a real
 SQLite store, including the sequential-sharing scenario), no `git branch -D`
 in the reclaim path, no command-injection surface, no secrets/PII in the new
 snapshot data, and job-claim CAS atomicity.
+
+### Test-supervisor findings (arrived after the initial hand-off — read these too)
+
+The test-supervisor subagent ran the suite green, then applied actual
+mutations to a throwaway `git archive` copy of HEAD to check what really goes
+red (method, not speculation). Verdict: FAIL, three test-honesty must-fix
+items — none are new production bugs, but they mean the suite currently
+provides less protection against the bugs above than its docstrings claim.
+Fix these alongside 1-3 above so the regression coverage for THIS round's
+fixes is real, not vacuous.
+
+1. **The orchestrator-level "regression guard" test is ordering-blind and its
+   docstring overclaims.** `TestDeleteSession_ActivatesResourceCleanupAfterCommit`
+   and `TestSessionDeleteCleanupJob_FullLifecycle`
+   (`apps/backend/internal/orchestrator/session_delete_resource_cleanup_test.go`,
+   `apps/backend/internal/task/service/resource_cleanup_session_delete_test.go`)
+   use a fake reclaimer/collaborator whose `StartPreparedTaskResourceCleanup`
+   just appends to a slice — it never queries whether the session row was
+   already gone. Mutation-proven: reordering `task_operations.go:2773-2780` so
+   activation runs *before* `repo.DeleteTaskSession` leaves both suites green.
+   (The real reference-exclusion invariant IS correctly covered elsewhere,
+   against real SQLite — `TestReclaimSessionWorktree_
+   RemovesExclusivelyHeldWorktree`/`...ReclaimsAfterBothSharingSessionsDeleted`
+   in `manager_reclaim_session_worktree_test.go` — but this orchestrator-level
+   test's own docstring claims to be *the* regression guard from the spec,
+   and it isn't testing that.) Fix: have the fake's
+   `StartPreparedTaskResourceCleanup` query `repo.GetTaskSession(sessionID)`
+   and record whether the row was still present when called; assert it was
+   already gone. Correct the docstring.
+2. **Vacuous copy-regression assertion, passes on revert.** `apps/web/components/task/session-tab-menu.test.tsx`
+   and `mobile-sessions-section.test.tsx`'s "does not claim only conversation
+   history is removed" tests assert `not.toMatch(/only.*conversation
+   history|conversation history.*only/)` — but the *old* copy ("This will
+   permanently delete the conversation history with this session.") never
+   contained "only" either, so the regex never matched either string.
+   Reverting the `task.json` copy change leaves both green. The e2e spec does
+   this correctly (positive `toContainText` on the new sentence + negative on
+   the exact old sentence) — port that pair down to both unit tests.
+3. **Restart-durability test asserts job state, not the downstream effect.**
+   `TestSessionDeleteCleanupJob_RestartAfterCommitResumes`
+   (`resource_cleanup_session_delete_test.go`) asserts only
+   `job.State == succeeded` after restart-resume. Mutation-proven: making
+   `executeSessionDeleteResourceCleanup` never actually reclaim anything
+   (`return nil` unconditionally) leaves this test green — the fake never gets
+   asked which IDs it reclaimed. Its sibling
+   `RestartBeforeCommitIsCancelled` correctly asserts `reclaimedCalls == 0`;
+   the positive counterpart needs the equivalent `reclaimedIDs == [...]`
+   assertion. This is the exact "assert real effect, not stored state" shape
+   PR #2241 finding #3 was about.
+
+Should-fix (test-rigor, not blocking on their own, but do while in this
+file): the mixed shared+exclusive multi-worktree scenario
+(`TestExecuteSessionDeleteResourceCleanup_ReclaimsEveryWorktreeIndependently`)
+only asserts a call count against a fake, never runs the mixed case against
+real reference counting; `simulateSessionCascadeDelete` deletes the child
+`task_session_worktrees` row directly rather than the parent `task_sessions`
+row, so the cascade this whole feature's exclusion logic depends on is
+exercised nowhere in the diff (verified to actually fire when probed
+separately — cheap to switch the test helper to delete the parent row
+instead); no test asserts the git-worktree *registration* is gone after
+`forceRemoveDir`+`prune` (only `os.Stat` on the directory) — the package
+already has `worktreeRegistrationExists` to assert against; no test drives a
+transient-failure-then-succeed retry through the `session_delete` job branch;
+the Primary-promotion regression scenario and both Invariant scenarios have
+no test anywhere in the repo (pre-existing gaps this diff's insertion of 3 new
+steps ahead of `promoteNextPrimaryAfterRemoval` makes worth closing now); no
+test proves `ReclaimSessionWorktree` *returns* (vs. only logs) a removal
+failure, which is what the retry budget and "reclamation failure SHALL be
+observable" actually depend on.
