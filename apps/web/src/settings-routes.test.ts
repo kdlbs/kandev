@@ -8,7 +8,6 @@ import ExecutorCreatePage from "@/app/settings/executor/new/page";
 import ProfileEditPage from "@/app/settings/executors/[profileId]/page";
 import CreateProfilePage from "@/app/settings/executors/new/[type]/page";
 import SSHExecutorPage from "@/app/settings/executors/ssh/[executorId]/page";
-import IntegrationsGitHubPage from "@/app/settings/integrations/github/page";
 import IntegrationsGitLabPage from "@/app/settings/integrations/gitlab/page";
 import PluginDetailPage from "@/app/settings/plugins/[pluginId]/page";
 import AutomationEditorPage from "@/app/settings/workspace/[id]/automations/[automationId]/page";
@@ -212,11 +211,18 @@ describe("renderSettingsRoute", () => {
     expect(route.props.to).toBe("/settings/workspaces/ws-1/integrations/github");
   });
 
-  it("routes GitHub settings through the integration page wrapper", () => {
-    const route = renderSettingsRoute("/settings/integrations/github");
+  // Upstream asserted this route rendered IntegrationsGitHubPage directly. The
+  // restructure makes integrations workspace-scoped, so the unscoped path is a
+  // redirect into the active workspace's Integrations tab — the page component
+  // is still what renders, one hop later, at the scoped URL.
+  it("sends unscoped GitHub settings into the active workspace's integrations tab", () => {
+    const route = renderSettingsRoute("/settings/integrations/github") as ReactElement<{
+      section: string;
+    }>;
 
     expect(isValidElement(route)).toBe(true);
-    expect((route as ReactElement).type).toBe(IntegrationsGitHubPage);
+    expect((route.type as { name?: string }).name).toBe("ActiveWorkspaceSectionRedirect");
+    expect(route.props.section).toBe("integrations/github");
   });
 
   it("reserves /settings/executor/new for executor creation", () => {
