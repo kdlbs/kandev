@@ -221,6 +221,36 @@ describe("buildHostApi — host.theme / host.onThemeChange", () => {
     expect(listener).toHaveBeenCalledTimes(1);
   });
 
+  // Cross-plugin fan-out: one buggy plugin must not silently stop theme
+  // updates for every other plugin. The throwing listener is registered
+  // FIRST so an unguarded loop would abort before reaching the healthy one.
+  it("keeps notifying later listeners when an earlier one throws", async () => {
+    document.documentElement.classList.remove("dark");
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const host = buildHostApi("jira", createAppStore());
+
+    const boom = vi.fn(() => {
+      throw new Error("plugin theme listener blew up");
+    });
+    const healthy = vi.fn();
+    const unsubscribeBoom = host.onThemeChange(boom);
+    const unsubscribeHealthy = host.onThemeChange(healthy);
+
+    document.documentElement.classList.add("dark");
+    await flushMutationObservers();
+
+    expect(boom).toHaveBeenCalledTimes(1);
+    expect(healthy).toHaveBeenCalledExactlyOnceWith("dark");
+    expect(consoleError).toHaveBeenCalledWith(
+      "[plugins] theme change listener threw:",
+      expect.any(Error),
+    );
+
+    unsubscribeBoom();
+    unsubscribeHealthy();
+    consoleError.mockRestore();
+  });
+
   it("ignores class mutations that leave the resolved theme unchanged", async () => {
     document.documentElement.classList.add("dark");
     const host = buildHostApi("jira", createAppStore());
