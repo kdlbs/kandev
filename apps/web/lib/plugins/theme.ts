@@ -59,6 +59,11 @@ function handleMutation(): void {
  * One `MutationObserver` is shared across every subscriber and is connected
  * lazily on the first subscription / disconnected after the last one, so a
  * page with no plugins (or none that care about the theme) observes nothing.
+ *
+ * That shared observer and its `listeners`/`lastTheme` state are module
+ * scope — correct for a browser (one document, one theme), but it means a
+ * test that subscribes without unsubscribing leaks a live observer into every
+ * later test in the file. Always call the returned function in cleanup.
  */
 export function subscribeToThemeChanges(listener: ThemeListener): () => void {
   listeners.add(listener);

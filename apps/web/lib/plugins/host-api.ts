@@ -227,10 +227,13 @@ const PLUGIN_UI: Record<string, unknown> = {
   Textarea,
   Tooltip,
   TooltipContent,
-  // The host already wraps plugin routes, slots, and `openModal` content in a
-  // TooltipProvider, so a plain Tooltip works without one. This is exported
-  // for plugins that want their own `delayDuration`/`skipDelayDuration` for a
-  // dense cluster of tooltips — nesting a provider is supported by Radix.
+  // A plain Tooltip works everywhere a plugin renders, but from two different
+  // providers: routes and slots render inside AppShell and inherit the
+  // app-wide TooltipProvider in app/layout.tsx, while `openModal` content
+  // mounts *outside* AppShell and gets its own from PluginModalHost. This is
+  // exported for plugins that want their own `delayDuration`/
+  // `skipDelayDuration` for a dense cluster of tooltips — nesting a provider
+  // is supported by Radix.
   TooltipProvider,
   TooltipTrigger,
   // App UI (not shadcn primitives), exposed so plugins compose kandev-native
