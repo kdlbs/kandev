@@ -46,7 +46,7 @@ min_kandev_version: "0.78.0"                 # optional
 capabilities:
   events: ["task.created", "task.state_changed", "agent.completed"]
   api_read: ["tasks", "agent_profiles"]      # gates the Host data-reader RPCs
-  api_write: ["tasks"]                       # gates Tasks().Create/Update
+  api_write: ["tasks", "messages"]           # gates Host task and message writes
   state: true
   secrets: true
   agent_invoke: true                         # gates Host.InvokeUtilityAgent
@@ -57,6 +57,19 @@ webhooks:
   - key: "slack-events"
     description: "Slack Events API webhook"
     method: "POST"                           # informational only, not enforced
+
+actions:                                      # authenticated browser-to-plugin calls
+  - key: "connection.save"
+    scope: "workspace"                       # workspace | task | repository
+    max_body_bytes: 65536                     # 1 through 1048576
+
+repository_providers: ["acme"]               # optional provider ids owned while active
+reference_sources:                            # optional dynamic composer sources
+  - source: "acme-pull-requests"
+    provider: "acme"
+    kind: "pull_request"
+    display_name: "Acme pull requests"
+    kind_label: "Pull request"
 
 auth_providers:                              # login buttons (needs capabilities.auth)
   - id: "google"
@@ -101,10 +114,10 @@ ui:                                           # optional native frontend plugin
 | `repo_url` | no | string | Absolute `http(s)` URL to the plugin's source repository. Rendered as a "Repo" link in Settings > Plugins (both the installed list and the plugin detail). Any other scheme (e.g. `javascript:`) is rejected at registration. Distinct from the marketplace card's `repo_url`, which the registry derives from `plugins.yaml`; declare this in the manifest so sideloaded and directly-installed plugins also carry the link. |
 | `runtime.type` | conditionally | string | `"binary"` is the only supported value. Setting it (vs. leaving it empty) makes the manifest **runtime-managed** — see "Managed vs. legacy" below. |
 | `runtime.executables` | required when `runtime.type: binary` | map\<string,string\> | Key is `<goos>-<goarch>` (e.g. `linux-amd64`, `darwin-arm64`, `windows-amd64`); value is a clean, package-relative path under `server/` (no leading `/`, no `..` segments). At least one entry required; the running host's key must be present at install time. Windows values end in `.exe`. |
-| `min_kandev_version` | no | string | Optional advisory; not currently enforced by the installer. |
+| `min_kandev_version` | no | string | Minimum released Kandev version required by the plugin. Release builds reject packages that require a newer host; non-release development builds skip this compatibility gate. |
 | `capabilities.events` | no | string[] | Bus subjects (or wildcard patterns) this plugin subscribes to. See "Event subscription vocabulary" below. |
-| `capabilities.api_read` | no | string[] | Gates the Host data API's read-only accessors. Each entry is a resource name: `tasks`, `sessions`, `messages`, `workspaces`, `workflows`, `agent_profiles`, `repositories`. Calling the matching `Host` accessor (e.g. `Tasks()`) without its resource declared returns gRPC `PermissionDenied`. See "Host data API resource vocabulary" below. |
-| `capabilities.api_write` | no | string[] | Gates Host data writes. Current resources are `tasks` (`Tasks().Create/Update`) and `messages` (`Messages().Send`); reads and writes are gated independently. |
+| `capabilities.api_read` | no | string[] | Gates the Host data API's read-only accessors. Each entry is a resource name: `tasks`, `sessions`, `messages`, `workspaces`, `workflows`, `agent_profiles`, `executor_profiles`, `repositories`. Calling the matching `Host` accessor (e.g. `Tasks()`) without its resource declared returns gRPC `PermissionDenied`. See "Host data API resource vocabulary" below. |
+| `capabilities.api_write` | no | string[] | Gates Host writes independently of `api_read`. `tasks` permits `Host.Tasks().Create` and `.Update`; `messages` permits `Host.Messages().Send`. Undeclared writes return gRPC `PermissionDenied`. |
 | `capabilities.state` | no | bool | Gates `Host.GetState`/`SetState`/`DeleteState`/`ListState`. Calling any of them without this set to `true` returns gRPC `PermissionDenied`. |
 | `capabilities.secrets` | no | bool | Gates `Host.RevealSecret`/`GetSecret`/`SetSecret`/`DeleteSecret`. Calling any of them without this set to `true` returns gRPC `PermissionDenied`. |
 | `capabilities.agent_invoke` | no | bool | Gates `Host.InvokeUtilityAgent` — a one-shot completion run by the utility agent selected for this plugin. Declare a `utility_agent` config property with `type: string` and `format: utility-agent`; Settings > Plugins renders the picker. Calling without this capability returns gRPC `PermissionDenied`; calling without a valid enabled selection returns gRPC `FailedPrecondition`. See ADR 0048. |
@@ -113,6 +126,12 @@ ui:                                           # optional native frontend plugin
 | `webhooks[].key` | yes | string | Must be unique within the manifest. Used in the relay path `POST /api/plugins/{id}/webhooks/{key}`. |
 | `webhooks[].description` | no | string | Free-form. |
 | `webhooks[].method` | no | string | **Informational only** — kandev does not validate or enforce the inbound HTTP method against this value. |
+| `actions[]` | no | object[] | Authenticated, manifest-declared browser actions. They are distinct from public webhooks: the host validates the action key, limits the JSON body, authorizes the declared resource, and passes only a verified context to the plugin. |
+| `actions[].key` | yes* | string | Unique non-empty action key, used at `POST /api/plugins/{id}/actions/{key}`. |
+| `actions[].scope` | yes* | `workspace` \| `task` \| `repository` | Resource selector the host authorizes. Use the canonical field name `scope`; `resource_scope` is only a legacy read-compatibility spelling and must not be authored. |
+| `actions[].max_body_bytes` | yes* | int | Maximum size of the decoded untrusted `body`, from 1 through 1,048,576 bytes. The whole HTTP envelope has a slightly larger hard cap. |
+| `repository_providers` | no | string[] | Provider IDs this plugin owns while active. An active provider can register native repository discovery/URL inspection and may supply transient Git credentials. Duplicate ownership is rejected. |
+| `reference_sources[]` | no | object[] | Dynamic composer-reference source. Each entry declares `source`, `provider`, `kind`, `display_name`, and `kind_label`; `order` is optional. Candidate identity is not trusted—Kandev reauthorizes the canonical reference when it is submitted. |
 | `auth_providers[]` | no | object[] | Login buttons this plugin contributes to the pre-auth login screen (needs `capabilities.auth`). Each is `{ id, display_name, initiate }`, where `initiate` names one of the plugin's `webhooks[].key` values — the button navigates to that webhook, which 302-redirects to the IdP. Surfaced anonymously in the boot payload as `auth.ssoProviders`. |
 | `config_schema` | no | object | JSON-Schema-like object driving the settings form at **Settings > Plugins > `<plugin>`** (`GET /api/plugins/{id}/config` and `PATCH /api/plugins/{id}`). See "Config schema validation and secret fields" below. |
 | `ui.bundle` | no | string | Root-relative path (must start with `/`, e.g. `/ui/bundle.js`) to the plugin's native UI ES module, served at `GET /api/plugins/{id}/bundle`. |
@@ -155,15 +174,20 @@ recognizes its shape.
 
 `capabilities.api_read` gates the read-only Host data accessors (ADR 0043,
 ADR 0047): each entry must be one of `tasks`, `sessions`, `messages`,
-`workspaces`, `workflows`, `agent_profiles`, `repositories`. Declaring a
+`workspaces`, `workflows`, `agent_profiles`, `executor_profiles`, `repositories`. Declaring a
 resource grants the matching `Host` accessor (`Tasks()`, `Sessions()`,
 `Messages()`, `Workspaces()`, `Workflows()`, `AgentProfiles()`,
-`Repositories()` — see [Authoring a plugin](plugins-authoring.md)); calling an
+`Repositories()`), or the optional `pluginsdk.ExecutorProfiles(host)` extension —
+see [Authoring a plugin](plugins-authoring.md). Calling an
 accessor for an undeclared resource returns gRPC `PermissionDenied`.
-`capabilities.api_write` gates the current Host data writes: `tasks` gates
-`Tasks().Create`/`Update`, and `messages` gates `Messages().Send`. A plugin may
-declare a read resource without its write capability, or vice versa. Calling a
-write without the matching declaration returns gRPC `PermissionDenied`.
+`capabilities.api_write` currently accepts `tasks` and `messages`. `tasks`
+enables `Host.Tasks().Create` and `.Update`; `messages` enables
+`Host.Messages().Send`. The host applies the same first-party task service and
+message-delivery path as its own UI/API, emits the normal events, stamps created
+rows/messages as `plugin:<id>`, and does not let a plugin supply that provenance.
+A plugin may declare a read resource without its write capability, or vice
+versa. Calling a write without the matching declaration returns gRPC
+`PermissionDenied`.
 
 `messages` reads historical **conversation content** (`Messages().List`):
 one user/agent message per row (`id`, `session_id`, `task_id`, `turn_id`,

@@ -255,12 +255,13 @@ recorded and are cleared after successful recovery.
   it declared in its manifest: `state` gates the state RPCs, `secrets` gates
   the plugin-owned secret RPCs, and each read-only data accessor (tasks,
   sessions, workspaces, workflows, agent profiles, repositories) is gated
-  individually via `api_read:<resource>` and `api_write:<resource>` for the
-  implemented task/message Host writes. An undeclared capability returns gRPC
-  `PermissionDenied` with a message naming the missing capability, checked by
-  a server interceptor before the handler runs. `GetConfig` and `EmitEvent`
-  are the only ungated RPCs — a plugin can always read its own config
-  (secrets included) and emit events.
+  individually via `api_read:<resource>`. Task create/update and message send
+  are independently gated by `api_write:tasks` and `api_write:messages` and
+  use Kandev's first-party service paths. An undeclared capability returns
+  gRPC `PermissionDenied` with a message naming the missing capability,
+  checked before the handler runs. `GetConfig` and `EmitEvent` are the only
+  ungated RPCs — a plugin can always read its own config (secrets included)
+  and emit events.
 - **Native UI plugins run in-origin with full app-store access.** This is an
   accepted tradeoff, not an oversight: a plugin bundle shares the kandev
   React instance and Zustand store so it can build UI indistinguishable from

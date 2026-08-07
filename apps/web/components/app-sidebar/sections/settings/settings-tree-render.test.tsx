@@ -1,6 +1,7 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { pluginRegistry } from "@/lib/plugins/registry";
 
 const MAIN_WORKSPACE_ID = "ws-1";
 const ARCHIVE_WORKSPACE_ID = "ws-10";
@@ -233,7 +234,10 @@ describe("SettingsTree integration status", () => {
     integrationAvailability.github = false;
   });
 
-  afterEach(() => cleanup());
+  afterEach(() => {
+    pluginRegistry.unregisterPlugin("plugin-bitbucket");
+    cleanup();
+  });
 
   it("labels configured integrations as enabled", () => {
     render(
@@ -243,6 +247,22 @@ describe("SettingsTree integration status", () => {
     expect(screen.getByRole("link", { name: "Azure DevOps Enabled" })).toBeTruthy();
     expect(screen.getByTestId("azure-devops-icon")).toBeTruthy();
     expect(screen.getByRole("link", { name: "GitHub" })).toBeTruthy();
+  });
+
+  it("renders plugin integration settings in the native workspace navigation", () => {
+    pluginRegistry.forPlugin("plugin-bitbucket").registerIntegrationSettings({
+      id: "bitbucket",
+      label: "Bitbucket",
+      description: "Bitbucket Cloud and Data Center.",
+      icon: "bitbucket",
+      Component: () => null,
+    });
+
+    render(<WorkspacesGroup pathname="/settings/workspace/ws-1/integrations/bitbucket" expanded />);
+
+    expect(screen.getByRole("link", { name: "Bitbucket" }).getAttribute("href")).toBe(
+      "/settings/workspace/ws-1/integrations/bitbucket",
+    );
   });
 });
 

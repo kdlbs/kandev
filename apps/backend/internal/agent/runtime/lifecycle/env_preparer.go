@@ -40,6 +40,7 @@ type RepoPrepareSpec struct {
 	WorktreeBranchTemplate string
 	WorktreeBranchTicket   string
 	PullBeforeWorktree     bool
+	RemoteSyncHandled      bool
 	RepoSetupScript        string
 	// BranchSlug, when set, suffixes the worktree path as
 	// {RepoName}-{BranchSlug} so two specs sharing a RepositoryID don't collide
@@ -77,6 +78,7 @@ type EnvPrepareRequest struct {
 	WorktreeBranchTemplate string
 	WorktreeBranchTicket   string
 	PullBeforeWorktree     bool
+	RemoteSyncHandled      bool
 
 	TaskDirName string // Per-task directory name within the workspace (e.g. "task-abc123")
 	RepoName    string // Repository slug used with TaskDirName to locate checkouts
@@ -121,6 +123,7 @@ func (r *EnvPrepareRequest) RepoSpecs() []RepoPrepareSpec {
 		WorktreeBranchTemplate: r.WorktreeBranchTemplate,
 		WorktreeBranchTicket:   r.WorktreeBranchTicket,
 		PullBeforeWorktree:     r.PullBeforeWorktree,
+		RemoteSyncHandled:      r.RemoteSyncHandled,
 		RepoSetupScript:        r.RepoSetupScript,
 		BranchSlug:             r.BranchSlug,
 		BranchIdentitySlug:     r.BranchIdentitySlug,

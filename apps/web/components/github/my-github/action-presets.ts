@@ -1,14 +1,5 @@
-import {
-  IconEye,
-  IconMessageDots,
-  IconTool,
-  IconCode,
-  IconSearch,
-  IconBug,
-  IconSparkles,
-  IconChecks,
-} from "@tabler/icons-react";
 import type { Icon } from "@tabler/icons-react";
+import { iconForIntegrationPreset } from "@/components/integrations/integration-preset-icons";
 import type {
   GitHubActionPreset,
   GitHubActionPresetIcon,
@@ -24,23 +15,26 @@ export const PRESET_ICON_CHOICES: {
   icon: Icon;
   labelKey: string;
 }[] = [
-  { key: "eye", icon: IconEye, labelKey: "github:presetIconEye" },
-  { key: "message", icon: IconMessageDots, labelKey: "github:presetIconMessage" },
-  { key: "tool", icon: IconTool, labelKey: "github:presetIconTool" },
-  { key: "code", icon: IconCode, labelKey: "github:presetIconCode" },
-  { key: "search", icon: IconSearch, labelKey: "github:presetIconSearch" },
-  { key: "bug", icon: IconBug, labelKey: "github:presetIconBug" },
-  { key: "sparkle", icon: IconSparkles, labelKey: "github:presetIconSparkle" },
-  { key: "check", icon: IconChecks, labelKey: "github:presetIconCheck" },
+  { key: "eye", icon: iconForIntegrationPreset("eye"), labelKey: "github:presetIconEye" },
+  {
+    key: "message",
+    icon: iconForIntegrationPreset("message"),
+    labelKey: "github:presetIconMessage",
+  },
+  { key: "tool", icon: iconForIntegrationPreset("tool"), labelKey: "github:presetIconTool" },
+  { key: "code", icon: iconForIntegrationPreset("code"), labelKey: "github:presetIconCode" },
+  { key: "search", icon: iconForIntegrationPreset("search"), labelKey: "github:presetIconSearch" },
+  { key: "bug", icon: iconForIntegrationPreset("bug"), labelKey: "github:presetIconBug" },
+  {
+    key: "sparkle",
+    icon: iconForIntegrationPreset("sparkle"),
+    labelKey: "github:presetIconSparkle",
+  },
+  { key: "check", icon: iconForIntegrationPreset("check"), labelKey: "github:presetIconCheck" },
 ];
 
-const ICON_BY_KEY: Record<string, Icon> = Object.fromEntries(
-  PRESET_ICON_CHOICES.map((choice) => [choice.key, choice.icon]),
-);
-
 export function iconForPresetKey(key: string | undefined): Icon {
-  if (!key) return IconSparkles;
-  return ICON_BY_KEY[key] ?? IconSparkles;
+  return iconForIntegrationPreset(key);
 }
 
 // Interpolate `{{url}}` and `{{title}}` placeholders in a prompt template.

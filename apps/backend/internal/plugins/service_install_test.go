@@ -259,6 +259,33 @@ func TestServiceInstall_AllowsPackageAtOrBelowRunningKandevVersion(t *testing.T)
 	}
 }
 
+func TestServiceInstall_NormalizesReleaseTagBeforeEnforcingMinKandevVersion(t *testing.T) {
+	svc, _, _ := newTestService(t)
+	svc.SetKandevVersion("v1.0.0")
+
+	_, err := svc.Install(context.Background(), minKandevVersionPackage(t, "kandev-plugin-slack", "1.0.0", "2.0.0"))
+	if err == nil {
+		t.Fatal("Install() expected a tagged running version below min_kandev_version to be rejected")
+	}
+}
+
+func TestServiceInstall_SkipsMinKandevVersionForNonReleaseBuildVersion(t *testing.T) {
+	for _, version := range []string{"dev", "v1.2.3-4-gabcdef"} {
+		t.Run(version, func(t *testing.T) {
+			svc, _, _ := newTestService(t)
+			svc.SetKandevVersion(version)
+
+			rec, err := svc.Install(context.Background(), minKandevVersionPackage(t, "kandev-plugin-slack", "1.0.0", "999.0.0"))
+			if err != nil {
+				t.Fatalf("Install() with non-release build version %q: %v", version, err)
+			}
+			if rec.Status != StatusActive {
+				t.Fatalf("Install() Status = %q, want %q", rec.Status, StatusActive)
+			}
+		})
+	}
+}
+
 // TestServiceInstall_NoEnforcementWithoutKandevVersionWired pins the
 // no-op default: a Service that never called SetKandevVersion (e.g. every
 // other test in this file, and any caller that hasn't wired it yet) must

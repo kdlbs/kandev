@@ -2,46 +2,157 @@ package backendapp
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/kandev/kandev/internal/common/config"
-	githubpkg "github.com/kandev/kandev/internal/github"
-	executorpkg "github.com/kandev/kandev/internal/orchestrator/executor"
+	"github.com/kandev/kandev/internal/gitcredentials"
+	"github.com/kandev/kandev/internal/repoclone"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/pkg/pluginsdk"
 )
 
-type fakeGitHubCredentialLeaseService struct {
-	request githubpkg.CredentialLeaseRequest
+type fakePluginCredentialService struct {
+	found  bool
+	remote pluginCredentialRemote
 }
 
-func (s *fakeGitHubCredentialLeaseService) IssueGitHubCredentialLease(
+func (s fakePluginCredentialService) Provider(string) (string, string, pluginCredentialRemote, bool) {
+	return "kandev-plugin-bitbucket", "1.2.3", s.remote, s.found
+}
+
+type recordingPluginCredentialRemote struct {
+	request        *pluginsdk.ResolveGitCredentialRequest
+	bindingRequest *pluginsdk.GitCredentialBindingRequest
+	calls          int
+	binding        string
+}
+
+func (r *recordingPluginCredentialRemote) GetGitCredentialBinding(
 	_ context.Context,
-	request githubpkg.CredentialLeaseRequest,
-) (*githubpkg.CredentialLease, error) {
-	s.request = request
-	return &githubpkg.CredentialLease{Token: "lease-token"}, nil
+	request *pluginsdk.GitCredentialBindingRequest,
+) (*pluginsdk.GitCredentialBindingResponse, error) {
+	r.bindingRequest = request
+	return &pluginsdk.GitCredentialBindingResponse{Binding: r.binding}, nil
 }
 
-func (*fakeGitHubCredentialLeaseService) DescribeTaskGitCredentialPolicy(
-	context.Context,
-	string,
-) (githubpkg.TaskGitCredentialPolicy, error) {
-	return githubpkg.TaskGitCredentialPolicy{Mode: githubpkg.TaskGitCredentialsModeManaged}, nil
+func (r *recordingPluginCredentialRemote) ResolveGitCredential(
+	_ context.Context,
+	request *pluginsdk.ResolveGitCredentialRequest,
+) (*pluginsdk.ResolveGitCredentialResponse, error) {
+	r.calls++
+	r.request = request
+	return &pluginsdk.ResolveGitCredentialResponse{
+		Username: "x-token-auth", Secret: "transient", ExpiresAt: time.Now().Add(time.Minute).UTC().Format(time.RFC3339),
+	}, nil
 }
 
-func TestGitHubExecutorCredentialLeaseAdapterMapsScope(t *testing.T) {
-	service := &fakeGitHubCredentialLeaseService{}
-	adapter := githubExecutorCredentialLeaseAdapter{service: service}
-	lease, err := adapter.IssueGitHubCredentialLease(context.Background(), executorpkg.GitHubCredentialLeaseRequest{
-		WorkspaceID: "workspace-1", TaskID: "task-1", SessionID: "session-1",
-		RepositoryID: "repository-1", Owner: "kdlbs", Repo: "kandev", Host: "github.com",
+func TestPluginGitCredentialResolverCallsLiveProviderWithExactScope(t *testing.T) {
+	remote := &recordingPluginCredentialRemote{binding: "connection:7"}
+	resolver := pluginGitCredentialResolver{service: fakePluginCredentialService{found: true, remote: remote}}
+	scope := gitcredentials.Scope{
+		ProviderID: "bitbucket", WorkspaceID: "workspace-1", TaskID: "task-1", SessionID: "session-1",
+		RepositoryID: "repository-1", Host: "bitbucket.example", Path: "/scm/ENG/widgets.git",
+	}
+	credential, err := resolver.Resolve(context.Background(), scope)
+	if err != nil {
+		t.Fatalf("Resolve() error = %v", err)
+	}
+	if credential.Username != "x-token-auth" || credential.Password != "transient" {
+		t.Fatalf("credential = %#v", credential)
+	}
+	if remote.calls != 1 || remote.request == nil || remote.request.Path != scope.Path || remote.request.Host != scope.Host ||
+		remote.request.SessionID != scope.SessionID || remote.request.ProviderID != scope.ProviderID {
+		t.Fatalf("live RPC request = %#v", remote.request)
+	}
+}
+
+func TestRepositoryCloneCredentialProviderResolvesPrivatePluginRepository(t *testing.T) {
+	remote := &recordingPluginCredentialRemote{}
+	provider := repositoryCloneCredentialProvider{
+		plugins: fakePluginCredentialService{found: true, remote: remote},
+	}
+	username, password, err := provider.ResolveGitCredential(t.Context(), repoclone.GitCredentialRequest{
+		WorkspaceID: "workspace-1", TaskID: "task-1", SessionID: "session-1", RepositoryID: "repository-1",
+		Provider:     "bitbucket",
+		ProviderHost: "https://bitbucket.example/context",
+		CloneURL:     "https://bitbucket.example/context/scm/ENG/widgets.git",
+		Owner:        "ENG", Name: "widgets",
 	})
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("ResolveGitCredential(): %v", err)
 	}
-	if lease.Token != "lease-token" || service.request.SessionID != "session-1" || service.request.RepositoryID != "repository-1" {
-		t.Fatalf("lease = %+v, request = %+v", lease, service.request)
+	if username != "x-token-auth" || password != "transient" {
+		t.Fatalf("clone credential = %q/%q", username, password)
+	}
+	if remote.request == nil || remote.request.WorkspaceID != "workspace-1" ||
+		remote.request.ProviderID != "bitbucket" || remote.request.Host != "bitbucket.example" ||
+		remote.request.Path != "/context/scm/ENG/widgets.git" || remote.request.TaskID != "task-1" ||
+		remote.request.SessionID != "session-1" || remote.request.RepositoryID != "repository-1" {
+		t.Fatalf("plugin clone credential request = %#v", remote.request)
+	}
+}
+
+func TestRepositoryCloneCredentialProviderRejectsMismatchedPluginOrigin(t *testing.T) {
+	remote := &recordingPluginCredentialRemote{}
+	provider := repositoryCloneCredentialProvider{
+		plugins: fakePluginCredentialService{found: true, remote: remote},
+	}
+	_, _, err := provider.ResolveGitCredential(t.Context(), repoclone.GitCredentialRequest{
+		WorkspaceID: "workspace-1", Provider: "bitbucket",
+		ProviderHost: "https://bitbucket.example",
+		CloneURL:     "https://attacker.example/ENG/widgets.git",
+	})
+	if err == nil {
+		t.Fatal("ResolveGitCredential() accepted a clone URL outside the provider origin")
+	}
+	if remote.calls != 0 {
+		t.Fatalf("plugin credential RPC calls = %d, want 0", remote.calls)
+	}
+}
+
+func TestPluginGitCredentialResolverUsesLiveCredentialBindingNotPluginVersion(t *testing.T) {
+	remote := &recordingPluginCredentialRemote{binding: "connection:7"}
+	resolver := pluginGitCredentialResolver{service: fakePluginCredentialService{found: true, remote: remote}}
+	scope := gitcredentials.Scope{ProviderID: "bitbucket", WorkspaceID: "workspace-1", TaskID: "task-1", SessionID: "session-1", RepositoryID: "repository-1", Host: "bitbucket.example", Path: "/scm/ENG/widgets.git"}
+
+	binding, err := resolver.Binding(context.Background(), scope)
+
+	if err != nil {
+		t.Fatalf("Binding() error = %v", err)
+	}
+	if binding != "connection:7" {
+		t.Fatalf("Binding() = %q, want live connection generation", binding)
+	}
+	if remote.bindingRequest == nil || remote.bindingRequest.Path != scope.Path || remote.bindingRequest.RepositoryID != scope.RepositoryID {
+		t.Fatalf("binding request = %#v, want exact host-verified scope", remote.bindingRequest)
+	}
+}
+
+type legacyPluginCredentialRemote struct{}
+
+func (legacyPluginCredentialRemote) ResolveGitCredential(context.Context, *pluginsdk.ResolveGitCredentialRequest) (*pluginsdk.ResolveGitCredentialResponse, error) {
+	return &pluginsdk.ResolveGitCredentialResponse{Username: "x-token-auth", Secret: "transient"}, nil
+}
+
+func TestPluginGitCredentialResolverFailsClosedWithoutCredentialBinding(t *testing.T) {
+	resolver := pluginGitCredentialResolver{service: fakePluginCredentialService{found: true, remote: legacyPluginCredentialRemote{}}}
+	_, err := resolver.Binding(context.Background(), gitcredentials.Scope{ProviderID: "bitbucket", WorkspaceID: "workspace-1", TaskID: "task-1", SessionID: "session-1", RepositoryID: "repository-1", Host: "bitbucket.example", Path: "/scm/ENG/widgets.git"})
+	if !errors.Is(err, gitcredentials.ErrUnsupported) {
+		t.Fatalf("Binding() error = %v, want ErrUnsupported", err)
+	}
+}
+
+func TestPluginGitCredentialResolverFailsClosedWhenProviderDisabled(t *testing.T) {
+	resolver := pluginGitCredentialResolver{service: fakePluginCredentialService{found: false}}
+	if resolver.Supports("bitbucket") {
+		t.Fatal("disabled provider unexpectedly supported")
+	}
+	if _, err := resolver.Resolve(context.Background(), gitcredentials.Scope{ProviderID: "bitbucket"}); err == nil ||
+		!strings.Contains(err.Error(), gitcredentials.ErrUnsupported.Error()) {
+		t.Fatalf("disabled provider error = %v", err)
 	}
 }
 

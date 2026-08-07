@@ -925,7 +925,7 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 			zap.Error(err))
 	}
 
-	allRepos, err := e.resolveAllRepoInfo(ctx, task.ID)
+	allRepos, err := e.resolveAllRepoInfoForSession(ctx, task.ID, sessionID)
 	if err != nil {
 		return nil, err
 	}
@@ -1324,7 +1324,7 @@ func (e *Executor) buildLaunchAgentRequest(ctx context.Context, task *v1.Task, s
 	if err != nil {
 		return nil, execConfig, err
 	}
-	if err := e.configureGitHubCredentialBrokerForRepositories(ctx, req, allRepos); err != nil {
+	if err := e.configureGitCredentialBrokerForRepositories(ctx, req, allRepos); err != nil {
 		return nil, execConfig, err
 	}
 	if err := e.applyGitCredentialSnapshot(ctx, req, session); err != nil {
@@ -1402,6 +1402,7 @@ func buildRepoSpecs(allRepos []*repoInfo) []RepoSpec {
 			WorktreeBranchPrefix:   info.WorktreeBranchPrefix,
 			WorktreeBranchTemplate: info.WorktreeBranchTemplate,
 			PullBeforeWorktree:     info.PullBeforeWorktree,
+			RemoteSyncHandled:      info.RemoteSyncHandled,
 		}
 		if info.Repository != nil {
 			spec.RepoName = info.Repository.Name
@@ -1468,6 +1469,7 @@ func (e *Executor) applyRepositoryConfig(req *LaunchAgentRequest, task *v1.Task,
 		req.WorktreeBranchPrefix = repoInfo.WorktreeBranchPrefix
 		req.WorktreeBranchTemplate = repoInfo.WorktreeBranchTemplate
 		req.PullBeforeWorktree = repoInfo.PullBeforeWorktree
+		req.RemoteSyncHandled = repoInfo.RemoteSyncHandled
 		if repoInfo.Repository != nil {
 			req.DefaultBranch = repoInfo.Repository.DefaultBranch
 			if req.UseWorktree {

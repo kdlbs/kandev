@@ -124,6 +124,22 @@ vi.mock("@/components/azure-devops/azure-devops-task-pull-request-chip", () => (
   AzureDevOpsTaskPullRequestChip: () => null,
 }));
 
+vi.mock("@/components/integrations/registered-change-request-status", () => ({
+  RegisteredChangeRequestStatus: ({
+    taskId,
+    sessionId,
+    surface,
+  }: {
+    taskId: string;
+    sessionId: string;
+    surface: string;
+  }) => (
+    <span data-testid={`registered-change-request-${surface}`}>
+      {taskId}:{sessionId}
+    </span>
+  ),
+}));
+
 vi.mock("./chat/pr-archive-banners", () => ({
   PRMergedBanner: () => null,
 }));
@@ -292,6 +308,14 @@ describe("PassthroughToolbar – default state", () => {
 
     const toggle = screen.getByTestId(TID_TOGGLE_COMMENTS) as HTMLButtonElement;
     expect(toggle.disabled).toBe(true);
+  });
+
+  it("mounts plugin change-request status in composer chrome", () => {
+    renderToolbar();
+
+    expect(screen.getByTestId("registered-change-request-composer").textContent).toBe(
+      `${TASK_ID}:${SESSION_ID}`,
+    );
   });
 });
 

@@ -102,7 +102,7 @@ export const defaultUIState: UISliceState = {
   mobileKanban: { activeStepIdByWorkflowId: {}, isMenuOpen: false, isSearchOpen: false },
   mobileSession: {
     activePanelBySessionId: {},
-    reviewMRKeyBySessionId: {},
+    reviewItemIdBySessionId: {},
     isTaskSwitcherOpen: false,
   },
   chatInput: { planModeBySessionId: {}, cancellingBySessionId: {} },
@@ -213,14 +213,14 @@ function buildMobileActions(set: ImmerSet) {
       set((draft) => {
         draft.mobileSession.activePanelBySessionId[sessionId] = panel;
       }),
-    setMobileSessionReview: (sessionId: string, mrKey: string | null) =>
+    setMobileSessionReview: (sessionId: string, reviewItemId: string | null) =>
       set((draft) => {
-        if (mrKey) {
-          draft.mobileSession.reviewMRKeyBySessionId[sessionId] = mrKey;
+        if (reviewItemId) {
+          draft.mobileSession.reviewItemIdBySessionId[sessionId] = reviewItemId;
           draft.mobileSession.activePanelBySessionId[sessionId] = "review";
           return;
         }
-        delete draft.mobileSession.reviewMRKeyBySessionId[sessionId];
+        delete draft.mobileSession.reviewItemIdBySessionId[sessionId];
         if (draft.mobileSession.activePanelBySessionId[sessionId] === "review") {
           draft.mobileSession.activePanelBySessionId[sessionId] = "chat";
         }

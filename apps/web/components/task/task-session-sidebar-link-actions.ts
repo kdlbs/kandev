@@ -1,8 +1,15 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { createContext, createElement, useCallback, useContext, useMemo, useState } from "react";
+import type { ReactNode } from "react";
 import type { KanbanState } from "@/lib/state/slices";
 import { findTaskInSnapshots } from "@/lib/kanban/find-task";
+import { usePluginRegistry } from "@/lib/plugins/registry";
+import type { PluginTaskActionContext } from "@/lib/plugins/types";
+import type { PluginTaskActionRegistration } from "@/lib/plugins/registry";
+import { useAppStore } from "@/components/state-provider";
+import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
+import { usePathname } from "@/lib/routing/client-router";
 import type { ExternalLinkProvider } from "./task-external-link-dialog";
 
 type StoreApi = {
@@ -25,6 +32,119 @@ export type SidebarExternalLinkTarget = {
   provider: ExternalLinkProvider;
   task: SidebarLinkTarget;
 };
+
+export type PluginLinkMenuAction = {
+  id: string;
+  label: string;
+  icon?: string;
+  onSelect: () => void;
+};
+
+const PluginTaskLinkActionSurfaceContext = createContext<(() => void) | undefined>(undefined);
+
+/** Lets a mobile drawer dismiss before a plugin opens its own host-native surface. */
+export function PluginTaskLinkActionSurfaceProvider({
+  beforePluginRun,
+  children,
+}: {
+  beforePluginRun?: () => void;
+  children: ReactNode;
+}) {
+  return createElement(
+    PluginTaskLinkActionSurfaceContext.Provider,
+    { value: beforePluginRun },
+    children,
+  );
+}
+
+export function runPluginTaskLinkAction(
+  beforePluginRun: (() => void) | undefined,
+  run: () => Promise<void>,
+): void {
+  beforePluginRun?.();
+  void run().catch(() => {
+    // Plugin action owns visible failure UI; keep host menu lifecycle safe.
+  });
+}
+
+function readonlyClone(value: unknown, seen = new WeakMap<object, unknown>()): unknown {
+  if (!value || typeof value !== "object") return value;
+  const cached = seen.get(value);
+  if (cached) return cached;
+  const clone: unknown[] | Record<string, unknown> = Array.isArray(value) ? [] : {};
+  seen.set(value, clone);
+  for (const [key, child] of Object.entries(value)) {
+    if (Array.isArray(clone)) clone[Number(key)] = readonlyClone(child, seen);
+    else clone[key] = readonlyClone(child, seen);
+  }
+  return Object.freeze(clone);
+}
+
+export function immutablePluginTaskActionContext(
+  context: PluginTaskActionContext,
+): PluginTaskActionContext {
+  return Object.freeze({
+    ...context,
+    repositories: readonlyClone(context.repositories) as readonly unknown[],
+  });
+}
+
+export function pluginTaskActionIsVisible(
+  action: PluginTaskActionRegistration,
+  context: PluginTaskActionContext,
+): boolean {
+  try {
+    return action.visible?.(context) !== false;
+  } catch {
+    console.warn(`[plugins] task action "${action.pluginId}:${action.id}" visibility failed`);
+    return false;
+  }
+}
+
+/**
+ * Registry actions receive only immutable, current task data. Menu callers
+ * invoke this after closing their Radix surface, so plugins never run under an
+ * open context menu or mobile bottom sheet.
+ */
+export function usePluginTaskLinkActions(
+  context: PluginTaskActionContext | null,
+): PluginLinkMenuAction[] {
+  const registry = usePluginRegistry();
+  const beforePluginRun = useContext(PluginTaskLinkActionSurfaceContext);
+  return useMemo(() => {
+    if (!context) return [];
+    const actionContext = immutablePluginTaskActionContext(context);
+    return registry
+      .getTaskActions("link")
+      .filter((action) => pluginTaskActionIsVisible(action, actionContext))
+      .map((action) => ({
+        id: `${action.pluginId}:${action.id}`,
+        label: action.label,
+        icon: action.icon,
+        onSelect: () => {
+          runPluginTaskLinkAction(beforePluginRun, () => action.run(actionContext));
+        },
+      }));
+  }, [beforePluginRun, context, registry]);
+}
+
+/** Builds the immutable action context shared by task-card and task-row menus. */
+export function useTaskPluginLinkActions(taskId: string, repositories: readonly unknown[] = []) {
+  const workspaceId = useAppStore((state) => state.workspaces.activeId);
+  const pathname = usePathname() ?? "";
+  const { isMobile } = useResponsiveBreakpoint();
+  return usePluginTaskLinkActions(
+    workspaceId
+      ? {
+          workspaceId,
+          taskId,
+          repositories,
+          pathname,
+          presentation: isMobile ? "mobile" : "desktop",
+        }
+      : null,
+  );
+}
 
 export function useSidebarLinkActions(store: StoreApi) {
   const [linkingPullRequestTask, setLinkingPullRequestTask] = useState<SidebarLinkTarget | null>(

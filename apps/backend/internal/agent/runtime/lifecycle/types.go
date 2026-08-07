@@ -585,6 +585,7 @@ type RepoLaunchSpec struct {
 	WorktreeBranchTemplate string
 	WorktreeBranchTicket   string
 	PullBeforeWorktree     bool
+	RemoteSyncHandled      bool
 	RepoSetupScript        string // Repository-level setup script (optional)
 	RepoCleanupScript      string // Repository-level cleanup script (optional)
 	CopyFiles              string // Comma-separated paths/globs to copy from the source repo (gitignored .env / config files)
@@ -618,6 +619,7 @@ type WorkspaceRepositorySpec struct {
 	WorktreeBranchPrefix   string
 	WorktreeBranchTemplate string
 	PullBeforeWorktree     bool
+	RemoteSyncHandled      bool
 	BranchSlug             string
 	BranchIdentitySlug     string
 }
@@ -714,6 +716,7 @@ type LaunchRequest struct {
 	WorktreeBranchTemplate string // Branch name template for worktree branches
 	WorktreeBranchTicket   string // External ticket value for branch templates
 	PullBeforeWorktree     bool   // Whether to pull from remote before creating the worktree
+	RemoteSyncHandled      bool   // Authenticated provider refresh already completed
 
 	// Task directory mode: place worktree at ~/.kandev/tasks/{TaskDirName}/{RepoName}/
 	TaskDirName string // Semantic task directory name (e.g. "fix-bug_ab12")
@@ -760,6 +763,7 @@ func (r *LaunchRequest) RepoSpecs() []RepoLaunchSpec {
 		WorktreeBranchTemplate: r.WorktreeBranchTemplate,
 		WorktreeBranchTicket:   r.WorktreeBranchTicket,
 		PullBeforeWorktree:     r.PullBeforeWorktree,
+		RemoteSyncHandled:      r.RemoteSyncHandled,
 		CopyFiles:              r.CopyFiles,
 		BranchSlug:             r.BranchSlug,
 		BranchIdentitySlug:     r.BranchIdentitySlug,

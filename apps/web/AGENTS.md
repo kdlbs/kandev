@@ -107,6 +107,31 @@ surface.
   phased out.
 - Components: <200 lines, extract to domain components, composition over props.
 - Hooks: domain-organized in `hooks/domains/`, encapsulate subscription + selection.
+- **Code-host dashboards:** GitHub, GitLab, and plugin code-host pages must use
+  the provider-neutral primitives in `components/integrations/` for
+  change-request lists, rows, toolbars, scope controls, task preset menus, and
+  linked-task indicators. Use the shared semantic `IntegrationIcon` glyphs instead of
+  copying first-party SVG paths. Keep provider API/state logic in adapters; do not fork row
+  anatomy or add dashboard review/launch flows outside the native task dialog
+  and registered task review surface. A plugin may override create-mode transport only
+  to route the unchanged native task payload through an authenticated plugin action;
+  that server action, not the browser, resolves the trusted repository descriptor.
+- **Code-host task status:** registered review providers publish normalized
+  `ReviewItemSummary.taskStatus`. Host task chrome automatically renders the shared
+  topbar button, composer CI chip, desktop popover/mobile drawer, and 90-second
+  deduplicated refresh. Do not add provider visual slots or provider-owned status
+  pollers for these locations; adapt GitHub and plugins through the shared
+  `components/integrations/change-request-*` anatomy.
+- **Code-host review detail:** GitHub and compatible review providers render
+  `components/integrations/change-request-detail.tsx` (also exposed as
+  `host.ui.ChangeRequestDetail`). Providers own normalized data/capabilities/actions,
+  not parallel headers, review/check/comment sections, scroll containers, or mobile
+  geometry.
+- **Code-host task links:** keep one-field pull/merge-request linking in
+  `components/integrations/task-change-request-link-form.tsx`. First-party providers
+  compose it directly; plugins call `host.openTaskLinkDialog`. Link submenu children
+  name the target only (for example, `Bitbucket Pull Request`) and preserve their
+  registered provider icon.
 - **Interactivity:** all buttons and links with actions must have `cursor-pointer` class.
 - **Self-documenting settings:** every setting must explain in visible, plain-language copy what
   changes, when the setting applies, and when the user should choose each non-obvious option. State
@@ -188,63 +213,31 @@ surface.
 
 ## Internationalization (i18n)
 
-**The migration is in progress, one directory per PR.** The runtime, the gates,
-and Settings → General → Appearance are done; most of the app still holds English
-literals. New user-facing copy must go through `t()` / `<Trans>` wherever you
-write it, even in a directory that has not been migrated yet.
+The migration is incremental, but new user-facing copy always uses `t()` or
+`<Trans>`, even in directories not fully migrated.
 
-User-facing strings are localized with i18next + react-i18next, keyed as
-`namespace:key`. Add the English text to `src/locales/en/<namespace>.json`, then
-reference it with `t("settings:deleteExecutor")` (`useTranslation()` in
-components, the module-level `t` from `@/lib/i18n` in plain helpers). Use
-`<Trans i18nKey=... values={...}>` only for copy containing markup — and never a
-`t()` call inside its children, which shifts the message's tag indices.
+Add English keys to `src/locales/en/<namespace>.json`; use `useTranslation()` in
+components and module-level `t` only inside plain helper calls. `<Trans>` is only
+for markup, and a `t()` child corrupts its tag indices.
 
-Never translate user/domain data, code identifiers, `data-testid`, or a literal
-that is also compared with `===`, used as a map key, or typed as a string-literal
-union. When a prop is both display copy and logic (`label: "Reviewers" |
-"Assignees"`), split it into a `kind`/`origin` discriminant plus a translated
-label rather than translating in place.
+Do not translate domain data, identifiers, test IDs, discriminants, comparison
+tokens, or map keys; split display copy from logic before translating it.
 
-`lib/i18n/provider.tsx` initializes i18next at module load. Do not remove that
-call: react-i18next suspends on an uninitialized instance and there is no
-Suspense boundary above the root, so the app renders a blank page with no error
-of any kind. Unit tests cannot catch it — `vitest.setup.ts` pre-initializes.
+Keep `lib/i18n/provider.tsx` module initialization; removing it blanks the app.
 
-Never write a plural ending yourself: use `t(key, { count })` with `_one`/`_other`
-keys. Passing the morpheme as a value (`{ s: n === 1 ? "" : "s" }`) is
-untranslatable — the plural rule ends up at the call site.
+Use i18next `_one`/`_other` plural keys; never build English suffixes locally.
 
-Never assign `t()` to a module-level constant. It resolves at import, before a
-locale is active, and never updates on a switch — and the pseudo-locale cannot
-see it, because the text _is_ translated, just frozen. Store the key and resolve
-at render, or make the value a component. `check-module-scope-t.mjs` enforces it.
+Never capture `t()` in a module-level constant; it freezes the boot locale.
 
-`pnpm lint` fails on hardcoded UI strings (`i18next/no-literal-string` is an
-**error**), but **only on the `i18nGuardFiles` allowlist** in
-`eslint.i18n.options.mjs` — paths already migrated. That scoping is deliberate:
-a repo-wide error breaks every unrelated PR that adds a label, which is what made
-the first attempt at this migration unmergeable. **When you migrate a directory,
-append it to `i18nGuardFiles` in the same PR** — that is the step that stops it
-drifting back. Never delete an entry to make a build pass. Use
-`pnpm run lint:i18n <path>` to preview the guard on a path that is not on the
-list yet.
+`pnpm lint` guards paths in `i18nGuardFiles`; append coverage when migrating a
+directory and never remove entries to pass CI. Preview with `pnpm run lint:i18n`.
 
-Separately, `pnpm run i18n:ratchet` (pre-commit + CI) guards **new code
-everywhere**, regardless of the allowlist: a file you added must be clean outright,
-and a file you modified is judged on the lines you touched. Untouched literals are
-never reported, so it cannot ask you to migrate code you did not write — the same
-contract as `golangci-lint --new-from-rev` for Go.
+`pnpm run i18n:ratchet` guards all new/changed lines independently of that
+allowlist; untouched literals are not reported.
 
-The rule **only sees literals in JSX** — `confirm()` arguments and copy in plain
-`.ts` helpers are invisible to it — and it **skips anything assigned to a
-SCREAMING_CASE identifier**, so `const ROWS = [{ label: "Disk usage" }]` passes
-silently. A clean lint is not proof a file is done. `pnpm run i18n:check` gates key/catalog
-drift, `<Trans>` tag indices, inline plurals and module-scope `t()`, and the
-**pseudo-locale** (Settings → General → Appearance, dev/e2e) is the completeness
-check — any plain-English text under it was never externalized. The tooling needs
-**Node 24**. Full guide:
-[`docs/i18n.md`](../../docs/i18n.md); spec:
+`pnpm run i18n:check` validates catalogs, pseudo locale, `<Trans>` indices,
+plurals, and module-scope translations. Tooling requires Node 24. Full guide:
+[`docs/i18n.md`](../../docs/i18n.md); behavior spec:
 [`docs/specs/platform/i18n.md`](../../docs/specs/platform/i18n.md).
 
 ## Markdown safety

@@ -18,6 +18,7 @@ import (
 	"github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/integrations/cloneauth"
+	"github.com/kandev/kandev/internal/repoclone"
 	"github.com/kandev/kandev/internal/secrets"
 	"github.com/kandev/kandev/internal/task/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
@@ -388,6 +389,7 @@ type LaunchAgentRequest struct {
 	WorktreeBranchTemplate string // Branch name template for worktree branches
 	WorktreeBranchTicket   string // External ticket value for branch templates
 	PullBeforeWorktree     bool   // Whether to pull from remote before creating the worktree
+	RemoteSyncHandled      bool   // Provider-authenticated origin refresh already completed
 
 	// Task directory mode: place worktree at ~/.kandev/tasks/{TaskDirName}/{RepoName}/
 	TaskDirName string // Semantic task directory name (e.g. "fix-bug_ab12")
@@ -432,6 +434,7 @@ type RepoSpec struct {
 	WorktreeBranchTemplate string
 	WorktreeBranchTicket   string
 	PullBeforeWorktree     bool
+	RemoteSyncHandled      bool
 	RepoSetupScript        string
 	RepoCleanupScript      string
 	CopyFiles              string
@@ -681,8 +684,8 @@ type Executor struct {
 	gitlabCredentials GitLabCredentialResolver
 	logger            *logger.Logger
 
-	githubCredentialIssuer         GitHubCredentialLeaseIssuer
-	githubCredentialBrokerURL      string
+	gitCredentialIssuer            GitCredentialLeaseIssuer
+	gitCredentialBrokerURL         string
 	githubCredentialPolicyResolver TaskGitCredentialPolicyResolver
 	agentctlBinaryPath             string
 
@@ -780,10 +783,14 @@ func (e *Executor) officeSessionLock(taskID string) *sync.Mutex {
 
 // RepoCloner clones remote repositories to local disk.
 type RepoCloner interface {
-	EnsureWorkspaceClonedForProvider(
-		ctx context.Context, workspaceID, cloneURL, provider, providerHost,
-		owner, name, credentialHost, token string,
+	EnsureWorkspaceClonedWithCredentialRequest(
+		ctx context.Context, request repoclone.GitCredentialRequest,
+		credentialHost, token string,
 	) (string, error)
+	RefreshWorkspaceRepositoryWithCredentialRequest(
+		ctx context.Context, request repoclone.GitCredentialRequest,
+		repositoryPath, credentialHost, token string,
+	) error
 	ShouldRecloneForWorkspace(workspaceID, path string) bool
 	// SetOriginURL updates a Kandev-managed checkout remote without exposing credentials.
 	SetOriginURL(ctx context.Context, repositoryPath, originURL string) error
@@ -798,17 +805,24 @@ type authenticatedRepoCloner interface {
 	) (string, error)
 }
 
+const providerAzureDevOps = "azure_devops"
+
 func (e *Executor) ensureClonedWithWorkspaceAuth(
 	ctx context.Context, repo *models.Repository, cloneURL string,
+) (string, error) {
+	return e.ensureClonedWithWorkspaceAuthForSession(ctx, "", "", repo, cloneURL)
+}
+
+func (e *Executor) ensureClonedWithWorkspaceAuthForSession(
+	ctx context.Context, taskID, sessionID string, repo *models.Repository, cloneURL string,
 ) (string, error) {
 	credentialHost, token := "", ""
 	if strings.EqualFold(repo.Provider, "gitlab") && e.gitlabCredentials != nil {
 		credentialHost, token, _ = e.gitlabCredentials.ResolveGitLabExecutionCredentials(ctx, repo.WorkspaceID)
 	}
-	if repo.Provider != "azure_devops" || !strings.HasPrefix(cloneURL, "https://") {
-		return e.repoCloner.EnsureWorkspaceClonedForProvider(
-			ctx, repo.WorkspaceID, cloneURL, repo.Provider, repo.ProviderHost,
-			repo.ProviderOwner, repo.ProviderName, credentialHost, token,
+	if repo.Provider != providerAzureDevOps || !strings.HasPrefix(cloneURL, "https://") {
+		return e.repoCloner.EnsureWorkspaceClonedWithCredentialRequest(
+			ctx, repositoryGitCredentialRequest(taskID, sessionID, repo, cloneURL), credentialHost, token,
 		)
 	}
 	authCloner, ok := e.repoCloner.(authenticatedRepoCloner)
@@ -824,6 +838,16 @@ func (e *Executor) ensureClonedWithWorkspaceAuth(
 		ctx, repo.WorkspaceID, repo.Provider, repo.ProviderHost,
 		cloneURL, repo.ProviderOwner, repo.ProviderName, "kandev", pat,
 	)
+}
+
+func repositoryGitCredentialRequest(
+	taskID, sessionID string, repo *models.Repository, cloneURL string,
+) repoclone.GitCredentialRequest {
+	return repoclone.GitCredentialRequest{
+		WorkspaceID: repo.WorkspaceID, TaskID: taskID, SessionID: sessionID,
+		RepositoryID: repo.ID, Provider: repo.Provider, ProviderHost: repo.ProviderHost,
+		CloneURL: cloneURL, Owner: repo.ProviderOwner, Name: repo.ProviderName,
+	}
 }
 
 // RepoUpdater updates repository records in the database.

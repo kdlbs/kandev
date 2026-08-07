@@ -177,6 +177,45 @@ func TestRegistryRejectsProviderWithoutAuthorizer(t *testing.T) {
 	}
 }
 
+func TestRegistryReplaceOwnerSwapsDynamicSourcesAndRevokesAuthorization(t *testing.T) {
+	type ownerReplacingRegistry interface {
+		ReplaceOwner(string, ...MentionProvider) error
+		UnregisterOwner(string) error
+	}
+
+	registry := NewRegistry()
+	owners, ok := any(registry).(ownerReplacingRegistry)
+	if !ok {
+		t.Fatal("registry does not support owner-aware source replacement")
+	}
+	provider := fakeProvider{
+		descriptor: ProviderDescriptor{
+			Source: "plugin:acme:pull-requests", Provider: "plugin:acme:bitbucket", Kind: "pull_request", Order: 90,
+		},
+		search: func(context.Context, SearchRequest) ([]Candidate, error) { return nil, nil },
+	}
+	if err := owners.ReplaceOwner("kandev-plugin-acme", provider); err != nil {
+		t.Fatalf("register owned source: %v", err)
+	}
+	if got := registry.snapshot(); len(got) != 1 || got[0].descriptor.Source != provider.descriptor.Source {
+		t.Fatalf("snapshot = %#v, want owned source", got)
+	}
+	if err := owners.UnregisterOwner("kandev-plugin-acme"); err != nil {
+		t.Fatalf("unregister owned source: %v", err)
+	}
+	if got := registry.snapshot(); len(got) != 0 {
+		t.Fatalf("snapshot after owner removal = %#v, want empty", got)
+	}
+	err := registry.AuthorizeReference(context.Background(), ReferenceAuthorizationRequest{
+		WorkspaceID: "workspace-1",
+		Purpose:     ReferencePurposeSubmission,
+		Reference:   apiv1.EntityReference{Provider: provider.descriptor.Provider, Kind: provider.descriptor.Kind},
+	})
+	if !errors.Is(err, ErrReferenceProviderUnavailable) {
+		t.Fatalf("authorization after owner removal = %v, want unavailable", err)
+	}
+}
+
 func TestServiceSearchDropsCandidateRejectedByProviderAuthorizer(t *testing.T) {
 	registry := NewRegistry()
 	if err := registry.Register(fakeProvider{

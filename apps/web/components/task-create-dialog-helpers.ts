@@ -246,6 +246,19 @@ export function findDuplicateRemoteRepo(remoteRepos: TaskRemoteRepoRow[]): strin
   return null;
 }
 
+/** Returns the first plugin-owned URL whose authorized descriptor is not ready yet. */
+export function findUnresolvedProviderRemote(
+  remoteRepos: TaskRemoteRepoRow[],
+  matchesProviderURL: (url: string) => boolean,
+): TaskRemoteRepoRow | null {
+  for (const row of remoteRepos) {
+    const url = row.url.trim();
+    if (!url || row.provider) continue;
+    if (matchesProviderURL(url)) return row;
+  }
+  return null;
+}
+
 /**
  * Builds the repositories payload for task creation from the unified list.
  *
@@ -419,14 +432,21 @@ function remoteRepositoryLocator(
   url: string,
 ): Pick<
   CreateTaskRepositoryPayload,
-  "github_url" | "remote_url" | "provider" | "provider_repo_id" | "provider_owner" | "provider_name"
+  | "github_url"
+  | "remote_url"
+  | "provider"
+  | "provider_host"
+  | "provider_repo_id"
+  | "provider_owner"
+  | "provider_name"
 > {
   if (!row.provider || row.provider === "github") {
     return { github_url: url };
   }
   return {
-    remote_url: url,
+    remote_url: row.remoteUrl?.trim() || url,
     provider: row.provider,
+    provider_host: row.providerHost,
     provider_repo_id: row.providerRepoId,
     provider_owner: row.providerOwner,
     provider_name: row.providerName,

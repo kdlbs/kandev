@@ -20,13 +20,26 @@ import {
   buildRepositoriesPayload,
   computeIsTaskStarted,
   findDuplicateRemoteRepo,
+  findUnresolvedProviderRemote,
   validateCreateInputs,
   hasPendingAttachmentUploads,
   toMessageAttachments,
 } from "@/components/task-create-dialog-helpers";
+import { pluginRegistry } from "@/lib/plugins/registry";
 
 const GENERIC_ERROR_MESSAGE = "An error occurred";
 const DUPLICATE_REPO_TITLE = "Duplicate repository";
+const UNRESOLVED_REPO_TITLE = "Repository is still being verified";
+
+function matchesRegisteredProviderURL(url: string): boolean {
+  return pluginRegistry.getRepositoryProviders().some((provider) => {
+    try {
+      return provider.matchesURL(url);
+    } catch {
+      return false;
+    }
+  });
+}
 
 function notifyQueuedTask(
   response: { queued_for_step_id?: string | null },
@@ -57,6 +70,11 @@ function hasNoAgentTaskRequirements(input: {
   );
 }
 
+function resolveWorkspacePath(noRepository: boolean, workspacePath: string): string | undefined {
+  if (!noRepository) return undefined;
+  return workspacePath.trim() || undefined;
+}
+
 // eslint-disable-next-line max-lines-per-function
 export function useTaskSubmitHandlers({
   isSessionMode,
@@ -81,6 +99,7 @@ export function useTaskSubmitHandlers({
   onSuccess,
   onCreateSession,
   onOpenChange,
+  createTask,
   preserveTaskCreateLastUsedOnClose,
   taskId,
   parentTaskId,
@@ -118,6 +137,7 @@ export function useTaskSubmitHandlers({
       workspaceId,
       repositoryLocalPath,
       toast,
+      createTask,
     });
 
   const buildFreshBranchPayload = (consentedDirtyFiles: string[]) =>
@@ -163,6 +183,26 @@ export function useTaskSubmitHandlers({
     });
     return true;
   }, [useRemote, remoteRepos, toast]);
+
+  const checkRemoteResolution = useCallback((): boolean => {
+    if (!useRemote) return false;
+    const unresolved = findUnresolvedProviderRemote(remoteRepos, matchesRegisteredProviderURL);
+    if (!unresolved) return false;
+    const resolutionError = prInfoByUrl.error(unresolved.url);
+    toast({
+      title: UNRESOLVED_REPO_TITLE,
+      description: resolutionError
+        ? "Kandev could not verify this provider URL. Use Retry on the repository row."
+        : "Wait for provider inspection to finish before creating the task.",
+      variant: "error",
+    });
+    return true;
+  }, [prInfoByUrl, remoteRepos, toast, useRemote]);
+
+  const hasRemoteSubmitBlocker = useCallback(
+    () => checkRemoteResolution() || checkRemoteDuplicates(),
+    [checkRemoteDuplicates, checkRemoteResolution],
+  );
 
   const resetForm = useCallback(() => {
     setHasTitle(false);
@@ -294,6 +334,7 @@ export function useTaskSubmitHandlers({
   }, [editingTask, taskName, descriptionInputRef, getRepositoriesPayload, isStartedEdit]);
 
   const handleEditSubmit = useCallback(async () => {
+    if (checkRemoteResolution()) return;
     setIsCreatingTask(true);
     try {
       const result = await performTaskUpdate();
@@ -328,6 +369,7 @@ export function useTaskSubmitHandlers({
     }
   }, [
     performTaskUpdate,
+    checkRemoteResolution,
     agentProfileId,
     executorId,
     executorProfileId,
@@ -338,6 +380,7 @@ export function useTaskSubmitHandlers({
   ]);
 
   const handleUpdateWithoutAgent = useCallback(async () => {
+    if (checkRemoteResolution()) return;
     setIsCreatingTask(true);
     try {
       const result = await performTaskUpdate();
@@ -353,7 +396,7 @@ export function useTaskSubmitHandlers({
       onOpenChange(false);
       setIsCreatingTask(false);
     }
-  }, [performTaskUpdate, onSuccess, onOpenChange, toast, setIsCreatingTask]);
+  }, [checkRemoteResolution, performTaskUpdate, onSuccess, onOpenChange, toast, setIsCreatingTask]);
 
   const performCreate = useCallback(
     async (opts: {
@@ -385,7 +428,7 @@ export function useTaskSubmitHandlers({
           // payload omits the key entirely — matches the noRepository=false
           // case and keeps "no path provided" semantically distinct from
           // "empty path string" on the wire.
-          workspacePath: noRepository ? workspacePath.trim() || undefined : undefined,
+          workspacePath: resolveWorkspacePath(noRepository, workspacePath),
         });
         submittedPayload = payload;
         return payload;
@@ -511,7 +554,7 @@ export function useTaskSubmitHandlers({
     if (hasPendingAttachmentUploads(selectedAttachments)) return;
     const attachments = toMessageAttachments(selectedAttachments);
     if (!validateForCreate(trimmedTitle, trimmedDescription)) return;
-    if (checkRemoteDuplicates()) return;
+    if (hasRemoteSubmitBlocker()) return;
     const consent = await ensureFreshBranchConsent();
     if (consent === null) return;
     setIsCreatingTask(true);
@@ -538,7 +581,7 @@ export function useTaskSubmitHandlers({
     performEditWithPlanMode,
     taskName,
     validateForCreate,
-    checkRemoteDuplicates,
+    hasRemoteSubmitBlocker,
     ensureFreshBranchConsent,
     performCreate,
     toast,
@@ -586,7 +629,7 @@ export function useTaskSubmitHandlers({
     if (hasPendingAttachmentUploads(selectedAttachments)) return;
     const attachments = toMessageAttachments(selectedAttachments);
     if (!validateForCreate(trimmedTitle, trimmedDescription)) return;
-    if (checkRemoteDuplicates()) return;
+    if (hasRemoteSubmitBlocker()) return;
     const consent = await ensureFreshBranchConsent();
     if (consent === null) return;
     setIsCreatingTask(true);
@@ -604,7 +647,7 @@ export function useTaskSubmitHandlers({
   }, [
     taskName,
     validateForCreate,
-    checkRemoteDuplicates,
+    hasRemoteSubmitBlocker,
     ensureFreshBranchConsent,
     submitCreateTask,
     toast,
@@ -626,7 +669,7 @@ export function useTaskSubmitHandlers({
       workflowId: effectiveWorkflowId,
     };
     if (!hasNoAgentTaskRequirements(requirements)) return;
-    if (checkRemoteDuplicates()) return;
+    if (hasRemoteSubmitBlocker()) return;
 
     const consent = await ensureFreshBranchConsent();
     if (consent === null) return;
@@ -646,7 +689,7 @@ export function useTaskSubmitHandlers({
           executorProfileId,
           withAgent: false,
           attachments,
-          workspacePath: noRepository ? workspacePath.trim() || undefined : undefined,
+          workspacePath: resolveWorkspacePath(noRepository, workspacePath),
         });
         p.workflow_step_id = requirements.workflowStepId;
         submittedPayload = p;
@@ -681,7 +724,7 @@ export function useTaskSubmitHandlers({
     noRepository,
     workspacePath,
     validateForCreate,
-    checkRemoteDuplicates,
+    hasRemoteSubmitBlocker,
     getRepositoriesPayload,
     ensureFreshBranchConsent,
     createTaskWithFreshBranchRetry,

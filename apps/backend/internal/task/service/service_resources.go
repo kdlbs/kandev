@@ -883,7 +883,16 @@ func (s *Service) GetRepository(ctx context.Context, id string) (*models.Reposit
 // GetRepositoryByProviderInfo looks up a repository by workspace and provider identity.
 // Returns nil (with nil error) when no matching repository exists.
 func (s *Service) GetRepositoryByProviderInfo(ctx context.Context, workspaceID, provider, host, owner, name string) (*models.Repository, error) {
-	return s.repoEntities.GetRepositoryByProviderInfo(ctx, workspaceID, provider, normalizeProviderHost(provider, host), owner, name)
+	workspaceID = strings.TrimSpace(workspaceID)
+	provider = strings.TrimSpace(provider)
+	return s.repoEntities.GetRepositoryByProviderInfo(
+		ctx,
+		workspaceID,
+		provider,
+		normalizeProviderHost(provider, host),
+		strings.TrimSpace(owner),
+		strings.TrimSpace(name),
+	)
 }
 
 // FindOrCreateRepository looks up a repository by provider info, creating one if not found.
@@ -898,6 +907,12 @@ func (s *Service) GetRepositoryByProviderInfo(ctx context.Context, workspaceID, 
 func (s *Service) FindOrCreateRepository(ctx context.Context, req *FindOrCreateRepositoryRequest) (*models.Repository, bool, error) {
 	s.repoResolveMu.Lock()
 	defer s.repoResolveMu.Unlock()
+	req.WorkspaceID = strings.TrimSpace(req.WorkspaceID)
+	req.Provider = strings.TrimSpace(req.Provider)
+	req.ProviderRepoID = strings.TrimSpace(req.ProviderRepoID)
+	req.ProviderOwner = strings.TrimSpace(req.ProviderOwner)
+	req.ProviderName = strings.TrimSpace(req.ProviderName)
+	req.RemoteURL = strings.TrimSpace(req.RemoteURL)
 	req.ProviderHost = normalizeProviderHost(req.Provider, req.ProviderHost)
 	existing, err := s.repoEntities.GetRepositoryByProviderInfo(
 		ctx, req.WorkspaceID, req.Provider, req.ProviderHost, req.ProviderOwner, req.ProviderName,

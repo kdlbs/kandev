@@ -21,6 +21,7 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/events/bus"
+	"github.com/kandev/kandev/internal/gitcredentials"
 	githubpkg "github.com/kandev/kandev/internal/github"
 	jirapkg "github.com/kandev/kandev/internal/jira"
 	linearpkg "github.com/kandev/kandev/internal/linear"
@@ -64,6 +65,7 @@ func provideOrchestrator(
 	repoCloner *repoclone.Cloner,
 	promptSvc *promptservice.Service,
 	githubSvc *githubpkg.Service,
+	gitCredentialBroker *gitcredentials.Broker,
 ) (*orchestrator.Service, *messageCreatorAdapter, error) {
 	if lifecycleMgr == nil {
 		return nil, nil, errors.New("lifecycle manager is required: configure agent runtime (docker or standalone)")
@@ -111,13 +113,12 @@ func provideOrchestrator(
 	}
 
 	orchestratorSvc := orchestrator.NewService(serviceCfg, eventBus, agentManagerClient, taskRepoAdapter, taskRepo, userSvc, secretStore, msgQueue, log)
+	if gitCredentialBroker != nil {
+		orchestratorSvc.SetGitHubCredentialBroker(gitCredentialBroker, githubCredentialBrokerEndpoint(cfg))
+	}
 	orchestratorSvc.SetAttachmentReader(taskSvc.AttachmentService())
 	orchestratorSvc.SetTitleBranchRuntime(lifecycleMgr)
 	if githubSvc != nil {
-		orchestratorSvc.SetGitHubCredentialBroker(
-			githubExecutorCredentialLeaseAdapter{service: githubSvc},
-			githubCredentialBrokerEndpoint(cfg),
-		)
 		orchestratorSvc.SetTaskGitCredentialPolicyResolver(githubExecutorCredentialPolicyAdapter{service: githubSvc})
 	}
 	taskSvc.SetExecutionStopper(orchestratorSvc)
@@ -208,13 +209,12 @@ func provideOrchestrator(
 	return orchestratorSvc, msgCreator, nil
 }
 
-type githubCredentialLeaseService interface {
-	IssueGitHubCredentialLease(context.Context, githubpkg.CredentialLeaseRequest) (*githubpkg.CredentialLease, error)
+type githubCredentialPolicyService interface {
 	DescribeTaskGitCredentialPolicy(context.Context, string) (githubpkg.TaskGitCredentialPolicy, error)
 }
 
 type githubExecutorCredentialPolicyAdapter struct {
-	service githubCredentialLeaseService
+	service githubCredentialPolicyService
 }
 
 func (a githubExecutorCredentialPolicyAdapter) ResolveTaskGitCredentialPolicy(
@@ -230,27 +230,6 @@ func (a githubExecutorCredentialPolicyAdapter) ResolveTaskGitCredentialPolicy(
 		WorkspaceMethod: policy.WorkspaceMethod,
 		WorkspaceActor:  policy.WorkspaceActor,
 	}, nil
-}
-
-type githubExecutorCredentialLeaseAdapter struct {
-	service githubCredentialLeaseService
-}
-
-func (a githubExecutorCredentialLeaseAdapter) IssueGitHubCredentialLease(
-	ctx context.Context,
-	request executorpkg.GitHubCredentialLeaseRequest,
-) (executorpkg.GitHubCredentialLease, error) {
-	lease, err := a.service.IssueGitHubCredentialLease(ctx, githubpkg.CredentialLeaseRequest{
-		WorkspaceID: request.WorkspaceID, TaskID: request.TaskID, SessionID: request.SessionID,
-		RepositoryID: request.RepositoryID, Owner: request.Owner, Repo: request.Repo, Host: request.Host,
-	})
-	if err != nil {
-		return executorpkg.GitHubCredentialLease{}, err
-	}
-	if lease == nil {
-		return executorpkg.GitHubCredentialLease{}, errors.New("GitHub credential broker returned no lease")
-	}
-	return executorpkg.GitHubCredentialLease{Token: lease.Token}, nil
 }
 
 func githubCredentialBrokerEndpoint(cfg *config.Config) string {
@@ -891,7 +870,11 @@ type repositoryResolverAdapter struct {
 func (a *repositoryResolverAdapter) ResolveForReview(
 	ctx context.Context, workspaceID, provider, owner, name, defaultBranch string,
 ) (string, string, error) {
-	providerHost := "https://" + defaultProviderHostname(provider)
+	hostname, err := defaultProviderHostname(provider)
+	if err != nil {
+		return "", "", err
+	}
+	providerHost := "https://" + hostname
 	existing, err := a.taskSvc.GetRepositoryByProviderInfo(ctx, workspaceID, provider, providerHost, owner, name)
 	if err != nil {
 		return "", "", fmt.Errorf("lookup repository by provider info: %w", err)
@@ -928,14 +911,14 @@ func (a *repositoryResolverAdapter) ResolveForReview(
 	return repo.ID, baseBranch, nil
 }
 
-func defaultProviderHostname(provider string) string {
+func defaultProviderHostname(provider string) (string, error) {
 	switch strings.ToLower(provider) {
 	case "gitlab":
-		return "gitlab.com"
-	case "bitbucket":
-		return "bitbucket.org"
+		return "gitlab.com", nil
+	case gitCredentialGitHubProviderID, "":
+		return gitCredentialGitHubHost, nil
 	default:
-		return "github.com"
+		return "", fmt.Errorf("unsupported review repository provider %q", provider)
 	}
 }
 

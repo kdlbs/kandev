@@ -29,6 +29,7 @@ service HostData {
   rpc ListWorkflows(ListWorkflowsRequest) returns (ListWorkflowsResponse);
   rpc ListWorkflowSteps(ListWorkflowStepsRequest) returns (ListWorkflowStepsResponse);
   rpc ListAgentProfiles(ListAgentProfilesRequest) returns (ListAgentProfilesResponse);
+  rpc ListExecutorProfiles(ListExecutorProfilesRequest) returns (ListExecutorProfilesResponse);
   rpc ListRepositories(ListRepositoriesRequest) returns (ListRepositoriesResponse);
 
   // Sessions + code stats — capability api_read:sessions. Driven by a real
@@ -41,10 +42,15 @@ service HostData {
 
   // Writes — capability api_write:<resource>. Route through service methods so
   // the corresponding task.* events fire; this is the whole reason not to let
-  // plugins write the DB.
+// plugins write the DB.
+// `ListExecutorProfiles` requires `api_read:executor_profiles`; preview/delete
+// capability is implicit in plugin-owned task provenance and is never conferred by
+// a task link stored in plugin state.
   rpc CreateTask(CreateTaskRequest) returns (CreateTaskResponse);
   rpc UpdateTask(UpdateTaskRequest) returns (UpdateTaskResponse);
   rpc SendMessage(SendMessageRequest) returns (SendMessageResponse);
+  rpc PreviewPluginOwnedTaskTree(PreviewPluginOwnedTaskTreeRequest) returns (PreviewPluginOwnedTaskTreeResponse);
+  rpc DeletePluginOwnedTaskTree(DeletePluginOwnedTaskTreeRequest) returns (DeletePluginOwnedTaskTreeResponse);
 }
 
 // ── Common ──────────────────────────────────────────────────────────────────
@@ -86,6 +92,7 @@ message TaskRepository {
   string repository_id = 2;
   string base_branch = 3;
   int32 position = 4;
+  string checkout_branch = 5;
 }
 
 message TaskFilter {
@@ -148,11 +155,28 @@ message AgentProfile {
 message ListAgentProfilesRequest { Page page = 1; }
 message ListAgentProfilesResponse { repeated AgentProfile profiles = 1; PageInfo page_info = 2; }
 
+message ExecutorProfile {
+  string id = 1;
+  string display_name = 2;
+  string executor_type = 3;
+}
+message ListExecutorProfilesRequest { Page page = 1; }
+message ListExecutorProfilesResponse { repeated ExecutorProfile profiles = 1; PageInfo page_info = 2; }
+
 message Repository {
   string id = 1;
   string workspace_id = 2;
   string name = 3;                  // owner/repo slug when known, else name
   optional string default_branch = 4;
+  // Credential-free provider origin identity. Never expose local paths,
+  // scripts, or credentials through this Host DTO.
+  string source_type = 5;
+  string provider_id = 6;
+  string provider_repository_id = 7;
+  string provider_host = 8;
+  string owner_or_project = 9;
+  string provider_name = 10;
+  string remote_url = 11;
 }
 message ListRepositoriesRequest { string workspace_id = 1; Page page = 2; }
 message ListRepositoriesResponse { repeated Repository repositories = 1; PageInfo page_info = 2; }
@@ -204,6 +228,34 @@ message CreateTaskRequest {
   optional string parent_id = 6;
   bool start_agent = 7;
   // kandev stamps source = "plugin:<id>" server-side; not settable here.
+  repeated PluginTaskRepository repositories = 8;
+  optional PluginTaskLaunchOptions launch = 9;
+  google.protobuf.Struct metadata = 10; // plugin namespace only; host reserves source.
+}
+message PluginTaskRepository {
+  string repository_id = 1; // existing Kandev repository, or empty with remote below
+  optional RemoteRepositoryDescriptor remote = 2;
+  optional string base_branch = 3;
+  optional string checkout_branch = 4;
+  optional int64 pull_request_number = 5;
+}
+message RemoteRepositoryDescriptor {
+  string provider_id = 1;
+  string provider_host = 2;
+  string owner_or_project = 3;
+  string provider_repository_id = 4;
+  string name = 5;
+  string clone_url = 6; // exact credential-free URL; host never reconstructs it
+  optional string default_branch = 7;
+  optional string base_branch = 8;
+  optional string head_branch = 9;
+  optional int64 pull_request_number = 10;
+}
+message PluginTaskLaunchOptions {
+  optional string agent_profile_id = 1;
+  optional string executor_profile_id = 2;
+  optional string prompt = 3;
+  optional string plan_mode = 4;
 }
 message CreateTaskResponse { Task task = 1; }
 message UpdateTaskRequest {
@@ -228,3 +280,10 @@ message SendMessageResponse {
   string session_id = 1;            // the session the message was delivered to
   string status = 2;                // "queued" | "sent" | "started"
 }
+
+// Deletion is owner-scoped. Host compares metadata.source with calling plugin ID; links
+// in plugin state are not deletion authority. Preview always precedes destructive UI.
+message PreviewPluginOwnedTaskTreeRequest { string root_task_id = 1; }
+message PreviewPluginOwnedTaskTreeResponse { repeated Task tasks = 1; }
+message DeletePluginOwnedTaskTreeRequest { string root_task_id = 1; }
+message DeletePluginOwnedTaskTreeResponse { repeated string deleted_task_ids = 1; }

@@ -7,7 +7,7 @@ import {
   assertLocatorWithinViewportX,
   assertNoDocumentHorizontalOverflow,
 } from "../../helpers/layout-assertions";
-import { GITLAB_HOST, GITLAB_PROJECT, seedGitLabReview } from "../../helpers/gitlab";
+import { GITLAB_HOST, GITLAB_PROJECT, gitLabMR, seedGitLabReview } from "../../helpers/gitlab";
 import { makeGitEnv } from "../../helpers/git-helper";
 import { GitLabPage } from "../../pages/gitlab-page";
 import { GitLabSettingsPage } from "../../pages/gitlab-settings-page";
@@ -63,6 +63,53 @@ async function seedMultiRepoGitLabTask(
 }
 
 test.describe("Mobile GitLab parity", () => {
+  test("opens the exact linked MR selected from a multi-MR topbar", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(180_000);
+    const primaryIID = 109;
+    const selectedIID = 110;
+    const selectedTitle = "Selected mobile GitLab review";
+    await seedGitLabReview(apiClient, seedData.workspaceId, primaryIID, "Primary mobile review");
+    await seedGitLabReview(apiClient, seedData.workspaceId, selectedIID, selectedTitle);
+    await apiClient.mockGitLabAddMRs(seedData.workspaceId, GITLAB_PROJECT, [
+      gitLabMR(primaryIID, "Primary mobile review"),
+      gitLabMR(selectedIID, selectedTitle),
+    ]);
+    await apiClient.updateRepository(seedData.repositoryId, {
+      provider: "gitlab",
+      provider_host: GITLAB_HOST,
+      provider_owner: "platform",
+      provider_name: "kandev",
+    });
+
+    const gitlab = new GitLabPage(testPage);
+    await gitlab.goto();
+    await gitlab.startMRTask(primaryIID);
+    const taskId = new URL(testPage.url()).pathname.match(/^\/t\/([^/]+)$/)?.[1];
+    if (!taskId) throw new Error(`Expected task detail URL, got ${testPage.url()}`);
+    await apiClient.linkTaskGitLabMR(seedData.workspaceId, {
+      task_id: taskId,
+      repository_id: seedData.repositoryId,
+      mr_url: `${GITLAB_HOST}/${GITLAB_PROJECT}/-/merge_requests/${selectedIID}`,
+    });
+    await testPage.reload();
+    await new SessionPage(testPage).waitForLoad();
+
+    await gitlab.openLinkedMR(selectedIID);
+    const panel = testPage.getByTestId("mr-detail-panel").last();
+    await expect(panel.getByText(selectedTitle, { exact: true })).toBeVisible();
+    await expect
+      .poll(() =>
+        testPage.evaluate(
+          "window.__KANDEV_E2E_STORE__?.getState().mobileSession.reviewItemIdBySessionId[window.__KANDEV_E2E_STORE__?.getState().tasks.activeSessionId ?? '']",
+        ),
+      )
+      .toBe(`gitlab:${encodeURIComponent(`${GITLAB_HOST}|${GITLAB_PROJECT}|${selectedIID}`)}`);
+  });
+
   test("browses, quick launches, reviews, subscribes, and unlinks without overflow", async ({
     testPage,
     apiClient,

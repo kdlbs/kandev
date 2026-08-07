@@ -214,6 +214,23 @@ test("accepts explicitly ordered pages with required frontmatter", async () => {
   await assert.doesNotReject(validatePublicDocs(dir));
 });
 
+test("plugin authoring reference documents authenticated actions and live host writes", async () => {
+  const [authoring, manifest, integrations] = await Promise.all([
+    fs.readFile(path.join(process.cwd(), "docs/public/plugins-authoring.md"), "utf8"),
+    fs.readFile(path.join(process.cwd(), "docs/public/plugins-manifest.md"), "utf8"),
+    fs.readFile(path.join(process.cwd(), "docs/public/integrations.md"), "utf8"),
+  ]);
+
+  assert.match(authoring, /Authenticated declared actions/);
+  assert.match(authoring, /workspaceId/);
+  assert.match(authoring, /AbortSignal/);
+  assert.match(authoring, /CreateTask/);
+  assert.match(manifest, /\bscope\b/);
+  assert.match(manifest, /repository_providers/);
+  assert.match(manifest, /reference_sources/);
+  assert.match(integrations, /Bitbucket/);
+});
+
 test("rejects published pages omitted from meta.json", async () => {
   const dir = await createDocs(
     { "index.md": validPage, "cli.md": validPage },

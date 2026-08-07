@@ -21,6 +21,7 @@ type registeredProvider struct {
 	descriptor ProviderDescriptor
 	provider   MentionProvider
 	authorizer ReferenceAuthorizer
+	owner      string
 }
 
 // Registry stores provider descriptors independently of their implementation type.
@@ -30,6 +31,7 @@ type Registry struct {
 	sources              map[string]struct{}
 	providerKinds        map[string]struct{}
 	referenceAuthorizers map[string]ReferenceAuthorizer
+	refreshers           []SourceRefresher
 }
 
 func NewRegistry() *Registry {
@@ -41,43 +43,176 @@ func NewRegistry() *Registry {
 }
 
 func (r *Registry) Register(provider MentionProvider) error {
-	if provider == nil {
-		return fmt.Errorf("%w: provider is nil", ErrInvalidDescriptor)
-	}
-	descriptor, err := normalizeDescriptor(provider.Descriptor())
+	registered, err := newRegisteredProvider("", provider)
 	if err != nil {
 		return err
 	}
-	authorizer, ok := provider.(ReferenceAuthorizer)
-	if !ok || authorizer == nil {
-		return ErrMissingAuthorizer
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if err := r.ensureAvailable(registered); err != nil {
+		return err
+	}
+	r.addRegistered(registered)
+	return nil
+}
+
+// ReplaceOwner atomically replaces every dynamic provider owned by owner.
+// The registry snapshot sees either the complete previous set or the complete
+// replacement, never a partially refreshed plugin manifest.
+func (r *Registry) ReplaceOwner(owner string, providers ...MentionProvider) error {
+	owner = strings.TrimSpace(owner)
+	if !validIdentity(owner) {
+		return fmt.Errorf("%w: owner is required", ErrInvalidDescriptor)
+	}
+	replacement, err := newRegisteredProviders(owner, providers)
+	if err != nil {
+		return err
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	retained := providersWithoutOwner(r.providers, owner)
+	sources, providerKinds, authorizers := providerIndexes(retained)
+	if err := ensureRegisteredProvidersAvailable(replacement, sources, providerKinds); err != nil {
+		return err
+	}
+	for _, registered := range replacement {
+		providerKey := referenceProviderKey(registered.descriptor.Provider, registered.descriptor.Kind)
+		sources[registered.descriptor.Source] = struct{}{}
+		providerKinds[providerKey] = struct{}{}
+		authorizers[providerKey] = registered.authorizer
+	}
+	retained = append(retained, replacement...)
+	r.providers = retained
+	r.sources = sources
+	r.providerKinds = providerKinds
+	r.referenceAuthorizers = authorizers
+	return nil
+}
+
+// UnregisterOwner removes every dynamic provider owned by owner.
+func (r *Registry) UnregisterOwner(owner string) error {
+	return r.ReplaceOwner(owner)
+}
+
+// RegisterSourceRefresher adds a dynamic source refresher. Registry reads run
+// refreshers before taking their lock-protected snapshots or authorizer lookups.
+func (r *Registry) RegisterSourceRefresher(refresher SourceRefresher) {
+	if refresher == nil {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.refreshers = append(r.refreshers, refresher)
+}
+
+func (r *Registry) refreshDynamicSources() {
+	r.mu.RLock()
+	refreshers := append([]SourceRefresher(nil), r.refreshers...)
+	r.mu.RUnlock()
+	for _, refresher := range refreshers {
+		refresher.RefreshMentionSources()
+	}
+}
+
+func newRegisteredProviders(owner string, providers []MentionProvider) ([]registeredProvider, error) {
+	registered := make([]registeredProvider, 0, len(providers))
+	for _, provider := range providers {
+		entry, err := newRegisteredProvider(owner, provider)
+		if err != nil {
+			return nil, err
+		}
+		registered = append(registered, entry)
+	}
+	return registered, nil
+}
+
+func newRegisteredProvider(owner string, provider MentionProvider) (registeredProvider, error) {
+	if provider == nil {
+		return registeredProvider{}, fmt.Errorf("%w: provider is nil", ErrInvalidDescriptor)
+	}
+	descriptor, err := normalizeDescriptor(provider.Descriptor())
+	if err != nil {
+		return registeredProvider{}, err
+	}
+	authorizer, ok := provider.(ReferenceAuthorizer)
+	if !ok || authorizer == nil {
+		return registeredProvider{}, ErrMissingAuthorizer
+	}
+	return registeredProvider{descriptor: descriptor, provider: provider, authorizer: authorizer, owner: owner}, nil
+}
+
+func (r *Registry) ensureAvailable(registered registeredProvider) error {
 	if r.sources == nil {
 		r.sources = make(map[string]struct{})
 	}
 	if r.providerKinds == nil {
 		r.providerKinds = make(map[string]struct{})
 	}
+	if _, exists := r.sources[registered.descriptor.Source]; exists {
+		return fmt.Errorf("%w: %s", ErrDuplicateSource, registered.descriptor.Source)
+	}
+	providerKey := referenceProviderKey(registered.descriptor.Provider, registered.descriptor.Kind)
+	if _, exists := r.providerKinds[providerKey]; exists {
+		return fmt.Errorf("%w: %s/%s", ErrDuplicateProvider, registered.descriptor.Provider, registered.descriptor.Kind)
+	}
+	return nil
+}
+
+func (r *Registry) addRegistered(registered registeredProvider) {
 	if r.referenceAuthorizers == nil {
 		r.referenceAuthorizers = make(map[string]ReferenceAuthorizer)
 	}
-	if _, exists := r.sources[descriptor.Source]; exists {
-		return fmt.Errorf("%w: %s", ErrDuplicateSource, descriptor.Source)
-	}
-	providerKey := referenceProviderKey(descriptor.Provider, descriptor.Kind)
-	if _, exists := r.providerKinds[providerKey]; exists {
-		return fmt.Errorf("%w: %s/%s", ErrDuplicateProvider, descriptor.Provider, descriptor.Kind)
-	}
-	r.providers = append(r.providers, registeredProvider{
-		descriptor: descriptor,
-		provider:   provider,
-		authorizer: authorizer,
-	})
-	r.sources[descriptor.Source] = struct{}{}
+	providerKey := referenceProviderKey(registered.descriptor.Provider, registered.descriptor.Kind)
+	r.providers = append(r.providers, registered)
+	r.sources[registered.descriptor.Source] = struct{}{}
 	r.providerKinds[providerKey] = struct{}{}
-	r.referenceAuthorizers[providerKey] = authorizer
+	r.referenceAuthorizers[providerKey] = registered.authorizer
+}
+
+func providersWithoutOwner(providers []registeredProvider, owner string) []registeredProvider {
+	retained := make([]registeredProvider, 0, len(providers))
+	for _, provider := range providers {
+		if provider.owner != owner {
+			retained = append(retained, provider)
+		}
+	}
+	return retained
+}
+
+func providerIndexes(providers []registeredProvider) (
+	map[string]struct{}, map[string]struct{}, map[string]ReferenceAuthorizer,
+) {
+	sources := make(map[string]struct{}, len(providers))
+	providerKinds := make(map[string]struct{}, len(providers))
+	authorizers := make(map[string]ReferenceAuthorizer, len(providers))
+	for _, provider := range providers {
+		providerKey := referenceProviderKey(provider.descriptor.Provider, provider.descriptor.Kind)
+		sources[provider.descriptor.Source] = struct{}{}
+		providerKinds[providerKey] = struct{}{}
+		authorizers[providerKey] = provider.authorizer
+	}
+	return sources, providerKinds, authorizers
+}
+
+func ensureRegisteredProvidersAvailable(
+	providers []registeredProvider,
+	sources map[string]struct{},
+	providerKinds map[string]struct{},
+) error {
+	for _, provider := range providers {
+		if _, exists := sources[provider.descriptor.Source]; exists {
+			return fmt.Errorf("%w: %s", ErrDuplicateSource, provider.descriptor.Source)
+		}
+		providerKey := referenceProviderKey(provider.descriptor.Provider, provider.descriptor.Kind)
+		if _, exists := providerKinds[providerKey]; exists {
+			return fmt.Errorf("%w: %s/%s", ErrDuplicateProvider, provider.descriptor.Provider, provider.descriptor.Kind)
+		}
+		// Record accepted replacements as we go. This retains exact duplicate
+		// detection while making large plugin manifests linear rather than
+		// rescanning every preceding descriptor.
+		sources[provider.descriptor.Source] = struct{}{}
+		providerKinds[providerKey] = struct{}{}
+	}
 	return nil
 }
 
@@ -87,6 +222,7 @@ func referenceProviderKey(provider, kind string) string {
 
 // AuthorizeReference dispatches to the provider registered for the normalized identity.
 func (r *Registry) AuthorizeReference(ctx context.Context, request ReferenceAuthorizationRequest) error {
+	r.refreshDynamicSources()
 	key := referenceProviderKey(request.Reference.Provider, request.Reference.Kind)
 	r.mu.RLock()
 	authorizer, ok := r.referenceAuthorizers[key]
@@ -140,6 +276,7 @@ func validDescriptorLabel(label string) bool {
 }
 
 func (r *Registry) snapshot() []registeredProvider {
+	r.refreshDynamicSources()
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	providers := append([]registeredProvider(nil), r.providers...)

@@ -173,6 +173,8 @@ type DockviewStore = {
   addPRPanel: (prKey?: string) => void;
   /** Open a GitLab merge request detail panel keyed by host/project/iid. */
   addMRPanel: (mrKey: string) => void;
+  /** Open a provider-neutral review detail panel. */
+  addReviewPanel: (providerId: string, reviewKey: string, title?: string) => void;
   addTerminalPanel: (
     terminalId?: string,
     groupId?: string,

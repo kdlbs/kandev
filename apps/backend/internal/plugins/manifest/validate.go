@@ -6,11 +6,19 @@ import (
 	"path"
 	"regexp"
 	"strings"
+	"unicode/utf8"
 )
 
 // idPattern matches the required plugin id shape: lowercase alphanumerics,
 // dots, underscores, and hyphens, starting with a lowercase alphanumeric.
 var idPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]*$`)
+
+// actionKeyPattern keeps manifest action keys addressable through the
+// /actions/:key route. Reference identities mirror the mention registry's
+// canonical identifier grammar so an install cannot succeed with a source
+// the host will later omit.
+var actionKeyPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]*$`)
+var referenceIdentityPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9._:-]{0,127}$`)
 
 // supportedAPIVersion is the only api_version this kandev build accepts.
 const supportedAPIVersion = 1
@@ -130,6 +138,9 @@ func (m *Manifest) Validate() error {
 	errs = append(errs, m.validateUIBundle()...)
 	errs = append(errs, m.validateUIKeybindings()...)
 	errs = append(errs, m.validateWebhooks()...)
+	errs = append(errs, m.validateActions()...)
+	errs = append(errs, m.validateRepositoryProviders()...)
+	errs = append(errs, m.validateReferenceSources()...)
 	return errors.Join(errs...)
 }
 
@@ -402,4 +413,89 @@ func (m *Manifest) validateWebhooks() []error {
 		seen[wh.Key] = true
 	}
 	return errs
+}
+
+func (m *Manifest) validateActions() []error {
+	seen := make(map[string]bool, len(m.Actions))
+	var errs []error
+	for _, action := range m.Actions {
+		if !actionKeyPattern.MatchString(action.Key) {
+			errs = append(errs, fmt.Errorf("action key %q must match %s", action.Key, actionKeyPattern.String()))
+		}
+		if seen[action.Key] {
+			errs = append(errs, fmt.Errorf("duplicate action key %q", action.Key))
+			continue
+		}
+		seen[action.Key] = true
+		if action.ResourceScope != ActionScopeWorkspace && action.ResourceScope != ActionScopeTask &&
+			action.ResourceScope != ActionScopeRepository {
+			errs = append(errs, fmt.Errorf("action %q has invalid scope %q", action.Key, action.ResourceScope))
+		}
+		if action.MaxBodyBytes <= 0 || action.MaxBodyBytes > MaxActionBodyBytes {
+			errs = append(errs, fmt.Errorf("action %q max_body_bytes must be between 1 and %d", action.Key, MaxActionBodyBytes))
+		}
+	}
+	return errs
+}
+
+func (m *Manifest) validateRepositoryProviders() []error {
+	seen := make(map[string]bool, len(m.RepositoryProviders))
+	var errs []error
+	for _, provider := range m.RepositoryProviders {
+		normalized := strings.ToLower(strings.TrimSpace(provider))
+		if normalized == "" {
+			errs = append(errs, fmt.Errorf("repository provider must not be empty"))
+			continue
+		}
+		if strings.TrimSpace(provider) != provider {
+			errs = append(errs, fmt.Errorf("repository provider %q must not contain surrounding whitespace", provider))
+			continue
+		}
+		if seen[normalized] {
+			errs = append(errs, fmt.Errorf("duplicate repository provider %q", provider))
+			continue
+		}
+		seen[normalized] = true
+	}
+	return errs
+}
+
+func (m *Manifest) validateReferenceSources() []error {
+	seenSources := make(map[string]bool, len(m.ReferenceSources))
+	seenProviderKinds := make(map[string]bool, len(m.ReferenceSources))
+	var errs []error
+	for _, source := range m.ReferenceSources {
+		if !referenceIdentityPattern.MatchString(source.Source) ||
+			!referenceIdentityPattern.MatchString(source.Provider) ||
+			!referenceIdentityPattern.MatchString(source.Kind) {
+			errs = append(errs, fmt.Errorf(
+				"reference source %q must use lowercase source, provider, and kind identifiers matching %s",
+				source.Source, referenceIdentityPattern.String(),
+			))
+			continue
+		}
+		if !validReferenceLabel(source.DisplayName) || !validReferenceLabel(source.KindLabel) {
+			errs = append(errs, fmt.Errorf(
+				"reference source %q display_name and kind_label must be non-empty valid UTF-8 labels of at most 100 characters",
+				source.Source,
+			))
+			continue
+		}
+		if seenSources[source.Source] {
+			errs = append(errs, fmt.Errorf("duplicate reference source %q", source.Source))
+			continue
+		}
+		providerKind := source.Provider + "\x00" + source.Kind
+		if seenProviderKinds[providerKind] {
+			errs = append(errs, fmt.Errorf("duplicate reference provider and kind %q/%q", source.Provider, source.Kind))
+			continue
+		}
+		seenSources[source.Source] = true
+		seenProviderKinds[providerKind] = true
+	}
+	return errs
+}
+
+func validReferenceLabel(label string) bool {
+	return strings.TrimSpace(label) == label && label != "" && utf8.ValidString(label) && utf8.RuneCountInString(label) <= 100
 }

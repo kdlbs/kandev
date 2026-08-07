@@ -26,7 +26,10 @@ const mockDockviewStore = vi.hoisted(() => ({
 }));
 
 const mockAppState = vi.hoisted(() => ({
+  workspaces: { activeId: "workspace-1" },
   tasks: { activeSessionId: "session-1", activeTaskId: null },
+  taskPRs: { byTaskId: {} },
+  taskMRs: { byWorkspaceId: {} },
   taskSessions: { items: {} },
   repositories: { itemsByWorkspaceId: {} },
   userShells: { byEnvironmentId: {} },

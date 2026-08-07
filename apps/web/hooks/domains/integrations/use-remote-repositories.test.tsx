@@ -18,11 +18,13 @@ vi.mock("@/lib/api/domains/azure-devops-api", () => ({
 }));
 
 import { useRemoteRepositories } from "./use-remote-repositories";
+import { pluginRegistry } from "@/lib/plugins/registry";
 
 const WORKSPACE_ID = "workspace-1";
 
 afterEach(() => {
   cleanup();
+  pluginRegistry.unregisterPlugin("test-bitbucket-provider");
   vi.resetAllMocks();
 });
 
@@ -38,7 +40,45 @@ function expectWorkspaceScopedGitHubRequest() {
   });
 }
 
-describe("useRemoteRepositories", () => {
+describe("useRemoteRepositories registered providers", () => {
+  it("lists registered provider repositories with their exact clone URL", async () => {
+    pluginRegistry.forPlugin("test-bitbucket-provider").registerRepositoryProvider({
+      id: "bitbucket",
+      label: "Bitbucket",
+      matchesURL: () => false,
+      listBranches: async () => [],
+      inspectURL: async () => null,
+      listRepositories: async () => [
+        {
+          providerId: "bitbucket",
+          providerHost: "https://bitbucket.example.test/bitbucket",
+          ownerOrProject: "PLATFORM",
+          repositoryId: "web-42",
+          repositoryName: "web",
+          cloneUrl: "https://bitbucket.example.test/bitbucket/scm/PLATFORM/web.git",
+          defaultBranch: "main",
+        },
+      ],
+    });
+    mocks.fetchAccessibleRepos.mockRejectedValue(new Error("GitHub not configured"));
+    rejectUnavailableProviders();
+    const { result } = renderHook(() => useRemoteRepositories(WORKSPACE_ID));
+
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.repos).toEqual([
+      expect.objectContaining({
+        provider: "bitbucket",
+        id: "web-42",
+        fullName: "PLATFORM/web",
+        url: "https://bitbucket.example.test/bitbucket/scm/PLATFORM/web.git",
+        defaultBranch: "main",
+      }),
+    ]);
+    expect(result.current.availableProviders).toEqual(["bitbucket"]);
+  });
+});
+
+describe("useRemoteRepositories provider results", () => {
   it("combines successful providers while tolerating a provider failure", async () => {
     mocks.fetchAccessibleRepos.mockResolvedValue([
       {
@@ -108,6 +148,25 @@ describe("useRemoteRepositories", () => {
 
     await waitFor(() => expect(result.current.loading).toBe(false));
     expect(result.current.availableProviders).toEqual(["github", "gitlab", "azure_devops"]);
+  });
+});
+
+describe("useRemoteRepositories workspace scope", () => {
+  it("does not invoke plugin providers without an active workspace", async () => {
+    const listRepositories = vi.fn().mockResolvedValue([]);
+    pluginRegistry.forPlugin("test-bitbucket-provider").registerRepositoryProvider({
+      id: "bitbucket",
+      label: "Bitbucket",
+      matchesURL: () => false,
+      listBranches: async () => [],
+      inspectURL: async () => null,
+      listRepositories,
+    });
+
+    const { result } = renderHook(() => useRemoteRepositories(""));
+
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(listRepositories).not.toHaveBeenCalled();
   });
 
   it("clears repositories immediately when the workspace changes", async () => {

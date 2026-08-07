@@ -37,6 +37,8 @@ import (
 	hcplugin "github.com/hashicorp/go-plugin"
 	pluginv1 "github.com/kandev/kandev/proto/kandev/plugin/v1"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 // Handshake is the go-plugin handshake shared by kandev and every plugin
@@ -191,6 +193,56 @@ func (r *RemotePlugin) HandleWebhook(ctx context.Context, req *WebhookRequest) (
 	return webhookResponseFromProto(resp), nil
 }
 
+// HandleAction calls an optional authenticated plugin action.
+func (r *RemotePlugin) HandleAction(ctx context.Context, req *PluginActionRequest) (*PluginActionResponse, error) {
+	resp, err := r.client.HandleAction(ctx, req.toProto())
+	if err != nil {
+		return nil, err
+	}
+	return pluginActionResponseFromProto(resp), nil
+}
+
+// SearchEntityReferences calls an optional manifest-owned reference source.
+func (r *RemotePlugin) SearchEntityReferences(ctx context.Context, req *SearchEntityReferencesRequest) (*SearchEntityReferencesResponse, error) {
+	resp, err := r.client.SearchEntityReferences(ctx, req.toProto())
+	if err != nil {
+		return nil, err
+	}
+	return searchEntityReferencesResponseFromProto(resp)
+}
+
+// AuthorizeEntityReference calls an optional live reference authorizer.
+func (r *RemotePlugin) AuthorizeEntityReference(ctx context.Context, req *AuthorizeEntityReferenceRequest) (*AuthorizeEntityReferenceResponse, error) {
+	protoReq, err := req.toProto()
+	if err != nil {
+		return nil, err
+	}
+	resp, err := r.client.AuthorizeEntityReference(ctx, protoReq)
+	if err != nil {
+		return nil, err
+	}
+	return authorizeEntityReferenceResponseFromProto(resp), nil
+}
+
+// ResolveGitCredential calls an optional declared-provider credential resolver.
+func (r *RemotePlugin) ResolveGitCredential(ctx context.Context, req *ResolveGitCredentialRequest) (*ResolveGitCredentialResponse, error) {
+	resp, err := r.client.ResolveGitCredential(ctx, req.toProto())
+	if err != nil {
+		return nil, err
+	}
+	return resolveGitCredentialResponseFromProto(resp), nil
+}
+
+// GetGitCredentialBinding calls an optional non-secret credential-binding
+// extension for an exact host-verified lease scope.
+func (r *RemotePlugin) GetGitCredentialBinding(ctx context.Context, req *GitCredentialBindingRequest) (*GitCredentialBindingResponse, error) {
+	resp, err := r.client.GetGitCredentialBinding(ctx, req.toProto())
+	if err != nil {
+		return nil, err
+	}
+	return gitCredentialBindingResponseFromProto(resp), nil
+}
+
 // grpcPluginServer adapts the author-facing Plugin interface to the
 // generated pluginv1.PluginServer interface. Registered inside the plugin
 // subprocess by GRPCPlugin.GRPCServer.
@@ -216,6 +268,89 @@ func (s *grpcPluginServer) HandleWebhook(ctx context.Context, req *pluginv1.Webh
 		return nil, err
 	}
 	return resp.toProto(), nil
+}
+
+func (s *grpcPluginServer) HandleAction(ctx context.Context, req *pluginv1.PluginActionRequest) (*pluginv1.PluginActionResponse, error) {
+	handler, ok := s.impl.(ActionHandler)
+	if !ok {
+		return nil, unsupportedPluginExtension("action handler")
+	}
+	resp, err := handler.HandleAction(ctx, pluginActionRequestFromProto(req))
+	if err != nil {
+		return nil, err
+	}
+	if resp == nil {
+		return nil, status.Error(codes.Internal, "pluginsdk: action handler returned nil response")
+	}
+	return resp.toProto(), nil
+}
+
+func (s *grpcPluginServer) SearchEntityReferences(ctx context.Context, req *pluginv1.SearchEntityReferencesRequest) (*pluginv1.SearchEntityReferencesResponse, error) {
+	handler, ok := s.impl.(EntityReferenceSearcher)
+	if !ok {
+		return nil, unsupportedPluginExtension("entity reference searcher")
+	}
+	resp, err := handler.SearchEntityReferences(ctx, searchEntityReferencesRequestFromProto(req))
+	if err != nil {
+		return nil, err
+	}
+	if resp == nil {
+		return nil, status.Error(codes.Internal, "pluginsdk: entity reference searcher returned nil response")
+	}
+	return resp.toProto()
+}
+
+func (s *grpcPluginServer) AuthorizeEntityReference(ctx context.Context, req *pluginv1.AuthorizeEntityReferenceRequest) (*pluginv1.AuthorizeEntityReferenceResponse, error) {
+	handler, ok := s.impl.(EntityReferenceAuthorizer)
+	if !ok {
+		return nil, unsupportedPluginExtension("entity reference authorizer")
+	}
+	native, err := authorizeEntityReferenceRequestFromProto(req)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := handler.AuthorizeEntityReference(ctx, native)
+	if err != nil {
+		return nil, err
+	}
+	if resp == nil {
+		return nil, status.Error(codes.Internal, "pluginsdk: entity reference authorizer returned nil response")
+	}
+	return resp.toProto(), nil
+}
+
+func (s *grpcPluginServer) ResolveGitCredential(ctx context.Context, req *pluginv1.ResolveGitCredentialRequest) (*pluginv1.ResolveGitCredentialResponse, error) {
+	handler, ok := s.impl.(GitCredentialResolver)
+	if !ok {
+		return nil, unsupportedPluginExtension("git credential resolver")
+	}
+	resp, err := handler.ResolveGitCredential(ctx, resolveGitCredentialRequestFromProto(req))
+	if err != nil {
+		return nil, err
+	}
+	if resp == nil {
+		return nil, status.Error(codes.Internal, "pluginsdk: git credential resolver returned nil response")
+	}
+	return resp.toProto(), nil
+}
+
+func (s *grpcPluginServer) GetGitCredentialBinding(ctx context.Context, req *pluginv1.GitCredentialBindingRequest) (*pluginv1.GitCredentialBindingResponse, error) {
+	handler, ok := s.impl.(GitCredentialBinder)
+	if !ok {
+		return nil, unsupportedPluginExtension("git credential binder")
+	}
+	resp, err := handler.GetGitCredentialBinding(ctx, gitCredentialBindingRequestFromProto(req))
+	if err != nil {
+		return nil, err
+	}
+	if resp == nil {
+		return nil, status.Error(codes.Internal, "pluginsdk: git credential binder returned nil response")
+	}
+	return resp.toProto(), nil
+}
+
+func unsupportedPluginExtension(extension string) error {
+	return status.Errorf(codes.Unimplemented, "pluginsdk: plugin does not implement %s", extension)
 }
 
 var _ pluginv1.PluginServer = (*grpcPluginServer)(nil)

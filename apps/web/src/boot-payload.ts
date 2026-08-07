@@ -103,7 +103,16 @@ function readPlugin(value: Record<string, unknown>): ActivePlugin | undefined {
   const styleUrls = Array.isArray(value.styleUrls)
     ? value.styleUrls.filter((entry): entry is string => typeof entry === "string")
     : undefined;
-  return { id, name, bundleUrl, styleUrls };
+  const repositoryProviderIds = Array.isArray(value.repositoryProviderIds)
+    ? value.repositoryProviderIds.filter((entry): entry is string => typeof entry === "string")
+    : undefined;
+  return {
+    id,
+    name,
+    bundleUrl,
+    styleUrls,
+    ...(repositoryProviderIds ? { repositoryProviderIds } : {}),
+  };
 }
 
 export async function loadBootPayload(

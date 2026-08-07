@@ -17,9 +17,12 @@ vi.mock("@/lib/api/domains/azure-devops-api", () => ({
 
 // Import after mocks so the hook picks up the mocked module.
 import { useBranchesByURL } from "./use-branches-by-url";
+import { pluginRegistry } from "@/lib/plugins/registry";
+import type { RepositoryInspection } from "@/lib/plugins/types";
 
 afterEach(() => {
   cleanup();
+  pluginRegistry.unregisterPlugin(PROVIDER_PLUGIN_ID);
   fetchRepoBranchesMock.mockReset();
   listProjectBranchesMock.mockReset();
   listAzureDevOpsBranchesMock.mockReset();
@@ -31,6 +34,7 @@ const REPO_B = "https://github.com/acme/api";
 const WORKSPACE_ID = "workspace-1";
 const WORKSPACE_B = "workspace-2";
 const WORKSPACE_B_BRANCH = "workspace-b";
+const PROVIDER_PLUGIN_ID = "test-bitbucket-provider";
 
 describe("useBranchesByURL", () => {
   it("does not load GitHub branches without a workspace credential scope", () => {
@@ -67,7 +71,7 @@ describe("useBranchesByURL", () => {
   });
 });
 
-describe("useBranchesByURL provider routing", () => {
+describe("useBranchesByURL built-in provider routing", () => {
   it("dispatches GitLab and Azure URLs without calling GitHub", async () => {
     listProjectBranchesMock.mockResolvedValue({ branches: [{ name: "develop" }] });
     listAzureDevOpsBranchesMock.mockResolvedValue({ branches: [{ name: "main" }] });
@@ -119,26 +123,116 @@ describe("useBranchesByURL provider routing", () => {
     );
   });
 
-  it("loads branches for a self-managed GitLab URL", async () => {
+  it("does not default an unknown self-managed URL to GitLab", async () => {
     listProjectBranchesMock.mockResolvedValue({ branches: [{ name: "main" }] });
     const { result } = renderHook(() => useBranchesByURL(WORKSPACE_ID));
     const gitlab = "https://gitlab.internal:8443/acme/platform/api.git";
 
     act(() => result.current.ensure(gitlab));
 
-    await waitFor(() => {
-      expect(listProjectBranchesMock).toHaveBeenCalledWith(
-        WORKSPACE_ID,
-        "acme/platform/api",
-        expect.objectContaining({
-          expectedHost: "https://gitlab.internal:8443",
-          init: expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    await waitFor(() => expect(result.current.loading(gitlab)).toBe(false));
+    expect(result.current.branches(gitlab)).toEqual([]);
+    expect(listProjectBranchesMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("useBranchesByURL registered provider routing", () => {
+  it("retries an unsupported URL after its provider registers", async () => {
+    const url = "https://bitbucket.example.test/projects/PLATFORM/repos/web";
+    const { result } = renderHook(() => useBranchesByURL(WORKSPACE_ID));
+    act(() => result.current.ensure(url));
+    expect(result.current.branches(url)).toEqual([]);
+
+    const listBranches = vi.fn().mockResolvedValue([{ name: "trunk" }]);
+    act(() => {
+      pluginRegistry.forPlugin(PROVIDER_PLUGIN_ID).registerRepositoryProvider({
+        id: "bitbucket",
+        label: "Bitbucket",
+        listRepositories: async () => [],
+        matchesURL: (candidate) => candidate.startsWith("https://bitbucket.example.test/"),
+        inspectURL: async () => ({
+          providerId: "bitbucket",
+          providerHost: "https://bitbucket.example.test",
+          ownerOrProject: "PLATFORM",
+          repositoryId: "web-42",
+          repositoryName: "web",
+          cloneUrl: "https://bitbucket.example.test/scm/PLATFORM/web.git",
+          defaultBranch: "trunk",
         }),
-      );
-      expect(result.current.branches(gitlab)).toEqual([
-        expect.objectContaining({ name: "main", type: "remote" }),
-      ]);
+        listBranches,
+      });
     });
+    act(() => result.current.ensure(url));
+
+    await waitFor(() =>
+      expect(result.current.branches(url)).toEqual([{ name: "trunk", type: "remote" }]),
+    );
+    expect(listBranches).toHaveBeenCalledOnce();
+  });
+
+  it("uses a registered provider descriptor for a Data Center context path", async () => {
+    const url =
+      "https://bitbucket.example.test/bitbucket/projects/PLATFORM/repos/web/pull-requests/42";
+    const inspection: RepositoryInspection = {
+      providerId: "bitbucket",
+      providerHost: "https://bitbucket.example.test/bitbucket",
+      ownerOrProject: "PLATFORM",
+      repositoryId: "web-42",
+      repositoryName: "web",
+      cloneUrl: "https://bitbucket.example.test/bitbucket/scm/PLATFORM/web.git",
+      defaultBranch: "main",
+    };
+    const listBranches = vi.fn().mockResolvedValue([{ name: "" }, { name: "release" }]);
+    pluginRegistry.forPlugin(PROVIDER_PLUGIN_ID).registerRepositoryProvider({
+      id: "bitbucket",
+      label: "Bitbucket",
+      listRepositories: async () => [],
+      matchesURL: (candidate) => candidate.includes("bitbucket.example.test/bitbucket/"),
+      inspectURL: async () => inspection,
+      listBranches,
+    });
+    listProjectBranchesMock.mockResolvedValue({ branches: [{ name: "wrong-fallback" }] });
+    const { result } = renderHook(() => useBranchesByURL(WORKSPACE_ID));
+
+    act(() => result.current.ensure(url));
+
+    await waitFor(() =>
+      expect(result.current.branches(url)).toEqual([{ name: "release", type: "remote" }]),
+    );
+    expect(listBranches).toHaveBeenCalledWith(
+      expect.objectContaining({ workspaceId: WORKSPACE_ID, repository: inspection }),
+    );
+    expect(listProjectBranchesMock).not.toHaveBeenCalled();
+  });
+
+  it("uses a registered provider descriptor for a Cloud pull-request URL", async () => {
+    const url = "https://bitbucket.org/kandev/web/pull-requests/42";
+    const inspection: RepositoryInspection = {
+      providerId: "bitbucket",
+      providerHost: "https://bitbucket.org",
+      ownerOrProject: "kandev",
+      repositoryId: "web-42",
+      repositoryName: "web",
+      cloneUrl: "https://bitbucket.org/kandev/web.git",
+      defaultBranch: "main",
+    };
+    const listBranches = vi.fn().mockResolvedValue([{ name: "main" }]);
+    pluginRegistry.forPlugin(PROVIDER_PLUGIN_ID).registerRepositoryProvider({
+      id: "bitbucket",
+      label: "Bitbucket",
+      listRepositories: async () => [],
+      matchesURL: (candidate) => candidate.startsWith("https://bitbucket.org/"),
+      inspectURL: async () => inspection,
+      listBranches,
+    });
+    const { result } = renderHook(() => useBranchesByURL(WORKSPACE_ID));
+
+    act(() => result.current.ensure(url));
+
+    await waitFor(() =>
+      expect(result.current.branches(url)).toEqual([{ name: "main", type: "remote" }]),
+    );
+    expect(listBranches).toHaveBeenCalledWith(expect.objectContaining({ repository: inspection }));
   });
 });
 

@@ -13,6 +13,7 @@ import (
 	"github.com/kandev/kandev/internal/entityrefs"
 	"github.com/kandev/kandev/internal/gitlab"
 	"github.com/kandev/kandev/internal/mentions"
+	"github.com/kandev/kandev/internal/plugins"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository"
 	api "github.com/kandev/kandev/pkg/api/v1"
@@ -41,6 +42,12 @@ func newMentionComponents(
 ) (*MentionComponents, error) {
 	registry := mentions.NewRegistry()
 	for _, provider := range providers {
+		if sourceRegistrar, ok := provider.(mentions.SourceRegistrar); ok {
+			if err := sourceRegistrar.RegisterMentionSources(registry); err != nil {
+				return nil, fmt.Errorf("register mention provider: %w", err)
+			}
+			continue
+		}
 		if err := registry.Register(provider); err != nil {
 			return nil, fmt.Errorf("register mention provider: %w", err)
 		}
@@ -137,6 +144,9 @@ func builtinMentionProviders(
 		sentryService = services.Sentry
 	}
 	providers = append(providers, mentions.NewSentryIssueProvider(sentryService))
+	if services.Plugins != nil {
+		providers = append(providers, plugins.NewMentionSourceBridge(services.Plugins))
+	}
 	return providers
 }
 

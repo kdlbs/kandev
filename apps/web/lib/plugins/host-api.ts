@@ -28,6 +28,18 @@ import {
   DialogTrigger,
 } from "@kandev/ui/dialog";
 import {
+  Drawer,
+  DrawerClose,
+  DrawerContent,
+  DrawerDescription,
+  DrawerFooter,
+  DrawerHeader,
+  DrawerOverlay,
+  DrawerPortal,
+  DrawerTitle,
+  DrawerTrigger,
+} from "@kandev/ui/drawer";
+import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
@@ -69,15 +81,35 @@ import { Combobox } from "@/components/combobox";
 import { RichTextEditor, RichTextReadOnly } from "@/components/editors/tiptap/rich-text-editor";
 import { PageTopbar } from "@/components/page-topbar";
 import { TaskCreateDialog } from "@/components/task-create-dialog";
+import { ChangeRequestList, ChangeRequestRow } from "@/components/integrations/change-request-list";
+import { ChangeRequestDetail } from "@/components/integrations/change-request-detail";
+import { IntegrationStartTaskMenu } from "@/components/integrations/integration-start-task-menu";
+import { IntegrationListToolbar } from "@/components/integrations/integration-list-toolbar";
+import { IntegrationScopeBar } from "@/components/integrations/presets-scope-bar-base";
+import { TaskRowIndicator } from "@/components/integrations/task-row-indicator";
+import { IntegrationChangeRequestStatus } from "@/components/integrations/integration-change-request-status";
+import { IntegrationIcon } from "@/components/integrations/integration-icon";
+import { TaskChangeRequestLinkForm } from "@/components/integrations/task-change-request-link-form";
 import { getBackendConfig } from "@/lib/config";
+import { fetchJson } from "@/lib/api/client";
 import { generateUUID } from "@/lib/utils";
 import { softNavigate } from "@/lib/routing/client-router";
 import type { AppState } from "@/lib/state/store";
+import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
+import { reviewItemId } from "@/components/task/review-selection";
+import { useDockviewStore } from "@/lib/state/dockview-store";
 import { pluginModalManager } from "./modal-manager";
 import { composeWriterId, subscribeToUserStateChanges } from "./user-state-sync";
+import type {
+  PluginActionInput,
+  PluginActionOptions,
+  PluginHostApi,
+  PluginModalHandle,
+  PluginTaskLinkDialogOptions,
+  PluginTaskReviewOptions,
+} from "./types";
 import {
   PluginStorageConflictError,
-  type PluginHostApi,
   type PluginStorageApi,
   type PluginStorageEntry,
   type PluginStorageScope,
@@ -114,6 +146,16 @@ const PLUGIN_UI: Record<string, unknown> = {
   DialogHeader,
   DialogTitle,
   DialogTrigger,
+  Drawer,
+  DrawerClose,
+  DrawerContent,
+  DrawerDescription,
+  DrawerFooter,
+  DrawerHeader,
+  DrawerOverlay,
+  DrawerPortal,
+  DrawerTitle,
+  DrawerTrigger,
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
@@ -172,6 +214,15 @@ const PLUGIN_UI: Record<string, unknown> = {
   //   initialValues, so plugins hand off task creation to the native flow
   //   instead of POSTing directly.
   TaskCreateDialog,
+  ChangeRequestList,
+  ChangeRequestRow,
+  ChangeRequestDetail,
+  IntegrationStartTaskMenu,
+  IntegrationListToolbar,
+  IntegrationChangeRequestStatus,
+  IntegrationScopeBar,
+  IntegrationIcon,
+  TaskRowIndicator,
   // - RichTextEditor / RichTextReadOnly: narrow wrappers over the Plan
   //   panel's tiptap editor (markdown paste, slash commands, mermaid),
   //   pixel-identical to the Plan panel. See rich-text-editor.tsx.
@@ -228,6 +279,11 @@ export function buildHostApi(
     },
     api: {
       fetch: (path, init) => fetchPluginApi(pluginId, path, init),
+      invokeAction: <TResponse>(
+        key: string,
+        input?: PluginActionInput,
+        options?: PluginActionOptions,
+      ) => invokePluginAction<TResponse>(pluginId, key, input, options),
       // Getter so split-origin dev/desktop always sees the current backend
       // origin, matching what fetchPluginApi resolves per call.
       get baseUrl() {
@@ -235,11 +291,56 @@ export function buildHostApi(
       },
     },
     ui: PLUGIN_UI,
+    useResponsiveBreakpoint,
     theme,
     navigate: (href, options) => softNavigate(href, options?.replace ? "replace" : "push"),
     openModal: (options) => pluginModalManager.openModal(pluginId, options),
+    openTaskLinkDialog: (options) => openTaskLinkDialog(pluginId, options),
+    openTaskReview: (options) => openTaskReview(storeApi, options),
     storage: buildStorageApi(pluginId),
   };
+}
+
+function openTaskReview(storeApi: StoreApi<AppState>, options: PluginTaskReviewOptions): void {
+  if (options.presentation === "desktop") {
+    useDockviewStore
+      .getState()
+      .addReviewPanel(options.providerId, options.reviewKey, options.title);
+    return;
+  }
+  storeApi
+    .getState()
+    .setMobileSessionReview(
+      options.sessionId,
+      reviewItemId({ providerId: options.providerId, reviewKey: options.reviewKey }),
+    );
+}
+
+function openTaskLinkDialog(
+  pluginId: string,
+  options: PluginTaskLinkDialogOptions,
+): PluginModalHandle {
+  const handle = pluginModalManager.openTaskLinkDialog(pluginId, {
+    title: options.title,
+    description: options.description,
+    presentation: "dialog",
+    content: function PluginTaskLinkDialogContent() {
+      return React.createElement(TaskChangeRequestLinkForm, {
+        inputLabel: options.inputLabel,
+        placeholder: options.placeholder,
+        emptyError: options.emptyError,
+        failureMessage: options.failureMessage,
+        successMessage: options.successMessage,
+        inputTestId: options.inputTestId,
+        errorTestId: options.errorTestId,
+        submitTestId: options.submitTestId,
+        onSubmit: options.onSubmit,
+        onCancel: () => handle.close(),
+        onSuccess: () => handle.close(),
+      });
+    },
+  });
+  return handle;
 }
 
 /**
@@ -302,4 +403,23 @@ function buildStorageApi(pluginId: string): PluginStorageApi {
     subscribe: (filter, handler) =>
       subscribeToUserStateChanges(pluginId, TAB_WRITER_ID, filter, handler),
   };
+}
+
+/** Calls the authenticated declared-action route; public webhook paths stay out of this API. */
+function invokePluginAction<TResponse>(
+  pluginId: string,
+  key: string,
+  input?: PluginActionInput,
+  options?: PluginActionOptions,
+): Promise<TResponse> {
+  const payload = {
+    ...(input?.workspaceId ? { workspaceId: input.workspaceId } : {}),
+    ...(input?.taskId ? { taskId: input.taskId } : {}),
+    ...(input?.repositoryId ? { repositoryId: input.repositoryId } : {}),
+    ...(input && "body" in input ? { body: input.body } : {}),
+  };
+  return fetchJson<TResponse>(
+    `/api/plugins/${encodeURIComponent(pluginId)}/actions/${encodeURIComponent(key)}`,
+    { init: { method: "POST", body: JSON.stringify(payload), signal: options?.signal } },
+  );
 }

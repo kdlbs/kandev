@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -58,6 +59,10 @@ type userStateCleanupStore interface {
 //     going through Service's error-wrapping Get).
 type Service struct {
 	mu sync.Mutex
+	// ownershipMu makes cross-plugin provider/reference ownership checks and
+	// transitions into active one atomic reservation. Per-plugin lifecycle
+	// locks cannot protect two different IDs claiming the same identity.
+	ownershipMu sync.Mutex
 
 	// syncMu serializes Sync/bootScan calls (service_sync.go) so concurrent
 	// operator clicks — or a boot scan racing an operator-triggered sync —
@@ -74,6 +79,10 @@ type Service struct {
 	// holding a lifecycleLocks entry while calling into PluginRuntime
 	// cannot deadlock against it.
 	lifecycleLocks *keyedMutex
+	// dispatchLocks keep lifecycle replacement/disable boundaries from racing
+	// authenticated actions and reference RPCs. Dispatch holds a read lease for
+	// the full RPC; lifecycle mutation holds the write side.
+	dispatchLocks *keyedRWMutex
 
 	pluginsDir       string
 	store            store.Store
@@ -87,6 +96,11 @@ type Service struct {
 	deliverer Deliverer
 	runtime   PluginRuntime
 	secrets   SecretVault
+
+	// revokeGitCredentialProvider invalidates leases for a repository provider
+	// when its owning plugin is no longer active. It is wired by backendapp to
+	// the provider-neutral broker after both subsystems are constructed.
+	revokeGitCredentialProvider func(string)
 
 	// Host data API (ADR 0043) service-layer dependencies, wired via
 	// SetDataSources and handed to every pluginHost hostForPlugin builds.
@@ -137,6 +151,17 @@ type Service struct {
 	// default). nil until SetSettings is called by Provide; the auto-update
 	// accessors treat a nil store as "default off, no overrides possible".
 	settings *settingsStore
+
+	reservedReferenceSources       map[string]struct{}
+	reservedReferenceProviderKinds map[string]struct{}
+}
+
+// ReferenceIdentity reserves a host-owned composer source and its canonical
+// provider/kind pair so a plugin cannot shadow a built-in integration.
+type ReferenceIdentity struct {
+	Source   string
+	Provider string
+	Kind     string
 }
 
 // NewService wires a Service from its already-constructed dependencies.
@@ -150,6 +175,75 @@ func NewService(pluginStore store.Store, registry *Registry, eventBus bus.EventB
 		log:            log,
 		httpClient:     &http.Client{},
 		lifecycleLocks: newKeyedMutex(),
+		dispatchLocks:  newKeyedRWMutex(),
+	}
+}
+
+// SetGitCredentialLeaseRevoker wires immediate provider-lease revocation for
+// plugin lifecycle changes. The callback receives manifest-declared provider
+// IDs, never a plugin ID, because broker leases are scoped by provider.
+func (s *Service) SetGitCredentialLeaseRevoker(revoker func(string)) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.revokeGitCredentialProvider = revoker
+}
+
+// SetReservedReferenceIdentities installs the host-owned mention vocabulary.
+// It runs during backend composition before active plugin processes start.
+// Persisted active records that now collide are demoted to error so the
+// dynamic mention bridge cannot make backend startup fail.
+func (s *Service) SetReservedReferenceIdentities(identities []ReferenceIdentity) {
+	sources := make(map[string]struct{}, len(identities))
+	providerKinds := make(map[string]struct{}, len(identities))
+	for _, identity := range identities {
+		source := strings.TrimSpace(identity.Source)
+		provider := strings.TrimSpace(identity.Provider)
+		kind := strings.TrimSpace(identity.Kind)
+		if source == "" || provider == "" || kind == "" {
+			continue
+		}
+		sources[source] = struct{}{}
+		providerKinds[provider+"\x00"+kind] = struct{}{}
+	}
+	s.mu.Lock()
+	s.reservedReferenceSources = sources
+	s.reservedReferenceProviderKinds = providerKinds
+	s.mu.Unlock()
+
+	for _, record := range s.List() {
+		if record.Status != StatusActive || !s.collidesWithReservedReference(record.ReferenceSources) {
+			continue
+		}
+		if err := s.setStatus(record.ID, StatusError); err != nil {
+			s.log.Warn("plugins: could not revoke host-owned reference collision",
+				zap.String("plugin_id", record.ID), zap.Error(err))
+		}
+	}
+}
+
+func (s *Service) collidesWithReservedReference(sources []manifest.ReferenceSource) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, source := range sources {
+		if _, reserved := s.reservedReferenceSources[source.Source]; reserved {
+			return true
+		}
+		if _, reserved := s.reservedReferenceProviderKinds[source.Provider+"\x00"+source.Kind]; reserved {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *Service) revokeGitCredentialProviderLeases(providers []string) {
+	s.mu.Lock()
+	revoker := s.revokeGitCredentialProvider
+	s.mu.Unlock()
+	if revoker == nil {
+		return
+	}
+	for _, provider := range providers {
+		revoker(provider)
 	}
 }
 
@@ -160,6 +254,26 @@ func NewService(pluginStore store.Store, registry *Registry, eventBus bus.EventB
 type keyedMutex struct {
 	mu    sync.Mutex
 	locks map[string]*sync.Mutex
+}
+
+type keyedRWMutex struct {
+	mu    sync.Mutex
+	locks map[string]*sync.RWMutex
+}
+
+func newKeyedRWMutex() *keyedRWMutex {
+	return &keyedRWMutex{locks: make(map[string]*sync.RWMutex)}
+}
+
+func (k *keyedRWMutex) lockFor(key string) *sync.RWMutex {
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	lock, ok := k.locks[key]
+	if !ok {
+		lock = &sync.RWMutex{}
+		k.locks[key] = lock
+	}
+	return lock
 }
 
 func newKeyedMutex() *keyedMutex {
@@ -346,11 +460,9 @@ func (s *Service) authLoginBridge() AuthLoginBridge {
 // SetKandevVersion wires the currently running kandev build version,
 // enabling Install to enforce a package's manifest.min_kandev_version
 // (checkMinKandevVersion): a package requiring a newer kandev is rejected
-// rather than installed and left to fail confusingly at spawn time. Not
-// currently called by Provide — the running build version needs to be
-// threaded down from internal/backendapp's ldflags-injected Version, which
-// is outside this package; until a caller wires it, min_kandev_version
-// remains parsed and stored but unenforced (the pre-existing behavior).
+// rather than installed and left to fail confusingly at spawn time. Provide
+// does not own executable build metadata; internal/backendapp wires its
+// ldflags-injected Version after constructing the service.
 func (s *Service) SetKandevVersion(v string) {
 	s.kandevVersion = v
 }
@@ -428,22 +540,23 @@ func (s *Service) hostForPlugin(pluginID string) pluginsdk.Host {
 		rec = &store.Record{} // every capability check below denies; should not happen in practice
 	}
 	return &pluginHost{
-		pluginID:         pluginID,
-		capabilities:     rec.Capabilities,
-		configSchema:     rec.ConfigSchema,
-		state:            s.state,
-		secrets:          s.secrets,
-		bus:              s.eventBus,
-		configs:          s.store,
-		taskData:         s.taskData,
-		workflows:        s.workflows,
-		workflowSteps:    s.workflowSteps,
-		agentProfiles:    s.agentProfiles,
-		sessionCodeStats: s.sessionCodeStats,
-		messageData:      s.messageData,
-		taskWriter:       s.taskWriter,
-		utilityDeps:      s.utilityAgentDeps,
-		writeDeps:        s.writeDependencies,
+		pluginID:            pluginID,
+		capabilities:        rec.Capabilities,
+		repositoryProviders: rec.RepositoryProviders,
+		configSchema:        rec.ConfigSchema,
+		state:               s.state,
+		secrets:             s.secrets,
+		bus:                 s.eventBus,
+		configs:             s.store,
+		taskData:            s.taskData,
+		workflows:           s.workflows,
+		workflowSteps:       s.workflowSteps,
+		agentProfiles:       s.agentProfiles,
+		sessionCodeStats:    s.sessionCodeStats,
+		messageData:         s.messageData,
+		taskWriter:          s.taskWriter,
+		utilityDeps:         s.utilityAgentDeps,
+		writeDeps:           s.writeDependencies,
 	}
 }
 
@@ -486,6 +599,9 @@ func (s *Service) UpdateConfig(ctx context.Context, id string, config map[string
 	lock := s.lifecycleLocks.lockFor(id)
 	lock.Lock()
 	defer lock.Unlock()
+	dispatchLock := s.dispatchLocks.lockFor(id)
+	dispatchLock.Lock()
+	defer dispatchLock.Unlock()
 
 	rec, err := s.Get(id)
 	if err != nil {
@@ -748,9 +864,27 @@ func (s *Service) Install(ctx context.Context, r io.Reader) (*store.Record, erro
 	lock := s.lifecycleLocks.lockFor(result.Manifest.ID)
 	lock.Lock()
 	defer lock.Unlock()
+	dispatchLock := s.dispatchLocks.lockFor(result.Manifest.ID)
+	dispatchLock.Lock()
+	defer dispatchLock.Unlock()
 
 	oldRec, hadOldRec := s.registry.Get(result.Manifest.ID)
+	if err := s.ensureOwnershipAvailable(result.Manifest); err != nil {
+		// pkgtar.Install has already atomically extracted exactly this new
+		// version before manifest-wide active-owner checks can run. Remove
+		// only that fresh version on rejection; otherwise a failed ownership
+		// check strands it and turns a later valid install into ErrVersionExists.
+		_ = os.RemoveAll(result.InstallPath)
+		return nil, err
+	}
 	wasRunning := s.runtime != nil && s.runtime.Running(result.Manifest.ID)
+	// Replacing an active plugin is an unload/reload boundary. Its old
+	// credential binding may no longer describe the successor, even when both
+	// package versions declare the same provider, so revoke before stopping the
+	// old runtime and exposing the new record.
+	if hadOldRec && oldRec.Status == StatusActive {
+		s.revokeGitCredentialProviderLeases(oldRec.RepositoryProviders)
+	}
 	if wasRunning {
 		s.runtime.Stop(result.Manifest.ID)
 	}
@@ -786,16 +920,23 @@ func (s *Service) Install(ctx context.Context, r io.Reader) (*store.Record, erro
 }
 
 // checkMinKandevVersion rejects a package whose manifest declares a
-// min_kandev_version newer than the currently running kandev build
-// (manifest.CompareVersions). A no-op (nil error) when either side is
-// unset: minVersion == "" (the manifest doesn't declare one, the common
-// case today) or s.kandevVersion == "" (no running version wired via
-// SetKandevVersion).
+// min_kandev_version newer than the currently running release build. Release
+// tags may carry a leading `v`; development and git-describe build strings do
+// not provide a trustworthy release boundary, so they deliberately skip this
+// release-only compatibility gate. An invalid manifest minimum is rejected.
 func (s *Service) checkMinKandevVersion(minVersion string) error {
 	if minVersion == "" || s.kandevVersion == "" {
 		return nil
 	}
-	if manifest.CompareVersions(s.kandevVersion, minVersion) < 0 {
+	runningVersion, runningRelease := manifest.NormalizeReleaseVersion(s.kandevVersion)
+	if !runningRelease {
+		return nil
+	}
+	minimumVersion, minimumRelease := manifest.NormalizeReleaseVersion(minVersion)
+	if !minimumRelease {
+		return fmt.Errorf("plugins: min_kandev_version %q is not a release version", minVersion)
+	}
+	if manifest.CompareVersions(runningVersion, minimumVersion) < 0 {
 		return fmt.Errorf("plugins: requires kandev >= %s, running %s", minVersion, s.kandevVersion)
 	}
 	return nil
@@ -911,14 +1052,19 @@ func (s *Service) Uninstall(ctx context.Context, id string) error {
 	lock := s.lifecycleLocks.lockFor(id)
 	lock.Lock()
 	defer lock.Unlock()
+	dispatchLock := s.dispatchLocks.lockFor(id)
+	dispatchLock.Lock()
+	defer dispatchLock.Unlock()
 
-	if _, err := s.Get(id); err != nil {
+	rec, err := s.Get(id)
+	if err != nil {
 		return err
 	}
 	wasRunning := s.runtime != nil && s.runtime.Running(id)
 	if s.runtime != nil {
 		s.runtime.Stop(id)
 	}
+	s.revokeGitCredentialProviderLeases(rec.RepositoryProviders)
 	if err := s.deletePluginSecrets(ctx, id); err != nil {
 		s.reconcileAbortedUninstall(id, wasRunning)
 		return fmt.Errorf("plugins: uninstall aborted, could not purge plugin secrets: %w", err)
@@ -1008,6 +1154,9 @@ func (s *Service) Enable(id string) error {
 	lock := s.lifecycleLocks.lockFor(id)
 	lock.Lock()
 	defer lock.Unlock()
+	dispatchLock := s.dispatchLocks.lockFor(id)
+	dispatchLock.Lock()
+	defer dispatchLock.Unlock()
 
 	rec, err := s.Get(id)
 	if err != nil {
@@ -1030,6 +1179,9 @@ func (s *Service) Disable(id string) error {
 	lock := s.lifecycleLocks.lockFor(id)
 	lock.Lock()
 	defer lock.Unlock()
+	dispatchLock := s.dispatchLocks.lockFor(id)
+	dispatchLock.Lock()
+	defer dispatchLock.Unlock()
 
 	rec, err := s.Get(id)
 	if err != nil {
@@ -1060,6 +1212,11 @@ const activateStartTimeout = 30 * time.Second
 // to StatusActive. If the spawn fails, it records the failure and transitions
 // the record to StatusError before returning the spawn error.
 func (s *Service) activate(rec *store.Record) error {
+	s.ownershipMu.Lock()
+	defer s.ownershipMu.Unlock()
+	if err := s.ensureOwnershipAvailable(&rec.Manifest); err != nil {
+		return err
+	}
 	if s.runtime != nil && !s.runtime.Running(rec.ID) {
 		ctx, cancel := context.WithTimeout(context.Background(), activateStartTimeout)
 		defer cancel()
@@ -1071,7 +1228,37 @@ func (s *Service) activate(rec *store.Record) error {
 			return fmt.Errorf("plugins: start %q: %w", rec.ID, err)
 		}
 	}
-	return s.SetStatus(rec.ID, StatusActive)
+	return s.setStatus(rec.ID, StatusActive)
+}
+
+// ensureOwnershipAvailable rejects duplicate ownership among active plugins.
+// Disabled plugins release ownership immediately; an in-place upgrade excludes
+// its previous record by plugin ID.
+func (s *Service) ensureOwnershipAvailable(candidate *manifest.Manifest) error {
+	for _, provider := range candidate.RepositoryProviders {
+		if owner, found := s.registry.activeRepositoryProviderOwner(provider, candidate.ID); found {
+			return fmt.Errorf("plugins: repository provider %q is already owned by active plugin %q", provider, owner)
+		}
+	}
+	for _, source := range candidate.ReferenceSources {
+		s.mu.Lock()
+		_, reservedSource := s.reservedReferenceSources[source.Source]
+		_, reservedProviderKind := s.reservedReferenceProviderKinds[source.Provider+"\x00"+source.Kind]
+		s.mu.Unlock()
+		if reservedSource {
+			return fmt.Errorf("plugins: reference source %q is owned by the host", source.Source)
+		}
+		if reservedProviderKind {
+			return fmt.Errorf("plugins: reference provider and kind %q/%q is owned by the host", source.Provider, source.Kind)
+		}
+		if owner, found := s.registry.activeReferenceSourceOwner(source.Source, candidate.ID); found {
+			return fmt.Errorf("plugins: reference source %q is already owned by active plugin %q", source.Source, owner)
+		}
+		if owner, found := s.registry.activeReferenceProviderKindOwner(source.Provider, source.Kind, candidate.ID); found {
+			return fmt.Errorf("plugins: reference provider and kind %q/%q is already owned by active plugin %q", source.Provider, source.Kind, owner)
+		}
+	}
+	return nil
 }
 
 // SetStatus applies a single-hop status transition for id, enforcing the
@@ -1084,6 +1271,21 @@ func (s *Service) activate(rec *store.Record) error {
 // both for the runtime spawn/stop and the status transition, and only want
 // a single Refresh for the whole operation.
 func (s *Service) SetStatus(id string, status Status) error {
+	if status == StatusActive {
+		s.ownershipMu.Lock()
+		defer s.ownershipMu.Unlock()
+		rec, err := s.Get(id)
+		if err != nil {
+			return err
+		}
+		if err := s.ensureOwnershipAvailable(&rec.Manifest); err != nil {
+			return err
+		}
+	}
+	return s.setStatusAndDiagnostic(id, status, nil, false)
+}
+
+func (s *Service) setStatus(id string, status Status) error {
 	return s.setStatusAndDiagnostic(id, status, nil, false)
 }
 
@@ -1093,17 +1295,19 @@ func (s *Service) SetStatus(id string, status Status) error {
 // public SetStatus keeps same-state transitions invalid.
 func (s *Service) setStatusAndDiagnostic(id string, status Status, failure error, allowSame bool) error {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 
 	rec, ok := s.registry.Get(id)
 	if !ok {
+		s.mu.Unlock()
 		return store.ErrNotFound
 	}
 	if rec.Status == status {
 		if !allowSame {
+			s.mu.Unlock()
 			return &ErrInvalidTransition{ID: id, From: rec.Status, To: status}
 		}
 	} else if !canTransition(rec.Status, status) {
+		s.mu.Unlock()
 		return &ErrInvalidTransition{ID: id, From: rec.Status, To: status}
 	}
 
@@ -1121,12 +1325,18 @@ func (s *Service) setStatusAndDiagnostic(id string, status Status, failure error
 
 	updated, ok := s.registry.SetRuntimeState(id, status, lastError, lastErrorAt)
 	if !ok {
+		s.mu.Unlock()
 		return store.ErrNotFound
 	}
 	if err := s.store.Save(updated); err != nil {
 		// Roll back the in-memory change so registry and disk stay in sync.
 		s.registry.Add(rec)
+		s.mu.Unlock()
 		return err
+	}
+	s.mu.Unlock()
+	if status != StatusActive {
+		s.revokeGitCredentialProviderLeases(updated.RepositoryProviders)
 	}
 	return nil
 }
@@ -1142,7 +1352,22 @@ func (s *Service) handleStatusChange(id string, healthy bool, reason error) {
 	if healthy {
 		newStatus = StatusActive
 	}
-	if err := s.setStatusAndDiagnostic(id, newStatus, reason, !healthy); err != nil {
+	var err error
+	if healthy {
+		s.ownershipMu.Lock()
+		rec, getErr := s.Get(id)
+		err = getErr
+		if err == nil {
+			err = s.ensureOwnershipAvailable(&rec.Manifest)
+		}
+		if err == nil {
+			err = s.setStatusAndDiagnostic(id, newStatus, reason, false)
+		}
+		s.ownershipMu.Unlock()
+	} else {
+		err = s.setStatusAndDiagnostic(id, newStatus, reason, true)
+	}
+	if err != nil {
 		s.log.Warn("plugins: health transition failed",
 			zap.String("plugin_id", id), zap.Bool("healthy", healthy), zap.Error(err))
 	} else {
@@ -1191,6 +1416,11 @@ func (s *Service) StartActivePlugins(ctx context.Context) {
 	}
 	for _, rec := range s.List() {
 		if rec.Status != StatusActive || !rec.IsManaged() || s.runtime.Running(rec.ID) {
+			continue
+		}
+		if err := s.ensureOwnershipAvailable(&rec.Manifest); err != nil {
+			s.log.Warn("plugins: active ownership collision", zap.String("plugin_id", rec.ID), zap.Error(err))
+			_ = s.SetStatus(rec.ID, StatusError)
 			continue
 		}
 		if err := s.runtime.Start(ctx, rec, s.hostForPlugin); err != nil {

@@ -16,10 +16,16 @@ package plugins
 import (
 	"context"
 	"errors"
+	"fmt"
+	"strings"
 
+	agentsettingsdto "github.com/kandev/kandev/internal/agent/settings/dto"
+	"github.com/kandev/kandev/internal/repoclone"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 	"github.com/kandev/kandev/pkg/pluginsdk"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 // ── Narrow write data-source interfaces ─────────────────────────────────
@@ -39,6 +45,20 @@ type TaskCreateInput struct {
 	Description    string
 	ParentID       string
 	Source         string
+	Repositories   []pluginsdk.PluginTaskRepository
+	Launch         TaskLaunchInput
+	Metadata       map[string]any
+	PlanMode       bool
+}
+
+// TaskLaunchInput contains validated launch fields for a freshly-created
+// plugin task. The backendapp adapter translates it to the orchestrator's
+// StartTask arguments without exposing the task service here.
+type TaskLaunchInput struct {
+	AgentProfileID    string
+	ExecutorProfileID string
+	Prompt            string
+	PlanMode          bool
 }
 
 // TaskUpdateInput is the plugins-local task-update request a taskWriter adapter
@@ -66,6 +86,7 @@ type PluginMessageResult struct {
 type taskWriter interface {
 	CreateTask(ctx context.Context, in TaskCreateInput) (*taskmodels.Task, error)
 	UpdateTask(ctx context.Context, in TaskUpdateInput) (*taskmodels.Task, error)
+	DeleteTask(ctx context.Context, id string) error
 }
 
 // taskMessenger delivers a prompt to a task session through the orchestrator's
@@ -84,12 +105,14 @@ type taskMessenger interface {
 // orchestrator's launch path. Best-effort — a launch failure never fails task
 // creation.
 type taskStarter interface {
-	StartTask(ctx context.Context, taskID string) error
+	StartTask(ctx context.Context, taskID string, launch TaskLaunchInput) error
 }
 
 // pluginSource is the "plugin:<id>" provenance stamped on rows this plugin
 // creates, so a created task/message is attributable and a plugin can never
 // spoof another origin.
+const taskSourceMetadataKey = "source"
+
 func (h *pluginHost) pluginSource() string {
 	return "plugin:" + h.pluginID
 }
@@ -118,6 +141,22 @@ func (r taskReader) Create(ctx context.Context, in pluginsdk.CreateTaskInput) (*
 	if in.Title == "" {
 		return nil, invalidArgument("title is required")
 	}
+	metadata, err := r.host.pluginTaskMetadata(in.Metadata)
+	if err != nil {
+		return nil, err
+	}
+	if err := r.host.validatePluginTaskRepositories(in.Repositories); err != nil {
+		return nil, err
+	}
+	launch, err := taskLaunchInput(in.Launch)
+	if err != nil {
+		return nil, err
+	}
+	if in.StartAgent {
+		if err := r.host.validateTaskLaunch(ctx, launch); err != nil {
+			return nil, err
+		}
+	}
 	workspaceID, workflowID, err := r.host.resolveCreatePlacement(ctx, in)
 	if err != nil {
 		return nil, err
@@ -130,12 +169,16 @@ func (r taskReader) Create(ctx context.Context, in pluginsdk.CreateTaskInput) (*
 		Description:    in.Description,
 		ParentID:       strDeref(in.ParentID),
 		Source:         r.host.pluginSource(),
+		Repositories:   in.Repositories,
+		Launch:         launch,
+		Metadata:       metadata,
+		PlanMode:       launch.PlanMode,
 	})
 	if err != nil {
 		return nil, err
 	}
 	if in.StartAgent {
-		r.host.startTaskBestEffort(ctx, created.ID)
+		r.host.startTaskBestEffort(ctx, created.ID, launch)
 	}
 	dto := taskModelToDTO(created)
 	return &dto, nil
@@ -230,12 +273,271 @@ func (h *pluginHost) defaultWorkflowID(ctx context.Context, workspaceID string) 
 // returns promptly (it launches on a detached, time-bounded context — see the
 // taskStarter doc), and a missing starter or a launch error just leaves the
 // task on the board for a manual start.
-func (h *pluginHost) startTaskBestEffort(ctx context.Context, taskID string) {
+func (h *pluginHost) startTaskBestEffort(ctx context.Context, taskID string, launch TaskLaunchInput) {
 	_, starter := h.writeDependencies()
 	if starter == nil {
 		return
 	}
-	_ = starter.StartTask(ctx, taskID)
+	_ = starter.StartTask(ctx, taskID, launch)
+}
+
+// pluginTaskMetadata stamps immutable provenance and keeps plugin data under
+// that provenance key. A plugin cannot replace source or write host metadata
+// outside its own namespace.
+func (h *pluginHost) pluginTaskMetadata(pluginMetadata map[string]any) (map[string]any, error) {
+	if _, exists := pluginMetadata[taskSourceMetadataKey]; exists {
+		return nil, invalidArgument("metadata.source is reserved")
+	}
+	metadata := map[string]any{taskSourceMetadataKey: h.pluginSource()}
+	if len(pluginMetadata) > 0 {
+		metadata[h.pluginSource()] = pluginMetadata
+	}
+	return metadata, nil
+}
+
+func (h *pluginHost) validatePluginTaskRepositories(repositories []pluginsdk.PluginTaskRepository) error {
+	for _, repository := range repositories {
+		if repository.RepositoryID != "" && repository.Remote != nil {
+			return invalidArgument("repository_id and remote descriptor are mutually exclusive")
+		}
+		if repository.RepositoryID == "" && repository.Remote == nil {
+			return invalidArgument("repository_id or remote descriptor is required")
+		}
+		if repository.Remote == nil {
+			continue
+		}
+		if err := validateRemoteRepositoryDescriptor(repository.Remote); err != nil {
+			return err
+		}
+		if !h.ownsRepositoryProvider(repository.Remote.ProviderID) {
+			return statusPermissionDeniedProvider(repository.Remote.ProviderID)
+		}
+	}
+	return nil
+}
+
+func validateRemoteRepositoryDescriptor(descriptor *pluginsdk.RemoteRepositoryDescriptor) error {
+	if descriptor.ProviderID == "" || descriptor.ProviderHost == "" || descriptor.OwnerOrProject == "" ||
+		descriptor.ProviderRepositoryID == "" || descriptor.Name == "" || descriptor.CloneURL == "" {
+		return invalidArgument("remote repository descriptor is incomplete")
+	}
+	if err := repoclone.ValidateHTTPSCloneOrigin(descriptor.CloneURL, descriptor.ProviderHost); err != nil {
+		return invalidArgument("remote repository clone_url must match its credential-free HTTPS provider origin")
+	}
+	return nil
+}
+
+func (h *pluginHost) ownsRepositoryProvider(provider string) bool {
+	for _, declared := range h.repositoryProviders {
+		if strings.EqualFold(provider, declared) {
+			return true
+		}
+	}
+	return false
+}
+
+func statusPermissionDeniedProvider(provider string) error {
+	return permissionDenied(fmt.Sprintf("repository_provider:%s", provider))
+}
+
+func taskLaunchInput(launch *pluginsdk.PluginTaskLaunchOptions) (TaskLaunchInput, error) {
+	if launch == nil {
+		return TaskLaunchInput{}, nil
+	}
+	input := TaskLaunchInput{
+		AgentProfileID:    strDeref(launch.AgentProfileID),
+		ExecutorProfileID: strDeref(launch.ExecutorProfileID),
+		Prompt:            strDeref(launch.Prompt),
+	}
+	if launch.PlanMode == nil || *launch.PlanMode == "" || strings.EqualFold(*launch.PlanMode, "off") {
+		return input, nil
+	}
+	if strings.EqualFold(*launch.PlanMode, "replace") || strings.EqualFold(*launch.PlanMode, "on") {
+		input.PlanMode = true
+		return input, nil
+	}
+	return TaskLaunchInput{}, invalidArgument("launch.plan_mode must be one of: off, on, replace")
+}
+
+// validateTaskLaunch confirms that auto-start profile references exist before
+// the task is created. This avoids a plugin creating a task that is guaranteed
+// to fail its requested launch, while keeping launch failures after creation
+// best-effort as documented by taskStarter.
+func (h *pluginHost) validateTaskLaunch(ctx context.Context, launch TaskLaunchInput) error {
+	if err := h.validateLaunchAgentProfile(ctx, launch.AgentProfileID); err != nil {
+		return err
+	}
+	return h.validateLaunchExecutorProfile(ctx, launch.ExecutorProfileID)
+}
+
+func (h *pluginHost) validateLaunchAgentProfile(ctx context.Context, id string) error {
+	if id == "" {
+		return nil
+	}
+	if h.agentProfiles == nil {
+		return status.Error(codes.Unimplemented, "agent profiles are unavailable")
+	}
+	response, err := h.agentProfiles.ListAgents(ctx)
+	if err != nil {
+		return err
+	}
+	if hasAgentProfile(response, id) {
+		return nil
+	}
+	return invalidArgument("launch.agent_profile_id is not available")
+}
+
+func hasAgentProfile(response *agentsettingsdto.ListAgentsResponse, id string) bool {
+	if response == nil {
+		return false
+	}
+	for _, agent := range response.Agents {
+		for _, profile := range agent.Profiles {
+			if profile.ID == id {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func (h *pluginHost) validateLaunchExecutorProfile(ctx context.Context, id string) error {
+	if id == "" {
+		return nil
+	}
+	if h.taskData == nil {
+		return status.Error(codes.Unimplemented, "executor profiles are unavailable")
+	}
+	profiles, err := h.taskData.ListAllExecutorProfiles(ctx)
+	if err != nil {
+		return err
+	}
+	if hasExecutorProfile(profiles, id) {
+		return nil
+	}
+	return invalidArgument("launch.executor_profile_id is not available")
+}
+
+func hasExecutorProfile(profiles []*taskmodels.ExecutorProfile, id string) bool {
+	for _, profile := range profiles {
+		if profile != nil && profile.ID == id {
+			return true
+		}
+	}
+	return false
+}
+
+// PluginOwnedTaskTrees returns a manager whose preview and delete operations
+// require api_write:tasks and exact source provenance on every traversed node.
+func (h *pluginHost) PluginOwnedTaskTrees() pluginsdk.PluginOwnedTaskTreeManager {
+	return pluginOwnedTaskTreeManager{host: h}
+}
+
+type pluginOwnedTaskTreeManager struct{ host *pluginHost }
+
+func (m pluginOwnedTaskTreeManager) Preview(ctx context.Context, rootTaskID string) ([]pluginsdk.Task, error) {
+	tasks, err := m.host.pluginOwnedTaskTree(ctx, rootTaskID)
+	if err != nil {
+		return nil, err
+	}
+	return tasksToDTOs(tasks), nil
+}
+
+func (m pluginOwnedTaskTreeManager) Delete(ctx context.Context, rootTaskID string) ([]string, error) {
+	tasks, err := m.host.pluginOwnedTaskTree(ctx, rootTaskID)
+	if err != nil {
+		return nil, err
+	}
+	if m.host.taskWriter == nil {
+		return m.host.UnimplementedHostData.PluginOwnedTaskTrees().Delete(ctx, rootTaskID)
+	}
+	if err := m.host.rejectMixedOwnershipDelete(ctx, tasks); err != nil {
+		return nil, err
+	}
+	deleted := make([]string, 0, len(tasks))
+	deleteCtx := context.WithoutCancel(ctx)
+	for index := len(tasks) - 1; index >= 0; index-- {
+		if err := m.host.taskWriter.DeleteTask(deleteCtx, tasks[index].ID); err != nil {
+			return deleted, fmt.Errorf("delete plugin-owned task tree after deleting %d task(s): %w", len(deleted), err)
+		}
+		deleted = append(deleted, tasks[index].ID)
+	}
+	return deleted, nil
+}
+
+func (h *pluginHost) rejectMixedOwnershipDelete(ctx context.Context, ownedTasks []*taskmodels.Task) error {
+	if len(ownedTasks) == 0 {
+		return nil
+	}
+	ownedIDs := make(map[string]struct{}, len(ownedTasks))
+	for _, task := range ownedTasks {
+		ownedIDs[task.ID] = struct{}{}
+	}
+	workspaceTasks, err := h.fetchTasksForWorkspaces(ctx, []string{ownedTasks[0].WorkspaceID}, true, true)
+	if err != nil {
+		return err
+	}
+	for _, task := range workspaceTasks {
+		if _, parentWillBeDeleted := ownedIDs[task.ParentID]; !parentWillBeDeleted {
+			continue
+		}
+		if _, childWillBeDeleted := ownedIDs[task.ID]; childWillBeDeleted {
+			continue
+		}
+		return status.Error(
+			codes.FailedPrecondition,
+			"plugin-owned task tree contains adopted or user-owned children; detach them before deleting",
+		)
+	}
+	return nil
+}
+
+func (h *pluginHost) pluginOwnedTaskTree(ctx context.Context, rootTaskID string) ([]*taskmodels.Task, error) {
+	if !h.capabilities.CanWrite(resourceTasks) {
+		return nil, permissionDenied(apiWriteCapability(resourceTasks))
+	}
+	if h.taskData == nil {
+		_, err := h.UnimplementedHostData.PluginOwnedTaskTrees().Preview(ctx, rootTaskID)
+		return nil, err
+	}
+	root, err := h.taskData.GetTask(ctx, rootTaskID)
+	if err != nil {
+		if errors.Is(err, repoerrors.ErrTaskNotFound) {
+			return nil, taskNotFound(rootTaskID)
+		}
+		return nil, err
+	}
+	if taskSource(root) != h.pluginSource() {
+		return nil, permissionDenied("plugin_owned_tasks")
+	}
+	tasks, err := h.fetchTasksForWorkspaces(ctx, []string{root.WorkspaceID}, true, true)
+	if err != nil {
+		return nil, err
+	}
+	children := make(map[string][]*taskmodels.Task)
+	for _, task := range tasks {
+		children[task.ParentID] = append(children[task.ParentID], task)
+	}
+	return ownedTaskSubtree(root, children, h.pluginSource()), nil
+}
+
+func ownedTaskSubtree(root *taskmodels.Task, children map[string][]*taskmodels.Task, source string) []*taskmodels.Task {
+	if root == nil || taskSource(root) != source {
+		return nil
+	}
+	out := []*taskmodels.Task{root}
+	for _, child := range children[root.ID] {
+		out = append(out, ownedTaskSubtree(child, children, source)...)
+	}
+	return out
+}
+
+func taskSource(task *taskmodels.Task) string {
+	if task == nil || task.Metadata == nil {
+		return ""
+	}
+	source, _ := task.Metadata[taskSourceMetadataKey].(string)
+	return source
 }
 
 // ── Message send (api_write:messages) ───────────────────────────────────

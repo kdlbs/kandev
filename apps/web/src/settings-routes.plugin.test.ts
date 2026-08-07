@@ -6,6 +6,7 @@ import { renderSettingsRoute } from "./settings-routes";
 
 const PLUGIN_ID = "plugin-a";
 const PLUGIN_SETTINGS_PATH = "/settings/plugins/plugin-a/config";
+const PLUGIN_INTEGRATION_ID = "source-control";
 
 function cleanupPlugins(...pluginIds: string[]) {
   pluginIds.forEach((id) => pluginRegistry.unregisterPlugin(id));
@@ -67,5 +68,85 @@ describe("renderSettingsRoute — plugin fallthrough", () => {
 
     // "/settings/general" is a real static route (GeneralSettings), not the plugin's.
     expect((route as ReactElement).type).not.toBe(ShouldNotMatch);
+  });
+});
+
+describe("renderSettingsRoute — plugin integration settings", () => {
+  afterEach(() => {
+    cleanupPlugins(PLUGIN_ID);
+    cleanup();
+  });
+
+  it("renders a registered integration in the native global settings route", () => {
+    function IntegrationSettings({ workspaceId }: { workspaceId?: string }) {
+      return `PluginIntegration:${workspaceId ?? "global"}`;
+    }
+    pluginRegistry.forPlugin(PLUGIN_ID).registerIntegrationSettings({
+      id: PLUGIN_INTEGRATION_ID,
+      label: "Source Control",
+      description: "Configure source control.",
+      Component: IntegrationSettings,
+    });
+
+    render(renderSettingsRoute(`/settings/integrations/${PLUGIN_INTEGRATION_ID}`) as ReactElement);
+
+    expect(screen.getByText("PluginIntegration:global")).not.toBeNull();
+  });
+
+  it("passes the decoded workspace id to a registered integration", () => {
+    function IntegrationSettings({ workspaceId }: { workspaceId?: string }) {
+      return `PluginIntegration:${workspaceId}`;
+    }
+    pluginRegistry.forPlugin(PLUGIN_ID).registerIntegrationSettings({
+      id: PLUGIN_INTEGRATION_ID,
+      label: "Source Control",
+      description: "Configure source control.",
+      Component: IntegrationSettings,
+    });
+
+    render(
+      renderSettingsRoute(
+        `/settings/workspace/workspace%20one/integrations/${PLUGIN_INTEGRATION_ID}`,
+      ) as ReactElement,
+    );
+
+    expect(screen.getByText("PluginIntegration:workspace one")).not.toBeNull();
+  });
+
+  it("wraps plugin content in the native integration settings section", () => {
+    pluginRegistry.forPlugin(PLUGIN_ID).registerIntegrationSettings({
+      id: PLUGIN_INTEGRATION_ID,
+      label: "Acme Source Control",
+      description: "Configure Acme source control.",
+      icon: "bitbucket",
+      Component: () => "Plugin-owned settings cards",
+    });
+
+    const { container } = render(
+      renderSettingsRoute(`/settings/integrations/${PLUGIN_INTEGRATION_ID}`) as ReactElement,
+    );
+
+    expect(screen.getByRole("heading", { name: "Acme Source Control" })).not.toBeNull();
+    expect(screen.getByText("Configure Acme source control.")).not.toBeNull();
+    expect(container.querySelector(".tabler-icon-brand-bitbucket")).not.toBeNull();
+    expect(screen.getByText("Plugin-owned settings cards")).not.toBeNull();
+  });
+
+  it("contains errors thrown by a plugin integration settings component", () => {
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    function ThrowingIntegration(): never {
+      throw new Error("boom");
+    }
+    pluginRegistry.forPlugin(PLUGIN_ID).registerIntegrationSettings({
+      id: PLUGIN_INTEGRATION_ID,
+      label: "Source Control",
+      description: "Configure source control.",
+      Component: ThrowingIntegration,
+    });
+
+    render(renderSettingsRoute(`/settings/integrations/${PLUGIN_INTEGRATION_ID}`) as ReactElement);
+
+    expect(screen.getByText(/this plugin page failed to load/i)).not.toBeNull();
+    errorSpy.mockRestore();
   });
 });

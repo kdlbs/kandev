@@ -1,94 +1,24 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { render, screen, fireEvent, cleanup } from "@testing-library/react";
+import { screen, fireEvent, cleanup } from "@testing-library/react";
 import type { Branch } from "@/lib/types/http";
-import type { TaskRemoteRepoRow } from "./task-create-dialog-types";
-import { TooltipProvider } from "@kandev/ui/tooltip";
 import type { UseRemoteRepositoriesResult } from "@/hooks/domains/integrations/use-remote-repositories";
-
-type AccessibleRepo = {
-  provider: "github" | "gitlab" | "azure_devops";
-  owner: string;
-  name: string;
-  full_name: string;
-  default_branch: string;
-  description?: string;
-  private: boolean;
-};
-type AccessibleOverrides = Omit<Partial<UseRemoteRepositoriesResult>, "repos"> & {
-  repos?: AccessibleRepo[];
-};
-function makeAccessible(overrides: AccessibleOverrides = {}): UseRemoteRepositoriesResult {
-  const repos = (overrides.repos ?? []).map((repo) => ({
-    provider: repo.provider,
-    id: repo.full_name,
-    owner: repo.owner,
-    name: repo.name,
-    fullName: repo.full_name,
-    url: remoteTestURL(repo),
-    defaultBranch: repo.default_branch,
-    private: repo.private,
-  }));
-  const availableProviders = overrides.availableProviders ?? [
-    ...new Set(repos.map((repo) => repo.provider)),
-  ];
-  return {
-    loading: false,
-    unavailable: false,
-    error: null,
-    search: () => undefined,
-    ...overrides,
-    repos,
-    availableProviders,
-  };
-}
-
-function remoteTestURL(repo: AccessibleRepo): string {
-  if (repo.provider === "azure_devops") {
-    return `https://dev.azure.com/acme/${repo.owner}/_git/${repo.name}`;
-  }
-  return `https://${repo.provider}.com/${repo.owner}/${repo.name}`;
-}
-import { RemoteRepoChip, type RemoteRepoChipProps } from "./task-create-dialog-remote-repo-chip";
+import { RemoteRepoChip } from "./task-create-dialog-remote-repo-chip";
+import {
+  githubSite,
+  makeAccessible,
+  noopBranch,
+  noopRemove,
+  renderInProvider,
+  renderRemoteRepoChip,
+  row,
+} from "./task-create-dialog-remote-repo-chip-test-support";
 
 const TRIGGER_TID = "remote-repo-chip-trigger";
 const INPUT_TID = "remote-repo-input";
 const ALREADY_ADDED_MARKER = "already-added-repository-marker";
 const FULL_NAME = "acme/site";
 const URL_ACME_SITE = "https://github.com/acme/site";
-function githubSite(overrides: Partial<AccessibleRepo> = {}): AccessibleRepo {
-  return {
-    provider: "github",
-    owner: "acme",
-    name: "site",
-    full_name: FULL_NAME,
-    default_branch: "main",
-    private: false,
-    ...overrides,
-  };
-}
 afterEach(cleanup);
-function row(overrides: Partial<TaskRemoteRepoRow> = {}): TaskRemoteRepoRow {
-  return { key: "remote-0", url: "", branch: "", source: "paste", ...overrides };
-}
-function renderInProvider(ui: Parameters<typeof render>[0]) {
-  return render(<TooltipProvider>{ui}</TooltipProvider>);
-}
-function renderRemoteRepoChip(overrides: Partial<RemoteRepoChipProps> = {}) {
-  return renderInProvider(
-    <RemoteRepoChip
-      row={row()}
-      branches={[]}
-      branchesLoading={false}
-      accessibleRepos={makeAccessible()}
-      onURLChange={vi.fn()}
-      onBranchChange={noopBranch}
-      onRemove={noopRemove}
-      {...overrides}
-    />,
-  );
-}
-const noopBranch = () => undefined;
-const noopRemove = () => undefined;
 describe("RemoteRepoChip — write paths", () => {
   it("keeps the committed URL visible and exposes an actionable resolution retry", () => {
     const onRetry = vi.fn();
@@ -119,7 +49,38 @@ describe("RemoteRepoChip — write paths", () => {
   });
 });
 
-describe("RemoteRepoChip — selection write paths", () => {
+describe("RemoteRepoChip — custom provider URL input", () => {
+  it("accepts a custom provider URL only when the provider registry matches it", () => {
+    const onURLChange = vi.fn();
+    const accessibleRepos = {
+      ...makeAccessible(),
+      matchesURL: (url: string) => url.includes("bitbucket.example.test/bitbucket/"),
+    } as unknown as UseRemoteRepositoriesResult;
+    renderInProvider(
+      <RemoteRepoChip
+        row={row()}
+        branches={[]}
+        branchesLoading={false}
+        accessibleRepos={accessibleRepos}
+        onURLChange={onURLChange}
+        onBranchChange={noopBranch}
+        onRemove={noopRemove}
+      />,
+    );
+    fireEvent.click(screen.getByTestId(TRIGGER_TID));
+    fireEvent.change(screen.getByTestId(INPUT_TID), {
+      target: { value: "https://bitbucket.example.test/bitbucket/projects/PLATFORM/repos/web" },
+    });
+    fireEvent.keyDown(screen.getByTestId(INPUT_TID), { key: "Enter" });
+
+    expect(onURLChange).toHaveBeenCalledWith(
+      "https://bitbucket.example.test/bitbucket/projects/PLATFORM/repos/web",
+      "paste",
+    );
+  });
+});
+
+describe("RemoteRepoChip — picker selection write paths", () => {
   it("picker selection writes URL + picker metadata (incl. default_branch) via onURLChange", () => {
     const accessibleRepos = makeAccessible({
       repos: [githubSite({ default_branch: "trunk" })],
@@ -181,6 +142,9 @@ describe("RemoteRepoChip — selection write paths", () => {
       expect.objectContaining({ provider: "azure_devops", fullName: "Platform/api" }),
     );
   });
+});
+
+describe("RemoteRepoChip — removal write path", () => {
   it("calls onRemove when the X button is clicked", () => {
     const onRemove = vi.fn();
     renderInProvider(

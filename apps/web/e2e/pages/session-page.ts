@@ -653,17 +653,19 @@ export class SessionPage {
 
   /** Submitted review row scoped by its normalized GitHub author login. */
   prSubmittedReview(author: string): Locator {
-    return this.page.getByTestId(`pr-submitted-review-${author.trim().toLowerCase()}`);
+    return this.page.getByTestId(`change-request-submitted-review-${author.trim().toLowerCase()}`);
   }
 
   /** Pending reviewer row scoped by its normalized GitHub author login. */
   prPendingReviewer(author: string): Locator {
-    return this.page.getByTestId(`pr-pending-reviewer-${author.trim().toLowerCase()}`);
+    return this.page.getByTestId(`change-request-pending-reviewer-${author.trim().toLowerCase()}`);
   }
 
   /** Re-request action scoped by its normalized GitHub author login. */
   prReRequestReviewButton(author: string): Locator {
-    return this.page.getByTestId(`pr-rerequest-review-${author.trim().toLowerCase()}`);
+    return this.page.getByTestId(
+      `change-request-review-action-rerequest-review-${author.trim().toLowerCase()}`,
+    );
   }
 
   // --- PR CI accessors: desktop hover popover + chip + mobile chip drawer ---

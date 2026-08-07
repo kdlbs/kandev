@@ -826,12 +826,18 @@ func bootActivePlugins(p routeParams) []webapp.ActivePluginPayload {
 	records := p.services.Plugins.ActiveUIPlugins()
 	out := make([]webapp.ActivePluginPayload, 0, len(records))
 	for _, rec := range records {
-		out = append(out, webapp.ActivePluginPayload{
+		entry := webapp.ActivePluginPayload{
 			ID:        rec.ID,
 			Name:      rec.DisplayName,
 			BundleURL: pluginBundleURL(rec),
 			StyleURLs: pluginStyleURLs(rec),
-		})
+		}
+		if rec.RepositoryProviders != nil {
+			providerIDs := make([]string, len(rec.RepositoryProviders))
+			copy(providerIDs, rec.RepositoryProviders)
+			entry.RepositoryProviderIDs = &providerIDs
+		}
+		out = append(out, entry)
 	}
 	return out
 }

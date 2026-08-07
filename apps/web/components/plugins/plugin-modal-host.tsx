@@ -1,12 +1,26 @@
 "use client";
 
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@kandev/ui/dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@kandev/ui/dialog";
+import {
+  Drawer,
+  DrawerContent,
+  DrawerDescription,
+  DrawerHeader,
+  DrawerTitle,
+} from "@kandev/ui/drawer";
 import {
   pluginModalManager,
   usePluginModals,
   type OpenPluginModal,
 } from "@/lib/plugins/modal-manager";
 import type { PluginModalOptions } from "@/lib/plugins/types";
+import { t } from "@/lib/i18n";
 import { PluginErrorBoundary } from "./plugin-error-boundary";
 
 /** Maps `PluginModalOptions.size` to the host's Dialog width classes. */
@@ -23,31 +37,80 @@ function preventWhenNotDismissible(dismissible: boolean) {
   };
 }
 
-function PluginModalInstance({ modal }: { modal: OpenPluginModal }) {
+function pluginDialogLabel(): string {
+  return t("plugins:pluginDialog");
+}
+
+type ModalSurfaceProps = {
+  modal: OpenPluginModal;
+  dismissible: boolean;
+  onOpenChange(open: boolean): void;
+};
+
+function PluginDrawer({ modal, dismissible, onOpenChange }: ModalSurfaceProps) {
   const { instanceId, pluginId, options } = modal;
-  const dismissible = options.dismissible ?? true;
+  const Content = options.content;
+  const noDescriptionProps = options.description ? {} : { "aria-describedby": undefined };
+  return (
+    <Drawer open dismissible={dismissible} onOpenChange={onOpenChange}>
+      <DrawerContent
+        {...noDescriptionProps}
+        className="max-h-[90dvh] pb-[max(1rem,env(safe-area-inset-bottom))]"
+      >
+        {(options.title || options.description) && (
+          <DrawerHeader>
+            {options.title ? (
+              <DrawerTitle>{options.title}</DrawerTitle>
+            ) : (
+              <DrawerTitle className="sr-only">{pluginDialogLabel()}</DrawerTitle>
+            )}
+            {options.description && <DrawerDescription>{options.description}</DrawerDescription>}
+          </DrawerHeader>
+        )}
+        {!options.title && !options.description && (
+          <DrawerTitle className="sr-only">{pluginDialogLabel()}</DrawerTitle>
+        )}
+        <div className="min-h-0 overflow-y-auto overscroll-contain px-4 pb-4">
+          <PluginErrorBoundary context={`drawer "${instanceId}" (plugin "${pluginId}")`}>
+            <Content />
+          </PluginErrorBoundary>
+        </div>
+      </DrawerContent>
+    </Drawer>
+  );
+}
+
+function PluginDialog({ modal, dismissible, onOpenChange }: ModalSurfaceProps) {
+  const { instanceId, pluginId, options } = modal;
   const Content = options.content;
   const guardClose = preventWhenNotDismissible(dismissible);
-
-  const handleOpenChange = (open: boolean) => {
-    if (open || !dismissible) return;
-    pluginModalManager.close(instanceId);
-  };
-
+  const noDescriptionProps = options.description ? {} : { "aria-describedby": undefined };
   return (
-    <Dialog open onOpenChange={handleOpenChange}>
+    <Dialog open onOpenChange={onOpenChange}>
       <DialogContent
-        className={SIZE_CLASSES[options.size ?? "md"]}
+        {...noDescriptionProps}
+        className={
+          modal.layout === "task-link"
+            ? "w-[calc(100vw-2rem)] sm:max-w-lg"
+            : SIZE_CLASSES[options.size ?? "md"]
+        }
         showCloseButton={dismissible}
         onEscapeKeyDown={guardClose}
         onInteractOutside={guardClose}
       >
-        {/* `options.title` is supplied by the plugin author, so it is
-            third-party data rather than host copy. */}
-        {options.title && (
+        {/* Plugin-owned title/description; render either when supplied. */}
+        {(options.title || options.description) && (
           <DialogHeader>
-            <DialogTitle>{options.title}</DialogTitle>
+            {options.title ? (
+              <DialogTitle>{options.title}</DialogTitle>
+            ) : (
+              <DialogTitle className="sr-only">{pluginDialogLabel()}</DialogTitle>
+            )}
+            {options.description && <DialogDescription>{options.description}</DialogDescription>}
           </DialogHeader>
+        )}
+        {!options.title && !options.description && (
+          <DialogTitle className="sr-only">{pluginDialogLabel()}</DialogTitle>
         )}
         <PluginErrorBoundary context={`modal "${instanceId}" (plugin "${pluginId}")`}>
           <Content />
@@ -57,10 +120,25 @@ function PluginModalInstance({ modal }: { modal: OpenPluginModal }) {
   );
 }
 
+function PluginModalInstance({ modal }: { modal: OpenPluginModal }) {
+  const dismissible = modal.options.dismissible ?? true;
+  const handleOpenChange = (open: boolean) => {
+    if (open || !dismissible) return;
+    pluginModalManager.close(modal.instanceId);
+  };
+  const props = { modal, dismissible, onOpenChange: handleOpenChange };
+  return modal.options.presentation === "drawer" ? (
+    <PluginDrawer {...props} />
+  ) : (
+    <PluginDialog {...props} />
+  );
+}
+
 /**
  * Renders every open plugin modal (`host.openModal(...)`) in a `@kandev/ui`
  * `Dialog`, each isolated behind its own `PluginErrorBoundary`. Mounted once
- * at the app root, alongside `<PluginBootBridge/>`.
+ * inside `<AppShell/>` so plugin content inherits host theme, tooltip, and
+ * toast providers.
  */
 export function PluginModalHost() {
   const modals = usePluginModals();

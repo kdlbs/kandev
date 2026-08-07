@@ -329,10 +329,7 @@ type staticRepoCloneCredential struct{}
 
 func (staticRepoCloneCredential) ResolveGitCredential(
 	context.Context,
-	string,
-	string,
-	string,
-	string,
+	repoclone.GitCredentialRequest,
 ) (string, string, error) {
 	return "x-access-token", "test-token", nil
 }

@@ -1,13 +1,14 @@
 "use client";
 
-import { IconBrandGithub, IconBrandGitlab } from "@tabler/icons-react";
+import { IconBrandGithub, IconBrandGitlab, IconGitBranch } from "@tabler/icons-react";
 import { Tabs, TabsList, TabsTrigger } from "@kandev/ui/tabs";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { AzureDevOpsIcon } from "@/components/icons/azure-devops-icon";
 import type { RemoteRepositoryProvider } from "@/hooks/domains/integrations/use-remote-repositories";
+import { pluginRegistry } from "@/lib/plugins/registry";
 import { cn } from "@/lib/utils";
 
-const PROVIDER_LABELS: Record<RemoteRepositoryProvider, string> = {
+const PROVIDER_LABELS: Record<string, string> = {
   github: "GitHub",
   gitlab: "GitLab",
   azure_devops: "Azure DevOps",
@@ -16,7 +17,16 @@ const PROVIDER_LABELS: Record<RemoteRepositoryProvider, string> = {
 export function RemoteRepositoryProviderIcon({ provider }: { provider: RemoteRepositoryProvider }) {
   if (provider === "github") return <IconBrandGithub className="size-3.5 shrink-0" />;
   if (provider === "gitlab") return <IconBrandGitlab className="size-3.5 shrink-0" />;
-  return <AzureDevOpsIcon className="size-3.5 shrink-0" />;
+  if (provider === "azure_devops") return <AzureDevOpsIcon className="size-3.5 shrink-0" />;
+  return <IconGitBranch className="size-3.5 shrink-0" />;
+}
+
+function providerLabel(provider: RemoteRepositoryProvider): string {
+  return (
+    PROVIDER_LABELS[provider] ??
+    pluginRegistry.getRepositoryProvider(provider)?.label ??
+    provider.replace(/[_-]+/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())
+  );
 }
 
 function ProviderTab({
@@ -26,7 +36,7 @@ function ProviderTab({
   provider: RemoteRepositoryProvider;
   compact: boolean;
 }) {
-  const label = PROVIDER_LABELS[provider];
+  const label = providerLabel(provider);
   const trigger = (
     <TabsTrigger
       value={provider}

@@ -49,6 +49,10 @@ func (p *fixturePlugin) HandleWebhook(ctx context.Context, req *pluginsdk.Webhoo
 	return &pluginsdk.WebhookResponse{Status: 200, Body: req.Body}, nil
 }
 
+func (*fixturePlugin) HandleAction(_ context.Context, req *pluginsdk.PluginActionRequest) (*pluginsdk.PluginActionResponse, error) {
+	return &pluginsdk.PluginActionResponse{Body: req.Body}, nil
+}
+
 // handleWrite exercises the Host data API write RPCs end to end: CreateTask,
 // then SendMessage to the task the Host returns. It responds "ok" on success so
 // the test can assert the round-trip completed; a Host error is surfaced as a

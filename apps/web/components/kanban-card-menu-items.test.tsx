@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
+import { IconBrandBitbucket } from "@tabler/icons-react";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from "@kandev/ui/dropdown-menu";
 import { pluginRegistry } from "@/lib/plugins/registry";
 import {
@@ -131,6 +132,35 @@ describe("buildKanbanCardMenuEntries — external issue links", () => {
     expect(linkMenu?.kind).toBe("submenu");
 
     expect(itemLabels(linkMenu)).toEqual(["GitHub Pull Request", "GitHub Issue", "Jira Ticket"]);
+  });
+
+  it("adds registered Link actions to the native Link submenu", () => {
+    const entries = buildKanbanCardMenuEntries({
+      workflows: [],
+      stepsByWorkflowId: {},
+      onLinkPullRequest: vi.fn(),
+      pluginLinkActions: [
+        {
+          id: "bitbucket-pull-request",
+          label: "Bitbucket Pull Request",
+          icon: "bitbucket",
+          onSelect: vi.fn(),
+        },
+      ],
+    } as never);
+
+    const linkMenu = entries.find((entry) => entry.kind === "submenu" && entry.key === "link");
+    expect(itemLabels(linkMenu)).toContain("Bitbucket Pull Request");
+    const bitbucket =
+      linkMenu?.kind === "submenu"
+        ? linkMenu.children.find(
+            (entry) => entry.kind === "item" && entry.key === "link-plugin-bitbucket-pull-request",
+          )
+        : undefined;
+    expect(bitbucket?.kind).toBe("item");
+    if (bitbucket?.kind === "item") {
+      expect((bitbucket.icon as { type?: unknown })?.type).toBe(IconBrandBitbucket);
+    }
   });
 });
 

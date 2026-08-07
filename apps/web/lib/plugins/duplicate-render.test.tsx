@@ -4,6 +4,7 @@ import { render, screen, cleanup } from "@testing-library/react";
 import { loadPlugins } from "./host";
 import { pluginRegistry } from "./registry";
 import { PluginSlot } from "@/components/plugins/plugin-slot";
+import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import type { ActivePlugin, PluginHostApi, PluginRegistry } from "./types";
 
 vi.mock("@/lib/config", () => ({ getBackendConfig: () => ({ apiBaseUrl: "" }) }));
@@ -25,11 +26,18 @@ function makeHostFactory(pluginId: string): PluginHostApi {
     React,
     jsx: React.createElement,
     store: { getState: () => ({}) as never, setState: () => {}, subscribe: () => () => {} },
-    api: { fetch: async () => new Response(), baseUrl: "" },
+    api: {
+      fetch: async () => new Response(),
+      invokeAction: async <TResponse,>() => undefined as TResponse,
+      baseUrl: "",
+    },
     ui: {},
+    useResponsiveBreakpoint,
     theme: "light",
     navigate: () => {},
     openModal: () => ({ close: () => {} }),
+    openTaskLinkDialog: () => ({ close: () => {} }),
+    openTaskReview: () => {},
     storage: {
       get: async () => undefined,
       set: async () => ({ updatedAt: "" }),

@@ -12,18 +12,23 @@ import (
 
 	"github.com/kandev/kandev/internal/common/logger"
 	orchexecutor "github.com/kandev/kandev/internal/orchestrator/executor"
+	"github.com/kandev/kandev/internal/plugins"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
 type fakePluginStarter struct {
 	started chan string
 	err     error
+	launch  plugins.TaskLaunchInput
 	// blockUntil, when non-nil, holds StartTask open until closed, so a test
 	// can prove the adapter returned before the (slow) launch finished.
 	blockUntil chan struct{}
 }
 
-func (f *fakePluginStarter) StartTask(ctx context.Context, taskID, _, _, _, _, _, _ string, _, _ bool, _ []v1.MessageAttachment) (*orchexecutor.TaskExecution, error) {
+func (f *fakePluginStarter) StartTask(ctx context.Context, taskID, agentProfileID, _, executorProfileID, _, prompt, _ string, planMode, _ bool, _ []v1.MessageAttachment) (*orchexecutor.TaskExecution, error) {
+	f.launch = plugins.TaskLaunchInput{
+		AgentProfileID: agentProfileID, ExecutorProfileID: executorProfileID, Prompt: prompt, PlanMode: planMode,
+	}
 	if f.blockUntil != nil {
 		select {
 		case <-f.blockUntil:
@@ -49,7 +54,7 @@ func TestPluginsStarter_LaunchesAsynchronously(t *testing.T) {
 	orch := &fakePluginStarter{started: make(chan string, 1)}
 	a := newStarterAdapter(t, orch)
 
-	require.NoError(t, a.StartTask(context.Background(), "task-1"))
+	require.NoError(t, a.StartTask(context.Background(), "task-1", plugins.TaskLaunchInput{}))
 	select {
 	case id := <-orch.started:
 		require.Equal(t, "task-1", id)
@@ -73,7 +78,7 @@ func TestPluginsStarter_ReturnsBeforeLaunchCompletes(t *testing.T) {
 	orch := &fakePluginStarter{started: make(chan string, 1), blockUntil: block}
 	a := newStarterAdapter(t, orch)
 
-	require.NoError(t, a.StartTask(context.Background(), "task-1"), "must return immediately even while the launch is in flight")
+	require.NoError(t, a.StartTask(context.Background(), "task-1", plugins.TaskLaunchInput{}), "must return immediately even while the launch is in flight")
 	release() // release the launch so the goroutine can finish
 	select {
 	case <-orch.started:
@@ -91,7 +96,7 @@ func TestPluginsStarter_DetachesFromCallerContext(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // cancel BEFORE the call
-	require.NoError(t, a.StartTask(ctx, "task-1"))
+	require.NoError(t, a.StartTask(ctx, "task-1", plugins.TaskLaunchInput{}))
 	select {
 	case id := <-orch.started:
 		require.Equal(t, "task-1", id, "launch proceeds despite the cancelled caller context")
@@ -104,9 +109,25 @@ func TestPluginsStarter_LaunchErrorIsSwallowed(t *testing.T) {
 	orch := &fakePluginStarter{started: make(chan string, 1), err: errors.New("no executor")}
 	a := newStarterAdapter(t, orch)
 
-	require.NoError(t, a.StartTask(context.Background(), "task-1"), "a launch error is best-effort, never surfaced")
+	require.NoError(t, a.StartTask(context.Background(), "task-1", plugins.TaskLaunchInput{}), "a launch error is best-effort, never surfaced")
 	select {
 	case <-orch.started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("orchestrator StartTask was never invoked")
+	}
+}
+
+func TestPluginsStarter_ForwardsLaunchOptions(t *testing.T) {
+	orch := &fakePluginStarter{started: make(chan string, 1)}
+	a := newStarterAdapter(t, orch)
+	launch := plugins.TaskLaunchInput{
+		AgentProfileID: "agent-1", ExecutorProfileID: "executor-profile-1", Prompt: "Fix it", PlanMode: true,
+	}
+
+	require.NoError(t, a.StartTask(context.Background(), "task-1", launch))
+	select {
+	case <-orch.started:
+		require.Equal(t, launch, orch.launch)
 	case <-time.After(2 * time.Second):
 		t.Fatal("orchestrator StartTask was never invoked")
 	}

@@ -20,10 +20,10 @@ type TaskRepositoryInput struct {
 	GitHubURL      string `json:"github_url,omitempty"`
 	RemoteURL      string `json:"remote_url,omitempty"`
 	Provider       string `json:"provider,omitempty"`
+	ProviderHost   string `json:"provider_host,omitempty"`
 	ProviderRepoID string `json:"provider_repo_id,omitempty"`
 	ProviderOwner  string `json:"provider_owner,omitempty"`
 	ProviderName   string `json:"provider_name,omitempty"`
-	ProviderHost   string `json:"provider_host,omitempty"`
 
 	// RemoteContribution is server-authored after provider resolution. It is
 	// intentionally excluded from JSON request surfaces; callers must not be
@@ -39,6 +39,12 @@ type TaskRepositoryInput struct {
 	// backfillRepoDefaultBranch). Left zero by create_task so the pinned
 	// "empty default_branch is filled at clone time" contract stays intact.
 	ResolveProviderDefaults bool `json:"-"`
+
+	// TrustedProviderDescriptor is an internal-only marker for a complete
+	// provider descriptor already authorized by the plugin host. It is never
+	// accepted from REST/MCP JSON; callers must still supply every identity and
+	// exact credential-free clone URL field above.
+	TrustedProviderDescriptor bool `json:"-"`
 }
 
 // CreateTaskRequest contains the data for creating a new task

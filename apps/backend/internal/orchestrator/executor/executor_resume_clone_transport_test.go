@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/kandev/kandev/internal/repoclone"
 	"github.com/kandev/kandev/internal/task/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
@@ -187,6 +188,73 @@ func TestEnsureRepoLocalPath_PersistsFreshCloneBeforeOriginFailure(t *testing.T)
 	}
 }
 
+func TestEnsureRepoClonedPrefersDeclaredRemoteURL(t *testing.T) {
+	cloner := &cloneTransportTestCloner{cloneURL: "https://wrong.example/acme/widgets.git"}
+	exec := newTestExecutor(t, &mockAgentManager{}, newMockRepository())
+	exec.SetRepoCloner(cloner, nil)
+
+	_, err := exec.ensureRepoCloned(context.Background(), &models.Repository{
+		ID: "repo-1", WorkspaceID: "workspace-1", Provider: "bitbucket",
+		ProviderOwner: "acme", ProviderName: "widgets",
+		RemoteURL: "https://bitbucket.example/scm/ENG/widgets.git",
+	})
+	if err != nil {
+		t.Fatalf("ensureRepoCloned(): %v", err)
+	}
+	if got, want := cloner.requestedCloneURL, "https://bitbucket.example/scm/ENG/widgets.git"; got != want {
+		t.Fatalf("clone URL = %q, want declared remote %q", got, want)
+	}
+}
+
+func TestEnsureRepoClonedUsesConfiguredProtocolForLegacyRepository(t *testing.T) {
+	cloner := &cloneTransportTestCloner{cloneURL: "git@github.com:acme/widgets.git"}
+	exec := newTestExecutor(t, &mockAgentManager{}, newMockRepository())
+	exec.SetRepoCloner(cloner, nil)
+
+	_, err := exec.ensureRepoCloned(context.Background(), &models.Repository{
+		ID: "repo-1", WorkspaceID: "workspace-1", Provider: "github",
+		ProviderOwner: "acme", ProviderName: "widgets",
+	})
+	if err != nil {
+		t.Fatalf("ensureRepoCloned(): %v", err)
+	}
+	if got, want := cloner.requestedCloneURL, "git@github.com:acme/widgets.git"; got != want {
+		t.Fatalf("clone URL = %q, want configured protocol %q", got, want)
+	}
+}
+
+func TestResolveTaskRepoInfoAuthenticatesPluginRefreshBeforeWorktree(t *testing.T) {
+	repoPath := initGitRepoWithOrigin(t, "https://bitbucket.org/acme/widgets.git")
+	repositoryStore := newMockRepository()
+	repositoryStore.repositories["repo-1"] = &models.Repository{
+		ID: "repo-1", WorkspaceID: "workspace-1", SourceType: "provider",
+		Provider: "bitbucket", ProviderHost: "https://bitbucket.org",
+		ProviderOwner: "acme", ProviderName: "widgets",
+		RemoteURL: "https://bitbucket.org/acme/widgets.git", LocalPath: repoPath,
+		DefaultBranch: "main", PullBeforeWorktree: true,
+	}
+	cloner := &cloneTransportTestCloner{}
+	exec := newTestExecutor(t, &mockAgentManager{}, repositoryStore)
+	exec.SetRepoCloner(cloner, nil)
+
+	info, err := exec.resolveTaskRepoInfoForSession(context.Background(), "session-1", &models.TaskRepository{
+		ID: "task-repo-1", TaskID: "task-1", RepositoryID: "repo-1", BaseBranch: "main",
+	})
+	if err != nil {
+		t.Fatalf("resolveTaskRepoInfoForSession(): %v", err)
+	}
+	if cloner.refreshCalls != 1 || !info.RemoteSyncHandled {
+		t.Fatalf("refresh calls = %d, remote sync handled = %v", cloner.refreshCalls, info.RemoteSyncHandled)
+	}
+	if got := cloner.refreshRequest; got.TaskID != "task-1" || got.SessionID != "session-1" ||
+		got.RepositoryID != "repo-1" || got.CloneURL != "https://bitbucket.org/acme/widgets.git" {
+		t.Fatalf("refresh request lost exact scope: %+v", got)
+	}
+	if cloner.refreshPath != repoPath {
+		t.Fatalf("refresh path = %q, want %q", cloner.refreshPath, repoPath)
+	}
+}
+
 func TestBuildResumeRequestPreparesEachAttachedRepositoryOnce(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not available")
@@ -244,16 +312,30 @@ func (u *localPathRecordingRepoUpdater) UpdateRepositoryDefaultBranch(context.Co
 }
 
 type cloneTransportTestCloner struct {
-	cloneURL       string
-	returnPath     string
-	setOriginErr   error
-	setOriginPaths []string
+	cloneURL          string
+	requestedCloneURL string
+	returnPath        string
+	setOriginErr      error
+	refreshCalls      int
+	refreshRequest    repoclone.GitCredentialRequest
+	refreshPath       string
+	setOriginPaths    []string
 }
 
-func (c *cloneTransportTestCloner) EnsureWorkspaceClonedForProvider(
-	context.Context, string, string, string, string, string, string, string, string,
+func (c *cloneTransportTestCloner) EnsureWorkspaceClonedWithCredentialRequest(
+	_ context.Context, request repoclone.GitCredentialRequest, _, _ string,
 ) (string, error) {
+	c.requestedCloneURL = request.CloneURL
 	return c.returnPath, nil
+}
+
+func (c *cloneTransportTestCloner) RefreshWorkspaceRepositoryWithCredentialRequest(
+	_ context.Context, request repoclone.GitCredentialRequest, repositoryPath, _, _ string,
+) error {
+	c.refreshCalls++
+	c.refreshRequest = request
+	c.refreshPath = repositoryPath
+	return nil
 }
 
 func (c *cloneTransportTestCloner) ShouldRecloneForWorkspace(string, string) bool { return false }

@@ -518,16 +518,28 @@ func (s *Service) SetQuickChatDir(dir string) {
 	s.quickChatDir = dir
 }
 
-// RemoteBranchLister fetches branches from a provider's remote (e.g. GitHub
-// API) without needing a local clone. Used by ListBranches so a repo that is
+// RemoteBranchSource is the host-verified identity of a provider-backed
+// workspace repository. Callers must derive it from persisted repository data.
+type RemoteBranchSource struct {
+	WorkspaceID          string
+	Provider             string
+	ProviderHost         string
+	ProviderRepositoryID string
+	Owner                string
+	Name                 string
+	RemoteURL            string
+	DefaultBranch        string
+}
+
+// RemoteBranchLister fetches branches from a provider's remote API without
+// needing a local clone. Used by ListBranches so a repo that is
 // registered as remote ("Remote" badge in the UI) can serve branches before
 // or even without the orchestrator finishing its clone.
 type RemoteBranchLister interface {
-	ListRepoBranches(ctx context.Context, workspaceID, owner, repo string) ([]Branch, error)
+	ListRepoBranches(ctx context.Context, source RemoteBranchSource) ([]Branch, error)
 }
 
-// SetRemoteBranchLister wires the remote branch source. Currently only GitHub
-// is plumbed; other providers can be added by extending the adapter.
+// SetRemoteBranchLister wires the provider-neutral remote branch source.
 func (s *Service) SetRemoteBranchLister(lister RemoteBranchLister) {
 	s.remoteBranchLister = lister
 }

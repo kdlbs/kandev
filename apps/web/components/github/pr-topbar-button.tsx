@@ -1,6 +1,7 @@
 "use client";
 
 import { memo, useRef, useState, type ReactNode } from "react";
+import { useTranslation } from "react-i18next";
 import {
   IconGitPullRequest,
   IconCheck,
@@ -9,7 +10,6 @@ import {
   IconChevronDown,
   IconAlertTriangle,
 } from "@tabler/icons-react";
-import { Button } from "@kandev/ui/button";
 import { Popover, PopoverAnchor, PopoverContent } from "@kandev/ui/popover";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import {
@@ -38,16 +38,18 @@ import { prIdentitySlug, prTaskKey } from "@/components/github/pr-utils";
 import { PR_CI_DESKTOP_POPOVER_SCROLL_CLASS, PRCIPopover } from "@/components/github/pr-ci-popover";
 import { MultiPRCIPopover } from "@/components/github/multi-pr-ci-popover";
 import { useAppStore } from "@/components/state-provider";
+import {
+  ChangeRequestTopbarButton,
+  ChangeRequestTopbarContent,
+} from "@/components/integrations/change-request-status-chrome";
 import type { TaskPR } from "@/lib/types/github";
-import { useTranslation } from "react-i18next";
 
 const POPOVER_OPEN_DELAY_MS = 150;
 const POPOVER_CLOSE_DELAY_MS = 150;
 type TriggerRef = { current: HTMLButtonElement | null };
 
 function focusAfterCollapse(triggerRef?: TriggerRef) {
-  if (!triggerRef) return;
-  setTimeout(() => triggerRef.current?.focus(), 0);
+  if (triggerRef) setTimeout(() => triggerRef.current?.focus(), 0);
 }
 
 // Badge for the hard merge blockers that must beat ready/awaiting-review:
@@ -164,15 +166,12 @@ function PRSingleButton({
   // single subscription warms both.
 
   const button = (
-    <Button
+    <ChangeRequestTopbarButton
       ref={triggerRef}
       data-testid="pr-topbar-button"
       data-pr-number={pr.pr_number}
       data-pr-state={pr.state}
       data-pr-ready-to-merge={isPRReadyToMerge(pr) ? "true" : "false"}
-      size="sm"
-      variant="outline"
-      className="cursor-pointer gap-1.5 px-2"
       onMouseOver={onTriggerEnter}
       onMouseEnter={onTriggerEnter}
       onMouseMove={onTriggerEnter}
@@ -188,10 +187,12 @@ function PRSingleButton({
         onOpenChange(false);
       }}
     >
-      <IconGitPullRequest className={`h-4 w-4 ${getPRStatusColor(pr)}`} />
-      <span className="text-xs font-medium">#{pr.pr_number}</span>
-      <PRStatusIcon pr={pr} />
-    </Button>
+      <ChangeRequestTopbarContent
+        label={`#${pr.pr_number}`}
+        colorClassName={getPRStatusColor(pr)}
+        statusIcon={<PRStatusIcon pr={pr} />}
+      />
+    </ChangeRequestTopbarButton>
   );
 
   if (usesTouchDrawer) {
@@ -259,13 +260,10 @@ function PRMultiButton({
   // never stack.
   const triggerButton = (
     <DropdownMenuTrigger asChild>
-      <Button
+      <ChangeRequestTopbarButton
         ref={triggerRef}
         data-testid="pr-topbar-button"
         data-pr-count={prs.length}
-        size="sm"
-        variant="outline"
-        className="cursor-pointer gap-1.5 px-2"
         onMouseOver={menuOpen ? undefined : onTriggerEnter}
         onMouseEnter={menuOpen ? undefined : onTriggerEnter}
         onMouseMove={menuOpen ? undefined : onTriggerEnter}
@@ -277,12 +275,12 @@ function PRMultiButton({
         onFocus={menuOpen ? undefined : onTriggerEnter}
         onBlur={onTriggerLeave}
       >
-        <IconGitPullRequest className={`h-4 w-4 ${aggColor}`} />
-        <span className="text-xs font-medium">
-          {prs.length} {t("github:prs")}
-        </span>
-        <IconChevronDown className="h-3 w-3 text-muted-foreground" />
-      </Button>
+        <ChangeRequestTopbarContent
+          label={`${prs.length} ${t("github:prs")}`}
+          colorClassName={aggColor}
+          dropdown={<IconChevronDown className="h-3 w-3 text-muted-foreground" />}
+        />
+      </ChangeRequestTopbarButton>
     </DropdownMenuTrigger>
   );
 

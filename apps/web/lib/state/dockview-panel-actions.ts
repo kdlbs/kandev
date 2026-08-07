@@ -32,6 +32,10 @@ function addSimplePanel(api: DockviewApi, groupId: string, opts: SimplePanelOpts
   focusOrAddPanel(api, { ...opts, position: { referenceGroup: groupId } });
 }
 
+export function reviewPanelId(providerId: string, reviewKey: string): string {
+  return `review-detail|${encodeURIComponent(providerId)}|${encodeURIComponent(reviewKey)}`;
+}
+
 type SidePanelOpts = { groupId?: string; quiet?: boolean; inCenter?: boolean };
 
 /**
@@ -550,6 +554,31 @@ function buildReviewPanelActions(get: StoreGet) {
         title: "Merge Request",
         position: { referenceGroup: canonical?.group.id ?? centerGroupId },
         params: { mrKey },
+      });
+    },
+    addReviewPanel: (providerId: string, reviewKey: string, title = "Review") => {
+      const { api, centerGroupId } = get();
+      if (!api) return;
+      const canonical = api.getPanel("pr-detail");
+      if (
+        canonical?.params?.providerId === providerId &&
+        canonical.params.reviewKey === reviewKey
+      ) {
+        canonical.api.setActive();
+        return;
+      }
+      const id = reviewPanelId(providerId, reviewKey);
+      const existing = api.getPanel(id);
+      if (existing) {
+        existing.api.setActive();
+        return;
+      }
+      focusOrAddPanel(api, {
+        id,
+        component: "review-detail",
+        title,
+        position: { referenceGroup: canonical?.group.id ?? centerGroupId },
+        params: { providerId, reviewKey },
       });
     },
   };

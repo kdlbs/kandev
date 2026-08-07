@@ -21,6 +21,7 @@ import (
 	"github.com/kandev/kandev/internal/auth/authn"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/db"
+	"github.com/kandev/kandev/internal/gitcredentials"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 	taskservice "github.com/kandev/kandev/internal/task/service"
@@ -312,6 +313,53 @@ func TestCredentialBrokerReadinessUsesExactResolveRoute(t *testing.T) {
 	router.ServeHTTP(response, request)
 	if response.Code != http.StatusNoContent || response.Header().Get("Cache-Control") != "no-store" {
 		t.Fatalf("configured readiness response = %d headers=%v", response.Code, response.Header())
+	}
+}
+
+type exactPathCredentialResolver struct{}
+
+func (exactPathCredentialResolver) Supports(providerID string) bool { return providerID == "bitbucket" }
+
+func (exactPathCredentialResolver) Binding(context.Context, gitcredentials.Scope) (string, error) {
+	return "generation-1", nil
+}
+
+func (exactPathCredentialResolver) Resolve(context.Context, gitcredentials.Scope) (gitcredentials.Credential, error) {
+	return gitcredentials.Credential{Username: "x-token-auth", Password: "fresh-token"}, nil
+}
+
+type exactPathCredentialAuthorizer struct{}
+
+func (exactPathCredentialAuthorizer) AuthorizeGitCredential(context.Context, gitcredentials.Scope) error {
+	return nil
+}
+
+func TestCredentialBrokerResolvePreservesExactProviderPath(t *testing.T) {
+	router, controller := setupControllerTest(&stubClient{})
+	broker := gitcredentials.NewBroker(exactPathCredentialResolver{}, exactPathCredentialAuthorizer{})
+	scope := gitcredentials.Scope{
+		ProviderID: "bitbucket", WorkspaceID: "workspace-1", TaskID: "task-1", SessionID: "session-1",
+		RepositoryID: "repository-1", Host: "bitbucket.example", Path: "/context/scm/ENG/widgets",
+	}
+	lease, err := broker.Issue(t.Context(), scope)
+	if err != nil {
+		t.Fatalf("Issue() error = %v", err)
+	}
+	controller.service.SetCredentialBroker(NewCredentialBrokerFromBroker(broker))
+	payload, err := json.Marshal(map[string]string{
+		"lease": lease.Token, "task_id": scope.TaskID, "session_id": scope.SessionID,
+		"repository_id": scope.RepositoryID, "owner": "context", "repo": "scm/ENG/widgets",
+		"host": scope.Host, "path": scope.Path,
+	})
+	if err != nil {
+		t.Fatalf("Marshal() error = %v", err)
+	}
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/github/credentials/resolve", bytes.NewReader(payload))
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", response.Code, response.Body.String())
 	}
 }
 

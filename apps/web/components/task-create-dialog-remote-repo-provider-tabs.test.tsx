@@ -46,6 +46,17 @@ const GITLAB_REPO: RemoteRepository = {
   private: false,
 };
 
+const BITBUCKET_REPO: RemoteRepository = {
+  provider: "bitbucket",
+  id: "web-42",
+  owner: "PLATFORM",
+  name: "web",
+  fullName: "PLATFORM/web",
+  url: "https://bitbucket.example.test/bitbucket/scm/PLATFORM/web.git",
+  defaultBranch: "main",
+  private: true,
+};
+
 afterEach(cleanup);
 
 function accessibleRepos(
@@ -84,6 +95,14 @@ function activateProvider(name: string) {
 }
 
 describe("RemoteRepoChip provider tabs", () => {
+  it("renders a registered-provider-style tab without requiring a built-in union member", () => {
+    renderPicker(accessibleRepos([GITHUB_REPO, BITBUCKET_REPO], ["github", "bitbucket"]));
+
+    expect(screen.getByRole("tab", { name: "Bitbucket" })).toBeTruthy();
+    activateProvider("Bitbucket");
+    expect(screen.getByText("PLATFORM/web")).toBeTruthy();
+  });
+
   it("shows bottom tabs and filters repositories when multiple providers are available", () => {
     renderPicker(
       accessibleRepos([GITHUB_REPO, GITLAB_REPO, AZURE_REPO], ["github", "gitlab", AZURE_PROVIDER]),

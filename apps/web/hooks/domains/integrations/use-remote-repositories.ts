@@ -7,10 +7,13 @@ import {
   listAzureDevOpsProjects,
   listAzureDevOpsRepositories,
 } from "@/lib/api/domains/azure-devops-api";
+import { usePluginRegistry } from "@/lib/plugins/registry";
+import type { PluginRepositoryProviderRegistration } from "@/lib/plugins/registry";
+import { looksLikeSupportedRemoteURL } from "@/components/workspace-source-picker/remote-url";
 
 export const REMOTE_REPOSITORY_PROVIDERS = ["github", "gitlab", "azure_devops"] as const;
 
-export type RemoteRepositoryProvider = (typeof REMOTE_REPOSITORY_PROVIDERS)[number];
+export type RemoteRepositoryProvider = (typeof REMOTE_REPOSITORY_PROVIDERS)[number] | (string & {});
 
 export type RemoteRepository = {
   provider: RemoteRepositoryProvider;
@@ -19,6 +22,7 @@ export type RemoteRepository = {
   name: string;
   fullName: string;
   url: string;
+  providerHost?: string;
   defaultBranch: string;
   private: boolean;
 };
@@ -30,6 +34,7 @@ export type UseRemoteRepositoriesResult = {
   error: Error | null;
   unavailable: boolean;
   search: (query: string) => void;
+  matchesURL?: (url: string) => boolean;
 };
 
 async function loadAzureRepositories(workspaceId: string): Promise<RemoteRepository[]> {
@@ -59,7 +64,16 @@ type RemoteRepositoryLoad = {
   availableProviders: RemoteRepositoryProvider[];
 };
 
-async function loadRemoteRepositories(workspaceId: string): Promise<RemoteRepositoryLoad> {
+type RepositoryRequest = {
+  provider: RemoteRepositoryProvider;
+  load: Promise<RemoteRepository[]>;
+};
+
+async function loadRemoteRepositories(
+  workspaceId: string,
+  pluginProviders: PluginRepositoryProviderRegistration[],
+  signal: AbortSignal,
+): Promise<RemoteRepositoryLoad> {
   const githubRequest = workspaceId
     ? fetchAccessibleRepos({ workspaceId, limit: 100 })
     : Promise.reject(new Error("workspace is required for GitHub repositories"));
@@ -69,40 +83,84 @@ async function loadRemoteRepositories(workspaceId: string): Promise<RemoteReposi
   const azureRequest = workspaceId
     ? loadAzureRepositories(workspaceId)
     : Promise.reject(new Error("workspace is required for Azure DevOps repositories"));
-  const results = await Promise.allSettled([
-    githubRequest.then((repos) =>
-      repos.map((repo) => ({
-        provider: "github" as const,
-        id: repo.full_name,
-        owner: repo.owner,
-        name: repo.name,
-        fullName: repo.full_name,
-        url: `https://github.com/${repo.owner}/${repo.name}`,
-        defaultBranch: repo.default_branch,
-        private: repo.private,
-      })),
-    ),
-    gitLabRequest.then(({ projects = [] }) =>
-      projects.map((project) => ({
-        provider: "gitlab" as const,
-        id: String(project.id),
-        owner: project.namespace,
-        name: project.path,
-        fullName: project.path_with_namespace,
-        url: project.web_url || `https://gitlab.com/${project.path_with_namespace}.git`,
-        defaultBranch: project.default_branch || "main",
-        private: project.visibility === "private",
-      })),
-    ),
-    azureRequest,
-  ]);
+  const requests: RepositoryRequest[] = [
+    {
+      provider: "github",
+      load: githubRequest.then((repos) =>
+        repos.map((repo) => ({
+          provider: "github" as const,
+          id: repo.full_name,
+          owner: repo.owner,
+          name: repo.name,
+          fullName: repo.full_name,
+          url: `https://github.com/${repo.owner}/${repo.name}`,
+          defaultBranch: repo.default_branch,
+          private: repo.private,
+        })),
+      ),
+    },
+    {
+      provider: "gitlab",
+      load: gitLabRequest.then(({ projects = [] }) =>
+        projects.map((project) => ({
+          provider: "gitlab" as const,
+          id: String(project.id),
+          owner: project.namespace,
+          name: project.path,
+          fullName: project.path_with_namespace,
+          url: project.web_url || `https://gitlab.com/${project.path_with_namespace}.git`,
+          defaultBranch: project.default_branch || "main",
+          private: project.visibility === "private",
+        })),
+      ),
+    },
+    { provider: "azure_devops", load: azureRequest },
+    ...(workspaceId
+      ? pluginProviders.map((provider) => ({
+          provider: provider.id,
+          load: provider
+            .listRepositories({ workspaceId, signal })
+            .then((repositories) =>
+              repositories.flatMap((repository) => toRemoteRepository(provider.id, repository)),
+            ),
+        }))
+      : []),
+  ];
+  const results = await Promise.allSettled(requests.map((request) => request.load));
   const availableProviders = results.flatMap((result, index) =>
-    result.status === "fulfilled" ? [REMOTE_REPOSITORY_PROVIDERS[index]] : [],
+    result.status === "fulfilled" ? [requests[index]!.provider] : [],
   );
   return {
     repos: results.flatMap((result) => (result.status === "fulfilled" ? result.value : [])),
     availableProviders,
   };
+}
+
+function toRemoteRepository(provider: string, value: unknown): RemoteRepository[] {
+  if (!value || typeof value !== "object") return [];
+  const repository = value as Record<string, unknown>;
+  const repositoryId = readString(repository.repositoryId) ?? readString(repository.id);
+  const owner = readString(repository.ownerOrProject) ?? readString(repository.owner);
+  const name = readString(repository.repositoryName) ?? readString(repository.name);
+  const url = readString(repository.cloneUrl) ?? readString(repository.url);
+  if (!repositoryId || !owner || !name || !url) return [];
+  return [
+    {
+      provider,
+      id: repositoryId,
+      owner,
+      name,
+      fullName: readString(repository.fullName) ?? `${owner}/${name}`,
+      url,
+      providerHost: readString(repository.providerHost),
+      defaultBranch: readString(repository.defaultBranch) ?? "",
+      private: repository.private === true,
+    },
+  ];
+}
+
+function readString(value: unknown): string | undefined {
+  return typeof value === "string" && value ? value : undefined;
 }
 
 export function useRemoteRepositories(workspaceId: string): UseRemoteRepositoriesResult {
@@ -111,6 +169,12 @@ export function useRemoteRepositories(workspaceId: string): UseRemoteRepositorie
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<Error | null>(null);
   const [availableProviders, setAvailableProviders] = useState<RemoteRepositoryProvider[]>([]);
+  const registry = usePluginRegistry();
+  const registryVersion = registry.getVersion();
+  const pluginProviders = useMemo(
+    () => registry.getRepositoryProviders(),
+    [registry, registryVersion],
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -118,7 +182,8 @@ export function useRemoteRepositories(workspaceId: string): UseRemoteRepositorie
     setAvailableProviders([]);
     setError(null);
     setLoading(true);
-    loadRemoteRepositories(workspaceId)
+    const controller = new AbortController();
+    loadRemoteRepositories(workspaceId, pluginProviders, controller.signal)
       .then((result) => {
         if (cancelled) return;
         setAllRepos(result.repos);
@@ -132,8 +197,9 @@ export function useRemoteRepositories(workspaceId: string): UseRemoteRepositorie
       });
     return () => {
       cancelled = true;
+      controller.abort();
     };
-  }, [workspaceId]);
+  }, [workspaceId, pluginProviders]);
 
   const repos = useMemo(() => {
     const needle = query.trim().toLowerCase();
@@ -141,6 +207,12 @@ export function useRemoteRepositories(workspaceId: string): UseRemoteRepositorie
     return allRepos.filter((repo) => repo.fullName.toLowerCase().includes(needle));
   }, [allRepos, query]);
   const search = useCallback((value: string) => setQuery(value), []);
+  const matchesURL = useCallback(
+    (url: string) =>
+      looksLikeSupportedRemoteURL(url) ||
+      pluginProviders.some((provider) => provider.matchesURL(url)),
+    [pluginProviders],
+  );
   return {
     repos,
     availableProviders,
@@ -148,5 +220,6 @@ export function useRemoteRepositories(workspaceId: string): UseRemoteRepositorie
     error,
     unavailable: !loading && availableProviders.length === 0,
     search,
+    matchesURL,
   };
 }

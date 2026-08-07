@@ -1,12 +1,29 @@
 import { describe, it, expect, afterEach, vi } from "vitest";
 import { pluginRegistry } from "./registry";
+import type { RepositoryProviderRegistration } from "./types";
 
 const TASK_SIDEBAR_SLOT = "task-sidebar";
 const TASK_CREATED_ACTION = "task.created";
 const APP_STATUS_LEFT_SLOT = "app-status-bar-left";
-
+const PRIMARY_PLUGIN_ID = "plugin-a";
+const SECONDARY_PLUGIN_ID = "plugin-b";
+const SOURCE_CONTROL_PROVIDER_ID = "source-control";
 function cleanup(...pluginIds: string[]) {
   pluginIds.forEach((id) => pluginRegistry.unregisterPlugin(id));
+}
+function repositoryProvider(
+  id: string,
+  overrides: Partial<RepositoryProviderRegistration> = {},
+): RepositoryProviderRegistration {
+  return {
+    id,
+    label: id,
+    listRepositories: async () => [],
+    matchesURL: () => false,
+    listBranches: async () => [],
+    inspectURL: async () => null,
+    ...overrides,
+  };
 }
 
 describe("pluginRegistry", () => {
@@ -464,5 +481,171 @@ describe("pluginRegistry — keybinding handlers", () => {
 
     expect(warnSpy).not.toHaveBeenCalled();
     warnSpy.mockRestore();
+  });
+});
+
+function cleanupProviderContracts() {
+  cleanup(PRIMARY_PLUGIN_ID, SECONDARY_PLUGIN_ID);
+}
+
+describe("pluginRegistry — repository provider contracts", () => {
+  afterEach(cleanupProviderContracts);
+
+  it("keeps repository provider ownership with its registering plugin", () => {
+    const provider = repositoryProvider(SOURCE_CONTROL_PROVIDER_ID);
+    pluginRegistry.forPlugin(PRIMARY_PLUGIN_ID).registerRepositoryProvider(provider);
+
+    expect(pluginRegistry.getRepositoryProvider(SOURCE_CONTROL_PROVIDER_ID)).toMatchObject({
+      pluginId: PRIMARY_PLUGIN_ID,
+      id: SOURCE_CONTROL_PROVIDER_ID,
+      label: SOURCE_CONTROL_PROVIDER_ID,
+    });
+  });
+
+  it("rejects a repository provider not declared for its plugin when declarations are available", () => {
+    pluginRegistry.setDeclaredRepositoryProviderIds(PRIMARY_PLUGIN_ID, ["declared-source-control"]);
+
+    expect(() =>
+      pluginRegistry
+        .forPlugin(PRIMARY_PLUGIN_ID)
+        .registerRepositoryProvider(repositoryProvider("other-source-control")),
+    ).toThrow('does not declare repository provider "other-source-control"');
+  });
+
+  it("rejects duplicate active provider ownership deterministically", () => {
+    pluginRegistry
+      .forPlugin(PRIMARY_PLUGIN_ID)
+      .registerRepositoryProvider(repositoryProvider(SOURCE_CONTROL_PROVIDER_ID));
+
+    expect(() =>
+      pluginRegistry
+        .forPlugin(SECONDARY_PLUGIN_ID)
+        .registerRepositoryProvider(repositoryProvider(SOURCE_CONTROL_PROVIDER_ID)),
+    ).toThrow(
+      `provider "${SOURCE_CONTROL_PROVIDER_ID}" is already owned by "${PRIMARY_PLUGIN_ID}"`,
+    );
+
+    expect(pluginRegistry.getRepositoryProvider(SOURCE_CONTROL_PROVIDER_ID)?.pluginId).toBe(
+      PRIMARY_PLUGIN_ID,
+    );
+  });
+
+  it("rejects provider IDs owned by first-party integrations", () => {
+    expect(() =>
+      pluginRegistry
+        .forPlugin(PRIMARY_PLUGIN_ID)
+        .registerRepositoryProvider(repositoryProvider("github")),
+    ).toThrow('provider "github" is reserved by the host');
+  });
+});
+
+describe("pluginRegistry — repository provider lifecycle", () => {
+  afterEach(cleanupProviderContracts);
+
+  it("aborts in-flight repository work when its owner unloads", async () => {
+    const aborted = vi.fn();
+    let markStarted: () => void;
+    const started = new Promise<void>((resolve) => {
+      markStarted = resolve;
+    });
+    const provider = repositoryProvider(SOURCE_CONTROL_PROVIDER_ID, {
+      listRepositories: ({ signal }) =>
+        new Promise((_, reject) => {
+          markStarted();
+          signal.addEventListener(
+            "abort",
+            () => {
+              aborted();
+              reject(new Error("provider request aborted"));
+            },
+            { once: true },
+          );
+        }),
+    });
+    pluginRegistry.forPlugin(PRIMARY_PLUGIN_ID).registerRepositoryProvider(provider);
+
+    const request = pluginRegistry
+      .getRepositoryProvider(SOURCE_CONTROL_PROVIDER_ID)
+      ?.listRepositories({ workspaceId: "workspace-a", signal: new AbortController().signal });
+    await started;
+    pluginRegistry.unregisterPlugin(PRIMARY_PLUGIN_ID);
+
+    await expect(request).rejects.toThrow("provider request aborted");
+    expect(aborted).toHaveBeenCalledOnce();
+  });
+
+  it("keeps re-enabled provider work tracked after an older request settles", async () => {
+    let rejectFirst!: (error: Error) => void;
+    let markFirstStarted!: () => void;
+    const firstStarted = new Promise<void>((resolve) => {
+      markFirstStarted = resolve;
+    });
+    const first = repositoryProvider(SOURCE_CONTROL_PROVIDER_ID, {
+      listRepositories: () =>
+        new Promise((_, reject) => {
+          rejectFirst = reject;
+          markFirstStarted();
+        }),
+    });
+    pluginRegistry.forPlugin(PRIMARY_PLUGIN_ID).registerRepositoryProvider(first);
+    const firstRequest = pluginRegistry
+      .getRepositoryProvider(SOURCE_CONTROL_PROVIDER_ID)!
+      .listRepositories({ workspaceId: "workspace-a", signal: new AbortController().signal });
+    await firstStarted;
+
+    pluginRegistry.unregisterPlugin(PRIMARY_PLUGIN_ID);
+    const secondAborted = vi.fn();
+    let markSecondStarted!: () => void;
+    const secondStarted = new Promise<void>((resolve) => {
+      markSecondStarted = resolve;
+    });
+    const second = repositoryProvider(SOURCE_CONTROL_PROVIDER_ID, {
+      listRepositories: ({ signal }) =>
+        new Promise((_, reject) => {
+          markSecondStarted();
+          signal.addEventListener(
+            "abort",
+            () => {
+              secondAborted();
+              reject(new Error("second provider request aborted"));
+            },
+            { once: true },
+          );
+        }),
+    });
+    pluginRegistry.forPlugin(PRIMARY_PLUGIN_ID).registerRepositoryProvider(second);
+    const secondRequest = pluginRegistry
+      .getRepositoryProvider(SOURCE_CONTROL_PROVIDER_ID)!
+      .listRepositories({ workspaceId: "workspace-a", signal: new AbortController().signal });
+    await secondStarted;
+    rejectFirst(new Error("first provider request stopped"));
+    await expect(firstRequest).rejects.toThrow();
+
+    pluginRegistry.unregisterPlugin(PRIMARY_PLUGIN_ID);
+
+    await expect(secondRequest).rejects.toThrow("second provider request aborted");
+    expect(secondAborted).toHaveBeenCalledOnce();
+  });
+});
+
+describe("pluginRegistry — task action contracts", () => {
+  afterEach(cleanupProviderContracts);
+
+  it("registers placement-aware task actions and revokes them with their owner", () => {
+    const action = {
+      id: "link-change",
+      label: "Link change request",
+      placement: "link" as const,
+      group: "Link",
+      run: async () => {},
+    };
+    pluginRegistry.forPlugin(PRIMARY_PLUGIN_ID).registerTaskAction(action);
+
+    expect(pluginRegistry.getTaskActions("link")).toEqual([
+      { ...action, pluginId: PRIMARY_PLUGIN_ID },
+    ]);
+
+    pluginRegistry.unregisterPlugin(PRIMARY_PLUGIN_ID);
+    expect(pluginRegistry.getTaskActions("link")).toEqual([]);
   });
 });

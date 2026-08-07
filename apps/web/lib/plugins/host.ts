@@ -125,6 +125,55 @@ function generationFencedRegistry(
   return fenced as unknown as PluginRegistry;
 }
 
+/**
+ * Fences host-side effects from a superseded or timed-out initializer. The
+ * registry alone is not enough: delayed plugin code can otherwise still open
+ * dialogs, navigate, mutate app state, or invoke authenticated actions after
+ * its registrations were revoked.
+ */
+function generationFencedHost(host: PluginHostApi, isCurrent: () => boolean): PluginHostApi {
+  const staleError = (): DOMException =>
+    new DOMException("Plugin load is no longer active", "AbortError");
+  const inertHandle = (): ReturnType<PluginHostApi["openModal"]> => ({ close: () => {} });
+  const setState = ((...args: unknown[]) => {
+    if (isCurrent()) {
+      (host.store.setState as unknown as (...forwarded: unknown[]) => void)(...args);
+    }
+  }) as PluginHostApi["store"]["setState"];
+  const subscribe: PluginHostApi["store"]["subscribe"] = (listener) => {
+    if (!isCurrent()) return () => {};
+    return host.store.subscribe((state, previousState) => {
+      if (isCurrent()) listener(state, previousState);
+    });
+  };
+  const fetch: PluginHostApi["api"]["fetch"] = (path, init) => {
+    if (!isCurrent()) return Promise.reject(staleError());
+    return host.api.fetch(path, init);
+  };
+  const invokeAction: PluginHostApi["api"]["invokeAction"] = (key, input, options) => {
+    if (!isCurrent()) return Promise.reject(staleError());
+    return host.api.invokeAction(key, input, options);
+  };
+
+  return {
+    ...host,
+    store: { ...host.store, setState, subscribe },
+    api: {
+      fetch,
+      invokeAction,
+      get baseUrl() {
+        return host.api.baseUrl;
+      },
+    },
+    navigate: (...args) => {
+      if (isCurrent()) host.navigate(...args);
+    },
+    openModal: (options) => (isCurrent() ? host.openModal(options) : inertHandle()),
+    openTaskLinkDialog: (options) =>
+      isCurrent() ? host.openTaskLinkDialog(options) : inertHandle(),
+  };
+}
+
 /** Defines `window.registerKandevPlugin` before any bundle loads. Idempotent. */
 export function installPluginGlobal(win: Window = window): void {
   (win as PluginGlobalWindow).registerKandevPlugin = (id, plugin) => {
@@ -187,7 +236,9 @@ async function loadPlugin(
       generationOpen = false;
       return;
     }
-    const host = hostFactory(plugin.id);
+    const host = generationFencedHost(hostFactory(plugin.id), () =>
+      isCurrentLoad(plugin.id, generation),
+    );
     // Idempotent (re)load. The nav/route/slot registry is append-only, so
     // running a plugin's initialize() a second time while its previous
     // registrations are still live leaves duplicates — e.g. a plugin's
@@ -202,6 +253,13 @@ async function loadPlugin(
     // registrations here so a reload always converges to exactly one set,
     // whatever the caller did — a no-op on a genuine first load.
     pluginRegistry.unregisterPlugin(plugin.id);
+    // Newer boot payloads carry manifest-owned provider IDs. Set them after
+    // revoking prior state and before plugin initialize(), so a re-enable
+    // cannot retain stale declarations and registration is checked eagerly.
+    // Omit this call for older payloads to preserve their existing registry API.
+    if (plugin.repositoryProviderIds) {
+      pluginRegistry.setDeclaredRepositoryProviderIds(plugin.id, plugin.repositoryProviderIds);
+    }
     // Fence the scoped registry on this generation so that if an even-newer
     // load supersedes us while initialize() is awaiting, a plugin that
     // registers post-await can't append onto the successor.
@@ -222,6 +280,7 @@ async function loadPlugin(
     if (isCurrentLoad(plugin.id, generation)) {
       if (result.timedOut) {
         pluginRegistry.markPluginFailed(plugin.id, generation);
+        revokeFailedLoad(plugin.id, generation);
       } else {
         pluginRegistry.markPluginReady(plugin.id, generation);
       }
@@ -232,7 +291,18 @@ async function loadPlugin(
       pluginRegistry.markPluginFailed(plugin.id, generation);
     }
     console.error(`[plugins] failed to load plugin "${plugin.id}"`, error);
+    revokeFailedLoad(plugin.id, generation);
   }
+}
+
+/** Removes a failed generation without disturbing a newer concurrent load. */
+function revokeFailedLoad(pluginId: string, generation: number): void {
+  if (!isCurrentLoad(pluginId, generation)) return;
+  pluginRegistry.unregisterPlugin(pluginId);
+  pluginModalManager.closeAllForPlugin(pluginId);
+  removeStyles(pluginId);
+  // Fence delayed registrations from an initializer that timed out.
+  claimLoadGeneration(pluginId);
 }
 
 /**

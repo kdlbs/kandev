@@ -20,8 +20,8 @@ const feedbackMocks = vi.hoisted(() => ({
   value: null as PRFeedback | null,
 }));
 const reviewMocks = vi.hoisted(() => ({ requestReviewers: vi.fn(), submitReview: vi.fn() }));
-const RE_REQUEST_BUTTON = "pr-rerequest-review-octocat";
-const PENDING_REVIEWER = "pr-pending-reviewer-octocat";
+const RE_REQUEST_BUTTON = "change-request-review-action-rerequest-review-octocat";
+const PENDING_REVIEWER = "change-request-pending-reviewer-octocat";
 const DISMISSED_REVIEWED_AT = "2026-01-01T00:00:00Z";
 
 vi.mock("@/hooks/domains/github/use-pr-feedback", () => ({
@@ -187,6 +187,17 @@ function renderPRDetail(taskPR = makeTaskPR()) {
   return render(prDetailTree(taskPR));
 }
 
+describe("PRDetailContent shared presentation", () => {
+  it("renders GitHub through the provider-neutral change request detail", () => {
+    feedbackMocks.value = makeFeedback({ pr: { body: "Shared review body" } });
+
+    renderPRDetail();
+
+    expect(screen.getByTestId("change-request-detail")).not.toBeNull();
+    expect(screen.getByText("Test PR")).not.toBeNull();
+  });
+});
+
 describe("shouldHideApproveButton", () => {
   it("hides when PR is closed", () => {
     expect(shouldHideApproveButton(makeTaskPR({ state: "closed" }), null, "bob")).toBe(true);
@@ -328,7 +339,7 @@ describe("PRDetailContent optimistic review reconciliation", () => {
     await waitFor(() => {
       expect(screen.queryByTestId(PENDING_REVIEWER)).toBeNull();
     });
-    expect(screen.getByTestId("pr-submitted-review-octocat")).not.toBeNull();
+    expect(screen.getByTestId("change-request-submitted-review-octocat")).not.toBeNull();
   });
 });
 
@@ -355,7 +366,7 @@ describe("PRDetailContent same-timestamp review reconciliation", () => {
     view.rerender(prDetailTree());
 
     await waitFor(() => expect(screen.queryByTestId(PENDING_REVIEWER)).toBeNull());
-    expect(screen.getByTestId("pr-submitted-review-octocat")).not.toBeNull();
+    expect(screen.getByTestId("change-request-submitted-review-octocat")).not.toBeNull();
   });
 });
 
