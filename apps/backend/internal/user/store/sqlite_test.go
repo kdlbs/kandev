@@ -387,6 +387,17 @@ func TestScanUserSettingsTodoListPanelDefault(t *testing.T) {
 	if !settings.ShowTodoListPanel {
 		t.Fatal("ShowTodoListPanel = false, want true (stored)")
 	}
+
+	settings, err = scanUserSettings(
+		settingsScanner{raw: `{"show_todo_list_panel":false}`},
+		DefaultUserID,
+	)
+	if err != nil {
+		t.Fatalf("scan explicit false: %v", err)
+	}
+	if settings.ShowTodoListPanel {
+		t.Fatal("ShowTodoListPanel = true, want false (explicit)")
+	}
 }
 
 func TestTodoListPanelSettingRoundTripThroughMarshalAndScan(t *testing.T) {
