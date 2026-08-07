@@ -51,7 +51,11 @@ describe("locale predicates", () => {
     expect([...SUPPORTED_LOCALES]).toEqual(["en", "pt-pt", "zh-cn", "pseudo"]);
   });
 
-  it("hides the pseudo locale in production builds only", () => {
+  // Only the `isProd` half of the contract. `selectableLocales` also requires
+  // `PSEUDO_LOCALE_BUNDLED`, and that half cannot be exercised here: the constant
+  // is fixed to `true` for the whole vitest run (config resolves in serve mode).
+  // `bundling.test.ts` covers the decision that produces it, in both directions.
+  it("hides the pseudo locale from production builds", () => {
     expect(selectableLocales(false)).toEqual(["en", "pt-pt", "zh-cn", "pseudo"]);
     expect(selectableLocales(true)).toEqual(["en", "pt-pt", "zh-cn"]);
   });

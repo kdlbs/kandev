@@ -44,20 +44,37 @@ export default function globalSetup() {
  * the artifact was built with `make build-web` instead of `make build-web-e2e`.
  * Only checked under KANDEV_I18N_COVERAGE=1; nothing else needs the catalog.
  *
- * The markers are read from the catalog itself rather than hardcoded, so this
- * cannot drift as `pnpm run i18n:pseudo` regenerates it.
+ * The markers are read from the catalogs themselves rather than hardcoded, so
+ * this cannot drift as `pnpm run i18n:pseudo` regenerates them — and the whole
+ * SOURCE directory is scanned rather than one named file, so adding, renaming or
+ * splitting a namespace cannot quietly turn the check into a no-op. Every path
+ * out of here either throws or has actually compared markers against `dist/`: a
+ * guard that can only ever pass is worth less than no guard, because it also
+ * reports clean.
  */
 function assertPseudoCatalogBundled() {
   if (process.env.KANDEV_I18N_COVERAGE !== "1") return;
 
-  const catalog = path.join(WEB_DIR, "src", "locales", "pseudo", "common.json");
-  if (!fs.existsSync(catalog)) return;
-  const markers = Object.values(
-    JSON.parse(fs.readFileSync(catalog, "utf8")) as Record<string, unknown>,
-  )
+  const catalogDir = path.join(WEB_DIR, "src", "locales", "pseudo");
+  const catalogs = fs.existsSync(catalogDir)
+    ? fs.readdirSync(catalogDir).filter((name) => name.endsWith(".json"))
+    : [];
+  const markers = catalogs
+    .flatMap((name) =>
+      Object.values(
+        JSON.parse(fs.readFileSync(path.join(catalogDir, name), "utf8")) as Record<string, unknown>,
+      ),
+    )
     .filter((value): value is string => typeof value === "string" && value.length >= 20)
-    .slice(0, 20);
-  if (markers.length === 0) return;
+    .slice(0, 50);
+
+  if (markers.length === 0) {
+    throw new Error(
+      `KANDEV_I18N_COVERAGE=1 but no usable pseudo source catalog was found in ${catalogDir}.\n` +
+        'The coverage oracle cannot mean anything without it — run "pnpm run i18n:pseudo" ' +
+        "to regenerate it. See docs/i18n.md.",
+    );
+  }
 
   const assets = path.join(WEB_DIR, "dist", "assets");
   const bundled = fs
