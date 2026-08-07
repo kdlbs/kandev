@@ -25,6 +25,7 @@ import { AgentProfilesSubList } from "@/components/settings/agents/agent-profile
 import { HostShellDialog } from "@/components/settings/host-shell-dialog";
 import { InstalledAgentCard } from "@/components/settings/installed-agent-card";
 import { AGENTS_BROWSE_SETTINGS_HREF } from "@/lib/settings-discovery/catalog/agents";
+import { detectedAgents, orphanedAgents } from "@/lib/settings/agent-display-order";
 import { toAgentProfileOption } from "@/lib/state/slices/settings/types";
 import type {
   AgentDiscovery,
@@ -122,11 +123,9 @@ function InstalledAgentsSection({
   const [shellOpen, setShellOpen] = useState(false);
 
   // Configured agents whose CLI the scan no longer detects still get a group
-  // (via a synthetic discovery record), so their profiles never vanish.
-  const installedNames = new Set(installedAgents.map((agent) => agent.name));
-  const orphanAgents = savedAgents.filter(
-    (agent) => agent.profiles.length > 0 && !installedNames.has(agent.name),
-  );
+  // (via a synthetic discovery record), so their profiles never vanish. The
+  // settings menu lists agents in this same order — see `agent-display-order`.
+  const orphanAgents = orphanedAgents(installedAgents, savedAgents);
 
   return (
     <div className="space-y-4">
@@ -218,10 +217,7 @@ function useAgentPageState() {
   const [rescanning, setRescanning] = useState(false);
   const [tuiDialogOpen, setTuiDialogOpen] = useState(false);
 
-  const installedAgents = useMemo(
-    () => discoveryAgents.filter((agent: AgentDiscovery) => agent.available),
-    [discoveryAgents],
-  );
+  const installedAgents = useMemo(() => detectedAgents(discoveryAgents), [discoveryAgents]);
   const savedAgentsByName = useMemo(
     () => new Map(savedAgents.map((agent: Agent) => [agent.name, agent])),
     [savedAgents],

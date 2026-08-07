@@ -36,6 +36,11 @@ const state = {
       },
     ],
   },
+  // The branch orders agents the way the Agents page groups them, so it reads
+  // the CLI scan. Empty here: one agent, so there is no order to disturb.
+  agentDiscovery: {
+    items: [] as Array<{ name: string; available: boolean }>,
+  },
   settingsData: {
     executorsLoaded: true,
     agentsLoaded: true,
