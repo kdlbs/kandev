@@ -28,7 +28,11 @@ func relatedTasksResponse(description string) map[string]interface{} {
 				"id": "task-C2", "title": "Child two", "state": "DONE", "description": description,
 			},
 		},
-		"siblings":   []interface{}{},
+		"siblings": []interface{}{
+			map[string]interface{}{
+				"id": "task-S1", "title": "Sibling task", "state": "RUNNING", "description": description,
+			},
+		},
 		"blockers":   []interface{}{},
 		"blocked_by": []interface{}{},
 	}
@@ -55,7 +59,7 @@ func TestListRelatedTasks_OmitsDescriptionsByDefault(t *testing.T) {
 	assert.NotContains(t, text, description)
 	assert.NotContains(t, text, `"description"`)
 	// The compact projection must still carry everything the caller navigates by.
-	for _, want := range []string{"task-A", "task-P", "task-C1", "task-C2", "Child one", "CREATED", "spec"} {
+	for _, want := range []string{"task-A", "task-P", "task-C1", "task-C2", "task-S1", "Child one", "CREATED", "spec"} {
 		assert.Contains(t, text, want)
 	}
 }

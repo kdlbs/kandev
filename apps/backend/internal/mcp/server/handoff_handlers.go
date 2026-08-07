@@ -104,8 +104,10 @@ func (s *Server) listRelatedTasksHandler() server.ToolHandlerFunc {
 	}
 }
 
-// relatedTaskGroups are the keys of the list_related_tasks response that carry
-// task projections — "task" and "parent" hold a single object, the rest arrays.
+// relatedTaskGroups are the explicit keys of the ActionMCPListRelatedTasks
+// response that carry task projections — "task" and "parent" hold a single
+// object, the rest arrays. Keep this list in sync when that response gains a
+// new relationship group so compact-mode stripping remains complete.
 var relatedTaskGroups = []string{"task", "parent", "children", "siblings", "blockers", "blocked_by"}
 
 // stripRelatedTaskDescriptions drops the description from every projected task
