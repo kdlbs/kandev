@@ -193,6 +193,18 @@ function MRAutoFixRoundHelpButton({
   );
 }
 
+function MRAutoMergeHelpButton() {
+  const { t } = useTranslation();
+  return (
+    <MRAutomationHelpButton
+      testId="mr-auto-merge-help"
+      ariaLabel={t("gitlab:mrAutomationExplainAutoMerge")}
+    >
+      <span data-testid="mr-auto-merge-explanation">{t("gitlab:mrAutoMergeReadyExplanation")}</span>
+    </MRAutomationHelpButton>
+  );
+}
+
 function MRAutomationHeader({
   disabled,
   onEditPrompt,
@@ -274,6 +286,7 @@ function MRAutomationOptionRows({
         checked={Boolean(options?.auto_merge_enabled)}
         disabled={disabled}
         onCheckedChange={(checked) => patchOption({ auto_merge_enabled: checked })}
+        help={options?.auto_merge_enabled ? <MRAutoMergeHelpButton /> : null}
       />
     </>
   );

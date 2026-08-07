@@ -177,6 +177,35 @@ describe("MRAutomationControls — Automation section (AC1)", () => {
     expect(screen.getByTestId("mr-auto-fix-round-help")).toBeTruthy();
   });
 
+  it("shows the auto-merge readiness help button only when auto-merge is enabled", () => {
+    hookMocks.options = makeOptions({ auto_merge_enabled: false });
+    renderControls();
+    expect(screen.queryByTestId("mr-auto-merge-help")).toBeNull();
+
+    cleanup();
+    hookMocks.options = makeOptions({ auto_merge_enabled: true });
+    renderControls();
+    expect(screen.getByTestId("mr-auto-merge-help")).toBeTruthy();
+  });
+
+  it("disables both automation switches while loading", () => {
+    hookMocks.loading = true;
+    hookMocks.options = null;
+    renderControls();
+    expect(screen.getByLabelText(AUTO_FIX_LABEL)).toHaveProperty("disabled", true);
+    expect(screen.getByLabelText(AUTO_MERGE_LABEL)).toHaveProperty("disabled", true);
+  });
+});
+
+describe("MRAutomationControls — auto-fix prompt editor", () => {
+  beforeEach(() => {
+    resetHookMocks();
+  });
+
+  afterEach(() => {
+    cleanup();
+  });
+
   it("opens the auto-fix prompt dialog with the effective prompt pre-filled", () => {
     hookMocks.options = makeOptions({ effective_auto_fix_prompt: "custom prompt text" });
     renderControls();
@@ -227,13 +256,5 @@ describe("MRAutomationControls — Automation section (AC1)", () => {
     fireEvent.click(screen.getByLabelText(EDIT_PROMPT_LABEL));
     fireEvent.click(screen.getByText("Use default"));
     expect(hookMocks.resetPromptMock).toHaveBeenCalled();
-  });
-
-  it("disables both automation switches while loading", () => {
-    hookMocks.loading = true;
-    hookMocks.options = null;
-    renderControls();
-    expect(screen.getByLabelText(AUTO_FIX_LABEL)).toHaveProperty("disabled", true);
-    expect(screen.getByLabelText(AUTO_MERGE_LABEL)).toHaveProperty("disabled", true);
   });
 });
