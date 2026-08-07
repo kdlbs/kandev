@@ -1,5 +1,7 @@
 "use client";
 
+import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 import { IconAlertTriangle, IconLoader2, IconRefresh } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import {
@@ -20,9 +22,15 @@ import {
 } from "@kandev/ui/drawer";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
+import {
+  canApproveAgentRuntimeUpdate,
+  resolveRuntimeVersionPair,
+} from "@/lib/agent-runtime-update";
 import type { AgentUpdateJob, AgentUpdatePreview, InstallJob } from "@/lib/api";
 import type { RuntimeUpdate } from "@/lib/types/http";
 import { useAgentUpdateDialogState } from "./use-agent-update-dialog-state";
+
+const UPDATE_AGENT_KEY = "agents:updateAgent";
 
 const ACTIVE_UPDATE_STATUSES = new Set<AgentUpdateJob["status"]>([
   "queued",
@@ -31,23 +39,24 @@ const ACTIVE_UPDATE_STATUSES = new Set<AgentUpdateJob["status"]>([
   "refreshing",
 ]);
 
-function updatePhase(status: AgentUpdateJob["status"] | undefined): string | null {
-  switch (status) {
-    case "queued":
-      return "Update queued…";
-    case "resolving":
-      return "Checking latest version…";
-    case "updating":
-      return "Updating runtime…";
-    case "refreshing":
-      return "Refreshing agent capabilities…";
-    default:
-      return null;
-  }
+// The job `status` values are the wire enum; only the phase labels are copy, so
+// they travel as catalog keys and resolve at render.
+const UPDATE_PHASE_KEYS: Partial<Record<AgentUpdateJob["status"], string>> = {
+  queued: "agents:updatePhaseQueued",
+  resolving: "agents:updatePhaseResolving",
+  updating: "agents:updatePhaseUpdating",
+  refreshing: "agents:updatePhaseRefreshing",
+};
+
+function updatePhase(t: TFunction, status: AgentUpdateJob["status"] | undefined): string | null {
+  const key = status ? UPDATE_PHASE_KEYS[status] : undefined;
+  return key ? t(key) : null;
 }
 
 function UpdateResult({ agentName, job }: { agentName: string; job?: AgentUpdateJob }) {
+  const { t } = useTranslation();
   if (!job) return null;
+  const { versionsMatch } = resolveRuntimeVersionPair(null, job);
   if (job.status === "succeeded" && job.refresh_error) {
     return (
       <p
@@ -55,7 +64,7 @@ function UpdateResult({ agentName, job }: { agentName: string; job?: AgentUpdate
         role="alert"
         data-testid={`agent-update-result-${agentName}`}
       >
-        Runtime updated, but capabilities could not be refreshed: {job.refresh_error}
+        {t("agents:runtimeUpdatedRefreshFailed", { error: job.refresh_error })}
       </p>
     );
   }
@@ -66,7 +75,7 @@ function UpdateResult({ agentName, job }: { agentName: string; job?: AgentUpdate
         role="status"
         data-testid={`agent-update-result-${agentName}`}
       >
-        Runtime updated successfully.
+        {versionsMatch ? t("agents:runtimeAlreadyUpToDate") : t("agents:runtimeUpdatedSuccess")}
       </p>
     );
   }
@@ -77,7 +86,7 @@ function UpdateResult({ agentName, job }: { agentName: string; job?: AgentUpdate
         role="alert"
         data-testid={`agent-update-result-${agentName}`}
       >
-        {job.error || "The runtime update failed."}
+        {job.error || t("agents:runtimeUpdateFailed")}
       </p>
     );
   }
@@ -94,6 +103,31 @@ type UpdateBodyProps = {
   onRetryPreview: () => void;
 };
 
+function RuntimeVersionSummary({
+  preview,
+  job,
+}: {
+  preview: AgentUpdatePreview;
+  job?: AgentUpdateJob;
+}) {
+  const { t } = useTranslation();
+  const { currentVersion, targetVersion, versionsMatch } = resolveRuntimeVersionPair(preview, job);
+
+  return (
+    <div className="space-y-1">
+      <p className="font-medium">{t("agents:runtimeVersion")}</p>
+      <p className="break-words font-mono text-sm">
+        {versionsMatch ? currentVersion : `${currentVersion} → ${targetVersion}`}
+      </p>
+      {versionsMatch && (
+        <p className="text-sm text-muted-foreground" role="status">
+          {t("agents:upToDate")}
+        </p>
+      )}
+    </div>
+  );
+}
+
 function UpdateBody({
   agentName,
   preview,
@@ -103,7 +137,8 @@ function UpdateBody({
   job,
   onRetryPreview,
 }: UpdateBodyProps) {
-  const phase = updatePhase(job?.status);
+  const { t } = useTranslation();
+  const phase = updatePhase(t, job?.status);
   return (
     <div
       className="max-h-[calc(80dvh-10rem)] min-h-0 space-y-4 overflow-y-auto overscroll-contain px-4 py-3 text-xs/relaxed"
@@ -112,7 +147,7 @@ function UpdateBody({
       {loading && (
         <p className="flex items-center gap-2 text-muted-foreground" role="status">
           <IconLoader2 className="size-4 animate-spin" />
-          Checking the latest runtime version…
+          {t("agents:checkingLatestRuntimeVersion")}
         </p>
       )}
       {previewError && (
@@ -125,7 +160,7 @@ function UpdateBody({
             <span>{previewError}</span>
           </p>
           <Button type="button" variant="outline" size="sm" onClick={onRetryPreview}>
-            Retry version check
+            {t("agents:retryVersionCheck")}
           </Button>
         </div>
       )}
@@ -137,32 +172,19 @@ function UpdateBody({
         >
           <p className="flex items-start gap-2 text-destructive">
             <IconAlertTriangle className="mt-0.5 size-4 shrink-0" />
-            <span>Unable to start update: {approveError}</span>
+            <span>{t("agents:unableToStartUpdate", { error: approveError })}</span>
           </p>
         </div>
       )}
       {preview && (
         <>
-          <div className="space-y-1">
-            <p className="font-medium">Runtime version</p>
-            <p className="break-words font-mono text-sm">
-              {(job?.current_version || preview.current_version || "Unknown") +
-                " → " +
-                (job?.target_version || preview.target_version)}
-            </p>
-          </div>
+          <RuntimeVersionSummary preview={preview} job={job} />
           <div className="space-y-1 text-muted-foreground">
-            <p>
-              This updates the managed runtime on this Kandev host, then refreshes its models and
-              capabilities.
-            </p>
-            <p>
-              Active sessions keep running; only later probes and launches use the refreshed
-              runtime.
-            </p>
+            <p>{t("agents:runtimeUpdateExplainer")}</p>
+            <p>{t("agents:runtimeUpdateSessionsNote")}</p>
           </div>
           <div className="space-y-1">
-            <p className="font-medium">Command that will run</p>
+            <p className="font-medium">{t("agents:commandThatWillRun")}</p>
             <pre className="whitespace-pre-wrap break-all rounded-md bg-muted p-3 font-mono text-xs text-muted-foreground">
               {preview.command_string}
             </pre>
@@ -205,31 +227,6 @@ type UpdateFooterProps = {
   mobile?: boolean;
 };
 
-function canApproveUpdate({
-  preview,
-  previewError,
-  loading,
-  updateInFlight,
-  starting,
-  installInFlight,
-}: {
-  preview: AgentUpdatePreview | null;
-  previewError: string | null;
-  loading: boolean;
-  updateInFlight: boolean;
-  starting: boolean;
-  installInFlight: boolean;
-}) {
-  return (
-    Boolean(preview?.current_version) &&
-    !previewError &&
-    !loading &&
-    !updateInFlight &&
-    !starting &&
-    !installInFlight
-  );
-}
-
 function UpdateFooter({
   agentName,
   preview,
@@ -242,10 +239,12 @@ function UpdateFooter({
   onClose,
   mobile,
 }: UpdateFooterProps) {
+  const { t } = useTranslation();
   const updateInFlight = Boolean(job && ACTIVE_UPDATE_STATUSES.has(job.status));
   const canRetry = job?.status === "failed";
-  const canApprove = canApproveUpdate({
+  const canApprove = canApproveAgentRuntimeUpdate({
     preview,
+    job,
     previewError,
     loading,
     updateInFlight,
@@ -256,7 +255,7 @@ function UpdateFooter({
   const content = (
     <>
       <Button type="button" variant="outline" onClick={onClose}>
-        {job?.status === "succeeded" ? "Done" : "Cancel"}
+        {job?.status === "succeeded" ? t("agents:done") : t("common:cancel")}
       </Button>
       {showApprove && (
         <Button
@@ -266,7 +265,7 @@ function UpdateFooter({
           data-testid={`agent-update-confirm-${agentName}`}
         >
           {starting && <IconLoader2 className="mr-2 size-4 animate-spin" />}
-          {canRetry ? "Retry update" : "Approve update"}
+          {canRetry ? t("agents:retryUpdate") : t("agents:approveUpdate")}
         </Button>
       )}
     </>
@@ -292,6 +291,7 @@ function UpdateTrigger({
   installInFlight: boolean;
   onOpen: () => void;
 }) {
+  const { t } = useTranslation();
   return (
     <Tooltip>
       <TooltipTrigger asChild>
@@ -301,7 +301,7 @@ function UpdateTrigger({
             variant="ghost"
             size="icon"
             className="h-11 w-11 cursor-pointer active:scale-95 sm:h-7 sm:w-7"
-            aria-label={`Update ${displayName}`}
+            aria-label={t(UPDATE_AGENT_KEY, { name: displayName })}
             disabled={installInFlight}
             onClick={onOpen}
             data-testid={`agent-update-trigger-${agentName}`}
@@ -311,7 +311,9 @@ function UpdateTrigger({
         </span>
       </TooltipTrigger>
       <TooltipContent>
-        {installInFlight ? "Agent installation is in progress" : `Update ${displayName}`}
+        {installInFlight
+          ? t("agents:agentInstallationInProgress")
+          : t(UPDATE_AGENT_KEY, { name: displayName })}
       </TooltipContent>
     </Tooltip>
   );
@@ -334,6 +336,7 @@ export function AgentRuntimeUpdateControl({
   onPreview: (agentName: string) => Promise<AgentUpdatePreview>;
   onUpdate: (agentName: string) => Promise<AgentUpdateJob>;
 }) {
+  const { t } = useTranslation();
   const { isMobile } = useResponsiveBreakpoint();
   const {
     activeJob,
@@ -390,10 +393,8 @@ export function AgentRuntimeUpdateControl({
         <Drawer open={open} onOpenChange={handleOpenChange}>
           <DrawerContent className="max-h-[80dvh]" data-testid={`agent-update-drawer-${agentName}`}>
             <DrawerHeader className="shrink-0 text-left">
-              <DrawerTitle>Update {displayName}</DrawerTitle>
-              <DrawerDescription>
-                Review the update before Kandev changes this host runtime.
-              </DrawerDescription>
+              <DrawerTitle>{t(UPDATE_AGENT_KEY, { name: displayName })}</DrawerTitle>
+              <DrawerDescription>{t("agents:reviewUpdateBeforeApplying")}</DrawerDescription>
             </DrawerHeader>
             {body}
             {footer(true)}
@@ -406,10 +407,8 @@ export function AgentRuntimeUpdateControl({
             data-testid={`agent-update-dialog-${agentName}`}
           >
             <DialogHeader className="px-4 pt-4">
-              <DialogTitle>Update {displayName}</DialogTitle>
-              <DialogDescription>
-                Review the update before Kandev changes this host runtime.
-              </DialogDescription>
+              <DialogTitle>{t(UPDATE_AGENT_KEY, { name: displayName })}</DialogTitle>
+              <DialogDescription>{t("agents:reviewUpdateBeforeApplying")}</DialogDescription>
             </DialogHeader>
             {body}
             {footer()}

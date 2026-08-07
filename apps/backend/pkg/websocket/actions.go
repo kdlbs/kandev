@@ -117,7 +117,9 @@ const (
 	ActionMessageQueueUpdate        = "message.queue.update"
 	ActionMessageQueueAppend        = "message.queue.append"
 	ActionMessageQueueDrain         = "message.queue.drain"          // Dispatch one queued entry now when the session is promptable
+	ActionMessageQueueSendNow       = "message.queue.send_now"       // Interrupt and replace the active turn with an exact queue selection
 	ActionMessageQueueRemove        = "message.queue.remove"         // Delete a single entry by id
+	ActionMessageQueueMerge         = "message.queue.merge"          // Fold an entry into the entry above it
 	ActionMessageQueueStatusChanged = "message.queue.status_changed" // Notification: queue status changed
 
 	// Workflow template/step actions
@@ -207,6 +209,8 @@ const (
 	ActionSessionMessageDeleted       = "session.message.deleted"
 	ActionSessionStateChanged         = "session.state_changed"
 	ActionSessionActivityChanged      = "session.activity_changed"
+	ActionSessionCancellationChanged  = "session.cancellation_changed"
+	ActionTaskStatusSummaryUpdated    = "task.status_summary.updated"
 	ActionSessionAgentctlStarting     = "session.agentctl_starting"
 	ActionSessionAgentctlReady        = "session.agentctl_ready"
 	ActionSessionAgentctlError        = "session.agentctl_error"
@@ -292,6 +296,12 @@ const (
 	// Session git event (unified notification)
 	ActionSessionGitEvent = "session.git.event" // Notification: unified git event
 
+	// Session git refresh (explicit detail-surface git snapshot request)
+	ActionSessionGitRefresh = "session.git.refresh"
+	// Retained for older clients. New detail surfaces should use the narrower
+	// ActionSessionGitRefresh request instead.
+	ActionSessionDataRefresh = "session.data.refresh"
+
 	// Process runner actions
 	ActionSessionProcessOutput = "session.process.output"
 	ActionSessionProcessStatus = "session.process.status"
@@ -315,6 +325,12 @@ const (
 	ActionUserGet             = "user.get"
 	ActionUserSettingsUpdate  = "user.settings.update"
 	ActionUserSettingsUpdated = "user.settings.updated"
+
+	// ActionPluginUserStateUpdated notifies the writing user's other WS
+	// connections that one of their per-user plugin storage keys changed
+	// (Approach F1). Payload: {pluginId, scope, scopeId, key, updatedAt,
+	// writerId, deleted} — keys only, never the stored value.
+	ActionPluginUserStateUpdated = "plugin.user-state.updated"
 
 	// System maintenance jobs (VACUUM, factory reset, snapshot create/restore,
 	// disk walk). Broadcast to all connected clients so the System pages can
@@ -358,6 +374,8 @@ const (
 	ActionMCPUpdateTask                 = "mcp.update_task"
 	ActionMCPGetTaskPRAutomation        = "mcp.get_task_pr_automation"
 	ActionMCPUpdateTaskPRAutomation     = "mcp.update_task_pr_automation"
+	ActionMCPGetTaskMRAutomation        = "mcp.get_task_mr_automation"
+	ActionMCPUpdateTaskMRAutomation     = "mcp.update_task_mr_automation"
 	ActionMCPAddBranchToTask            = "mcp.add_branch_to_task"
 	ActionMCPAddWorkspaceSources        = "mcp.add_workspace_sources"
 	ActionMCPUpdateRepositoryBaseBranch = "mcp.update_repository_base_branch"
@@ -372,6 +390,8 @@ const (
 	ActionMCPDeleteWalkthrough          = "mcp.delete_walkthrough"
 	ActionMCPPublishReviewFindings      = "mcp.publish_review_findings"
 	ActionMCPClarificationTimeout       = "mcp.clarification_timeout"
+	ActionMCPSetTaskTitle               = "mcp.set_task_title"
+	ActionMCPGetDiagnosticBundle        = "mcp.get_diagnostic_bundle"
 
 	// Office task handoffs (cross-task context).
 	ActionMCPListRelatedTasks  = "mcp.list_related_tasks"
@@ -438,7 +458,9 @@ const (
 	ActionGitHubPRWatchDelete        = "github.pr_watches.delete"
 	ActionGitHubPRFilesGet           = "github.pr_files.get"
 	ActionGitHubPRCommitsGet         = "github.pr_commits.get"
+	ActionGitHubPRCommitGet          = "github.pr_commit.get"
 	ActionGitHubTaskPRUpdated        = "github.task_pr.updated"         // Notification
+	ActionGitHubTaskPRDeleted        = "github.task_pr.deleted"         // Notification
 	ActionGitHubTaskCIOptionsUpdated = "github.task_ci_options.updated" // Notification
 	ActionGitHubRateLimitUpdated     = "github.rate_limit.updated"      // Notification
 	ActionGitHubPRFeedbackNotify     = "github.pr_feedback.notify"      // Notification
@@ -446,6 +468,7 @@ const (
 	ActionGitHubTaskPRSync           = "github.task_pr.sync"
 	ActionGitHubStats                = "github.stats"
 	ActionGitHubCheckSessionPR       = "github.check_session_pr"
+	ActionGitLabCheckSessionMR       = "gitlab.check_session_mr"
 
 	// Issue watch actions
 	ActionGitHubIssueWatchesList = "github.issue_watches.list"
@@ -488,6 +511,8 @@ const (
 	ActionGitLabNewReviewMRNotify = "gitlab.new_review_mr.notify" // Notification
 	ActionGitLabTaskMRSync        = "gitlab.task_mr.sync"
 	ActionGitLabStats             = "gitlab.stats"
+
+	ActionGitLabTaskMRAutomationUpdated = "gitlab.task_mr_options.updated" // Notification
 
 	ActionGitLabMRMerge                = "gitlab.mr.merge"
 	ActionGitLabMRApprove              = "gitlab.mr.approve"
@@ -589,6 +614,9 @@ const (
 	ActionAutomationDisable             = "automation.disable"
 	ActionAutomationTrigger             = "automation.trigger"
 	ActionAutomationRunsList            = "automation.runs.list"
+	ActionAutomationRunsListWorkspace   = "automation.runs.list_workspace"
+	ActionAutomationSummaries           = "automation.summaries"
+	ActionAutomationSummary             = "automation.summary"
 	ActionAutomationTriggerAdd          = "automation.trigger.add"
 	ActionAutomationTriggerUpdate       = "automation.trigger.update"
 	ActionAutomationTriggerDelete       = "automation.trigger.delete"

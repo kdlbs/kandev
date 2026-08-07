@@ -1,6 +1,7 @@
 "use client";
 
 import { useRef } from "react";
+import { useTranslation } from "react-i18next";
 import { IconAlertTriangle, IconArrowRight, IconUser } from "@tabler/icons-react";
 import { Alert, AlertDescription, AlertTitle } from "@kandev/ui/alert";
 import {
@@ -20,27 +21,28 @@ import type {
 import type { WorkflowMutationProposal } from "./workflow-mutation-guard";
 import { cn } from "@/lib/utils";
 
-const PROMPT_SOURCE_TEXT = {
-  task_description: (stepName: string) =>
-    `"${stepName}" has no step prompt, so re-entering it sends the task description.`,
-  step_prompt_with_task_description: (stepName: string) =>
-    `Re-entering "${stepName}" sends its rendered step prompt including the task description.`,
-  step_prompt: (stepName: string) =>
-    `Re-entering "${stepName}" sends its step prompt instead of the task description.`,
+// `promptSource`, `trigger` and `actionKind` are wire values from the analyzer.
+// Each maps to a catalog key resolved at render; the step name it describes is
+// user data and travels as an interpolated value, never inside the message.
+const PROMPT_SOURCE_KEYS = {
+  task_description: "workflows:promptSourceTaskDescription",
+  step_prompt_with_task_description: "workflows:promptSourceStepPromptWithTaskDescription",
+  step_prompt: "workflows:promptSourceStepPrompt",
 } as const;
 
-const TRIGGER_LABELS = {
-  on_turn_start: "On turn start",
-  on_turn_complete: "On turn complete",
+const TRIGGER_LABEL_KEYS = {
+  on_turn_start: "workflows:onTurnStartTrigger",
+  on_turn_complete: "workflows:onTurnCompleteTrigger",
 } as const;
 
-const ACTION_LABELS = {
-  move_to_next: "Move to next step",
-  move_to_previous: "Move to previous step",
-  move_to_step: "Move to specific step",
+const ACTION_LABEL_KEYS = {
+  move_to_next: "workflows:moveToNextStep",
+  move_to_previous: "workflows:moveToPreviousStep",
+  move_to_step: "workflows:moveToSpecificStep",
 } as const;
 
 function CycleHop({ hop, index }: { hop: WorkflowReplayCycleHop; index: number }) {
+  const { t } = useTranslation();
   return (
     <li className="min-w-0 rounded-md border bg-background/60 p-3">
       <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-2">
@@ -52,19 +54,19 @@ function CycleHop({ hop, index }: { hop: WorkflowReplayCycleHop; index: number }
       </div>
       <div className="mt-2 flex min-w-0 flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
         <span className="whitespace-nowrap rounded bg-muted px-2 py-1">
-          {TRIGGER_LABELS[hop.trigger]}
+          {t(TRIGGER_LABEL_KEYS[hop.trigger])}
         </span>
         <span className="whitespace-nowrap rounded bg-muted px-2 py-1">
-          {ACTION_LABELS[hop.actionKind]}
+          {t(ACTION_LABEL_KEYS[hop.actionKind])}
         </span>
       </div>
       {hop.requiresUserInvolvement && (
         <div className="mt-2 flex items-center gap-1.5 text-xs font-medium text-foreground">
           <IconUser className="size-3.5 shrink-0" aria-hidden="true" />
-          <span>User action required</span>
+          <span>{t("workflows:userActionRequired")}</span>
         </div>
       )}
-      <span className="sr-only">Hop {index + 1}</span>
+      <span className="sr-only">{t("workflows:hopNumber", { index: index + 1 })}</span>
     </li>
   );
 }
@@ -74,8 +76,11 @@ export function WorkflowCycleDiagnostic({
 }: {
   diagnostic: WorkflowReplayCycleDiagnostic;
 }) {
+  const { t } = useTranslation();
   const isBlocking = diagnostic.severity === "blocking";
-  const promptText = PROMPT_SOURCE_TEXT[diagnostic.promptSource](diagnostic.autoStartStepName);
+  const promptText = t(PROMPT_SOURCE_KEYS[diagnostic.promptSource], {
+    stepName: diagnostic.autoStartStepName,
+  });
 
   return (
     <Alert
@@ -88,16 +93,24 @@ export function WorkflowCycleDiagnostic({
     >
       <IconAlertTriangle className="mt-0.5 size-4" aria-hidden="true" />
       <AlertTitle className="text-sm">
-        {isBlocking ? "Automatic workflow cycle" : "Potential repeated agent run"}
+        {isBlocking
+          ? t("workflows:automaticWorkflowCycle")
+          : t("workflows:potentialRepeatedAgentRun")}
       </AlertTitle>
       <AlertDescription className="min-w-0 space-y-3 text-left text-sm text-pretty">
         <p>
           {isBlocking
-            ? `This path re-enters "${diagnostic.autoStartStepName}" and can start the agent again without another user action.`
-            : `This path can re-enter "${diagnostic.autoStartStepName}" and start the agent again after a user action.`}
+            ? t("workflows:workflowCycleBlockingBody", {
+                stepName: diagnostic.autoStartStepName,
+              })
+            : t("workflows:workflowCycleWarningBody", {
+                stepName: diagnostic.autoStartStepName,
+              })}
         </p>
         <ol
-          aria-label={`Replay path for ${diagnostic.autoStartStepName}`}
+          aria-label={t("workflows:workflowCycleReplayPathFor", {
+            stepName: diagnostic.autoStartStepName,
+          })}
           className="grid min-w-0 gap-2"
         >
           {diagnostic.trace.map((hop, index) => (
@@ -125,8 +138,10 @@ export function WorkflowCycleGuardDialog({
   onCancel,
   onConfirm,
 }: WorkflowCycleGuardDialogProps) {
+  const { t } = useTranslation();
   const isBlocking = proposal?.severity === "blocking";
-  const actionLabel = proposal?.intent === "create" ? "Create anyway" : "Apply anyway";
+  const actionLabel =
+    proposal?.intent === "create" ? t("workflows:createAnyway") : t("workflows:applyAnyway");
   const confirming = useRef(false);
 
   const handleConfirm = async () => {
@@ -150,12 +165,12 @@ export function WorkflowCycleGuardDialog({
       >
         <AlertDialogHeader className="place-items-start p-4 pb-3 text-left sm:p-6 sm:pb-4">
           <AlertDialogTitle className="text-lg">
-            {isBlocking ? "Workflow cycle blocked" : "Confirm workflow cycle"}
+            {isBlocking ? t("workflows:workflowCycleBlocked") : t("workflows:confirmWorkflowCycle")}
           </AlertDialogTitle>
           <AlertDialogDescription className="text-left text-sm">
             {isBlocking
-              ? "Change the workflow steps to remove the automatic cycle before continuing."
-              : "Review the repeated agent run before continuing."}
+              ? t("workflows:workflowCycleBlockedDescription")
+              : t("workflows:confirmWorkflowCycleDescription")}
           </AlertDialogDescription>
         </AlertDialogHeader>
         <div
@@ -170,7 +185,7 @@ export function WorkflowCycleGuardDialog({
         </div>
         <AlertDialogFooter className="border-t bg-background p-4 sm:px-6">
           <AlertDialogCancel className="min-h-12 w-full cursor-pointer sm:w-auto">
-            {isBlocking ? "Return to workflow" : "Cancel"}
+            {isBlocking ? t("workflows:returnToWorkflow") : t("common:cancel")}
           </AlertDialogCancel>
           {!isBlocking && (
             <AlertDialogAction

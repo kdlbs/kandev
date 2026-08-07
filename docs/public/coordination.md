@@ -7,6 +7,13 @@ description: "Coordinate parallel sessions, subtasks, repositories, branches, me
 
 Kandev can coordinate several agents without turning every unit of work into a separate task. Choose the smallest boundary that gives the work the isolation, workflow state, and review surface it needs.
 
+## Quick path
+
+1. Use another session for parallel work in the same task environment.
+2. Use a subtask when work needs its own workflow state.
+3. Choose an isolated workspace for concurrent writers or a different repository.
+4. Send bounded messages and keep the human review gate explicit.
+
 ## Choose a coordination boundary
 
 | Need                                                                 | Use                                       | Filesystem relationship                    | Independent workflow state |
@@ -65,7 +72,7 @@ Open it from either:
 - the current task action beside **New Task** in the sidebar (**New subtask of current task**); or
 - the task workbench **Task** split menu → **Subtask**.
 
-The dialog proposes `_Parent title_ / Subtask _N_`. Title and prompt are required, and **Create Subtask** starts the agent immediately. The subtask inherits the parent's workflow. Its profile starts from the active parent session's profile and can be changed, but the dialog does not filter profiles for executor compatibility.
+The dialog proposes `_Parent title_ / Subtask _N_`. Title and prompt are required, and **Create Subtask** starts the agent immediately. When **Agent-generated task titles** is enabled, the title field is hidden and the prompt is required instead; Kandev derives the same six-word provisional title and lets the first session replace it. The subtask inherits the parent's workflow. Its profile starts from the active parent session's profile and can be changed, but the dialog does not filter profiles for executor compatibility.
 
 Choose a workspace mode:
 
@@ -90,7 +97,7 @@ Detaching changes task hierarchy only. An inherited workspace remains shared wit
 
 Call `create_task_kandev` with `parent_id: "self"`. `workspace_mode` defaults to `inherit_parent`; set it to `new_workspace` for isolated materialization.
 
-- `start_agent` defaults to `true`, so a description is required unless it is set to `false`.
+- `start_agent` defaults to `true`. Supply a detailed `prompt` when it is true; if omitted, Kandev still starts the agent without task-specific instructions. Set it to `false` for a placeholder task.
 - The tool inherits the parent workspace, workflow, profile, executor, repositories, and base branches unless overridden.
 - Inherited repository attachments deliberately do not copy an explicit checkout branch.
 - An explicit same-repository child uses the inherited base branch. An explicit cross-repository child defaults to that repository's default branch unless `base_branch` is supplied.
@@ -100,7 +107,7 @@ Call `create_task_kandev` with `parent_id: "self"`. `workspace_mode` defaults to
 - The one-level Kanban depth rule still applies.
 - An ephemeral Quick Chat task cannot be a parent; omit `parent_id` and create a top-level task instead.
 
-For predictable top-level creation, pass `repository_url`, `repository_id`, or `local_path`, as the tool contract requests. In task mode, the backend currently inherits repositories from the calling source task when no locator is supplied; if that source is repository-free, it can create a repository-free task despite the stricter tool description. The regular UI's **None** source remains the explicit route for intentional repository-free work.
+For predictable top-level creation, pass `repository_url`, `repository_id`, or `local_path`, as the tool contract requests. `repository_url` may be a canonical repository URL, a GitHub pull request URL such as `https://github.com/contributor/widget/pull/123`, or a GitLab merge request URL such as `https://gitlab.example.com/group/widget/-/merge_requests/123` on the configured host. For a pull request or merge request, Kandev validates the open source contribution, keeps the target repository as `origin`, and pushes future commits to the contributor's existing source branch after a write preflight; the existing provider change is reused rather than creating a duplicate. Provider-authored title, description, comments, and diff content are not trusted task context. If collaboration is disabled, enable the provider's edit-from-target setting and retry; if the write preflight reports missing credentials, configure the task's [Git credentials](integrations.md#choose-task-git-credentials) and retry the launch. Kandev never falls back to pushing `origin`. In task mode, the backend currently inherits repositories from the calling source task when no locator is supplied; if that source is repository-free, it can create a repository-free task despite the stricter tool description. The regular UI's **None** source remains the explicit route for intentional repository-free work.
 
 ## Coordinate with targeted messages
 
@@ -113,7 +120,16 @@ For predictable top-level creation, pass `repository_url`, `repository_id`, or `
 | Created but not started     | Starts the session with the message.      |
 | Failed or cancelled         | Returns an error.                         |
 
-The default delivery mode is queued. Each session accepts 10 queued messages by default; operators can change it with `KANDEV_QUEUE_MAX_PER_SESSION`, and a value of `0` or less disables the limit. Only one queued message drains per agent turn. When the cap is reached, the sender receives a structured `queue_full` error and should retry after a target turn completes.
+The default delivery mode is queued. Each session accepts 10 queued messages by default. An admin can change the install-wide limit under **Settings > General > Message Queue**; `0` means unlimited. The saved value applies immediately to new admissions without removing messages already waiting. `KANDEV_QUEUE_MAX_PER_SESSION` has higher precedence, locks the UI field, and requires a restart when changed; zero or a negative value means unlimited. Only one queued message drains per agent turn. When the cap is reached, the sender receives a structured `queue_full` error and should retry after space becomes available.
+
+In the task workbench, expand the queue chip to manage pending messages. Every visible pending row has **Remove**, whether it came from a user, another agent, workflow automation, or a server action. **Clear all** removes all visible pending rows in that session and releases their capacity. After removal, merge, or drain, displayed positions compact to `#1` through `#N` while FIFO order stays unchanged. Provenance still matters for editing and merging: only user-origin content can be edited. A row already reserved for delivery is hidden from the panel and cannot be cancelled there.
+
+Use the queue controls according to the outcome you want:
+
+- **Run next** dispatches the promptable FIFO head without interrupting an active turn. It is available when the session can accept a prompt.
+- **Send Now** sends directly when the session is promptable; when an agent turn is active, it waits for the backend to acknowledge cancellation and then replaces that captured turn with either the selected row or the click-time snapshot of every visible row. Bulk Send Now joins non-empty bodies with a blank line, keeps attachments in FIFO order, and deduplicates references. It creates a replacement turn but does not apply normal Cancel side effects: it does not record a cancellation message, complete the cancelled workflow step, or move the task to review. New rows added after the click remain queued.
+- **Clear all** removes every visible pending row without sending a prompt.
+- **Cancel** in the chat toolbar stops the active turn as a user cancellation. It may record the cancellation, complete an eligible workflow step, and move the task to review; it does not send queued content.
 
 Choose the control by intent:
 
@@ -154,6 +170,9 @@ It ignores archived and ephemeral children, ignores grandchildren, and does not 
 
 For a human gate, use **On Turn Complete → Do nothing (wait for user)** and require a person to review before moving the task or sending the next instruction. `step_complete_kandev` proves only that the agent emitted the configured completion signal.
 
+<details>
+<summary>Work across repositories and branches</summary>
+
 ## Work across repositories and branches
 
 ### Create a multi-repository task
@@ -168,7 +187,12 @@ Before starting, document:
 - the merge order for dependent changes; and
 - the test command required in each repository.
 
+</details>
+
 ### Add sources after creation
+
+<details>
+<summary>Adding sources details</summary>
 
 For an idle, non-archived repository-backed task, use **Files → Workspace actions → Add Repositories to workspace**. **Add repository** offers a workspace repository, an existing local Git checkout, or a provider-backed/pasted remote URL. The workspace option shares task creation's saved/discovered selector, including refresh and create-repository actions. **Add folder** appears when the executor supports it. Add multiple mixed sources together; validation, persistence, and materialization are atomic. Desktop uses a dialog and phones use a full-height drawer with a touch-sized repository menu.
 
@@ -201,6 +225,8 @@ Use `update_repository_base_branch_kandev` with a task-repository ID to change t
 
 Separate worktrees isolate file state. They do not by themselves isolate host credentials, ports, background processes, or other machine resources.
 
+</details>
+
 ## Keep durable coordination state
 
 Regular tasks have one versioned plan. Use the parent plan for the overall breakdown, then put each child's precise scope and file ownership in that child's description. A subtask does not share a second live copy of the parent plan.
@@ -215,6 +241,9 @@ Before handing work to another session or task, record:
 - files another writer must not overwrite.
 
 Commit before switching isolated branches when the repository process requires it. Conversation summaries are useful context, but plans, repository files, commits, and pull requests are the durable sources of truth.
+
+<details>
+<summary>Coordinator-led and human-led patterns</summary>
 
 ## Coordinator-led and human-led patterns
 
@@ -241,12 +270,14 @@ Regular Kanban does not currently expose a dependency editor or blocker filter. 
 
 When Office is enabled, it prototypes **Blocked by** and **Blocking** properties with same-workspace, self-reference, and cycle validation. Treat these as an evaluation surface rather than a production coordination contract.
 
+</details>
+
 ## Troubleshooting
 
 - **New Agent has no usable profile:** configure credentials under **Settings → Agents** and a compatible executor under **Settings → Executors**.
 - **Summarize session is missing:** configure a utility agent; otherwise use **Blank** or **Copy initial prompt**.
 - **Parallel agents overwrite work:** stop one writer, assign disjoint files, or create an isolated subtask workspace.
-- **Subtask cannot be created:** confirm title, prompt, compatible profile, workflow, and the one-level Kanban depth limit.
+- **Subtask cannot be created:** confirm the prompt (and title unless **Agent-generated task titles** is enabled), compatible profile, workflow, and the one-level Kanban depth limit.
 - **Subtask creates but its agent or repositories fail to start:** the dialog does not enforce agent/executor compatibility. Confirm the agent is configured on that executor; multi-repository creation supports Worktree, Local Docker, SSH, and Sprites.
 - **Inherited subtask sees unexpected changes:** it intentionally shares the parent's materialized files and branch.
 - **Message remains queued:** the target is busy and only one queued message drains per turn. Check for `queue_full` before retrying.

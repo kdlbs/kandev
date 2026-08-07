@@ -97,6 +97,18 @@ describe("AppStatusSurfaceProvider", () => {
     expect(screen.getByTestId(STATUS_DRAWER_TEST_ID).textContent).toBe("true");
   });
 
+  it("keeps the drawer trigger visible across the whole mobile band", () => {
+    // The drawer replaces the inline bar below the hook's mobile boundary
+    // (768px). A narrower visibility class would hide the only trigger on
+    // topbar routes, leaving 640-767px with no status surface at all.
+    responsiveState.breakpoint = "mobile";
+    renderSurface();
+
+    const trigger = screen.getByTestId(STATUS_DRAWER_TRIGGER_TEST_ID);
+    expect(trigger.className).toContain("md:hidden");
+    expect(trigger.className).not.toContain("sm:hidden");
+  });
+
   it("hides both presentations when the app-status-bar feature is disabled", () => {
     responsiveState.breakpoint = "mobile";
     featureState.appStatusBar = false;

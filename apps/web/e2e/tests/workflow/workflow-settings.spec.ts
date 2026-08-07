@@ -38,6 +38,117 @@ test.describe("Workflow settings", () => {
     }
   });
 
+  test("keeps turn-complete policy controls aligned", async ({ testPage, apiClient, seedData }) => {
+    const workflow = await apiClient.createWorkflow(seedData.workspaceId, "Turn Complete Layout");
+    await apiClient.createWorkflowStep(workflow.id, "Inbox", 0, { is_start_step: true });
+    const working = await apiClient.createWorkflowStep(workflow.id, "Working", 1);
+    const done = await apiClient.createWorkflowStep(workflow.id, "Done", 2);
+    await apiClient.updateWorkflowStep(working.id, {
+      events: {
+        on_turn_complete: [{ type: "move_to_step", config: { step_id: done.id } }],
+      },
+    });
+
+    const page = new WorkflowSettingsPage(testPage);
+    await testPage.setViewportSize({ width: 1920, height: 1080 });
+    await page.goto(seedData.workspaceId);
+    const card = await page.findWorkflowCard("Turn Complete Layout");
+    const panel = await page.selectStep(card, "Working");
+    const signalRow = panel.getByTestId(`${working.id}-require-signal-row`);
+    const cancelRow = panel.getByTestId(`${working.id}-cancel-completion-row`);
+    const label = panel.getByTestId(`${working.id}-cancel-completion-label`);
+    const helpTip = panel.getByTestId(`${working.id}-cancel-completion-help`);
+    const [signalRowBox, cancelRowBox, labelBox, helpBox] = await Promise.all([
+      signalRow.boundingBox(),
+      cancelRow.boundingBox(),
+      label.boundingBox(),
+      helpTip.boundingBox(),
+    ]);
+
+    expect(signalRowBox).not.toBeNull();
+    expect(cancelRowBox).not.toBeNull();
+    expect(labelBox).not.toBeNull();
+    expect(helpBox).not.toBeNull();
+    expect(cancelRowBox!.height).toBeCloseTo(signalRowBox!.height, 1);
+    expect(helpBox!.x - (labelBox!.x + labelBox!.width)).toBeGreaterThanOrEqual(0);
+    expect(helpBox!.x - (labelBox!.x + labelBox!.width)).toBeLessThanOrEqual(12);
+  });
+
+  test("configures the original session with the shared model settings picker", async ({
+    testPage,
+    backend,
+    apiClient,
+    seedData,
+    prCapture,
+  }) => {
+    const available = await testPage.request.get(`${backend.baseUrl}/api/v1/agents/available`);
+    expect(available.ok()).toBe(true);
+    const availablePayload = (await available.json()) as {
+      agents?: Array<{
+        name: string;
+        model_config?: { config_options?: Array<{ id: string }> };
+      }>;
+    };
+    const agent = availablePayload.agents?.find((item) =>
+      item.model_config?.config_options?.some((option) => option.id === "effort"),
+    );
+    expect(agent).toBeDefined();
+
+    const workflow = await apiClient.createWorkflow(
+      seedData.workspaceId,
+      "Conditional Session Settings",
+    );
+    const workStep = await apiClient.createWorkflowStep(workflow.id, "Work", 0, {
+      is_start_step: true,
+    });
+
+    const page = new WorkflowSettingsPage(testPage);
+    await page.goto(seedData.workspaceId);
+    const card = await page.findWorkflowCard("Conditional Session Settings");
+    await expect(card).toBeVisible();
+    await page.selectStep(card, "Work");
+
+    const agentProfileHelpId = `${workStep.id}-agent-profile-help`;
+    const originalSessionHelpId = `${workStep.id}-override-original-session-help`;
+    const helpOrder = await card
+      .locator(`[data-testid="${agentProfileHelpId}"], [data-testid="${originalSessionHelpId}"]`)
+      .evaluateAll((elements) => elements.map((element) => element.getAttribute("data-testid")));
+    expect(helpOrder).toEqual([agentProfileHelpId, originalSessionHelpId]);
+
+    await card.getByLabel("Override original session options").click();
+    const editor = card.getByTestId(`${workStep.id}-session-config-editor`);
+    await expect(editor.getByTestId("session-config-rule-0")).toBeVisible();
+    await expect(page.stepAgentProfileSelect(card)).toBeDisabled();
+
+    const settings = editor.getByRole("button", { name: `Settings for ${agent!.name}` });
+    await settings.click();
+    await testPage.getByText("Mock Smart", { exact: true }).click();
+    await testPage.getByTestId("config-option-trigger-effort").click();
+    await testPage.getByRole("button", { name: "High", exact: true }).click();
+    await testPage.keyboard.press("Escape");
+    await prCapture.screenshot("desktop-original-session-editor", {
+      caption: "Workflow step editor with a conditional original-session model and effort rule.",
+    });
+
+    await page.saveChanges();
+    const { steps } = await apiClient.listWorkflowSteps(workflow.id);
+    expect(steps.find((step) => step.id === workStep.id)?.events?.on_enter).toEqual([
+      {
+        type: "configure_session",
+        config: {
+          rules: [
+            {
+              agent_name: agent!.name,
+              operation: "set",
+              model: "mock-smart",
+              config_options: { effort: "high" },
+            },
+          ],
+        },
+      },
+    ]);
+  });
+
   test("creates a workflow from template only after Save", async ({
     testPage,
     apiClient,
@@ -211,21 +322,16 @@ test.describe("Workflow settings", () => {
   });
 
   test("modifies a step name only after Save", async ({ testPage, apiClient, seedData }) => {
+    const workflow = await apiClient.createWorkflow(seedData.workspaceId, "Step Rename Workflow");
+    const step = await apiClient.createWorkflowStep(workflow.id, "Original Step", 0);
     const page = new WorkflowSettingsPage(testPage);
     await page.goto(seedData.workspaceId);
 
-    // Use the first step name from seed data (same template)
-    const firstStepName = seedData.steps[0]?.name;
-    if (!firstStepName) {
-      test.skip(true, "No template steps available");
-      return;
-    }
-
-    const card = await page.findWorkflowCard("E2E Workflow");
+    const card = await page.findWorkflowCard(workflow.name);
     await expect(card).toBeVisible();
 
     // Click on the first step to open config panel
-    const stepNode = page.stepNodeByName(card, firstStepName);
+    const stepNode = page.stepNodeByName(card, step.name);
     await stepNode.click();
 
     // Find the step name input in the config panel and rename it
@@ -234,8 +340,8 @@ test.describe("Workflow settings", () => {
 
     await expect(nameInput).toHaveAttribute("data-settings-dirty", "true");
     await expect(card).toHaveAttribute("data-settings-dirty", "true");
-    const stepPanel = card.getByTestId(`workflow-step-panel-${seedData.steps[0].id}`);
-    const dirtyStepNode = card.getByTestId(`workflow-step-node-${seedData.steps[0].id}`);
+    const stepPanel = card.getByTestId(`workflow-step-panel-${step.id}`);
+    const dirtyStepNode = card.getByTestId(`workflow-step-node-${step.id}`);
 
     await expect(stepPanel).toHaveAttribute("data-settings-dirty", "true");
     await expect(card).toHaveAttribute("data-settings-dirty-level", "card");
@@ -248,16 +354,14 @@ test.describe("Workflow settings", () => {
     expect(await maxRingSpread(stepPanel)).toBe(0);
     expect(await maxRingSpread(dirtyStepNode)).toBe(0);
 
-    expect((await apiClient.listWorkflowSteps(seedData.workflowId)).steps[0]?.name).toBe(
-      firstStepName,
-    );
+    expect((await apiClient.listWorkflowSteps(workflow.id)).steps[0]?.name).toBe(step.name);
     await page.saveChanges();
 
     await expect(nameInput).toHaveAttribute("data-settings-dirty", "false");
     await expect(card).toHaveAttribute("data-settings-dirty", "false");
 
     await page.goto(seedData.workspaceId);
-    const reloadedCard = await page.findWorkflowCard("E2E Workflow");
+    const reloadedCard = await page.findWorkflowCard(workflow.name);
     await expect(reloadedCard).toBeVisible();
     await expect(reloadedCard.getByText("Renamed Step")).toBeVisible();
   });
@@ -330,10 +434,11 @@ test.describe("Workflow settings", () => {
     apiClient,
     seedData,
   }) => {
+    const workflow = await apiClient.createWorkflow(seedData.workspaceId, "Workflow Detail Save");
     const page = new WorkflowSettingsPage(testPage);
     await page.goto(seedData.workspaceId);
 
-    const card = await page.findWorkflowCard("E2E Workflow");
+    const card = await page.findWorkflowCard(workflow.name);
     const nameInput = card.locator("input").first();
     await nameInput.fill("Manually Saved Workflow Name");
 
@@ -342,9 +447,9 @@ test.describe("Workflow settings", () => {
 
     expect(
       (await apiClient.listWorkflows(seedData.workspaceId)).workflows.find(
-        (workflow) => workflow.id === seedData.workflowId,
+        (candidate) => candidate.id === workflow.id,
       )?.name,
-    ).toBe("E2E Workflow");
+    ).toBe(workflow.name);
     await expect(page.floatingSave).toBeVisible();
     await page.saveChanges();
 

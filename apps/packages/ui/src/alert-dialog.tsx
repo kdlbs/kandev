@@ -52,12 +52,14 @@ function AlertDialogContent({
   className,
   size = "default",
   enterConfirms = true,
+  overlayClassName,
   onKeyDown,
   ...props
 }: React.ComponentProps<typeof AlertDialogPrimitive.Content> & {
   size?: "default" | "sm";
   /** Pressing Enter activates the semantic action button. Default: true. */
   enterConfirms?: boolean;
+  overlayClassName?: string;
 }) {
   const handleKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
     onKeyDown?.(event);
@@ -65,7 +67,7 @@ function AlertDialogContent({
   };
   return (
     <AlertDialogPortal>
-      <AlertDialogOverlay />
+      <AlertDialogOverlay className={overlayClassName} />
       <AlertDialogPrimitive.Content
         data-slot="alert-dialog-content"
         data-size={size}

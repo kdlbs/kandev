@@ -1,7 +1,7 @@
 ---
 status: shipped
 created: 2026-07-21
-updated: 2026-07-28
+updated: 2026-08-01
 owner: kandev
 ---
 
@@ -24,6 +24,10 @@ lifecycle unless a deployment deliberately enables the Claude-only experiment.
   does not select a separate operator-visible activity tier by default.
 - A settled session follows its coarse state and does not remain visually busy
   solely because detached work is still registered.
+- Session status surfaces do not infer that an agent needs an answer from the
+  coarse `WAITING_FOR_INPUT` state alone. A clarification question or permission
+  indicator requires the corresponding pending input record; an idle session
+  that is merely ready for another prompt does not show either indicator.
 - The runtime retains one registration per recognized live subagent and derives
   `active_subagent_count` from those registrations. Background shells and
   Monitor watches may remain internally tracked but do not contribute to the
@@ -113,14 +117,27 @@ truth for prompt admission and operator-visible activity.
 - **GIVEN** the session leaves `RUNNING`, **WHEN** its DTO or task aggregate is
   serialized, **THEN** foreground activity is omitted even if detached work
   remains registered.
+- **GIVEN** a session is `WAITING_FOR_INPUT` with no pending clarification or
+  permission, **WHEN** the user opens the task add-panel menu, **THEN** the
+  session row shows neither the clarification-question icon nor the
+  permission-question icon.
+- **GIVEN** an input-capable session has a pending clarification or permission,
+  **WHEN** the user opens the task add-panel menu, **THEN** its session row shows
+  the corresponding question or shield-question indicator.
 - **GIVEN** an execution terminates with orphaned tool ownership and background
   work, **WHEN** teardown runs, **THEN** its owned accounting state is released.
 
 ## Out of scope
 
-- Mid-turn steering for agents without concurrent-prompt capability.
+- Mid-turn steering, including the steer-capable case. Delivering input into a
+  turn that is still generating is specified separately in
+  [mid-turn-steering](mid-turn-steering.md); this spec covers only the
+  foreground-idle handoff, where the foreground has already yielded to
+  recognized background work.
 - Reconstructing detached-work liveness after restart.
 - Rendering active subagent counts or individual subagent details in the UI.
+- Renaming the generic `WAITING_FOR_INPUT` lifecycle state or redesigning status
+  labels and icons outside the task add-panel menu.
 
 ## Decision record
 

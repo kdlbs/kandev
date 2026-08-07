@@ -10,6 +10,7 @@ import { deleteExecutorProfile, listExecutorProfiles } from "@/lib/api/domains/s
 import { ExecutorProfileDialog } from "@/components/settings/executor-profile-dialog";
 import { useAppStore } from "@/components/state-provider";
 import type { ExecutorProfile } from "@/lib/types/http";
+import { useTranslation } from "react-i18next";
 
 type ExecutorProfilesCardProps = {
   executorId: string;
@@ -17,6 +18,7 @@ type ExecutorProfilesCardProps = {
 };
 
 export function ExecutorProfilesCard({ executorId, profiles }: ExecutorProfilesCardProps) {
+  const { t } = useTranslation();
   const router = useRouter();
   const [dialogOpen, setDialogOpen] = useState(false);
   const executors = useAppStore((state) => state.executors.items);
@@ -64,21 +66,20 @@ export function ExecutorProfilesCard({ executorId, profiles }: ExecutorProfilesC
         <CardHeader>
           <div className="flex items-center justify-between">
             <div>
-              <CardTitle>Profiles</CardTitle>
+              <CardTitle>{t("executors:profiles")}</CardTitle>
               <CardDescription>
-                Different configurations for this executor. Each profile can have its own prepare
-                script, environment variables, and settings.
+                {t("executors:differentConfigurationsForThisExecutorEach")}
               </CardDescription>
             </div>
             <Button variant="outline" size="sm" onClick={handleCreate} className="cursor-pointer">
               <IconPlus className="h-4 w-4 mr-1" />
-              Add
+              {t("executors:add")}
             </Button>
           </div>
         </CardHeader>
         <CardContent>
           {profiles.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No profiles configured.</p>
+            <p className="text-sm text-muted-foreground">{t("executors:noProfilesConfigured")}</p>
           ) : (
             <div className="space-y-2">
               {profiles.map((profile) => (
@@ -93,7 +94,7 @@ export function ExecutorProfilesCard({ executorId, profiles }: ExecutorProfilesC
                     <span className="text-sm font-medium truncate">{profile.name}</span>
                     {profile.prepare_script && (
                       <Badge variant="outline" className="text-xs flex-shrink-0">
-                        Prepare script
+                        {t("executors:prepareScriptBadge")}
                       </Badge>
                     )}
                   </div>

@@ -17,6 +17,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@kandev/ui/dropdown-menu";
+import { useTranslation } from "react-i18next";
 
 const ACTION_BTN =
   "h-5 w-5 inline-flex items-center justify-center rounded-[5px] text-muted-foreground/50 hover:text-foreground transition-colors cursor-pointer";
@@ -69,6 +70,7 @@ function MaximizeButton({
   isMaximized: boolean;
   onMaximize: () => void;
 }) {
+  const { t } = useTranslation();
   return (
     <Tooltip>
       <TooltipTrigger asChild>
@@ -85,7 +87,7 @@ function MaximizeButton({
           )}
         </button>
       </TooltipTrigger>
-      <TooltipContent>{isMaximized ? "Restore" : "Maximize"}</TooltipContent>
+      <TooltipContent>{isMaximized ? t("task:restore") : t("task:maximize")}</TooltipContent>
     </Tooltip>
   );
 }
@@ -96,6 +98,7 @@ function InlineSplitClose({
   onSplitDown,
   onCloseGroup,
 }: SplitCloseHandlers) {
+  const { t } = useTranslation();
   return (
     <>
       <Tooltip>
@@ -109,7 +112,7 @@ function InlineSplitClose({
             <IconLayoutColumns className="h-3 w-3" />
           </button>
         </TooltipTrigger>
-        <TooltipContent>Split right</TooltipContent>
+        <TooltipContent>{t("task:splitRight")}</TooltipContent>
       </Tooltip>
       <Tooltip>
         <TooltipTrigger asChild>
@@ -122,7 +125,7 @@ function InlineSplitClose({
             <IconLayoutRows className="h-3 w-3" />
           </button>
         </TooltipTrigger>
-        <TooltipContent>Split down</TooltipContent>
+        <TooltipContent>{t("task:splitDown")}</TooltipContent>
       </Tooltip>
       {!isChatGroup && (
         <Tooltip>
@@ -136,7 +139,7 @@ function InlineSplitClose({
               <IconX className="h-3 w-3" />
             </button>
           </TooltipTrigger>
-          <TooltipContent>Close group</TooltipContent>
+          <TooltipContent>{t("task:closeGroup")}</TooltipContent>
         </Tooltip>
       )}
     </>
@@ -149,6 +152,7 @@ function SplitCloseDropdown({
   onSplitDown,
   onCloseGroup,
 }: SplitCloseHandlers) {
+  const { t } = useTranslation();
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -159,16 +163,16 @@ function SplitCloseDropdown({
       <DropdownMenuContent align="end">
         <DropdownMenuItem onClick={onSplitRight} className="cursor-pointer text-xs">
           <IconLayoutColumns className="h-3.5 w-3.5 mr-1.5" />
-          Split right
+          {t("task:splitRight")}
         </DropdownMenuItem>
         <DropdownMenuItem onClick={onSplitDown} className="cursor-pointer text-xs">
           <IconLayoutRows className="h-3.5 w-3.5 mr-1.5" />
-          Split down
+          {t("task:splitDown")}
         </DropdownMenuItem>
         {!isChatGroup && (
           <DropdownMenuItem onClick={onCloseGroup} className="cursor-pointer text-xs">
             <IconX className="h-3.5 w-3.5 mr-1.5" />
-            Close group
+            {t("task:closeGroup")}
           </DropdownMenuItem>
         )}
       </DropdownMenuContent>

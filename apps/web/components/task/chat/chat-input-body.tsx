@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useCallback } from "react";
+import { useTranslation } from "react-i18next";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { TipTapInput } from "./tiptap-input";
@@ -22,6 +23,7 @@ export type ChatInputEditorAreaProps = {
   isDisabled: boolean;
   submitDisabled: boolean;
   submitDisabledReason?: string;
+  hasPendingAttachmentUploads: boolean;
   planModeEnabled: boolean;
   planModeAvailable: boolean;
   mcpServers: string[];
@@ -75,6 +77,7 @@ function EditorWithTooltip({
   className?: string;
   children: React.ReactNode;
 }) {
+  const { t } = useTranslation();
   return (
     <Tooltip open={showTooltip}>
       <TooltipTrigger asChild>
@@ -89,7 +92,7 @@ function EditorWithTooltip({
         </div>
       </TooltipTrigger>
       <TooltipContent side="top" className="bg-orange-600 text-white border-orange-700">
-        <p className="font-medium">Write your changes here</p>
+        <p className="font-medium">{t("task:writeYourChangesHere")}</p>
       </TooltipContent>
     </Tooltip>
   );
@@ -127,6 +130,7 @@ function FileInput({
 }
 
 export function ChatInputEditorArea(p: ChatInputEditorAreaProps) {
+  const { t } = useTranslation("chat");
   const { inputRef, value, handleChange, handleSubmitWithReset, inputPlaceholder } = p;
   const { isDisabled, planModeEnabled, planModeAvailable, mcpServers } = p;
   const { submitKey, setIsInputFocused, sessionId, taskId, planContextEnabled } = p;
@@ -144,6 +148,9 @@ export function ChatInputEditorArea(p: ChatInputEditorAreaProps) {
   const hasContent = value.trim().length > 0 || userContextCount > 0;
   // Block submit while enhancing prompt, but keep editor editable for programmatic updates
   const wrappedSubmit = isEnhancingPrompt || p.submitDisabled ? () => {} : handleSubmitWithReset;
+  const submitDisabledReason = p.hasPendingAttachmentUploads
+    ? t("chat:attachmentUploadPendingSubmit")
+    : p.submitDisabledReason;
   const handleAttachFiles = useCallback(() => fileInputRef.current?.click(), [fileInputRef]);
   return (
     <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
@@ -189,7 +196,7 @@ export function ChatInputEditorArea(p: ChatInputEditorAreaProps) {
         canCancelAgent={p.canCancelAgent}
         hasContent={hasContent}
         isDisabled={p.submitDisabled}
-        submitDisabledReason={p.submitDisabledReason}
+        submitDisabledReason={submitDisabledReason}
         isSending={isSending}
         onCancel={onCancel}
         onSubmit={wrappedSubmit}

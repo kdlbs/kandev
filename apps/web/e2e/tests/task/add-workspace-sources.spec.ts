@@ -39,6 +39,14 @@ function createSourceDirectories(root: string) {
   return { repositoryPath, folderPath };
 }
 
+function activeFileEditor(page: Page) {
+  return page.locator(".monaco-editor:visible").first();
+}
+
+function activeFileTab(page: Page, filename: string) {
+  return page.locator(".dv-tab.dv-active-tab", { hasText: filename }).first();
+}
+
 test.describe("Attach local workspace sources", () => {
   test("adds a local repository and folder successively, scopes Changes to Git, and persists", async ({
     testPage,
@@ -207,6 +215,14 @@ test.describe("Attach local workspace sources", () => {
 
     await testPage.reload();
     await session.waitForLoad();
+    const refreshedSessions = await apiClient.listTaskSessions(task.id);
+    const refreshedPrimarySession = refreshedSessions.sessions.find(
+      ({ id }) => id === task.session_id,
+    );
+    expect(refreshedPrimarySession).toMatchObject({
+      workspace_path: path.dirname(repoPaths[0]),
+      worktree_path: repoPaths[0],
+    });
     await session.clickTab("Files");
     await expect(
       session.files
@@ -216,6 +232,40 @@ test.describe("Attach local workspace sources", () => {
     await expect(
       session.files.getByTestId("file-tree-node").filter({ hasText: "plain-local-folder" }),
     ).toBeVisible();
+
+    // Chat links in a multi-repository workspace are absolute on the host but
+    // must resolve relative to the task root (not the primary repository).
+    const taskState = await apiClient.getTask(task.id);
+    const activeSessionId = taskState.primary_session_id;
+    if (!activeSessionId) throw new Error("task has no primary session after source attachment");
+    const linkedRepoPath = repoPaths.find((repoPath) =>
+      repoPath.endsWith("second-local-repository-main"),
+    );
+    if (!linkedRepoPath) throw new Error("attached repository worktree path was not returned");
+    const primaryFilePath = path.join(repoPaths[0], "changes/repository-0.txt");
+    const linkedFilePath = path.join(linkedRepoPath, "second-source.txt");
+    await apiClient.seedSessionMessage(activeSessionId, {
+      type: "message",
+      content: `[primary source](${primaryFilePath}) [second source](${linkedFilePath})`,
+    });
+
+    await testPage.reload();
+    await session.waitForLoad();
+    await session.waitForChatIdle({ timeout: 30_000 });
+    await session.showSessionContext();
+    const primaryChatLink = session.activeChat().getByRole("link", { name: "primary source" });
+    const siblingChatLink = session.activeChat().getByRole("link", { name: "second source" });
+    await expect(primaryChatLink).toBeVisible({ timeout: 15_000 });
+    await expect(siblingChatLink).toBeVisible({ timeout: 15_000 });
+    await primaryChatLink.click();
+    const fileEditor = activeFileEditor(testPage);
+    await expect(fileEditor).toBeVisible({ timeout: 15_000 });
+    await expect(fileEditor.locator(".view-lines")).toContainText("repository 0");
+    await expect(activeFileTab(testPage, "repository-0.txt")).toBeVisible({ timeout: 15_000 });
+    await session.showSessionContext();
+    await session.activeChat().getByRole("link", { name: "second source" }).click();
+    await expect(fileEditor.locator(".view-lines")).toContainText("repository source");
+    await expect(activeFileTab(testPage, "second-source.txt")).toBeVisible({ timeout: 15_000 });
   });
 
   test("explains the disabled action while an active turn is running", async ({

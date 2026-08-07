@@ -3,6 +3,7 @@
 import { createContext, useCallback, useContext, useMemo, useRef, useState } from "react";
 import { IconCheck, IconX, IconInfoCircle, IconLoader2 } from "@tabler/icons-react";
 import { cn, generateUUID } from "@/lib/utils";
+import { scheduleFrontendErrorReport } from "@/lib/api/domains/frontend-error-log-api";
 
 type ToastVariant = "default" | "success" | "error" | "loading";
 
@@ -53,10 +54,12 @@ const variantStyles: Record<
 export function ToastProvider({ children }: { children: React.ReactNode }) {
   const [toasts, setToasts] = useState<Toast[]>([]);
   const timersRef = useRef(new Map<string, ReturnType<typeof setTimeout>>());
+  const toastsRef = useRef(new Map<string, Toast>());
 
   const removeToast = useCallback((id: string) => {
     setToasts((prev) => prev.filter((toast) => toast.id !== id));
     timersRef.current.delete(id);
+    toastsRef.current.delete(id);
   }, []);
 
   const scheduleRemoval = useCallback(
@@ -78,7 +81,15 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
         description: input.description,
         variant: input.variant ?? "default",
       };
+      toastsRef.current.set(id, nextToast);
       setToasts((prev) => [...prev, nextToast]);
+      if (nextToast.variant === "error") {
+        scheduleFrontendErrorReport({
+          source: "toast-provider",
+          title: nextToast.title,
+          description: nextToast.description,
+        });
+      }
       // Loading toasts don't auto-dismiss
       if (input.variant !== "loading") {
         scheduleRemoval(id, input.duration ?? 4000);
@@ -90,18 +101,24 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
 
   const updateToast = useCallback(
     (id: string, input: Partial<ToastInput>) => {
-      setToasts((prev) =>
-        prev.map((t) =>
-          t.id === id
-            ? {
-                ...t,
-                ...(input.title !== undefined && { title: input.title }),
-                ...(input.description !== undefined && { description: input.description }),
-                ...(input.variant !== undefined && { variant: input.variant }),
-              }
-            : t,
-        ),
-      );
+      const previous = toastsRef.current.get(id);
+      if (previous) {
+        const next = {
+          ...previous,
+          ...(input.title !== undefined && { title: input.title }),
+          ...(input.description !== undefined && { description: input.description }),
+          ...(input.variant !== undefined && { variant: input.variant }),
+        };
+        toastsRef.current.set(id, next);
+        setToasts((current) => current.map((item) => (item.id === id ? next : item)));
+        if (next.variant === "error" && previous.variant !== "error") {
+          scheduleFrontendErrorReport({
+            source: "toast-provider",
+            title: next.title,
+            description: next.description,
+          });
+        }
+      }
       // When transitioning away from loading, schedule auto-dismiss
       if (input.variant && input.variant !== "loading") {
         scheduleRemoval(id, input.duration ?? 4000);

@@ -10,14 +10,23 @@ import {
   createPromptMentionCompletionProvider,
   type ScriptPlaceholder,
 } from "./script-editor-completions";
+import { useTranslation } from "react-i18next";
+
+// A component rather than an inline literal so the label resolves at render:
+// `dynamic()` is evaluated at module load, where a `t()` would freeze the copy
+// at the boot locale and never follow a locale switch.
+function EditorLoading() {
+  const { t } = useTranslation();
+  return (
+    <div className="h-full w-full flex items-center justify-center text-muted-foreground text-xs border rounded-md bg-muted/20">
+      {t("executors:loadingEditor")}
+    </div>
+  );
+}
 
 const MonacoEditor = dynamic(() => import("@monaco-editor/react").then((m) => m.default), {
   ssr: false,
-  loading: () => (
-    <div className="h-full w-full flex items-center justify-center text-muted-foreground text-xs border rounded-md bg-muted/20">
-      Loading editor...
-    </div>
-  ),
+  loading: () => <EditorLoading />,
 });
 
 type Monaco = typeof import("monaco-editor");

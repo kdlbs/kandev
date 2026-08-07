@@ -1,4 +1,5 @@
 import { type Locator, type Page, expect } from "@playwright/test";
+import { FileTreePage } from "./file-tree-page";
 
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -20,6 +21,7 @@ export class SessionPage {
   readonly planPanel: Locator;
   readonly stepper: Locator;
   readonly passthroughTerminal: Locator;
+  readonly fileTree: FileTreePage;
 
   constructor(private readonly page: Page) {
     this.chat = page.getByTestId("session-chat");
@@ -30,6 +32,7 @@ export class SessionPage {
     this.planPanel = page.getByTestId("plan-panel");
     this.stepper = page.getByTestId("workflow-stepper");
     this.passthroughTerminal = page.getByTestId("passthrough-terminal");
+    this.fileTree = new FileTreePage(page, this.files, () => this.activeChat());
   }
 
   // Port forward dialog locators
@@ -102,11 +105,47 @@ export class SessionPage {
     return this.page.locator("[data-testid='session-chat']:visible").first();
   }
 
+  /**
+   * Wait for the session chat panel to be visible.
+   *
+   * When multiple session tabs are open, multiple session-chat panels exist in
+   * the DOM but only the active one is visible. Use :visible to avoid matching
+   * a hidden background panel (which would cause the wait to time out).
+   *
+   * Under CI shard load the freshly-navigated task page can be slow to hydrate:
+   * the SSR boot payload + React mount + WS connect sequence races, and a single
+   * hard `waitFor` occasionally exceeds its budget before the chat panel mounts.
+   * Reloading re-drives SSR hydration and reliably recovers, so instead of one
+   * fixed wait we poll with a bounded reload-and-retry loop (same recovery shape
+   * as `waitForChatIdle`). The fast path stays instant when the chat is already
+   * visible.
+   */
   async waitForLoad(timeout = 15_000) {
-    // When multiple session tabs are open, multiple session-chat panels exist in
-    // the DOM but only the active one is visible. Use :visible to avoid matching
-    // a hidden background panel (which would cause the wait to time out).
-    await this.activeChat().waitFor({ state: "visible", timeout });
+    const chat = this.activeChat();
+    // Fast path: already foregrounded (common case, no reload cost).
+    if (await chat.isVisible()) return;
+
+    const attemptTimeout = Math.min(timeout, Math.max(5_000, Math.floor(timeout / 2)));
+    const start = Date.now();
+    let lastReloadAt = start;
+
+    while (Date.now() - start < timeout) {
+      const remaining = timeout - (Date.now() - start);
+      const now = Date.now();
+      // Re-drive SSR hydration once per attemptTimeout slice while budget remains
+      // for the reloaded page to settle.
+      if (now - lastReloadAt >= attemptTimeout && remaining > attemptTimeout) {
+        lastReloadAt = now;
+        await this.page.reload();
+      }
+      await chat
+        .waitFor({ state: "visible", timeout: Math.min(attemptTimeout, remaining) })
+        .catch(() => undefined);
+      if (await chat.isVisible()) return;
+    }
+
+    // Final bounded check: still throws on a genuinely stuck page.
+    await chat.waitFor({ state: "visible", timeout: attemptTimeout });
   }
 
   /**
@@ -134,31 +173,26 @@ export class SessionPage {
   /**
    * Wait for the chat to be idle (input placeholder visible, agent not busy).
    *
-   * On mobile-chrome (and occasionally desktop), there's a WS subscribe race:
-   * a fresh task auto-starts its agent, the mock agent completes in <1s, and
-   * the session_state transition (RUNNING -> AWAITING_INPUT) can fan out
-   * before the client's WS subscription registers server-side. The client
-   * then sits with `isAgentBusy=true` forever and the idle placeholder
-   * never renders. SSR picks up the right state on the next page load, so
-   * one targeted reload-and-retry is enough to recover.
+   * A fresh task can still miss the first persisted session-state transition
+   * while the page hydrates under CI load. Re-drive SSR hydration periodically
+   * so a stale busy state does not consume the whole idle wait budget.
    *
    * After a backend restart, auto-resume can briefly surface the recovery
    * prompt ("Environment setup failed"); click through it when visible.
-   *
-   * This is the same race the office agent-run-live spec rides out with
-   * `expect.poll`-based re-seeding.
    */
-  async waitForChatIdle(opts: { timeout?: number; attemptTimeout?: number } = {}) {
+  async waitForChatIdle(opts: { timeout?: number; requireEditable?: boolean } = {}) {
     const softTotalTimeout = opts.timeout ?? 45_000;
-    const attemptTimeout =
-      opts.attemptTimeout ?? Math.min(15_000, Math.max(5_000, Math.floor(softTotalTimeout / 3)));
+    const attemptTimeout = Math.min(15_000, Math.max(5_000, Math.floor(softTotalTimeout / 3)));
     const pollSlice = 1_500;
     const idle = this.anyIdleInput();
+    const editor = this.activeChat().locator(".tiptap.ProseMirror:visible").first();
+    const isReady = async () =>
+      (await idle.isVisible()) && (!opts.requireEditable || (await editor.isEditable()));
     const start = Date.now();
     let lastReloadAt = start;
 
     while (Date.now() - start < softTotalTimeout) {
-      if (await idle.isVisible()) return;
+      if (await isReady()) return;
 
       const resumeButton = this.recoveryResumeButton();
       if (await resumeButton.isVisible()) {
@@ -171,10 +205,6 @@ export class SessionPage {
 
       const now = Date.now();
       const remaining = Math.max(1, softTotalTimeout - (now - start));
-      // Re-drive SSR hydration once per attemptTimeout slice (not just once):
-      // under CI shard load a single reload isn't always enough for the
-      // idle-input state to hydrate. Only reload while enough budget remains
-      // for the reloaded page to settle.
       if (now - lastReloadAt >= attemptTimeout && remaining > pollSlice) {
         lastReloadAt = now;
         await this.page.reload();
@@ -184,13 +214,23 @@ export class SessionPage {
         continue;
       }
 
-      await idle
-        .waitFor({ state: "visible", timeout: Math.min(pollSlice, remaining) })
-        .catch(() => undefined);
+      const timeout = Math.min(pollSlice, remaining);
+      if (opts.requireEditable) {
+        await expect
+          .poll(isReady, { timeout })
+          .toBe(true)
+          .catch(() => undefined);
+      } else {
+        await idle.waitFor({ state: "visible", timeout }).catch(() => undefined);
+      }
     }
 
     // Final bounded check: still throws on a genuinely stuck session, but gives
     // the last hydration attempt a full attemptTimeout slice to land.
+    if (opts.requireEditable) {
+      await expect.poll(isReady, { timeout: attemptTimeout }).toBe(true);
+      return;
+    }
     await idle.waitFor({ state: "visible", timeout: attemptTimeout });
   }
 
@@ -343,20 +383,20 @@ export class SessionPage {
 
   /** Chat input placeholder when agent is idle (default mode). */
   idleInput(): Locator {
-    return this.page.locator('[data-placeholder="Continue working on the task..."]');
+    return this.activeChat().locator('[data-placeholder="Continue working on the task..."]');
   }
 
   /** Chat input placeholder when agent is idle in any current mode. */
   anyIdleInput(): Locator {
-    return this.page
+    return this.activeChat()
       .locator('[data-placeholder="Continue working on the task..."]')
-      .or(this.page.locator('[data-placeholder="Continue working on the plan..."]'))
-      .or(this.page.locator('[data-placeholder="Continue working on the file..."]'));
+      .or(this.activeChat().locator('[data-placeholder="Continue working on the plan..."]'))
+      .or(this.activeChat().locator('[data-placeholder="Continue working on the file..."]'));
   }
 
   /** Chat input placeholder when agent is idle (plan mode). */
   planModeInput(): Locator {
-    return this.page.locator('[data-placeholder="Continue working on the plan..."]');
+    return this.activeChat().locator('[data-placeholder="Continue working on the plan..."]');
   }
 
   /**
@@ -669,6 +709,12 @@ export class SessionPage {
     return this.page.getByTestId(`pr-popover-tab-${owner}-${repo}-${prNumber}`);
   }
 
+  /** Unlink control for one PR association in the multi-PR popover. */
+  prMultiPopoverRemove(owner: string, repo: string, prNumber: number): Locator {
+    const activePopover = this.page.locator("[data-testid='pr-multi-popover']:visible").last();
+    return activePopover.getByTestId(`pr-popover-remove-${owner}-${repo}-${prNumber}`);
+  }
+
   /**
    * A specific bucket group inside the popover by kind.
    *
@@ -925,10 +971,22 @@ export class SessionPage {
   async expandChangesSection(testId: string): Promise<void> {
     const toggle = this.changes.getByTestId(`${testId}-collapse-toggle`);
     await expect(toggle).toBeVisible({ timeout: 15_000 });
-    if ((await toggle.getAttribute("aria-expanded")) === "false") {
-      await toggle.click();
-      await expect(toggle).toHaveAttribute("aria-expanded", "true");
-    }
+    // TimelineSection re-syncs collapsed state from defaultCollapsed until the
+    // user has toggled. A late git-data update can therefore re-collapse right
+    // after the first click (and can also remount the section). Retry until the
+    // expanded attribute sticks instead of asserting once.
+    await expect
+      .poll(
+        async () => {
+          if ((await toggle.getAttribute("aria-expanded")) === "true") {
+            return true;
+          }
+          await toggle.click();
+          return (await toggle.getAttribute("aria-expanded")) === "true";
+        },
+        { timeout: 15_000 },
+      )
+      .toBe(true);
   }
 
   /** Expand the commits section (collapsed by default in the changes panel). */
@@ -947,8 +1005,7 @@ export class SessionPage {
    * TipTap maps "Mod" to Meta on macOS and Control on Linux/Windows.
    */
   async sendMessage(text: string) {
-    const editor = this.activeChat().locator('.tiptap.ProseMirror[contenteditable="true"]').first();
-    await expect(editor).toBeEditable();
+    const editor = await this.composerReady();
     await editor.click();
     await editor.fill(text);
     const modifier = process.platform === "darwin" ? "Meta" : "Control";
@@ -960,34 +1017,77 @@ export class SessionPage {
    * don't submit on Ctrl/Cmd+Enter, so mobile specs use this instead.
    */
   async sendMessageViaButton(text: string) {
-    const editor = this.activeChat().locator('.tiptap.ProseMirror[contenteditable="true"]').first();
-    await expect(editor).toBeEditable();
+    const editor = await this.composerReady();
     await editor.click();
     await editor.fill(text);
-    await this.page.getByTestId("submit-message-button").click();
+    const isTouch = await this.page.evaluate(() => window.matchMedia("(pointer: coarse)").matches);
+    if (isTouch) {
+      await this.tapSubmitWhenReady();
+      return;
+    }
+    await this.clickSubmitWhenReady();
+  }
+
+  /** The composer's send/submit button (scoped to the active chat panel). */
+  submitButton(): Locator {
+    return this.activeChat().getByTestId("submit-message-button");
   }
 
   /**
-   * Wait for the agent reply containing `text` at the given 0-based match
-   * `index` to be visible after a follow-up prompt. On first timeout, reload
-   * once so SSR re-fetches the persisted turn, then re-assert.
+   * Tap the submit button only once it is actually enabled.
    *
-   * This rides out the same WS-subscribe race `waitForChatIdle` handles, but
-   * for the reply message itself: a mid-session prompt's response event can be
-   * dropped when the client's WS subscription loses the race with the agent's
-   * reply (common after repeated restart/resume cycles). The reply is persisted
-   * server-side, so a single reload recovers it.
+   * The button renders a spinner and is `disabled` while the composer is in a
+   * transient not-ready state (`isSending`/`isStarting`/`isMoving`) — most
+   * commonly the brief STARTING lifecycle an auto-started session passes through
+   * right after it first goes idle. Acting on the button during that window is a
+   * no-op tap that silently drops the message, so we gate on `toBeEnabled`
+   * (waiting for the `disabled` attribute to clear — a condition, not a longer
+   * fixed delay) before tapping. Mirrors `clickSubmitWhenReady` for desktop.
    */
+  async tapSubmitWhenReady() {
+    const submit = this.submitButton();
+    await expect(submit).toBeEnabled();
+    await submit.tap();
+  }
+
+  /** Desktop analog of `tapSubmitWhenReady` (uses click instead of tap). */
+  async clickSubmitWhenReady() {
+    const submit = this.submitButton();
+    await expect(submit).toBeEnabled();
+    await submit.click();
+  }
+
+  /**
+   * Resolve the active chat's ProseMirror composer and wait until it is
+   * actually editable before returning it.
+   *
+   * TipTap uses `immediatelyRender: false`, so `EditorContent` mounts the
+   * `.tiptap.ProseMirror` node only after the editor instance is created in a
+   * post-mount effect; until then the contenteditable host is absent or still
+   * `contenteditable="false"`. Callers reach here after `waitForLoad` /
+   * `waitForChatIdle` have already driven hydration, so the default
+   * `toBeEditable` wait is the correct condition to synchronize on.
+   */
+  async composerReady(): Promise<Locator> {
+    const editor = this.activeChat().locator('.tiptap.ProseMirror[contenteditable="true"]').first();
+    try {
+      await expect(editor).toBeEditable();
+    } catch {
+      // `waitForChatIdle` intentionally treats the visible idle placeholder as
+      // sufficient for terminal workflow states, where the composer may stay
+      // disabled. Sending requires the stronger editable condition; re-drive
+      // that condition when startup hydration exposed a stale idle placeholder.
+      await this.waitForChatIdle({ timeout: 30_000, requireEditable: true });
+      await expect(editor).toBeEditable();
+    }
+    return editor;
+  }
+
+  /** Wait for the agent reply containing `text` at the given 0-based match `index`. */
   async expectChatResponseVisible(text: string, index = 0, opts: { timeout?: number } = {}) {
     const timeout = opts.timeout ?? 30_000;
-    const target = () => this.chat.getByText(text, { exact: false }).nth(index);
-    try {
-      await expect(target()).toBeVisible({ timeout });
-    } catch {
-      await this.page.reload();
-      await this.waitForLoad();
-      await expect(target()).toBeVisible({ timeout });
-    }
+    const target = () => this.activeChat().getByText(text, { exact: false }).nth(index);
+    await expect(target()).toBeVisible({ timeout });
   }
 
   /** Toggle plan mode on/off by clicking the plan mode toggle button in the toolbar.
@@ -1203,6 +1303,11 @@ export class SessionPage {
     return this.page.getByTestId("new-session-button");
   }
 
+  /** Row in the dockview "+" add-panel menu for a registered plugin task panel. */
+  addPanelPluginItem(pluginId: string, panelId: string): Locator {
+    return this.page.getByTestId(`add-panel-plugin-item-${pluginId}-${panelId}`);
+  }
+
   /** Open the new session dialog via the + menu. */
   async openNewSessionDialog(): Promise<void> {
     await this.addPanelButton().click();
@@ -1226,7 +1331,7 @@ export class SessionPage {
 
   /** Prompt textarea inside the new session or handoff dialog. */
   newSessionPromptInput(): Locator {
-    return this.sessionLaunchDialog().locator("textarea");
+    return this.sessionLaunchDialog().getByTestId("task-description-input");
   }
 
   /** Start Agent button inside the new session or handoff dialog. */
@@ -1263,6 +1368,12 @@ export class SessionPage {
     await row.getByRole("button", { name: "Session actions" }).click();
     await this.handoffSubmenu().hover();
     await this.handoffProfileItem(profileId).click();
+  }
+
+  /** Open the New Agent dialog from the phone session controls. */
+  async openMobileNewSessionDialog(): Promise<void> {
+    await this.page.getByTestId("mobile-sessions-pill").tap();
+    await this.page.getByTestId("mobile-launch-session").tap();
   }
 
   /** Session tab in dockview by session label (e.g., "Session 1", "Session 2"). */
@@ -1351,12 +1462,57 @@ export class SessionPage {
 
   /** Find a tree node by its data-path attribute. */
   fileTreeNode(nodePath: string): Locator {
-    return this.files.locator(`[data-testid="file-tree-node"][data-path="${nodePath}"]`);
+    return this.fileTree.fileTreeNode(nodePath);
+  }
+
+  /** Visible search button in the Files panel. */
+  fileSearchButton(): Locator {
+    return this.fileTree.fileSearchButton();
+  }
+
+  /** Search input shown in the visible Files panel. */
+  fileSearchInput(): Locator {
+    return this.fileTree.fileSearchInput();
+  }
+
+  /** Search result by its task-root-relative path. */
+  fileSearchResult(nodePath: string): Locator {
+    return this.fileTree.fileSearchResult(nodePath);
   }
 
   /** All file tree nodes with data-selected="true". */
   fileTreeSelectedNodes(): Locator {
-    return this.files.locator("[data-selected='true']");
+    return this.fileTree.fileTreeSelectedNodes();
+  }
+
+  /** The desktop context-menu action for the selected file-tree node. */
+  fileTreeAddToChatContextMenuItem(): Locator {
+    return this.fileTree.fileTreeAddToChatContextMenuItem();
+  }
+
+  /** Visible coarse-pointer row action for one file-tree node. */
+  fileTreeNodeActions(nodePath: string): Locator {
+    return this.fileTree.fileTreeNodeActions(nodePath);
+  }
+
+  /** Responsive dropdown opened from a file-tree row action. */
+  fileTreeTouchMenu(): Locator {
+    return this.fileTree.fileTreeTouchMenu();
+  }
+
+  /** Add-to-chat item inside the responsive file-tree dropdown. */
+  fileTreeTouchAddToChatContextItem(): Locator {
+    return this.fileTree.fileTreeTouchAddToChatContextItem();
+  }
+
+  /** Pending composer chip for a file or directory path. */
+  chatContextFile(path: string): Locator {
+    return this.fileTree.chatContextFile(path);
+  }
+
+  /** Context-file badge on a sent user message. */
+  sentMessageContextFile(path: string): Locator {
+    return this.fileTree.sentMessageContextFile(path);
   }
 
   // --- Changes panel multi-select helpers ---

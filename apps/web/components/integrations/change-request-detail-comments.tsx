@@ -3,6 +3,7 @@ import { IconChevronDown, IconChevronRight } from "@tabler/icons-react";
 import { Label } from "@kandev/ui/label";
 import { Textarea } from "@kandev/ui/textarea";
 import { AddToContextButton, CollapsibleSection } from "@/components/github/pr-shared";
+import { t } from "@/lib/i18n";
 import { ChangeRequestActionButton } from "./change-request-detail-header";
 import { ChangeRequestFeedbackRow } from "./change-request-detail-feedback";
 import type {
@@ -69,7 +70,9 @@ function TextAction({
   onAction?: ChangeRequestDetailProps["onAction"];
 }) {
   const [body, setBody] = useState("");
-  const label = threadId ? `Reply to thread ${threadId}` : "Add review comment";
+  const label = threadId
+    ? t("integrations:replyToThread", { threadId })
+    : t("integrations:addReviewComment");
   return (
     <form
       className="space-y-2 rounded-md border border-border p-2"
@@ -108,7 +111,9 @@ function commentMetadata(comment: ChangeRequestDetailComment, reply = false) {
       </span>
     );
   }
-  return reply ? null : <span className="text-[10px] text-muted-foreground">(general)</span>;
+  return reply ? null : (
+    <span className="text-[10px] text-muted-foreground">{t("integrations:general")}</span>
+  );
 }
 
 function CommentThreadBlock({
@@ -145,7 +150,7 @@ function CommentThreadBlock({
               onClick={() =>
                 props.onAddContext?.("comment", buildThreadContext(thread, detail.url))
               }
-              tooltip="Add whole thread to chat context"
+              tooltip={t("integrations:addWholeThreadToChatContext")}
             />
           </div>
         ) : null}
@@ -199,7 +204,7 @@ export function ChangeRequestComments({
   const commentAction = props.actions?.find((action) => action.placement === "comment");
   return (
     <CollapsibleSection
-      title="Comments"
+      title={t("integrations:comments")}
       count={detail.comments.length}
       defaultOpen
       onAddAll={
@@ -208,10 +213,10 @@ export function ChangeRequestComments({
               props.onAddContext?.("comment", buildAllCommentsContext(detail.comments, detail.url))
           : undefined
       }
-      addAllLabel="Add all comments to chat context"
+      addAllLabel={t("integrations:addAllCommentsToChatContext")}
     >
       {detail.comments.length === 0 ? (
-        <p className="px-2 py-2 text-xs text-muted-foreground">No comments yet</p>
+        <p className="px-2 py-2 text-xs text-muted-foreground">{t("integrations:noCommentsYet")}</p>
       ) : null}
       {threads.map((thread) => (
         <CommentThreadBlock
@@ -233,7 +238,7 @@ export function ChangeRequestComments({
           ) : (
             <IconChevronRight className="mr-1.5 inline h-3.5 w-3.5" />
           )}
-          Bot comments ({botComments.length})
+          {t("integrations:botComments", { count: botComments.length })}
         </button>
       ) : null}
       {showBotComments

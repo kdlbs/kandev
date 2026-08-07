@@ -1,6 +1,5 @@
 import type { ConnectionIssueSeverity, ConnectionStatus } from "@/lib/types/connection";
 import type { HealthCheckSummary, HealthIssue, SystemHealthResponse } from "@/lib/types/health";
-import type { StateSnapshot } from "react-virtuoso";
 import type {
   FilterClause,
   GroupKey,
@@ -38,12 +37,22 @@ export type ConnectionState = {
 };
 
 export type MobileKanbanState = {
-  activeColumnIndex: number;
+  /** Last selected workflow step id, keyed by workflow id (phone board). */
+  activeStepIdByWorkflowId: Record<string, string>;
   isMenuOpen: boolean;
   isSearchOpen: boolean;
 };
 
-export type MobileSessionPanel = "chat" | "plan" | "changes" | "files" | "terminal" | "review";
+/** Core, host-defined mobile panels. Kept as a named union (rather than
+ *  inlined into MobileSessionPanel) so existing `=== "chat"`-style narrowing
+ *  still works unchanged after MobileSessionPanel grew a plugin variant. */
+export type MobileSessionCorePanel = "chat" | "plan" | "changes" | "files" | "terminal" | "review";
+
+/** A plugin task panel id on mobile, `plugin:<pluginId>:<panelKey>` — see
+ *  lib/state/layout-manager/plugin-panels.ts's pluginPanelId. */
+export type MobileSessionPluginPanel = `plugin:${string}:${string}`;
+
+export type MobileSessionPanel = MobileSessionCorePanel | MobileSessionPluginPanel;
 
 export type MobileSessionState = {
   activePanelBySessionId: Record<string, MobileSessionPanel>;
@@ -53,6 +62,8 @@ export type MobileSessionState = {
 
 export type ChatInputState = {
   planModeBySessionId: Record<string, boolean>;
+  /** True while a session's agent.cancel request is awaiting settlement. */
+  cancellingBySessionId: Record<string, boolean>;
 };
 
 export type TranscriptAutoScrollState = {
@@ -61,9 +72,6 @@ export type TranscriptAutoScrollState = {
   /** Last known scrollTop for the native renderer, captured continuously so
    *  a disabled session's position survives a dockview panel remount. */
   scrollTopBySessionId: Record<string, number>;
-  /** Last captured Virtuoso state snapshot (scroll offset + measured item
-   *  sizes) for the virtuoso renderer, captured on disable/unmount. */
-  virtuosoStateBySessionId: Record<string, StateSnapshot>;
 };
 
 export type ReviewPRSelectionState = {
@@ -88,6 +96,26 @@ export type SystemHealthState = {
 
 export type QuickChatSessionKind = "chat" | "config";
 
+export type QuickTerminalStatus = "connecting" | "running" | "exited" | "error";
+
+export type QuickTerminalTab = {
+  tabId: string;
+  workspaceId: string;
+  sessionId: string | null;
+  sequence: number;
+  status: QuickTerminalStatus;
+  exitCode?: number;
+  error?: string;
+};
+
+export type QuickTerminalUpdate = {
+  sequence?: number;
+  sessionId?: string | null;
+  status?: QuickTerminalStatus;
+  exitCode?: number | null;
+  error?: string | null;
+};
+
 export type QuickChatSession = {
   kind: QuickChatSessionKind;
   sessionId: string;
@@ -99,10 +127,16 @@ export type QuickChatSession = {
   initialPrompt?: string;
 };
 
+export type QuickChatActiveKind = "conversation" | "terminal";
+
 export type QuickChatState = {
   isOpen: boolean;
   sessions: QuickChatSession[];
   activeSessionId: string | null;
+  terminalTabs: QuickTerminalTab[];
+  activeKind: QuickChatActiveKind;
+  activeTerminalTabId: string | null;
+  lastTerminalTabIdByWorkspace: Record<string, string>;
 };
 
 export type SessionFailureNotification = {
@@ -215,16 +249,16 @@ export type UISliceActions = {
   setRightPanelActiveTab: (sessionId: string, tab: string) => void;
   setConnectionStatus: (status: ConnectionState["status"], error?: string | null) => void;
   setConnectionIssueSeverity: (severity: ConnectionIssueSeverity) => void;
-  setMobileKanbanColumnIndex: (index: number) => void;
+  setMobileKanbanActiveStep: (workflowId: string, stepId: string) => void;
   setMobileKanbanMenuOpen: (open: boolean) => void;
   setMobileKanbanSearchOpen: (open: boolean) => void;
   setMobileSessionPanel: (sessionId: string, panel: MobileSessionPanel) => void;
   setMobileSessionReview: (sessionId: string, reviewItemId: string | null) => void;
   setMobileSessionTaskSwitcherOpen: (open: boolean) => void;
   setPlanMode: (sessionId: string, enabled: boolean) => void;
+  setCancelTurnPending: (sessionId: string, pending: boolean) => void;
   setTranscriptAutoScrollEnabled: (sessionId: string, enabled: boolean) => void;
   setTranscriptScrollTop: (sessionId: string, scrollTop: number) => void;
-  setTranscriptVirtuosoState: (sessionId: string, state: StateSnapshot) => void;
   setReviewPRSelection: (taskId: string, selectedKey: string) => void;
   setActiveDocument: (sessionId: string, doc: ActiveDocument | null) => void;
   setSystemHealth: (response: SystemHealthResponse) => void;
@@ -244,12 +278,19 @@ export type UISliceActions = {
     kind?: QuickChatSessionKind,
     taskId?: string,
   ) => void;
+  reuseOrCreateQuickTerminal: (workspaceId: string) => string;
+  createQuickTerminal: (workspaceId: string) => string;
+  updateQuickTerminal: (tabId: string, update: QuickTerminalUpdate) => void;
+  activateQuickTerminal: (tabId: string, workspaceId: string) => void;
+  removeQuickTerminal: (tabId: string) => void;
   closeQuickChat: () => void;
   closeQuickChatSession: (sessionId: string) => void;
   setActiveQuickChatSession: (sessionId: string, workspaceId: string) => void;
   renameQuickChatSession: (sessionId: string, name: string) => void;
   /** Replaces a workspace's quick-chat tabs with the server's authoritative list. */
   syncQuickChatSessions: (workspaceId: string, sessions: QuickChatSession[]) => void;
+  /** Replaces a workspace's terminal descriptors with the server's list. */
+  syncQuickTerminalTabs: (workspaceId: string, tabs: QuickTerminalTab[]) => void;
   /** Adds or updates a tab observed on the wire, without stealing focus. */
   upsertQuickChatSessionFromEvent: (session: QuickChatSession) => void;
   /** Drops tabs whose backing task was deleted (possibly on another device). */

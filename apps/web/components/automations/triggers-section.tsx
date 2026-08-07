@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
+import { useTranslation } from "react-i18next";
 import { Button } from "@kandev/ui/button";
 import { Label } from "@kandev/ui/label";
 import type { AutomationTrigger, TriggerType, TriggerTypeInfo } from "@/lib/types/automation";
@@ -31,6 +32,7 @@ export function TriggersSection({
   onToggleTrigger,
   onDeleteTrigger,
 }: TriggersSectionProps) {
+  const { t } = useTranslation();
   const webhookTrigger = useMemo(() => triggers.find((t) => t.type === "webhook"), [triggers]);
   const savedWebhookTrigger = useMemo(
     () => savedTriggers.find((t) => t.type === "webhook"),
@@ -54,7 +56,13 @@ export function TriggersSection({
 
   const handleScheduleChange = (config: Record<string, unknown>) => {
     if (scheduleTrigger) {
-      onUpdateTrigger(scheduleTrigger.id, config);
+      // Merge rather than replace. onUpdateTrigger swaps the config object
+      // wholesale (see updateDraft), so emitting a partial config here silently
+      // drops sibling keys — a preset click that sends only `cron_expression`
+      // would discard a `timezone` set elsewhere, moving the schedule to UTC
+      // with nothing on screen to show it. A key is still removable by sending
+      // it as undefined: it survives the spread and JSON.stringify omits it.
+      onUpdateTrigger(scheduleTrigger.id, { ...scheduleTrigger.config, ...config });
     } else {
       onAddTrigger("scheduled", config);
     }
@@ -85,7 +93,10 @@ export function TriggersSection({
           onToggleEnabled={(enabled) => onToggleTrigger(webhookTrigger.id, enabled)}
           onDelete={handleRemoveWebhook}
         />
-        <SwitchModeButton label="Switch to scheduled" onClick={handleRemoveWebhook} />
+        <SwitchModeButton
+          label={t("automations:switchToScheduled")}
+          onClick={handleRemoveWebhook}
+        />
       </div>
     );
   }
@@ -108,7 +119,7 @@ export function TriggersSection({
         onToggleTrigger={onToggleTrigger}
         onDeleteTrigger={onDeleteTrigger}
       />
-      <SwitchModeButton label="Or use a webhook instead" onClick={handleAddWebhook} />
+      <SwitchModeButton label={t("automations:orUseWebhookInstead")} onClick={handleAddWebhook} />
     </div>
   );
 }
@@ -122,9 +133,10 @@ function ScheduleArea({
   savedScheduleTrigger: AutomationTrigger | undefined;
   onScheduleChange: (config: Record<string, unknown>) => void;
 }) {
+  const { t } = useTranslation();
   return (
     <div className="space-y-2">
-      <Label className="text-xs font-medium">Schedule</Label>
+      <Label className="text-xs font-medium">{t("automations:scheduleLabel")}</Label>
       <ScheduleSelector
         config={scheduleTrigger?.config ?? null}
         isDirty={
@@ -158,9 +170,10 @@ function ConditionArea({
   onToggleTrigger: (triggerId: string, enabled: boolean) => void;
   onDeleteTrigger: (triggerId: string) => void;
 }) {
+  const { t } = useTranslation();
   return (
     <div className="space-y-2">
-      <Label className="text-xs font-medium">Watch for</Label>
+      <Label className="text-xs font-medium">{t("automations:watchForLabel")}</Label>
       {trigger ? (
         <div className="space-y-2">
           <TriggerCard

@@ -2,7 +2,7 @@
 
 import { useCallback, useState } from "react";
 import type { StoreApi } from "zustand";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast/sonner";
 import { detachTask as requestDetachTask } from "@/lib/api";
 import type { Task } from "@/lib/types/http";
 import type { AppState } from "@/lib/state/store";

@@ -9,6 +9,7 @@ import { useRegisterCommands } from "@/hooks/use-register-commands";
 import { getShortcut } from "@/lib/keyboard/shortcut-overrides";
 import type { CommandItem } from "@/lib/commands/types";
 import type { Task } from "@/lib/types/http";
+import { useTranslation } from "react-i18next";
 
 type NewTaskButtonProps = {
   workspaceId: string | null;
@@ -35,6 +36,7 @@ export const NewTaskButton = memo(function NewTaskButton({
   steps,
   onSuccess,
 }: NewTaskButtonProps) {
+  const { t } = useTranslation();
   const [dialogOpen, setDialogOpen] = useState(false);
 
   const keyboardShortcuts = useAppStore((s) => s.userSettings.keyboardShortcuts);
@@ -43,7 +45,7 @@ export const NewTaskButton = memo(function NewTaskButton({
     () => [
       {
         id: "task-create",
-        label: "Create New Task",
+        label: t("task:createNewTask"),
         group: "Tasks",
         icon: <IconPlus className="size-3.5" />,
         shortcut: newTaskShortcut,
@@ -65,7 +67,7 @@ export const NewTaskButton = memo(function NewTaskButton({
         onClick={() => setDialogOpen(true)}
       >
         <IconPlus className="h-4 w-4" />
-        Task
+        {t("task:task")}
       </Button>
       <TaskCreateDialog
         open={dialogOpen}

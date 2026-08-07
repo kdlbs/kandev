@@ -83,7 +83,6 @@ export type {
   SystemSliceState,
   SystemSliceActions,
   SystemBackupsState,
-  SystemLogsState,
   SystemJobsMap,
 } from "./system/types";
 export type {
@@ -120,6 +119,7 @@ export type {
   SecretsState,
   NotificationProvidersState,
   SettingsDataState,
+  SleepInhibitionStoreState,
   UserSettingsState,
 } from "./settings/types";
 export type {

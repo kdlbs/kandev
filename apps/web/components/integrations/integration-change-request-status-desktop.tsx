@@ -9,6 +9,7 @@ import {
   DropdownMenuTrigger,
 } from "@kandev/ui/dropdown-menu";
 import { Popover, PopoverAnchor, PopoverContent } from "@kandev/ui/popover";
+import { t } from "@/lib/i18n";
 import {
   IntegrationChangeRequestMultiStatusContent,
   IntegrationChangeRequestStatusContent,
@@ -52,7 +53,7 @@ function MultiStatusMenu({
             />
             <div className="flex min-w-0 flex-1 flex-col">
               <span className="text-xs font-medium">
-                {item.repositoryLabel ?? "Pull request"} #{item.number}
+                {item.repositoryLabel ?? t("integrations:pullRequest")} #{item.number}
               </span>
               <span className="truncate text-[11px] text-muted-foreground">{item.title}</span>
             </div>

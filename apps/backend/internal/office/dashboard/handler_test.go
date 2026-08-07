@@ -137,6 +137,7 @@ func newTestDeps(t *testing.T) *testDeps {
 			labels TEXT DEFAULT '[]',
 			identifier TEXT DEFAULT '',
 			is_ephemeral INTEGER DEFAULT 0,
+			origin TEXT DEFAULT 'manual',
 			execution_policy TEXT DEFAULT '',
 			execution_state TEXT DEFAULT '',
 			workflow_id TEXT NOT NULL DEFAULT '',
@@ -148,6 +149,13 @@ func newTestDeps(t *testing.T) *testDeps {
 	`)
 	if err != nil {
 		t.Fatalf("create tasks table: %v", err)
+	}
+	_, err = db.Exec(`CREATE TABLE IF NOT EXISTS workspaces (
+		id TEXT PRIMARY KEY,
+		office_workflow_id TEXT DEFAULT ''
+	)`)
+	if err != nil {
+		t.Fatalf("create workspaces table: %v", err)
 	}
 
 	// workflows is referenced by FKs on workflow_steps (workflow store

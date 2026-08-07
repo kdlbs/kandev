@@ -1,6 +1,7 @@
 import { Label } from "@kandev/ui/label";
 import { RadioGroup, RadioGroupItem } from "@kandev/ui/radio-group";
 import type { GitHubAppVisibility } from "@/lib/types/github";
+import { useTranslation } from "react-i18next";
 
 export function GitHubAppVisibilityField({
   value,
@@ -9,9 +10,10 @@ export function GitHubAppVisibilityField({
   value: GitHubAppVisibility;
   onChange: (value: GitHubAppVisibility) => void;
 }) {
+  const { t } = useTranslation();
   return (
     <fieldset className="space-y-2">
-      <legend className="text-sm font-medium">Who can install this App?</legend>
+      <legend className="text-sm font-medium">{t("github:whoCanInstallThisApp")}</legend>
       <RadioGroup
         value={value}
         onValueChange={(next) => onChange(next as GitHubAppVisibility)}
@@ -20,18 +22,18 @@ export function GitHubAppVisibilityField({
         <Label className="flex min-h-20 cursor-pointer items-start gap-3 rounded-md border p-3">
           <RadioGroupItem value="private" className="mt-0.5" />
           <span>
-            <span className="block text-sm font-medium">Only the App owner</span>
+            <span className="block text-sm font-medium">{t("github:onlyTheAppOwner")}</span>
             <span className="block text-xs font-normal leading-5 text-muted-foreground">
-              Best for personal or company-internal automation.
+              {t("github:bestForPersonalOrCompanyInternal")}
             </span>
           </span>
         </Label>
         <Label className="flex min-h-20 cursor-pointer items-start gap-3 rounded-md border p-3">
           <RadioGroupItem value="public" className="mt-0.5" />
           <span>
-            <span className="block text-sm font-medium">Other GitHub accounts</span>
+            <span className="block text-sm font-medium">{t("github:otherGithubAccounts")}</span>
             <span className="block text-xs font-normal leading-5 text-muted-foreground">
-              Allows installation elsewhere. It does not publish to Marketplace or grant repos.
+              {t("github:allowsInstallationElsewhereItDoesNot")}
             </span>
           </span>
         </Label>

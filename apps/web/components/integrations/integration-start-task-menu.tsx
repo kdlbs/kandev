@@ -1,6 +1,7 @@
 "use client";
 
 import type { ComponentType } from "react";
+import { useTranslation } from "react-i18next";
 import { IconChecklist, IconChevronDown, IconPlus } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import {
@@ -26,6 +27,8 @@ export type IntegrationStartTaskMenuProps<T extends IntegrationTaskPreset = Inte
   {
     presets: T[];
     onSelect: (preset: T) => void;
+    triggerLabel?: string;
+    triggerAriaLabel?: string;
     triggerTestId?: string;
     itemTestId?: string;
   };
@@ -33,9 +36,12 @@ export type IntegrationStartTaskMenuProps<T extends IntegrationTaskPreset = Inte
 export function IntegrationStartTaskMenu<T extends IntegrationTaskPreset>({
   presets,
   onSelect,
+  triggerLabel,
+  triggerAriaLabel,
   triggerTestId,
   itemTestId,
 }: IntegrationStartTaskMenuProps<T>) {
+  const { t } = useTranslation();
   if (presets.length === 0) return null;
   return (
     <DropdownMenu>
@@ -44,11 +50,11 @@ export function IntegrationStartTaskMenu<T extends IntegrationTaskPreset>({
           size="sm"
           variant="outline"
           className="h-11 cursor-pointer gap-1 sm:h-7"
-          aria-label="Create task"
+          aria-label={triggerAriaLabel ?? t("github:task")}
           data-testid={triggerTestId}
         >
           <IconPlus className="h-3.5 w-3.5" />
-          Task
+          {triggerLabel ?? t("github:task")}
           <IconChevronDown className="h-3 w-3" />
         </Button>
       </DropdownMenuTrigger>

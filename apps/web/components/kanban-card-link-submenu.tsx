@@ -8,6 +8,7 @@ import {
   IconTicket,
 } from "@tabler/icons-react";
 import { resolvePluginIcon } from "@/lib/plugins/icons";
+import { t } from "@/lib/i18n";
 import type { KanbanCardMenuEntry, KanbanPluginLinkAction } from "./kanban-card-menu-items";
 
 type LinkSubmenuArgs = {
@@ -51,7 +52,7 @@ function builtInLinkItems(args: LinkSubmenuArgs): KanbanCardMenuEntry[] {
       key: "link-github-pull-request",
       testId: "task-context-link-github-pull-request",
       icon: <IconGitPullRequest className="mr-2 h-4 w-4" />,
-      label: "GitHub Pull Request",
+      label: t("kanban:githubPullRequest"),
       onSelect: args.onLinkPullRequest,
     }),
     buildLinkItem({
@@ -59,7 +60,7 @@ function builtInLinkItems(args: LinkSubmenuArgs): KanbanCardMenuEntry[] {
       key: "link-github-issue",
       testId: "task-context-link-github-issue",
       icon: <IconCircleDot className="mr-2 h-4 w-4" />,
-      label: "GitHub Issue",
+      label: t("kanban:githubIssue"),
       onSelect: args.onLinkIssue,
     }),
     buildLinkItem({
@@ -67,7 +68,7 @@ function builtInLinkItems(args: LinkSubmenuArgs): KanbanCardMenuEntry[] {
       key: "link-gitlab-merge-request",
       testId: "task-context-link-gitlab-merge-request",
       icon: <IconBrandGitlab className="mr-2 h-4 w-4" />,
-      label: "GitLab Merge Request",
+      label: t("kanban:gitlabMergeRequest"),
       onSelect: args.onLinkMergeRequest,
     }),
     buildLinkItem({
@@ -75,7 +76,7 @@ function builtInLinkItems(args: LinkSubmenuArgs): KanbanCardMenuEntry[] {
       key: "link-jira-ticket",
       testId: "task-context-link-jira-ticket",
       icon: <IconTicket className="mr-2 h-4 w-4" />,
-      label: "Jira Ticket",
+      label: t("kanban:jiraTicket"),
       onSelect: args.onLinkJiraTicket,
     }),
     buildLinkItem({
@@ -83,7 +84,7 @@ function builtInLinkItems(args: LinkSubmenuArgs): KanbanCardMenuEntry[] {
       key: "link-linear-issue",
       testId: "task-context-link-linear-issue",
       icon: <IconCircleDot className="mr-2 h-4 w-4" />,
-      label: "Linear Issue",
+      label: t("kanban:linearIssue"),
       onSelect: args.onLinkLinearIssue,
     }),
     buildLinkItem({
@@ -91,7 +92,7 @@ function builtInLinkItems(args: LinkSubmenuArgs): KanbanCardMenuEntry[] {
       key: "link-sentry-issue",
       testId: "task-context-link-sentry-issue",
       icon: <IconBrandSentry className="mr-2 h-4 w-4" />,
-      label: "Sentry Issue",
+      label: t("kanban:sentryIssue"),
       onSelect: args.onLinkSentryIssue,
     }),
   ].filter((item): item is LinkMenuItem => item !== null);
@@ -125,7 +126,7 @@ export function buildLinkSubmenu(args: LinkSubmenuArgs): KanbanCardMenuEntry | n
     key: "link",
     testId: "task-context-link",
     icon: <IconLink className="mr-2 h-4 w-4" />,
-    label: "Link",
+    label: t("kanban:link"),
     disabled: args.disabled,
     className: "w-56",
     children,

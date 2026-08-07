@@ -14,6 +14,9 @@ import type {
 } from "./ids";
 import type { OnEnterActionType, StepEvents } from "./workflow-actions";
 import type { EntityReference } from "./entity-reference";
+import type { TaskStatusSummary } from "./task-status-summary";
+
+export type { TaskStatusSummary } from "./task-status-summary";
 
 export type { ExecutorType } from "./executor";
 export type { ActiveSubagentCountFields, ForegroundActivity } from "./activity";
@@ -24,7 +27,9 @@ export type {
   SidebarTaskPrefsApi,
   TaskCreateLastUsedApi,
   AppStatusBarOrderApi,
+  LspStatusLocation,
   MCPTaskAgentProfileDefault,
+  StartupPage,
   UserSettings,
   UserSettingsResponse,
   UserSettingsUpdatePayload,
@@ -43,6 +48,9 @@ export type {
   MoveToStepConfig,
   OnEnterAction,
   OnEnterActionType,
+  ConfigureSessionActionConfig,
+  ConfigureSessionOperation,
+  ConfigureSessionRule,
   OnExitAction,
   OnExitActionType,
   OnTurnCompleteAction,
@@ -93,6 +101,8 @@ export type StepDefinition = {
   is_start_step?: boolean;
   show_in_command_panel?: boolean;
   agent_profile_id?: AgentProfileId;
+  auto_advance_requires_signal?: boolean;
+  cancel_triggers_turn_complete?: boolean;
   wip_limit?: number;
   pull_from_step_id?: string | null;
 };
@@ -126,6 +136,11 @@ export type WorkflowStep = {
    * legacy "any turn-end advances" behaviour.
    */
   auto_advance_requires_signal?: boolean;
+  /**
+   * When true, an explicit user cancellation runs this step's normal
+   * on_turn_complete actions after the cancelled turn settles.
+   */
+  cancel_triggers_turn_complete?: boolean;
   created_at: string;
   updated_at: string;
 };
@@ -248,8 +263,14 @@ export type Repository = {
    * suffix. Remote executors always copy the bytes.
    */
   copy_files: string;
+  secret_bindings?: RepositorySecretBinding[];
   created_at: string;
   updated_at: string;
+};
+
+export type RepositorySecretBinding = {
+  key: string;
+  secret_id: string;
 };
 
 export type RepositoryScript = {
@@ -345,6 +366,7 @@ export type Task = ActiveSubagentCountFields & {
   // OR workflow_id matches the workspace's office_workflow_id. See
   // isFromOfficeProjection in the Go task repo for the canonical rule.
   is_from_office?: boolean;
+  status_summary?: TaskStatusSummary | null;
 };
 
 // Task origin values mirror models.TaskOrigin* constants in the Go backend.
@@ -416,11 +438,26 @@ export type TaskSession = ActiveSubagentCountFields & {
   worktree_id?: string;
   worktree_path?: string;
   worktree_branch?: string;
+  /** Effective task root containing every attached workspace source. */
+  workspace_path?: string;
   worktrees?: TaskSessionWorktree[];
   task_environment_id?: string;
   state: TaskSessionState;
+  /** Backend-owned runtime cancellation projection; API responses include it explicitly. */
+  cancellation_pending?: boolean;
+  /** Process-local cancellation transition generation used to reject stale snapshots. */
+  cancellation_revision?: number;
   /** Fine-grained busy substate; background may outlive the foreground turn (ADR-0049). */
   foreground_activity?: ForegroundActivity | null;
+  /**
+   * True when a send right now would be delivered into the still-generating turn
+   * (mid-turn steering) rather than blocked/queued. Live, derived from the
+   * connected agent's negotiated capability plus the runtime flag; never
+   * persisted. The composer uses it to promise delivery, not folding.
+   */
+  supports_steering?: boolean;
+  /** Compact pending-input projection used when this session's messages are unloaded. */
+  pending_action?: TaskPendingAction | null;
   error_message?: string;
   metadata?: Record<string, unknown> | null;
   agent_profile_snapshot?: Record<string, unknown> | null;

@@ -2,6 +2,7 @@ import path from "node:path";
 import fs from "node:fs";
 import { execSync } from "node:child_process";
 import { test, expect } from "../../fixtures/test-base";
+import { expectWebkitDialogMotion } from "../../helpers/dialog-webkit-metrics";
 import { useRegularMode } from "../../helpers/regular-mode";
 import { KanbanPage } from "../../pages/kanban-page";
 import { makeGitEnv } from "../../helpers/git-helper";
@@ -331,6 +332,9 @@ test.describe("Fresh-branch flow", () => {
       fs.writeFileSync(path.join(setup.repoDir, "WIP.txt"), "draft");
 
       await openDialogWithLocalProfile(testPage, setup.profileName, setup.repoName);
+      await testPage.locator("html").evaluate((root) => {
+        root.setAttribute("data-rendering-engine", "webkit");
+      });
       await testPage.getByTestId("fresh-branch-toggle").click();
       // Submit triggers the dirty preflight; the modal lists WIP.txt.
       await testPage.getByTestId("submit-start-agent").click();
@@ -338,6 +342,11 @@ test.describe("Fresh-branch flow", () => {
       const modal = testPage.getByTestId("discard-local-changes-dialog");
       await expect(modal).toBeVisible({ timeout: 5_000 });
       await expect(testPage.getByTestId("discard-local-changes-files")).toContainText("WIP.txt");
+      await expectWebkitDialogMotion(modal, {
+        overlaySelector: '[data-slot="alert-dialog-overlay"]',
+        contentZIndex: "53",
+        overlayZIndex: "52",
+      });
 
       // Cancel returns to the form with the toggle still on.
       await testPage.getByTestId("discard-local-changes-cancel").click();
@@ -563,23 +572,6 @@ test.describe("Branch refresh + filter", () => {
       return;
     }
 
-    // Resolve the seeded repo's name via the workspace API so we can select
-    // it explicitly — earlier specs in this worker may have registered extra
-    // repos in the same workspace, and we need the asserted ?refresh URL to
-    // be unambiguous.
-    const repoListRes = await apiClient.rawRequest(
-      "GET",
-      `/api/v1/workspaces/${seedData.workspaceId}/repositories`,
-    );
-    const repoList = (await repoListRes.json()) as {
-      repositories: Array<{ id: string; name: string }>;
-    };
-    const seededRepoName = repoList.repositories.find((r) => r.id === seedData.repositoryId)?.name;
-    if (!seededRepoName) {
-      test.skip(true, "Could not resolve seeded repository name");
-      return;
-    }
-
     const kanban = new KanbanPage(testPage);
     await kanban.goto();
     await kanban.createTaskButton.first().click();
@@ -587,10 +579,9 @@ test.describe("Branch refresh + filter", () => {
     await testPage.getByTestId("task-title-input").fill("Refresh button test");
     await testPage.getByTestId("task-description-input").fill("triggers git fetch");
     await testPage.getByTestId("repo-chip-trigger").first().click();
-    await testPage
-      .getByRole("option", { name: new RegExp(`^${escapeRe(seededRepoName)}\\b`, "i") })
-      .first()
-      .click();
+    // Repository names are not unique after earlier specs register additional
+    // worktrees. cmdk's stable data-value is the repository ID.
+    await testPage.locator(`[cmdk-item][data-value="${seedData.repositoryId}"]`).click();
     // Worktree executor → branch selector enabled and refresh button visible.
     await testPage.getByTestId("executor-profile-selector").click();
     await testPage.getByRole("option", { name: worktreeProfileName }).click();

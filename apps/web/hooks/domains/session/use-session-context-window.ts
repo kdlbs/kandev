@@ -18,6 +18,9 @@ export function useSessionContextWindow(sessionId: string | null): ContextWindow
   const efficiency = useAppStore((state) =>
     sessionId ? state.contextWindow.bySessionId[sessionId]?.efficiency : undefined,
   );
+  const compactionCount = useAppStore((state) =>
+    sessionId ? state.contextWindow.bySessionId[sessionId]?.compactionCount : undefined,
+  );
   const source = useAppStore((state) =>
     sessionId ? state.contextWindow.bySessionId[sessionId]?.source : undefined,
   );
@@ -33,10 +36,11 @@ export function useSessionContextWindow(sessionId: string | null): ContextWindow
       used: used ?? 0,
       remaining: remaining ?? 0,
       efficiency: efficiency ?? 0,
+      compactionCount: compactionCount ?? 0,
       source,
       timestamp,
     };
-  }, [size, used, remaining, efficiency, source, timestamp]);
+  }, [size, used, remaining, efficiency, compactionCount, source, timestamp]);
 
   const session = useAppStore((state) =>
     sessionId ? state.taskSessions.items[sessionId] : undefined,
@@ -53,7 +57,11 @@ export function useSessionContextWindow(sessionId: string | null): ContextWindow
     if (!metadata || typeof metadata !== "object") return;
 
     const storedContextWindow = (metadata as Record<string, unknown>).context_window;
-    const entry = parseContextWindowEntry(storedContextWindow);
+    const entry = parseContextWindowEntry(
+      storedContextWindow,
+      undefined,
+      (metadata as Record<string, unknown>).context_compaction_count,
+    );
     if (!entry) return;
 
     setContextWindow(sessionId, entry);

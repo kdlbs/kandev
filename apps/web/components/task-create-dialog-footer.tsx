@@ -18,6 +18,7 @@ import {
 } from "@kandev/ui/dropdown-menu";
 import { SHORTCUTS } from "@/lib/keyboard/constants";
 import { KeyboardShortcutTooltip } from "@/components/keyboard-shortcut-tooltip";
+import { useTranslation } from "react-i18next";
 
 type UpdateButtonProps = {
   isCreatingTask: boolean;
@@ -26,6 +27,7 @@ type UpdateButtonProps = {
 };
 
 function UpdateButton({ isCreatingTask, hasTitle, onUpdate }: UpdateButtonProps) {
+  const { t } = useTranslation();
   return (
     <Button
       type="button"
@@ -37,10 +39,10 @@ function UpdateButton({ isCreatingTask, hasTitle, onUpdate }: UpdateButtonProps)
       {isCreatingTask ? (
         <>
           <IconLoader2 className="h-3.5 w-3.5 animate-spin" />
-          Updating...
+          {t("task:updating2")}
         </>
       ) : (
-        "Update"
+        t("task:update")
       )}
     </Button>
   );
@@ -63,7 +65,8 @@ function StartTaskSplitButton({
   onAltAction,
   onPlanModeAction,
 }: StartTaskSplitButtonProps) {
-  const altLabel = isEditMode ? "Update task" : "Create only";
+  const { t } = useTranslation();
+  const altLabel = isEditMode ? t("task:updateTask") : t("task:createOnly");
 
   return (
     <div className="flex flex-col w-full sm:w-auto gap-2 sm:gap-0">
@@ -80,7 +83,7 @@ function StartTaskSplitButton({
           ) : (
             <IconSend className="h-3.5 w-3.5" />
           )}
-          {isCreatingTask ? "Starting..." : "Start task"}
+          {isCreatingTask ? t("task:starting") : t("task:startTask")}
         </Button>
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
@@ -102,7 +105,7 @@ function StartTaskSplitButton({
                 data-testid="submit-plan-mode"
               >
                 <IconFileInvoice className="h-3.5 w-3.5 mr-1.5" />
-                Start task in plan mode
+                {t("task:startTaskInPlanMode")}
               </DropdownMenuItem>
             )}
             <DropdownMenuItem
@@ -111,7 +114,7 @@ function StartTaskSplitButton({
               data-testid="submit-create-without-agent"
             >
               <IconPlus className="h-3.5 w-3.5 mr-1.5" />
-              {isEditMode ? "Update task" : "Create without starting agent"}
+              {isEditMode ? t("task:updateTask") : t("task:createWithoutStartingAgent")}
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
@@ -127,7 +130,7 @@ function StartTaskSplitButton({
           data-testid="mobile-plan-mode"
         >
           <IconFileInvoice className="h-3.5 w-3.5" />
-          Plan mode
+          {t("task:planMode")}
         </Button>
       )}
       <Button
@@ -163,6 +166,7 @@ function DefaultSubmitButton({
   hasDescription,
   disabled,
 }: DefaultSubmitButtonProps) {
+  const { t } = useTranslation();
   const planModeStyle =
     isCreateMode && !hasDescription
       ? "bg-blue-600 border-blue-500 text-white hover:bg-blue-700 hover:text-white"
@@ -182,20 +186,20 @@ function DefaultSubmitButton({
           return (
             <>
               <IconLoader2 className="h-3.5 w-3.5 animate-spin" />
-              {isEditMode ? "Updating..." : "Starting..."}
+              {isEditMode ? t("task:updating2") : t("task:starting")}
             </>
           );
         }
-        if (isSessionMode) return "Create Session";
+        if (isSessionMode) return t("task:createSession");
         if (isCreateMode) {
           return (
             <>
               <IconFileInvoice className="h-3.5 w-3.5" />
-              Start Plan Mode
+              {t("task:startPlanMode")}
             </>
           );
         }
-        return "Update task";
+        return t("task:updateTask");
       })()}
     </Button>
   );
@@ -205,6 +209,7 @@ export type TaskCreateDialogFooterProps = {
   isSessionMode: boolean;
   isCreateMode: boolean;
   isEditMode: boolean;
+  autoTitle?: boolean;
   isTaskStarted: boolean;
   isCreatingSession: boolean;
   isCreatingTask: boolean;
@@ -252,7 +257,8 @@ function computeBaseDisabled(props: TaskCreateDialogFooterProps) {
   );
   return (
     props.isCreatingTask ||
-    !props.hasTitle ||
+    (!props.autoTitle && !props.hasTitle) ||
+    (props.autoTitle && !props.hasDescription) ||
     !props.hasRepositorySelection ||
     !props.hasAllBranches ||
     missingCtx ||
@@ -262,31 +268,50 @@ function computeBaseDisabled(props: TaskCreateDialogFooterProps) {
 
 export type ButtonKind = "update" | "start-task" | "default";
 
-export const REASON_TITLE = "Add a task title";
-export const REASON_REPO = "Select a repository";
-export const REASON_BRANCH = "Select a branch";
-export const REASON_WORKSPACE = "Select a workspace";
-export const REASON_WORKFLOW = "Select a workflow";
-export const REASON_AGENT = "Select an agent";
-export const REASON_DESCRIPTION = "Add a session description";
+// Catalog keys, not copy. `computeDisabledReason` is a pure helper with no
+// access to `t`, so it returns the key and the component resolves it at render
+// (the repo-wide pattern for module-scope tables). Keeping these as keys also
+// preserves the identity comparisons in the unit tests.
+export const REASON_TITLE = "task:reasonAddTaskTitle";
+export const REASON_PROMPT = "task:reasonAddTaskPrompt";
+export const REASON_REPO = "task:reasonSelectRepository";
+export const REASON_BRANCH = "task:reasonSelectBranch";
+export const REASON_WORKSPACE = "task:reasonSelectWorkspace";
+export const REASON_WORKFLOW = "task:reasonSelectWorkflow";
+export const REASON_AGENT = "task:reasonSelectAgent";
+export const REASON_DESCRIPTION = "task:reasonAddSessionDescription";
+export const REASON_NO_COMPATIBLE_AGENT = "task:noCompatibleAgentProfileFor";
 
-function noCompatibleAgentReason(executorProfileName: string | null): string {
-  const target = executorProfileName ? `“${executorProfileName}”` : "this executor";
-  return `No compatible agent profile is configured for ${target}. Configure agent credentials in Settings → Executors.`;
+/**
+ * Resolve what `computeDisabledReason` returned. Reasons this component owns are
+ * catalog keys; `submitBlockedReason` is human text supplied by the caller and
+ * passes through untouched.
+ */
+export function resolveDisabledReason(
+  t: (key: string, options?: Record<string, unknown>) => string,
+  reason: string | null | undefined,
+  executorProfileName: string | null,
+): string | undefined {
+  if (!reason) return undefined;
+  if (!reason.startsWith("task:")) return reason;
+  return t(reason, {
+    target: executorProfileName ? `“${executorProfileName}”` : t("task:thisExecutor"),
+  });
 }
 
 function baseReason(props: TaskCreateDialogFooterProps): string | null {
-  if (!props.hasTitle) return REASON_TITLE;
+  if (props.autoTitle && !props.hasDescription) return REASON_PROMPT;
+  if (!props.autoTitle && !props.hasTitle) return REASON_TITLE;
   if (!props.hasRepositorySelection) return REASON_REPO;
   if (!props.hasAllBranches) return REASON_BRANCH;
   if (props.isCreateMode && !props.workspaceId) return REASON_WORKSPACE;
   if (props.isCreateMode && !props.effectiveWorkflowId) return REASON_WORKFLOW;
-  if (props.noCompatibleAgent) return noCompatibleAgentReason(props.executorProfileName);
+  if (props.noCompatibleAgent) return REASON_NO_COMPATIBLE_AGENT;
   return null;
 }
 
 function sessionDefaultReason(props: TaskCreateDialogFooterProps): string | null {
-  if (props.noCompatibleAgent) return noCompatibleAgentReason(props.executorProfileName);
+  if (props.noCompatibleAgent) return REASON_NO_COMPATIBLE_AGENT;
   if (!props.agentProfileId) return REASON_AGENT;
   if (!props.hasDescription) return REASON_DESCRIPTION;
   return null;
@@ -322,7 +347,7 @@ function computeFooterState(props: TaskCreateDialogFooterProps) {
   // Session mode previously only gated on missing agent — it ignored
   // noCompatibleAgent, so a user who switched executor after picking an
   // agent could still submit a known-incompatible combination. The reason
-  // text already surfaces noCompatibleAgentReason in this branch (see
+  // text already surfaces REASON_NO_COMPATIBLE_AGENT in this branch (see
   // sessionDefaultReason), so the disable gate needs to match.
   const sessionDisabled = !props.agentProfileId || props.noCompatibleAgent;
   const defaultDisabled = (props.isSessionMode ? sessionDisabled : altDisabled) || blocked;
@@ -335,6 +360,7 @@ function computeFooterState(props: TaskCreateDialogFooterProps) {
 export const TaskCreateDialogFooter = memo(function TaskCreateDialogFooter(
   props: TaskCreateDialogFooterProps,
 ) {
+  const { t } = useTranslation();
   const {
     isSessionMode,
     isCreateMode,
@@ -368,12 +394,12 @@ export const TaskCreateDialogFooter = memo(function TaskCreateDialogFooter(
           disabled={isCreatingSession || isCreatingTask}
           className="w-full h-10 border-0 cursor-pointer sm:w-auto sm:h-7 sm:border"
         >
-          Cancel
+          {t("common:cancel")}
         </Button>
       </DialogClose>
       <KeyboardShortcutTooltip
         shortcut={SHORTCUTS.SUBMIT}
-        description={disabledReason ?? undefined}
+        description={resolveDisabledReason(t, disabledReason, props.executorProfileName)}
       >
         <span className="inline-flex w-full sm:w-auto" data-testid="submit-start-agent-wrapper">
           {(() => {

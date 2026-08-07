@@ -17,11 +17,13 @@ export type ApiRequestOptions = {
 export class ApiError extends Error {
   readonly status: number;
   readonly body: unknown;
-  constructor(message: string, status: number, body: unknown) {
+  readonly retryAfterSeconds?: number;
+  constructor(message: string, status: number, body: unknown, retryAfterSeconds?: number) {
     super(message);
     this.name = "ApiError";
     this.status = status;
     this.body = body;
+    this.retryAfterSeconds = retryAfterSeconds;
   }
 }
 
@@ -32,14 +34,19 @@ function resolveUrl(pathOrUrl: string, baseUrl: string) {
   return `${baseUrl}${pathOrUrl}`;
 }
 
-// Notified whenever a request comes back 401. The auth gate (src/main.tsx)
-// registers a callback that clears the store's auth slice and redirects to
-// the login page, so a session that expires mid-use doesn't leave the SPA
-// stuck making requests against a stale authenticated identity.
+// Notified when a request carries a Kandev session challenge. The auth gate
+// (src/main.tsx) registers a callback that clears the store's auth slice and
+// redirects to the login page, so a session that expires mid-use doesn't leave
+// the SPA stuck making requests against a stale authenticated identity.
 let onUnauthorized: (() => void) | null = null;
 
 export function setOnUnauthorized(cb: (() => void) | null): void {
   onUnauthorized = cb;
+}
+
+function isKandevAuthChallenge(response: Response): boolean {
+  const challenge = response.headers.get("WWW-Authenticate");
+  return challenge?.split(",").some((value) => /^Bearer(?:\s|$)/i.test(value.trim())) ?? false;
 }
 
 async function throwFromResponse(response: Response): Promise<never> {
@@ -54,7 +61,13 @@ async function throwFromResponse(response: Response): Promise<never> {
     const errVal = (body as { error?: unknown }).error;
     if (typeof errVal === "string") message = errVal;
   }
-  throw new ApiError(message, response.status, body);
+  const retryAfter = Number(response.headers.get("Retry-After"));
+  throw new ApiError(
+    message,
+    response.status,
+    body,
+    Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter : undefined,
+  );
 }
 
 export async function fetchJson<T>(pathOrUrl: string, options?: ApiRequestOptions): Promise<T> {
@@ -68,7 +81,7 @@ export async function fetchJson<T>(pathOrUrl: string, options?: ApiRequestOption
     headers: buildRequestHeaders(options),
   });
   if (!response.ok) {
-    if (response.status === 401) onUnauthorized?.();
+    if (response.status === 401 && isKandevAuthChallenge(response)) onUnauthorized?.();
     await throwFromResponse(response);
   }
   if (response.status === 204) return undefined as T;

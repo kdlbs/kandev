@@ -56,6 +56,10 @@ export const STRUCTURAL_COMPONENTS = new Set([
   "vscode",
   "pr-detail",
   "mr-detail",
+  // Every plugin-contributed task panel shares this one generic component
+  // name (see lib/state/layout-manager/plugin-panels.ts) — structural
+  // regardless of which plugin registered it.
+  "plugin-panel",
 ]);
 
 /** Default panel configurations for known panels. */

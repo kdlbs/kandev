@@ -3,6 +3,7 @@
 import { memo, useEffect, useId, useRef, useState } from "react";
 import { IconInfoCircle } from "@tabler/icons-react";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@kandev/ui/tooltip";
+import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
 import { useSessionContextWindow } from "@/hooks/domains/session/use-session-context-window";
 
@@ -120,7 +121,11 @@ function ContextWindowRing({ usagePercent }: { usagePercent: number }) {
 }
 
 function ContextWindowSource({ source }: { source: "acp" | "api" | undefined }) {
+  const { t } = useTranslation();
   const helpId = useId();
+  const [helpOpen, setHelpOpen] = useState(false);
+  const [touchMode, setTouchMode] = useState(false);
+  const pointerDownRef = useRef(false);
 
   if (!source) return null;
   const description =
@@ -130,23 +135,104 @@ function ContextWindowSource({ source }: { source: "acp" | "api" | undefined }) 
 
   return (
     <div className="group relative flex shrink-0 items-center gap-1 text-[10px] text-muted-foreground">
-      <span>Source</span>
+      <span>{t("task:source")}</span>
       <span className="font-medium text-foreground">{source.toUpperCase()}</span>
       <button
         type="button"
-        aria-label="About context window source"
+        aria-label={t("task:aboutContextWindowSource")}
         aria-describedby={helpId}
+        aria-expanded={helpOpen}
         className="inline-flex size-6 cursor-help items-center justify-center text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring sm:size-4"
+        onPointerDown={(event) => {
+          pointerDownRef.current = true;
+          if (event.pointerType !== "touch") setTouchMode(false);
+        }}
+        onTouchStart={() => {
+          setTouchMode(true);
+        }}
+        onFocus={() => {
+          if (!pointerDownRef.current) setHelpOpen(true);
+        }}
+        onBlur={() => {
+          pointerDownRef.current = false;
+          setHelpOpen(false);
+        }}
+        onClick={() => {
+          pointerDownRef.current = false;
+          setHelpOpen((open) => !open);
+        }}
       >
         <IconInfoCircle className="h-3 w-3" />
       </button>
       <span
         id={helpId}
         role="tooltip"
-        className="pointer-events-none absolute right-0 bottom-[calc(100%+0.375rem)] z-10 w-60 rounded-md border border-border bg-popover px-3 py-1.5 text-xs text-popover-foreground opacity-0 shadow-sm transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"
+        className={cn(
+          "pointer-events-none absolute right-0 bottom-[calc(100%+0.375rem)] z-10 w-60 rounded-md border border-border bg-popover px-3 py-1.5 text-xs text-popover-foreground opacity-0 shadow-sm transition-opacity",
+          !touchMode && "group-hover:opacity-100",
+          helpOpen && "opacity-100",
+        )}
       >
         {description}
       </span>
+    </div>
+  );
+}
+
+function ContextCompactionCount({ count }: { count: number }) {
+  const { t } = useTranslation();
+  const helpId = useId();
+  const [helpOpen, setHelpOpen] = useState(false);
+  const [touchMode, setTouchMode] = useState(false);
+  const pointerDownRef = useRef(false);
+
+  return (
+    <div
+      className="flex min-h-6 items-center justify-between gap-3"
+      data-testid="context-window-compactions-row"
+    >
+      <span className="text-[11px] text-muted-foreground">{t("common:contextCompactions")}</span>
+      <div className="group relative flex shrink-0 items-center gap-1 text-[11px] text-muted-foreground">
+        <span className="font-medium tabular-nums text-foreground">{count}</span>
+        <button
+          type="button"
+          aria-label={t("common:aboutContextCompactionCount")}
+          aria-describedby={helpId}
+          aria-expanded={helpOpen}
+          className="inline-flex size-6 cursor-help items-center justify-center text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring sm:size-4"
+          onPointerDown={(event) => {
+            pointerDownRef.current = true;
+            if (event.pointerType !== "touch") setTouchMode(false);
+          }}
+          onTouchStart={() => {
+            setTouchMode(true);
+          }}
+          onFocus={() => {
+            if (!pointerDownRef.current) setHelpOpen(true);
+          }}
+          onBlur={() => {
+            pointerDownRef.current = false;
+            setHelpOpen(false);
+          }}
+          onClick={() => {
+            pointerDownRef.current = false;
+            setHelpOpen((open) => !open);
+          }}
+        >
+          <IconInfoCircle className="h-3 w-3" />
+        </button>
+        <span
+          id={helpId}
+          role="tooltip"
+          className={cn(
+            "pointer-events-none absolute right-0 bottom-[calc(100%+0.375rem)] z-10 w-60 rounded-md border border-border bg-popover px-3 py-1.5 text-xs text-popover-foreground opacity-0 shadow-sm transition-opacity",
+            !touchMode && "group-hover:opacity-100",
+            helpOpen && "opacity-100",
+          )}
+        >
+          {t("common:contextCompactionCountHelp")}
+        </span>
+      </div>
     </div>
   );
 }
@@ -155,12 +241,13 @@ export const TokenUsageDisplay = memo(function TokenUsageDisplay({
   sessionId,
   className,
 }: TokenUsageDisplayProps) {
+  const { t } = useTranslation();
   const tooltip = usePinnableTooltip();
   const contextWindow = useSessionContextWindow(sessionId);
 
   if (!contextWindow) return null;
 
-  const { size, used, source } = contextWindow;
+  const { size, used, source, compactionCount } = contextWindow;
 
   // Hide when there's no data yet (size 0) or the report is impossible
   // (used > size) — see isContextWindowReliable.
@@ -176,7 +263,7 @@ export const TokenUsageDisplay = memo(function TokenUsageDisplay({
           <button
             ref={tooltip.triggerRef}
             type="button"
-            aria-label={`Context window: ${usagePercent.toFixed(0)}% used`}
+            aria-label={t("task:contextWindowUsed", { percent: usagePercent.toFixed(0) })}
             aria-expanded={tooltip.open}
             onClick={tooltip.onTriggerClick}
             className={cn(
@@ -192,7 +279,7 @@ export const TokenUsageDisplay = memo(function TokenUsageDisplay({
             <div className="space-y-2" data-testid="context-window-usage">
               <div className="flex items-baseline justify-between gap-6">
                 <span className="text-[10px] font-medium uppercase text-muted-foreground">
-                  Context window
+                  {t("task:contextWindow")}
                 </span>
                 <span className="text-base font-semibold tabular-nums text-foreground">
                   {usagePercent.toFixed(0)}%
@@ -218,6 +305,7 @@ export const TokenUsageDisplay = memo(function TokenUsageDisplay({
                 </span>
                 <ContextWindowSource source={source} />
               </div>
+              <ContextCompactionCount count={compactionCount} />
             </div>
           </div>
         </TooltipContent>

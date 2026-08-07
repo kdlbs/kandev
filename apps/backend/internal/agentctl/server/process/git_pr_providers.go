@@ -416,7 +416,7 @@ func (g *GitOperator) runRepositoryCommand(ctx context.Context, name string, arg
 	case "gh":
 		err = subproc.RunGH(ctx, cmd)
 	case "git":
-		err = subproc.RunGit(ctx, cmd)
+		err = subproc.RunGitClass(ctx, subproc.GitInteractive, cmd)
 	default:
 		err = cmd.Run()
 	}

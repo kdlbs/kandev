@@ -3,6 +3,7 @@
 import { type ReactNode } from "react";
 import { Card, CardContent } from "@kandev/ui/card";
 import { useAppStore } from "@/components/state-provider";
+import { useTranslation } from "react-i18next";
 
 type WorkspaceScopedSectionProps = {
   emptyMessage?: string;
@@ -17,6 +18,7 @@ export function WorkspaceScopedSection({
   workspaceId,
   children,
 }: WorkspaceScopedSectionProps) {
+  const { t } = useTranslation();
   const workspaces = useAppStore((s) => s.workspaces.items);
   const activeId = useAppStore((s) => s.workspaces.activeId);
   const selected = workspaceId ?? activeId ?? workspaces[0]?.id ?? null;
@@ -25,7 +27,7 @@ export function WorkspaceScopedSection({
     return (
       <Card>
         <CardContent className="py-6 text-sm text-muted-foreground">
-          {emptyMessage ?? "Create a workspace to configure this integration."}
+          {emptyMessage ?? t("common:createAWorkspaceToConfigureThisIntegration")}
         </CardContent>
       </Card>
     );

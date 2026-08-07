@@ -7,6 +7,7 @@ import { cn } from "@/lib/utils";
 import type { Message } from "@/lib/types/http";
 import type { SubagentTaskPayload, ToolCallMetadata } from "@/components/task/chat/types";
 import { SubagentMetaRow } from "@/components/task/chat/messages/subagent-meta-row";
+import { useTranslation } from "react-i18next";
 
 type ToolSubagentMessageProps = {
   comment: Message;
@@ -51,14 +52,28 @@ export function isSubagentEffectivelyActive(
   return isContainingTurnActive && (status === "in_progress" || payloadStatus === "started");
 }
 
+// The result is what the subagent was dispatched to produce, so it is shown
+// whether or not the subagent also streamed child tool calls. The prompt is a
+// fallback for subagents that reported neither.
 function deriveSubagentBody(
   childCount: number,
   subagentTask: SubagentTaskPayload | undefined,
 ): { resultText?: string; prompt?: string } {
-  if (childCount > 0) return {};
   if (subagentTask?.result_text) return { resultText: subagentTask.result_text };
+  if (childCount > 0) return {};
   if (subagentTask?.prompt) return { prompt: subagentTask.prompt };
   return {};
+}
+
+/** The collapsed card carries one line of the result — the first non-empty one,
+ *  which is where agents put the verdict. Everything else waits for expand. */
+export function firstResultLine(resultText: string | undefined): string {
+  if (!resultText) return "";
+  for (const line of resultText.split("\n")) {
+    const trimmed = line.trim();
+    if (trimmed) return trimmed;
+  }
+  return "";
 }
 
 function deriveSubagentDisplay(
@@ -78,8 +93,30 @@ function deriveSubagentDisplay(
   };
 }
 
-function labelsMatch(left: string, right: string): boolean {
-  return left.trim().toLowerCase() === right.trim().toLowerCase();
+/** The type chip already names the subagent, so a description that opens by
+ *  restating it ("test-supervisor" + "Test-supervisor review of new invariant
+ *  tests") spends the line it truncates in on a word already on screen. The
+ *  match ignores case and the separators agents vary on, and only strips at a
+ *  word boundary — "code-reviewer" must not eat the "code-review" in
+ *  "code-review of the closure diff". Returns "" when the description is
+ *  nothing but the type. */
+export function stripSubagentTypePrefix(description: string, subagentType: string): string {
+  const normalize = (value: string) => value.toLowerCase().replace(/[\s\-_]+/g, "");
+  const target = normalize(subagentType);
+  if (!target) return description;
+  let consumed = "";
+  for (let i = 0; i < description.length; i++) {
+    consumed += normalize(description[i]);
+    if (consumed.length < target.length) continue;
+    if (consumed !== target) return description;
+    // Only whitespace or a colon separates a type from its description. `.`
+    // and `,` are not boundaries: type "test" would otherwise eat the filename
+    // in "test.ts regression suite" and leave "ts regression suite".
+    const rest = description.slice(i + 1);
+    if (rest !== "" && !/^[\s:]/.test(rest)) return description;
+    return rest.replace(/^[\s:]+/, "");
+  }
+  return description;
 }
 
 type SubagentHeaderProps = {
@@ -101,7 +138,9 @@ function SubagentHeader({
   hasExpandableContent,
   onToggle,
 }: SubagentHeaderProps) {
-  const showDescription = !labelsMatch(subagentType, description);
+  const { t } = useTranslation();
+  const shownDescription = stripSubagentTypePrefix(description, subagentType);
+  const showDescription = shownDescription !== "";
   const showInlineWorking = isActive && !hasExpandableContent;
   const content = (
     <>
@@ -129,11 +168,11 @@ function SubagentHeader({
           title={description}
           className="font-mono text-xs truncate text-muted-foreground min-w-0"
         >
-          {description}
+          {shownDescription}
         </span>
       )}
       {showInlineWorking && (
-        <span className="text-xs text-muted-foreground italic">Working...</span>
+        <span className="text-xs text-muted-foreground italic">{t("task:working")}</span>
       )}
       {isActive && <GridSpinner className="text-muted-foreground shrink-0" />}
       {childCount > 0 && (
@@ -141,7 +180,7 @@ function SubagentHeader({
           data-testid="subagent-child-count"
           className="text-muted-foreground/60 text-xs px-1.5 rounded min-w-[20px] text-center font-mono whitespace-nowrap"
         >
-          {childCount} tool call{childCount !== 1 ? "s" : ""}
+          {t("task:toolCallCount", { count: childCount })}
         </span>
       )}
     </>
@@ -192,6 +231,14 @@ function SubagentContent({
   if (childMessages.length > 0) {
     return (
       <div className={cn(NESTED_BORDER, "space-y-2")}>
+        {resultText && (
+          <p
+            data-testid="subagent-result-text"
+            className="text-xs text-foreground/80 whitespace-pre-wrap break-words"
+          >
+            {resultText}
+          </p>
+        )}
         {childMessages.map((child) => (
           <div key={child.id}>{renderChild(child)}</div>
         ))}
@@ -234,6 +281,7 @@ export const ToolSubagentMessage = memo(function ToolSubagentMessage({
   const childCount = childMessages.length;
   const { subagentTask, isActive, resultText, prompt, hasExpandableContent } =
     deriveSubagentDisplay(metadata, childCount, isContainingTurnActive);
+  const resultSummary = firstResultLine(resultText);
   const description = subagentTask?.description || comment.content || "Subagent";
   const subagentType = subagentTask?.subagent_type || "Task";
 
@@ -266,7 +314,16 @@ export const ToolSubagentMessage = memo(function ToolSubagentMessage({
         hasExpandableContent={hasExpandableContent}
         onToggle={handleToggle}
       />
-      {!isActive && <SubagentMetaRow subagentTask={subagentTask} />}
+      {!isActive && !isExpanded && resultSummary && (
+        <p
+          data-testid="subagent-result-summary"
+          title={resultSummary}
+          className="ml-2 pl-4 text-xs text-foreground/80 truncate"
+        >
+          {resultSummary}
+        </p>
+      )}
+      {!isActive && <SubagentMetaRow subagentTask={subagentTask} childCount={childCount} />}
       <SubagentContent
         isExpanded={isExpanded}
         childMessages={childMessages}

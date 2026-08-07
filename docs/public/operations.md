@@ -9,16 +9,52 @@ Kandev can run as a desktop app, an interactive CLI process, an OS-managed servi
 
 Kandev does not currently provide a user-login boundary for the web application, HTTP API, WebSocket, or external MCP routes. Treat anyone who can reach the backend as an operator. Keep it on a trusted host or private network, or put the entire origin behind an authenticated TLS reverse proxy.
 
+## Quick path
+
+1. Choose one process owner for the database and Kandev home.
+2. Check `/health` for readiness and **System > Status** for diagnostics.
+3. Back up the database and `master.key` before upgrades, resets, or recovery work.
+4. Preserve Git branches and external provider state separately from database backups.
+
 ## Choose an operating model
 
 | Mode | Start and stop | Durable state | Update path |
 | --- | --- | --- | --- |
 | Desktop | Launch or quit Kandev | `~/.kandev` by default | **Settings > System > Updates** uses the signed desktop updater when supported |
 | Interactive CLI | `kandev`, then `Ctrl-C` | `~/.kandev` by default | Upgrade the Homebrew or npm package, then restart |
-| Managed service | `kandev service {start,stop,restart,status}` | `~/.kandev` for a user service, `/var/lib/kandev` for a system service, or the install-time `--home-dir` | Use guarded in-app apply for a managed user service; otherwise upgrade the package, reinstall with the same flags, and restart |
+| Managed service | `kandev service {start,stop,restart,status}` | `~/.kandev` for a user service, `/var/lib/kandev` for a system service, or the install-time `--home-dir` | A verified npm/npx user service can select and apply Stable or Nightly; other services use Stable and may require a package upgrade, reinstall, and restart |
 | Docker or Kubernetes | Container or workload manager | Mounted Kandev home plus any external database/provider state | Replace the image and recreate the container or pod |
 
 See [Desktop app](desktop-app.md), [CLI](cli.md), [Run as a service](run-as-a-service.md), [Docker](docker.md), and [Kubernetes](k8s.md) for mode-specific prerequisites and commands.
+
+## Prevent host sleep during active tasks
+
+Administrators can open **Settings > General > Task Actions** and enable
+**Prevent host sleep while tasks run**. The install-wide setting is off by
+default and is saved with the Kandev database. It applies only to the machine
+running the backend; it does not change executor or node power policy.
+
+When enabled, Kandev holds one host sleep-prevention request while any task
+session is `STARTING` or `RUNNING`. It releases the request when the last such
+session reaches `WAITING_FOR_INPUT`, `IDLE`, or a terminal state, when an
+administrator disables the setting, and during backend shutdown. Missed session
+events are repaired by periodic reconciliation against the session repository.
+
+The request prevents idle system sleep but does not keep the display awake or
+override an explicit user sleep action, lid-close behavior, shutdown, low-power
+emergency, or another administrator/platform policy. It is supported through
+macOS `caffeinate`, Windows execution state, and Linux `systemd-logind` over the
+system D-Bus. A missing or denied Linux system bus, an unavailable service, or
+another native failure is shown in the setting status and never blocks task
+execution.
+
+Do not enable this setting by default for Docker, Kubernetes, remote-executor,
+or always-on deployments. A backend inside a container or pod cannot inhibit
+sleep on the physical node, and an SSH or other remote executor runs on a
+different host. Those deployments should use their normal host power and
+availability policy instead. Enabling the preference is safe when moving the
+database between hosts: Kandev reacquires a native request only after startup
+if the new backend can provide it and a working task still exists.
 
 ## Health and readiness
 
@@ -53,6 +89,14 @@ kandev service logs -f
 
 Add `--system` to both commands for a system service.
 
+## Message queue capacity
+
+Open **Settings > General > Message Queue** to set the install-wide number of pending messages allowed in each session. The default is `10`; `0` means unlimited. Admin saves apply immediately to later admissions. Lowering the limit does not prune rows already waiting, so a queue at or above the new limit rejects new work until messages run or are removed. Delivery retries for work accepted before the change are not discarded by the lower cap.
+
+`KANDEV_QUEUE_MAX_PER_SESSION` has higher precedence than the saved setting. A valid environment value makes the UI field read-only; zero or a negative value means unlimited. Invalid text is logged and ignored in favor of the saved setting or default. Environment changes require a backend restart, while UI changes do not.
+
+To recover capacity in one session, expand its queue chip in the task workbench. **Remove** deletes one visible pending row and **Clear all** deletes all visible pending rows, including user-, agent-, workflow-, and server-origin work. After removal, merge, or drain, displayed positions immediately compact to `#1` through `#N`; durable FIFO ordering is unchanged. A row already reserved for delivery is hidden and is not cancelled by either action.
+
 ## State and storage
 
 `KANDEV_HOME_DIR` relocates the Kandev home. Its default is `~/.kandev`; the derived data directory is always `<home>/data`.
@@ -74,6 +118,11 @@ Database snapshots do not contain Git worktrees, clones, the master key, service
 The supported SQLite layout for the System database and restore pages is the derived `<home>/data/kandev.db`. `database.path` can point the persistence layer elsewhere, but the current System page still derives its displayed path, WAL path, and restore destination from `<home>/data/kandev.db`. Treat a custom SQLite path as operator-managed: back it up and restore it with SQLite-aware tooling while Kandev is stopped.
 
 ## Storage maintenance
+
+> **Destructive:** **Force clear all** permanently removes eligible quarantine entries and discards their restore windows.
+
+<details>
+<summary>Storage maintenance details</summary>
 
 Open **Settings > System > Storage** to inspect Kandev-managed disk usage and configure cleanup.
 **Analyze** is read-only. **Run now** applies only the enabled cleanup rules and refuses to start
@@ -126,7 +175,14 @@ cleanup do not delete this legacy data by name or age. Remove it only through a 
 host-administrator procedure after confirming that no live process references the target; stopping
 the Kandev service first provides the clearest maintenance boundary.
 
+</details>
+
 ## Database operation
+
+> **Single-owner rule:** SQLite uses one writer connection in WAL mode; only one Kandev backend should own the file. **Factory reset** is destructive and removes managed data after creating a pre-reset backup.
+
+<details>
+<summary>Database operation details</summary>
 
 ### SQLite
 
@@ -155,7 +211,12 @@ pg_dump --host "$PGHOST" --port "${PGPORT:-5432}" \
 
 Switching `database.driver` does not migrate data. PostgreSQL and shared NATS remove two single-process data constraints, but they do not make Kandev horizontally scalable: WebSocket subscriptions, execution lifecycle/control state, and task workspaces remain process- or filesystem-local. The current product and supplied deployment validate one backend replica only; do not add replicas based on the database and event bus alone.
 
+</details>
+
 ## SQLite backups
+
+<details>
+<summary>Backup details</summary>
 
 Open **Settings > System > Backups**.
 
@@ -178,7 +239,14 @@ kandev service start
 
 Adapt the source for a custom `--home-dir`. This archive still does not include external PostgreSQL, remote executors, provider objects, or CLI credentials stored elsewhere in the operating-system home.
 
+</details>
+
 ## Restore and recovery
+
+> **Restore warning:** Stop or finish active sessions, relaunch Kandev after restoring, and reconcile worktrees, containers, pull requests, credentials, and other external state before restarting automation. A database restore does not roll those systems back.
+
+<details>
+<summary>Restore details</summary>
 
 ### Restore a System snapshot
 
@@ -205,6 +273,8 @@ pg_restore --clean --if-exists --no-owner \
 
 Restart one backend, allow schema initialization to complete, then validate it as a single-replica deployment. Match the restored data with a compatible Kandev version; Kandev has no automatic database downgrade or validated multi-replica operating path.
 
+</details>
+
 ## Factory reset
 
 In **Settings > System > Database**, click **Factory reset**, type `RESET`, and confirm. This is SQLite-only. The job:
@@ -219,18 +289,31 @@ It does not erase the entire Kandev home: backups, `master.key`, logs, service m
 
 ## Logs and diagnostics
 
-Open **Settings > System > Logs** for recent structured backend events. Kandev maintains an in-memory ring of exactly 2,000 events that passed the configured log level; the page requests the newest 1,000. This buffer disappears on restart.
+Open **Settings > System > Logs** and select **Customize bundle** to create and
+download a diagnostic ZIP. Backend and frontend diagnostic evidence are
+selected by default; you can add the allow-listed runtime index, and in debug
+mode raw and normalized agent-protocol (ACP) evidence. Adding ACP opens an
+explicit session picker, with each session's Kandev task title linked for
+identification. The archive has source directories and `manifest.json`; inspect
+the manifest for requested sources, warnings, captured ranges, truncation, and
+loss before treating it as complete.
 
-Default interactive launcher output is warning level. `kandev --verbose` selects info level and shows backend output; `kandev --debug` selects debug level and also enables ACP message dumps. An explicit `KANDEV_LOG_LEVEL` overrides the flag-selected level. Those dumps can contain full prompts, file contents, and tool calls. Use debug mode only on a trusted machine, collect the minimum needed, then disable and remove the files.
+Standard bundles do not read stored chat transcripts, session messages, or agent messages. Backend evidence covers startup, lifecycle, API, executor, and error events; frontend evidence covers bounded browser console errors/warnings and diagnostic toast reports. Incidental text already emitted into a backend/frontend log entry is not automatically redacted, so review the ZIP before sharing. The runtime index contains only allow-listed session status and executor metadata.
 
-Logging configuration defaults are `outputPath: stdout`, 100 MB rotation size, five rotated files, 30-day rotated-file age, and gzip compression. Rotation applies only when `logging.outputPath` is a file, and active files are created owner-readable. The Logs page can list/download the exact active filename and timestamped rotations when that filename has an extension; for an extensionless output path it does not enumerate rotated siblings. With stdout logging, use the in-memory tail plus the process manager:
+ACP evidence is a separate, debug-only opt-in. It is limited to one to ten sessions the caller is authorized to view and may contain prompts, responses, tool calls, file contents, MCP data, environment-derived values, and secrets. Collection is on demand from retained host files or reachable executors; unavailable, expired, invalid, or truncated sessions make the archive partial instead of broadening the request or continuously copying ACP frames.
+
+Every launch writes info and above to `<home>/logs/backend-logs.log`; normal and debug stdout show warn and above. `kandev --verbose` also shows info on stdout. `kandev --debug` records debug events in the file and enables ACP message dumps. The backend appends on same-day restarts, caps each daily file at 256 MiB, rolls at UTC midnight, and retains the current day plus the two previous UTC days.
+
+The browser keeps a bounded three-day console history locally and sends it only when an authenticated bundle request asks for frontend evidence. Console calls are not continuously uploaded. Error toasts are reported immediately, but automatic reports remove URL query strings and fragments and use count and byte rate limits. A bundle can be partial if no browser responds, IndexedDB is unavailable, queues shed entries, or byte/profile limits truncate data. Ready bundles expire after 15 minutes; one active job per user and bounded global capacity can return `429` or `503`. Standard bundles cap backend/frontend/runtime sources at 160/80/2 MiB; ACP-inclusive bundles use 96/48/2 MiB plus 96 MiB ACP, with no budget transfer between sources.
+
+Process-manager logs remain useful for live output:
 
 - Linux service: `kandev service logs -f` reads the systemd journal.
 - macOS service: the same command tails `<home>/logs/service.out` and `service.err`.
 - Docker: `docker logs -f kandev`.
 - Kubernetes: `kubectl logs -f deployment/kandev`.
 
-When reporting an incident, record timestamp/timezone, Kandev version and commit from **System > About**, task ID, session ID, executor type, repository/branch, and relevant provider request IDs. **System > Licenses** is a generated inventory of shipped npm and Go dependencies, not a runtime health check.
+When reporting an incident, record timestamp/timezone, Kandev version and commit from **System > About**, task ID, session ID, executor type, repository/branch, and relevant provider request IDs. Bundles can contain install-wide backend events, full browser URLs, console arguments, and stacks; review them as sensitive data before sharing. Agents can request backend, frontend, or all sources and should search a known task ID exactly before broadening. **System > Licenses** is a generated inventory of shipped npm and Go dependencies, not a runtime health check.
 
 ## Disk use and environment cleanup
 
@@ -252,15 +335,42 @@ Never delete a managed task directory merely because its database row looks term
 
 ## Updates
 
-The backend contacts the public GitHub Releases API once at startup and every six hours, with a 30-second HTTP timeout, and persists the last successful result. **Check now** performs a synchronous request and permits one manual check per process every 30 seconds. Offline or rate-limited installations continue to show cached state.
+Stable is the default update channel. It resolves signed releases from the public GitHub Releases
+API. A verified Kandev-managed npm or npx user service can select **Nightly** in
+**Settings > System > Updates**, then use the shared **Save changes** action. Nightly resolves the
+public npm `kandev@nightly` dist-tag. The install-wide selection survives restart. Desktop,
+Homebrew, system-service, unmanaged, local-checkout, unknown, and invalid-metadata installs stay on
+Stable and the page explains why Nightly is unavailable.
 
-Configure update alerts in **Settings > General > Notifications > Notification Events**. Select **Kandev update available** for each notification provider that should receive it: Local delivers the in-app update indication and can use an already-granted browser or native desktop notification; System and Apprise use their configured provider transports. There is no separate update-only channel selector. New Local and System providers include this event by default; existing Local and System providers receive it once on upgrade, while existing Apprise providers remain unchanged. Disabling the event for a provider stops that provider's delivery without disabling release checks. Each provider receives a release version at most once; a later version is a new occurrence.
+The backend checks the selected source once at startup and every six hours, with a 30-second HTTP
+timeout, and persists the last successful Stable and Nightly results separately. **Check now**
+performs a synchronous request and permits one manual check per process every 30 seconds. Offline,
+rate-limited, or registry-failing installations continue to show that channel's cached state.
+
+Nightlies are best-effort daily snapshots. A new version appears only when `main` contains commits
+after the latest Stable release and that exact commit has not already been published. Nightlies do
+not move npm `latest` and do not create Homebrew, Scoop, Desktop, GHCR, Git tag, or GitHub Release
+artifacts.
+
+Configure update alerts in **Settings > General > Notifications > Notification Events**. Select **Kandev update available** for each notification provider that should receive it: Local delivers the in-app update indication and can use an already-granted browser or native desktop notification; System and Apprise use their configured provider transports. Notification routing is independent of the Stable/Nightly release selector. New Local and System providers include this event by default; existing Local and System providers receive it once on upgrade, while existing Apprise providers remain unchanged. Disabling the event for a provider stops that provider's delivery without disabling release checks. Each provider receives a release version at most once; a later version is a new occurrence. Returning from Nightly to a Stable version is an explicit action and does not produce a normal upgrade notification.
 
 Before any update, finish or stop active sessions, create and export a database backup plus its master key, preserve unpushed Git work, and read release notes.
 
 - Desktop: use **Settings > System > Updates** when signed updater assets are available; otherwise install the new desktop package.
-- Managed user service: use **Settings > System > Updates > Apply update**. Kandev enables it only after verifying the managed unit or plist and `<home>/service/install.json`. If the guarded update is unavailable or fails, run `brew upgrade kandev` or `npm install -g kandev@latest`, rerun `kandev service install` with the same install flags, then `kandev service restart`. System services always use that terminal flow with the required privileges.
-- Unmanaged CLI: run `brew upgrade kandev` or `npm install -g kandev@latest`, then restart the process.
+- Managed npm/npx user service: choose Stable or Nightly, save, check the resolved exact version,
+  then use **Apply update**. Apply submits the exact immutable version shown; if a newer channel
+  target was cached meanwhile, the backend rejects the stale request so the page can refresh. To
+  recover from Nightly, select Stable and apply the shown release. For terminal recovery, an
+  npm-managed service runs `npm install -g kandev@latest` and then `kandev service install` with the
+  same flags; an npx-managed service runs
+  `npx -y kandev@latest service install` with the same flags. Restart afterward. An npx-managed
+  service points into npm's transient `_npx` cache and stops working if that cache is pruned; prefer
+  `npm install -g` for a durable service.
+- Managed Homebrew user service: Stable only. Use **Apply update** when available; otherwise run
+  `brew upgrade kandev`, reinstall the service with the same flags, and restart.
+- System service: Stable only. Upgrade with the required privileges, reinstall with the same
+  service flags, and restart; the UI never applies it.
+- Unmanaged CLI: run `brew upgrade kandev`, `scoop update kandev`, or `npm install -g kandev@latest`, then restart the process.
 - Transient npx: start the desired release with `npx -y kandev@latest`; this does not update a persistent package.
 - Docker/Kubernetes: replace the image and recreate the workload. Do not treat an in-container package install as a durable update.
 
@@ -304,9 +414,11 @@ drawer mirrors it as the saved left sequence followed by the saved right sequenc
 | Backups page reports a 15-second create timeout | Reload the backup list and inspect the `backup-create` job/log | Large `VACUUM INTO` jobs can still finish; avoid double-clicking and ensure free disk |
 | Backup/maintenance fails on PostgreSQL | Active driver on Database page | Use `pg_dump`, provider snapshots, and PostgreSQL maintenance; System backup/vacuum/reset is SQLite-only |
 | Restored data looks stale | Whether the backend was restarted immediately | Quit/restart; do not keep using the old open database connections |
-| Logs page has no downloadable files | `logging.outputPath` and service/container logs | `stdout` is the default; use in-memory tail or configure a file sink |
+| Diagnostic bundle is partial | `manifest.json` warnings, source status, and loss counters | Keep a Kandev browser open for frontend capture; use backend-only when browser evidence is unnecessary |
 | Update check returns HTTP 429 | Time since last **Check now** | Wait at least 30 seconds; background checks retry every six hours |
 | **Apply update** is absent | Install mode/method and `<home>/service/install.json` | Expected for system, unmanaged, local-checkout, or invalid-metadata installs. A managed npm, npx, or Homebrew user service should offer Apply; reinstall it with the same flags to refresh its identity and metadata, or use the manual package-manager flow. |
+| **Nightly** is disabled | Install mode/method and `<home>/service/install.json` | Expected unless this is a verified managed npm/npx user service. Homebrew, Desktop, system-service, unmanaged, local-checkout, invalid-metadata, and unknown installs are Stable-only. |
+| Nightly check or save fails | npm access and cached checked time | Verify access to `https://registry.npmjs.org/kandev`, retry after connectivity returns, or keep/select Stable. A malformed or missing npm `nightly` tag fails closed. |
 | Metrics show unavailable | OS support, disk path, executor connectivity | Select supported metrics and verify permissions/network; the collector reports errors per sample |
 | Disk total exceeds filesystem expectation | Separate `data` and `backups` rows | Backups are counted twice in the UI total; use volume metrics for capacity decisions |
 | Legacy `/tmp/kandev-agent/*` uses disk | Process inventory and open-file references for the exact directory | This is data from older Kandev versions, not a current Storage resource. Stop Kandev, confirm no live process references the target, then remove only the confirmed-inactive legacy directory through host administration. |

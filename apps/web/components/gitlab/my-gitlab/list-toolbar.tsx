@@ -1,6 +1,7 @@
 "use client";
 
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
+import { useTranslation } from "react-i18next";
 import { IntegrationListToolbar } from "@/components/integrations/integration-list-toolbar";
 
 const ALL_PROJECTS = "__all__";
@@ -34,6 +35,7 @@ export function ListToolbar({
   projectOptions,
   onRefresh,
 }: ListToolbarProps) {
+  const { t } = useTranslation();
   const selectValue = projectFilter || ALL_PROJECTS;
   return (
     <IntegrationListToolbar
@@ -55,11 +57,11 @@ export function ListToolbar({
             className="h-8 w-full cursor-pointer md:w-[220px]"
             data-testid="gitlab-project-filter-trigger"
           >
-            <SelectValue placeholder="All projects" />
+            <SelectValue placeholder={t("gitlab:allProjects")} />
           </SelectTrigger>
           <SelectContent>
             <SelectItem value={ALL_PROJECTS} className="cursor-pointer">
-              All projects
+              {t("gitlab:allProjects")}
             </SelectItem>
             {projectOptions.map((key) => (
               <SelectItem key={key} value={key} className="cursor-pointer">
@@ -69,7 +71,7 @@ export function ListToolbar({
           </SelectContent>
         </Select>
       }
-      queryPlaceholder='Custom query — press Enter. e.g. "labels=bug&state=opened"'
+      queryPlaceholder={t("gitlab:customQueryPressEnterEG")}
       titleTestId="gitlab-list-toolbar-title"
       queryTestId="gitlab-list-toolbar-custom-query"
       refreshTestId="gitlab-list-toolbar-refresh"

@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Badge } from "@kandev/ui/badge";
 import { Button } from "@kandev/ui/button";
 import { CardContent, CardDescription, CardHeader, CardTitle } from "@kandev/ui/card";
@@ -8,9 +9,10 @@ import { Label } from "@kandev/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@kandev/ui/table";
 import { IconCheck, IconCopy, IconLoader2, IconX } from "@tabler/icons-react";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast/sonner";
 import { probeSSHAgents, probeSSHShells } from "@/lib/api/domains/ssh-api";
 import type { SSHAgentReadinessRow } from "@/lib/types/http-ssh";
+import { copyToClipboard } from "@/lib/utils/copy-to-clipboard";
 import { SettingsCard } from "@/components/settings/settings-card";
 
 export interface SSHAgentReadinessCardProps {
@@ -52,6 +54,7 @@ function useReadinessState({
   shellProp?: string;
   onShellChange?: (s: string) => void | Promise<void>;
 }) {
+  const { t } = useTranslation();
   const [rows, setRows] = useState<SSHAgentReadinessRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -77,11 +80,11 @@ function useReadinessState({
       setHasProbed(true);
     } catch (e) {
       if (seq !== seqRef.current) return;
-      setError(e instanceof Error ? e.message : "Failed to probe agents");
+      setError(e instanceof Error ? e.message : t("executors:sshFailedToProbeAgents"));
     } finally {
       if (seq === seqRef.current) setLoading(false);
     }
-  }, [executorId, shell]);
+  }, [executorId, shell, t]);
 
   // Auto-probe the shells once on mount so the dropdown has real options.
   // Cheap (one SSH dial, ~1s) and fully out-of-band of agent probing.
@@ -128,11 +131,11 @@ function useReadinessState({
         try {
           await onShellChange(next);
         } catch (e) {
-          toast.error(e instanceof Error ? e.message : "Failed to save shell");
+          toast.error(e instanceof Error ? e.message : t("executors:sshFailedToSaveShell"));
         }
       }
     },
-    [onShellChange],
+    [onShellChange, t],
   );
 
   return {
@@ -163,6 +166,7 @@ export function SSHAgentReadinessCard({
   baselineShell,
   onShellChange,
 }: SSHAgentReadinessCardProps) {
+  const { t } = useTranslation();
   const state = useReadinessState({ executorId, shellProp, onShellChange });
   const {
     rows,
@@ -184,10 +188,11 @@ export function SSHAgentReadinessCard({
       <CardHeader>
         <div className="flex items-start justify-between gap-3">
           <div>
-            <CardTitle>Available agents on this host</CardTitle>
+            <CardTitle>{t("executors:sshAvailableAgents")}</CardTitle>
             <CardDescription>
-              Probes the remote {"$PATH"} for each enabled agent under the chosen login shell. Copy
-              the install hint and run it on the remote when an agent is missing.
+              {/* $PATH is a shell variable name, interpolated so the
+                  pseudo-locale cannot transliterate it. */}
+              {t("executors:sshAvailableAgentsDescription", { pathVar: "$PATH" })}
             </CardDescription>
           </div>
           <Button
@@ -199,7 +204,7 @@ export function SSHAgentReadinessCard({
             className="cursor-pointer shrink-0"
           >
             {loading ? <IconLoader2 className="mr-1.5 h-4 w-4 animate-spin" /> : null}
-            {hasProbed ? "Re-probe" : "Probe agents"}
+            {hasProbed ? t("executors:sshReprobe") : t("executors:sshProbeAgents")}
           </Button>
         </div>
         <ShellSelector
@@ -233,6 +238,7 @@ function ShellSelector({
   onChange: (s: string) => void | Promise<void>;
   isDirty: boolean;
 }) {
+  const { t } = useTranslation();
   // While probing, show a placeholder option so the dropdown can't surface
   // a stale "bash" selection that we haven't confirmed exists on the host.
   // After probing, render whatever the host has, plus the current value so
@@ -241,7 +247,7 @@ function ShellSelector({
   return (
     <div className="flex items-center gap-2 pt-3">
       <Label htmlFor="ssh-readiness-shell" className="text-xs text-muted-foreground">
-        Login shell
+        {t("executors:sshLoginShell")}
       </Label>
       <Select value={shell} onValueChange={(v) => void onChange(v)} disabled={loading}>
         <SelectTrigger
@@ -257,7 +263,7 @@ function ShellSelector({
             <SelectItem key={s} value={s} className="text-xs">
               {s}
               {shells && !shells.includes(s) ? (
-                <span className="text-amber-600 ml-1">(not detected)</span>
+                <span className="text-amber-600 ml-1">{t("executors:sshShellNotDetected")}</span>
               ) : null}
             </SelectItem>
           ))}
@@ -285,6 +291,7 @@ function ReadinessContent({
   hasProbed: boolean;
   rows: SSHAgentReadinessRow[];
 }) {
+  const { t } = useTranslation();
   if (error) {
     return (
       <p data-testid="ssh-agent-readiness-error" className="text-sm text-red-600 dark:text-red-400">
@@ -295,25 +302,26 @@ function ReadinessContent({
   if (!hasProbed) {
     return (
       <p className="text-sm text-muted-foreground">
-        Click {`"Probe agents"`} to check which agents are installed on the remote.
+        {t("executors:sshProbeHint", { button: t("executors:sshProbeAgents") })}
       </p>
     );
   }
   if (rows.length === 0) {
-    return <p className="text-sm text-muted-foreground">No enabled agents to probe.</p>;
+    return <p className="text-sm text-muted-foreground">{t("executors:sshNoEnabledAgents")}</p>;
   }
   return <ReadinessTable rows={rows} />;
 }
 
 function ReadinessTable({ rows }: { rows: SSHAgentReadinessRow[] }) {
+  const { t } = useTranslation();
   return (
     <Table data-testid="ssh-agent-readiness-table">
       <TableHeader>
         <TableRow>
-          <TableHead>Agent</TableHead>
-          <TableHead>Binary</TableHead>
-          <TableHead>Status</TableHead>
-          <TableHead>Install hint</TableHead>
+          <TableHead>{t("executors:agent")}</TableHead>
+          <TableHead>{t("executors:sshBinary")}</TableHead>
+          <TableHead>{t("executors:status")}</TableHead>
+          <TableHead>{t("executors:sshInstallHint")}</TableHead>
         </TableRow>
       </TableHeader>
       <TableBody>
@@ -342,39 +350,44 @@ function ReadinessRow({ row }: { row: SSHAgentReadinessRow }) {
 }
 
 function StatusBadge({ row }: { row: SSHAgentReadinessRow }) {
+  const { t } = useTranslation();
   if (row.error) {
     return (
       <Badge variant="outline" className="border-amber-500/30 bg-amber-500/10 text-amber-700">
-        <IconX className="mr-1 h-3 w-3" /> Probe error
+        <IconX className="mr-1 h-3 w-3" /> {t("executors:sshProbeError")}
       </Badge>
     );
   }
   if (row.available) {
     return (
       <Badge variant="outline" className="border-green-500/30 bg-green-500/10 text-green-700">
-        <IconCheck className="mr-1 h-3 w-3" /> Installed
+        <IconCheck className="mr-1 h-3 w-3" /> {t("executors:sshInstalled")}
       </Badge>
     );
   }
   return (
     <Badge variant="outline" className="border-red-500/30 bg-red-500/10 text-red-700">
-      <IconX className="mr-1 h-3 w-3" /> Missing
+      <IconX className="mr-1 h-3 w-3" /> {t("executors:sshMissing")}
     </Badge>
   );
 }
 
 function InstallHint({ hint, available }: { hint?: string; available: boolean }) {
+  const { t } = useTranslation();
   if (available) return <span className="text-muted-foreground">—</span>;
-  if (!hint) return <span className="text-muted-foreground">No hint available</span>;
+  if (!hint)
+    return <span className="text-muted-foreground">{t("executors:sshNoHintAvailable")}</span>;
   return (
     <div className="flex items-center gap-1">
       <code className="truncate">{hint}</code>
       <button
         type="button"
         className="cursor-pointer text-muted-foreground hover:text-foreground"
-        aria-label="Copy install hint"
+        aria-label={t("executors:sshCopyInstallHint")}
         onClick={() => {
-          void navigator.clipboard.writeText(hint).then(() => toast.success("Install hint copied"));
+          void copyToClipboard(hint).then((success) => {
+            if (success) toast.success(t("executors:sshInstallHintCopied"));
+          });
         }}
       >
         <IconCopy className="h-3 w-3" />

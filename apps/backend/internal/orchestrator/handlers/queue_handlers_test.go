@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"testing"
@@ -12,6 +13,7 @@ import (
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/orchestrator"
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
+	"github.com/kandev/kandev/internal/task/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"github.com/stretchr/testify/assert"
@@ -19,9 +21,12 @@ import (
 )
 
 // mockEventBus is a no-op event bus for handler tests.
-type mockEventBus struct{}
+type mockEventBus struct {
+	published int
+}
 
 func (m *mockEventBus) Publish(_ context.Context, _ string, _ *bus.Event) error {
+	m.published++
 	return nil
 }
 func (m *mockEventBus) Subscribe(_ string, _ bus.EventHandler) (bus.Subscription, error) {
@@ -36,6 +41,30 @@ func (m *mockEventBus) Request(_ context.Context, _ string, _ *bus.Event, _ time
 func (m *mockEventBus) Close()            {}
 func (m *mockEventBus) IsConnected() bool { return true }
 
+type allowQueueAccess struct{}
+
+func (allowQueueAccess) AuthorizeSessionAccess(context.Context, string) error { return nil }
+func (allowQueueAccess) AuthorizeTaskSessionAccess(context.Context, string, string) error {
+	return nil
+}
+
+type fakeQueueAccessAuthorizer struct {
+	sessionErr   error
+	pairErr      error
+	sessionCalls int
+	pairCalls    int
+}
+
+func (f *fakeQueueAccessAuthorizer) AuthorizeSessionAccess(context.Context, string) error {
+	f.sessionCalls++
+	return f.sessionErr
+}
+
+func (f *fakeQueueAccessAuthorizer) AuthorizeTaskSessionAccess(context.Context, string, string) error {
+	f.pairCalls++
+	return f.pairErr
+}
+
 type mockQueueDrainer struct {
 	calls     int
 	sessionID string
@@ -49,6 +78,30 @@ type fakeReferenceSubmissionValidator struct {
 	taskID    string
 	result    []v1.EntityReference
 	err       error
+}
+
+type recordingQueueAttachmentClaimer struct {
+	claims   []string
+	releases []string
+	claimErr error
+}
+
+func (f *recordingQueueAttachmentClaimer) ClaimMessageAttachments(_ context.Context, _ string, _ string, attachments []v1.MessageAttachment) error {
+	for _, attachment := range attachments {
+		if attachment.AttachmentID != "" {
+			f.claims = append(f.claims, attachment.AttachmentID)
+		}
+	}
+	return f.claimErr
+}
+
+func (f *recordingQueueAttachmentClaimer) ReleaseMessageAttachments(_ context.Context, _ string, _ string, attachments []v1.MessageAttachment) error {
+	for _, attachment := range attachments {
+		if attachment.AttachmentID != "" {
+			f.releases = append(f.releases, attachment.AttachmentID)
+		}
+	}
+	return nil
 }
 
 func (f *fakeReferenceSubmissionValidator) ValidateForSubmission(
@@ -81,7 +134,7 @@ func setupQueueHandlersWithDrainer(t *testing.T, drainer QueueDrainer) (*QueueHa
 	})
 	require.NoError(t, err)
 	svc := messagequeue.NewServiceMemory(log)
-	return NewQueueHandlers(svc, &mockEventBus{}, log, drainer), svc
+	return NewQueueHandlers(svc, &mockEventBus{}, log, drainer, allowQueueAccess{}), svc
 }
 
 func setupQueueHandlersWithValidator(t *testing.T, validator entityrefs.SubmissionValidator) (*QueueHandlers, *messagequeue.Service) {
@@ -93,7 +146,7 @@ func setupQueueHandlersWithValidator(t *testing.T, validator entityrefs.Submissi
 	})
 	require.NoError(t, err)
 	svc := messagequeue.NewServiceMemory(log)
-	return NewQueueHandlers(svc, &mockEventBus{}, log, nil, validator), svc
+	return NewQueueHandlers(svc, &mockEventBus{}, log, nil, allowQueueAccess{}, validator), svc
 }
 
 func createTestMessage(t *testing.T, action string, payload interface{}) *ws.Message {
@@ -115,9 +168,93 @@ func parseError(t *testing.T, response *ws.Message) ws.ErrorPayload {
 	return errorPayload
 }
 
+func TestQueueHandlersDenyUnauthorizedSessionActions(t *testing.T) {
+	tests := []struct {
+		name   string
+		action string
+		call   func(*QueueHandlers, context.Context, *ws.Message) (*ws.Message, error)
+		body   func(string) map[string]interface{}
+	}{
+		{name: "clear", action: ws.ActionMessageQueueCancel, call: (*QueueHandlers).wsCancelAll, body: func(string) map[string]interface{} { return map[string]interface{}{"session_id": "s"} }},
+		{name: "get", action: ws.ActionMessageQueueGet, call: (*QueueHandlers).wsGetQueueStatus, body: func(string) map[string]interface{} { return map[string]interface{}{"session_id": "s"} }},
+		{name: "update", action: ws.ActionMessageQueueUpdate, call: (*QueueHandlers).wsUpdateMessage, body: func(id string) map[string]interface{} {
+			return map[string]interface{}{"session_id": "s", "entry_id": id, "content": "changed"}
+		}},
+		{name: "drain", action: ws.ActionMessageQueueDrain, call: (*QueueHandlers).wsDrainQueue, body: func(string) map[string]interface{} { return map[string]interface{}{"session_id": "s"} }},
+		{name: "send now", action: ws.ActionMessageQueueSendNow, call: (*QueueHandlers).wsSendNow, body: func(string) map[string]interface{} {
+			return map[string]interface{}{"session_id": "s", "scope": orchestrator.QueueSendNowScopeEntry, "entry_id": "q"}
+		}},
+		{name: "remove", action: ws.ActionMessageQueueRemove, call: (*QueueHandlers).wsRemoveEntry, body: func(id string) map[string]interface{} {
+			return map[string]interface{}{"session_id": "s", "entry_id": id}
+		}},
+		{name: "merge", action: ws.ActionMessageQueueMerge, call: (*QueueHandlers).wsMergeIntoAbove, body: func(id string) map[string]interface{} {
+			return map[string]interface{}{"session_id": "s", "entry_id": id}
+		}},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			log, err := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "console", OutputPath: "stderr"})
+			require.NoError(t, err)
+			svc := messagequeue.NewServiceMemory(log)
+			_, err = svc.QueueMessage(context.Background(), "s", "t", "first", "", messagequeue.QueuedByUser, false, nil)
+			require.NoError(t, err)
+			second, err := svc.QueueMessage(context.Background(), "s", "t", "second", "", messagequeue.QueuedByUser, false, nil)
+			require.NoError(t, err)
+			access := &fakeQueueAccessAuthorizer{sessionErr: errors.New("secret denial")}
+			events := &mockEventBus{}
+			drainer := &mockQueueDrainer{drained: true}
+			handlers := NewQueueHandlers(svc, events, log, drainer, access)
+
+			response, err := tc.call(handlers, context.Background(), createTestMessage(t, tc.action, tc.body(second.ID)))
+			require.NoError(t, err)
+			assert.Equal(t, ws.MessageTypeError, response.Type)
+			assert.Equal(t, ws.ErrorCodeNotFound, parseError(t, response).Code)
+			assert.NotContains(t, string(response.Payload), "secret denial")
+			assert.Equal(t, 1, access.sessionCalls)
+			assert.Equal(t, 0, access.pairCalls)
+			assert.Equal(t, 0, events.published)
+			assert.Equal(t, 0, drainer.calls)
+			assert.Equal(t, 2, svc.GetStatus(context.Background(), "s").Count)
+		})
+	}
+}
+
+func TestQueueHandlersDenyUnauthorizedTaskSessionPairActions(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		action string
+		call   func(*QueueHandlers, context.Context, *ws.Message) (*ws.Message, error)
+	}{
+		{name: "add", action: ws.ActionMessageQueueAdd, call: (*QueueHandlers).wsQueueMessage},
+		{name: "append", action: ws.ActionMessageQueueAppend, call: (*QueueHandlers).wsAppendToQueue},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			log, err := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "console", OutputPath: "stderr"})
+			require.NoError(t, err)
+			svc := messagequeue.NewServiceMemory(log)
+			access := &fakeQueueAccessAuthorizer{pairErr: errors.New("secret denial")}
+			events := &mockEventBus{}
+			handlers := NewQueueHandlers(svc, events, log, nil, access)
+
+			response, err := tc.call(handlers, context.Background(), createTestMessage(t, tc.action, map[string]interface{}{
+				"session_id": "s", "task_id": "other-task", "content": "secret",
+			}))
+			require.NoError(t, err)
+			assert.Equal(t, ws.MessageTypeError, response.Type)
+			assert.Equal(t, ws.ErrorCodeNotFound, parseError(t, response).Code)
+			assert.NotContains(t, string(response.Payload), "secret denial")
+			assert.Equal(t, 0, access.sessionCalls)
+			assert.Equal(t, 1, access.pairCalls)
+			assert.Equal(t, 0, events.published)
+			assert.Equal(t, 0, svc.GetStatus(context.Background(), "s").Count)
+		})
+	}
+}
+
 func TestWsQueueMessage(t *testing.T) {
 	t.Run("queues a message", func(t *testing.T) {
-		handlers, _ := setupQueueHandlers(t)
+		handlers, svc := setupQueueHandlers(t)
 		ctx := context.Background()
 
 		msg := createTestMessage(t, ws.ActionMessageQueueAdd, map[string]interface{}{
@@ -125,11 +262,23 @@ func TestWsQueueMessage(t *testing.T) {
 			"task_id":    "task-1",
 			"content":    "test message",
 			"user_id":    "user-1",
+			"context_files": []map[string]interface{}{
+				{"path": "src/components", "name": "components", "is_directory": true},
+			},
 		})
 
 		response, err := handlers.wsQueueMessage(ctx, msg)
 		require.NoError(t, err)
 		assert.Equal(t, ws.MessageTypeResponse, response.Type)
+		entries := svc.GetStatus(ctx, "session-1").Entries
+		require.Len(t, entries, 1)
+		files, ok := entries[0].Metadata[messagequeue.MetadataContextFiles].([]v1.ContextFileMeta)
+		require.True(t, ok)
+		require.Len(t, files, 1)
+		assert.Equal(t, "src/components", files[0].Path)
+		assert.Equal(t, "components", files[0].Name)
+		require.NotNil(t, files[0].IsDirectory)
+		assert.True(t, *files[0].IsDirectory)
 	})
 
 	t.Run("rejects missing session_id", func(t *testing.T) {
@@ -301,6 +450,15 @@ func TestFirstInvalidDeliveryMode(t *testing.T) {
 	}
 }
 
+func TestFirstInvalidAttachmentCountsInlineDataInAggregate(t *testing.T) {
+	inline := base64.StdEncoding.EncodeToString([]byte("inline"))
+	attachments := []messagequeue.MessageAttachment{
+		{Type: "resource", AttachmentID: "descriptor", Name: "large.bin", MimeType: "application/octet-stream", SizeBytes: models.MaxMessageAttachmentBytes},
+		{Type: "resource", Data: inline, Name: "inline.txt", MimeType: "text/plain"},
+	}
+	assert.Equal(t, 1, firstInvalidAttachment(attachments))
+}
+
 func TestWsCancelAll(t *testing.T) {
 	t.Run("clears the queue", func(t *testing.T) {
 		handlers, svc := setupQueueHandlers(t)
@@ -445,6 +603,53 @@ func TestWsGetQueueStatus(t *testing.T) {
 }
 
 func TestWsUpdateMessage(t *testing.T) {
+	t.Run("claims replacement attachments and releases superseded claims", func(t *testing.T) {
+		handlers, svc := setupQueueHandlers(t)
+		claimer := &recordingQueueAttachmentClaimer{}
+		handlers.SetAttachmentClaimer(claimer)
+		ctx := context.Background()
+		queued, err := svc.QueueMessage(ctx, "s", "task-1", "original", "", "u", false, []messagequeue.MessageAttachment{{
+			Type: "resource", AttachmentID: "old-attachment", Name: "old.txt", MimeType: "text/plain",
+		}})
+		require.NoError(t, err)
+
+		response, err := handlers.wsUpdateMessage(ctx,
+			createTestMessage(t, ws.ActionMessageQueueUpdate, map[string]interface{}{
+				"session_id": "s", "entry_id": queued.ID, "content": "edited", "user_id": "u",
+				"attachments": []messagequeue.MessageAttachment{{
+					Type: "resource", AttachmentID: "new-attachment", Name: "new.txt", MimeType: "text/plain",
+				}},
+			}))
+		require.NoError(t, err)
+		assert.Equal(t, ws.MessageTypeResponse, response.Type)
+		assert.Equal(t, []string{"new-attachment"}, claimer.claims)
+		assert.Equal(t, []string{"old-attachment"}, claimer.releases)
+	})
+
+	t.Run("releases only newly claimed attachments when replacement fails", func(t *testing.T) {
+		handlers, svc := setupQueueHandlers(t)
+		claimer := &recordingQueueAttachmentClaimer{}
+		handlers.SetAttachmentClaimer(claimer)
+		ctx := context.Background()
+		queued, err := svc.QueueMessage(ctx, "s", "task-1", "original", "", "u", false, []messagequeue.MessageAttachment{{
+			Type: "resource", AttachmentID: "old-attachment", Name: "old.txt", MimeType: "text/plain",
+		}})
+		require.NoError(t, err)
+
+		response, err := handlers.wsUpdateMessage(ctx,
+			createTestMessage(t, ws.ActionMessageQueueUpdate, map[string]interface{}{
+				"session_id": "s", "entry_id": queued.ID, "content": "edited", "user_id": "other",
+				"attachments": []messagequeue.MessageAttachment{
+					{Type: "resource", AttachmentID: "old-attachment", Name: "old.txt", MimeType: "text/plain"},
+					{Type: "resource", AttachmentID: "new-attachment", Name: "new.txt", MimeType: "text/plain"},
+				},
+			}))
+		require.NoError(t, err)
+		assert.Equal(t, ws.MessageTypeError, response.Type)
+		assert.Equal(t, []string{"new-attachment"}, claimer.claims)
+		assert.Equal(t, []string{"new-attachment"}, claimer.releases)
+	})
+
 	t.Run("updates an entry", func(t *testing.T) {
 		handlers, svc := setupQueueHandlers(t)
 		ctx := context.Background()
@@ -729,7 +934,7 @@ func TestWsRemoveEntry(t *testing.T) {
 		assert.Equal(t, "entry_not_found", parseError(t, response).Code)
 	})
 
-	t.Run("returns entry_not_found for agent-authored entries", func(t *testing.T) {
+	t.Run("removes agent-authored entries", func(t *testing.T) {
 		handlers, svc := setupQueueHandlers(t)
 		ctx := context.Background()
 
@@ -742,15 +947,13 @@ func TestWsRemoveEntry(t *testing.T) {
 				"entry_id":   queued.ID,
 			}))
 		require.NoError(t, err)
-		assert.Equal(t, ws.MessageTypeError, response.Type)
-		assert.Equal(t, "entry_not_found", parseError(t, response).Code)
+		assert.Equal(t, ws.MessageTypeResponse, response.Type)
 
 		status := svc.GetStatus(ctx, "s")
-		assert.Equal(t, 1, status.Count)
-		assert.Equal(t, "agent prompt", status.Entries[0].Content)
+		assert.Equal(t, 0, status.Count)
 	})
 
-	t.Run("returns entry_not_found for workflow-authored entries", func(t *testing.T) {
+	t.Run("removes workflow-authored entries", func(t *testing.T) {
 		handlers, svc := setupQueueHandlers(t)
 		ctx := context.Background()
 
@@ -766,11 +969,10 @@ func TestWsRemoveEntry(t *testing.T) {
 				"entry_id":   queued.ID,
 			}))
 		require.NoError(t, err)
-		assert.Equal(t, ws.MessageTypeError, response.Type)
+		assert.Equal(t, ws.MessageTypeResponse, response.Type)
 
 		status := svc.GetStatus(ctx, "s")
-		require.Equal(t, 1, status.Count)
-		assert.Equal(t, "lifecycle prompt", status.Entries[0].Content)
+		assert.Equal(t, 0, status.Count)
 	})
 
 	t.Run("rejects missing session_id", func(t *testing.T) {

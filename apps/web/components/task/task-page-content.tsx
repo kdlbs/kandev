@@ -2,6 +2,9 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { IconAlertTriangle } from "@tabler/icons-react";
+import { Button } from "@kandev/ui/button";
+import Link from "@/components/routing/app-link";
+import { useTranslation } from "react-i18next";
 import type { Repository, RepositoryScript, Task } from "@/lib/types/http";
 import type { Terminal } from "@/hooks/domains/session/use-terminals";
 import type { KanbanState } from "@/lib/state/slices";
@@ -14,6 +17,7 @@ import { useAppStore } from "@/components/state-provider";
 import { useEnsureTaskSession } from "@/hooks/domains/session/use-ensure-task-session";
 import { useExternalVcsFileLinkHydration } from "@/hooks/domains/workspace/use-external-vcs-file-link";
 import { fetchTask } from "@/lib/api";
+import { linkToTaskOverview } from "@/lib/links";
 import { useTasks } from "@/hooks/use-tasks";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { useForegroundRefresh } from "@/hooks/use-foreground-refresh";
@@ -135,6 +139,8 @@ export function useMergedAgentState(
 }
 
 function TaskLoadingState() {
+  const { t } = useTranslation();
+
   return (
     <div
       className="flex h-full min-h-0 w-full items-center justify-center bg-background px-4"
@@ -142,13 +148,16 @@ function TaskLoadingState() {
     >
       <div className="flex min-h-24 min-w-0 flex-col items-center justify-center gap-3 text-center text-sm text-muted-foreground">
         <GridSpinner className="text-primary" />
-        <span>Loading task...</span>
+        <span>{t("common:taskLoading")}</span>
       </div>
     </div>
   );
 }
 
-function TaskLoadErrorState() {
+export function TaskLoadErrorState() {
+  const { t } = useTranslation();
+  const activeWorkspaceId = useAppStore((state) => state.workspaces.activeId);
+
   return (
     <div
       className="flex h-full min-h-0 w-full items-center justify-center bg-background px-4"
@@ -157,11 +166,19 @@ function TaskLoadErrorState() {
       <div className="flex min-h-24 max-w-sm min-w-0 flex-col items-center justify-center gap-3 text-center text-sm text-muted-foreground">
         <IconAlertTriangle className="h-5 w-5 text-destructive" aria-hidden="true" />
         <div className="space-y-1">
-          <div className="font-medium text-foreground">Task unavailable</div>
-          <div>
-            We could not load this task. It may have been deleted or you may not have access.
-          </div>
+          <div className="font-medium text-foreground">{t("common:taskUnavailable")}</div>
+          <div>{t("common:taskUnavailableDescription")}</div>
         </div>
+        <Button
+          asChild
+          size="lg"
+          className="min-h-11 px-4 sm:min-h-9"
+          data-testid="task-unavailable-overview-link"
+        >
+          <Link href={linkToTaskOverview({ workspaceId: activeWorkspaceId ?? undefined })}>
+            {t("common:backToTaskOverview")}
+          </Link>
+        </Button>
       </div>
     </div>
   );

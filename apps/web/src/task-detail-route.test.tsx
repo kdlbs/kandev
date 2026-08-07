@@ -8,6 +8,7 @@ import type { Task } from "@/lib/types/http";
 const mocks = vi.hoisted(() => ({
   fetchSessionDataForTask: vi.fn(),
 }));
+const KANBAN_TASK_SHELL_TEST_ID = "kanban-task-shell";
 
 vi.mock("@/components/state-hydrator", () => ({
   StateHydrator: () => <div data-testid="state-hydrator" />,
@@ -16,7 +17,7 @@ vi.mock("@/components/state-hydrator", () => ({
 vi.mock("@/app/tasks/[id]/kanban-task-shell", () => ({
   KanbanTaskShell: ({ task, taskId }: { task: Task | null; taskId: string }) => (
     <div
-      data-testid="kanban-task-shell"
+      data-testid={KANBAN_TASK_SHELL_TEST_ID}
       data-route-task-id={taskId}
       data-task-id={task?.id ?? ""}
     />
@@ -75,7 +76,7 @@ describe("TaskDetailRoute", () => {
 
     render(<TaskDetailRoute taskId="task-1" />);
 
-    expect(screen.queryByTestId("kanban-task-shell")).toBeNull();
+    expect(screen.queryByTestId(KANBAN_TASK_SHELL_TEST_ID)).toBeNull();
     expect(screen.getByRole("status").textContent).toContain("Loading task");
     expect(screen.getByRole("status").parentElement?.className).toContain("h-full");
     expect(screen.getByRole("status").parentElement?.className).toContain("min-h-0");
@@ -85,7 +86,9 @@ describe("TaskDetailRoute", () => {
     routeData.resolve(makeFetchedData());
 
     await waitFor(() => {
-      expect(screen.getByTestId("kanban-task-shell").getAttribute("data-task-id")).toBe("task-1");
+      expect(screen.getByTestId(KANBAN_TASK_SHELL_TEST_ID).getAttribute("data-task-id")).toBe(
+        "task-1",
+      );
     });
   });
 
@@ -93,7 +96,21 @@ describe("TaskDetailRoute", () => {
     render(<TaskDetailRoute taskId="task-1" initialData={makeFetchedData()} />);
 
     expect(mocks.fetchSessionDataForTask).not.toHaveBeenCalled();
-    expect(screen.getByTestId("kanban-task-shell").getAttribute("data-task-id")).toBe("task-1");
+    expect(screen.getByTestId(KANBAN_TASK_SHELL_TEST_ID).getAttribute("data-task-id")).toBe(
+      "task-1",
+    );
     expect(screen.getByTestId("state-hydrator")).toBeTruthy();
+  });
+
+  it("reaches the unavailable task shell when route data fails", async () => {
+    mocks.fetchSessionDataForTask.mockRejectedValueOnce(new Error("task not found"));
+
+    render(<TaskDetailRoute taskId="missing-task" />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId(KANBAN_TASK_SHELL_TEST_ID)).toBeTruthy();
+    });
+    expect(screen.getByTestId(KANBAN_TASK_SHELL_TEST_ID).getAttribute("data-task-id")).toBe("");
+    expect(screen.queryByTestId("state-hydrator")).toBeNull();
   });
 });

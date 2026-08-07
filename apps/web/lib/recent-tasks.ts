@@ -78,6 +78,14 @@ export function getRecentTasks(): RecentTaskEntry[] {
   }
 }
 
+export function findMostRecentTaskForWorkspace(
+  entries: RecentTaskEntry[],
+  workspaceId: string | undefined,
+): RecentTaskEntry | null {
+  if (!workspaceId) return null;
+  return entries.find((entry) => entry.workspaceId === workspaceId) ?? null;
+}
+
 export function setRecentTasks(entries: RecentTaskEntry[]): RecentTaskEntry[] {
   const normalized = normalizeEntries(entries);
   if (typeof window === "undefined") return normalized;

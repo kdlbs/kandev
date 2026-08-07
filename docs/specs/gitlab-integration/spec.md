@@ -1,7 +1,7 @@
 ---
 status: building
 created: 2026-05-04
-updated: 2026-07-22
+updated: 2026-08-01
 owner: tbd
 ---
 
@@ -47,6 +47,16 @@ workflows are not usable end to end.
 - Users can link an existing task to a merge request by pasting a full MR URL,
   including URLs from the workspace's configured self-managed host. They can
   unlink one association without deleting the task or upstream MR.
+- A merge request opened outside Kandev's own MR-creation action (e.g. `glab mr
+  create` from an agent session, or opening the MR directly in the GitLab web
+  UI) on a task's session branch is auto-linked: on the next push the open MR
+  matching that branch is found and linked, scoped to the pushing repository,
+  with an on-demand check available as an immediate alternative to waiting for
+  a push or the background poller. Linking also creates the refresh watch that
+  keeps review/pipeline status current, so no manual link step is required for
+  this common case. Multi-repository and multi-branch tasks each get their own
+  association and watch, scoped per `(repository_id, branch)`; re-linking an
+  already-linked MR is a no-op rather than a duplicate.
 - For a workspace with GitLab configured, task context menus expose
   `GitLab Merge Request` inside the shared `Link` submenu. Desktop users can
   reach it by right-clicking a task, and touch users can reach the same action
@@ -130,7 +140,14 @@ into the secret store.
   records. Reservation occurs before task creation; a failed dispatch releases
   the reservation, while a successful dispatch attaches the created task ID.
 - `gitlab_mr_watches` remains the linked-MR refresh record for an active task
-  session. It is not a replacement for a review watch.
+  session. It is not a replacement for a review watch. Its unique key is
+  `(session_id, repository_id, branch)` — branch-scoped so a session with
+  multiple worktrees on the same repository (multi-branch tasks) can hold one
+  watch per branch instead of colliding on the second branch's insert. It is
+  populated by both explicit URL linking and by push-detection/on-demand
+  auto-link, and its periodic poll refreshes the matching `gitlab_task_mrs`
+  row (state, pipeline, approval, merge status) in addition to notifying on
+  notable transitions.
 - GitLab notification subscription state is owned by GitLab. Kandev reads it
   live and does not duplicate it in SQLite.
 

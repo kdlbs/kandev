@@ -93,22 +93,6 @@ describe("aggregateSidebarTasks", () => {
     expect(result.allSteps).toHaveLength(1);
   });
 
-  it("does not duplicate tasks already present in the snapshot", () => {
-    const snapshots: WorkflowSnapshotMap = {
-      "wf-1": makeSnapshot([makeStep("s1", 0)], [makeTask("t1", "s1", { title: "from snapshot" })]),
-    };
-    const result = aggregateSidebarTasks(
-      snapshots,
-      "wf-1",
-      [makeTask("t1", "s1", { title: "from active" }), makeTask("t2", "s1")],
-      [makeStep("s1", 0)],
-    );
-    expect(result.allTasks).toHaveLength(2);
-    const t1 = result.allTasks.find((t) => t.id === "t1");
-    expect(t1?.title).toBe("from snapshot");
-    expect(result.allTasks.find((t) => t.id === "t2")).toBeDefined();
-  });
-
   it("prefers live active steps when the workflow snapshot is stale", () => {
     const snapshots: WorkflowSnapshotMap = {
       "wf-1": makeSnapshot([makeStep("s1", 0, { title: "Snapshot Step" })], []),
@@ -159,6 +143,75 @@ describe("aggregateSidebarTasks", () => {
       [makeStep("step-B", 0)],
     );
     expect(result.allTasks.map((t) => t.id)).toEqual(["task-B"]);
+  });
+});
+
+describe("aggregateSidebarTasks active precedence", () => {
+  it("prefers the live active task over a stale workflow snapshot", () => {
+    const snapshots: WorkflowSnapshotMap = {
+      "wf-1": makeSnapshot(
+        [makeStep("s1", 0)],
+        [
+          makeTask("t1", "s1", {
+            title: "from snapshot",
+            state: "IN_PROGRESS",
+            primarySessionState: "STARTING",
+            statusSummary: {
+              revision: 2,
+              updated_at: "2026-08-03T00:00:00Z",
+            },
+          }),
+        ],
+      ),
+    };
+    const result = aggregateSidebarTasks(
+      snapshots,
+      "wf-1",
+      [
+        makeTask("t1", "s1", {
+          title: "from active",
+          state: "REVIEW",
+          primarySessionState: "WAITING_FOR_INPUT",
+          statusSummary: {
+            revision: 4,
+            updated_at: "2026-08-03T00:00:02Z",
+          },
+        }),
+        makeTask("t2", "s1"),
+      ],
+      [makeStep("s1", 0)],
+    );
+    expect(result.allTasks).toHaveLength(2);
+    const t1 = result.allTasks.find((t) => t.id === "t1");
+    expect(t1).toMatchObject({
+      title: "from active",
+      state: "REVIEW",
+      primarySessionState: "WAITING_FOR_INPUT",
+      statusSummary: { revision: 4 },
+    });
+    expect(result.allTasks.find((t) => t.id === "t2")).toBeDefined();
+  });
+
+  it("keeps a projected snapshot when the active task has no newer revision", () => {
+    const projected = makeTask("t1", "s1", {
+      statusSummary: {
+        revision: 4,
+        updated_at: "2026-08-03T00:00:02Z",
+        git: { additions: 3, deletions: 0 },
+      },
+    });
+    const result = aggregateSidebarTasks(
+      { "wf-1": makeSnapshot([makeStep("s1", 0)], [projected]) },
+      "wf-1",
+      [makeTask("t1", "s1", { statusSummary: undefined })],
+      [makeStep("s1", 0)],
+    );
+
+    expect(result.allTasks).toHaveLength(1);
+    expect(result.allTasks[0].statusSummary).toMatchObject({
+      revision: 4,
+      git: { additions: 3, deletions: 0 },
+    });
   });
 });
 

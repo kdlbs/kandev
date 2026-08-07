@@ -36,29 +36,42 @@ type officeSessionMetadataUpdater interface {
 func (e *Executor) EnsureSessionForAgent(
 	ctx context.Context, task *v1.Task, agentInstanceID, agentProfileID, executorID, executorProfileID string,
 ) (*models.TaskSession, error) {
+	session, _, err := e.EnsureSessionForAgentWithCreation(
+		ctx, task, agentInstanceID, agentProfileID, executorID, executorProfileID,
+	)
+	return session, err
+}
+
+// EnsureSessionForAgentWithCreation is the same office-session lookup as
+// EnsureSessionForAgent, but also reports whether the returned row was
+// inserted by this call. Reused rows already have a CREATED lifecycle event;
+// callers must not publish another one for every office turn.
+func (e *Executor) EnsureSessionForAgentWithCreation(
+	ctx context.Context, task *v1.Task, agentInstanceID, agentProfileID, executorID, executorProfileID string,
+) (*models.TaskSession, bool, error) {
 	if task == nil || task.ID == "" {
-		return nil, errors.New("EnsureSessionForAgent: task is required")
+		return nil, false, errors.New("EnsureSessionForAgent: task is required")
 	}
 	if agentInstanceID == "" {
-		return nil, errors.New("EnsureSessionForAgent: agent_profile_id is required")
+		return nil, false, errors.New("EnsureSessionForAgent: agent_profile_id is required")
 	}
 	if agentProfileID == "" {
-		return nil, ErrNoAgentProfileID
+		return nil, false, ErrNoAgentProfileID
 	}
 
 	existing, err := e.repo.GetTaskSessionByTaskAndAgent(ctx, task.ID, agentInstanceID)
 	if err != nil {
-		return nil, fmt.Errorf("lookup (task,agent) session: %w", err)
+		return nil, false, fmt.Errorf("lookup (task,agent) session: %w", err)
 	}
 	if existing != nil {
 		if err := e.rebindOfficeSessionExecutionProfile(ctx, existing, agentProfileID); err != nil {
-			return nil, err
+			return nil, false, err
 		}
 		reused, decision := e.tryReuseExistingSession(ctx, existing)
 		if decision == reuseDecisionTerminal {
 			// Fall through to create a new row below.
 		} else {
-			return reused, nil
+			return reused, false, nil
 		}
 	}
 
@@ -68,15 +81,15 @@ func (e *Executor) EnsureSessionForAgent(
 		raced, lookupErr := e.repo.GetTaskSessionByTaskAndAgent(ctx, task.ID, agentInstanceID)
 		if lookupErr == nil && raced != nil {
 			if rebindErr := e.rebindOfficeSessionExecutionProfile(ctx, raced, agentProfileID); rebindErr != nil {
-				return nil, rebindErr
+				return nil, false, rebindErr
 			}
 			reused, _ := e.tryReuseExistingSession(ctx, raced)
 			if reused != nil {
-				return reused, nil
+				return reused, false, nil
 			}
 		}
 	}
-	return created, err
+	return created, err == nil, err
 }
 
 func (e *Executor) rebindOfficeSessionExecutionProfile(
@@ -109,7 +122,7 @@ func (e *Executor) rebindOfficeSessionExecutionProfile(
 			models.SessionMetaKeyRuntimeConfigOverrides,
 			models.SessionMetaKeyACPConfigBaseline,
 			models.SessionMetaKeyACPModelState,
-			"context_window",
+			models.SessionMetaKeyContextWindow,
 			models.SessionMetaKeyLastAgentError,
 		} {
 			delete(updated.Metadata, key)
@@ -121,7 +134,7 @@ func (e *Executor) rebindOfficeSessionExecutionProfile(
 			models.SessionMetaKeyRuntimeConfigOverrides,
 			models.SessionMetaKeyACPConfigBaseline,
 			models.SessionMetaKeyACPModelState,
-			"context_window",
+			models.SessionMetaKeyContextWindow,
 			models.SessionMetaKeyLastAgentError,
 		})
 		if err != nil {
@@ -239,7 +252,7 @@ func (e *Executor) createOfficeSession(
 		session.ExecutorID = execConfig.ExecutorID
 	}
 
-	if err := e.repo.CreateTaskSession(ctx, session); err != nil {
+	if err := e.persistOfficeSession(ctx, task.ID, session); err != nil {
 		return nil, fmt.Errorf("persist office session: %w", err)
 	}
 	e.logger.Info("office session created",
@@ -247,4 +260,28 @@ func (e *Executor) createOfficeSession(
 		zap.String("session_id", session.ID),
 		zap.String("agent_profile_id", agentInstanceID))
 	return session, nil
+}
+
+func (e *Executor) persistOfficeSession(ctx context.Context, taskID string, session *models.TaskSession) error {
+	if creator, ok := e.repo.(officeTaskSessionCreator); ok {
+		return creator.CreateOfficeTaskSession(ctx, session)
+	}
+	creationLock := e.officeSessionLock(taskID)
+	creationLock.Lock()
+	defer creationLock.Unlock()
+	return e.persistOfficeSessionFallback(ctx, taskID, session)
+}
+
+func (e *Executor) persistOfficeSessionFallback(ctx context.Context, taskID string, session *models.TaskSession) error {
+	existingSessions, err := e.repo.ListTaskSessions(ctx, taskID)
+	if err != nil {
+		return fmt.Errorf("list task sessions before creating office session: %w", err)
+	}
+	if len(existingSessions) == 0 {
+		if session.Metadata == nil {
+			session.Metadata = make(map[string]interface{})
+		}
+		session.Metadata[models.SessionMetaKeyOrigin] = models.SessionOriginTaskInitial
+	}
+	return e.repo.CreateTaskSession(ctx, session)
 }

@@ -9,7 +9,7 @@ import {
   IconCpu,
   IconBuilding,
 } from "@tabler/icons-react";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast/sonner";
 import { getCostsBreakdown } from "@/lib/api/domains/office-api";
 import { MetricCard } from "../../components/metric-card";
 import type { CostBreakdownItem } from "@/lib/state/slices/office/types";

@@ -4,7 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"os/exec"
+	"errors"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -36,18 +36,23 @@ func (wt *WorkspaceTracker) pollGitChanges(ctx context.Context) {
 	}
 	defer timer.Stop()
 
-	// Initialize cached HEAD SHA, branch name, and index hash
+	// Prime cached HEAD SHA, branch name, upstream SHA, and index hash. A read
+	// failure here is non-fatal: the caches stay empty and the first
+	// successful tick fills them, which is what the previous per-value
+	// getters did on error too.
+	snap, _ := wt.readGitPollSnapshot(ctx)
 	wt.gitStateMu.Lock()
-	wt.cachedHeadSHA = wt.getHeadSHA(ctx)
-	wt.cachedBranchName = wt.getCurrentBranchName(ctx)
-	wt.cachedIndexHash = wt.getGitStatusHash(ctx)
+	wt.cachedHeadSHA = snap.headSHA
+	wt.cachedBranchName = snap.branch
+	wt.cachedUpstreamSHA = snap.upstreamSHA
+	wt.cachedIndexHash = snap.indexHash
 	wt.gitStateMu.Unlock()
 
 	wt.logger.Info("git polling started",
 		zap.Duration("fast_interval", wt.gitPollInterval),
 		zap.String("initial_mode", string(wt.GetPollMode())),
-		zap.String("initial_head", wt.cachedHeadSHA),
-		zap.String("initial_branch", wt.cachedBranchName))
+		zap.String("initial_head", snap.headSHA),
+		zap.String("initial_branch", snap.branch))
 
 	var consecutiveFailures int
 
@@ -116,194 +121,377 @@ func (wt *WorkspaceTracker) gitPollTick(ctx context.Context, consecutiveFailures
 		return true
 	}
 
-	// Quick git health check before running full change detection.
-	// If git is broken (e.g., worktree .git reference points to deleted gitdir),
-	// stop after maxConsecutiveGitFailures to avoid wasting CPU.
-	probeCmd := exec.CommandContext(ctx, "git", "rev-parse", "--git-dir")
-	probeCmd.Dir = wt.workDir
-	if err := subproc.RunGit(ctx, probeCmd); err != nil {
-		*consecutiveFailures++
-		if *consecutiveFailures >= maxConsecutiveGitFailures {
-			wt.logger.Error("git not functional, stopping git polling",
-				zap.String("workDir", wt.workDir),
-				zap.Int("consecutiveFailures", *consecutiveFailures),
-				zap.Error(err))
-			return true
-		}
-		return false
+	snap, err := wt.readGitPollSnapshot(ctx)
+	if err != nil {
+		return wt.handleGitPollFailure(ctx, consecutiveFailures, err)
 	}
 	*consecutiveFailures = 0
 
-	wt.checkGitChanges(ctx)
+	wt.checkGitChanges(ctx, snap)
 	return false
 }
 
-// getHeadSHA returns the current HEAD commit SHA
-func (wt *WorkspaceTracker) getHeadSHA(ctx context.Context) string {
-	cmd := exec.CommandContext(ctx, "git", "rev-parse", "HEAD")
-	cmd.Dir = wt.workDir
-	out, err := subproc.RunGitOutput(ctx, cmd)
-	if err != nil {
-		return ""
+// handleGitPollFailure decides whether a failed snapshot read means git itself
+// is broken (e.g. a worktree .git reference pointing at a deleted gitdir) or
+// just a transient error worth retrying. The `rev-parse --git-dir` health probe
+// used to run on every tick; it now runs only here, because on the happy path
+// its exit code is already implied by the snapshot read succeeding.
+//
+// Returns true if pollGitChanges should exit.
+func (wt *WorkspaceTracker) handleGitPollFailure(ctx context.Context, consecutiveFailures *int, cause error) bool {
+	if errors.Is(cause, subproc.ErrAdmissionCanceled) {
+		wt.logger.Debug("git poll admission canceled; preserving tracker liveness",
+			zap.String("workDir", wt.workDir),
+			zap.Error(cause))
+		*consecutiveFailures = 0
+		return false
 	}
-	return strings.TrimSpace(string(out))
+
+	probeErr := wt.runPollingGit(ctx, "rev-parse", "--git-dir")
+	if errors.Is(probeErr, subproc.ErrAdmissionCanceled) {
+		wt.logger.Debug("git poll health probe admission canceled; preserving tracker liveness",
+			zap.String("workDir", wt.workDir),
+			zap.Error(probeErr))
+		*consecutiveFailures = 0
+		return false
+	}
+	if probeErr == nil {
+		// The repository is fine, so the snapshot read failed for some other
+		// reason (per-command timeout under load, a concurrent index.lock
+		// holder). Same as before: only probe failures count against the
+		// give-up budget.
+		*consecutiveFailures = 0
+		wt.logger.Debug("git poll snapshot failed but repository is healthy",
+			zap.String("workDir", wt.workDir),
+			zap.Error(cause))
+		return false
+	}
+
+	// If git is broken, stop after maxConsecutiveGitFailures to avoid wasting CPU.
+	*consecutiveFailures++
+	if *consecutiveFailures >= maxConsecutiveGitFailures {
+		wt.logger.Error("git not functional, stopping git polling",
+			zap.String("workDir", wt.workDir),
+			zap.Int("consecutiveFailures", *consecutiveFailures),
+			zap.Error(cause))
+		return true
+	}
+	return false
 }
 
-// getCurrentBranchName returns the current branch name.
-// Returns empty string if in detached HEAD state (e.g., during rebase or when a commit/tag is checked out).
-func (wt *WorkspaceTracker) getCurrentBranchName(ctx context.Context) string {
-	cmd := exec.CommandContext(ctx, "git", "symbolic-ref", "--short", "-q", "HEAD")
-	cmd.Dir = wt.workDir
-	out, err := subproc.RunGitOutput(ctx, cmd)
-	if err != nil {
-		return ""
-	}
-	return strings.TrimSpace(string(out))
+// gitPollSnapshot is one tick's worth of git state: HEAD, branch, upstream
+// branch name, and a hash standing in for the index contents.
+type gitPollSnapshot struct {
+	headSHA     string
+	branch      string
+	upstream    string
+	upstreamSHA string
+	indexHash   string
 }
 
-// getGitStatusHash returns a hash of the git status porcelain output.
-// This is used to detect changes to the git index (staging/unstaging) that don't
-// change HEAD. Uses --untracked-files=no because untracked file monitoring is
-// already handled by monitorLoop via git ls-files. This avoids the expensive
-// directory traversal that --untracked-files=all performs on large repos.
-func (wt *WorkspaceTracker) getGitStatusHash(ctx context.Context) string {
-	cmd := wt.pollingGitCommand(ctx, "status", "--porcelain", "--untracked-files=no")
-	out, err := subproc.RunGitOutput(ctx, cmd)
+// Porcelain v2 header prefixes, and the sentinel values git prints when there
+// is no commit yet (branch.oid) or HEAD is not on a branch (branch.head). Both
+// sentinels map to the empty string, matching what the rev-parse and
+// symbolic-ref probes this read replaces returned in those same states.
+const (
+	gitStatusHeaderPrefix         = "# "
+	gitStatusBranchOIDPrefix      = "# branch.oid "
+	gitStatusBranchHeadPrefix     = "# branch.head "
+	gitStatusBranchUpstreamPrefix = "# branch.upstream "
+	gitStatusInitialOID           = "(initial)"
+	gitStatusDetachedHead         = "(detached)"
+)
+
+// readGitPollSnapshot reads HEAD, branch name and index state in a single git
+// invocation. `--porcelain=v2 --branch` emits the `branch.oid` and `branch.head`
+// headers alongside the entry lines, which is everything the poll loop
+// previously gathered with three separate rev-parse / symbolic-ref / status
+// spawns.
+//
+// Collapsing them matters far more than it looks: on Windows a git spawn pays
+// for CreateProcess, the Git-for-Windows shim exec'ing the real binary, and AV
+// inspection, all regardless of how little work the command does. Per-tick cost
+// therefore tracks the number of spawns, not the work. Measured on a Windows
+// dev machine (n=25, medians): 582ms for the four-spawn tick against 176ms for
+// this one, with a 146ms floor for a bare `git --version` — i.e. the old tick
+// was almost entirely spawn overhead. On macOS and Linux a spawn is 3-5ms and
+// none of this is visible, which is why the cost went unnoticed for so long.
+//
+// Two flags keep --branch from paying for work the poller throws away:
+//
+//   - --no-ahead-behind, because --branch otherwise walks the revision graph to
+//     count how far the branch is from its upstream, and parseGitPollSnapshot
+//     discards branch.ab. That walk is not free on a diverged branch: measured
+//     at 1799 commits behind, the tick took 334ms with the flag against 646ms
+//     without — worse than the four-spawn version this replaces. git prints
+//     `# branch.ab +? -?` when it skips the count, which the parser ignores as
+//     it ignores every other header.
+//   - --untracked-files=no, preserved from the old status call: untracked files
+//     are already monitored by monitorLoop via git ls-files, and =all would pay
+//     for a full directory traversal on every tick.
+//
+// branch.upstream carries the upstream's *name*, which the status call reports
+// for free, but not its SHA — --no-ahead-behind only suppresses branch.ab, the
+// walk that counts commits between the two, not the upstream header itself.
+// Detecting a push needs the SHA (the name is stable across a push; only what
+// it points at moves), so when an upstream is configured this issues one more
+// `git rev-parse` for it. That's a plain ref resolution, not a graph walk — the
+// same class of cheap call as the isAncestor/merge-base spawns already on this
+// path — so it doesn't reintroduce the walk cost --no-ahead-behind avoids.
+func (wt *WorkspaceTracker) readGitPollSnapshot(ctx context.Context) (gitPollSnapshot, error) {
+	out, err := wt.runPollingGitOutput(ctx, "status", "--porcelain=v2", "--branch", "--no-ahead-behind", "--untracked-files=no")
 	if err != nil {
-		return ""
+		return gitPollSnapshot{}, err
 	}
-	hash := sha256.Sum256(out)
-	return hex.EncodeToString(hash[:])
+	snap := parseGitPollSnapshot(out)
+	if snap.upstream != "" {
+		sha, err := wt.getUpstreamSHA(ctx)
+		if err != nil {
+			// Propagate rather than coerce to "", which would be
+			// indistinguishable from "no upstream" and could mask a real
+			// transition. Returning the error routes through the same
+			// gitPollTick failure/retry path as the status read above, so
+			// the next tick just tries the snapshot again.
+			return gitPollSnapshot{}, err
+		}
+		snap.upstreamSHA = sha
+	}
+	return snap, nil
 }
 
-// checkGitChanges checks if HEAD or git index has changed and processes changes
-func (wt *WorkspaceTracker) checkGitChanges(ctx context.Context) {
-	currentHead := wt.getHeadSHA(ctx)
-	currentBranch := wt.getCurrentBranchName(ctx)
-	currentIndexHash := wt.getGitStatusHash(ctx)
+// getUpstreamSHA resolves the current branch's upstream ref to a SHA.
+func (wt *WorkspaceTracker) getUpstreamSHA(ctx context.Context) (string, error) {
+	out, err := wt.runPollingGitOutput(ctx, "rev-parse", "@{upstream}")
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(out)), nil
+}
 
+// parseGitPollSnapshot splits porcelain v2 output into the branch headers and
+// the entry lines. Only the entries feed the hash — headers carry branch.oid
+// and branch.ab, which move on every commit and every fetch and would make the
+// index hash report changes that the HEAD and branch comparisons already cover.
+func parseGitPollSnapshot(out []byte) gitPollSnapshot {
+	var snap gitPollSnapshot
+	entries := make([]byte, 0, len(out))
+
+	for _, line := range strings.Split(string(out), "\n") {
+		line = strings.TrimSuffix(line, "\r")
+		switch {
+		case strings.HasPrefix(line, gitStatusBranchOIDPrefix):
+			if oid := strings.TrimPrefix(line, gitStatusBranchOIDPrefix); oid != gitStatusInitialOID {
+				snap.headSHA = oid
+			}
+		case strings.HasPrefix(line, gitStatusBranchHeadPrefix):
+			if head := strings.TrimPrefix(line, gitStatusBranchHeadPrefix); head != gitStatusDetachedHead {
+				snap.branch = head
+			}
+		case strings.HasPrefix(line, gitStatusBranchUpstreamPrefix):
+			snap.upstream = strings.TrimPrefix(line, gitStatusBranchUpstreamPrefix)
+		case line == "" || strings.HasPrefix(line, gitStatusHeaderPrefix):
+			// branch.ab is not poll state (suppressed by --no-ahead-behind anyway).
+		default:
+			entries = append(entries, line...)
+			entries = append(entries, '\n')
+		}
+	}
+
+	hash := sha256.Sum256(entries)
+	snap.indexHash = hex.EncodeToString(hash[:])
+	return snap
+}
+
+// gitPollDelta is a snapshot compared against the cached state: what git says
+// now, what it said last tick, and which of the four tracked values moved.
+type gitPollDelta struct {
+	snap            gitPollSnapshot
+	previousHead    string
+	previousBranch  string
+	headChanged     bool
+	branchChanged   bool
+	indexChanged    bool
+	upstreamChanged bool
+}
+
+// compareToCachedState reads the cached HEAD, branch, upstream SHA and index
+// hash once and diffs the snapshot against them.
+func (wt *WorkspaceTracker) compareToCachedState(snap gitPollSnapshot) gitPollDelta {
 	wt.gitStateMu.RLock()
 	previousHead := wt.cachedHeadSHA
 	previousBranch := wt.cachedBranchName
+	previousUpstreamSHA := wt.cachedUpstreamSHA
 	previousIndexHash := wt.cachedIndexHash
 	wt.gitStateMu.RUnlock()
 
-	headChanged := currentHead != "" && currentHead != previousHead
-	branchChanged := currentBranch != previousBranch // Track all transitions including to/from detached HEAD
-	indexChanged := currentIndexHash != "" && currentIndexHash != previousIndexHash
+	return gitPollDelta{
+		snap:           snap,
+		previousHead:   previousHead,
+		previousBranch: previousBranch,
+		headChanged:    snap.headSHA != "" && snap.headSHA != previousHead,
+		// Track all transitions including to/from detached HEAD.
+		branchChanged: snap.branch != previousBranch,
+		indexChanged:  snap.indexHash != "" && snap.indexHash != previousIndexHash,
+		// A push or fetch moves the upstream ref without touching HEAD, the
+		// local branch name, or the index — none of the other three signals
+		// observe it. Compared as a plain value change (not gated on
+		// non-empty like headChanged) so losing the upstream entirely, e.g. a
+		// deleted remote branch, is also observed.
+		upstreamChanged: snap.upstreamSHA != previousUpstreamSHA,
+	}
+}
 
-	// If nothing changed, nothing to do
-	if !headChanged && !branchChanged && !indexChanged {
+// checkGitChanges checks if HEAD, git index, or the upstream ref has changed
+// and processes changes. It only routes: each case below owns its own cache
+// update and notifications.
+func (wt *WorkspaceTracker) checkGitChanges(ctx context.Context, snap gitPollSnapshot) {
+	delta := wt.compareToCachedState(snap)
+
+	switch {
+	case !delta.headChanged && !delta.branchChanged && !delta.indexChanged && !delta.upstreamChanged:
+		// Nothing moved.
+	case delta.upstreamChanged && !delta.headChanged && !delta.branchChanged && !delta.indexChanged:
+		wt.handleUpstreamOnlyChange(ctx, delta)
+	case delta.indexChanged && !delta.headChanged && !delta.branchChanged:
+		wt.handleIndexOnlyChange(ctx, delta)
+	case delta.branchChanged && !delta.headChanged:
+		wt.handleBranchChangeWithoutHead(ctx, delta)
+	case delta.headChanged:
+		wt.handleHeadChange(ctx, delta)
+	}
+}
+
+// handleUpstreamOnlyChange records a push or fetch that moved the upstream
+// ref without changing HEAD, the branch, or the index — the case the other
+// three signals can't see on their own.
+//
+// Unlike the other three handlers, the cache write happens only after
+// tryUpdateGitStatus confirms it actually published a status. If it was
+// skipped (updateMu held by a concurrent RefreshGitStatus) or getGitStatus
+// itself failed, cachedUpstreamSHA is left at its old value on purpose: the
+// next tick's compareToCachedState will see the same "changed" delta again
+// and retry, instead of the event being silently marked handled while no
+// refreshed RemoteAhead/RemoteBranch was ever published — which push
+// detection depends on to fire (event_handlers_git.go).
+func (wt *WorkspaceTracker) handleUpstreamOnlyChange(ctx context.Context, delta gitPollDelta) {
+	wt.logger.Debug("git upstream ref changed (push or fetch detected)")
+	if !wt.tryUpdateGitStatus(ctx) {
 		return
 	}
 
-	// Update cached index hash (HEAD will be updated below if it changed)
-	if indexChanged && !headChanged && !branchChanged {
-		wt.gitStateMu.Lock()
-		wt.cachedIndexHash = currentIndexHash
-		wt.gitStateMu.Unlock()
-
-		wt.logger.Debug("git index changed (staging/unstaging detected)")
-		wt.tryUpdateGitStatus(ctx)
-		return
-	}
-
-	// Branch changed without HEAD change - this can happen when:
-	// 1. Switching between branches that point to the same commit
-	// 2. Transitioning to/from detached HEAD state (git switch --detach, rebase end)
-	if branchChanged && !headChanged {
-		wt.gitStateMu.Lock()
-		wt.cachedBranchName = currentBranch
-		wt.cachedIndexHash = currentIndexHash
-		wt.gitStateMu.Unlock()
-
-		// Only handle branch switch if we're not in detached HEAD state
-		// Suppress notification when currentBranch is empty (detached HEAD)
-		if currentBranch != "" {
-			wt.handleBranchSwitch(ctx, previousBranch, currentBranch, currentHead)
-			return
-		}
-
-		// In detached HEAD state, just update git status
-		wt.tryUpdateGitStatus(ctx)
-		return
-	}
-
-	// HEAD changed - handle normally
-	if !headChanged {
-		return
-	}
-
-	wt.logger.Info("git HEAD changed, syncing",
-		zap.String("previous", previousHead),
-		zap.String("current", currentHead))
-
-	// Update cached HEAD, branch, and index hash
 	wt.gitStateMu.Lock()
-	wt.cachedHeadSHA = currentHead
-	wt.cachedBranchName = currentBranch
-	wt.cachedIndexHash = currentIndexHash
+	wt.cachedUpstreamSHA = delta.snap.upstreamSHA
+	wt.gitStateMu.Unlock()
+}
+
+// handleIndexOnlyChange records staging/unstaging that left HEAD and the branch
+// alone.
+func (wt *WorkspaceTracker) handleIndexOnlyChange(ctx context.Context, delta gitPollDelta) {
+	wt.gitStateMu.Lock()
+	wt.cachedIndexHash = delta.snap.indexHash
+	wt.cachedUpstreamSHA = delta.snap.upstreamSHA
 	wt.gitStateMu.Unlock()
 
-	// Check if this is a branch switch (branch name changed)
-	// Branch switches need special handling to update the base commit
-	// Only handle if we're not in detached HEAD state (currentBranch != "")
-	if branchChanged && currentBranch != "" {
-		wt.handleBranchSwitch(ctx, previousBranch, currentBranch, currentHead)
+	wt.logger.Debug("git index changed (staging/unstaging detected)")
+	wt.tryUpdateGitStatus(ctx)
+}
+
+// handleBranchChangeWithoutHead handles a branch move that left HEAD where it
+// was. Two ways that happens: switching between branches pointing at the same
+// commit, and entering or leaving detached HEAD (git switch --detach, end of a
+// rebase).
+func (wt *WorkspaceTracker) handleBranchChangeWithoutHead(ctx context.Context, delta gitPollDelta) {
+	wt.gitStateMu.Lock()
+	wt.cachedBranchName = delta.snap.branch
+	wt.cachedIndexHash = delta.snap.indexHash
+	wt.cachedUpstreamSHA = delta.snap.upstreamSHA
+	wt.gitStateMu.Unlock()
+
+	// In detached HEAD state there is no branch to report a switch to, so just
+	// refresh status.
+	if delta.snap.branch == "" {
+		wt.tryUpdateGitStatus(ctx)
 		return
 	}
 
-	// Check if history was rewritten (reset, rebase, amend, etc.)
-	// There are three cases:
-	// 1. HEAD moved backward: currentHead is an ancestor of previousHead (e.g., git reset HEAD~1)
-	// 2. History rewritten: previousHead is NOT reachable from currentHead (e.g., git rebase -i, git commit --amend)
-	// 3. HEAD moved forward: previousHead IS an ancestor of currentHead (normal commits)
-	if previousHead != "" {
-		switch {
-		case wt.isAncestor(ctx, currentHead, previousHead):
-			// Case 1: HEAD moved backward - emit reset notification
-			wt.logger.Info("detected git reset (HEAD moved backward)",
-				zap.String("previous", previousHead),
-				zap.String("current", currentHead))
-			wt.notifyWorkspaceStreamGitReset(&types.GitResetNotification{
-				Timestamp:      time.Now(),
-				RepositoryName: wt.repositoryName,
-				PreviousHead:   previousHead,
-				CurrentHead:    currentHead,
-			})
-		case !wt.isAncestor(ctx, previousHead, currentHead):
-			// Case 2: History was rewritten - previousHead is not reachable from currentHead
-			// This happens with interactive rebase, commit amend, etc.
-			wt.logger.Info("detected git history rewrite (previous HEAD not reachable)",
-				zap.String("previous", previousHead),
-				zap.String("current", currentHead))
-			wt.notifyWorkspaceStreamGitReset(&types.GitResetNotification{
-				Timestamp:      time.Now(),
-				RepositoryName: wt.repositoryName,
-				PreviousHead:   previousHead,
-				CurrentHead:    currentHead,
-			})
-		default:
-			// Case 3: HEAD moved forward normally - get new commits
-			commits := wt.getCommitsSince(ctx, previousHead)
+	wt.handleBranchSwitch(ctx, delta.previousBranch, delta.snap.branch, delta.snap.headSHA)
+}
 
-			// Filter out commits that are already on remote branches.
-			// This prevents recording upstream commits as session commits when
-			// the user pulls/rebases onto a remote branch (e.g., git reset --hard main).
-			localCommits := wt.filterLocalCommits(ctx, commits)
+// handleHeadChange handles a HEAD move, which is either a branch switch or a
+// change in history that needs classifying.
+func (wt *WorkspaceTracker) handleHeadChange(ctx context.Context, delta gitPollDelta) {
+	wt.logger.Info("git HEAD changed, syncing",
+		zap.String("previous", delta.previousHead),
+		zap.String("current", delta.snap.headSHA))
 
-			for _, commit := range localCommits {
-				wt.notifyWorkspaceStreamGitCommit(commit)
-			}
-			if len(localCommits) > 0 {
-				wt.logger.Info("detected new commits via polling",
-					zap.Int("count", len(localCommits)))
-			}
-		}
+	wt.gitStateMu.Lock()
+	wt.cachedHeadSHA = delta.snap.headSHA
+	wt.cachedBranchName = delta.snap.branch
+	wt.cachedIndexHash = delta.snap.indexHash
+	wt.cachedUpstreamSHA = delta.snap.upstreamSHA
+	wt.gitStateMu.Unlock()
+
+	// Branch switches need special handling to update the base commit. Skipped
+	// in detached HEAD state, where there is no branch name.
+	if delta.branchChanged && delta.snap.branch != "" {
+		wt.handleBranchSwitch(ctx, delta.previousBranch, delta.snap.branch, delta.snap.headSHA)
+		return
+	}
+
+	if delta.previousHead != "" {
+		wt.classifyHeadMovement(ctx, delta)
 	}
 
 	// Update and broadcast git status
 	wt.tryUpdateGitStatus(ctx)
+}
+
+// classifyHeadMovement works out what a HEAD move meant and emits the matching
+// notification. There are three cases:
+//  1. HEAD moved backward: the new HEAD is an ancestor of the old one (git reset HEAD~1)
+//  2. History rewritten: the old HEAD is NOT reachable from the new one (git rebase -i, git commit --amend)
+//  3. HEAD moved forward: the old HEAD IS an ancestor of the new one (normal commits)
+func (wt *WorkspaceTracker) classifyHeadMovement(ctx context.Context, delta gitPollDelta) {
+	switch {
+	case wt.isAncestor(ctx, delta.snap.headSHA, delta.previousHead):
+		wt.logger.Info("detected git reset (HEAD moved backward)",
+			zap.String("previous", delta.previousHead),
+			zap.String("current", delta.snap.headSHA))
+		wt.notifyWorkspaceStreamGitReset(&types.GitResetNotification{
+			Timestamp:      time.Now(),
+			RepositoryName: wt.repositoryName,
+			PreviousHead:   delta.previousHead,
+			CurrentHead:    delta.snap.headSHA,
+		})
+	case !wt.isAncestor(ctx, delta.previousHead, delta.snap.headSHA):
+		wt.logger.Info("detected git history rewrite (previous HEAD not reachable)",
+			zap.String("previous", delta.previousHead),
+			zap.String("current", delta.snap.headSHA))
+		wt.notifyWorkspaceStreamGitReset(&types.GitResetNotification{
+			Timestamp:      time.Now(),
+			RepositoryName: wt.repositoryName,
+			PreviousHead:   delta.previousHead,
+			CurrentHead:    delta.snap.headSHA,
+		})
+	default:
+		wt.reportNewCommits(ctx, delta.previousHead)
+	}
+}
+
+// reportNewCommits notifies about commits made since previousHead, minus the
+// ones already on a remote branch — pulling or rebasing onto a remote branch
+// would otherwise record upstream commits as session commits.
+func (wt *WorkspaceTracker) reportNewCommits(ctx context.Context, previousHead string) {
+	commits := wt.getCommitsSince(ctx, previousHead)
+	localCommits := wt.filterLocalCommits(ctx, commits)
+
+	for _, commit := range localCommits {
+		wt.notifyWorkspaceStreamGitCommit(commit)
+	}
+	if len(localCommits) > 0 {
+		wt.logger.Info("detected new commits via polling",
+			zap.Int("count", len(localCommits)))
+	}
 }
 
 // handleBranchSwitch handles a branch switch event by calculating the new base commit
@@ -349,14 +537,12 @@ func (wt *WorkspaceTracker) getBaseCommitForBranch(ctx context.Context, branch, 
 
 	// Try integration branch candidates first (origin/main, origin/master, main, master)
 	// This ensures we get the branch-off point from the main development line.
-	// Routed through subproc.RunGit so each rev-parse counts against the global
+	// Routed through the background admission helpers so each rev-parse counts against the global
 	// git semaphore — handleBranchSwitch can invoke this on every detected
 	// branch change, so an unthrottled burst here was the exact pattern the
 	// throttle is meant to prevent on CrowdStrike-instrumented macOS.
 	for _, candidate := range []string{"origin/main", "origin/master", "main", "master"} {
-		checkCmd := exec.CommandContext(ctx, "git", "rev-parse", "--verify", candidate)
-		checkCmd.Dir = wt.workDir
-		if err := subproc.RunGit(ctx, checkCmd); err == nil {
+		if err := wt.runPollingGit(ctx, "rev-parse", "--verify", candidate); err == nil {
 			baseBranch = candidate
 			break
 		}
@@ -364,9 +550,7 @@ func (wt *WorkspaceTracker) getBaseCommitForBranch(ctx context.Context, branch, 
 
 	// Fall back to upstream tracking branch if no integration branch exists
 	if baseBranch == "" {
-		upstreamCmd := exec.CommandContext(ctx, "git", "rev-parse", "--abbrev-ref", branch+"@{upstream}")
-		upstreamCmd.Dir = wt.workDir
-		upstreamOut, err := subproc.RunGitOutput(ctx, upstreamCmd)
+		upstreamOut, err := wt.runPollingGitOutput(ctx, "rev-parse", "--abbrev-ref", branch+"@{upstream}")
 		if err == nil && len(upstreamOut) > 0 {
 			baseBranch = strings.TrimSpace(string(upstreamOut))
 		}
@@ -375,9 +559,7 @@ func (wt *WorkspaceTracker) getBaseCommitForBranch(ctx context.Context, branch, 
 	// Calculate merge-base if we found a base branch
 	// Use the sampled head SHA instead of live HEAD to avoid race conditions
 	if baseBranch != "" && head != "" {
-		mergeBaseCmd := exec.CommandContext(ctx, "git", "merge-base", baseBranch, head)
-		mergeBaseCmd.Dir = wt.workDir
-		if mergeBaseOut, err := subproc.RunGitOutput(ctx, mergeBaseCmd); err == nil {
+		if mergeBaseOut, err := wt.runPollingGitOutput(ctx, "merge-base", baseBranch, head); err == nil {
 			return strings.TrimSpace(string(mergeBaseOut))
 		}
 	}
@@ -387,9 +569,7 @@ func (wt *WorkspaceTracker) getBaseCommitForBranch(ctx context.Context, branch, 
 
 // isAncestor checks if commit1 is an ancestor of commit2
 func (wt *WorkspaceTracker) isAncestor(ctx context.Context, commit1, commit2 string) bool {
-	cmd := exec.CommandContext(ctx, "git", "merge-base", "--is-ancestor", commit1, commit2)
-	cmd.Dir = wt.workDir
-	err := subproc.RunGit(ctx, cmd)
+	err := wt.runPollingGit(ctx, "merge-base", "--is-ancestor", commit1, commit2)
 	// Exit code 0 means commit1 IS an ancestor of commit2
 	// Exit code 1 means commit1 is NOT an ancestor of commit2
 	return err == nil
@@ -400,9 +580,7 @@ func (wt *WorkspaceTracker) isAncestor(ctx context.Context, commit1, commit2 str
 // as opposed to commits made locally in the session.
 func (wt *WorkspaceTracker) isOnRemote(ctx context.Context, commitSHA string) bool {
 	// Use git branch -r --contains to check if commit is on any remote branch
-	cmd := exec.CommandContext(ctx, "git", "branch", "-r", "--contains", commitSHA)
-	cmd.Dir = wt.workDir
-	out, err := subproc.RunGitOutput(ctx, cmd)
+	out, err := wt.runPollingGitOutput(ctx, "branch", "-r", "--contains", commitSHA)
 	if err != nil {
 		// If the command fails, assume it's not on remote (safer default)
 		return false

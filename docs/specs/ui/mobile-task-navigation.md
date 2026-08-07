@@ -14,7 +14,7 @@ Mobile users need the same task controls as desktop without relying on long pres
 
 - Task action controls are visible and touch-reachable on mobile.
 - Mobile task actions preserve desktop capabilities, including same-workflow **Move to**, cross-workflow **Send to workflow**, linking, pinning, renaming, coloring, archiving, and deleting when those actions are available on desktop.
-- Context and dropdown action menus below the app's 640px mobile breakpoint stay within the viewport, use bottom-sheet presentation, contain their own vertical overflow, respect the bottom safe area, and provide touch targets at least 44px high.
+- Context and dropdown action menus below 640px stay within the viewport, use bottom-sheet presentation, contain their own vertical overflow, respect the bottom safe area, and provide touch targets at least 44px high.
 - Mobile Kanban renders one focused workflow and one focused step at a time when the user has several workflows.
 - Workflow is a primary mobile Kanban navigation dimension, not a setting hidden in the secondary display menu. The current workflow and step are always visible together in the board navigation control, including when only one workflow exists.
 - Opening the board navigation control exposes available workflows and the focused workflow's steps in one bottom drawer. Choosing a workflow makes it the active workflow for the board, task creation, and multi-select actions through the existing saved workflow selection; previous/next step buttons and horizontal swipe remain equivalent transient step shortcuts.
@@ -26,7 +26,7 @@ Mobile users need the same task controls as desktop without relying on long pres
 - Editing a task from a mobile context menu exposes its title even after work has started. The existing lock on a started task's prompt remains unchanged.
 - The mobile Home menu and Dockview task switcher open as inset, card-style bottom surfaces with internal vertical scrolling and safe-area spacing, rather than edge-to-edge side sheets.
 - Switching tasks from the mobile task switcher keeps the workbench usable while destination details hydrate. Transient placeholder data must not crash mobile chrome, and a remembered panel that is unavailable for the destination falls back to Chat.
-- Opening the repository picker for a multi-repository task remains usable while repository details and sessions are still loading. Delayed data cannot crash mobile chrome.
+- Mobile Dockview does not expose a repository switcher. The existing session picker owns active-session changes; choosing a session also changes repository context when that session belongs to another repository. When loaded sessions span repositories, the active-session pill and session rows identify each session's repository so otherwise-identical sessions remain distinguishable, even if optional workflow hydration is unavailable.
 - The active-session control at the top of mobile Dockview shows the active agent's icon beside its session label.
 - Desktop and tablet Kanban, context menus, drag/drop, and workflow filtering retain their existing behavior.
 
@@ -46,7 +46,9 @@ Mobile users need the same task controls as desktop without relying on long pres
 - **GIVEN** a started task on mobile Home, **WHEN** the user chooses Edit from its context menu, **THEN** the title can be changed while the prompt remains locked.
 - **GIVEN** the mobile Home menu or Dockview task switcher is opened, **WHEN** its content exceeds the viewport, **THEN** an inset bottom card remains within the safe area and scrolls internally.
 - **GIVEN** two tasks with active sessions, **WHEN** the user selects the other task from the mobile task switcher, **THEN** the destination URL, title, and chat render without a blank screen or mobile-chrome crash.
-- **GIVEN** a multi-repository task whose repository details or sessions are delayed, **WHEN** the user opens the mobile repository picker, **THEN** the picker remains usable and the task view does not become blank.
+- **GIVEN** a multi-repository task whose repository details or sessions are delayed or fail to load, **WHEN** the user opens the mobile task view, **THEN** the task remains usable, the session picker remains available, and no repository switcher is rendered.
+- **GIVEN** a multi-repository task with sessions on different repositories, **WHEN** the user opens the mobile session picker and chooses another session, **THEN** each bound repository is identified and the active-session pill updates to the selected repository context.
+- **GIVEN** a task page is already open, **WHEN** a live session event introduces a session bound to another repository, **THEN** the session picker hydrates its repository identity without a page refresh; if that hydration request fails, the existing and partial live rows remain available for a later refresh.
 - **GIVEN** Review is remembered for a mobile session but its selected merge request is no longer available, **WHEN** the session becomes active, **THEN** Chat is rendered and selected instead of an empty center pane.
 - **GIVEN** a mobile Dockview task with an active session, **WHEN** its chat panel is visible, **THEN** the active-session control shows the session agent's icon and label.
 - **GIVEN** a desktop viewport, **WHEN** the same task menus and Kanban open, **THEN** their existing desktop interaction and layout remain unchanged.
@@ -57,8 +59,10 @@ Mobile users need the same task controls as desktop without relying on long pres
 - Persisting the transient focused mobile step across reloads.
 - Changing backend task-move contracts, workflow ordering, or task permissions.
 - Unlocking or changing a started task's prompt.
+- Changing repository selection during task creation, workspace-source attachment, file browsing, or desktop and tablet task interaction.
 
 ## Implementation plans
 
 - [Mobile task navigation refinement](../../plans/mobile-task-navigation-refinement/plan.md)
 - [SPA blank-screen resilience](../../plans/spa-blank-screen-resilience/plan.md)
+- [Mobile repository switcher removal](../../plans/mobile-repository-switcher-removal/plan.md)

@@ -17,110 +17,120 @@ import {
   IconMinus,
 } from "@tabler/icons-react";
 import type { MenuState } from "@/components/task/chat/tiptap-suggestion";
+import type { TFunction } from "i18next";
 
 // ── Types ────────────────────────────────────────────────────────────
+
+/**
+ * Stable grouping id, not display copy: it is the `Map` key the menu groups by.
+ * `plan-slash-menu.tsx` resolves it to a translated heading at render.
+ */
+export type PlanSlashCategory = "text" | "lists" | "blocks";
 
 export type PlanSlashCommand = {
   id: string;
   label: string;
   description: string;
   icon: Icon;
-  category: string;
+  category: PlanSlashCategory;
   action: (editor: Editor, range: Range) => void;
 };
 
 // ── Command definitions ──────────────────────────────────────────────
 
-const PLAN_SLASH_COMMANDS: PlanSlashCommand[] = [
-  // Text
+const textCommands = (t: TFunction): PlanSlashCommand[] => [
   {
     id: "heading1",
-    label: "Heading 1",
-    description: "Large heading",
+    label: t("editors:slashHeading1"),
+    description: t("editors:slashHeading1Description"),
     icon: IconH1,
-    category: "Text",
+    category: "text",
     action: (editor, range) => {
       editor.chain().focus().deleteRange(range).toggleHeading({ level: 1 }).run();
     },
   },
   {
     id: "heading2",
-    label: "Heading 2",
-    description: "Medium heading",
+    label: t("editors:slashHeading2"),
+    description: t("editors:slashHeading2Description"),
     icon: IconH2,
-    category: "Text",
+    category: "text",
     action: (editor, range) => {
       editor.chain().focus().deleteRange(range).toggleHeading({ level: 2 }).run();
     },
   },
   {
     id: "heading3",
-    label: "Heading 3",
-    description: "Small heading",
+    label: t("editors:slashHeading3"),
+    description: t("editors:slashHeading3Description"),
     icon: IconH3,
-    category: "Text",
+    category: "text",
     action: (editor, range) => {
       editor.chain().focus().deleteRange(range).toggleHeading({ level: 3 }).run();
     },
   },
-  // Lists
+];
+
+const listCommands = (t: TFunction): PlanSlashCommand[] => [
   {
     id: "bulletList",
-    label: "Bullet List",
-    description: "Unordered list",
+    label: t("editors:slashBulletList"),
+    description: t("editors:slashBulletListDescription"),
     icon: IconList,
-    category: "Lists",
+    category: "lists",
     action: (editor, range) => {
       editor.chain().focus().deleteRange(range).toggleBulletList().run();
     },
   },
   {
     id: "numberedList",
-    label: "Numbered List",
-    description: "Ordered list",
+    label: t("editors:slashNumberedList"),
+    description: t("editors:slashNumberedListDescription"),
     icon: IconListNumbers,
-    category: "Lists",
+    category: "lists",
     action: (editor, range) => {
       editor.chain().focus().deleteRange(range).toggleOrderedList().run();
     },
   },
   {
     id: "taskList",
-    label: "Task List",
-    description: "Checklist items",
+    label: t("editors:slashTaskList"),
+    description: t("editors:slashTaskListDescription"),
     icon: IconListCheck,
-    category: "Lists",
+    category: "lists",
     action: (editor, range) => {
       editor.chain().focus().deleteRange(range).toggleTaskList().run();
     },
   },
-  // Blocks
+];
+
+const blockCommands = (t: TFunction): PlanSlashCommand[] => [
   {
     id: "codeBlock",
-    label: "Code Block",
-    description: "Fenced code",
+    label: t("editors:slashCodeBlock"),
+    description: t("editors:slashCodeBlockDescription"),
     icon: IconCode,
-    category: "Blocks",
+    category: "blocks",
     action: (editor, range) => {
       editor.chain().focus().deleteRange(range).toggleCodeBlock().run();
     },
   },
   {
     id: "blockquote",
-    label: "Blockquote",
-    description: "Quote text",
+    label: t("editors:slashBlockquote"),
+    description: t("editors:slashBlockquoteDescription"),
     icon: IconQuote,
-    category: "Blocks",
+    category: "blocks",
     action: (editor, range) => {
       editor.chain().focus().deleteRange(range).toggleBlockquote().run();
     },
   },
   {
     id: "table",
-    label: "Table",
-    description: "3x3 table",
+    label: t("editors:slashTable"),
+    description: t("editors:slashTableDescription"),
     icon: IconTable,
-    category: "Blocks",
+    category: "blocks",
     action: (editor, range) => {
       editor
         .chain()
@@ -132,15 +142,36 @@ const PLAN_SLASH_COMMANDS: PlanSlashCommand[] = [
   },
   {
     id: "horizontalRule",
-    label: "Divider",
-    description: "Horizontal line",
+    label: t("editors:slashDivider"),
+    description: t("editors:slashDividerDescription"),
     icon: IconMinus,
-    category: "Blocks",
+    category: "blocks",
     action: (editor, range) => {
       editor.chain().focus().deleteRange(range).setHorizontalRule().run();
     },
   },
 ];
+
+/** Exported for unit testing — see `plan-slash-commands.test.ts`. */
+export const buildPlanSlashCommands = (t: TFunction): PlanSlashCommand[] => [
+  ...textCommands(t),
+  ...listCommands(t),
+  ...blockCommands(t),
+];
+
+/**
+ * Matches on the translated label and on the stable `id`, so the English command
+ * name keeps working as a query under a non-English locale.
+ *
+ * Exported for unit testing — see `plan-slash-commands.test.ts`.
+ */
+export function filterPlanSlashCommands(commands: PlanSlashCommand[], query: string) {
+  if (!query) return commands;
+  const lq = query.toLowerCase();
+  return commands.filter(
+    (cmd) => cmd.label.toLowerCase().includes(lq) || cmd.id.toLowerCase().includes(lq),
+  );
+}
 
 // ── Empty state ──────────────────────────────────────────────────────
 
@@ -157,6 +188,7 @@ const EMPTY_STATE: MenuState<PlanSlashCommand> = {
 const PlanSlashPluginKey = new PluginKey("planSlashCommands");
 
 export function createPlanSlashExtension(
+  getT: () => TFunction,
   setMenuState: (state: MenuState<PlanSlashCommand>) => void,
   onKeyDown: (event: KeyboardEvent) => boolean,
 ) {
@@ -172,13 +204,10 @@ export function createPlanSlashExtension(
           allowSpaces: false,
           startOfLine: true,
 
-          items: ({ query }) => {
-            if (!query) return PLAN_SLASH_COMMANDS;
-            const lq = query.toLowerCase();
-            return PLAN_SLASH_COMMANDS.filter(
-              (cmd) => cmd.label.toLowerCase().includes(lq) || cmd.id.toLowerCase().includes(lq),
-            );
-          },
+          items: ({ query }) =>
+            // Resolved per call, so the menu follows a locale switch without the
+            // extension itself having to be rebuilt.
+            filterPlanSlashCommands(buildPlanSlashCommands(getT()), query),
 
           command: ({ editor, range, props: cmd }) => {
             cmd.action(editor, range);

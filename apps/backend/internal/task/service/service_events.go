@@ -82,6 +82,24 @@ func (s *Service) PublishTaskStateChanged(ctx context.Context, task *models.Task
 	s.publishTaskEvent(ctx, events.TaskStateChanged, task, &oldState)
 }
 
+// PublishAfterTaskEvents appends a task-scoped publication behind any task
+// events already being drained. Reentrant callers append without waiting,
+// preserving FIFO order without deadlocking the active publication.
+func (s *Service) PublishAfterTaskEvents(
+	ctx context.Context,
+	taskID, eventType string,
+	publish func(context.Context),
+) {
+	if publish == nil {
+		return
+	}
+	if taskID == "" {
+		publish(ctx)
+		return
+	}
+	s.enqueueTaskPublication(ctx, taskID, eventType, publish)
+}
+
 // PublishTaskDeleted publishes a task.deleted event for the given task.
 // Used by cascade-delete callers (HandoffService.DeleteTaskTree) that
 // bypass Service.DeleteTask and therefore would otherwise leave WS
@@ -160,6 +178,7 @@ func (s *Service) publishSessionsCancelled(
 			"agent_profile_id":         sess.AgentProfileID,
 			"agent_profile_snapshot":   sess.AgentProfileSnapshot,
 			"is_passthrough":           sess.IsPassthrough,
+			"is_primary":               sess.IsPrimary,
 			sessionEventFieldUpdatedAt: sess.UpdatedAt.Format(time.RFC3339Nano),
 			sessionEventFieldName:      sess.Name,
 		}
@@ -377,6 +396,7 @@ func (s *Service) publishTaskEventNow(ctx context.Context, eventType string, tas
 	if task.ParentID != "" {
 		data["parent_id"] = task.ParentID
 	}
+	data["archived_at"] = nil
 	if task.ArchivedAt != nil {
 		data["archived_at"] = task.ArchivedAt.Format(time.RFC3339)
 	}
@@ -879,6 +899,10 @@ func (s *Service) publishRepositoryEvent(ctx context.Context, eventType string, 
 	if s.eventBus == nil || repository == nil {
 		return
 	}
+	bindings := make([]map[string]string, 0, len(repository.SecretBindings))
+	for _, binding := range repository.SecretBindings {
+		bindings = append(bindings, map[string]string{"key": binding.Key, "secret_id": binding.SecretID})
+	}
 	data := map[string]interface{}{
 		"id":                     repository.ID,
 		"workspace_id":           repository.WorkspaceID,
@@ -897,6 +921,7 @@ func (s *Service) publishRepositoryEvent(ctx context.Context, eventType string, 
 		"cleanup_script":         repository.CleanupScript,
 		"dev_script":             repository.DevScript,
 		"copy_files":             repository.CopyFiles,
+		"secret_bindings":        bindings,
 		"created_at":             repository.CreatedAt.Format(time.RFC3339),
 		"updated_at":             repository.UpdatedAt.Format(time.RFC3339),
 	}

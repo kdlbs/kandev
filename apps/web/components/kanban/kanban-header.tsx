@@ -10,8 +10,10 @@ import {
   IconLayoutKanban,
   IconMenu2,
   IconMessageCircle,
+  IconTerminal2,
   IconTimeline,
 } from "@tabler/icons-react";
+import { useTranslation } from "react-i18next";
 import { PageTopbar } from "@/components/page-topbar";
 import { KanbanDisplayDropdown } from "../kanban-display-dropdown";
 import { ReleaseNotesDialog } from "../release-notes/release-notes-dialog";
@@ -21,13 +23,14 @@ import { KanbanHeaderMobile } from "./kanban-header-mobile";
 import { MainTopBarPluginActions } from "./main-top-bar-plugin-actions";
 import { MobileMenuSheet } from "./mobile-menu-sheet";
 import type { TasksListDisplayOptions } from "./mobile-menu-task-list-options";
-import { linkToTasks } from "@/lib/links";
+import { linkToTaskOverview, linkToTasks } from "@/lib/links";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { useAppStore } from "@/components/state-provider";
 import { useKanbanDisplaySettings } from "@/hooks/use-kanban-display-settings";
 import { useReleaseNotes } from "@/hooks/use-release-notes";
 import { useSystemHealthIndicator } from "@/hooks/use-system-health-indicator";
 import { useQuickChatLauncher } from "@/hooks/use-quick-chat-launcher";
+import { useQuickTerminalLauncher } from "@/hooks/use-quick-terminal-launcher";
 import { TopbarMetrics } from "@/components/system-metrics/topbar-metrics";
 import type { ComponentProps, RefObject } from "react";
 
@@ -44,13 +47,14 @@ type KanbanHeaderProps = {
 type ViewToggleItem = {
   value: string;
   icon: typeof IconLayoutKanban;
-  label: string;
+  /** Resolved at render — a `t()` here would freeze at the boot locale. */
+  labelKey: string;
 };
 
 const VIEW_TOGGLE_ITEMS: ViewToggleItem[] = [
-  { value: "kanban", icon: IconLayoutKanban, label: "Kanban" },
-  { value: "pipeline", icon: IconTimeline, label: "Pipeline" },
-  { value: "list", icon: IconList, label: "List" },
+  { value: "kanban", icon: IconLayoutKanban, labelKey: "kanban:kanban" },
+  { value: "pipeline", icon: IconTimeline, labelKey: "kanban:pipeline" },
+  { value: "list", icon: IconList, labelKey: "kanban:list" },
 ];
 
 const WORKBENCH_TOPBAR_CLASSNAME = "h-12 border-b-0 px-3 py-2";
@@ -66,6 +70,13 @@ function getWorkspaceLabel(
 
 function getHeaderTitle(currentPage: string): string {
   return currentPage === "tasks" ? "Tasks" : "Home";
+}
+
+function toHeaderHealthProps(health: ReturnType<typeof useSystemHealthIndicator>) {
+  return {
+    showHealthIndicator: health.hasIssues,
+    onOpenHealthDialog: health.openDialog,
+  };
 }
 
 // Integrations / Stats / Office / Improve Kandev / Settings / Release notes
@@ -85,6 +96,7 @@ function ViewToggleGroup({
   className?: string;
   itemClassName?: string;
 }) {
+  const { t } = useTranslation();
   return (
     <ToggleGroup
       type="single"
@@ -94,7 +106,7 @@ function ViewToggleGroup({
       size={size}
       className={className}
     >
-      {VIEW_TOGGLE_ITEMS.map(({ value, icon: Icon, label }) => (
+      {VIEW_TOGGLE_ITEMS.map(({ value, icon: Icon, labelKey }) => (
         <ToggleGroupItem
           key={value}
           value={value}
@@ -107,7 +119,7 @@ function ViewToggleGroup({
                 <Icon className="h-4 w-4" />
               </span>
             </TooltipTrigger>
-            <TooltipContent>{label}</TooltipContent>
+            <TooltipContent>{t(labelKey)}</TooltipContent>
           </Tooltip>
         </ToggleGroupItem>
       ))}
@@ -129,6 +141,38 @@ function useIsHeaderNarrow(ref: RefObject<HTMLElement | null>): boolean {
   }, [ref]);
 
   return isNarrow;
+}
+
+function TabletQuickActions({ workspaceId }: { workspaceId?: string }) {
+  const { t } = useTranslation();
+  const handleOpenQuickChat = useQuickChatLauncher(workspaceId);
+  const handleOpenQuickTerminal = useQuickTerminalLauncher(workspaceId);
+  if (!workspaceId) return null;
+
+  return (
+    <>
+      <Button
+        variant="outline"
+        size="icon-lg"
+        onClick={handleOpenQuickTerminal}
+        className="!size-11 cursor-pointer"
+        aria-label={t("sidebar:quickTerminal")}
+        data-testid="tablet-quick-terminal-button"
+      >
+        <IconTerminal2 className="h-4 w-4" />
+      </Button>
+      <Button
+        variant="outline"
+        size="icon-lg"
+        onClick={handleOpenQuickChat}
+        className="!size-11 cursor-pointer"
+        aria-label={t("sidebar:quickChat")}
+        data-testid="tablet-quick-chat-button"
+      >
+        <IconMessageCircle className="h-4 w-4" />
+      </Button>
+    </>
+  );
 }
 
 function TabletHeader({
@@ -160,8 +204,8 @@ function TabletHeader({
   onOpenHealthDialog: () => void;
   hideTitle?: boolean;
 }) {
+  const { t } = useTranslation();
   const isHome = title === "Home";
-  const handleOpenQuickChat = useQuickChatLauncher(workspaceId);
 
   return (
     <PageTopbar
@@ -177,7 +221,7 @@ function TabletHeader({
             <TaskSearchInput
               value={searchQuery}
               onChange={onSearchChange}
-              placeholder="Search..."
+              placeholder={t("kanban:searchPlaceholder")}
               isLoading={isSearchLoading}
               className="hidden md:flex w-48 lg:w-56 [&_input]:h-8"
             />
@@ -188,18 +232,7 @@ function TabletHeader({
             currentPage={currentPage}
           />
           <TopbarMetrics size="lg" />
-          {workspaceId && (
-            <Button
-              variant="outline"
-              size="icon-lg"
-              onClick={handleOpenQuickChat}
-              className="cursor-pointer"
-              aria-label="Quick Chat"
-              data-testid="tablet-quick-chat-button"
-            >
-              <IconMessageCircle className="h-4 w-4" />
-            </Button>
-          )}
+          <TabletQuickActions workspaceId={workspaceId} />
           <TooltipProvider>
             <ViewToggleGroup toggleValue={toggleValue} onValueChange={handleViewChange} size="lg" />
           </TooltipProvider>
@@ -216,7 +249,7 @@ function TabletHeader({
             className="cursor-pointer"
           >
             <IconMenu2 className="h-4 w-4" />
-            <span className="sr-only">Open menu</span>
+            <span className="sr-only">{t("kanban:openMenu")}</span>
           </Button>
         </>
       }
@@ -251,13 +284,14 @@ function DesktopHeader({
   onOpenHealthDialog: () => void;
   hideTitle?: boolean;
 }) {
+  const { t } = useTranslation();
   const headerRef = useRef<HTMLElement>(null);
   const isNarrow = useIsHeaderNarrow(headerRef);
   const searchInput = onSearchChange ? (
     <TaskSearchInput
       value={searchQuery}
       onChange={onSearchChange}
-      placeholder="Search tasks..."
+      placeholder={t("kanban:searchTasksPlaceholder")}
       isLoading={isSearchLoading}
       className={`${isNarrow ? "w-44" : "w-72 xl:w-80"} [&_input]:h-8`}
     />
@@ -300,9 +334,10 @@ function DesktopHeader({
   );
 }
 
-function useHeaderViewChange(
+function useHeaderView(
   currentPage: string,
   workspaceId: string | undefined,
+  workflowId: string | null,
   onViewModeChange: (mode: string) => void,
 ) {
   const router = useRouter();
@@ -312,10 +347,12 @@ function useHeaderViewChange(
       if (currentPage !== "tasks") router.push(linkToTasks(workspaceId));
     } else if (value === "kanban") {
       onViewModeChange("kanban");
-      if (currentPage !== "kanban") router.push("/");
+      if (currentPage !== "kanban")
+        router.push(linkToTaskOverview({ workspaceId, workflowId: workflowId ?? undefined }));
     } else if (value === "pipeline") {
       onViewModeChange("pipeline");
-      if (currentPage !== "kanban") router.push("/");
+      if (currentPage !== "kanban")
+        router.push(linkToTaskOverview({ workspaceId, workflowId: workflowId ?? undefined }));
     }
   };
 }
@@ -332,19 +369,17 @@ export function KanbanHeader({
   const { isMobile, isTablet } = useResponsiveBreakpoint();
   const isMenuOpen = useAppStore((state) => state.mobileKanban.isMenuOpen);
   const setMenuOpen = useAppStore((state) => state.setMobileKanbanMenuOpen);
-  const { effectiveTaskListingView, onViewModeChange, workspaces, activeWorkspaceId } =
-    useKanbanDisplaySettings();
+  const workflowId = useAppStore((state) => state.workflows.activeId);
+  const display = useKanbanDisplaySettings();
+  const { effectiveTaskListingView, onViewModeChange, workspaces, activeWorkspaceId } = display;
   const releaseNotes = useReleaseNotes();
   const healthIndicator = useSystemHealthIndicator();
   const toggleValue = currentPage === "tasks" ? "list" : effectiveTaskListingView;
-  const handleViewChange = useHeaderViewChange(currentPage, workspaceId, onViewModeChange);
+  const handleViewChange = useHeaderView(currentPage, workspaceId, workflowId, onViewModeChange);
   const title = getHeaderTitle(currentPage);
   const workspaceLabel = getWorkspaceLabel(workspaces, activeWorkspaceId);
 
-  const healthProps = {
-    showHealthIndicator: healthIndicator.hasIssues,
-    onOpenHealthDialog: healthIndicator.openDialog,
-  };
+  const healthProps = toHeaderHealthProps(healthIndicator);
   const sharedSearch = { searchQuery, onSearchChange, isSearchLoading };
 
   const renderHeader = () => {

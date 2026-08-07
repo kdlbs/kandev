@@ -33,8 +33,10 @@ import {
   ExternalVcsFileMenuItem,
 } from "@/components/editors/external-vcs-file-link";
 import { useGlobalViewMode } from "@/hooks/use-global-view-mode";
+import { copyToClipboard } from "@/lib/utils/copy-to-clipboard";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { isMarkdownFile } from "@/lib/utils/file-types";
+import { useTranslation } from "react-i18next";
 
 const iconBtn = "h-6 w-6 p-0 cursor-pointer opacity-60 hover:opacity-100";
 const iconBtnActive = "h-6 w-6 p-0 cursor-pointer bg-muted opacity-100";
@@ -117,11 +119,12 @@ function DiffDisplayControls({
   onToggleViewMode,
   onToggleWordWrap,
 }: DiffDisplayControlsProps) {
+  const { t } = useTranslation();
   return (
     <>
       <ToolbarIconBtn
         onClick={onToggleExpandUnchanged}
-        tooltip={expandUnchanged ? "Collapse unchanged" : "Expand all"}
+        tooltip={expandUnchanged ? t("review:collapseUnchanged") : t("review:expandAll")}
         active={expandUnchanged}
       >
         {expandUnchanged ? (
@@ -130,12 +133,20 @@ function DiffDisplayControls({
           <IconFoldDown className="h-3.5 w-3.5" />
         )}
       </ToolbarIconBtn>
-      <ToolbarIconBtn onClick={onToggleWordWrap} tooltip="Toggle word wrap" active={wordWrap}>
+      <ToolbarIconBtn
+        onClick={onToggleWordWrap}
+        tooltip={t("review:toggleWordWrap")}
+        active={wordWrap}
+      >
         <IconTextWrap className="h-3.5 w-3.5" />
       </ToolbarIconBtn>
       <ToolbarIconBtn
         onClick={onToggleViewMode}
-        tooltip={globalViewMode === "split" ? "Switch to unified view" : "Switch to split view"}
+        tooltip={
+          globalViewMode === "split"
+            ? t("review:switchToUnifiedView")
+            : t("review:switchToSplitView")
+        }
       >
         {globalViewMode === "split" ? (
           <IconLayoutRows className="h-3.5 w-3.5" />
@@ -156,17 +167,18 @@ function MobileDiffViewMenuItems({
   FileDiffToolbarProps,
   "expandUnchanged" | "wordWrap" | "onToggleExpandUnchanged" | "onToggleWordWrap"
 >) {
+  const { t } = useTranslation();
   return (
     <>
       <DropdownMenuSeparator />
-      <DropdownMenuLabel>View</DropdownMenuLabel>
+      <DropdownMenuLabel>{t("review:view")}</DropdownMenuLabel>
       <DropdownMenuCheckboxItem
         checked={expandUnchanged}
         className={mobileMenuItem}
         onCheckedChange={onToggleExpandUnchanged}
       >
         <IconFoldDown className={mobileMenuIcon} />
-        Expand unchanged lines
+        {t("review:expandUnchangedLines")}
       </DropdownMenuCheckboxItem>
       <DropdownMenuCheckboxItem
         checked={wordWrap}
@@ -174,13 +186,14 @@ function MobileDiffViewMenuItems({
         onCheckedChange={onToggleWordWrap}
       >
         <IconTextWrap className={mobileMenuIcon} />
-        Wrap long lines
+        {t("review:wrapLongLines")}
       </DropdownMenuCheckboxItem>
     </>
   );
 }
 
 function MobileFileActionsMenu(props: FileDiffToolbarProps) {
+  const { t } = useTranslation();
   const {
     diff,
     filePath,
@@ -203,7 +216,7 @@ function MobileFileActionsMenu(props: FileDiffToolbarProps) {
     repo,
   } = props;
   const handleCopyDiff = useCallback(() => {
-    void navigator.clipboard.writeText(diff || "");
+    void copyToClipboard(diff || "");
   }, [diff]);
   const [open, setOpen] = useState(false);
 
@@ -214,8 +227,8 @@ function MobileFileActionsMenu(props: FileDiffToolbarProps) {
           type="button"
           variant="ghost"
           size="icon"
-          aria-label={`More actions for ${filePath}`}
-          title={`More actions for ${filePath}`}
+          aria-label={t("review:moreActionsFor", { filePath })}
+          title={t("review:moreActionsFor", { filePath })}
           className="size-11 shrink-0 cursor-pointer text-muted-foreground transition-[scale,color,background-color] duration-150 ease-out active:scale-[0.96]"
           onPointerDown={(event) => event.preventDefault()}
           onClick={() => setOpen((previous) => !previous)}
@@ -225,7 +238,7 @@ function MobileFileActionsMenu(props: FileDiffToolbarProps) {
       </DropdownMenuTrigger>
       <DropdownMenuContent
         data-testid="review-file-actions-menu"
-        aria-label={`Actions for ${filePath}`}
+        aria-label={t("review:actionsFor", { filePath })}
         align="end"
         className="w-64"
       >
@@ -234,18 +247,18 @@ function MobileFileActionsMenu(props: FileDiffToolbarProps) {
         </DropdownMenuLabel>
         <DropdownMenuItem className={mobileMenuItem} onSelect={handleCopyDiff}>
           <IconCopy className={mobileMenuIcon} />
-          Copy diff
+          {t("review:copyDiff")}
         </DropdownMenuItem>
         {onOpenFile && (
           <DropdownMenuItem className={mobileMenuItem} onSelect={() => onOpenFile(filePath, repo)}>
             <IconPencil className={mobileMenuIcon} />
-            Edit file
+            {t("review:editFile")}
           </DropdownMenuItem>
         )}
         {onToggleMarkdownPreview && isMarkdownFile(filePath) && (
           <DropdownMenuItem className={mobileMenuItem} onSelect={onToggleMarkdownPreview}>
             <IconEye className={mobileMenuIcon} />
-            {markdownPreview ? "Show diff" : "Preview markdown"}
+            {markdownPreview ? t("review:showDiff") : t("review:previewMarkdown")}
           </DropdownMenuItem>
         )}
         <ExternalVcsFileMenuItem
@@ -271,7 +284,7 @@ function MobileFileActionsMenu(props: FileDiffToolbarProps) {
             <DropdownMenuSeparator />
             <DropdownMenuItem variant="destructive" className={mobileMenuItem} onSelect={onDiscard}>
               <IconArrowBackUp className="size-4" />
-              Revert changes
+              {t("review:revertChanges")}
             </DropdownMenuItem>
           </>
         )}
@@ -281,6 +294,7 @@ function MobileFileActionsMenu(props: FileDiffToolbarProps) {
 }
 
 function DesktopFileDiffToolbar(props: FileDiffToolbarProps) {
+  const { t } = useTranslation();
   const {
     diff,
     filePath,
@@ -304,7 +318,7 @@ function DesktopFileDiffToolbar(props: FileDiffToolbarProps) {
   } = props;
   const [globalViewMode, setGlobalViewMode] = useGlobalViewMode();
   const handleCopyDiff = useCallback(() => {
-    void navigator.clipboard.writeText(diff || "");
+    void copyToClipboard(diff || "");
   }, [diff]);
   const handleToggleViewMode = useCallback(
     () => setGlobalViewMode(globalViewMode === "split" ? "unified" : "split"),
@@ -313,7 +327,7 @@ function DesktopFileDiffToolbar(props: FileDiffToolbarProps) {
 
   return (
     <div className="flex items-center gap-0.5">
-      <ToolbarIconBtn onClick={handleCopyDiff} tooltip="Copy diff">
+      <ToolbarIconBtn onClick={handleCopyDiff} tooltip={t("review:copyDiff")}>
         <IconCopy className="h-3.5 w-3.5" />
       </ToolbarIconBtn>
       <ExternalVcsFileLink
@@ -339,19 +353,23 @@ function DesktopFileDiffToolbar(props: FileDiffToolbarProps) {
       {onToggleMarkdownPreview && isMarkdownFile(filePath) && (
         <ToolbarIconBtn
           onClick={onToggleMarkdownPreview}
-          tooltip={markdownPreview ? "Show diff" : "Preview markdown"}
+          tooltip={markdownPreview ? t("review:showDiff") : t("review:previewMarkdown")}
         >
           <IconEye className="h-3.5 w-3.5" />
         </ToolbarIconBtn>
       )}
       {onOpenFile && (
-        <ToolbarIconBtn onClick={() => onOpenFile(filePath, repo)} tooltip="Edit">
+        <ToolbarIconBtn onClick={() => onOpenFile(filePath, repo)} tooltip={t("common:edit")}>
           <IconPencil className="h-3.5 w-3.5" />
         </ToolbarIconBtn>
       )}
       <FileActionsDropdown filePath={filePath} sessionId={sessionId} size="xs" />
       {source === "uncommitted" && (
-        <ToolbarIconBtn onClick={onDiscard} tooltip="Revert changes" className={iconBtnDestructive}>
+        <ToolbarIconBtn
+          onClick={onDiscard}
+          tooltip={t("review:revertChanges")}
+          className={iconBtnDestructive}
+        >
           <IconArrowBackUp className="h-3.5 w-3.5" />
         </ToolbarIconBtn>
       )}

@@ -139,6 +139,18 @@ func TestClassify_InvariantsQuotaLimitedAutoRetryable(t *testing.T) {
 	}
 }
 
+func TestClassify_OpenCodeUsageLimitIsHighConfidenceQuota(t *testing.T) {
+	resetInjection()
+	e := Classify(Input{
+		Phase:      PhaseStreaming,
+		ProviderID: "opencode-acp",
+		Stderr:     "AI_APICallError: 5-hour usage limit reached. Resets in 4hr 19min.",
+	})
+	if e.Code != CodeQuotaLimited || e.Confidence != ConfHigh {
+		t.Fatalf("classification = %+v, want high-confidence quota_limited", e)
+	}
+}
+
 func TestClassify_InjectionShortCircuit(t *testing.T) {
 	resetInjection()
 	t.Setenv("KANDEV_PROVIDER_FAILURES", "claude-acp:quota_limited,codex-acp:auth_required")
@@ -160,6 +172,23 @@ func TestClassify_SanitizesRawExcerpt(t *testing.T) {
 	}
 	if containsSubstring(e.RawExcerpt, "abcdefghijklmnopqrstuvwxyz") {
 		t.Fatalf("raw excerpt not sanitized: %q", e.RawExcerpt)
+	}
+}
+
+func TestClassify_SanitizesOpenCodeWorkspaceURL(t *testing.T) {
+	resetInjection()
+	e := Classify(Input{
+		Phase:      PhaseStreaming,
+		ProviderID: "opencode-acp",
+		Stderr:     "stream error https://opencode.ai/workspace/wrk_01KQM7K5CYT715264YKKFB17ZY/go",
+	})
+	for _, secret := range []string{"/workspace/", "wrk_01KQM7K5CYT715264YKKFB17ZY"} {
+		if containsSubstring(e.RawExcerpt, secret) {
+			t.Fatalf("raw excerpt contains %q: %q", secret, e.RawExcerpt)
+		}
+	}
+	if !containsSubstring(e.RawExcerpt, "https://opencode.ai") {
+		t.Fatalf("raw excerpt removed safe provider host: %q", e.RawExcerpt)
 	}
 }
 

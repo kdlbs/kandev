@@ -9,6 +9,10 @@ import (
 	"time"
 )
 
+// methodSessionUpdate is the ACP notification an agent streams for every
+// message chunk, tool call, and replayed history entry.
+const methodSessionUpdate = "session/update"
+
 // IsAuthErrorMessage is a coarse substring heuristic mirroring
 // hostutility.isAuthError. ACP auth failures bubble up as plain-text
 // JSON-RPC errors without a distinct code, so we match obvious markers so
@@ -283,44 +287,81 @@ func sendPromptAndCollect(ctx context.Context, r *Runner, sessionID, prompt stri
 		return "", err
 	}
 
-	respCh := make(chan Frame, 1)
-	r.mu.Lock()
-	r.pending[promptID] = respCh
-	r.mu.Unlock()
-
-	if err := r.framer.Write(req); err != nil {
+	respCh, err := r.registerPending(promptID)
+	if err != nil {
 		return "", err
 	}
+	// Every exit path drops the waiter, including the ones that give up before
+	// a response arrives, so the map does not accumulate dead entries.
+	defer func() {
+		r.mu.Lock()
+		delete(r.pending, promptID)
+		r.mu.Unlock()
+	}()
 
 	var text strings.Builder
-	for {
-		select {
-		case resp := <-respCh:
-			if errMap, ok := resp["error"].(map[string]any); ok {
-				return text.String(), fmt.Errorf("%v", errMap["message"])
-			}
-			return text.String(), nil
-		case frame, ok := <-r.oob:
+
+	// drain consumes everything currently queued. Frames that arrived before
+	// the prompt was written are answered but never collected: a session/load
+	// replay leaves the whole conversation history queued, and folding that
+	// into the prompt's text would return the transcript instead of the reply.
+	drain := func(collect bool) {
+		for {
+			frame, ok, _ := r.popOOB()
 			if !ok {
-				return text.String(), io.EOF
+				return
 			}
-			// Agent-initiated request during a prompt: auto-reply so it
-			// doesn't hang.
+			// Agent-initiated request: auto-reply so it doesn't hang.
 			if frame.Method() != "" && frame.ID() != nil {
 				reply := NewMethodNotFound(frame.ID(), frame.Method())
 				_ = r.rec.Sent(reply)
 				_ = r.framer.Write(reply)
 				continue
 			}
-			// Notification: extract text chunks from session/update if
-			// present.
-			if frame.Method() == "session/update" {
+			if collect && frame.Method() == methodSessionUpdate {
 				if chunk := extractTextChunk(frame); chunk != "" {
 					text.WriteString(chunk)
 				}
 			}
+		}
+	}
+
+	drain(false)
+	if err := r.framer.Write(req); err != nil {
+		return "", err
+	}
+
+	for {
+		drain(true)
+
+		select {
+		case resp, ok := <-respCh:
+			if !ok {
+				// The read loop closed our waiter: the child died or the
+				// runner is shutting down. Without this check the nil frame
+				// would read as a successful, empty response.
+				r.mu.Lock()
+				readErr := r.readLoopEr
+				r.mu.Unlock()
+				if readErr == nil {
+					readErr = io.EOF
+				}
+				return text.String(), fmt.Errorf("read loop exited: %w", readErr)
+			}
+			// The read loop is serial and the agent emits every chunk before
+			// the response, so anything left queued belongs to this prompt.
+			drain(true)
+			if errMap, ok := resp["error"].(map[string]any); ok {
+				return text.String(), fmt.Errorf("%v", errMap["message"])
+			}
+			return text.String(), nil
+		case <-r.oobWake:
 		case <-ctx.Done():
 			return text.String(), ctx.Err()
+		}
+
+		if r.oobFinished() {
+			return text.String(), io.EOF
 		}
 	}
 }

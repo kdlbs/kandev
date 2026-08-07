@@ -23,6 +23,7 @@ import {
   resolveAgentLabelFor,
   sortSessions,
 } from "./session-sort";
+import { useTranslation } from "react-i18next";
 
 const LABEL_SEPARATOR = " \u2022 ";
 
@@ -47,6 +48,7 @@ export function PreviewSessionTabs({
   workspaceId,
   onSessionChange,
 }: PreviewSessionTabsProps) {
+  const { t } = useTranslation();
   const { sessions, isLoaded } = useTaskSessions(taskId);
   const agentProfiles = useAppStore((state) => state.agentProfiles.items);
 
@@ -91,12 +93,12 @@ export function PreviewSessionTabs({
   );
 
   if (!isLoaded && sortedSessions.length === 0) {
-    return <PreviewLoadingState label="Loading agents…" />;
+    return <PreviewLoadingState label={t("task:loadingAgents")} />;
   }
 
   if (sortedSessions.length === 0) {
     if (ensureSession?.status === "preparing") {
-      return <PreviewLoadingState label="Preparing workspace…" />;
+      return <PreviewLoadingState label={t("task:preparingWorkspace2")} />;
     }
     if (ensureSession?.status === "error") {
       return (
@@ -194,13 +196,14 @@ function PreviewLoadingState({ label }: { label: string }) {
 }
 
 function PreviewEmptyState() {
+  const { t } = useTranslation();
   return (
     <div className="flex h-full flex-col">
       <div
         className="flex flex-1 items-center justify-center text-sm text-muted-foreground"
         data-testid="preview-empty-state"
       >
-        No agents yet.
+        {t("task:noAgentsYet2")}
       </div>
     </div>
   );

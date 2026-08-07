@@ -12,6 +12,7 @@ type ContextItemBase = {
   label: string;
   pinned?: boolean;
   onRemove?: () => void;
+  onRetry?: () => void;
   onUnpin?: () => void;
 };
 
@@ -24,7 +25,8 @@ export type PlanContextItem = ContextItemBase & {
 export type FileContextItem = ContextItemBase & {
   kind: "file";
   path: string;
-  onOpen: (path: string) => void;
+  isDirectory: boolean;
+  onOpen?: (path: string) => void;
 };
 
 export type PromptContextItem = ContextItemBase & {

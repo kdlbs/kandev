@@ -38,7 +38,9 @@ manually moving files into the task workspace.
 - A source file rename may stay within its canonical workspace/source root; a cross-root move or
   rename is rejected before either source is mutated.
 - A multi-source submission is atomic from the user's perspective: either every source is attached
-  and materialized in the current task environment, or none of the new attachments remain.
+  and materialized in the current task environment, or none of the new attachments remain. When an
+  attachment repointed a pre-existing Kandev-owned entry, a failed submission restores that entry to
+  the target it had before the attachment rather than deleting it.
 - Repository attachment works for every executor that can run the task. Arbitrary folders are
   available only to Local and Worktree tasks, where the selected host paths remain live. Container
   and remote pickers do not offer the folder source kind, and the backend rejects a forged folder
@@ -132,6 +134,18 @@ session-scoped workspace-sources update after agentctl has adopted the new works
 refresh the Files tree and repository trackers from those events rather than assuming the POST
 response is the only writer.
 
+Full and summary task-session responses expose `workspace_path` as the effective task workspace
+root. In a multi-source task this is the parent that contains every repository and folder entry;
+`worktree_path` remains the flattened primary-repository path for backward compatibility. Live
+workspace-source and sibling-materialization events update `workspace_path` without replacing the
+primary `worktree_path`, and a later session refresh returns the same effective root.
+
+Chat file links resolve against `workspace_path`, so an absolute path under any attached source is
+converted to its task-root-relative Files path before it is opened. Clients may fall back to
+`worktree_path` for legacy session payloads that do not yet include `workspace_path`. Absolute paths
+outside the effective workspace remain non-actionable and are never rewritten into a workspace
+file request.
+
 `add_workspace_sources_kandev` accepts the same source union and defaults `task_id` to the current
 task.
 
@@ -175,10 +189,15 @@ persisted in source URLs or copied into agent-visible metadata.
 | A container/remote repository clone fails                      | Newly created remote entries are removed best-effort, durable attachments are rolled back, and the response identifies the failed source.           |
 | A container/remote task submits a folder source                | The request returns `422` without persistence or filesystem changes.                                                                                |
 | Agentctl cannot rescan the new root                            | The attachment fails rather than reporting success with a stale Files tree.                                                                         |
+| A chat message links to an absolute path outside the task root | The link is not sent to the workspace file API; normal external/unsafe-path handling remains in effect.                                              |
 | An idle agent must restart to adopt the promoted root          | The intentional stop is not shown as a prior agent failure; the replacement agent uses the promoted task root.                                      |
 | A requested file move or rename crosses canonical source roots | The request is rejected before either source is mutated.                                                                                            |
 | A persisted local folder later disappears                      | The current live environment keeps its existing materialization; a new/reset environment surfaces the missing source and does not silently omit it. |
 | The client disconnects during materialization                  | Rollback runs on a detached bounded context and the eventual task event reflects durable state.                                                     |
+| A Kandev-owned task-root entry already points at a different directory than the current durable spec (e.g. a stale entry left by an earlier launch) | Because the task root is Kandev-owned and the entry is a directory link, reconciliation repoints it to the current spec target and the launch/resume proceeds; it does not fail closed forever. |
+| A Kandev-owned task-root entry's ownership marker names a different task than the one reconciling | Reconciliation does not repoint the entry; it fails closed with a marker-conflict error and leaves the other task's entry pointing at its existing target. |
+| A multi-source attachment that repointed a pre-existing owned entry later fails during materialization | Rollback restores each repointed entry to the target it had before the attachment and deletes only entries this attachment created; no pre-existing entry is left deleted. |
+| A safe replacement would overwrite a non-owned or out-of-root entry, or its recreate fails after removal | A non-owned or changed entry, or a traversal path, is rejected before any removal, and a failed recreate restores the entry to its prior target rather than leaving it missing. |
 
 ## Persistence guarantees
 
@@ -187,6 +206,14 @@ resolve the exact canonical host path. New container or remote environments recr
 checkouts from durable repository attachments; they never persist folder attachments. Existing task
 conversations and source records survive an environment restart even when runtime materialization
 must be retried.
+
+Each task that materializes a Kandev-owned task root under the tasks base directory derives its
+task-root directory name from task identity. The name is collision-resistant, not injective: two
+distinct tasks — including two tasks whose titles sanitize to the same slug, or a local task and a
+worktree task sharing a title — are overwhelmingly unlikely to resolve to the same task root, and any
+residual collision is caught by the fail-closed ownership marker, which verifies task identity before
+any Kandev-owned entry under a shared root is repointed. The task-root name is computed once and
+persisted; every relaunch and resume of that task reuses the persisted name.
 
 ## Scenarios
 
@@ -241,6 +268,16 @@ must be retried.
 - **GIVEN** the original repository has no pending changes, **WHEN** a legacy add-branch call creates
   a sibling worktree, **THEN** Git status in the original repository does not report the sibling as
   an untracked or changed path.
+- **GIVEN** a task whose workspace contains multiple repositories, **WHEN** an agent message links
+  to an absolute file path in either the primary or an attached repository, **THEN** clicking the
+  link opens the exact file through the task-root-relative Files API path without a file-not-found
+  notification.
+- **GIVEN** that multi-repository task is reloaded after workspace promotion, **WHEN** the user
+  clicks the same chat file link, **THEN** the session-restored `workspace_path` resolves the same
+  file and `worktree_path` still identifies the primary repository.
+- **GIVEN** a legacy single-repository session payload without `workspace_path`, **WHEN** a chat
+  file link is inside `worktree_path`, **THEN** the link continues to open as a repository-relative
+  path.
 - **GIVEN** a live legacy add-branch materialization fails, **WHEN** the MCP call returns an error,
   **THEN** the new `task_repositories` row and any newly created repository entity are rolled back
   while the agent and existing processes continue running.
@@ -255,6 +292,29 @@ must be retried.
   horizontal document overflow and returns focus to the workspace-actions control.
 - **GIVEN** an agent calls `add_workspace_sources_kandev` for its current idle task, **WHEN** all
   inputs materialize, **THEN** the UI receives the same task and session updates as the human flow.
+- **GIVEN** two distinct tasks whose titles sanitize to the same task-root slug, **WHEN** each task
+  materializes a Kandev-owned task root, **THEN** their collision-resistant suffixes normally produce
+  different task-root directory names; if a residual suffix collision occurs, the ownership marker
+  rejects cross-task repointing with a marker-conflict error rather than redirecting the other task's
+  entries.
+- **GIVEN** a local task whose persisted task root already contains a Kandev-owned directory-link
+  entry for a repository that points at a different directory than the current durable spec target,
+  **WHEN** the task launches or resumes, **THEN** reconciliation repoints the owned entry to the
+  current spec target and the launch/resume proceeds instead of failing with an owned-link target
+  mismatch on every attempt.
+- **GIVEN** a Kandev-owned task-root entry that is not a directory link (a real file or directory a
+  reconcile did not create), **WHEN** the task launches or resumes, **THEN** reconciliation does not
+  delete or overwrite it and the launch surfaces an error identifying the conflicting entry.
+- **GIVEN** two persisted legacy tasks whose environments share one Kandev-owned task root, **WHEN**
+  the second task launches or resumes and its ownership marker does not match the root's marker,
+  **THEN** reconciliation fails closed with a marker-conflict error and does not redirect the first
+  task's live entry.
+- **GIVEN** a multi-source attachment that repointed a pre-existing Kandev-owned entry, **WHEN** a
+  later source in the same submission fails to materialize, **THEN** rollback restores the repointed
+  entry to its prior target and no pre-existing entry is left deleted.
+- **GIVEN** a Kandev-owned entry whose recreate could fail after the old link is removed, **WHEN**
+  reconciliation replaces it, **THEN** a traversal or out-of-root name is rejected before any removal
+  and a failed recreate leaves the original entry intact rather than missing.
 
 ## Out of scope
 
@@ -276,4 +336,6 @@ must be retried.
 ## Implementation plan
 
 See [Attach Workspace Sources plan](../../plans/attach-workspace-sources/plan.md) and the
-[live add-branch compatibility repair plan](../../plans/restore-live-add-branch/plan.md).
+[live add-branch compatibility repair plan](../../plans/restore-live-add-branch/plan.md), plus the
+[multi-repository chat file-link repair plan](../../plans/multi-repo-chat-file-links/plan.md) and the
+[owned link target mismatch repair plan](../../plans/owned-link-target-mismatch-repair/plan.md).

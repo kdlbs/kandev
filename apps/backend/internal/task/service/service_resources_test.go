@@ -12,8 +12,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jmoiron/sqlx"
 	commonlogger "github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events"
+	"github.com/kandev/kandev/internal/secrets"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository"
 	"github.com/kandev/kandev/internal/worktree"
@@ -24,6 +26,16 @@ import (
 
 type failingWorkspaceBootstrapper struct {
 	err error
+}
+
+type failingTransactionalWorkspaceSecretDeleter struct{}
+
+func (failingTransactionalWorkspaceSecretDeleter) DeleteWorkspaceSecrets(context.Context, string) error {
+	return errors.New("legacy cleanup should not be used")
+}
+
+func (failingTransactionalWorkspaceSecretDeleter) DeleteWorkspaceSecretsTx(context.Context, *sqlx.Tx, string) error {
+	return errors.New("injected transactional secret cleanup failure")
 }
 
 func (b *failingWorkspaceBootstrapper) CreateWorkspaceWithKanban(
@@ -128,6 +140,131 @@ func TestService_CreateRepositoryCanonicalizesExplicitLocalPath(t *testing.T) {
 	}
 	if stored.LocalPath != canonicalPath {
 		t.Fatalf("stored LocalPath = %q, want %q", stored.LocalPath, canonicalPath)
+	}
+}
+
+func TestService_RepositorySecretBindingsValidateScopeAndReplaceAtomically(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-secret-bindings", Name: "Workspace"}); err != nil {
+		t.Fatalf("CreateWorkspace: %v", err)
+	}
+	secretDB := sqlx.NewDb(repo.DB(), "sqlite3")
+	crypto, err := secrets.NewMasterKeyProvider(t.TempDir())
+	if err != nil {
+		t.Fatalf("master key: %v", err)
+	}
+	secretStore, closeSecrets, err := secrets.Provide(secretDB, secretDB, crypto)
+	if err != nil {
+		t.Fatalf("secret store: %v", err)
+	}
+	t.Cleanup(func() { _ = closeSecrets() })
+	svc.SetSecretStore(secretStore)
+
+	global := &secrets.SecretWithValue{Secret: secrets.Secret{Name: "global"}, Value: "global-value"}
+	workspace := &secrets.SecretWithValue{Secret: secrets.Secret{
+		Name: "workspace", Scope: secrets.ScopeWorkspace, WorkspaceID: "ws-secret-bindings",
+	}, Value: "workspace-value"}
+	if err := secretStore.Create(ctx, global); err != nil {
+		t.Fatalf("create global secret: %v", err)
+	}
+	if err := secretStore.Create(ctx, workspace); err != nil {
+		t.Fatalf("create workspace secret: %v", err)
+	}
+
+	created, err := svc.CreateRepository(ctx, &CreateRepositoryRequest{
+		WorkspaceID: "ws-secret-bindings",
+		Name:        "app",
+		SecretBindings: []RepositorySecretBindingInput{
+			{Key: "GLOBAL_TOKEN", SecretID: global.ID},
+			{Key: "WORKSPACE_TOKEN", SecretID: workspace.ID},
+		},
+	})
+	if err != nil {
+		t.Fatalf("create repository: %v", err)
+	}
+	if len(created.SecretBindings) != 2 {
+		t.Fatalf("created bindings = %+v, want two", created.SecretBindings)
+	}
+
+	bad, err := svc.CreateRepository(ctx, &CreateRepositoryRequest{
+		WorkspaceID:    "ws-secret-bindings",
+		Name:           "bad",
+		SecretBindings: []RepositorySecretBindingInput{{Key: "BAD", SecretID: "missing-secret"}},
+	})
+	if err == nil || bad != nil || !errors.Is(err, ErrInvalidRepositorySettings) {
+		t.Fatalf("missing binding result = %v, %+v; want invalid settings", err, bad)
+	}
+
+	clear := []RepositorySecretBindingInput{}
+	updated, err := svc.UpdateRepository(ctx, created.ID, &UpdateRepositoryRequest{SecretBindings: &clear})
+	if err != nil {
+		t.Fatalf("clear bindings: %v", err)
+	}
+	if len(updated.SecretBindings) != 0 {
+		t.Fatalf("bindings after clear = %+v, want empty", updated.SecretBindings)
+	}
+	loaded, err := repo.GetRepository(ctx, created.ID)
+	if err != nil {
+		t.Fatalf("get after clear: %v", err)
+	}
+	if len(loaded.SecretBindings) != 0 {
+		t.Fatalf("persisted bindings after clear = %+v, want empty", loaded.SecretBindings)
+	}
+}
+
+func TestService_ExecutorProfileSecretRefsRequireGlobalScope(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-profile-secrets", Name: "Workspace"}); err != nil {
+		t.Fatalf("CreateWorkspace: %v", err)
+	}
+	secretDB := sqlx.NewDb(repo.DB(), "sqlite3")
+	crypto, err := secrets.NewMasterKeyProvider(t.TempDir())
+	if err != nil {
+		t.Fatalf("master key: %v", err)
+	}
+	secretStore, closeSecrets, err := secrets.Provide(secretDB, secretDB, crypto)
+	if err != nil {
+		t.Fatalf("secret store: %v", err)
+	}
+	t.Cleanup(func() { _ = closeSecrets() })
+	svc.SetSecretStore(secretStore)
+
+	workspaceSecret := &secrets.SecretWithValue{Secret: secrets.Secret{
+		ID: "workspace-profile-secret", Scope: secrets.ScopeWorkspace, WorkspaceID: "ws-profile-secrets",
+	}, Value: "workspace-value"}
+	if err := secretStore.Create(ctx, workspaceSecret); err != nil {
+		t.Fatalf("create workspace secret: %v", err)
+	}
+	if err := svc.validateGlobalProfileEnvRefs(ctx, []models.ProfileEnvVar{{Key: "TOKEN", SecretID: workspaceSecret.ID}}); err == nil {
+		t.Fatal("workspace secret accepted in executor profile")
+	}
+}
+
+func TestService_ExecutorProfileRejectsBackendOwnedSecretID(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	secretDB := sqlx.NewDb(repo.DB(), "sqlite3")
+	crypto, err := secrets.NewMasterKeyProvider(t.TempDir())
+	if err != nil {
+		t.Fatalf("master key: %v", err)
+	}
+	secretStore, closeSecrets, err := secrets.Provide(secretDB, secretDB, crypto)
+	if err != nil {
+		t.Fatalf("secret store: %v", err)
+	}
+	t.Cleanup(func() { _ = closeSecrets() })
+	svc.SetSecretStore(secrets.NewUserVisibleStore(secretStore))
+
+	internal := &secrets.SecretWithValue{Secret: secrets.Secret{
+		ID: "github:user:workspace:user:access", Scope: secrets.ScopeGlobal,
+	}, Value: "backend-owned"}
+	if err := secretStore.Create(ctx, internal); err != nil {
+		t.Fatalf("create internal secret: %v", err)
+	}
+	if err := svc.validateGlobalProfileEnvRefs(ctx, []models.ProfileEnvVar{{Key: "TOKEN", SecretID: internal.ID}}); err == nil {
+		t.Fatal("backend-owned secret ID accepted in executor profile")
 	}
 }
 
@@ -859,6 +996,37 @@ func TestService_DeleteWorkspaceDeletesWorkspaceOwnedTasksAndWorkflows(t *testin
 	}
 	if _, err := repo.GetWorkflow(ctx, "wf-keep"); err != nil {
 		t.Fatalf("unrelated workflow should remain: %v", err)
+	}
+}
+
+func TestService_DeleteWorkspaceRollsBackCascadeWhenSecretCleanupFails(t *testing.T) {
+	svc, eventBus, repo := createTestService(t)
+	ctx := context.Background()
+	svc.SetWorkspaceSecretDeleter(failingTransactionalWorkspaceSecretDeleter{})
+	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-delete", Name: "Delete Me"}); err != nil {
+		t.Fatalf("CreateWorkspace: %v", err)
+	}
+	if err := repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-delete", WorkspaceID: "ws-delete", Name: "Doomed"}); err != nil {
+		t.Fatalf("CreateWorkflow: %v", err)
+	}
+	if err := repo.CreateTask(ctx, &models.Task{
+		ID: "task-delete", WorkspaceID: "ws-delete", WorkflowID: "wf-delete", WorkflowStepID: "step-delete", Title: "Delete task",
+	}); err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	eventBus.ClearEvents()
+
+	if err := svc.DeleteWorkspace(ctx, "ws-delete"); err == nil {
+		t.Fatal("DeleteWorkspace succeeded, want secret cleanup failure")
+	}
+	if _, err := repo.GetWorkspace(ctx, "ws-delete"); err != nil {
+		t.Fatalf("workspace was deleted after cleanup failure: %v", err)
+	}
+	if _, err := repo.GetTask(ctx, "task-delete"); err != nil {
+		t.Fatalf("task was deleted after cleanup failure: %v", err)
+	}
+	if events := eventBus.GetPublishedEvents(); len(events) != 0 {
+		t.Fatalf("events after rolled-back delete = %#v, want none", events)
 	}
 }
 

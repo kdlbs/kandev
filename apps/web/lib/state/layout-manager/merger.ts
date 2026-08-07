@@ -25,6 +25,9 @@ const CENTER_EXTRA_COMPONENTS = new Set([
   "file-editor",
   "commit-detail",
   "diff-viewer",
+  // Plugin task panels (e.g. a Notes scratchpad) are main-content surfaces
+  // like plan/browser/vscode, not side "tools" — see plugin-panels.ts.
+  "plugin-panel",
 ]);
 
 /** Collect all panels from a LayoutState, flattened. */

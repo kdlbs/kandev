@@ -286,11 +286,11 @@ WEB_STARTED=0
 if [[ "$WANT_WEB" -eq 1 ]]; then
   echo "dev-isolated: starting web (vite dev) on :$WEB_PORT ..."
   env \
-    NEXT_PUBLIC_KANDEV_API_PORT="$BACKEND_PORT" \
+    VITE_KANDEV_API_PORT="$BACKEND_PORT" \
     KANDEV_API_BASE_URL="$BACKEND_URL" \
     PORT="$WEB_PORT" \
     HOSTNAME="127.0.0.1" \
-    NEXT_PUBLIC_KANDEV_DEBUG="true" \
+    VITE_KANDEV_DEBUG="true" \
     setsid pnpm -C "$REPO_ROOT/apps" --filter @kandev/web dev >"$WEB_LOG" 2>&1 &
   WEB_PID=$!
   echo "$WEB_PID" >"$WEB_PIDFILE"
@@ -335,6 +335,6 @@ echo "  backend log : $BACKEND_LOG"
 [[ "$WANT_WEB" -eq 1 ]] && echo "  web log     : $WEB_LOG"
 echo "  pidfile     : $PIDFILE"
 echo
-echo "  Logs        : scripts/kandev-logs $BACKEND_PORT --export"
+echo "  Logs        : scripts/kandev-logs $BACKEND_PORT --source backend"
 echo "  Teardown    : scripts/kandev-kill --pidfile $PIDFILE --yes"
 echo "==========================================================="

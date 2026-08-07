@@ -1,10 +1,16 @@
 import type { Workflow, WorkflowStep } from "@/lib/types/http";
 import type { useToast } from "@/components/toast-provider";
+import { t } from "@/lib/i18n";
 import { generateUUID } from "@/lib/utils";
 import { createWorkflowStepAction, updateWorkflowStepAction } from "@/app/actions/workspaces";
 
-const FALLBACK_ERROR_MESSAGE = "Request failed";
+// See `workflow-card-actions.ts`: both fields are persisted verbatim, so the
+// seeded step name deliberately stays English.
 const NEW_STEP_DEFAULTS = { name: "New Step", color: "bg-slate-500" } as const;
+
+function fallbackErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : t("common:requestFailed");
+}
 
 type WorkflowStepsSetter = (
   updater: ((previous: WorkflowStep[]) => WorkflowStep[]) | WorkflowStep[],
@@ -51,8 +57,8 @@ export async function addRemoteStep(
     setWorkflowSteps((previous) => [...previous, created]);
   } catch (error) {
     toast({
-      title: "Failed to add workflow step",
-      description: error instanceof Error ? error.message : FALLBACK_ERROR_MESSAGE,
+      title: t("workflows:failedToAddWorkflowStep"),
+      description: fallbackErrorMessage(error),
       variant: "error",
     });
   }
@@ -87,8 +93,8 @@ export async function updateRemoteWorkflowStep({
     setWorkflowSteps((previous) => applyWorkflowStepUpdates(previous, stepId, updated));
   } catch (error) {
     toast({
-      title: "Failed to update workflow step",
-      description: error instanceof Error ? error.message : FALLBACK_ERROR_MESSAGE,
+      title: t("workflows:failedToUpdateWorkflowStep"),
+      description: fallbackErrorMessage(error),
       variant: "error",
     });
   }

@@ -95,6 +95,42 @@ func TestListPreparedTaskResourceCleanupJobsExcludesRunnableStates(t *testing.T)
 	}
 }
 
+func TestHasActiveTaskResourceCleanupJobTracksAdmissionStates(t *testing.T) {
+	ctx := context.Background()
+	repo := newRepoForHealTests(t)
+	states := []struct {
+		state  models.TaskResourceCleanupState
+		active bool
+	}{
+		{models.TaskResourceCleanupStatePrepared, true},
+		{models.TaskResourceCleanupStatePending, true},
+		{models.TaskResourceCleanupStateRunning, true},
+		{models.TaskResourceCleanupStateRetryWait, true},
+		{models.TaskResourceCleanupStateSucceeded, false},
+		{models.TaskResourceCleanupStateFailed, false},
+		{models.TaskResourceCleanupStateCancelled, false},
+	}
+	for _, tt := range states {
+		t.Run(string(tt.state), func(t *testing.T) {
+			taskID := "task-" + string(tt.state)
+			job := &models.TaskResourceCleanupJob{
+				ID: "job-" + string(tt.state), OperationID: "delete:" + taskID, TaskID: taskID,
+				Trigger: models.TaskResourceCleanupTriggerDelete, State: tt.state, ResourceSnapshot: `{}`,
+			}
+			if err := repo.CreateTaskResourceCleanupJob(ctx, job); err != nil {
+				t.Fatalf("CreateTaskResourceCleanupJob: %v", err)
+			}
+			active, err := repo.HasActiveTaskResourceCleanupJob(ctx, taskID)
+			if err != nil {
+				t.Fatalf("HasActiveTaskResourceCleanupJob: %v", err)
+			}
+			if active != tt.active {
+				t.Fatalf("active = %v, want %v", active, tt.active)
+			}
+		})
+	}
+}
+
 func TestTaskResourceCleanupJobStaleClaimCannotOverwriteCancellation(t *testing.T) {
 	ctx := context.Background()
 	repo := newRepoForHealTests(t)

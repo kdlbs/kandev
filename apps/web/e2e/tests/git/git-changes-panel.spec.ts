@@ -401,6 +401,105 @@ test.describe("Git Changes Panel", () => {
     await expect(testPage.getByText("line 1")).toBeVisible({ timeout: 5_000 });
   });
 
+  test("PR-only commit uses GitHub details when local history is stale", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const profile = await createStandardProfile(apiClient, "Git PR-only Detail Profile");
+    const task = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      "Git PR-only Detail Test",
+      profile.id,
+      {
+        description: "Testing PR-only commit details after a force-push",
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+      },
+    );
+
+    const remoteSha = "d".repeat(40);
+    const remoteMessage = "Force-pushed remote commit";
+    await apiClient.mockGitHubReset();
+    await apiClient.mockGitHubSetUser("remote-author");
+    await apiClient.mockGitHubAddPRs([
+      {
+        number: 2253,
+        title: "Force-pushed PR",
+        state: "open",
+        head_branch: "feature/stale-worktree",
+        base_branch: "main",
+        author_login: "remote-author",
+        repo_owner: "testorg",
+        repo_name: "testrepo",
+      },
+    ]);
+    await apiClient.mockGitHubAddPRCommits("testorg", "testrepo", 2253, [
+      {
+        sha: remoteSha,
+        message: remoteMessage,
+        author_login: "remote-author",
+        author_date: "2026-08-04T12:00:00Z",
+        stats_available: false,
+      },
+    ]);
+    await apiClient.mockGitHubAddPRCommitDetail("testorg", "testrepo", remoteSha, {
+      message: remoteMessage,
+      author_login: "remote-author",
+      author_name: "Remote Author",
+      author_date: "2026-08-04T12:00:00Z",
+      additions: 1,
+      deletions: 0,
+      files_changed: 1,
+      files: [
+        {
+          filename: "pr-only-marker.ts",
+          status: "added",
+          additions: 1,
+          deletions: 0,
+          patch: "@@ -0,0 +1 @@\n+PR_ONLY_REMOTE_MARKER",
+        },
+      ],
+    });
+    await apiClient.mockGitHubAssociateTaskPR({
+      task_id: task.id,
+      owner: "testorg",
+      repo: "testrepo",
+      pr_number: 2253,
+      pr_url: "https://github.com/testorg/testrepo/pull/2253",
+      pr_title: "Force-pushed PR",
+      head_branch: "feature/stale-worktree",
+      base_branch: "main",
+      author_login: "remote-author",
+    });
+
+    const session = await openTaskSession(testPage, "Git PR-only Detail Test");
+    await session.clickTab("Changes");
+    await expect(session.changes).toBeVisible({ timeout: 10_000 });
+    await expect(testPage.getByTestId("commits-section")).toBeVisible({ timeout: 20_000 });
+    await session.expandCommitsSection();
+
+    const row = testPage.getByTestId(`commit-row-${remoteSha.slice(0, 7)}`);
+    await expect(row).toBeVisible({ timeout: 20_000 });
+    await expect(row.getByText("+0", { exact: true })).toHaveCount(0);
+    await expect(row.getByText("-0", { exact: true })).toHaveCount(0);
+    await row.hover();
+    await expect(row.getByRole("button")).toHaveCount(0);
+
+    await row.click();
+    await expect(testPage.getByText(remoteMessage).last()).toBeVisible({ timeout: 15_000 });
+    await expect(testPage.getByText("Remote Author")).toBeVisible({ timeout: 10_000 });
+    await testPage.waitForFunction(
+      (marker: string) =>
+        Array.from(document.querySelectorAll("diffs-container")).some((container) =>
+          container.shadowRoot?.textContent?.includes(marker),
+        ),
+      "PR_ONLY_REMOTE_MARKER",
+      { timeout: 60_000 },
+    );
+  });
+
   /**
    * Verifies that reverting a commit undoes it (soft reset).
    * Note: The "Revert commit" action does `git reset --soft HEAD~1`,
@@ -520,12 +619,18 @@ test.describe("Git Changes Panel", () => {
     // Wait for both commits to appear. The commits-section header renders as
     // soon as the section mounts (no commits required), so asserting on the
     // text alone races the WS git-status push that carries the actual commit
-    // list. Gate on the row count first — that's the signal that the FE
-    // received both commits — and only then check text content.
+    // list. Gate on the two *named* commit rows we created — that's the signal
+    // that the FE received them. Don't assert an exact total count: the
+    // auto-started agent can land its own commit in the same worktree, so the
+    // list may legitimately hold a third row.
     await expect(testPage.getByTestId("commits-section")).toBeVisible({ timeout: 15_000 });
     await session.expandCommitsSection();
     const commitsList = testPage.getByTestId("commits-list");
-    await expect(commitsList.locator('[data-testid^="commit-row-"]')).toHaveCount(2, {
+    const commitRows = commitsList.locator('[data-testid^="commit-row-"]');
+    await expect(commitRows.filter({ hasText: "First commit" })).toHaveCount(1, {
+      timeout: 15_000,
+    });
+    await expect(commitRows.filter({ hasText: "Second commit" })).toHaveCount(1, {
       timeout: 15_000,
     });
     await expect(session.changes.getByText("First commit")).toBeVisible({ timeout: 5_000 });
@@ -1026,7 +1131,19 @@ test.describe("Git Changes Panel", () => {
     git.exec(`git reset --soft ${baseSha}`);
     git.commit("Squashed commit");
 
-    // Wait for the UI to update - old commits should disappear
+    // The squash happens on the filesystem while the Changes tab is already
+    // open, so the FE only reflects it once the backend's git-status watcher
+    // fires a WS push. Under CI shard load that push can lag past the wait
+    // budget. Reload to force a fresh git-status load — deterministic instead of
+    // racing the watcher (same approach as the persistent-commits test above).
+    await testPage.reload();
+    await session.waitForLoad();
+    await session.clickTab("Changes");
+    await expect(session.changes).toBeVisible({ timeout: 10_000 });
+    await expect(testPage.getByTestId("commits-section")).toBeVisible({ timeout: 15_000 });
+    await session.expandCommitsSection();
+
+    // Old commits should be gone after the squash.
     await expect(session.changes.getByText("First commit to squash")).not.toBeVisible({
       timeout: 15_000,
     });

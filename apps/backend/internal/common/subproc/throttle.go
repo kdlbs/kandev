@@ -35,9 +35,10 @@ import (
 // reports queue depth and saturation per pool (gh, git, ...). Unnamed
 // throttles stay silent — tests and ad-hoc pools don't pollute /debug/vars.
 type Throttle struct {
-	mu   sync.RWMutex
-	sem  chan struct{}
-	name string
+	mu        sync.RWMutex
+	sem       chan struct{}
+	name      string
+	admission *classAdmission
 }
 
 // NewThrottle returns a Throttle with the given cap and no name. cap <= 0
@@ -64,13 +65,15 @@ func NewNamedThrottle(name string, cap int) *Throttle {
 	return t
 }
 
-// Acquire blocks until a slot is available or ctx is cancelled. The
-// returned release function is safe to call any number of times — only
-// the first invocation returns the slot to the pool — but every successful
-// Acquire MUST call release at least once (typically via defer) to avoid
-// permanently shrinking the pool. On context error it returns ctx.Err()
-// and a no-op release so callers can defer unconditionally without
-// leaking slots.
+// Acquire blocks until a slot is available or ctx is cancelled. It is the
+// classless API for generic throttles such as gh; the process-wide class-aware
+// Git throttle rejects it with ErrGitWorkClassRequired. Git callers must use
+// AcquireClass (or AcquireGit) so their scheduling class is explicit. The
+// returned release function is safe to call any number of times — only the
+// first invocation returns the slot to the pool — but every successful Acquire
+// MUST call release at least once (typically via defer) to avoid permanently
+// shrinking the pool. On context error it returns ctx.Err() and a no-op release
+// so callers can defer unconditionally without leaking slots.
 //
 // Fast path: if ctx is already cancelled at entry, return immediately
 // without racing the select against an available slot. Without this,
@@ -78,6 +81,9 @@ func NewNamedThrottle(name string, cap int) *Throttle {
 // ready, so a cancelled caller might still acquire and then fail
 // downstream — unobservable but non-deterministic.
 func (t *Throttle) Acquire(ctx context.Context) (release func(), err error) {
+	if t.admission != nil {
+		return noopRelease, ErrGitWorkClassRequired
+	}
 	if err := ctx.Err(); err != nil {
 		return noopRelease, err
 	}
@@ -136,6 +142,16 @@ func (t *Throttle) Acquire(ctx context.Context) (release func(), err error) {
 	}
 }
 
+// AcquireClass admits one Git operation in the requested work class. It is
+// available on Throttle so the existing Git singleton can keep its narrow
+// package-level accessor while callers migrate to explicit classification.
+func (t *Throttle) AcquireClass(ctx context.Context, class GitWorkClass) (func(), error) {
+	if t.admission == nil {
+		return t.Acquire(ctx)
+	}
+	return t.admission.acquire(ctx, class)
+}
+
 // releaseFunc returns an idempotent release closure that decrements the
 // inflight gauge and frees a slot. sync.Once protects against a double
 // release (deferred + early-return path in a future refactor) draining a
@@ -172,6 +188,9 @@ func (t *Throttle) currentSem() chan struct{} {
 // Restore is idempotent in the sense that the previous pool is captured
 // at the call site; nested test setups stack via the returned closure.
 func (t *Throttle) SetCapForTest(newCap int) func() {
+	if t.admission != nil {
+		return t.admission.setCapForTest(newCap)
+	}
 	t.mu.Lock()
 	prev := t.sem
 	prevCap := 0

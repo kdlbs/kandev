@@ -118,9 +118,15 @@ test.describe("Session tab management — close behavior", () => {
     await expect(dialog).toBeVisible({ timeout: 5_000 });
     await expect(dialog).toContainText("Delete session?");
     await dialog.getByRole("button", { name: "Delete" }).click();
+    await expect(
+      testPage.getByTestId("toast-message").filter({ hasText: "Deleting session" }),
+    ).toHaveCount(0);
 
     await expect(session.sessionTabBySessionId(session1Id)).not.toBeVisible({ timeout: 15_000 });
     await expect(session.sessionTabBySessionId(session2Id)).toBeVisible();
+    await expect(
+      testPage.getByText("Deleting session successful", { exact: false }),
+    ).not.toBeVisible();
 
     const { sessions } = await apiClient.listTaskSessions(task.id);
     expect(sessions.map((s) => s.id)).toEqual([session2Id]);

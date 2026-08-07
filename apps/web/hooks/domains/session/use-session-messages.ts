@@ -3,20 +3,27 @@ import { getWebSocketClient } from "@/lib/ws/connection";
 import { useForegroundRefresh } from "@/hooks/use-foreground-refresh";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import type { TaskSessionState, Message } from "@/lib/types/http";
-import { listTaskSessionMessages } from "@/lib/api";
 import { createDebugLogger, isDebug } from "@/lib/debug/log";
 import {
   useUnknownSessionSubscriptionRetry,
   useUnknownSessionSubscriptionRetryEffect,
 } from "./use-session-subscription-retry";
+import { doFetchMessages } from "./use-session-message-fetch";
+import { autoBackfillUntilUserMessage, hasUserOrAgentMessage } from "./message-backfill";
+
+export {
+  autoBackfillUntilUserMessage,
+  type BackfillStep,
+  hasUserOrAgentMessage,
+  MAX_AUTO_BACKFILL_PAGES,
+  runBackfillRound,
+} from "./message-backfill";
 
 export { shouldRetryUnknownSessionSubscription } from "./use-session-subscription-retry";
 
 const INITIAL_FETCH_LIMIT = 100;
-const BACKFILL_PAGE_LIMIT = 100;
 const RUNNING_BACKFILL_INITIAL_DELAY_MS = 1200;
 const RUNNING_BACKFILL_INTERVAL_MS = 5000;
-export const MAX_AUTO_BACKFILL_PAGES = 10;
 
 // Monotonic guard against stale concurrent fetches. Each fetch claims an
 // increasing sequence number before awaiting; a completion only merges if no
@@ -42,12 +49,6 @@ export function commitFetchSeq(sessionId: string, seq: number): boolean {
   if (seq < applied) return false;
   lastAppliedFetchSeq.set(sessionId, seq);
   return true;
-}
-
-export function hasUserOrAgentMessage(messages: Message[]): boolean {
-  return messages.some(
-    (m) => m.type === "message" && (m.author_type === "user" || m.author_type === "agent"),
-  );
 }
 
 // States where a turn (or the agent boot) is actively progressing.
@@ -139,9 +140,14 @@ interface UseSessionMessagesReturn {
 }
 
 type MessageListResponse = { messages: Message[]; has_more?: boolean; cursor?: string };
+type InFlightMessageRequest = {
+  readiness: Promise<void>;
+  promise: Promise<MessageListResponse>;
+};
 
 const EMPTY_MESSAGES: Message[] = [];
 const EMPTY_META = { isLoading: false, hasMore: false, oldestCursor: null };
+const inFlightMessageRequests = new Map<string, InFlightMessageRequest>();
 
 /** Debug-only summary of a fetch response (no-op unless debug logging is on). */
 function logFetchSummary(
@@ -169,25 +175,63 @@ function logFetchSummary(
   }
 }
 
-/** Fetch latest messages via WS and merge with any that arrived via live notifications. */
-async function fetchAndStoreMessages(
+function requestSessionMessages(
+  client: NonNullable<ReturnType<typeof getWebSocketClient>>,
   sessionId: string,
-  store: ReturnType<typeof useAppStoreApi>,
-): Promise<Message[]> {
-  const client = getWebSocketClient();
-  if (!client) {
-    return [];
-  }
-  const seq = nextFetchSeq();
+  readiness: Promise<void>,
+): Promise<MessageListResponse> {
+  const existing = inFlightMessageRequests.get(sessionId);
+  if (existing?.readiness === readiness) return existing.promise;
 
   const requestParams = {
     session_id: sessionId,
     limit: INITIAL_FETCH_LIMIT,
     sort: "desc" as const,
   };
-  const response = await client.request<MessageListResponse>("message.list", requestParams, 10000);
+  const promise = client.request<MessageListResponse>("message.list", requestParams, 10000);
+  const entry = { readiness, promise };
+  inFlightMessageRequests.set(sessionId, entry);
+  void promise.then(
+    () => {
+      window.setTimeout(() => {
+        if (inFlightMessageRequests.get(sessionId) === entry) {
+          inFlightMessageRequests.delete(sessionId);
+        }
+      }, 0);
+    },
+    () => {
+      window.setTimeout(() => {
+        if (inFlightMessageRequests.get(sessionId) === entry) {
+          inFlightMessageRequests.delete(sessionId);
+        }
+      }, 0);
+    },
+  );
+  return promise;
+}
+
+/** Fetch latest messages via WS and merge with any that arrived via live notifications. */
+async function fetchAndStoreMessages(
+  sessionId: string,
+  store: ReturnType<typeof useAppStoreApi>,
+  isActive?: () => boolean,
+): Promise<Message[]> {
+  const client = getWebSocketClient();
+  if (!client) {
+    return [];
+  }
+  // Initial and recovery fetches must not overtake the server-side
+  // session.subscribe registration. The client returns an already-resolved
+  // promise when no durable subscription is active, preserving fetch behavior
+  // for non-session callers while gating this hook's normal subscription path.
+  const readiness = client.getSessionSubscriptionReadiness(sessionId);
+  await readiness;
+  if (isActive && !isActive()) return [];
+  const seq = nextFetchSeq();
+  const response = await requestSessionMessages(client, sessionId, readiness);
+  if (isActive && !isActive()) return [];
   const fetched = [...(response.messages ?? [])].reverse();
-  logFetchSummary(sessionId, fetched, response, requestParams.limit);
+  logFetchSummary(sessionId, fetched, response, INITIAL_FETCH_LIMIT);
   // Merge: keep WS-delivered messages that aren't in the fetch response.
   // This prevents a slow fetch (sent before messages existed) from wiping
   // messages that arrived via real-time notifications while the fetch was
@@ -231,116 +275,6 @@ async function fetchAndStoreMessages(
  * endpoint `useLazyLoadMessages` uses until we span at least one user/agent
  * message or hit the page budget.
  */
-export type BackfillStep = "continue" | "stop";
-
-async function fetchAndPrependOlder(
-  sessionId: string,
-  store: ReturnType<typeof useAppStoreApi>,
-  oldestCursor: string,
-): Promise<number> {
-  const response = await listTaskSessionMessages(sessionId, {
-    limit: BACKFILL_PAGE_LIMIT,
-    before: oldestCursor,
-    sort: "desc",
-  });
-  const ordered = [...(response.messages ?? [])].reverse();
-  const newOldestCursor = ordered[0]?.id ?? oldestCursor;
-  store.getState().prependMessages(sessionId, ordered, {
-    hasMore: response.has_more ?? false,
-    oldestCursor: newOldestCursor,
-  });
-  return ordered.length;
-}
-
-export async function runBackfillRound(
-  sessionId: string,
-  store: ReturnType<typeof useAppStoreApi>,
-  round: number,
-): Promise<BackfillStep> {
-  const meta = store.getState().messages.metaBySession[sessionId];
-  const messages = store.getState().messages.bySession[sessionId] ?? [];
-  if (hasUserOrAgentMessage(messages)) return "stop";
-  if (!meta?.hasMore || !meta.oldestCursor) {
-    debug("autoBackfill: stopping (no more older messages)", {
-      sessionId,
-      round,
-      hasMore: meta?.hasMore ?? false,
-    });
-    return "stop";
-  }
-  debug("autoBackfill: window has no user/agent message, fetching older", {
-    sessionId,
-    round,
-    currentCount: messages.length,
-    oldestCursor: meta.oldestCursor,
-  });
-  try {
-    const added = await fetchAndPrependOlder(sessionId, store, meta.oldestCursor);
-    return added === 0 ? "stop" : "continue";
-  } catch (err) {
-    debug("autoBackfill: fetch failed, stopping", { sessionId, round, err });
-    return "stop";
-  }
-}
-
-export async function autoBackfillUntilUserMessage(
-  sessionId: string,
-  store: ReturnType<typeof useAppStoreApi>,
-): Promise<void> {
-  for (let round = 0; round < MAX_AUTO_BACKFILL_PAGES; round++) {
-    const step = await runBackfillRound(sessionId, store, round);
-    if (step === "stop") return;
-  }
-  debug("autoBackfill: hit page budget without finding user/agent message", {
-    sessionId,
-    pageBudget: MAX_AUTO_BACKFILL_PAGES,
-    messageBudget: MAX_AUTO_BACKFILL_PAGES * BACKFILL_PAGE_LIMIT,
-  });
-}
-
-type FetchMessagesParams = {
-  taskSessionId: string;
-  store: ReturnType<typeof useAppStoreApi>;
-  setIsLoading: (v: boolean) => void;
-  setIsWaitingForInitialMessages: (v: boolean) => void;
-  initialFetchStartRef: MutableRefObject<number | null>;
-  lastFetchedSessionIdRef: MutableRefObject<string | null>;
-  onError?: (error: unknown) => void;
-};
-
-async function doFetchMessages({
-  taskSessionId,
-  store,
-  setIsLoading,
-  setIsWaitingForInitialMessages,
-  initialFetchStartRef,
-  lastFetchedSessionIdRef,
-  onError,
-}: FetchMessagesParams): Promise<void> {
-  setIsLoading(true);
-  store.getState().setMessagesLoading(taskSessionId, true);
-  if (initialFetchStartRef.current === null) {
-    initialFetchStartRef.current = Date.now();
-    setIsWaitingForInitialMessages(true);
-  }
-  try {
-    const fetched = await fetchAndStoreMessages(taskSessionId, store);
-    lastFetchedSessionIdRef.current = taskSessionId;
-    if (fetched.length > 0) setIsWaitingForInitialMessages(false);
-    if (fetched.length > 0 && !hasUserOrAgentMessage(fetched)) {
-      await autoBackfillUntilUserMessage(taskSessionId, store);
-    }
-  } catch (error) {
-    if (onError) onError(error);
-    else console.error("Failed to fetch messages:", error);
-    store.getState().setMessages(taskSessionId, []);
-    lastFetchedSessionIdRef.current = taskSessionId;
-  } finally {
-    store.getState().setMessagesLoading(taskSessionId, false);
-    setIsLoading(false);
-  }
-}
-
 function useTerminalStateFetch(
   taskSessionId: string | null,
   taskSessionState: TaskSessionState | null,
@@ -370,6 +304,9 @@ function useTerminalStateFetch(
     void doFetchMessages({
       taskSessionId,
       ...refs,
+      fetchAndStoreMessages,
+      autoBackfillUntilUserMessage,
+      hasUserOrAgentMessage,
       onError: (error) => console.error("Failed to fetch messages after state change:", error),
     });
   }, [taskSessionId, taskSessionState, hasAgentMessage, connectionStatus, refs]);
@@ -444,15 +381,23 @@ function useSessionSubscription(
       return;
     }
     debug("subscription: subscribing", { sessionId: taskSessionId });
-    const unsubscribe = client.subscribeSession(taskSessionId);
+    const subscription = client.subscribeSessionWithReady(taskSessionId);
+    let active = true;
 
-    // Re-fetch messages after subscribing to close the gap between SSR
-    // (which may have run before the agent responded) and this subscription.
-    fetchAndStoreMessages(taskSessionId, store).catch(() => {});
+    // Re-fetch messages after the server acknowledges the subscription to
+    // close the gap between SSR (which may have run before the agent
+    // responded) and this subscription.
+    void subscription.ready
+      .then(() => {
+        if (!active) return;
+        return fetchAndStoreMessages(taskSessionId, store, () => active);
+      })
+      .catch(() => {});
 
     return () => {
+      active = false;
       debug("subscription: unsubscribing", { sessionId: taskSessionId });
-      unsubscribe();
+      subscription.unsubscribe();
     };
   }, [taskSessionId, connectionStatus, store, isSessionStartingOrUnknown]);
 }
@@ -618,21 +563,22 @@ export function useSessionMessages(taskSessionId: string | null): UseSessionMess
     refs: fetchRefs,
   } = useMessageFetchState(store);
 
+  useSessionLifecycleSubscriptions({
+    taskSessionId,
+    taskSessionState,
+    connectionStatus,
+    activeTurnId,
+    messages,
+    store,
+  });
+
   useEffect(() => {
     if (!taskSessionId) {
       initialFetchStartRef.current = null;
       lastFetchedSessionIdRef.current = null;
       setIsWaitingForInitialMessages(false);
+      return;
     }
-  }, [
-    taskSessionId,
-    initialFetchStartRef,
-    lastFetchedSessionIdRef,
-    setIsWaitingForInitialMessages,
-  ]);
-
-  useEffect(() => {
-    if (!taskSessionId) return;
     if (messages.length > 0) {
       setIsWaitingForInitialMessages(false);
       return;
@@ -644,7 +590,13 @@ export function useSessionMessages(taskSessionId: string | null): UseSessionMess
   }, [taskSessionId, messages.length, initialFetchStartRef, setIsWaitingForInitialMessages]);
 
   useEffect(() => {
-    if (!taskSessionId || connectionStatus !== "connected") return;
+    let active = true;
+    const deactivate = () => {
+      active = false;
+    };
+    if (!taskSessionId || connectionStatus !== "connected") {
+      return deactivate;
+    }
 
     const isFreshMount = prevSessionIdRef.current === null;
     const sessionChanged =
@@ -659,23 +611,30 @@ export function useSessionMessages(taskSessionId: string | null): UseSessionMess
     if (messages.length > 0 && !sessionChanged && !isFreshMount) {
       lastFetchedSessionIdRef.current = taskSessionId;
       setIsWaitingForInitialMessages(false);
-      return;
+      return deactivate;
     }
 
     // Fresh mount with cached messages — show cached instantly, fetch in background
     if (isFreshMount && messages.length > 0) {
       lastFetchedSessionIdRef.current = taskSessionId;
       setIsWaitingForInitialMessages(false);
-      fetchAndStoreMessages(taskSessionId, store).catch(() => {});
-      return;
+      fetchAndStoreMessages(taskSessionId, store, () => active).catch(() => {});
+      return deactivate;
     }
 
-    if (lastFetchedSessionIdRef.current === taskSessionId) return;
+    if (lastFetchedSessionIdRef.current === taskSessionId) {
+      return deactivate;
+    }
 
     void doFetchMessages({
       taskSessionId,
       ...fetchRefs,
+      fetchAndStoreMessages,
+      autoBackfillUntilUserMessage,
+      hasUserOrAgentMessage,
+      isActive: () => active,
     });
+    return deactivate;
   }, [
     taskSessionId,
     connectionStatus,
@@ -685,15 +644,6 @@ export function useSessionMessages(taskSessionId: string | null): UseSessionMess
     setIsWaitingForInitialMessages,
     fetchRefs,
   ]);
-
-  useSessionLifecycleSubscriptions({
-    taskSessionId,
-    taskSessionState,
-    connectionStatus,
-    activeTurnId,
-    messages,
-    store,
-  });
 
   useVisibilityBackfill(taskSessionId, store);
 

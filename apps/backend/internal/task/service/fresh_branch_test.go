@@ -310,6 +310,22 @@ func TestLocalRepositoryStatus_ListsDirtyFiles(t *testing.T) {
 }
 
 // initRealGitRepo creates a git repo with a single commit on `main`.
+// canonicalRepoTestPath resolves dir the same way the production
+// CreateRepository path does (filepath.EvalSymlinks), so a stored LocalPath
+// matches what resolveRepositoryLocalPath re-resolves it to. Tests that write
+// LocalPath through the repository-entity layer directly (bypassing the
+// canonicalizing service.CreateRepository) must use this, or the saved raw
+// t.TempDir() path fails the sameCanonicalPath guard on platforms whose temp
+// dir has a symlinked ancestor (e.g. macOS /var -> /private/var).
+func canonicalRepoTestPath(t *testing.T, dir string) string {
+	t.Helper()
+	resolved, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		t.Fatalf("EvalSymlinks(%q): %v", dir, err)
+	}
+	return resolved
+}
+
 func initRealGitRepo(t *testing.T, dir string) {
 	t.Helper()
 	if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -388,7 +404,7 @@ func persistFreshBranchRepository(t *testing.T, svc *Service, repoPath string) s
 		t.Fatalf("CreateWorkspace: %v", err)
 	}
 	if err := svc.repoEntities.CreateRepository(ctx, &models.Repository{
-		ID: repositoryID, WorkspaceID: workspaceID, Name: "Repository", SourceType: sourceTypeLocal, LocalPath: repoPath,
+		ID: repositoryID, WorkspaceID: workspaceID, Name: "Repository", SourceType: sourceTypeLocal, LocalPath: canonicalRepoTestPath(t, repoPath),
 	}); err != nil {
 		t.Fatalf("CreateRepository: %v", err)
 	}

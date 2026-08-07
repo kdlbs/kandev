@@ -17,6 +17,8 @@ import { panelPortalManager } from "@/lib/layout/panel-portal-manager";
 import { syncOpenFileFromWorkspace } from "@/hooks/file-editors-sync";
 import { buildRepoScopedItemId } from "@/lib/state/dockview-panel-actions";
 import { FileViewerExternalLink } from "./file-viewer-header";
+import { getSessionWorkspacePath } from "@/lib/session-workspace-path";
+import { useTranslation } from "react-i18next";
 
 type FileCategory = "image" | "binary" | "text";
 
@@ -262,6 +264,7 @@ function useFileEditorBuffer(fileKey: string) {
 }
 
 function LoadingFilePanel() {
+  const { t } = useTranslation();
   return (
     <PanelRoot>
       <PanelBody
@@ -269,7 +272,7 @@ function LoadingFilePanel() {
         scroll={false}
         className="flex items-center justify-center text-muted-foreground text-sm"
       >
-        Loading file...
+        {t("task:loadingFile")}
       </PanelBody>
     </PanelRoot>
   );
@@ -327,7 +330,7 @@ export const FileEditorPanel = memo(function FileEditorPanel({
     return <LoadingFilePanel />;
   }
 
-  const worktreePath = activeSession?.worktree_path ?? undefined;
+  const worktreePath = getSessionWorkspacePath(activeSession);
   const repositoryId = activeSession?.repository_id ?? undefined;
   const category = resolveFileCategory(isBinary, path);
   if (category !== "text") {

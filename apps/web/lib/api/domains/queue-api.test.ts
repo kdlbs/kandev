@@ -8,10 +8,14 @@ vi.mock("@/lib/ws/connection", () => ({
 }));
 
 import {
+  MergeReferenceOverflowError,
+  QueueSendNowError,
   QueueFullError,
   QueueEntryNotFoundError,
+  mergeQueuedEntry,
   queueMessage,
   rethrowQueueError,
+  sendQueuedNow,
   updateQueuedMessage,
 } from "./queue-api";
 
@@ -77,6 +81,15 @@ describe("rethrowQueueError", () => {
     ).toThrow(QueueEntryNotFoundError);
   });
 
+  it("maps merge_reference_overflow errors to MergeReferenceOverflowError", () => {
+    expect(() =>
+      rethrowQueueError({
+        code: "merge_reference_overflow",
+        message: "merge would exceed the per-message entity reference limit",
+      }),
+    ).toThrow(MergeReferenceOverflowError);
+  });
+
   it("rethrows non-queue WS errors as plain Error instances", () => {
     let caught: unknown;
     try {
@@ -131,6 +144,25 @@ describe("queue reference payloads", () => {
     });
   });
 
+  it("forwards context file metadata through message.queue.add", async () => {
+    const request = vi.fn().mockResolvedValue({ id: "q-1" });
+    getWebSocketClientMock.mockReturnValue({ request });
+
+    await queueMessage({
+      session_id: "session-1",
+      task_id: "task-1",
+      content: "queued context",
+      context_files: [{ path: "src/components", name: "components", is_directory: true }],
+    });
+
+    expect(request).toHaveBeenCalledWith("message.queue.add", {
+      session_id: "session-1",
+      task_id: "task-1",
+      content: "queued context",
+      context_files: [{ path: "src/components", name: "components", is_directory: true }],
+    });
+  });
+
   it("sends an explicit empty reference array when replacing a queued message", async () => {
     const request = vi.fn().mockResolvedValue({ entry_id: "q-1" });
     getWebSocketClientMock.mockReturnValue({ request });
@@ -166,5 +198,113 @@ describe("queue reference payloads", () => {
       content: "reference kept",
       entity_references: [reference],
     });
+  });
+});
+
+describe("mergeQueuedEntry", () => {
+  it("forwards session, entry, and caller identity through message.queue.merge", async () => {
+    const request = vi.fn().mockResolvedValue({ entry_id: "q-a" });
+    getWebSocketClientMock.mockReturnValue({ request });
+
+    await mergeQueuedEntry({
+      session_id: "session-1",
+      entry_id: "q-b",
+      user_id: "user-1",
+    });
+
+    expect(request).toHaveBeenCalledWith("message.queue.merge", {
+      session_id: "session-1",
+      entry_id: "q-b",
+      user_id: "user-1",
+    });
+  });
+
+  it("omits user_id when the caller identity is unknown", async () => {
+    const request = vi.fn().mockResolvedValue({ entry_id: "q-a" });
+    getWebSocketClientMock.mockReturnValue({ request });
+
+    await mergeQueuedEntry({ session_id: "session-1", entry_id: "q-b" });
+
+    expect(request).toHaveBeenCalledWith("message.queue.merge", {
+      session_id: "session-1",
+      entry_id: "q-b",
+    });
+  });
+
+  it("maps a drained-source rejection to QueueEntryNotFoundError", async () => {
+    const request = vi
+      .fn()
+      .mockRejectedValue({ code: "entry_not_found", message: "Already drained" });
+    getWebSocketClientMock.mockReturnValue({ request });
+
+    await expect(
+      mergeQueuedEntry({ session_id: "session-1", entry_id: "q-b" }),
+    ).rejects.toBeInstanceOf(QueueEntryNotFoundError);
+  });
+
+  it("maps a reference-overflow rejection to MergeReferenceOverflowError", async () => {
+    const request = vi.fn().mockRejectedValue({
+      code: "merge_reference_overflow",
+      message: "merge would exceed the per-message entity reference limit",
+    });
+    getWebSocketClientMock.mockReturnValue({ request });
+
+    await expect(
+      mergeQueuedEntry({ session_id: "session-1", entry_id: "q-b" }),
+    ).rejects.toBeInstanceOf(MergeReferenceOverflowError);
+  });
+});
+
+describe("sendQueuedNow", () => {
+  it("sends an exact entry scope", async () => {
+    const request = vi.fn().mockResolvedValue({
+      session_id: "session-1",
+      dispatched: true,
+      sent_count: 1,
+    });
+    getWebSocketClientMock.mockReturnValue({ request });
+
+    await sendQueuedNow({
+      session_id: "session-1",
+      scope: "entry",
+      entry_id: "q-2",
+    });
+
+    expect(request).toHaveBeenCalledWith("message.queue.send_now", {
+      session_id: "session-1",
+      scope: "entry",
+      entry_id: "q-2",
+    });
+  });
+
+  it("omits entry_id for an all scope snapshot", async () => {
+    const request = vi.fn().mockResolvedValue({
+      session_id: "session-1",
+      dispatched: true,
+      sent_count: 3,
+    });
+    getWebSocketClientMock.mockReturnValue({ request });
+
+    await sendQueuedNow({ session_id: "session-1", scope: "all" });
+
+    expect(request).toHaveBeenCalledWith("message.queue.send_now", {
+      session_id: "session-1",
+      scope: "all",
+    });
+  });
+
+  it("maps send-now conflict codes to a typed error", async () => {
+    const request = vi.fn().mockRejectedValue({
+      code: "send_now_conflict",
+      message: "Another cancellation is in progress",
+    });
+    getWebSocketClientMock.mockReturnValue({ request });
+
+    await expect(sendQueuedNow({ session_id: "session-1", scope: "all" })).rejects.toMatchObject({
+      code: "send_now_conflict",
+    });
+    await expect(sendQueuedNow({ session_id: "session-1", scope: "all" })).rejects.toBeInstanceOf(
+      QueueSendNowError,
+    );
   });
 });

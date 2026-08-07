@@ -4,12 +4,16 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { QuickChatSetup } from "./quick-chat-setup";
 
 let defaultAgentId = "";
+let agentProfiles: Array<{ id: string; enabled?: boolean }> = [
+  { id: "agent-a" },
+  { id: "agent-b" },
+];
 const AGENT_SELECTOR_TEST_ID = "agent-profile-selector";
 
 vi.mock("@/components/state-provider", () => ({
   useAppStore: (selector: (state: unknown) => unknown) =>
     selector({
-      agentProfiles: { items: [{ id: "agent-a" }, { id: "agent-b" }] },
+      agentProfiles: { items: agentProfiles },
       workspaces: {
         items: [{ id: "workspace-1", default_agent_profile_id: defaultAgentId }],
       },
@@ -75,6 +79,7 @@ const props = {
 
 beforeEach(() => {
   defaultAgentId = "";
+  agentProfiles = [{ id: "agent-a" }, { id: "agent-b" }];
   vi.clearAllMocks();
 });
 
@@ -127,5 +132,18 @@ describe("QuickChatSetup default agent", () => {
     rerender(<QuickChatSetup {...props} />);
 
     expect(screen.getByTestId(AGENT_SELECTOR_TEST_ID).textContent).toContain("agent-b");
+  });
+
+  it("clears a selected profile when it becomes disabled", () => {
+    const { rerender } = render(<QuickChatSetup {...props} />);
+    fireEvent.click(screen.getByTestId(AGENT_SELECTOR_TEST_ID));
+    expect(screen.getByTestId(AGENT_SELECTOR_TEST_ID).textContent).toContain("agent-b");
+
+    agentProfiles = [{ id: "agent-a" }, { id: "agent-b", enabled: false }];
+    rerender(<QuickChatSetup {...props} />);
+
+    expect(screen.getByTestId(AGENT_SELECTOR_TEST_ID).textContent).toContain("Select agent");
+    expect((screen.getByTestId("quick-chat-start") as HTMLButtonElement).disabled).toBe(true);
+    expect(props.onStart).not.toHaveBeenCalled();
   });
 });

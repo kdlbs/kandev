@@ -1,6 +1,7 @@
 package runtime
 
 import (
+	"fmt"
 	"sync"
 	"time"
 
@@ -53,7 +54,7 @@ type process struct {
 	log *logger.Logger
 
 	spawnFn        func() (spawnedProcess, error)
-	onStatusChange func(id string, healthy bool)
+	onStatusChange func(id string, healthy bool, reason error)
 
 	pingInterval        time.Duration
 	maxConsecutiveFails int
@@ -84,7 +85,7 @@ type process struct {
 // newProcess builds a process with default tuning. Callers may override
 // pingInterval/maxConsecutiveFails/restartBackoff/maxRestartAttempts/
 // sleepFn/onTick before calling start.
-func newProcess(id string, log *logger.Logger, spawnFn func() (spawnedProcess, error), onStatusChange func(string, bool)) *process {
+func newProcess(id string, log *logger.Logger, spawnFn func() (spawnedProcess, error), onStatusChange func(string, bool, error)) *process {
 	return &process{
 		id:                  id,
 		log:                 log,
@@ -227,8 +228,9 @@ func (p *process) tick() bool {
 	}
 
 	if cur.Exited() {
+		reason := fmt.Errorf("plugin process exited unexpectedly")
 		p.log.Warn("plugin process exited unexpectedly", zap.String("plugin_id", p.id))
-		return p.handleFailureAndRestart()
+		return p.handleFailureAndRestart(reason)
 	}
 
 	if err := cur.Ping(); err != nil {
@@ -239,7 +241,7 @@ func (p *process) tick() bool {
 		if reachedThreshold {
 			p.log.Warn("plugin health check failed repeatedly",
 				zap.String("plugin_id", p.id), zap.Error(err))
-			return p.handleFailureAndRestart()
+			return p.handleFailureAndRestart(err)
 		}
 		return false
 	}
@@ -249,7 +251,7 @@ func (p *process) tick() bool {
 	p.failures = 0
 	p.mu.Unlock()
 	if hadFailures {
-		p.notify(true)
+		p.notify(true, nil)
 	}
 	return false
 }
@@ -258,8 +260,8 @@ func (p *process) tick() bool {
 // left of the old process, and attempts to respawn it with backoff up to
 // maxRestartAttempts times. Returns true if every attempt failed (the
 // process has given up permanently).
-func (p *process) handleFailureAndRestart() bool {
-	p.notify(false)
+func (p *process) handleFailureAndRestart(reason error) bool {
+	p.notify(false, reason)
 
 	p.mu.Lock()
 	if p.current != nil {
@@ -269,6 +271,7 @@ func (p *process) handleFailureAndRestart() bool {
 	p.failures = 0
 	p.mu.Unlock()
 
+	var lastErr error
 	for attempt := 0; attempt < p.maxRestartAttempts; attempt++ {
 		delay := time.Duration(0)
 		if attempt < len(p.restartBackoff) {
@@ -280,6 +283,7 @@ func (p *process) handleFailureAndRestart() bool {
 
 		proc, err := p.spawnFn()
 		if err != nil {
+			lastErr = err
 			p.log.Warn("plugin restart attempt failed",
 				zap.String("plugin_id", p.id), zap.Int("attempt", attempt+1), zap.Error(err))
 			continue
@@ -289,7 +293,7 @@ func (p *process) handleFailureAndRestart() bool {
 		p.current = proc
 		p.restarts++
 		p.mu.Unlock()
-		p.notify(true)
+		p.notify(true, nil)
 		return false
 	}
 
@@ -298,12 +302,17 @@ func (p *process) handleFailureAndRestart() bool {
 	p.mu.Lock()
 	p.gaveUp = true
 	p.mu.Unlock()
+	if lastErr != nil {
+		p.notify(false, fmt.Errorf("plugin restart attempts exhausted: %w", lastErr))
+	} else {
+		p.notify(false, fmt.Errorf("plugin restart attempts exhausted"))
+	}
 	return true
 }
 
 // notify invokes onStatusChange, if set.
-func (p *process) notify(healthy bool) {
+func (p *process) notify(healthy bool, reason error) {
 	if p.onStatusChange != nil {
-		p.onStatusChange(p.id, healthy)
+		p.onStatusChange(p.id, healthy, reason)
 	}
 }

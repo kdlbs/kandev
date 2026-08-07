@@ -11,6 +11,16 @@ import (
 
 	"github.com/kandev/kandev/internal/analytics/models"
 	"github.com/kandev/kandev/internal/db/dialect"
+	taskmodels "github.com/kandev/kandev/internal/task/models"
+)
+
+// Automation runs are hidden from human-facing surfaces by their origin rather
+// than by is_ephemeral, so every aggregate here has to say so explicitly. Built
+// from the same constant the task and office repositories build theirs from —
+// spelling the literal out per query is how one of them gets missed.
+const (
+	andNotAutomationOrigin  = ` AND COALESCE(origin, '') != '` + taskmodels.TaskOriginAutomationRun + `'`
+	andNotAutomationOriginT = ` AND COALESCE(t.origin, '') != '` + taskmodels.TaskOriginAutomationRun + `'`
 )
 
 // parseTimeString parses time strings in various SQLite formats
@@ -90,7 +100,7 @@ func (r *Repository) GetTaskStats(
 			WHERE (? IS NULL OR s.started_at >= ?)
 			GROUP BY s.task_id
 		) turn_stats ON turn_stats.task_id = t.id
-		WHERE t.workspace_id = ? AND t.is_ephemeral = 0 AND (? IS NULL OR t.created_at >= ?)
+		WHERE t.workspace_id = ? AND t.is_ephemeral = 0`+andNotAutomationOriginT+` AND (? IS NULL OR t.created_at >= ?)
 		ORDER BY t.updated_at DESC
 		LIMIT ?
 	`, dur, dialect.DurationMs(
@@ -184,13 +194,13 @@ func (r *Repository) GetGlobalStats(ctx context.Context, workspaceID string, sta
 				SUM(CASE WHEN t.state = 'IN_PROGRESS' AND t.archived_at IS NULL THEN 1 ELSE 0 END) AS in_progress_tasks
 			FROM tasks t
 			LEFT JOIN workflow_steps ws ON ws.id = t.workflow_step_id
-			WHERE t.workspace_id = ? AND t.is_ephemeral = 0 AND (? IS NULL OR t.created_at >= ?)
+			WHERE t.workspace_id = ? AND t.is_ephemeral = 0`+andNotAutomationOriginT+` AND (? IS NULL OR t.created_at >= ?)
 		),
 		session_agg AS (
 			SELECT COUNT(*) AS total_sessions
 			FROM task_sessions s
 			JOIN tasks t ON t.id = s.task_id
-			WHERE t.workspace_id = ? AND t.is_ephemeral = 0 AND (? IS NULL OR s.started_at >= ?)
+			WHERE t.workspace_id = ? AND t.is_ephemeral = 0`+andNotAutomationOriginT+` AND (? IS NULL OR s.started_at >= ?)
 		),
 		turn_agg AS (
 			SELECT
@@ -199,7 +209,7 @@ func (r *Repository) GetGlobalStats(ctx context.Context, workspaceID string, sta
 			FROM task_session_turns turn
 			JOIN task_sessions s ON s.id = turn.task_session_id
 			JOIN tasks t ON t.id = s.task_id
-			WHERE t.workspace_id = ? AND t.is_ephemeral = 0 AND (? IS NULL OR s.started_at >= ?)
+			WHERE t.workspace_id = ? AND t.is_ephemeral = 0`+andNotAutomationOriginT+` AND (? IS NULL OR s.started_at >= ?)
 		),
 		clean_turn_agg AS (
 			SELECT
@@ -212,7 +222,7 @@ func (r *Repository) GetGlobalStats(ctx context.Context, workspaceID string, sta
 				FROM task_session_turns turn
 				JOIN task_sessions s ON s.id = turn.task_session_id
 				JOIN tasks t ON t.id = s.task_id
-				WHERE t.workspace_id = ? AND t.is_ephemeral = 0 AND (? IS NULL OR s.started_at >= ?)
+				WHERE t.workspace_id = ? AND t.is_ephemeral = 0`+andNotAutomationOriginT+` AND (? IS NULL OR s.started_at >= ?)
 				  AND turn.completed_at IS NOT NULL
 			) clean
 			WHERE dur_ms >= %d AND dur_ms < %d AND msg_count >= %d
@@ -225,7 +235,7 @@ func (r *Repository) GetGlobalStats(ctx context.Context, workspaceID string, sta
 			FROM task_session_messages msg
 			JOIN task_sessions s ON s.id = msg.task_session_id
 			JOIN tasks t ON t.id = s.task_id
-			WHERE t.workspace_id = ? AND t.is_ephemeral = 0 AND (? IS NULL OR s.started_at >= ?)
+			WHERE t.workspace_id = ? AND t.is_ephemeral = 0`+andNotAutomationOriginT+` AND (? IS NULL OR s.started_at >= ?)
 		)
 		SELECT
 			task_agg.total_tasks, task_agg.completed_tasks, task_agg.in_progress_tasks,
@@ -307,7 +317,7 @@ func (r *Repository) GetDailyActivity(ctx context.Context, workspaceID string, d
 			JOIN tasks t ON t.id = s.task_id
 			LEFT JOIN task_session_messages msg ON msg.task_session_id = s.id
 				AND %s = %s
-			WHERE t.workspace_id = ? AND t.is_ephemeral = 0
+			WHERE t.workspace_id = ? AND t.is_ephemeral = 0`+andNotAutomationOriginT+`
 			GROUP BY %s
 		) activity ON activity.activity_date = d.date
 		ORDER BY d.date ASC
@@ -355,7 +365,7 @@ func (r *Repository) GetCompletedTaskActivity(ctx context.Context, workspaceID s
 				SELECT task_id, MAX(completed_at) as completed_at
 				FROM task_sessions WHERE completed_at IS NOT NULL GROUP BY task_id
 			) ts ON ts.task_id = t.id
-			WHERE t.workspace_id = ? AND t.is_ephemeral = 0
+			WHERE t.workspace_id = ? AND t.is_ephemeral = 0`+andNotAutomationOriginT+`
 			  AND (t.archived_at IS NOT NULL
 			       OR ws.position = (SELECT MAX(ws2.position) FROM workflow_steps ws2 WHERE ws2.workflow_id = ws.workflow_id))
 			  AND COALESCE(ts.completed_at, t.archived_at) IS NOT NULL
@@ -449,7 +459,7 @@ func buildRepositoryStatsQuery(drv string) string {
 			FROM task_repositories tr
 			JOIN tasks t ON t.id = tr.task_id
 			LEFT JOIN workflow_steps ws ON ws.id = t.workflow_step_id
-			WHERE t.is_ephemeral = 0 AND (? IS NULL OR t.created_at >= ?)
+			WHERE t.is_ephemeral = 0`+andNotAutomationOriginT+` AND (? IS NULL OR t.created_at >= ?)
 			GROUP BY tr.repository_id
 		) task_stats ON task_stats.repository_id = r.id
 		LEFT JOIN (
@@ -464,7 +474,7 @@ func buildRepositoryStatsQuery(drv string) string {
 			JOIN task_sessions s ON s.task_id = tr.task_id
 			LEFT JOIN task_session_turns turn ON turn.task_session_id = s.id
 			LEFT JOIN task_session_messages msg ON msg.task_session_id = s.id
-			WHERE t.is_ephemeral = 0 AND (? IS NULL OR s.started_at >= ?)
+			WHERE t.is_ephemeral = 0`+andNotAutomationOriginT+` AND (? IS NULL OR s.started_at >= ?)
 			GROUP BY tr.repository_id
 		) session_stats ON session_stats.repository_id = r.id
 		LEFT JOIN (
@@ -474,7 +484,7 @@ func buildRepositoryStatsQuery(drv string) string {
 			JOIN tasks t ON t.id = tr.task_id
 			JOIN task_sessions s ON s.task_id = tr.task_id
 			LEFT JOIN task_session_turns turn ON turn.task_session_id = s.id
-			WHERE t.is_ephemeral = 0 AND (? IS NULL OR s.started_at >= ?)
+			WHERE t.is_ephemeral = 0`+andNotAutomationOriginT+` AND (? IS NULL OR s.started_at >= ?)
 			GROUP BY tr.repository_id
 		) duration_stats ON duration_stats.repository_id = r.id
 		LEFT JOIN (
@@ -486,7 +496,7 @@ func buildRepositoryStatsQuery(drv string) string {
 			FROM task_session_commits c
 			JOIN task_sessions s ON s.id = c.session_id
 			JOIN tasks t ON t.id = s.task_id
-			WHERE t.is_ephemeral = 0 AND s.repository_id != '' AND (? IS NULL OR c.committed_at >= ?)
+			WHERE t.is_ephemeral = 0`+andNotAutomationOriginT+` AND s.repository_id != '' AND (? IS NULL OR c.committed_at >= ?)
 			GROUP BY s.repository_id
 		) git_stats ON git_stats.repository_id = r.id
 		WHERE r.workspace_id = ? AND r.deleted_at IS NULL
@@ -520,7 +530,7 @@ func (r *Repository) GetAgentUsage(ctx context.Context, workspaceID string, limi
 		FROM task_sessions s
 		JOIN tasks t ON t.id = s.task_id
 		LEFT JOIN task_session_turns turn ON turn.task_session_id = s.id
-		WHERE t.workspace_id = ? AND t.is_ephemeral = 0 AND s.agent_profile_id != '' AND (? IS NULL OR s.started_at >= ?)
+		WHERE t.workspace_id = ? AND t.is_ephemeral = 0`+andNotAutomationOriginT+` AND s.agent_profile_id != '' AND (? IS NULL OR s.started_at >= ?)
 		GROUP BY s.agent_profile_id
 		ORDER BY session_count DESC
 		LIMIT ?
@@ -566,7 +576,7 @@ func (r *Repository) GetGitStats(ctx context.Context, workspaceID string, start 
 		FROM task_session_commits c
 		JOIN task_sessions s ON s.id = c.session_id
 		JOIN tasks t ON t.id = s.task_id
-		WHERE t.workspace_id = ? AND t.is_ephemeral = 0 AND (? IS NULL OR c.committed_at >= ?)
+		WHERE t.workspace_id = ? AND t.is_ephemeral = 0` + andNotAutomationOriginT + ` AND (? IS NULL OR c.committed_at >= ?)
 	`
 
 	var stats models.GitStats
@@ -616,6 +626,10 @@ func (r *Repository) ListSessionCodeStats(
 	// via fetchTasksForWorkspaces' excludeConfig=true, so the Host data API's
 	// List and CodeStats reads cover the same session set.
 	where += " AND " + dialect.ExcludeConfigModePredicate(driver, "t.metadata")
+	// Automation runs are hidden from every human-facing surface by their
+	// origin; the Host data API is one, so a plugin must not see through it
+	// what the UI deliberately does not show.
+	where += andNotAutomationOriginT
 	query := fmt.Sprintf(`
 		SELECT
 			ts.id AS session_id,

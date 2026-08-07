@@ -7,6 +7,7 @@ const MAIN_WORKSPACE_ID = "ws-1";
 const ARCHIVE_WORKSPACE_ID = "ws-10";
 const MAIN_WORKSPACE_NAME = "Main Workspace";
 const ARCHIVE_WORKSPACE_NAME = "Archive Workspace";
+const VOICE_MODE_LABEL = "Voice Mode";
 
 const state = {
   workspaces: {
@@ -38,7 +39,6 @@ const integrationAvailability = vi.hoisted(() => ({
   jira: false,
   linear: false,
   sentry: false,
-  slack: false,
 }));
 
 vi.mock("@/components/state-provider", () => ({
@@ -70,10 +70,6 @@ vi.mock("@/hooks/domains/linear/use-linear-availability", () => ({
 vi.mock("@/hooks/domains/sentry/use-sentry-availability", () => ({
   useSentryAvailable: () => integrationAvailability.sentry,
 }));
-vi.mock("@/hooks/domains/slack/use-slack-availability", () => ({
-  useSlackAuthed: () => integrationAvailability.slack,
-}));
-
 vi.mock("@kandev/ui/collapsible", async () => {
   const React = await vi.importActual<typeof import("react")>("react");
   const CollapsibleContext = React.createContext(false);
@@ -88,6 +84,9 @@ vi.mock("@kandev/ui/collapsible", async () => {
 });
 
 import { SettingsTree } from "./settings-tree";
+import { AgentsGroup } from "./agents-group";
+import { GeneralGroup } from "./general-group";
+import { SystemGroup } from "./system-group";
 import { WorkspacesGroup } from "./workspaces-group";
 
 describe("SettingsTree rendering", () => {
@@ -103,7 +102,6 @@ describe("SettingsTree rendering", () => {
     integrationAvailability.jira = false;
     integrationAvailability.linear = false;
     integrationAvailability.sentry = false;
-    integrationAvailability.slack = false;
   });
 
   afterEach(() => cleanup());
@@ -206,6 +204,28 @@ describe("SettingsTree rendering", () => {
   });
 });
 
+describe("Workspace settings order", () => {
+  beforeEach(() => {
+    state.workspaces.activeId = MAIN_WORKSPACE_ID;
+    state.workspaces.items = [{ id: MAIN_WORKSPACE_ID, name: MAIN_WORKSPACE_NAME }];
+  });
+
+  afterEach(() => cleanup());
+
+  it("places workspace secrets below automations", () => {
+    render(<WorkspacesGroup pathname="/settings/workspace" expanded />);
+
+    const hrefs = screen.getAllByRole("link").map((link) => link.getAttribute("href"));
+    const automationsIndex = hrefs.indexOf("/settings/workspace/ws-1/automations");
+    const secretsIndex = hrefs.indexOf("/settings/workspace/ws-1/secrets");
+
+    expect(automationsIndex).toBeGreaterThanOrEqual(0);
+    expect(secretsIndex).toBeGreaterThan(automationsIndex);
+    expect(screen.getByRole("link", { name: "Secrets" })).toBeTruthy();
+    expect(screen.queryByRole("link", { name: "Workspace Secrets" })).toBeNull();
+  });
+});
+
 describe("SettingsTree integration status", () => {
   beforeEach(() => {
     state.workspaces.activeId = MAIN_WORKSPACE_ID;
@@ -246,13 +266,43 @@ describe("SettingsTree integration status", () => {
   });
 });
 
+describe("SettingsTree agents group", () => {
+  beforeEach(() => {
+    state.settingsAgents.items = [
+      {
+        id: "agent-1",
+        name: "mock-agent",
+        profiles: [
+          { id: "p-on", name: "default", agentDisplayName: "Mock", enabled: true },
+          { id: "p-off", name: "alt", agentDisplayName: "Mock", enabled: false },
+          { id: "p-legacy", name: "legacy", agentDisplayName: "Mock" },
+        ],
+      },
+    ] as unknown as typeof state.settingsAgents.items;
+  });
+
+  afterEach(() => {
+    cleanup();
+    state.settingsAgents.items = [];
+  });
+
+  it("labels disabled profiles with a badge and leaves others unlabeled", () => {
+    render(<AgentsGroup pathname="/settings/agents" expanded />);
+
+    expect(screen.getByRole("link", { name: "Mock • default" })).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Mock • alt Disabled" })).toBeTruthy();
+    // Legacy payloads without the flag are treated as enabled — no badge.
+    expect(screen.getByRole("link", { name: "Mock • legacy" })).toBeTruthy();
+  });
+});
+
 describe("SettingsTree standalone leaves", () => {
   afterEach(cleanup);
 
   it("keeps Voice Mode in the settings tree as a standalone active leaf", () => {
     render(<SettingsTree pathname="/settings" />);
 
-    expect(screen.getByRole("link", { name: "Voice Mode" }).getAttribute("href")).toBe(
+    expect(screen.getByRole("link", { name: VOICE_MODE_LABEL }).getAttribute("href")).toBe(
       "/settings/voice-mode",
     );
 
@@ -260,7 +310,7 @@ describe("SettingsTree standalone leaves", () => {
 
     render(<SettingsTree pathname="/settings/voice-mode" />);
 
-    expect(screen.getByRole("link", { name: "Voice Mode" }).className).toContain(
+    expect(screen.getByRole("link", { name: VOICE_MODE_LABEL }).className).toContain(
       "before:bg-primary",
     );
     expect(screen.queryByRole("link", { name: "Appearance" })).toBeNull();
@@ -275,6 +325,67 @@ describe("SettingsTree standalone leaves", () => {
         .slice(-2)
         .map((link) => link.textContent),
     ).toEqual(["Plugins", "System"]);
+  });
+});
+
+describe("SettingsTree search", () => {
+  afterEach(cleanup);
+
+  it("preserves the normal tree until a query filters it to grouped hits", () => {
+    render(<SettingsTree pathname="/settings" />);
+
+    const search = screen.getByRole("searchbox", { name: "Search settings" });
+    expect(screen.getByRole("link", { name: VOICE_MODE_LABEL })).toBeTruthy();
+
+    fireEvent.change(search, { target: { value: "font size" } });
+
+    const result = screen.getByRole("link", { name: /Terminal Font Size/ });
+    expect(result.getAttribute("href")).toBe(
+      "/settings/general/terminal#setting-terminal-font-size",
+    );
+    expect(result.textContent).toContain("General");
+    expect(result.textContent).toContain("Terminal");
+    expect(screen.queryByRole("link", { name: VOICE_MODE_LABEL })).toBeNull();
+  });
+
+  it("clears a query with Escape and restores the normal tree", () => {
+    render(<SettingsTree pathname="/settings" />);
+    const search = screen.getByRole("searchbox", { name: "Search settings" });
+
+    fireEvent.change(search, { target: { value: "font size" } });
+    fireEvent.keyDown(search, { key: "Escape" });
+
+    expect((search as HTMLInputElement).value).toBe("");
+    expect(screen.getByRole("link", { name: VOICE_MODE_LABEL })).toBeTruthy();
+  });
+
+  it("announces an empty result without rendering the normal tree", () => {
+    render(<SettingsTree pathname="/settings" />);
+
+    fireEvent.change(screen.getByRole("searchbox", { name: "Search settings" }), {
+      target: { value: "definitely missing" },
+    });
+
+    expect(screen.getByText("No matching settings")).toBeTruthy();
+    expect(screen.queryByRole("link", { name: VOICE_MODE_LABEL })).toBeNull();
+  });
+});
+
+describe("Message Queue settings navigation", () => {
+  afterEach(cleanup);
+
+  it("exposes Message Queue under General in the shared desktop and mobile settings tree", () => {
+    render(<GeneralGroup pathname="/settings/general/message-queue" expanded />);
+
+    const link = screen.getByRole("link", { name: "Message Queue" });
+    expect(link.getAttribute("href")).toBe("/settings/general/message-queue");
+    expect(link.className).toContain("before:bg-primary");
+  });
+
+  it("does not expose Message Queue under System", () => {
+    render(<SystemGroup pathname="/settings/system/status" expanded />);
+
+    expect(screen.queryByRole("link", { name: "Message Queue" })).toBeNull();
   });
 });
 

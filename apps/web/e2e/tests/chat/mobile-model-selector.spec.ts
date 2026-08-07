@@ -6,25 +6,24 @@ import { SessionPage } from "../../pages/session-page";
 
 type E2EModelStoreWindow = Window & {
   __KANDEV_E2E_STORE__?: {
-    setState: (
-      updater: (state: {
-        sessionModels: {
-          bySessionId: Record<
-            string,
-            {
-              currentModelId: string;
-              models: unknown[];
-              configOptions: {
-                id: string;
-                options?: { value: string; name: string; description?: string }[];
-              }[];
-              configBaseline?: Record<string, string>;
-            }
-          >;
-        };
-      }) => void,
-    ) => void;
+    getState: () => { sessionModels: E2ESessionModels };
+    setState: (state: { sessionModels: E2ESessionModels }) => void;
   };
+};
+
+type E2ESessionModels = {
+  bySessionId: Record<
+    string,
+    {
+      currentModelId: string;
+      models: unknown[];
+      configOptions: {
+        id: string;
+        options?: { value: string; name: string; description?: string }[];
+      }[];
+      configBaseline?: Record<string, string>;
+    }
+  >;
 };
 
 async function seedAndOpenTask(testPage: Page, apiClient: ApiClient, seedData: SeedData) {
@@ -53,32 +52,37 @@ async function seedLongReasoningMenu(testPage: Page, sessionId: string) {
       testPage.evaluate((sid) => {
         const store = (window as E2EModelStoreWindow).__KANDEV_E2E_STORE__;
         if (!store) return false;
-        let seeded = false;
-        store.setState((state) => {
-          const sessionModels = state.sessionModels.bySessionId[sid];
-          if (!sessionModels?.configOptions.some((option) => option.id === "effort")) return;
-          sessionModels.configBaseline = {
-            ...sessionModels.configBaseline,
-            effort: "medium",
-          };
-          sessionModels.configOptions = sessionModels.configOptions.map((option) =>
-            option.id === "effort"
-              ? {
-                  ...option,
-                  options: Array.from({ length: 10 }, (_, index) => ({
-                    value: index === 0 ? "low" : `effort-${index + 1}`,
-                    name: index === 0 ? "Low" : `Reasoning level ${index + 1}`,
-                    description:
-                      index === 0
-                        ? "Faster responses with less reasoning"
-                        : `Reasoning depth description for level ${index + 1}`,
-                  })),
-                }
-              : option,
-          );
-          seeded = true;
+        const state = store.getState();
+        const sessionModels = state.sessionModels.bySessionId[sid];
+        if (!sessionModels?.configOptions.some((option) => option.id === "effort")) return false;
+        store.setState({
+          sessionModels: {
+            ...state.sessionModels,
+            bySessionId: {
+              ...state.sessionModels.bySessionId,
+              [sid]: {
+                ...sessionModels,
+                configBaseline: { ...sessionModels.configBaseline, effort: "medium" },
+                configOptions: sessionModels.configOptions.map((option) =>
+                  option.id === "effort"
+                    ? {
+                        ...option,
+                        options: Array.from({ length: 10 }, (_, index) => ({
+                          value: index === 0 ? "low" : `effort-${index + 1}`,
+                          name: index === 0 ? "Low" : `Reasoning level ${index + 1}`,
+                          description:
+                            index === 0
+                              ? "Faster responses with less reasoning"
+                              : `Reasoning depth description for level ${index + 1}`,
+                        })),
+                      }
+                    : option,
+                ),
+              },
+            },
+          },
         });
-        return seeded;
+        return true;
       }, sessionId),
     )
     .toBe(true);
@@ -106,8 +110,6 @@ test.describe("Mobile chat model selector", () => {
       })
       .toBe("medium");
 
-    await seedLongReasoningMenu(testPage, task.session_id!);
-
     const leftActions = testPage.getByTestId("mobile-chat-toolbar-left-actions");
     await expect(leftActions).toBeVisible({ timeout: 15_000 });
     await expect(testPage.getByTestId("toolbar-overflow-menu")).not.toBeVisible();
@@ -131,6 +133,10 @@ test.describe("Mobile chat model selector", () => {
         .getByTitle("Smart mock model for testing"),
     ).toBeVisible();
 
+    // Seed after the selector opens so a late task-page hydration cannot
+    // replace the synthetic long menu before this test exercises it.
+    await seedLongReasoningMenu(testPage, task.session_id!);
+
     const effortTrigger = testPage.getByTestId("config-option-trigger-effort");
     await expect(effortTrigger).toBeVisible();
     await expect(
@@ -139,11 +145,23 @@ test.describe("Mobile chat model selector", () => {
     await effortTrigger.tap();
     const effortSection = testPage.getByTestId("config-option-section-effort");
     await expect(effortSection).toBeVisible();
+    const lastReasoningLevel = effortSection.getByText("Reasoning level 10", { exact: true });
+    await expect
+      .poll(
+        async () => {
+          if (await lastReasoningLevel.isVisible()) return true;
+          await seedLongReasoningMenu(testPage, task.session_id!);
+          return false;
+        },
+        { message: "waiting for the synthetic long reasoning menu" },
+      )
+      .toBe(true);
     const overflow = await effortSection.evaluate((element) => ({
       clientHeight: element.clientHeight,
       overflowY: getComputedStyle(element).overflowY,
       scrollHeight: element.scrollHeight,
     }));
+    await expect(lastReasoningLevel).toBeVisible();
     expect(overflow.overflowY).toBe("auto");
     expect(overflow.scrollHeight).toBeGreaterThan(overflow.clientHeight);
     const effortBox = await effortSection.boundingBox();

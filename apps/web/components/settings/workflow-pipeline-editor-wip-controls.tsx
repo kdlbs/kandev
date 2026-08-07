@@ -1,5 +1,6 @@
 "use client";
 
+import { useTranslation } from "react-i18next";
 import { Input } from "@kandev/ui/input";
 import { Label } from "@kandev/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
@@ -28,6 +29,7 @@ export function StepWipControls({
   onUpdate,
   readOnly,
 }: StepWipControlsProps) {
+  const { t } = useTranslation();
   const otherSteps = steps.filter((s) => s.id !== step.id);
   const pullFromValue = step.pull_from_step_id || "none";
   const pullFromSelectID = `${step.id}-pull-from-step`;
@@ -37,9 +39,9 @@ export function StepWipControls({
       <div className="space-y-1.5">
         <div className="flex items-center gap-1.5">
           <Label htmlFor={`${step.id}-wip-limit`} className="text-xs font-medium">
-            WIP limit
+            {t("workflows:wipLimit")}
           </Label>
-          <HelpTip text="Maximum admitted (active) tasks in this step. Overflow stays visible in a queue. Use 0 for unlimited." />
+          <HelpTip text={t("workflows:wipLimitHelp")} />
         </div>
         <Input
           id={`${step.id}-wip-limit`}
@@ -64,9 +66,9 @@ export function StepWipControls({
       <div className="space-y-1.5">
         <div className="flex items-center gap-1.5">
           <Label htmlFor={pullFromSelectID} className="text-xs font-medium">
-            Pull from
+            {t("workflows:pullFrom")}
           </Label>
-          <HelpTip text="Optional feeder step to pull queued work from when this step has capacity." />
+          <HelpTip text={t("workflows:pullFromHelp")} />
         </div>
         <Select
           value={pullFromValue}
@@ -86,11 +88,11 @@ export function StepWipControls({
               (item) => item.pull_from_step_id ?? "",
             )}
           >
-            <SelectValue placeholder="No feeder step" />
+            <SelectValue placeholder={t("workflows:noFeederStep")} />
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="none" className="cursor-pointer">
-              No feeder step
+              {t("workflows:noFeederStep")}
             </SelectItem>
             {otherSteps.map((candidate) => (
               <SelectItem key={candidate.id} value={candidate.id} className="cursor-pointer">
@@ -100,10 +102,7 @@ export function StepWipControls({
           </SelectContent>
         </Select>
       </div>
-      <p className="text-xs text-muted-foreground sm:col-span-2">
-        WIP limits active work, not visibility. Overflow remains on the board until capacity opens;
-        if a selected feeder is also full, new task creation is rejected.
-      </p>
+      <p className="text-xs text-muted-foreground sm:col-span-2">{t("workflows:wipLimitsNote")}</p>
     </div>
   );
 }

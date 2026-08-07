@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 
@@ -31,9 +32,15 @@ const (
 	gitCredentialMaxBytes        = 16 * 1024
 	managedWorkspacesDir         = "workspaces"
 	providerCloneDir             = "_providers"
+	maxGitDiagnosticBytes        = 4096
 )
 
-var ErrWorkspaceCredentialUnavailable = errors.New("workspace Git credential is unavailable")
+var (
+	ErrWorkspaceCredentialUnavailable = errors.New("workspace Git credential is unavailable")
+	ErrRepositoryOwnershipMismatch    = errors.New("managed repository ownership mismatch")
+	gitURLUserInfoPattern             = regexp.MustCompile(`(?i)(https?://)[^/\s@]+@`)
+	gitCredentialPattern              = regexp.MustCompile(`(?i)\b(password|token|secret|authorization)(\s*[:=]\s*)[^\r\n]+`)
+)
 
 // Config holds configuration for the repository cloner.
 type Config struct {
@@ -384,13 +391,13 @@ func (c *Cloner) RefreshWorkspaceRepositoryWithCredentialRequest(
 	if err := c.setOriginURLLocked(ctx, targetPath, cloneURL); err != nil {
 		return err
 	}
-	cmd := exec.CommandContext(ctx, "git", "-C", targetPath, "fetch", "--prune", "--force", gitNoTags, "origin")
+	cmd := subproc.NewGitCommand(ctx, "-C", targetPath, "fetch", "--prune", "--force", gitNoTags, "origin")
 	cleanup, err := configureGitCommand(cmd, auth)
 	if err != nil {
 		return err
 	}
 	defer cleanup()
-	if out, runErr := subproc.RunGitCombinedOutput(ctx, cmd); runErr != nil {
+	if out, runErr := subproc.RunGitCombinedOutputClass(ctx, subproc.GitLifecycle, cmd); runErr != nil {
 		return fmt.Errorf("refresh scoped workspace repository: %s: %w",
 			redactCloneOutput(string(out), authToken(auth)), runErr)
 	}
@@ -416,21 +423,52 @@ func (c *Cloner) SetOriginURL(ctx context.Context, repositoryPath, originURL str
 	mu := c.repoMu(repositoryPath)
 	mu.Lock()
 	defer mu.Unlock()
-
 	return c.setOriginURLLocked(ctx, repositoryPath, originURL)
 }
 
 func (c *Cloner) setOriginURLLocked(ctx context.Context, repositoryPath, originURL string) error {
-	cmd := exec.CommandContext(ctx, "git", "-C", repositoryPath, "remote", "set-url", "origin", "--", originURL)
+	// `git remote get-url` expands url.*.insteadOf rules before returning the
+	// value. Read the local config so canonical origins do not get rewritten on
+	// every launch or resume.
+	cmd := subproc.NewGitCommand(ctx, "-C", repositoryPath, "config", "--local", "--get", "remote.origin.url")
 	cleanup, err := configureGitCommand(cmd, nil)
 	if err != nil {
 		return err
 	}
-	defer cleanup()
-	if _, err := subproc.RunGitCombinedOutput(ctx, cmd); err != nil {
-		return fmt.Errorf("set repository origin: %w", err)
+	currentOutput, err := subproc.RunGitCombinedOutputClass(ctx, subproc.GitLifecycle, cmd)
+	cleanup()
+	if err != nil {
+		return fmt.Errorf("inspect repository origin: %w", formatGitOriginError(repositoryPath, currentOutput, err))
+	}
+	if strings.TrimSpace(string(currentOutput)) == strings.TrimSpace(originURL) {
+		return nil
+	}
+
+	cmd = subproc.NewGitCommand(ctx, "-C", repositoryPath, "remote", "set-url", "origin", "--", originURL)
+	cleanup, err = configureGitCommand(cmd, nil)
+	if err != nil {
+		return err
+	}
+	output, err := subproc.RunGitCombinedOutputClass(ctx, subproc.GitLifecycle, cmd)
+	cleanup()
+	if err != nil {
+		return fmt.Errorf("set repository origin: %w", formatGitOriginError(repositoryPath, output, err))
 	}
 	return nil
+}
+
+func formatGitOriginError(repositoryPath string, output []byte, err error) error {
+	diagnostic := redactCloneOutput(string(output), "")
+	if strings.Contains(strings.ToLower(diagnostic), "detected dubious ownership") {
+		return fmt.Errorf(
+			"%w: Git rejected managed checkout %q because its filesystem owner differs from the Kandev service account; ensure that account owns the checkout or reinstall Kandev with the intended account (git: %s)",
+			ErrRepositoryOwnershipMismatch, repositoryPath, diagnostic,
+		)
+	}
+	if diagnostic == "" {
+		return err
+	}
+	return fmt.Errorf("git reported %s: %w", diagnostic, err)
 }
 
 type cloneAuth struct {
@@ -590,8 +628,8 @@ func gitCredentialOrigin(cloneURL string) (string, error) {
 
 func (c *Cloner) fetch(ctx context.Context, repoPath string, auth *cloneAuth) {
 	c.logger.Debug("repository already cloned, fetching", zap.String("path", repoPath))
-	cmd := exec.CommandContext(
-		ctx, "git", "-C", repoPath, "fetch", "--all", "--prune", "--force", gitNoTags,
+	cmd := subproc.NewGitCommand(
+		ctx, "-C", repoPath, "fetch", "--all", "--prune", "--force", gitNoTags,
 	)
 	cleanup, err := configureGitCommand(cmd, auth)
 	if err != nil {
@@ -599,7 +637,7 @@ func (c *Cloner) fetch(ctx context.Context, repoPath string, auth *cloneAuth) {
 		return
 	}
 	defer cleanup()
-	if out, err := subproc.RunGitCombinedOutput(ctx, cmd); err != nil {
+	if out, err := subproc.RunGitCombinedOutputClass(ctx, subproc.GitLifecycle, cmd); err != nil {
 		c.logger.Warn("git fetch failed (non-fatal)",
 			zap.String("path", repoPath), zap.String("output", redactCloneOutput(string(out), authToken(auth))), zap.Error(err))
 	}
@@ -615,14 +653,41 @@ func (c *Cloner) clone(ctx context.Context, cloneURL, targetPath string, auth *c
 		args = append(args, "--filter=blob:none")
 	}
 	args = append(args, gitNoTags, "--", cloneURL, targetPath)
-	cmd := exec.CommandContext(ctx, "git", args...)
+	cmd := subproc.NewGitCommand(ctx, args...)
 	cleanup, err := configureGitCommand(cmd, auth)
 	if err != nil {
 		return err
 	}
 	defer cleanup()
-	if out, err := subproc.RunGitCombinedOutput(ctx, cmd); err != nil {
+	if out, err := subproc.RunGitCombinedOutputClass(ctx, subproc.GitLifecycle, cmd); err != nil {
 		return fmt.Errorf("git clone failed: %s: %w", redactCloneOutput(string(out), authToken(auth)), err)
+	}
+	return nil
+}
+
+func (c *Cloner) fetchWithHTTPHeader(ctx context.Context, repoPath, authURL, header string) {
+	c.logger.Debug("repository already cloned, fetching", zap.String("path", repoPath))
+	cmd := subproc.NewGitCommand(
+		ctx, "-C", repoPath, "fetch", "--all", "--prune", "--force", gitNoTags,
+	)
+	configureHTTPHeaderCommand(cmd, authURL, header)
+	if out, err := subproc.RunGitCombinedOutputClass(ctx, subproc.GitLifecycle, cmd); err != nil {
+		c.logger.Warn("authenticated git fetch failed (non-fatal)",
+			zap.String("path", repoPath), zap.String("output", string(out)), zap.Error(err))
+	}
+}
+
+func (c *Cloner) cloneWithHTTPHeader(ctx context.Context, cloneURL, targetPath, header string) error {
+	if err := os.MkdirAll(filepath.Dir(targetPath), 0o755); err != nil {
+		return fmt.Errorf("create parent directory: %w", err)
+	}
+	c.logger.Info("cloning authenticated repository", zap.String("url", redactCloneURL(cloneURL)), zap.String("target", targetPath))
+	cmd := subproc.NewGitCommand(
+		ctx, "clone", "--filter=blob:none", gitNoTags, "--", cloneURL, targetPath,
+	)
+	configureHTTPHeaderCommand(cmd, cloneURL, header)
+	if out, err := subproc.RunGitCombinedOutputClass(ctx, subproc.GitLifecycle, cmd); err != nil {
+		return fmt.Errorf("git clone failed: %s: %w", string(out), err)
 	}
 	return nil
 }
@@ -653,6 +718,14 @@ func configureGitCommand(cmd *exec.Cmd, auth *cloneAuth) (func(), error) {
 	cmd.Env = env
 	cmd.ExtraFiles = files
 	return cleanup, nil
+}
+
+func configureHTTPHeaderCommand(cmd *exec.Cmd, authURL, header string) {
+	cmd.Env = append(cleanGitEnvironment(),
+		"GIT_CONFIG_COUNT=2",
+		"GIT_CONFIG_KEY_0=credential.helper", "GIT_CONFIG_VALUE_0=",
+		"GIT_CONFIG_KEY_1=http."+authURL+".extraHeader", "GIT_CONFIG_VALUE_1="+header,
+	)
 }
 
 func validateCloneAuth(auth *cloneAuth) error {
@@ -752,10 +825,16 @@ func redactCloneURL(raw string) string {
 }
 
 func redactCloneOutput(output, token string) string {
-	if token == "" {
-		return output
+	redacted := output
+	if token != "" {
+		redacted = strings.ReplaceAll(redacted, token, "[REDACTED]")
 	}
-	return strings.ReplaceAll(output, token, "[REDACTED]")
+	redacted = gitURLUserInfoPattern.ReplaceAllString(redacted, `${1}[REDACTED]@`)
+	redacted = gitCredentialPattern.ReplaceAllString(redacted, `${1}${2}[REDACTED]`)
+	if len(redacted) > maxGitDiagnosticBytes {
+		return redacted[:maxGitDiagnosticBytes]
+	}
+	return redacted
 }
 
 func authToken(auth *cloneAuth) string {

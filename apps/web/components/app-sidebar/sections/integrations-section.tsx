@@ -1,19 +1,12 @@
 "use client";
 
 import Link from "@/components/routing/app-link";
+import { useTranslation } from "react-i18next";
 import { usePathname } from "@/lib/routing/client-router";
-import type { ComponentType } from "react";
-import {
-  IconBrandGithub,
-  IconBrandGitlab,
-  IconHexagon,
-  IconPlugConnected,
-  IconTicket,
-} from "@tabler/icons-react";
+import { IconPlugConnected } from "@tabler/icons-react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
-import { useConfiguredIntegrationLinks } from "@/components/integrations/integrations-menu";
-import { resolvePluginIcon } from "@/lib/plugins/icons";
-import { usePluginRegistry } from "@/lib/plugins/registry";
+import { useAppDestinations } from "@/hooks/use-app-destinations";
+import type { DestinationIcon, ResolvedDestination } from "@/lib/navigation/types";
 import { cn } from "@/lib/utils";
 import {
   APP_SIDEBAR_SECTION_IDS,
@@ -21,47 +14,31 @@ import {
   SIDEBAR_ITEM_INACTIVE,
 } from "../app-sidebar-constants";
 import { AppSidebarSection } from "../app-sidebar-section";
-import { AzureDevOpsIcon } from "@/components/icons/azure-devops-icon";
 
 type IntegrationsSectionProps = {
   collapsed: boolean;
 };
 
-type IntegrationIcon = ComponentType<{ className?: string }>;
-
-const INTEGRATION_ICONS: Record<string, IntegrationIcon> = {
-  "azure-devops": AzureDevOpsIcon,
-  github: IconBrandGithub,
-  gitlab: IconBrandGitlab,
-  jira: IconTicket,
-  linear: IconHexagon,
-};
-
 const MAX_HEADER_SHORTCUTS = 4;
 
-type ConfiguredIntegrationLink = ReturnType<typeof useConfiguredIntegrationLinks>[number];
-
-function IntegrationHeaderShortcuts({ links }: { links: ConfiguredIntegrationLink[] }) {
+function IntegrationHeaderShortcuts({ links }: { links: ResolvedDestination[] }) {
   return (
     <div className="flex items-center gap-0.5">
-      {links.slice(0, MAX_HEADER_SHORTCUTS).map(({ id, label, href }) => {
-        const Icon = INTEGRATION_ICONS[id] ?? IconPlugConnected;
-        return (
-          <Tooltip key={id}>
-            <TooltipTrigger asChild>
-              <Link
-                href={href}
-                aria-label={label}
-                data-testid="integration-header-shortcut"
-                className="flex h-5 w-5 items-center justify-center rounded text-muted-foreground/70 hover:bg-muted/60 hover:text-foreground cursor-pointer transition-colors"
-              >
-                <Icon className="h-3.5 w-3.5" />
-              </Link>
-            </TooltipTrigger>
-            <TooltipContent side="right">{label}</TooltipContent>
-          </Tooltip>
-        );
-      })}
+      {links.slice(0, MAX_HEADER_SHORTCUTS).map(({ id, label, href, icon: Icon }) => (
+        <Tooltip key={id}>
+          <TooltipTrigger asChild>
+            <Link
+              href={href}
+              aria-label={label}
+              data-testid="integration-header-shortcut"
+              className="flex h-5 w-5 items-center justify-center rounded text-muted-foreground/70 hover:bg-muted/60 hover:text-foreground cursor-pointer transition-colors"
+            >
+              <Icon className="h-3.5 w-3.5" />
+            </Link>
+          </TooltipTrigger>
+          <TooltipContent side="right">{label}</TooltipContent>
+        </Tooltip>
+      ))}
     </div>
   );
 }
@@ -69,7 +46,7 @@ function IntegrationHeaderShortcuts({ links }: { links: ConfiguredIntegrationLin
 type IntegrationRowProps = {
   href: string;
   label: string;
-  icon: IntegrationIcon;
+  icon: DestinationIcon;
   active: boolean;
   testId?: string;
 };
@@ -91,42 +68,41 @@ function IntegrationRow({ href, label, icon: Icon, active, testId }: Integration
 }
 
 export function IntegrationsSection({ collapsed }: IntegrationsSectionProps) {
+  const { t } = useTranslation();
   const pathname = usePathname();
-  const links = useConfiguredIntegrationLinks();
-  // Plugin-registered nav items that target this section
-  // (`registerNavItem({ section: "integrations" })`), rendered after the
-  // first-party links.
-  const registry = usePluginRegistry();
-  const pluginItems = registry.getNavItems().filter((item) => item.section === "integrations");
+  // First-party integration links and plugin-registered nav items that target
+  // this section (`registerNavItem({ section: "integrations" })`) both come from
+  // the navigation manifest, already in render order.
+  const destinations = useAppDestinations("sidebar", "integrations");
+  // Header shortcuts stay first-party: they are a fixed-width strip, and a
+  // plugin should not push a configured integration out of it.
+  const firstPartyLinks = destinations.filter((destination) => destination.source !== "plugin");
 
-  if (links.length === 0 && pluginItems.length === 0) return null;
+  if (destinations.length === 0) return null;
 
   return (
     <AppSidebarSection
       id={APP_SIDEBAR_SECTION_IDS.integrations}
-      label="Integrations"
+      label={t("common:integrations")}
       collapsed={collapsed}
       icon={IconPlugConnected}
-      headerAction={links.length > 0 ? <IntegrationHeaderShortcuts links={links} /> : undefined}
+      headerAction={
+        firstPartyLinks.length > 0 ? (
+          <IntegrationHeaderShortcuts links={firstPartyLinks} />
+        ) : undefined
+      }
       headerActionVisibility="always"
     >
-      {links.map(({ id, label, href }) => (
+      {destinations.map((destination) => (
         <IntegrationRow
-          key={id}
-          href={href}
-          label={label}
-          icon={INTEGRATION_ICONS[id] ?? IconPlugConnected}
-          active={pathname === href || pathname.startsWith(`${href}/`)}
-        />
-      ))}
-      {pluginItems.map((item) => (
-        <IntegrationRow
-          key={`plugin-${item.id}`}
-          href={item.path}
-          label={item.label}
-          icon={resolvePluginIcon(item.icon)}
-          active={pathname === item.path || pathname.startsWith(`${item.path}/`)}
-          testId={`plugin-nav-item-${item.id}`}
+          key={destination.id}
+          href={destination.href}
+          label={destination.label}
+          icon={destination.icon}
+          active={pathname === destination.href || pathname.startsWith(`${destination.href}/`)}
+          {...(destination.source === "plugin"
+            ? { testId: `plugin-nav-item-${destination.pluginItemId ?? destination.id}` }
+            : {})}
         />
       ))}
     </AppSidebarSection>

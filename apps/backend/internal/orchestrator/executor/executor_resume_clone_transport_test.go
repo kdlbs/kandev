@@ -10,6 +10,7 @@ import (
 
 	"github.com/kandev/kandev/internal/repoclone"
 	"github.com/kandev/kandev/internal/task/models"
+	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
 func TestEnsureRepoLocalPath_ReconcilesGitHubOriginForCredentialPolicy(t *testing.T) {
@@ -237,6 +238,49 @@ func TestResolveTaskRepoInfoAuthenticatesPluginRefreshBeforeWorktree(t *testing.
 	}
 }
 
+func TestBuildResumeRequestPreparesEachAttachedRepositoryOnce(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+
+	repoPathOne := initGitRepoWithOrigin(t, "https://github.com/acme/one.git")
+	repoPathTwo := initGitRepoWithOrigin(t, "https://github.com/acme/two.git")
+	repo := newMockRepository()
+	repo.tasks["task-1"] = &models.Task{ID: "task-1", WorkspaceID: "workspace-1", Title: "resume"}
+	repo.repositories["repo-1"] = &models.Repository{
+		ID: "repo-1", WorkspaceID: "workspace-1", SourceType: "provider", Provider: "github",
+		ProviderOwner: "acme", ProviderName: "one", LocalPath: repoPathOne,
+	}
+	repo.repositories["repo-2"] = &models.Repository{
+		ID: "repo-2", WorkspaceID: "workspace-1", SourceType: "provider", Provider: "github",
+		ProviderOwner: "acme", ProviderName: "two", LocalPath: repoPathTwo,
+	}
+	repo.taskRepositories["task-repo-1"] = &models.TaskRepository{ID: "task-repo-1", TaskID: "task-1", RepositoryID: "repo-1", Position: 0}
+	repo.taskRepositories["task-repo-2"] = &models.TaskRepository{ID: "task-repo-2", TaskID: "task-1", RepositoryID: "repo-2", Position: 1}
+	executor := newTestExecutor(t, &mockAgentManager{}, repo)
+	cloner := &cloneTransportTestCloner{cloneURL: "git@github.com:acme/widgets.git"}
+	executor.SetRepoCloner(cloner, nil)
+	session := &models.TaskSession{
+		ID: "session-1", TaskID: "task-1", RepositoryID: "repo-1", ExecutorID: models.ExecutorIDLocal,
+		State: models.TaskSessionStateWaitingForInput,
+	}
+
+	if _, _, _, _, _, err := executor.buildResumeRequest(context.Background(), &v1.Task{ID: "task-1", WorkspaceID: "workspace-1", Title: "resume"}, session, true); err != nil {
+		t.Fatalf("buildResumeRequest() error = %v", err)
+	}
+	for _, repositoryPath := range []string{repoPathOne, repoPathTwo} {
+		calls := 0
+		for _, preparedPath := range cloner.setOriginPaths {
+			if preparedPath == repositoryPath {
+				calls++
+			}
+		}
+		if calls != 1 {
+			t.Fatalf("origin reconciliation calls for %q = %d, want one", repositoryPath, calls)
+		}
+	}
+}
+
 type localPathRecordingRepoUpdater struct {
 	localPath string
 }
@@ -258,6 +302,7 @@ type cloneTransportTestCloner struct {
 	refreshCalls      int
 	refreshRequest    repoclone.GitCredentialRequest
 	refreshPath       string
+	setOriginPaths    []string
 }
 
 func (c *cloneTransportTestCloner) EnsureWorkspaceClonedWithCredentialRequest(
@@ -279,6 +324,7 @@ func (c *cloneTransportTestCloner) RefreshWorkspaceRepositoryWithCredentialReque
 func (c *cloneTransportTestCloner) ShouldRecloneForWorkspace(string, string) bool { return false }
 
 func (c *cloneTransportTestCloner) SetOriginURL(ctx context.Context, repositoryPath, originURL string) error {
+	c.setOriginPaths = append(c.setOriginPaths, repositoryPath)
 	if c.setOriginErr != nil {
 		return c.setOriginErr
 	}

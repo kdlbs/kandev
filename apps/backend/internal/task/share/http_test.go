@@ -11,6 +11,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/kandev/kandev/internal/i18n"
 	"github.com/kandev/kandev/internal/task/models"
 )
 
@@ -137,7 +138,7 @@ func TestHTTP_List_ReturnsSharesNewestFirst(t *testing.T) {
 	handlers, svc := newHandlersForTest(t, reader, backend, true)
 	router := newGinRouter(handlers)
 
-	if _, err := svc.CreateShare(context.Background(), "s-1"); err != nil {
+	if _, err := svc.CreateShare(context.Background(), "s-1", "en"); err != nil {
 		t.Fatalf("create: %v", err)
 	}
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/tasks/t-1/sessions/s-1/shares", nil)
@@ -163,7 +164,7 @@ func TestHTTP_Revoke_Success(t *testing.T) {
 	handlers, svc := newHandlersForTest(t, reader, backend, true)
 	router := newGinRouter(handlers)
 
-	share, err := svc.CreateShare(context.Background(), "s-1")
+	share, err := svc.CreateShare(context.Background(), "s-1", "en")
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -295,5 +296,49 @@ func TestHTTP_Revoke_NotFound(t *testing.T) {
 
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("want 404, got %d", rec.Code)
+	}
+}
+
+// TestHTTP_Create_ResolvesCreatorLocale pins the whole chain end to end: the
+// creator's locale is read off the request and reaches the backend, because
+// that is the only moment a static gist can be given a language. Table covers
+// the two ways a locale arrives and the two ways it degrades to English.
+func TestHTTP_Create_ResolvesCreatorLocale(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name           string
+		cookie         string
+		acceptLanguage string
+		want           string
+	}{
+		{name: "cookie wins over accept-language", cookie: "pseudo", acceptLanguage: "en", want: "pseudo"},
+		{name: "accept-language when no cookie", acceptLanguage: "pseudo;q=1.0, en;q=0.8", want: "pseudo"},
+		{name: "no signal falls back to en", want: "en"},
+		{name: "unsupported cookie falls back to en", cookie: "klingon", want: "en"},
+	} {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			backend := &mockBackend{nextID: "gist-loc"}
+			handlers, _ := newHandlersForTest(t, completedSession(), backend, true)
+			router := newGinRouter(handlers)
+
+			req := httptest.NewRequest(http.MethodPost, "/api/v1/tasks/t-1/sessions/s-1/shares", nil)
+			if tc.cookie != "" {
+				req.AddCookie(&http.Cookie{Name: i18n.LocaleCookie, Value: tc.cookie})
+			}
+			if tc.acceptLanguage != "" {
+				req.Header.Set("Accept-Language", tc.acceptLanguage)
+			}
+			rec := httptest.NewRecorder()
+			router.ServeHTTP(rec, req)
+
+			if rec.Code != http.StatusCreated {
+				t.Fatalf("want 201, got %d: %s", rec.Code, rec.Body.String())
+			}
+			if len(backend.uploadLocales) != 1 || backend.uploadLocales[0] != tc.want {
+				t.Fatalf("backend received locales %v, want [%s]", backend.uploadLocales, tc.want)
+			}
+		})
 	}
 }

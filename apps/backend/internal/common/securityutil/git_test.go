@@ -26,3 +26,19 @@ func TestIsValidBaseBranchRef(t *testing.T) {
 		}
 	}
 }
+
+func TestIsKnownSafeGitFlagAllowsRequiredGitOperationFlags(t *testing.T) {
+	for _, flag := range []string{"--dry-run", "--first-parent", "--is-ancestor"} {
+		if !IsKnownSafeGitFlag(flag) {
+			t.Fatalf("%s must be allowed for the git operations that use it", flag)
+		}
+	}
+}
+
+func TestIsKnownSafeGitFlagRejectsPushOptionPrefixes(t *testing.T) {
+	for _, flag := range []string{"--push", "--push-option=notify"} {
+		if IsKnownSafeGitFlag(flag) {
+			t.Fatalf("IsKnownSafeGitFlag(%q) = true, want false", flag)
+		}
+	}
+}

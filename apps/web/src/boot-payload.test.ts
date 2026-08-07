@@ -23,6 +23,7 @@ describe("readBootPayload", () => {
         runtime: {
           apiPrefix: "/api/v1",
           webSocketPath: "/ws",
+          lspAutoInstallPreferenceLanguages: ["go", "python", "rust", "typescript"],
         },
         initialState: {
           tasks: { activeTaskId: "task-1" },
@@ -42,6 +43,7 @@ describe("readBootPayload", () => {
       runtime: {
         apiPrefix: "/api/v1",
         webSocketPath: "/ws",
+        lspAutoInstallPreferenceLanguages: ["go", "python", "rust", "typescript"],
       },
       initialState: {
         tasks: { activeTaskId: "task-1" },

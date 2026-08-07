@@ -36,6 +36,105 @@ func (s settingsScanner) Scan(dest ...any) error {
 	return nil
 }
 
+func TestScanUserSettingsStartupPage(t *testing.T) {
+	tests := []struct {
+		name string
+		raw  string
+		want string
+	}{
+		{name: "empty settings default to task overview", raw: "{}", want: "task_overview"},
+		{name: "missing setting defaults to task overview", raw: `{"chat_submit_key":"cmd_enter"}`, want: "task_overview"},
+		{name: "unknown setting defaults to task overview", raw: `{"startup_page":"future_value"}`, want: "task_overview"},
+		{name: "last task is preserved", raw: `{"startup_page":"last_task"}`, want: "last_task"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			settings, err := scanUserSettings(settingsScanner{raw: tt.raw}, DefaultUserID)
+			if err != nil {
+				t.Fatalf("scan settings: %v", err)
+			}
+			encoded, err := marshalUserSettingsPayload(settings)
+			if err != nil {
+				t.Fatalf("marshal settings payload: %v", err)
+			}
+			var payload map[string]any
+			if err := json.Unmarshal(encoded, &payload); err != nil {
+				t.Fatalf("decode normalized settings: %v", err)
+			}
+			if got := payload["startup_page"]; got != tt.want {
+				t.Fatalf("startup_page = %#v, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestScanUserSettingsSidebarDefaults(t *testing.T) {
+	defaultView := models.SidebarView{
+		ID:              "view-all-tasks",
+		Name:            "All tasks",
+		Filters:         []models.SidebarViewClause{},
+		Sort:            models.SidebarViewSort{Key: "state", Direction: "asc"},
+		Group:           "repository",
+		CollapsedGroups: []string{},
+	}
+
+	tests := []struct {
+		name          string
+		raw           string
+		wantDefaults  bool
+		wantViewCount int
+	}{
+		{name: "empty settings use canonical sidebar default", raw: "{}", wantDefaults: true, wantViewCount: 1},
+		{name: "unrelated settings retain canonical sidebar default", raw: `{"workspace_id":"workspace-1"}`, wantDefaults: true, wantViewCount: 1},
+		{name: "explicit sidebar settings are preserved", raw: `{"sidebar_views":[{"id":"custom","name":"Custom"}],"sidebar_active_view_id":"custom"}`, wantDefaults: false, wantViewCount: 1},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			settings, err := scanUserSettings(settingsScanner{raw: tt.raw}, DefaultUserID)
+			if err != nil {
+				t.Fatalf("scan settings: %v", err)
+			}
+			if len(settings.SidebarViews) != tt.wantViewCount {
+				t.Fatalf("sidebar view count = %d, want %d", len(settings.SidebarViews), tt.wantViewCount)
+			}
+			if tt.wantDefaults {
+				if !reflect.DeepEqual(settings.SidebarViews[0], defaultView) {
+					t.Fatalf("sidebar default = %+v, want %+v", settings.SidebarViews[0], defaultView)
+				}
+				if settings.SidebarActiveViewID != defaultView.ID {
+					t.Fatalf("active sidebar view = %q, want %q", settings.SidebarActiveViewID, defaultView.ID)
+				}
+				return
+			}
+			if settings.SidebarViews[0].ID != "custom" || settings.SidebarActiveViewID != "custom" {
+				t.Fatalf("explicit sidebar settings were not preserved: views=%+v active=%q", settings.SidebarViews, settings.SidebarActiveViewID)
+			}
+		})
+	}
+}
+
+func TestScanUserSettingsPreservesExplicitEmptySidebarSettings(t *testing.T) {
+	for _, raw := range []string{
+		`{"sidebar_views":[],"sidebar_active_view_id":""}`,
+		`{"sidebar_views":null,"sidebar_active_view_id":null}`,
+	} {
+		t.Run(raw, func(t *testing.T) {
+			settings, err := scanUserSettings(settingsScanner{raw: raw}, DefaultUserID)
+			if err != nil {
+				t.Fatalf("scan settings: %v", err)
+			}
+			if len(settings.SidebarViews) != 0 {
+				t.Fatalf("sidebar views = %+v, want an explicit empty list", settings.SidebarViews)
+			}
+			if settings.SidebarActiveViewID != "" {
+				t.Fatalf("active sidebar view = %q, want an explicit empty ID", settings.SidebarActiveViewID)
+			}
+		})
+	}
+}
+
 func TestScanUserSettingsChangesPanelLayoutDefault(t *testing.T) {
 	t.Run("empty settings default to tree", func(t *testing.T) {
 		settings, err := scanUserSettings(settingsScanner{raw: "{}"}, DefaultUserID)
@@ -112,6 +211,31 @@ func TestScanUserSettingsUnreadDividerDefault(t *testing.T) {
 			}
 			if settings.UnreadDivider != tt.want {
 				t.Fatalf("UnreadDivider = %v, want %v", settings.UnreadDivider, tt.want)
+			}
+		})
+	}
+}
+
+func TestScanUserSettingsAgentGeneratedTaskTitlesDefault(t *testing.T) {
+	tests := []struct {
+		name string
+		raw  string
+		want bool
+	}{
+		{name: "empty settings enable title generation", raw: `{}`, want: true},
+		{name: "missing setting enables title generation", raw: `{"chat_submit_key":"enter"}`, want: true},
+		{name: "explicit false disables title generation", raw: `{"agent_generated_task_titles":false}`, want: false},
+		{name: "explicit true enables title generation", raw: `{"agent_generated_task_titles":true}`, want: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			settings, err := scanUserSettings(settingsScanner{raw: tt.raw}, DefaultUserID)
+			if err != nil {
+				t.Fatalf("scan settings: %v", err)
+			}
+			if settings.AgentGeneratedTaskTitles != tt.want {
+				t.Fatalf("AgentGeneratedTaskTitles = %v, want %v", settings.AgentGeneratedTaskTitles, tt.want)
 			}
 		})
 	}
@@ -349,6 +473,76 @@ func TestSQLiteRepositoryMCPTaskAgentProfileDefaultRoundTrip(t *testing.T) {
 	}
 	if got.MCPTaskAgentProfileDefault != models.MCPTaskAgentProfileDefaultWorkspaceDefault {
 		t.Fatalf("MCPTaskAgentProfileDefault = %q, want workspace_default", got.MCPTaskAgentProfileDefault)
+	}
+}
+
+func TestScanUserSettingsLspStatusLocationDefaultsAndLoads(t *testing.T) {
+	tests := []struct {
+		name string
+		raw  string
+		want string
+	}{
+		{name: "empty settings use toolbar", raw: `{}`, want: models.LspStatusLocationToolbar},
+		{name: "unknown setting uses toolbar", raw: `{"lsp_status_location":"sidebar"}`, want: models.LspStatusLocationToolbar},
+		{name: "toolbar is preserved", raw: `{"lsp_status_location":"toolbar"}`, want: models.LspStatusLocationToolbar},
+		{name: "status bar is preserved", raw: `{"lsp_status_location":"status_bar"}`, want: models.LspStatusLocationStatusBar},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			settings, err := scanUserSettings(settingsScanner{raw: tt.raw}, DefaultUserID)
+			if err != nil {
+				t.Fatalf("scan settings: %v", err)
+			}
+			if settings.LspStatusLocation != tt.want {
+				t.Fatalf("LspStatusLocation = %q, want %q", settings.LspStatusLocation, tt.want)
+			}
+		})
+	}
+}
+
+func TestMarshalUserSettingsLspStatusLocation(t *testing.T) {
+	raw, err := marshalUserSettingsPayload(&models.UserSettings{
+		LspStatusLocation: models.LspStatusLocationStatusBar,
+	})
+	if err != nil {
+		t.Fatalf("marshal settings: %v", err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		t.Fatalf("decode settings: %v", err)
+	}
+	if got := payload["lsp_status_location"]; got != models.LspStatusLocationStatusBar {
+		t.Fatalf("lsp_status_location = %#v, want status_bar", got)
+	}
+}
+
+func TestSQLiteRepositoryLspStatusLocationRoundTrip(t *testing.T) {
+	conn, err := sqlx.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	conn.SetMaxOpenConns(1)
+	t.Cleanup(func() { _ = conn.Close() })
+	repo, err := newSQLiteRepositoryWithDB(conn, conn)
+	if err != nil {
+		t.Fatalf("new repo: %v", err)
+	}
+
+	ctx := context.Background()
+	settings, err := repo.GetUserSettings(ctx, DefaultUserID)
+	if err != nil {
+		t.Fatalf("get defaults: %v", err)
+	}
+	settings.LspStatusLocation = models.LspStatusLocationStatusBar
+	upsertUserSettingsForTest(t, repo, ctx, settings)
+
+	got, err := repo.GetUserSettings(ctx, DefaultUserID)
+	if err != nil {
+		t.Fatalf("get saved settings: %v", err)
+	}
+	if got.LspStatusLocation != models.LspStatusLocationStatusBar {
+		t.Fatalf("LspStatusLocation = %q, want status_bar", got.LspStatusLocation)
 	}
 }
 

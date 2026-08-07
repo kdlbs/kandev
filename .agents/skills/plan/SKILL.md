@@ -6,8 +6,9 @@ description: Create a committed implementation plan from a feature spec. Explore
 # Create Implementation Plan
 
 This is a primary-session artifact skill. The user-started conversation creates
-the plan and task files, then the user manually switches that same conversation
-to an implementation model to execute them.
+the plan and task files, then returns control with a handoff. The user reviews
+the files, switches that same conversation to an implementation model if
+desired, and sends the explicit request to execute them.
 
 Translate a feature spec into a concrete, phased implementation plan saved under
 `docs/plans/<feature>/`. Plans and task files are committed implementation
@@ -134,6 +135,13 @@ For each user-facing scenario in the spec:
 
 ---
 
+## Verification Results
+Pending. On completion, synchronize this section with each task's `## Results`:
+record exact commands and outcomes/counts, generated artifact paths, and
+cleanup/teardown evidence.
+
+---
+
 ## Implementation Waves And Parallel Candidates
 
 Group task files by dependency order. Use waves to expose possible parallelism,
@@ -189,7 +197,7 @@ spec: "../../specs/<slug>/spec.md"
 
 Each task should be small enough for one focused implementation pass:
 - **Acceptance:** 1-3 concrete conditions.
-- **Verification:** exact command(s), e.g. `cd apps/backend && go test -run TestName ./internal/path/...` or `cd apps && pnpm --filter @kandev/web test -- path/to/file.test.ts`.
+- **Verification:** exact command(s), e.g. `cd apps/backend && go test -run TestName ./internal/path/...` or `cd apps && pnpm --filter @kandev/web test -- path/to/file.test.ts`. Frontend/E2E tasks must include the fresh-worktree bootstrap (`cd apps && pnpm install --frozen-lockfile`) when dependencies may be absent; direct web typechecking uses `cd apps/web && pnpm run typecheck`, while other workspace package commands use the documented `pnpm --filter` form. Backend commands should use the applicable repository `make` target when one exists.
 - **Files likely touched:** specific paths, not broad directories.
 - **Dependencies:** task numbers that must land first, or `None`.
 - **Parallelism:** `sequential` by default; set `parallel-safe` only with named
@@ -198,12 +206,30 @@ Each task should be small enough for one focused implementation pass:
 - **Output contract:** summary, files changed, tests run, blockers, risks, and
   task/plan status update in the same conversation.
 
+## Results
+Pending. Before marking the task done, replace this with every exact command
+actually run and its outcome/count, generated artifact paths, and cleanup or
+teardown evidence (including temporary capture-spec removal and
+`git diff --check` when used). Record security/trust and external side-effect
+boundaries when applicable, or explicitly state `None`.
+
 Break a task down further if it touches unrelated subsystems, needs more than one focused session, or the title contains "and".
 
 When an implementation agent starts the task, it must change `status` to
-`in_progress`. When it finishes, it must change `status` to `done` and update
-the corresponding checkbox/status in `plan.md`.
+`in_progress`. Before it finishes, reconcile **Files likely touched** with the
+actual diff, including modified existing tests used as E2E evidence. It may then
+change `status` to `done`, update its `## Results`, and synchronize the
+corresponding checkbox/status and `## Verification Results` in `plan.md`.
 ```
+
+### 6. End the design turn
+
+After `plan.md` and every task file are written and validated, report their
+paths, dependency order, exact checks, and open risks as a compact handoff,
+then end the turn. Do not call `ask_user_question_kandev` (or an equivalent
+approval prompt) to ask the user to approve the plan or switch models. The user
+reviews the artifacts and controls the next implementation request and model
+choice.
 
 ### Style rules
 

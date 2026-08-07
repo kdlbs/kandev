@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { IconRefresh } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import type { InferenceAgent, InferenceAgentStatus } from "@/lib/api/domains/utility-api";
@@ -28,27 +29,30 @@ type Props = {
   onRefresh: () => Promise<unknown> | void;
 };
 
-type Note = { text: string; refreshable: boolean };
+// This switch holds no JSX, so the literal guard never inspected it — the copy
+// travels as a catalog key and the caller resolves it at render.
+type Note = { key: string; refreshable: boolean };
 
-function noteForStatus(status: InferenceAgentStatus | undefined, name: string): Note {
+function noteForStatus(status: InferenceAgentStatus | undefined): Note {
   switch (status) {
     case "probing":
-      return { text: `Setting up ${name}…`, refreshable: true };
+      return { key: "settings:inferenceAgentProbing", refreshable: true };
     case "auth_required":
-      return { text: `Sign in to ${name} to load models.`, refreshable: true };
+      return { key: "settings:inferenceAgentAuthRequired", refreshable: true };
     case "not_installed":
-      return { text: `${name} CLI is not installed on this machine.`, refreshable: true };
+      return { key: "settings:inferenceAgentNotInstalled", refreshable: true };
     case "not_configured":
-      return { text: `${name} is not configured for inference.`, refreshable: false };
+      return { key: "settings:inferenceAgentNotConfigured", refreshable: false };
     case "failed":
-      return { text: `Probe failed for ${name}.`, refreshable: true };
+      return { key: "settings:inferenceAgentProbeFailed", refreshable: true };
     case "ok":
     default:
-      return { text: `${name} advertised no models.`, refreshable: true };
+      return { key: "settings:inferenceAgentNoModels", refreshable: true };
   }
 }
 
 function RefreshButton({ onRefresh }: { onRefresh: () => Promise<unknown> | void }) {
+  const { t } = useTranslation();
   const [refreshing, setRefreshing] = useState(false);
   const handleClick = async () => {
     if (refreshing) return;
@@ -70,7 +74,9 @@ function RefreshButton({ onRefresh }: { onRefresh: () => Promise<unknown> | void
       data-testid="inference-agent-refresh"
     >
       <IconRefresh className={refreshing ? "h-3 w-3 animate-spin" : "h-3 w-3"} />
-      <span className="ml-1">{refreshing ? "Refreshing…" : "Refresh"}</span>
+      <span className="ml-1">
+        {refreshing ? t("settings:inferenceAgentRefreshing") : t("settings:inferenceAgentRefresh")}
+      </span>
     </Button>
   );
 }
@@ -85,14 +91,17 @@ function isAgentHealthy(agent: InferenceAgent | null | undefined): boolean {
 }
 
 export function InferenceAgentStatusNote({ agent, fallbackName, onRefresh }: Props) {
+  const { t } = useTranslation();
   if (isAgentHealthy(agent)) {
     return null;
   }
 
-  const name = agent?.display_name ?? fallbackName ?? "this agent";
+  // `display_name` and the agent id are wire values; only the last-resort
+  // fallback is copy.
+  const name = agent?.display_name ?? fallbackName ?? t("settings:inferenceAgentThisAgent");
   const note: Note = agent
-    ? noteForStatus(agent.status, name)
-    : { text: `${name} is no longer available.`, refreshable: true };
+    ? noteForStatus(agent.status)
+    : { key: "settings:inferenceAgentUnavailable", refreshable: true };
   const detail = agent?.status_message?.trim();
 
   return (
@@ -101,7 +110,7 @@ export function InferenceAgentStatusNote({ agent, fallbackName, onRefresh }: Pro
       data-testid="inference-agent-status-note"
     >
       <div className="space-y-0.5 min-w-0">
-        <p>{note.text}</p>
+        <p>{t(note.key, { name })}</p>
         {detail && <p className="text-[11px] opacity-80 truncate">{detail}</p>}
       </div>
       {note.refreshable && <RefreshButton onRefresh={onRefresh} />}

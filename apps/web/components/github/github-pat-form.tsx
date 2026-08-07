@@ -5,6 +5,7 @@ import { IconEye, IconEyeOff } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Input } from "@kandev/ui/input";
 import { Label } from "@kandev/ui/label";
+import { useTranslation } from "react-i18next";
 
 export function GitHubPATForm({
   workspaceId,
@@ -17,6 +18,7 @@ export function GitHubPATForm({
   onChange: (value: string) => void;
   disabled?: boolean;
 }) {
+  const { t } = useTranslation();
   const [visible, setVisible] = useState(false);
 
   useEffect(() => {
@@ -26,10 +28,8 @@ export function GitHubPATForm({
   return (
     <div className="space-y-3">
       <div className="space-y-1">
-        <Label htmlFor="github-workspace-token">Personal access token</Label>
-        <p className="text-xs text-muted-foreground">
-          Kandev stores this token for this workspace. GitHub records actions as the token owner.
-        </p>
+        <Label htmlFor="github-workspace-token">{t("github:personalAccessToken")}</Label>
+        <p className="text-xs text-muted-foreground">{t("github:kandevStoresThisTokenForThis")}</p>
       </div>
       <div className="flex flex-col gap-2 sm:flex-row sm:items-stretch">
         <div className="relative min-w-0 flex-1">
@@ -50,7 +50,7 @@ export function GitHubPATForm({
             className="absolute right-0 top-0 h-11 w-11 cursor-pointer"
             onClick={() => setVisible((current) => !current)}
             disabled={disabled}
-            aria-label={visible ? "Hide token" : "Show token"}
+            aria-label={visible ? t("github:hideToken") : t("github:showToken")}
           >
             {visible ? <IconEyeOff className="h-4 w-4" /> : <IconEye className="h-4 w-4" />}
           </Button>

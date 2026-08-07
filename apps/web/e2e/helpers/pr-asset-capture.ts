@@ -18,20 +18,12 @@ export type AssetManifest = {
 
 const DEFAULT_OUTPUT_DIR = path.resolve(__dirname, "../../.pr-assets");
 const FRAMES_DIR = ".frames";
+const MANIFEST_LOCK_DIR = ".manifest.lock";
+const MANIFEST_LOCK_RETRY_MS = 10;
+const MANIFEST_LOCK_TIMEOUT_MS = 5_000;
+const MANIFEST_LOCK_STALE_MS = 30_000;
 const RECORDING_FPS = 5;
 const RECORDING_INTERVAL = 1000 / RECORDING_FPS;
-
-// Ensures the output directory is wiped exactly once per process (per e2e run).
-let _cleanedForRun = false;
-
-function cleanOutputDir(outputDir: string): void {
-  if (_cleanedForRun) return;
-  _cleanedForRun = true;
-  if (fs.existsSync(outputDir)) {
-    fs.rmSync(outputDir, { recursive: true });
-  }
-  fs.mkdirSync(outputDir, { recursive: true });
-}
 
 function sanitizeName(name: string): string {
   return name
@@ -65,6 +57,47 @@ function writeManifest(outputDir: string, manifest: AssetManifest): void {
   fs.writeFileSync(path.join(outputDir, "manifest.json"), JSON.stringify(manifest, null, 2));
 }
 
+function waitForManifestLock(): void {
+  const signal = new Int32Array(new SharedArrayBuffer(4));
+  Atomics.wait(signal, 0, 0, MANIFEST_LOCK_RETRY_MS);
+}
+
+function reclaimStaleManifestLock(lockDir: string): boolean {
+  try {
+    const ageMs = Date.now() - fs.statSync(lockDir).mtimeMs;
+    if (ageMs < MANIFEST_LOCK_STALE_MS) return false;
+    fs.rmdirSync(lockDir);
+    return true;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return true;
+    throw error;
+  }
+}
+
+function withManifestLock<T>(outputDir: string, write: () => T): T {
+  const lockDir = path.join(outputDir, MANIFEST_LOCK_DIR);
+  const deadline = Date.now() + MANIFEST_LOCK_TIMEOUT_MS;
+  while (true) {
+    try {
+      fs.mkdirSync(lockDir);
+      break;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+      if (reclaimStaleManifestLock(lockDir)) continue;
+      if (Date.now() >= deadline) {
+        throw new Error(`timed out waiting for PR asset manifest lock: ${lockDir}`);
+      }
+      waitForManifestLock();
+    }
+  }
+
+  try {
+    return write();
+  } finally {
+    fs.rmdirSync(lockDir);
+  }
+}
+
 export class PrAssetCapture {
   private readonly page: Page;
   private readonly outputDir: string;
@@ -84,7 +117,7 @@ export class PrAssetCapture {
     this.testSlug = captureKey ? `${fileSlug}-${captureKey}` : fileSlug;
 
     if (this.enabled) {
-      cleanOutputDir(this.outputDir);
+      ensureDir(this.outputDir);
     }
   }
 
@@ -186,10 +219,12 @@ export class PrAssetCapture {
       this.recordingInterval = null;
     }
 
-    const manifest = readManifest(this.outputDir);
-    // Remove stale entries from this test
-    manifest.assets = manifest.assets.filter((a) => a.test !== `${this.testSlug}.spec.ts`);
-    manifest.assets.push(...this.assets);
-    writeManifest(this.outputDir, manifest);
+    withManifestLock(this.outputDir, () => {
+      const manifest = readManifest(this.outputDir);
+      // Remove stale entries from this test.
+      manifest.assets = manifest.assets.filter((a) => a.test !== `${this.testSlug}.spec.ts`);
+      manifest.assets.push(...this.assets);
+      writeManifest(this.outputDir, manifest);
+    });
   }
 }

@@ -51,6 +51,27 @@ type Service struct {
 	// delete for that workspace waits (bounded by the HTTP client timeout)
 	// rather than racing an in-flight apply.
 	locks sync.Map // workspaceID → *sync.Mutex
+
+	// workspaceAuthorizer enforces per-user workspace scoping. Nil (unit
+	// tests, or a caller with no identity in context — internal callers like
+	// the periodic poller) means unscoped, matching every other integration
+	// service's default before auth is wired up.
+	workspaceAuthorizer func(context.Context, string) error
+}
+
+// SetWorkspaceAuthorizer installs the per-user workspace access boundary
+// applied before every user-facing config read/write and force sync.
+func (s *Service) SetWorkspaceAuthorizer(authorizer func(context.Context, string) error) {
+	if s != nil {
+		s.workspaceAuthorizer = authorizer
+	}
+}
+
+func (s *Service) authorizeWorkspaceAccess(ctx context.Context, workspaceID string) error {
+	if s == nil || s.workspaceAuthorizer == nil {
+		return nil
+	}
+	return s.workspaceAuthorizer(ctx, workspaceID)
 }
 
 func (s *Service) workspaceLock(workspaceID string) *sync.Mutex {
@@ -75,11 +96,17 @@ func (s *Service) Store() *Store {
 
 // GetConfigForWorkspace returns the workspace's config, or nil when unset.
 func (s *Service) GetConfigForWorkspace(ctx context.Context, workspaceID string) (*Config, error) {
+	if err := s.authorizeWorkspaceAccess(ctx, workspaceID); err != nil {
+		return nil, err
+	}
 	return s.store.GetConfigForWorkspace(ctx, workspaceID)
 }
 
 // SetConfigForWorkspace validates and stores the workspace's config.
 func (s *Service) SetConfigForWorkspace(ctx context.Context, workspaceID string, req *SetConfigRequest) (*Config, error) {
+	if err := s.authorizeWorkspaceAccess(ctx, workspaceID); err != nil {
+		return nil, err
+	}
 	if err := req.Normalize(); err != nil {
 		return nil, err
 	}
@@ -93,6 +120,9 @@ func (s *Service) SetConfigForWorkspace(ctx context.Context, workspaceID string,
 // workflows are released back to manual ownership first so they become
 // editable again — a failed release keeps the config so the user can retry.
 func (s *Service) DeleteConfigForWorkspace(ctx context.Context, workspaceID string) error {
+	if err := s.authorizeWorkspaceAccess(ctx, workspaceID); err != nil {
+		return err
+	}
 	lock := s.workspaceLock(workspaceID)
 	lock.Lock()
 	defer lock.Unlock()
@@ -133,6 +163,9 @@ type fetchedFile struct {
 // silent. The outcome (including failures) is recorded on the config row so
 // the UI can surface it.
 func (s *Service) SyncWorkspace(ctx context.Context, workspaceID string) (*SyncResult, error) {
+	if err := s.authorizeWorkspaceAccess(ctx, workspaceID); err != nil {
+		return nil, err
+	}
 	lock := s.workspaceLock(workspaceID)
 	lock.Lock()
 	defer lock.Unlock()

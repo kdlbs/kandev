@@ -13,6 +13,7 @@ import {
 } from "@kandev/ui/dropdown-menu";
 import { cn } from "@kandev/ui/lib/utils";
 import { usePluginRegistry } from "@/lib/plugins/registry";
+import { t } from "@/lib/i18n";
 import type { ReviewItemSummary } from "@/lib/plugins/types";
 import { reviewItemId } from "./review-selection";
 
@@ -50,7 +51,7 @@ export function ReviewItemSelector({
         >
           <IconGitPullRequest className="h-4 w-4 shrink-0" />
           <span className="truncate text-xs font-medium">
-            {selectedReview ? selectedReview.title : "Choose review"}
+            {selectedReview ? selectedReview.title : t("integrations:chooseReview")}
           </span>
           <IconChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
         </Button>
@@ -60,7 +61,7 @@ export function ReviewItemSelector({
         data-testid="review-item-selector-menu"
         className="max-h-[calc(100dvh-1rem)] w-80 max-w-[calc(100vw-1rem)] overflow-y-auto overscroll-contain sm:max-h-80"
       >
-        <DropdownMenuLabel>Choose review</DropdownMenuLabel>
+        <DropdownMenuLabel>{t("integrations:chooseReview")}</DropdownMenuLabel>
         <DropdownMenuSeparator />
         <DropdownMenuRadioGroup
           value={selectedId}

@@ -10,7 +10,7 @@ export function defaultLayout(): LayoutState {
           {
             id: CENTER_GROUP,
             activePanel: "chat",
-            panels: [panel("chat"), panel("pr-detail")],
+            panels: [panel("chat")],
           },
         ],
       },
@@ -35,13 +35,7 @@ export function compactLayout(): LayoutState {
         groups: [
           {
             id: CENTER_GROUP,
-            panels: [
-              panel("chat"),
-              panel("files"),
-              panel("changes"),
-              panel("pr-detail"),
-              panel("terminal-default"),
-            ],
+            panels: [panel("chat"), panel("files"), panel("changes"), panel("terminal-default")],
           },
         ],
       },

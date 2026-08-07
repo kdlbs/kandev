@@ -50,6 +50,7 @@ import {
   MessageCommentDecorationOverlay,
   MessageCustomHighlightStyle,
 } from "./message-comment-decorations";
+import { useTranslation } from "react-i18next";
 
 type MessageCommentSurfaceProps = {
   message: Message;
@@ -126,6 +127,7 @@ function SelectionCommentTrigger({
   onOpen: () => void;
   portalContainer?: HTMLElement | null;
 }) {
+  const { t } = useTranslation();
   const size = isTouch ? 44 : 28;
   const portalRect = portalContainer?.getBoundingClientRect();
   const outerSize = size + 8;
@@ -139,7 +141,7 @@ function SelectionCommentTrigger({
   return createPortal(
     <div
       className={cn(
-        "pointer-events-auto z-[60] rounded-lg border border-border/50 bg-popover p-1 shadow-lg",
+        "pointer-events-auto z-40 rounded-lg border border-border/50 bg-popover p-1 shadow-lg",
         portalContainer ? "absolute" : "fixed",
       )}
       style={{
@@ -149,8 +151,8 @@ function SelectionCommentTrigger({
     >
       <button
         type="button"
-        title="Comment (Cmd+Shift+C)"
-        aria-label="Comment on selection"
+        title={t("task:commentCmdShiftC")}
+        aria-label={t("task:commentOnSelection")}
         data-testid="agent-message-comment-trigger"
         className="flex cursor-pointer items-center justify-center rounded bg-primary text-primary-foreground transition-transform duration-150 ease-out hover:bg-primary/90 active:scale-[0.96]"
         style={{ width: size, height: size }}
@@ -177,6 +179,7 @@ function DrawerCommentActions({
   onRun?: () => void;
   onDelete?: () => void;
 }) {
+  const { t } = useTranslation();
   return (
     <div className="flex items-center justify-between gap-3">
       {isEditing && onDelete ? (
@@ -184,7 +187,7 @@ function DrawerCommentActions({
           type="button"
           size="sm"
           variant="ghost"
-          aria-label="Delete comment"
+          aria-label={t("task:deleteComment")}
           onClick={onDelete}
           className="min-h-11 cursor-pointer px-3 text-muted-foreground hover:text-destructive"
         >
@@ -204,7 +207,7 @@ function DrawerCommentActions({
           className={`min-h-11 cursor-pointer gap-1.5 px-4 transition-transform duration-150 ease-out active:scale-[0.96] ${onRun && !isEditing ? "rounded-r-none border-r-0" : ""}`}
         >
           <IconPlus className="h-4 w-4" />
-          {isEditing ? "Update" : "Add"}
+          {isEditing ? t("task:update") : t("task:add")}
         </Button>
         {onRun && !isEditing ? (
           <Button
@@ -216,7 +219,7 @@ function DrawerCommentActions({
             className="min-h-11 cursor-pointer gap-1.5 rounded-l-none px-4 transition-transform duration-150 ease-out active:scale-[0.96]"
           >
             <IconPlayerPlay className="h-4 w-4" />
-            Run
+            {t("task:run")}
           </Button>
         ) : null}
       </div>
@@ -241,6 +244,7 @@ function MessageCommentDrawer({
   onDelete: (() => void) | undefined;
   errorMessage?: string | null;
 }) {
+  const { t } = useTranslation();
   const [feedback, setFeedback] = useState(target?.editingText ?? "");
   const targetKey = `${target?.editingCommentId ?? "new"}:${target?.selection.start ?? 0}:${target?.selection.end ?? 0}`;
 
@@ -264,7 +268,7 @@ function MessageCommentDrawer({
         data-testid="agent-message-comment-drawer"
       >
         <DrawerHeader className="shrink-0 px-4 pb-3 text-left">
-          <DrawerTitle>{isEditing ? "Edit comment" : "Comment"}</DrawerTitle>
+          <DrawerTitle>{isEditing ? t("task:editComment") : t("task:comment")}</DrawerTitle>
           <DrawerDescription className="line-clamp-2 text-pretty italic">
             &ldquo;{target.selection.selectedText}&rdquo;
           </DrawerDescription>
@@ -279,8 +283,8 @@ function MessageCommentDrawer({
               if (event.shiftKey && !isEditing) run();
               else submit();
             }}
-            placeholder="Add your comment or instruction..."
-            aria-label="Comment on agent response"
+            placeholder={t("task:addYourCommentOrInstruction")}
+            aria-label={t("task:commentOnAgentResponse")}
             className="mb-3 min-h-20 resize-none text-sm border-border/50 focus:border-primary/50"
             autoFocus
             data-testid="agent-message-comment-input"

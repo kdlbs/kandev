@@ -38,8 +38,8 @@ func TestEnsureWorkspaceClonedWithBasicAuthKeepsCredentialScopedToGitChild(t *te
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			binDir := t.TempDir()
-			capturePath := filepath.Join(t.TempDir(), "git-env")
+			binDir := canonicalTempDir(t)
+			capturePath := filepath.Join(canonicalTempDir(t), "git-env")
 			fakeGit := "#!/bin/sh\nprintf '%s\\n%s' \"$GIT_CONFIG_KEY_1\" \"$GIT_CONFIG_VALUE_1\" > \"$CAPTURE_PATH\"\n" +
 				"helper=${GIT_CONFIG_VALUE_1#!}\n\"$helper\" get > \"$CAPTURE_PATH.helper\"\n" +
 				"if [ \"$BLOCK_GIT\" = 1 ]; then exec sleep 10; fi\nexit 1\n"
@@ -52,11 +52,14 @@ func TestEnsureWorkspaceClonedWithBasicAuthKeepsCredentialScopedToGitChild(t *te
 			if tc.cancel {
 				t.Setenv("BLOCK_GIT", "1")
 			}
-			cloner := NewCloner(Config{BasePath: t.TempDir()}, ProtocolHTTPS, "", logger.Default())
+			cloner := NewCloner(Config{BasePath: canonicalTempDir(t)}, ProtocolHTTPS, "", logger.Default())
 			ctx := context.Background()
 			var cancel context.CancelFunc
 			if tc.cancel {
-				ctx, cancel = context.WithTimeout(ctx, 20*time.Millisecond)
+				// Generous enough for a cold shell start (macOS is slow) so the
+				// fake git reliably writes CAPTURE_PATH before entering its long
+				// sleep; the deadline then cancels the blocked clone mid-run.
+				ctx, cancel = context.WithTimeout(ctx, 750*time.Millisecond)
 				defer cancel()
 			}
 			targetPath, err := cloner.EnsureWorkspaceClonedWithBasicAuth(
@@ -128,6 +131,7 @@ func TestScopedWorkspaceRefreshUsesOnlyAuthenticatedOrigin(t *testing.T) {
 	}
 	capturePath := filepath.Join(root, "git-refresh")
 	fakeGit := `#!/bin/sh
+if [ "$3" = "config" ]; then printf '%s\n' "https://bitbucket.org/acme/repository.git"; exit 0; fi
 if [ "$3" = "remote" ]; then exit 0; fi
 printf '%s\n' "$@" > "$CAPTURE_PATH.args"
 printf '%s\n' "$GIT_CONFIG_KEY_1" > "$CAPTURE_PATH.scope"
@@ -189,4 +193,15 @@ helper=${GIT_CONFIG_VALUE_1#!}
 		credentials.request.RepositoryID != "repo-a" {
 		t.Fatalf("credential request lost exact scope: %+v", credentials.request)
 	}
+}
+
+// canonicalTempDir returns t.TempDir() with symlinks resolved so the Git child
+// and the assertions agree on paths (macOS /var -> /private/var).
+func canonicalTempDir(t *testing.T) string {
+	t.Helper()
+	resolved, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return resolved
 }

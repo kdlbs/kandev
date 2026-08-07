@@ -7,7 +7,9 @@ import (
 	"fmt"
 
 	"github.com/kandev/kandev/internal/agent/registry"
+	"github.com/kandev/kandev/internal/agent/settings/models"
 	"github.com/kandev/kandev/internal/agent/settings/store"
+	"github.com/kandev/kandev/internal/agentctl/acpcompat"
 )
 
 // DeletedProfileError carries the soft-deleted profile's ID and name so the
@@ -60,6 +62,9 @@ func (r *StoreProfileResolver) ResolveProfile(ctx context.Context, profileID str
 	if err != nil {
 		return nil, fmt.Errorf("agent not found for profile: %w", err)
 	}
+	if err := r.migrateCursorProfile(ctx, profile, agent); err != nil {
+		return nil, err
+	}
 
 	// Resolve agent capabilities from the registry.
 	model, nativeSessionResume := r.resolveAgentCapabilities(agent.Name, profile.Model)
@@ -82,6 +87,30 @@ func (r *StoreProfileResolver) ResolveProfile(ctx context.Context, profileID str
 		NativeSessionResume:        nativeSessionResume,
 		SupportsMCP:                agent.SupportsMCP,
 	}, nil
+}
+
+func (r *StoreProfileResolver) migrateCursorProfile(
+	ctx context.Context,
+	profile *models.AgentProfile,
+	agent *models.Agent,
+) error {
+	if profile == nil || agent == nil {
+		return nil
+	}
+	agentID := agent.Name
+	if agentID == "" {
+		agentID = agent.ID
+	}
+	model, options, changed := acpcompat.MigrateCursorModel(agentID, profile.Model, profile.ConfigOptions)
+	if !changed {
+		return nil
+	}
+	profile.Model = model
+	profile.ConfigOptions = options
+	if err := r.store.UpdateAgentProfile(ctx, profile); err != nil {
+		return fmt.Errorf("migrate Cursor profile %q: %w", profile.ID, err)
+	}
+	return nil
 }
 
 // checkSoftDeleted returns a *DeletedProfileError when the missing-row error

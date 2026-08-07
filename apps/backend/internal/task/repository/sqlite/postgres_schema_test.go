@@ -74,6 +74,74 @@ func TestPostgresExecutorRunningLocalPIDMigration(t *testing.T) {
 	}
 }
 
+func TestPostgresTaskTitleCASAndStaleUpdate(t *testing.T) {
+	db := testutil.OpenIsolatedPostgres(t, testutil.PostgresDSNFromEnv(t))
+	repo, err := NewWithDB(db, db, nil)
+	if err != nil {
+		t.Fatalf("init postgres schema: %v", err)
+	}
+	ctx := context.Background()
+	now := time.Now().UTC()
+
+	if _, err := db.Exec(db.Rebind(`
+		INSERT INTO tasks (id, title, metadata, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?)
+	`), "task-pg-title-false", "Provisional", `{"agent_title_pending":false,"keep":"value"}`, now, now); err != nil {
+		t.Fatalf("seed false-marker task: %v", err)
+	}
+	accepted, err := repo.SetTaskTitleIfPending(ctx, "task-pg-title-false", "session-owner", "Agent title")
+	if err != nil {
+		t.Fatalf("false-marker title CAS: %v", err)
+	}
+	if accepted {
+		t.Fatal("accepted title update with a false pending marker")
+	}
+	falseTask, err := repo.GetTask(ctx, "task-pg-title-false")
+	if err != nil {
+		t.Fatalf("reload false-marker task: %v", err)
+	}
+	if falseTask.Title != "Provisional" || falseTask.Metadata["agent_title_pending"] != false || falseTask.Metadata["keep"] != "value" {
+		t.Fatalf("false-marker task changed unexpectedly: title=%q metadata=%#v", falseTask.Title, falseTask.Metadata)
+	}
+
+	if _, err := db.Exec(db.Rebind(`
+		INSERT INTO tasks (id, title, metadata, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?)
+	`), "task-pg-title-race", "Provisional", `{"agent_title_pending":true}`, now, now); err != nil {
+		t.Fatalf("seed stale-update task: %v", err)
+	}
+	claimed, _, err := repo.ClaimTaskTitleSession(ctx, "task-pg-title-race", "session-owner")
+	if err != nil || !claimed {
+		t.Fatalf("claim postgres title session: claimed=%v err=%v", claimed, err)
+	}
+	stale, err := repo.GetTask(ctx, "task-pg-title-race")
+	if err != nil {
+		t.Fatalf("load stale postgres task: %v", err)
+	}
+	accepted, err = repo.SetTaskTitleIfPending(ctx, "task-pg-title-race", "session-owner", "Agent chosen title")
+	if err != nil || !accepted {
+		t.Fatalf("winning title CAS: accepted=%v err=%v", accepted, err)
+	}
+	stale.Description = "updated concurrently"
+	stale.Metadata["stale_change"] = "retained"
+	if err := repo.UpdateTask(ctx, stale); err != nil {
+		t.Fatalf("stale UpdateTask: %v", err)
+	}
+	current, err := repo.GetTask(ctx, "task-pg-title-race")
+	if err != nil {
+		t.Fatalf("reload stale-update task: %v", err)
+	}
+	if current.Title != "Agent chosen title" || current.Description != "updated concurrently" || current.Metadata["stale_change"] != "retained" {
+		t.Fatalf("stale update result = title %q description %q metadata %#v", current.Title, current.Description, current.Metadata)
+	}
+	if _, pending := current.Metadata[models.MetaKeyAgentTitlePending]; pending {
+		t.Fatalf("pending marker restored by stale update: %#v", current.Metadata)
+	}
+	if _, owner := current.Metadata[models.MetaKeyAgentTitleOwnerSessionID]; owner {
+		t.Fatalf("owner marker restored by stale update: %#v", current.Metadata)
+	}
+}
+
 func TestPostgresImproveKandevWorkflowIndexMigration(t *testing.T) {
 	db := testutil.OpenIsolatedPostgres(t, testutil.PostgresDSNFromEnv(t))
 	repo, err := NewWithDB(db, db, nil)
@@ -291,6 +359,46 @@ func TestPostgresSetSessionMetadataKeyIfAbsentIsWriteOnce(t *testing.T) {
 	}
 }
 
+func TestPostgresUpdateSessionContextWindowCountsStrictUsageDrops(t *testing.T) {
+	db := testutil.OpenIsolatedPostgres(t, testutil.PostgresDSNFromEnv(t))
+	repo, err := NewWithDB(db, db, nil)
+	if err != nil {
+		t.Fatalf("init postgres schema: %v", err)
+	}
+	ctx := context.Background()
+	now := time.Now().UTC()
+	if _, err := db.Exec(db.Rebind(`
+		INSERT INTO tasks (id, workspace_id, title, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?)
+	`), "task-context-count-pg", "ws-context-count-pg", "Context count", now, now); err != nil {
+		t.Fatalf("seed task: %v", err)
+	}
+	if err := repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID: "session-context-count-pg", TaskID: "task-context-count-pg", State: models.TaskSessionStateWaitingForInput,
+	}); err != nil {
+		t.Fatalf("CreateTaskSession: %v", err)
+	}
+
+	count, err := repo.UpdateSessionContextWindow(ctx, "session-context-count-pg", map[string]interface{}{
+		"size": int64(200000), "used": int64(120000),
+	})
+	if err != nil || count != 0 {
+		t.Fatalf("first context update = (%d, %v), want (0, nil)", count, err)
+	}
+	count, err = repo.UpdateSessionContextWindow(ctx, "session-context-count-pg", map[string]interface{}{
+		"size": int64(200000), "used": int64(80000),
+	})
+	if err != nil || count != 1 {
+		t.Fatalf("decreased context update = (%d, %v), want (1, nil)", count, err)
+	}
+	count, err = repo.UpdateSessionContextWindow(ctx, "session-context-count-pg", map[string]interface{}{
+		"size": int64(200000), "used": int64(80000),
+	})
+	if err != nil || count != 1 {
+		t.Fatalf("duplicate context update = (%d, %v), want (1, nil)", count, err)
+	}
+}
+
 func TestPostgresSkipsLegacyTaskEnvironmentBackfill(t *testing.T) {
 	db := testutil.OpenIsolatedPostgres(t, testutil.PostgresDSNFromEnv(t))
 	repo, err := NewWithDB(db, db, nil)
@@ -421,6 +529,50 @@ func TestPostgresTaskEnvironmentReposMultiBranchMigration(t *testing.T) {
 		) VALUES ('ter-dupe', 'env-1', 'repo-1', '', 'wt-dupe', $1, $1)
 	`, now); err == nil {
 		t.Fatal("expected duplicate env/repo/branch insert to fail")
+	}
+}
+
+func TestPostgresRepositorySecretBindingsSchemaReplay(t *testing.T) {
+	db := testutil.OpenIsolatedPostgres(t, testutil.PostgresDSNFromEnv(t))
+	repo, err := NewWithDB(db, db, nil)
+	if err != nil {
+		t.Fatalf("init postgres schema: %v", err)
+	}
+
+	if _, err := db.Exec("DROP TABLE repository_secret_bindings"); err != nil {
+		t.Fatalf("drop repository secret bindings table: %v", err)
+	}
+	if err := repo.runMigrations(); err != nil {
+		t.Fatalf("replay repository secret bindings migration: %v", err)
+	}
+	if err := repo.runMigrations(); err != nil {
+		t.Fatalf("replay repository secret bindings migration twice: %v", err)
+	}
+
+	ctx := context.Background()
+	seedWorkspace(t, repo, "ws-postgres-secret-bindings")
+	repository := &models.Repository{
+		ID:          "repo-postgres-secret-bindings",
+		WorkspaceID: "ws-postgres-secret-bindings",
+		Name:        "postgres secrets",
+	}
+	bindings := []models.RepositorySecretBinding{{Key: "NPM_TOKEN", SecretID: "secret-pg-npm"}}
+	if err := repo.CreateRepositoryWithSecretBindings(ctx, repository, bindings); err != nil {
+		t.Fatalf("create repository with bindings after replay: %v", err)
+	}
+	got, err := repo.GetRepository(ctx, repository.ID)
+	if err != nil {
+		t.Fatalf("get repository after replay: %v", err)
+	}
+	if len(got.SecretBindings) != 1 {
+		t.Fatalf("repository bindings = %+v, want one binding", got.SecretBindings)
+	}
+	gotBinding := got.SecretBindings[0]
+	if gotBinding.RepositoryID != repository.ID || gotBinding.Key != bindings[0].Key || gotBinding.SecretID != bindings[0].SecretID {
+		t.Fatalf("repository binding = %+v, want repository=%q key=%q secret=%q", gotBinding, repository.ID, bindings[0].Key, bindings[0].SecretID)
+	}
+	if gotBinding.CreatedAt.IsZero() || gotBinding.UpdatedAt.IsZero() {
+		t.Fatalf("repository binding timestamps = %+v, want persisted timestamps", gotBinding)
 	}
 }
 

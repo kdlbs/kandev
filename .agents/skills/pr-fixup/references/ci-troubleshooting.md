@@ -19,12 +19,95 @@ SHA (`git diff <last-passing-sha>..HEAD`) instead of against `main`.
 
 ## Infrastructure Failures
 
+**Failed job in an in-progress workflow:** GitHub can expose a failed job
+before the parent workflow is terminal, and `gh run view --log-failed` can
+temporarily report its logs as unavailable. Confirm the job's conclusion and
+steps before reproducing or changing code, then retrieve the job log directly
+when needed:
+
+```bash
+gh api repos/<owner>/<repo>/actions/jobs/<job_id> \
+  --jq '{status, conclusion, steps: [.steps[] | {name, status, conclusion}]}'
+scripts/pr-state --job-log <job_id>
+```
+
+Treat an unavailable log stream as unknown evidence, not a product failure.
+If the direct job-log request returns 404 while the job is queued or in progress,
+wait for that job to complete before retrying; it is not missing evidence.
+When the aggregate command exposes only a merge/report job, obtain every failed
+shard `job_id` from `scripts/pr-state --summary <PR>` and inspect at least one
+failure from each shard before changing code:
+
+```bash
+scripts/pr-state --job-log <job_id>
+```
+
+If that summary still names only the aggregate gate, enumerate the failed jobs
+from the workflow and inspect the concrete shard (then load its test-results
+artifact as described in `/e2e`):
+
+```bash
+gh run view <run-id> --json jobs \
+  --jq '.jobs[] | select(.conclusion == "failure") | {name, databaseId}'
+```
+
+Verify the output names the actual failing spec or assertion, rather than only
+the merge-report exit code.
+
+**CodeQL code-scanning upload failure:** If CodeQL completes extraction and
+query evaluation, then fails immediately after `Uploading code scanning
+results` without a source finding or actionable log error, treat it as GitHub
+code-scanning upload infrastructure. On the current head, rerun the failed job
+once and re-check the PR state:
+
+```bash
+gh run rerun <run-id> --failed
+scripts/pr-state --summary <PR>
+```
+
+If a newer head has already been pushed, rely on its newly triggered CodeQL
+run. Report an unchanged upload failure rather than changing product code.
+
+**Go module-proxy transport failure:** If a Go test job fails during package
+setup while downloading from `proxy.golang.org` (for example, `stream error:
+stream ID ... INTERNAL_ERROR`), and has no test assertion or compile failure,
+treat it as proxy transport infrastructure. Rerun the failed job once, then
+re-check the current head:
+
+```bash
+gh run rerun <run-id> --failed
+scripts/pr-state --summary <PR>
+```
+
+Only investigate product code when the rerun exposes a repeatable test or build
+failure.
+
+**Third-party deployment fetch failure:** For a deployment action that cannot
+fetch its third-party resource, compare adjacent successful runs for the same
+branch/head and rerun the failed job once before changing workflow or product
+code. Treat a one-off fetch failure as infrastructure unless it repeats with
+an actionable configuration error.
+
+**Merge-ref validation drift:** GitHub can run a PR check against the synthetic
+merge ref, where a current-base deletion makes a cited path or coverage entry
+appear missing even though it exists on the PR head. Compare the failing path
+with `origin/<baseRefName>` before changing the PR. Update a genuinely stale
+manifest or coverage entry, but do not rebase solely to satisfy this check.
+
 **Cancelled concurrency duplicates:** A required check with
 `conclusion=cancelled`, 0s job durations, unexpanded `${{ matrix.* }}` job
 names, or a "Canceling since a higher priority waiting request ..." annotation
 is usually a superseded GitHub run, not a code failure. Confirm the
 non-cancelled run for the same head SHA passed, then trigger one clean run
 (rebase onto main + force-push, or `gh run rerun <id>`).
+
+**Manual-review event provenance:** For an unexpected zero-duration or no-op
+manual bot-mention run, inspect the workflow at the repository default branch
+and the event payload before assuming the PR is behind `main`. Privileged
+`issue_comment` and `pull_request_target` runs use the trusted default-branch
+workflow definition, not a newly synced PR workflow. Compare the run's
+workflow path, event, and head metadata with that definition; land a workflow
+fix on the default branch, then reproduce with a fresh comment.
 
 **Semantic PR title transport failures:** If `pr-title` /
 `amannn/action-semantic-pull-request` fails with transport or response parsing
@@ -84,10 +167,11 @@ go test -race ./path/to/package -run '^TestName$' -count=20
 go test -race ./path/to/package -count=3
 ```
 
-If a failed-job rerun reports a different, unrelated package or test, validate
-that second failure the same way and allow one additional failed-job rerun
-instead of changing unrelated PR code. Stop and fix code when the same failure
-reproduces locally or repeats in CI.
+If a failed-job rerun reports a different package or test, validate that failure
+with the same rigor even when it is outside the PR diff. Do not dismiss or rerun
+past a valid race, leak, or product defect because it appears unrelated; fix it
+and exercise the affected package without retry masking. Only an evidenced
+external dependency or infrastructure fault is exempt from code remediation.
 
 ## E2E Failures
 
@@ -108,14 +192,12 @@ scripts/run-quiet e2e -- bash -c 'cd apps && pnpm --filter @kandev/web e2e -- te
 scripts/run-quiet e2e -- bash -c 'cd apps && pnpm --filter @kandev/web e2e -- tests/path/to/failing.spec.ts -g "exact failing test title"'
 ```
 
-If the failed E2E spec is unrelated to the PR diff, the exact failing test
-passes locally via `pnpm e2e:run`, and there are no unresolved review threads
-or other failed checks, rerun the failed GitHub job once and poll until terminal:
-
-```bash
-gh run rerun <run-id> --failed
-scripts/pr-state --summary <PR>
-```
+An isolated pass does not invalidate a CI failure, and a spec outside the PR
+diff remains part of fixup scope. Re-run it with retries disabled under CI
+resource limits and preserve the failed shard's ordering. If that exposes a
+race, stale state, or interaction leak, fix it and stress the smallest
+reproducing sequence before running the full affected shard. Never use a
+failed-job rerun as a substitute for explaining and fixing a valid test failure.
 
 When a UI copy rename is intentional, search E2E specs for old visible text
 before debugging deeper. Prefer updating assertions to the new label while

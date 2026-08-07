@@ -3,6 +3,7 @@ package executor
 import (
 	"context"
 	"errors"
+	"reflect"
 	"testing"
 	"time"
 
@@ -18,12 +19,14 @@ func seedMultiRepoTask(t *testing.T, repo *mockRepository, taskID string) {
 	repo.repositories["repo-front"] = &models.Repository{
 		ID:                   "repo-front",
 		Name:                 "frontend",
+		Provider:             "gitlab",
 		LocalPath:            "/repos/frontend",
 		WorktreeBranchPrefix: "feat/",
 	}
 	repo.repositories["repo-back"] = &models.Repository{
 		ID:                   "repo-back",
 		Name:                 "backend",
+		Provider:             "github",
 		LocalPath:            "/repos/backend",
 		WorktreeBranchPrefix: "feat/",
 	}
@@ -98,6 +101,48 @@ func TestLaunchPreparedSession_MultiRepo_PopulatesRequestRepositories(t *testing
 	// Legacy single-repo top-level fields stay populated from the primary.
 	if captured.RepositoryPath != "/repos/frontend" {
 		t.Errorf("expected primary repo path on top-level field, got %q", captured.RepositoryPath)
+	}
+	if got, want := captured.McpProviders, []string{"github", "gitlab"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("McpProviders = %#v, want %#v", got, want)
+	}
+}
+
+func TestLaunchPreparedSession_RepositoryEnvironmentConflictFailsBeforeLaunch(t *testing.T) {
+	repo := newMockRepository()
+	const taskID = "task-multi-env-conflict"
+	const sessionID = "session-multi-env-conflict"
+	seedMultiRepoTask(t, repo, taskID)
+	repo.repositories["repo-front"].WorkspaceID = "ws-1"
+	repo.repositories["repo-front"].SecretBindings = []models.RepositorySecretBinding{{
+		Key: "PACKAGE_TOKEN", SecretID: "secret-front",
+	}}
+	repo.repositories["repo-back"].WorkspaceID = "ws-1"
+	repo.repositories["repo-back"].SecretBindings = []models.RepositorySecretBinding{{
+		Key: "PACKAGE_TOKEN", SecretID: "secret-back",
+	}}
+	repo.sessions[sessionID] = &models.TaskSession{
+		ID:             sessionID,
+		TaskID:         taskID,
+		AgentProfileID: "profile-123",
+		State:          models.TaskSessionStateCreated,
+		StartedAt:      time.Now(),
+		UpdatedAt:      time.Now(),
+	}
+
+	agentManager := &mockAgentManager{}
+	exec := newTestExecutor(t, agentManager, repo)
+	_, err := exec.LaunchPreparedSession(context.Background(), &v1.Task{
+		ID: taskID, WorkspaceID: "ws-1", Title: "Multi",
+	}, sessionID, LaunchOptions{AgentProfileID: "profile-123", StartAgent: false})
+	if err == nil {
+		t.Fatal("LaunchPreparedSession succeeded, want environment conflict")
+	}
+	var conflictErr *EnvironmentConflictError
+	if !errors.As(err, &conflictErr) {
+		t.Fatalf("LaunchPreparedSession error = %T %v, want EnvironmentConflictError", err, err)
+	}
+	if agentManager.launchAgentCallCount != 0 {
+		t.Fatalf("LaunchAgent calls = %d, want 0", agentManager.launchAgentCallCount)
 	}
 }
 
@@ -391,6 +436,9 @@ func TestResumeSession_MultiRepo_PopulatesRequestRepositories(t *testing.T) {
 	}
 	if captured.Repositories[0].RepositoryID != "repo-front" || captured.Repositories[1].RepositoryID != "repo-back" {
 		t.Errorf("unexpected repo order: %+v", captured.Repositories)
+	}
+	if got, want := captured.McpProviders, []string{"github", "gitlab"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("McpProviders = %#v, want %#v", got, want)
 	}
 }
 

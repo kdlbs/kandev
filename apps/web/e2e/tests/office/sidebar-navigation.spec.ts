@@ -102,8 +102,17 @@ test.describe("Sidebar Home destination", () => {
     await testPage.goto("/stats");
     const home = testPage.getByRole("link", { name: "Home", exact: true });
     await expect(home).toBeVisible({ timeout: 15_000 });
+    await expect(home).toHaveAttribute("href", /^\/\?home=overview&workspaceId=.+$/);
+    const homeHref = await home.getAttribute("href");
+    const workspaceId = new URL(homeHref ?? "/", testPage.url()).searchParams.get("workspaceId");
+    expect(workspaceId).toBeTruthy();
     await home.click();
-    await expect(testPage).toHaveURL(/\/$/);
+    await expect(testPage).toHaveURL(
+      (url) =>
+        url.pathname === "/" &&
+        url.searchParams.get("home") === "overview" &&
+        url.searchParams.get("workspaceId") === workspaceId,
+    );
     await expect(testPage.getByTestId("kanban-board")).toBeVisible({ timeout: 15_000 });
   });
 });

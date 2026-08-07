@@ -54,6 +54,8 @@ export type BackendEnvOptions = {
   ports: PortConfig;
   /** Log level: debug, info, warn, error (default: info) */
   logLevel?: string;
+  /** Backend stdout threshold. Normal/debug use warn; verbose uses info. */
+  consoleLogLevel?: "warn" | "info";
   /** Route browser pages through an external dev web server. Production serves the SPA from Go. */
   webProxy?: boolean;
   /** Additional environment variables to merge */
@@ -67,7 +69,7 @@ export type BackendEnvOptions = {
  * @returns Environment object for the backend process
  */
 export function buildBackendEnv(options: BackendEnvOptions): NodeJS.ProcessEnv {
-  const { ports, logLevel, webProxy = true, extra } = options;
+  const { ports, logLevel, consoleLogLevel = "warn", webProxy = true, extra } = options;
   if (webProxy && ports.webPort === undefined) {
     throw new Error("webProxy requires a web port");
   }
@@ -77,12 +79,44 @@ export function buildBackendEnv(options: BackendEnvOptions): NodeJS.ProcessEnv {
     ...(webProxy ? { KANDEV_WEB_INTERNAL_URL: `http://localhost:${ports.webPort}` } : {}),
     KANDEV_AGENT_STANDALONE_PORT: String(ports.agentctlPort),
     ...(logLevel ? { KANDEV_LOG_LEVEL: logLevel } : {}),
+    KANDEV_CONSOLE_LOG_LEVEL: consoleLogLevel,
     ...extra,
   };
   if (!webProxy) {
     delete env.KANDEV_WEB_INTERNAL_URL;
   }
   return env;
+}
+
+export function resolveBackendLogLevels({
+  verbose = false,
+  debug = false,
+  env = process.env,
+}: { verbose?: boolean; debug?: boolean; env?: NodeJS.ProcessEnv } = {}): {
+  file: string;
+  console: "warn" | "info";
+} {
+  return {
+    file: env.KANDEV_LOG_LEVEL?.trim() || (debug ? "debug" : "info"),
+    console: verbose ? "info" : "warn",
+  };
+}
+
+export function createOutputRingBuffer(
+  sink: Pick<NodeJS.WritableStream, "write"> | null,
+  maxChars = 64 * 1024,
+): { attach: (stream: NodeJS.ReadableStream | null) => void; read: () => string } {
+  let buffer = "";
+  const attach = (stream: NodeJS.ReadableStream | null): void => {
+    stream?.on("data", (chunk: Buffer | string) => {
+      sink?.write(chunk);
+      buffer += typeof chunk === "string" ? chunk : chunk.toString("utf8");
+      if (buffer.length > maxChars) {
+        buffer = buffer.slice(buffer.length - maxChars);
+      }
+    });
+  };
+  return { attach, read: () => buffer };
 }
 
 export type WebEnvOptions = {

@@ -6,6 +6,7 @@ import {
   formatDuration,
   formatElapsed,
 } from "@/components/github/pr-shared";
+import { t } from "@/lib/i18n";
 import type {
   ChangeRequestDetailCheck,
   ChangeRequestDetailModel,
@@ -35,9 +36,9 @@ function isFailedCheck(check: ChangeRequestDetailCheck) {
 function checkConclusionLabel(check: ChangeRequestDetailCheck) {
   const value = (check.conclusion || check.state).toLowerCase();
   const labels: Record<string, string> = {
-    timed_out: "timed out",
-    action_required: "action required",
-    in_progress: "in progress",
+    timed_out: t("integrations:timedOut"),
+    action_required: t("integrations:actionRequired"),
+    in_progress: t("integrations:inProgress").toLowerCase(),
   };
   return labels[value] ?? value.replaceAll("_", " ");
 }
@@ -49,9 +50,9 @@ function checkSummary(checks: ChangeRequestDetailCheck[]) {
   ).length;
   const pending = checks.length - failed - passed;
   return [
-    failed > 0 ? `${failed} failed` : "",
-    passed > 0 ? `${passed} passed` : "",
-    pending > 0 ? `${pending} pending` : "",
+    failed > 0 ? t("integrations:failedCount", { count: failed }) : "",
+    passed > 0 ? t("integrations:passedCount", { count: passed }) : "",
+    pending > 0 ? t("integrations:pendingCount", { count: pending }) : "",
   ].filter(Boolean);
 }
 
@@ -81,7 +82,7 @@ function buildAllFailedChecksContext(checks: ChangeRequestDetailCheck[]) {
 
 function checkDurationText(check: ChangeRequestDetailCheck) {
   if (!check.startedAt) return null;
-  if (!check.completedAt) return `${formatElapsed(check.startedAt)} running`;
+  if (!check.completedAt) return `${formatElapsed(check.startedAt)} ${t("integrations:running")}`;
   const milliseconds = new Date(check.completedAt).getTime() - new Date(check.startedAt).getTime();
   return milliseconds < 1_000 ? null : formatDuration(check.startedAt, check.completedAt);
 }
@@ -101,10 +102,11 @@ export function ChangeRequestChecks({
     return () => clearInterval(interval);
   }, [hasRunning]);
   const summary = checkSummary(detail.checks);
+  const summaryLabel = summary.length > 0 ? ` — ${summary.join(", ")}` : "";
   const failed = detail.checks.filter(isFailedCheck);
   return (
     <CollapsibleSection
-      title={`CI Checks${summary.length > 0 ? ` — ${summary.join(", ")}` : ""}`}
+      title={t("integrations:ciChecks", { summary: summaryLabel })}
       count={detail.checks.length}
       defaultOpen
       onAddAll={
@@ -112,10 +114,10 @@ export function ChangeRequestChecks({
           ? () => onAdd("check", buildAllFailedChecksContext(detail.checks))
           : undefined
       }
-      addAllLabel="Add all failed checks to chat context"
+      addAllLabel={t("integrations:addAllFailedChecksToChatContext")}
     >
       {detail.checks.length === 0 ? (
-        <p className="px-2 py-2 text-xs text-muted-foreground">No checks</p>
+        <p className="px-2 py-2 text-xs text-muted-foreground">{t("integrations:noChecks")}</p>
       ) : null}
       {detail.checks.map((check) => {
         const duration = checkDurationText(check);

@@ -9,6 +9,13 @@ This inventory describes the current `main` branch. A capability counts as shipp
 
 Released builds can lag this page. Check **Settings > System > About** or `kandev --version` and compare the matching GitHub tag when behavior differs.
 
+## How to use this page
+
+- Start with **Supported** for the normal product path.
+- Read **Dependency-bound** and **Limited** before choosing a provider, executor, or platform.
+- Treat **Experimental**, **In progress**, and **Internal** as non-contract surfaces.
+- Verify the running version and a small representative workflow before trusting a boundary.
+
 ## Status meanings
 
 | Status | Meaning |
@@ -19,6 +26,9 @@ Released builds can lag this page. Check **Settings > System > About** or `kande
 | Experimental | Intentionally unstable or based on a fragile/nonstandard integration contract. |
 | In progress | Source, schema, tests, a flag, or a stub exists, but there is no supported production workflow yet. |
 | Internal | Development, test, diagnostic, or implementation support rather than an end-user feature. |
+
+<details>
+<summary>Tasks, workflows, and coordination</summary>
 
 ## Tasks, workflows, and coordination
 
@@ -41,14 +51,20 @@ Released builds can lag this page. Check **Settings > System > About** or `kande
 | GitHub-backed workflow sync | Dependency-bound | Requires GitHub access. Synced workflows are read-only in Kandev and guarded updates can need local agent/executor mapping. |
 | Coordinator-led teams, participants/quorum, arbitrary task trees, routines, budgets, and heartbeats | In progress | These belong to Office. Office is disabled in the production profile and remains an evolving, feature-flagged autonomy layer. |
 
+</details>
+
+<details>
+<summary>Sessions, review, and developer tools</summary>
+
 ## Sessions, review, and developer tools
 
 | Capability | Status | Current boundary |
 |---|---|---|
 | Structured chat, tool activity, files, integrated PTYs, and session lifecycle | Dependency-bound | Panel availability follows the task environment, agent protocol, executor, and viewport. A terminal needs a materialized task environment. |
-| Changes and cumulative Review | Supported | Supports staged, unstaged, commit, and multi-repository views; persisted reviewed hashes, stale detection, and anchored comments are implemented. Discard is destructive and permanent. |
+| Changes and cumulative Review | Supported | Supports staged, unstaged, commit, multi-repository, and initialized direct/nested submodule views; repository-scoped paths, persisted reviewed hashes, stale detection, and anchored comments are implemented. Unavailable submodules retain their parent gitlink. Discard is destructive and permanent, and submodule pull requests remain separate repository workflows. |
 | Agent-authored code walkthrough | Dependency-bound | One saved walkthrough per task is supported through task MCP. A new walkthrough replaces the old one; anchors can drift, and the backend does not prove that referenced file content is still current. |
-| GitHub pull-request review, checks, merge, and task PR automation | Dependency-bound | Requires GitHub credentials and repository permissions. GitHub-only task-level controls apply to every linked PR and can auto-fix feedback, auto-merge, and notify agents when their review is requested or when a PR merges or closes. Lifecycle messages are factual, immutable server-owned templates with only a canonical PR URL as dynamic content. Review-request matching uses the task workspace's connected GitHub account and a quiet baseline; delivery uses an existing task session or queue and never creates a new session. GitLab lifecycle parity is not shipped. Azure has a create-PR path only; other Git hosts do not get the full task PR panel. |
+| GitHub pull-request review, checks, merge, and task PR automation | Dependency-bound | Requires GitHub credentials and repository permissions. GitHub-only task-level controls apply to every linked PR and can auto-fix feedback, auto-merge, and notify agents when their review is requested or when a PR merges or closes. Lifecycle messages are factual, immutable server-owned templates with only a canonical PR URL as dynamic content. Review-request matching uses the task workspace's connected GitHub account and a quiet baseline; delivery uses an existing task session or queue and never creates a new session. Azure has a create-PR path only; other Git hosts do not get the full task PR panel. |
+| GitLab merge-request review and task MR lifecycle notifications | Dependency-bound | Requires GitLab credentials and project permissions. GitLab has no auto-fix or auto-merge automation; task-level controls notify agents when their review is requested (assignment as a reviewer, since GitLab has no distinct review-request event), or when a linked MR merges or closes. Lifecycle messages are factual, immutable server-owned templates with only a canonical MR URL as dynamic content, delivered through the same durable queue as GitHub's. |
 | Share a session snapshot as a secret GitHub Gist | Dependency-bound | Requires GitHub auth and a structured session outside `CREATED`/`STARTING`. The viewing URL is rendered through `gist.githack.com`; unlisted URLs and heuristic redaction are not access control or exhaustive secret detection. Payloads are capped and shares can be revoked. |
 | Quick Chat | Dependency-bound | Requires an agent profile. Repository-backed chats use isolated Kandev worktrees; closing deletes the ephemeral task permanently. Chats older than seven days are swept at startup and every 24 hours unless their session is `RUNNING` or `IDLE`. |
 | Utility agents and custom one-shot helpers | Dependency-bound | Require an ACP inference-capable agent and usable model. Passthrough-only agents do not satisfy this path. |
@@ -56,9 +72,15 @@ Released builds can lag this page. Check **Settings > System > About** or `kande
 | Voice input | Dependency-bound | Browser Web Speech, a browser-downloaded Whisper model, and server Whisper paths exist. Selection does not retry another engine after a recognition error. Server Whisper requires `KANDEV_VOICE_OPENAI_API_KEY` (empty by default); without it the transcription route returns 503. |
 | Embedded VS Code | Limited | code-server runs inside the task runtime with `--auth none` on `0.0.0.0:<random-port>`. It relies on task-runtime and network isolation rather than its own login. Native Windows Local and Worktree sessions omit it; Linux-backed Local Docker, Sprites, and supported SSH sessions can offer it even when Kandev runs on Windows. The active session executor, not the visitor's browser platform, controls the topbar entry. |
 | Built-in editors and host editor launch | Dependency-bound | Built-in editing is shipped. External editors depend on host discovery/custom commands. A multi-worktree session presents a repository/worktree picker before host launch; clients that omit the worktree ID retain a first-worktree fallback. A remote executor path may not work without remote-editor configuration. |
-| Language servers | Limited | Current built-in mapping covers TypeScript/JavaScript, Go, Rust, and Python. Auto-start/installation default off, and subprocesses run on the backend host rather than inside Docker, SSH, or Sprites runtimes. |
+| Language servers | Limited | Desktop Monaco maps TypeScript/JavaScript, Go, Rust, Python, and experimental Kotlin to task-host servers with diagnostics, completion, hover, navigation, signature help, and semantic tokens. Status distinguishes a launched process awaiting `initialize` from server-reported project work; slow Kotlin Gradle imports can take minutes, with no automatic timeout or universal percentage/ETA. Fine-pointer desktop can place active-file status in the editor toolbar or Application status bar; touch tablet falls back to the toolbar, and phone has no LSP control. Auto-start/installation default off; Kotlin is manual-only. Local PC and Local Docker are supported, while SSH, Sprites, remote Docker, and mobile LSP are not. |
 | Integrated shell terminals | Dependency-bound | Create, reopen, rename, and terminate are shipped. Shell settings affect new terminals, and executor/task-environment availability controls where the PTY runs. |
 | Prompts, keyboard shortcuts, notifications, appearance, and task actions | Supported | These are normal settings surfaces. Browser notification permission, custom command validity, and local shell/editor availability still apply to their effects. |
+| Web UI localization | Limited | **Settings > General > Appearance** offers English and 简体中文. The selection persists across reloads, but localization migration is incremental: currently externalized surfaces use the selected language while unmigrated surfaces remain in English. |
+
+</details>
+
+<details>
+<summary>Agents, executors, integrations, and automation</summary>
 
 ## Agents, executors, integrations, and automation
 
@@ -72,17 +94,21 @@ Released builds can lag this page. Check **Settings > System > About** or `kande
 | SSH executor | Limited | Remote sessions support trusted Linux or macOS hosts on amd64 or arm64, with public-key authentication, SFTP, and TCP forwarding. Kandev does not currently clone/materialize attached repositories there, ignores profile prepare/cleanup scripts, and retains the remote task directory for manual cleanup. |
 | Remote Docker executor | In progress | The type and legacy/direct settings fields are registered, but runtime create/stop return `not yet implemented`, and the current **Settings > Executors** hub does not offer it. |
 | GitHub integration | Dependency-bound | Workspace repository scope, issue/PR browsing, actions, watches, presets, reviews, checks, and Gists depend on GitHub auth, scopes, rate limits, and repository permissions. Supported Local Docker, Sprites, and SSH launch paths may receive the globally stored token as `GITHUB_TOKEN`/`GH_TOKEN`; workspace repository scope does not constrain its privileges. |
-| Azure DevOps integration | Limited | Azure DevOps Services supports workspace PAT configuration, read-only work-item and pull-request browsing, feedback, task launch, and durable task PR associations. Azure DevOps Server/TFS, Entra OAuth, writes, watches, and webhooks are not supported; neither `gh` nor `az` is required. |
+| Azure DevOps integration | Limited | Azure DevOps Services supports workspace PAT configuration, boards, work-item/PR browsing, constrained assignment and board moves, feedback, task launch and associations, configurable actions/queries, and polling watches. Azure DevOps Server/TFS, Entra OAuth, arbitrary work-item editing, and webhooks are not supported; neither `gh` nor `az` is required. |
 | GitLab integration | Limited | Each workspace can connect one `gitlab.com` or self-managed origin, browse and launch from issues/MRs, link tasks to MRs, run review/issue watches, review and act on linked MRs, assign reviewers, toggle MR notifications, and create/auto-link MRs. Provider permissions and exact host/project identity apply. Browse project narrowing is current-page-only, watches inspect at most their first 50 matches, GitLab has no team review-request equivalent, and issue notification subscription has no UI control. |
 | Jira integration | Limited | Search/browse, supported transitions, launch presets, task launch, and watches require provider credentials. Launch copies data rather than creating a durable association; each watch poll reads only the first 50 JQL matches. |
 | Linear integration | Limited | Search/browse, state changes, task launch, and watches require provider credentials. Launch has no preset/durable association; a watch reads 50 matches in provider order or at most 250 with explicit local sorting. |
 | Sentry integration | Limited | Multi-instance configuration, issue watches, and current-task issue actions are shipped; there is no top-level browser. Watches read only the newest first page, and the status picker allows multiple selections while the backend accepts at most one. |
-| Slack integration | Experimental | Uses a nonstandard browser-session token/cookie and polling rather than OAuth or a bot installation. A first scan can process up to 30 existing matches, and reactions/replies are best-effort. |
-| Integration **Enabled** switches | Limited | Jira/Linear/Sentry/Slack switches are browser-local presentation state; they do not stop backend pollers. Pause/delete watches or remove the Slack/provider configuration when polling must stop. |
-| Manual, preset/`@every` schedule, authenticated webhook, and GitHub PR-open automations | Limited | Task and Run modes are shipped, but Run cannot answer permission prompts. PR triggers need explicit repositories and ignore the saved Opened checkbox. Webhooks silently retain only the first 1 MiB. **Play** remains clickable while disabled but produces no history. |
+| Integration **Enabled** switches | Limited | Jira/Linear/Sentry switches are browser-local presentation state; they do not stop backend pollers. Pause/delete watches or remove the provider configuration when polling must stop. |
+| Manual, preset/`@every` schedule, authenticated webhook, and GitHub PR-open automations | Limited | Every automation now produces the same kind of run; the Task/Run mode selector is withdrawn and runs have their own destination instead of the board. PR triggers need explicit repositories and ignore the saved Opened checkbox. Webhooks silently retain only the first 1 MiB. **Play** remains clickable while disabled but produces no history. |
 | Fixed cron timezone behavior | Limited | The UI accepts fixed cron and timezone values, but the current interval scheduler does not honor the configured timezone and some fixed cron expressions may never fire. Prefer tested presets or `@every` intervals. |
 | GitHub push and CI automation triggers | In progress | Trigger types and UI labels exist as coming-soon/stub paths; they are not working production triggers. GitHub's separate opt-in PR CI-fix automation is shipped. |
-| Automation Run mode | Limited | Creates a hidden ephemeral task and starts immediately. It cannot require user input. Automatic worktree/branch reaping applies only when a Worktree runtime ID is present; other executors follow their own lifecycle. |
+| Automation runs | Limited | A firing creates a persistent task hidden from the board by its origin, starts immediately, and stays answerable — the old Run mode's inability to take user input is gone with the mode itself. Automations that predate this change stop producing kanban cards on their next firing. Worktrees are kept for the ten most recent finished runs per automation and reclaimed beyond that, so an older run is still readable but no longer repliable. |
+
+</details>
+
+<details>
+<summary>MCP, clients, and operation</summary>
 
 ## MCP, clients, and operation
 
@@ -96,13 +122,15 @@ Released builds can lag this page. Check **Settings > System > About** or `kande
 | CLI/browser runtime, Linux/macOS service, Docker deployment, and remote hosting | Dependency-bound | Platform, filesystem, browser, systemd/launchd, container, reverse-proxy, and network configuration determine availability. The web app, API, WebSocket, and external MCP add no Kandev user-login boundary; protect the whole remotely reachable origin. |
 | Native desktop app | Dependency-bound | macOS, Windows, and Linux artifacts and a Tauri shell are implemented. Signing trust and update behavior differ by platform and release artifact. |
 | Kubernetes deployment guide | Experimental | The guide describes one deployment approach; Kandev does not ship a Kubernetes executor or operator. |
-| Statistics and host resource metrics | Supported | Workspace stats and on-demand CPU/memory/disk display are shipped. Execution-environment metrics depend on executor/runtime support. |
+| Statistics and host resource metrics | Supported | Workspace stats and on-demand CPU/memory/disk display are shipped. Open **Stats** from the desktop sidebar or from **Menu → Utilities → Stats** on phones. Execution-environment metrics depend on executor/runtime support. |
 | SQLite backups, database maintenance, status, and logs | Supported | Backups use SQLite `VACUUM INTO` snapshots under the data root. Retention, free space, file permissions, and off-host copies remain operator responsibilities. |
 | Update checking and applying updates | Dependency-bound | Checking is shipped. Package-manager installs update through their package manager; backend self-update is service-install-specific; desktop updater support varies by artifact/platform. |
 | Feature Toggle settings | Supported | The page exposes Office and Debug overrides, environment locks, and restart-required state. Debug is high risk because logs/endpoints can expose prompt, file, and tool data. A toggle being present does not promote its target feature to supported. |
 | Office mode | In progress | Production defaults `KANDEV_FEATURES_OFFICE=false`; development and E2E enable it for implementation/testing. Its routes, agents, labels, documents, dependencies, routines, skills, routing, costs, and approvals may change between releases. |
 | Plugin system | Supported | The plugin system ships in the base product with no feature flag: install/manage plugins, spawn plugin backends, and load native UI bundles. Loaded plugin code runs with backend privileges, so install only plugins you trust; manifest schema, capabilities, and host API may still change between releases. |
 | Mock providers and E2E-only routes | Internal | They are selected only by development/test runtime profiles and must not be exposed as product integrations. |
+
+</details>
 
 ## Publication boundary
 

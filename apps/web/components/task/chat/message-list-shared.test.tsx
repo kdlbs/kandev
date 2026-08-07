@@ -75,6 +75,7 @@ import {
   MessageItem,
   MessageListStatus,
   UnreadDivider,
+  anchoredBarScrollOffsetPx,
   getConversationLoadingState,
   getEffectiveActiveTurnId,
   getItemKey,
@@ -88,6 +89,24 @@ import {
   shouldAutoScrollToBottom,
   shouldLoadMoreForTranscriptTarget,
 } from "./message-list-shared";
+
+describe("anchoredBarScrollOffsetPx", () => {
+  it("passes through a measured height unchanged", () => {
+    expect(anchoredBarScrollOffsetPx(63)).toBe(63);
+  });
+
+  it("treats an unmeasured (undefined) height as no offset", () => {
+    expect(anchoredBarScrollOffsetPx(undefined)).toBe(0);
+  });
+
+  it("clamps a negative height to zero", () => {
+    expect(anchoredBarScrollOffsetPx(-12)).toBe(0);
+  });
+
+  it("rounds a fractional height to whole pixels", () => {
+    expect(anchoredBarScrollOffsetPx(63.7)).toBe(64);
+  });
+});
 
 const item: RenderItem = { type: "message", message: { id: "m1" } as Message };
 const noop = () => {};

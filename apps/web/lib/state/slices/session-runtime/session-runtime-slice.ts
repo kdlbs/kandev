@@ -50,6 +50,7 @@ const COMPARABLE_FILE_FIELDS = [
   "diff",
   "diff_skip_reason",
   "repository_name",
+  "is_submodule",
 ] as const;
 
 function comparableFileInfo(file: FileInfo) {
@@ -63,6 +64,7 @@ function comparableFileInfo(file: FileInfo) {
     diff: file.diff ?? "",
     diff_skip_reason: file.diff_skip_reason ?? "",
     repository_name: file.repository_name ?? "",
+    is_submodule: file.is_submodule ?? false,
   };
 }
 
@@ -96,6 +98,7 @@ function hasBranchSummaryChanged(existing: GitStatusEntry, incoming: GitStatusEn
     existing.ahead !== incoming.ahead ||
     existing.behind !== incoming.behind ||
     (existing.repository_name ?? "") !== (incoming.repository_name ?? "") ||
+    existing.is_submodule !== incoming.is_submodule ||
     existing.branch_additions !== incoming.branch_additions ||
     existing.branch_deletions !== incoming.branch_deletions
   );

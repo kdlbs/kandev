@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
-import { isEnvironmentSetupError, resolveAgentErrorLabel } from "./agent-error-label";
+import { isEnvironmentSetupError, resolveAgentErrorLabelKey } from "./agent-error-label";
 
-const FALLBACK = "Agent has encountered an error";
+const FALLBACK = "task:agentHasEncounteredAnError";
 
 describe("isEnvironmentSetupError", () => {
   it("matches genuine environment/workspace setup failures", () => {
@@ -35,21 +35,21 @@ describe("isEnvironmentSetupError", () => {
   });
 });
 
-describe("resolveAgentErrorLabel", () => {
-  it("returns the setup label only for genuine setup failures", () => {
-    expect(resolveAgentErrorLabel("failed to launch container", FALLBACK)).toBe(
-      "Environment setup failed",
+describe("resolveAgentErrorLabelKey", () => {
+  it("returns the setup label key only for genuine setup failures", () => {
+    expect(resolveAgentErrorLabelKey("failed to launch container", FALLBACK)).toBe(
+      "task:environmentSetupFailed",
     );
   });
 
-  it("returns the fallback label for downstream agent/API errors", () => {
+  it("returns the fallback label key for downstream agent/API errors", () => {
     expect(
-      resolveAgentErrorLabel("API Error: 400 thinking blocks cannot be modified", FALLBACK),
+      resolveAgentErrorLabelKey("API Error: 400 thinking blocks cannot be modified", FALLBACK),
     ).toBe(FALLBACK);
   });
 
-  it("returns the fallback label when there is no error message", () => {
-    expect(resolveAgentErrorLabel(undefined, FALLBACK)).toBe(FALLBACK);
-    expect(resolveAgentErrorLabel("", FALLBACK)).toBe(FALLBACK);
+  it("returns the fallback label key when there is no error message", () => {
+    expect(resolveAgentErrorLabelKey(undefined, FALLBACK)).toBe(FALLBACK);
+    expect(resolveAgentErrorLabelKey("", FALLBACK)).toBe(FALLBACK);
   });
 });

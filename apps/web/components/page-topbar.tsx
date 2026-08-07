@@ -1,6 +1,7 @@
 import Link from "@/components/routing/app-link";
 import { forwardRef } from "react";
 import type { ReactNode } from "react";
+import { useTranslation } from "react-i18next";
 import { IconArrowLeft, IconHome } from "@tabler/icons-react";
 import {
   Breadcrumb,
@@ -12,6 +13,7 @@ import {
 } from "@kandev/ui/breadcrumb";
 import { cn } from "@kandev/ui/lib/utils";
 import { AppStatusDrawerTrigger } from "@/components/app-status-bar/app-status-surface-provider";
+import { linkToTaskOverview } from "@/lib/links";
 
 type PageTopbarProps = {
   /** Page title shown as the rightmost (current) breadcrumb */
@@ -46,8 +48,16 @@ type PageTopbarProps = {
   showStatusTrigger?: boolean;
 };
 
-function BackLink({ href, label }: { href: string; label: string }) {
-  if (href === "/") {
+function BackLink({
+  href,
+  label,
+  isHome = href === "/",
+}: {
+  href: string;
+  label: string;
+  isHome?: boolean;
+}) {
+  if (isHome) {
     return (
       <Link
         href={href}
@@ -83,6 +93,7 @@ function TopbarBreadcrumb({
   icon?: ReactNode;
   showPhoneHome: boolean;
 }) {
+  const { t } = useTranslation();
   // The Home prefix is redundant on desktop, where the AppSidebar always shows
   // a Home nav item. Only render the back link when a page sets a non-root
   // backHref (e.g. a true ancestor route within a section).
@@ -92,7 +103,7 @@ function TopbarBreadcrumb({
   // users with no way back. Keep the home crumb phone-only.
   const showHomeCrumb = !showBackLink && showPhoneHome;
   return (
-    <Breadcrumb className="relative z-10 min-w-0">
+    <Breadcrumb className="relative z-10 min-w-0" aria-label={t("common:breadcrumb")}>
       <BreadcrumbList className="flex-nowrap text-sm">
         {showBackLink && (
           <>
@@ -108,7 +119,7 @@ function TopbarBreadcrumb({
           <>
             <BreadcrumbItem className="shrink-0 md:hidden" data-testid="topbar-phone-home">
               <BreadcrumbLink asChild>
-                <BackLink href="/" label="Home" />
+                <BackLink href={linkToTaskOverview()} label="Home" isHome />
               </BreadcrumbLink>
             </BreadcrumbItem>
             <BreadcrumbSeparator className="shrink-0 md:hidden" />

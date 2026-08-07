@@ -246,30 +246,40 @@ const TaskCIAutoFixMaxRounds = 10
 
 // PR represents a GitHub Pull Request.
 type PR struct {
-	ID                 int64               `json:"id"`
-	NodeID             string              `json:"node_id"`
-	Number             int                 `json:"number"`
-	Title              string              `json:"title"`
-	URL                string              `json:"url"`
-	HTMLURL            string              `json:"html_url"`
-	State              string              `json:"state"` // open, closed, merged
-	HeadBranch         string              `json:"head_branch"`
-	HeadSHA            string              `json:"head_sha"`
-	BaseBranch         string              `json:"base_branch"`
-	AuthorLogin        string              `json:"author_login"`
-	RepoOwner          string              `json:"repo_owner"`
-	RepoName           string              `json:"repo_name"`
-	Body               string              `json:"body"`
-	Draft              bool                `json:"draft"`
-	Mergeable          bool                `json:"mergeable"`
-	MergeableState     string              `json:"mergeable_state"` // clean, blocked, behind, dirty, has_hooks, unstable, draft, unknown, ""
-	Additions          int                 `json:"additions"`
-	Deletions          int                 `json:"deletions"`
-	RequestedReviewers []RequestedReviewer `json:"requested_reviewers"`
-	CreatedAt          time.Time           `json:"created_at"`
-	UpdatedAt          time.Time           `json:"updated_at"`
-	MergedAt           *time.Time          `json:"merged_at,omitempty"`
-	ClosedAt           *time.Time          `json:"closed_at,omitempty"`
+	ID                  int64               `json:"id"`
+	NodeID              string              `json:"node_id"`
+	Number              int                 `json:"number"`
+	Title               string              `json:"title"`
+	URL                 string              `json:"url"`
+	HTMLURL             string              `json:"html_url"`
+	State               string              `json:"state"` // open, closed, merged
+	HeadBranch          string              `json:"head_branch"`
+	HeadSHA             string              `json:"head_sha"`
+	BaseBranch          string              `json:"base_branch"`
+	AuthorLogin         string              `json:"author_login"`
+	RepoOwner           string              `json:"repo_owner"`
+	RepoName            string              `json:"repo_name"`
+	HeadRepoID          int64               `json:"head_repo_id,omitempty"`
+	HeadRepoNodeID      string              `json:"head_repo_node_id,omitempty"`
+	HeadRepoOwner       string              `json:"head_repo_owner,omitempty"`
+	HeadRepoName        string              `json:"head_repo_name,omitempty"`
+	HeadRepoCloneURL    string              `json:"head_repo_clone_url,omitempty"`
+	BaseRepoID          int64               `json:"base_repo_id,omitempty"`
+	BaseRepoOwner       string              `json:"base_repo_owner,omitempty"`
+	BaseRepoName        string              `json:"base_repo_name,omitempty"`
+	BaseDefaultBranch   string              `json:"base_default_branch,omitempty"`
+	MaintainerCanModify bool                `json:"maintainer_can_modify"`
+	Body                string              `json:"body"`
+	Draft               bool                `json:"draft"`
+	Mergeable           bool                `json:"mergeable"`
+	MergeableState      string              `json:"mergeable_state"` // clean, blocked, behind, dirty, has_hooks, unstable, draft, unknown, ""
+	Additions           int                 `json:"additions"`
+	Deletions           int                 `json:"deletions"`
+	RequestedReviewers  []RequestedReviewer `json:"requested_reviewers"`
+	CreatedAt           time.Time           `json:"created_at"`
+	UpdatedAt           time.Time           `json:"updated_at"`
+	MergedAt            *time.Time          `json:"merged_at,omitempty"`
+	ClosedAt            *time.Time          `json:"closed_at,omitempty"`
 }
 
 // RequestedReviewer represents a pending reviewer request on a PR.
@@ -432,6 +442,7 @@ type TaskPR struct {
 	MergedAt                *time.Time `json:"merged_at,omitempty" db:"merged_at"`
 	ClosedAt                *time.Time `json:"closed_at,omitempty" db:"closed_at"`
 	LastSyncedAt            *time.Time `json:"last_synced_at,omitempty" db:"last_synced_at"`
+	DetachedAt              *time.Time `json:"-" db:"detached_at"`
 	UpdatedAt               time.Time  `json:"updated_at" db:"updated_at"`
 }
 
@@ -809,13 +820,29 @@ type PRFile struct {
 
 // PRCommitInfo represents a commit in a pull request.
 type PRCommitInfo struct {
-	SHA          string `json:"sha"`
-	Message      string `json:"message"`
-	AuthorLogin  string `json:"author_login"`
-	AuthorDate   string `json:"author_date"`
-	Additions    int    `json:"additions"`
-	Deletions    int    `json:"deletions"`
-	FilesChanged int    `json:"files_changed"`
+	SHA            string `json:"sha"`
+	Message        string `json:"message"`
+	AuthorLogin    string `json:"author_login"`
+	AuthorDate     string `json:"author_date"`
+	Additions      int    `json:"additions"`
+	Deletions      int    `json:"deletions"`
+	FilesChanged   int    `json:"files_changed"`
+	StatsAvailable bool   `json:"stats_available"`
+}
+
+// PRCommitDetail represents the metadata and changed files for one GitHub
+// commit. Unlike PRCommitInfo, its statistics come from GitHub's individual
+// commit endpoint and are always measured.
+type PRCommitDetail struct {
+	SHA          string   `json:"sha"`
+	Message      string   `json:"message"`
+	AuthorLogin  string   `json:"author_login"`
+	AuthorName   string   `json:"author_name"`
+	AuthorDate   string   `json:"author_date"`
+	Additions    int      `json:"additions"`
+	Deletions    int      `json:"deletions"`
+	FilesChanged int      `json:"files_changed"`
+	Files        []PRFile `json:"files"`
 }
 
 // DailyCount holds a date and count for chart data.

@@ -37,6 +37,11 @@ import type { JiraTicket } from "@/lib/types/jira";
 import type { LinearIssue } from "@/lib/types/linear";
 import { useTaskCreatePromptMention } from "@/hooks/use-task-create-prompt-mention";
 import { cn } from "@/lib/utils";
+import { clampTaskTitleInput } from "@/lib/task-title";
+import { deleteAttachment, uploadAttachment } from "@/lib/api/domains/attachment-api";
+import { ApiError } from "@/lib/api/client";
+import { useTranslation } from "react-i18next";
+import { t } from "@/lib/i18n";
 
 const CURSOR_POINTER_CLASS = "cursor-pointer";
 
@@ -99,7 +104,7 @@ export const RepositorySelector = memo(function RepositorySelector({
       searchPlaceholder={searchPlaceholder}
       emptyMessage={emptyMessage}
       disabled={disabled}
-      dropdownLabel="Repository"
+      dropdownLabel={t("task:repository2")}
       className={disabled ? undefined : CURSOR_POINTER_CLASS}
       triggerClassName={triggerClassName}
       testId="repository-selector"
@@ -162,7 +167,7 @@ export const BranchSelector = memo(function BranchSelector({
       searchPlaceholder={searchPlaceholder}
       emptyMessage={emptyMessage}
       disabled={disabled}
-      dropdownLabel="Base Branch"
+      dropdownLabel={t("task:baseBranch2")}
       className={disabled ? undefined : CURSOR_POINTER_CLASS}
       triggerClassName={triggerClassName}
       testId="branch-selector"
@@ -192,16 +197,17 @@ export const AgentSelector = memo(function AgentSelector({
   triggerClassName,
   popoverPortal,
 }: AgentSelectorProps) {
+  const { t } = useTranslation();
   return (
     <Combobox
       options={options}
       value={value}
       onValueChange={onValueChange}
       placeholder={placeholder}
-      searchPlaceholder="Search agents..."
-      emptyMessage="No agent found."
+      searchPlaceholder={t("task:searchAgents")}
+      emptyMessage={t("task:noAgentFound")}
       disabled={disabled}
-      dropdownLabel="Agent Profile"
+      dropdownLabel={t("task:agentProfile2")}
       className={disabled ? undefined : CURSOR_POINTER_CLASS}
       triggerClassName={cn("min-w-0", triggerClassName)}
       popoverPortal={popoverPortal}
@@ -229,15 +235,16 @@ export const ExecutorSelector = memo(function ExecutorSelector({
   triggerClassName,
   popoverPortal,
 }: ExecutorSelectorProps) {
+  const { t } = useTranslation();
   return (
     <Combobox
       options={options}
       value={value}
       onValueChange={onValueChange}
       placeholder={placeholder}
-      emptyMessage="No executor found."
+      emptyMessage={t("task:noExecutorFound")}
       disabled={disabled}
-      dropdownLabel="Executor"
+      dropdownLabel={t("task:executor2")}
       className={disabled ? undefined : CURSOR_POINTER_CLASS}
       triggerClassName={triggerClassName}
       popoverPortal={popoverPortal}
@@ -265,16 +272,17 @@ export const ExecutorProfileSelector = memo(function ExecutorProfileSelector({
   triggerClassName,
   popoverPortal,
 }: ExecutorProfileSelectorProps) {
+  const { t } = useTranslation();
   return (
     <Combobox
       options={options}
       value={value}
       onValueChange={onValueChange}
       placeholder={placeholder}
-      searchPlaceholder="Search profiles..."
-      emptyMessage="No profile found."
+      searchPlaceholder={t("task:searchProfiles")}
+      emptyMessage={t("task:noProfileFound")}
       disabled={disabled}
-      dropdownLabel="Executor Profile"
+      dropdownLabel={t("task:executorProfile2")}
       className={disabled ? undefined : CURSOR_POINTER_CLASS}
       triggerClassName={cn("min-w-0", triggerClassName)}
       popoverPortal={popoverPortal}
@@ -294,6 +302,7 @@ export const InlineTaskName = memo(function InlineTaskName({
   onChange,
   autoFocus,
 }: InlineTaskNameProps) {
+  const { t } = useTranslation();
   const inputRef = useRef<HTMLInputElement>(null);
   const hasFocusedRef = useRef(false);
 
@@ -310,8 +319,8 @@ export const InlineTaskName = memo(function InlineTaskName({
       ref={inputRef}
       type="text"
       value={value}
-      onChange={(e) => onChange(e.target.value)}
-      placeholder="Task name"
+      onChange={(e) => onChange(clampTaskTitleInput(e.target.value))}
+      placeholder={t("task:taskName")}
       data-testid="task-title-input"
       className="w-full min-w-0 max-w-full border border-input bg-input/20 dark:bg-input/30 text-sm font-medium rounded-md px-3 py-2 placeholder:text-muted-foreground/70 outline-none focus-visible:border-ring transition-colors"
     />
@@ -321,9 +330,11 @@ export const InlineTaskName = memo(function InlineTaskName({
 // Memoized description input to prevent re-rendering the entire dialog on every keystroke
 type TaskFormInputsProps = {
   isSessionMode: boolean;
+  workspaceId?: string | null;
   autoFocus?: boolean;
   initialDescription: string;
   onDescriptionChange: (hasContent: boolean) => void;
+  onPendingAttachmentUploadsChange?: (pending: boolean) => void;
   onKeyDown: (e: React.KeyboardEvent) => void;
   descriptionValueRef: React.RefObject<TaskFormInputsHandle | null>;
   disabled?: boolean;
@@ -349,14 +360,73 @@ type TaskFormInputsProps = {
   onVoiceAutoSend?: () => void;
 };
 
-function useFileAttachments() {
+// eslint-disable-next-line max-lines-per-function
+function useFileAttachments(
+  workspaceId: string | null | undefined,
+  onPendingAttachmentUploadsChange?: (pending: boolean) => void,
+) {
   const [attachments, setAttachments] = useState<FileAttachment[]>([]);
   const attachmentsRef = useRef<FileAttachment[]>([]);
+
+  const updateAttachment = useCallback((id: string, update: Partial<FileAttachment>) => {
+    setAttachments((prev) => {
+      const next = prev.map((attachment) =>
+        attachment.id === id ? { ...attachment, ...update } : attachment,
+      );
+      attachmentsRef.current = next;
+      return next;
+    });
+  }, []);
+
+  const uploadPendingAttachment = useCallback(
+    async (attachment: FileAttachment) => {
+      if (!workspaceId || !attachment.file || attachment.attachmentId) return;
+      updateAttachment(attachment.id, { uploadStatus: "uploading" });
+      try {
+        const uploaded = await uploadAttachment(attachment.file, {
+          workspaceId,
+          kind: attachment.isImage ? "image" : "resource",
+          deliveryMode: attachment.deliveryMode,
+        });
+        if (!attachmentsRef.current.some((current) => current.id === attachment.id)) {
+          void deleteAttachment(uploaded.attachment_id).catch(() => undefined);
+          return;
+        }
+        updateAttachment(attachment.id, {
+          attachmentId: uploaded.attachment_id,
+          uploadStatus: "ready",
+          size: uploaded.size_bytes,
+        });
+      } catch (error) {
+        updateAttachment(attachment.id, {
+          uploadStatus: "failed",
+          uploadError: error instanceof ApiError ? error.message : t("task:uploadFailed"),
+        });
+      }
+    },
+    [updateAttachment, workspaceId],
+  );
+
+  useEffect(() => {
+    if (!workspaceId) return;
+    for (const attachment of attachmentsRef.current) {
+      if (attachment.file && !attachment.attachmentId && attachment.uploadStatus !== "uploading") {
+        void uploadPendingAttachment(attachment);
+      }
+    }
+  }, [uploadPendingAttachment, workspaceId]);
+
   const [isDragging, setIsDragging] = useState(false);
   const warnAttachmentCountLimit = useAttachmentCountFeedback();
   const rejectOversizedFile = useAttachmentFileFeedback();
   const warnAttachmentTotalSizeLimit = useAttachmentTotalSizeFeedback();
   const warnUnreadablePastedImage = useUnreadablePastedImageFeedback();
+
+  useEffect(() => {
+    onPendingAttachmentUploadsChange?.(
+      attachments.some((attachment) => attachment.file && !attachment.attachmentId),
+    );
+  }, [attachments, onPendingAttachmentUploadsChange, workspaceId]);
 
   const addFiles = useCallback(
     async (files: File[], issue?: ImagePasteIssue) => {
@@ -386,22 +456,41 @@ function useFileAttachments() {
       const next = [...attachmentsRef.current, ...accepted];
       attachmentsRef.current = next;
       setAttachments(next);
+      for (const attachment of accepted) void uploadPendingAttachment(attachment);
     },
     [
       rejectOversizedFile,
       warnAttachmentCountLimit,
       warnAttachmentTotalSizeLimit,
       warnUnreadablePastedImage,
+      uploadPendingAttachment,
     ],
   );
 
   const handleRemoveAttachment = useCallback((id: string) => {
+    const removed = attachmentsRef.current.find((attachment) => attachment.id === id);
     const next = attachmentsRef.current.filter((att) => att.id !== id);
     attachmentsRef.current = next;
     setAttachments(next);
+    if (removed?.attachmentId) void deleteAttachment(removed.attachmentId).catch(() => undefined);
   }, []);
 
-  return { attachments, isDragging, setIsDragging, addFiles, handleRemoveAttachment };
+  const handleRetryAttachment = useCallback(
+    (id: string) => {
+      const attachment = attachmentsRef.current.find((item) => item.id === id);
+      if (attachment) void uploadPendingAttachment(attachment);
+    },
+    [uploadPendingAttachment],
+  );
+
+  return {
+    attachments,
+    isDragging,
+    setIsDragging,
+    addFiles,
+    handleRemoveAttachment,
+    handleRetryAttachment,
+  };
 }
 
 function useAttachmentHandlers(
@@ -469,15 +558,17 @@ function useAttachmentHandlers(
 function toContextItems(
   attachments: FileAttachment[],
   onRemove: (id: string) => void,
+  onRetry: (id: string) => void,
 ): ContextItem[] {
   return attachments.map((att) =>
     att.isImage
       ? ({
           kind: "image" as const,
           id: `image:${att.id}`,
-          label: `Image (${formatBytes(att.size)})`,
+          label: t("task:imageWithSize", { bytes: formatBytes(att.size) }),
           attachment: att,
           onRemove: () => onRemove(att.id),
+          onRetry: () => onRetry(att.id),
         } as ImageContextItem)
       : ({
           kind: "file-attachment" as const,
@@ -485,18 +576,20 @@ function toContextItems(
           label: att.fileName,
           attachment: att,
           onRemove: () => onRemove(att.id),
+          onRetry: () => onRetry(att.id),
         } as FileAttachmentContextItem),
   );
 }
 
 function AttachButton({ onClick, disabled }: { onClick: () => void; disabled?: boolean }) {
+  const { t } = useTranslation();
   return (
     <div className="flex items-center px-1 pb-1">
       <Tooltip>
         <TooltipTrigger asChild>
           <button
             type="button"
-            aria-label="Attach files"
+            aria-label={t("task:attachFiles")}
             className={`h-7 w-7 inline-flex items-center justify-center rounded-md text-muted-foreground hover:bg-muted/40 hover:text-foreground ${disabled ? "cursor-not-allowed opacity-50" : "cursor-pointer"}`}
             onClick={onClick}
             disabled={disabled}
@@ -504,7 +597,7 @@ function AttachButton({ onClick, disabled }: { onClick: () => void; disabled?: b
             <IconPaperclip className="h-4 w-4" />
           </button>
         </TooltipTrigger>
-        <TooltipContent>Attach files</TooltipContent>
+        <TooltipContent>{t("task:attachFiles")}</TooltipContent>
       </Tooltip>
     </div>
   );
@@ -679,7 +772,8 @@ function useTextareaHandlers(
 ) {
   const { handleChange: mentionHandleChange, handleKeyDown: mentionHandleKeyDown } = mention;
   const handleChange = useCallback(
-    (e: React.ChangeEvent<HTMLTextAreaElement>) => mentionHandleChange(e.target.value),
+    (e: React.ChangeEvent<HTMLTextAreaElement>) =>
+      mentionHandleChange(e.target.value, e.target.selectionStart),
     [mentionHandleChange],
   );
   const handleKeyDown = useCallback(
@@ -727,19 +821,22 @@ function HiddenFileInput({
 }
 
 function DraggingOverlay({ isDragging }: { isDragging: boolean }) {
+  const { t } = useTranslation();
   if (!isDragging) return null;
   return (
     <div className="absolute inset-0 flex items-center justify-center bg-primary/10 border-2 border-dashed border-primary rounded-md pointer-events-none">
-      <span className="text-sm text-primary font-medium">Drop files here</span>
+      <span className="text-sm text-primary font-medium">{t("task:dropFilesHere")}</span>
     </div>
   );
 }
 
 export const TaskFormInputs = memo(function TaskFormInputs({
+  workspaceId,
   isSessionMode,
   autoFocus,
   initialDescription,
   onDescriptionChange,
+  onPendingAttachmentUploadsChange,
   onKeyDown,
   descriptionValueRef,
   disabled,
@@ -751,16 +848,23 @@ export const TaskFormInputs = memo(function TaskFormInputs({
   linearImport,
   onVoiceAutoSend,
 }: TaskFormInputsProps) {
-  const { attachments, isDragging, setIsDragging, addFiles, handleRemoveAttachment } =
-    useFileAttachments();
+  const { t } = useTranslation();
+  const {
+    attachments,
+    isDragging,
+    setIsDragging,
+    addFiles,
+    handleRemoveAttachment,
+    handleRetryAttachment,
+  } = useFileAttachments(workspaceId, onPendingAttachmentUploadsChange);
   const { handlePaste, handleDragOver, handleDragLeave, handleDrop } = useAttachmentHandlers(
     disabled,
     addFiles,
     setIsDragging,
   );
   const contextItems = useMemo(
-    () => toContextItems(attachments, handleRemoveAttachment),
-    [attachments, handleRemoveAttachment],
+    () => toContextItems(attachments, handleRemoveAttachment, handleRetryAttachment),
+    [attachments, handleRemoveAttachment, handleRetryAttachment],
   );
   const { description, textareaRef, setDescriptionValue, insertAtCursor } = useDescriptionInput(
     initialDescription,
@@ -797,8 +901,8 @@ export const TaskFormInputs = memo(function TaskFormInputs({
           placeholder={
             placeholder ??
             (isSessionMode
-              ? "Describe what you want the agent to do... (@ to insert a saved prompt)"
-              : "Write a prompt for the agent... (@ to insert a saved prompt)")
+              ? t("task:describeWhatYouWantTheAgent")
+              : t("task:writeAPromptForTheAgent"))
           }
           value={description}
           onChange={handleChange}

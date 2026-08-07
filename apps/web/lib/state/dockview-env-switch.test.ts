@@ -94,25 +94,6 @@ function makeParams(overrides?: Partial<EnvSwitchParams>): EnvSwitchParams {
   };
 }
 
-function makeTwoLeafSavedLayout(
-  leaves: Array<{ id: string; views: string[]; activeView: string }>,
-  activeGroup: string,
-): ReturnType<typeof getEnvLayout> {
-  return {
-    grid: {
-      root: {
-        type: "branch" as const,
-        data: leaves.map((leaf) => ({ type: "leaf", data: leaf })),
-      },
-      height: 600,
-      width: 800,
-      orientation: "HORIZONTAL" as const,
-    },
-    panels: { chat: { contentComponent: "chat" } },
-    activeGroup,
-  } as unknown as ReturnType<typeof getEnvLayout>;
-}
-
 describe("performEnvSwitch", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -191,6 +172,18 @@ describe("performEnvSwitch", () => {
 
     expect(params.api.layout).toHaveBeenCalledWith(800, 600);
     expect(params.buildDefault).toHaveBeenCalledWith(params.api);
+  });
+
+  it("keeps an explicit route layout on first environment adoption", () => {
+    // The task route can render ?layout=plan before the session's environment
+    // id arrives. First adoption must replay that explicit intent instead of
+    // replacing the plan preset with the effective default layout.
+    const params = makeParams({ oldEnvId: null, initialLayout: "plan" });
+
+    performEnvSwitch(params);
+
+    expect(params.buildDefault).toHaveBeenCalledWith(params.api, "plan");
+    expect(params.api.fromJSON).not.toHaveBeenCalled();
   });
 
   it("preserves the outgoing session panel's tab index when adding the new session on the fast path", () => {
@@ -648,53 +641,5 @@ describe("performEnvSwitch missing Agent restoration", () => {
         position: expect.objectContaining({ referenceGroup: fallbackGroup.id }),
       }),
     );
-  });
-});
-
-describe("performEnvSwitch fast-path active view restoration", () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-  });
-
-  it("restores saved per-group active tabs on the fast path", () => {
-    // Regression: the fast path skips fromJSON, so per-group active tabs
-    // from the outgoing env would persist into the incoming env. The saved
-    // layout's activeView for each group must be reapplied.
-    const setActiveRight = vi.fn();
-    const setActiveCenter = vi.fn();
-    const rightGroup = {
-      id: "right",
-      panels: [
-        { id: "plan", api: { setActive: setActiveRight } },
-        { id: "files", api: { setActive: vi.fn() } },
-      ],
-    };
-    const centerGroup = {
-      id: "center",
-      panels: [{ id: NEW_SESSION_PANEL_ID, api: { setActive: setActiveCenter } }],
-    };
-    const savedLayout = makeTwoLeafSavedLayout(
-      [
-        { id: "center", views: ["chat"], activeView: "chat" },
-        { id: "right", views: ["plan", "files"], activeView: "plan" },
-      ],
-      "right",
-    );
-    vi.mocked(getEnvLayout).mockReturnValueOnce(savedLayout).mockReturnValueOnce(savedLayout);
-    vi.mocked(savedLayoutMatchesLive).mockReturnValueOnce(true);
-    const api = {
-      ...makeMockApi(),
-      groups: [centerGroup, rightGroup],
-      getPanel: vi.fn((id: string) => (id === NEW_SESSION_PANEL_ID ? centerGroup.panels[0] : null)),
-    } as unknown as EnvSwitchParams["api"];
-
-    performEnvSwitch(makeParams({ api }));
-
-    expect(setActiveRight).toHaveBeenCalled();
-    // The saved activeGroup ("right") is applied last, so its setActive must
-    // be the most recent — otherwise center would steal global focus.
-    const lastRightCall = setActiveRight.mock.invocationCallOrder.at(-1) ?? 0;
-    const lastCenterCall = setActiveCenter.mock.invocationCallOrder.at(-1) ?? 0;
-    expect(lastRightCall).toBeGreaterThan(lastCenterCall);
   });
 });

@@ -99,18 +99,19 @@ func (c *Controller) CreateStepsFromTemplate(ctx context.Context, req CreateStep
 
 // CreateStepRequest is the request for creating a single workflow step.
 type CreateStepRequest struct {
-	WorkflowID                string             `json:"workflow_id"`
-	Name                      string             `json:"name"`
-	Position                  int                `json:"position"`
-	Color                     string             `json:"color"`
-	Prompt                    string             `json:"prompt,omitempty"`
-	Events                    *models.StepEvents `json:"events,omitempty"`
-	AllowManualMove           bool               `json:"allow_manual_move"`
-	IsStartStep               *bool              `json:"is_start_step,omitempty"`
-	ShowInCommandPanel        *bool              `json:"show_in_command_panel,omitempty"`
-	AutoAdvanceRequiresSignal *bool              `json:"auto_advance_requires_signal,omitempty"`
-	WIPLimit                  *int               `json:"wip_limit,omitempty"`
-	PullFromStepID            *string            `json:"pull_from_step_id,omitempty"`
+	WorkflowID                 string             `json:"workflow_id"`
+	Name                       string             `json:"name"`
+	Position                   int                `json:"position"`
+	Color                      string             `json:"color"`
+	Prompt                     string             `json:"prompt,omitempty"`
+	Events                     *models.StepEvents `json:"events,omitempty"`
+	AllowManualMove            bool               `json:"allow_manual_move"`
+	IsStartStep                *bool              `json:"is_start_step,omitempty"`
+	ShowInCommandPanel         *bool              `json:"show_in_command_panel,omitempty"`
+	AutoAdvanceRequiresSignal  *bool              `json:"auto_advance_requires_signal,omitempty"`
+	CancelTriggersTurnComplete *bool              `json:"cancel_triggers_turn_complete,omitempty"`
+	WIPLimit                   *int               `json:"wip_limit,omitempty"`
+	PullFromStepID             *string            `json:"pull_from_step_id,omitempty"`
 }
 
 // CreateStep creates a new workflow step.
@@ -140,6 +141,9 @@ func (c *Controller) CreateStep(ctx context.Context, req CreateStepRequest) (*Ge
 	if req.AutoAdvanceRequiresSignal != nil {
 		step.AutoAdvanceRequiresSignal = *req.AutoAdvanceRequiresSignal
 	}
+	if req.CancelTriggersTurnComplete != nil {
+		step.CancelTriggersTurnComplete = *req.CancelTriggersTurnComplete
+	}
 	if req.WIPLimit != nil {
 		if *req.WIPLimit < 0 {
 			return nil, fmt.Errorf("wip_limit must be non-negative")
@@ -161,20 +165,21 @@ func (c *Controller) CreateStep(ctx context.Context, req CreateStepRequest) (*Ge
 
 // UpdateStepRequest is the request for updating a workflow step.
 type UpdateStepRequest struct {
-	ID                        string             `json:"id"`
-	Name                      *string            `json:"name,omitempty"`
-	Position                  *int               `json:"position,omitempty"`
-	Color                     *string            `json:"color,omitempty"`
-	Prompt                    *string            `json:"prompt,omitempty"`
-	Events                    *models.StepEvents `json:"events,omitempty"`
-	AllowManualMove           *bool              `json:"allow_manual_move,omitempty"`
-	IsStartStep               *bool              `json:"is_start_step,omitempty"`
-	ShowInCommandPanel        *bool              `json:"show_in_command_panel,omitempty"`
-	AutoArchiveAfterHours     *int               `json:"auto_archive_after_hours,omitempty"`
-	AgentProfileID            *string            `json:"agent_profile_id,omitempty"`
-	AutoAdvanceRequiresSignal *bool              `json:"auto_advance_requires_signal,omitempty"`
-	WIPLimit                  *int               `json:"wip_limit,omitempty"`
-	PullFromStepID            *string            `json:"pull_from_step_id,omitempty"`
+	ID                         string             `json:"id"`
+	Name                       *string            `json:"name,omitempty"`
+	Position                   *int               `json:"position,omitempty"`
+	Color                      *string            `json:"color,omitempty"`
+	Prompt                     *string            `json:"prompt,omitempty"`
+	Events                     *models.StepEvents `json:"events,omitempty"`
+	AllowManualMove            *bool              `json:"allow_manual_move,omitempty"`
+	IsStartStep                *bool              `json:"is_start_step,omitempty"`
+	ShowInCommandPanel         *bool              `json:"show_in_command_panel,omitempty"`
+	AutoArchiveAfterHours      *int               `json:"auto_archive_after_hours,omitempty"`
+	AgentProfileID             *string            `json:"agent_profile_id,omitempty"`
+	AutoAdvanceRequiresSignal  *bool              `json:"auto_advance_requires_signal,omitempty"`
+	CancelTriggersTurnComplete *bool              `json:"cancel_triggers_turn_complete,omitempty"`
+	WIPLimit                   *int               `json:"wip_limit,omitempty"`
+	PullFromStepID             *string            `json:"pull_from_step_id,omitempty"`
 }
 
 // UpdateStep updates an existing workflow step.
@@ -218,6 +223,9 @@ func (c *Controller) UpdateStep(ctx context.Context, req UpdateStepRequest) (*Ge
 	}
 	if req.AutoAdvanceRequiresSignal != nil {
 		step.AutoAdvanceRequiresSignal = *req.AutoAdvanceRequiresSignal
+	}
+	if req.CancelTriggersTurnComplete != nil {
+		step.CancelTriggersTurnComplete = *req.CancelTriggersTurnComplete
 	}
 	if req.WIPLimit != nil {
 		if *req.WIPLimit < 0 {

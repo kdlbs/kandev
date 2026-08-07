@@ -1,6 +1,11 @@
 package worktree
 
-import "time"
+import (
+	"fmt"
+	"time"
+
+	"github.com/kandev/kandev/internal/task/models"
+)
 
 // SyncProgressStatus represents the status of a base-branch sync progress event.
 type SyncProgressStatus string
@@ -157,6 +162,10 @@ type CreateRequest struct {
 	// uniformly without needing to add the fork as a remote.
 	PRNumber int
 
+	// RemoteContribution identifies an existing provider contribution whose
+	// source branch must be fetched from its own remote and verified by SHA.
+	RemoteContribution *models.RemoteContribution
+
 	// WorktreeBranchPrefix is the prefix to use for the worktree branch name.
 	// If empty, the default prefix is used.
 	WorktreeBranchPrefix string
@@ -236,6 +245,9 @@ func (r *CreateRequest) Validate() error {
 	if r.RepositoryPath == "" {
 		return ErrRepoNotGit
 	}
+	if err := r.validateRemoteContribution(); err != nil {
+		return err
+	}
 	if r.BaseBranch == "" {
 		// Defence-in-depth: prefer the explicit FallbackBaseBranch (typically
 		// the repository's default_branch carried by the caller) over an
@@ -245,6 +257,26 @@ func (r *CreateRequest) Validate() error {
 			return ErrInvalidBaseBranch
 		}
 		r.BaseBranch = r.FallbackBaseBranch
+	}
+	return nil
+}
+
+func (r *CreateRequest) validateRemoteContribution() error {
+	if r.RemoteContribution == nil {
+		return nil
+	}
+	if err := r.RemoteContribution.Validate(); err != nil {
+		return fmt.Errorf("invalid remote contribution: %w", err)
+	}
+	if r.BaseBranch == "" {
+		r.BaseBranch = r.RemoteContribution.BaseBranch
+	} else if r.BaseBranch != r.RemoteContribution.BaseBranch {
+		return ErrInvalidBaseBranch
+	}
+	if r.CheckoutBranch == "" {
+		r.CheckoutBranch = r.RemoteContribution.HeadBranch
+	} else if r.CheckoutBranch != r.RemoteContribution.HeadBranch {
+		return fmt.Errorf("checkout branch does not match remote contribution")
 	}
 	return nil
 }

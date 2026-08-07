@@ -12,7 +12,6 @@ const automation = {
   id: "automation-1",
   name: "Daily check",
   enabled: false,
-  execution_mode: "task",
   triggers: [],
   last_triggered_at: null,
 } as unknown as Automation;

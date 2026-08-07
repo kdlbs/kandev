@@ -18,6 +18,8 @@ vi.mock("@/lib/api", () => ({
   updateUserSettings: (...args: unknown[]) => updateUserSettings(...args),
 }));
 
+import { activateLocale } from "@/lib/i18n";
+
 import { useLayoutSettings } from "./use-layout-settings";
 
 function profile(overrides: Partial<SavedLayout> = {}): SavedLayout {
@@ -331,5 +333,67 @@ describe("useLayoutSettings persistence", () => {
       error: "save failed",
       isDirty: true,
     });
+  });
+});
+
+/**
+ * These strings leave the hook as plain text, so `i18next/no-literal-string`
+ * cannot see them — a hardcoded English literal here is invisible to lint and,
+ * once allowlisted in the pseudo-coverage oracle, invisible there too. Asserting
+ * that the pseudo locale actually changes them is what proves they resolve
+ * through the catalog rather than being baked in.
+ */
+describe("useLayoutSettings localization", () => {
+  afterEach(async () => {
+    await activateLocale("en");
+  });
+
+  it("resolves the default-action labels through the catalog", async () => {
+    await act(async () => {
+      await activateLocale("pseudo");
+    });
+
+    const builtInDefault = renderLayoutSettings();
+    const customDefault = renderLayoutSettings([profile({ is_default: true })]);
+
+    // The built-in-Default branch used to return a hardcoded "Default".
+    expect(builtInDefault.result.current.defaultActionLabel).not.toBe("Default");
+    expect(customDefault.result.current.defaultActionLabel).not.toBe("Use built-in Default");
+  });
+
+  it("interpolates the source name into a localized duplicated profile name", async () => {
+    await act(async () => {
+      await activateLocale("pseudo");
+    });
+
+    const { result } = renderLayoutSettings([profile({ name: "My Layout" })]);
+
+    act(() => result.current.setSelection({ kind: "custom", id: PROFILE_ID }));
+    act(() => result.current.duplicate());
+
+    // Both halves of the contract: the source name is user data and survives
+    // verbatim, while the surrounding " copy" resolves through the catalog.
+    expect(result.current.selectedName).toContain("My Layout");
+    expect(result.current.selectedName).not.toBe("My Layout copy");
+  });
+
+  it("names a newly created profile and reports validation errors from the catalog", async () => {
+    await act(async () => {
+      await activateLocale("pseudo");
+    });
+
+    const { result } = renderLayoutSettings();
+    act(() => result.current.create());
+    expect(result.current.selectedCustom?.name).not.toBe("Untitled layout");
+
+    act(() => result.current.updateSelected({ name: "   " }));
+    await act(async () => {
+      await result.current.save();
+    });
+
+    expect(updateUserSettings).not.toHaveBeenCalled();
+    expect(result.current.saveStatus).toBe("error");
+    expect(result.current.error).toBeTruthy();
+    expect(result.current.error).not.toBe("Layout profile names must not be empty");
   });
 });

@@ -1,5 +1,7 @@
+import { act } from "react";
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { activateLocale } from "@/lib/i18n";
 
 let pathname = "/office";
 
@@ -88,5 +90,31 @@ describe("OfficeNavigationSection", () => {
     expect(badge.classList.contains("bg-muted")).toBe(true);
     expect(badge.classList.contains("text-muted-foreground")).toBe(true);
     expect(badge.classList.contains("bg-primary")).toBe(false);
+  });
+});
+
+/**
+ * `workItems` / `workspaceItems` are module-scope tables. A `t()` call written
+ * inside them resolves once at import and freezes at the boot locale — it still
+ * renders translated, so neither lint nor the pseudo-locale can see the bug.
+ * Storing the key and resolving at render is what this asserts.
+ */
+describe("OfficeNavigationSection locale switching", () => {
+  afterEach(async () => {
+    await act(async () => {
+      await activateLocale("en");
+    });
+  });
+
+  it("re-renders its module-scope nav labels when the locale changes", async () => {
+    render(<OfficeNavigationSection collapsed={false} />);
+    expect(screen.getByRole("link", { name: /Preferences/i })).toBeTruthy();
+
+    await act(async () => {
+      await activateLocale("pseudo");
+    });
+
+    expect(screen.queryByRole("link", { name: /^Preferences$/ })).toBeNull();
+    expect(screen.getByRole("link", { name: /Ƥŕēƒēŕēńćēś/ })).toBeTruthy();
   });
 });

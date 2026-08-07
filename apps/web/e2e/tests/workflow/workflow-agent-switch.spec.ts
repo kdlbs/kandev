@@ -305,6 +305,11 @@ test.describe("Workflow agent profile switching", () => {
       )
       .toBe(true);
 
+    // The backend can settle before this page's WS subscription observes the
+    // ready transition. Recover the persisted idle state before interacting
+    // with the editor instead of racing the boot-hydrated starting UI.
+    await session.waitForChatIdle({ timeout: 30_000 });
+
     // User message → dispatchPromptAsync → on_turn_start → move_to_next → Step1 (profileB)
     await session.sendMessage("hello");
     await expect(session.chat.getByText("hello")).toBeVisible({ timeout: 10_000 });

@@ -1,4 +1,13 @@
+import type { TaskSession } from "@/lib/types/http";
+import { getSessionWorkspacePath } from "@/lib/session-workspace-path";
+
 const HOME_PATH_PATTERN = /^\/(?:Users|home)\/[^/]+\//;
+
+export function getFileBrowserSessionWorkspacePath(
+  session: Pick<TaskSession, "workspace_path" | "worktree_path"> | null | undefined,
+): string | undefined {
+  return getSessionWorkspacePath(session);
+}
 
 export type FileBrowserPathInput = {
   sessionWorktreePath?: string | null;

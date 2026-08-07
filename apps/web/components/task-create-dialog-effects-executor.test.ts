@@ -84,6 +84,24 @@ function worktreeExecutor(): StoreSelections["executors"][number] {
 }
 
 describe("useDefaultSelectionsEffect - executor profile defaults", () => {
+  it("does not let a saved local profile override the worktree default", async () => {
+    const fs = makeDefaultSelFs({ executorId: "", executorProfileId: "" });
+    const local = localExecutor();
+    const worktree = worktreeExecutor();
+    const sel = makeSel({
+      executors: [local, worktree],
+      lastUsedExecutorProfileId: PROFILE_LOCAL,
+      userSettingsLoaded: true,
+    });
+
+    renderHook(() => useDefaultSelectionsEffect(fs, true, sel, []));
+
+    await waitFor(() => expect(fs.setExecutorProfileId).toHaveBeenCalledWith(PROFILE_WORKTREE));
+    expect(fs.setExecutorProfileId).not.toHaveBeenCalledWith(PROFILE_LOCAL);
+    await waitFor(() => expect(fs.setExecutorId).toHaveBeenCalledWith(worktree.id));
+    expect(fs.setExecutorId).not.toHaveBeenCalledWith(local.id);
+  });
+
   it("defaults repo-backed tasks to the worktree profile when no profile was saved", async () => {
     const fs = makeDefaultSelFs({ executorId: "", executorProfileId: "" });
     const local = localExecutor();
@@ -100,7 +118,11 @@ describe("useDefaultSelectionsEffect - executor profile defaults", () => {
     const fs = makeDefaultSelFs({ executorId: "", executorProfileId: "", noRepository: true });
     const worktree = worktreeExecutor();
     const local = localExecutor();
-    const sel = makeSel({ executors: [worktree, local] });
+    const sel = makeSel({
+      executors: [worktree, local],
+      lastUsedExecutorProfileId: PROFILE_WORKTREE,
+      userSettingsLoaded: true,
+    });
 
     renderHook(() => useDefaultSelectionsEffect(fs, true, sel, []));
 
@@ -116,7 +138,11 @@ describe("useDefaultSelectionsEffect - executor profile defaults", () => {
     });
     const worktree = worktreeExecutor();
     const local = localExecutor();
-    const sel = makeSel({ executors: [worktree, local] });
+    const sel = makeSel({
+      executors: [worktree, local],
+      lastUsedExecutorProfileId: PROFILE_WORKTREE,
+      userSettingsLoaded: true,
+    });
 
     renderHook(() => useDefaultSelectionsEffect(fs, true, sel, []));
 
@@ -206,7 +232,7 @@ describe("useDefaultSelectionsEffect - executor profile settings restoration", (
     await waitFor(() => expect(fs.setExecutorProfileId).toHaveBeenCalledWith(PROFILE_WORKTREE_B));
   });
 
-  it("does not pick a fallback executor id while a valid last-used profile is restoring", async () => {
+  it("keeps an explicit local workspace default ahead of a saved worktree profile", async () => {
     const local = localExecutor();
     const worktree = worktreeExecutor();
     const sel = makeSel({
@@ -232,18 +258,19 @@ describe("useDefaultSelectionsEffect - executor profile settings restoration", (
       },
     );
 
-    await waitFor(() => expect(setExecutorProfileId).toHaveBeenCalledWith(PROFILE_WORKTREE_B));
+    await waitFor(() => expect(setExecutorProfileId).toHaveBeenCalledWith(PROFILE_LOCAL));
+    expect(setExecutorProfileId).not.toHaveBeenCalledWith(PROFILE_WORKTREE_B);
     rerender({
       formState: makeDefaultSelFs({
-        executorProfileId: PROFILE_WORKTREE_B,
+        executorProfileId: PROFILE_LOCAL,
         executorId: "",
         setExecutorId,
         setExecutorProfileId,
       }),
     });
 
-    await waitFor(() => expect(setExecutorId).toHaveBeenCalledWith(worktree.id));
-    expect(setExecutorId).not.toHaveBeenCalledWith(local.id);
+    await waitFor(() => expect(setExecutorId).toHaveBeenCalledWith(local.id));
+    expect(setExecutorId).not.toHaveBeenCalledWith(worktree.id);
   });
 });
 

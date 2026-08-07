@@ -7,6 +7,7 @@ import { Popover, PopoverAnchor, PopoverContent } from "@kandev/ui/popover";
 import type { DiffComment } from "@/lib/diff/types";
 import { useHoverPopover } from "@/hooks/domains/github/use-hover-popover";
 import { ReviewCommentsOverview } from "./review-comments-overview";
+import { useTranslation } from "react-i18next";
 
 const COMMENTS_HOVER_OPEN_DELAY_MS = 150;
 const COMMENTS_HOVER_CLOSE_DELAY_MS = 150;
@@ -30,6 +31,7 @@ export function FixCommentsButton({
   getPendingComments,
   onFixComments,
 }: FixCommentsButtonProps) {
+  const { t } = useTranslation();
   const { open, onOpenChange, onTriggerEnter, onTriggerLeave, onContentEnter, onContentLeave } =
     useHoverPopover({
       openDelayMs: COMMENTS_HOVER_OPEN_DELAY_MS,
@@ -67,7 +69,7 @@ export function FixCommentsButton({
             data-testid="review-fix-comments-button"
           >
             <IconMessageForward className="h-4 w-4" />
-            Fix Comments
+            {t("review:fixComments")}
             <span className="ml-1 rounded-full bg-blue-500/10 px-1.5 py-0.5 text-xs font-medium text-blue-600 dark:text-blue-400">
               {commentCount}
             </span>

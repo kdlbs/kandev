@@ -21,6 +21,7 @@ import type {
 } from "@/lib/state/slices/comments";
 import type { Message } from "@/lib/types/http";
 import { deriveSessionInputMode } from "@/hooks/domains/session/session-input-mode";
+import { generateUUID } from "@/lib/utils";
 
 /**
  * Format a single comment into markdown suitable for sending to the agent.
@@ -74,6 +75,7 @@ type QueuePayload = {
 type MessagePayload = {
   task_id: string;
   session_id: string;
+  client_message_id: string;
   content: string;
   plan_mode?: boolean;
   has_review_comments?: boolean;
@@ -97,7 +99,12 @@ function buildMessagePayload(
   planModeEnabled: boolean,
   comment: Comment,
 ): MessagePayload {
-  const payload: MessagePayload = { task_id: taskId, session_id: sessionId, content };
+  const payload: MessagePayload = {
+    task_id: taskId,
+    session_id: sessionId,
+    client_message_id: generateUUID(),
+    content,
+  };
   if (planModeEnabled) payload.plan_mode = true;
   if (comment.source !== "plan") payload.has_review_comments = true;
   return payload;

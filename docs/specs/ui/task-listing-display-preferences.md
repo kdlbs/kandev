@@ -40,6 +40,13 @@ optional richer row without losing the current compact default.
 - Rich rows preserve the existing primary row action: tapping or clicking the
   row opens the task, while archive/delete and interactive metadata controls do
   not trigger row navigation.
+- **Settings → General → Appearance → Startup Page** offers **Task overview**
+  (the default) and **Last visited task**. The latter applies only when Kandev
+  starts or the user opens bare home; it resumes the newest task recorded for
+  the active workspace on that device.
+- Home navigation and a task's Back action always open the task overview, even
+  when **Last visited task** is selected. An explicit task, session, workflow,
+  or overview URL also keeps its explicit destination.
 
 ## Data model
 
@@ -69,18 +76,34 @@ The existing backend-owned user settings object adds:
 The frontend settings store exposes the same value as
 `tasksListShowDetails`.
 
+### Startup preference and local task target
+
+The existing backend-owned user settings object also adds:
+
+| Field | Type | Default | Meaning |
+|---|---|---:|---|
+| `startup_page` | string | `"task_overview"` | `"task_overview"` starts on the saved task listing; `"last_task"` resumes a local recent task when available. |
+
+The portable setting is exposed as `startupPage`. Its target is deliberately
+not portable: `localStorage["kandev.recentTasks.v1"]` remains the source of
+the newest task on the current device. Resolution only considers entries for
+the active workspace.
+
 ## API surface
 
 The existing user-settings read response includes:
 
 ```json
 {
-  "tasks_list_show_details": false
+  "tasks_list_show_details": false,
+  "startup_page": "task_overview"
 }
 ```
 
 The existing user-settings update request accepts an optional
-`tasks_list_show_details` boolean. Omitting it leaves the saved value unchanged.
+`tasks_list_show_details` boolean and optional `startup_page` string.
+`startup_page` accepts `"task_overview"` or `"last_task"`; omitting either
+field leaves its saved value unchanged.
 
 No new endpoint is introduced.
 
@@ -93,6 +116,10 @@ No new endpoint is introduced.
 - If saving **Show task details** fails, the optimistic display remains for the
   current page; the backend value wins after the next authoritative reload,
   following existing user-settings behavior.
+- An absent, malformed, or unknown `startup_page` value defaults to **Task
+  overview**.
+- When **Last visited task** has no recent task in the active workspace, or
+  browser storage is unavailable, bare home falls back to the task overview.
 - Missing repository or pull-request data omits only that metadata; it does not
   hide the task row or block navigation.
 
@@ -102,6 +129,9 @@ No new endpoint is introduced.
   device and does not sync to other devices or users.
 - **Show task details** survives Kandev and browser restarts and syncs through
   the authenticated user's backend settings.
+- The startup-page choice survives Kandev and browser restarts and syncs through
+  backend user settings; the exact recent task remains device-local.
+- A saved recent task from another workspace never becomes the startup target.
 - A phone's effective Kanban fallback for a saved Pipeline preference is never
   persisted over the saved device preference.
 
@@ -131,6 +161,14 @@ No new endpoint is introduced.
   task opens and all secondary row actions remain independently touchable.
 - **GIVEN** the user enables **Show task details**, **WHEN** the page or app is
   reloaded, **THEN** the option remains enabled from backend user settings.
+- **GIVEN** **Last visited task** is selected and the active workspace has a
+  recent local task, **WHEN** Kandev starts or bare home opens, **THEN** that
+  task opens.
+- **GIVEN** **Last visited task** is selected, **WHEN** the user uses Home or a
+  task's Back action, **THEN** the task overview opens instead of resuming a
+  task.
+- **GIVEN** the newest local recent task belongs to another workspace, **WHEN**
+  bare home opens in the active workspace, **THEN** the task overview opens.
 
 ## Out of scope
 
@@ -140,4 +178,7 @@ No new endpoint is introduced.
   fields.
 - Changing existing sort, group, archive, pagination, or preview-panel
   behavior.
+- Syncing the exact last visited task between devices.
+- Redirecting explicit task, session, workflow, Home, or Back destinations to a
+  recent task.
 - Removing the legacy `kanban_view_mode` API field in this change.

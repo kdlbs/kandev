@@ -427,7 +427,8 @@ func (m *Manifest) validateActions() []error {
 			continue
 		}
 		seen[action.Key] = true
-		if action.ResourceScope != "workspace" && action.ResourceScope != "task" && action.ResourceScope != "repository" {
+		if action.ResourceScope != ActionScopeWorkspace && action.ResourceScope != ActionScopeTask &&
+			action.ResourceScope != ActionScopeRepository {
 			errs = append(errs, fmt.Errorf("action %q has invalid scope %q", action.Key, action.ResourceScope))
 		}
 		if action.MaxBodyBytes <= 0 || action.MaxBodyBytes > MaxActionBodyBytes {

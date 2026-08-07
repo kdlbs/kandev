@@ -30,7 +30,7 @@ describe("IntegrationStartTaskMenu", () => {
       />,
     );
 
-    fireEvent.pointerDown(screen.getByRole("button", { name: "Create task" }), {
+    fireEvent.pointerDown(screen.getByRole("button", { name: "Task" }), {
       button: 0,
       ctrlKey: false,
     });

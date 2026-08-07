@@ -4,6 +4,7 @@ import { IconArrowBarToUp, IconArrowDown, IconArrowUp, type Icon } from "@tabler
 import { Button } from "@kandev/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { cn } from "@/lib/utils";
+import { useTranslation } from "react-i18next";
 
 // Matches the ghost-style action buttons in the chat status bar (same row as
 // Share) so both transcript-navigation entry points sit flush together.
@@ -65,10 +66,11 @@ export function ScrollToLastPromptButton({
   className,
   direction = "up",
 }: ScrollButtonProps & { direction?: "up" | "down" }) {
+  const { t } = useTranslation();
   return (
     <TranscriptScrollButton
       onClick={onClick}
-      label="Scroll to last prompt"
+      label={t("task:scrollToLastPrompt")}
       testId="scroll-to-last-prompt-button"
       className={className}
       Icon={direction === "down" ? IconArrowDown : IconArrowUp}
@@ -82,10 +84,11 @@ export function ScrollToLastPromptButton({
  * back to the start of the transcript.
  */
 export function ScrollToStartButton({ onClick, className }: ScrollButtonProps) {
+  const { t } = useTranslation();
   return (
     <TranscriptScrollButton
       onClick={onClick}
-      label="Scroll to start of transcript"
+      label={t("task:scrollToStartOfTranscript")}
       testId="scroll-to-start-button"
       className={className}
       Icon={IconArrowBarToUp}

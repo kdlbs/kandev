@@ -11,10 +11,12 @@ import { FileBinaryViewer } from "../file-binary-viewer";
 import { getFileCategory, isMarkdownFile } from "@/lib/utils/file-types";
 import { useAppStore } from "@/components/state-provider";
 import type { OpenFileTab } from "@/lib/types/backend";
+import { getSessionWorkspacePath } from "@/lib/session-workspace-path";
 import {
   ExternalVcsFileLink,
   useExternalVcsFileStatus,
 } from "@/components/editors/external-vcs-file-link";
+import { useTranslation } from "react-i18next";
 
 type MobileFileViewerPanelProps = {
   file: OpenFileTab;
@@ -70,7 +72,12 @@ function MobileViewerBody({
             onTogglePreview={onToggleMarkdownPreview}
           />
         ) : (
-          <FileViewerContent path={file.path} repo={file.repo} content={file.content} />
+          <FileViewerContent
+            path={file.path}
+            repo={file.repo}
+            content={file.content}
+            sessionId={sessionId ?? undefined}
+          />
         ))}
     </div>
   );
@@ -82,11 +89,12 @@ export function MobileFileViewerPanel({
   onClose,
   initialMarkdownPreview = false,
 }: MobileFileViewerPanelProps) {
+  const { t } = useTranslation();
   const activeSession = useAppStore((state) =>
     sessionId ? (state.taskSessions.items[sessionId] ?? null) : null,
   );
   const activeTaskId = useAppStore((state) => state.tasks.activeTaskId);
-  const worktreePath = activeSession?.worktree_path ?? undefined;
+  const worktreePath = getSessionWorkspacePath(activeSession);
   const repositoryId = activeSession?.repository_id ?? undefined;
   const fileStatus = useExternalVcsFileStatus(file.path, sessionId, file.repo);
   const viewerKind = useMemo(() => resolveViewerKind(file), [file]);
@@ -128,13 +136,13 @@ export function MobileFileViewerPanel({
                 className="cursor-pointer px-2"
                 onClick={() => setMarkdownPreview(true)}
                 data-testid="markdown-preview-toggle"
-                aria-label="Open markdown preview"
+                aria-label={t("task:openMarkdownPreview")}
               >
                 <IconEye className="h-4 w-4" />
               </Button>
             )}
             <Button variant="ghost" size="sm" className="cursor-pointer px-2" onClick={onClose}>
-              Close
+              {t("task:close")}
             </Button>
           </div>
         }

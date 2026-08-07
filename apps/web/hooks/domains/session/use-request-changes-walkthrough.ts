@@ -11,6 +11,7 @@ import {
 import type { Message } from "@/lib/types/http";
 import type { AppState } from "@/lib/state/store";
 import { deriveSessionInputMode } from "./session-input-mode";
+import { generateUUID } from "@/lib/utils";
 
 const TERMINAL_SESSION_STATES = new Set(["FAILED", "CANCELLED", "COMPLETED"]);
 
@@ -62,6 +63,7 @@ async function sendWalkthroughRequest(params: {
     {
       task_id: params.taskId,
       session_id: params.sessionId,
+      client_message_id: generateUUID(),
       content: params.content,
       ...planModePayload(params.planModeEnabled),
     },

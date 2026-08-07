@@ -9,19 +9,10 @@ import {
   useRef,
   useState,
 } from "react";
-import {
-  IconCheck,
-  IconChevronDown,
-  IconChevronUp,
-  IconEdit,
-  IconFile,
-  IconInfoCircle,
-  IconRobot,
-  IconUser,
-  IconX,
-} from "@tabler/icons-react";
+import { IconCheck, IconFile, IconInfoCircle, IconRobot, IconUser } from "@tabler/icons-react";
 import ReactMarkdown from "react-markdown";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast/sonner";
+import { useTranslation } from "react-i18next";
 import { Button } from "@kandev/ui";
 import { Textarea } from "@kandev/ui/textarea";
 import { cn } from "@/lib/utils";
@@ -45,6 +36,8 @@ import {
   survivingEntityReferences,
 } from "@/lib/entity-references/message-references";
 import { buildEntityReferenceMarkdownComponents } from "@/components/task/chat/messages/entity-reference-chip";
+import { QueuedGhostRowActions } from "@/components/task/chat/queued-ghost-row-actions";
+import { t } from "@/lib/i18n";
 
 type QueuedAttachment = NonNullable<QueuedMessage["attachments"]>[number];
 
@@ -60,6 +53,7 @@ type AttachmentRowProps = {
  * editing the message text.
  */
 function AttachmentRow({ attachments, interactive }: AttachmentRowProps) {
+  const { t } = useTranslation();
   if (attachments.length === 0) return null;
   const images = attachments.filter((a) => a.type === "image");
   const files = attachments.filter((a) => a.type !== "image");
@@ -69,7 +63,7 @@ function AttachmentRow({ attachments, interactive }: AttachmentRowProps) {
         <ImagePreviewDialog
           key={`img-${i}`}
           src={`data:${att.mime_type};base64,${att.data}`}
-          alt={`Attachment ${i + 1}`}
+          alt={t("task:attachmentIndexed", { index: i + 1 })}
           interactive={interactive}
           thumbnailClassName={cn(
             "h-10 w-10 rounded-md border border-border object-cover",
@@ -83,7 +77,7 @@ function AttachmentRow({ attachments, interactive }: AttachmentRowProps) {
           className="inline-flex items-center gap-1.5 rounded-full bg-muted/60 px-2 py-0.5 text-xs text-muted-foreground"
         >
           <IconFile className="h-3 w-3" />
-          Attachment
+          {t("task:attachment")}
         </span>
       ))}
     </div>
@@ -114,19 +108,55 @@ function senderKindOf(entry: QueuedMessage): SenderKind {
   return "user";
 }
 
+/** A message may serve as a merge source or target only when its sender kind is
+ * "user" or "agent". Server-owned rows (queued_by="server") are reserved
+ * backend rows and are never mergeable. */
+export function canMergeEntry(entry: QueuedMessage): boolean {
+  if (entry.queued_by === "server") return false;
+  const kind = senderKindOf(entry);
+  return kind === "user" || kind === "agent";
+}
+
+/** Two messages may merge when both are mergeable and share the same sender
+ * kind. Agent entries additionally require an identical non-empty
+ * sender_task_id; user entries require both rows to be owned by the caller
+ * identity (callerId defaults to the backend's QueuedByUser, which is what the
+ * SPA sends when it omits user_id). Mirrors the backend's mergeAllowed
+ * predicate so the button never appears for merges the server would reject. */
+export function canMergeWithAbove(
+  entry: QueuedMessage,
+  above: QueuedMessage | undefined,
+  callerId = "user",
+): boolean {
+  if (!above) return false;
+  if (!canMergeEntry(entry) || !canMergeEntry(above)) return false;
+  if (senderKindOf(entry) !== senderKindOf(above)) return false;
+  if (senderKindOf(entry) === "agent") {
+    const senderTaskId = getSenderTaskInfo(entry)?.id;
+    return senderTaskId !== undefined && senderTaskId === getSenderTaskInfo(above)?.id;
+  }
+  if (senderKindOf(entry) === "user") {
+    return callerId !== "" && entry.queued_by === callerId && above.queued_by === callerId;
+  }
+  return false;
+}
+
 function senderLabel(entry: QueuedMessage): string {
   const kind = senderKindOf(entry);
   if (kind === "agent") {
     const title = entry.metadata?.sender_task_title;
     const sessionName = entry.metadata?.sender_session_name;
-    const base = typeof title === "string" && title.length > 0 ? `From ${title}` : "From agent";
+    const base =
+      typeof title === "string" && title.length > 0
+        ? t("task:fromTask", { title })
+        : t("task:fromAgent");
     return typeof sessionName === "string" && sessionName.length > 0
-      ? `${base} · ${sessionName}`
+      ? t("task:senderWithSession", { base, sessionName })
       : base;
   }
-  if (kind === "workflow") return "Workflow";
-  if (kind === "system") return "System";
-  return "You";
+  if (kind === "workflow") return t("task:workflowSender");
+  if (kind === "system") return t("task:systemSender");
+  return t("task:you");
 }
 
 type SenderIconProps = { entry: QueuedMessage };
@@ -199,6 +229,7 @@ function EditView({
   onCancel,
   textareaRef,
 }: EditViewProps) {
+  const { t } = useTranslation();
   const onKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key === "Escape") {
       event.preventDefault();
@@ -216,7 +247,7 @@ function EditView({
         data-testid="queue-edit-textarea"
         value={value}
         disabled={saving}
-        placeholder="Enter message content..."
+        placeholder={t("task:enterMessageContent")}
         onChange={(e) => onChange(e.target.value)}
         onKeyDown={onKeyDown}
         className={cn(
@@ -232,7 +263,7 @@ function EditView({
           className="h-7 cursor-pointer"
         >
           <IconCheck className="mr-1 h-3.5 w-3.5" />
-          Save
+          {t("common:save")}
         </Button>
         <Button
           size="sm"
@@ -241,10 +272,10 @@ function EditView({
           disabled={saving}
           className="h-7 cursor-pointer"
         >
-          Cancel
+          {t("common:cancel")}
         </Button>
         <span className="ml-auto text-xs text-muted-foreground">
-          Press Esc to cancel, Cmd+Enter to save
+          {t("task:pressEscToCancelCmdEnter")}
         </span>
       </div>
     </div>
@@ -256,8 +287,13 @@ type DisplayViewProps = {
   entityReferences: readonly EntityReference[];
   positionLabel: string;
   canEdit: boolean;
+  canRemove: boolean;
+  canMerge: boolean;
   onStartEdit: () => void;
   onRemove: () => void;
+  onMerge?: () => void | Promise<void>;
+  onSendNow: () => void;
+  sendNowDisabled: boolean;
 };
 
 /** Rough threshold above which we offer a per-row expand toggle. Two lines of
@@ -265,6 +301,10 @@ type DisplayViewProps = {
  * so we use either signal to surface the chevron — short multi-line messages
  * (lists, code blocks) would otherwise be silently truncated. */
 const EXPAND_THRESHOLD = 80;
+
+function queuePositionLabel(index: number | undefined, position: number | undefined): string {
+  return `#${index === undefined ? (position ?? 1) : index + 1}`;
+}
 
 function shouldOfferExpand(text: string): boolean {
   return text.length > EXPAND_THRESHOLD || text.includes("\n");
@@ -275,9 +315,15 @@ function DisplayView({
   entityReferences,
   positionLabel,
   canEdit,
+  canRemove,
+  canMerge,
   onStartEdit,
   onRemove,
+  onMerge,
+  onSendNow,
+  sendNowDisabled,
 }: DisplayViewProps) {
+  const { t } = useTranslation();
   const visible = stripSystemTags(entry.content);
   const attachments = (entry.attachments ?? []) as QueuedAttachment[];
   const senderTask = getSenderTaskInfo(entry);
@@ -289,10 +335,10 @@ function DisplayView({
     [entityReferences],
   );
   return (
-    <div className="group flex items-start gap-2 py-1.5">
+    <div className="group flex items-start gap-2 py-1.5" data-testid="queue-entry">
       <span className="flex items-center gap-1.5 mt-0.5 text-muted-foreground">
         <span
-          aria-label={`Position ${positionLabel}`}
+          aria-label={t("task:position", { positionLabel })}
           className="font-mono text-[10px] tabular-nums"
         >
           {positionLabel}
@@ -320,55 +366,19 @@ function DisplayView({
         )}
         <AttachmentRow attachments={attachments} interactive={true} />
       </div>
-      <div
-        className={cn(
-          "flex items-center gap-0.5 flex-shrink-0 transition-opacity",
-          // Hover-reveal on devices that support hover (desktop); always
-          // visible on touch surfaces where there's no hover affordance.
-          "opacity-0 group-hover:opacity-100 focus-within:opacity-100",
-          "[@media(hover:none)]:opacity-100",
-        )}
-      >
-        {canExpand && (
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-6 w-6 cursor-pointer p-0 text-muted-foreground hover:text-foreground"
-            onClick={() => setExpanded((v) => !v)}
-            title={expanded ? "Collapse message" : "Expand message"}
-            data-testid="queue-entry-expand"
-            aria-expanded={expanded}
-          >
-            {expanded ? (
-              <IconChevronUp className="h-3.5 w-3.5" />
-            ) : (
-              <IconChevronDown className="h-3.5 w-3.5" />
-            )}
-          </Button>
-        )}
-        {canEdit && (
-          <>
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-6 w-6 cursor-pointer p-0 text-muted-foreground hover:text-foreground"
-              onClick={onStartEdit}
-              title="Edit queued message"
-            >
-              <IconEdit className="h-3.5 w-3.5" />
-            </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-6 w-6 cursor-pointer p-0 text-muted-foreground hover:text-foreground"
-              onClick={onRemove}
-              title="Remove queued message"
-            >
-              <IconX className="h-4 w-4" />
-            </Button>
-          </>
-        )}
-      </div>
+      <QueuedGhostRowActions
+        canExpand={canExpand}
+        expanded={expanded}
+        canMerge={canMerge}
+        canEdit={canEdit}
+        canRemove={canRemove}
+        onToggleExpand={() => setExpanded((v) => !v)}
+        onMerge={onMerge}
+        onStartEdit={onStartEdit}
+        onRemove={onRemove}
+        onSendNow={onSendNow}
+        sendNowDisabled={sendNowDisabled}
+      />
     </div>
   );
 }
@@ -382,14 +392,103 @@ type QueuedGhostMessageProps = {
    * entry's queued_by. Inter-task entries are visible but read-only.
    */
   canEdit: boolean;
+  /** Removal is independent from edit ownership and applies to every visible row. */
+  canRemove?: boolean;
+  /**
+   * Merge-with-above control; only shown when this row and the one above it
+   * share a sender kind. Optional so standalone renders (tests) can omit it.
+   */
+  canMerge?: boolean;
   onSave: (content: string, entityReferences: EntityReference[]) => Promise<void>;
   onRemove: () => void | Promise<void>;
+  /** Fold this entry into the one above it. */
+  onMerge?: () => void | Promise<void>;
+  /** Interrupt the current turn and dispatch this exact queued entry. */
+  onSendNow?: () => void;
+  /** Disable while the queue mutation or backend cancellation is in flight. */
+  sendNowDisabled?: boolean;
   /** Called after edit save/cancel so the parent can refocus the chat input. */
   onEditComplete?: () => void;
 };
 
+function useFocusQueuedEdit(
+  editing: boolean,
+  textareaRef: React.RefObject<HTMLTextAreaElement | null>,
+): void {
+  useEffect(() => {
+    if (!editing || !textareaRef.current) return;
+    const textarea = textareaRef.current;
+    textarea.focus();
+    textarea.setSelectionRange(textarea.value.length, textarea.value.length);
+  }, [editing, textareaRef]);
+}
+
+type QueuedGhostSaveArgs = {
+  value: string;
+  entryContent: string;
+  entityReferences: readonly EntityReference[];
+  onSave: QueuedGhostMessageProps["onSave"];
+  onEditComplete?: () => void;
+  setEditing: (editing: boolean) => void;
+  setSaving: (saving: boolean) => void;
+  t: (key: string) => string;
+};
+
+function useQueuedGhostSave({
+  value,
+  entryContent,
+  entityReferences,
+  onSave,
+  onEditComplete,
+  setEditing,
+  setSaving,
+  t,
+}: QueuedGhostSaveArgs) {
+  return useCallback(async () => {
+    const trimmed = value.trim();
+    if (!trimmed || trimmed === entryContent) {
+      setEditing(false);
+      onEditComplete?.();
+      return;
+    }
+    setSaving(true);
+    try {
+      await onSave(trimmed, survivingEntityReferences(trimmed, entityReferences));
+      setEditing(false);
+      onEditComplete?.();
+    } catch (err) {
+      console.error("Failed to update queued entry:", err);
+      if (err instanceof QueueEntryNotFoundError) {
+        toast.error(t("chat:queueEditAlreadySent"));
+      } else {
+        toast.error(t("chat:queueEditSaveFailed"));
+      }
+      setEditing(false);
+      onEditComplete?.();
+    } finally {
+      setSaving(false);
+    }
+  }, [value, entryContent, onSave, onEditComplete, entityReferences, setEditing, setSaving, t]);
+}
+
 export const QueuedGhostMessage = forwardRef<QueuedGhostMessageHandle, QueuedGhostMessageProps>(
-  function QueuedGhostMessage({ entry, index, canEdit, onSave, onRemove, onEditComplete }, ref) {
+  function QueuedGhostMessage(
+    {
+      entry,
+      index,
+      canEdit,
+      canRemove = true,
+      canMerge = false,
+      onSave,
+      onRemove,
+      onMerge,
+      onSendNow = () => undefined,
+      sendNowDisabled = false,
+      onEditComplete,
+    },
+    ref,
+  ) {
+    const { t } = useTranslation();
     const [editing, setEditing] = useState(false);
     const [value, setValue] = useState(entry.content);
     const [saving, setSaving] = useState(false);
@@ -398,18 +497,11 @@ export const QueuedGhostMessage = forwardRef<QueuedGhostMessageHandle, QueuedGho
       () => entityReferencesFromMetadata(entry.metadata),
       [entry.metadata],
     );
-
+    const effectiveCanMerge = canMerge && canMergeEntry(entry);
+    useFocusQueuedEdit(editing, textareaRef);
     useEffect(() => {
       if (!editing) setValue(entry.content);
     }, [entry.content, editing]);
-
-    useEffect(() => {
-      if (editing && textareaRef.current) {
-        const el = textareaRef.current;
-        el.focus();
-        el.setSelectionRange(el.value.length, el.value.length);
-      }
-    }, [editing]);
 
     const startEdit = useCallback(() => {
       if (!canEdit) return;
@@ -418,44 +510,24 @@ export const QueuedGhostMessage = forwardRef<QueuedGhostMessageHandle, QueuedGho
     }, [entry.content, canEdit]);
 
     useImperativeHandle(ref, () => ({ startEdit }), [startEdit]);
-
     const handleCancel = useCallback(() => {
       setValue(entry.content);
       setEditing(false);
       onEditComplete?.();
     }, [entry.content, onEditComplete]);
 
-    const handleSave = useCallback(async () => {
-      const trimmed = value.trim();
-      if (!trimmed || trimmed === entry.content) {
-        setEditing(false);
-        onEditComplete?.();
-        return;
-      }
-      setSaving(true);
-      try {
-        await onSave(trimmed, survivingEntityReferences(trimmed, entityReferences));
-        setEditing(false);
-        onEditComplete?.();
-      } catch (err) {
-        console.error("Failed to update queued entry:", err);
-        // Exit edit mode so the user sees the current state instead of being
-        // stuck in a textarea with no signal that the save failed (drain race
-        // or transient network error).
-        if (err instanceof QueueEntryNotFoundError) {
-          toast.error("Message already sent — agent picked it up before your edit landed.");
-        } else {
-          toast.error("Failed to save edit. Please try again.");
-        }
-        setEditing(false);
-        onEditComplete?.();
-      } finally {
-        setSaving(false);
-      }
-    }, [value, entry.content, onSave, onEditComplete, entityReferences]);
+    const handleSave = useQueuedGhostSave({
+      value,
+      entryContent: entry.content,
+      entityReferences,
+      onSave,
+      onEditComplete,
+      setEditing,
+      setSaving,
+      t,
+    });
 
-    const positionNumber = entry.position ?? (index ?? 0) + 1;
-    const positionLabel = `#${positionNumber}`;
+    const positionLabel = queuePositionLabel(index, entry.position);
 
     return (
       <div
@@ -480,8 +552,13 @@ export const QueuedGhostMessage = forwardRef<QueuedGhostMessageHandle, QueuedGho
             entityReferences={entityReferences}
             positionLabel={positionLabel}
             canEdit={canEdit}
+            canRemove={canRemove}
+            canMerge={effectiveCanMerge}
             onStartEdit={startEdit}
             onRemove={onRemove}
+            onMerge={onMerge}
+            onSendNow={onSendNow}
+            sendNowDisabled={sendNowDisabled}
           />
         )}
       </div>

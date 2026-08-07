@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import Image from "@/components/routing/app-image";
 import { IconUpload, IconDeviceFloppy } from "@tabler/icons-react";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast/sonner";
 import { Input } from "@kandev/ui/input";
 import { Switch } from "@kandev/ui/switch";
 import { Button } from "@kandev/ui/button";

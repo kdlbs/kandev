@@ -33,6 +33,34 @@ function isFileNotFoundError(error: string): boolean {
 }
 
 /**
+ * Number of extra attempts for a transient content-load failure and the base
+ * backoff between them. The two file reads go over the WebSocket, which rejects
+ * with a 5s timeout and no retry of its own; when the backend is briefly slow
+ * (loaded CI runner, reconnect in flight) a single timeout would otherwise set
+ * a terminal error and permanently disable expansion for this mount, since the
+ * auto-load effect only fires while there is no error. Retrying transient
+ * failures here keeps that from happening.
+ */
+const CONTENT_LOAD_MAX_RETRIES = 3;
+const CONTENT_LOAD_RETRY_BASE_MS = 300;
+
+/**
+ * A transient failure is one worth retrying: the WebSocket client not being
+ * ready yet, or a request that timed out. Permanent failures (binary file,
+ * genuine backend rejections) are surfaced immediately so we fall back to the
+ * partial metadata without spinning.
+ */
+function isTransientLoadError(error: string): boolean {
+  return /timed out|websocket client not available|not connected|connection (closed|lost)/i.test(
+    error,
+  );
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
  * Validate that a reparsed metadata won't trip @pierre/diffs' iterateOverDiff
  * trailing-context check (which throws and tears down the renderer). When
  * fetched contents are out of sync with the patch, processFile still produces
@@ -115,6 +143,34 @@ async function fetchExpansionContent(
 }
 
 /**
+ * Fetch expansion content, retrying transient failures with linear backoff.
+ * `isCurrent` lets the caller abort the retry loop when the hook's inputs have
+ * changed (a newer request superseded this one); permanent failures rethrow on
+ * the first attempt so we don't spin on a binary file or a real backend error.
+ */
+async function fetchExpansionContentWithRetry(
+  sessionId: string,
+  filePath: string,
+  baseRef: string | undefined,
+  repo: string | undefined,
+  isCurrent: () => boolean,
+) {
+  let lastError: unknown;
+  for (let attempt = 0; attempt <= CONTENT_LOAD_MAX_RETRIES; attempt++) {
+    try {
+      return await fetchExpansionContent(sessionId, filePath, baseRef, repo);
+    } catch (err) {
+      lastError = err;
+      const msg = err instanceof Error ? err.message : String(err);
+      if (!isTransientLoadError(msg) || attempt === CONTENT_LOAD_MAX_RETRIES) throw err;
+      await delay(CONTENT_LOAD_RETRY_BASE_MS * (attempt + 1));
+      if (!isCurrent()) throw err;
+    }
+  }
+  throw lastError;
+}
+
+/**
  * Hook for managing expandable diffs with lazy-loaded file content.
  *
  * @pierre/diffs needs the patch *and* the full file contents (with
@@ -157,7 +213,13 @@ export function useExpandableDiff({
     setError(null);
 
     try {
-      const content = await fetchExpansionContent(sessionId, filePath, baseRef, repo);
+      const content = await fetchExpansionContentWithRetry(
+        sessionId,
+        filePath,
+        baseRef,
+        repo,
+        () => version === requestVersionRef.current,
+      );
       if (version === requestVersionRef.current) setLoadedContent(content);
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Failed to load file content";

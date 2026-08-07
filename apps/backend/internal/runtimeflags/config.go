@@ -9,35 +9,23 @@ import (
 )
 
 const (
-	featureOfficeKey                         = "features.office"
-	featureAppStatusBarKey                   = "features.appStatusBar"
-	featureAuthKey                           = "features.auth"
-	featureClaudeBackgroundPromptHandoffKey  = "features.claudeBackgroundPromptHandoff"
-	debugDevModeKey                          = "debug.devMode"
-	envFeaturesOffice                        = "KANDEV_FEATURES_OFFICE"
-	envFeaturesAppStatusBar                  = "KANDEV_FEATURES_APP_STATUS_BAR"
-	envFeaturesAuth                          = "KANDEV_FEATURES_AUTH"
-	envFeaturesClaudeBackgroundPromptHandoff = "KANDEV_FEATURES_CLAUDE_BACKGROUND_PROMPT_HANDOFF"
-	envDebugDevMode                          = "KANDEV_DEBUG_DEV_MODE"
-	envDebugPprofEnabled                     = "KANDEV_DEBUG_PPROF_ENABLED"
-	envDebugAgentMessages                    = "KANDEV_DEBUG_AGENT_MESSAGES"
+	envDebugPprofEnabled  = "KANDEV_DEBUG_PPROF_ENABLED"
+	envDebugAgentMessages = "KANDEV_DEBUG_AGENT_MESSAGES"
 )
 
 func OptionsFromConfig(cfg *config.Config) Options {
+	envValues := make(map[string]bool, len(registrations))
+	for _, registration := range registrations {
+		envValues[registration.definition.EnvVar] = isTruthy(os.Getenv(registration.definition.EnvVar))
+		for _, impliedEnvVar := range registration.definition.ImpliedEnvVars {
+			envValues[impliedEnvVar] = isTruthy(os.Getenv(impliedEnvVar))
+		}
+	}
+
 	return Options{
 		DefaultValues: ValuesFromConfig(cfg),
 		RuntimeValues: ValuesFromConfig(cfg),
-		EnvValues: map[string]bool{
-			envFeaturesOffice:       isTruthy(os.Getenv(envFeaturesOffice)),
-			envFeaturesAppStatusBar: isTruthy(os.Getenv(envFeaturesAppStatusBar)),
-			envFeaturesAuth:         isTruthy(os.Getenv(envFeaturesAuth)),
-			envFeaturesClaudeBackgroundPromptHandoff: isTruthy(
-				os.Getenv(envFeaturesClaudeBackgroundPromptHandoff),
-			),
-			envDebugDevMode:       isTruthy(os.Getenv(envDebugDevMode)),
-			envDebugPprofEnabled:  isTruthy(os.Getenv(envDebugPprofEnabled)),
-			envDebugAgentMessages: isTruthy(os.Getenv(envDebugAgentMessages)),
-		},
+		EnvValues:     envValues,
 		IsExplicitEnv: func(name string) bool {
 			_, ok := os.LookupEnv(name)
 			return ok && !profiles.WasApplied(name)
@@ -46,39 +34,33 @@ func OptionsFromConfig(cfg *config.Config) Options {
 }
 
 func ValuesFromConfig(cfg *config.Config) map[string]bool {
-	debugEnabled := cfg.Debug.DevMode || cfg.Debug.PprofEnabled
-	return map[string]bool{
-		featureOfficeKey:                        cfg.Features.Office,
-		featureAppStatusBarKey:                  cfg.Features.AppStatusBar,
-		featureAuthKey:                          cfg.Features.Auth,
-		featureClaudeBackgroundPromptHandoffKey: cfg.Features.ClaudeBackgroundPromptHandoff,
-		debugDevModeKey:                         debugEnabled,
+	values := make(map[string]bool, len(registrations))
+	for _, registration := range registrations {
+		values[registration.definition.Key] = registration.read(cfg)
 	}
+	return values
 }
 
 func ApplyStatesToConfig(cfg *config.Config, states []RuntimeFlagState) {
 	for _, state := range states {
-		switch state.Key {
-		case featureOfficeKey:
-			cfg.Features.Office = state.EffectiveValue
-		case featureAppStatusBarKey:
-			cfg.Features.AppStatusBar = state.EffectiveValue
-		case featureAuthKey:
-			cfg.Features.Auth = state.EffectiveValue
-		case featureClaudeBackgroundPromptHandoffKey:
-			cfg.Features.ClaudeBackgroundPromptHandoff = state.EffectiveValue
-		case debugDevModeKey:
-			cfg.Debug.DevMode = state.EffectiveValue
-			cfg.Debug.PprofEnabled = state.EffectiveValue
-			if state.EffectiveValue {
-				setIfNotExplicit(envDebugAgentMessages, "true")
-				setIfNotExplicit(envDebugPprofEnabled, "true")
-			} else {
-				unsetIfNotExplicit(envDebugAgentMessages)
-				unsetIfNotExplicit(envDebugPprofEnabled)
-			}
+		registration, ok := registrationByKey(state.Key)
+		if !ok {
+			continue
 		}
+		registration.apply(cfg, state.EffectiveValue)
 	}
+}
+
+func applyDebugMode(cfg *config.Config, enabled bool) {
+	cfg.Debug.DevMode = enabled
+	cfg.Debug.PprofEnabled = enabled
+	if enabled {
+		setIfNotExplicit(envDebugAgentMessages, "true")
+		setIfNotExplicit(envDebugPprofEnabled, "true")
+		return
+	}
+	unsetIfNotExplicit(envDebugAgentMessages)
+	unsetIfNotExplicit(envDebugPprofEnabled)
 }
 
 func RuntimeOptionsFromAppliedConfig(defaults map[string]bool, cfg *config.Config) Options {

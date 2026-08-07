@@ -12,6 +12,7 @@ import (
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agentctl/server/process"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/common/subproc"
 )
 
 // StandaloneExecutor implements Runtime for standalone agentctl execution.
@@ -48,6 +49,12 @@ func (r *StandaloneExecutor) HealthCheck(ctx context.Context) error {
 	return r.ctl.Health(ctx)
 }
 
+// SubprocessAdmission returns the admission snapshot from the host agentctl
+// control server for backend diagnostics.
+func (r *StandaloneExecutor) SubprocessAdmission(ctx context.Context) (subproc.Snapshot, error) {
+	return r.ctl.SubprocessAdmission(ctx)
+}
+
 func (r *StandaloneExecutor) waitForReady(ctx context.Context) error {
 	if err := r.ctl.Health(ctx); err == nil {
 		return nil
@@ -72,6 +79,41 @@ func (r *StandaloneExecutor) waitForReady(ctx context.Context) error {
 				return nil
 			}
 		}
+	}
+}
+
+func buildStandaloneCreateInstanceRequest(
+	req *ExecutorCreateRequest,
+	env map[string]string,
+	agentType string,
+	disableAskQuestion, assumeMcpSse, assumeMcpHttp, requiresProcessKill bool,
+	stripEnv []string,
+) *agentctl.CreateInstanceRequest {
+	return &agentctl.CreateInstanceRequest{
+		ID:            req.InstanceID,
+		WorkspacePath: req.WorkspacePath,
+		AgentCommand:  "", // Agent command set via Configure endpoint
+		Protocol:      req.Protocol,
+		AgentType:     agentType,
+		Env:           env,
+		AutoApprovePermissions: autoApprovePermissionsOverride(
+			req.AutoApprovePermissions,
+			req.AutoApprovePermissionsOverride,
+		),
+		AutoStart:            false,
+		McpServers:           req.McpServers,
+		SessionID:            req.SessionID,
+		TaskID:               req.TaskID,
+		DisableAskQuestion:   disableAskQuestion,
+		AssumeMcpSse:         assumeMcpSse,
+		AssumeMcpHttp:        assumeMcpHttp,
+		McpMode:              req.McpMode,
+		McpProviders:         req.McpProviders,
+		RequiresProcessKill:  requiresProcessKill,
+		StripEnv:             stripEnv,
+		BaseBranches:         getMetadataStringMap(req.Metadata, MetadataKeyBaseBranches),
+		RemoteContributions:  req.RemoteContributions,
+		WorkspaceSourceRoots: req.WorkspaceSourceRoots,
 	}
 }
 
@@ -108,30 +150,9 @@ func (r *StandaloneExecutor) CreateInstance(ctx context.Context, req *ExecutorCr
 		}
 	}
 
-	createReq := &agentctl.CreateInstanceRequest{
-		ID:            req.InstanceID,
-		WorkspacePath: req.WorkspacePath,
-		AgentCommand:  "", // Agent command set via Configure endpoint
-		Protocol:      req.Protocol,
-		AgentType:     agentType,
-		Env:           env,
-		AutoApprovePermissions: autoApprovePermissionsOverride(
-			req.AutoApprovePermissions,
-			req.AutoApprovePermissionsOverride,
-		),
-		AutoStart:            false,
-		McpServers:           req.McpServers,
-		SessionID:            req.SessionID,
-		TaskID:               req.TaskID,
-		DisableAskQuestion:   disableAskQuestion,
-		AssumeMcpSse:         assumeMcpSse,
-		AssumeMcpHttp:        assumeMcpHttp,
-		McpMode:              req.McpMode,
-		RequiresProcessKill:  requiresProcessKill,
-		StripEnv:             stripEnv,
-		BaseBranches:         getMetadataStringMap(req.Metadata, MetadataKeyBaseBranches),
-		WorkspaceSourceRoots: req.WorkspaceSourceRoots,
-	}
+	createReq := buildStandaloneCreateInstanceRequest(
+		req, env, agentType, disableAskQuestion, assumeMcpSse, assumeMcpHttp, requiresProcessKill, stripEnv,
+	)
 
 	r.logger.Info("CreateInstance: sending request to agentctl",
 		zap.String("instance_id", req.InstanceID),

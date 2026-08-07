@@ -22,9 +22,9 @@ describe("subagentMetaChips", () => {
       status: "complete",
     };
     expect(subagentMetaChips(payload)).toEqual([
-      { label: "duration", value: "2.2s" },
-      { label: "tokens", value: "9,987 tokens" },
-      { label: "tools", value: "0 tools" },
+      { id: "duration", label: "duration", value: "2.2s" },
+      { id: "tokens", label: "tokens", value: "9,987 tokens" },
+      { id: "tools", label: "tools", value: "0 tools" },
     ]);
   });
 
@@ -35,28 +35,32 @@ describe("subagentMetaChips", () => {
       child_session_id: "sess_abcdef0123456789",
     };
     expect(subagentMetaChips(payload)).toEqual([
-      { label: "model", value: "opencode/big-pickle" },
-      { label: "session", value: "sess_abcdef0…" },
+      { id: "model", label: "model", value: "opencode/big-pickle" },
+      { id: "session", label: "session", value: "sess_abcdef0…" },
     ]);
   });
 
   it("formats a Cursor payload (duration only)", () => {
     const payload: SubagentTaskPayload = { subagent_type: "task", duration_ms: 850 };
-    expect(subagentMetaChips(payload)).toEqual([{ label: "duration", value: "850ms" }]);
+    expect(subagentMetaChips(payload)).toEqual([
+      { id: "duration", label: "duration", value: "850ms" },
+    ]);
   });
 
   it("singularizes a single tool use", () => {
-    expect(subagentMetaChips({ tool_use_count: 1 })).toEqual([{ label: "tools", value: "1 tool" }]);
+    expect(subagentMetaChips({ tool_use_count: 1 })).toEqual([
+      { id: "tools", label: "tools", value: "1 tool" },
+    ]);
   });
 
   it("skips zero/negative duration and zero tokens but keeps zero tools", () => {
     const payload: SubagentTaskPayload = { duration_ms: 0, total_tokens: 0, tool_use_count: 0 };
-    expect(subagentMetaChips(payload)).toEqual([{ label: "tools", value: "0 tools" }]);
+    expect(subagentMetaChips(payload)).toEqual([{ id: "tools", label: "tools", value: "0 tools" }]);
   });
 
   it("does not truncate short session ids", () => {
     expect(subagentMetaChips({ child_session_id: "short" })).toEqual([
-      { label: "session", value: "short" },
+      { id: "session", label: "session", value: "short" },
     ]);
   });
 
@@ -71,11 +75,48 @@ describe("subagentMetaChips", () => {
       status: "async_launched",
       output_file: "/tmp/tasks/abc.output",
     };
-    expect(subagentMetaChips(payload)).toEqual([{ label: "background", value: "background" }]);
+    expect(subagentMetaChips(payload)).toEqual([
+      { id: "background", label: "background", value: "background" },
+    ]);
   });
 
   it("adds a background chip when status is async_launched even without is_async", () => {
     const payload: SubagentTaskPayload = { status: "async_launched" };
-    expect(subagentMetaChips(payload)).toEqual([{ label: "background", value: "background" }]);
+    expect(subagentMetaChips(payload)).toEqual([
+      { id: "background", label: "background", value: "background" },
+    ]);
+  });
+});
+
+// The card header already reads "10 tool calls" from the rendered child count.
+// A "10 tools" chip beside it states the same fact twice, in two registers.
+describe("subagentMetaChips tool-count de-duplication", () => {
+  it("omits the tools chip when it repeats the rendered child count", () => {
+    const payload: SubagentTaskPayload = { tool_use_count: 10, duration_ms: 90278 };
+    const labels = subagentMetaChips(payload, 10).map((chip) => chip.id);
+    expect(labels).not.toContain("tools");
+    expect(labels).toContain("duration");
+  });
+
+  it("keeps the tools chip when the reported count differs from what streamed", () => {
+    expect(subagentMetaChips({ tool_use_count: 27 }, 20)).toEqual([
+      { id: "tools", label: "tools", value: "27 tools" },
+    ]);
+  });
+
+  it("keeps the tools chip when no children were rendered at all", () => {
+    expect(subagentMetaChips({ tool_use_count: 0 })).toEqual([
+      { id: "tools", label: "tools", value: "0 tools" },
+    ]);
+  });
+
+  // The card always passes a numeric childCount, so a zero-tool subagent hits
+  // 0 === 0 and would lose its "0 tools" chip — which is the one case the chip
+  // exists for. Passing undefined here (as the test above does) misses the
+  // production path entirely.
+  it("keeps the 0 tools chip when the card reports zero children", () => {
+    expect(subagentMetaChips({ tool_use_count: 0 }, 0)).toEqual([
+      { id: "tools", label: "tools", value: "0 tools" },
+    ]);
   });
 });

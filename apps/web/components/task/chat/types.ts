@@ -183,6 +183,11 @@ export type RecoveryMetadata = StatusMetadata & {
   has_resume_token: boolean;
   is_auth_error?: boolean;
   auth_methods?: RecoveryAuthMethod[];
+  failure_kind?: "provider_quota_limited" | "missing_pr_branch" | string;
+  provider_name?: string;
+  model_id?: string;
+  reset_at?: string;
+  error_output?: string;
 };
 
 export type MessageAction = {

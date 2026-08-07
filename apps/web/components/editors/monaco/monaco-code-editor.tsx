@@ -10,11 +10,13 @@ import { EDITOR_FONT_FAMILY, EDITOR_FONT_SIZE } from "@/lib/theme/editor-theme";
 import { CommentForm } from "@/components/diff/comment-form";
 import { CommentDisplay } from "@/components/diff/comment-display";
 import { useEditorViewZoneComments } from "@/hooks/use-editor-view-zone-comments";
+import { useLspStatusPlacement } from "@/hooks/use-lsp-status-placement";
 import { MonacoEditorToolbar } from "./monaco-editor-toolbar";
 import { useMonacoEditorComments } from "./use-monaco-editor-state";
 import { useMonacoEditorLsp, useMonacoDiffDecorations } from "./use-monaco-editor-lsp";
 import { useMonacoWalkthroughRange } from "./use-monaco-walkthrough-range";
 import { initMonacoThemes } from "./monaco-init";
+import { useTranslation } from "react-i18next";
 
 initMonacoThemes();
 
@@ -124,6 +126,9 @@ function useMonacoCodeEditorSetup(props: MonacoCodeEditorProps) {
     onSave,
   } = props;
   const contentRef = useRef(content);
+  useEffect(() => {
+    contentRef.current = content;
+  }, [content]);
   const wrapperRef = useRef<HTMLDivElement>(null);
   const language = getMonacoLanguage(path);
   const state = useMonacoEditorComments({
@@ -139,10 +144,12 @@ function useMonacoCodeEditorSetup(props: MonacoCodeEditorProps) {
   const lsp = useMonacoEditorLsp({
     sessionId,
     worktreePath,
+    repo,
     language,
     path,
     contentRef,
     editorRef: state.editorRef,
+    editorReady: state.editorInstance !== null,
   });
   const { diffStats } = useMonacoDiffDecorations({
     originalContent,
@@ -154,9 +161,6 @@ function useMonacoCodeEditorSetup(props: MonacoCodeEditorProps) {
     editorRef: state.editorRef,
     diffDecorationsRef: state.diffDecorationsRef,
   });
-  useEffect(() => {
-    contentRef.current = content;
-  }, [content]);
   useEditorViewZoneComments(
     state.editorInstance,
     [state.comments, state.formZoneRange, state.editingCommentId],
@@ -169,7 +173,17 @@ function useMonacoCodeEditorSetup(props: MonacoCodeEditorProps) {
   return { contentRef, wrapperRef, language, state, lsp, diffStats, options };
 }
 
+function EditorLoading() {
+  const { t } = useTranslation();
+  return (
+    <div className="flex h-full items-center justify-center text-muted-foreground text-sm">
+      {t("editors:loadingEditor")}
+    </div>
+  );
+}
+
 export function MonacoCodeEditor(props: MonacoCodeEditorProps) {
+  const { t } = useTranslation();
   const {
     path,
     content,
@@ -183,6 +197,7 @@ export function MonacoCodeEditor(props: MonacoCodeEditorProps) {
     enableComments = false,
   } = props;
   const { resolvedTheme } = useTheme();
+  const lspStatusPlacement = useLspStatusPlacement();
   const { wrapperRef, language, state, lsp, diffStats, options } = useMonacoCodeEditorSetup(props);
   const editorAreaRef = useRef<HTMLDivElement>(null);
   const walkthroughRange = useMonacoWalkthroughRange({
@@ -209,7 +224,9 @@ export function MonacoCodeEditor(props: MonacoCodeEditorProps) {
         hasRemoteUpdate={hasRemoteUpdate}
         hasVcsDiff={Boolean(vcsDiff)}
         lspStatus={lsp.lspStatus}
+        lspProgress={lsp.lspProgress}
         lspLanguage={lsp.lspLanguage}
+        showLspStatus={lspStatusPlacement === "toolbar"}
         onToggleLsp={lsp.toggleLsp}
         onToggleWrap={() => state.setWrapEnabled(!state.wrapEnabled)}
         onToggleDiffIndicators={() => state.setShowDiffIndicators(!state.showDiffIndicators)}
@@ -229,11 +246,7 @@ export function MonacoCodeEditor(props: MonacoCodeEditorProps) {
           onMount={state.handleEditorDidMount}
           keepCurrentModel
           options={options}
-          loading={
-            <div className="flex h-full items-center justify-center text-muted-foreground text-sm">
-              Loading editor...
-            </div>
-          }
+          loading={<EditorLoading />}
         />
         {walkthroughRange ? (
           <div
@@ -260,7 +273,7 @@ export function MonacoCodeEditor(props: MonacoCodeEditorProps) {
             onClick={state.handleFloatingButtonClick}
           >
             <IconMessagePlus className="h-3.5 w-3.5" />
-            Comment
+            {t("editors:comment")}
           </Button>
         )}
       </div>

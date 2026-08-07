@@ -210,6 +210,10 @@
 }
 
 @layer components {
+  [data-settings-target-highlight="true"] {
+    animation: settings-target-highlight 1400ms ease-out;
+  }
+
   [data-settings-dirty="true"] {
     border-color: color-mix(in oklab, var(--success) 65%, var(--border)) !important;
   }
@@ -232,6 +236,78 @@
   [data-workflow-replay-cycle="true"] {
     @apply ring-1 ring-warning/20;
     border-color: color-mix(in oklab, var(--warning) 65%, var(--border)) !important;
+  }
+}
+
+@keyframes settings-target-highlight {
+  0%,
+  35% {
+    background-color: color-mix(in oklab, var(--primary) 10%, transparent);
+    box-shadow: inset 0 0 0 2px color-mix(in oklab, var(--primary) 55%, transparent);
+  }
+  100% {
+    background-color: transparent;
+    box-shadow: inset 0 0 0 2px transparent;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-settings-target-highlight="true"] {
+    animation: none;
+    background-color: color-mix(in oklab, var(--primary) 10%, transparent);
+    box-shadow: inset 0 0 0 2px color-mix(in oklab, var(--primary) 55%, transparent);
+  }
+}
+
+/* WebKit can leave a fixed dialog's transform animation on a separate layer,
+   which makes the Create Task surface look soft or briefly sit below its
+   overlay. Keep the workaround scoped to the dialog opt-in and the engine
+   marker so Chromium keeps the existing motion and geometry. The task's own
+   overlay is one level lower so a nested confirmation can reuse the shared
+   modal level and still paint above the task form. */
+@keyframes kandev-dialog-webkit-enter {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes kandev-dialog-webkit-exit {
+  to {
+    opacity: 0;
+  }
+}
+
+html[data-rendering-engine="webkit"] [data-webkit-safe-motion="true"] {
+  inset: 0;
+  margin: auto;
+  translate: 0 0;
+  z-index: 50;
+}
+
+html[data-rendering-engine="webkit"] .create-task-dialog-overlay {
+  z-index: 49;
+}
+
+html[data-rendering-engine="webkit"] .discard-confirmation-overlay {
+  z-index: 52;
+}
+
+html[data-rendering-engine="webkit"] [data-webkit-modal-layer="discard-confirmation"] {
+  z-index: 53;
+  height: fit-content;
+}
+
+html[data-rendering-engine="webkit"] [data-webkit-safe-motion="true"][data-state="open"] {
+  animation-name: kandev-dialog-webkit-enter;
+}
+
+html[data-rendering-engine="webkit"] [data-webkit-safe-motion="true"][data-state="closed"] {
+  animation-name: kandev-dialog-webkit-exit;
+}
+
+@media (min-width: 640px) {
+  html[data-rendering-engine="webkit"] [data-webkit-safe-motion="true"] {
+    height: fit-content;
   }
 }
 
@@ -967,31 +1043,60 @@
   table-layout: auto;
 }
 
+.markdown-table-scroll {
+  position: relative;
+}
+
+.markdown-table-resizer {
+  position: absolute;
+  z-index: 10;
+  width: 0.625rem;
+  padding: 0;
+  transform: translateX(-50%);
+  cursor: col-resize;
+  touch-action: none;
+  border: 0;
+  outline: none;
+  background: transparent;
+}
+
+.markdown-table-resizer::after {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 2px;
+  content: "";
+  transform: translateX(-50%);
+  background: transparent;
+  transition: background-color 100ms ease;
+}
+
+.markdown-table-resizer:hover::after,
+.markdown-table-resizer:focus-visible::after,
+.markdown-table-resizer[data-active="true"]::after {
+  background: var(--primary);
+}
+
 .markdown-body th,
 .markdown-body td {
   border: 1px solid var(--border);
   padding: 0.25rem 0.5rem;
   font-size: 13px;
   vertical-align: top;
+  overflow-wrap: anywhere;
+  white-space: normal;
 }
 
-.markdown-body td {
-  overflow-wrap: anywhere;
+/* Keep genuinely wide Markdown tables readable in their local scroll wrapper.
+   Ordinary two- and three-column tables use the available width and wrap. */
+.markdown-body table:has(> thead > tr > th:nth-child(4)) :is(th, td) {
+  min-width: 8rem;
 }
 
 .markdown-body th {
   background: var(--muted);
   font-weight: 600;
-  white-space: nowrap;
-}
-
-/* Label/value tables (common in agent output) put short keys in the first
-   column. Keep that column on one line and sized to its content so a long
-   value cell can't starve it down to a few characters and wrap "Failing"
-   into "Failin g". */
-.markdown-body td:first-child {
-  white-space: nowrap;
-  width: 1%;
 }
 
 .markdown-body td:not(:first-child) code {

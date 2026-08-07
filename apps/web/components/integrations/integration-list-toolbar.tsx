@@ -1,6 +1,7 @@
 "use client";
 
 import type { ReactNode } from "react";
+import { useTranslation } from "react-i18next";
 import { IconRefresh } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Input } from "@kandev/ui/input";
@@ -35,11 +36,12 @@ function RefreshControls({
   refreshTestId,
   showUpdatedPrefix,
 }: RefreshControlsProps) {
+  const { t } = useTranslation();
   return (
     <>
       {lastFetchedAt && !loading ? (
         <span className="whitespace-nowrap text-xs text-muted-foreground">
-          {showUpdatedPrefix ? "Updated " : ""}
+          {showUpdatedPrefix ? t("github:updated") : ""}
           {formatRelativeTime(lastFetchedAt.toISOString())}
         </span>
       ) : null}
@@ -49,7 +51,7 @@ function RefreshControls({
         className="h-8 w-8 cursor-pointer"
         onClick={onRefresh}
         disabled={loading}
-        title="Refresh"
+        title={t("github:refresh")}
         data-testid={refreshTestId}
       >
         <IconRefresh className={cn("h-4 w-4", loading && "animate-spin")} />
@@ -74,6 +76,7 @@ export function IntegrationListToolbar({
   queryTestId,
   refreshTestId,
 }: IntegrationListToolbarProps) {
+  const { t } = useTranslation();
   const dirty = customQuery !== committedQuery;
   return (
     <div className="flex shrink-0 flex-col gap-2 border-b px-4 py-2.5 sm:px-6 md:flex-row md:flex-wrap md:items-center md:gap-3">
@@ -116,7 +119,7 @@ export function IntegrationListToolbar({
         />
         {dirty ? (
           <span className="pointer-events-none absolute right-2 top-1/2 hidden -translate-y-1/2 text-[10px] uppercase tracking-wider text-muted-foreground sm:inline">
-            Press Enter
+            {t("github:pressEnter")}
           </span>
         ) : null}
       </div>

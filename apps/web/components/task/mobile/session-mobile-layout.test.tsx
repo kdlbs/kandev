@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, renderHook, act, screen } from "@testing-library/react";
 import { useState } from "react";
 import type { OpenFileTab } from "@/lib/types/backend";
@@ -31,6 +31,11 @@ vi.mock("../review-item-selector", () => ({
   ),
 }));
 
+vi.mock("@/components/state-provider", () => ({
+  useAppStore: (selector: (state: Record<string, unknown>) => unknown) =>
+    selector({ tasks: { activeTaskId: "task-1", activeSessionId: "session-1" } }),
+}));
+
 vi.mock("../review-detail-panel", async () => {
   const React = await import("react");
   return {
@@ -43,9 +48,14 @@ vi.mock("../review-detail-panel", async () => {
 
 import {
   MobilePanelArea,
+  resolveMobilePluginPanel,
+  resolveMobileReviewSource,
+  terminalPaddingBottom,
   useMobilePanelHandlers,
   useMobileReviewPanelFallback,
 } from "./session-mobile-layout";
+import type { PluginLifecycleSnapshot } from "@/lib/plugins/registry";
+import { pluginRegistry } from "@/lib/plugins/registry";
 
 const MOCK_FILE: OpenFileTab = {
   path: "src/foo.ts",
@@ -268,6 +278,28 @@ describe("useMobileReviewPanelFallback", () => {
   });
 });
 
+describe("resolveMobilePluginPanel", () => {
+  const panel = "plugin:plugin-a:notes" as const;
+
+  function lifecycle(status: PluginLifecycleSnapshot["status"]): PluginLifecycleSnapshot {
+    return { status, generation: 3 };
+  }
+
+  it("preserves the selected panel while its plugin is loading or recovering", () => {
+    expect(resolveMobilePluginPanel(panel, lifecycle("loading"), false)).toBe(panel);
+    expect(resolveMobilePluginPanel(panel, lifecycle("failed"), false)).toBe(panel);
+  });
+
+  it("falls back to Chat only after definitive removal or a ready missing registration", () => {
+    expect(resolveMobilePluginPanel(panel, lifecycle("removed"), false)).toBe("chat");
+    expect(resolveMobilePluginPanel(panel, lifecycle("ready"), false)).toBe("chat");
+  });
+
+  it("keeps a ready selected panel when its registration is present", () => {
+    expect(resolveMobilePluginPanel(panel, lifecycle("ready"), true)).toBe(panel);
+  });
+});
+
 describe("MobilePanelArea PR identity", () => {
   it("remounts detail feedback when the user chooses another mixed-provider review", () => {
     function MobileReviewHarness() {
@@ -319,5 +351,80 @@ describe("MobilePanelArea PR identity", () => {
 
     expect(screen.queryByRole("button", { name: "feedback for pr-a" })).toBeNull();
     expect(screen.getByRole("button", { name: "feedback for pr-b" })).not.toBeNull();
+  });
+});
+
+function renderMobilePanel(currentMobilePanel: string) {
+  return render(
+    <MobilePanelArea
+      currentMobilePanel={currentMobilePanel as never}
+      activeTaskId="task-1"
+      isPassthroughMode={false}
+      effectiveSessionId="session-1"
+      selectedFile={null}
+      selectedFilePreview={false}
+      selectedDiff={null}
+      handleOpenFileFromChat={vi.fn()}
+      handleClearSelectedDiff={vi.fn()}
+      handleOpenFile={vi.fn()}
+      handlePanelChangeAndClearSheet={vi.fn()}
+      topNavHeight="3.5rem"
+      bottomNavHeight="3.25rem"
+      reviews={[]}
+      selectedReview={null}
+      onSelectReview={vi.fn()}
+    />,
+  );
+}
+
+describe("MobilePanelArea — plugin task panel (AC7)", () => {
+  afterEach(() => {
+    pluginRegistry.unregisterPlugin("kandev-plugin-notes");
+  });
+
+  it("renders the plugin's Component with mobile presentation when selected", () => {
+    function Notes(props: { panelId: string; taskId: string; presentation: string }) {
+      return (
+        <div data-testid="notes-mobile-body">
+          {props.panelId}|{props.taskId}|{props.presentation}
+        </div>
+      );
+    }
+    pluginRegistry
+      .forPlugin("kandev-plugin-notes")
+      .registerTaskPanel({ id: "notes", title: "Notes", Component: Notes, mobileEnabled: true });
+
+    renderMobilePanel("plugin:kandev-plugin-notes:notes");
+
+    expect(screen.getByTestId("notes-mobile-body").textContent).toBe(
+      "plugin:kandev-plugin-notes:notes|task-1|mobile",
+    );
+  });
+
+  it("renders nothing for a panel id that isn't a plugin id", () => {
+    renderMobilePanel("not-a-plugin-panel-id");
+    expect(screen.queryByTestId("notes-mobile-body")).toBeNull();
+  });
+});
+
+describe("terminalPaddingBottom", () => {
+  it("pads by the keybar height alone when the keyboard is closed", () => {
+    expect(terminalPaddingBottom(false, 0, "3.25rem")).toBe("48px");
+    // bottomOffset is irrelevant while the keyboard is closed.
+    expect(terminalPaddingBottom(false, 300, "3.25rem")).toBe("48px");
+  });
+
+  it("subtracts the bottom nav and adds the live keyboard offset when the keyboard is open", () => {
+    expect(terminalPaddingBottom(true, 300, "3.25rem")).toBe(
+      "calc(348px - 3.25rem - env(safe-area-inset-bottom, 0px))",
+    );
+  });
+});
+
+describe("resolveMobileReviewSource", () => {
+  it("keeps built-in source precedence for saved mobile state", () => {
+    expect(resolveMobileReviewSource(true, true)).toBe("github");
+    expect(resolveMobileReviewSource(false, true)).toBe("gitlab");
+    expect(resolveMobileReviewSource(false, false)).toBeNull();
   });
 });

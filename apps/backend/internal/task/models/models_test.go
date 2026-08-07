@@ -4,6 +4,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/require"
+
 	"github.com/kandev/kandev/internal/agentruntime"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
@@ -50,6 +52,31 @@ func TestLoadSessionRuntimeConfigOverridesUsesDedicatedKey(t *testing.T) {
 	if !ok || overrides.Model != "gpt-5.6-sol" || overrides.ConfigOptions["effort"] != "low" {
 		t.Fatalf("overrides = %#v, %v", overrides, ok)
 	}
+}
+
+func TestLoadOriginalSessionEffectiveConfiguration(t *testing.T) {
+	metadata := map[string]interface{}{
+		SessionMetaKeyOriginalEffectiveConfig: map[string]interface{}{
+			"model": "gpt-5.6-sol",
+			"config_options": map[string]interface{}{
+				"reasoning_effort": "high",
+			},
+		},
+	}
+
+	config, ok := LoadOriginalSessionEffectiveConfiguration(metadata)
+	require.True(t, ok)
+	require.Equal(t, "gpt-5.6-sol", config.Model)
+	require.Equal(t, map[string]string{"reasoning_effort": "high"}, config.ConfigOptions)
+}
+
+func TestIsOriginalTaskSessionUsesImmutableOriginMarker(t *testing.T) {
+	require.True(t, IsOriginalTaskSession(map[string]interface{}{
+		SessionMetaKeyOrigin: SessionOriginTaskInitial,
+	}))
+	require.False(t, IsOriginalTaskSession(map[string]interface{}{
+		SessionMetaKeyCreatedBy: SessionCreatedByWorkflowSwitch,
+	}))
 }
 
 func TestLoadSessionACPConfigBaselinePreservesEmptyJSONValues(t *testing.T) {

@@ -1,7 +1,6 @@
 package configloader
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"os"
@@ -12,6 +11,7 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/common/subproc"
 
 	"go.uber.org/zap"
 )
@@ -262,24 +262,18 @@ func isAllowedRepoURL(u string) bool {
 // runGit executes a git command and returns combined stdout. If dir is empty,
 // the command runs in the current directory.
 func (g *GitManager) runGit(ctx context.Context, dir string, args ...string) (string, error) {
-	ctx, cancel := context.WithTimeout(ctx, gitCmdTimeout)
-	defer cancel()
-
-	cmd := exec.CommandContext(ctx, "git", args...)
-	if dir != "" {
-		cmd.Dir = dir
-	}
-
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-
-	if err := cmd.Run(); err != nil {
-		errMsg := stderr.String()
-		if errMsg == "" {
-			errMsg = stdout.String()
+	output, runErr, execCtxErr := subproc.RunGitCombinedAfterAcquire(ctx, subproc.GitLifecycle, gitCmdTimeout, func(execCtx context.Context) *exec.Cmd {
+		cmd := subproc.NewGitCommand(execCtx, args...)
+		if dir != "" {
+			cmd.Dir = dir
 		}
-		return "", fmt.Errorf("%s: %s", err, strings.TrimSpace(errMsg))
+		return cmd
+	})
+	if runErr != nil || execCtxErr != nil {
+		if runErr == nil {
+			runErr = execCtxErr
+		}
+		return "", fmt.Errorf("%s: %s", runErr, strings.TrimSpace(string(output)))
 	}
-	return stdout.String(), nil
+	return string(output), nil
 }

@@ -1,6 +1,7 @@
 "use client";
 
 import { IconArrowLeft } from "@tabler/icons-react";
+import { Trans, useTranslation } from "react-i18next";
 import { Badge } from "@kandev/ui/badge";
 import { Button } from "@kandev/ui/button";
 import { CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
@@ -15,6 +16,7 @@ import { PluginConfigForm } from "./plugin-config-form";
 import { PluginManifestCard } from "./plugin-manifest-card";
 import { PluginRepoLink } from "./plugin-repo-link";
 import { PluginStatusBadge } from "./plugin-status-badge";
+import { PluginErrorDiagnostic } from "./plugin-error-diagnostic";
 import { UninstallPluginDialog } from "./uninstall-plugin-dialog";
 import { usePluginActions } from "./use-plugin-actions";
 import { usePluginConfigForm } from "./use-plugin-config-form";
@@ -82,6 +84,7 @@ type PluginDetailHeaderProps = {
 };
 
 function PluginDetailHeader({ plugin }: PluginDetailHeaderProps) {
+  const { t } = useTranslation();
   return (
     <div className="space-y-3">
       <Link
@@ -89,7 +92,7 @@ function PluginDetailHeader({ plugin }: PluginDetailHeaderProps) {
         className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground cursor-pointer"
       >
         <IconArrowLeft className="h-4 w-4" />
-        Plugins
+        {t("common:plugins")}
       </Link>
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0 space-y-1">
@@ -101,7 +104,7 @@ function PluginDetailHeader({ plugin }: PluginDetailHeaderProps) {
                 variant="outline"
                 className="border-amber-500/40 bg-amber-500/10 text-amber-600 dark:text-amber-400 text-[11px]"
               >
-                unsigned
+                {t("plugins:unsigned")}
               </Badge>
             )}
           </div>
@@ -114,6 +117,7 @@ function PluginDetailHeader({ plugin }: PluginDetailHeaderProps) {
           {plugin.description && (
             <p className="text-sm text-muted-foreground">{plugin.description}</p>
           )}
+          <PluginErrorDiagnostic plugin={plugin} />
         </div>
       </div>
     </div>
@@ -127,10 +131,11 @@ type PluginSettingsCardProps = {
 };
 
 function PluginSettingsCard({ plugin, form, busy }: PluginSettingsCardProps) {
+  const { t } = useTranslation();
   return (
     <SettingsCard isDirty={form.isDirty} data-testid="plugin-settings-card">
       <CardHeader>
-        <CardTitle className="text-base">Settings</CardTitle>
+        <CardTitle className="text-base">{t("plugins:settings")}</CardTitle>
       </CardHeader>
       <CardContent>
         <PluginSettingsBody plugin={plugin} form={form} busy={busy} />
@@ -140,10 +145,14 @@ function PluginSettingsCard({ plugin, form, busy }: PluginSettingsCardProps) {
 }
 
 function PluginSettingsBody({ plugin, form, busy }: PluginSettingsCardProps) {
+  const { t } = useTranslation();
   if (form.fields.length === 0) {
     return (
       <p className="text-sm text-muted-foreground">
-        This plugin does not declare any settings (no <code>config_schema</code> in its manifest).
+        {/* `config_schema` is a manifest key — the contract, not copy. */}
+        <Trans i18nKey="plugins:noDeclaredSettings">
+          This plugin does not declare any settings (no <code>config_schema</code> in its manifest).
+        </Trans>
       </p>
     );
   }
@@ -151,7 +160,7 @@ function PluginSettingsBody({ plugin, form, busy }: PluginSettingsCardProps) {
     return <p className="text-sm text-destructive">{form.configError}</p>;
   }
   if (form.configLoading) {
-    return <p className="text-sm text-muted-foreground">Loading settings...</p>;
+    return <p className="text-sm text-muted-foreground">{t("plugins:loadingSettings")}</p>;
   }
   return (
     <div className="space-y-4">
@@ -163,9 +172,7 @@ function PluginSettingsBody({ plugin, form, busy }: PluginSettingsCardProps) {
         onChange={form.handleChange}
       />
       {plugin.status === "active" && (
-        <p className="text-xs text-muted-foreground">
-          Saving restarts the plugin so the new settings take effect.
-        </p>
+        <p className="text-xs text-muted-foreground">{t("plugins:savingRestartsPlugin")}</p>
       )}
     </div>
   );
@@ -177,8 +184,10 @@ type PluginDangerZoneProps = {
 };
 
 function PluginDangerZone({ plugin, actions }: PluginDangerZoneProps) {
+  const { t } = useTranslation();
   const busy = actions.busyId === plugin.id;
-  const canEnable = plugin.status === "disabled" || plugin.status === "registered";
+  const canEnable =
+    plugin.status === "disabled" || plugin.status === "registered" || plugin.status === "error";
   const canDisable = plugin.status === "active" || plugin.status === "error";
 
   return (
@@ -187,38 +196,39 @@ function PluginDangerZone({ plugin, actions }: PluginDangerZoneProps) {
         <Button
           variant="outline"
           size="sm"
-          className="cursor-pointer"
+          className="cursor-pointer min-h-11 sm:min-h-0"
           disabled={busy}
           onClick={() => actions.handleEnable(plugin)}
         >
-          Enable
+          {t("plugins:enable")}
         </Button>
       )}
       {canDisable && (
         <Button
           variant="outline"
           size="sm"
-          className="cursor-pointer"
+          className="cursor-pointer min-h-11 sm:min-h-0"
           disabled={busy}
           onClick={() => actions.handleDisable(plugin)}
         >
-          Disable
+          {t("plugins:disable")}
         </Button>
       )}
       <Button
         variant="ghost"
         size="sm"
-        className="cursor-pointer text-destructive hover:text-destructive"
+        className="cursor-pointer min-h-11 text-destructive hover:text-destructive sm:min-h-0"
         disabled={busy}
         onClick={() => actions.openUninstall(plugin)}
       >
-        Uninstall
+        {t("plugins:uninstall")}
       </Button>
     </div>
   );
 }
 
 function PluginNotFound({ pluginId }: { pluginId: string }) {
+  const { t } = useTranslation();
   return (
     <div className="space-y-4">
       <Link
@@ -226,10 +236,13 @@ function PluginNotFound({ pluginId }: { pluginId: string }) {
         className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground cursor-pointer"
       >
         <IconArrowLeft className="h-4 w-4" />
-        Plugins
+        {t("common:plugins")}
       </Link>
       <div className="rounded-md border border-dashed p-6 text-sm text-muted-foreground">
-        No installed plugin with id <span className="font-mono">{pluginId}</span>.
+        {/* The plugin id is an identifier the user typed or followed, never copy. */}
+        <Trans i18nKey="plugins:noInstalledPluginWithId" values={{ id: pluginId }}>
+          No installed plugin with id <span className="font-mono">{pluginId}</span>.
+        </Trans>
       </div>
     </div>
   );

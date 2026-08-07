@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
+import { Trans, useTranslation } from "react-i18next";
 
 import AgentsSettingsPage from "@/app/settings/agents/page";
 import AgentSetupPage from "@/app/settings/agents/[agentId]/page";
@@ -18,9 +19,9 @@ import IntegrationsGitLabPage from "@/app/settings/integrations/gitlab/page";
 import IntegrationsJiraPage from "@/app/settings/integrations/jira/page";
 import IntegrationsLinearPage from "@/app/settings/integrations/linear/page";
 import IntegrationsSentryPage from "@/app/settings/integrations/sentry/page";
-import IntegrationsSlackPage from "@/app/settings/integrations/slack/page";
 import PluginsSettingsPage from "@/app/settings/plugins/page";
 import PluginDetailPage from "@/app/settings/plugins/[pluginId]/page";
+import MessageQueueSettingsPage from "@/app/settings/general/message-queue/page";
 import StoragePage from "@/app/settings/system/storage/page";
 import UtilityAgentsSettingsPage from "@/app/settings/utility-agents/page";
 import AutomationsPage from "@/app/settings/workspace/[id]/automations/page";
@@ -53,11 +54,16 @@ import { UsersTable } from "@/components/settings/system/users-table";
 import { BackupsTable } from "@/components/settings/system/backups-table";
 import { DatabaseStatsCard } from "@/components/settings/system/database-stats-card";
 import { DiskUsageCard } from "@/components/settings/system/disk-usage-card";
-import { FeatureTogglesSettings } from "@/components/settings/system/feature-toggles-settings";
+import { FeatureTogglesRoute } from "@/components/settings/system/feature-toggles-route";
 import { HealthIssuesCard } from "@/components/settings/system/health-issues-card";
 import { LicensesList } from "@/components/settings/system/licenses-list";
 import { LogViewer } from "@/components/settings/system/log-viewer";
 import { SystemPageShell } from "@/components/settings/system/system-page-shell";
+import {
+  BACKUP_DIR,
+  BACKUP_SQL_COMMAND,
+  SystemRouteShell,
+} from "@/components/settings/system/system-route-shell";
 import { UIStateCard } from "@/components/settings/system/ui-state-card";
 import { UpdatesCard } from "@/components/settings/system/updates-card";
 import { VersionSummaryCard } from "@/components/settings/system/version-summary-card";
@@ -136,6 +142,7 @@ const SETTINGS_ROUTES: Record<string, RouteRenderer> = {
   "/settings/general/editors": () => <EditorsSettings />,
   "/settings/general/keyboard-shortcuts": () => <KeyboardShortcutsSettings />,
   "/settings/general/layouts": () => <LayoutSettings />,
+  "/settings/general/message-queue": () => <MessageQueueSettingsPage />,
   "/settings/general/notifications": () => <NotificationsSettings />,
   "/settings/general/resource-metrics": () => (
     <SettingsRedirect to="/settings/general/appearance" />
@@ -162,86 +169,64 @@ const SETTINGS_ROUTES: Record<string, RouteRenderer> = {
   "/settings/integrations/jira": () => renderIntegrationSettingsRoute("jira"),
   "/settings/integrations/linear": () => renderIntegrationSettingsRoute("linear"),
   "/settings/integrations/sentry": () => renderIntegrationSettingsRoute("sentry"),
-  "/settings/integrations/slack": () => renderIntegrationSettingsRoute("slack"),
   "/settings/system": () => <SettingsRedirect to="/settings/system/status" />,
   "/settings/system/users": () => (
-    <SystemPageShell
-      title="Users"
-      description="Manage accounts, roles, and invite links for this instance."
-    >
+    <SystemRouteShell titleKey="system:navUsers" descriptionKey="system:usersPageDescription">
       <UsersTable />
-    </SystemPageShell>
+    </SystemRouteShell>
   ),
-  "/settings/account/security": () => (
-    <SystemPageShell
-      title="Profile & password"
-      description="Change your password and review devices signed in to your account."
-    >
-      <SecuritySettings />
-    </SystemPageShell>
-  ),
-  "/settings/account/tokens": () => (
-    <SystemPageShell
-      title="API tokens"
-      description="Personal access tokens for scripts and CLIs acting as you."
-    >
-      <ApiTokens />
-    </SystemPageShell>
-  ),
+  "/settings/account/security": () => <AccountSecurityRoute />,
+  "/settings/account/tokens": () => <AccountTokensRoute />,
   "/settings/system/about": () => (
-    <SystemPageShell title="About" description="Version, build metadata, and links.">
+    <SystemRouteShell titleKey="system:navAbout" descriptionKey="system:aboutPageDescription">
       <AboutCard />
-    </SystemPageShell>
+    </SystemRouteShell>
   ),
   "/settings/system/backups": () => (
-    <SystemPageShell
-      title="Backups"
-      description="VACUUM INTO snapshots stored under <data-dir>/backups/."
+    <SystemRouteShell
+      titleKey="system:navBackups"
+      descriptionKey="system:backupsPageDescription"
+      descriptionValues={{ command: BACKUP_SQL_COMMAND, path: BACKUP_DIR }}
     >
       <BackupsTable />
-    </SystemPageShell>
+    </SystemRouteShell>
   ),
   "/settings/system/database": () => (
-    <SystemPageShell
-      title="Database"
-      description="Database driver, size, and available maintenance controls."
-    >
+    <SystemRouteShell titleKey="system:navDatabase" descriptionKey="system:databasePageDescription">
       <DatabaseStatsCard />
-    </SystemPageShell>
+    </SystemRouteShell>
   ),
   "/settings/system/feature-toggles": () => (
-    <SystemPageShell
-      title="Feature Toggles"
-      description="Manage Kandev feature and diagnostic switches."
+    <SystemRouteShell
+      titleKey="system:navFeatureToggles"
+      descriptionKey="system:featureTogglesPageDescription"
     >
-      <FeatureTogglesSettings initialFlags={[]} restartCapability={null} />
-    </SystemPageShell>
+      <FeatureTogglesRoute />
+    </SystemRouteShell>
   ),
   "/settings/system/licenses": () => (
-    <SystemPageShell
-      title="Licenses"
-      description="Open-source licenses for every npm and Go dependency shipped with kandev."
-    >
+    <SystemRouteShell titleKey="system:navLicenses" descriptionKey="system:licensesPageDescription">
       <LicensesList entries={licenseEntries} />
-    </SystemPageShell>
+    </SystemRouteShell>
   ),
   "/settings/system/logs": () => (
-    <SystemPageShell
-      title="Logs"
-      description="Recent backend log output and downloadable log files."
+    <SystemRouteShell
+      titleKey="settings:logsPageTitle"
+      descriptionKey="settings:logsPageDescription"
     >
       <LogViewer />
-    </SystemPageShell>
+    </SystemRouteShell>
   ),
+  "/settings/system/message-queue": () => <SettingsRedirect to="/settings/general/message-queue" />,
   "/settings/system/status": () => (
-    <SystemPageShell title="Status" description="Health checks, disk usage, and version summary.">
+    <SystemRouteShell titleKey="common:status" descriptionKey="system:statusPageDescription">
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <HealthIssuesCard />
         <VersionSummaryCard />
       </div>
       <DiskUsageCard />
       <UIStateCard />
-    </SystemPageShell>
+    </SystemRouteShell>
   ),
   "/settings/system/storage": () => <StoragePage />,
   "/settings/system/updates": renderUpdatesRoute,
@@ -379,16 +364,13 @@ function renderWorkspaceSettingsRoute(pathname: string) {
 
   const workspaceSubpage = matchDouble(
     pathname,
-    /^\/settings\/workspace\/([^/]+)\/(repositories|workflows|automations)$/,
+    /^\/settings\/workspace\/([^/]+)\/(repositories|secrets|workflows|automations)$/,
   );
   if (workspaceSubpage) {
     const [id, section] = workspaceSubpage;
-    if (section === "repositories") {
-      return <WorkspaceRepositoriesRoute workspaceId={id} />;
-    }
-    if (section === "workflows") {
-      return <WorkspaceWorkflowsRoute workspaceId={id} />;
-    }
+    if (section === "repositories") return <WorkspaceRepositoriesRoute workspaceId={id} />;
+    if (section === "secrets") return <SecretsSettings scope="workspace" workspaceId={id} />;
+    if (section === "workflows") return <WorkspaceWorkflowsRoute workspaceId={id} />;
     return <AutomationsPage workspaceId={id} />;
   }
 
@@ -416,28 +398,55 @@ function renderIntegrationSettingsRoute(section: string | null, workspaceId?: st
       return <IntegrationsLinearPage workspaceId={workspaceId} />;
     case "sentry":
       return <IntegrationsSentryPage workspaceId={workspaceId} />;
-    case "slack":
-      return <IntegrationsSlackPage workspaceId={workspaceId} />;
     default:
       return renderPluginIntegrationSettings(section, workspaceId);
   }
 }
 
-function renderUpdatesRoute() {
+// Components rather than inline JSX so `t()` resolves at render — a t() call
+// inside SETTINGS_ROUTES would run at module load and freeze at the boot locale.
+function AccountSecurityRoute() {
+  const { t } = useTranslation();
   return (
     <SystemPageShell
-      title="Updates"
-      description="Current vs latest release plus the full kandev changelog."
+      title={t("account:securityPageTitle")}
+      description={t("account:securityPageDescription")}
     >
+      <SecuritySettings />
+    </SystemPageShell>
+  );
+}
+
+function AccountTokensRoute() {
+  const { t } = useTranslation();
+  return (
+    <SystemPageShell
+      title={t("account:tokensPageTitle")}
+      description={t("account:tokensPageDescription")}
+    >
+      <ApiTokens />
+    </SystemPageShell>
+  );
+}
+
+function renderUpdatesRoute() {
+  return <UpdatesRoute />;
+}
+
+function UpdatesRoute() {
+  return (
+    <SystemRouteShell titleKey="system:navUpdates" descriptionKey="system:updatesPageDescription">
       <p className="text-sm text-muted-foreground">
-        Notification preferences are managed in{" "}
-        <Link className="cursor-pointer underline" href="/settings/general/notifications">
-          Notifications
-        </Link>
-        .
+        <Trans i18nKey="system:updatesNotificationsHint">
+          Notification preferences are managed in{" "}
+          <Link className="cursor-pointer underline" href="/settings/general/notifications">
+            Notifications
+          </Link>
+          .
+        </Trans>
       </p>
       <UpdatesCard />
-    </SystemPageShell>
+    </SystemRouteShell>
   );
 }
 
@@ -633,8 +642,11 @@ async function loadWorkspaceWorkflowsRoute(
 function SettingsRouteFallback({ pathname }: { pathname: string }) {
   return (
     <div className="rounded-md border border-dashed p-6 text-sm text-muted-foreground">
-      This settings route is handled by the SPA shell, but its dedicated client page is still being
-      ported: <span className="font-mono">{pathname}</span>
+      {/* `pathname` is a route string, never translated. */}
+      <Trans i18nKey="system:settingsRouteNotPorted" values={{ pathname }}>
+        This settings route is handled by the SPA shell, but its dedicated client page is still
+        being ported: <span className="font-mono">{pathname}</span>
+      </Trans>
     </div>
   );
 }

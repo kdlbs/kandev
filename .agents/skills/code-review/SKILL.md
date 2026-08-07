@@ -70,6 +70,16 @@ Before reviewing implementation details:
 - Identify missing coverage for happy path, key error paths, edge cases, auth/workspace boundaries, and concurrency/order-sensitive behavior.
 - For concurrent or event-driven changes, require a deterministic schedule that checks ownership or generation identity, stale-event handling, cancellation, and lock scope. Channel/barrier coordination is preferable to timing sleeps.
 - For stale-event races, cover both event-before-successor and delayed-old-event-after-successor orderings. Prefer integration coverage for cross-package event or callback paths when practical.
+- When an HTTP mutation returns a full entity while WebSocket/event updates can
+  update the same entity, ensure a delayed HTTP response cannot overwrite the
+  newer event. Prefer a narrow mutation response or guard a full merge with an
+  immutable revision/`updated_at`; cover it with a deferred-response test that
+  applies the newer event first.
+- For ordering guarantees across an event bus, trace producer, remote
+  transport, and gateway/client delivery. Sequential publishes on separate
+  subscriptions do not establish client order; require a unified stream or
+  sequence-aware buffering, with a transport-boundary test and local-emulator
+  coverage.
 - For terminal event streams, block an earlier publication, enqueue a terminal event (for example delete or cancellation), then enqueue a stale update. Assert no later mutation reaches an upserting consumer; queues must tombstone the entity or discard pending work at the terminal boundary.
 - When completion events lack a stable workload identity, test N outstanding registrations with N completion signals and duplicate delivery. A single-registration test cannot prove that uncorrelated completions retire work correctly. Compare this behavior with the accepted spec or ADR; a passing test that contradicts the contract is still a blocker.
 - Treat missing tests for new or changed non-UI logic as a blocker unless the change is explicitly untestable and says why.
@@ -80,6 +90,9 @@ Check every changed file for the following layers. Skip layers that don't apply 
 
 **Security** (blockers if found):
 - No secrets, tokens, or credentials in code
+- When persisted configuration is copied into UI or session metadata, trace it
+  through the applicable sanitizer/redaction boundary; storage-safe values are
+  not automatically presentation-safe.
 - Input validation at system boundaries (user input, API handlers, external data)
 - No SQL injection, XSS, command injection, or path traversal risks
 - Authentication and authorization checks in place for new endpoints
@@ -87,12 +100,29 @@ Check every changed file for the following layers. Skip layers that don't apply 
 - Workspace and office boundaries are enforced; no cross-workspace data, credentials, logs, or agent context leakage
 - Agent/tool execution is constrained by code, not prompt text alone
 
-**Architecture:**
+**Architectural fit (highest priority):**
+- Changes belong in the correct layer/module and follow the dependency direction used by the codebase
+- Business/domain logic is not placed in controllers, transport handlers, repositories, data sources, or infrastructure code
+- Controllers handle protocol concerns, use cases orchestrate workflows, repositories define persistence needs, and data sources handle external systems
+- Domain/application code does not depend on frameworks, transport models, database models, or vendor-specific types
+- Changes do not bypass existing boundaries, duplicate responsibilities, or introduce unnecessary coupling between modules or domains
+- New interfaces and abstractions have clear ownership and represent a meaningful boundary, rather than wrapping a single implementation
+- Compare with neighbouring features and established patterns, but flag deviations only when they create a real architectural or maintainability problem
+- Treat fundamental architectural misplacement or broken dependency direction as a blocker
 - Frontend: no direct data fetching in components (must go through store), shadcn imports from `@kandev/ui` not `@/components/ui/*`
 - Backend: provider pattern for DI, context passed through call chains, event bus for cross-component communication
 - Search `docs/specs/` and `docs/decisions/` for the affected subsystem; flag an accepted spec or ADR that the change makes inaccurate
 - New abstractions justified — no over-engineering
 - Concerns cleanly separated (single responsibility)
+
+**Data & state modelling:**
+- Domain entities, value objects, DTOs, persistence models, and external API models remain separate where their responsibilities differ
+- State transitions and invariants are explicit and cannot create invalid or partially updated state
+- There is a single clear source of truth; state or business rules are not duplicated across layers
+- Nullability, optional fields, defaults, and invalid combinations are modelled deliberately
+- Persistence schemas or transport types are not leaking implementation details into domain/application contracts
+- Concurrency, retries, partial failures, and duplicate requests cannot corrupt state or apply transitions more than once
+- Backward compatibility, migrations, and mixed-version behaviour are considered when contracts or persisted data change
 
 **Logic & correctness:**
 - Edge cases handled (empty input, nil/null, zero, max values)
@@ -127,6 +157,11 @@ Check every changed file for the following layers. Skip layers that don't apply 
 - For changed Makefiles, shell scripts, or CI path filters, trace each changed
   target through the shell and platform branches. Distinguish executable naming
   from recipe-shell syntax; inspect `OS`, `MSYSTEM`, and `SHELL` assumptions.
+- When simulating a Windows Make branch from POSIX, prefer
+  `scripts/check-make-shells`. If a manual `make -n` is necessary, neutralize
+  its parse-time probes as that checker does (`NULL_REDIR= BUILD_TIME=simulated`)
+  so POSIX does not create `NUL` artifacts. Compare `git status --short` with
+  the initial snapshot afterward.
 - Use `make -n <changed-target>` for every affected platform branch that is
   available, and confirm CI invokes the changed target. Include docs or
   configuration paths when a validator or test reads them.
@@ -152,6 +187,10 @@ the user asks for a review only, or when reviewing an external contributor's
 branch, do not edit the checkout or push code; report findings through the
 channel the user requested. Do not submit or resolve reviews unless explicitly
 asked.
+
+Before a read-only review ends, compare `git status --short` with the initial
+snapshot. Remove only diagnostic artifacts demonstrably created during the
+review; preserve all pre-existing user changes.
 
 Report findings with a concrete suggested fix. Do not edit the checkout during
 a review-only request; otherwise remediate in the same primary conversation.

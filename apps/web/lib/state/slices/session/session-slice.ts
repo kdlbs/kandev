@@ -101,15 +101,49 @@ function syncPrepareProgress(draft: any, session: TaskSession) {
   if (prepareState) draft.prepareProgress.bySessionId[session.id] = prepareState;
 }
 
+/** Merge the runtime cancellation projection using its process-local revision. */
+function mergeCancellationProjection(
+  existing: TaskSession,
+  incoming: TaskSession,
+): Pick<TaskSession, "cancellation_pending" | "cancellation_revision"> {
+  const incomingRevision = incoming.cancellation_revision;
+  const existingRevision = existing.cancellation_revision;
+  const incomingIsCurrent =
+    incomingRevision !== undefined &&
+    (existingRevision === undefined || incomingRevision >= existingRevision);
+
+  if (incomingIsCurrent) {
+    return {
+      cancellation_pending: incoming.cancellation_pending ?? existing.cancellation_pending,
+      cancellation_revision: incomingRevision,
+    };
+  }
+
+  if (incomingRevision === undefined && existingRevision === undefined) {
+    return {
+      cancellation_pending: incoming.cancellation_pending ?? existing.cancellation_pending,
+      cancellation_revision: existingRevision,
+    };
+  }
+
+  return {
+    cancellation_pending: existing.cancellation_pending,
+    cancellation_revision: existingRevision,
+  };
+}
+
 /** Merge an incoming session update with an existing session, preserving nullable fields. */
 function mergeTaskSession(existing: TaskSession, incoming: TaskSession): TaskSession {
+  const cancellation = mergeCancellationProjection(existing, incoming);
   return {
     ...existing,
     ...incoming,
+    ...cancellation,
     agent_profile_snapshot: incoming.agent_profile_snapshot ?? existing.agent_profile_snapshot,
     worktree_id: incoming.worktree_id ?? existing.worktree_id,
     worktree_path: incoming.worktree_path ?? existing.worktree_path,
     worktree_branch: incoming.worktree_branch ?? existing.worktree_branch,
+    workspace_path: incoming.workspace_path ?? existing.workspace_path,
     repository_id: incoming.repository_id ?? existing.repository_id,
     base_branch: incoming.base_branch ?? existing.base_branch,
     task_environment_id: incoming.task_environment_id ?? existing.task_environment_id,
@@ -537,6 +571,12 @@ function buildTaskSessionActions(set: ImmerSet) {
     ) =>
       set((draft) => {
         const existing = draft.taskSessions.items[session.id];
+        if (!existing && draft.taskSessionsByTask.loadedByTaskId[taskId]) {
+          // State events intentionally carry partial session rows. When one
+          // introduces a new session, let useTaskSessions hydrate fields such
+          // as repository_id instead of treating the old list as authoritative.
+          draft.taskSessionsByTask.loadedByTaskId[taskId] = false;
+        }
         const merged = existing ? mergeTaskSession(existing, session) : session;
         draft.taskSessions.items[session.id] = merged;
         const list = draft.taskSessionsByTask.itemsByTaskId[taskId];

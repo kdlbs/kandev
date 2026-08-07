@@ -1,3 +1,4 @@
+import { Trans, useTranslation } from "react-i18next";
 import { IconTerminal2 } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import {
@@ -11,7 +12,11 @@ import {
 import type { CommandEntry, ModeEntry } from "@/lib/types/http";
 import type { ProfileFormData } from "./profile-form-fields";
 
+// An example slash command the user types verbatim — an identifier, not copy.
+const EXAMPLE_COMMAND = "/init";
+
 export function CommandsButton({ commands }: { commands: CommandEntry[] }) {
+  const { t } = useTranslation();
   if (commands.length === 0) return null;
   return (
     <Dialog>
@@ -24,14 +29,19 @@ export function CommandsButton({ commands }: { commands: CommandEntry[] }) {
           data-testid="profile-commands-button"
         >
           <IconTerminal2 className="mr-2 h-4 w-4" />
-          Available commands ({commands.length})
+          {t("agents:availableCommandsCount", { count: commands.length })}
         </Button>
       </DialogTrigger>
       <DialogContent className="max-w-lg">
         <DialogHeader>
-          <DialogTitle>Available slash commands</DialogTitle>
+          <DialogTitle>{t("agents:availableSlashCommands")}</DialogTitle>
           <DialogDescription>
-            Type these during a session chat to invoke them - e.g. <code>/init</code>.
+            <Trans
+              i18nKey="agents:availableSlashCommandsHelp"
+              values={{ example: EXAMPLE_COMMAND }}
+            >
+              <code />
+            </Trans>
           </DialogDescription>
         </DialogHeader>
         <div className="max-h-[60vh] overflow-y-auto space-y-2">

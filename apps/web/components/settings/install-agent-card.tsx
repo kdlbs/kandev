@@ -1,5 +1,7 @@
 "use client";
 
+import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 import { IconDownload, IconLoader2 } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Card, CardContent } from "@kandev/ui/card";
@@ -9,19 +11,27 @@ import type { AvailableAgent } from "@/lib/types/http";
 
 type InstallStatus = InstallJob["status"] | "idle";
 
-function installButtonContent(status: InstallStatus): {
+/**
+ * The install-job `status` values are the wire enum; only the button labels are
+ * copy. The rule never inspects this function (`mode: "jsx-only"` skips a
+ * non-JSX body), so the labels are resolved through `t` at render.
+ */
+function installButtonContent(
+  t: TFunction,
+  status: InstallStatus,
+): {
   icon: "spinner" | "download";
   label: string;
 } {
   switch (status) {
     case "queued":
-      return { icon: "spinner", label: "Queued…" };
+      return { icon: "spinner", label: t("agents:installQueued") };
     case "running":
-      return { icon: "spinner", label: "Installing…" };
+      return { icon: "spinner", label: t("agents:installing") };
     case "failed":
-      return { icon: "download", label: "Retry" };
+      return { icon: "download", label: t("agents:retry") };
     default:
-      return { icon: "download", label: "Install" };
+      return { icon: "download", label: t("agents:install") };
   }
 }
 
@@ -34,8 +44,9 @@ function InstallButton({
   status: InstallStatus;
   onInstall: (name: string) => void;
 }) {
+  const { t } = useTranslation();
   const isInFlight = status === "queued" || status === "running";
-  const btn = installButtonContent(status);
+  const btn = installButtonContent(t, status);
   return (
     <Button
       size="sm"

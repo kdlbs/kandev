@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useMemo } from "react";
+import { useTranslation } from "react-i18next";
 import { usePathname, useRouter, useSearchParams } from "@/lib/routing/client-router";
 import ReactMarkdown from "react-markdown";
 import { Card, CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
@@ -31,12 +32,14 @@ function parsePageParam(raw: string | null, totalPages: number): number {
 }
 
 function ChangelogEntryCard({ entry }: { entry: ChangelogEntry }) {
+  const { t } = useTranslation();
   const releaseUrl = getReleaseUrl(entry.version);
 
   return (
     <Card>
       <CardHeader>
         <div className="flex items-center justify-between">
+          {/* Version, date and the release notes body are all release data. */}
           <CardTitle className="text-base flex items-center gap-2">
             <Badge variant="secondary">v{entry.version}</Badge>
             {entry.date && (
@@ -49,7 +52,7 @@ function ChangelogEntryCard({ entry }: { entry: ChangelogEntry }) {
             rel="noopener noreferrer"
             className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
           >
-            View on GitHub
+            {t("system:changelogViewOnGitHub")}
             <IconExternalLink className="h-3 w-3" />
           </a>
         </div>
@@ -82,6 +85,7 @@ function buildPageNumbers(currentPage: number, totalPages: number): (number | "e
 }
 
 export function ChangelogList() {
+  const { t } = useTranslation();
   const changelog = getChangelog();
   const router = useRouter();
   const pathname = usePathname();
@@ -111,7 +115,7 @@ export function ChangelogList() {
   }, [changelog, currentPage]);
 
   if (changelog.length === 0) {
-    return <p className="text-sm text-muted-foreground">No changelog entries available.</p>;
+    return <p className="text-sm text-muted-foreground">{t("system:changelogEmpty")}</p>;
   }
 
   const pageNumbers = buildPageNumbers(currentPage, totalPages);

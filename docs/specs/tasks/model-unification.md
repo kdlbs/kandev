@@ -178,6 +178,15 @@ User-initiated launches (clicking Start on a kanban task) bypass the
 queue and call `runtime.Launch` directly — those don't need
 coalescing and shouldn't pay the scheduler's tick latency.
 
+The queue has one backend-wide consumer across all workspaces; there
+is no scheduler per Office workspace. Assignment alone does not make
+an ordinary Kanban task autonomous. Office assignment recovery uses
+the authoritative Office-task identity, while a workflow of any style
+can opt into queued automation explicitly with `queue_run`. Shared
+scheduler lifecycle, Office maintenance activation, and shutdown
+ordering are specified in [queued run scheduling](run-scheduling.md)
+and [ADR-2026-08-01-global-run-scheduler-ownership](../../decisions/2026-08-01-global-run-scheduler-ownership.md).
+
 `run_events` (the audit log per run) keeps its current shape and
 event-streaming behaviour. WS event subjects (`office.run.queued`,
 `office.run.processed`, `office.run.event_appended.<run_id>`) keep
@@ -295,6 +304,12 @@ preserved.
   **WHEN** the user creates a task and clicks Start, **THEN** the agent
   runs through the linear steps as today. No regression. No new
   triggers fire because the kanban template doesn't configure them.
+
+- **GIVEN** Office mode is enabled but every workspace contains only
+  ordinary Kanban workflows, **WHEN** scheduler maintenance runs,
+  **THEN** no Kanban assignment is recovered as autonomous Office
+  work. Explicit user Start and configured Kanban workflow actions
+  retain their existing behavior.
 
 - **GIVEN** a workspace that adopts the Office Default workflow,
   **WHEN** the user creates a task assigned to the CEO, **THEN** the

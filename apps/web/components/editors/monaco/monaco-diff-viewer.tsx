@@ -6,6 +6,7 @@ import { useTheme } from "@/components/theme/app-theme";
 import { cn } from "@kandev/ui/lib/utils";
 import type { FileDiffData, DiffComment, DiffCommentUpdate } from "@/lib/diff/types";
 import { getMonacoLanguage } from "@/lib/editor/language-map";
+import { copyToClipboard } from "@/lib/utils/copy-to-clipboard";
 import { useCommandPanelOpen } from "@/lib/commands/command-registry";
 import { useDiffEditorHeight } from "@/hooks/use-diff-editor-height";
 import { useGlobalViewMode } from "@/hooks/use-global-view-mode";
@@ -16,6 +17,7 @@ import { useDiffViewerComments } from "./use-diff-viewer-comments";
 import { useGlobalFolding } from "./use-global-folding";
 import { resolveDiffContent, buildDiffEditorOptions } from "./diff-viewer-helpers";
 import { initMonacoThemes } from "./monaco-init";
+import { useTranslation } from "react-i18next";
 
 initMonacoThemes();
 
@@ -144,6 +146,7 @@ function useMonacoDiffViewerState(props: MonacoDiffViewerProps) {
 }
 
 export function MonacoDiffViewer(props: MonacoDiffViewerProps) {
+  const { t } = useTranslation();
   const { className, compact = false, hideHeader = false, onOpenFile, onRevert } = props;
   const state = useMonacoDiffViewerState(props);
   const { wrapperRef, hasDiff, contextMenu, setContextMenu } = state;
@@ -158,7 +161,7 @@ export function MonacoDiffViewer(props: MonacoDiffViewerProps) {
           className,
         )}
       >
-        No diff available
+        {t("editors:noDiffAvailable")}
       </div>
     );
   }
@@ -174,7 +177,7 @@ export function MonacoDiffViewer(props: MonacoDiffViewerProps) {
           setWordWrap={state.setWordWrap}
           globalViewMode={state.globalViewMode}
           setGlobalViewMode={state.setGlobalViewMode}
-          onCopyDiff={() => navigator.clipboard.writeText(state.diff ?? "")}
+          onCopyDiff={() => void copyToClipboard(state.diff ?? "")}
           onOpenFile={onOpenFile}
           onRevert={onRevert}
           sessionId={props.sessionId}
@@ -204,7 +207,7 @@ export function MonacoDiffViewer(props: MonacoDiffViewerProps) {
           options={state.options}
           loading={
             <div className="flex h-full items-center justify-center text-muted-foreground text-sm">
-              Loading diff...
+              {t("editors:loadingDiff")}
             </div>
           }
         />

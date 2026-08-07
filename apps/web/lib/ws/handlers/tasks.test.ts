@@ -94,6 +94,15 @@ function makeMessage(payload: Record<string, unknown>) {
   } as Parameters<NonNullable<ReturnType<typeof registerTasksHandlers>["task.updated"]>>[0];
 }
 
+function makeStateChangedMessage(payload: Record<string, unknown>) {
+  return {
+    id: "msg-1",
+    type: "notification" as const,
+    action: "task.state_changed" as const,
+    payload,
+  } as Parameters<NonNullable<ReturnType<typeof registerTasksHandlers>["task.state_changed"]>>[0];
+}
+
 // Shared setup for the primary-session focus-follow tests: a single task t1
 // whose kanban primary, plus the active/pinned session ids, are the only knobs
 // that vary between cases.
@@ -594,5 +603,73 @@ describe("task.updated executor preservation", () => {
       primaryExecutorName: undefined,
       isRemoteExecutor: false,
     });
+  });
+});
+
+function makeParentTaskStore(parentTaskId: string) {
+  const existingTask = {
+    id: "t1",
+    workflowStepId: "step1",
+    title: "Old title",
+    position: 0,
+    primarySessionId: "session-1",
+    parentTaskId,
+  };
+  return makeStore({
+    kanban: {
+      workflowId: "wf1",
+      steps: [],
+      tasks: [existingTask],
+    } as unknown as AppState["kanban"],
+    kanbanMulti: {
+      isLoading: false,
+      snapshots: {
+        wf1: { workflowId: "wf1", workflowName: "WF1", steps: [], tasks: [existingTask] },
+      },
+    } as unknown as AppState["kanbanMulti"],
+  });
+}
+
+describe("task parent preservation", () => {
+  it("preserves parentTaskId when a partial update omits parent_id", () => {
+    const store = makeParentTaskStore("parent-1");
+
+    registerTasksHandlers(store)["task.updated"]!(
+      makeMessage({
+        ...makeTask("t1", "session-1"),
+        title: "Retitled task",
+      }),
+    );
+    registerTasksHandlers(store)["task.state_changed"]!(
+      makeStateChangedMessage({ ...makeTask("t1", "session-1"), title: "Retitled again" }),
+    );
+
+    const state = store.getState();
+    expect(state.kanban.tasks[0]).toMatchObject({ parentTaskId: "parent-1" });
+    expect(state.kanbanMulti.snapshots.wf1.tasks[0]).toMatchObject({ parentTaskId: "parent-1" });
+  });
+
+  it("clears parentTaskId when the task is explicitly detached (parent_id: null)", () => {
+    const store = makeParentTaskStore("parent-1");
+
+    registerTasksHandlers(store)["task.updated"]!(
+      makeMessage({ ...makeTask("t1", "session-1"), parent_id: null }),
+    );
+
+    const state = store.getState();
+    expect(state.kanban.tasks[0]).toMatchObject({ parentTaskId: undefined });
+    expect(state.kanbanMulti.snapshots.wf1.tasks[0]).toMatchObject({ parentTaskId: undefined });
+  });
+
+  it("adopts an explicit re-parent even while the previous parent is still preserved elsewhere", () => {
+    const store = makeParentTaskStore("parent-old");
+
+    registerTasksHandlers(store)["task.updated"]!(
+      makeMessage({ ...makeTask("t1", "session-1"), parent_id: "parent-new" }),
+    );
+
+    const state = store.getState();
+    expect(state.kanban.tasks[0]).toMatchObject({ parentTaskId: "parent-new" });
+    expect(state.kanbanMulti.snapshots.wf1.tasks[0]).toMatchObject({ parentTaskId: "parent-new" });
   });
 });

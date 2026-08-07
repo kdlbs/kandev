@@ -40,6 +40,24 @@ export async function waitForActiveSessionForegroundActivity(
   );
 }
 
+/** Wait for the backend-owned cancellation projection on the active session. */
+export async function waitForActiveSessionCancellationPending(
+  page: Page,
+  pending: boolean,
+): Promise<void> {
+  await page.waitForFunction(
+    (expected) => {
+      const store = (window as E2EStoreWindow).__KANDEV_E2E_STORE__;
+      if (!store) return false;
+      const sessionId = store.getState().tasks.activeSessionId;
+      if (!sessionId) return false;
+      return store.getState().taskSessions.items[sessionId]?.cancellation_pending === expected;
+    },
+    pending,
+    { timeout: 20_000 },
+  );
+}
+
 /**
  * Simulate a lean session-list / partial WS update: preserve `is_passthrough`
  * but drop `agent_profile_snapshot` from the client store.

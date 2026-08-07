@@ -76,7 +76,10 @@ func isValidationError(err error) bool {
 	if err == nil {
 		return false
 	}
-	if errors.Is(err, service.ErrInvalidParent) {
+	if errors.Is(err, service.ErrInvalidParent) || errors.Is(err, service.ErrAutoTitleUnsupportedForOffice) {
+		return true
+	}
+	if errors.Is(err, service.ErrTaskTitleTooLong) {
 		return true
 	}
 	msg := strings.ToLower(err.Error())

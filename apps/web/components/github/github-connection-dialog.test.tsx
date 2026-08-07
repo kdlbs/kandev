@@ -17,6 +17,7 @@ const changeConnectionLabel = "Change connection";
 const registrationDisplayName = "Work automation";
 const githubAppLabel = "GitHub App";
 const saveChangesLabel = "Save changes";
+const personalAccessTokenLabel = "Personal access token";
 const WORKSPACE_ID = "workspace-1";
 const DESKTOP_CONNECTION_TEST_ID = "github-connection-desktop";
 const taskAccess: TaskGitCredentialsState = {
@@ -155,7 +156,7 @@ describe("GitHubConnectionDialog task access", () => {
       .getByTestId("github-task-access-option-executor")
       .querySelector('[role="radio"]')!;
     fireEvent.click(executor);
-    fireEvent.change(screen.getByLabelText("Personal access token"), {
+    fireEvent.change(screen.getByLabelText(personalAccessTokenLabel), {
       target: { value: "ghp_replacement" },
     });
 
@@ -196,7 +197,7 @@ describe("GitHubConnectionDialog task access", () => {
     mocks.setConnection.mockRejectedValue(new Error("Token rejected"));
     render(<PartialSaveHarness />);
     fireEvent.click(screen.getByRole("button", { name: changeConnectionLabel }));
-    const token = screen.getByLabelText("Personal access token") as HTMLInputElement;
+    const token = screen.getByLabelText(personalAccessTokenLabel) as HTMLInputElement;
     fireEvent.change(token, { target: { value: "ghp_retry_me" } });
     fireEvent.click(
       screen.getByTestId("github-task-access-option-executor").querySelector('[role="radio"]')!,
@@ -207,6 +208,32 @@ describe("GitHubConnectionDialog task access", () => {
     await screen.findByText(/Some settings were saved/);
     expect(token.value).toBe("ghp_retry_me");
   });
+
+  it("keeps an invalid PAT draft in the open connection dialog", async () => {
+    const onSaved = vi.fn();
+    mocks.setConnection.mockRejectedValue(new Error("GitHub token is invalid"));
+    render(
+      <ToastProvider>
+        <GitHubConnectionDialog
+          status={status}
+          workspaceId={WORKSPACE_ID}
+          onSaved={onSaved}
+          taskAccess={taskAccess}
+        />
+      </ToastProvider>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: changeConnectionLabel }));
+    const dialog = await screen.findByTestId(DESKTOP_CONNECTION_TEST_ID);
+    const token = screen.getByLabelText(personalAccessTokenLabel) as HTMLInputElement;
+    fireEvent.change(token, { target: { value: "ghp_invalid" } });
+    fireEvent.click(screen.getByRole("button", { name: saveChangesLabel }));
+
+    await screen.findByText("GitHub token is invalid");
+    expect(token.value).toBe("ghp_invalid");
+    expect(dialog.getAttribute("data-state")).toBe("open");
+    expect(onSaved).not.toHaveBeenCalled();
+  });
 });
 afterEach(() => cleanup());
 
@@ -216,7 +243,7 @@ describe("GitHubConnectionDialog", () => {
     fireEvent.click(screen.getByRole("button", { name: changeConnectionLabel }));
     expect(await screen.findByTestId(DESKTOP_CONNECTION_TEST_ID)).toBeTruthy();
     expect(screen.getByLabelText("Connection method")).toBeTruthy();
-    expect(screen.getAllByText("Personal access token")).not.toHaveLength(0);
+    expect(screen.getAllByText(personalAccessTokenLabel)).not.toHaveLength(0);
     expect(screen.getByText("GitHub CLI account")).toBeTruthy();
 
     fireEvent.click(screen.getByText(githubAppLabel, { selector: "span" }));

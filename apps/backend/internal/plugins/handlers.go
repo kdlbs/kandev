@@ -91,6 +91,10 @@ func RegisterRoutes(router *gin.Engine, svc *Service, _ Deliverer, log *logger.L
 	api.GET("/:id/bundle", ctrl.bundle)
 	api.GET("/:id/ui/*path", ctrl.ui)
 	api.POST("/:id/actions/:key", ctrl.action)
+	// Registered before the /:id/webhooks/:key wildcard for the same reason
+	// /settings is registered before /:id above: some gin/httprouter tree
+	// versions reject a static-ish sibling added after an existing wildcard.
+	registerUserStateRoutes(api, ctrl)
 	api.POST("/:id/webhooks/:key", ctrl.webhook)
 	api.GET("/:id/webhooks/:key", ctrl.webhook)
 }
@@ -501,11 +505,11 @@ func (c *Controller) verifyActionContext(
 
 	verified := pluginsdk.VerifiedActionContext{ActorID: identity.UserID}
 	switch resourceScope {
-	case "workspace":
+	case manifest.ActionScopeWorkspace:
 		return c.verifyWorkspaceAction(ctx, verified, envelope)
-	case "task":
+	case manifest.ActionScopeTask:
 		return c.verifyTaskAction(ctx, verified, envelope)
-	case "repository":
+	case manifest.ActionScopeRepository:
 		return c.verifyRepositoryAction(ctx, verified, envelope)
 	default:
 		// Manifest validation makes this unreachable for persisted plugins, but

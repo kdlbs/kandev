@@ -6,7 +6,7 @@ import { Badge } from "@kandev/ui/badge";
 import { Textarea } from "@kandev/ui/textarea";
 import { Dialog, DialogContent, DialogHeader, DialogFooter, DialogTitle } from "@kandev/ui/dialog";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast/sonner";
 import { useAppStore } from "@/components/state-provider";
 import { createTask } from "@/lib/api/domains/kanban-api";
 import { useIssueDraft, type IssueDraft } from "./new-task-draft";
@@ -18,6 +18,7 @@ import {
   EMPTY_STAGES,
   type StagesDraft,
 } from "./new-task-stages";
+import { clampTaskTitleInput } from "@/lib/task-title";
 
 function buildMetadata(draft: IssueDraft): Record<string, unknown> | undefined {
   const meta: Record<string, unknown> = {};
@@ -148,7 +149,7 @@ function NewIssueDialogBody({
         <Textarea
           placeholder="Task title"
           value={draft.title}
-          onChange={(e) => updateDraft({ title: e.target.value })}
+          onChange={(e) => updateDraft({ title: clampTaskTitleInput(e.target.value) })}
           className="text-lg font-medium border-0 resize-none focus-visible:ring-0 min-h-[40px]"
           rows={1}
           autoFocus

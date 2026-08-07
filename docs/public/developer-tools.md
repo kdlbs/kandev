@@ -7,6 +7,12 @@ description: "Use quick chat, utility agents, saved prompts, voice input, editor
 
 Kandev includes short-lived chat, reusable AI helpers, dictation, file and editor integration, language servers, and terminals. Some tools run in a task environment; others run on the Kandev backend host or in the browser. That boundary determines which files, executables, credentials, and network services they can reach.
 
+## Quick path
+
+1. Use **Quick Chat** for disposable questions.
+2. Use a task session for work that needs files, review, or workflow state.
+3. Add utility agents, editors, language servers, or terminals only when their host boundary is acceptable.
+
 ## Quick Chat
 
 Quick Chat is an agent conversation outside the board. Use it for repository orientation, experiments, and disposable questions that do not need workflow state, review gates, dependencies, or a delivery record.
@@ -45,6 +51,9 @@ Closing a real chat tab permanently deletes its conversation, hidden backing tas
 
 If **Start chat** is disabled, select a profile and finish every repository/branch row. If a repository is missing, confirm that it belongs to the current workspace and refresh the repository configuration. Use a normal task when the result must remain visible on a board or become a reviewed PR.
 
+<details>
+<summary>Utility agents and configuration chat</summary>
+
 ## Utility agents
 
 Open **Settings > Utility Agents** (`/settings/utility-agents`). Utility agents are one-shot ACP calls used to generate small pieces of text; they do not create a durable task conversation.
@@ -75,7 +84,12 @@ Configuration Chat uses a repository-less ephemeral task. Its configuration-mode
 
 Closing the floating Settings panel preserves the conversation. To delete it, open it in Quick Chat, close its tab, and confirm deletion. Configuration tasks are excluded from the seven-day Quick Chat sweeper and remain available until explicitly deleted or their workspace is deleted.
 
+</details>
+
 ## Saved prompts
+
+<details>
+<summary>Saved prompt details</summary>
 
 Open **Settings > Prompts** (`/settings/prompts`) to add, edit, or delete reusable prompts. A saved prompt needs a unique name and non-empty content.
 
@@ -95,7 +109,12 @@ Built-ins are marked in the UI but remain editable. Editing `ci-auto-fix` or `ch
 
 A saved prompt is an instruction, not an authorization or policy boundary. Executor permissions, human gates, tests, and provider protections still control what can happen.
 
+</details>
+
 ## Voice Mode
+
+<details>
+<summary>Voice details</summary>
 
 Open **Settings > Voice Mode** (`/settings/voice-mode`). Voice Mode inserts a transcript at the cursor in the active chat composer.
 
@@ -128,7 +147,14 @@ Engine choice is capability selection, not runtime failover. Once recognition or
 
 Microphone capture requires browser permission and normally HTTPS or localhost. Whisper Web also needs `getUserMedia`, `MediaRecorder`, workers, enough browser storage, and a first-use network download. The UI mentions common Chrome, Edge, and Safari versions, but Kandev does not enforce a browser/version allow-list; runtime availability is determined from the required APIs. If recording fails, check site permission, input device, secure context, model download/cache, browser support, and network access. The composer must remain enabled; switching tasks or disabling the input cancels recording.
 
+</details>
+
 ## Files and editor integrations
+
+> **Security:** Embedded VS Code runs code-server with `--auth none` inside the task environment. Use it only with a trusted executor and network boundary.
+
+<details>
+<summary>Editor, language-server, and terminal details</summary>
 
 For an idle, non-archived repository-backed task, **Files → Workspace actions → Add Repositories to workspace** opens a tab-free source picker. **Add repository** offers a workspace repository, a local Git checkout, or a provider-backed/pasted remote URL. The workspace option shares task creation's saved/discovered selector, refresh, and create-repository actions. **Add folder** is available on Local/Local PC or Worktree. Every repository chooses one base branch, and Local/Local PC uses the current checkout without switching it. Desktop uses a dialog; phones use a full-height drawer with a touch-sized repository menu. A mixed submission is atomic, and repository additions refresh repository-aware tools while folders remain Files-only. See [Tasks and workflows](tasks-and-workflows.md#add-sources-to-an-existing-task).
 
@@ -165,19 +191,33 @@ Language-server settings are part of **Settings > General > Editors**. Kandev cu
 - TypeScript and JavaScript;
 - Go;
 - Rust;
-- Python.
+- Python;
+- Kotlin through the official `kotlin-lsp`. Kotlin support is experimental because the upstream server is still alpha.
 
-Auto-start and auto-install are off for every language by default. Enable only the languages used by the workspace, then save settings. A file toolbar can start or stop a server manually; browser-local storage remembers manual enablement for that session and language. Kandev disconnects an unused server connection after two minutes.
+Auto-start and auto-install are off for every language by default. Enable only the languages used by the workspace, then save settings. Each language card keeps its installation command, prerequisites, and managed destination visible next to the auto-install setting, including for touch and keyboard users. Open the language-server control to inspect its status and use the explicit **Start**, **Stop**, or **Retry** action. Browser-local storage remembers manual enablement for that session and language. If you stop an auto-started server, it stays off for that session and language in the current browser tab—even if a matching editor reopens—until you explicitly start it again or reload the page. Kandev disconnects an unused server connection after two minutes.
 
-Server lookup checks installed executables and `<KANDEV_HOME_DIR>/lsp-servers` (by default `~/.kandev/lsp-servers`). Auto-install uses different toolchains:
+**Status location** defaults to the active file's editor toolbar. On a fine-pointer desktop with the Application status bar enabled, you can instead place it in that bar; the item follows the active supported file and is absent on unsupported files and non-file panels. A touch-oriented tablet keeps the saved preference but uses the 44 px editor-toolbar control and bottom drawer. The phone file viewer has no LSP control. Runtime fallbacks do not overwrite the saved preference.
+
+Language servers run beside the project on the **task host**, with the task workspace as their working directory. V1 supports Local PC and Local Docker tasks. SSH, Sprites, and remote-Docker tasks show an unsupported-executor state instead of starting a server; an LSP request alone does not launch or resume those task resources. The desktop Monaco editor wires diagnostics plus completion, hover, definition, references, signature help, and semantic tokens when the server advertises them. TypeScript/JavaScript built-ins remain available to other sessions and models, and for features the active external server does not advertise or Kandev does not replace. After a file is successfully saved, Kandev sends its latest content change before notifying an active server that requested save synchronization; a failed save sends no save notification. The mobile file viewer does not start language servers in the background.
+
+Only enable Kotlin language support for repositories you trust. Kotlin project import can evaluate Gradle or Maven build configuration on the task host; use a disposable Local Docker executor when the repository or its build files are untrusted.
+
+Server lookup checks the task host's `PATH` and its `~/.kandev/lsp-servers` directory. The managed cache resolves `~` from the same task `HOME` used to execute installer commands, including executor-provided environment overrides. Auto-install uses different toolchains:
 
 - TypeScript/JavaScript and Python install npm packages into Kandev's language-server storage;
-- Go runs `go install ...@latest` and therefore needs a working Go toolchain;
-- Rust downloads a release for supported macOS or Linux, x86-64 or ARM64 hosts. Windows is not registered for automatic Rust installation.
+- Go runs `go install ...@latest` and therefore needs a working Go toolchain. Result discovery follows `GOBIN`, `GOPATH`, and the task user's default Go workspace, including `%USERPROFILE%\go\bin` on Windows;
+- Rust downloads a release for supported macOS or Linux, x86-64 or ARM64 task hosts. The Editors checkbox is a global preference; agentctl applies it only when the active task host supports the installer. A Windows Local PC task therefore needs a manual installation, while a Linux Local Docker task can auto-install Rust even when Kandev itself runs on Windows. If the selected task host has no supported installer, its status directs you to install the server manually even before you enable auto-install;
+- Kotlin is manual-only. Follow the [official Kotlin LSP installation guide](https://kotlinlang.org/docs/kotlin-lsp.html), then verify `command -v kotlin-lsp` and `kotlin-lsp --version` in the task environment.
 
-The default Go server configuration enables semantic tokens. A custom language-server configuration must be a JSON object; Kandev sends it through the language-server workspace configuration request. Installing a language server does not install project dependencies or make an unsupported language available. If startup fails, check the backend log/status, executable `PATH`, supported host platform, toolchain/network access, project dependencies, and that the file belongs to the active task worktree.
+For a Local PC task, start Kandev from an environment whose `PATH` includes the server executable. For a Local Docker task, the host installation is not visible: add the executable and its runtime requirements to the executor image or prepare script, then recreate the task container. A Kotlin server in a Local Docker task must therefore be resolvable by `command -v kotlin-lsp` inside that container. If a managed installation fails, the language-server status preserves the detailed installer output after the connection closes.
 
-Language-server subprocesses run on the Kandev backend host with the task workspace path as their working directory; they are not launched inside a Docker container, SSH host, or Sprites sandbox. Remote-only paths, binaries, and project dependencies are therefore normally unavailable to this LSP path even when the agent itself can use them.
+The default Go server configuration enables semantic tokens. A custom language-server configuration must be a JSON object; Kandev returns it through the language-server workspace configuration request and notifies an already-running server immediately after a saved change. Installing a language server does not install project dependencies or make an unsupported language available. If the task host cannot launch a discovered executable, the editor shows a localized start-failure status while the detailed execution error remains in backend logs. Check the backend log/status, executable `PATH`, supported host platform, toolchain/network access, project dependencies, and that the file belongs to the active task worktree.
+
+The status surface separates process startup, the LSP `initialize` request, and server-reported background project analysis. **Server process started** means the executable is running but has not yet answered `initialize`; definitions and references across files remain unavailable during that stage. After one minute, Kandev calls out the long wait without stopping the server. For Kotlin, a Gradle project import is one possible cause, especially in a large or multi-module codebase. **Stop** remains available throughout.
+
+Kandev does not impose an automatic initialization timeout or invent a percentage or ETA. Some valid project imports take several minutes, and LSP has no universal indexing-progress contract. When a server reports standard work-done progress, Kandev shows its title, message, percentage, and concurrent work-item count when available. Those values describe only the work item the server reported; its completion does not guarantee that every cross-file definition or reference is ready. If cross-file navigation is still incomplete, leave the server running while its project model warms up, or stop it explicitly if the wait is unexpected.
+
+Each browser connection owns a language-server process; editors in one browser window share the connection for the same session and language. Kandev allows eight active connections by default; operators can change that startup limit with `KANDEV_LSP_MAX_CONNECTIONS`. A request above that limit is rejected before it can start or resume the task host. Stopping a server, closing its connection, or stopping the task reaps the task-host process tree. If the toolbar says the server is unavailable, distinguish a missing task-host binary from an unsupported executor or the active-connection limit before retrying.
 
 ## Integrated terminal
 
@@ -202,6 +242,8 @@ Open **Settings > General > Terminal** (`/settings/general/terminal`) to configu
 Shell changes apply whenever a new or restarted terminal is created, including inside an existing task. Only an already-live PTY keeps its current shell. A custom shell must exist in the task environment. Fonts render only when available to the browser. Commands can behave differently from your login shell because the executor may use another user, `PATH`, credentials, working directory, or startup files.
 
 If no terminal can be created, wait for the task environment to become ready and confirm its executor is reachable. If a reopened terminal is dead, create a new one; the original PTY or remote connection may have exited.
+
+</details>
 
 ## Choose the right surface
 

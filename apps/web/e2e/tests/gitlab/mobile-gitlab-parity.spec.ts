@@ -18,8 +18,11 @@ async function expectTouchTarget(locator: ReturnType<GitLabPage["mrRow"]>, label
   const box = await locator.boundingBox();
   expect(box, `${label} has no bounding box`).not.toBeNull();
   if (!box) return;
-  expect(box.width, `${label} width`).toBeGreaterThanOrEqual(44);
-  expect(box.height, `${label} height`).toBeGreaterThanOrEqual(44);
+  // Chromium can report a CSS 44px box as 43.9999 after device-scale
+  // conversion. Compare whole CSS pixels so floating-point noise does not
+  // turn a conforming touch target into a retry-only failure.
+  expect(Math.round(box.width), `${label} width`).toBeGreaterThanOrEqual(44);
+  expect(Math.round(box.height), `${label} height`).toBeGreaterThanOrEqual(44);
 }
 
 async function seedMultiRepoGitLabTask(

@@ -6,6 +6,7 @@ import { MRDetailPanelComponent } from "@/components/gitlab/mr-detail-panel";
 import { useAppStore } from "@/components/state-provider";
 import { useTaskMRs } from "@/hooks/domains/gitlab/use-task-mr";
 import { usePluginRegistry } from "@/lib/plugins/registry";
+import { t } from "@/lib/i18n";
 import type { PluginReviewProviderRegistration } from "@/lib/plugins/registry";
 import {
   resolveReviewKey,
@@ -59,7 +60,7 @@ function RegisteredReviewPanel({
 function ReviewUnavailable() {
   return (
     <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
-      Review unavailable.
+      {t("integrations:reviewUnavailable")}
     </div>
   );
 }
@@ -102,7 +103,7 @@ function CanonicalReviewPanel({ panelId }: { panelId: string }) {
         </div>
       ) : (
         <div className="flex flex-1 items-center justify-center px-6 text-center text-sm text-muted-foreground">
-          Choose a review to open it.
+          {t("integrations:chooseReviewToOpen")}
         </div>
       )}
     </div>

@@ -1,4 +1,6 @@
 import { cn } from "@/lib/utils";
+import { copyToClipboard } from "@/lib/utils/copy-to-clipboard";
+import { useTranslation } from "react-i18next";
 
 export type ContextMenuState = {
   x: number;
@@ -33,6 +35,7 @@ export function DiffViewerContextMenu({
   onRevert,
   filePath,
 }: DiffViewerContextMenuProps) {
+  const { t } = useTranslation();
   return (
     <div
       role="menu"
@@ -41,18 +44,18 @@ export function DiffViewerContextMenu({
       onMouseDown={(e) => e.stopPropagation()}
     >
       <button role="menuitem" className={itemCls} onClick={onCopyAllChanged}>
-        Copy all changed lines
+        {t("editors:copyAllChangedLines")}
       </button>
       {contextMenu.isChangedLine && (
         <button
           role="menuitem"
           className={itemCls}
           onClick={() => {
-            navigator.clipboard.writeText(contextMenu.lineContent);
+            void copyToClipboard(contextMenu.lineContent);
             onClose();
           }}
         >
-          Copy line {contextMenu.lineNumber}
+          {t("editors:copyLine", { lineNumber: contextMenu.lineNumber })}
         </button>
       )}
       {onRevert && (
@@ -69,7 +72,7 @@ export function DiffViewerContextMenu({
               onClose();
             }}
           >
-            Revert all changes
+            {t("editors:revertAllChanges")}
           </button>
         </>
       )}

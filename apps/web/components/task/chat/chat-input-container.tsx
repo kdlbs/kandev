@@ -24,6 +24,8 @@ import { useUtilityAgentGenerator } from "@/hooks/use-utility-agent-generator";
 import { useIsUtilityConfigured } from "@/hooks/use-is-utility-configured";
 import { usePromptResultDelivery } from "@/hooks/use-prompt-result-delivery";
 import { PromptResultRecovery } from "@/components/prompt-result-recovery";
+import { useTranslation } from "react-i18next";
+import { t } from "@/lib/i18n";
 
 // Re-export ImageAttachment type for consumers
 export type { ImageAttachment } from "./image-attachment-preview";
@@ -31,9 +33,11 @@ export type { ImageAttachment } from "./image-attachment-preview";
 // Type for message attachments sent to backend
 export type MessageAttachment = {
   type: "image" | "audio" | "resource";
-  data: string;
+  data?: string;
+  attachment_id?: string;
   mime_type: string;
   name?: string;
+  size_bytes?: number;
   delivery_mode?: "prompt" | "path";
 };
 
@@ -72,6 +76,9 @@ type ChatInputContainerProps = {
   mcpAttachmentHistory?: MCPAttachmentHistory;
   onPlanModeChange: (enabled: boolean) => void;
   isAgentBusy: boolean;
+  /** True when a send would be delivered into the running turn (mid-turn
+   * steering) rather than queued. Defaults to false. */
+  supportsSteering?: boolean;
   isStarting: boolean;
   /** True only while a containerized executor is bootstrapping (Docker
    * prepare, Sprites sandbox spin-up). Distinct from the brief STARTING
@@ -126,11 +133,15 @@ async function requestSessionRecover(
   }
 }
 
+// The recovery banner keeps resume/fresh-start controls together for desktop
+// and mobile layouts; its line count is intentionally bounded by that UI.
+// eslint-disable-next-line max-lines-per-function
 function FailedSessionBanner({
   showDialog,
   onShowDialog,
   taskId,
   sessionId,
+  workspaceId,
   message = "This agent has stopped.",
   detail,
   resumeLabel = "Resume",
@@ -140,11 +151,13 @@ function FailedSessionBanner({
   onShowDialog: (open: boolean) => void;
   taskId: string | null;
   sessionId: string | null;
+  workspaceId?: string | null;
   message?: string;
   detail?: string;
   resumeLabel?: string;
   resumingLabel?: string;
 }) {
+  const { t } = useTranslation();
   const [isResuming, setIsResuming] = useState(false);
   const [isStartingFresh, setIsStartingFresh] = useState(false);
 
@@ -204,7 +217,9 @@ function FailedSessionBanner({
                     </Button>
                   </span>
                 </TooltipTrigger>
-                {!profileExists && <TooltipContent>Agent profile no longer exists</TooltipContent>}
+                {!profileExists && (
+                  <TooltipContent>{t("task:agentProfileNoLongerExists")}</TooltipContent>
+                )}
               </Tooltip>
             )}
             <Button
@@ -216,12 +231,19 @@ function FailedSessionBanner({
               data-testid="recovery-fresh-button"
             >
               <IconRefresh className="h-3.5 w-3.5" />
-              {isStartingFresh ? "Starting..." : "Start fresh session"}
+              {isStartingFresh ? t("task:starting") : t("task:startFreshSession")}
             </Button>
           </div>
         </div>
       </div>
-      {taskId && <NewSessionDialog open={showDialog} onOpenChange={onShowDialog} taskId={taskId} />}
+      {taskId && (
+        <NewSessionDialog
+          open={showDialog}
+          onOpenChange={onShowDialog}
+          taskId={taskId}
+          workspaceId={workspaceId}
+        />
+      )}
     </>
   );
 }
@@ -294,6 +316,7 @@ function buildEditorAreaProps(
     isDisabled: s.isDisabled,
     submitDisabled: s.submitDisabled,
     submitDisabledReason: s.submitDisabledReason,
+    hasPendingAttachmentUploads: s.hasPendingAttachmentUploads,
     planModeEnabled: p.planModeEnabled,
     planModeAvailable: p.planModeAvailable ?? true,
     mcpServers: p.mcpServers ?? [],
@@ -337,10 +360,10 @@ function buildEditorAreaProps(
 function buildStoppedBannerProps(p: ChatInputContainerProps) {
   if (!p.executorUnavailable) return {};
   return {
-    message: "Executor environment is unavailable.",
+    message: t("task:executorEnvironmentIsUnavailable"),
     detail: p.executorUnavailableReason,
-    resumeLabel: "Restart",
-    resumingLabel: "Restarting...",
+    resumeLabel: t("task:restart"),
+    resumingLabel: t("task:restarting"),
   };
 }
 
@@ -423,6 +446,7 @@ export const ChatInputContainer = forwardRef<ChatInputContainerHandle, ChatInput
     const s = useChatInputContainer({
       ref,
       sessionId,
+      workspaceId: props.workspaceId,
       isSending,
       isStarting,
       isPreparingEnvironment: props.isPreparingEnvironment ?? false,
@@ -431,6 +455,7 @@ export const ChatInputContainer = forwardRef<ChatInputContainerHandle, ChatInput
       needsRecovery: props.needsRecovery ?? false,
       executorUnavailable,
       isAgentBusy,
+      supportsSteering: props.supportsSteering ?? false,
       hasAgentCommands: p.hasAgentCommands,
       placeholder: props.placeholder,
       contextItems: p.contextItems,
@@ -475,6 +500,7 @@ export const ChatInputContainer = forwardRef<ChatInputContainerHandle, ChatInput
           onShowDialog={s.setShowNewSessionDialog}
           taskId={taskId}
           sessionId={sessionId}
+          workspaceId={props.workspaceId}
           {...buildStoppedBannerProps(props)}
         />
       );

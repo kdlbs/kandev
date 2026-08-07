@@ -7,9 +7,12 @@ import { Switch } from "@kandev/ui/switch";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { updateUserSettings } from "@/lib/api";
 import { SettingsCard } from "./settings-card";
+import { GENERAL_SETTINGS_TARGETS } from "@/lib/settings-discovery/catalog/general";
 import { useSettingsSaveContributor } from "./settings-save-provider";
+import { useTranslation } from "react-i18next";
 
 export function ArchiveConfirmationSettings() {
+  const { t } = useTranslation();
   const confirmTaskArchive = useAppStore((state) => state.userSettings.confirmTaskArchive);
   const setUserSettings = useAppStore((state) => state.setUserSettings);
   const storeApi = useAppStoreApi();
@@ -40,16 +43,22 @@ export function ArchiveConfirmationSettings() {
   });
 
   return (
-    <SettingsCard isDirty={isDirty} data-testid="archive-confirmation-card">
+    <SettingsCard
+      isDirty={isDirty}
+      discoveryTargetId={GENERAL_SETTINGS_TARGETS.archiveConfirmation}
+      data-testid="archive-confirmation-card"
+    >
       <CardHeader>
-        <CardTitle className="text-base">Archive Confirmation</CardTitle>
+        <CardTitle className="text-base">{t("settings:archiveConfirmation")}</CardTitle>
       </CardHeader>
       <CardContent>
         <div className="flex min-h-11 items-center justify-between gap-4">
           <div className="min-w-0 space-y-0.5">
-            <Label htmlFor="confirm-task-archive">Confirm before archiving tasks</Label>
+            <Label htmlFor="confirm-task-archive">
+              {t("settings:confirmBeforeArchivingTasks")}
+            </Label>
             <p className="text-xs text-muted-foreground">
-              Show cleanup details and subtask options before an archive starts.
+              {t("settings:showCleanupDetailsAndSubtaskOptions")}
             </p>
           </div>
           <Switch

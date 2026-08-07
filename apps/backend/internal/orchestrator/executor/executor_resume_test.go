@@ -2,6 +2,7 @@ package executor
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -9,6 +10,7 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
+	"github.com/kandev/kandev/internal/gitcredentials"
 	"github.com/kandev/kandev/internal/task/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
@@ -71,6 +73,217 @@ func setupLiveResumeTestFixture(repo *mockRepository) {
 	}
 }
 
+type resumeCredentialStateIssuer struct {
+	repo          *mockRepository
+	observedState models.TaskSessionState
+	err           error
+	afterIssue    func()
+}
+
+func (i *resumeCredentialStateIssuer) Issue(
+	ctx context.Context,
+	req gitcredentials.Scope,
+) (gitcredentials.Lease, error) {
+	session, err := i.repo.GetTaskSession(ctx, req.SessionID)
+	if err != nil {
+		return gitcredentials.Lease{}, err
+	}
+	i.observedState = session.State
+	if i.err != nil {
+		return gitcredentials.Lease{}, i.err
+	}
+	if session.State != models.TaskSessionStateStarting {
+		return gitcredentials.Lease{}, fmt.Errorf("Git credential scope denied: session is terminal")
+	}
+	if i.afterIssue != nil {
+		i.afterIssue()
+	}
+	return gitcredentials.Lease{Token: "opaque-lease"}, nil
+}
+
+func attachManagedGitHubRepositoryForResume(t *testing.T, repo *mockRepository) {
+	t.Helper()
+	repo.sessions["sess-1"].RepositoryID = "repo-1"
+	repo.repositories["repo-1"] = &models.Repository{
+		ID:            "repo-1",
+		WorkspaceID:   "workspace-1",
+		Name:          "widgets",
+		SourceType:    sourceTypeLocal,
+		LocalPath:     t.TempDir(),
+		Provider:      "github",
+		ProviderOwner: "acme",
+		ProviderName:  "widgets",
+		DefaultBranch: "main",
+	}
+	repo.taskRepositories["task-repo-1"] = &models.TaskRepository{
+		ID: "task-repo-1", TaskID: "task-1", RepositoryID: "repo-1",
+	}
+}
+
+func TestResumeSession_PersistsStartingBeforeCredentialLease(t *testing.T) {
+	for _, initialState := range []models.TaskSessionState{
+		models.TaskSessionStateFailed,
+		models.TaskSessionStateCancelled,
+	} {
+		t.Run(string(initialState), func(t *testing.T) {
+			repo := newMockRepository()
+			setupLiveResumeTestFixture(repo)
+			attachManagedGitHubRepositoryForResume(t, repo)
+			repo.sessions["sess-1"].State = initialState
+
+			agentMgr := &mockAgentManager{}
+			issuer := &resumeCredentialStateIssuer{repo: repo}
+			exec := newTestExecutor(t, agentMgr, repo)
+			exec.SetGitHubCredentialBroker(issuer, "http://localhost:8080/api/github/credentials/resolve")
+
+			if _, err := exec.ResumeSession(context.Background(), repo.sessions["sess-1"], true); err != nil {
+				t.Fatalf("ResumeSession: %v", err)
+			}
+			if issuer.observedState != models.TaskSessionStateStarting {
+				t.Fatalf("session state at credential lease = %s, want %s", issuer.observedState, models.TaskSessionStateStarting)
+			}
+			if agentMgr.launchAgentCallCount != 1 {
+				t.Fatalf("LaunchAgent calls = %d, want 1", agentMgr.launchAgentCallCount)
+			}
+		})
+	}
+}
+
+func TestResumeSession_RollsBackStartingWhenCredentialLeaseFails(t *testing.T) {
+	repo := newMockRepository()
+	setupLiveResumeTestFixture(repo)
+	attachManagedGitHubRepositoryForResume(t, repo)
+	repo.sessions["sess-1"].State = models.TaskSessionStateFailed
+
+	leaseErr := errors.New("credential lease unavailable")
+	agentMgr := &mockAgentManager{}
+	issuer := &resumeCredentialStateIssuer{repo: repo, err: leaseErr}
+	exec := newTestExecutor(t, agentMgr, repo)
+	exec.SetGitHubCredentialBroker(issuer, "http://localhost:8080/api/github/credentials/resolve")
+
+	if _, err := exec.ResumeSession(context.Background(), repo.sessions["sess-1"], true); !errors.Is(err, leaseErr) {
+		t.Fatalf("ResumeSession error = %v, want %v", err, leaseErr)
+	}
+	if issuer.observedState != models.TaskSessionStateStarting {
+		t.Fatalf("session state at credential lease = %s, want %s", issuer.observedState, models.TaskSessionStateStarting)
+	}
+	current := repo.sessions["sess-1"]
+	if current.State != models.TaskSessionStateFailed {
+		t.Fatalf("session state after credential failure = %s, want %s", current.State, models.TaskSessionStateFailed)
+	}
+	if !strings.Contains(current.ErrorMessage, leaseErr.Error()) {
+		t.Fatalf("session error = %q, want credential lease error", current.ErrorMessage)
+	}
+	if agentMgr.launchAgentCallCount != 0 {
+		t.Fatalf("LaunchAgent calls = %d, want 0", agentMgr.launchAgentCallCount)
+	}
+}
+
+func TestResumeSession_PersistsCredentialSnapshot(t *testing.T) {
+	repo := newMockRepository()
+	setupLiveResumeTestFixture(repo)
+	attachManagedGitHubRepositoryForResume(t, repo)
+	repo.sessions["sess-1"].State = models.TaskSessionStateFailed
+	repo.sessions["sess-1"].Metadata = map[string]interface{}{
+		models.SessionMetaKeyGitCredentialSnapshot: models.GitCredentialSnapshot{
+			Version:   1,
+			Source:    "executor",
+			Transport: "executor_selected",
+		},
+	}
+
+	issuer := &resumeCredentialStateIssuer{repo: repo}
+	exec := newTestExecutor(t, &mockAgentManager{}, repo)
+	exec.SetGitHubCredentialBroker(issuer, "http://localhost:8080/api/github/credentials/resolve")
+
+	if _, err := exec.ResumeSession(context.Background(), repo.sessions["sess-1"], true); err != nil {
+		t.Fatalf("ResumeSession: %v", err)
+	}
+
+	var persistedSnapshot models.GitCredentialSnapshot
+	for _, persisted := range repo.updateTaskSessionSnapshots {
+		if persisted.State != models.TaskSessionStateStarting || persisted.Metadata == nil {
+			continue
+		}
+		value, ok := persisted.Metadata[models.SessionMetaKeyGitCredentialSnapshot]
+		if !ok {
+			continue
+		}
+		encoded, err := json.Marshal(value)
+		if err != nil {
+			t.Fatalf("marshal persisted credential snapshot: %v", err)
+		}
+		var candidate models.GitCredentialSnapshot
+		if err := json.Unmarshal(encoded, &candidate); err != nil {
+			t.Fatalf("unmarshal persisted credential snapshot: %v", err)
+		}
+		if candidate.Source == "workspace" {
+			persistedSnapshot = candidate
+			break
+		}
+	}
+	if persistedSnapshot.Source != "workspace" {
+		t.Fatalf("persisted credential snapshot = %#v, want workspace snapshot", persistedSnapshot)
+	}
+	if persistedSnapshot.Transport != "managed_https" {
+		t.Fatalf("persisted credential transport = %q, want managed_https", persistedSnapshot.Transport)
+	}
+}
+
+func TestResumeSession_DoesNotLaunchWhenCredentialSnapshotPersistenceLosesTerminalRace(t *testing.T) {
+	repo := newMockRepository()
+	setupLiveResumeTestFixture(repo)
+	attachManagedGitHubRepositoryForResume(t, repo)
+	repo.sessions["sess-1"].State = models.TaskSessionStateFailed
+
+	agentMgr := &mockAgentManager{}
+	issuer := &resumeCredentialStateIssuer{
+		repo: repo,
+		afterIssue: func() {
+			repo.sessions["sess-1"].State = models.TaskSessionStateCancelled
+		},
+	}
+	exec := newTestExecutor(t, agentMgr, repo)
+	exec.SetGitHubCredentialBroker(issuer, "http://localhost:8080/api/github/credentials/resolve")
+
+	_, err := exec.ResumeSession(context.Background(), repo.sessions["sess-1"], true)
+	if err == nil || !errors.Is(err, ErrSessionStateSuperseded) {
+		t.Fatalf("ResumeSession error = %v, want ErrSessionStateSuperseded", err)
+	}
+	if got := repo.sessions["sess-1"].State; got != models.TaskSessionStateCancelled {
+		t.Fatalf("session state = %s, want CANCELLED", got)
+	}
+	if agentMgr.launchAgentCallCount != 0 {
+		t.Fatalf("LaunchAgent calls = %d, want 0", agentMgr.launchAgentCallCount)
+	}
+}
+
+func TestResumeSession_RollsBackWhenCredentialSnapshotPersistenceFails(t *testing.T) {
+	repo := newMockRepository()
+	setupLiveResumeTestFixture(repo)
+	attachManagedGitHubRepositoryForResume(t, repo)
+	repo.sessions["sess-1"].State = models.TaskSessionStateFailed
+
+	persistErr := errors.New("credential snapshot persistence failed")
+	repo.updateTaskSessionIfCurrentFailOn = 2
+	repo.updateTaskSessionIfCurrentFailErr = persistErr
+	issuer := &resumeCredentialStateIssuer{repo: repo}
+	agentMgr := &mockAgentManager{}
+	exec := newTestExecutor(t, agentMgr, repo)
+	exec.SetGitHubCredentialBroker(issuer, "http://localhost:8080/api/github/credentials/resolve")
+
+	_, err := exec.ResumeSession(context.Background(), repo.sessions["sess-1"], true)
+	if !errors.Is(err, persistErr) {
+		t.Fatalf("ResumeSession error = %v, want %v", err, persistErr)
+	}
+	if got := repo.sessions["sess-1"].State; got != models.TaskSessionStateFailed {
+		t.Fatalf("session state = %s, want FAILED", got)
+	}
+	if agentMgr.launchAgentCallCount != 0 {
+		t.Fatalf("LaunchAgent calls = %d, want 0", agentMgr.launchAgentCallCount)
+	}
+}
+
 func TestResumeSession_PersistsStartingBeforeLaunch(t *testing.T) {
 	repo := newMockRepository()
 	setupLiveResumeTestFixture(repo)
@@ -130,7 +343,52 @@ func TestResumeSession_RollsBackStartingWhenLaunchFails(t *testing.T) {
 	}
 }
 
-func TestRollbackResumeStateAfterLaunchFailure_SkipsTransitionAfterConcurrentStateChange(t *testing.T) {
+func TestResumeSession_RestoresCredentialSnapshotWhenLaunchFails(t *testing.T) {
+	repo := newMockRepository()
+	setupLiveResumeTestFixture(repo)
+	attachManagedGitHubRepositoryForResume(t, repo)
+	repo.sessions["sess-1"].State = models.TaskSessionStateFailed
+	oldSnapshot := models.GitCredentialSnapshot{
+		Version:   1,
+		Source:    "executor",
+		Transport: "executor_selected",
+	}
+	repo.sessions["sess-1"].Metadata = map[string]interface{}{
+		models.SessionMetaKeyGitCredentialSnapshot: oldSnapshot,
+	}
+
+	launchErr := errors.New("credential broker rejected launch")
+	agentMgr := &mockAgentManager{
+		launchAgentFunc: func(_ context.Context, _ *LaunchAgentRequest) (*LaunchAgentResponse, error) {
+			return nil, launchErr
+		},
+	}
+	issuer := &resumeCredentialStateIssuer{repo: repo}
+	exec := newTestExecutor(t, agentMgr, repo)
+	exec.SetGitHubCredentialBroker(issuer, "http://localhost:8080/api/github/credentials/resolve")
+
+	if _, err := exec.ResumeSession(context.Background(), repo.sessions["sess-1"], true); !errors.Is(err, launchErr) {
+		t.Fatalf("ResumeSession error = %v, want %v", err, launchErr)
+	}
+
+	current := repo.sessions["sess-1"]
+	if current.State != models.TaskSessionStateFailed {
+		t.Fatalf("session state after failed launch = %s, want FAILED", current.State)
+	}
+	value, ok := current.Metadata[models.SessionMetaKeyGitCredentialSnapshot]
+	if !ok {
+		t.Fatal("credential snapshot missing after failed launch")
+	}
+	got, ok := value.(models.GitCredentialSnapshot)
+	if !ok {
+		t.Fatalf("credential snapshot type = %T, want models.GitCredentialSnapshot", value)
+	}
+	if got.Source != oldSnapshot.Source || got.Transport != oldSnapshot.Transport {
+		t.Fatalf("credential snapshot after failed launch = %#v, want %#v", got, oldSnapshot)
+	}
+}
+
+func TestRollbackResumeStateAfterFailure_SkipsTransitionAfterConcurrentStateChange(t *testing.T) {
 	repo := newMockRepository()
 	setupLiveResumeTestFixture(repo)
 	repo.sessions["sess-1"].State = models.TaskSessionStateCancelled
@@ -148,12 +406,13 @@ func TestRollbackResumeStateAfterLaunchFailure_SkipsTransitionAfterConcurrentSta
 		return false, models.TaskSessionStateCancelled, nil
 	})
 
-	exec.rollbackResumeStateAfterLaunchFailure(
+	exec.rollbackResumeStateAfterFailure(
 		context.Background(),
 		"task-1",
 		"sess-1",
 		models.TaskSessionStateFailed,
 		errors.New("launch failed"),
+		nil,
 	)
 	if got := repo.sessions["sess-1"].State; got != models.TaskSessionStateCancelled {
 		t.Fatalf("session state = %s, want %s", got, models.TaskSessionStateCancelled)

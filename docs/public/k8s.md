@@ -8,6 +8,13 @@ status: experimental
 
 Kandev ships example Kubernetes YAML in `k8s/`. It is a single-replica, persistent deployment example—not a Helm chart, operator, or supported high-availability topology. The release workflow publishes container images but does not apply these manifests to a cluster. Review and adapt every manifest before production use.
 
+## Quick path
+
+1. Pin a published image and keep one replica.
+2. Apply the ConfigMap, PVC, Service, and transformed Deployment.
+3. Port-forward first; add TLS and authentication before exposing an Ingress.
+4. Back up the database and PVC before upgrades or deletion.
+
 ## Architecture and limitations
 
 The example creates:
@@ -133,7 +140,7 @@ See [Configuration](configuration.md) for exact YAML and `KANDEV_` names. Import
 | `KANDEV_LOG_LEVEL` | `info` | Backend log threshold |
 | `KANDEV_DATABASE_DRIVER` | `sqlite` by default | Set `postgres` for an external database |
 
-Kubernetes detection makes the default log format JSON. Logs remain on stdout unless `logging.outputPath` is changed.
+Kubernetes detection makes the default log format JSON. Kandev writes daily files under `/data/logs/`, caps each day at 256 MiB, and emits warn-and-above to stdout by default; ensure the home path is persistent if the three-day file history must survive pod replacement.
 
 ### PostgreSQL
 
@@ -163,6 +170,11 @@ env:
 Use the SSL mode and trust material required by your database. PostgreSQL moves only database data; keep the `/data` PVC. Kandev's built-in backup/restore is SQLite-only, so schedule `pg_dump` and test restoration independently.
 
 ## Agent execution in a pod
+
+> **Docker boundary:** Do not add only a Docker socket mount. The runtime also needs helper, credential-session, and local-clone bind sources at matching daemon-host paths. Privileged Docker-in-Docker has a separate security and persistence model and no supplied manifest.
+
+<details>
+<summary>Agent execution, resources, and probes</summary>
 
 Local and Worktree profiles run agents inside the Kandev pod. Install agent CLIs from **Settings > Agents**, or derive an image that contains them. Runtime npm installs persist under `/data/.npm-global`. Choose the universal image when tasks need its additional build toolchains, but account for the larger image and non-root volume requirement.
 
@@ -196,6 +208,8 @@ startupProbe:
 ```
 
 Tune from observed startup time. Keep readiness on `/health`; use separate external monitoring for dependencies and real workflows.
+
+</details>
 
 ## Ingress and exposure
 

@@ -59,6 +59,10 @@ vi.mock("@/components/state-provider", () => ({
           ? { [SESSION_ID]: { id: SESSION_ID, state: mockSessionState } }
           : {},
       },
+      quickChat: { sessions: [] },
+      kanban: { workflowId: null, tasks: [] },
+      kanbanMulti: { snapshots: {} },
+      workflows: { items: [] },
       userSettings: { keyboardShortcuts: mockKeyboardShortcuts, chatSubmitKey: "enter" },
     }),
   useAppStoreApi: () => ({
@@ -533,7 +537,7 @@ describe("PassthroughToolbar – send message", () => {
     const content = mockWsRequestFn.mock.calls[0][1].content as string;
     expect(content).toMatch(/^### Review Comments\n/);
     expect(content).toContain("ship it");
-    expect(content).toContain("CONTEXT FILES");
+    expect(content).toContain("CONTEXT PATHS");
 
     await waitFor(() => expect(mockMarkCommentsSent).toHaveBeenCalledWith(["c1"]));
   });

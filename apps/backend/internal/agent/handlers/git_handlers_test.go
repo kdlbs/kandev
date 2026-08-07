@@ -693,6 +693,108 @@ func TestWsGitCommits_WrappedWorkspaceNotReadyError(t *testing.T) {
 	}
 }
 
+func TestWsGitCommits_TerminalSessionError(t *testing.T) {
+	// A terminal session (cancelled/completed/failed) returns ready:false
+	// gracefully instead of propagating an error the WS layer would log at
+	// ERROR with a stacktrace.
+	log := newTestLogger()
+	lookup := &mockExecutionLookup{
+		ensureErr: lifecycle.ErrSessionTerminal,
+	}
+	h := NewGitHandlers(lookup, nil, log)
+
+	msg, _ := ws.NewRequest("test-1", ws.ActionSessionGitCommits, GitCommitsRequest{SessionID: "session-1"})
+
+	resp, err := h.wsGitCommits(context.Background(), msg)
+	if err != nil {
+		t.Fatalf("expected graceful response for terminal session, got error: %v", err)
+	}
+	if resp == nil {
+		t.Fatal("expected non-nil response")
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(resp.Payload, &payload); err != nil {
+		t.Fatalf("failed to parse payload: %v", err)
+	}
+	if ready, ok := payload["ready"].(bool); !ok || ready {
+		t.Errorf("expected ready=false, got %v", payload["ready"])
+	}
+	if got, want := payload["reason"], sessionTerminalReason; got != want {
+		t.Errorf("reason = %v, want %v", got, want)
+	}
+	commits, ok := payload["commits"].([]any)
+	if !ok {
+		t.Fatalf("expected commits array, got %T", payload["commits"])
+	}
+	if len(commits) != 0 {
+		t.Errorf("expected empty commits, got %d", len(commits))
+	}
+}
+
+func TestWsGitCommits_WrappedTerminalSessionError(t *testing.T) {
+	// The terminal-session sentinel is wrapped in a descriptive message by the
+	// lifecycle manager; errors.Is must still detect it.
+	log := newTestLogger()
+	lookup := &mockExecutionLookup{
+		ensureErr: fmt.Errorf("verify session before registering execution: session %q is CANCELLED: %w", "session-1", lifecycle.ErrSessionTerminal),
+	}
+	h := NewGitHandlers(lookup, nil, log)
+
+	msg, _ := ws.NewRequest("test-1", ws.ActionSessionGitCommits, GitCommitsRequest{SessionID: "session-1"})
+
+	resp, err := h.wsGitCommits(context.Background(), msg)
+	if err != nil {
+		t.Fatalf("expected graceful response for wrapped terminal session, got error: %v", err)
+	}
+	if resp == nil {
+		t.Fatal("expected non-nil response")
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(resp.Payload, &payload); err != nil {
+		t.Fatalf("failed to parse payload: %v", err)
+	}
+	if ready, ok := payload["ready"].(bool); !ok || ready {
+		t.Errorf("expected ready=false, got %v", payload["ready"])
+	}
+	if got, want := payload["reason"], sessionTerminalReason; got != want {
+		t.Errorf("reason = %v, want %v", got, want)
+	}
+}
+
+func TestWsCumulativeDiff_TerminalSessionError(t *testing.T) {
+	log := newTestLogger()
+	lookup := &mockExecutionLookup{
+		ensureErr: fmt.Errorf("verify session before registering execution: session %q is FAILED: %w", "session-1", lifecycle.ErrSessionTerminal),
+	}
+	h := NewGitHandlers(lookup, nil, log)
+
+	msg, _ := ws.NewRequest("test-1", ws.ActionSessionCumulativeDiff, CumulativeDiffRequest{SessionID: "session-1"})
+
+	resp, err := h.wsCumulativeDiff(context.Background(), msg)
+	if err != nil {
+		t.Fatalf("expected graceful response for terminal session, got error: %v", err)
+	}
+	if resp == nil {
+		t.Fatal("expected non-nil response")
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(resp.Payload, &payload); err != nil {
+		t.Fatalf("failed to parse payload: %v", err)
+	}
+	if ready, ok := payload["ready"].(bool); !ok || ready {
+		t.Errorf("expected ready=false, got %v", payload["ready"])
+	}
+	if got, want := payload["reason"], sessionTerminalReason; got != want {
+		t.Errorf("reason = %v, want %v", got, want)
+	}
+	if payload["cumulative_diff"] != nil {
+		t.Errorf("expected cumulative_diff=nil, got %v", payload["cumulative_diff"])
+	}
+}
+
 // TestWsGitCommits_SingleflightDedupesConcurrentRequests verifies that N
 // concurrent identical (sessionID, limit) requests collapse onto a single
 // computeGitCommits invocation. Without dedup, a frontend re-render storm

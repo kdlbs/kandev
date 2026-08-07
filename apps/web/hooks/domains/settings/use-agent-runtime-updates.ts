@@ -11,6 +11,10 @@ import {
   type AgentUpdateJob,
 } from "@/lib/api";
 import { ApiError } from "@/lib/api/client";
+// Thrown from a callback rather than rendered as a literal, so this uses the
+// module-level `t`, which resolves at call time. The message surfaces in the
+// runtime-update dialog through `agents:unableToStartUpdate`.
+import { t } from "@/lib/i18n";
 
 type MaintenanceConflict = {
   active_job_id: string;
@@ -42,7 +46,7 @@ export function useAgentRuntimeUpdates() {
       }
       const job = await getInstallJob(conflict.active_job_id, { cache: "no-store" });
       store.getState().upsertInstallJob(job.agent_name ? job : { ...job, agent_name: agentName });
-      throw new Error("Agent installation is already in progress.");
+      throw new Error(t("agents:agentInstallAlreadyInProgress"));
     },
     [store],
   );

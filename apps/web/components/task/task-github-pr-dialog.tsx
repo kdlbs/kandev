@@ -16,6 +16,11 @@ import {
   pullRequestPayload,
   type TaskPullRequestLinkTarget,
 } from "./task-github-pr-url";
+import { useTranslation } from "react-i18next";
+
+/** URL shape the user types verbatim — protocol, not copy. Passed into the
+ * placeholder message as an interpolation value so it survives translation. */
+const GITHUB_PR_URL_EXAMPLE = "github.com/owner/repo/pull/1471";
 
 type TaskGitHubPRDialogProps = {
   workspaceId: string | null;
@@ -32,15 +37,16 @@ export function TaskGitHubPRDialog({
   task,
   repositories,
 }: TaskGitHubPRDialogProps) {
+  const { t } = useTranslation();
   const githubRepos = useMemo(() => githubReposForTask(task, repositories), [task, repositories]);
   const inferredRepo = githubRepos.length === 1 ? githubRepos[0] : null;
   const placeholder = inferredRepo
-    ? "#1471 or github.com/owner/repo/pull/1471"
-    : "github.com/owner/repo/pull/1471";
+    ? t("task:githubPrRefPlaceholder", { example: GITHUB_PR_URL_EXAMPLE })
+    : GITHUB_PR_URL_EXAMPLE;
 
   const submit = async (reference: string) => {
     if (!workspaceId) {
-      throw new Error("Select a workspace before linking a GitHub pull request.");
+      throw new Error(t("task:selectWorkspaceBeforeLinkingPr"));
     }
     const payload = pullRequestPayload(reference, githubRepos);
     await createTaskPR({
@@ -55,19 +61,22 @@ export function TaskGitHubPRDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="w-[calc(100vw-2rem)] sm:max-w-lg">
         <DialogHeader>
-          <DialogTitle>Link GitHub pull request</DialogTitle>
+          <DialogTitle>{t("task:linkGithubPullRequest")}</DialogTitle>
           <DialogDescription>
             {inferredRepo
-              ? `Use a full pull request URL or number for ${inferredRepo.owner}/${inferredRepo.repo}.`
-              : "Use a full GitHub pull request URL for this task."}
+              ? t("task:useAFullPullRequestUrl", {
+                  owner: inferredRepo.owner,
+                  repo: inferredRepo.repo,
+                })
+              : t("task:useAFullGithubPullRequest")}
           </DialogDescription>
         </DialogHeader>
         <TaskChangeRequestLinkForm
-          inputLabel="Pull request"
+          inputLabel={t("task:pullRequest")}
           placeholder={placeholder}
-          emptyError="Enter a GitHub pull request URL or number."
-          failureMessage="Failed to link GitHub pull request."
-          successMessage="GitHub pull request linked"
+          emptyError={t("task:enterGithubPrUrlOrNumber")}
+          failureMessage={t("task:failedToLinkGithubPullRequest")}
+          successMessage={t("task:githubPullRequestLinked")}
           inputTestId="task-github-pr-input"
           errorTestId="task-github-pr-error"
           submitTestId="task-github-pr-submit"

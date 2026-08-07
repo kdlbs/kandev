@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useMemo } from "react";
+import { useTranslation } from "react-i18next";
 import { useToast } from "@/components/toast-provider";
 import { useAppStore } from "@/components/state-provider";
 import { useCommentsStore } from "@/lib/state/slices/comments";
@@ -92,13 +93,16 @@ function PRCIPopoverHeader({
   pr: TaskPR;
   onOpenDetailPanel?: () => void;
 }) {
+  const { t } = useTranslation();
+  const title = pr.pr_title || t("github:untitledPr");
   return (
     <ChangeRequestPopoverHeader
       number={pr.pr_number}
-      title={pr.pr_title || "Untitled PR"}
+      title={title}
       url={pr.pr_url}
       onOpenReview={onOpenDetailPanel}
-      externalLabel="View pull request on GitHub"
+      openDetailsLabel={t("github:openDetails", { title: `#${pr.pr_number} ${title}` })}
+      externalLabel={t("github:viewPullRequestOnGithub")}
     />
   );
 }
@@ -129,6 +133,7 @@ function PRChecksSection({
   isFetching: boolean;
   onAddAsContext: ((message: string) => void) | null;
 }) {
+  const { t } = useTranslation();
   const aggregateCounts = useMemo(() => deriveAggregateCounts(pr), [pr]);
 
   const { precise, byBucket } = useMemo(() => {
@@ -176,6 +181,13 @@ function PRChecksSection({
       counts={{ passed: counts.passed, pending: counts.inProgress, failed: counts.failed }}
       rows={rows}
       loading={isFetching && !byBucket}
+      emptyLabel={t("github:noChecksHaveStarted")}
+      passRateLabel={t("github:passRate")}
+      groupLabels={{
+        success: t("github:checkBucketPassed"),
+        pending: t("github:checkBucketInProgress"),
+        failure: t("github:checkBucketFailed"),
+      }}
     />
   );
 }
@@ -196,26 +208,48 @@ function PRReviewRow({ pr }: { pr: TaskPR }) {
 }
 
 function PRCommentsRow({ pr }: { pr: TaskPR }) {
-  return <ChangeRequestCommentsRow count={pr.unresolved_review_threads ?? 0} />;
+  const { t } = useTranslation();
+  const count = pr.unresolved_review_threads ?? 0;
+  return (
+    <ChangeRequestCommentsRow count={count} label={t("github:unresolvedComments", { count })} />
+  );
 }
 
 function PRPopoverFooter({ lastUpdatedAt }: { lastUpdatedAt: number | null }) {
-  return <ChangeRequestPopoverFooter updatedAt={lastUpdatedAt ?? undefined} />;
+  const { t } = useTranslation();
+  return (
+    <ChangeRequestPopoverFooter
+      updatedAt={lastUpdatedAt ?? undefined}
+      formatElapsed={(seconds) =>
+        seconds === 0
+          ? t("github:updatedJustNow")
+          : t("github:updatedAgo", { elapsed: formatElapsedShort(seconds) })
+      }
+    />
+  );
+}
+
+function formatElapsedShort(seconds: number): string {
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m`;
+  return `${Math.floor(minutes / 60)}h`;
 }
 
 function ReconnectGitHubBlock() {
+  const { t } = useTranslation();
   return (
     <div
       data-testid="pr-popover-auth-error"
       className="flex flex-col items-start gap-1 px-1 py-2 text-xs"
     >
-      <span className="text-foreground">GitHub authentication lost.</span>
+      <span className="text-foreground">{t("github:githubAuthenticationLost")}</span>
       <a
         data-testid="pr-popover-reconnect-link"
         href="/settings#github"
         className="cursor-pointer text-primary hover:underline"
       >
-        Reconnect GitHub
+        {t("github:reconnectGithub")}
       </a>
     </div>
   );
@@ -272,6 +306,7 @@ export function PRCIPopover({
 
 // --- Add-to-context wiring (mirrors pr-detail-panel.tsx for failed checks) ---
 function useAddCheckToContext(pr: TaskPR): ((message: string) => void) | null {
+  const { t } = useTranslation();
   const sessionId = useAppStore((s) => s.tasks.activeSessionId);
   const addComment = useCommentsStore((s) => s.addComment);
   const { toast } = useToast();
@@ -295,9 +330,9 @@ function useAddCheckToContext(pr: TaskPR): ((message: string) => void) | null {
         content: message,
       };
       addComment(comment);
-      toast({ description: "Added to chat context" });
+      toast({ description: t("github:addedToChatContext") });
     },
-    [sessionId, prNumber, addComment, toast],
+    [sessionId, prNumber, addComment, toast, t],
   );
   return sessionId ? handler : null;
 }

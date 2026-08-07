@@ -9,6 +9,13 @@ Kandev runs Git commands in the selected repository workspace for a task session
 
 Use the task's **Changes** panel to inspect, stage, discard, commit, push, reset, or rename a branch. The task toolbar and command panel also expose **Commit Changes**, **Push**, **Pull**, provider-appropriate pull-request or merge-request creation, **Rebase**, and **Merge** when a Git-capable session is selected.
 
+## Quick path
+
+1. Inspect the selected repository in **Changes**.
+2. Stage only the files you intend to commit.
+3. Run required checks before pushing or opening a change request.
+4. Treat discard, reset, amend, force-push, and cleanup as irreversible or history-changing operations.
+
 ## Prerequisites and trust boundary
 
 The repository must be a valid Git checkout in the executor workspace and the session's `agentctl` must be reachable. Remote commands use the remote named `origin`; configure its URL and credentials before relying on Pull, Push, Rebase, Merge, or change-request creation.
@@ -41,6 +48,14 @@ feature/{title}-{suffix}
 `{title}` is an ASCII-safe, lower-case task-title slug and `{suffix}` is a short collision-avoidance value. Repository settings can change the template. When `pull_before_worktree` is omitted it defaults to `true`: Kandev best-effort fetches the base branch before creating the worktree. The public configuration defaults both fetch and fast-forward pull timeouts to 60 seconds. An authentication, network, or timeout failure can fall back to an available local or remote-tracking ref with a visible warning; a base branch that cannot be resolved, including its configured fallback, stops creation.
 
 When a task opens an existing branch or GitHub PR, Kandev fetches that branch; for a numbered GitHub PR it can fetch `refs/pull/NUMBER/head`, including fork PRs. If the intended branch is already checked out in another worktree, the new worktree uses a suffixed local branch and tracks the original `origin` branch when available. If remote fetch fails but the local branch exists, Kandev can continue with that possibly stale branch and reports the fallback.
+
+Tasks created without an initial title can expose the one-shot `set_task_title_kandev` handoff when
+**Settings → General → Task Actions → Agent-generated task titles** is enabled. After the owning
+session accepts its final title, Kandev regenerates Kandev-managed branch names from that title and
+updates the stored branch snapshots. It never renames a repository row with an explicit checkout
+branch (for example, a GitHub PR branch) or a Local/Local PC checkout. A branch manually selected
+before the title call is preserved as well. Multi-repository tasks apply these rules independently to
+each repository, and a Git or snapshot persistence failure does not undo the accepted title.
 
 After creation, Kandev copies any repository-configured files and runs its setup script. Setup-script failure is non-fatal: the worktree remains and the session surfaces a warning. Cleanup scripts run before worktree removal, but their failure also does not prevent removal.
 
@@ -111,6 +126,9 @@ Title is required. Body and base branch may be empty. GitHub and Azure delegate 
 
 For GitLab, Kandev preserves a self-managed connection's scheme and never retries against another host. It prefers `glab` when installed and uses the workspace-injected `GITLAB_TOKEN` REST path when the CLI is absent or its create command fails. The successful WebSocket payload keeps the compatibility field name `pr_url` and adds `provider:"gitlab"`. Association runs after that response; use **Link GitLab merge request** if the MR was created but the link is missing.
 
+<details>
+<summary>WebSocket operation reference</summary>
+
 ## WebSocket operation reference
 
 These are the registered Kandev WebSocket actions. Every payload requires `session_id`; `repo` is optional only for a single-repository workspace.
@@ -163,6 +181,8 @@ Example request and normal operation result:
 Read-only Git actions used by the Changes panel include `session.commit_diff`, `session.git.commits`, `session.cumulative_diff`, and `session.git.snapshots`. See [WebSocket API](websocket-api.md) for transport and subscription behavior.
 
 `agentctl` also implements `/api/v1/git/*` HTTP routes inside the execution runtime. Those routes are an internal backend-to-runtime control surface, not the public Kandev backend API. External clients should not discover or expose executor-local agentctl ports; use the registered Kandev WebSocket actions.
+
+</details>
 
 ## Cleanup and data loss
 

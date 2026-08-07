@@ -5,8 +5,11 @@ import type {
   DiskUsageResponse,
   DatabaseStats,
   SnapshotInfo,
-  LogFileInfo,
-  LogTailResponse,
+  DiagnosticBundleJob,
+  DiagnosticBundleCapabilities,
+  DiagnosticBundleSource,
+  DiagnosticSession,
+  FrontendLogUploadChunk,
   UpdatesResponse,
   JobAcceptResponse,
   RestartCapability,
@@ -15,9 +18,11 @@ import type {
   StorageMaintenanceRun,
   StorageMaintenanceSettings,
   StorageOverviewResponse,
+  StoragePolicyResponse,
   StorageQuarantineEntry,
   StorageQuarantinePurgeScope,
   StorageSettingsResponse,
+  UpdatesChannel,
 } from "@/lib/types/system";
 
 const SYSTEM_BASE = "/api/v1/system";
@@ -125,21 +130,67 @@ export function buildBackupDownloadUrl(name: string, baseUrl?: string): string {
 
 // --- Logs ---------------------------------------------------------------
 
-export async function fetchLogFiles(options?: ApiRequestOptions): Promise<LogFileInfo[]> {
-  const res = await fetchJson<{ files: LogFileInfo[] }>(`${SYSTEM_BASE}/logs`, options);
-  return res.files ?? [];
-}
-
-export function fetchLogTail(n = 1000, options?: ApiRequestOptions): Promise<LogTailResponse> {
-  return fetchJson<LogTailResponse>(`${SYSTEM_BASE}/logs/tail?n=${encodeURIComponent(String(n))}`, {
-    cache: "no-store",
+export function createDiagnosticBundle(
+  sources: DiagnosticBundleSource[] = ["backend", "frontend"],
+  sessionIds: string[] = [],
+  options?: ApiRequestOptions,
+): Promise<DiagnosticBundleJob> {
+  return fetchJson<DiagnosticBundleJob>(`${SYSTEM_BASE}/logs/bundles`, {
     ...options,
+    init: {
+      ...(options?.init ?? {}),
+      method: "POST",
+      body: JSON.stringify({
+        sources,
+        ...(sessionIds.length > 0 ? { session_ids: sessionIds } : {}),
+      }),
+    },
   });
 }
 
-export function buildLogDownloadUrl(name: string, baseUrl?: string): string {
+export function fetchDiagnosticBundleCapabilities(
+  options?: ApiRequestOptions,
+): Promise<DiagnosticBundleCapabilities> {
+  return fetchJson<DiagnosticBundleCapabilities>(`${SYSTEM_BASE}/logs/capabilities`, {
+    ...options,
+    cache: "no-store",
+  });
+}
+
+export async function fetchDiagnosticACPSessions(
+  options?: ApiRequestOptions,
+): Promise<DiagnosticSession[]> {
+  const response = await fetchJson<{ sessions: DiagnosticSession[] }>(
+    `${SYSTEM_BASE}/logs/acp-sessions`,
+    { ...options, cache: "no-store" },
+  );
+  return response.sessions ?? [];
+}
+
+export function fetchDiagnosticBundle(
+  id: string,
+  options?: ApiRequestOptions,
+): Promise<DiagnosticBundleJob> {
+  return fetchJson<DiagnosticBundleJob>(`${SYSTEM_BASE}/logs/bundles/${encodeURIComponent(id)}`, {
+    ...options,
+    cache: "no-store",
+  });
+}
+
+export function uploadFrontendBundleChunk(
+  id: string,
+  chunk: FrontendLogUploadChunk,
+  options?: ApiRequestOptions,
+): Promise<void> {
+  return fetchJson<void>(`${SYSTEM_BASE}/logs/bundles/${encodeURIComponent(id)}/frontend`, {
+    ...options,
+    init: { ...(options?.init ?? {}), method: "POST", body: JSON.stringify(chunk) },
+  });
+}
+
+export function buildDiagnosticBundleDownloadUrl(id: string, baseUrl?: string): string {
   const root = baseUrl ?? getBackendConfig().apiBaseUrl;
-  return `${root}${SYSTEM_BASE}/logs/${encodeURIComponent(name)}/download`;
+  return `${root}${SYSTEM_BASE}/logs/bundles/${encodeURIComponent(id)}/download`;
 }
 
 // --- Jobs ---------------------------------------------------------------
@@ -167,14 +218,33 @@ export function checkUpdates(options?: ApiRequestOptions): Promise<UpdatesRespon
   });
 }
 
+export function saveUpdatesChannel(
+  channel: UpdatesChannel,
+  options?: ApiRequestOptions,
+): Promise<UpdatesResponse> {
+  return fetchJson<UpdatesResponse>(`${SYSTEM_BASE}/updates/channel`, {
+    ...options,
+    init: {
+      ...(options?.init ?? {}),
+      method: "PATCH",
+      body: JSON.stringify({ channel }),
+    },
+  });
+}
+
 export function applyUpdate(
-  confirm = "UPDATE",
+  confirm: string,
+  targetVersion: string,
   options?: ApiRequestOptions,
 ): Promise<JobAcceptResponse> {
   return fetchJson<JobAcceptResponse>(`${SYSTEM_BASE}/updates/apply`, {
     ...options,
     // Spread caller init first so the required method/body can't be overridden.
-    init: { ...(options?.init ?? {}), method: "POST", body: JSON.stringify({ confirm }) },
+    init: {
+      ...(options?.init ?? {}),
+      method: "POST",
+      body: JSON.stringify({ confirm, target_version: targetVersion }),
+    },
   });
 }
 
@@ -200,6 +270,13 @@ export function fetchStorageOverview(
   options?: ApiRequestOptions,
 ): Promise<StorageOverviewResponse> {
   return fetchJson<StorageOverviewResponse>(`${SYSTEM_BASE}/storage`, {
+    ...options,
+    cache: "no-store",
+  });
+}
+
+export function fetchStoragePolicy(options?: ApiRequestOptions): Promise<StoragePolicyResponse> {
+  return fetchJson<StoragePolicyResponse>(`${SYSTEM_BASE}/storage/settings`, {
     ...options,
     cache: "no-store",
   });

@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -18,6 +17,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/executor"
 	"github.com/kandev/kandev/internal/agent/runtime/activity"
 	"github.com/kandev/kandev/internal/agent/settings/cliflags"
+	"github.com/kandev/kandev/internal/common/subproc"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/gitconfigenv"
 	storageworkspaces "github.com/kandev/kandev/internal/system/storage/workspaces"
@@ -27,6 +27,16 @@ import (
 )
 
 const legacyExecutorTypeLocalPC = "local_pc"
+
+const registeredLaunchRollbackRetries = 3
+
+var registeredLaunchRollbackRetryDelays = [...]time.Duration{
+	100 * time.Millisecond,
+	500 * time.Millisecond,
+	2 * time.Second,
+}
+
+var errTaskCleanupActive = errors.New("task cleanup is active")
 
 // resolveAgentProfile resolves the agent profile and returns the agent type name and profile info.
 func (m *Manager) resolveAgentProfile(ctx context.Context, req *LaunchRequest) (string, *AgentProfileInfo, error) {
@@ -164,6 +174,47 @@ func buildLaunchMetadata(req *LaunchRequest, mainRepoGitDir, worktreeID, worktre
 		metadata[MetadataKeyBaseBranches] = branches
 	}
 	return metadata
+}
+
+// collectRemoteContributions projects the validated per-repository bindings
+// into the workspace-subpath keys understood by agentctl. The first repository
+// owns the workspace root; sibling destinations use the same deterministic key
+// as base-branch and workspace materialization projection.
+func collectRemoteContributions(req *LaunchRequest) (map[string]models.RemoteContribution, error) {
+	if req == nil {
+		return nil, nil
+	}
+	specs := req.RepoSpecs()
+	if len(specs) == 0 {
+		if req.RemoteContribution == nil {
+			return nil, nil
+		}
+		if err := req.RemoteContribution.Validate(); err != nil {
+			return nil, fmt.Errorf("validate remote contribution: %w", err)
+		}
+		return map[string]models.RemoteContribution{"": *req.RemoteContribution}, nil
+	}
+	bindings := make(map[string]models.RemoteContribution)
+	for index, spec := range specs {
+		if spec.RemoteContribution == nil {
+			continue
+		}
+		if err := spec.RemoteContribution.Validate(); err != nil {
+			return nil, fmt.Errorf("validate remote contribution for repository %q: %w", spec.RepoName, err)
+		}
+		key := ""
+		if index > 0 {
+			key = baseBranchMetadataKey(spec)
+		}
+		if existing, ok := bindings[key]; ok && existing.CanonicalURL != spec.RemoteContribution.CanonicalURL {
+			return nil, fmt.Errorf("multiple remote contributions target workspace repository %q", key)
+		}
+		bindings[key] = *spec.RemoteContribution
+	}
+	if len(bindings) == 0 {
+		return nil, nil
+	}
+	return bindings, nil
 }
 
 // collectBaseBranches builds the per-repo {RepositoryName → base_branch}
@@ -380,7 +431,7 @@ func (m *Manager) launchResolveWorkspacePath(ctx context.Context, req *LaunchReq
 	// For tasks without a repository, create a scratch workspace.
 	// - Non-ephemeral repo-less tasks: <homeDir>/tasks/<workspaceID>/<taskID>/
 	//   (task-scoped, persists across sessions, mirrors the worktree task layout).
-	// - Ephemeral tasks (slack triage / quick chat): <dataDir>/quick-chat/<sessionID>/
+	// - Ephemeral tasks (quick chat): <dataDir>/quick-chat/<sessionID>/
 	//   (session-scoped, cleaned up on task delete via performTaskCleanup).
 	// Office tasks that have no repo (onboarding, planning) take the
 	// non-ephemeral branch and land under <homeDir>/tasks/...
@@ -433,7 +484,7 @@ func (m *Manager) resolveScratchWorkspace(ctx context.Context, req *LaunchReques
 func (m *Manager) scratchWorkspacePath(req *LaunchRequest) string {
 	if req.IsEphemeral {
 		// Legacy quick-chat path — session-scoped, kept for backward compat with
-		// slack triage and other ephemeral one-shot flows.
+		// ephemeral one-shot flows.
 		if strings.ContainsAny(req.SessionID, `/\`) {
 			m.logger.Warn("session ID contains path separator, rejecting",
 				zap.String("session_id", req.SessionID))
@@ -468,7 +519,8 @@ func invalidScratchPathID(id string) bool {
 }
 
 // launchPrepareRequest copies the launch request, sets the resolved workspace path,
-// populates metadata from the request fields, and injects profile environment variables.
+// and populates metadata from the request fields. Runtime/profile environment
+// values are composed later, after every managed source has been collected.
 func (m *Manager) launchPrepareRequest(req *LaunchRequest, profileInfo *AgentProfileInfo, workspacePath string) (LaunchRequest, string, error) {
 	executionID := uuid.New().String()
 	reqWithWorktree := *req
@@ -487,17 +539,6 @@ func (m *Manager) launchPrepareRequest(req *LaunchRequest, profileInfo *AgentPro
 		reqWithWorktree.Metadata["session_id"] = req.SessionID
 	}
 
-	if profileInfo != nil {
-		if reqWithWorktree.Env == nil {
-			reqWithWorktree.Env = make(map[string]string)
-		}
-		if profileInfo.Model != "" {
-			reqWithWorktree.Env["AGENT_MODEL"] = profileInfo.Model
-		}
-		if profileInfo.AutoApprove {
-			reqWithWorktree.Env["AGENTCTL_AUTO_APPROVE_PERMISSIONS"] = "true"
-		}
-	}
 	if err := mergeRouteOverrideEnv(&reqWithWorktree); err != nil {
 		return LaunchRequest{}, "", err
 	}
@@ -631,6 +672,13 @@ func (m *Manager) launchBuildExecutorRequest(ctx context.Context, executionID st
 	}
 
 	metadata := buildLaunchMetadata(reqWithWorktree, mainRepoGitDir, worktreeID, worktreeBranch)
+	remoteContributions, err := collectRemoteContributions(reqWithWorktree)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	if len(remoteContributions) > 0 {
+		metadata[MetadataKeyRemoteContributions] = remoteContributions
+	}
 
 	var autoApproveOverride *bool
 	if profileInfo != nil {
@@ -652,12 +700,15 @@ func (m *Manager) launchBuildExecutorRequest(ctx context.Context, executionID st
 		AutoApprovePermissionsOverride: autoApproveOverride,
 		Metadata:                       metadata,
 		AgentConfig:                    agentConfig,
+		ApprovedSecretEnvKeys:          append([]string(nil), reqWithWorktree.ApprovedSecretEnvKeys...),
 		McpServers:                     mcpServers,
 		PreviousExecutionID:            reqWithWorktree.PreviousExecutionID,
 		McpMode:                        reqWithWorktree.McpMode,
+		McpProviders:                   reqWithWorktree.McpProviders,
 		AuthToken:                      m.revealRuntimeSecret(ctx, metadata, MetadataKeyAuthTokenSecret),
 		BootstrapNonce:                 m.revealRuntimeSecret(ctx, metadata, MetadataKeyBootstrapNonceSecret),
 		OnProgress:                     onProgress,
+		RemoteContributions:            remoteContributions,
 	}
 
 	if err := resumeRemoteInstancePreflight(ctx, rt, execReq); err != nil {
@@ -772,6 +823,7 @@ func buildEnvPrepareRequest(req *LaunchRequest, workspacePath string, execName e
 		DefaultBranch:          req.DefaultBranch,
 		CheckoutBranch:         req.CheckoutBranch,
 		PRNumber:               req.PRNumber,
+		RemoteContribution:     req.RemoteContribution,
 		WorktreeBranch:         getMetadataString(req.Metadata, MetadataKeyWorktreeBranch),
 		WorktreeBranchPrefix:   req.WorktreeBranchPrefix,
 		WorktreeBranchTemplate: req.WorktreeBranchTemplate,
@@ -802,6 +854,7 @@ func buildEnvPrepareRequest(req *LaunchRequest, workspacePath string, execName e
 				DefaultBranch:          r.DefaultBranch,
 				CheckoutBranch:         r.CheckoutBranch,
 				PRNumber:               r.PRNumber,
+				RemoteContribution:     r.RemoteContribution,
 				WorktreeID:             r.WorktreeID,
 				WorktreeBranchPrefix:   r.WorktreeBranchPrefix,
 				WorktreeBranchTemplate: r.WorktreeBranchTemplate,
@@ -972,6 +1025,14 @@ func (m *Manager) promoteWorkspaceExecution(ctx context.Context, execution *Agen
 			return nil, acquireErr
 		}
 		defer activityLease.Release()
+		if len(req.McpProviders) > 0 {
+			if execution.agentctl == nil {
+				return nil, fmt.Errorf("execution %q has no agentctl client for MCP provider promotion", execution.ID)
+			}
+			if err := execution.agentctl.SetMcpProviders(sharedCtx, req.McpProviders); err != nil {
+				return nil, fmt.Errorf("set MCP providers during workspace execution promotion: %w", err)
+			}
+		}
 		// Re-check after acquiring the slot — a peer Launch may have already
 		// promoted while we were waiting.
 		if execution.AgentCommand != "" {
@@ -1066,21 +1127,39 @@ func (m *Manager) launchInternal(ctx context.Context, req *LaunchRequest) (*Agen
 
 	// 4. Resolve workspace path (non-worktree executors use this directly)
 	workspacePath, mainRepoGitDir, worktreeID, worktreeBranch := m.launchResolveWorkspacePath(ctx, req)
-	if err := reconcileWorkspaceSources(ctx, workspacePath, req.WorkspaceFolders); err != nil {
+	owner := ownedDirectoryLinkOwner(req.TaskID, req.TaskDirName)
+	if err := reconcileWorkspaceSources(ctx, workspacePath, req.WorkspaceFolders, owner); err != nil {
 		return nil, err
 	}
 	if req.ExecutorType == string(models.ExecutorTypeLocal) || req.ExecutorType == legacyExecutorTypeLocalPC {
-		if err := reconcileWorkspaceRepositories(workspacePath, workspaceRepositorySpecsFromLaunch(req), m.logger); err != nil {
+		if err := reconcileWorkspaceRepositories(workspacePath, workspaceRepositorySpecsFromLaunch(req), m.logger, owner); err != nil {
 			return nil, err
 		}
 	}
 	progressRecorder := newPrepareProgressRecorder(m.newProgressCallback(req.TaskID, req.SessionID))
 
+	// Compose the request before preparation so setup scripts receive the same
+	// final snapshot that the runtime, agent, shell, and terminal will use.
+	reqWithWorktree, executionID, err := m.launchPrepareRequest(req, profileInfo, workspacePath)
+	if err != nil {
+		m.publishLaunchPrepareCompleted(req, nil, progressRecorder, workspacePath, false, err)
+		return nil, err
+	}
+	finalEnv, err := m.buildEnvForExecution(ctx, executionID, &reqWithWorktree, agentConfig, profileInfo)
+	if err != nil {
+		m.publishLaunchPrepareCompleted(req, nil, progressRecorder, workspacePath, false, err)
+		return nil, err
+	}
+	reqWithWorktree.Env = finalEnv
+	reqWithWorktree.EnvironmentDefinitions = nil
+	reqWithWorktree.EnvironmentResolutionRequired = false
+	reqWithWorktree.EnvironmentFinalized = true
+
 	// 4b. Run environment preparation (if preparer registered for this executor type).
 	// Skip on resume (ACPSessionID set) — workspace was already prepared during initial launch.
 	var prepResult *EnvPrepareResult
 	if req.ACPSessionID == "" {
-		prepResult = m.runEnvironmentPreparerWithProgress(ctx, req, workspacePath, progressRecorder.Callback(0))
+		prepResult = m.runEnvironmentPreparerWithProgress(ctx, &reqWithWorktree, workspacePath, progressRecorder.Callback(0))
 	} else {
 		m.logger.Debug("skipping environment preparation for resumed session",
 			zap.String("task_id", req.TaskID),
@@ -1088,16 +1167,14 @@ func (m *Manager) launchInternal(ctx context.Context, req *LaunchRequest) (*Agen
 	}
 	if prepResult != nil {
 		progressRecorder.Merge(prepResult.Steps)
-		if err := m.launchApplyPrepareResult(req, prepResult, &workspacePath, &mainRepoGitDir, &worktreeID, &worktreeBranch); err != nil {
+		if err := m.launchApplyPrepareResult(&reqWithWorktree, prepResult, &workspacePath, &mainRepoGitDir, &worktreeID, &worktreeBranch); err != nil {
 			return nil, err
 		}
-	}
-
-	// 5 & 6. Prepare the request copy with metadata and profile env
-	reqWithWorktree, executionID, err := m.launchPrepareRequest(req, profileInfo, workspacePath)
-	if err != nil {
-		m.publishLaunchPrepareCompleted(req, prepResult, progressRecorder, workspacePath, false, err)
-		return nil, err
+		// The preparer owns the final workspace location for worktree-backed
+		// launches. Keep the executor request in sync with the local launch
+		// state; otherwise standalone receives the repository path (or an empty
+		// path) that was present before preparation completed.
+		reqWithWorktree.WorkspacePath = workspacePath
 	}
 
 	// 6b. Deploy per-profile skills + custom prompt (ADR 0005 Wave A).
@@ -1238,6 +1315,10 @@ func (m *Manager) registerAndPublishExecution(
 	execInstance *ExecutorInstance,
 	sessionID string,
 ) error {
+	if err := m.ensureLaunchSessionStillActive(ctx, sessionID); err != nil {
+		m.rollbackLaunchExecution(ctx, rt, execInstance, execution, "session ended during runtime creation")
+		return err
+	}
 	if addErr := m.executionStore.Add(execution); addErr != nil {
 		if errors.Is(addErr, ErrExecutionAlreadyExistsForSession) {
 			m.rollbackRacedExecution(ctx, rt, execInstance, execution)
@@ -1245,14 +1326,25 @@ func (m *Manager) registerAndPublishExecution(
 		}
 		return fmt.Errorf("failed to register execution: %w", addErr)
 	}
+	// Make the execution visible to durable cleanup before the final session
+	// read. This closes the precheck -> Add -> persist gap: deletion cleanup can
+	// now inventory the row, while a deletion that already ran is caught below.
+	if err := m.persistExecutorRunningResult(ctx, execution); err != nil {
+		m.rollbackRegisteredLaunchAfterPersistFailure(rt, execInstance, execution)
+		return fmt.Errorf("persist execution registration: %w", err)
+	}
+
+	if err := m.ensureLaunchSessionStillActive(ctx, sessionID); err != nil {
+		if errors.Is(err, errTaskCleanupActive) {
+			m.rollbackRegisteredLaunchForTaskCleanup(rt, execInstance, execution)
+		} else {
+			m.rollbackRegisteredLaunch(rt, execInstance, execution, "session ended during execution registration")
+		}
+		return err
+	}
+	m.setRuntimeInterest(execution.SessionID, true)
 
 	m.persistRuntimeSecrets(ctx, execInstance, execution)
-
-	// Persist executors_running in lockstep with Add — see persistence.go for the
-	// invariant. Carries forward resume_token / metadata from a prior row so the
-	// lifecycle write doesn't clobber data the orchestrator's narrow CAS updates
-	// wrote earlier (e.g., context_window from a previous run).
-	m.persistExecutorRunning(ctx, execution)
 
 	go m.pollOneRemoteStatus(context.Background(), execution)
 
@@ -1263,6 +1355,157 @@ func (m *Manager) registerAndPublishExecution(
 	// NOTE: This does NOT start the agent process — call StartAgentProcess() explicitly.
 	go m.waitForAgentctlReady(execution)
 	return nil
+}
+
+// ensureLaunchSessionStillActive closes the remote-runtime creation race: SSH,
+// Docker, and other remote CreateInstance calls can outlive a concurrent task
+// delete. Callers read both immediately before and after registration. The
+// durable cleanup-intent check is the admission boundary between them: either
+// launch persists first and cleanup's final inventory observes it, or cleanup
+// persists first and launch rolls the runtime back.
+func (m *Manager) ensureLaunchSessionStillActive(ctx context.Context, sessionID string) error {
+	if m.executorProfileReader == nil || sessionID == "" {
+		return nil
+	}
+	session, err := m.executorProfileReader.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		return fmt.Errorf("verify session before registering execution: %w", err)
+	}
+	if session == nil {
+		return fmt.Errorf("verify session before registering execution: session %q not found", sessionID)
+	}
+	cleanupActive, err := m.executorProfileReader.HasActiveTaskResourceCleanupJob(ctx, session.TaskID)
+	if err != nil {
+		return fmt.Errorf("verify task cleanup before registering execution: %w", err)
+	}
+	if cleanupActive {
+		return fmt.Errorf("verify task cleanup before registering execution: %w for task %q", errTaskCleanupActive, session.TaskID)
+	}
+	// Re-read after the cleanup-intent lookup. A cleanup can transition to a
+	// terminal state between separate queries; its job then no longer appears
+	// active, but the session deletion/cancellation remains authoritative.
+	session, err = m.executorProfileReader.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		return fmt.Errorf("reverify session after task cleanup admission: %w", err)
+	}
+	if session == nil {
+		return fmt.Errorf("reverify session after task cleanup admission: session %q not found", sessionID)
+	}
+	switch session.State {
+	case models.TaskSessionStateCancelled,
+		models.TaskSessionStateCompleted,
+		models.TaskSessionStateFailed:
+		return fmt.Errorf("verify session before registering execution: session %q is %s: %w", sessionID, session.State, ErrSessionTerminal)
+	default:
+		return nil
+	}
+}
+
+// rollbackRegisteredLaunchForTaskCleanup cannot assume the session is
+// terminal: the task mutation may still fail after persisting its prepared
+// cleanup intent. Preserve resumable state while removing the rejected live
+// execution; committed cleanup can subsequently remove the stopped row.
+func (m *Manager) rollbackRegisteredLaunchForTaskCleanup(
+	rt ExecutorBackend,
+	execInstance *ExecutorInstance,
+	execution *AgentExecution,
+) {
+	m.rollbackRegisteredLaunchWithRetry(rt, execInstance, execution, true, "task cleanup won execution registration")
+}
+
+// rollbackRegisteredLaunchAfterPersistFailure preserves any prior durable row
+// for the session. If the failed upsert actually committed before returning an
+// ambiguous transport error, clean it up resume-safely only after confirming
+// that it belongs to this exact execution.
+func (m *Manager) rollbackRegisteredLaunchAfterPersistFailure(
+	rt ExecutorBackend,
+	execInstance *ExecutorInstance,
+	execution *AgentExecution,
+) {
+	m.rollbackRegisteredLaunchWithRetry(rt, execInstance, execution, false, "execution registration persistence failed")
+}
+
+func (m *Manager) rollbackRegisteredLaunchWithRetry(
+	rt ExecutorBackend,
+	execInstance *ExecutorInstance,
+	execution *AgentExecution,
+	taskCleanupActive bool,
+	reason string,
+) {
+	if err := m.stopRegisteredLaunchRuntime(rt, execInstance, execution); err == nil {
+		m.finishRegisteredLaunchRollback(execution, taskCleanupActive)
+		return
+	} else {
+		m.logger.Warn("registered launch rollback retained ownership after stop failure",
+			zap.String("execution_id", execution.ID),
+			zap.String("session_id", execution.SessionID),
+			zap.String("reason", reason),
+			zap.Error(err))
+	}
+
+	m.wg.Add(1)
+	go func() {
+		defer m.wg.Done()
+		for attempt := 0; attempt < registeredLaunchRollbackRetries; attempt++ {
+			timer := time.NewTimer(registeredLaunchRollbackRetryDelays[attempt])
+			select {
+			case <-m.stopCh:
+				timer.Stop()
+				return
+			case <-timer.C:
+			}
+			if _, exists := m.executionStore.Get(execution.ID); !exists {
+				return
+			}
+			if err := m.stopRegisteredLaunchRuntime(rt, execInstance, execution); err == nil {
+				m.finishRegisteredLaunchRollback(execution, taskCleanupActive)
+				return
+			} else {
+				m.logger.Warn("registered launch rollback retry failed",
+					zap.String("execution_id", execution.ID),
+					zap.Int("attempt", attempt+1),
+					zap.Error(err))
+			}
+		}
+		m.logger.Error("registered launch rollback exhausted retries; retaining cleanup ownership",
+			zap.String("execution_id", execution.ID),
+			zap.String("session_id", execution.SessionID),
+			zap.String("reason", reason))
+	}()
+}
+
+func (m *Manager) stopRegisteredLaunchRuntime(
+	rt ExecutorBackend,
+	execInstance *ExecutorInstance,
+	execution *AgentExecution,
+) error {
+	if rt != nil && execInstance != nil {
+		cleanupCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		err := rt.StopInstance(cleanupCtx, execInstance, true)
+		cancel()
+		if err != nil {
+			return err
+		}
+	}
+	if execution.agentctl != nil {
+		execution.agentctl.Close()
+	}
+	execution.EndSessionSpan()
+	return nil
+}
+
+func (m *Manager) finishRegisteredLaunchRollback(execution *AgentExecution, taskCleanupActive bool) {
+	cleanupCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if taskCleanupActive {
+		m.deleteExecutorRunning(cleanupCtx, execution.SessionID)
+	} else if reader, ok := m.runningWriter.(executorRunningReader); ok {
+		running, err := reader.GetExecutorRunningBySessionID(cleanupCtx, execution.SessionID)
+		if err == nil && running != nil && running.AgentExecutionID == execution.ID {
+			m.deleteExecutorRunning(cleanupCtx, execution.SessionID)
+		}
+	}
+	m.executionStore.Remove(execution.ID)
 }
 
 func (m *Manager) rollbackLaunchExecution(_ context.Context, rt ExecutorBackend, execInstance *ExecutorInstance, execution *AgentExecution, reason string) {
@@ -1283,6 +1526,26 @@ func (m *Manager) rollbackLaunchExecution(_ context.Context, rt ExecutorBackend,
 		execution.agentctl.Close()
 	}
 	execution.EndSessionSpan()
+}
+
+// rollbackRegisteredLaunch removes both sides of an execution registration
+// before stopping its runtime. This path intentionally deletes the durable row
+// without the normal resume-token repair: the owning session was just proven
+// terminal or absent, so leaving a repaired row would expose a phantom runtime.
+func (m *Manager) rollbackRegisteredLaunch(rt ExecutorBackend, execInstance *ExecutorInstance, execution *AgentExecution, reason string) {
+	m.executionStore.Remove(execution.ID)
+	if m.runningWriter != nil && execution.SessionID != "" {
+		cleanupCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		if err := m.runningWriter.DeleteExecutorRunningBySessionID(cleanupCtx, execution.SessionID); err != nil &&
+			!errors.Is(err, models.ErrExecutorRunningNotFound) {
+			m.logger.Warn("failed to delete executor-running row during launch rollback",
+				zap.String("execution_id", execution.ID),
+				zap.String("session_id", execution.SessionID),
+				zap.Error(err))
+		}
+		cancel()
+	}
+	m.rollbackLaunchExecution(context.Background(), rt, execInstance, execution, reason)
 }
 
 // SetExecutionDescription updates the task description stored in an execution's metadata.
@@ -1335,6 +1598,30 @@ func (m *Manager) SetMcpMode(ctx context.Context, executionID string, mode strin
 		return fmt.Errorf("execution %q has no agentctl client", executionID)
 	}
 	return execution.agentctl.SetMcpMode(ctx, mode)
+}
+
+// SetMcpProvidersForSession replaces the task-mode MCP provider capabilities
+// on the live execution attached to sessionID. The execution store is the
+// source of truth for active agentctl instances; an absent execution is a
+// successful no-op because the next launch or resume derives providers from
+// the persisted task repositories.
+func (m *Manager) SetMcpProvidersForSession(ctx context.Context, sessionID string, providers []string) error {
+	if sessionID == "" {
+		return fmt.Errorf("session_id is required")
+	}
+	execution, exists := m.GetExecutionBySessionID(sessionID)
+	if !exists || execution == nil {
+		m.logger.Debug("MCP provider refresh skipped: no execution for session",
+			zap.String("session_id", sessionID))
+		return nil
+	}
+	if execution.agentctl == nil {
+		return fmt.Errorf("execution %q has no agentctl client", execution.ID)
+	}
+	if err := execution.agentctl.SetMcpProviders(ctx, providers); err != nil {
+		return fmt.Errorf("set MCP providers for session %s: %w", sessionID, err)
+	}
+	return nil
 }
 
 // resolveApprovalPolicyAndDisplayName resolves the approval policy and agent display name
@@ -1513,20 +1800,20 @@ func (m *Manager) initGitRepo(ctx context.Context, workspacePath string) error {
 	}
 
 	// Initialize git repository
-	cmd := exec.CommandContext(ctx, "git", "init")
+	cmd := subproc.NewGitCommand(ctx, "init")
 	cmd.Dir = workspacePath
-	if output, err := cmd.CombinedOutput(); err != nil {
+	if output, err := subproc.RunGitCombinedOutputClass(ctx, subproc.GitLifecycle, cmd); err != nil {
 		return fmt.Errorf("git init failed: %w (output: %s)", err, string(output))
 	}
 
 	// Configure git user (required for initial commit)
-	configName := exec.CommandContext(ctx, "git", "config", "user.name", "Kandev Quick Chat")
+	configName := subproc.NewGitCommand(ctx, "config", "user.name", "Kandev Quick Chat")
 	configName.Dir = workspacePath
-	_ = configName.Run() // Ignore error - might already be configured globally
+	_ = subproc.RunGitClass(ctx, subproc.GitLifecycle, configName) // Ignore error - might already be configured globally
 
-	configEmail := exec.CommandContext(ctx, "git", "config", "user.email", "quickchat@kandev.local")
+	configEmail := subproc.NewGitCommand(ctx, "config", "user.email", "quickchat@kandev.local")
 	configEmail.Dir = workspacePath
-	_ = configEmail.Run() // Ignore error - might already be configured globally
+	_ = subproc.RunGitClass(ctx, subproc.GitLifecycle, configEmail) // Ignore error - might already be configured globally
 
 	// Create initial commit with empty .gitkeep file
 	gitkeepPath := filepath.Join(workspacePath, ".gitkeep")
@@ -1534,15 +1821,15 @@ func (m *Manager) initGitRepo(ctx context.Context, workspacePath string) error {
 		return fmt.Errorf("failed to create .gitkeep: %w", err)
 	}
 
-	addCmd := exec.CommandContext(ctx, "git", "add", ".gitkeep")
+	addCmd := subproc.NewGitCommand(ctx, "add", ".gitkeep")
 	addCmd.Dir = workspacePath
-	if output, err := addCmd.CombinedOutput(); err != nil {
+	if output, err := subproc.RunGitCombinedOutputClass(ctx, subproc.GitLifecycle, addCmd); err != nil {
 		return fmt.Errorf("git add failed: %w (output: %s)", err, string(output))
 	}
 
-	commitCmd := exec.CommandContext(ctx, "git", "commit", "-m", "Initial commit")
+	commitCmd := subproc.NewGitCommand(ctx, "commit", "-m", "Initial commit")
 	commitCmd.Dir = workspacePath
-	if output, err := commitCmd.CombinedOutput(); err != nil {
+	if output, err := subproc.RunGitCombinedOutputClass(ctx, subproc.GitLifecycle, commitCmd); err != nil {
 		return fmt.Errorf("git commit failed: %w (output: %s)", err, string(output))
 	}
 

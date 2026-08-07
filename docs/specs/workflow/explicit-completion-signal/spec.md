@@ -20,6 +20,7 @@ Signal-gated Kanban workflows need a reliable distinction between an agent endin
 - Creating or loading an ACP session supplies the local Kandev MCP server. After a transient MCP reconnect, the client can list and call `step_complete_kandev` again without a user message or process restart.
 - Kandev does not pin the Claude ACP bridge version as part of this feature. Bridge selection retains the existing unversioned package behavior; diagnostics continue to report the version returned during ACP initialization.
 - Existing idempotency, clarification barriers, and re-open semantics remain unchanged. ADR 0015's planned manual "Mark complete & advance" fallback is not currently implemented and is outside this reliability fix.
+- Explicit user-cancel completion is owned by the [Cancelled Turn Completion](../cancelled-turn-completion/spec.md) spec. When a step opts into that policy, the user's cancel action is a human completion decision and may run `on_turn_complete` without an agent-emitted signal; internal cancellation paths remain non-completing.
 
 ## API Surface
 
@@ -67,12 +68,13 @@ The pending completion signal continues to use `TaskSession.Metadata` as specifi
 - **GIVEN** an Office task session in `ModeOffice`, **WHEN** the client lists tools or receives its first-turn context, **THEN** `step_complete_kandev` is absent.
 - **GIVEN** a task-mode client has connected to Kandev MCP, **WHEN** its MCP connection drops and reconnects, **THEN** the client can list and call `step_complete_kandev` without another user message.
 - **GIVEN** a signal-gated workflow step, **WHEN** the agent finishes without calling the tool, **THEN** the task remains on the current step and no automatic transition runs.
+- **GIVEN** a signal-gated workflow step that also enables explicit user-cancel completion, **WHEN** the user cancels the active turn, **THEN** the configured completion transition may run without `step_complete_kandev` as defined by the cancelled-turn completion policy.
 - **GIVEN** a client that displays fully qualified MCP names, **WHEN** it resolves the completion instruction, **THEN** it can associate canonical `step_complete_kandev` with its qualified runtime alias.
 - **GIVEN** Claude ACP initializes, **WHEN** the bridge reports its identity, **THEN** Kandev records the reported bridge name and version in diagnostics without constraining package resolution in this feature.
 
 ## Out of Scope
 
 - Exposing `step_complete_kandev` to Office agents.
-- Changing completion-signal persistence or transition semantics, or implementing ADR 0015's planned manual fallback UI.
+- Changing completion-signal persistence or ordinary halt semantics, or implementing ADR 0015's planned manual fallback UI. Explicit user-cancel behavior is defined separately by the cancelled-turn completion spec.
 - Adding vendor-specific eager-load metadata; agents are expected to use normal MCP tool discovery.
 - Implementing a generic MCP proxy or replacing the ACP bridge.

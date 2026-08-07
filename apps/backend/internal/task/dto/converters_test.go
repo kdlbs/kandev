@@ -81,10 +81,30 @@ func TestFromWorkflowStep_PreservesWIPFields(t *testing.T) {
 	}
 }
 
+func TestFromWorkflowStep_PreservesCancelTriggersTurnComplete(t *testing.T) {
+	got := FromWorkflowStep(&wfmodels.WorkflowStep{
+		ID:                         "step-cancel",
+		WorkflowID:                 "wf-1",
+		CancelTriggersTurnComplete: true,
+	})
+	payload, err := json.Marshal(got)
+	if err != nil {
+		t.Fatalf("marshal workflow step DTO: %v", err)
+	}
+	var fields map[string]any
+	if err := json.Unmarshal(payload, &fields); err != nil {
+		t.Fatalf("decode workflow step DTO: %v", err)
+	}
+	if gotValue, ok := fields["cancel_triggers_turn_complete"].(bool); !ok || !gotValue {
+		t.Fatalf("cancel trigger DTO field = %#v, want true", fields["cancel_triggers_turn_complete"])
+	}
+}
+
 func TestFromTaskSession_IncludesAllWorktrees(t *testing.T) {
 	session := &models.TaskSession{
-		ID:     "session-1",
-		TaskID: "task-1",
+		ID:            "session-1",
+		TaskID:        "task-1",
+		WorkspacePath: "/task-root",
 		Worktrees: []*models.TaskSessionWorktree{
 			{ID: "assoc-1", WorktreeID: "wt-1", RepositoryID: "repo-a", WorktreePath: "/x/a"},
 			{ID: "assoc-2", WorktreeID: "wt-2", RepositoryID: "repo-b", WorktreePath: "/x/b"},
@@ -98,6 +118,9 @@ func TestFromTaskSession_IncludesAllWorktrees(t *testing.T) {
 	if full.WorktreePath != "/x/a" {
 		t.Fatalf("WorktreePath = %q, want /x/a (first worktree)", full.WorktreePath)
 	}
+	if full.WorkspacePath != "/task-root" {
+		t.Fatalf("WorkspacePath = %q, want /task-root", full.WorkspacePath)
+	}
 
 	summary := FromTaskSessionSummary(session)
 	if len(summary.Worktrees) != 2 {
@@ -105,5 +128,8 @@ func TestFromTaskSession_IncludesAllWorktrees(t *testing.T) {
 	}
 	if summary.Worktrees[1].WorktreeID != "wt-2" {
 		t.Fatalf("second worktree id = %q, want wt-2", summary.Worktrees[1].WorktreeID)
+	}
+	if summary.WorkspacePath != "/task-root" {
+		t.Fatalf("summary WorkspacePath = %q, want /task-root", summary.WorkspacePath)
 	}
 }

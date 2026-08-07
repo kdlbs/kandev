@@ -6,6 +6,7 @@ import { useAppStoreApi } from "@/components/state-provider";
 import { useTaskCRUD } from "@/hooks/use-task-crud";
 import type { Task as BackendTask } from "@/lib/types/http";
 import type { KanbanState, WorkspaceState, WorkflowsState } from "@/lib/state/slices";
+import { linkToTaskOverview } from "@/lib/links";
 
 type UseKanbanActionsOptions = {
   workspaceState: WorkspaceState;
@@ -20,13 +21,10 @@ function isTaskDetailPath(): boolean {
 }
 
 function kanbanWorkspaceHref(workspaceId: string): string {
-  if (typeof window === "undefined") return `/?workspaceId=${workspaceId}`;
+  if (typeof window === "undefined") return linkToTaskOverview({ workspaceId });
   const current = new URLSearchParams(window.location.search);
-  const next = new URLSearchParams();
   const workflowId = current.get("workflowId");
-  if (workflowId) next.set("workflowId", workflowId);
-  next.set("workspaceId", workspaceId);
-  return `/?${next.toString()}`;
+  return linkToTaskOverview({ workspaceId, workflowId: workflowId ?? undefined });
 }
 
 /** Handle creating a new task in the kanban board, merging with any WS-provided data. */
@@ -142,7 +140,7 @@ export function useKanbanActions({ workspaceState, workflowsState }: UseKanbanAc
       if (nextWorkspaceId) {
         router.push(kanbanWorkspaceHref(nextWorkspaceId));
       } else {
-        router.push("/");
+        router.push(linkToTaskOverview());
       }
     },
     [router, store, workspaceState.activeId],
@@ -162,8 +160,9 @@ export function useKanbanActions({ workspaceState, workflowsState }: UseKanbanAc
         const workspaceId = workflowsState.items.find(
           (workflow: WorkflowsState["items"][number]) => workflow.id === nextWorkflowId,
         )?.workspaceId;
-        const workspaceParam = workspaceId ? `&workspaceId=${workspaceId}` : "";
-        router.push(`/?workflowId=${nextWorkflowId}${workspaceParam}`);
+        router.push(
+          linkToTaskOverview({ workspaceId: workspaceId ?? undefined, workflowId: nextWorkflowId }),
+        );
       }
     },
     [router, store, workflowsState.activeId, workflowsState.items],

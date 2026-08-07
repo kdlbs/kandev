@@ -162,6 +162,9 @@ func (r *DockerExecutor) HealthCheck(_ context.Context) error {
 }
 
 func (r *DockerExecutor) CreateInstance(ctx context.Context, req *ExecutorCreateRequest) (instance *ExecutorInstance, err error) {
+	if _, err := validateRemoteContributions(req.RemoteContributions); err != nil {
+		return nil, err
+	}
 	dockerClient, containerMgr, err := r.ensureClient()
 	if err != nil {
 		return nil, fmt.Errorf("docker unavailable: %w", err)
@@ -177,7 +180,10 @@ func (r *DockerExecutor) CreateInstance(ctx context.Context, req *ExecutorCreate
 
 	r.seedSessionDir(ctx, req)
 
-	containerCfg := r.buildContainerLaunchConfig(req)
+	containerCfg, err := r.buildContainerLaunchConfig(req)
+	if err != nil {
+		return nil, fmt.Errorf("build container launch config: %w", err)
+	}
 	result, err := containerMgr.LaunchContainer(ctx, containerCfg)
 	if err != nil {
 		return nil, fmt.Errorf("failed to launch container: %w", err)
@@ -242,7 +248,11 @@ func (r *DockerExecutor) seedSessionDir(ctx context.Context, req *ExecutorCreate
 	}
 }
 
-func (r *DockerExecutor) buildContainerLaunchConfig(req *ExecutorCreateRequest) ContainerConfig {
+func (r *DockerExecutor) buildContainerLaunchConfig(req *ExecutorCreateRequest) (ContainerConfig, error) {
+	prepareScript, err := r.resolvePrepareScript(req)
+	if err != nil {
+		return ContainerConfig{}, err
+	}
 	return ContainerConfig{
 		AgentConfig:                    req.AgentConfig,
 		WorkspacePath:                  "", // Empty = no workspace mount; we clone inside container.
@@ -256,11 +266,13 @@ func (r *DockerExecutor) buildContainerLaunchConfig(req *ExecutorCreateRequest) 
 		AutoApprovePermissions:         req.AutoApprovePermissions,
 		AutoApprovePermissionsOverride: req.AutoApprovePermissionsOverride,
 		McpServers:                     req.McpServers,
-		PrepareScript:                  r.resolvePrepareScript(req),
+		McpProviders:                   req.McpProviders,
+		PrepareScript:                  prepareScript,
 		ImageTagOverride:               getMetadataString(req.Metadata, MetadataKeyImageTagOverride),
 		LocalClonePath:                 localCloneMountPath(req.Metadata),
 		BaseBranches:                   getMetadataStringMap(req.Metadata, MetadataKeyBaseBranches),
-	}
+		RemoteContributions:            req.RemoteContributions,
+	}, nil
 }
 
 func (r *DockerExecutor) buildCreatedInstance(req *ExecutorCreateRequest, result *LaunchResult, containerIP string) *ExecutorInstance {
@@ -548,6 +560,7 @@ func buildReconnectCreateInstanceRequest(req *ExecutorCreateRequest, instanceID 
 		),
 		AutoStart:           false,
 		McpServers:          req.McpServers,
+		McpProviders:        req.McpProviders,
 		SessionID:           req.SessionID,
 		TaskID:              req.TaskID,
 		DisableAskQuestion:  disableAskQuestion,
@@ -557,6 +570,7 @@ func buildReconnectCreateInstanceRequest(req *ExecutorCreateRequest, instanceID 
 		RequiresProcessKill: requiresProcessKill,
 		StripEnv:            stripEnv,
 		BaseBranches:        getMetadataStringMap(req.Metadata, MetadataKeyBaseBranches),
+		RemoteContributions: req.RemoteContributions,
 	}
 }
 
@@ -665,7 +679,7 @@ func (r *DockerExecutor) StopInstance(ctx context.Context, instance *ExecutorIns
 		return nil
 	}
 
-	dockerClient, _, err := r.ensureClient()
+	dockerClient, containerMgr, err := r.ensureClient()
 	if err != nil {
 		return fmt.Errorf("docker unavailable: %w", err)
 	}
@@ -674,12 +688,29 @@ func (r *DockerExecutor) StopInstance(ctx context.Context, instance *ExecutorIns
 	defer cancel()
 
 	if force {
-		err = dockerClient.KillContainer(cleanupCtx, instance.ContainerID, "SIGKILL")
-	} else {
-		err = dockerClient.StopContainer(cleanupCtx, instance.ContainerID, dockerStopContainerTimeout)
+		if killErr := dockerClient.KillContainer(cleanupCtx, instance.ContainerID, "SIGKILL"); killErr != nil {
+			r.logger.Warn("failed to kill docker container before forced removal",
+				zap.String("container_id", instance.ContainerID),
+				zap.Error(killErr))
+		}
+		if removeErr := dockerClient.RemoveContainer(cleanupCtx, instance.ContainerID, true); removeErr != nil {
+			return fmt.Errorf("failed to remove container after kill: %w", removeErr)
+		}
+		return nil
 	}
 
-	if err != nil {
+	if shouldRunExecutorCleanup(instance.StopReason) {
+		if err := containerMgr.StopContainer(cleanupCtx, instance.ContainerID, dockerStopContainerTimeout); err != nil {
+			return fmt.Errorf("failed to stop and remove container: %w", err)
+		}
+		return nil
+	}
+
+	// Stale execution cleanup deliberately stops but preserves the container.
+	// A page refresh may still recover the durable task environment by starting
+	// that same container; only destructive task/session lifecycle reasons own
+	// removal. Failed-launch rollback uses the force branch above.
+	if err := dockerClient.StopContainer(cleanupCtx, instance.ContainerID, dockerStopContainerTimeout); err != nil {
 		return fmt.Errorf("failed to stop container: %w", err)
 	}
 
@@ -746,15 +777,22 @@ func (r *DockerExecutor) IsAlwaysResumable() bool         { return true }
 // postlude — older profiles that snapshot a then-current default lacked it,
 // so simply updating DefaultPrepareScript wouldn't reach those users. The
 // postlude runs after the user's prepare script and is idempotent.
-func (r *DockerExecutor) resolvePrepareScript(req *ExecutorCreateRequest) string {
+func (r *DockerExecutor) resolvePrepareScript(req *ExecutorCreateRequest) (string, error) {
 	script := getMetadataString(req.Metadata, MetadataKeySetupScript)
 	if script == "" {
 		script = DefaultPrepareScript("local_docker")
 	}
 	if script == "" {
-		return ""
+		return "", nil
 	}
 	script += KandevBranchCheckoutPostlude()
+	if binding, ok := req.RemoteContributions[""]; ok {
+		contributionScript, err := scriptengine.RemoteContributionSetupScript(&binding)
+		if err != nil {
+			return "", err
+		}
+		script += contributionScript
+	}
 
 	resolver := scriptengine.NewResolver().
 		WithProvider(scriptengine.WorkspaceProvider(dockerWorkspacePath)).
@@ -783,7 +821,7 @@ func (r *DockerExecutor) resolvePrepareScript(req *ExecutorCreateRequest) string
 			"kandev.agentctl.start":   "",
 		})
 
-	return resolver.Resolve(script)
+	return resolver.Resolve(script), nil
 }
 
 func localCloneMountPath(metadata map[string]interface{}) string {

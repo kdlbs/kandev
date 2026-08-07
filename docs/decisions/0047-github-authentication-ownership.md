@@ -10,6 +10,12 @@
 > workspace automation identity and task Git credential routing are separate settings. Background
 > automation still uses the workspace connection; tasks may explicitly inherit executor
 > credentials instead of receiving the managed broker contract.
+>
+> Amended by
+> [ADR-2026-08-02-new-workspace-github-access-defaults](2026-08-02-new-workspace-github-access-defaults.md):
+> operator-authorized workspace creation may snapshot the host's active authenticated `gh`
+> host/login as that new workspace's explicit named CLI automation connection. Member-created
+> workspaces never receive the operator identity automatically.
 
 - Status: accepted
 - Date: 2026-07-19

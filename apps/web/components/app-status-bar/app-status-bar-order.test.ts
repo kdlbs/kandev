@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   APP_STATUS_CONNECTION_ID,
+  APP_STATUS_LSP_ID,
   APP_STATUS_METRICS_ID,
   moveAppStatusItem,
   projectActiveStatusItems,
@@ -22,6 +23,19 @@ const items: AppStatusItemDescriptor[] = [
 ];
 
 describe("reconcileAppStatusBarOrder", () => {
+  it("assigns the built-in LSP item an opaque, reorderable identity", () => {
+    const active = [
+      { id: APP_STATUS_CONNECTION_ID, defaultSide: "left" as const },
+      { id: APP_STATUS_LSP_ID, defaultSide: "right" as const },
+    ];
+
+    expect(APP_STATUS_LSP_ID).toBe("builtin:lsp");
+    expect(reconcileAppStatusBarOrder({ leftItemIds: [], rightItemIds: [] }, active)).toEqual({
+      leftItemIds: [APP_STATUS_CONNECTION_ID],
+      rightItemIds: [APP_STATUS_LSP_ID],
+    });
+  });
+
   it("builds the default two-sided order when no preference exists", () => {
     expect(reconcileAppStatusBarOrder({ leftItemIds: [], rightItemIds: [] }, items)).toEqual({
       leftItemIds: [APP_STATUS_CONNECTION_ID, PLUGIN_LEFT_ID],

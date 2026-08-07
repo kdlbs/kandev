@@ -225,3 +225,53 @@ func TestGitHubBrokerScopeAuthorizerValidatesSessionOwnershipAndState(t *testing
 		t.Fatalf("terminal session error = %v", err)
 	}
 }
+
+func TestGitHubBrokerScopeAuthorizerAllowsOnlyTheBoundContributionFork(t *testing.T) {
+	binding := taskmodels.RemoteContribution{
+		Version:              taskmodels.RemoteContributionVersion,
+		Provider:             taskmodels.RemoteContributionProviderGitHub,
+		Kind:                 taskmodels.RemoteContributionKindPullRequest,
+		CanonicalURL:         "https://github.com/acme/widget/pull/7",
+		Number:               7,
+		State:                taskmodels.RemoteContributionStateOpen,
+		BaseBranch:           "main",
+		HeadBranch:           "feature/remote",
+		HeadSHA:              strings.Repeat("a", 40),
+		CollaborationAllowed: true,
+		SourceRepository: taskmodels.RemoteContributionRepository{
+			Host: "github.com", Path: "contributor/widget-fork", RemoteURL: "https://github.com/contributor/widget-fork.git",
+		},
+	}
+	metadata := map[string]interface{}{}
+	if err := taskmodels.PutRemoteContribution(metadata, &binding); err != nil {
+		t.Fatalf("PutRemoteContribution() error = %v", err)
+	}
+	repo := &fakeGitHubBrokerTaskRepository{
+		task:       &taskmodels.Task{ID: "task-fork", WorkspaceID: "workspace-fork"},
+		session:    &taskmodels.TaskSession{ID: "session-fork", TaskID: "task-fork", State: taskmodels.TaskSessionStateRunning},
+		repository: &taskmodels.Repository{ID: "repository-fork", WorkspaceID: "workspace-fork", Provider: "github", ProviderOwner: "acme", ProviderName: "widget"},
+		links:      []*taskmodels.TaskRepository{{TaskID: "task-fork", RepositoryID: "repository-fork", Metadata: metadata}},
+	}
+	authorizer := &githubBrokerScopeAuthorizer{repo: repo}
+
+	if err := authorizer.AuthorizeGitHubRepository(
+		context.Background(), "workspace-fork", "task-fork", "session-fork", "repository-fork", "contributor", "widget-fork",
+	); err != nil {
+		t.Fatalf("bound fork was denied: %v", err)
+	}
+	if err := authorizer.AuthorizeGitHubRepository(
+		context.Background(), "workspace-fork", "task-fork", "session-fork", "repository-fork", "contributor", "other-fork",
+	); err == nil || !strings.Contains(err.Error(), "identity does not match") {
+		t.Fatalf("unbound fork error = %v, want identity denial", err)
+	}
+
+	binding.CollaborationAllowed = false
+	if err := taskmodels.PutRemoteContribution(metadata, &binding); err != nil {
+		t.Fatalf("update remote contribution: %v", err)
+	}
+	if err := authorizer.AuthorizeGitHubRepository(
+		context.Background(), "workspace-fork", "task-fork", "session-fork", "repository-fork", "contributor", "widget-fork",
+	); err == nil || !strings.Contains(err.Error(), "identity does not match") {
+		t.Fatalf("non-collaborative fork error = %v, want identity denial", err)
+	}
+}

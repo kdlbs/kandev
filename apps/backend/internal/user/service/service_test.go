@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -183,6 +184,30 @@ func TestApplyBasicSettings_ConfirmTaskArchive(t *testing.T) {
 	})
 }
 
+func TestApplyBasicSettingsAgentGeneratedTaskTitles(t *testing.T) {
+	settings := &models.UserSettings{AgentGeneratedTaskTitles: false}
+	if err := applyBasicSettings(settings, &UpdateUserSettingsRequest{}); err != nil {
+		t.Fatalf("apply omitted setting: %v", err)
+	}
+	if settings.AgentGeneratedTaskTitles {
+		t.Fatal("AgentGeneratedTaskTitles changed on omitted patch")
+	}
+
+	if err := applyBasicSettings(settings, &UpdateUserSettingsRequest{AgentGeneratedTaskTitles: ptr(true)}); err != nil {
+		t.Fatalf("apply enabled setting: %v", err)
+	}
+	if !settings.AgentGeneratedTaskTitles {
+		t.Fatal("AgentGeneratedTaskTitles = false, want true")
+	}
+
+	if err := applyBasicSettings(settings, &UpdateUserSettingsRequest{AgentGeneratedTaskTitles: ptr(false)}); err != nil {
+		t.Fatalf("apply disabled setting: %v", err)
+	}
+	if settings.AgentGeneratedTaskTitles {
+		t.Fatal("AgentGeneratedTaskTitles = true, want false")
+	}
+}
+
 func TestApplyBasicSettingsAppStatusBarOrder(t *testing.T) {
 	saved := models.AppStatusBarOrder{
 		LeftItemIDs:  []string{"builtin:connection"},
@@ -209,6 +234,78 @@ func TestApplyBasicSettingsAppStatusBarOrder(t *testing.T) {
 		}
 		if fmt.Sprint(settings.AppStatusBarOrder) != fmt.Sprint(next) {
 			t.Fatalf("AppStatusBarOrder = %#v, want %#v", settings.AppStatusBarOrder, next)
+		}
+	})
+}
+
+func TestApplyLSPSettingsRejectsManualOnlyAutoInstallLanguage(t *testing.T) {
+	settings := &models.UserSettings{}
+	req := &UpdateUserSettingsRequest{
+		LspAutoInstallLanguages: ptr([]string{"kotlin"}),
+	}
+
+	err := applyLSPSettings(settings, req)
+	if err == nil || !strings.Contains(err.Error(), "does not support auto-install") {
+		t.Fatalf("applyLSPSettings() error = %v, want manual-install-only error", err)
+	}
+	if len(settings.LspAutoInstallLanguages) != 0 {
+		t.Fatalf("LspAutoInstallLanguages = %v, want unchanged", settings.LspAutoInstallLanguages)
+	}
+}
+
+func TestApplyLSPSettingsAcceptsTaskHostAutoInstallPreference(t *testing.T) {
+	settings := &models.UserSettings{}
+	req := &UpdateUserSettingsRequest{
+		LspAutoInstallLanguages: ptr([]string{"rust"}),
+	}
+
+	if err := applyLSPSettings(settings, req); err != nil {
+		t.Fatalf("applyLSPSettings() error = %v, want Rust preference accepted", err)
+	}
+	if !slices.Equal(settings.LspAutoInstallLanguages, []string{"rust"}) {
+		t.Fatalf("LspAutoInstallLanguages = %v, want [rust]", settings.LspAutoInstallLanguages)
+	}
+}
+
+func TestApplyLspStatusLocation(t *testing.T) {
+	t.Run("omission preserves saved value", func(t *testing.T) {
+		settings := &models.UserSettings{LspStatusLocation: models.LspStatusLocationStatusBar}
+		if err := applyLSPSettings(settings, &UpdateUserSettingsRequest{}); err != nil {
+			t.Fatalf("apply LSP settings: %v", err)
+		}
+		if settings.LspStatusLocation != models.LspStatusLocationStatusBar {
+			t.Fatalf("LspStatusLocation = %q, want status_bar", settings.LspStatusLocation)
+		}
+	})
+
+	t.Run("valid values are accepted", func(t *testing.T) {
+		for _, value := range []string{
+			models.LspStatusLocationToolbar,
+			models.LspStatusLocationStatusBar,
+		} {
+			settings := &models.UserSettings{LspStatusLocation: models.LspStatusLocationToolbar}
+			err := applyLSPSettings(settings, &UpdateUserSettingsRequest{
+				LspStatusLocation: ptr(value),
+			})
+			if err != nil {
+				t.Fatalf("apply %q: %v", value, err)
+			}
+			if settings.LspStatusLocation != value {
+				t.Fatalf("LspStatusLocation = %q, want %q", settings.LspStatusLocation, value)
+			}
+		}
+	})
+
+	t.Run("invalid value is rejected without mutation", func(t *testing.T) {
+		settings := &models.UserSettings{LspStatusLocation: models.LspStatusLocationToolbar}
+		err := applyLSPSettings(settings, &UpdateUserSettingsRequest{
+			LspStatusLocation: ptr("sidebar"),
+		})
+		if err == nil || !strings.Contains(err.Error(), "lsp_status_location") {
+			t.Fatalf("apply invalid location error = %v, want lsp_status_location validation", err)
+		}
+		if settings.LspStatusLocation != models.LspStatusLocationToolbar {
+			t.Fatalf("LspStatusLocation = %q after invalid patch, want toolbar", settings.LspStatusLocation)
 		}
 	})
 }
@@ -440,6 +537,41 @@ func TestApplyChangesPanelLayout(t *testing.T) {
 		}
 		if settings.ChangesPanelLayout != "tree" {
 			t.Fatalf("expected ChangesPanelLayout=tree, got %q", settings.ChangesPanelLayout)
+		}
+	})
+}
+
+func TestApplyStartupPage(t *testing.T) {
+	t.Run("omission preserves saved value", func(t *testing.T) {
+		settings := &models.UserSettings{StartupPage: models.StartupPageLastTask}
+		if err := applyBasicSettings(settings, &UpdateUserSettingsRequest{}); err != nil {
+			t.Fatalf("apply basic settings: %v", err)
+		}
+		if settings.StartupPage != models.StartupPageLastTask {
+			t.Fatalf("StartupPage = %q, want %q", settings.StartupPage, models.StartupPageLastTask)
+		}
+	})
+
+	for _, value := range []string{models.StartupPageTaskOverview, models.StartupPageLastTask} {
+		t.Run("applies "+value, func(t *testing.T) {
+			settings := &models.UserSettings{StartupPage: models.StartupPageTaskOverview}
+			if err := applyBasicSettings(settings, &UpdateUserSettingsRequest{StartupPage: ptr(value)}); err != nil {
+				t.Fatalf("apply basic settings: %v", err)
+			}
+			if settings.StartupPage != value {
+				t.Fatalf("StartupPage = %q, want %q", settings.StartupPage, value)
+			}
+		})
+	}
+
+	t.Run("rejects invalid value", func(t *testing.T) {
+		settings := &models.UserSettings{StartupPage: models.StartupPageLastTask}
+		err := applyBasicSettings(settings, &UpdateUserSettingsRequest{StartupPage: ptr("future_value")})
+		if err == nil {
+			t.Fatal("expected invalid startup page error")
+		}
+		if settings.StartupPage != models.StartupPageLastTask {
+			t.Fatalf("StartupPage = %q, want unchanged %q", settings.StartupPage, models.StartupPageLastTask)
 		}
 	})
 }
@@ -703,9 +835,9 @@ func TestApplySidebarViews(t *testing.T) {
 			wantApplied: false,
 		},
 		{
-			name:        "empty slice is accepted",
+			name:        "empty slice restores the canonical default",
 			req:         &UpdateUserSettingsRequest{SidebarViews: ptr([]models.SidebarView{})},
-			wantCount:   0,
+			wantCount:   1,
 			wantApplied: true,
 		},
 		{
@@ -1007,6 +1139,24 @@ func TestPublishUserSettingsEventIncludesNormalizedMCPTaskAgentProfileDefault(t 
 	}
 }
 
+func TestPublishUserSettingsEventIncludesNormalizedStartupPage(t *testing.T) {
+	log, err := logger.NewFromZap(zap.NewNop())
+	if err != nil {
+		t.Fatalf("logger.NewFromZap: %v", err)
+	}
+	eventBus := &recordingEventBus{}
+	svc := NewService(&recordingUserRepository{}, eventBus, log)
+	svc.publishUserSettingsEvent(context.Background(), &models.UserSettings{StartupPage: "future_value"})
+
+	eventData, ok := eventBus.publishedEvents[0].Data.(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected event data map, got %T", eventBus.publishedEvents[0].Data)
+	}
+	if got := eventData["startup_page"]; got != models.StartupPageTaskOverview {
+		t.Fatalf("startup_page = %#v, want task_overview", got)
+	}
+}
+
 func TestPublishUserSettingsEventIncludesAppStatusBarOrder(t *testing.T) {
 	log, err := logger.NewFromZap(zap.NewNop())
 	if err != nil {
@@ -1026,6 +1176,26 @@ func TestPublishUserSettingsEventIncludesAppStatusBarOrder(t *testing.T) {
 	}
 	if got, ok := eventData["app_status_bar_order"].(models.AppStatusBarOrder); !ok || fmt.Sprint(got) != fmt.Sprint(want) {
 		t.Fatalf("app_status_bar_order = %#v, want %#v", eventData["app_status_bar_order"], want)
+	}
+}
+
+func TestPublishUserSettingsEventIncludesLspStatusLocation(t *testing.T) {
+	log, err := logger.NewFromZap(zap.NewNop())
+	if err != nil {
+		t.Fatalf("logger.NewFromZap: %v", err)
+	}
+	eventBus := &recordingEventBus{}
+	svc := NewService(&recordingUserRepository{}, eventBus, log)
+	svc.publishUserSettingsEvent(context.Background(), &models.UserSettings{
+		LspStatusLocation: models.LspStatusLocationStatusBar,
+	})
+
+	eventData, ok := eventBus.publishedEvents[0].Data.(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected event data map, got %T", eventBus.publishedEvents[0].Data)
+	}
+	if got := eventData["lsp_status_location"]; got != models.LspStatusLocationStatusBar {
+		t.Fatalf("lsp_status_location = %#v, want status_bar", got)
 	}
 }
 
@@ -1239,6 +1409,46 @@ func TestApplyUserPreferenceBlobsValidation(t *testing.T) {
 			t.Fatalf("expected explicit null to clear blob, got %s", string(settings.JiraSavedViews))
 		}
 	})
+
+}
+
+func TestAzureDevOpsBrowsePreferencesArePatched(t *testing.T) {
+	log, err := logger.NewFromZap(zap.NewNop())
+	if err != nil {
+		t.Fatalf("logger: %v", err)
+	}
+	preferences := json.RawMessage(`{"workspace-a":{"mode":"board","projectId":"project-a"}}`)
+	updatedSettings := &models.UserSettings{
+		UserID:                       store.DefaultUserID,
+		AzureDevOpsBrowsePreferences: preferences,
+	}
+	repo := &recordingUserRepository{
+		getSettings:        &models.UserSettings{UserID: store.DefaultUserID},
+		preservingSettings: updatedSettings,
+	}
+	eventBus := &recordingEventBus{}
+	settings, err := NewService(repo, eventBus, log).UpdateUserSettings(context.Background(), &UpdateUserSettingsRequest{
+		AzureDevOpsBrowsePreferences: rawPatch(preferences),
+	})
+	if err != nil {
+		t.Fatalf("update Azure DevOps preferences: %v", err)
+	}
+	if string(settings.AzureDevOpsBrowsePreferences) != string(preferences) {
+		t.Fatalf("AzureDevOpsBrowsePreferences = %s, want %s", settings.AzureDevOpsBrowsePreferences, preferences)
+	}
+	if repo.preservingInput == nil || string(repo.preservingInput.AzureDevOpsBrowsePreferences) != string(preferences) {
+		t.Fatalf("persisted AzureDevOpsBrowsePreferences = %+v, want %s", repo.preservingInput, preferences)
+	}
+	if len(eventBus.publishedEvents) != 1 {
+		t.Fatalf("settings events = %d, want 1", len(eventBus.publishedEvents))
+	}
+	eventData, ok := eventBus.publishedEvents[0].Data.(map[string]interface{})
+	if !ok {
+		t.Fatalf("settings event data = %T, want map", eventBus.publishedEvents[0].Data)
+	}
+	if got, ok := eventData["azure_devops_browse_preferences"].(json.RawMessage); !ok || string(got) != string(preferences) {
+		t.Fatalf("event AzureDevOpsBrowsePreferences = %s, want %s", got, preferences)
+	}
 }
 
 type recordingUserRepository struct {
@@ -1254,6 +1464,7 @@ type recordingUserRepository struct {
 	getSettings                               *models.UserSettings
 	getErr                                    error
 	preservingSettings                        *models.UserSettings
+	preservingInput                           *models.UserSettings
 	preservingPatch                           *models.TaskCreateLastUsed
 	preservingErr                             error
 	closeCalls                                int
@@ -1282,10 +1493,12 @@ func (r *recordingUserRepository) GetUserSettings(context.Context, string) (*mod
 
 func (r *recordingUserRepository) UpsertUserSettingsPreservingTaskCreateLastUsed(
 	_ context.Context,
-	_ *models.UserSettings,
+	settings *models.UserSettings,
 	patch *models.TaskCreateLastUsed,
 ) (*models.UserSettings, error) {
 	r.upsertUserSettingsPreservingLastUsedCalls++
+	settingsCopy := *settings
+	r.preservingInput = &settingsCopy
 	if patch != nil {
 		patchCopy := *patch
 		r.preservingPatch = &patchCopy

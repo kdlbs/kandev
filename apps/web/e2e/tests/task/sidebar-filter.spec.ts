@@ -94,6 +94,22 @@ test.describe("Sidebar filter bar — popover basics", () => {
     const chips = filters.chipMenu.getByTestId("sidebar-view-chip");
     await expect(chips).toHaveCount(1);
     await expect(chips.filter({ hasText: "All tasks" })).toBeVisible();
+    await filters.closeViewPicker();
+
+    await filters.addFilterRow();
+    await filters.setClauseDimension(0, "Archived");
+    await expect
+      .poll(async () => {
+        const { settings } = await apiClient.getUserSettings();
+        const draft = settings.sidebar_draft as { base_view_id?: string } | null | undefined;
+        return draft?.base_view_id ?? null;
+      })
+      .toBe("view-all-tasks");
+    await expect(testPage.getByText("Sidebar views", { exact: true })).toHaveCount(0);
+
+    await testPage.reload();
+    await new SessionPage(testPage).waitForLoad();
+    await new SidebarFilterPopoverPage(testPage).expectActiveViewChip("All tasks");
   });
 
   test("switching chips updates active state and persists across reload", async ({
@@ -169,6 +185,47 @@ test.describe("Sidebar filter — view ordering", () => {
 });
 
 test.describe("Sidebar filter — filtering", () => {
+  test("offers archived as a filter dimension and loads archived rows", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const archivedTask = await apiClient.createTask(seedData.workspaceId, "Archived filter task", {
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+    });
+    await apiClient.archiveTask(archivedTask.id);
+    const { session, filters } = await openWithSeed(testPage, apiClient, seedData, [
+      "Filter options task",
+    ]);
+    await filters.addFilterRow();
+    await filters.clauseRow(0).getByTestId("filter-dimension-select").click();
+
+    await expect(testPage.getByRole("option", { name: "Archived", exact: true })).toBeVisible();
+    await testPage.getByRole("option", { name: "Archived", exact: true }).click();
+    await filters.close();
+    await expect(testPage.getByText("Archived filter task")).toBeVisible({ timeout: 10_000 });
+    await expect(testPage.getByText("Archived", { exact: true })).toBeVisible();
+    await expect(testPage.getByText("Filter options task")).toHaveCount(0);
+
+    const liveArchivedTask = await apiClient.createTask(
+      seedData.workspaceId,
+      "Live archived filter task",
+      {
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+      },
+    );
+    await apiClient.archiveTask(liveArchivedTask.id);
+    await expect(session.sidebar.getByText("Live archived filter task")).toHaveCount(1, {
+      timeout: 10_000,
+    });
+
+    await session.sidebar.getByText("Archived filter task", { exact: true }).click();
+    await expect(testPage).toHaveURL((url) => url.pathname === `/t/${archivedTask.id}`);
+    await expect(testPage.getByTestId("task-unarchive-button")).toBeVisible({ timeout: 10_000 });
+  });
+
   test("adding a title filter narrows the list live", async ({ testPage, apiClient, seedData }) => {
     const { session, filters } = await openWithSeed(testPage, apiClient, seedData, [
       "Fix auth bug",

@@ -9,6 +9,13 @@ Kandev is a developer workbench that runs agents with access to repositories, to
 
 > Kandev does not currently provide a multi-user login, role-based access control, or an authorization boundary for its web UI, HTTP API, WebSocket, or external MCP routes. Treat anyone who can reach the backend as an operator with the potential to read or change developer data.
 
+## Quick checklist
+
+- Keep the backend on loopback or behind an authenticated TLS proxy.
+- Use Worktree, Docker, SSH, or Sprites only when their isolation boundary matches the risk.
+- Scope agent and provider credentials to the smallest repository and operation set.
+- Keep human approval before merge, release, deployment, or other irreversible actions.
+
 ## Choose a deployment boundary
 
 | Use case | Recommended boundary | Avoid |
@@ -90,6 +97,12 @@ Secrets created through Kandev are encrypted in the database with the AES-256 ma
 - filesystem permissions and backup access remain part of the security boundary.
 
 Back up the master key separately with owner-only access when encrypted settings must survive recovery. Do not commit secrets to `config.yaml`, repository instructions, workflow prompts, task descriptions, capture artifacts, or shell history. Environment variables are visible to the process and may be visible to child agents.
+
+Kandev separates **Global** secrets from **Workspace** secrets. Global means user-global when authentication is enabled, and install-global when authentication is disabled. Workspace secrets are private to one authorized workspace. Shared agent and executor profiles can reference Global secrets only; a repository can explicitly bind a Global or same-workspace secret to a named environment key. Every task inherits bindings from all of its attached repositories.
+
+The runtime builds one environment snapshot before provisioning. Same-key bindings to the same secret are deduplicated; different secret IDs, literal-versus-secret bindings, or different literal values fail the launch before setup or agent startup. Source origins are retained for conflict diagnostics, but secret values and IDs are never exposed. Deleted, missing, unreadable, unauthorized, or wrong-workspace repository references fail closed and remain visible as broken bindings for repair. Values are held in process memory and are not written to repository, task, session, event, or environment metadata. Rotating a secret affects fresh provisioning or **Reset Environment**, not a running process or an already-open terminal.
+
+SSH forwards only the managed credential allowlist and repository environment keys explicitly approved by the task's bindings. It does not forward arbitrary host or request environment, and unrelated executor-profile variables do not cross the SSH boundary. Treat any secret that is approved for a repository as available to code and setup scripts in tasks that attach that repository.
 
 Webhook secrets are a separate case. A workspace automation stores its webhook secret with the automation, and a user with settings access can reveal it. Use TLS, keep it out of URLs and logs, and replace the automation when rotation is required.
 

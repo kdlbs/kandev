@@ -14,6 +14,7 @@ import (
 
 const (
 	repositoryBranchesActionKey     = "repositories.branches"
+	repositoryActionBodyKey         = "repository"
 	maxRepositoryBranchResponseSize = 1 << 20
 	maxRepositoryBranchCount        = 10_000
 	repositoryBranchActionTimeout   = 15 * time.Second
@@ -67,7 +68,7 @@ func (s *Service) listRepositoryProviderBranches(
 	if err != nil {
 		return nil, err
 	}
-	body, err := json.Marshal(map[string]any{"repository": map[string]any{
+	body, err := json.Marshal(map[string]any{repositoryActionBodyKey: map[string]any{
 		"provider_id":            source.Provider,
 		"provider_host":          source.ProviderHost,
 		"provider_repository_id": source.ProviderRepositoryID,
@@ -105,7 +106,7 @@ func (s *Service) repositoryProviderAction(provider, key string) (*store.Record,
 		return nil, manifest.Action{}, err
 	}
 	for _, action := range record.Actions {
-		if action.Key == key && action.ResourceScope == "workspace" {
+		if action.Key == key && action.ResourceScope == manifest.ActionScopeWorkspace {
 			return record, action, nil
 		}
 	}

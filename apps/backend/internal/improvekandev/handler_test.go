@@ -1,11 +1,20 @@
 package improvekandev
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"testing"
 
+	"github.com/gin-gonic/gin"
+	"github.com/kandev/kandev/internal/auth/authn"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/system/logbundle"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
 )
 
@@ -50,6 +59,65 @@ func TestCanonicalWorkspaceID(t *testing.T) {
 	}
 	if _, err := canonicalWorkspaceID("../workspace"); err == nil {
 		t.Fatal("canonicalWorkspaceID() expected invalid UUID error")
+	}
+}
+
+type fakeDiagnosticBundles struct {
+	path  string
+	owner string
+	id    string
+}
+
+func (f *fakeDiagnosticBundles) OpenArchive(owner, id string) (*os.File, logbundle.JobView, error) {
+	f.owner, f.id = owner, id
+	file, err := os.Open(f.path)
+	return file, logbundle.JobView{ID: id, Status: logbundle.StatusReady, Sources: []string{"backend", "frontend"}}, err
+}
+
+func TestLeaseBundleChecksMarkerOwnerAndCopiesArchive(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	dir, err := createBundleDir("user-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	source := filepath.Join(t.TempDir(), "source.zip")
+	if err := os.WriteFile(source, []byte("zip bytes"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	bundles := &fakeDiagnosticBundles{path: source}
+	handler := &Handler{log: logger.Default(), logBundles: bundles}
+	router := gin.New()
+	router.Use(func(c *gin.Context) {
+		authn.SetOnGin(c, authn.Identity{UserID: "user-1"})
+		c.Next()
+	})
+	router.POST("/lease", handler.httpLeaseBundle)
+
+	body, _ := json.Marshal(leaseBundleRequest{BundleDir: dir, BundleID: "bundle-1"})
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/lease", bytes.NewReader(body)))
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, body=%s", recorder.Code, recorder.Body.String())
+	}
+	if bundles.owner != "user-1" || bundles.id != "bundle-1" {
+		t.Fatalf("OpenArchive identity = %q/%q", bundles.owner, bundles.id)
+	}
+	data, err := os.ReadFile(filepath.Join(dir, diagnosticFileName))
+	if err != nil || string(data) != "zip bytes" {
+		t.Fatalf("leased archive = %q, err=%v", data, err)
+	}
+
+	otherDir, err := createBundleDir("user-2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(otherDir) })
+	body, _ = json.Marshal(leaseBundleRequest{BundleDir: otherDir, BundleID: "bundle-1"})
+	recorder = httptest.NewRecorder()
+	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/lease", bytes.NewReader(body)))
+	if recorder.Code != http.StatusForbidden {
+		t.Fatalf("other owner status = %d, want 403", recorder.Code)
 	}
 }
 

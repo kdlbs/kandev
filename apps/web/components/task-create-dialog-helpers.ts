@@ -30,28 +30,24 @@ const BRANCH_AUTOPICK_DEBUG = "branch-autopick";
 
 export type { CreateTaskParams };
 
+/** Returns true while a selected file still needs its staged upload. */
+export function hasPendingAttachmentUploads(attachments: FileAttachment[]): boolean {
+  return attachments.some((attachment) => attachment.file && !attachment.attachmentId);
+}
+
 /** Converts FileAttachment array to MessageAttachment array for the launch request. */
 export function toMessageAttachments(
   attachments: FileAttachment[],
 ): MessageAttachment[] | undefined {
   if (attachments.length === 0) return undefined;
-  return attachments.map((att) =>
-    att.isImage
-      ? {
-          type: "image" as const,
-          data: att.data,
-          mime_type: att.mimeType,
-          name: att.fileName,
-          ...(att.deliveryMode === "path" && { delivery_mode: "path" as const }),
-        }
-      : {
-          type: "resource" as const,
-          data: att.data,
-          mime_type: att.mimeType,
-          name: att.fileName,
-          delivery_mode: "path" as const,
-        },
-  );
+  return attachments.map((att) => ({
+    type: att.isImage ? ("image" as const) : ("resource" as const),
+    mime_type: att.mimeType,
+    name: att.fileName,
+    size_bytes: att.size,
+    ...(att.attachmentId ? { attachment_id: att.attachmentId } : { data: att.data ?? "" }),
+    ...(att.deliveryMode === "path" && { delivery_mode: "path" as const }),
+  }));
 }
 
 export function autoSelectBranch(
@@ -160,6 +156,7 @@ export type BuildCreatePayloadArgs = {
   effectiveWorkflowId: string;
   trimmedTitle: string;
   trimmedDescription: string;
+  autoTitle?: boolean;
   repositoriesPayload: CreateTaskParams["repositories"];
   agentProfileId: string;
   executorId: string;
@@ -175,7 +172,7 @@ export function buildCreateTaskPayload(args: BuildCreatePayloadArgs): CreateTask
   return {
     workspace_id: args.workspaceId,
     workflow_id: args.effectiveWorkflowId,
-    title: args.trimmedTitle,
+    ...(args.autoTitle ? { auto_title: true } : { title: args.trimmedTitle }),
     description: args.trimmedDescription,
     repositories: args.repositoriesPayload,
     state: args.withAgent ? "IN_PROGRESS" : "CREATED",
@@ -193,6 +190,8 @@ export function buildCreateTaskPayload(args: BuildCreatePayloadArgs): CreateTask
 
 export function validateCreateInputs(inputs: {
   trimmedTitle: string;
+  trimmedDescription?: string;
+  autoTitle?: boolean;
   workspaceId: string | null;
   effectiveWorkflowId: string | null;
   /** Unified repos list. The form is valid if any row has a repo set OR URL mode is filled. */
@@ -208,7 +207,7 @@ export function validateCreateInputs(inputs: {
     inputs.repositories.some((r) => r.repositoryId || r.localPath) ||
     hasRemoteRepo;
   return Boolean(
-    inputs.trimmedTitle &&
+    (inputs.autoTitle ? inputs.trimmedDescription : inputs.trimmedTitle) &&
     inputs.workspaceId &&
     inputs.effectiveWorkflowId &&
     inputs.agentProfileId &&

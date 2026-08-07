@@ -225,8 +225,14 @@ test.describe("Workflow automation", () => {
     // Session transitions to idle — plan mode input placeholder visible
     await expect(session.planModeInput()).toBeVisible({ timeout: 15_000 });
 
-    // Sidebar shows the task under "Turn Finished" section
-    await expect(session.sidebarSection("Turn Finished")).toBeVisible();
+    // The active kanban projection must win over any stale all-workflow
+    // snapshot that was already in flight when the turn completed. That
+    // reconciliation is exactly what this waits on, so it needs the same
+    // explicit budget as the assertions above — on the default expect timeout
+    // it loses the race under a loaded 14-shard run while passing locally.
+    await expect(session.taskInSection("Plan Mode Workflow Task", "Turn Finished")).toBeVisible({
+      timeout: 15_000,
+    });
   });
 
   /**

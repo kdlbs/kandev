@@ -416,6 +416,38 @@ describe("selectTaskWithLayout — last-selected session preference", () => {
   });
 });
 
+describe("selectTaskWithLayout — archived tasks", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("navigates directly without loading or preparing a session", () => {
+    const store = makeKanbanStore({
+      activeSessionId: "sess-old",
+      envIds: { "sess-old": "env-old" },
+    });
+    const loadTaskSessionsForTask = vi.fn(async () => []);
+    const switchToSession = vi.fn();
+    const setActiveTask = vi.fn();
+
+    selectTaskWithLayout({
+      taskId: "archived-task",
+      task: { isArchived: true, primarySessionId: "archived-session" },
+      store,
+      switchToSession,
+      loadTaskSessionsForTask,
+      setActiveTask,
+      setPreparingTaskId: vi.fn(),
+    });
+
+    expect(setActiveTask).toHaveBeenCalledWith("archived-task");
+    expect(replaceTaskUrl).toHaveBeenCalledWith("archived-task");
+    expect(loadTaskSessionsForTask).not.toHaveBeenCalled();
+    expect(switchToSession).not.toHaveBeenCalled();
+    expect(launchSession).not.toHaveBeenCalled();
+  });
+});
+
 describe("selectTaskWithLayout — pending selection races", () => {
   beforeEach(() => {
     vi.clearAllMocks();

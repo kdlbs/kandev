@@ -103,6 +103,98 @@ type blockingResumeCleanupRepository struct {
 	release chan struct{}
 }
 
+type commitThenErrorTaskRepository struct {
+	repository.TaskRepository
+	err error
+}
+
+func (r *commitThenErrorTaskRepository) DeleteTask(ctx context.Context, id string) error {
+	if err := r.TaskRepository.DeleteTask(ctx, id); err != nil {
+		return err
+	}
+	return r.err
+}
+
+func (r *commitThenErrorTaskRepository) ArchiveTask(ctx context.Context, id string) error {
+	if err := r.TaskRepository.ArchiveTask(ctx, id); err != nil {
+		return err
+	}
+	return r.err
+}
+
+func TestResolveTaskResourceCleanupAfterMutationErrorSurvivesCallerCancellation(t *testing.T) {
+	taskSvc, repo := setupOfficeTest(t)
+	seedCleanupTaskAndSession(t, repo, "task-cancel-detached", "session-cancel-detached")
+	job := &models.TaskResourceCleanupJob{
+		ID: "job-cancel-detached", OperationID: "delete:cancel-detached", TaskID: "task-cancel-detached",
+		Trigger: models.TaskResourceCleanupTriggerDelete, State: models.TaskResourceCleanupStatePrepared,
+		ResourceSnapshot: `{}`,
+	}
+	if err := repo.CreateTaskResourceCleanupJob(context.Background(), job); err != nil {
+		t.Fatalf("CreateTaskResourceCleanupJob: %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	taskSvc.resolveTaskResourceCleanupAfterMutationError(ctx, job)
+
+	got, err := repo.GetTaskResourceCleanupJob(context.Background(), job.ID)
+	if err != nil {
+		t.Fatalf("GetTaskResourceCleanupJob: %v", err)
+	}
+	if got.State != models.TaskResourceCleanupStateCancelled {
+		t.Fatalf("cleanup state = %q, want %q", got.State, models.TaskResourceCleanupStateCancelled)
+	}
+}
+
+func TestTaskMutationCommitThenErrorKeepsCleanupRunnable(t *testing.T) {
+	for _, operation := range []string{"delete", "archive"} {
+		t.Run(operation, func(t *testing.T) {
+			taskSvc, _, repo := createTestService(t)
+			taskSvc.setCleanupDoneForTestHook(make(chan struct{}, 1))
+			taskID := "task-commit-then-error-" + operation
+			seedCleanupTaskAndSession(t, repo, taskID, "session-commit-then-error-"+operation)
+			commitErr := errors.New("transport lost after commit")
+			taskSvc.tasks = &commitThenErrorTaskRepository{TaskRepository: repo, err: commitErr}
+
+			var err error
+			if operation == "delete" {
+				err = taskSvc.DeleteTask(context.Background(), taskID)
+			} else {
+				err = taskSvc.ArchiveTask(context.Background(), taskID)
+			}
+			if !errors.Is(err, commitErr) {
+				t.Fatalf("mutation error = %v, want %v", err, commitErr)
+			}
+
+			// Activation starts the cleanup worker immediately, so there is no
+			// deterministic window in which the durable row must still be pending.
+			// Wait for the worker and assert the end-to-end invariant instead: a
+			// mutation that committed before returning an error remains runnable.
+			waitForCleanupDone(t, taskSvc)
+			var state models.TaskResourceCleanupState
+			if err := repo.DB().QueryRowContext(context.Background(), `
+				SELECT state FROM task_resource_cleanup_jobs WHERE task_id = ?
+			`, taskID).Scan(&state); err != nil {
+				t.Fatalf("load cleanup state: %v", err)
+			}
+			if state != models.TaskResourceCleanupStateSucceeded {
+				t.Fatalf("cleanup state = %q, want succeeded", state)
+			}
+			if operation == "delete" {
+				if task, getErr := repo.GetTask(context.Background(), taskID); getErr == nil || task != nil {
+					t.Fatalf("delete did not commit: task=%#v err=%v", task, getErr)
+				}
+			} else {
+				task, getErr := repo.GetTask(context.Background(), taskID)
+				if getErr != nil || task.ArchivedAt == nil {
+					t.Fatalf("archive did not commit: task=%#v err=%v", task, getErr)
+				}
+			}
+		})
+	}
+}
+
 func (r *blockingResumeCleanupRepository) ResetRunningTaskResourceCleanupJobs(context.Context) error {
 	close(r.entered)
 	<-r.release

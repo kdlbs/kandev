@@ -6,7 +6,7 @@ import { useRouter } from "@/lib/routing/client-router";
 import { IconChevronRight, IconTrash } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Separator } from "@kandev/ui/separator";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast/sonner";
 import { useAppStore } from "@/components/state-provider";
 import { getProject, deleteProject } from "@/lib/api/domains/office-api";
 import type { Project } from "@/lib/state/slices/office/types";

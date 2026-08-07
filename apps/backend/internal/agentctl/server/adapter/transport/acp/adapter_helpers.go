@@ -5,8 +5,19 @@ import (
 	"strings"
 
 	"github.com/coder/acp-go-sdk"
+	"github.com/kandev/kandev/internal/agentctl/acpcompat"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
+
+// clientCapabilitiesForAgent builds the ACP client capabilities for one agent.
+// The meta map is agent-scoped because cursor-agent reads it to choose a model
+// picker mode (see acpcompat.ClientCapabilityMeta); every other agent sees the
+// capabilities kandev has always sent.
+func clientCapabilitiesForAgent(agentID string) acp.ClientCapabilities {
+	return acp.ClientCapabilities{
+		Meta: acpcompat.ClientCapabilityMeta(agentID, map[string]any{"terminal_output": true}),
+	}
+}
 
 // derefStr safely dereferences a pointer to a string or named string type,
 // returning empty string if nil.

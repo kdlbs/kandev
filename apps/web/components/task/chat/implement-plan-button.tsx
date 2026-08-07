@@ -11,6 +11,7 @@ import {
 } from "@kandev/ui/dropdown-menu";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { cn } from "@kandev/ui/lib/utils";
+import { useTranslation } from "react-i18next";
 
 /**
  * Split-button: primary "Implement" runs the plan inline in the current
@@ -61,6 +62,7 @@ export function ImplementPlanButton({
   framed,
   testIds,
 }: ImplementPlanButtonProps) {
+  const { t } = useTranslation();
   const ids = {
     root: testIds?.root ?? "implement-plan-control",
     button: testIds?.button ?? "implement-plan-button",
@@ -85,7 +87,7 @@ export function ImplementPlanButton({
         onClick={() => onClick(false)}
       >
         <IconRocket className="h-4 w-4" />
-        <span className="text-xs">Implement</span>
+        <span className="text-xs">{t("task:implement")}</span>
       </Button>
     </span>
   );
@@ -94,7 +96,7 @@ export function ImplementPlanButton({
   ) : (
     <Tooltip>
       <TooltipTrigger asChild>{primaryButton}</TooltipTrigger>
-      <TooltipContent>Implement the plan in this session</TooltipContent>
+      <TooltipContent>{t("task:implementThePlanInThisSession")}</TooltipContent>
     </Tooltip>
   );
   const splitButton = (
@@ -115,7 +117,7 @@ export function ImplementPlanButton({
             variant="ghost"
             size="sm"
             data-testid={ids.menuTrigger}
-            aria-label="More implement options"
+            aria-label={t("task:moreImplementOptions")}
             aria-disabled={disabled}
             disabled={disabled}
             className={cn(
@@ -136,9 +138,9 @@ export function ImplementPlanButton({
           >
             <IconPlus className="h-4 w-4 mr-2 shrink-0 self-start mt-0.5" />
             <div>
-              <div>Implement in fresh agent</div>
+              <div>{t("task:implementInFreshAgent")}</div>
               <div className="text-[11px] text-muted-foreground font-normal">
-                Starts a new session with a clean context window
+                {t("task:startsANewSessionWithA")}
               </div>
             </div>
           </DropdownMenuItem>

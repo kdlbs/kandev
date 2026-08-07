@@ -60,6 +60,19 @@ const dimensionExtractors: Record<FilterDimension, DimensionExtractor> = {
   titleMatch: (t) => t.title ?? "",
 };
 
+export function viewRequiresArchivedTasks(
+  view: Pick<SidebarView, "filters"> | null | undefined,
+): boolean {
+  return (
+    view?.filters.some(
+      (clause) =>
+        clause.dimension === "archived" &&
+        ((clause.op === "is" && clause.value === true) ||
+          (clause.op === "is_not" && clause.value === false)),
+    ) ?? false
+  );
+}
+
 function toStringArray(v: FilterValue): string[] {
   if (Array.isArray(v)) return v.map(String);
   return [String(v)];

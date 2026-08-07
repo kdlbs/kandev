@@ -25,6 +25,12 @@ type TaskRepositoryInput struct {
 	ProviderOwner  string `json:"provider_owner,omitempty"`
 	ProviderName   string `json:"provider_name,omitempty"`
 
+	// RemoteContribution is server-authored after provider resolution. It is
+	// intentionally excluded from JSON request surfaces; callers must not be
+	// able to forge a writable source binding.
+	RemoteContribution *models.RemoteContribution `json:"-"`
+	TrustedRemote      bool                       `json:"-"`
+
 	// ResolveProviderDefaults opts the GitHub-URL resolution path into a
 	// synchronous default-branch probe (git ls-remote --symref) when neither
 	// the input nor the existing workspace repo carries one. Set only by
@@ -48,6 +54,7 @@ type CreateTaskRequest struct {
 	WorkflowStepID string                 `json:"workflow_step_id"`
 	Title          string                 `json:"title"`
 	Description    string                 `json:"description"`
+	AutoTitle      bool                   `json:"auto_title,omitempty"`
 	Priority       string                 `json:"priority"`
 	State          *v1.TaskState          `json:"state,omitempty"`
 	Repositories   []TaskRepositoryInput  `json:"repositories,omitempty"`
@@ -137,24 +144,32 @@ type FindOrCreateRepositoryRequest struct {
 
 // CreateRepositoryRequest contains the data for creating a new repository
 type CreateRepositoryRequest struct {
-	WorkspaceID            string `json:"workspace_id"`
-	Name                   string `json:"name"`
-	SourceType             string `json:"source_type"`
-	LocalPath              string `json:"local_path"`
-	Provider               string `json:"provider"`
-	ProviderRepoID         string `json:"provider_repo_id"`
-	ProviderHost           string `json:"provider_host"`
-	ProviderOwner          string `json:"provider_owner"`
-	ProviderName           string `json:"provider_name"`
-	RemoteURL              string `json:"remote_url"`
-	DefaultBranch          string `json:"default_branch"`
-	WorktreeBranchPrefix   string `json:"worktree_branch_prefix"`
-	WorktreeBranchTemplate string `json:"worktree_branch_template"`
-	PullBeforeWorktree     *bool  `json:"pull_before_worktree"`
-	SetupScript            string `json:"setup_script"`
-	CleanupScript          string `json:"cleanup_script"`
-	DevScript              string `json:"dev_script"`
-	CopyFiles              string `json:"copy_files"`
+	WorkspaceID            string                         `json:"workspace_id"`
+	Name                   string                         `json:"name"`
+	SourceType             string                         `json:"source_type"`
+	LocalPath              string                         `json:"local_path"`
+	Provider               string                         `json:"provider"`
+	ProviderRepoID         string                         `json:"provider_repo_id"`
+	ProviderHost           string                         `json:"provider_host"`
+	ProviderOwner          string                         `json:"provider_owner"`
+	ProviderName           string                         `json:"provider_name"`
+	RemoteURL              string                         `json:"remote_url"`
+	DefaultBranch          string                         `json:"default_branch"`
+	WorktreeBranchPrefix   string                         `json:"worktree_branch_prefix"`
+	WorktreeBranchTemplate string                         `json:"worktree_branch_template"`
+	PullBeforeWorktree     *bool                          `json:"pull_before_worktree"`
+	SetupScript            string                         `json:"setup_script"`
+	CleanupScript          string                         `json:"cleanup_script"`
+	DevScript              string                         `json:"dev_script"`
+	CopyFiles              string                         `json:"copy_files"`
+	SecretBindings         []RepositorySecretBindingInput `json:"secret_bindings,omitempty"`
+}
+
+// RepositorySecretBindingInput is the write-only reference shape accepted by
+// repository mutations. Secret values never cross this boundary.
+type RepositorySecretBindingInput struct {
+	Key      string `json:"key"`
+	SecretID string `json:"secret_id"`
 }
 
 // InitializeLocalRepositoryRequest contains the data for creating and registering a new local repository.
@@ -182,6 +197,9 @@ type UpdateRepositoryRequest struct {
 	CleanupScript          *string `json:"cleanup_script,omitempty"`
 	DevScript              *string `json:"dev_script,omitempty"`
 	CopyFiles              *string `json:"copy_files,omitempty"`
+	// SecretBindings uses nil to preserve the current set and a non-nil empty
+	// slice to clear it.
+	SecretBindings *[]RepositorySecretBindingInput `json:"secret_bindings,omitempty"`
 }
 
 // CreateExecutorRequest contains the data for creating an executor

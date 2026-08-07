@@ -6,6 +6,7 @@ import { ScrollArea } from "@kandev/ui/scroll-area";
 import { Separator } from "@kandev/ui/separator";
 import { Spinner } from "@kandev/ui/spinner";
 import { CollapsibleSection, PRMarkdownBody, formatTimeAgo } from "@/components/github/pr-shared";
+import { t } from "@/lib/i18n";
 import { ChangeRequestDetailHeader } from "./change-request-detail-header";
 import { ChangeRequestReviews } from "./change-request-detail-reviews";
 import { ChangeRequestChecks } from "./change-request-detail-checks";
@@ -116,7 +117,7 @@ function DetailState({ props }: { props: ChangeRequestDetailProps }) {
   if (props.loading)
     return (
       <div className="flex items-center justify-center py-8">
-        <Spinner aria-label="Loading change request" />
+        <Spinner aria-label={t("integrations:loadingChangeRequest")} />
       </div>
     );
   if (props.error)
@@ -128,14 +129,14 @@ function DetailState({ props }: { props: ChangeRequestDetailProps }) {
         <p>{props.error}</p>
         {props.onRetry ? (
           <Button type="button" variant="outline" className="min-h-11" onClick={props.onRetry}>
-            Retry
+            {t("integrations:retry")}
           </Button>
         ) : null}
       </div>
     );
   return (
     <div className="flex items-center justify-center px-6 py-8 text-sm text-muted-foreground">
-      Review unavailable.
+      {t("integrations:reviewUnavailable")}
     </div>
   );
 }
@@ -167,7 +168,11 @@ export function ChangeRequestDetail(props: ChangeRequestDetailProps) {
           ) : (
             <>
               {detail.description ? (
-                <CollapsibleSection title="Description" count={1} defaultOpen={false}>
+                <CollapsibleSection
+                  title={t("integrations:description")}
+                  count={1}
+                  defaultOpen={false}
+                >
                   <div className="px-2">
                     <PRMarkdownBody body={detail.description} />
                   </div>
@@ -188,7 +193,7 @@ export function ChangeRequestDetail(props: ChangeRequestDetailProps) {
         <>
           <Separator />
           <div className="px-3 py-2 text-center text-[10px] text-muted-foreground">
-            Last synced {formatTimeAgo(detail.lastSyncedAt)}
+            {t("integrations:lastSynced", { relative: formatTimeAgo(detail.lastSyncedAt) })}
           </div>
         </>
       ) : null}

@@ -1,16 +1,17 @@
 "use client";
 
 import { useEffect, useState, type ComponentType } from "react";
+import { useTranslation } from "react-i18next";
 import {
   IconArrowsShuffle,
   IconBolt,
   IconBrandGithub,
   IconBrandGitlab,
   IconBrandSentry,
-  IconBrandSlack,
   IconFolder,
   IconGitBranch,
   IconHexagon,
+  IconKey,
   IconPlugConnected,
   IconTicket,
 } from "@tabler/icons-react";
@@ -22,36 +23,42 @@ import { useGitLabAvailable } from "@/hooks/domains/gitlab/use-task-mr";
 import { useJiraAuthed } from "@/hooks/domains/jira/use-jira-availability";
 import { useLinearAuthed } from "@/hooks/domains/linear/use-linear-availability";
 import { useSentryAvailable } from "@/hooks/domains/sentry/use-sentry-availability";
-import { useSlackAuthed } from "@/hooks/domains/slack/use-slack-availability";
+import { WORKSPACE_INTEGRATIONS } from "@/lib/settings-discovery/catalog/integrations";
+import { WORKSPACES_SETTINGS_HREF } from "@/lib/settings-discovery/catalog/workspaces";
 import { SettingsGroup, SettingsLeaf } from "./settings-nav-primitives";
 import { resolvePluginIcon } from "@/lib/plugins/icons";
 import { usePluginRegistry } from "@/lib/plugins/registry";
 
-const ROOT_HREF = "/settings/workspace";
-
 type IntegrationIcon = ComponentType<{ className?: string }>;
 
-const INTEGRATIONS: Array<{ slug: string; label: string; icon: IntegrationIcon }> = [
-  { slug: "azure-devops", label: "Azure DevOps", icon: AzureDevOpsIcon },
-  { slug: "github", label: "GitHub", icon: IconBrandGithub },
-  { slug: "gitlab", label: "GitLab", icon: IconBrandGitlab },
-  { slug: "jira", label: "Jira", icon: IconTicket },
-  { slug: "linear", label: "Linear", icon: IconHexagon },
-  { slug: "sentry", label: "Sentry", icon: IconBrandSentry },
-  { slug: "slack", label: "Slack", icon: IconBrandSlack },
-];
+const INTEGRATION_ICONS: Record<(typeof WORKSPACE_INTEGRATIONS)[number][0], IntegrationIcon> = {
+  "azure-devops": AzureDevOpsIcon,
+  github: IconBrandGithub,
+  gitlab: IconBrandGitlab,
+  jira: IconTicket,
+  linear: IconHexagon,
+  sentry: IconBrandSentry,
+};
 
-const ACTIVE_WORKSPACE_LABEL = (
-  <span className="shrink-0 rounded-full border border-primary/35 bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium leading-none text-primary">
-    Active
-  </span>
-);
+// Rendered as components, not module-scope JSX constants: `t()` must resolve at
+// render so a locale switch reaches them (a module-scope value freezes at boot).
+function ActiveWorkspaceBadge() {
+  const { t } = useTranslation();
+  return (
+    <span className="shrink-0 rounded-full border border-primary/35 bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium leading-none text-primary">
+      {t("sidebar:activeWorkspaceBadge")}
+    </span>
+  );
+}
 
-const ENABLED_LABEL = (
-  <span className="shrink-0 rounded border border-emerald-500/30 bg-emerald-500/10 px-1 py-0.5 text-[9px] font-medium leading-none text-emerald-600 dark:text-emerald-400">
-    Enabled
-  </span>
-);
+function EnabledBadge() {
+  const { t } = useTranslation();
+  return (
+    <span className="shrink-0 rounded border border-emerald-500/30 bg-emerald-500/10 px-1 py-0.5 text-[9px] font-medium leading-none text-emerald-600 dark:text-emerald-400">
+      {t("sidebar:enabledBadge")}
+    </span>
+  );
+}
 
 function WorkspaceIntegrationItems({
   workspaceId,
@@ -69,7 +76,6 @@ function WorkspaceIntegrationItems({
   const jira = useJiraAuthed(workspaceId);
   const linear = useLinearAuthed(workspaceId);
   const sentry = useSentryAvailable(workspaceId);
-  const slack = useSlackAuthed(workspaceId);
   const enabled = new Set([
     ...(azureDevOps ? ["azure-devops"] : []),
     ...(githubStatus?.authenticated || githubStatus?.token_configured ? ["github"] : []),
@@ -77,22 +83,21 @@ function WorkspaceIntegrationItems({
     ...(jira ? ["jira"] : []),
     ...(linear ? ["linear"] : []),
     ...(sentry ? ["sentry"] : []),
-    ...(slack ? ["slack"] : []),
   ]);
 
   const pluginIntegrations = registry.getIntegrationSettings();
 
   return (
     <>
-      {INTEGRATIONS.map(({ slug, label, icon }) => {
+      {WORKSPACE_INTEGRATIONS.map(([slug, label]) => {
         const href = `${integrationsPath}/${slug}`;
         return (
           <SettingsLeaf
             key={href}
             href={href}
             label={label}
-            labelSuffix={enabled.has(slug) ? ENABLED_LABEL : undefined}
-            icon={icon}
+            labelSuffix={enabled.has(slug) ? <EnabledBadge /> : undefined}
+            icon={INTEGRATION_ICONS[slug]}
             isActive={pathname === href}
             depth={3}
           />
@@ -122,7 +127,7 @@ type WorkspacesGroupProps = {
 };
 
 function isWorkspaceRoute(pathname: string, workspaceId: string): boolean {
-  const workspacePath = `${ROOT_HREF}/${workspaceId}`;
+  const workspacePath = `${WORKSPACES_SETTINGS_HREF}/${workspaceId}`;
   return pathname === workspacePath || pathname.startsWith(`${workspacePath}/`);
 }
 
@@ -144,6 +149,7 @@ function activeWorkspaceFirst<T extends { id: string }>(workspaces: T[], activeI
 }
 
 export function WorkspacesGroup({ pathname, expanded, onToggle }: WorkspacesGroupProps) {
+  const { t } = useTranslation();
   const workspaces = useAppStore((s) => s.workspaces.items);
   const storeActiveWorkspaceId = useAppStore((s) => s.workspaces.activeId);
   const routeWorkspaceId =
@@ -165,16 +171,17 @@ export function WorkspacesGroup({ pathname, expanded, onToggle }: WorkspacesGrou
 
   return (
     <SettingsGroup
-      label="Workspaces"
+      label={t("common:workspaces")}
       icon={IconFolder}
-      href={ROOT_HREF}
-      isActive={pathname === ROOT_HREF}
+      href={WORKSPACES_SETTINGS_HREF}
+      isActive={pathname === WORKSPACES_SETTINGS_HREF}
       expanded={expanded}
       onToggle={onToggle}
     >
       {orderedWorkspaces.map((workspace) => {
-        const workspacePath = `${ROOT_HREF}/${workspace.id}`;
+        const workspacePath = `${WORKSPACES_SETTINGS_HREF}/${workspace.id}`;
         const repositoriesPath = `${workspacePath}/repositories`;
+        const secretsPath = `${workspacePath}/secrets`;
         const workflowsPath = `${workspacePath}/workflows`;
         const automationsPath = `${workspacePath}/automations`;
         const integrationsPath = `${workspacePath}/integrations`;
@@ -185,7 +192,7 @@ export function WorkspacesGroup({ pathname, expanded, onToggle }: WorkspacesGrou
           <SettingsGroup
             key={workspace.id}
             label={workspace.name}
-            labelSuffix={workspaceIsActive ? ACTIVE_WORKSPACE_LABEL : undefined}
+            labelSuffix={workspaceIsActive ? <ActiveWorkspaceBadge /> : undefined}
             href={workspacePath}
             isActive={pathname === workspacePath}
             expanded={expandedWorkspaceId === workspace.id}
@@ -194,20 +201,20 @@ export function WorkspacesGroup({ pathname, expanded, onToggle }: WorkspacesGrou
           >
             <SettingsLeaf
               href={repositoriesPath}
-              label="Repositories"
+              label={t("sidebar:repositories")}
               icon={IconGitBranch}
               isActive={pathname === repositoriesPath}
               depth={2}
             />
             <SettingsLeaf
               href={workflowsPath}
-              label="Workflows"
+              label={t("workflows:workflows")}
               icon={IconArrowsShuffle}
               isActive={pathname === workflowsPath}
               depth={2}
             />
             <SettingsGroup
-              label="Integrations"
+              label={t("common:integrations")}
               icon={IconPlugConnected}
               href={integrationsPath}
               isActive={pathname === integrationsPath}
@@ -222,9 +229,16 @@ export function WorkspacesGroup({ pathname, expanded, onToggle }: WorkspacesGrou
             </SettingsGroup>
             <SettingsLeaf
               href={automationsPath}
-              label="Automations"
+              label={t("common:automations")}
               icon={IconBolt}
               isActive={pathname === automationsPath}
+              depth={2}
+            />
+            <SettingsLeaf
+              href={secretsPath}
+              label={t("settings:secrets")}
+              icon={IconKey}
+              isActive={pathname === secretsPath}
               depth={2}
             />
           </SettingsGroup>

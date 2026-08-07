@@ -16,7 +16,16 @@ export type BootRoute = {
 export type BootRuntime = {
   apiPrefix?: string;
   webSocketPath?: string;
+  lspAutoInstallPreferenceLanguages?: string[];
   debug?: boolean;
+  /**
+   * True for a dev or e2e build. The e2e harness serves a PRODUCTION bundle, so
+   * `import.meta.env.PROD` cannot distinguish it from a real release — this flag
+   * is what gates QA-only UI such as the pseudo-locale option.
+   */
+  nonProduction?: boolean;
+  /** Active UI locale from the kandev_locale cookie; drives first-paint i18n. */
+  locale?: string;
 };
 
 export type BootRouteData = {
@@ -142,12 +151,20 @@ function readRuntime(value: Record<string, unknown>): BootRuntime {
   return {
     apiPrefix: readString(value.apiPrefix),
     webSocketPath: readString(value.webSocketPath),
+    lspAutoInstallPreferenceLanguages: readStringArray(value.lspAutoInstallPreferenceLanguages),
     debug: value.debug === true ? true : undefined,
+    nonProduction: value.nonProduction === true ? true : undefined,
+    locale: readString(value.locale),
   };
 }
 
 function readString(value: unknown): string | undefined {
   return typeof value === "string" ? value : undefined;
+}
+
+function readStringArray(value: unknown): string[] | undefined {
+  if (!Array.isArray(value) || !value.every((entry) => typeof entry === "string")) return undefined;
+  return value;
 }
 
 function readNonEmptyString(value: unknown): string | undefined {

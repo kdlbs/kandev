@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"go.uber.org/zap"
 
@@ -13,7 +14,6 @@ import (
 	"github.com/kandev/kandev/internal/agent/hostutility"
 	"github.com/kandev/kandev/internal/agent/registry"
 	agentsettingscontroller "github.com/kandev/kandev/internal/agent/settings/controller"
-	agentctlutil "github.com/kandev/kandev/internal/agentctl/server/utility"
 	analyticsservice "github.com/kandev/kandev/internal/analytics/service"
 	"github.com/kandev/kandev/internal/automation"
 	"github.com/kandev/kandev/internal/azuredevops"
@@ -34,7 +34,6 @@ import (
 	"github.com/kandev/kandev/internal/repoclone"
 	"github.com/kandev/kandev/internal/secrets"
 	"github.com/kandev/kandev/internal/sentry"
-	"github.com/kandev/kandev/internal/slack"
 	systemsettings "github.com/kandev/kandev/internal/system/settings"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
 	taskservice "github.com/kandev/kandev/internal/task/service"
@@ -58,7 +57,9 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 	if err != nil {
 		return nil, nil, err
 	}
+	userSecretStore := secrets.NewUserVisibleStore(repos.Secrets)
 	agentSettingsController := agentsettingscontroller.NewController(repos.AgentSettings, discoveryRegistry, agentRegistry, repos.Task, log)
+	agentSettingsController.SetSecretStore(userSecretStore)
 
 	userSvc := userservice.NewService(repos.User, eventBus, log)
 	editorSvc := editorservice.NewService(repos.Editor, repos.Task, userSvc)
@@ -73,6 +74,7 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 			WorkspaceFolders:  repos.Task,
 			Workflows:         repos.Task,
 			Messages:          repos.Task,
+			Attachments:       repos.Task,
 			Turns:             repos.Task,
 			Sessions:          repos.Task,
 			GitSnapshots:      repos.Task,
@@ -83,6 +85,7 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 			TaskEnvironments:  repos.Task,
 			Reviews:           repos.Task,
 			ResourceCleanups:  repos.Task,
+			StatusSummaries:   repos.Task,
 		},
 		eventBus,
 		log,
@@ -92,6 +95,10 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 			TaskWorktreeRoots: []string{filepath.Join(cfg.ResolvedHomeDir(), "tasks")},
 		},
 	)
+	taskSvc.SetSecretStore(userSecretStore)
+	if deleter, ok := userSecretStore.(taskservice.WorkspaceSecretDeleter); ok {
+		taskSvc.SetWorkspaceSecretDeleter(deleter)
+	}
 
 	// Wire workflow step creator to task service for board creation
 	taskSvc.SetWorkflowStepCreator(workflowSvc)
@@ -116,17 +123,18 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 
 	githubSvc := initGitHubService(cfg, dbPool, eventBus, repos.Secrets, log)
 	if githubSvc != nil {
+		taskSvc.SetTaskStatusSummaryPRReader(&githubTaskStatusSummaryPRReader{gh: githubSvc})
 		githubSvc.SetPromptResolver(promptSvc)
 	}
 	gitlabSvc := initGitLabService(dbPool, eventBus, repos.Secrets, log)
 	azureDevOpsSvc := initAzureDevOpsService(dbPool, eventBus, repos.Secrets, log)
 	if azureDevOpsSvc != nil {
 		azureDevOpsSvc.SetRepositoryLookup(&repositoryLookupAdapter{svc: taskSvc})
+		azureDevOpsSvc.SetWorkspaceAuthorizer(taskSvc.AuthorizeWorkspaceAccess)
 	}
 	jiraSvc := initJiraService(dbPool, eventBus, repos.Secrets, log)
 	linearSvc := initLinearService(dbPool, eventBus, repos.Secrets, log)
 	sentrySvc := initSentryService(dbPool, eventBus, repos.Secrets, log)
-	slackSvc := initSlackService(dbPool, repos.Secrets, log)
 	workflowSyncSvc := initWorkflowSyncService(dbPool, githubSvc, workflowSvc, taskSvc, log)
 	pluginsSvc := initPluginsService(cfg, dbPool, eventBus, repos.Secrets, log, version)
 	if pluginsSvc != nil {
@@ -151,6 +159,13 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 	if githubSvc != nil {
 		taskSvc.SetPRTaskResolver(githubSvc)
 		githubSvc.SetWorkspaceAuthorizer(taskSvc.AuthorizeWorkspaceAccess)
+		taskSvc.SetWorkspaceDefaultsInitializer(githubSvc)
+		startupCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		err := githubSvc.InitializeFreshWorkspaceDefaults(startupCtx)
+		cancel()
+		if err != nil {
+			log.Warn("GitHub fresh workspace defaults initialization failed", zap.Error(err))
+		}
 	}
 
 	// Initialize Automation service
@@ -162,6 +177,15 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 		automationComponents.Service.SetTaskDeleter(&automationTaskDeleterAdapter{svc: taskSvc})
 		// Per-user workspace scoping for the automation HTTP/WS surface.
 		automationComponents.Service.SetWorkspaceAuthorizer(taskSvc.AuthorizeWorkspaceAccess)
+		// A UI filter is not an authorization boundary: reject a workflow owned
+		// by another workspace even when a request names it directly.
+		automationComponents.Service.SetWorkflowLocator(&automationWorkflowLocatorAdapter{svc: taskSvc})
+		// Profile deletion disables the automations bound to a profile before
+		// the row goes, but nothing ever checked that the binding pointed at a
+		// real profile in the first place — so a create or rebind naming an id
+		// that never existed produced the same orphan without any delete
+		// involved.
+		automationComponents.Service.SetAgentProfileLookup(&automationAgentProfileLookupAdapter{store: repos.AgentSettings})
 	}
 
 	services := &Services{
@@ -177,7 +201,6 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 		Jira:           jiraSvc,
 		Linear:         linearSvc,
 		Sentry:         sentrySvc,
-		Slack:          slackSvc,
 		WorkflowSync:   workflowSyncSvc,
 		Share:          shareHTTP,
 		Automation:     automationComponents,
@@ -238,10 +261,45 @@ func (a *githubBrokerScopeAuthorizer) AuthorizeGitHubRepository(
 	ctx context.Context,
 	workspaceID, taskID, sessionID, repositoryID, owner, repoName string,
 ) error {
-	return a.AuthorizeGitCredential(ctx, gitcredentials.Scope{
+	if err := a.AuthorizeGitCredential(ctx, gitcredentials.Scope{
 		ProviderID: gitCredentialGitHubProviderID, WorkspaceID: workspaceID, TaskID: taskID, SessionID: sessionID,
 		RepositoryID: repositoryID, Host: gitCredentialGitHubHost, Path: "/" + owner + "/" + repoName + ".git",
-	})
+	}); err == nil {
+		return nil
+	}
+	if a == nil || a.repo == nil {
+		return fmt.Errorf("task repository is unavailable")
+	}
+	if err := a.authorizeTaskSession(ctx, workspaceID, taskID, sessionID); err != nil {
+		return err
+	}
+	link, err := a.authorizeTaskRepository(ctx, taskID, repositoryID)
+	if err != nil {
+		return err
+	}
+	if link == nil {
+		return fmt.Errorf("repository identity does not match lease scope")
+	}
+	repository, err := a.repo.GetRepository(ctx, repositoryID)
+	if err != nil {
+		return err
+	}
+	if repository == nil || repository.WorkspaceID != workspaceID || !strings.EqualFold(repository.Provider, "github") {
+		return fmt.Errorf("repository identity does not match lease scope")
+	}
+	binding, found, err := taskmodels.LoadRemoteContribution(link.Metadata)
+	if err != nil {
+		return fmt.Errorf("validate remote contribution scope: %w", err)
+	}
+	if !found || binding.Provider != taskmodels.RemoteContributionProviderGitHub ||
+		!binding.CollaborationAllowed || !strings.EqualFold(binding.SourceRepository.Host, "github.com") {
+		return fmt.Errorf("repository identity does not match lease scope")
+	}
+	parts := strings.Split(binding.SourceRepository.Path, "/")
+	if len(parts) != 2 || !strings.EqualFold(parts[0], owner) || !strings.EqualFold(parts[1], repoName) {
+		return fmt.Errorf("repository identity does not match lease scope")
+	}
+	return nil
 }
 
 func (a *githubBrokerScopeAuthorizer) authorizeTaskSession(
@@ -274,22 +332,17 @@ func (a *githubBrokerScopeAuthorizer) authorizeTaskSession(
 func (a *githubBrokerScopeAuthorizer) authorizeTaskRepository(
 	ctx context.Context,
 	taskID, repositoryID string,
-) error {
+) (*taskmodels.TaskRepository, error) {
 	links, err := a.repo.ListTaskRepositories(ctx, taskID)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	linked := false
 	for _, link := range links {
 		if link != nil && link.RepositoryID == repositoryID {
-			linked = true
-			break
+			return link, nil
 		}
 	}
-	if !linked {
-		return fmt.Errorf("repository is not linked to task")
-	}
-	return nil
+	return nil, fmt.Errorf("repository is not linked to task")
 }
 
 // loadCustomTUIAgents loads user-defined TUI agents from the database into the registry.
@@ -579,6 +632,7 @@ func initWorkflowSyncService(dbPool *db.Pool, githubSvc *github.Service, workflo
 		log.Warn("workflow sync service initialization failed (non-fatal)", zap.Error(err))
 		return nil
 	}
+	svc.SetWorkspaceAuthorizer(taskSvc.AuthorizeWorkspaceAccess)
 	return svc
 }
 
@@ -621,16 +675,11 @@ func initShareHandlers(
 	return h
 }
 
-// initSlackService wires up the Slack integration. Failures are non-fatal.
-// The agent runner is wired post-construction by main.go once hostutility +
-// utility services exist.
-func initSlackService(dbPool *db.Pool, secretsStore secrets.SecretStore, log *logger.Logger) *slack.Service {
-	svc, _, err := slack.Provide(dbPool.Writer(), dbPool.Reader(), secretadapter.New(secretsStore), log)
-	if err != nil {
-		log.Warn("Slack service initialization failed (non-fatal)", zap.Error(err))
-	}
-	return svc
-}
+// portsBackendDefault is the default backend HTTP port. We don't import
+// internal/common/ports here to avoid pulling its transitive deps into
+// services.go's import graph; the value is a fallback for when
+// cfg.Server.Port is left at zero (which shouldn't happen in practice).
+const portsBackendDefault = 38429
 
 // initPluginsService wires up the plugin system's core Service
 // (registration registry, config, plugin_state store). Failures are
@@ -663,54 +712,11 @@ func initPluginsService(
 	return svc
 }
 
-// buildKandevMCPURL is the URL passed to the Slack triage agent for the
-// Kandev MCP server. The MCP server is mounted on the same port as the rest
-// of the backend's HTTP API; this just centralises the path so it stays in
-// sync with internal/mcp/server's mount point ("/mcp").
-func buildKandevMCPURL(port int) string {
-	if port == 0 {
-		port = portsBackendDefault
-	}
-	return fmt.Sprintf("http://localhost:%d/mcp", port)
-}
-
-// portsBackendDefault is the default backend HTTP port. We don't import
-// internal/common/ports here to avoid pulling its transitive deps into
-// services.go's import graph; the value is duplicated only as a fallback for
-// when cfg.Server.Port is left at zero (which shouldn't happen in practice).
-const portsBackendDefault = 38429
-
-// slackHostUtilityAdapter adapts *hostutility.Manager to slack.HostUtilityRunner.
-// The slack package can't import hostutility without a transitive cycle (it
-// would need to import agentctl + lifecycle), so we shim through the agentctl
-// utility DTO here in the cmd package where both are already imported.
-type slackHostUtilityAdapter struct {
-	mgr *hostutility.Manager
-}
-
-func (a slackHostUtilityAdapter) ExecutePromptWithMCP(
-	ctx context.Context,
-	agentType, model, mode, prompt string,
-	mcpServers []agentctlutil.MCPServerDTO,
-) (slack.HostPromptResult, error) {
-	res, err := a.mgr.ExecutePromptWithMCP(ctx, agentType, model, mode, prompt, mcpServers)
-	if err != nil {
-		return slack.HostPromptResult{}, err
-	}
-	return slack.HostPromptResult{
-		Response:       res.Response,
-		Model:          res.Model,
-		PromptTokens:   res.PromptTokens,
-		ResponseTokens: res.ResponseTokens,
-		DurationMs:     res.DurationMs,
-	}, nil
-}
-
 // pluginsHostUtilityAdapter adapts *hostutility.Manager to the plugins
 // package's utilityRunner interface (Host.InvokeUtilityAgent, ADR 0048),
 // returning just the response text. Lives here for the same cycle-avoidance
-// reason as slackHostUtilityAdapter — internal/plugins must not import the
-// agent runtime.
+// reason as the review adapter — internal/plugins must not import the agent
+// runtime.
 type pluginsHostUtilityAdapter struct {
 	mgr *hostutility.Manager
 }

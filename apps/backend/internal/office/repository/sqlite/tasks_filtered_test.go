@@ -28,6 +28,7 @@ func ensureTasksTable(t *testing.T, repo *sqlite.Repository) {
 			labels TEXT DEFAULT '[]',
 			identifier TEXT DEFAULT '',
 			is_ephemeral INTEGER NOT NULL DEFAULT 0,
+			origin TEXT DEFAULT 'manual',
 			archived_at DATETIME,
 			created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
 			updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP

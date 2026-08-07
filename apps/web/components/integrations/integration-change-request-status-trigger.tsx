@@ -14,6 +14,7 @@ import {
   ChangeRequestTopbarButton,
   ChangeRequestTopbarContent,
 } from "./change-request-status-chrome";
+import { t } from "@/lib/i18n";
 import { PipelineStatusGlyph } from "./integration-change-request-status-content";
 import type {
   IntegrationChangeRequestPipelineState,
@@ -98,7 +99,11 @@ function TriggerContents({
   if (!composer) {
     return (
       <ChangeRequestTopbarContent
-        label={single ? `#${single.number}` : `${items.length} PRs`}
+        label={
+          single
+            ? `#${single.number}`
+            : t("integrations:pullRequestShortCount", { count: items.length })
+        }
         colorClassName={normalizedTopbarColor(single, status)}
         statusIcon={
           single ? (
@@ -130,7 +135,9 @@ export const IntegrationChangeRequestStatusTrigger = forwardRef<HTMLButtonElemen
     ref,
   ) {
     const single = items.length === 1 ? items[0] : null;
-    const label = single ? `#${single.number} ${single.title}` : `${items.length} pull requests`;
+    const label = single
+      ? `#${single.number} ${single.title}`
+      : t("integrations:pullRequestCount", { count: items.length });
     const status = single?.status ?? aggregatePipelineStatus(items);
     const composer = surface === "composer";
     const interactions = triggerHoverProps(hover);

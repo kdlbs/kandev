@@ -1,0 +1,11 @@
+{
+  "$schema": "https://unpkg.com/knip@6/schema.json",
+  "workspaces": {
+    "web": {
+      "playwright": {
+        "config": ["e2e/playwright.config.ts"],
+        "entry": ["e2e/**/*.@(spec|test).?(c|m)[jt]s?(x)", "e2e/global-setup.ts"]
+      }
+    }
+  }
+}

@@ -82,6 +82,12 @@ type PromptRequest struct {
 	Text             string                 `json:"text"`                  // Simple text prompt
 	Attachments      []v1.MessageAttachment `json:"attachments,omitempty"` // Optional image attachments
 	PromptGeneration uint64                 `json:"prompt_generation,omitempty"`
+	// Steer asks for delivery into a turn that is still generating rather than
+	// waiting for it to end. Honored only when the adapter implements
+	// SteerablePrompter and the connected agent advertised the capability;
+	// otherwise it degrades silently to an ordinary prompt, which is the
+	// specified behavior for an agent that cannot steer.
+	Steer bool `json:"steer,omitempty"`
 }
 
 // PromptResponse is the response to a prompt call
@@ -550,14 +556,18 @@ func (s *Server) handleWSPrompt(ctx context.Context, msg *ws.Message) *ws.Messag
 	// The prompt completes naturally when the agent process exits (stdin/stdout close),
 	// the user cancels, or agentctl shuts down.
 	go func() {
-		if err := adapter.Prompt(context.Background(), req.Text, req.Attachments, req.PromptGeneration); err != nil {
+		if err := promptOrSteer(context.Background(), adapter, req); err != nil {
 			if acptransport.IsPromptAbandonedAfterCancel(err) {
 				s.logger.Info("async prompt abandoned after cancel; suppressing stale error event",
 					zap.Error(err))
 				return
 			}
 			s.logger.Error("async prompt failed", zap.Error(err))
-			s.procMgr.SendErrorEvent(err.Error(), req.PromptGeneration)
+			s.procMgr.SendErrorEventWithProviderError(
+				err.Error(),
+				req.PromptGeneration,
+				acptransport.ProviderErrorFromError(err),
+			)
 		}
 	}()
 
@@ -749,4 +759,22 @@ func (s *Server) handleWSResetSession(ctx context.Context, msg *ws.Message) *ws.
 		SessionID: sessionID,
 	})
 	return resp
+}
+
+// promptOrSteer routes a prompt to the steering path when the caller asked for it
+// and the adapter can actually do it. An adapter that does not implement
+// SteerablePrompter, or a connected agent that never advertised the capability,
+// falls back to the ordinary prompt — the message still reaches the agent, just
+// at the next turn boundary, which is exactly today's behavior.
+func promptOrSteer(
+	ctx context.Context,
+	adpt adapter.AgentAdapter,
+	req PromptRequest,
+) error {
+	if req.Steer {
+		if steerable, ok := adpt.(adapter.SteerablePrompter); ok && steerable.SupportsSteering() {
+			return steerable.PromptSteer(ctx, req.Text, req.Attachments, req.PromptGeneration)
+		}
+	}
+	return adpt.Prompt(ctx, req.Text, req.Attachments, req.PromptGeneration)
 }

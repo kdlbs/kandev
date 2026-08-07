@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/agentctl/types"
+	"github.com/kandev/kandev/internal/common/subproc"
 )
 
 func TestWorkspaceTrackerConcurrentFreshStatusSharesObservation(t *testing.T) {
@@ -133,7 +134,7 @@ func TestWorkspaceTrackerCanceledCallerStartsNoObservation(t *testing.T) {
 		t.Fatalf("GetGitStatus error = %v, want context.Canceled", err)
 	}
 	var probeCalls atomic.Int32
-	_, _, _ = wt.gitStatusGroup.Do("live", func() (interface{}, error) {
+	_, _, _ = wt.gitStatusGroup.Do("live:"+string(subproc.GitInteractive), func() (interface{}, error) {
 		probeCalls.Add(1)
 		return types.GitStatusUpdate{}, nil
 	})
@@ -142,6 +143,58 @@ func TestWorkspaceTrackerCanceledCallerStartsNoObservation(t *testing.T) {
 	}
 	if got := probeCalls.Load(); got != 1 {
 		t.Fatalf("probe observations = %d, want 1 independent flight", got)
+	}
+}
+
+func TestWorkspaceTrackerFreshStatusDoesNotJoinBackgroundObservation(t *testing.T) {
+	wt := newStatusConcurrencyTracker(t)
+	started := make(chan subproc.GitWorkClass, 2)
+	release := make(chan struct{})
+	var observations atomic.Int32
+	wt.gitStatusObserver = func(ctx context.Context) (types.GitStatusUpdate, error) {
+		observations.Add(1)
+		started <- gitWorkClass(ctx)
+		<-release
+		return types.GitStatusUpdate{Timestamp: time.Unix(987, 0)}, nil
+	}
+
+	backgroundDone := make(chan error, 1)
+	go func() {
+		_, err := wt.getGitStatusClass(context.Background(), subproc.GitBackground)
+		backgroundDone <- err
+	}()
+	select {
+	case got := <-started:
+		if got != subproc.GitBackground {
+			t.Fatalf("background observation class = %s, want %s", got, subproc.GitBackground)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("background observation did not start")
+	}
+
+	interactiveDone := make(chan error, 1)
+	go func() {
+		_, err := wt.GetGitStatus(context.Background(), true)
+		interactiveDone <- err
+	}()
+	select {
+	case got := <-started:
+		if got != subproc.GitInteractive {
+			t.Fatalf("fresh observation class = %s, want %s", got, subproc.GitInteractive)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("fresh interactive observation joined background flight")
+	}
+
+	close(release)
+	if err := <-backgroundDone; err != nil {
+		t.Fatalf("background observation failed: %v", err)
+	}
+	if err := <-interactiveDone; err != nil {
+		t.Fatalf("fresh observation failed: %v", err)
+	}
+	if got := observations.Load(); got != 2 {
+		t.Fatalf("observations = %d, want separate background and interactive flights", got)
 	}
 }
 

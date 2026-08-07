@@ -20,6 +20,7 @@ import {
   type OpenPluginModal,
 } from "@/lib/plugins/modal-manager";
 import type { PluginModalOptions } from "@/lib/plugins/types";
+import { t } from "@/lib/i18n";
 import { PluginErrorBoundary } from "./plugin-error-boundary";
 
 /** Maps `PluginModalOptions.size` to the host's Dialog width classes. */
@@ -34,6 +35,10 @@ function preventWhenNotDismissible(dismissible: boolean) {
   return (event: Event) => {
     if (!dismissible) event.preventDefault();
   };
+}
+
+function pluginDialogLabel(): string {
+  return t("plugins:pluginDialog");
 }
 
 type ModalSurfaceProps = {
@@ -57,13 +62,13 @@ function PluginDrawer({ modal, dismissible, onOpenChange }: ModalSurfaceProps) {
             {options.title ? (
               <DrawerTitle>{options.title}</DrawerTitle>
             ) : (
-              <DrawerTitle className="sr-only">Plugin dialog</DrawerTitle>
+              <DrawerTitle className="sr-only">{pluginDialogLabel()}</DrawerTitle>
             )}
             {options.description && <DrawerDescription>{options.description}</DrawerDescription>}
           </DrawerHeader>
         )}
         {!options.title && !options.description && (
-          <DrawerTitle className="sr-only">Plugin dialog</DrawerTitle>
+          <DrawerTitle className="sr-only">{pluginDialogLabel()}</DrawerTitle>
         )}
         <div className="min-h-0 overflow-y-auto overscroll-contain px-4 pb-4">
           <PluginErrorBoundary context={`drawer "${instanceId}" (plugin "${pluginId}")`}>
@@ -93,18 +98,19 @@ function PluginDialog({ modal, dismissible, onOpenChange }: ModalSurfaceProps) {
         onEscapeKeyDown={guardClose}
         onInteractOutside={guardClose}
       >
+        {/* Plugin-owned title/description; render either when supplied. */}
         {(options.title || options.description) && (
           <DialogHeader>
             {options.title ? (
               <DialogTitle>{options.title}</DialogTitle>
             ) : (
-              <DialogTitle className="sr-only">Plugin dialog</DialogTitle>
+              <DialogTitle className="sr-only">{pluginDialogLabel()}</DialogTitle>
             )}
             {options.description && <DialogDescription>{options.description}</DialogDescription>}
           </DialogHeader>
         )}
         {!options.title && !options.description && (
-          <DialogTitle className="sr-only">Plugin dialog</DialogTitle>
+          <DialogTitle className="sr-only">{pluginDialogLabel()}</DialogTitle>
         )}
         <PluginErrorBoundary context={`modal "${instanceId}" (plugin "${pluginId}")`}>
           <Content />

@@ -16,6 +16,7 @@ describe("parseContextWindowEntry", () => {
       used: 95_100,
       remaining: 163_300,
       efficiency: 36.8,
+      compactionCount: 0,
       source,
       timestamp: undefined,
     });
@@ -25,6 +26,35 @@ describe("parseContextWindowEntry", () => {
     expect(parseContextWindowEntry({ size: 128_000, source: "cache" })).toEqual(
       expect.objectContaining({ source: undefined }),
     );
+  });
+
+  it("parses a caller-supplied persisted inferred compaction count", () => {
+    expect(
+      parseContextWindowEntry(
+        {
+          size: 128_000,
+          used: 64_000,
+          remaining: 64_000,
+          efficiency: 50,
+        },
+        undefined,
+        3,
+      ),
+    ).toEqual(expect.objectContaining({ compactionCount: 3 }));
+  });
+
+  it.each([
+    { label: "missing", value: undefined },
+    { label: "invalid", value: "3" },
+    { label: "negative", value: -2 },
+  ])("normalizes a $label compaction count to zero", ({ value }) => {
+    expect(
+      parseContextWindowEntry(
+        { size: 128_000, used: 64_000, compaction_count: value },
+        undefined,
+        value,
+      ),
+    ).toEqual(expect.objectContaining({ compactionCount: 0 }));
   });
 
   it("prefers a caller-supplied timestamp over embedded metadata", () => {

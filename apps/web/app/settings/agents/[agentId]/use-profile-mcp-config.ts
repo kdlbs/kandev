@@ -5,6 +5,7 @@ import {
   getAgentProfileMcpConfigAction,
   updateAgentProfileMcpConfigAction,
 } from "@/app/actions/agents";
+import { t } from "@/lib/i18n";
 import type { AgentProfileMcpConfig, McpServerDef } from "@/lib/types/http";
 
 type McpStatus = "idle" | "loading" | "success" | "error";
@@ -31,6 +32,9 @@ type UseProfileMcpConfigResult = {
 };
 
 const EMPTY_EXAMPLE = '{\n  "mcpServers": {}\n}';
+// The JSON key the editor validates against — an identifier, interpolated into
+// the error messages below rather than written into the catalog.
+const MCP_SERVERS_KEY = "mcpServers";
 const isEmptyExample = (value: string) => value.trim() === EMPTY_EXAMPLE.trim();
 
 type McpStateSetters = {
@@ -51,12 +55,12 @@ function serializeServers(config: AgentProfileMcpConfig | null): string {
 
 function normalizeServers(value: unknown): Record<string, McpServerDef> {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new Error("MCP servers config must be a JSON object");
+    throw new Error(t("agents:mcpConfigMustBeJsonObject"));
   }
-  if ("mcpServers" in value) {
+  if (MCP_SERVERS_KEY in value) {
     const nested = (value as { mcpServers?: unknown }).mcpServers;
     if (!nested || typeof nested !== "object" || Array.isArray(nested)) {
-      throw new Error("mcpServers must be a JSON object");
+      throw new Error(t("agents:mcpKeyMustBeJsonObject", { key: MCP_SERVERS_KEY }));
     }
     return nested as Record<string, McpServerDef>;
   }
@@ -113,7 +117,9 @@ function useFetchConfig(
       })
       .catch((error) => {
         if (!active) return;
-        setters.setMcpError(error instanceof Error ? error.message : "Failed to load MCP config");
+        setters.setMcpError(
+          error instanceof Error ? error.message : t("agents:failedToLoadMcpConfig"),
+        );
         setters.setMcpStatus("error");
       });
 
@@ -196,7 +202,7 @@ export function useProfileMcpConfig({
       normalizeServers(parsed);
       setMcpError(null);
     } catch {
-      setMcpError("Invalid JSON");
+      setMcpError(t("agents:invalidJson"));
     }
   };
 
@@ -213,7 +219,7 @@ export function useProfileMcpConfig({
       servers = normalizeServers(parsed);
     } catch (error) {
       setMcpStatus("error");
-      setMcpError(error instanceof Error ? error.message : "Invalid MCP config");
+      setMcpError(error instanceof Error ? error.message : t("agents:invalidMcpConfig"));
       throw error;
     }
 

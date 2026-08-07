@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState, useSyncExternalStore } from "react";
+import { useTranslation } from "react-i18next";
 import {
   DndContext,
   closestCenter,
@@ -54,12 +55,14 @@ function getTransitionType(step: WorkflowStep): string {
   return action?.type ?? "none";
 }
 
-function getTransitionLabel(step: WorkflowStep): string {
-  const t = getTransitionType(step);
-  if (t === "move_to_next") return "auto";
-  if (t === "move_to_previous") return "back";
-  if (t === "move_to_step") return "goto";
-  return "manual";
+// The transition `type`s are wire values; only the connector caption is copy,
+// so the mapping yields a catalog key that the caller resolves at render.
+function transitionLabelKey(step: WorkflowStep): string {
+  const type = getTransitionType(step);
+  if (type === "move_to_next") return "workflows:transitionAuto";
+  if (type === "move_to_previous") return "workflows:transitionBack";
+  if (type === "move_to_step") return "workflows:transitionGoto";
+  return "workflows:transitionManual";
 }
 
 // --- Pipeline Node ---
@@ -83,6 +86,7 @@ function PipelineNode({
   onRemove,
   readOnly = false,
 }: PipelineNodeProps) {
+  const { t } = useTranslation();
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: step.id,
   });
@@ -115,7 +119,7 @@ function PipelineNode({
                 <IconRosetteNumber1 className="h-3.5 w-3.5" />
               </div>
             </TooltipTrigger>
-            <TooltipContent>Start step</TooltipContent>
+            <TooltipContent>{t("workflows:startStep")}</TooltipContent>
           </Tooltip>
         </TooltipProvider>
       )}
@@ -140,15 +144,19 @@ function PipelineNode({
         <StepCapabilityIcons
           events={step.events}
           agentProfileId={step.agent_profile_id}
-          fallback={<span className="text-xs text-muted-foreground/50">manual</span>}
+          fallback={
+            <span className="text-xs text-muted-foreground/50">
+              {t("workflows:transitionManual")}
+            </span>
+          }
         />
         {isReplayCycleAffected && (
           <span
             className="flex items-center gap-1 text-xs font-medium text-amber-700 dark:text-amber-300"
-            aria-label={`${step.name} is part of a replay cycle`}
+            aria-label={t("workflows:stepIsPartOfReplayCycle", { stepName: step.name })}
           >
             <IconAlertTriangle className="size-3 shrink-0" aria-hidden="true" />
-            Cycle
+            {t("workflows:cycle")}
           </span>
         )}
       </div>
@@ -170,14 +178,17 @@ function PipelineNode({
 
 // --- Connector ---
 
-function PipelineConnector({ label }: { label: string }) {
+function PipelineConnector({ labelKey }: { labelKey: string }) {
+  const { t } = useTranslation();
   return (
     <div className="flex flex-col items-center justify-center shrink-0 px-1">
       <div className="flex items-center gap-0.5 text-muted-foreground/60">
         <div className="w-4 h-px bg-border" />
         <IconChevronRight className="h-3 w-3" />
       </div>
-      <span className="text-[10px] text-muted-foreground/50 leading-none mt-0.5">{label}</span>
+      <span className="text-[10px] text-muted-foreground/50 leading-none mt-0.5">
+        {t(labelKey)}
+      </span>
     </div>
   );
 }
@@ -209,7 +220,7 @@ function PipelineArea({
     <div className="flex items-center gap-0 py-2 px-1">
       {steps.map((step, index) => (
         <div key={step.id} className="flex items-center">
-          {index > 0 && <PipelineConnector label={getTransitionLabel(steps[index - 1])} />}
+          {index > 0 && <PipelineConnector labelKey={transitionLabelKey(steps[index - 1])} />}
           <PipelineNode
             step={step}
             isDirty={isWorkflowStepDirty(step, savedStepsById.get(step.id))}

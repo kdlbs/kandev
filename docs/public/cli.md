@@ -7,13 +7,20 @@ description: "Install, start, and operate Kandev from the command line."
 
 The `kandev` command starts a local Kandev backend, which serves the web UI, HTTP API, WebSocket API, and MCP endpoint. Use it when you want a browser-based installation or a headless/service process. For a packaged system WebView and desktop updates, use the [desktop app](./desktop-app.md) instead.
 
+## Quick path
+
+1. Install with Homebrew or npm.
+2. Run `kandev` and open the printed URL.
+3. Use `--headless` for a server or SSH session.
+4. Keep the backend on loopback unless a trusted proxy and authentication protect it.
+
 ## Supported release targets
 
 | OS | Architectures | Install channels |
 |---|---|---|
 | macOS | Apple silicon (`arm64`), Intel (`x64`) | Homebrew, npm/npx |
 | Linux | `arm64`, `x64` | Homebrew, npm/npx |
-| Windows | `x64` | npm/npx |
+| Windows | `x64` | Scoop, npm/npx |
 
 The npm package is a small Node.js shim. It selects an exact, same-version native runtime package for `process.platform` and `process.arch`, then starts its `kandev` binary. npm 7 or later is required because the native packages are platform-specific optional dependencies. There is no native Windows ARM64 npm package; running the x64 package under Windows emulation is OS-dependent and is not a tested release target.
 
@@ -29,6 +36,20 @@ Homebrew is available on macOS and Linux:
 brew install kdlbs/kandev/kandev
 kandev --version
 ```
+
+### Scoop
+
+Scoop is available on Windows:
+
+```bash
+scoop bucket add kandev https://github.com/kdlbs/scoop-kandev
+scoop install kandev
+kandev --version
+```
+
+The bucket installs the native runtime bundle, so Node.js is not required to
+install or start Kandev. Node.js is still needed for the agent CLIs Kandev
+installs through its own interface.
 
 ### npm or npx
 
@@ -46,6 +67,50 @@ npx -y kandev@latest
 ```
 
 If an npm policy such as `--omit=optional` prevents optional dependencies from being installed, Kandev cannot find its native runtime.
+
+### Release archive
+
+Every release publishes a runtime archive per platform, named `kandev-<platform>.tar.gz`, where
+`<platform>` is one of `linux-x64`, `linux-arm64`, `macos-x64`, `macos-arm64`, or `windows-x64`.
+Pick the archive matching the machine, verify it against the `.sha256` published beside it, extract
+it, and run the launcher from the extracted tree:
+
+```bash
+curl -fsSLO https://github.com/kdlbs/kandev/releases/latest/download/kandev-linux-x64.tar.gz
+curl -fsSLO https://github.com/kdlbs/kandev/releases/latest/download/kandev-linux-x64.tar.gz.sha256
+shasum -a 256 -c kandev-linux-x64.tar.gz.sha256
+tar -xzf kandev-linux-x64.tar.gz
+./kandev/bin/kandev --version
+```
+
+Verifying the checksum matters more here than with the package managers, which do that themselves.
+
+The archive extracts to a `kandev/` directory containing `bin/`, and the launcher finds the rest of
+the bundle relative to itself. The extracted directory can be moved anywhere; add `kandev/bin` to
+`PATH` for a persistent command. Set `KANDEV_BUNDLE_DIR` only to point the launcher at a bundle it
+is not part of.
+
+### npm nightly
+
+Stable remains npm's default `latest` tag. To opt into the current prerelease from `main`, install
+or run the `nightly` tag explicitly:
+
+```bash
+npm install -g kandev@nightly
+kandev --version
+
+# One-off launch
+npx -y kandev@nightly
+```
+
+A nightly version has the form `X.Y.(Z+1)-nightly.sha<12-hex-character SHA prefix>`, based on the latest
+stable `X.Y.Z`. The launcher and all five platform runtime packages use that same immutable
+version. Nightlies are best-effort daily snapshots. A new one appears only when `main` has changed
+since the latest Stable release, so some days may have no new Nightly.
+
+Nightly does not move `latest` and does not publish a Homebrew formula, Desktop updater feed,
+container tag, Git tag, or GitHub Release. Use it for prerelease testing, not unattended production
+rollout.
 
 ## Start and stop
 
@@ -90,11 +155,14 @@ kandev service <action> [service options]
 | `--port <1-65535>` | Request an exact backend port. `--backend-port` is an alias; `--port=<port>` forms also work. |
 | `--headless`, `--no-browser` | Do not open a browser. |
 | `--verbose`, `-v` | Show backend info output. |
-| `--debug` | Show debug output and enable diagnostic endpoints and ACP frame logs. See the security warning below. |
+| `--debug` | Record debug output in the backend file and enable diagnostic endpoints and ACP frame logs; stdout remains concise. See the security warning below. |
 | `--version`, `-V` | Print the native runtime version. |
 | `--help`, `-h`, `help` | Print help. |
 
 These commands and options describe the installed native launcher. Unknown arguments fail with exit status 2. In particular, the npm and Homebrew release entrypoints currently invoke that native launcher, which does **not** support `dev`, `--dev`, `--runtime-version`, `--web-internal-port`, or the removed `--web-port` spelling. The source-checkout development launcher has a separate contract described below.
+
+<details>
+<summary>Source checkout and service commands</summary>
 
 ### `dev` and the internal web port are source-checkout options
 
@@ -143,7 +211,9 @@ kandev service status
 kandev service logs --follow
 ```
 
-Supported actions are `install`, `uninstall`, `start`, `stop`, `restart`, `status`, `logs`, and `config`. Installation accepts `--system`, `--port`, `--home-dir`, and `--no-boot-start`. In the current native installer, `--port` is written as `KANDEV_SERVER_PORT`, but the supervising launcher overwrites that value with its own automatic port selection; the option therefore does not reliably pin a service listener today. The service normally prefers `38429` and falls back when it is busy. Windows service installation is not implemented. Managed user services write owner-only install metadata so **Settings > System > Updates** can offer the guarded Apply action; system services and failed guarded updates use the package manager followed by `kandev service install` and `kandev service restart`. See [Run as a service](./run-as-a-service.md) for privileges, paths, upgrades, and recovery.
+Supported actions are `install`, `uninstall`, `start`, `stop`, `restart`, `status`, `logs`, and `config`. Installation accepts `--system`, `--run-as <user>` (only with `--system`), `--port`, `--home-dir`, and `--no-boot-start`. Reinstalling an existing Kandev-managed system service preserves its account unless `--run-as` is supplied explicitly. A first system install from a root login requires `--run-as`, including `--run-as root` when root is intentional. In the current native installer, `--port` is written as `KANDEV_SERVER_PORT`, but the supervising launcher overwrites that value with its own automatic port selection; the option therefore does not reliably pin a service listener today. The service normally prefers `38429` and falls back when it is busy. Windows service installation is not implemented. Managed user services write owner-only install metadata so **Settings > System > Updates** can offer the guarded Apply action; system services and failed guarded updates use the package manager followed by `kandev service install` and `kandev service restart`. See [Run as a service](./run-as-a-service.md) for privileges, paths, upgrades, and recovery.
+
+</details>
 
 ## Ports and network exposure
 
@@ -181,7 +251,7 @@ Flags take precedence over the equivalent port variables. `KANDEV_BACKEND_PORT` 
 
 The launcher also sets the selected server and `agentctl` ports for the backend. Treat its supervisor socket and manifest under `<home>/supervisor/` as private implementation state, not a control API.
 
-`--debug` sets `KANDEV_DEBUG_AGENT_MESSAGES=true` and `KANDEV_DEBUG_PPROF_ENABLED=true`. ACP logs can contain full prompts, file content, and tool calls, while diagnostic endpoints expose process details. Use debug mode only on a trusted machine and remove retained debug logs afterward. [Configuration](./configuration.md) lists their location and retention controls.
+`--debug` sets `KANDEV_DEBUG_AGENT_MESSAGES=true` and `KANDEV_DEBUG_PPROF_ENABLED=true`. Debug events go to `<home>/logs/backend-logs.log`; warn and above still appear on stdout. ACP logs can contain full prompts, file content, and tool calls, while diagnostic endpoints expose process details. Use debug mode only on a trusted machine and remove retained debug logs afterward. [Configuration](./configuration.md) lists locations and retention.
 
 ## Data and cleanup
 
@@ -193,13 +263,19 @@ Uninstalling the package does not remove `<home>`. Before removing that director
 
 ## Update
 
-The installer owns CLI updates:
+The installer owns CLI updates. Update persistent Stable installs with:
 
 ```bash
 brew upgrade kandev
+scoop update kandev
 npm install -g kandev@latest
-npx -y kandev@latest
 ```
+
+Use `npm install -g kandev@nightly` for a persistent npm Nightly install. `npx -y kandev@latest`
+and `npx -y kandev@nightly` launch one-off copies from the requested channel; they do not update a
+global package. A verified managed npm/npx user service can also select **Nightly** under
+**Settings > System > Updates**. Stable is selected by default; Desktop, Homebrew, system-service,
+unmanaged, local-checkout, and unknown installs cannot change this setting.
 
 Release packages pin the shim and native runtime packages to the same SemVer. Do not copy only one binary from a different release into a bundle. A service unit contains installation-specific executable and bundle paths; after the package upgrade, reinstall it with the same service flags and restart it as described above.
 

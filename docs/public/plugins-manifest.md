@@ -12,6 +12,13 @@ optional UI bundle. Kandev parses and validates it **before any plugin code
 runs**. See [Authoring a plugin](plugins-authoring.md) for the build
 workflow and [Plugins](plugins.md) for install/operate.
 
+## Quick path
+
+1. Start from the annotated example.
+2. Set identity, version, runtime executable, and only the capabilities the plugin needs.
+3. Add config, webhooks, events, or UI fields only when the plugin uses them.
+4. Validate the manifest before packaging.
+
 ## Annotated example
 
 ```yaml
@@ -44,6 +51,7 @@ capabilities:
   secrets: true
   agent_invoke: true                         # gates Host.InvokeUtilityAgent
   auth: true                                 # gates external (OIDC/SAML) login — see ADR 0050
+  user_state: true                           # gates host.storage (per-user browser storage)
 
 webhooks:
   - key: "slack-events"
@@ -88,6 +96,11 @@ ui:                                           # optional native frontend plugin
 
 ## Field reference
 
+> **Security:** `capabilities.auth` lets a plugin assert external login identities. Grant it only to trusted plugins whose identity provider verifies email ownership; a spoofed email claim can take over an account.
+
+<details>
+<summary>Complete field reference and validation rules</summary>
+
 | Field | Required | Type | Notes |
 |---|---|---|---|
 | `id` | yes | string | Must match `^[a-z0-9][a-z0-9._-]*$` (lowercase alphanumeric, dots, underscores, hyphens; must start with a lowercase alphanumeric). Directory name under `~/.kandev/plugins/`. |
@@ -109,6 +122,7 @@ ui:                                           # optional native frontend plugin
 | `capabilities.secrets` | no | bool | Gates `Host.RevealSecret`/`GetSecret`/`SetSecret`/`DeleteSecret`. Calling any of them without this set to `true` returns gRPC `PermissionDenied`. |
 | `capabilities.agent_invoke` | no | bool | Gates `Host.InvokeUtilityAgent` — a one-shot completion run by the utility agent selected for this plugin. Declare a `utility_agent` config property with `type: string` and `format: utility-agent`; Settings > Plugins renders the picker. Calling without this capability returns gRPC `PermissionDenied`; calling without a valid enabled selection returns gRPC `FailedPrecondition`. See ADR 0048. |
 | `capabilities.auth` | no | bool | Lets the plugin log a visitor in against an external IdP (OIDC/SAML). Its webhook validates the token, then asserts the identity to Kandev via the `X-Kandev-Auth-Login` response header (`{provider, subject, email, display_name}`); Kandev mints the session and sets the cookie — the plugin never sees the token. Requires authentication enabled; new users are provisioned as members, and Kandev never creates an admin nor auto-links to an existing admin account. **You MUST only assert an email the IdP verified as owned by the subject — a spoofed email claim is account takeover.** Highest-privilege capability; grant only to trusted plugins. See ADR 0050. |
+| `capabilities.user_state` | no | bool | Gates `host.storage` (`get`/`set`/`delete`/`list`/`subscribe`), the authenticated per-user browser storage surface at `/api/plugins/{id}/user-state/...`. Unlike `capabilities.state` (the gRPC `Host.SetState` family, written by the plugin's own backend), this is reachable directly from the plugin's frontend bundle with no Go backend required — every read/write is scoped to the calling user. Calling the route without this capability returns `403`. See [Authoring a plugin](plugins-authoring.md) and the per-user-plugin-storage decision record. |
 | `webhooks[].key` | yes | string | Must be unique within the manifest. Used in the relay path `POST /api/plugins/{id}/webhooks/{key}`. |
 | `webhooks[].description` | no | string | Free-form. |
 | `webhooks[].method` | no | string | **Informational only** — kandev does not validate or enforce the inbound HTTP method against this value. |
@@ -122,19 +136,20 @@ ui:                                           # optional native frontend plugin
 | `config_schema` | no | object | JSON-Schema-like object driving the settings form at **Settings > Plugins > `<plugin>`** (`GET /api/plugins/{id}/config` and `PATCH /api/plugins/{id}`). See "Config schema validation and secret fields" below. |
 | `ui.bundle` | no | string | Root-relative path (must start with `/`, e.g. `/ui/bundle.js`) to the plugin's native UI ES module, served at `GET /api/plugins/{id}/bundle`. |
 | `ui.styles` | no | string[] | Root-relative CSS paths (each must start with `/`), served at `GET /api/plugins/{id}/ui/*` and injected as `<link>` tags on load. |
-| `ui.pages` | no | object[] | Optional declarative page metadata. Secondary to `ui.bundle` — a native bundle registers its own routes/nav at runtime, so most plugins omit `ui.pages`. |
+| `ui.pages` | no | object[] | Optional declarative metadata accepted by the manifest model. The current frontend does not render these entries; a native bundle registers its supported routes/nav/slots at runtime, so most plugins omit `ui.pages`. |
 | `ui.pages[].key` | yes* | string | Stable identifier for the page (*required when a page entry is present). |
 | `ui.pages[].title` | yes* | string | Display title. |
 | `ui.pages[].path` | yes* | string | Route path for the page. |
-| `ui.pages[].surface` | yes* | string | Where the page mounts. Enum, one of: `settings` · `task-panel` · `main-nav`. Any other value is a validation error. |
+| `ui.pages[].surface` | yes* | string | Metadata enum (`settings` · `task-panel` · `main-nav`) validated by the manifest parser. It is not a current frontend mount; use the registry hooks in the authoring guide. |
 | `ui.keybindings` | no | object[] | Declares plugin keybindings bound at runtime via `registerKeybinding`. Requires `ui.bundle`. |
 | `ui.keybindings[].id` | yes* | string | Stable, plugin-local slug (*required when a keybinding entry is present). Must match `^[a-z0-9][a-z0-9-]*$` and be unique within this plugin's own `ui.keybindings` list — not globally; the effective shortcut is namespaced `plugin:{pluginId}:{id}`. |
 | `ui.keybindings[].default` | yes* | string | Default combo string. `+`-separated tokens: zero or more modifiers from `mod`, `ctrl`, `cmd`, `meta`, `alt`, `option`, `shift` (`mod` = ⌘ on macOS, Ctrl elsewhere) plus exactly one non-modifier key. `shift` may not combine with a digit or symbol key — the browser reports the shifted glyph for those keys, so the combo could never match. |
 | `ui.keybindings[].description` | yes* | string | Non-empty, human-readable label shown in **Settings > Keyboard Shortcuts**. |
 
-`ui.pages` is declarative manifest metadata only. A native bundle's runtime
-nav items, icons, and per-route title-bar chrome (`registerNavItem`,
-`registerRoute`'s `options.topbar`) are a separate JS SDK surface with no
+`ui.pages` is declarative manifest metadata only and is not currently rendered
+by the frontend. A native bundle's runtime nav items, icons, routes, named
+slots, and per-route title-bar chrome (`registerNavItem`, `registerRoute`, and
+`registerComponent`) are the supported JS SDK surface with no corresponding
 `manifest.yaml` field — see [Authoring a plugin](plugins-authoring.md).
 
 ## Managed vs. legacy manifests
@@ -170,6 +185,9 @@ enables `Host.Tasks().Create` and `.Update`; `messages` enables
 `Host.Messages().Send`. The host applies the same first-party task service and
 message-delivery path as its own UI/API, emits the normal events, stamps created
 rows/messages as `plugin:<id>`, and does not let a plugin supply that provenance.
+A plugin may declare a read resource without its write capability, or vice
+versa. Calling a write without the matching declaration returns gRPC
+`PermissionDenied`.
 
 `messages` reads historical **conversation content** (`Messages().List`):
 one user/agent message per row (`id`, `session_id`, `task_id`, `turn_id`,
@@ -287,3 +305,5 @@ they have no effect there and are overwritten on install:
 | `restart_count` | Best-effort restart bookkeeping used by the supervision loop. |
 
 Related: [Plugins](plugins.md), [Authoring a plugin](plugins-authoring.md).
+
+</details>

@@ -1,12 +1,16 @@
 package mcp
 
 import (
+	"context"
 	"encoding/json"
 	"testing"
 	"time"
 
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/logger"
+	ws "github.com/kandev/kandev/pkg/websocket"
+	mcplib "github.com/mark3labs/mcp-go/mcp"
+	mcpsrv "github.com/mark3labs/mcp-go/server"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -89,7 +93,7 @@ func TestServerModeTask_RegistersCorrectTools(t *testing.T) {
 	backend := NewChannelBackendClient(log)
 	defer backend.Close()
 
-	s := New(backend, "test-session", "test-task", 10005, log, "", false, ModeTask)
+	s := New(backend, "test-session", "test-task", 10005, log, "", false, ModeTask, []string{"github", "gitlab"})
 	require.NotNil(t, s)
 
 	tools := getRegisteredToolNames(s)
@@ -107,6 +111,9 @@ func TestServerModeTask_RegistersCorrectTools(t *testing.T) {
 	assert.Contains(t, tools, "get_task_conversation_kandev")
 	assert.Contains(t, tools, "get_task_pr_automation_kandev")
 	assert.Contains(t, tools, "update_task_pr_automation_kandev")
+	assert.Contains(t, tools, "get_diagnostic_bundle_kandev")
+	assert.Contains(t, tools, "get_task_mr_automation_kandev")
+	assert.Contains(t, tools, "update_task_mr_automation_kandev")
 
 	// Task mode should have plan tools
 	assert.Contains(t, tools, "create_task_plan_kandev")
@@ -239,6 +246,147 @@ func TestServerModeDefault_DefaultsToTask(t *testing.T) {
 	assert.NotContains(t, tools, "create_workflow_step_kandev")
 }
 
+func TestServerModeTask_AbsentProvidersFailClosedForReviewAutomation(t *testing.T) {
+	log := newTestLogger(t)
+	backend := NewChannelBackendClient(log)
+	defer backend.Close()
+
+	s := New(backend, "test-session", "test-task", 10005, log, "", false, ModeTask)
+	tools := getRegisteredToolNames(s)
+
+	assert.NotContains(t, tools, "get_task_pr_automation_kandev")
+	assert.NotContains(t, tools, "update_task_pr_automation_kandev")
+	assert.NotContains(t, tools, "get_task_mr_automation_kandev")
+	assert.NotContains(t, tools, "update_task_mr_automation_kandev")
+}
+
+func TestServerModeTask_ProviderMembership(t *testing.T) {
+	log := newTestLogger(t)
+
+	tests := []struct {
+		name      string
+		providers []string
+		wantPR    bool
+		wantMR    bool
+	}{
+		{name: "github only", providers: []string{" GITHUB "}, wantPR: true},
+		{name: "gitlab only", providers: []string{"gitlab"}, wantMR: true},
+		{name: "mixed", providers: []string{"gitlab", "github", "github"}, wantPR: true, wantMR: true},
+		{name: "empty", providers: []string{}, wantPR: false, wantMR: false},
+		{name: "unsupported", providers: []string{"local", "azure"}, wantPR: false, wantMR: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			backend := NewChannelBackendClient(log)
+			t.Cleanup(backend.Close)
+			s := New(backend, "test-session", "test-task", 10005, log, "", false, ModeTask, tt.providers)
+			tools := getRegisteredToolNames(s)
+			assert.Equal(t, tt.wantPR, containsTool(tools, "get_task_pr_automation_kandev"))
+			assert.Equal(t, tt.wantPR, containsTool(tools, "update_task_pr_automation_kandev"))
+			assert.Equal(t, tt.wantMR, containsTool(tools, "get_task_mr_automation_kandev"))
+			assert.Equal(t, tt.wantMR, containsTool(tools, "update_task_mr_automation_kandev"))
+			assert.Contains(t, tools, "stop_task_kandev")
+		})
+	}
+}
+
+func TestServerSetProvidersPreservesModeAndRebuildsTools(t *testing.T) {
+	log := newTestLogger(t)
+	backend := NewChannelBackendClient(log)
+	defer backend.Close()
+
+	s := New(backend, "test-session", "test-task", 10005, log, "", false, ModeTaskTitlePending, []string{"github"})
+	s.SetProviders([]string{"gitlab"})
+
+	tools := getRegisteredToolNames(s)
+	assert.Equal(t, ModeTaskTitlePending, s.mode)
+	assert.Contains(t, tools, "set_task_title_kandev")
+	assert.NotContains(t, tools, "get_task_pr_automation_kandev")
+	assert.Contains(t, tools, "get_task_mr_automation_kandev")
+}
+
+type providerRefreshTestSession struct {
+	id            string
+	notifications chan mcplib.JSONRPCNotification
+}
+
+func (s *providerRefreshTestSession) Initialize() {}
+
+func (s *providerRefreshTestSession) Initialized() bool { return true }
+
+func (s *providerRefreshTestSession) NotificationChannel() chan<- mcplib.JSONRPCNotification {
+	return s.notifications
+}
+
+func (s *providerRefreshTestSession) SessionID() string { return s.id }
+
+var _ mcpsrv.ClientSession = (*providerRefreshTestSession)(nil)
+
+func TestServerSetProvidersNotifiesInitializedSessionOnceWithCompleteTools(t *testing.T) {
+	log := newTestLogger(t)
+	backend := NewChannelBackendClient(log)
+	defer backend.Close()
+
+	s := New(backend, "test-session", "test-task", 10005, log, "", false, ModeTask, []string{"github"})
+	session := &providerRefreshTestSession{
+		id:            "initialized-provider-refresh",
+		notifications: make(chan mcplib.JSONRPCNotification, 128),
+	}
+	require.NoError(t, s.mcpServer.RegisterSession(context.Background(), session))
+
+	s.SetProviders([]string{"gitlab"})
+
+	var notifications []mcplib.JSONRPCNotification
+	for {
+		select {
+		case notification := <-session.notifications:
+			notifications = append(notifications, notification)
+		default:
+			goto drained
+		}
+	}
+
+drained:
+	require.Len(t, notifications, 1, "a live provider rebuild must emit one tools/list_changed notification")
+	require.Equal(t, mcplib.MethodNotificationToolsListChanged, notifications[0].Method)
+	tools := getRegisteredToolNames(s)
+	require.Len(t, tools, 32, "final registry should contain the complete GitLab-only task tool set")
+	assert.Contains(t, tools, "get_task_mr_automation_kandev")
+	assert.NotContains(t, tools, "get_task_pr_automation_kandev")
+}
+
+func TestServerSetProvidersAndModeSkipNormalizedNoOps(t *testing.T) {
+	log := newTestLogger(t)
+	backend := NewChannelBackendClient(log)
+	defer backend.Close()
+
+	s := New(backend, "test-session", "test-task", 10005, log, "", false, ModeTask, []string{"github", "gitlab"})
+	session := &providerRefreshTestSession{
+		id:            "initialized-noop-refresh",
+		notifications: make(chan mcplib.JSONRPCNotification, 128),
+	}
+	require.NoError(t, s.mcpServer.RegisterSession(context.Background(), session))
+
+	s.SetProviders([]string{" GITLAB ", "github", "github"})
+	s.SetMode("unknown-mode")
+
+	select {
+	case notification := <-session.notifications:
+		t.Fatalf("normalized no-op emitted notification %q", notification.Method)
+	default:
+	}
+}
+
+func containsTool(tools []string, name string) bool {
+	for _, tool := range tools {
+		if tool == name {
+			return true
+		}
+	}
+	return false
+}
+
 func TestServerModeConfig_DisableAskQuestion(t *testing.T) {
 	log := newTestLogger(t)
 	backend := NewChannelBackendClient(log)
@@ -267,24 +415,78 @@ func TestServerModeTask_DisableAskQuestion(t *testing.T) {
 	assert.Contains(t, tools, "create_task_plan_kandev")
 }
 
+func TestServerModeTaskTitlePending_RegistersTitleToolOnlyForPendingTaskMode(t *testing.T) {
+	log := newTestLogger(t)
+	backend := NewChannelBackendClient(log)
+	defer backend.Close()
+
+	pending := New(backend, "test-session", "test-task", 10005, log, "", false, ModeTaskTitlePending)
+	titleTool, ok := pending.mcpServer.ListTools()["set_task_title_kandev"]
+	require.True(t, ok, "pending task mode must register set_task_title_kandev")
+	assert.Contains(t, titleTool.Tool.Description, "first action")
+	assert.Contains(t, titleTool.Tool.Description, "6 words")
+	assert.Contains(t, titleTool.Tool.Description, "sentence case")
+	assert.Contains(t, titleTool.Tool.Description, "Improve task title casing")
+	assert.Contains(t, titleTool.Tool.Description, "short title phrase")
+	assert.NotContains(t, titleTool.Tool.Description, "short noun phrase")
+
+	titleProperties := toolInputProperties(t, pending, "set_task_title_kandev")
+	titleProperty, ok := titleProperties["title"].(map[string]interface{})
+	require.True(t, ok, "title argument should have a schema property")
+	assert.Contains(t, titleProperty["description"], "targeting about 6 words")
+	assert.Contains(t, titleProperty["description"], "sentence-case")
+
+	ordinary := New(backend, "test-session", "test-task", 10005, log, "", false, ModeTask)
+	assert.NotContains(t, ordinary.mcpServer.ListTools(), "set_task_title_kandev")
+	for _, mode := range []string{ModeConfig, ModeOffice, ModeExternal} {
+		t.Run(mode, func(t *testing.T) {
+			restricted := New(backend, "test-session", "test-task", 10005, log, "", false, mode)
+			assert.NotContains(t, restricted.mcpServer.ListTools(), "set_task_title_kandev")
+		})
+	}
+}
+
+func TestServerSetTaskTitle_ForwardsBoundTaskAndSession(t *testing.T) {
+	backend := &testBackend{response: map[string]interface{}{
+		"accepted": true,
+		"task_id":  "task-1",
+		"title":    "Short title",
+	}}
+	log := newTestLogger(t)
+	s := New(backend, "session-1", "task-1", 10005, log, "", false, ModeTaskTitlePending)
+
+	result := callTool(t, s, "set_task_title_kandev", map[string]interface{}{"title": "Short title"})
+	require.False(t, result.IsError)
+	assert.Equal(t, ws.ActionMCPSetTaskTitle, backend.lastAction)
+	assert.Equal(t, map[string]interface{}{
+		"task_id":    "task-1",
+		"session_id": "session-1",
+		"title":      "Short title",
+	}, backend.lastPayload)
+	text, ok := result.Content[0].(mcplib.TextContent)
+	require.True(t, ok)
+	assert.Contains(t, text.Text, `"accepted": true`)
+}
+
 func TestServerModeTask_ToolCount(t *testing.T) {
 	log := newTestLogger(t)
 	backend := NewChannelBackendClient(log)
 	defer backend.Close()
 
-	s := New(backend, "test-session", "test-task", 10005, log, "", false, ModeTask)
+	s := New(backend, "test-session", "test-task", 10005, log, "", false, ModeTask, []string{"github", "gitlab"})
 	tools := getRegisteredToolNames(s)
-	// 17 kanban (incl. delete + archive task + stop_task + spawn_session + PR automation) +
-	// 1 add_branch_to_task + 1 add_workspace_sources + 1 update_repository_base_branch +
+	// 19 kanban (incl. delete + archive task + stop_task + spawn_session + PR
+	// automation + MR automation) + 1 add_branch_to_task +
+	// 1 add_workspace_sources + 1 update_repository_base_branch +
 	// 1 step_complete (ADR 0015) + 1 interaction + 4 plan + 3 walkthrough +
-	// 1 publish_review_findings + 1 related-tasks = 31.
+	// 1 publish_review_findings + 1 related-tasks + 1 diagnostic bundle = 34.
 	// Task-document tools (list/get/write) are office-only.
 	assert.Contains(t, tools, "step_complete_kandev", "ADR 0015 explicit-completion signal must be registered in task mode")
 	assert.Contains(t, tools, "show_walkthrough_kandev", "walkthrough tool must be registered in task mode")
 	assert.Contains(t, tools, "publish_review_findings_kandev", "native code-review publishing must be registered in task mode")
 	assert.Contains(t, tools, "spawn_session_kandev", "spawn_session must be registered in task mode")
 	assert.Contains(t, tools, "add_workspace_sources_kandev")
-	assert.Equal(t, 31, len(tools))
+	assert.Equal(t, 34, len(tools))
 }
 
 func TestServerStepCompleteTool_TaskOnlyAndDiscoverable(t *testing.T) {
@@ -416,6 +618,7 @@ func TestServerModeOffice_DisableAskQuestion(t *testing.T) {
 
 func TestServerModeConstants(t *testing.T) {
 	assert.Equal(t, "task", ModeTask)
+	assert.Equal(t, "task-title-pending", ModeTaskTitlePending)
 	assert.Equal(t, "config", ModeConfig)
 	assert.Equal(t, "external", ModeExternal)
 	assert.Equal(t, "office", ModeOffice)
@@ -443,7 +646,7 @@ func TestServerModeExternal_RegistersCorrectTools(t *testing.T) {
 	// External mode includes create_task_kandev so external agents can spawn tasks
 	assert.Contains(t, tools, "create_task_kandev")
 	createTask := s.mcpServer.ListTools()["create_task_kandev"]
-	assert.Contains(t, createTask.Tool.Description, "explicit agent_profile_id always wins")
+	assert.Contains(t, createTask.Tool.Description, "outranks an explicit agent_profile_id")
 	assert.Contains(t, createTask.Tool.Description, "current_task")
 	assert.Contains(t, createTask.Tool.Description, "workspace_default")
 	assert.Contains(t, createTask.Tool.Description, "workflow profiles first")

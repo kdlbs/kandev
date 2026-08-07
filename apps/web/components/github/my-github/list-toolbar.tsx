@@ -1,7 +1,8 @@
 "use client";
 
-import { RepoFilterCombobox } from "./repo-filter-combobox";
+import { useTranslation } from "react-i18next";
 import { IntegrationListToolbar } from "@/components/integrations/integration-list-toolbar";
+import { RepoFilterCombobox } from "./repo-filter-combobox";
 
 type ListToolbarProps = {
   title: string;
@@ -32,6 +33,7 @@ export function ListToolbar({
   repoOptions,
   onRefresh,
 }: ListToolbarProps) {
+  const { t } = useTranslation();
   return (
     <IntegrationListToolbar
       title={title}
@@ -48,14 +50,14 @@ export function ListToolbar({
           repoFilter={repoFilter}
           onRepoFilterChange={onRepoFilterChange}
           repoOptions={repoOptions}
-          ariaLabel="Filter GitHub results by repository"
-          triggerClassName="w-full md:w-[220px] h-8 border border-input bg-background hover:bg-secondary/50 px-2 py-1.5 text-xs/relaxed"
+          ariaLabel={t("github:filterGithubResultsByRepository")}
+          triggerClassName="h-8 w-full border border-input bg-background px-2 py-1.5 text-xs/relaxed hover:bg-secondary/50 md:w-[220px]"
           className="md:min-w-[360px]"
           testId="github-repo-filter-trigger"
           dropdownTestId="github-repo-filter-dropdown"
         />
       }
-      queryPlaceholder='Custom query — press Enter. e.g. "is:open review-requested:@me"'
+      queryPlaceholder={t("github:customQueryPressEnterEG")}
       titleTestId="github-list-toolbar-title"
     />
   );

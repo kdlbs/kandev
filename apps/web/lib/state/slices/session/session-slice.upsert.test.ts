@@ -79,6 +79,17 @@ describe("upsertTaskSessionFromEvent", () => {
     expect(session.repository_id).toBe("repo-1");
   });
 
+  it("preserves backend cancellation state across unrelated partial events", () => {
+    const store = makeStore();
+
+    store
+      .getState()
+      .upsertTaskSessionFromEvent(TASK_ID, makeSession({ cancellation_pending: true }));
+    store.getState().upsertTaskSessionFromEvent(TASK_ID, makeSession({ state: "RUNNING" }));
+
+    expect(store.getState().taskSessions.items[SESSION_ID].cancellation_pending).toBe(true);
+  });
+
   it("seeds environmentIdBySessionId when task_environment_id is present", () => {
     const store = makeStore();
 
@@ -87,6 +98,22 @@ describe("upsertTaskSessionFromEvent", () => {
       .upsertTaskSessionFromEvent(TASK_ID, makeSession({ task_environment_id: "env-1" }));
 
     expect(store.getState().environmentIdBySessionId[SESSION_ID]).toBe("env-1");
+  });
+
+  it("preserves the live workspace root when a later partial refresh omits it", () => {
+    const store = makeStore();
+
+    store
+      .getState()
+      .upsertTaskSessionFromEvent(
+        TASK_ID,
+        makeSession({ workspace_path: "/task-root", worktree_path: "/task-root/kandev" }),
+      );
+    store.getState().setTaskSessionsForTask(TASK_ID, [makeSession()]);
+
+    const session = store.getState().taskSessions.items[SESSION_ID];
+    expect(session.workspace_path).toBe("/task-root");
+    expect(session.worktree_path).toBe("/task-root/kandev");
   });
 
   it("does not seed environmentIdBySessionId when task_environment_id is absent", () => {
@@ -106,6 +133,61 @@ describe("upsertTaskSessionFromEvent", () => {
 
     const list = store.getState().taskSessionsByTask.itemsByTaskId[TASK_ID];
     expect(list.map((s) => s.id)).toEqual(["session-other", SESSION_ID]);
+  });
+
+  it("invalidates a loaded list when an event introduces a partial session", () => {
+    const store = makeStore();
+    const existing = makeSession({ id: "session-existing", repository_id: "repo-1" });
+    store.getState().setTaskSessionsForTask(TASK_ID, [existing]);
+
+    store.getState().upsertTaskSessionFromEvent(TASK_ID, makeSession());
+
+    expect(store.getState().taskSessionsByTask.loadedByTaskId[TASK_ID]).toBe(false);
+    expect(store.getState().taskSessionsByTask.itemsByTaskId[TASK_ID].map((s) => s.id)).toEqual([
+      "session-existing",
+      SESSION_ID,
+    ]);
+  });
+
+  it("keeps a loaded list authoritative when an event updates a known session", () => {
+    const store = makeStore();
+    store.getState().setTaskSessionsForTask(TASK_ID, [makeSession({ repository_id: "repo-1" })]);
+
+    store.getState().upsertTaskSessionFromEvent(TASK_ID, makeSession({ state: "COMPLETED" }));
+
+    expect(store.getState().taskSessionsByTask.loadedByTaskId[TASK_ID]).toBe(true);
+    expect(store.getState().taskSessions.items[SESSION_ID].repository_id).toBe("repo-1");
+  });
+});
+
+describe("cancellation revision ordering", () => {
+  it("rejects a stale REST cancellation snapshot after a newer live event", () => {
+    const store = makeStore();
+
+    store
+      .getState()
+      .upsertTaskSessionFromEvent(
+        TASK_ID,
+        makeSession({ cancellation_pending: true, cancellation_revision: 1 }),
+      );
+    store
+      .getState()
+      .upsertTaskSessionFromEvent(
+        TASK_ID,
+        makeSession({ cancellation_pending: false, cancellation_revision: 2 }),
+      );
+
+    // A delayed REST response captured during the older pending generation must
+    // not restore true after the newer live false event has settled.
+    store
+      .getState()
+      .setTaskSessionsForTask(TASK_ID, [
+        makeSession({ cancellation_pending: true, cancellation_revision: 1 }),
+      ]);
+
+    const session = store.getState().taskSessions.items[SESSION_ID];
+    expect(session.cancellation_pending).toBe(false);
+    expect(session.cancellation_revision).toBe(2);
   });
 });
 

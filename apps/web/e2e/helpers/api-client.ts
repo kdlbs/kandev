@@ -10,8 +10,14 @@ import type {
 } from "../../lib/types/http";
 import type { Agent, AgentProfile } from "../../lib/types/http-agents";
 import { normalizeAgentProfile } from "../../lib/api/domains/agent-profile-normalize";
-import type { TaskCIAutomationOptions, TaskCIAutomationPatch } from "../../lib/types/github";
+import type {
+  PRCommitDetail,
+  TaskCIAutomationOptions,
+  TaskCIAutomationPatch,
+} from "../../lib/types/github";
 import type { VoiceModeSettings } from "../../lib/types/http-voice";
+import type { TaskStatusSummary } from "../../lib/types/task-status-summary";
+import type { SecretListItem, SecretScope } from "../../lib/types/http-secrets";
 import type {
   GitLabMRApproval,
   GitLabMRCommit,
@@ -22,6 +28,8 @@ import type {
   Issue as MockGitLabIssue,
   MR as MockGitLabMR,
   TaskMR,
+  TaskMRAutomationOptions,
+  TaskMRAutomationPatch,
 } from "../../lib/types/gitlab";
 import type {
   SSHAgentReadinessResponse,
@@ -573,6 +581,7 @@ export class ApiClient {
       mode?: string;
       config_options?: Record<string, string>;
       cli_passthrough?: boolean;
+      enabled?: boolean;
       cli_flags?: Array<{ description: string; flag: string; enabled: boolean }>;
       command_prefix?: string;
       env_vars?: Array<{ key: string; value?: string; secret_id?: string }>;
@@ -705,6 +714,53 @@ export class ApiClient {
     });
   }
 
+  async createSecret(
+    name: string,
+    value: string,
+    options?: { scope?: SecretScope; workspaceId?: string },
+  ): Promise<SecretListItem> {
+    return this.request("POST", "/api/v1/secrets", {
+      name,
+      value,
+      scope: options?.scope ?? "global",
+      ...(options?.workspaceId ? { workspace_id: options.workspaceId } : {}),
+    });
+  }
+
+  async listSecrets(options?: {
+    scope?: SecretScope;
+    workspaceId?: string;
+    includeGlobal?: boolean;
+  }): Promise<SecretListItem[]> {
+    const query = new URLSearchParams();
+    if (options?.scope) query.set("scope", options.scope);
+    if (options?.workspaceId) query.set("workspace_id", options.workspaceId);
+    if (options?.includeGlobal) query.set("include_global", "true");
+    const suffix = query.toString();
+    return this.request("GET", `/api/v1/secrets${suffix ? `?${suffix}` : ""}`);
+  }
+
+  async deleteSecret(secretId: string, workspaceId?: string): Promise<void> {
+    const suffix = workspaceId ? `?workspace_id=${encodeURIComponent(workspaceId)}` : "";
+    const response = await this.rawRequest("DELETE", `/api/v1/secrets/${secretId}${suffix}`);
+    if (!response.ok) {
+      throw new Error(
+        `API DELETE /api/v1/secrets/${secretId}${suffix} failed (${response.status}): ${await response.text()}`,
+      );
+    }
+  }
+
+  async deleteSecretIfPresent(secretId: string, workspaceId?: string): Promise<void> {
+    try {
+      await this.deleteSecret(secretId, workspaceId);
+    } catch (error) {
+      if (error instanceof Error && error.message.includes(" failed (404):")) {
+        return;
+      }
+      throw error;
+    }
+  }
+
   async updateRepository(
     repositoryId: string,
     updates: {
@@ -716,6 +772,7 @@ export class ApiClient {
       setup_script?: string;
       cleanup_script?: string;
       copy_files?: string;
+      secret_bindings?: Array<{ key: string; secret_id: string }>;
     },
   ): Promise<void> {
     await this.request("PATCH", `/api/v1/repositories/${repositoryId}`, updates);
@@ -831,9 +888,11 @@ export class ApiClient {
       terminal_link_behavior?: string;
       terminal_font_family?: string;
       terminal_font_size?: number;
+      startup_page?: "task_overview" | "last_task";
       mcp_task_agent_profile_default?: MCPTaskAgentProfileDefault;
       tasks_list_show_details?: boolean;
       show_transcript_auto_scroll_control?: boolean;
+      agent_generated_task_titles?: boolean;
       [key: string]: unknown;
     };
   }> {
@@ -844,7 +903,9 @@ export class ApiClient {
     enable_preview_on_click?: boolean;
     confirm_task_archive?: boolean;
     unread_divider?: boolean;
+    agent_generated_task_titles?: boolean;
     mcp_task_agent_profile_default?: MCPTaskAgentProfileDefault;
+    sidebar_active_view_id?: string;
     show_anchored_prompt_bar?: boolean;
     show_scroll_to_last_prompt?: boolean;
     show_scroll_to_start?: boolean;
@@ -855,11 +916,16 @@ export class ApiClient {
     terminal_link_behavior?: "new_tab" | "browser_panel";
     terminal_font_family?: string;
     terminal_font_size?: number;
+    startup_page?: "task_overview" | "last_task";
     keyboard_shortcuts?: Record<string, unknown>;
     default_utility_agent_id?: string;
     default_utility_model?: string;
     sidebar_views?: unknown[];
     saved_layouts?: unknown[];
+    lsp_auto_start_languages?: string[];
+    lsp_auto_install_languages?: string[];
+    lsp_server_configs?: Record<string, Record<string, unknown>>;
+    lsp_status_location?: "toolbar" | "status_bar";
     kanban_view_mode?: string;
     tasks_list_show_details?: boolean;
     tasks_list_sort?: string;
@@ -904,6 +970,7 @@ export class ApiClient {
       };
       wip_limit?: number;
       pull_from_step_id?: string | null;
+      cancel_triggers_turn_complete?: boolean;
     },
   ): Promise<void> {
     await this.request("PUT", `/api/v1/workflow/steps/${stepId}`, { id: stepId, ...updates });
@@ -997,6 +1064,7 @@ export class ApiClient {
       state: TaskSessionState;
       sessionId?: string;
       agentProfileId?: string;
+      repositoryId?: string;
       startedAt?: string;
       completedAt?: string;
       commandCount?: number;
@@ -1009,6 +1077,7 @@ export class ApiClient {
     };
     if (opts.sessionId !== undefined) body.session_id = opts.sessionId;
     if (opts.agentProfileId !== undefined) body.agent_profile_id = opts.agentProfileId;
+    if (opts.repositoryId !== undefined) body.repository_id = opts.repositoryId;
     if (opts.startedAt !== undefined) body.started_at = opts.startedAt;
     if (opts.completedAt !== undefined) body.completed_at = opts.completedAt;
     if (opts.commandCount !== undefined) body.command_count = opts.commandCount;
@@ -1305,6 +1374,7 @@ export class ApiClient {
       message: string;
       author_login: string;
       author_date: string;
+      stats_available?: boolean;
     }>,
   ): Promise<void> {
     await this.request("POST", "/api/v1/github/mock/commits", {
@@ -1317,6 +1387,28 @@ export class ApiClient {
 
     // PR commit fixtures predate workspace-scoped GitHub authentication and
     // expect the shared mock client to be available for provider lookups.
+    const workspaceId = await this.activeWorkspaceId();
+    if (!workspaceId) return;
+    await this.mockGitHubSetWorkspaceConnection(workspaceId, {
+      source: "legacy_shared",
+      status: "active",
+    });
+  }
+
+  async mockGitHubAddPRCommitDetail(
+    owner: string,
+    repo: string,
+    sha: string,
+    detail: Omit<PRCommitDetail, "sha"> & { sha?: string },
+  ): Promise<void> {
+    await this.request("POST", "/api/v1/github/mock/commit-details", {
+      owner,
+      repo,
+      sha,
+      detail: { ...detail, sha: detail.sha ?? sha },
+    });
+    await this.seedMockGitHubRepositoryAccess([{ repo_owner: owner, repo_name: repo }]);
+
     const workspaceId = await this.activeWorkspaceId();
     if (!workspaceId) return;
     await this.mockGitHubSetWorkspaceConnection(workspaceId, {
@@ -1636,6 +1728,21 @@ export class ApiClient {
     );
   }
 
+  async getTaskMRAutomationOptions(taskId: string): Promise<TaskMRAutomationOptions> {
+    return this.request("GET", `/api/v1/gitlab/tasks/${encodeURIComponent(taskId)}/mr-automation`);
+  }
+
+  async updateTaskMRAutomationOptions(
+    taskId: string,
+    patch: TaskMRAutomationPatch,
+  ): Promise<TaskMRAutomationOptions> {
+    return this.request(
+      "PATCH",
+      `/api/v1/gitlab/tasks/${encodeURIComponent(taskId)}/mr-automation`,
+      patch,
+    );
+  }
+
   async linkTaskGitLabMR(
     workspaceId: string,
     data: { task_id: string; repository_id?: string; mr_url: string },
@@ -1706,6 +1813,7 @@ export class ApiClient {
       id: string;
       content: string;
       author_type: string;
+      type?: string;
       raw_content?: string;
       metadata?: Record<string, unknown>;
     }>;
@@ -1741,9 +1849,14 @@ export class ApiClient {
     });
   }
 
-  async listTasks(
-    workspaceId: string,
-  ): Promise<{ tasks: Array<{ id: string; title: string; workflow_step_id?: string }> }> {
+  async listTasks(workspaceId: string): Promise<{
+    tasks: Array<{
+      id: string;
+      title: string;
+      workflow_step_id?: string;
+      status_summary?: TaskStatusSummary | null;
+    }>;
+  }> {
     return this.request("GET", `/api/v1/workspaces/${workspaceId}/tasks`);
   }
 
@@ -1755,6 +1868,7 @@ export class ApiClient {
       state: string;
       started_at: string;
       task_environment_id?: string;
+      workspace_path?: string;
       worktree_path?: string;
       worktree_branch?: string;
       worktrees?: Array<{ repository_id?: string; worktree_path?: string }>;
@@ -1767,7 +1881,7 @@ export class ApiClient {
   }
 
   async setPrimarySession(sessionId: string): Promise<void> {
-    await this.request("POST", `/api/v1/task-sessions/${sessionId}/set-primary`);
+    await this.wsRequest("session.set_primary", { session_id: sessionId });
   }
 
   async deleteSession(sessionId: string): Promise<void> {
@@ -1877,7 +1991,9 @@ export class ApiClient {
       executor_profile_id?: string;
       prompt: string;
       intent?: string;
+      session_id?: string;
       workflow_step_id?: string;
+      launch_workspace?: boolean;
       auto_start?: boolean;
     },
     timeoutMs = 30_000,
@@ -2701,12 +2817,29 @@ export class ApiClient {
     name: string;
     workflowId?: string;
     workflowStepId?: string;
+    /**
+     * The automation's standing instruction. The run view only renders the
+     * instruction card when there is one, so specs asserting on where that
+     * card lives have to seed it.
+     */
+    prompt?: string;
+    /**
+     * Backdate the row's `execution_mode` to `task` after creation, which is
+     * what an install predating the withdrawal of execution modes carries on
+     * disk. The API ignores `execution_mode` on input by design, so this is
+     * the only way to stand up the state the board-move migration notice
+     * exists to explain; the `legacy_board_card` flag the UI reads is then
+     * derived by the same production SQL a real upgraded install goes through.
+     */
+    legacyBoardCard?: boolean;
   }): Promise<{ id: string; workspace_id: string; name: string }> {
     return this.request("POST", "/api/v1/e2e/automations", {
       workspace_id: opts.workspaceId,
       name: opts.name,
       workflow_id: opts.workflowId ?? "",
       workflow_step_id: opts.workflowStepId ?? "",
+      prompt: opts.prompt ?? "",
+      legacy_board_card: opts.legacyBoardCard ?? false,
     });
   }
 
@@ -2714,6 +2847,16 @@ export class ApiClient {
    * Seed an automation run row via the E2E HTTP endpoint.
    * Only works when KANDEV_MOCK_AGENT is active.
    */
+  /**
+   * Stamps a seeded task with an origin. Production tags automation runs
+   * `automation_run` inside the firing path; a task created through the
+   * ordinary task API has no origin and therefore still shows on the kanban
+   * and in task lists, which is exactly what the origin is supposed to prevent.
+   */
+  async setTaskOrigin(taskId: string, origin: string): Promise<void> {
+    await this.request("PATCH", `/api/v1/e2e/tasks/${taskId}/origin`, { origin });
+  }
+
   async seedAutomationRun(
     automationId: string,
     status = "skipped",

@@ -12,6 +12,8 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/common/subproc"
+	"github.com/kandev/kandev/internal/task/models"
 	"go.uber.org/zap"
 )
 
@@ -55,6 +57,7 @@ type CreateInstanceRequest struct {
 	AssumeMcpSse           bool              `json:"assume_mcp_sse,omitempty"`       // Assume agent supports SSE MCP servers
 	AssumeMcpHttp          bool              `json:"assume_mcp_http,omitempty"`      // Assume agent supports HTTP MCP servers
 	McpMode                string            `json:"mcp_mode,omitempty"`             // MCP tool mode: "task" (default), "config", or "office"
+	McpProviders           []string          `json:"mcp_providers,omitempty"`        // Supported review-automation providers
 	// RequiresProcessKill tells agentctl to skip the graceful stdin-close wait
 	// and reap the agent process group immediately. Required for agents whose
 	// runtime keeps child processes (e.g. MCP servers) alive when stdin closes
@@ -71,6 +74,10 @@ type CreateInstanceRequest struct {
 	// single-repo tracker. Empty map disables the override and falls back
 	// to the hardcoded origin/main → master priority list inside agentctl.
 	BaseBranches map[string]string `json:"base_branches,omitempty"`
+	// RemoteContributions maps an agentctl workspace repository subpath to the
+	// server-authored contribution binding for that checkout. The empty key is
+	// the workspace root.
+	RemoteContributions map[string]models.RemoteContribution `json:"remote_contributions,omitempty"`
 	// WorkspaceSourceRoots are canonical host roots explicitly attached to the
 	// workspace. Agentctl permits file operations through links only beneath
 	// these roots.
@@ -206,6 +213,32 @@ func (c *ControlClient) Health(ctx context.Context) error {
 		return fmt.Errorf("health check failed: %d", resp.StatusCode)
 	}
 	return nil
+}
+
+// SubprocessAdmission returns the agentctl process's current Git admission
+// state. It is used by the backend debug export to correlate host and agentctl
+// pressure without exposing control-server internals directly.
+func (c *ControlClient) SubprocessAdmission(ctx context.Context) (subproc.Snapshot, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/api/v1/debug/subprocess-admission", nil)
+	if err != nil {
+		return subproc.Snapshot{}, err
+	}
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return subproc.Snapshot{}, fmt.Errorf("failed to get subprocess admission: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		return subproc.Snapshot{}, fmt.Errorf("failed to get subprocess admission: status %d", resp.StatusCode)
+	}
+
+	var snapshot subproc.Snapshot
+	if err := json.NewDecoder(resp.Body).Decode(&snapshot); err != nil {
+		return subproc.Snapshot{}, fmt.Errorf("failed to decode subprocess admission: %w", err)
+	}
+	return snapshot, nil
 }
 
 // CreateInstance creates a new agent instance.

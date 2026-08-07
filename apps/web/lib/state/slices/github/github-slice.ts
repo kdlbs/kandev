@@ -110,12 +110,25 @@ function createTaskPRActions(
   set: ImmerSet,
 ): Pick<
   GitHubSlice,
-  "setTaskPRs" | "setTaskPR" | "setPendingPrUrlForTask" | "setTaskIssues" | "upsertTaskIssue"
+  | "setTaskPRs"
+  | "removeTaskPR"
+  | "setTaskPR"
+  | "setPendingPrUrlForTask"
+  | "setTaskIssues"
+  | "upsertTaskIssue"
 > {
   return {
     setTaskPRs: (prs) =>
       set((draft) => {
         draft.taskPRs.byTaskId = prs;
+      }),
+    removeTaskPR: (taskId, associationId) =>
+      set((draft) => {
+        const current = draft.taskPRs.byTaskId[taskId];
+        if (!Array.isArray(current)) return;
+        const remaining = current.filter((pr) => pr.id !== associationId);
+        if (remaining.length === 0) delete draft.taskPRs.byTaskId[taskId];
+        else draft.taskPRs.byTaskId[taskId] = remaining;
       }),
     setTaskIssues: (workspaceId, issues) =>
       set((draft) => {

@@ -6,9 +6,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 
 	"go.uber.org/zap"
@@ -17,6 +15,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	agentsettingscontroller "github.com/kandev/kandev/internal/agent/settings/controller"
 	settingsstore "github.com/kandev/kandev/internal/agent/settings/store"
+	automationpkg "github.com/kandev/kandev/internal/automation"
 	"github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/common/gitref"
 	"github.com/kandev/kandev/internal/common/logger"
@@ -34,6 +33,8 @@ import (
 	"github.com/kandev/kandev/internal/repoclone"
 	"github.com/kandev/kandev/internal/secrets"
 	sentrypkg "github.com/kandev/kandev/internal/sentry"
+	"github.com/kandev/kandev/internal/system/queuesettings"
+	systemsettings "github.com/kandev/kandev/internal/system/settings"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	taskservice "github.com/kandev/kandev/internal/task/service"
@@ -76,6 +77,8 @@ func provideOrchestrator(
 	serviceCfg := orchestrator.DefaultServiceConfig()
 	serviceCfg.ClaudeBackgroundPromptHandoff =
 		cfg != nil && cfg.Features.ClaudeBackgroundPromptHandoff
+	serviceCfg.ClaudeMidTurnSteering =
+		cfg != nil && cfg.Features.ClaudeMidTurnSteering
 	namespace := resolveEventNamespace(cfg)
 	serviceCfg.QueueGroup = "orchestrator." + namespace
 	busMode := "memory"
@@ -92,20 +95,38 @@ func provideOrchestrator(
 	if err != nil {
 		return nil, nil, fmt.Errorf("init message queue repo: %w", err)
 	}
-	maxPerSession := resolveQueueMaxPerSession(log)
+	maxPerSession := resolveQueueMaxPerSession(pool, log)
 	msgQueue := messagequeue.NewService(queueRepo, maxPerSession, log)
 	log.Info("Message queue initialized",
 		zap.Int("max_per_session", maxPerSession))
+	if taskSvc.AttachmentService() == nil && taskSvc.AttachmentRepository() != nil {
+		attachmentSvc, attachmentErr := taskservice.NewAttachmentService(
+			taskSvc.AttachmentRepository(), cfg.ResolvedHomeDir(), taskSvc.AuthorizeWorkspaceAccess, log,
+		)
+		if attachmentErr != nil {
+			return nil, nil, fmt.Errorf("initialize prompt attachment storage: %w", attachmentErr)
+		}
+		taskSvc.SetAttachmentService(attachmentSvc)
+	}
 
 	orchestratorSvc := orchestrator.NewService(serviceCfg, eventBus, agentManagerClient, taskRepoAdapter, taskRepo, userSvc, secretStore, msgQueue, log)
 	if gitCredentialBroker != nil {
 		orchestratorSvc.SetGitHubCredentialBroker(gitCredentialBroker, githubCredentialBrokerEndpoint(cfg))
 	}
+	orchestratorSvc.SetAttachmentReader(taskSvc.AttachmentService())
+	orchestratorSvc.SetTitleBranchRuntime(lifecycleMgr)
 	if githubSvc != nil {
 		orchestratorSvc.SetTaskGitCredentialPolicyResolver(githubExecutorCredentialPolicyAdapter{service: githubSvc})
 	}
 	taskSvc.SetExecutionStopper(orchestratorSvc)
+	// Runtime-aware liveness lets durable cleanup treat a not-found stop for a
+	// confirmed-dead local runtime as already stopped instead of retrying forever.
+	taskSvc.SetRowLivenessProber(agentManagerClient)
+	taskSvc.SetContextWindowResetter(orchestratorSvc.ResetContextWindow)
 	taskSvc.SetGitArchiveCapture(orchestratorSvc)
+	// Automation runs keep their worktrees so they stay repliable, which makes
+	// them the one task kind nothing else ever cleans up; the orchestrator needs
+	// the manager to enforce the per-automation retention window.
 	orchestratorSvc.SetWorktreeManager(lifecycleMgr.WorktreeManager())
 
 	msgCreator := &messageCreatorAdapter{svc: taskSvc, logger: log}
@@ -219,19 +240,30 @@ func githubCredentialBrokerEndpoint(cfg *config.Config) string {
 // falling back to messagequeue.DefaultMaxPerSession (10) when unset or invalid.
 // Values <= 0 disable the cap entirely (callers can still flood queues — only
 // useful in tests / specialized deployments).
-func resolveQueueMaxPerSession(log *logger.Logger) int {
-	raw := strings.TrimSpace(os.Getenv("KANDEV_QUEUE_MAX_PER_SESSION"))
-	if raw == "" {
-		return messagequeue.DefaultMaxPerSession
+func resolveQueueMaxPerSession(pool *db.Pool, log *logger.Logger) int {
+	var configured *queuesettings.Settings
+	if pool != nil {
+		rawStore, err := systemsettings.NewStore(pool)
+		if err != nil {
+			log.Warn("Failed to initialize message queue settings store", zap.Error(err))
+		} else {
+			configured, err = queuesettings.NewStore(rawStore).Load(context.Background())
+			if err != nil {
+				log.Warn("Ignoring invalid persisted message queue settings", zap.Error(err))
+				configured = nil
+			}
+		}
 	}
-	n, err := strconv.Atoi(raw)
+	resolution, err := queuesettings.Resolve(configured, queuesettings.ReadEnvironment())
 	if err != nil {
-		log.Warn("KANDEV_QUEUE_MAX_PER_SESSION is not a number, using default",
-			zap.String("value", raw),
-			zap.Int("default", messagequeue.DefaultMaxPerSession))
+		log.Warn("Failed to resolve message queue capacity, using default", zap.Error(err))
 		return messagequeue.DefaultMaxPerSession
 	}
-	return n
+	if resolution.InvalidEnvironment {
+		log.Warn("Ignoring invalid message queue capacity environment value",
+			zap.String("environment_variable", queuesettings.EnvironmentVariable))
+	}
+	return resolution.Effective.MaxPerSession
 }
 
 func resolveEventNamespace(cfg *config.Config) string {
@@ -466,6 +498,55 @@ func (a *profileLookupAdapter) LookupProfile(ctx context.Context, profileID stri
 //
 // Each integration's package is optional in dev mode; nil-safe so the
 // adapter degrades gracefully when one isn't wired.
+// automationDepsAdapter lets the agent-settings controller name the enabled
+// automations bound to a profile without importing the automation package's
+// types into it.
+type automationDepsAdapter struct {
+	store *automationpkg.Store
+}
+
+func (a *automationDepsAdapter) ListEnabledAutomationsByAgentProfile(
+	ctx context.Context, profileID string,
+) ([]agentsettingscontroller.AutomationReference, error) {
+	if a == nil || a.store == nil {
+		return nil, nil
+	}
+	bindings, err := a.store.ListEnabledByAgentProfile(ctx, profileID)
+	if err != nil {
+		return nil, err
+	}
+	refs := make([]agentsettingscontroller.AutomationReference, 0, len(bindings))
+	for _, b := range bindings {
+		refs = append(refs, agentsettingscontroller.AutomationReference{
+			ID:          b.ID,
+			Name:        b.Name,
+			WorkspaceID: b.WorkspaceID,
+		})
+	}
+	return refs, nil
+}
+
+func (a *automationDepsAdapter) DisableAutomationsByAgentProfile(
+	ctx context.Context, profileID string,
+) ([]agentsettingscontroller.AutomationReference, error) {
+	if a == nil || a.store == nil {
+		return nil, nil
+	}
+	bindings, err := a.store.DisableByAgentProfile(ctx, profileID)
+	if err != nil {
+		return nil, err
+	}
+	refs := make([]agentsettingscontroller.AutomationReference, 0, len(bindings))
+	for _, b := range bindings {
+		refs = append(refs, agentsettingscontroller.AutomationReference{
+			ID:          b.ID,
+			Name:        b.Name,
+			WorkspaceID: b.WorkspaceID,
+		})
+	}
+	return refs, nil
+}
+
 type watcherDepsAdapter struct {
 	linear *linearpkg.Service
 	jira   *jirapkg.Service
@@ -801,7 +882,7 @@ func defaultProviderHostname(provider string) (string, error) {
 	case "gitlab":
 		return "gitlab.com", nil
 	case gitCredentialGitHubProviderID, "":
-		return "github.com", nil
+		return gitCredentialGitHubHost, nil
 	default:
 		return "", fmt.Errorf("unsupported review repository provider %q", provider)
 	}

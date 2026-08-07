@@ -21,6 +21,8 @@ import (
 	"github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/events/bus"
 	gateways "github.com/kandev/kandev/internal/gateway/websocket"
+	"github.com/kandev/kandev/internal/quickterminal"
+	quickterminalrepo "github.com/kandev/kandev/internal/quickterminal/repository"
 	storagepkg "github.com/kandev/kandev/internal/system/storage"
 	storageworkspaces "github.com/kandev/kandev/internal/system/storage/workspaces"
 	taskdto "github.com/kandev/kandev/internal/task/dto"
@@ -143,6 +145,39 @@ func TestAppendSessionStateMessage_IncludesTaskEnvironmentID(t *testing.T) {
 	}
 	if got != "env-42" {
 		t.Fatalf("expected task_environment_id=env-42, got %v", got)
+	}
+}
+
+type fakeCancellationPendingProvider struct {
+	pending  bool
+	revision uint64
+}
+
+func (p fakeCancellationPendingProvider) CancellationPending(string) bool {
+	return p.pending
+}
+
+func (p fakeCancellationPendingProvider) CancellationPendingSnapshot(string) (bool, uint64) {
+	return p.pending, p.revision
+}
+
+func TestAppendSessionStateMessage_IncludesCancellationPending(t *testing.T) {
+	session := &models.TaskSession{ID: "sess-cancel", TaskID: "task-1"}
+	msgs := appendSessionStateMessageWithCancellation(
+		session.ID,
+		session,
+		fakeCancellationPendingProvider{pending: true, revision: 7},
+		nil,
+	)
+	if len(msgs) != 1 {
+		t.Fatalf("expected 1 message, got %d", len(msgs))
+	}
+	payload := decodePayload(t, msgs[0].Payload)
+	if got, ok := payload["cancellation_pending"]; !ok || got != true {
+		t.Fatalf("cancellation_pending = %#v, want explicit true", payload["cancellation_pending"])
+	}
+	if got, ok := payload["cancellation_revision"]; !ok || got != float64(7) {
+		t.Fatalf("cancellation_revision = %#v, want 7", payload["cancellation_revision"])
 	}
 }
 
@@ -763,6 +798,161 @@ func TestBootRouteDataTaskDetailIncludesTaskPageData(t *testing.T) {
 	}
 }
 
+func TestBootPayloadMissingTaskFallsBackToHomeKanbanState(t *testing.T) {
+	harness := newBootStateTestHarness(t)
+	ctx := context.Background()
+	workspaces, err := harness.taskSvc.ListWorkspaces(ctx)
+	if err != nil || len(workspaces) == 0 {
+		t.Fatalf("ListWorkspaces: count=%d err=%v", len(workspaces), err)
+	}
+	workflows, err := harness.taskSvc.ListWorkflows(ctx, workspaces[0].ID, true)
+	if err != nil || len(workflows) == 0 {
+		t.Fatalf("ListWorkflows: count=%d err=%v", len(workflows), err)
+	}
+	steps, err := harness.workflowSvc.ListStepsByWorkflow(ctx, workflows[0].ID)
+	if err != nil || len(steps) == 0 {
+		t.Fatalf("ListStepsByWorkflow: count=%d err=%v", len(steps), err)
+	}
+	task, err := harness.taskSvc.CreateTask(ctx, &taskservice.CreateTaskRequest{
+		WorkspaceID:    workspaces[0].ID,
+		WorkflowID:     workflows[0].ID,
+		WorkflowStepID: steps[0].ID,
+		Title:          "Visible sibling task",
+	})
+	if err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+
+	request := httptest.NewRequest(
+		http.MethodGet,
+		"/t/missing-task",
+		nil,
+	)
+	request.AddCookie(&http.Cookie{Name: activeWorkspaceCookie, Value: workspaces[0].ID})
+	route := webapp.ClassifyRoute("/t/missing-task")
+	payload := bootPayload(ctx, request, routeParams{
+		taskSvc:  harness.taskSvc,
+		userCtrl: harness.userCtrl,
+		services: &Services{Workflow: harness.workflowSvc},
+	}, route)
+
+	if payload.RouteData != nil {
+		t.Fatalf("missing task route data = %#v, want nil", payload.RouteData)
+	}
+	workspacesState, ok := payload.InitialState["workspaces"].(map[string]any)
+	if !ok {
+		t.Fatalf("missing fallback workspaces state: %#v", payload.InitialState["workspaces"])
+	}
+	if got := workspacesState["activeId"]; got != workspaces[0].ID {
+		t.Fatalf("fallback active workspace = %v, want %q", got, workspaces[0].ID)
+	}
+	if _, ok := payload.InitialState["workflows"].(map[string]any); !ok {
+		t.Fatalf("missing fallback workflows state: %#v", payload.InitialState["workflows"])
+	}
+	if _, ok := payload.InitialState["repositories"].(map[string]any); !ok {
+		t.Fatalf("missing fallback repositories state: %#v", payload.InitialState["repositories"])
+	}
+	kanbanMulti, ok := payload.InitialState["kanbanMulti"].(map[string]any)
+	if !ok {
+		t.Fatalf("missing fallback kanban state: %#v", payload.InitialState["kanbanMulti"])
+	}
+	snapshots, ok := kanbanMulti["snapshots"].(map[string]any)
+	if !ok {
+		t.Fatalf("fallback kanban snapshots = %#v", kanbanMulti["snapshots"])
+	}
+	snapshot, ok := snapshots[workflows[0].ID].(map[string]any)
+	if !ok {
+		t.Fatalf("missing fallback workflow snapshot %q: %#v", workflows[0].ID, snapshots)
+	}
+	tasks, ok := snapshot["tasks"].([]map[string]any)
+	if !ok {
+		// JSON-safe boot state is assembled with []map[string]any, so this
+		// assertion protects the sidebar's task source without depending on
+		// JSON round-tripping in the test.
+		t.Fatalf("fallback workflow tasks = %#v", snapshot["tasks"])
+	}
+	if len(tasks) != 1 || tasks[0]["id"] != task.ID {
+		t.Fatalf("fallback workflow tasks = %#v, want task %q", tasks, task.ID)
+	}
+}
+
+func TestBootPayloadAnonymousMissingTaskDoesNotLoadHomeState(t *testing.T) {
+	harness := newBootStateTestHarness(t)
+	ctx := context.Background()
+	request := httptest.NewRequest(http.MethodGet, "/t/missing-task", nil)
+	route := webapp.ClassifyRoute("/t/missing-task")
+	payload := bootPayload(ctx, request, routeParams{
+		taskSvc:  harness.taskSvc,
+		userCtrl: harness.userCtrl,
+		authSvc:  newSSOTestAuthService(t),
+		services: &Services{Workflow: harness.workflowSvc},
+	}, route)
+
+	if payload.RouteData != nil {
+		t.Fatalf("anonymous missing task route data = %#v, want nil", payload.RouteData)
+	}
+	if _, ok := payload.InitialState["auth"]; !ok {
+		t.Fatal("anonymous auth-enabled bootstrap should include auth state")
+	}
+	for _, key := range []string{"workspaces", "workflows", "repositories", "kanbanMulti"} {
+		if _, ok := payload.InitialState[key]; ok {
+			t.Fatalf("anonymous auth-enabled bootstrap should not include %s state", key)
+		}
+	}
+}
+
+func TestBootPayloadValidTaskKeepsRouteSpecificState(t *testing.T) {
+	harness := newBootStateTestHarness(t)
+	ctx := context.Background()
+	workspaces, err := harness.taskSvc.ListWorkspaces(ctx)
+	if err != nil || len(workspaces) == 0 {
+		t.Fatalf("ListWorkspaces: count=%d err=%v", len(workspaces), err)
+	}
+	workflows, err := harness.taskSvc.ListWorkflows(ctx, workspaces[0].ID, true)
+	if err != nil || len(workflows) == 0 {
+		t.Fatalf("ListWorkflows: count=%d err=%v", len(workflows), err)
+	}
+	steps, err := harness.workflowSvc.ListStepsByWorkflow(ctx, workflows[0].ID)
+	if err != nil || len(steps) == 0 {
+		t.Fatalf("ListStepsByWorkflow: count=%d err=%v", len(steps), err)
+	}
+	task, err := harness.taskSvc.CreateTask(ctx, &taskservice.CreateTaskRequest{
+		WorkspaceID:    workspaces[0].ID,
+		WorkflowID:     workflows[0].ID,
+		WorkflowStepID: steps[0].ID,
+		Title:          "Valid detail task",
+	})
+	if err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+
+	request := httptest.NewRequest(http.MethodGet, "/t/"+task.ID, nil)
+	route := webapp.ClassifyRoute("/t/" + task.ID)
+	payload := bootPayload(ctx, request, routeParams{
+		taskSvc:  harness.taskSvc,
+		userCtrl: harness.userCtrl,
+		services: &Services{Workflow: harness.workflowSvc},
+	}, route)
+
+	if payload.RouteData == nil {
+		t.Fatal("valid task route data is nil")
+	}
+	detail, ok := payload.RouteData["taskDetail"].(map[string]any)
+	if !ok {
+		t.Fatalf("task detail route data = %#v", payload.RouteData["taskDetail"])
+	}
+	detailTask, ok := detail["task"].(taskdto.TaskDTO)
+	if !ok {
+		t.Fatalf("task detail task = %#v", detail["task"])
+	}
+	if detailTask.ID != task.ID {
+		t.Fatalf("task detail id = %q, want %q", detailTask.ID, task.ID)
+	}
+	if _, ok := payload.InitialState["workspaces"]; ok {
+		t.Fatal("valid task route should keep the lean initial state without home workspace data")
+	}
+}
+
 func TestBootTaskDetailMessagesProjectShellOutput(t *testing.T) {
 	harness := newBootStateTestHarness(t)
 	ctx := context.Background()
@@ -1156,6 +1346,11 @@ func TestBootPayloadRestoresQuickChatSessions(t *testing.T) {
 	harness := newBootStateTestHarness(t)
 	ctx := context.Background()
 	repo := harness.taskRepo
+	quickTerminalRepo, err := quickterminalrepo.NewWithDB(harness.db, harness.db)
+	if err != nil {
+		t.Fatalf("quick terminal repository: %v", err)
+	}
+	quickTerminalSvc := quickterminal.NewService(quickTerminalRepo, nil, harness.taskSvc)
 
 	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-qc", Name: "Quick Chats"}); err != nil {
 		t.Fatalf("CreateWorkspace: %v", err)
@@ -1199,12 +1394,16 @@ func TestBootPayloadRestoresQuickChatSessions(t *testing.T) {
 		id: "task-workflow", title: "Workflow Ephemeral", updatedAt: base, sessionUpdatedAt: base,
 		agentProfileID: "agent-workflow", workflowID: "wf-qc",
 	})
+	if _, err := quickTerminalSvc.Create(ctx, "ws-qc", "11111111-1111-4111-8111-111111111111"); err != nil {
+		t.Fatalf("create quick terminal descriptor: %v", err)
+	}
 
 	req := httptest.NewRequest(http.MethodGet, "/?workspaceId=ws-qc", nil)
 	payload := bootPayload(ctx, req, routeParams{
-		taskSvc:  harness.taskSvc,
-		services: &Services{Workflow: harness.workflowSvc},
-		userCtrl: harness.userCtrl,
+		taskSvc:          harness.taskSvc,
+		services:         &Services{Workflow: harness.workflowSvc},
+		userCtrl:         harness.userCtrl,
+		quickTerminalSvc: quickTerminalSvc,
 	}, webapp.ClassifyRoute("/"))
 
 	raw, err := json.Marshal(payload)
@@ -1223,6 +1422,12 @@ func TestBootPayloadRestoresQuickChatSessions(t *testing.T) {
 				} `json:"sessions"`
 				IsOpen          bool    `json:"isOpen"`
 				ActiveSessionID *string `json:"activeSessionId"`
+				TerminalTabs    []struct {
+					TabID     string `json:"tabId"`
+					Status    string `json:"status"`
+					Error     string `json:"error"`
+					Workspace string `json:"workspaceId"`
+				} `json:"terminalTabs"`
 			} `json:"quickChat"`
 			TaskSessions struct {
 				Items map[string]struct {
@@ -1262,6 +1467,16 @@ func TestBootPayloadRestoresQuickChatSessions(t *testing.T) {
 	}
 	if decoded.InitialState.QuickChat.ActiveSessionID != nil {
 		t.Fatalf("quick chat active session = %q, want nil", *decoded.InitialState.QuickChat.ActiveSessionID)
+	}
+	if len(decoded.InitialState.QuickChat.TerminalTabs) != 1 {
+		t.Fatalf("quickChat terminal tabs = %#v, want one restored descriptor", decoded.InitialState.QuickChat.TerminalTabs)
+	}
+	tab := decoded.InitialState.QuickChat.TerminalTabs[0]
+	if tab.TabID != "11111111-1111-4111-8111-111111111111" || tab.Workspace != "ws-qc" {
+		t.Fatalf("restored terminal identity = %#v", tab)
+	}
+	if tab.Status != "exited" || tab.Error == "" {
+		t.Fatalf("stale terminal lifecycle = %#v, want exited/unavailable", tab)
 	}
 }
 
@@ -1616,6 +1831,7 @@ func TestQueryValueReadsRouteQueryFromAppStatePath(t *testing.T) {
 }
 
 type bootStateTestHarness struct {
+	db          *sqlx.DB
 	taskSvc     *taskservice.Service
 	taskRepo    *sqlitetaskrepo.Repository
 	workflowSvc *workflowservice.Service
@@ -1681,6 +1897,7 @@ func newBootStateTestHarness(t *testing.T) bootStateTestHarness {
 			Environments:     taskRepo,
 			TaskEnvironments: taskRepo,
 			Reviews:          taskRepo,
+			StatusSummaries:  taskRepo,
 		},
 		eventBus,
 		log,
@@ -1692,6 +1909,7 @@ func newBootStateTestHarness(t *testing.T) bootStateTestHarness {
 	taskSvc.SetStartStepResolver(&startStepResolverAdapter{svc: workflowSvc})
 	workflowSvc.SetWorkflowProvider(&workflowProviderAdapter{svc: taskSvc})
 	return bootStateTestHarness{
+		db:          sqlxDB,
 		taskSvc:     taskSvc,
 		taskRepo:    taskRepo,
 		workflowSvc: workflowSvc,
@@ -1766,7 +1984,8 @@ func TestAppendContextWindowMessage_DoesNotEmitStateSnapshot(t *testing.T) {
 		State:     models.TaskSessionStateRunning,
 		UpdatedAt: time.Date(2026, 1, 2, 12, 0, 0, 0, time.UTC),
 		Metadata: map[string]interface{}{
-			"context_window": map[string]interface{}{"size": 100},
+			models.SessionMetaKeyContextWindow:          map[string]interface{}{"size": 100},
+			models.SessionMetaKeyContextCompactionCount: int64(3),
 		},
 	}
 
@@ -1777,6 +1996,13 @@ func TestAppendContextWindowMessage_DoesNotEmitStateSnapshot(t *testing.T) {
 	payload := decodePayload(t, msgs[0].Payload)
 	if _, present := payload["new_state"]; present {
 		t.Fatal("context-window snapshot must not carry new_state and overwrite fresher session state")
+	}
+	metadata, ok := payload["metadata"].(map[string]interface{})
+	if !ok {
+		t.Fatal("context-window snapshot missing metadata")
+	}
+	if got := metadata[models.SessionMetaKeyContextCompactionCount]; got != float64(3) {
+		t.Fatalf("expected compaction count 3, got %v", got)
 	}
 }
 

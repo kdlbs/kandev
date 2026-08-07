@@ -18,8 +18,8 @@ import (
 // docs/specs/plugins/spec.md ("State machine"):
 //
 //	registered -> active -> disabled -> uninstalled
-//	                 |          |
-//	                 +-> error -+
+//	registered|active|disabled --failure--> error
+//	recovery --> active; Disable --> disabled
 //
 // Status is a type alias (not a distinct type) for store's Record.Status
 // field, and the constants below are direct aliases of the string values
@@ -60,7 +60,7 @@ var allowedTransitions = map[Status][]Status{
 	StatusRegistered: {StatusActive, StatusError},
 	StatusActive:     {StatusDisabled, StatusError},
 	StatusError:      {StatusActive, StatusDisabled},
-	StatusDisabled:   {StatusActive},
+	StatusDisabled:   {StatusActive, StatusError},
 }
 
 // canTransition reports whether to is a legal single-hop transition from

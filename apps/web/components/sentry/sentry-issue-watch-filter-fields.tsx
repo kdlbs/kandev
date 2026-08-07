@@ -17,8 +17,19 @@ import {
   projectMultiSelectItems,
 } from "./sentry-issue-watch-form";
 import type { SentryLevel, SentryProject, SentryStatus } from "@/lib/types/sentry";
+import { useTranslation } from "react-i18next";
+import { resolveOptionLabel } from "@/lib/i18n/option-label";
 
 export type FormSetter = React.Dispatch<React.SetStateAction<FormState>>;
+
+// Both placeholders are Sentry syntax, not copy, so neither reaches the catalog:
+// `production` is a real environment name the user is expected to type back, and
+// the query example is Sentry search syntax — `is:` and `transaction:` are the
+// service's own filter tokens and `unresolved` is a `SentryStatus` union member.
+// Translating either would show the user a query Sentry cannot parse. Same call
+// as the Jira watcher's example JQL and the Linear watcher's filter examples.
+const ENVIRONMENT_PLACEHOLDER = "production";
+const QUERY_PLACEHOLDER = "is:unresolved transaction:/api/checkout";
 
 // useSentryProjects loads the workspace/instance's projects and narrows them
 // to the currently-selected org — Sentry's auth-token endpoint already
@@ -118,6 +129,7 @@ function OrgProjectRow({
   projects: SentryProject[];
   orgs: string[];
 }) {
+  const { t } = useTranslation();
   const onOrgChange = (v: string) =>
     // The selected projects may belong to a different org — clear them so the
     // project picker re-populates within the new org.
@@ -127,20 +139,26 @@ function OrgProjectRow({
   return (
     <div className="grid grid-cols-2 gap-4">
       <SelectField
-        label="Organization slug"
-        description="The Sentry org to poll."
+        label={t("sentry:organizationSlug")}
+        description={t("sentry:organizationSlugHelp")}
         value={form.orgSlug}
         onChange={onOrgChange}
-        placeholder={orgItems.length === 0 ? "No organizations available" : "Select organization"}
+        placeholder={
+          orgItems.length === 0
+            ? t("sentry:noOrganizationsAvailable")
+            : t("sentry:selectOrganization")
+        }
         items={orgItems}
         disabled={orgItems.length === 0}
       />
       <ProjectMultiSelectField
-        label="Project slug"
-        description="The Sentry project(s) to poll. Select one or more."
+        label={t("sentry:projectSlug")}
+        description={t("sentry:projectSlugHelp")}
         selected={form.projectSlugs}
         onChange={(v: string[]) => setForm((p) => ({ ...p, projectSlugs: v }))}
-        placeholder={projectItems.length === 0 ? "No projects available" : "Select projects"}
+        placeholder={
+          projectItems.length === 0 ? t("sentry:noProjectsAvailable") : t("sentry:selectProjects")
+        }
         items={projectItems}
         disabled={projectItems.length === 0}
       />
@@ -157,6 +175,7 @@ export function FilterFields({
   setForm: FormSetter;
   orgs: string[];
 }) {
+  const { t } = useTranslation();
   const projects = useSentryProjects(form.workspaceId, form.sentryInstanceId, form.orgSlug);
   const toggleLevel = useCallback(
     (level: SentryLevel) =>
@@ -183,44 +202,44 @@ export function FilterFields({
       <OrgProjectRow form={form} setForm={setForm} projects={projects} orgs={orgs} />
       <div className="grid grid-cols-2 gap-4">
         <div className="space-y-1.5">
-          <Label>Environment</Label>
-          <p className="text-xs text-muted-foreground">Optional — restrict to one environment.</p>
+          <Label>{t("sentry:environment")}</Label>
+          <p className="text-xs text-muted-foreground">{t("sentry:environmentHelp")}</p>
           <Input
             value={form.environment}
             onChange={(e) => setForm((p) => ({ ...p, environment: e.target.value }))}
-            placeholder="production"
+            placeholder={ENVIRONMENT_PLACEHOLDER}
           />
         </div>
         <SelectField
-          label="Stats period"
-          description="How far back to look for matching issues."
+          label={t("sentry:statsPeriod")}
+          description={t("sentry:statsPeriodHelp")}
           value={form.statsPeriod}
           onChange={(v) => setForm((p) => ({ ...p, statsPeriod: v }))}
-          placeholder="(any)"
-          items={STATS_PERIOD_OPTIONS.map((o) => ({ id: o.value, label: o.label }))}
+          placeholder={t("sentry:any")}
+          // `id` stays the Sentry statsPeriod token; only the menu text is copy.
+          items={STATS_PERIOD_OPTIONS.map((o) => ({
+            id: o.value,
+            label: resolveOptionLabel(t, o),
+          }))}
         />
       </div>
       <div className="space-y-1.5">
-        <Label>Levels</Label>
-        <p className="text-xs text-muted-foreground">
-          Click to toggle. Matches issues at ANY of the selected levels.
-        </p>
+        <Label>{t("sentry:levels")}</Label>
+        <p className="text-xs text-muted-foreground">{t("sentry:levelsHelp")}</p>
         <LevelMultiSelect selected={form.levels} onToggle={toggleLevel} />
       </div>
       <div className="space-y-1.5">
-        <Label>Statuses</Label>
-        <p className="text-xs text-muted-foreground">
-          Click to toggle. Matches issues at ANY of the selected statuses.
-        </p>
+        <Label>{t("sentry:statuses")}</Label>
+        <p className="text-xs text-muted-foreground">{t("sentry:statusesHelp")}</p>
         <StatusMultiSelect selected={form.statuses} onToggle={toggleStatus} />
       </div>
       <div className="space-y-1.5">
-        <Label>Query</Label>
-        <p className="text-xs text-muted-foreground">Free-text Sentry search query (optional).</p>
+        <Label>{t("sentry:query")}</Label>
+        <p className="text-xs text-muted-foreground">{t("sentry:queryHelp")}</p>
         <Input
           value={form.query}
           onChange={(e) => setForm((p) => ({ ...p, query: e.target.value }))}
-          placeholder="is:unresolved transaction:/api/checkout"
+          placeholder={QUERY_PLACEHOLDER}
         />
       </div>
     </>

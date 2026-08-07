@@ -16,7 +16,9 @@ import { ClarificationInputOverlay } from "@/components/task/chat/clarification-
 import { ResizeHandle } from "@/components/task/chat/resize-handle";
 import { useResizableClarificationOverlay } from "@/hooks/use-resizable-clarification-overlay";
 import type { Message } from "@/lib/types/http";
+import { getSessionWorkspacePath } from "@/lib/session-workspace-path";
 import { routePanelMouseDown } from "@/components/task/chat/route-panel-mouse-down";
+import { useTranslation } from "react-i18next";
 
 type QuickChatContentProps = {
   sessionId: string;
@@ -39,6 +41,7 @@ function QuickChatClarificationSection({
   onResolved,
   shortcutScopeRef,
 }: QuickChatClarificationSectionProps) {
+  const { t } = useTranslation();
   const [collapsed, setCollapsed] = useState(false);
   const contentId = useId();
   const { height, containerRef, resetHeight, resizeHandleProps } =
@@ -55,7 +58,7 @@ function QuickChatClarificationSection({
 
   if (!pending) return null;
 
-  const actionLabel = collapsed ? "Expand clarification" : "Collapse clarification";
+  const actionLabel = collapsed ? t("chat:expandClarification") : t("chat:collapseClarification");
 
   return (
     <div className="relative flex-shrink-0 border-t border-sky-400/30 bg-card">
@@ -73,7 +76,7 @@ function QuickChatClarificationSection({
         <div className="flex h-11 flex-shrink-0 items-center justify-between gap-2 pl-4">
           <div className="flex min-w-0 items-center gap-2 text-sm font-medium">
             <IconMessageQuestion className="h-4 w-4 flex-shrink-0 text-blue-500" />
-            <span className="truncate">Clarification needed</span>
+            <span className="truncate">{t("chat:clarificationNeeded")}</span>
           </div>
           <Button
             type="button"
@@ -183,7 +186,7 @@ export const QuickChatContent = memo(function QuickChatContent({
           messagesLoading={panelState.messagesLoading}
           isWorking={panelState.isWorking}
           sessionState={panelState.session?.state}
-          worktreePath={panelState.session?.worktree_path}
+          worktreePath={getSessionWorkspacePath(panelState.session)}
           onOpenFile={undefined}
         />
       </div>

@@ -1,6 +1,6 @@
 # Backend (Go) — architecture and conventions
 
-Scoped guidance for `apps/backend/`. Repo-wide rules (commit format, code-quality limits, etc.) live in the root `AGENTS.md`.
+Scoped guidance for `apps/backend/`. Repo-wide rules (commit format, code-quality limits, etc.) live in the root `AGENTS.md`. For plugin work, start at the [canonical plugin authoring guide](../../docs/public/plugins-authoring.md), follow choose recipe → edit `manifest.yaml` → implement → validate → package → smoke test, and treat `pkg/pluginsdk`, `proto/kandev/plugin/v1/plugin.proto`, `internal/plugins/manifest`, and `internal/plugins/pkgtar` as authoritative; the fixture is test support, and plugins must not access databases or `internal/...` packages.
 
 ## Package Structure
 
@@ -28,11 +28,7 @@ apps/backend/
 │   │   ├── settings/     # Agent settings
 │   │   ├── mcpconfig/    # MCP server configuration
 │   │   └── remoteauth/   # Remote auth catalog and method IDs for remote executors/UI
-│   ├── auth/             # Opt-in user authentication + per-user scoping
-│   │   ├── authn/        # Request-identity plumbing (context + gin helpers, RequireAdmin)
-│   │   ├── httpmw/       # Global enforcement middleware (allowlist, synthetic identity)
-│   │   ├── httpapi/      # /api/v1/auth/* + /api/v1/users endpoints
-│   │   └── store/        # auth_identities, auth_sessions, auth_api_tokens, auth_invites
+│   ├── auth/             # Opt-in auth, per-user scoping, middleware, API, store
 │   ├── agentctl/
 │   │   └── server/       # agentctl HTTP server
 │   │       ├── acp/      # ACP protocol implementation
@@ -60,27 +56,9 @@ apps/backend/
 │   │   ├── models/       # Task, Session, Executor, Message models
 │   │   ├── repository/   # Database access (SQLite)
 │   │   └── service/      # Task business logic
-│   ├── office/           # Autonomous agent management (Office feature)
-│   │   ├── agents/       # Agent instance CRUD + auth guards
-│   │   ├── approvals/    # Approval requests and decisions
-│   │   ├── channels/     # External integration channels (webhooks)
-│   │   ├── config/       # Config sync (DB ↔ filesystem)
-│   │   ├── configloader/ # Filesystem config reader/writer
-│   │   ├── costs/        # Cost tracking and budget policies
-│   │   ├── dashboard/    # Dashboard API, issues, activity, live runs
-│   │   ├── infra/        # GC, reconciliation
-│   │   ├── labels/       # Task labels
-│   │   ├── onboarding/   # Workspace onboarding wizard API
-│   │   ├── projects/     # Project management
-│   │   ├── repository/   # Office SQLite persistence
-│   │   ├── runtime/      # Agent run context, capabilities, and runtime action surface
-│   │   ├── routines/     # Scheduled recurring tasks
-│   │   ├── routing/      # Provider routing: resolver, validators, catalogue, backoff, agent-overrides
-│   │   ├── scheduler/    # Wakeup scheduler (duplicate of service scheduler features)
-│   │   ├── service/      # Core office service (wakeups, event subscribers, execution policy)
-│   │   ├── shared/       # Shared interfaces and activity logging
-│   │   ├── skills/       # Skill injection and materialization
-│   │   └── workspaces/   # Workspace deletion handler
+│   ├── office/           # Autonomous agent management (agents, approvals, channels, config, costs,
+│   │                     # dashboard, infra, labels, onboarding, projects, repository, runtime,
+│   │                     # routines, routing, scheduler, service, shared, skills, workspaces)
 │   ├── events/           # Event bus for internal pub/sub
 │   ├── gateway/          # WebSocket gateway
 │   ├── github/           # GitHub API integration (PRs, reviews, webhooks)
@@ -90,6 +68,7 @@ apps/backend/
 │   ├── integrations/     # Shared shapes for third-party integrations
 │   │   ├── healthpoll/   # Reusable 90s auth-health Poller (used by jira, linear)
 │   │   └── secretadapter/ # Upsert-style adapter over secrets.SecretStore
+│   ├── i18n/             # Localization for backend-rendered browser/share artifacts
 │   ├── jira/             # Jira/Atlassian Cloud integration (config, REST client, poller)
 │   ├── linear/           # Linear integration (config, GraphQL client, poller)
 │   ├── lsp/              # LSP server
@@ -123,6 +102,16 @@ apps/backend/
 - Handles event-driven state transitions via workflow engine
 - Located in `internal/orchestrator/`
 
+**Cancellation progress projection:** `orchestrator.Service.CancellationPending(sessionID)` is a
+runtime-only, session-scoped view of accepted cancellation work. Serialization that carries the
+boolean with ordering identity uses the atomic `CancellationPendingSnapshot(sessionID)` provider,
+whose process-local revision increments on first-begin and last-end transitions. The task DTO
+package exposes both the compatibility boolean provider and snapshot seam; boot state, task-session
+HTTP/WS lists and detail responses, and the session-scoped WebSocket notification must project
+explicit `true`/`false` values plus the revision. Keep count, revision, and publication queue updates
+in one critical section, drain event-bus sends outside it, and never persist this transient marker or
+turn it into a coarse session lifecycle state.
+
 **Watcher Dispatch Coordinator** (`internal/orchestrator/watcher_dispatch.go`) is the single pipeline that turns a freshly-observed external issue (Linear, Jira, future) into a Kandev task. Bus subscribers for each integration forward the event to `WatcherDispatchCoordinator.Dispatch` with a per-integration `WatcherSource` implementation (`source_linear.go`, `source_jira.go`). Source methods carry the integration-specific bits (reserve dedup, build task request, attach task ID, release, auto-start params); the coordinator owns the cross-cutting pipeline (create task, decide auto-start, error/release handling). Add a new watcher = implement `WatcherSource` + register a one-line bus subscriber. Do NOT add another `createXIssueTask` mirror.
 
 **GitHub App registration catalog** (`internal/github/`) stores zero or more managed/imported App
@@ -146,6 +135,8 @@ replace state verification, installation association, or HMAC verification.
 
 **Agent Runtime** (`internal/agent/runtime/`) is the single seam for launching, resuming, stopping, and observing agent executions. ADR 0004 introduced this in Phase 1 of task-model-unification. The public surface is `runtime.Runtime` (`runtime.go`); a thin facade (`facade.go`) delegates to a `Backend` (satisfied by `*lifecycle.Manager`).
 
+**Runtime environment invariant:** `Agent.Runtime().Env` applies to every ACP subprocess entry point. Route new overrides through host-utility probes and sessionless prompts into agentctl child processes before sanitization; cover probe DTO, prompt DTO, and child-process boundaries.
+
 **Convention:** only `internal/agent/runtime/` (and code that pre-dates Phase 1 migration) may import `runtime/lifecycle` or `runtime/agentctl` directly. New consumers — workflow engine actions, cron-driven trigger handlers, future task-tier callers — should depend on `runtime.Runtime`. Existing call sites are migrated through later phases of task-model-unification.
 
 **Lifecycle Manager** (`internal/agent/runtime/lifecycle/`) manages agent instances under the runtime:
@@ -158,6 +149,11 @@ replace state verification, installation association, or HMAC verification.
 - `profile_resolver.go` - resolves agent profiles/settings
 
 **agentctl client** (`internal/agent/runtime/agentctl/`) is the HTTP/WS client used by the lifecycle manager to talk to a running agentctl instance. It is a runtime-tier package and should not be imported outside `internal/agent/runtime/`.
+
+**Agent discovery vs. ACP probing:** discovery answers only whether an agent
+executable is available. Authentication, protocol compatibility, and supported
+models or modes belong to the ACP probe path; do not reintroduce those checks
+as installation gates.
 
 **agentctl** is an HTTP server that:
 - Runs inside Docker containers or as standalone process
@@ -215,6 +211,12 @@ Client (WS) ← Orchestrator ← Lifecycle Manager ←──── stream update
 
 - Provider pattern for DI; stderr for logs, stdout for ACP only.
 - Pass context through chains; event bus for cross-component comm.
+- Production Git commands must use `subproc.NewGitCommand` with a classified
+  `subproc.RunGit*` helper, or hold a classified admission slot across
+  streaming `Start`/`Wait`. Do not construct raw Git commands outside
+  `internal/common/subproc`; choose `interactive`, `lifecycle`, or `background`
+  explicitly for each operation.
+- **Event-bus wildcard parity:** New NATS wildcard subscriptions must verify equivalent `MemoryEventBus` semantics in `go test ./internal/events/bus`.
 - **Repository provider identity:** Provider-backed repositories are keyed by workspace, provider, normalized `provider_host` origin, full owner/namespace, and name. Persist `provider_host` when importing or resolving a remote; do not infer self-managed GitLab rows from owner/name alone. Legacy rows with an empty host have unknown identity and must fail closed for provider write/link operations.
 - **Repository provider branches:** Native task branch pickers derive provider identity only from the persisted workspace repository. GitHub uses the first-party service; manifest-owned providers route through the owning active plugin's workspace-scoped `repositories.branches` action. Do not add provider-specific task-service branches or accept browser-supplied repository descriptors on this path.
 - **Execution access:** Workspace-oriented handlers (files, shell, inference, ports, vscode, LSP) MUST use `GetOrEnsureExecution(ctx, sessionID)` — it recovers from backend restarts by creating executions on-demand. Only use `GetExecutionBySessionID` for operations that require a running agent process (prompt, cancel, mode).
@@ -224,7 +226,19 @@ Client (WS) ← Orchestrator ← Lifecycle Manager ←──── stream update
   - **Joining production goroutines in tests:** When code spawns untracked goroutines (e.g. `fireWakeup`), don't rely on arbitrary sleeps. Join via an observable side effect — e.g. block on `EventTypeComplete` from `a.updatesCh` after unblocking the fake agent. Use short timeouts (~100ms) for in-process negative assertions; reserve multi-second waits for subprocess/integration tests only.
   - **Path/security tests:** Avoid using the real filesystem root as a fixture root. Build fake absolute roots under `t.TempDir()` with `filepath.Join`; this keeps tests portable across Windows, POSIX, and privileged cloud executors.
   - **Filesystem permission tests:** Assert permission-denied behavior only after probing that the current executor enforces the permission bit change. Root-like Sprite executors may bypass `chmod` restrictions.
+  - **Filesystem safety checks:** Carry the original `os.Lstat` `FileInfo` (or opened handle) through every decision; do not re-stat a validated path, which reopens a TOCTOU window before side effects. Test mismatches before writes or manager commands.
+  - **Git indexed-environment tests:** When a test supplies `GIT_CONFIG_COUNT`,
+    `GIT_CONFIG_KEY_n`, and `GIT_CONFIG_VALUE_n`, clear every inherited indexed
+    key first and restore it with `t.Cleanup`. Changing only the count can leave
+    higher parent indexes behind and create a malformed Git config block.
   - **Full test output:** For local full-suite pass/fail validation, prefer plain `go test -race ./...`. `go test -json ./...` can emit very large JSONL streams; if a wrapper or tracing tool truncates the stream mid-record, downstream JSON parsing may fail even when Go tests passed. Use JSON output mainly for CI artifacts or test-report tooling that explicitly requires it.
+  - **Private executable helpers:** When library code starts `os.Executable()` in
+    a private helper mode, do not rely only on a command package's dispatch or
+    package-specific `TestMain`: an importing package's test binary can be the
+    executable and recursively run tests. Use either an explicitly marked
+    private env-and-argument trampoline that runs before normal test entry, or
+    inject a dedicated helper executable. Cover it from a different importing
+    package, not only the helper package.
 
 ### Goroutine ownership and leak testing
 
@@ -248,19 +262,26 @@ Every long-running goroutine must have a single owner with explicit start and st
 
 ## Schema & migrations (SQLite repository)
 
+`internal/task/repository/sqlite` also runs against PostgreSQL: avoid unguarded SQLite-only `rowid`, JSON, or date syntax and add an environment-gated PostgreSQL behavior test for every changed dialect-sensitive method (schema replay is insufficient).
+
 `initSchema()` in `internal/task/repository/sqlite/base_schema.go` runs the `init*Schema` (CREATE TABLE) steps **before** `runMigrations()`. The table-creation DDL uses `CREATE TABLE IF NOT EXISTS`, so on an **existing** database it is a no-op and never adds columns to a table that is already present.
 
 **Rule:** when you add a column to an existing table, add it **only** via an idempotent `ADD COLUMN` migration in `runMigrations()` (`base_migrations.go`), never by editing the table's `CREATE TABLE` alone. Anything that *references* that new column — an index, a backfill `UPDATE`, a partial-index predicate — must live in `runMigrations()` **after** the `ADD COLUMN`, not in the `init*Schema` DDL. Putting a `CREATE INDEX ... (new_col)` in the schema-init block crashes existing DBs with `no such column: new_col`, because schema init runs before the migration that adds the column.
 
 You may still list the column in the `CREATE TABLE` so fresh DBs get it inline, but the migration is the source of truth for evolution and must stand alone. New columns also need: the struct field in `models/`, the DTO field + `ToAPI` in `pkg/api/v1/`, and every `CreateX`/`UpdateX`/bulk write in the repo that should set it.
 
+Built-in prompt content refreshes are seed-data migrations, not schema migrations. Match only known historical content hashes after applying the same normalization as the embedded prompt loader, require `created_at == updated_at` to preserve user edits, and use a conditional update over the original row values to avoid racing concurrent edits. Keep these refreshes with prompt seeding rather than `runMigrations()`.
+
+## Internationalization
+
+`internal/i18n` renders only browser-facing copy: SPA-unavailable pages and shared-task artifacts. Diagnostics, logs, agent/ACP output, and CLI output remain English. Use `i18n.T`/`i18n.Tf` with explicit locale threading (including interpolation/plurals); resolve artifact locale at creation. Catalogs are embedded in `internal/i18n/locales/`; regenerate `pseudo` with `pnpm run i18n:pseudo`.
+Prefer stable error codes for new output so the frontend translates it. See `docs/i18n.md` and ADR `2026-08-01-share-artifact-locale.md`.
+
 ## Code-quality limits
 
 Enforced by `apps/backend/.golangci.yml` (errors on new code only):
-- Functions: ≤80 lines, ≤50 statements
-- Cyclomatic complexity: ≤15 · Cognitive complexity: ≤30
-- Nesting depth: ≤5 · Naked returns only in functions ≤30 lines
-- No duplicated blocks (≥150 tokens) · Repeated strings → constants (≥3 occurrences)
+- Functions: ≤80 lines, ≤50 statements · Cyclomatic complexity: ≤15 · Cognitive complexity: ≤30
+- Nesting depth: ≤5 · Naked returns only in functions ≤30 lines · No duplicated blocks (≥150 tokens) · Repeated strings → constants (≥3 occurrences)
 
 When you hit a limit, extract a helper function. Prefer composition over growing a single function.
 
@@ -275,4 +296,5 @@ golangci-lint run ./... --new-from-rev="<base-sha>" --timeout=5m
 - `internal/agentctl/AGENTS.md` — agentctl server route groups, adapter model, ACP protocol
 - `internal/agentctl/server/api/AGENTS.md` — reverse-proxy body rewriting (`Accept-Encoding`), iframe-blocking header stripping
 - `internal/integrations/AGENTS.md` — playbook for adding a new third-party integration (Jira/Linear pattern)
+- `docs/i18n.md` ("Backend") — `internal/i18n` covers only what Go renders straight to a browser: the SPA-unavailable error pages and the shared-task artifacts (`share.html`, gist README and description). Both are complete. Everything else stays English by design; for new user-facing output prefer a stable error code the frontend translates. Use `i18n.Tf` for anything carrying a value — never `fmt.Sprintf` a translated string, and never build a plural in Go. A locale for output that outlives the request is resolved once at write time and threaded as an argument, not a context value (ADR `2026-08-01-share-artifact-locale.md`).
 - `cmd/mock-agent/AGENTS.md` — predefined `/e2e:<name>` scenarios vs inline `e2e:...` scripts, recipe for adding a scenario, and the rebuild-before-e2e requirement

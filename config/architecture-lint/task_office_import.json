@@ -1,0 +1,34 @@
+{
+  "version": 1,
+  "rule": "ARCH-TASK-OFFICE-IMPORT",
+  "entries": [
+    {
+      "import": "github.com/kandev/kandev/internal/office/models",
+      "path": "apps/backend/internal/task/service/handoff_cascade.go"
+    },
+    {
+      "import": "github.com/kandev/kandev/internal/office/models",
+      "path": "apps/backend/internal/task/service/handoff_cleaner.go"
+    },
+    {
+      "import": "github.com/kandev/kandev/internal/office/models",
+      "path": "apps/backend/internal/task/service/handoff_context.go"
+    },
+    {
+      "import": "github.com/kandev/kandev/internal/office/models",
+      "path": "apps/backend/internal/task/service/handoff_materialize.go"
+    },
+    {
+      "import": "github.com/kandev/kandev/internal/office/models",
+      "path": "apps/backend/internal/task/service/handoff_restore.go"
+    },
+    {
+      "import": "github.com/kandev/kandev/internal/office/models",
+      "path": "apps/backend/internal/task/service/handoff_service.go"
+    },
+    {
+      "import": "github.com/kandev/kandev/internal/office/models",
+      "path": "apps/backend/internal/task/service/service_office.go"
+    }
+  ]
+}

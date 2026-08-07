@@ -15,8 +15,11 @@ import (
 )
 
 const (
-	DefaultUserID    = "default-user"
-	DefaultUserEmail = "default@kandev.local"
+	DefaultUserID        = "default-user"
+	DefaultUserEmail     = "default@kandev.local"
+	DefaultSidebarViewID = "view-all-tasks"
+
+	defaultChangesPanelLayout = "tree"
 )
 
 type sqliteRepository struct {
@@ -444,6 +447,7 @@ func marshalUserSettingsPayload(settings *models.UserSettings) ([]byte, error) {
 	return json.Marshal(map[string]interface{}{
 		"workspace_id":                        settings.WorkspaceID,
 		"kanban_view_mode":                    settings.KanbanViewMode,
+		"startup_page":                        models.NormalizeStartupPage(settings.StartupPage),
 		"workflow_filter_id":                  settings.WorkflowFilterID,
 		"repository_ids":                      settings.RepositoryIDs,
 		"tasks_list_sort":                     models.NormalizeTasksListSort(settings.TasksListSort),
@@ -457,6 +461,7 @@ func marshalUserSettingsPayload(settings *models.UserSettings) ([]byte, error) {
 		"review_auto_mark_on_scroll":          settings.ReviewAutoMarkOnScroll,
 		"confirm_task_archive":                settings.ConfirmTaskArchive,
 		"unread_divider":                      settings.UnreadDivider,
+		"agent_generated_task_titles":         settings.AgentGeneratedTaskTitles,
 		"mcp_task_agent_profile_default":      models.NormalizeMCPTaskAgentProfileDefault(settings.MCPTaskAgentProfileDefault),
 		"show_anchored_prompt_bar":            settings.ShowAnchoredPromptBar,
 		"show_scroll_to_last_prompt":          settings.ShowScrollToLastPrompt,
@@ -467,6 +472,7 @@ func marshalUserSettingsPayload(settings *models.UserSettings) ([]byte, error) {
 		"lsp_auto_start_languages":            lspAutoStart,
 		"lsp_auto_install_languages":          lspAutoInstall,
 		"lsp_server_configs":                  lspServerConfigs,
+		"lsp_status_location":                 models.NormalizeLspStatusLocation(settings.LspStatusLocation),
 		"saved_layouts":                       savedLayouts,
 		"sidebar_views":                       sidebarViews,
 		"sidebar_active_view_id":              settings.SidebarActiveViewID,
@@ -478,6 +484,7 @@ func marshalUserSettingsPayload(settings *models.UserSettings) ([]byte, error) {
 		"github_saved_presets":                settings.GitHubSavedPresets,
 		"github_default_query_presets":        settings.GitHubDefaultQueryPresets,
 		"gitlab_saved_presets":                settings.GitLabSavedPresets,
+		"azure_devops_browse_preferences":     settings.AzureDevOpsBrowsePreferences,
 		"default_utility_agent_id":            settings.DefaultUtilityAgentID,
 		"default_utility_model":               settings.DefaultUtilityModel,
 		"keyboard_shortcuts":                  keyboardShortcuts,
@@ -569,12 +576,14 @@ func mergeVoiceModeDefaults(stored *storedVoiceMode) models.VoiceModeSettings {
 func defaultUserSettings(userID string) *models.UserSettings {
 	return &models.UserSettings{
 		UserID:                          userID,
+		StartupPage:                     models.StartupPageTaskOverview,
 		RepositoryIDs:                   []string{},
 		TasksListSort:                   models.TasksListSortDefault,
 		TasksListGroup:                  models.TasksListGroupDefault,
 		ReviewAutoMarkOnScroll:          true,
 		ConfirmTaskArchive:              true,
 		UnreadDivider:                   false,
+		AgentGeneratedTaskTitles:        true,
 		MCPTaskAgentProfileDefault:      models.MCPTaskAgentProfileDefaultCurrentTask,
 		ShowAnchoredPromptBar:           false,
 		ShowScrollToLastPrompt:          true,
@@ -584,16 +593,29 @@ func defaultUserSettings(userID string) *models.UserSettings {
 		LspAutoStartLanguages:           []string{},
 		LspAutoInstallLanguages:         []string{},
 		LspServerConfigs:                map[string]map[string]interface{}{},
+		LspStatusLocation:               models.LspStatusLocationToolbar,
 		SavedLayouts:                    []models.SavedLayout{},
 		ChatSubmitKey:                   "cmd_enter",
 		KeyboardShortcuts:               map[string]interface{}{},
 		TerminalLinkBehavior:            "new_tab",
-		ChangesPanelLayout:              "tree",
-		SidebarViews:                    []models.SidebarView{},
+		ChangesPanelLayout:              defaultChangesPanelLayout,
+		SidebarViews:                    DefaultSidebarViews(),
+		SidebarActiveViewID:             DefaultSidebarViewID,
 		SidebarTaskPrefs:                normalizeSidebarTaskPrefs(models.SidebarTaskPrefs{}),
 		AppStatusBarOrder:               normalizeAppStatusBarOrder(models.AppStatusBarOrder{}),
 		VoiceMode:                       defaultVoiceModeSettings(),
 	}
+}
+
+func DefaultSidebarViews() []models.SidebarView {
+	return []models.SidebarView{{
+		ID:              DefaultSidebarViewID,
+		Name:            "All tasks",
+		Filters:         []models.SidebarViewClause{},
+		Sort:            models.SidebarViewSort{Key: "state", Direction: "asc"},
+		Group:           "repository",
+		CollapsedGroups: []string{},
+	}}
 }
 
 func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID string) (*models.UserSettings, error) {
@@ -608,6 +630,7 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 	var payload struct {
 		WorkspaceID                     string                              `json:"workspace_id"`
 		KanbanViewMode                  string                              `json:"kanban_view_mode"`
+		StartupPage                     string                              `json:"startup_page"`
 		WorkflowFilterID                string                              `json:"workflow_filter_id"`
 		RepositoryIDs                   []string                            `json:"repository_ids"`
 		TasksListSort                   string                              `json:"tasks_list_sort"`
@@ -621,6 +644,7 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 		ReviewAutoMarkOnScroll          *bool                               `json:"review_auto_mark_on_scroll"`
 		ConfirmTaskArchive              *bool                               `json:"confirm_task_archive"`
 		UnreadDivider                   *bool                               `json:"unread_divider"`
+		AgentGeneratedTaskTitles        *bool                               `json:"agent_generated_task_titles"`
 		MCPTaskAgentProfileDefault      string                              `json:"mcp_task_agent_profile_default"`
 		ShowAnchoredPromptBar           *bool                               `json:"show_anchored_prompt_bar"`
 		ShowScrollToLastPrompt          *bool                               `json:"show_scroll_to_last_prompt"`
@@ -631,9 +655,10 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 		LspAutoStartLanguages           []string                            `json:"lsp_auto_start_languages"`
 		LspAutoInstallLanguages         []string                            `json:"lsp_auto_install_languages"`
 		LspServerConfigs                map[string]map[string]interface{}   `json:"lsp_server_configs"`
+		LspStatusLocation               string                              `json:"lsp_status_location"`
 		SavedLayouts                    []models.SavedLayout                `json:"saved_layouts"`
-		SidebarViews                    []models.SidebarView                `json:"sidebar_views"`
-		SidebarActiveViewID             string                              `json:"sidebar_active_view_id"`
+		SidebarViews                    json.RawMessage                     `json:"sidebar_views"`
+		SidebarActiveViewID             json.RawMessage                     `json:"sidebar_active_view_id"`
 		SidebarDraft                    *models.SidebarViewDraft            `json:"sidebar_draft"`
 		SidebarTaskPrefs                models.SidebarTaskPrefs             `json:"sidebar_task_prefs"`
 		TaskCreateLastUsed              models.TaskCreateLastUsed           `json:"task_create_last_used"`
@@ -642,6 +667,7 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 		GitHubSavedPresets              json.RawMessage                     `json:"github_saved_presets"`
 		GitHubDefaultQueryPresets       json.RawMessage                     `json:"github_default_query_presets"`
 		GitLabSavedPresets              json.RawMessage                     `json:"gitlab_saved_presets"`
+		AzureDevOpsBrowsePreferences    json.RawMessage                     `json:"azure_devops_browse_preferences"`
 		DefaultUtilityAgentID           string                              `json:"default_utility_agent_id"`
 		DefaultUtilityModel             string                              `json:"default_utility_model"`
 		KeyboardShortcuts               map[string]interface{}              `json:"keyboard_shortcuts"`
@@ -658,6 +684,7 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 	}
 	settings.WorkspaceID = payload.WorkspaceID
 	settings.KanbanViewMode = payload.KanbanViewMode
+	settings.StartupPage = models.NormalizeStartupPage(payload.StartupPage)
 	settings.WorkflowFilterID = payload.WorkflowFilterID
 	settings.RepositoryIDs = payload.RepositoryIDs
 	if settings.RepositoryIDs == nil {
@@ -681,6 +708,9 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 	}
 	if payload.UnreadDivider != nil {
 		settings.UnreadDivider = *payload.UnreadDivider
+	}
+	if payload.AgentGeneratedTaskTitles != nil {
+		settings.AgentGeneratedTaskTitles = *payload.AgentGeneratedTaskTitles
 	}
 	settings.MCPTaskAgentProfileDefault = models.NormalizeMCPTaskAgentProfileDefault(payload.MCPTaskAgentProfileDefault)
 	if payload.ShowAnchoredPromptBar != nil {
@@ -711,15 +741,30 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 	if settings.LspServerConfigs == nil {
 		settings.LspServerConfigs = map[string]map[string]interface{}{}
 	}
+	settings.LspStatusLocation = models.NormalizeLspStatusLocation(payload.LspStatusLocation)
 	settings.SavedLayouts = payload.SavedLayouts
 	if settings.SavedLayouts == nil {
 		settings.SavedLayouts = []models.SavedLayout{}
 	}
-	settings.SidebarViews = payload.SidebarViews
-	if settings.SidebarViews == nil {
-		settings.SidebarViews = []models.SidebarView{}
+	if len(payload.SidebarViews) > 0 {
+		if err := json.Unmarshal(payload.SidebarViews, &settings.SidebarViews); err != nil {
+			return nil, err
+		}
+		if settings.SidebarViews == nil {
+			settings.SidebarViews = []models.SidebarView{}
+		}
 	}
-	settings.SidebarActiveViewID = payload.SidebarActiveViewID
+	if len(payload.SidebarActiveViewID) > 0 {
+		var activeViewID *string
+		if err := json.Unmarshal(payload.SidebarActiveViewID, &activeViewID); err != nil {
+			return nil, err
+		}
+		if activeViewID == nil {
+			settings.SidebarActiveViewID = ""
+		} else {
+			settings.SidebarActiveViewID = *activeViewID
+		}
+	}
 	settings.SidebarDraft = payload.SidebarDraft
 	settings.SidebarTaskPrefs = normalizeSidebarTaskPrefs(payload.SidebarTaskPrefs)
 	settings.TaskCreateLastUsed = payload.TaskCreateLastUsed
@@ -728,6 +773,7 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 	settings.GitHubSavedPresets = payload.GitHubSavedPresets
 	settings.GitHubDefaultQueryPresets = payload.GitHubDefaultQueryPresets
 	settings.GitLabSavedPresets = payload.GitLabSavedPresets
+	settings.AzureDevOpsBrowsePreferences = payload.AzureDevOpsBrowsePreferences
 	settings.DefaultUtilityAgentID = payload.DefaultUtilityAgentID
 	settings.DefaultUtilityModel = payload.DefaultUtilityModel
 	settings.KeyboardShortcuts = payload.KeyboardShortcuts
@@ -747,7 +793,7 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 	if payload.ChangesPanelLayout == "flat" {
 		settings.ChangesPanelLayout = "flat"
 	} else {
-		settings.ChangesPanelLayout = "tree"
+		settings.ChangesPanelLayout = defaultChangesPanelLayout
 	}
 	return settings, nil
 }

@@ -18,7 +18,7 @@ describe("PageTopbar phone home crumb", () => {
     expect(home).not.toBeNull();
     // Hidden from md up, where the always-visible AppSidebar owns Home.
     expect(home.className).toContain("md:hidden");
-    expect(home.querySelector("a")?.getAttribute("href")).toBe("/");
+    expect(home.querySelector("a")?.getAttribute("href")).toBe("/?home=overview");
   });
 
   it("omits it when the page supplies its own leading nav", () => {

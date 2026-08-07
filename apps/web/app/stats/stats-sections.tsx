@@ -5,6 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import type { StatsResponse, TaskStatsDTO, RepositoryStatsDTO } from "@/lib/types/http";
 import { formatDuration } from "./stats-utils";
+import { useTranslation } from "react-i18next";
 
 function formatPercent(value: number): string {
   return `${Math.round(value)}%`;
@@ -14,24 +15,27 @@ type GlobalStats = StatsResponse["global"];
 type GitStats = StatsResponse["git_stats"];
 
 function TasksCard({ global }: { global: GlobalStats }) {
+  const { t } = useTranslation();
   const completionRate =
     global.total_tasks > 0 ? Math.round((global.completed_tasks / global.total_tasks) * 100) : 0;
 
   return (
     <Card className="rounded-sm">
       <CardHeader className="pb-2">
-        <CardTitle className="text-sm font-medium text-muted-foreground">Tasks</CardTitle>
+        <CardTitle className="text-sm font-medium text-muted-foreground">
+          {t("stats:tasks")}
+        </CardTitle>
       </CardHeader>
       <CardContent>
         <div className="text-3xl font-bold tabular-nums">{global.total_tasks}</div>
         <div className="flex items-center gap-4 mt-2 text-sm text-muted-foreground">
-          <span>{global.completed_tasks} completed</span>
-          <span>{global.in_progress_tasks} in progress</span>
+          <span>{t("stats:completedCount", { count: global.completed_tasks })}</span>
+          <span>{t("stats:inProgressCount", { count: global.in_progress_tasks })}</span>
         </div>
         {global.total_tasks > 0 && (
           <div className="mt-3">
             <div className="flex justify-between text-xs mb-1">
-              <span className="text-muted-foreground">Completion rate</span>
+              <span className="text-muted-foreground">{t("stats:completionRate")}</span>
               <span className="tabular-nums">{completionRate}%</span>
             </div>
             <div className="h-1.5 bg-muted rounded-full overflow-hidden">
@@ -48,26 +52,29 @@ function TasksCard({ global }: { global: GlobalStats }) {
 }
 
 function TimeSpentCard({ global }: { global: GlobalStats }) {
+  const { t } = useTranslation();
   return (
     <Card className="rounded-sm">
       <CardHeader className="pb-2">
-        <CardTitle className="text-sm font-medium text-muted-foreground">Time Spent</CardTitle>
+        <CardTitle className="text-sm font-medium text-muted-foreground">
+          {t("stats:timeSpent")}
+        </CardTitle>
       </CardHeader>
       <CardContent>
         <div className="text-3xl font-bold tabular-nums">
           {formatDuration(global.total_duration_ms)}
         </div>
         <div className="mt-2 text-sm text-muted-foreground">
-          {formatDuration(global.avg_duration_ms_per_task)} avg per task
+          {t("stats:avgPerTask", { duration: formatDuration(global.avg_duration_ms_per_task) })}
         </div>
         <div className="mt-3 grid grid-cols-2 gap-4 pt-3 border-t">
           <div>
             <div className="text-lg font-semibold tabular-nums">{global.total_turns}</div>
-            <div className="text-xs text-muted-foreground">Total turns</div>
+            <div className="text-xs text-muted-foreground">{t("stats:totalTurns")}</div>
           </div>
           <div>
             <div className="text-lg font-semibold tabular-nums">{global.total_messages}</div>
-            <div className="text-xs text-muted-foreground">Total messages</div>
+            <div className="text-xs text-muted-foreground">{t("stats:totalMessages")}</div>
           </div>
         </div>
       </CardContent>
@@ -76,6 +83,7 @@ function TimeSpentCard({ global }: { global: GlobalStats }) {
 }
 
 function GitOrAveragesCard({ global, git_stats }: { global: GlobalStats; git_stats?: GitStats }) {
+  const { t } = useTranslation();
   const hasGitStats =
     git_stats && (git_stats.total_commits > 0 || git_stats.total_files_changed > 0);
 
@@ -85,13 +93,13 @@ function GitOrAveragesCard({ global, git_stats }: { global: GlobalStats; git_sta
         <CardHeader className="pb-2">
           <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
             <IconGitCommit className="h-4 w-4" />
-            Git Activity
+            {t("stats:gitActivity")}
           </CardTitle>
         </CardHeader>
         <CardContent>
           <div className="text-3xl font-bold tabular-nums">{git_stats.total_commits}</div>
           <div className="mt-2 text-sm text-muted-foreground">
-            {git_stats.total_files_changed} files changed
+            {t("stats:filesChangedCount", { count: git_stats.total_files_changed })}
           </div>
           <div className="mt-3 flex items-center gap-4 pt-3 border-t text-sm">
             <span className="text-emerald-600 dark:text-emerald-400 tabular-nums">
@@ -110,16 +118,18 @@ function GitOrAveragesCard({ global, git_stats }: { global: GlobalStats; git_sta
   return (
     <Card className="rounded-sm">
       <CardHeader className="pb-2">
-        <CardTitle className="text-sm font-medium text-muted-foreground">Averages</CardTitle>
+        <CardTitle className="text-sm font-medium text-muted-foreground">
+          {t("stats:averages")}
+        </CardTitle>
       </CardHeader>
       <CardContent>
         <div className="space-y-3">
           <div className="flex justify-between">
-            <span className="text-sm text-muted-foreground">Turns per task</span>
+            <span className="text-sm text-muted-foreground">{t("stats:turnsPerTask")}</span>
             <span className="font-medium tabular-nums">{global.avg_turns_per_task.toFixed(1)}</span>
           </div>
           <div className="flex justify-between">
-            <span className="text-sm text-muted-foreground">Messages per task</span>
+            <span className="text-sm text-muted-foreground">{t("stats:messagesPerTask")}</span>
             <span className="font-medium tabular-nums">
               {global.avg_messages_per_task.toFixed(1)}
             </span>
@@ -127,12 +137,11 @@ function GitOrAveragesCard({ global, git_stats }: { global: GlobalStats; git_sta
           <div className="flex justify-between">
             <Tooltip>
               <TooltipTrigger asChild>
-                <span className="text-sm text-muted-foreground cursor-help">Turn duration</span>
+                <span className="text-sm text-muted-foreground cursor-help">
+                  {t("stats:turnDuration")}
+                </span>
               </TooltipTrigger>
-              <TooltipContent>
-                Mean duration of completed turns, excluding turns &lt;1s, &gt;=1h, or with no
-                messages
-              </TooltipContent>
+              <TooltipContent>{t("stats:meanDurationOfCompletedTurnsExcluding")}</TooltipContent>
             </Tooltip>
             <span className="font-medium tabular-nums">
               {formatDuration(global.avg_turn_duration_ms)}
@@ -141,18 +150,18 @@ function GitOrAveragesCard({ global, git_stats }: { global: GlobalStats; git_sta
           <div className="flex justify-between">
             <Tooltip>
               <TooltipTrigger asChild>
-                <span className="text-sm text-muted-foreground cursor-help">Messages per turn</span>
+                <span className="text-sm text-muted-foreground cursor-help">
+                  {t("stats:messagesPerTurn")}
+                </span>
               </TooltipTrigger>
-              <TooltipContent>
-                Mean message count per turn, same exclusions as turn duration
-              </TooltipContent>
+              <TooltipContent>{t("stats:meanMessageCountPerTurnSame")}</TooltipContent>
             </Tooltip>
             <span className="font-medium tabular-nums">
               {global.avg_messages_per_turn === 0 ? "—" : global.avg_messages_per_turn.toFixed(1)}
             </span>
           </div>
           <div className="flex justify-between">
-            <span className="text-sm text-muted-foreground">Sessions</span>
+            <span className="text-sm text-muted-foreground">{t("stats:sessions")}</span>
             <span className="font-medium tabular-nums">{global.total_sessions}</span>
           </div>
         </div>
@@ -162,6 +171,7 @@ function GitOrAveragesCard({ global, git_stats }: { global: GlobalStats; git_sta
 }
 
 function SignalCard({ global }: { global: GlobalStats }) {
+  const { t } = useTranslation();
   const avgTurnsPerSession =
     global.total_sessions > 0 ? global.total_turns / global.total_sessions : 0;
   const avgMessagesPerSession =
@@ -178,32 +188,36 @@ function SignalCard({ global }: { global: GlobalStats }) {
   return (
     <Card className="rounded-sm">
       <CardHeader className="pb-2">
-        <CardTitle className="text-sm font-medium text-muted-foreground">Signal</CardTitle>
+        <CardTitle className="text-sm font-medium text-muted-foreground">
+          {t("stats:signal")}
+        </CardTitle>
       </CardHeader>
       <CardContent>
         <div className="text-3xl font-bold tabular-nums">{global.total_sessions}</div>
         <div className="mt-2 text-sm text-muted-foreground">
-          {avgTurnsPerSession.toFixed(1)} turns {"\u00B7"} {avgMessagesPerSession.toFixed(1)}{" "}
-          messages per session
+          {t("stats:turnsMessagesPerSession", {
+            turns: avgTurnsPerSession.toFixed(1),
+            messages: avgMessagesPerSession.toFixed(1),
+          })}
         </div>
         <div className="mt-3 grid grid-cols-2 gap-4 pt-3 border-t text-xs text-muted-foreground">
           <div className="space-y-1">
             <div className="flex justify-between">
-              <span>User msgs</span>
+              <span>{t("stats:userMsgs")}</span>
               <span className="tabular-nums font-mono">{global.total_user_messages}</span>
             </div>
             <div className="flex justify-between">
-              <span>User share</span>
+              <span>{t("stats:userShare")}</span>
               <span className="tabular-nums font-mono">{formatPercent(userShare)}</span>
             </div>
           </div>
           <div className="space-y-1">
             <div className="flex justify-between">
-              <span>Tool calls</span>
+              <span>{t("stats:toolCalls")}</span>
               <span className="tabular-nums font-mono">{global.total_tool_calls}</span>
             </div>
             <div className="flex justify-between">
-              <span>Tool share</span>
+              <span>{t("stats:toolShare")}</span>
               <span className="tabular-nums font-mono">{formatPercent(toolShare)}</span>
             </div>
           </div>
@@ -235,6 +249,7 @@ type WorkloadSectionProps = {
 };
 
 export function WorkloadSection({ task_stats }: WorkloadSectionProps) {
+  const { t } = useTranslation();
   if (task_stats.length === 0) return null;
 
   return (
@@ -242,14 +257,16 @@ export function WorkloadSection({ task_stats }: WorkloadSectionProps) {
       {/* Longest Tasks (Most Complex) */}
       <Card className="rounded-sm">
         <CardHeader className="pb-2">
-          <CardTitle className="text-sm font-medium text-muted-foreground">Longest Tasks</CardTitle>
-          <p className="text-xs text-muted-foreground">Ranked by active duration</p>
+          <CardTitle className="text-sm font-medium text-muted-foreground">
+            {t("stats:longestTasks")}
+          </CardTitle>
+          <p className="text-xs text-muted-foreground">{t("stats:rankedByActiveDuration")}</p>
         </CardHeader>
         <CardContent>
           <TaskDurationList
             tasks={task_stats}
             sortDirection="desc"
-            emptyLabel="No completed tasks yet."
+            emptyLabel={t("stats:noCompletedTasksYet")}
           />
         </CardContent>
       </Card>
@@ -258,15 +275,15 @@ export function WorkloadSection({ task_stats }: WorkloadSectionProps) {
       <Card className="rounded-sm">
         <CardHeader className="pb-2">
           <CardTitle className="text-sm font-medium text-muted-foreground">
-            Quickest Tasks
+            {t("stats:quickestTasks")}
           </CardTitle>
-          <p className="text-xs text-muted-foreground">Ranked by active duration</p>
+          <p className="text-xs text-muted-foreground">{t("stats:rankedByActiveDuration")}</p>
         </CardHeader>
         <CardContent>
           <TaskDurationList
             tasks={task_stats}
             sortDirection="asc"
-            emptyLabel="No completed tasks yet."
+            emptyLabel={t("stats:noCompletedTasksYet")}
           />
         </CardContent>
       </Card>
@@ -285,8 +302,11 @@ export function RepositoryStatsGrid({
 }: {
   repositoryStats: RepositoryStatsDTO[];
 }) {
+  const { t } = useTranslation();
   if (!repositoryStats || repositoryStats.length === 0) {
-    return <div className="text-sm text-muted-foreground py-4">No repository stats yet.</div>;
+    return (
+      <div className="text-sm text-muted-foreground py-4">{t("stats:noRepositoryStatsYet")}</div>
+    );
   }
 
   return (
@@ -308,15 +328,15 @@ export function RepositoryStatsGrid({
             </div>
 
             <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground font-mono">
-              <span>{repo.total_tasks} tasks</span>
-              <span>{repo.session_count} sessions</span>
-              <span>{repo.turn_count} turns</span>
-              <span>{repo.message_count} msgs</span>
+              <span>{t("stats:repoTasksCount", { count: repo.total_tasks })}</span>
+              <span>{t("stats:repoSessionsCount", { count: repo.session_count })}</span>
+              <span>{t("stats:repoTurnsCount", { count: repo.turn_count })}</span>
+              <span>{t("stats:repoMessagesCount", { count: repo.message_count })}</span>
             </div>
 
             <div className="mt-3">
               <div className="flex items-center justify-between text-[10px] text-muted-foreground">
-                <span>Completion</span>
+                <span>{t("stats:completion")}</span>
                 <span className="tabular-nums font-mono">
                   {formatPercent(completionRate)} {"\u00B7"} {repo.completed_tasks}/
                   {repo.total_tasks}
@@ -339,7 +359,9 @@ export function RepositoryStatsGrid({
                   </span>
                 </div>
               ) : (
-                <div className="text-[11px] text-muted-foreground">No git activity yet.</div>
+                <div className="text-[11px] text-muted-foreground">
+                  {t("stats:noGitActivityYet")}
+                </div>
               )}
             </div>
           </div>
@@ -356,9 +378,12 @@ function RankedRepoList({
   repos: RepositoryStatsDTO[];
   valueAccessor: (repo: RepositoryStatsDTO) => string | number;
 }) {
+  const { t } = useTranslation();
   return (
     <div className="space-y-2">
-      {repos.length === 0 && <div className="text-sm text-muted-foreground">No data yet.</div>}
+      {repos.length === 0 && (
+        <div className="text-sm text-muted-foreground">{t("stats:noDataYet")}</div>
+      )}
       {repos.map((repo, idx) => (
         <div key={repo.repository_id} className="flex items-center gap-3">
           <span className="text-xs text-muted-foreground w-4">{idx + 1}.</span>
@@ -375,8 +400,11 @@ function RankedRepoList({
 }
 
 export function TopRepositories({ repositoryStats }: { repositoryStats: RepositoryStatsDTO[] }) {
+  const { t } = useTranslation();
   if (!repositoryStats || repositoryStats.length === 0) {
-    return <div className="text-sm text-muted-foreground py-4">No repository stats yet.</div>;
+    return (
+      <div className="text-sm text-muted-foreground py-4">{t("stats:noRepositoryStatsYet")}</div>
+    );
   }
 
   const topByTurns = [...repositoryStats]
@@ -393,13 +421,13 @@ export function TopRepositories({ repositoryStats }: { repositoryStats: Reposito
     <div className="grid gap-4 md:grid-cols-2">
       <div>
         <div className="text-[11px] uppercase tracking-wider text-muted-foreground mb-2">
-          Top By Turns
+          {t("stats:topByTurns")}
         </div>
         <RankedRepoList repos={topByTurns} valueAccessor={(r) => r.turn_count} />
       </div>
       <div>
         <div className="text-[11px] uppercase tracking-wider text-muted-foreground mb-2">
-          Top By Messages
+          {t("stats:topByMessages")}
         </div>
         <RankedRepoList repos={topByMessages} valueAccessor={(r) => r.message_count} />
       </div>
@@ -408,8 +436,11 @@ export function TopRepositories({ repositoryStats }: { repositoryStats: Reposito
 }
 
 export function RepoLeaders({ repositoryStats }: { repositoryStats: RepositoryStatsDTO[] }) {
+  const { t } = useTranslation();
   if (!repositoryStats || repositoryStats.length === 0) {
-    return <div className="text-sm text-muted-foreground py-4">No repository stats yet.</div>;
+    return (
+      <div className="text-sm text-muted-foreground py-4">{t("stats:noRepositoryStatsYet")}</div>
+    );
   }
 
   const topByTasks = [...repositoryStats]
@@ -431,13 +462,13 @@ export function RepoLeaders({ repositoryStats }: { repositoryStats: RepositorySt
     <div className="grid gap-4 md:grid-cols-3">
       <div>
         <div className="text-[11px] uppercase tracking-wider text-muted-foreground mb-2">
-          Most Tasks
+          {t("stats:mostTasks")}
         </div>
         <RankedRepoList repos={topByTasks} valueAccessor={(r) => r.total_tasks} />
       </div>
       <div>
         <div className="text-[11px] uppercase tracking-wider text-muted-foreground mb-2">
-          Most Time
+          {t("stats:mostTime")}
         </div>
         <RankedRepoList
           repos={topByTime}
@@ -446,7 +477,7 @@ export function RepoLeaders({ repositoryStats }: { repositoryStats: RepositorySt
       </div>
       <div>
         <div className="text-[11px] uppercase tracking-wider text-muted-foreground mb-2">
-          Most Commits
+          {t("stats:mostCommits")}
         </div>
         <RankedRepoList repos={topByCommits} valueAccessor={(r) => r.total_commits} />
       </div>
@@ -455,7 +486,8 @@ export function RepoLeaders({ repositoryStats }: { repositoryStats: RepositorySt
 }
 
 function TaskDurationList({ tasks, sortDirection, emptyLabel }: TaskDurationListProps) {
-  const filtered = [...tasks].filter((t) => t.active_duration_ms > 0);
+  const { t } = useTranslation();
+  const filtered = [...tasks].filter((task) => task.active_duration_ms > 0);
   filtered.sort((a, b) =>
     sortDirection === "desc"
       ? b.active_duration_ms - a.active_duration_ms
@@ -473,13 +505,16 @@ function TaskDurationList({ tasks, sortDirection, emptyLabel }: TaskDurationList
               {task.task_title}
             </div>
             <div className="text-xs text-muted-foreground">
-              {task.turn_count} turns {"\u00B7"} {task.message_count} messages
+              {t("stats:turnsMessagesMiddot", {
+                turns: task.turn_count,
+                messages: task.message_count,
+              })}
             </div>
           </div>
           <div className="text-sm font-medium tabular-nums text-right">
             <div>{formatDuration(task.active_duration_ms)}</div>
             <div className="text-[11px] text-muted-foreground">
-              span {formatDuration(task.elapsed_span_ms)}
+              {t("stats:durationSpan", { duration: formatDuration(task.elapsed_span_ms) })}
             </div>
           </div>
         </div>

@@ -1,6 +1,8 @@
 package backendapp
 
 import (
+	"errors"
+
 	settingsstore "github.com/kandev/kandev/internal/agent/settings/store"
 	analyticsrepository "github.com/kandev/kandev/internal/analytics/repository"
 	authservice "github.com/kandev/kandev/internal/auth"
@@ -22,10 +24,10 @@ import (
 	"github.com/kandev/kandev/internal/plugins"
 	promptservice "github.com/kandev/kandev/internal/prompts/service"
 	promptstore "github.com/kandev/kandev/internal/prompts/store"
+	quickterminalrepository "github.com/kandev/kandev/internal/quickterminal/repository"
 	"github.com/kandev/kandev/internal/runtimeflags"
 	"github.com/kandev/kandev/internal/secrets"
 	"github.com/kandev/kandev/internal/sentry"
-	"github.com/kandev/kandev/internal/slack"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	taskservice "github.com/kandev/kandev/internal/task/service"
 	"github.com/kandev/kandev/internal/task/share"
@@ -48,16 +50,17 @@ type Repositories struct {
 	User          userstore.Repository
 	// UserAccounts is the account-management view of the same user store
 	// (list/create/role/status), consumed by the auth service.
-	UserAccounts userstore.AccountRepository
-	Notification notificationstore.Repository
-	Editor       editorstore.Repository
-	Prompts      promptstore.Repository
-	Utility      utilitystore.Repository
-	Workflow     *workflowrepository.Repository
-	Secrets      secrets.SecretStore
-	Office       *officesqlite.Repository
-	Terminal     *terminalrepo.Repository
-	RuntimeFlags *runtimeflags.SQLiteStore
+	UserAccounts  userstore.AccountRepository
+	Notification  notificationstore.Repository
+	Editor        editorstore.Repository
+	Prompts       promptstore.Repository
+	Utility       utilitystore.Repository
+	Workflow      *workflowrepository.Repository
+	Secrets       secrets.SecretStore
+	Office        *officesqlite.Repository
+	Terminal      *terminalrepo.Repository
+	QuickTerminal *quickterminalrepository.Repository
+	RuntimeFlags  *runtimeflags.SQLiteStore
 	// Auth persists login identities, sessions, PATs, and invites.
 	Auth *authstore.Store
 }
@@ -76,7 +79,6 @@ type Services struct {
 	Jira         *jira.Service
 	Linear       *linear.Service
 	Sentry       *sentry.Service
-	Slack        *slack.Service
 	// WorkflowSync keeps workspace workflows in sync with definition files
 	// in a configured GitHub repository. Nil when GitHub is unavailable.
 	WorkflowSync *workflowsync.Service
@@ -112,4 +114,34 @@ type Services struct {
 	// PATs, invites). Always non-nil; in disabled mode it only answers
 	// Mode() == ModeDisabled and the middleware injects the synthetic identity.
 	Auth *authservice.Service
+}
+
+type schedulerStopper interface {
+	Stop() error
+}
+
+// schedulingRuntime owns the backend-wide queue and cron loops. Keeping the
+// handles together gives startup-failure cleanup and signal-driven shutdown
+// the same idempotent stop path.
+type schedulingRuntime struct {
+	runs schedulerStopper
+	cron schedulerStopper
+}
+
+func (s *schedulingRuntime) Stop() error {
+	if s == nil {
+		return nil
+	}
+	var errs []error
+	if s.cron != nil {
+		if err := s.cron.Stop(); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	if s.runs != nil {
+		if err := s.runs.Stop(); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	return errors.Join(errs...)
 }

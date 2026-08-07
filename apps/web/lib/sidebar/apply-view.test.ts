@@ -1,6 +1,15 @@
+/* eslint-disable max-lines -- archived filter coverage extends the existing view matrix. */
+
 import { describe, it, expect } from "vitest";
 import type { TaskSwitcherItem } from "@/components/task/task-switcher";
-import { applyFilters, applyGroup, applySort, applyView, mergeGroupOrder } from "./apply-view";
+import {
+  applyFilters,
+  applyGroup,
+  applySort,
+  applyView,
+  mergeGroupOrder,
+  viewRequiresArchivedTasks,
+} from "./apply-view";
 import type { FilterClause, SidebarView } from "@/lib/state/slices/ui/sidebar-view-types";
 import { DEFAULT_VIEW } from "@/lib/state/slices/ui/sidebar-view-builtins";
 import type { Repository } from "@/lib/types/http";
@@ -81,14 +90,6 @@ describe("applyFilters — per-dimension", () => {
     const tasks = [task({ id: "a", isIssueWatch: true }), task({ id: "b" })];
     const out = applyFilters(tasks, [C({ dimension: "isIssueWatch", op: "is_not", value: true })]);
     expect(out.map((t) => t.id)).toEqual(["b"]);
-  });
-
-  it("filters by archived boolean", () => {
-    const tasks = [task({ id: "a", isArchived: true }), task({ id: "b" })];
-    const only = applyFilters(tasks, [C({ dimension: "archived", op: "is", value: true })]);
-    expect(only.map((t) => t.id)).toEqual(["a"]);
-    const not = applyFilters(tasks, [C({ dimension: "archived", op: "is", value: false })]);
-    expect(not.map((t) => t.id)).toEqual(["b"]);
   });
 
   it("filters by state bucket with in / not_in", () => {
@@ -676,5 +677,26 @@ describe("default view semantics", () => {
     const out = applyView(tasks, DEFAULT_VIEW);
     const ids = out.groups.flatMap((g) => g.tasks.map((t) => t.id));
     expect(ids.sort()).toEqual(["archived", "plain", "pr-open"]);
+  });
+});
+
+describe("viewRequiresArchivedTasks", () => {
+  it("requests archived candidates only for a positive archived clause", () => {
+    expect(
+      viewRequiresArchivedTasks({
+        filters: [C({ dimension: "archived", op: "is", value: true })],
+      }),
+    ).toBe(true);
+    expect(
+      viewRequiresArchivedTasks({
+        filters: [C({ dimension: "archived", op: "is_not", value: true })],
+      }),
+    ).toBe(false);
+    expect(
+      viewRequiresArchivedTasks({
+        filters: [C({ dimension: "archived", op: "is_not", value: false })],
+      }),
+    ).toBe(true);
+    expect(viewRequiresArchivedTasks({ filters: [] })).toBe(false);
   });
 });

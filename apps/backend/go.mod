@@ -8,6 +8,7 @@ require (
 	github.com/coder/acp-go-sdk v0.13.5
 	github.com/creack/pty v1.1.24
 	github.com/gin-gonic/gin v1.9.1
+	github.com/godbus/dbus/v5 v5.1.0
 	github.com/google/uuid v1.6.0
 	github.com/gorilla/websocket v1.5.3
 	github.com/hashicorp/go-plugin v1.8.0
@@ -20,6 +21,7 @@ require (
 	github.com/moby/moby/client v0.5.0
 	github.com/nats-io/nats.go v1.31.0
 	github.com/pkg/sftp v1.13.10
+	github.com/santhosh-tekuri/jsonschema/v6 v6.0.2
 	github.com/spf13/viper v1.16.0
 	github.com/stretchr/testify v1.11.1
 	github.com/superfly/sprites-go v0.0.0-20260206213632-8176adff485b

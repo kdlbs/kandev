@@ -33,6 +33,8 @@ import {
   type TaskPendingAction,
   type TaskState,
 } from "@/lib/types/http";
+import type { PluginTaskMenuContext } from "@/lib/plugins/types";
+import { usePluginRegistry } from "@/lib/plugins/registry";
 
 const EMPTY_REPOSITORIES: Repository[] = [];
 
@@ -62,6 +64,8 @@ export interface Task {
    * affordance on the card status icon.
    */
   foregroundActivity?: ForegroundActivity | null;
+  /** Live subagents summed across this task's sessions; drives the count chip. */
+  activeSubagentCount?: number;
   reviewStatus?: "pending" | "approved" | "changes_requested" | "rejected" | null;
   primaryExecutorId?: string | null;
   primaryExecutorType?: string | null;
@@ -96,9 +100,12 @@ export interface WorkflowStep {
   };
 }
 
+export type KanbanPresentation = PluginTaskMenuContext["presentation"];
+
 interface KanbanCardProps {
   task: Task;
   workspaceId: string | null;
+  presentation?: KanbanPresentation;
   externalLinkAvailability: KanbanExternalLinkAvailability;
   /** Display labels and hover paths of every repository linked to the task, primary first. */
   repositoryChips?: RepositoryChip[];
@@ -188,8 +195,68 @@ function externalLinkHandlers(
   };
 }
 
+/** Link-dialog openers shared by both the dropdown and context menu builds. */
+function buildLinkDialogHandlers(
+  externalLinkAvailability: KanbanExternalLinkAvailability,
+  dialogs: ReturnType<typeof useKanbanCardDialogState>,
+) {
+  return {
+    onLinkPullRequest: () => dialogs.setShowPRDialog(true),
+    onLinkIssue: () => dialogs.setShowIssueDialog(true),
+    onLinkMergeRequest: externalLinkAvailability.gitlab
+      ? () => dialogs.setShowMRDialog(true)
+      : undefined,
+    ...externalLinkHandlers(externalLinkAvailability, dialogs.setExternalLinkProvider),
+  };
+}
+
+export function buildPluginMenuContext(
+  task: Task,
+  workspaceId: string | null,
+  presentation: KanbanPresentation,
+): PluginTaskMenuContext {
+  return {
+    workspaceId: workspaceId ?? "",
+    taskId: task.id,
+    taskTitle: task.title,
+    workflowStepId: task.workflowStepId ?? null,
+    presentation,
+  };
+}
+
+/** Every confirm/link-dialog open flag the card menus and their dialogs share. */
+function useKanbanCardDialogState() {
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [showArchiveConfirm, setShowArchiveConfirm] = useState(false);
+  const [showDetachConfirm, setShowDetachConfirm] = useState(false);
+  const [showPRDialog, setShowPRDialog] = useState(false);
+  const [showIssueDialog, setShowIssueDialog] = useState(false);
+  const [showMRDialog, setShowMRDialog] = useState(false);
+  const [externalLinkProvider, setExternalLinkProvider] = useState<ExternalLinkProvider | null>(
+    null,
+  );
+  return {
+    showDeleteConfirm,
+    setShowDeleteConfirm,
+    showArchiveConfirm,
+    setShowArchiveConfirm,
+    showDetachConfirm,
+    setShowDetachConfirm,
+    showPRDialog,
+    setShowPRDialog,
+    showIssueDialog,
+    setShowIssueDialog,
+    showMRDialog,
+    setShowMRDialog,
+    externalLinkProvider,
+    setExternalLinkProvider,
+  };
+}
+
 function useKanbanCardMenus({
   task,
+  workspaceId,
+  presentation = "desktop",
   steps,
   isDeleting,
   isArchiving,
@@ -203,6 +270,8 @@ function useKanbanCardMenus({
 }: Pick<
   KanbanCardProps,
   | "task"
+  | "workspaceId"
+  | "presentation"
   | "externalLinkAvailability"
   | "steps"
   | "isDeleting"
@@ -215,16 +284,13 @@ function useKanbanCardMenus({
   | "onMove"
 >) {
   const pluginLinkActions = useTaskPluginLinkActions(task.id, task.repositories ?? []);
+  // Plugins load asynchronously and can be disabled/uninstalled at runtime;
+  // re-render on any registry change so a menu action a plugin registers
+  // after this card already mounted still appears, and one whose plugin was
+  // just disabled doesn't linger as a stale entry.
+  usePluginRegistry();
   const moveMenu = useKanbanCardMoveMenuActions({ task, steps, isSelected, selectedIds, onMove });
-  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
-  const [showArchiveConfirm, setShowArchiveConfirm] = useState(false);
-  const [showDetachConfirm, setShowDetachConfirm] = useState(false);
-  const [showPRDialog, setShowPRDialog] = useState(false);
-  const [showIssueDialog, setShowIssueDialog] = useState(false);
-  const [showMRDialog, setShowMRDialog] = useState(false);
-  const [externalLinkProvider, setExternalLinkProvider] = useState<ExternalLinkProvider | null>(
-    null,
-  );
+  const dialogs = useKanbanCardDialogState();
   const { detachTask, detachingTaskId } = useDetachTask();
   const isDetaching = detachingTaskId === task.id;
   const disabled = Boolean(isDeleting || isArchiving || isDetaching);
@@ -233,7 +299,7 @@ function useKanbanCardMenus({
   const handleDetachConfirm = async () => {
     try {
       await detachTask(task.id);
-      setShowDetachConfirm(false);
+      dialogs.setShowDetachConfirm(false);
     } catch (error) {
       console.error("Failed to detach task:", error);
     }
@@ -250,44 +316,34 @@ function useKanbanCardMenus({
     isDetaching,
     parentTaskId: task.parentTaskId,
     onEdit: onEdit ? () => onEdit(task) : undefined,
-    onArchive: onArchive ? () => setShowArchiveConfirm(true) : undefined,
-    onDelete: onDelete ? () => setShowDeleteConfirm(true) : undefined,
+    onArchive: onArchive ? () => dialogs.setShowArchiveConfirm(true) : undefined,
+    onDelete: onDelete ? () => dialogs.setShowDeleteConfirm(true) : undefined,
     onDetach:
-      task.parentTaskId && !actingOnMultiSelection ? () => setShowDetachConfirm(true) : undefined,
-    onLinkPullRequest: () => setShowPRDialog(true),
-    onLinkIssue: () => setShowIssueDialog(true),
-    onLinkMergeRequest: externalLinkAvailability.gitlab ? () => setShowMRDialog(true) : undefined,
+      task.parentTaskId && !actingOnMultiSelection
+        ? () => dialogs.setShowDetachConfirm(true)
+        : undefined,
+    ...buildLinkDialogHandlers(externalLinkAvailability, dialogs),
     pluginLinkActions,
-    ...externalLinkHandlers(externalLinkAvailability, setExternalLinkProvider),
   };
 
+  const pluginMenuContext = buildPluginMenuContext(task, workspaceId, presentation);
+
   return {
+    ...dialogs,
     dropdownMenuEntries: buildKanbanCardMenuEntries({
       ...menuBase,
       onMoveToStep: moveMenu.moveToStepFromDropdown,
       onSendToWorkflow: moveMenu.sendTaskToWorkflow,
+      pluginMenuContext,
     }),
     contextMenuEntries: buildKanbanCardMenuEntries({
       ...menuBase,
       onMoveToStep: moveMenu.moveSelectedToStep,
       onSendToWorkflow: moveMenu.sendSelectionToWorkflow,
+      pluginMenuContext,
     }),
-    showDeleteConfirm,
-    setShowDeleteConfirm,
-    showArchiveConfirm,
-    setShowArchiveConfirm,
-    showDetachConfirm,
-    setShowDetachConfirm,
     isDetaching,
     handleDetachConfirm,
-    showPRDialog,
-    setShowPRDialog,
-    showIssueDialog,
-    setShowIssueDialog,
-    showMRDialog,
-    setShowMRDialog,
-    externalLinkProvider,
-    setExternalLinkProvider,
   };
 }
 
@@ -485,6 +541,7 @@ function KanbanCardFrame({
 export function KanbanCard({
   task,
   workspaceId,
+  presentation = "desktop",
   externalLinkAvailability,
   repositoryChips,
   onClick,
@@ -511,6 +568,8 @@ export function KanbanCard({
   const repositories = useActiveWorkspaceRepositories();
   const menu = useKanbanCardMenus({
     task,
+    workspaceId,
+    presentation,
     externalLinkAvailability,
     steps,
     isDeleting,

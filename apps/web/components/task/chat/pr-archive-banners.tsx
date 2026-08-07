@@ -13,6 +13,7 @@ import {
   wasPRClosedBannerDismissed,
   wasPRMergedBannerDismissed,
 } from "@/lib/local-storage";
+import { useTranslation } from "react-i18next";
 
 type ArchiveTarget = { title: string; executorType?: string | null };
 
@@ -20,6 +21,7 @@ type ArchiveTarget = { title: string; executorType?: string | null };
 // dialog as every other archive surface. Only failures toast; on success the
 // archive-and-switch flow moves the user to the next task.
 function useBannerArchiveConfirm(taskId: string) {
+  const { t } = useTranslation();
   const store = useAppStoreApi();
   const archiveAndSwitch = useArchiveAndSwitchTask();
   const { toast } = useToast();
@@ -29,7 +31,10 @@ function useBannerArchiveConfirm(taskId: string) {
   const requestArchive = useCallback(() => {
     const state = store.getState();
     const task = findTaskInSnapshots(taskId, state.kanbanMulti.snapshots, state.kanban.tasks);
-    setTarget({ title: task?.title ?? "this task", executorType: task?.primaryExecutorType });
+    setTarget({
+      title: task?.title ?? t("task:thisTask"),
+      executorType: task?.primaryExecutorType,
+    });
   }, [store, taskId]);
 
   const closeConfirm = useCallback(() => setTarget(null), []);
@@ -40,7 +45,7 @@ function useBannerArchiveConfirm(taskId: string) {
       try {
         await archiveAndSwitch(taskId, { cascade });
       } catch {
-        toast({ description: "Failed to archive task", variant: "error" });
+        toast({ description: t("task:failedToArchiveTask"), variant: "error" });
       } finally {
         setIsPending(false);
       }
@@ -74,6 +79,7 @@ function ArchiveDismissBanner({
   taskId: string;
   onDismiss: () => void;
 }) {
+  const { t } = useTranslation();
   const { target, requestArchive, closeConfirm, confirmArchive, isPending } =
     useBannerArchiveConfirm(taskId);
   return (
@@ -87,11 +93,11 @@ function ArchiveDismissBanner({
           onClick={requestArchive}
           className={archiveClass}
         >
-          Archive
+          {t("task:archive")}
         </button>
         <button
           type="button"
-          aria-label="Dismiss"
+          aria-label={t("task:dismiss")}
           data-testid={`${testIdPrefix}-dismiss-button`}
           onClick={onDismiss}
           className={dismissClass}

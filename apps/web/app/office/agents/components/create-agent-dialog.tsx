@@ -6,7 +6,7 @@ import { Input } from "@kandev/ui/input";
 import { Label } from "@kandev/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@kandev/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast/sonner";
 import { useAppStore } from "@/components/state-provider";
 import { createAgentProfile } from "@/lib/api/domains/office-api";
 import type { AgentRole, AgentProfile } from "@/lib/state/slices/office/types";

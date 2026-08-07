@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { setPanelTitle } from "@/lib/layout/panel-portal-manager";
 import { IconCheck } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
@@ -32,6 +33,7 @@ type PRDetailPanelProps = {
 };
 
 export function PRDetailPanelComponent({ panelId, params }: PRDetailPanelProps) {
+  const { t } = useTranslation();
   const activeTaskId = useAppStore((s) => s.tasks.activeTaskId);
   const { prs } = useTaskPR(activeTaskId);
   const activePR = useActiveTaskPR();
@@ -50,7 +52,7 @@ export function PRDetailPanelComponent({ panelId, params }: PRDetailPanelProps) 
   if (!pr || !sessionId) {
     return (
       <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
-        No pull request linked to this session.
+        {t("github:noPullRequestLinkedToThis")}
       </div>
     );
   }
@@ -65,6 +67,7 @@ export function PRDetailPanelComponent({ panelId, params }: PRDetailPanelProps) 
 // --- Add PR feedback as chat context ---
 
 function useAddPRFeedbackAsContext(sessionId: string, prNumber: number) {
+  const { t } = useTranslation();
   const { toast } = useToast();
   const addComment = useCommentsStore((s) => s.addComment);
 
@@ -82,9 +85,9 @@ function useAddPRFeedbackAsContext(sessionId: string, prNumber: number) {
         content,
       };
       addComment(comment);
-      toast({ description: "Added to chat context" });
+      toast({ description: t("github:addedToChatContext") });
     },
-    [sessionId, prNumber, addComment, toast],
+    [sessionId, prNumber, addComment, toast, t],
   );
 
   return { addAsContext };
@@ -238,6 +241,7 @@ function ApproveButton({
   feedback: PRFeedback | null;
   onRefresh: () => void;
 }) {
+  const { t } = useTranslation();
   const { toast } = useToast();
   const [submitting, setSubmitting] = useState(false);
   // Ensures status (and thus the authenticated username) is fetched even when
@@ -259,12 +263,12 @@ function ApproveButton({
         { owner: taskPR.owner, repo: taskPR.repo, number: taskPR.pr_number },
         "APPROVE",
       );
-      toast({ description: "PR approved", variant: "success" });
+      toast({ description: t("github:prApproved"), variant: "success" });
       onRefresh();
     } catch (e) {
       toast({
-        title: "Failed to approve",
-        description: e instanceof Error ? e.message : "An error occurred",
+        title: t("github:failedToApprove"),
+        description: e instanceof Error ? e.message : t("github:anErrorOccurred"),
         variant: "error",
       });
     } finally {
@@ -281,7 +285,7 @@ function ApproveButton({
       disabled={submitting}
     >
       <IconCheck className="h-3.5 w-3.5" />
-      {submitting ? "Approving..." : `Approve as ${mutationActor}`}
+      {submitting ? t("github:approving") : t("github:approveAs", { mutationActor })}
     </Button>
   );
 }
@@ -406,6 +410,21 @@ function mapGitHubDetail(
   };
 }
 
+function useConflictQueued(sessionId: string, prNumber: number): boolean {
+  return useCommentsStore((s) =>
+    s.pendingForChat.some((id) => {
+      const comment = s.byId[id];
+      return (
+        !!comment &&
+        isPRFeedbackComment(comment) &&
+        comment.feedbackType === "conflict" &&
+        comment.sessionId === sessionId &&
+        comment.prNumber === prNumber
+      );
+    }),
+  );
+}
+
 export function PRDetailContent({ taskPR, sessionId }: { taskPR: TaskPR; sessionId: string }) {
   const workspaceId = useAppStore((state) => state.workspaces.activeId);
   const { feedback, loading, refresh } = usePRFeedback(
@@ -428,20 +447,7 @@ export function PRDetailContent({ taskPR, sessionId }: { taskPR: TaskPR; session
 
   const metrics = derivePanelMetrics(taskPR, feedback);
 
-  // True once a conflict prompt for this PR is already queued — avoids piling
-  // up identical instructions if the user clicks "Resolve conflicts" again.
-  const conflictQueued = useCommentsStore((s) =>
-    s.pendingForChat.some((id) => {
-      const c = s.byId[id];
-      return (
-        !!c &&
-        isPRFeedbackComment(c) &&
-        c.feedbackType === "conflict" &&
-        c.sessionId === sessionId &&
-        c.prNumber === taskPR.pr_number
-      );
-    }),
-  );
+  const conflictQueued = useConflictQueued(sessionId, taskPR.pr_number);
 
   const onResolveConflicts = useCallback(() => {
     if (conflictQueued) return;

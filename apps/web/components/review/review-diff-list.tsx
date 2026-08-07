@@ -18,12 +18,14 @@ import {
   reviewFileKey,
 } from "./types";
 import type { ReviewFile } from "./types";
-import { RepoGroupHeader } from "./review-diff-list-groups";
+import { ReviewDiffGroup } from "./review-diff-group";
 import { ReviewDiffHeader, type ReviewExternalLinkContext } from "./review-diff-header";
 import { extractReviewMarkdownPreview } from "./review-markdown-diff-preview";
 import { ReviewMarkdownDiffPreviewContent } from "./review-markdown-diff-preview-content";
 import { groupByRepositoryName } from "@/lib/group-by-repo";
 import { useActiveTaskPR } from "@/hooks/domains/github/use-task-pr";
+import { useTranslation } from "react-i18next";
+import { t } from "@/lib/i18n";
 
 const SCROLL_KEYS = new Set(["ArrowDown", "ArrowUp", "PageDown", "PageUp", "Home", "End", " "]);
 
@@ -105,15 +107,11 @@ export const ReviewDiffList = memo(function ReviewDiffList({
       onKeyDownCapture={handleKeyDown}
     >
       {groups.map((group) => (
-        <div
+        <ReviewDiffGroup
           key={group.repositoryName || "__no_repo__"}
-          data-testid="changes-repo-group"
-          data-repository-name={group.repositoryName || ""}
-        >
-          {showRepoHeaders && (
-            <RepoGroupHeader name={group.repositoryName} fileCount={group.items.length} />
-          )}
-          {group.items.map((file) => {
+          group={group}
+          showRepoHeaders={showRepoHeaders}
+          renderFile={(file) => {
             const key = reviewFileKey(file);
             return (
               <FileDiffSection
@@ -129,7 +127,7 @@ export const ReviewDiffList = memo(function ReviewDiffList({
                 isSelected={selectedFile === key}
                 forceLoad={
                   selectedIndex >= 0 &&
-                  files.findIndex((f) => reviewFileKey(f) === key) <= selectedIndex
+                  files.findIndex((candidate) => reviewFileKey(candidate) === key) <= selectedIndex
                 }
                 onToggleReviewed={onToggleReviewed}
                 onDiscard={onDiscard}
@@ -147,15 +145,12 @@ export const ReviewDiffList = memo(function ReviewDiffList({
                 }}
               />
             );
-          })}
-        </div>
+          }}
+        />
       ))}
     </div>
   );
 });
-
-// Per-repo grouping helpers live in ./review-diff-list-groups so this file
-// stays under the 600-line lint cap.
 
 type FileDiffSectionProps = {
   file: ReviewFile;
@@ -264,6 +259,7 @@ function useAutoMarkOnScroll({
 }
 
 function useCommentRunHandler(sessionId: string) {
+  const { t } = useTranslation();
   const activeTaskId = useAppStore((state) => state.tasks.activeTaskId);
   const { toast } = useToast();
   const { runComment } = useRunComment({
@@ -275,14 +271,14 @@ function useCommentRunHandler(sessionId: string) {
       try {
         const { queued } = await runComment(comment);
         toast({
-          title: "Comment sent",
-          description: queued ? "Queued for the agent." : "Sent to the agent.",
+          title: t("review:commentSent"),
+          description: queued ? t("review:queuedForTheAgent") : t("review:sentToTheAgent"),
         });
       } catch (err) {
         console.error("Failed to run diff comment:", err);
         toast({
-          title: "Failed to send comment",
-          description: "Please try again.",
+          title: t("review:failedToSendComment"),
+          description: t("review:pleaseTryAgain"),
           variant: "error",
         });
       }
@@ -442,7 +438,7 @@ function renderDiffContent(opts: {
         </DiffErrorBoundary>
         {file.diff_skip_reason === "truncated" && (
           <div className="py-1 text-center text-xs text-muted-foreground border-t">
-            Diff truncated — showing first 256 KB
+            {t("review:diffTruncated")}
           </div>
         )}
       </>

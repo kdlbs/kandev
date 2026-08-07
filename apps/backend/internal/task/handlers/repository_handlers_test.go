@@ -341,7 +341,7 @@ func TestHTTPCreateDirectoryCreatesFolder(t *testing.T) {
 
 func trustedRepositoryParent(t *testing.T) string {
 	t.Helper()
-	directory := t.TempDir()
+	directory := canonicalTempDir(t)
 	if err := os.Chmod(directory, 0o700); err != nil {
 		t.Fatalf("chmod trusted repository parent: %v", err)
 	}

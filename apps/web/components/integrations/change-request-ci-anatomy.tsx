@@ -12,6 +12,7 @@ import {
 } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { openExternalLink } from "@/lib/desktop/external-links";
+import { t } from "@/lib/i18n";
 import type { IntegrationChangeRequestPipelineState } from "./integration-change-request-status-types";
 
 export type ChangeRequestCheckCounts = {
@@ -38,14 +39,16 @@ export function ChangeRequestPopoverHeader({
   url,
   onOpenReview,
   externalLabel,
+  openDetailsLabel,
 }: {
   number: number | string;
   title: string;
   url?: string;
   onOpenReview?: () => void;
   externalLabel?: string;
+  openDetailsLabel?: string;
 }) {
-  const displayTitle = `#${number} ${title || "Untitled pull request"}`;
+  const displayTitle = `#${number} ${title || t("integrations:untitledPullRequest")}`;
   return (
     <div
       data-testid="pr-popover-header"
@@ -57,7 +60,7 @@ export function ChangeRequestPopoverHeader({
           data-testid="pr-popover-title"
           className="min-w-0 cursor-pointer truncate text-left text-sm font-medium hover:underline"
           title={displayTitle}
-          aria-label={`Open ${displayTitle} details`}
+          aria-label={openDetailsLabel ?? t("integrations:openDetails", { title: displayTitle })}
           onClick={onOpenReview}
         >
           {displayTitle}
@@ -78,7 +81,7 @@ export function ChangeRequestPopoverHeader({
           target="_blank"
           rel="noopener noreferrer"
           className="cursor-pointer text-muted-foreground hover:text-foreground"
-          aria-label={externalLabel ?? `View pull request #${number} externally`}
+          aria-label={externalLabel ?? t("integrations:viewPullRequestExternally", { number })}
           onClick={(event) => event.stopPropagation()}
         >
           <IconGitPullRequest className="h-3.5 w-3.5" />
@@ -88,11 +91,15 @@ export function ChangeRequestPopoverHeader({
   );
 }
 
-function groupLabel(state: IntegrationChangeRequestPipelineState): string {
-  if (state === "success") return "Passed";
-  if (state === "pending") return "In progress";
-  if (state === "failure") return "Failed";
-  return "Other";
+function groupLabel(
+  state: IntegrationChangeRequestPipelineState,
+  labels?: Partial<Record<IntegrationChangeRequestPipelineState, string>>,
+): string {
+  if (labels?.[state]) return labels[state];
+  if (state === "success") return t("integrations:passed");
+  if (state === "pending") return t("integrations:inProgress");
+  if (state === "failure") return t("integrations:failed");
+  return t("integrations:other");
 }
 
 function GroupIcon({ state }: { state: IntegrationChangeRequestPipelineState }) {
@@ -116,14 +123,22 @@ function countForState(
 
 const CHECK_STATES: IntegrationChangeRequestPipelineState[] = ["success", "pending", "failure"];
 
-function ChecksProgress({ counts }: { counts: ChangeRequestCheckCounts }) {
+function ChecksProgress({
+  counts,
+  passRateLabel,
+}: {
+  counts: ChangeRequestCheckCounts;
+  passRateLabel?: string;
+}) {
   const total = counts.passed + counts.pending + counts.failed;
   if (total === 0) return null;
   const percent = (value: number) => (value / total) * 100;
   return (
     <div data-testid="pr-checks-progress" className="flex flex-col gap-1.5 px-1 pb-1.5 pt-1">
       <div className="flex items-center justify-between text-xs">
-        <span className="font-medium text-foreground">Pass rate</span>
+        <span className="font-medium text-foreground">
+          {passRateLabel ?? t("integrations:passRate")}
+        </span>
         <span className="tabular-nums text-muted-foreground">
           {counts.passed}/{total} ({Math.round(percent(counts.passed))}%)
         </span>
@@ -159,7 +174,7 @@ function CheckRow({ row }: { row: ChangeRequestCheckRow }) {
           size="sm"
           variant="ghost"
           className="h-5 w-5 cursor-pointer p-0"
-          aria-label={`Add ${row.label} failures to chat context`}
+          aria-label={t("integrations:addFailuresToChatContext", { name: row.label })}
           onClick={(event) => {
             event.stopPropagation();
             row.onAddAsContext?.();
@@ -176,24 +191,30 @@ export function ChangeRequestChecksSection({
   counts,
   rows,
   loading,
+  emptyLabel,
+  passRateLabel,
+  groupLabels,
 }: {
   counts: ChangeRequestCheckCounts;
   rows: readonly ChangeRequestCheckRow[];
   loading?: boolean;
+  emptyLabel?: string;
+  passRateLabel?: string;
+  groupLabels?: Partial<Record<IntegrationChangeRequestPipelineState, string>>;
 }) {
   const total = counts.passed + counts.pending + counts.failed;
   if (!loading && total === 0 && rows.length === 0) {
     return (
       <div data-testid="pr-checks-section" className="flex flex-col">
         <div data-testid="pr-checks-empty" className="px-1 py-2 text-xs text-muted-foreground">
-          No checks have started
+          {emptyLabel ?? t("integrations:noChecksHaveStarted")}
         </div>
       </div>
     );
   }
   return (
     <div data-testid="pr-checks-section" className="flex flex-col gap-1">
-      <ChecksProgress counts={counts} />
+      <ChecksProgress counts={counts} passRateLabel={passRateLabel} />
       {CHECK_STATES.map((state) => {
         const stateRows = rows.filter((row) => row.state === state);
         const count = countForState(counts, state);
@@ -203,7 +224,7 @@ export function ChangeRequestChecksSection({
             <div className="flex items-center justify-between gap-2 px-1 py-1">
               <div className="flex items-center gap-1.5">
                 <GroupIcon state={state} />
-                <span className="text-xs font-medium">{groupLabel(state)}</span>
+                <span className="text-xs font-medium">{groupLabel(state, groupLabels)}</span>
               </div>
               <span className="text-xs tabular-nums text-muted-foreground">{count}</span>
             </div>
@@ -233,7 +254,7 @@ export function ChangeRequestReviewRow({
   requested?: number;
 }) {
   const { label, icon } = reviewPresentation(state);
-  const count = `${approved}${required == null ? "" : ` / ${required}`}${requested ? ` · ${requested} requested` : ""}`;
+  const count = `${approved}${required == null ? "" : ` / ${required}`}${requested ? ` · ${t("integrations:requestedCount", { count: requested })}` : ""}`;
   return (
     <div
       data-testid="pr-review-row"
@@ -251,35 +272,39 @@ export function ChangeRequestReviewRow({
 function reviewPresentation(state: "approved" | "changes_requested" | "pending") {
   if (state === "approved") {
     return {
-      label: "Approved",
+      label: t("integrations:approved"),
       icon: <IconCheck className="h-3.5 w-3.5 text-emerald-500" />,
     };
   }
   if (state === "changes_requested") {
     return {
-      label: "Changes requested",
+      label: t("integrations:changesRequested"),
       icon: <IconCircleX className="h-3.5 w-3.5 text-red-500" />,
     };
   }
   return {
-    label: "Awaiting review",
+    label: t("integrations:awaitingReview"),
     icon: <IconCircleDot className="h-3.5 w-3.5 text-muted-foreground" />,
   };
 }
 
-export function ChangeRequestCommentsRow({ count }: { count: number }) {
+export function ChangeRequestCommentsRow({ count, label }: { count: number; label?: string }) {
   if (count <= 0) return null;
   return (
     <div data-testid="pr-comments-row" className="flex items-center gap-1.5 px-1 py-1 text-xs">
       <IconMessageCircle className="h-3.5 w-3.5 text-muted-foreground" />
-      <span>
-        {count} unresolved comment{count === 1 ? "" : "s"}
-      </span>
+      <span>{label ?? t("integrations:unresolvedComments", { count })}</span>
     </div>
   );
 }
 
-export function ChangeRequestPopoverFooter({ updatedAt }: { updatedAt?: number }) {
+export function ChangeRequestPopoverFooter({
+  updatedAt,
+  formatElapsed,
+}: {
+  updatedAt?: number;
+  formatElapsed?: (seconds: number) => string;
+}) {
   const [now, setNow] = useState(updatedAt);
   useEffect(() => {
     if (updatedAt == null) return;
@@ -288,10 +313,7 @@ export function ChangeRequestPopoverFooter({ updatedAt }: { updatedAt?: number }
   }, [updatedAt]);
   if (updatedAt == null) return null;
   const seconds = Math.max(0, Math.floor(((now ?? updatedAt) - updatedAt) / 1000));
-  const elapsed =
-    seconds === 0
-      ? "updated just now"
-      : `updated ${seconds < 60 ? `${seconds}s` : `${Math.floor(seconds / 60)}m`} ago`;
+  const elapsed = formatElapsed ? formatElapsed(seconds) : defaultElapsed(seconds);
   return (
     <div
       data-testid="pr-popover-footer"
@@ -305,6 +327,12 @@ export function ChangeRequestPopoverFooter({ updatedAt }: { updatedAt?: number }
       </span>
     </div>
   );
+}
+
+function defaultElapsed(seconds: number): string {
+  if (seconds === 0) return t("integrations:updatedJustNow");
+  const elapsed = seconds < 60 ? `${seconds}s` : `${Math.floor(seconds / 60)}m`;
+  return t("integrations:updatedAgo", { elapsed });
 }
 
 export function ChangeRequestCIPopoverFrame({ children }: { children: ReactNode }) {

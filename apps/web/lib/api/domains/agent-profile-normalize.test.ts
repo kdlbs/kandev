@@ -5,6 +5,7 @@ import { agentProfileId as toAgentProfileId } from "@/lib/types/ids";
 const sampleEnvVar = { key: "ANTHROPIC_BASE_URL", value: "https://api.example" };
 const SAMPLE_ID = "p1";
 const SAMPLE_PREFIX = "greywall --";
+const WORKSPACE_ID = "workspace-1";
 
 describe("normalizeAgentProfile", () => {
   it("converts snake_case wire payload to canonical camelCase", () => {
@@ -20,6 +21,8 @@ describe("normalizeAgentProfile", () => {
       cli_flags: [{ flag: "--verbose", description: "v", enabled: true }],
       env_vars: [sampleEnvVar],
       cli_passthrough: false,
+      enabled: false,
+      workspace_id: WORKSPACE_ID,
       user_modified: true,
       created_at: "2026-01-01T00:00:00Z",
       updated_at: "2026-01-02T00:00:00Z",
@@ -37,6 +40,8 @@ describe("normalizeAgentProfile", () => {
       cliFlags: [{ flag: "--verbose", description: "v", enabled: true }],
       envVars: [sampleEnvVar],
       cliPassthrough: false,
+      enabled: false,
+      workspaceId: WORKSPACE_ID,
       userModified: true,
       createdAt: "2026-01-01T00:00:00Z",
       updatedAt: "2026-01-02T00:00:00Z",
@@ -51,6 +56,14 @@ describe("normalizeAgentProfile", () => {
     expect(result.allowIndexing).toBe(false);
     expect(result.autoApprove).toBe(false);
     expect(result.agentDisplayName).toBe("");
+    // Legacy payloads without the flag are treated as enabled.
+    expect(result.enabled).toBe(true);
+  });
+
+  it("preserves the office workspace scope when it is present", () => {
+    expect(normalizeAgentProfile({ id: "x", workspace_id: WORKSPACE_ID }).workspaceId).toBe(
+      WORKSPACE_ID,
+    );
   });
 
   it("accepts already-camelCase input", () => {
@@ -136,5 +149,12 @@ describe("toAgentProfilePayload", () => {
       commandPrefix: SAMPLE_PREFIX,
     });
     expect(payload).toEqual({ id: SAMPLE_ID, name: "default", command_prefix: SAMPLE_PREFIX });
+  });
+
+  it("maps enabled and omits it when undefined", () => {
+    const disabled = toAgentProfilePayload({ id: toAgentProfileId(SAMPLE_ID), enabled: false });
+    expect(disabled.enabled).toBe(false);
+    const omitted = toAgentProfilePayload({ id: toAgentProfileId(SAMPLE_ID) });
+    expect("enabled" in omitted).toBe(false);
   });
 });

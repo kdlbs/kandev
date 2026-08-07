@@ -1,6 +1,7 @@
 import { IconCheck, IconClock, IconX } from "@tabler/icons-react";
 import { Badge } from "@kandev/ui/badge";
 import { CollapsibleSection } from "@/components/github/pr-shared";
+import { t } from "@/lib/i18n";
 import { ChangeRequestActionButton, ChangeRequestPersonLink } from "./change-request-detail-header";
 import {
   ChangeRequestFeedbackRow,
@@ -25,11 +26,11 @@ function buildReviewContext(review: ChangeRequestDetailReview, url: string) {
 
 function reviewStateLabel(state: string) {
   const labels: Record<string, string> = {
-    APPROVED: "Approved",
-    CHANGES_REQUESTED: "Changes requested",
-    COMMENTED: "Commented",
-    DISMISSED: "Dismissed",
-    PENDING: "Pending",
+    APPROVED: t("integrations:approved"),
+    CHANGES_REQUESTED: t("integrations:changesRequested"),
+    COMMENTED: t("integrations:commented"),
+    DISMISSED: t("integrations:dismissed"),
+    PENDING: t("integrations:pending"),
   };
   return labels[state.toUpperCase()] ?? state.toLowerCase().replaceAll("_", " ");
 }
@@ -65,10 +66,10 @@ function reviewSummary(reviews: ChangeRequestDetailReview[]) {
     (review) => review.state.toUpperCase() === "CHANGES_REQUESTED",
   ).length;
   const parts: string[] = [];
-  if (approved > 0) parts.push(`${approved} approved`);
-  if (changes > 0) parts.push(`${changes} changes requested`);
+  if (approved > 0) parts.push(t("integrations:approvedCount", { count: approved }));
+  if (changes > 0) parts.push(t("integrations:changesRequestedCount", { count: changes }));
   const other = reviews.length - approved - changes;
-  if (other > 0) parts.push(`${other} other`);
+  if (other > 0) parts.push(t("integrations:otherCount", { count: other }));
   return parts;
 }
 
@@ -95,6 +96,86 @@ function latestReviews(reviews: ChangeRequestDetailReview[]) {
   return [...latest.values()];
 }
 
+function ReviewSubtitle({ state, pendingCount }: { state?: string; pendingCount: number }) {
+  if (!state) return null;
+  return (
+    <div className="px-2 pb-1 text-[10px] text-muted-foreground">
+      {t("integrations:overall")}: <ReviewStateBadge state={state} />
+      {pendingCount > 0 ? (
+        <span className="text-yellow-600 dark:text-yellow-400">
+          {` (${t("integrations:pendingCount", { count: pendingCount })})`}
+        </span>
+      ) : null}
+    </div>
+  );
+}
+
+function SubmittedReview({
+  review,
+  detailUrl,
+  onAdd,
+  onAction,
+}: {
+  review: ChangeRequestDetailReview;
+  detailUrl: string;
+  onAdd?: ChangeRequestDetailProps["onAddContext"];
+  onAction?: ChangeRequestDetailProps["onAction"];
+}) {
+  const reviewerId = normalizeChangeRequestPersonName(review.author.name);
+  return (
+    <div className="space-y-1.5" data-testid={`change-request-submitted-review-${reviewerId}`}>
+      <ChangeRequestFeedbackRow
+        person={review.author}
+        body={review.body}
+        createdAt={review.createdAt}
+        metadata={
+          <>
+            <ReviewStateIcon state={review.state} />
+            <span className="truncate text-[10px] text-muted-foreground">
+              {reviewStateLabel(review.state)}
+            </span>
+          </>
+        }
+        onAdd={onAdd ? () => onAdd("review", buildReviewContext(review, detailUrl)) : undefined}
+      />
+      {review.actions?.map((action) => (
+        <ChangeRequestActionButton
+          key={action.id}
+          action={{ ...action, placement: "thread" }}
+          busy={action.busy ?? false}
+          onAction={() => void onAction?.({ actionId: action.id, targetId: review.author.name })}
+          ariaLabel={t("integrations:actionFromReviewer", {
+            action: action.label,
+            name: review.author.name,
+          })}
+          testId={`change-request-review-action-${action.id}-${reviewerId}`}
+        />
+      ))}
+    </div>
+  );
+}
+
+function PendingReviewer({
+  person,
+}: {
+  person: ChangeRequestDetailModel["requestedReviewers"][number];
+}) {
+  const name =
+    person.kind === "team"
+      ? t("integrations:reviewerTeamName", { name: person.name })
+      : person.name;
+  return (
+    <div
+      className="flex items-center gap-2 rounded-md border border-border bg-muted/30 px-2.5 py-1.5"
+      data-testid={`change-request-pending-reviewer-${normalizeChangeRequestPersonName(person.name)}`}
+    >
+      <IconClock className="h-3.5 w-3.5 shrink-0 text-yellow-500" />
+      <ChangeRequestPersonLink person={{ ...person, name }} />
+      <span className="text-[10px] text-muted-foreground">{t("integrations:pendingReview")}</span>
+    </div>
+  );
+}
+
 export function ChangeRequestReviews({
   detail,
   onAdd,
@@ -112,80 +193,37 @@ export function ChangeRequestReviews({
   );
   const pendingCount = detail.requestedReviewers.length || detail.pendingReviewCount || 0;
   const summaryParts = reviewSummary(reviews);
-  if (pendingCount > 0) summaryParts.push(`${pendingCount} pending`);
+  if (pendingCount > 0) {
+    summaryParts.push(t("integrations:pendingCount", { count: pendingCount }));
+  }
   const summary = summaryParts.length > 0 ? ` — ${summaryParts.join(", ")}` : "";
-  const subtitle = detail.reviewState ? (
-    <div className="px-2 pb-1 text-[10px] text-muted-foreground">
-      Overall: <ReviewStateBadge state={detail.reviewState} />
-      {pendingCount > 0 ? (
-        <span className="text-yellow-600 dark:text-yellow-400"> ({pendingCount} pending)</span>
-      ) : null}
-    </div>
-  ) : null;
   return (
     <CollapsibleSection
-      title={`Reviews${summary}`}
+      title={t("integrations:reviews", { summary })}
       count={reviews.length + pendingCount}
       defaultOpen
-      subtitle={subtitle}
+      subtitle={<ReviewSubtitle state={detail.reviewState} pendingCount={pendingCount} />}
       onAddAll={
         onAdd && reviews.length > 0
           ? () => onAdd("review", buildAllReviewsContext(reviews, detail.url))
           : undefined
       }
-      addAllLabel="Add all reviews to chat context"
+      addAllLabel={t("integrations:addAllReviewsToChatContext")}
     >
       {reviews.length + pendingCount === 0 ? (
-        <p className="px-2 py-2 text-xs text-muted-foreground">No reviews yet</p>
+        <p className="px-2 py-2 text-xs text-muted-foreground">{t("integrations:noReviewsYet")}</p>
       ) : null}
       {reviews.map((review) => (
-        <div
+        <SubmittedReview
           key={review.id}
-          className="space-y-1.5"
-          data-testid={`change-request-submitted-review-${normalizeChangeRequestPersonName(review.author.name)}`}
-        >
-          <ChangeRequestFeedbackRow
-            person={review.author}
-            body={review.body}
-            createdAt={review.createdAt}
-            metadata={
-              <>
-                <ReviewStateIcon state={review.state} />
-                <span className="truncate text-[10px] text-muted-foreground">
-                  {reviewStateLabel(review.state)}
-                </span>
-              </>
-            }
-            onAdd={
-              onAdd ? () => onAdd("review", buildReviewContext(review, detail.url)) : undefined
-            }
-          />
-          {review.actions?.map((action) => (
-            <ChangeRequestActionButton
-              key={action.id}
-              action={{ ...action, placement: "thread" }}
-              busy={action.busy ?? false}
-              onAction={() =>
-                void onAction?.({ actionId: action.id, targetId: review.author.name })
-              }
-              ariaLabel={`${action.label} from ${review.author.name}`}
-              testId={`change-request-review-action-${action.id}-${normalizeChangeRequestPersonName(review.author.name)}`}
-            />
-          ))}
-        </div>
+          review={review}
+          detailUrl={detail.url}
+          onAdd={onAdd}
+          onAction={onAction}
+        />
       ))}
       {detail.requestedReviewers.map((person) => (
-        <div
-          key={person.name}
-          className="flex items-center gap-2 rounded-md border border-border bg-muted/30 px-2.5 py-1.5"
-          data-testid={`change-request-pending-reviewer-${normalizeChangeRequestPersonName(person.name)}`}
-        >
-          <IconClock className="h-3.5 w-3.5 shrink-0 text-yellow-500" />
-          <ChangeRequestPersonLink
-            person={{ ...person, name: `${person.name}${person.kind === "team" ? " (team)" : ""}` }}
-          />
-          <span className="text-[10px] text-muted-foreground">Pending review</span>
-        </div>
+        <PendingReviewer key={person.name} person={person} />
       ))}
     </CollapsibleSection>
   );

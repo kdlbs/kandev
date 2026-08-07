@@ -8,6 +8,21 @@ import (
 	"github.com/kandev/kandev/internal/user/models"
 )
 
+func TestUpdateUserSettingsRequestExposesAzureDevOpsBrowsePreferences(t *testing.T) {
+	field, ok := reflect.TypeFor[UpdateUserSettingsRequest]().FieldByName("AzureDevOpsBrowsePreferences")
+	if !ok || field.Tag.Get("json") != "azure_devops_browse_preferences,omitempty" {
+		t.Fatalf("Azure DevOps browse preferences patch field = %+v, want JSON preference field", field)
+	}
+}
+
+func TestFromUserSettingsMapsAzureDevOpsBrowsePreferences(t *testing.T) {
+	preferences := json.RawMessage(`{"project-1":{"teamId":"team-1"}}`)
+	settings := FromUserSettings(&models.UserSettings{AzureDevOpsBrowsePreferences: preferences})
+	if string(settings.AzureDevOpsBrowsePreferences) != string(preferences) {
+		t.Fatalf("AzureDevOpsBrowsePreferences = %s, want %s", settings.AzureDevOpsBrowsePreferences, preferences)
+	}
+}
+
 func TestTasksListShowDetailsDTO(t *testing.T) {
 	if !FromUserSettings(&models.UserSettings{TasksListShowDetails: true}).TasksListShowDetails {
 		t.Fatal("TasksListShowDetails = false, want true")
@@ -65,6 +80,46 @@ func TestAppStatusBarOrderDTOAndPatchSemantics(t *testing.T) {
 	})
 }
 
+func TestLspStatusLocationDTOAndPatchSemantics(t *testing.T) {
+	t.Run("response normalizes missing and unknown values to toolbar", func(t *testing.T) {
+		for _, value := range []string{"", "future_location"} {
+			got := FromUserSettings(&models.UserSettings{LspStatusLocation: value}).LspStatusLocation
+			if got != models.LspStatusLocationToolbar {
+				t.Fatalf("LspStatusLocation = %q, want toolbar", got)
+			}
+		}
+	})
+
+	t.Run("response preserves status bar", func(t *testing.T) {
+		got := FromUserSettings(&models.UserSettings{
+			LspStatusLocation: models.LspStatusLocationStatusBar,
+		}).LspStatusLocation
+		if got != models.LspStatusLocationStatusBar {
+			t.Fatalf("LspStatusLocation = %q, want status_bar", got)
+		}
+	})
+
+	t.Run("omitted patch stays nil", func(t *testing.T) {
+		var req UpdateUserSettingsRequest
+		if err := json.Unmarshal([]byte(`{}`), &req); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		if req.LspStatusLocation != nil {
+			t.Fatalf("LspStatusLocation = %#v, want nil", req.LspStatusLocation)
+		}
+	})
+
+	t.Run("explicit patch is retained", func(t *testing.T) {
+		var req UpdateUserSettingsRequest
+		if err := json.Unmarshal([]byte(`{"lsp_status_location":"status_bar"}`), &req); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		if req.LspStatusLocation == nil || *req.LspStatusLocation != models.LspStatusLocationStatusBar {
+			t.Fatalf("LspStatusLocation = %#v, want status_bar", req.LspStatusLocation)
+		}
+	})
+}
+
 func TestUpdateUserSettingsRequestSystemMetricsDisplayPreservesOmittedFields(t *testing.T) {
 	var req UpdateUserSettingsRequest
 	if err := json.Unmarshal([]byte(`{"system_metrics_display":{"show_in_topbar":true}}`), &req); err != nil {
@@ -93,6 +148,36 @@ func TestFromUserSettingsIncludesArchiveConfirmation(t *testing.T) {
 	}
 }
 
+func TestAgentGeneratedTaskTitlesDTOAndPatchSemantics(t *testing.T) {
+	if !FromUserSettings(&models.UserSettings{AgentGeneratedTaskTitles: true}).AgentGeneratedTaskTitles {
+		t.Fatal("AgentGeneratedTaskTitles = false, want true")
+	}
+
+	var omitted UpdateUserSettingsRequest
+	if err := json.Unmarshal([]byte(`{}`), &omitted); err != nil {
+		t.Fatalf("decode omitted request: %v", err)
+	}
+	if omitted.AgentGeneratedTaskTitles != nil {
+		t.Fatalf("AgentGeneratedTaskTitles = %#v, want nil for omitted field", omitted.AgentGeneratedTaskTitles)
+	}
+
+	var explicit UpdateUserSettingsRequest
+	if err := json.Unmarshal([]byte(`{"agent_generated_task_titles":true}`), &explicit); err != nil {
+		t.Fatalf("decode explicit request: %v", err)
+	}
+	if explicit.AgentGeneratedTaskTitles == nil || !*explicit.AgentGeneratedTaskTitles {
+		t.Fatalf("AgentGeneratedTaskTitles = %#v, want true", explicit.AgentGeneratedTaskTitles)
+	}
+
+	var disabled UpdateUserSettingsRequest
+	if err := json.Unmarshal([]byte(`{"agent_generated_task_titles":false}`), &disabled); err != nil {
+		t.Fatalf("decode explicit false request: %v", err)
+	}
+	if disabled.AgentGeneratedTaskTitles == nil || *disabled.AgentGeneratedTaskTitles {
+		t.Fatalf("AgentGeneratedTaskTitles = %#v, want false", disabled.AgentGeneratedTaskTitles)
+	}
+}
+
 func TestFromUserSettingsIncludesNormalizedMCPTaskAgentProfileDefault(t *testing.T) {
 	tests := []struct {
 		name  string
@@ -118,6 +203,55 @@ func TestFromUserSettingsIncludesNormalizedMCPTaskAgentProfileDefault(t *testing
 			}
 		})
 	}
+}
+
+func TestFromUserSettingsIncludesNormalizedStartupPage(t *testing.T) {
+	tests := []struct {
+		name  string
+		value string
+		want  string
+	}{
+		{name: "last task", value: models.StartupPageLastTask, want: models.StartupPageLastTask},
+		{name: "unknown defaults to task overview", value: "future_value", want: models.StartupPageTaskOverview},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			raw, err := json.Marshal(FromUserSettings(&models.UserSettings{StartupPage: tt.value}))
+			if err != nil {
+				t.Fatalf("marshal DTO: %v", err)
+			}
+			var payload map[string]any
+			if err := json.Unmarshal(raw, &payload); err != nil {
+				t.Fatalf("decode DTO: %v", err)
+			}
+			if got := payload["startup_page"]; got != tt.want {
+				t.Fatalf("startup_page = %#v, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestUpdateUserSettingsRequestStartupPagePatchSemantics(t *testing.T) {
+	t.Run("omitted value stays nil", func(t *testing.T) {
+		var req UpdateUserSettingsRequest
+		if err := json.Unmarshal([]byte(`{}`), &req); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		if req.StartupPage != nil {
+			t.Fatalf("StartupPage = %#v, want nil", req.StartupPage)
+		}
+	})
+
+	t.Run("explicit last task is retained", func(t *testing.T) {
+		var req UpdateUserSettingsRequest
+		if err := json.Unmarshal([]byte(`{"startup_page":"last_task"}`), &req); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		if req.StartupPage == nil || *req.StartupPage != models.StartupPageLastTask {
+			t.Fatalf("StartupPage = %#v, want last_task", req.StartupPage)
+		}
+	})
 }
 
 func TestUpdateUserSettingsRequestMCPTaskAgentProfileDefaultPatchSemantics(t *testing.T) {

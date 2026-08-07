@@ -1,13 +1,17 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { cleanup, renderHook } from "@testing-library/react";
+import { act, cleanup, renderHook } from "@testing-library/react";
 
 const mockRequest = vi.fn();
+const mockMergeMessages = vi.fn();
 const mockSetMessages = vi.fn();
 const SESSION_ID = "sess-1";
 const MESSAGE_LIST = "message.list";
 
 vi.mock("@/lib/ws/connection", () => ({
-  getWebSocketClient: () => ({ request: mockRequest }),
+  getWebSocketClient: () => ({
+    getSessionSubscriptionReadiness: () => Promise.resolve(),
+    request: mockRequest,
+  }),
 }));
 
 vi.mock("@/components/state-provider", () => ({
@@ -15,6 +19,7 @@ vi.mock("@/components/state-provider", () => ({
   useAppStoreApi: () => ({
     getState: () => ({
       messages: { bySession: {} },
+      mergeMessages: mockMergeMessages,
       setMessages: mockSetMessages,
     }),
   }),
@@ -34,7 +39,11 @@ describe("useVisibilityBackfill", () => {
     vi.clearAllMocks();
     mockRequest.mockResolvedValue({ messages: [], has_more: false });
     store = {
-      getState: () => ({ messages: { bySession: {} }, setMessages: mockSetMessages }),
+      getState: () => ({
+        messages: { bySession: {} },
+        mergeMessages: mockMergeMessages,
+        setMessages: mockSetMessages,
+      }),
     };
   });
 
@@ -42,9 +51,12 @@ describe("useVisibilityBackfill", () => {
     cleanup();
   });
 
-  it("fetches when the tab becomes visible", () => {
+  it("fetches when the tab becomes visible", async () => {
     renderHook(() => useVisibilityBackfill(SESSION_ID, store as never));
-    setVisibility("visible");
+    await act(async () => {
+      setVisibility("visible");
+      await Promise.resolve();
+    });
     expect(mockRequest).toHaveBeenCalledTimes(1);
     expect(mockRequest).toHaveBeenCalledWith(
       MESSAGE_LIST,
@@ -53,10 +65,13 @@ describe("useVisibilityBackfill", () => {
     );
   });
 
-  it("fetches when the Kandev window regains focus", () => {
+  it("fetches when the Kandev window regains focus", async () => {
     renderHook(() => useVisibilityBackfill(SESSION_ID, store as never));
 
-    window.dispatchEvent(new Event("focus"));
+    await act(async () => {
+      window.dispatchEvent(new Event("focus"));
+      await Promise.resolve();
+    });
 
     expect(mockRequest).toHaveBeenCalledWith(
       MESSAGE_LIST,
@@ -84,12 +99,15 @@ describe("useVisibilityBackfill", () => {
     expect(mockRequest).not.toHaveBeenCalled();
   });
 
-  it("re-registers when sessionId changes", () => {
+  it("re-registers when sessionId changes", async () => {
     const { rerender } = renderHook(
       ({ id }: { id: string | null }) => useVisibilityBackfill(id, store as never),
       { initialProps: { id: SESSION_ID } },
     );
-    setVisibility("visible");
+    await act(async () => {
+      setVisibility("visible");
+      await Promise.resolve();
+    });
     expect(mockRequest).toHaveBeenLastCalledWith(
       MESSAGE_LIST,
       expect.objectContaining({ session_id: SESSION_ID }),
@@ -97,7 +115,10 @@ describe("useVisibilityBackfill", () => {
     );
 
     rerender({ id: "sess-2" });
-    setVisibility("visible");
+    await act(async () => {
+      setVisibility("visible");
+      await Promise.resolve();
+    });
     expect(mockRequest).toHaveBeenLastCalledWith(
       MESSAGE_LIST,
       expect.objectContaining({ session_id: "sess-2" }),

@@ -194,7 +194,7 @@ test.describe("Terminal agent (TUI passthrough)", () => {
     // Terminal should show output from both auto-started step prompts.
     // The mock TUI prints "Processed: <prompt>" for each stdin line it receives.
     await session.expectPassthroughHasText("Analyze", 30_000);
-    await session.expectPassthroughHasText("Implement", 30_000);
+    await session.expectPassthroughHasText("Processed: Implement", 30_000);
 
     // Stepper shows Review as current step after the full cascade
     await expect(session.stepperStep("Review")).toHaveAttribute("aria-current", "step", {
@@ -252,8 +252,8 @@ test.describe("Terminal agent (TUI passthrough)", () => {
     // Terminal shows output from Analyze step (before reset)
     await session.expectPassthroughHasText("Analyze", 30_000);
 
-    // After context reset, Implement step prompt is delivered to the fresh process
-    await session.expectPassthroughHasText("Implement", 30_000);
+    // After context reset, the fresh process completes the Implement step prompt.
+    await session.expectPassthroughHasText("Processed: Implement", 30_000);
 
     // Stepper shows Review as current step after the full cascade
     await expect(session.stepperStep("Review")).toHaveAttribute("aria-current", "step", {

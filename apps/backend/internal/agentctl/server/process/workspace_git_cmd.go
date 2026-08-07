@@ -1,12 +1,27 @@
 package process
 
 import (
+	"bytes"
 	"context"
 	"os"
 	"os/exec"
+	"strings"
 
 	"github.com/kandev/kandev/internal/common/subproc"
 )
+
+type gitWorkClassContextKey struct{}
+
+func withGitWorkClass(ctx context.Context, class subproc.GitWorkClass) context.Context {
+	return context.WithValue(ctx, gitWorkClassContextKey{}, class)
+}
+
+func gitWorkClass(ctx context.Context) subproc.GitWorkClass {
+	if class, ok := ctx.Value(gitWorkClassContextKey{}).(subproc.GitWorkClass); ok {
+		return class
+	}
+	return subproc.GitInteractive
+}
 
 // gitOptionalLocksOff is the env var git reads to skip "optional" locks, i.e.
 // the index refresh lock that `git status` and friends take to update stat
@@ -19,53 +34,115 @@ import (
 // See: https://git-scm.com/docs/git#Documentation/git.txt-codeGITOPTIONALLOCKSltbooleangtcode
 const gitOptionalLocksOff = "GIT_OPTIONAL_LOCKS=0"
 
-// pollingGitCommand builds an exec.Cmd for a polling git invocation. It sets
-// the workspace directory and disables optional locks so the background poll
-// loop doesn't contend with user-initiated git operations.
+// pollingGitCommand builds an exec.Cmd with optional Git locks disabled. The
+// lock policy is independent from the admission class: fresh interactive
+// status also needs lockless reads while still using the interactive queue.
 func (wt *WorkspaceTracker) pollingGitCommand(ctx context.Context, args ...string) *exec.Cmd {
-	cmd := exec.CommandContext(ctx, "git", args...)
+	cmd := subproc.NewGitCommand(ctx, args...)
 	cmd.Dir = wt.workDir
 	cmd.Env = append(os.Environ(), gitOptionalLocksOff)
 	return cmd
 }
 
-// gitCmdContext builds a per-command timeout-bounded ctx and an exec.Cmd
-// for a git invocation. When polling is true, the cmd is built via
-// pollingGitCommand (which sets GIT_OPTIONAL_LOCKS=0) so the background
-// poll loop doesn't contend with user-initiated git operations on the
-// index lock. The returned cancel must be deferred by the caller to
-// release the timer once the subprocess exits.
-func (wt *WorkspaceTracker) gitCmdContext(ctx context.Context, polling bool, args ...string) (context.Context, context.CancelFunc, *exec.Cmd) {
-	cctx, cancel := context.WithTimeout(ctx, gitCommandTimeout)
-	if polling {
-		return cctx, cancel, wt.pollingGitCommand(cctx, args...)
+// gitCommand builds a git command for the already-admitted execution context.
+// The timeout is deliberately owned by subproc.RunGit*AfterAcquire so queue
+// time cannot consume the command's execution budget.
+func (wt *WorkspaceTracker) gitCommand(ctx context.Context, lockless bool, args ...string) *exec.Cmd {
+	if lockless {
+		return wt.pollingGitCommand(ctx, args...)
 	}
-	cmd := exec.CommandContext(cctx, "git", args...)
+	cmd := subproc.NewGitCommand(ctx, args...)
 	cmd.Dir = wt.workDir
-	return cctx, cancel, cmd
+	return cmd
 }
 
-// runGitOutput runs a git command with a per-command timeout and returns its
-// stdout. The derived ctx ensures cancellation SIGKILLs the subprocess and
-// releases its throttle slot even when the outer poll ctx is long-lived.
+// runGitOutput runs a class-selected git command with a per-command timeout
+// and returns its stdout. Background contexts also disable optional Git locks.
 func (wt *WorkspaceTracker) runGitOutput(ctx context.Context, args ...string) ([]byte, error) {
-	cctx, cancel, cmd := wt.gitCmdContext(ctx, false, args...)
-	defer cancel()
-	return subproc.RunGitOutput(cctx, cmd)
+	class := gitWorkClass(ctx)
+	return wt.runGitOutputClass(ctx, class, class == subproc.GitBackground, args...)
+}
+
+// runGitOutputClass runs a Git command under the supplied admission class and
+// independently chooses whether Git's optional locks are disabled. Keeping
+// these concerns separate prevents a fresh interactive status from being
+// accidentally scheduled on the background FIFO just because it is read-only.
+func (wt *WorkspaceTracker) runGitOutputClass(
+	ctx context.Context,
+	class subproc.GitWorkClass,
+	lockless bool,
+	args ...string,
+) ([]byte, error) {
+	out, runErr, execCtxErr := subproc.RunGitOutputAfterAcquire(
+		ctx,
+		class,
+		gitCommandTimeout,
+		func(execCtx context.Context) *exec.Cmd {
+			return wt.gitCommand(execCtx, lockless, args...)
+		},
+	)
+	return out, gitCommandError(runErr, execCtxErr)
 }
 
 // runGit is runGitOutput's no-stdout sibling for verify-style probes where
 // only the exit code matters.
 func (wt *WorkspaceTracker) runGit(ctx context.Context, args ...string) error {
-	cctx, cancel, cmd := wt.gitCmdContext(ctx, false, args...)
-	defer cancel()
-	return subproc.RunGit(cctx, cmd)
+	class := gitWorkClass(ctx)
+	runErr, execCtxErr := subproc.RunGitAfterAcquire(
+		ctx,
+		class,
+		gitCommandTimeout,
+		func(execCtx context.Context) *exec.Cmd {
+			return wt.gitCommand(execCtx, class == subproc.GitBackground, args...)
+		},
+	)
+	return gitCommandError(runErr, execCtxErr)
 }
 
-// runPollingGitOutput is runGitOutput's polling sibling — see
-// gitCmdContext for the GIT_OPTIONAL_LOCKS rationale.
+// runPollingGitOutput is runGitOutput's polling sibling. It always uses the
+// background class and builds the command with GIT_OPTIONAL_LOCKS=0.
 func (wt *WorkspaceTracker) runPollingGitOutput(ctx context.Context, args ...string) ([]byte, error) {
-	cctx, cancel, cmd := wt.gitCmdContext(ctx, true, args...)
-	defer cancel()
-	return subproc.RunGitOutput(cctx, cmd)
+	out, runErr, execCtxErr := subproc.RunGitOutputAfterAcquire(
+		ctx,
+		subproc.GitBackground,
+		gitCommandTimeout,
+		func(execCtx context.Context) *exec.Cmd {
+			return wt.gitCommand(execCtx, true, args...)
+		},
+	)
+	return out, gitCommandError(runErr, execCtxErr)
+}
+
+func (wt *WorkspaceTracker) runPollingGitOutputWithStderr(ctx context.Context, args ...string) ([]byte, string, error) {
+	var stderr bytes.Buffer
+	out, runErr, execCtxErr := subproc.RunGitOutputAfterAcquire(
+		ctx,
+		subproc.GitBackground,
+		gitCommandTimeout,
+		func(execCtx context.Context) *exec.Cmd {
+			cmd := wt.gitCommand(execCtx, true, args...)
+			cmd.Stderr = &stderr
+			return cmd
+		},
+	)
+	return out, strings.TrimSpace(stderr.String()), gitCommandError(runErr, execCtxErr)
+}
+
+func (wt *WorkspaceTracker) runPollingGit(ctx context.Context, args ...string) error {
+	runErr, execCtxErr := subproc.RunGitAfterAcquire(
+		ctx,
+		subproc.GitBackground,
+		gitCommandTimeout,
+		func(execCtx context.Context) *exec.Cmd {
+			return wt.gitCommand(execCtx, true, args...)
+		},
+	)
+	return gitCommandError(runErr, execCtxErr)
+}
+
+func gitCommandError(runErr, execCtxErr error) error {
+	if runErr != nil {
+		return runErr
+	}
+	return execCtxErr
 }

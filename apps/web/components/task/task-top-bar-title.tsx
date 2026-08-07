@@ -1,10 +1,12 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Breadcrumb, BreadcrumbItem, BreadcrumbList, BreadcrumbPage } from "@kandev/ui/breadcrumb";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { Input } from "@kandev/ui/input";
 import { useTaskActions } from "@/hooks/use-task-actions";
+import { clampTaskTitleInput } from "@/lib/task-title";
 
 type TaskTopBarTitleProps = {
   taskId?: string | null;
@@ -14,6 +16,7 @@ type TaskTopBarTitleProps = {
 
 export function TaskTopBarTitle({ taskId, taskTitle, isArchived }: TaskTopBarTitleProps) {
   const { renameTaskById } = useTaskActions();
+  const { t } = useTranslation();
   const [isEditing, setIsEditing] = useState(false);
   const [draft, setDraft] = useState("");
   const titleRef = useRef<HTMLSpanElement>(null);
@@ -78,10 +81,10 @@ export function TaskTopBarTitle({ taskId, taskTitle, isArchived }: TaskTopBarTit
     return (
       <Input
         data-testid="task-title-rename-input"
-        aria-label="Task title"
+        aria-label={t("task:taskTitle")}
         autoFocus
         value={draft}
-        onChange={(e) => setDraft(e.target.value)}
+        onChange={(e) => setDraft(clampTaskTitleInput(e.target.value))}
         onFocus={(e) => e.target.select()}
         onBlur={handleCancel}
         onKeyDown={handleKeyDown}
@@ -91,7 +94,7 @@ export function TaskTopBarTitle({ taskId, taskTitle, isArchived }: TaskTopBarTit
   }
 
   return (
-    <Breadcrumb className="min-w-0 max-w-full">
+    <Breadcrumb className="min-w-0 max-w-full" aria-label={t("common:breadcrumb")}>
       <BreadcrumbList className="min-w-0 max-w-full flex-nowrap text-sm">
         <BreadcrumbItem className="min-w-0 max-w-full">
           <Tooltip>
@@ -107,13 +110,13 @@ export function TaskTopBarTitle({ taskId, taskTitle, isArchived }: TaskTopBarTit
                 onDoubleClick={startEditing}
                 onKeyDown={canRename ? handleTitleKeyDown : undefined}
               >
-                {taskTitle ?? "Task details"}
+                {taskTitle ?? t("task:taskDetails")}
               </BreadcrumbPage>
             </TooltipTrigger>
             <TooltipContent className="max-w-sm whitespace-normal break-words">
-              <span className="block">{taskTitle ?? "Task details"}</span>
+              <span className="block">{taskTitle ?? t("task:taskDetails")}</span>
               {canRename && (
-                <span className="mt-1 block">Double-click to edit (or press Enter)</span>
+                <span className="mt-1 block">{t("task:doubleClickToEditOrPress")}</span>
               )}
             </TooltipContent>
           </Tooltip>

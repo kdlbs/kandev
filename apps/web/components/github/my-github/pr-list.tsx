@@ -1,17 +1,18 @@
 "use client";
 
-import { cn, formatRelativeTime } from "@/lib/utils";
-import type { GitHubPR, GitHubPRStatus, TaskPR } from "@/lib/types/github";
-import type { LaunchPayload, TaskPreset } from "./quick-task-launcher";
-import { PRStatusBadges } from "./pr-status-badges";
-import { prStatusKey, usePRStatuses } from "./use-pr-statuses";
-import { PRRowTaskIndicator } from "./pr-row-task-indicator";
+import { useTranslation } from "react-i18next";
 import { ChangeRequestList, ChangeRequestRow } from "@/components/integrations/change-request-list";
-import { IntegrationStartTaskMenu } from "@/components/integrations/integration-start-task-menu";
 import {
   IntegrationIcon,
   type IntegrationIconName,
 } from "@/components/integrations/integration-icon";
+import { IntegrationStartTaskMenu } from "@/components/integrations/integration-start-task-menu";
+import { cn, formatRelativeTime } from "@/lib/utils";
+import type { GitHubPR, GitHubPRStatus, TaskPR } from "@/lib/types/github";
+import type { LaunchPayload, TaskPreset } from "./quick-task-launcher";
+import { PRStatusBadges } from "./pr-status-badges";
+import { PRRowTaskIndicator } from "./pr-row-task-indicator";
+import { prStatusKey, usePRStatuses } from "./use-pr-statuses";
 
 type PRListProps = {
   workspaceId: string | null;
@@ -23,9 +24,6 @@ type PRListProps = {
   prKeyToTasks?: Map<string, TaskPR[]>;
 };
 
-// Prefer the enriched PR returned by the batched status endpoint — the search
-// API used to populate `items` does not include head/base branches, so the
-// launcher needs the enriched copy to pre-fill the task dialog correctly.
 export function pickPRForLaunch(pr: GitHubPR, status: GitHubPRStatus | null | undefined): GitHubPR {
   return status?.pr ?? pr;
 }
@@ -48,11 +46,13 @@ function StartTaskMenu({
   presets: TaskPreset[];
   onStartTask: PRListProps["onStartTask"];
 }) {
-  const launch = (preset: TaskPreset) => onStartTask({ kind: "pr", pr, preset });
+  const { t } = useTranslation();
   return (
     <IntegrationStartTaskMenu
       presets={presets}
-      onSelect={launch}
+      onSelect={(preset) => onStartTask({ kind: "pr", pr, preset })}
+      triggerLabel={t("github:task")}
+      triggerAriaLabel={t("github:task")}
       triggerTestId="pr-start-task-trigger"
       itemTestId="pr-start-task-preset"
     />
@@ -72,6 +72,7 @@ function PRRow({
   onStartTask: PRListProps["onStartTask"];
   tasks: TaskPR[] | undefined;
 }) {
+  const { t } = useTranslation();
   const { name: stateIconName, className: stateIconClass } = prStateIcon(pr);
   return (
     <ChangeRequestRow
@@ -85,7 +86,10 @@ function PRRow({
           </span>
           <span>·</span>
           <span className="whitespace-nowrap">
-            by {pr.author_login} · opened {formatRelativeTime(pr.created_at)}
+            {t("github:byAuthorOpenedAgo", {
+              author: pr.author_login,
+              time: formatRelativeTime(pr.created_at),
+            })}
           </span>
           <PRStatusBadges pr={pr} status={status} />
         </>
@@ -126,11 +130,12 @@ function PRListBody({ workspaceId, items, presets, onStartTask, prKeyToTasks }: 
 }
 
 export function PRList(props: PRListProps) {
+  const { t } = useTranslation();
   return (
     <ChangeRequestList
       loading={props.loading}
       error={props.error}
-      emptyMessage="No pull requests match this filter."
+      emptyMessage={t("github:noPullRequestsMatchThisFilter")}
       isEmpty={props.items.length === 0}
     >
       <PRListBody {...props} />

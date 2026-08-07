@@ -37,6 +37,7 @@ type Service struct {
 type UpdateUserSettingsRequest struct {
 	WorkspaceID                     *string
 	KanbanViewMode                  *string
+	StartupPage                     *string
 	WorkflowFilterID                *string
 	RepositoryIDs                   *[]string
 	TasksListSort                   *string
@@ -50,6 +51,7 @@ type UpdateUserSettingsRequest struct {
 	ReviewAutoMarkOnScroll          *bool
 	ConfirmTaskArchive              *bool
 	UnreadDivider                   *bool
+	AgentGeneratedTaskTitles        *bool
 	MCPTaskAgentProfileDefault      *string
 	ShowAnchoredPromptBar           *bool
 	ShowScrollToLastPrompt          *bool
@@ -60,6 +62,7 @@ type UpdateUserSettingsRequest struct {
 	LspAutoStartLanguages           *[]string
 	LspAutoInstallLanguages         *[]string
 	LspServerConfigs                *map[string]map[string]interface{}
+	LspStatusLocation               *string
 	SavedLayouts                    *[]models.SavedLayout
 	SidebarViews                    *[]models.SidebarView
 	SidebarActiveViewID             *string
@@ -71,6 +74,7 @@ type UpdateUserSettingsRequest struct {
 	GitHubSavedPresets              **json.RawMessage
 	GitHubDefaultQueryPresets       **json.RawMessage
 	GitLabSavedPresets              **json.RawMessage
+	AzureDevOpsBrowsePreferences    **json.RawMessage
 	DefaultUtilityAgentID           *string
 	DefaultUtilityModel             *string
 	KeyboardShortcuts               *map[string]interface{}
@@ -230,6 +234,9 @@ func applyWorkspaceAndTaskListPreferences(settings *models.UserSettings, req *Up
 	if req.KanbanViewMode != nil {
 		settings.KanbanViewMode = *req.KanbanViewMode
 	}
+	if err := applyStartupPage(settings, req.StartupPage); err != nil {
+		return err
+	}
 	if req.WorkflowFilterID != nil {
 		settings.WorkflowFilterID = *req.WorkflowFilterID
 	}
@@ -257,6 +264,20 @@ func applyWorkspaceAndTaskListPreferences(settings *models.UserSettings, req *Up
 	return nil
 }
 
+func applyStartupPage(settings *models.UserSettings, value *string) error {
+	if value == nil {
+		return nil
+	}
+	v := strings.TrimSpace(*value)
+	switch v {
+	case models.StartupPageTaskOverview, models.StartupPageLastTask:
+		settings.StartupPage = v
+		return nil
+	default:
+		return fmt.Errorf("startup_page must be %q or %q", models.StartupPageTaskOverview, models.StartupPageLastTask)
+	}
+}
+
 func applyTaskActionPreferences(settings *models.UserSettings, req *UpdateUserSettingsRequest) error {
 	if req.ReviewAutoMarkOnScroll != nil {
 		settings.ReviewAutoMarkOnScroll = *req.ReviewAutoMarkOnScroll
@@ -266,6 +287,9 @@ func applyTaskActionPreferences(settings *models.UserSettings, req *UpdateUserSe
 	}
 	if req.UnreadDivider != nil {
 		settings.UnreadDivider = *req.UnreadDivider
+	}
+	if req.AgentGeneratedTaskTitles != nil {
+		settings.AgentGeneratedTaskTitles = *req.AgentGeneratedTaskTitles
 	}
 	if err := applyMCPTaskAgentProfileDefault(settings, req.MCPTaskAgentProfileDefault); err != nil {
 		return err
@@ -485,13 +509,25 @@ func applyLSPSettings(settings *models.UserSettings, req *UpdateUserSettingsRequ
 		settings.LspAutoStartLanguages = *req.LspAutoStartLanguages
 	}
 	if req.LspAutoInstallLanguages != nil {
-		if err := validateLSPLanguages(*req.LspAutoInstallLanguages); err != nil {
+		if err := validateLSPAutoInstallLanguages(*req.LspAutoInstallLanguages); err != nil {
 			return fmt.Errorf("lsp_auto_install_languages: %w", err)
 		}
 		settings.LspAutoInstallLanguages = *req.LspAutoInstallLanguages
 	}
 	if req.LspServerConfigs != nil {
 		settings.LspServerConfigs = *req.LspServerConfigs
+	}
+	if req.LspStatusLocation != nil {
+		switch *req.LspStatusLocation {
+		case models.LspStatusLocationToolbar, models.LspStatusLocationStatusBar:
+			settings.LspStatusLocation = *req.LspStatusLocation
+		default:
+			return fmt.Errorf(
+				"lsp_status_location must be %q or %q",
+				models.LspStatusLocationToolbar,
+				models.LspStatusLocationStatusBar,
+			)
+		}
 	}
 	return nil
 }
@@ -555,6 +591,10 @@ func applySidebarViews(settings *models.UserSettings, req *UpdateUserSettingsReq
 		}
 		seen[views[i].ID] = struct{}{}
 	}
+	if len(views) == 0 && req.SidebarActiveViewID == nil {
+		views = store.DefaultSidebarViews()
+		settings.SidebarActiveViewID = store.DefaultSidebarViewID
+	}
 	settings.SidebarViews = views
 	return nil
 }
@@ -606,6 +646,9 @@ func applyUserPreferenceBlobs(settings *models.UserSettings, req *UpdateUserSett
 	if err := applyUserPreferenceBlob("gitlab_saved_presets", req.GitLabSavedPresets, &settings.GitLabSavedPresets); err != nil {
 		return err
 	}
+	if err := applyUserPreferenceBlob("azure_devops_browse_preferences", req.AzureDevOpsBrowsePreferences, &settings.AzureDevOpsBrowsePreferences); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -648,6 +691,7 @@ func (s *Service) publishUserSettingsEvent(ctx context.Context, settings *models
 		"user_id":                             settings.UserID,
 		"workspace_id":                        settings.WorkspaceID,
 		"kanban_view_mode":                    settings.KanbanViewMode,
+		"startup_page":                        models.NormalizeStartupPage(settings.StartupPage),
 		"workflow_filter_id":                  settings.WorkflowFilterID,
 		"repository_ids":                      settings.RepositoryIDs,
 		"tasks_list_sort":                     settings.TasksListSort,
@@ -661,6 +705,7 @@ func (s *Service) publishUserSettingsEvent(ctx context.Context, settings *models
 		"review_auto_mark_on_scroll":          settings.ReviewAutoMarkOnScroll,
 		"confirm_task_archive":                settings.ConfirmTaskArchive,
 		"unread_divider":                      settings.UnreadDivider,
+		"agent_generated_task_titles":         settings.AgentGeneratedTaskTitles,
 		"mcp_task_agent_profile_default":      models.NormalizeMCPTaskAgentProfileDefault(settings.MCPTaskAgentProfileDefault),
 		"show_anchored_prompt_bar":            settings.ShowAnchoredPromptBar,
 		"show_scroll_to_last_prompt":          settings.ShowScrollToLastPrompt,
@@ -671,6 +716,7 @@ func (s *Service) publishUserSettingsEvent(ctx context.Context, settings *models
 		"lsp_auto_start_languages":            settings.LspAutoStartLanguages,
 		"lsp_auto_install_languages":          settings.LspAutoInstallLanguages,
 		"lsp_server_configs":                  settings.LspServerConfigs,
+		"lsp_status_location":                 models.NormalizeLspStatusLocation(settings.LspStatusLocation),
 		"saved_layouts":                       settings.SavedLayouts,
 		"sidebar_views":                       settings.SidebarViews,
 		"sidebar_active_view_id":              settings.SidebarActiveViewID,
@@ -682,6 +728,7 @@ func (s *Service) publishUserSettingsEvent(ctx context.Context, settings *models
 		"github_saved_presets":                settings.GitHubSavedPresets,
 		"github_default_query_presets":        settings.GitHubDefaultQueryPresets,
 		"gitlab_saved_presets":                settings.GitLabSavedPresets,
+		"azure_devops_browse_preferences":     settings.AzureDevOpsBrowsePreferences,
 		"default_utility_agent_id":            settings.DefaultUtilityAgentID,
 		"default_utility_model":               settings.DefaultUtilityModel,
 		"keyboard_shortcuts":                  settings.KeyboardShortcuts,
@@ -729,6 +776,18 @@ func validateLSPLanguages(langs []string) error {
 	for _, lang := range langs {
 		if _, ok := supported[lang]; !ok {
 			return fmt.Errorf("unsupported language: %s", lang)
+		}
+	}
+	return nil
+}
+
+func validateLSPAutoInstallLanguages(langs []string) error {
+	if err := validateLSPLanguages(langs); err != nil {
+		return err
+	}
+	for _, lang := range langs {
+		if !installer.SupportsAutoInstall(lang) {
+			return fmt.Errorf("language %s does not support auto-install", lang)
 		}
 	}
 	return nil

@@ -39,7 +39,7 @@ test.describe("Task default layout shape", () => {
           }),
         { message: "Waiting for every built-in default panel" },
       )
-      .toEqual(["changes", "files", "pr-detail", `session:${task.session_id}`, "terminal-default"]);
+      .toEqual(["changes", "files", `session:${task.session_id}`, "terminal-default"]);
   });
 
   test("entering a task is horizontal (right column beside chat, not stacked)", async ({

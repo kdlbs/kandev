@@ -20,6 +20,7 @@ const VIOLET_SPINNER_CLASS = "text-violet-500";
 const PREPARING_SPINNER_CLASS = "text-muted-foreground/40";
 const SPIN_CLASS = "animate-spin";
 const SLOW_SPIN_CLASS = "[animation-duration:2s]";
+const TASK_ACTIONS_LABEL = "Task actions";
 
 afterEach(() => cleanup());
 
@@ -166,10 +167,49 @@ describe("TaskItem status icon", () => {
 });
 
 describe("TaskItem actions", () => {
+  it("keeps row-focus actions visible when no diff stats are available", () => {
+    renderTaskItem({ isSelected: true });
+
+    const actionButton = screen.getByRole("button", { name: TASK_ACTIONS_LABEL });
+    const actionContainer = actionButton.parentElement;
+
+    expect(actionContainer?.className).toContain("group-focus-within:opacity-100");
+    expect(actionContainer?.className.split(/\s+/)).not.toContain("focus-within:opacity-100");
+  });
+
+  it("keeps diff stats as the idle affordance when the selected row owns focus", () => {
+    renderTaskItem({
+      isSelected: true,
+      diffStats: { additions: 3488, deletions: 199 },
+    });
+
+    const diffStats = screen.getByTestId("sidebar-task-diff-stats");
+    const actionButton = screen.getByRole("button", { name: TASK_ACTIONS_LABEL });
+    const actionContainer = actionButton.parentElement;
+
+    expect(diffStats.className).not.toContain("group-focus-within:opacity-0");
+    expect(actionContainer?.className).not.toContain("group-focus-within:opacity-100");
+    expect(actionContainer?.className).toContain("focus-within:opacity-100");
+  });
+
+  it("hides diff stats and keeps the action trigger visible when the context menu is open", () => {
+    renderTaskItem({
+      menuOpen: true,
+      diffStats: { additions: 42, deletions: 7 },
+    });
+
+    const diffStats = screen.getByTestId("sidebar-task-diff-stats");
+    const actionButton = screen.getByRole("button", { name: TASK_ACTIONS_LABEL });
+    const actionContainer = actionButton.parentElement;
+
+    expect(diffStats.className).toContain("opacity-0");
+    expect(actionContainer?.className).toContain("opacity-100");
+  });
+
   it("announces the task menu state", () => {
     renderTaskItem({ menuOpen: true });
 
-    const actions = screen.getByRole("button", { name: "Task actions" });
+    const actions = screen.getByRole("button", { name: TASK_ACTIONS_LABEL });
     expect(actions.getAttribute("aria-haspopup")).toBe("menu");
     expect(actions.getAttribute("aria-expanded")).toBe("true");
   });
@@ -177,9 +217,9 @@ describe("TaskItem actions", () => {
   it("does not announce a closed menu as expanded while deleting", () => {
     renderTaskItem({ isDeleting: true });
 
-    expect(screen.getByRole("button", { name: "Task actions" }).getAttribute("aria-expanded")).toBe(
-      "false",
-    );
+    expect(
+      screen.getByRole("button", { name: TASK_ACTIONS_LABEL }).getAttribute("aria-expanded"),
+    ).toBe("false");
   });
 });
 

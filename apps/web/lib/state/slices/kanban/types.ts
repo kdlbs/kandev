@@ -3,6 +3,7 @@ import type {
   TaskPendingAction,
   TaskState as TaskStatus,
 } from "@/lib/types/http";
+import type { TaskStatusSummary } from "@/lib/types/task-status-summary";
 
 export type KanbanStepEvents = {
   on_enter?: Array<{ type: string; config?: Record<string, unknown> }>;
@@ -44,6 +45,8 @@ export type KanbanState = {
   }>;
   tasks: Array<{
     id: string;
+    workspaceId?: string;
+    workflowId?: string;
     workflowStepId: string;
     title: string;
     description?: string;
@@ -79,7 +82,7 @@ export type KanbanState = {
      * list background-running affordance.
      */
     foregroundActivity?: ForegroundActivity | null;
-    /** Live subagents across this task's sessions; reserved for future UI. */
+    /** Live subagents across this task's sessions; drives the board count chip. */
     activeSubagentCount?: number;
     sessionCount?: number | null;
     reviewStatus?: "pending" | "approved" | "changes_requested" | "rejected" | null;
@@ -96,8 +99,10 @@ export type KanbanState = {
     queuedAt?: string;
     isPRReview?: boolean;
     isIssueWatch?: boolean;
+    isArchived?: boolean;
     issueUrl?: string;
     issueNumber?: number;
+    statusSummary?: TaskStatusSummary | null;
   }>;
   isLoading?: boolean;
 };
@@ -113,6 +118,14 @@ export type WorkflowSnapshotData = {
 export type KanbanMultiState = {
   snapshots: Record<string, WorkflowSnapshotData>;
   isLoading: boolean;
+};
+
+export type SidebarArchivedTasksState = {
+  itemsByWorkspaceId: Record<string, KanbanState["tasks"]>;
+  loadedByWorkspaceId: Record<string, boolean>;
+  loadingByWorkspaceId: Record<string, boolean>;
+  errorByWorkspaceId: Record<string, string | null>;
+  revisionByWorkspaceId: Record<string, number>;
 };
 
 export type WorkflowsState = {
@@ -152,6 +165,7 @@ export type TaskState = {
 export type KanbanSliceState = {
   kanban: KanbanState;
   kanbanMulti: KanbanMultiState;
+  sidebarArchivedTasks: SidebarArchivedTasksState;
   workflows: WorkflowsState;
   workspaceContextGeneration: number;
   tasks: TaskState;
@@ -174,6 +188,15 @@ export type KanbanSliceActions = {
   clearKanbanMulti: () => void;
   updateMultiTask: (workflowId: string, task: KanbanState["tasks"][number]) => void;
   removeMultiTask: (workflowId: string, taskId: string) => void;
+  setSidebarArchivedTasks: (
+    workspaceId: string,
+    tasks: KanbanState["tasks"],
+    expectedRevision?: number,
+  ) => boolean;
+  setSidebarArchivedTasksLoading: (workspaceId: string, loading: boolean) => void;
+  setSidebarArchivedTasksError: (workspaceId: string, error: string | null) => void;
+  upsertSidebarArchivedTask: (workspaceId: string, task: KanbanState["tasks"][number]) => void;
+  removeSidebarArchivedTask: (taskId: string, workspaceId?: string) => void;
 };
 
 export type KanbanSlice = KanbanSliceState & KanbanSliceActions;

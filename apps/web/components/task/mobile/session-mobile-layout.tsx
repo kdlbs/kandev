@@ -27,6 +27,12 @@ import { useAppStore } from "@/components/state-provider";
 import { useNormalizedTaskReviewsState } from "../review-panel-provider";
 import type { ReviewItemSummary } from "@/lib/plugins/types";
 import { reviewItemId, useReviewItemSelection } from "../review-selection";
+import { PluginTaskPanel } from "../plugin-task-panel";
+import { parsePluginPanelId } from "@/lib/state/layout-manager/plugin-panels";
+import { useEffectiveMobilePanel, type MobileReviewSource } from "./mobile-plugin-panel-lifecycle";
+import { useTranslation } from "react-i18next";
+
+export { resolveMobilePluginPanel } from "./mobile-plugin-panel-lifecycle";
 
 function useMobilePanelChangeHandler(
   handlePanelChangeAndClearSheet: (panel: MobileSessionPanel) => void,
@@ -50,6 +56,15 @@ export function useMobileReviewPanelFallback(
     if (shouldReturnToChat) handlePanelChangeAndClearSheet("chat");
   }, [handlePanelChangeAndClearSheet, shouldReturnToChat]);
   return shouldReturnToChat ? "chat" : currentMobilePanel;
+}
+
+export function resolveMobileReviewSource(
+  hasGitHubPR: boolean,
+  hasGitLabMR: boolean,
+): MobileReviewSource {
+  if (hasGitHubPR) return "github";
+  if (hasGitLabMR) return "gitlab";
+  return null;
 }
 
 const TOP_NAV_HEIGHT = "3.5rem";
@@ -83,10 +98,11 @@ function MobileChatPanelContent({
   effectiveSessionId: string | null;
   onOpenFile: (path: string, repo?: string) => void;
 }) {
+  const { t } = useTranslation();
   if (!activeTaskId) {
     return (
       <div className="flex-1 flex items-center justify-center text-muted-foreground">
-        No task selected
+        {t("task:noTaskSelected")}
       </div>
     );
   }
@@ -133,6 +149,20 @@ type MobilePanelAreaProps = {
   onSelectReview: (review: ReviewItemSummary) => void;
 };
 
+/** Keeps terminal content's visible bottom glued to the keybar top. When the
+ *  keyboard is up, the content area already pads for the bottom nav (which
+ *  is now under the keyboard), so we subtract it back out and add the
+ *  keyboard height instead. */
+export function terminalPaddingBottom(
+  keyboardOpen: boolean,
+  bottomOffset: number,
+  bottomNavHeight: string,
+): string {
+  return keyboardOpen
+    ? `calc(${bottomOffset + KEYBAR_HEIGHT_PX}px - ${bottomNavHeight} - env(safe-area-inset-bottom, 0px))`
+    : `${KEYBAR_HEIGHT_PX}px`;
+}
+
 export function MobilePanelArea({
   currentMobilePanel,
   activeTaskId,
@@ -152,13 +182,7 @@ export function MobilePanelArea({
   onSelectReview,
 }: MobilePanelAreaProps) {
   const { keyboardOpen, bottomOffset } = useVisualViewportOffset();
-  // Keep terminal content's visible bottom glued to the keybar top. When the
-  // keyboard is up, the content area already pads for the bottom nav (which
-  // is now under the keyboard), so we subtract it back out and add the
-  // keyboard height instead.
-  const terminalPaddingBottom = keyboardOpen
-    ? `calc(${bottomOffset + KEYBAR_HEIGHT_PX}px - ${bottomNavHeight} - env(safe-area-inset-bottom, 0px))`
-    : `${KEYBAR_HEIGHT_PX}px`;
+  const terminalPadding = terminalPaddingBottom(keyboardOpen, bottomOffset, bottomNavHeight);
   return (
     <div
       className="flex flex-col"
@@ -211,7 +235,7 @@ export function MobilePanelArea({
         <div
           data-testid="terminal-panel"
           className="flex-1 min-h-0 flex flex-col px-2"
-          style={{ paddingBottom: terminalPaddingBottom }}
+          style={{ paddingBottom: terminalPadding }}
         >
           <SessionPanelContent className="p-0 flex-1 min-h-0 flex flex-col">
             <MobileTerminalPane key={effectiveSessionId} sessionId={effectiveSessionId} />
@@ -223,6 +247,28 @@ export function MobilePanelArea({
         reviews={reviews}
         selectedReview={selectedReview}
         onSelectReview={onSelectReview}
+      />
+      <MobilePluginPanel currentMobilePanel={currentMobilePanel} />
+    </div>
+  );
+}
+
+/**
+ * Renders a mobile-enabled plugin task panel (AC7) — `currentMobilePanel` is
+ * a `plugin:<pluginId>:<panelKey>` id from `SessionMobileBottomNav`'s
+ * plugin-contributed nav entries. A non-plugin id (the common case) is a
+ * no-op, so this stays a single trailing branch instead of one per plugin.
+ */
+function MobilePluginPanel({ currentMobilePanel }: { currentMobilePanel: MobileSessionPanel }) {
+  const parsed = parsePluginPanelId(currentMobilePanel);
+  if (!parsed) return null;
+  return (
+    <div className="flex-1 min-h-0 flex flex-col p-2">
+      <PluginTaskPanel
+        pluginId={parsed.pluginId}
+        panelKey={parsed.panelKey}
+        panelId={currentMobilePanel}
+        presentation="mobile"
       />
     </div>
   );
@@ -266,11 +312,16 @@ function useMobileReviewPanelState({
     handlePanelChangeAndClearSheet,
     reviewsLoading,
   );
+  const effectivePanel = useEffectiveMobilePanel(
+    effectiveMobilePanel,
+    reviews.length > 0 || reviewsLoading ? "reviews" : null,
+    handlePanelChangeAndClearSheet,
+  );
   return {
     reviews,
     selectedReview,
     selectReview,
-    effectiveMobilePanel,
+    effectiveMobilePanel: effectivePanel,
     handleMobilePanelChange: useMobilePanelChangeHandler(handlePanelChangeAndClearSheet),
   };
 }
@@ -514,7 +565,7 @@ export const SessionMobileLayout = memo(function SessionMobileLayout(
       handlePanelChangeAndClearSheet,
     });
   return (
-    <div className="h-dvh relative bg-background">
+    <div className="h-dvh relative bg-background" data-testid="mobile-task-layout">
       <MobileTopBarSticky
         {...props}
         activeTaskId={activeTaskId}

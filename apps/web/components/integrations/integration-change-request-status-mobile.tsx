@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { Button } from "@kandev/ui/button";
 import { Drawer, DrawerClose, DrawerFooter } from "@kandev/ui/drawer";
+import { t } from "@/lib/i18n";
 import { ChangeRequestStatusDrawerContent } from "./change-request-status-chrome";
 import {
   IntegrationChangeRequestMultiStatusContent,
@@ -35,14 +36,18 @@ export function MobileIntegrationChangeRequestStatus({
         headerTestId="integration-change-request-status-drawer-header"
         closeTestId="integration-change-request-status-drawer-close"
         bodyTestId="integration-change-request-status-scroll-body"
-        title={items.length === 1 ? `PR #${single.number}` : `${items.length} pull requests`}
-        description="Pull request CI status, reviews, and checks summary."
+        title={
+          items.length === 1
+            ? t("integrations:pullRequestNumber", { number: single.number })
+            : t("integrations:pullRequestCount", { count: items.length })
+        }
+        description={t("integrations:pullRequestStatusSummary")}
         footer={
           items.length === 1 ? (
             <DrawerFooter className="shrink-0 border-t pb-[max(1rem,env(safe-area-inset-bottom))]">
               <DrawerClose asChild>
                 <Button type="button" className="h-11 cursor-pointer" onClick={single.onOpenReview}>
-                  Open review
+                  {t("integrations:openReview")}
                 </Button>
               </DrawerClose>
             </DrawerFooter>

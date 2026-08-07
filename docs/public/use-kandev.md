@@ -5,7 +5,14 @@ description: "Install Kandev, add a repository, configure an agent, run a first 
 
 # Get Started with Kandev
 
-This guide establishes the smallest useful Kandev setup: one local Git repository, one coding-agent profile, the built-in Worktree executor profile, and the default Development workflow.
+Use this guide to run one agent on one local Git repository. Start with the built-in Worktree profile so the agent works in a separate checkout.
+
+## Quick path
+
+1. Install and start Kandev.
+2. Add a local repository and review its scripts and trust boundary.
+3. Configure an agent profile and keep Worktree selected for the first task.
+4. Start, inspect, test, and review the task before archiving or opening a pull request.
 
 ## Prerequisites
 
@@ -25,6 +32,11 @@ Choose one release channel:
 brew install kdlbs/kandev/kandev
 kandev
 
+# Scoop on Windows
+scoop bucket add kandev https://github.com/kdlbs/scoop-kandev
+scoop install kandev
+kandev
+
 # One-off npm launch
 npx kandev@latest
 
@@ -33,11 +45,39 @@ npm install -g kandev@latest
 kandev
 ```
 
+Scoop installs the native runtime bundle, so Node.js is not required to install or start Kandev. It
+is still needed for the agent CLIs Kandev installs through its own interface.
+
+Stable is the default and is selected by npm's `latest` tag. To test the current prerelease from
+`main` without changing a global installation, launch the package once from the npm-only `nightly`
+tag:
+
+```bash
+npx -y kandev@nightly
+```
+
+To replace a global Stable installation with Nightly, use:
+
+```bash
+npm install -g kandev@nightly
+kandev
+```
+
+The global command replaces the installed `kandev` channel. Return to Stable with
+`npm install -g kandev@latest`.
+
+Nightly builds may be unstable. They are best-effort daily snapshots, and a new version appears
+only when `main` has commits after the latest Stable release. Homebrew, Scoop, Desktop, and
+container installs have no Nightly channel.
+
 The launcher selects the platform runtime, starts the Go backend and agent runtime, serves the web app, and opens its local URL. The preferred backend port is `38429`; if it is unavailable, the launcher chooses another free port and prints the actual URL. Use `kandev --headless` (or `KANDEV_NO_BROWSER=1`) when a browser must not open.
 
 By default, persistent state is under `~/.kandev`, including the SQLite database, repository materializations, sessions, logs, and backups. `KANDEV_HOME_DIR` relocates that root; `KANDEV_DATABASE_PATH` overrides only the database. Kandev creates its data directory with owner-only permissions and rejects symlinked components in that path, but file permissions do not replace host access controls.
 
 See the [CLI reference](cli.md) for commands, port and logging flags, data paths, environment variables, and update behavior. Other supported entry points are the [desktop app](desktop-app.md), [service](run-as-a-service.md), and [Docker deployment](docker.md). Read [Security and trust](security.md) before making any installation remotely reachable.
+
+<details>
+<summary>First-run records and onboarding details</summary>
 
 ## Know what a fresh database contains
 
@@ -50,6 +90,20 @@ Kandev creates these records when no prior workspace or executor configuration e
 - A disabled Sprites executor entry.
 
 The first-run dialog scans supported agent CLIs, lets you inspect detected profiles, and introduces executors, workflows, and the command panel. **Skip** stores only a browser-local onboarding marker. Advancing/completing also saves any dirty agent-profile edits made in the dialog. Neither path creates another workspace. The dialog warns that default agent profiles can have **Auto Approve** enabled. Inspect every profile before assigning trusted code or credentials.
+
+</details>
+
+## Find a setting
+
+Open **Settings** and use **Search settings** at the top of its navigation tree. Search results are
+grouped by area; selecting a specific control opens its owning page, scrolls it into view, focuses
+it, and briefly highlights it without changing the saved value. The same search is available in
+the Settings menu on phones.
+
+From anywhere, press `Cmd/Ctrl+K` and begin typing a setting name or familiar alias. Individual
+settings appear only after typing, while **Go to Settings** remains in the command menu at rest.
+Discovery searches setting names and curated aliases, never saved values, secrets, paths, or other
+configuration content.
 
 ## Add a local repository
 
@@ -127,6 +181,9 @@ See [Sessions and review](sessions-and-review.md) for the workbench and [Tasks a
 
 Use the [Security and trust](security.md) guide to choose a local, remote, shared-team, or unattended-automation boundary and to review the deployment checklist.
 
+<details>
+<summary>Troubleshoot a task that will not start</summary>
+
 ## Troubleshoot a task that will not start
 
 Check in this order:
@@ -147,3 +204,5 @@ Common corrections:
 - If the browser did not open, use the URL printed by the launcher or start with `--headless`; do not assume port `38429` when the launcher selected a fallback.
 
 For backup, update, log, database, and recovery details, see [Operations](operations.md). For release-specific disagreement, record the version from **Settings > System > About** and compare it with the matching GitHub tag.
+
+</details>

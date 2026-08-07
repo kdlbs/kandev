@@ -33,6 +33,10 @@ const maxDownloadSize = 100 << 20
 // download.
 const downloadTimeout = 60 * time.Second
 
+type userStateCleanupStore interface {
+	DeleteAllForPlugin(context.Context, string) error
+}
+
 // Service is the core plugin service: install/uninstall, the in-memory
 // Registry, the lifecycle state machine, and the runtime.Manager wiring
 // that spawns/supervises each plugin's subprocess.
@@ -80,12 +84,14 @@ type Service struct {
 	// the full RPC; lifecycle mutation holds the write side.
 	dispatchLocks *keyedRWMutex
 
-	pluginsDir string
-	store      store.Store
-	registry   *Registry
-	state      *state.Store
-	eventBus   bus.EventBus
-	log        *logger.Logger
+	pluginsDir       string
+	store            store.Store
+	registry         *Registry
+	state            *state.Store
+	userState        *state.UserStore
+	userStateCleanup userStateCleanupStore
+	eventBus         bus.EventBus
+	log              *logger.Logger
 
 	deliverer Deliverer
 	runtime   PluginRuntime
@@ -316,6 +322,32 @@ func (s *Service) SetState(st *state.Store) {
 // without re-initializing the schema.
 func (s *Service) StateStore() *state.Store {
 	return s.state
+}
+
+// SetUserState wires the already-constructed plugin_user_state store. Provide
+// calls this; also exposed for tests that build a Service without going
+// through Provide. See UserState's doc comment for how it differs from
+// StateStore.
+func (s *Service) SetUserState(st *state.UserStore) {
+	s.userState = st
+	s.userStateCleanup = st
+}
+
+// setUserStateCleanupStore replaces the narrow uninstall-cleanup seam. The
+// concrete UserStore remains the handler-facing store; this seam lets tests
+// exercise fail-closed uninstall behavior without weakening that accessor.
+func (s *Service) setUserStateCleanupStore(cleanup userStateCleanupStore) {
+	s.userStateCleanup = cleanup
+}
+
+// UserState returns the plugin_user_state store Provide constructed, for the
+// authenticated per-user storage HTTP routes (user_state_handlers.go).
+// Unlike StateStore (plugin_state, written only by a plugin's own
+// gRPC-connected backend via the Host RPC), this store is reachable directly
+// from an authenticated browser request — every read/write is scoped to the
+// calling user (Approach D1, docs/decisions/2026-08-01-per-user-plugin-storage.md).
+func (s *Service) UserState() *state.UserStore {
+	return s.userState
 }
 
 // SetSecrets wires the secret vault Provide was constructed with.
@@ -781,7 +813,7 @@ func (s *Service) restartForConfigChange(rec *store.Record) error {
 	ctx, cancel := context.WithTimeout(context.Background(), activateStartTimeout)
 	defer cancel()
 	if err := s.runtime.Start(ctx, rec, s.hostForPlugin); err != nil {
-		if setErr := s.SetStatus(rec.ID, StatusError); setErr != nil {
+		if setErr := s.setStatusAndDiagnostic(rec.ID, StatusError, err, true); setErr != nil {
 			// The restart error stays the returned error (it is the primary
 			// signal), but a failed status write means the registry may show
 			// StatusActive with no process running — don't lose that.
@@ -999,23 +1031,23 @@ func validateInstallURL(raw string) error {
 	return nil
 }
 
-// Uninstall stops id's process (if running), purges its vault namespace,
-// removes its extracted package tree from disk, deletes its record from both
-// the store and the in-memory registry, and deletes every plugin_state row
-// scoped to id (best-effort — a failure there is logged but does not fail
-// the overall Uninstall, since the package/record are already gone by that
-// point), then notifies the attached Deliverer. Clearing plugin_state and
-// the vault namespace matters so a plugin reinstalled under the same id (or
-// an id later reused by a different plugin) never silently inherits stale
-// state or secrets.
+// Uninstall stops id's process (if running), purges its vault namespace and
+// every plugin_user_state row, removes its extracted package tree from disk,
+// deletes its record from both the store and the in-memory registry, and
+// deletes every plugin_state row scoped to id (best-effort — a failure there
+// is logged but does not fail the overall Uninstall, since the package/record
+// are already gone by that point), then notifies the attached Deliverer.
+// Clearing plugin_state, plugin_user_state, and the vault namespace matters so
+// a plugin reinstalled under the same id (or an id later reused by a different
+// plugin) never silently inherits stale state or secrets.
 //
 // Ordering is deliberate: the process is stopped FIRST so the plugin can no
 // longer race the cleanup by writing a fresh secret (SetSecret) between the
 // vault list and the deletes; then the vault namespace is purged and any
 // failure aborts the uninstall — nothing destructive (package/record
-// removal) has happened yet, so the operator simply retries (Stop and the
-// vault deletes are both idempotent). A failed uninstall therefore leaves
-// the plugin stopped-but-installed, resolved by a retry.
+// removal) has happened yet, so the operator simply retries (Stop, the vault
+// deletes, and the user-state purge are all idempotent). A failed uninstall
+// therefore leaves the plugin stopped-but-installed, resolved by a retry.
 func (s *Service) Uninstall(ctx context.Context, id string) error {
 	lock := s.lifecycleLocks.lockFor(id)
 	lock.Lock()
@@ -1034,18 +1066,12 @@ func (s *Service) Uninstall(ctx context.Context, id string) error {
 	}
 	s.revokeGitCredentialProviderLeases(rec.RepositoryProviders)
 	if err := s.deletePluginSecrets(ctx, id); err != nil {
-		// The process is stopped but nothing else was removed. If it had been
-		// running, its persisted status still says active — reconcile it to
-		// error and notify observers so it isn't reported as running while no
-		// process is, before returning the retryable failure.
-		if wasRunning {
-			if setErr := s.SetStatus(id, StatusError); setErr != nil {
-				s.log.Warn("plugins: could not mark plugin errored after an aborted uninstall",
-					zap.String("plugin_id", id), zap.Error(setErr))
-			}
-			s.notifyDeliverer()
-		}
+		s.reconcileAbortedUninstall(id, wasRunning)
 		return fmt.Errorf("plugins: uninstall aborted, could not purge plugin secrets: %w", err)
+	}
+	if err := s.deletePluginUserState(ctx, id); err != nil {
+		s.reconcileAbortedUninstall(id, wasRunning)
+		return fmt.Errorf("plugins: uninstall aborted, could not purge plugin user state: %w", err)
 	}
 	if err := pkgtar.Remove(s.pluginsDir, id); err != nil {
 		return fmt.Errorf("plugins: remove installed package: %w", err)
@@ -1057,6 +1083,17 @@ func (s *Service) Uninstall(ctx context.Context, id string) error {
 	s.deletePluginState(id)
 	s.notifyDeliverer()
 	return nil
+}
+
+func (s *Service) reconcileAbortedUninstall(id string, wasRunning bool) {
+	if !wasRunning {
+		return
+	}
+	if setErr := s.SetStatus(id, StatusError); setErr != nil {
+		s.log.Warn("plugins: could not mark plugin errored after an aborted uninstall",
+			zap.String("plugin_id", id), zap.Error(setErr))
+	}
+	s.notifyDeliverer()
 }
 
 // deletePluginSecrets removes every vault entry in id's namespace
@@ -1098,6 +1135,16 @@ func (s *Service) deletePluginState(id string) {
 	if err := s.state.DeleteAll(context.Background(), id); err != nil {
 		s.log.Warn("plugins: failed to delete plugin_state on uninstall", zap.String("plugin_id", id), zap.Error(err))
 	}
+}
+
+// deletePluginUserState removes every plugin_user_state row for id, across
+// every user (AC20). A nil cleanup store is a silent no-op for narrowly
+// constructed tests where per-user storage could never have been written.
+func (s *Service) deletePluginUserState(ctx context.Context, id string) error {
+	if s.userStateCleanup == nil {
+		return nil
+	}
+	return s.userStateCleanup.DeleteAllForPlugin(ctx, id)
 }
 
 // Enable transitions id to StatusActive, spawning its process first if it
@@ -1162,9 +1209,8 @@ func (s *Service) Disable(id string) error {
 const activateStartTimeout = 30 * time.Second
 
 // activate spawns rec's process (if not already running) and transitions it
-// to StatusActive. If the spawn fails, it best-effort transitions the
-// record to StatusError (ignoring an invalid-transition failure, e.g. from
-// "disabled") and returns the spawn error.
+// to StatusActive. If the spawn fails, it records the failure and transitions
+// the record to StatusError before returning the spawn error.
 func (s *Service) activate(rec *store.Record) error {
 	s.ownershipMu.Lock()
 	defer s.ownershipMu.Unlock()
@@ -1175,7 +1221,10 @@ func (s *Service) activate(rec *store.Record) error {
 		ctx, cancel := context.WithTimeout(context.Background(), activateStartTimeout)
 		defer cancel()
 		if err := s.runtime.Start(ctx, rec, s.hostForPlugin); err != nil {
-			_ = s.SetStatus(rec.ID, StatusError)
+			if setErr := s.setStatusAndDiagnostic(rec.ID, StatusError, err, true); setErr != nil {
+				s.log.Warn("plugins: could not persist activation failure",
+					zap.String("plugin_id", rec.ID), zap.Error(setErr))
+			}
 			return fmt.Errorf("plugins: start %q: %w", rec.ID, err)
 		}
 	}
@@ -1233,10 +1282,18 @@ func (s *Service) SetStatus(id string, status Status) error {
 			return err
 		}
 	}
-	return s.setStatus(id, status)
+	return s.setStatusAndDiagnostic(id, status, nil, false)
 }
 
 func (s *Service) setStatus(id string, status Status) error {
+	return s.setStatusAndDiagnostic(id, status, nil, false)
+}
+
+// setStatusAndDiagnostic applies a lifecycle transition together with its
+// persisted runtime diagnostic. allowSame is used only for repeated failure
+// reports (for example, a failed retry while the record is already in error);
+// public SetStatus keeps same-state transitions invalid.
+func (s *Service) setStatusAndDiagnostic(id string, status Status, failure error, allowSame bool) error {
 	s.mu.Lock()
 
 	rec, ok := s.registry.Get(id)
@@ -1244,19 +1301,36 @@ func (s *Service) setStatus(id string, status Status) error {
 		s.mu.Unlock()
 		return store.ErrNotFound
 	}
-	if !canTransition(rec.Status, status) {
+	if rec.Status == status {
+		if !allowSame {
+			s.mu.Unlock()
+			return &ErrInvalidTransition{ID: id, From: rec.Status, To: status}
+		}
+	} else if !canTransition(rec.Status, status) {
 		s.mu.Unlock()
 		return &ErrInvalidTransition{ID: id, From: rec.Status, To: status}
 	}
 
-	updated, ok := s.registry.SetStatus(id, status)
+	lastError := rec.LastError
+	lastErrorAt := rec.LastErrorAt
+	if status == StatusActive {
+		lastError = ""
+		lastErrorAt = nil
+	}
+	if failure != nil {
+		lastError = normalizePluginError(failure)
+		now := time.Now().UTC()
+		lastErrorAt = &now
+	}
+
+	updated, ok := s.registry.SetRuntimeState(id, status, lastError, lastErrorAt)
 	if !ok {
 		s.mu.Unlock()
 		return store.ErrNotFound
 	}
 	if err := s.store.Save(updated); err != nil {
 		// Roll back the in-memory change so registry and disk stay in sync.
-		s.registry.SetStatus(id, rec.Status)
+		s.registry.Add(rec)
 		s.mu.Unlock()
 		return err
 	}
@@ -1273,12 +1347,27 @@ func (s *Service) setStatus(id string, status Status) error {
 // health transitions. healthy=false drives active -> error; healthy=true
 // drives error -> active plus a Deliverer.Flush (the buffered-event
 // recovery replay). Restart count is persisted best-effort afterward.
-func (s *Service) handleStatusChange(id string, healthy bool) {
+func (s *Service) handleStatusChange(id string, healthy bool, reason error) {
 	newStatus := StatusError
 	if healthy {
 		newStatus = StatusActive
 	}
-	if err := s.SetStatus(id, newStatus); err != nil {
+	var err error
+	if healthy {
+		s.ownershipMu.Lock()
+		rec, getErr := s.Get(id)
+		err = getErr
+		if err == nil {
+			err = s.ensureOwnershipAvailable(&rec.Manifest)
+		}
+		if err == nil {
+			err = s.setStatusAndDiagnostic(id, newStatus, reason, false)
+		}
+		s.ownershipMu.Unlock()
+	} else {
+		err = s.setStatusAndDiagnostic(id, newStatus, reason, true)
+	}
+	if err != nil {
 		s.log.Warn("plugins: health transition failed",
 			zap.String("plugin_id", id), zap.Bool("healthy", healthy), zap.Error(err))
 	} else {
@@ -1298,6 +1387,11 @@ func (s *Service) recordRestartCount(id string) {
 	if s.runtime == nil {
 		return
 	}
+	// Serialize this metadata write with lifecycle/diagnostic persistence so a
+	// restart callback cannot save a stale record over a concurrent Enable or
+	// recovery that just cleared LastError.
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	updated, ok := s.registry.SetRestartCount(id, s.runtime.RestartCount(id))
 	if !ok {
 		return
@@ -1332,7 +1426,15 @@ func (s *Service) StartActivePlugins(ctx context.Context) {
 		if err := s.runtime.Start(ctx, rec, s.hostForPlugin); err != nil {
 			s.log.Warn("plugins: failed to spawn active plugin at boot",
 				zap.String("plugin_id", rec.ID), zap.Error(err))
-			_ = s.SetStatus(rec.ID, StatusError)
+			if setErr := s.setStatusAndDiagnostic(rec.ID, StatusError, err, true); setErr != nil {
+				s.log.Warn("plugins: could not persist boot activation failure",
+					zap.String("plugin_id", rec.ID), zap.Error(setErr))
+			} else {
+				// The deliverer was refreshed before boot activation began, so
+				// reconcile it after an active plugin fails to spawn. Otherwise
+				// its worker would continue treating the plugin as active.
+				s.notifyDeliverer()
+			}
 		}
 	}
 }

@@ -1,0 +1,148 @@
+{
+ "kind": "background_survives_handoff",
+ "frames": [
+  {
+   "dir": "sent",
+   "method": "session/prompt",
+   "id": 3
+  },
+  {
+   "dir": "received",
+   "update": "tool_call",
+   "toolCallId": "toolu_01Rf1wdyaNZNt3po2LXdip5M",
+   "title": "Terminal",
+   "status": "pending"
+  },
+  {
+   "dir": "received",
+   "update": "tool_call_update",
+   "toolCallId": "toolu_01Rf1wdyaNZNt3po2LXdip5M",
+   "title": "sleep 90",
+   "status": null
+  },
+  {
+   "dir": "received",
+   "update": "tool_call_update",
+   "toolCallId": "toolu_01Rf1wdyaNZNt3po2LXdip5M",
+   "title": null,
+   "status": null
+  },
+  {
+   "dir": "received",
+   "update": "tool_call_update",
+   "toolCallId": "toolu_01Rf1wdyaNZNt3po2LXdip5M",
+   "title": null,
+   "status": "completed"
+  },
+  {
+   "dir": "sent",
+   "method": "session/prompt",
+   "id": 4
+  },
+  {
+   "dir": "received",
+   "update": "agent_message_chunk",
+   "text": ""
+  },
+  {
+   "dir": "received",
+   "update": "agent_message_chunk",
+   "text": "Step 1"
+  },
+  {
+   "dir": "received",
+   "update": "agent_message_chunk",
+   "text": " done. Now step 2: foreground sleep 15."
+  },
+  {
+   "dir": "received",
+   "update": "tool_call",
+   "toolCallId": "toolu_012CQkHyzHB2iJoLHbvHtwsW",
+   "title": "Terminal",
+   "status": "pending"
+  },
+  {
+   "dir": "received",
+   "update": "tool_call_update",
+   "toolCallId": "toolu_012CQkHyzHB2iJoLHbvHtwsW",
+   "title": "sleep 15",
+   "status": null
+  },
+  {
+   "dir": "received",
+   "update": "tool_call_update",
+   "toolCallId": "toolu_012CQkHyzHB2iJoLHbvHtwsW",
+   "title": null,
+   "status": null
+  },
+  {
+   "dir": "received",
+   "update": "tool_call_update",
+   "toolCallId": "toolu_012CQkHyzHB2iJoLHbvHtwsW",
+   "title": null,
+   "status": "completed"
+  },
+  {
+   "dir": "received",
+   "promptResponseFor": 3,
+   "stopReason": "end_turn",
+   "usage": {
+    "inputTokens": 0,
+    "outputTokens": 0,
+    "cachedReadTokens": 0,
+    "cachedWriteTokens": 0
+   }
+  },
+  {
+   "dir": "received",
+   "update": "agent_message_chunk",
+   "text": ""
+  },
+  {
+   "dir": "received",
+   "update": "agent_message_chunk",
+   "text": "The"
+  },
+  {
+   "dir": "received",
+   "update": "agent_message_chunk",
+   "text": " foreground sleep completed. Now addressing your updated instruction.\n\nSTEER"
+  },
+  {
+   "dir": "received",
+   "update": "agent_message_chunk",
+   "text": "ED"
+  },
+  {
+   "dir": "received",
+   "promptResponseFor": 4,
+   "stopReason": "end_turn",
+   "usage": {
+    "inputTokens": 17972,
+    "outputTokens": 282,
+    "cachedReadTokens": 60788,
+    "cachedWriteTokens": 16319
+   }
+  },
+  {
+   "dir": "received",
+   "update": "agent_message_chunk",
+   "text": ""
+  },
+  {
+   "dir": "received",
+   "update": "agent_message_chunk",
+   "text": "The"
+  },
+  {
+   "dir": "received",
+   "update": "agent_message_chunk",
+   "text": " background command finished on its own (exit code 0). No action"
+  },
+  {
+   "dir": "received",
+   "update": "agent_message_chunk",
+   "text": " needed \u2014 as instructed, I left it running and did not kill it."
+  }
+ ]
+}

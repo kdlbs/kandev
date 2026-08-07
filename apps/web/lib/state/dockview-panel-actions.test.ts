@@ -458,6 +458,27 @@ describe("addCommitDetailPanel — preview behavior", () => {
     expect(preview.params.commitSha).toBe(SHA_B);
     expect(preview.params.promoted).toBeUndefined();
   });
+
+  it("serializes remote provenance and keeps repositories with equal SHAs distinct", () => {
+    const first = {
+      source: "github" as const,
+      sha: SHA_A,
+      workspaceId: "workspace-1",
+      owner: "acme",
+      repo: "frontend",
+    };
+    const second = { ...first, repo: "backend" };
+
+    actions.addCommitDetailPanel(first, { pin: true });
+    actions.addCommitDetailPanel(second, { pin: true });
+
+    const firstPanel = api.getPanel(`commit:github:workspace-1:acme/frontend:${SHA_A}`);
+    const secondPanel = api.getPanel(`commit:github:workspace-1:acme/backend:${SHA_A}`);
+    expect(firstPanel).toBeDefined();
+    expect(secondPanel).toBeDefined();
+    expect((secondPanel as unknown as MockPanel).params.target).toEqual(second);
+    expect((secondPanel as unknown as MockPanel).params.commitSha).toBe(SHA_A);
+  });
 });
 
 describe("preview slots are independent across types", () => {
@@ -473,7 +494,6 @@ describe("preview slots are independent across types", () => {
     expect(api.getPanel(PREVIEW_COMMIT_ID)).toBeDefined();
   });
 });
-
 describe("addPRPanel — dedup with legacy auto-shown panel", () => {
   const PR_KEY = "testorg/testrepo/101";
   const OTHER_PR_KEY = "testorg/testrepo/202";
@@ -686,11 +706,8 @@ describe("addReviewPanel", () => {
   const panelId = `review-detail|${providerId}|${encodeURIComponent(reviewKey)}`;
 
   it("opens a provider-neutral panel with normalized params in the canonical review group", () => {
-    const { api, actions } = (() => {
-      const api = makeApi();
-      const store = makeStore(api);
-      return { api, actions: buildExtraPanelActions(store.get) };
-    })();
+    const api = makeApi();
+    const actions = buildExtraPanelActions(makeStore(api).get);
     api.addPanel({
       id: "pr-detail",
       component: "pr-detail",
@@ -701,11 +718,9 @@ describe("addReviewPanel", () => {
     actions.addReviewPanel(providerId, reviewKey, title);
 
     const panel = api.getPanel(panelId) as unknown as MockPanel;
-    expect(panel).toMatchObject({
-      title,
-      params: { providerId, reviewKey },
-      group: { id: "provider-review-group" },
-    });
+    expect(panel.title).toBe(title);
+    expect(panel.params).toEqual({ providerId, reviewKey });
+    expect(panel.group.id).toBe("provider-review-group");
   });
 
   it("focuses the canonical review panel when it already renders the requested review", () => {

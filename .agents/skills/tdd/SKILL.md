@@ -50,6 +50,15 @@ Choose the right level:
 
 Prefer state/output assertions over interaction assertions. Mock only slow, nondeterministic, or external boundaries; use real implementations or fakes when they keep the test deterministic.
 
+### Cross-layer contracts
+
+When adding or renaming a field that crosses backend, WebSocket, and frontend
+boundaries, use `rg` to trace every producer, DTO, store upsert or partial
+merge, reconnect/readiness handler, and consumer before editing. Add focused
+coverage at the affected boundaries, including refresh/reconnect and an update
+that omits the field, so a partial payload cannot silently discard an existing
+value.
+
 ### Concurrent and event-driven behavior
 
 Test ordering-sensitive behavior with channels, barriers, or controllable fakes;
@@ -63,6 +72,11 @@ signals, or queue ownership. Cover stale events acting after a replacement
 operation begins, cancellation/retry ownership, and at-most-once delivery when
 they apply. Run affected Go packages with `-race`.
 
+When delayed state has a lifecycle owner, pair the boundary tests: disposal
+before the threshold must cancel timers and emit nothing later; disposal or
+replacement after publication must immediately clear externally observable
+state; and stale callbacks must not mutate the replacement.
+
 ## Steps
 
 ### 1. RED — Write a failing test
@@ -70,7 +84,10 @@ they apply. Run affected Go packages with `-race`.
 1. Identify the single behavior to implement or bug to reproduce
 2. Write the **smallest test** that asserts the expected behavior — one assertion, clear name
 3. Run the test and confirm it **fails with the expected assertion error** (not a compile/import error)
-4. If it passes immediately, the test is not testing new behavior — revise it
+4. If it passes immediately, the test is not testing new behavior — revise it.
+   Exception: a reviewer-requested test that documents behavior already present
+   on the current head is valid test-only contract coverage. Label it as such,
+   make no production change, and run the focused suite.
 
 For bug fixes, use the Prove-It Pattern: reproduce the bug with a failing test before changing production code. A fix without a regression test is not complete unless the change is explicitly untestable and you say why.
 
@@ -99,6 +116,10 @@ Run the targeted tests named in the task file and report their results. Commit
 and open the PR after all affected task checks pass; do not add broad local
 verification by default.
 
+After the final production-code edit, rerun every new or changed regression
+test and report the exact command and result. A prior green run does not cover
+a later patch.
+
 ## Testing anti-patterns
 
 **Don't test implementation details:**
@@ -117,6 +138,9 @@ verification by default.
 
 **Don't use incomplete mocks:**
 - Mock the complete data structure as it exists in reality, not just fields your test uses. Partial mocks hide bugs when downstream code accesses omitted fields.
+- When adding a named export to a shared module, search for full-module
+  `vi.mock()` factories and add the export to each factory. Focused tests can
+  pass while a full suite fails on an out-of-date module shape.
 
 **Never swallow errors in tests:**
 - `try/catch` that silently ignores failures in test helpers or setup — these hide real failures.
@@ -127,7 +151,8 @@ verification by default.
 ## Red flags
 
 - Writing production code before a failing test exists — delete and start over
-- Test passes on first run — it tests nothing new, revise the test
+- Test passes on first run — revise it, except for clearly labelled
+  reviewer-requested test-only contract coverage
 - Fixing a test to make it pass instead of fixing the production code
 - Large jumps — multiple behaviors implemented between test runs
 - Skipping the refactor step

@@ -276,6 +276,7 @@ func buildWorktreeCreateRequest(req *EnvPrepareRequest) worktree.CreateRequest {
 		FallbackBaseBranch:     req.DefaultBranch,
 		CheckoutBranch:         req.CheckoutBranch,
 		PRNumber:               req.PRNumber,
+		RemoteContribution:     req.RemoteContribution,
 		WorktreeBranchPrefix:   req.WorktreeBranchPrefix,
 		WorktreeBranchTemplate: req.WorktreeBranchTemplate,
 		WorktreeBranchTicket:   req.WorktreeBranchTicket,
@@ -486,6 +487,7 @@ func (p *WorktreePreparer) prepareOneRepo(
 	subReq.DefaultBranch = spec.DefaultBranch
 	subReq.CheckoutBranch = spec.CheckoutBranch
 	subReq.PRNumber = spec.PRNumber
+	subReq.RemoteContribution = spec.RemoteContribution
 	subReq.WorktreeID = spec.WorktreeID
 	subReq.WorktreeBranchPrefix = spec.WorktreeBranchPrefix
 	subReq.WorktreeBranchTemplate = spec.WorktreeBranchTemplate

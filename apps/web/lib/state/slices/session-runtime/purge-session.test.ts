@@ -20,7 +20,13 @@ describe("purgeSessionRuntimeState", () => {
     s.registerSessionEnvironment("session-1", "env-1");
     s.appendShellOutput("session-1", "shell noise");
     s.setShellStatus("session-1", { available: true });
-    s.setContextWindow("session-1", { size: 1, used: 1, remaining: 0, efficiency: 1 });
+    s.setContextWindow("session-1", {
+      size: 1,
+      used: 1,
+      remaining: 0,
+      efficiency: 1,
+      compactionCount: 0,
+    });
     s.setSessionTodos("session-1", [{ description: "do", status: "pending" }]);
     s.upsertProcessStatus({
       processId: "proc-1",

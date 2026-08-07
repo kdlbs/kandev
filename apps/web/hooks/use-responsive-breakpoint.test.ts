@@ -100,10 +100,11 @@ describe("useResponsiveBreakpoint", () => {
     expect(result.current.usesDesktopWorkbench).toBe(false);
   });
 
-  it("updates workbench mode when crossing compact desktop boundary", () => {
-    setViewport(640, "fine");
+  it("uses mobile composition until the desktop sidebar becomes available", () => {
+    setViewport(767, "fine");
     const { result } = renderHook(() => useResponsiveBreakpoint());
 
+    expect(result.current.breakpoint).toBe("mobile");
     expect(result.current.usesDesktopWorkbench).toBe(false);
 
     notifyResize(768, "fine");

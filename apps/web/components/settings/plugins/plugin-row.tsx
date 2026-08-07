@@ -1,12 +1,14 @@
 "use client";
 
 import { IconArrowUpCircle } from "@tabler/icons-react";
+import { useTranslation } from "react-i18next";
 import { Badge } from "@kandev/ui/badge";
 import { Button } from "@kandev/ui/button";
 import { Switch } from "@kandev/ui/switch";
 import Link from "@/components/routing/app-link";
 import { PluginRepoLink } from "./plugin-repo-link";
 import { PluginStatusBadge } from "./plugin-status-badge";
+import { PluginErrorDiagnostic } from "./plugin-error-diagnostic";
 import type { MarketplaceEntry, PluginRecord } from "@/lib/types/plugins";
 
 type PluginRowProps = {
@@ -42,7 +44,9 @@ export function PluginRow({
   onUpdate,
   onSetAutoUpdate,
 }: PluginRowProps) {
-  const canEnable = plugin.status === "disabled" || plugin.status === "registered";
+  const { t } = useTranslation();
+  const canEnable =
+    plugin.status === "disabled" || plugin.status === "registered" || plugin.status === "error";
   const canDisable = plugin.status === "active" || plugin.status === "error";
 
   return (
@@ -67,7 +71,7 @@ export function PluginRow({
                 variant="outline"
                 className="border-amber-500/40 bg-amber-500/10 text-amber-600 dark:text-amber-400 text-[11px]"
               >
-                unsigned
+                {t("plugins:unsigned")}
               </Badge>
             )}
           </div>
@@ -95,6 +99,7 @@ export function PluginRow({
       {plugin.description && (
         <div className="text-xs text-muted-foreground">{plugin.description}</div>
       )}
+      <PluginErrorDiagnostic plugin={plugin} />
       {plugin.categories.length > 0 && (
         <div className="flex flex-wrap gap-1">
           {plugin.categories.map((category) => (
@@ -132,16 +137,17 @@ function PluginAutoUpdateRow({
   busy: boolean;
   onSetAutoUpdate: (plugin: PluginRecord, value: boolean | null) => void;
 }) {
+  const { t } = useTranslation();
   const isOverridden = plugin.auto_update !== null && plugin.auto_update !== undefined;
   const effective = isOverridden ? (plugin.auto_update as boolean) : autoUpdateDefault;
 
   return (
     <div className="flex items-center justify-between gap-3 border-t border-border/50 pt-3">
       <div className="flex items-center gap-2 text-xs text-muted-foreground">
-        <span>Auto-update</span>
+        <span>{t("plugins:autoUpdate")}</span>
         {isOverridden && (
           <Badge variant="outline" className="text-[11px]">
-            override
+            {t("plugins:override")}
           </Badge>
         )}
       </div>
@@ -150,17 +156,17 @@ function PluginAutoUpdateRow({
           <button
             type="button"
             data-testid={`plugin-auto-update-reset-${plugin.id}`}
-            aria-label={`Reset auto-update for ${plugin.display_name} to the default`}
+            aria-label={t("plugins:resetAutoUpdateFor", { name: plugin.display_name })}
             className="text-xs text-muted-foreground hover:text-foreground underline-offset-2 hover:underline cursor-pointer disabled:opacity-50"
             disabled={busy}
             onClick={() => onSetAutoUpdate(plugin, null)}
           >
-            Reset
+            {t("plugins:reset")}
           </button>
         )}
         <Switch
           data-testid={`plugin-auto-update-${plugin.id}`}
-          aria-label={`Auto-update for ${plugin.display_name}`}
+          aria-label={t("plugins:autoUpdateFor", { name: plugin.display_name })}
           checked={effective}
           disabled={busy}
           onCheckedChange={(value) => onSetAutoUpdate(plugin, value)}
@@ -198,6 +204,7 @@ function PluginRowActions({
   onUninstall,
   onUpdate,
 }: PluginRowActionsProps) {
+  const { t } = useTranslation();
   return (
     <div className="flex flex-wrap items-center gap-2 shrink-0">
       {update && onUpdate && (
@@ -205,44 +212,44 @@ function PluginRowActions({
           variant="outline"
           size="sm"
           data-testid={`plugin-update-${plugin.id}`}
-          className="cursor-pointer gap-1"
+          className="cursor-pointer gap-1 min-h-11 sm:min-h-0"
           disabled={busy}
           onClick={() => onUpdate(update)}
         >
           <IconArrowUpCircle className="h-4 w-4" />
-          {busy ? "Updating…" : `Update to v${update.version}`}
+          {busy ? t("plugins:updating") : t("plugins:updateToVersion", { version: update.version })}
         </Button>
       )}
       {canEnable && (
         <Button
           variant="outline"
           size="sm"
-          className="cursor-pointer"
+          className="cursor-pointer min-h-11 sm:min-h-0"
           disabled={busy}
           onClick={() => onEnable(plugin)}
         >
-          Enable
+          {t("plugins:enable")}
         </Button>
       )}
       {canDisable && (
         <Button
           variant="outline"
           size="sm"
-          className="cursor-pointer"
+          className="cursor-pointer min-h-11 sm:min-h-0"
           disabled={busy}
           onClick={() => onDisable(plugin)}
         >
-          Disable
+          {t("plugins:disable")}
         </Button>
       )}
       <Button
         variant="ghost"
         size="sm"
-        className="cursor-pointer text-destructive hover:text-destructive"
+        className="cursor-pointer min-h-11 text-destructive hover:text-destructive sm:min-h-0"
         disabled={busy}
         onClick={() => onUninstall(plugin)}
       >
-        Uninstall
+        {t("plugins:uninstall")}
       </Button>
     </div>
   );

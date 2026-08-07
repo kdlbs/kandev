@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -44,6 +45,7 @@ func TestMultiRepoReviewEndpointsUseStoredBaseBranches(t *testing.T) {
 	log, _ := logger.NewLogger(logger.LoggingConfig{Level: "error"})
 	cfg := &config.InstanceConfig{WorkDir: taskRoot, BaseBranches: bases}
 	mgr := process.NewManager(cfg, log)
+	t.Cleanup(func() { _ = mgr.StopForTeardown(context.Background()) })
 	srv := NewServer(cfg, mgr, nil, nil, log)
 
 	logResponse := httptest.NewRecorder()
@@ -141,6 +143,108 @@ func TestMultiRepoReviewEndpointsUseStoredBaseBranches(t *testing.T) {
 			t.Errorf("file content at ref for %s = %q, want %q", repo, content.Content, "base\n")
 		}
 	}
+}
+
+func TestNestedSubmoduleReviewEndpointsIncludeRootAndStableChildBase(t *testing.T) {
+	parent, parentCleanup := setupAPITestRepo(t)
+	t.Cleanup(parentCleanup)
+	child, childCleanup := setupAPITestRepo(t)
+	t.Cleanup(childCleanup)
+
+	runGitAPI(t, parent, "-c", "protocol.file.allow=always", "submodule", "add", child, "vendor/lib")
+	runGitAPI(t, parent, "add", ".")
+	runGitAPI(t, parent, "commit", "-m", "add submodule")
+	runGitAPI(t, parent, "push", "origin", "main")
+	runGitAPI(t, parent, "checkout", "-b", "feature/review")
+
+	childBase := strings.TrimSpace(runGitAPI(t, parent, "rev-parse", "origin/main:vendor/lib"))
+	writeFileAPI(t, parent, "README.md", "root change\n")
+	childDir := filepath.Join(parent, "vendor/lib")
+	runGitAPI(t, childDir, "config", "user.email", "test@test.com")
+	runGitAPI(t, childDir, "config", "user.name", "Test User")
+	writeFileAPI(t, childDir, "child-change.txt", "child change\n")
+	runGitAPI(t, childDir, "add", ".")
+	runGitAPI(t, childDir, "commit", "-m", "child change")
+	writeFileAPI(t, childDir, "child-uncommitted.txt", "uncommitted child change\n")
+
+	log, _ := logger.NewLogger(logger.LoggingConfig{Level: "error"})
+	cfg := &config.InstanceConfig{
+		WorkDir:      parent,
+		BaseBranches: map[string]string{"": "main"},
+	}
+	mgr := process.NewManager(cfg, log)
+	t.Cleanup(func() { _ = mgr.StopForTeardown(context.Background()) })
+	srv := NewServer(cfg, mgr, nil, nil, log)
+
+	statusResponse := httptest.NewRecorder()
+	srv.Router().ServeHTTP(statusResponse, httptest.NewRequest(
+		http.MethodGet, "/api/v1/git/status/multi?fresh=true", nil,
+	))
+	if statusResponse.Code != http.StatusOK {
+		t.Fatalf("git status response = %d: %s", statusResponse.Code, statusResponse.Body.String())
+	}
+	var status MultiRepoGitStatusResult
+	if err := json.Unmarshal(statusResponse.Body.Bytes(), &status); err != nil {
+		t.Fatalf("decode git status: %v", err)
+	}
+	statusByRepo := make(map[string]GitStatusResult, len(status.Repos))
+	for _, repo := range status.Repos {
+		statusByRepo[repo.RepositoryName] = repo.Status
+	}
+	if _, ok := statusByRepo[""]; !ok {
+		t.Fatalf("root status missing: %s", statusResponse.Body.String())
+	}
+	childStatus, ok := statusByRepo["vendor/lib"]
+	if !ok {
+		t.Fatalf("child repo status missing entirely: %s", statusResponse.Body.String())
+	}
+	if !childStatus.IsSubmodule {
+		t.Fatalf("child repo is_submodule was false: %s", statusResponse.Body.String())
+	}
+	if !containsString(childStatus.Modified, "child-uncommitted.txt") &&
+		!containsString(childStatus.Untracked, "child-uncommitted.txt") {
+		t.Fatalf("child-uncommitted.txt not in Modified or Untracked: %s", statusResponse.Body.String())
+	}
+
+	diffResponse := httptest.NewRecorder()
+	srv.Router().ServeHTTP(diffResponse, httptest.NewRequest(
+		http.MethodGet, "/api/v1/git/cumulative-diff?base="+childBase, nil,
+	))
+	if diffResponse.Code != http.StatusOK {
+		t.Fatalf("cumulative diff status = %d: %s", diffResponse.Code, diffResponse.Body.String())
+	}
+	var diff process.CumulativeDiffResult
+	if err := json.Unmarshal(diffResponse.Body.Bytes(), &diff); err != nil {
+		t.Fatalf("decode cumulative diff: %v", err)
+	}
+	childPayload, ok := diff.Files["vendor/lib\x00child-change.txt"]
+	if !ok {
+		t.Fatalf("child cumulative diff missing: %s", diffResponse.Body.String())
+	}
+	childFile, ok := childPayload.(map[string]interface{})
+	if !ok || childFile["repository_name"] != "vendor/lib" || childFile["path"] != "child-change.txt" || childFile["base_ref"] != childBase || childFile["is_submodule"] != true {
+		t.Fatalf("child cumulative payload = %#v, want scoped path and base", childPayload)
+	}
+	if _, ok := diff.Files["\x00README.md"]; !ok {
+		t.Fatalf("root cumulative diff missing: %s", diffResponse.Body.String())
+	}
+
+	contentResponse := httptest.NewRecorder()
+	srv.Router().ServeHTTP(contentResponse, httptest.NewRequest(
+		http.MethodGet, "/api/v1/workspace/file/content-at-ref?path=README.md&ref=HEAD", nil,
+	))
+	if contentResponse.Code != http.StatusOK {
+		t.Fatalf("root file content status = %d: %s", contentResponse.Code, contentResponse.Body.String())
+	}
+}
+
+func containsString(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
 }
 
 func TestMultiRepoReviewEndpointsCorrectStaleBases(t *testing.T) {

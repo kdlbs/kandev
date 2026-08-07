@@ -32,6 +32,8 @@ import { ChangesTab } from "./changes-tab";
 import { useChangesPanelAutoFocus } from "./changes-panel-focus";
 import { PlanTab } from "./plan-tab";
 import { PreviewFileTab, PreviewDiffTab, PreviewCommitTab, PinnedDefaultTab } from "./preview-tab";
+import { PluginPanelTab } from "./plugin-panel-tab";
+import { useCloseRevokedPluginPanels } from "./use-close-revoked-plugin-panels";
 import { SessionTab } from "./session-tab";
 import { TerminalTab } from "./terminal-tab";
 import { useTabMaximizeOnDoubleClick } from "./use-tab-maximize";
@@ -131,6 +133,7 @@ const components: Record<string, React.FunctionComponent<IDockviewPanelProps>> =
   "pr-detail": PortalSlot,
   "mr-detail": PortalSlot,
   "review-detail": PortalSlot,
+  "plugin-panel": PortalSlot,
   // Backwards compat aliases for saved layouts
   "diff-files": PortalSlot,
   "all-files": PortalSlot,
@@ -173,6 +176,7 @@ const tabComponents: Record<string, React.FunctionComponent<IDockviewPanelHeader
   previewDiffTab: PreviewDiffTab,
   previewCommitTab: PreviewCommitTab,
   pinnedDefaultTab: PinnedDefaultTab,
+  pluginPanelTab: PluginPanelTab,
 };
 
 // ---------------------------------------------------------------------------
@@ -189,6 +193,7 @@ function useEnvSwitchCleanup(
   effectiveSessionId: string | null,
   effectiveEnvId: string | null,
   activeTaskId: string | null,
+  initialLayout?: string | null,
 ) {
   const prevEnvRef = useRef<string | null | undefined>(undefined);
   const prevTaskRef = useRef<string | null | undefined>(undefined);
@@ -241,9 +246,9 @@ function useEnvSwitchCleanup(
       if (effectiveSessionId && !currentSessionIds.includes(effectiveSessionId)) {
         currentSessionIds.unshift(effectiveSessionId);
       }
-      performLayoutSwitch(oldEnvId, newEnvId, effectiveSessionId, currentSessionIds);
+      performLayoutSwitch(oldEnvId, newEnvId, effectiveSessionId, currentSessionIds, initialLayout);
     }
-  }, [effectiveEnvId, effectiveSessionId, activeTaskId, currentSessionIdsKey]);
+  }, [effectiveEnvId, effectiveSessionId, activeTaskId, currentSessionIdsKey, initialLayout]);
 }
 
 // ---------------------------------------------------------------------------
@@ -376,6 +381,7 @@ export const DockviewDesktopLayout = memo(function DockviewDesktopLayout({
   useEditorKeybinds();
   usePlanPanelAutoOpen();
   useCompactDockviewDefault(compact);
+  useCloseRevokedPluginPanels(api);
 
   useEffect(() => {
     envIdRef.current = effectiveEnvId;
@@ -404,7 +410,7 @@ export const DockviewDesktopLayout = memo(function DockviewDesktopLayout({
   // IMPORTANT: this must run BEFORE useAutoSessionTab so the old layout is
   // saved before a new session tab is created — otherwise the new session's
   // panel could leak into the old session's persisted layout.
-  useEnvSwitchCleanup(effectiveSessionId, effectiveEnvId, activeTaskId);
+  useEnvSwitchCleanup(effectiveSessionId, effectiveEnvId, activeTaskId, initialLayout);
 
   useAutoSessionTab(effectiveSessionId);
   useChangesPanelAutoFocus(changesFocusKey);

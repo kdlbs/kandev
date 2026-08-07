@@ -12,11 +12,14 @@ import type {
   ExecutorProfile,
 } from "@/lib/types/http";
 import type { AgentProfileOption } from "@/lib/state/slices";
+import { isSelectableAgentProfile } from "@/lib/state/slices/settings/types";
 import { formatUserHomePath, truncateRepoPath } from "@/lib/utils";
 import { getExecutorIcon } from "@/lib/executor-icons";
 import { AgentLogo } from "@/components/agent-logo";
 import { getCapabilityWarning } from "@/lib/capability-warning";
 import { buildBranchKeywords } from "./task-create-dialog-pill";
+import { useTranslation } from "react-i18next";
+import { t } from "@/lib/i18n";
 
 type OptionItem = {
   value: string;
@@ -118,8 +121,12 @@ export function useBranchOptions(branchOptionsRaw: Branch[]) {
 }
 
 export function useAgentProfileOptions(agentProfiles: AgentProfileOption[]): OptionItem[] {
+  const { t } = useTranslation();
   return useMemo(() => {
-    return agentProfiles.map((profile: AgentProfileOption) => {
+    // Disabled profiles stay in the store (existing sessions keep their
+    // labels) but are never offered as a choice for new work.
+    const selectable = agentProfiles.filter(isSelectableAgentProfile);
+    return selectable.map((profile: AgentProfileOption) => {
       const parts = profile.label.split(" \u2022 ");
       const agentLabel = parts[0] ?? profile.label;
       const profileLabel = parts[1] ?? "";
@@ -141,7 +148,7 @@ export function useAgentProfileOptions(agentProfiles: AgentProfileOption[]): Opt
               {isPassthrough && (
                 <IconTerminal2
                   className="size-3.5 text-muted-foreground"
-                  title="CLI mode - your prompt will be auto-injected into the terminal"
+                  title={t("task:cliModeYourPromptWillBe")}
                 />
               )}
               {profileLabel ? (
@@ -190,15 +197,15 @@ export function computeExecutorHint(
   const selectedExecutor = executors.find((e: Executor) => e.id === executorId);
   if (selectedExecutor?.type === "worktree") {
     if (repoCount > 1) {
-      return "A git worktree will be created for each repository in a parent folder. The agent runs in that parent folder so it can see every worktree side by side.";
+      return t("task:executorHintWorktreeMulti");
     }
-    return "A git worktree will be created from the base branch.";
+    return t("task:executorHintWorktreeSingle");
   }
   if (selectedExecutor?.type === "local_docker" || selectedExecutor?.type === "remote_docker") {
-    return "A Docker container will be created from the selected base branch and checked out on a task branch.";
+    return t("task:executorHintDocker");
   }
   if (selectedExecutor?.type === "local" || selectedExecutor?.type === "local_pc")
-    return "The agent will run directly on the repository.";
+    return t("task:executorHintLocal");
   return null;
 }
 

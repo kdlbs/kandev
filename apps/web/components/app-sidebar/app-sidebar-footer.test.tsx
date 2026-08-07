@@ -1,5 +1,6 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { TooltipProvider } from "@kandev/ui/tooltip";
+import { IconChartBar } from "@tabler/icons-react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
@@ -41,6 +42,20 @@ vi.mock("@/components/state-provider", () => ({
 
 vi.mock("@/hooks/domains/features/use-feature", () => ({
   useFeature: (name: string) => (name === "office" ? officeEnabled : appStatusBarEnabled),
+}));
+
+// The footer renders its insight buttons from the navigation manifest; the
+// manifest itself is covered in `lib/navigation/core-destinations.test.ts`.
+vi.mock("@/hooks/use-app-destinations", () => ({
+  useStaticDestinations: () => [
+    {
+      id: "stats",
+      label: "Stats",
+      icon: IconChartBar,
+      section: "insights",
+      href: "/stats",
+    },
+  ],
 }));
 
 vi.mock("@/hooks/use-release-notes", () => ({
@@ -187,7 +202,7 @@ describe("AppSidebarFooter", () => {
     expect(screen.queryByRole("button", { name: "Office" })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Kanban" }));
 
-    expect(mocks.routerPush).toHaveBeenCalledWith("/?workspaceId=kanban-1");
+    expect(mocks.routerPush).toHaveBeenCalledWith("/?home=overview&workspaceId=kanban-1");
   });
 
   it("remembers the current office workspace when toggling back to kanban", () => {
@@ -200,7 +215,7 @@ describe("AppSidebarFooter", () => {
     fireEvent.click(screen.getByRole("button", { name: "Kanban" }));
 
     expect(document.cookie).toContain("office-active-workspace=office-2");
-    expect(mocks.routerPush).toHaveBeenCalledWith("/?workspaceId=kanban-1");
+    expect(mocks.routerPush).toHaveBeenCalledWith("/?home=overview&workspaceId=kanban-1");
   });
   it("navigates to /settings when the gear opens settings mode from a non-settings route", () => {
     pathname = DEFAULT_PATHNAME;

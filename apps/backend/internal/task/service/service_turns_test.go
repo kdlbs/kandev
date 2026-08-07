@@ -162,6 +162,7 @@ func TestGetWorkspaceInfoForSession_BasicFields(t *testing.T) {
 		TaskEnvironmentID:  "env-123",
 		AgentProfileID:     "profile-1",
 		ExecutionProfileID: "claude-opus",
+		ExecutorProfileID:  "executor-profile-1",
 		State:              models.TaskSessionStateCompleted,
 		AgentProfileSnapshot: map[string]interface{}{
 			"agent_name": "auggie",
@@ -212,11 +213,39 @@ func TestGetWorkspaceInfoForSession_BasicFields(t *testing.T) {
 	if info.ExecutionProfileID != "claude-opus" {
 		t.Errorf("expected ExecutionProfileID 'claude-opus', got %q", info.ExecutionProfileID)
 	}
+	if info.ExecutorProfileID != "executor-profile-1" {
+		t.Errorf("expected ExecutorProfileID 'executor-profile-1', got %q", info.ExecutorProfileID)
+	}
 	if info.AgentID != "auggie" {
 		t.Errorf("expected AgentID 'auggie', got %q", info.AgentID)
 	}
 	if info.ACPSessionID != "acp-123" {
 		t.Errorf("expected ACPSessionID 'acp-123', got %q", info.ACPSessionID)
+	}
+}
+
+func TestApplyTaskEnvironmentToWorkspaceInfoUsesEnvironmentProfileAsFallback(t *testing.T) {
+	info := &lifecycle.WorkspaceInfo{}
+	applyTaskEnvironmentToWorkspaceInfo(info, &models.TaskEnvironment{
+		ID:                "env-1",
+		ExecutorProfileID: "executor-profile",
+		WorkspacePath:     "/workspace/task-1",
+	})
+
+	if info.ExecutorProfileID != "executor-profile" {
+		t.Fatalf("ExecutorProfileID = %q, want executor-profile", info.ExecutorProfileID)
+	}
+	if info.WorkspacePath != "/workspace/task-1" {
+		t.Fatalf("WorkspacePath = %q, want /workspace/task-1", info.WorkspacePath)
+	}
+
+	info.ExecutorProfileID = "session-profile"
+	applyTaskEnvironmentToWorkspaceInfo(info, &models.TaskEnvironment{
+		ID:                "env-2",
+		ExecutorProfileID: "stale-environment-profile",
+	})
+	if info.ExecutorProfileID != "session-profile" {
+		t.Fatalf("ExecutorProfileID = %q after session value, want session-profile", info.ExecutorProfileID)
 	}
 }
 

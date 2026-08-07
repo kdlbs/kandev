@@ -6,6 +6,7 @@ import type { FileEditorState } from "@/lib/state/dockview-store";
 const mockUpdateFileContent = vi.fn();
 const mockDeleteFile = vi.fn();
 const mockGetWebSocketClient = vi.fn();
+const mockSaveDocument = vi.fn();
 let openFilesMap = new Map<string, FileEditorState>();
 
 vi.mock("@/lib/ws/workspace-files", () => ({
@@ -15,6 +16,12 @@ vi.mock("@/lib/ws/workspace-files", () => ({
 
 vi.mock("@/lib/ws/connection", () => ({
   getWebSocketClient: () => mockGetWebSocketClient(),
+}));
+
+vi.mock("@/lib/lsp/lsp-client-manager", () => ({
+  lspClientManager: {
+    saveDocument: (...args: unknown[]) => mockSaveDocument(...args),
+  },
 }));
 
 vi.mock("@/lib/state/dockview-store", () => ({
@@ -89,6 +96,55 @@ describe("useSaveDeleteActions repo threading", () => {
       FAKE_CLIENT,
       SESSION_ID,
       expect.objectContaining({ path: PATH, repo: REPO }),
+    );
+    expect(mockSaveDocument).toHaveBeenCalledWith(SESSION_ID, PATH, REPO, "v2", "v2");
+  });
+
+  it("does not notify the language server when saving fails", async () => {
+    seedOpenFile({ repo: REPO });
+    mockUpdateFileContent.mockResolvedValueOnce({ success: false, error: "write failed" });
+
+    const { result } = renderActions();
+    await act(async () => {
+      await result.current.saveFile(PATH, REPO);
+    });
+
+    expect(mockSaveDocument).not.toHaveBeenCalled();
+  });
+
+  it("keeps the newest editor snapshot in LSP when the buffer advances during save", async () => {
+    seedOpenFile({ repo: REPO });
+    let resolveSave!: (response: { success: boolean; new_hash: string }) => void;
+    mockUpdateFileContent.mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveSave = resolve;
+      }),
+    );
+    const { result } = renderActions();
+
+    let savePromise!: Promise<void>;
+    act(() => {
+      savePromise = result.current.saveFile(PATH, REPO);
+    });
+    const fileKey = buildRepoScopedItemId(PATH, REPO);
+    const savingSnapshot = openFilesMap.get(fileKey)!;
+    openFilesMap.set(fileKey, {
+      ...savingSnapshot,
+      content: "v3 typed while saving",
+      isDirty: true,
+    });
+
+    await act(async () => {
+      resolveSave({ success: true, new_hash: "h:v2" });
+      await savePromise;
+    });
+
+    expect(mockSaveDocument).toHaveBeenCalledWith(
+      SESSION_ID,
+      PATH,
+      REPO,
+      "v2",
+      "v3 typed while saving",
     );
   });
 

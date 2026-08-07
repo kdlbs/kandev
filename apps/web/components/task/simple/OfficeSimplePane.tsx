@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback, useRef } from "react";
+import { useTranslation } from "react-i18next";
 import Link from "@/components/routing/app-link";
 import {
   IconCopy,
@@ -35,6 +36,7 @@ import { StatusIcon } from "@/app/office/tasks/[id]/status-icon";
 import { StageProgressBar } from "./stage-progress-bar";
 import { SubtaskStepper } from "./subtask-stepper";
 import { hasBlockerChain } from "./workflow-sort";
+import { copyToClipboard } from "@/lib/utils/copy-to-clipboard";
 import { NewTaskDialog } from "@/app/office/components/new-task-dialog";
 import { ActiveSessionRefProvider } from "./components/active-session-ref-context";
 import { TopbarWorkingIndicator } from "./components/topbar-working-indicator";
@@ -55,7 +57,7 @@ import type {
   TaskSession,
   TimelineEvent,
 } from "@/app/office/tasks/[id]/types";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast/sonner";
 
 const COMMENTABLE_DONE_SESSION_STATES = new Set<TaskSession["state"]>([
   "CREATED",
@@ -97,12 +99,13 @@ function commentsReadOnly(task: Task, sessions: TaskSession[]): boolean {
 }
 
 function TaskBreadcrumb({ task }: { task: Task }) {
+  const { t } = useTranslation();
   return (
-    <Breadcrumb>
+    <Breadcrumb aria-label={t("common:breadcrumb")}>
       <BreadcrumbList className="text-sm">
         <BreadcrumbItem>
           <BreadcrumbLink asChild>
-            <Link href="/office/tasks">Tasks</Link>
+            <Link href="/office/tasks">{t("task:tasks")}</Link>
           </BreadcrumbLink>
         </BreadcrumbItem>
         {task.parentIdentifier && (
@@ -125,13 +128,14 @@ function TaskBreadcrumb({ task }: { task: Task }) {
 }
 
 function TaskHeaderRow({ task, activeHold }: { task: Task; activeHold: TreeHold | null }) {
+  const { t } = useTranslation();
   return (
     <div className="flex items-center gap-2">
       <StatusIcon status={task.status} />
       <span className="text-sm font-mono text-muted-foreground">{task.identifier}</span>
       {task.projectName && <Badge variant="outline">{task.projectName}</Badge>}
-      {activeHold?.mode === "pause" && <Badge variant="outline">Paused</Badge>}
-      {activeHold?.mode === "cancel" && <Badge variant="outline">Cancelled (tree)</Badge>}
+      {activeHold?.mode === "pause" && <Badge variant="outline">{t("task:paused")}</Badge>}
+      {activeHold?.mode === "cancel" && <Badge variant="outline">{t("task:cancelledTree")}</Badge>}
       <div className="ml-auto">
         <Tooltip>
           <TooltipTrigger asChild>
@@ -139,12 +143,12 @@ function TaskHeaderRow({ task, activeHold }: { task: Task; activeHold: TreeHold 
               variant="ghost"
               size="icon"
               className="h-8 w-8 cursor-pointer"
-              onClick={() => navigator.clipboard.writeText(task.identifier)}
+              onClick={() => void copyToClipboard(task.identifier)}
             >
               <IconCopy className="h-4 w-4" />
             </Button>
           </TooltipTrigger>
-          <TooltipContent>Copy identifier</TooltipContent>
+          <TooltipContent>{t("task:copyIdentifier")}</TooltipContent>
         </Tooltip>
       </div>
     </div>
@@ -158,11 +162,12 @@ function ChildIssuesList({
   items: Task["children"];
   activeHold: TreeHold | null;
 }) {
+  const { t } = useTranslation();
   if (items.length === 0) return null;
-  const holdLabel = activeHold?.mode === "pause" ? "Paused" : "Cancelled (tree)";
+  const holdLabel = activeHold?.mode === "pause" ? t("task:paused") : t("task:cancelledTree");
   return (
     <div className="mt-8" data-testid="child-issues-list">
-      <h2 className="text-sm font-semibold mb-4">Sub-tasks</h2>
+      <h2 className="text-sm font-semibold mb-4">{t("task:subTasks")}</h2>
       <div className="border border-border rounded-lg divide-y divide-border">
         {items.map((child) => (
           <Link
@@ -183,7 +188,9 @@ function ChildIssuesList({
   );
 }
 
-type TreeActionRunner = (action: () => Promise<unknown>, message: string) => Promise<void>;
+// Takes a catalog key rather than resolved copy: the call sites are plain
+// click handlers, and the success toast has to resolve at click time.
+type TreeActionRunner = (action: () => Promise<unknown>, messageKey: string) => Promise<void>;
 
 function PauseResumeButton({
   taskId,
@@ -198,6 +205,11 @@ function PauseResumeButton({
   busy: boolean;
   runAction: TreeActionRunner;
 }) {
+  const { t } = useTranslation();
+  // The success-toast keys are hoisted out of JSX: they are catalog keys, not
+  // copy, and the literal guard only inspects JSX positions.
+  const handleResume = () => runAction(() => resumeTaskTree(taskId), "task:taskTreeResumed");
+  const handlePause = () => runAction(() => pauseTaskTree(taskId), "task:taskTreePaused");
   if (activeHold?.mode === "pause") {
     return (
       <Button
@@ -205,9 +217,9 @@ function PauseResumeButton({
         size="sm"
         className="cursor-pointer"
         disabled={busy}
-        onClick={() => runAction(() => resumeTaskTree(taskId), "Task tree resumed")}
+        onClick={handleResume}
       >
-        <IconPlayerPlay className="h-3.5 w-3.5 mr-1" /> Resume tree
+        <IconPlayerPlay className="h-3.5 w-3.5 mr-1" /> {t("task:resumeTree")}
       </Button>
     );
   }
@@ -218,9 +230,9 @@ function PauseResumeButton({
       size="sm"
       className="cursor-pointer"
       disabled={busy || activeHold?.mode === "cancel"}
-      onClick={() => runAction(() => pauseTaskTree(taskId), "Task tree paused")}
+      onClick={handlePause}
     >
-      <IconPlayerPause className="h-3.5 w-3.5 mr-1" /> Pause tree
+      <IconPlayerPause className="h-3.5 w-3.5 mr-1" /> {t("task:pauseTree")}
     </Button>
   );
 }
@@ -240,6 +252,8 @@ function CancelRestoreButton({
   onCancel: () => void;
   runAction: TreeActionRunner;
 }) {
+  const { t } = useTranslation();
+  const handleRestore = () => runAction(() => restoreTaskTree(taskId), "task:taskTreeRestored");
   if (activeHold?.mode === "cancel") {
     return (
       <Button
@@ -247,9 +261,9 @@ function CancelRestoreButton({
         size="sm"
         className="cursor-pointer"
         disabled={busy}
-        onClick={() => runAction(() => restoreTaskTree(taskId), "Task tree restored")}
+        onClick={handleRestore}
       >
-        <IconRestore className="h-3.5 w-3.5 mr-1" /> Restore tree
+        <IconRestore className="h-3.5 w-3.5 mr-1" /> {t("task:restoreTree")}
       </Button>
     );
   }
@@ -262,7 +276,7 @@ function CancelRestoreButton({
       disabled={busy}
       onClick={onCancel}
     >
-      <IconTrash className="h-3.5 w-3.5 mr-1" /> Cancel tree
+      <IconTrash className="h-3.5 w-3.5 mr-1" /> {t("task:cancelTree")}
     </Button>
   );
 }
@@ -278,18 +292,24 @@ function TreeControls({
   activeHold: TreeHold | null;
   onChanged: () => Promise<void>;
 }) {
+  const { t } = useTranslation();
   const [cancelOpen, setCancelOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const hasTree = (preview?.task_count ?? 1) > 1 || task.children.length > 0;
 
-  const runAction = async (action: () => Promise<unknown>, message: string) => {
+  const handleConfirmCancel = () => {
+    setCancelOpen(false);
+    void runAction(() => cancelTaskTree(task.id), "task:taskTreeCancelled");
+  };
+
+  const runAction = async (action: () => Promise<unknown>, messageKey: string) => {
     setBusy(true);
     try {
       await action();
-      toast.success(message);
+      toast.success(t(messageKey));
       await onChanged();
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Tree action failed");
+      toast.error(error instanceof Error ? error.message : t("task:treeActionFailed"));
     } finally {
       setBusy(false);
     }
@@ -316,7 +336,7 @@ function TreeControls({
       />
       {preview && hasTree && (
         <span className="inline-flex items-center text-xs text-muted-foreground">
-          {preview.task_count} tasks affected
+          {t("task:tasksAffected", { count: preview.task_count })}
         </span>
       )}
       <TreeCancelDialog
@@ -324,10 +344,7 @@ function TreeControls({
         onOpenChange={setCancelOpen}
         taskCount={preview?.task_count ?? task.children.length + 1}
         activeRunCount={preview?.active_run_count ?? 0}
-        onConfirm={() => {
-          setCancelOpen(false);
-          void runAction(() => cancelTaskTree(task.id), "Task tree cancelled");
-        }}
+        onConfirm={handleConfirmCancel}
       />
     </div>
   );
@@ -346,6 +363,7 @@ function TaskActionRow({
   onTreeChanged: () => Promise<void>;
   onNewSubIssue: () => void;
 }) {
+  const { t } = useTranslation();
   const attachInputRef = useRef<HTMLInputElement>(null);
   const handleAttachFiles = useCallback(
     async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -360,21 +378,21 @@ function TaskActionRow({
             title: file.name,
             content: content.slice(0, 100_000),
           });
-          toast.success(`Uploaded ${file.name}`);
+          toast.success(t("task:uploaded", { name: file.name }));
         } catch {
-          toast.error(`Failed to upload ${file.name}`);
+          toast.error(t("task:failedToUpload", { name: file.name }));
         }
       }
       e.target.value = "";
     },
-    [task.id],
+    [task.id, t],
   );
 
   return (
     <>
       <div className="flex gap-2 mt-6">
         <Button variant="outline" size="sm" className="cursor-pointer" onClick={onNewSubIssue}>
-          <IconPlus className="h-3.5 w-3.5 mr-1" /> New Sub-Task
+          <IconPlus className="h-3.5 w-3.5 mr-1" /> {t("task:newSubTask")}
         </Button>
         <Button
           variant="outline"
@@ -382,7 +400,7 @@ function TaskActionRow({
           className="cursor-pointer"
           onClick={() => attachInputRef.current?.click()}
         >
-          <IconPaperclip className="h-3.5 w-3.5 mr-1" /> Attach files
+          <IconPaperclip className="h-3.5 w-3.5 mr-1" /> {t("task:attachFiles")}
         </Button>
         <input
           ref={attachInputRef}
@@ -447,6 +465,7 @@ export function OfficeSimplePane({
   onToggleAdvanced,
   onCommentsChanged,
 }: OfficeSimplePaneProps) {
+  const { t } = useTranslation();
   const [subIssueOpen, setSubIssueOpen] = useState(false);
   const [scrollParent, setScrollParent] = useState<HTMLDivElement | null>(null);
   const { treePreview, activeHold, refreshTreePreview } = useTaskTreePreview(task.id);
@@ -465,7 +484,7 @@ export function OfficeSimplePane({
                 htmlFor="advanced-toggle"
                 className="text-xs text-muted-foreground cursor-pointer"
               >
-                Advanced
+                {t("task:advanced")}
               </Label>
               <Switch
                 id="advanced-toggle"
@@ -479,7 +498,7 @@ export function OfficeSimplePane({
             className="text-xs text-muted-foreground underline-offset-2 hover:underline cursor-pointer whitespace-nowrap"
             data-testid="task-cross-link"
           >
-            Open in advanced view
+            {t("task:openInAdvancedView")}
           </Link>
         </OfficeTopbarPortal>
         <div ref={setScrollParent} className="flex-1 min-w-0 overflow-y-auto p-6">

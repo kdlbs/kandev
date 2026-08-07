@@ -18,7 +18,7 @@ import (
 )
 
 // startCronScheduler builds and starts the Phase 5 shared cron loop.
-// All three handlers (heartbeat, budget, routines) ride a single
+// All handlers (heartbeat, budget, routines, Office recovery) ride a single
 // goroutine so the backend has one cron driver for all
 // task-model-unification timers.
 //
@@ -31,16 +31,26 @@ func startCronScheduler(
 	repos *Repositories,
 	dispatcher *officeenginedispatcher.Dispatcher,
 	routineSvc *officeroutines.RoutineService,
+	officeRecovery schedulercron.Handler,
 	log *logger.Logger,
-) {
+) *schedulercron.Loop {
 	heartbeat := buildHeartbeatHandler(repos, dispatcher, log)
 	budget := buildBudgetHandler(repos, dispatcher, log)
-	routines := schedulercron.NewRoutinesHandler(routineSvc, nil, log)
+	// Only wire a routines ticker when the office routines service exists.
+	// Assigning a nil *RoutineService straight into the RoutineTicker
+	// interface would produce a non-nil typed-nil interface and panic on
+	// every tick when Office is disabled.
+	var routineTicker schedulercron.RoutineTicker
+	if routineSvc != nil {
+		routineTicker = routineSvc
+	}
+	routines := schedulercron.NewRoutinesHandler(routineTicker, nil, log)
 	loop := schedulercron.NewLoop(schedulercron.DefaultTickInterval, log,
-		heartbeat, budget, routines)
-	go loop.Start(ctx)
+		heartbeat, budget, routines, officeRecovery)
+	loop.Start(ctx)
 	log.Info("phase 5 cron loop started",
 		zap.Duration("interval", schedulercron.DefaultTickInterval))
+	return loop
 }
 
 func buildHeartbeatHandler(

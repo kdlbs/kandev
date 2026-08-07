@@ -22,6 +22,14 @@ import {
   readImproveKandevSkipIntro,
   writeImproveKandevSkipIntro,
 } from "./improve-kandev-dialog-model";
+import { Trans, useTranslation } from "react-i18next";
+// The module-level `t` — resolved when called, not at import — for the two
+// error-only strings below. The hook-provided `t` changes identity on a locale
+// switch, and putting it in these effects' dependency arrays would re-POST
+// `bootstrapImproveKandev` (which forks a repository) and reset auth state
+// whenever the user changes language. Render-time copy still uses the reactive
+// `t` from `useTranslation()`.
+import { t as tStatic } from "@/lib/i18n";
 
 type ImproveKandevDialogProps = {
   open: boolean;
@@ -38,6 +46,7 @@ type AuthState =
   | { kind: "missing"; message: string; fixUrl: string; fixLabel: string };
 
 export function ImproveKandevDialog(props: ImproveKandevDialogProps) {
+  const { t } = useTranslation();
   const { open, onOpenChange, workspaceId, onSuccess } = props;
   const [mode, setMode] = useState<Mode>(() => initialImproveKandevMode(readSkipIntro()));
   const [skipIntro, setSkipIntro] = useState(() => readSkipIntro());
@@ -95,7 +104,9 @@ export function ImproveKandevDialog(props: ImproveKandevDialogProps) {
         setCaptureLogs={setCaptureLogs}
         transformDescription={transformDescription}
         onTaskCreated={handleSuccess}
-        externalBlockedReason={auth.kind === "checking" ? "Checking GitHub authentication…" : null}
+        externalBlockedReason={
+          auth.kind === "checking" ? t("common:checkingGithubAuthentication") : null
+        }
       />
     );
   }
@@ -106,7 +117,7 @@ export function ImproveKandevDialog(props: ImproveKandevDialogProps) {
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <IconStethoscope className="h-5 w-5" />
-            Improve Kandev
+            {t("common:improveKandev")}
           </DialogTitle>
         </DialogHeader>
         <IntroBody
@@ -145,7 +156,7 @@ function useGitHubAuthCheck(
           kind: "missing",
           message: ghIssue.message,
           fixUrl: ghIssue.fix_url.replace("{workspaceId}", workspaceId),
-          fixLabel: ghIssue.fix_label || "Configure GitHub",
+          fixLabel: ghIssue.fix_label || tStatic("common:configureGithub"),
         });
       } catch {
         if (!cancelled) setAuth({ kind: "ok" }); // Fail open — bootstrap will surface real errors.
@@ -190,10 +201,10 @@ function useBootstrapKandev(
         });
       } catch (err) {
         if (cancelled) return;
-        const message = err instanceof Error ? err.message : "Bootstrap failed";
+        const message = err instanceof Error ? err.message : tStatic("common:bootstrapFailed");
         setBootstrap({ kind: "error", message });
         toast({
-          title: "Could not prepare Improve Kandev",
+          title: tStatic("common:couldNotPrepareImproveKandev"),
           description: message,
           variant: "error",
         });
@@ -239,21 +250,29 @@ function GhAuthMissing({
   auth: Extract<AuthState, { kind: "missing" }>;
   onCancel: () => void;
 }) {
+  const { t } = useTranslation();
   return (
     <div className="space-y-4 py-2">
       <div className="flex items-start gap-3 rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-sm">
         <IconAlertTriangle className="h-4 w-4 shrink-0 text-amber-500" />
         <div>
-          <p className="font-medium text-foreground">GitHub CLI not authenticated</p>
+          <p className="font-medium text-foreground">{t("common:githubCliNotAuthenticated")}</p>
           <p className="mt-1 text-muted-foreground">
-            The final step of this workflow opens a pull request, which needs the <code>gh</code>{" "}
-            CLI to be authenticated. {auth.message}
+            {/* `gh` is the CLI's binary name, so it stays literal in the children
+                and never becomes a catalog key. */}
+            <Trans
+              i18nKey="common:theFinalStepOpensAPullRequest"
+              values={{ message: auth.message }}
+            >
+              The final step of this workflow opens a pull request, which needs the <code>gh</code>{" "}
+              CLI to be authenticated. {auth.message}
+            </Trans>
           </p>
         </div>
       </div>
       <div className="flex justify-end gap-2">
         <Button variant="ghost" onClick={onCancel} className="cursor-pointer">
-          Cancel
+          {t("common:cancel")}
         </Button>
         <Button asChild className="cursor-pointer">
           <Link href={auth.fixUrl} onClick={onCancel}>
@@ -278,30 +297,37 @@ function IntroExplanation({
   onCancel: () => void;
   onProceed: () => void;
 }) {
+  const { t } = useTranslation();
   return (
     <div className="space-y-5 py-2">
       <p className="text-sm leading-relaxed text-muted-foreground">
-        Kandev is open source, and you can help make it better.
+        {t("common:kandevIsOpenSourceAndYou")}
       </p>
 
       <p className="text-sm leading-relaxed text-muted-foreground">
-        Describe a bug you hit or a feature you&apos;d like, and we&apos;ll create a task on your
-        own agent to implement it in the kandev codebase.
+        {t("common:describeABugYouHitOr")}
       </p>
 
       <p className="text-sm leading-relaxed text-muted-foreground">
-        When it&apos;s done, the agent opens a pull request to{" "}
-        <code className="font-mono text-xs">kdlbs/kandev</code> for the maintainers to review,
-        saving them time and shipping the improvement to everyone.
+        <Trans i18nKey="common:whenItsDoneTheAgentOpensAPr" values={{ repo: "kdlbs/kandev" }}>
+          When it&apos;s done, the agent opens a pull request to{" "}
+          <code className="font-mono text-xs">kdlbs/kandev</code> for the maintainers to review,
+          saving them time and shipping the improvement to everyone.
+        </Trans>
       </p>
 
       <ul className="space-y-2 text-sm text-muted-foreground">
-        <IntroBullet>Create a task describing your bug or feature request</IntroBullet>
-        <IntroBullet>Your agent implements it in the kandev repository, with tests</IntroBullet>
-        <IntroBullet>You verify and test the change in a second kandev instance</IntroBullet>
+        <IntroBullet>{t("common:createATaskDescribingYourBug")}</IntroBullet>
+        <IntroBullet>{t("common:yourAgentImplementsItInThe")}</IntroBullet>
+        <IntroBullet>{t("common:youVerifyAndTestTheChange")}</IntroBullet>
         <IntroBullet>
-          The agent forks <code className="font-mono text-xs">kdlbs/kandev</code> to your GitHub
-          account and opens a PR from your fork, credited to you
+          <Trans
+            i18nKey="common:theAgentForksKandevToYourAccount"
+            values={{ repo: "kdlbs/kandev" }}
+          >
+            The agent forks <code className="font-mono text-xs">kdlbs/kandev</code> to your GitHub
+            account and opens a PR from your fork, credited to you
+          </Trans>
         </IntroBullet>
       </ul>
       <label
@@ -312,11 +338,11 @@ function IntroExplanation({
           checked={skipIntro}
           onCheckedChange={(checked) => onSkipIntroChange(checked === true)}
         />
-        Do not show this again
+        {t("common:doNotShowThisAgain")}
       </label>
       <div className="flex justify-end gap-2">
         <Button variant="ghost" onClick={onCancel} className="cursor-pointer">
-          Cancel
+          {t("common:cancel")}
         </Button>
         <Button
           onClick={onProceed}
@@ -324,7 +350,7 @@ function IntroExplanation({
           className="cursor-pointer"
           data-testid="improve-kandev-proceed"
         >
-          Contribute
+          {t("common:contribute")}
         </Button>
       </div>
     </div>

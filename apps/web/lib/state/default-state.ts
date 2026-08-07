@@ -19,11 +19,12 @@ import {
 } from "./slices";
 import { applyStoredQuickChatNames } from "@/lib/state/slices/ui/quick-chat-sync";
 import type { HydrationState } from "./store";
-import { migrateView } from "./slices/ui/ui-slice";
+import { migrateSidebarViewDraft, migrateView } from "./slices/ui/ui-slice";
 
 export const defaultState = {
   kanban: defaultKanbanState.kanban,
   kanbanMulti: defaultKanbanState.kanbanMulti,
+  sidebarArchivedTasks: defaultKanbanState.sidebarArchivedTasks,
   workflows: defaultKanbanState.workflows,
   tasks: defaultKanbanState.tasks,
   workspaces: defaultWorkspaceState.workspaces,
@@ -40,6 +41,7 @@ export const defaultState = {
   secrets: defaultSettingsState.secrets,
   notificationProviders: defaultSettingsState.notificationProviders,
   settingsData: defaultSettingsState.settingsData,
+  sleepInhibition: defaultSettingsState.sleepInhibition,
   userSettings: defaultSettingsState.userSettings,
   messages: defaultSessionState.messages,
   turns: defaultSessionState.turns,
@@ -86,12 +88,14 @@ export const defaultState = {
   taskCIAutomation: defaultGitHubState.taskCIAutomation,
   taskMRs: defaultGitLabState.taskMRs,
   azureDevOpsTaskPullRequests: defaultAzureDevOpsState.azureDevOpsTaskPullRequests,
+  azureDevOpsTaskWorkItems: defaultAzureDevOpsState.azureDevOpsTaskWorkItems,
   gitlabReviewWatches: defaultGitLabState.gitlabReviewWatches,
   gitlabIssueWatches: defaultGitLabState.gitlabIssueWatches,
   gitlabMRWatches: defaultGitLabState.gitlabMRWatches,
   gitlabActionPresets: defaultGitLabState.gitlabActionPresets,
   gitlabStats: defaultGitLabState.gitlabStats,
   gitlabStatus: defaultGitLabState.gitlabStatus,
+  taskMRAutomation: defaultGitLabState.taskMRAutomation,
   jiraIssueWatches: defaultJiraState.jiraIssueWatches,
   linearIssueWatches: defaultLinearState.linearIssueWatches,
   office: defaultOfficeState.office,
@@ -134,6 +138,7 @@ function mergeCodeHostFields(
   | "gitlabStats"
   | "gitlabStatus"
   | "azureDevOpsTaskPullRequests"
+  | "azureDevOpsTaskWorkItems"
 > {
   return {
     taskMRs: { ...d.taskMRs, ...s.taskMRs },
@@ -146,6 +151,10 @@ function mergeCodeHostFields(
     azureDevOpsTaskPullRequests: {
       ...d.azureDevOpsTaskPullRequests,
       ...s.azureDevOpsTaskPullRequests,
+    },
+    azureDevOpsTaskWorkItems: {
+      ...d.azureDevOpsTaskWorkItems,
+      ...s.azureDevOpsTaskWorkItems,
     },
   };
 }
@@ -172,7 +181,11 @@ function mergeSidebarViewState(initialState: HydrationState): DefaultState["side
   } else if (!sidebarViews.views.some((view) => view.id === sidebarViews.activeViewId)) {
     sidebarViews.activeViewId = sidebarViews.views[0].id;
   }
-  if (userSettings?.sidebarDraft !== undefined) sidebarViews.draft = userSettings.sidebarDraft;
+  if (userSettings?.sidebarDraft !== undefined) {
+    sidebarViews.draft = userSettings.sidebarDraft
+      ? migrateSidebarViewDraft(userSettings.sidebarDraft)
+      : null;
+  }
   return sidebarViews;
 }
 
@@ -263,6 +276,7 @@ export function mergeInitialState(initialState?: HydrationState): DefaultState {
       ...initialState.notificationProviders,
     },
     settingsData: { ...defaultState.settingsData, ...initialState.settingsData },
+    sleepInhibition: { ...defaultState.sleepInhibition, ...initialState.sleepInhibition },
     userSettings: { ...defaultState.userSettings, ...initialState.userSettings },
     messages: { ...defaultState.messages, ...initialState.messages },
     turns: { ...defaultState.turns, ...initialState.turns },
@@ -312,6 +326,7 @@ export function mergeInitialState(initialState?: HydrationState): DefaultState {
     actionPresets: { ...defaultState.actionPresets, ...initialState.actionPresets },
     prFeedbackCache: { ...defaultState.prFeedbackCache, ...initialState.prFeedbackCache },
     taskCIAutomation: { ...defaultState.taskCIAutomation, ...initialState.taskCIAutomation },
+    taskMRAutomation: { ...defaultState.taskMRAutomation, ...initialState.taskMRAutomation },
     ...mergeCodeHostFields(defaultState, initialState),
     jiraIssueWatches: { ...defaultState.jiraIssueWatches, ...initialState.jiraIssueWatches },
     linearIssueWatches: {

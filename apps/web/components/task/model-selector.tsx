@@ -12,6 +12,7 @@ import {
 } from "@/components/model-config-selector";
 import { useAppStore } from "@/components/state-provider";
 import { useToast } from "@/components/toast-provider";
+import { createDebugLogger, isDebug } from "@/lib/debug/log";
 import { useAvailableAgents } from "@/hooks/domains/settings/use-available-agents";
 import { useSettingsData } from "@/hooks/domains/settings/use-settings-data";
 import { setSessionConfigOption, setSessionModel } from "@/lib/api/domains/session-api";
@@ -20,6 +21,8 @@ import type {
   ConfigOptionEntry,
   SessionModelEntry,
 } from "@/lib/state/slices/session-runtime/types";
+import { useTranslation } from "react-i18next";
+import { t } from "@/lib/i18n";
 
 type SessionModelsEntry = {
   currentModelId: string;
@@ -33,6 +36,8 @@ type ModelSelectorProps = {
   triggerClassName?: string;
 };
 
+const debug = createDebugLogger("model-selector:gate");
+
 function configValueKeys(value: unknown): string[] {
   if (!value || typeof value !== "object" || Array.isArray(value)) return [];
   return Object.entries(value)
@@ -40,7 +45,9 @@ function configValueKeys(value: unknown): string[] {
     .map(([key]) => key);
 }
 
-function requiredConfigKeys(session: TaskSession | null, agents: Agent[]): string[] {
+const MODEL_CONFIG_KEY = "model";
+
+export function requiredConfigKeys(session: TaskSession | null, agents: Agent[]): string[] {
   if (!session) return [];
   const keys = new Set(configValueKeys(session.agent_profile_snapshot?.config_options));
   for (const agent of agents) {
@@ -59,7 +66,7 @@ function requiredConfigKeys(session: TaskSession | null, agents: Agent[]): strin
   return [...keys];
 }
 
-function hasCompleteDynamicConfig(
+export function hasCompleteDynamicConfig(
   session: TaskSession | null,
   sessionModelsData: SessionModelsEntry | undefined,
   agents: Agent[],
@@ -68,7 +75,16 @@ function hasCompleteDynamicConfig(
   if (required.length === 0) return true;
   if (!sessionModelsData) return false;
   const available = new Set(sessionModelsData.configOptions.map((option) => option.id));
-  return required.every((key) => available.has(key));
+  // Flat-model-list agents (e.g. claude-opus) expose their models via the ACP
+  // top-level `models` list and switch with session/set_model rather than a
+  // SessionConfigOption(category="model"). For those the persisted runtime
+  // config still records a "model" key, but it will never appear in
+  // configOptions. Treat that key as satisfied when the session has a flat model
+  // list — the selector renders fine from it.
+  const hasFlatModelList = !!sessionModelsData.models.length;
+  return required.every(
+    (key) => available.has(key) || (key === MODEL_CONFIG_KEY && hasFlatModelList),
+  );
 }
 
 function resolveSessionState(
@@ -191,7 +207,7 @@ function resolveAvailableModels({
 }
 
 function describeError(err: unknown): string {
-  return err instanceof Error ? err.message : "Unknown error";
+  return err instanceof Error ? err.message : t("task:unknownError2");
 }
 
 /** Builds model/config change handlers with optimistic update + error toast + revert. */
@@ -199,6 +215,7 @@ function useModelChangeHandlers(
   configOptions: SelectConfigOption[],
   sessionModelsData: SessionModelsEntry | undefined,
 ) {
+  const { t } = useTranslation();
   const activeModels = useAppStore((state) => state.activeModel.bySessionId);
   const setActiveModel = useAppStore((state) => state.setActiveModel);
   const setSessionModels = useAppStore((state) => state.setSessionModels);
@@ -232,7 +249,7 @@ function useModelChangeHandlers(
         setActiveModel(sid, previousActive);
         if (previousModels) setSessionModels(sid, previousModels);
         toast({
-          title: "Failed to change model",
+          title: t("task:failedToChangeModel"),
           description: describeError(err),
           variant: "error",
         });
@@ -338,6 +355,8 @@ function useModelSelectorState(sessionId: string | null) {
     configOptions,
     configBaseline: sessionModelsData?.configBaseline,
     configHydrated: hasCompleteDynamicConfig(session, sessionModelsData, settingsAgents as Agent[]),
+    requiredKeys: requiredConfigKeys(session, settingsAgents as Agent[]),
+    rawConfigOptionIds: (sessionModelsData?.configOptions ?? []).map((o) => o.id),
     handleModelChange,
     handleConfigChange,
   };
@@ -347,12 +366,15 @@ export const ModelSelector = memo(function ModelSelector({
   sessionId,
   triggerClassName,
 }: ModelSelectorProps) {
+  const { t } = useTranslation();
   const {
     currentModel,
     modelOptions,
     configOptions,
     configBaseline,
     configHydrated,
+    requiredKeys,
+    rawConfigOptionIds,
     handleModelChange,
     handleConfigChange,
   } = useModelSelectorState(sessionId);
@@ -374,6 +396,19 @@ export const ModelSelector = memo(function ModelSelector({
     [sessionId, handleConfigChange],
   );
 
+  if (isDebug()) {
+    debug("render", {
+      sessionId: sessionId ?? "",
+      configHydrated,
+      currentModel: currentModel ?? "",
+      hasModelConfig: !!modelConfig,
+      modelOptionsLen: modelOptions.length,
+      configOptionIds: configOptions.map((o) => o.id),
+      rawConfigOptionIds,
+      requiredKeys,
+      willHide: !sessionId || !configHydrated || (!currentModel && !modelConfig),
+    });
+  }
   if (!sessionId || !configHydrated || (!currentModel && !modelConfig)) return null;
 
   return (
@@ -383,8 +418,8 @@ export const ModelSelector = memo(function ModelSelector({
       configOptions={configOptions}
       onModelChange={onModelChange}
       onConfigChange={onConfigChange}
-      placeholder="Model"
-      ariaLabel="Session model settings"
+      placeholder={t("common:model")}
+      ariaLabel={t("task:sessionModelSettings")}
       variant="compact"
       popoverSide="top"
       triggerClassName={triggerClassName}

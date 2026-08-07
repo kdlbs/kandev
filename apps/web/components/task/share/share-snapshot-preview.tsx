@@ -6,6 +6,7 @@ import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 
 import type { SnapshotPreview, SnapshotPreviewMessage } from "@/lib/api/domains/share-api";
+import { useTranslation } from "react-i18next";
 
 type Props = {
   snapshot: SnapshotPreview;
@@ -39,6 +40,7 @@ const previewMarkdownComponents: Components = {
  * exactly what will be published" easy to verify at a glance.
  */
 export function ShareSnapshotPreview({ snapshot }: Props) {
+  const { t } = useTranslation();
   const slices = previewSlices(snapshot.messages);
   return (
     <div className="flex min-w-0 flex-col gap-2">
@@ -50,16 +52,19 @@ export function ShareSnapshotPreview({ snapshot }: Props) {
         {snapshot.session.executor_type && (
           <Badge variant="outline">{snapshot.session.executor_type}</Badge>
         )}
-        <span>{snapshot.messages.length} messages</span>
+        <span>{t("task:snapshotMessageCount", { count: snapshot.messages.length })}</span>
         {snapshot.redaction.applied_rules.length > 0 && (
-          <span>Redacted: {snapshot.redaction.applied_rules.join(", ")}</span>
+          // `applied_rules` are redaction-rule ids from the share API — data, not copy.
+          <span>
+            {t("task:redactedRules", { rules: snapshot.redaction.applied_rules.join(", ") })}
+          </span>
         )}
       </div>
       <ScrollArea className="h-72 rounded border bg-muted/30">
         <div className="flex flex-col gap-3 p-3">
           {snapshot.messages.length === 0 && (
             <p className="text-sm text-muted-foreground italic">
-              This conversation has no shareable content.
+              {t("task:thisConversationHasNoShareableContent")}
             </p>
           )}
           {slices.head.map((msg, idx) => (
@@ -67,8 +72,7 @@ export function ShareSnapshotPreview({ snapshot }: Props) {
           ))}
           {slices.hiddenCount > 0 && (
             <p className="text-center text-xs text-muted-foreground italic py-1">
-              … {slices.hiddenCount} more message{slices.hiddenCount === 1 ? "" : "s"} hidden in
-              this preview (still included in the share) …
+              {t("task:hiddenMessagesInPreview", { count: slices.hiddenCount })}
             </p>
           )}
           {slices.tail.map((msg, idx) => (
@@ -114,6 +118,7 @@ function PreviewMessage({ message }: { message: SnapshotPreviewMessage }) {
 }
 
 function PreviewBlock({ block }: { block: SnapshotPreviewMessage["blocks"][number] }) {
+  const { t } = useTranslation();
   if (block.kind === "text") {
     return (
       <div className="markdown-body min-w-0 text-sm">
@@ -126,8 +131,8 @@ function PreviewBlock({ block }: { block: SnapshotPreviewMessage["blocks"][numbe
   if (block.kind === "tool_call") {
     return (
       <div className="min-w-0 rounded bg-muted/60 p-1.5 text-xs">
-        <div className="truncate font-mono" title={block.tool_name || "tool"}>
-          {block.tool_name || "tool"}
+        <div className="truncate font-mono" title={block.tool_name || t("task:tool")}>
+          {block.tool_name || t("task:tool")}
         </div>
         {block.text && (
           <p className="truncate text-muted-foreground" title={block.text}>

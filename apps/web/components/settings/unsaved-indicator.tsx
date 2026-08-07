@@ -1,5 +1,6 @@
 "use client";
 
+import { useTranslation } from "react-i18next";
 import { IconAlertCircle } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { RequestIndicator } from "@/components/request-indicator";
@@ -16,7 +17,8 @@ type UnsavedSaveButtonProps = {
 const dirtyButtonClass = "border-success/60 text-success hover:bg-success/10";
 
 export function UnsavedChangesBadge() {
-  return <span className="text-xs text-success">Unsaved changes</span>;
+  const { t } = useTranslation();
+  return <span className="text-xs text-success">{t("common:unsavedChanges")}</span>;
 }
 
 export function UnsavedSaveButton({
@@ -25,8 +27,12 @@ export function UnsavedSaveButton({
   status,
   onClick,
   disabled,
-  cleanLabel = "Save",
+  cleanLabel,
 }: UnsavedSaveButtonProps) {
+  const { t } = useTranslation();
+  // Defaulted here rather than in the parameter list: `t()` must resolve at
+  // render, and a default expression in the signature runs before the hook.
+  const resolvedCleanLabel = cleanLabel ?? t("common:save");
   return (
     <Button
       type="button"
@@ -37,7 +43,7 @@ export function UnsavedSaveButton({
       className={isDirty ? dirtyButtonClass : "cursor-pointer"}
     >
       {isDirty && <IconAlertCircle className="h-4 w-4 mr-2" />}
-      {isDirty ? "Save" : cleanLabel}
+      {isDirty ? t("common:save") : resolvedCleanLabel}
       {status !== "idle" && (
         <span className="ml-2">
           <RequestIndicator status={status} />

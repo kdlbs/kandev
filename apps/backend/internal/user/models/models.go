@@ -8,6 +8,8 @@ import (
 const (
 	MCPTaskAgentProfileDefaultCurrentTask      = "current_task"
 	MCPTaskAgentProfileDefaultWorkspaceDefault = "workspace_default"
+	LspStatusLocationToolbar                   = "toolbar"
+	LspStatusLocationStatusBar                 = "status_bar"
 )
 
 func NormalizeMCPTaskAgentProfileDefault(value string) string {
@@ -15,6 +17,25 @@ func NormalizeMCPTaskAgentProfileDefault(value string) string {
 		return value
 	}
 	return MCPTaskAgentProfileDefaultCurrentTask
+}
+
+func NormalizeLspStatusLocation(value string) string {
+	if value == LspStatusLocationStatusBar {
+		return value
+	}
+	return LspStatusLocationToolbar
+}
+
+const (
+	StartupPageTaskOverview = "task_overview"
+	StartupPageLastTask     = "last_task"
+)
+
+func NormalizeStartupPage(value string) string {
+	if value == StartupPageLastTask {
+		return value
+	}
+	return StartupPageTaskOverview
 }
 
 const (
@@ -46,6 +67,7 @@ type UserSettings struct {
 	UserID                          string                            `json:"user_id"`
 	WorkspaceID                     string                            `json:"workspace_id"`
 	KanbanViewMode                  string                            `json:"kanban_view_mode"`
+	StartupPage                     string                            `json:"startup_page"`
 	WorkflowFilterID                string                            `json:"workflow_filter_id"`
 	RepositoryIDs                   []string                          `json:"repository_ids"`
 	TasksListSort                   string                            `json:"tasks_list_sort"`
@@ -59,6 +81,7 @@ type UserSettings struct {
 	ReviewAutoMarkOnScroll          bool                              `json:"review_auto_mark_on_scroll"`
 	ConfirmTaskArchive              bool                              `json:"confirm_task_archive"`
 	UnreadDivider                   bool                              `json:"unread_divider"`
+	AgentGeneratedTaskTitles        bool                              `json:"agent_generated_task_titles"`
 	MCPTaskAgentProfileDefault      string                            `json:"mcp_task_agent_profile_default"`
 	ShowAnchoredPromptBar           bool                              `json:"show_anchored_prompt_bar"` // desktop-only sticky last-prompt bar
 	ShowScrollToLastPrompt          bool                              `json:"show_scroll_to_last_prompt"`
@@ -69,6 +92,7 @@ type UserSettings struct {
 	LspAutoStartLanguages           []string                          `json:"lsp_auto_start_languages"`
 	LspAutoInstallLanguages         []string                          `json:"lsp_auto_install_languages"`
 	LspServerConfigs                map[string]map[string]interface{} `json:"lsp_server_configs"`
+	LspStatusLocation               string                            `json:"lsp_status_location"`
 	SavedLayouts                    []SavedLayout                     `json:"saved_layouts"`
 	SidebarViews                    []SidebarView                     `json:"sidebar_views"`
 	SidebarActiveViewID             string                            `json:"sidebar_active_view_id"`
@@ -80,6 +104,7 @@ type UserSettings struct {
 	GitHubSavedPresets              json.RawMessage                   `json:"github_saved_presets"`
 	GitHubDefaultQueryPresets       json.RawMessage                   `json:"github_default_query_presets"`
 	GitLabSavedPresets              json.RawMessage                   `json:"gitlab_saved_presets"`
+	AzureDevOpsBrowsePreferences    json.RawMessage                   `json:"azure_devops_browse_preferences"`
 	DefaultUtilityAgentID           string                            `json:"default_utility_agent_id"` // Default inference agent for utility agents
 	DefaultUtilityModel             string                            `json:"default_utility_model"`    // Default model for utility agents
 	KeyboardShortcuts               map[string]interface{}            `json:"keyboard_shortcuts"`       // User-configured keyboard shortcut overrides

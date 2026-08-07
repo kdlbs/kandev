@@ -1,5 +1,6 @@
 import type { ReviewItemSummary } from "@/lib/plugins/types";
 import type { MobileSessionPanel } from "@/lib/state/slices/ui/types";
+import { t } from "@/lib/i18n";
 import { ReviewDetailPanelComponent } from "../review-detail-panel";
 import { ReviewItemSelector } from "../review-item-selector";
 
@@ -40,7 +41,7 @@ export function MobileReviewPanel({
         </div>
       ) : (
         <div className="flex flex-1 items-center justify-center px-6 text-center text-sm text-muted-foreground">
-          Choose a review to open it.
+          {t("integrations:chooseReviewToOpen")}
         </div>
       )}
     </div>

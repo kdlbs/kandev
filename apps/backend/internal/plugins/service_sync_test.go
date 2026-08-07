@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	goruntime "runtime"
+	"strings"
 	"testing"
 	"time"
 )
@@ -216,6 +217,31 @@ func TestServiceSync_MissingInstallPathSetsErrorAndStopsRuntime(t *testing.T) {
 	}
 	if got.Status != StatusError {
 		t.Fatalf("Status after missing-install detection = %q, want %q", got.Status, StatusError)
+	}
+	if got.LastError == "" || got.LastErrorAt == nil || !strings.Contains(got.LastError, "install path") {
+		t.Fatalf("diagnostic after missing-install detection = (%q, %v), want install path/non-nil", got.LastError, got.LastErrorAt)
+	}
+}
+
+func TestServiceSync_StatErrorDoesNotMarkInstallMissing(t *testing.T) {
+	svc, _, _ := newTestService(t)
+	rec := installTestPlugin(t, svc, "kandev-plugin-stat-error")
+	rec.InstallPath = "\x00"
+	svc.registry.Add(rec)
+
+	result, err := svc.Sync(context.Background())
+	if err != nil {
+		t.Fatalf("Sync() unexpected error: %v", err)
+	}
+	if len(result.Missing) != 0 {
+		t.Fatalf("Sync().Missing = %v, want none for a non-NotExist stat error", result.Missing)
+	}
+	got, err := svc.Get("kandev-plugin-stat-error")
+	if err != nil {
+		t.Fatalf("Get(): %v", err)
+	}
+	if got.Status != StatusActive {
+		t.Fatalf("Status after stat error = %q, want %q", got.Status, StatusActive)
 	}
 }
 

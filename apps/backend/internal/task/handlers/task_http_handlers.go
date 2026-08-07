@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
@@ -20,6 +21,7 @@ import (
 	taskrepository "github.com/kandev/kandev/internal/task/repository"
 	taskrepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	"github.com/kandev/kandev/internal/task/service"
+	"github.com/kandev/kandev/internal/task/statussummary"
 	usermodels "github.com/kandev/kandev/internal/user/models"
 	"github.com/kandev/kandev/internal/worktree"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
@@ -134,9 +136,11 @@ func (h *TaskHandlers) httpListTasks(c *gin.Context) {
 		handleNotFound(c, h.logger, err, "tasks not found")
 		return
 	}
-	taskDTOs := make([]dto.TaskDTO, 0, len(tasks))
-	for _, task := range tasks {
-		taskDTOs = append(taskDTOs, dto.FromTask(task))
+	taskDTOs, err := h.toTaskDTOsWithSessionInfo(c.Request.Context(), tasks)
+	if err != nil {
+		h.logger.Error("failed to enrich tasks with status summaries", zap.Error(err))
+		handleNotFound(c, h.logger, err, "tasks not found")
+		return
 	}
 	c.JSON(http.StatusOK, dto.ListTasksResponse{
 		Tasks: taskDTOs,
@@ -164,12 +168,13 @@ func (h *TaskHandlers) httpListTasksByWorkspace(c *gin.Context) {
 	workflowID := c.Query("workflow_id")
 	repositoryID := c.Query("repository_id")
 	includeArchived := c.Query("include_archived") == queryValueTrue
+	onlyArchived := c.Query("only_archived") == queryValueTrue
 	includeEphemeral := c.Query("include_ephemeral") == queryValueTrue
 	onlyEphemeral := c.Query("only_ephemeral") == queryValueTrue
 	excludeConfig := c.Query("exclude_config") == queryValueTrue
 
-	tasks, total, err := h.service.ListTasksByWorkspace(
-		c.Request.Context(), c.Param("id"), workflowID, repositoryID, query, page, pageSize, sort, includeArchived, includeEphemeral, onlyEphemeral, excludeConfig,
+	tasks, total, err := h.service.ListTasksByWorkspaceWithArchiveMode(
+		c.Request.Context(), c.Param("id"), workflowID, repositoryID, query, page, pageSize, sort, includeArchived, includeEphemeral, onlyEphemeral, excludeConfig, onlyArchived,
 	)
 	if err != nil {
 		handleNotFound(c, h.logger, err, "tasks not found")
@@ -190,13 +195,9 @@ func (h *TaskHandlers) httpListTasksByWorkspace(c *gin.Context) {
 }
 
 // buildTaskDTOsWithSessionInfo converts tasks to DTOs enriched with primary
-// session IDs, session counts, and review status. Uses BatchGetSessionsForTasks
-// to derive the primary session ID and session count in a single round trip,
-// then calls GetPrimarySessionInfoForTasks for the executor type/name fields
-// — those are populated by a LEFT JOIN to the executors table inside that
-// method (the persisted ExecutorSnapshot JSON uses different keys), so the
-// batch loader alone can't supply them without a regression. Two queries
-// total, down from three pre-batch.
+// session IDs, session counts, review status, and the bounded task status
+// summary. Session and executor lookups remain batched; missing summary rows
+// are repaired lazily from the same batch-loaded authoritative inputs.
 func buildTaskDTOsWithSessionInfo(
 	ctx context.Context,
 	svc *service.Service,
@@ -219,10 +220,23 @@ func buildTaskDTOsWithSessionInfo(
 	if err != nil {
 		return nil, err
 	}
-	pendingActionsBySession, err := pendingActionsForInputCapableSessions(ctx, svc, sessionsByTask)
-	if err != nil {
-		log.Warn("failed to load pending actions for task list, using empty map", zap.Error(err))
+	pendingActionsBySession, pendingErr := pendingActionsForInputCapableSessions(ctx, svc, sessionsByTask)
+	if pendingErr != nil {
+		log.Warn("failed to load pending actions for task list, using empty map", zap.Error(pendingErr))
 		pendingActionsBySession = map[string]models.TaskPendingAction{}
+	}
+	statusSummaries, summaryErr := svc.GetTaskStatusSummaries(ctx, taskIDs)
+	if summaryErr != nil {
+		log.Warn("failed to load task status summaries, using coarse task fields", zap.Error(summaryErr))
+		statusSummaries = map[string]*statussummary.TaskStatusSummary{}
+	}
+	if summaryErr == nil && pendingErr == nil {
+		statusSummaries, err = svc.HydrateMissingTaskStatusSummaries(
+			ctx, tasks, sessionsByTask, pendingActionsBySession, statusSummaries,
+		)
+		if err != nil {
+			log.Warn("failed to repair missing task status summaries", zap.Error(err))
+		}
 	}
 	result := make([]dto.TaskDTO, 0, len(tasks))
 	for _, task := range tasks {
@@ -255,6 +269,7 @@ func buildTaskDTOsWithSessionInfo(
 		)
 		taskDTO.TaskPendingAction = taskPendingActionPtr(sessions, pendingActionsBySession)
 		dto.EnrichTaskForegroundActivity(&taskDTO, sessions, activityProvider)
+		taskDTO.StatusSummary = statusSummaries[task.ID]
 		result = append(result, taskDTO)
 	}
 	return result, nil
@@ -369,6 +384,22 @@ func pendingActionPtr(
 	return &value
 }
 
+func (h *TaskHandlers) taskSessionDTO(ctx context.Context, session *models.TaskSession) dto.TaskSessionDTO {
+	result := dto.FromTaskSession(session)
+	dto.EnrichCancellationPending(&result, h.cancellationPending)
+	if !isInputCapableSession(session) {
+		return result
+	}
+	actions, err := h.service.GetPendingActionsForSessions(ctx, []string{session.ID})
+	if err != nil {
+		h.logger.Warn("get task session pending action failed",
+			zap.String("session_id", session.ID), zap.Error(err))
+		return result
+	}
+	result.PendingAction = pendingActionPtr(&session.ID, actions)
+	return result
+}
+
 func (h *TaskHandlers) toTaskDTOsWithSessionInfo(ctx context.Context, tasks []*models.Task) ([]dto.TaskDTO, error) {
 	return buildTaskDTOsWithSessionInfo(ctx, h.service, h.logger, h.foregroundActivity, tasks)
 }
@@ -395,11 +426,22 @@ func (h *TaskHandlers) httpListTaskSessions(c *gin.Context) {
 		handleNotFound(c, h.logger, err, "task sessions not found")
 		return
 	}
+	pendingActionsBySession, pendingErr := pendingActionsForInputCapableSessions(
+		ctx,
+		h.service,
+		map[string][]*models.TaskSession{c.Param("id"): sessions},
+	)
+	if pendingErr != nil {
+		h.logger.Warn("get task session pending actions failed", zap.Error(pendingErr))
+		pendingActionsBySession = map[string]models.TaskPendingAction{}
+	}
 	sessionDTOs := make([]dto.TaskSessionSummaryDTO, 0, len(sessions))
 	ids := make([]string, 0, len(sessions))
 	for _, session := range sessions {
 		summary := dto.FromTaskSessionSummary(session)
 		dto.EnrichForegroundActivitySummary(&summary, h.foregroundActivity)
+		dto.EnrichCancellationPendingSummary(&summary, h.cancellationPending)
+		summary.PendingAction = pendingActionPtr(&session.ID, pendingActionsBySession)
 		sessionDTOs = append(sessionDTOs, summary)
 		ids = append(ids, session.ID)
 	}
@@ -442,7 +484,7 @@ func (h *TaskHandlers) httpGetTaskSession(c *gin.Context) {
 		handleNotFound(c, h.logger, err, "task session not found")
 		return
 	}
-	sessionDTO := dto.FromTaskSession(session)
+	sessionDTO := h.taskSessionDTO(c.Request.Context(), session)
 	dto.EnrichForegroundActivity(&sessionDTO, h.foregroundActivity)
 	c.JSON(http.StatusOK, dto.GetTaskSessionResponse{
 		Session: sessionDTO,
@@ -464,7 +506,7 @@ func (h *TaskHandlers) httpDismissLastAgentError(c *gin.Context) {
 		handleNotFound(c, h.logger, err, "task session not found")
 		return
 	}
-	sessionDTO := dto.FromTaskSession(session)
+	sessionDTO := h.taskSessionDTO(c.Request.Context(), session)
 	dto.EnrichForegroundActivity(&sessionDTO, h.foregroundActivity)
 	c.JSON(http.StatusOK, dto.GetTaskSessionResponse{
 		Session: sessionDTO,
@@ -550,7 +592,7 @@ func (h *TaskHandlers) httpApproveSession(c *gin.Context) {
 
 	resp := dto.ApproveSessionResponse{
 		Success: true,
-		Session: dto.FromTaskSession(result.Session),
+		Session: h.taskSessionDTO(c.Request.Context(), result.Session),
 	}
 	if result.WorkflowStep != nil {
 		resp.WorkflowStep = dto.FromWorkflowStep(result.WorkflowStep)
@@ -667,6 +709,7 @@ type httpCreateTaskRequest struct {
 	WorkflowStepID    string                    `json:"workflow_step_id"`
 	Title             string                    `json:"title"`
 	Description       string                    `json:"description,omitempty"`
+	AutoTitle         bool                      `json:"auto_title,omitempty"`
 	Priority          string                    `json:"priority,omitempty"`
 	State             *v1.TaskState             `json:"state,omitempty"`
 	Repositories      []httpTaskRepositoryInput `json:"repositories,omitempty"`
@@ -712,7 +755,8 @@ func validateAttachments(items []v1.MessageAttachment) error {
 	if len(items) > maxCreateTaskAttachments {
 		return fmt.Errorf("too many attachments (max %d)", maxCreateTaskAttachments)
 	}
-	var totalSize int
+	var totalSize int64
+	var legacyTotalSize int
 	for i, a := range items {
 		typ := strings.TrimSpace(a.Type)
 		if _, ok := allowedAttachmentTypes[typ]; !ok {
@@ -721,18 +765,35 @@ func validateAttachments(items []v1.MessageAttachment) error {
 		if strings.TrimSpace(a.MimeType) == "" {
 			return fmt.Errorf("attachment[%d] mime_type is required", i)
 		}
+		if !a.HasValidDeliveryMode() {
+			return fmt.Errorf("attachment[%d] delivery_mode must be prompt or path", i)
+		}
+		if a.AttachmentID != "" {
+			if a.Data != "" {
+				return fmt.Errorf("attachment[%d] descriptors cannot include inline data", i)
+			}
+			if strings.TrimSpace(a.Name) == "" || strings.TrimSpace(a.MimeType) == "" {
+				return fmt.Errorf("attachment[%d] descriptor name and mime_type are required", i)
+			}
+			if err := service.ValidateAttachmentSize(a.SizeBytes); err != nil {
+				return fmt.Errorf("attachment[%d]: %w", i, err)
+			}
+			totalSize += a.SizeBytes
+			continue
+		}
 		if len(a.Data) == 0 {
 			return fmt.Errorf("attachment[%d] data is required", i)
 		}
 		if len(a.Data) > maxAttachmentDataBytes {
 			return fmt.Errorf("attachment[%d] data exceeds size limit", i)
 		}
-		if !a.HasValidDeliveryMode() {
-			return fmt.Errorf("attachment[%d] delivery_mode must be prompt or path", i)
-		}
-		totalSize += len(a.Data)
+		totalSize += int64(len(a.Data))
+		legacyTotalSize += len(a.Data)
 	}
-	if totalSize > maxAttachmentDataBytes {
+	if legacyTotalSize > maxAttachmentDataBytes {
+		return fmt.Errorf("total legacy attachment size exceeds limit")
+	}
+	if totalSize > service.MaxAttachmentBytes {
 		return fmt.Errorf("total attachment size exceeds limit")
 	}
 	return nil
@@ -807,6 +868,7 @@ func (h *TaskHandlers) httpCreateTask(c *gin.Context) {
 		WorkflowStepID: body.WorkflowStepID,
 		Title:          title,
 		Description:    description,
+		AutoTitle:      body.AutoTitle,
 		Priority:       body.Priority,
 		State:          body.State,
 		Repositories:   convertToServiceRepos(repos),
@@ -821,6 +883,25 @@ func (h *TaskHandlers) httpCreateTask(c *gin.Context) {
 	})
 	if err != nil {
 		handleNotFound(c, h.logger, err, "task not created")
+		return
+	}
+	if err := h.service.ClaimMessageAttachments(c.Request.Context(), task.ID, "", body.Attachments); err != nil {
+		rollbackCtx, cancel := context.WithTimeout(context.WithoutCancel(c.Request.Context()), 10*time.Second)
+		defer cancel()
+		if deleteErr := h.service.DeleteTask(rollbackCtx, task.ID); deleteErr != nil {
+			h.logger.Warn("failed to roll back task after attachment claim", zap.String("task_id", task.ID), zap.Error(deleteErr))
+		}
+		switch {
+		case errors.Is(err, service.ErrAttachmentTooLarge):
+			c.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": err.Error()})
+		case errors.Is(err, service.ErrAttachmentForbidden), errors.Is(err, service.ErrAttachmentNotFound), errors.Is(err, service.ErrAttachmentClaimConflict):
+			c.JSON(http.StatusNotFound, gin.H{"error": "attachment not found"})
+		case errors.Is(err, service.ErrAttachmentInvalid), errors.Is(err, service.ErrAttachmentTotalTooLarge), errors.Is(err, service.ErrTooManyAttachments):
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		default:
+			h.logger.Error("failed to claim task attachments", zap.Error(err))
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to claim task attachments"})
+		}
 		return
 	}
 
@@ -839,7 +920,7 @@ func (h *TaskHandlers) httpCreateTask(c *gin.Context) {
 		}
 	}
 
-	if !h.commitFreshBranch(c, task.ID, title, body.WorkspaceID, body.Repositories, repos) {
+	if !h.commitFreshBranch(c, task.ID, task.Title, body.WorkspaceID, body.Repositories, repos) {
 		return
 	}
 	taskDTO := dto.FromTask(task)
@@ -1724,7 +1805,9 @@ func (h *TaskHandlers) httpListQuickChatSessions(c *gin.Context) {
 			Name:           item.Name,
 			AgentProfileID: item.AgentProfileID,
 		})
-		response.TaskSessions = append(response.TaskSessions, dto.FromTaskSession(item.Session))
+		sessionDTO := dto.FromTaskSession(item.Session)
+		dto.EnrichCancellationPending(&sessionDTO, h.cancellationPending)
+		response.TaskSessions = append(response.TaskSessions, sessionDTO)
 	}
 	c.JSON(http.StatusOK, response)
 }

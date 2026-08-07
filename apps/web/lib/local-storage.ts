@@ -1,4 +1,5 @@
 import { setWalkthroughLastSeen } from "@/lib/walkthrough-notification-storage";
+import { attachmentContentUrl } from "@/lib/api/domains/attachment-api";
 
 type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue };
 
@@ -69,6 +70,31 @@ export function removeLocalStorage(key: string): void {
     window.localStorage.removeItem(key);
   } catch {
     // Ignore removal failures.
+  }
+}
+
+// PR panel "offered" flag — tracks whether the conditional review panel was
+// shown for a session. If the user closes it, we respect that dismissal for
+// the rest of the browser tab session.
+const PR_PANEL_OFFERED_PREFIX = "kandev.pr-panel-offered.";
+
+/** Whether the conditional review panel was already offered for this session. */
+export function wasPRPanelOffered(sessionId: string): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    return window.sessionStorage.getItem(`${PR_PANEL_OFFERED_PREFIX}${sessionId}`) === "1";
+  } catch {
+    return false;
+  }
+}
+
+/** Record that the conditional review panel was offered for this session. */
+export function markPRPanelOffered(sessionId: string): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.sessionStorage.setItem(`${PR_PANEL_OFFERED_PREFIX}${sessionId}`, "1");
+  } catch {
+    // Ignore write failures.
   }
 }
 
@@ -561,7 +587,9 @@ const CHAT_INPUT_HEIGHT_KEY = "kandev.chatInput.height";
 /** Stored attachment — same as FileAttachment but without `preview` (reconstructed on load) */
 type StoredFileAttachment = {
   id: string;
-  data: string;
+  attachmentId?: string;
+  /** Legacy inline data is read for backwards compatibility only. */
+  data?: string;
   mimeType: string;
   fileName: string;
   size: number;
@@ -621,7 +649,8 @@ export function setChatDraftAttachments(
   sessionId: string,
   attachments: Array<{
     id: string;
-    data: string;
+    data?: string;
+    attachmentId?: string;
     mimeType: string;
     fileName: string;
     size: number;
@@ -633,33 +662,53 @@ export function setChatDraftAttachments(
   if (attachments.length === 0) {
     removeSessionStorage(`${CHAT_DRAFT_ATTACHMENTS_KEY}.${sessionId}`);
   } else {
-    // Strip `preview` to halve storage cost — reconstructed on load for images
-    const stored: StoredFileAttachment[] = attachments.map(
-      ({ id, data, mimeType, fileName, size, isImage, deliveryMode }) => ({
-        id,
-        data,
-        mimeType,
-        fileName,
-        size,
-        isImage,
-        deliveryMode,
-      }),
+    // Store descriptors only. File bytes remain in backend private storage;
+    // legacy inline data is retained only when no descriptor exists.
+    const stored: StoredFileAttachment[] = attachments.flatMap(
+      ({ id, attachmentId, data, mimeType, fileName, size, isImage, deliveryMode }) => {
+        // A File object cannot survive sessionStorage. Do not persist an
+        // attachment until its descriptor or legacy inline bytes exist; the
+        // in-flight upload remains visible in the current composer only.
+        if (!attachmentId && !data) return [];
+        return [
+          {
+            id,
+            ...(attachmentId ? { attachmentId } : { data }),
+            mimeType,
+            fileName,
+            size,
+            isImage,
+            deliveryMode,
+          },
+        ];
+      },
     );
-    setSessionStorage(`${CHAT_DRAFT_ATTACHMENTS_KEY}.${sessionId}`, stored);
+    if (stored.length === 0) {
+      removeSessionStorage(`${CHAT_DRAFT_ATTACHMENTS_KEY}.${sessionId}`);
+    } else {
+      setSessionStorage(`${CHAT_DRAFT_ATTACHMENTS_KEY}.${sessionId}`, stored);
+    }
   }
 }
 
 /**
- * Reconstruct the `preview` data URL from stored attachment data (images only).
+ * Reconstruct an image preview from its private content URL (or legacy inline
+ * data for drafts created before staged uploads).
  */
 export function restoreAttachmentPreview(
   att: StoredFileAttachment,
 ): StoredFileAttachment & { deliveryMode: "prompt" | "path"; preview?: string } {
   if (att.isImage) {
+    let preview: string | undefined;
+    if (att.attachmentId) {
+      preview = attachmentContentUrl(att.attachmentId);
+    } else if (att.data) {
+      preview = `data:${att.mimeType};base64,${att.data}`;
+    }
     return {
       ...att,
       deliveryMode: normalizeAttachmentDeliveryMode(att.deliveryMode, "prompt"),
-      preview: `data:${att.mimeType};base64,${att.data}`,
+      preview,
     };
   }
   return { ...att, deliveryMode: normalizeAttachmentDeliveryMode(att.deliveryMode, "path") };
@@ -741,6 +790,7 @@ export function cleanupTaskStorage(
   // Session-keyed storage — drafts, files panel state, scroll, etc.
   for (const sessionId of sessionIds) {
     removeStoredQuickChatName(sessionId);
+    removeSessionStorage(`${PR_PANEL_OFFERED_PREFIX}${sessionId}`);
     removeSessionStorage(`${CHAT_DRAFT_TEXT_KEY}.${sessionId}`);
     removeSessionStorage(`${CHAT_DRAFT_CONTENT_KEY}.${sessionId}`);
     removeSessionStorage(`${CHAT_DRAFT_ATTACHMENTS_KEY}.${sessionId}`);

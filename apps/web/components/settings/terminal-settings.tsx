@@ -26,16 +26,27 @@ import { useShellSettings } from "@/hooks/domains/settings/use-shell-settings";
 import { useSettingsSaveContributor } from "./settings-save-provider";
 import { TERMINAL_FONT_PRESETS } from "@/lib/terminal/terminal-font";
 import type { FontCategory } from "@/lib/terminal/terminal-font";
+import { useTranslation } from "react-i18next";
+import {
+  TERMINAL_FONT_FAMILY_TARGET,
+  TERMINAL_FONT_SIZE_TARGET,
+  TERMINAL_LINKS_TARGET,
+} from "@/lib/settings-discovery/catalog/general";
 
 const CUSTOM_VALUE = "__custom__";
-const CATEGORY_LABELS: Record<FontCategory, string> = {
-  icons: "Nerd Fonts",
-  ligatures: "Programming",
-  system: "System",
+/**
+ * Catalog KEYS, not copy: a `t()` in a module-scope table freezes at the boot
+ * locale, and neither the lint guard nor the pseudo-locale can see that.
+ * Resolved at render in `FontGroupOptions`; the record keys are data.
+ */
+export const CATEGORY_LABEL_KEYS: Record<FontCategory, string> = {
+  icons: "settings:nerdFonts",
+  ligatures: "settings:programming",
+  system: "common:system",
 };
-const CATEGORY_BADGES: Partial<Record<FontCategory, string>> = {
-  icons: "Icons",
-  ligatures: "Ligatures",
+export const CATEGORY_BADGE_KEYS: Partial<Record<FontCategory, string>> = {
+  icons: "settings:icons",
+  ligatures: "settings:ligatures",
 };
 const FONT_GROUPS: Record<string, typeof TERMINAL_FONT_PRESETS> = TERMINAL_FONT_PRESETS.reduce(
   (acc, p) => {
@@ -52,23 +63,28 @@ export function normalizeTerminalFontSize(value: number, fallback: number): numb
 }
 
 function FontGroupOptions() {
-  return FONT_CATEGORIES.map((category) => (
-    <SelectGroup key={category}>
-      <SelectLabel className="flex items-center gap-2">
-        {CATEGORY_LABELS[category]}
-        {CATEGORY_BADGES[category] && (
-          <Badge variant="secondary" className="text-[10px] px-1.5 py-0">
-            {CATEGORY_BADGES[category]}
-          </Badge>
-        )}
-      </SelectLabel>
-      {(FONT_GROUPS[category] ?? []).map((preset) => (
-        <SelectItem key={preset.value} value={preset.value}>
-          {preset.label}
-        </SelectItem>
-      ))}
-    </SelectGroup>
-  ));
+  const { t } = useTranslation();
+  return FONT_CATEGORIES.map((category) => {
+    const badgeKey = CATEGORY_BADGE_KEYS[category];
+    return (
+      <SelectGroup key={category}>
+        <SelectLabel className="flex items-center gap-2">
+          {t(CATEGORY_LABEL_KEYS[category])}
+          {badgeKey && (
+            <Badge variant="secondary" className="text-[10px] px-1.5 py-0">
+              {t(badgeKey)}
+            </Badge>
+          )}
+        </SelectLabel>
+        {/* Preset labels are font family names — data, never translated. */}
+        {(FONT_GROUPS[category] ?? []).map((preset) => (
+          <SelectItem key={preset.value} value={preset.value}>
+            {preset.label}
+          </SelectItem>
+        ))}
+      </SelectGroup>
+    );
+  });
 }
 
 function TerminalFontSizeCard({
@@ -80,18 +96,23 @@ function TerminalFontSizeCard({
   isDirty: boolean;
   onChange: (value: number) => void;
 }) {
+  const { t } = useTranslation();
   const handleFontSizeBlur = () => {
     onChange(normalizeTerminalFontSize(fontSize, 13));
   };
 
   return (
-    <SettingsCard isDirty={isDirty} data-testid="terminal-font-size-card">
+    <SettingsCard
+      isDirty={isDirty}
+      discoveryTargetId={TERMINAL_FONT_SIZE_TARGET}
+      data-testid="terminal-font-size-card"
+    >
       <CardHeader>
-        <CardTitle className="text-base">Terminal Font Size</CardTitle>
+        <CardTitle className="text-base">{t("settings:terminalFontSize")}</CardTitle>
       </CardHeader>
       <CardContent>
         <div className="space-y-2">
-          <Label htmlFor="terminal-font-size">Font Size</Label>
+          <Label htmlFor="terminal-font-size">{t("settings:fontSize")}</Label>
           <div className="flex items-center gap-3">
             <Input
               id="terminal-font-size"
@@ -108,11 +129,9 @@ function TerminalFontSizeCard({
               className="w-20"
               data-testid="terminal-font-size-input"
             />
-            <span className="text-xs text-muted-foreground">px (8-24)</span>
+            <span className="text-xs text-muted-foreground">{t("settings:pxRange")}</span>
           </div>
-          <p className="text-xs text-muted-foreground">
-            Set the font size for the terminal. Default is 13px.
-          </p>
+          <p className="text-xs text-muted-foreground">{t("settings:setTheFontSizeForThe")}</p>
         </div>
       </CardContent>
     </SettingsCard>
@@ -128,6 +147,7 @@ function TerminalFontCard({
   isDirty: boolean;
   onChange: (value: string | null) => void;
 }) {
+  const { t } = useTranslation();
   const [isCustom, setIsCustom] = useState(() => {
     const current = fontFamily;
     if (!current) return false;
@@ -161,31 +181,35 @@ function TerminalFontCard({
   const selectValue = isCustom ? CUSTOM_VALUE : fontFamily || "default";
 
   return (
-    <SettingsCard isDirty={isDirty} data-testid="terminal-font-card">
+    <SettingsCard
+      isDirty={isDirty}
+      discoveryTargetId={TERMINAL_FONT_FAMILY_TARGET}
+      data-testid="terminal-font-card"
+    >
       <CardHeader>
-        <CardTitle className="text-base">Terminal Font</CardTitle>
+        <CardTitle className="text-base">{t("settings:terminalFont")}</CardTitle>
       </CardHeader>
       <CardContent>
         <div className="space-y-3">
-          <Label htmlFor="terminal-font">Font Family</Label>
+          <Label htmlFor="terminal-font">{t("settings:fontFamily")}</Label>
           <Select value={selectValue} onValueChange={handleSelectChange}>
             <SelectTrigger
               id="terminal-font"
               data-testid="terminal-font-select"
               data-settings-dirty={isDirty}
             >
-              <SelectValue placeholder="Default" />
+              <SelectValue placeholder={t("settings:default")} />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="default">Default (Menlo / Monaco)</SelectItem>
+              <SelectItem value="default">{t("settings:defaultMenloMonaco")}</SelectItem>
               <FontGroupOptions />
               <SelectSeparator />
-              <SelectItem value={CUSTOM_VALUE}>Custom...</SelectItem>
+              <SelectItem value={CUSTOM_VALUE}>{t("settings:customEllipsis")}</SelectItem>
             </SelectContent>
           </Select>
           {isCustom && (
             <Input
-              placeholder='e.g. "My Custom Font"'
+              placeholder={t("settings:customFontExample")}
               value={customValue}
               data-settings-dirty={isDirty}
               onChange={(e) => setCustomValue(e.target.value)}
@@ -197,7 +221,7 @@ function TerminalFontCard({
             />
           )}
           <p className="text-xs text-muted-foreground">
-            Choose a monospace font for the terminal. Nerd Fonts include icons for CLI tools.
+            {t("settings:chooseAMonospaceFontForThe")}
           </p>
         </div>
       </CardContent>
@@ -214,14 +238,19 @@ function TerminalLinksCard({
   isDirty: boolean;
   onChange: (value: "new_tab" | "browser_panel") => void;
 }) {
+  const { t } = useTranslation();
   return (
-    <SettingsCard isDirty={isDirty} data-testid="terminal-links-card">
+    <SettingsCard
+      isDirty={isDirty}
+      discoveryTargetId={TERMINAL_LINKS_TARGET}
+      data-testid="terminal-links-card"
+    >
       <CardHeader>
-        <CardTitle className="text-base">Terminal Links</CardTitle>
+        <CardTitle className="text-base">{t("settings:terminalLinks")}</CardTitle>
       </CardHeader>
       <CardContent>
         <div className="space-y-2">
-          <Label htmlFor="terminal-link-behavior">Open links in</Label>
+          <Label htmlFor="terminal-link-behavior">{t("settings:openLinksIn")}</Label>
           <Select
             value={value}
             onValueChange={(next) => onChange(next as "new_tab" | "browser_panel")}
@@ -230,11 +259,11 @@ function TerminalLinksCard({
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="new_tab">New browser tab</SelectItem>
-              <SelectItem value="browser_panel">Built-in browser panel</SelectItem>
+              <SelectItem value="new_tab">{t("settings:newBrowserTab")}</SelectItem>
+              <SelectItem value="browser_panel">{t("settings:builtInBrowserPanel")}</SelectItem>
             </SelectContent>
           </Select>
-          <p className="text-xs text-muted-foreground">Click a URL in the terminal to open it.</p>
+          <p className="text-xs text-muted-foreground">{t("settings:clickAUrlInTheTerminal")}</p>
         </div>
       </CardContent>
     </SettingsCard>
@@ -242,6 +271,7 @@ function TerminalLinksCard({
 }
 
 export function TerminalSettings() {
+  const { t } = useTranslation();
   const userSettings = useAppStore((state) => state.userSettings);
   const setUserSettings = useAppStore((state) => state.setUserSettings);
   const storeApi = useAppStoreApi();
@@ -261,7 +291,7 @@ export function TerminalSettings() {
     revision,
     isDirty: revision !== JSON.stringify(saved),
     canSave: Number.isFinite(draft.terminalFontSize),
-    invalidReason: "Terminal font size must be a number between 8 and 24.",
+    invalidReason: t("settings:terminalFontSizeMustBeA"),
     save: async () => {
       const submitted = { ...draft, terminalFontSize: validFontSize };
       const current = storeApi.getState().userSettings;
@@ -302,8 +332,8 @@ export function TerminalSettings() {
 
       <SettingsSection
         icon={<IconTerminal2 className="h-5 w-5" />}
-        title="Terminal"
-        description="Configure terminal appearance and behavior"
+        title={t("settings:terminal")}
+        description={t("settings:configureTerminalAppearanceAndBehavior")}
       >
         <TerminalFontCard
           fontFamily={draft.terminalFontFamily}

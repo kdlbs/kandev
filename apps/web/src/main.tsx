@@ -11,8 +11,10 @@ import type { BootPayload } from "./boot-payload";
 import { RootErrorBoundary, RouteErrorBoundary } from "./app-error-boundary";
 import { SpaRoutes } from "./spa-routes";
 import { installVitePreloadRecovery } from "./vite-preload-recovery";
+import { markRenderingEngine } from "@/lib/browser/rendering-engine";
 
 installVitePreloadRecovery();
+markRenderingEngine(document.documentElement);
 
 const AUTH_ROUTE_PATHS = new Set(["/login", "/setup", "/invite"]);
 

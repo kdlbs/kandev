@@ -21,6 +21,13 @@ turn on: **Settings > Plugins** is always available in the sidebar. Because
 loaded plugin code runs with backend privileges, install only plugins you
 trust — see [Security posture](#security-posture).
 
+## Quick path
+
+1. Open **Settings > Plugins**.
+2. Install from the marketplace, a URL, or a local tarball.
+3. Let the installer verify package integrity before it extracts or spawns the plugin; review the install result before enabling it.
+4. Disable or uninstall a plugin when it is no longer trusted or needed.
+
 ## How it works
 
 ![Plugin lifecycle: install, verify, extract, and spawn a go-plugin gRPC subprocess; then, over one supervised gRPC connection, kandev delivers bus events and relays external webhooks to the plugin, the plugin calls back into the Host API, and the SPA optionally loads the native UI bundle.](../screenshots/plugin-architecture.png)
@@ -109,12 +116,16 @@ Either path runs the same pipeline:
 3. Parse and validate `manifest.yaml` **before any code runs**: schema, `id`
    pattern, the `categories` and UI-surface enums, and that
    `runtime.executables` contains an entry for the host's OS/arch.
-4. Extract to `~/.kandev/plugins/<id>/<version>/` and record the
-   installation.
+4. Extract to `~/.kandev/plugins/<id>/<version>/` and record the installation
+   in `~/.kandev/plugins/<id>.yml`.
 5. Spawn the platform-matched binary and complete the go-plugin handshake.
    Status is `registered` while this is pending, `active` once the
    handshake succeeds, or `error` if spawn/handshake fails (the operator can
-   retry via **Enable**).
+   retry via **Enable**). The record keeps a bounded, single-line diagnostic
+   and its failure timestamp so the reason is visible in Settings > Plugins.
+   Before persistence, credential-like values such as PATs, bearer tokens,
+   labeled secrets/API keys, and the host home path are redacted; plugin stdout
+   is not stored verbatim.
 
 A successful install that failed to spawn returns HTTP 201 with a
 `warning` field rather than failing outright — the package is installed,
@@ -125,6 +136,9 @@ badge (`active`), a signing badge (`unsigned` today), and **Disable** and
 **Uninstall** actions:
 
 ![The Settings > Plugins page listing an installed, active plugin with its category, an unsigned badge, and Disable/Uninstall actions.](../screenshots/plugin-settings-list.png)
+
+<details>
+<summary>Filesystem sideload and synchronization</summary>
 
 ## Filesystem sideload and Sync
 
@@ -153,13 +167,26 @@ At boot, kandev runs only the directory-sideload and missing-install steps
 already active. This is conservative by design: starting up never spawns a
 binary an operator hasn't explicitly approved via install or Sync.
 
+</details>
+
 ## Enable, disable, uninstall
 
 - **Disable** stops the subprocess. Config and state are preserved; no
   events or webhooks are delivered while disabled.
-- **Enable** respawns the subprocess and re-completes the handshake.
+- **Enable** respawns the subprocess and re-completes the handshake. It is also
+  the manual recovery action for an `error` plugin; the Settings row and detail
+  page show the last failure diagnostic when one is available. A successful
+  retry clears the diagnostic, while a failed retry re-reads the plugin record
+  so the row/detail immediately shows the replacement reason and keeps the
+  plugin in `error`.
 - **Uninstall** stops the subprocess and deletes the plugin's package,
   registration record, and all persisted state — there is no grace period.
+
+When a plugin is in `error`, its declared events remain buffered in the bounded
+100-event/5-minute ring buffer. If that buffer overflows, kandev drops the
+oldest event and emits at most one warning per plugin per minute, reporting the
+number of drops accumulated since the previous warning instead of writing one
+log line per dropped event.
 
 ## Per-plugin settings
 
@@ -180,8 +207,11 @@ A plugin can also render its own UI inline on this page — at the top, above th
 settings form — via the `plugin-settings` slot, for example a live
 integration-health card ("CLI installed ✅ v0.45.2", "API token ✅
 authenticated"). This is owner-scoped, so a plugin's card only ever appears on
-its own settings page. See [Named
-slots](plugins-authoring.md#named-slots) in the authoring guide.
+its own settings page. See [supported named
+slots](plugins-authoring.md#supported-named-slots) in the authoring guide.
+
+<details>
+<summary>Package signing, storage, and security details</summary>
 
 ## Signed vs. unsigned packages
 
@@ -197,7 +227,7 @@ identically to an unsigned one; signing is not required in v1.
 
 ```
 ~/.kandev/plugins/
-├── <id>.yml                    # registration record (status, install_path, signed, ...)
+├── <id>.yml                    # registration record (signed, status, install_path, last_error, last_error_at, ...)
 ├── <id>.config.yml             # operator-editable config (PATCH /api/plugins/{id})
 └── <id>/
     ├── <version>/              # extracted package (InstallPath)
@@ -206,6 +236,13 @@ identically to an unsigned one; signing is not required in v1.
     │   └── ui/bundle.js         # optional
     └── data/                    # KANDEV_PLUGIN_DATA_DIR — shared across versions
 ```
+
+</details>
+
+Each `<id>.yml` registration record stores the installed package metadata and
+host-managed runtime fields, including `signed`, `last_error`, and
+`last_error_at`. The diagnostic fields are empty until a runtime failure is
+recorded and are cleared after successful recovery.
 
 ## Security posture
 

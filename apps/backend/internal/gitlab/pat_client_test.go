@@ -137,6 +137,42 @@ func TestPATClient_GetMR(t *testing.T) {
 	}
 }
 
+func TestPATClient_GetMRHydratesForkSourceProjectByID(t *testing.T) {
+	var sourceProjectRequested bool
+	host, stop := newTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.EscapedPath() {
+		case "/projects/group%2Fproject/merge_requests/4":
+			// Fork responses can contain only the source and target project
+			// IDs. The embedded source_project object is not required by the
+			// GitLab Merge Requests API.
+			_, _ = w.Write([]byte(`{"id":400,"iid":4,"project_id":99,"title":"Contribution","state":"opened","web_url":"https://gitlab.example.com/group/project/-/merge_requests/4","source_branch":"feature/remote","target_branch":"main","sha":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","references":{"full":"group/project!4"},"source_project_id":42,"target_project_id":99,"allow_collaboration":false}`))
+		case "/projects/42":
+			sourceProjectRequested = true
+			_, _ = w.Write([]byte(`{"id":42,"path_with_namespace":"contributor/project","http_url_to_repo":"https://gitlab.example.com/contributor/project.git","default_branch":"main"}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer stop()
+
+	mr, err := NewPATClient(host, "token").GetMR(context.Background(), "group/project", 4)
+	if err != nil {
+		t.Fatalf("GetMR() error = %v", err)
+	}
+	if !sourceProjectRequested {
+		t.Fatal("GetMR() did not resolve the differing source project ID")
+	}
+	if mr.SourceProjectID != 42 || mr.SourceProjectPath != "contributor/project" {
+		t.Fatalf("source identity = (%d, %q), want (42, contributor/project)", mr.SourceProjectID, mr.SourceProjectPath)
+	}
+	if mr.SourceProjectRemoteURL != "https://gitlab.example.com/contributor/project.git" {
+		t.Fatalf("source remote URL = %q, want hydrated source URL", mr.SourceProjectRemoteURL)
+	}
+	if mr.TargetProjectID != 99 || mr.TargetProjectPath != "group/project" {
+		t.Fatalf("target identity = (%d, %q), want (99, group/project)", mr.TargetProjectID, mr.TargetProjectPath)
+	}
+}
+
 func TestPATClientSetMRLabelsThenFeedbackHydratesReplacement(t *testing.T) {
 	labels := []string{"old"}
 	host, stop := newTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

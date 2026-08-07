@@ -1,5 +1,12 @@
 import type { DockviewApi, DockviewGroupPanel } from "dockview-react";
+import type { CommitDetailTarget } from "@/components/task/changes-diff-target";
 import { focusOrAddPanel } from "./dockview-layout-builders";
+import {
+  parsePluginPanelId,
+  pluginPanelId,
+  PLUGIN_PANEL_COMPONENT,
+  PLUGIN_PANEL_TAB_COMPONENT,
+} from "./layout-manager/plugin-panels";
 
 type StoreGet = () => {
   api: DockviewApi | null;
@@ -26,6 +33,28 @@ function addSimplePanel(api: DockviewApi, groupId: string, opts: SimplePanelOpts
 
 export function reviewPanelId(providerId: string, reviewKey: string): string {
   return `review-detail|${encodeURIComponent(providerId)}|${encodeURIComponent(reviewKey)}`;
+}
+
+type SidePanelOpts = { groupId?: string; quiet?: boolean; inCenter?: boolean };
+
+/**
+ * Shared placement logic for a single-instance "side" panel (Plan, a plugin
+ * task panel, ...): an explicit `groupId` wins, `inCenter` falls back to the
+ * center group, and otherwise the panel opens beside the chat panel. Extracted
+ * from `addPlanPanel` so `addPluginPanel` can reuse the identical placement
+ * rules instead of re-deriving them.
+ */
+function addSidePanel(
+  api: DockviewApi,
+  centerGroupId: string,
+  panel: SimplePanelOpts,
+  opts?: SidePanelOpts,
+): void {
+  const groupId = opts?.groupId ?? (opts?.inCenter ? centerGroupId : undefined);
+  const position = groupId
+    ? { referenceGroup: groupId }
+    : { referencePanel: "chat" as const, direction: "right" as const };
+  focusOrAddPanel(api, { ...panel, position }, opts?.quiet ?? false);
 }
 
 function focusMatchingLegacyPanel(
@@ -336,20 +365,46 @@ function buildFileDiffAction(get: StoreGet) {
   };
 }
 
+function buildCommitItemId(
+  requestedTarget: CommitDetailTarget | string,
+  target: CommitDetailTarget,
+  legacyRepo?: string,
+): string {
+  if (typeof requestedTarget === "string") {
+    return legacyRepo ? `${legacyRepo}:${requestedTarget}` : requestedTarget;
+  }
+  if (target.source === "local") return `local:${target.repo ?? ""}:${target.sha}`;
+  return `github:${target.workspaceId}:${target.owner}/${target.repo}:${target.sha}`;
+}
+
 function buildCommitDetailAction(get: StoreGet) {
-  return (sha: string, opts?: OpenPanelOpts & { groupId?: string; repo?: string }) => {
+  return (
+    requestedTarget: CommitDetailTarget | string,
+    opts?: OpenPanelOpts & { groupId?: string; repo?: string },
+  ) => {
     const { api, centerGroupId } = get();
     if (!api) return;
-    // Multi-repo: scope the panel id by repo so the same SHA from two repos
-    // (rare in practice, but cheap to be correct) doesn't collide and so the
-    // existing-tab dedup doesn't reuse the wrong-repo's panel.
-    const itemId = opts?.repo ? `${opts.repo}:${sha}` : sha;
+    const target: CommitDetailTarget =
+      typeof requestedTarget === "string"
+        ? {
+            source: "local",
+            sha: requestedTarget,
+            ...(opts?.repo ? { repo: opts.repo } : {}),
+          }
+        : requestedTarget;
+    // Preserve the legacy string-call identity for saved callers/tests; new
+    // discriminated targets include provenance and repository identity.
+    const itemId = buildCommitItemId(requestedTarget, target, opts?.repo);
     openOrReplacePreview({
       api,
       type: "commit-detail",
       itemId,
-      title: sha.slice(0, 7),
-      params: { commitSha: sha, repo: opts?.repo },
+      title: target.sha.slice(0, 7),
+      params: {
+        target,
+        commitSha: target.sha,
+        ...(target.source === "local" && target.repo ? { repo: target.repo } : {}),
+      },
       groupId: opts?.groupId ?? centerGroupId,
       quiet: opts?.quiet,
       pin: opts?.pin,
@@ -555,18 +610,38 @@ export function buildExtraPanelActions(get: StoreGet) {
         position: { referenceGroup: centerGroupId },
       });
     },
-    addPlanPanel: (opts?: { groupId?: string; quiet?: boolean; inCenter?: boolean }) => {
+    addPlanPanel: (opts?: SidePanelOpts) => {
       const { api, centerGroupId } = get();
       if (!api) return;
-      const groupId = opts?.groupId ?? (opts?.inCenter ? centerGroupId : undefined);
-      const position = groupId
-        ? { referenceGroup: groupId }
-        : { referencePanel: "chat" as const, direction: "right" as const };
-      focusOrAddPanel(
+      addSidePanel(
         api,
-        { id: "plan", component: "plan", title: "Plan", tabComponent: "planTab", position },
-        opts?.quiet ?? false,
+        centerGroupId,
+        { id: "plan", component: "plan", title: "Plan", tabComponent: "planTab" },
+        opts,
       );
+    },
+    addPluginPanel: (pluginId: string, panelKey: string, title: string, opts?: SidePanelOpts) => {
+      const { api, centerGroupId } = get();
+      if (!api) return;
+      addSidePanel(
+        api,
+        centerGroupId,
+        {
+          id: pluginPanelId(pluginId, panelKey),
+          component: PLUGIN_PANEL_COMPONENT,
+          title,
+          tabComponent: PLUGIN_PANEL_TAB_COMPONENT,
+          params: { pluginId, panelKey },
+        },
+        opts,
+      );
+    },
+    closePluginPanels: (pluginId: string) => {
+      const { api } = get();
+      if (!api) return;
+      api.panels
+        .filter((p) => parsePluginPanelId(p.id)?.pluginId === pluginId)
+        .forEach((p) => api.removePanel(p));
     },
     ...buildReviewPanelActions(get),
     addTerminalPanel: (

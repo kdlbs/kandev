@@ -6,6 +6,7 @@ import { DialogFooter } from "@kandev/ui/dialog";
 import { Input } from "@kandev/ui/input";
 import { Label } from "@kandev/ui/label";
 import { useToast } from "@/components/toast-provider";
+import { t } from "@/lib/i18n";
 
 export type TaskChangeRequestLinkFormProps = {
   inputLabel: string;
@@ -103,7 +104,7 @@ export function TaskChangeRequestLinkForm({
           onClick={onCancel}
           disabled={submitting}
         >
-          Cancel
+          {t("common:cancel")}
         </Button>
         <Button
           type="submit"
@@ -112,7 +113,7 @@ export function TaskChangeRequestLinkForm({
           data-testid={submitTestId}
           data-dialog-default-action
         >
-          {submitting ? "Saving" : "Save"}
+          {submitting ? t("integrations:saving") : t("common:save")}
         </Button>
       </DialogFooter>
     </form>

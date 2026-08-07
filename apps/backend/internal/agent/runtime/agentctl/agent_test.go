@@ -3,6 +3,7 @@ package client
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -167,6 +168,9 @@ func TestSendStreamRequest_NotConnected(t *testing.T) {
 	_, err := c.sendStreamRequest(ctx, "test.action", nil)
 	if err == nil {
 		t.Fatal("expected error when stream not connected")
+	}
+	if !errors.Is(err, ErrAgentStreamNotConnected) {
+		t.Fatalf("expected ErrAgentStreamNotConnected, got: %v", err)
 	}
 	if !strings.Contains(err.Error(), "agent stream not connected") {
 		t.Fatalf("expected 'agent stream not connected' error, got: %v", err)

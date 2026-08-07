@@ -12,6 +12,7 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/persistence"
+	quickterminalrepository "github.com/kandev/kandev/internal/quickterminal/repository"
 	"github.com/kandev/kandev/internal/secrets"
 	"github.com/kandev/kandev/internal/task/repository"
 	terminalrepo "github.com/kandev/kandev/internal/terminal/repository"
@@ -72,6 +73,10 @@ func provideRepositories(ctx context.Context, cfg *config.Config, log *logger.Lo
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("terminal repo: %w", err)
 	}
+	quickTerminalRepoImpl, err := quickterminalrepository.NewWithDB(writer, reader)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("quick terminal repo: %w", err)
+	}
 	runtimeFlagsStore, err := runtimeflags.NewSQLiteStore(writer, reader)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("runtime flags store: %w", err)
@@ -109,6 +114,7 @@ func provideRepositories(ctx context.Context, cfg *config.Config, log *logger.Lo
 		Secrets:       secretStore,
 		Office:        officeRepo,
 		Terminal:      terminalRepoImpl,
+		QuickTerminal: quickTerminalRepoImpl,
 		RuntimeFlags:  runtimeFlagsStore,
 		Auth:          authRepo,
 	}

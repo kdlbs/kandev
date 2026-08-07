@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { IconLoader2, IconMessageCircle, IconSend2, IconSparkles } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Textarea } from "@kandev/ui/textarea";
@@ -8,11 +9,22 @@ import { useAppStore } from "@/components/state-provider";
 import type { QuickChatSessionKind } from "@/lib/state/slices/ui/types";
 import { ConfigurationChatToggle } from "@/components/quick-chat/configuration-chat-toggle";
 
-const SUGGESTION_PROMPTS = [
-  "Add a 'Code Review' step to my workflow",
-  "Create a new agent profile with auto-approve enabled",
-  "Show me the current workflow configuration",
-  "Update the MCP servers for the default agent profile",
+/**
+ * Catalog KEYS, not copy. Resolving these at module scope would freeze them at
+ * the boot locale (and hide them from the pseudo-locale, which only ever sees
+ * text that was never translated) — see docs/i18n.md. `Suggestions` resolves
+ * each one at render.
+ *
+ * These are display copy that the user then SENDS: picking one fills the
+ * composer, so the agent receives whatever locale the user is reading in. That
+ * is the intent — a French user should be able to send a French prompt — and
+ * none of these values is compared or persisted.
+ */
+const SUGGESTION_PROMPT_KEYS = [
+  "configChat:suggestionAddReviewStep",
+  "configChat:suggestionCreateProfile",
+  "configChat:suggestionShowWorkflow",
+  "configChat:suggestionUpdateMcp",
 ];
 
 type ConfigChatSetupBaseProps = {
@@ -31,15 +43,14 @@ type ConfigChatSetupProps = ConfigChatSetupBaseProps &
 
 function ProfileSelector({ onSelect }: { onSelect: (id: string) => void }) {
   const profiles = useAppStore((state) => state.agentProfiles.items ?? []);
+  const { t } = useTranslation();
   return (
     <section className="space-y-3" aria-labelledby="config-chat-agent-label">
       <div>
         <h3 id="config-chat-agent-label" className="text-sm font-medium">
-          Configuration agent profile
+          {t("configChat:agentProfileHeading")}
         </h3>
-        <p className="text-xs text-muted-foreground">
-          Choose the agent with access to configuration tools. This becomes the workspace default.
-        </p>
+        <p className="text-xs text-muted-foreground">{t("configChat:agentProfileHelp")}</p>
       </div>
       <div className="grid gap-2 sm:grid-cols-2">
         {profiles.map((profile) => (
@@ -66,20 +77,24 @@ function ProfileSelector({ onSelect }: { onSelect: (id: string) => void }) {
 }
 
 function Suggestions({ onSelect }: { onSelect: (prompt: string) => void }) {
+  const { t } = useTranslation();
   return (
     <section className="space-y-2" aria-labelledby="config-chat-suggestions-label">
       <h3 id="config-chat-suggestions-label" className="text-xs font-medium text-muted-foreground">
-        Try asking
+        {t("configChat:tryAsking")}
       </h3>
       <div className="grid gap-2 sm:grid-cols-2">
-        {SUGGESTION_PROMPTS.map((prompt) => (
+        {/* Keyed by the CATALOG KEY, not the resolved prompt: a React key should
+            be a stable identity, and keying on translated copy remounts every
+            button on a locale switch. */}
+        {SUGGESTION_PROMPT_KEYS.map((key) => (
           <button
-            key={prompt}
+            key={key}
             type="button"
-            onClick={() => onSelect(prompt)}
+            onClick={() => onSelect(t(key))}
             className="min-h-11 rounded-md border px-3 py-2 text-left text-xs text-muted-foreground transition-colors hover:border-primary/50 hover:bg-accent/50 hover:text-foreground"
           >
-            {prompt}
+            {t(key)}
           </button>
         ))}
       </div>
@@ -100,20 +115,21 @@ function ConfigChatFooter({
   startDisabled: boolean;
   isStarting: boolean;
 }) {
+  const { t } = useTranslation();
   return (
     <footer className="flex shrink-0 items-center justify-end gap-2 border-t bg-popover px-4 py-3 sm:px-8">
       <Button variant="outline" onClick={onCancel} disabled={disabled} className="cursor-pointer">
-        Cancel
+        {t("common:cancel")}
       </Button>
       <Button
         onClick={onStart}
         disabled={startDisabled}
         className="min-w-28 cursor-pointer"
-        aria-label="Start configuration chat"
+        aria-label={t("configChat:startChatAria")}
         data-dialog-default-action
       >
         {isStarting ? <IconLoader2 className="h-4 w-4 animate-spin" aria-hidden /> : null}
-        {isStarting ? "Starting chat..." : "Start chat"}
+        {isStarting ? t("configChat:startingChat") : t("configChat:startChat")}
       </Button>
     </footer>
   );
@@ -142,6 +158,7 @@ function ConfigPrompt({
   onChange,
   onSubmit,
 }: ConfigPromptProps) {
+  const { t } = useTranslation();
   return (
     <div
       className="shrink-0 border-t bg-popover px-4 py-4 sm:px-8"
@@ -152,7 +169,7 @@ function ConfigPrompt({
         aria-labelledby="config-chat-prompt-label"
       >
         <h3 id="config-chat-prompt-label" className="text-sm font-medium">
-          What would you like to configure?
+          {t("configChat:promptHeading")}
         </h3>
         <div className="flex items-end gap-2">
           <Textarea
@@ -171,7 +188,7 @@ function ConfigPrompt({
                 onSubmit();
               }
             }}
-            placeholder="Ask anything about your configuration..."
+            placeholder={t("configChat:promptPlaceholder")}
             disabled={disabled}
             className="min-h-20 max-h-32 resize-y"
           />
@@ -181,7 +198,7 @@ function ConfigPrompt({
               onClick={onSubmit}
               disabled={!canSubmit}
               className="h-11 w-11 shrink-0 cursor-pointer"
-              aria-label="Start configuration chat"
+              aria-label={t("configChat:startChatAria")}
             >
               {isStarting ? (
                 <IconLoader2 className="h-4 w-4 animate-spin" aria-hidden />
@@ -214,6 +231,7 @@ function ConfigGuidance({
   onSelectSuggestion: (prompt: string) => void;
   onKindChange?: (kind: QuickChatSessionKind) => void;
 }) {
+  const { t } = useTranslation();
   return (
     <div
       className="min-h-0 flex-1 overflow-y-auto px-4 py-6 sm:px-8 sm:py-8"
@@ -225,11 +243,9 @@ function ConfigGuidance({
             <header className="space-y-2">
               <div className="flex items-center gap-2">
                 <IconSparkles className="h-5 w-5 text-primary" aria-hidden />
-                <h2 className="text-lg font-semibold">Configuration Chat</h2>
+                <h2 className="text-lg font-semibold">{t("common:configurationChat")}</h2>
               </div>
-              <p className="text-sm text-muted-foreground">
-                Ask an agent to manage workflows, agent profiles, and MCP configuration.
-              </p>
+              <p className="text-sm text-muted-foreground">{t("configChat:dialogDescription")}</p>
             </header>
             {onKindChange && (
               <ConfigurationChatToggle
@@ -242,9 +258,7 @@ function ConfigGuidance({
         )}
 
         {!hasProfiles && (
-          <p className="text-sm text-muted-foreground">
-            No agent profiles are available. Create one in Agent settings first.
-          </p>
+          <p className="text-sm text-muted-foreground">{t("configChat:noAgentProfiles")}</p>
         )}
 
         {hasProfiles && needsProfileSelection && <ProfileSelector onSelect={onSelectProfile} />}

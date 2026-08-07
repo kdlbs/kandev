@@ -9,6 +9,7 @@ agentctl exposes these route groups (see `server/api/`):
 - `/instances/*` - Multi-instance management
 - `/processes/*` - Agent subprocess management (start/stop)
 - `/agent/configure`, `/agent/stream` - Agent configuration and event streaming
+- `/lsp/stream` - Task-host language-server stdio/WebSocket bridge
 - `/git/*` - Git operations (status, commit, push, pull, rebase, stage, create PR, etc.)
 - `/shell/*` - Shell session management
 - `/workspace/*` - File operations, search, tree
@@ -37,6 +38,8 @@ Protocol adapters in `server/adapter/transport/` normalize different agent CLIs:
 - Factory pattern in `server/adapter/factory.go` selects adapter by agent type
 
 The `acp` transport is split by concern across `adapter_*.go` files: `adapter.go` (core/lifecycle), `adapter_session.go` (initialize/new/load/resume), `adapter_prompt.go` (prompt/cancel), `adapter_updates.go` (`session/update` notification fan-out), `adapter_tools.go` (`convertToolCallUpdate` / `convertToolCallResultUpdate` -> normalized payloads), `adapter_permissions.go`, and `adapter_helpers.go`. Agent-specific ACP extensions use the package-private `acpDialect` function table in `dialect.go`; keep observed wire translation in `dialect_<agent>.go`. Dialect hooks return normalized data or request descriptions and never receive `*Adapter` or execute RPCs. Shared capability normalization used by both live sessions and utility probes belongs in `internal/agentctl/acpcompat/`. Tool-call conversion lives in `adapter_tools.go`, not `adapter.go`. See ADR-0043.
+
+**Prompt handoff and steering are negotiated, not named.** Both the foreground-idle handoff (ADR-0049) and mid-turn steering (ADR-2026-08-04) gate on the agent's `initialize` advertisement `agentCapabilities._meta.claudeCode.promptQueueing`, read once in `prompt_queueing.go` and cached on the adapter — never on `agentID`. A steer transfers the existing prompt-gate token to a human successor while the predecessor `session/prompt` is still open (`adapter_prompt_cancel.go: handOffTurnLocked`), reusing the generation-keyed completion attribution and background-work protection built for handoff. Steering is exposed via the optional `adapter.SteerablePrompter` interface (`PromptSteer` / `SupportsSteering`), so non-steering transports need no change. Delivery is opportunistic: the advertisement asserts the agent accepts a concurrent prompt, not that it folds it — both outcomes must be correct.
 
 ### Grok ACP dialect (`dialect_grok.go`)
 
@@ -113,6 +116,15 @@ wait). After the command leader exits, `waitForProcessExit` still checks the
 agent process group and sends SIGTERM/SIGKILL if descendants remain. If `Stop(ctx)`
 times out, it also re-runs the pgid SIGKILL fallback.
 
+Non-agent protocol subprocesses must use the same ownership path. LSP servers
+start through `process.Manager.StartPipedProcess`, which exposes stdin/stdout to
+the bridge while registering the command with `ProcessRunner`; instance teardown
+then closes admission and reaps the full process tree on Unix and Windows.
+LSP auto-install work holds `Manager.BeginOwnedOperation`; npm and Go installer
+commands run through `Manager.CombinedOutput`, so teardown cancels downloads,
+drains cache mutations, and reaps installer descendants before resources are
+released.
+
 To add another agent that needs immediate kill instead of graceful stdin close:
 set `RequiresProcessKill: true` in its `Runtime()` config.
 
@@ -144,6 +156,13 @@ Both accept any value `time.ParseDuration` accepts (`30m`, `2h`, `500ms`, …). 
 ## MCP stdio command validation
 
 `instance.Manager.buildMcpServerConfigs` calls `exec.LookPath` on every stdio MCP `Command` before passing the list to the agent. Entries whose command can't be resolved are dropped with a warn log (URL-transport MCPs always pass through). This prevents the `/snap/bin/brave` repro in GH issue #1247 — an MCP whose binary was uninstalled after config save no longer causes a permanently broken child process to be spawned every session.
+
+## Testing
+
+PTY-backed shell tests run on Windows through the supported ConPTY path. Skip
+only assertions that require Unix-specific PTY semantics; keep environment and
+configuration-merge tests platform-neutral so they remain covered on every
+supported OS.
 
 ## Further scoped notes
 

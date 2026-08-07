@@ -15,6 +15,7 @@ type ContextWindowStoreWindow = Window & {
           used: number;
           remaining: number;
           efficiency: number;
+          compactionCount: number;
           source: "acp" | "api";
         },
       ) => void;
@@ -67,6 +68,7 @@ async function seedStaleContextWindow(testPage: Page): Promise<void> {
       used: 190_000,
       remaining: 10_000,
       efficiency: 95,
+      compactionCount: 0,
       source: "acp",
     });
   });

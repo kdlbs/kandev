@@ -1301,6 +1301,97 @@ func TestEnrichSubagentResult_Claude(t *testing.T) {
 	}
 }
 
+// The subagent's returned text and resolved model ride on the same
+// `toolResponse` map as the metrics. Verified against a live claude-agent-acp
+// 0.49.0 capture: `content` is an array of ACP content blocks and
+// `resolvedModel` is the model the subagent actually ran on.
+func TestEnrichSubagentResult_ClaudeResultTextAndModel(t *testing.T) {
+	n := NewNormalizer("")
+	payload := streams.NewSubagentTask("Review", "review it", "")
+	meta := map[string]any{"claudeCode": map[string]any{"toolResponse": map[string]any{
+		"status":        "completed",
+		"resolvedModel": "claude-opus-4-8[1m]",
+		"content": []any{
+			map[string]any{"type": "text", "text": "VERDICT: APPROVE"},
+			map[string]any{"type": "text", "text": "No blocking findings."},
+		},
+	}}}
+	n.EnrichSubagentResult(payload, meta, nil)
+	sa := payload.SubagentTask()
+	if want := "VERDICT: APPROVE\nNo blocking findings."; sa.ResultText != want {
+		t.Errorf("ResultText = %q, want %q", sa.ResultText, want)
+	}
+	if sa.Model != "claude-opus-4-8[1m]" {
+		t.Errorf("Model = %q, want claude-opus-4-8[1m]", sa.Model)
+	}
+}
+
+// Absent, empty, and all-non-text content must leave ResultText empty rather
+// than substituting a placeholder — a subagent that returned nothing must not
+// be made to look like one that failed.
+func TestEnrichSubagentResult_ClaudeNoUsableResultText(t *testing.T) {
+	cases := map[string]any{
+		"absent":       nil,
+		"empty":        []any{},
+		"non-text":     []any{map[string]any{"type": "image", "data": "…"}},
+		"blank text":   []any{map[string]any{"type": "text", "text": "   "}},
+		"wrong shape":  []any{"just a string"},
+		"not an array": map[string]any{"type": "text", "text": "nope"},
+	}
+	for name, content := range cases {
+		t.Run(name, func(t *testing.T) {
+			n := NewNormalizer("")
+			payload := streams.NewSubagentTask("Review", "review it", "")
+			resp := map[string]any{"status": "completed"}
+			if content != nil {
+				resp["content"] = content
+			}
+			meta := map[string]any{"claudeCode": map[string]any{"toolResponse": resp}}
+			n.EnrichSubagentResult(payload, meta, nil)
+			if got := payload.SubagentTask().ResultText; got != "" {
+				t.Errorf("ResultText = %q, want empty", got)
+			}
+		})
+	}
+}
+
+// The payload contract is that captured text is stored verbatim; truncation is
+// a rendering concern. Trimming the joined result would eat the indentation of
+// a verdict that opens with a code block.
+func TestEnrichSubagentResult_ClaudeResultTextKeepsIndentation(t *testing.T) {
+	n := NewNormalizer("")
+	payload := streams.NewSubagentTask("Review", "review it", "")
+	meta := map[string]any{"claudeCode": map[string]any{"toolResponse": map[string]any{
+		"content": []any{
+			map[string]any{"type": "text", "text": "    indented finding"},
+			map[string]any{"type": "text", "text": "\tsecond line"},
+		},
+	}}}
+	n.EnrichSubagentResult(payload, meta, nil)
+	if want := "    indented finding\n\tsecond line"; payload.SubagentTask().ResultText != want {
+		t.Errorf("ResultText = %q, want %q", payload.SubagentTask().ResultText, want)
+	}
+}
+
+// Claude sends the metrics envelope and the terminal status on different
+// frames, so enrichment runs more than once per subagent. A later frame
+// without content must not erase text an earlier one captured.
+func TestEnrichSubagentResult_ClaudeResultTextSurvivesLaterEmptyFrame(t *testing.T) {
+	n := NewNormalizer("")
+	payload := streams.NewSubagentTask("Review", "review it", "")
+	withText := map[string]any{"claudeCode": map[string]any{"toolResponse": map[string]any{
+		"content": []any{map[string]any{"type": "text", "text": "VERDICT: APPROVE"}},
+	}}}
+	n.EnrichSubagentResult(payload, withText, nil)
+	noText := map[string]any{"claudeCode": map[string]any{"toolResponse": map[string]any{
+		"status": "completed",
+	}}}
+	n.EnrichSubagentResult(payload, noText, nil)
+	if got := payload.SubagentTask().ResultText; got != "VERDICT: APPROVE" {
+		t.Errorf("ResultText = %q, want it retained across frames", got)
+	}
+}
+
 // A completed subagent that ran zero tools must serialize tool_use_count: 0
 // (not drop it), so the UI can render the "0 tools" chip. Regression test for
 // the omitempty + non-zero-guard bug.

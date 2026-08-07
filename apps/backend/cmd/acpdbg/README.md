@@ -24,12 +24,17 @@ Or invoke the binary directly: `apps/backend/bin/acpdbg <subcommand> [flags]`.
 | Command | Purpose |
 |---|---|
 | `list` | Enumerate registered ACP agents with their spawn command |
-| `probe <agent>` | `initialize` → `session/new` → close. Shows models, modes, auth methods. |
+| `probe [flags] <agent>` | `initialize` → `session/new` → close. Shows models, modes, auth methods. |
 | `probe --exec "<cmd> [args...]"` | Same but against an arbitrary binary not in the registry |
-| `mcp-probe <agent>` | Inject a temporary HTTP MCP sentinel into `session/new` and report delivery separately from observed initialize, `tools/list`, and tool use. |
-| `prompt <agent> --prompt "..." [--model M] [--mode M]` | Full prompt round-trip, collects text chunks from `session/update` |
-| `session-load <agent> --session-id <id> [--prompt "..."]` | Load an existing session in `--workdir`, then optionally verify it with a prompt |
+| `mcp-probe [flags] <agent>` | Inject a temporary HTTP MCP sentinel into `session/new` and report delivery separately from observed initialize, `tools/list`, and tool use. |
+| `prompt --prompt "..." [--model M] [--mode M] <agent>` | Full prompt round-trip, collects text chunks from `session/update` |
+| `session-load --session-id <id> [--prompt "..."] <agent>` | Load an existing session in `--workdir`, then optionally verify it with a prompt |
 | `matrix` | Probe every registered ACP agent in parallel, write one JSONL per agent + `matrix-summary.json` |
+
+> **Flags go before the agent name.** Parsing uses the standard library `flag`
+> package, which stops at the first non-flag argument — so
+> `session-load opencode-acp --session-id X` silently drops `--session-id` and
+> fails with `--session-id is required`.
 
 ### Shared flags
 
@@ -46,16 +51,18 @@ Create a session in one directory, then load it from another and ask the agent
 to report its working directory:
 
 ```bash
-apps/backend/bin/acpdbg prompt codex-acp \
+apps/backend/bin/acpdbg prompt \
   --workdir /tmp/folder-a \
   --prompt "Reply with pwd only" \
-  --file /tmp/codex-new.jsonl
+  --file /tmp/codex-new.jsonl \
+  codex-acp
 
-apps/backend/bin/acpdbg session-load codex-acp \
+apps/backend/bin/acpdbg session-load \
   --session-id <session-id-from-first-run> \
   --workdir /tmp/folder-b \
   --prompt "Reply with pwd only" \
-  --file /tmp/codex-load.jsonl
+  --file /tmp/codex-load.jsonl \
+  codex-acp
 ```
 
 `session-load` sends the selected `--workdir` as the ACP `cwd` parameter. The

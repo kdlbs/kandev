@@ -8,6 +8,7 @@ import {
 } from "@tabler/icons-react";
 import { DrawerClose } from "@kandev/ui/drawer";
 import { Button } from "@kandev/ui/button";
+import { t } from "@/lib/i18n";
 import {
   ChangeRequestCIPopoverFrame,
   ChangeRequestChecksSection,
@@ -155,7 +156,7 @@ export function IntegrationChangeRequestMultiStatusContent({
                 className="mt-2 h-11 w-full cursor-pointer"
                 onClick={item.onOpenReview}
               >
-                Open review #{item.number}
+                {t("integrations:openReviewNumber", { number: item.number })}
               </Button>
             </DrawerClose>
           ) : null}

@@ -7,6 +7,13 @@ description: "Choose and run Kandev's Go, web, CLI, script, PostgreSQL, Playwrig
 
 Use the narrowest test that proves a rule, then cover the real boundary when behavior crosses a process, protocol, database, executor, or user journey.
 
+## Quick path
+
+1. Start with `make fmt`, `make typecheck`, `make test`, and `make lint`.
+2. Run the focused package or Vitest test for the changed rule.
+3. Add Playwright coverage for every `apps/web/` behavior change.
+4. Run PostgreSQL, container, real-agent, or desktop layers only when the change crosses that boundary.
+
 ## Standard local checks
 
 From the repository root, format first:

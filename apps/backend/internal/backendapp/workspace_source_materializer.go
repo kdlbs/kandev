@@ -70,6 +70,16 @@ type hostWorkspaceMaterialization struct {
 	knownWorktree map[string]bool
 	priorRoots    []string
 	postRoots     []string
+	linkUndo      []ownedDirectoryLinkUndo
+}
+
+type ownedDirectoryLinkUndo struct {
+	Path        string
+	PriorTarget string
+}
+
+func materializedLinkOwner(taskID, taskDirName string) worktree.OwnedDirectoryLinkOwner {
+	return worktree.OwnedDirectoryLinkOwner{TaskID: taskID, TaskDirName: taskDirName}
 }
 
 func newWorkspaceSourceMaterializer(repo workspaceSourceMaterializerRepo, mgr *worktree.Manager, lc *lifecycle.Manager, log *logger.Logger) *workspaceSourceMaterializer {
@@ -119,18 +129,17 @@ func (m *workspaceSourceMaterializer) materializeHostWorkspaceSources(ctx contex
 	if err != nil {
 		return nil, err
 	}
-	created := make([]string, 0, len(batch.Sources))
 	adoptedSessions := make([]*models.TaskSession, 0, len(state.sessions))
 	defer func() {
 		if err == nil {
 			return
 		}
-		if rollbackErr := m.rollbackHostWorkspaceMaterialization(ctx, taskID, state, materialization, adoptedSessions, created); rollbackErr != nil {
+		if rollbackErr := m.rollbackHostWorkspaceMaterialization(ctx, taskID, state, materialization, adoptedSessions); rollbackErr != nil {
 			err = fmt.Errorf("%w; restore adopted session workspaces: %v", err, rollbackErr)
 		}
 	}()
 	branchMaterializations, materialized, materializeErr := m.materializeHostRuntime(ctx, taskID, materialization.root, state, batch)
-	created = append(created, materialized...)
+	materialization.linkUndo = append(materialization.linkUndo, materialized...)
 	if materializeErr != nil {
 		return nil, materializeErr
 	}
@@ -171,6 +180,7 @@ func (m *workspaceSourceMaterializer) prepareHostWorkspaceMaterialization(ctx co
 	return &hostWorkspaceMaterialization{
 		root: root, oldPath: state.environment.WorkspacePath, rootExisted: pathExists(root),
 		knownWorktree: worktreeIDs(worktrees), priorRoots: priorRoots, postRoots: postRoots,
+		linkUndo: make([]ownedDirectoryLinkUndo, 0, len(batch.Sources)),
 	}, nil
 }
 
@@ -184,28 +194,29 @@ func worktreeIDs(worktrees []*worktree.Worktree) map[string]bool {
 	return ids
 }
 
-func (m *workspaceSourceMaterializer) materializeHostRuntime(ctx context.Context, taskID, root string, state *workspaceSourceMaterializationState, batch *models.WorkspaceSourceBatch) ([]*branchMaterialization, []string, error) {
+func (m *workspaceSourceMaterializer) materializeHostRuntime(ctx context.Context, taskID, root string, state *workspaceSourceMaterializationState, batch *models.WorkspaceSourceBatch) ([]*branchMaterialization, []ownedDirectoryLinkUndo, error) {
+	owner := materializedLinkOwner(taskID, state.environment.TaskDirName)
 	if state.environment.ExecutorType == string(models.ExecutorTypeWorktree) {
-		created, materializations, err := m.materializeWorktreeSources(ctx, taskID, root, batch, state.folders)
+		created, materializations, err := m.materializeWorktreeSources(ctx, taskID, root, batch, state.folders, owner)
 		return materializations, created, err
 	}
 	entries, err := localWorkspaceEntries(state.repositories, state.folders, state.entities, batch)
 	if err != nil {
 		return nil, nil, err
 	}
-	created, err := materializeDirectoryLinks(root, entries, "workspace source")
+	created, err := materializeDirectoryLinks(root, entries, "workspace source", owner)
 	return nil, created, err
 }
 
-func materializeDirectoryLinks(root string, entries map[string]string, description string) ([]string, error) {
-	created := make([]string, 0, len(entries))
+func materializeDirectoryLinks(root string, entries map[string]string, description string, owner worktree.OwnedDirectoryLinkOwner) ([]ownedDirectoryLinkUndo, error) {
+	created := make([]ownedDirectoryLinkUndo, 0, len(entries))
 	for name, target := range entries {
-		entry, wasCreated, err := worktree.EnsureOwnedDirectoryLink(root, name, target)
+		result, err := worktree.EnsureOwnedDirectoryLink(root, name, target, owner)
 		if err != nil {
 			return created, fmt.Errorf("link %s %q: %w", description, name, err)
 		}
-		if wasCreated {
-			created = append(created, entry)
+		if result.Created {
+			created = append(created, ownedDirectoryLinkUndo{Path: result.Path, PriorTarget: result.PriorTarget})
 		}
 	}
 	return created, nil
@@ -226,10 +237,10 @@ func (m *workspaceSourceMaterializer) adoptSessionWorkspaces(ctx context.Context
 	return ids, adopted, nil
 }
 
-func (m *workspaceSourceMaterializer) rollbackHostWorkspaceMaterialization(ctx context.Context, taskID string, state *workspaceSourceMaterializationState, materialization *hostWorkspaceMaterialization, adopted []*models.TaskSession, created []string) error {
+func (m *workspaceSourceMaterializer) rollbackHostWorkspaceMaterialization(ctx context.Context, taskID string, state *workspaceSourceMaterializationState, materialization *hostWorkspaceMaterialization, adopted []*models.TaskSession) error {
 	rollbackErr := m.restoreSessionWorkspaces(ctx, adopted, materialization.oldPath, materialization.priorRoots)
-	for index := len(created) - 1; index >= 0; index-- {
-		_ = os.Remove(created[index])
+	if err := rollbackOwnedDirectoryLinks(materialization.linkUndo); err != nil {
+		rollbackErr = errors.Join(rollbackErr, err)
 	}
 	m.cleanupNewWorktrees(ctx, taskID, materialization.knownWorktree)
 	if !materialization.rootExisted {
@@ -241,6 +252,29 @@ func (m *workspaceSourceMaterializer) rollbackHostWorkspaceMaterialization(ctx c
 		_ = m.repo.UpdateTaskEnvironment(context.WithoutCancel(ctx), state.environment)
 	}
 	return rollbackErr
+}
+
+func rollbackOwnedDirectoryLinks(undo []ownedDirectoryLinkUndo) error {
+	var rollbackErr error
+	for index := len(undo) - 1; index >= 0; index-- {
+		if err := rollbackOwnedDirectoryLink(undo[index]); err != nil {
+			rollbackErr = errors.Join(rollbackErr, err)
+		}
+	}
+	return rollbackErr
+}
+
+func rollbackOwnedDirectoryLink(undo ownedDirectoryLinkUndo) error {
+	if undo.PriorTarget == "" {
+		if err := worktree.RemoveOwnedDirectoryLink(filepath.Dir(undo.Path), filepath.Base(undo.Path)); err != nil {
+			return fmt.Errorf("remove materialized link %q: %w", undo.Path, err)
+		}
+		return nil
+	}
+	if err := worktree.RestoreOwnedDirectoryLink(filepath.Dir(undo.Path), filepath.Base(undo.Path), undo.PriorTarget); err != nil {
+		return fmt.Errorf("restore repointed link %q: %w", undo.Path, err)
+	}
+	return nil
 }
 
 func (m *workspaceSourceMaterializer) cleanupNewWorktrees(ctx context.Context, taskID string, known map[string]bool) {
@@ -564,7 +598,7 @@ func isHostWorkspaceExecutor(executorType string) bool {
 	return executorType == string(models.ExecutorTypeLocal) || executorType == legacyLocalPCExecutor || executorType == string(models.ExecutorTypeWorktree)
 }
 
-func (m *workspaceSourceMaterializer) materializeWorktreeSources(ctx context.Context, taskID, root string, batch *models.WorkspaceSourceBatch, folders []*models.TaskWorkspaceFolder) ([]string, []*branchMaterialization, error) {
+func (m *workspaceSourceMaterializer) materializeWorktreeSources(ctx context.Context, taskID, root string, batch *models.WorkspaceSourceBatch, folders []*models.TaskWorkspaceFolder, owner worktree.OwnedDirectoryLinkOwner) ([]ownedDirectoryLinkUndo, []*branchMaterialization, error) {
 	materializations := make([]*branchMaterialization, 0, len(batch.Sources))
 	for _, source := range batch.Sources {
 		if source.Repository != nil {
@@ -584,14 +618,14 @@ func (m *workspaceSourceMaterializer) materializeWorktreeSources(ctx context.Con
 	if err != nil {
 		return nil, nil, err
 	}
-	created := make([]string, 0, len(entries))
+	created := make([]ownedDirectoryLinkUndo, 0, len(entries))
 	for name, target := range entries {
-		entry, wasCreated, err := worktree.EnsureOwnedDirectoryLink(root, name, target)
+		result, err := worktree.EnsureOwnedDirectoryLink(root, name, target, owner)
 		if err != nil {
 			return created, nil, fmt.Errorf("link worktree folder %q: %w", name, err)
 		}
-		if wasCreated {
-			created = append(created, entry)
+		if result.Created {
+			created = append(created, ownedDirectoryLinkUndo{Path: result.Path, PriorTarget: result.PriorTarget})
 		}
 	}
 	return created, materializations, nil

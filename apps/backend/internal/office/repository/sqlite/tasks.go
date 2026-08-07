@@ -9,6 +9,7 @@ import (
 
 	"github.com/jmoiron/sqlx"
 
+	taskmodels "github.com/kandev/kandev/internal/task/models"
 	taskrepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 )
 
@@ -18,6 +19,16 @@ import (
 // signal the office GC uses to classify a kandev-managed container as
 // safely removable.
 var ErrTaskNotFound = errors.New("task not found")
+
+// Automation runs never appear in a task list: they are hidden by their
+// provenance, not by ephemerality (docs/specs/office/automations-settings.md).
+// is_ephemeral keeps its original quick-chat meaning, so every list read here
+// pairs the two.
+const (
+	notAutomationOriginT    = `COALESCE(t.origin, '') != '` + taskmodels.TaskOriginAutomationRun + `'`
+	andNotAutomationOrigin  = ` AND COALESCE(origin, '') != '` + taskmodels.TaskOriginAutomationRun + `'`
+	andNotAutomationOriginT = " AND " + notAutomationOriginT
+)
 
 // systemTasksJoin is the JOIN onto the workflows table used by every
 // task list/search query that needs to know whether a task lives in a
@@ -59,6 +70,7 @@ type TaskExecutionFields struct {
 	AssigneeAgentProfileID string `db:"assignee_agent_profile_id"`
 	State                  string `db:"state"`
 	WorkspaceID            string `db:"workspace_id"`
+	IsFromOffice           bool   `db:"is_from_office"`
 }
 
 // GetTaskExecutionFields returns the execution-related fields for a task.
@@ -68,7 +80,8 @@ func (r *Repository) GetTaskExecutionFields(ctx context.Context, taskID string) 
 		SELECT tasks.id,
 		       `+RunnerProjection("tasks")+` as assignee_agent_profile_id,
 		       COALESCE(tasks.state, '') as state,
-		       COALESCE(tasks.workspace_id, '') as workspace_id
+		       COALESCE(tasks.workspace_id, '') as workspace_id,
+		       `+taskrepo.IsFromOfficePredicate("tasks")+` AS is_from_office
 		FROM tasks WHERE tasks.id = ?
 	`), taskID).StructScan(&fields)
 	if err == sql.ErrNoRows {
@@ -251,6 +264,7 @@ func (r *Repository) ListTasksByWorkspace(ctx context.Context, workspaceID strin
 		"t.workspace_id = ?",
 		"t.archived_at IS NULL",
 		"t.is_ephemeral = 0",
+		notAutomationOriginT,
 	}
 	if !includeSystem && len(sysArgs) > 0 {
 		where = append(where, "COALESCE(w.workflow_template_id,'') NOT IN ("+sysPh+")")
@@ -437,6 +451,7 @@ func buildTaskWhereClause(
 		"t.workspace_id = ?",
 		"t.archived_at IS NULL",
 		"t.is_ephemeral = 0",
+		notAutomationOriginT,
 	}
 	if len(opts.Status) > 0 {
 		ph, vals := bindList(opts.Status)
@@ -547,7 +562,7 @@ func (r *Repository) ListChildTasks(ctx context.Context, parentID string) ([]*Ta
 		FROM tasks t
 		WHERE t.parent_id = ?
 		  AND t.archived_at IS NULL
-		  AND t.is_ephemeral = 0
+		  AND t.is_ephemeral = 0`+andNotAutomationOriginT+`
 		ORDER BY t.created_at ASC
 	`), parentID)
 	if err != nil {
@@ -618,7 +633,7 @@ func (r *Repository) searchTasksFTS(ctx context.Context, workspaceID, query stri
 		WHERE fts.tasks_fts MATCH ?
 		  AND t.workspace_id = ?
 		  AND t.archived_at IS NULL
-		  AND t.is_ephemeral = 0
+		  AND t.is_ephemeral = 0`+andNotAutomationOriginT+`
 		ORDER BY rank
 		LIMIT ?
 	`), ftsQuery, workspaceID, limit)
@@ -649,7 +664,7 @@ func (r *Repository) searchTasksLike(ctx context.Context, workspaceID, query str
 		FROM tasks t
 		WHERE t.workspace_id = ?
 		  AND t.archived_at IS NULL
-		  AND t.is_ephemeral = 0
+		  AND t.is_ephemeral = 0`+andNotAutomationOriginT+`
 		  AND (t.title LIKE ? OR t.description LIKE ? OR t.identifier LIKE ?)
 		ORDER BY t.updated_at DESC
 		LIMIT ?
@@ -678,13 +693,17 @@ func scanSearchResults(rows *sqlx.Rows) ([]*TaskSearchResult, error) {
 // the given agent that are in an actionable state (TODO or IN_PROGRESS)
 // and not archived. Resolves the assignee through the runner projection
 // so per-task overrides and step-primary fallbacks both count.
+//
+// Automation runs are excluded: an automation configured against a workflow
+// step resolves to that step's runner, so counting its long-lived run would
+// inflate the agent's load forever and starve it of real work.
 func (r *Repository) CountActionableTasksForAgent(ctx context.Context, agentID string) (int, error) {
 	var count int
 	err := r.ro.QueryRowxContext(ctx, r.ro.Rebind(`
 		SELECT COUNT(*) FROM tasks t
 		WHERE `+RunnerProjection("t")+` = ?
 		  AND t.state IN ('TODO', 'IN_PROGRESS')
-		  AND t.archived_at IS NULL
+		  AND t.archived_at IS NULL`+andNotAutomationOriginT+`
 	`), agentID).Scan(&count)
 	return count, err
 }
@@ -812,6 +831,23 @@ type UnstartedTaskRow struct {
 	WorkspaceID            string `db:"workspace_id"`
 }
 
+// HasOfficeAdoption reports whether persisted Office configuration exists
+// anywhere in the backend. It is intentionally cheap because the shared
+// cron loop checks it before every recovery pass.
+func (r *Repository) HasOfficeAdoption(ctx context.Context) (bool, error) {
+	var adopted bool
+	err := r.ro.QueryRowxContext(ctx, r.ro.Rebind(`
+		SELECT EXISTS (
+			SELECT 1 FROM workspaces
+			WHERE COALESCE(office_workflow_id, '') != ''
+		) OR EXISTS (
+			SELECT 1 FROM office_projects
+			WHERE COALESCE(workspace_id, '') != ''
+		)
+	`)).Scan(&adopted)
+	return adopted, err
+}
+
 // ListUnstartedTasks returns TODO tasks with an assignee, not archived,
 // within the lookback window, that have no active run (queued/claimed/finished).
 // CountTasksByWorkspace returns the number of non-archived, non-ephemeral tasks
@@ -822,11 +858,16 @@ func (r *Repository) CountTasksByWorkspace(ctx context.Context, workspaceID stri
 		SELECT COUNT(*) FROM tasks
 		WHERE workspace_id = ?
 		  AND archived_at IS NULL
-		  AND is_ephemeral = 0
+		  AND is_ephemeral = 0`+andNotAutomationOrigin+`
 	`), workspaceID).Scan(&count)
 	return count, err
 }
 
+// ListUnstartedTasks feeds scheduler recovery, which launches whatever it
+// finds. Automation runs are excluded: they are started once, explicitly, at
+// trigger time, and recovery picking one up would launch it a second time
+// through a lifecycle path that knows nothing about the automation's run row
+// or its concurrency cap.
 func (r *Repository) ListUnstartedTasks(
 	ctx context.Context, lookbackHours int, limit int,
 ) ([]*UnstartedTaskRow, error) {
@@ -837,8 +878,9 @@ func (r *Repository) ListUnstartedTasks(
 		       t.workspace_id
 		FROM tasks t
 		WHERE t.state = 'TODO'
+		  AND `+taskrepo.IsFromOfficePredicate("t")+`
 		  AND `+RunnerProjection("t")+` != ''
-		  AND t.archived_at IS NULL
+		  AND t.archived_at IS NULL`+andNotAutomationOriginT+`
 		  AND t.created_at >= datetime('now', '-' || ? || ' hours')
 		  AND NOT EXISTS (
 		      SELECT 1 FROM runs w

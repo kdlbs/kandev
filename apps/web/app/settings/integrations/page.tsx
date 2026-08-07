@@ -6,56 +6,50 @@ import {
   IconBrandGitlab,
   IconBrandAzure,
   IconBrandSentry,
-  IconBrandSlack,
   IconHexagon,
   IconTicket,
 } from "@tabler/icons-react";
 import { Card, CardContent } from "@kandev/ui/card";
 import { resolvePluginIcon } from "@/lib/plugins/icons";
 import { usePluginRegistry } from "@/lib/plugins/registry";
+import { useTranslation } from "react-i18next";
 
 const INTEGRATIONS = [
   {
     slug: "azure-devops",
     label: "Azure DevOps",
-    description: "Azure Boards work items and Azure Repos pull requests.",
+    descriptionKey: "settings:integrationDescriptionAzureDevops",
     Icon: IconBrandAzure,
   },
   {
     slug: "github",
     label: "GitHub",
-    description: "PR review queues, issue watchers, and OAuth credentials.",
+    descriptionKey: "settings:integrationDescriptionGithub",
     Icon: IconBrandGithub,
   },
   {
     slug: "gitlab",
     label: "GitLab",
-    description: "Merge request creation, discussion replies, and self-managed hosts.",
+    descriptionKey: "settings:integrationDescriptionGitlab",
     Icon: IconBrandGitlab,
   },
   {
     slug: "jira",
     label: "Jira",
-    description: "Atlassian Cloud credentials and JQL issue watchers.",
+    descriptionKey: "settings:integrationDescriptionJira",
     Icon: IconTicket,
   },
   {
     slug: "linear",
     label: "Linear",
-    description: "Personal API key and team defaults.",
+    descriptionKey: "settings:integrationDescriptionLinear",
     Icon: IconHexagon,
   },
   {
     slug: "sentry",
     label: "Sentry",
-    description: "Auth token, org/project defaults, and issue browsing.",
+    descriptionKey: "settings:integrationDescriptionSentry",
     Icon: IconBrandSentry,
-  },
-  {
-    slug: "slack",
-    label: "Slack",
-    description: "Browser-session credentials and !kandev triage agent.",
-    Icon: IconBrandSlack,
   },
 ];
 
@@ -65,11 +59,15 @@ type IntegrationsIndexPageProps = {
 
 export default function IntegrationsIndexPage({ workspaceId }: IntegrationsIndexPageProps = {}) {
   const registry = usePluginRegistry();
+  const { t } = useTranslation();
   const rootHref = workspaceId
     ? `/settings/workspace/${encodeURIComponent(workspaceId)}/integrations`
     : "/settings/integrations";
   const integrations = [
-    ...INTEGRATIONS,
+    ...INTEGRATIONS.map(({ descriptionKey, ...integration }) => ({
+      ...integration,
+      description: t(descriptionKey, { trigger: "!kandev" }),
+    })),
     ...registry.getIntegrationSettings().map(({ id, label, description, icon }) => ({
       slug: id,
       label,
@@ -81,10 +79,9 @@ export default function IntegrationsIndexPage({ workspaceId }: IntegrationsIndex
   return (
     <div className="space-y-6">
       <div>
-        <h2 className="text-2xl font-bold">Integrations</h2>
+        <h2 className="text-2xl font-bold">{t("common:integrations")}</h2>
         <p className="text-sm text-muted-foreground mt-1">
-          Connect Kandev to third-party services. Connection scope and available settings are shown
-          on each integration page.
+          {t("settings:connectKandevToThirdPartyServices")}
         </p>
       </div>
       <div className="grid auto-rows-fr gap-3 sm:grid-cols-2 lg:grid-cols-3">

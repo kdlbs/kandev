@@ -92,6 +92,90 @@ func TestStoreConfigReplayAndDelete(t *testing.T) {
 	}
 }
 
+func TestWorkspaceSettingsConditionalWriteRejectsStaleVersion(t *testing.T) {
+	db := newTestDB(t)
+	store, err := NewStore(db, db)
+	if err != nil {
+		t.Fatalf("new store: %v", err)
+	}
+	ctx := context.Background()
+	if err := store.UpsertConfig(ctx, &Config{
+		WorkspaceID: "ws-a", OrganizationURL: "https://dev.azure.com/acme", AuthMethod: AuthMethodPAT,
+	}); err != nil {
+		t.Fatalf("upsert config: %v", err)
+	}
+
+	snapshot, err := store.GetWorkspaceSettingsSnapshot(ctx, "ws-a")
+	if err != nil {
+		t.Fatalf("get workspace settings snapshot: %v", err)
+	}
+	if snapshot.JSON != "{}" || snapshot.Version != 0 {
+		t.Fatalf("initial snapshot = %+v, want empty settings at version 0", snapshot)
+	}
+	updated, err := store.PutWorkspaceSettingsJSONIfVersion(ctx, "ws-a", `{"workItemActions":[]}`, snapshot.Version)
+	if err != nil || !updated {
+		t.Fatalf("conditional write = %t, %v, want success", updated, err)
+	}
+	updated, err = store.PutWorkspaceSettingsJSONIfVersion(ctx, "ws-a", `{"pullRequestActions":[]}`, snapshot.Version)
+	if err != nil {
+		t.Fatalf("stale conditional write: %v", err)
+	}
+	if updated {
+		t.Fatal("stale conditional write unexpectedly succeeded")
+	}
+
+	current, err := store.GetWorkspaceSettingsSnapshot(ctx, "ws-a")
+	if err != nil {
+		t.Fatalf("get current workspace settings snapshot: %v", err)
+	}
+	if current.JSON != `{"workItemActions":[]}` || current.Version != 1 {
+		t.Fatalf("current snapshot = %+v, want successful write at version 1", current)
+	}
+}
+
+func TestWorkspaceSettingsVersionMigratesExistingConfigTable(t *testing.T) {
+	db := newTestDB(t)
+	_, err := db.Exec(`
+		CREATE TABLE azure_devops_configs (
+			workspace_id TEXT PRIMARY KEY,
+			organization_url TEXT NOT NULL,
+			default_project_id TEXT NOT NULL DEFAULT '',
+			default_project_name TEXT NOT NULL DEFAULT '',
+			auth_method TEXT NOT NULL DEFAULT 'pat',
+			last_checked_at DATETIME,
+			last_ok BOOLEAN NOT NULL DEFAULT 0,
+			last_error TEXT NOT NULL DEFAULT '',
+			saved_views TEXT NOT NULL DEFAULT '[]',
+			workspace_settings TEXT NOT NULL DEFAULT '{}',
+			created_at DATETIME NOT NULL,
+			updated_at DATETIME NOT NULL
+		)`)
+	if err != nil {
+		t.Fatalf("create previous config schema: %v", err)
+	}
+
+	store, err := NewStore(db, db)
+	if err != nil {
+		t.Fatalf("migrate config schema: %v", err)
+	}
+	ctx := context.Background()
+	if err := store.UpsertConfig(ctx, &Config{
+		WorkspaceID: "ws-a", OrganizationURL: "https://dev.azure.com/acme", AuthMethod: AuthMethodPAT,
+	}); err != nil {
+		t.Fatalf("upsert config: %v", err)
+	}
+	snapshot, err := store.GetWorkspaceSettingsSnapshot(ctx, "ws-a")
+	if err != nil {
+		t.Fatalf("get migrated workspace settings snapshot: %v", err)
+	}
+	if snapshot.Version != 0 {
+		t.Fatalf("migrated settings version = %d, want 0", snapshot.Version)
+	}
+	if _, err := NewStore(db, db); err != nil {
+		t.Fatalf("replay migrated config schema: %v", err)
+	}
+}
+
 func TestStoreTaskPRSchemaAndReplay(t *testing.T) {
 	db := newTestDB(t)
 	if _, err := NewStore(db, db); err != nil {
@@ -114,6 +198,48 @@ type taskPRStoreContract interface {
 	ListTaskPRsByTask(context.Context, string) ([]*TaskPR, error)
 	ListTaskPRsByWorkspace(context.Context, string) (map[string][]*TaskPR, error)
 	DeleteTaskPRsByTask(context.Context, string) error
+}
+
+type taskWorkItemStoreContract interface {
+	UpsertTaskWorkItem(context.Context, *TaskWorkItem) error
+	ListTaskWorkItemsByWorkspace(context.Context, string) (map[string][]*TaskWorkItem, error)
+	DeleteTaskWorkItemsByTask(context.Context, string) error
+	DeleteTaskWorkItemsByWorkspace(context.Context, string) error
+}
+
+func TestStoreDeleteTaskWorkItemsIsScoped(t *testing.T) {
+	store, err := NewStore(newTestDB(t), nil)
+	if err != nil {
+		t.Fatalf("new store: %v", err)
+	}
+	contract, ok := any(store).(taskWorkItemStoreContract)
+	if !ok {
+		t.Fatal("Store does not implement the task work item persistence contract")
+	}
+	ctx := context.Background()
+	for _, row := range []*TaskWorkItem{
+		{TaskID: "task-a", WorkspaceID: "workspace-a", ProjectID: "project-a", WorkItemID: 1},
+		{TaskID: "task-b", WorkspaceID: "workspace-a", ProjectID: "project-a", WorkItemID: 2},
+		{TaskID: "task-c", WorkspaceID: "workspace-b", ProjectID: "project-b", WorkItemID: 3},
+	} {
+		if err := contract.UpsertTaskWorkItem(ctx, row); err != nil {
+			t.Fatalf("upsert task work item: %v", err)
+		}
+	}
+	if err := contract.DeleteTaskWorkItemsByTask(ctx, "task-a"); err != nil {
+		t.Fatalf("delete task work items by task: %v", err)
+	}
+	byWorkspace, err := contract.ListTaskWorkItemsByWorkspace(ctx, "workspace-a")
+	if err != nil || len(byWorkspace["task-a"]) != 0 || len(byWorkspace["task-b"]) != 1 {
+		t.Fatalf("task-scoped deletion result = %+v, err = %v", byWorkspace, err)
+	}
+	if err := contract.DeleteTaskWorkItemsByWorkspace(ctx, "workspace-a"); err != nil {
+		t.Fatalf("delete task work items by workspace: %v", err)
+	}
+	byWorkspace, err = contract.ListTaskWorkItemsByWorkspace(ctx, "workspace-b")
+	if err != nil || len(byWorkspace["task-c"]) != 1 {
+		t.Fatalf("workspace-scoped deletion result = %+v, err = %v", byWorkspace, err)
+	}
 }
 
 func TestStoreDeleteTaskPRsByTaskIsScoped(t *testing.T) {

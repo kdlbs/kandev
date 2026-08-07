@@ -14,6 +14,11 @@ import (
 // SessionDataProvider is a function that retrieves initial data for a session subscription (e.g., git status)
 type SessionDataProvider func(ctx context.Context, sessionID string) ([]*ws.Message, error)
 
+// SessionGitDataProvider retrieves only the current git-status snapshot needed
+// by a detail surface. It is separate from SessionDataProvider so a refresh
+// does not replay unrelated session state, models, commands, or control data.
+type SessionGitDataProvider func(ctx context.Context, sessionID string) ([]*ws.Message, error)
+
 // Hub manages all WebSocket client connections
 type Hub struct {
 	// All registered clients
@@ -46,6 +51,7 @@ type Hub struct {
 
 	// Optional provider for session data on subscription (e.g., git status)
 	sessionDataProvider       SessionDataProvider
+	sessionGitDataProvider    SessionGitDataProvider
 	userSubscriptionListeners []func(userID string)
 
 	// sessionMode tracks per-session focus state and fires listeners when
@@ -257,11 +263,12 @@ func (h *Hub) broadcastMessage(msg *ws.Message) {
 
 	h.mu.RLock()
 	defer h.mu.RUnlock()
+	frame := newOutboundNotification(data, msg.Action)
 
 	// For now, broadcast to all clients
 	// TODO: Add topic-based routing for task-specific notifications
 	for client := range h.clients {
-		client.sendBytes(data)
+		client.sendNotificationFrame(frame)
 	}
 }
 
@@ -359,9 +366,10 @@ func (h *Hub) getSubscribersLocked(m map[string]map[*Client]bool, id string) []*
 
 // sendToClients delivers a pre-marshalled message to a list of clients.
 func (h *Hub) sendToClients(data []byte, clients []*Client, action string) int {
+	frame := newOutboundNotification(data, action)
 	queued := 0
 	for _, client := range clients {
-		if client.sendBytes(data) {
+		if client.sendNotificationFrame(frame) {
 			queued++
 			h.logger.Debug("Sent message to client",
 				zap.String("client_id", client.ID),
@@ -453,6 +461,32 @@ func (h *Hub) BroadcastToUser(userID string, msg *ws.Message) bool {
 	return h.sendToClients(data, clients, msg.Action) > 0
 }
 
+// SendToIdentity sends a notification to every connected client belonging to
+// the authenticated identity, without requiring a topic subscription.
+func (h *Hub) SendToIdentity(userID string, msg *ws.Message) int {
+	if userID == "" {
+		return 0
+	}
+	data, err := json.Marshal(msg)
+	if err != nil {
+		h.logger.Error("Failed to marshal identity message", zap.Error(err))
+		return 0
+	}
+	h.mu.RLock()
+	clients := make([]*Client, 0)
+	for client := range h.clients {
+		if client.identity.UserID == userID {
+			clients = append(clients, client)
+		}
+	}
+	h.mu.RUnlock()
+	h.logger.Debug("SendToIdentity",
+		zap.String("user_id", userID),
+		zap.String("action", msg.Action),
+		zap.Int("recipient_count", len(clients)))
+	return h.sendToClients(data, clients, msg.Action)
+}
+
 // SubscribeToTask subscribes a client to task notifications
 func (h *Hub) SubscribeToTask(client *Client, taskID string) {
 	h.mu.Lock()
@@ -469,9 +503,12 @@ func (h *Hub) SubscribeToTask(client *Client, taskID string) {
 		zap.String("task_id", taskID))
 }
 
-// SubscribeToSession subscribes a client to session notifications
-func (h *Hub) SubscribeToSession(client *Client, sessionID string) {
+// SubscribeToSession subscribes a client to session notifications and reports
+// whether this call created new membership. Callers use the transition to
+// decide whether an initial detail snapshot is needed.
+func (h *Hub) SubscribeToSession(client *Client, sessionID string) bool {
 	h.mu.Lock()
+	wasSubscribed := client.sessionSubscriptions[sessionID]
 	if _, ok := h.sessionSubscribers[sessionID]; !ok {
 		h.sessionSubscribers[sessionID] = make(map[*Client]bool)
 	}
@@ -484,6 +521,7 @@ func (h *Hub) SubscribeToSession(client *Client, sessionID string) {
 		zap.String("session_id", sessionID))
 
 	h.recomputeSessionMode(sessionID)
+	return !wasSubscribed
 }
 
 // UnsubscribeFromSession unsubscribes a client from session notifications
@@ -687,10 +725,26 @@ func (h *Hub) SetSessionDataProvider(provider SessionDataProvider) {
 	h.sessionDataProvider = provider
 }
 
+// SetSessionGitDataProvider sets the narrow provider used by explicit git
+// refresh requests. Subscription hydration continues to use the full provider.
+func (h *Hub) SetSessionGitDataProvider(provider SessionGitDataProvider) {
+	h.sessionGitDataProvider = provider
+}
+
 // GetSessionData retrieves session data (e.g., git status) if a provider is set
 func (h *Hub) GetSessionData(ctx context.Context, sessionID string) ([]*ws.Message, error) {
 	if h.sessionDataProvider == nil {
 		return nil, nil
 	}
 	return h.sessionDataProvider(ctx, sessionID)
+}
+
+// GetSessionGitData retrieves only git data for an explicit detail refresh.
+// Fall back to the full provider for compatibility with lightweight/test
+// configurations that have not installed the dedicated provider yet.
+func (h *Hub) GetSessionGitData(ctx context.Context, sessionID string) ([]*ws.Message, error) {
+	if h.sessionGitDataProvider != nil {
+		return h.sessionGitDataProvider(ctx, sessionID)
+	}
+	return h.GetSessionData(ctx, sessionID)
 }

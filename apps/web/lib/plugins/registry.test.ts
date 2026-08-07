@@ -1,6 +1,6 @@
 import { describe, it, expect, afterEach, vi } from "vitest";
 import { pluginRegistry } from "./registry";
-import type { RepositoryProviderRegistration, ReviewProviderRegistration } from "./types";
+import type { RepositoryProviderRegistration } from "./types";
 
 const TASK_SIDEBAR_SLOT = "task-sidebar";
 const TASK_CREATED_ACTION = "task.created";
@@ -8,8 +8,6 @@ const APP_STATUS_LEFT_SLOT = "app-status-bar-left";
 const PRIMARY_PLUGIN_ID = "plugin-a";
 const SECONDARY_PLUGIN_ID = "plugin-b";
 const SOURCE_CONTROL_PROVIDER_ID = "source-control";
-const CHANGE_URL = "https://example.test/changes/1",
-  REPOSITORY_ID = "repository-a";
 function cleanup(...pluginIds: string[]) {
   pluginIds.forEach((id) => pluginRegistry.unregisterPlugin(id));
 }
@@ -26,78 +24,6 @@ function repositoryProvider(
     inspectURL: async () => null,
     ...overrides,
   };
-}
-
-function reviewProvider(
-  id: string,
-  overrides: Partial<ReviewProviderRegistration> = {},
-): ReviewProviderRegistration {
-  return {
-    id,
-    label: id,
-    changeRequestNoun: "change request",
-    order: 0,
-    getSnapshot: () => [],
-    subscribe: () => () => {},
-    refresh: async () => {},
-    ReviewPanel: () => null,
-    ...overrides,
-  };
-}
-
-function providerSpecificStatusSnapshot() {
-  return [
-    {
-      providerId: SOURCE_CONTROL_PROVIDER_ID,
-      reviewKey: "change-1",
-      title: "Change 1",
-      url: CHANGE_URL,
-      repositoryId: REPOSITORY_ID,
-      state: "open",
-      taskStatus: {
-        number: 1,
-        state: "open" as const,
-        pipelineState: "failure" as const,
-        checks: [
-          {
-            id: "build",
-            label: "Build",
-            state: "failure" as const,
-            detail: "Failed in 2m",
-            url: "https://example.test/checks/build",
-            providerPayload: "discard",
-          },
-        ],
-        review: {
-          state: "approved" as const,
-          approved: 1,
-          required: 2,
-          requested: 1,
-          providerPayload: "discard",
-        },
-        unresolvedComments: 3,
-        providerPayload: "discard",
-      },
-    },
-  ];
-}
-
-function normalizedStatusSnapshot() {
-  const [{ taskStatus, ...review }] = providerSpecificStatusSnapshot();
-  const [{ providerPayload: _checkPayload, ...check }] = taskStatus.checks;
-  const { providerPayload: _reviewPayload, ...reviewSummary } = taskStatus.review;
-  const {
-    providerPayload: _statusPayload,
-    checks: _checks,
-    review: _review,
-    ...status
-  } = taskStatus;
-  return [
-    {
-      ...review,
-      taskStatus: { ...status, checks: [check], review: reviewSummary },
-    },
-  ];
 }
 
 describe("pluginRegistry", () => {
@@ -132,6 +58,18 @@ describe("pluginRegistry", () => {
       label: "A",
       path: "/plugin-a",
     });
+  });
+
+  it("reports the owning plugin for each nav item", () => {
+    // Nav item ids are plugin-local, so navigation needs the owner to build a
+    // unique identity (`lib/navigation/plugin-destinations.ts`).
+    pluginRegistry.forPlugin("plugin-a").registerNavItem({ id: "nav", label: "A", path: "/a" });
+    pluginRegistry.forPlugin("plugin-b").registerNavItem({ id: "nav", label: "B", path: "/b" });
+
+    expect(pluginRegistry.getNavRegistrations()).toEqual([
+      { pluginId: "plugin-a", id: "nav", label: "A", path: "/a" },
+      { pluginId: "plugin-b", id: "nav", label: "B", path: "/b" },
+    ]);
   });
 
   it("registers and returns a settings route", () => {
@@ -216,6 +154,34 @@ describe("pluginRegistry — lifecycle", () => {
     cleanup("plugin-a", "plugin-b");
   });
 
+  it("tracks host lifecycle snapshots without extending the plugin-facing registry", () => {
+    pluginRegistry.markPluginLoading("plugin-a", 3);
+
+    expect(pluginRegistry.getPluginLifecycle("plugin-a")).toEqual({
+      status: "loading",
+      generation: 3,
+    });
+    expect("markPluginLoading" in pluginRegistry.forPlugin("plugin-a")).toBe(false);
+
+    pluginRegistry.markPluginReady("plugin-a", 3);
+
+    expect(pluginRegistry.getPluginLifecycle("plugin-a")).toEqual({
+      status: "ready",
+      generation: 3,
+    });
+  });
+
+  it("does not let an older generation overwrite the current lifecycle", () => {
+    pluginRegistry.markPluginLoading("plugin-a", 4);
+    pluginRegistry.markPluginReady("plugin-a", 3);
+    pluginRegistry.markPluginFailed("plugin-a", 3);
+
+    expect(pluginRegistry.getPluginLifecycle("plugin-a")).toEqual({
+      status: "loading",
+      generation: 4,
+    });
+  });
+
   it("registers a WS handler and only returns it for the matching action", () => {
     const scoped = pluginRegistry.forPlugin("plugin-a");
     const handler = () => {};
@@ -275,6 +241,66 @@ describe("pluginRegistry — lifecycle", () => {
 
     unsubscribe();
     expect(notified).toBe(0);
+  });
+});
+
+describe("pluginRegistry — task panels and task menu actions", () => {
+  afterEach(() => {
+    cleanup("plugin-a", "plugin-b");
+  });
+
+  it("registers a task panel and returns it with its owning pluginId", () => {
+    const scoped = pluginRegistry.forPlugin("plugin-a");
+    function Notes() {
+      return null;
+    }
+
+    scoped.registerTaskPanel({ id: "notes", title: "Notes", icon: "file-text", Component: Notes });
+
+    expect(pluginRegistry.getTaskPanels()).toEqual([
+      { pluginId: "plugin-a", id: "notes", title: "Notes", icon: "file-text", Component: Notes },
+    ]);
+    expect(pluginRegistry.getTaskPanel("plugin-a", "notes")).toMatchObject({
+      pluginId: "plugin-a",
+      id: "notes",
+    });
+    expect(pluginRegistry.getTaskPanel("plugin-a", "missing")).toBeUndefined();
+  });
+
+  it("registers a task menu action and filters by group", () => {
+    const scoped = pluginRegistry.forPlugin("plugin-a");
+    const run = vi.fn();
+
+    scoped.registerTaskMenuAction({ id: "enhance", label: "Enhance", group: "edit", run });
+
+    expect(pluginRegistry.getTaskMenuActions("edit")).toEqual([
+      { pluginId: "plugin-a", id: "enhance", label: "Enhance", group: "edit", run },
+    ]);
+    expect(pluginRegistry.getTaskMenuActions()).toHaveLength(1);
+  });
+
+  it("bulk-revokes task panels and task menu actions on unregisterPlugin", () => {
+    const scopedA = pluginRegistry.forPlugin("plugin-a");
+    const scopedB = pluginRegistry.forPlugin("plugin-b");
+    function Notes() {
+      return null;
+    }
+
+    scopedA.registerTaskPanel({ id: "notes", title: "Notes", Component: Notes });
+    scopedA.registerTaskMenuAction({
+      id: "enhance",
+      label: "Enhance",
+      group: "edit",
+      run: () => {},
+    });
+    scopedB.registerTaskPanel({ id: "notes", title: "Notes", Component: Notes });
+
+    pluginRegistry.unregisterPlugin("plugin-a");
+
+    expect(pluginRegistry.getTaskPanels()).toEqual([
+      { pluginId: "plugin-b", id: "notes", title: "Notes", icon: undefined, Component: Notes },
+    ]);
+    expect(pluginRegistry.getTaskMenuActions()).toEqual([]);
   });
 });
 
@@ -536,103 +562,5 @@ describe("pluginRegistry — task action contracts", () => {
 
     pluginRegistry.unregisterPlugin(PRIMARY_PLUGIN_ID);
     expect(pluginRegistry.getTaskActions("link")).toEqual([]);
-  });
-});
-
-describe("pluginRegistry — review provider contracts", () => {
-  afterEach(cleanupProviderContracts);
-
-  it("normalizes review items, cleans subscriptions, and aborts refresh on owner removal", async () => {
-    const unsubscribe = vi.fn();
-    const refreshAborted = vi.fn();
-    let markRefreshStarted: () => void;
-    const refreshStarted = new Promise<void>((resolve) => {
-      markRefreshStarted = resolve;
-    });
-    const provider = reviewProvider(SOURCE_CONTROL_PROVIDER_ID, {
-      getSnapshot: () => [
-        {
-          providerId: SOURCE_CONTROL_PROVIDER_ID,
-          reviewKey: "change-1",
-          title: "Change 1",
-          url: CHANGE_URL,
-          repositoryId: REPOSITORY_ID,
-          state: "open",
-          statusBadge: { label: "Checks passing", tone: "success" },
-        },
-        {
-          providerId: "another-provider",
-          reviewKey: "spoofed-change",
-          title: "Spoofed",
-          url: "https://example.test/changes/2",
-          repositoryId: REPOSITORY_ID,
-          state: "open",
-        },
-      ],
-      subscribe: () => unsubscribe,
-      refresh: (_taskId, signal) =>
-        new Promise((_, reject) => {
-          markRefreshStarted();
-          signal.addEventListener(
-            "abort",
-            () => {
-              refreshAborted();
-              reject(new Error("review refresh aborted"));
-            },
-            { once: true },
-          );
-        }),
-    });
-    pluginRegistry.forPlugin(PRIMARY_PLUGIN_ID).registerReviewProvider(provider);
-    const registration = pluginRegistry.getReviewProvider(SOURCE_CONTROL_PROVIDER_ID);
-    if (!registration) throw new Error("review provider registration missing");
-
-    expect(registration.getSnapshot("task-a")).toEqual([
-      {
-        providerId: SOURCE_CONTROL_PROVIDER_ID,
-        reviewKey: "change-1",
-        title: "Change 1",
-        url: CHANGE_URL,
-        repositoryId: REPOSITORY_ID,
-        state: "open",
-        statusBadge: { label: "Checks passing", tone: "success" },
-      },
-    ]);
-    registration.subscribe("task-a", () => {});
-    const refresh = registration.refresh("task-a", new AbortController().signal);
-    await refreshStarted;
-
-    pluginRegistry.unregisterPlugin(PRIMARY_PLUGIN_ID);
-
-    await expect(refresh).rejects.toThrow("review refresh aborted");
-    expect(unsubscribe).toHaveBeenCalledOnce();
-    expect(refreshAborted).toHaveBeenCalledOnce();
-    expect(pluginRegistry.getReviewProvider(SOURCE_CONTROL_PROVIDER_ID)).toBeUndefined();
-  });
-
-  it("preserves normalized task status and strips provider-specific fields", () => {
-    pluginRegistry.forPlugin(PRIMARY_PLUGIN_ID).registerReviewProvider(
-      reviewProvider(SOURCE_CONTROL_PROVIDER_ID, {
-        getSnapshot: providerSpecificStatusSnapshot,
-      }),
-    );
-
-    expect(
-      pluginRegistry.getReviewProvider(SOURCE_CONTROL_PROVIDER_ID)?.getSnapshot("task-a"),
-    ).toEqual(normalizedStatusSnapshot());
-  });
-
-  it("rejects a review provider claimed by another active plugin", () => {
-    pluginRegistry
-      .forPlugin(PRIMARY_PLUGIN_ID)
-      .registerReviewProvider(reviewProvider(SOURCE_CONTROL_PROVIDER_ID));
-
-    expect(() =>
-      pluginRegistry
-        .forPlugin(SECONDARY_PLUGIN_ID)
-        .registerReviewProvider(reviewProvider(SOURCE_CONTROL_PROVIDER_ID)),
-    ).toThrow(
-      `provider "${SOURCE_CONTROL_PROVIDER_ID}" is already owned by "${PRIMARY_PLUGIN_ID}"`,
-    );
   });
 });

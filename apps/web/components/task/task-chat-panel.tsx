@@ -35,7 +35,9 @@ import { useSessionReadTracking } from "./chat/use-session-read-tracking";
 import { useDrainOlderMessages } from "@/components/task/chat/use-drain-older-messages";
 import { useAppStore } from "@/components/state-provider";
 import type { Message } from "@/lib/types/http";
+import { getSessionWorkspacePath } from "@/lib/session-workspace-path";
 import { routePanelMouseDown } from "./chat/route-panel-mouse-down";
+import { useTranslation } from "react-i18next";
 
 /**
  * Cap on how many extra pages the last-prompt background lookup will fetch
@@ -264,6 +266,7 @@ export const TaskChatPanel = memo(function TaskChatPanel({
   // The anchored bar is a desktop-only, opt-in affordance; mobile always
   // falls back to the scroll button.
   const showAnchoredBar = !isMobile && showAnchoredPromptBar;
+  const [anchoredBarHeight, setAnchoredBarHeight] = useState(0);
   const { anchoredBarVisible, scrollButtonEligible, scrollDirection } =
     resolveLastPromptControls(lastPromptEdge);
   const showScrollButton =
@@ -362,13 +365,14 @@ export const TaskChatPanel = memo(function TaskChatPanel({
           messagesLoading={messagesLoading}
           isWorking={isWorking}
           sessionState={session?.state}
-          worktreePath={session?.worktree_path}
+          worktreePath={getSessionWorkspacePath(session)}
           onOpenFile={onOpenFile}
           dividerBeforeItemKey={dividerBeforeItemKey}
           lastPromptMessageId={lastPromptMessageId}
           onLastPromptEdgeChange={setLastPromptEdge}
           firstMessageId={firstMessageId}
           onFirstMessageHiddenChange={setIsFirstMessageHidden}
+          anchoredBarHeight={showAnchoredBar && lastPromptMessage ? anchoredBarHeight : 0}
           stickyPromptBar={
             showAnchoredBar && lastPromptMessage ? (
               <AnchoredLastPromptBar
@@ -376,6 +380,7 @@ export const TaskChatPanel = memo(function TaskChatPanel({
                 isVisible={anchoredBarVisible}
                 onScrollUp={scrollToLastPrompt}
                 showScrollToLastPrompt={showScrollToLastPrompt}
+                onHeightChange={setAnchoredBarHeight}
               />
             ) : undefined
           }
@@ -494,10 +499,11 @@ function ChatFooter({
   showScrollToStart,
   onScrollToStart,
 }: ChatFooterProps) {
+  const { t } = useTranslation();
   if (isArchived) {
     return (
       <div className="bg-muted/50 flex-shrink-0 px-4 py-3 text-center text-sm text-muted-foreground border-t">
-        This task is archived and read-only.
+        {t("task:thisTaskIsArchivedAndRead")}
       </div>
     );
   }

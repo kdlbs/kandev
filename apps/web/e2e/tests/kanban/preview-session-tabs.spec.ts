@@ -1,6 +1,6 @@
 import { test, expect } from "../../fixtures/test-base";
 import { KanbanPage } from "../../pages/kanban-page";
-import { SessionPage } from "../../pages/session-page";
+import { waitForSessionDone } from "../../helpers/session";
 
 const DONE_STATES = ["COMPLETED", "WAITING_FOR_INPUT"];
 
@@ -50,42 +50,43 @@ test.describe("Preview session tabs", () => {
     const { sessions: afterFirst } = await apiClient.listTaskSessions(task.id);
     const primaryId = afterFirst[0].id;
 
-    // 3. Navigate to the full task view and launch a second session via the new-session dialog.
-    // This mirrors the approach in preview-primary-session.spec.ts since there is no
-    // dedicated API helper to start a second session on an existing task.
-    const kanban = new KanbanPage(testPage);
-    await kanban.goto();
+    // 3. Launch a second session through the same WS API path the UI uses.
+    // This spec is about preview tabs, not dialog mechanics, so it avoids the
+    // separate new-session-dialog UI surface which has its own dedicated tests.
+    const launched = await apiClient.launchSession(
+      {
+        task_id: task.id,
+        agent_profile_id: seedData.agentProfileId,
+        executor_profile_id: seedData.worktreeExecutorProfileId,
+        workflow_step_id: seedData.startStepId,
+        prompt: 'e2e:message("secondary-session-response")',
+      },
+      60_000,
+    );
 
-    const card = kanban.taskCardByTitle("Preview Tabs Task");
-    await expect(card).toBeVisible({ timeout: 10_000 });
-    await card.click();
-    await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
+    // 4. Wait for the launched second session to finish.
+    await waitForSessionDone(
+      apiClient,
+      task.id,
+      launched.session_id,
+      "Waiting for second session to finish",
+      60_000,
+    );
 
-    const session = new SessionPage(testPage);
-    await session.waitForLoad();
-    await expect(session.chat.getByText("simple mock response", { exact: false })).toBeVisible({
-      timeout: 15_000,
-    });
-
-    await session.addPanelButton().click();
-    await testPage.getByTestId("new-session-button").click();
-    const dialog = testPage.getByRole("dialog");
-    await expect(dialog).toBeVisible({ timeout: 5_000 });
-    // Dialog prompts use the script command form; the agent echoes the argument.
-    await dialog.locator("textarea").fill('e2e:message("secondary-session-response")');
-    await dialog.getByRole("button").filter({ hasText: /Start/ }).click();
-    await expect(dialog).not.toBeVisible({ timeout: 10_000 });
-
-    // 4. Wait for the second session to finish (two sessions in a done state).
+    // Keep the original preview semantics under test: the first session should
+    // remain the task's primary/default tab even after another session exists.
+    // The direct WS launch path can promote the new session, so restore the
+    // original primary explicitly before opening the kanban preview.
+    await apiClient.setPrimarySession(primaryId);
     await expect
       .poll(
         async () => {
-          const { sessions } = await apiClient.listTaskSessions(task.id);
-          return sessions.filter((s) => DONE_STATES.includes(s.state)).length;
+          const taskData = await apiClient.getTask(task.id);
+          return taskData.primary_session_id ?? null;
         },
-        { timeout: 60_000, message: "Waiting for second session to finish" },
+        { timeout: 15_000, message: "Waiting for primary session to be restored" },
       )
-      .toBe(2);
+      .toBe(primaryId);
 
     const { sessions: afterSecond } = await apiClient.listTaskSessions(task.id);
     const secondaryId = afterSecond.find((s) => s.id !== primaryId)?.id;
@@ -95,7 +96,9 @@ test.describe("Preview session tabs", () => {
     // new-session dialog does not steal the primary flag (verified by
     // preview-primary-session.spec.ts).
 
-    // 5. Enable preview-on-click and return to the kanban board.
+    const kanban = new KanbanPage(testPage);
+
+    // 5. Enable preview-on-click and open the kanban board.
     await apiClient.saveUserSettings({ enable_preview_on_click: true });
     await kanban.goto();
 

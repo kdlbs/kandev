@@ -3,6 +3,7 @@
 import { IconAlertCircle, IconLoader2 } from "@tabler/icons-react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import type { TaskRunStatus } from "@/app/office/tasks/[id]/types";
+import { useTranslation } from "react-i18next";
 
 type UserCommentRunBadgeProps = {
   status: TaskRunStatus;
@@ -26,6 +27,7 @@ const BASE_PILL = "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-
  * `data-status` attribute so e2e tests can pin the rendered state.
  */
 export function UserCommentRunBadge({ status, errorMessage }: UserCommentRunBadgeProps) {
+  const { t } = useTranslation();
   if (status === "finished") return null;
 
   if (status === "queued") {
@@ -39,7 +41,7 @@ export function UserCommentRunBadge({ status, errorMessage }: UserCommentRunBadg
           className="inline-block h-1.5 w-1.5 rounded-full bg-muted-foreground/60"
           aria-hidden
         />
-        Queued
+        {t("task:queued")}
       </span>
     );
   }
@@ -52,7 +54,7 @@ export function UserCommentRunBadge({ status, errorMessage }: UserCommentRunBadg
         data-status={status}
       >
         <IconLoader2 className="h-3 w-3 animate-spin" aria-hidden />
-        Working…
+        {t("task:working4")}
       </span>
     );
   }
@@ -64,7 +66,7 @@ export function UserCommentRunBadge({ status, errorMessage }: UserCommentRunBadg
         data-testid="user-comment-run-badge"
         data-status={status}
       >
-        Cancelled
+        {t("task:cancelled")}
       </span>
     );
   }
@@ -77,7 +79,7 @@ export function UserCommentRunBadge({ status, errorMessage }: UserCommentRunBadg
       data-status={status}
     >
       <IconAlertCircle className="h-3 w-3" aria-hidden />
-      Failed
+      {t("task:failed")}
     </span>
   );
 

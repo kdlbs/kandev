@@ -17,12 +17,16 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/kandev/kandev/internal/gitconfigenv"
+	"github.com/kandev/kandev/internal/githubauth"
+	mcpproviders "github.com/kandev/kandev/internal/mcp/providers"
+	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/pkg/agent"
 )
 
@@ -223,6 +227,9 @@ type InstanceConfig struct {
 	// "task" (default), "config", and "office" select distinct tool surfaces.
 	McpMode string
 
+	// McpProviders limits task-mode review automation tools to attached providers.
+	McpProviders []string
+
 	// AuthToken is a shared secret for authenticating requests.
 	// Inherited from the parent Config at instance creation time.
 	AuthToken string
@@ -242,6 +249,10 @@ type InstanceConfig struct {
 	// WorkspaceTracker's baseBranch. Empty falls back to the hardcoded
 	// origin/main → master priority list inside workspace_git_status.go.
 	BaseBranches map[string]string
+
+	// RemoteContributions maps workspace repository subpaths to the
+	// server-authored contribution binding used for source-routed writes.
+	RemoteContributions map[string]models.RemoteContribution
 
 	// WorkspaceSourceRoots are canonical durable source roots permitted for
 	// linked workspace file operations.
@@ -420,6 +431,9 @@ func applyOverrides(cfg *InstanceConfig, overrides *InstanceOverrides) {
 	if overrides.McpMode != "" {
 		cfg.McpMode = overrides.McpMode
 	}
+	if overrides.McpProviders != nil {
+		cfg.McpProviders = mcpproviders.Normalize(overrides.McpProviders)
+	}
 	if overrides.RequiresProcessKill {
 		cfg.RequiresProcessKill = true
 	}
@@ -428,6 +442,9 @@ func applyOverrides(cfg *InstanceConfig, overrides *InstanceOverrides) {
 	}
 	if len(overrides.BaseBranches) > 0 {
 		cfg.BaseBranches = overrides.BaseBranches
+	}
+	if len(overrides.RemoteContributions) > 0 {
+		cfg.RemoteContributions = cloneRemoteContributions(overrides.RemoteContributions)
 	}
 	if overrides.WorkspaceSourceRoots != nil {
 		cfg.WorkspaceSourceRoots = append([]string(nil), overrides.WorkspaceSourceRoots...)
@@ -469,10 +486,23 @@ type InstanceOverrides struct {
 	AssumeMcpSse           bool
 	AssumeMcpHttp          bool
 	McpMode                string
+	McpProviders           []string
 	RequiresProcessKill    bool
 	StripEnv               []string
 	BaseBranches           map[string]string
+	RemoteContributions    map[string]models.RemoteContribution
 	WorkspaceSourceRoots   []string
+}
+
+func cloneRemoteContributions(values map[string]models.RemoteContribution) map[string]models.RemoteContribution {
+	if len(values) == 0 {
+		return nil
+	}
+	cloned := make(map[string]models.RemoteContribution, len(values))
+	for key, value := range values {
+		cloned[key] = value
+	}
+	return cloned
 }
 
 // ParseCommand splits a command string into arguments
@@ -539,8 +569,9 @@ func CollectAgentEnvWithError(additional map[string]string) ([]string, error) {
 	if err != nil {
 		return nil, fmt.Errorf("compose indexed Git config: %w", err)
 	}
-	if envMap["KANDEV_GITHUB_CREDENTIAL_BROKER_URL"] != "" {
-		prependPathEntry(envMap, envMap["KANDEV_GITHUB_CLI_SHIM_DIR"])
+	if envMap[githubauth.CredentialBrokerURLEnv] != "" {
+		prependPathEntry(envMap, envMap[githubauth.CredentialCLIShimDirEnv])
+		configureGitHubCLIStartupEnv(envMap)
 	}
 
 	// Convert back to slice
@@ -549,6 +580,83 @@ func CollectAgentEnvWithError(additional map[string]string) ([]string, error) {
 		result = append(result, k+"="+v)
 	}
 	return result, nil
+}
+
+func configureGitHubCLIStartupEnv(env map[string]string) {
+	if runtime.GOOS == "windows" {
+		return
+	}
+	startupEnv := env[githubauth.CredentialCLIBashEnvEnv]
+	if startupEnv == "" {
+		return
+	}
+	parentEnv := env["BASH_ENV"]
+	resolvedParentEnv := expandBashEnvParameters(parentEnv, env)
+	if resolvedParentEnv != "" && filepath.Clean(resolvedParentEnv) != filepath.Clean(startupEnv) {
+		env[githubauth.CredentialParentBashEnv] = resolvedParentEnv
+	} else {
+		delete(env, githubauth.CredentialParentBashEnv)
+	}
+	env["BASH_ENV"] = startupEnv
+}
+
+func expandBashEnvParameters(value string, env map[string]string) string {
+	var expanded strings.Builder
+	for index := 0; index < len(value); {
+		dollarOffset := strings.IndexByte(value[index:], '$')
+		if dollarOffset < 0 {
+			expanded.WriteString(value[index:])
+			break
+		}
+		dollar := index + dollarOffset
+		expanded.WriteString(value[index:dollar])
+		name, end, ok := bashEnvParameterAt(value, dollar)
+		if !ok {
+			expanded.WriteByte('$')
+			index = dollar + 1
+			continue
+		}
+		expanded.WriteString(env[name])
+		index = end
+	}
+	return expanded.String()
+}
+
+func bashEnvParameterAt(value string, dollar int) (string, int, bool) {
+	if dollar+1 >= len(value) {
+		return "", 0, false
+	}
+	if value[dollar+1] == '{' {
+		closeOffset := strings.IndexByte(value[dollar+2:], '}')
+		if closeOffset < 0 {
+			return "", 0, false
+		}
+		end := dollar + 2 + closeOffset
+		name := value[dollar+2 : end]
+		return name, end + 1, isBashEnvName(name)
+	}
+	end := dollar + 1
+	for end < len(value) && isBashEnvNameByte(value[end], end == dollar+1) {
+		end++
+	}
+	if end == dollar+1 {
+		return "", 0, false
+	}
+	return value[dollar+1 : end], end, true
+}
+
+func isBashEnvName(name string) bool {
+	for index := range len(name) {
+		if !isBashEnvNameByte(name[index], index == 0) {
+			return false
+		}
+	}
+	return name != ""
+}
+
+func isBashEnvNameByte(value byte, first bool) bool {
+	letter := value >= 'a' && value <= 'z' || value >= 'A' && value <= 'Z'
+	return letter || value == '_' || !first && value >= '0' && value <= '9'
 }
 
 func prependPathEntry(env map[string]string, entry string) {

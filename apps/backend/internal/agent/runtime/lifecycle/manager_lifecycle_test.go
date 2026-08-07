@@ -2,10 +2,14 @@ package lifecycle
 
 import (
 	"context"
+	"encoding/json"
+	"net"
+	"net/http"
 	"testing"
 	"time"
 
 	"github.com/kandev/kandev/internal/agent/executor"
+	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agentctl/server/process"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
@@ -276,5 +280,67 @@ func TestManager_StartStop(t *testing.T) {
 	err = mgr.Stop()
 	if err != nil {
 		t.Fatalf("unexpected error stopping manager: %v", err)
+	}
+}
+
+// TestManager_StartSeedsRecoveredExecution verifies the recovery path itself,
+// not only the readiness helper. A recovered agentctl never passes through
+// waitForAgentctlReady, so startup must seed its base-branch map before stream
+// reconnection begins.
+func TestManager_StartSeedsRecoveredExecution(t *testing.T) {
+	log := newTestRegistryLogger()
+	branchesCh := make(chan map[string]string, 1)
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	server := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/workspace/base-branches" {
+			http.NotFound(w, r)
+			return
+		}
+		var body struct {
+			BaseBranches map[string]string `json:"base_branches"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		branchesCh <- body.BaseBranches
+		w.WriteHeader(http.StatusOK)
+	})}
+	go func() { _ = server.Serve(listener) }()
+	t.Cleanup(func() {
+		_ = server.Close()
+	})
+
+	port := listener.Addr().(*net.TCPAddr).Port
+	client := agentctl.NewClient("127.0.0.1", port, log)
+	execRegistry := NewExecutorRegistry(log)
+	execRegistry.Register(&MockExecutor{
+		name: executor.NameStandalone,
+		recoverInstances: []*ExecutorInstance{{
+			InstanceID: "exec-recovered",
+			TaskID:     "task-recovered",
+			Client:     client,
+		}},
+	})
+	mgr := NewManager(newTestRegistry(), &MockEventBus{}, execRegistry, &MockCredentialsManager{}, &MockProfileResolver{}, nil, ExecutorFallbackWarn, "", log)
+	t.Cleanup(func() { _ = mgr.Stop() })
+	mgr.SetBaseBranchProvider(func(context.Context, string) (map[string]string, error) {
+		return map[string]string{"frontend": "develop"}, nil
+	})
+
+	if err := mgr.Start(context.Background()); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	select {
+	case got := <-branchesCh:
+		if got["frontend"] != "develop" {
+			t.Fatalf("recovered base branch = %q, want develop; map=%v", got["frontend"], got)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for recovered execution base-branch seed")
 	}
 }

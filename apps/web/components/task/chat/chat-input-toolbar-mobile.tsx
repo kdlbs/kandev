@@ -21,6 +21,7 @@ import {
 import type { ContextFile } from "@/lib/state/context-files-store";
 import type { SHORTCUTS } from "@/lib/keyboard/constants";
 import type { MCPAttachmentHistory } from "@/lib/state/slices/session-runtime/types";
+import { t } from "@/lib/i18n";
 
 type MobileToolbarProps = {
   planModeEnabled: boolean;
@@ -66,7 +67,7 @@ function mobileContextButton(contextCount: number) {
       size="sm"
       className="h-7 gap-1.5 px-2 cursor-pointer hover:bg-muted/40 relative"
       data-testid="chat-context-button"
-      aria-label="Session context"
+      aria-label={t("task:sessionContext")}
     >
       <IconAt className="h-4 w-4" />
       {contextCount > 0 && (
@@ -188,6 +189,7 @@ export function MobileChatInputToolbar(props: MobileToolbarProps) {
         <SubmitButton
           isAgentBusy={props.isAgentBusy}
           canCancelAgent={props.canCancelAgent}
+          sessionId={props.sessionId}
           hasContent={props.hasContent}
           isDisabled={props.isDisabled}
           submitDisabledReason={props.submitDisabledReason}

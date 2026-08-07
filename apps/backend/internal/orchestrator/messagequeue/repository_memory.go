@@ -2,6 +2,7 @@ package messagequeue
 
 import (
 	"context"
+	"reflect"
 	"sort"
 	"sync"
 	"time"
@@ -315,6 +316,211 @@ func (r *memoryRepository) TakeByID(_ context.Context, sessionID, entryID string
 	return nil, nil
 }
 
+func (r *memoryRepository) ClaimSendNow(_ context.Context, sessionID string, expected []QueuedMessage) (*SendNowClaim, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if len(expected) == 0 {
+		return nil, ErrSendNowEmpty
+	}
+
+	requested, err := requestedSendNowIDs(expected)
+	if err != nil {
+		return nil, err
+	}
+
+	list := r.entries[sessionID]
+	selected := make([]*QueuedMessage, 0, len(expected))
+	for _, entry := range list {
+		if _, ok := requested[entry.ID]; !ok {
+			continue
+		}
+		if entry.IsReservedInFlight() {
+			return nil, ErrSendNowReservationConflict
+		}
+		selected = append(selected, entry)
+	}
+	if len(selected) != len(expected) {
+		return nil, ErrSendNowClaimChanged
+	}
+	if err := validateSendNowSnapshot(selected, expected); err != nil {
+		return nil, ErrSendNowClaimChanged
+	}
+
+	sources := cloneSendNowSources(selected)
+	envelope, err := BuildSendNowEnvelope(sources)
+	if err != nil {
+		return nil, err
+	}
+	generations := make(map[string]int64)
+	for _, source := range sources {
+		if source.TaskID != "" {
+			generations[source.TaskID] = r.generation[source.TaskID]
+		}
+	}
+
+	remaining := make([]*QueuedMessage, 0, len(list))
+	for _, entry := range list {
+		if _, ok := requested[entry.ID]; !ok {
+			remaining = append(remaining, entry)
+			continue
+		}
+		if entry.IsDurableLifecycle() {
+			entry.Metadata = markReservedMetadata(entry.Metadata)
+			remaining = append(remaining, entry)
+		}
+	}
+	if len(remaining) == 0 {
+		delete(r.entries, sessionID)
+		delete(r.nextPosition, sessionID)
+	} else {
+		r.entries[sessionID] = remaining
+	}
+	return &SendNowClaim{Sources: sources, Dispatch: *envelope, SourceGenerations: generations}, nil
+}
+
+func (r *memoryRepository) RestoreSendNowClaim(_ context.Context, claim *SendNowClaim) error {
+	if claim == nil || len(claim.Sources) == 0 {
+		return ErrSendNowEmpty
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	sessionID := claim.Sources[0].SessionID
+	list := r.entries[sessionID]
+	existing := make(map[string]*QueuedMessage, len(list))
+	for _, entry := range list {
+		existing[entry.ID] = entry
+	}
+	if err := validateMemorySendNowRestore(claim, sessionID, existing, r.generation); err != nil {
+		return err
+	}
+
+	for _, source := range claim.Sources {
+		if sendNowSourceGenerationChanged(claim, source, r.generation[source.TaskID]) {
+			continue
+		}
+		if existing[source.ID] != nil {
+			if source.IsDurableLifecycle() {
+				existing[source.ID].Metadata = restoreSendNowMetadata(existing[source.ID].Metadata, source.Metadata)
+			}
+			continue
+		}
+		clone := cloneQueuedMessage(&source)
+		clone.Metadata = clearReservedMetadata(clone.Metadata)
+		list = append(list, clone)
+		if clone.Position > r.nextPosition[sessionID] {
+			r.nextPosition[sessionID] = clone.Position
+		}
+	}
+	sort.Slice(list, func(i, j int) bool { return list[i].Position < list[j].Position })
+	r.entries[sessionID] = list
+	return nil
+}
+
+func validateMemorySendNowRestore(
+	claim *SendNowClaim,
+	sessionID string,
+	existing map[string]*QueuedMessage,
+	generations map[string]int64,
+) error {
+	for _, source := range claim.Sources {
+		if source.SessionID != sessionID {
+			return ErrSendNowClaimChanged
+		}
+		if sendNowSourceGenerationChanged(claim, source, generations[source.TaskID]) {
+			continue
+		}
+		entry := existing[source.ID]
+		if source.IsDurableLifecycle() {
+			if entry == nil || (!entry.IsReservedInFlight() && !sameQueuedMessageContent(entry, &source)) {
+				return ErrSendNowClaimChanged
+			}
+			continue
+		}
+		if entry != nil && entry.IsReservedInFlight() {
+			return ErrSendNowClaimChanged
+		}
+	}
+	return nil
+}
+
+func (r *memoryRepository) AcknowledgeSendNowClaim(_ context.Context, claim *SendNowClaim) error {
+	if claim == nil || len(claim.Sources) == 0 {
+		return ErrSendNowEmpty
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	sessionID := claim.Sources[0].SessionID
+	requested := make(map[string]struct{})
+	for _, source := range claim.Sources {
+		if source.SessionID != sessionID {
+			return ErrSendNowClaimChanged
+		}
+		if !source.IsDurableLifecycle() {
+			continue
+		}
+		requested[source.ID] = struct{}{}
+	}
+	for _, entry := range r.entries[sessionID] {
+		if _, ok := requested[entry.ID]; ok && !entry.IsReservedInFlight() {
+			return ErrSendNowClaimChanged
+		}
+	}
+	if len(requested) == 0 {
+		return nil
+	}
+	list := r.entries[sessionID]
+	remaining := list[:0]
+	for _, entry := range list {
+		if _, ok := requested[entry.ID]; !ok {
+			remaining = append(remaining, entry)
+		}
+	}
+	if len(remaining) == 0 {
+		delete(r.entries, sessionID)
+		delete(r.nextPosition, sessionID)
+	} else {
+		r.entries[sessionID] = remaining
+	}
+	return nil
+}
+
+func cloneSendNowSources(entries []*QueuedMessage) []QueuedMessage {
+	sources := make([]QueuedMessage, 0, len(entries))
+	for _, entry := range entries {
+		clone := cloneQueuedMessage(entry)
+		clone.Metadata = clearReservedMetadata(clone.Metadata)
+		if entry.IsDurableLifecycle() {
+			clone.reservedLifecycleDelivery = true
+		}
+		sources = append(sources, *clone)
+	}
+	return sources
+}
+
+func cloneQueuedMessage(entry *QueuedMessage) *QueuedMessage {
+	if entry == nil {
+		return nil
+	}
+	clone := *entry
+	clone.Attachments = append([]MessageAttachment(nil), entry.Attachments...)
+	clone.Metadata = copyMessageMetadata(entry.Metadata, 0)
+	return &clone
+}
+
+func sameQueuedMessageContent(left, right *QueuedMessage) bool {
+	if left == nil || right == nil {
+		return false
+	}
+	leftCopy := cloneQueuedMessage(left)
+	rightCopy := cloneQueuedMessage(right)
+	leftCopy.Metadata = clearReservedMetadata(leftCopy.Metadata)
+	rightCopy.Metadata = clearReservedMetadata(rightCopy.Metadata)
+	leftCopy.reservedLifecycleDelivery = false
+	rightCopy.reservedLifecycleDelivery = false
+	return reflect.DeepEqual(leftCopy, rightCopy)
+}
+
 func (r *memoryRepository) UpdateContent(ctx context.Context, sessionID, entryID, content string, attachments []MessageAttachment, queuedBy string) error {
 	return r.UpdateContentAndMetadata(ctx, sessionID, entryID, content, attachments, nil, queuedBy)
 }
@@ -347,6 +553,69 @@ func (r *memoryRepository) UpdateContentAndMetadata(_ context.Context, sessionID
 	return ErrEntryNotFound
 }
 
+// MergeIntoAbove folds the source entry into the entry directly above it within
+// the same session, mirroring the sqlite repository's semantics. The target is
+// the entry with the greatest position strictly below the source's — the slice
+// may not be position-sorted after ReplaceSession. See
+// Repository.MergeIntoAbove for the merge rules and error mapping.
+func (r *memoryRepository) MergeIntoAbove(_ context.Context, sessionID, sourceID, queuedBy string) (*QueuedMessage, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	list, ok := r.entries[sessionID]
+	if !ok {
+		return nil, ErrEntryNotFound
+	}
+	sourceIndex := -1
+	for i, m := range list {
+		if m.ID == sourceID {
+			sourceIndex = i
+			break
+		}
+	}
+	if sourceIndex < 0 {
+		return nil, ErrEntryNotFound
+	}
+	source := list[sourceIndex]
+
+	var target *QueuedMessage
+	for _, m := range list {
+		if m.Position >= source.Position {
+			continue
+		}
+		if target == nil || m.Position > target.Position {
+			target = m
+		}
+	}
+	if target == nil {
+		return nil, ErrNoMergeTarget
+	}
+	if !mergeAllowed(source, target, queuedBy) {
+		return nil, ErrNoMergeTarget
+	}
+
+	// Compute every merged value before mutating the target: mergeEntryMetadata
+	// can reject an over-cap reference union, and the target must stay untouched
+	// on that path so the failed merge is atomic (mirrors the sqlite
+	// repository's build-then-apply ordering).
+	content := joinMergeContent(target.Content, source.Content)
+	attachments := append(append([]MessageAttachment{}, target.Attachments...), source.Attachments...)
+	metadata, err := mergeEntryMetadata(target.Metadata, source.Metadata)
+	if err != nil {
+		return nil, err
+	}
+	target.Content = content
+	target.Attachments = attachments
+	target.Metadata = metadata
+	r.entries[sessionID] = append(list[:sourceIndex], list[sourceIndex+1:]...)
+	if len(r.entries[sessionID]) == 0 {
+		delete(r.entries, sessionID)
+		delete(r.nextPosition, sessionID)
+	}
+
+	merged := *target
+	return &merged, nil
+}
+
 func (r *memoryRepository) DeleteByID(_ context.Context, sessionID, entryID string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -358,7 +627,7 @@ func (r *memoryRepository) DeleteByID(_ context.Context, sessionID, entryID stri
 		if m.ID != entryID {
 			continue
 		}
-		if IsReservedQueuedBy(m.QueuedBy) {
+		if m.IsReservedInFlight() {
 			return ErrEntryNotFound
 		}
 		r.entries[sessionID] = append(list[:i], list[i+1:]...)
@@ -378,7 +647,7 @@ func (r *memoryRepository) DeleteAllBySession(_ context.Context, sessionID strin
 	kept := list[:0]
 	removed := 0
 	for _, msg := range list {
-		if IsReservedQueuedBy(msg.QueuedBy) {
+		if msg.IsReservedInFlight() {
 			kept = append(kept, msg)
 			continue
 		}

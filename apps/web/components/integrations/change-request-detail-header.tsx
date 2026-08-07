@@ -3,6 +3,7 @@ import { Badge } from "@kandev/ui/badge";
 import { Button } from "@kandev/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { formatTimeAgo, getTimeAgoColor } from "@/components/github/pr-shared";
+import { t } from "@/lib/i18n";
 import type {
   ChangeRequestDetailAction,
   ChangeRequestDetailModel,
@@ -83,13 +84,13 @@ function HeaderDates({ detail }: { detail: ChangeRequestDetailModel }) {
   return (
     <div className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
       <span className="flex items-center gap-0.5">
-        by <ChangeRequestPersonLink person={detail.author} />
+        {t("integrations:by")} <ChangeRequestPersonLink person={detail.author} />
       </span>
       {detail.createdAt ? (
         <>
           <span>&middot;</span>
           <span className={getTimeAgoColor(detail.createdAt)}>
-            opened {formatTimeAgo(detail.createdAt)}
+            {t("integrations:openedRelative", { relative: formatTimeAgo(detail.createdAt) })}
           </span>
         </>
       ) : null}
@@ -98,14 +99,16 @@ function HeaderDates({ detail }: { detail: ChangeRequestDetailModel }) {
           <span>&middot;</span>
           <span className="flex items-center gap-0.5">
             <IconGitMerge className="h-3 w-3 text-purple-500" />
-            merged {formatTimeAgo(detail.mergedAt)}
+            {t("integrations:mergedRelative", { relative: formatTimeAgo(detail.mergedAt) })}
           </span>
         </>
       ) : null}
       {detail.closedAt && !detail.mergedAt ? (
         <>
           <span>&middot;</span>
-          <span>closed {formatTimeAgo(detail.closedAt)}</span>
+          <span>
+            {t("integrations:closedRelative", { relative: formatTimeAgo(detail.closedAt) })}
+          </span>
         </>
       ) : null}
     </div>
@@ -127,15 +130,15 @@ function HeaderStats({ detail }: { detail: ChangeRequestDetailModel }) {
       </span>
       <span>&middot;</span>
       <span>
-        {reviewCount} review{reviewCount === 1 ? "" : "s"}
+        {t("integrations:reviewCount", { count: reviewCount })}
         {pendingCount ? (
-          <span className="text-yellow-600 dark:text-yellow-400"> ({pendingCount} pending)</span>
+          <span className="text-yellow-600 dark:text-yellow-400">
+            {` (${t("integrations:pendingCount", { count: pendingCount })})`}
+          </span>
         ) : null}
       </span>
       <span>&middot;</span>
-      <span>
-        {detail.comments.length} comment{detail.comments.length === 1 ? "" : "s"}
-      </span>
+      <span>{t("integrations:commentCount", { count: detail.comments.length })}</span>
       {detail.reviewState ? (
         <Badge variant="secondary" className="px-1.5 py-0 text-[10px]">
           {detail.reviewState.replaceAll("_", " ")}
@@ -189,12 +192,12 @@ export function ChangeRequestDetailHeader({
                   className="h-11 w-11 cursor-pointer p-0 text-muted-foreground sm:h-6 sm:w-6"
                   onClick={props.onRefresh}
                   disabled={props.loading}
-                  aria-label="Refresh"
+                  aria-label={t("integrations:refresh")}
                 >
                   <IconRefresh className={`h-3.5 w-3.5 ${props.loading ? "animate-spin" : ""}`} />
                 </Button>
               </TooltipTrigger>
-              <TooltipContent>Refresh</TooltipContent>
+              <TooltipContent>{t("integrations:refresh")}</TooltipContent>
             </Tooltip>
           ) : null}
         </div>

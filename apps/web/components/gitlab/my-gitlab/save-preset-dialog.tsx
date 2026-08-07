@@ -12,6 +12,7 @@ import {
 import { Input } from "@kandev/ui/input";
 import { Button } from "@kandev/ui/button";
 import { Label } from "@kandev/ui/label";
+import { useTranslation } from "react-i18next";
 
 type SavePresetDialogProps = {
   open: boolean;
@@ -38,6 +39,7 @@ function SavePresetForm({
   onSave: (label: string) => void;
   onClose: () => void;
 }) {
+  const { t } = useTranslation();
   const [value, setValue] = useState(suggestedLabel);
   const trimmed = value.trim();
   const canSubmit = trimmed.length > 0;
@@ -51,16 +53,17 @@ function SavePresetForm({
   return (
     <>
       <DialogHeader>
-        <DialogTitle>Save GitLab query</DialogTitle>
+        <DialogTitle>{t("gitlab:saveGitlabQuery")}</DialogTitle>
         <DialogDescription>
-          Save this {kind === "mr" ? "merge request" : "issue"} query to the sidebar for quick
-          access later.
+          {t("gitlab:savePresetDescription", {
+            kind: kind === "mr" ? t("gitlab:kindMergeRequest") : t("gitlab:kindIssue"),
+          })}
         </DialogDescription>
       </DialogHeader>
       <div className="flex flex-col gap-3">
         <div className="flex flex-col gap-1.5">
           <Label htmlFor="gitlab-preset-label" className="text-xs">
-            Name
+            {t("gitlab:name")}
           </Label>
           <Input
             id="gitlab-preset-label"
@@ -68,13 +71,13 @@ function SavePresetForm({
             value={value}
             onChange={(e) => setValue(e.target.value)}
             onFocus={(e) => e.target.select()}
-            placeholder="e.g. Needs my review"
+            placeholder={t("gitlab:eGNeedsMyReview")}
           />
         </div>
         <div className="flex flex-col gap-1.5 text-xs">
           {customQuery && (
             <div className="flex gap-2">
-              <span className="text-muted-foreground shrink-0 w-16">Query</span>
+              <span className="text-muted-foreground shrink-0 w-16">{t("gitlab:query")}</span>
               <code className="font-mono text-[11px] bg-muted rounded px-1.5 py-0.5 break-all">
                 {customQuery}
               </code>
@@ -82,7 +85,7 @@ function SavePresetForm({
           )}
           {projectFilter && (
             <div className="flex gap-2">
-              <span className="text-muted-foreground shrink-0 w-16">Project</span>
+              <span className="text-muted-foreground shrink-0 w-16">{t("gitlab:project")}</span>
               <code className="font-mono text-[11px] bg-muted rounded px-1.5 py-0.5 break-all">
                 {projectFilter}
               </code>
@@ -92,10 +95,10 @@ function SavePresetForm({
       </div>
       <DialogFooter>
         <Button variant="outline" className="cursor-pointer" onClick={onClose}>
-          Cancel
+          {t("common:cancel")}
         </Button>
         <Button className="cursor-pointer" disabled={!canSubmit} onClick={handleSubmit}>
-          Save
+          {t("common:save")}
         </Button>
       </DialogFooter>
     </>

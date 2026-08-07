@@ -5,9 +5,10 @@ import type { StoreApi } from "zustand";
 import type { AppState } from "@/lib/state/store";
 import { createAppStore } from "@/lib/state/store";
 import { deriveSessionInputMode } from "@/hooks/domains/session/session-input-mode";
-import type { TaskSession } from "@/lib/types/http";
+import { sessionId as toSessionId, type TaskSession } from "@/lib/types/http";
 import type {
   TaskSessionActivityChangedPayload,
+  TaskSessionCancellationChangedPayload,
   TaskSessionStateChangedPayload,
 } from "@/lib/types/backend";
 
@@ -47,8 +48,10 @@ function makeStore(overrides: Record<string, unknown> = {}) {
 
 const STATE_CHANGED_EVENT = "session.state_changed";
 const ACTIVITY_EVENT = "session.activity_changed";
+const CANCELLATION_EVENT = "session.cancellation_changed";
 const RECOVERABLE_ERROR_MESSAGE = "peer disconnected before response";
 const RECOVERABLE_ERROR_AT = "2026-06-14T14:06:40Z";
+const TASK_ROOT = "/task-root";
 
 function makeMessage(payload: TaskSessionStateChangedPayload) {
   return {
@@ -69,6 +72,15 @@ function makeActivityMessage(
     type: "notification" as const,
     action: "session.activity_changed" as const,
     payload: { ...payload, active_subagent_count: payload.active_subagent_count ?? 0 },
+  };
+}
+
+function makeCancellationMessage(payload: TaskSessionCancellationChangedPayload) {
+  return {
+    id: "m-cancel",
+    type: "notification" as const,
+    action: "session.cancellation_changed" as const,
+    payload,
   };
 }
 
@@ -213,6 +225,109 @@ describe("session.state_changed handler", () => {
   });
 });
 
+describe("session.state_changed cancellation snapshot", () => {
+  it("merges an explicit cancellation false from the authoritative snapshot", () => {
+    const store = makeStore({
+      taskSessions: {
+        items: {
+          "s-1": {
+            id: "s-1",
+            task_id: "t-1",
+            state: "RUNNING",
+            cancellation_pending: true,
+          },
+        },
+      },
+    });
+    const handler = registerTaskSessionHandlers(store)[STATE_CHANGED_EVENT]!;
+
+    handler(
+      makeMessage({
+        task_id: "t-1",
+        session_id: "s-1",
+        new_state: "RUNNING",
+        cancellation_pending: false,
+        cancellation_revision: 2,
+      }),
+    );
+
+    expect(store.getState().upsertTaskSessionFromEvent).toHaveBeenCalledWith(
+      "t-1",
+      expect.objectContaining({ cancellation_pending: false, cancellation_revision: 2 }),
+    );
+  });
+});
+
+describe("session.cancellation_changed handler", () => {
+  it("updates only the addressed session in the real store", () => {
+    const store = createAppStore();
+    const selected = {
+      id: "s-1",
+      task_id: "t-1",
+      state: "RUNNING",
+      cancellation_pending: false,
+      started_at: RECOVERABLE_ERROR_AT,
+      updated_at: RECOVERABLE_ERROR_AT,
+    } as TaskSession;
+    const peer = { ...selected, id: toSessionId("s-2") };
+    store.getState().setTaskSession(selected);
+    store.getState().setTaskSession(peer);
+
+    const handler = registerTaskSessionHandlers(store)[CANCELLATION_EVENT]!;
+    handler(
+      makeCancellationMessage({
+        session_id: "s-1",
+        cancellation_pending: true,
+        cancellation_revision: 1,
+      }),
+    );
+
+    expect(store.getState().taskSessions.items["s-1"].cancellation_pending).toBe(true);
+    expect(store.getState().taskSessions.items["s-1"].cancellation_revision).toBe(1);
+    expect(store.getState().taskSessions.items["s-2"].cancellation_pending).toBe(false);
+  });
+
+  it("ignores an event for a session that has not been loaded", () => {
+    const store = makeStore();
+    const handler = registerTaskSessionHandlers(store)[CANCELLATION_EVENT]!;
+
+    handler(
+      makeCancellationMessage({
+        session_id: "unknown",
+        cancellation_pending: true,
+        cancellation_revision: 1,
+      }),
+    );
+
+    expect(store.getState().upsertTaskSessionFromEvent).not.toHaveBeenCalled();
+  });
+
+  it("rejects a lower-revision live event", () => {
+    const store = createAppStore();
+    store.getState().setTaskSession({
+      id: "s-1",
+      task_id: "t-1",
+      state: "RUNNING",
+      cancellation_pending: false,
+      cancellation_revision: 2,
+      started_at: RECOVERABLE_ERROR_AT,
+      updated_at: RECOVERABLE_ERROR_AT,
+    } as TaskSession);
+
+    const handler = registerTaskSessionHandlers(store)[CANCELLATION_EVENT]!;
+    handler(
+      makeCancellationMessage({
+        session_id: "s-1",
+        cancellation_pending: true,
+        cancellation_revision: 1,
+      }),
+    );
+
+    expect(store.getState().taskSessions.items["s-1"].cancellation_pending).toBe(false);
+    expect(store.getState().taskSessions.items["s-1"].cancellation_revision).toBe(2);
+  });
+});
+
 describe("session.workspace_sources.updated handler", () => {
   it("adopts the workspace root and bumps the Files refresh key", () => {
     const setTaskSession = vi.fn();
@@ -234,10 +349,38 @@ describe("session.workspace_sources.updated handler", () => {
     } as never);
 
     expect(setTaskSession).toHaveBeenCalledWith(
-      expect.objectContaining({ id: "s-1", worktree_path: "/new" }),
+      expect.objectContaining({ id: "s-1", worktree_path: "/old", workspace_path: "/new" }),
     );
     expect(bumpWorkspaceFilesRefresh).toHaveBeenCalledWith("s-1");
     expect(store.getState().reconcileWorkspaceSourcesAdopted).toHaveBeenCalledWith(["s-1"]);
+  });
+
+  it("does not clear the workspace root when a partial event omits it", () => {
+    const setTaskSession = vi.fn();
+    const store = makeStore({
+      taskSessions: {
+        items: {
+          "s-1": {
+            id: "s-1",
+            task_id: "t-1",
+            state: "IDLE",
+            worktree_path: "/task-root/kandev",
+            workspace_path: TASK_ROOT,
+          },
+        },
+      },
+      setTaskSession,
+    });
+
+    const handler = registerTaskSessionHandlers(store)["session.workspace_sources.updated"]!;
+    handler({
+      id: "msg-workspace-sources-partial",
+      type: "notification",
+      action: "session.workspace_sources.updated",
+      payload: { task_id: "t-1", session_id: "s-1" },
+    } as never);
+
+    expect(setTaskSession).not.toHaveBeenCalled();
   });
 });
 
@@ -308,13 +451,14 @@ describe("session.state_changed context window provenance", () => {
             efficiency: 36.8,
             source: "acp",
           },
+          context_compaction_count: 3,
         },
       }),
     );
 
     expect(setContextWindow).toHaveBeenCalledWith(
       "s-1",
-      expect.objectContaining({ source: "acp" }),
+      expect.objectContaining({ source: "acp", compactionCount: 3 }),
     );
   });
 
@@ -907,6 +1051,7 @@ describe("session.state_changed → agentctl ready fallback", () => {
         id: "s-1",
         task_environment_id: "env-1",
         worktree_path: "/tmp/kandev/tasks/ws/task-1",
+        workspace_path: "/tmp/kandev/tasks/ws/task-1",
       }),
     );
   });
@@ -940,6 +1085,71 @@ describe("session.state_changed → agentctl ready fallback", () => {
     expect(upsertTaskSessionFromEvent).toHaveBeenCalledWith(
       "t-1",
       expect.objectContaining({ id: "s-1", task_environment_id: "env-1" }),
+    );
+  });
+
+  it("preserves the primary worktree when a sibling agentctl_ready arrives", () => {
+    const upsertTaskSessionFromEvent = vi.fn();
+    const setTaskSession = vi.fn();
+    const store = makeStore({
+      taskSessions: {
+        items: {
+          "s-1": {
+            id: "s-1",
+            task_id: "t-1",
+            state: "RUNNING",
+            repository_id: "primary-repo",
+            worktree_id: "primary-worktree",
+            worktree_path: "/task-root/kandev",
+            worktree_branch: "main",
+          },
+        },
+      },
+      sessionAgentctl: { itemsBySessionId: {} },
+      sessionWorktreesBySessionId: { itemsBySessionId: { "s-1": ["primary-worktree"] } },
+      setSessionAgentctlStatus: vi.fn(),
+      setTaskSession,
+      upsertTaskSessionFromEvent,
+      setWorktree: vi.fn(),
+      setSessionWorktrees: vi.fn(),
+    });
+    const handler = registerTaskSessionHandlers(store)["session.agentctl_ready"]!;
+
+    handler({
+      id: "m",
+      type: "notification",
+      action: "session.agentctl_ready",
+      timestamp: TS,
+      payload: {
+        task_id: "t-1",
+        session_id: "s-1",
+        agent_execution_id: "ae-sibling",
+        task_environment_id: "env-1",
+        worktree_id: "sibling-worktree",
+        worktree_path: "/task-root/second-repository-main",
+        worktree_branch: "main",
+        workspace_path: TASK_ROOT,
+      },
+    });
+
+    const upsertPayload = upsertTaskSessionFromEvent.mock.calls[0]?.[1];
+    expect(upsertPayload).toEqual(
+      expect.objectContaining({
+        id: "s-1",
+        task_environment_id: "env-1",
+        workspace_path: TASK_ROOT,
+      }),
+    );
+    expect(upsertPayload).not.toHaveProperty("worktree_id");
+    expect(upsertPayload).not.toHaveProperty("worktree_path");
+    expect(upsertPayload).not.toHaveProperty("worktree_branch");
+    expect(setTaskSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        worktree_id: "primary-worktree",
+        worktree_path: "/task-root/kandev",
+        worktree_branch: "main",
+        workspace_path: TASK_ROOT,
+      }),
     );
   });
 

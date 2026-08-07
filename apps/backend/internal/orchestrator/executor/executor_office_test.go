@@ -69,8 +69,33 @@ func TestEnsureSessionForAgent_CreatesWhenMissing(t *testing.T) {
 	if got.State != models.TaskSessionStateCreated {
 		t.Errorf("state: got %q want CREATED", got.State)
 	}
+	if got.Metadata[models.SessionMetaKeyOrigin] != models.SessionOriginTaskInitial {
+		t.Errorf("origin marker = %#v, want %q", got.Metadata[models.SessionMetaKeyOrigin], models.SessionOriginTaskInitial)
+	}
 	if len(repo.createTaskSessionCalls) != 1 {
 		t.Fatalf("expected 1 CreateTaskSession call, got %d", len(repo.createTaskSessionCalls))
+	}
+}
+
+func TestEnsureSessionForAgent_DoesNotMarkExistingTaskSessionAsOrigin(t *testing.T) {
+	repo := newMockRepository()
+	repo.sessions["sess-existing"] = &models.TaskSession{
+		ID:             "sess-existing",
+		TaskID:         "task-office",
+		AgentProfileID: "agent-existing",
+		State:          models.TaskSessionStateIdle,
+		StartedAt:      time.Now().UTC(),
+	}
+	exec := newTestExecutor(t, &mockAgentManager{}, repo)
+
+	got, err := exec.EnsureSessionForAgent(
+		context.Background(), officeTestTask(), "agent-new", "profile-1", "exec-1", "",
+	)
+	if err != nil {
+		t.Fatalf("EnsureSessionForAgent: %v", err)
+	}
+	if _, marked := got.Metadata[models.SessionMetaKeyOrigin]; marked {
+		t.Fatalf("new Office session metadata = %#v, must not claim task origin when another session exists", got.Metadata)
 	}
 }
 

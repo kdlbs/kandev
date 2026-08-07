@@ -54,7 +54,7 @@ func isRootOwnershipMarkerPath(path string) bool {
 
 // updateFiles updates the file listing
 func (wt *WorkspaceTracker) updateFiles(ctx context.Context) {
-	files, err := wt.getFileList(ctx)
+	files, err := wt.getFileListClass(ctx, subproc.GitBackground)
 	if err != nil {
 		wt.logger.Debug("failed to get file list", zap.Error(err))
 		return
@@ -67,6 +67,10 @@ func (wt *WorkspaceTracker) updateFiles(ctx context.Context) {
 
 // getFileList retrieves the list of files in the workspace
 func (wt *WorkspaceTracker) getFileList(ctx context.Context) (types.FileListUpdate, error) {
+	return wt.getFileListClass(ctx, subproc.GitInteractive)
+}
+
+func (wt *WorkspaceTracker) getFileListClass(ctx context.Context, class subproc.GitWorkClass) (types.FileListUpdate, error) {
 	update := types.FileListUpdate{
 		Timestamp:      time.Now(),
 		RepositoryName: wt.repositoryName,
@@ -77,9 +81,12 @@ func (wt *WorkspaceTracker) getFileList(ctx context.Context) (types.FileListUpda
 	// --cached: include tracked files
 	// --others: include untracked files
 	// --exclude-standard: respect .gitignore
-	cmd := exec.CommandContext(ctx, "git", "ls-files", "--cached", "--others", "--exclude-standard")
-	cmd.Dir = wt.workDir
-	out, err := subproc.RunGitOutput(ctx, cmd)
+	out, runErr, execCtxErr := subproc.RunGitOutputAfterAcquire(ctx, class, gitCommandTimeout, func(execCtx context.Context) *exec.Cmd {
+		cmd := subproc.NewGitCommand(execCtx, "ls-files", "--cached", "--others", "--exclude-standard")
+		cmd.Dir = wt.workDir
+		return cmd
+	})
+	err := gitCommandError(runErr, execCtxErr)
 	if err != nil {
 		return update, err
 	}
@@ -551,10 +558,17 @@ func (wt *WorkspaceTracker) ApplyFileDiff(ctx context.Context, reqPath, unifiedD
 	}()
 
 	// Use git apply to apply the patch directly to the file
-	cmd := exec.CommandContext(ctx, "git", "apply", "-p0", "--unidiff-zero", "--whitespace=nowarn", patchFile)
-	cmd.Dir = wt.workDir
-
-	output, err := subproc.RunGitCombinedOutput(ctx, cmd)
+	output, runErr, execCtxErr := subproc.RunGitCombinedAfterAcquire(
+		ctx,
+		subproc.GitInteractive,
+		gitCommandTimeout,
+		func(execCtx context.Context) *exec.Cmd {
+			cmd := subproc.NewGitCommand(execCtx, "apply", "-p0", "--unidiff-zero", "--whitespace=nowarn", patchFile)
+			cmd.Dir = wt.workDir
+			return cmd
+		},
+	)
+	err = gitCommandError(runErr, execCtxErr)
 	if err != nil {
 		// Treat caller cancellation / deadline as a transient failure and
 		// propagate rather than overwriting the file from desiredContent —
@@ -905,10 +919,18 @@ func (wt *WorkspaceTracker) GetFileContentAtRef(ctx context.Context, reqPath str
 	// Preflight: check blob size before materializing content to avoid memory spikes.
 	// Use CombinedOutput to capture stderr for error detection (git writes errors to stderr).
 	// Set LC_ALL=C to ensure English error messages for reliable parsing.
-	sizeCmd := exec.CommandContext(ctx, "git", "cat-file", "-s", gitRef)
-	sizeCmd.Dir = wt.workDir
-	sizeCmd.Env = append(os.Environ(), "LC_ALL=C")
-	sizeOut, err := subproc.RunGitCombinedOutput(ctx, sizeCmd)
+	sizeOut, runErr, execCtxErr := subproc.RunGitCombinedAfterAcquire(
+		ctx,
+		subproc.GitInteractive,
+		gitCommandTimeout,
+		func(execCtx context.Context) *exec.Cmd {
+			sizeCmd := subproc.NewGitCommand(execCtx, "cat-file", "-s", gitRef)
+			sizeCmd.Dir = wt.workDir
+			sizeCmd.Env = append(os.Environ(), "LC_ALL=C")
+			return sizeCmd
+		},
+	)
+	err := gitCommandError(runErr, execCtxErr)
 	if err != nil {
 		output := string(sizeOut)
 		if strings.Contains(output, "does not exist") ||
@@ -927,10 +949,17 @@ func (wt *WorkspaceTracker) GetFileContentAtRef(ctx context.Context, reqPath str
 		return "", blobSize, false, fmt.Errorf("file too large (max 10MB)")
 	}
 
-	cmd := exec.CommandContext(ctx, "git", "show", gitRef)
-	cmd.Dir = wt.workDir
-
-	content, err := subproc.RunGitOutput(ctx, cmd)
+	content, runErr, execCtxErr := subproc.RunGitOutputAfterAcquire(
+		ctx,
+		subproc.GitInteractive,
+		gitCommandTimeout,
+		func(execCtx context.Context) *exec.Cmd {
+			cmd := subproc.NewGitCommand(execCtx, "show", gitRef)
+			cmd.Dir = wt.workDir
+			return cmd
+		},
+	)
+	err = gitCommandError(runErr, execCtxErr)
 	if err != nil {
 		return "", 0, false, fmt.Errorf("failed to get file at ref: %w", err)
 	}

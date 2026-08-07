@@ -29,6 +29,7 @@ import type {
   useSessionPanelState,
   useMergedAgentState,
 } from "./task-page-content";
+import { useTranslation } from "react-i18next";
 
 export type TaskPageInnerProps = {
   task: Task | null;
@@ -201,6 +202,12 @@ function maybeBuildDebugEntries(params: {
   });
 }
 
+function TaskDebugOverlay({ entries }: { entries: ReturnType<typeof maybeBuildDebugEntries> }) {
+  const { t } = useTranslation();
+  if (!entries) return null;
+  return <DebugOverlay title={t("task:taskDebug")} entries={entries} />;
+}
+
 export function TaskPageInner({
   task,
   effectiveSessionId,
@@ -285,7 +292,7 @@ export function TaskPageInner({
             isPassthrough={sessionPanel.isSessionPassthrough}
           />
           <TaskPRShortcut taskId={taskProps.taskId} />
-          {debugEntries && <DebugOverlay title="Task Debug" entries={debugEntries} />}
+          <TaskDebugOverlay entries={debugEntries} />
           {!isMobile && <TaskTopBar {...topBarProps} />}
           {ensureSession.status === "error" && (
             <EnsureSessionErrorBanner

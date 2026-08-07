@@ -8,6 +8,7 @@ import { useAppStore } from "@/components/state-provider";
 import { createTaskPR, linkTaskIssue } from "@/lib/api/domains/github-api";
 import type { Repository, Task, TaskRepository, Workflow, WorkflowStep } from "@/lib/types/http";
 import type { GitHubPR, GitHubIssue } from "@/lib/types/github";
+import { truncateRemoteTaskTitle } from "@/lib/task-title";
 
 export type TaskPreset = {
   id: string;
@@ -127,7 +128,7 @@ function extractPayload(payload: LaunchPayload) {
 function buildDialogState(payload: LaunchPayload, repositories: Repository[]): DialogState {
   const data = extractPayload(payload);
   const description = payload.preset.prompt({ url: data.url, title: data.title });
-  const title = `${payload.preset.label}: ${data.title}`;
+  const title = truncateRemoteTaskTitle(`${payload.preset.label}: ${data.title}`);
   // For a PR launch we want the dialog to display and check out the PR's head
   // branch — matching the GitHub-URL-paste flow, where the branch selector
   // auto-resolves to the PR head. Same branch for both: the chip shows it and

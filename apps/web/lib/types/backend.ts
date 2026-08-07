@@ -1,4 +1,5 @@
 import type { TaskPlanEventPayload, TaskPlanRevisionEventPayload } from "./task-plan-events";
+import type { CaptureRequest } from "@/lib/logger/capture";
 
 export type BackendMessageType = keyof BackendMessageMap;
 
@@ -21,8 +22,15 @@ import type {
 } from "@/lib/types/http";
 import type { SecretListItem } from "@/lib/types/http-secrets";
 import type { GitEventPayload } from "@/lib/types/git-events";
-import type { GitHubRateLimitUpdate, TaskCIAutomationOptions, TaskPR } from "@/lib/types/github";
+import type {
+  GitHubRateLimitUpdate,
+  TaskCIAutomationOptions,
+  TaskPR,
+  TaskPRDeletedEvent,
+} from "@/lib/types/github";
 import type { TaskMR } from "@/lib/types/gitlab";
+import type { TaskStatusSummary } from "@/lib/types/task-status-summary";
+import type { TaskMRAutomationOptions } from "@/lib/types/gitlab";
 import type { SystemMetricsSnapshot } from "./system";
 import type { FileChangeNotificationPayload } from "./workspace-files";
 import type {
@@ -107,6 +115,7 @@ export type TaskEventPayload = {
   metadata?: Record<string, unknown> | null;
   /** Deletion reason on task.deleted (e.g. "pr_approved_by_user"). Absent otherwise. */
   reason?: string;
+  status_summary?: TaskStatusSummary | null;
 };
 
 export type AgentUpdatePayload = {
@@ -170,11 +179,6 @@ export type DiffUpdatePayload = {
     plus: number;
     minus: number;
   }>;
-};
-
-export type SystemErrorPayload = {
-  message: string;
-  code?: string;
 };
 
 export type UpdateAvailablePayload = {
@@ -282,6 +286,12 @@ export type TaskSessionStateChangedPayload = {
   // live flips arrive on session.activity_changed.
   foreground_activity?: ForegroundActivity | null;
   active_subagent_count?: number;
+  /** Backend-owned cancellation projection carried by state snapshots. */
+  cancellation_pending?: boolean;
+  /** Process-local cancellation transition generation carried by state snapshots. */
+  cancellation_revision?: number;
+  /** True when a send right now would steer the running turn; see http.ts. */
+  supports_steering?: boolean;
 };
 
 /**
@@ -294,6 +304,14 @@ export type TaskSessionActivityChangedPayload = {
   session_id: string;
   foreground_activity: ForegroundActivity | null;
   active_subagent_count: number;
+  /** True when a send right now would steer the running turn; see http.ts. */
+  supports_steering?: boolean;
+};
+
+export type TaskSessionCancellationChangedPayload = {
+  session_id: string;
+  cancellation_pending: boolean;
+  cancellation_revision: number;
 };
 
 export type TaskSessionNotificationPayload = {
@@ -320,6 +338,8 @@ export type TaskSessionAgentctlPayload = {
   worktree_id?: string;
   worktree_path?: string;
   worktree_branch?: string;
+  /** Effective task workspace root when the agentctl payload carries it. */
+  workspace_path?: string;
   /** Task root that contains every per-repo worktree as a sibling subdir.
    *  Set only when the event signals a sibling worktree addition (multi-branch
    *  add_branch flow) — the frontend repoints the file browser to it instead of
@@ -399,7 +419,6 @@ export type UserSettingsUpdatedPayload = Omit<
   workspace_id: string;
   repository_ids: string[];
 };
-
 export type ShellOutputPayload = {
   task_id: string;
   session_id: string;
@@ -478,6 +497,12 @@ export type QueueStatusChangedPayload = {
   max?: number;
 };
 
+export type TaskStatusSummaryUpdatedPayload = {
+  task_id: string;
+  workspace_id: string;
+  status_summary: TaskStatusSummary;
+};
+
 export type BackendMessageMap = OfficeBackendMessageMap &
   import("@/lib/types/http").WalkthroughBackendMessageMap &
   import("@/lib/types/review").ReviewBackendMessageMap & {
@@ -486,6 +511,10 @@ export type BackendMessageMap = OfficeBackendMessageMap &
     "task.updated": BackendMessage<"task.updated", TaskEventPayload>;
     "task.deleted": BackendMessage<"task.deleted", TaskEventPayload>;
     "task.state_changed": BackendMessage<"task.state_changed", TaskEventPayload>;
+    "task.status_summary.updated": BackendMessage<
+      "task.status_summary.updated",
+      TaskStatusSummaryUpdatedPayload
+    >;
     "task.plan.created": BackendMessage<"task.plan.created", TaskPlanEventPayload>;
     "task.plan.updated": BackendMessage<"task.plan.updated", TaskPlanEventPayload>;
     "task.plan.deleted": BackendMessage<"task.plan.deleted", TaskPlanEventPayload>;
@@ -508,9 +537,12 @@ export type BackendMessageMap = OfficeBackendMessageMap &
     "terminal.output": BackendMessage<"terminal.output", TerminalOutputPayload>;
     "diff.update": BackendMessage<"diff.update", DiffUpdatePayload>;
     "session.git.event": BackendMessage<"session.git.event", GitEventPayload>;
-    "system.error": BackendMessage<"system.error", SystemErrorPayload>;
     "system.job.update": BackendMessage<"system.job.update", import("./system").SystemJob>;
     "system.metrics.updated": BackendMessage<"system.metrics.updated", SystemMetricsSnapshot>;
+    "system.logs.capture_requested": BackendMessage<
+      "system.logs.capture_requested",
+      CaptureRequest
+    >;
     "system.update_available": BackendMessage<"system.update_available", UpdateAvailablePayload>;
     "workspace.created": BackendMessage<"workspace.created", WorkspacePayload>;
     "workspace.updated": BackendMessage<"workspace.updated", WorkspacePayload>;
@@ -535,6 +567,10 @@ export type BackendMessageMap = OfficeBackendMessageMap &
     "session.activity_changed": BackendMessage<
       "session.activity_changed",
       TaskSessionActivityChangedPayload
+    >;
+    "session.cancellation_changed": BackendMessage<
+      "session.cancellation_changed",
+      TaskSessionCancellationChangedPayload
     >;
     "session.clarification_requested": BackendMessage<
       "session.clarification_requested",
@@ -615,6 +651,7 @@ export type BackendMessageMap = OfficeBackendMessageMap &
       QueueStatusChangedPayload
     >;
     "github.task_pr.updated": BackendMessage<"github.task_pr.updated", TaskPR>;
+    "github.task_pr.deleted": BackendMessage<"github.task_pr.deleted", TaskPRDeletedEvent>;
     "github.task_ci_options.updated": BackendMessage<
       "github.task_ci_options.updated",
       TaskCIAutomationOptions
@@ -623,6 +660,10 @@ export type BackendMessageMap = OfficeBackendMessageMap &
     "gitlab.task_mr.updated": BackendMessage<
       "gitlab.task_mr.updated",
       TaskMR & { workspace_id: string }
+    >;
+    "gitlab.task_mr_options.updated": BackendMessage<
+      "gitlab.task_mr_options.updated",
+      TaskMRAutomationOptions
     >;
     "run.event.appended": BackendMessage<"run.event.appended", RunEventAppendedPayload>;
   };

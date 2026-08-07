@@ -13,6 +13,7 @@ import { useLayoutStore } from "@/lib/state/layout-store";
 import { useDockviewStore } from "@/lib/state/dockview-store";
 import { useToolbarCollapsed } from "@/hooks/use-toolbar-collapsed";
 import type { KanbanStepEvents } from "@/lib/state/slices/kanban/types";
+import { useTranslation } from "react-i18next";
 
 type Step = {
   id: string;
@@ -73,6 +74,7 @@ const WorkflowStepper = memo(function WorkflowStepper({
   workflowId,
   isArchived,
 }: WorkflowStepperProps) {
+  const { t } = useTranslation();
   const [movingToStepId, setMovingToStepId] = useState<string | null>(null);
   const disablePlanMode = useDisablePlanMode();
 
@@ -142,7 +144,7 @@ const WorkflowStepper = memo(function WorkflowStepper({
             <>
               <div className="h-px w-6 shrink-0 bg-border" />
               <span className="text-[11px] font-medium text-amber-500 bg-amber-500/15 px-2 py-0.5 rounded-md whitespace-nowrap">
-                Archived
+                {t("task:filterDimensionArchived")}
               </span>
             </>
           )}
@@ -162,13 +164,14 @@ function MinimalWorkflowStepper({
   currentIndex: number;
   isArchived?: boolean;
 }) {
+  const { t } = useTranslation();
   if (isArchived) {
     return (
       <span
         data-testid="workflow-stepper-minimal"
         className="text-[11px] font-medium text-amber-500 bg-amber-500/15 px-2 py-0.5 rounded-md whitespace-nowrap"
       >
-        Archived
+        {t("task:filterDimensionArchived")}
       </span>
     );
   }
@@ -298,6 +301,7 @@ function StepHoverContent({
   isMoving: boolean;
   onMove: (stepId: string) => void;
 }) {
+  const { t } = useTranslation();
   return (
     <HoverCardContent
       side="bottom"
@@ -313,10 +317,12 @@ function StepHoverContent({
           onClick={() => onMove(step.id)}
         >
           <IconArrowRight className="h-3 w-3" />
-          {isMoving ? "Moving..." : "Move here"}
+          {isMoving ? t("task:moving") : t("task:moveHere")}
         </Button>
       )}
-      {isCurrent && <div className="text-[11px] text-muted-foreground">Current step</div>}
+      {isCurrent && (
+        <div className="text-[11px] text-muted-foreground">{t("task:currentStep")}</div>
+      )}
       <StepCapabilityIcons events={step.events} agentProfileId={step.agent_profile_id} />
     </HoverCardContent>
   );

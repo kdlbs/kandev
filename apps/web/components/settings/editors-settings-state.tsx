@@ -5,7 +5,7 @@ import { useAppStore } from "@/components/state-provider";
 import { useEditors } from "@/hooks/domains/settings/use-editors";
 import { createEditor, deleteEditor, updateEditor, updateUserSettings } from "@/lib/api";
 import { useRequest } from "@/lib/http/use-request";
-import type { EditorOption } from "@/lib/types/http";
+import type { EditorOption, LspStatusLocation } from "@/lib/types/http";
 import { type ComboboxOption } from "@/components/combobox";
 import { mapUserSettingsResponse } from "@/lib/ssr/user-settings";
 import {
@@ -17,6 +17,7 @@ import {
   isCustomEditor,
 } from "@/components/settings/editor-form";
 import { Badge } from "@kandev/ui/badge";
+import { useTranslation } from "react-i18next";
 
 export function useEditorsSettingsState() {
   const setEditors = useAppStore((state) => state.setEditors);
@@ -43,6 +44,12 @@ export function useEditorsSettingsState() {
   );
   const [baselineLspAutoInstall, setBaselineLspAutoInstall] = useState<string[]>(
     () => currentUserSettings.lspAutoInstallLanguages ?? [],
+  );
+  const [lspStatusLocation, setLspStatusLocation] = useState<LspStatusLocation>(
+    () => currentUserSettings.lspStatusLocation ?? "toolbar",
+  );
+  const [baselineLspStatusLocation, setBaselineLspStatusLocation] = useState<LspStatusLocation>(
+    () => currentUserSettings.lspStatusLocation ?? "toolbar",
   );
 
   const initConfigStrings = useCallback((): Record<string, string> => {
@@ -82,6 +89,10 @@ export function useEditorsSettingsState() {
     setBaselineLspAutoStart,
     baselineLspAutoInstall,
     setBaselineLspAutoInstall,
+    lspStatusLocation,
+    setLspStatusLocation,
+    baselineLspStatusLocation,
+    setBaselineLspStatusLocation,
     lspConfigStrings,
     setLspConfigStrings,
     baselineLspConfigStrings,
@@ -99,6 +110,7 @@ export function useLspConfigActions(
   setLspConfigStrings: (updater: (prev: Record<string, string>) => Record<string, string>) => void,
   setLspConfigErrors: (updater: (prev: Record<string, string>) => Record<string, string>) => void,
 ) {
+  const { t } = useTranslation();
   const clearLspConfigError = useCallback(
     (langId: string) => {
       setLspConfigErrors((prev) => {
@@ -127,18 +139,40 @@ export function useLspConfigActions(
       try {
         const parsed = JSON.parse(value);
         if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
-          setLspConfigErrors((prev) => ({ ...prev, [langId]: "Must be a JSON object" }));
+          setLspConfigErrors((prev) => ({ ...prev, [langId]: t("settings:mustBeAJsonObject") }));
         } else {
           clearLspConfigError(langId);
         }
       } catch {
-        setLspConfigErrors((prev) => ({ ...prev, [langId]: "Invalid JSON" }));
+        setLspConfigErrors((prev) => ({ ...prev, [langId]: t("settings:invalidJson") }));
       }
     },
-    [setLspConfigStrings, setLspConfigErrors, clearLspConfigError],
+    [setLspConfigStrings, setLspConfigErrors, clearLspConfigError, t],
   );
 
   return { updateLspConfigString };
+}
+
+/** Add/remove a language id in the auto-start and auto-install sets. */
+export function useLspLanguageToggles(state: EditorsSettingsState) {
+  const { setLspAutoStartLanguages, setLspAutoInstallLanguages } = state;
+  const toggleAutoStart = useCallback(
+    (langId: string, checked: boolean) => {
+      setLspAutoStartLanguages((prev) =>
+        checked ? [...prev, langId] : prev.filter((id) => id !== langId),
+      );
+    },
+    [setLspAutoStartLanguages],
+  );
+  const toggleAutoInstall = useCallback(
+    (langId: string, checked: boolean) => {
+      setLspAutoInstallLanguages((prev) =>
+        checked ? [...prev, langId] : prev.filter((id) => id !== langId),
+      );
+    },
+    [setLspAutoInstallLanguages],
+  );
+  return { toggleAutoStart, toggleAutoInstall };
 }
 
 export function parseLspConfigStrings(
@@ -158,9 +192,15 @@ export function parseLspConfigStrings(
   return result;
 }
 
+/**
+ * `t` is a parameter rather than a module import: the option list is built in a
+ * `useMemo`, so passing the caller's `t` both keeps the copy out of module scope
+ * and gives the memo a dependency that changes on a locale switch.
+ */
 export function buildDefaultEditorOptions(
   availableEditors: EditorOption[],
   defaultEditorId: string,
+  t: (key: string) => string,
 ): ComboboxOption[] {
   if (availableEditors.length === 0) return [];
   const selected = defaultEditorId ? availableEditors.filter((e) => e.id === defaultEditorId) : [];
@@ -174,11 +214,11 @@ export function buildDefaultEditorOptions(
         <span className="truncate">{editor.name}</span>
         {editor.kind === "built_in" ? (
           <Badge variant={editor.installed ? "secondary" : "outline"} className="ml-auto">
-            {editor.installed ? "Installed" : "Not installed"}
+            {editor.installed ? t("settings:installed") : t("settings:notInstalled")}
           </Badge>
         ) : (
           <Badge variant="secondary" className="ml-auto">
-            {getCustomKindLabel(editor.kind)}
+            {getCustomKindLabel(t, editor.kind)}
           </Badge>
         )}
       </div>
@@ -193,17 +233,21 @@ type SetUserSettingsFn = ReturnType<typeof useEditorsSettingsState>["setUserSett
 function buildSettingsPayload(
   s: UserSettingsState,
   defaultEditorId: string,
-  lspAutoStartLanguages: string[],
-  lspAutoInstallLanguages: string[],
-  parsedConfigs: Record<string, Record<string, unknown>>,
+  lsp: {
+    autoStartLanguages: string[];
+    autoInstallLanguages: string[];
+    statusLocation: LspStatusLocation;
+    serverConfigs: Record<string, Record<string, unknown>>;
+  },
 ): Parameters<typeof updateUserSettings>[0] {
   return {
     workspace_id: s.workspaceId ?? "",
     repository_ids: s.repositoryIds ?? [],
     default_editor_id: defaultEditorId || undefined,
-    lsp_auto_start_languages: lspAutoStartLanguages,
-    lsp_auto_install_languages: lspAutoInstallLanguages,
-    lsp_server_configs: parsedConfigs,
+    lsp_auto_start_languages: lsp.autoStartLanguages,
+    lsp_auto_install_languages: lsp.autoInstallLanguages,
+    lsp_status_location: lsp.statusLocation,
+    lsp_server_configs: lsp.serverConfigs,
   };
 }
 
@@ -302,23 +346,25 @@ export function useSaveRequest(state: EditorsSettingsState) {
     setBaselineLspAutoStart,
     lspAutoInstallLanguages,
     setBaselineLspAutoInstall,
+    lspStatusLocation,
+    setBaselineLspStatusLocation,
     lspConfigStrings,
     setBaselineLspConfigStrings,
   } = state;
   return useRequest(async () => {
     const parsedConfigs = parseLspConfigStrings(lspConfigStrings);
     if (parsedConfigs === null) return;
-    const payload = buildSettingsPayload(
-      currentUserSettings,
-      defaultEditorId,
-      lspAutoStartLanguages,
-      lspAutoInstallLanguages,
-      parsedConfigs,
-    );
+    const payload = buildSettingsPayload(currentUserSettings, defaultEditorId, {
+      autoStartLanguages: lspAutoStartLanguages,
+      autoInstallLanguages: lspAutoInstallLanguages,
+      statusLocation: lspStatusLocation,
+      serverConfigs: parsedConfigs,
+    });
     const response = await updateUserSettings(payload, { cache: "no-store" });
     setBaselineDefaultId(defaultEditorId);
     setBaselineLspAutoStart([...lspAutoStartLanguages]);
     setBaselineLspAutoInstall([...lspAutoInstallLanguages]);
+    setBaselineLspStatusLocation(lspStatusLocation);
     setBaselineLspConfigStrings({ ...lspConfigStrings });
     applySettingsResponseToStore(response, currentUserSettings, setUserSettings);
   });

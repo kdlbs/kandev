@@ -3,6 +3,8 @@ package worktree
 import (
 	"context"
 	"os/exec"
+
+	"github.com/kandev/kandev/internal/common/subproc"
 )
 
 // newGitCommand enables Git's long-path handling for this process only. Git
@@ -10,8 +12,8 @@ import (
 // shape everywhere keeps all package-owned Git invocations on one safe path
 // without mutating repository, global, or system configuration.
 func newGitCommand(ctx context.Context, args ...string) *exec.Cmd {
-	commandArgs := make([]string, 0, len(args)+2)
+	commandArgs := make([]string, 0, len(args))
 	commandArgs = append(commandArgs, "-c", "core.longpaths=true")
 	commandArgs = append(commandArgs, args...)
-	return exec.CommandContext(ctx, "git", commandArgs...)
+	return subproc.NewGitCommand(ctx, commandArgs...)
 }

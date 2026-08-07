@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -14,6 +15,7 @@ import (
 	"github.com/kandev/kandev/internal/clarification"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/db"
+	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/orchestrator"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
@@ -184,6 +186,154 @@ func (p *mcpUserSettingsProvider) GetUserSettings(context.Context) (*usermodels.
 	return p.settings, p.err
 }
 
+type recordingRemoteContributionService struct {
+	resolution   *models.RemoteContributionResolution
+	associateErr error
+	associateURL string
+	taskID       string
+	repositoryID string
+}
+
+func (s *recordingRemoteContributionService) Resolve(_ context.Context, _, _, rawURL string) (*models.RemoteContributionResolution, bool, error) {
+	s.associateURL = rawURL
+	return s.resolution, true, nil
+}
+
+func (s *recordingRemoteContributionService) Associate(_ context.Context, _, _, taskID, repositoryID string, _ *models.RemoteContributionResolution) error {
+	s.taskID = taskID
+	s.repositoryID = repositoryID
+	return s.associateErr
+}
+
+func testRemoteContributionResolution() *models.RemoteContributionResolution {
+	return &models.RemoteContributionResolution{
+		Binding: models.RemoteContribution{
+			Version:      models.RemoteContributionVersion,
+			Provider:     models.RemoteContributionProviderGitHub,
+			Kind:         models.RemoteContributionKindPullRequest,
+			CanonicalURL: "https://github.com/acme/widget/pull/7",
+			Number:       7,
+			State:        models.RemoteContributionStateOpen,
+			BaseBranch:   "main",
+			HeadBranch:   "feature/remote",
+			HeadSHA:      strings.Repeat("a", 40),
+			SourceRepository: models.RemoteContributionRepository{
+				Host: "github.com", Path: "contributor/widget", ProviderID: "R_kgDOFork123", RemoteURL: "https://github.com/contributor/widget.git",
+			},
+			CollaborationAllowed: true,
+		},
+		TargetProvider:      models.RemoteContributionProviderGitHub,
+		TargetHost:          "https://github.com",
+		TargetPath:          "acme/widget",
+		TargetProviderID:    "99",
+		TargetRemoteURL:     "https://github.com/acme/widget.git",
+		TargetDefaultBranch: "main",
+	}
+}
+
+func TestHandleCreateTask_AssociatesExistingRemoteContribution(t *testing.T) {
+	svc, repo := newTestTaskService(t)
+	ctx := context.Background()
+	workspaces, err := svc.ListWorkspaces(ctx)
+	require.NoError(t, err)
+	workflows, err := svc.ListWorkflows(ctx, workspaces[0].ID, false)
+	require.NoError(t, err)
+	remote := &recordingRemoteContributionService{resolution: testRemoteContributionResolution()}
+	h := NewHandlers(svc, nil, nil, nil, nil, repo, repo, nil, nil, nil, nil, nil, testLogger(t))
+	h.SetRemoteContributionService(remote)
+
+	resp, err := h.handleCreateTask(ctx, makeWSMessage(t, ws.ActionMCPCreateTask, map[string]interface{}{
+		"workspace_id":     workspaces[0].ID,
+		"workflow_id":      workflows[0].ID,
+		"title":            "Remote contribution",
+		"description":      "Work on the existing contribution",
+		"agent_profile_id": "profile-remote",
+		"start_agent":      false,
+		"repositories": []map[string]interface{}{{
+			"github_url":  "https://github.com/acme/widget/pull/7",
+			"base_branch": "main",
+		}},
+	}))
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	if resp.Type == ws.MessageTypeError {
+		t.Fatalf("create task returned error: %s", string(resp.Payload))
+	}
+	if remote.associateURL != "https://github.com/acme/widget/pull/7" || remote.taskID == "" || remote.repositoryID == "" {
+		t.Fatalf("remote association = URL %q, task %q, repository %q", remote.associateURL, remote.taskID, remote.repositoryID)
+	}
+	task, err := svc.GetTask(ctx, remote.taskID)
+	require.NoError(t, err)
+	require.NotNil(t, task)
+	taskRepos, err := repo.ListTaskRepositories(ctx, task.ID)
+	require.NoError(t, err)
+	require.Len(t, taskRepos, 1)
+	binding, found, err := models.LoadRemoteContribution(taskRepos[0].Metadata)
+	require.NoError(t, err)
+	if !found || binding.SourceRepository.Path != "contributor/widget" {
+		t.Fatalf("persisted remote contribution = (%+v, found=%v)", binding, found)
+	}
+}
+
+func TestResolveMCPRemoteContributionsPreservesExistingDefaultBranch(t *testing.T) {
+	resolution := testRemoteContributionResolution()
+	resolution.TargetDefaultBranch = ""
+	remote := &recordingRemoteContributionService{resolution: resolution}
+	h := &Handlers{remoteContributionSvc: remote, logger: testLogger(t)}
+	repos := []service.TaskRepositoryInput{{
+		RemoteURL:     "https://github.com/acme/widget/pull/7",
+		DefaultBranch: "trunk",
+	}}
+	resolutions, err := h.resolveMCPRemoteContributions(context.Background(), "workspace-1", "user-1", repos)
+	if err != nil {
+		t.Fatalf("resolveMCPRemoteContributions() error = %v", err)
+	}
+	if len(resolutions) != 1 || resolutions[0] == nil {
+		t.Fatalf("resolutions = %#v, want one resolution", resolutions)
+	}
+	if repos[0].DefaultBranch != "trunk" {
+		t.Fatalf("default branch = %q, want existing branch trunk", repos[0].DefaultBranch)
+	}
+}
+
+func TestHandleCreateTask_RollsBackWhenRemoteContributionAssociationFails(t *testing.T) {
+	svc, repo := newTestTaskService(t)
+	ctx := context.Background()
+	workspaces, err := svc.ListWorkspaces(ctx)
+	require.NoError(t, err)
+	workflows, err := svc.ListWorkflows(ctx, workspaces[0].ID, false)
+	require.NoError(t, err)
+	remote := &recordingRemoteContributionService{
+		resolution:   testRemoteContributionResolution(),
+		associateErr: errors.New("association failed"),
+	}
+	h := NewHandlers(svc, nil, nil, nil, nil, repo, repo, nil, nil, nil, nil, nil, testLogger(t))
+	h.SetRemoteContributionService(remote)
+
+	resp, err := h.handleCreateTask(ctx, makeWSMessage(t, ws.ActionMCPCreateTask, map[string]interface{}{
+		"workspace_id":     workspaces[0].ID,
+		"workflow_id":      workflows[0].ID,
+		"title":            "Rollback contribution",
+		"description":      "This association will fail",
+		"agent_profile_id": "profile-remote",
+		"start_agent":      false,
+		"repositories": []map[string]interface{}{{
+			"github_url":  "https://github.com/acme/widget/pull/7",
+			"base_branch": "main",
+		}},
+	}))
+	require.NoError(t, err)
+	assertWSError(t, resp, ws.ErrorCodeInternalError)
+	if remote.taskID == "" || remote.repositoryID == "" {
+		t.Fatalf("association was not attempted: task %q repository %q", remote.taskID, remote.repositoryID)
+	}
+	tasks, err := svc.ListTasks(ctx, workflows[0].ID)
+	require.NoError(t, err)
+	if len(tasks) != 0 {
+		t.Fatalf("tasks after association rollback = %d, want 0", len(tasks))
+	}
+}
+
 // TestClassifyAddBranchError_UnresolvedBaseBranchIsValidation pins the
 // classifier's handling of the new "cannot resolve base_branch" sentinel
 // emitted by AddBranchToTask when neither base_branch nor a probed
@@ -201,6 +351,53 @@ func TestClassifyCreateTaskErrorMapsWIPLimitToConflict(t *testing.T) {
 	if got := classifyCreateTaskError(err); got != ws.ErrorCodeConflict {
 		t.Fatalf("expected ErrorCodeConflict, got %q", got)
 	}
+}
+
+func TestClassifyCreateTaskErrorMapsOverlongTitleToValidation(t *testing.T) {
+	if got := classifyCreateTaskError(service.ErrTaskTitleTooLong); got != ws.ErrorCodeValidation {
+		t.Fatalf("expected ErrorCodeValidation, got %q", got)
+	}
+}
+
+func TestHandleCreateTask_RejectsOverlongTitle(t *testing.T) {
+	svc, repo := newTestTaskService(t)
+	ctx := context.Background()
+	workspaces, err := svc.ListWorkspaces(ctx)
+	require.NoError(t, err)
+	require.Len(t, workspaces, 1)
+	workflows, err := svc.ListWorkflows(ctx, workspaces[0].ID, false)
+	require.NoError(t, err)
+	require.Len(t, workflows, 1)
+
+	source, err := svc.CreateTask(ctx, &service.CreateTaskRequest{
+		WorkspaceID: workspaces[0].ID,
+		WorkflowID:  workflows[0].ID,
+		Title:       "Source task",
+	})
+	require.NoError(t, err)
+	require.NoError(t, repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID:                "source-title-session",
+		TaskID:            source.ID,
+		AgentProfileID:    "source-profile",
+		ExecutorProfileID: "source-executor-profile",
+		State:             models.TaskSessionStateWaitingForInput,
+		IsPrimary:         true,
+	}))
+
+	h := &Handlers{taskSvc: svc, logger: testLogger(t).WithFields()}
+	resp, err := h.handleCreateTask(ctx, makeWSMessage(t, ws.ActionMCPCreateTask, map[string]interface{}{
+		"source_task_id": source.ID,
+		"workspace_id":   workspaces[0].ID,
+		"workflow_id":    workflows[0].ID,
+		"title":          strings.Repeat("x", service.TaskTitleMaxLength+1),
+		"start_agent":    false,
+	}))
+	require.NoError(t, err)
+	assertWSError(t, resp, ws.ErrorCodeValidation)
+
+	tasks, err := svc.ListTasks(ctx, workflows[0].ID)
+	require.NoError(t, err)
+	assert.Len(t, tasks, 1, "validation failure must not persist a task")
 }
 
 // TestHandleAddBranchToTask_RejectsMultipleLocators pins the mutual-exclusion
@@ -360,6 +557,182 @@ func TestSessionStateEventsIncludeUpdatedAt(t *testing.T) {
 			assert.Equal(t, updatedSession.UpdatedAt.UTC().Format(time.RFC3339Nano), gotUpdatedAt)
 		})
 	}
+}
+
+func TestSetSessionRunning_PublishesTaskStateBeforeSession(t *testing.T) {
+	svc, repo, eventBus := newTestTaskServiceWithEventBus(t)
+	const taskID = "task-clarification-order"
+	const sessionID = "session-clarification-order"
+	seedMCPHandlerSession(t, repo, taskID, sessionID, models.TaskSessionStateWaitingForInput)
+	require.NoError(t, repo.UpdateTaskState(context.Background(), taskID, v1.TaskStateReview))
+
+	var published []string
+	sub, err := eventBus.Subscribe(">", func(_ context.Context, event *bus.Event) error {
+		switch event.Type {
+		case events.TaskStateChanged, events.TaskSessionStateChanged:
+			published = append(published, event.Type)
+		}
+		return nil
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = sub.Unsubscribe() })
+
+	h := &Handlers{
+		taskSvc:     svc,
+		sessionRepo: repo,
+		taskRepo:    repo,
+		eventBus:    eventBus,
+		logger:      testLogger(t).WithFields(),
+	}
+	h.setSessionRunning(context.Background(), taskID, sessionID)
+
+	require.Equal(t, []string{events.TaskStateChanged, events.TaskSessionStateChanged}, published)
+	task, err := repo.GetTask(context.Background(), taskID)
+	require.NoError(t, err)
+	assert.Equal(t, v1.TaskStateInProgress, task.State)
+}
+
+type failingClarificationTaskRepository struct {
+	repository.TaskRepository
+	err error
+}
+
+func (r failingClarificationTaskRepository) UpdateTaskStateIfSessionState(
+	context.Context,
+	string,
+	string,
+	models.TaskSessionState,
+	v1.TaskState,
+) (v1.TaskState, bool, error) {
+	return v1.TaskStateReview, false, r.err
+}
+
+func newClarificationTaskService(
+	t *testing.T,
+	repo *sqliterepo.Repository,
+	tasks repository.TaskRepository,
+	eventBus *bus.MemoryEventBus,
+) *service.Service {
+	t.Helper()
+	return service.NewService(service.Repos{
+		Workspaces:   repo,
+		Tasks:        tasks,
+		TaskRepos:    repo,
+		Workflows:    repo,
+		Messages:     repo,
+		Turns:        repo,
+		Sessions:     repo,
+		GitSnapshots: repo,
+		RepoEntities: repo,
+		Executors:    repo,
+		Environments: repo,
+		Reviews:      repo,
+	}, eventBus, testLogger(t), service.RepositoryDiscoveryConfig{})
+}
+
+func TestSetSessionRunning_PreservesSessionEventOnTaskServiceError(t *testing.T) {
+	_, repo, eventBus := newTestTaskServiceWithEventBus(t)
+	const taskID = "task-clarification-service-error"
+	const sessionID = "session-clarification-service-error"
+	seedMCPHandlerSession(t, repo, taskID, sessionID, models.TaskSessionStateWaitingForInput)
+	require.NoError(t, repo.UpdateTaskState(context.Background(), taskID, v1.TaskStateReview))
+
+	failingSvc := newClarificationTaskService(t, repo, failingClarificationTaskRepository{
+		TaskRepository: repo,
+		err:            errors.New("task state write failed"),
+	}, eventBus)
+	var published []string
+	sub, err := eventBus.Subscribe(">", func(_ context.Context, event *bus.Event) error {
+		published = append(published, event.Type)
+		return nil
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = sub.Unsubscribe() })
+
+	h := &Handlers{
+		taskSvc:     failingSvc,
+		sessionRepo: repo,
+		taskRepo:    repo,
+		eventBus:    eventBus,
+		logger:      testLogger(t).WithFields(),
+	}
+	h.setSessionRunning(context.Background(), taskID, sessionID)
+
+	require.Equal(t, []string{events.TaskSessionStateChanged}, published)
+	session, err := repo.GetTaskSession(context.Background(), sessionID)
+	require.NoError(t, err)
+	assert.Equal(t, models.TaskSessionStateRunning, session.State)
+}
+
+func TestSetSessionRunning_QueuesSessionAfterBusyTaskPublication(t *testing.T) {
+	svc, repo, eventBus := newTestTaskServiceWithEventBus(t)
+	const taskID = "task-clarification-busy-queue"
+	const sessionID = "session-clarification-busy-queue"
+	seedMCPHandlerSession(t, repo, taskID, sessionID, models.TaskSessionStateWaitingForInput)
+	require.NoError(t, repo.UpdateTaskState(context.Background(), taskID, v1.TaskStateReview))
+
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	var mu sync.Mutex
+	var published []string
+	first := true
+	sub, err := eventBus.Subscribe(">", func(_ context.Context, event *bus.Event) error {
+		mu.Lock()
+		published = append(published, event.Type)
+		block := first
+		first = false
+		mu.Unlock()
+		if block {
+			close(entered)
+			<-release
+		}
+		return nil
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = sub.Unsubscribe() })
+
+	ordinaryDone := make(chan struct{})
+	go func() {
+		svc.PublishTaskUpdated(context.Background(), &models.Task{
+			ID:             taskID,
+			WorkspaceID:    "ws-state-event",
+			Title:          "ordinary",
+			WorkflowID:     "wf-state-event",
+			WorkflowStepID: "step-state-event",
+		})
+		close(ordinaryDone)
+	}()
+	<-entered
+
+	h := &Handlers{
+		taskSvc:     svc,
+		sessionRepo: repo,
+		taskRepo:    repo,
+		eventBus:    eventBus,
+		logger:      testLogger(t).WithFields(),
+	}
+	resumeDone := make(chan struct{})
+	go func() {
+		h.setSessionRunning(context.Background(), taskID, sessionID)
+		close(resumeDone)
+	}()
+	select {
+	case <-resumeDone:
+	case <-time.After(time.Second):
+		t.Fatal("clarification resume waited for the busy task publication")
+	}
+
+	close(release)
+	<-ordinaryDone
+
+	mu.Lock()
+	got := append([]string(nil), published...)
+	mu.Unlock()
+	require.Equal(t, []string{
+		events.TaskUpdated,
+		events.TaskStateChanged,
+		events.TaskSessionStateChanged,
+	}, got)
 }
 
 func TestHandleCreateTask_SubtaskMissingDescription(t *testing.T) {

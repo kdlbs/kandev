@@ -17,15 +17,19 @@ import type {
   PluginRegistry,
   PluginRouteOptions,
   RepositoryProviderRegistration,
-  ReviewItemSummary,
-  ReviewTaskPipelineState,
-  ReviewTaskStatus,
   ReviewProviderRegistration,
   SlotComponent,
   TaskActionRegistration,
+  TaskMenuActionRegistration,
+  TaskPanelRegistration,
   WsHandler,
 } from "./types";
 import type { ComponentType } from "react";
+import {
+  normalizeReviewItems,
+  pluginSlotOrderingId,
+  taskActionKey,
+} from "./registry-normalization";
 
 interface Owned<T> {
   pluginId: string;
@@ -70,6 +74,16 @@ export interface PluginIntegrationSettingsRegistration extends IntegrationSettin
   pluginId: string;
 }
 
+/**
+ * Nav item plus the owning pluginId — what `getNavRegistrations()` returns.
+ * Navigation needs the owner because `NavItem.id` is plugin-local: two plugins
+ * may register the same id, and the navigation manifest builds its React keys
+ * from it (`lib/navigation/plugin-destinations.ts`).
+ */
+export interface PluginNavRegistration extends NavItem {
+  pluginId: string;
+}
+
 interface SlotRegistration {
   registrationId: string;
   orderingId: string;
@@ -102,6 +116,25 @@ const CORE_INTEGRATION_SETTINGS_IDS = new Set([
 const INTEGRATION_SETTINGS_ID_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const CORE_REPOSITORY_PROVIDER_IDS = new Set(["github", "gitlab", "azure_devops"]);
 
+/** Task panel registration plus the owning pluginId — what `getTaskPanels()` returns. */
+export interface PluginTaskPanelRegistration extends TaskPanelRegistration {
+  pluginId: string;
+}
+
+/** Task menu action registration plus the owning pluginId. */
+export interface PluginTaskMenuActionRegistration extends TaskMenuActionRegistration {
+  pluginId: string;
+}
+
+/** Host-owned lifecycle states used to reconcile registrations with UI state. */
+export type PluginLifecycleStatus = "loading" | "ready" | "failed" | "removed";
+
+/** A generation-fenced lifecycle snapshot; never exposed through PluginRegistry. */
+export interface PluginLifecycleSnapshot {
+  status: PluginLifecycleStatus;
+  generation: number;
+}
+
 function removeByPlugin<T>(list: Owned<T>[], pluginId: string): Owned<T>[] {
   return list.filter((entry) => entry.pluginId !== pluginId);
 }
@@ -123,9 +156,13 @@ class PluginRegistryStore {
   private declaredRepositoryProviderIds = new Map<string, Set<string>>();
   private abortControllersByPlugin = new Map<string, Set<AbortController>>();
   private reviewUnsubscribersByPlugin = new Map<string, Set<() => void>>();
+  private taskPanels: Owned<TaskPanelRegistration>[] = [];
+  private taskMenuActions: Owned<TaskMenuActionRegistration>[] = [];
   private nextSlotRegistrationId = 0;
   /** Display names from the boot payload, used for derived page-chrome titles. */
   private pluginNames = new Map<string, string>();
+  /** Host-owned lifecycle state; plugin-facing registries only expose registrations. */
+  private pluginLifecycles = new Map<string, PluginLifecycleSnapshot>();
   /**
    * Keybinding ids declared in each plugin's `ui.keybindings` manifest,
    * synced by the shortcut dispatcher (`hooks/use-plugin-shortcuts.ts`) from
@@ -145,6 +182,27 @@ class PluginRegistryStore {
   };
 
   getVersion = (): number => this.version;
+
+  getPluginLifecycle(pluginId: string): PluginLifecycleSnapshot | undefined {
+    const snapshot = this.pluginLifecycles.get(pluginId);
+    return snapshot ? { ...snapshot } : undefined;
+  }
+
+  markPluginLoading(pluginId: string, generation: number): void {
+    this.setPluginLifecycle(pluginId, "loading", generation);
+  }
+
+  markPluginReady(pluginId: string, generation: number): void {
+    this.setPluginLifecycle(pluginId, "ready", generation);
+  }
+
+  markPluginFailed(pluginId: string, generation: number): void {
+    this.setPluginLifecycle(pluginId, "failed", generation);
+  }
+
+  markPluginRemoved(pluginId: string, generation: number): void {
+    this.setPluginLifecycle(pluginId, "removed", generation);
+  }
 
   registerRoute(
     pluginId: string,
@@ -211,6 +269,27 @@ class PluginRegistryStore {
     this.notify();
   }
 
+  /**
+   * Removes exactly one previously registered WS handler (matched by
+   * reference equality), without touching any of the plugin's other
+   * registrations. Used by `host.storage.subscribe`'s returned unsubscribe
+   * function so an individual subscription can end without the plugin being
+   * disabled/uninstalled (which already bulk-revokes via unregisterPlugin).
+   * A no-op if the handler is already gone (e.g. the plugin was unregistered
+   * first).
+   */
+  unregisterWsHandler(pluginId: string, action: string, handler: WsHandler): void {
+    const index = this.wsHandlers.findIndex(
+      (entry) =>
+        entry.pluginId === pluginId &&
+        entry.value.action === action &&
+        entry.value.handler === handler,
+    );
+    if (index === -1) return;
+    this.wsHandlers.splice(index, 1);
+    this.notify();
+  }
+
   registerKeybinding(pluginId: string, id: string, handler: (event: KeyboardEvent) => void): void {
     const declared = this.declaredKeybindingIds.get(pluginId);
     if (declared && !declared.has(id)) {
@@ -219,6 +298,16 @@ class PluginRegistryStore {
       );
     }
     this.keybindingHandlers.push({ pluginId, value: { id, handler } });
+    this.notify();
+  }
+
+  registerTaskPanel(pluginId: string, registration: TaskPanelRegistration): void {
+    this.taskPanels.push({ pluginId, value: registration });
+    this.notify();
+  }
+
+  registerTaskMenuAction(pluginId: string, registration: TaskMenuActionRegistration): void {
+    this.taskMenuActions.push({ pluginId, value: registration });
     this.notify();
   }
 
@@ -301,6 +390,8 @@ class PluginRegistryStore {
     this.providerOwners.forEach((owner, providerId) => {
       if (owner === pluginId) this.providerOwners.delete(providerId);
     });
+    this.taskPanels = removeByPlugin(this.taskPanels, pluginId);
+    this.taskMenuActions = removeByPlugin(this.taskMenuActions, pluginId);
     this.pluginNames.delete(pluginId);
     this.declaredKeybindingIds.delete(pluginId);
     this.declaredRepositoryProviderIds.delete(pluginId);
@@ -332,8 +423,18 @@ class PluginRegistryStore {
     return entry ? { ...entry.value, pluginId: entry.pluginId } : undefined;
   }
 
+  /**
+   * Nav items without their owner. Use `getNavRegistrations()` for anything that
+   * needs a globally unique identity; this stays for callers that only read the
+   * item's own fields (e.g. deriving a page title from a path).
+   */
   getNavItems(): NavItem[] {
     return this.navItems.map((entry) => entry.value);
+  }
+
+  /** Nav items plus the pluginId that registered each one, in registration order. */
+  getNavRegistrations(): PluginNavRegistration[] {
+    return this.navItems.map((entry) => ({ ...entry.value, pluginId: entry.pluginId }));
   }
 
   getSlotComponents(slot: string): SlotComponent[] {
@@ -421,6 +522,28 @@ class PluginRegistryStore {
     return entry ? { ...entry.value, pluginId: entry.pluginId } : undefined;
   }
 
+  /** Every registered task panel, in registration order. */
+  getTaskPanels(): PluginTaskPanelRegistration[] {
+    return this.taskPanels.map((entry) => ({ ...entry.value, pluginId: entry.pluginId }));
+  }
+
+  /** The registration for a specific `pluginId`/panel `id`, if still registered. */
+  getTaskPanel(pluginId: string, id: string): PluginTaskPanelRegistration | undefined {
+    const entry = this.taskPanels.find(
+      (candidate) => candidate.pluginId === pluginId && candidate.value.id === id,
+    );
+    return entry ? { ...entry.value, pluginId: entry.pluginId } : undefined;
+  }
+
+  /** Every registered task menu action, optionally filtered to one group. */
+  getTaskMenuActions(
+    group?: TaskMenuActionRegistration["group"],
+  ): PluginTaskMenuActionRegistration[] {
+    return this.taskMenuActions
+      .filter((entry) => !group || entry.value.group === group)
+      .map((entry) => ({ ...entry.value, pluginId: entry.pluginId }));
+  }
+
   /** Registry view scoped to one plugin — matches the frozen `PluginRegistry` contract. */
   forPlugin(pluginId: string, pluginName?: string): PluginRegistry {
     if (pluginName) this.pluginNames.set(pluginId, pluginName);
@@ -438,6 +561,8 @@ class PluginRegistryStore {
       registerRepositoryProvider: (provider) => this.registerRepositoryProvider(pluginId, provider),
       registerTaskAction: (action) => this.registerTaskAction(pluginId, action),
       registerReviewProvider: (provider) => this.registerReviewProvider(pluginId, provider),
+      registerTaskPanel: (registration) => this.registerTaskPanel(pluginId, registration),
+      registerTaskMenuAction: (registration) => this.registerTaskMenuAction(pluginId, registration),
     };
   }
 
@@ -555,7 +680,9 @@ class PluginRegistryStore {
       this.keybindingHandlers.length +
       this.repositoryProviders.size +
       this.taskActions.size +
-      this.reviewProviders.size
+      this.reviewProviders.size +
+      this.taskPanels.length +
+      this.taskMenuActions.length
     );
   }
 
@@ -563,123 +690,23 @@ class PluginRegistryStore {
     this.version += 1;
     this.listeners.forEach((listener) => listener());
   }
-}
 
-function taskActionKey(pluginId: string, actionId: string): string {
-  return `${pluginId}:${actionId}`;
-}
-
-function normalizeReviewItems(
-  providerId: string,
-  items: readonly ReviewItemSummary[],
-): readonly ReviewItemSummary[] {
-  return items.flatMap((item) => {
+  private setPluginLifecycle(
+    pluginId: string,
+    status: PluginLifecycleStatus,
+    generation: number,
+  ): void {
+    const current = this.pluginLifecycles.get(pluginId);
     if (
-      item.providerId !== providerId ||
-      !item.reviewKey ||
-      !item.title ||
-      !item.url ||
-      !item.repositoryId ||
-      !item.state
+      current &&
+      (generation < current.generation ||
+        (generation === current.generation && current.status === status))
     ) {
-      return [];
+      return;
     }
-    const statusBadge = item.statusBadge?.label
-      ? {
-          label: item.statusBadge.label,
-          ...(item.statusBadge.tone ? { tone: item.statusBadge.tone } : {}),
-        }
-      : undefined;
-    const taskStatus = normalizeReviewTaskStatus(item.taskStatus);
-    return [
-      {
-        providerId,
-        reviewKey: item.reviewKey,
-        title: item.title,
-        url: item.url,
-        repositoryId: item.repositoryId,
-        state: item.state,
-        ...(statusBadge ? { statusBadge } : {}),
-        ...(taskStatus ? { taskStatus } : {}),
-      },
-    ];
-  });
-}
-
-const REVIEW_TASK_STATES = new Set<ReviewTaskStatus["state"]>([
-  "open",
-  "merged",
-  "closed",
-  "draft",
-]);
-const REVIEW_PIPELINE_STATES = new Set<ReviewTaskPipelineState>([
-  "success",
-  "failure",
-  "pending",
-  "neutral",
-]);
-
-function normalizeReviewTaskStatus(status: ReviewTaskStatus | undefined): ReviewTaskStatus | null {
-  if (
-    !status ||
-    (typeof status.number !== "string" && typeof status.number !== "number") ||
-    !REVIEW_TASK_STATES.has(status.state) ||
-    !REVIEW_PIPELINE_STATES.has(status.pipelineState) ||
-    !Array.isArray(status.checks)
-  ) {
-    return null;
+    this.pluginLifecycles.set(pluginId, { status, generation });
+    this.notify();
   }
-  const checks = status.checks.flatMap((check) => {
-    if (!check.id || !check.label || !REVIEW_PIPELINE_STATES.has(check.state)) return [];
-    return [
-      {
-        id: check.id,
-        label: check.label,
-        state: check.state,
-        ...(check.detail ? { detail: check.detail } : {}),
-        ...(check.url ? { url: check.url } : {}),
-      },
-    ];
-  });
-  const review = normalizeReviewTaskReview(status.review);
-  return {
-    number: status.number,
-    state: status.state,
-    pipelineState: status.pipelineState,
-    checks,
-    ...(review ? { review } : {}),
-    ...(typeof status.unresolvedComments === "number" && status.unresolvedComments >= 0
-      ? { unresolvedComments: status.unresolvedComments }
-      : {}),
-    ...(status.loading === true ? { loading: true } : {}),
-    ...(status.error ? { error: status.error } : {}),
-    ...(typeof status.updatedAt === "number" ? { updatedAt: status.updatedAt } : {}),
-  };
-}
-
-function normalizeReviewTaskReview(review: ReviewTaskStatus["review"]) {
-  if (
-    !review ||
-    !["approved", "changes_requested", "pending"].includes(review.state) ||
-    !Number.isFinite(review.approved) ||
-    review.approved < 0
-  ) {
-    return null;
-  }
-  return {
-    state: review.state,
-    approved: review.approved,
-    ...(Number.isFinite(review.required) && (review.required ?? -1) >= 0
-      ? { required: review.required }
-      : {}),
-    ...(Number.isFinite(review.requested) && (review.requested ?? -1) >= 0
-      ? { requested: review.requested }
-      : {}),
-  };
-}
-
-function pluginSlotOrderingId(pluginId: string, slot: string, ordinal: number): string {
-  return `plugin:${encodeURIComponent(pluginId)}:${encodeURIComponent(slot)}:${ordinal}`;
 }
 
 export const pluginRegistry = new PluginRegistryStore();

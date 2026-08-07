@@ -7,6 +7,13 @@ description: "Set up Kandev, find the owning subsystem, run focused checks, upda
 
 Kandev combines a Go server and native launcher, a Vite/React web client, a TypeScript development supervisor and npm shim, a Tauri desktop shell, and task-environment helpers. Begin at the subsystem that owns the behavior; do not recreate its rules in a neighboring layer.
 
+## Quick path
+
+1. Run `make bootstrap` once in a fresh checkout.
+2. Use `make dev` for normal full-stack work.
+3. Find the owning backend, web, CLI, desktop, or runtime boundary before editing.
+4. Run focused checks, update public docs, and leave a small reviewable diff.
+
 ## Set up the repository
 
 The pinned toolchain in `mise.toml` currently includes Node 24, pnpm 9.15.9, Go 1.26.0, and supporting tools.
@@ -25,7 +32,7 @@ make bootstrap
 make dev
 ```
 
-This is the normal development path. The TypeScript supervisor starts the Go backend and Vite, selects available ports, points Go at Vite, and isolates application state under the checkout's `.kandev-dev/`. Use the printed URLs.
+This is the normal development path. The TypeScript supervisor starts the Go backend and Vite, selects available ports, points Go at Vite, and isolates application state under the checkout's `.kandev-dev/`. Use the printed URLs. Backend logs append to `.kandev-dev/logs/backend-logs.log`; startup prints the resolved path.
 
 `make dev-web` starts only Vite on its fixed development port; it has no live API by itself. `make dev-backend` starts only the backend with the normal production-profile home unless you override it. For an intentionally isolated backend-only run:
 
@@ -33,7 +40,7 @@ This is the normal development path. The TypeScript supervisor starts the Go bac
 KANDEV_HOME_DIR="$PWD/.kandev-dev" KANDEV_DEBUG_DEV_MODE=true make dev-backend
 ```
 
-Use `make build` for a production build. Use `make start` for a production-shaped local start; it installs dependencies, builds and synchronizes the embedded web application, then launches Kandev.
+Use `make build` for a production build. Use `make start` for a production-shaped local start; it installs dependencies, builds and synchronizes the embedded web application, then launches Kandev and writes `<resolved-home>/logs/backend-logs.log`.
 
 ## Find the owner
 

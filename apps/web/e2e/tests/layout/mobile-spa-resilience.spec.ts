@@ -144,7 +144,7 @@ test.describe("Mobile SPA resilience", () => {
     expectNoUnexpectedIssues(issues, isExpectedPersistentChunkConsole);
   });
 
-  test("opens a multi-repository picker when optional task hydration fails", async ({
+  test("keeps a multi-repository task usable without a mobile repository switcher when optional hydration fails", async ({
     testPage,
     apiClient,
     seedData,
@@ -233,16 +233,15 @@ test.describe("Mobile SPA resilience", () => {
       releaseFailures.resolve();
       await Promise.all([repositorySettled.promise, sessionSettled.promise]);
 
-      const repoPill = testPage.getByTestId("mobile-repo-pill");
-      await expect(repoPill).toBeVisible();
-      await repoPill.tap();
-
-      const picker = testPage.getByRole("dialog");
-      await expect(picker.getByText("Repositories", { exact: true })).toBeVisible();
-      await expect(testPage.getByTestId(`mobile-repo-row-${seedData.repositoryId}`)).toBeVisible();
-      await expect(testPage.getByTestId(`mobile-repo-row-${secondaryRepo.id}`)).toBeVisible();
+      const activeMobileTaskLayout = testPage.locator("[data-testid='mobile-task-layout']:visible");
+      await expect(activeMobileTaskLayout).toHaveCount(1);
+      await expect(activeMobileTaskLayout.getByTestId("mobile-sessions-pill")).toBeVisible();
+      await expect(activeMobileTaskLayout.getByTestId("mobile-repo-pill")).toHaveCount(0);
       await expect(testPage.locator("#root")).not.toBeEmpty();
-      await assertNoDocumentHorizontalOverflow(testPage, "mobile repository picker recovery");
+      await assertNoDocumentHorizontalOverflow(
+        testPage,
+        "mobile task recovery without repository switcher",
+      );
 
       expect(repositoryFailures).toBe(1);
       expect(sessionFailures).toBe(1);

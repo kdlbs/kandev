@@ -379,21 +379,127 @@ func TestHumanFollowupWaitsWithoutForegroundHandoff(t *testing.T) {
 	}
 }
 
-func TestPromptHandoffCapabilityIsAdapterAttested(t *testing.T) {
+// TestPromptHandoffCapabilityIsNegotiatedNotNamed pins the ADR-0049 rule that
+// eligibility comes from the agent's advertisement, not its identity: a
+// name-matching agent that does not advertise is ineligible, and an unnamed agent
+// that does advertise is eligible.
+func TestPromptHandoffCapabilityIsNegotiatedNotNamed(t *testing.T) {
 	for _, test := range []struct {
+		name    string
 		agentID string
+		caps    sdk.AgentCapabilities
 		want    bool
 	}{
-		{agentID: claudeAgentID, want: true},
-		{agentID: mockAgentID, want: true},
-		{agentID: codexAgentID, want: false},
-		{agentID: "other-acp", want: false},
+		{
+			name:    "advertised",
+			agentID: claudeAgentID,
+			caps:    promptQueueingCapabilities(true),
+			want:    true,
+		},
+		{
+			name:    "claude that does not advertise is ineligible",
+			agentID: claudeAgentID,
+			caps:    sdk.AgentCapabilities{},
+			want:    false,
+		},
+		{
+			name:    "mock that does not advertise is ineligible",
+			agentID: mockAgentID,
+			caps:    sdk.AgentCapabilities{},
+			want:    false,
+		},
+		{
+			name:    "unnamed agent that advertises is eligible",
+			agentID: "other-acp",
+			caps:    promptQueueingCapabilities(true),
+			want:    true,
+		},
+		{
+			name:    "codex without the advertisement",
+			agentID: codexAgentID,
+			caps:    sdk.AgentCapabilities{},
+			want:    false,
+		},
+		{
+			name:    "explicit false",
+			agentID: claudeAgentID,
+			caps:    promptQueueingCapabilities(false),
+			want:    false,
+		},
 	} {
-		a := newTestAdapter()
-		a.agentID = test.agentID
-		if got := a.supportsPromptHandoff(); got != test.want {
-			t.Fatalf("agent %q handoff support = %t, want %t", test.agentID, got, test.want)
-		}
-		_ = a.Close()
+		t.Run(test.name, func(t *testing.T) {
+			a := newTestAdapter()
+			a.agentID = test.agentID
+			a.promptQueueing = agentAdvertisesPromptQueueing(test.caps)
+			if got := a.supportsPromptHandoff(); got != test.want {
+				t.Fatalf("agent %q handoff support = %t, want %t", test.agentID, got, test.want)
+			}
+			_ = a.Close()
+		})
+	}
+}
+
+func promptQueueingCapabilities(queueing bool) sdk.AgentCapabilities {
+	return sdk.AgentCapabilities{
+		Meta: map[string]any{
+			"claudeCode": map[string]any{promptQueueingMetaKey: queueing},
+		},
+	}
+}
+
+// TestAgentAdvertisesPromptQueueingFailsClosed covers every malformed shape the
+// untyped `_meta` map can arrive in over the wire.
+func TestAgentAdvertisesPromptQueueingFailsClosed(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		caps sdk.AgentCapabilities
+	}{
+		{name: "nil meta", caps: sdk.AgentCapabilities{}},
+		{
+			name: "empty meta",
+			caps: sdk.AgentCapabilities{Meta: map[string]any{}},
+		},
+		{
+			name: "namespace missing",
+			caps: sdk.AgentCapabilities{Meta: map[string]any{"other": map[string]any{}}},
+		},
+		{
+			name: "namespace not an object",
+			caps: sdk.AgentCapabilities{Meta: map[string]any{"claudeCode": "yes"}},
+		},
+		{
+			name: "namespace nil",
+			caps: sdk.AgentCapabilities{Meta: map[string]any{"claudeCode": nil}},
+		},
+		{
+			name: "key missing",
+			caps: sdk.AgentCapabilities{
+				Meta: map[string]any{"claudeCode": map[string]any{"toolName": "Monitor"}},
+			},
+		},
+		{
+			name: "value is a string",
+			caps: sdk.AgentCapabilities{
+				Meta: map[string]any{"claudeCode": map[string]any{promptQueueingMetaKey: "true"}},
+			},
+		},
+		{
+			name: "value is a number",
+			caps: sdk.AgentCapabilities{
+				Meta: map[string]any{"claudeCode": map[string]any{promptQueueingMetaKey: 1}},
+			},
+		},
+		{
+			name: "value is nil",
+			caps: sdk.AgentCapabilities{
+				Meta: map[string]any{"claudeCode": map[string]any{promptQueueingMetaKey: nil}},
+			},
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if agentAdvertisesPromptQueueing(test.caps) {
+				t.Fatalf("%s: advertised prompt queueing, want fail-closed false", test.name)
+			}
+		})
 	}
 }

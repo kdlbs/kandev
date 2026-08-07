@@ -4,12 +4,24 @@ import { ToastProvider } from "@/components/toast-provider";
 import type { GitHubStatus } from "@/lib/types/github";
 import { GitHubPersonalSettings } from "./github-status";
 
-const mocks = vi.hoisted(() => ({ status: null as GitHubStatus | null }));
+const mocks = vi.hoisted(() => ({
+  status: null as GitHubStatus | null,
+  loading: false,
+}));
 vi.mock("@/hooks/domains/github/use-github-status", () => ({
-  useGitHubStatus: () => ({ status: mocks.status, loaded: true, loading: false, refresh: vi.fn() }),
+  useGitHubStatus: () => ({
+    status: mocks.status,
+    loaded: true,
+    loading: mocks.loading,
+    refresh: vi.fn(),
+  }),
 }));
 
-afterEach(() => cleanup());
+afterEach(() => {
+  cleanup();
+  mocks.status = null;
+  mocks.loading = false;
+});
 
 function renderPersonal() {
   return render(
@@ -60,5 +72,14 @@ describe("GitHubPersonalSettings", () => {
     renderPersonal();
     expect(screen.getByRole("button", { name: /Connect identity/ })).toBeTruthy();
     expect(screen.getByText(/never given to managed agents/)).toBeTruthy();
+  });
+
+  it("keeps the current identity visible while refreshing", () => {
+    mocks.status = status("github_app_installation");
+    mocks.loading = true;
+    renderPersonal();
+
+    expect(screen.getByTestId("github-personal-identity")).toBeTruthy();
+    expect(screen.getByText("octocat", { exact: true })).toBeTruthy();
   });
 });

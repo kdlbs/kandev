@@ -432,6 +432,96 @@ func TestHTTPCreateTask_ProjectIDReachesOfficePath(t *testing.T) {
 	assert.Equal(t, "wf-office", repo.captured.WorkflowID, "office workflow should be auto-resolved")
 }
 
+func TestHTTPCreateTaskAutoTitleUsesPromptWordsAndPendingMarker(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	log := newTestLogger(t)
+	repo := &captureCreateTaskRepo{}
+	svc := service.NewService(service.Repos{
+		Workspaces: repo, Tasks: repo, TaskRepos: repo,
+		Workflows: repo, Messages: repo, Turns: repo,
+		Sessions: repo, GitSnapshots: repo, RepoEntities: repo,
+		Executors: repo, Environments: repo, TaskEnvironments: repo,
+		Reviews: repo,
+	}, nil, log, service.RepositoryDiscoveryConfig{})
+	svc.SetWorkflowStepGetter(repo)
+	h := &TaskHandlers{service: svc, logger: log}
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/tasks", strings.NewReader(`{
+		"workspace_id":"ws-1",
+		"workflow_id":"wf-1",
+		"workflow_step_id":"step-1",
+		"auto_title":true,
+		"description":"  Add\n a better   task title for this request  "
+	}`))
+	c.Request.Header.Set("Content-Type", "application/json")
+
+	h.httpCreateTask(c)
+
+	require.Equal(t, http.StatusOK, rec.Code, "body: %s", rec.Body.String())
+	require.NotNil(t, repo.captured)
+	assert.Equal(t, "Add a better task title for", repo.captured.Title)
+	assert.True(t, models.IsAgentTitlePending(repo.captured.Metadata))
+}
+
+func TestHTTPCreateTaskAutoTitleRequiresPrompt(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	log := newTestLogger(t)
+	repo := &captureCreateTaskRepo{}
+	svc := service.NewService(service.Repos{
+		Workspaces: repo, Tasks: repo, TaskRepos: repo,
+		Workflows: repo, Messages: repo, Turns: repo,
+		Sessions: repo, GitSnapshots: repo, RepoEntities: repo,
+		Executors: repo, Environments: repo, TaskEnvironments: repo,
+		Reviews: repo,
+	}, nil, log, service.RepositoryDiscoveryConfig{})
+	h := &TaskHandlers{service: svc, logger: log}
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/tasks", strings.NewReader(`{
+		"workspace_id":"ws-1",
+		"workflow_id":"wf-1",
+		"auto_title":true,
+		"description":"   "
+	}`))
+	c.Request.Header.Set("Content-Type", "application/json")
+
+	h.httpCreateTask(c)
+
+	assert.Equal(t, http.StatusBadRequest, rec.Code, "body: %s", rec.Body.String())
+	assert.Nil(t, repo.captured)
+}
+
+func TestHTTPCreateTaskRejectsOverlongTitle(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	log := newTestLogger(t)
+	repo := &captureCreateTaskRepo{}
+	svc := service.NewService(service.Repos{
+		Workspaces: repo, Tasks: repo, TaskRepos: repo,
+		Workflows: repo, Messages: repo, Turns: repo,
+		Sessions: repo, GitSnapshots: repo, RepoEntities: repo,
+		Executors: repo, Environments: repo, TaskEnvironments: repo,
+		Reviews: repo,
+	}, nil, log, service.RepositoryDiscoveryConfig{})
+	h := &TaskHandlers{service: svc, logger: log}
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/tasks", strings.NewReader(`{
+		"workspace_id": "ws-1",
+		"workflow_id": "wf-1",
+		"title": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+	}`))
+	c.Request.Header.Set("Content-Type", "application/json")
+
+	h.httpCreateTask(c)
+
+	assert.Equal(t, http.StatusBadRequest, rec.Code, "body: %s", rec.Body.String())
+	assert.Nil(t, repo.captured, "overlong title must not reach repository persistence")
+}
+
 func TestHTTPCreateTaskRecordsFinalLastUsedSelections(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	log := newTestLogger(t)
@@ -640,6 +730,36 @@ func TestWSCreateTaskRecordsFinalLastUsedSelections(t *testing.T) {
 		AgentProfileID:    "agent-2",
 		ExecutorProfileID: "exec-profile-2",
 	}, recorder.got)
+}
+
+func TestWSCreateTaskReturnsValidationErrorForOverlongTitle(t *testing.T) {
+	log := newTestLogger(t)
+	repo := &captureCreateTaskRepo{}
+	svc := service.NewService(service.Repos{
+		Workspaces: repo, Tasks: repo, TaskRepos: repo,
+		Workflows: repo, Messages: repo, Turns: repo,
+		Sessions: repo, GitSnapshots: repo, RepoEntities: repo,
+		Executors: repo, Environments: repo, TaskEnvironments: repo,
+		Reviews: repo,
+	}, nil, log, service.RepositoryDiscoveryConfig{})
+	h := &TaskHandlers{service: svc, logger: log}
+
+	msg, err := ws.NewRequest("msg-title", ws.ActionTaskCreate, map[string]any{
+		"workspace_id": "ws-1",
+		"workflow_id":  "wf-1",
+		"title":        "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+	})
+	require.NoError(t, err)
+
+	resp, err := h.wsCreateTask(context.Background(), msg)
+
+	require.NoError(t, err)
+	require.Equal(t, ws.MessageTypeError, resp.Type)
+	var payload ws.ErrorPayload
+	require.NoError(t, json.Unmarshal(resp.Payload, &payload))
+	assert.Equal(t, ws.ErrorCodeValidation, payload.Code)
+	assert.Contains(t, payload.Message, "60")
+	assert.Nil(t, repo.captured, "overlong title must not reach repository persistence")
 }
 
 func TestWSCreateTaskRecordsFreshBranchRequestBase(t *testing.T) {
@@ -1477,8 +1597,8 @@ func (r *freshBranchIdentityRepository) CreateTaskRepository(_ context.Context, 
 
 func TestCommitFreshBranchUsesPersistedTaskRepositoryIdentity(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	realRepoPath := initHandlerGitRepository(t, filepath.Join(t.TempDir(), "real"))
-	decoyRepoPath := initHandlerGitRepository(t, filepath.Join(t.TempDir(), "decoy"))
+	realRepoPath := initHandlerGitRepository(t, filepath.Join(canonicalTempDir(t), "real"))
+	decoyRepoPath := initHandlerGitRepository(t, filepath.Join(canonicalTempDir(t), "decoy"))
 	repo := &freshBranchIdentityRepository{
 		task: &models.Task{ID: "task-1", WorkspaceID: "ws-1"},
 		taskRepos: []*models.TaskRepository{{
@@ -1545,6 +1665,16 @@ func TestCommitFreshBranchRollsBackTaskWhenPersistedRepositoriesCannotBeLoaded(t
 	if !repo.deletedTask {
 		t.Fatal("created task was not rolled back")
 	}
+}
+
+// canonicalTempDir returns t.TempDir() with symlinks resolved, matching how production canonicalizes local paths.
+func canonicalTempDir(t *testing.T) string {
+	t.Helper()
+	resolved, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatalf("EvalSymlinks: %v", err)
+	}
+	return resolved
 }
 
 func initHandlerGitRepository(t *testing.T, path string) string {

@@ -6,7 +6,6 @@ import {
   IconArrowRight,
   IconLoader,
   IconLogicBuffer,
-  IconPencil,
   IconTrash,
   IconUnlink,
 } from "@tabler/icons-react";
@@ -34,6 +33,10 @@ import {
 } from "@/components/task/task-move-context-menu";
 import { cn } from "@/lib/utils";
 import { buildLinkSubmenu } from "./kanban-card-link-submenu";
+import type { PluginTaskMenuContext } from "@/lib/plugins/types";
+import { buildEditMenuEntry } from "./kanban-card-edit-submenu";
+import { useTranslation } from "react-i18next";
+import { t } from "@/lib/i18n";
 
 type ItemEntry = {
   kind: "item";
@@ -101,17 +104,34 @@ type BuildKanbanCardMenuEntriesArgs = {
   pluginLinkActions?: KanbanPluginLinkAction[];
   onMoveToStep?: (stepId: string) => void;
   onSendToWorkflow?: (workflowId: string, stepId: string) => void;
+  /** Defaults to an empty-id context (no visible plugin actions match it in practice). */
+  pluginMenuContext?: PluginTaskMenuContext;
 };
 
+const EMPTY_PLUGIN_MENU_CONTEXT: PluginTaskMenuContext = {
+  workspaceId: "",
+  taskId: "",
+  taskTitle: "",
+  workflowStepId: null,
+  presentation: "desktop",
+};
+
+function resolvePluginMenuContext(context?: PluginTaskMenuContext): PluginTaskMenuContext {
+  return context ?? EMPTY_PLUGIN_MENU_CONTEXT;
+}
+
 function StepBadges({ step, isCurrent }: { step: TaskMoveStep; isCurrent: boolean }) {
+  const { t } = useTranslation();
   const hasAutoStart = stepHasAutoStart(step);
   if (!isCurrent && !hasAutoStart) return null;
 
   return (
     <span className="ml-auto flex items-center gap-1 text-[10px] text-muted-foreground">
-      {isCurrent && <span data-testid={`task-context-step-current-${step.id}`}>Current</span>}
+      {isCurrent && (
+        <span data-testid={`task-context-step-current-${step.id}`}>{t("kanban:current")}</span>
+      )}
       {hasAutoStart && (
-        <span data-testid={`task-context-step-autostart-${step.id}`}>Auto-start</span>
+        <span data-testid={`task-context-step-autostart-${step.id}`}>{t("kanban:autoStart")}</span>
       )}
     </span>
   );
@@ -154,7 +174,7 @@ function buildMoveToCurrentWorkflowSubmenu({
     key: "move-to",
     testId: "task-context-move-to",
     icon: <IconArrowRight className="mr-2 h-4 w-4" />,
-    label: "Move to",
+    label: t("kanban:moveTo"),
     disabled,
     className: "w-48",
     children: steps.map((step) => buildStepEntry(step, currentStepId, onMoveToStep)),
@@ -181,7 +201,7 @@ function buildWorkflowTargetEntry({
       label: <span className="flex-1 truncate">{workflow.name}</span>,
       trailing: (
         <span data-testid="task-context-disabled-reason" className="ml-2 text-[10px]">
-          No steps
+          {t("kanban:noSteps")}
         </span>
       ),
     };
@@ -220,7 +240,7 @@ function buildSendToWorkflowSubmenu({
     key: "send-to-workflow",
     testId: "task-context-send-to-workflow",
     icon: <IconLogicBuffer className="mr-2 h-4 w-4" />,
-    label: "Send to workflow",
+    label: t("kanban:sendToWorkflow"),
     disabled,
     className: "w-56",
     children: targets.map((workflow) =>
@@ -257,19 +277,17 @@ export function buildKanbanCardMenuEntries({
   pluginLinkActions,
   onMoveToStep,
   onSendToWorkflow,
+  pluginMenuContext,
 }: BuildKanbanCardMenuEntriesArgs): KanbanCardMenuEntry[] {
   const visibleWorkflows = workflows.filter((workflow) => !workflow.hidden);
   const currentSteps = currentWorkflowId ? (stepsByWorkflowId[currentWorkflowId] ?? []) : [];
   const isProcessing = Boolean(disabled || isDeleting || isArchiving || isDetaching);
   const entries: KanbanCardMenuEntry[] = [
-    {
-      kind: "item",
-      key: "edit",
-      icon: <IconPencil className="mr-2 h-4 w-4" />,
-      label: "Edit",
-      disabled: isProcessing || !onEdit,
-      onSelect: onEdit,
-    },
+    buildEditMenuEntry({
+      onEdit,
+      disabled: isProcessing,
+      context: resolvePluginMenuContext(pluginMenuContext),
+    }),
   ];
 
   const moveToEntry = buildMoveToCurrentWorkflowSubmenu({
@@ -309,7 +327,7 @@ export function buildKanbanCardMenuEntries({
     ) : (
       <IconArchive className="mr-2 h-4 w-4" />
     ),
-    label: "Archive",
+    label: t("kanban:archive"),
     disabled: isProcessing || !onArchive,
     onSelect: onArchive,
   });
@@ -326,7 +344,7 @@ export function buildKanbanCardMenuEntries({
     ) : (
       <IconTrash className="mr-2 h-4 w-4" />
     ),
-    label: "Delete",
+    label: t("kanban:delete"),
     destructive: true,
     disabled: isProcessing || !onDelete,
     onSelect: onDelete,
@@ -353,7 +371,7 @@ function buildDetachEntry({
     ) : (
       <IconUnlink className="mr-2 h-4 w-4" />
     ),
-    label: "Detach from parent",
+    label: t("kanban:detachFromParent"),
     disabled: isProcessing,
     onSelect: onDetach,
   };

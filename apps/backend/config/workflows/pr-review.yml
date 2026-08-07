@@ -70,11 +70,31 @@ steps:
 
       Review across these layers (skip layers that don't apply):
 
+      ARCHITECTURAL FIT (highest priority):
+      - Changes belong in the correct layer/module and follow the dependency direction used by the codebase
+      - Business/domain logic is not placed in controllers, transport handlers, repositories, data sources, or infrastructure code
+      - Controllers handle protocol concerns, use cases orchestrate workflows, repositories define persistence needs, and data sources handle external systems
+      - Domain/application code does not depend on frameworks, transport models, database models, or vendor-specific types
+      - Changes do not bypass existing boundaries, duplicate responsibilities, or introduce unnecessary coupling between modules or domains
+      - New interfaces and abstractions have clear ownership and represent a meaningful boundary, rather than wrapping a single implementation
+      - Compare with neighbouring features and established patterns, but flag deviations only when they create a real architectural or maintainability problem
+      - Treat fundamental architectural misplacement or broken dependency direction as a blocker
+
+      DATA & STATE MODELLING:
+      - Domain entities, value objects, DTOs, persistence models, and external API models remain separate where their responsibilities differ
+      - State transitions and invariants are explicit and cannot create invalid or partially updated state
+      - There is a single clear source of truth; state or business rules are not duplicated across layers
+      - Nullability, optional fields, defaults, and invalid combinations are modelled deliberately
+      - Persistence schemas or transport types are not leaking implementation details into domain/application contracts
+      - Concurrency, retries, partial failures, and duplicate requests cannot corrupt state or apply transitions more than once
+      - Backward compatibility, migrations, and mixed-version behaviour are considered when contracts or persisted data change
+
       Security (blockers if found):
       - No secrets, tokens, or credentials in code
       - Input validation at system boundaries (user input, API handlers, external data)
       - No SQL injection, XSS, command injection, or path traversal
       - Auth and authorization checks on new endpoints
+      - No insecure crypto (MD5/SHA1 for passwords, weak random)
 
       Logic & correctness:
       - Edge cases handled (empty input, nil/null, zero, max values)
@@ -84,11 +104,9 @@ steps:
       Performance:
       - No N+1 queries (loop with individual DB calls)
       - No memory leaks (unclosed connections, streams, listeners)
-      - Algorithm complexity appropriate for the data scale
-
-      Architecture:
-      - New abstractions justified — no over-engineering
-      - Concerns cleanly separated (single responsibility)
+      - Algorithm complexity appropriate for the data scale (O(n^2) where O(n) is possible)
+      - Unnecessary allocations in loops, regex compilation in hot paths, or unbounded resource growth
+      - Prefer structured concurrency (errgroup, conc) over raw primitives
 
       Code quality:
       - No dead code, unused imports, or commented-out code
@@ -123,15 +141,18 @@ steps:
 
       AFTER SUBMITTING THE REVIEW:
 
-      Use update_task_pr_automation_kandev to enable all three task-bound
-      notifications:
+      Enable all three task-bound lifecycle notifications on whichever
+      provider this task's linked review target is on:
+      - GitHub pull request: use update_task_pr_automation_kandev
+      - GitLab merge request: use update_task_mr_automation_kandev
+      In both cases set:
       - prompt_on_review_requested: true
       - prompt_on_merged: true
       - prompt_on_closed: true
 
-      These settings keep this review task subscribed to the related PR. Kandev
-      will prompt the task again if review is requested after feedback is
-      addressed, or when the PR is merged or closed.
+      These settings keep this review task subscribed to the related PR/MR.
+      Kandev will prompt the task again if review is requested after feedback
+      is addressed, or when the PR/MR is merged or closed.
 
       NOT A FINDING (skip these):
       - Issues on lines or files the PR didn't modify — even if they are real bugs

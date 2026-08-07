@@ -12,8 +12,10 @@ package orchestrator
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
+	"io"
 	"regexp"
 	"strconv"
 	"strings"
@@ -22,6 +24,7 @@ import (
 
 	"go.uber.org/zap"
 
+	runtimeapi "github.com/kandev/kandev/internal/agent/runtime"
 	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/logger"
@@ -37,9 +40,12 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/workflow/engine"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
-	"github.com/kandev/kandev/internal/worktree"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
+
+func isNoActiveTurnError(err error) bool {
+	return errors.Is(err, sql.ErrNoRows)
+}
 
 // Common errors
 var (
@@ -53,6 +59,19 @@ type ServiceConfig struct {
 	QueueSize                     int
 	QueueGroup                    string
 	ClaudeBackgroundPromptHandoff bool
+
+	// ClaudeMidTurnSteering enables delivering a prompt into a still-generating
+	// turn for an agent that advertised prompt queueing. Independent of
+	// ClaudeBackgroundPromptHandoff, which covers the foreground-idle handoff.
+	ClaudeMidTurnSteering bool
+}
+
+// AttachmentReader is the narrow attachment-store seam needed when the
+// orchestrator delivers claimed descriptors to a passthrough agent.
+// Keeping this interface local avoids coupling the coordinator to lifecycle's
+// concrete package while preserving the same structural contract.
+type AttachmentReader interface {
+	OpenClaimed(ctx context.Context, id, taskID, sessionID string) (io.ReadCloser, string, string, int64, error)
 }
 
 // DefaultServiceConfig returns default configuration
@@ -200,6 +219,7 @@ type sessionExecutorStore interface {
 	UpdateSessionMetadata(ctx context.Context, sessionID string, metadata map[string]interface{}) error
 	SetSessionMetadataKey(ctx context.Context, sessionID, key string, value interface{}) error
 	SetSessionMetadataKeyIfAbsent(ctx context.Context, sessionID, key string, value interface{}) (bool, error)
+	UpdateSessionContextWindow(ctx context.Context, sessionID string, contextWindow map[string]interface{}) (int64, error)
 	SetSessionACPSessionID(ctx context.Context, sessionID, acpSessionID string) (bool, error)
 	// Executor running state
 	ListExecutorsRunning(ctx context.Context) ([]*models.ExecutorRunning, error)
@@ -218,6 +238,10 @@ type sessionExecutorStore interface {
 	GetExecutor(ctx context.Context, id string) (*models.Executor, error)
 	// Task
 	GetTask(ctx context.Context, id string) (*models.Task, error)
+	// ClaimTaskTitleSession atomically assigns the first eligible session to a
+	// pending task title. The second return value reports a new claim rather
+	// than an idempotent same-owner observation.
+	ClaimTaskTitleSession(ctx context.Context, taskID, sessionID string) (owned bool, newlyClaimed bool, err error)
 	UpdateTask(ctx context.Context, task *models.Task) error
 	ListChildCompletionRows(ctx context.Context, parentID string) ([]models.ChildCompletionRow, error)
 	// Git snapshots and commits
@@ -244,6 +268,34 @@ type sessionExecutorStore interface {
 	GetTaskEnvironmentByTaskID(ctx context.Context, taskID string) (*models.TaskEnvironment, error)
 	CreateTaskEnvironment(ctx context.Context, env *models.TaskEnvironment) error
 	UpdateTaskEnvironment(ctx context.Context, env *models.TaskEnvironment) error
+}
+
+// ClaimTaskTitleSession claims the first-turn generated-title handoff for a
+// task. The repository owns the compare-and-set; the orchestrator publishes a
+// task update only when this call creates a new owner.
+func (s *Service) ClaimTaskTitleSession(ctx context.Context, taskID, sessionID string) (bool, error) {
+	if taskID == "" || sessionID == "" {
+		return false, nil
+	}
+	task, err := s.repo.GetTask(ctx, taskID)
+	if err != nil {
+		return false, err
+	}
+	if !models.IsAgentTitlePending(task.Metadata) {
+		return false, nil
+	}
+	owned, newlyClaimed, err := s.repo.ClaimTaskTitleSession(ctx, taskID, sessionID)
+	if err != nil {
+		return false, err
+	}
+	if newlyClaimed {
+		claimedTask, reloadErr := s.repo.GetTask(ctx, taskID)
+		if reloadErr != nil {
+			return false, reloadErr
+		}
+		s.publishTaskUpdated(ctx, claimedTask)
+	}
+	return owned, nil
 }
 
 // Service is the main orchestrator service
@@ -282,6 +334,11 @@ type Service struct {
 	// entry points that name a task rather than a session (session.launch,
 	// session.ensure). Nil = unscoped.
 	taskAccessCheck func(ctx context.Context, taskID string) error
+
+	// titleBranchRuntime performs the lifecycle-owned Git branch rename after
+	// an agent resolves a prompt-first task title. It is optional for tests and
+	// installations that do not configure an agent runtime.
+	titleBranchRuntime titleBranchRuntime
 
 	// Workflow step getter for prompt building
 	workflowStepGetter WorkflowStepGetter
@@ -331,6 +388,14 @@ type Service struct {
 	// ciAutomationInFlight prevents PR feedback and task-PR update events from
 	// racing duplicate auto-fix prompts or merge calls for the same PR.
 	ciAutomationInFlight sync.Map
+
+	// GitLab MR lifecycle notification automation. Nil-safe: without it,
+	// gitlab.task_mr.updated events are observed but no lifecycle prompt is
+	// ever evaluated.
+	gitlabMRAutomation taskMRAgentAutomationService
+	// mrAutomationInFlight prevents overlapping poll ticks from running the
+	// lifecycle evaluation pass twice for the same (task, repository, iid).
+	mrAutomationInFlight sync.Map
 
 	// Office task-handoffs materializer (phase 6 wiring) — invoked from
 	// PrepareTaskSession to flip workspace groups to materialized once
@@ -399,6 +464,18 @@ type Service struct {
 	gitlabService      GitLabWatchService
 	gitlabReviewSource *GitLabReviewWatcherSource
 	gitlabIssueSource  *GitLabIssueWatcherSource
+	// Azure DevOps watcher service + sources for work-item and pull-request
+	// polling events. The integration publishes provider-native matches; the
+	// shared watcher coordinator owns task creation and throttling.
+	azureDevOpsService     AzureDevOpsWatchService
+	azureWorkItemSource    *AzureDevOpsWorkItemWatcherSource
+	azurePullRequestSource *AzureDevOpsPullRequestWatcherSource
+
+	// gitlabMRLinkService auto-links merge requests opened outside Kandev's
+	// Create-PR action, mirroring what githubService does for PRs. Separate
+	// from gitlabService (the review/issue watch surface) — see
+	// GitLabMRLinkService's doc comment.
+	gitlabMRLinkService GitLabMRLinkService
 
 	// Repository resolver for cloning + finding/creating repos for review tasks
 	repositoryResolver RepositoryResolver
@@ -406,10 +483,20 @@ type Service struct {
 	// Automation service for handling automation triggers
 	automationService AutomationService
 
-	// Worktree manager — used to clean up ephemeral worktrees for run-mode
-	// automation tasks immediately on completion rather than waiting for
-	// the 24h Office GC. Nil-safe.
-	worktreeMgr *worktree.Manager
+	// Worktree reaper — reclaims the workspaces of automation runs that have
+	// aged out of the per-automation retention window. Nil-safe: most tests
+	// construct the service without one, and an install with no worktree
+	// manager simply keeps every run's checkout. Set via SetWorktreeManager.
+	worktreeReaper automationWorktreeReaper
+
+	// unreclaimedWorkspaces holds the automation runs whose workspace removal
+	// was attempted and did not actually free the directory. Retention selects
+	// candidates by "still has a live worktree row", and a failed removal can
+	// leave a run with no live row and a full checkout, invisible to every
+	// later sweep — this is how it gets retried instead of written off. See
+	// queueAutomationWorkspaceReclaim.
+	unreclaimedWorkspaces   map[string]struct{}
+	unreclaimedWorkspacesMu sync.Mutex
 
 	// Clarification canceller — cancels pending clarifications when agent's turn completes
 	clarificationCanceller ClarificationCanceller
@@ -429,34 +516,14 @@ type Service struct {
 	// Active turns map: sessionID -> turnID
 	activeTurns sync.Map
 
-	// dispatchingQueued tracks, per session, the entry ID of whichever
-	// queued message was most recently taken and handed off to the async
-	// executeQueuedMessage goroutine, but hasn't yet reached promptTask's
-	// own setSessionRunning call — the only point at which session.State
-	// itself starts correctly reporting "busy" for that dispatch. Without
-	// this, a second take-and-dispatch decision for the same session (a
-	// workflow drain, a manual drain, or another parent interrupt) could
-	// acquire the cancelInFlight guard in that gap, see the still-idle
-	// session.State, and dispatch a second, unrelated queued entry before
-	// the first dispatch's turn has even started.
-	//
-	// Stores the entry ID (string), not a bool: a newer dispatch for the
-	// same session (e.g. a second parent interrupt cancelling and
-	// re-taking) always supersedes an older one that's still settling —
-	// markQueuedDispatchInFlight unconditionally overwrites. Each
-	// goroutine must reconfirm it still owns *its own* entry ID
-	// (isCurrentQueuedDispatch) immediately before calling
-	// setSessionRunning, and may only clear the marker via a
-	// compare-and-delete keyed on that same entry ID
-	// (clearQueuedDispatchInFlightIfCurrent) — otherwise a superseded
-	// goroutine finishing late could delete a newer dispatch's marker out
-	// from under it, or proceed to prompt after it no longer owns the
-	// session. Non-cancelling take-and-dispatch paths
-	// (drainQueuedMessageForPromptableSessionLocked, takeIfPromptableLocked)
-	// instead use isQueuedDispatchInFlight, which only asks "is *anything*
-	// still settling" — they have no cancel to supersede it with, so any
-	// in-flight dispatch at all is reason enough to defer.
-	dispatchingQueued sync.Map
+	// dispatchingQueued tracks the pre-acceptance reservation for the exact
+	// queued message handed to an async worker. acceptedQueuedDispatch keeps
+	// the same ownership visible after the worker claims RUNNING until its turn
+	// settles, so Send Now cannot cancel or duplicate a successor that FIFO has
+	// already accepted. The two maps are managed by queued_dispatch.go and are
+	// arbitrated through cancelInFlight.
+	dispatchingQueued      sync.Map
+	acceptedQueuedDispatch sync.Map
 
 	// afterReadyLifecycleReservation is a deterministic test seam for the
 	// narrow interval after handleAgentReady releases its per-session guard
@@ -500,6 +567,11 @@ type Service struct {
 	// completed-execution stream markers.
 	executionTeardownClaims sync.Map
 
+	// steerInFlight tracks sessions with an unacknowledged mid-turn steer.
+	// The spec allows at most one in-flight steer per session; a second attempt
+	// while one is outstanding queues instead. Keyed by sessionID, cleared when
+	// the steer dispatch is accepted or fails.
+	steerInFlight sync.Map
 	// Session reset flags: sessionID -> true while resetAgentContext is restarting process.
 	// Used to suppress stale ready events and avoid draining queued prompts mid-reset.
 	resetInProgressSessions sync.Map
@@ -528,15 +600,18 @@ type Service struct {
 	cancelInFlightMu sync.Mutex
 	// cancelInFlight holds one *cancelInFlightGuard per session with an
 	// active reference — an in-progress or waiting claim from CancelAgent
-	// (the user cancel button — TryLock, dedup impatient retries), the
-	// natural turn-completion/boot-ready drain decision in handleAgentReady
-	// / handleAgentBootReady (TryLock, skip if a cancel/interrupt owns it),
+	// (the user cancel button, with duplicate and cross-source calls joined by
+	// the unified cancellation operation registry), the natural turn-completion/boot-ready drain
+	// decision in handleAgentReady / handleAgentBootReady (blocking while an
+	// active cancellation marker yields),
 	// or QueueAndInterruptForPeerMessage (blocking Lock — must wait rather
 	// than work around a busy lock with an unguarded insert; see its doc
-	// comment). All of these must go through the same per-session guard —
-	// a second, independent lock for any of them would defeat the mutual
-	// exclusion the others rely on to avoid racing each other's
-	// take-and-dispatch decision for the same session.
+	// comment), or an agent stream handler persisting output (blocking Lock so
+	// cancellation cannot commit while a stream side effect is in flight).
+	// All of these must go through the same per-session guard — a second,
+	// independent lock for any of them would defeat the mutual exclusion the
+	// others rely on to avoid racing each other's take-and-dispatch decision
+	// for the same session.
 	//
 	// Entries are reference-counted (acquireCancelInFlightGuard /
 	// releaseCancelInFlightGuard) and pruned once nobody holds a reference,
@@ -544,6 +619,27 @@ type Service struct {
 	// growing by one permanent entry per session ever created over a
 	// long-lived backend's lifetime.
 	cancelInFlight map[string]*cancelInFlightGuard
+
+	// cancellationOperations is the single per-session ownership boundary for
+	// every lifecycle cancellation source: explicit user cancel, silent
+	// clarification recovery, and peer-message interrupts. The owner keeps the
+	// operation in this map across the lifecycle wait and source-specific
+	// reconciliation so all other state claimants either join it or defer.
+	cancellationOperationsMu sync.Mutex
+	cancellationOperations   map[string]*cancelOperation
+
+	// cancelOperations tracks cancellation intent separately from the shared
+	// cancelInFlight mutex. Stream and lifecycle handlers use that mutex to
+	// serialize their side effects, but they are not themselves cancellations;
+	// treating every mutex holder as a cancellation would make agent.boot_ready
+	// discard a legitimate boot signal while a stream frame is being persisted.
+	// Values hold the reference count, process-local transition revision, and
+	// publication queue for each session. Entries remain after the count reaches
+	// zero so a later operation cannot reuse an older revision. The single mutex
+	// makes each count transition and its queued publication one atomic state change; event-bus
+	// sends happen after releasing it so one slow bus cannot delay other sessions.
+	cancelOperationsMu sync.Mutex
+	cancelOperations   map[string]*cancellationOperationState
 
 	// transientRetries tracks in-progress transient-provider-error (529
 	// Overloaded) retry loops. key: sessionID, value: *transientRetryEntry.
@@ -560,6 +656,15 @@ type Service struct {
 	mu        sync.RWMutex
 	running   bool
 	startedAt time.Time
+
+	// sendNowWorkers owns the asynchronous replacement handoffs. The context
+	// is cancelled during Stop so a claimed durable source gets a bounded
+	// recovery attempt before shutdown returns.
+	sendNowMu      sync.Mutex
+	sendNowCtx     context.Context
+	sendNowCancel  context.CancelFunc
+	sendNowStopped bool
+	sendNowWorkers sync.WaitGroup
 }
 
 // Status contains orchestrator status information
@@ -626,6 +731,7 @@ func NewService(
 	}
 
 	// Create the service (watcher will be created after we have handlers)
+	sendNowCtx, sendNowCancel := context.WithCancel(context.Background())
 	s := &Service{
 		config:                       cfg,
 		logger:                       svcLogger,
@@ -639,7 +745,10 @@ func NewService(
 		messageQueue:                 msgQueue,
 		clarificationWatchdogTimeout: 15 * time.Second,
 		gitSnapshotCache:             newGitSnapshotCache(),
+		sendNowCtx:                   sendNowCtx,
+		sendNowCancel:                sendNowCancel,
 	}
+	exec.SetOnContextWindowReset(s.clearContextWindowForReset)
 
 	// Wire executor state changes through the orchestrator so events are published
 	// (e.g. WebSocket notifications to the frontend). Must be set after service
@@ -736,6 +845,12 @@ func (s *Service) SetMessageCreator(mc MessageCreator) {
 	s.messageCreator = mc
 }
 
+// SetAttachmentReader wires the backend attachment store into passthrough
+// prompt delivery so claimed descriptors can be streamed into the workspace.
+func (s *Service) SetAttachmentReader(reader AttachmentReader) {
+	s.executor.SetAttachmentReader(reader)
+}
+
 // SetOnPrimarySessionSet sets a callback on the executor for when the first session
 // of a task is marked primary. Used to publish a task.updated event so the frontend
 // receives the primary_session_id.
@@ -777,6 +892,12 @@ func (s *Service) EnsureRepositoryClonedForSession(
 // for executor git and gh operations.
 func (s *Service) SetGitHubCredentialBroker(issuer executor.GitHubCredentialLeaseIssuer, endpoint string) {
 	s.executor.SetGitHubCredentialBroker(issuer, endpoint)
+}
+
+// SetAgentctlBinaryPath configures the host agentctl executable used by
+// managed Git during Local and Worktree preparation.
+func (s *Service) SetAgentctlBinaryPath(path string) {
+	s.executor.SetAgentctlBinaryPath(path)
 }
 
 // SetTaskGitCredentialPolicyResolver configures non-secret workspace policy lookup.
@@ -1172,19 +1293,111 @@ func (s *Service) startTurnForSessionWithOwnership(ctx context.Context, sessionI
 // query the DB for any open turn and close it. Loops to mop up multiple
 // zombies (e.g. left over from before this fix) with a small sanity bound.
 func (s *Service) completeTurnForSession(ctx context.Context, sessionID string) {
+	s.clearAcceptedQueuedDispatch(sessionID)
 	s.completeTurnForTaskSession(ctx, "", sessionID)
 }
 
 func (s *Service) completeTurnForTaskSession(ctx context.Context, taskID, sessionID string) {
+	// Stream-only completion paths call this helper directly rather than the
+	// session wrapper. Clear the accepted queued-dispatch ownership here too,
+	// otherwise a completed Send Now/FIFO successor can permanently block the
+	// next queue action.
+	s.clearAcceptedQueuedDispatch(sessionID)
+	if err := s.completeTurnForTaskSessionChecked(ctx, taskID, sessionID); err != nil {
+		s.logger.Warn("failed to reconcile active turn",
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+	}
+}
+
+// completeTurnForTaskSessionChecked closes every open turn for a session and
+// returns an error unless the turn service confirms that none remain. The
+// regular lifecycle paths use completeTurnForTaskSession, which preserves
+// their best-effort behavior; cancellation uses this checked variant because
+// workflow completion must not run while the cancelled turn is still open.
+func (s *Service) completeTurnForTaskSessionChecked(ctx context.Context, taskID, sessionID string) error {
+	return s.completeTurnForTaskSessionCheckedOwned(ctx, taskID, sessionID, "")
+}
+
+// completeTurnForTaskSessionCheckedOwned is the cancellation-specific form of
+// turn settlement. When expectedTurnID is non-empty, it closes only that turn
+// and fails closed if a different turn is active. This prevents a late cancel
+// response from sweeping a successor turn that started after the cancelled
+// turn's terminal frames were delivered.
+func (s *Service) completeTurnForTaskSessionCheckedOwned(ctx context.Context, taskID, sessionID, expectedTurnID string) error {
+	if err := s.verifyExpectedTurnOwnership(ctx, sessionID, expectedTurnID); err != nil {
+		return err
+	}
+
 	// Foreground ownership ends with the turn, but detached background work can
 	// outlive it. Preserve those registrations for accounting; full cleanup
 	// belongs to execution/session teardown paths.
 	s.yieldForegroundAndPublish(ctx, taskID, sessionID, foregroundYieldTurnCompletion)
 
 	if s.turnService == nil {
-		return
+		return nil
 	}
 
+	if expectedTurnID != "" {
+		return s.completeExpectedTurn(ctx, sessionID, expectedTurnID)
+	}
+
+	return s.completeAllTurns(ctx, sessionID)
+}
+
+func (s *Service) verifyExpectedTurnOwnership(ctx context.Context, sessionID, expectedTurnID string) error {
+	if s.turnService == nil || expectedTurnID == "" {
+		return nil
+	}
+	turn, err := s.turnService.GetActiveTurn(ctx, sessionID)
+	if err != nil {
+		if isNoActiveTurnError(err) {
+			return nil
+		}
+		return fmt.Errorf("look up captured active turn: %w", err)
+	}
+	if turn != nil && turn.ID != expectedTurnID {
+		return fmt.Errorf("captured cancelled turn %s was superseded by active turn %s", expectedTurnID, turn.ID)
+	}
+	return nil
+}
+
+func (s *Service) completeExpectedTurn(ctx context.Context, sessionID, expectedTurnID string) error {
+	turn, err := s.turnService.GetActiveTurn(ctx, sessionID)
+	if err != nil {
+		if isNoActiveTurnError(err) {
+			return nil
+		}
+		return fmt.Errorf("look up captured active turn: %w", err)
+	}
+	if turn == nil {
+		return nil
+	}
+	if turn.ID != expectedTurnID {
+		return fmt.Errorf("captured cancelled turn %s was superseded by active turn %s", expectedTurnID, turn.ID)
+	}
+	if err := s.turnService.CompleteTurn(ctx, expectedTurnID); err != nil {
+		return fmt.Errorf("complete captured turn %s: %w", expectedTurnID, err)
+	}
+	active, err := s.turnService.GetActiveTurn(ctx, sessionID)
+	if err != nil {
+		if isNoActiveTurnError(err) {
+			s.activeTurns.CompareAndDelete(sessionID, expectedTurnID)
+			return nil
+		}
+		return fmt.Errorf("verify captured turn closure: %w", err)
+	}
+	if active == nil {
+		s.activeTurns.CompareAndDelete(sessionID, expectedTurnID)
+		return nil
+	}
+	if active.ID != expectedTurnID {
+		return fmt.Errorf("captured cancelled turn %s was superseded by active turn %s", expectedTurnID, active.ID)
+	}
+	return fmt.Errorf("captured cancelled turn %s remains open", expectedTurnID)
+}
+
+func (s *Service) completeAllTurns(ctx context.Context, sessionID string) error {
 	s.activeTurns.Delete(sessionID)
 
 	const maxIterations = 16
@@ -1192,34 +1405,35 @@ func (s *Service) completeTurnForTaskSession(ctx context.Context, taskID, sessio
 	for closed < maxIterations {
 		turn, err := s.turnService.GetActiveTurn(ctx, sessionID)
 		if err != nil {
-			s.logger.Warn("failed to look up active turn",
-				zap.String("session_id", sessionID),
-				zap.Error(err))
-			return
+			if isNoActiveTurnError(err) {
+				return nil
+			}
+			return fmt.Errorf("look up active turn: %w", err)
 		}
 		if turn == nil {
-			return
+			return nil
 		}
 		if err := s.turnService.CompleteTurn(ctx, turn.ID); err != nil {
 			// GetActiveTurn returns the latest open turn — retrying here
 			// would just hit the same row and loop. Bail; the next
 			// completeTurnForSession call will pick it up.
-			s.logger.Warn("failed to complete turn; will retry on next sweep",
-				zap.String("session_id", sessionID),
-				zap.String("turn_id", turn.ID),
-				zap.Error(err))
-			return
+			return fmt.Errorf("complete turn %s: %w", turn.ID, err)
 		}
 		closed++
 	}
-	// Only warn if turns are *still* accumulating after the cap. Closing
-	// exactly maxIterations turns and then finding the session clean is not a
-	// runaway.
-	if turn, err := s.turnService.GetActiveTurn(ctx, sessionID); err == nil && turn != nil {
-		s.logger.Warn("completeTurnForSession iteration cap hit; possible turn close loop",
-			zap.String("session_id", sessionID),
-			zap.Int("max_iterations", maxIterations))
+	// Verify after the cap. Closing exactly maxIterations turns and then
+	// finding the session clean is a successful reconciliation, not a runaway.
+	turn, err := s.turnService.GetActiveTurn(ctx, sessionID)
+	if err != nil {
+		if isNoActiveTurnError(err) {
+			return nil
+		}
+		return fmt.Errorf("verify active turn closure: %w", err)
 	}
+	if turn != nil {
+		return fmt.Errorf("active turn %s remains after %d closure attempts", turn.ID, maxIterations)
+	}
+	return nil
 }
 
 // completeTurnIfCurrent closes turnID only when it is still sessionID's active
@@ -1290,80 +1504,15 @@ func (s *Service) peekActiveTurnID(ctx context.Context, sessionID string) (strin
 	}
 	turn, err := s.turnService.GetActiveTurn(ctx, sessionID)
 	if err != nil {
+		if isNoActiveTurnError(err) {
+			return "", nil
+		}
 		return "", err
 	}
 	if turn == nil {
 		return "", nil
 	}
 	return turn.ID, nil
-}
-
-// markQueuedDispatchInFlight records that entryID — a specific queued
-// message — has been taken and handed off to the async
-// executeQueuedMessage goroutine for sessionID. Unconditionally
-// overwrites any previous entry for the session: a newer dispatch always
-// supersedes an older one that's still settling. See the
-// Service.dispatchingQueued field doc comment for why this exists:
-// session.State alone doesn't reflect "busy" until that goroutine's own
-// promptTask call reaches setSessionRunning, several DB round-trips
-// later — and for why the token must be the specific entry ID, not a bare
-// bool.
-func (s *Service) markQueuedDispatchInFlight(sessionID, entryID string) {
-	if sessionID == "" {
-		return
-	}
-	s.dispatchingQueued.Store(sessionID, entryID)
-}
-
-// clearQueuedDispatchInFlightIfCurrent removes sessionID's in-flight
-// marker only if it still names entryID — a compare-and-delete so a
-// goroutine whose own dispatch has since been superseded by a newer one
-// (a different entryID overwrote the marker) can never clear the
-// *newer* dispatch's marker out from under it. Called by
-// executeQueuedMessage via defer so the marker is cleared on every exit
-// path (success, transient requeue, superseded, or lost/dropped message)
-// — but only when this goroutine is still the current owner.
-func (s *Service) clearQueuedDispatchInFlightIfCurrent(sessionID, entryID string) {
-	if sessionID == "" {
-		return
-	}
-	s.dispatchingQueued.CompareAndDelete(sessionID, entryID)
-}
-
-// isCurrentQueuedDispatch reports whether entryID is still the most
-// recently handed-off in-flight dispatch for sessionID — i.e. no *other*
-// dispatch has superseded it since markQueuedDispatchInFlight was called
-// for it. A goroutine that owns entryID must confirm this immediately
-// before calling setSessionRunning (see promptTask's claimDispatch
-// parameter); if it no longer owns the token, a different dispatch has
-// already taken over the session and this one must not proceed.
-func (s *Service) isCurrentQueuedDispatch(sessionID, entryID string) bool {
-	if sessionID == "" {
-		return false
-	}
-	v, ok := s.dispatchingQueued.Load(sessionID)
-	if !ok {
-		return false
-	}
-	current, _ := v.(string)
-	return current == entryID
-}
-
-// isQueuedDispatchInFlight reports whether *any* queued message is
-// currently in the handoff window for sessionID, regardless of which one
-// — see markQueuedDispatchInFlight. Checked by
-// drainQueuedMessageForPromptableSessionLocked and takeIfPromptableLocked
-// before either takes and directly dispatches another entry on the same
-// session without a cancel to supersede whatever is already settling; a
-// genuine cancel (cancelAndTakeForPeerMessage) is exempt — see its own
-// doc comment for why it may proceed regardless and simply overwrite the
-// token via markQueuedDispatchInFlight.
-func (s *Service) isQueuedDispatchInFlight(sessionID string) bool {
-	if sessionID == "" {
-		return false
-	}
-	_, ok := s.dispatchingQueued.Load(sessionID)
-	return ok
 }
 
 func (s *Service) setSessionResetInProgress(sessionID string, inProgress bool) {
@@ -1401,6 +1550,7 @@ func (s *Service) Start(ctx context.Context) error {
 	s.mu.Unlock()
 
 	s.logger.Info("starting orchestrator service")
+	s.resetSendNowWorkers()
 
 	// Reconcile session state from persisted runtime state on startup.
 	// This does NOT launch any agent processes — sessions are recovered lazily
@@ -1434,6 +1584,9 @@ func (s *Service) Start(ctx context.Context) error {
 
 	// Subscribe to GitLab integration events
 	s.subscribeGitLabEvents()
+
+	// Subscribe to Azure DevOps watcher events
+	s.subscribeAzureDevOpsEvents()
 
 	// Subscribe to JIRA integration events
 	s.subscribeJiraEvents()
@@ -1491,6 +1644,7 @@ func (s *Service) Stop() error {
 
 	s.cancelAllClarificationWatchdogs()
 	s.cancelAllTransientRetries()
+	s.stopSendNowWorkers()
 
 	if len(errs) > 0 {
 		return errs[0]
@@ -1675,11 +1829,25 @@ func (s *Service) handleMissingSessionOnStartup(ctx context.Context, running *mo
 		return
 	}
 	if err := s.agentManager.StopAgentWithReason(ctx, executionID, "startup missing session cleanup", true); err != nil {
-		s.logger.Warn("failed to stop missing-session runtime; preserving executor record",
+		// A not-found stop for a runtime whose row is a confirmed-dead LOCAL
+		// process means the runtime is already gone — treat it as an idempotent
+		// successful stop and prune/repair the row under the resume-safety
+		// invariant, so the orphan row does not survive restarts forever. Any
+		// other error (alive/unknown/remote row, or a non-not-found failure) is
+		// preserved and left for a later attempt.
+		if !stopReportsRuntimeAbsent(err) || s.rowLiveness(running) != models.ProcessLivenessDead {
+			s.logger.Warn("failed to stop missing-session runtime; preserving executor record",
+				zap.String("session_id", sessionID),
+				zap.String("task_id", running.TaskID),
+				zap.String("execution_id", executionID),
+				zap.Error(err))
+			return
+		}
+		s.logger.Info("missing-session runtime already gone (confirmed dead); pruning executor record",
 			zap.String("session_id", sessionID),
 			zap.String("task_id", running.TaskID),
-			zap.String("execution_id", executionID),
-			zap.Error(err))
+			zap.String("execution_id", executionID))
+		s.pruneOrRepairExecutorRow(ctx, running, models.TaskSessionStateCancelled)
 		return
 	}
 	if err := s.repo.DeleteExecutorRunningBySessionID(ctx, sessionID); err != nil {
@@ -1688,6 +1856,17 @@ func (s *Service) handleMissingSessionOnStartup(ctx context.Context, running *mo
 			zap.String("task_id", running.TaskID),
 			zap.Error(err))
 	}
+}
+
+// stopReportsRuntimeAbsent reports whether a stop error means the runtime is
+// already gone (a typed not-found sentinel), as opposed to a transient failure.
+// Only a typed sentinel counts — a generic store/lookup error must never be
+// reinterpreted as an absent runtime. The runtime seam (lifecycleAdapter)
+// normalizes the backend lifecycle not-found sentinel to runtimeapi.ErrNotFound,
+// so reconciliation depends only on the public runtime and executor sentinels.
+func stopReportsRuntimeAbsent(err error) bool {
+	return errors.Is(err, runtimeapi.ErrNotFound) ||
+		errors.Is(err, executor.ErrExecutionNotFound)
 }
 
 func (s *Service) abandonOpenTurnsOnStartup(ctx context.Context, sessionID, reason string) {
@@ -1718,15 +1897,8 @@ func (s *Service) handleTerminalSessionOnStartup(ctx context.Context, session *m
 			zap.String("task_id", session.TaskID),
 			zap.String("state", string(previousState)))
 		s.abandonOpenTurnsOnStartup(ctx, sessionID, "terminal session cleanup")
-		executionID := strings.TrimSpace(running.AgentExecutionID)
-		if executionID != "" && s.agentManager != nil {
-			if err := s.agentManager.StopAgentWithReason(ctx, executionID, "startup terminal session cleanup", true); err != nil {
-				s.logger.Warn("failed to stop terminal session runtime; preserving executor record",
-					zap.String("session_id", sessionID),
-					zap.String("execution_id", executionID),
-					zap.Error(err))
-				return true
-			}
+		if !s.stopRuntimeForStartupCleanup(ctx, running, "startup terminal session cleanup") {
+			return true
 		}
 		// Resume-safety invariant: prune the row only if it is not still resumable
 		// (no resume_token). A terminal session that kept a resume_token — e.g. an
@@ -1770,20 +1942,47 @@ func (s *Service) handleFailedSessionOnStartup(ctx context.Context, session *mod
 		s.logger.Info("stopping failed session runtime before cleaning up executor record",
 			zap.String("session_id", sessionID),
 			zap.String("task_id", session.TaskID))
-		executionID := strings.TrimSpace(running.AgentExecutionID)
-		if executionID != "" && s.agentManager != nil {
-			if err := s.agentManager.StopAgentWithReason(ctx, executionID, "startup failed session cleanup", true); err != nil {
-				s.logger.Warn("failed to stop failed session runtime; preserving executor record",
-					zap.String("session_id", sessionID),
-					zap.String("execution_id", executionID),
-					zap.Error(err))
-				return
-			}
+		if !s.stopRuntimeForStartupCleanup(ctx, running, "startup failed session cleanup") {
+			return
 		}
 		// Prune only subject to the resume-safety invariant (a lingering
 		// resume_token is repaired in place rather than deleted).
 		s.pruneOrRepairExecutorRow(ctx, running, models.TaskSessionStateFailed)
 	}
+}
+
+// stopRuntimeForStartupCleanup stops a session's still-registered runtime handle
+// during startup reconciliation and reports whether the caller may proceed to
+// prune/repair the executor row. It mirrors handleMissingSessionOnStartup's
+// classification so terminal and non-resumable-failed reconciliation stop
+// leaking stale rows: a not-found stop for a confirmed-dead LOCAL runtime means
+// the runtime is already gone and cleanup proceeds; any other error
+// (alive/unknown/remote row, or a non-not-found failure) preserves the row for a
+// later attempt. A row with no stoppable handle is already stoppable-complete.
+func (s *Service) stopRuntimeForStartupCleanup(ctx context.Context, running *models.ExecutorRunning, reason string) bool {
+	executionID := strings.TrimSpace(running.AgentExecutionID)
+	if executionID == "" || s.agentManager == nil {
+		return true
+	}
+	err := s.agentManager.StopAgentWithReason(ctx, executionID, reason, true)
+	if err == nil {
+		return true
+	}
+	if !stopReportsRuntimeAbsent(err) || s.rowLiveness(running) != models.ProcessLivenessDead {
+		s.logger.Warn("failed to stop session runtime during startup cleanup; preserving executor record",
+			zap.String("session_id", running.SessionID),
+			zap.String("task_id", running.TaskID),
+			zap.String("execution_id", executionID),
+			zap.String("reason", reason),
+			zap.Error(err))
+		return false
+	}
+	s.logger.Info("session runtime already gone (confirmed dead) during startup cleanup; proceeding to prune/repair",
+		zap.String("session_id", running.SessionID),
+		zap.String("task_id", running.TaskID),
+		zap.String("execution_id", executionID),
+		zap.String("reason", reason))
+	return true
 }
 
 func canResumeRunning(running *models.ExecutorRunning) bool {

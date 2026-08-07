@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback } from "react";
+import { useTranslation } from "react-i18next";
 import { IconChecklist } from "@tabler/icons-react";
 import { Badge } from "@kandev/ui/badge";
 import {
@@ -69,6 +70,7 @@ function SingleTaskButton({
   testIdPrefix: string;
   onNavigate: (taskId: string) => void;
 }) {
+  const { t } = useTranslation();
   const taskData = useTaskById(task.taskId);
   const stepTitle = useTaskStepTitle(taskData?.workflowStepId);
   const title = taskData?.title ?? task.fallbackTitle;
@@ -87,8 +89,10 @@ function SingleTaskButton({
       </TooltipTrigger>
       <TooltipContent>
         <div className="flex flex-col gap-0.5 text-xs">
-          <span>Task: {title}</span>
-          {stepTitle ? <span className="text-muted-foreground">Step: {stepTitle}</span> : null}
+          <span>{t("github:taskLabelled", { title })}</span>
+          {stepTitle ? (
+            <span className="text-muted-foreground">{t("github:stepLabelled", { stepTitle })}</span>
+          ) : null}
         </div>
       </TooltipContent>
     </Tooltip>
@@ -96,6 +100,7 @@ function SingleTaskButton({
 }
 
 export function TaskRowIndicator({ tasks, testIdPrefix, emptyLabel }: TaskRowIndicatorProps) {
+  const { t } = useTranslation();
   const setActiveTask = useAppStore((state) => state.setActiveTask);
   const router = useRouter();
   const navigate = useCallback(
@@ -124,7 +129,7 @@ export function TaskRowIndicator({ tasks, testIdPrefix, emptyLabel }: TaskRowInd
       <DropdownMenuTrigger asChild>
         <button type="button" data-testid={`${testIdPrefix}-multi`} className={buttonClass}>
           <IconChecklist className={iconClass} />
-          <span className="text-foreground/80">Tasks</span>
+          <span className="text-foreground/80">{t("github:tasks")}</span>
           <Badge variant="outline" className="h-4 shrink-0 px-1 py-0 text-[10px]">
             {tasks.length}
           </Badge>

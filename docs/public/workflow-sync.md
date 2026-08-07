@@ -9,6 +9,13 @@ Workflow Sync makes a GitHub directory the source of truth for selected workflow
 
 Choose sync when workflow changes should be reviewed and versioned in Git. Choose [Workflow Import / Export](workflow-import-export.md) for a one-time copy that remains editable in Kandev.
 
+## Quick path
+
+1. Put portable workflow YAML in a GitHub repository.
+2. Grant the workspace connection read access.
+3. Select the repository, branch, and directory in **Workflows > Sync**.
+4. Run a sync and review created, updated, skipped, and removed definitions.
+
 ## Prerequisites and credentials
 
 You need a GitHub repository and a branch containing valid portable workflow files. The Kandev backend—not the browser and not a task executor—reads the repository. The workspace automation connection must therefore have contents-read access to the configured branch, including for private repositories, and the repository must be inside the workspace's effective scope.
@@ -67,6 +74,7 @@ workflows:
         show_in_command_panel: true
         allow_manual_move: true
         auto_advance_requires_signal: false
+        cancel_triggers_turn_complete: false
       - name: Done
         position: 1
         color: bg-green-500
@@ -75,6 +83,7 @@ workflows:
         show_in_command_panel: true
         allow_manual_move: true
         auto_advance_requires_signal: false
+        cancel_triggers_turn_complete: false
 ```
 
 Commit the file, then use **Sync now**. The status card reports created, updated, deleted, warning, or unchanged results.
@@ -92,7 +101,7 @@ These rules matter when editing definitions:
 - Manual workflows are never matched, updated, or removed by sync, even when their name is identical.
 - Synced workflows are read-only in normal workflow mutation paths. Edit the repository and sync again. Every run performs a full reconciliation, so it also repairs drift; the stored content hash is for status/observability, not a skip condition.
 
-The portable format does not carry every internal or Office field. Sync reconciles the portable Kanban fields and preserves non-portable internal stage type. Do not use this facility as an Office-workflow backup.
+The portable format does not carry every internal or Office field. Sync reconciles the portable Kanban fields, including `cancel_triggers_turn_complete`, and preserves non-portable internal stage type. Changing that field in GitHub changes whether an explicit user cancellation can run the step's normal completion actions on the next sync. Pending clarifications and non-user interruption/failure paths remain ineligible. Do not use this facility as an Office-workflow backup.
 
 ### Invalid and empty sources
 
@@ -102,9 +111,14 @@ A valid fetch that returns no supported files is different: it is an empty desir
 
 Repository listing or file-download failures fail the run before apply. Per-workspace locking serializes sync, configuration changes, and removal, so two requests cannot interleave their changes.
 
+> **Network security:** The HTTP API is unauthenticated and can read or change sync configuration with the backend's GitHub credentials. Keep the backend on loopback or behind an authenticated, origin-protected reverse proxy before exposing it.
+
+<details>
+<summary>HTTP API, reconciliation, and cleanup details</summary>
+
 ## HTTP API
 
-The settings UI uses these backend routes. All require a `workspace_id` query parameter. They currently have no backend authentication: any network client that can reach them can inspect or change sync configuration and trigger repository reads with the backend's GitHub credentials. Keep the backend on loopback or put it behind an authenticated, origin-protected reverse proxy before exposing it.
+The settings UI uses these backend routes. All require a `workspace_id` query parameter.
 
 | Method | Route | Success behavior |
 |--------|-------|------------------|
@@ -139,6 +153,8 @@ Except for “not configured,” a completed force-sync request returns HTTP `20
 Choose **Remove sync** to stop polling. Kandev first clears GitHub ownership from all synced workflows in the workspace, making them normal editable workflows, and then removes the configuration. It does not delete those workflows. If releasing any workflow fails, removal fails and the configuration remains so the operation can be retried.
 
 Deleting an individual repository definition has the different reconciliation behavior described above. Move or archive tasks first when you intend the corresponding synced step or workflow to disappear.
+
+</details>
 
 ## Troubleshooting
 

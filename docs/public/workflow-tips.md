@@ -13,6 +13,13 @@ Workflow prompts run with the selected executor's filesystem, credentials, and n
 
 > Workflow definitions can be copied between workspaces with [Workflow Import / Export](workflow-import-export.md), or reconciled from a repository with [Workflow Sync](workflow-sync.md).
 
+## Quick path
+
+1. Start with **Kanban** for ordinary task tracking.
+2. Choose **Plan & Build** or **PR Review** when the workflow itself should guide the agent.
+3. Add automatic starts only when the executor, profile, and prompt are ready.
+4. Keep a human **Review** or **Do nothing** gate before risky changes ship.
+
 ## Built-in Kanban templates
 
 The template prompts are product behavior, not merely sample text. Review them before using a template in a repository with strict Git, test, or deployment rules. Kandev currently presents these five Kanban templates.
@@ -104,6 +111,7 @@ Workflow-level settings include the name and default agent profile. A step can o
 | Show in command panel | Includes tasks in this step in the command panel. |
 | Auto-archive | Archives eligible tasks after the configured number of hours. `0` disables it; the background sweep runs every five minutes and uses task `updated_at`, so timing is approximate. |
 | Wait for agent completion signal | With an `on_turn_complete` transition, waits for the agent to call `step_complete_kandev`. A halt without the signal leaves the task on the current step; retry or reconnect the agent, or move the task through the normal workflow UI. Without this setting, a normal turn end counts as completion. Default is off. |
+| Run completion actions when a turn is cancelled | Also runs the step's `on_turn_complete` actions after an explicit user cancellation settles. A pending clarification, silent interruption, parent/task stop, provider failure, crash, or runtime teardown does not qualify. If the destination has `on_enter: auto_start_agent`, another agent turn can begin immediately. Default is off for custom steps; the built-in Kanban workflow enables it on Backlog and In Progress for newly created workflows; existing workflows are not backfilled. |
 | WIP limit | Maximum admitted active, non-archived, non-ephemeral tasks in the step. `0` means unlimited; visible overflow is queued. A full target rejects manual moves. |
 | Pull from | Optional one-hop feeder step. When capacity opens, Kandev promotes queued destination work first, then feeder work. A full feeder rejects new overflow creation. |
 
@@ -111,29 +119,47 @@ Pull candidates are selected by board position, then priority, queue time, creat
 
 ## Events and actions
 
+<details>
+<summary>Events and action details</summary>
+
 The standard Kanban editor exposes these events:
 
 | Event | When it runs | Editor actions |
 |-------|--------------|----------------|
 | `on_enter` | A task enters a step through normal step-entry processing. | Enable plan mode, auto-start agent, reset context. |
 | `on_turn_start` | A user sends a message. The transition happens before that message is delivered. | Move next, previous, or to a selected step. |
-| `on_turn_complete` | An agent turn finishes, unless a clarification is still pending or explicit completion is required but absent. | Move next, previous, or to a selected step; disable plan mode. |
+| `on_turn_complete` | A normal agent turn finishes when its signal requirements are satisfied. An explicit user cancellation qualifies when the step enables its cancellation policy, even if the completion signal is absent. A pending clarification always blocks completion. | Move next, previous, or to a selected step; disable plan mode. |
 | `on_exit` | A task leaves a step. | Disable plan mode. |
 
 The portable format also recognizes `set_session_mode`, `clear_decisions`, `queue_run`, and `queue_run_for_each_participant` in `on_enter`; these are advanced/runtime-dependent actions and most are not offered by the Kanban editor. Office event triggers have a broader model, but do not round-trip through Kanban import/export. See the exact boundary in [Workflow Import / Export](workflow-import-export.md).
 
 Keep one transition action per event. A “next” action on the last step or “previous” on the first has nowhere to go and leaves the task in place. WIP rejection, a missing target step, a failed agent launch, or missing credentials can also prevent the intended progression; inspect the task/session error and backend logs before changing the workflow.
 
+Cancellation policy is deliberately narrow: it is evaluated only for the visible user **Cancel** action while a turn is working. It reuses the normal turn-complete pipeline after the runtime settles, but does not reinterpret every way a session can stop as a completion.
+
+</details>
+
 ## Safe authoring pattern
+
+> **Safety:** Requiring `step_complete_kandev` can leave a step waiting indefinitely if the agent cannot call it. Export before large edits; workflow deletion is permanent and may require task migration or archival.
+
+<details>
+<summary>Safe authoring details</summary>
 
 1. Start with manual transitions and verify prompts in a disposable task.
 2. Add `auto_start_agent` only to steps that always have an effective agent profile.
 3. Add turn-complete transitions after the prompt has an unambiguous stop condition.
 4. Enable the explicit completion signal for agents that can discover and call `step_complete_kandev`; otherwise the step can wait indefinitely. If the tool is not already visible, the agent should search the active tool catalog for its canonical name.
-5. Add WIP limits before pull rules, then test a full target and a vacated slot.
-6. Export the workflow before a large edit. Workflow deletion is permanent; when it contains tasks, the UI asks you to migrate them or archive them.
+5. Decide whether an explicit user cancellation should run the same completion actions. Enable **Run completion actions when a turn is cancelled** only when the destination transition is safe to repeat and any destination `on_enter` automation is intentional.
+6. Add WIP limits before pull rules, then test a full target and a vacated slot.
+7. Export the workflow before a large edit. Workflow deletion is permanent; when it contains tasks, the UI asks you to migrate them or archive them.
+
+</details>
 
 ## Saved prompt references in step prompts
+
+<details>
+<summary>Saved prompt reference details</summary>
 
 A step's Prompt field accepts `@name` references to [saved prompts](developer-tools.md#saved-prompts) (**Settings > Prompts**), the same way task chat does. Type `@` and select a prompt, or type the name directly.
 
@@ -143,17 +169,25 @@ A step's Prompt field accepts `@name` references to [saved prompts](developer-to
 
 The same `@name` syntax and resolution apply to a GitHub Review Watch's prompt field. See [Integrations](integrations.md#configure-and-use-the-workspace).
 
+</details>
+
 ## Repository instructions and multiple repositories
+
+<details>
+<summary>Repository instruction details</summary>
 
 Step prompts are combined with the selected agent and the checked-out repository. Keep repository-specific instructions such as `AGENTS.md`, `CLAUDE.md`, skills, test commands, and MCP configuration in that repository. Kandev does not make one repository's agent rules automatically authoritative for another.
 
 A task may contain several repositories, but a workflow step is not bound to one repository. The agent session receives the task workspace and its repository set. Prompts should name the intended repository when the phase is repository-specific, and Git operations must be scoped per repository. See [Git Operations](git-operations.md).
+
+</details>
 
 ## Troubleshooting
 
 - **Task starts in the wrong column:** confirm exactly one Start step, save the workflow, and check whether the creator supplied an explicit `workflow_step_id`.
 - **Agent does not start:** verify the effective workflow/step agent profile, its health, executor profile, repository access, and the `auto_start_agent` entry action.
 - **Task stays after a turn:** check for an absent transition, a pending clarification, the explicit-completion toggle, a queued WIP card waiting for capacity, or an invalid target left by an older definition.
+- **Task stays after a cancel:** check for a pending clarification, the cancelled-turn completion policy, an absent or blocked transition, a queued WIP card, or an invalid target left by an older definition.
 - **Task cannot be dragged:** the destination may disallow manual moves, be at its WIP limit, or the task may have a starting/running session.
 - **Auto-archive looks late:** the sweep cadence is five minutes and task updates extend the age check.
 - **Synced workflow is read-only:** edit its repository definition and run Sync now, or remove the sync configuration to release all synced workflows as editable manual workflows.

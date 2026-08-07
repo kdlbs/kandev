@@ -3,12 +3,15 @@ package messagequeue
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/entityrefs"
+	apiv1 "github.com/kandev/kandev/pkg/api/v1"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -78,6 +81,158 @@ func TestQueueMessage(t *testing.T) {
 		assert.Len(t, msg.Attachments, 1)
 		assert.Equal(t, "image", msg.Attachments[0].Type)
 	})
+}
+
+func TestLoweredQueueCapacityBlocksAdmissionsWithoutPruning(t *testing.T) {
+	log, err := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "console", OutputPath: "stderr"})
+	require.NoError(t, err)
+	svc := NewService(NewMemoryRepository(), 2, log)
+	ctx := context.Background()
+
+	for _, content := range []string{"first", "second"} {
+		_, err := svc.QueueMessage(ctx, "s", "t", content, "", QueuedByUser, false, nil)
+		require.NoError(t, err)
+	}
+	svc.SetMaxPerSession(1)
+
+	assert.Equal(t, 2, svc.GetStatus(ctx, "s").Count)
+	_, err = svc.QueueMessage(ctx, "s", "t", "blocked", "", QueuedByUser, false, nil)
+	assert.ErrorIs(t, err, ErrQueueFull)
+}
+
+func TestRestoreMessageBypassesLoweredCapacity(t *testing.T) {
+	log, err := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "console", OutputPath: "stderr"})
+	require.NoError(t, err)
+	svc := NewService(NewMemoryRepository(), 2, log)
+	ctx := context.Background()
+
+	_, err = svc.QueueMessage(ctx, "s", "t", "first", "", QueuedByUser, false, nil)
+	require.NoError(t, err)
+	_, err = svc.QueueMessage(ctx, "s", "t", "second", "", QueuedByUser, false, nil)
+	require.NoError(t, err)
+	first, ok := svc.TakeQueued(ctx, "s")
+	require.True(t, ok)
+	svc.SetMaxPerSession(1)
+
+	_, err = svc.RestoreMessage(ctx, first)
+	require.NoError(t, err)
+	status := svc.GetStatus(ctx, "s")
+	require.Equal(t, 2, status.Count)
+	assert.Equal(t, "first", status.Entries[0].Content)
+	assert.Equal(t, "second", status.Entries[1].Content)
+}
+
+func TestRequeueMessageBypassesLoweredCapacity(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		coalesceKey string
+	}{
+		{name: "ordinary"},
+		{name: "coalesced", coalesceKey: "retry-key"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			log, err := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "console", OutputPath: "stderr"})
+			require.NoError(t, err)
+			svc := NewService(NewMemoryRepository(), 2, log)
+			ctx := context.Background()
+
+			var first *QueuedMessage
+			if tc.coalesceKey == "" {
+				first, err = svc.QueueMessage(ctx, "s", "t", "first", "", QueuedByUser, false, nil)
+			} else {
+				first, _, err = svc.QueueMessageWithCoalesceKey(
+					ctx, "s", "t", "first", "", QueuedByWorkflow, false, nil, nil,
+					tc.coalesceKey, true,
+				)
+			}
+			require.NoError(t, err)
+			_, err = svc.QueueMessage(ctx, "s", "t", "second", "", QueuedByUser, false, nil)
+			require.NoError(t, err)
+			dequeued, ok := svc.TakeQueued(ctx, "s")
+			require.True(t, ok)
+			require.Equal(t, first.ID, dequeued.ID)
+			svc.SetMaxPerSession(1)
+
+			requeued, replaced, err := svc.RequeueMessage(
+				ctx, dequeued, dequeued.QueuedBy, tc.coalesceKey,
+			)
+			require.NoError(t, err)
+			require.NotNil(t, requeued)
+			assert.False(t, replaced)
+			status := svc.GetStatus(ctx, "s")
+			require.Equal(t, 2, status.Count)
+			assert.Equal(t, "second", status.Entries[0].Content)
+			assert.Equal(t, "first", status.Entries[1].Content)
+		})
+	}
+}
+
+func TestLifecycleRetryBypassesCurrentCapacity(t *testing.T) {
+	log, err := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "console", OutputPath: "stderr"})
+	require.NoError(t, err)
+	repo := &maxRecordingRepository{Repository: NewMemoryRepository()}
+	svc := NewService(repo, 3, log)
+	ctx := context.Background()
+
+	queued, _, accepted, err := svc.QueueLifecycleMessageWithCoalesceKey(
+		ctx, "s", "t", "initial", "", QueuedByWorkflow, false, nil, nil, "lifecycle:1", true,
+	)
+	require.NoError(t, err)
+	require.True(t, accepted)
+	svc.SetMaxPerSession(1)
+	_, _, accepted, err = svc.RequeueLifecycleMessageWithCoalesceKey(
+		ctx, "s", "t", "retry", "", QueuedByWorkflow, false, nil,
+		queued.Metadata, "lifecycle:1", true,
+	)
+	require.NoError(t, err)
+	require.True(t, accepted)
+	assert.Equal(t, []int{3, 0}, repo.lifecycleMaxima())
+}
+
+func TestQueueCapacityConcurrentReadWrite(t *testing.T) {
+	svc := setupService(t)
+	var wait sync.WaitGroup
+	for worker := 0; worker < 8; worker++ {
+		wait.Add(1)
+		go func(offset int) {
+			defer wait.Done()
+			for i := 0; i < 500; i++ {
+				svc.SetMaxPerSession((i + offset) % 20)
+				_ = svc.MaxPerSession()
+				_ = svc.GetStatus(context.Background(), "s")
+			}
+		}(worker)
+	}
+	wait.Wait()
+}
+
+func TestLiveCapacityCoversEveryNewAdmissionPath(t *testing.T) {
+	log, err := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "console", OutputPath: "stderr"})
+	require.NoError(t, err)
+	svc := NewService(NewMemoryRepository(), 1, log)
+	ctx := context.Background()
+
+	_, err = svc.QueueMessage(ctx, "s", "t", "first", "", QueuedByUser, false, nil)
+	require.NoError(t, err)
+	_, appended, err := svc.AppendContent(ctx, "s", "t", "same sender", "", QueuedByUser, false, nil)
+	require.NoError(t, err)
+	assert.True(t, appended)
+	_, _, err = svc.AppendContent(ctx, "s", "t", "new sender", "", QueuedByAgent, false, nil)
+	assert.ErrorIs(t, err, ErrQueueFull)
+	_, _, err = svc.QueueMessageWithCoalesceKey(
+		ctx, "s", "t", "coalesced", "", QueuedByWorkflow, false, nil, nil, "key", true,
+	)
+	assert.ErrorIs(t, err, ErrQueueFull)
+	_, _, accepted, err := svc.QueueLifecycleMessageWithCoalesceKey(
+		ctx, "s", "t", "lifecycle", "", QueuedByWorkflow, false, nil, nil, "lifecycle", true,
+	)
+	assert.ErrorIs(t, err, ErrQueueFull)
+	assert.False(t, accepted)
+
+	svc.SetMaxPerSession(0)
+	_, err = svc.QueueMessage(ctx, "s", "t", "unlimited", "", QueuedByServer, false, nil)
+	require.NoError(t, err)
+	assert.Equal(t, 0, svc.GetStatus(ctx, "s").Max)
 }
 
 func TestAppendContent(t *testing.T) {
@@ -213,7 +368,7 @@ func TestTakeQueued(t *testing.T) {
 }
 
 // TestTakeQueuedEntry covers TakeQueuedEntry: out-of-FIFO-order removal,
-// takeability of agent-authored entries (unlike RemoveEntry), the
+// takeability of agent-authored entries, the
 // not-found (nil, false, nil) shape for a missing or foreign-session id,
 // and — distinctly — a genuine repository error propagating as a non-nil
 // error rather than being collapsed into the not-found shape.
@@ -246,7 +401,7 @@ func TestTakeQueuedEntry(t *testing.T) {
 		assert.False(t, ok)
 	})
 
-	t.Run("takes agent-authored entries unlike RemoveEntry", func(t *testing.T) {
+	t.Run("takes agent-authored entries", func(t *testing.T) {
 		svc := setupService(t)
 		ctx := context.Background()
 
@@ -309,6 +464,33 @@ func TestTakeQueuedEntry(t *testing.T) {
 type errInjectingRepository struct {
 	Repository
 	takeByIDErr error
+}
+
+type maxRecordingRepository struct {
+	Repository
+	mu               sync.Mutex
+	lifecycleMaxSeen []int
+}
+
+func (r *maxRecordingRepository) InsertOrReplaceLifecycleByCoalesceKey(
+	ctx context.Context,
+	msg *QueuedMessage,
+	coalesceKey string,
+	maxPerSession int,
+	allowInsert bool,
+) (*QueuedMessage, bool, error) {
+	r.mu.Lock()
+	r.lifecycleMaxSeen = append(r.lifecycleMaxSeen, maxPerSession)
+	r.mu.Unlock()
+	return r.Repository.InsertOrReplaceLifecycleByCoalesceKey(
+		ctx, msg, coalesceKey, maxPerSession, allowInsert,
+	)
+}
+
+func (r *maxRecordingRepository) lifecycleMaxima() []int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]int(nil), r.lifecycleMaxSeen...)
 }
 
 // TakeByID returns the configured error if set, otherwise delegates to the
@@ -459,19 +641,36 @@ func TestRemoveEntry(t *testing.T) {
 		assert.Equal(t, 1, status.Count)
 	})
 
-	t.Run("rejects deletion of agent-authored entries", func(t *testing.T) {
+	t.Run("removes visible entries from every origin", func(t *testing.T) {
 		svc := setupService(t)
 		ctx := context.Background()
 
-		agentEntry, err := svc.QueueMessageWithMetadata(ctx, "s", "t", "agent entry", "", QueuedByAgent, false, nil, nil)
+		for _, queuedBy := range []string{QueuedByUser, QueuedByAgent, QueuedByWorkflow, QueuedByServer} {
+			entry, err := svc.QueueMessageWithMetadata(
+				ctx, "s", "t", queuedBy+" entry", "", queuedBy, false, nil, nil,
+			)
+			require.NoError(t, err)
+			require.NoError(t, svc.RemoveEntry(ctx, "s", entry.ID), queuedBy)
+		}
+
+		assert.Equal(t, 0, svc.GetStatus(ctx, "s").Count)
+	})
+
+	t.Run("preserves a durable entry already reserved in flight", func(t *testing.T) {
+		svc := setupService(t)
+		ctx := context.Background()
+
+		_, _, accepted, err := svc.QueueLifecycleMessageWithCoalesceKey(
+			ctx, "s", "t", "lifecycle", "", QueuedByWorkflow, false, nil,
+			map[string]interface{}{"origin": "github_pr_automation"}, "lifecycle:1", true,
+		)
 		require.NoError(t, err)
+		require.True(t, accepted)
 
-		err = svc.RemoveEntry(ctx, "s", agentEntry.ID)
-		assert.ErrorIs(t, err, ErrEntryNotFound)
-
-		status := svc.GetStatus(ctx, "s")
-		assert.Equal(t, 1, status.Count)
-		assert.Equal(t, "agent entry", status.Entries[0].Content)
+		reserved, ok := svc.ReserveQueued(ctx, "s")
+		require.True(t, ok)
+		assert.ErrorIs(t, svc.RemoveEntry(ctx, "s", reserved.ID), ErrEntryNotFound)
+		require.NoError(t, svc.AcknowledgeQueued(ctx, "s", reserved.ID))
 	})
 }
 
@@ -479,8 +678,8 @@ func TestCancelAll(t *testing.T) {
 	svc := setupService(t)
 	ctx := context.Background()
 
-	for i := 0; i < 4; i++ {
-		_, err := svc.QueueMessage(ctx, "s", "t", "x", "", "u", false, nil)
+	for _, queuedBy := range []string{QueuedByUser, QueuedByAgent, QueuedByWorkflow, QueuedByServer} {
+		_, err := svc.QueueMessage(ctx, "s", "t", "x", "", queuedBy, false, nil)
 		require.NoError(t, err)
 	}
 	n, err := svc.CancelAll(ctx, "s")
@@ -489,6 +688,31 @@ func TestCancelAll(t *testing.T) {
 
 	status := svc.GetStatus(ctx, "s")
 	assert.Equal(t, 0, status.Count)
+}
+
+func TestCancelAllPreservesDurableEntryReservedInFlight(t *testing.T) {
+	svc := setupService(t)
+	ctx := context.Background()
+
+	_, _, accepted, err := svc.QueueLifecycleMessageWithCoalesceKey(
+		ctx, "s", "t", "lifecycle", "", QueuedByWorkflow, false, nil,
+		map[string]interface{}{"origin": "github_pr_automation"}, "lifecycle:1", true,
+	)
+	require.NoError(t, err)
+	require.True(t, accepted)
+	reserved, ok := svc.ReserveQueued(ctx, "s")
+	require.True(t, ok)
+
+	for _, queuedBy := range []string{QueuedByAgent, QueuedByWorkflow, QueuedByServer} {
+		_, err := svc.QueueMessage(ctx, "s", "t", "visible", "", queuedBy, false, nil)
+		require.NoError(t, err)
+	}
+
+	removed, err := svc.CancelAll(ctx, "s")
+	require.NoError(t, err)
+	assert.Equal(t, 3, removed)
+	assert.Equal(t, 0, svc.GetStatus(ctx, "s").Count)
+	require.NoError(t, svc.AcknowledgeQueued(ctx, "s", reserved.ID))
 }
 
 func TestGetStatus(t *testing.T) {
@@ -735,4 +959,164 @@ func TestQueuedTimestamp(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, msg.QueuedAt.After(before))
 	assert.True(t, msg.QueuedAt.Before(after))
+}
+
+// TestMemoryRepository_MergeIntoAbove exercises the in-memory repository merge
+// with Go-struct entity references (the form the memory repo stores without a
+// JSON round-trip) alongside the shared merge rules.
+func TestMemoryRepository_MergeIntoAbove(t *testing.T) {
+	ctx := context.Background()
+	repo := NewMemoryRepository()
+
+	ref := apiv1.EntityReference{
+		Version:  apiv1.EntityReferenceVersion,
+		Ref:      entityrefs.CanonicalRef("github", "issue", "acme/repo", "1"),
+		Provider: "github",
+		Kind:     "issue",
+		ID:       "1",
+		Title:    "Issue 1",
+		URL:      "https://github.com/acme/repo/issues/1",
+		Scope:    "acme/repo",
+	}
+
+	target := &QueuedMessage{
+		SessionID: "s1", TaskID: "t1", Content: "first", QueuedBy: "alice",
+		Attachments: []MessageAttachment{{Type: "image", Data: "a", MimeType: "image/png"}},
+		Metadata:    map[string]interface{}{MetadataEntityReferences: []apiv1.EntityReference{ref}},
+	}
+	require.NoError(t, repo.Insert(ctx, target, 0))
+	source := &QueuedMessage{
+		SessionID: "s1", TaskID: "t1", Content: "second", QueuedBy: "alice",
+		Attachments: []MessageAttachment{{Type: "file", Data: "b", MimeType: "text/plain"}},
+		Metadata:    map[string]interface{}{MetadataEntityReferences: []apiv1.EntityReference{ref}},
+	}
+	require.NoError(t, repo.Insert(ctx, source, 0))
+
+	merged, err := repo.MergeIntoAbove(ctx, "s1", source.ID, "alice")
+	require.NoError(t, err)
+	assert.Equal(t, target.ID, merged.ID)
+	assert.Equal(t, "first\n\nsecond", merged.Content)
+	assert.Len(t, merged.Attachments, 2)
+	assert.Len(t, entityrefs.NormalizePersisted(merged.Metadata[MetadataEntityReferences]), 1)
+
+	entries, err := repo.ListBySession(ctx, "s1")
+	require.NoError(t, err)
+	assert.Len(t, entries, 1)
+	assert.Equal(t, "first\n\nsecond", entries[0].Content)
+}
+
+// TestMemoryRepository_MergeIntoAbove_MixedKindsRejected covers the memory repo
+// kind gate and missing-source error mapping.
+func TestMemoryRepository_MergeIntoAbove_MixedKindsRejected(t *testing.T) {
+	ctx := context.Background()
+	repo := NewMemoryRepository()
+
+	require.NoError(t, repo.Insert(ctx, &QueuedMessage{SessionID: "s1", TaskID: "t1", Content: "agent", QueuedBy: QueuedByAgent, Metadata: map[string]interface{}{MetadataSenderTaskID: "task-1"}}, 0))
+	source := &QueuedMessage{SessionID: "s1", TaskID: "t1", Content: "user", QueuedBy: "alice"}
+	require.NoError(t, repo.Insert(ctx, source, 0))
+
+	_, err := repo.MergeIntoAbove(ctx, "s1", source.ID, "alice")
+	assert.ErrorIs(t, err, ErrNoMergeTarget)
+
+	_, err = repo.MergeIntoAbove(ctx, "s1", "missing", "alice")
+	assert.ErrorIs(t, err, ErrEntryNotFound)
+}
+
+// TestMemoryRepository_MergeIntoAbove_ReferenceOverflow asserts an over-cap
+// reference union is rejected atomically in the in-memory repository: the
+// target's content, attachments, and references must stay untouched so a
+// failed merge does not leave a partially-folded queue behind.
+func TestMemoryRepository_MergeIntoAbove_ReferenceOverflow(t *testing.T) {
+	ctx := context.Background()
+	repo := NewMemoryRepository()
+
+	refs := make([]apiv1.EntityReference, 0, entityrefs.MaxReferencesPerMessage)
+	for i := 0; i < entityrefs.MaxReferencesPerMessage; i++ {
+		refs = append(refs, apiv1.EntityReference{
+			Version:  apiv1.EntityReferenceVersion,
+			Ref:      entityrefs.CanonicalRef("github", "issue", "acme/repo", fmt.Sprintf("%d", i)),
+			Provider: "github",
+			Kind:     "issue",
+			ID:       fmt.Sprintf("%d", i),
+			Title:    "Issue " + fmt.Sprintf("%d", i),
+			URL:      "https://github.com/acme/repo/issues/" + fmt.Sprintf("%d", i),
+			Scope:    "acme/repo",
+		})
+	}
+	target := &QueuedMessage{
+		SessionID: "s1", TaskID: "t1", Content: "first", QueuedBy: "alice",
+		Attachments: []MessageAttachment{{Type: "image", Data: "a", MimeType: "image/png"}},
+		Metadata:    map[string]interface{}{MetadataEntityReferences: refs},
+	}
+	require.NoError(t, repo.Insert(ctx, target, 0))
+	source := &QueuedMessage{
+		SessionID: "s1", TaskID: "t1", Content: "second", QueuedBy: "alice",
+		Attachments: []MessageAttachment{{Type: "file", Data: "b", MimeType: "text/plain"}},
+		Metadata: map[string]interface{}{MetadataEntityReferences: []apiv1.EntityReference{
+			{Version: apiv1.EntityReferenceVersion, Ref: entityrefs.CanonicalRef("github", "issue", "acme/repo", "x"), Provider: "github", Kind: "issue", ID: "x", Title: "Issue x", URL: "https://github.com/acme/repo/issues/x", Scope: "acme/repo"},
+		}},
+	}
+	require.NoError(t, repo.Insert(ctx, source, 0))
+
+	_, err := repo.MergeIntoAbove(ctx, "s1", source.ID, "alice")
+	assert.ErrorIs(t, err, ErrMergeReferenceOverflow)
+
+	entries, err := repo.ListBySession(ctx, "s1")
+	require.NoError(t, err)
+	require.Len(t, entries, 2)
+	byID := make(map[string]*QueuedMessage, len(entries))
+	for i := range entries {
+		byID[entries[i].ID] = &entries[i]
+	}
+	assert.Equal(t, "first", byID[target.ID].Content, "target content changed after rejected overflow merge")
+	assert.Len(t, byID[target.ID].Attachments, 1, "target attachments changed after rejected overflow merge")
+	assert.Len(t, entityrefs.NormalizePersisted(byID[target.ID].Metadata[MetadataEntityReferences]), entityrefs.MaxReferencesPerMessage, "target refs changed after rejected overflow merge")
+	assert.Equal(t, "second", byID[source.ID].Content, "source content changed after rejected overflow merge")
+}
+
+// TestService_MergeIntoAbove exercises the service delegation path over the
+// memory repository and the mapped errors.
+func TestService_MergeIntoAbove(t *testing.T) {
+	svc := setupService(t)
+	ctx := context.Background()
+
+	above, err := svc.QueueMessage(ctx, "s", "t", "above", "", "alice", false, nil)
+	require.NoError(t, err)
+	source, err := svc.QueueMessage(ctx, "s", "t", "source", "", "alice", false, nil)
+	require.NoError(t, err)
+
+	merged, err := svc.MergeIntoAbove(ctx, "s", source.ID, "alice")
+	require.NoError(t, err)
+	assert.Equal(t, above.ID, merged.ID)
+	assert.Equal(t, "above\n\nsource", merged.Content)
+	assert.Equal(t, 1, svc.GetStatus(ctx, "s").Count)
+
+	_, err = svc.MergeIntoAbove(ctx, "s", "missing", "alice")
+	assert.ErrorIs(t, err, ErrEntryNotFound)
+}
+
+// TestMemoryRepository_MergeIntoAbove_UnsortedSlice proves the memory repo
+// selects the merge target by greatest position strictly below the source's,
+// not by slice order. ReplaceSession can persist an unsorted snapshot, so a
+// slice-adjacent target would be wrong: here the source (position 3) sits
+// between an unrelated entry (position 1) and the true target (position 2).
+func TestMemoryRepository_MergeIntoAbove_UnsortedSlice(t *testing.T) {
+	ctx := context.Background()
+	repo := NewMemoryRepository()
+
+	err := repo.ReplaceSession(ctx, "s1", []QueuedMessage{
+		{ID: "unrelated", SessionID: "s1", TaskID: "t1", Position: 1, Content: "other", QueuedBy: "alice"},
+		{ID: "source", SessionID: "s1", TaskID: "t1", Position: 3, Content: "src", QueuedBy: "alice"},
+		{ID: "target", SessionID: "s1", TaskID: "t1", Position: 2, Content: "tgt", QueuedBy: "alice"},
+	}, nil)
+	require.NoError(t, err)
+
+	merged, err := repo.MergeIntoAbove(ctx, "s1", "source", "alice")
+	require.NoError(t, err)
+	assert.Equal(t, "target", merged.ID)
+	assert.Equal(t, "tgt\n\nsrc", merged.Content)
+
+	entries, err := repo.ListBySession(ctx, "s1")
+	require.NoError(t, err)
+	assert.Len(t, entries, 2)
 }

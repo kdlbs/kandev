@@ -92,6 +92,7 @@ func newAgentEventPayload(execution *AgentExecution) AgentEventPayload {
 		AgentExecutionID:   execution.ID,
 		TaskID:             execution.TaskID,
 		SessionID:          execution.SessionID,
+		AgentID:            execution.AgentID,
 		AgentProfileID:     execution.officeProfileID(),
 		ExecutionProfileID: execution.AgentProfileID,
 		ContainerID:        execution.ContainerID,
@@ -99,6 +100,7 @@ func newAgentEventPayload(execution *AgentExecution) AgentEventPayload {
 		StartedAt:          execution.StartedAt,
 		FinishedAt:         execution.FinishedAt,
 		ErrorMessage:       execution.ErrorMessage,
+		ProviderError:      execution.ProviderError,
 		ExitCode:           execution.ExitCode,
 		PromptGeneration:   execution.promptGeneration,
 	}
@@ -112,13 +114,11 @@ func (p *EventPublisher) PublishAgentctlEvent(ctx context.Context, eventType str
 
 	var worktreeID string
 	var worktreeBranch string
-	if execution.Metadata != nil {
-		if id, ok := execution.Metadata[MetadataKeyWorktreeID].(string); ok {
-			worktreeID = id
-		}
-		if branch, ok := execution.Metadata[MetadataKeyWorktreeBranch].(string); ok {
-			worktreeBranch = branch
-		}
+	if id, ok := execution.metadataValue(MetadataKeyWorktreeID); ok {
+		worktreeID, _ = id.(string)
+	}
+	if branch, ok := execution.metadataValue(MetadataKeyWorktreeBranch); ok {
+		worktreeBranch, _ = branch.(string)
 	}
 
 	payload := AgentctlEventPayload{
@@ -184,6 +184,7 @@ func (p *EventPublisher) PublishAgentStreamEvent(execution *AgentExecution, even
 		ToolTitle:               event.ToolTitle,
 		ToolStatus:              event.ToolStatus,
 		Error:                   event.Error,
+		ProviderError:           event.ProviderError,
 		SessionStatus:           event.SessionStatus,
 		PromptGeneration:        event.PromptGeneration,
 		Data:                    event.Data,
@@ -197,11 +198,13 @@ func (p *EventPublisher) PublishAgentStreamEvent(execution *AgentExecution, even
 		SupportsImage:           event.SupportsImage,
 		SupportsAudio:           event.SupportsAudio,
 		SupportsEmbeddedContext: event.SupportsEmbeddedContext,
+		SupportsPromptQueueing:  event.SupportsPromptQueueing,
 		AuthMethods:             event.AuthMethods,
 		CurrentModelID:          event.CurrentModelID,
 		SessionModels:           event.SessionModels,
 		ConfigOptions:           event.ConfigOptions,
 		ConfigBaselineCandidate: event.ConfigBaselineCandidate,
+		OriginalConfigCandidate: event.OriginalConfigCandidate,
 		SessionTitle:            event.SessionTitle,
 		SessionUpdatedAt:        event.SessionUpdatedAt,
 		SessionMeta:             event.SessionMeta,
@@ -296,10 +299,13 @@ func (p *EventPublisher) PublishGitStatus(execution *AgentExecution, update *age
 			Renamed:         update.Renamed,
 			Ahead:           update.Ahead,
 			Behind:          update.Behind,
+			RemoteAhead:     update.RemoteAhead,
+			RemoteBehind:    update.RemoteBehind,
 			Files:           update.Files,
 			BranchAdditions: update.BranchAdditions,
 			BranchDeletions: update.BranchDeletions,
 			RepositoryName:  update.RepositoryName,
+			IsSubmodule:     update.IsSubmodule,
 		},
 	})
 }

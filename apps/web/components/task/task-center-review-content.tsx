@@ -2,6 +2,7 @@
 
 import { TabsContent } from "@kandev/ui/tabs";
 import type { ReviewItemSummary } from "@/lib/plugins/types";
+import { t } from "@/lib/i18n";
 import { ReviewDetailPanelComponent } from "./review-detail-panel";
 import { ReviewItemSelector } from "./review-item-selector";
 
@@ -36,7 +37,7 @@ export function TaskCenterReviewContent({
           </div>
         ) : (
           <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
-            Choose a review to open it.
+            {t("integrations:chooseReviewToOpen")}
           </div>
         )}
       </div>

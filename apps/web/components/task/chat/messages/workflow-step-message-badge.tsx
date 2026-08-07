@@ -2,6 +2,7 @@
 
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@kandev/ui/tooltip";
 import { cn } from "@/lib/utils";
+import { useTranslation } from "react-i18next";
 
 export type WorkflowMessageMetadata = {
   workflow_message?: boolean;
@@ -53,6 +54,7 @@ type WorkflowStepMessageBadgeProps = {
 };
 
 export function WorkflowStepMessageBadge({ workflow, size = "sm" }: WorkflowStepMessageBadgeProps) {
+  const { t } = useTranslation();
   const label = workflow.stepName || "workflow step";
   const sizeClass =
     size === "xs" ? "gap-1 px-1.5 py-0.5 text-[10px]" : "gap-1.5 px-2.5 py-1 text-xs font-medium";
@@ -71,7 +73,7 @@ export function WorkflowStepMessageBadge({ workflow, size = "sm" }: WorkflowStep
         className={cn("shrink-0 rounded-full", dotSize, stepColor)}
         data-testid="workflow-message-dot"
       />
-      <span className="truncate">Workflow: {label}</span>
+      <span className="truncate">{t("task:workflowLabel", { label })}</span>
     </span>
   );
 
@@ -79,7 +81,7 @@ export function WorkflowStepMessageBadge({ workflow, size = "sm" }: WorkflowStep
     <TooltipProvider delayDuration={300}>
       <Tooltip>
         <TooltipTrigger asChild>{badge}</TooltipTrigger>
-        <TooltipContent>Workflow step message from {label}</TooltipContent>
+        <TooltipContent>{t("task:workflowStepMessageFrom", { label })}</TooltipContent>
       </Tooltip>
     </TooltipProvider>
   );

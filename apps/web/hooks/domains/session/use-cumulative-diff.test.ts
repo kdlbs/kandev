@@ -146,3 +146,52 @@ describe("useCumulativeDiff invalidation coalescing", () => {
     expect(mockRequest).toHaveBeenCalledTimes(2);
   });
 });
+
+describe("useCumulativeDiff terminal session", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.useFakeTimers();
+    setStore();
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.useRealTimers();
+  });
+
+  it("preserves a cached diff when the backend reports session_terminal", async () => {
+    const sid = "sess-terminal";
+    const cached = {
+      session_id: sid,
+      files: { "a.ts": { status: "modified", additions: 1, deletions: 0 } },
+    };
+    mockRequest.mockResolvedValueOnce({ cumulative_diff: cached }).mockResolvedValueOnce({
+      cumulative_diff: null,
+      ready: false,
+      reason: "session_terminal",
+    });
+
+    const { result } = renderHook(() => useCumulativeDiff(sid));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(result.current.diff).toEqual(cached);
+
+    // Invalidate so the hook refetches; the terminal envelope must not wipe
+    // the previously visible snapshot.
+    act(() => {
+      invalidateCumulativeDiffCache(sid);
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(WINDOW);
+    });
+
+    expect(mockRequest).toHaveBeenCalledTimes(2);
+    expect(result.current.diff).toEqual(cached);
+
+    // A later subscriber (e.g. another panel mount) must also see the restored
+    // shared cache — not null from the post-invalidation miss.
+    const second = renderHook(() => useCumulativeDiff(sid));
+    expect(second.result.current.diff).toEqual(cached);
+  });
+});

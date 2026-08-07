@@ -1,9 +1,11 @@
 "use client";
 
 import { useState, useEffect, useCallback, useMemo } from "react";
+import { useTranslation } from "react-i18next";
+import { t } from "@/lib/i18n";
 import { useRouter } from "@/lib/routing/client-router";
 import { runWithNavigationBlockerBypassed } from "@/lib/routing/navigation-guard";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast/sonner";
 import { Separator } from "@kandev/ui/separator";
 import { useAppStore } from "@/components/state-provider";
 import { getMultiRepoExecutorDisabledReason } from "@/components/task-create-dialog-multi-repo-guard";
@@ -45,6 +47,10 @@ type AutomationEditorProps = {
   automationId: string | null; // null = create mode
 };
 
+// The seeded prompt is persisted on the automation and sent to the agent
+// verbatim, and it is compared with `===` in useAutoPromptUpdate to decide
+// whether the user has edited it. Both make it protocol, not copy — the same
+// call the Jira (#2177), Linear (#2179) and Sentry (#2182) migrations made.
 const DEFAULT_PROMPT = "Run scheduled automation.\n\nTrigger: {{trigger.type}}";
 
 const defaultForm: FormState = {
@@ -57,7 +63,6 @@ const defaultForm: FormState = {
   repositorySelections: [],
   prompt: DEFAULT_PROMPT,
   taskTitleTemplate: "",
-  executionMode: "task",
   enabled: true,
   maxConcurrentRuns: 1,
 };
@@ -73,7 +78,6 @@ function formFromAutomation(a: Automation): FormState {
     repositorySelections: a.repository_ids.map((id) => ({ kind: "registered" as const, id })),
     prompt: a.prompt || DEFAULT_PROMPT,
     taskTitleTemplate: a.task_title_template ?? "",
-    executionMode: a.execution_mode ?? "task",
     enabled: a.enabled,
     maxConcurrentRuns: a.max_concurrent_runs,
   };
@@ -169,7 +173,7 @@ function useSaveHandler(opts: SaveHandlerOpts): () => Promise<void> {
           setCurrentId(a.id);
           setCreatedWebhook({ url: buildWebhookUrl(a.id), secret: a.webhook_secret });
         } else {
-          toast.success("Automation created");
+          toast.success(t("automations:automationCreated"));
           runWithNavigationBlockerBypassed(() =>
             router.push(`/settings/workspace/${workspaceId}/automations`),
           );
@@ -181,8 +185,10 @@ function useSaveHandler(opts: SaveHandlerOpts): () => Promise<void> {
         onSaved(formWithPromotedSelections, persistedTriggers);
       }
     } catch (err) {
+      // The interpolated value is an API/network diagnostic and stays English
+      // by design — see docs/i18n.md ("interpolated value" limit).
       const msg = err instanceof Error ? err.message : String(err);
-      toast.error(`Failed to save automation: ${msg}`);
+      toast.error(t("automations:failedToSaveAutomation", { error: msg }));
       throw err;
     } finally {
       setSaving(false);
@@ -271,12 +277,18 @@ function useAutomationSaveContributor(options: {
   discard: () => void;
 }) {
   const { isNew, currentId, revision, savedRevision, canSave, save, discard } = options;
+  // `invalidReason` is resolved during RENDER, so it needs the hook rather than
+  // the module-level `t` the toasts below use: nothing else in AutomationEditor
+  // calls useTranslation(), so without this subscription the tooltip would keep
+  // the previous locale's text until some unrelated re-render. (The toasts are
+  // fine on the module-level `t` — they resolve at call time inside a callback.)
+  const { t: translate } = useTranslation();
   useSettingsSaveContributor({
     id: `automation:${currentId ?? "new"}`,
     revision,
     isDirty: isNew || revision !== savedRevision,
     canSave,
-    invalidReason: canSave ? undefined : "Complete the required automation fields before saving.",
+    invalidReason: canSave ? undefined : translate("automations:completeRequiredFields"),
     save,
     discard,
   });
@@ -317,14 +329,17 @@ function useAutomationPersistence(options: AutomationPersistenceOptions) {
     options.remove,
     options.router,
     (error) =>
-      toast.error("Failed to delete automation", {
-        description: error instanceof Error ? error.message : "Request failed",
+      toast.error(t("automations:failedToDeleteAutomation"), {
+        // An Error message here is an API diagnostic and stays English; the
+        // fallback for a missing payload is copy.
+        description: error instanceof Error ? error.message : t("common:requestFailed"),
       }),
   );
-  const isRunMode = options.form.executionMode === "run";
-  const canSave =
-    options.form.name.trim().length > 0 &&
-    (isRunMode || (!!options.form.workflowId && !!options.form.workflowStepId));
+  // The name is the only thing an automation cannot do without — it is how the
+  // reader finds it in the runs list. Workflow and step are optional: an
+  // automation that only reports has no place on a board, and requiring one
+  // made every such automation pick a step at random to get past the gate.
+  const canSave = options.form.name.trim().length > 0;
   useAutomationSaveContributor({
     isNew: options.isNew,
     currentId: options.currentId,
@@ -437,11 +452,7 @@ export function AutomationEditor({ workspaceId, automationId }: AutomationEditor
       <Separator />
       <SettingsSection form={form} savedForm={dirtyBaseline} updateField={updateField} />
       <Separator />
-      <RunsSection
-        automationId={currentId}
-        executionMode={form.executionMode}
-        workspaceId={workspaceId}
-      />
+      <RunsSection automationId={currentId} workspaceId={workspaceId} />
       <EditorFooter saving={saving} isNew={isNew} onDelete={handleRemove} />
       <CreatedWebhookDialogHost
         details={createdWebhook}

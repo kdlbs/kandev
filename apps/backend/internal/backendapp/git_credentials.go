@@ -222,7 +222,7 @@ func (a *githubBrokerScopeAuthorizer) AuthorizeGitCredential(ctx context.Context
 	if err := a.authorizeTaskSession(ctx, scope.WorkspaceID, scope.TaskID, scope.SessionID); err != nil {
 		return err
 	}
-	if err := a.authorizeTaskRepository(ctx, scope.TaskID, scope.RepositoryID); err != nil {
+	if _, err := a.authorizeTaskRepository(ctx, scope.TaskID, scope.RepositoryID); err != nil {
 		return err
 	}
 	return a.authorizeRepositoryIdentity(ctx, scope)

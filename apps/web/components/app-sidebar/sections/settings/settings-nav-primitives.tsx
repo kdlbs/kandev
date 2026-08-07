@@ -4,6 +4,7 @@ import Link from "@/components/routing/app-link";
 import { IconChevronRight } from "@tabler/icons-react";
 import type { Icon as TablerIcon } from "@tabler/icons-react";
 import { useEffect, useState, type ComponentType, type ReactNode } from "react";
+import { useTranslation } from "react-i18next";
 import { Collapsible, CollapsibleContent } from "@kandev/ui/collapsible";
 import { cn } from "@/lib/utils";
 import { SIDEBAR_ITEM_ACTIVE, SIDEBAR_ITEM_INACTIVE } from "../../app-sidebar-constants";
@@ -92,6 +93,7 @@ export function SettingsGroup({
   expanded: controlledExpanded,
   onToggle,
 }: SettingsGroupProps) {
+  const { t } = useTranslation();
   const [internalExpanded, setInternalExpanded] = useState(defaultExpanded);
   const isControlled = controlledExpanded !== undefined;
   const expanded = isControlled ? controlledExpanded : internalExpanded;
@@ -148,7 +150,9 @@ export function SettingsGroup({
         <button
           type="button"
           onClick={toggle}
-          aria-label={expanded ? `Collapse ${label}` : `Expand ${label}`}
+          aria-label={
+            expanded ? t("sidebar:collapseGroup", { label }) : t("sidebar:expandGroup", { label })
+          }
           aria-expanded={expanded}
           className={cn(
             "shrink-0 flex h-5 w-5 items-center justify-center text-muted-foreground/60 hover:text-foreground/80 cursor-pointer transition-colors",

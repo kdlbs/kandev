@@ -18,6 +18,7 @@ type UserSettingsDTO struct {
 	UserID                          string                              `json:"user_id"`
 	WorkspaceID                     string                              `json:"workspace_id"`
 	KanbanViewMode                  string                              `json:"kanban_view_mode"`
+	StartupPage                     string                              `json:"startup_page"`
 	WorkflowFilterID                string                              `json:"workflow_filter_id"`
 	RepositoryIDs                   []string                            `json:"repository_ids"`
 	TasksListSort                   string                              `json:"tasks_list_sort"`
@@ -31,6 +32,7 @@ type UserSettingsDTO struct {
 	ReviewAutoMarkOnScroll          bool                                `json:"review_auto_mark_on_scroll"`
 	ConfirmTaskArchive              bool                                `json:"confirm_task_archive"`
 	UnreadDivider                   bool                                `json:"unread_divider"`
+	AgentGeneratedTaskTitles        bool                                `json:"agent_generated_task_titles"`
 	MCPTaskAgentProfileDefault      string                              `json:"mcp_task_agent_profile_default"`
 	ShowAnchoredPromptBar           bool                                `json:"show_anchored_prompt_bar"`
 	ShowScrollToLastPrompt          bool                                `json:"show_scroll_to_last_prompt"`
@@ -41,6 +43,7 @@ type UserSettingsDTO struct {
 	LspAutoStartLanguages           []string                            `json:"lsp_auto_start_languages"`
 	LspAutoInstallLanguages         []string                            `json:"lsp_auto_install_languages"`
 	LspServerConfigs                map[string]map[string]interface{}   `json:"lsp_server_configs,omitempty"`
+	LspStatusLocation               string                              `json:"lsp_status_location"`
 	SavedLayouts                    []models.SavedLayout                `json:"saved_layouts"`
 	SidebarViews                    []models.SidebarView                `json:"sidebar_views"`
 	SidebarActiveViewID             string                              `json:"sidebar_active_view_id"`
@@ -52,6 +55,7 @@ type UserSettingsDTO struct {
 	GitHubSavedPresets              json.RawMessage                     `json:"github_saved_presets,omitempty"`
 	GitHubDefaultQueryPresets       json.RawMessage                     `json:"github_default_query_presets,omitempty"`
 	GitLabSavedPresets              json.RawMessage                     `json:"gitlab_saved_presets,omitempty"`
+	AzureDevOpsBrowsePreferences    json.RawMessage                     `json:"azure_devops_browse_preferences,omitempty"`
 	DefaultUtilityAgentID           string                              `json:"default_utility_agent_id"`
 	DefaultUtilityModel             string                              `json:"default_utility_model"`
 	KeyboardShortcuts               map[string]interface{}              `json:"keyboard_shortcuts,omitempty"`
@@ -83,6 +87,7 @@ type ShellOption struct {
 type UpdateUserSettingsRequest struct {
 	WorkspaceID                     *string                            `json:"workspace_id,omitempty"`
 	KanbanViewMode                  *string                            `json:"kanban_view_mode,omitempty"`
+	StartupPage                     *string                            `json:"startup_page,omitempty"`
 	WorkflowFilterID                *string                            `json:"workflow_filter_id,omitempty"`
 	RepositoryIDs                   *[]string                          `json:"repository_ids,omitempty"`
 	TasksListSort                   *string                            `json:"tasks_list_sort,omitempty"`
@@ -96,6 +101,7 @@ type UpdateUserSettingsRequest struct {
 	ReviewAutoMarkOnScroll          *bool                              `json:"review_auto_mark_on_scroll,omitempty"`
 	ConfirmTaskArchive              *bool                              `json:"confirm_task_archive,omitempty"`
 	UnreadDivider                   *bool                              `json:"unread_divider,omitempty"`
+	AgentGeneratedTaskTitles        *bool                              `json:"agent_generated_task_titles,omitempty"`
 	MCPTaskAgentProfileDefault      *string                            `json:"mcp_task_agent_profile_default,omitempty"`
 	ShowAnchoredPromptBar           *bool                              `json:"show_anchored_prompt_bar,omitempty"`
 	ShowScrollToLastPrompt          *bool                              `json:"show_scroll_to_last_prompt,omitempty"`
@@ -106,6 +112,7 @@ type UpdateUserSettingsRequest struct {
 	LspAutoStartLanguages           *[]string                          `json:"lsp_auto_start_languages,omitempty"`
 	LspAutoInstallLanguages         *[]string                          `json:"lsp_auto_install_languages,omitempty"`
 	LspServerConfigs                *map[string]map[string]interface{} `json:"lsp_server_configs,omitempty"`
+	LspStatusLocation               *string                            `json:"lsp_status_location,omitempty"`
 	SavedLayouts                    *[]models.SavedLayout              `json:"saved_layouts,omitempty"`
 	SidebarViews                    *[]models.SidebarView              `json:"sidebar_views,omitempty"`
 	SidebarActiveViewID             *string                            `json:"sidebar_active_view_id,omitempty"`
@@ -117,6 +124,7 @@ type UpdateUserSettingsRequest struct {
 	GitHubSavedPresets              NullableRawMessage                 `json:"github_saved_presets,omitempty"`
 	GitHubDefaultQueryPresets       NullableRawMessage                 `json:"github_default_query_presets,omitempty"`
 	GitLabSavedPresets              NullableRawMessage                 `json:"gitlab_saved_presets,omitempty"`
+	AzureDevOpsBrowsePreferences    NullableRawMessage                 `json:"azure_devops_browse_preferences,omitempty"`
 	DefaultUtilityAgentID           *string                            `json:"default_utility_agent_id,omitempty"`
 	DefaultUtilityModel             *string                            `json:"default_utility_model,omitempty"`
 	KeyboardShortcuts               *map[string]interface{}            `json:"keyboard_shortcuts,omitempty"`
@@ -209,6 +217,7 @@ func FromUserSettings(settings *models.UserSettings) UserSettingsDTO {
 		UserID:                          settings.UserID,
 		WorkspaceID:                     settings.WorkspaceID,
 		KanbanViewMode:                  settings.KanbanViewMode,
+		StartupPage:                     models.NormalizeStartupPage(settings.StartupPage),
 		WorkflowFilterID:                settings.WorkflowFilterID,
 		RepositoryIDs:                   settings.RepositoryIDs,
 		TasksListSort:                   settings.TasksListSort,
@@ -222,6 +231,7 @@ func FromUserSettings(settings *models.UserSettings) UserSettingsDTO {
 		ReviewAutoMarkOnScroll:          settings.ReviewAutoMarkOnScroll,
 		ConfirmTaskArchive:              settings.ConfirmTaskArchive,
 		UnreadDivider:                   settings.UnreadDivider,
+		AgentGeneratedTaskTitles:        settings.AgentGeneratedTaskTitles,
 		MCPTaskAgentProfileDefault:      models.NormalizeMCPTaskAgentProfileDefault(settings.MCPTaskAgentProfileDefault),
 		ShowAnchoredPromptBar:           settings.ShowAnchoredPromptBar,
 		ShowScrollToLastPrompt:          settings.ShowScrollToLastPrompt,
@@ -232,6 +242,7 @@ func FromUserSettings(settings *models.UserSettings) UserSettingsDTO {
 		LspAutoStartLanguages:           settings.LspAutoStartLanguages,
 		LspAutoInstallLanguages:         settings.LspAutoInstallLanguages,
 		LspServerConfigs:                settings.LspServerConfigs,
+		LspStatusLocation:               models.NormalizeLspStatusLocation(settings.LspStatusLocation),
 		SavedLayouts:                    settings.SavedLayouts,
 		SidebarViews:                    settings.SidebarViews,
 		SidebarActiveViewID:             settings.SidebarActiveViewID,
@@ -243,6 +254,7 @@ func FromUserSettings(settings *models.UserSettings) UserSettingsDTO {
 		GitHubSavedPresets:              settings.GitHubSavedPresets,
 		GitHubDefaultQueryPresets:       settings.GitHubDefaultQueryPresets,
 		GitLabSavedPresets:              settings.GitLabSavedPresets,
+		AzureDevOpsBrowsePreferences:    settings.AzureDevOpsBrowsePreferences,
 		DefaultUtilityAgentID:           settings.DefaultUtilityAgentID,
 		DefaultUtilityModel:             settings.DefaultUtilityModel,
 		KeyboardShortcuts:               settings.KeyboardShortcuts,

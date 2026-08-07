@@ -105,6 +105,13 @@ type Capabilities struct {
 	// can log a visitor in as any (or a new) user — so it should only be
 	// granted to plugins an operator explicitly trusts.
 	Auth bool `yaml:"auth,omitempty" json:"auth,omitempty"`
+	// UserState gates the authenticated, browser-reachable per-user storage
+	// routes (PUT/GET/DELETE /api/plugins/:id/user-state/...). Unlike State
+	// (plugin_state, written by the plugin's own gRPC-connected backend),
+	// this lets a UI-only plugin bundle persist data scoped to the calling
+	// browser session's user with no Go backend of its own (Approach D1,
+	// docs/decisions/2026-08-01-per-user-plugin-storage.md).
+	UserState bool `yaml:"user_state,omitempty" json:"user_state,omitempty"`
 }
 
 // AuthProvider is a login option a plugin contributes to the pre-auth login
@@ -131,6 +138,12 @@ type Action struct {
 	ResourceScope string `yaml:"scope" json:"scope"`
 	MaxBodyBytes  int    `yaml:"max_body_bytes" json:"max_body_bytes"`
 }
+
+const (
+	ActionScopeWorkspace  = "workspace"
+	ActionScopeTask       = "task"
+	ActionScopeRepository = "repository"
+)
 
 // UnmarshalYAML accepts the frozen manifest field name (scope) and the
 // pre-release resource_scope spelling so stored local plugin records remain

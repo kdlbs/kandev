@@ -55,6 +55,20 @@ type fakeRuntime struct {
 	blockProceed chan struct{}
 }
 
+type fakeUserStateCleanup struct {
+	deleteErr error
+	delete    func(context.Context, string) error
+	calls     int
+}
+
+func (f *fakeUserStateCleanup) DeleteAllForPlugin(ctx context.Context, pluginID string) error {
+	f.calls++
+	if f.deleteErr != nil {
+		return f.deleteErr
+	}
+	return f.delete(ctx, pluginID)
+}
+
 func newFakeRuntime() *fakeRuntime {
 	return &fakeRuntime{
 		running:       map[string]bool{},
@@ -148,6 +162,12 @@ func (r *fakeRuntime) setStartErr(id string, err error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.startErr[id] = err
+}
+
+func (r *fakeRuntime) clearStartErr(id string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	delete(r.startErr, id)
 }
 
 func (r *fakeRuntime) startCallCount(id string) int {
@@ -549,6 +569,98 @@ func TestServiceUninstallDeletesPluginState(t *testing.T) {
 	}
 }
 
+// TestServiceUninstallDeletesPluginUserStateForEveryUser pins AC20: the
+// per-user counterpart of TestServiceUninstallDeletesPluginState — uninstall
+// must purge plugin_user_state rows for every user who wrote one, not just
+// whichever user happened to trigger the uninstall.
+func TestServiceUninstallDeletesPluginUserStateForEveryUser(t *testing.T) {
+	svc, _, _ := newTestService(t)
+	svc.SetUserState(newTestUserStateStore(t))
+	installTestPlugin(t, svc, "kandev-plugin-notes")
+
+	ctx := context.Background()
+	if _, err := svc.UserState().Set(ctx, "kandev-plugin-notes", "user_1", "task", "task_1", "note", json.RawMessage(`"a"`), nil); err != nil {
+		t.Fatalf("seed user_1: %v", err)
+	}
+	if _, err := svc.UserState().Set(ctx, "kandev-plugin-notes", "user_2", "task", "task_1", "note", json.RawMessage(`"b"`), nil); err != nil {
+		t.Fatalf("seed user_2: %v", err)
+	}
+
+	if err := svc.Uninstall(context.Background(), "kandev-plugin-notes"); err != nil {
+		t.Fatalf("Uninstall() unexpected error: %v", err)
+	}
+
+	for _, userID := range []string{"user_1", "user_2"} {
+		entries, err := svc.UserState().List(ctx, "kandev-plugin-notes", userID, "task", "task_1")
+		if err != nil {
+			t.Fatalf("List(%s) after Uninstall(): %v", userID, err)
+		}
+		if len(entries) != 0 {
+			t.Fatalf("plugin_user_state entries for %s after Uninstall() = %d, want 0", userID, len(entries))
+		}
+	}
+}
+
+func TestServiceUninstallFailsClosedWhenUserStateCleanupFails(t *testing.T) {
+	svc, fsStore, rt := newTestService(t)
+	svc.SetUserState(newTestUserStateStore(t))
+	rec := installTestPlugin(t, svc, "kandev-plugin-notes")
+	ctx := context.Background()
+	if _, err := svc.UserState().Set(ctx, rec.ID, "user_1", "task", "task_1", "note", json.RawMessage(`"a"`), nil); err != nil {
+		t.Fatalf("seed user state: %v", err)
+	}
+
+	cleanupErr := errors.New("user state database unavailable")
+	cleanup := &fakeUserStateCleanup{
+		deleteErr: cleanupErr,
+		delete:    svc.UserState().DeleteAllForPlugin,
+	}
+	svc.setUserStateCleanupStore(cleanup)
+	deliverer := &fakeDeliverer{}
+	svc.SetDeliverer(deliverer)
+
+	err := svc.Uninstall(ctx, rec.ID)
+	if err == nil || !strings.Contains(err.Error(), cleanupErr.Error()) {
+		t.Fatalf("Uninstall() error = %v, want user-state cleanup failure", err)
+	}
+	if cleanup.calls != 1 {
+		t.Fatalf("DeleteAllForPlugin calls after failed uninstall = %d, want 1", cleanup.calls)
+	}
+	if !rt.stopped(rec.ID) {
+		t.Fatal("Uninstall() did not stop the runtime before cleanup failure")
+	}
+	if _, err := svc.Get(rec.ID); err != nil {
+		t.Fatalf("Get() after failed uninstall: %v, want installed record", err)
+	}
+	if _, err := fsStore.Get(rec.ID); err != nil {
+		t.Fatalf("store.Get() after failed uninstall: %v, want installed record", err)
+	}
+	if _, err := os.Stat(rec.InstallPath); err != nil {
+		t.Fatalf("installed package after failed uninstall: %v", err)
+	}
+	if deliverer.refreshCount != 1 {
+		t.Fatalf("deliverer refreshes after failed uninstall = %d, want stopped-state reconciliation only", deliverer.refreshCount)
+	}
+
+	cleanup.deleteErr = nil
+	if err := svc.Uninstall(ctx, rec.ID); err != nil {
+		t.Fatalf("retry Uninstall() error: %v", err)
+	}
+	if cleanup.calls != 2 {
+		t.Fatalf("DeleteAllForPlugin calls after retry = %d, want 2", cleanup.calls)
+	}
+	if _, err := svc.Get(rec.ID); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("Get() after successful retry = %v, want store.ErrNotFound", err)
+	}
+	entries, err := svc.UserState().List(ctx, rec.ID, "user_1", "task", "task_1")
+	if err != nil {
+		t.Fatalf("List() after successful retry: %v", err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("user state rows after successful retry = %d, want 0", len(entries))
+	}
+}
+
 func TestServiceUninstallMissingReturnsNotFound(t *testing.T) {
 	svc, _, _ := newTestService(t)
 	if err := svc.Uninstall(context.Background(), "missing"); !errors.Is(err, store.ErrNotFound) {
@@ -681,6 +793,81 @@ func TestServiceDisabledCanReEnableAndRespawns(t *testing.T) {
 	}
 	if want := 2; rt.startCallCount("kandev-plugin-slack") != want {
 		t.Fatalf("runtime Start called %d times, want %d (install + re-enable)", rt.startCallCount("kandev-plugin-slack"), want)
+	}
+}
+
+func TestServiceEnableFailurePersistsDiagnosticAndSuccessfulRetryClearsIt(t *testing.T) {
+	svc, fsStore, rt := newTestService(t)
+	installTestPlugin(t, svc, "kandev-plugin-slack")
+	if err := svc.Disable("kandev-plugin-slack"); err != nil {
+		t.Fatalf("Disable(): %v", err)
+	}
+
+	rt.setStartErr("kandev-plugin-slack", errors.New("handshake failed: binary exited"))
+	if err := svc.Enable("kandev-plugin-slack"); err == nil {
+		t.Fatal("Enable() unexpectedly succeeded with a configured start failure")
+	}
+
+	failed, err := svc.Get("kandev-plugin-slack")
+	if err != nil {
+		t.Fatalf("Get() after failed Enable(): %v", err)
+	}
+	if failed.Status != StatusError {
+		t.Fatalf("Status after failed Enable() = %q, want %q", failed.Status, StatusError)
+	}
+	if failed.LastError == "" || !strings.Contains(failed.LastError, "handshake failed") {
+		t.Fatalf("LastError = %q, want the start failure", failed.LastError)
+	}
+	if failed.LastErrorAt == nil {
+		t.Fatal("LastErrorAt is nil after failed Enable()")
+	}
+	onDisk, err := fsStore.Get("kandev-plugin-slack")
+	if err != nil {
+		t.Fatalf("store.Get() after failed Enable(): %v", err)
+	}
+	if onDisk.LastError != failed.LastError || onDisk.LastErrorAt == nil {
+		t.Fatalf("persisted diagnostic = (%q, %v), want (%q, non-nil)", onDisk.LastError, onDisk.LastErrorAt, failed.LastError)
+	}
+
+	rt.clearStartErr("kandev-plugin-slack")
+	if err := svc.Enable("kandev-plugin-slack"); err != nil {
+		t.Fatalf("Enable() retry unexpected error: %v", err)
+	}
+	recovered, err := svc.Get("kandev-plugin-slack")
+	if err != nil {
+		t.Fatalf("Get() after successful retry: %v", err)
+	}
+	if recovered.Status != StatusActive {
+		t.Fatalf("Status after successful retry = %q, want %q", recovered.Status, StatusActive)
+	}
+	if recovered.LastError != "" || recovered.LastErrorAt != nil {
+		t.Fatalf("diagnostic after successful retry = (%q, %v), want empty/nil", recovered.LastError, recovered.LastErrorAt)
+	}
+}
+
+func TestServiceFailedRetryReplacesDiagnostic(t *testing.T) {
+	svc, _, rt := newTestService(t)
+	installTestPlugin(t, svc, "kandev-plugin-slack")
+	if err := svc.Disable("kandev-plugin-slack"); err != nil {
+		t.Fatalf("Disable(): %v", err)
+	}
+
+	rt.setStartErr("kandev-plugin-slack", errors.New("first handshake failure"))
+	if err := svc.Enable("kandev-plugin-slack"); err == nil {
+		t.Fatal("first Enable() unexpectedly succeeded")
+	}
+	first, _ := svc.Get("kandev-plugin-slack")
+
+	rt.setStartErr("kandev-plugin-slack", errors.New("second executable failure"))
+	if err := svc.Enable("kandev-plugin-slack"); err == nil {
+		t.Fatal("second Enable() unexpectedly succeeded")
+	}
+	second, _ := svc.Get("kandev-plugin-slack")
+	if second.Status != StatusError {
+		t.Fatalf("Status after failed retry = %q, want %q", second.Status, StatusError)
+	}
+	if second.LastError == first.LastError || !strings.Contains(second.LastError, "second executable failure") {
+		t.Fatalf("LastError after failed retry = %q, want replacement diagnostic", second.LastError)
 	}
 }
 
@@ -834,12 +1021,12 @@ func TestServiceRecoveryCannotReclaimOwnedProvider(t *testing.T) {
 	if _, err := svc.Install(t.Context(), testPackageWithRepositoryProvider(t, "kandev-plugin-recovering", "bitbucket")); err != nil {
 		t.Fatalf("install recovering plugin: %v", err)
 	}
-	svc.handleStatusChange("kandev-plugin-recovering", false)
+	svc.handleStatusChange("kandev-plugin-recovering", false, errors.New("health check failed"))
 	if _, err := svc.Install(t.Context(), testPackageWithRepositoryProvider(t, "kandev-plugin-owner", "bitbucket")); err != nil {
 		t.Fatalf("install replacement owner: %v", err)
 	}
 
-	svc.handleStatusChange("kandev-plugin-recovering", true)
+	svc.handleStatusChange("kandev-plugin-recovering", true, nil)
 	recovering, _ := svc.Get("kandev-plugin-recovering")
 	if recovering.Status == StatusActive {
 		t.Fatal("health recovery reclaimed a provider already owned by another active plugin")
@@ -871,11 +1058,14 @@ func TestServiceHandleStatusChangeUnhealthyTransitionsToErrorAndRefreshesDeliver
 	deliverer := &fakeDeliverer{}
 	svc.SetDeliverer(deliverer)
 
-	svc.handleStatusChange("kandev-plugin-slack", false)
+	svc.handleStatusChange("kandev-plugin-slack", false, errors.New("ping timeout"))
 
 	got, _ := svc.Get("kandev-plugin-slack")
 	if got.Status != StatusError {
 		t.Fatalf("Status after unhealthy transition = %q, want %q", got.Status, StatusError)
+	}
+	if got.LastError == "" || !strings.Contains(got.LastError, "ping timeout") || got.LastErrorAt == nil {
+		t.Fatalf("diagnostic after unhealthy transition = (%q, %v), want ping timeout/non-nil", got.LastError, got.LastErrorAt)
 	}
 	if deliverer.refreshCount != 1 {
 		t.Fatalf("Refresh() call count = %d, want 1", deliverer.refreshCount)
@@ -888,15 +1078,18 @@ func TestServiceHandleStatusChangeUnhealthyTransitionsToErrorAndRefreshesDeliver
 func TestServiceHandleStatusChangeHealthyRecoversAndFlushesDeliverer(t *testing.T) {
 	svc, _, _ := newTestService(t)
 	installTestPlugin(t, svc, "kandev-plugin-slack")
-	svc.handleStatusChange("kandev-plugin-slack", false) // degrade first
+	svc.handleStatusChange("kandev-plugin-slack", false, errors.New("ping timeout")) // degrade first
 	deliverer := &fakeDeliverer{}
 	svc.SetDeliverer(deliverer)
 
-	svc.handleStatusChange("kandev-plugin-slack", true)
+	svc.handleStatusChange("kandev-plugin-slack", true, nil)
 
 	got, _ := svc.Get("kandev-plugin-slack")
 	if got.Status != StatusActive {
 		t.Fatalf("Status after recovery = %q, want %q", got.Status, StatusActive)
+	}
+	if got.LastError != "" || got.LastErrorAt != nil {
+		t.Fatalf("diagnostic after recovery = (%q, %v), want empty/nil", got.LastError, got.LastErrorAt)
 	}
 	if len(deliverer.flushedIDs) != 1 || deliverer.flushedIDs[0] != "kandev-plugin-slack" {
 		t.Fatalf("Flush() calls = %v, want [kandev-plugin-slack]", deliverer.flushedIDs)
@@ -910,7 +1103,7 @@ func TestServiceHandleStatusChangePersistsRestartCountBestEffort(t *testing.T) {
 	rt.restartCounts["kandev-plugin-slack"] = 3
 	rt.mu.Unlock()
 
-	svc.handleStatusChange("kandev-plugin-slack", false)
+	svc.handleStatusChange("kandev-plugin-slack", false, errors.New("ping timeout"))
 
 	got, _ := svc.Get("kandev-plugin-slack")
 	if got.RestartCount != 3 {
@@ -1061,5 +1254,40 @@ func TestServiceStartActivePluginsSpawnsOnlyActiveManagedNotAlreadyRunning(t *te
 
 	if !rt2.Running("kandev-plugin-slack") {
 		t.Fatal("StartActivePlugins() did not spawn the active plugin")
+	}
+}
+
+func TestServiceStartActivePluginsFailurePersistsDiagnosticAndRefreshesDeliverer(t *testing.T) {
+	svc, dir, fsStore, _ := newTestServiceWithDir(t)
+	installTestPlugin(t, svc, "kandev-plugin-slack")
+
+	reg2 := NewRegistry()
+	if err := reg2.Load(fsStore); err != nil {
+		t.Fatalf("Load(): %v", err)
+	}
+	svc2 := NewService(fsStore, reg2, nil, testLogger(t))
+	svc2.SetPluginsDir(dir)
+	rt2 := newFakeRuntime()
+	rt2.setStartErr("kandev-plugin-slack", errors.New("boot handshake failed"))
+	svc2.SetRuntime(rt2)
+	deliverer := &fakeDeliverer{}
+	svc2.SetDeliverer(deliverer)
+
+	svc2.StartActivePlugins(context.Background())
+
+	got, err := svc2.Get("kandev-plugin-slack")
+	if err != nil {
+		t.Fatalf("Get() after boot failure: %v", err)
+	}
+	if got.Status != StatusError {
+		t.Fatalf("Status after boot failure = %q, want %q", got.Status, StatusError)
+	}
+	if !strings.Contains(got.LastError, "boot handshake failed") || got.LastErrorAt == nil {
+		t.Fatalf("diagnostic after boot failure = (%q, %v), want boot failure and timestamp", got.LastError, got.LastErrorAt)
+	}
+	// bootScan refreshes once at the end of its normal reconciliation, then
+	// the failed active spawn refreshes again so delivery sees StatusError.
+	if deliverer.refreshCount != 2 {
+		t.Fatalf("Refresh() calls after boot failure = %d, want 2", deliverer.refreshCount)
 	}
 }

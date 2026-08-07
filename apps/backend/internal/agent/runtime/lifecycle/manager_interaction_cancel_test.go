@@ -128,6 +128,50 @@ func TestManager_CancelAgent_EscalatesWhenAgentHangs(t *testing.T) {
 	require.True(t, sawReady, "expected AgentReady event after cancel escalation")
 }
 
+func TestManager_CancelAgent_DisconnectedStreamWithoutPromptIsAlreadyCancelled(t *testing.T) {
+	mgr := newTestManager(t)
+	exec := &AgentExecution{
+		ID:        "exec-disconnected-idle",
+		TaskID:    "task-1",
+		SessionID: "session-1",
+		Status:    v1.AgentStatusReady,
+		agentctl:  agentctlClient.NewClient("127.0.0.1", 1, newTestLogger()),
+	}
+	require.NoError(t, mgr.executionStore.Add(exec))
+
+	require.NoError(t, mgr.CancelAgent(context.Background(), exec.ID))
+}
+
+func TestManager_CancelAgent_DisconnectedStreamReleasesPrompt(t *testing.T) {
+	previousEscalationTimeout := cancelEscalationTimeout
+	cancelEscalationTimeout = 100 * time.Millisecond
+	t.Cleanup(func() { cancelEscalationTimeout = previousEscalationTimeout })
+
+	mgr := newTestManager(t)
+	promptFinished := make(chan struct{})
+	exec := &AgentExecution{
+		ID:             "exec-disconnected-running",
+		TaskID:         "task-1",
+		SessionID:      "session-1",
+		Status:         v1.AgentStatusRunning,
+		agentctl:       agentctlClient.NewClient("127.0.0.1", 1, newTestLogger()),
+		promptDoneCh:   make(chan PromptCompletionSignal, 1),
+		promptFinished: promptFinished,
+	}
+	require.NoError(t, mgr.executionStore.Add(exec))
+
+	go func() {
+		<-exec.promptDoneCh
+		close(promptFinished)
+	}()
+
+	err := mgr.CancelAgent(context.Background(), exec.ID)
+	require.ErrorIs(t, err, ErrCancelEscalated)
+	updated, found := mgr.executionStore.Get(exec.ID)
+	require.True(t, found)
+	require.Equal(t, v1.AgentStatusReady, updated.Status)
+}
+
 // TestManager_CancelAgent_EscalationCleanupSurvivesCtxCancel covers the case where
 // the caller's context is cancelled during the post-escalation wait. Once the
 // synthetic signal has been queued on promptDoneCh, the cleanup (MarkReady + drain)

@@ -27,6 +27,7 @@ capabilities:
   api_write: ["tasks"]
   state: true
   secrets: true
+  user_state: true
 
 # These provider-neutral declarations keep the package fixture useful as a
 # second-provider contract: the labels and canned data resemble a Bitbucket

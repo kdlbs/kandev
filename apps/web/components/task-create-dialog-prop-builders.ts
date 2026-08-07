@@ -8,10 +8,8 @@
 // ReturnType<>), so the `import type` form makes the otherwise-circular
 // dependency with task-create-dialog.tsx explicitly type-only — bundlers
 // and analysis tools won't treat it as a real runtime cycle.
-import type {
-  TaskCreateDialogProps,
-  useTaskCreateDialogSetup,
-} from "@/components/task-create-dialog";
+import type { TaskCreateDialogProps } from "@/components/task-create-dialog";
+import type { useTaskCreateDialogSetup } from "@/components/task-create-dialog-setup";
 import type { DialogFormBodyProps, DialogFormState } from "@/components/task-create-dialog-types";
 
 export function computeHasAllBranches(fs: DialogFormState): boolean {
@@ -37,6 +35,7 @@ export function buildDialogFormBodyProps(
     isSessionMode: setup.isSessionMode,
     isCreateMode: setup.isCreateMode,
     isEditMode: setup.isEditMode,
+    autoTitle: setup.autoTitle,
     isTaskStarted: setup.isTaskStarted,
     onTaskNameChange: handlers.handleTaskNameChange,
     onRowRepositoryChange: handlers.handleRowRepositoryChange,
@@ -91,12 +90,14 @@ export function buildDialogFormBodyProps(
 export function buildDialogFooterProps(
   setup: ReturnType<typeof useTaskCreateDialogSetup>,
   props: TaskCreateDialogProps,
+  pendingAttachmentUploadReason?: string | null,
 ) {
   const { fs, computed, submitHandlers } = setup;
   return {
     isSessionMode: setup.isSessionMode,
     isCreateMode: setup.isCreateMode,
     isEditMode: setup.isEditMode,
+    autoTitle: setup.autoTitle,
     isTaskStarted: setup.isTaskStarted,
     isCreatingSession: fs.isCreatingSession,
     isCreatingTask: fs.isCreatingTask,
@@ -114,6 +115,6 @@ export function buildDialogFooterProps(
     onUpdateWithoutAgent: submitHandlers.handleUpdateWithoutAgent,
     onCreateWithoutAgent: submitHandlers.handleCreateWithoutAgent,
     onCreateWithPlanMode: submitHandlers.handleCreateWithPlanMode,
-    submitBlockedReason: props.submitBlockedReason,
+    submitBlockedReason: props.submitBlockedReason ?? pendingAttachmentUploadReason,
   };
 }

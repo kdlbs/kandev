@@ -2,6 +2,56 @@ import { test, expect } from "../../fixtures/test-base";
 import { GitHubAuthSettingsPage } from "../../pages/github-auth-settings-page";
 
 test.describe("Mobile GitHub authentication settings", () => {
+  test("keeps loaded settings visible during refresh", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    await apiClient.mockGitHubSetWorkspaceConnection(seedData.workspaceId, {
+      source: "pat",
+      status: "active",
+      login: "mobile-refresh-user",
+    });
+    let holdStatus = false;
+    let releaseStatus!: () => void;
+    const statusGate = new Promise<void>((resolve) => {
+      releaseStatus = resolve;
+    });
+    await testPage.route("**/api/v1/github/status?*", async (route) => {
+      if (holdStatus) await statusGate;
+      await route.continue();
+    });
+
+    await testPage.setViewportSize({ width: 390, height: 844 });
+    await testPage.goto(`/settings/workspace/${seedData.workspaceId}/integrations/github`);
+    const automation = testPage.getByTestId("github-workspace-automation");
+    await expect(automation.getByText("mobile-refresh-user", { exact: true })).toBeVisible({
+      timeout: 15_000,
+    });
+
+    holdStatus = true;
+    const refresh = automation.getByRole("button", { name: "Refresh GitHub connection" });
+    await refresh.tap();
+    await expect(automation.getByText("mobile-refresh-user", { exact: true })).toBeVisible();
+    await expect(testPage.getByText("Checking GitHub connection...", { exact: true })).toHaveCount(
+      0,
+    );
+    await expect(refresh).toBeDisabled();
+    await expect(refresh).toHaveAttribute("aria-busy", "true");
+    const refreshBox = await refresh.boundingBox();
+    expect(refreshBox).not.toBeNull();
+    expect(refreshBox!.height).toBeGreaterThanOrEqual(44);
+
+    const hasHorizontalOverflow = await testPage.evaluate(
+      () => document.documentElement.scrollWidth > document.documentElement.clientWidth,
+    );
+    expect(hasHorizontalOverflow).toBe(false);
+
+    holdStatus = false;
+    releaseStatus();
+    await expect(refresh).toBeEnabled();
+  });
+
   test("keeps workspace and personal identity controls usable on a narrow viewport", async ({
     testPage,
     apiClient,

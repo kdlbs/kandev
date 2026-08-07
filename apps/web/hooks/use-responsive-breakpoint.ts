@@ -1,7 +1,6 @@
 import * as React from "react";
 
-const MOBILE_BREAKPOINT = 640;
-const COMPACT_DESKTOP_BREAKPOINT = 768;
+const MOBILE_BREAKPOINT = 768;
 const DESKTOP_BREAKPOINT = 1024;
 
 export type Breakpoint = "mobile" | "tablet" | "compactDesktop" | "desktop";
@@ -21,9 +20,7 @@ function getBreakpoint(width: number, isFinePointer: boolean): Breakpoint {
   if (width < MOBILE_BREAKPOINT) {
     return "mobile";
   }
-  // Fine-pointer devices below 768px stay on the tablet layout; that range is
-  // too narrow to host the full workbench even with a mouse.
-  if (width >= COMPACT_DESKTOP_BREAKPOINT && width < DESKTOP_BREAKPOINT && isFinePointer) {
+  if (width < DESKTOP_BREAKPOINT && isFinePointer) {
     return "compactDesktop";
   }
   if (width < DESKTOP_BREAKPOINT) {
@@ -91,8 +88,7 @@ function subscribeBreakpoint(callback: () => void): () => void {
   }
   const mediaQueries = [
     `(max-width: ${MOBILE_BREAKPOINT - 1}px)`,
-    `(min-width: ${MOBILE_BREAKPOINT}px) and (max-width: ${COMPACT_DESKTOP_BREAKPOINT - 1}px)`,
-    `(min-width: ${COMPACT_DESKTOP_BREAKPOINT}px) and (max-width: ${DESKTOP_BREAKPOINT - 1}px)`,
+    `(min-width: ${MOBILE_BREAKPOINT}px) and (max-width: ${DESKTOP_BREAKPOINT - 1}px)`,
     `(min-width: ${DESKTOP_BREAKPOINT}px)`,
     "(pointer: fine)",
   ];

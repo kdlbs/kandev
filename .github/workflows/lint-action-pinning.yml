@@ -12,6 +12,16 @@ on:
       - ".github/scripts/release-workflow-contract_test.py"
       - ".github/release-signing-key.asc"
       - "docs/public/release-process.md"
+      - "scripts/release/npm-packages.sh"
+      - "scripts/release/nightly-version.mjs"
+      - "scripts/release/nightly-version.test.mjs"
+      - "scripts/release/nightly-release.sh"
+      - "scripts/release/nightly-release.test.mjs"
+      - "scripts/release/npm-view-version.sh"
+      - "scripts/release/npm-view-version.test.mjs"
+      - "scripts/release/package-npm-runtime.sh"
+      - "scripts/release/publish-npm.sh"
+      - "scripts/release/publish-npm.test.mjs"
   pull_request:
     branches: [main]
     paths:
@@ -23,6 +33,16 @@ on:
       - ".github/scripts/release-workflow-contract_test.py"
       - ".github/release-signing-key.asc"
       - "docs/public/release-process.md"
+      - "scripts/release/npm-packages.sh"
+      - "scripts/release/nightly-version.mjs"
+      - "scripts/release/nightly-version.test.mjs"
+      - "scripts/release/nightly-release.sh"
+      - "scripts/release/nightly-release.test.mjs"
+      - "scripts/release/npm-view-version.sh"
+      - "scripts/release/npm-view-version.test.mjs"
+      - "scripts/release/package-npm-runtime.sh"
+      - "scripts/release/publish-npm.sh"
+      - "scripts/release/publish-npm.test.mjs"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -51,6 +71,14 @@ jobs:
 
       - name: Test release workflow contract
         run: python3 .github/scripts/release-workflow-contract_test.py
+
+      - name: Set up Node.js
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version: "24"
+
+      - name: Test npm release helpers
+        run: node --test scripts/release/nightly-version.test.mjs scripts/release/nightly-release.test.mjs scripts/release/npm-view-version.test.mjs scripts/release/publish-npm.test.mjs
 
       - name: Verify action refs
         run: python3 .github/scripts/lint-action-pinning.py

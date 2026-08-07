@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -565,6 +566,33 @@ func TestHandleUpdateTask_PersistsState(t *testing.T) {
 	task, err := svc.GetTask(ctx, "task-update-state")
 	require.NoError(t, err)
 	assert.Equal(t, v1.TaskStateCompleted, task.State)
+}
+
+func TestHandleUpdateTask_TitleTooLongReturnsValidation(t *testing.T) {
+	svc, repo := newTestTaskService(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+
+	require.NoError(t, repo.CreateWorkspace(ctx, &models.Workspace{
+		ID: "ws-update-title", Name: "Update Title", CreatedAt: now, UpdatedAt: now,
+	}))
+	require.NoError(t, repo.CreateWorkflow(ctx, &models.Workflow{
+		ID: "wf-update-title", WorkspaceID: "ws-update-title", Name: "Board", CreatedAt: now, UpdatedAt: now,
+	}))
+	require.NoError(t, repo.CreateTask(ctx, &models.Task{
+		ID: "task-update-title", WorkspaceID: "ws-update-title", WorkflowID: "wf-update-title",
+		Title: "Original", State: v1.TaskStateTODO, CreatedAt: now, UpdatedAt: now,
+	}))
+
+	h := &Handlers{taskSvc: svc, logger: testLogger(t).WithFields()}
+	msg := makeWSMessage(t, ws.ActionMCPUpdateTask, map[string]interface{}{
+		"task_id": "task-update-title",
+		"title":   strings.Repeat("x", service.TaskTitleMaxLength+1),
+	})
+
+	resp, err := h.handleUpdateTask(ctx, msg)
+	require.NoError(t, err)
+	assertWSError(t, resp, ws.ErrorCodeValidation)
 }
 
 // TestHandleMoveTask_ActiveSessionWithoutPrompt_DefersMove pins the production

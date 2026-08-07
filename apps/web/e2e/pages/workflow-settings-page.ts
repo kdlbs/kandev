@@ -112,6 +112,26 @@ export class WorkflowSettingsPage {
     await this.activate(this.page.getByRole("option", { name: optionName }), touch);
   }
 
+  /** Toggle the cancellation policy beneath a configured turn-complete transition. */
+  async setCancelCompletionPolicy(
+    card: Locator,
+    stepName: string,
+    enabled: boolean,
+    touch = false,
+  ) {
+    const panel = await this.selectStep(card, stepName, touch);
+    const checkbox = panel.getByRole("checkbox", {
+      name: "Run completion actions when a turn is cancelled",
+    });
+    if ((await checkbox.isChecked()) !== enabled) {
+      const target = touch ? panel.getByTestId(/-cancel-completion-label$/) : checkbox;
+      await this.activate(target, touch);
+    }
+    if (enabled) await expect(checkbox).toBeChecked();
+    else await expect(checkbox).not.toBeChecked();
+    return checkbox;
+  }
+
   /** The add-step (+) button within a workflow card. */
   addStepButton(card: Locator): Locator {
     return card.getByTestId("add-step-button");
@@ -124,8 +144,8 @@ export class WorkflowSettingsPage {
   }
 
   /** Save every dirty workflow contributor through the route-level action. */
-  async saveChanges(): Promise<void> {
-    await this.submitSaveChanges();
+  async saveChanges(touch = false): Promise<void> {
+    await this.submitSaveChanges(touch);
     await expect
       .poll(
         async () =>

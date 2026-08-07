@@ -18,6 +18,8 @@ import (
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/gitconfigenv"
+	"github.com/kandev/kandev/internal/githubauth"
+	"github.com/kandev/kandev/internal/task/models"
 )
 
 const (
@@ -25,6 +27,7 @@ const (
 	dockerAgentctlInstancePortMax   = 41100
 	boolStringTrue                  = "true"
 	gitHubCredentialHelperConfigKey = "credential.https://github.com.helper"
+	remoteAgentctlExecutablePath    = "/usr/local/bin/agentctl"
 )
 
 // ContainerConfig holds configuration for launching a Docker container
@@ -46,6 +49,7 @@ type ContainerConfig struct {
 	MainRepoGitDir                 string // Path to main repo's .git directory (for worktrees)
 	McpServers                     []McpServerConfig
 	McpMode                        string
+	McpProviders                   []string
 	PrepareScript                  string                 // Script to run inside container before agent starts (e.g., clone repo)
 	ImageTagOverride               string                 // If set, replaces the agent runtime's default image (e.g. profile.config.image_tag)
 	LocalClonePath                 string                 // Host path for file:// repository clone URLs; mounted read-only at the same path.
@@ -54,7 +58,8 @@ type ContainerConfig struct {
 	// BaseBranches maps RepositoryName → base branch ref; forwarded into
 	// agentctl's CreateInstanceRequest so each WorkspaceTracker resolves
 	// diff stats against the task-recorded base.
-	BaseBranches map[string]string
+	BaseBranches        map[string]string
+	RemoteContributions map[string]models.RemoteContribution
 }
 
 func boolPtr(v bool) *bool {
@@ -70,6 +75,37 @@ func autoApprovePermissionsOverride(enabled bool, override *bool) *bool {
 		return boolPtr(true)
 	}
 	return nil
+}
+
+func buildContainerCreateInstanceRequest(
+	config ContainerConfig,
+	agentType string,
+	disableAskQuestion, assumeMcpSse, assumeMcpHttp, requiresProcessKill bool,
+	stripEnv []string,
+) *agentctl.CreateInstanceRequest {
+	return &agentctl.CreateInstanceRequest{
+		ID:            config.InstanceID,
+		WorkspacePath: "/workspace",
+		AgentCommand:  "",
+		AgentType:     agentType,
+		Env:           config.Credentials,
+		AutoApprovePermissions: autoApprovePermissionsOverride(
+			config.AutoApprovePermissions,
+			config.AutoApprovePermissionsOverride,
+		),
+		AutoStart:           false,
+		McpServers:          config.McpServers,
+		SessionID:           config.SessionID,
+		DisableAskQuestion:  disableAskQuestion,
+		AssumeMcpSse:        assumeMcpSse,
+		AssumeMcpHttp:       assumeMcpHttp,
+		McpMode:             config.McpMode,
+		McpProviders:        config.McpProviders,
+		RequiresProcessKill: requiresProcessKill,
+		StripEnv:            stripEnv,
+		BaseBranches:        config.BaseBranches,
+		RemoteContributions: config.RemoteContributions,
+	}
 }
 
 // ContainerManager handles Docker container lifecycle operations
@@ -237,27 +273,9 @@ func (cm *ContainerManager) createInstanceAndClient(
 		}
 	}
 
-	createReq := &agentctl.CreateInstanceRequest{
-		ID:            config.InstanceID,
-		WorkspacePath: "/workspace",
-		AgentCommand:  "",
-		AgentType:     agentType,
-		Env:           config.Credentials,
-		AutoApprovePermissions: autoApprovePermissionsOverride(
-			config.AutoApprovePermissions,
-			config.AutoApprovePermissionsOverride,
-		),
-		AutoStart:           false,
-		McpServers:          config.McpServers,
-		SessionID:           config.SessionID,
-		DisableAskQuestion:  disableAskQuestion,
-		AssumeMcpSse:        assumeMcpSse,
-		AssumeMcpHttp:       assumeMcpHttp,
-		McpMode:             config.McpMode,
-		RequiresProcessKill: requiresProcessKill,
-		StripEnv:            stripEnv,
-		BaseBranches:        config.BaseBranches,
-	}
+	createReq := buildContainerCreateInstanceRequest(
+		config, agentType, disableAskQuestion, assumeMcpSse, assumeMcpHttp, requiresProcessKill, stripEnv,
+	)
 
 	resp, err := ctl.CreateInstance(ctx, createReq)
 	if err != nil {
@@ -665,10 +683,14 @@ func (cm *ContainerManager) buildEnvVars(config ContainerConfig) ([]string, erro
 
 	// Inject credentials from the provided credentials map
 	for k, v := range config.Credentials {
-		if k == "GIT_CONFIG_COUNT" || strings.HasPrefix(k, "GIT_CONFIG_KEY_") || strings.HasPrefix(k, "GIT_CONFIG_VALUE_") {
+		if k == "GIT_CONFIG_COUNT" || strings.HasPrefix(k, "GIT_CONFIG_KEY_") ||
+			strings.HasPrefix(k, "GIT_CONFIG_VALUE_") || k == githubauth.CredentialHelperPathEnv {
 			continue
 		}
 		env = append(env, fmt.Sprintf("%s=%s", k, v))
+	}
+	if hasManagedGitHubBrokerEnv(config.Credentials) {
+		env = append(env, githubauth.CredentialHelperPathEnv+"="+remoteAgentctlExecutablePath)
 	}
 
 	// Add profile-specific label if available

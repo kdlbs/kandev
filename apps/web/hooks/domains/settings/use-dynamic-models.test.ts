@@ -125,4 +125,25 @@ describe("useAgentCapabilities", () => {
 
     expect(result.current.status).toBe("ok");
   });
+
+  // The catch branch falls back to the catalog string. Nothing else in this
+  // file makes `fetchDynamicModels` reject, so without this the branch can
+  // drift undetected: rename the key and `t()` silently returns the key name.
+  // The mount effect issues the fetch, so rejecting once is enough.
+  it("falls back to the catalog string when the capability fetch rejects with a non-Error", async () => {
+    fetchDynamicModelsMock.mockRejectedValueOnce("raw rejection");
+
+    const { result } = renderHook(() => useAgentCapabilities("grok-acp", initialConfig));
+
+    await waitFor(() => expect(result.current.error).toBe("Failed to fetch capabilities"));
+    expect(result.current.isLoading).toBe(false);
+  });
+
+  it("surfaces the thrown message when the capability fetch rejects with an Error", async () => {
+    fetchDynamicModelsMock.mockRejectedValueOnce(new Error("probe timed out"));
+
+    const { result } = renderHook(() => useAgentCapabilities("grok-acp", initialConfig));
+
+    await waitFor(() => expect(result.current.error).toBe("probe timed out"));
+  });
 });

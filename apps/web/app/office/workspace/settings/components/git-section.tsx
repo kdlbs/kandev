@@ -12,7 +12,7 @@ import {
 import { Input } from "@kandev/ui/input";
 import { Button } from "@kandev/ui/button";
 import { Badge } from "@kandev/ui/badge";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast/sonner";
 import { useAppStore } from "@/components/state-provider";
 import * as officeApi from "@/lib/api/domains/office-api";
 import type { GitStatusData } from "@/lib/api/domains/office-api";

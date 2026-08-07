@@ -2,12 +2,19 @@ package orchestrator
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"testing"
 	"time"
 
+	runtimeapi "github.com/kandev/kandev/internal/agent/runtime"
 	"github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/task/models"
 )
+
+// errWorkTransient is a non-not-found stop error used to assert that a transient
+// stop failure never causes a confirmed-dead row to be pruned.
+var errWorkTransient = errors.New("runtime stop transient failure")
 
 // TestReconcileSessionsOnStartupMakesRowsTrue is the restart-reconciliation
 // integration test for #1597 startup reconciliation (the backlog stops
@@ -185,6 +192,145 @@ func TestReconcileSessionsOnStartup_MissingSessionStopsAgentAndDeletesRow(t *tes
 	}
 }
 
+// TestReconcileSessionsOnStartup_MissingSessionDeadRowPrunedOnNotFound is the
+// regression test for the stale-orphan-row bug: a missing-session row whose
+// runtime handle is already gone returns a not-found error from the stop, which
+// the old code treated as "stop failed" and preserved forever. A confirmed-dead
+// LOCAL row must instead treat the not-found stop as already-stopped and prune
+// the row under the resume-safety invariant (no resume_token → delete).
+func TestReconcileSessionsOnStartup_MissingSessionDeadRowPrunedOnNotFound(t *testing.T) {
+	repo := setupTestRepo(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+
+	if err := repo.UpsertExecutorRunning(ctx, &models.ExecutorRunning{
+		ID: "sDead", SessionID: "sDead", TaskID: "taskDead", Runtime: agentruntime.RuntimeStandalone,
+		Status: models.ExecutorRunningStatusRunning, AgentExecutionID: "execDead", LocalPID: 4242,
+		CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("upsert sDead: %v", err)
+	}
+
+	agentMgr := &mockAgentManager{
+		// The runtime seam (lifecycleAdapter) normalizes the lifecycle not-found
+		// sentinel to runtimeapi.ErrNotFound before it reaches the orchestrator.
+		stopAgentWithReasonErr: fmt.Errorf("stop agent: %w", runtimeapi.ErrNotFound),
+		rowLivenessFn: func(*models.ExecutorRunning) models.ProcessLiveness {
+			return models.ProcessLivenessDead
+		},
+	}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
+	svc.reconcileSessionsOnStartup(ctx)
+
+	if _, err := repo.GetExecutorRunningBySessionID(ctx, "sDead"); err == nil {
+		t.Error("confirmed-dead local orphan row with a not-found stop must be pruned, not preserved")
+	}
+}
+
+// TestReconcileSessionsOnStartup_MissingSessionDeadRowWithTokenRepaired covers
+// the resume-safety half of the confirmed-dead not-found path: a dead local row
+// that still carries a resume_token is repaired in place (never deleted).
+func TestReconcileSessionsOnStartup_MissingSessionDeadRowWithTokenRepaired(t *testing.T) {
+	repo := setupTestRepo(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+
+	if err := repo.UpsertExecutorRunning(ctx, &models.ExecutorRunning{
+		ID: "sTok", SessionID: "sTok", TaskID: "taskTok", Runtime: agentruntime.RuntimeStandalone,
+		Status: models.ExecutorRunningStatusRunning, AgentExecutionID: "execTok",
+		ResumeToken: "tokTok", Resumable: true, LocalPID: 5252,
+		CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("upsert sTok: %v", err)
+	}
+
+	agentMgr := &mockAgentManager{
+		stopAgentWithReasonErr: fmt.Errorf("stop agent: %w", runtimeapi.ErrNotFound),
+		rowLivenessFn: func(*models.ExecutorRunning) models.ProcessLiveness {
+			return models.ProcessLivenessDead
+		},
+	}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
+	svc.reconcileSessionsOnStartup(ctx)
+
+	row, err := repo.GetExecutorRunningBySessionID(ctx, "sTok")
+	if err != nil {
+		t.Fatalf("confirmed-dead row holding a resume_token must be preserved: %v", err)
+	}
+	if row.ResumeToken != "tokTok" {
+		t.Errorf("resume_token must survive repair; got %q", row.ResumeToken)
+	}
+	if row.Status != models.ExecutorRunningStatusStopped || row.LocalPID != 0 {
+		t.Errorf("dead row must be repaired to stopped with cleared local_pid; got status=%q local_pid=%d", row.Status, row.LocalPID)
+	}
+}
+
+// TestReconcileSessionsOnStartup_MissingSessionUnknownRowPreservedOnNotFound
+// guards the anti-blanket-ignore rule: a not-found stop for a row whose local
+// liveness is Unknown (remote/containerized/no local handle) must NOT prune the
+// row — only a confirmed-dead LOCAL row is reclassified.
+func TestReconcileSessionsOnStartup_MissingSessionUnknownRowPreservedOnNotFound(t *testing.T) {
+	repo := setupTestRepo(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+
+	if err := repo.UpsertExecutorRunning(ctx, &models.ExecutorRunning{
+		ID: "sRemote", SessionID: "sRemote", TaskID: "taskRemote", Runtime: agentruntime.RuntimeSSH,
+		Status: models.ExecutorRunningStatusRunning, AgentExecutionID: "execRemote",
+		ResumeToken: "tokRemote", PID: 4444, CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("upsert sRemote: %v", err)
+	}
+
+	agentMgr := &mockAgentManager{
+		stopAgentWithReasonErr: fmt.Errorf("stop agent: %w", runtimeapi.ErrNotFound),
+		rowLivenessFn: func(*models.ExecutorRunning) models.ProcessLiveness {
+			return models.ProcessLivenessUnknown
+		},
+	}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
+	svc.reconcileSessionsOnStartup(ctx)
+
+	row, err := repo.GetExecutorRunningBySessionID(ctx, "sRemote")
+	if err != nil {
+		t.Fatalf("unknown/remote row must be preserved on a host-local not-found: %v", err)
+	}
+	if row.ResumeToken != "tokRemote" || row.PID != 4444 {
+		t.Errorf("unknown/remote row must be left intact; got token=%q pid=%d", row.ResumeToken, row.PID)
+	}
+}
+
+// TestReconcileSessionsOnStartup_MissingSessionNonNotFoundPreserved guards the
+// retryable-failure rule: a stop that fails with a non-not-found error must
+// preserve the row even when the row is confirmed dead — a transient stop
+// failure is never mistaken for an absent runtime.
+func TestReconcileSessionsOnStartup_MissingSessionNonNotFoundPreserved(t *testing.T) {
+	repo := setupTestRepo(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+
+	if err := repo.UpsertExecutorRunning(ctx, &models.ExecutorRunning{
+		ID: "sErr", SessionID: "sErr", TaskID: "taskErr", Runtime: agentruntime.RuntimeStandalone,
+		Status: models.ExecutorRunningStatusRunning, AgentExecutionID: "execErr", LocalPID: 6262,
+		CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("upsert sErr: %v", err)
+	}
+
+	agentMgr := &mockAgentManager{
+		stopAgentWithReasonErr: errWorkTransient, // not a not-found sentinel
+		rowLivenessFn: func(*models.ExecutorRunning) models.ProcessLiveness {
+			return models.ProcessLivenessDead
+		},
+	}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
+	svc.reconcileSessionsOnStartup(ctx)
+
+	if _, err := repo.GetExecutorRunningBySessionID(ctx, "sErr"); err != nil {
+		t.Errorf("a non-not-found stop failure must preserve the row for retry: %v", err)
+	}
+}
+
 // TestReconcileSessionsOnStartup_CreatedSessionRowPrunedUnlessResumable covers
 // the never-started-session cleanup site, which routes through the resume-safety
 // invariant rather than deleting unconditionally: a Created session's row with
@@ -225,5 +371,181 @@ func TestReconcileSessionsOnStartup_CreatedSessionRowPrunedUnlessResumable(t *te
 	}
 	if f.Status != models.ExecutorRunningStatusStopped || f.LocalPID != 0 {
 		t.Errorf("sF should be repaired to stopped with cleared local_pid; got status=%q local_pid=%d", f.Status, f.LocalPID)
+	}
+}
+
+// TestReconcileSessionsOnStartup_TerminalDeadRowPrunedOnNotFound is the
+// regression test for the "failed to stop terminal session runtime; preserving
+// executor record" warning: a COMPLETED/CANCELLED session whose confirmed-dead
+// LOCAL runtime returns a not-found stop must be treated as already-stopped and
+// its tokenless row pruned — not preserved forever. Mirrors the missing-session
+// classification so terminal reconciliation stops leaking stale rows.
+func TestReconcileSessionsOnStartup_TerminalDeadRowPrunedOnNotFound(t *testing.T) {
+	for _, state := range []models.TaskSessionState{
+		models.TaskSessionStateCompleted,
+		models.TaskSessionStateCancelled,
+	} {
+		t.Run(string(state), func(t *testing.T) {
+			repo := setupTestRepo(t)
+			ctx := context.Background()
+			now := time.Now().UTC()
+
+			seedTaskAndSession(t, repo, "taskT", "sT", state)
+			if err := repo.UpsertExecutorRunning(ctx, &models.ExecutorRunning{
+				ID: "sT", SessionID: "sT", TaskID: "taskT", Runtime: agentruntime.RuntimeStandalone,
+				Status: models.ExecutorRunningStatusRunning, AgentExecutionID: "execT", LocalPID: 7272,
+				CreatedAt: now, UpdatedAt: now,
+			}); err != nil {
+				t.Fatalf("upsert sT: %v", err)
+			}
+
+			agentMgr := &mockAgentManager{
+				stopAgentWithReasonErr: fmt.Errorf("stop agent: %w", runtimeapi.ErrNotFound),
+				rowLivenessFn: func(*models.ExecutorRunning) models.ProcessLiveness {
+					return models.ProcessLivenessDead
+				},
+			}
+			svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
+			svc.reconcileSessionsOnStartup(ctx)
+
+			if _, err := repo.GetExecutorRunningBySessionID(ctx, "sT"); err == nil {
+				t.Error("confirmed-dead terminal row with a not-found stop must be pruned, not preserved")
+			}
+		})
+	}
+}
+
+// TestReconcileSessionsOnStartup_TerminalDeadRowWithTokenRepaired covers the
+// resume-safety half of the terminal not-found path: a terminal row still
+// carrying a resume_token is repaired in place, never deleted.
+func TestReconcileSessionsOnStartup_TerminalDeadRowWithTokenRepaired(t *testing.T) {
+	repo := setupTestRepo(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+
+	seedTaskAndSession(t, repo, "taskTT", "sTT", models.TaskSessionStateCompleted)
+	if err := repo.UpsertExecutorRunning(ctx, &models.ExecutorRunning{
+		ID: "sTT", SessionID: "sTT", TaskID: "taskTT", Runtime: agentruntime.RuntimeStandalone,
+		Status: models.ExecutorRunningStatusRunning, AgentExecutionID: "execTT",
+		ResumeToken: "tokTT", Resumable: true, LocalPID: 8282,
+		CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("upsert sTT: %v", err)
+	}
+
+	agentMgr := &mockAgentManager{
+		stopAgentWithReasonErr: fmt.Errorf("stop agent: %w", runtimeapi.ErrNotFound),
+		rowLivenessFn: func(*models.ExecutorRunning) models.ProcessLiveness {
+			return models.ProcessLivenessDead
+		},
+	}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
+	svc.reconcileSessionsOnStartup(ctx)
+
+	row, err := repo.GetExecutorRunningBySessionID(ctx, "sTT")
+	if err != nil {
+		t.Fatalf("terminal row holding a resume_token must be preserved: %v", err)
+	}
+	if row.ResumeToken != "tokTT" {
+		t.Errorf("resume_token must survive repair; got %q", row.ResumeToken)
+	}
+	if row.Status != models.ExecutorRunningStatusStopped || row.LocalPID != 0 {
+		t.Errorf("dead terminal row must be repaired to stopped with cleared local_pid; got status=%q local_pid=%d", row.Status, row.LocalPID)
+	}
+}
+
+// TestReconcileSessionsOnStartup_TerminalUnknownRowPreservedOnNotFound guards the
+// anti-blanket-ignore rule for the terminal path: a not-found stop for a row
+// whose local liveness is Unknown (remote/no local handle) must NOT prune the
+// row — only a confirmed-dead LOCAL row is reclassified.
+func TestReconcileSessionsOnStartup_TerminalUnknownRowPreservedOnNotFound(t *testing.T) {
+	repo := setupTestRepo(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+
+	seedTaskAndSession(t, repo, "taskTU", "sTU", models.TaskSessionStateCancelled)
+	if err := repo.UpsertExecutorRunning(ctx, &models.ExecutorRunning{
+		ID: "sTU", SessionID: "sTU", TaskID: "taskTU", Runtime: agentruntime.RuntimeSSH,
+		Status: models.ExecutorRunningStatusRunning, AgentExecutionID: "execTU",
+		PID: 9191, CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("upsert sTU: %v", err)
+	}
+
+	agentMgr := &mockAgentManager{
+		stopAgentWithReasonErr: fmt.Errorf("stop agent: %w", runtimeapi.ErrNotFound),
+		rowLivenessFn: func(*models.ExecutorRunning) models.ProcessLiveness {
+			return models.ProcessLivenessUnknown
+		},
+	}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
+	svc.reconcileSessionsOnStartup(ctx)
+
+	if _, err := repo.GetExecutorRunningBySessionID(ctx, "sTU"); err != nil {
+		t.Fatalf("unknown/remote terminal row must be preserved on a host-local not-found: %v", err)
+	}
+}
+
+// TestReconcileSessionsOnStartup_FailedNonResumableDeadRowPrunedOnNotFound
+// extends the classification to the non-resumable FAILED startup path: a failed
+// session with no resume handle whose dead-local runtime returns not-found must
+// have its row pruned rather than preserved with the "failed to stop failed
+// session runtime; preserving executor record" warning.
+func TestReconcileSessionsOnStartup_FailedNonResumableDeadRowPrunedOnNotFound(t *testing.T) {
+	repo := setupTestRepo(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+
+	seedTaskAndSession(t, repo, "taskFail", "sFail", models.TaskSessionStateFailed)
+	if err := repo.UpsertExecutorRunning(ctx, &models.ExecutorRunning{
+		ID: "sFail", SessionID: "sFail", TaskID: "taskFail", Runtime: agentruntime.RuntimeStandalone,
+		Status: models.ExecutorRunningStatusRunning, AgentExecutionID: "execFail", LocalPID: 3131,
+		CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("upsert sFail: %v", err)
+	}
+
+	agentMgr := &mockAgentManager{
+		stopAgentWithReasonErr: fmt.Errorf("stop agent: %w", runtimeapi.ErrNotFound),
+		rowLivenessFn: func(*models.ExecutorRunning) models.ProcessLiveness {
+			return models.ProcessLivenessDead
+		},
+	}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
+	svc.reconcileSessionsOnStartup(ctx)
+
+	if _, err := repo.GetExecutorRunningBySessionID(ctx, "sFail"); err == nil {
+		t.Error("confirmed-dead non-resumable failed row with a not-found stop must be pruned, not preserved")
+	}
+}
+
+// TestReconcileSessionsOnStartup_TerminalNonNotFoundPreserved guards the
+// retryable-failure rule for the terminal path: a stop that fails with a
+// non-not-found error must preserve the row even when the row is confirmed dead.
+func TestReconcileSessionsOnStartup_TerminalNonNotFoundPreserved(t *testing.T) {
+	repo := setupTestRepo(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+
+	seedTaskAndSession(t, repo, "taskTE", "sTE", models.TaskSessionStateCompleted)
+	if err := repo.UpsertExecutorRunning(ctx, &models.ExecutorRunning{
+		ID: "sTE", SessionID: "sTE", TaskID: "taskTE", Runtime: agentruntime.RuntimeStandalone,
+		Status: models.ExecutorRunningStatusRunning, AgentExecutionID: "execTE", LocalPID: 4141,
+		CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("upsert sTE: %v", err)
+	}
+
+	agentMgr := &mockAgentManager{
+		stopAgentWithReasonErr: errWorkTransient, // not a not-found sentinel
+		rowLivenessFn: func(*models.ExecutorRunning) models.ProcessLiveness {
+			return models.ProcessLivenessDead
+		},
+	}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
+	svc.reconcileSessionsOnStartup(ctx)
+
+	if _, err := repo.GetExecutorRunningBySessionID(ctx, "sTE"); err != nil {
+		t.Errorf("a non-not-found stop failure must preserve the terminal row for retry: %v", err)
 	}
 }

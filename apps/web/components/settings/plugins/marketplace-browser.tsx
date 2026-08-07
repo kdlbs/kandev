@@ -1,13 +1,14 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { Trans, useTranslation } from "react-i18next";
 import { IconRefresh } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Input } from "@kandev/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import { useMarketplace } from "@/hooks/domains/plugins/use-marketplace";
 import type { CatalogQuery } from "@/lib/api/domains/marketplace-api";
-import type { MarketplaceCatalog, MarketplaceEntry } from "@/lib/types/plugins";
+import type { MarketplaceCatalog, MarketplaceEntry, MarketplaceSource } from "@/lib/types/plugins";
 import { MarketplaceEntryRow } from "./marketplace-entry-row";
 import { MarketplaceSourcesDialog } from "./marketplace-sources-dialog";
 
@@ -107,10 +108,11 @@ type ToolbarProps = {
 };
 
 function MarketplaceToolbar(props: ToolbarProps) {
+  const { t } = useTranslation();
   return (
     <div className="flex flex-wrap items-center gap-2">
       <Input
-        placeholder="Search plugins…"
+        placeholder={t("plugins:searchPlugins")}
         value={props.text}
         onChange={(e) => props.onText(e.target.value)}
         className="max-w-xs"
@@ -118,10 +120,10 @@ function MarketplaceToolbar(props: ToolbarProps) {
       />
       <Select value={props.category} onValueChange={props.onCategory}>
         <SelectTrigger className="w-40" data-testid="marketplace-category">
-          <SelectValue placeholder="Category" />
+          <SelectValue placeholder={t("plugins:category")} />
         </SelectTrigger>
         <SelectContent>
-          <SelectItem value={ALL_CATEGORIES}>All categories</SelectItem>
+          <SelectItem value={ALL_CATEGORIES}>{t("plugins:allCategories")}</SelectItem>
           {props.categories.map((cat) => (
             <SelectItem key={cat} value={cat}>
               {cat}
@@ -134,15 +136,16 @@ function MarketplaceToolbar(props: ToolbarProps) {
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
-          <SelectItem value="stars">Most stars</SelectItem>
-          <SelectItem value="recent">Recently updated</SelectItem>
-          <SelectItem value="name">Name</SelectItem>
+          {/* The `value`s are the catalog API's sort tokens, not copy. */}
+          <SelectItem value="stars">{t("plugins:sortMostStars")}</SelectItem>
+          <SelectItem value="recent">{t("plugins:sortRecentlyUpdated")}</SelectItem>
+          <SelectItem value="name">{t("plugins:sortName")}</SelectItem>
         </SelectContent>
       </Select>
       <div className="ml-auto flex items-center gap-2">
         <Button variant="secondary" onClick={props.onRefresh} className="cursor-pointer">
           <IconRefresh className="h-4 w-4" />
-          Refresh
+          {t("plugins:refresh")}
         </Button>
         <Button
           variant="outline"
@@ -150,7 +153,7 @@ function MarketplaceToolbar(props: ToolbarProps) {
           className="cursor-pointer"
           data-testid="marketplace-manage-sources"
         >
-          Sources
+          {t("plugins:sources")}
         </Button>
       </div>
     </div>
@@ -166,11 +169,25 @@ function DegradedSourcesBanner({ catalog }: { catalog: MarketplaceCatalog }) {
       className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-sm text-amber-700 dark:text-amber-400 space-y-1"
     >
       {degraded.map((s) => (
-        <div key={s.id}>
-          <span className="font-medium">{s.name}</span> is unreachable
-          {s.error ? `: ${s.error}` : ""} — its plugins are hidden.
-        </div>
+        <DegradedSourceLine key={s.id} source={s} />
       ))}
+    </div>
+  );
+}
+
+/**
+ * The source name comes from its index.json and `detail` is the backend's own
+ * network diagnostic, so both are interpolated as values rather than written
+ * into the message.
+ */
+function DegradedSourceLine({ source }: { source: MarketplaceSource }) {
+  const detail = source.error ? `: ${source.error}` : "";
+  return (
+    <div>
+      <Trans i18nKey="plugins:sourceUnreachableDetail" values={{ name: source.name, detail }}>
+        <span className="font-medium">{source.name}</span> is unreachable
+        {detail} — its plugins are hidden.
+      </Trans>
     </div>
   );
 }
@@ -192,6 +209,7 @@ function MarketplaceList({
   installingId,
   onInstall,
 }: ListProps) {
+  const { t } = useTranslation();
   if (error) {
     return (
       <div className="rounded-lg border border-destructive/40 bg-destructive/5 p-6 text-sm text-destructive">
@@ -202,23 +220,21 @@ function MarketplaceList({
   if (loading && entries.length === 0) {
     return (
       <div className="rounded-lg border border-dashed border-border/70 p-6 text-sm text-muted-foreground">
-        Loading marketplace…
+        {t("plugins:loadingMarketplace")}
       </div>
     );
   }
   if (entries.length === 0) {
     return (
       <div className="rounded-xl border border-dashed border-border/70 p-10 text-center text-sm text-muted-foreground">
-        {filtered
-          ? "No plugins match your search. Try clearing the filters."
-          : "No plugins available yet. Check back soon, or add a marketplace source with your own."}
+        {filtered ? t("plugins:noPluginsMatchSearch") : t("plugins:noPluginsAvailable")}
       </div>
     );
   }
   return (
     <div className="space-y-3">
       <p className="text-xs text-muted-foreground">
-        {entries.length} {entries.length === 1 ? "plugin" : "plugins"} available
+        {t("plugins:pluginsAvailable", { count: entries.length })}
       </p>
       <div className="grid gap-3 md:grid-cols-2">
         {entries.map((entry) => (

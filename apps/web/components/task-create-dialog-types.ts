@@ -59,7 +59,14 @@ export interface TaskCreateDialogProps {
     mode: "create" | "edit",
     meta?: { taskSessionId?: string | null; willNavigate?: boolean },
   ) => void;
-  onCreateSession?: (data: { prompt: string; agentProfileId: string; executorId: string }) => void;
+  onCreateSession?: (data: {
+    prompt: string;
+    agentProfileId: string;
+    executorId: string;
+    attachments?: ReturnType<
+      typeof import("@/components/task-create-dialog-helpers").toMessageAttachments
+    >;
+  }) => void;
   /** Optional trusted create-mode transport; edit and session modes ignore it. */
   createTask?: TaskCreateSubmit;
   initialValues?: TaskCreateDialogInitialValues;
@@ -293,6 +300,8 @@ export type DialogFormState = {
   setHasTitle: (v: boolean) => void;
   hasDescription: boolean;
   setHasDescription: (v: boolean) => void;
+  hasPendingAttachmentUploads: boolean;
+  setHasPendingAttachmentUploads: (v: boolean) => void;
   /** Restored draft description, used as initialDescription for TaskFormInputs */
   draftDescription: string;
   /** Cycle counter incremented each time dialog opens - used in key for remount */
@@ -382,6 +391,8 @@ export type DialogFormState = {
 export type SubmitHandlersDeps = {
   isSessionMode: boolean;
   isEditMode: boolean;
+  /** Create-mode opt-in: derive a provisional title from the prompt. */
+  autoTitle?: boolean;
   isPassthroughProfile: boolean;
   taskName: string;
   workspaceId: string | null;
@@ -420,7 +431,14 @@ export type SubmitHandlersDeps = {
     mode: "create" | "edit",
     meta?: { taskSessionId?: string | null; willNavigate?: boolean },
   ) => void;
-  onCreateSession?: (data: { prompt: string; agentProfileId: string; executorId: string }) => void;
+  onCreateSession?: (data: {
+    prompt: string;
+    agentProfileId: string;
+    executorId: string;
+    attachments?: ReturnType<
+      typeof import("@/components/task-create-dialog-helpers").toMessageAttachments
+    >;
+  }) => void;
   onOpenChange: (open: boolean) => void;
   /** Create-mode transport override. Omitted to use Kandev's REST task endpoint. */
   createTask?: TaskCreateSubmit;
@@ -471,6 +489,8 @@ export type DialogFormBodyProps = {
   isSessionMode: boolean;
   isCreateMode: boolean;
   isEditMode: boolean;
+  /** Create-mode opt-in: hide the manual title field and use the prompt. */
+  autoTitle?: boolean;
   isTaskStarted: boolean;
   initialDescription: string;
   workspaceId: string | null;

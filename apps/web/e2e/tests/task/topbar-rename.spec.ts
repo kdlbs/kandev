@@ -9,8 +9,7 @@ test.describe("Task topbar inline rename", () => {
   }) => {
     test.setTimeout(90_000);
 
-    const originalTitle =
-      "Topbar rename original with a deliberately long title that is truncated in the task header";
+    const originalTitle = "Topbar rename original with a long title truncates in header";
 
     const task = await apiClient.createTaskWithAgent(
       seedData.workspaceId,

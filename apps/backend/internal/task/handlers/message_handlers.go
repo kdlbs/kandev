@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"unicode"
 
 	"github.com/gin-gonic/gin"
@@ -36,14 +37,38 @@ type OrchestratorService interface {
 	// and persisted provider identity. Background therefore means this exact
 	// session is eligible for the experimental direct-admission path.
 	ForegroundActivity(sessionID string) v1.ForegroundActivity
+	// SteerEligible reports whether a send to this generating RUNNING session
+	// would be delivered as a mid-turn steer rather than blocked/queued. Already
+	// gated by the mid-turn-steering runtime flag and the agent's negotiated
+	// capability, so a false is the conservative default.
+	SteerEligible(sessionID string, state models.TaskSessionState) bool
+	// SteerTask delivers a prompt into a still-generating turn. It returns a typed
+	// steer sentinel when the message must be queued/blocked instead.
+	SteerTask(ctx context.Context, taskID, sessionID, prompt, model string, planMode bool, attachments []v1.MessageAttachment) (*orchestrator.PromptResult, error)
+}
+
+type taskTitleSessionClaimer interface {
+	ClaimTaskTitleSession(ctx context.Context, taskID, sessionID string) (bool, error)
 }
 
 // MessageHandlers handles WebSocket requests for messages
 type MessageHandlers struct {
-	service            *service.Service
-	orchestrator       OrchestratorService
-	logger             *logger.Logger
-	referenceValidator entityrefs.SubmissionValidator
+	service             *service.Service
+	orchestrator        OrchestratorService
+	cancellationPending dto.CancellationPendingProvider
+	logger              *logger.Logger
+	referenceValidator  entityrefs.SubmissionValidator
+	messageIDMu         sync.Mutex
+	messageIDGates      map[string]*messageIDGate
+	// waitForSessionReadyFn backs waitForSessionReady; defaults to
+	// service.WaitForSessionReady but is overridable in tests to avoid its
+	// real polling delay.
+	waitForSessionReadyFn func(ctx context.Context, sessionID string) error
+}
+
+type messageIDGate struct {
+	mu   sync.Mutex
+	refs int
 }
 
 // NewMessageHandlers creates a new MessageHandlers instance
@@ -54,14 +79,30 @@ func NewMessageHandlers(
 	validators ...entityrefs.SubmissionValidator,
 ) *MessageHandlers {
 	handlers := &MessageHandlers{
-		service:      svc,
-		orchestrator: orchestrator,
-		logger:       log.WithFields(zap.String("component", "task-message-handlers")),
+		service:               svc,
+		orchestrator:          orchestrator,
+		logger:                log.WithFields(zap.String("component", "task-message-handlers")),
+		waitForSessionReadyFn: svc.WaitForSessionReady,
 	}
 	if len(validators) > 0 {
 		handlers.referenceValidator = validators[0]
 	}
+	if cancellation, ok := orchestrator.(dto.CancellationPendingProvider); ok {
+		handlers.cancellationPending = cancellation
+	}
 	return handlers
+}
+
+func (h *MessageHandlers) claimTaskTitleSession(ctx context.Context, task *models.Task, taskID, sessionID string) (bool, error) {
+	if task == nil || task.IsFromOffice {
+		return false, nil
+	}
+	titleOwner := models.IsAgentTitleOwner(task.Metadata, sessionID)
+	claimer, ok := h.orchestrator.(taskTitleSessionClaimer)
+	if !ok {
+		return titleOwner, nil
+	}
+	return claimer.ClaimTaskTitleSession(ctx, taskID, sessionID)
 }
 
 // RegisterMessageRoutes registers message HTTP + WebSocket handlers
@@ -236,6 +277,8 @@ func (h *MessageHandlers) httpListMessages(c *gin.Context) {
 type wsAddMessageRequest struct {
 	TaskID            string                 `json:"task_id"`
 	TaskSessionID     string                 `json:"session_id"`
+	MessageID         string                 `json:"message_id,omitempty"`
+	ClientMessageID   string                 `json:"client_message_id,omitempty"`
 	Content           string                 `json:"content"`
 	AuthorID          string                 `json:"author_id,omitempty"`
 	Model             string                 `json:"model,omitempty"`
@@ -252,9 +295,43 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
 	}
 	req.Content = strings.TrimSpace(req.Content)
+	req.MessageID = strings.TrimSpace(req.MessageID)
+	req.ClientMessageID = strings.TrimSpace(req.ClientMessageID)
+	if req.ClientMessageID == "" {
+		req.ClientMessageID = req.MessageID
+	}
 
 	if errMsg := validateAddMessageRequest(req); errMsg != "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, errMsg, nil)
+	}
+	unlockMessageID := h.lockMessageID(req.ClientMessageID)
+	defer unlockMessageID()
+
+	// A response can be lost after the message is committed. Resolve a replay
+	// before checking the live session state or running turn-start hooks so a
+	// retry is a read, not a second prompt.
+	if req.ClientMessageID != "" {
+		existing, err := h.service.GetMessage(ctx, req.ClientMessageID)
+		switch {
+		case err == nil && existing != nil:
+			// The turn-start hook may switch the task's primary session before
+			// the message is persisted. A retried request still belongs to the
+			// same authorized task even when its original session_id is no
+			// longer the persisted message's session.
+			if (existing.TaskID != "" && existing.TaskID != req.TaskID) ||
+				existing.AuthorType != models.MessageAuthorUser {
+				return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "client_message_id is already used", nil)
+			}
+			apiMsg := existing.ToAPI()
+			response, responseErr := ws.NewResponse(msg.ID, msg.Action, apiMsg)
+			if responseErr != nil {
+				return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to encode response", nil)
+			}
+			return response, nil
+		case err != nil && !errors.Is(err, sql.ErrNoRows):
+			h.logger.Error("failed to check idempotent message", zap.String("message_id", req.ClientMessageID), zap.Error(err))
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to check message", nil)
+		}
 	}
 
 	// Check session state — may block the message or flag it as a create-start
@@ -262,6 +339,7 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 	if wsErr != nil {
 		return wsErr, nil
 	}
+	wasCreatedSession := sessionResp.Session.State == models.TaskSessionStateCreated
 	if len(req.EntityReferences) > 0 {
 		if sessionResp.Session.IsPassthrough || h.referenceValidator == nil {
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "Invalid entity references", nil)
@@ -309,10 +387,19 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 		}
 		req.TaskSessionID = sessionResp.Session.ID
 	}
-	if wsErr := h.errorForBlockedMessageSession(msg, sessionResp.Session.ID, sessionResp.Session.State); wsErr != nil {
-		return wsErr, nil
+	// A generating RUNNING session is normally blocked here. When mid-turn
+	// steering is enabled and this session's agent advertised the capability,
+	// deliver the message into the running turn instead of blocking. Flag-off or
+	// an unadvertised agent leaves this false, so behavior is unchanged.
+	steer := h.orchestrator != nil &&
+		h.orchestrator.SteerEligible(sessionResp.Session.ID, sessionResp.Session.State)
+	if !steer {
+		if wsErr := h.errorForBlockedMessageSession(msg, sessionResp.Session.ID, sessionResp.Session.State); wsErr != nil {
+			return wsErr, nil
+		}
 	}
 	isCreatedSession := sessionResp.Session.State == models.TaskSessionStateCreated
+	startCreatedSession := isCreatedSession || wasCreatedSession
 
 	// Build metadata with attachments, plan mode, review comments, and context files
 	meta := orchestrator.NewUserMessageMeta().
@@ -338,13 +425,18 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 	// the agent CLI's TTY and the user sees it verbatim — they don't want a
 	// wall of MCP-tool boilerplate prepended to "hello".
 	storedContent := orchestrator.AppendEntityReferenceContext(req.Content, req.EntityReferences)
-	if isCreatedSession && !sessionResp.Session.IsPassthrough && (req.Content != "" || len(req.Attachments) > 0) {
+	if startCreatedSession && !sessionResp.Session.IsPassthrough && (req.Content != "" || len(req.Attachments) > 0) {
 		task, err := h.service.GetTask(ctx, req.TaskID)
 		if err != nil {
 			h.logger.Error("failed to resolve first-turn MCP capabilities", zap.String("task_id", req.TaskID), zap.Error(err))
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to get task", nil)
 		}
 		configMode, _ := sessionResp.Session.Metadata["config_mode"].(bool)
+		titleOwner, claimErr := h.claimTaskTitleSession(ctx, task, req.TaskID, req.TaskSessionID)
+		if claimErr != nil {
+			h.logger.Error("failed to claim first-turn task title", zap.String("task_id", req.TaskID), zap.String("session_id", req.TaskSessionID), zap.Error(claimErr))
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to claim task title", nil)
+		}
 		requiresSignal := h.orchestrator != nil && h.orchestrator.StepRequiresCompletionSignal(ctx, req.TaskID)
 		referenceContext := orchestrator.EntityReferenceContext(req.EntityReferences)
 		if task.IsFromOffice {
@@ -353,19 +445,30 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 			storedContent = sysprompt.InjectKandevContextWithOptions(req.TaskID, req.TaskSessionID, storedContent, sysprompt.KandevContextOptions{
 				RequiresCompletionSignal:       requiresSignal,
 				IncludeCoordinatorTaskControls: !configMode,
+				IncludeTaskTitleTool:           !configMode && titleOwner,
 			}, referenceContext)
 		}
 	}
 	req.Content = storedContent
+	if err := h.service.ClaimMessageAttachments(ctx, req.TaskID, req.TaskSessionID, req.Attachments); err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, err.Error(), nil)
+	}
 
-	message, err := h.service.CreateMessage(ctx, &service.CreateMessageRequest{
+	createRequest := &service.CreateMessageRequest{
 		TaskSessionID: req.TaskSessionID,
 		TaskID:        req.TaskID,
 		Content:       storedContent,
 		AuthorType:    "user",
 		AuthorID:      req.AuthorID,
 		Metadata:      meta.ToMap(),
-	})
+	}
+	var message *models.Message
+	var err error
+	if req.ClientMessageID != "" {
+		message, err = h.service.CreateMessageIdempotent(ctx, req.ClientMessageID, createRequest)
+	} else {
+		message, err = h.service.CreateMessage(ctx, createRequest)
+	}
 	if err != nil {
 		h.logger.Error("failed to create message", zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to create message", nil)
@@ -381,10 +484,43 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 	// This runs async so the WS request can respond immediately.
 	// Use context.WithoutCancel so the prompt continues even if the WebSocket client disconnects.
 	if h.orchestrator != nil {
-		h.dispatchPromptAsync(ctx, req, sessionResp.Session.AgentProfileID, isCreatedSession)
+		h.dispatchPromptAsync(ctx, req, sessionResp.Session.AgentProfileID, startCreatedSession, steer)
 	}
 
 	return response, nil
+}
+
+// lockMessageID serializes acceptance for one caller-owned message ID. The
+// database primary key still closes races across process boundaries, but this
+// gate keeps same-process retries from running mutable session hooks twice
+// before the first insert commits.
+func (h *MessageHandlers) lockMessageID(id string) func() {
+	if id == "" {
+		return func() {}
+	}
+
+	h.messageIDMu.Lock()
+	if h.messageIDGates == nil {
+		h.messageIDGates = make(map[string]*messageIDGate)
+	}
+	gate := h.messageIDGates[id]
+	if gate == nil {
+		gate = &messageIDGate{}
+		h.messageIDGates[id] = gate
+	}
+	gate.refs++
+	h.messageIDMu.Unlock()
+
+	gate.mu.Lock()
+	return func() {
+		gate.mu.Unlock()
+		h.messageIDMu.Lock()
+		gate.refs--
+		if gate.refs == 0 && h.messageIDGates[id] == gate {
+			delete(h.messageIDGates, id)
+		}
+		h.messageIDMu.Unlock()
+	}
 }
 
 func (h *MessageHandlers) resolveSessionAfterTurnStart(
@@ -404,7 +540,9 @@ func (h *MessageHandlers) resolveSessionAfterTurnStart(
 		return nil, errors.New("failed to reload submitted session after on_turn_start")
 	}
 	if reloaded.State != models.TaskSessionStateCompleted {
-		return &dto.GetTaskSessionResponse{Session: dto.FromTaskSession(reloaded)}, nil
+		sessionDTO := dto.FromTaskSession(reloaded)
+		dto.EnrichCancellationPending(&sessionDTO, h.cancellationPending)
+		return &dto.GetTaskSessionResponse{Session: sessionDTO}, nil
 	}
 	primary, err := h.service.GetPrimarySession(ctx, taskID)
 	if err != nil || primary == nil {
@@ -419,7 +557,9 @@ func (h *MessageHandlers) resolveSessionAfterTurnStart(
 	if primary.ID == submittedSessionID {
 		return nil, errors.New("submitted session completed during on_turn_start but remains primary")
 	}
-	return &dto.GetTaskSessionResponse{Session: dto.FromTaskSession(primary)}, nil
+	sessionDTO := dto.FromTaskSession(primary)
+	dto.EnrichCancellationPending(&sessionDTO, h.cancellationPending)
+	return &dto.GetTaskSessionResponse{Session: sessionDTO}, nil
 }
 
 func (h *MessageHandlers) errorForBlockedMessageSession(msg *ws.Message, sessionID string, state models.TaskSessionState) *ws.Message {
@@ -451,6 +591,9 @@ func validateAddMessageRequest(req wsAddMessageRequest) string {
 	if req.Content == "" && len(req.Attachments) == 0 {
 		return "content or attachments are required"
 	}
+	if len(req.ClientMessageID) > 128 {
+		return "client_message_id is too long"
+	}
 	if err := validateAttachments(req.Attachments); err != nil {
 		return err.Error()
 	}
@@ -467,7 +610,20 @@ func (h *MessageHandlers) checkSessionStateForMessage(ctx context.Context, msg *
 		return nil, wsErr
 	}
 	sessionDTO := dto.FromTaskSession(session)
+	dto.EnrichCancellationPending(&sessionDTO, h.cancellationPending)
 	resp := &dto.GetTaskSessionResponse{Session: sessionDTO}
+	// A steer-eligible generating RUNNING session must pass this first guard:
+	// otherwise the busy error is returned here, before the steer branch in
+	// wsAddMessage is ever reached, and the message is rejected instead of
+	// delivered into the running turn. The steer branch there re-checks
+	// eligibility (after on_turn_start) and remains the authoritative decision;
+	// this only widens the first gate for the sessions steering targets. Every
+	// other blocked state is unchanged.
+	if h.orchestrator != nil &&
+		sessionDTO.State == models.TaskSessionStateRunning &&
+		h.orchestrator.SteerEligible(sessionID, sessionDTO.State) {
+		return resp, nil
+	}
 	if wsErr := h.errorForBlockedMessageSession(msg, sessionID, sessionDTO.State); wsErr != nil {
 		if sessionDTO.State == models.TaskSessionStateRunning {
 			h.logBlockedRunningSession(sessionID, sessionDTO.State)
@@ -508,7 +664,7 @@ func (h *MessageHandlers) ensureTaskInProgress(ctx context.Context, taskID strin
 // background goroutine. The caller (wsAddMessage) is responsible for running
 // on_turn_start synchronously BEFORE wrapping the prompt, so this function
 // only handles the agent-facing dispatch.
-func (h *MessageHandlers) dispatchPromptAsync(ctx context.Context, req wsAddMessageRequest, agentProfileID string, isCreatedSession bool) {
+func (h *MessageHandlers) dispatchPromptAsync(ctx context.Context, req wsAddMessageRequest, agentProfileID string, isCreatedSession, steer bool) {
 	taskID := req.TaskID
 	sessionID := req.TaskSessionID
 	content := req.Content
@@ -517,11 +673,57 @@ func (h *MessageHandlers) dispatchPromptAsync(ctx context.Context, req wsAddMess
 	attachments := req.Attachments
 	go func() {
 		promptCtx := context.WithoutCancel(ctx)
+		if steer {
+			h.forwardMessageAsSteer(promptCtx, taskID, sessionID, content, model, planMode, attachments)
+			return
+		}
 		h.forwardMessageAsPrompt(
 			promptCtx, taskID, sessionID, agentProfileID,
 			content, model, planMode, attachments, req.EntityReferences, isCreatedSession,
 		)
 	}()
+}
+
+// forwardMessageAsSteer delivers a message into a still-generating turn.
+// SteerTask returns nil whether it dispatched the steer or enqueued it behind
+// pending work (both are success — order is preserved either way).
+//
+// ErrSteerNotEligible is returned by SteerTask's eligibility check *before* any
+// dispatch, so nothing was sent: the session's turn ended between the handler's
+// check and here, and the ordinary prompt path is correct (the session is now
+// promptable). Falling back there cannot double-deliver.
+//
+// Any other error is a genuine dispatch failure, and it is NOT safe to re-send:
+// the agentctl request can be written to the agent and then have its
+// acknowledgement fail (a stream disconnect or context cancellation after the
+// write, see agentctl client sendStreamRequest), so the steer may already be in
+// flight. Re-running it as an ordinary prompt would deliver the operator's
+// message twice. Surface the error instead — exactly as the ordinary prompt path
+// does for its own dispatch failures — unless the agent itself reported it.
+func (h *MessageHandlers) forwardMessageAsSteer(
+	ctx context.Context,
+	taskID, sessionID, content, model string,
+	planMode bool,
+	attachments []v1.MessageAttachment,
+) {
+	_, err := h.orchestrator.SteerTask(ctx, taskID, sessionID, content, model, planMode, attachments)
+	if err == nil {
+		return
+	}
+	if errors.Is(err, orchestrator.ErrSteerNotEligible) {
+		h.logger.Debug("steer no longer eligible; using ordinary prompt path",
+			zap.String("task_id", taskID),
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+		// agentProfileID/references/startCreated are irrelevant: a steer only
+		// targets a RUNNING session, never a CREATED one, so this takes the
+		// ordinary prompt branch (PromptTask + resume + error handling).
+		h.forwardMessageAsPrompt(ctx, taskID, sessionID, "", content, model, planMode, attachments, nil, false)
+		return
+	}
+	if !isAgentReportedError(err) {
+		h.createPromptErrorMessage(ctx, taskID, sessionID, err)
+	}
 }
 
 // forwardMessageAsPrompt sends a user message to the agent as a prompt.
@@ -608,8 +810,36 @@ func isTimeoutError(err error) bool {
 	return strings.Contains(strings.ToLower(err.Error()), "timeout")
 }
 
-// handlePromptWithResume attempts to resume a session and retry a prompt when the
-// initial prompt fails with ErrExecutionNotFound.
+// handlePromptWithResume attempts to resume a session and retry a prompt once
+// when the initial prompt fails with a recoverable, pre-dispatch error:
+//
+//   - executor.ErrExecutionNotFound: no live execution is tracked for the
+//     session (e.g. after a lazy backend restart).
+//   - orchestrator.ErrAgentNotReadyForPrompt: ensureSessionRunning's post-resume
+//     readiness wait (agentPromptReadyTimeout, 30s) expired — the exact error
+//     class behind "agent not ready after resume: ... context deadline
+//     exceeded". ensureSessionRunning already reaps a stuck execution on this
+//     error internally, and a fresh resume typically completes in a few
+//     seconds (ACP re-initialize + session/load), well inside a second
+//     attempt's own budget. Without this retry, a merely-slow-to-recover
+//     resume surfaced "Request timed out. The agent may be processing a
+//     complex task. Please try again." to the user on the very first hiccup,
+//     even though the backend's own self-healing would have succeeded
+//     silently one attempt later.
+//
+// Both error classes are guaranteed pre-dispatch: promptTask returns them
+// from ensureSessionRunning, before executor.PromptWithDispatchCallback ever
+// runs, so retrying here cannot double-send a prompt the agent already
+// accepted.
+//
+// ResumeTaskSession and waitForSessionReady failures return origErr: neither
+// step ever reaches PromptTask, so the original pre-dispatch error is still
+// the only meaningful signal. Once the retry's own PromptTask call runs,
+// though, that call IS a real dispatch attempt — its error is authoritative
+// and takes over from origErr, so the caller's isAgentReportedError check
+// still fires correctly (e.g. the retry failing with a wrapped
+// lifecycle.ErrAgentReported must suppress createPromptErrorMessage, not get
+// masked by the unrelated original timeout).
 func (h *MessageHandlers) handlePromptWithResume(
 	ctx context.Context,
 	taskID, sessionID, content, model string,
@@ -617,7 +847,8 @@ func (h *MessageHandlers) handlePromptWithResume(
 	attachments []v1.MessageAttachment,
 	origErr error,
 ) error {
-	if !errors.Is(origErr, executor.ErrExecutionNotFound) {
+	if !errors.Is(origErr, executor.ErrExecutionNotFound) &&
+		!errors.Is(origErr, orchestrator.ErrAgentNotReadyForPrompt) {
 		return origErr
 	}
 	if resumeErr := h.orchestrator.ResumeTaskSession(ctx, taskID, sessionID); resumeErr != nil {
@@ -635,10 +866,16 @@ func (h *MessageHandlers) handlePromptWithResume(
 			zap.String("task_id", taskID),
 			zap.String("session_id", sessionID),
 			zap.Error(waitErr))
-		return waitErr
+		return origErr
 	}
-	_, err := h.orchestrator.PromptTask(ctx, taskID, sessionID, content, model, planMode, attachments, false)
-	return err
+	if _, err := h.orchestrator.PromptTask(ctx, taskID, sessionID, content, model, planMode, attachments, false); err != nil {
+		h.logger.Warn("retry prompt failed after resume",
+			zap.String("task_id", taskID),
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+		return err
+	}
+	return nil
 }
 
 // createPromptErrorMessage creates an agent error message visible to the user when
@@ -675,10 +912,12 @@ func (h *MessageHandlers) createPromptErrorMessage(ctx context.Context, taskID, 
 	}
 }
 
-// waitForSessionReady delegates to the shared service.WaitForSessionReady helper.
-// Kept as a thin wrapper so existing tests on this method continue to pass.
+// waitForSessionReady delegates to waitForSessionReadyFn (by default
+// service.WaitForSessionReady). Kept as a thin wrapper so existing tests on
+// this method continue to pass; the indirection lets tests stub out the
+// real polling delay via waitForSessionReadyFn.
 func (h *MessageHandlers) waitForSessionReady(ctx context.Context, sessionID string) error {
-	return h.service.WaitForSessionReady(ctx, sessionID)
+	return h.waitForSessionReadyFn(ctx, sessionID)
 }
 
 type wsListMessagesRequest struct {

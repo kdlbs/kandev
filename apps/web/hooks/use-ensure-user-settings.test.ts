@@ -49,6 +49,7 @@ function makeUnloadedSettings(): UserSettingsState {
     workspaceId: null,
     workflowId: null,
     kanbanViewMode: null,
+    startupPage: "task_overview",
     repositoryIds: [],
     tasksListSort: "updated_desc",
     tasksListGroup: "state",
@@ -61,6 +62,7 @@ function makeUnloadedSettings(): UserSettingsState {
     reviewAutoMarkOnScroll: true,
     confirmTaskArchive: true,
     unreadDivider: true,
+    agentGeneratedTaskTitles: false,
     mcpTaskAgentProfileDefault: "current_task",
     showAnchoredPromptBar: false,
     showScrollToLastPrompt: true,
@@ -84,6 +86,7 @@ function makeUnloadedSettings(): UserSettingsState {
     githubSavedPresets: undefined,
     githubDefaultQueryPresets: undefined,
     gitlabSavedPresets: undefined,
+    azureDevOpsBrowsePreferences: undefined,
     defaultUtilityAgentId: null,
     keyboardShortcuts: {},
     terminalLinkBehavior: "new_tab",
@@ -103,6 +106,7 @@ function makeUnloadedSettings(): UserSettingsState {
     lspAutoStartLanguages: [],
     lspAutoInstallLanguages: [],
     lspServerConfigs: {},
+    lspStatusLocation: "toolbar",
     loaded: false,
   };
 }

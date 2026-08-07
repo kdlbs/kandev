@@ -2,6 +2,7 @@ package websocket
 
 import (
 	"context"
+	"sync"
 
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events"
@@ -14,6 +15,8 @@ type TaskEventBroadcaster struct {
 	hub           *Hub
 	subscriptions []bus.Subscription
 	logger        *logger.Logger
+	closeMu       sync.Mutex
+	closed        bool
 }
 
 func RegisterTaskNotifications(ctx context.Context, eventBus bus.EventBus, hub *Hub, log *logger.Logger) *TaskEventBroadcaster {
@@ -72,6 +75,8 @@ func RegisterTaskNotifications(ctx context.Context, eventBus bus.EventBus, hub *
 	b.subscribe(eventBus, events.EnvironmentUpdated, ws.ActionEnvironmentUpdated)
 	b.subscribe(eventBus, events.EnvironmentDeleted, ws.ActionEnvironmentDeleted)
 	b.subscribe(eventBus, events.TaskSessionActivityChanged, ws.ActionSessionActivityChanged)
+	b.subscribe(eventBus, events.TaskSessionCancellationChanged, ws.ActionSessionCancellationChanged)
+	b.subscribe(eventBus, events.TaskStatusSummaryUpdated, ws.ActionTaskStatusSummaryUpdated)
 	b.subscribe(eventBus, events.MessageAdded, ws.ActionSessionMessageAdded)
 	b.subscribe(eventBus, events.MessageUpdated, ws.ActionSessionMessageUpdated)
 	b.subscribe(eventBus, events.MessageDeleted, ws.ActionSessionMessageDeleted)
@@ -82,9 +87,11 @@ func RegisterTaskNotifications(ctx context.Context, eventBus bus.EventBus, hub *
 	b.subscribe(eventBus, events.TurnCompleted, ws.ActionSessionTurnCompleted)
 	b.subscribe(eventBus, events.MessageQueueStatusChanged, ws.ActionMessageQueueStatusChanged)
 	b.subscribe(eventBus, events.GitHubTaskPRUpdated, ws.ActionGitHubTaskPRUpdated)
+	b.subscribe(eventBus, events.GitHubTaskPRDeleted, ws.ActionGitHubTaskPRDeleted)
 	b.subscribe(eventBus, events.GitHubTaskCIOptionsUpdated, ws.ActionGitHubTaskCIOptionsUpdated)
 	b.subscribe(eventBus, events.GitHubRateLimitUpdated, ws.ActionGitHubRateLimitUpdated)
 	b.subscribe(eventBus, events.GitLabTaskMRUpdated, ws.ActionGitLabTaskMRUpdated)
+	b.subscribe(eventBus, events.GitLabTaskMROptionsUpdated, ws.ActionGitLabTaskMRAutomationUpdated)
 
 	go func() {
 		<-ctx.Done()
@@ -95,12 +102,21 @@ func RegisterTaskNotifications(ctx context.Context, eventBus bus.EventBus, hub *
 }
 
 func (b *TaskEventBroadcaster) Close() {
-	for _, sub := range b.subscriptions {
+	b.closeMu.Lock()
+	if b.closed {
+		b.closeMu.Unlock()
+		return
+	}
+	b.closed = true
+	subscriptions := b.subscriptions
+	b.subscriptions = nil
+	b.closeMu.Unlock()
+
+	for _, sub := range subscriptions {
 		if sub != nil && sub.IsValid() {
 			_ = sub.Unsubscribe()
 		}
 	}
-	b.subscriptions = nil
 }
 
 func (b *TaskEventBroadcaster) subscribe(eventBus bus.EventBus, subject, action string) {
@@ -138,7 +154,16 @@ func (b *TaskEventBroadcaster) subscribeWithResolver(
 		b.logger.Error("failed to subscribe to events", zap.String("subject", subject), zap.Error(err))
 		return
 	}
+	b.closeMu.Lock()
+	if b.closed {
+		b.closeMu.Unlock()
+		if sub.IsValid() {
+			_ = sub.Unsubscribe()
+		}
+		return
+	}
 	b.subscriptions = append(b.subscriptions, sub)
+	b.closeMu.Unlock()
 }
 
 func (b *TaskEventBroadcaster) broadcastEvent(ctx context.Context, event *bus.Event, action string) error {
@@ -213,6 +238,11 @@ func (b *TaskEventBroadcaster) routeBroadcast(
 			b.hub.BroadcastToSession(sessionID, msg)
 			return nil
 		}
+	case ws.ActionSessionCancellationChanged:
+		if sessionID != "" {
+			b.hub.BroadcastToSession(sessionID, msg)
+			return nil
+		}
 	case ws.ActionMessageQueueStatusChanged:
 		if sessionID != "" {
 			b.hub.BroadcastToSession(sessionID, msg)
@@ -223,6 +253,13 @@ func (b *TaskEventBroadcaster) routeBroadcast(
 		// progress/warnings are available when the user navigates to the
 		// session page after task creation.
 		b.hub.BroadcastToWorkspace(workspaceID, msg)
+		return nil
+	case ws.ActionGitLabTaskMRUpdated, ws.ActionGitLabTaskMRAutomationUpdated:
+		// These payloads carry per-task MR link/lifecycle state. Fail closed
+		// (drop, don't fall back to a global broadcast) when workspace
+		// resolution came back empty and auth is enforced — an unattributed
+		// GitLab MR update must never cross workspace boundaries.
+		b.hub.BroadcastToWorkspaceOrDrop(workspaceID, msg)
 		return nil
 	}
 	// Workspace-carrying events (task/workflow/repository/…) route to the

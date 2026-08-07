@@ -8,6 +8,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/task/service"
 	workflowmodels "github.com/kandev/kandev/internal/workflow/models"
 )
 
@@ -347,6 +348,16 @@ func (c *WatcherDispatchCoordinator) Dispatch(ctx context.Context, src WatcherSo
 			zap.String("source", src.Name()), zap.Error(err))
 		src.Release(ctx, evt)
 		return
+	}
+
+	// Bound the generated title once, here, so every watcher source (Linear,
+	// Jira, GitLab, future) inherits the task-title limit without each
+	// BuildTaskRequest re-implementing truncation. A remote issue title that
+	// would otherwise exceed the limit is shortened rather than rejected by
+	// backend title validation. GitHub's review/issue path builds its tasks
+	// through a separate creator and truncates at its own builders.
+	if req != nil {
+		req.Title = service.TruncateTaskTitle(req.Title)
 	}
 
 	// A bound repository deleted after the watch was configured would let

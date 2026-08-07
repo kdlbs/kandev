@@ -7,7 +7,7 @@ import { Label } from "@kandev/ui/label";
 import { Button } from "@kandev/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import { IconRefresh } from "@tabler/icons-react";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast/sonner";
 import { useAppStore } from "@/components/state-provider";
 import { updateAgentProfile, getAgentUtilization } from "@/lib/api/domains/office-api";
 import type { AgentProfile, AgentRole, ProviderUsage } from "@/lib/state/slices/office/types";

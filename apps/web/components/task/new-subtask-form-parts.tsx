@@ -1,5 +1,6 @@
 "use client";
 
+import { useTranslation } from "react-i18next";
 import { Badge } from "@kandev/ui/badge";
 import { Button } from "@kandev/ui/button";
 import { DialogFooter } from "@kandev/ui/dialog";
@@ -25,8 +26,10 @@ import {
   useDialogAttachments,
 } from "./session-dialog-shared";
 import { ContextZone } from "./chat/context-items/context-zone";
+import { clampTaskTitleInput } from "@/lib/task-title";
 
 export function WorktreeBadge({ show, branch }: { show: boolean; branch: string | null }) {
+  const { t } = useTranslation();
   if (!show || !branch) return null;
   return (
     <div className="flex items-center gap-2 text-xs text-muted-foreground">
@@ -34,7 +37,7 @@ export function WorktreeBadge({ show, branch }: { show: boolean; branch: string 
         <IconGitBranch className="h-3 w-3" />
         {branch}
       </Badge>
-      <span>Same branch as current session</span>
+      <span>{t("task:sameBranchAsCurrentSession")}</span>
     </div>
   );
 }
@@ -65,6 +68,7 @@ export function SelectorsRow({
   disabled,
   hideExecutor,
 }: SelectorsRowProps) {
+  const { t } = useTranslation();
   const noAgents = profileOptions.length === 0;
   return (
     <div className={"grid min-w-0 grid-cols-1 gap-4" + (hideExecutor ? "" : " sm:grid-cols-2")}>
@@ -74,7 +78,7 @@ export function SelectorsRow({
           value={agentProfileId}
           onValueChange={onAgentProfileChange}
           disabled={disabled || noAgents}
-          placeholder={noAgents ? "No agents found" : "Select agent profile"}
+          placeholder={noAgents ? t("task:noAgentsFound2") : t("task:selectAgentProfile")}
           popoverPortal
         />
       </div>
@@ -85,7 +89,7 @@ export function SelectorsRow({
             value={executorProfileId}
             onValueChange={onExecutorProfileChange}
             disabled={disabled}
-            placeholder="Select executor profile"
+            placeholder={t("task:selectExecutorProfile")}
             popoverPortal
           />
         </div>
@@ -127,6 +131,7 @@ export function PromptZone({
   onCopyPending,
   onSubmitShortcut,
 }: PromptZoneProps) {
+  const { t } = useTranslation();
   const {
     isDragging,
     fileInputRef,
@@ -150,7 +155,7 @@ export function PromptZone({
         <Textarea
           ref={promptRef}
           value={promptValue}
-          placeholder="What should the agent work on?"
+          placeholder={t("task:whatShouldTheAgentWorkOn")}
           className="min-w-0 max-w-full field-sizing-fixed wrap-anywhere border-0 focus-visible:ring-0 focus-visible:ring-offset-0 min-h-[120px] max-h-[240px] resize-none overflow-auto text-[13px]"
           autoFocus
           disabled={inputDisabled}
@@ -188,14 +193,14 @@ export function PromptZone({
       />
       {isDragging && (
         <div className="absolute inset-0 flex items-center justify-center bg-primary/10 border-2 border-dashed border-primary rounded-md pointer-events-none">
-          <span className="text-sm text-primary font-medium">Drop files here</span>
+          <span className="text-sm text-primary font-medium">{t("task:dropFilesHere")}</span>
         </div>
       )}
       {isSummarizing && (
         <div className="absolute inset-0 flex items-center justify-center rounded-md bg-background/80">
           <div className="flex items-center gap-2 text-xs text-muted-foreground">
             <IconLoader2 className="h-4 w-4 animate-spin" />
-            <span>Generating summary...</span>
+            <span>{t("task:generatingSummary")}</span>
           </div>
         </div>
       )}
@@ -252,6 +257,7 @@ type SubtaskFormBodyProps = {
   handlers: ReturnType<typeof useDialogHandlers>;
   title: string;
   setTitle: (v: string) => void;
+  autoTitle?: boolean;
   workspaceId: string | null;
   availableRepositories: Repository[];
   parentRepositoryId: string | null;
@@ -293,21 +299,22 @@ export function WorkspaceModeToggle({
   disabled,
   worktreeBranch,
 }: WorkspaceModeToggleProps) {
+  const { t } = useTranslation();
   return (
     <div className="space-y-1.5">
-      <label className="text-xs font-medium text-muted-foreground">Workspace</label>
+      <label className="text-xs font-medium text-muted-foreground">{t("common:workspace")}</label>
       <div
         role="radiogroup"
-        aria-label="Workspace mode"
+        aria-label={t("task:workspaceMode")}
         className="grid grid-cols-1 gap-2 sm:grid-cols-2"
       >
         <WorkspaceModeOption
           value="inherit_parent"
-          label="Inherit parent workspace"
+          label={t("task:inheritParentWorkspace")}
           description={
             worktreeBranch
-              ? `Run in the parent's worktree (${worktreeBranch})`
-              : "Run in the parent's materialized workspace"
+              ? t("task:runInTheParentSWorktree", { worktreeBranch })
+              : t("task:runInTheParentSMaterialized")
           }
           checked={value === "inherit_parent"}
           disabled={disabled}
@@ -316,8 +323,8 @@ export function WorkspaceModeToggle({
         />
         <WorkspaceModeOption
           value="new_workspace"
-          label="Create new workspace"
-          description="Pick a different repo, local folder, or remote URL"
+          label={t("task:createNewWorkspace")}
+          description={t("task:pickADifferentRepoLocalFolder")}
           checked={value === "new_workspace"}
           disabled={disabled}
           onSelect={() => onChange("new_workspace")}
@@ -390,11 +397,13 @@ function shouldShowWorktreeBadge(
  * context picker, prompt zone, footer). Extracted from `NewSubtaskForm` so
  * the parent stays under the per-function complexity cap.
  */
+// eslint-disable-next-line max-lines-per-function -- shared form keeps workspace, prompt, and submit controls together.
 export function SubtaskFormBody({
   fs,
   handlers,
   title,
   setTitle,
+  autoTitle = false,
   workspaceId,
   availableRepositories,
   parentRepositoryId,
@@ -415,24 +424,30 @@ export function SubtaskFormBody({
   onClose,
   onSubmit,
 }: SubtaskFormBodyProps) {
+  const { t } = useTranslation();
   const showWorktreeBadge = shouldShowWorktreeBadge(fs, worktreeBranch, parentRepositoryId);
   const inheritParent = workspaceMode === "inherit_parent";
   return (
     <form onSubmit={onSubmit} className="min-w-0 space-y-4">
-      <div className="space-y-1.5">
-        <label htmlFor="subtask-title-input" className="text-xs font-medium text-muted-foreground">
-          Title
-        </label>
-        <Input
-          id="subtask-title-input"
-          value={title}
-          onChange={(e) => setTitle(e.target.value)}
-          placeholder="Subtask title"
-          className="min-w-0 max-w-full text-sm"
-          data-testid="subtask-title-input"
-          disabled={isCreating}
-        />
-      </div>
+      {!autoTitle && (
+        <div className="space-y-1.5">
+          <label
+            htmlFor="subtask-title-input"
+            className="text-xs font-medium text-muted-foreground"
+          >
+            {t("common:title")}
+          </label>
+          <Input
+            id="subtask-title-input"
+            value={title}
+            onChange={(e) => setTitle(clampTaskTitleInput(e.target.value))}
+            placeholder={t("common:subtaskTitle")}
+            className="min-w-0 max-w-full text-sm"
+            data-testid="subtask-title-input"
+            disabled={isCreating}
+          />
+        </div>
+      )}
       <WorkspaceModeToggle
         value={workspaceMode}
         onChange={onWorkspaceModeChange}
@@ -474,14 +489,14 @@ export function SubtaskFormBody({
           disabled={isCreating}
           className="cursor-pointer"
         >
-          Cancel
+          {t("common:cancel")}
         </Button>
         <Button
           type="submit"
-          disabled={isCreating || isSummarizing || !hasPrompt}
+          disabled={isCreating || isSummarizing || !hasPrompt || (!autoTitle && !title.trim())}
           className="cursor-pointer"
         >
-          {isCreating ? "Creating..." : "Create Subtask"}
+          {isCreating ? t("task:creatingEllipsis") : t("task:createSubtask")}
         </Button>
       </DialogFooter>
     </form>

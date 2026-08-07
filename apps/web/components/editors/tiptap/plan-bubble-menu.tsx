@@ -16,6 +16,7 @@ import {
 } from "@tabler/icons-react";
 import { cn } from "@/lib/utils";
 import type { TextSelection } from "./tiptap-plan-editor";
+import { useTranslation } from "react-i18next";
 
 type PlanBubbleMenuProps = {
   editor: Editor;
@@ -59,6 +60,7 @@ function LinkInput({
   onSubmit: (url: string) => void;
   onCancel: () => void;
 }) {
+  const { t } = useTranslation();
   const [value, setValue] = useState("");
   return (
     <div className="flex items-center gap-1 bg-popover border border-border/50 rounded-lg shadow-lg p-1">
@@ -70,7 +72,7 @@ function LinkInput({
           if (e.key === "Enter") onSubmit(value);
           if (e.key === "Escape") onCancel();
         }}
-        placeholder="Paste link..."
+        placeholder={t("editors:pasteLink")}
         className="text-xs bg-transparent outline-none px-2 py-1 w-48"
         autoFocus
       />
@@ -79,7 +81,7 @@ function LinkInput({
         className="text-xs px-2 py-1 rounded hover:bg-muted cursor-pointer"
         onClick={() => onSubmit(value)}
       >
-        Apply
+        {t("editors:apply")}
       </button>
     </div>
   );
@@ -94,48 +96,49 @@ function FormatToolbar({
   onLinkClick: () => void;
   onComment?: () => void;
 }) {
+  const { t } = useTranslation();
   return (
     <div className="flex items-center gap-0.5 bg-popover border border-border/50 rounded-lg shadow-lg p-1">
       <ToggleButton
         icon={IconBold}
-        title="Bold (Cmd+B)"
+        title={t("editors:boldCmdB")}
         isActive={editor.isActive("bold")}
         onClick={() => editor.chain().focus().toggleBold().run()}
       />
       <ToggleButton
         icon={IconItalic}
-        title="Italic (Cmd+I)"
+        title={t("editors:italicCmdI")}
         isActive={editor.isActive("italic")}
         onClick={() => editor.chain().focus().toggleItalic().run()}
       />
       <ToggleButton
         icon={IconUnderline}
-        title="Underline (Cmd+U)"
+        title={t("editors:underlineCmdU")}
         isActive={editor.isActive("underline")}
         onClick={() => editor.chain().focus().toggleUnderline().run()}
       />
       <ToggleButton
         icon={IconStrikethrough}
-        title="Strikethrough (Cmd+Shift+X)"
+        title={t("editors:strikethroughCmdShiftX")}
         isActive={editor.isActive("strike")}
         onClick={() => editor.chain().focus().toggleStrike().run()}
       />
       <MenuSeparator />
       <ToggleButton
         icon={IconCode}
-        title="Inline code"
+        title={t("editors:inlineCode")}
         isActive={editor.isActive("code")}
         onClick={() => editor.chain().focus().toggleCode().run()}
       />
       <ToggleButton
         icon={IconHighlight}
-        title="Highlight"
+        title={t("editors:highlight")}
         isActive={editor.isActive("highlight")}
         onClick={() => editor.chain().focus().toggleHighlight().run()}
       />
       <ToggleButton
         icon={IconLink}
-        title="Link"
+        title={t("editors:link")}
         isActive={editor.isActive("link")}
         onClick={onLinkClick}
       />
@@ -144,7 +147,7 @@ function FormatToolbar({
           <MenuSeparator />
           <ToggleButton
             icon={IconMessage}
-            title="Comment (Cmd+Shift+C)"
+            title={t("editors:commentCmdShiftC")}
             isActive={false}
             onClick={onComment}
             accent

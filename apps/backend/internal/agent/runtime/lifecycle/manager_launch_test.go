@@ -25,6 +25,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/executor"
 	"github.com/kandev/kandev/internal/agent/runtime/activity"
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
+	runtimeenv "github.com/kandev/kandev/internal/agent/runtime/environment"
 	settingsmodels "github.com/kandev/kandev/internal/agent/settings/models"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/secrets"
@@ -150,7 +151,7 @@ func TestBuildAgentCommand_UsesManagedNPMRuntimes(t *testing.T) {
 		{
 			name:  "opencode",
 			agent: agents.NewOpenCodeACP(),
-			want:  "npx --yes --prefer-offline opencode-ai acp",
+			want:  "npx --yes --prefer-offline opencode-ai acp --print-logs --log-level ERROR",
 		},
 		{
 			name:  "copilot",
@@ -496,6 +497,64 @@ func TestBuildEnvForExecution_SeparatesOfficeAndExecutionProfiles(t *testing.T) 
 	if env["KANDEV_EXECUTION_PROFILE_ID"] != "claude-profile" {
 		t.Fatalf("KANDEV_EXECUTION_PROFILE_ID = %q, want claude-profile", env["KANDEV_EXECUTION_PROFILE_ID"])
 	}
+}
+
+func TestBuildEnvForExecution_RejectsLateManagedValuesThatConflictWithRepositorySecrets(t *testing.T) {
+	store := newInMemorySecretStore()
+	for _, key := range []string{"AGENT_MODEL", "AGENTCTL_AUTO_APPROVE_PERMISSIONS", "GOCACHE", "ANTHROPIC_API_KEY"} {
+		if err := store.Create(context.Background(), &secrets.SecretWithValue{
+			Secret: secrets.Secret{ID: "secret-" + key, Name: key, Scope: secrets.ScopeWorkspace, WorkspaceID: "workspace-1"},
+			Value:  "repository-value",
+		}); err != nil {
+			t.Fatalf("seed %s: %v", key, err)
+		}
+	}
+
+	tests := []struct {
+		name       string
+		key        string
+		profile    *AgentProfileInfo
+		cachePath  string
+		required   []string
+		credential string
+	}{
+		{name: "model", key: "AGENT_MODEL", profile: &AgentProfileInfo{Model: "managed-model"}},
+		{name: "auto approve", key: "AGENTCTL_AUTO_APPROVE_PERMISSIONS", profile: &AgentProfileInfo{AutoApprove: true}},
+		{name: "go cache", key: "GOCACHE", cachePath: "/managed/cache"},
+		{name: "required credential", key: "ANTHROPIC_API_KEY", required: []string{"ANTHROPIC_API_KEY"}, credential: "managed-credential"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			mgr := newTestManager(t)
+			mgr.secretStore = store
+			mgr.credsMgr = fixedCredentialManager{value: tc.credential}
+			req := &LaunchRequest{
+				TaskID: "task-1", WorkspaceID: "workspace-1", SessionID: "session-1",
+				EnvironmentResolutionRequired: true,
+				EnvironmentDefinitions: []runtimeenv.Definition{{
+					Key: tc.key, SecretID: "secret-" + tc.key, Origin: "repository app", WorkspaceID: "workspace-1",
+				}},
+			}
+			req.managedGoCachePath = tc.cachePath
+			_, err := mgr.buildEnvForExecution(context.Background(), "exec-1", req, &testAgent{runtimeConfig: &agents.RuntimeConfig{RequiredEnv: tc.required}}, tc.profile)
+			if err == nil {
+				t.Fatal("buildEnvForExecution succeeded, want conflict")
+			}
+			var conflictErr *runtimeenv.ConflictError
+			if !errors.As(err, &conflictErr) {
+				t.Fatalf("error = %T %v, want environment conflict", err, err)
+			}
+			if len(conflictErr.Origins) != 2 {
+				t.Fatalf("conflict origins = %#v, want repository and managed origin", conflictErr.Origins)
+			}
+		})
+	}
+}
+
+type fixedCredentialManager struct{ value string }
+
+func (m fixedCredentialManager) GetCredentialValue(context.Context, string) (string, error) {
+	return m.value, nil
 }
 
 type recordingEnvProfileResolver struct {
@@ -1087,12 +1146,42 @@ func TestLaunch_PublishesPrepareCompletedAfterRuntimeProgress(t *testing.T) {
 		t.Fatalf("Launch returned error: %v", err)
 	}
 
+	if backend.lastRequest == nil {
+		t.Fatal("runtime did not receive a create request")
+	}
+	require.Equal(t, "/tmp/ws", backend.lastRequest.WorkspacePath,
+		"runtime must receive the workspace path returned by environment preparation")
+
 	completed := prepareCompletedPayloads(eventBus)
 	require.NotEmpty(t, completed)
 	final := completed[len(completed)-1]
 	require.True(t, final.Success)
 	requirePrepareStep(t, final.Steps, "Validate Docker")
 	requirePrepareStep(t, final.Steps, "Waiting for Docker container")
+}
+
+func TestLaunch_UsesPreparedWorkspacePathForWorktree(t *testing.T) {
+	profileResolver := &countingProfileResolver{info: &AgentProfileInfo{
+		ProfileID: "profile-worktree",
+		AgentName: "auggie",
+	}}
+	mgr, backend := newEnvironmentExecutionTestManagerWithProfileResolver(t, nil, profileResolver)
+	mgr.preparerRegistry = NewPreparerRegistry(mgr.logger)
+	mgr.preparerRegistry.Register(models.ExecutorTypeWorktree, &progressPreparer{})
+
+	_, err := mgr.Launch(context.Background(), &LaunchRequest{
+		TaskID:         "task-worktree-path",
+		SessionID:      "session-worktree-path",
+		AgentProfileID: "profile-worktree",
+		ExecutorType:   string(models.ExecutorTypeWorktree),
+		RepositoryPath: "/tmp/repo",
+		UseWorktree:    true,
+		BaseBranch:     "main",
+	})
+	require.NoError(t, err)
+	require.NotNil(t, backend.lastRequest)
+	require.Equal(t, "/tmp/ws", backend.lastRequest.WorkspacePath,
+		"worktree runtime must receive the path returned by preparation")
 }
 
 func TestLaunch_PublishesPrepareCompletionOnLegacyRouteEnvError(t *testing.T) {
@@ -1374,6 +1463,93 @@ func TestLaunch_PromotesWorkspaceOnlyExecution(t *testing.T) {
 	require.True(t, got.isResumedSession, "isResumedSession must be set when PreviousExecutionID is non-empty")
 }
 
+func TestLaunch_PromotesWorkspaceOnlyExecutionAppliesMCPProviders(t *testing.T) {
+	var gotProviders []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPut || r.URL.Path != "/api/v1/mcp/providers" {
+			t.Errorf("request = %s %s, want PUT /api/v1/mcp/providers", r.Method, r.URL.Path)
+		}
+		var payload struct {
+			Providers []string `json:"mcp_providers"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Errorf("decode MCP provider payload: %v", err)
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		gotProviders = payload.Providers
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(server.Close)
+	parsed, err := url.Parse(server.URL)
+	require.NoError(t, err)
+	port, err := strconv.Atoi(parsed.Port())
+	require.NoError(t, err)
+
+	mgr := newTestManager(t)
+	mgr.profileResolver = &countingProfileResolver{info: &AgentProfileInfo{
+		ProfileID: "profile-1",
+		AgentName: "auggie",
+	}}
+	existing := &AgentExecution{
+		ID:        "exec-workspace-provider",
+		SessionID: "session-provider",
+		TaskID:    "task-provider",
+		agentctl:  agentctl.NewClient(parsed.Hostname(), port, mgr.logger),
+	}
+	require.NoError(t, mgr.executionStore.Add(existing))
+
+	wantProviders := []string{"github", "gitlab"}
+	got, err := mgr.Launch(context.Background(), &LaunchRequest{
+		TaskID:         existing.TaskID,
+		SessionID:      existing.SessionID,
+		AgentProfileID: existing.AgentProfileID,
+		IsPassthrough:  true,
+		McpProviders:   wantProviders,
+	})
+	require.NoError(t, err)
+	require.Same(t, existing, got)
+	require.Equal(t, wantProviders, gotProviders,
+		"promotion must apply provider capabilities to the existing agentctl instance")
+}
+
+func TestLaunch_PromotesWorkspaceOnlyExecutionFailsWhenMCPProviderApplyFails(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPut && r.URL.Path == "/api/v1/mcp/providers" {
+			w.WriteHeader(http.StatusBadGateway)
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	t.Cleanup(server.Close)
+	parsed, err := url.Parse(server.URL)
+	require.NoError(t, err)
+	port, err := strconv.Atoi(parsed.Port())
+	require.NoError(t, err)
+
+	mgr := newTestManager(t)
+	mgr.profileResolver = &countingProfileResolver{info: &AgentProfileInfo{
+		ProfileID: "profile-1",
+		AgentName: "auggie",
+	}}
+	existing := &AgentExecution{
+		ID:        "exec-workspace-provider-failure",
+		SessionID: "session-provider-failure",
+		TaskID:    "task-provider-failure",
+		agentctl:  agentctl.NewClient(parsed.Hostname(), port, mgr.logger),
+	}
+	require.NoError(t, mgr.executionStore.Add(existing))
+
+	_, err = mgr.Launch(context.Background(), &LaunchRequest{
+		TaskID:        existing.TaskID,
+		SessionID:     existing.SessionID,
+		IsPassthrough: true,
+		McpProviders:  []string{"github"},
+	})
+	require.Error(t, err, "promotion must fail when the live provider endpoint rejects the update")
+	require.Empty(t, existing.AgentCommand, "failed provider application must not promote the execution")
+}
+
 // TestLaunch_RejectsWhenAgentAlreadyRunning verifies the original "already has
 // an agent running" guard still fires when the existing execution is a real
 // agent-equipped one (AgentCommand populated), preventing duplicate launches.
@@ -1596,6 +1772,434 @@ func TestLaunch_RaceRollback(t *testing.T) {
 	}
 	if got := backend.stopCount.Load(); got != 1 {
 		t.Errorf("StopInstance called %d times, want 1 (runtime instance must be stopped on rollback)", got)
+	}
+}
+
+func TestLaunch_RollsBackRuntimeWhenSessionEndsDuringCreate(t *testing.T) {
+	log, _ := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json"})
+	execRegistry := NewExecutorRegistry(log)
+	entered := make(chan struct{}, 1)
+	barrier := make(chan struct{})
+	backend := &createInstanceExecutor{
+		MockExecutor: MockExecutor{name: executor.NameStandalone},
+		entered:      entered,
+		barrier:      barrier,
+	}
+	execRegistry.Register(backend)
+
+	mgr := NewManager(
+		newTestRegistry(), &MockEventBus{}, execRegistry,
+		&MockCredentialsManager{}, &MockProfileResolver{}, nil,
+		ExecutorFallbackWarn, "", log,
+	)
+	mgr.dataDir = t.TempDir()
+	cleanupManagerStopCh(t, mgr)
+	session := &models.TaskSession{ID: "session-deleted", State: models.TaskSessionStateStarting}
+	mgr.SetExecutorProfileReader(&fakeExecutorProfileReader{session: session})
+
+	errCh := make(chan error, 1)
+	go func() {
+		_, err := mgr.Launch(context.Background(), &LaunchRequest{
+			TaskID:         "task-deleted",
+			SessionID:      session.ID,
+			AgentProfileID: "profile-1",
+			IsEphemeral:    true,
+		})
+		errCh <- err
+	}()
+
+	select {
+	case <-entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for CreateInstance to start")
+	}
+	session.State = models.TaskSessionStateCancelled
+	close(barrier)
+
+	err := <-errCh
+	if err == nil || !strings.Contains(err.Error(), "session-deleted") || !strings.Contains(err.Error(), "CANCELLED") {
+		t.Fatalf("Launch error = %v, want terminal-session validation", err)
+	}
+	if got := backend.stopCount.Load(); got != 1 {
+		t.Fatalf("StopInstance called %d times, want 1", got)
+	}
+	if _, exists := mgr.executionStore.GetBySessionID(session.ID); exists {
+		t.Fatal("terminal session runtime must not be registered")
+	}
+}
+
+type launchRegistrationGateReader struct {
+	reads            atomic.Int32
+	cleanupReads     atomic.Int32
+	cleanupActive    atomic.Bool
+	finalState       models.TaskSessionState
+	blockRead        int32
+	blockCleanupRead int32
+	secondRead       chan struct{}
+	release          chan struct{}
+}
+
+type launchRegistrationWriter struct {
+	upserted  chan struct{}
+	deleted   atomic.Int32
+	repaired  atomic.Int32
+	upsertErr error
+	running   *models.ExecutorRunning
+}
+
+func (w *launchRegistrationWriter) GetExecutorRunningBySessionID(context.Context, string) (*models.ExecutorRunning, error) {
+	if w.running == nil {
+		return nil, models.ErrExecutorRunningNotFound
+	}
+	return w.running, nil
+}
+
+func (w *launchRegistrationWriter) UpsertExecutorRunning(_ context.Context, running *models.ExecutorRunning) error {
+	close(w.upserted)
+	if w.upsertErr != nil {
+		return w.upsertErr
+	}
+	w.running = running
+	return nil
+}
+
+func (w *launchRegistrationWriter) DeleteExecutorRunningBySessionID(context.Context, string) error {
+	w.deleted.Add(1)
+	w.running = nil
+	return nil
+}
+func (w *launchRegistrationWriter) RepairExecutorRunningDead(context.Context, string) error {
+	w.repaired.Add(1)
+	if w.running != nil {
+		w.running.Status = models.ExecutorRunningStatusStopped
+	}
+	return nil
+}
+
+func (r *launchRegistrationGateReader) GetTaskSession(_ context.Context, id string) (*models.TaskSession, error) {
+	read := r.reads.Add(1)
+	if read < r.blockRead {
+		return &models.TaskSession{ID: id, TaskID: "task-registration-race", State: models.TaskSessionStateStarting}, nil
+	}
+	if read == r.blockRead {
+		close(r.secondRead)
+		<-r.release
+	}
+	state := r.finalState
+	if state == "" {
+		state = models.TaskSessionStateCancelled
+	}
+	return &models.TaskSession{ID: id, TaskID: "task-registration-race", State: state}, nil
+}
+
+func (r *launchRegistrationGateReader) HasActiveTaskResourceCleanupJob(context.Context, string) (bool, error) {
+	if read := r.cleanupReads.Add(1); read == r.blockCleanupRead {
+		close(r.secondRead)
+		<-r.release
+	}
+	return r.cleanupActive.Load(), nil
+}
+
+func (*launchRegistrationGateReader) GetTaskEnvironment(context.Context, string) (*models.TaskEnvironment, error) {
+	return nil, nil
+}
+
+func (*launchRegistrationGateReader) GetExecutorProfile(context.Context, string) (*models.ExecutorProfile, error) {
+	return nil, nil
+}
+
+func TestLaunch_RollsBackWhenSessionEndsDuringRegistration(t *testing.T) {
+	log, _ := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json"})
+	execRegistry := NewExecutorRegistry(log)
+	backend := &createInstanceExecutor{MockExecutor: MockExecutor{name: executor.NameStandalone}}
+	execRegistry.Register(backend)
+
+	mgr := NewManager(
+		newTestRegistry(), &MockEventBus{}, execRegistry,
+		&MockCredentialsManager{}, &MockProfileResolver{}, nil,
+		ExecutorFallbackWarn, "", log,
+	)
+	mgr.dataDir = t.TempDir()
+	cleanupManagerStopCh(t, mgr)
+	reader := &launchRegistrationGateReader{
+		blockRead:  4,
+		secondRead: make(chan struct{}),
+		release:    make(chan struct{}),
+	}
+	mgr.SetExecutorProfileReader(reader)
+	writer := &launchRegistrationWriter{upserted: make(chan struct{})}
+	mgr.SetExecutorRunningWriter(writer)
+
+	errCh := make(chan error, 1)
+	go func() {
+		_, err := mgr.Launch(context.Background(), &LaunchRequest{
+			TaskID:         "task-registration-race",
+			SessionID:      "session-registration-race",
+			AgentProfileID: "profile-1",
+			IsEphemeral:    true,
+		})
+		errCh <- err
+	}()
+
+	select {
+	case <-reader.secondRead:
+	case err := <-errCh:
+		t.Fatalf("Launch returned before post-registration validation: %v", err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for post-registration session validation")
+	}
+	if _, exists := mgr.executionStore.GetBySessionID("session-registration-race"); !exists {
+		t.Fatal("execution must be registered before the final session validation")
+	}
+	select {
+	case <-writer.upserted:
+	default:
+		t.Fatal("executor-running row must be durable before the final session validation")
+	}
+	close(reader.release)
+
+	err := <-errCh
+	if err == nil || !strings.Contains(err.Error(), "CANCELLED") {
+		t.Fatalf("Launch error = %v, want terminal-session validation", err)
+	}
+	if got := backend.stopCount.Load(); got != 1 {
+		t.Fatalf("StopInstance called %d times, want 1", got)
+	}
+	if _, exists := mgr.executionStore.GetBySessionID("session-registration-race"); exists {
+		t.Fatal("terminal session runtime must be removed after registration race")
+	}
+	if got := writer.deleted.Load(); got != 1 {
+		t.Fatalf("executor-running delete count = %d, want 1", got)
+	}
+}
+
+func TestLaunch_RollsBackWhenTaskCleanupBeginsDuringRegistration(t *testing.T) {
+	log, _ := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json"})
+	execRegistry := NewExecutorRegistry(log)
+	backend := &createInstanceExecutor{MockExecutor: MockExecutor{name: executor.NameStandalone}}
+	execRegistry.Register(backend)
+
+	mgr := NewManager(
+		newTestRegistry(), &MockEventBus{}, execRegistry,
+		&MockCredentialsManager{}, &MockProfileResolver{}, nil,
+		ExecutorFallbackWarn, "", log,
+	)
+	mgr.dataDir = t.TempDir()
+	cleanupManagerStopCh(t, mgr)
+	reader := &launchRegistrationGateReader{
+		finalState:       models.TaskSessionStateStarting,
+		blockCleanupRead: 2,
+		secondRead:       make(chan struct{}),
+		release:          make(chan struct{}),
+	}
+	mgr.SetExecutorProfileReader(reader)
+	writer := &launchRegistrationWriter{
+		upserted: make(chan struct{}),
+		running: &models.ExecutorRunning{
+			SessionID: "session-cleanup-race", ExecutionProfileID: "profile-1", ResumeToken: "resume-token",
+		},
+	}
+	mgr.SetExecutorRunningWriter(writer)
+
+	errCh := make(chan error, 1)
+	go func() {
+		_, err := mgr.Launch(context.Background(), &LaunchRequest{
+			TaskID:         "task-registration-race",
+			SessionID:      "session-cleanup-race",
+			AgentProfileID: "profile-1",
+			IsEphemeral:    true,
+		})
+		errCh <- err
+	}()
+
+	select {
+	case <-reader.secondRead:
+	case err := <-errCh:
+		t.Fatalf("Launch returned before post-registration validation: %v", err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for post-registration session validation")
+	}
+	reader.cleanupActive.Store(true)
+	close(reader.release)
+
+	err := <-errCh
+	if err == nil || !strings.Contains(err.Error(), "cleanup is active") {
+		t.Fatalf("Launch error = %v, want active-cleanup validation", err)
+	}
+	if got := backend.stopCount.Load(); got != 1 {
+		t.Fatalf("StopInstance called %d times, want 1", got)
+	}
+	if _, exists := mgr.executionStore.GetBySessionID("session-cleanup-race"); exists {
+		t.Fatal("runtime must be removed when task cleanup wins registration race")
+	}
+	if got := writer.deleted.Load(); got != 0 {
+		t.Fatalf("executor-running delete count = %d, want 0 for resumable row", got)
+	}
+	if got := writer.repaired.Load(); got != 1 {
+		t.Fatalf("executor-running repair count = %d, want 1", got)
+	}
+	if writer.running == nil || writer.running.ResumeToken != "resume-token" || writer.running.Status != models.ExecutorRunningStatusStopped {
+		t.Fatalf("resumable row was not preserved and stopped: %#v", writer.running)
+	}
+}
+
+func TestLaunch_RollsBackWhenExecutionRegistrationCannotPersist(t *testing.T) {
+	log, _ := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json"})
+	execRegistry := NewExecutorRegistry(log)
+	backend := &createInstanceExecutor{MockExecutor: MockExecutor{name: executor.NameStandalone}}
+	execRegistry.Register(backend)
+
+	mgr := NewManager(
+		newTestRegistry(), &MockEventBus{}, execRegistry,
+		&MockCredentialsManager{}, &MockProfileResolver{}, nil,
+		ExecutorFallbackWarn, "", log,
+	)
+	mgr.dataDir = t.TempDir()
+	cleanupManagerStopCh(t, mgr)
+	mgr.SetExecutorProfileReader(&fakeExecutorProfileReader{session: &models.TaskSession{
+		ID: "session-persist-failure", TaskID: "task-persist-failure", State: models.TaskSessionStateStarting,
+	}})
+	writer := &launchRegistrationWriter{
+		upserted:  make(chan struct{}),
+		upsertErr: errors.New("database is locked"),
+	}
+	mgr.SetExecutorRunningWriter(writer)
+
+	_, err := mgr.Launch(context.Background(), &LaunchRequest{
+		TaskID:         "task-persist-failure",
+		SessionID:      "session-persist-failure",
+		AgentProfileID: "profile-1",
+		IsEphemeral:    true,
+	})
+	if err == nil || !strings.Contains(err.Error(), "persist execution registration") {
+		t.Fatalf("Launch error = %v, want persistence failure", err)
+	}
+	if got := backend.stopCount.Load(); got != 1 {
+		t.Fatalf("StopInstance called %d times, want 1", got)
+	}
+	if _, exists := mgr.executionStore.GetBySessionID("session-persist-failure"); exists {
+		t.Fatal("runtime must be removed when durable registration fails")
+	}
+	if got := writer.deleted.Load(); got != 0 {
+		t.Fatalf("executor-running delete count = %d, want 0 for an uncommitted upsert", got)
+	}
+}
+
+type staleLaunchAdmissionReader struct {
+	reads atomic.Int32
+}
+
+func (r *staleLaunchAdmissionReader) GetTaskSession(_ context.Context, id string) (*models.TaskSession, error) {
+	state := models.TaskSessionStateStarting
+	if r.reads.Add(1) > 1 {
+		state = models.TaskSessionStateCancelled
+	}
+	return &models.TaskSession{ID: id, TaskID: "task-terminalization-race", State: state}, nil
+}
+
+func (*staleLaunchAdmissionReader) HasActiveTaskResourceCleanupJob(context.Context, string) (bool, error) {
+	return false, nil
+}
+
+func (*staleLaunchAdmissionReader) GetTaskEnvironment(context.Context, string) (*models.TaskEnvironment, error) {
+	return nil, nil
+}
+
+func (*staleLaunchAdmissionReader) GetExecutorProfile(context.Context, string) (*models.ExecutorProfile, error) {
+	return nil, nil
+}
+
+func TestEnsureLaunchSessionStillActiveRereadsAfterCleanupAdmission(t *testing.T) {
+	mgr := newTestManager(t)
+	reader := &staleLaunchAdmissionReader{}
+	mgr.SetExecutorProfileReader(reader)
+
+	err := mgr.ensureLaunchSessionStillActive(context.Background(), "session-terminalization-race")
+	if err == nil || !strings.Contains(err.Error(), "CANCELLED") {
+		t.Fatalf("ensureLaunchSessionStillActive error = %v, want terminal-session validation", err)
+	}
+	if !errors.Is(err, ErrSessionTerminal) {
+		t.Fatalf("ensureLaunchSessionStillActive error = %v, want wrapped ErrSessionTerminal", err)
+	}
+	if got := reader.reads.Load(); got != 2 {
+		t.Fatalf("session reads = %d, want 2", got)
+	}
+}
+
+type failOnceStopExecutor struct {
+	MockExecutor
+	attempts     atomic.Int32
+	retryEntered chan struct{}
+	releaseRetry chan struct{}
+	succeeded    chan struct{}
+}
+
+func (e *failOnceStopExecutor) StopInstance(context.Context, *ExecutorInstance, bool) error {
+	if e.attempts.Add(1) == 1 {
+		return errors.New("transient stop failure")
+	}
+	close(e.retryEntered)
+	<-e.releaseRetry
+	close(e.succeeded)
+	return nil
+}
+
+func TestRegisteredLaunchRollbackRetainsOwnershipUntilStopRetrySucceeds(t *testing.T) {
+	for _, taskCleanupActive := range []bool{false, true} {
+		name := "persistence_failure"
+		if taskCleanupActive {
+			name = "task_cleanup"
+		}
+		t.Run(name, func(t *testing.T) {
+			mgr := newTestManager(t)
+			execution := &AgentExecution{ID: "exec-stop-retry", SessionID: "session-stop-retry"}
+			if err := mgr.executionStore.Add(execution); err != nil {
+				t.Fatalf("Add execution: %v", err)
+			}
+			writer := &invariantWriter{prior: &models.ExecutorRunning{
+				AgentExecutionID: execution.ID,
+				SessionID:        execution.SessionID,
+				ResumeToken:      "resume-token",
+				Status:           models.ExecutorRunningStatusStarting,
+			}}
+			mgr.SetExecutorRunningWriter(writer)
+			backend := &failOnceStopExecutor{
+				MockExecutor: MockExecutor{name: executor.NameStandalone},
+				retryEntered: make(chan struct{}),
+				releaseRetry: make(chan struct{}),
+				succeeded:    make(chan struct{}),
+			}
+
+			mgr.rollbackRegisteredLaunchWithRetry(
+				backend, &ExecutorInstance{InstanceID: execution.ID}, execution,
+				taskCleanupActive, "test rollback",
+			)
+
+			select {
+			case <-backend.retryEntered:
+			case <-time.After(5 * time.Second):
+				t.Fatal("timed out waiting for detached stop retry")
+			}
+			if _, exists := mgr.executionStore.Get(execution.ID); !exists {
+				t.Fatal("failed stop retired in-memory cleanup ownership")
+			}
+			if writer.deleted || writer.repaired {
+				t.Fatal("failed stop retired durable cleanup ownership")
+			}
+			close(backend.releaseRetry)
+			select {
+			case <-backend.succeeded:
+			case <-time.After(5 * time.Second):
+				t.Fatal("timed out waiting for detached stop retry")
+			}
+			require.Eventually(t, func() bool {
+				_, exists := mgr.executionStore.Get(execution.ID)
+				return !exists
+			}, time.Second, 10*time.Millisecond)
+			if writer.deleted || !writer.repaired || writer.prior == nil || writer.prior.ResumeToken != "resume-token" {
+				t.Fatalf("successful retry did not preserve resume state: %#v", writer)
+			}
+		})
 	}
 }
 

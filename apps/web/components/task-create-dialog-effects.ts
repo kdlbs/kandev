@@ -239,19 +239,17 @@ function pickDefaultExecutorProfileId(
       : allProfiles;
   if (eligibleProfiles.length === 0) return null;
 
-  if (
-    lastUsedExecutorProfileId &&
-    eligibleProfiles.some((p) => p.id === lastUsedExecutorProfileId)
-  ) {
-    return lastUsedExecutorProfileId;
-  }
-
   const executorId = pickDefaultExecutorId(
     executors,
     workspaceDefaults,
     noRepository,
     preferLocalExecutor,
   );
+  const lastUsedProfile = eligibleProfiles.find((p) => p.id === lastUsedExecutorProfileId);
+  if (lastUsedProfile && lastUsedProfile._executorId === executorId) {
+    return lastUsedProfile.id;
+  }
+
   const executorProfile = eligibleProfiles.find((p) => p._executorId === executorId);
   return executorProfile?.id ?? eligibleProfiles[0].id;
 }
@@ -270,6 +268,7 @@ type ExecutorProfileLastUsedState = {
   eligibleProfiles: ExecutorProfileCandidate[];
   settingsId: string | null;
   settingsValid: boolean;
+  settingsCompatible: boolean;
 };
 
 function getExecutorProfileLastUsedState(
@@ -282,11 +281,21 @@ function getExecutorProfileLastUsedState(
     noRepository || preferLocalExecutor
       ? allProfiles.filter((p) => !isWorktreeExecutorType(p._executorType))
       : allProfiles;
+  const defaultExecutorId = pickDefaultExecutorId(
+    executors,
+    context.workspaceDefaults,
+    noRepository,
+    preferLocalExecutor,
+  );
+  const settingsProfile = eligibleProfiles.find((p) => p.id === settingsId);
   return {
     allProfiles,
     eligibleProfiles,
     settingsId,
-    settingsValid: Boolean(settingsId && eligibleProfiles.some((p) => p.id === settingsId)),
+    settingsValid: Boolean(settingsProfile),
+    settingsCompatible: Boolean(
+      settingsProfile && settingsProfile._executorId === defaultExecutorId,
+    ),
   };
 }
 
@@ -302,7 +311,7 @@ export function shouldWaitForLastUsedExecutorProfile(context: ExecutorAutopickCo
     context,
     context.lastUsedExecutorProfileId ?? null,
   );
-  if (!lastUsedProfile.settingsValid) return false;
+  if (!lastUsedProfile.settingsCompatible) return false;
   if (isDebug()) {
     selectionDebug("executor-autopick", {
       current: "-",
@@ -311,6 +320,7 @@ export function shouldWaitForLastUsedExecutorProfile(context: ExecutorAutopickCo
       workspace_default: context.workspaceDefaults?.default_executor_id ?? "-",
       no_repository: context.noRepository,
       prefer_local_executor: context.preferLocalExecutor,
+      settings_compatible: lastUsedProfile.settingsCompatible,
       source: "executor-profile-last-used",
     });
   }
@@ -329,6 +339,7 @@ function logExecutorProfileAutopick(
     pick: pick ?? "-",
     settings_id: lastUsed.settingsId ?? "-",
     settings_valid: lastUsed.settingsValid,
+    settings_compatible: lastUsed.settingsCompatible,
     profile_count: lastUsed.allProfiles.length,
     workspace_default_executor: context.workspaceDefaults?.default_executor_id ?? "-",
     no_repository: context.noRepository,

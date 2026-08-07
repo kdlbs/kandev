@@ -1,7 +1,7 @@
 ---
-status: draft
+status: building
 created: 2026-07-19
-amended: 2026-07-31
+amended: 2026-08-02
 owner: Kandev
 ---
 
@@ -50,6 +50,18 @@ automation under different GitHub Apps without operating separate Kandev deploym
   workspace automation connection. **Inherit executor Git credentials** injects no GitHub broker
   helper or `gh` shim: Local and Worktree tasks use host-visible Git/SSH credentials, while remote
   tasks use credentials configured in that executor.
+- Every newly created workspace attempts to persist **Inherit executor Git credentials** as its
+  initial task policy. After a successful settings write, if creation is performed by an internal
+  trusted caller, an auth-disabled synthetic administrator, or a real administrator while host
+  `gh` has an authenticated active account, Kandev also stores that exact host/login as the new
+  workspace's named CLI automation connection. Non-admin member-created workspaces never receive
+  the server operator's CLI identity automatically.
+- If host `gh` is absent, unauthenticated, or cannot validate its active account, workspace creation
+  still succeeds with executor task access and disconnected GitHub automation. If the executor
+  settings write fails, creation still succeeds but the existing managed compatibility fallback
+  remains until the workspace is configured or retried. Existing workspaces are never migrated to
+  these defaults; their connection, persisted policy, and legacy missing/invalid policy fallback
+  remain unchanged.
 - Workspace settings present the automation identity and task Git credential routing as one
   **Workspace GitHub access** group. The page shows a compact read-only summary of both effective
   choices; the existing **Change GitHub connection** dialog contains the full controls for the
@@ -65,10 +77,29 @@ automation under different GitHub Apps without operating separate Kandev deploym
   an existing managed checkout when the policy changes. This makes Git conditional includes based
   on `remote.*.url` observe the same transport the task uses. Kandev never rewrites the remote of a
   repository registered as a user-managed local checkout.
+- Repository preparation resolves each attached repository once per launch or resume and reuses
+  that result for primary-repository configuration, multi-repository configuration, and credential
+  routing. Origin reconciliation is serialized per managed checkout, compares the current and
+  desired canonical URLs, and performs no write when they already match.
+- Git failures while inspecting or reconciling a managed checkout preserve a bounded,
+  credential-redacted diagnostic. Git's dubious-ownership failure is classified as a service/data
+  ownership mismatch with guidance to restore the intended Kandev service account or reconcile the
+  managed data owner. Kandev does not bypass Git's ownership protection with a broad
+  `safe.directory` entry.
 - Under managed routing, App installation tokens are minted for the requested repository and cached
   only in memory. PAT/CLI tokens retain their provider-granted scope once delivered to a trusted
   agent subprocess. GitHub HTTPS and the broker-aware `gh` shim fail closed rather than consulting
   another ambient helper after a managed-helper failure.
+- Managed Git helper execution does not depend on the post-startup `PATH`: Git resolves an
+  absolute Kandev-owned `agentctl` executable published before the first managed Git operation.
+  Local and Worktree preparation binds the helper to the standalone launcher's absolute executable
+  before checkout or setup scripts run. Remote preparation binds it to the installed executor
+  binary before cloning, and a running `agentctl` publishes its own executable for child processes.
+  Non-interactive Unix login shells that replace their inherited `PATH` restore the managed
+  CLI-shim directory after profile initialization for broker-enabled tasks, while preserving
+  pre-existing Bash environment hooks, including hook paths containing `$VAR` or `${VAR}`
+  references from the effective child environment. Broker-disabled and executor-inheritance
+  processes receive no shell hook or managed-tool path.
 - Under managed routing, every authorized task execution surface receives the same current
   task-scoped Git environment: the agent subprocess, terminal shells, passthrough-agent PTYs, and
   task-scoped command processes. This includes the broker contract, managed indexed Git
@@ -87,8 +118,11 @@ automation under different GitHub Apps without operating separate Kandev deploym
 - The unpublished `KANDEV_GITHUB_APP_*` configuration introduced on this branch is removed. Setting
   those variables does not create or configure a registration; operators use the guided import
   flow for an App they already own.
-- Existing released workspaces migrate to `legacy_shared`; new workspaces start disconnected.
-  Once a workspace leaves legacy mode it cannot return. The unpublished singleton registration
+- Existing released workspaces migrate to `legacy_shared`; upgrades do not rewrite their
+  connection or task policy. New operator-authorized workspaces use the active authenticated host
+  `gh` account when one can be validated, while member-created workspaces and workspaces created
+  without usable host `gh` remain disconnected. Once a workspace leaves legacy mode it cannot
+  return. The unpublished singleton registration
   schema on this branch is rewritten directly and receives no compatibility migration. A valid
   legacy connection supplies both the existing API client abstraction and an in-memory Git
   transport credential so provider-backed repositories can be rematerialized from legacy shared
@@ -199,8 +233,8 @@ The non-secret operational settings row adds `task_git_credentials_mode`, with a
 
 | Value | Behavior |
 | --- | --- |
-| `managed` | Default. Inject the workspace broker contract for attached GitHub repositories unless an explicit executor-profile token overrides it. |
-| `executor` | Inject no Kandev GitHub helper or `gh` shim; use credentials available where the selected executor runs. |
+| `managed` | Inject the workspace broker contract for attached GitHub repositories unless an explicit executor-profile token overrides it. Existing missing/invalid values continue to normalize here for upgrade compatibility. |
+| `executor` | Default persisted for newly created workspaces. Inject no Kandev GitHub helper or `gh` shim; use credentials available where the selected executor runs. |
 
 Missing or invalid persisted values normalize to `managed`. Workspace-settings copy includes this
 policy because it is operational configuration, not authentication material.
@@ -340,11 +374,19 @@ post-signature processing failures produce `failing`; a later valid successful d
 ### Task Git credential resolution
 
 - Missing settings start at `managed`.
+- New workspace creation attempts to persist `executor` before the workspace is exposed for task
+  launch; a persistence failure leaves the existing managed compatibility fallback in place.
+- Operator-authorized creation snapshots a validated active host `gh` host/login as a named CLI
+  connection when available; member creation and unavailable/invalid host CLI leave automation
+  disconnected.
 - `managed + explicit profile GITHUB_TOKEN/GH_TOKEN -> executor_profile`.
 - `managed + attached GitHub repository + active workspace connection -> workspace broker`.
 - `executor -> executor-visible credentials`, regardless of PAT/CLI/App automation method.
 - Initial launch and resume run the same resolution. A successful operation replaces the session
   snapshot; a failed operation leaves the previous snapshot unchanged.
+- Each attached repository is resolved once for an individual launch or resume. The resolved
+  repository set is shared by task configuration and credential-snapshot construction rather than
+  triggering repeated materialization or origin mutation.
 - Changing the workspace policy affects new launches and the next resume, not an already-running
   process.
 
@@ -374,6 +416,12 @@ post-signature processing failures produce `failing`; a later valid successful d
   prompts, and activates Kandev's `agentctl`/`gh` tool directory only for broker-enabled task
   instances. It does not claim to prevent a host-authority agent from manually switching a remote
   to SSH or invoking another credential-bearing tool.
+- The helper command uses a Kandev-owned absolute executable variable rather than searching ambient
+  `PATH`. The variable is bound before executor preparation and refreshed from `os.Executable` by
+  a running `agentctl`. Unix shell-startup restoration composes with an inherited `BASH_ENV`,
+  resolves simple environment-variable references in that hook path from the effective child
+  environment, remains conditional on the broker contract, and never places broker leases, tokens,
+  or credential scopes in shell arguments or startup files.
 - The effective task Git environment is runtime-only. It is copied only after the existing
   task/session or task-environment ownership check, is never persisted in task metadata or terminal
   records, and is never written to logs, errors, browser payloads, or process arguments.
@@ -404,13 +452,31 @@ post-signature processing failures produce `failing`; a later valid successful d
   truncating, partially merging, or executing a different block.
 - If executor inheritance is selected but no usable credential exists in that executor, Git/SSH
   reports its normal authentication failure. Kandev does not probe or guess the actor.
+- If host `gh` is absent, unauthenticated, or fails active-account validation while a workspace is
+  created, the workspace remains disconnected for automation, retains executor task access, and
+  creation succeeds.
+- If executor-default persistence fails while a workspace is created, the workspace remains
+  available with the existing managed task-access fallback and a warning for retry/configuration;
+  Kandev does not claim executor inheritance was applied.
 - If Kandev cannot reconcile a managed checkout's `origin` with the selected task policy, Local and
   Worktree preparation fails before the agent starts instead of silently using the other policy's
   transport.
+- If Git rejects a managed checkout because its filesystem owner differs from the Kandev service
+  account, preparation fails with an ownership-specific, credential-safe diagnostic. Kandev does
+  not retry with a global trust override, suppress the Git check, or mutate filesystem ownership.
+- Generic origin-inspection and origin-update failures include only bounded, credential-redacted
+  Git output. Credentials embedded in URL userinfo or known authentication material never appear
+  in logs, session errors, or browser payloads.
 - Deleting a registration with any workspace or personal reference returns
   `github_app_registration_in_use` with a non-secret binding count.
 - Changing workspace auth while a flow is open makes the stale callback fail without reverting the
   newer connection.
+- A PAT replacement is validated against GitHub before it replaces the current workspace
+  connection. An invalid PAT leaves the previous connection unchanged, keeps the submitted draft
+  available for correction, and shows the validation error in the connection dialog.
+- If a previously valid GitHub credential expires or is revoked, My GitHub stays on the current
+  route and renders a reconnect/loading error instead of treating GitHub's 401 as an expired Kandev
+  login session.
 
 ## Persistence Guarantees
 
@@ -457,6 +523,10 @@ registration and never creates a global default.
   human identity; the page does not render a redundant identity section or a fake selector.
 - The workspace identity and task-access summary lines expose concise help through a tooltip on
   hover or keyboard focus and the same explanation in a 44px-target drawer on touch devices.
+- Refreshing an already loaded workspace GitHub status keeps the current identity, task-access
+  summary, and actions visible while the request is in flight. The refresh control alone shows
+  progress and prevents duplicate activation. A workspace whose status has not loaded yet still
+  shows the initial connection-status placeholder and never inherits another workspace's data.
 - When rate-limit snapshots are available, the connection status row exposes a **Show GitHub API
   limits** icon. Its desktop tooltip and touch drawer show remaining and total API requests,
   GraphQL query points, Search requests, and reset timing. Exhausted buckets explain that
@@ -475,6 +545,29 @@ registration and never creates a global default.
 
 ## Scenarios
 
+- **GIVEN** a brand-new Kandev database and an authenticated active host `gh` account, **WHEN** the
+  initial workspace is seeded, **THEN** its automation connection records that exact CLI
+  host/login, its task access is executor inheritance, and its first task does not request a
+  managed credential lease.
+- **GIVEN** an administrator or internal trusted caller and an authenticated active host `gh`
+  account, **WHEN** a workspace is created, **THEN** the workspace records that exact named CLI
+  automation connection and executor task access.
+- **GIVEN** a non-admin member and an authenticated server-operator `gh` account, **WHEN** the
+  member creates a workspace, **THEN** the workspace has executor task access but no automatic
+  GitHub automation connection.
+- **GIVEN** no usable authenticated host `gh` account, **WHEN** an authorized caller creates a
+  workspace, **THEN** workspace creation succeeds, task access is executor inheritance, and
+  GitHub automation remains disconnected.
+- **GIVEN** an existing installation with managed, disconnected, or legacy missing workspace
+  settings, **WHEN** Kandev upgrades, **THEN** those connections and task policies remain
+  unchanged.
+
+- **GIVEN** a workspace GitHub status is visible, **WHEN** the user refreshes it and the status
+  request is still pending, **THEN** the existing workspace content remains visible and usable
+  while the refresh control is busy, on both desktop and mobile.
+- **GIVEN** the user navigates to a workspace with no loaded GitHub status, **WHEN** its initial
+  status request is pending, **THEN** the UI shows the connection-status placeholder and no status
+  from the previous workspace.
 - **GIVEN** two workspaces, **WHEN** each selects a different App registration and installation,
   **THEN** status, tokens, webhooks, repositories, actors, and revocation remain isolated.
 - **GIVEN** two workspaces intentionally reuse one registration, **WHEN** each installs it into a
@@ -522,6 +615,12 @@ registration and never creates a global default.
 - **GIVEN** a PAT or named CLI connection draft and a changed task access mode, **WHEN** the user
   presses the dialog's single **Save changes** action, **THEN** both drafts are persisted, the dialog
   closes only after both succeed, and reopening shows the selected account and task mode.
+- **GIVEN** a user enters an invalid replacement PAT, **WHEN** GitHub rejects it during **Save
+  changes**, **THEN** the dialog remains open, the submitted PAT remains available for correction,
+  an error is shown, and the previously active workspace connection is unchanged.
+- **GIVEN** a configured PAT has expired or been revoked, **WHEN** the user opens My GitHub and the
+  provider data request returns 401, **THEN** the page remains on `/github`, shows an authentication
+  loading error, and does not navigate to the Kandev login screen.
 - **GIVEN** a changed task access mode but no PAT or CLI connection change, **WHEN** the user presses
   **Save changes**, **THEN** only the task policy is persisted and the selected automation identity
   remains unchanged.
@@ -536,12 +635,44 @@ registration and never creates a global default.
 - **GIVEN** a Kandev-managed GitHub checkout currently has an SSH `origin`, **WHEN** the workspace
   selects managed credentials and launches a Local or Worktree task, **THEN** Kandev changes that
   managed checkout's `origin` to canonical HTTPS before task preparation.
+- **GIVEN** a Kandev-managed checkout already has the canonical origin selected by the task policy,
+  **WHEN** a task launches or resumes, **THEN** Kandev inspects the origin but does not rewrite
+  `.git/config`.
+- **GIVEN** a task with one or more attached repositories, **WHEN** launch or resume builds the
+  primary, multi-repository, and credential configuration, **THEN** each repository is prepared
+  once and the same resolved result is reused by all three consumers.
+- **GIVEN** a managed checkout is owned by `brewuser` while the Kandev service runs as root,
+  **WHEN** Git rejects origin inspection or reconciliation as dubious ownership, **THEN** task
+  preparation stops and reports that the service account and managed repository owner disagree,
+  without suggesting `safe.directory=*`.
+- **GIVEN** Git emits a failure containing credential-bearing URL userinfo, **WHEN** the failure is
+  returned through task preparation, **THEN** the diagnostic retains actionable Git context but
+  redacts the credential and bounds the output length.
 - **GIVEN** a repository is registered from a user-managed local checkout, **WHEN** either task Git
   credential policy is selected, **THEN** Kandev leaves its configured `origin` unchanged.
 - **GIVEN** managed mode and an explicit executor-profile GitHub token, **WHEN** a task launches,
   **THEN** the profile token wins and the session disclosure labels its actor runtime-selected.
 - **GIVEN** a managed helper cannot execute or redeem its lease, **WHEN** Git requests GitHub HTTPS
   credentials, **THEN** the command fails without falling through to a personal helper or prompt.
+- **GIVEN** a broker-enabled managed task whose login profile replaces its inherited `PATH`,
+  **WHEN** Git requests GitHub HTTPS credentials, **THEN** the configured helper invokes the
+  instance-owned `agentctl` directly and does not search or fall through to an ambient helper.
+- **GIVEN** a broker-enabled Local or Worktree task whose checkout or setup script invokes Git
+  before the task instance is created, **WHEN** Git requests GitHub HTTPS credentials, **THEN** the
+  configured helper invokes the standalone launcher's absolute `agentctl` executable without
+  consulting `PATH` or an ambient helper.
+- **GIVEN** a broker-enabled Docker or Sprites task whose prepare script clones before `agentctl`
+  starts, **WHEN** Git requests GitHub HTTPS credentials during that clone, **THEN** the configured
+  helper invokes the already-installed absolute executor binary and redeems the task lease without
+  consulting `PATH` or an ambient helper.
+- **GIVEN** a broker-enabled managed task with an existing Bash environment hook, **WHEN** a
+  non-interactive login shell replaces `PATH`, **THEN** the existing hook still runs and the
+  Kandev-managed `agentctl` and `gh` shims are restored ahead of ambient tools before the requested
+  command starts.
+- **GIVEN** that existing Bash environment hook is expressed as `$HOME/hook.sh` or
+  `${KANDEV_HOOK_ROOT}/hook.sh`, **WHEN** Kandev composes its managed startup fragment, **THEN** it
+  resolves the reference from the effective child environment and sources the intended hook rather
+  than a filename containing literal dollar-sign text.
 - **GIVEN** the host or executor exports indexed Git config for `core.hooksPath` and
   `notes.augment.mergeStrategy`, **WHEN** Kandev appends its managed GitHub helper configuration,
   **THEN** the agent receives one contiguous block containing the original entries first and the
@@ -604,10 +735,20 @@ and the
 [task Git credential policy follow-up plan](../../plans/task-git-credential-policy/plan.md), plus
 the
 [executor clone transport repair plan](../../plans/github-executor-clone-transport/plan.md), and
-the [managed task terminal environment plan](../../plans/task-terminal-git-environment/plan.md).
+the [managed task terminal environment plan](../../plans/task-terminal-git-environment/plan.md),
+and the
+[managed GitHub login-shell repair plan](../../plans/github-managed-tools-login-shell/plan.md),
+and the
+[system-service identity guardrails repair plan](../../plans/system-service-identity-guardrails/plan.md).
+The new-workspace default repair is tracked in
+[the new workspace GitHub access defaults plan](../../plans/new-workspace-github-access-defaults/plan.md).
 
 ## Decision
 
 See [ADR-2026-07-21-workspace-selectable-github-app-registrations](../../decisions/2026-07-21-workspace-selectable-github-app-registrations.md)
 and
 [ADR-2026-07-27-task-git-credential-policy](../../decisions/2026-07-27-task-git-credential-policy.md).
+New-workspace defaults are defined by
+[ADR-2026-08-02-new-workspace-github-access-defaults](../../decisions/2026-08-02-new-workspace-github-access-defaults.md).
+The system-service ownership boundary is defined by
+[ADR-2026-07-31-system-service-user-continuity](../../decisions/2026-07-31-system-service-user-continuity.md).

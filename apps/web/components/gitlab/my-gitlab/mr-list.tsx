@@ -6,6 +6,7 @@ import type { GitLabLaunchPayload, GitLabTaskPreset } from "./quick-task-launche
 import { gitLabMRKey } from "@/lib/gitlab-identity";
 import { MRRowTaskIndicator } from "./mr-row-task-indicator";
 import { StartTaskMenu } from "./start-task-menu";
+import { useTranslation } from "react-i18next";
 import { ChangeRequestList, ChangeRequestRow } from "@/components/integrations/change-request-list";
 import {
   IntegrationIcon,
@@ -43,6 +44,7 @@ function MRRow({
   onStartTask?: MRListProps["onStartTask"];
 }) {
   const { name: stateIconName, className: stateIconClass } = mrStateIcon(mr);
+  const { t } = useTranslation();
   return (
     <ChangeRequestRow
       stateIcon={<IntegrationIcon name={stateIconName} className={cn("h-4 w-4", stateIconClass)} />}
@@ -59,7 +61,10 @@ function MRRow({
           </span>
           <span>·</span>
           <span className="whitespace-nowrap">
-            by {mr.author_username} · opened {formatRelativeTime(mr.created_at)}
+            {t("gitlab:byAuthorOpenedAgo", {
+              author: mr.author_username,
+              time: formatRelativeTime(mr.created_at),
+            })}
           </span>
         </>
       }
@@ -95,11 +100,12 @@ function MRListBody({ items, presets = [], onStartTask, mrKeyToTasks }: MRListPr
 }
 
 export function MRList(props: MRListProps) {
+  const { t } = useTranslation();
   return (
     <ChangeRequestList
       loading={props.loading}
       error={props.error}
-      emptyMessage="No merge requests match this filter."
+      emptyMessage={t("gitlab:noMergeRequestsMatchThisFilter")}
       isEmpty={props.items.length === 0}
     >
       <MRListBody {...props} />

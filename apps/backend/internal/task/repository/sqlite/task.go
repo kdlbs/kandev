@@ -33,6 +33,16 @@ type taskScanColumn struct {
 	selectExpr func(alias string) string
 }
 
+// Automation runs are hidden from the board and from task lists by their
+// provenance, not by ephemerality: their tasks are ordinary persistent tasks
+// that keep their worktree and stay repliable, they just have their own
+// destination (docs/specs/office/automations-settings.md). is_ephemeral keeps
+// its original quick-chat meaning, so every board read pairs the two.
+const (
+	andNotAutomationOrigin  = ` AND COALESCE(origin, '') != '` + models.TaskOriginAutomationRun + `'`
+	andNotAutomationOriginT = ` AND COALESCE(t.origin, '') != '` + models.TaskOriginAutomationRun + `'`
+)
+
 var taskScanColumns = []taskScanColumn{
 	{name: "id"},
 	{name: "workspace_id"},
@@ -115,6 +125,14 @@ func isFromOfficeProjection(alias string) string {
 			  AND w.office_workflow_id = ` + alias + `.workflow_id
 		)
 	)`
+}
+
+// IsFromOfficePredicate returns the shared SQL predicate for authoritative
+// Office-task identity. Callers that query tasks outside this repository must
+// use this expression so project-linked tasks and canonical Office-workflow
+// tasks are classified consistently with models.Task.IsFromOffice.
+func IsFromOfficePredicate(alias string) string {
+	return isFromOfficeProjection(alias)
 }
 
 // excludeConfigModePredicate delegates to the shared dialect helper (also
@@ -303,7 +321,7 @@ func (r *Repository) insertTaskTx(ctx context.Context, tx *sql.Tx, task *models.
 	_, err = tx.ExecContext(ctx, r.db.Rebind(`
 		INSERT INTO tasks (id, workspace_id, workflow_id, workflow_step_id, title, description, state, priority, position, wip_admitted, queued_for_step_id, queued_at, metadata, is_ephemeral, parent_id, created_at, updated_at, origin, project_id, labels, identifier)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`), task.ID, task.WorkspaceID, task.WorkflowID, task.WorkflowStepID, task.Title, task.Description, task.State, task.Priority, task.Position, task.WIPAdmitted, task.QueuedForStepID, task.QueuedAt, string(metadata), task.IsEphemeral, task.ParentID, task.CreatedAt, task.UpdatedAt, task.Origin, task.ProjectID, task.Labels, task.Identifier)
+	`), task.ID, task.WorkspaceID, task.WorkflowID, task.WorkflowStepID, task.Title, task.Description, task.State, task.Priority, task.Position, dialect.BoolToInt(task.WIPAdmitted), task.QueuedForStepID, task.QueuedAt, string(metadata), dialect.BoolToInt(task.IsEphemeral), task.ParentID, task.CreatedAt, task.UpdatedAt, task.Origin, task.ProjectID, task.Labels, task.Identifier)
 	if err != nil {
 		return err
 	}
@@ -330,7 +348,7 @@ func (r *Repository) lockWorkflowStepsForAdmission(ctx context.Context, tx *sql.
 }
 
 func (r *Repository) countAdmittedInTx(ctx context.Context, tx *sql.Tx, stepID, excludeTaskID string) (int, error) {
-	query := `SELECT COUNT(*) FROM tasks WHERE workflow_step_id = ? AND wip_admitted = 1 AND archived_at IS NULL AND is_ephemeral = 0`
+	query := `SELECT COUNT(*) FROM tasks WHERE workflow_step_id = ? AND wip_admitted = 1 AND archived_at IS NULL AND is_ephemeral = 0` + andNotAutomationOrigin
 	args := []interface{}{stepID}
 	if excludeTaskID != "" {
 		query += " AND id != ?"
@@ -354,7 +372,7 @@ func (r *Repository) ensureWorkflowStepCapacity(ctx context.Context, tx *sql.Tx,
 		WHERE workflow_step_id = ?
 		  AND wip_admitted = 1
 		  AND archived_at IS NULL
-		  AND is_ephemeral = 0
+		  AND is_ephemeral = 0`+andNotAutomationOrigin+`
 	`), targetStepID).Scan(&occupants); err != nil {
 		return err
 	}
@@ -452,10 +470,24 @@ func (r *Repository) UpdateTask(ctx context.Context, task *models.Task) error {
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	result, err := tx.ExecContext(ctx, r.db.Rebind(`
+	updateQuery := `
 		UPDATE tasks SET workspace_id = ?, workflow_id = ?, workflow_step_id = ?, title = ?, description = ?, state = ?, priority = ?, position = ?, wip_admitted = ?, queued_for_step_id = ?, queued_at = ?, metadata = ?, parent_id = ?, updated_at = ?, origin = ?, project_id = ?, labels = ?, identifier = ?
 		WHERE id = ?
-	`), task.WorkspaceID, task.WorkflowID, task.WorkflowStepID, task.Title, task.Description, task.State, task.Priority, task.Position, task.WIPAdmitted, task.QueuedForStepID, task.QueuedAt, string(metadata), task.ParentID, task.UpdatedAt, task.Origin, task.ProjectID, task.Labels, task.Identifier, task.ID)
+	`
+	if models.IsAgentTitlePending(task.Metadata) {
+		pending := agentTitlePendingPredicate(r.db.DriverName())
+		metadataMerge := pendingTaskMetadataMergeExpression(r.db.DriverName())
+		updateQuery = fmt.Sprintf(`
+			UPDATE tasks SET workspace_id = ?, workflow_id = ?, workflow_step_id = ?,
+				title = CASE WHEN %s THEN ? ELSE title END,
+				description = ?, state = ?, priority = ?, position = ?, wip_admitted = ?,
+				queued_for_step_id = ?, queued_at = ?,
+				metadata = %s,
+				parent_id = ?, updated_at = ?, origin = ?, project_id = ?, labels = ?, identifier = ?
+			WHERE id = ?
+		`, pending, metadataMerge)
+	}
+	result, err := tx.ExecContext(ctx, r.db.Rebind(updateQuery), task.WorkspaceID, task.WorkflowID, task.WorkflowStepID, task.Title, task.Description, task.State, task.Priority, task.Position, dialect.BoolToInt(task.WIPAdmitted), task.QueuedForStepID, task.QueuedAt, string(metadata), task.ParentID, task.UpdatedAt, task.Origin, task.ProjectID, task.Labels, task.Identifier, task.ID)
 	if err != nil {
 		return err
 	}
@@ -499,6 +531,107 @@ func (r *Repository) RemoveTaskMetadataKey(ctx context.Context, taskID, key stri
 	return rows > 0, err
 }
 
+// ClaimTaskTitleSession atomically assigns the first eligible session as the
+// owner of a pending title handoff. Repeated calls by that same session are
+// idempotent; a different session observes the existing owner and returns
+// false.
+func (r *Repository) ClaimTaskTitleSession(ctx context.Context, taskID, sessionID string) (bool, bool, error) {
+	if sessionID == "" {
+		return false, false, nil
+	}
+
+	var query string
+	var args []interface{}
+	if dialect.IsPostgres(r.db.DriverName()) {
+		query = `
+			UPDATE tasks
+			SET metadata = jsonb_set(
+				CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}'::jsonb ELSE metadata::jsonb END,
+				ARRAY['agent_title_owner_session_id']::text[], ?::jsonb, true
+			)::text,
+				updated_at = ?
+			WHERE id = ?
+			  AND jsonb_extract_path(CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}'::jsonb ELSE metadata::jsonb END, 'agent_title_pending') = 'true'::jsonb
+			  AND jsonb_extract_path(CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}'::jsonb ELSE metadata::jsonb END, 'agent_title_owner_session_id') IS NULL
+		`
+		payload, err := json.Marshal(sessionID)
+		if err != nil {
+			return false, false, err
+		}
+		args = []interface{}{string(payload), time.Now().UTC(), taskID}
+	} else {
+		query = `
+			UPDATE tasks
+			SET metadata = json_set(
+				CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}' ELSE metadata END,
+				'$.agent_title_owner_session_id', json(?)
+			), updated_at = ?
+			WHERE id = ?
+			  AND json_type(CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}' ELSE metadata END, '$.agent_title_pending') = 'true'
+			  AND json_type(CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}' ELSE metadata END, '$.agent_title_owner_session_id') IS NULL
+		`
+		payload, err := json.Marshal(sessionID)
+		if err != nil {
+			return false, false, err
+		}
+		args = []interface{}{string(payload), time.Now().UTC(), taskID}
+	}
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(query), args...)
+	if err != nil {
+		return false, false, err
+	}
+	if rows, rowsErr := result.RowsAffected(); rowsErr == nil && rows > 0 {
+		return true, true, nil
+	}
+
+	task, err := r.GetTask(ctx, taskID)
+	if err != nil {
+		return false, false, err
+	}
+	return models.IsAgentTitleOwner(task.Metadata, sessionID), false, nil
+}
+
+// SetTaskTitleIfPending replaces a provisional title and removes its pending
+// and owner markers in one conditional write. The compare-and-set prevents two
+// agent sessions (or a late agent call racing a human rename) from both winning.
+func (r *Repository) SetTaskTitleIfPending(ctx context.Context, taskID, sessionID, title string) (bool, error) {
+	if sessionID == "" {
+		return false, nil
+	}
+	var query string
+	if dialect.IsPostgres(r.db.DriverName()) {
+		query = `
+			UPDATE tasks
+			SET title = ?,
+				metadata = (CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}'::jsonb ELSE metadata::jsonb END #- ARRAY['agent_title_pending']::text[] #- ARRAY['agent_title_owner_session_id']::text[])::text,
+				updated_at = ?
+			WHERE id = ?
+			  AND jsonb_extract_path(CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}'::jsonb ELSE metadata::jsonb END, ?) = 'true'::jsonb
+			  AND jsonb_extract_path_text(CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}'::jsonb ELSE metadata::jsonb END, 'agent_title_owner_session_id') = ?
+		`
+	} else {
+		query = `
+			UPDATE tasks
+			SET title = ?,
+				metadata = json_remove(CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}' ELSE metadata END, '$.agent_title_pending', '$.agent_title_owner_session_id'),
+				updated_at = ?
+			WHERE id = ?
+			  AND json_type(CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}' ELSE metadata END, ?) = 'true'
+			  AND json_extract(CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}' ELSE metadata END, '$.agent_title_owner_session_id') = ?
+			`
+	}
+	path := jsonPath(models.MetaKeyAgentTitlePending)
+	if dialect.IsPostgres(r.db.DriverName()) {
+		path = models.MetaKeyAgentTitlePending
+	}
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(query), title, time.Now().UTC(), taskID, path, sessionID)
+	if err != nil {
+		return false, err
+	}
+	rows, err := result.RowsAffected()
+	return rows > 0, err
+}
+
 // SetTaskMetadataKey updates one metadata key without replacing concurrent
 // task fields. It is used to restore a deferred launch after a failed launch.
 func (r *Repository) SetTaskMetadataKey(ctx context.Context, taskID, key string, value interface{}) error {
@@ -521,6 +654,20 @@ func (r *Repository) SetTaskMetadataKey(ctx context.Context, taskID, key string,
 }
 
 func jsonPath(key string) string { return "$." + key }
+
+func agentTitlePendingPredicate(driver string) string {
+	if dialect.IsPostgres(driver) {
+		return "jsonb_extract_path(CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}'::jsonb ELSE metadata::jsonb END, 'agent_title_pending') = 'true'::jsonb"
+	}
+	return "json_type(CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}' ELSE metadata END, '$.agent_title_pending') = 'true'"
+}
+
+func pendingTaskMetadataMergeExpression(driver string) string {
+	if dialect.IsPostgres(driver) {
+		return "(CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}'::jsonb ELSE metadata::jsonb END || (?::jsonb - 'agent_title_pending' - 'agent_title_owner_session_id'))::text"
+	}
+	return "json_patch(CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}' ELSE metadata END, json_remove(?, '$.agent_title_pending', '$.agent_title_owner_session_id'))"
+}
 
 // DetachTask clears only the hierarchy fields involved in detachment. Keeping
 // this as a targeted update prevents concurrent task edits from being replaced
@@ -613,7 +760,7 @@ func (r *Repository) UpdateTaskIfWorkflowStepHasCapacity(ctx context.Context, ta
 		  AND wip_admitted = 1
 		  AND id != ?
 		  AND archived_at IS NULL
-		  AND is_ephemeral = 0
+		  AND is_ephemeral = 0`+andNotAutomationOrigin+`
 	`), targetStepID, excludeTaskID).Scan(&occupants); err != nil {
 		return err
 	}
@@ -624,7 +771,7 @@ func (r *Repository) UpdateTaskIfWorkflowStepHasCapacity(ctx context.Context, ta
 	result, err := tx.ExecContext(ctx, r.db.Rebind(`
 		UPDATE tasks SET workspace_id = ?, workflow_id = ?, workflow_step_id = ?, title = ?, description = ?, state = ?, priority = ?, position = ?, wip_admitted = ?, queued_for_step_id = ?, queued_at = ?, metadata = ?, parent_id = ?, updated_at = ?, origin = ?, project_id = ?, labels = ?, identifier = ?
 		WHERE id = ?
-	`), task.WorkspaceID, task.WorkflowID, task.WorkflowStepID, task.Title, task.Description, task.State, task.Priority, task.Position, task.WIPAdmitted, task.QueuedForStepID, task.QueuedAt, string(metadata), task.ParentID, task.UpdatedAt, task.Origin, task.ProjectID, task.Labels, task.Identifier, task.ID)
+	`), task.WorkspaceID, task.WorkflowID, task.WorkflowStepID, task.Title, task.Description, task.State, task.Priority, task.Position, dialect.BoolToInt(task.WIPAdmitted), task.QueuedForStepID, task.QueuedAt, string(metadata), task.ParentID, task.UpdatedAt, task.Origin, task.ProjectID, task.Labels, task.Identifier, task.ID)
 	if err != nil {
 		return err
 	}
@@ -671,7 +818,7 @@ func (r *Repository) PromoteQueuedTaskIfWorkflowStepHasCapacity(
 			  AND wip_admitted = 1
 			  AND id != ?
 			  AND archived_at IS NULL
-			  AND is_ephemeral = 0
+			  AND is_ephemeral = 0`+andNotAutomationOrigin+`
 		`), destinationStepID, task.ID).Scan(&occupants); err != nil {
 			return false, err
 		}
@@ -686,8 +833,8 @@ func (r *Repository) PromoteQueuedTaskIfWorkflowStepHasCapacity(
 		  AND workflow_step_id = ?
 		  AND (queued_for_step_id = ? OR queued_for_step_id = '' OR queued_for_step_id IS NULL)
 		  AND archived_at IS NULL
-		  AND is_ephemeral = 0
-	`), task.WorkspaceID, task.WorkflowID, task.WorkflowStepID, task.Title, task.Description, task.State, task.Priority, task.Position, task.WIPAdmitted, task.QueuedForStepID, task.QueuedAt, string(metadata), task.ParentID, task.UpdatedAt, task.Origin, task.ProjectID, task.Labels, task.Identifier, task.ID, fromStepID, destinationStepID)
+		  AND is_ephemeral = 0`+andNotAutomationOrigin+`
+	`), task.WorkspaceID, task.WorkflowID, task.WorkflowStepID, task.Title, task.Description, task.State, task.Priority, task.Position, dialect.BoolToInt(task.WIPAdmitted), task.QueuedForStepID, task.QueuedAt, string(metadata), task.ParentID, task.UpdatedAt, task.Origin, task.ProjectID, task.Labels, task.Identifier, task.ID, fromStepID, destinationStepID)
 	if err != nil {
 		return false, err
 	}
@@ -737,7 +884,7 @@ func (r *Repository) ListTasks(ctx context.Context, workflowID string) ([]*model
 	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(`
 		SELECT `+taskSelectColumns("t")+`
 		FROM tasks t
-		WHERE t.workflow_id = ? AND t.archived_at IS NULL AND t.is_ephemeral = 0
+		WHERE t.workflow_id = ? AND t.archived_at IS NULL AND t.is_ephemeral = 0`+andNotAutomationOriginT+`
 		ORDER BY t.created_at ASC
 	`), workflowID)
 	if err != nil {
@@ -751,7 +898,7 @@ func (r *Repository) ListTasks(ctx context.Context, workflowID string) ([]*model
 // CountTasksByWorkflow returns the number of non-archived, non-ephemeral tasks in a workflow
 func (r *Repository) CountTasksByWorkflow(ctx context.Context, workflowID string) (int, error) {
 	var count int
-	err := r.ro.QueryRowContext(ctx, r.ro.Rebind(`SELECT COUNT(*) FROM tasks WHERE workflow_id = ? AND archived_at IS NULL AND is_ephemeral = 0`), workflowID).Scan(&count)
+	err := r.ro.QueryRowContext(ctx, r.ro.Rebind(`SELECT COUNT(*) FROM tasks WHERE workflow_id = ? AND archived_at IS NULL AND is_ephemeral = 0`+andNotAutomationOrigin), workflowID).Scan(&count)
 	if err != nil {
 		return 0, err
 	}
@@ -761,7 +908,7 @@ func (r *Repository) CountTasksByWorkflow(ctx context.Context, workflowID string
 // CountTasksByWorkflowStep returns the number of non-archived, non-ephemeral tasks in a workflow step
 func (r *Repository) CountTasksByWorkflowStep(ctx context.Context, stepID string) (int, error) {
 	var count int
-	err := r.ro.QueryRowContext(ctx, r.ro.Rebind(`SELECT COUNT(*) FROM tasks WHERE workflow_step_id = ? AND archived_at IS NULL AND is_ephemeral = 0`), stepID).Scan(&count)
+	err := r.ro.QueryRowContext(ctx, r.ro.Rebind(`SELECT COUNT(*) FROM tasks WHERE workflow_step_id = ? AND archived_at IS NULL AND is_ephemeral = 0`+andNotAutomationOrigin), stepID).Scan(&count)
 	if err != nil {
 		return 0, err
 	}
@@ -778,7 +925,7 @@ func (r *Repository) CountTasksByWorkflowStepExcludingTask(ctx context.Context, 
 		  AND id != ?
 		  AND wip_admitted = 1
 		  AND archived_at IS NULL
-		  AND is_ephemeral = 0
+		  AND is_ephemeral = 0`+andNotAutomationOrigin+`
 	`), stepID, excludeTaskID).Scan(&count)
 	if err != nil {
 		return 0, err
@@ -795,7 +942,7 @@ func (r *Repository) CountAdmittedTasksByWorkflowStep(ctx context.Context, stepI
 		WHERE workflow_step_id = ?
 		  AND wip_admitted = 1
 		  AND archived_at IS NULL
-		  AND is_ephemeral = 0
+		  AND is_ephemeral = 0`+andNotAutomationOrigin+`
 	`), stepID).Scan(&count)
 	return count, err
 }
@@ -832,7 +979,7 @@ func (r *Repository) NextPullCandidateExcluding(ctx context.Context, stepID stri
 			FROM tasks t
 			WHERE t.workflow_step_id = ?
 			  AND t.archived_at IS NULL
-			  AND t.is_ephemeral = 0
+			  AND t.is_ephemeral = 0`+andNotAutomationOriginT+`
 			  AND (t.queued_for_step_id = '' OR t.queued_for_step_id IS NULL)
 			  `+excludeClause+`
 			ORDER BY
@@ -879,7 +1026,7 @@ func (r *Repository) NextQueuedTaskForStepExcluding(ctx context.Context, feederS
 		FROM tasks t
 		WHERE t.workflow_step_id = ?
 		  AND t.archived_at IS NULL
-		  AND t.is_ephemeral = 0
+		  AND t.is_ephemeral = 0`+andNotAutomationOriginT+`
 		  AND (t.queued_for_step_id = '' OR t.queued_for_step_id IS NULL OR t.queued_for_step_id = ?)
 		  `+excludeClause+`
 		ORDER BY
@@ -914,7 +1061,7 @@ func (r *Repository) ListChildren(ctx context.Context, parentID string) ([]*mode
 	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(`
 		SELECT `+taskSelectColumns("t")+`
 		FROM tasks t
-		WHERE t.parent_id = ? AND t.archived_at IS NULL AND t.is_ephemeral = 0
+		WHERE t.parent_id = ? AND t.archived_at IS NULL AND t.is_ephemeral = 0`+andNotAutomationOriginT+`
 		ORDER BY t.created_at ASC, t.id ASC
 	`), parentID)
 	if err != nil {
@@ -934,7 +1081,7 @@ func (r *Repository) ListChildCompletionRows(ctx context.Context, parentID strin
 	err := r.ro.SelectContext(ctx, &rows, r.ro.Rebind(`
 		SELECT id, state, title, workflow_step_id, updated_at
 		FROM tasks
-		WHERE parent_id = ? AND archived_at IS NULL AND is_ephemeral = 0
+		WHERE parent_id = ? AND archived_at IS NULL AND is_ephemeral = 0`+andNotAutomationOrigin+`
 		ORDER BY created_at ASC, id ASC
 	`), parentID)
 	if err != nil {
@@ -954,7 +1101,7 @@ func (r *Repository) ListChildrenIncludingArchived(ctx context.Context, parentID
 	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(`
 		SELECT `+taskSelectColumns("t")+`
 		FROM tasks t
-		WHERE t.parent_id = ? AND t.is_ephemeral = 0
+		WHERE t.parent_id = ? AND t.is_ephemeral = 0`+andNotAutomationOriginT+`
 		ORDER BY t.created_at ASC, t.id ASC
 	`), parentID)
 	if err != nil {
@@ -998,7 +1145,7 @@ func (r *Repository) ListSiblings(ctx context.Context, taskID string) ([]*models
 		  AND t.workspace_id = ?
 		  AND t.id != ?
 		  AND t.archived_at IS NULL
-		  AND t.is_ephemeral = 0
+		  AND t.is_ephemeral = 0`+andNotAutomationOriginT+`
 		ORDER BY t.created_at ASC, t.id ASC
 	`), self.ParentID, self.WorkspaceID, self.ID)
 	if err != nil {
@@ -1013,7 +1160,7 @@ func (r *Repository) ListTasksByWorkflowStep(ctx context.Context, workflowStepID
 	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(`
 		SELECT `+taskSelectColumns("t")+`
 		FROM tasks t
-		WHERE t.workflow_step_id = ? AND t.archived_at IS NULL AND t.is_ephemeral = 0 ORDER BY t.created_at ASC
+		WHERE t.workflow_step_id = ? AND t.archived_at IS NULL AND t.is_ephemeral = 0`+andNotAutomationOriginT+` ORDER BY t.created_at ASC
 	`), workflowStepID)
 	if err != nil {
 		return nil, err
@@ -1030,7 +1177,7 @@ func (r *Repository) ListQueuedTasks(ctx context.Context) ([]*models.Task, error
 		SELECT `+taskSelectColumns("t")+`
 		FROM tasks t
 		WHERE t.queued_for_step_id IS NOT NULL AND t.queued_for_step_id != ''
-		  AND t.archived_at IS NULL AND t.is_ephemeral = 0
+		  AND t.archived_at IS NULL AND t.is_ephemeral = 0`+andNotAutomationOriginT+`
 		ORDER BY t.queued_at ASC, t.created_at ASC, t.id ASC
 	`))
 	if err != nil {
@@ -1042,10 +1189,19 @@ func (r *Repository) ListQueuedTasks(ctx context.Context) ([]*models.Task, error
 
 // ListTasksByWorkspace returns paginated tasks for a workspace with total count
 // If query is non-empty, filters by task title, description, repository name, or repository path
-// If includeArchived is false, archived tasks are excluded
+// If includeArchived is false, archived tasks are excluded. If onlyArchived
+// is true, only archived tasks are returned and it takes precedence over
+// includeArchived.
 // If includeEphemeral is false, ephemeral tasks are excluded
 // If onlyEphemeral is true, only ephemeral tasks are returned
 func (r *Repository) ListTasksByWorkspace(ctx context.Context, workspaceID, workflowID, repositoryID, query string, page, pageSize int, sort string, includeArchived, includeEphemeral, onlyEphemeral, excludeConfig bool) ([]*models.Task, int, error) {
+	return r.ListTasksByWorkspaceWithArchiveMode(ctx, workspaceID, workflowID, repositoryID, query, page, pageSize, sort, includeArchived, includeEphemeral, onlyEphemeral, excludeConfig, false)
+}
+
+// ListTasksByWorkspaceWithArchiveMode is the additive workspace-list contract
+// used by the sidebar archive view. onlyArchived takes precedence over
+// includeArchived when both are true.
+func (r *Repository) ListTasksByWorkspaceWithArchiveMode(ctx context.Context, workspaceID, workflowID, repositoryID, query string, page, pageSize int, sort string, includeArchived, includeEphemeral, onlyEphemeral, excludeConfig, onlyArchived bool) ([]*models.Task, int, error) {
 	ctx, span := tracing.Tracer("kandev-db").Start(ctx, "db.ListTasksByWorkspace")
 	defer span.End()
 	// Calculate offset
@@ -1065,8 +1221,14 @@ func (r *Repository) ListTasksByWorkspace(ctx context.Context, workspaceID, work
 		filter += " AND is_ephemeral = 0"
 	}
 	// If includeEphemeral is true and onlyEphemeral is false, include both
+	// Automation runs are excluded regardless of the ephemeral toggles: they
+	// are hidden by provenance, and "include quick chats" is not a request to
+	// see them.
+	filter += andNotAutomationOrigin
 
-	if !includeArchived {
+	if onlyArchived {
+		filter += " AND archived_at IS NOT NULL"
+	} else if !includeArchived {
 		filter += " AND archived_at IS NULL"
 	}
 
@@ -1081,7 +1243,7 @@ func (r *Repository) ListTasksByWorkspace(ctx context.Context, workspaceID, work
 	if query == "" {
 		rows, total, err = r.queryAllTasks(ctx, workspaceID, filter, workflowID, repositoryID, pageSize, offset, sort)
 	} else {
-		rows, total, err = r.searchTasks(ctx, workspaceID, query, filter, workflowID, repositoryID, pageSize, offset, sort, includeArchived, includeEphemeral, onlyEphemeral, excludeConfig)
+		rows, total, err = r.searchTasks(ctx, workspaceID, query, filter, workflowID, repositoryID, pageSize, offset, sort)
 	}
 
 	if err != nil {
@@ -1157,7 +1319,7 @@ func rewriteFilterForAlias(filter, alias string) string {
 		return filter
 	}
 	out := filter
-	for _, col := range []string{"is_ephemeral", "archived_at", "metadata", "workflow_id"} {
+	for _, col := range []string{"is_ephemeral", "archived_at", "metadata", "workflow_id", "origin"} {
 		// Replace " <col>" only when not already prefixed by `alias.`.
 		out = simplePrefixCol(out, col, alias)
 	}
@@ -1216,23 +1378,13 @@ func isWordByte(b byte) bool {
 }
 
 // searchTasks fetches tasks matching a search query for a workspace with pagination.
-func (r *Repository) searchTasks(ctx context.Context, workspaceID, query, filter, workflowID, repositoryID string, pageSize, offset int, sort string, includeArchived, includeEphemeral, onlyEphemeral, excludeConfig bool) (*sql.Rows, int, error) {
+func (r *Repository) searchTasks(ctx context.Context, workspaceID, query, filter, workflowID, repositoryID string, pageSize, offset int, sort string) (*sql.Rows, int, error) {
 	searchPattern := "%" + query + "%"
 	like := dialect.Like(r.ro.DriverName())
 
-	// Build task filter
-	tFilter := ""
-	if onlyEphemeral {
-		tFilter += " AND t.is_ephemeral = 1"
-	} else if !includeEphemeral {
-		tFilter += " AND t.is_ephemeral = 0"
-	}
-	if !includeArchived {
-		tFilter += " AND t.archived_at IS NULL"
-	}
-	if excludeConfig {
-		tFilter += " AND " + excludeConfigModePredicate(r.ro.DriverName(), "t.metadata")
-	}
+	// Reuse the same archive, ephemeral, and config predicates as the
+	// non-search path so count and page results cannot diverge by mode.
+	tFilter := rewriteFilterForAlias(filter, "t")
 
 	// Collect extra filter args in query-argument order
 	var extraArgs []interface{}
@@ -2084,7 +2236,7 @@ func (r *Repository) ListTasksByProject(ctx context.Context, projectID string) (
 	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(`
 		SELECT `+taskSelectColumns("t")+`
 		FROM tasks t
-		WHERE t.project_id = ? AND t.archived_at IS NULL AND t.is_ephemeral = 0
+		WHERE t.project_id = ? AND t.archived_at IS NULL AND t.is_ephemeral = 0`+andNotAutomationOriginT+`
 		ORDER BY t.created_at ASC
 	`), projectID)
 	if err != nil {
@@ -2102,7 +2254,7 @@ func (r *Repository) ListTasksByAssignee(ctx context.Context, agentInstanceID st
 		SELECT `+taskSelectColumns("t")+`
 		FROM tasks t
 		WHERE `+runnerProjection("t")+` = ?
-		  AND t.archived_at IS NULL AND t.is_ephemeral = 0
+		  AND t.archived_at IS NULL AND t.is_ephemeral = 0`+andNotAutomationOriginT+`
 		ORDER BY t.created_at ASC
 	`), agentInstanceID)
 	if err != nil {
@@ -2115,7 +2267,7 @@ func (r *Repository) ListTasksByAssignee(ctx context.Context, agentInstanceID st
 // ListTaskTree returns a flat list of non-archived tasks for a workspace, suitable for
 // building a tree using each task's ParentID field.
 func (r *Repository) ListTaskTree(ctx context.Context, workspaceID string, filters models.TaskTreeFilters) ([]*models.Task, error) {
-	query := `SELECT ` + taskSelectColumns("t") + ` FROM tasks t WHERE t.workspace_id = ? AND t.archived_at IS NULL AND t.is_ephemeral = 0`
+	query := `SELECT ` + taskSelectColumns("t") + ` FROM tasks t WHERE t.workspace_id = ? AND t.archived_at IS NULL AND t.is_ephemeral = 0` + andNotAutomationOriginT
 	args := []interface{}{workspaceID}
 
 	if filters.ProjectID != "" {

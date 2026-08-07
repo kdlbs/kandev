@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Card, CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
 import { Input } from "@kandev/ui/input";
 import { Badge } from "@kandev/ui/badge";
@@ -20,6 +21,7 @@ type Props = {
 };
 
 function LicenseRow({ entry }: { entry: LicenseEntry }) {
+  const { t } = useTranslation();
   const [expanded, setExpanded] = useState(false);
   return (
     <div
@@ -34,6 +36,7 @@ function LicenseRow({ entry }: { entry: LicenseEntry }) {
           size="sm"
           className="cursor-pointer px-1 h-auto py-1"
           onClick={() => setExpanded((v) => !v)}
+          aria-label={t("system:licensesToggleLabel", { name: entry.name })}
           data-testid="system-license-toggle"
           disabled={!entry.license_text}
         >
@@ -44,6 +47,9 @@ function LicenseRow({ entry }: { entry: LicenseEntry }) {
           )}
         </Button>
         <div className="flex-1 min-w-0">
+          {/* Package name, version, ecosystem and the SPDX identifier are all
+              identifiers, and `license_text` is third-party content. None of
+              them is ever translated. */}
           <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
             <span className="font-mono text-sm break-all" data-testid="system-license-name">
               {entry.name}
@@ -69,7 +75,7 @@ function LicenseRow({ entry }: { entry: LicenseEntry }) {
                 className="text-xs text-muted-foreground hover:text-foreground inline-flex items-center gap-1 cursor-pointer"
                 data-testid="system-license-repo"
               >
-                source <IconExternalLink className="h-3 w-3" />
+                {t("system:licensesSource")} <IconExternalLink className="h-3 w-3" />
               </a>
             )}
           </div>
@@ -100,6 +106,7 @@ function filterEntries(entries: LicenseEntry[], query: string): LicenseEntry[] {
 }
 
 export function LicensesList({ entries }: Props) {
+  const { t } = useTranslation();
   const [query, setQuery] = useState("");
   const visible = useMemo(() => filterEntries(entries, query), [entries, query]);
   const hasStaleGoEntries = useMemo(
@@ -111,22 +118,20 @@ export function LicensesList({ entries }: Props) {
     <Card data-testid="system-licenses-card">
       <CardHeader>
         <CardTitle className="text-base flex items-center gap-2">
-          <IconScale className="h-4 w-4" /> Third-party licenses
+          <IconScale className="h-4 w-4" /> {t("system:licensesTitle")}
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">
         {hasStaleGoEntries && (
           <Alert data-testid="system-licenses-stale-warning">
             <IconAlertTriangle className="h-3.5 w-3.5" />
-            <AlertDescription>
-              Go license entries were reused from the committed manifest because generation failed.
-              Regenerate licenses when go-licenses is healthy to refresh Go dependency data.
-            </AlertDescription>
+            <AlertDescription>{t("system:licensesStaleWarning")}</AlertDescription>
           </Alert>
         )}
         <div className="flex items-center justify-between gap-3">
           <Input
-            placeholder="Filter by name, license, or ecosystem..."
+            placeholder={t("system:licensesFilterPlaceholder")}
+            aria-label={t("system:licensesFilterPlaceholder")}
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             data-testid="system-licenses-filter"
@@ -135,7 +140,7 @@ export function LicensesList({ entries }: Props) {
             className="text-xs text-muted-foreground whitespace-nowrap"
             data-testid="system-licenses-count"
           >
-            {visible.length} of {entries.length}
+            {t("system:licensesCount", { visible: visible.length, total: entries.length })}
           </p>
         </div>
         <div
@@ -150,7 +155,7 @@ export function LicensesList({ entries }: Props) {
               className="py-6 text-center text-sm text-muted-foreground"
               data-testid="system-licenses-empty"
             >
-              No entries match the filter.
+              {t("system:licensesEmpty")}
             </p>
           )}
         </div>

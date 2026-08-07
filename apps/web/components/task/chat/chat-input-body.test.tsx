@@ -54,6 +54,7 @@ function props(overrides: Partial<ChatInputBodyProps> = {}): ChatInputBodyProps 
       inputPlaceholder: "Ask to make changes",
       isDisabled: false,
       submitDisabled: false,
+      hasPendingAttachmentUploads: false,
       planModeEnabled: false,
       planModeAvailable: true,
       mcpServers: [],

@@ -11,6 +11,7 @@ import (
 	taskdto "github.com/kandev/kandev/internal/task/dto"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
 	taskservice "github.com/kandev/kandev/internal/task/service"
+	"github.com/kandev/kandev/internal/task/statussummary"
 	userdto "github.com/kandev/kandev/internal/user/dto"
 	"github.com/kandev/kandev/internal/webapp"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
@@ -330,9 +331,21 @@ func (b bootStateBuilder) addQuickChatState(
 		b.logBootError("list quick-chat sessions", err)
 		return
 	}
+	terminalTabs := []any{}
+	if b.p.quickTerminalSvc != nil {
+		if tabs, terminalErr := b.p.quickTerminalSvc.List(ctx, workspaceID); terminalErr != nil {
+			b.logBootError("list quick-terminal tabs", terminalErr)
+		} else {
+			terminalTabs = make([]any, 0, len(tabs))
+			for _, tab := range tabs {
+				terminalTabs = append(terminalTabs, tab)
+			}
+		}
+	}
 	state["quickChat"] = map[string]any{
 		"isOpen":          false,
 		"sessions":        quickChat.sessions,
+		"terminalTabs":    terminalTabs,
 		"activeSessionId": nil,
 	}
 	mergeBootTaskSessionItems(state, quickChat.taskSessions)
@@ -412,7 +425,11 @@ func (b bootStateBuilder) quickChatSessions(ctx context.Context, workspaceID str
 	taskSessions := make(map[string]taskdto.TaskSessionDTO, len(items))
 	for _, item := range items {
 		sessions = append(sessions, mapQuickChatSessionState(item))
-		taskSessions[item.SessionID] = taskdto.FromTaskSession(item.Session)
+		sessionDTO := taskdto.FromTaskSession(item.Session)
+		if b.p.orchestratorSvc != nil {
+			taskdto.EnrichCancellationPending(&sessionDTO, b.p.orchestratorSvc)
+		}
+		taskSessions[item.SessionID] = sessionDTO
 	}
 	return quickChatBootState{sessions: sessions, taskSessions: taskSessions}, nil
 }
@@ -611,20 +628,33 @@ func (b bootStateBuilder) taskDTOsWithSessionInfo(ctx context.Context, tasks []*
 			taskIDs = append(taskIDs, task.ID)
 		}
 	}
+	statusSummaries, summaryErr := b.p.taskSvc.GetTaskStatusSummaries(ctx, taskIDs)
+	if summaryErr != nil {
+		b.logBootError("batch task status summaries", summaryErr)
+		statusSummaries = map[string]*statussummary.TaskStatusSummary{}
+	}
 	sessionsByTask, err := b.p.taskSvc.BatchGetSessionsForTasks(ctx, taskIDs)
 	if err != nil {
 		b.logBootError("batch task detail sessions", err)
-		return taskDTOs(tasks)
+		return taskDTOsWithStatusSummaries(tasks, statusSummaries)
 	}
 	primaryInfoByTask, err := b.p.taskSvc.GetPrimarySessionInfoForTasks(ctx, taskIDs)
 	if err != nil {
 		b.logBootError("get task detail primary session info", err)
-		return taskDTOs(tasks)
+		return taskDTOsWithStatusSummaries(tasks, statusSummaries)
 	}
-	pendingActionsBySession, err := b.bootPendingActionsForInputCapableSessions(ctx, sessionsByTask)
-	if err != nil {
-		b.logBootError("get task detail pending actions", err)
+	pendingActionsBySession, pendingErr := b.bootPendingActionsForInputCapableSessions(ctx, sessionsByTask)
+	if pendingErr != nil {
+		b.logBootError("get task detail pending actions", pendingErr)
 		pendingActionsBySession = map[string]taskmodels.TaskPendingAction{}
+	}
+	if summaryErr == nil && pendingErr == nil {
+		statusSummaries, err = b.p.taskSvc.HydrateMissingTaskStatusSummaries(
+			ctx, tasks, sessionsByTask, pendingActionsBySession, statusSummaries,
+		)
+		if err != nil {
+			b.logBootError("repair missing task status summaries", err)
+		}
 	}
 	result := make([]taskdto.TaskDTO, 0, len(tasks))
 	for _, task := range tasks {
@@ -667,6 +697,20 @@ func (b bootStateBuilder) taskDTOsWithSessionInfo(ctx context.Context, tasks []*
 		if b.p.orchestratorSvc != nil {
 			taskdto.EnrichTaskForegroundActivity(&dto, sessions, b.p.orchestratorSvc)
 		}
+		dto.StatusSummary = statusSummaries[task.ID]
+		result = append(result, dto)
+	}
+	return result
+}
+
+func taskDTOsWithStatusSummaries(tasks []*taskmodels.Task, summaries map[string]*statussummary.TaskStatusSummary) []taskdto.TaskDTO {
+	result := make([]taskdto.TaskDTO, 0, len(tasks))
+	for _, task := range tasks {
+		if task == nil {
+			continue
+		}
+		dto := taskdto.FromTask(task)
+		dto.StatusSummary = summaries[task.ID]
 		result = append(result, dto)
 	}
 	return result
@@ -930,6 +974,14 @@ func (b bootStateBuilder) addTaskDetailSessionsState(
 	worktreesBySession := make(map[string]any)
 	sessionModelsByID := make(map[string]any)
 	sessionMCPStatusByID := make(map[string]any)
+	pendingActionsBySession, err := b.bootPendingActionsForInputCapableSessions(
+		ctx,
+		map[string][]*taskmodels.TaskSession{taskID: sessions},
+	)
+	if err != nil {
+		b.logBootError("get task detail session pending actions", err)
+		pendingActionsBySession = map[string]taskmodels.TaskPendingAction{}
+	}
 	for _, session := range sessions {
 		if session == nil {
 			continue
@@ -941,7 +993,9 @@ func (b bootStateBuilder) addTaskDetailSessionsState(
 		// (ADR-0049). No-op for non-RUNNING sessions.
 		if b.p.orchestratorSvc != nil {
 			taskdto.EnrichForegroundActivity(&dto, b.p.orchestratorSvc)
+			taskdto.EnrichCancellationPending(&dto, b.p.orchestratorSvc)
 		}
+		dto.PendingAction = bootPendingActionPtr(&session.ID, pendingActionsBySession)
 		sessionItems[session.ID] = dto
 		sessionList = append(sessionList, dto)
 		if session.TaskEnvironmentID != "" {

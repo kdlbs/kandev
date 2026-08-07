@@ -17,6 +17,7 @@ import {
   DrawerTitle,
 } from "@kandev/ui/drawer";
 import { cn } from "@kandev/ui/lib/utils";
+import { t } from "@/lib/i18n";
 
 export const CHANGE_REQUEST_STATUS_CHIP_CLASS =
   "cursor-pointer inline-flex items-center gap-1 rounded-md px-1 py-0.5 text-xs";
@@ -102,8 +103,11 @@ export function ChangeRequestStatusChipHoverArea({
   );
 }
 
-export function useChangeRequestStatusChipTriggerGuard() {
-  const ref = useRef<HTMLButtonElement>(null);
+export function useChangeRequestStatusChipTriggerGuard(externalRef?: {
+  current: HTMLButtonElement | null;
+}) {
+  const fallbackRef = useRef<HTMLButtonElement>(null);
+  const ref = externalRef ?? fallbackRef;
   const onPointerDownOutside = useCallback(
     (event: { target: EventTarget | null; preventDefault: () => void }) => {
       if (ref.current?.contains(event.target as Node)) event.preventDefault();
@@ -122,6 +126,7 @@ export function ChangeRequestStatusDrawerContent({
   description,
   children,
   footer,
+  closeLabel,
 }: {
   testId: string;
   headerTestId?: string;
@@ -131,6 +136,7 @@ export function ChangeRequestStatusDrawerContent({
   description: string;
   children: ReactNode;
   footer?: ReactNode;
+  closeLabel?: string;
 }) {
   return (
     <DrawerContent data-testid={testId} className="max-h-[80dvh] flex flex-col">
@@ -145,7 +151,7 @@ export function ChangeRequestStatusDrawerContent({
             data-testid={closeTestId}
             variant="ghost"
             size="icon-sm"
-            aria-label="Close PR status"
+            aria-label={closeLabel ?? t("integrations:closePullRequestStatus")}
             className="cursor-pointer"
           >
             <IconX className="h-4 w-4" />

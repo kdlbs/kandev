@@ -19,9 +19,11 @@ import { Badge } from "@kandev/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@kandev/ui/dialog";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { listPorts, listTunnels, type ListeningPort } from "@/lib/api/domains/port-api";
+import { copyToClipboard } from "@/lib/utils/copy-to-clipboard";
 import { useTunnelActions } from "./use-tunnel-actions";
 import { getBackendConfig } from "@/lib/config";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast/sonner";
+import { useTranslation } from "react-i18next";
 
 function buildPortProxyUrl(sessionId: string, port: number): string {
   const backendUrl = getBackendConfig().apiBaseUrl;
@@ -48,11 +50,13 @@ function InfoTip({ text }: { text: string }) {
 }
 
 function UrlActions({ url }: { url: string }) {
+  const { t } = useTranslation();
   const [copied, setCopied] = useState(false);
-  const handleCopy = useCallback(() => {
-    navigator.clipboard?.writeText(url);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 1500);
+  const handleCopy = useCallback(async () => {
+    if (await copyToClipboard(url)) {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    }
   }, [url]);
 
   return (
@@ -72,7 +76,7 @@ function UrlActions({ url }: { url: string }) {
             )}
           </Button>
         </TooltipTrigger>
-        <TooltipContent>Copy URL</TooltipContent>
+        <TooltipContent>{t("task:copyUrl")}</TooltipContent>
       </Tooltip>
       <Tooltip>
         <TooltipTrigger asChild>
@@ -82,7 +86,7 @@ function UrlActions({ url }: { url: string }) {
             </a>
           </Button>
         </TooltipTrigger>
-        <TooltipContent>Open in new tab</TooltipContent>
+        <TooltipContent>{t("task:openInNewTab")}</TooltipContent>
       </Tooltip>
     </div>
   );
@@ -99,6 +103,7 @@ function TunnelToggleButton({
   onStop: () => void;
   onToggleForm: () => void;
 }) {
+  const { t } = useTranslation();
   const Icon = isTunnelActive ? IconPlugConnectedX : IconPlugConnected;
   return (
     <Tooltip>
@@ -117,7 +122,9 @@ function TunnelToggleButton({
           )}
         </Button>
       </TooltipTrigger>
-      <TooltipContent>{isTunnelActive ? "Stop tunnel" : "Start tunnel"}</TooltipContent>
+      <TooltipContent>
+        {isTunnelActive ? t("task:stopTunnel") : t("task:startTunnel")}
+      </TooltipContent>
     </Tooltip>
   );
 }
@@ -148,17 +155,18 @@ function PortUrlRow({
 }
 
 function PortUrlRows({ proxyUrl, tunnelUrl }: { proxyUrl: string; tunnelUrl: string | null }) {
+  const { t } = useTranslation();
   return (
     <div className="space-y-1 overflow-hidden">
       <PortUrlRow
-        label="Proxy"
-        tip="Path-based proxy. Works for APIs but may break web apps that expect to be served at /."
+        label={t("task:proxy")}
+        tip={t("task:pathBasedProxyWorksForApis")}
         url={proxyUrl}
       />
       {tunnelUrl && (
         <PortUrlRow
-          label="Tunnel"
-          tip="Dedicated port tunnel. App is served at /, so assets and routing work correctly."
+          label={t("task:tunnel")}
+          tip={t("task:dedicatedPortTunnelAppIsServed")}
           url={tunnelUrl}
           variant="default"
         />
@@ -172,7 +180,7 @@ type PortRowProps = {
   address?: string;
   process?: string;
   sessionId: string;
-  badge: "Detected" | "Manual";
+  badge: "detected" | "manual";
   tunnelPort?: number;
   tunnelPending?: boolean;
   onTunnelStart: (port: number, requestedPort?: number) => void;
@@ -190,6 +198,7 @@ function PortRow({
   onTunnelStart,
   onTunnelStop,
 }: PortRowProps) {
+  const { t } = useTranslation();
   const [showTunnelForm, setShowTunnelForm] = useState(false);
   const [tunnelPortInput, setTunnelPortInput] = useState("");
   const proxyUrl = buildPortProxyUrl(sessionId, port);
@@ -202,7 +211,7 @@ function PortRow({
       tunnelPortInput &&
       (isNaN(requestedPort!) || requestedPort! < 1 || requestedPort! > 65535)
     ) {
-      toast.error("Enter a valid port (1-65535) or leave blank for random");
+      toast.error(t("task:enterAValidPort165535"));
       return;
     }
     onTunnelStart(port, requestedPort);
@@ -225,10 +234,10 @@ function PortRow({
             <span className="text-xs text-muted-foreground">{address}</span>
           )}
           <Badge
-            variant={badge === "Detected" ? "secondary" : "outline"}
+            variant={badge === "detected" ? "secondary" : "outline"}
             className="text-[10px] px-1.5 py-0"
           >
-            {badge}
+            {badge === "detected" ? t("task:detected") : t("task:manual")}
           </Badge>
         </div>
         <div className="flex items-center gap-0.5">
@@ -245,7 +254,7 @@ function PortRow({
         <div className="flex items-center gap-2">
           <Input
             type="number"
-            placeholder="Random"
+            placeholder={t("task:random")}
             value={tunnelPortInput}
             onChange={(e) => setTunnelPortInput(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), handleStartTunnel())}
@@ -260,9 +269,9 @@ function PortRow({
             onClick={handleStartTunnel}
             disabled={tunnelPending}
           >
-            Start
+            {t("task:start2")}
           </Button>
-          <InfoTip text="Specify a local port or leave blank for a random one. For Docker/K8s, use a port you've pre-exposed." />
+          <InfoTip text={t("task:specifyALocalPortOrLeave")} />
         </div>
       )}
 
@@ -294,6 +303,7 @@ function PortListSection({
   onTunnelStart: (port: number, requestedPort?: number) => void;
   onTunnelStop: (port: number) => void;
 }) {
+  const { t } = useTranslation();
   const detectedPortNumbers = new Set(detectedPorts.map((p) => p.port));
   const uniqueManualPorts = manualPorts.filter((p) => !detectedPortNumbers.has(p));
 
@@ -301,8 +311,8 @@ function PortListSection({
     <div className="space-y-2">
       <div className="flex items-center justify-between">
         <span className="text-sm font-medium flex items-center gap-1.5">
-          Listening Ports
-          <InfoTip text="TCP ports with active listeners inside the remote executor. Click refresh to re-scan." />
+          {t("task:listeningPorts")}
+          <InfoTip text={t("task:tcpPortsWithActiveListenersInside")} />
         </span>
         <Button
           size="sm"
@@ -317,16 +327,18 @@ function PortListSection({
           ) : (
             <IconRefresh className="h-3.5 w-3.5" />
           )}
-          Refresh
+          {t("task:refresh")}
         </Button>
       </div>
 
       {!loaded && !loading && (
-        <p className="text-xs text-muted-foreground">Click refresh to detect listening ports.</p>
+        <p className="text-xs text-muted-foreground">
+          {t("task:clickRefreshToDetectListeningPorts")}
+        </p>
       )}
 
       {loaded && detectedPorts.length === 0 && !loading && (
-        <p className="text-xs text-muted-foreground">No listening ports detected.</p>
+        <p className="text-xs text-muted-foreground">{t("task:noListeningPortsDetected")}</p>
       )}
 
       <div className="space-y-1">
@@ -337,7 +349,7 @@ function PortListSection({
             address={p.address}
             process={p.process}
             sessionId={sessionId}
-            badge="Detected"
+            badge="detected"
             tunnelPort={activeTunnels.get(p.port)}
             tunnelPending={pendingTunnels.has(p.port)}
             onTunnelStart={onTunnelStart}
@@ -349,7 +361,7 @@ function PortListSection({
             key={`m-${port}`}
             port={port}
             sessionId={sessionId}
-            badge="Manual"
+            badge="manual"
             tunnelPort={activeTunnels.get(port)}
             tunnelPending={pendingTunnels.has(port)}
             onTunnelStart={onTunnelStart}
@@ -362,12 +374,13 @@ function PortListSection({
 }
 
 function ManualPortInput({ onAdd }: { onAdd: (port: number) => void }) {
+  const { t } = useTranslation();
   const [value, setValue] = useState("");
 
   const handleAdd = useCallback(() => {
     const port = parseInt(value, 10);
     if (isNaN(port) || port < 1 || port > 65535) {
-      toast.error("Enter a valid port (1-65535)");
+      toast.error(t("task:enterAValidPort1655352"));
       return;
     }
     onAdd(port);
@@ -377,14 +390,14 @@ function ManualPortInput({ onAdd }: { onAdd: (port: number) => void }) {
   return (
     <div className="space-y-2">
       <span className="text-sm font-medium flex items-center gap-1.5">
-        Add Port Manually
-        <InfoTip text="Add a port that isn't auto-detected. Useful for services not yet started." />
+        {t("task:addPortManually")}
+        <InfoTip text={t("task:addAPortThatIsnT")} />
       </span>
       <div className="flex gap-2">
         <Input
           data-testid="port-forward-port-input"
           type="number"
-          placeholder="Port number"
+          placeholder={t("task:portNumber")}
           value={value}
           onChange={(e) => setValue(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), handleAdd())}
@@ -400,7 +413,7 @@ function ManualPortInput({ onAdd }: { onAdd: (port: number) => void }) {
           onClick={handleAdd}
         >
           <IconPlus className="h-3.5 w-3.5" />
-          Add
+          {t("task:add")}
         </Button>
       </div>
     </div>
@@ -416,6 +429,7 @@ function PortForwardDialogContent({
   activeTunnels: Map<number, number>;
   setActiveTunnels: (updater: (prev: Map<number, number>) => Map<number, number>) => void;
 }) {
+  const { t } = useTranslation();
   const [detectedPorts, setDetectedPorts] = useState<ListeningPort[]>([]);
   const [manualPorts, setManualPorts] = useState<number[]>([]);
   const [loading, setLoading] = useState(false);
@@ -455,7 +469,7 @@ function PortForwardDialogContent({
   const handleAddManual = useCallback(
     (port: number) => {
       if (manualPorts.includes(port)) {
-        toast.error("Port already added");
+        toast.error(t("task:portAlreadyAdded"));
         return;
       }
       setManualPorts((prev) => [...prev, port]);
@@ -472,7 +486,7 @@ function PortForwardDialogContent({
       <DialogHeader>
         <DialogTitle className="flex items-center gap-2">
           <IconNetwork className="h-5 w-5" />
-          Port Forwarding
+          {t("task:portForwarding")}
         </DialogTitle>
       </DialogHeader>
       <div className="space-y-4 min-w-0 max-h-[60vh] overflow-y-auto">
@@ -503,6 +517,7 @@ export function PortForwardButton({
   sessionId?: string | null;
   isAgentctlReady?: boolean;
 }) {
+  const { t } = useTranslation();
   const [activeTunnels, setActiveTunnelsRaw] = useState<Map<number, number>>(new Map());
   const hasActiveTunnels = activeTunnels.size > 0;
 
@@ -539,8 +554,8 @@ export function PortForwardButton({
         </TooltipTrigger>
         <TooltipContent>
           {hasActiveTunnels
-            ? `Port Forwarding (${activeTunnels.size} tunnel${activeTunnels.size > 1 ? "s" : ""} active)`
-            : "Port Forwarding"}
+            ? t("task:portForwardingTunnelActive", { count: activeTunnels.size })
+            : t("task:portForwarding")}
         </TooltipContent>
       </Tooltip>
       <PortForwardDialogContent

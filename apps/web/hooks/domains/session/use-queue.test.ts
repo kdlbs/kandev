@@ -5,14 +5,18 @@ import type { EntityReference } from "@/lib/types/entity-reference";
 
 const queueApiMock = vi.hoisted(() => {
   class QueueEntryNotFoundError extends Error {}
+  class QueueSendNowError extends Error {}
   return {
     QueueEntryNotFoundError,
+    QueueSendNowError,
     queueMessage: vi.fn(),
     clearQueue: vi.fn(),
     drainQueuedMessage: vi.fn(),
     getQueueStatus: vi.fn(),
     updateQueuedMessage: vi.fn(),
     removeQueuedEntry: vi.fn(),
+    mergeQueuedEntry: vi.fn(),
+    sendQueuedNow: vi.fn(),
   };
 });
 
@@ -23,6 +27,7 @@ type MockQueueState = {
     isLoading: Record<string, boolean>;
   };
   connection: { status: string };
+  taskSessions: { items: Record<string, { cancellation_pending?: boolean }> };
   setQueueEntries: ReturnType<typeof vi.fn>;
   removeQueueEntry: ReturnType<typeof vi.fn>;
   setQueueLoading: ReturnType<typeof vi.fn>;
@@ -80,6 +85,7 @@ function resetMockState() {
       isLoading: {},
     },
     connection: { status: "connected" },
+    taskSessions: { items: {} },
     setQueueEntries: vi.fn(),
     removeQueueEntry: vi.fn(),
     setQueueLoading: vi.fn(),
@@ -200,6 +206,294 @@ describe("useQueue", () => {
       content: "reference removed",
       attachments: undefined,
       entity_references: [],
+    });
+  });
+});
+
+describe("useQueue context file metadata and Send Now", () => {
+  beforeEach(() => {
+    resetMockState();
+    setDocumentVisibility("visible");
+    queueApiMock.getQueueStatus.mockResolvedValue({ entries: [], count: 0, max: 10 });
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.clearAllMocks();
+  });
+
+  it("forwards context file metadata with queued messages", async () => {
+    queueApiMock.queueMessage.mockResolvedValue(entry());
+    const { result } = renderHook(() => useQueue(SESSION_ID));
+    await waitFor(() => expect(queueApiMock.getQueueStatus).toHaveBeenCalled());
+    queueApiMock.queueMessage.mockClear();
+
+    await act(async () => {
+      await result.current.queue({
+        taskId: TASK_ID,
+        content: "queued context",
+        contextFilesMeta: [{ path: "src/components", name: "components", is_directory: true }],
+      } as never);
+    });
+
+    expect(queueApiMock.queueMessage).toHaveBeenCalledWith({
+      session_id: SESSION_ID,
+      task_id: TASK_ID,
+      content: "queued context",
+      model: undefined,
+      plan_mode: undefined,
+      attachments: undefined,
+      entity_references: undefined,
+      context_files: [{ path: "src/components", name: "components", is_directory: true }],
+    });
+  });
+
+  it("sends one exact entry now and refetches authoritative status", async () => {
+    queueApiMock.sendQueuedNow.mockResolvedValue({
+      session_id: SESSION_ID,
+      dispatched: true,
+      sent_count: 1,
+    });
+    const { result } = renderHook(() => useQueue(SESSION_ID));
+    await waitFor(() => expect(queueApiMock.getQueueStatus).toHaveBeenCalled());
+    queueApiMock.getQueueStatus.mockClear();
+
+    await act(async () => {
+      await result.current.sendEntryNow("q-2");
+    });
+
+    expect(queueApiMock.sendQueuedNow).toHaveBeenCalledWith({
+      session_id: SESSION_ID,
+      scope: "entry",
+      entry_id: "q-2",
+    });
+    expect(queueApiMock.getQueueStatus).toHaveBeenCalledWith(SESSION_ID);
+  });
+
+  it("refetches after a raced Send Now failure and preserves the typed error", async () => {
+    queueApiMock.sendQueuedNow.mockRejectedValueOnce(new queueApiMock.QueueSendNowError());
+    const { result } = renderHook(() => useQueue(SESSION_ID));
+    await waitFor(() => expect(queueApiMock.getQueueStatus).toHaveBeenCalled());
+    queueApiMock.getQueueStatus.mockClear();
+
+    await act(async () => {
+      await expect(result.current.sendAllNow()).rejects.toBeInstanceOf(
+        queueApiMock.QueueSendNowError,
+      );
+    });
+
+    expect(queueApiMock.sendQueuedNow).toHaveBeenCalledWith({
+      session_id: SESSION_ID,
+      scope: "all",
+    });
+    expect(queueApiMock.getQueueStatus).toHaveBeenCalledWith(SESSION_ID);
+  });
+
+  it("exposes authoritative cancellation progress for disabling controls", async () => {
+    mockState.taskSessions.items[SESSION_ID] = { cancellation_pending: true };
+    const { result } = renderHook(() => useQueue(SESSION_ID));
+    await waitFor(() => expect(queueApiMock.getQueueStatus).toHaveBeenCalled());
+
+    expect(result.current.cancellationPending).toBe(true);
+  });
+});
+
+describe("useQueue mergeEntry", () => {
+  beforeEach(() => {
+    resetMockState();
+    setDocumentVisibility("visible");
+    queueApiMock.getQueueStatus.mockResolvedValue({ entries: [], count: 0, max: 10 });
+  });
+
+  it("merges an entry and refetches the queue", async () => {
+    queueApiMock.mergeQueuedEntry.mockResolvedValue({ entry_id: "q-1" });
+    const { result } = renderHook(() => useQueue(SESSION_ID));
+    await waitFor(() => expect(queueApiMock.getQueueStatus).toHaveBeenCalled());
+    queueApiMock.getQueueStatus.mockClear();
+
+    await act(async () => {
+      await result.current.mergeEntry("q-2");
+    });
+
+    expect(queueApiMock.mergeQueuedEntry).toHaveBeenCalledWith({
+      session_id: SESSION_ID,
+      entry_id: "q-2",
+    });
+    expect(queueApiMock.getQueueStatus).toHaveBeenCalledWith(SESSION_ID);
+  });
+
+  it("forwards an explicit user_id on merge", async () => {
+    queueApiMock.mergeQueuedEntry.mockResolvedValue({ entry_id: "q-1" });
+    const { result } = renderHook(() => useQueue(SESSION_ID));
+    await waitFor(() => expect(queueApiMock.getQueueStatus).toHaveBeenCalled());
+
+    await act(async () => {
+      await result.current.mergeEntry("q-2", "alice");
+    });
+
+    expect(queueApiMock.mergeQueuedEntry).toHaveBeenCalledWith({
+      session_id: SESSION_ID,
+      entry_id: "q-2",
+      user_id: "alice",
+    });
+  });
+
+  it("refetches the queue when the merge target was already drained", async () => {
+    queueApiMock.mergeQueuedEntry.mockRejectedValue(new queueApiMock.QueueEntryNotFoundError());
+    const { result } = renderHook(() => useQueue(SESSION_ID));
+    await waitFor(() => expect(queueApiMock.getQueueStatus).toHaveBeenCalled());
+    queueApiMock.getQueueStatus.mockClear();
+
+    await act(async () => {
+      await expect(result.current.mergeEntry("q-2")).rejects.toThrow(
+        queueApiMock.QueueEntryNotFoundError,
+      );
+    });
+
+    expect(queueApiMock.getQueueStatus).toHaveBeenCalledWith(SESSION_ID);
+  });
+});
+
+describe("useQueue clearAll", () => {
+  beforeEach(() => {
+    resetMockState();
+    setDocumentVisibility("visible");
+    queueApiMock.clearQueue.mockReset();
+    queueApiMock.getQueueStatus.mockResolvedValue({ entries: [], count: 0, max: 10 });
+    queueApiMock.clearQueue.mockResolvedValue(undefined);
+  });
+
+  it("refetches authoritative status after a successful clear", async () => {
+    const { result } = renderHook(() => useQueue(SESSION_ID));
+    await waitFor(() => expect(queueApiMock.getQueueStatus).toHaveBeenCalled());
+    queueApiMock.getQueueStatus.mockClear();
+
+    await act(async () => {
+      await result.current.clearAll();
+    });
+
+    expect(queueApiMock.clearQueue).toHaveBeenCalledWith(SESSION_ID);
+    expect(queueApiMock.getQueueStatus).toHaveBeenCalledWith(SESSION_ID);
+  });
+
+  it("refetches authoritative status and rethrows when clear fails", async () => {
+    queueApiMock.clearQueue.mockRejectedValueOnce(new Error("clear failed"));
+    const authoritative = entry({ id: "still-queued" });
+    const { result } = renderHook(() => useQueue(SESSION_ID));
+    await waitFor(() => expect(queueApiMock.getQueueStatus).toHaveBeenCalled());
+    queueApiMock.getQueueStatus.mockClear();
+    queueApiMock.getQueueStatus.mockResolvedValueOnce({
+      entries: [authoritative],
+      count: 1,
+      max: 10,
+    });
+
+    await act(async () => {
+      await expect(result.current.clearAll()).rejects.toThrow("clear failed");
+    });
+
+    expect(queueApiMock.getQueueStatus).toHaveBeenCalledWith(SESSION_ID);
+    expect(mockState.setQueueEntries).toHaveBeenCalledWith(SESSION_ID, [authoritative], {
+      count: 1,
+      max: 10,
+    });
+  });
+
+  it("discards an in-flight refetch that resolves after the clear", async () => {
+    const { result } = renderHook(() => useQueue(SESSION_ID));
+    await waitFor(() => expect(queueApiMock.getQueueStatus).toHaveBeenCalled());
+
+    // A refetch starts before the clear and resolves afterwards with the
+    // pre-clear entries.
+    let resolveStale: (status: { entries: QueuedMessage[]; count: number; max: number }) => void;
+    queueApiMock.getQueueStatus.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveStale = resolve;
+        }),
+    );
+    let staleRefetch: Promise<void>;
+    act(() => {
+      staleRefetch = result.current.refetch();
+    });
+    expect(mockState.setQueueEntries).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      await result.current.clearAll();
+    });
+
+    await act(async () => {
+      resolveStale!({ entries: [entry({ id: "pre-clear" })], count: 1, max: 10 });
+      await staleRefetch!;
+    });
+
+    // The stale pre-clear snapshot must never be applied; the empty snapshot
+    // from clearAll stays the last one written.
+    expect(mockState.setQueueEntries).not.toHaveBeenCalledWith(
+      SESSION_ID,
+      [entry({ id: "pre-clear" })],
+      { count: 1, max: 10 },
+    );
+  });
+});
+
+describe("useQueue removeEntry", () => {
+  beforeEach(() => {
+    resetMockState();
+    setDocumentVisibility("visible");
+    queueApiMock.removeQueuedEntry.mockReset();
+    queueApiMock.getQueueStatus.mockResolvedValue({ entries: [], count: 0, max: 10 });
+  });
+
+  it("optimistically removes then refetches authoritative status after success", async () => {
+    queueApiMock.removeQueuedEntry.mockResolvedValueOnce({ entry_id: "q-1" });
+    const { result } = renderHook(() => useQueue(SESSION_ID));
+    await waitFor(() => expect(queueApiMock.getQueueStatus).toHaveBeenCalled());
+    queueApiMock.getQueueStatus.mockClear();
+
+    await act(async () => {
+      await result.current.removeEntry("q-1");
+    });
+
+    expect(mockState.removeQueueEntry).toHaveBeenCalledWith(SESSION_ID, "q-1");
+    expect(queueApiMock.getQueueStatus).toHaveBeenCalledWith(SESSION_ID);
+  });
+
+  it("refetches after a drain race without surfacing a benign error", async () => {
+    queueApiMock.removeQueuedEntry.mockRejectedValueOnce(
+      new queueApiMock.QueueEntryNotFoundError(),
+    );
+    const { result } = renderHook(() => useQueue(SESSION_ID));
+    await waitFor(() => expect(queueApiMock.getQueueStatus).toHaveBeenCalled());
+    queueApiMock.getQueueStatus.mockClear();
+
+    await act(async () => {
+      await expect(result.current.removeEntry("q-1")).resolves.toBeUndefined();
+    });
+
+    expect(queueApiMock.getQueueStatus).toHaveBeenCalledWith(SESSION_ID);
+  });
+
+  it("refetches and rethrows a failed removal", async () => {
+    queueApiMock.removeQueuedEntry.mockRejectedValueOnce(new Error("remove failed"));
+    const authoritative = entry({ id: "q-1" });
+    const { result } = renderHook(() => useQueue(SESSION_ID));
+    await waitFor(() => expect(queueApiMock.getQueueStatus).toHaveBeenCalled());
+    queueApiMock.getQueueStatus.mockClear();
+    queueApiMock.getQueueStatus.mockResolvedValueOnce({
+      entries: [authoritative],
+      count: 1,
+      max: 10,
+    });
+
+    await act(async () => {
+      await expect(result.current.removeEntry("q-1")).rejects.toThrow("remove failed");
+    });
+
+    expect(queueApiMock.getQueueStatus).toHaveBeenCalledWith(SESSION_ID);
+    expect(mockState.setQueueEntries).toHaveBeenCalledWith(SESSION_ID, [authoritative], {
+      count: 1,
+      max: 10,
     });
   });
 });
