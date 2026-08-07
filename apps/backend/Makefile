@@ -286,7 +286,7 @@ test:
 ## runtime.GOOS guards in source.
 test-windows:
 	@echo "Running Windows-sensitive packages..."
-	$(CGO_PREFIX) $(GO) test -tags fts5 -v ./internal/agentctl/server/process/... ./internal/agent/runtime/agentctl/launcher/...
+	$(CGO_PREFIX) $(GO) test -tags fts5 -v ./internal/common/netutil ./internal/agentctl/server/process/... ./internal/agentctl/server/instance/... ./internal/agent/runtime/agentctl/launcher/... ./internal/gateway/websocket/...
 
 ## Verify run/dev/start-debug expand to the right per-shell command line across
 ## native Windows (cmd), Git Bash/MSYS, and Unix — the Make-target dispatch the

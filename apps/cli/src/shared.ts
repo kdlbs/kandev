@@ -6,10 +6,12 @@
  */
 
 import type { ChildProcess } from "node:child_process";
+import crypto from "node:crypto";
+import type { BackendPortSource } from "./args";
 import os from "node:os";
 
 import { DEFAULT_AGENTCTL_PORT, DEFAULT_BACKEND_PORT, DEFAULT_WEB_PORT } from "./constants";
-import { pickAvailablePort } from "./ports";
+import { assertPortAvailable, pickAvailablePort } from "./ports";
 import { createProcessSupervisor } from "./process";
 
 export type PortConfig = {
@@ -19,6 +21,12 @@ export type PortConfig = {
   backendUrl: string;
 };
 
+export type PortSelection = {
+  backendPort?: number;
+  backendPortSource?: BackendPortSource;
+  webPort?: number;
+};
+
 /**
  * Picks available ports for all services, using provided values or finding free ports.
  *
@@ -26,7 +34,14 @@ export type PortConfig = {
  * @param webPort - Optional preferred web port
  * @returns Resolved ports for all services
  */
-export async function pickPorts(backendPort?: number, webPort?: number): Promise<PortConfig> {
+export async function pickPorts({
+  backendPort,
+  backendPortSource,
+  webPort,
+}: PortSelection = {}): Promise<PortConfig> {
+  if (backendPort !== undefined) {
+    await assertPortAvailable(backendPort, backendPortSource);
+  }
   const resolvedBackendPort = backendPort ?? (await pickAvailablePort(DEFAULT_BACKEND_PORT));
   const resolvedWebPort = webPort ?? (await pickAvailablePort(DEFAULT_WEB_PORT));
   const agentctlPort = await pickAvailablePort(DEFAULT_AGENTCTL_PORT);
@@ -39,7 +54,13 @@ export async function pickPorts(backendPort?: number, webPort?: number): Promise
   };
 }
 
-export async function pickBackendPorts(backendPort?: number): Promise<PortConfig> {
+export async function pickBackendPorts({
+  backendPort,
+  backendPortSource,
+}: Pick<PortSelection, "backendPort" | "backendPortSource"> = {}): Promise<PortConfig> {
+  if (backendPort !== undefined) {
+    await assertPortAvailable(backendPort, backendPortSource);
+  }
   const resolvedBackendPort = backendPort ?? (await pickAvailablePort(DEFAULT_BACKEND_PORT));
   const agentctlPort = await pickAvailablePort(DEFAULT_AGENTCTL_PORT);
 
@@ -81,6 +102,7 @@ export function buildBackendEnv(options: BackendEnvOptions): NodeJS.ProcessEnv {
     ...(logLevel ? { KANDEV_LOG_LEVEL: logLevel } : {}),
     KANDEV_CONSOLE_LOG_LEVEL: consoleLogLevel,
     ...extra,
+    KANDEV_DESKTOP_HEALTH_TOKEN: crypto.randomBytes(32).toString("hex"),
   };
   if (!webProxy) {
     delete env.KANDEV_WEB_INTERNAL_URL;

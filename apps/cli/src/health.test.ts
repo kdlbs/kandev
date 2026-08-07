@@ -57,11 +57,33 @@ describe("waitForHealth", () => {
 
   it("returns once /health responds ok", async () => {
     const proc: ProcState = { exitCode: null };
-    fetchMock
-      .mockRejectedValueOnce(new Error("ECONNREFUSED"))
-      .mockResolvedValue({ ok: true } as Response);
+    fetchMock.mockRejectedValueOnce(new Error("ECONNREFUSED")).mockResolvedValue({
+      ok: true,
+      headers: new Headers({ "X-Kandev-Desktop-Health-Token": "expected" }),
+    } as Response);
 
-    await expect(waitForHealth("http://localhost:8080", proc, 1000)).resolves.toBeUndefined();
+    await expect(
+      waitForHealth("http://localhost:8080", proc, 1000, "expected"),
+    ).resolves.toBeUndefined();
+  });
+
+  it("ignores a successful response with a missing or mismatched launch token", async () => {
+    const proc: ProcState = { exitCode: null };
+    fetchMock
+      .mockResolvedValueOnce({ ok: true, headers: new Headers() } as Response)
+      .mockResolvedValueOnce({
+        ok: true,
+        headers: new Headers({ "X-Kandev-Desktop-Health-Token": "wrong" }),
+      } as Response)
+      .mockResolvedValue({
+        ok: true,
+        headers: new Headers({ "X-Kandev-Desktop-Health-Token": "expected" }),
+      } as Response);
+
+    await expect(
+      waitForHealth("http://localhost:8080", proc, 1500, "expected"),
+    ).resolves.toBeUndefined();
+    expect(fetchMock).toHaveBeenCalledTimes(3);
   });
 
   it("includes the exit code and invokes onFailure when backend exits early", async () => {
@@ -69,7 +91,7 @@ describe("waitForHealth", () => {
     fetchMock.mockRejectedValue(new Error("ECONNREFUSED"));
     const onFailure = vi.fn();
 
-    await expect(waitForHealth("http://localhost:8080", proc, 1000, onFailure)).rejects.toThrow(
+    await expect(waitForHealth("http://localhost:8080", proc, 1000, "", onFailure)).rejects.toThrow(
       "Backend exited (code 2) before healthcheck passed",
     );
     expect(onFailure).toHaveBeenCalledTimes(1);
@@ -80,7 +102,7 @@ describe("waitForHealth", () => {
     fetchMock.mockRejectedValue(new Error("ECONNREFUSED"));
     const onFailure = vi.fn();
 
-    await expect(waitForHealth("http://localhost:8080", proc, 120, onFailure)).rejects.toThrow(
+    await expect(waitForHealth("http://localhost:8080", proc, 120, "", onFailure)).rejects.toThrow(
       /http:\/\/localhost:8080\/health.*KANDEV_HEALTH_TIMEOUT_MS/s,
     );
     expect(onFailure).toHaveBeenCalledTimes(1);

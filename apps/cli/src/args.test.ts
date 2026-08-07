@@ -106,6 +106,7 @@ describe("resolvePorts", () => {
       KANDEV_PORT: "5000",
     } as NodeJS.ProcessEnv);
     expect(r.backendPort).toBe(3000);
+    expect(r.backendPortSource).toBe("--port");
   });
 
   it("KANDEV_BACKEND_PORT wins over KANDEV_PORT (more specific env wins)", () => {
@@ -114,11 +115,13 @@ describe("resolvePorts", () => {
       KANDEV_BACKEND_PORT: "6666",
     } as NodeJS.ProcessEnv);
     expect(r.backendPort).toBe(6666);
+    expect(r.backendPortSource).toBe("KANDEV_BACKEND_PORT");
   });
 
   it("falls back to KANDEV_PORT when KANDEV_BACKEND_PORT is not set", () => {
     const r = resolvePorts({ command: "run" }, { KANDEV_PORT: "5555" } as NodeJS.ProcessEnv);
     expect(r.backendPort).toBe(5555);
+    expect(r.backendPortSource).toBe("KANDEV_PORT");
   });
 
   it("KANDEV_WEB_PORT sets the internal web port in dev", () => {
@@ -133,7 +136,11 @@ describe("resolvePorts", () => {
 
   it("--port maps to backend in every command (including dev)", () => {
     const r = resolvePorts({ command: "dev", backendPort: 3447 }, {} as NodeJS.ProcessEnv);
-    expect(r).toEqual({ backendPort: 3447, webPort: undefined });
+    expect(r).toEqual({
+      backendPort: 3447,
+      backendPortSource: "--port",
+      webPort: undefined,
+    });
   });
 
   it("throws ParseError when KANDEV_PORT is not a number", () => {

@@ -95,6 +95,12 @@ async function isPortAvailable(port: number): Promise<boolean> {
   return canBindPort(port, "127.0.0.1");
 }
 
+export async function assertPortAvailable(port: number, source?: string): Promise<void> {
+  if (await isPortAvailable(port)) return;
+  const sourceSuffix = source ? ` from ${source}` : "";
+  throw new Error(`Backend port ${port}${sourceSuffix} is already in use`);
+}
+
 async function reserveSpecificPort(port: number, host = "127.0.0.1"): Promise<net.Server | null> {
   return new Promise((resolve) => {
     const server = net.createServer();

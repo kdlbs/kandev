@@ -378,7 +378,7 @@ jobs:
       # a self-hosting Go helper (see testmain_test.go) so they run on
       # every platform.
       - name: Test windows-sensitive packages
-        run: go test -race -v ./internal/agentctl/server/process/... ./internal/agent/runtime/agentctl/launcher/...
+        run: go test -race -v ./internal/common/netutil ./internal/agentctl/server/process/... ./internal/agentctl/server/instance/... ./internal/agent/runtime/agentctl/launcher/... ./internal/gateway/websocket/...
 
       # Keep this targeted: the service package has broad subprocess coverage,
       # while this native test is the Windows path-semantics regression.

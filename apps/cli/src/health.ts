@@ -28,6 +28,7 @@ export async function waitForHealth(
   baseUrl: string,
   proc: { exitCode: number | null },
   timeoutMs: number,
+  expectedToken = "",
   onFailure?: () => void,
 ): Promise<void> {
   const deadline = Date.now() + timeoutMs;
@@ -39,7 +40,7 @@ export async function waitForHealth(
     }
     try {
       const res = await fetch(healthUrl);
-      if (res.ok) {
+      if (res.ok && matchesHealthToken(res, expectedToken)) {
         return;
       }
     } catch {
@@ -53,6 +54,10 @@ export async function waitForHealth(
       `If your machine is slow on first run (antivirus scan, cold disk), ` +
       `set KANDEV_HEALTH_TIMEOUT_MS=120000 and retry.`,
   );
+}
+
+function matchesHealthToken(res: Response, expectedToken: string): boolean {
+  return expectedToken === "" || res.headers.get("X-Kandev-Desktop-Health-Token") === expectedToken;
 }
 
 export async function waitForUrlReady(

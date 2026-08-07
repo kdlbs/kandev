@@ -1,4 +1,5 @@
 import os from "node:os";
+import net from "node:net";
 import { PassThrough } from "node:stream";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -10,6 +11,7 @@ import {
   listHostNetworkAddresses,
   logStartupInfo,
   networkUrlsForPort,
+  pickBackendPorts,
   resolveBackendLogLevels,
   type PortConfig,
 } from "./shared";
@@ -87,6 +89,15 @@ describe("buildBackendEnv", () => {
     expect(env.KANDEV_WEB_INTERNAL_URL).toBeUndefined();
   });
 
+  it("generates a fresh backend health token for each launch environment", () => {
+    const first = buildBackendEnv({ ports }).KANDEV_DESKTOP_HEALTH_TOKEN;
+    const second = buildBackendEnv({ ports }).KANDEV_DESKTOP_HEALTH_TOKEN;
+
+    expect(first).toMatch(/^[0-9a-f]{64}$/);
+    expect(second).toMatch(/^[0-9a-f]{64}$/);
+    expect(second).not.toBe(first);
+  });
+
   it("uses independent file and console thresholds", () => {
     expect(resolveBackendLogLevels({ env: {} })).toEqual({ file: "info", console: "warn" });
     expect(resolveBackendLogLevels({ debug: true, env: {} })).toEqual({
@@ -120,6 +131,29 @@ describe("buildBackendEnv", () => {
     stream.write("world");
     expect(forwarded).toBe("helloworld");
     expect(capture.read()).toBe("world");
+  });
+});
+
+describe("explicit backend port selection", () => {
+  it("rejects an occupied port before selecting the other services", async () => {
+    const server = net.createServer();
+    await new Promise<void>((resolve, reject) => {
+      server.once("error", reject);
+      server.listen(0, "127.0.0.1", () => resolve());
+    });
+    const address = server.address();
+    if (!address || typeof address === "string") {
+      server.close();
+      throw new Error("test server did not expose a port");
+    }
+
+    try {
+      await expect(
+        pickBackendPorts({ backendPort: address.port, backendPortSource: "KANDEV_PORT" }),
+      ).rejects.toThrow(`Backend port ${address.port} from KANDEV_PORT is already in use`);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
   });
 });
 

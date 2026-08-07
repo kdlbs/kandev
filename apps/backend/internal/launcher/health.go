@@ -37,7 +37,7 @@ func healthTimeout(defaultMS int) time.Duration {
 	return time.Duration(n) * time.Millisecond
 }
 
-func waitForHealth(ctx context.Context, baseURL string, proc childState, timeout time.Duration, onFailure func()) error {
+func waitForHealth(ctx context.Context, baseURL string, proc childState, timeout time.Duration, expectedToken string, onFailure func()) error {
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
@@ -49,7 +49,7 @@ func waitForHealth(ctx context.Context, baseURL string, proc childState, timeout
 			}
 			return fmt.Errorf("backend exited (code %d) before healthcheck passed", code)
 		}
-		if probeHealth(ctx, healthURL) {
+		if probeHealth(ctx, healthURL, expectedToken) {
 			return nil
 		}
 		select {
@@ -68,7 +68,7 @@ func waitForHealth(ctx context.Context, baseURL string, proc childState, timeout
 
 // probeHealth reports whether a single health request succeeded. The body is
 // drained and closed so the connection can be reused by the next poll.
-func probeHealth(ctx context.Context, healthURL string) bool {
+func probeHealth(ctx context.Context, healthURL, expectedToken string) bool {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, healthURL, nil)
 	if err != nil {
 		return false
@@ -79,5 +79,6 @@ func probeHealth(ctx context.Context, healthURL string) bool {
 	}
 	defer func() { _ = resp.Body.Close() }()
 	_, _ = io.Copy(io.Discard, resp.Body)
-	return resp.StatusCode >= 200 && resp.StatusCode < 300
+	return resp.StatusCode >= 200 && resp.StatusCode < 300 &&
+		(expectedToken == "" || resp.Header.Get("X-Kandev-Desktop-Health-Token") == expectedToken)
 }

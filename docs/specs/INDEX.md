@@ -220,6 +220,7 @@ System pages (Radarr/Sonarr-style) for status, disk usage, database maintenance,
 | [homebrew-core](homebrew-core/spec.md) | building |
 | [native-kandev-cli](native-kandev-cli/spec.md) | draft |
 | [desktop-tauri-app](desktop-tauri-app/spec.md) | shipped |
+| [port-collision-safety](port-collision-safety/spec.md) | building |
 | [lsp-file-intelligence](lsp-file-intelligence/spec.md) | building |
 | [public-share-links](public-share-links/spec.md) | draft |
 | [ssh-executor](ssh-executor/spec.md) | draft |

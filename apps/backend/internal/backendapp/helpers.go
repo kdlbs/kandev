@@ -672,16 +672,7 @@ func registerRoutes(p routeParams) {
 	// Before that, return 503 so callers (including the e2e fixture's
 	// waitForHealth) keep polling instead of racing ahead and hitting
 	// 404s on routes that aren't wired yet.
-	p.router.GET("/health", func(c *gin.Context) {
-		if !ready.Load() {
-			c.JSON(http.StatusServiceUnavailable, gin.H{"status": "starting", "service": "kandev"})
-			return
-		}
-		if token := desktopHealthToken(); token != "" {
-			c.Header(desktopHealthTokenHeader, token)
-		}
-		c.JSON(http.StatusOK, gin.H{"status": "ok", "service": "kandev", "mode": "websocket+http"})
-	})
+	p.router.GET("/health", healthHandler())
 
 	// /api/v1/features is a public, unauthenticated read of the runtime
 	// feature-flag map. The frontend SSR-fetches it once per page render to
@@ -701,7 +692,6 @@ func registerRoutes(p routeParams) {
 		payload := bootPayload(c.Request.Context(), c.Request, p, route)
 		c.JSON(http.StatusOK, payload)
 	})
-
 	if p.webInternalURL == "" {
 		if handler, distDir, ok := newWebAppHandler(p); ok {
 			p.router.NoRoute(func(c *gin.Context) {
@@ -740,6 +730,19 @@ func registerRoutes(p routeParams) {
 			})
 			p.log.Info("Web dev handler enabled", zap.String("target", p.webInternalURL))
 		}
+	}
+}
+
+func healthHandler() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if !ready.Load() {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"status": "starting", "service": "kandev"})
+			return
+		}
+		if token := desktopHealthToken(); token != "" {
+			c.Header(desktopHealthTokenHeader, token)
+		}
+		c.JSON(http.StatusOK, gin.H{"status": "ok", "service": "kandev", "mode": "websocket+http"})
 	}
 }
 

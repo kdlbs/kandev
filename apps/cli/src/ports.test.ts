@@ -2,7 +2,7 @@ import net from "node:net";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { ensureValidPort, pickAvailablePort, __testing } from "./ports";
+import { assertPortAvailable, ensureValidPort, pickAvailablePort, __testing } from "./ports";
 
 describe("ensureValidPort", () => {
   it("returns undefined for undefined input", () => {
@@ -124,6 +124,19 @@ describe("pickAvailablePort", () => {
       const picked = await pickAvailablePort(port, 5);
       expect(picked).not.toBe(port);
       expect(picked).toBeGreaterThan(0);
+    } finally {
+      await closeServer(server);
+    }
+  });
+});
+
+describe("assertPortAvailable", () => {
+  it("rejects an occupied explicit port with its configuration source", async () => {
+    const { server, port } = await listenOn("127.0.0.1");
+    try {
+      await expect(assertPortAvailable(port, "KANDEV_BACKEND_PORT")).rejects.toThrow(
+        `Backend port ${port} from KANDEV_BACKEND_PORT is already in use`,
+      );
     } finally {
       await closeServer(server);
     }
