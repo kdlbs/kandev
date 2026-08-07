@@ -7,7 +7,7 @@ import { transformPathsInText } from "@/lib/utils";
 import type { Message } from "@/lib/types/http";
 import { ShellOutputDisclosure } from "./shell-output-disclosure";
 import { normalizeToolCallStatus } from "./tool-status";
-import type { ToolCallMetadata } from "../types";
+import type { ShellExecPayload, ToolCallMetadata } from "../types";
 import { useTranslation } from "react-i18next";
 
 type ToolExecuteMessageProps = {
@@ -57,6 +57,14 @@ function parseExecuteMetadata(comment: Message) {
   return { status, shellExec };
 }
 
+function hasShellOutput(output: ShellExecPayload["output"]): boolean {
+  return (
+    Boolean(output?.has_output) ||
+    (output?.stdout_bytes ?? 0) > 0 ||
+    (output?.stderr_bytes ?? 0) > 0
+  );
+}
+
 export const ToolExecuteMessage = memo(function ToolExecuteMessage({
   comment,
   worktreePath,
@@ -89,12 +97,14 @@ export const ToolExecuteMessage = memo(function ToolExecuteMessage({
             </span>
           </div>
         )}
-        <ShellOutputDisclosure
-          sessionId={comment.session_id}
-          messageId={comment.id}
-          messageStatus={status}
-          summary={shellExec?.output}
-        />
+        {hasShellOutput(shellExec?.output) && (
+          <ShellOutputDisclosure
+            sessionId={comment.session_id}
+            messageId={comment.id}
+            messageStatus={status}
+            summary={shellExec?.output}
+          />
+        )}
       </div>
     </div>
   );

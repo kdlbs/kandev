@@ -1,7 +1,7 @@
 ---
 status: shipped
 created: 2026-07-14
-updated: 2026-07-16
+updated: 2026-08-07
 owner: cfl
 ---
 
@@ -27,6 +27,7 @@ Agent chat shows that a shell command ran, but ACP agents encode terminal output
 - Each normalized output text field is bounded to 256 KiB. When a field exceeds the bound, Kandev retains its most recent valid UTF-8 content and sets `truncated: true`.
 - The full normalized command is always visible and wraps instead of truncating. The message content remains its fallback when a normalized command is absent. The working directory, when present, remains visible with the command.
 - Stdout and stderr render in a separate disclosure that is collapsed by default for both running and completed commands. Running commands never auto-expand their output.
+- The output disclosure is offered only when the browser-facing summary indicates retained stdout or stderr (`has_output: true` or a positive stdout/stderr byte count). A command with no retained output shows its command, working directory, and status without an expandable output control.
 - Expanding the disclosure fetches the latest output snapshot on demand. A collapsed disclosure does not fetch or mount the output body.
 - While an expanded command is running, Kandev refreshes its output with non-overlapping polling until the command becomes complete, failed, or cancelled. Polling stops immediately when the disclosure collapses or unmounts.
 - The expanded disclosure shows combined output in a scrollable monospace region. On terminal completion it visibly shows `Exit code N` when known, or `Exit code unavailable` when unknown. Unknown is neutral, not success or failure.
@@ -138,6 +139,7 @@ Live output updates use the existing tool-message update path and are persisted 
 - **GIVEN** terminal output exceeds 256 KiB, **WHEN** live and final updates are normalized, **THEN** stored output remains within the bound, keeps the newest valid UTF-8 text, and the expanded row indicates truncation.
 - **GIVEN** a persisted shell message with a long command, **WHEN** chat opens on desktop or mobile, **THEN** the complete command wraps visibly while its output disclosure remains collapsed.
 - **GIVEN** a collapsed shell command with persisted output, **WHEN** task boot state, message REST/WS lists, and live message notifications reach the browser, **THEN** they contain byte counts and result metadata but no stdout or stderr body, and no output endpoint request occurs.
+- **GIVEN** a shell command whose browser-facing summary has `has_output: false`, `stdout_bytes: 0`, and `stderr_bytes: 0`, **WHEN** its command row renders on desktop or mobile, **THEN** the command, working directory, and status remain visible but no output disclosure is offered and no shell-output request can be initiated.
 - **GIVEN** a persisted completed shell message, **WHEN** the user expands its output disclosure, **THEN** exactly one on-demand snapshot is fetched and its output, truncation, and exit status are readable without overlapping adjacent chat content.
 - **GIVEN** a running shell message with its disclosure expanded, **WHEN** output changes and the command later completes, **THEN** bounded non-overlapping polling refreshes the transcript and stops after the terminal snapshot.
 - **GIVEN** an expanded running shell message, **WHEN** the user collapses it or navigates away, **THEN** scheduled polling stops and an in-flight request cannot update the unmounted disclosure.
