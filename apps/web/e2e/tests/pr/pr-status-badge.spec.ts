@@ -45,6 +45,14 @@ async function seedBadgeTest(
 
 type TaskPR = NonNullable<Awaited<ReturnType<ApiClient["getTaskPR"]>>>;
 
+function visibleTaskPRSummary(page: Page) {
+  return page
+    .locator(
+      '[data-slot="tooltip-content"]:not([data-state="closed"]) > [data-testid="pr-task-status-summary"]',
+    )
+    .first();
+}
+
 async function waitForTaskPRFields(
   apiClient: ApiClient,
   taskId: string,
@@ -345,5 +353,123 @@ test.describe("PR status badge", () => {
     await expect(icon).toHaveClass(/text-sky-400/);
     await expect(icon).not.toHaveClass(/text-emerald-400/);
     await expect(icon).not.toHaveClass(/text-green-500/);
+  });
+
+  test("renders readable task PR summary", async ({ testPage, apiClient, seedData, prCapture }) => {
+    test.setTimeout(120_000);
+
+    const taskTitle = "Readable PR Summary Task";
+    const prTitle =
+      "Improve pull request status readability with a clear title and separate review, CI, and merge rows";
+    const { task } = await seedBadgeTest(
+      apiClient,
+      seedData.workspaceId,
+      seedData.agentProfileId,
+      seedData.repositoryId,
+      taskTitle,
+    );
+
+    const kanban = new KanbanPage(testPage);
+    await kanban.goto();
+    await apiClient.mockGitHubAssociateTaskPR({
+      task_id: task.id,
+      owner: "testorg",
+      repo: "testrepo",
+      pr_number: 2966,
+      pr_url: "https://github.com/testorg/testrepo/pull/2966",
+      pr_title: prTitle,
+      head_branch: "feat/readable-pr-summary",
+      base_branch: "main",
+      author_login: "test-user",
+      state: "open",
+      review_state: "approved",
+      checks_state: "success",
+      mergeable_state: "clean",
+    });
+    await waitForTaskPRFields(apiClient, task.id, {
+      state: "open",
+      review_state: "approved",
+      checks_state: "success",
+      mergeable_state: "clean",
+    });
+
+    const taskRow = testPage.getByTestId("sidebar-task-item").filter({ hasText: taskTitle });
+    await expect(taskRow).toBeVisible({ timeout: 15_000 });
+    const icon = taskRow.getByTestId(`pr-task-icon-${task.id}`);
+    await expect(icon).toHaveAttribute("data-pr-ready-to-merge", "true");
+    await icon.hover();
+
+    const summary = visibleTaskPRSummary(testPage);
+    await expect(summary).toBeVisible();
+    await expect(summary.getByTestId("pr-task-status-number")).toHaveText("PR #2966");
+    const title = summary.getByTestId("pr-task-status-title");
+    await expect(title).toHaveText(prTitle);
+
+    const reviewRow = summary.getByTestId("pr-task-status-review");
+    await expect(reviewRow).toContainText("Review");
+    await expect(reviewRow).toContainText("Approved");
+    const ciRow = summary.getByTestId("pr-task-status-ci");
+    await expect(ciRow).toContainText("CI");
+    await expect(ciRow).toContainText("Passed");
+    const mergeRow = summary.getByTestId("pr-task-status-merge");
+    await expect(mergeRow).toContainText("Merge");
+    await expect(mergeRow).toContainText("Ready to merge");
+    await prCapture.screenshot("readable-task-pr-summary", {
+      caption: "Structured pull request summary in the task sidebar",
+    });
+
+    const [summaryBox, titleBox] = await Promise.all([summary.boundingBox(), title.boundingBox()]);
+    expect(summaryBox).not.toBeNull();
+    expect(titleBox).not.toBeNull();
+    expect(titleBox!.height).toBeGreaterThan(24);
+    const viewport = testPage.viewportSize();
+    expect(viewport).not.toBeNull();
+    expect(summaryBox!.x).toBeGreaterThanOrEqual(0);
+    expect(summaryBox!.y).toBeGreaterThanOrEqual(0);
+    expect(summaryBox!.x + summaryBox!.width).toBeLessThanOrEqual(viewport!.width);
+    expect(summaryBox!.y + summaryBox!.height).toBeLessThanOrEqual(viewport!.height);
+    expect(
+      await testPage.evaluate(
+        () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
+      ),
+    ).toBe(true);
+
+    await testPage.mouse.move(viewport!.width - 1, viewport!.height - 1);
+    await expect(summary).toBeHidden();
+    await taskRow.focus();
+    await testPage.keyboard.press("Tab");
+    await expect(icon).toBeFocused();
+    const focusedSummary = visibleTaskPRSummary(testPage);
+    await expect(focusedSummary).toBeVisible();
+    await expect(focusedSummary.getByTestId("pr-task-status-title")).toHaveText(prTitle);
+
+    await testPage.keyboard.press("Escape");
+    await apiClient.mockGitHubAssociateTaskPR({
+      workspace_id: seedData.workspaceId,
+      task_id: task.id,
+      owner: "testorg",
+      repo: "api",
+      pr_number: 2967,
+      pr_url: "https://github.com/testorg/api/pull/2967",
+      pr_title: "Resolve the failing API checks",
+      head_branch: "fix/api-checks",
+      base_branch: "main",
+      author_login: "test-user",
+      state: "open",
+      review_state: "changes_requested",
+      checks_state: "failure",
+      mergeable_state: "dirty",
+    });
+    await expect(icon).toHaveAttribute("data-pr-count", "2", { timeout: 15_000 });
+    await icon.hover();
+
+    const multiSummary = visibleTaskPRSummary(testPage);
+    const entries = multiSummary.getByTestId("pr-task-status-entry");
+    await expect(entries).toHaveCount(2);
+    await expect(entries.nth(0).getByTestId("pr-task-status-number")).toHaveText("PR #2966");
+    await expect(entries.nth(1).getByTestId("pr-task-status-number")).toHaveText("PR #2967");
+    await expect(entries.nth(1).getByTestId("pr-task-status-title")).toHaveText(
+      "Resolve the failing API checks",
+    );
   });
 });
