@@ -1,10 +1,10 @@
-import { cleanup, render } from "@testing-library/react";
+import { act, cleanup, render } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CommandItem } from "@/lib/commands/types";
+import { activateLocale, DEFAULT_LOCALE } from "@/lib/i18n";
 import { GlobalCommands } from "./global-commands";
 
 const mocks = vi.hoisted(() => {
-  const translations: Record<string, string> = {};
   return {
     commands: [] as CommandItem[],
     destinations: [
@@ -24,14 +24,9 @@ const mocks = vi.hoisted(() => {
     push: vi.fn(),
     quickChat: vi.fn(),
     setTheme: vi.fn(),
-    translations,
-    translate: vi.fn((key: string) => translations[key] ?? key),
   };
 });
 
-vi.mock("react-i18next", () => ({
-  useTranslation: () => ({ t: mocks.translate }),
-}));
 vi.mock("@/components/state-provider", () => ({
   useAppStore: (selector: (state: unknown) => unknown) =>
     selector({
@@ -70,14 +65,16 @@ function navigationCommand(): CommandItem {
   return command;
 }
 
-beforeEach(() => {
+beforeEach(async () => {
   mocks.commands = [];
   mocks.push.mockReset();
-  mocks.translations["common:commandGroupNavigation"] = "Navigation";
-  mocks.translations["common:commandGoToStatsKeywords"] = "stats, metrics";
+  await activateLocale(DEFAULT_LOCALE);
 });
 
-afterEach(cleanup);
+afterEach(async () => {
+  cleanup();
+  await activateLocale(DEFAULT_LOCALE);
+});
 
 describe("GlobalCommands navigation commands", () => {
   it("maps destinations to commands and navigation actions", () => {
@@ -88,27 +85,32 @@ describe("GlobalCommands navigation commands", () => {
       id: "nav-stats",
       label: "Stats",
       group: "Navigation",
-      keywords: ["stats", "metrics"],
+      keywords: ["stats", "statistics", "analytics", "metrics"],
     });
 
     command.action?.();
     expect(mocks.push).toHaveBeenCalledWith("/stats");
   });
 
-  it("keeps command identity until a translated command value changes", () => {
+  // Drives a real locale switch rather than a stubbed `t`. The point of the
+  // test is that the memo key tracks translated values, and only the real
+  // catalog can show that end to end — a hand-written translation table proves
+  // the memo reacts to the table, not to a locale change.
+  it("keeps command identity until a translated command value changes", async () => {
     const { rerender } = render(<GlobalCommands />);
     const first = navigationCommand();
 
     rerender(<GlobalCommands />);
     expect(navigationCommand()).toBe(first);
 
-    mocks.translations["common:commandGroupNavigation"] = "Navigation pseudo";
-    mocks.translations["common:commandGoToStatsKeywords"] = "statistiques, mesures";
+    await act(async () => {
+      await activateLocale("pt-pt");
+    });
     rerender(<GlobalCommands />);
 
     const translated = navigationCommand();
     expect(translated).not.toBe(first);
-    expect(translated.group).toBe("Navigation pseudo");
-    expect(translated.keywords).toEqual(["statistiques", "mesures"]);
+    expect(translated.group).toBe("Navegação");
+    expect(translated.keywords).toEqual(["estatísticas", "análises", "métricas"]);
   });
 });

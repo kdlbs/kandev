@@ -13,6 +13,7 @@ import {
 import type { JiraTicket } from "@/lib/types/jira";
 import { formatRelative, statusBadgeClass } from "@/components/jira/jira-ticket-common";
 import type { JiraTaskPreset } from "./presets";
+import { useDateLocale } from "@/lib/i18n/date-locale";
 import { useTranslation } from "react-i18next";
 
 type TicketRowProps = {
@@ -82,7 +83,7 @@ function StartTaskMenu({
 
 export function TicketRow({ ticket, presets, onStartTask, onOpen }: TicketRowProps) {
   const { t } = useTranslation();
-  const relative = formatRelative(ticket.updated);
+  const relative = formatRelative(ticket.updated, useDateLocale());
   return (
     <div className="flex items-start gap-3 py-3 border-b last:border-b-0">
       <button

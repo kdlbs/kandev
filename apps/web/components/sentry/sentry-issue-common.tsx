@@ -1,6 +1,7 @@
 "use client";
 
-import { formatDistanceToNow } from "date-fns";
+import type { Locale } from "date-fns";
+import { dateLocale, formatTimeDistance, useDateLocale } from "@/lib/i18n/date-locale";
 import { Badge } from "@kandev/ui/badge";
 import type { SentryIssue, SentryLevel, SentryStatus } from "@/lib/types/sentry";
 import { IntegrationAuthErrorMessage } from "@/components/integrations/auth-error-message";
@@ -48,15 +49,16 @@ export function statusBadgeClass(status: SentryStatus | undefined): string {
   }
 }
 
-export function formatRelative(iso: string | undefined): string {
-  if (!iso) return "";
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return "";
-  return formatDistanceToNow(d, { addSuffix: true });
+// Distance phrasing comes from date-fns' locale data, so it needs the active
+// locale handed to it — see `@/lib/i18n/date-locale`. Callers inside React
+// should pass `useDateLocale()` so the value re-renders when a lazily loaded
+// locale lands; the default keeps non-component callers correct.
+export function formatRelative(iso: string | undefined, locale?: Locale): string {
+  return formatTimeDistance(iso, locale ?? dateLocale());
 }
 
 export function SentryIssueRow({ issue }: { issue: SentryIssue }) {
-  const lastSeen = formatRelative(issue.lastSeen);
+  const lastSeen = formatRelative(issue.lastSeen, useDateLocale());
   return (
     <div className="space-y-1.5 rounded-md border bg-background px-3 py-2.5">
       <div className="flex items-center gap-2 flex-wrap">

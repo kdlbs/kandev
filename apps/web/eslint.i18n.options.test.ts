@@ -173,4 +173,15 @@ describe("jsx-attributes.exclude", () => {
       expect(excludesAttribute(name)).toBe(false);
     },
   );
+
+  // The pattern used to be `.*SaveId$`, which requires at least one character
+  // before `SaveId` and so matched a composed `fooSaveId` but never the bare
+  // `saveId` the codebase actually writes (`prompts-settings.tsx`,
+  // `secrets-settings.tsx`). It was inert: the draft ids it was meant to cover
+  // are hyphenated lowercase slugs that `words.exclude` already skips, so
+  // fixing it changes no finding — it only stops the entry lying about its
+  // coverage, and now holds for a `saveId` value that is not slug-shaped.
+  it.each(["saveId", "draftSaveId"])("excludes the draft-id prop %j", (name) => {
+    expect(excludesAttribute(name)).toBe(true);
+  });
 });

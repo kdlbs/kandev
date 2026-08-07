@@ -8,7 +8,7 @@ import { IconTrash, IconLoader, IconArchive } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Badge } from "@kandev/ui/badge";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
-import { formatDistanceToNow } from "date-fns";
+import { formatTimeDistance } from "@/lib/i18n/date-locale";
 import { TaskDeleteConfirmDialog } from "@/components/task/task-delete-confirm-dialog";
 import { TaskArchiveConfirmDialog } from "@/components/task/task-archive-confirm-dialog";
 import { linkToTask } from "@/lib/links";
@@ -180,7 +180,9 @@ export function getColumns({
       header: t("tasks:columnUpdated"),
       cell: ({ row }) => (
         <span className="text-xs text-muted-foreground">
-          {formatDistanceToNow(new Date(row.original.updated_at), { addSuffix: true })}
+          {/* `getColumns` is a plain builder, not a component, so it resolves
+              the locale from the module rather than through `useDateLocale`. */}
+          {formatTimeDistance(row.original.updated_at)}
         </span>
       ),
     },

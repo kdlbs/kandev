@@ -10,8 +10,9 @@ import {
   IconServer,
 } from "@tabler/icons-react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
-import { formatDistanceToNow } from "date-fns";
+import type { Locale } from "date-fns";
 import type { TFunction } from "i18next";
+import { formatTimeDistance, useDateLocale } from "@/lib/i18n/date-locale";
 import { useTranslation } from "react-i18next";
 import { useAppStore } from "@/components/state-provider";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
@@ -159,6 +160,7 @@ function SourceBadge({
   showLabel: boolean;
 }) {
   const { t } = useTranslation();
+  const locale = useDateLocale();
   return (
     <Tooltip>
       <TooltipTrigger asChild>
@@ -174,7 +176,9 @@ function SourceBadge({
         <div className="space-y-1">
           <div className="font-medium">{t("system:host")}</div>
           <div className="text-xs text-muted-foreground">{source.label}</div>
-          <div className="text-xs text-muted-foreground">{lastUpdatedText(t, updatedAt)}</div>
+          <div className="text-xs text-muted-foreground">
+            {lastUpdatedText(t, locale, updatedAt)}
+          </div>
         </div>
       </TooltipContent>
     </Tooltip>
@@ -221,6 +225,7 @@ function MetricValue({
   simplified: boolean;
 }) {
   const { t } = useTranslation();
+  const locale = useDateLocale();
   const help = metric.id === "io_load" ? t("system:ioLoadHelp") : null;
   return (
     <Tooltip>
@@ -247,7 +252,9 @@ function MetricValue({
           {metric.error ? (
             <div className="text-xs text-muted-foreground">{metric.error}</div>
           ) : null}
-          <div className="text-xs text-muted-foreground">{lastUpdatedText(t, updatedAt)}</div>
+          <div className="text-xs text-muted-foreground">
+            {lastUpdatedText(t, locale, updatedAt)}
+          </div>
         </div>
       </TooltipContent>
     </Tooltip>
@@ -309,11 +316,12 @@ function metricColor(metric: SystemMetricSample) {
   return "text-current";
 }
 
-function lastUpdatedText(t: TFunction, updatedAt?: string) {
-  if (!updatedAt) return t("system:lastUpdateUnknown");
-  const date = new Date(updatedAt);
-  if (Number.isNaN(date.getTime())) return t("system:lastUpdateUnknown");
-  return t("system:updatedRelative", {
-    relative: formatDistanceToNow(date, { addSuffix: true }),
-  });
+// `relative` is interpolated into a translated sentence, so an unlocalized
+// date-fns distance would leave "about 1 hour ago" sitting inside Portuguese
+// prose. Passing the value through `values` is already the right shape; it just
+// needs the active locale to reach the formatter.
+function lastUpdatedText(t: TFunction, locale: Locale, updatedAt?: string) {
+  const relative = formatTimeDistance(updatedAt, locale);
+  if (!relative) return t("system:lastUpdateUnknown");
+  return t("system:updatedRelative", { relative });
 }

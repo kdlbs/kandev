@@ -154,7 +154,10 @@ export const noLiteralStringOptions = {
       "cmd",
       ".*[Ii]dPrefix$",
       ".*[Ii]dSuffix$",
-      ".*SaveId$",
+      // Matches the bare `saveId` prop as well as composed `fooSaveId` names.
+      // The former `.*SaveId$` required at least one leading character, so it
+      // never matched the prop the codebase actually uses (`saveId`).
+      ".*[Ss]aveId$",
       "aria-labelledby",
       "aria-controls",
       "aria-describedby",

@@ -4,10 +4,6 @@ import type { WorkflowStep } from "@/lib/types/http";
 import { workflowId as toWorkflowId } from "@/lib/types/ids";
 import { TurnCompleteSelect } from "./workflow-pipeline-editor-step-actions";
 
-vi.mock("react-i18next", () => ({
-  useTranslation: () => ({ t: (key: string) => key }),
-}));
-
 afterEach(cleanup);
 
 function step(overrides: Partial<WorkflowStep> = {}): WorkflowStep {
@@ -47,14 +43,10 @@ describe("TurnCompleteSelect cancel completion policy", () => {
     const checkbox = screen.getByTestId("step-1-cancel-completion-checkbox");
 
     expect(checkbox.getAttribute("aria-checked")).toBe("false");
-    // This file stubs react-i18next with an identity `t`, so keys render as
-    // keys. `HelpTip`'s default aria-label is now a catalog key rather than a
-    // hardcoded string, so the expectation follows the same convention as the
-    // queryByText below.
     expect(screen.getByTestId("step-1-cancel-completion-help").getAttribute("aria-label")).toBe(
-      "workflows:moreInformation",
+      "More information",
     );
-    expect(screen.queryByText("workflows:runCompletionActionsWhenTurnCancelledHelp")).toBeNull();
+    expect(screen.queryByText(/Applies only when a user explicitly cancels a turn\./)).toBeNull();
     fireEvent.click(checkbox);
     expect(onUpdate).toHaveBeenCalledWith({ cancel_triggers_turn_complete: true });
   });

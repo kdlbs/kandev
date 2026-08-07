@@ -1384,7 +1384,7 @@
   "viewName": "View name",
   "viewPlanHistory": "View plan history",
   "voiceInput": "Voice input",
-  "voiceInputNeedsHttps": "Voice input needs HTTPS. Open this site over https:// (or http://localhost) — most mobile browsers block microphone APIs on insecure origins.",
+  "voiceInputNeedsHttps": "Voice input needs HTTPS. Open this site over {{secureSchemeUrl}} (or {{localhostUrl}}) — most mobile browsers block microphone APIs on insecure origins.",
   "voiceInputUnavailable": "Voice input unavailable",
   "voiceInputUnavailableHere": "Voice input is unavailable here.",
   "voiceInputUnavailableTapForDetails": "Voice input unavailable — tap for details",
