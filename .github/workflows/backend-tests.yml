@@ -377,8 +377,14 @@ jobs:
       # in source with a documented reason. The shell-fixture tests now use
       # a self-hosting Go helper (see testmain_test.go) so they run on
       # every platform.
+      # portutil carries the cross-platform "address already in use" check.
+      # It builds and vets clean everywhere, so only a real double-bind on
+      # Windows tells WSAEADDRINUSE apart from syscall.EADDRINUSE — without
+      # this entry the regression is invisible to CI. Its callers
+      # (agentctl/server/instance, gateway/websocket) only delegate to it and
+      # are deliberately left out: they carry unrelated shell-dependent tests.
       - name: Test windows-sensitive packages
-        run: go test -race -v ./internal/agentctl/server/process/... ./internal/agent/runtime/agentctl/launcher/...
+        run: go test -race -v ./internal/agentctl/server/process/... ./internal/agent/runtime/agentctl/launcher/... ./internal/common/portutil/...
 
       # Keep this targeted: the service package has broad subprocess coverage,
       # while this native test is the Windows path-semantics regression.
