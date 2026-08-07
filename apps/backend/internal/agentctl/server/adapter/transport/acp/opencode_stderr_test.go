@@ -17,10 +17,13 @@ func TestNormalizeOpenCodeActionURLAcceptsOnlyAllowlistedRoute(t *testing.T) {
 	const want = "https://opencode.ai/workspace/wrk_01KQM7K5CYT715264YKKFB17ZY/go"
 	accepted := []string{
 		want,
+		"https://opencode.ai/workspace/a/go",
+		"https://opencode.ai/workspace/WRK-build_run-42/go",
+		"https://opencode.ai/workspace/" + strings.Repeat("x", 128) + "/go",
 	}
 	for _, raw := range accepted {
-		if got := NormalizeOpenCodeActionURL(raw); got != want {
-			t.Errorf("NormalizeOpenCodeActionURL(%q) = %q, want %q", raw, got, want)
+		if got := NormalizeOpenCodeActionURL(raw); got != raw {
+			t.Errorf("NormalizeOpenCodeActionURL(%q) = %q, want the input itself", raw, got)
 		}
 	}
 
@@ -33,12 +36,16 @@ func TestNormalizeOpenCodeActionURLAcceptsOnlyAllowlistedRoute(t *testing.T) {
 		"https://opencode.ai/workspace/wrk_123/go/extra",
 		"https://opencode.ai/workspace/wrk_123/other",
 		"https://opencode.ai/workspace/wrk_123/go?source=email",
+		"https://opencode.ai/workspace/wrk_123/go?",
 		"https://opencode.ai/workspace/wrk_123/go#fragment",
+		"https://opencode.ai/workspace/wrk_123/go#",
+		"https://opencode.ai/workspace/wrk_123/go?#",
 		"https://user:pass@opencode.ai/workspace/wrk_123/go",
 		"https://opencode.ai:443/workspace/wrk_123/go",
 		"https://opencode.ai/workspace/wrk_123%2F..%2Fgo",
 		"https://opencode.ai/workspace/%77rk_123/go",
 		"https://opencode.ai/workspace/../go",
+		"https://opencode.ai/workspace/../workspace/wrk_123/go",
 		"https://opencode.ai/workspace/wrk_123/go extra",
 		"https://opencode.ai/workspace/wrk_123/go.",
 		"https://opencode.ai/workspace/" + strings.Repeat("w", 200) + "/go",

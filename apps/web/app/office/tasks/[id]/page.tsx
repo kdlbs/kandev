@@ -13,6 +13,7 @@ import {
   type TaskDecisionDTO,
 } from "@/lib/api/domains/office-api";
 import { listTaskSessions } from "@/lib/api/domains/session-api";
+import { mergeLiveSessionMetadata } from "@/components/task/simple/chat-entries";
 import { OfficeSimplePane } from "@/components/task/simple/OfficeSimplePane";
 import { TaskAdvancedMode } from "./task-advanced-mode";
 import { IssueDetailSkeleton } from "./task-detail-skeleton";
@@ -34,6 +35,11 @@ import { t } from "@/lib/i18n";
 type IssueDetailPageProps = {
   params: Promise<{ id: string }>;
 };
+
+// Sentinel for the live-session metadata key: distinguishes "no store entry"
+// (keep the initial fetch) from an explicit server-side null (metadata was
+// cleared and must not be resurrected).
+const SESSION_METADATA_ABSENT = "\u0000absent\u0000";
 
 function mapDecisionDTO(d: TaskDecisionDTO): TaskDecision {
   return {
@@ -239,18 +245,27 @@ function useSessionLiveSync({
 
   // Same stable-key trick for the live metadata (last_agent_error etc.)
   // carried by session.state_changed, so the office chat can render the
-  // remediation link without a refetch.
+  // remediation link without a refetch. Tri-state per session: the sentinel
+  // marks "no store entry" (undefined), explicit null means the server
+  // cleared metadata, and an object is the live metadata.
   const sessionMetadataKey = useAppStore((s) => {
     const items = s.taskSessions?.items ?? {};
     return baseSessions
-      .map((sess) => JSON.stringify(items[sess.id]?.metadata ?? null))
+      .map((sess) =>
+        JSON.stringify(
+          items[sess.id] === undefined
+            ? SESSION_METADATA_ABSENT
+            : (items[sess.id]?.metadata ?? null),
+        ),
+      )
       .join("\u0001");
   });
   const sessionStoreMetadata = useMemo(
     () =>
       sessionMetadataKey.split("\u0001").map((chunk) => {
         try {
-          const parsed = chunk ? JSON.parse(chunk) : null;
+          const parsed = JSON.parse(chunk);
+          if (parsed === SESSION_METADATA_ABSENT) return undefined;
           return parsed && typeof parsed === "object" ? (parsed as Record<string, unknown>) : null;
         } catch {
           return null;
@@ -422,15 +437,13 @@ function useIssueData(id: string) {
   });
   const sessions = useMemo(
     () =>
-      baseSessions.map((s, i) => {
-        const liveMetadata = sessionStoreMetadata[i];
-        return {
-          ...s,
-          state: (sessionStoreStates[i] ?? s.state) as TaskSession["state"],
-          // Live session.state_changed metadata wins over the initial fetch.
-          metadata: liveMetadata ?? s.metadata,
-        };
-      }),
+      baseSessions.map((s, i) => ({
+        ...s,
+        state: (sessionStoreStates[i] ?? s.state) as TaskSession["state"],
+        // Live session.state_changed metadata wins over the initial fetch;
+        // explicit null (server cleared metadata) is preserved.
+        metadata: mergeLiveSessionMetadata(s.metadata, sessionStoreMetadata[i]),
+      })),
     [baseSessions, sessionStoreStates, sessionStoreMetadata],
   );
 

@@ -4,16 +4,21 @@
  * already allowlists the URL; this mirror rejects anything unexpected before
  * it becomes an href, so a malformed or hostile metadata value can never
  * render as a navigable link.
+ *
+ * The raw string must already be the exact allowlisted route. Parsing is a
+ * secondary validation/error step — never evidence that the route is
+ * allowlisted — so literal or percent-encoded traversal cannot normalize
+ * into a passing shape.
  */
 
 const REMEDIATION_URL_MAX_LENGTH = 256;
-const REMEDIATION_URL_HOST = "opencode.ai";
-const REMEDIATION_URL_PREFIX = "/workspace/";
-const REMEDIATION_URL_SUFFIX = "/go";
-const WORKSPACE_ID_PATTERN = /^[A-Za-z0-9_-]+$/;
+const REMEDIATION_URL_PATTERN = /^https:\/\/opencode\.ai\/workspace\/[A-Za-z0-9_-]{1,128}\/go$/;
 
 export function normalizeRemediationUrl(raw: unknown): string | null {
   if (typeof raw !== "string" || raw.length === 0 || raw.length > REMEDIATION_URL_MAX_LENGTH) {
+    return null;
+  }
+  if (!REMEDIATION_URL_PATTERN.test(raw)) {
     return null;
   }
   let url: URL;
@@ -22,44 +27,20 @@ export function normalizeRemediationUrl(raw: unknown): string | null {
   } catch {
     return null;
   }
-  if (!hasAllowlistedAuthority(raw, url)) {
+  // Defense in depth: the parsed shape must agree with the raw allowlist.
+  if (url.protocol !== "https:" || url.hostname !== REMEDIATION_URL_HOST) {
     return null;
   }
   if (
-    !url.pathname.startsWith(REMEDIATION_URL_PREFIX) ||
-    !url.pathname.endsWith(REMEDIATION_URL_SUFFIX)
-  ) {
-    return null;
-  }
-  const workspaceId = url.pathname.slice(
-    REMEDIATION_URL_PREFIX.length,
-    url.pathname.length - REMEDIATION_URL_SUFFIX.length,
-  );
-  if (
-    workspaceId.length === 0 ||
-    workspaceId.length > 128 ||
-    !WORKSPACE_ID_PATTERN.test(workspaceId)
+    url.username !== "" ||
+    url.password !== "" ||
+    url.search !== "" ||
+    url.hash !== "" ||
+    url.port !== ""
   ) {
     return null;
   }
   return url.href;
 }
 
-/**
- * The authority must be exactly `opencode.ai` — an explicit default port
- * (`:443`) survives URL parsing but is not part of the allowlisted shape.
- */
-function hasAllowlistedAuthority(raw: string, url: URL): boolean {
-  if (!raw.startsWith(`https://${REMEDIATION_URL_HOST}/`)) {
-    return false;
-  }
-  return (
-    url.protocol === "https:" &&
-    url.username === "" &&
-    url.password === "" &&
-    url.search === "" &&
-    url.hash === "" &&
-    url.port === "" &&
-    url.hostname === REMEDIATION_URL_HOST
-  );
-}
+const REMEDIATION_URL_HOST = "opencode.ai";

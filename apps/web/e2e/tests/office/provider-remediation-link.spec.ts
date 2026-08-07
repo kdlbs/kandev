@@ -83,7 +83,7 @@ test.describe("Office run-error remediation link", () => {
 
       await testPage.goto(`/office/tasks/${task.id}`);
       await expect(testPage.getByRole("heading", { name: title })).toBeVisible({ timeout: 10_000 });
-      await expect(testPage.getByTestId("run-error-resume-button").first()).toBeVisible({
+      await expect(testPage.getByTestId("run-error-resume-button")).toBeVisible({
         timeout: 10_000,
       });
       await expect(testPage.getByTestId("remediation-link")).toHaveCount(0);

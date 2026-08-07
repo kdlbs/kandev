@@ -37,7 +37,9 @@ notices; there is no new navigation or surface.
 - Mobile Playwright: `mobile-provider-remediation-link.spec.ts` proves the
   link, focus, 44px target, URL-free details, and zero document overflow.
 
-## Root-cause constraintThe reported OpenCode 1.18.5 ACP failure contains only the short message in
+## Root-cause constraint
+
+The reported OpenCode 1.18.5 ACP failure contains only the short message in
 Kandev's ACP error, logs, and managed stderr. OpenCode's TUI has additional
 provider-side context, including the workspace URL, but that context is not
 transported by the ACP service-failure response. No Kandev-only parser can
@@ -145,10 +147,11 @@ Targeted commands:
 
 ```text
 cd apps/backend && go test ./internal/agentctl/server/adapter/transport/acp ./internal/agentctl/server/api ./internal/agent/runtime/lifecycle ./internal/agent/runtime/routingerr ./internal/orchestrator -run 'Test(OpenCode|ProviderError|RecoverableFailure|RecoveryStatus)' -count=1
-cd apps && pnpm --filter @kandev/web test -- --run components/task/chat/messages/action-message.test.tsx lib/session-last-agent-error.test.ts
+cd apps && pnpm --filter @kandev/web test -- --run components/task/chat/messages/action-message.test.tsx lib/session-last-agent-error.test.ts components/task/simple/chat-entries.test.ts lib/remediation-url.test.ts
 cd apps/web && pnpm run typecheck && pnpm run i18n:check && pnpm run i18n:ratchet
 cd apps/web && pnpm e2e:run --no-build tests/session/provider-remediation-link.spec.ts
 cd apps/web && pnpm e2e:run --no-build --project mobile-chrome tests/session/mobile-provider-remediation-link.spec.ts
+cd apps/web && pnpm e2e:run --no-build tests/office/provider-remediation-link.spec.ts
 ```
 
 ## Likely files

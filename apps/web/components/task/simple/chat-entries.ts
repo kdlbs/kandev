@@ -1,5 +1,6 @@
 import type { CommentTurnContext } from "./turn-context";
 import { groupSortKey, type SessionGroup } from "./session-groups";
+import { normalizeRemediationUrl } from "@/lib/remediation-url";
 import type {
   RunError,
   TaskComment,
@@ -47,9 +48,9 @@ export function buildLaterAgentReplyMap(comments: TaskComment[]): Map<string, bo
 /**
  * Pull RunError entries out of failed sessions. One entry per office
  * session in FAILED state — the session row's error_message becomes
- * the rawPayload for the chat entry's Show details. The adapter-validated
- * remediation URL is copied from the persisted last_agent_error metadata;
- * the browser-edge allowlist still applies before anything renders.
+ * the rawPayload for the chat entry's Show details. The remediation URL is
+ * copied from the persisted last_agent_error metadata and passed through the
+ * browser-edge allowlist, so RunError never carries an unvalidated string.
  */
 export function buildRunErrorsFromSessions(sessions: TaskSession[]): RunError[] {
   const errors: RunError[] = [];
@@ -62,10 +63,21 @@ export function buildRunErrorsFromSessions(sessions: TaskSession[]): RunError[] 
       agentProfileId: s.agentProfileId,
       rawPayload: s.errorMessage ?? "",
       failedAt,
-      remediationUrl: remediationUrlFromSessionMetadata(s.metadata),
+      remediationUrl:
+        normalizeRemediationUrl(remediationUrlFromSessionMetadata(s.metadata)) ?? undefined,
     });
   }
   return errors;
+}
+
+export function mergeLiveSessionMetadata(
+  base: Record<string, unknown> | null | undefined,
+  live: Record<string, unknown> | null | undefined,
+): Record<string, unknown> | null | undefined {
+  // Tri-state: `live` is undefined when the store has no metadata update for
+  // this session (keep the initial fetch), and explicit null is preserved so
+  // a server-side metadata clear cannot resurrect stale initial metadata.
+  return live === undefined ? base : live;
 }
 
 function remediationUrlFromSessionMetadata(metadata: Record<string, unknown> | null | undefined) {

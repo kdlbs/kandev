@@ -27,6 +27,7 @@ spec: "../../specs/agent-stall-recovery/spec.md"
 cd apps/backend && go test ./internal/agentctl/server/adapter/transport/acp ./internal/agentctl/server/api ./internal/agent/runtime/lifecycle ./internal/orchestrator -run 'Test(OpenCode|ProviderError|RecoverableFailure|RecoveryStatus)' -count=1
 cd apps/web && pnpm e2e:run --no-build tests/session/provider-remediation-link.spec.ts
 cd apps/web && pnpm e2e:run --no-build --project mobile-chrome tests/session/mobile-provider-remediation-link.spec.ts
+cd apps/web && pnpm e2e:run --no-build tests/office/provider-remediation-link.spec.ts
 ```
 
 Inspect the phone viewport in addition to assertions and record exact results

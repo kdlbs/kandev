@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildRunErrorsFromSessions } from "./chat-entries";
+import { buildRunErrorsFromSessions, mergeLiveSessionMetadata } from "./chat-entries";
 import type { TaskSession } from "@/app/office/tasks/[id]/types";
 
 const URL = "https://opencode.ai/workspace/wrk_01KQM7K5CYT715264YKKFB17ZY/go";
@@ -52,10 +52,42 @@ describe("buildRunErrorsFromSessions", () => {
     }
   });
 
+  it("drops an unvalidated URL before it reaches RunError", () => {
+    const errors = buildRunErrorsFromSessions([
+      session({
+        metadata: {
+          last_agent_error: {
+            message: "boom",
+            remediation_url: "https://evil.example.com/workspace/wrk_123/go",
+          },
+        },
+      }),
+    ]);
+    expect(errors[0].remediationUrl).toBeUndefined();
+  });
+
   it("skips non-FAILED sessions", () => {
     const errors = buildRunErrorsFromSessions([
       session({ state: "RUNNING", metadata: { last_agent_error: { remediation_url: URL } } }),
     ]);
     expect(errors).toHaveLength(0);
+  });
+});
+
+describe("mergeLiveSessionMetadata", () => {
+  const initial = { last_agent_error: { message: "boom", remediation_url: URL } };
+
+  it("keeps the initial fetch when the store has no metadata update", () => {
+    expect(mergeLiveSessionMetadata(initial, undefined)).toBe(initial);
+    expect(mergeLiveSessionMetadata(null, undefined)).toBeNull();
+  });
+
+  it("preserves an explicit server-side null so cleared metadata is not resurrected", () => {
+    expect(mergeLiveSessionMetadata(initial, null)).toBeNull();
+  });
+
+  it("prefers live metadata over the initial fetch", () => {
+    const live = { last_agent_error: { message: "newer" } };
+    expect(mergeLiveSessionMetadata(initial, live)).toBe(live);
   });
 });

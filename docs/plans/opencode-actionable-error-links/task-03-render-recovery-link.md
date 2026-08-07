@@ -25,7 +25,7 @@ spec: "../../specs/agent-stall-recovery/spec.md"
 ## Verification
 
 ```text
-cd apps && pnpm --filter @kandev/web test -- --run components/task/chat/messages/action-message.test.tsx lib/session-last-agent-error.test.ts
+cd apps && pnpm --filter @kandev/web test -- --run components/task/chat/messages/action-message.test.tsx lib/session-last-agent-error.test.ts components/task/simple/chat-entries.test.ts lib/remediation-url.test.ts
 cd apps/web && pnpm run typecheck && pnpm run i18n:check && pnpm run i18n:ratchet
 ```
 

@@ -50,15 +50,20 @@ func ProviderErrorFromError(err error) *streams.ProviderError {
 		copy := providerErr.ProviderError
 		return &copy
 	}
-	return providerErrorFromACPRequestError(err)
+	return providerErrorFromACPActionURL(err)
 }
 
-// providerErrorFromACPRequestError projects a future ACP service-failure
+// providerErrorFromACPActionURL projects a future ACP service-failure
 // response that carries a structured `action_url` into a provider diagnostic.
 // The URL must pass the shared allowlist; the message runs through the same
-// sanitizer as stderr so it stays URL-free and identifier-redacted. Absent,
-// malformed, or untrusted data keeps the existing generic error path.
-func providerErrorFromACPRequestError(err error) *streams.ProviderError {
+// sanitizer as stderr so it stays URL-free and identifier-redacted.
+//
+// The contract is intentionally URL-gated: a message-only ACP error (no
+// valid `action_url`) falls through to the generic error path rather than
+// surfacing an unsanitized ACP message, matching the stderr diagnostic's
+// bounded-message rule. OpenCode's current ACP failures therefore keep the
+// existing short-error fallback.
+func providerErrorFromACPActionURL(err error) *streams.ProviderError {
 	var reqErr *acp.RequestError
 	if !errors.As(err, &reqErr) || reqErr == nil {
 		return nil
