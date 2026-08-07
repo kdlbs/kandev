@@ -17,6 +17,7 @@ import { getSlackConfig } from "@/lib/api/domains/slack-api";
 import Link from "@/components/routing/app-link";
 import {
   workspaceSettingsHref,
+  workspaceSettingsTabSpec,
   type WorkspaceSettingsTab,
 } from "./workspace-settings-shell";
 import { cn } from "@kandev/ui/lib/utils";
@@ -100,15 +101,16 @@ export function useWorkspaceSectionCounts(workspaceId: string): {
 type SectionStat = {
   key: keyof SectionCounts;
   tab: WorkspaceSettingsTab;
-  labelKey: string;
 };
 
+// Name and mark come from the tab table, so a tile and the tab it opens cannot
+// end up labelled or marked differently.
 const SECTION_STATS: SectionStat[] = [
-  { key: "repositories", tab: "repositories", labelKey: "sidebar:repositories" },
-  { key: "workflows", tab: "workflows", labelKey: "workflows:workflows" },
-  { key: "integrations", tab: "integrations", labelKey: "common:integrations" },
-  { key: "automations", tab: "automations", labelKey: "common:automations" },
-  { key: "secrets", tab: "secrets", labelKey: "settings:secrets" },
+  { key: "repositories", tab: "repositories" },
+  { key: "workflows", tab: "workflows" },
+  { key: "integrations", tab: "integrations" },
+  { key: "automations", tab: "automations" },
+  { key: "secrets", tab: "secrets" },
 ];
 
 /**
@@ -136,8 +138,9 @@ export function WorkspaceSectionStats({
       )}
       data-testid="workspace-section-stats"
     >
-      {SECTION_STATS.map(({ key, tab, labelKey }) => {
+      {SECTION_STATS.map(({ key, tab }) => {
         const count = counts[key];
+        const { labelKey, icon: Icon } = workspaceSettingsTabSpec(tab);
         return (
           <Link
             key={key}
@@ -155,7 +158,10 @@ export function WorkspaceSectionStats({
               </span>
               <IconChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground/50" />
             </div>
-            <span className="truncate text-xs text-muted-foreground">{t(labelKey)}</span>
+            <span className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
+              <Icon className="h-3.5 w-3.5 shrink-0" />
+              <span className="truncate">{t(labelKey)}</span>
+            </span>
           </Link>
         );
       })}

@@ -562,6 +562,7 @@ export function WorkspaceRepositoriesClient({
           name, mark and description, and the tab strip above says which tab you
           are on. A second copy of all three read as the page repeating itself. */}
       <SettingsSection
+        divided
         icon={<IconGitBranch className="h-5 w-5" />}
         title={t("workspaces:repositories")}
         description={t("workspaces:repositoriesInThisWorkspace")}
