@@ -13,8 +13,8 @@ import (
 // TestGitHubCredentialHelperHandlesMultibyteTruncationBoundary guards against
 // a byte-boundary truncation splitting a multi-byte UTF-8 rune in the broker
 // error body. formatBrokerErrorBody truncates by raw bytes before rune
-// iteration, so a cut mid-rune must not panic or produce invalid UTF-8 in the
-// surfaced error message.
+// iteration, so a cut mid-rune must not expand the bounded body or produce
+// replacement runes in the surfaced error message.
 func TestGitHubCredentialHelperHandlesMultibyteTruncationBoundary(t *testing.T) {
 	// Build a body whose byte 512 boundary lands mid-rune: pad with ASCII to
 	// 510 bytes, then place a 3-byte rune (e.g. '中') straddling the cut.
@@ -38,5 +38,19 @@ func TestGitHubCredentialHelperHandlesMultibyteTruncationBoundary(t *testing.T) 
 	if !utf8.ValidString(err.Error()) {
 		t.Fatalf("error message is not valid UTF-8: %q", err.Error())
 	}
-	t.Logf("error = %q (len=%d)", err.Error(), len(err.Error()))
+	const errorPrefix = "resolve GitHub credential: broker returned HTTP 401"
+	appended := strings.TrimPrefix(err.Error(), errorPrefix)
+	if !strings.HasPrefix(appended, ": ") {
+		t.Fatalf("error = %q, want appended broker body", err.Error())
+	}
+	appended = strings.TrimPrefix(appended, ": ")
+	if len(appended) > maxBrokerErrorBodyBytes {
+		t.Fatalf("appended body length = %d, want <= %d", len(appended), maxBrokerErrorBodyBytes)
+	}
+	if strings.ContainsRune(appended, utf8.RuneError) {
+		t.Fatalf("appended body contains replacement rune: %q", appended)
+	}
+	if strings.Contains(appended, "中") {
+		t.Fatalf("appended body contains the split rune: %q", appended)
+	}
 }

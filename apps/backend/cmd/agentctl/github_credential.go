@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/kandev/kandev/internal/githubauth"
 )
@@ -79,9 +80,9 @@ const maxBrokerErrorBodyBytes = 512
 // for appending to an error message, e.g. ": {\"error\":\"...\"}" — or "" when
 // the body is empty after sanitizing.
 func formatBrokerErrorBody(body io.Reader) string {
-	raw, _ := io.ReadAll(io.LimitReader(body, 1<<20))
-	if len(raw) > maxBrokerErrorBodyBytes {
-		raw = raw[:maxBrokerErrorBodyBytes]
+	raw, _ := io.ReadAll(io.LimitReader(body, maxBrokerErrorBodyBytes))
+	for !utf8.Valid(raw) && len(raw) > 0 {
+		raw = raw[:len(raw)-1]
 	}
 	var sanitized strings.Builder
 	for _, r := range string(raw) {

@@ -171,7 +171,7 @@ func TestGitHubCredentialHelperSurfacesBrokerErrorBody(t *testing.T) {
 }
 
 func TestGitHubCredentialHelperTruncatesAndSanitizesBrokerErrorBody(t *testing.T) {
-	rawBody := strings.Repeat("x", 600) + "\x00\x01\x1f control chars"
+	rawBody := "prefix\x00\x01\x1f control chars" + strings.Repeat("x", 600)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
 		_, _ = io.WriteString(w, rawBody)
