@@ -41,8 +41,11 @@ async function openTask(testPage: import("@playwright/test").Page, taskId: strin
   return session;
 }
 
-async function openDropdown(testPage: import("@playwright/test").Page) {
-  await testPage.getByTestId("mr-topbar-button").click();
+// Automation controls live in the hover popover for a single linked MR on
+// desktop (clicking the topbar button opens the MR detail panel directly —
+// see mr-topbar-popover.spec.ts), so reaching them here means hovering.
+async function openAutomationControls(testPage: import("@playwright/test").Page) {
+  await testPage.getByTestId("mr-topbar-button").hover();
   const content = testPage.getByTestId("mr-automation-controls");
   await expect(content).toBeVisible();
   return content;
@@ -67,7 +70,7 @@ test.describe("GitLab MR automation section (auto-fix / auto-merge)", () => {
     test.setTimeout(120_000);
     const taskId = await seedTaskWithLinkedMR(apiClient, seedData, "MR automation section");
     await openTask(testPage, taskId);
-    const controls = await openDropdown(testPage);
+    const controls = await openAutomationControls(testPage);
 
     // AC1: the Automation group (exactly two switches) sits above the
     // existing Review follow-up collapsible.
@@ -106,7 +109,7 @@ test.describe("GitLab MR automation section (auto-fix / auto-merge)", () => {
 
     await testPage.reload();
     await expect(testPage.getByTestId("mr-topbar-button")).toBeVisible({ timeout: 15_000 });
-    const reloadedControls = await openDropdown(testPage);
+    const reloadedControls = await openAutomationControls(testPage);
     await expect(
       reloadedControls.getByRole("switch", { name: "Auto-fix CI and address comments" }),
     ).toBeChecked();
@@ -145,7 +148,7 @@ test.describe("GitLab MR automation section (auto-fix / auto-merge)", () => {
 });
 
 test.describe("GitLab MR automation options", () => {
-  test("desktop dropdown persists lifecycle notification switches and survives reload", async ({
+  test("desktop hover popover persists lifecycle notification switches and survives reload", async ({
     testPage,
     apiClient,
     seedData,
@@ -153,7 +156,7 @@ test.describe("GitLab MR automation options", () => {
     test.setTimeout(120_000);
     const taskId = await seedTaskWithLinkedMR(apiClient, seedData, "MR automation desktop");
     await openTask(testPage, taskId);
-    const controls = await openDropdown(testPage);
+    const controls = await openAutomationControls(testPage);
 
     const reviewFollowUp = controls.getByTestId("mr-review-follow-up-trigger");
     await expect(reviewFollowUp).toHaveAttribute("aria-expanded", "false");
@@ -190,7 +193,7 @@ test.describe("GitLab MR automation options", () => {
 
     await testPage.reload();
     await expect(testPage.getByTestId("mr-topbar-button")).toBeVisible({ timeout: 15_000 });
-    const reloadedControls = await openDropdown(testPage);
+    const reloadedControls = await openAutomationControls(testPage);
     const reloadedTrigger = reloadedControls.getByTestId("mr-review-follow-up-trigger");
     // Auto-expands: a switch is already enabled.
     await expect(reloadedTrigger).toHaveAttribute("aria-expanded", "true");
@@ -200,7 +203,7 @@ test.describe("GitLab MR automation options", () => {
     await expect(reloadedControls.getByRole("switch", { name: "MR merged" })).toBeChecked();
   });
 
-  test("desktop dropdown shows a retry banner when the initial load fails", async ({
+  test("desktop hover popover shows a retry banner when the initial load fails", async ({
     testPage,
     apiClient,
     seedData,
@@ -209,7 +212,7 @@ test.describe("GitLab MR automation options", () => {
     await interceptLoadFailure(testPage);
     await openTask(testPage, taskId);
 
-    await testPage.getByTestId("mr-topbar-button").click();
+    await testPage.getByTestId("mr-topbar-button").hover();
     const controls = testPage.getByTestId("mr-automation-controls");
     await expect(controls).toBeVisible();
     // Visible without opening the collapsible section — the group never

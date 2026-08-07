@@ -36,15 +36,33 @@ export class GitLabPage {
     await expect(this.page).toHaveURL(/\/t\//);
   }
 
+  // A single linked MR on desktop opens its detail panel directly on click
+  // (no dropdown); a task with 2+ linked MRs, and touch/coarse-pointer
+  // regardless of MR count, still show the click-driven per-MR dropdown with
+  // a "Review !iid" menu item. Only click through the menu item when the
+  // dropdown actually appears, so this works for both.
   async openLinkedMR(iid: number) {
     await this.page.getByTestId("mr-topbar-button").click();
-    await this.page.getByRole("menuitem", { name: new RegExp(`Review .*\\!${iid}$`) }).click();
+    const reviewItem = this.page.getByRole("menuitem", { name: new RegExp(`Review .*\\!${iid}$`) });
+    if (await reviewItem.isVisible({ timeout: 2_000 }).catch(() => false)) {
+      await reviewItem.click();
+    }
     await expect(this.page.getByTestId("mr-detail-panel").last()).toBeVisible();
   }
 
+  // Same dual-path reasoning as openLinkedMR: touch/multi-MR unlink via the
+  // dropdown's menu item; single-MR desktop unlink lives in the hover
+  // popover's header icon button instead.
   async unlinkMR(iid: number) {
-    await this.page.getByTestId("mr-topbar-button").click();
-    await this.page.getByRole("menuitem", { name: `Unlink !${iid}` }).click();
+    const trigger = this.page.getByTestId("mr-topbar-button");
+    await trigger.click();
+    const unlinkMenuItem = this.page.getByRole("menuitem", { name: `Unlink !${iid}` });
+    if (await unlinkMenuItem.isVisible({ timeout: 2_000 }).catch(() => false)) {
+      await unlinkMenuItem.click();
+    } else {
+      await trigger.hover();
+      await this.page.getByRole("button", { name: `Unlink !${iid}` }).click();
+    }
     await expect(this.page.getByTestId("mr-topbar-button")).toHaveCount(0);
   }
 }
