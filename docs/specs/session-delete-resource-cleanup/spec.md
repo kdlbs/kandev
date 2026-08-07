@@ -374,3 +374,107 @@ backoff schedule are inherited unchanged from
   repos coincidentally sharing a branch name would undercount. This is a
   documented assumption, not a verified contract; revisit if `session.git.snapshots`
   gains an explicit repository/worktree identifier on each row.
+
+## REVIEW-ROUND: 1
+
+Review wave (2026-08-07) ran code-reviewer, security-reviewer, and test-supervisor
+(ksdd subagents), the repo's own `code-review` skill, and a cross-vendor Codex
+review over the diff (base `main`). Verdict: **production-bug residual, back to
+Build.** Three independently-confirmed, severe issues, all in or around the
+target-path-lock fix added this round to `ReclaimSessionWorktree` — each was
+independently verified against the actual code (not taken on a reviewer's word)
+before being recorded here.
+
+1. **CRITICAL — lock-order inversion / deadlock** (code-reviewer subagent).
+   `ReclaimSessionWorktree` (`apps/backend/internal/worktree/manager_cleanup.go`)
+   acquires `acquireWorktreeTargetPath(wt.Path)` first, then `repoLock` second.
+   Every worktree-creation path (`Create()` → `gitAddWorktree`/
+   `gitAddWorktreeExisting`/`gitAddWorktreeForRecreate` in
+   `manager_lifecycle.go`) acquires `repoLock` first (held via `defer` across
+   the whole call) and `acquireWorktreeTargetPath` second, nested inside. This
+   is a classic AB-BA inversion: when a session-delete reclaim and a same-task
+   worktree creation (e.g. `EnsureSession`'s auto-continuation right after the
+   delete — the exact scenario the target-path lock was added for) target the
+   same path concurrently, each can end up holding the lock the other wants,
+   with no deadline on either path to break the stall. This hangs the durable
+   cleanup worker and the session-launch request until a backend restart.
+   Fix: acquire `repoLock` before `acquireWorktreeTargetPath` in
+   `ReclaimSessionWorktree`, matching the order used everywhere else in the
+   package. The existing `TestReclaimSessionWorktree_
+   SerializesWithConcurrentTargetPathCreate` only simulates a bare
+   target-path-lock holder and does not catch this — add a test that holds
+   `repoLock` on the creation side while reclaim runs concurrently.
+
+2. **CRITICAL — `removeWorktreeDir` operates by path, not worktree ID; can
+   destroy a replacement worktree** (Codex, cross-vendor review; corroborated
+   by tracing `Create` → `tryReuseExisting` → `recreate`). Worktree directory
+   paths are derived only from task dir + repo name
+   (`prepareTaskWorktreePath`), independent of `worktree_id`. The target-path
+   lock added this round prevents the two operations from running literally
+   concurrently, but not the *sequential* failure: if a replacement worktree
+   (different `worktree_id`) legitimately wins the lock race and finishes
+   creating at the same path before reclaim acquires the lock,
+   `ReclaimSessionWorktree`'s reference-count check
+   (`CountActiveWorktreeReferences(ctx, wt.ID, nil)`) still correctly returns 0
+   for the *old* worktree's id — but `removeWorktreeDir(wt.Path, ...)` then
+   blindly force-removes whatever is *currently* registered at that path,
+   destroying the replacement's live data instead of leaving it alone. A
+   second, independent unprotected window: `Manager.recreate()`
+   (`manager_lifecycle.go:1074-1080`) calls `os.RemoveAll(existing.Path)`
+   completely outside any lock, before later acquiring the target-path lock
+   via `gitAddWorktreeForRecreate`. Fix: `ReclaimSessionWorktree` must verify,
+   while still holding the lock(s), that the current resident of `wt.Path` is
+   still `wt.ID` before removing (e.g. query the store for any other active
+   worktree row at that exact path with a different ID and skip removal if
+   found); move `recreate()`'s `os.RemoveAll` inside/after its lock
+   acquisition.
+
+3. **HIGH — ambiguous `DeleteTaskSession` error unconditionally cancels the
+   cleanup job, silently re-leaking the worktree** (security-reviewer
+   subagent; independently verified). `task_operations.go:2772-2774` calls
+   `cancelSessionDeleteResourceCleanup` unconditionally whenever
+   `DeleteTaskSession` returns an error — even when the mutation actually
+   committed (a realistic ambiguous-outcome class on this repo's supported
+   Postgres deployment target). If the delete did commit, the cancelled job
+   was the *only* remaining pointer to the worktree needing reclaim; cancelled
+   jobs are filtered out of `ListPreparedTaskResourceCleanupJobs`
+   (`state='prepared'` only), so reconciliation never revisits it — the
+   worktree leaks forever, silently, reproducing this card's original bug via
+   a different path. The fix pattern already exists in the same package for
+   the task-level trigger — `resolveTaskResourceCleanupAfterMutationError`
+   (`resource_cleanup_jobs.go:489`) — but was never wired into the
+   session-delete path; `sessionDeleteCleanupMutationCommitted` is used only
+   in the reconciliation path, not `DeleteSession`'s synchronous error branch.
+   Fix: mirror `resolveTaskResourceCleanupAfterMutationError` for
+   `session_delete` — check `sessionDeleteCleanupMutationCommitted` first;
+   activate if committed, cancel if not, mark with the existing
+   ambiguous-outcome sentinel if the check itself errors so reconciliation
+   retries it.
+
+4. **P1, spec-literal — delete confirm control not gated on the warning fetch
+   resolving** (Codex). The previous QA round considered this and treated it
+   as an accepted, documented design decision (there is an explicit code
+   comment and test asserting "nothing gates the delete button on the fetch
+   resolving"). Flagging again because an independent cross-vendor review
+   raised the same concern against the scenario's literal text (this doc,
+   Confirmation surface: "the dialog states both counts *before the confirm
+   control is used*") — Build's call whether to gate the control on the fetch
+   resolving or explicitly re-affirm the residual-risk decision, rather than
+   pass through silently a second time.
+
+5. **P2 — `git worktree prune` failure silently swallowed after
+   `forceRemoveDir` fallback** (Codex). `removeWorktreeDir`'s fallback path
+   (git remove fails → `forceRemoveDir` → `git worktree prune`) only logs a
+   prune failure at Debug and returns nil regardless; the job is marked
+   succeeded while the source repo can retain a stale `.git/worktrees/<id>`
+   registration. Lower severity (no disk leak; git generally self-heals stale
+   worktree admin entries) but worth tightening to match the function's own
+   doc comment ("directory-removal failure is returned rather than only
+   logged") — propagate prune failures too.
+
+Everything else reviewed clean: auth-boundary ordering, durable-worker
+snapshot isolation (no scope widening), the WS gateway backstop, the
+regression-guard reference-exclusion invariant (re-verified against a real
+SQLite store, including the sequential-sharing scenario), no `git branch -D`
+in the reclaim path, no command-injection surface, no secrets/PII in the new
+snapshot data, and job-claim CAS atomicity.
