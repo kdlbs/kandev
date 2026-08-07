@@ -237,6 +237,7 @@ type QueuePanelDisclosureProps = {
   onSendEntryNow: (entryId: string) => void;
 };
 
+/** Wraps QueuePanel in the collapsible open/close animation shell. */
 function QueuePanelDisclosure({
   isOpen,
   onOpenChange,
@@ -483,6 +484,8 @@ type QueuePanelProps = {
   onSendEntryNow: (entryId: string) => void;
 };
 
+/** Renders the expanded queue list: header controls plus one QueuedGhostMessage
+ * row per pending entry, gating each row's merge control on `mergeEnabled`. */
 function QueuePanel({
   entries,
   count,

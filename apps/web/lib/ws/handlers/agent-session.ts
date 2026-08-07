@@ -668,6 +668,8 @@ function handleCancellationPendingMessage(
   applyCancellationPending(store, payload);
 }
 
+/** Writes a message.queue.status_changed broadcast into the queue slice,
+ * defaulting count/max/mergeEnabled when the backend omits them. */
 function handleQueueStatusChangedMessage(
   store: StoreApi<AppState>,
   payload: QueueStatusChangedPayload,

@@ -30,6 +30,8 @@ type storedSettings struct {
 	MergeEnabled  *bool `json:"merge_enabled"`
 }
 
+// toSettings normalizes a decoded record into Settings, defaulting
+// MergeEnabled to true when the persisted JSON has no merge_enabled key.
 func (s storedSettings) toSettings() Settings {
 	mergeEnabled := true
 	if s.MergeEnabled != nil {

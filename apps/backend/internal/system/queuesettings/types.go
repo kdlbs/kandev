@@ -78,6 +78,8 @@ type Resolution struct {
 	InvalidEnvironment bool
 }
 
+// DefaultSettings returns the shipped defaults: no session-count cap and
+// merging enabled.
 func DefaultSettings() Settings {
 	return Settings{MaxPerSession: DefaultMaxPerSession, MergeEnabled: true}
 }

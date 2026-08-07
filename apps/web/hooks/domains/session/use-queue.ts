@@ -131,6 +131,9 @@ function useSendNowAction(
   );
 }
 
+/** Fetches the authoritative queue snapshot and writes it into the slice,
+ * discarding a response that arrives after a newer request for the same
+ * session was already issued (out-of-order network resolution). */
 function useQueueRefetch(
   setQueueEntries: ReturnType<typeof useQueueState>["setQueueEntries"],
   setQueueLoading: ReturnType<typeof useQueueState>["setQueueLoading"],

@@ -22,6 +22,8 @@ import type { MessageQueueSettingsResponse, MessageQueueSettingsSource } from "@
 
 const ENVIRONMENT_VARIABLE = "KANDEV_QUEUE_MAX_PER_SESSION";
 
+/** Parses the max-per-session draft text into a non-negative safe integer,
+ * or `null` when the text isn't a valid whole number. */
 function parseMaximum(value: string): number | null {
   const trimmed = value.trim();
   if (!/^\d+$/.test(trimmed)) return null;
@@ -29,6 +31,7 @@ function parseMaximum(value: string): number | null {
   return Number.isSafeInteger(parsed) ? parsed : null;
 }
 
+/** Maps an effective-settings source enum to its i18n label key. */
 function sourceLabelKey(source: MessageQueueSettingsSource): string {
   switch (source) {
     case "setting":
@@ -89,6 +92,9 @@ function useMessageQueueSettingsLoad() {
   };
 }
 
+/** Derives dirty/validity/permission state from the loaded snapshot and the
+ * two drafts, and registers the combined save/discard contributor that the
+ * page's floating save bar drives. */
 function useMessageQueueSettingsDraft() {
   const { t } = useTranslation();
   const role = useAppStore((state) => state.auth.user?.role);
@@ -177,6 +183,9 @@ type QueueLimitFieldsProps = {
   source: MessageQueueSettingsSource;
 };
 
+/** Renders the per-session limit input plus the configured/effective summary
+ * badge; a pure presentational block extracted so `MessageQueueSettings`
+ * stays under the per-function line limit. */
 function QueueLimitFields({
   draft,
   onDraftChange,
@@ -230,6 +239,8 @@ type MergeToggleFieldsProps = {
   disabled: boolean;
 };
 
+/** Renders the merge-enabled switch plus its limitations notice; extracted
+ * for the same per-function line-limit reason as `QueueLimitFields`. */
 function MergeToggleFields({ enabled, onChange, disabled }: MergeToggleFieldsProps) {
   const { t } = useTranslation();
   return (
@@ -261,6 +272,8 @@ function MergeToggleFields({ enabled, onChange, disabled }: MergeToggleFieldsPro
   );
 }
 
+/** Settings → General → Message Queue page: the per-session queue limit and
+ * the queued-message merge toggle, sharing one save contributor. */
 export function MessageQueueSettings() {
   const { t } = useTranslation();
   const state = useMessageQueueSettingsDraft();
