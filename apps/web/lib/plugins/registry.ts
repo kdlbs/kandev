@@ -16,6 +16,7 @@ import type {
   PluginRegistry,
   PluginRouteOptions,
   SlotComponent,
+  TaskFilterRegistration,
   TaskMenuActionRegistration,
   TaskPanelRegistration,
   WsHandler,
@@ -85,6 +86,11 @@ export interface PluginTaskMenuActionRegistration extends TaskMenuActionRegistra
   pluginId: string;
 }
 
+/** Task filter registration plus the owning pluginId. */
+export interface PluginTaskFilterRegistration extends TaskFilterRegistration {
+  pluginId: string;
+}
+
 /** Host-owned lifecycle states used to reconcile registrations with UI state. */
 export type PluginLifecycleStatus = "loading" | "ready" | "failed" | "removed";
 
@@ -107,6 +113,7 @@ class PluginRegistryStore {
   private keybindingHandlers: Owned<PluginKeybindingHandler>[] = [];
   private taskPanels: Owned<TaskPanelRegistration>[] = [];
   private taskMenuActions: Owned<TaskMenuActionRegistration>[] = [];
+  private taskFilters: Owned<TaskFilterRegistration>[] = [];
   private nextSlotRegistrationId = 0;
   /** Display names from the boot payload, used for derived page-chrome titles. */
   private pluginNames = new Map<string, string>();
@@ -236,6 +243,11 @@ class PluginRegistryStore {
     this.notify();
   }
 
+  registerTaskFilter(pluginId: string, registration: TaskFilterRegistration): void {
+    this.taskFilters.push({ pluginId, value: registration });
+    this.notify();
+  }
+
   /**
    * Records the keybinding ids declared in `pluginId`'s `ui.keybindings`
    * manifest, so `registerKeybinding` can warn on an undeclared id. Safe to
@@ -256,6 +268,7 @@ class PluginRegistryStore {
     this.keybindingHandlers = removeByPlugin(this.keybindingHandlers, pluginId);
     this.taskPanels = removeByPlugin(this.taskPanels, pluginId);
     this.taskMenuActions = removeByPlugin(this.taskMenuActions, pluginId);
+    this.taskFilters = removeByPlugin(this.taskFilters, pluginId);
     this.pluginNames.delete(pluginId);
     this.declaredKeybindingIds.delete(pluginId);
     if (this.totalCount() !== before) this.notify();
@@ -361,6 +374,11 @@ class PluginRegistryStore {
       .map((entry) => ({ ...entry.value, pluginId: entry.pluginId }));
   }
 
+  /** Every registered task filter, in registration order. */
+  getTaskFilters(): PluginTaskFilterRegistration[] {
+    return this.taskFilters.map((entry) => ({ ...entry.value, pluginId: entry.pluginId }));
+  }
+
   /** Registry view scoped to one plugin — matches the frozen `PluginRegistry` contract. */
   forPlugin(pluginId: string, pluginName?: string): PluginRegistry {
     if (pluginName) this.pluginNames.set(pluginId, pluginName);
@@ -375,6 +393,7 @@ class PluginRegistryStore {
       registerKeybinding: (id, handler) => this.registerKeybinding(pluginId, id, handler),
       registerTaskPanel: (registration) => this.registerTaskPanel(pluginId, registration),
       registerTaskMenuAction: (registration) => this.registerTaskMenuAction(pluginId, registration),
+      registerTaskFilter: (registration) => this.registerTaskFilter(pluginId, registration),
     };
   }
 
@@ -387,7 +406,8 @@ class PluginRegistryStore {
       this.wsHandlers.length +
       this.keybindingHandlers.length +
       this.taskPanels.length +
-      this.taskMenuActions.length
+      this.taskMenuActions.length +
+      this.taskFilters.length
     );
   }
 

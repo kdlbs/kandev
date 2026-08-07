@@ -187,7 +187,8 @@ bookkeeping is host-internal; plugins do not call lifecycle methods.
 | registerWsHandler | registerWsHandler(action, handler(payload)); receives actions bridged from lib/ws | Active ui.bundle | Handler is removed on disable/uninstall; tolerate duplicate/replayed actions | registry.registerWsHandler("acme.updated", renderUpdate) |
 | registerKeybinding | registerKeybinding(id, handler(event)); id must be declared in ui.keybindings; users can override the effective combo | ui.bundle and ui.keybindings[] | Handler is removed on disable/uninstall; editable targets/core shortcuts win | registry.registerKeybinding("open-panel", () => host.openModal(...)) |
 | registerTaskPanel | { id, title, icon?, Component, mobileEnabled? }; adds a row to the task workspace's "+" (add panel) menu; Component receives { panelId, taskId, sessionId, presentation } | Active ui.bundle | Panel renders behind its own error boundary; slow/failed reloads preserve it, a ready generation missing it closes it, and disable/uninstall closes every owned instance | registry.registerTaskPanel({ id: "notes", title: "Notes", Component: NotesPanel }) |
-| registerTaskMenuAction | { id, label, icon?, group: "edit", visible?(context), run(context) }; adds an item to the kanban card's Edit submenu | Active ui.bundle | Action is revoked on disable/uninstall; a throwing/rejecting run is caught and logged | registry.registerTaskMenuAction({ id: "enhance", label: "Enhance", group: "edit", run: doEnhance }) |
+| registerTaskMenuAction | { id, label, icon?, group: "edit" \| "primary", visible?(context), run(context) }; "edit" nests inside the card's Edit submenu, "primary" renders as a flat top-level item between "Move to"/"Send to workflow" and "Link" | Active ui.bundle | Action is revoked on disable/uninstall; a throwing/rejecting run is caught and logged | registry.registerTaskMenuAction({ id: "enhance", label: "Enhance", group: "edit", run: doEnhance }) |
+| registerTaskFilter | { id, label, getOptions(), matches(context, selected) }; adds a client-side, multi-select filter section to the kanban board's display dropdown, alongside Workflow/Repository | Active ui.bundle | Filter is revoked on disable/uninstall; selections are ephemeral (not persisted); matches is only called for a non-empty selection, and a throw is caught, logged, and treated as non-matching | registry.registerTaskFilter({ id: "tags", label: "Tags", getOptions: listTagOptions, matches: taskHasSelectedTag }) |
 | host.React / host.jsx | Shared React instance and React.createElement alias | Active ui.bundle | No cleanup; never bundle a second React/Radix runtime | const h = host.jsx |
 | host.store | Curated Zustand { getState, setState, subscribe } for the live app store | Active ui.bundle | Unsubscribe in destroy; setState mutates the whole SPA and is not a plugin database | const stop = host.store.subscribe(render) |
 | host.api.fetch / baseUrl | fetch(path, init?) is scoped to /api/plugins/<id>/...; baseUrl is the backend origin for split-origin deployments | Active ui.bundle; backend path must be a declared webhook when relayed | Abort/ignore requests after destroy; do not assume a webhook authenticates callers | host.api.fetch("webhooks/inbound", { method: "POST" }) |
@@ -657,7 +658,10 @@ Host reader because event queues are bounded and delivery is best-effort.
 
 ### 6. Kanban-aware contribution
 
-`registerTaskMenuAction` adds an item to the kanban card's `Edit` submenu;
+`registerTaskMenuAction` adds an item to the kanban card's context/dropdown
+menu — group `"edit"` nests it inside the `Edit` submenu, group `"primary"`
+renders it as a flat, top-level item positioned between the "Move
+to"/"Send to workflow" submenus and the "Link" submenu.
 `task-card-indicators` (see the named slots table) is the matching read-only
 surface, rendered beside the PR status icon on every card. Both `visible(context)`
 and `run(context)` receive the card's actual `presentation`: `"desktop"` on the
@@ -677,10 +681,37 @@ registry.registerTaskMenuAction({
 ```
 
 With no plugin action registered, the card's `Edit` item stays flat; once any
-plugin registers one, it becomes `Edit > Edit task` followed by each visible
-action. A `run` that throws or rejects is caught and logged, not left to crash
-the card; the menu closes either way. Do not patch first-party Kanban
-components directly.
+plugin registers one for group `"edit"`, it becomes `Edit > Edit task`
+followed by each visible action. A `run` that throws or rejects is caught and
+logged, not left to crash the card; the menu closes either way. Group
+`"primary"` actions render and behave the same way, just as their own
+top-level menu row instead of nested under `Edit`. Do not patch first-party
+Kanban components directly.
+
+`registerTaskFilter` adds a client-side, multi-select filter section to the
+kanban board's display dropdown, next to the built-in Workflow and Repository
+sections. The plugin supplies its own options (including any "untagged"-style
+sentinel — the host does not special-case option values) and a `matches`
+predicate; filtering runs entirely against tasks already loaded in the
+board's in-memory state, with no backend query or persistence — selections
+reset on reload.
+
+```js
+registry.registerTaskFilter({
+  id: "tags",
+  label: "Tags",
+  getOptions: () => [
+    { value: "bug", label: "Bug", color: "#ef4444" },
+    { value: "untagged", label: "Untagged" },
+  ],
+  matches: (context, selected) => taskHasAnyTag(context.taskId, selected),
+});
+```
+
+An empty selection is implicit "All" for that section — `matches` is only
+called once at least one option is selected, and a `matches` that throws is
+caught, logged, and treated as non-matching for that task.
+
 
 ## Build, package, install, and test
 
