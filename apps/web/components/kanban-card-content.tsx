@@ -432,7 +432,7 @@ function KanbanCardActions({
     <div className="flex items-center gap-2">
       {renderSubagentCountChip(
         task,
-        t("activeSubagents", { count: task.activeSubagentCount ?? 0 }),
+        t("common:activeSubagents", { count: task.activeSubagentCount ?? 0 }),
       )}
       {statusIcon}
       {showMaximizeButton && onOpenFullPage && hasKnownSession && (

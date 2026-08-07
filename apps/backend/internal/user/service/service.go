@@ -57,6 +57,7 @@ type UpdateUserSettingsRequest struct {
 	ShowScrollToLastPrompt          *bool
 	ShowScrollToStart               *bool
 	ShowTranscriptAutoScrollControl *bool
+	ShowTodoListPanel               *bool
 	ShowReleaseNotification         *bool
 	ReleaseNotesLastSeenVersion     *string
 	LspAutoStartLanguages           *[]string
@@ -305,6 +306,9 @@ func applyTaskActionPreferences(settings *models.UserSettings, req *UpdateUserSe
 	}
 	if req.ShowTranscriptAutoScrollControl != nil {
 		settings.ShowTranscriptAutoScrollControl = *req.ShowTranscriptAutoScrollControl
+	}
+	if req.ShowTodoListPanel != nil {
+		settings.ShowTodoListPanel = *req.ShowTodoListPanel
 	}
 	if req.ShowReleaseNotification != nil {
 		settings.ShowReleaseNotification = *req.ShowReleaseNotification
@@ -711,6 +715,7 @@ func (s *Service) publishUserSettingsEvent(ctx context.Context, settings *models
 		"show_scroll_to_last_prompt":          settings.ShowScrollToLastPrompt,
 		"show_scroll_to_start":                settings.ShowScrollToStart,
 		"show_transcript_auto_scroll_control": settings.ShowTranscriptAutoScrollControl,
+		"show_todo_list_panel":                settings.ShowTodoListPanel,
 		"show_release_notification":           settings.ShowReleaseNotification,
 		"release_notes_last_seen_version":     settings.ReleaseNotesLastSeenVersion,
 		"lsp_auto_start_languages":            settings.LspAutoStartLanguages,

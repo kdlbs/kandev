@@ -25,6 +25,7 @@ import { TaskChangesPanel } from "./task-changes-panel";
 import { TaskChatPanel } from "./task-chat-panel";
 import { TaskPlanPanel } from "./task-plan-panel";
 import { TerminalPanel } from "./terminal-panel";
+import { TodosContent } from "./todos-panel-content";
 import { VscodePanel } from "./vscode-panel";
 
 export const CHAT_PANEL_FALLBACK_LABEL = "Agent";
@@ -215,6 +216,7 @@ const PANEL_RENDERERS: Record<string, PanelRenderer> = {
   browser: (panelId, params) => <BrowserPanel panelId={panelId} params={params} />,
   vscode: (panelId) => <VscodePanel panelId={panelId} />,
   plan: () => <PlanContent />,
+  todos: () => <TodosContent />,
   "pr-detail": (panelId, params) => (
     <ReviewDetailPanelComponent panelId={panelId} params={params} />
   ),

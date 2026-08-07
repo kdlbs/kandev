@@ -13,8 +13,8 @@ import { TooltipProvider } from "@kandev/ui/tooltip";
 
 const useGitHubStatusMock = vi.hoisted(() => vi.fn());
 const useGitLabAvailableMock = vi.hoisted(() => vi.fn());
-const useJiraAvailableMock = vi.hoisted(() => vi.fn());
-const useLinearAvailableMock = vi.hoisted(() => vi.fn());
+const useJiraAuthedMock = vi.hoisted(() => vi.fn());
+const useLinearAuthedMock = vi.hoisted(() => vi.fn());
 const activeWorkspaceRef = vi.hoisted(() => ({
   id: null as string | null,
   items: [] as Array<{ id: string }>,
@@ -29,11 +29,39 @@ vi.mock("@/hooks/domains/gitlab/use-task-mr", () => ({
 }));
 
 vi.mock("@/hooks/domains/jira/use-jira-availability", () => ({
-  useJiraAvailable: useJiraAvailableMock,
+  useJiraAuthed: useJiraAuthedMock,
 }));
 
 vi.mock("@/hooks/domains/linear/use-linear-availability", () => ({
-  useLinearAvailable: useLinearAvailableMock,
+  useLinearAuthed: useLinearAuthedMock,
+}));
+
+// useNavAvailability now also folds in each integration's install-wide
+// enabled toggle plus the "hide disabled" nav setting. This suite never
+// exercises that decoupling (see hooks/use-nav-availability.test.ts for
+// that) — every enabled hook here defaults to `true` and the hide-disabled
+// setting to `false`, reproducing the pre-existing "enabled && authed"
+// visibility these tests already assert on.
+function enabledStub() {
+  return { enabled: true, setEnabled: () => {}, loaded: true };
+}
+vi.mock("@/hooks/domains/azure-devops/use-azure-devops-enabled", () => ({
+  useAzureDevOpsEnabled: enabledStub,
+}));
+vi.mock("@/hooks/domains/github/use-github-enabled", () => ({
+  useGitHubEnabled: enabledStub,
+}));
+vi.mock("@/hooks/domains/gitlab/use-gitlab-enabled", () => ({
+  useGitLabEnabled: enabledStub,
+}));
+vi.mock("@/hooks/domains/jira/use-jira-enabled", () => ({
+  useJiraEnabled: enabledStub,
+}));
+vi.mock("@/hooks/domains/linear/use-linear-enabled", () => ({
+  useLinearEnabled: enabledStub,
+}));
+vi.mock("@/hooks/domains/integrations/use-hide-disabled-integrations-in-nav", () => ({
+  useHideDisabledIntegrationsInNav: () => ({ hideDisabled: false, setHideDisabled: () => {} }),
 }));
 
 vi.mock("@/components/state-provider", () => ({
@@ -65,21 +93,21 @@ function status(overrides: Partial<GitHubStatus>): GitHubStatus {
 function mockAvailability({
   githubReady,
   gitlabReady = false,
-  jiraAvailable,
-  linearAvailable,
+  jiraConfigured,
+  linearConfigured,
 }: {
   githubReady: boolean;
   gitlabReady?: boolean;
-  jiraAvailable: boolean;
-  linearAvailable: boolean;
+  jiraConfigured: boolean;
+  linearConfigured: boolean;
 }) {
   useGitHubStatusMock.mockReturnValue({
     status: githubReady ? status({ token_configured: true }) : status({}),
     loading: false,
   });
   useGitLabAvailableMock.mockReturnValue(gitlabReady);
-  useJiraAvailableMock.mockReturnValue(jiraAvailable);
-  useLinearAvailableMock.mockReturnValue(linearAvailable);
+  useJiraAuthedMock.mockReturnValue(jiraConfigured);
+  useLinearAuthedMock.mockReturnValue(linearConfigured);
 }
 
 afterEach(() => {
@@ -96,7 +124,7 @@ afterEach(() => {
 
 describe("IntegrationsMenu", () => {
   it("opens configured integration links on hover", async () => {
-    mockAvailability({ githubReady: true, jiraAvailable: true, linearAvailable: false });
+    mockAvailability({ githubReady: true, jiraConfigured: true, linearConfigured: false });
 
     render(createElement(IntegrationsMenu, {}));
 
@@ -111,7 +139,7 @@ describe("IntegrationsMenu", () => {
   });
 
   it("does not render when no integrations are configured", () => {
-    mockAvailability({ githubReady: false, jiraAvailable: false, linearAvailable: false });
+    mockAvailability({ githubReady: false, jiraConfigured: false, linearConfigured: false });
 
     render(createElement(IntegrationsMenu, {}));
 
@@ -121,14 +149,14 @@ describe("IntegrationsMenu", () => {
   it("passes the active workspace id to the per-workspace availability hooks", () => {
     activeWorkspaceRef.id = "ws-active";
     activeWorkspaceRef.items = [{ id: "ws-active" }];
-    mockAvailability({ githubReady: true, jiraAvailable: true, linearAvailable: true });
+    mockAvailability({ githubReady: true, jiraConfigured: true, linearConfigured: true });
 
     render(createElement(IntegrationsMenu, {}));
 
     // Jira and Linear are per-workspace: they must be scoped to the active
     // workspace so the sidebar reflects the workspace the user is viewing.
-    expect(useJiraAvailableMock).toHaveBeenCalledWith("ws-active");
-    expect(useLinearAvailableMock).toHaveBeenCalledWith("ws-active");
+    expect(useJiraAuthedMock).toHaveBeenCalledWith("ws-active");
+    expect(useLinearAuthedMock).toHaveBeenCalledWith("ws-active");
   });
 
   it("falls back to null scope when the active workspace id is stale", () => {
@@ -137,12 +165,12 @@ describe("IntegrationsMenu", () => {
     // backend's default-workspace resolution applies.
     activeWorkspaceRef.id = "ws-deleted";
     activeWorkspaceRef.items = [{ id: "ws-remaining" }];
-    mockAvailability({ githubReady: false, jiraAvailable: true, linearAvailable: true });
+    mockAvailability({ githubReady: false, jiraConfigured: true, linearConfigured: true });
 
     render(createElement(IntegrationsMenu, {}));
 
-    expect(useJiraAvailableMock).toHaveBeenCalledWith(null);
-    expect(useLinearAvailableMock).toHaveBeenCalledWith(null);
+    expect(useJiraAuthedMock).toHaveBeenCalledWith(null);
+    expect(useLinearAuthedMock).toHaveBeenCalledWith(null);
   });
 });
 
@@ -153,7 +181,7 @@ function renderWithTooltip(component: Parameters<typeof render>[0]) {
 
 describe("IntegrationsTopbarLinks", () => {
   it("renders an icon link for each configured integration", () => {
-    mockAvailability({ githubReady: true, jiraAvailable: false, linearAvailable: true });
+    mockAvailability({ githubReady: true, jiraConfigured: false, linearConfigured: true });
 
     renderWithTooltip(createElement(IntegrationsTopbarLinks, {}));
 
@@ -165,7 +193,7 @@ describe("IntegrationsTopbarLinks", () => {
   });
 
   it("renders nothing when no integrations are configured", () => {
-    mockAvailability({ githubReady: false, jiraAvailable: false, linearAvailable: false });
+    mockAvailability({ githubReady: false, jiraConfigured: false, linearConfigured: false });
 
     const { container } = renderWithTooltip(createElement(IntegrationsTopbarLinks, {}));
     expect(container.firstChild).toBeNull();
@@ -208,7 +236,7 @@ describe("MobileIntegrationsSection", () => {
   }
 
   it("renders a touch row for each configured first-party link and closes the sheet on click", () => {
-    mockAvailability({ githubReady: true, jiraAvailable: false, linearAvailable: true });
+    mockAvailability({ githubReady: true, jiraConfigured: false, linearConfigured: true });
 
     const { onNavigate } = renderMobileSection();
 
@@ -222,7 +250,7 @@ describe("MobileIntegrationsSection", () => {
   });
 
   it("renders plugin nav items targeting the integrations section, gated on the plugins flag", () => {
-    mockAvailability({ githubReady: false, jiraAvailable: false, linearAvailable: false });
+    mockAvailability({ githubReady: false, jiraConfigured: false, linearConfigured: false });
     registerHelloIntegrationItem();
     registerNavItem("plugin-b", {
       id: "main-item",
@@ -241,7 +269,7 @@ describe("MobileIntegrationsSection", () => {
   });
 
   it("renders when only plugin items exist and no first-party links are configured", () => {
-    mockAvailability({ githubReady: false, jiraAvailable: false, linearAvailable: false });
+    mockAvailability({ githubReady: false, jiraConfigured: false, linearConfigured: false });
     registerHelloIntegrationItem();
 
     renderMobileSection();
@@ -251,7 +279,7 @@ describe("MobileIntegrationsSection", () => {
   });
 
   it("renders nothing when there are no links and no plugin items", () => {
-    mockAvailability({ githubReady: false, jiraAvailable: false, linearAvailable: false });
+    mockAvailability({ githubReady: false, jiraConfigured: false, linearConfigured: false });
 
     const { container } = renderMobileSection();
 

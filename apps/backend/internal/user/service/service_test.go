@@ -381,6 +381,38 @@ func TestApplyBasicSettingsShowAnchoredPromptBar(t *testing.T) {
 	})
 }
 
+func TestApplyBasicSettingsTodoListPanel(t *testing.T) {
+	t.Run("omission preserves saved value", func(t *testing.T) {
+		settings := &models.UserSettings{ShowTodoListPanel: true}
+		if err := applyBasicSettings(settings, &UpdateUserSettingsRequest{}); err != nil {
+			t.Fatalf("apply settings: %v", err)
+		}
+		if !settings.ShowTodoListPanel {
+			t.Fatal("ShowTodoListPanel = false, want true (unchanged)")
+		}
+	})
+
+	t.Run("explicit value replaces saved value", func(t *testing.T) {
+		settings := &models.UserSettings{ShowTodoListPanel: false}
+		if err := applyBasicSettings(settings, &UpdateUserSettingsRequest{ShowTodoListPanel: ptr(true)}); err != nil {
+			t.Fatalf("apply settings: %v", err)
+		}
+		if !settings.ShowTodoListPanel {
+			t.Fatal("ShowTodoListPanel = false, want true")
+		}
+	})
+
+	t.Run("explicit false disables it", func(t *testing.T) {
+		settings := &models.UserSettings{ShowTodoListPanel: true}
+		if err := applyBasicSettings(settings, &UpdateUserSettingsRequest{ShowTodoListPanel: ptr(false)}); err != nil {
+			t.Fatalf("apply settings: %v", err)
+		}
+		if settings.ShowTodoListPanel {
+			t.Fatal("ShowTodoListPanel = true, want false")
+		}
+	})
+}
+
 func TestApplyBasicSettingsTranscriptNavigation(t *testing.T) {
 	settings := &models.UserSettings{
 		ShowScrollToLastPrompt:          true,

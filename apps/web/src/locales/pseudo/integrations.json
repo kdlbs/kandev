@@ -69,7 +69,7 @@
   "disabled": "Ďĩśàƀĺēď",
   "dismissed": "Ďĩśḿĩśśēď",
   "draftCreated": "Ďŕàƒţ {{shortName}} ćŕēàţēď",
-  "enabled": "Ēńàƀĺēď",
+  "enableIntegrationNamed": "Ēńàƀĺē {{name}}",
   "enterCommitMessage": "Ēńţēŕ ćōḿḿĩţ ḿēśśàĝē...",
   "failedToCopyConfig": "Ƒàĩĺēď ţō ćōƥŷ ćōńƒĩĝ: {{err}}",
   "failed": "Ƒàĩĺēď",

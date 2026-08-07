@@ -389,6 +389,24 @@ describe("transcript navigation settings", () => {
   });
 });
 
+describe("todo list panel setting", () => {
+  it("defaults to hidden and preserves an explicit true", () => {
+    const fallback = mapUserSettingsResponse(null) as { showTodoListPanel?: boolean };
+    const enabled = mapUserSettingsResponse({
+      settings: {
+        user_id: DEFAULT_USER_ID,
+        workspace_id: toWorkspaceId(""),
+        repository_ids: [],
+        show_todo_list_panel: true,
+        updated_at: UPDATED_AT,
+      } as unknown as NonNullable<Parameters<typeof mapUserSettingsResponse>[0]>["settings"],
+    }) as { showTodoListPanel?: boolean };
+
+    expect(fallback.showTodoListPanel).toBe(false);
+    expect(enabled.showTodoListPanel).toBe(true);
+  });
+});
+
 describe("parseChangesPanelLayout", () => {
   it('returns "tree" for "tree"', () => {
     expect(parseChangesPanelLayout("tree")).toBe("tree");

@@ -470,7 +470,7 @@ function useSessionData(
 
 type TodoStatus = "pending" | "in_progress" | "completed" | "failed";
 
-function useSessionTodoItems(
+export function useSessionTodoItems(
   resolvedSessionId: string | null,
   messageTodos: Array<{ text: string; done?: boolean }>,
 ) {

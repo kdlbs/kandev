@@ -69,7 +69,7 @@
   "disabled": "Disabled",
   "dismissed": "Dismissed",
   "draftCreated": "Draft {{shortName}} created",
-  "enabled": "Enabled",
+  "enableIntegrationNamed": "Enable {{name}}",
   "enterCommitMessage": "Enter commit message...",
   "failedToCopyConfig": "Failed to copy config: {{err}}",
   "failed": "Failed",

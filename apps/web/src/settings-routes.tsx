@@ -13,12 +13,6 @@ import ProfileEditPage from "@/app/settings/executors/[profileId]/page";
 import CreateProfilePage from "@/app/settings/executors/new/[type]/page";
 import SSHExecutorPage from "@/app/settings/executors/ssh/[executorId]/page";
 import ExternalMcpPage from "@/app/settings/external-mcp/page";
-import IntegrationsIndexPage from "@/app/settings/integrations/page";
-import IntegrationsAzureDevOpsPage from "@/app/settings/integrations/azure-devops/page";
-import IntegrationsGitLabPage from "@/app/settings/integrations/gitlab/page";
-import IntegrationsJiraPage from "@/app/settings/integrations/jira/page";
-import IntegrationsLinearPage from "@/app/settings/integrations/linear/page";
-import IntegrationsSentryPage from "@/app/settings/integrations/sentry/page";
 import PluginsSettingsPage from "@/app/settings/plugins/page";
 import PluginDetailPage from "@/app/settings/plugins/[pluginId]/page";
 import MessageQueueSettingsPage from "@/app/settings/general/message-queue/page";
@@ -31,7 +25,6 @@ import WorkspaceEditPage from "@/app/settings/workspace/[id]/page";
 import { WorkspaceRepositoriesClient } from "@/app/settings/workspace/workspace-repositories-client";
 import { WorkspaceWorkflowsClient } from "@/app/settings/workspace/workspace-workflows-client";
 import WorkspacesPage from "@/app/settings/workspace/page";
-import { GitHubIntegrationPage } from "@/components/github/github-settings";
 import Link from "@/components/routing/app-link";
 import { useAppStoreApi } from "@/components/state-provider";
 import { EditorsSettings } from "@/components/settings/editors-settings";
@@ -112,7 +105,7 @@ import type {
   Workspace,
 } from "@/lib/types/http";
 import type { LicenseEntry } from "@/lib/types/system";
-import { renderPluginIntegrationSettings } from "./plugin-integration-settings-route";
+import { renderIntegrationSettingsRoute } from "./integration-settings-route";
 
 type RouteRenderer = () => ReactNode;
 type RepositoryWithScripts = Repository & { scripts: RepositoryScript[] };
@@ -386,27 +379,6 @@ function renderWorkspaceSettingsRoute(pathname: string) {
   }
 
   return null;
-}
-
-function renderIntegrationSettingsRoute(section: string | null, workspaceId?: string) {
-  switch (section) {
-    case null:
-      return <IntegrationsIndexPage workspaceId={workspaceId} />;
-    case "azure-devops":
-      return <IntegrationsAzureDevOpsPage workspaceId={workspaceId} />;
-    case "github":
-      return <GitHubIntegrationPage workspaceId={workspaceId} />;
-    case "gitlab":
-      return <IntegrationsGitLabPage workspaceId={workspaceId} />;
-    case "jira":
-      return <IntegrationsJiraPage workspaceId={workspaceId} />;
-    case "linear":
-      return <IntegrationsLinearPage workspaceId={workspaceId} />;
-    case "sentry":
-      return <IntegrationsSentryPage workspaceId={workspaceId} />;
-    default:
-      return renderPluginIntegrationSettings(section, workspaceId);
-  }
 }
 
 // Components rather than inline JSX so `t()` resolves at render — a t() call

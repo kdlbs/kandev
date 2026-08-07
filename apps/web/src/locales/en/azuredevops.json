@@ -51,6 +51,7 @@
   "delete": "Delete",
   "deleteWatchConfirm": "Delete this watch?",
   "description": "Description",
+  "descriptionFallback": "(no description)",
   "disable": "Disable",
   "disabled": "Disabled",
   "discussion": "Discussion",

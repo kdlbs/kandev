@@ -467,6 +467,7 @@ func marshalUserSettingsPayload(settings *models.UserSettings) ([]byte, error) {
 		"show_scroll_to_last_prompt":          settings.ShowScrollToLastPrompt,
 		"show_scroll_to_start":                settings.ShowScrollToStart,
 		"show_transcript_auto_scroll_control": settings.ShowTranscriptAutoScrollControl,
+		"show_todo_list_panel":                settings.ShowTodoListPanel,
 		"show_release_notification":           settings.ShowReleaseNotification,
 		"release_notes_last_seen_version":     settings.ReleaseNotesLastSeenVersion,
 		"lsp_auto_start_languages":            lspAutoStart,
@@ -589,6 +590,7 @@ func defaultUserSettings(userID string) *models.UserSettings {
 		ShowScrollToLastPrompt:          true,
 		ShowScrollToStart:               false,
 		ShowTranscriptAutoScrollControl: false,
+		ShowTodoListPanel:               false,
 		ShowReleaseNotification:         true,
 		LspAutoStartLanguages:           []string{},
 		LspAutoInstallLanguages:         []string{},
@@ -650,6 +652,7 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 		ShowScrollToLastPrompt          *bool                               `json:"show_scroll_to_last_prompt"`
 		ShowScrollToStart               *bool                               `json:"show_scroll_to_start"`
 		ShowTranscriptAutoScrollControl *bool                               `json:"show_transcript_auto_scroll_control"`
+		ShowTodoListPanel               *bool                               `json:"show_todo_list_panel"`
 		ShowReleaseNotification         *bool                               `json:"show_release_notification"`
 		ReleaseNotesLastSeenVersion     string                              `json:"release_notes_last_seen_version"`
 		LspAutoStartLanguages           []string                            `json:"lsp_auto_start_languages"`
@@ -724,6 +727,9 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 	}
 	if payload.ShowTranscriptAutoScrollControl != nil {
 		settings.ShowTranscriptAutoScrollControl = *payload.ShowTranscriptAutoScrollControl
+	}
+	if payload.ShowTodoListPanel != nil {
+		settings.ShowTodoListPanel = *payload.ShowTodoListPanel
 	}
 	if payload.ShowReleaseNotification != nil {
 		settings.ShowReleaseNotification = *payload.ShowReleaseNotification

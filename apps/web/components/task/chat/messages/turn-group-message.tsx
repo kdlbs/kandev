@@ -370,7 +370,7 @@ export const TurnGroupMessage = memo(function TurnGroupMessage({
   // calls and nothing else.
   const rawDescription = isGroupRunning
     ? getActiveGroupDescription(group.messages)
-    : t("turnGroupToolCalls", { count: group.messages.length });
+    : t("chat:turnGroupToolCalls", { count: group.messages.length });
   const description = transformPathsInText(rawDescription, worktreePath);
   const count = group.messages.length;
 

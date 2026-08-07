@@ -2,17 +2,25 @@
 
 import { useAppStore } from "@/components/state-provider";
 import { useAzureDevOpsAvailable } from "@/hooks/domains/azure-devops/use-azure-devops-availability";
+import { useAzureDevOpsEnabled } from "@/hooks/domains/azure-devops/use-azure-devops-enabled";
 import { useGitHubStatus } from "@/hooks/domains/github/use-github-status";
+import { useGitHubEnabled } from "@/hooks/domains/github/use-github-enabled";
 import { useGitLabAvailable } from "@/hooks/domains/gitlab/use-task-mr";
-import { useJiraAvailable } from "@/hooks/domains/jira/use-jira-availability";
-import { useLinearAvailable } from "@/hooks/domains/linear/use-linear-availability";
+import { useGitLabEnabled } from "@/hooks/domains/gitlab/use-gitlab-enabled";
+import { useJiraAuthed } from "@/hooks/domains/jira/use-jira-availability";
+import { useJiraEnabled } from "@/hooks/domains/jira/use-jira-enabled";
+import { useLinearAuthed } from "@/hooks/domains/linear/use-linear-availability";
+import { useLinearEnabled } from "@/hooks/domains/linear/use-linear-enabled";
+import { useHideDisabledIntegrationsInNav } from "@/hooks/domains/integrations/use-hide-disabled-integrations-in-nav";
 import type { AvailabilityMap } from "@/lib/navigation/types";
 import type { GitHubStatus } from "@/lib/types/github";
 
+/** Human-readable status label for a not-yet-connected integration destination. */
 function getStatusLabel(loading: boolean | undefined): string {
   return loading ? "Checking" : "Setup";
 }
 
+/** Derives the GitHub nav destination's ready/label pair from its auth status. */
 export function getGitHubIntegrationStatus(status: GitHubStatus | null, loading: boolean) {
   if (status?.authenticated) return { ready: true, label: "Connected" };
   if (status?.token_configured) return { ready: true, label: "Configured" };
@@ -27,6 +35,18 @@ export function getGitHubIntegrationStatus(status: GitHubStatus | null, loading:
  * Extracted from `useConfiguredIntegrationLinks` so the sidebar link list and the
  * mobile menu gate on one implementation instead of each calling the five domain
  * hooks themselves.
+ *
+ * A destination is visible when it is **configured** (credentials saved,
+ * auth healthy) AND, only when the user has turned on "Hide disabled
+ * integrations from left panel navigation" (`useHideDisabledIntegrationsInNav`,
+ * off by default), also **enabled**. With that setting off — the default — a
+ * disabled-but-configured integration still shows in the nav exactly like an
+ * enabled one; only credential/health status gates it. This deliberately
+ * decouples nav visibility from the per-integration "enabled" toggle used
+ * elsewhere (import popovers, Kanban external-link buttons, task-top-bar
+ * buttons) — those keep gating on enabled-and-authed via each integration's
+ * `useXAvailable`, unaffected by this hook. See
+ * `docs/specs/integrations/enable-disable-toggle.md`.
  *
  * Availability is **not** deduplicated across consumers. GitHub and GitLab are
  * store-backed, but Jira, Linear and Azure DevOps go through
@@ -58,16 +78,27 @@ export function useNavAvailability(): AvailabilityMap {
   // default-workspace resolution applies instead.
   const scopedWorkspaceId = activeWorkspaceExists ? activeWorkspaceId : null;
   const { status, loading } = useGitHubStatus();
-  const gitlabAvailable = useGitLabAvailable();
-  const jiraAvailable = useJiraAvailable(scopedWorkspaceId);
-  const linearAvailable = useLinearAvailable(scopedWorkspaceId);
-  const azureDevOpsAvailable = useAzureDevOpsAvailable(scopedWorkspaceId);
+  const gitlabConfigured = useGitLabAvailable();
+  const jiraConfigured = useJiraAuthed(scopedWorkspaceId);
+  const linearConfigured = useLinearAuthed(scopedWorkspaceId);
+  const azureDevOpsConfigured = useAzureDevOpsAvailable(scopedWorkspaceId);
+  const githubConfigured = getGitHubIntegrationStatus(status, loading).ready;
+
+  const { enabled: azureDevOpsEnabled } = useAzureDevOpsEnabled();
+  const { enabled: githubEnabled } = useGitHubEnabled();
+  const { enabled: gitlabEnabled } = useGitLabEnabled();
+  const { enabled: jiraEnabled } = useJiraEnabled();
+  const { enabled: linearEnabled } = useLinearEnabled();
+
+  const { hideDisabled } = useHideDisabledIntegrationsInNav();
+  const visible = (configured: boolean, enabled: boolean) =>
+    configured && (!hideDisabled || enabled);
 
   return {
-    "azure-devops": !!azureDevOpsAvailable,
-    github: getGitHubIntegrationStatus(status, loading).ready,
-    gitlab: gitlabAvailable,
-    jira: jiraAvailable,
-    linear: linearAvailable,
+    "azure-devops": visible(!!azureDevOpsConfigured, azureDevOpsEnabled),
+    github: visible(githubConfigured, githubEnabled),
+    gitlab: visible(gitlabConfigured, gitlabEnabled),
+    jira: visible(jiraConfigured, jiraEnabled),
+    linear: visible(linearConfigured, linearEnabled),
   };
 }
