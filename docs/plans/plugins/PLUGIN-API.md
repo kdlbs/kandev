@@ -209,6 +209,10 @@ attach to the wrong tree, and responsive containers stop resizing. Compose the
 ```ts
 // Sonner's imperative toast — the host owns the single <Toaster/>.
 host.toast.success("Synced 12 issues");
+// .error also logs `[plugins] toast.error from "<pluginId>":` to the console.
+// It does NOT file a report into kandev's frontend error log: that log is for
+// kandev's own application errors, and a plugin toasting an expected
+// condition (a failed poll, say) would otherwise record one every cycle.
 host.toast.error("Sync failed");
 
 interface PluginUtilsApi {

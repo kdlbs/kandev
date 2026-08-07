@@ -312,6 +312,21 @@ describe("buildHostApi — host.toast / host.utils", () => {
     }
   });
 
+  // Scoped per plugin: an unattributed plugin error toast would land in
+  // kandev's own frontend error log as an application error.
+  it("scopes toast.error to the calling plugin rather than the app reporting seam", () => {
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const host = buildHostApi("kandev-plugin-github-status", createAppStore());
+
+    host.toast.error("Poll failed");
+
+    expect(consoleError).toHaveBeenCalledWith(
+      '[plugins] toast.error from "kandev-plugin-github-status":',
+      "Poll failed",
+    );
+    consoleError.mockRestore();
+  });
+
   it("exposes cn, merging conflicting tailwind classes the way host components do", () => {
     const host = buildHostApi("jira", createAppStore());
 

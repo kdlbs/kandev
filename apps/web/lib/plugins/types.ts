@@ -401,10 +401,16 @@ export interface PluginHostApi {
    */
   openModal(options: PluginModalOptions): PluginModalHandle;
   /**
-   * Sonner's imperative `toast` (through the app's error-reporting wrapper).
-   * The host mounts the single `<Toaster/>`, so there is nothing to render:
+   * Sonner's imperative `toast`, scoped to this plugin. The host mounts the
+   * single `<Toaster/>`, so there is nothing to render:
    * `host.toast.success(...)` / `.error(...)` / `.warning(...)` work from any
    * plugin code path, including inside a modal.
+   *
+   * `.error` additionally logs to the browser console as
+   * `[plugins] toast.error from "<pluginId>":`. It does **not** file a report
+   * into kandev's frontend error log — that log is for kandev's own
+   * application errors, and a plugin toasting an expected condition (a failed
+   * poll, say) would otherwise record one every cycle.
    */
   toast: PluginToastApi;
   /** Shared helpers — plain functions, not components. See `PluginUtilsApi`. */

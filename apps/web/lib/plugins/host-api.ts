@@ -101,7 +101,7 @@ import { PageTopbar } from "@/components/page-topbar";
 import { TaskCreateDialog } from "@/components/task-create-dialog";
 import { getBackendConfig } from "@/lib/config";
 import { formatRelativeTime } from "@/lib/i18n/formats";
-import { toast } from "@/lib/toast/sonner";
+import { createPluginToast } from "@/lib/toast/sonner";
 import { generateUUID } from "@/lib/utils";
 import { softNavigate } from "@/lib/routing/client-router";
 import type { AppState } from "@/lib/state/store";
@@ -317,11 +317,13 @@ export function buildHostApi(pluginId: string, storeApi: StoreApi<AppState>): Pl
     onThemeChange: (listener) => subscribeToThemeChanges(listener),
     navigate: (href, options) => softNavigate(href, options?.replace ? "replace" : "push"),
     openModal: (options) => pluginModalManager.openModal(pluginId, options),
-    // Sonner's imperative global (via the app's reporting wrapper). The app
-    // mounts <Toaster/> once in app/layout.tsx, so this needs no host wiring
-    // and — unlike a rendered component — works from a plugin modal
-    // regardless of which providers that modal sits under.
-    toast,
+    // Sonner's imperative global. The app mounts <Toaster/> once in
+    // app/layout.tsx, so this needs no host wiring and — unlike a rendered
+    // component — works from a plugin modal regardless of which providers
+    // that modal sits under. Scoped per plugin so `.error` logs with
+    // attribution rather than filing a kandev frontend error report; see
+    // createPluginToast.
+    toast: createPluginToast(pluginId),
     utils: PLUGIN_UTILS,
     storage: buildStorageApi(pluginId),
   };
