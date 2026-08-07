@@ -18,9 +18,15 @@ export function useMinVisibleDuration(active: boolean, minMs: number): boolean {
   const [visible, setVisible] = useState(active);
   const shownAtRef = useRef<number | null>(active ? Date.now() : null);
 
+  // Stamped in its own effect, keyed only on `active`. Folded into the effect
+  // below it would restamp on the re-render that `setVisible(true)` causes —
+  // `visible` is one of that effect's deps — starting the window a render late.
+  useEffect(() => {
+    if (active) shownAtRef.current = Date.now();
+  }, [active]);
+
   useEffect(() => {
     if (active) {
-      shownAtRef.current = Date.now();
       setVisible(true);
       return;
     }
