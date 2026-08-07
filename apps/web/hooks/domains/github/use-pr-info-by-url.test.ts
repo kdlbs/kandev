@@ -153,6 +153,43 @@ describe("usePRInfoByURL", () => {
     expect(fetchPRInfoMock).not.toHaveBeenCalled();
   });
 
+  it("retries an unsupported provider URL after its plugin finishes booting", async () => {
+    const url = "https://bitbucket.example.test/projects/PLATFORM/repos/web/pull-requests/42";
+    const { result } = renderHook(() => usePRInfoByURL(WORKSPACE_ID));
+    act(() => result.current.ensure(url));
+    expect(result.current.info(url)).toBeUndefined();
+
+    const inspectURL = vi.fn().mockResolvedValue({
+      providerId: "bitbucket",
+      providerHost: "https://bitbucket.example.test",
+      ownerOrProject: "PLATFORM",
+      repositoryId: "web-42",
+      repositoryName: "web",
+      cloneUrl: "https://bitbucket.example.test/scm/PLATFORM/web.git",
+      baseBranch: "main",
+      headBranch: "feature/plugin-ready",
+      pullRequest: { number: 42, title: "Plugin ready" },
+    });
+    act(() => {
+      pluginRegistry.forPlugin("test-bitbucket-provider").registerRepositoryProvider({
+        id: "bitbucket",
+        label: "Bitbucket",
+        listRepositories: async () => [],
+        matchesURL: (candidate) => candidate.startsWith("https://bitbucket.example.test/"),
+        listBranches: async () => [],
+        inspectURL,
+      });
+    });
+    act(() => result.current.ensure(url));
+
+    await waitFor(() =>
+      expect(result.current.info(url)?.prHeadBranch).toBe("feature/plugin-ready"),
+    );
+    expect(inspectURL).toHaveBeenCalledOnce();
+  });
+});
+
+describe("usePRInfoByURL — GitHub pull requests", () => {
   it("fetches PR info once per unique PR URL when ensure() is called", async () => {
     fetchPRInfoMock.mockImplementation((_ws: string, _o: string, _r: string, n: number) => {
       return Promise.resolve(makePR({ number: n, head: n === 42 ? "feat-a" : "feat-b" }));

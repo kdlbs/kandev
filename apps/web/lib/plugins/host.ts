@@ -125,6 +125,55 @@ function generationFencedRegistry(
   return fenced as unknown as PluginRegistry;
 }
 
+/**
+ * Fences host-side effects from a superseded or timed-out initializer. The
+ * registry alone is not enough: delayed plugin code can otherwise still open
+ * dialogs, navigate, mutate app state, or invoke authenticated actions after
+ * its registrations were revoked.
+ */
+function generationFencedHost(host: PluginHostApi, isCurrent: () => boolean): PluginHostApi {
+  const staleError = (): DOMException =>
+    new DOMException("Plugin load is no longer active", "AbortError");
+  const inertHandle = (): ReturnType<PluginHostApi["openModal"]> => ({ close: () => {} });
+  const setState = ((...args: unknown[]) => {
+    if (isCurrent()) {
+      (host.store.setState as unknown as (...forwarded: unknown[]) => void)(...args);
+    }
+  }) as PluginHostApi["store"]["setState"];
+  const subscribe: PluginHostApi["store"]["subscribe"] = (listener) => {
+    if (!isCurrent()) return () => {};
+    return host.store.subscribe((state, previousState) => {
+      if (isCurrent()) listener(state, previousState);
+    });
+  };
+  const fetch: PluginHostApi["api"]["fetch"] = (path, init) => {
+    if (!isCurrent()) return Promise.reject(staleError());
+    return host.api.fetch(path, init);
+  };
+  const invokeAction: PluginHostApi["api"]["invokeAction"] = (key, input, options) => {
+    if (!isCurrent()) return Promise.reject(staleError());
+    return host.api.invokeAction(key, input, options);
+  };
+
+  return {
+    ...host,
+    store: { ...host.store, setState, subscribe },
+    api: {
+      fetch,
+      invokeAction,
+      get baseUrl() {
+        return host.api.baseUrl;
+      },
+    },
+    navigate: (...args) => {
+      if (isCurrent()) host.navigate(...args);
+    },
+    openModal: (options) => (isCurrent() ? host.openModal(options) : inertHandle()),
+    openTaskLinkDialog: (options) =>
+      isCurrent() ? host.openTaskLinkDialog(options) : inertHandle(),
+  };
+}
+
 /** Defines `window.registerKandevPlugin` before any bundle loads. Idempotent. */
 export function installPluginGlobal(win: Window = window): void {
   (win as PluginGlobalWindow).registerKandevPlugin = (id, plugin) => {
@@ -177,7 +226,9 @@ async function loadPlugin(
     // revoke the successor's registrations or initialize an older bundle over
     // them (the boot-vs-update race Codex flagged).
     if (!isCurrentLoad(plugin.id, generation)) return;
-    const host = hostFactory(plugin.id);
+    const host = generationFencedHost(hostFactory(plugin.id), () =>
+      isCurrentLoad(plugin.id, generation),
+    );
     // Idempotent (re)load. The nav/route/slot registry is append-only, so
     // running a plugin's initialize() a second time while its previous
     // registrations are still live leaves duplicates — e.g. a plugin's

@@ -253,9 +253,9 @@ type repositoryHandlerRemoteLister struct {
 	expectedWorkspaceID string
 }
 
-func (l *repositoryHandlerRemoteLister) ListRepoBranches(_ context.Context, workspaceID, owner, name string) ([]service.Branch, error) {
+func (l *repositoryHandlerRemoteLister) ListRepoBranches(_ context.Context, source service.RemoteBranchSource) ([]service.Branch, error) {
 	l.calls++
-	if workspaceID != l.expectedWorkspaceID || owner != "owner" || name != "repo" {
+	if source.WorkspaceID != l.expectedWorkspaceID || source.Provider != "github" || source.Owner != "owner" || source.Name != "repo" {
 		return nil, errors.New("unexpected provider identity")
 	}
 	return []service.Branch{{Name: "main", Type: "remote"}}, nil

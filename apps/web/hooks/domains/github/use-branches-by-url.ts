@@ -6,7 +6,7 @@ import { listProjectBranches } from "@/lib/api/domains/gitlab-api";
 import { listAzureDevOpsBranches } from "@/lib/api/domains/azure-devops-api";
 import { parseGitHubAnyUrl } from "@/hooks/domains/github/use-pr-info-by-url";
 import type { Branch } from "@/lib/types/http";
-import { pluginRegistry } from "@/lib/plugins/registry";
+import { pluginRegistry, usePluginRegistry } from "@/lib/plugins/registry";
 import type { RepositoryProviderRegistration } from "@/lib/plugins/types";
 
 /**
@@ -157,6 +157,8 @@ function finalizeRequest(refs: Refs, url: string, request: RequestIdentity): voi
 }
 
 export function useBranchesByURL(workspaceId: string | null = null): UseBranchesByURLResult {
+  const registryVersion = usePluginRegistry().getVersion();
+  const registryVersionRef = useRef(registryVersion);
   const [state, setState] = useState<Record<string, URLState>>({});
   // Tracks in-flight URLs so concurrent ensure() calls coalesce. We use a ref
   // (not state) because the dedup check must observe the latest value
@@ -217,6 +219,10 @@ export function useBranchesByURL(workspaceId: string | null = null): UseBranches
       // comment in usePRInfoByURL for the rationale.
       const url = rawUrl.trim();
       if (!url) return;
+      if (registryVersionRef.current !== registryVersion) {
+        registryVersionRef.current = registryVersion;
+        loadedRef.current.delete(url);
+      }
       if (inFlightRef.current.has(url) || loadedRef.current.has(url)) return;
       // Accept plain repo URLs plus PR/issue URLs — branches are listed against
       // the repo in every case, so we extract just `{ owner, repo }` and ignore
@@ -236,7 +242,7 @@ export function useBranchesByURL(workspaceId: string | null = null): UseBranches
         .catch((error) => handleFailure(refs, setState, url, requestIdentity, error))
         .finally(() => finalizeRequest(refs, url, requestIdentity));
     },
-    [workspaceId],
+    [registryVersion, workspaceId],
   );
 
   const clear = useCallback((rawUrl: string) => {
@@ -329,7 +335,8 @@ function branchEntry(entry: unknown): Array<{ name: string }> {
     "name" in entry &&
     typeof (entry as { name?: unknown }).name === "string"
   ) {
-    return [{ name: (entry as { name: string }).name }];
+    const name = (entry as { name: string }).name.trim();
+    return name ? [{ name }] : [];
   }
   return [];
 }

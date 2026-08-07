@@ -152,6 +152,23 @@ describe("useRemoteRepositories provider results", () => {
 });
 
 describe("useRemoteRepositories workspace scope", () => {
+  it("does not invoke plugin providers without an active workspace", async () => {
+    const listRepositories = vi.fn().mockResolvedValue([]);
+    pluginRegistry.forPlugin("test-bitbucket-provider").registerRepositoryProvider({
+      id: "bitbucket",
+      label: "Bitbucket",
+      matchesURL: () => false,
+      listBranches: async () => [],
+      inspectURL: async () => null,
+      listRepositories,
+    });
+
+    const { result } = renderHook(() => useRemoteRepositories(""));
+
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(listRepositories).not.toHaveBeenCalled();
+  });
+
   it("clears repositories immediately when the workspace changes", async () => {
     mocks.fetchAccessibleRepos.mockResolvedValue([]);
     mocks.listUserProjects.mockRejectedValue(new Error("GitLab not configured"));

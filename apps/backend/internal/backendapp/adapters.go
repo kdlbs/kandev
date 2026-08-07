@@ -159,6 +159,7 @@ func (a *lifecycleAdapter) LaunchAgent(ctx context.Context, req *executor.Launch
 		WorktreeBranchTemplate: req.WorktreeBranchTemplate,
 		WorktreeBranchTicket:   req.WorktreeBranchTicket,
 		PullBeforeWorktree:     req.PullBeforeWorktree,
+		RemoteSyncHandled:      req.RemoteSyncHandled,
 		// Task directory mode
 		TaskDirName:        req.TaskDirName,
 		RepoName:           req.RepoName,
@@ -199,6 +200,7 @@ func (a *lifecycleAdapter) LaunchAgent(ctx context.Context, req *executor.Launch
 				WorktreeBranchTemplate: r.WorktreeBranchTemplate,
 				WorktreeBranchTicket:   r.WorktreeBranchTicket,
 				PullBeforeWorktree:     r.PullBeforeWorktree,
+				RemoteSyncHandled:      r.RemoteSyncHandled,
 				RepoSetupScript:        r.RepoSetupScript,
 				RepoCleanupScript:      r.RepoCleanupScript,
 				CopyFiles:              r.CopyFiles,

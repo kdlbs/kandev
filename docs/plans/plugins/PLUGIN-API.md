@@ -79,13 +79,22 @@ interface PluginHostApi {
   // (e.g. /t/{taskId}) without a full reload.
   navigate(href: string, options?: { replace?: boolean }): void;
   // Imperatively opens a modal window rendered by the host's <PluginModalHost/>
-  // (mounted once at the app root, isolated behind its own error boundary).
+  // (mounted once inside AppShell's theme/tooltip/toast providers and isolated
+  // behind its own error boundary).
   // Independent of keybindings — any plugin code path may call it.
   openModal(options: PluginModalOptions): PluginModalHandle;
+  // Opens Kandev's native one-field task change-request linking workflow.
+  // Provider code supplies copy, parsing, and mutation only; the host owns
+  // validation placement, submitting state, footer, toast, and close behavior.
+  openTaskLinkDialog(options: PluginTaskLinkDialogOptions): PluginModalHandle;
+  // Opens a registered provider review in the native desktop dock panel or
+  // current mobile session review. Plugins do not reach into host layout stores.
+  openTaskReview(options: PluginTaskReviewOptions): void;
 }
 
 interface PluginModalOptions {
   title?: string;                          // rendered in a DialogHeader/DialogTitle; omit for no header title
+  description?: string;                    // rendered below the title in the host-owned header
   content: React.ComponentType<{ slotProps?: unknown }>; // reuses the slot-component contract
   size?: "sm" | "md" | "lg" | "xl";         // maps to the host's Dialog width classes; default "md"
   dismissible?: boolean;                    // overlay click / Escape close the modal; default true
@@ -95,6 +104,28 @@ interface PluginModalOptions {
 interface PluginModalHandle {
   close(): void; // closes this modal instance; no-op if already closed
 }
+
+interface PluginTaskLinkDialogOptions {
+  title: string;
+  description: string;
+  inputLabel: string;
+  placeholder?: string;
+  emptyError: string;
+  failureMessage: string;
+  successMessage: string;
+  inputTestId?: string;
+  errorTestId?: string;
+  submitTestId?: string;
+  onSubmit(reference: string): Promise<void>;
+}
+
+interface PluginTaskReviewOptions {
+  providerId: string;
+  reviewKey: string;
+  title?: string;
+  presentation: "desktop" | "mobile";
+  sessionId?: string;
+}
 ```
 
 `host.ui` contents: shadcn primitives (Alert*, Badge, Button, Card*, Checkbox,
@@ -103,13 +134,99 @@ Separator, Sheet*, Skeleton, Spinner, Switch, Table*, Tabs*, Textarea,
 Tooltip*) plus first-party app UI: `PageTopbar` (the kandev title bar, for
 routes that opt out of the default chrome and own their layout),
 `TaskCreateDialog` (kandev's real create-task modal, prefilled via
-`initialValues`), and `Combobox` (the app's Command+Popover picker). The
-authoritative list is `apps/web/lib/plugins/host-api.ts` (`PLUGIN_UI`).
+`initialValues`), `Combobox` (the app's Command+Popover picker), and the
+provider-neutral code-host dashboard set: `ChangeRequestList`,
+`ChangeRequestRow`, `ChangeRequestDetail`, `IntegrationListToolbar`, `IntegrationScopeBar`,
+`IntegrationStartTaskMenu`, `IntegrationIcon`, `IntegrationChangeRequestStatus`, and
+`TaskRowIndicator`. The authoritative list is
+`apps/web/lib/plugins/host-api.ts` (`PLUGIN_UI`).
+
+In create mode, `TaskCreateDialog` accepts this optional transport seam:
+
+```ts
+createTask?: (
+  payload: Parameters<typeof createTask>[0],
+) => Promise<CreateTaskResponse>;
+```
+
+When omitted, the dialog uses the normal `/api/v1/tasks` REST client. A trusted
+plugin wrapper may provide it to send the unchanged native payload through
+`Host Tasks.Create`; the same callback handles both the initial submission and
+the one allowed fresh-branch re-consent retry. Edit and session modes ignore it.
+The browser callback must not manufacture a repository-provider descriptor. It sends
+only native task choices plus an idempotency identifier to an authenticated plugin
+action; the plugin resolves repository identity from its live provider connection.
+Scope idempotency to one open dialog so retry does not create duplicates while a later
+intentional launch for the same change request still can.
+
+Code-host plugins use that dashboard set as one contract. The plugin supplies
+normalized change-request data, filter state, task presets, and callbacks; the
+host owns row density, external-title behavior, responsive task menus,
+linked-task navigation, and loading/error/empty treatment. A row's sole workflow CTA
+is the shared **Task** preset menu, whose selection opens `TaskCreateDialog`
+directly. Review belongs to the registered task review-provider surface, not a
+parallel dashboard button or plugin-specific launch modal. `IntegrationIcon` maps
+semantic names (`pull-request`, `pull-request-closed`, `merged`, `filter`) to the same
+host Tabler glyphs used by first-party code-host pages; plugins do not copy their SVG
+paths. Runtime components stay in the Kandev host and are versioned with `host.ui`.
+A task preset may provide a semantic `iconName`; the host maps `eye`, `message`, and
+`tool` to the exact first-party **Review**, **Address feedback**, and **Fix CI** icons.
+`ReviewItemSummary.taskStatus` is the normal code-host status integration. Once a
+registered review provider publishes it, Kandev automatically mounts the exact shared
+topbar button, composer CI chip, desktop hover popover, and mobile drawer; Kandev also
+leases one provider refresh on mount/open and every 90 seconds. Plugins must not register
+a visual slot or a second poller for these surfaces. `IntegrationChangeRequestStatus`
+remains exposed for non-review-provider composition only.
+
+`ChangeRequestDetail` is the exact provider-neutral detail component consumed by
+Kandev's GitHub panel. A review provider supplies its normalized model and advertised
+callbacks; Kandev owns header, branches, state/review badges, description, review/check/
+comment sections, add-to-context controls, scrolling, loading/error states, and native
+mobile sizing. Code-host plugins must use it instead of recreating the review page.
+A future SDK package may contain types or pure helpers, but not duplicate React/Radix
+runtime components.
 
 Plugins must use these host instances — bundling copies of anything
 Radix/portal/context-based would split React context across instances and
 break refs/`asChild`. Pure-React libs (e.g. `@tabler/icons-react`) bundle
 fine.
+
+### Persisted repository branch action
+
+A manifest-owned repository provider that participates in Kandev's native task branch
+picker declares this standardized action:
+
+```yaml
+actions:
+  - key: "repositories.branches"
+    scope: "workspace"
+    max_body_bytes: 16384
+```
+
+This action is invoked by the host backend, not the browser callback. Kandev resolves the
+active plugin that owns the repository's persisted provider ID and supplies a verified
+workspace context plus this snake-case body:
+
+```json
+{
+  "repository": {
+    "provider_id": "example-provider",
+    "provider_host": "https://code.example.com",
+    "provider_repository_id": "owner/repository",
+    "owner_or_project": "owner",
+    "name": "repository",
+    "clone_url": "https://code.example.com/owner/repository.git",
+    "default_branch": "main"
+  }
+}
+```
+
+Every field comes from the persisted workspace repository. The plugin returns
+`{"branches":[{"name":"main","commit":"optional","is_default":true}]}`. Kandev
+enforces the manifest request cap, a 15-second timeout, a 1 MiB response cap, at most
+10,000 branches, non-empty names, and name deduplication. Missing ownership, an inactive
+plugin, an undeclared/wrong-scope action, or malformed output fails closed. Providers
+must not require browser-supplied repository authority on this path.
 
 ## `registry: PluginRegistry`
 
@@ -157,6 +274,10 @@ interface PluginRegistry {
   // Route under /settings/plugins/{id}/... rendered inside settings shell.
   // The settings shell already provides its own topbar chrome — no options here.
   registerSettingsRoute(path: string, Component: React.ComponentType): void;
+
+  // Native Settings > Integrations contribution. The host adds index/navigation
+  // entries and wraps this component in the shared settings section.
+  registerIntegrationSettings(registration: IntegrationSettingsRegistration): void;
 
   // Named slot injection. Host renders all components registered for a slot via
   // <PluginSlot name="..." slotProps={...}/>. Initial slots: "task-sidebar",
@@ -224,6 +345,18 @@ interface PluginRegistry {
   registerReviewProvider(provider: ReviewProviderRegistration): void;
 }
 
+interface IntegrationSettingsRegistration {
+  id: string;
+  label: string;
+  description: string;
+  icon?: string;
+  Component: React.ComponentType<{ workspaceId?: string }>;
+}
+
+// Integration settings render at /settings/integrations/{id} and
+// /settings/workspace/{workspaceId}/integrations/{id}. IDs are URL-safe, cannot
+// shadow first-party integrations, and have one active owner; unload revokes them.
+
 interface RepositoryProviderRegistration {
   id: string;
   label: string;
@@ -240,7 +373,7 @@ interface RepositoryInspection {
   pullRequest?: { number: number; title: string };
 }
 interface TaskActionRegistration {
-  id: string; label: string; icon?: string; placement: "link" | "action";
+  id: string; label: string; icon?: string; placement: "link";
   group?: string; visible?(context: PluginTaskActionContext): boolean;
   singleTaskOnly?: boolean; run(context: PluginTaskActionContext): Promise<void>;
 }
@@ -259,6 +392,23 @@ interface ReviewProviderRegistration {
 interface ReviewItemSummary {
   providerId: string; reviewKey: string; title: string; url: string; repositoryId: string;
   state: string; statusBadge?: { label: string; tone?: string };
+  taskStatus?: ReviewTaskStatus;
+}
+type ReviewTaskPipelineState = "success" | "failure" | "pending" | "neutral";
+interface ReviewTaskStatus {
+  number: number | string;
+  state: "open" | "merged" | "closed" | "draft";
+  pipelineState: ReviewTaskPipelineState;
+  checks: readonly {
+    id: string; label: string; state: ReviewTaskPipelineState;
+    detail?: string; url?: string;
+  }[];
+  review?: {
+    state: "approved" | "changes_requested" | "pending";
+    approved: number; required?: number; requested?: number;
+  };
+  unresolvedComments?: number;
+  loading?: boolean; error?: string; updatedAt?: number;
 }
 interface PluginReviewPanelProps {
   panelId: string; presentation: "desktop" | "mobile"; workspaceId: string;

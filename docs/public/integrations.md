@@ -337,6 +337,11 @@ A successful create returns the MR URL and asynchronously records it against the
 
 ## Bitbucket
 
+> [!EXPERIMENTAL]
+> Bitbucket uses Kandev's experimental plugin platform. Package signatures are
+> not enforced yet, so the official plugin follows the same unsigned install
+> path as current plugins; signature enforcement is deferred.
+
 Bitbucket support is provided by the separately installed **Bitbucket** plugin.
 Install a package built for the running Kandev host from **Settings > Plugins**,
 then open its **Bitbucket** entry in the Integrations section. The connection is

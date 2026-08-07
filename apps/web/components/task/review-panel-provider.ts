@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useSyncExternalStore } from "react";
+import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { useAppStore } from "@/components/state-provider";
 import { mrTaskKey } from "@/components/gitlab/mr-detail-panel";
 import { prTaskKey } from "@/components/github/pr-utils";
@@ -37,7 +37,7 @@ function gitLabReviewItem(mr: TaskMR): ReviewItemSummary {
   };
 }
 
-function useProviderUpdates(
+export function useReviewProviderUpdates(
   taskId: string | null,
   providers: PluginReviewProviderRegistration[],
 ): number {
@@ -63,6 +63,73 @@ function useProviderUpdates(
   return useSyncExternalStore(source.subscribe, source.getSnapshot, source.getSnapshot);
 }
 
+type ProviderRefreshEntry = {
+  controller: AbortController;
+  consumers: number;
+  settled: boolean;
+  done: Promise<void>;
+};
+
+const providerRefreshes = new WeakMap<
+  PluginReviewProviderRegistration["refresh"],
+  Map<string, ProviderRefreshEntry>
+>();
+
+function acquireProviderRefresh(
+  provider: PluginReviewProviderRegistration,
+  taskId: string,
+): { done: Promise<void>; release: () => void } {
+  const refresh = provider.refresh;
+  const byTask = providerRefreshes.get(refresh) ?? new Map<string, ProviderRefreshEntry>();
+  providerRefreshes.set(refresh, byTask);
+  let entry = byTask.get(taskId);
+  if (!entry) {
+    const controller = new AbortController();
+    const nextEntry: ProviderRefreshEntry = {
+      controller,
+      consumers: 0,
+      settled: false,
+      done: Promise.resolve(),
+    };
+    entry = nextEntry;
+    byTask.set(taskId, entry);
+    entry.done = provider
+      .refresh(taskId, controller.signal)
+      .catch(() => undefined)
+      .finally(() => {
+        nextEntry.settled = true;
+        if (byTask.get(taskId) === nextEntry) byTask.delete(taskId);
+        if (byTask.size === 0) providerRefreshes.delete(refresh);
+      });
+  }
+  entry.consumers += 1;
+  let released = false;
+  const release = () => {
+    if (released) return;
+    released = true;
+    entry!.consumers -= 1;
+    if (entry!.consumers === 0 && !entry!.settled) {
+      entry!.controller.abort();
+      if (byTask.get(taskId) === entry) byTask.delete(taskId);
+      if (byTask.size === 0) providerRefreshes.delete(refresh);
+    }
+  };
+  return { done: entry.done, release };
+}
+
+/** Shares one provider refresh across task chrome, review selectors, and manual refreshes. */
+export async function refreshReviewProvider(
+  provider: PluginReviewProviderRegistration,
+  taskId: string,
+): Promise<void> {
+  const lease = acquireProviderRefresh(provider, taskId);
+  try {
+    await lease.done;
+  } finally {
+    lease.release();
+  }
+}
+
 function combineUnsubscribers(unsubscribers: Array<() => void>): () => void {
   return () => unsubscribers.forEach((unsubscribe) => unsubscribe());
 }
@@ -72,7 +139,10 @@ function combineUnsubscribers(unsubscribers: Array<() => void>): () => void {
  * providers refresh through their external-store subscription; their panels
  * remain revocable because registry changes re-render this hook.
  */
-export function useNormalizedTaskReviews(taskId: string | null): readonly ReviewItemSummary[] {
+export function useNormalizedTaskReviewsState(taskId: string | null): {
+  reviews: readonly ReviewItemSummary[];
+  loading: boolean;
+} {
   const workspaceId = useAppStore((state) => state.workspaces.activeId);
   const prs = useAppStore((state) =>
     taskId ? (state.taskPRs.byTaskId[taskId] ?? EMPTY_GITHUB_REVIEWS) : EMPTY_GITHUB_REVIEWS,
@@ -85,27 +155,36 @@ export function useNormalizedTaskReviews(taskId: string | null): readonly Review
   const registry = usePluginRegistry();
   const registryVersion = registry.getVersion();
   const providers = useMemo(() => registry.getReviewProviders(), [registry, registryVersion]);
-  const providerVersion = useProviderUpdates(taskId, providers);
+  const providerVersion = useReviewProviderUpdates(taskId, providers);
+  const refreshScope = taskId && providers.length ? `${taskId}:${registryVersion}` : "";
+  const [settledRefreshScope, setSettledRefreshScope] = useState("");
 
   useEffect(() => {
-    if (!taskId) return;
-    const controller = new AbortController();
-    providers.forEach((provider) => {
-      void provider.refresh(taskId, controller.signal).catch(() => {
-        // Provider renders its own empty/error state.
-      });
+    if (!taskId || !refreshScope) return;
+    let active = true;
+    const leases = providers.map((provider) => acquireProviderRefresh(provider, taskId));
+    void Promise.all(leases.map((lease) => lease.done)).then(() => {
+      if (active) setSettledRefreshScope(refreshScope);
     });
-    return () => controller.abort();
-  }, [providers, taskId]);
+    return () => {
+      active = false;
+      leases.forEach((lease) => lease.release());
+    };
+  }, [providers, refreshScope, taskId]);
 
-  return useMemo(
+  const reviews = useMemo(
     () => [
       ...prs.map(githubReviewItem),
       ...mrs.map(gitLabReviewItem),
-      ...providers.flatMap((provider) => provider.getSnapshot(taskId ?? "")),
+      ...(taskId ? providers.flatMap((provider) => provider.getSnapshot(taskId)) : []),
     ],
     [mrs, prs, providers, providerVersion, taskId],
   );
+  return { reviews, loading: Boolean(refreshScope && settledRefreshScope !== refreshScope) };
+}
+
+export function useNormalizedTaskReviews(taskId: string | null): readonly ReviewItemSummary[] {
+  return useNormalizedTaskReviewsState(taskId).reviews;
 }
 
 export function resolveReviewPanelProvider(

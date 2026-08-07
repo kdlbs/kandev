@@ -103,7 +103,7 @@ ui:                                           # optional native frontend plugin
 | `runtime.executables` | required when `runtime.type: binary` | map\<string,string\> | Key is `<goos>-<goarch>` (e.g. `linux-amd64`, `darwin-arm64`, `windows-amd64`); value is a clean, package-relative path under `server/` (no leading `/`, no `..` segments). At least one entry required; the running host's key must be present at install time. Windows values end in `.exe`. |
 | `min_kandev_version` | no | string | Minimum released Kandev version required by the plugin. Release builds reject packages that require a newer host; non-release development builds skip this compatibility gate. |
 | `capabilities.events` | no | string[] | Bus subjects (or wildcard patterns) this plugin subscribes to. See "Event subscription vocabulary" below. |
-| `capabilities.api_read` | no | string[] | Gates the Host data API's read-only accessors. Each entry is a resource name: `tasks`, `sessions`, `messages`, `workspaces`, `workflows`, `agent_profiles`, `repositories`. Calling the matching `Host` accessor (e.g. `Tasks()`) without its resource declared returns gRPC `PermissionDenied`. See "Host data API resource vocabulary" below. |
+| `capabilities.api_read` | no | string[] | Gates the Host data API's read-only accessors. Each entry is a resource name: `tasks`, `sessions`, `messages`, `workspaces`, `workflows`, `agent_profiles`, `executor_profiles`, `repositories`. Calling the matching `Host` accessor (e.g. `Tasks()`) without its resource declared returns gRPC `PermissionDenied`. See "Host data API resource vocabulary" below. |
 | `capabilities.api_write` | no | string[] | Gates Host writes independently of `api_read`. `tasks` permits `Host.Tasks().Create` and `.Update`; `messages` permits `Host.Messages().Send`. Undeclared writes return gRPC `PermissionDenied`. |
 | `capabilities.state` | no | bool | Gates `Host.GetState`/`SetState`/`DeleteState`/`ListState`. Calling any of them without this set to `true` returns gRPC `PermissionDenied`. |
 | `capabilities.secrets` | no | bool | Gates `Host.RevealSecret`/`GetSecret`/`SetSecret`/`DeleteSecret`. Calling any of them without this set to `true` returns gRPC `PermissionDenied`. |
@@ -159,10 +159,11 @@ recognizes its shape.
 
 `capabilities.api_read` gates the read-only Host data accessors (ADR 0043,
 ADR 0047): each entry must be one of `tasks`, `sessions`, `messages`,
-`workspaces`, `workflows`, `agent_profiles`, `repositories`. Declaring a
+`workspaces`, `workflows`, `agent_profiles`, `executor_profiles`, `repositories`. Declaring a
 resource grants the matching `Host` accessor (`Tasks()`, `Sessions()`,
 `Messages()`, `Workspaces()`, `Workflows()`, `AgentProfiles()`,
-`Repositories()` — see [Authoring a plugin](plugins-authoring.md)); calling an
+`Repositories()`), or the optional `pluginsdk.ExecutorProfiles(host)` extension —
+see [Authoring a plugin](plugins-authoring.md). Calling an
 accessor for an undeclared resource returns gRPC `PermissionDenied`.
 `capabilities.api_write` currently accepts `tasks` and `messages`. `tasks`
 enables `Host.Tasks().Create` and `.Update`; `messages` enables

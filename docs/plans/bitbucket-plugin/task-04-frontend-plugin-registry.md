@@ -13,8 +13,8 @@ spec: "../../specs/bitbucket-plugin/spec.md"
 ## Intent
 
 Add generic revocable action, repository-provider, task-action, review-provider,
-Drawer, and responsive contracts to the frontend plugin host. Do not rewrite task-create
-or review screens in this task.
+integration-settings, Drawer, and responsive contracts to the frontend plugin host.
+Do not rewrite task-create or review screens in this task.
 
 ## Owned paths
 
@@ -30,6 +30,7 @@ or review screens in this task.
 - `apps/web/lib/plugins/active-plugin.test.ts`
 - `apps/web/src/boot-payload.test.ts`
 - Built-in registration adapters directly required by those registry files.
+- Native settings integration index, route resolver, workspace navigation, icons, and tests.
 
 ## Dependencies
 
@@ -47,6 +48,9 @@ Task 01.
    preserves absent-field compatibility for older payloads.
 4. Host exports Drawer family and supported responsive breakpoint behavior needed for
    native mobile plugin UI.
+5. `registerIntegrationSettings({ id, label, description, icon?, Component })`
+   contributes lifecycle-safe native global/workspace settings pages, index cards, and
+   workspace navigation without provider-specific host rendering.
 
 ## Verification
 

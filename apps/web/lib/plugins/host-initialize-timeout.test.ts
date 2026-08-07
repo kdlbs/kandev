@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
-import { loadPlugins } from "./host";
+import { loadPlugins, unloadPlugin } from "./host";
 import { pluginRegistry } from "./registry";
 import type { ActivePlugin, PluginHostApi, PluginRegistry } from "./types";
 
@@ -35,6 +35,8 @@ function makeHostFactory(pluginId: string): PluginHostApi {
     theme: "light",
     navigate: () => {},
     openModal: () => ({ close: () => {} }),
+    openTaskLinkDialog: () => ({ close: () => {} }),
+    openTaskReview: () => {},
   };
 }
 
@@ -59,8 +61,8 @@ function fakeImporterFor(
 }
 
 afterEach(() => {
-  pluginRegistry.unregisterPlugin(PLUGIN_HANG_A_ID);
-  pluginRegistry.unregisterPlugin(PLUGIN_HANG_B_ID);
+  unloadPlugin(PLUGIN_HANG_A_ID, { evictCache: true });
+  unloadPlugin(PLUGIN_HANG_B_ID, { evictCache: true });
 });
 
 describe("loadPlugins — initialize() timeout isolation", () => {
@@ -127,5 +129,64 @@ describe("loadPlugins — initialize() timeout isolation", () => {
     await Promise.resolve();
 
     expect(pluginRegistry.getNavItems().find((item) => item.id === "late-nav")).toBeUndefined();
+  });
+});
+
+describe("loadPlugins — timed-out host mutation isolation", () => {
+  it("fences host mutations that arrive after initialize times out", async () => {
+    let finishInitialize!: () => void;
+    const initializeFinished = new Promise<void>((resolve) => {
+      finishInitialize = resolve;
+    });
+    const openModal = vi.fn(() => ({ close: () => {} }));
+    const openTaskLinkDialog = vi.fn(() => ({ close: () => {} }));
+    const navigate = vi.fn();
+    const setState = vi.fn();
+    const importer = fakeImporterFor({
+      "/late-host-mutation.js": (win) =>
+        (win as unknown as FakeWindow).registerKandevPlugin(PLUGIN_HANG_A_ID, {
+          initialize: async (_registry: PluginRegistry, host: PluginHostApi) => {
+            await initializeFinished;
+            host.openModal({ title: "Late modal", content: () => null });
+            host.openTaskLinkDialog({
+              title: "Late task link",
+              description: "Link a change request",
+              inputLabel: "URL",
+              placeholder: "https://example.test/pull-requests/1",
+              emptyError: "Required",
+              failureMessage: "Failed",
+              successMessage: "Linked",
+              onSubmit: async () => {},
+            });
+            host.navigate("/late");
+            host.store.setState({} as never);
+          },
+        }),
+    });
+    const hostFactory = (pluginId: string): PluginHostApi => ({
+      ...makeHostFactory(pluginId),
+      openModal,
+      openTaskLinkDialog,
+      navigate,
+      store: {
+        ...makeHostFactory(pluginId).store,
+        setState,
+      },
+    });
+
+    await loadPlugins(
+      [activePlugin({ id: PLUGIN_HANG_A_ID, bundleUrl: "/late-host-mutation.js" })],
+      hostFactory,
+      importer,
+      window,
+      10,
+    );
+    finishInitialize();
+    await Promise.resolve();
+
+    expect(openModal).not.toHaveBeenCalled();
+    expect(openTaskLinkDialog).not.toHaveBeenCalled();
+    expect(navigate).not.toHaveBeenCalled();
+    expect(setState).not.toHaveBeenCalled();
   });
 });

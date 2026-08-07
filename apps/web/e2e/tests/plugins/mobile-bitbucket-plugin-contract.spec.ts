@@ -83,16 +83,22 @@ test.describe("mobile Bitbucket plugin contract", () => {
     await taskRow.getByRole("button", { name: "Task actions" }).tap();
     const linkSubmenu = testPage.getByRole("menuitem", { name: "Link", exact: true });
     await linkSubmenu.tap();
-    await testPage
-      .getByTestId("task-context-link-plugin-kandev-plugin-e2e:link-bitbucket-pull-request")
-      .tap();
-    const result = testPage.getByTestId("fixture-link-pull-request-result");
-    await expect(result).toHaveText("Linked Bitbucket Pull Request #42");
-    await expect(result.locator("xpath=ancestor::*[@role='dialog'][1]")).toHaveAttribute(
-      "data-slot",
-      "drawer-content",
+    const bitbucketLink = testPage.getByTestId(
+      "task-context-link-plugin-kandev-plugin-e2e:link-bitbucket-pull-request",
     );
-    await testPage.getByRole("dialog", { name: "Link Bitbucket Pull Request" }).press("Escape");
+    await expect(bitbucketLink).toHaveText("Bitbucket Pull Request");
+    await expect(bitbucketLink.locator("svg.tabler-icon-brand-bitbucket")).toBeVisible();
+    await bitbucketLink.tap();
+    const linkDialog = testPage.getByRole("dialog", { name: "Link Bitbucket pull request" });
+    await expect(linkDialog).toHaveAttribute("data-slot", "dialog-content");
+    await linkDialog
+      .getByLabel("Pull request")
+      .fill("https://bitbucket.example.test/projects/TEAM/repos/fixture/pull-requests/42");
+    await linkDialog.getByRole("button", { name: "Save" }).tap();
+    await expect(linkDialog).toBeHidden();
+    await expect(
+      testPage.getByText("Bitbucket pull request linked", { exact: true }),
+    ).toBeVisible();
 
     // The responsive task layout presents the exact same plugin reviews via
     // the mobile bottom navigation and its 44px selector menu rows.
@@ -128,19 +134,22 @@ test.describe("mobile Bitbucket plugin contract", () => {
     await sourceOption.tap();
     await session.activeChat().getByTestId("submit-message-button").tap();
     await expect
-      .poll(async () => {
-        const { messages } = await apiClient.listSessionMessages(task.session_id!);
-        return messages.some(
-          (message) =>
-            Array.isArray(message.metadata?.entity_references) &&
-            message.metadata.entity_references.some(
-              (reference) =>
-                typeof reference === "object" &&
-                reference !== null &&
-                (reference as Record<string, unknown>).id === "pull-request-42",
-            ),
-        );
-      })
+      .poll(
+        async () => {
+          const { messages } = await apiClient.listSessionMessages(task.session_id!);
+          return messages.some(
+            (message) =>
+              Array.isArray(message.metadata?.entity_references) &&
+              message.metadata.entity_references.some(
+                (reference) =>
+                  typeof reference === "object" &&
+                  reference !== null &&
+                  (reference as Record<string, unknown>).id === "pull-request-42",
+              ),
+          );
+        },
+        { timeout: 15_000, message: "wait for fixture reference pull-request-42" },
+      )
       .toBe(true);
     expect(await testPage.evaluate(() => document.documentElement.scrollWidth)).toBe(
       await testPage.evaluate(() => document.documentElement.clientWidth),

@@ -24,6 +24,8 @@ import { useLinearAuthed } from "@/hooks/domains/linear/use-linear-availability"
 import { useSentryAvailable } from "@/hooks/domains/sentry/use-sentry-availability";
 import { useSlackAuthed } from "@/hooks/domains/slack/use-slack-availability";
 import { SettingsGroup, SettingsLeaf } from "./settings-nav-primitives";
+import { resolvePluginIcon } from "@/lib/plugins/icons";
+import { usePluginRegistry } from "@/lib/plugins/registry";
 
 const ROOT_HREF = "/settings/workspace";
 
@@ -60,6 +62,7 @@ function WorkspaceIntegrationItems({
   integrationsPath: string;
   pathname: string;
 }) {
+  const registry = usePluginRegistry();
   const azureDevOps = useAzureDevOpsAvailable(workspaceId);
   const { status: githubStatus } = useGitHubStatus(workspaceId);
   const gitlab = useGitLabAvailable();
@@ -77,20 +80,39 @@ function WorkspaceIntegrationItems({
     ...(slack ? ["slack"] : []),
   ]);
 
-  return INTEGRATIONS.map(({ slug, label, icon }) => {
-    const href = `${integrationsPath}/${slug}`;
-    return (
-      <SettingsLeaf
-        key={href}
-        href={href}
-        label={label}
-        labelSuffix={enabled.has(slug) ? ENABLED_LABEL : undefined}
-        icon={icon}
-        isActive={pathname === href}
-        depth={3}
-      />
-    );
-  });
+  const pluginIntegrations = registry.getIntegrationSettings();
+
+  return (
+    <>
+      {INTEGRATIONS.map(({ slug, label, icon }) => {
+        const href = `${integrationsPath}/${slug}`;
+        return (
+          <SettingsLeaf
+            key={href}
+            href={href}
+            label={label}
+            labelSuffix={enabled.has(slug) ? ENABLED_LABEL : undefined}
+            icon={icon}
+            isActive={pathname === href}
+            depth={3}
+          />
+        );
+      })}
+      {pluginIntegrations.map(({ id, label, icon }) => {
+        const href = `${integrationsPath}/${id}`;
+        return (
+          <SettingsLeaf
+            key={href}
+            href={href}
+            label={label}
+            icon={resolvePluginIcon(icon)}
+            isActive={pathname === href}
+            depth={3}
+          />
+        );
+      })}
+    </>
+  );
 }
 
 type WorkspacesGroupProps = {

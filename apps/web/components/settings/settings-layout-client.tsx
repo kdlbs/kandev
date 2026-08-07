@@ -17,6 +17,7 @@ import { safeDecodePathSegment } from "@/lib/routing/path";
 import { SettingsSaveProvider } from "@/components/settings/settings-save-provider";
 import { connectionIssueDetails } from "@/components/app-status-bar/connection-status-item";
 import { cn } from "@/lib/utils";
+import { usePluginRegistry } from "@/lib/plugins/registry";
 
 // Brand/initialism overrides so the derived label matches how the rest of the
 // app spells these (e.g. "github" → "GitHub", not "Github"). Anything not
@@ -85,6 +86,7 @@ function deriveParents(pathname: string): Array<{ label: string; href: string }>
 
 export function SettingsLayoutClient({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
+  const registry = usePluginRegistry();
   const isAgentDetail = pathname.startsWith("/settings/agents/") && pathname !== "/settings/agents";
   const showIntegrationCopyAction = integrationFromPathname(pathname) !== null;
 
@@ -102,7 +104,10 @@ export function SettingsLayoutClient({ children }: { children: React.ReactNode }
     );
   }
 
-  const pageLabel = deriveCurrentPageLabel(pathname);
+  const integrationId = pluginIntegrationIdFromPathname(pathname);
+  const pageLabel = integrationId
+    ? (registry.getIntegrationSetting(integrationId)?.label ?? deriveCurrentPageLabel(pathname))
+    : deriveCurrentPageLabel(pathname);
   const title = pageLabel ?? "Settings";
   const parents = deriveParents(pathname);
 
@@ -117,6 +122,11 @@ export function SettingsLayoutClient({ children }: { children: React.ReactNode }
       {children}
     </SettingsShell>
   );
+}
+
+function pluginIntegrationIdFromPathname(pathname: string): string | null {
+  const match = pathname.match(/^\/settings(?:\/workspace\/[^/]+)?\/integrations\/([^/]+)$/);
+  return safeDecodePathSegment(match?.[1]);
 }
 
 function IntegrationCopyConfigAction() {

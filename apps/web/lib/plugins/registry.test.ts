@@ -8,11 +8,11 @@ const APP_STATUS_LEFT_SLOT = "app-status-bar-left";
 const PRIMARY_PLUGIN_ID = "plugin-a";
 const SECONDARY_PLUGIN_ID = "plugin-b";
 const SOURCE_CONTROL_PROVIDER_ID = "source-control";
-
+const CHANGE_URL = "https://example.test/changes/1",
+  REPOSITORY_ID = "repository-a";
 function cleanup(...pluginIds: string[]) {
   pluginIds.forEach((id) => pluginRegistry.unregisterPlugin(id));
 }
-
 function repositoryProvider(
   id: string,
   overrides: Partial<RepositoryProviderRegistration> = {},
@@ -43,6 +43,61 @@ function reviewProvider(
     ReviewPanel: () => null,
     ...overrides,
   };
+}
+
+function providerSpecificStatusSnapshot() {
+  return [
+    {
+      providerId: SOURCE_CONTROL_PROVIDER_ID,
+      reviewKey: "change-1",
+      title: "Change 1",
+      url: CHANGE_URL,
+      repositoryId: REPOSITORY_ID,
+      state: "open",
+      taskStatus: {
+        number: 1,
+        state: "open" as const,
+        pipelineState: "failure" as const,
+        checks: [
+          {
+            id: "build",
+            label: "Build",
+            state: "failure" as const,
+            detail: "Failed in 2m",
+            url: "https://example.test/checks/build",
+            providerPayload: "discard",
+          },
+        ],
+        review: {
+          state: "approved" as const,
+          approved: 1,
+          required: 2,
+          requested: 1,
+          providerPayload: "discard",
+        },
+        unresolvedComments: 3,
+        providerPayload: "discard",
+      },
+    },
+  ];
+}
+
+function normalizedStatusSnapshot() {
+  const [{ taskStatus, ...review }] = providerSpecificStatusSnapshot();
+  const [{ providerPayload: _checkPayload, ...check }] = taskStatus.checks;
+  const { providerPayload: _reviewPayload, ...reviewSummary } = taskStatus.review;
+  const {
+    providerPayload: _statusPayload,
+    checks: _checks,
+    review: _review,
+    ...status
+  } = taskStatus;
+  return [
+    {
+      ...review,
+      taskStatus: { ...status, checks: [check], review: reviewSummary },
+    },
+  ];
 }
 
 describe("pluginRegistry", () => {
@@ -364,6 +419,18 @@ describe("pluginRegistry — repository provider contracts", () => {
     );
   });
 
+  it("rejects provider IDs owned by first-party integrations", () => {
+    expect(() =>
+      pluginRegistry
+        .forPlugin(PRIMARY_PLUGIN_ID)
+        .registerRepositoryProvider(repositoryProvider("github")),
+    ).toThrow('provider "github" is reserved by the host');
+  });
+});
+
+describe("pluginRegistry — repository provider lifecycle", () => {
+  afterEach(cleanupProviderContracts);
+
   it("aborts in-flight repository work when its owner unloads", async () => {
     const aborted = vi.fn();
     let markStarted: () => void;
@@ -394,6 +461,59 @@ describe("pluginRegistry — repository provider contracts", () => {
 
     await expect(request).rejects.toThrow("provider request aborted");
     expect(aborted).toHaveBeenCalledOnce();
+  });
+
+  it("keeps re-enabled provider work tracked after an older request settles", async () => {
+    let rejectFirst!: (error: Error) => void;
+    let markFirstStarted!: () => void;
+    const firstStarted = new Promise<void>((resolve) => {
+      markFirstStarted = resolve;
+    });
+    const first = repositoryProvider(SOURCE_CONTROL_PROVIDER_ID, {
+      listRepositories: () =>
+        new Promise((_, reject) => {
+          rejectFirst = reject;
+          markFirstStarted();
+        }),
+    });
+    pluginRegistry.forPlugin(PRIMARY_PLUGIN_ID).registerRepositoryProvider(first);
+    const firstRequest = pluginRegistry
+      .getRepositoryProvider(SOURCE_CONTROL_PROVIDER_ID)!
+      .listRepositories({ workspaceId: "workspace-a", signal: new AbortController().signal });
+    await firstStarted;
+
+    pluginRegistry.unregisterPlugin(PRIMARY_PLUGIN_ID);
+    const secondAborted = vi.fn();
+    let markSecondStarted!: () => void;
+    const secondStarted = new Promise<void>((resolve) => {
+      markSecondStarted = resolve;
+    });
+    const second = repositoryProvider(SOURCE_CONTROL_PROVIDER_ID, {
+      listRepositories: ({ signal }) =>
+        new Promise((_, reject) => {
+          markSecondStarted();
+          signal.addEventListener(
+            "abort",
+            () => {
+              secondAborted();
+              reject(new Error("second provider request aborted"));
+            },
+            { once: true },
+          );
+        }),
+    });
+    pluginRegistry.forPlugin(PRIMARY_PLUGIN_ID).registerRepositoryProvider(second);
+    const secondRequest = pluginRegistry
+      .getRepositoryProvider(SOURCE_CONTROL_PROVIDER_ID)!
+      .listRepositories({ workspaceId: "workspace-a", signal: new AbortController().signal });
+    await secondStarted;
+    rejectFirst(new Error("first provider request stopped"));
+    await expect(firstRequest).rejects.toThrow();
+
+    pluginRegistry.unregisterPlugin(PRIMARY_PLUGIN_ID);
+
+    await expect(secondRequest).rejects.toThrow("second provider request aborted");
+    expect(secondAborted).toHaveBeenCalledOnce();
   });
 });
 
@@ -435,8 +555,8 @@ describe("pluginRegistry — review provider contracts", () => {
           providerId: SOURCE_CONTROL_PROVIDER_ID,
           reviewKey: "change-1",
           title: "Change 1",
-          url: "https://example.test/changes/1",
-          repositoryId: "repository-a",
+          url: CHANGE_URL,
+          repositoryId: REPOSITORY_ID,
           state: "open",
           statusBadge: { label: "Checks passing", tone: "success" },
         },
@@ -445,7 +565,7 @@ describe("pluginRegistry — review provider contracts", () => {
           reviewKey: "spoofed-change",
           title: "Spoofed",
           url: "https://example.test/changes/2",
-          repositoryId: "repository-a",
+          repositoryId: REPOSITORY_ID,
           state: "open",
         },
       ],
@@ -472,8 +592,8 @@ describe("pluginRegistry — review provider contracts", () => {
         providerId: SOURCE_CONTROL_PROVIDER_ID,
         reviewKey: "change-1",
         title: "Change 1",
-        url: "https://example.test/changes/1",
-        repositoryId: "repository-a",
+        url: CHANGE_URL,
+        repositoryId: REPOSITORY_ID,
         state: "open",
         statusBadge: { label: "Checks passing", tone: "success" },
       },
@@ -488,6 +608,18 @@ describe("pluginRegistry — review provider contracts", () => {
     expect(unsubscribe).toHaveBeenCalledOnce();
     expect(refreshAborted).toHaveBeenCalledOnce();
     expect(pluginRegistry.getReviewProvider(SOURCE_CONTROL_PROVIDER_ID)).toBeUndefined();
+  });
+
+  it("preserves normalized task status and strips provider-specific fields", () => {
+    pluginRegistry.forPlugin(PRIMARY_PLUGIN_ID).registerReviewProvider(
+      reviewProvider(SOURCE_CONTROL_PROVIDER_ID, {
+        getSnapshot: providerSpecificStatusSnapshot,
+      }),
+    );
+
+    expect(
+      pluginRegistry.getReviewProvider(SOURCE_CONTROL_PROVIDER_ID)?.getSnapshot("task-a"),
+    ).toEqual(normalizedStatusSnapshot());
   });
 
   it("rejects a review provider claimed by another active plugin", () => {

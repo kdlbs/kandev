@@ -22,7 +22,7 @@ import type { RepositoryInspection } from "@/lib/plugins/types";
 
 afterEach(() => {
   cleanup();
-  pluginRegistry.unregisterPlugin("test-bitbucket-provider");
+  pluginRegistry.unregisterPlugin(PROVIDER_PLUGIN_ID);
   fetchRepoBranchesMock.mockReset();
   listProjectBranchesMock.mockReset();
   listAzureDevOpsBranchesMock.mockReset();
@@ -34,6 +34,7 @@ const REPO_B = "https://github.com/acme/api";
 const WORKSPACE_ID = "workspace-1";
 const WORKSPACE_B = "workspace-2";
 const WORKSPACE_B_BRANCH = "workspace-b";
+const PROVIDER_PLUGIN_ID = "test-bitbucket-provider";
 
 describe("useBranchesByURL", () => {
   it("does not load GitHub branches without a workspace credential scope", () => {
@@ -136,6 +137,39 @@ describe("useBranchesByURL built-in provider routing", () => {
 });
 
 describe("useBranchesByURL registered provider routing", () => {
+  it("retries an unsupported URL after its provider registers", async () => {
+    const url = "https://bitbucket.example.test/projects/PLATFORM/repos/web";
+    const { result } = renderHook(() => useBranchesByURL(WORKSPACE_ID));
+    act(() => result.current.ensure(url));
+    expect(result.current.branches(url)).toEqual([]);
+
+    const listBranches = vi.fn().mockResolvedValue([{ name: "trunk" }]);
+    act(() => {
+      pluginRegistry.forPlugin(PROVIDER_PLUGIN_ID).registerRepositoryProvider({
+        id: "bitbucket",
+        label: "Bitbucket",
+        listRepositories: async () => [],
+        matchesURL: (candidate) => candidate.startsWith("https://bitbucket.example.test/"),
+        inspectURL: async () => ({
+          providerId: "bitbucket",
+          providerHost: "https://bitbucket.example.test",
+          ownerOrProject: "PLATFORM",
+          repositoryId: "web-42",
+          repositoryName: "web",
+          cloneUrl: "https://bitbucket.example.test/scm/PLATFORM/web.git",
+          defaultBranch: "trunk",
+        }),
+        listBranches,
+      });
+    });
+    act(() => result.current.ensure(url));
+
+    await waitFor(() =>
+      expect(result.current.branches(url)).toEqual([{ name: "trunk", type: "remote" }]),
+    );
+    expect(listBranches).toHaveBeenCalledOnce();
+  });
+
   it("uses a registered provider descriptor for a Data Center context path", async () => {
     const url =
       "https://bitbucket.example.test/bitbucket/projects/PLATFORM/repos/web/pull-requests/42";
@@ -148,8 +182,8 @@ describe("useBranchesByURL registered provider routing", () => {
       cloneUrl: "https://bitbucket.example.test/bitbucket/scm/PLATFORM/web.git",
       defaultBranch: "main",
     };
-    const listBranches = vi.fn().mockResolvedValue([{ name: "release" }]);
-    pluginRegistry.forPlugin("test-bitbucket-provider").registerRepositoryProvider({
+    const listBranches = vi.fn().mockResolvedValue([{ name: "" }, { name: "release" }]);
+    pluginRegistry.forPlugin(PROVIDER_PLUGIN_ID).registerRepositoryProvider({
       id: "bitbucket",
       label: "Bitbucket",
       listRepositories: async () => [],
@@ -183,7 +217,7 @@ describe("useBranchesByURL registered provider routing", () => {
       defaultBranch: "main",
     };
     const listBranches = vi.fn().mockResolvedValue([{ name: "main" }]);
-    pluginRegistry.forPlugin("test-bitbucket-provider").registerRepositoryProvider({
+    pluginRegistry.forPlugin(PROVIDER_PLUGIN_ID).registerRepositoryProvider({
       id: "bitbucket",
       label: "Bitbucket",
       listRepositories: async () => [],

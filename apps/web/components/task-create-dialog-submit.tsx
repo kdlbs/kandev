@@ -20,12 +20,25 @@ import {
   buildRepositoriesPayload,
   computeIsTaskStarted,
   findDuplicateRemoteRepo,
+  findUnresolvedProviderRemote,
   validateCreateInputs,
   toMessageAttachments,
 } from "@/components/task-create-dialog-helpers";
+import { pluginRegistry } from "@/lib/plugins/registry";
 
 const GENERIC_ERROR_MESSAGE = "An error occurred";
 const DUPLICATE_REPO_TITLE = "Duplicate repository";
+const UNRESOLVED_REPO_TITLE = "Repository is still being verified";
+
+function matchesRegisteredProviderURL(url: string): boolean {
+  return pluginRegistry.getRepositoryProviders().some((provider) => {
+    try {
+      return provider.matchesURL(url);
+    } catch {
+      return false;
+    }
+  });
+}
 
 function notifyQueuedTask(
   response: { queued_for_step_id?: string | null },
@@ -36,6 +49,23 @@ function notifyQueuedTask(
     title: "Task queued",
     description: "The workflow step is at its WIP limit; this task will start when capacity opens.",
   });
+}
+
+type CreateWithoutAgentTarget = {
+  description: string;
+  stepId: string;
+  workspaceId: string;
+  workflowId: string;
+};
+
+function resolveCreateWithoutAgentTarget(
+  description: string,
+  stepId: string | null,
+  workspaceId: string | null,
+  workflowId: string | null,
+): CreateWithoutAgentTarget | null {
+  if (!description || !stepId || !workspaceId || !workflowId) return null;
+  return { description, stepId, workspaceId, workflowId };
 }
 
 // eslint-disable-next-line max-lines-per-function
@@ -61,6 +91,7 @@ export function useTaskSubmitHandlers({
   onSuccess,
   onCreateSession,
   onOpenChange,
+  createTask,
   preserveTaskCreateLastUsedOnClose,
   taskId,
   parentTaskId,
@@ -98,6 +129,7 @@ export function useTaskSubmitHandlers({
       workspaceId,
       repositoryLocalPath,
       toast,
+      createTask,
     });
 
   const buildFreshBranchPayload = (consentedDirtyFiles: string[]) =>
@@ -140,6 +172,21 @@ export function useTaskSubmitHandlers({
     });
     return true;
   }, [useRemote, remoteRepos, toast]);
+
+  const checkRemoteResolution = useCallback((): boolean => {
+    if (!useRemote) return false;
+    const unresolved = findUnresolvedProviderRemote(remoteRepos, matchesRegisteredProviderURL);
+    if (!unresolved) return false;
+    const resolutionError = prInfoByUrl.error(unresolved.url);
+    toast({
+      title: UNRESOLVED_REPO_TITLE,
+      description: resolutionError
+        ? "Kandev could not verify this provider URL. Use Retry on the repository row."
+        : "Wait for provider inspection to finish before creating the task.",
+      variant: "error",
+    });
+    return true;
+  }, [prInfoByUrl, remoteRepos, toast, useRemote]);
 
   const resetForm = useCallback(() => {
     setHasTitle(false);
@@ -264,6 +311,7 @@ export function useTaskSubmitHandlers({
   }, [editingTask, taskName, descriptionInputRef, getRepositoriesPayload, isStartedEdit]);
 
   const handleEditSubmit = useCallback(async () => {
+    if (checkRemoteResolution()) return;
     setIsCreatingTask(true);
     try {
       const result = await performTaskUpdate();
@@ -298,6 +346,7 @@ export function useTaskSubmitHandlers({
     }
   }, [
     performTaskUpdate,
+    checkRemoteResolution,
     agentProfileId,
     executorId,
     executorProfileId,
@@ -308,6 +357,7 @@ export function useTaskSubmitHandlers({
   ]);
 
   const handleUpdateWithoutAgent = useCallback(async () => {
+    if (checkRemoteResolution()) return;
     setIsCreatingTask(true);
     try {
       const result = await performTaskUpdate();
@@ -323,7 +373,7 @@ export function useTaskSubmitHandlers({
       onOpenChange(false);
       setIsCreatingTask(false);
     }
-  }, [performTaskUpdate, onSuccess, onOpenChange, toast, setIsCreatingTask]);
+  }, [checkRemoteResolution, performTaskUpdate, onSuccess, onOpenChange, toast, setIsCreatingTask]);
 
   const performCreate = useCallback(
     async (opts: {
@@ -472,6 +522,7 @@ export function useTaskSubmitHandlers({
     const trimmedDescription = description.trim();
     const attachments = toMessageAttachments(descriptionInputRef.current?.getAttachments() ?? []);
     if (!validateForCreate(trimmedTitle)) return;
+    if (checkRemoteResolution()) return;
     if (checkRemoteDuplicates()) return;
     const consent = await ensureFreshBranchConsent();
     if (consent === null) return;
@@ -499,6 +550,7 @@ export function useTaskSubmitHandlers({
     performEditWithPlanMode,
     taskName,
     validateForCreate,
+    checkRemoteResolution,
     checkRemoteDuplicates,
     ensureFreshBranchConsent,
     performCreate,
@@ -513,6 +565,7 @@ export function useTaskSubmitHandlers({
     const trimmedDescription = description.trim();
     const attachments = toMessageAttachments(descriptionInputRef.current?.getAttachments() ?? []);
     if (!validateForCreate(trimmedTitle)) return;
+    if (checkRemoteResolution()) return;
     if (checkRemoteDuplicates()) return;
     const consent = await ensureFreshBranchConsent();
     if (consent === null) return;
@@ -544,6 +597,7 @@ export function useTaskSubmitHandlers({
   }, [
     taskName,
     validateForCreate,
+    checkRemoteResolution,
     checkRemoteDuplicates,
     ensureFreshBranchConsent,
     performCreate,
@@ -558,8 +612,14 @@ export function useTaskSubmitHandlers({
     const trimmedTitle = taskName.trim();
     const trimmedDescription = (descriptionInputRef.current?.getValue() ?? "").trim();
     if (!validateForCreate(trimmedTitle)) return;
-    if (!trimmedDescription || !effectiveDefaultStepId || !workspaceId || !effectiveWorkflowId)
-      return;
+    const target = resolveCreateWithoutAgentTarget(
+      trimmedDescription,
+      effectiveDefaultStepId,
+      workspaceId,
+      effectiveWorkflowId,
+    );
+    if (!target) return;
+    if (checkRemoteResolution()) return;
     if (checkRemoteDuplicates()) return;
 
     const consent = await ensureFreshBranchConsent();
@@ -569,10 +629,10 @@ export function useTaskSubmitHandlers({
       let submittedPayload: ReturnType<typeof buildCreateTaskPayload> | null = null;
       const buildPayload = (c: string[]) => {
         const p = buildCreateTaskPayload({
-          workspaceId,
-          effectiveWorkflowId,
+          workspaceId: target.workspaceId,
+          effectiveWorkflowId: target.workflowId,
           trimmedTitle,
-          trimmedDescription,
+          trimmedDescription: target.description,
           repositoriesPayload: getRepositoriesPayload(c),
           agentProfileId,
           executorId,
@@ -580,7 +640,7 @@ export function useTaskSubmitHandlers({
           withAgent: false,
           workspacePath: noRepository ? workspacePath.trim() || undefined : undefined,
         });
-        p.workflow_step_id = effectiveDefaultStepId;
+        p.workflow_step_id = target.stepId;
         submittedPayload = p;
         return p;
       };
@@ -612,6 +672,7 @@ export function useTaskSubmitHandlers({
     noRepository,
     workspacePath,
     validateForCreate,
+    checkRemoteResolution,
     checkRemoteDuplicates,
     getRepositoriesPayload,
     ensureFreshBranchConsent,

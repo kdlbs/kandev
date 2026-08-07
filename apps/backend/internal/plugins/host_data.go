@@ -21,6 +21,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/url"
 	"sort"
 	"strconv"
 	"time"
@@ -501,13 +502,17 @@ func (r executorProfileReader) List(ctx context.Context, page pluginsdk.Page) ([
 	if err != nil {
 		return nil, nil, err
 	}
-	dtos := make([]pluginsdk.ExecutorProfile, 0, len(profiles))
+	validProfiles := make([]*taskmodels.ExecutorProfile, 0, len(profiles))
 	for _, profile := range profiles {
-		if profile == nil {
-			continue
+		if profile != nil {
+			validProfiles = append(validProfiles, profile)
 		}
+	}
+	pageProfiles, info := paginate(validProfiles, page)
+	dtos := make([]pluginsdk.ExecutorProfile, 0, len(pageProfiles))
+	for _, profile := range pageProfiles {
 		executor, err := r.host.taskData.GetExecutor(ctx, profile.ExecutorID)
-		if err != nil {
+		if err != nil && !errors.Is(err, taskmodels.ErrExecutorNotFound) {
 			return nil, nil, err
 		}
 		executorType := ""
@@ -518,8 +523,7 @@ func (r executorProfileReader) List(ctx context.Context, page pluginsdk.Page) ([
 			ID: profile.ID, DisplayName: profile.Name, ExecutorType: executorType,
 		})
 	}
-	items, info := paginate(dtos, page)
-	return items, info, nil
+	return dtos, info, nil
 }
 
 type repositoryReader struct{ host *pluginHost }
@@ -1004,8 +1008,17 @@ func repositoryModelToDTO(r *taskmodels.Repository) pluginsdk.Repository {
 		ProviderHost:         r.ProviderHost,
 		OwnerOrProject:       r.ProviderOwner,
 		ProviderName:         r.ProviderName,
-		RemoteURL:            r.RemoteURL,
+		RemoteURL:            credentialFreeRepositoryURL(r.RemoteURL),
 	}
+}
+
+func credentialFreeRepositoryURL(raw string) string {
+	parsed, err := url.Parse(raw)
+	if err != nil {
+		return ""
+	}
+	parsed.User = nil
+	return parsed.String()
 }
 
 func agentProfileDTOToSDK(p agentsettingsdto.AgentProfileDTO) pluginsdk.AgentProfile {

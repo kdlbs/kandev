@@ -6,6 +6,7 @@ import { DiffWorkerPoolProvider } from "@/components/diff-worker-pool-provider";
 import { DesktopCommandHost } from "@/components/desktop-command-host";
 import { GlobalCommands } from "@/components/global-commands";
 import { LogBufferBridge } from "@/components/log-buffer-bridge";
+import { PluginModalHost } from "@/components/plugins/plugin-modal-host";
 import { QuickChatProvider } from "@/components/quick-chat/quick-chat-provider";
 import { RecentTaskSwitcher } from "@/components/task/recent-task-switcher";
 import { SessionFailureToastBridge } from "@/components/session-failure-toast-bridge";
@@ -30,6 +31,7 @@ export function AppShell({ children }: AppShellProps) {
         <TooltipProvider>
           <ToastProvider>
             <SonnerToaster richColors position="top-right" />
+            <PluginModalHost />
             <SessionFailureToastBridge />
             <TaskDeletedToastBridge />
             <UpdateAvailableToastBridge />

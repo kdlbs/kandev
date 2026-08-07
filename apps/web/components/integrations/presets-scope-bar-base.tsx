@@ -10,6 +10,7 @@ import {
   DropdownMenuTrigger,
 } from "@kandev/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
+import { IntegrationIcon, type IntegrationIconName } from "./integration-icon";
 
 /**
  * Shared, domain-agnostic scope bar for the integration dashboards (/github,
@@ -24,7 +25,8 @@ import { cn } from "@/lib/utils";
 export type ScopePreset = {
   value: string;
   label: string;
-  icon: Icon;
+  icon?: Icon;
+  iconName?: IntegrationIconName;
   group: "inbox" | "created";
 };
 
@@ -79,12 +81,14 @@ function KindSegment<K extends string>({
 
 function PresetPill({
   label,
-  Icon,
+  Icon = IconBookmark,
+  iconName,
   active,
   onClick,
 }: {
   label: string;
-  Icon: Icon;
+  Icon?: Icon;
+  iconName?: IntegrationIconName;
   active: boolean;
   onClick: () => void;
 }) {
@@ -95,7 +99,11 @@ function PresetPill({
       aria-pressed={active}
       className={cn(PILL_BASE, active ? PILL_ACTIVE : PILL_IDLE)}
     >
-      <Icon className="h-3.5 w-3.5 shrink-0" />
+      {iconName ? (
+        <IntegrationIcon name={iconName} className="h-3.5 w-3.5 shrink-0" />
+      ) : (
+        <Icon className="h-3.5 w-3.5 shrink-0" />
+      )}
       <span>{label}</span>
     </button>
   );
@@ -217,6 +225,7 @@ export function IntegrationScopeBar<K extends string>({
       key={`${selected.kind}-${p.value}`}
       label={p.label}
       Icon={p.icon}
+      iconName={p.iconName}
       active={selected.source === "preset" && selected.id === p.value}
       onClick={() => onSelect({ kind: selected.kind, source: "preset", id: p.value })}
     />

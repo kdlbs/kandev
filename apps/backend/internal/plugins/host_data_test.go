@@ -30,6 +30,8 @@ type fakeTaskDataSource struct {
 	executorRunning  map[string]*taskmodels.ExecutorRunning
 	executorProfiles []*taskmodels.ExecutorProfile
 	executors        map[string]*taskmodels.Executor
+	executorErrors   map[string]error
+	executorCalls    int
 
 	// gotIncludeArchived records the includeArchived flag of every
 	// ListTasksByWorkspace call, in call order.
@@ -102,6 +104,10 @@ func (f *fakeTaskDataSource) ListAllExecutorProfiles(context.Context) ([]*taskmo
 }
 
 func (f *fakeTaskDataSource) GetExecutor(_ context.Context, id string) (*taskmodels.Executor, error) {
+	f.executorCalls++
+	if err := f.executorErrors[id]; err != nil {
+		return nil, err
+	}
 	return f.executors[id], nil
 }
 
@@ -381,6 +387,49 @@ func TestPluginHost_ExecutorProfiles_ListsProfilesWithExecutorType(t *testing.T)
 	}
 }
 
+func TestPluginHost_ExecutorProfiles_KeepsProfileWhenExecutorWasDeleted(t *testing.T) {
+	d := newTestDataHost(manifest.Capabilities{APIRead: []string{"executor_profiles"}})
+	d.tasks.executorProfiles = []*taskmodels.ExecutorProfile{{ID: "profile-1", ExecutorID: "deleted", Name: "Deleted executor"}}
+	d.tasks.executorErrors = map[string]error{
+		"deleted": fmt.Errorf("lookup: %w", taskmodels.ErrExecutorNotFound),
+	}
+
+	profiles, _ := pluginsdk.ExecutorProfiles(d.host)
+	got, _, err := profiles.List(context.Background(), pluginsdk.Page{})
+	if err != nil {
+		t.Fatalf("List() unexpected error: %v", err)
+	}
+	if len(got) != 1 || got[0].ID != "profile-1" || got[0].ExecutorType != "" {
+		t.Fatalf("List() = %+v, want profile with an empty executor type", got)
+	}
+}
+
+func TestPluginHost_ExecutorProfiles_EnrichesOnlyRequestedPage(t *testing.T) {
+	d := newTestDataHost(manifest.Capabilities{APIRead: []string{"executor_profiles"}})
+	d.tasks.executorProfiles = []*taskmodels.ExecutorProfile{
+		{ID: "profile-1", ExecutorID: "executor-1"},
+		{ID: "profile-2", ExecutorID: "executor-2"},
+		{ID: "profile-3", ExecutorID: "executor-3"},
+	}
+	d.tasks.executors = map[string]*taskmodels.Executor{
+		"executor-1": {ID: "executor-1", Type: taskmodels.ExecutorTypeLocalDocker},
+		"executor-2": {ID: "executor-2", Type: taskmodels.ExecutorTypeRemoteDocker},
+		"executor-3": {ID: "executor-3", Type: taskmodels.ExecutorTypeSSH},
+	}
+
+	profiles, _ := pluginsdk.ExecutorProfiles(d.host)
+	got, info, err := profiles.List(context.Background(), pluginsdk.Page{Limit: 1})
+	if err != nil {
+		t.Fatalf("List() unexpected error: %v", err)
+	}
+	if len(got) != 1 || got[0].ID != "profile-1" || info == nil || !info.HasMore {
+		t.Fatalf("List() = %+v, info = %+v, want first of three profiles", got, info)
+	}
+	if d.tasks.executorCalls != 1 {
+		t.Fatalf("GetExecutor() calls = %d, want 1 for the returned page", d.tasks.executorCalls)
+	}
+}
+
 func TestPluginHost_Repositories_DeniedWithoutCapability(t *testing.T) {
 	d := newTestDataHost(manifest.Capabilities{})
 	_, _, err := d.host.Repositories().List(context.Background(), "ws-1", pluginsdk.Page{})
@@ -517,6 +566,15 @@ func TestPluginHost_Repositories_SucceedsWithCapability(t *testing.T) {
 	}
 	if repos[0].SourceType != "provider" || repos[0].ProviderID != "example-vcs" || repos[0].ProviderRepositoryID != "repo-42" || repos[0].ProviderHost != "code.example.test" || repos[0].OwnerOrProject != "team" || repos[0].ProviderName != "kandev" || repos[0].RemoteURL != "https://code.example.test/scm/team/kandev.git" {
 		t.Fatalf("List() = %+v, want provider origin identity", repos[0])
+	}
+}
+
+func TestRepositoryModelToDTO_StripsRemoteURLCredentials(t *testing.T) {
+	dto := repositoryModelToDTO(&taskmodels.Repository{
+		RemoteURL: "https://user:secret@code.example.test/team/repo.git",
+	})
+	if dto.RemoteURL != "https://code.example.test/team/repo.git" {
+		t.Fatalf("RemoteURL = %q, want credential-free URL", dto.RemoteURL)
 	}
 }
 

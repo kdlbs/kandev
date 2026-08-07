@@ -1,14 +1,5 @@
-import {
-  IconEye,
-  IconMessageDots,
-  IconTool,
-  IconCode,
-  IconSearch,
-  IconBug,
-  IconSparkles,
-  IconChecks,
-} from "@tabler/icons-react";
 import type { Icon } from "@tabler/icons-react";
+import { iconForIntegrationPreset } from "@/components/integrations/integration-preset-icons";
 import type {
   GitHubActionPreset,
   GitHubActionPresetIcon,
@@ -17,23 +8,18 @@ import type {
 import type { TaskPreset } from "./quick-task-launcher";
 
 export const PRESET_ICON_CHOICES: { key: GitHubActionPresetIcon; icon: Icon; label: string }[] = [
-  { key: "eye", icon: IconEye, label: "Eye" },
-  { key: "message", icon: IconMessageDots, label: "Message" },
-  { key: "tool", icon: IconTool, label: "Tool" },
-  { key: "code", icon: IconCode, label: "Code" },
-  { key: "search", icon: IconSearch, label: "Search" },
-  { key: "bug", icon: IconBug, label: "Bug" },
-  { key: "sparkle", icon: IconSparkles, label: "Sparkle" },
-  { key: "check", icon: IconChecks, label: "Check" },
+  { key: "eye", icon: iconForIntegrationPreset("eye"), label: "Eye" },
+  { key: "message", icon: iconForIntegrationPreset("message"), label: "Message" },
+  { key: "tool", icon: iconForIntegrationPreset("tool"), label: "Tool" },
+  { key: "code", icon: iconForIntegrationPreset("code"), label: "Code" },
+  { key: "search", icon: iconForIntegrationPreset("search"), label: "Search" },
+  { key: "bug", icon: iconForIntegrationPreset("bug"), label: "Bug" },
+  { key: "sparkle", icon: iconForIntegrationPreset("sparkle"), label: "Sparkle" },
+  { key: "check", icon: iconForIntegrationPreset("check"), label: "Check" },
 ];
 
-const ICON_BY_KEY: Record<string, Icon> = Object.fromEntries(
-  PRESET_ICON_CHOICES.map((choice) => [choice.key, choice.icon]),
-);
-
 export function iconForPresetKey(key: string | undefined): Icon {
-  if (!key) return IconSparkles;
-  return ICON_BY_KEY[key] ?? IconSparkles;
+  return iconForIntegrationPreset(key);
 }
 
 // Interpolate `{{url}}` and `{{title}}` placeholders in a prompt template.

@@ -64,6 +64,8 @@ Read individual ADRs for full context. Create new ones via `/record decision` or
 | 2026-07-23-post-commit-hook-aware-verification | [Post-Commit Hook-Aware Verification](2026-07-23-post-commit-hook-aware-verification.md) | superseded by 2026-07-26 | workflow | 2026-07-23 |
 | 2026-07-23-workspace-source-root-move-boundary | [Workspace Source Root Move Boundary](2026-07-23-workspace-source-root-move-boundary.md) | accepted | backend | 2026-07-23 |
 | 2026-07-24-operator-owned-agent-launcher-settings | [Operator-Owned Agent Launcher Settings](2026-07-24-operator-owned-agent-launcher-settings.md) | accepted | backend, frontend, protocol | 2026-07-24 |
+| 2026-08-05-plugin-native-integration-settings | [Plugins Contribute Native Integration Settings](2026-08-05-plugin-native-integration-settings.md) | accepted | frontend, protocol | 2026-08-05 |
+| 2026-08-06-plugin-code-host-dashboard-parity | [Code-Host Plugins Reuse Native Dashboard Primitives](2026-08-06-plugin-code-host-dashboard-parity.md) | accepted | frontend, protocol | 2026-08-06 |
 | 2026-07-18-turn-configuration-snapshots | [Attribute runtime configuration to turns](2026-07-18-turn-configuration-snapshots.md) | accepted | backend, frontend | 2026-07-18 |
 | 2026-07-22-gpg-signed-release-tags | [GPG-signed release tags](2026-07-22-gpg-signed-release-tags.md) | accepted | infra, workflow | 2026-07-22 |
 | 2026-07-19-reject-mcp-actions-on-raw-websocket | [Reject MCP Actions on the Raw WebSocket](2026-07-19-reject-mcp-actions-on-raw-websocket.md) | accepted | backend, protocol | 2026-07-19 |

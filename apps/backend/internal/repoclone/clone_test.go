@@ -6,12 +6,42 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
 
 	"github.com/kandev/kandev/internal/common/logger"
 )
+
+func TestGitCredentialRequestCarriesExactTaskScope(t *testing.T) {
+	t.Parallel()
+
+	requestType := reflect.TypeOf(GitCredentialRequest{})
+	for _, field := range []string{"TaskID", "SessionID", "RepositoryID"} {
+		if _, found := requestType.FieldByName(field); !found {
+			t.Errorf("GitCredentialRequest is missing %s", field)
+		}
+	}
+}
+
+type exactScopeWorkspaceCloner interface {
+	EnsureWorkspaceClonedWithCredentialRequest(
+		context.Context, GitCredentialRequest, string, string,
+	) (string, error)
+	RefreshWorkspaceRepositoryWithCredentialRequest(
+		context.Context, GitCredentialRequest, string, string, string,
+	) error
+}
+
+func TestClonerExposesExactScopeWorkspaceClone(t *testing.T) {
+	t.Parallel()
+
+	cloner := NewCloner(Config{BasePath: t.TempDir()}, ProtocolHTTPS, "", logger.Default())
+	if _, supported := any(cloner).(exactScopeWorkspaceCloner); !supported {
+		t.Fatal("Cloner does not expose exact-scope workspace clone and refresh operations")
+	}
+}
 
 func TestProviderRepoPathSeparatesProviderHosts(t *testing.T) {
 	t.Parallel()
@@ -324,7 +354,7 @@ func TestWorkspaceCloneAuthPreservesNonGitHubURL(t *testing.T) {
 	cloner := NewCloner(Config{BasePath: t.TempDir()}, ProtocolSSH, "", logger.Default())
 	want := "git@ssh.dev.azure.com:v3/acme/Platform/api"
 	got, auth, err := cloner.workspaceCloneAuth(
-		context.Background(), "workspace-a", "azure_devops", want, "Platform", "api", "", "",
+		context.Background(), "workspace-a", "azure_devops", "", want, "Platform", "api", "", "",
 	)
 	if err != nil {
 		t.Fatalf("workspaceCloneAuth() unexpected error: %v", err)
@@ -340,7 +370,7 @@ func TestWorkspaceCloneAuthPrefersDeclaredGitHubHTTPSURL(t *testing.T) {
 	declared := "https://github.enterprise.example/scm/ENG/widgets.git"
 
 	cloneURL, auth, err := cloner.workspaceCloneAuth(
-		context.Background(), "workspace-a", "github", declared, "acme", "widgets", "", "",
+		context.Background(), "workspace-a", "github", "https://github.enterprise.example", declared, "acme", "widgets", "", "",
 	)
 	if err != nil {
 		t.Fatalf("workspaceCloneAuth(): %v", err)
@@ -350,17 +380,56 @@ func TestWorkspaceCloneAuthPrefersDeclaredGitHubHTTPSURL(t *testing.T) {
 	}
 }
 
+func TestWorkspaceCloneAuthRejectsMismatchedGitHubURLBeforeCredentialUse(t *testing.T) {
+	cloner := NewCloner(Config{BasePath: t.TempDir()}, ProtocolHTTPS, "", logger.Default())
+	cloner.SetGitCredentialProvider(&recordingCredentialProvider{password: "workspace-token"})
+
+	cloneURL, auth, err := cloner.workspaceCloneAuth(
+		context.Background(), "workspace-a", "github", "https://github.com",
+		"https://attacker.example/acme/widgets.git", "acme", "widgets", "", "",
+	)
+	if err != nil {
+		t.Fatalf("workspaceCloneAuth(): %v", err)
+	}
+	if cloneURL != "https://github.com/acme/widgets.git" || auth == nil || auth.origin != "https://github.com" {
+		t.Fatalf("workspace clone auth = (%q, %#v)", cloneURL, auth)
+	}
+}
+
 type recordingCredentialProvider struct {
 	workspaceID string
+	request     GitCredentialRequest
 	password    string
 }
 
 func (p *recordingCredentialProvider) ResolveGitCredential(
-	_ context.Context,
-	workspaceID, _, _, _ string,
+	_ context.Context, request GitCredentialRequest,
 ) (string, string, error) {
-	p.workspaceID = workspaceID
+	p.workspaceID = request.WorkspaceID
+	p.request = request
 	return "x-access-token", p.password, nil
+}
+
+func TestWorkspaceCloneAuthResolvesPluginProviderCredentialForExactOrigin(t *testing.T) {
+	credentials := &recordingCredentialProvider{password: "plugin-token"}
+	cloner := NewCloner(Config{BasePath: t.TempDir()}, ProtocolHTTPS, "", logger.Default())
+	cloner.SetGitCredentialProvider(credentials)
+	cloneURL := "https://bitbucket.example/context/scm/ENG/widgets.git"
+
+	gotURL, auth, err := cloner.workspaceCloneAuth(
+		context.Background(), "workspace-a", "bitbucket", "https://bitbucket.example/context",
+		cloneURL, "ENG", "widgets", "", "",
+	)
+	if err != nil {
+		t.Fatalf("workspaceCloneAuth(): %v", err)
+	}
+	if gotURL != cloneURL || auth == nil || auth.username != "x-access-token" || auth.password != "plugin-token" {
+		t.Fatalf("workspace clone auth = (%q, %#v)", gotURL, auth)
+	}
+	if credentials.request.Provider != "bitbucket" || credentials.request.ProviderHost != "https://bitbucket.example/context" ||
+		credentials.request.CloneURL != cloneURL || credentials.request.WorkspaceID != "workspace-a" {
+		t.Fatalf("credential request = %+v", credentials.request)
+	}
 }
 
 func readTestFile(t *testing.T, path string) string {

@@ -80,13 +80,31 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { Combobox } from "@/components/combobox";
 import { PageTopbar } from "@/components/page-topbar";
 import { TaskCreateDialog } from "@/components/task-create-dialog";
+import { ChangeRequestList, ChangeRequestRow } from "@/components/integrations/change-request-list";
+import { ChangeRequestDetail } from "@/components/integrations/change-request-detail";
+import { IntegrationStartTaskMenu } from "@/components/integrations/integration-start-task-menu";
+import { IntegrationListToolbar } from "@/components/integrations/integration-list-toolbar";
+import { IntegrationScopeBar } from "@/components/integrations/presets-scope-bar-base";
+import { TaskRowIndicator } from "@/components/integrations/task-row-indicator";
+import { IntegrationChangeRequestStatus } from "@/components/integrations/integration-change-request-status";
+import { IntegrationIcon } from "@/components/integrations/integration-icon";
+import { TaskChangeRequestLinkForm } from "@/components/integrations/task-change-request-link-form";
 import { getBackendConfig } from "@/lib/config";
 import { fetchJson } from "@/lib/api/client";
 import { softNavigate } from "@/lib/routing/client-router";
 import type { AppState } from "@/lib/state/store";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
+import { reviewItemId } from "@/components/task/review-selection";
+import { useDockviewStore } from "@/lib/state/dockview-store";
 import { pluginModalManager } from "./modal-manager";
-import type { PluginActionInput, PluginActionOptions, PluginHostApi } from "./types";
+import type {
+  PluginActionInput,
+  PluginActionOptions,
+  PluginHostApi,
+  PluginModalHandle,
+  PluginTaskLinkDialogOptions,
+  PluginTaskReviewOptions,
+} from "./types";
 
 /**
  * Curated `@kandev/ui` subset exposed on `host.ui`, plus a handful of
@@ -187,6 +205,15 @@ const PLUGIN_UI: Record<string, unknown> = {
   //   initialValues, so plugins hand off task creation to the native flow
   //   instead of POSTing directly.
   TaskCreateDialog,
+  ChangeRequestList,
+  ChangeRequestRow,
+  ChangeRequestDetail,
+  IntegrationStartTaskMenu,
+  IntegrationListToolbar,
+  IntegrationChangeRequestStatus,
+  IntegrationScopeBar,
+  IntegrationIcon,
+  TaskRowIndicator,
 };
 
 export function buildHostApi(
@@ -221,7 +248,51 @@ export function buildHostApi(
     theme,
     navigate: (href, options) => softNavigate(href, options?.replace ? "replace" : "push"),
     openModal: (options) => pluginModalManager.openModal(pluginId, options),
+    openTaskLinkDialog: (options) => openTaskLinkDialog(pluginId, options),
+    openTaskReview: (options) => openTaskReview(storeApi, options),
   };
+}
+
+function openTaskReview(storeApi: StoreApi<AppState>, options: PluginTaskReviewOptions): void {
+  if (options.presentation === "desktop") {
+    useDockviewStore
+      .getState()
+      .addReviewPanel(options.providerId, options.reviewKey, options.title);
+    return;
+  }
+  storeApi
+    .getState()
+    .setMobileSessionReview(
+      options.sessionId,
+      reviewItemId({ providerId: options.providerId, reviewKey: options.reviewKey }),
+    );
+}
+
+function openTaskLinkDialog(
+  pluginId: string,
+  options: PluginTaskLinkDialogOptions,
+): PluginModalHandle {
+  const handle = pluginModalManager.openTaskLinkDialog(pluginId, {
+    title: options.title,
+    description: options.description,
+    presentation: "dialog",
+    content: function PluginTaskLinkDialogContent() {
+      return React.createElement(TaskChangeRequestLinkForm, {
+        inputLabel: options.inputLabel,
+        placeholder: options.placeholder,
+        emptyError: options.emptyError,
+        failureMessage: options.failureMessage,
+        successMessage: options.successMessage,
+        inputTestId: options.inputTestId,
+        errorTestId: options.errorTestId,
+        submitTestId: options.submitTestId,
+        onSubmit: options.onSubmit,
+        onCancel: () => handle.close(),
+        onSuccess: () => handle.close(),
+      });
+    },
+  });
+  return handle;
 }
 
 /** fetch scoped to `/api/plugins/{pluginId}/...` via the kandev reverse proxy. */

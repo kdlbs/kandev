@@ -247,6 +247,19 @@ export function findDuplicateRemoteRepo(remoteRepos: TaskRemoteRepoRow[]): strin
   return null;
 }
 
+/** Returns the first plugin-owned URL whose authorized descriptor is not ready yet. */
+export function findUnresolvedProviderRemote(
+  remoteRepos: TaskRemoteRepoRow[],
+  matchesProviderURL: (url: string) => boolean,
+): TaskRemoteRepoRow | null {
+  for (const row of remoteRepos) {
+    const url = row.url.trim();
+    if (!url || row.provider) continue;
+    if (matchesProviderURL(url)) return row;
+  }
+  return null;
+}
+
 /**
  * Builds the repositories payload for task creation from the unified list.
  *

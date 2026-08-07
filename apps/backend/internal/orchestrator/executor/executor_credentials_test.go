@@ -262,7 +262,7 @@ func TestConfigureGitCredentialBrokerUsesRepositoryCloneURLForCustomProvider(t *
 		ExecutorType: string(models.ExecutorTypeRemoteDocker), Env: map[string]string{},
 	}
 	info := &repoInfo{RepositoryID: "repo-1", Repository: &models.Repository{
-		Provider: "bitbucket", ProviderOwner: "ignored", ProviderName: "ignored",
+		Provider: "bitbucket", ProviderHost: "https://bitbucket.example", ProviderOwner: "ignored", ProviderName: "ignored",
 		RemoteURL: "https://bitbucket.example/scm/ENG/widgets.git",
 	}}
 
@@ -318,12 +318,41 @@ func TestConfigureGitCredentialBrokerRejectsUnsupportedPluginProvider(t *testing
 		ExecutorType: string(models.ExecutorTypeRemoteDocker), Env: map[string]string{},
 	}
 	info := &repoInfo{RepositoryID: "repo-1", Repository: &models.Repository{
-		Provider: "bitbucket", RemoteURL: "https://bitbucket.example/team/widgets.git",
+		Provider: "bitbucket", ProviderHost: "https://bitbucket.example", RemoteURL: "https://bitbucket.example/team/widgets.git",
 	}}
 
 	err := exec.configureGitCredentialBrokerForRepositories(context.Background(), req, []*repoInfo{info})
 	if !errors.Is(err, gitcredentials.ErrUnsupported) {
 		t.Fatalf("configureGitCredentialBrokerForRepositories() error = %v, want ErrUnsupported", err)
+	}
+}
+
+func TestConfigureGitCredentialBrokerRejectsMismatchedProviderHost(t *testing.T) {
+	issuer := &fakeGitHubCredentialLeaseIssuer{lease: gitcredentials.Lease{Token: "opaque-lease"}}
+	exec := newTestExecutor(t, &mockAgentManager{}, newMockRepository())
+	exec.SetGitHubCredentialBroker(issuer, "https://kandev.example/api/v1/github/credentials/resolve")
+	req := &LaunchAgentRequest{
+		TaskID: "task-1", WorkspaceID: "workspace-1", SessionID: "session-1",
+		ExecutorType: string(models.ExecutorTypeRemoteDocker), Env: map[string]string{},
+	}
+	info := &repoInfo{RepositoryID: "repo-1", Repository: &models.Repository{
+		Provider: "bitbucket", ProviderHost: "https://bitbucket.example",
+		RemoteURL: "https://attacker.example/team/widgets.git",
+	}}
+
+	err := exec.configureGitCredentialBrokerForRepositories(context.Background(), req, []*repoInfo{info})
+	if err == nil || !strings.Contains(err.Error(), "provider origin") {
+		t.Fatalf("configureGitCredentialBrokerForRepositories() error = %v, want provider-origin rejection", err)
+	}
+	if issuer.calls != 0 {
+		t.Fatalf("Issue calls = %d, want 0", issuer.calls)
+	}
+}
+
+func TestManagedGitCredentialProviderTreatsEmptyProviderAsGitHub(t *testing.T) {
+	repository := &models.Repository{Provider: ""}
+	if got := managedGitCredentialProvider(repository, true, map[string]string{}); got != gitHubProviderID {
+		t.Fatalf("managedGitCredentialProvider() = %q, want %q", got, gitHubProviderID)
 	}
 }
 

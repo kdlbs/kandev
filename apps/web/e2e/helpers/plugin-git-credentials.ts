@@ -5,7 +5,7 @@ import { connect } from "node:net";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { pipeline, type Duplex } from "node:stream";
+import { pipeline, type Duplex, type Readable, type Writable } from "node:stream";
 
 export const fixtureGitProvider = "fixture-source-control";
 export const fixtureGitHost = "bitbucket.example.test";
@@ -234,7 +234,23 @@ function serveGitHTTP(req: IncomingMessage, res: ServerResponse, root: string): 
   child.once("close", () => {
     if (!failed) writeCGIResponse(res, Buffer.concat(chunks));
   });
-  req.pipe(child.stdin);
+  pipeFixtureGitRequest(req, child.stdin, () => {
+    if (failed) return;
+    failed = true;
+    child.kill();
+    if (!res.destroyed) res.destroy();
+  });
+}
+
+/** Pipes an HTTP request into git-http-backend with deterministic EPIPE handling. */
+export function pipeFixtureGitRequest(
+  request: Readable,
+  childInput: Writable,
+  onError: (error: Error) => void,
+): void {
+  pipeline(request, childInput, (error) => {
+    if (error) onError(error);
+  });
 }
 
 function writeCGIResponse(res: ServerResponse, body: Buffer): void {

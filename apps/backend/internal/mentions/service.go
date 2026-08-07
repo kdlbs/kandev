@@ -199,7 +199,7 @@ func ensureRegisteredProvidersAvailable(
 	sources map[string]struct{},
 	providerKinds map[string]struct{},
 ) error {
-	for index, provider := range providers {
+	for _, provider := range providers {
 		if _, exists := sources[provider.descriptor.Source]; exists {
 			return fmt.Errorf("%w: %s", ErrDuplicateSource, provider.descriptor.Source)
 		}
@@ -207,14 +207,11 @@ func ensureRegisteredProvidersAvailable(
 		if _, exists := providerKinds[providerKey]; exists {
 			return fmt.Errorf("%w: %s/%s", ErrDuplicateProvider, provider.descriptor.Provider, provider.descriptor.Kind)
 		}
-		for _, earlier := range providers[:index] {
-			if earlier.descriptor.Source == provider.descriptor.Source {
-				return fmt.Errorf("%w: %s", ErrDuplicateSource, provider.descriptor.Source)
-			}
-			if referenceProviderKey(earlier.descriptor.Provider, earlier.descriptor.Kind) == providerKey {
-				return fmt.Errorf("%w: %s/%s", ErrDuplicateProvider, provider.descriptor.Provider, provider.descriptor.Kind)
-			}
-		}
+		// Record accepted replacements as we go. This retains exact duplicate
+		// detection while making large plugin manifests linear rather than
+		// rescanning every preceding descriptor.
+		sources[provider.descriptor.Source] = struct{}{}
+		providerKinds[providerKey] = struct{}{}
 	}
 	return nil
 }

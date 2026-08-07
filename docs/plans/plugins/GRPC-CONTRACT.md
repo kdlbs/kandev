@@ -320,9 +320,13 @@ type Host interface {                                        // injected before 
     Workspaces() WorkspaceReader
     Workflows() WorkflowReader
     AgentProfiles() AgentProfileReader
-    ExecutorProfiles() ExecutorProfileReader
     Repositories() RepositoryReader
 }
+// Optional Host extension, discovered without breaking existing Host implementations.
+type ExecutorProfileHost interface {
+    ExecutorProfiles() ExecutorProfileReader
+}
+func ExecutorProfiles(host Host) (ExecutorProfileReader, bool)
 func Serve(p Plugin, opts ...Option)     // blocks; wires go-plugin server + broker
 // Optional embeddable no-op base: sdk.UnimplementedPlugin
 // Optional embeddable no-op base for Host data accessors (every method
@@ -356,7 +360,12 @@ type GitCredentialBinder interface {
 separately. `SearchEntityReferences` candidates are untrusted: the host injects
 descriptor identity and constructs canonical reference fields. `AuthorizeEntityReference`
 runs for search and submission. `ResolveGitCredential` receives an exact host-verified
-lease scope and returns only a transient credential consumed by the host helper.
+scope for both initial host materialization and helper-lease redemption, and returns
+only a transient credential consumed by the host Git process. Initial materialization
+and strict pre-worktree refresh carry the same task/session/repository scope; after a
+successful refresh the worktree layer uses local refs and performs no second network operation.
+must include workspace, task, active session, repository, exact host, and exact path;
+an incomplete plugin-provider scope fails closed.
 `GetGitCredentialBinding` receives the same scope and returns an opaque, non-secret
 generation checked before and after redemption; missing or changed bindings fail closed.
 Disabling, failing, or uninstalling a plugin immediately revokes leases for all

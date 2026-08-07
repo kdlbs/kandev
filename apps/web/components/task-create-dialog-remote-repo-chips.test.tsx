@@ -292,6 +292,49 @@ describe("RemoteRepoChipsRow controls", () => {
     });
   });
 
+  it("uses the inspected provider default when a pasted repository has no branch", () => {
+    const onUpdateRow = vi.fn();
+    const fs = makeFs({
+      remoteRepos: [
+        {
+          key: "remote-0",
+          url: "https://bitbucket.example.test/projects/PLATFORM/repos/web",
+          branch: "",
+          source: "paste",
+        },
+      ],
+      prInfoByUrl: {
+        ...makePrInfoByUrl(),
+        inspection: () => ({
+          providerId: "bitbucket",
+          providerHost: "https://bitbucket.example.test",
+          ownerOrProject: "PLATFORM",
+          repositoryId: "web-42",
+          repositoryName: "web",
+          cloneUrl: "https://bitbucket.example.test/scm/PLATFORM/web.git",
+          defaultBranch: "trunk",
+        }),
+      } as unknown as DialogFormState["prInfoByUrl"],
+    });
+
+    renderInProvider(
+      <RemoteRepoChipsRow
+        workspaceId="ws-1"
+        fs={fs}
+        onUpdateRow={onUpdateRow}
+        onAddRow={vi.fn()}
+        onRemoveRow={vi.fn()}
+      />,
+    );
+
+    expect(onUpdateRow).toHaveBeenCalledWith(
+      "remote-0",
+      expect.objectContaining({ branch: "trunk" }),
+    );
+  });
+});
+
+describe("RemoteRepoChipsRow retry", () => {
   it("retries both resolution paths for the failed row", () => {
     const branchEnsure = vi.fn();
     const branchClear = vi.fn();

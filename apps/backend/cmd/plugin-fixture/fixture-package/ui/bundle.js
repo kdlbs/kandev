@@ -128,7 +128,11 @@
             "data-testid": "fixture-review-panel-" + props.presentation,
             "data-review-key": props.reviewKey,
           },
-          jsx("h2", null, "Bitbucket pull request #42"),
+          jsx(
+            "h2",
+            null,
+            "Bitbucket pull request #" + props.reviewKey.replace("pull-request-", ""),
+          ),
           jsx("p", null, "Provider-neutral fixture review panel"),
         );
       }
@@ -138,38 +142,32 @@
       }
 
       function openLinkResult(context) {
-        return host.api
-          .invokeAction("link-pull-request", {
-            workspaceId: context.workspaceId,
-            taskId: context.taskId,
-            body: { pullRequestUrl: PULL_REQUEST_URL },
-          })
-          .then(function (result) {
-            function LinkResult() {
-              return jsx(
-                "div",
-                { "data-testid": "fixture-link-pull-request-result" },
-                result.linked
-                  ? "Linked Bitbucket Pull Request #42"
-                  : result.error || "Connection unavailable",
-              );
-            }
-            host.openModal({
-              title: "Link Bitbucket Pull Request",
-              content: LinkResult,
-              presentation: context.presentation === "mobile" ? "drawer" : "dialog",
-            });
-          })
-          .catch(function (error) {
-            function LinkFailure() {
-              return jsx(
-                "div",
-                { "data-testid": "fixture-link-pull-request-result" },
-                error instanceof Error ? error.message : "Connection unavailable",
-              );
-            }
-            host.openModal({ title: "Link Bitbucket Pull Request", content: LinkFailure });
-          });
+        host.openTaskLinkDialog({
+          title: "Link Bitbucket pull request",
+          description: "Use a Bitbucket pull request URL for this task.",
+          inputLabel: "Pull request",
+          placeholder: PULL_REQUEST_URL,
+          emptyError: "Enter a Bitbucket pull request URL.",
+          failureMessage: "Failed to link Bitbucket pull request.",
+          successMessage: "Bitbucket pull request linked",
+          inputTestId: "fixture-link-pull-request-input",
+          errorTestId: "fixture-link-pull-request-error",
+          submitTestId: "fixture-link-pull-request-submit",
+          onSubmit: function (reference) {
+            return host.api
+              .invokeAction("link-pull-request", {
+                workspaceId: context.workspaceId,
+                taskId: context.taskId,
+                body: { pullRequestUrl: reference },
+              })
+              .then(function (result) {
+                if (!result.linked) {
+                  throw new Error(result.error || "Connection unavailable");
+                }
+              });
+          },
+        });
+        return Promise.resolve();
       }
 
       function SidebarSlot() {
@@ -216,7 +214,12 @@
           return Promise.resolve([fixtureRepository()]);
         },
         matchesURL: function (url) {
-          return typeof url === "string" && url.indexOf("bitbucket.example.test") !== -1;
+          if (typeof url !== "string") return false;
+          try {
+            return new URL(url).hostname === "bitbucket.example.test";
+          } catch (_error) {
+            return false;
+          }
         },
         listBranches: function (_context) {
           return Promise.resolve([{ name: "main" }, { name: "feature/provider-contract" }]);
@@ -240,6 +243,7 @@
       registry.registerTaskAction({
         id: "link-bitbucket-pull-request",
         label: "Bitbucket Pull Request",
+        icon: "bitbucket",
         placement: "link",
         group: "Link",
         run: openLinkResult,

@@ -90,7 +90,7 @@ function validateRow(
     return null;
   }
   const locator = repositoryLocator(row);
-  if (row.remoteUrl && !isValidRemoteUrl(row.remoteUrl)) {
+  if (row.remoteUrl && !row.provider && !isValidRemoteUrl(row.remoteUrl)) {
     return "Enter a valid remote repository URL and base branch.";
   }
   if (!locator || !row.baseBranch?.trim()) return "Choose a repository and base branch.";

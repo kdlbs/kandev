@@ -100,6 +100,7 @@ import type {
   Workspace,
 } from "@/lib/types/http";
 import type { LicenseEntry } from "@/lib/types/system";
+import { renderPluginIntegrationSettings } from "./plugin-integration-settings-route";
 
 type RouteRenderer = () => ReactNode;
 type RepositoryWithScripts = Repository & { scripts: RepositoryScript[] };
@@ -298,6 +299,11 @@ function renderDynamicSettingsRoute(pathname: string) {
   const workspaceRoute = renderWorkspaceSettingsRoute(pathname);
   if (workspaceRoute) return workspaceRoute;
 
+  const integrationId = matchSingle(pathname, /^\/settings\/integrations\/([^/]+)$/);
+  if (integrationId) {
+    return renderIntegrationSettingsRoute(integrationId);
+  }
+
   const pluginId = matchSingle(pathname, /^\/settings\/plugins\/([^/]+)$/);
   if (pluginId) {
     // A plugin-authored settings route registered at exactly this path
@@ -413,7 +419,7 @@ function renderIntegrationSettingsRoute(section: string | null, workspaceId?: st
     case "slack":
       return <IntegrationsSlackPage workspaceId={workspaceId} />;
     default:
-      return null;
+      return renderPluginIntegrationSettings(section, workspaceId);
   }
 }
 

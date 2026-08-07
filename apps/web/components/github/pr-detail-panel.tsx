@@ -2,20 +2,13 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { setPanelTitle } from "@/lib/layout/panel-portal-manager";
-import {
-  IconRefresh,
-  IconPlus,
-  IconMinus,
-  IconGitMerge,
-  IconCheck,
-  IconLoader2,
-} from "@tabler/icons-react";
-import { Badge } from "@kandev/ui/badge";
+import { IconCheck } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
-import { Separator } from "@kandev/ui/separator";
-import { ScrollArea } from "@kandev/ui/scroll-area";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { useAppStore } from "@/components/state-provider";
+import {
+  ChangeRequestDetail,
+  type ChangeRequestDetailModel,
+} from "@/components/integrations/change-request-detail";
 import { useActiveTaskPR, useTaskPR } from "@/hooks/domains/github/use-task-pr";
 import { prPanelLabel, prTaskKey } from "@/components/github/pr-utils";
 import { usePRFeedback } from "@/hooks/domains/github/use-pr-feedback";
@@ -26,19 +19,8 @@ import type { PRFeedbackComment } from "@/lib/state/slices/comments";
 import { useToast } from "@/components/toast-provider";
 import { submitPRReview } from "@/lib/api/domains/github-pr-api";
 import type { TaskPR, PRFeedback } from "@/lib/types/github";
-import {
-  formatTimeAgo,
-  AuthorLink,
-  getTimeAgoColor,
-  CollapsibleSection,
-  PRMarkdownBody,
-} from "./pr-shared";
 import { PRMergeButton } from "./pr-merge-button";
 import { PRMergeabilityNotice, buildConflictResolutionMessage } from "./pr-mergeability-notice";
-import { ReviewStateBadge } from "./pr-reviews-section";
-import { ChecksSection } from "./pr-checks-section";
-import { ReviewsSection } from "./pr-reviews-section";
-import { CommentsSection } from "./pr-comments-section";
 import { usePRScopedReviewRequest } from "./use-pr-scoped-review-request";
 
 // --- Dockview panel wrapper ---
@@ -217,17 +199,6 @@ function derivePanelMetrics(taskPR: TaskPR, feedback: PRFeedback | null): PRPane
   };
 }
 
-function DescriptionSection({ body }: { body: string }) {
-  if (!body) return null;
-  return (
-    <CollapsibleSection title="Description" count={1} defaultOpen={false}>
-      <div className="px-2">
-        <PRMarkdownBody body={body} />
-      </div>
-    </CollapsibleSection>
-  );
-}
-
 // GitHub logins are case-insensitive; normalize before comparing.
 // Fails closed when the current user is unknown — without that identity we
 // can't tell whether the viewer is the PR author, and GitHub rejects
@@ -315,6 +286,126 @@ function ApproveButton({
   );
 }
 
+function githubPerson(login: string, avatarUrl?: string, isBot?: boolean) {
+  return {
+    name: login,
+    url: login ? `https://github.com/${login}` : undefined,
+    avatarUrl: avatarUrl || undefined,
+    isBot,
+  };
+}
+
+function mapGitHubIdentity(taskPR: TaskPR, feedback: PRFeedback | null) {
+  const live = feedback?.pr;
+  return {
+    title: live?.title ?? taskPR.pr_title,
+    url: live?.html_url || live?.url || taskPR.pr_url,
+    state: live?.state ?? taskPR.state,
+    draft: live?.draft,
+    author: githubPerson(live?.author_login ?? taskPR.author_login),
+    description: live?.body,
+  };
+}
+
+function mapGitHubDates(taskPR: TaskPR, feedback: PRFeedback | null) {
+  const live = feedback?.pr;
+  return {
+    createdAt: live?.created_at ?? taskPR.created_at,
+    mergedAt: live?.merged_at ?? taskPR.merged_at ?? undefined,
+    closedAt: live?.closed_at ?? taskPR.closed_at ?? undefined,
+  };
+}
+
+function mapGitHubBranches(taskPR: TaskPR, feedback: PRFeedback | null) {
+  const live = feedback?.pr;
+  return {
+    sourceBranch: live?.head_branch ?? taskPR.head_branch,
+    targetBranch: live?.base_branch ?? taskPR.base_branch,
+    additions: live?.additions ?? taskPR.additions,
+    deletions: live?.deletions ?? taskPR.deletions,
+  };
+}
+
+function mapGitHubReviews(
+  taskPR: TaskPR,
+  feedback: PRFeedback | null,
+  requestingReviewers: string[],
+) {
+  const requesting = new Set(requestingReviewers.map((reviewer) => reviewer.toLowerCase()));
+  const state = feedback?.pr.state ?? taskPR.state;
+  return (feedback?.reviews ?? []).map((review) => ({
+    id: String(review.id),
+    author: githubPerson(review.author, review.author_avatar),
+    state: review.state,
+    body: review.body || undefined,
+    createdAt: review.created_at,
+    actions: shouldShowReRequestReviewAction(state, review.state)
+      ? [
+          {
+            id: "rerequest-review",
+            label: "Re-request review",
+            pendingLabel: "Requesting...",
+            tone: "secondary" as const,
+            disabled: requesting.has(review.author.toLowerCase()),
+            busy: requesting.has(review.author.toLowerCase()),
+          },
+        ]
+      : undefined,
+  }));
+}
+
+function mapGitHubChecks(feedback: PRFeedback | null) {
+  return (feedback?.checks ?? []).map((check) => ({
+    id: `${check.name}-${check.html_url}-${check.source}-${check.started_at ?? ""}`,
+    name: check.name,
+    state: check.status,
+    conclusion: check.conclusion,
+    url: check.html_url || undefined,
+    output: check.output,
+    startedAt: check.started_at ?? undefined,
+    completedAt: check.completed_at ?? undefined,
+  }));
+}
+
+function mapGitHubComments(feedback: PRFeedback | null) {
+  return (feedback?.comments ?? []).map((comment) => ({
+    id: String(comment.id),
+    parentId: comment.in_reply_to ? String(comment.in_reply_to) : undefined,
+    author: githubPerson(comment.author, comment.author_avatar, comment.author_is_bot),
+    body: comment.body,
+    createdAt: comment.created_at,
+    path: comment.path || undefined,
+    line: comment.line || undefined,
+  }));
+}
+
+function mapGitHubDetail(
+  taskPR: TaskPR,
+  feedback: PRFeedback | null,
+  metrics: PRPanelMetrics,
+  requestedReviewers: { login: string; type: "user" | "team" }[],
+  requestingReviewers: string[],
+): ChangeRequestDetailModel {
+  return {
+    providerId: "github",
+    reviewKey: `${taskPR.owner}/${taskPR.repo}#${taskPR.pr_number}`,
+    number: taskPR.pr_number,
+    ...mapGitHubIdentity(taskPR, feedback),
+    ...mapGitHubDates(taskPR, feedback),
+    ...mapGitHubBranches(taskPR, feedback),
+    reviewState: metrics.reviewState,
+    pendingReviewCount: metrics.pendingReviewCount,
+    reviews: mapGitHubReviews(taskPR, feedback, requestingReviewers),
+    requestedReviewers: requestedReviewers.map((reviewer) => ({
+      ...githubPerson(reviewer.login),
+      kind: reviewer.type,
+    })),
+    checks: mapGitHubChecks(feedback),
+    comments: mapGitHubComments(feedback),
+    lastSyncedAt: taskPR.last_synced_at ?? undefined,
+  };
+}
+
 export function PRDetailContent({ taskPR, sessionId }: { taskPR: TaskPR; sessionId: string }) {
   const workspaceId = useAppStore((state) => state.workspaces.activeId);
   const { feedback, loading, refresh } = usePRFeedback(
@@ -364,237 +455,50 @@ export function PRDetailContent({ taskPR, sessionId }: { taskPR: TaskPR; session
     );
   }, [addAsContext, conflictQueued, taskPR.pr_number, taskPR.head_branch, taskPR.base_branch]);
 
-  return (
-    <div className="flex flex-col h-full">
-      <PRHeader
-        workspaceId={workspaceId}
-        taskPR={taskPR}
-        feedback={feedback}
-        metrics={metrics}
-        loading={loading}
-        onRefresh={refresh}
-        onResolveConflicts={onResolveConflicts}
-        conflictQueued={conflictQueued}
-      />
-      <Separator />
-      <ScrollArea className="flex-1 overflow-hidden">
-        <div className="box-border w-0 min-w-full max-w-full overflow-x-hidden p-3 space-y-1">
-          {loading && !feedback && (
-            <div className="flex items-center justify-center py-8">
-              <IconLoader2 className="h-6 w-6 text-blue-500 animate-spin" />
-            </div>
-          )}
-          {feedback && (
-            <>
-              <DescriptionSection body={feedback.pr.body ?? ""} />
-              <ReviewsSection
-                reviews={feedback.reviews ?? []}
-                requestedReviewers={reviewRequest.requestedReviewers}
-                prUrl={taskPR.pr_url}
-                reviewState={metrics.reviewState}
-                pendingReviewCount={metrics.pendingReviewCount}
-                onAddAsContext={(msg) => addAsContext("review", msg)}
-                canReRequest={shouldShowReRequestReviewAction(feedback.pr.state, "DISMISSED")}
-                requestingReviewers={reviewRequest.requestingReviewers}
-                onReRequest={reviewRequest.reRequest}
-              />
-              <ChecksSection
-                checks={feedback.checks ?? []}
-                onAddAsContext={(msg) => addAsContext("check", msg)}
-              />
-              <CommentsSection
-                comments={feedback.comments ?? []}
-                prUrl={taskPR.pr_url}
-                onAddAsContext={(msg) => addAsContext("comment", msg)}
-              />
-            </>
-          )}
-        </div>
-      </ScrollArea>
-      {taskPR.last_synced_at && (
-        <>
-          <Separator />
-          <div className="px-3 py-2 text-[10px] text-muted-foreground text-center">
-            Last synced {formatTimeAgo(taskPR.last_synced_at)}
-          </div>
-        </>
-      )}
-    </div>
+  const detail = mapGitHubDetail(
+    taskPR,
+    feedback,
+    metrics,
+    reviewRequest.requestedReviewers,
+    reviewRequest.requestingReviewers,
   );
-}
-
-function StateBadge({ state }: { state: string }) {
-  const styles: Record<string, string> = {
-    open: "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400",
-    draft: "bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400",
-    merged: "bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400",
-    closed: "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400",
-  };
-  return (
-    <Badge variant="secondary" className={`text-[10px] px-1.5 py-0 ${styles[state] ?? ""}`}>
-      {state}
-    </Badge>
-  );
-}
-
-function HeaderTitleRow({
-  taskPR,
-  loading,
-  onRefresh,
-}: {
-  taskPR: TaskPR;
-  loading: boolean;
-  onRefresh: () => void;
-}) {
-  return (
-    <div className="flex items-start justify-between gap-2">
-      <a
-        href={taskPR.pr_url}
-        target="_blank"
-        rel="noopener noreferrer"
-        className="text-sm font-medium hover:underline truncate cursor-pointer min-w-0 flex-1"
-      >
-        {taskPR.pr_title}
-      </a>
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <Button
-            size="sm"
-            variant="ghost"
-            className="h-6 w-6 p-0 cursor-pointer shrink-0 text-muted-foreground hover:text-foreground"
-            onClick={onRefresh}
-            disabled={loading}
-          >
-            <IconRefresh className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
-          </Button>
-        </TooltipTrigger>
-        <TooltipContent>Refresh</TooltipContent>
-      </Tooltip>
-    </div>
-  );
-}
-
-function HeaderDateLine({ taskPR }: { taskPR: TaskPR }) {
-  return (
-    <div className="flex items-center gap-1.5 text-xs text-muted-foreground flex-wrap">
-      <span className="flex items-center gap-0.5">
-        by <AuthorLink author={taskPR.author_login} />
-      </span>
-      <span>&middot;</span>
-      <span className={getTimeAgoColor(taskPR.created_at)}>
-        opened {formatTimeAgo(taskPR.created_at)}
-      </span>
-      {taskPR.merged_at && (
-        <>
-          <span>&middot;</span>
-          <span className="flex items-center gap-0.5">
-            <IconGitMerge className="h-3 w-3 text-purple-500" />
-            merged {formatTimeAgo(taskPR.merged_at)}
-          </span>
-        </>
-      )}
-      {taskPR.closed_at && !taskPR.merged_at && (
-        <>
-          <span>&middot;</span>
-          <span>closed {formatTimeAgo(taskPR.closed_at)}</span>
-        </>
-      )}
-    </div>
-  );
-}
-
-function HeaderStatsLine({ taskPR, metrics }: { taskPR: TaskPR; metrics: PRPanelMetrics }) {
-  return (
-    <div className="flex items-center gap-3 text-xs text-muted-foreground flex-wrap">
-      <span className="flex items-center gap-1">
-        <IconPlus className="h-3 w-3 text-green-500" />
-        {taskPR.additions}
-      </span>
-      <span className="flex items-center gap-1">
-        <IconMinus className="h-3 w-3 text-red-500" />
-        {taskPR.deletions}
-      </span>
-      <span>&middot;</span>
-      <span>
-        {metrics.reviewCount} review{metrics.reviewCount !== 1 ? "s" : ""}
-        {metrics.pendingReviewCount > 0 && (
-          <span className="text-yellow-600 dark:text-yellow-400">
-            {" "}
-            ({metrics.pendingReviewCount} pending)
-          </span>
-        )}
-      </span>
-      <span>&middot;</span>
-      <span>
-        {metrics.commentCount} comment{metrics.commentCount !== 1 ? "s" : ""}
-      </span>
-      {metrics.reviewState && <ReviewStateBadge state={metrics.reviewState} />}
-    </div>
-  );
-}
-
-function PRHeader({
-  workspaceId,
-  taskPR,
-  feedback,
-  metrics,
-  loading,
-  onRefresh,
-  onResolveConflicts,
-  conflictQueued,
-}: {
-  workspaceId: string | null;
-  taskPR: TaskPR;
-  feedback: PRFeedback | null;
-  metrics: PRPanelMetrics;
-  loading: boolean;
-  onRefresh: () => void;
-  onResolveConflicts: () => void;
-  conflictQueued: boolean;
-}) {
   const liveState = feedback?.pr.state ?? taskPR.state;
   const isDraft = feedback?.pr.draft ?? false;
   const isMergeable = feedback?.pr.mergeable ?? true;
-  // Prefer the live feedback state (refreshed by the panel's Refresh button);
-  // fall back to the polled store value before feedback loads.
   const mergeableState = feedback?.pr.mergeable_state ?? taskPR.mergeable_state;
 
   return (
-    <div className="p-3 space-y-2">
-      <div className="flex items-center gap-2">
-        <div className="flex-1 min-w-0">
-          <HeaderTitleRow taskPR={taskPR} loading={loading} onRefresh={onRefresh} />
-        </div>
-        <ApproveButton
-          workspaceId={workspaceId}
-          taskPR={taskPR}
-          feedback={feedback}
-          onRefresh={onRefresh}
+    <ChangeRequestDetail
+      detail={detail}
+      loading={loading}
+      contentLoading={loading && !feedback}
+      onRefresh={refresh}
+      onAddContext={addAsContext}
+      onAction={({ actionId, targetId }) => {
+        if (actionId === "rerequest-review" && targetId) void reviewRequest.reRequest(targetId);
+      }}
+      headerActions={
+        <>
+          <ApproveButton
+            workspaceId={workspaceId}
+            taskPR={taskPR}
+            feedback={feedback}
+            onRefresh={refresh}
+          />
+          <PRMergeButton taskPR={taskPR} onMerged={refresh} />
+        </>
+      }
+      notice={
+        <PRMergeabilityNotice
+          state={mergeableState}
+          mergeable={isMergeable}
+          isDraft={isDraft}
+          prState={liveState}
+          baseBranch={taskPR.base_branch}
+          onResolveConflicts={onResolveConflicts}
+          resolveDisabled={conflictQueued}
         />
-        <PRMergeButton taskPR={taskPR} onMerged={onRefresh} />
-      </div>
-      <div className="flex items-center gap-1.5 flex-wrap">
-        <StateBadge state={isDraft && liveState === "open" ? "draft" : liveState} />
-        <span className="text-xs text-muted-foreground">#{taskPR.pr_number}</span>
-        <code className="text-[10px] px-1 py-0.5 bg-muted rounded font-mono">
-          {taskPR.head_branch}
-        </code>
-        <span className="text-muted-foreground mx-0.5">&rarr;</span>
-        <code className="text-[10px] px-1 py-0.5 bg-muted rounded font-mono">
-          {taskPR.base_branch}
-        </code>
-      </div>
-      <PRMergeabilityNotice
-        state={mergeableState}
-        mergeable={isMergeable}
-        isDraft={isDraft}
-        prState={liveState}
-        baseBranch={taskPR.base_branch}
-        onResolveConflicts={onResolveConflicts}
-        resolveDisabled={conflictQueued}
-      />
-      <HeaderDateLine taskPR={taskPR} />
-      <HeaderStatsLine taskPR={taskPR} metrics={metrics} />
-    </div>
+      }
+    />
   );
 }

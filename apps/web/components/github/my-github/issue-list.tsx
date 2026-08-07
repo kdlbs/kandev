@@ -15,7 +15,7 @@ import { cn } from "@/lib/utils";
 import { formatRelativeTime } from "@/lib/utils";
 import type { GitHubIssue, TaskIssueLink } from "@/lib/types/github";
 import type { LaunchPayload, TaskPreset } from "./quick-task-launcher";
-import { TaskRowIndicator } from "./task-row-indicator";
+import { TaskRowIndicator } from "@/components/integrations/task-row-indicator";
 
 type IssueListProps = {
   items: GitHubIssue[];

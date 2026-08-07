@@ -24,7 +24,7 @@ import { MobileReviewPanel } from "./mobile-review-panel";
 import type { MobileSessionPanel } from "@/lib/state/slices/ui/types";
 import type { OpenFileTab } from "@/lib/types/backend";
 import { useAppStore } from "@/components/state-provider";
-import { useNormalizedTaskReviews } from "../review-panel-provider";
+import { useNormalizedTaskReviewsState } from "../review-panel-provider";
 import type { ReviewItemSummary } from "@/lib/plugins/types";
 import { reviewItemId, useReviewItemSelection } from "../review-selection";
 
@@ -43,8 +43,9 @@ export function useMobileReviewPanelFallback(
   currentMobilePanel: MobileSessionPanel,
   hasReview: boolean,
   handlePanelChangeAndClearSheet: (panel: MobileSessionPanel) => void,
+  reviewLoading = false,
 ): MobileSessionPanel {
-  const shouldReturnToChat = currentMobilePanel === "review" && !hasReview;
+  const shouldReturnToChat = currentMobilePanel === "review" && !hasReview && !reviewLoading;
   useEffect(() => {
     if (shouldReturnToChat) handlePanelChangeAndClearSheet("chat");
   }, [handlePanelChangeAndClearSheet, shouldReturnToChat]);
@@ -244,7 +245,7 @@ function useMobileReviewPanelState({
       : null,
   );
   const setMobileSessionReview = useAppStore((state) => state.setMobileSessionReview);
-  const reviews = useNormalizedTaskReviews(activeTaskId);
+  const { reviews, loading: reviewsLoading } = useNormalizedTaskReviewsState(activeTaskId);
   const { selectedReview, selectReview: selectReviewItem } = useReviewItemSelection(
     activeTaskId,
     reviews,
@@ -263,6 +264,7 @@ function useMobileReviewPanelState({
     currentMobilePanel,
     reviews.length > 0,
     handlePanelChangeAndClearSheet,
+    reviewsLoading,
   );
   return {
     reviews,

@@ -71,6 +71,10 @@ surfaces. The core stays small; the ecosystem grows independently.
   revocable generic frontend contracts. A provider plugin can participate in native
   task creation, Link menus, desktop/mobile review surfaces, and composer `#` search
   without a host-specific provider branch.
+- First-party-parity code-host dashboards use host-owned provider-neutral list,
+  toolbar, scope, task-menu, and linked-task primitives exposed through `host.ui`.
+  Plugins provide normalized data and callbacks; task presets open the native
+  `TaskCreateDialog`, while review remains owned by the task review-provider surface.
 
 ## Data model
 
@@ -179,7 +183,11 @@ without `api_write:tasks`, or vice versa (see "Host data API writes").
 plugin, has one resource scope (`workspace`, `task`, or `repository`), and supplies a
 bounded request-body maximum. `repository_providers` declares stable IDs the plugin may
 register in the frontend repository-provider registry; one enabled plugin owns one
-provider ID. `reference_sources` declares plugin-owned composer sources. Source names
+provider ID. A provider that supports the native task branch picker declares the
+workspace-scoped `repositories.branches` action. Kandev invokes it server-to-server with
+the persisted repository identity and accepts only a bounded normalized branch list;
+browser input cannot select the provider or repository for that invocation.
+`reference_sources` declares plugin-owned composer sources. Source names
 are unique, a descriptor cannot claim another provider, and all entries are removed when
 the plugin disables. See ADRs
 [2026-07-31-authenticated-plugin-actions](../../decisions/2026-07-31-authenticated-plugin-actions.md)
@@ -585,8 +593,13 @@ Mattermost-webapp model), not iframes. The full contract lives in
   Activation is transactional: failure or timeout revokes every partial registration,
   aborts owned work, and fences callbacks that arrive after the attempt ended.
 - **Registry surface:** `registerRoute(path, C)`, `registerNavItem(item)`,
-  `registerSettingsRoute(path, C)`, `registerComponent(slot, C)` (including
-  `app-status-bar-left` and `app-status-bar-right`), `registerWsHandler(action, fn)`.
+  `registerSettingsRoute(path, C)`,
+  `registerIntegrationSettings({ id, label, description, icon?, Component })`,
+  `registerComponent(slot, C)` (including `app-status-bar-left` and
+  `app-status-bar-right`), and `registerWsHandler(action, fn)`. Integration-settings
+  contributions appear in the native global integrations index, workspace settings
+  navigation, and global/workspace settings routes. IDs are URL-safe, unique among
+  active plugins, and cannot shadow host integrations; unload revokes the contribution.
   Status-slot components receive the exact `AppStatusBarSlotProps` contract in
   `PLUGIN-API.md`: current path/context plus placement and presentation. The host
   renders one responsive presentation at once — 24 px bar on tablet/desktop or
@@ -606,20 +619,32 @@ Mattermost-webapp model), not iframes. The full contract lives in
   it globally, skipping editable targets the same way core app shortcuts do. User
   overrides are namespaced `plugin:{pluginId}:{id}` so they survive independently
   per plugin.
-- **Modals and drawers:** `host.openModal({ title?, content, size?, dismissible?, presentation? })` imperatively
-  opens a modal rendered by the host's `<PluginModalHost/>` (mounted once at the app
-  root, isolated behind its own error boundary) and returns `{ close() }` to close
+- **Modals and drawers:** `host.openModal({ title?, description?, content, size?, dismissible?, presentation? })` imperatively
+  opens a modal rendered by the host's `<PluginModalHost/>` (mounted once inside the
+  authenticated `AppShell` theme/tooltip/toast provider tree and isolated behind its
+  own error boundary) and returns `{ close() }` to close
   that instance. `content` reuses the slot-component contract (rendered with the
   host React instance). `presentation: "drawer"` renders the contribution in a
   safe-area-aware host drawer for phone actions; omitted/`dialog` keeps desktop modal
   presentation. Independent of keybindings — any plugin code path may call it.
+- **Task change-request links:** `host.openTaskLinkDialog(...)` renders the same
+  one-field dialog anatomy, inline validation, Cancel/Save footer, submitting state,
+  success toast, and close behavior as Kandev's GitHub task-link flow. Code-host
+  plugins supply provider copy and an authenticated `onSubmit(reference)` callback;
+  they do not build this workflow inside `openModal`. Link submenu children name only
+  the target because the parent already supplies the verb.
 - **Provider registrations:** `registry.registerRepositoryProvider(...)` contributes
   repository listing, URL matching/inspection, and branch listing; `inspectURL` returns
   a complete credential-free provider/repository/pull-request descriptor with an HTTPS
   clone URL. The host
-  persists that descriptor rather than parsing plugin URLs. `registerTaskAction(...)`
-  contributes context actions with placement (including `link`), visibility, and a
-  read-only task/workspace/repository context. `registerReviewProvider(...)` supplies
+  persists that descriptor rather than parsing plugin URLs. Once persisted, native task
+  branch requests are routed to the active manifest owner through its declared
+  workspace-scoped `repositories.branches` action using only that stored descriptor.
+  `registerTaskAction(...)`
+  contributes children of the native **Link** submenu with visibility and a read-only
+  task/workspace/repository context. Unsupported top-level action placements are
+  rejected at compile/registration time rather than accepted without a consumer.
+  `registerReviewProvider(...)` supplies
   normalized review summaries, an external-store task-item source, and a plugin
   `ReviewPanel` rendered in native desktop/mobile review surfaces. All are
   manifest-owned, lifecycle-revocable registrations; duplicate active provider
@@ -823,9 +848,21 @@ restart with backoff (max 5 attempts, then `error`). Next successful handshake/`
   cancellation to the authenticated HTTP request and backend action context.
 
 - **GIVEN** a manifest-owned repository and review provider, **WHEN** it registers
-  native task actions and a review panel, **THEN** Kandev renders those contributions
+  native task-link actions and a review panel, **THEN** Kandev renders those contributions
   in applicable desktop and mobile task/review surfaces and removes them, including
   in-flight work, when the plugin disables.
+
+- **GIVEN** a registered review provider publishes normalized task status, **WHEN** a
+  linked task renders on desktop or mobile, **THEN** Kandev automatically mounts the
+  same topbar control, composer CI chip, hover popover/mobile drawer, review summary,
+  comment summary, and checks anatomy used by GitHub, refreshes through the provider
+  lifecycle, and requires no provider-owned visual slot or second poller.
+
+- **GIVEN** a compatible code-host review provider, **WHEN** its panel renders normalized
+  detail through `host.ui.ChangeRequestDetail`, **THEN** GitHub and the provider share
+  the same header, collapsible sections, add-to-context controls, scroll ownership,
+  loading/error treatment, and desktop/mobile geometry; only data, capabilities, and
+  callbacks remain provider-owned.
 
 - **GIVEN** a plugin-owned `#` reference source returns a pull-request candidate,
   **WHEN** the user submits the selected reference, **THEN** Kandev authorizes it

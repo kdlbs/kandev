@@ -5,6 +5,8 @@ import type { WorkflowSnapshotData } from "@/lib/state/slices/kanban/types";
 import { useDialogFormState } from "./task-create-dialog-state";
 import { buildRepositoriesPayload } from "./task-create-dialog-helpers";
 
+const BITBUCKET_HEAD_BRANCH = "feature/fix";
+
 // `useBranchesByURL` triggers a real network ensure() when given a URL — stub
 // it so the dialog state hook can mount in JSDOM without hitting fetch. The
 // stubbed shape mirrors the production hook (branches/loading/ensure).
@@ -205,6 +207,43 @@ describe("useDialogFormState — remoteRepos mode", () => {
         source: "paste",
       }),
     ]);
+  });
+});
+
+describe("useDialogFormState — provider-neutral initial values", () => {
+  it("seeds an authorized provider descriptor before asynchronous URL inspection", () => {
+    const initialValues = {
+      title: "",
+      remoteUrl: "https://bitbucket.example.test/projects/PLATFORM/repos/web/pull-requests/42",
+      checkoutBranch: BITBUCKET_HEAD_BRANCH,
+      remoteRepository: {
+        providerId: "bitbucket",
+        providerHost: "https://bitbucket.example.test",
+        ownerOrProject: "PLATFORM",
+        repositoryId: "web-42",
+        repositoryName: "web",
+        cloneUrl: "https://bitbucket.example.test/scm/PLATFORM/web.git",
+        defaultBranch: "trunk",
+        baseBranch: "trunk",
+        headBranch: BITBUCKET_HEAD_BRANCH,
+        pullRequest: { number: 42, title: "Fix" },
+      },
+    };
+    const { result } = renderHook(() => useDialogFormState(true, "ws-1", null, initialValues));
+
+    expect(result.current.remoteRepos[0]).toMatchObject({
+      url: initialValues.remoteUrl,
+      remoteUrl: "https://bitbucket.example.test/scm/PLATFORM/web.git",
+      provider: "bitbucket",
+      providerHost: "https://bitbucket.example.test",
+      providerRepoId: "web-42",
+      providerOwner: "PLATFORM",
+      providerName: "web",
+      branch: BITBUCKET_HEAD_BRANCH,
+      prNumber: 42,
+      prBaseBranch: "trunk",
+      prHeadBranch: BITBUCKET_HEAD_BRANCH,
+    });
   });
 });
 

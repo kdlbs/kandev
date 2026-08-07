@@ -61,7 +61,7 @@ export function RemoteRepoChipsRow({
     if (!inspection) return;
     for (const row of fs.remoteRepos) {
       const resolved = inspection(row.url);
-      const update = resolved ? inspectedRemoteRepositoryUpdate(resolved) : undefined;
+      const update = resolved ? inspectedRemoteRepositoryUpdate(resolved, row) : undefined;
       if (update && remoteRepositoryUpdateNeeded(row, update)) onUpdateRow(row.key, update);
     }
   }, [fs.remoteRepos, inspection, onUpdateRow]);
@@ -107,6 +107,7 @@ export function RemoteRepoChipsRow({
 
 function inspectedRemoteRepositoryUpdate(
   inspection: RepositoryInspection,
+  row: TaskRemoteRepoRow,
 ): Partial<TaskRemoteRepoRow> {
   return {
     remoteUrl: inspection.cloneUrl,
@@ -119,6 +120,9 @@ function inspectedRemoteRepositoryUpdate(
     prNumber: inspection.pullRequest?.number,
     prBaseBranch: inspection.baseBranch,
     prHeadBranch: inspection.headBranch,
+    ...(!row.branch && (inspection.headBranch || inspection.defaultBranch)
+      ? { branch: inspection.headBranch || inspection.defaultBranch }
+      : {}),
   };
 }
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { cloneElement, isValidElement, useState } from "react";
+import { cloneElement, createElement, isValidElement, useState } from "react";
 import {
   IconBrandGitlab,
   IconBrandSentry,
@@ -30,6 +30,7 @@ import {
 } from "@/components/task/task-move-context-menu";
 import { TaskNestContextMenuItems } from "@/components/task/task-nest-context-menu";
 import { useTaskWorkflowMove } from "@/hooks/use-task-workflow-move";
+import { resolvePluginIcon } from "@/lib/plugins/icons";
 import { TaskColorMenu } from "./task-switcher-color-menu";
 import { useTaskPluginLinkActions } from "./task-session-sidebar-link-actions";
 import { clearSelectionBeforeAction } from "./task-switcher-context-menu-helpers";
@@ -564,7 +565,7 @@ function TaskLinkMenu({
   onLinkJiraTicket?: () => void;
   onLinkLinearIssue?: () => void;
   onLinkSentryIssue?: () => void;
-  pluginLinkActions?: { id: string; label: string; onSelect: () => void }[];
+  pluginLinkActions?: { id: string; label: string; icon?: string; onSelect: () => void }[];
 }) {
   if (
     !onLinkPullRequest &&
@@ -631,7 +632,7 @@ function TaskLinkMenu({
             disabled={disabled}
             onSelect={action.onSelect}
           >
-            <IconLink className="mr-2 h-4 w-4" />
+            {createElement(resolvePluginIcon(action.icon), { className: "mr-2 h-4 w-4" })}
             {action.label}
           </ContextMenuItem>
         ))}

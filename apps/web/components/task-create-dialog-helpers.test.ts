@@ -2,6 +2,7 @@ import { describe, expect, it, vi, beforeEach } from "vitest";
 import {
   autoSelectBranch,
   buildRepositoriesPayload,
+  findUnresolvedProviderRemote,
   shouldShowTaskTitleField,
 } from "./task-create-dialog-helpers";
 import type { TaskRemoteRepoRow } from "./task-create-dialog-types";
@@ -172,5 +173,20 @@ describe("buildRepositoriesPayload — inspected provider repository", () => {
       }),
     ]);
     expect(payload[0]).not.toHaveProperty("github_url");
+  });
+});
+
+describe("findUnresolvedProviderRemote", () => {
+  it("blocks a plugin URL until inspection attaches provider identity", () => {
+    const row = {
+      key: "remote-0",
+      url: "https://bitbucket.example.test/projects/TEAM/repos/app",
+      branch: "",
+      source: "paste",
+    } as TaskRemoteRepoRow;
+    const matches = (url: string) => url.includes("bitbucket.example.test");
+
+    expect(findUnresolvedProviderRemote([row], matches)).toBe(row);
+    expect(findUnresolvedProviderRemote([{ ...row, provider: "bitbucket" }], matches)).toBeNull();
   });
 });

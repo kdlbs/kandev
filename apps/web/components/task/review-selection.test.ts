@@ -39,6 +39,14 @@ describe("selectReviewItem", () => {
     );
   });
 
+  it("keeps delimiter-bearing provider and review identities distinct", () => {
+    const first = { ...bitbucketReview, providerId: "a:b", reviewKey: "c" };
+    const second = { ...bitbucketReview, providerId: "a", reviewKey: "b:c" };
+
+    expect(reviewItemId(first)).not.toBe(reviewItemId(second));
+    expect(selectReviewItem([first, second], reviewItemId(second))).toBe(second);
+  });
+
   it("opens a lone review without an unnecessary chooser", () => {
     expect(selectReviewItem([bitbucketReview], null)).toBe(bitbucketReview);
   });

@@ -51,16 +51,16 @@ const gitlabMRKey = "https://gitlab.example.test|group/project|7";
 const bitbucketReviewKey = "workspace/repository/42";
 
 describe("resolveCanonicalReviewPanelState", () => {
-  it("prefers the primary GitHub pull request when both providers are linked", () => {
+  it("requires selection when GitHub and GitLab reviews are both linked", () => {
     expect(resolveCanonicalReviewPanelState([githubPR], [gitlabMR])).toEqual({
       params: {
-        providerId: "github",
-        provider: "github",
-        reviewKey: githubPRKey,
-        prKey: githubPRKey,
+        providerId: undefined,
+        provider: undefined,
+        reviewKey: undefined,
+        prKey: undefined,
         mrKey: undefined,
       },
-      title: "Pull Request",
+      title: "Reviews",
     });
   });
 
@@ -115,6 +115,34 @@ describe("resolveCanonicalReviewPanelState", () => {
         mrKey: undefined,
       },
       title: "Bitbucket pull request",
+    });
+  });
+
+  it("requires selection when built-in and registered providers coexist", () => {
+    expect(
+      resolveCanonicalReviewPanelState(
+        [githubPR],
+        [],
+        [
+          {
+            providerId: "bitbucket",
+            reviewKey: bitbucketReviewKey,
+            title: "Bitbucket pull request",
+            url: "https://bitbucket.example/workspace/repository/pull-requests/42",
+            repositoryId: "repository-1",
+            state: "OPEN",
+          },
+        ],
+      ),
+    ).toEqual({
+      params: {
+        providerId: undefined,
+        provider: undefined,
+        reviewKey: undefined,
+        prKey: undefined,
+        mrKey: undefined,
+      },
+      title: "Reviews",
     });
   });
 });

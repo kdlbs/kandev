@@ -36,6 +36,16 @@ Tasks 03, 05, 06, 07, and 10.
    `plugin.kandev-plugin-bitbucket.*` events.
 4. Reset/delete previews cascade and removes only plugin/watch-owned task trees;
    manually linked and adopted tasks survive.
+5. The Cloud/Data Center provider wrapper preserves restart-safe PR paging; a
+   watch-created task is returned by both task-scoped PR and workspace-association
+   queries after restart.
+6. Creating a PR from a verified task persists its association immediately. A remote
+   create success followed by local association failure returns a bounded partial
+   result rather than a retryable error that could duplicate the remote PR.
+7. Review status adapters query the PR source/head commit.
+8. Task-scoped refresh performs bounded, exact source-branch PR discovery from the
+   host-verified repository checkout and persists the result idempotently; discovery
+   errors do not suppress existing associations.
 
 ## Verification
 
@@ -49,3 +59,17 @@ make build
 
 Concurrent polls and crash timing can duplicate tasks. Credential refresh and ownership
 checks must fail closed; avoid adding Bitbucket logic to host `agentctl` PR automation.
+
+## Completion
+
+- Live Cloud acceptance proved manual linking through the host-native dialog and durable
+  association recovery after host/plugin restarts.
+- A disposable linked task was explicitly unlinked, then task-scoped refresh rediscovered
+  the open pull request by its exact host-verified `kandev-live-test` checkout branch and
+  persisted the association again (`0 -> discovered key -> 1`).
+- The live watch created exactly one owned task and a subsequent run skipped the same pull
+  request. Cloud paging now respects Bitbucket's 50-item maximum.
+- Review status reads the source commit: the live `KANDEV-LIVE-ACCEPTANCE` marker resolved
+  target `c1c53106bebf`, not the destination commit.
+- Final plugin checks passed: 37 UI tests, `go test ./...`, `go test -race ./internal/...`,
+  `go vet ./...`, host build, five-platform package build, and checksum verification.

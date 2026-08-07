@@ -1,7 +1,7 @@
 "use client";
 
 import type { TaskPR } from "@/lib/types/github";
-import { TaskRowIndicator } from "./task-row-indicator";
+import { TaskRowIndicator } from "@/components/integrations/task-row-indicator";
 
 type PRRowTaskIndicatorProps = {
   tasks: TaskPR[] | undefined;

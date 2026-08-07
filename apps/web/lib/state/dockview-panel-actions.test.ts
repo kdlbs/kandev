@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import type { DockviewApi, AddPanelOptions } from "dockview-react";
-import { buildPanelActions, buildExtraPanelActions } from "./dockview-panel-actions";
+import { buildPanelActions, buildExtraPanelActions, reviewPanelId } from "./dockview-panel-actions";
 import { CENTER_GROUP } from "./layout-manager";
 
 const PR_DETAILS_TITLE = "PR Details";
@@ -683,7 +683,7 @@ describe("addReviewPanel", () => {
   const providerId = "bitbucket";
   const reviewKey = "project/repository/42";
   const title = "Bitbucket Pull Request";
-  const panelId = `review-detail|${providerId}|${reviewKey}`;
+  const panelId = `review-detail|${providerId}|${encodeURIComponent(reviewKey)}`;
 
   it("opens a provider-neutral panel with normalized params in the canonical review group", () => {
     const { api, actions } = (() => {
@@ -722,5 +722,16 @@ describe("addReviewPanel", () => {
 
     expect((api.getPanel("pr-detail") as unknown as MockPanel).isActive).toBe(true);
     expect(api.getPanel(panelId)).toBeUndefined();
+  });
+
+  it("does not collide when provider IDs or review keys contain panel delimiters", () => {
+    const api = makeApi();
+    const actions = buildExtraPanelActions(makeStore(api).get);
+
+    actions.addReviewPanel("a|b", "c", "First");
+    actions.addReviewPanel("a", "b|c", "Second");
+
+    expect(api.getPanel(reviewPanelId("a|b", "c"))).toBeDefined();
+    expect(api.getPanel(reviewPanelId("a", "b|c"))).toBeDefined();
   });
 });

@@ -205,11 +205,6 @@ func readGitCredentialInput(input io.Reader) (map[string]string, error) {
 	return values, nil
 }
 
-func validateGitCredentialScope(input map[string]string, scope githubBrokerResolveRequest) error {
-	_, err := gitCredentialRequestForInput(input, scope)
-	return err
-}
-
 // gitCredentialRequestForInput validates the Git credential helper request
 // against its issued lease scope, then carries the exact requested repository
 // path through to the broker. Git uses owner/repo fields on this compatibility

@@ -1,6 +1,7 @@
 import { cleanup, render, screen } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { pluginRegistry } from "@/lib/plugins/registry";
 
 let pathname = "/settings/integrations/github";
 const COPY_CONFIG_TEST_ID = "mock-copy-config";
@@ -69,7 +70,10 @@ describe("SettingsLayoutClient integrations actions", () => {
     state.setActiveWorkspace.mockClear();
   });
 
-  afterEach(() => cleanup());
+  afterEach(() => {
+    pluginRegistry.unregisterPlugin("plugin-source-control");
+    cleanup();
+  });
 
   it("keeps copy config available without rendering the workspace switcher", () => {
     render(
@@ -105,6 +109,24 @@ describe("SettingsLayoutClient integrations actions", () => {
     );
 
     expect(screen.getByTestId(COPY_CONFIG_TEST_ID).dataset.sourceWorkspaceId).toBe("ws-2");
+  });
+
+  it("uses a plugin integration's registered label in native settings chrome", () => {
+    pathname = "/settings/workspace/ws-1/integrations/source-control";
+    pluginRegistry.forPlugin("plugin-source-control").registerIntegrationSettings({
+      id: "source-control",
+      label: "Acme Source Control",
+      description: "Configure Acme source control.",
+      Component: () => null,
+    });
+
+    render(
+      <SettingsLayoutClient>
+        <div>Plugin settings page</div>
+      </SettingsLayoutClient>,
+    );
+
+    expect(screen.getByTestId("page-topbar-title").textContent).toBe("Acme Source Control");
   });
 
   it("falls back to the active workspace when a scoped route has invalid encoding", () => {

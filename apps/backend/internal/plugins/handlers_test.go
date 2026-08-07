@@ -447,18 +447,20 @@ func TestWebhookHandlerNotRunningReturns503(t *testing.T) {
 }
 
 type recordingActionInvoker struct {
-	calls    int
-	request  *pluginsdk.PluginActionRequest
-	response *pluginsdk.PluginActionResponse
-	err      error
-	invoke   func(context.Context, string, *pluginsdk.PluginActionRequest) (*pluginsdk.PluginActionResponse, error)
+	calls      int
+	request    *pluginsdk.PluginActionRequest
+	generation pluginDispatchGeneration
+	response   *pluginsdk.PluginActionResponse
+	err        error
+	invoke     func(context.Context, string, *pluginsdk.PluginActionRequest) (*pluginsdk.PluginActionResponse, error)
 }
 
 func (f *recordingActionInvoker) InvokeAction(
-	ctx context.Context, id string, req *pluginsdk.PluginActionRequest,
+	ctx context.Context, id string, generation pluginDispatchGeneration, req *pluginsdk.PluginActionRequest,
 ) (*pluginsdk.PluginActionResponse, error) {
 	f.calls++
 	f.request = req
+	f.generation = generation
 	if f.invoke != nil {
 		return f.invoke(ctx, id, req)
 	}

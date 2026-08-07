@@ -12,6 +12,7 @@ import {
   DropdownMenuTrigger,
 } from "@kandev/ui/dropdown-menu";
 import { cn } from "@kandev/ui/lib/utils";
+import { usePluginRegistry } from "@/lib/plugins/registry";
 import type { ReviewItemSummary } from "@/lib/plugins/types";
 import { reviewItemId } from "./review-selection";
 
@@ -30,6 +31,7 @@ export function ReviewItemSelector({
   presentation,
   className,
 }: ReviewItemSelectorProps) {
+  const registry = usePluginRegistry();
   if (reviews.length < 2) return null;
   const selectedId = selectedReview ? reviewItemId(selectedReview) : "";
   return (
@@ -78,7 +80,11 @@ export function ReviewItemSelector({
               <span className="flex min-w-0 flex-1 flex-col">
                 <span className="truncate text-sm font-medium">{review.title}</span>
                 <span className="truncate text-xs text-muted-foreground">
-                  {providerLabel(review.providerId)} · {review.repositoryId}
+                  {providerLabel(
+                    review.providerId,
+                    registry.getReviewProvider(review.providerId)?.label,
+                  )}{" "}
+                  · {review.repositoryId}
                 </span>
               </span>
             </DropdownMenuRadioItem>
@@ -89,8 +95,8 @@ export function ReviewItemSelector({
   );
 }
 
-function providerLabel(providerId: string): string {
+function providerLabel(providerId: string, registeredLabel?: string): string {
   if (providerId === "github") return "GitHub";
   if (providerId === "gitlab") return "GitLab";
-  return providerId;
+  return registeredLabel ?? providerId;
 }

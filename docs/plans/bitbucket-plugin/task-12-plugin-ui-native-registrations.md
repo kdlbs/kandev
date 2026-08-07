@@ -27,9 +27,10 @@ Tasks 04, 05, 08, 09, and 10.
 
 ## Acceptance
 
-1. `/bitbucket` provides settings/health, browse/search, queue filters, review details,
-   status presentation, task launch/link/unlink/create-PR, and watch controls through
-   authenticated plugin actions.
+1. Native **Settings > Integrations > Bitbucket** provides connection/authentication,
+   health, and saved-watch configuration; `/bitbucket` provides browse/search, queue
+   filters, review details, status presentation, and task launch/link/unlink/create-PR
+   through authenticated plugin actions.
 2. Plugin registers provider `bitbucket`, Link actions, native review panel, and
    `bitbucket`/`pull_request` composer source; its review component works in host
    desktop and mobile surfaces.

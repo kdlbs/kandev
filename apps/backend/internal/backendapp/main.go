@@ -478,8 +478,10 @@ func startAgentInfrastructure(
 	repoCloner := repoclone.NewCloner(repoclone.Config{
 		BasePath: cfg.RepoClone.BasePath,
 	}, repoclone.DetectGitProtocol(), cfg.ResolvedHomeDir(), log)
-	if services.GitHub != nil {
-		repoCloner.SetGitCredentialProvider(services.GitHub)
+	if services.GitHub != nil || services.Plugins != nil {
+		repoCloner.SetGitCredentialProvider(
+			newRepositoryCloneCredentialProvider(services.GitHub, services.Plugins),
+		)
 	}
 	log.Info("Repository cloner configured",
 		zap.String("base_path", cfg.RepoClone.BasePath))

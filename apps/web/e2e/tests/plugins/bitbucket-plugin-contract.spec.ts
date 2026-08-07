@@ -104,13 +104,26 @@ test.describe("Bitbucket plugin contract", () => {
     const linkSubmenu = testPage.getByTestId("task-context-link");
     await linkSubmenu.focus();
     await testPage.keyboard.press("ArrowRight");
-    await testPage
-      .getByTestId("task-context-link-plugin-kandev-plugin-e2e:link-bitbucket-pull-request")
-      .click();
-    await expect(testPage.getByTestId("fixture-link-pull-request-result")).toHaveText(
-      "Linked Bitbucket Pull Request #42",
+    const bitbucketLink = testPage.getByTestId(
+      "task-context-link-plugin-kandev-plugin-e2e:link-bitbucket-pull-request",
     );
-    await testPage.getByRole("button", { name: "Close" }).click();
+    await expect(bitbucketLink).toHaveText("Bitbucket Pull Request");
+    await expect(bitbucketLink.locator("svg.tabler-icon-brand-bitbucket")).toBeVisible();
+    await bitbucketLink.click();
+    const linkDialog = testPage.getByRole("dialog", { name: "Link Bitbucket pull request" });
+    await expect(linkDialog).toContainText("Use a Bitbucket pull request URL for this task.");
+    await linkDialog.getByRole("button", { name: "Save" }).click();
+    await expect(linkDialog.getByTestId("fixture-link-pull-request-error")).toHaveText(
+      "Enter a Bitbucket pull request URL.",
+    );
+    await linkDialog
+      .getByLabel("Pull request")
+      .fill("https://bitbucket.example.test/projects/TEAM/repos/fixture/pull-requests/42");
+    await linkDialog.getByRole("button", { name: "Save" }).click();
+    await expect(linkDialog).toBeHidden();
+    await expect(
+      testPage.getByText("Bitbucket pull request linked", { exact: true }),
+    ).toBeVisible();
 
     // Desktop sessions expose provider reviews as Dockview panels. The mobile
     // companion covers the shared multi-review selector.
@@ -179,11 +192,11 @@ test.describe("Bitbucket plugin contract", () => {
     await row.getByRole("button", { name: "Disable" }).click();
     await expect(row.getByText("Disabled", { exact: true })).toBeVisible();
     await testPage.goto(`/t/${task.id}`);
-    await expect(testPage.getByText("Bitbucket Pull Request #42", { exact: true })).toHaveCount(0);
+    await expect(testPage.getByTestId("fixture-review-panel-desktop")).toHaveCount(0);
     await testPage.goto("/settings/plugins");
     await row.getByRole("button", { name: "Enable" }).click();
     await expect(row.getByText("Active", { exact: true })).toBeVisible();
     await testPage.goto(`/t/${task.id}`);
-    await expect(testPage.getByText("Bitbucket Pull Request #42", { exact: true })).toBeVisible();
+    await expect(testPage.getByTestId("fixture-review-panel-desktop")).toBeVisible();
   });
 });

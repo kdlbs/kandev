@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { fetchIssueInfo, fetchPRInfo } from "@/lib/api/domains/github-api";
 import { parseGitHubRepoUrl } from "@/lib/github/parse-url";
-import { pluginRegistry } from "@/lib/plugins/registry";
+import { pluginRegistry, usePluginRegistry } from "@/lib/plugins/registry";
 import type { RepositoryInspection, RepositoryProviderRegistration } from "@/lib/plugins/types";
 
 /**
@@ -332,7 +332,23 @@ function useURLStateAccessors(state: Record<string, URLState>) {
   return { info, loading, error, inspection };
 }
 
+function useRequestCleanup(refs: Refs): void {
+  useEffect(() => {
+    refs.mountedRef.current = true;
+    return () => {
+      refs.mountedRef.current = false;
+      for (const controller of refs.abortersRef.current.values()) controller.abort();
+      refs.abortersRef.current.clear();
+      refs.inFlightRef.current.clear();
+      refs.loadedRef.current.clear();
+      refs.seqRef.current.clear();
+    };
+  }, [refs]);
+}
+
 export function usePRInfoByURL(workspaceId: string | null): UsePRInfoByURLResult {
+  const registryVersion = usePluginRegistry().getVersion();
+  const registryVersionRef = useRef(registryVersion);
   const [state, setState] = useState<Record<string, URLState>>({});
   const inFlightRef = useRef<Set<string>>(new Set());
   const loadedRef = useRef<Set<string>>(new Set());
@@ -353,22 +369,7 @@ export function usePRInfoByURL(workspaceId: string | null): UsePRInfoByURLResult
     seqRef,
   });
 
-  useEffect(() => {
-    mountedRef.current = true;
-    const aborters = abortersRef.current;
-    const inFlight = inFlightRef.current;
-    const loaded = loadedRef.current;
-    const seqs = seqRef.current;
-    return () => {
-      mountedRef.current = false;
-      for (const controller of aborters.values()) controller.abort();
-      aborters.clear();
-      inFlight.clear();
-      loaded.clear();
-      seqs.clear();
-    };
-  }, []);
-
+  useRequestCleanup(refsRef.current);
   useWorkspaceScope(workspaceId, refsRef.current, setState);
 
   const ensure = useCallback(
@@ -380,6 +381,10 @@ export function usePRInfoByURL(workspaceId: string | null): UsePRInfoByURLResult
       // via the trimmed URL would miss the cache.
       const url = rawUrl.trim();
       if (!url || !workspaceId) return;
+      if (registryVersionRef.current !== registryVersion) {
+        registryVersionRef.current = registryVersion;
+        loadedRef.current.delete(url);
+      }
       if (inFlightRef.current.has(url) || loadedRef.current.has(url)) return;
       const registeredProvider = registeredProviderForURL(url);
       if (registeredProvider) {
@@ -418,7 +423,7 @@ export function usePRInfoByURL(workspaceId: string | null): UsePRInfoByURLResult
         issue,
       });
     },
-    [workspaceId],
+    [registryVersion, workspaceId],
   );
 
   const { info, loading, error, inspection } = useURLStateAccessors(state);

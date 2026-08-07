@@ -256,6 +256,16 @@ describe("useMobileReviewPanelFallback", () => {
     expect(handlePanelChange).toHaveBeenCalledOnce();
     expect(handlePanelChange).toHaveBeenCalledWith("chat");
   });
+
+  it("keeps Review selected while a registered provider is still loading", () => {
+    const handlePanelChange = vi.fn();
+    const { result } = renderHook(() =>
+      useMobileReviewPanelFallback("review", false, handlePanelChange, true),
+    );
+
+    expect(result.current).toBe("review");
+    expect(handlePanelChange).not.toHaveBeenCalled();
+  });
 });
 
 describe("MobilePanelArea PR identity", () => {

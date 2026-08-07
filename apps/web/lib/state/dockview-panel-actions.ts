@@ -24,6 +24,10 @@ function addSimplePanel(api: DockviewApi, groupId: string, opts: SimplePanelOpts
   focusOrAddPanel(api, { ...opts, position: { referenceGroup: groupId } });
 }
 
+export function reviewPanelId(providerId: string, reviewKey: string): string {
+  return `review-detail|${encodeURIComponent(providerId)}|${encodeURIComponent(reviewKey)}`;
+}
+
 function focusMatchingLegacyPanel(
   api: DockviewApi,
   keyedPanelId: string,
@@ -507,7 +511,7 @@ function buildReviewPanelActions(get: StoreGet) {
         canonical.api.setActive();
         return;
       }
-      const id = `review-detail|${providerId}|${reviewKey}`;
+      const id = reviewPanelId(providerId, reviewKey);
       const existing = api.getPanel(id);
       if (existing) {
         existing.api.setActive();

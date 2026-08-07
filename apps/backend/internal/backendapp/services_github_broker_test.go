@@ -9,6 +9,7 @@ import (
 
 	"github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/gitcredentials"
+	"github.com/kandev/kandev/internal/repoclone"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/pkg/pluginsdk"
 )
@@ -65,6 +66,50 @@ func TestPluginGitCredentialResolverCallsLiveProviderWithExactScope(t *testing.T
 	if remote.calls != 1 || remote.request == nil || remote.request.Path != scope.Path || remote.request.Host != scope.Host ||
 		remote.request.SessionID != scope.SessionID || remote.request.ProviderID != scope.ProviderID {
 		t.Fatalf("live RPC request = %#v", remote.request)
+	}
+}
+
+func TestRepositoryCloneCredentialProviderResolvesPrivatePluginRepository(t *testing.T) {
+	remote := &recordingPluginCredentialRemote{}
+	provider := repositoryCloneCredentialProvider{
+		plugins: fakePluginCredentialService{found: true, remote: remote},
+	}
+	username, password, err := provider.ResolveGitCredential(t.Context(), repoclone.GitCredentialRequest{
+		WorkspaceID: "workspace-1", TaskID: "task-1", SessionID: "session-1", RepositoryID: "repository-1",
+		Provider:     "bitbucket",
+		ProviderHost: "https://bitbucket.example/context",
+		CloneURL:     "https://bitbucket.example/context/scm/ENG/widgets.git",
+		Owner:        "ENG", Name: "widgets",
+	})
+	if err != nil {
+		t.Fatalf("ResolveGitCredential(): %v", err)
+	}
+	if username != "x-token-auth" || password != "transient" {
+		t.Fatalf("clone credential = %q/%q", username, password)
+	}
+	if remote.request == nil || remote.request.WorkspaceID != "workspace-1" ||
+		remote.request.ProviderID != "bitbucket" || remote.request.Host != "bitbucket.example" ||
+		remote.request.Path != "/context/scm/ENG/widgets.git" || remote.request.TaskID != "task-1" ||
+		remote.request.SessionID != "session-1" || remote.request.RepositoryID != "repository-1" {
+		t.Fatalf("plugin clone credential request = %#v", remote.request)
+	}
+}
+
+func TestRepositoryCloneCredentialProviderRejectsMismatchedPluginOrigin(t *testing.T) {
+	remote := &recordingPluginCredentialRemote{}
+	provider := repositoryCloneCredentialProvider{
+		plugins: fakePluginCredentialService{found: true, remote: remote},
+	}
+	_, _, err := provider.ResolveGitCredential(t.Context(), repoclone.GitCredentialRequest{
+		WorkspaceID: "workspace-1", Provider: "bitbucket",
+		ProviderHost: "https://bitbucket.example",
+		CloneURL:     "https://attacker.example/ENG/widgets.git",
+	})
+	if err == nil {
+		t.Fatal("ResolveGitCredential() accepted a clone URL outside the provider origin")
+	}
+	if remote.calls != 0 {
+		t.Fatalf("plugin credential RPC calls = %d, want 0", remote.calls)
 	}
 }
 

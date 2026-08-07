@@ -13,10 +13,13 @@
 import { useSyncExternalStore } from "react";
 import type {
   NavItem,
+  IntegrationSettingsRegistration,
   PluginRegistry,
   PluginRouteOptions,
   RepositoryProviderRegistration,
   ReviewItemSummary,
+  ReviewTaskPipelineState,
+  ReviewTaskStatus,
   ReviewProviderRegistration,
   SlotComponent,
   TaskActionRegistration,
@@ -62,6 +65,11 @@ export interface PluginReviewProviderRegistration extends ReviewProviderRegistra
   pluginId: string;
 }
 
+/** Integration settings contribution paired with its active plugin owner. */
+export interface PluginIntegrationSettingsRegistration extends IntegrationSettingsRegistration {
+  pluginId: string;
+}
+
 interface SlotRegistration {
   registrationId: string;
   orderingId: string;
@@ -82,6 +90,18 @@ interface WsHandlerRegistration {
   handler: WsHandler;
 }
 
+const CORE_INTEGRATION_SETTINGS_IDS = new Set([
+  "azure-devops",
+  "github",
+  "gitlab",
+  "jira",
+  "linear",
+  "sentry",
+  "slack",
+]);
+const INTEGRATION_SETTINGS_ID_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+const CORE_REPOSITORY_PROVIDER_IDS = new Set(["github", "gitlab", "azure_devops"]);
+
 function removeByPlugin<T>(list: Owned<T>[], pluginId: string): Owned<T>[] {
   return list.filter((entry) => entry.pluginId !== pluginId);
 }
@@ -89,6 +109,7 @@ function removeByPlugin<T>(list: Owned<T>[], pluginId: string): Owned<T>[] {
 class PluginRegistryStore {
   private routes: Owned<RouteRegistration>[] = [];
   private settingsRoutes: Owned<RouteRegistration>[] = [];
+  private integrationSettings = new Map<string, Owned<IntegrationSettingsRegistration>>();
   private navItems: Owned<NavItem>[] = [];
   private slotComponents: Owned<SlotRegistration>[] = [];
   private wsHandlers: Owned<WsHandlerRegistration>[] = [];
@@ -137,6 +158,30 @@ class PluginRegistryStore {
 
   registerSettingsRoute(pluginId: string, path: string, Component: ComponentType): void {
     this.settingsRoutes.push({ pluginId, value: { path, Component } });
+    this.notify();
+  }
+
+  registerIntegrationSettings(
+    pluginId: string,
+    integration: IntegrationSettingsRegistration,
+  ): void {
+    if (!INTEGRATION_SETTINGS_ID_PATTERN.test(integration.id)) {
+      throw new Error(
+        `[plugins] integration settings id "${integration.id}" must be a URL-safe slug`,
+      );
+    }
+    if (CORE_INTEGRATION_SETTINGS_IDS.has(integration.id)) {
+      throw new Error(
+        `[plugins] integration settings id "${integration.id}" is reserved by the host`,
+      );
+    }
+    const existing = this.integrationSettings.get(integration.id);
+    if (existing) {
+      throw new Error(
+        `[plugins] integration settings "${integration.id}" is already owned by "${existing.pluginId}"`,
+      );
+    }
+    this.integrationSettings.set(integration.id, { pluginId, value: integration });
     this.notify();
   }
 
@@ -236,6 +281,9 @@ class PluginRegistryStore {
     const before = this.totalCount();
     this.routes = removeByPlugin(this.routes, pluginId);
     this.settingsRoutes = removeByPlugin(this.settingsRoutes, pluginId);
+    this.integrationSettings.forEach((entry, id) => {
+      if (entry.pluginId === pluginId) this.integrationSettings.delete(id);
+    });
     this.navItems = removeByPlugin(this.navItems, pluginId);
     this.slotComponents = removeByPlugin(this.slotComponents, pluginId);
     this.wsHandlers = removeByPlugin(this.wsHandlers, pluginId);
@@ -270,6 +318,18 @@ class PluginRegistryStore {
 
   getSettingsRoutes(): RouteRegistration[] {
     return this.settingsRoutes.map((entry) => entry.value);
+  }
+
+  getIntegrationSettings(): PluginIntegrationSettingsRegistration[] {
+    return Array.from(this.integrationSettings.values()).map((entry) => ({
+      ...entry.value,
+      pluginId: entry.pluginId,
+    }));
+  }
+
+  getIntegrationSetting(id: string): PluginIntegrationSettingsRegistration | undefined {
+    const entry = this.integrationSettings.get(id);
+    return entry ? { ...entry.value, pluginId: entry.pluginId } : undefined;
   }
 
   getNavItems(): NavItem[] {
@@ -370,6 +430,8 @@ class PluginRegistryStore {
       registerNavItem: (item) => this.registerNavItem(pluginId, item),
       registerSettingsRoute: (path, Component) =>
         this.registerSettingsRoute(pluginId, path, Component),
+      registerIntegrationSettings: (integration) =>
+        this.registerIntegrationSettings(pluginId, integration),
       registerComponent: (slot, Component) => this.registerComponent(pluginId, slot, Component),
       registerWsHandler: (action, handler) => this.registerWsHandler(pluginId, action, handler),
       registerKeybinding: (id, handler) => this.registerKeybinding(pluginId, id, handler),
@@ -380,6 +442,9 @@ class PluginRegistryStore {
   }
 
   private claimProvider(pluginId: string, providerId: string): void {
+    if (CORE_REPOSITORY_PROVIDER_IDS.has(providerId.trim().toLowerCase())) {
+      throw new Error(`[plugins] provider "${providerId}" is reserved by the host`);
+    }
     const declared = this.declaredRepositoryProviderIds.get(pluginId);
     if (declared && !declared.has(providerId)) {
       throw new Error(
@@ -451,7 +516,9 @@ class PluginRegistryStore {
       .finally(() => {
         sourceSignal.removeEventListener("abort", forwardAbort);
         controllers.delete(controller);
-        if (controllers.size === 0) this.abortControllersByPlugin.delete(pluginId);
+        if (controllers.size === 0 && this.abortControllersByPlugin.get(pluginId) === controllers) {
+          this.abortControllersByPlugin.delete(pluginId);
+        }
       });
   }
 
@@ -481,6 +548,7 @@ class PluginRegistryStore {
     return (
       this.routes.length +
       this.settingsRoutes.length +
+      this.integrationSettings.size +
       this.navItems.length +
       this.slotComponents.length +
       this.wsHandlers.length +
@@ -522,6 +590,7 @@ function normalizeReviewItems(
           ...(item.statusBadge.tone ? { tone: item.statusBadge.tone } : {}),
         }
       : undefined;
+    const taskStatus = normalizeReviewTaskStatus(item.taskStatus);
     return [
       {
         providerId,
@@ -531,9 +600,82 @@ function normalizeReviewItems(
         repositoryId: item.repositoryId,
         state: item.state,
         ...(statusBadge ? { statusBadge } : {}),
+        ...(taskStatus ? { taskStatus } : {}),
       },
     ];
   });
+}
+
+const REVIEW_TASK_STATES = new Set<ReviewTaskStatus["state"]>([
+  "open",
+  "merged",
+  "closed",
+  "draft",
+]);
+const REVIEW_PIPELINE_STATES = new Set<ReviewTaskPipelineState>([
+  "success",
+  "failure",
+  "pending",
+  "neutral",
+]);
+
+function normalizeReviewTaskStatus(status: ReviewTaskStatus | undefined): ReviewTaskStatus | null {
+  if (
+    !status ||
+    (typeof status.number !== "string" && typeof status.number !== "number") ||
+    !REVIEW_TASK_STATES.has(status.state) ||
+    !REVIEW_PIPELINE_STATES.has(status.pipelineState) ||
+    !Array.isArray(status.checks)
+  ) {
+    return null;
+  }
+  const checks = status.checks.flatMap((check) => {
+    if (!check.id || !check.label || !REVIEW_PIPELINE_STATES.has(check.state)) return [];
+    return [
+      {
+        id: check.id,
+        label: check.label,
+        state: check.state,
+        ...(check.detail ? { detail: check.detail } : {}),
+        ...(check.url ? { url: check.url } : {}),
+      },
+    ];
+  });
+  const review = normalizeReviewTaskReview(status.review);
+  return {
+    number: status.number,
+    state: status.state,
+    pipelineState: status.pipelineState,
+    checks,
+    ...(review ? { review } : {}),
+    ...(typeof status.unresolvedComments === "number" && status.unresolvedComments >= 0
+      ? { unresolvedComments: status.unresolvedComments }
+      : {}),
+    ...(status.loading === true ? { loading: true } : {}),
+    ...(status.error ? { error: status.error } : {}),
+    ...(typeof status.updatedAt === "number" ? { updatedAt: status.updatedAt } : {}),
+  };
+}
+
+function normalizeReviewTaskReview(review: ReviewTaskStatus["review"]) {
+  if (
+    !review ||
+    !["approved", "changes_requested", "pending"].includes(review.state) ||
+    !Number.isFinite(review.approved) ||
+    review.approved < 0
+  ) {
+    return null;
+  }
+  return {
+    state: review.state,
+    approved: review.approved,
+    ...(Number.isFinite(review.required) && (review.required ?? -1) >= 0
+      ? { required: review.required }
+      : {}),
+    ...(Number.isFinite(review.requested) && (review.requested ?? -1) >= 0
+      ? { requested: review.requested }
+      : {}),
+  };
 }
 
 function pluginSlotOrderingId(pluginId: string, slot: string, ordinal: number): string {

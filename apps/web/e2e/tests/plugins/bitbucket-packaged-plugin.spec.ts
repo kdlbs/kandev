@@ -43,7 +43,7 @@ test.describe("Bitbucket packaged plugin", () => {
     seedData,
   }, testInfo) => {
     test.setTimeout(90_000);
-    const capture = new PrAssetCapture(testPage, testInfo.file);
+    const capture = new PrAssetCapture(testPage, testInfo.file, { captureKey: "desktop" });
 
     await installPackagedPlugin(testPage);
 
@@ -100,14 +100,14 @@ test.describe("Bitbucket packaged plugin", () => {
     testPage,
   }, testInfo) => {
     test.setTimeout(90_000);
-    const capture = new PrAssetCapture(testPage, testInfo.file);
+    const capture = new PrAssetCapture(testPage, testInfo.file, { captureKey: "mobile" });
 
     await installPackagedPlugin(testPage);
 
     await testPage.setViewportSize({ width: 393, height: 851 });
     await testPage.goto("/bitbucket");
     await expect(testPage.getByTestId("bitbucket-workbench")).toHaveClass(/bb-mobile/);
-    const filterButton = testPage.getByRole("button", { name: "Filter pull requests" });
+    const filterButton = testPage.getByRole("button", { name: "Open Bitbucket filters" });
     await expect(filterButton).toBeVisible();
     expect((await filterButton.boundingBox())?.height).toBeGreaterThanOrEqual(44);
     // This spec runs in the regular packaged-plugin project; resizing its

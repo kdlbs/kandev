@@ -6,11 +6,19 @@ import (
 	"path"
 	"regexp"
 	"strings"
+	"unicode/utf8"
 )
 
 // idPattern matches the required plugin id shape: lowercase alphanumerics,
 // dots, underscores, and hyphens, starting with a lowercase alphanumeric.
 var idPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]*$`)
+
+// actionKeyPattern keeps manifest action keys addressable through the
+// /actions/:key route. Reference identities mirror the mention registry's
+// canonical identifier grammar so an install cannot succeed with a source
+// the host will later omit.
+var actionKeyPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]*$`)
+var referenceIdentityPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9._:-]{0,127}$`)
 
 // supportedAPIVersion is the only api_version this kandev build accepts.
 const supportedAPIVersion = 1
@@ -411,8 +419,8 @@ func (m *Manifest) validateActions() []error {
 	seen := make(map[string]bool, len(m.Actions))
 	var errs []error
 	for _, action := range m.Actions {
-		if action.Key == "" || strings.TrimSpace(action.Key) != action.Key {
-			errs = append(errs, errors.New("action key must not be empty or contain surrounding whitespace"))
+		if !actionKeyPattern.MatchString(action.Key) {
+			errs = append(errs, fmt.Errorf("action key %q must match %s", action.Key, actionKeyPattern.String()))
 		}
 		if seen[action.Key] {
 			errs = append(errs, fmt.Errorf("duplicate action key %q", action.Key))
@@ -456,8 +464,20 @@ func (m *Manifest) validateReferenceSources() []error {
 	seenProviderKinds := make(map[string]bool, len(m.ReferenceSources))
 	var errs []error
 	for _, source := range m.ReferenceSources {
-		if source.Source == "" || source.Provider == "" || source.Kind == "" || source.DisplayName == "" || source.KindLabel == "" {
-			errs = append(errs, fmt.Errorf("reference source must declare source, provider, kind, display_name, and kind_label"))
+		if !referenceIdentityPattern.MatchString(source.Source) ||
+			!referenceIdentityPattern.MatchString(source.Provider) ||
+			!referenceIdentityPattern.MatchString(source.Kind) {
+			errs = append(errs, fmt.Errorf(
+				"reference source %q must use lowercase source, provider, and kind identifiers matching %s",
+				source.Source, referenceIdentityPattern.String(),
+			))
+			continue
+		}
+		if !validReferenceLabel(source.DisplayName) || !validReferenceLabel(source.KindLabel) {
+			errs = append(errs, fmt.Errorf(
+				"reference source %q display_name and kind_label must be non-empty valid UTF-8 labels of at most 100 characters",
+				source.Source,
+			))
 			continue
 		}
 		if seenSources[source.Source] {
@@ -473,4 +493,8 @@ func (m *Manifest) validateReferenceSources() []error {
 		seenProviderKinds[providerKind] = true
 	}
 	return errs
+}
+
+func validReferenceLabel(label string) bool {
+	return strings.TrimSpace(label) == label && label != "" && utf8.ValidString(label) && utf8.RuneCountInString(label) <= 100
 }

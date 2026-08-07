@@ -3,7 +3,7 @@ id: "13-contract-e2e-release-marketplace"
 title: "Cross-repository contract E2E, release, and marketplace"
 status: in_progress
 wave: 4
-depends_on: ["03-protocol-manifest-actions", "04-frontend-plugin-registry", "05-dynamic-composer-reference-sources", "06-plugin-owned-task-lifecycle", "07-provider-neutral-git-credentials", "08-native-repository-provider", "09-native-link-review-surfaces", "10-cloud-dc-domain-auth", "11-plugin-workflows-watches", "12-plugin-ui-native-registrations"]
+depends_on: ["03-protocol-manifest-actions", "04-frontend-plugin-registry", "05-dynamic-composer-reference-sources", "06-plugin-owned-task-lifecycle", "07-provider-neutral-git-credentials", "08-native-repository-provider", "09-native-link-review-surfaces", "10-cloud-dc-domain-auth", "11-plugin-workflows-watches", "12-plugin-ui-native-registrations", "12b-github-parity-page", "12c-exact-code-host-ui-parity", "12d-host-native-task-link-parity"]
 plan: "plan.md"
 spec: "../../specs/bitbucket-plugin/spec.md"
 ---
@@ -91,9 +91,16 @@ leakage checks as release gates.
   connection through the authenticated host action, exercises health/repositories/
   branches/PR/review reads, optionally performs explicitly authorized comment,
   approve/unapprove, and decline mutations, then disconnects in cleanup. Its live
-  Playwright config disables traces, screenshots, and video. No Cloud or Data Center
-  live pass is recorded until the required secret environment and disposable target
-  are supplied.
+  Playwright config disables traces, screenshots, and video. Cloud API-token and OAuth
+  authorization-code/PKCE acceptance passed on 2026-08-05 against the disposable
+  `kdbls-kandev/kandev-plugin-live-test` repository. OAuth callback replay was rejected,
+  and the credential remained healthy across plugin disable/re-enable. Data Center
+  remains pending a disposable target.
+- The current Cloud package additionally passed host-native manual linking, exact-branch
+  auto-link recovery, idempotent watch creation, persisted-provider branch selection,
+  desktop/mobile native Review, and task-topbar CI status. Live 90-second polling tracked
+  an actual build-status transition from successful to in-progress and back, and the
+  disposable marker was restored to successful.
 - Public docs and the marketplace index baseline validate.
 - Container credential specs are present for Docker and SSH, but this workspace lacks
   `KANDEV_E2E_CREDENTIAL_BROKER_PUBLIC_BASE_URL`; both tests therefore skip rather than

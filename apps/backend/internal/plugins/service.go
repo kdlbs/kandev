@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -54,6 +55,10 @@ const downloadTimeout = 60 * time.Second
 //     going through Service's error-wrapping Get).
 type Service struct {
 	mu sync.Mutex
+	// ownershipMu makes cross-plugin provider/reference ownership checks and
+	// transitions into active one atomic reservation. Per-plugin lifecycle
+	// locks cannot protect two different IDs claiming the same identity.
+	ownershipMu sync.Mutex
 
 	// syncMu serializes Sync/bootScan calls (service_sync.go) so concurrent
 	// operator clicks — or a boot scan racing an operator-triggered sync —
@@ -70,6 +75,10 @@ type Service struct {
 	// holding a lifecycleLocks entry while calling into PluginRuntime
 	// cannot deadlock against it.
 	lifecycleLocks *keyedMutex
+	// dispatchLocks keep lifecycle replacement/disable boundaries from racing
+	// authenticated actions and reference RPCs. Dispatch holds a read lease for
+	// the full RPC; lifecycle mutation holds the write side.
+	dispatchLocks *keyedRWMutex
 
 	pluginsDir string
 	store      store.Store
@@ -136,6 +145,17 @@ type Service struct {
 	// default). nil until SetSettings is called by Provide; the auto-update
 	// accessors treat a nil store as "default off, no overrides possible".
 	settings *settingsStore
+
+	reservedReferenceSources       map[string]struct{}
+	reservedReferenceProviderKinds map[string]struct{}
+}
+
+// ReferenceIdentity reserves a host-owned composer source and its canonical
+// provider/kind pair so a plugin cannot shadow a built-in integration.
+type ReferenceIdentity struct {
+	Source   string
+	Provider string
+	Kind     string
 }
 
 // NewService wires a Service from its already-constructed dependencies.
@@ -149,6 +169,7 @@ func NewService(pluginStore store.Store, registry *Registry, eventBus bus.EventB
 		log:            log,
 		httpClient:     &http.Client{},
 		lifecycleLocks: newKeyedMutex(),
+		dispatchLocks:  newKeyedRWMutex(),
 	}
 }
 
@@ -159,6 +180,53 @@ func (s *Service) SetGitCredentialLeaseRevoker(revoker func(string)) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.revokeGitCredentialProvider = revoker
+}
+
+// SetReservedReferenceIdentities installs the host-owned mention vocabulary.
+// It runs during backend composition before active plugin processes start.
+// Persisted active records that now collide are demoted to error so the
+// dynamic mention bridge cannot make backend startup fail.
+func (s *Service) SetReservedReferenceIdentities(identities []ReferenceIdentity) {
+	sources := make(map[string]struct{}, len(identities))
+	providerKinds := make(map[string]struct{}, len(identities))
+	for _, identity := range identities {
+		source := strings.TrimSpace(identity.Source)
+		provider := strings.TrimSpace(identity.Provider)
+		kind := strings.TrimSpace(identity.Kind)
+		if source == "" || provider == "" || kind == "" {
+			continue
+		}
+		sources[source] = struct{}{}
+		providerKinds[provider+"\x00"+kind] = struct{}{}
+	}
+	s.mu.Lock()
+	s.reservedReferenceSources = sources
+	s.reservedReferenceProviderKinds = providerKinds
+	s.mu.Unlock()
+
+	for _, record := range s.List() {
+		if record.Status != StatusActive || !s.collidesWithReservedReference(record.ReferenceSources) {
+			continue
+		}
+		if err := s.setStatus(record.ID, StatusError); err != nil {
+			s.log.Warn("plugins: could not revoke host-owned reference collision",
+				zap.String("plugin_id", record.ID), zap.Error(err))
+		}
+	}
+}
+
+func (s *Service) collidesWithReservedReference(sources []manifest.ReferenceSource) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, source := range sources {
+		if _, reserved := s.reservedReferenceSources[source.Source]; reserved {
+			return true
+		}
+		if _, reserved := s.reservedReferenceProviderKinds[source.Provider+"\x00"+source.Kind]; reserved {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *Service) revokeGitCredentialProviderLeases(providers []string) {
@@ -180,6 +248,26 @@ func (s *Service) revokeGitCredentialProviderLeases(providers []string) {
 type keyedMutex struct {
 	mu    sync.Mutex
 	locks map[string]*sync.Mutex
+}
+
+type keyedRWMutex struct {
+	mu    sync.Mutex
+	locks map[string]*sync.RWMutex
+}
+
+func newKeyedRWMutex() *keyedRWMutex {
+	return &keyedRWMutex{locks: make(map[string]*sync.RWMutex)}
+}
+
+func (k *keyedRWMutex) lockFor(key string) *sync.RWMutex {
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	lock, ok := k.locks[key]
+	if !ok {
+		lock = &sync.RWMutex{}
+		k.locks[key] = lock
+	}
+	return lock
 }
 
 func newKeyedMutex() *keyedMutex {
@@ -479,6 +567,9 @@ func (s *Service) UpdateConfig(ctx context.Context, id string, config map[string
 	lock := s.lifecycleLocks.lockFor(id)
 	lock.Lock()
 	defer lock.Unlock()
+	dispatchLock := s.dispatchLocks.lockFor(id)
+	dispatchLock.Lock()
+	defer dispatchLock.Unlock()
 
 	rec, err := s.Get(id)
 	if err != nil {
@@ -741,6 +832,9 @@ func (s *Service) Install(ctx context.Context, r io.Reader) (*store.Record, erro
 	lock := s.lifecycleLocks.lockFor(result.Manifest.ID)
 	lock.Lock()
 	defer lock.Unlock()
+	dispatchLock := s.dispatchLocks.lockFor(result.Manifest.ID)
+	dispatchLock.Lock()
+	defer dispatchLock.Unlock()
 
 	oldRec, hadOldRec := s.registry.Get(result.Manifest.ID)
 	if err := s.ensureOwnershipAvailable(result.Manifest); err != nil {
@@ -926,6 +1020,9 @@ func (s *Service) Uninstall(ctx context.Context, id string) error {
 	lock := s.lifecycleLocks.lockFor(id)
 	lock.Lock()
 	defer lock.Unlock()
+	dispatchLock := s.dispatchLocks.lockFor(id)
+	dispatchLock.Lock()
+	defer dispatchLock.Unlock()
 
 	rec, err := s.Get(id)
 	if err != nil {
@@ -1010,6 +1107,9 @@ func (s *Service) Enable(id string) error {
 	lock := s.lifecycleLocks.lockFor(id)
 	lock.Lock()
 	defer lock.Unlock()
+	dispatchLock := s.dispatchLocks.lockFor(id)
+	dispatchLock.Lock()
+	defer dispatchLock.Unlock()
 
 	rec, err := s.Get(id)
 	if err != nil {
@@ -1032,6 +1132,9 @@ func (s *Service) Disable(id string) error {
 	lock := s.lifecycleLocks.lockFor(id)
 	lock.Lock()
 	defer lock.Unlock()
+	dispatchLock := s.dispatchLocks.lockFor(id)
+	dispatchLock.Lock()
+	defer dispatchLock.Unlock()
 
 	rec, err := s.Get(id)
 	if err != nil {
@@ -1063,6 +1166,8 @@ const activateStartTimeout = 30 * time.Second
 // record to StatusError (ignoring an invalid-transition failure, e.g. from
 // "disabled") and returns the spawn error.
 func (s *Service) activate(rec *store.Record) error {
+	s.ownershipMu.Lock()
+	defer s.ownershipMu.Unlock()
 	if err := s.ensureOwnershipAvailable(&rec.Manifest); err != nil {
 		return err
 	}
@@ -1074,7 +1179,7 @@ func (s *Service) activate(rec *store.Record) error {
 			return fmt.Errorf("plugins: start %q: %w", rec.ID, err)
 		}
 	}
-	return s.SetStatus(rec.ID, StatusActive)
+	return s.setStatus(rec.ID, StatusActive)
 }
 
 // ensureOwnershipAvailable rejects duplicate ownership among active plugins.
@@ -1087,6 +1192,16 @@ func (s *Service) ensureOwnershipAvailable(candidate *manifest.Manifest) error {
 		}
 	}
 	for _, source := range candidate.ReferenceSources {
+		s.mu.Lock()
+		_, reservedSource := s.reservedReferenceSources[source.Source]
+		_, reservedProviderKind := s.reservedReferenceProviderKinds[source.Provider+"\x00"+source.Kind]
+		s.mu.Unlock()
+		if reservedSource {
+			return fmt.Errorf("plugins: reference source %q is owned by the host", source.Source)
+		}
+		if reservedProviderKind {
+			return fmt.Errorf("plugins: reference provider and kind %q/%q is owned by the host", source.Provider, source.Kind)
+		}
 		if owner, found := s.registry.activeReferenceSourceOwner(source.Source, candidate.ID); found {
 			return fmt.Errorf("plugins: reference source %q is already owned by active plugin %q", source.Source, owner)
 		}
@@ -1107,6 +1222,21 @@ func (s *Service) ensureOwnershipAvailable(candidate *manifest.Manifest) error {
 // both for the runtime spawn/stop and the status transition, and only want
 // a single Refresh for the whole operation.
 func (s *Service) SetStatus(id string, status Status) error {
+	if status == StatusActive {
+		s.ownershipMu.Lock()
+		defer s.ownershipMu.Unlock()
+		rec, err := s.Get(id)
+		if err != nil {
+			return err
+		}
+		if err := s.ensureOwnershipAvailable(&rec.Manifest); err != nil {
+			return err
+		}
+	}
+	return s.setStatus(id, status)
+}
+
+func (s *Service) setStatus(id string, status Status) error {
 	s.mu.Lock()
 
 	rec, ok := s.registry.Get(id)

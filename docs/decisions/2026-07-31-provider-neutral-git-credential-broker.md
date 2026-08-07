@@ -36,8 +36,23 @@ each provider it declared; later redemption does not wait for expiry. Host match
 normalized, while repository paths remain case-sensitive and exact. The helper carries
 the requested path without appending or removing `.git`. Remote executor transport uses
 HTTPS.
+
+Host-local initial repository materialization uses the same verified scope before it
+creates a checkout. The orchestrator and workspace-source materializer must carry the
+canonical task ID, active session ID, and persisted repository ID explicitly into the
+clone credential request; the cloner must not reconstruct them from provider data or
+accept browser-selected identifiers. A plugin-provider clone without that complete
+scope fails closed. GitHub's legacy workspace credential adapter remains compatible,
+but generic plugin providers never receive a weaker initial-clone request than later
+fetch/push lease redemption.
 `RepositoryCloneURL` remains authoritative and is never reconstructed from provider
 fragments.
+
+Before creating a worktree from an existing plugin-provider checkout, the orchestrator
+performs a strict origin refresh through that same exact scope. It then marks the
+in-memory launch as already refreshed; local and worktree preparers consume local and
+`origin/*` refs without issuing a second unauthenticated fetch or pull. A failed scoped
+refresh fails the launch closed.
 
 ## Consequences
 

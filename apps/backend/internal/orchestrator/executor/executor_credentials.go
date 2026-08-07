@@ -16,6 +16,7 @@ import (
 	"github.com/kandev/kandev/internal/gitconfigenv"
 	"github.com/kandev/kandev/internal/gitcredentials"
 	"github.com/kandev/kandev/internal/githubauth"
+	"github.com/kandev/kandev/internal/repoclone"
 	"github.com/kandev/kandev/internal/task/models"
 )
 
@@ -299,6 +300,9 @@ func (e *Executor) issueGitCredentialScope(
 
 func managedGitCredentialProvider(repository *models.Repository, githubManaged bool, env map[string]string) string {
 	providerID := strings.ToLower(strings.TrimSpace(repository.Provider))
+	if providerID == "" {
+		providerID = gitHubProviderID
+	}
 	if providerID == gitLabProviderID {
 		return ""
 	}
@@ -317,6 +321,14 @@ func gitCredentialCloneIdentity(repository *models.Repository, repositoryID stri
 	if err != nil || parsed.Scheme != httpsScheme || parsed.Host == "" || parsed.User != nil || parsed.RawQuery != "" ||
 		parsed.Fragment != "" || parsed.Path == "" {
 		return "", "", "", "", fmt.Errorf("repository %q must use an HTTPS clone URL for managed credentials", repositoryID)
+	}
+	providerHost := strings.TrimSpace(repository.ProviderHost)
+	providerID := strings.ToLower(strings.TrimSpace(repository.Provider))
+	if providerHost == "" && (providerID == "" || providerID == gitHubProviderID) {
+		providerHost = "https://" + defaultGitHubHost
+	}
+	if err := repoclone.ValidateHTTPSCloneOrigin(cloneURL, providerHost); err != nil {
+		return "", "", "", "", fmt.Errorf("repository %q provider origin: %w", repositoryID, err)
 	}
 	owner, repo, err := credentialHelperPath(parsed.Path)
 	if err != nil || repositoryID == "" {

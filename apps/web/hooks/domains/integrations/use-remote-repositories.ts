@@ -115,14 +115,16 @@ async function loadRemoteRepositories(
       ),
     },
     { provider: "azure_devops", load: azureRequest },
-    ...pluginProviders.map((provider) => ({
-      provider: provider.id,
-      load: provider
-        .listRepositories({ workspaceId, signal })
-        .then((repositories) =>
-          repositories.flatMap((repository) => toRemoteRepository(provider.id, repository)),
-        ),
-    })),
+    ...(workspaceId
+      ? pluginProviders.map((provider) => ({
+          provider: provider.id,
+          load: provider
+            .listRepositories({ workspaceId, signal })
+            .then((repositories) =>
+              repositories.flatMap((repository) => toRemoteRepository(provider.id, repository)),
+            ),
+        }))
+      : []),
   ];
   const results = await Promise.allSettled(requests.map((request) => request.load));
   const availableProviders = results.flatMap((result, index) =>

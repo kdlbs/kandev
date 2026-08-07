@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/kandev/kandev/internal/repoclone"
 	"github.com/kandev/kandev/internal/task/models"
 )
 
@@ -204,6 +205,38 @@ func TestEnsureRepoClonedPrefersDeclaredRemoteURL(t *testing.T) {
 	}
 }
 
+func TestResolveTaskRepoInfoAuthenticatesPluginRefreshBeforeWorktree(t *testing.T) {
+	repoPath := initGitRepoWithOrigin(t, "https://bitbucket.org/acme/widgets.git")
+	repositoryStore := newMockRepository()
+	repositoryStore.repositories["repo-1"] = &models.Repository{
+		ID: "repo-1", WorkspaceID: "workspace-1", SourceType: "provider",
+		Provider: "bitbucket", ProviderHost: "https://bitbucket.org",
+		ProviderOwner: "acme", ProviderName: "widgets",
+		RemoteURL: "https://bitbucket.org/acme/widgets.git", LocalPath: repoPath,
+		DefaultBranch: "main", PullBeforeWorktree: true,
+	}
+	cloner := &cloneTransportTestCloner{}
+	exec := newTestExecutor(t, &mockAgentManager{}, repositoryStore)
+	exec.SetRepoCloner(cloner, nil)
+
+	info, err := exec.resolveTaskRepoInfoForSession(context.Background(), "session-1", &models.TaskRepository{
+		ID: "task-repo-1", TaskID: "task-1", RepositoryID: "repo-1", BaseBranch: "main",
+	})
+	if err != nil {
+		t.Fatalf("resolveTaskRepoInfoForSession(): %v", err)
+	}
+	if cloner.refreshCalls != 1 || !info.RemoteSyncHandled {
+		t.Fatalf("refresh calls = %d, remote sync handled = %v", cloner.refreshCalls, info.RemoteSyncHandled)
+	}
+	if got := cloner.refreshRequest; got.TaskID != "task-1" || got.SessionID != "session-1" ||
+		got.RepositoryID != "repo-1" || got.CloneURL != "https://bitbucket.org/acme/widgets.git" {
+		t.Fatalf("refresh request lost exact scope: %+v", got)
+	}
+	if cloner.refreshPath != repoPath {
+		t.Fatalf("refresh path = %q, want %q", cloner.refreshPath, repoPath)
+	}
+}
+
 type localPathRecordingRepoUpdater struct {
 	localPath string
 }
@@ -222,13 +255,25 @@ type cloneTransportTestCloner struct {
 	requestedCloneURL string
 	returnPath        string
 	setOriginErr      error
+	refreshCalls      int
+	refreshRequest    repoclone.GitCredentialRequest
+	refreshPath       string
 }
 
-func (c *cloneTransportTestCloner) EnsureWorkspaceClonedForProvider(
-	_ context.Context, _ string, cloneURL string, _ string, _ string, _ string, _ string, _ string, _ string,
+func (c *cloneTransportTestCloner) EnsureWorkspaceClonedWithCredentialRequest(
+	_ context.Context, request repoclone.GitCredentialRequest, _, _ string,
 ) (string, error) {
-	c.requestedCloneURL = cloneURL
+	c.requestedCloneURL = request.CloneURL
 	return c.returnPath, nil
+}
+
+func (c *cloneTransportTestCloner) RefreshWorkspaceRepositoryWithCredentialRequest(
+	_ context.Context, request repoclone.GitCredentialRequest, repositoryPath, _, _ string,
+) error {
+	c.refreshCalls++
+	c.refreshRequest = request
+	c.refreshPath = repositoryPath
+	return nil
 }
 
 func (c *cloneTransportTestCloner) ShouldRecloneForWorkspace(string, string) bool { return false }

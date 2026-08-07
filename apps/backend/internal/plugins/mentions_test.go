@@ -24,13 +24,13 @@ func (c *fakeMentionSourceClient) List() []*store.Record {
 }
 
 func (c *fakeMentionSourceClient) SearchEntityReferences(
-	ctx context.Context, id string, request *pluginsdk.SearchEntityReferencesRequest,
+	ctx context.Context, id string, _ pluginDispatchGeneration, request *pluginsdk.SearchEntityReferencesRequest,
 ) (*pluginsdk.SearchEntityReferencesResponse, error) {
 	return c.search(ctx, id, request)
 }
 
 func (c *fakeMentionSourceClient) AuthorizeEntityReference(
-	ctx context.Context, id string, request *pluginsdk.AuthorizeEntityReferenceRequest,
+	ctx context.Context, id string, _ pluginDispatchGeneration, request *pluginsdk.AuthorizeEntityReferenceRequest,
 ) (*pluginsdk.AuthorizeEntityReferenceResponse, error) {
 	return c.authorize(ctx, id, request)
 }
@@ -41,7 +41,8 @@ func TestMentionSourceBridgeCanonicalizesPluginCandidatesWithVerifiedSearchScope
 		search: func(_ context.Context, id string, request *pluginsdk.SearchEntityReferencesRequest) (*pluginsdk.SearchEntityReferencesResponse, error) {
 			if id != "kandev-plugin-bitbucket" || request.Source != "bitbucket" ||
 				request.WorkspaceID != "workspace-1" || request.Query != "auth" || request.Limit != 3 {
-				t.Fatalf("search request = %#v for %q", request, id)
+				t.Errorf("search request = %#v for %q", request, id)
+				return &pluginsdk.SearchEntityReferencesResponse{}, nil
 			}
 			return &pluginsdk.SearchEntityReferencesResponse{Candidates: []pluginsdk.EntityReferenceCandidate{{
 				ProviderLocalID: "pull-42",
@@ -53,7 +54,8 @@ func TestMentionSourceBridgeCanonicalizesPluginCandidatesWithVerifiedSearchScope
 		authorize: func(_ context.Context, id string, request *pluginsdk.AuthorizeEntityReferenceRequest) (*pluginsdk.AuthorizeEntityReferenceResponse, error) {
 			if id != "kandev-plugin-bitbucket" || request.Source != "bitbucket" ||
 				request.WorkspaceID != "workspace-1" || request.Purpose != "search" {
-				t.Fatalf("authorization request = %#v for %q", request, id)
+				t.Errorf("authorization request = %#v for %q", request, id)
+				return &pluginsdk.AuthorizeEntityReferenceResponse{Allowed: false}, nil
 			}
 			return &pluginsdk.AuthorizeEntityReferenceResponse{Allowed: true}, nil
 		},
@@ -90,10 +92,12 @@ func TestMentionSourceBridgeReauthorizesSubmissionAndRejectsStaleOrTamperedRefer
 		authorize: func(ctx context.Context, _ string, request *pluginsdk.AuthorizeEntityReferenceRequest) (*pluginsdk.AuthorizeEntityReferenceResponse, error) {
 			authorizeCalls++
 			if request.Purpose != "submission" {
-				t.Fatalf("purpose = %q, want submission", request.Purpose)
+				t.Errorf("purpose = %q, want submission", request.Purpose)
+				return &pluginsdk.AuthorizeEntityReferenceResponse{Allowed: false}, nil
 			}
 			if request.WorkspaceID != "workspace-1" || request.Source != "bitbucket" {
-				t.Fatalf("submission request = %#v", request)
+				t.Errorf("submission request = %#v", request)
+				return &pluginsdk.AuthorizeEntityReferenceResponse{Allowed: false}, nil
 			}
 			if request.Reference["id"] == "timeout" {
 				<-ctx.Done()
@@ -140,6 +144,37 @@ func TestMentionSourceBridgeReauthorizesSubmissionAndRejectsStaleOrTamperedRefer
 	}
 	if err := registry.AuthorizeForWorkspace(context.Background(), "workspace-1", valid); !errors.Is(err, mentions.ErrReferenceProviderUnavailable) {
 		t.Fatalf("disabled plugin error = %v, want unavailable", err)
+	}
+}
+
+func TestMentionSourceBridgeTransfersOwnershipInOneSync(t *testing.T) {
+	predecessor := testMentionSourceRecord()
+	predecessor.ID = "z-predecessor"
+	successor := testMentionSourceRecord()
+	successor.ID = "a-successor"
+	client := &fakeMentionSourceClient{
+		records: []*store.Record{predecessor},
+		search: func(context.Context, string, *pluginsdk.SearchEntityReferencesRequest) (*pluginsdk.SearchEntityReferencesResponse, error) {
+			return &pluginsdk.SearchEntityReferencesResponse{}, nil
+		},
+		authorize: func(context.Context, string, *pluginsdk.AuthorizeEntityReferenceRequest) (*pluginsdk.AuthorizeEntityReferenceResponse, error) {
+			return &pluginsdk.AuthorizeEntityReferenceResponse{Allowed: true}, nil
+		},
+	}
+	bridge := NewMentionSourceBridge(client)
+	if err := bridge.RegisterMentionSources(mentions.NewRegistry()); err != nil {
+		t.Fatalf("register predecessor: %v", err)
+	}
+
+	client.records = []*store.Record{successor}
+	if err := bridge.Sync(); err != nil {
+		t.Fatalf("transfer source ownership: %v", err)
+	}
+	if _, retained := bridge.owners[predecessor.ID]; retained {
+		t.Fatalf("departed owner %q was retained", predecessor.ID)
+	}
+	if _, active := bridge.owners[successor.ID]; !active {
+		t.Fatalf("successor owner %q was not installed by the first sync", successor.ID)
 	}
 }
 

@@ -17,10 +17,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net/url"
 	"strings"
 
 	agentsettingsdto "github.com/kandev/kandev/internal/agent/settings/dto"
+	"github.com/kandev/kandev/internal/repoclone"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 	"github.com/kandev/kandev/pkg/pluginsdk"
@@ -321,13 +321,8 @@ func validateRemoteRepositoryDescriptor(descriptor *pluginsdk.RemoteRepositoryDe
 		descriptor.ProviderRepositoryID == "" || descriptor.Name == "" || descriptor.CloneURL == "" {
 		return invalidArgument("remote repository descriptor is incomplete")
 	}
-	parsed, err := url.Parse(descriptor.CloneURL)
-	if err != nil {
-		return invalidArgument("remote repository clone_url is invalid")
-	}
-	if !strings.EqualFold(parsed.Scheme, "https") || parsed.Host == "" || parsed.Path == "" || parsed.User != nil ||
-		parsed.RawQuery != "" || parsed.Fragment != "" {
-		return invalidArgument("remote repository clone_url must be a credential-free HTTPS URL")
+	if err := repoclone.ValidateHTTPSCloneOrigin(descriptor.CloneURL, descriptor.ProviderHost); err != nil {
+		return invalidArgument("remote repository clone_url must match its credential-free HTTPS provider origin")
 	}
 	return nil
 }
@@ -456,14 +451,45 @@ func (m pluginOwnedTaskTreeManager) Delete(ctx context.Context, rootTaskID strin
 	if m.host.taskWriter == nil {
 		return m.host.UnimplementedHostData.PluginOwnedTaskTrees().Delete(ctx, rootTaskID)
 	}
+	if err := m.host.rejectMixedOwnershipDelete(ctx, tasks); err != nil {
+		return nil, err
+	}
 	deleted := make([]string, 0, len(tasks))
+	deleteCtx := context.WithoutCancel(ctx)
 	for index := len(tasks) - 1; index >= 0; index-- {
-		if err := m.host.taskWriter.DeleteTask(ctx, tasks[index].ID); err != nil {
-			return nil, err
+		if err := m.host.taskWriter.DeleteTask(deleteCtx, tasks[index].ID); err != nil {
+			return deleted, fmt.Errorf("delete plugin-owned task tree after deleting %d task(s): %w", len(deleted), err)
 		}
 		deleted = append(deleted, tasks[index].ID)
 	}
 	return deleted, nil
+}
+
+func (h *pluginHost) rejectMixedOwnershipDelete(ctx context.Context, ownedTasks []*taskmodels.Task) error {
+	if len(ownedTasks) == 0 {
+		return nil
+	}
+	ownedIDs := make(map[string]struct{}, len(ownedTasks))
+	for _, task := range ownedTasks {
+		ownedIDs[task.ID] = struct{}{}
+	}
+	workspaceTasks, err := h.fetchTasksForWorkspaces(ctx, []string{ownedTasks[0].WorkspaceID}, true, true)
+	if err != nil {
+		return err
+	}
+	for _, task := range workspaceTasks {
+		if _, parentWillBeDeleted := ownedIDs[task.ParentID]; !parentWillBeDeleted {
+			continue
+		}
+		if _, childWillBeDeleted := ownedIDs[task.ID]; childWillBeDeleted {
+			continue
+		}
+		return status.Error(
+			codes.FailedPrecondition,
+			"plugin-owned task tree contains adopted or user-owned children; detach them before deleting",
+		)
+	}
+	return nil
 }
 
 func (h *pluginHost) pluginOwnedTaskTree(ctx context.Context, rootTaskID string) ([]*taskmodels.Task, error) {

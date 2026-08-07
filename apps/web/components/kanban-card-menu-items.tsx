@@ -73,6 +73,7 @@ export type KanbanCardMoveTargets = {
 export type KanbanPluginLinkAction = {
   id: string;
   label: string;
+  icon?: string;
   disabled?: boolean;
   onSelect: () => void;
 };

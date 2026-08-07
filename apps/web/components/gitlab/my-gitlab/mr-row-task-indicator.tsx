@@ -1,7 +1,7 @@
 "use client";
 
 import type { TaskMR } from "@/lib/types/gitlab";
-import { TaskRowIndicator } from "@/components/github/my-github/task-row-indicator";
+import { TaskRowIndicator } from "@/components/integrations/task-row-indicator";
 
 export function MRRowTaskIndicator({ tasks }: { tasks: TaskMR[] | undefined }) {
   return (

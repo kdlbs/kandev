@@ -196,6 +196,46 @@ func TestBrokerExpiresAndRevokesLease(t *testing.T) {
 	}
 }
 
+func TestBrokerClampsRequestedTTLToDefaultMaximum(t *testing.T) {
+	provider := &rotatingProvider{binding: "generation-1", username: "user", secret: "secret"}
+	broker := NewBroker(provider, &recordingAuthorizer{})
+	now := time.Date(2026, 7, 31, 12, 0, 0, 0, time.UTC)
+	broker.now = func() time.Time { return now }
+	scope := testScope()
+	scope.TTL = defaultLeaseTTL + time.Hour
+
+	lease, err := broker.Issue(t.Context(), scope)
+	if err != nil {
+		t.Fatalf("Issue() error = %v", err)
+	}
+	if want := now.Add(defaultLeaseTTL); !lease.ExpiresAt.Equal(want) {
+		t.Fatalf("ExpiresAt = %s, want clamped maximum %s", lease.ExpiresAt, want)
+	}
+}
+
+func TestBrokerActiveLeaseCountSweepsExpiredRecords(t *testing.T) {
+	provider := &rotatingProvider{binding: "generation-1", username: "user", secret: "secret"}
+	broker := NewBroker(provider, &recordingAuthorizer{})
+	now := time.Date(2026, 7, 31, 12, 0, 0, 0, time.UTC)
+	broker.now = func() time.Time { return now }
+	scope := testScope()
+	scope.TTL = time.Minute
+
+	if _, err := broker.Issue(t.Context(), scope); err != nil {
+		t.Fatalf("Issue() error = %v", err)
+	}
+	now = now.Add(2 * time.Minute)
+	if count := broker.ActiveLeaseCount(); count != 0 {
+		t.Fatalf("ActiveLeaseCount() = %d, want expired record swept", count)
+	}
+	broker.mu.Lock()
+	retained := len(broker.leases)
+	broker.mu.Unlock()
+	if retained != 0 {
+		t.Fatalf("retained lease records = %d, want 0 after sweep", retained)
+	}
+}
+
 func TestBrokerRenewsLeaseOnlyAfterSuccessfulRedemption(t *testing.T) {
 	provider := &rotatingProvider{binding: "generation-1", username: "user", secret: "secret"}
 	broker := NewBroker(provider, &recordingAuthorizer{})
@@ -238,10 +278,22 @@ func TestBrokerConcurrentRevocationNeverReturnsCredential(t *testing.T) {
 			err        error
 		}{credential, redeemErr}
 	}()
-	<-provider.started
+	select {
+	case <-provider.started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Redeem() did not reach provider resolution")
+	}
 	broker.RevokeSession("session-1")
 	close(provider.release)
-	got := <-result
+	var got struct {
+		credential Credential
+		err        error
+	}
+	select {
+	case got = <-result:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Redeem() did not return after provider release")
+	}
 	if got.credential.Password != "" || !errors.Is(got.err, ErrLeaseRevoked) {
 		t.Fatalf("Redeem() = %#v, %v; want no credential and ErrLeaseRevoked", got.credential, got.err)
 	}

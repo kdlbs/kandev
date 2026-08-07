@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -24,21 +25,28 @@ const (
 // manifest-declared composer sources.
 type MentionSourceClient interface {
 	List() []*store.Record
-	SearchEntityReferences(context.Context, string, *pluginsdk.SearchEntityReferencesRequest) (*pluginsdk.SearchEntityReferencesResponse, error)
-	AuthorizeEntityReference(context.Context, string, *pluginsdk.AuthorizeEntityReferenceRequest) (*pluginsdk.AuthorizeEntityReferenceResponse, error)
+	SearchEntityReferences(
+		context.Context, string, pluginDispatchGeneration, *pluginsdk.SearchEntityReferencesRequest,
+	) (*pluginsdk.SearchEntityReferencesResponse, error)
+	AuthorizeEntityReference(
+		context.Context, string, pluginDispatchGeneration, *pluginsdk.AuthorizeEntityReferenceRequest,
+	) (*pluginsdk.AuthorizeEntityReferenceResponse, error)
 }
 
 // MentionSourceBridge materializes active manifest-owned reference sources
 // into mentions.Registry. It never accepts plugin-provided descriptor identity.
 type MentionSourceBridge struct {
-	mu       sync.Mutex
-	client   MentionSourceClient
-	registry *mentions.Registry
-	owners   map[string]struct{}
+	mu           sync.Mutex
+	client       MentionSourceClient
+	registry     *mentions.Registry
+	owners       map[string]struct{}
+	fingerprints map[string]string
 }
 
 func NewMentionSourceBridge(client MentionSourceClient) *MentionSourceBridge {
-	return &MentionSourceBridge{client: client, owners: make(map[string]struct{})}
+	return &MentionSourceBridge{
+		client: client, owners: make(map[string]struct{}), fingerprints: make(map[string]string),
+	}
 }
 
 // Descriptor and Search make the bridge transport-compatible with the
@@ -87,19 +95,30 @@ func (b *MentionSourceBridge) Sync() error {
 }
 
 func (b *MentionSourceBridge) syncLocked(next map[string][]mentions.MentionProvider) error {
-	owners := mentionSourceOwners(b.owners, next)
 	var errs []error
-	for _, owner := range owners {
+	// Release departed owners first. Otherwise a successor whose ID sorts
+	// before the disabled predecessor collides on the first refresh and the
+	// newly active source stays invisible until a second request.
+	for _, owner := range departedMentionSourceOwners(b.owners, next) {
+		if err := b.registry.ReplaceOwner(owner); err != nil {
+			errs = append(errs, fmt.Errorf("plugin %q reference sources: %w", owner, err))
+			continue
+		}
+		delete(b.owners, owner)
+		delete(b.fingerprints, owner)
+	}
+	for _, owner := range sortedMentionSourceOwners(next) {
 		providers := next[owner]
+		fingerprint := mentionSourceFingerprint(providers)
+		if _, exists := b.owners[owner]; exists && b.fingerprints[owner] == fingerprint {
+			continue
+		}
 		if err := b.registry.ReplaceOwner(owner, providers...); err != nil {
 			errs = append(errs, fmt.Errorf("plugin %q reference sources: %w", owner, err))
 			continue
 		}
-		if len(providers) == 0 {
-			delete(b.owners, owner)
-			continue
-		}
 		b.owners[owner] = struct{}{}
+		b.fingerprints[owner] = fingerprint
 	}
 	return errors.Join(errs...)
 }
@@ -114,6 +133,7 @@ func activeMentionSourceProviders(client MentionSourceClient, records []*store.R
 			providers[record.ID] = append(providers[record.ID], pluginMentionProvider{
 				client:     client,
 				pluginID:   record.ID,
+				generation: dispatchGeneration(record),
 				descriptor: source,
 			})
 		}
@@ -121,15 +141,12 @@ func activeMentionSourceProviders(client MentionSourceClient, records []*store.R
 	return providers
 }
 
-func mentionSourceOwners(current map[string]struct{}, next map[string][]mentions.MentionProvider) []string {
-	owners := make([]string, 0, len(current)+len(next))
-	seen := make(map[string]struct{}, len(current)+len(next))
+func departedMentionSourceOwners(
+	current map[string]struct{}, next map[string][]mentions.MentionProvider,
+) []string {
+	owners := make([]string, 0, len(current))
 	for owner := range current {
-		seen[owner] = struct{}{}
-		owners = append(owners, owner)
-	}
-	for owner := range next {
-		if _, exists := seen[owner]; exists {
+		if _, retained := next[owner]; retained {
 			continue
 		}
 		owners = append(owners, owner)
@@ -138,9 +155,33 @@ func mentionSourceOwners(current map[string]struct{}, next map[string][]mentions
 	return owners
 }
 
+func sortedMentionSourceOwners(next map[string][]mentions.MentionProvider) []string {
+	owners := make([]string, 0, len(next))
+	for owner := range next {
+		owners = append(owners, owner)
+	}
+	sort.Strings(owners)
+	return owners
+}
+
+func mentionSourceFingerprint(providers []mentions.MentionProvider) string {
+	var result strings.Builder
+	for _, provider := range providers {
+		descriptor := provider.Descriptor()
+		_, _ = fmt.Fprintf(
+			&result,
+			"%q\x00%q\x00%q\x00%q\x00%q\x00%d\x00",
+			descriptor.Source, descriptor.Provider, descriptor.Kind,
+			descriptor.DisplayName, descriptor.KindLabel, descriptor.Order,
+		)
+	}
+	return result.String()
+}
+
 type pluginMentionProvider struct {
 	client     MentionSourceClient
 	pluginID   string
+	generation pluginDispatchGeneration
 	descriptor manifest.ReferenceSource
 }
 
@@ -154,7 +195,7 @@ func (p pluginMentionProvider) Descriptor() mentions.ProviderDescriptor {
 func (p pluginMentionProvider) Search(
 	ctx context.Context, request mentions.SearchRequest,
 ) ([]mentions.Candidate, error) {
-	response, err := p.client.SearchEntityReferences(ctx, p.pluginID, &pluginsdk.SearchEntityReferencesRequest{
+	response, err := p.client.SearchEntityReferences(ctx, p.pluginID, p.generation, &pluginsdk.SearchEntityReferencesRequest{
 		Source: p.descriptor.Source, WorkspaceID: request.WorkspaceID, Query: request.Query, Limit: int32(request.Limit),
 	})
 	if err != nil || response == nil {
@@ -182,7 +223,7 @@ func (p pluginMentionProvider) AuthorizeReference(
 	}
 	ctx, cancel := context.WithTimeout(ctx, referenceAuthorizationTimeout)
 	defer cancel()
-	response, err := p.client.AuthorizeEntityReference(ctx, p.pluginID, &pluginsdk.AuthorizeEntityReferenceRequest{
+	response, err := p.client.AuthorizeEntityReference(ctx, p.pluginID, p.generation, &pluginsdk.AuthorizeEntityReferenceRequest{
 		Source: p.descriptor.Source, WorkspaceID: request.WorkspaceID, Purpose: string(request.Purpose),
 		Reference: pluginEntityReference(request.Reference),
 	})
@@ -215,11 +256,16 @@ func pluginEntityReference(reference apiv1.EntityReference) map[string]any {
 // plugin process. The bridge also checks active status before every RPC so a
 // disable race cannot return or authorize a reference.
 func (s *Service) SearchEntityReferences(
-	ctx context.Context, id string, request *pluginsdk.SearchEntityReferencesRequest,
+	ctx context.Context, id string, expected pluginDispatchGeneration, request *pluginsdk.SearchEntityReferencesRequest,
 ) (*pluginsdk.SearchEntityReferencesResponse, error) {
 	if request == nil {
 		return nil, errors.New("plugins: missing entity reference request")
 	}
+	_, release, err := s.beginPluginDispatch(id, expected)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
 	if err := s.requireActiveReferenceSource(id, request.Source); err != nil {
 		return nil, err
 	}
@@ -233,11 +279,16 @@ func (s *Service) SearchEntityReferences(
 // AuthorizeEntityReference routes submit-time authorization for one validated
 // manifest source to its live plugin process.
 func (s *Service) AuthorizeEntityReference(
-	ctx context.Context, id string, request *pluginsdk.AuthorizeEntityReferenceRequest,
+	ctx context.Context, id string, expected pluginDispatchGeneration, request *pluginsdk.AuthorizeEntityReferenceRequest,
 ) (*pluginsdk.AuthorizeEntityReferenceResponse, error) {
 	if request == nil {
 		return nil, errors.New("plugins: missing entity reference request")
 	}
+	_, release, err := s.beginPluginDispatch(id, expected)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
 	if err := s.requireActiveReferenceSource(id, request.Source); err != nil {
 		return nil, err
 	}

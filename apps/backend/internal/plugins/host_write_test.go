@@ -150,6 +150,28 @@ func TestPluginHost_Tasks_CreateRejectsCredentialBearingCloneURL(t *testing.T) {
 	}
 }
 
+func TestPluginHost_Tasks_CreateRejectsCloneURLOnDifferentProviderOrigin(t *testing.T) {
+	d := newTestDataHost(manifest.Capabilities{APIWrite: []string{"tasks"}})
+	d.host.repositoryProviders = []string{"bitbucket"}
+
+	_, err := d.host.Tasks().Create(context.Background(), pluginsdk.CreateTaskInput{
+		WorkspaceID: "ws-1", WorkflowID: "wf-1", Title: "Investigate",
+		Repositories: []pluginsdk.PluginTaskRepository{{
+			Remote: &pluginsdk.RemoteRepositoryDescriptor{
+				ProviderID: "bitbucket", ProviderHost: "https://bitbucket.example.test",
+				OwnerOrProject: "PROJ", ProviderRepositoryID: "99", Name: "widgets",
+				CloneURL: "https://attacker.example/PROJ/widgets.git",
+			},
+		}},
+	})
+	if status.Code(err) != codes.InvalidArgument {
+		t.Fatalf("Create() error = %v, want InvalidArgument for mismatched provider origin", err)
+	}
+	if d.taskWriter.createCalls != 0 {
+		t.Fatal("task writer called for a clone URL on another provider origin")
+	}
+}
+
 func TestPluginHost_Tasks_CreateRejectsNonHTTPSManagedCloneURL(t *testing.T) {
 	d := newTestDataHost(manifest.Capabilities{APIWrite: []string{"tasks"}})
 	d.host.repositoryProviders = []string{"bitbucket"}
@@ -265,7 +287,7 @@ func TestPluginHost_PluginOwnedTaskTreeRejectsUserOwnedRoot(t *testing.T) {
 	}
 }
 
-func TestPluginHost_PluginOwnedTaskTreeSkipsAdoptedDescendants(t *testing.T) {
+func TestPluginHost_PluginOwnedTaskTreeRejectsDeleteWithAdoptedDescendants(t *testing.T) {
 	d := newTestDataHost(manifest.Capabilities{APIWrite: []string{"tasks"}})
 	root := &taskmodels.Task{ID: "root", WorkspaceID: "ws-1", Metadata: map[string]any{taskSourceMetadataKey: "plugin:p1"}}
 	ownedChild := &taskmodels.Task{ID: "owned-child", WorkspaceID: "ws-1", ParentID: "root", Metadata: map[string]any{taskSourceMetadataKey: "plugin:p1"}}
@@ -284,14 +306,11 @@ func TestPluginHost_PluginOwnedTaskTreeSkipsAdoptedDescendants(t *testing.T) {
 		t.Fatalf("Preview() = %+v, want only contiguous plugin-owned tree", preview)
 	}
 	deleted, err := d.host.PluginOwnedTaskTrees().Delete(context.Background(), "root")
-	if err != nil {
-		t.Fatalf("Delete() unexpected error: %v", err)
+	if status.Code(err) != codes.FailedPrecondition {
+		t.Fatalf("Delete() error = %v, want FailedPrecondition", err)
 	}
-	if len(deleted) != 2 || deleted[0] != "owned-child" || deleted[1] != "root" {
-		t.Fatalf("Delete() = %v, want leaf-first plugin-owned IDs", deleted)
-	}
-	if len(d.taskWriter.deletedIDs) != 2 || d.taskWriter.deletedIDs[0] != "owned-child" || d.taskWriter.deletedIDs[1] != "root" {
-		t.Fatalf("deleted IDs = %v, adopted/user tasks must survive", d.taskWriter.deletedIDs)
+	if len(deleted) != 0 || len(d.taskWriter.deletedIDs) != 0 {
+		t.Fatalf("Delete() mutated mixed-ownership tree: result=%v deleted=%v", deleted, d.taskWriter.deletedIDs)
 	}
 }
 

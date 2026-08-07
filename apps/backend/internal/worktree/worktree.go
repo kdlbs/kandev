@@ -171,6 +171,11 @@ type CreateRequest struct {
 	// PullBeforeWorktree indicates whether to pull from remote before creating the worktree.
 	PullBeforeWorktree bool
 
+	// RemoteSyncHandled means the caller already refreshed origin through an
+	// authenticated provider seam. Worktree creation must use local/remote-
+	// tracking refs only and must not perform another network operation.
+	RemoteSyncHandled bool
+
 	// WorktreeID is the ID of an existing worktree to reuse (optional).
 	// If provided and valid, the existing worktree is returned instead of creating a new one.
 	WorktreeID string

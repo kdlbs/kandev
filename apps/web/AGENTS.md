@@ -98,6 +98,31 @@ surface.
   phased out.
 - Components: <200 lines, extract to domain components, composition over props.
 - Hooks: domain-organized in `hooks/domains/`, encapsulate subscription + selection.
+- **Code-host dashboards:** GitHub, GitLab, and plugin code-host pages must use
+  the provider-neutral primitives in `components/integrations/` for
+  change-request lists, rows, toolbars, scope controls, task preset menus, and
+  linked-task indicators. Use the shared semantic `IntegrationIcon` glyphs instead of
+  copying first-party SVG paths. Keep provider API/state logic in adapters; do not fork row
+  anatomy or add dashboard review/launch flows outside the native task dialog
+  and registered task review surface. A plugin may override create-mode transport only
+  to route the unchanged native task payload through an authenticated plugin action;
+  that server action, not the browser, resolves the trusted repository descriptor.
+- **Code-host task status:** registered review providers publish normalized
+  `ReviewItemSummary.taskStatus`. Host task chrome automatically renders the shared
+  topbar button, composer CI chip, desktop popover/mobile drawer, and 90-second
+  deduplicated refresh. Do not add provider visual slots or provider-owned status
+  pollers for these locations; adapt GitHub and plugins through the shared
+  `components/integrations/change-request-*` anatomy.
+- **Code-host review detail:** GitHub and compatible review providers render
+  `components/integrations/change-request-detail.tsx` (also exposed as
+  `host.ui.ChangeRequestDetail`). Providers own normalized data/capabilities/actions,
+  not parallel headers, review/check/comment sections, scroll containers, or mobile
+  geometry.
+- **Code-host task links:** keep one-field pull/merge-request linking in
+  `components/integrations/task-change-request-link-form.tsx`. First-party providers
+  compose it directly; plugins call `host.openTaskLinkDialog`. Link submenu children
+  name the target only (for example, `Bitbucket Pull Request`) and preserve their
+  registered provider icon.
 - **Interactivity:** all buttons and links with actions must have `cursor-pointer` class.
 - **Self-documenting settings:** every setting must explain in visible, plain-language copy what
   changes, when the setting applies, and when the user should choose each non-obvious option. State

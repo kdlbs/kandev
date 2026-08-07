@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"reflect"
 	goruntime "runtime"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -361,6 +362,36 @@ func TestServiceRejectsActiveReferenceProviderKindOwnerCollision(t *testing.T) {
 	}
 	if _, err := svc.Install(t.Context(), testPackageWithReferenceSourceDescriptor(t, "kandev-plugin-second", "bitbucket.prs", "bitbucket", "pull_request")); err != nil {
 		t.Fatalf("install reference provider/kind after owner disable: %v", err)
+	}
+}
+
+func TestServiceRejectsHostOwnedReferenceIdentity(t *testing.T) {
+	svc, _, _ := newTestService(t)
+	svc.SetReservedReferenceIdentities([]ReferenceIdentity{{
+		Source: "github_pull_requests", Provider: "github", Kind: "pull_request",
+	}})
+
+	if _, err := svc.Install(t.Context(), testPackageWithReferenceSourceDescriptor(
+		t, "kandev-plugin-shadow", "github_pull_requests", "shadow", "pull_request",
+	)); err == nil || !strings.Contains(err.Error(), "owned by the host") {
+		t.Fatalf("Install() error = %v, want host-owned source collision", err)
+	}
+}
+
+func TestServiceDemotesPersistedHostOwnedReferenceCollision(t *testing.T) {
+	svc, _, _ := newTestService(t)
+	if _, err := svc.Install(t.Context(), testPackageWithReferenceSourceDescriptor(
+		t, "kandev-plugin-shadow", "github_pull_requests", "github", "pull_request",
+	)); err != nil {
+		t.Fatalf("install pre-reservation plugin: %v", err)
+	}
+
+	svc.SetReservedReferenceIdentities([]ReferenceIdentity{{
+		Source: "github_pull_requests", Provider: "github", Kind: "pull_request",
+	}})
+	record, _ := svc.Get("kandev-plugin-shadow")
+	if record.Status != StatusError {
+		t.Fatalf("persisted collision status = %s, want %s", record.Status, StatusError)
 	}
 }
 
@@ -724,6 +755,94 @@ func TestServiceEnable_ConcurrentCallsForSameID_OnlyOneActivationNoError(t *test
 	}
 	if rec.Status != StatusActive {
 		t.Fatalf("Status = %q, want %q", rec.Status, StatusActive)
+	}
+}
+
+func TestServiceEnableConcurrentProviderOwnersActivatesOnlyOne(t *testing.T) {
+	svc, _, rt := newTestService(t)
+	if _, err := svc.Install(t.Context(), testPackageWithRepositoryProvider(t, "kandev-plugin-first", "bitbucket")); err != nil {
+		t.Fatalf("install first: %v", err)
+	}
+	if err := svc.Disable("kandev-plugin-first"); err != nil {
+		t.Fatalf("disable first: %v", err)
+	}
+	if _, err := svc.Install(t.Context(), testPackageWithRepositoryProvider(t, "kandev-plugin-second", "bitbucket")); err != nil {
+		t.Fatalf("install second: %v", err)
+	}
+	if err := svc.Disable("kandev-plugin-second"); err != nil {
+		t.Fatalf("disable second: %v", err)
+	}
+
+	started, release := rt.blockNextStart()
+	firstResult := make(chan error, 1)
+	secondResult := make(chan error, 1)
+	go func() { firstResult <- svc.Enable("kandev-plugin-first") }()
+	select {
+	case <-started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("first provider owner did not reach runtime start")
+	}
+	go func() { secondResult <- svc.Enable("kandev-plugin-second") }()
+	select {
+	case err := <-secondResult:
+		t.Fatalf("competing owner completed before reservation released: %v", err)
+	case <-time.After(100 * time.Millisecond):
+	}
+	release()
+
+	if err := <-firstResult; err != nil {
+		t.Fatalf("first owner activation: %v", err)
+	}
+	if err := <-secondResult; err == nil || !strings.Contains(err.Error(), "already owned") {
+		t.Fatalf("second owner activation error = %v, want ownership collision", err)
+	}
+	first, _ := svc.Get("kandev-plugin-first")
+	second, _ := svc.Get("kandev-plugin-second")
+	if first.Status != StatusActive || second.Status == StatusActive {
+		t.Fatalf("statuses = first:%s second:%s, want exactly first active", first.Status, second.Status)
+	}
+}
+
+func TestServiceDispatchLeaseBlocksDisableUntilRequestCompletes(t *testing.T) {
+	svc, _, _ := newTestService(t)
+	record := installTestPlugin(t, svc, "kandev-plugin-actions")
+	_, release, err := svc.beginPluginDispatch(record.ID, dispatchGeneration(record))
+	if err != nil {
+		t.Fatalf("begin dispatch: %v", err)
+	}
+
+	disabled := make(chan error, 1)
+	go func() { disabled <- svc.Disable(record.ID) }()
+	select {
+	case err := <-disabled:
+		t.Fatalf("Disable completed while dispatch lease was active: %v", err)
+	case <-time.After(100 * time.Millisecond):
+	}
+	release()
+	select {
+	case err := <-disabled:
+		if err != nil {
+			t.Fatalf("Disable after dispatch release: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("Disable remained blocked after dispatch release")
+	}
+}
+
+func TestServiceRecoveryCannotReclaimOwnedProvider(t *testing.T) {
+	svc, _, _ := newTestService(t)
+	if _, err := svc.Install(t.Context(), testPackageWithRepositoryProvider(t, "kandev-plugin-recovering", "bitbucket")); err != nil {
+		t.Fatalf("install recovering plugin: %v", err)
+	}
+	svc.handleStatusChange("kandev-plugin-recovering", false)
+	if _, err := svc.Install(t.Context(), testPackageWithRepositoryProvider(t, "kandev-plugin-owner", "bitbucket")); err != nil {
+		t.Fatalf("install replacement owner: %v", err)
+	}
+
+	svc.handleStatusChange("kandev-plugin-recovering", true)
+	recovering, _ := svc.Get("kandev-plugin-recovering")
+	if recovering.Status == StatusActive {
+		t.Fatal("health recovery reclaimed a provider already owned by another active plugin")
 	}
 }
 

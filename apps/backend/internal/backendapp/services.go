@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"strings"
 
 	"go.uber.org/zap"
 
@@ -27,8 +28,10 @@ import (
 	"github.com/kandev/kandev/internal/integrations/secretadapter"
 	"github.com/kandev/kandev/internal/jira"
 	"github.com/kandev/kandev/internal/linear"
+	"github.com/kandev/kandev/internal/mentions"
 	"github.com/kandev/kandev/internal/plugins"
 	promptservice "github.com/kandev/kandev/internal/prompts/service"
+	"github.com/kandev/kandev/internal/repoclone"
 	"github.com/kandev/kandev/internal/secrets"
 	"github.com/kandev/kandev/internal/sentry"
 	"github.com/kandev/kandev/internal/slack"
@@ -138,12 +141,14 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 	}
 	shareHTTP := initShareHandlers(dbPool, repos.Task, githubSvc, log, version)
 
-	// Plumb GitHub branch listing into the task service so provider-backed
-	// ("Remote") repos serve branches from the GitHub API rather than relying
+	// Plumb code-host branch listing into the task service so provider-backed
+	// ("Remote") repos serve branches from their owning provider rather than relying
 	// on a local clone that may not exist yet (or ever - some executors clone
 	// inside their own container).
+	if githubSvc != nil || pluginsSvc != nil {
+		taskSvc.SetRemoteBranchLister(codeHostBranchListerAdapter{github: githubSvc, plugins: pluginsSvc})
+	}
 	if githubSvc != nil {
-		taskSvc.SetRemoteBranchLister(githubBranchListerAdapter{svc: githubSvc})
 		taskSvc.SetPRTaskResolver(githubSvc)
 		githubSvc.SetWorkspaceAuthorizer(taskSvc.AuthorizeWorkspaceAccess)
 	}
@@ -184,16 +189,40 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 		// Notification service is initialized after gateway is available.
 		Notification: nil,
 	}
+	mentionProviders := builtinMentionProviders(services, repos.Task)
+	reserveBuiltinMentionIdentities(pluginsSvc, mentionProviders)
 	mentionComponents, err := newMentionComponents(
 		taskSvc,
 		taskSvc,
-		builtinMentionProviders(services, repos.Task)...,
+		mentionProviders...,
 	)
 	if err != nil {
 		return nil, nil, err
 	}
 	services.Mentions = mentionComponents
 	return services, agentSettingsController, nil
+}
+
+func reserveBuiltinMentionIdentities(
+	pluginService *plugins.Service, providers []mentions.MentionProvider,
+) {
+	if pluginService == nil {
+		return
+	}
+	identities := make([]plugins.ReferenceIdentity, 0, len(providers))
+	for _, provider := range providers {
+		if provider == nil {
+			continue
+		}
+		if _, dynamic := provider.(mentions.SourceRegistrar); dynamic {
+			continue
+		}
+		descriptor := provider.Descriptor()
+		identities = append(identities, plugins.ReferenceIdentity{
+			Source: descriptor.Source, Provider: descriptor.Provider, Kind: descriptor.Kind,
+		})
+	}
+	pluginService.SetReservedReferenceIdentities(identities)
 }
 
 type githubBrokerScopeAuthorizer struct {
@@ -799,6 +828,9 @@ func pluginTaskRepositoryInput(repository pluginsdk.PluginTaskRepository) (tasks
 		}, nil
 	}
 	remote := repository.Remote
+	if err := repoclone.ValidateHTTPSCloneOrigin(remote.CloneURL, remote.ProviderHost); err != nil {
+		return taskservice.TaskRepositoryInput{}, fmt.Errorf("plugin repository descriptor: %w", err)
+	}
 	return taskservice.TaskRepositoryInput{
 		RepositoryID:              repository.RepositoryID,
 		BaseBranch:                firstStringValue(repository.BaseBranch, remote.BaseBranch),
@@ -955,25 +987,54 @@ func buildAgentProfileMatcher(repos *Repositories) wfmodels.AgentProfileMatcher 
 	}
 }
 
-// githubBranchListerAdapter bridges github.Service to the task service's
-// RemoteBranchLister interface. It maps github.RepoBranch into the task
+// codeHostBranchListerAdapter routes first-party GitHub repositories directly
+// and manifest-owned providers through their standardized branch action. It maps
+// both responses into the task
 // service's Branch shape with Type="remote" so the dialog renders branches
 // the same way URL-mode does - bare names without an "origin/" prefix, since
 // there is no checked-out clone whose tracking config could disambiguate.
-type githubBranchListerAdapter struct {
-	svc *github.Service
+type codeHostBranchListerAdapter struct {
+	github  *github.Service
+	plugins *plugins.Service
 }
 
-func (a githubBranchListerAdapter) ListRepoBranches(
-	ctx context.Context, workspaceID, owner, repo string,
+const codeHostRemoteBranchType = "remote"
+
+func (a codeHostBranchListerAdapter) ListRepoBranches(
+	ctx context.Context, source taskservice.RemoteBranchSource,
 ) ([]taskservice.Branch, error) {
-	remote, err := a.svc.ListRepoBranchesForWorkspace(ctx, workspaceID, owner, repo)
+	if strings.EqualFold(source.Provider, "github") {
+		if a.github == nil {
+			return nil, fmt.Errorf("GitHub branch provider is unavailable")
+		}
+		remote, err := a.github.ListRepoBranchesForWorkspace(ctx, source.WorkspaceID, source.Owner, source.Name)
+		if err != nil {
+			return nil, err
+		}
+		out := make([]taskservice.Branch, 0, len(remote))
+		for _, branch := range remote {
+			out = append(out, taskservice.Branch{Name: branch.Name, Type: codeHostRemoteBranchType})
+		}
+		return out, nil
+	}
+	if a.plugins == nil {
+		return nil, fmt.Errorf("plugin repository branch provider is unavailable")
+	}
+	remote, err := a.plugins.ListRepositoryProviderBranches(ctx, source.WorkspaceID, plugins.RepositoryProviderSource{
+		Provider:             source.Provider,
+		ProviderHost:         source.ProviderHost,
+		ProviderRepositoryID: source.ProviderRepositoryID,
+		OwnerOrProject:       source.Owner,
+		Name:                 source.Name,
+		CloneURL:             source.RemoteURL,
+		DefaultBranch:        source.DefaultBranch,
+	})
 	if err != nil {
 		return nil, err
 	}
 	out := make([]taskservice.Branch, 0, len(remote))
-	for _, b := range remote {
-		out = append(out, taskservice.Branch{Name: b.Name, Type: "remote"})
+	for _, branch := range remote {
+		out = append(out, taskservice.Branch{Name: branch.Name, Type: codeHostRemoteBranchType})
 	}
 	return out, nil
 }

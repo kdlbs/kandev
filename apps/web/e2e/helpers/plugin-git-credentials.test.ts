@@ -1,8 +1,12 @@
-import { Duplex, PassThrough } from "node:stream";
+import { Duplex, PassThrough, Writable } from "node:stream";
 
 import { describe, expect, it } from "vitest";
 
-import { bindFixtureConnectErrors, bridgeFixtureConnectStreams } from "./plugin-git-credentials";
+import {
+  bindFixtureConnectErrors,
+  bridgeFixtureConnectStreams,
+  pipeFixtureGitRequest,
+} from "./plugin-git-credentials";
 
 class TestEndpoint extends Duplex {
   readonly writes: string[] = [];
@@ -51,5 +55,25 @@ describe("bridgeFixtureConnectStreams", () => {
 
     expect(client.destroyed).toBe(true);
     expect(upstream.destroyed).toBe(true);
+  });
+});
+
+describe("pipeFixtureGitRequest", () => {
+  it("reports an early child-stdin EPIPE without an unhandled stream error", async () => {
+    const request = new PassThrough();
+    const childInput = new Writable({
+      write(_chunk, _encoding, callback) {
+        const error = Object.assign(new Error("broken pipe"), { code: "EPIPE" });
+        callback(error);
+      },
+    });
+    const errors: Error[] = [];
+
+    pipeFixtureGitRequest(request, childInput, (error) => errors.push(error));
+    request.end("request body");
+    await new Promise<void>((resolve) => setImmediate(resolve));
+
+    expect(errors).toHaveLength(1);
+    expect((errors[0] as NodeJS.ErrnoException).code).toBe("EPIPE");
   });
 });

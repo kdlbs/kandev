@@ -31,6 +31,8 @@ function makeHostFactory(pluginId: string): PluginHostApi {
     theme: "light",
     navigate: () => {},
     openModal: () => ({ close: () => {} }),
+    openTaskLinkDialog: () => ({ close: () => {} }),
+    openTaskReview: () => {},
   };
 }
 

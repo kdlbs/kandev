@@ -17,8 +17,9 @@ The frontend plugin registry gains revocable, manifest-owned registrations for:
 
 - `registerRepositoryProvider(...)` with repository listing, URL matching, branch
   listing, and credential-free `inspectURL` descriptors whose clone URL is HTTPS;
-- `registerTaskAction(...)` with placement/group, visibility, single-task rules, and
-  an async handler receiving read-only current workspace/task/repository context;
+- `registerTaskAction(...)` for children of the existing **Link** submenu, with
+  visibility and an async handler receiving read-only current
+  workspace/task/repository context;
 - `registerReviewProvider(...)` with normalized task-item summaries, external-store
   `getSnapshot`/`subscribe`/cancellable `refresh`, and a plugin-owned `ReviewPanel`.
 
@@ -29,13 +30,16 @@ them. The host adapts GitHub, GitLab, and Azure implementations to the same cont
 It accepts a complete plugin-inspected provider descriptor, including an exact
 credential-free HTTPS clone URL, rather than parsing plugin provider URLs.
 
-Task actions render in existing desktop and visible mobile menus. Review panels use
+Task link actions render in existing desktop and visible mobile menus. A generic
+top-level `action` placement is deliberately deferred until Kandev has a host-owned
+workflow contract for command eligibility, result handling, and review navigation;
+accepting registrations with no consumer would be a false public API. Review panels use
 provider-neutral IDs and params `{ providerId, reviewKey }`; legacy GitHub/GitLab
 layout names remain aliases. The host's native desktop and mobile review surfaces own
 navigation and placement, while the plugin owns provider data and rendering.
-Imperative task-action surfaces remain host-owned: `openModal` accepts an explicit
-`dialog` or `drawer` presentation so phone actions use the same safe-area-aware drawer
-composition as core UI. Native review surfaces expose provider-neutral selection when
+Task-link surfaces remain host-owned through `openTaskLinkDialog`; `openModal` remains
+available for plugin-owned workflows but is not a substitute for native task actions.
+Native review surfaces expose provider-neutral selection when
 multiple built-in or plugin reviews exist instead of silently choosing the first.
 Selections are revalidated by provider and review key after unload/reload, so a stale
 same-ID provider instance cannot keep an obsolete item selected.

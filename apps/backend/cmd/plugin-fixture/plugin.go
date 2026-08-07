@@ -61,9 +61,9 @@ type fixturePlugin struct {
 
 	dataDir string
 
-	mu                sync.Mutex
-	sawFirstEvent     bool
-	credentialRevoked bool
+	mu                   sync.Mutex
+	sawFirstEvent        bool
+	revokedByWorkspaceID map[string]bool
 }
 
 var _ pluginsdk.Plugin = (*fixturePlugin)(nil)
@@ -160,7 +160,7 @@ func (p *fixturePlugin) HandleAction(ctx context.Context, req *pluginsdk.PluginA
 	switch req.ActionKey {
 	case connectionStatusAction:
 		if requestedRevocation(req.Body) {
-			p.setCredentialRevoked()
+			p.setCredentialRevoked(req.Context.WorkspaceID)
 			response["connected"] = false
 			response["error"] = "connection unavailable"
 		}
@@ -208,16 +208,19 @@ func requestedRevocation(body []byte) bool {
 	return json.Unmarshal(body, &request) == nil && request.Revoke
 }
 
-func (p *fixturePlugin) setCredentialRevoked() {
+func (p *fixturePlugin) setCredentialRevoked(workspaceID string) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	p.credentialRevoked = true
+	if p.revokedByWorkspaceID == nil {
+		p.revokedByWorkspaceID = make(map[string]bool)
+	}
+	p.revokedByWorkspaceID[workspaceID] = true
 }
 
-func (p *fixturePlugin) isCredentialRevoked() bool {
+func (p *fixturePlugin) isCredentialRevoked(workspaceID string) bool {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	return p.credentialRevoked
+	return p.revokedByWorkspaceID[workspaceID]
 }
 
 // SearchEntityReferences returns a deterministic, Bitbucket-shaped pull
@@ -252,7 +255,11 @@ func (*fixturePlugin) AuthorizeEntityReference(_ context.Context, req *pluginsdk
 	// Search authorization determines whether a candidate may be shown; the
 	// fixture must allow the candidate at that point so the host can exercise
 	// the separate, submit-time reauthorization boundary.
-	if id, _ := req.Reference["id"].(string); id == revokedPullRequestID && req.Purpose == submissionPurpose {
+	id, _ := req.Reference["id"].(string)
+	if id != fixturePullRequestID && id != revokedPullRequestID {
+		return &pluginsdk.AuthorizeEntityReferenceResponse{Allowed: false, Reason: "pull request is not owned by this source"}, nil
+	}
+	if id == revokedPullRequestID && req.Purpose == submissionPurpose {
 		return &pluginsdk.AuthorizeEntityReferenceResponse{Allowed: false, Reason: "pull request is no longer available"}, nil
 	}
 	return &pluginsdk.AuthorizeEntityReferenceResponse{Allowed: true}, nil
@@ -262,7 +269,7 @@ func (*fixturePlugin) AuthorizeEntityReference(_ context.Context, req *pluginsdk
 // fixture provider's exact host/path. Production plugins must resolve their
 // own short-lived credential without exposing it through browser actions.
 func (p *fixturePlugin) ResolveGitCredential(_ context.Context, req *pluginsdk.ResolveGitCredentialRequest) (*pluginsdk.ResolveGitCredentialResponse, error) {
-	if !isFixtureCredentialScope(req) || p.isCredentialRevoked() {
+	if !isFixtureCredentialScope(req) || p.isCredentialRevoked(req.WorkspaceID) {
 		return nil, fmt.Errorf("plugin-fixture: connection unavailable")
 	}
 	return &pluginsdk.ResolveGitCredentialResponse{
@@ -273,7 +280,7 @@ func (p *fixturePlugin) ResolveGitCredential(_ context.Context, req *pluginsdk.R
 // GetGitCredentialBinding returns a non-secret revision for the exact fixture
 // connection. An empty binding is the documented revocation signal.
 func (p *fixturePlugin) GetGitCredentialBinding(_ context.Context, req *pluginsdk.GitCredentialBindingRequest) (*pluginsdk.GitCredentialBindingResponse, error) {
-	if !isFixtureBindingScope(req) || p.isCredentialRevoked() {
+	if !isFixtureBindingScope(req) || p.isCredentialRevoked(req.WorkspaceID) {
 		return &pluginsdk.GitCredentialBindingResponse{}, nil
 	}
 	return &pluginsdk.GitCredentialBindingResponse{Binding: "fixture-connection-v1"}, nil

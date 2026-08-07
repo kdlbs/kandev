@@ -10,7 +10,7 @@ type ReviewSelection = {
 };
 
 export function reviewItemId(review: Pick<ReviewItemSummary, "providerId" | "reviewKey">): string {
-  return `${review.providerId}:${review.reviewKey}`;
+  return `${encodeURIComponent(review.providerId)}:${encodeURIComponent(review.reviewKey)}`;
 }
 
 /**

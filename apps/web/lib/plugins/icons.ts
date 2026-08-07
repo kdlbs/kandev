@@ -9,6 +9,7 @@
  */
 import {
   IconBell,
+  IconBrandBitbucket,
   IconBolt,
   IconBook,
   IconBug,
@@ -32,6 +33,7 @@ import type { Icon as TablerIcon } from "@tabler/icons-react";
 /** Icon names a plugin may reference from `NavItem.icon` / `PluginPageChrome.icon`. */
 export const PLUGIN_ICONS: Record<string, TablerIcon> = {
   bell: IconBell,
+  bitbucket: IconBrandBitbucket,
   bolt: IconBolt,
   book: IconBook,
   bug: IconBug,

@@ -690,15 +690,15 @@ func newDiscoveryService(t *testing.T, root string) *Service {
 
 // stubRemoteLister captures the call args and returns canned branches/err.
 type stubRemoteLister struct {
-	branches    []Branch
-	err         error
-	calls       int
-	workspaceID string
+	branches []Branch
+	err      error
+	calls    int
+	source   RemoteBranchSource
 }
 
-func (s *stubRemoteLister) ListRepoBranches(_ context.Context, workspaceID, _, _ string) ([]Branch, error) {
+func (s *stubRemoteLister) ListRepoBranches(_ context.Context, source RemoteBranchSource) ([]Branch, error) {
 	s.calls++
-	s.workspaceID = workspaceID
+	s.source = source
 	return s.branches, s.err
 }
 
@@ -739,8 +739,8 @@ func TestListBranches_RoutesProviderRepoToRemoteLister(t *testing.T) {
 	if lister.calls != 1 {
 		t.Fatalf("remote lister calls = %d, want 1", lister.calls)
 	}
-	if lister.workspaceID != "ws-1" {
-		t.Fatalf("remote lister workspace = %q, want ws-1", lister.workspaceID)
+	if lister.source.WorkspaceID != "ws-1" || lister.source.Provider != "github" || lister.source.Owner != "owner" || lister.source.Name != "repo" {
+		t.Fatalf("remote lister source = %+v", lister.source)
 	}
 	if len(got) != 2 || got[0].Name != "main" || got[1].Name != "develop" {
 		t.Fatalf("unexpected branches: %+v", got)

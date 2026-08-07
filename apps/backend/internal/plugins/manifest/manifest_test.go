@@ -150,6 +150,22 @@ actions:
 	}
 }
 
+func TestValidate_RejectsRouteUnsafeActionKey(t *testing.T) {
+	m, err := Parse([]byte(validManifestYAML + `
+actions:
+  - key: pullrequests/link
+    scope: workspace
+    max_body_bytes: 1024
+`))
+	if err != nil {
+		t.Fatalf("Parse() unexpected error: %v", err)
+	}
+
+	if err := m.Validate(); err == nil || !strings.Contains(err.Error(), "action key") {
+		t.Fatalf("Validate() error = %v, want route-safe action key rejection", err)
+	}
+}
+
 func TestValidate_RejectsDuplicateRepositoryProvider(t *testing.T) {
 	m, err := Parse([]byte(validManifestYAML + `
 repository_providers: [bitbucket, bitbucket]
@@ -232,6 +248,42 @@ reference_sources:
 
 	if err := m.Validate(); err == nil {
 		t.Fatal("Validate() expected error for duplicate reference provider/kind, got nil")
+	}
+}
+
+func TestValidate_RejectsReferenceIdentityThatMentionRegistryCannotNormalize(t *testing.T) {
+	m, err := Parse([]byte(validManifestYAML + `
+reference_sources:
+  - source: bitbucket_pull_requests
+    provider: Bitbucket
+    kind: pull_request
+    display_name: Bitbucket
+    kind_label: Pull request
+`))
+	if err != nil {
+		t.Fatalf("Parse() unexpected error: %v", err)
+	}
+
+	if err := m.Validate(); err == nil || !strings.Contains(err.Error(), "lowercase") {
+		t.Fatalf("Validate() error = %v, want canonical reference identity rejection", err)
+	}
+}
+
+func TestValidate_RejectsWhitespaceOnlyReferenceLabel(t *testing.T) {
+	m, err := Parse([]byte(validManifestYAML + `
+reference_sources:
+  - source: bitbucket_pull_requests
+    provider: bitbucket
+    kind: pull_request
+    display_name: "   "
+    kind_label: Pull request
+`))
+	if err != nil {
+		t.Fatalf("Parse() unexpected error: %v", err)
+	}
+
+	if err := m.Validate(); err == nil || !strings.Contains(err.Error(), "display_name") {
+		t.Fatalf("Validate() error = %v, want invalid reference label rejection", err)
 	}
 }
 

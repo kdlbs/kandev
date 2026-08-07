@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useMemo } from "react";
 import type { DockviewApi } from "dockview-react";
 import { prTaskKey } from "@/components/github/pr-utils";
 import { mrTaskKey } from "@/components/gitlab/mr-detail-panel";
@@ -30,6 +30,23 @@ export function resolveCanonicalReviewPanelState(
   mrs: TaskMR[] | undefined,
   registeredReviews: readonly ReviewItemSummary[] = [],
 ): CanonicalReviewPanelState {
+  const linkedProviderIds = new Set<string>();
+  if (prs?.length) linkedProviderIds.add("github");
+  if (mrs?.length) linkedProviderIds.add("gitlab");
+  registeredReviews.forEach((review) => linkedProviderIds.add(review.providerId));
+  if (linkedProviderIds.size > 1) {
+    return {
+      params: {
+        providerId: undefined,
+        provider: undefined,
+        reviewKey: undefined,
+        prKey: undefined,
+        mrKey: undefined,
+      },
+      title: "Reviews",
+    };
+  }
+
   const pr = getPrimaryTaskPR(prs);
   if (pr) {
     const key = prTaskKey(pr);
@@ -131,8 +148,10 @@ export function useSyncReviewPanel() {
   const taskId = useAppStore((state) => state.tasks.activeTaskId);
   const workspaceId = useAppStore((state) => state.workspaces.activeId);
   const reviews = useNormalizedTaskReviews(taskId);
-  const registeredReview = reviews.find(
-    (review) => review.providerId !== "github" && review.providerId !== "gitlab",
+  const registeredReviews = useMemo(
+    () =>
+      reviews.filter((review) => review.providerId !== "github" && review.providerId !== "gitlab"),
+    [reviews],
   );
   const identity = useAppStore((state) => {
     if (!taskId || !workspaceId) return "none";
@@ -140,7 +159,7 @@ export function useSyncReviewPanel() {
       resolveCanonicalReviewPanelState(
         state.taskPRs.byTaskId[taskId],
         state.taskMRs.byWorkspaceId[workspaceId]?.[taskId],
-        registeredReview ? [registeredReview] : [],
+        registeredReviews,
       ),
     );
   });
@@ -162,7 +181,7 @@ export function useSyncReviewPanel() {
           resolveCanonicalReviewPanelState(
             live.taskPRs.byTaskId[taskId],
             live.taskMRs.byWorkspaceId[workspaceId]?.[taskId],
-            registeredReview ? [registeredReview] : [],
+            registeredReviews,
           ),
         );
       });
@@ -172,5 +191,5 @@ export function useSyncReviewPanel() {
       cancelAnimationFrame(outerFrame);
       if (innerFrame !== null) cancelAnimationFrame(innerFrame);
     };
-  }, [appStore, hasApi, identity, registeredReview, taskId, workspaceId]);
+  }, [appStore, hasApi, identity, registeredReviews, taskId, workspaceId]);
 }

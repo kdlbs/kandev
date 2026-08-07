@@ -3,11 +3,12 @@
 import { useCallback, useState } from "react";
 import { getLocalRepositoryStatusAction } from "@/app/actions/workspaces";
 import { ApiError } from "@/lib/api/client";
-import { createTask } from "@/lib/api";
+import { createTask as createTaskREST } from "@/lib/api";
 import type { useToast } from "@/components/toast-provider";
+import type { TaskCreateSubmit } from "@/components/task-create-dialog-types";
 
-type CreateTaskParams = Parameters<typeof createTask>[0];
-type CreateTaskResponse = Awaited<ReturnType<typeof createTask>>;
+type CreateTaskParams = Parameters<typeof createTaskREST>[0];
+type CreateTaskResponse = Awaited<ReturnType<typeof createTaskREST>>;
 
 export function dirtyFilesFromApiError(err: unknown): string[] | null {
   if (!(err instanceof ApiError) || err.status !== 409) return null;
@@ -39,6 +40,7 @@ type Args = {
   workspaceId: string | null;
   repositoryLocalPath: string;
   toast: ReturnType<typeof useToast>["toast"];
+  createTask?: TaskCreateSubmit;
 };
 
 /**
@@ -55,6 +57,7 @@ export function useFreshBranchConsent({
   workspaceId,
   repositoryLocalPath,
   toast,
+  createTask = createTaskREST,
 }: Args) {
   const [pendingDiscard, setPendingDiscard] = useState<PendingDiscard | null>(null);
 
@@ -111,7 +114,7 @@ export function useFreshBranchConsent({
         return await createTask(build(reconsented));
       }
     },
-    [isFreshBranchActive, promptForList],
+    [createTask, isFreshBranchActive, promptForList],
   );
 
   return {

@@ -1,3 +1,5 @@
+"use client";
+
 import Link from "@/components/routing/app-link";
 import {
   IconBrandGithub,
@@ -9,6 +11,8 @@ import {
   IconTicket,
 } from "@tabler/icons-react";
 import { Card, CardContent } from "@kandev/ui/card";
+import { resolvePluginIcon } from "@/lib/plugins/icons";
+import { usePluginRegistry } from "@/lib/plugins/registry";
 
 const INTEGRATIONS = [
   {
@@ -60,9 +64,19 @@ type IntegrationsIndexPageProps = {
 };
 
 export default function IntegrationsIndexPage({ workspaceId }: IntegrationsIndexPageProps = {}) {
+  const registry = usePluginRegistry();
   const rootHref = workspaceId
     ? `/settings/workspace/${encodeURIComponent(workspaceId)}/integrations`
     : "/settings/integrations";
+  const integrations = [
+    ...INTEGRATIONS,
+    ...registry.getIntegrationSettings().map(({ id, label, description, icon }) => ({
+      slug: id,
+      label,
+      description,
+      Icon: resolvePluginIcon(icon),
+    })),
+  ];
 
   return (
     <div className="space-y-6">
@@ -74,7 +88,7 @@ export default function IntegrationsIndexPage({ workspaceId }: IntegrationsIndex
         </p>
       </div>
       <div className="grid auto-rows-fr gap-3 sm:grid-cols-2 lg:grid-cols-3">
-        {INTEGRATIONS.map(({ slug, label, description, Icon }) => {
+        {integrations.map(({ slug, label, description, Icon }) => {
           const href = `${rootHref}/${slug}`;
           return (
             <Link key={href} href={href} className="flex h-full cursor-pointer">

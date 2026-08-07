@@ -6,6 +6,7 @@ import type { KanbanState } from "@/lib/state/slices";
 import { findTaskInSnapshots } from "@/lib/kanban/find-task";
 import { usePluginRegistry } from "@/lib/plugins/registry";
 import type { PluginTaskActionContext } from "@/lib/plugins/types";
+import type { PluginTaskActionRegistration } from "@/lib/plugins/registry";
 import { useAppStore } from "@/components/state-provider";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { usePathname } from "@/lib/routing/client-router";
@@ -35,6 +36,7 @@ export type SidebarExternalLinkTarget = {
 export type PluginLinkMenuAction = {
   id: string;
   label: string;
+  icon?: string;
   onSelect: () => void;
 };
 
@@ -65,6 +67,40 @@ export function runPluginTaskLinkAction(
   });
 }
 
+function readonlyClone(value: unknown, seen = new WeakMap<object, unknown>()): unknown {
+  if (!value || typeof value !== "object") return value;
+  const cached = seen.get(value);
+  if (cached) return cached;
+  const clone: unknown[] | Record<string, unknown> = Array.isArray(value) ? [] : {};
+  seen.set(value, clone);
+  for (const [key, child] of Object.entries(value)) {
+    if (Array.isArray(clone)) clone[Number(key)] = readonlyClone(child, seen);
+    else clone[key] = readonlyClone(child, seen);
+  }
+  return Object.freeze(clone);
+}
+
+export function immutablePluginTaskActionContext(
+  context: PluginTaskActionContext,
+): PluginTaskActionContext {
+  return Object.freeze({
+    ...context,
+    repositories: readonlyClone(context.repositories) as readonly unknown[],
+  });
+}
+
+export function pluginTaskActionIsVisible(
+  action: PluginTaskActionRegistration,
+  context: PluginTaskActionContext,
+): boolean {
+  try {
+    return action.visible?.(context) !== false;
+  } catch {
+    console.warn(`[plugins] task action "${action.pluginId}:${action.id}" visibility failed`);
+    return false;
+  }
+}
+
 /**
  * Registry actions receive only immutable, current task data. Menu callers
  * invoke this after closing their Radix surface, so plugins never run under an
@@ -77,16 +113,14 @@ export function usePluginTaskLinkActions(
   const beforePluginRun = useContext(PluginTaskLinkActionSurfaceContext);
   return useMemo(() => {
     if (!context) return [];
-    const actionContext: PluginTaskActionContext = Object.freeze({
-      ...context,
-      repositories: Object.freeze([...context.repositories]),
-    });
+    const actionContext = immutablePluginTaskActionContext(context);
     return registry
       .getTaskActions("link")
-      .filter((action) => action.visible?.(actionContext) !== false)
+      .filter((action) => pluginTaskActionIsVisible(action, actionContext))
       .map((action) => ({
         id: `${action.pluginId}:${action.id}`,
         label: action.label,
+        icon: action.icon,
         onSelect: () => {
           runPluginTaskLinkAction(beforePluginRun, () => action.run(actionContext));
         },

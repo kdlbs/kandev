@@ -7,6 +7,7 @@ import {
   IconLink,
   IconTicket,
 } from "@tabler/icons-react";
+import { resolvePluginIcon } from "@/lib/plugins/icons";
 import type { KanbanCardMenuEntry, KanbanPluginLinkAction } from "./kanban-card-menu-items";
 
 type LinkSubmenuArgs = {
@@ -97,17 +98,20 @@ function builtInLinkItems(args: LinkSubmenuArgs): KanbanCardMenuEntry[] {
 }
 
 function pluginLinkItems(actions: KanbanPluginLinkAction[], disabled: boolean | undefined) {
-  return actions.map((action) => ({
-    kind: "item" as const,
-    key: `link-plugin-${action.id}`,
-    testId: `task-context-link-plugin-${action.id}`,
-    icon: <IconLink className="mr-2 h-4 w-4" />,
-    label: action.label,
-    disabled: disabled || action.disabled,
-    // Radix closes the current menu during this event. Defer plugin work one
-    // microtask so a modal/panel never mounts beneath an open menu surface.
-    onSelect: () => queueMicrotask(action.onSelect),
-  }));
+  return actions.map((action) => {
+    const Icon = resolvePluginIcon(action.icon);
+    return {
+      kind: "item" as const,
+      key: `link-plugin-${action.id}`,
+      testId: `task-context-link-plugin-${action.id}`,
+      icon: <Icon className="mr-2 h-4 w-4" />,
+      label: action.label,
+      disabled: disabled || action.disabled,
+      // Radix closes the current menu during this event. Defer plugin work one
+      // microtask so a modal/panel never mounts beneath an open menu surface.
+      onSelect: () => queueMicrotask(action.onSelect),
+    };
+  });
 }
 
 export function buildLinkSubmenu(args: LinkSubmenuArgs): KanbanCardMenuEntry | null {

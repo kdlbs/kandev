@@ -47,7 +47,9 @@ var pluginActionTimeout = 15 * time.Second
 // can be tested without a subprocess while production dispatch remains the
 // Service's runtime-mediated RPC call.
 type actionInvoker interface {
-	InvokeAction(context.Context, string, *pluginsdk.PluginActionRequest) (*pluginsdk.PluginActionResponse, error)
+	InvokeAction(
+		context.Context, string, pluginDispatchGeneration, *pluginsdk.PluginActionRequest,
+	) (*pluginsdk.PluginActionResponse, error)
 }
 
 // Controller holds the plugin HTTP handlers: operator-facing management
@@ -415,7 +417,7 @@ func (c *Controller) action(ctx *gin.Context) {
 
 	invokeCtx, cancel := context.WithTimeout(ctx.Request.Context(), pluginActionTimeout)
 	defer cancel()
-	resp, err := c.actionInvoker.InvokeAction(invokeCtx, record.ID, &pluginsdk.PluginActionRequest{
+	resp, err := c.actionInvoker.InvokeAction(invokeCtx, record.ID, dispatchGeneration(record), &pluginsdk.PluginActionRequest{
 		ActionKey: ctx.Param("key"),
 		Context:   verified,
 		Body:      envelope.Body,

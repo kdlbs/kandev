@@ -194,6 +194,17 @@ func TestAuthorizeEntityReference_DeniesRevokedPullRequestAtSubmission(t *testin
 	require.NotEmpty(t, resp.Reason)
 }
 
+func TestAuthorizeEntityReference_DeniesUnknownPullRequest(t *testing.T) {
+	p := &fixturePlugin{dataDir: t.TempDir()}
+	response, err := p.AuthorizeEntityReference(context.Background(), &pluginsdk.AuthorizeEntityReferenceRequest{
+		Source: fixtureReferenceSource, WorkspaceID: "workspace-42", Purpose: submissionPurpose,
+		Reference: map[string]any{"id": "pull-request-forged"},
+	})
+	require.NoError(t, err)
+	require.False(t, response.Allowed)
+	require.NotEmpty(t, response.Reason)
+}
+
 func TestGitCredentialBinding_RevokesAfterAuthenticatedConnectionAction(t *testing.T) {
 	p := &fixturePlugin{dataDir: t.TempDir()}
 	bindingRequest := &pluginsdk.GitCredentialBindingRequest{
@@ -212,6 +223,28 @@ func TestGitCredentialBinding_RevokesAfterAuthenticatedConnectionAction(t *testi
 	binding, err = p.GetGitCredentialBinding(context.Background(), bindingRequest)
 	require.NoError(t, err)
 	require.Empty(t, binding.Binding)
+}
+
+func TestGitCredentialBinding_RevocationIsWorkspaceScoped(t *testing.T) {
+	p := &fixturePlugin{dataDir: t.TempDir()}
+
+	_, err := p.HandleAction(context.Background(), &pluginsdk.PluginActionRequest{
+		ActionKey: connectionStatusAction,
+		Context:   pluginsdk.VerifiedActionContext{WorkspaceID: "workspace-a"},
+		Body:      []byte(`{"revoke":true}`),
+	})
+	require.NoError(t, err)
+
+	for workspaceID, wantBinding := range map[string]string{
+		"workspace-a": "",
+		"workspace-b": "fixture-connection-v1",
+	} {
+		binding, bindingErr := p.GetGitCredentialBinding(context.Background(), &pluginsdk.GitCredentialBindingRequest{
+			ProviderID: fixtureProviderID, WorkspaceID: workspaceID, Host: fixtureCredentialHost, Path: fixtureCredentialPath,
+		})
+		require.NoError(t, bindingErr)
+		require.Equal(t, wantBinding, binding.Binding, workspaceID)
+	}
 }
 
 func TestResolveGitCredential_ReturnsTransientFixtureSecret(t *testing.T) {

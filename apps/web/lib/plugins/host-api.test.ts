@@ -1,6 +1,9 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import * as React from "react";
+import { render } from "@testing-library/react";
 import { createAppStore } from "@/lib/state/store";
+import { useDockviewStore } from "@/lib/state/dockview-store";
+import { reviewItemId } from "@/components/task/review-selection";
 import { buildHostApi } from "./host-api";
 
 /** Curated primitives a plugin needs to build a full native-feeling page. */
@@ -48,6 +51,7 @@ const originalFetch = global.fetch;
 afterEach(() => {
   global.fetch = originalFetch;
   vi.unstubAllEnvs();
+  vi.restoreAllMocks();
 });
 
 describe("buildHostApi — API", () => {
@@ -160,8 +164,24 @@ describe("buildHostApi — host contract", () => {
     expect(host.ui.PageTopbar).toBeDefined();
     expect(host.ui.TaskCreateDialog).toBeDefined();
     expect(host.ui.Combobox).toBeDefined();
+    expect(host.ui.ChangeRequestList).toBeDefined();
+    expect(host.ui.ChangeRequestRow).toBeDefined();
+    expect(host.ui.IntegrationStartTaskMenu).toBeDefined();
+    expect(host.ui.IntegrationListToolbar).toBeDefined();
+    expect(host.ui.IntegrationChangeRequestStatus).toBeDefined();
+    expect(host.ui.ChangeRequestDetail).toBeTypeOf("function");
+    expect(host.ui.IntegrationScopeBar).toBeDefined();
+    const IntegrationIcon = host.ui.IntegrationIcon as React.ComponentType<{
+      name: string;
+    }>;
+    expect(IntegrationIcon).toBeTypeOf("function");
+    const rendered = render(React.createElement(IntegrationIcon, { name: "merged" }));
+    expect(rendered.container.querySelector('[data-integration-icon="merged"]')).not.toBeNull();
+    expect(host.ui.TaskRowIndicator).toBeDefined();
   });
+});
 
+describe("buildHostApi — navigation and modal contract", () => {
   it("exposes navigate() that soft-navigates via history push/replace", () => {
     const host = buildHostApi("jira", createAppStore(), "light");
     const pushSpy = vi.spyOn(window.history, "pushState");
@@ -211,5 +231,62 @@ describe("buildHostApi — host contract", () => {
 
     handle.close();
     expect(pluginModalManager.getSnapshot()).toHaveLength(before);
+  });
+
+  it("opens a host-owned task link dialog instead of requiring plugin form markup", async () => {
+    const { pluginModalManager } = await import("./modal-manager");
+    const host = buildHostApi("jira", createAppStore(), "light");
+    const before = pluginModalManager.getSnapshot().length;
+
+    const handle = host.openTaskLinkDialog({
+      title: "Link Acme pull request",
+      description: "Use an Acme pull request URL for this task.",
+      inputLabel: "Pull request",
+      emptyError: "Enter a pull request.",
+      failureMessage: "Failed to link pull request.",
+      successMessage: "Pull request linked",
+      onSubmit: vi.fn().mockResolvedValue(undefined),
+    });
+
+    expect(pluginModalManager.getSnapshot().at(-1)).toMatchObject({
+      pluginId: "jira",
+      layout: "task-link",
+      options: {
+        title: "Link Acme pull request",
+        description: "Use an Acme pull request URL for this task.",
+        presentation: "dialog",
+      },
+    });
+    handle.close();
+    expect(pluginModalManager.getSnapshot()).toHaveLength(before);
+  });
+
+  it("opens provider-neutral desktop and mobile task review surfaces", () => {
+    const reviewKey = "cloud|workspace/repo|42";
+    const reviewTitle = "Review #42";
+    const store = createAppStore();
+    const addReviewPanel = vi.spyOn(useDockviewStore.getState(), "addReviewPanel");
+    const setMobileSessionReview = vi.spyOn(store.getState(), "setMobileSessionReview");
+    const host = buildHostApi("bitbucket", store, "light");
+
+    host.openTaskReview({
+      providerId: "bitbucket",
+      reviewKey,
+      title: reviewTitle,
+      presentation: "desktop",
+    });
+    expect(addReviewPanel).toHaveBeenCalledWith("bitbucket", reviewKey, reviewTitle);
+
+    host.openTaskReview({
+      providerId: "bitbucket",
+      reviewKey,
+      title: reviewTitle,
+      presentation: "mobile",
+      sessionId: "session-1",
+    });
+    expect(setMobileSessionReview).toHaveBeenCalledWith(
+      "session-1",
+      reviewItemId({ providerId: "bitbucket", reviewKey }),
+    );
   });
 });
