@@ -310,7 +310,7 @@ func (e *Executor) ensureRepoClonedForSession(
 	// RemoteURL is the canonical provider-declared transport. In particular,
 	// plugin providers may use a path shape that cannot be reconstructed from
 	// owner/name. Only derive a URL for legacy rows that do not have one.
-	cloneURL := repositoryCloneURL(repo)
+	cloneURL := strings.TrimSpace(repo.RemoteURL)
 	if cloneURL == "" {
 		var urlErr error
 		cloneURL, urlErr = e.repoCloner.BuildCloneURLWithHost(

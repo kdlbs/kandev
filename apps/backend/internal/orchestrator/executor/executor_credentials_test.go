@@ -444,6 +444,27 @@ func TestManagedGitCredentialProviderTreatsEmptyProviderAsGitHub(t *testing.T) {
 	}
 }
 
+func TestConfigureGitCredentialBrokerSkipsLocalRepositoryWithoutProvider(t *testing.T) {
+	issuer := &fakeGitHubCredentialLeaseIssuer{lease: gitcredentials.Lease{Token: "opaque-lease"}}
+	exec := newTestExecutor(t, &mockAgentManager{}, newMockRepository())
+	exec.SetGitHubCredentialBroker(issuer, "https://kandev.example/api/v1/git/credentials/resolve")
+	req := &LaunchAgentRequest{
+		TaskID: "task-1", WorkspaceID: "workspace-1", SessionID: "session-1",
+		ExecutorType: string(models.ExecutorTypeSSH), Env: map[string]string{},
+	}
+	info := &repoInfo{RepositoryID: "repo-local", Repository: &models.Repository{
+		SourceType: sourceTypeLocal,
+		RemoteURL:  "file:///tmp/repository.git",
+	}}
+
+	if err := exec.configureGitCredentialBrokerForRepositories(context.Background(), req, []*repoInfo{info}); err != nil {
+		t.Fatalf("configureGitCredentialBrokerForRepositories() error = %v", err)
+	}
+	if issuer.calls != 0 {
+		t.Fatalf("Issue calls = %d, want 0 for local repository", issuer.calls)
+	}
+}
+
 func mapValues(values map[string]string) []string {
 	result := make([]string, 0, len(values))
 	for _, value := range values {

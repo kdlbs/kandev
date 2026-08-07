@@ -206,6 +206,23 @@ func TestEnsureRepoClonedPrefersDeclaredRemoteURL(t *testing.T) {
 	}
 }
 
+func TestEnsureRepoClonedUsesConfiguredProtocolForLegacyRepository(t *testing.T) {
+	cloner := &cloneTransportTestCloner{cloneURL: "git@github.com:acme/widgets.git"}
+	exec := newTestExecutor(t, &mockAgentManager{}, newMockRepository())
+	exec.SetRepoCloner(cloner, nil)
+
+	_, err := exec.ensureRepoCloned(context.Background(), &models.Repository{
+		ID: "repo-1", WorkspaceID: "workspace-1", Provider: "github",
+		ProviderOwner: "acme", ProviderName: "widgets",
+	})
+	if err != nil {
+		t.Fatalf("ensureRepoCloned(): %v", err)
+	}
+	if got, want := cloner.requestedCloneURL, "git@github.com:acme/widgets.git"; got != want {
+		t.Fatalf("clone URL = %q, want configured protocol %q", got, want)
+	}
+}
+
 func TestResolveTaskRepoInfoAuthenticatesPluginRefreshBeforeWorktree(t *testing.T) {
 	repoPath := initGitRepoWithOrigin(t, "https://bitbucket.org/acme/widgets.git")
 	repositoryStore := newMockRepository()

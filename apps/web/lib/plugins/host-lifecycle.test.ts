@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
+import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { loadPlugins } from "./host";
 import { pluginRegistry } from "./registry";
 import type { ActivePlugin, PluginHostApi, PluginRegistry } from "./types";
@@ -24,11 +25,18 @@ function makeHostFactory(pluginId: string): PluginHostApi {
       setState: () => {},
       subscribe: () => () => {},
     },
-    api: { fetch: async () => new Response(), baseUrl: "" },
+    api: {
+      fetch: async () => new Response(),
+      invokeAction: async <TResponse>() => undefined as TResponse,
+      baseUrl: "",
+    },
     ui: {},
+    useResponsiveBreakpoint,
     theme: "light",
     navigate: () => {},
     openModal: () => ({ close: () => {} }),
+    openTaskLinkDialog: () => ({ close: () => {} }),
+    openTaskReview: () => {},
     storage: {
       get: async () => undefined,
       set: async () => ({ updatedAt: "" }),

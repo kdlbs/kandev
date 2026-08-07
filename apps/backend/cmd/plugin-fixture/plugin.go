@@ -34,6 +34,7 @@ const (
 	fixtureCredentialHost  = "bitbucket.example.test"
 	fixtureCredentialPath  = "/scm/TEAM/fixture.git"
 	connectionStatusAction = "connection-status"
+	searchPurpose          = "search"
 	submissionPurpose      = "submission"
 )
 
@@ -258,6 +259,9 @@ func (*fixturePlugin) AuthorizeEntityReference(_ context.Context, req *pluginsdk
 	id, _ := req.Reference["id"].(string)
 	if id != fixturePullRequestID && id != revokedPullRequestID {
 		return &pluginsdk.AuthorizeEntityReferenceResponse{Allowed: false, Reason: "pull request is not owned by this source"}, nil
+	}
+	if req.Purpose != searchPurpose && req.Purpose != submissionPurpose {
+		return &pluginsdk.AuthorizeEntityReferenceResponse{Allowed: false, Reason: "reference purpose is unsupported"}, nil
 	}
 	if id == revokedPullRequestID && req.Purpose == submissionPurpose {
 		return &pluginsdk.AuthorizeEntityReferenceResponse{Allowed: false, Reason: "pull request is no longer available"}, nil

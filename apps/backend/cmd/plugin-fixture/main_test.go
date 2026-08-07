@@ -205,6 +205,17 @@ func TestAuthorizeEntityReference_DeniesUnknownPullRequest(t *testing.T) {
 	require.NotEmpty(t, response.Reason)
 }
 
+func TestAuthorizeEntityReference_DeniesUnsupportedPurpose(t *testing.T) {
+	p := &fixturePlugin{dataDir: t.TempDir()}
+	response, err := p.AuthorizeEntityReference(context.Background(), &pluginsdk.AuthorizeEntityReferenceRequest{
+		Source: fixtureReferenceSource, WorkspaceID: "workspace-42", Purpose: "unsupported",
+		Reference: map[string]any{"id": fixturePullRequestID},
+	})
+	require.NoError(t, err)
+	require.False(t, response.Allowed)
+	require.NotEmpty(t, response.Reason)
+}
+
 func TestGitCredentialBinding_RevokesAfterAuthenticatedConnectionAction(t *testing.T) {
 	p := &fixturePlugin{dataDir: t.TempDir()}
 	bindingRequest := &pluginsdk.GitCredentialBindingRequest{

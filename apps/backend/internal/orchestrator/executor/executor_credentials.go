@@ -417,6 +417,9 @@ func (e *Executor) issueGitHubContributionCredentialScope(
 }
 
 func managedGitCredentialProvider(repository *models.Repository, githubManaged bool, env map[string]string) string {
+	if repository.SourceType == sourceTypeLocal && strings.TrimSpace(repository.Provider) == "" {
+		return ""
+	}
 	providerID := strings.ToLower(strings.TrimSpace(repository.Provider))
 	if providerID == "" {
 		providerID = gitHubProviderID

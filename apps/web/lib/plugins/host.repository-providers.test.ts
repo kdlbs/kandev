@@ -33,6 +33,13 @@ function makeHostFactory(pluginId: string): PluginHostApi {
     openModal: () => ({ close: () => {} }),
     openTaskLinkDialog: () => ({ close: () => {} }),
     openTaskReview: () => {},
+    storage: {
+      get: async () => undefined,
+      set: async () => ({ updatedAt: "" }),
+      delete: async () => {},
+      list: async () => [],
+      subscribe: () => () => {},
+    },
   };
 }
 
