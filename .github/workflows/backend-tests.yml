@@ -383,6 +383,7 @@ jobs:
       # Keep port-collision coverage targeted: the instance package contains
       # broader stdio MCP fixture tests that depend on Unix command behavior.
       - name: Test Windows port collision handling
+        shell: bash
         run: |
           go test -race -v ./internal/common/netutil -run '^TestIsAddrInUse'
           go test -race -v ./internal/agentctl/server/instance -run '^TestAllocatePortAndListenerRetriesAddressInUse$'

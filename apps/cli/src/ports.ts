@@ -109,13 +109,6 @@ async function reserveSpecificPort(port: number, host = "127.0.0.1"): Promise<ne
   });
 }
 
-export async function pickAvailablePort(
-  preferred: number,
-  retries = RANDOM_PORT_RETRIES,
-): Promise<number> {
-  return pickAvailablePortExcluding(preferred, new Set(), retries);
-}
-
 export async function pickAvailablePortExcluding(
   preferred: number,
   excludedPorts: ReadonlySet<number>,

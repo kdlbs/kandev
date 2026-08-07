@@ -62,7 +62,7 @@ func envPort(name string) (int, error) {
 	return n, nil
 }
 
-func pickPorts(backendPort int, source ...string) (portConfig, error) {
+func pickPorts(backendPort int, source string) (portConfig, error) {
 	used := map[int]bool{}
 	backend := backendPort
 	if backend == 0 {
@@ -73,8 +73,8 @@ func pickPorts(backendPort int, source ...string) (portConfig, error) {
 		backend = p
 	} else if !canBind(backend) {
 		sourceSuffix := ""
-		if len(source) > 0 && source[0] != "" {
-			sourceSuffix = fmt.Sprintf(" from %s", source[0])
+		if source != "" {
+			sourceSuffix = fmt.Sprintf(" from %s", source)
 		}
 		return portConfig{}, fmt.Errorf("backend port %d%s is already in use", backend, sourceSuffix)
 	}

@@ -165,8 +165,11 @@ describe("explicit backend port selection", () => {
     }
   });
 
-  it("does not reuse an explicit backend port for the automatic web port", async () => {
-    if (!(await portsTesting.isPortAvailable(DEFAULT_WEB_PORT))) return;
+  it("does not reuse an explicit backend port for the automatic web port", async (ctx) => {
+    if (!(await portsTesting.isPortAvailable(DEFAULT_WEB_PORT))) {
+      ctx.skip();
+      return;
+    }
 
     const resolved = await pickPorts({
       backendPort: DEFAULT_WEB_PORT,
@@ -176,8 +179,11 @@ describe("explicit backend port selection", () => {
     expect(resolved.webPort).not.toBe(DEFAULT_WEB_PORT);
   });
 
-  it("does not reuse an explicit backend port for the automatic agentctl port", async () => {
-    if (!(await portsTesting.isPortAvailable(DEFAULT_AGENTCTL_PORT))) return;
+  it("does not reuse an explicit backend port for the automatic agentctl port", async (ctx) => {
+    if (!(await portsTesting.isPortAvailable(DEFAULT_AGENTCTL_PORT))) {
+      ctx.skip();
+      return;
+    }
 
     const resolved = await pickBackendPorts({
       backendPort: DEFAULT_AGENTCTL_PORT,

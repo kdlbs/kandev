@@ -86,6 +86,17 @@ describe("waitForHealth", () => {
     expect(fetchMock).toHaveBeenCalledTimes(3);
   });
 
+  it("reports a different process when successful responses never match the launch token", async () => {
+    const proc: ProcState = { exitCode: null };
+    fetchMock.mockResolvedValue({ ok: true, headers: new Headers() } as Response);
+
+    await expect(waitForHealth("http://localhost:38429", proc, 120, "expected")).rejects.toThrow(
+      "Backend port 38429 answered a health check from a different process " +
+        "(missing/mismatched launcher token). Another Kandev instance may already own it, " +
+        "or the runtime bundle predates v0.66.0.",
+    );
+  });
+
   it("includes the exit code and invokes onFailure when backend exits early", async () => {
     const proc: ProcState = { exitCode: 2 };
     fetchMock.mockRejectedValue(new Error("ECONNREFUSED"));

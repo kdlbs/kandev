@@ -3,6 +3,7 @@ package instance
 import (
 	"context"
 	"net"
+	"strconv"
 	"testing"
 
 	"github.com/kandev/kandev/internal/agentctl/server/config"
@@ -18,6 +19,12 @@ func TestAllocatePortAndListenerRetriesAddressInUse(t *testing.T) {
 		}
 		candidatePort := candidate.Addr().(*net.TCPAddr).Port
 		if candidatePort < 65535 {
+			next, err := net.Listen("tcp", "127.0.0.1:"+strconv.Itoa(candidatePort+1))
+			if err != nil {
+				_ = candidate.Close()
+				continue
+			}
+			_ = next.Close()
 			occupied = candidate
 			base = candidatePort
 			break

@@ -81,10 +81,14 @@ func TestWaitForHealthIgnoresHealthyResponseWithoutMatchingToken(t *testing.T) {
 
 	err := waitForHealth(context.Background(), srv.URL, fakeChild{}, 400*time.Millisecond, "expected", nil)
 	if err == nil {
-		t.Fatal("waitForHealth() = nil, want timeout after mismatched token")
+		t.Fatal("waitForHealth() = nil, want different-process error")
 	}
-	if !strings.Contains(err.Error(), "timed out") {
-		t.Fatalf("error = %v, want a timeout error", err)
+	want := "answered a health check from a different process (missing/mismatched launcher token)"
+	if !strings.Contains(err.Error(), want) {
+		t.Fatalf("error = %v, want %q", err, want)
+	}
+	if !strings.Contains(err.Error(), "runtime bundle predates v0.66.0") {
+		t.Fatalf("error = %v, want legacy runtime guidance", err)
 	}
 }
 

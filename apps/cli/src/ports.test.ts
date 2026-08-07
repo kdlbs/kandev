@@ -5,7 +5,6 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   assertPortAvailable,
   ensureValidPort,
-  pickAvailablePort,
   pickAvailablePortExcluding,
   __testing,
 } from "./ports";
@@ -118,10 +117,10 @@ describe("isPortInUse", () => {
   });
 });
 
-describe("pickAvailablePort", () => {
+describe("pickAvailablePortExcluding", () => {
   it("returns the preferred port when it is free", async () => {
     const port = await findReportedAvailablePort();
-    expect(await pickAvailablePort(port)).toBe(port);
+    expect(await pickAvailablePortExcluding(port, new Set())).toBe(port);
   });
 
   it("skips an excluded preferred port", async () => {
@@ -135,7 +134,7 @@ describe("pickAvailablePort", () => {
   it("returns a fallback port when the preferred port is taken", async () => {
     const { server, port } = await listenOn("127.0.0.1");
     try {
-      const picked = await pickAvailablePort(port, 5);
+      const picked = await pickAvailablePortExcluding(port, new Set(), 5);
       expect(picked).not.toBe(port);
       expect(picked).toBeGreaterThan(0);
     } finally {
