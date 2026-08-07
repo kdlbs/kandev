@@ -407,3 +407,78 @@ func TestApplyWorkflowAndPlanMode_PassthroughSkipsReferenceExpansion(t *testing.
 		t.Fatalf("expected expander not to be invoked for a passthrough session, got %d calls", len(expander.calls))
 	}
 }
+
+func TestGetWorkflowMeta_CachesPerRequest(t *testing.T) {
+	stepGetter := newMockStepGetter()
+	stepGetter.workflowAgentProfileID = "profile-wf"
+	stepGetter.workflowPrompts["wf-1"] = "Keep CI green."
+	svc := createTestService(setupTestRepo(t), stepGetter, newMockTaskRepo())
+
+	ctx := withWorkflowMetaCache(context.Background())
+	step := &wfmodels.WorkflowStep{
+		ID:         "step-1",
+		WorkflowID: "wf-1",
+		// No step override — forces workflow default profile lookup.
+	}
+
+	if got := svc.resolveStepAgentProfile(ctx, step); got != "profile-wf" {
+		t.Fatalf("resolveStepAgentProfile() = %q, want profile-wf", got)
+	}
+	if stepGetter.workflowMetaCalls != 1 {
+		t.Fatalf("after profile resolve: GetWorkflowMeta calls = %d, want 1", stepGetter.workflowMetaCalls)
+	}
+
+	got := svc.buildWorkflowPrompt(ctx, "base", step, "task-1", "session-1", false)
+	want := "## Workflow instructions\n\nKeep CI green.\n\n<!-- /workflow-instructions -->\n\nbase"
+	if got != want {
+		t.Fatalf("buildWorkflowPrompt() = %q, want %q", got, want)
+	}
+	if stepGetter.workflowMetaCalls != 1 {
+		t.Fatalf("after prompt build: GetWorkflowMeta calls = %d, want 1 (cached)", stepGetter.workflowMetaCalls)
+	}
+}
+
+func TestGetWorkflowMeta_WithoutCacheHitsProviderTwice(t *testing.T) {
+	stepGetter := newMockStepGetter()
+	stepGetter.workflowAgentProfileID = "profile-wf"
+	stepGetter.workflowPrompts["wf-1"] = "Keep CI green."
+	svc := createTestService(setupTestRepo(t), stepGetter, newMockTaskRepo())
+
+	ctx := context.Background()
+	step := &wfmodels.WorkflowStep{ID: "step-1", WorkflowID: "wf-1"}
+
+	_ = svc.resolveStepAgentProfile(ctx, step)
+	_ = svc.buildWorkflowPrompt(ctx, "base", step, "task-1", "session-1", false)
+
+	if stepGetter.workflowMetaCalls != 2 {
+		t.Fatalf("without cache: GetWorkflowMeta calls = %d, want 2", stepGetter.workflowMetaCalls)
+	}
+}
+
+func TestProcessOnEnter_SharesWorkflowMetaCache(t *testing.T) {
+	// processOnEnter seeds withWorkflowMetaCache; profile switch + prompt build
+	// must share one GetWorkflowMeta read. Cover the pure helpers with the same
+	// ctx seeding pattern processOnEnter uses.
+	stepGetter := newMockStepGetter()
+	stepGetter.workflowAgentProfileID = "profile-wf"
+	stepGetter.workflowPrompts["wf-1"] = "Rule one."
+	svc := createTestService(setupTestRepo(t), stepGetter, newMockTaskRepo())
+
+	ctx := withWorkflowMetaCache(context.Background())
+	step := &wfmodels.WorkflowStep{
+		ID:         "step-1",
+		WorkflowID: "wf-1",
+		Prompt:     "Do the work.",
+	}
+
+	if got := svc.resolveStepAgentProfile(ctx, step); got != "profile-wf" {
+		t.Fatalf("resolveStepAgentProfile() = %q, want profile-wf", got)
+	}
+	got := svc.buildWorkflowPrompt(ctx, "base", step, "task-1", "session-1", false)
+	if !strings.Contains(got, "Rule one.") {
+		t.Fatalf("expected workflow instructions in prompt, got %q", got)
+	}
+	if stepGetter.workflowMetaCalls != 1 {
+		t.Fatalf("shared cache path: GetWorkflowMeta calls = %d, want 1", stepGetter.workflowMetaCalls)
+	}
+}

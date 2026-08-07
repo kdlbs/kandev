@@ -763,14 +763,14 @@ func (s *Service) resolveStepAgentProfile(ctx context.Context, step *wfmodels.Wo
 		return step.AgentProfileID
 	}
 	if s.workflowStepGetter != nil && step.WorkflowID != "" {
-		wfProfileID, err := s.workflowStepGetter.GetWorkflowAgentProfileID(ctx, step.WorkflowID)
+		meta, err := s.getWorkflowMeta(ctx, step.WorkflowID)
 		if err != nil {
 			s.logger.Warn("failed to resolve workflow agent profile, falling back to task defaults",
 				zap.String("workflow_id", step.WorkflowID),
 				zap.String("step_id", step.ID),
 				zap.Error(err))
-		} else if wfProfileID != "" {
-			return wfProfileID
+		} else if meta.AgentProfileID != "" {
+			return meta.AgentProfileID
 		}
 	}
 	return ""
@@ -1077,6 +1077,9 @@ func (s *Service) maybySwitchSessionForProfile(
 
 // processOnEnter processes the on_enter events for a step after transitioning to it.
 func (s *Service) processOnEnter(ctx context.Context, taskID string, session *models.TaskSession, step *wfmodels.WorkflowStep, taskDescription string) {
+	// One GetWorkflowMeta read shared by profile resolution and prompt build.
+	ctx = withWorkflowMetaCache(ctx)
+
 	// Switch session if this step requires a different agent profile.
 	var ok bool
 	prevSessionID := session.ID

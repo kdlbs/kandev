@@ -337,6 +337,9 @@ func (s *Service) StartCreatedSession(
 	attachments []v1.MessageAttachment,
 	references []v1.EntityReference,
 ) (*executor.TaskExecution, error) {
+	// One GetWorkflowMeta read shared by profile resolution and prompt build.
+	ctx = withWorkflowMetaCache(ctx)
+
 	s.logger.Debug("starting created session",
 		zap.String("task_id", taskID),
 		zap.String("session_id", sessionID),
@@ -778,6 +781,9 @@ func (s *Service) StartTaskWithRoute(
 
 //nolint:cyclop,funlen,gocognit // launch path threads many orthogonal concerns (workflow-step / agent-profile / office-task / config-mode / route / system-prompt wrapping); splitting it would require shared mutable state across helpers
 func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID string, executorID string, executorProfileID string, priority string, prompt string, workflowStepID string, planMode, autoStart bool, attachments []v1.MessageAttachment, opts startTaskOptions) (*executor.TaskExecution, error) {
+	// One GetWorkflowMeta read shared by profile resolution and prompt build.
+	ctx = withWorkflowMetaCache(ctx)
+
 	env, route := opts.Env, opts.Route
 	s.logger.Debug("manually starting task",
 		zap.String("task_id", taskID),
@@ -1494,7 +1500,7 @@ func (s *Service) workflowInstructionsBlock(ctx context.Context, step *wfmodels.
 	if s.workflowStepGetter == nil || step == nil || step.WorkflowID == "" {
 		return ""
 	}
-	prompt, err := s.workflowStepGetter.GetWorkflowPrompt(ctx, step.WorkflowID)
+	meta, err := s.getWorkflowMeta(ctx, step.WorkflowID)
 	if err != nil {
 		if s.logger != nil {
 			s.logger.Warn("failed to get workflow prompt for prompt building",
@@ -1503,7 +1509,7 @@ func (s *Service) workflowInstructionsBlock(ctx context.Context, step *wfmodels.
 		}
 		return ""
 	}
-	prompt = strings.TrimSpace(prompt)
+	prompt := strings.TrimSpace(meta.Prompt)
 	if prompt == "" {
 		return ""
 	}
