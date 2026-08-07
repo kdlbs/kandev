@@ -30,7 +30,9 @@ export function readSavedPresets(value: unknown): SavedPreset[] | null {
     if (
       typeof preset.id !== "string" ||
       (kind !== "pr" && kind !== "issue") ||
-      typeof preset.label !== "string"
+      typeof preset.label !== "string" ||
+      typeof preset.customQuery !== "string" ||
+      typeof preset.createdAt !== "string"
     ) {
       return [];
     }
@@ -38,8 +40,12 @@ export function readSavedPresets(value: unknown): SavedPreset[] | null {
     if (isDefault) defaultKinds.add(kind);
     return [
       {
-        ...(preset as Omit<SavedPreset, "repoFilter" | "isDefault">),
+        id: preset.id,
+        kind,
+        label: preset.label,
+        customQuery: preset.customQuery,
         repoFilter: typeof preset.repoFilter === "string" ? preset.repoFilter : "",
+        createdAt: preset.createdAt,
         isDefault,
       },
     ];

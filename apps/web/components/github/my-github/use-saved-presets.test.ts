@@ -357,4 +357,19 @@ describe("useSavedPresets default persistence", () => {
     });
     expect(result.current.presets).toEqual([{ ...prA, isDefault: true }]);
   });
+
+  it("retains the prior portable user default when persistence fails", async () => {
+    const prA = { ...valid, id: "pr-a", isDefault: true };
+    const prB = { ...valid, id: "pr-b" };
+    vi.mocked(fetchUserSettings).mockResolvedValue({
+      settings: { github_saved_presets: [prA, prB] },
+    } as Awaited<ReturnType<typeof fetchUserSettings>>);
+    vi.mocked(updateUserSettings).mockRejectedValue(new Error(SETTINGS_DOWN));
+    const { result } = renderHook(() => useSavedPresets());
+    await waitFor(() => expect(result.current.presets).toHaveLength(2));
+
+    await expect(defaultSetter(result.current)("pr", "pr-b")).rejects.toThrow(SETTINGS_DOWN);
+
+    expect(result.current.presets.map((preset) => preset.isDefault)).toEqual([true, false]);
+  });
 });

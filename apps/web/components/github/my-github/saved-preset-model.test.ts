@@ -43,6 +43,26 @@ function preset(id: string, kind: SavedPresetKind, isDefault = false): SavedPres
   };
 }
 
+describe("saved preset parsing", () => {
+  it.each([
+    { field: "customQuery", value: undefined },
+    { field: "customQuery", value: 42 },
+    { field: "createdAt", value: undefined },
+    { field: "createdAt", value: 42 },
+  ])("rejects an entry with an invalid $field", ({ field, value }) => {
+    const valid = preset("valid", "pr");
+    const malformed = { ...preset("malformed", "pr"), [field]: value };
+
+    expect(model.readSavedPresets([malformed, valid])).toEqual([valid]);
+  });
+
+  it("returns only validated saved-preset fields", () => {
+    const valid = preset("valid", "pr");
+
+    expect(model.readSavedPresets([{ ...valid, serverOnly: "discard me" }])).toEqual([valid]);
+  });
+});
+
 describe("saved preset defaults", () => {
   it("replaces one kind's default without changing the other kind", () => {
     const setDefault = futureFunction("setSavedPresetDefault");

@@ -120,6 +120,35 @@ export function useSavedPresets(workspaceId: string | null = null) {
   const { workspacePresets, setWorkspacePresets } = useWorkspaceSavedPresets(workspaceId);
   useUserSavedPresetsSync(!workspaceId);
   const activePresets = workspaceId ? (workspacePresets ?? emptySnapshot) : presets;
+  const activePresetsRef = useRef(activePresets);
+  const mutationQueueRef = useRef<Promise<void>>(Promise.resolve());
+  activePresetsRef.current = activePresets;
+
+  const applyLocal = useCallback(
+    (next: SavedPreset[]) => {
+      activePresetsRef.current = next;
+      if (workspaceId) {
+        setWorkspacePresets(next);
+      } else {
+        publish(next);
+      }
+    },
+    [workspaceId, setWorkspacePresets],
+  );
+
+  const persist = useCallback(
+    (next: SavedPreset[]) => {
+      if (workspaceId) return syncWorkspaceSavedPresets(workspaceId, next);
+      return syncServer(next);
+    },
+    [workspaceId],
+  );
+
+  const queueMutation = useCallback((mutation: () => Promise<void>) => {
+    const queued = mutationQueueRef.current.catch(() => undefined).then(mutation);
+    mutationQueueRef.current = queued;
+    return queued;
+  }, []);
 
   const save = useCallback(
     (input: Omit<SavedPreset, "id" | "createdAt" | "isDefault">) => {
@@ -130,32 +159,27 @@ export function useSavedPresets(workspaceId: string | null = null) {
         createdAt: new Date().toISOString(),
         isDefault: false,
       };
-      const next = [...activePresets, preset];
-      if (workspaceId) {
-        setWorkspacePresets(next);
-        void syncWorkspaceSavedPresets(workspaceId, next).catch(() => {});
-        return preset;
-      }
-      publish(next);
-      void syncServer(next);
+      const append = (current: SavedPreset[]) =>
+        current.some((saved) => saved.id === preset.id) ? current : [...current, preset];
+      applyLocal(append(activePresetsRef.current));
+      void queueMutation(async () => {
+        await persist(append(activePresetsRef.current));
+      }).catch(() => {});
       return preset;
     },
-    [activePresets, workspaceId, workspacePresets, setWorkspacePresets],
+    [applyLocal, persist, queueMutation, workspaceId, workspacePresets],
   );
 
   const remove = useCallback(
     (id: string) => {
       if (workspaceId && workspacePresets === undefined) return;
-      const next = activePresets.filter((p) => p.id !== id);
-      if (workspaceId) {
-        setWorkspacePresets(next);
-        void syncWorkspaceSavedPresets(workspaceId, next).catch(() => {});
-        return;
-      }
-      publish(next);
-      void syncServer(next);
+      const discard = (current: SavedPreset[]) => current.filter((preset) => preset.id !== id);
+      applyLocal(discard(activePresetsRef.current));
+      void queueMutation(async () => {
+        await persist(discard(activePresetsRef.current));
+      }).catch(() => {});
     },
-    [activePresets, workspaceId, workspacePresets, setWorkspacePresets],
+    [applyLocal, persist, queueMutation, workspaceId, workspacePresets],
   );
 
   const setDefault = useCallback(
@@ -163,17 +187,14 @@ export function useSavedPresets(workspaceId: string | null = null) {
       if (workspaceId && workspacePresets === undefined) {
         throw new Error("Saved queries are not loaded");
       }
-      const next = setSavedPresetDefault(activePresets, kind, id);
-      if (next === activePresets) return;
-      if (workspaceId) {
-        await syncWorkspaceSavedPresets(workspaceId, next);
-        setWorkspacePresets(next);
-        return;
-      }
-      await syncServer(next);
-      publish(next);
+      await queueMutation(async () => {
+        const next = setSavedPresetDefault(activePresetsRef.current, kind, id);
+        if (next === activePresetsRef.current) return;
+        await persist(next);
+        applyLocal(setSavedPresetDefault(activePresetsRef.current, kind, id));
+      });
     },
-    [activePresets, workspaceId, workspacePresets, setWorkspacePresets],
+    [applyLocal, persist, queueMutation, workspaceId, workspacePresets],
   );
 
   return { presets: activePresets, save, remove, setDefault };
