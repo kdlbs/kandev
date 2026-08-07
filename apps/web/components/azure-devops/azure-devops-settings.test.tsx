@@ -90,7 +90,11 @@ afterEach(cleanup);
 
 describe("AzureDevOpsConnectionSection", () => {
   it("links to the organization PAT page and explains the required read scopes", async () => {
-    render(<AzureDevOpsConnectionSection workspaceId="workspace-a" />);
+    render(
+      <SettingsSaveProvider>
+        <AzureDevOpsConnectionSection workspaceId="workspace-a" />
+      </SettingsSaveProvider>,
+    );
 
     const patHelpButton = await screen.findByRole("button", {
       name: "How to create a personal access token",
@@ -117,7 +121,11 @@ describe("AzureDevOpsConnectionSection", () => {
   });
 
   it("does not create a token link from a non-Azure organization URL", async () => {
-    render(<AzureDevOpsConnectionSection workspaceId="workspace-a" />);
+    render(
+      <SettingsSaveProvider>
+        <AzureDevOpsConnectionSection workspaceId="workspace-a" />
+      </SettingsSaveProvider>,
+    );
 
     const organization = await screen.findByTestId("azure-devops-organization");
     await waitFor(() =>
@@ -134,7 +142,11 @@ describe("AzureDevOpsConnectionSection", () => {
   });
 
   it("removes trailing slashes before saving an organization URL", async () => {
-    render(<AzureDevOpsConnectionSection workspaceId="workspace-a" />);
+    render(
+      <SettingsSaveProvider>
+        <AzureDevOpsConnectionSection workspaceId="workspace-a" />
+      </SettingsSaveProvider>,
+    );
     const organization = await screen.findByTestId("azure-devops-organization");
     await waitFor(() =>
       expect((organization as HTMLInputElement).value).toBe(OLD_ORGANIZATION_URL),
@@ -154,7 +166,11 @@ describe("AzureDevOpsConnectionSection", () => {
   });
 
   it("omits a project selected for the previous organization", async () => {
-    render(<AzureDevOpsConnectionSection workspaceId="workspace-a" />);
+    render(
+      <SettingsSaveProvider>
+        <AzureDevOpsConnectionSection workspaceId="workspace-a" />
+      </SettingsSaveProvider>,
+    );
     const organization = await screen.findByTestId("azure-devops-organization");
     await waitFor(() =>
       expect((organization as HTMLInputElement).value).toBe(OLD_ORGANIZATION_URL),

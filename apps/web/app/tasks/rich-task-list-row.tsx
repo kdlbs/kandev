@@ -35,13 +35,12 @@ function PrimaryTaskLine({
 }) {
   return (
     <>
-      {getTaskStateIcon(
-        task.state,
-        "h-4 w-4 shrink-0",
-        pendingInput.clarification,
-        task.foreground_activity,
-        pendingInput.permission,
-      )}
+      {getTaskStateIcon(task.state, "h-4 w-4 shrink-0", {
+        hasPendingClarification: pendingInput.clarification,
+        foregroundActivity: task.foreground_activity,
+        hasPendingPermission: pendingInput.permission,
+        interrupted: task.interrupted,
+      })}
       <span className="min-w-0 truncate font-medium" data-testid="tasks-list-row-title">
         {task.title}
       </span>

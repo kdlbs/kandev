@@ -11,6 +11,7 @@ import { invalidateCumulativeDiffCache } from "@/hooks/domains/session/use-cumul
 import { updateTaskRepositoryBaseBranch } from "@/lib/api/domains/kanban-api";
 import { useToast } from "@/components/toast-provider";
 import { repositoryId, type Branch, type Repository } from "@/lib/types/http";
+import { useTranslation } from "react-i18next";
 
 type ResolvedRepo = {
   taskRepositoryId: string;
@@ -62,6 +63,7 @@ function useResolvedTaskRepo(taskId: string | null, repositoryName: string): Res
  * the trigger components tiny and avoids duplicated select + toast plumbing.
  */
 function usePickerLogic(taskId: string | null, repositoryName: string, fallbackBaseBranch: string) {
+  const { t } = useTranslation();
   const { toast } = useToast();
   const [open, setOpen] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
@@ -101,8 +103,8 @@ function usePickerLogic(taskId: string | null, repositoryName: string, fallbackB
       if (envKey) invalidateCumulativeDiffCache(envKey);
     } catch (err) {
       toast({
-        title: "Failed to change compare branch",
-        description: err instanceof Error ? err.message : "Unknown error",
+        title: t("task:failedToChangeCompareBranch"),
+        description: err instanceof Error ? err.message : t("task:unknownError"),
         variant: "error",
       });
     } finally {
@@ -134,6 +136,7 @@ function BranchList({
   currentBase: string;
   onSelect: (name: string) => void;
 }) {
+  const { t } = useTranslation();
   const [filter, setFilter] = useState("");
   // Dedupe by name (local + remote variants collapse to one option) so the
   // list shows each branch once even when the API returns both kinds.
@@ -159,7 +162,7 @@ function BranchList({
         type="text"
         value={filter}
         onChange={(e) => setFilter(e.target.value)}
-        placeholder="Filter branches…"
+        placeholder={t("task:filterBranches")}
         data-testid="base-branch-picker-filter"
         className="w-full rounded border border-input bg-background px-2 py-1 text-xs outline-none focus:ring-1 focus:ring-ring"
         autoFocus
@@ -185,16 +188,21 @@ function BranchListBody({
   currentBase: string;
   onSelect: (name: string) => void;
 }) {
+  const { t } = useTranslation();
   if (isLoadingBranches && filtered.length === 0) {
     return (
       <div className="flex items-center gap-2 px-2 py-1.5 text-xs text-muted-foreground">
         <IconLoader2 className="h-3 w-3 animate-spin" />
-        Loading branches…
+        {t("task:loadingBranches")}
       </div>
     );
   }
   if (filtered.length === 0) {
-    return <div className="px-2 py-1.5 text-xs text-muted-foreground">No matching branches</div>;
+    return (
+      <div className="px-2 py-1.5 text-xs text-muted-foreground">
+        {t("task:noMatchingBranches")}
+      </div>
+    );
   }
   return (
     <>

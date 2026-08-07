@@ -14,9 +14,10 @@
  *      `check-inline-plurals.mjs` only inspects morphemes passed through `t()`.
  *   2. Prose literals in non-JSX positions — for eye review, not auto-flagged.
  *
- * This is a human tool, not a gate: it always exits 0 and is wired into neither
- * CI nor pre-commit. The eye-review half needs judgement, and a check that fires
- * on every clean run teaches people to ignore it.
+ * This is a human tool, not a gate: whatever it finds, it exits 0, and it is
+ * wired into neither CI nor pre-commit. The eye-review half needs judgement, and
+ * a check that fires on every clean run teaches people to ignore it. Input it
+ * cannot read is the one exception — see `collectFiles`.
  *
  * Known limits, inherited from the Python original and kept for parity with it:
  * a line is skipped only when it *starts* with a comment, so a trailing
@@ -26,7 +27,7 @@
  * `.d.ts` files are scanned like any other `.ts` (there are none in the
  * directories this is pointed at). See also the note on `NOISE_VAL` below.
  *
- * Usage: node scripts/i18n-sweep.mjs <dir> [<dir> ...]
+ * Usage: node scripts/i18n-sweep.mjs <path> [<path> ...]
  */
 import fs from "node:fs";
 import path from "node:path";
@@ -98,19 +99,23 @@ function repr(value) {
 /**
  * Walk without following build output. The tool is pointed at source directories,
  * but `.` is a plausible mistake and node_modules would take minutes.
+ *
+ * A directory that cannot be read is recorded rather than skipped: silently
+ * scanning less than was asked for is the failure this tool must not have.
  */
-function listFiles(dir, out = []) {
+function listFiles(dir, out, errors) {
   let entries;
   try {
     entries = fs.readdirSync(dir, { withFileTypes: true });
-  } catch {
+  } catch (error) {
+    errors.push(`${dir}: ${error.code ?? error.message}`);
     return out;
   }
   for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name))) {
     const full = path.join(dir, entry.name);
     if (entry.isDirectory()) {
       if (["node_modules", "dist", ".git"].includes(entry.name)) continue;
-      listFiles(full, out);
+      listFiles(full, out, errors);
     } else if (/\.tsx?$/.test(entry.name) && !entry.name.includes(".test.")) {
       out.push(full);
     }
@@ -118,28 +123,67 @@ function listFiles(dir, out = []) {
   return out;
 }
 
-function sweep(dirs) {
+/**
+ * Resolve arguments to the de-duplicated file list to scan.
+ *
+ * A directory is walked as before. A file is scanned as named — the extension
+ * and `.test.` filters exist to keep a *walk* focused, and re-applying them to a
+ * path someone typed would put us back in the business of quietly ignoring the
+ * input. Anything that is neither is an error, never a skip: a detector that
+ * reports "0 findings" for input it never opened converts a missing check into a
+ * passed one.
+ *
+ * De-duplication keys on the resolved path but keeps the argument's own spelling,
+ * so findings still print the relative paths the caller passed in.
+ */
+function collectFiles(args) {
+  const found = [];
+  const errors = [];
+
+  for (const arg of args) {
+    let stat;
+    try {
+      stat = fs.statSync(arg);
+    } catch (error) {
+      errors.push(`${arg}: ${error.code ?? error.message}`);
+      continue;
+    }
+    if (stat.isDirectory()) listFiles(arg, found, errors);
+    else if (stat.isFile()) found.push(arg);
+    else errors.push(`${arg}: not a file or directory`);
+  }
+
+  const seen = new Set();
+  const files = [];
+  for (const file of found) {
+    const key = path.resolve(file);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    files.push(file);
+  }
+  return { files, errors };
+}
+
+function sweep(files) {
   const plurals = [];
   const hits = [];
 
-  for (const dir of dirs) {
-    for (const file of listFiles(dir)) {
-      const lines = fs.readFileSync(file, "utf8").split("\n");
-      lines.forEach((line, index) => {
-        const lineNumber = index + 1;
-        if (SKIP_LINE.test(line.trimStart())) return;
-        if (PLURAL.test(line)) {
-          plurals.push(`${file}:${lineNumber}: ${line.trim().slice(0, 100)}`);
-        }
-        for (const match of line.matchAll(LITERAL)) {
-          const value = match[1];
-          if (value.length < MIN_LENGTH || !isProse(value)) continue;
-          if (NOISE_CTX.test(line.slice(0, match.index))) continue;
-          if (CATALOG_KEY.test(value)) continue;
-          hits.push(`${file}:${lineNumber}: ${repr(value)}`);
-        }
-      });
-    }
+  for (const file of files) {
+    const lines = fs.readFileSync(file, "utf8").split("\n");
+    lines.forEach((line, index) => {
+      const lineNumber = index + 1;
+      if (SKIP_LINE.test(line.trimStart())) return;
+      if (PLURAL.test(line)) {
+        plurals.push(`${file}:${lineNumber}: ${line.trim().slice(0, 100)}`);
+      }
+      for (const match of line.matchAll(LITERAL)) {
+        const value = match[1];
+        if (value.length < MIN_LENGTH || !isProse(value)) continue;
+        if (NOISE_CTX.test(line.slice(0, match.index))) continue;
+        if (CATALOG_KEY.test(value)) continue;
+        hits.push(`${file}:${lineNumber}: ${repr(value)}`);
+      }
+    });
   }
 
   return { plurals, hits };
@@ -175,12 +219,24 @@ function report({ plurals, hits }) {
     "  Judge each hit; nothing in this section is automatically a defect.",
   );
   for (const h of hits) out.push(`  ${h}`);
+  out.push(
+    "",
+    "  Limit: copy handed back by a plain helper is invisible here and to the lint rule — the pseudo-locale is the completeness check.",
+  );
   return out.join("\n");
 }
 
-const DIRS = process.argv.slice(2).filter((a) => !a.startsWith("--"));
-if (!DIRS.length) {
-  console.error("Usage: node scripts/i18n-sweep.mjs <dir> [<dir> ...]");
+const ARGS = process.argv.slice(2).filter((a) => !a.startsWith("--"));
+if (!ARGS.length) {
+  console.error("Usage: node scripts/i18n-sweep.mjs <path> [<path> ...]");
   process.exit(2);
 }
-console.log(report(sweep(DIRS)));
+
+const { files, errors } = collectFiles(ARGS);
+if (errors.length) {
+  for (const error of errors) console.error(`i18n-sweep: cannot read ${error}`);
+  process.exit(2);
+}
+
+console.log(`scanned ${files.length} file(s) from ${ARGS.length} argument(s)`);
+console.log(report(sweep(files)));

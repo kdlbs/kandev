@@ -8,6 +8,10 @@ import { usePanelActions } from "@/hooks/use-panel-actions";
 import { useSessionMessages } from "@/hooks/domains/session/use-session-messages";
 import { useCustomPrompts } from "@/hooks/domains/settings/use-custom-prompts";
 import { useSessionState } from "@/hooks/domains/session/use-session-state";
+import {
+  deriveSessionInputMode,
+  resolvesSteeringAffordance,
+} from "@/hooks/domains/session/session-input-mode";
 import { useSessionMcp } from "@/hooks/domains/session/use-session-mcp";
 import { useProcessedMessages } from "@/hooks/use-processed-messages";
 import { useSessionModel } from "@/hooks/domains/session/use-session-model";
@@ -466,7 +470,7 @@ function useSessionData(
 
 type TodoStatus = "pending" | "in_progress" | "completed" | "failed";
 
-function useSessionTodoItems(
+export function useSessionTodoItems(
   resolvedSessionId: string | null,
   messageTodos: Array<{ text: string; done?: boolean }>,
 ) {
@@ -483,6 +487,14 @@ function useSessionTodoItems(
     }
     return messageTodos;
   }, [storeTodos, messageTodos]);
+}
+
+function deriveQueueAwareSessionInput(
+  session: ReturnType<typeof useSessionState>["session"],
+  queuedCount: number,
+) {
+  const inputMode = deriveSessionInputMode(session, queuedCount);
+  return { inputMode, isAgentBusy: inputMode === "queue" };
 }
 
 export type UseChatPanelStateOptions = {
@@ -600,6 +612,8 @@ export function useChatPanelState({
     mcpAttachmentHistory,
     prompts,
     todoItems,
+    ...deriveQueueAwareSessionInput(sessionState.session, sessionData.count),
+    supportsSteering: resolvesSteeringAffordance(sessionState.supportsSteering, sessionData.count),
   };
 }
 

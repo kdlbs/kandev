@@ -68,6 +68,7 @@ function makeUnloadedSettings(): UserSettingsState {
     showScrollToLastPrompt: true,
     showScrollToStart: false,
     showTranscriptAutoScrollControl: true,
+    showTodoListPanel: false,
     showReleaseNotification: true,
     releaseNotesLastSeenVersion: null,
     savedLayouts: [],

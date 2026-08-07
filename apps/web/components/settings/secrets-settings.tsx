@@ -497,7 +497,10 @@ function SecretsSettingsBody({
   const { isValid, isBusy } = actions;
   return (
     <>
-      <div className="space-y-6">
+      {/* `secrets-settings-body` is the pseudo-coverage oracle's render anchor for
+          this screen (e2e/tests/i18n/pseudo-coverage.spec.ts). Renaming it makes
+          that spec time out rather than silently scan an unrendered route. */}
+      <div className="space-y-6" data-testid="secrets-settings-body">
         <div className="flex items-center justify-between">
           <div className="text-sm font-medium text-foreground">{secretScopeTitle(t)}</div>
           <Button

@@ -281,6 +281,7 @@ type Service struct {
 	statusSummaries             repository.TaskStatusSummaryRepository
 	attachmentSvc               *AttachmentService
 	statusSummaryPRs            TaskStatusSummaryPRReader
+	queuedPromptCounter         QueuedPromptCounter
 	eventBus                    bus.EventBus
 	logger                      *logger.Logger
 	discoveryConfig             RepositoryDiscoveryConfig

@@ -1,5 +1,9 @@
-import { expect, type Locator } from "@playwright/test";
+import { expect, type Locator, type Page } from "@playwright/test";
 import { test } from "../../fixtures/test-base";
+import type { SeedData } from "../../fixtures/test-base";
+import type { ApiClient } from "../../helpers/api-client";
+import { typeWhileBusy } from "../../helpers/type-while-busy";
+import { SessionPage } from "../../pages/session-page";
 import { expectFullQueueScrolls, seedFullQueueTask } from "./message-queue-scroll-helpers";
 
 async function expectTouchTarget(locator: Locator): Promise<void> {
@@ -8,6 +12,32 @@ async function expectTouchTarget(locator: Locator): Promise<void> {
   expect(box).not.toBeNull();
   expect(box!.width).toBeGreaterThanOrEqual(44);
   expect(box!.height).toBeGreaterThanOrEqual(44);
+}
+
+async function seedBusyQueueTask(
+  testPage: Page,
+  apiClient: ApiClient,
+  seedData: SeedData,
+): Promise<SessionPage> {
+  const task = await apiClient.createTaskWithAgent(
+    seedData.workspaceId,
+    "Mobile queue Send Now",
+    seedData.agentProfileId,
+    {
+      description: "/e2e:simple-message",
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+      repository_ids: [seedData.repositoryId],
+    },
+  );
+  await testPage.goto(`/t/${task.id}`);
+  const session = new SessionPage(testPage);
+  await session.waitForLoad();
+  await session.waitForChatIdle({ timeout: 30_000 });
+  await session.sendMessageViaButton("/slow 30s");
+  await session.agentStatus().waitFor({ state: "visible", timeout: 15_000 });
+  await testPage.waitForTimeout(500);
+  return session;
 }
 
 test("mobile full queue stays usable while removing and clearing messages", async ({
@@ -48,4 +78,46 @@ test("mobile full queue stays usable while removing and clearing messages", asyn
   await expect(panel).not.toBeVisible({ timeout: 10_000 });
   await expect(chat.getByTestId("queue-chip")).not.toBeVisible();
   await expect(chat.getByTestId("chat-input-editor-shell")).toBeVisible();
+});
+
+test("mobile Send Now replaces a busy turn without hover or horizontal overflow", async ({
+  testPage,
+  apiClient,
+  seedData,
+}) => {
+  test.setTimeout(120_000);
+
+  const session = await seedBusyQueueTask(testPage, apiClient, seedData);
+  const chat = session.activeChat();
+  const editor = chat.locator(".tiptap.ProseMirror:visible").first();
+  const submit = testPage.getByTestId("submit-message-button");
+  for (const message of ["mobile first", "/slow 10s mobile second", "mobile third"]) {
+    await typeWhileBusy(testPage, editor, message);
+    await expect(submit).toBeEnabled();
+    await submit.tap();
+  }
+
+  await chat.getByTestId("queue-chip").tap();
+  const panel = chat.getByTestId("queued-ghost-list");
+  await expect(panel.getByTestId("queue-entry-text")).toHaveCount(3);
+  const rowSendNow = panel.getByTestId("queue-entry-send-now").nth(1);
+  const headerSendNow = panel.getByTestId("queue-send-now");
+  await expectTouchTarget(rowSendNow);
+  await expectTouchTarget(headerSendNow);
+
+  const viewport = await testPage.evaluate(() => ({
+    clientWidth: document.documentElement.clientWidth,
+    scrollWidth: document.documentElement.scrollWidth,
+  }));
+  expect(viewport.scrollWidth).toBeLessThanOrEqual(viewport.clientWidth);
+
+  await rowSendNow.tap();
+  const transcript = chat.locator(".chat-message-list:visible");
+  await expect(transcript.getByText("/slow 10s mobile second", { exact: true })).toBeVisible({
+    timeout: 20_000,
+  });
+  await expect(panel.getByTestId("queue-entry-text")).toHaveCount(2, { timeout: 10_000 });
+  await expect(panel.getByTestId("queue-entry-text").nth(0)).toContainText("mobile first");
+  await expect(panel.getByTestId("queue-entry-text").nth(1)).toContainText("mobile third");
+  await expect(session.chat).not.toContainText("Turn cancelled by user");
 });

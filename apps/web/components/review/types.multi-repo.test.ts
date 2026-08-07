@@ -81,6 +81,54 @@ describe("buildFileTree — multi-repo", () => {
     expect(frontend?.children?.[0].file?.repository_id).toBe("f");
     expect(backend?.children?.[0].file?.repository_id).toBe("b");
   });
+
+  it("places nested submodule scopes beneath their workspace directory hierarchy", () => {
+    const tree = buildFileTree([
+      file({ path: "README.md" }),
+      file({ path: "src/main.ts", repository_name: "vendor/outer" }),
+      file({ path: "README.md", repository_name: "vendor/outer/vendor/inner" }),
+    ]);
+
+    const vendor = tree.find((node) => node.name === "vendor");
+    const outer = vendor?.children?.find((node) => node.name === "outer");
+    const nestedVendor = outer?.children?.find((node) => node.name === "vendor");
+    const inner = nestedVendor?.children?.find((node) => node.name === "inner");
+
+    expect(vendor).toBeDefined();
+    expect(outer?.isSubmodule).toBe(true);
+    expect(outer?.repositoryName).toBe("vendor/outer");
+    expect(inner?.isSubmodule).toBe(true);
+    expect(inner?.repositoryName).toBe("vendor/outer/vendor/inner");
+    expect(inner?.children?.[0].file?.repository_name).toBe("vendor/outer/vendor/inner");
+  });
+
+  it("merges repeated directory segments within a repo despite interleaved input", () => {
+    const tree = buildFileTree([
+      file({ path: "src/a.ts", repository_name: "frontend", repository_id: "f" }),
+      file({ path: "README.md", repository_name: "frontend", repository_id: "f" }),
+      file({ path: "src/b.ts", repository_name: "frontend", repository_id: "f" }),
+      file({ path: "main.go", repository_name: "backend", repository_id: "b" }),
+    ]);
+
+    const frontend = tree.find((node) => node.name === "frontend");
+    const srcNodes = frontend?.children?.filter((node) => node.name === "src") ?? [];
+    expect(srcNodes).toHaveLength(1);
+    expect(srcNodes[0].children?.map((node) => node.file?.path)).toEqual(["src/a.ts", "src/b.ts"]);
+  });
+
+  it("keeps identical relative directories distinct across repositories", () => {
+    const tree = buildFileTree([
+      file({ path: "src/frontend.ts", repository_name: "frontend", repository_id: "f" }),
+      file({ path: "src/backend.ts", repository_name: "backend", repository_id: "b" }),
+    ]);
+
+    const srcNodes = tree.map((root) => root.children?.find((node) => node.name === "src"));
+    expect(srcNodes).toHaveLength(2);
+    expect(srcNodes.map((node) => node?.children?.[0].file?.repository_name)).toEqual([
+      "frontend",
+      "backend",
+    ]);
+  });
 });
 
 // reviewFileKey + splitReviewFileKey are the dedup primitive for the
@@ -92,7 +140,10 @@ describe("buildFileTree — multi-repo", () => {
 describe("reviewFileKey", () => {
   it("returns the bare path when no repository_name is set", () => {
     expect(reviewFileKey({ path: "README.md" })).toBe("README.md");
-    expect(reviewFileKey({ path: "src/index.ts", repository_name: "" })).toBe("src/index.ts");
+  });
+
+  it("keeps an explicit root scope distinct from a legacy bare path", () => {
+    expect(reviewFileKey({ path: "src/index.ts", repository_name: "" })).toBe(`${SEP}src/index.ts`);
   });
 
   it("joins repository_name and path with the NUL separator", () => {
@@ -182,15 +233,21 @@ describe("splitReviewFileKey", () => {
     });
   });
 
-  it("treats a key with empty repository_name as a legacy bare-path key", () => {
-    // reviewFileKey({path, repository_name: ""}) returns the bare path,
-    // so split should mirror that — no NUL in input means repo is "".
+  it("splits an explicit empty repository_name root key", () => {
+    expect(splitReviewFileKey(`${SEP}${APP_PATH}`)).toEqual({
+      repositoryName: "",
+      path: APP_PATH,
+    });
+  });
+
+  it("keeps a legacy bare-path key without a repository scope", () => {
     expect(splitReviewFileKey(APP_PATH)).toEqual({ repositoryName: "", path: APP_PATH });
   });
 
   it("round-trips through reviewFileKey", () => {
     const cases = [
       { path: "README.md" },
+      { path: "root.md", repository_name: "" },
       { path: "src/index.ts", repository_name: "frontend" },
       { path: "deep/nested/path/file.go", repository_name: "backend" },
       { path: "with spaces/file.md", repository_name: "shared" },

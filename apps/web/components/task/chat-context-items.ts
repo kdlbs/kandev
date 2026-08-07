@@ -1,5 +1,6 @@
 import type { ContextFile } from "@/lib/state/context-files-store";
 import { getFileName } from "@/lib/utils/file-path";
+import { t } from "@/lib/i18n";
 import type { ContextItem } from "@/lib/types/context";
 import type { DiffComment } from "@/lib/diff/types";
 import type {
@@ -188,7 +189,7 @@ function buildWalkthroughCommentItems(params: BuildContextItemsParams): ContextI
     {
       kind: "walkthrough-comment" as const,
       id: "walkthrough-comments",
-      label: `${walkthroughComments.length} walkthrough note${walkthroughComments.length !== 1 ? "s" : ""}`,
+      label: t("task:walkthroughNoteCount", { count: walkthroughComments.length }),
       comments: walkthroughComments,
       onRemove: handleClearWalkthroughComments,
       onRemoveComment: (id: string) => handleRemoveWalkthroughComment(id),
@@ -203,7 +204,7 @@ function buildAgentMessageCommentItems(params: BuildContextItemsParams): Context
     {
       kind: "agent-message-comment" as const,
       id: "agent-message-comments",
-      label: `${messageComments.length} message comment${messageComments.length === 1 ? "" : "s"}`,
+      label: t("task:messageCommentCount", { count: messageComments.length }),
       comments: messageComments,
       onRemove: handleClearMessageComments,
     },
@@ -247,7 +248,7 @@ export function buildContextItems(params: BuildContextItemsParams): ContextItem[
     items.push({
       kind: "plan-comment",
       id: "plan-comments",
-      label: `${params.planComments.length} plan comment${params.planComments.length !== 1 ? "s" : ""}`,
+      label: t("task:planCommentCount", { count: params.planComments.length }),
       comments: params.planComments,
       onRemove: params.handleClearPlanComments,
       onOpen: params.addPlan,

@@ -573,7 +573,7 @@ gitlab.task_mrs.list
 
 Provider actions make outbound calls with the backend's configured GitHub or GitLab identity. Status and registration do not imply a provider is authenticated, reachable, or authorized for a repository.
 
-### Jira, Linear, Slack, and Sprites
+### Jira, Linear, and Sprites
 
 ```text
 jira.config.delete
@@ -591,11 +591,6 @@ linear.config.test
 linear.issue.get
 linear.issue.transition
 linear.teams.list
-
-slack.config.delete
-slack.config.get
-slack.config.set
-slack.config.test
 
 sprites.instances.destroy
 sprites.instances.list

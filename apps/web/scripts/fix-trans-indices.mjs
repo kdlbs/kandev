@@ -12,17 +12,18 @@
  * right: a different number of tags than element children, or nested tags. Those
  * need a human to decide which element each phrase belongs to.
  *
- * Usage: node scripts/fix-trans-indices.mjs [--write] [<dir> ...]
+ * Usage: node scripts/fix-trans-indices.mjs [--write] [<path> ...]
  */
 import { parseSync } from "@babel/core";
 import fs from "node:fs";
 import path from "node:path";
 
 const ROOT = path.resolve(import.meta.dirname, "..");
-const EN = path.join(ROOT, "src", "locales", "en");
+/** Overridable so a test can point the remap at a fixture catalog. */
+const EN = process.env.KANDEV_I18N_EN_DIR ?? path.join(ROOT, "src", "locales", "en");
 const WRITE = process.argv.includes("--write");
 const args = process.argv.slice(2).filter((a) => !a.startsWith("--"));
-const DIRS = args.length ? args : ["components", "app"];
+const TARGETS = args.length ? args : ["components", "app"];
 
 const catalogs = {};
 for (const file of fs.readdirSync(EN)) {
@@ -55,15 +56,66 @@ const runtimeChildren = (element) =>
     (c) => !(c.type === "JSXText" && c.value.trim() === "" && c.value.includes("\n")),
   );
 
-function listFiles(dir, out = []) {
-  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+function listFiles(dir, out, errors) {
+  let entries;
+  try {
+    entries = fs.readdirSync(dir, { withFileTypes: true });
+  } catch (error) {
+    errors.push(`${dir}: ${error.code ?? error.message}`);
+    return out;
+  }
+  for (const entry of entries) {
     const full = path.join(dir, entry.name);
     if (entry.isDirectory()) {
       if (["node_modules", "dist", "e2e", "locales"].includes(entry.name)) continue;
-      listFiles(full, out);
+      listFiles(full, out, errors);
     } else if (/\.tsx$/.test(entry.name) && !/\.test\.tsx$/.test(entry.name)) out.push(full);
   }
   return out;
+}
+
+/**
+ * Resolve arguments to the de-duplicated file list to visit.
+ *
+ * A directory is walked as before; a file is taken as named, because filtering a
+ * path someone typed is how the previous version came to report a clean run over
+ * input it never opened. A path that is neither is a hard error — this walked
+ * directories only, so a file argument threw ENOTDIR and a missing one was
+ * skipped silently, both leaving `{"fixed": 0}` looking like a verdict.
+ */
+function collectFiles(targets) {
+  const found = [];
+  const errors = [];
+
+  for (const target of targets) {
+    const abs = path.isAbsolute(target) ? target : path.join(ROOT, target);
+    let stat;
+    try {
+      stat = fs.statSync(abs);
+    } catch (error) {
+      errors.push(`${target}: ${error.code ?? error.message}`);
+      continue;
+    }
+    if (stat.isDirectory()) listFiles(abs, found, errors);
+    else if (stat.isFile()) found.push(abs);
+    else errors.push(`${target}: not a file or directory`);
+  }
+
+  const seen = new Set();
+  const files = [];
+  for (const file of found) {
+    const key = path.resolve(file);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    files.push(file);
+  }
+  return { files, errors };
+}
+
+const { files: FILES, errors: PATH_ERRORS } = collectFiles(TARGETS);
+if (PATH_ERRORS.length) {
+  for (const error of PATH_ERRORS) console.error(`fix-trans-indices: cannot read ${error}`);
+  process.exit(2);
 }
 
 const report = { fixed: 0, alreadyOk: 0, declinedCount: 0, declinedNested: 0 };
@@ -110,43 +162,39 @@ function remapMessage(ns, catKey, children, elementIdx, where) {
   }
 }
 
-for (const dir of DIRS) {
-  const abs = path.isAbsolute(dir) ? dir : path.join(ROOT, dir);
-  if (!fs.existsSync(abs)) continue;
-  for (const file of listFiles(abs)) {
-    const src = fs.readFileSync(file, "utf8");
-    if (!src.includes("<Trans")) continue;
-    let ast;
-    try {
-      ast = parseSync(src, {
-        filename: file,
-        babelrc: false,
-        configFile: false,
-        sourceType: "module",
-        parserOpts: { plugins: ["typescript", "jsx"] },
-      });
-    } catch {
-      continue;
-    }
-    walk(ast, (node) => {
-      if (node.type !== "JSXElement" || node.openingElement?.name?.name !== "Trans") return;
-      const keyAttr = node.openingElement.attributes.find(
-        (a) => a.type === "JSXAttribute" && a.name?.name === "i18nKey",
-      );
-      const key = keyAttr?.value?.type === "StringLiteral" ? keyAttr.value.value : null;
-      if (!key) return;
-      const rel = path.relative(ROOT, file);
-      const line = src.slice(0, node.start).split("\n").length;
-      const children = runtimeChildren(node);
-      const elementIdx = children
-        .map((c, i) => (c.type === "JSXElement" ? i : -1))
-        .filter((i) => i >= 0);
-
-      for (const [ns, catKey] of entriesFor(key)) {
-        remapMessage(ns, catKey, children, elementIdx, `${rel}:${line}`);
-      }
+for (const file of FILES) {
+  const src = fs.readFileSync(file, "utf8");
+  if (!src.includes("<Trans")) continue;
+  let ast;
+  try {
+    ast = parseSync(src, {
+      filename: file,
+      babelrc: false,
+      configFile: false,
+      sourceType: "module",
+      parserOpts: { plugins: ["typescript", "jsx"] },
     });
+  } catch {
+    continue;
   }
+  walk(ast, (node) => {
+    if (node.type !== "JSXElement" || node.openingElement?.name?.name !== "Trans") return;
+    const keyAttr = node.openingElement.attributes.find(
+      (a) => a.type === "JSXAttribute" && a.name?.name === "i18nKey",
+    );
+    const key = keyAttr?.value?.type === "StringLiteral" ? keyAttr.value.value : null;
+    if (!key) return;
+    const rel = path.relative(ROOT, file);
+    const line = src.slice(0, node.start).split("\n").length;
+    const children = runtimeChildren(node);
+    const elementIdx = children
+      .map((c, i) => (c.type === "JSXElement" ? i : -1))
+      .filter((i) => i >= 0);
+
+    for (const [ns, catKey] of entriesFor(key)) {
+      remapMessage(ns, catKey, children, elementIdx, `${rel}:${line}`);
+    }
+  });
 }
 
 if (WRITE) {
@@ -157,9 +205,10 @@ if (WRITE) {
     fs.writeFileSync(path.join(EN, `${ns}.json`), JSON.stringify(sorted, null, 2) + "\n");
   }
 }
+console.log(`scanned ${FILES.length} file(s) from ${TARGETS.length} argument(s)`);
 if (declined.length) {
   console.log(`Declined ${declined.length} message(s) — fix these by hand:`);
   for (const d of declined) console.log(`  ${d}`);
   console.log("");
 }
-console.log(JSON.stringify({ ...report, wrote: WRITE }, null, 2));
+console.log(JSON.stringify({ scanned: FILES.length, ...report, wrote: WRITE }, null, 2));

@@ -8,10 +8,16 @@ on:
       - ".github/scripts/lint-action-pinning.py"
       - ".github/scripts/lint-action-pinning_test.py"
       - ".github/scripts/claude-code-review-workflow-contract_test.py"
+      - ".github/scripts/preview-env-workflow-contract_test.py"
       - ".github/scripts/collect-macos-desktop-diagnostics.sh"
       - ".github/scripts/release-workflow-contract_test.py"
       - ".github/release-signing-key.asc"
       - "docs/public/release-process.md"
+      - "Makefile"
+      - "apps/backend/Makefile"
+      - "scripts/release/package-bundle.sh"
+      - "scripts/release/runtime-bundle.test.sh"
+      - "scripts/release/validate-darwin-arm64-helper.mjs"
       - "scripts/release/npm-packages.sh"
       - "scripts/release/nightly-version.mjs"
       - "scripts/release/nightly-version.test.mjs"
@@ -29,10 +35,16 @@ on:
       - ".github/scripts/lint-action-pinning.py"
       - ".github/scripts/lint-action-pinning_test.py"
       - ".github/scripts/claude-code-review-workflow-contract_test.py"
+      - ".github/scripts/preview-env-workflow-contract_test.py"
       - ".github/scripts/collect-macos-desktop-diagnostics.sh"
       - ".github/scripts/release-workflow-contract_test.py"
       - ".github/release-signing-key.asc"
       - "docs/public/release-process.md"
+      - "Makefile"
+      - "apps/backend/Makefile"
+      - "scripts/release/package-bundle.sh"
+      - "scripts/release/runtime-bundle.test.sh"
+      - "scripts/release/validate-darwin-arm64-helper.mjs"
       - "scripts/release/npm-packages.sh"
       - "scripts/release/nightly-version.mjs"
       - "scripts/release/nightly-version.test.mjs"
@@ -69,6 +81,9 @@ jobs:
       - name: Test Claude Code review workflow contract
         run: python3 .github/scripts/claude-code-review-workflow-contract_test.py
 
+      - name: Test preview environment workflow contract
+        run: python3 .github/scripts/preview-env-workflow-contract_test.py
+
       - name: Test release workflow contract
         run: python3 .github/scripts/release-workflow-contract_test.py
 
@@ -76,6 +91,9 @@ jobs:
         uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
         with:
           node-version: "24"
+
+      - name: Test runtime bundle contract
+        run: bash scripts/release/runtime-bundle.test.sh
 
       - name: Test npm release helpers
         run: node --test scripts/release/nightly-version.test.mjs scripts/release/nightly-release.test.mjs scripts/release/npm-view-version.test.mjs scripts/release/publish-npm.test.mjs

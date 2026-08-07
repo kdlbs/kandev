@@ -224,6 +224,38 @@ it("uses the generated description when an action prompt is blank", () => {
   expect(screen.getByTestId("task-description").textContent).toContain(
     "Azure DevOps work item: 73",
   );
+  // The fallback is UI copy the user reads (and can edit) in the create dialog,
+  // so it resolves through the catalog rather than a bare literal. The English
+  // is unchanged.
+  expect(screen.getByTestId("task-description").textContent).toContain("(no description)");
+});
+
+it("strips markup from a work-item description instead of using the fallback", () => {
+  render(
+    <AzureDevOpsTaskLauncher
+      workspaceId={workspaceId}
+      workflows={[workflow]}
+      steps={[step]}
+      repositories={[repository]}
+      payload={{
+        kind: "work-item",
+        item: {
+          id: 74,
+          revision: 1,
+          title: "Has a description",
+          type: "Issue",
+          state: "To Do",
+          project: "project-1",
+          description: "<div>Real <b>description</b></div>",
+        },
+      }}
+      onClose={mocks.close}
+    />,
+  );
+
+  const text = screen.getByTestId("task-description").textContent ?? "";
+  expect(text).toContain("Real description");
+  expect(text).not.toContain("(no description)");
 });
 
 it("reports a missing work-item project after creating the task", async () => {

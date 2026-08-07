@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/google/uuid"
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/auth/authn"
@@ -40,6 +39,14 @@ const (
 	issueTemplateID   = "report-kandev-issue"
 	issueWorkflowName = "Report Kandev Issue"
 	issueWorkflowDesc = "Hidden workflow for publishing a kdlbs/kandev issue without changing code."
+
+	// improveWorkspaceName aliases the canonical identity in task/models so
+	// every guard and the bootstrap agree on the exact name.
+	improveWorkspaceName = taskmodels.WorkspaceNameImproveKandev
+	improveWorkspaceDesc = "Dedicated workspace for Improve Kandev contribution tasks, isolated from regular work."
+
+	// errorKey is the JSON key every error response body uses.
+	errorKey = "error"
 )
 
 // Cloner is the minimal subset of repoclone.Cloner the bootstrap endpoint uses.
@@ -51,12 +58,29 @@ type Cloner interface {
 	) (string, error)
 }
 
+// GitHubWorkspaceCopier copies a workspace's GitHub connection onto another
+// workspace. Implemented by the github service; nil disables the copy.
+type GitHubWorkspaceCopier interface {
+	CopyWorkspaceConnectionToWorkspace(ctx context.Context, srcWorkspaceID, dstWorkspaceID string) error
+}
+
+// DefaultWorkspaceResolver resolves the workspace whose GitHub configuration
+// the dedicated workspace inherits on creation (active workspace in user
+// settings → first-created workspace → literal "default").
+type DefaultWorkspaceResolver func(ctx context.Context) (string, error)
+
 // Handler exposes the improve-kandev HTTP endpoints.
 type Handler struct {
 	taskSvc    *taskservice.Service
 	cloner     Cloner
 	log        *logger.Logger
 	logBundles diagnosticBundleService
+	// ghCopier copies the default workspace's GitHub connection onto the
+	// dedicated workspace when bootstrap creates it. Nil disables the copy.
+	ghCopier GitHubWorkspaceCopier
+	// defaultWorkspaceResolver picks the source workspace for the copy. Nil
+	// disables the copy.
+	defaultWorkspaceResolver DefaultWorkspaceResolver
 	// gh resolves the authenticated user's login and write access. Defaults
 	// to a gh-CLI shell-out; tests can substitute a fake.
 	gh GitHubInfo
@@ -69,15 +93,24 @@ type diagnosticBundleService interface {
 	OpenArchive(owner, id string) (*os.File, logbundle.JobView, error)
 }
 
-// NewHandler constructs a Handler.
-func NewHandler(taskSvc *taskservice.Service, cloner Cloner, version string, log *logger.Logger) *Handler {
+// NewHandler constructs a Handler. version is embedded into bundle metadata.
+func NewHandler(
+	taskSvc *taskservice.Service,
+	cloner Cloner,
+	ghCopier GitHubWorkspaceCopier,
+	defaultWorkspaceResolver DefaultWorkspaceResolver,
+	version string,
+	log *logger.Logger,
+) *Handler {
 	_ = version
 	return &Handler{
-		taskSvc:       taskSvc,
-		cloner:        cloner,
-		log:           log,
-		gh:            newDefaultGitHubInfo(),
-		resolveRemote: taskservice.ResolveGitRemoteProvider,
+		taskSvc:                  taskSvc,
+		cloner:                   cloner,
+		log:                      log,
+		ghCopier:                 ghCopier,
+		defaultWorkspaceResolver: defaultWorkspaceResolver,
+		gh:                       newDefaultGitHubInfo(),
+		resolveRemote:            taskservice.ResolveGitRemoteProvider,
 	}
 }
 
@@ -97,7 +130,16 @@ func RegisterRoutes(router *gin.Engine, h *Handler) {
 
 // BootstrapRequest is the JSON body for POST /bootstrap.
 type BootstrapRequest struct {
-	WorkspaceID string `json:"workspace_id"`
+	// WorkspaceID is the fallback workspace (the user's active workspace) used
+	// when the dedicated Improve Kandev workspace does not exist and the user
+	// declines to create it (CreateWorkspace=false). It is ignored when the
+	// dedicated workspace exists or is being created.
+	WorkspaceID string `json:"workspace_id,omitempty"`
+	// CreateWorkspace opts into creating the dedicated Improve Kandev
+	// workspace when it does not exist (surfaced to the user as a checkbox in
+	// the dialog). When false and the workspace is missing, bootstrap falls
+	// back to WorkspaceID (legacy behavior).
+	CreateWorkspace bool `json:"create_workspace,omitempty"`
 }
 
 // ForkStatus reports the result of the bootstrap fork-capability probe. The
@@ -124,6 +166,9 @@ const (
 
 // BootstrapResponse describes the artifacts the dialog needs to submit a task.
 type BootstrapResponse struct {
+	// WorkspaceID is the dedicated Improve Kandev workspace the task must be
+	// created in.
+	WorkspaceID     string     `json:"workspace_id"`
 	RepositoryID    string     `json:"repository_id"`
 	WorkflowID      string     `json:"workflow_id"`
 	IssueWorkflowID string     `json:"issue_workflow_id"`
@@ -139,32 +184,35 @@ type BootstrapResponse struct {
 func (h *Handler) httpBootstrap(c *gin.Context) {
 	identity, ok := authn.FromGin(c)
 	if !ok || identity.UserID == "" {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "authentication required"})
+		c.JSON(http.StatusUnauthorized, gin.H{errorKey: "authentication required"})
 		return
 	}
 	var req BootstrapRequest
-	if err := c.ShouldBindJSON(&req); err != nil || req.WorkspaceID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "workspace_id is required"})
-		return
-	}
-	workspaceID, err := canonicalWorkspaceID(req.WorkspaceID)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "workspace_id must be a UUID"})
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{errorKey: "invalid payload"})
 		return
 	}
 
 	ctx := c.Request.Context()
+	workspace, err := h.ensureImproveWorkspace(ctx, req.CreateWorkspace, req.WorkspaceID)
+	if err != nil {
+		h.log.Error("improve-kandev: dedicated workspace resolution failed", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{errorKey: "failed to resolve the Improve Kandev workspace"})
+		return
+	}
+	workspaceID := workspace.ID
+
 	repo, err := h.resolveOrCloneRepo(ctx, workspaceID)
 	if err != nil {
 		h.log.Error("improve-kandev: repository upsert failed", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to register kandev repository"})
+		c.JSON(http.StatusInternalServerError, gin.H{errorKey: "failed to register kandev repository"})
 		return
 	}
 
 	workflows, err := h.taskSvc.ListWorkflows(ctx, workspaceID, true)
 	if err != nil {
 		h.log.Error("improve-kandev: workflow list failed", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list improve-kandev workflows"})
+		c.JSON(http.StatusInternalServerError, gin.H{errorKey: "failed to list improve-kandev workflows"})
 		return
 	}
 	workflow, err := h.ensureWorkflow(
@@ -177,7 +225,7 @@ func (h *Handler) httpBootstrap(c *gin.Context) {
 	)
 	if err != nil {
 		h.log.Error("improve-kandev: workflow upsert failed", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to ensure improve-kandev workflow"})
+		c.JSON(http.StatusInternalServerError, gin.H{errorKey: "failed to ensure improve-kandev workflow"})
 		return
 	}
 	issueWorkflow, err := h.ensureWorkflow(
@@ -190,19 +238,20 @@ func (h *Handler) httpBootstrap(c *gin.Context) {
 	)
 	if err != nil {
 		h.log.Error("improve-kandev: issue workflow upsert failed", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to ensure report-kandev-issue workflow"})
+		c.JSON(http.StatusInternalServerError, gin.H{errorKey: "failed to ensure report-kandev-issue workflow"})
 		return
 	}
 
 	dir, err := createBundleDir(identity.UserID)
 	if err != nil {
 		h.log.Error("improve-kandev: bundle dir creation failed", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create bundle dir"})
+		c.JSON(http.StatusInternalServerError, gin.H{errorKey: "failed to create bundle dir"})
 		return
 	}
 	access := h.resolveGitHubAccess(ctx)
 
 	c.JSON(http.StatusOK, BootstrapResponse{
+		WorkspaceID:     workspaceID,
 		RepositoryID:    repo.ID,
 		WorkflowID:      workflow.ID,
 		IssueWorkflowID: issueWorkflow.ID,
@@ -216,12 +265,95 @@ func (h *Handler) httpBootstrap(c *gin.Context) {
 	})
 }
 
-func canonicalWorkspaceID(value string) (string, error) {
-	id, err := uuid.Parse(value)
-	if err != nil {
-		return "", err
+// ensureImproveWorkspace returns the dedicated Improve Kandev workspace.
+//
+//   - Exists (matched by exact name): returned as-is; create_workspace and
+//     workspace_id are ignored.
+//   - Missing + createWorkspace: created (kanban-bootstrapped), and the GitHub
+//     connection from the user's default workspace is copied onto it
+//     (best-effort). A creation failure re-reads the list to converge on a
+//     workspace a concurrent bootstrap may have created.
+//   - Missing + !createWorkspace: legacy fallback — returns the requested
+//     fallbackWorkspaceID (the user's active workspace) so improve tasks land
+//     there without a dedicated workspace.
+func (h *Handler) ensureImproveWorkspace(ctx context.Context, createWorkspace bool, fallbackWorkspaceID string) (*taskmodels.Workspace, error) {
+	findByName := func(workspaces []*taskmodels.Workspace) *taskmodels.Workspace {
+		for _, workspace := range workspaces {
+			if workspace != nil && workspace.Name == improveWorkspaceName {
+				return workspace
+			}
+		}
+		return nil
 	}
-	return id.String(), nil
+
+	workspaces, err := h.taskSvc.ListWorkspaces(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if workspace := findByName(workspaces); workspace != nil {
+		return workspace, nil
+	}
+
+	if !createWorkspace {
+		if fallbackWorkspaceID == "" {
+			return nil, errors.New("workspace_id is required when the Improve Kandev workspace does not exist")
+		}
+		workspace, err := h.taskSvc.GetWorkspace(ctx, fallbackWorkspaceID)
+		if err != nil {
+			return nil, err
+		}
+		return workspace, nil
+	}
+
+	created, err := h.taskSvc.CreateWorkspace(ctx, &taskservice.CreateWorkspaceRequest{
+		Name:        improveWorkspaceName,
+		Description: improveWorkspaceDesc,
+		// No Kanban bootstrap: the dedicated workspace only ever contains the
+		// hidden Improve Kandev / Report Kandev Issue workflows, so its
+		// workflow configuration must not show a default "Kanban" workflow.
+	})
+	if err == nil {
+		// A concurrent bootstrap may have created another row with the same
+		// name in the same instant (workspace names are not unique). Re-read
+		// and converge on the deterministic first match so every caller agrees
+		// on one workspace id; the duplicate row is left to the next bootstrap
+		// to ignore.
+		if latest, listErr := h.taskSvc.ListWorkspaces(ctx); listErr == nil {
+			if winner := findByName(latest); winner != nil {
+				h.copyGitHubConnectionFromDefaultWorkspace(ctx, winner.ID)
+				return winner, nil
+			}
+		}
+		h.copyGitHubConnectionFromDefaultWorkspace(ctx, created.ID)
+		return created, nil
+	}
+
+	latest, listErr := h.taskSvc.ListWorkspaces(ctx)
+	if listErr == nil {
+		if workspace := findByName(latest); workspace != nil {
+			return workspace, nil
+		}
+	}
+	return nil, err
+}
+
+// copyGitHubConnectionFromDefaultWorkspace copies the user's default
+// workspace GitHub connection onto the newly created dedicated workspace.
+// Best-effort: failures are logged, never fail bootstrap.
+func (h *Handler) copyGitHubConnectionFromDefaultWorkspace(ctx context.Context, workspaceID string) {
+	if h.ghCopier == nil || h.defaultWorkspaceResolver == nil {
+		return
+	}
+	srcWorkspaceID, err := h.defaultWorkspaceResolver(ctx)
+	if err != nil || srcWorkspaceID == "" {
+		if err != nil {
+			h.log.Warn("improve-kandev: default workspace resolution failed; skipping GitHub connection copy", zap.Error(err))
+		}
+		return
+	}
+	if err := h.ghCopier.CopyWorkspaceConnectionToWorkspace(ctx, srcWorkspaceID, workspaceID); err != nil {
+		h.log.Warn("improve-kandev: GitHub connection copy failed; improve workspace starts without one", zap.Error(err))
+	}
 }
 
 // resolveOrCloneRepo returns the workspace's kandev repository, preferring an
@@ -448,26 +580,26 @@ type leaseBundleRequest struct {
 func (h *Handler) httpLeaseBundle(c *gin.Context) {
 	identity, ok := authn.FromGin(c)
 	if !ok || identity.UserID == "" {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "authentication required"})
+		c.JSON(http.StatusUnauthorized, gin.H{errorKey: "authentication required"})
 		return
 	}
 	var req leaseBundleRequest
 	if err := c.ShouldBindJSON(&req); err != nil || req.BundleID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
+		c.JSON(http.StatusBadRequest, gin.H{errorKey: "invalid payload"})
 		return
 	}
 	dir, err := validateBundleDir(req.BundleDir, identity.UserID)
 	if err != nil {
-		c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
+		c.JSON(http.StatusForbidden, gin.H{errorKey: err.Error()})
 		return
 	}
 	if h.logBundles == nil {
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "diagnostic bundles unavailable"})
+		c.JSON(http.StatusServiceUnavailable, gin.H{errorKey: "diagnostic bundles unavailable"})
 		return
 	}
 	archive, view, err := h.logBundles.OpenArchive(identity.UserID, req.BundleID)
 	if err != nil {
-		c.JSON(http.StatusConflict, gin.H{"error": "diagnostic bundle is not ready"})
+		c.JSON(http.StatusConflict, gin.H{errorKey: "diagnostic bundle is not ready"})
 		return
 	}
 	defer func() { _ = archive.Close() }()
@@ -479,7 +611,7 @@ func (h *Handler) httpLeaseBundle(c *gin.Context) {
 		if errors.Is(err, errBundleTooLarge) {
 			status = http.StatusRequestEntityTooLarge
 		}
-		c.JSON(status, gin.H{"error": "failed to lease diagnostic bundle"})
+		c.JSON(status, gin.H{errorKey: "failed to lease diagnostic bundle"})
 		return
 	}
 	time.AfterFunc(staleBundleAge, func() { _ = os.Remove(path) })

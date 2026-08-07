@@ -6,6 +6,7 @@ import { useAppStore } from "@/components/state-provider";
 import type { UseEnsureTaskSessionResult } from "@/hooks/domains/session/use-ensure-task-session";
 import type { Task } from "./kanban-card";
 import { PreviewSessionTabs } from "./task/preview-session-tabs";
+import { useTranslation } from "react-i18next";
 
 interface TaskPreviewPanelProps {
   task: Task | null;
@@ -24,6 +25,7 @@ export function TaskPreviewPanel({
   onMaximize,
   onSessionChange,
 }: TaskPreviewPanelProps) {
+  const { t } = useTranslation();
   const activeWorkspaceId = useAppStore((s) => s.workspaces.activeId);
   return (
     <div
@@ -32,7 +34,7 @@ export function TaskPreviewPanel({
     >
       {/* Header */}
       <div className="flex items-center justify-between border-b px-4 py-3">
-        <h2 className="text-sm font-semibold truncate">{task?.title ?? "Task Chat"}</h2>
+        <h2 className="text-sm font-semibold truncate">{task?.title ?? t("task:taskChat")}</h2>
         <div className="flex items-center gap-1">
           {onMaximize && task && (
             <Button
@@ -40,15 +42,15 @@ export function TaskPreviewPanel({
               size="icon"
               className="h-8 w-8 cursor-pointer"
               onClick={() => onMaximize(task)}
-              title="Open full page"
+              title={t("common:openFullPage")}
             >
               <IconArrowsMaximize className="h-4 w-4" />
-              <span className="sr-only">Open full page</span>
+              <span className="sr-only">{t("common:openFullPage")}</span>
             </Button>
           )}
           <Button variant="ghost" size="icon" className="h-8 w-8 cursor-pointer" onClick={onClose}>
             <IconX className="h-4 w-4" />
-            <span className="sr-only">Close preview</span>
+            <span className="sr-only">{t("task:closePreview")}</span>
           </Button>
         </div>
       </div>
@@ -65,7 +67,7 @@ export function TaskPreviewPanel({
           />
         ) : (
           <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
-            Select a task to start chatting
+            {t("task:selectATaskToStartChatting")}
           </div>
         )}
       </div>

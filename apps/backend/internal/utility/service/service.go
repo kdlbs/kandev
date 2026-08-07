@@ -84,7 +84,7 @@ func (s *Service) CreateAgent(ctx context.Context, name, description, prompt, ag
 		// configured and ready to run at creation time. The DB's NOT NULL
 		// column persists the field value (not the schema default), so we
 		// have to set it here — otherwise new custom agents land disabled
-		// and never appear as runnable in pickers like the Slack triage one.
+		// and never appear as runnable in the utility-agent pickers.
 		Enabled: true,
 	}
 

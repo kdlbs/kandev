@@ -540,7 +540,14 @@ func (m *Manager) resumeExistingExecution(ctx context.Context, sessionID string,
 }
 
 // createExecutionFromSessionInfo creates a new execution for a passthrough session
-// when no execution exists (e.g., backend restarted and execution store was cleared).
+// when no execution exists — either because the session has never run (a task
+// created with start_agent:false, started later) or because a backend restart
+// cleared the execution store. The two are distinguished by applyResumeIntent,
+// which decides fresh launch vs resume.
+//
+// Terminal sessions are rejected by the guard at the top of createExecution, the
+// same one every other creation path goes through, so this recovery path never
+// spawns a runtime for a session that ended before the restart.
 func (m *Manager) createExecutionFromSessionInfo(ctx context.Context, sessionID string) (*AgentExecution, error) {
 	if m.workspaceInfoProvider == nil {
 		return nil, fmt.Errorf("cannot restore session %s: workspace info provider not configured", sessionID)
@@ -561,18 +568,24 @@ func (m *Manager) createExecutionFromSessionInfo(ctx context.Context, sessionID 
 	}
 
 	// Verify this session should use passthrough mode
-	if err := m.verifyPassthroughEnabled(ctx, sessionID, workspaceExecutionProfileID(info)); err != nil {
+	profileInfo, err := m.verifyPassthroughEnabled(ctx, sessionID, workspaceExecutionProfileID(info))
+	if err != nil {
 		return nil, err
 	}
 
 	// If agent ID not in workspace info (snapshot missing/empty), resolve from profile
 	executionProfileID := workspaceExecutionProfileID(info)
 	if info.AgentID == "" && executionProfileID != "" && m.profileResolver != nil {
-		profileInfo, err := m.profileResolver.ResolveProfile(ctx, executionProfileID)
+		// Resolve only to backfill info.AgentID — keep the name distinct from the
+		// outer profileInfo so it's clear this one is not what reaches
+		// startPassthroughExecution below. Both resolve from the same profile ID,
+		// so the content is identical, but avoiding the shadow keeps ownership
+		// unambiguous for future readers.
+		agentProfile, err := m.profileResolver.ResolveProfile(ctx, executionProfileID)
 		if err != nil {
 			return nil, fmt.Errorf("resolve agent for session %s: %w", sessionID, err)
 		}
-		info.AgentID = profileInfo.AgentName
+		info.AgentID = agentProfile.AgentName
 	}
 
 	// Create the execution
@@ -586,12 +599,15 @@ func (m *Manager) createExecutionFromSessionInfo(ctx context.Context, sessionID 
 		return nil, fmt.Errorf("create execution for session %s: %w", sessionID, err)
 	}
 
-	// Start the passthrough process using resume command (recovery after restart)
+	// createExecution derived the resume intent (applyResumeIntent): a session
+	// with no prior agent execution has never run, so there is nothing for the
+	// CLI's resume flag to attach to and it launches fresh (issue #2330).
 	m.logger.Info("starting passthrough process for session",
 		zap.String("session_id", sessionID),
-		zap.String("execution_id", execution.ID))
+		zap.String("execution_id", execution.ID),
+		zap.Bool("resumed_session", execution.isResumedSession))
 
-	if err := m.ResumePassthroughSession(ctx, sessionID); err != nil {
+	if err := m.startPassthroughExecution(ctx, execution, profileInfo); err != nil {
 		return nil, fmt.Errorf("start passthrough process for session %s: %w", sessionID, err)
 	}
 
@@ -604,10 +620,27 @@ func (m *Manager) createExecutionFromSessionInfo(ctx context.Context, sessionID 
 	return execution, nil
 }
 
-// verifyPassthroughEnabled checks if the session's profile has CLI passthrough enabled.
-func (m *Manager) verifyPassthroughEnabled(ctx context.Context, sessionID, profileID string) error {
+// applyResumeIntent marks whether a freshly built execution should launch as a
+// resume, from the same PreviousExecutionID buildExecutionFromInstance uses on
+// the ACP launch path (populated here from info.AgentExecutionID).
+//
+// An empty PreviousExecutionID means no agent execution has ever been recorded
+// for this session — the state a task created with start_agent:false is in.
+// startPassthroughExecution reads the flag: such a session has no CLI-side
+// conversation for `-c` / `--resume` to attach to, and its stored prompt has
+// never been delivered, so it must take the fresh-launch path. Only a session
+// that previously ran — one whose execution was lost from the in-memory store
+// by a backend restart — is a genuine recovery.
+func applyResumeIntent(execution *AgentExecution, req *ExecutorCreateRequest) {
+	execution.isResumedSession = req.PreviousExecutionID != ""
+}
+
+// verifyPassthroughEnabled checks if the session's profile has CLI passthrough
+// enabled, returning the resolved profile so callers can reuse it for command
+// building instead of resolving twice.
+func (m *Manager) verifyPassthroughEnabled(ctx context.Context, sessionID, profileID string) (*AgentProfileInfo, error) {
 	if m.profileResolver == nil || profileID == "" {
-		return fmt.Errorf("session %s has no profile configured for passthrough mode", sessionID)
+		return nil, fmt.Errorf("session %s has no profile configured for passthrough mode", sessionID)
 	}
 
 	profileInfo, err := m.profileResolver.ResolveProfile(ctx, profileID)
@@ -616,14 +649,14 @@ func (m *Manager) verifyPassthroughEnabled(ctx context.Context, sessionID, profi
 			zap.String("session_id", sessionID),
 			zap.String("profile_id", profileID),
 			zap.Error(err))
-		return fmt.Errorf("session %s: failed to resolve profile %s: %w", sessionID, profileID, err)
+		return nil, fmt.Errorf("session %s: failed to resolve profile %s: %w", sessionID, profileID, err)
 	}
 
 	if profileInfo == nil || !profileInfo.CLIPassthrough {
-		return fmt.Errorf("session %s is not configured for CLI passthrough mode", sessionID)
+		return nil, fmt.Errorf("session %s is not configured for CLI passthrough mode", sessionID)
 	}
 
-	return nil
+	return profileInfo, nil
 }
 
 // createExecution creates a session-owned agentctl execution.
@@ -651,6 +684,14 @@ func (m *Manager) createExecutionForPurpose(
 ) (*AgentExecution, error) {
 	if info == nil {
 		return nil, fmt.Errorf("workspace info is required")
+	}
+	// Session-owned executions must reject terminal sessions before workspace
+	// reconciliation or runtime creation. Task hosts use task-level admission
+	// and deliberately have no owning session.
+	if !isTaskHost {
+		if err := m.ensureLaunchSessionStillActive(ctx, info.SessionID); err != nil {
+			return nil, err
+		}
 	}
 	if err := m.prepareExecutionWorkspace(ctx, taskID, info); err != nil {
 		return nil, err
@@ -685,6 +726,12 @@ func (m *Manager) createExecutionForPurpose(
 
 	execution := runtimeInstance.ToAgentExecution(req)
 	execution.RuntimeName = rt.Name()
+	// Set before executionStore.Add: concurrent passthrough callers must not
+	// observe a half-initialized session resume intent. Task-host reuse uses
+	// PreviousExecutionID only as a runtime transport detail.
+	if !isTaskHost {
+		applyResumeIntent(execution, req)
+	}
 	return m.finishCreatedExecution(ctx, taskID, info, isTaskHost, plan, rt, runtimeInstance, execution)
 }
 

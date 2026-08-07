@@ -6,7 +6,7 @@ import {
   type TaskSession,
   type TaskSessionState,
 } from "@/lib/types/http";
-import { deriveSessionInputMode } from "./session-input-mode";
+import { deriveSessionInputMode, resolvesSteeringAffordance } from "./session-input-mode";
 
 function session(
   state: TaskSessionState,
@@ -51,6 +51,11 @@ describe("deriveSessionInputMode", () => {
     expect(deriveSessionInputMode(selected)).toBe("direct");
   });
 
+  it("queues a steer-capable session when a message is already queued", () => {
+    const selected = session("RUNNING", "generating", true);
+    expect(deriveSessionInputMode(selected, 1)).toBe("queue");
+  });
+
   it("still queues a generating session when steering is not supported", () => {
     const selected = session("RUNNING", "generating", false);
     expect(deriveSessionInputMode(selected)).toBe("queue");
@@ -67,5 +72,25 @@ describe("deriveSessionInputMode", () => {
 
     expect(deriveSessionInputMode(selected)).toBe("direct");
     expect(deriveSessionInputMode(another)).toBe("queue");
+  });
+});
+
+describe("resolvesSteeringAffordance", () => {
+  it("shows the steer affordance when steering is supported and nothing is queued", () => {
+    expect(resolvesSteeringAffordance(true, 0)).toBe(true);
+  });
+
+  it("falls back to the queue affordance once anything is queued, even if steering is supported", () => {
+    // SteerTask never jumps an already-queued message — it silently joins the
+    // queue instead (see steer.go's order rule). The composer must not
+    // promise delivery into the running turn when the next send would
+    // actually be queued behind an existing entry.
+    expect(resolvesSteeringAffordance(true, 1)).toBe(false);
+    expect(resolvesSteeringAffordance(true, 2)).toBe(false);
+  });
+
+  it("stays false when steering is not supported, regardless of queue length", () => {
+    expect(resolvesSteeringAffordance(false, 0)).toBe(false);
+    expect(resolvesSteeringAffordance(false, 1)).toBe(false);
   });
 });

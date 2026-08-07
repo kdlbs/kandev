@@ -284,9 +284,10 @@ export function renderTaskStatusIcon(
   const showQuestionIcon = shouldUseQuestionTaskIcon(task.state, hasPendingClarification);
   const showPermissionIcon = shouldUsePermissionTaskIcon(hasPendingPermission);
   const needsMe = showQuestionIcon || showPermissionIcon;
+  const showInterrupted = !!task.interrupted;
   const hasActivity =
     task.foregroundActivity === "generating" || task.foregroundActivity === "background";
-  if (!showRunningSpinner && !needsMe && !hasActivity) {
+  if (!showRunningSpinner && !needsMe && !hasActivity && !showInterrupted) {
     return null;
   }
   // A "needs me" prompt (pending clarification / permission) must not be masked
@@ -296,13 +297,12 @@ export function renderTaskStatusIcon(
   if (showRunningSpinner && !needsMe && task.foregroundActivity !== "background") {
     return <IconLoader2 className="h-4 w-4 text-blue-500 animate-spin" />;
   }
-  return getTaskStateIcon(
-    task.state,
-    "h-4 w-4",
+  return getTaskStateIcon(task.state, "h-4 w-4", {
     hasPendingClarification,
-    task.foregroundActivity,
+    foregroundActivity: task.foregroundActivity,
     hasPendingPermission,
-  );
+    interrupted: showInterrupted,
+  });
 }
 
 // The board's only window into a fan-out. `activeSubagentCount` is derived from
@@ -432,7 +432,7 @@ function KanbanCardActions({
     <div className="flex items-center gap-2">
       {renderSubagentCountChip(
         task,
-        t("activeSubagents", { count: task.activeSubagentCount ?? 0 }),
+        t("common:activeSubagents", { count: task.activeSubagentCount ?? 0 }),
       )}
       {statusIcon}
       {showMaximizeButton && onOpenFullPage && hasKnownSession && (

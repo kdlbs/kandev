@@ -20,6 +20,7 @@ test.describe("Improve Kandev on mobile", () => {
         status: 200,
         contentType: "application/json",
         body: JSON.stringify({
+          workspace_id: seedData.workspaceId,
           repository_id: seedData.repositoryId,
           workflow_id: seedData.workflowId,
           issue_workflow_id: seedData.workflowId,

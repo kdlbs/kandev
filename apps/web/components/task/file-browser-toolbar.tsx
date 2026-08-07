@@ -21,6 +21,7 @@ import { Skeleton } from "@kandev/ui/skeleton";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { cn } from "@/lib/utils";
 import { PanelHeaderBarSplit } from "./panel-primitives";
+import { useTranslation } from "react-i18next";
 
 function ToolbarButton({
   onClick,
@@ -68,12 +69,13 @@ function CopyWorkspacePathButton({
   copied,
   onCopyPath,
 }: Pick<FileBrowserToolbarProps, "fullPath" | "copied" | "onCopyPath">) {
+  const { t } = useTranslation();
   return (
     <Tooltip>
       <TooltipTrigger asChild>
         <button
           className="relative shrink-0 cursor-pointer"
-          aria-label="Copy workspace path"
+          aria-label={t("task:copyWorkspacePath")}
           onClick={() => {
             if (fullPath) void onCopyPath(fullPath);
           }}
@@ -91,7 +93,7 @@ function CopyWorkspacePathButton({
           )}
         </button>
       </TooltipTrigger>
-      <TooltipContent>Copy workspace path</TooltipContent>
+      <TooltipContent>{t("task:copyWorkspacePath")}</TooltipContent>
     </Tooltip>
   );
 }
@@ -135,6 +137,7 @@ function WorkspaceActionsMenu({
   FileBrowserToolbarProps,
   "onAddSources" | "onOpenFolder" | "addSourcesButtonRef" | "addSourcesDisabledReason"
 >) {
+  const { t } = useTranslation();
   const triggerRef = useRef<HTMLButtonElement>(null);
   const openSourcesAfterCloseRef = useRef(false);
   const restoreMobileFocusAfterDrawerClose = useMobileDrawerFocusRestoration(triggerRef);
@@ -151,7 +154,7 @@ function WorkspaceActionsMenu({
   );
   const disabledReason =
     addSourcesDisabledReason ??
-    (onAddSources ? undefined : "This task needs a repository before sources can be added.");
+    (onAddSources ? undefined : t("task:taskNeedsRepositoryForSources"));
 
   return (
     <DropdownMenu>
@@ -161,7 +164,7 @@ function WorkspaceActionsMenu({
             <button
               ref={setTriggerRef}
               type="button"
-              aria-label="Workspace actions"
+              aria-label={t("task:workspaceActions")}
               data-testid="files-workspace-actions"
               className="inline-flex size-11 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground cursor-pointer sm:size-8"
             >
@@ -169,7 +172,7 @@ function WorkspaceActionsMenu({
             </button>
           </DropdownMenuTrigger>
         </TooltipTrigger>
-        <TooltipContent>Workspace actions</TooltipContent>
+        <TooltipContent>{t("task:workspaceActions")}</TooltipContent>
       </Tooltip>
       <DropdownMenuContent
         align="end"
@@ -191,7 +194,7 @@ function WorkspaceActionsMenu({
         >
           <IconPlus className="h-3.5 w-3.5" />
           <span className="min-w-0">
-            <span className="block">Add Repositories to workspace</span>
+            <span className="block">{t("task:addRepositoriesToWorkspace")}</span>
             {disabledReason && (
               <span className="block text-[10px] text-muted-foreground normal-case">
                 {disabledReason}
@@ -204,7 +207,7 @@ function WorkspaceActionsMenu({
           onSelect={onOpenFolder}
         >
           <IconFolderOpen className="h-3.5 w-3.5" />
-          Open workspace folder
+          {t("task:openWorkspaceFolder")}
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
@@ -226,6 +229,7 @@ export function FileBrowserToolbar({
   addSourcesButtonRef,
   addSourcesDisabledReason,
 }: FileBrowserToolbarProps) {
+  const { t } = useTranslation();
   return (
     <PanelHeaderBarSplit
       className="group/header"
@@ -253,7 +257,7 @@ export function FileBrowserToolbar({
           {showCreateButton && onStartCreate && (
             <ToolbarButton
               onClick={onStartCreate}
-              label="New file"
+              label={t("task:newFile")}
               icon={<IconPlus className="h-3.5 w-3.5" />}
             />
           )}
@@ -265,13 +269,13 @@ export function FileBrowserToolbar({
           />
           <ToolbarButton
             onClick={onStartSearch}
-            label="Search files"
+            label={t("task:searchFiles")}
             icon={<IconSearch className="h-3.5 w-3.5" />}
           />
           {expandedPathsSize > 0 && (
             <ToolbarButton
               onClick={onCollapseAll}
-              label="Collapse all"
+              label={t("task:collapseAll")}
               icon={<IconListTree className="h-3.5 w-3.5" />}
             />
           )}

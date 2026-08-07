@@ -295,6 +295,9 @@ type GitStatusData struct {
 	// multi-repo task workspaces. Empty for single-repo. Carried through to
 	// the frontend so the Changes panel can render per-repo group headers.
 	RepositoryName string `json:"repository_name,omitempty"`
+	// IsSubmodule identifies an initialized Git submodule repository so the
+	// frontend can render its scope boundary without guessing from its name.
+	IsSubmodule bool `json:"is_submodule,omitempty"`
 }
 
 type GitCommitData struct {

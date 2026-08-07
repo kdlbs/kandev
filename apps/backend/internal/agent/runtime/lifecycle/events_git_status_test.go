@@ -39,6 +39,7 @@ func TestPublishGitStatus_PropagatesRepositoryName(t *testing.T) {
 	pub.PublishGitStatus(exec, &agentctl.GitStatusUpdate{
 		Timestamp:      time.Now(),
 		RepositoryName: "frontend",
+		IsSubmodule:    true,
 		Branch:         "feature/x",
 		Modified:       []string{"src/app.tsx"},
 		Files:          map[string]agentctl.FileInfo{"src/app.tsx": {Path: "src/app.tsx"}},
@@ -55,6 +56,9 @@ func TestPublishGitStatus_PropagatesRepositoryName(t *testing.T) {
 		}
 		if payload.Status.RepositoryName != "frontend" {
 			t.Errorf("repository_name was dropped: got %q", payload.Status.RepositoryName)
+		}
+		if !payload.Status.IsSubmodule {
+			t.Error("is_submodule was dropped")
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("timed out waiting for git status event")

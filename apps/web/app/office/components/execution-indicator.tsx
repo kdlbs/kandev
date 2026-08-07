@@ -3,6 +3,7 @@
 import { IconPointFilled } from "@tabler/icons-react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { cn } from "@/lib/utils";
+import { useTranslation } from "react-i18next";
 
 type ExecutionIndicatorProps = {
   status: string;
@@ -16,6 +17,7 @@ type ExecutionIndicatorProps = {
  * - Otherwise: hidden
  */
 export function ExecutionIndicator({ status, className }: ExecutionIndicatorProps) {
+  const { t } = useTranslation();
   const normalized = status?.toLowerCase().replace(/ /g, "_");
 
   if (normalized === "in_progress" || normalized === "scheduling") {
@@ -26,10 +28,10 @@ export function ExecutionIndicator({ status, className }: ExecutionIndicatorProp
             className={cn("inline-flex items-center gap-1 text-xs text-emerald-500", className)}
           >
             <IconPointFilled className="h-3 w-3 animate-pulse" />
-            Live
+            {t("office:live")}
           </span>
         </TooltipTrigger>
-        <TooltipContent>Agent is actively working on this task</TooltipContent>
+        <TooltipContent>{t("office:agentIsActivelyWorkingOnThis")}</TooltipContent>
       </Tooltip>
     );
   }
@@ -40,10 +42,10 @@ export function ExecutionIndicator({ status, className }: ExecutionIndicatorProp
         <TooltipTrigger asChild>
           <span className={cn("inline-flex items-center gap-1 text-xs text-amber-500", className)}>
             <IconPointFilled className="h-3 w-3" />
-            Ready
+            {t("office:ready")}
           </span>
         </TooltipTrigger>
-        <TooltipContent>Agent finished — workspace ready for review</TooltipContent>
+        <TooltipContent>{t("office:agentFinishedWorkspaceReadyForReview")}</TooltipContent>
       </Tooltip>
     );
   }

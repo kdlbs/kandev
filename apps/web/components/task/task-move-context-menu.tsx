@@ -9,6 +9,7 @@ import {
   ContextMenuSubTrigger,
 } from "@kandev/ui/context-menu";
 import { cn } from "@/lib/utils";
+import { useTranslation } from "react-i18next";
 
 export type TaskMoveStep = {
   id: string;
@@ -47,6 +48,7 @@ function StepMenuItem({
   currentStepId?: string | null;
   onSelect: (stepId: string) => void;
 }) {
+  const { t } = useTranslation();
   const isCurrent = step.id === currentStepId;
   const hasAutoStart = stepHasAutoStart(step);
   return (
@@ -63,9 +65,13 @@ function StepMenuItem({
       <span className="flex-1 truncate">{step.title}</span>
       {(isCurrent || hasAutoStart) && (
         <span className="ml-auto flex items-center gap-1 text-[10px] text-muted-foreground">
-          {isCurrent && <span data-testid={`task-context-step-current-${step.id}`}>Current</span>}
+          {isCurrent && (
+            <span data-testid={`task-context-step-current-${step.id}`}>{t("task:current2")}</span>
+          )}
           {hasAutoStart && (
-            <span data-testid={`task-context-step-autostart-${step.id}`}>Auto-start</span>
+            <span data-testid={`task-context-step-autostart-${step.id}`}>
+              {t("task:autoStart")}
+            </span>
           )}
         </span>
       )}
@@ -84,12 +90,13 @@ function MoveToCurrentWorkflowSubmenu({
   disabled?: boolean;
   onMoveToStep?: (stepId: string) => void;
 }) {
+  const { t } = useTranslation();
   if (!onMoveToStep || steps.length <= 1) return null;
   return (
     <ContextMenuSub>
       <ContextMenuSubTrigger data-testid="task-context-move-to" disabled={disabled}>
         <IconArrowRight className="mr-2 h-4 w-4" />
-        Move to
+        {t("task:moveTo")}
       </ContextMenuSubTrigger>
       <ContextMenuSubContent className="w-48">
         {steps.map((step) => (
@@ -116,6 +123,7 @@ function WorkflowTargetItem({
   disabled?: boolean;
   onSendToWorkflow?: (workflowId: string, stepId: string) => void;
 }) {
+  const { t } = useTranslation();
   if (steps.length === 0 || !onSendToWorkflow) {
     return (
       <ContextMenuItem
@@ -125,7 +133,7 @@ function WorkflowTargetItem({
       >
         <span className="flex-1 truncate">{workflow.name}</span>
         <span data-testid="task-context-disabled-reason" className="ml-2 text-[10px]">
-          No steps
+          {t("task:noSteps")}
         </span>
       </ContextMenuItem>
     );
@@ -165,13 +173,14 @@ function SendToWorkflowSubmenu({
   disabled?: boolean;
   onSendToWorkflow?: (workflowId: string, stepId: string) => void;
 }) {
+  const { t } = useTranslation();
   const targets = workflows.filter((workflow) => workflow.id !== currentWorkflowId);
   if (!onSendToWorkflow || !currentWorkflowId || targets.length === 0) return null;
   return (
     <ContextMenuSub>
       <ContextMenuSubTrigger data-testid="task-context-send-to-workflow" disabled={disabled}>
         <IconLogicBuffer className="mr-2 h-4 w-4" />
-        Send to workflow
+        {t("task:sendToWorkflow")}
       </ContextMenuSubTrigger>
       <ContextMenuSubContent className="w-56">
         {targets.map((workflow) => (

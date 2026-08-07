@@ -7,12 +7,18 @@ import (
 	"testing"
 )
 
+// localePtPT is the canonical European Portuguese id, spelled once so the
+// catalog, negotiation, and parity assertions cannot drift apart.
+const localePtPT = "pt-pt"
+
 func TestNormalize(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct{ in, want string }{
 		{"en", "en"},
 		{"zh-cn", "zh-cn"},
 		{"zh-CN", "zh-cn"},
+		{localePtPT, localePtPT},
+		{"pt-PT", localePtPT},
 		{"pseudo", "pseudo"},
 		{"", "en"},
 		{"fr", "en"},
@@ -37,6 +43,9 @@ func TestTranslatesAndFallsBack(t *testing.T) {
 	}
 	if chinese := T("zh-cn", "webapp.shellUnavailable"); chinese == en {
 		t.Fatalf("zh-cn message should differ from en, both %q", en)
+	}
+	if portuguese := T(localePtPT, "webapp.shellUnavailable"); portuguese == en {
+		t.Fatalf("pt-pt message should differ from en, both %q", en)
 	}
 	// An unknown locale falls back to en rather than erroring or blanking.
 	if got := T("klingon", "webapp.shellUnavailable"); got != en {
@@ -118,7 +127,7 @@ func TestCatalogsHaveMatchingKeys(t *testing.T) {
 	t.Parallel()
 	load()
 	source := catalogs[DefaultLocale]
-	for _, locale := range []string{"pseudo", "zh-cn"} {
+	for _, locale := range []string{"pseudo", "zh-cn", localePtPT} {
 		translated := catalogs[locale]
 		if len(translated) != len(source) {
 			t.Fatalf("%s catalog has %d keys, want %d", locale, len(translated), len(source))

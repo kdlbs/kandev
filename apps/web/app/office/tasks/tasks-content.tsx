@@ -5,6 +5,7 @@ import type { TaskViewMode, OfficeTask } from "@/lib/state/slices/office/types";
 import { TaskRow } from "./task-row";
 import { TaskBoard } from "./task-board";
 import { EmptyState } from "../components/shared/empty-state";
+import { useTranslation } from "react-i18next";
 
 type IssuesContentProps = {
   viewMode: TaskViewMode;
@@ -26,11 +27,12 @@ function IssueListView({
   onToggleExpand: (id: string) => void;
   agentMap: Map<string, string>;
 }) {
+  const { t } = useTranslation();
   if (flatNodes.length === 0)
     return (
       <EmptyState
-        message="No tasks found."
-        description="Create a task or let agents generate them from routines."
+        message={t("office:noTasksFound")}
+        description={t("office:createATaskOrLetAgents")}
       />
     );
 
@@ -64,7 +66,8 @@ export function TasksContent({
   onToggleExpand,
   agentMap,
 }: IssuesContentProps) {
-  if (isLoading) return <EmptyState message="Loading tasks..." />;
+  const { t } = useTranslation();
+  if (isLoading) return <EmptyState message={t("office:loadingTasks")} />;
 
   if (viewMode === "board") {
     return <TaskBoard tasks={flatNodes.map((n) => n.task)} />;

@@ -9,6 +9,7 @@ import unittest
 REPO_ROOT = Path(__file__).resolve().parents[2]
 WORKFLOW = REPO_ROOT / ".github" / "workflows" / "claude-code-review.yml"
 MENTION_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "claude.yml"
+LINT_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "lint-action-pinning.yml"
 ALLOWED_USERS_INPUT = "allowed_non_write_users: ${{ github.event.pull_request.user.login }}"
 
 
@@ -134,6 +135,43 @@ class ClaudeCodeReviewWorkflowContractTest(unittest.TestCase):
             fork_job,
             "fork review must forward its job-authorized pull request author "
             "to Claude's allowed_non_write_users input",
+        )
+
+    def test_allowlisted_fork_label_job_adds_both_approval_labels(self) -> None:
+        workflow = WORKFLOW.read_text(encoding="utf-8")
+        _, separator, label_job = workflow.partition("  label-allowlisted-fork:")
+        label_job = label_job.partition("\n  claude-review-fork:")[0]
+
+        self.assertTrue(separator, "Allowlisted fork label job is missing")
+        self.assertIn("github.event_name == 'pull_request_target'", label_job)
+        self.assertIn("github.event.action == 'opened'", label_job)
+        self.assertIn(
+            "github.event.pull_request.head.repo.full_name != github.repository",
+            label_job,
+        )
+        self.assertIn("vars.CLAUDE_REVIEW_ALLOWLIST != ''", label_job)
+        self.assertIn(
+            "contains(fromJSON(vars.CLAUDE_REVIEW_ALLOWLIST), github.event.pull_request.user.login)",
+            label_job,
+        )
+        self.assertIn("issues: write", label_job)
+        self.assertIn("github.rest.issues.addLabels", label_job)
+        self.assertIn(
+            "const labels = ['safe-to-review', 'safe-to-test'];",
+            label_job,
+        )
+        self.assertNotIn("actions/checkout", label_job)
+
+    def test_lint_workflow_runs_preview_contract_test(self) -> None:
+        workflow = LINT_WORKFLOW.read_text(encoding="utf-8")
+
+        self.assertIn(
+            ".github/scripts/preview-env-workflow-contract_test.py",
+            workflow,
+        )
+        self.assertIn(
+            "python3 .github/scripts/preview-env-workflow-contract_test.py",
+            workflow,
         )
 
 

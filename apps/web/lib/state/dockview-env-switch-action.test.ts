@@ -178,6 +178,21 @@ describe("switchEnvLayout — root fix for terminal/layout swapping", () => {
     expect(setEnvLayout).not.toHaveBeenCalledWith("env-first", expect.anything());
   });
 
+  it("prioritizes an explicit route layout over saved maximize state on first adoption", () => {
+    const api = makeMockApi();
+    const buildDefaultLayout = vi.fn();
+    vi.mocked(getEnvMaximizeState).mockReturnValue({
+      preMaximizeLayout: { columns: [] },
+      maximizedDockviewJson: { grid: {}, panels: {} },
+    });
+    useDockviewStore.setState({ api, currentLayoutEnvId: null, buildDefaultLayout });
+
+    useDockviewStore.getState().switchEnvLayout(null, "env-first", "session-Y", [], "plan");
+
+    expect(api.fromJSON).not.toHaveBeenCalled();
+    expect(buildDefaultLayout).toHaveBeenCalledWith(api, "plan");
+  });
+
   it("does nothing when api is unset", () => {
     useDockviewStore.setState({ api: null });
     useDockviewStore.getState().switchEnvLayout("env-a", "env-b", null);

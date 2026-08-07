@@ -171,6 +171,87 @@ describe("buildKanbanCardMenuEntries — !onEdit does not disable plugin edit ac
   });
 });
 
+describe("buildKanbanCardMenuEntries — 'primary' group plugin actions", () => {
+  const PLUGIN_ID = "kandev-plugin-tags";
+
+  afterEach(() => {
+    pluginRegistry.unregisterPlugin(PLUGIN_ID);
+  });
+
+  function entryKeys(entries: KanbanCardMenuEntry[]) {
+    return entries.map((entry) => entry.key);
+  }
+
+  it("renders a 'primary' group action as a flat item between Send to workflow and Link", () => {
+    pluginRegistry.forPlugin(PLUGIN_ID).registerTaskMenuAction({
+      id: "quick-tag",
+      label: "Quick tag",
+      group: "primary",
+      run: vi.fn(),
+    });
+
+    const entries = buildKanbanCardMenuEntries({
+      currentWorkflowId: "wf-1",
+      workflows: [
+        { id: "wf-1", name: "Workflow 1" },
+        { id: "wf-2", name: "Workflow 2" },
+      ],
+      stepsByWorkflowId: {
+        "wf-1": [
+          { id: "s1", title: "Step 1" },
+          { id: "s2", title: "Step 2" },
+        ],
+        "wf-2": [{ id: "s3", title: "Step 3" }],
+      },
+      onSendToWorkflow: vi.fn(),
+      onLinkPullRequest: vi.fn(),
+    });
+
+    const keys = entryKeys(entries);
+    const sendToIndex = keys.indexOf("send-to-workflow");
+    const primaryIndex = keys.indexOf(`plugin-primary-${PLUGIN_ID}-quick-tag`);
+    const linkIndex = keys.indexOf("link");
+
+    expect(sendToIndex).toBeGreaterThanOrEqual(0);
+    expect(primaryIndex).toBeGreaterThanOrEqual(0);
+    expect(linkIndex).toBeGreaterThanOrEqual(0);
+    expect(sendToIndex).toBeLessThan(primaryIndex);
+    expect(primaryIndex).toBeLessThan(linkIndex);
+
+    const primaryEntry = entries[primaryIndex];
+    expect(primaryEntry.kind).toBe("item");
+    if (primaryEntry.kind === "item") expect(primaryEntry.label).toBe("Quick tag");
+  });
+
+  it("does not add a 'primary' entry when visible(context) returns false", () => {
+    pluginRegistry.forPlugin(PLUGIN_ID).registerTaskMenuAction({
+      id: "quick-tag",
+      label: "Quick tag",
+      group: "primary",
+      visible: () => false,
+      run: vi.fn(),
+    });
+
+    const entries = buildKanbanCardMenuEntries({ workflows: [], stepsByWorkflowId: {} });
+
+    expect(entryKeys(entries)).not.toContain(`plugin-primary-${PLUGIN_ID}-quick-tag`);
+  });
+
+  it("leaves the 'edit' group submenu unaffected by 'primary' group registrations", () => {
+    pluginRegistry.forPlugin(PLUGIN_ID).registerTaskMenuAction({
+      id: "quick-tag",
+      label: "Quick tag",
+      group: "primary",
+      run: vi.fn(),
+    });
+
+    const entries = buildKanbanCardMenuEntries({ workflows: [], stepsByWorkflowId: {} });
+    const editMenu = entries.find((entry) => entry.key === "edit");
+
+    expect(editMenu?.kind).toBe("item");
+  });
+});
+
 describe("buildKanbanCardMenuEntries — detach", () => {
   const baseArgs = {
     workflows: [],

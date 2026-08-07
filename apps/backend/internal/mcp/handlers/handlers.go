@@ -513,8 +513,8 @@ func (h *Handlers) handleListWorkflowSteps(ctx context.Context, msg *ws.Message)
 
 // handleListRepositories lists repositories for a workspace. Exposes the same
 // data the kanban "Edit task → Repositories" picker reads, so an MCP-driven
-// agent (e.g. the Slack triage runner) can match a request against an actual
-// repo instead of guessing or making up an ID.
+// agent can match a request against an actual repo instead of guessing or
+// making up an ID.
 func (h *Handlers) handleListRepositories(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 	return h.handleListByField(ctx, msg, "workspace_id", "failed to list repositories", "Failed to list repositories",
 		func(ctx context.Context, workspaceID string) (any, error) {
@@ -1129,12 +1129,22 @@ func (h *Handlers) resolveMCPAutoStartConfigWithError(ctx context.Context, task 
 		}
 	}
 
-	if agentProfileID == "" {
-		var err error
-		agentProfileID, err = h.resolveWorkflowAgentProfileWithError(ctx, task.WorkflowStepID, task.WorkflowID)
-		if err != nil {
-			return mcpAutoStartConfig{}, fmt.Errorf("resolve workflow agent profile: %w", err)
-		}
+	// Mirror the orchestrator's launch-time precedence so the profile reported
+	// back to the caller (and stored in task metadata) equals the one that will
+	// actually run. At launch resolveEffectiveAgentProfile applies the step's
+	// launch profile (the step's pinned profile, or the workflow default when the
+	// step has none) over any caller-provided profile, but only when the task
+	// sits on a workflow step. A create_task_kandev task lands on a step whenever
+	// its workflow has steps: the explicit workflow_step_id, or the start step
+	// CreateTask assigns when the step is omitted. When the task will be on a
+	// step, the workflow-derived profile overrides the caller; otherwise it only
+	// fills an omitted profile.
+	workflowProfileID, onStepAtLaunch, err := h.resolveWorkflowLaunchProfile(ctx, task.WorkflowStepID, task.WorkflowID)
+	if err != nil {
+		return mcpAutoStartConfig{}, fmt.Errorf("resolve workflow agent profile: %w", err)
+	}
+	if workflowProfileID != "" && (onStepAtLaunch || agentProfileID == "") {
+		agentProfileID = workflowProfileID
 	}
 	if agentProfileID == "" && h.taskSvc != nil {
 		workspace, err := h.taskSvc.GetWorkspace(ctx, task.WorkspaceID)
@@ -1168,6 +1178,36 @@ func (h *Handlers) mcpTaskAgentProfileDefault(ctx context.Context, explicitAgent
 		return usermodels.MCPTaskAgentProfileDefaultCurrentTask, nil
 	}
 	return usermodels.NormalizeMCPTaskAgentProfileDefault(settings.MCPTaskAgentProfileDefault), nil
+}
+
+// resolveWorkflowLaunchProfile returns the workflow-derived agent profile a task
+// launches with and whether the task will sit on a workflow step at launch.
+// onStepAtLaunch is true when the task has an explicit step, or when it has no
+// step yet but its workflow has at least one step (CreateTask assigns that start
+// step). Callers apply the returned profile over an explicit caller profile only
+// when onStepAtLaunch is true; off a step it may only fill an omitted profile.
+func (h *Handlers) resolveWorkflowLaunchProfile(ctx context.Context, workflowStepID, workflowID string) (string, bool, error) {
+	profileID, err := h.resolveWorkflowAgentProfileWithError(ctx, workflowStepID, workflowID)
+	if err != nil {
+		return "", false, err
+	}
+	if workflowStepID != "" {
+		return profileID, true, nil
+	}
+	return profileID, h.workflowHasSteps(ctx, workflowID), nil
+}
+
+// workflowHasSteps reports whether the workflow has at least one step, i.e. a
+// stepless task created on it will be assigned a start step at CreateTask time.
+func (h *Handlers) workflowHasSteps(ctx context.Context, workflowID string) bool {
+	if workflowID == "" || h.workflowCtrl == nil {
+		return false
+	}
+	resp, err := h.workflowCtrl.ListStepsByWorkflow(ctx, workflowctrl.ListStepsRequest{WorkflowID: workflowID})
+	if err != nil || resp == nil {
+		return false
+	}
+	return len(resp.Steps) > 0
 }
 
 func (h *Handlers) resolveWorkflowAgentProfileWithError(ctx context.Context, workflowStepID, workflowID string) (string, error) {

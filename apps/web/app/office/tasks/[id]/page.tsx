@@ -28,6 +28,8 @@ import type {
 import type { ActivityEntry, OfficeTask } from "@/lib/state/slices/office/types";
 import type { TaskSession as ApiTaskSession } from "@/lib/types/http";
 import { useSessionLiveSyncSubscriptions } from "./use-session-live-sync";
+import { useTranslation } from "react-i18next";
+import { t } from "@/lib/i18n";
 
 type IssueDetailPageProps = {
   params: Promise<{ id: string }>;
@@ -101,7 +103,10 @@ function mapCommentResponse(c: TaskCommentResponse): TaskComment {
     // Agent name is resolved at render time against the office agents
     // store so it stays correct after renames. Backend doesn't send a
     // name for session-bridged comments, so leave it empty here.
-    authorName: c.authorType === "user" ? "You" : "",
+    // Module-level `t`, resolved when the response is mapped: this runs in a
+    // fetch, not a render. `task:you` is the same word the shared task chat
+    // already uses, so it is reused rather than duplicated into `office`.
+    authorName: c.authorType === "user" ? t("task:you") : "",
     content: c.body,
     source: c.source,
     createdAt: c.createdAt,
@@ -116,6 +121,13 @@ function entryField(entry: ActivityEntry, camelKey: keyof ActivityEntry, snakeKe
   return raw[camelKey] ?? raw[snakeKey];
 }
 
+/**
+ * NOT localized, deliberately. `action` is an open-ended backend activity
+ * identifier (`task.status_changed`, `task.plan.revision.created`, …) with no
+ * closed union on the wire, so a key map would silently fall through for any
+ * action the backend adds. The verb is rendered by
+ * `components/task/simple/task-activity.tsx`, which is outside this migration.
+ */
 function activityActionVerb(action: string) {
   return action
     .replace(/^task\./, "")
@@ -146,7 +158,7 @@ function mapTaskSession(session: ApiTaskSession): TaskSession {
   return {
     id: session.id,
     agentProfileId: session.agent_profile_id,
-    agentName: snapshotString(profile, "name") || session.agent_profile_id || "Agent",
+    agentName: snapshotString(profile, "name") || session.agent_profile_id || t("task:agent"),
     agentRole: snapshotString(profile, "role") || "agent",
     state: session.state as TaskSession["state"],
     isPrimary: Boolean(session.is_primary),
@@ -320,7 +332,10 @@ function useIssueData(id: string) {
   const [activity, setActivity] = useState<TaskActivityEntry[]>([]);
   const [baseSessions, setBaseSessions] = useState<TaskSession[]>([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  // Holds a catalog KEY, not a message: the load effect must not take `t` in
+  // its dep array (a locale switch would re-issue the task fetch), so the key is
+  // stored and resolved at render instead.
+  const [errorKey, setErrorKey] = useState<string | null>(null);
 
   const applyDetail = useCallback(
     (detail: IssueDetailData) => {
@@ -337,7 +352,7 @@ function useIssueData(id: string) {
 
     async function load() {
       setLoading(true);
-      setError(null);
+      setErrorKey(null);
       const fromStore = storeIssuesRef.current.find((i) => i.id === id);
       if (fromStore && !cancelled) setTask(mapOfficeTaskToTask(fromStore));
 
@@ -345,7 +360,7 @@ function useIssueData(id: string) {
         const res = await getTask(id);
         if (cancelled) return;
         if (!res.task) {
-          if (!fromStore) setError("Task not found");
+          if (!fromStore) setErrorKey("office:taskNotFound");
         } else {
           const freshTask = mapOfficeTaskToTask(res.task);
           setTask(freshTask);
@@ -354,7 +369,7 @@ function useIssueData(id: string) {
           if (!cancelled) applyDetail(detail);
         }
       } catch {
-        if (!cancelled && !fromStore) setError("Failed to load task");
+        if (!cancelled && !fromStore) setErrorKey("office:failedToLoadTask");
       }
 
       if (!cancelled) setLoading(false);
@@ -403,7 +418,7 @@ function useIssueData(id: string) {
     activity,
     sessions,
     loading,
-    error,
+    errorKey,
     fetchComments,
     applyTaskPatch,
     restoreTask,
@@ -419,6 +434,7 @@ export default function IssueDetailPage({ params }: IssueDetailPageProps) {
 }
 
 function IssueDetailContent({ params }: IssueDetailPageProps) {
+  const { t } = useTranslation();
   const { id } = use(params);
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -440,7 +456,7 @@ function IssueDetailContent({ params }: IssueDetailPageProps) {
     activity,
     sessions,
     loading,
-    error,
+    errorKey,
     fetchComments,
     applyTaskPatch,
     restoreTask,
@@ -458,16 +474,16 @@ function IssueDetailContent({ params }: IssueDetailPageProps) {
     return <IssueDetailSkeleton />;
   }
 
-  if (error && !task) {
+  if (errorKey && !task) {
     return (
       <div className="flex h-full items-center justify-center">
         <div className="text-center">
-          <p className="text-sm text-muted-foreground">{error}</p>
+          <p className="text-sm text-muted-foreground">{t(errorKey)}</p>
           <button
             className="mt-2 text-sm text-primary underline cursor-pointer"
             onClick={() => router.push("/office/tasks")}
           >
-            Back to tasks
+            {t("office:backToTasks")}
           </button>
         </div>
       </div>

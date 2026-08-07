@@ -118,6 +118,40 @@ func TestApplySyncedWorkflows_CreatesNewWorkflows(t *testing.T) {
 	assert.True(t, steps[0].IsStartStep)
 }
 
+func TestApplySyncedWorkflows_UpdatesAndClearsWorkflowPrompt(t *testing.T) {
+	svc, provider, _ := setupSyncService(t)
+	ctx := context.Background()
+	wf := addSyncedWorkflow(provider, "wf-1", "ws-1", "Dev Flow", "flows/dev.yml")
+	wf.Prompt = "Old shared instructions."
+	createStep(t, svc, &models.WorkflowStep{ID: "step-todo", WorkflowID: wf.ID, Name: "Todo", Position: 0, IsStartStep: true})
+
+	// Update prompt from portable definition.
+	updated := portableWorkflow("Dev Flow", "Todo")
+	updated.Prompt = "If the PR is merged or closed, move the Task to Done."
+	result, err := svc.ApplySyncedWorkflows(ctx, "ws-1", []SyncFileExport{
+		{Path: "flows/dev.yml", Export: exportOf(updated)},
+	})
+	require.NoError(t, err)
+	assert.Contains(t, result.Updated, "Dev Flow")
+
+	got, err := provider.GetWorkflow(ctx, wf.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "If the PR is merged or closed, move the Task to Done.", got.Prompt)
+
+	// Omitting prompt in the portable file clears it on sync.
+	cleared := portableWorkflow("Dev Flow", "Todo")
+	cleared.Prompt = ""
+	result, err = svc.ApplySyncedWorkflows(ctx, "ws-1", []SyncFileExport{
+		{Path: "flows/dev.yml", Export: exportOf(cleared)},
+	})
+	require.NoError(t, err)
+	assert.Contains(t, result.Updated, "Dev Flow")
+
+	got, err = provider.GetWorkflow(ctx, wf.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "", got.Prompt)
+}
+
 func TestApplySyncedWorkflows_UpdatesMatchedWorkflowPreservingStepIDs(t *testing.T) {
 	svc, provider, _ := setupSyncService(t)
 	ctx := context.Background()
@@ -410,6 +444,33 @@ func TestEnsureWorkflowMutable(t *testing.T) {
 	assert.NoError(t, svc.EnsureWorkflowMutable(ctx, "wf-manual"))
 	assert.NoError(t, svc.EnsureWorkflowMutable(ctx, "wf-missing"),
 		"guard fails open on lookup errors; the mutation itself surfaces not-found")
+}
+
+func TestEnsureWorkflowMutable_BlocksImproveWorkspace(t *testing.T) {
+	svc, provider, _ := setupSyncService(t)
+	ctx := context.Background()
+	provider.addWorkflow("wf-improve", "ws-improve", "Improve Kandev Workflow")
+	svc.SetWorkspaceProvider(&fakeWorkspaceProvider{
+		workspaces: map[string]*taskmodels.Workspace{
+			"ws-improve": {ID: "ws-improve", Name: "Improve Kandev"},
+			"ws-normal":  {ID: "ws-normal", Name: "Default Workspace"},
+		},
+	})
+	provider.addWorkflow("wf-normal", "ws-normal", "Normal Flow")
+
+	assert.ErrorIs(t, svc.EnsureWorkflowMutable(ctx, "wf-improve"), ErrWorkflowWorkspaceReadOnly)
+	assert.NoError(t, svc.EnsureWorkflowMutable(ctx, "wf-normal"))
+}
+
+type fakeWorkspaceProvider struct {
+	workspaces map[string]*taskmodels.Workspace
+}
+
+func (f *fakeWorkspaceProvider) GetWorkspace(_ context.Context, id string) (*taskmodels.Workspace, error) {
+	if workspace, ok := f.workspaces[id]; ok {
+		return workspace, nil
+	}
+	return nil, fmt.Errorf("workspace not found: %s", id)
 }
 
 func TestReleaseSyncedWorkflows(t *testing.T) {

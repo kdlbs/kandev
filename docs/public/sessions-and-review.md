@@ -65,6 +65,8 @@ Stopping a turn does not itself run the next queued message. Expand the queue an
 
 The expanded queue also lets you discard stale work. **Remove** is available for every visible pending row, including messages from users, peer agents, workflows, and server actions; **Clear all** removes all visible pending rows in that session. Only user-origin rows remain editable. A message already reserved for delivery is hidden from the queue and cannot be cancelled with these controls.
 
+The queue panel separates four actions. **Run next** sends the promptable FIFO head and leaves a running turn alone. **Send Now** sends directly when the session is promptable; otherwise it waits for backend cancellation acknowledgement, then replaces the active turn with one selected row or the click-time snapshot of all visible rows as one FIFO-ordered prompt. It does not record ordinary Cancel side effects or complete the cancelled workflow step. **Clear all** discards the visible queue. The chat toolbar's **Cancel** is the normal user cancellation for the active turn; it sends no queued prompt and may complete an eligible workflow step or move the task to review.
+
 A CLI-passthrough profile displays the agent's native terminal interface in a PTY. It still belongs to the task, but it does not provide Kandev's structured chat messages and tool-call presentation.
 
 <details>
@@ -159,7 +161,9 @@ Kandev hides the action instead of guessing when a repository is local-only, uns
 
 ## Review a diff
 
-Select **Review** in the Changes header. Kandev builds a repository-aware file list by merging available uncommitted, cumulative committed, and linked-PR files. When a path occurs in more than one source, the uncommitted version wins deduplication.
+Select **Review** in the Changes header. Kandev builds a repository-aware file list by merging available uncommitted, cumulative committed, and linked-PR files. Initialized direct and nested Git submodules appear under their task-workspace scopes, so a submodule's `README.md` remains distinct from the parent repository's `README.md`. When a path occurs in more than one source within the same repository, the uncommitted version wins deduplication.
+
+Review compares each submodule with the gitlink commit recorded by its parent and marks the submodule boundaries in the file hierarchy and diff headers. If a declared submodule is unavailable or uninitialized, Kandev keeps the parent's gitlink change visible instead of hiding the only available evidence. Pull requests for submodule repositories remain separate repository workflows; Review does not create or coordinate them.
 
 When a task has multiple linked pull requests, use the PR selector in the Changes diff header or Review toolbar to inspect one PR revision at a time. The selection is scoped to that task for the current app session. Switching PRs replaces only the remote PR contribution; uncommitted and committed sources keep their normal precedence. Selecting a file from a specific PR row opens that exact PR revision, even when a sibling PR changes the same path.
 

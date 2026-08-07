@@ -39,6 +39,7 @@ import (
 	"github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/common/ports"
+	"github.com/kandev/kandev/internal/db"
 	debughandlers "github.com/kandev/kandev/internal/debug"
 	editorcontroller "github.com/kandev/kandev/internal/editors/controller"
 	editorhandlers "github.com/kandev/kandev/internal/editors/handlers"
@@ -51,6 +52,7 @@ import (
 	"github.com/kandev/kandev/internal/health/oslimits"
 	"github.com/kandev/kandev/internal/i18n"
 	"github.com/kandev/kandev/internal/improvekandev"
+	"github.com/kandev/kandev/internal/integrations/workspacescope"
 	"github.com/kandev/kandev/internal/jira"
 	"github.com/kandev/kandev/internal/linear"
 	tasklsp "github.com/kandev/kandev/internal/lsp"
@@ -75,7 +77,6 @@ import (
 	"github.com/kandev/kandev/internal/runtimeflags"
 	"github.com/kandev/kandev/internal/secrets"
 	"github.com/kandev/kandev/internal/sentry"
-	"github.com/kandev/kandev/internal/slack"
 	spriteshandlers "github.com/kandev/kandev/internal/sprites"
 	sshhandlers "github.com/kandev/kandev/internal/ssh"
 	systemsvc "github.com/kandev/kandev/internal/system"
@@ -345,6 +346,7 @@ func buildGitStatusNotification(sessionID, repositoryName string, status client.
 		"renamed":          status.Renamed,
 		"branch_additions": status.BranchAdditions,
 		"branch_deletions": status.BranchDeletions,
+		"is_submodule":     status.IsSubmodule,
 	}
 	if repositoryName != "" {
 		statusPayload["repository_name"] = repositoryName
@@ -527,6 +529,7 @@ type routeParams struct {
 	systemSvc                     *systemsvc.Service
 	workspaceRestorer             taskhandlers.WorkspaceQuarantineRestorer
 	runtimeFlagsSvc               *runtimeflags.Service
+	dbPool                        *db.Pool
 	agentSettingsController       *agentsettingscontroller.Controller
 	agentSettingsRepo             settingsstore.Repository
 	agentList                     taskhandlers.AgentLister
@@ -641,9 +644,6 @@ func registerRoutes(p routeParams) {
 		p.services.Linear.SetTaskDeleter(handoffSvc)
 		p.services.Linear.SetRepositoryLookup(repoLookup)
 		p.services.Linear.SetWorkspaceAuthorizer(p.taskSvc.AuthorizeWorkspaceAccess)
-	}
-	if p.services.Slack != nil {
-		p.services.Slack.SetWorkspaceAuthorizer(p.taskSvc.AuthorizeWorkspaceAccess)
 	}
 	if p.services.Sentry != nil {
 		p.services.Sentry.SetTaskDeleter(handoffSvc)
@@ -1055,7 +1055,14 @@ func registerSecondaryRoutes(
 	// Login PTY: spawns agent login commands under a PTY on the kandev host
 	// (claude auth login, auggie login, ...). The manager is shared with Quick
 	// Terminal so descriptor lifecycle callbacks observe the same sessions.
-	loginpty.NewHandlers(p.loginMgr, p.agentRegistry, p.log.Zap(), nil).RegisterRoutes(p.router)
+	loginHandlers := loginpty.NewHandlers(p.loginMgr, p.agentRegistry, p.log.Zap(), nil)
+	if p.quickTerminalSvc != nil {
+		// Guard the assignment: passing a nil *quickterminal.Service straight
+		// into the interface would create a typed-nil binder that is non-nil to
+		// the handler's nil check but panics when invoked.
+		loginHandlers.SetHostShellSessionBinder(p.quickTerminalSvc)
+	}
+	loginHandlers.RegisterRoutes(p.router)
 	if p.quickTerminalSvc != nil {
 		p.quickTerminalSvc.RegisterRoutes(p.router)
 	}
@@ -1146,11 +1153,6 @@ func registerSecondaryRoutes(
 		p.log.Debug("Registered Sentry handlers (HTTP)")
 	}
 
-	if p.services.Slack != nil {
-		slack.RegisterRoutes(p.router, p.gateway.Dispatcher, p.services.Slack, p.log)
-		p.log.Debug("Registered Slack handlers (HTTP + WebSocket)")
-	}
-
 	if p.services.WorkflowSync != nil {
 		workflowsync.RegisterRoutes(p.router, p.services.WorkflowSync, p.log)
 		p.log.Debug("Registered workflow sync handlers (HTTP)")
@@ -1182,7 +1184,15 @@ func registerSecondaryRoutes(
 	}
 
 	if p.repoCloner != nil {
-		ikHandler := improvekandev.NewHandler(p.taskSvc, p.repoCloner, p.version, p.log)
+		var ghCopier improvekandev.GitHubWorkspaceCopier
+		var resolveDefaultWorkspace improvekandev.DefaultWorkspaceResolver
+		if p.services.GitHub != nil && p.dbPool != nil {
+			ghCopier = p.services.GitHub
+			resolveDefaultWorkspace = func(context.Context) (string, error) {
+				return workspacescope.ResolveMigrationTarget(p.dbPool.Reader())
+			}
+		}
+		ikHandler := improvekandev.NewHandler(p.taskSvc, p.repoCloner, ghCopier, resolveDefaultWorkspace, p.version, p.log)
 		if p.systemSvc != nil {
 			ikHandler.SetLogBundles(p.systemSvc.LogBundles)
 		}
@@ -1268,7 +1278,7 @@ func officeWorkspaceScopeMiddleware(authSvc *auth.Service, taskSvc *taskservice.
 // gitlab) with no per-user gate of their own, so this global middleware
 // authorizes ownership for them when auth is enabled.
 var integrationWorkspacePrefixes = []string{
-	"/api/v1/jira/", "/api/v1/linear/", "/api/v1/sentry/", "/api/v1/slack/",
+	"/api/v1/jira/", "/api/v1/linear/", "/api/v1/sentry/",
 	"/api/v1/azure-devops/", "/api/v1/gitlab/", "/api/v1/github/", "/api/v1/workflow-sync/",
 }
 

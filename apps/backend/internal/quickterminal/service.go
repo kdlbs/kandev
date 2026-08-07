@@ -163,6 +163,17 @@ func (s *Service) HandleSessionExit(managerKey, sessionID, _ string, exitCode in
 	}
 }
 
+func (s *Service) BindHostShellSession(ctx context.Context, tabID, sessionID string) error {
+	_, err := s.UpdateLifecycle(ctx, tabID, sessionID, models.StatusRunning, "", nil)
+	if errors.Is(err, repository.ErrNotFound) {
+		// The host shell was started for a client_id that has no persisted
+		// Quick Terminal tab. Signal the caller to keep the PTY running rather
+		// than treating the missing descriptor as a start failure.
+		return loginpty.ErrNoHostShellDescriptor
+	}
+	return err
+}
+
 func (s *Service) reconcileTab(ctx context.Context, tab *models.Tab) error {
 	if tab == nil || tab.SessionID == nil {
 		if tab != nil && tab.Status == models.StatusConnecting {
@@ -177,7 +188,11 @@ func (s *Service) reconcileTab(ctx context.Context, tab *models.Tab) error {
 	if !s.ownsSession(tab.TabID, *tab.SessionID) {
 		return s.markUnavailable(ctx, tab)
 	}
-	status := s.manager.GetByID(*tab.SessionID).Status()
+	session := s.manager.GetByID(*tab.SessionID)
+	if session == nil {
+		return s.markUnavailable(ctx, tab)
+	}
+	status := session.Status()
 	if !status.Running {
 		return s.markUnavailable(ctx, tab)
 	}

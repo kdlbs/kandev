@@ -560,6 +560,45 @@ func (s *Service) cancelAgentSilentActionWithKind(
 	return registered.wait(ctx)
 }
 
+// cancelAgentSilentActionWithKindExclusive is the non-joining cancellation
+// path used by Send Now. A second Send Now click or an explicit cancellation
+// that already owns the session is reported as a conflict instead of joining
+// and inheriting the first operation's reconciliation semantics.
+func (s *Service) cancelAgentSilentActionWithKindExclusive(
+	ctx context.Context,
+	taskID, sessionID string,
+	action func(context.Context) (bool, error),
+	kind cancellationKind,
+	expectedTurnID string,
+) (bool, error) {
+	if s.repo == nil {
+		return false, errors.New("cancel agent silently: repository is not configured")
+	}
+	var registeredAction func(context.Context, *cancelOperation) (bool, error)
+	if action != nil {
+		registeredAction = func(actionCtx context.Context, _ *cancelOperation) (bool, error) {
+			return action(actionCtx)
+		}
+	}
+	operation, owner, registered, accepted := s.claimCancellationWithActionExclusive(
+		sessionID, kind, registeredAction,
+	)
+	if !accepted {
+		return false, ErrSendNowConflict
+	}
+	if owner {
+		s.setCancellationExpectedTurn(sessionID, operation, expectedTurnID)
+		go s.runSilentCancellation(ctx, taskID, sessionID, operation)
+	}
+	if err := operation.wait(ctx); err != nil {
+		return false, err
+	}
+	if registered == nil {
+		return false, nil
+	}
+	return registered.wait(ctx)
+}
+
 func (s *Service) runSilentCancellation(requestCtx context.Context, taskID, sessionID string, operation *cancelOperation) {
 	endProjection := s.beginCancellationProjection(sessionID)
 	operation.projectionRelease = endProjection
@@ -599,6 +638,9 @@ func (s *Service) runSilentCancellationOwned(ctx context.Context, taskID, sessio
 	identity, err := s.captureCancellationIdentity(ctx, sessionID)
 	if err != nil {
 		return err
+	}
+	if expectedTurnID, expectedReady := s.cancellationExpectedTurnSnapshot(operation); expectedReady && identity.turnID != expectedTurnID {
+		return ErrSendNowTurnChanged
 	}
 	s.setCancellationIdentity(sessionID, operation, identity)
 	if err := s.cancelAgentWhileUnlocked(ctx, sessionID, unlockGuard, relockGuard); err != nil {
@@ -684,6 +726,21 @@ func (s *Service) cancelAgentSilentWithGuardActionKind(
 		defer relockGuard()
 	}
 	return s.cancelAgentSilentActionWithKind(ctx, taskID, sessionID, action, kind)
+}
+
+func (s *Service) cancelAgentSilentWithGuardActionKindExclusive(
+	ctx context.Context,
+	taskID, sessionID string,
+	unlockGuard, relockGuard func(),
+	action func(context.Context) (bool, error),
+	kind cancellationKind,
+	expectedTurnID string,
+) (bool, error) {
+	if unlockGuard != nil {
+		unlockGuard()
+		defer relockGuard()
+	}
+	return s.cancelAgentSilentActionWithKindExclusive(ctx, taskID, sessionID, action, kind, expectedTurnID)
 }
 
 func (s *Service) logSilentCancelReconciled(taskID, sessionID string, err error) {

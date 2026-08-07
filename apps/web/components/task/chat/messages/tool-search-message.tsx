@@ -9,6 +9,7 @@ import type { Message } from "@/lib/types/http";
 import { ExpandableRow } from "./expandable-row";
 import { useExpandState } from "./use-expand-state";
 import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 
 type CodeSearchOutput = {
   files?: string[];
@@ -44,12 +45,12 @@ function SearchStatusIcon({ status }: { status: string | undefined }) {
   return null;
 }
 
-function getSearchSummary(searchOutput: CodeSearchOutput | undefined): string {
+function getSearchSummary(t: TFunction, searchOutput: CodeSearchOutput | undefined): string {
   if (searchOutput?.files && searchOutput.files.length > 0) {
     const count = searchOutput.file_count || searchOutput.files.length;
-    return `Found ${count} file${count !== 1 ? "s" : ""}`;
+    return t("task:foundFiles", { count });
   }
-  return "Searching";
+  return t("task:toolSearching");
 }
 
 type SearchResultsProps = {
@@ -98,6 +99,7 @@ export const ToolSearchMessage = memo(function ToolSearchMessage({
   worktreePath,
   onOpenFile,
 }: ToolSearchMessageProps) {
+  const { t } = useTranslation();
   const { status, searchOutput, searchPath, searchPattern, hasOutput, isSuccess } =
     parseSearchMetadata(comment);
   const autoExpanded = status === "running";
@@ -110,7 +112,7 @@ export const ToolSearchMessage = memo(function ToolSearchMessage({
         <div className="flex items-center gap-2 text-xs">
           <span className="inline-flex items-center gap-1.5">
             <span className="font-mono text-xs text-muted-foreground">
-              {getSearchSummary(searchOutput)}
+              {getSearchSummary(t, searchOutput)}
             </span>
             {!isSuccess && <SearchStatusIcon status={status} />}
           </span>
