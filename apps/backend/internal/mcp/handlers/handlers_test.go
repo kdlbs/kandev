@@ -1868,10 +1868,12 @@ func TestResolveMCPAutoStartConfig_WorkflowDefaultOutranksExplicitOnUnpinnedStep
 	assert.Equal(t, workflowProfileID, config.AgentProfileID)
 }
 
-// A stepless task keeps the caller's explicit profile even when the workflow has
-// a default: resolveEffectiveAgentProfile only overrides on a workflow step, so
-// the workflow default must not leak in off a step.
-func TestResolveMCPAutoStartConfig_WorkflowDefaultDoesNotOverrideExplicitWithoutStep(t *testing.T) {
+// A task on a stepless workflow keeps the caller's explicit profile even when the
+// workflow has a default: with no steps CreateTask assigns no start step, so the
+// task launches stepless and resolveEffectiveAgentProfile keeps the caller
+// profile. The workflow default must not leak in when the task will not be on a
+// step at launch.
+func TestResolveMCPAutoStartConfig_WorkflowDefaultDoesNotOverrideExplicitOnSteplessWorkflow(t *testing.T) {
 	svc, _, workflowCtrl, _ := newTestTaskServiceWithWorkflow(t)
 	ctx := context.Background()
 	workspace, workflow := defaultWorkspaceAndWorkflow(t, ctx, svc)
@@ -1888,6 +1890,63 @@ func TestResolveMCPAutoStartConfig_WorkflowDefaultDoesNotOverrideExplicitWithout
 	}, "explicit-profile", "", "")
 
 	assert.Equal(t, "explicit-profile", config.AgentProfileID)
+}
+
+// A task created with an explicit profile but no step, on a workflow that has a
+// start step, lands on that start step at CreateTask time. The orchestrator then
+// launches it with the start step's pinned profile, overriding the caller. The
+// reported/stored profile must match, or task metadata disagrees with the
+// launched profile. This covers the stepless-at-resolve-time gap: the step is
+// omitted here but the persisted task will sit on the start step at launch.
+func TestResolveMCPAutoStartConfig_StartStepPinnedOutranksExplicitWhenStepOmitted(t *testing.T) {
+	svc, _, workflowCtrl, workflowRepo := newTestTaskServiceWithWorkflow(t)
+	ctx := context.Background()
+	workspace, workflow := defaultWorkspaceAndWorkflow(t, ctx, svc)
+	seedWorkflowStep(t, ctx, workflowRepo, &workflowmodels.WorkflowStep{
+		WorkflowID:      workflow.ID,
+		Name:            "Start",
+		Position:        1,
+		IsStartStep:     true,
+		AgentProfileID:  "start-profile",
+		AllowManualMove: true,
+	})
+	h := &Handlers{taskSvc: svc, workflowCtrl: workflowCtrl, logger: testLogger(t).WithFields()}
+
+	config := h.resolveMCPAutoStartConfig(ctx, &models.Task{
+		WorkspaceID: workspace.ID,
+		WorkflowID:  workflow.ID,
+	}, "explicit-profile", "", "")
+
+	assert.Equal(t, "start-profile", config.AgentProfileID)
+}
+
+// Same stepless-at-resolve-time gap as above, but the start step is unpinned and
+// the workflow supplies a default: the launcher applies the workflow default over
+// the caller, so the reported profile must be the workflow default.
+func TestResolveMCPAutoStartConfig_WorkflowDefaultOutranksExplicitWhenStepOmitted(t *testing.T) {
+	svc, _, workflowCtrl, workflowRepo := newTestTaskServiceWithWorkflow(t)
+	ctx := context.Background()
+	workspace, workflow := defaultWorkspaceAndWorkflow(t, ctx, svc)
+	workflowProfileID := "workflow-profile"
+	_, err := svc.UpdateWorkflow(ctx, workflow.ID, &service.UpdateWorkflowRequest{
+		AgentProfileID: &workflowProfileID,
+	})
+	require.NoError(t, err)
+	seedWorkflowStep(t, ctx, workflowRepo, &workflowmodels.WorkflowStep{
+		WorkflowID:      workflow.ID,
+		Name:            "Start",
+		Position:        1,
+		IsStartStep:     true,
+		AllowManualMove: true,
+	})
+	h := &Handlers{taskSvc: svc, workflowCtrl: workflowCtrl, logger: testLogger(t).WithFields()}
+
+	config := h.resolveMCPAutoStartConfig(ctx, &models.Task{
+		WorkspaceID: workspace.ID,
+		WorkflowID:  workflow.ID,
+	}, "explicit-profile", "", "")
+
+	assert.Equal(t, workflowProfileID, config.AgentProfileID)
 }
 
 func TestResolveMCPAutoStartConfig_ExplicitAgentProfileWinsOverSourceTask(t *testing.T) {

@@ -1131,20 +1131,20 @@ func (h *Handlers) resolveMCPAutoStartConfigWithError(ctx context.Context, task 
 
 	// Mirror the orchestrator's launch-time precedence so the profile reported
 	// back to the caller (and stored in task metadata) equals the one that will
-	// actually run. resolveEffectiveAgentProfile resolves the step's launch
-	// profile (the step's pinned profile, or the workflow default when the step
-	// has none) and applies it over any caller-provided profile, but only for a
-	// task that actually sits on a workflow step. A stepless task keeps its
-	// metadata profile at launch, so here the workflow-derived profile overrides
-	// the caller only on a step; off a step it merely fills an omitted profile.
-	if task.WorkflowStepID != "" || agentProfileID == "" {
-		workflowProfileID, err := h.resolveWorkflowAgentProfileWithError(ctx, task.WorkflowStepID, task.WorkflowID)
-		if err != nil {
-			return mcpAutoStartConfig{}, fmt.Errorf("resolve workflow agent profile: %w", err)
-		}
-		if workflowProfileID != "" {
-			agentProfileID = workflowProfileID
-		}
+	// actually run. At launch resolveEffectiveAgentProfile applies the step's
+	// launch profile (the step's pinned profile, or the workflow default when the
+	// step has none) over any caller-provided profile, but only when the task
+	// sits on a workflow step. A create_task_kandev task lands on a step whenever
+	// its workflow has steps: the explicit workflow_step_id, or the start step
+	// CreateTask assigns when the step is omitted. When the task will be on a
+	// step, the workflow-derived profile overrides the caller; otherwise it only
+	// fills an omitted profile.
+	workflowProfileID, onStepAtLaunch, err := h.resolveWorkflowLaunchProfile(ctx, task.WorkflowStepID, task.WorkflowID)
+	if err != nil {
+		return mcpAutoStartConfig{}, fmt.Errorf("resolve workflow agent profile: %w", err)
+	}
+	if workflowProfileID != "" && (onStepAtLaunch || agentProfileID == "") {
+		agentProfileID = workflowProfileID
 	}
 	if agentProfileID == "" && h.taskSvc != nil {
 		workspace, err := h.taskSvc.GetWorkspace(ctx, task.WorkspaceID)
@@ -1178,6 +1178,36 @@ func (h *Handlers) mcpTaskAgentProfileDefault(ctx context.Context, explicitAgent
 		return usermodels.MCPTaskAgentProfileDefaultCurrentTask, nil
 	}
 	return usermodels.NormalizeMCPTaskAgentProfileDefault(settings.MCPTaskAgentProfileDefault), nil
+}
+
+// resolveWorkflowLaunchProfile returns the workflow-derived agent profile a task
+// launches with and whether the task will sit on a workflow step at launch.
+// onStepAtLaunch is true when the task has an explicit step, or when it has no
+// step yet but its workflow has at least one step (CreateTask assigns that start
+// step). Callers apply the returned profile over an explicit caller profile only
+// when onStepAtLaunch is true; off a step it may only fill an omitted profile.
+func (h *Handlers) resolveWorkflowLaunchProfile(ctx context.Context, workflowStepID, workflowID string) (string, bool, error) {
+	profileID, err := h.resolveWorkflowAgentProfileWithError(ctx, workflowStepID, workflowID)
+	if err != nil {
+		return "", false, err
+	}
+	if workflowStepID != "" {
+		return profileID, true, nil
+	}
+	return profileID, h.workflowHasSteps(ctx, workflowID), nil
+}
+
+// workflowHasSteps reports whether the workflow has at least one step, i.e. a
+// stepless task created on it will be assigned a start step at CreateTask time.
+func (h *Handlers) workflowHasSteps(ctx context.Context, workflowID string) bool {
+	if workflowID == "" || h.workflowCtrl == nil {
+		return false
+	}
+	resp, err := h.workflowCtrl.ListStepsByWorkflow(ctx, workflowctrl.ListStepsRequest{WorkflowID: workflowID})
+	if err != nil || resp == nil {
+		return false
+	}
+	return len(resp.Steps) > 0
 }
 
 func (h *Handlers) resolveWorkflowAgentProfileWithError(ctx context.Context, workflowStepID, workflowID string) (string, error) {
