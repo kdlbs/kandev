@@ -770,3 +770,96 @@ func TestProjectorKeepsPendingWhenRequestStaysAnswerable(t *testing.T) {
 		t.Fatalf("pending action after detach = %+v, want clarification", got)
 	}
 }
+
+// Every announced tool call is persisted with metadata.status="pending" (the raw
+// ACP tool status) before its first tool_update arrives. That is ordinary agent
+// work, not a prompt waiting on the user, so it must never arm the amber
+// permission affordance on the task row.
+func TestProjectorIgnoresPendingToolCallMessages(t *testing.T) {
+	for _, messageType := range []string{"tool_call", "tool_execute", "tool_read", "tool_edit", "tool_search"} {
+		t.Run(messageType, func(t *testing.T) {
+			_, store, eventBus, _, _ := newProjectorTest(t)
+			taskID := "task-pending-tool-" + messageType
+			sessionID := "session-pending-tool-" + messageType
+
+			publishSessionState(t, eventBus, taskID, sessionID, nil)
+			publishProjectorEvent(t, eventBus, events.MessageAdded, events.MessageAdded, map[string]interface{}{
+				"task_id":     taskID,
+				"session_id":  sessionID,
+				"author_type": "agent",
+				"type":        messageType,
+				"metadata": map[string]interface{}{
+					"status":       statusPending,
+					"tool_call_id": "tool-1",
+					"title":        "Terminal",
+				},
+			})
+
+			got := store.summary(taskID)
+			if got == nil {
+				t.Fatal("missing projected summary")
+			}
+			if got.PendingAction != "" {
+				t.Fatalf("pending action for a pending %s = %q, want empty", messageType, got.PendingAction)
+			}
+		})
+	}
+}
+
+// A message that merely carries a pending_id must not default to the permission
+// affordance either: only a real permission_request does.
+func TestProjectorDoesNotDefaultUnknownPendingMessagesToPermission(t *testing.T) {
+	_, store, eventBus, _, _ := newProjectorTest(t)
+	const taskID = "task-pending-unknown"
+	const sessionID = "session-pending-unknown"
+
+	publishSessionState(t, eventBus, taskID, sessionID, nil)
+	publishProjectorEvent(t, eventBus, events.MessageAdded, events.MessageAdded, map[string]interface{}{
+		"task_id":     taskID,
+		"session_id":  sessionID,
+		"author_type": "agent",
+		"type":        "status",
+		"metadata":    map[string]interface{}{"status": statusPending, "pending_id": "pending-1"},
+	})
+
+	got := store.summary(taskID)
+	if got == nil {
+		t.Fatal("missing projected summary")
+	}
+	if got.PendingAction != "" {
+		t.Fatalf("pending action for an untyped pending message = %q, want empty", got.PendingAction)
+	}
+}
+
+// A genuinely pending permission must survive unrelated agent traffic in the
+// same session — a background tool call completing while the foreground turn is
+// blocked on the prompt must not tear down the affordance the user still has to
+// act on.
+func TestProjectorKeepsPendingAcrossUnrelatedToolTraffic(t *testing.T) {
+	_, store, eventBus, _, _ := newProjectorTest(t)
+	const taskID = "task-pending-unrelated-tools"
+	const sessionID = "session-pending-unrelated-tools"
+
+	publishSessionState(t, eventBus, taskID, sessionID, nil)
+	publishProjectorEvent(t, eventBus, events.PermissionRequestReceived, events.BuildPermissionRequestSubject(sessionID), map[string]interface{}{
+		"task_id":    taskID,
+		"session_id": sessionID,
+	})
+	if got := store.summary(taskID); got == nil || got.PendingAction != pendingPermission {
+		t.Fatalf("pending action before tool traffic = %+v, want permission", got)
+	}
+
+	for _, status := range []string{"complete", "error", "cancelled"} {
+		publishProjectorEvent(t, eventBus, events.MessageUpdated, events.MessageUpdated, map[string]interface{}{
+			"task_id":     taskID,
+			"session_id":  sessionID,
+			"author_type": "agent",
+			"type":        "tool_execute",
+			"metadata":    map[string]interface{}{"status": status, "tool_call_id": "background-1"},
+		})
+		got := store.summary(taskID)
+		if got == nil || got.PendingAction != pendingPermission {
+			t.Fatalf("pending action after a %q tool update = %+v, want permission", status, got)
+		}
+	}
+}
