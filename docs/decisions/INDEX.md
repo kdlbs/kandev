@@ -135,3 +135,4 @@ Read individual ADRs for full context. Create new ones via `/record decision` or
 | 2026-08-08-workspace-scoped-task-create-workflow-memory | [Remember Task-Create Workflows Per Workspace](2026-08-08-workspace-scoped-task-create-workflow-memory.md) | accepted | backend, frontend | 2026-08-08 |
 | 2026-08-08-owned-temp-artifact-cleanup | [Clean only registered Kandev temporary artifacts](2026-08-08-owned-temp-artifact-cleanup.md) | accepted | backend, frontend, infra, security | 2026-08-08 |
 | 2026-08-08-task-owned-worktree-lifetime | [Keep Worktree Ownership at the Task Lifecycle](2026-08-08-task-owned-worktree-lifetime.md) | accepted | backend, frontend | 2026-08-08 |
+| 2026-08-08-go-launcher-owns-all-launch-modes | [The Go Launcher Owns Every Entrypoint; apps/cli Is a Publish-Only Shim](2026-08-08-go-launcher-owns-all-launch-modes.md) | accepted | backend, cli, infra | 2026-08-08 |

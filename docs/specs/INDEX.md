@@ -53,6 +53,7 @@ Product-wide capabilities that are not tied to a single feature area.
 | [diagnostic-logging](platform/diagnostic-logging.md) | approved |
 | [provider-error-recovery](platform/provider-error-recovery.md) | draft |
 | [health-endpoint-version](health-endpoint-version/spec.md) | building |
+| [go-dev-launcher](go-dev-launcher/spec.md) | draft |
 
 ## tasks/ — task & workflow model
 

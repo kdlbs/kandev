@@ -153,7 +153,9 @@ build-mock-agent:
 ## Build the winjob helper — wraps a subprocess in a Windows Job Object so
 ## Ctrl-C at the top of the chain reliably terminates the entire subtree
 ## (kandev, agentctl, etc.) instead of leaking them. No-op passthrough on Unix.
-## See apps/cli/src/dev.ts for how the CLI launcher uses it.
+## The native Go launcher replaces this on the `make dev` path with its own
+## process-group handling (internal/launcher/process_group_windows.go); the
+## helper stays for any other consumer.
 build-winjob:
 	@echo "Building winjob..."
 	-@$(MKDIR) $(BUILD_DIR)

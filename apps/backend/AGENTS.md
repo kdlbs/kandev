@@ -289,9 +289,9 @@ When a PR fixup touches backend code, run the CI-style changed-file linter local
 ```bash
 golangci-lint run ./... --new-from-rev="<base-sha>" --timeout=5m
 ```
-
 ## Further scoped notes
 
+- `internal/launcher/` — native launcher owning every entrypoint (`dev`, `start`, `run`, `service`); `dev` runs `make -C apps/backend dev` with Vite as a supervised child, state under `<repoRoot>/.kandev-dev/` (`docs/plans/go-dev-launcher/`).
 - `internal/agentctl/AGENTS.md` — agentctl server route groups, adapter model, ACP protocol
 - `internal/agentctl/server/api/AGENTS.md` — reverse-proxy body rewriting (`Accept-Encoding`), iframe-blocking header stripping
 - `internal/integrations/AGENTS.md` — playbook for adding a new third-party integration (Jira/Linear pattern)

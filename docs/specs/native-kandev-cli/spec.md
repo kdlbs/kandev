@@ -174,7 +174,7 @@ Transitions:
 - **GIVEN** Kandev is installed from Homebrew, **WHEN** the user runs `kandev --help`, **THEN** the help output describes the public launcher commands and does not show `__backend`.
 - **GIVEN** Kandev is installed from Homebrew, **WHEN** the user runs `kandev --version`, **THEN** the command prints the installed Kandev version without executing the Node CLI bundle.
 - **GIVEN** a valid release bundle, **WHEN** the user runs `kandev --headless`, **THEN** the native launcher starts `kandev __backend`, waits for the backend to serve API and SPA routes, and prints the backend URL.
-- **GIVEN** a local checkout with built backend and web artifacts, **WHEN** the user runs `make start`, **THEN** the Makefile launches through `apps/backend/bin/kandev start` and does not invoke `pnpm -C cli dev -- start`.
+- **GIVEN** a local checkout with built backend and web artifacts, **WHEN** the user runs `make start`, **THEN** the Makefile launches through `apps/backend/bin/kandev start` and does not invoke the TypeScript CLI launcher (`kandev dev` likewise goes through the same Go binary).
 - **GIVEN** the backend has requested a restart through the restart adapter, **WHEN** the launcher receives the restart request, **THEN** only the `kandev __backend` child process is replaced.
 - **GIVEN** the user presses Ctrl-C while Kandev is running, **WHEN** the launcher handles the signal, **THEN** it terminates the backend child process before exiting.
 - **GIVEN** a new service install on Linux or macOS, **WHEN** the user runs `kandev service install`, **THEN** the generated service unit executes the public `kandev` launcher path.

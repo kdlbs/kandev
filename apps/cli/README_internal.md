@@ -107,14 +107,7 @@ If the runtime package or bundle is missing, the shim prints an actionable runti
 
 ## Local Development
 
-```bash
-# Run CLI in dev mode (uses tsx)
-pnpm -C apps/cli dev
-
-# Run with arguments
-pnpm -C apps/cli dev -- start
-pnpm -C apps/cli dev -- --port 9000
-```
+This package is a publish-only shim; there is no TypeScript source anymore. The native Go launcher owns every launch mode (`dev`, `start`, `run`, `service`), so `make dev` and friends exec `apps/backend/bin/kandev` directly.
 
 ## Release
 
