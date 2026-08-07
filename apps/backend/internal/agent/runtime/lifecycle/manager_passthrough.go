@@ -982,6 +982,10 @@ func (m *Manager) ResumePassthroughSession(ctx context.Context, sessionID string
 	}
 
 	execution.PassthroughStartedAt = time.Now()
+	// Must precede PassthroughProcessID: handlePassthroughStatus reads
+	// passthroughLaunchUsedResume synchronously once the process ID is visible
+	// (the ID is what routes a status update to this execution), so the flag has
+	// to be set before the process can exit and publish a status.
 	execution.passthroughLaunchUsedResume = useResume
 	execution.PassthroughProcessID = processInfo.ID
 

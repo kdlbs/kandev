@@ -454,11 +454,16 @@ func (m *Manager) createExecutionFromSessionInfo(ctx context.Context, sessionID 
 	// If agent ID not in workspace info (snapshot missing/empty), resolve from profile
 	executionProfileID := workspaceExecutionProfileID(info)
 	if info.AgentID == "" && executionProfileID != "" && m.profileResolver != nil {
-		profileInfo, err := m.profileResolver.ResolveProfile(ctx, executionProfileID)
+		// Resolve only to backfill info.AgentID — keep the name distinct from the
+		// outer profileInfo so it's clear this one is not what reaches
+		// startPassthroughExecution below. Both resolve from the same profile ID,
+		// so the content is identical, but avoiding the shadow keeps ownership
+		// unambiguous for future readers.
+		agentProfile, err := m.profileResolver.ResolveProfile(ctx, executionProfileID)
 		if err != nil {
 			return nil, fmt.Errorf("resolve agent for session %s: %w", sessionID, err)
 		}
-		info.AgentID = profileInfo.AgentName
+		info.AgentID = agentProfile.AgentName
 	}
 
 	// Create the execution
