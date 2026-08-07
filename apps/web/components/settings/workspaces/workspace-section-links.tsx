@@ -158,7 +158,10 @@ export function WorkspaceSectionStats({
               </span>
               <IconChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground/50" />
             </div>
-            <span className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
+            {/* gap-1, not gap-1.5: at the width these tiles sit at on a laptop
+                the longest label ("Automations") overflowed its box by a single
+                pixel once the mark took its place beside it. */}
+            <span className="flex min-w-0 items-center gap-1 text-xs text-muted-foreground">
               <Icon className="h-3.5 w-3.5 shrink-0" />
               <span className="truncate">{t(labelKey)}</span>
             </span>
