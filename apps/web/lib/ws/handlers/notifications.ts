@@ -6,6 +6,9 @@ import {
   NOTIFICATION_EVENT_SYSTEM_UPDATE_AVAILABLE,
 } from "@/lib/notifications/events";
 import { playWaitingForInputSound } from "@/lib/notifications/sound";
+// Module-level `t`, resolved at call time: these handlers are plain callbacks
+// invoked by the WS client, not components, so there is no hook to bind.
+import { t } from "@/lib/i18n";
 import { nativeNotifications } from "@/lib/desktop/native-notification-client";
 import type { AppState } from "@/lib/state/store";
 import type {
@@ -39,10 +42,18 @@ function showDesktopNotification(payload: NotificationPayload): void {
   new Notification(payload.title, { body: payload.body });
 }
 
+/**
+ * Catalog keys for the copy shown when the backend sends an empty title/body.
+ * Keys rather than resolved strings: the handlers are registered once when the
+ * WS client starts, so resolving here would pin the fallback to whichever locale
+ * was active at registration. `t` runs inside the handler, per notification.
+ */
+type NotificationFallbackKeys = { titleKey: string; bodyKey: string };
+
 function registerNotificationHandler(
   store: StoreApi<AppState>,
   eventType: string,
-  fallback: Pick<NotificationPayload, "title" | "body">,
+  fallback: NotificationFallbackKeys,
 ) {
   return (message: { id?: string; payload: NotificationPayload }) => {
     const sessionId = message.payload?.session_id;
@@ -55,8 +66,8 @@ function registerNotificationHandler(
     playWaitingForInputSound();
     const payload = {
       ...message.payload,
-      title: message.payload.title || fallback.title,
-      body: message.payload.body || fallback.body,
+      title: message.payload.title || t(fallback.titleKey),
+      body: message.payload.body || t(fallback.bodyKey),
     };
     const occurrenceID =
       message.id ??
@@ -86,24 +97,24 @@ export function registerNotificationsHandlers(store: StoreApi<AppState>): WsHand
       store,
       NOTIFICATION_EVENT_SESSION_TURN_FINISHED,
       {
-        title: "Agent turn finished",
-        body: "The agent finished a turn.",
+        titleKey: "common:notificationTurnFinishedTitle",
+        bodyKey: "common:notificationTurnFinishedBody",
       },
     ),
     [NOTIFICATION_EVENT_SESSION_CLARIFICATION_REQUESTED]: registerNotificationHandler(
       store,
       NOTIFICATION_EVENT_SESSION_CLARIFICATION_REQUESTED,
       {
-        title: "Agent needs your answer",
-        body: "The agent asked a question.",
+        titleKey: "common:notificationClarificationTitle",
+        bodyKey: "common:notificationClarificationBody",
       },
     ),
     [NOTIFICATION_EVENT_OFFICE_INBOX_ITEM]: registerNotificationHandler(
       store,
       NOTIFICATION_EVENT_OFFICE_INBOX_ITEM,
       {
-        title: "New inbox item",
-        body: "A new item needs your attention.",
+        titleKey: "common:notificationInboxItemTitle",
+        bodyKey: "common:notificationInboxItemBody",
       },
     ),
     [NOTIFICATION_EVENT_SYSTEM_UPDATE_AVAILABLE]: (message: { payload: UpdateAvailablePayload }) =>
