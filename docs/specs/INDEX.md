@@ -229,6 +229,7 @@ System pages (Radarr/Sonarr-style) for status, disk usage, database maintenance,
 | [mobile-quick-chat-topbar](mobile-quick-chat-topbar/spec.md) | building |
 | [native-code-review](native-code-review/spec.md) | building |
 | [missing-task-route-recovery](missing-task-route-recovery/spec.md) | draft |
+| [browser-inspect-annotations-save](browser-inspect-annotations-save/spec.md) | shipped |
 
 ---
 
