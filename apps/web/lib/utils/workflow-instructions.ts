@@ -63,7 +63,9 @@ export function splitWorkflowInstructions(content: string): WorkflowInstructions
   }
 
   const instructions = afterHeading.slice(0, endIdx).replace(/\n+$/, "");
-  const afterEnd = afterHeading.slice(endIdx + WORKFLOW_INSTRUCTIONS_END.length).replace(/^\n+/, "");
+  const afterEnd = afterHeading
+    .slice(endIdx + WORKFLOW_INSTRUCTIONS_END.length)
+    .replace(/^\n+/, "");
   return {
     instructions,
     rest: afterEnd,

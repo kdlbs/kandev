@@ -18,9 +18,7 @@ afterEach(() => {
 
 describe("WorkflowPromptSection", () => {
   it("starts collapsed when the prompt is empty", () => {
-    render(
-      <WorkflowPromptSection workflow={baseWorkflow} onUpdate={vi.fn()} />,
-    );
+    render(<WorkflowPromptSection workflow={baseWorkflow} onUpdate={vi.fn()} />);
 
     expect(screen.getByTestId("workflow-prompt-toggle")).toBeTruthy();
     expect(screen.queryByTestId("workflow-prompt-input")).toBeNull();
@@ -63,9 +61,7 @@ describe("WorkflowPromptSection", () => {
   it("marks the textarea dirty when the draft prompt differs from saved", () => {
     const draft = { ...baseWorkflow, prompt: "new" };
     const saved = { ...baseWorkflow, prompt: "old" };
-    render(
-      <WorkflowPromptSection workflow={draft} savedWorkflow={saved} onUpdate={vi.fn()} />,
-    );
+    render(<WorkflowPromptSection workflow={draft} savedWorkflow={saved} onUpdate={vi.fn()} />);
     const input = screen.getByTestId("workflow-prompt-input");
     expect(input.getAttribute("data-settings-dirty")).toBe("true");
   });

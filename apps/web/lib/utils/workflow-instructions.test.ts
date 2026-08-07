@@ -21,13 +21,13 @@ describe("splitWorkflowInstructions", () => {
   });
 
   it("splits a leading workflow instructions block from the step body", () => {
-    expect(splitWorkflowInstructions(block("Always open a draft PR.", "Commit the changes."))).toEqual(
-      {
-        instructions: "Always open a draft PR.",
-        rest: "Commit the changes.",
-        hasInstructions: true,
-      },
-    );
+    expect(
+      splitWorkflowInstructions(block("Always open a draft PR.", "Commit the changes.")),
+    ).toEqual({
+      instructions: "Always open a draft PR.",
+      rest: "Commit the changes.",
+      hasInstructions: true,
+    });
   });
 
   it("keeps multi-line and multi-paragraph instruction bodies intact", () => {
