@@ -231,6 +231,7 @@
   "wipLimit": "WIP limit",
   "wipLimitHelp": "Maximum admitted (active) tasks in this step. Overflow stays visible in a queue. Use 0 for unlimited.",
   "wipLimitsNote": "WIP limits active work, not visibility. Overflow remains on the board until capacity opens; if a selected feeder is also full, new task creation is rejected.",
+  "workflow": "Workflow",
   "workflowCycleBlocked": "Workflow cycle blocked",
   "workflowCycleBlockedDescription": "Change the workflow steps to remove the automatic cycle before continuing.",
   "workflowCycleBlockingBody": "This path re-enters \"{{stepName}}\" and can start the agent again without another user action.",
