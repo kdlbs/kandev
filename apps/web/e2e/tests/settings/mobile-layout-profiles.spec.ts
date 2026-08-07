@@ -17,6 +17,26 @@ type SavedProfile = {
 };
 
 test.describe("Mobile layout profiles", () => {
+  test("opens the Add panel menu via touch without auto-adding the first missing panel", async ({
+    testPage,
+  }) => {
+    // Regression guard: Radix's DropdownMenu opens on pointerdown and
+    // tracks the pointer session through to release. A tap presses and
+    // releases at the same coordinates with no movement, and used to
+    // race the menu's first render - the pointerup landed on the
+    // just-opened first item ("PR Details") and silently added it
+    // before the user ever chose anything. See layout-editor-toolbar.tsx
+    // AddPanelAction for the fix (deferred, click-driven open state).
+    const layouts = new LayoutSettingsPage(testPage);
+    await layouts.openFromMobileMenu();
+    const trigger = testPage.getByTestId("layout-editor-add-panel").getByRole("button", {
+      name: "Add panel",
+    });
+    await trigger.tap();
+    await expect(testPage.getByRole("menuitem", { name: "PR Details", exact: true })).toBeVisible();
+    await expect(layouts.editor.locator(".dv-tab", { hasText: "PR Details" })).toHaveCount(0);
+  });
+
   test("moves PR Details with touch controls without horizontal overflow", async ({
     testPage,
     apiClient,
