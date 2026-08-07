@@ -3,6 +3,11 @@ import { loadPlugins } from "./host";
 import { pluginRegistry } from "./registry";
 import type { ActivePlugin, PluginHostApi, PluginRegistry } from "./types";
 
+/** No-op `host.toast`; these specs exercise lifecycle, never notifications. */
+const NOOP_TOAST = new Proxy(() => 0, {
+  get: () => () => 0,
+}) as unknown as PluginHostApi["toast"];
+
 const PLUGIN_LIFECYCLE_A_ID = "plugin-lifecycle-a";
 const PLUGIN_TIMEOUT_ID = "plugin-timeout-a";
 
@@ -30,6 +35,8 @@ function makeHostFactory(pluginId: string): PluginHostApi {
     onThemeChange: () => () => {},
     navigate: () => {},
     openModal: () => ({ close: () => {} }),
+    toast: NOOP_TOAST,
+    utils: { cn: () => "", formatRelativeTime: () => "" },
     storage: {
       get: async () => undefined,
       set: async () => ({ updatedAt: "" }),

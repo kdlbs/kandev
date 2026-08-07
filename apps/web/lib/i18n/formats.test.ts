@@ -1,6 +1,6 @@
-import { beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
-import { formatDate, formatNumber, formatRelative } from "./formats";
+import { formatDate, formatNumber, formatRelative, formatRelativeTime } from "./formats";
 import { activateLocale } from "./index";
 
 beforeAll(async () => {
@@ -82,5 +82,91 @@ describe("locale-aware Intl wrappers", () => {
       new Intl.DateTimeFormat("pt-pt", dateOptions).format(new Date(date)),
     );
     await activateLocale("en");
+  });
+});
+
+/**
+ * `host.utils.formatRelativeTime` (docs/plans/plugins/PLUGIN-API.md). Unlike
+ * `formatRelative` above, this one goes through `Intl.RelativeTimeFormat`
+ * rather than the message catalog, so it covers the full range up to years
+ * and localizes without any keys — which is the point: three published
+ * plugins ship hand-rolled English-only versions of this.
+ */
+const THREE_HOURS_AGO = "3 hours ago";
+
+describe("formatRelativeTime (en)", () => {
+  const now = new Date("2026-07-27T12:00:00Z").getTime();
+  const secondsAgo = (n: number) => new Date(now - n * 1000);
+  const secondsAhead = (n: number) => new Date(now + n * 1000);
+
+  it("returns an empty string for unparseable input", () => {
+    expect(formatRelativeTime("not-a-date", now)).toBe("");
+    expect(formatRelativeTime("", now)).toBe("");
+  });
+
+  it("collapses anything within ten seconds to 'now'", () => {
+    expect(formatRelativeTime(secondsAgo(0), now)).toBe("now");
+    expect(formatRelativeTime(secondsAgo(9), now)).toBe("now");
+    expect(formatRelativeTime(secondsAhead(9), now)).toBe("now");
+  });
+
+  it("reports whole seconds below a minute", () => {
+    expect(formatRelativeTime(secondsAgo(10), now)).toBe("10 seconds ago");
+    expect(formatRelativeTime(secondsAgo(59), now)).toBe("59 seconds ago");
+  });
+
+  it("switches to minutes, hours, days and weeks at each boundary", () => {
+    expect(formatRelativeTime(secondsAgo(60), now)).toBe("1 minute ago");
+    expect(formatRelativeTime(secondsAgo(90), now)).toBe("1 minute ago");
+    expect(formatRelativeTime(secondsAgo(60 * 60), now)).toBe("1 hour ago");
+    expect(formatRelativeTime(secondsAgo(3 * 60 * 60), now)).toBe(THREE_HOURS_AGO);
+    expect(formatRelativeTime(secondsAgo(2 * 24 * 60 * 60), now)).toBe("2 days ago");
+    expect(formatRelativeTime(secondsAgo(3 * 7 * 24 * 60 * 60), now)).toBe("3 weeks ago");
+    expect(formatRelativeTime(secondsAgo(800 * 24 * 60 * 60), now)).toBe("2 years ago");
+  });
+
+  // numeric: "auto" is deliberate — CLDR phrases the small magnitudes
+  // idiomatically, which no interpolated number can do across locales.
+  it("uses idiomatic phrasing for a single unit either side", () => {
+    expect(formatRelativeTime(secondsAgo(24 * 60 * 60), now)).toBe("yesterday");
+    expect(formatRelativeTime(secondsAhead(24 * 60 * 60), now)).toBe("tomorrow");
+    expect(formatRelativeTime(secondsAgo(400 * 24 * 60 * 60), now)).toBe("last year");
+  });
+
+  it("phrases future timestamps as future", () => {
+    expect(formatRelativeTime(secondsAhead(3 * 60 * 60), now)).toBe("in 3 hours");
+    expect(formatRelativeTime(secondsAhead(5 * 24 * 60 * 60), now)).toBe("in 5 days");
+  });
+
+  it("accepts a Date, an epoch number, and an ISO string alike", () => {
+    const date = secondsAgo(3 * 60 * 60);
+    expect(formatRelativeTime(date, now)).toBe(THREE_HOURS_AGO);
+    expect(formatRelativeTime(date.getTime(), now)).toBe(THREE_HOURS_AGO);
+    expect(formatRelativeTime(date.toISOString(), now)).toBe(THREE_HOURS_AGO);
+  });
+});
+
+/**
+ * The reason this lives in the host rather than in each plugin. A hand-rolled
+ * "3 hours ago" ladder is English-only by construction; Intl reads the active
+ * locale, so the same call renders Portuguese for a pt-PT user.
+ */
+describe("formatRelativeTime (locale awareness)", () => {
+  const now = new Date("2026-07-27T12:00:00Z").getTime();
+  const threeHoursAgo = new Date(now - 3 * 60 * 60 * 1000);
+
+  afterAll(async () => {
+    await activateLocale("en");
+  });
+
+  it("renders in the active locale, not English", async () => {
+    const english = formatRelativeTime(threeHoursAgo, now);
+
+    await activateLocale("pt-pt");
+    const portuguese = formatRelativeTime(threeHoursAgo, now);
+
+    expect(portuguese).not.toBe(english);
+    expect(portuguese).toContain("3");
+    expect(portuguese).toMatch(/horas/i);
   });
 });

@@ -371,9 +371,9 @@ export interface PluginHostApi {
   };
   /**
    * Curated subset of `@kandev/ui` components (Button, Card, Badge, Input,
-   * Tabs, Dialog, Table, ...) plus first-party app UI (PageTopbar,
-   * TaskCreateDialog, RichTextEditor, RichTextReadOnly). See
-   * `lib/plugins/host-api.ts` for the full list.
+   * Tabs, Dialog, Table, Popover, Progress, Accordion, Chart, ...) plus
+   * first-party app UI (PageTopbar, TaskCreateDialog, RichTextEditor,
+   * RichTextReadOnly). See `lib/plugins/host-api.ts` for the full list.
    */
   ui: Record<string, unknown>;
   /**
@@ -400,8 +400,44 @@ export interface PluginHostApi {
    * handler may call it, but it works from any plugin code path.
    */
   openModal(options: PluginModalOptions): PluginModalHandle;
+  /**
+   * Sonner's imperative `toast` (through the app's error-reporting wrapper).
+   * The host mounts the single `<Toaster/>`, so there is nothing to render:
+   * `host.toast.success(...)` / `.error(...)` / `.warning(...)` work from any
+   * plugin code path, including inside a modal.
+   */
+  toast: PluginToastApi;
+  /** Shared helpers — plain functions, not components. See `PluginUtilsApi`. */
+  utils: PluginUtilsApi;
   /** Authenticated, per-user key/value storage. See `PluginStorageApi`. */
   storage: PluginStorageApi;
+}
+
+/**
+ * `host.toast` — sonner's `toast`. Typed structurally rather than as
+ * `typeof import("sonner").toast` so a plugin's own type-checking does not
+ * need sonner installed.
+ */
+export type PluginToastApi = {
+  (message: string, options?: Record<string, unknown>): string | number;
+  success(message: string, options?: Record<string, unknown>): string | number;
+  error(message: string, options?: Record<string, unknown>): string | number;
+  warning(message: string, options?: Record<string, unknown>): string | number;
+  info(message: string, options?: Record<string, unknown>): string | number;
+  dismiss(id?: string | number): unknown;
+};
+
+/** `host.utils` — shared helpers a plugin would otherwise reimplement. */
+export interface PluginUtilsApi {
+  /** The host's `clsx` + `tailwind-merge` class combiner. */
+  cn(...inputs: unknown[]): string;
+  /**
+   * Locale-aware relative time ("3 hours ago", "in 2 days", "yesterday") via
+   * `Intl.RelativeTimeFormat` in the user's active locale. Returns "" for
+   * unparseable input. Prefer this over a hand-rolled ladder — those are
+   * English-only and go untranslated for every non-English user.
+   */
+  formatRelativeTime(value: string | number | Date): string;
 }
 
 /**

@@ -5,6 +5,11 @@ import { pluginModalManager } from "./modal-manager";
 import { pluginRegistry } from "./registry";
 import type { ActivePlugin, PluginHostApi, PluginRegistry } from "./types";
 
+/** No-op `host.toast`; these specs exercise lifecycle, never notifications. */
+const NOOP_TOAST = new Proxy(() => 0, {
+  get: () => () => 0,
+}) as unknown as PluginHostApi["toast"];
+
 let mockApiBaseUrl = "";
 vi.mock("@/lib/config", () => ({
   getBackendConfig: () => ({ apiBaseUrl: mockApiBaseUrl }),
@@ -37,6 +42,8 @@ function makeHostFactory(pluginId: string): PluginHostApi {
     onThemeChange: () => () => {},
     navigate: () => {},
     openModal: () => ({ close: () => {} }),
+    toast: NOOP_TOAST,
+    utils: { cn: () => "", formatRelativeTime: () => "" },
     storage: {
       get: async () => undefined,
       set: async () => ({ updatedAt: "" }),

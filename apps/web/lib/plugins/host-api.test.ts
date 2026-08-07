@@ -5,16 +5,45 @@ import { buildHostApi } from "./host-api";
 
 /** Curated primitives a plugin needs to build a full native-feeling page. */
 const EXPECTED_UI_PRIMITIVES = [
+  "Accordion",
+  "AccordionContent",
+  "AccordionItem",
+  "AccordionTrigger",
   "Alert",
   "Badge",
   "Button",
   "Card",
+  "ChartContainer",
+  "ChartLegend",
+  "ChartLegendContent",
+  "ChartStyle",
+  "ChartTooltip",
+  "ChartTooltipContent",
   "Checkbox",
+  "Collapsible",
+  "CollapsibleContent",
+  "CollapsibleTrigger",
   "Dialog",
   "DropdownMenu",
+  "Empty",
+  "EmptyContent",
+  "EmptyDescription",
+  "EmptyHeader",
+  "EmptyMedia",
+  "EmptyTitle",
   "Input",
+  "Kbd",
+  "KbdGroup",
   "Label",
   "Pagination",
+  "Popover",
+  "PopoverAnchor",
+  "PopoverContent",
+  "PopoverDescription",
+  "PopoverHeader",
+  "PopoverTitle",
+  "PopoverTrigger",
+  "Progress",
   "ScrollArea",
   "Select",
   "Sheet",
@@ -31,6 +60,7 @@ const EXPECTED_UI_PRIMITIVES = [
   "Tabs",
   "Textarea",
   "Tooltip",
+  "TooltipProvider",
 ];
 
 describe("buildHostApi — api.fetch", () => {
@@ -235,6 +265,39 @@ describe("buildHostApi — host.theme / host.onThemeChange", () => {
 
     unsubscribe();
     document.documentElement.classList.remove("some-unrelated-class");
+  });
+});
+
+/**
+ * `toast` and `utils` are functions, so they sit beside `navigate`/`openModal`
+ * rather than in `ui`, which is a component map.
+ */
+describe("buildHostApi — host.toast / host.utils", () => {
+  it("exposes sonner's imperative toast, which needs no host rendering", () => {
+    const host = buildHostApi("jira", createAppStore());
+
+    expect(typeof host.toast).toBe("function");
+    for (const method of ["success", "error", "warning", "info", "dismiss"] as const) {
+      expect(typeof host.toast[method], `host.toast.${method}`).toBe("function");
+    }
+  });
+
+  it("exposes cn, merging conflicting tailwind classes the way host components do", () => {
+    const host = buildHostApi("jira", createAppStore());
+
+    expect(typeof host.utils.cn).toBe("function");
+    // tailwind-merge semantics, not plain concatenation — the later padding wins.
+    expect(host.utils.cn("p-2", "p-4")).toBe("p-4");
+    const hidden = false;
+    expect(host.utils.cn("text-sm", hidden && "hidden", "font-bold")).toBe("text-sm font-bold");
+  });
+
+  it("exposes formatRelativeTime rather than leaving plugins to hand-roll one", () => {
+    const host = buildHostApi("jira", createAppStore());
+
+    expect(typeof host.utils.formatRelativeTime).toBe("function");
+    const threeHoursAgo = new Date(Date.now() - 3 * 60 * 60 * 1000);
+    expect(host.utils.formatRelativeTime(threeHoursAgo)).toContain("3");
   });
 });
 

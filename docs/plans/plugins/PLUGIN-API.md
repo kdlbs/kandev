@@ -75,6 +75,14 @@ interface PluginHostApi {
   // (mounted once at the app root, isolated behind its own error boundary).
   // Independent of keybindings — any plugin code path may call it.
   openModal(options: PluginModalOptions): PluginModalHandle;
+  // Sonner's imperative toast. The host mounts the single <Toaster/>, so
+  // there is nothing to render and nothing to wire — and because it is
+  // imperative rather than a component, it works from inside a plugin modal
+  // regardless of which providers that modal sits under.
+  toast: PluginToastApi;
+  // Shared helpers — plain functions, so they live here rather than in `ui`
+  // (a component map). See the "host.utils" section below.
+  utils: PluginUtilsApi;
   // Authenticated, per-user key/value storage backed by
   // /api/plugins/{id}/user-state/... — see the "host.storage" section below.
   // Requires the plugin manifest to declare capabilities.user_state: true.
@@ -162,10 +170,13 @@ interface PluginModalHandle {
 }
 ```
 
-`host.ui` contents: shadcn primitives (Alert*, Badge, Button, Card*, Checkbox,
-Dialog*, DropdownMenu*, Input, Label, Pagination*, ScrollArea, Select*,
+`host.ui` contents: shadcn primitives (Accordion*, Alert*, Badge, Button,
+Card*, Checkbox, Collapsible*, Dialog*, DropdownMenu*, Empty*, Input, Kbd,
+KbdGroup, Label, Pagination*, Popover*, Progress, ScrollArea, Select*,
 Separator, Sheet*, Skeleton, Spinner, Switch, Table*, Tabs*, Textarea,
-Tooltip*, including `TooltipProvider`) plus first-party app UI: `PageTopbar` (the kandev title bar, for
+Tooltip*, including `TooltipProvider`), the recharts wrappers (`ChartContainer`,
+`ChartTooltip`, `ChartTooltipContent`, `ChartLegend`, `ChartLegendContent`,
+`ChartStyle`), plus first-party app UI: `PageTopbar` (the kandev title bar, for
 routes that opt out of the default chrome and own their layout),
 `TaskCreateDialog` (kandev's real create-task modal, prefilled via
 `initialValues`), `Combobox` (the app's Command+Popover picker), and
@@ -183,6 +194,37 @@ The host wraps plugin routes, slots, and `openModal` content in a
 `TooltipProvider` is exported for plugins that want their own
 `delayDuration`/`skipDelayDuration` over a dense cluster of tooltips; Radix
 supports nesting it.
+
+**Charts use the host's recharts.** `recharts` is already a dependency of both
+`apps/web` and `@kandev/ui`, so the `Chart*` exports add no bundle weight — and
+a plugin must never bundle its own copy. recharts drives layout through its own
+React context and portals its tooltips, so a second copy splits that context
+exactly the way a second Radix copy does: charts render at zero size, tooltips
+attach to the wrong tree, and responsive containers stop resizing. Compose the
+`Chart*` wrappers with the chart primitives they hand you rather than importing
+`recharts` in plugin code.
+
+### `host.toast` and `host.utils`
+
+```ts
+// Sonner's imperative toast — the host owns the single <Toaster/>.
+host.toast.success("Synced 12 issues");
+host.toast.error("Sync failed");
+
+interface PluginUtilsApi {
+  // The host's clsx + tailwind-merge combiner, so class merging matches the
+  // components it styles.
+  cn(...inputs: unknown[]): string;
+  // Locale-aware relative time ("3 hours ago", "in 2 days", "yesterday") via
+  // Intl.RelativeTimeFormat in the user's active locale; "" for unparseable
+  // input. Prefer it over a hand-rolled ladder, which is English-only by
+  // construction and goes untranslated for every non-English user.
+  formatRelativeTime(value: string | number | Date): string;
+}
+```
+
+Both are functions, so they sit beside `navigate`/`openModal` rather than in
+`ui`, which is a component map.
 
 ### `host.ui.RichTextEditor` / `host.ui.RichTextReadOnly`
 
