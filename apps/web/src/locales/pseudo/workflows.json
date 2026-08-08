@@ -245,6 +245,8 @@
   "workflowCycleBlockingBody": "Ţĥĩś ƥàţĥ ŕē-ēńţēŕś \"{{stepName}}\" àńď ćàń śţàŕţ ţĥē àĝēńţ àĝàĩń ŵĩţĥōũţ àńōţĥēŕ ũśēŕ àćţĩōń.",
   "workflowCycleReplayPathFor": "Ŕēƥĺàŷ ƥàţĥ ƒōŕ {{stepName}}",
   "workflowCycleWarningBody": "Ţĥĩś ƥàţĥ ćàń ŕē-ēńţēŕ \"{{stepName}}\" àńď śţàŕţ ţĥē àĝēńţ àĝàĩń àƒţēŕ à ũśēŕ àćţĩōń.",
+  "workflowDescription": "Ďēśćŕĩƥţĩōń",
+  "workflowDescriptionPlaceholder": "Ōƥţĩōńàĺ ďēśćŕĩƥţĩōń",
   "workflowDetails": "Ŵōŕķƒĺōŵ ďēţàĩĺś",
   "workflowName": "Ŵōŕķƒĺōŵ Ńàḿē",
   "workflowsReadOnlyImprove": "Ŵōŕķƒĺōŵś ĩń ţĥĩś ŵōŕķśƥàćē àŕē ḿàńàĝēď ƀŷ Ĩḿƥŕōvē Ķàńďēv àńď ćàńńōţ ƀē ćĥàńĝēď.",

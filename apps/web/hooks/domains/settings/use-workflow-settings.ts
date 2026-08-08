@@ -140,7 +140,7 @@ function workflowIsDirty(workflow: Workflow, savedWorkflows: Map<string, Workflo
   if (!saved) return true;
   return (
     workflow.name !== saved.name ||
-    workflow.description !== saved.description ||
+    (workflow.description ?? "") !== (saved.description ?? "") ||
     (workflow.prompt ?? "") !== (saved.prompt ?? "") ||
     (workflow.agent_profile_id ?? "") !== (saved.agent_profile_id ?? "")
   );

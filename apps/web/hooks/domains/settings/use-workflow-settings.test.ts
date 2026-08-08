@@ -171,6 +171,29 @@ describe("useWorkflowSettings", () => {
     expect(result.current.savedWorkflowItems[0].name).toBe("Remote name");
     expect(result.current.isWorkflowDirty(result.current.workflowItems[0])).toBe(true);
   });
+
+  it("does not report a workflow dirty after its description is edited then cleared back to an absent saved description", () => {
+    // Backend omits `description` entirely when empty (omitempty), so a
+    // workflow with no saved description has `saved.description === undefined`,
+    // not "". Typing into the description field and then clearing it sets the
+    // draft to "" — that must still compare equal to the absent saved value.
+    const initial: Workflow[] = [{ ...wf("wf-b1", "ws-b", NAME_B1), description: undefined }];
+    const { result } = renderHook(() => useWorkflowSettings(initial, "ws-b"));
+
+    act(() => {
+      result.current.setWorkflowItems((items) =>
+        items.map((item) => ({ ...item, description: "test description" })),
+      );
+    });
+    expect(result.current.isWorkflowDirty(result.current.workflowItems[0])).toBe(true);
+
+    act(() => {
+      result.current.setWorkflowItems((items) =>
+        items.map((item) => ({ ...item, description: "" })),
+      );
+    });
+    expect(result.current.isWorkflowDirty(result.current.workflowItems[0])).toBe(false);
+  });
 });
 
 describe("useWorkflowSettings visibility", () => {
