@@ -4,16 +4,21 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/mentions"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository"
 	apiv1 "github.com/kandev/kandev/pkg/api/v1"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zaptest/observer"
 )
 
 type fakeMentionScopeResolver struct {
@@ -112,7 +117,7 @@ func TestMentionHTTPCompositionValidatesWorkspaceBeforeMixedProviderFanout(t *te
 	resolver := &fakeMentionScopeResolver{workspaces: map[string]*models.Workspace{
 		"workspace-1": {ID: "workspace-1", Name: "One"},
 	}}
-	components, err := newMentionComponents(resolver, resolver, failure, timeout, success)
+	components, err := newMentionComponents(testLogger(t), resolver, resolver, failure, timeout, success)
 	if err != nil {
 		t.Fatalf("compose mentions: %v", err)
 	}
@@ -190,7 +195,7 @@ func TestMentionHTTPCompositionPropagatesRequestCancellation(t *testing.T) {
 	resolver := &fakeMentionScopeResolver{workspaces: map[string]*models.Workspace{
 		"workspace-1": {ID: "workspace-1", Name: "One"},
 	}}
-	components, err := newMentionComponents(resolver, resolver, provider)
+	components, err := newMentionComponents(testLogger(t), resolver, resolver, provider)
 	if err != nil {
 		t.Fatalf("compose mentions: %v", err)
 	}
@@ -226,11 +231,52 @@ func TestMentionHTTPCompositionPropagatesRequestCancellation(t *testing.T) {
 		t.Fatal("provider did not observe request cancellation")
 	}
 
-	if response.Code != http.StatusInternalServerError {
-		t.Fatalf("status = %d, body = %s", response.Code, response.Body.String())
+	if response.Code != 499 {
+		t.Fatalf("status = %d, want 499; body = %s", response.Code, response.Body.String())
 	}
 	if !provider.canceled {
 		t.Fatal("provider did not observe request cancellation")
+	}
+}
+
+func TestMentionHTTPCompositionLogsWorkspaceFailureOnceWithSafeFields(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	core, observed := observer.New(zap.DebugLevel)
+	log, err := logger.NewFromZap(zap.New(core))
+	if err != nil {
+		t.Fatalf("create observer logger: %v", err)
+	}
+	resolver := &fakeMentionScopeResolver{err: errors.New("secret database address")}
+	components, err := newMentionComponents(log, resolver, resolver)
+	if err != nil {
+		t.Fatalf("compose mentions: %v", err)
+	}
+	router := gin.New()
+	registerMentionRoutes(router, components)
+
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, httptest.NewRequest(
+		http.MethodGet,
+		"/api/v1/workspaces/workspace-1/mentions/search?q=secret-query",
+		nil,
+	))
+
+	if response.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want %d", response.Code, http.StatusInternalServerError)
+	}
+	entries := observed.All()
+	if len(entries) != 1 || entries[0].Level != zap.ErrorLevel {
+		t.Fatalf("workspace failure diagnostics = %#v", entries)
+	}
+	fields := entries[0].ContextMap()
+	if fields["workspace_id"] != "workspace-1" ||
+		fields["failure_stage"] != mentions.FailureStageWorkspaceValidation ||
+		fields["failure_class"] != mentions.FailureClassWorkspaceLookup {
+		t.Fatalf("workspace failure fields = %#v", fields)
+	}
+	if strings.Contains(fmt.Sprint(fields), "secret-query") ||
+		strings.Contains(fmt.Sprint(fields), "secret database address") {
+		t.Fatalf("workspace failure diagnostics leaked sensitive detail: %#v", fields)
 	}
 }
 

@@ -78,6 +78,7 @@ export function buildStateOverrides(m: DefaultState) {
     automations: m.automations,
     automationRuns: m.automationRuns,
     system: m.system,
+    agentRuntime: m.agentRuntime,
     previewPanel: m.previewPanel,
     rightPanel: m.rightPanel,
     diffs: m.diffs,

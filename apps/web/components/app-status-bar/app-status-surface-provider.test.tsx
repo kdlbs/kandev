@@ -8,6 +8,16 @@ const responsiveState = vi.hoisted(() => ({
   breakpoint: "desktop" as "mobile" | "tablet" | "desktop",
 }));
 const featureState = vi.hoisted(() => ({ appStatusBar: true }));
+const restartState = vi.hoisted(() => ({
+  capability: { status: "resolved", capability: { supported: false, mode: "manual" } },
+  restart: {
+    phase: "idle",
+    errorMessage: null,
+    isRestarting: false,
+    start: vi.fn(),
+    dismiss: vi.fn(),
+  },
+}));
 const STATUS_BAR_TEST_ID = "app-status-bar";
 const STATUS_DRAWER_TEST_ID = "app-status-drawer";
 const STATUS_DRAWER_TRIGGER_TEST_ID = "app-status-drawer-trigger";
@@ -27,6 +37,14 @@ vi.mock("@/hooks/use-responsive-breakpoint", () => ({
 
 vi.mock("@/hooks/domains/features/use-feature", () => ({
   useFeature: (name: string) => (name === "appStatusBar" ? featureState.appStatusBar : true),
+}));
+
+vi.mock("@/hooks/domains/system/use-restart-capability", () => ({
+  useRestartCapability: () => restartState.capability,
+}));
+
+vi.mock("@/hooks/domains/system/use-kandev-restart", () => ({
+  useKandevRestart: () => restartState.restart,
 }));
 
 vi.mock("./app-status-bar", () => ({
@@ -117,6 +135,21 @@ describe("AppStatusSurfaceProvider", () => {
     expect(screen.queryByTestId(STATUS_BAR_TEST_ID)).toBeNull();
     expect(screen.queryByTestId(STATUS_DRAWER_TEST_ID)).toBeNull();
     expect(screen.queryByTestId(STATUS_DRAWER_TRIGGER_TEST_ID)).toBeNull();
+  });
+
+  it("keeps the runtime alert visible when the app-status-bar feature is disabled", () => {
+    featureState.appStatusBar = false;
+    renderSurface({
+      agentRuntime: {
+        status: "unavailable",
+        reason: "agentctl_exited",
+        occurred_at: "2026-08-08T14:22:52Z",
+      },
+    });
+
+    expect(screen.getByRole("alert")).toBeTruthy();
+    expect(screen.queryByTestId(STATUS_BAR_TEST_ID)).toBeNull();
+    expect(screen.queryByTestId(STATUS_DRAWER_TEST_ID)).toBeNull();
   });
 
   it("exposes a connection-only Status drawer for an active phone warning when disabled", () => {

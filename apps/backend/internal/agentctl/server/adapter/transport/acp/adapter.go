@@ -534,6 +534,7 @@ func (a *Adapter) sendUpdate(event AgentEvent) {
 	if lifetimeCtx == nil {
 		lifetimeCtx = context.Background()
 	}
+	event.NormalizedPayload = event.NormalizedPayload.Snapshot()
 	closedCh := a.closedCh
 	if closedCh != nil {
 		a.updateSendWg.Add(1)
@@ -558,6 +559,7 @@ func (a *Adapter) sendUpdateLocked(event AgentEvent) bool {
 	if a.closed {
 		return false
 	}
+	event.NormalizedPayload = event.NormalizedPayload.Snapshot()
 	select {
 	case a.updatesCh <- event:
 		return true

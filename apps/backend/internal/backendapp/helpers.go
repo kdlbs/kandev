@@ -543,6 +543,7 @@ type routeParams struct {
 	secretStore                   secrets.SecretStore
 	mcpConfigSvc                  *mcpconfig.Service
 	authSvc                       *auth.Service
+	agentRuntimeAvailability      *client.Availability
 	addCleanup                    func(func() error)
 	repoCloner                    *repoclone.Cloner
 	version                       string
