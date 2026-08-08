@@ -459,6 +459,28 @@ func (s *Server) getTaskConversationHandler() server.ToolHandlerFunc {
 	}
 }
 
+func (s *Server) listTaskSessionsHandler() server.ToolHandlerFunc {
+	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		taskID, err := req.RequireString(mcpKeyTaskID)
+		if err != nil {
+			return mcp.NewToolResultError("task_id is required"), nil
+		}
+		// current_session_id comes from the session this MCP server is bound
+		// to, never from the caller, so "is_current" cannot be spoofed.
+		payload := map[string]interface{}{
+			mcpKeyTaskID:         taskID,
+			"current_session_id": s.sessionID,
+		}
+
+		var result map[string]interface{}
+		if err := s.backend.RequestPayload(ctx, ws.ActionMCPListTaskSessions, payload, &result); err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		data, _ := json.MarshalIndent(result, "", "  ")
+		return mcp.NewToolResultText(string(data)), nil
+	}
+}
+
 func buildTaskConversationPayload(req mcp.CallToolRequest, taskID string) map[string]interface{} {
 	payload := map[string]interface{}{"task_id": taskID}
 	copyOptionalStringArg(payload, req, "session_id")

@@ -134,6 +134,145 @@ test.describe("Task creation", () => {
     );
   });
 
+  test("uses the remembered workflow instead of the board filter", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const devWorkflow = await apiClient.createWorkflow(seedData.workspaceId, "Dev", "simple");
+    const devSteps = await apiClient.listWorkflowSteps(devWorkflow.id);
+    const devStartStep = devSteps.steps.find((step) => step.is_start_step) ?? devSteps.steps[0];
+    if (!devStartStep) throw new Error("Dev workflow has no start step");
+
+    try {
+      await apiClient.createTask(seedData.workspaceId, "Remembered Dev task", {
+        workflow_id: devWorkflow.id,
+        workflow_step_id: devStartStep.id,
+      });
+      const { settings } = await apiClient.getUserSettings();
+      expect(
+        settings.task_create_last_used?.workflow_ids_by_workspace?.[seedData.workspaceId],
+      ).toBe(devWorkflow.id);
+
+      // Keep the board filtered to the seeded workflow while remembering a
+      // different workflow for task creation.
+      await apiClient.saveUserSettings({
+        workspace_id: seedData.workspaceId,
+        workflow_filter_id: seedData.workflowId,
+      });
+
+      const kanban = new KanbanPage(testPage);
+      await kanban.goto();
+      await kanban.createTaskButton.first().click();
+
+      const dialog = testPage.getByTestId("create-task-dialog");
+      await expect(dialog).toBeVisible();
+      await expect(dialog.getByTestId("workflow-selector-trigger")).toContainText("Dev");
+    } finally {
+      await apiClient.deleteWorkflow(devWorkflow.id).catch(() => {});
+    }
+  });
+
+  test("keeps remembered workflows isolated by workspace after reload", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    let devWorkflowId = "";
+    let workspaceBId = "";
+
+    try {
+      const devWorkflow = await apiClient.createWorkflow(seedData.workspaceId, "Dev", "simple");
+      devWorkflowId = devWorkflow.id;
+      const devSteps = await apiClient.listWorkflowSteps(devWorkflow.id);
+      const devStartStep = devSteps.steps.find((step) => step.is_start_step) ?? devSteps.steps[0];
+      if (!devStartStep) throw new Error("Dev workflow has no start step");
+
+      const workspaceB = await apiClient.createWorkspace("Workflow Memory B");
+      workspaceBId = workspaceB.id;
+      const supportWorkflow = await apiClient.createWorkflow(workspaceB.id, "Support", "simple");
+      const otherWorkflow = await apiClient.createWorkflow(workspaceB.id, "Other", "simple");
+      const supportSteps = await apiClient.listWorkflowSteps(supportWorkflow.id);
+      const supportStartStep =
+        supportSteps.steps.find((step) => step.is_start_step) ?? supportSteps.steps[0];
+      if (!supportStartStep) throw new Error("Support workflow has no start step");
+
+      await apiClient.createTask(seedData.workspaceId, "Remembered Dev task", {
+        workflow_id: devWorkflow.id,
+        workflow_step_id: devStartStep.id,
+      });
+      await apiClient.createTask(workspaceB.id, "Remembered Support task", {
+        workflow_id: supportWorkflow.id,
+        workflow_step_id: supportStartStep.id,
+      });
+      const { settings } = await apiClient.getUserSettings();
+      expect(settings.task_create_last_used?.workflow_ids_by_workspace).toMatchObject({
+        [seedData.workspaceId]: devWorkflow.id,
+        [workspaceB.id]: supportWorkflow.id,
+      });
+
+      await apiClient.saveUserSettings({
+        workspace_id: seedData.workspaceId,
+        workflow_filter_id: seedData.workflowId,
+      });
+
+      const kanban = new KanbanPage(testPage);
+      await kanban.goto();
+      await kanban.createTaskButton.first().click();
+      const dialog = testPage.getByTestId("create-task-dialog");
+      await expect(dialog).toBeVisible();
+      await expect(dialog.getByTestId("workflow-selector-trigger")).toContainText("Dev");
+      await testPage.keyboard.press("Escape");
+      await expect(dialog).not.toBeVisible();
+
+      await testPage.getByTestId("sidebar-workspace-trigger").click();
+      await testPage.getByTestId(`sidebar-workspace-item-${workspaceB.id}`).click();
+      await expect(testPage).toHaveURL(
+        (url) => url.pathname === "/" && url.searchParams.get("workspaceId") === workspaceB.id,
+      );
+
+      // Give workspace B a conflicting board filter so the remembered Support
+      // workflow is the only source that can select it in the dialog.
+      await apiClient.saveUserSettings({
+        workspace_id: workspaceB.id,
+        workflow_filter_id: otherWorkflow.id,
+      });
+      await testPage.reload();
+      await kanban.board.waitFor({ state: "visible" });
+      await kanban.createTaskButton.first().click();
+      await expect(dialog).toBeVisible();
+      await expect(dialog.getByTestId("workflow-selector-trigger")).toContainText("Support");
+      await testPage.keyboard.press("Escape");
+      await expect(dialog).not.toBeVisible();
+
+      // Reload workspace A again to prove the two memories do not overwrite
+      // each other when the active workspace changes.
+      await testPage.getByTestId("sidebar-workspace-trigger").click();
+      await testPage.getByTestId(`sidebar-workspace-item-${seedData.workspaceId}`).click();
+      await expect(testPage).toHaveURL(
+        (url) =>
+          url.pathname === "/" && url.searchParams.get("workspaceId") === seedData.workspaceId,
+      );
+      await apiClient.saveUserSettings({
+        workspace_id: seedData.workspaceId,
+        workflow_filter_id: seedData.workflowId,
+      });
+      await testPage.reload();
+      await kanban.board.waitFor({ state: "visible" });
+      await kanban.createTaskButton.first().click();
+      await expect(dialog).toBeVisible();
+      await expect(dialog.getByTestId("workflow-selector-trigger")).toContainText("Dev");
+    } finally {
+      if (devWorkflowId) await apiClient.deleteWorkflow(devWorkflowId).catch(() => {});
+      if (workspaceBId)
+        await apiClient.deleteWorkspace(workspaceBId, "Workflow Memory B").catch(() => {});
+      await apiClient.saveUserSettings({
+        workspace_id: seedData.workspaceId,
+        workflow_filter_id: seedData.workflowId,
+      });
+    }
+  });
+
   test("opens create task dialog from kanban header", async ({ testPage }) => {
     const kanban = new KanbanPage(testPage);
     await kanban.goto();

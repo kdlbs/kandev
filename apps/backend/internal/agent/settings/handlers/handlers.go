@@ -62,6 +62,7 @@ func (h *Handlers) registerHTTP(router *gin.Engine) {
 	api.POST("/agents/:id/profiles", h.interlock, h.httpCreateProfile)
 	api.GET("/agents/:id/logo", h.httpGetAgentLogo)
 	api.GET("/agent-models/:agentName", h.httpGetAgentModels)
+	api.POST("/agent-models/:agentName/resolve", h.httpResolveAgentModelConfig)
 	api.POST("/agent-command-preview/:agentName", h.httpPreviewAgentCommand)
 	api.POST("/agent-install/:agentName", h.interlock, h.httpInstallAgent)
 	api.GET("/agent-update/:agentName/preview", h.httpPreviewAgentUpdate)
@@ -712,7 +713,7 @@ func (h *Handlers) httpGetAgentModels(c *gin.Context) {
 
 	resp, err := h.controller.FetchDynamicModels(c.Request.Context(), agentName, refresh)
 	if err != nil {
-		if strings.Contains(err.Error(), "not found") {
+		if errors.Is(err, controller.ErrAgentNotFound) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "agent not found"})
 			return
 		}
@@ -721,5 +722,33 @@ func (h *Handlers) httpGetAgentModels(c *gin.Context) {
 		return
 	}
 
+	c.JSON(http.StatusOK, resp)
+}
+
+func (h *Handlers) httpResolveAgentModelConfig(c *gin.Context) {
+	agentName := strings.TrimSpace(c.Param("agentName"))
+	if agentName == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "agent name is required"})
+		return
+	}
+	var req dto.ResolveAgentModelConfigRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid model resolution request"})
+		return
+	}
+	resp, err := h.controller.ResolveAgentModelConfig(c.Request.Context(), agentName, req)
+	if err != nil {
+		if errors.Is(err, controller.ErrModelRequired) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "model is required"})
+			return
+		}
+		if errors.Is(err, controller.ErrAgentNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "agent not found"})
+			return
+		}
+		h.logger.Error("failed to resolve agent model options", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to resolve agent model options"})
+		return
+	}
 	c.JSON(http.StatusOK, resp)
 }

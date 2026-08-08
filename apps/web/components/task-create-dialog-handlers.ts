@@ -12,9 +12,13 @@ type TaskCreateLastUsedPatch = {
   branch?: string | null;
   agent_profile_id?: string | null;
   executor_profile_id?: string | null;
+  workspace_id?: string | null;
+  workflow_id?: string | null;
 };
 
 type TaskCreateLastUsedPayload = {
+  workspace_id?: string;
+  workflow_id?: string;
   repositories?: Array<{
     repository_id?: string;
     base_branch?: string;
@@ -136,6 +140,13 @@ function taskCreateLastUsedSettingsMatchQueue(
 ) {
   return Object.entries(lastQueuedLastUsed).every(([key, value]) => {
     if (value === undefined) return true;
+    if (key === "workflowIdsByWorkspace") {
+      const queued = value as Record<string, string>;
+      const synced = settings?.workflowIdsByWorkspace ?? {};
+      return Object.entries(queued).every(([workspaceId, workflowId]) => {
+        return synced[workspaceId] === workflowId;
+      });
+    }
     return settings?.[key as keyof TaskCreateLastUsedState] === value;
   });
 }
@@ -148,6 +159,10 @@ function mapTaskCreateLastUsedPatch(
     branch: pending.branch,
     agentProfileId: pending.agent_profile_id,
     executorProfileId: pending.executor_profile_id,
+    workflowIdsByWorkspace:
+      pending.workspace_id && pending.workflow_id
+        ? { [pending.workspace_id]: pending.workflow_id }
+        : undefined,
   };
 }
 
@@ -158,10 +173,8 @@ function compactTaskCreateLastUsedState(state: Partial<TaskCreateLastUsedState>)
 }
 
 export function syncTaskCreateLastUsed(patch: TaskCreateLastUsedPatch) {
-  lastQueuedLastUsed = {
-    ...lastQueuedLastUsed,
-    ...compactTaskCreateLastUsedState(mapTaskCreateLastUsedPatch(patch)),
-  };
+  const mapped = compactTaskCreateLastUsedState(mapTaskCreateLastUsedPatch(patch));
+  lastQueuedLastUsed = mergeTaskCreateLastUsedState(lastQueuedLastUsed, mapped);
   lastUsedDebug("overlay-updated", { patch, queued: lastQueuedLastUsed });
 }
 
@@ -174,13 +187,36 @@ export function queueTaskCreateLastUsedFromPayload(
   payload: TaskCreateLastUsedPayload | null | undefined,
 ) {
   if (!payload) return;
+  const previousWorkflowIdsByWorkspace = lastQueuedLastUsed.workflowIdsByWorkspace;
+  lastQueuedLastUsed = {};
   const firstWorkspaceRepo = payload.repositories?.find((repo) => repo.repository_id);
-  replaceQueuedTaskCreateLastUsed({
+  syncTaskCreateLastUsed({
+    workspace_id: payload.workspace_id,
+    workflow_id: payload.workflow_id,
     repository_id: firstWorkspaceRepo?.repository_id,
     branch: firstWorkspaceRepo ? taskCreateLastUsedPayloadBranch(firstWorkspaceRepo) : undefined,
     agent_profile_id: payload.agent_profile_id,
     executor_profile_id: payload.executor_profile_id,
   });
+  if (previousWorkflowIdsByWorkspace) {
+    lastQueuedLastUsed = mergeTaskCreateLastUsedState(lastQueuedLastUsed, {
+      workflowIdsByWorkspace: previousWorkflowIdsByWorkspace,
+    });
+  }
+}
+
+function mergeTaskCreateLastUsedState(
+  previous: Partial<TaskCreateLastUsedState>,
+  patch: Partial<TaskCreateLastUsedState>,
+): Partial<TaskCreateLastUsedState> {
+  const merged = { ...previous, ...patch };
+  if (patch.workflowIdsByWorkspace) {
+    merged.workflowIdsByWorkspace = {
+      ...(previous.workflowIdsByWorkspace ?? {}),
+      ...patch.workflowIdsByWorkspace,
+    };
+  }
+  return merged;
 }
 
 function taskCreateLastUsedPayloadBranch(

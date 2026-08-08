@@ -202,8 +202,9 @@ type SidebarTaskPrefs struct {
 }
 
 type TaskCreateLastUsed struct {
-	RepositoryID      string `json:"repository_id"`
-	Branch            string `json:"branch"`
-	AgentProfileID    string `json:"agent_profile_id"`
-	ExecutorProfileID string `json:"executor_profile_id"`
+	RepositoryID           string            `json:"repository_id"`
+	Branch                 string            `json:"branch"`
+	AgentProfileID         string            `json:"agent_profile_id"`
+	ExecutorProfileID      string            `json:"executor_profile_id"`
+	WorkflowIDsByWorkspace map[string]string `json:"workflow_ids_by_workspace"`
 }

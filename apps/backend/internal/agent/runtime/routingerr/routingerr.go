@@ -21,8 +21,10 @@ const (
 	CodeSubscriptionRequired   Code = "subscription_required"
 	CodeQuotaLimited           Code = "quota_limited"
 	CodeRateLimited            Code = "rate_limited"
+	CodeNetworkUnavailable     Code = "network_unavailable"
 	CodeProviderUnavailable    Code = "provider_unavailable"
 	CodeProviderOverloaded     Code = "provider_overloaded"
+	CodeModelCapacity          Code = "model_capacity"
 	CodeModelUnavailable       Code = "model_unavailable"
 	CodeProviderNotConfigured  Code = "provider_not_configured"
 	CodeUnknownProvider        Code = "unknown_provider_error"
@@ -91,6 +93,7 @@ type Input struct {
 	ExitCode      *int
 	StructuredErr error
 	HTTPStatus    int
+	ResetHint     *time.Time
 	Stderr        string
 	Stdout        string
 }
@@ -108,21 +111,33 @@ func Classify(in Input) *Error {
 		return e
 	}
 	if e := classifyStructured(in, excerpt); e != nil {
+		e.ResetHint = in.ResetHint
 		return applyInvariants(e)
 	}
 	if e, ok := matchProviderRules(in.ProviderID, in.Stderr+"\n"+in.Stdout); ok {
 		e.Phase = in.Phase
 		e.ExitCode = in.ExitCode
+		e.ResetHint = in.ResetHint
+		e.RawExcerpt = excerpt
+		return applyInvariants(e)
+	}
+	if e, ok := matchProviderNeutralRules(in.Stderr + "\n" + in.Stdout); ok {
+		e.Phase = in.Phase
+		e.ExitCode = in.ExitCode
+		e.ResetHint = in.ResetHint
 		e.RawExcerpt = excerpt
 		return applyInvariants(e)
 	}
 	if e, ok := matchRuntimeEnvironmentRules(in.Stderr + "\n" + in.Stdout); ok {
 		e.Phase = in.Phase
 		e.ExitCode = in.ExitCode
+		e.ResetHint = in.ResetHint
 		e.RawExcerpt = excerpt
 		return applyInvariants(e)
 	}
-	return applyInvariants(classifyByPhase(in, excerpt))
+	e := classifyByPhase(in, excerpt)
+	e.ResetHint = in.ResetHint
+	return applyInvariants(e)
 }
 
 func classifyInjection(in Input, excerpt string) *Error {
@@ -140,6 +155,7 @@ func classifyInjection(in Input, excerpt string) *Error {
 		Phase:          in.Phase,
 		ClassifierRule: "inject.env",
 		ExitCode:       in.ExitCode,
+		ResetHint:      in.ResetHint,
 		RawExcerpt:     excerpt,
 	}
 	return applyInvariants(e)
@@ -219,7 +235,7 @@ func applyInvariants(e *Error) *Error {
 		e.UserAction = true
 		e.AutoRetryable = false
 		e.FallbackAllowed = true
-	case CodeRateLimited, CodeQuotaLimited:
+	case CodeRateLimited, CodeQuotaLimited, CodeNetworkUnavailable, CodeModelCapacity:
 		e.AutoRetryable = true
 		e.FallbackAllowed = true
 	case CodeProviderUnavailable, CodeUnknownProvider:

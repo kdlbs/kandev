@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"github.com/kandev/kandev/internal/agent/runtime/activity"
@@ -15,6 +16,7 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/system/jobs"
+	systemmetrics "github.com/kandev/kandev/internal/system/metrics"
 	systemsettings "github.com/kandev/kandev/internal/system/settings"
 	storagepkg "github.com/kandev/kandev/internal/system/storage"
 	"github.com/kandev/kandev/internal/system/storage/dockerstore"
@@ -107,6 +109,17 @@ func provideStorageComposition(
 	})
 	handler := storagepkg.NewHandler(storagepkg.HandlerConfig{
 		Settings: settings, Runs: store, Quarantine: store, Overview: cachedOverview,
+		DiskCapacity: func(ctx context.Context, path string) (storagepkg.DiskCapacity, error) {
+			capacity, err := systemmetrics.DiskUsage(ctx, path)
+			if err != nil {
+				return storagepkg.DiskCapacity{}, err
+			}
+			return storagepkg.DiskCapacity{
+				TotalBytes: capacity.TotalBytes, UsedBytes: capacity.UsedBytes,
+				AvailableBytes: capacity.AvailableBytes, UsedPercent: capacity.UsedPercent,
+			}, nil
+		},
+		DiskPath:  cfg.ResolvedHomeDir(),
 		Mutations: operations, OnSettingsChanged: runtime.ApplySettings, LogError: logError,
 	})
 	return &storageComposition{
@@ -162,7 +175,9 @@ type storageOverview struct {
 	settings         *storagepkg.SettingsStore
 	quarantine       quarantineSummarizer
 	workspaceFactory workspaceFactory
+	workspaceAnalyze func(context.Context, storagepkg.StorageMaintenanceSettings) (workspaces.Analysis, error)
 	goCache          *gocache.Provider
+	goCacheAnalyze   func(context.Context) (gocache.Analysis, error)
 	docker           *dockerstore.Provider
 	dockerClient     *lazyStorageDocker
 	dockerHost       string
@@ -174,10 +189,44 @@ func (o *storageOverview) Summary(ctx context.Context) (storagepkg.Summary, erro
 	if err != nil {
 		return storagepkg.Summary{}, err
 	}
-	workspaceSummary, workspaceErr := o.workspaceFactory(settings).Analyze(ctx)
-	goCacheSummary, goCacheErr := o.goCache.Analyze(ctx)
-	quarantineSummary, quarantineErr := o.quarantine.SummarizeQuarantine(ctx)
-	dockerSummary := o.docker.Analyze(ctx)
+	var (
+		workspaceSummary  workspaces.Analysis
+		workspaceErr      error
+		goCacheSummary    gocache.Analysis
+		goCacheErr        error
+		quarantineSummary storagepkg.QuarantineSummary
+		quarantineErr     error
+		dockerSummary     dockerstore.Analysis
+	)
+	var measurements sync.WaitGroup
+	measurements.Add(4)
+	workspaceAnalyze := o.workspaceAnalyze
+	if workspaceAnalyze == nil {
+		workspaceAnalyze = func(ctx context.Context, settings storagepkg.StorageMaintenanceSettings) (workspaces.Analysis, error) {
+			return o.workspaceFactory(settings).Analyze(ctx)
+		}
+	}
+	goCacheAnalyze := o.goCacheAnalyze
+	if goCacheAnalyze == nil {
+		goCacheAnalyze = o.goCache.Analyze
+	}
+	go func() {
+		defer measurements.Done()
+		workspaceSummary, workspaceErr = workspaceAnalyze(ctx, settings)
+	}()
+	go func() {
+		defer measurements.Done()
+		goCacheSummary, goCacheErr = goCacheAnalyze(ctx)
+	}()
+	go func() {
+		defer measurements.Done()
+		quarantineSummary, quarantineErr = o.quarantine.SummarizeQuarantine(ctx)
+	}()
+	go func() {
+		defer measurements.Done()
+		dockerSummary = o.docker.Analyze(ctx)
+	}()
+	measurements.Wait()
 	return storagepkg.Summary{
 		Workspaces: summaryValue(workspaceSummary, workspaceErr),
 		GoCache:    summaryValue(goCacheSummary, goCacheErr),
@@ -271,11 +320,26 @@ func storageCleanupProviders(
 	return []storagepkg.CleanupProvider{
 		quarantineCleanupProvider{purger: quarantine},
 		workspaceCleanupAdapter(settings, workspaceFactory),
+		workspaceDependencyCleanupAdapter(settings, workspaceFactory),
 		goCacheCleanupProvider{provider: goCache},
 		dockerContainerCleanupAdapter(settings, docker),
 		dockerBuildCacheCleanupAdapter(settings, docker),
 		dockerImageCleanupAdapter(settings, docker),
 	}
+}
+
+func workspaceDependencyCleanupAdapter(
+	settings *storagepkg.SettingsStore,
+	factory workspaceFactory,
+) storagepkg.CleanupProvider {
+	return namedCleanupProvider{name: "workspace_dependencies", cleanup: func(ctx context.Context) (map[string]any, error) {
+		current, err := settings.GetSettings(ctx)
+		if err != nil || !current.Workspaces.DependencyCleanupEnabled {
+			return nil, err
+		}
+		result, err := factory(current).CleanupDependencies(ctx)
+		return toMap(result), err
+	}}
 }
 
 func workspaceCleanupAdapter(

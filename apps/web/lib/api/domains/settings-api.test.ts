@@ -7,6 +7,7 @@ vi.mock("@/lib/config", () => ({
 import {
   fetchMessageQueueSettings,
   fetchSleepInhibitionSettings,
+  resolveAgentModelConfig,
   startHostShell,
   updateMessageQueueSettings,
   updateSleepInhibitionSettings,
@@ -133,5 +134,33 @@ describe("startHostShell", () => {
 
     const fetchCall = vi.mocked(fetch).mock.calls[0];
     expect(JSON.parse(String(fetchCall?.[1]?.body))).toEqual({ cols: 80, rows: 24 });
+  });
+});
+
+describe("resolveAgentModelConfig", () => {
+  it("posts the selected provider context", async () => {
+    fetchSpy.mockResolvedValueOnce(
+      jsonResponse({
+        agent_name: "opencode",
+        model: "opencode/gpt-5.6",
+        status: "ok",
+        config_options: [],
+        error: null,
+      }),
+    );
+
+    await resolveAgentModelConfig("opencode", {
+      model: "opencode/gpt-5.6",
+      mode: "build",
+      config_options: { reasoning_effort: "high" },
+    });
+
+    expect(lastCall().url).toBe("http://api.test/api/v1/agent-models/opencode/resolve");
+    expect(lastCall().init?.method).toBe("POST");
+    expect(JSON.parse(String(lastCall().init?.body))).toEqual({
+      model: "opencode/gpt-5.6",
+      mode: "build",
+      config_options: { reasoning_effort: "high" },
+    });
   });
 });

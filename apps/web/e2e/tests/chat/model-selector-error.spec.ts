@@ -442,7 +442,7 @@ test.describe("Chat model selector — persistence", () => {
     await trigger.click();
     await testPage.getByTestId("config-option-trigger-effort").click();
     await expect(
-      testPage.getByText("Controls how much reasoning the mock model uses", { exact: true }),
+      testPage.getByText("Controls the reasoning depth for the smart mock model", { exact: true }),
     ).toBeVisible();
     await testPage.getByRole("button", { name: "Low", exact: true }).click();
     await expect

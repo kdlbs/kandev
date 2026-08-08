@@ -135,6 +135,11 @@ policy saves reuse the displayed snapshot instead of scanning disk again. The pa
 snapshot was last analyzed. Select **Analyze** to force a fresh scan; restarting the backend also
 clears the in-memory snapshot.
 
+The page also shows the current percentage used on the filesystem containing Kandev's storage,
+along with used, available, and total capacity. This is host-volume capacity, not just the bytes
+that Kandev can classify. The card warns at 80% full and uses a critical style at 90%; these
+thresholds do not trigger cleanup.
+
 Scheduled cleanup is disabled by default and runs only after the configured resource-idle quiet
 period. Orphaned task workspaces and rotated Go caches move into Kandev's quarantine before
 permanent deletion. Each entry shows its `delete_after` retention deadline: **Delete** and
@@ -150,6 +155,20 @@ override bypasses only the retention timestamp; path, ownership, state, and file
 checks still apply.
 If scheduled cleanup is disabled, no independent quarantine sweeper runs: use a full **Run now** or
 one of the quarantine actions when you want cleanup.
+
+The Workspaces policy includes an off-by-default **Remove dependencies from archived or deleted
+task workspaces** option. When enabled, a scheduled cleanup or the matching manual action can
+recursively remove only these directories from eligible, unprotected Kandev task workspaces:
+
+`node_modules`, `bower_components`, `.pnpm-store`, `.yarn/cache`, `.yarn/unplugged`, `.venv`,
+`venv`, `.tox`, `.nox`, `__pypackages__`, `Pods`, and `.gradle`.
+
+The Storage page always shows this exact list next to an information control. Kandev skips missing
+directories, never follows symlinks, and does not target ambiguous names such as `vendor`, `target`,
+`build`, `dist`, `.cache`, or `.git`. Only archived or deleted workspaces without active or
+protected references qualify. This does not change the existing full-workspace lifecycle (seven
+days of orphan grace followed by seven days of quarantine retention), and restoring a workspace
+after dependency pruning may require reinstalling its dependencies.
 
 Host-wide Docker build-cache and unused-image cleanup remain disabled until you confirm that Kandev
 owns a dedicated Docker daemon.

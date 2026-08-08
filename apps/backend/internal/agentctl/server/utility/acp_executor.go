@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"sort"
 	"strings"
 	"sync"
@@ -31,6 +32,7 @@ const (
 	acpCommandTerminateGrace = 250 * time.Millisecond
 	acpCommandForceKillGrace = 500 * time.Millisecond
 	acpCommandPollInterval   = 25 * time.Millisecond
+	acpProbeConfigWait       = 1 * time.Second
 )
 
 // ACPInferenceExecutor executes one-shot prompts using the ACP protocol.
@@ -225,7 +227,7 @@ func (e *ACPInferenceExecutor) executeACPSession(
 			return "", fmt.Errorf("ACP model selection failed: %w", err)
 		}
 	}
-	if err := applySessionConfigOptions(ctx, conn, string(sessionID), modelConfigOptions); err != nil {
+	if _, err := applySessionConfigOptions(ctx, conn, string(sessionID), modelConfigOptions); err != nil {
 		return "", fmt.Errorf("ACP model config selection failed: %w", err)
 	}
 
@@ -262,7 +264,24 @@ func applySessionModel(
 	model string,
 	configOptions []acp.SessionConfigOption,
 ) (sessionmodel.Method, error) {
-	return sessionmodel.ApplySDKFromACP(ctx, conn, string(sessionID), model, configOptions)
+	method, _, err := applySessionModelWithConfigOptions(
+		ctx, conn, sessionID, model, configOptions,
+	)
+	return method, err
+}
+
+func applySessionModelWithConfigOptions(
+	ctx context.Context,
+	conn sessionmodel.SDKConn,
+	sessionID acp.SessionId,
+	model string,
+	configOptions []acp.SessionConfigOption,
+) (sessionmodel.Method, []acp.SessionConfigOption, error) {
+	return sessionmodel.ApplySDKWithConfigOptions(ctx, conn, sessionmodel.Request{
+		SessionID:     string(sessionID),
+		ModelID:       model,
+		ConfigOptions: sessionmodel.FromACP(configOptions),
+	})
 }
 
 func applySessionConfigOptions(
@@ -270,22 +289,96 @@ func applySessionConfigOptions(
 	conn sessionmodel.SDKConn,
 	sessionID string,
 	options map[string]string,
-) error {
+) ([]acp.SessionConfigOption, error) {
+	configOptions, _, err := applySessionConfigOptionsWithBoundary(
+		ctx, conn, sessionID, options, nil,
+	)
+	return configOptions, err
+}
+
+// applySessionConfigOptionsWithBoundary applies a batch of option mutations
+// and returns the notification version captured immediately before the final
+// mutation. A snapshot from an earlier mutation is not authoritative for the
+// batch, so probe callers use that boundary when they wait for a notification.
+func applySessionConfigOptionsWithBoundary(
+	ctx context.Context,
+	conn sessionmodel.SDKConn,
+	sessionID string,
+	options map[string]string,
+	state *acpProbeNotificationState,
+) ([]acp.SessionConfigOption, int, error) {
 	if len(options) == 0 {
-		return nil
+		return nil, 0, nil
 	}
 	keys := make([]string, 0, len(options))
 	for key := range options {
 		keys = append(keys, key)
 	}
 	sort.Strings(keys)
-	applier := sessionmodel.SDKApplier{Conn: conn}
+	var configOptions []acp.SessionConfigOption
 	for _, key := range keys {
-		if err := applier.SetConfigOption(ctx, sessionID, key, options[key]); err != nil {
-			return fmt.Errorf("set %q: %w", key, err)
+		previousVersion := 0
+		if state != nil {
+			previousVersion = state.currentConfigUpdateVersion()
+		}
+		response, err := conn.SetSessionConfigOption(ctx, acp.SetSessionConfigOptionRequest{
+			ValueId: &acp.SetSessionConfigOptionValueId{
+				SessionId: acp.SessionId(sessionID),
+				ConfigId:  acp.SessionConfigId(key),
+				Value:     acp.SessionConfigValueId(options[key]),
+			},
+		})
+		if err != nil {
+			return nil, 0, fmt.Errorf("set %q: %w", key, err)
+		}
+		configOptions = response.ConfigOptions
+		if key == keys[len(keys)-1] {
+			return configOptions, previousVersion, nil
 		}
 	}
-	return nil
+	return configOptions, 0, nil
+}
+
+func filterRequestedConfigOptions(
+	requested map[string]string,
+	available []acp.SessionConfigOption,
+) map[string]string {
+	if len(requested) == 0 || len(available) == 0 {
+		return nil
+	}
+	availableValues := make(map[string]map[string]struct{}, len(available))
+	for _, option := range available {
+		if option.Select == nil {
+			continue
+		}
+		values := make(map[string]struct{})
+		for _, choice := range selectOptionsUngrouped(option.Select.Options) {
+			values[string(choice.Value)] = struct{}{}
+		}
+		availableValues[string(option.Select.Id)] = values
+	}
+	filtered := make(map[string]string, len(requested))
+	for id, value := range requested {
+		values, ok := availableValues[id]
+		if !ok {
+			continue
+		}
+		// Some providers expose a select option without enumerating choices.
+		// Keep the persisted value in that case. When choices are present,
+		// discard values from a previous model that the new model does not
+		// support.
+		if len(values) == 0 {
+			filtered[id] = value
+			continue
+		}
+		if _, ok := values[value]; ok {
+			filtered[id] = value
+		}
+	}
+	if len(filtered) == 0 {
+		return nil
+	}
+	return filtered
 }
 
 // toACPMcpServers converts the cross-process DTO list into the ACP SDK shape.
@@ -407,7 +500,9 @@ func (e *ACPInferenceExecutor) Probe(ctx context.Context, req *ProbeRequest) (*P
 	}
 	defer cleanupACPCommand(ctx, cmd, lifecycle, e.logger)
 
-	resp, err := e.probeACPSession(ctx, stdin, stdout, workDir, req.AgentID)
+	resp, err := e.probeACPSessionWithContext(
+		ctx, stdin, stdout, workDir, req.AgentID, req.Model, req.Mode, req.ConfigOptions,
+	)
 	if err != nil {
 		// The tail goes to the log rather than into the response: handlers
 		// deliberately keep subprocess diagnostics and tmp paths out of client
@@ -537,40 +632,203 @@ func isOpenCodeModelID(id string) bool {
 	return strings.Contains(id, "/") && !strings.ContainsAny(id, " \t\r")
 }
 
-// probeACPSession performs initialize + session/new and returns the parsed
-// capabilities, without sending any prompt or running session/prompt. After
-// session/new, it briefly drains out-of-band notifications to capture the
-// `available_commands_update` notification which some agents emit post-session.
-func (e *ACPInferenceExecutor) probeACPSession(
+type acpProbeNotificationState struct {
+	mu                  sync.Mutex
+	commands            []ProbeCommand
+	configOptions       []acp.SessionConfigOption
+	configUpdateVersion int
+	gotCommands         chan struct{}
+	gotConfigOptions    chan struct{}
+}
+
+func newACPProbeNotificationState() *acpProbeNotificationState {
+	return &acpProbeNotificationState{
+		gotCommands:      make(chan struct{}, 1),
+		gotConfigOptions: make(chan struct{}, 1),
+	}
+}
+
+func (s *acpProbeNotificationState) handle(n acp.SessionNotification) {
+	if update := n.Update.ConfigOptionUpdate; update != nil {
+		s.mu.Lock()
+		s.configOptions = append([]acp.SessionConfigOption(nil), update.ConfigOptions...)
+		s.configUpdateVersion++
+		s.mu.Unlock()
+		select {
+		case s.gotConfigOptions <- struct{}{}:
+		default:
+		}
+	}
+	if update := n.Update.AvailableCommandsUpdate; update != nil {
+		s.mu.Lock()
+		s.commands = s.commands[:0]
+		for _, command := range update.AvailableCommands {
+			s.commands = append(s.commands, ProbeCommand{
+				Name:        command.Name,
+				Description: command.Description,
+			})
+		}
+		s.mu.Unlock()
+		select {
+		case s.gotCommands <- struct{}{}:
+		default:
+		}
+	}
+}
+
+func (s *acpProbeNotificationState) currentConfigUpdateVersion() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.configUpdateVersion
+}
+
+func (s *acpProbeNotificationState) waitForConfigUpdate(
+	ctx context.Context,
+	previousVersion int,
+) ([]acp.SessionConfigOption, bool, error) {
+	timer := time.NewTimer(acpProbeConfigWait)
+	defer timer.Stop()
+	for {
+		select {
+		case <-s.gotConfigOptions:
+			s.mu.Lock()
+			if s.configUpdateVersion > previousVersion {
+				updated := append([]acp.SessionConfigOption(nil), s.configOptions...)
+				s.mu.Unlock()
+				return updated, true, nil
+			}
+			s.mu.Unlock()
+		case <-timer.C:
+			return nil, false, nil
+		case <-ctx.Done():
+			return nil, false, ctx.Err()
+		}
+	}
+}
+
+func (s *acpProbeNotificationState) commandsSnapshot() []ProbeCommand {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]ProbeCommand(nil), s.commands...)
+}
+
+func waitForProbeCommands(ctx context.Context, state *acpProbeNotificationState) {
+	select {
+	case <-state.gotCommands:
+	case <-time.After(1 * time.Second):
+	case <-ctx.Done():
+	}
+}
+
+type acpSessionModeSetter interface {
+	SetSessionMode(context.Context, acp.SetSessionModeRequest) (acp.SetSessionModeResponse, error)
+}
+
+func applyProbeMode(
+	ctx context.Context,
+	conn acpSessionModeSetter,
+	sessionID acp.SessionId,
+	mode string,
+	state *acpProbeNotificationState,
+) ([]acp.SessionConfigOption, error) {
+	previousVersion := state.currentConfigUpdateVersion()
+	if _, err := conn.SetSessionMode(ctx, acp.SetSessionModeRequest{
+		SessionId: sessionID,
+		ModeId:    acp.SessionModeId(mode),
+	}); err != nil {
+		return nil, fmt.Errorf("ACP session/set_mode failed: %w", err)
+	}
+	updated, received, err := state.waitForConfigUpdate(ctx, previousVersion)
+	if err != nil {
+		return nil, err
+	}
+	if !received {
+		return nil, nil
+	}
+	return updated, nil
+}
+
+func applyProbeModel(
+	ctx context.Context,
+	conn sessionmodel.SDKConn,
+	sessionID acp.SessionId,
+	model string,
+	configOptions []acp.SessionConfigOption,
+	state *acpProbeNotificationState,
+) ([]acp.SessionConfigOption, error) {
+	previousVersion := state.currentConfigUpdateVersion()
+	method, returnedConfigOptions, err := applySessionModelWithConfigOptions(
+		ctx, conn, sessionID, model, configOptions,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("ACP model selection failed: %w", err)
+	}
+	if method == sessionmodel.MethodNone {
+		return nil, fmt.Errorf("ACP provider does not support model selection")
+	}
+	if returnedConfigOptions != nil {
+		return returnedConfigOptions, nil
+	}
+	updated, received, err := state.waitForConfigUpdate(ctx, previousVersion)
+	if err != nil {
+		return nil, err
+	}
+	if !received {
+		return nil, fmt.Errorf("ACP model selection returned no configuration options")
+	}
+	return updated, nil
+}
+
+func applyProbeConfigOptions(
+	ctx context.Context,
+	conn sessionmodel.SDKConn,
+	sessionID acp.SessionId,
+	requested map[string]string,
+	available []acp.SessionConfigOption,
+	state *acpProbeNotificationState,
+) ([]acp.SessionConfigOption, error) {
+	requested = filterRequestedConfigOptions(requested, available)
+	if len(requested) == 0 {
+		return nil, nil
+	}
+	returnedConfigOptions, previousVersion, err := applySessionConfigOptionsWithBoundary(
+		ctx, conn, string(sessionID), requested, state,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("ACP model config selection failed: %w", err)
+	}
+	if returnedConfigOptions != nil {
+		return returnedConfigOptions, nil
+	}
+	updated, received, err := state.waitForConfigUpdate(ctx, previousVersion)
+	if err != nil {
+		return nil, err
+	}
+	if !received {
+		return nil, fmt.Errorf("ACP model config selection returned no configuration options")
+	}
+	return updated, nil
+}
+
+// probeACPSessionWithContext performs a model-aware probe with optional mode
+// and configuration selections. The returned options are always the latest
+// complete snapshot observed from the provider.
+func (e *ACPInferenceExecutor) probeACPSessionWithContext(
 	ctx context.Context,
 	stdin io.Writer,
 	stdout io.Reader,
 	workDir string,
 	agentID string,
+	model string,
+	mode string,
+	requestedConfigOptions map[string]string,
 ) (*ProbeResponse, error) {
-	var mu sync.Mutex
-	var commands []ProbeCommand
-	gotCommands := make(chan struct{}, 1)
-	updateHandler := func(n acp.SessionNotification) {
-		if n.Update.AvailableCommandsUpdate == nil {
-			return
-		}
-		mu.Lock()
-		commands = commands[:0]
-		for _, c := range n.Update.AvailableCommandsUpdate.AvailableCommands {
-			commands = append(commands, ProbeCommand{Name: c.Name, Description: c.Description})
-		}
-		mu.Unlock()
-		select {
-		case gotCommands <- struct{}{}:
-		default:
-		}
-	}
+	updates := newACPProbeNotificationState()
 
 	client := acpclient.NewClient(
 		acpclient.WithLogger(e.logger),
 		acpclient.WithWorkspaceRoot(workDir),
-		acpclient.WithUpdateHandler(updateHandler),
+		acpclient.WithUpdateHandler(updates.handle),
 	)
 
 	conn := acp.NewClientSideConnection(client, stdin, stdout)
@@ -604,20 +862,48 @@ func (e *ACPInferenceExecutor) probeACPSession(
 		return nil, describeACPFailure(ctx, "session/new", err)
 	}
 
-	// Wait up to 1s for the available_commands_update notification. Agents
-	// that don't advertise commands (or push them later) simply yield an
-	// empty Commands slice.
-	select {
-	case <-gotCommands:
-	case <-time.After(1 * time.Second):
-	case <-ctx.Done():
+	// Mode can change the provider's available options. Apply it before the
+	// model and use the resulting notification, when present, as the next
+	// model-selection snapshot.
+	if mode != "" {
+		updated, err := applyProbeMode(ctx, conn, sessionResp.SessionId, mode, updates)
+		if err != nil {
+			return nil, err
+		}
+		if updated != nil {
+			sessionResp.ConfigOptions = updated
+		}
 	}
+
+	if model != "" {
+		updated, err := applyProbeModel(
+			ctx, conn, sessionResp.SessionId, model, sessionResp.ConfigOptions, updates,
+		)
+		if err != nil {
+			return nil, err
+		}
+		sessionResp.ConfigOptions = updated
+	}
+	if updated, err := applyProbeConfigOptions(
+		ctx,
+		conn,
+		sessionResp.SessionId,
+		requestedConfigOptions,
+		sessionResp.ConfigOptions,
+		updates,
+	); err != nil {
+		return nil, err
+	} else if updated != nil {
+		sessionResp.ConfigOptions = updated
+	}
+
+	// Agents that don't advertise commands (or push them later) simply yield
+	// an empty Commands slice.
+	waitForProbeCommands(ctx, updates)
 
 	out := buildInitProbeFields(initResp)
 	applySessionProbeFields(out, sessionResp, agentID)
-	mu.Lock()
-	out.Commands = append([]ProbeCommand(nil), commands...)
-	mu.Unlock()
+	out.Commands = updates.commandsSnapshot()
 	return out, nil
 }
 
@@ -876,8 +1162,28 @@ var allowedProbeCommands = map[string]string{
 
 // resolveProbeCommand validates and returns a hard-coded executable name for
 // the given command. Returns the empty string if the command is not allowed.
+//
+// An agent launched from an absolute path arrives here carrying the executable
+// suffix Windows requires — "mock-agent.exe" — which never matches the bare
+// allow-list key, so its probe is refused before it can spawn.
+//
+// Only ".exe" is trimmed, and only on Windows. That is the suffix the Go build
+// emits, so it is the only one an allow-listed binary can arrive with; trimming
+// whatever filepath.Ext returns would instead let "mock-agent.cmd" or
+// "mock-agent.txt" reach an allow-listed entry. Unix executables carry no such
+// convention at all, and trimming there would let "opencode.sh" pass as
+// "opencode".
 func resolveProbeCommand(name string) string {
-	return allowedProbeCommands[filepath.Base(name)]
+	base := filepath.Base(name)
+	if resolved, ok := allowedProbeCommands[base]; ok {
+		return resolved
+	}
+	if runtime.GOOS == "windows" {
+		if ext := filepath.Ext(base); strings.EqualFold(ext, ".exe") {
+			return allowedProbeCommands[strings.TrimSuffix(base, ext)]
+		}
+	}
+	return ""
 }
 
 // stderrTailLimit bounds how much of a spawned agent's stderr reaches the log:

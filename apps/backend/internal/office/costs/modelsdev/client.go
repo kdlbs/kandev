@@ -15,6 +15,7 @@ import (
 
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/office/shared"
+	"golang.org/x/sync/singleflight"
 
 	"go.uber.org/zap"
 )
@@ -43,7 +44,8 @@ type Client struct {
 	httpClient *http.Client
 	logger     *logger.Logger
 
-	once sync.Once
+	once         sync.Once
+	refreshGroup singleflight.Group
 
 	mu       sync.RWMutex
 	index    map[string]shared.ModelPricing
@@ -162,7 +164,7 @@ func (c *Client) warmFromDisk(ctx context.Context) {
 		}
 		// File missing on first boot — schedule a refresh; lookup
 		// returns miss this turn.
-		go c.refreshSafe(ctx)
+		c.startBackgroundRefresh(ctx)
 		return
 	}
 	buf, err := os.ReadFile(c.cachePath)
@@ -176,7 +178,7 @@ func (c *Client) warmFromDisk(ctx context.Context) {
 	c.loadedAt = stat.ModTime()
 	c.mu.Unlock()
 	if time.Since(stat.ModTime()) >= c.ttl {
-		go c.refreshSafe(ctx)
+		c.startBackgroundRefresh(context.WithoutCancel(ctx))
 	}
 }
 
@@ -220,35 +222,56 @@ func (c *Client) parseModelInfoFromBuffer(key string) (ModelInfo, bool) {
 	return info, true
 }
 
-// maybeRefresh fires a background refresh when the loaded buffer is
-// stale. No-op when refresh is in progress (sync.Once-style guard
-// implicitly enforced by atomicity of the staleness check + ttl).
+// maybeRefresh fires a background refresh when the loaded buffer is stale.
+// Refresh's per-client singleflight guard coalesces all callers, including
+// concurrent pricing and metadata lookups.
 func (c *Client) maybeRefresh(ctx context.Context) {
 	c.mu.RLock()
 	stale := c.loadedAt.IsZero() || time.Since(c.loadedAt) >= c.ttl
 	c.mu.RUnlock()
 	if stale {
-		go c.refreshSafe(ctx)
+		c.startBackgroundRefresh(context.WithoutCancel(ctx))
 	}
 }
 
-// refreshSafe wraps Refresh in a panic guard + warning log; safe to
-// run from a goroutine.
-func (c *Client) refreshSafe(ctx context.Context) {
-	defer func() {
-		if r := recover(); r != nil {
-			c.logger.Warn("models.dev refresh panicked", zap.Any("recover", r))
+// startBackgroundRefresh registers the refresh synchronously so every stale
+// lookup joins the same in-flight singleflight call before returning. The
+// result is still observed asynchronously, so stale lookups remain nonblocking.
+// Callers choose whether the refresh should inherit or detach from their context.
+func (c *Client) startBackgroundRefresh(ctx context.Context) {
+	result := c.refreshResult(ctx)
+	go func() {
+		if err := (<-result).Err; err != nil {
+			c.logger.Warn("models.dev refresh failed", zap.Error(err))
 		}
 	}()
-	if err := c.Refresh(ctx); err != nil {
-		c.logger.Warn("models.dev refresh failed", zap.Error(err))
-	}
 }
 
 // Refresh pulls the latest dataset from models.dev and atomically
 // swaps the cache file. Network or write errors leave the existing
 // file (and in-memory index) untouched.
 func (c *Client) Refresh(ctx context.Context) error {
+	result := c.refreshResult(ctx)
+	return (<-result).Err
+}
+
+func (c *Client) refreshResult(ctx context.Context) <-chan singleflight.Result {
+	return c.refreshGroup.DoChan("modelsdev-refresh", func() (interface{}, error) {
+		return c.refreshPhysicalSafely(ctx)
+	})
+}
+
+func (c *Client) refreshPhysicalSafely(ctx context.Context) (value interface{}, err error) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			c.logger.Warn("models.dev refresh panicked", zap.Any("recover", recovered))
+			err = fmt.Errorf("models.dev refresh panicked")
+		}
+	}()
+	return nil, c.refreshPhysical(ctx)
+}
+
+func (c *Client) refreshPhysical(ctx context.Context) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.url, nil)
 	if err != nil {
 		return fmt.Errorf("build request: %w", err)
@@ -271,24 +294,22 @@ func (c *Client) Refresh(ctx context.Context) error {
 	}
 
 	c.mu.Lock()
-	c.cacheBuf = buf
-	c.loadedAt = time.Now()
-	// Re-populate every entry already in the in-memory index so a
-	// stale price doesn't survive the refresh.
+	newIndex := make(map[string]shared.ModelPricing, len(c.index))
 	for k := range c.index {
 		if pricing, ok := lookupInDataset(buf, k); ok {
-			c.index[k] = pricing
-		} else {
-			delete(c.index, k)
+			newIndex[k] = pricing
 		}
 	}
+	newInfo := make(map[string]ModelInfo, len(c.info))
 	for k := range c.info {
 		if info, ok := lookupModelInfoInDataset(buf, k); ok {
-			c.info[k] = info
-		} else {
-			delete(c.info, k)
+			newInfo[k] = info
 		}
 	}
+	c.cacheBuf = buf
+	c.index = newIndex
+	c.info = newInfo
+	c.loadedAt = time.Now().UTC()
 	c.mu.Unlock()
 	return nil
 }
@@ -300,11 +321,27 @@ func (c *Client) writeCacheAtomic(buf []byte) error {
 	if err := os.MkdirAll(filepath.Dir(c.cachePath), 0o755); err != nil {
 		return fmt.Errorf("mkdir cache dir: %w", err)
 	}
-	tmp := c.cachePath + ".tmp"
-	if err := os.WriteFile(tmp, buf, 0o644); err != nil {
-		return fmt.Errorf("write cache tmp: %w", err)
+	tmp, err := os.CreateTemp(filepath.Dir(c.cachePath), "."+filepath.Base(c.cachePath)+".tmp-*")
+	if err != nil {
+		return fmt.Errorf("create cache tmp: %w", err)
 	}
-	if err := os.Rename(tmp, c.cachePath); err != nil {
+	tmpName := tmp.Name()
+	defer func() {
+		_ = tmp.Close()
+		_ = os.Remove(tmpName)
+	}()
+	if written, err := tmp.Write(buf); err != nil {
+		return fmt.Errorf("write cache tmp: %w", err)
+	} else if written != len(buf) {
+		return fmt.Errorf("write cache tmp: %w", io.ErrShortWrite)
+	}
+	if err := tmp.Sync(); err != nil {
+		return fmt.Errorf("sync cache tmp: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("close cache tmp: %w", err)
+	}
+	if err := os.Rename(tmpName, c.cachePath); err != nil {
 		return fmt.Errorf("rename cache: %w", err)
 	}
 	return nil

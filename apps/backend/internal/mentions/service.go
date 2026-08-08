@@ -13,8 +13,10 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/entityrefs"
 	apiv1 "github.com/kandev/kandev/pkg/api/v1"
+	"go.uber.org/zap"
 )
 
 type registeredProvider struct {
@@ -155,6 +157,7 @@ func (r *Registry) snapshot() []registeredProvider {
 // Service validates and aggregates every registered provider.
 type Service struct {
 	registry         *Registry
+	log              *logger.Logger
 	providerTimeout  time.Duration
 	maxConcurrency   int
 	providerSlots    chan struct{}
@@ -183,6 +186,12 @@ func WithMaxConcurrency(limit int) Option {
 		if limit > 0 {
 			service.maxConcurrency = limit
 		}
+	}
+}
+
+func WithLogger(log *logger.Logger) Option {
+	return func(service *Service) {
+		service.log = log
 	}
 }
 
@@ -274,7 +283,7 @@ func (s *Service) searchProvider(ctx context.Context, registered registeredProvi
 	defer cancelProvider()
 	result := make(chan apiv1.MentionGroup, 1)
 	go func() {
-		group := searchProviderWithinContext(providerCtx, registered, request)
+		group := searchProviderWithinContext(providerCtx, registered, request, s.log)
 		// The provider slot belongs to the underlying call. A provider that ignores
 		// cancellation stays quarantined without consuming shared search capacity.
 		<-providerSlot
@@ -308,11 +317,22 @@ func searchProviderWithinContext(
 	ctx context.Context,
 	registered registeredProvider,
 	request SearchRequest,
+	log *logger.Logger,
 ) apiv1.MentionGroup {
 	group := groupFromDescriptor(registered.descriptor)
 	candidates, err := registered.provider.Search(ctx, request)
 	if err != nil {
-		group.Status = classifyProviderError(err)
+		status := classifyProviderError(err)
+		if log != nil && !errors.Is(err, context.Canceled) {
+			log.Warn(
+				"mention provider search failed",
+				zap.String("source", registered.descriptor.Source),
+				zap.String("provider", registered.descriptor.Provider),
+				zap.String("kind", registered.descriptor.Kind),
+				zap.String("status", string(status)),
+			)
+		}
+		group.Status = status
 		return group
 	}
 	if ctx.Err() != nil {

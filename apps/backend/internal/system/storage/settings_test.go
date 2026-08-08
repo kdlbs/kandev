@@ -2,11 +2,13 @@ package storage
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/jmoiron/sqlx"
@@ -15,6 +17,16 @@ import (
 	"github.com/kandev/kandev/internal/db"
 	systemsettings "github.com/kandev/kandev/internal/system/settings"
 )
+
+func TestDefaultSettingsDisablesWorkspaceDependencyCleanup(t *testing.T) {
+	raw, err := json.Marshal(DefaultSettings())
+	if err != nil {
+		t.Fatalf("marshal defaults: %v", err)
+	}
+	if !strings.Contains(string(raw), `"dependency_cleanup_enabled":false`) {
+		t.Fatalf("defaults = %s, want dependency cleanup disabled", raw)
+	}
+}
 
 func TestSettingsStoreMissingUsesDisabledDefaults(t *testing.T) {
 	store, _ := newTestStores(t)
@@ -29,7 +41,7 @@ func TestSettingsStoreMissingUsesDisabledDefaults(t *testing.T) {
 		IdleForMinutes:           10,
 		OrphanGraceHours:         168,
 		QuarantineRetentionHours: 168,
-		Workspaces:               ResourceSettings{Enabled: true},
+		Workspaces:               WorkspaceSettings{Enabled: true},
 		KandevContainers:         ResourceSettings{Enabled: true},
 		GoCache: GoCacheSettings{
 			Enabled:     false,

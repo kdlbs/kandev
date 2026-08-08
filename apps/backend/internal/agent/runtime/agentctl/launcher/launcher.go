@@ -25,10 +25,11 @@ import (
 
 // Launcher manages an agentctl subprocess.
 type Launcher struct {
-	binaryPath string
-	host       string
-	port       int
-	logger     *logger.Logger
+	binaryPath       string
+	host             string
+	port             int
+	logger           *logger.Logger
+	onUnexpectedExit func()
 
 	cmd    *exec.Cmd
 	exited chan struct{}
@@ -59,9 +60,10 @@ type Launcher struct {
 
 // Config holds configuration for the launcher.
 type Config struct {
-	BinaryPath string // Path to agentctl binary (auto-detected if empty)
-	Host       string // Host to bind to (default: localhost)
-	Port       int    // Control port (default: 39429)
+	BinaryPath       string // Path to agentctl binary (auto-detected if empty)
+	Host             string // Host to bind to (default: localhost)
+	Port             int    // Control port (default: 39429)
+	OnUnexpectedExit func() // Called once when the child exits without Stop.
 }
 
 // New creates a new Launcher.
@@ -77,11 +79,12 @@ func New(cfg Config, log *logger.Logger) *Launcher {
 	}
 
 	return &Launcher{
-		binaryPath: cfg.BinaryPath,
-		host:       cfg.Host,
-		port:       cfg.Port,
-		logger:     log.WithFields(zap.String("component", "agentctl-launcher")),
-		exited:     make(chan struct{}),
+		binaryPath:       cfg.BinaryPath,
+		host:             cfg.Host,
+		port:             cfg.Port,
+		onUnexpectedExit: cfg.OnUnexpectedExit,
+		logger:           log.WithFields(zap.String("component", "agentctl-launcher")),
+		exited:           make(chan struct{}),
 	}
 }
 
@@ -483,6 +486,9 @@ func (l *Launcher) monitorExit() {
 		l.logger.Info("agentctl exited",
 			zap.Int("pid", l.cmd.Process.Pid),
 			zap.Int("exit_code", l.cmd.ProcessState.ExitCode()))
+	}
+	if !stopping && l.onUnexpectedExit != nil {
+		l.onUnexpectedExit()
 	}
 
 	close(l.exited)

@@ -77,6 +77,44 @@ func TestClassify_ProviderRules(t *testing.T) {
 	}
 }
 
+func TestClassify_ProviderNeutralTransientSignals(t *testing.T) {
+	resetInjection()
+	cases := []struct {
+		name     string
+		provider string
+		stderr   string
+		want     Code
+	}{
+		{
+			name:     "model capacity",
+			provider: "codex-acp",
+			stderr:   "Selected model is at capacity. Please try a different model.",
+			want:     Code("model_capacity"),
+		},
+		{
+			name:     "network unavailable",
+			provider: "claude-acp",
+			stderr:   "connect: network is unreachable",
+			want:     Code("network_unavailable"),
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := Classify(Input{
+				Phase:      PhasePromptSend,
+				ProviderID: tc.provider,
+				Stderr:     tc.stderr,
+			})
+			if got.Code != tc.want {
+				t.Fatalf("classification = %q, want %q (rule=%s)", got.Code, tc.want, got.ClassifierRule)
+			}
+			if !got.AutoRetryable || !got.FallbackAllowed || got.UserAction {
+				t.Fatalf("transient invariants violated: %+v", got)
+			}
+		})
+	}
+}
+
 func TestClassify_PrestartPhaseFallback(t *testing.T) {
 	resetInjection()
 	for _, p := range []Phase{PhaseAuthCheck, PhaseProcessStart, PhaseSessionInit} {

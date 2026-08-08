@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useCallback, useState } from "react";
+import { memo } from "react";
 import Link from "@/components/routing/app-link";
 import type { AgentProfileOption } from "@/lib/state/slices";
 import type { WorkflowSnapshotData } from "@/lib/state/slices/kanban/types";
@@ -293,19 +293,9 @@ export const WorkflowSection = memo(function WorkflowSection({
   agentProfiles,
   workflowLocked,
 }: WorkflowSectionProps) {
-  const [lastUsedWorkflowId, setLastUsedWorkflowId] = useState<string | null>(null);
-
   // Hidden workflows (e.g. improve-kandev) are excluded from the picker; they
   // remain reachable via their dedicated entry point.
   const workflows = allWorkflows.filter((w) => !w.hidden);
-
-  const handleWorkflowChange = useCallback(
-    (workflowId: string) => {
-      setLastUsedWorkflowId(workflowId);
-      onWorkflowChange(workflowId);
-    },
-    [onWorkflowChange],
-  );
 
   if (!isCreateMode || isTaskStarted) return null;
   if (workflowLocked) return null;
@@ -316,8 +306,7 @@ export const WorkflowSection = memo(function WorkflowSection({
         workflows={workflows}
         snapshots={snapshots}
         selectedWorkflowId={effectiveWorkflowId ?? null}
-        onWorkflowChange={handleWorkflowChange}
-        lastUsedWorkflowId={lastUsedWorkflowId}
+        onWorkflowChange={onWorkflowChange}
         agentProfiles={agentProfiles}
       />
     );

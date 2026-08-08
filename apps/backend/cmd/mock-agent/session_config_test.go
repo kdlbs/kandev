@@ -67,6 +67,55 @@ func TestSetSessionConfigOptionRejectsUnknownValue(t *testing.T) {
 	}
 }
 
+func TestSetSessionConfigOptionModelChangesAvailableOptions(t *testing.T) {
+	agent := &mockAgent{
+		sessions:        make(map[acp.SessionId]bool),
+		sessionConfig:   make(map[acp.SessionId][]acp.SessionConfigOption),
+		commandsEmitted: make(map[acp.SessionId]bool),
+	}
+	session, err := agent.NewSession(context.Background(), acp.NewSessionRequest{})
+	if err != nil {
+		t.Fatalf("NewSession: %v", err)
+	}
+
+	response, err := agent.SetSessionConfigOption(context.Background(), acp.SetSessionConfigOptionRequest{
+		ValueId: &acp.SetSessionConfigOptionValueId{
+			SessionId: session.SessionId,
+			ConfigId:  "model",
+			Value:     "mock-smart",
+		},
+	})
+	if err != nil {
+		t.Fatalf("set model: %v", err)
+	}
+
+	values := make(map[string]string)
+	for _, option := range response.ConfigOptions {
+		if option.Select != nil {
+			values[string(option.Select.Id)] = string(option.Select.CurrentValue)
+		}
+	}
+	if values["model"] != "mock-smart" {
+		t.Fatalf("model = %q, want mock-smart", values["model"])
+	}
+	if values["effort"] != "high" {
+		t.Fatalf("effort = %q, want high for mock-smart", values["effort"])
+	}
+	var hasMax, hasMedium bool
+	for _, option := range response.ConfigOptions {
+		if option.Select == nil || option.Select.Id != "effort" || option.Select.Options.Ungrouped == nil {
+			continue
+		}
+		for _, choice := range *option.Select.Options.Ungrouped {
+			hasMax = hasMax || choice.Value == "max"
+			hasMedium = hasMedium || choice.Value == "medium"
+		}
+	}
+	if !hasMax || hasMedium {
+		t.Fatalf("response = %#v, want smart-only effort choices", response.ConfigOptions)
+	}
+}
+
 func TestSessionConfigIsIsolatedAcrossNewSessions(t *testing.T) {
 	agent := &mockAgent{
 		sessions:        make(map[acp.SessionId]bool),

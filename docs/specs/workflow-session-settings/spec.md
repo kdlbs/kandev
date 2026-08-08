@@ -116,6 +116,8 @@ The backend validates the action on workflow-step create/update and import. Inva
 
 Existing agent capability responses provide the editor's family names, models, and ACP select options. Existing task-session model/configuration mechanisms apply and persist runtime changes.
 
+When an ACP provider's options depend on the selected model, the editor uses the model-aware capability contract in [Dynamic Provider Model Options](../agents/dynamic-provider-options.md) to replace the baseline option snapshot before saving a rule.
+
 ## State machine
 
 For each original agent family on each possible workflow path, the editor and runtime use these effective states:
@@ -144,7 +146,7 @@ The same users who can edit a workspace workflow can create, change, or remove c
 - If the session is not running but can be launched or resumed, Kandev records the requested overrides first so initialization applies them before the next prompt.
 - If `restore_original` has no trustworthy original effective snapshot, Kandev changes nothing, warns that restoration is unavailable for that legacy or incomplete session, and continues the step.
 - If an option captured in the original snapshot is no longer advertised, restoration skips that option, restores the remaining fields, and reports the skipped option in the warning.
-- Capability discovery failures keep the conditional editor readable, show the existing agent capability error, and prevent saving a new `set` rule whose values cannot be selected. Existing persisted rules remain visible and removable.
+- Capability discovery keeps the conditional editor readable and shows a localized, retryable status. While discovery is pending, coordinated save is blocked. After a failed discovery, the author may save the selected model without new or unverified option values; existing persisted rules remain visible, and failed discovery does not remove their saved option values.
 
 ## Persistence guarantees
 

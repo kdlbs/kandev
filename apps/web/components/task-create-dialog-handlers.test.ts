@@ -14,6 +14,15 @@ import {
 
 const WORKTREE_PROFILE_ID = "worktree-profile";
 const LOCAL_PROFILE_ID = "local-profile";
+const WORKSPACE_ONE = "workspace-1";
+const WORKSPACE_TWO = "workspace-2";
+const WORKFLOW_ONE = "workflow-1";
+const WORKFLOW_TWO = "workflow-2";
+
+function resetQueuedTaskCreateLastUsedForTest() {
+  window.localStorage.clear();
+  resetTaskCreateLastUsedSync({ clearQueued: true });
+}
 
 function executor(
   id: string,
@@ -248,6 +257,7 @@ describe("syncTaskCreateLastUsed", () => {
         branch: "main",
         agentProfileId: null,
         executorProfileId: null,
+        workflowIdsByWorkspace: {},
       },
     });
 
@@ -265,6 +275,7 @@ describe("syncTaskCreateLastUsed", () => {
         branch: "feature",
         agentProfileId: null,
         executorProfileId: null,
+        workflowIdsByWorkspace: {},
       },
     });
 
@@ -273,10 +284,7 @@ describe("syncTaskCreateLastUsed", () => {
 });
 
 describe("queueTaskCreateLastUsedFromPayload", () => {
-  beforeEach(() => {
-    window.localStorage.clear();
-    resetTaskCreateLastUsedSync({ clearQueued: true });
-  });
+  beforeEach(resetQueuedTaskCreateLastUsedForTest);
 
   it("leaves the queued overlay unchanged for null or undefined payloads", () => {
     syncTaskCreateLastUsed({ branch: "feature" });
@@ -299,6 +307,10 @@ describe("queueTaskCreateLastUsedFromPayload", () => {
       executorProfileId: "exec-1",
     });
   });
+});
+
+describe("queueTaskCreateLastUsedFromPayload repositories", () => {
+  beforeEach(resetQueuedTaskCreateLastUsedForTest);
 
   it("uses the first workspace repository and skips rows without repository ids", () => {
     queueTaskCreateLastUsedFromPayload({
@@ -381,5 +393,76 @@ describe("queueTaskCreateLastUsedFromPayload", () => {
       repositoryId: "repo-1",
       branch: "main",
     });
+  });
+});
+
+describe("queueTaskCreateLastUsedFromPayload workflow history", () => {
+  beforeEach(resetQueuedTaskCreateLastUsedForTest);
+
+  it("queues the successful workflow under its workspace", () => {
+    queueTaskCreateLastUsedFromPayload({
+      workspace_id: WORKSPACE_ONE,
+      workflow_id: WORKFLOW_ONE,
+      repositories: [],
+    });
+
+    expect(readQueuedTaskCreateLastUsedState()).toEqual({
+      workflowIdsByWorkspace: { [WORKSPACE_ONE]: WORKFLOW_ONE },
+    });
+  });
+
+  it("merges workflow entries from consecutive workspace submissions", () => {
+    queueTaskCreateLastUsedFromPayload({
+      workspace_id: WORKSPACE_ONE,
+      workflow_id: WORKFLOW_ONE,
+      repositories: [],
+    });
+    queueTaskCreateLastUsedFromPayload({
+      workspace_id: WORKSPACE_TWO,
+      workflow_id: WORKFLOW_TWO,
+      repositories: [],
+    });
+
+    expect(readQueuedTaskCreateLastUsedState()).toEqual({
+      workflowIdsByWorkspace: {
+        [WORKSPACE_ONE]: WORKFLOW_ONE,
+        [WORKSPACE_TWO]: WORKFLOW_TWO,
+      },
+    });
+  });
+
+  it("waits for every queued workspace workflow to appear in settings", () => {
+    syncTaskCreateLastUsed({ workspace_id: WORKSPACE_ONE, workflow_id: WORKFLOW_ONE });
+    syncTaskCreateLastUsed({ workspace_id: WORKSPACE_TWO, workflow_id: WORKFLOW_TWO });
+
+    resetTaskCreateLastUsedSync({
+      syncedSettings: {
+        repositoryId: null,
+        branch: null,
+        agentProfileId: null,
+        executorProfileId: null,
+        workflowIdsByWorkspace: { [WORKSPACE_ONE]: WORKFLOW_ONE },
+      },
+    });
+    expect(readQueuedTaskCreateLastUsedState()).toEqual({
+      workflowIdsByWorkspace: {
+        [WORKSPACE_ONE]: WORKFLOW_ONE,
+        [WORKSPACE_TWO]: WORKFLOW_TWO,
+      },
+    });
+
+    resetTaskCreateLastUsedSync({
+      syncedSettings: {
+        repositoryId: null,
+        branch: null,
+        agentProfileId: null,
+        executorProfileId: null,
+        workflowIdsByWorkspace: {
+          [WORKSPACE_ONE]: WORKFLOW_ONE,
+          [WORKSPACE_TWO]: WORKFLOW_TWO,
+        },
+      },
+    });
+    expect(readQueuedTaskCreateLastUsedState()).toEqual({});
   });
 });

@@ -1,7 +1,7 @@
 ---
 status: approved
 created: 2026-07-29
-updated: 2026-08-07
+updated: 2026-08-08
 owner: Kandev
 ---
 
@@ -12,6 +12,7 @@ Decisions:
 - [ADR-2026-07-29-agent-stall-user-controlled-recovery](../../decisions/2026-07-29-agent-stall-user-controlled-recovery.md)
 - [ADR-2026-08-02-agent-terminal-diagnostics-over-stderr](../../decisions/2026-08-02-agent-terminal-diagnostics-over-stderr.md)
 - [ADR-2026-08-07-allowlisted-provider-action-links](../../decisions/2026-08-07-allowlisted-provider-action-links.md)
+- [ADR-2026-08-08-provider-neutral-agent-error-recovery](../../decisions/2026-08-08-provider-neutral-agent-error-recovery.md)
 
 Implementation plans:
 
@@ -72,6 +73,10 @@ mere inactivity so a failed turn is not presented as healthy work.
   `quota_limited`. Its recovery surface names the affected model when known,
   explains when capacity resets, and keeps sanitized technical details
   collapsed by default.
+- Kanban interactive recovery treats `quota_limited` as user-actionable. A reset
+  time is informative and never schedules a Kanban retry. Office may consume the
+  same classification for configured provider fallback and durable scheduler
+  recovery under its separate routing policy.
 - The user-facing provider-limit copy is localized. Desktop and phone layouts
   expose the same failure explanation, technical details, and recovery actions.
 - A diagnostic for a background/title request, another OpenCode session, an

@@ -306,10 +306,41 @@ type promptTurnState struct {
 	handoffCh        chan struct{}
 	providerErrorCh  chan openCodeStderrDiagnostic
 	promptGeneration uint64
+	evidenceMu       sync.Mutex
+	codexSystemError bool
+	codexCapacity    bool
 	allowHandoff     bool
 	handedOff        bool
 	gateOwned        bool
 	finishing        bool
+}
+
+func (t *promptTurnState) observeCodexEvidence(systemError, capacity bool) {
+	if t == nil || (!systemError && !capacity) {
+		return
+	}
+	t.evidenceMu.Lock()
+	t.codexSystemError = t.codexSystemError || systemError
+	t.codexCapacity = t.codexCapacity || capacity
+	t.evidenceMu.Unlock()
+}
+
+func (t *promptTurnState) codexCapacityFailure() bool {
+	if t == nil {
+		return false
+	}
+	t.evidenceMu.Lock()
+	defer t.evidenceMu.Unlock()
+	return t.codexSystemError && t.codexCapacity
+}
+
+func (t *promptTurnState) hasCodexSystemError() bool {
+	if t == nil {
+		return false
+	}
+	t.evidenceMu.Lock()
+	defer t.evidenceMu.Unlock()
+	return t.codexSystemError
 }
 
 type asyncTurnFinalizer struct {
@@ -534,6 +565,7 @@ func (a *Adapter) sendUpdate(event AgentEvent) {
 	if lifetimeCtx == nil {
 		lifetimeCtx = context.Background()
 	}
+	event.NormalizedPayload = event.NormalizedPayload.Snapshot()
 	closedCh := a.closedCh
 	if closedCh != nil {
 		a.updateSendWg.Add(1)
@@ -558,6 +590,7 @@ func (a *Adapter) sendUpdateLocked(event AgentEvent) bool {
 	if a.closed {
 		return false
 	}
+	event.NormalizedPayload = event.NormalizedPayload.Snapshot()
 	select {
 	case a.updatesCh <- event:
 		return true

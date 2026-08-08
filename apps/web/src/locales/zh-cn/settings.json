@@ -258,6 +258,7 @@
   "externalMcpToolListAgents": "列出已配置的代理及其配置。",
   "externalMcpToolListExecutorProfiles": "列出执行器的配置。",
   "externalMcpToolListExecutors": "列出所有执行器。",
+  "externalMcpToolListTaskSessions": "按最近启动的顺序列出任务的所有代理会话，以便其他工具通过 ID 定位会话。",
   "externalMcpToolListTasks": "列出工作流中的任务。",
   "externalMcpToolListWorkflowSteps": "列出工作流中的所有步骤。",
   "externalMcpToolListWorkflows": "列出工作区中的工作流。",

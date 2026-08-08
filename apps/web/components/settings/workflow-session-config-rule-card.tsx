@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useRef } from "react";
 import { IconTrash } from "@tabler/icons-react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@kandev/ui/button";
@@ -11,34 +12,22 @@ import {
   ModelConfigSelector,
   type SelectConfigOption,
 } from "@/components/model-config-selector";
+import { ModelConfigResolutionStatus } from "@/components/settings/model-config-resolution-status";
 import type { AvailableAgent } from "@/lib/types/http";
 import type { ConfigureSessionOperation, ConfigureSessionRule } from "@/lib/types/workflow-actions";
+import { reconcileConfigOptionValues } from "./profile-model-config";
+import { useSessionConfigModelOptions } from "./use-session-config-model-options";
 import {
   type AgentChoice,
   defaultModelForAgent,
-  modelConfigOptions,
   operationRule,
 } from "./workflow-session-config-shared";
 
-export function SessionConfigRuleCard({
-  rule,
-  index,
-  choices,
-  availableAgents,
-  readOnly,
-  onChange,
-  onRemove,
-}: {
-  rule: ConfigureSessionRule;
-  index: number;
-  choices: AgentChoice[];
-  availableAgents: AvailableAgent[];
-  readOnly: boolean;
-  onChange: (rule: ConfigureSessionRule) => void;
-  onRemove: () => void;
-}) {
-  const selectedAgent = availableAgents.find((agent) => agent.name === rule.agent_name);
-  const configOptions = modelConfigOptions(selectedAgent?.model_config, rule);
+function modelSelectionForRule(
+  rule: ConfigureSessionRule,
+  configOptions: SelectConfigOption[],
+  selectedAgent: AvailableAgent | undefined,
+) {
   const modelConfigOption = configOptions.find(isModelConfigOption);
   const modelOptions = modelConfigOption
     ? configOptionToModelOptions(modelConfigOption)
@@ -49,7 +38,51 @@ export function SessionConfigRuleCard({
         usageMultiplier:
           typeof model.meta?.copilotUsage === "string" ? model.meta.copilotUsage : undefined,
       }));
-  const currentModel = currentModelForRule(rule, modelConfigOption, selectedAgent);
+
+  return {
+    modelOptions,
+    currentModel: currentModelForRule(rule, modelConfigOption, selectedAgent),
+  };
+}
+
+export function SessionConfigRuleCard({
+  rule,
+  index,
+  choices,
+  availableAgents,
+  readOnly,
+  onChange,
+  onRemove,
+  onResolutionPendingChange,
+}: {
+  rule: ConfigureSessionRule;
+  index: number;
+  choices: AgentChoice[];
+  availableAgents: AvailableAgent[];
+  readOnly: boolean;
+  onChange: (rule: ConfigureSessionRule) => void;
+  onRemove: () => void;
+  onResolutionPendingChange: (key: string, pending: boolean) => void;
+}) {
+  const selectedAgent = availableAgents.find((agent) => agent.name === rule.agent_name);
+  const {
+    configOptions,
+    configStatus,
+    configError,
+    configIsLoading,
+    isResolutionPending,
+    refreshConfig,
+    modelOptions,
+    currentModel,
+    handleRuleChange,
+  } = useSessionConfigRuleModelState({
+    rule,
+    index,
+    selectedAgent,
+    readOnly,
+    onChange,
+    onResolutionPendingChange,
+  });
 
   return (
     <div
@@ -72,12 +105,116 @@ export function SessionConfigRuleCard({
           modelOptions={modelOptions}
           currentModel={currentModel}
           configOptions={configOptions}
+          configStatus={configStatus}
+          configError={configError}
+          configIsLoading={configIsLoading}
+          isConfigResolutionPending={isResolutionPending}
+          onRetryConfig={refreshConfig}
           readOnly={readOnly}
-          onChange={onChange}
+          onChange={handleRuleChange}
         />
       )}
     </div>
   );
+}
+
+function useSessionConfigRuleModelState({
+  rule,
+  index,
+  selectedAgent,
+  readOnly,
+  onChange,
+  onResolutionPendingChange,
+}: {
+  rule: ConfigureSessionRule;
+  index: number;
+  selectedAgent: AvailableAgent | undefined;
+  readOnly: boolean;
+  onChange: (rule: ConfigureSessionRule) => void;
+  onResolutionPendingChange: (key: string, pending: boolean) => void;
+}) {
+  const {
+    configOptions,
+    configStatus,
+    configError,
+    configIsLoading,
+    isConfigResolutionPending,
+    refreshConfig,
+    isConfigResolvedForRequest,
+    resolvedConfigOptions,
+  } = useSessionConfigModelOptions(selectedAgent, rule);
+  const selectedRuleModel = rule.operation === "set" ? rule.model : undefined;
+  const initialRuleModel = useRef(selectedRuleModel);
+  const hasUserSelectedModel = useRef(false);
+  const pendingKey = `${rule.agent_name}:${index}`;
+  const currentConfigOptions = rule.operation === "set" ? rule.config_options : undefined;
+
+  const reconciledConfigOptions = reconcileConfigOptionValues(
+    currentConfigOptions,
+    resolvedConfigOptions,
+  );
+  const needsReconciliation =
+    !readOnly &&
+    rule.operation === "set" &&
+    configStatus === "ok" &&
+    isConfigResolvedForRequest &&
+    JSON.stringify(reconciledConfigOptions) !== JSON.stringify(currentConfigOptions ?? {});
+  const isResolutionPending = isConfigResolutionPending || needsReconciliation;
+
+  useEffect(() => {
+    onResolutionPendingChange(pendingKey, isResolutionPending);
+    return () => onResolutionPendingChange(pendingKey, false);
+  }, [isResolutionPending, onResolutionPendingChange, pendingKey]);
+
+  useEffect(() => {
+    if (selectedRuleModel !== initialRuleModel.current) {
+      hasUserSelectedModel.current = true;
+    }
+  }, [selectedRuleModel]);
+
+  useEffect(() => {
+    if (
+      readOnly ||
+      !hasUserSelectedModel.current ||
+      rule.operation !== "set" ||
+      configStatus !== "ok" ||
+      !isConfigResolvedForRequest
+    ) {
+      return;
+    }
+    const nextConfigOptions = reconciledConfigOptions;
+    if (JSON.stringify(nextConfigOptions) === JSON.stringify(currentConfigOptions ?? {})) {
+      return;
+    }
+    const nextRule = { ...rule };
+    if (Object.keys(nextConfigOptions).length > 0) {
+      nextRule.config_options = nextConfigOptions;
+    } else {
+      delete nextRule.config_options;
+    }
+    onChange(nextRule);
+  }, [configStatus, isConfigResolvedForRequest, onChange, readOnly, reconciledConfigOptions, rule]);
+
+  const { modelOptions, currentModel } = modelSelectionForRule(rule, configOptions, selectedAgent);
+  const handleRuleChange = (nextRule: ConfigureSessionRule) => {
+    const nextModel = nextRule.operation === "set" ? nextRule.model : undefined;
+    if (nextModel !== selectedRuleModel) {
+      hasUserSelectedModel.current = true;
+    }
+    onChange(nextRule);
+  };
+
+  return {
+    configOptions,
+    configStatus,
+    configError,
+    configIsLoading,
+    isResolutionPending,
+    refreshConfig,
+    modelOptions,
+    currentModel,
+    handleRuleChange,
+  };
 }
 
 function SessionConfigRuleHeader({
@@ -183,6 +320,11 @@ function SessionConfigRuleSettings({
   modelOptions,
   currentModel,
   configOptions,
+  configStatus,
+  configError,
+  configIsLoading,
+  isConfigResolutionPending,
+  onRetryConfig,
   readOnly,
   onChange,
 }: {
@@ -190,6 +332,11 @@ function SessionConfigRuleSettings({
   modelOptions: { id: string; name: string; description?: string; usageMultiplier?: string }[];
   currentModel: string | null;
   configOptions: SelectConfigOption[];
+  configStatus: ReturnType<typeof useSessionConfigModelOptions>["configStatus"];
+  configError: string | null;
+  configIsLoading: boolean;
+  isConfigResolutionPending: boolean;
+  onRetryConfig: () => Promise<void>;
   readOnly: boolean;
   onChange: (rule: ConfigureSessionRule) => void;
 }) {
@@ -218,6 +365,12 @@ function SessionConfigRuleSettings({
           {t("workflows:sessionConfigModelOptionsUnavailable")}
         </p>
       )}
+      <ModelConfigResolutionStatus
+        status={configStatus}
+        error={configError}
+        isLoading={configIsLoading || isConfigResolutionPending}
+        onRetry={onRetryConfig}
+      />
     </div>
   );
 }

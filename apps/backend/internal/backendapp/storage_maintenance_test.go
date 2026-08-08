@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -90,6 +91,187 @@ func TestStorageOverviewIncludesQuarantineAndManagedContainers(t *testing.T) {
 	if _, ok := degraded.Workspaces.(workspaces.Analysis); !ok {
 		t.Fatalf("workspace summary should remain available, got %#v", degraded.Workspaces)
 	}
+}
+
+func TestStorageCleanupProvidersIncludeWorkspaceDependencyCleanup(t *testing.T) {
+	settings, store := newStorageMaintenanceStores(t)
+	home := t.TempDir()
+	workspaceFactory := func(storagepkg.StorageMaintenanceSettings) *workspaces.Provider {
+		return workspaces.New(workspaces.Config{TasksRoot: filepath.Join(home, "tasks"), Store: store})
+	}
+	providers := storageCleanupProviders(settings, workspaceFactory, nil, nil, nil)
+	for _, provider := range providers {
+		if provider.Name() == "workspace_dependencies" {
+			return
+		}
+	}
+	t.Fatal("storage cleanup providers did not include workspace_dependencies")
+}
+
+func TestWorkspaceDependencyCleanupProviderIsDefaultOff(t *testing.T) {
+	settings, store := newStorageMaintenanceStores(t)
+	home := t.TempDir()
+	factoryCalls := 0
+	workspaceFactory := func(storagepkg.StorageMaintenanceSettings) *workspaces.Provider {
+		factoryCalls++
+		return workspaces.New(workspaces.Config{TasksRoot: filepath.Join(home, "tasks"), Store: store})
+	}
+	var dependencyProvider storagepkg.CleanupProvider
+	for _, provider := range storageCleanupProviders(settings, workspaceFactory, nil, nil, nil) {
+		if provider.Name() == "workspace_dependencies" {
+			dependencyProvider = provider
+			break
+		}
+	}
+	if dependencyProvider == nil {
+		t.Fatal("workspace dependency provider is missing")
+	}
+	if result, err := dependencyProvider.Cleanup(context.Background()); err != nil || result != nil {
+		t.Fatalf("default-off cleanup = (%#v, %v), want no-op", result, err)
+	}
+	if factoryCalls != 0 {
+		t.Fatalf("workspace factory calls = %d, want 0 while disabled", factoryCalls)
+	}
+
+	enabled := storagepkg.DefaultSettings()
+	enabled.Workspaces.DependencyCleanupEnabled = true
+	if _, err := settings.SaveSettings(context.Background(), enabled); err != nil {
+		t.Fatalf("enable dependency cleanup: %v", err)
+	}
+	if _, err := dependencyProvider.Cleanup(context.Background()); err == nil {
+		t.Fatal("enabled dependency cleanup unexpectedly succeeded without complete inventory")
+	}
+	if factoryCalls != 1 {
+		t.Fatalf("workspace factory calls = %d, want 1 after enabling", factoryCalls)
+	}
+}
+
+func TestStorageOverviewStartsIndependentMeasurementsTogether(t *testing.T) {
+	home := t.TempDir()
+	for _, dir := range []string{filepath.Join(home, "tasks"), filepath.Join(home, "trash")} {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Setenv("GOCACHE", filepath.Join(home, "go-cache"))
+	settings, store := newStorageMaintenanceStores(t)
+	workspaceStarted, workspaceRelease := make(chan struct{}), make(chan struct{})
+	goCacheStarted, goCacheRelease := make(chan struct{}), make(chan struct{})
+	quarantine := &blockingOverviewQuarantine{
+		started: make(chan struct{}), release: make(chan struct{}),
+	}
+	dockerClient := &blockingOverviewDockerClient{
+		started: make(chan struct{}), release: make(chan struct{}),
+	}
+	var releaseOnce sync.Once
+	releaseMeasurements := func() {
+		releaseOnce.Do(func() {
+			close(workspaceRelease)
+			close(goCacheRelease)
+			close(quarantine.release)
+			close(dockerClient.release)
+		})
+	}
+	t.Cleanup(releaseMeasurements)
+	docker := dockerstore.NewProvider(dockerClient, overviewContainerInventory{}, settings)
+	overview := &storageOverview{
+		settings: settings, quarantine: quarantine,
+		workspaceAnalyze: func(context.Context, storagepkg.StorageMaintenanceSettings) (workspaces.Analysis, error) {
+			close(workspaceStarted)
+			<-workspaceRelease
+			return workspaces.Analysis{}, nil
+		},
+		goCacheAnalyze: func(context.Context) (gocache.Analysis, error) {
+			close(goCacheStarted)
+			<-goCacheRelease
+			return gocache.Analysis{}, nil
+		},
+		workspaceFactory: func(current storagepkg.StorageMaintenanceSettings) *workspaces.Provider {
+			return workspaces.New(workspaces.Config{
+				TasksRoot: filepath.Join(home, "tasks"), TrashRoot: filepath.Join(home, "trash"),
+				Inventory: overviewWorkspaceInventory{}, Store: store,
+				GracePeriod: time.Duration(current.OrphanGraceHours) * time.Hour,
+				Retention:   time.Duration(current.QuarantineRetentionHours) * time.Hour,
+			})
+		},
+		goCache: gocache.New(gocache.Config{
+			HomeDir: home, TrashDir: filepath.Join(home, "trash"), Settings: settings, Store: store,
+		}),
+		docker: docker, homeDir: home,
+	}
+
+	resultCh := make(chan struct {
+		summary storagepkg.Summary
+		err     error
+	}, 1)
+	go func() {
+		summary, err := overview.Summary(context.Background())
+		resultCh <- struct {
+			summary storagepkg.Summary
+			err     error
+		}{summary: summary, err: err}
+	}()
+
+	for _, measurement := range []struct {
+		name    string
+		started <-chan struct{}
+	}{
+		{name: "workspace", started: workspaceStarted},
+		{name: "Go cache", started: goCacheStarted},
+		{name: "quarantine", started: quarantine.started},
+		{name: "Docker", started: dockerClient.started},
+	} {
+		select {
+		case <-measurement.started:
+		case <-time.After(time.Second):
+			t.Fatalf("%s measurement did not start before the barrier was released", measurement.name)
+		}
+	}
+	releaseMeasurements()
+
+	select {
+	case result := <-resultCh:
+		if result.err != nil {
+			t.Fatalf("Summary: %v", result.err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("Summary did not finish")
+	}
+}
+
+type blockingOverviewQuarantine struct {
+	started chan struct{}
+	release chan struct{}
+}
+
+func (s *blockingOverviewQuarantine) SummarizeQuarantine(context.Context) (storagepkg.QuarantineSummary, error) {
+	close(s.started)
+	<-s.release
+	return storagepkg.QuarantineSummary{}, nil
+}
+
+type blockingOverviewDockerClient struct {
+	started chan struct{}
+	release chan struct{}
+}
+
+func (c *blockingOverviewDockerClient) Ping(context.Context) error { return nil }
+func (c *blockingOverviewDockerClient) ListContainers(context.Context, map[string]string) ([]agentdocker.ContainerInfo, error) {
+	return nil, nil
+}
+func (c *blockingOverviewDockerClient) RemoveContainer(context.Context, string, bool) error {
+	return nil
+}
+func (c *blockingOverviewDockerClient) DiskUsage(context.Context) (agentdocker.DiskUsage, error) {
+	close(c.started)
+	<-c.release
+	return agentdocker.DiskUsage{}, nil
+}
+func (c *blockingOverviewDockerClient) PruneBuildCache(context.Context, agentdocker.BuildCachePruneOptions) (agentdocker.PruneResult, error) {
+	return agentdocker.PruneResult{}, nil
+}
+func (c *blockingOverviewDockerClient) PruneUnusedImages(context.Context, time.Time) (agentdocker.PruneResult, error) {
+	return agentdocker.PruneResult{}, nil
 }
 
 type failingQuarantineSummarizer struct{ err error }
@@ -479,14 +661,14 @@ func TestQuarantineCleanupProviderPurgesEligibleEntries(t *testing.T) {
 
 func TestStorageCleanupProvidersIncludesQuarantineProvider(t *testing.T) {
 	providers := storageCleanupProviders(nil, nil, nil, nil, &recordingQuarantinePurger{})
-	if len(providers) != 6 {
-		t.Fatalf("provider count = %d, want 6", len(providers))
+	if len(providers) != 7 {
+		t.Fatalf("provider count = %d, want 7", len(providers))
 	}
 	if providers[0].Name() != "quarantine" {
 		t.Fatalf("first provider = %q, want quarantine", providers[0].Name())
 	}
-	if providers[1].Name() != "workspaces" || providers[2].Name() != "go_cache" {
-		t.Fatalf("provider order = %q, %q, want workspaces, go_cache", providers[1].Name(), providers[2].Name())
+	if providers[1].Name() != "workspaces" || providers[2].Name() != "workspace_dependencies" || providers[3].Name() != "go_cache" {
+		t.Fatalf("provider order = %q, %q, %q, want workspaces, workspace_dependencies, go_cache", providers[1].Name(), providers[2].Name(), providers[3].Name())
 	}
 }
 

@@ -212,6 +212,7 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 		Notification: nil,
 	}
 	mentionComponents, err := newMentionComponents(
+		log,
 		taskSvc,
 		taskSvc,
 		builtinMentionProviders(services, repos.Task)...,

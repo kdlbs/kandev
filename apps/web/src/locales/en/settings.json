@@ -258,6 +258,7 @@
   "externalMcpToolListAgents": "List configured agents and their profiles.",
   "externalMcpToolListExecutorProfiles": "List profiles for an executor.",
   "externalMcpToolListExecutors": "List all executors.",
+  "externalMcpToolListTaskSessions": "List every agent session on a task, newest first, so another tool can address one by ID.",
   "externalMcpToolListTasks": "List tasks in a workflow.",
   "externalMcpToolListWorkflowSteps": "List all steps in a workflow.",
   "externalMcpToolListWorkflows": "List workflows in a workspace.",

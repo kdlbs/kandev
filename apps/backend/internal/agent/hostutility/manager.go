@@ -44,12 +44,16 @@ type Manager struct {
 
 	parentTmpDir string
 	cache        *cache
+	modelCache   *modelConfigCache
 
-	mu          sync.RWMutex
-	instances   map[string]*instance // keyed by agent type
-	createGroup singleflight.Group
-	startCancel context.CancelFunc
-	stopped     bool
+	mu                sync.RWMutex
+	instances         map[string]*instance // keyed by agent type
+	createGroup       singleflight.Group
+	modelGroup        singleflight.Group
+	modelGenerationMu sync.Mutex
+	modelGenerations  map[string]uint64
+	startCancel       context.CancelFunc
+	stopped           bool
 }
 
 // instance is a single warm agentctl instance bound to an agent type.
@@ -69,13 +73,15 @@ func NewManager(
 	log *logger.Logger,
 ) *Manager {
 	return &Manager{
-		registry:      reg,
-		controlHost:   controlHost,
-		controlPort:   controlPort,
-		controlClient: controlClient,
-		log:           log.WithFields(zap.String("component", "host-utility")),
-		cache:         newCache(),
-		instances:     make(map[string]*instance),
+		registry:         reg,
+		controlHost:      controlHost,
+		controlPort:      controlPort,
+		controlClient:    controlClient,
+		log:              log.WithFields(zap.String("component", "host-utility")),
+		cache:            newCache(),
+		modelCache:       newModelConfigCache(),
+		instances:        make(map[string]*instance),
+		modelGenerations: make(map[string]uint64),
 	}
 }
 
@@ -146,6 +152,9 @@ func (m *Manager) Start(ctx context.Context) error {
 // Only dirs owned by this process are removed; other kandev processes' dirs
 // are untouched.
 func (m *Manager) Stop(ctx context.Context) {
+	if m.modelCache != nil {
+		m.modelCache.clear()
+	}
 	m.mu.Lock()
 	m.stopped = true
 	cancel := m.startCancel
@@ -594,30 +603,14 @@ func (m *Manager) probeWithCommand(
 			ID: m.ID, Name: m.Name, Description: m.Description, Meta: m.Meta,
 		})
 	}
-	for _, opt := range resp.ConfigOptions {
-		choices := make([]ConfigOptionChoice, 0, len(opt.Options))
-		for _, choice := range opt.Options {
-			choices = append(choices, ConfigOptionChoice{
-				Value:       choice.Value,
-				Name:        choice.Name,
-				Description: choice.Description,
-			})
-		}
-		caps.ConfigOptions = append(caps.ConfigOptions, ConfigOption{
-			Type:         opt.Type,
-			ID:           opt.ID,
-			Name:         opt.Name,
-			Description:  opt.Description,
-			CurrentValue: opt.CurrentValue,
-			Category:     opt.Category,
-			Options:      choices,
-		})
-	}
+	caps.ConfigOptions = configOptionsFromProbe(resp.ConfigOptions)
 	for _, c := range resp.Commands {
 		caps.Commands = append(caps.Commands, Command{Name: c.Name, Description: c.Description})
 	}
 	return caps
 }
+
+const modelConfigResolveTimeout = 60 * time.Second
 
 func buildProbeRequest(
 	inst *instance,

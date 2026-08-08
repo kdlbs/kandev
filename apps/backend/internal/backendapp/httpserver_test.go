@@ -22,7 +22,7 @@ func TestBuildHTTPServerAbortsWhenInterlockTokenGenerationFails(t *testing.T) {
 	newInterimSettingsInterlockToken = func() (string, error) { return "", wantErr }
 	t.Cleanup(func() { newInterimSettingsInterlockToken = original })
 
-	server, err := buildHTTPServer(&config.Config{}, testLogger(t), nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	server, err := buildHTTPServer(&config.Config{}, testLogger(t), nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 	if !errors.Is(err, wantErr) {
 		t.Fatalf("buildHTTPServer error = %v, want %v", err, wantErr)
 	}

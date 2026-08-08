@@ -109,6 +109,26 @@ type ConfigOptionChoice struct {
 	Description string `json:"description,omitempty"`
 }
 
+// ModelConfigResolutionRequest identifies the provider state to resolve.
+// Model is required. Mode and ConfigOptions are optional future-dependent
+// inputs for providers whose options depend on more than the model.
+type ModelConfigResolutionRequest struct {
+	Model         string
+	Mode          string
+	ConfigOptions map[string]string
+	Refresh       bool
+}
+
+// ModelConfigResolution is the provider's complete option snapshot for one
+// model-resolution context.
+type ModelConfigResolution struct {
+	AgentType     string
+	Model         string
+	Status        Status
+	ConfigOptions []ConfigOption
+	Error         string
+}
+
 // PromptResult is returned from ExecutePrompt and RawPrompt calls.
 type PromptResult struct {
 	Response       string

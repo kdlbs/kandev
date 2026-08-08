@@ -119,5 +119,18 @@
   "composerSteerPlaceholder": "Śēńď ńōŵ — ďēĺĩvēŕēď ţō ţĥē ŕũńńĩńĝ ţũŕń",
   "unknownError": "Ũńķńōŵń ēŕŕōŕ",
   "useWorkspaceDefault": "Ũśē ŵōŕķśƥàćē ďēƒàũĺţ...",
-  "useWorkspaceDefaultOption": "Ũśē ŵōŕķśƥàćē ďēƒàũĺţ"
+  "useWorkspaceDefaultOption": "Ũśē ŵōŕķśƥàćē ďēƒàũĺţ",
+  "transientRetryReasonModelCapacity": "Ḿōďēĺ àţ ćàƥàćĩţŷ",
+  "transientRetryReasonNetworkUnavailable": "Ńēţŵōŕķ ũńàvàĩĺàƀĺē",
+  "transientRetryReasonProviderOverloaded": "Ƥŕōvĩďēŕ ōvēŕĺōàďēď",
+  "transientRetryReasonProviderUnavailable": "Ƥŕōvĩďēŕ ţēḿƥōŕàŕĩĺŷ ũńàvàĩĺàƀĺē",
+  "transientRetryReasonRateLimited": "Ŕàţē ĺĩḿĩţēď",
+  "transientRetryReasonGeneric": "Ƥŕōvĩďēŕ ēŕŕōŕ",
+  "transientRetryIn": "Ŕēţŕŷĩńĝ ĩń {{countdown}}",
+  "transientRetryNow": "Ŕēţŕŷĩńĝ ńōŵ…",
+  "transientRetryCountdownLabel": "Ŕēţŕŷ ćōũńţďōŵń",
+  "transientRetryAttempt": "Àţţēḿƥţ {{attempt}} ōƒ {{maxAttempts}}",
+  "transientRetryProviderModel": "{{provider}} · {{model}}",
+  "transientRetryProvider": "Ƥŕōvĩďēŕ: {{provider}}",
+  "transientRetryModel": "Ḿōďēĺ: {{model}}"
 }

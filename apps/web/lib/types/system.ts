@@ -261,6 +261,10 @@ export interface StorageResourceSettings {
   enabled: boolean;
 }
 
+export interface StorageWorkspaceSettings extends StorageResourceSettings {
+  dependency_cleanup_enabled: boolean;
+}
+
 export interface StorageGoCacheSettings {
   enabled: boolean;
   max_bytes: number;
@@ -282,7 +286,7 @@ export interface StorageMaintenanceSettings {
   idle_for_minutes: number;
   orphan_grace_hours: number;
   quarantine_retention_hours: number;
-  workspaces: StorageResourceSettings;
+  workspaces: StorageWorkspaceSettings;
   kandev_containers: StorageResourceSettings;
   go_cache: StorageGoCacheSettings;
   docker: StorageDockerSettings;
@@ -419,6 +423,16 @@ export interface StorageOverviewResponse {
   summary: StorageSummary;
   analyzed_at: string;
   last_run: StorageMaintenanceRun | null;
+}
+
+export interface StorageDiskCapacityResponse {
+  path: string;
+  total_bytes: number;
+  used_bytes: number;
+  available_bytes: number;
+  used_percent: number;
+  available: boolean;
+  warning?: string;
 }
 
 export interface StoragePolicyResponse {

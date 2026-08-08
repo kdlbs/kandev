@@ -95,7 +95,7 @@ describe("system storage slice", () => {
         idle_for_minutes: 10,
         orphan_grace_hours: 168,
         quarantine_retention_hours: 168,
-        workspaces: { enabled: true },
+        workspaces: { enabled: true, dependency_cleanup_enabled: false },
         kandev_containers: { enabled: true },
         go_cache: { enabled: false, max_bytes: 16106127360, adopted_path: "" },
         docker: {
@@ -137,6 +137,7 @@ describe("system storage slice", () => {
     expect(store.getState().system.storage).toEqual({
       policy,
       overview,
+      disk: null,
       runs: [],
       quarantine: [],
     });

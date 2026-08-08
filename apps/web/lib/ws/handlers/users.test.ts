@@ -299,6 +299,7 @@ describe("user settings websocket task-create last-used", () => {
       branch: null,
       agentProfileId: null,
       executorProfileId: null,
+      workflowIdsByWorkspace: {},
       synced: false,
     });
   });
@@ -316,6 +317,25 @@ describe("user settings websocket task-create last-used", () => {
     });
   });
 
+  it("maps workspace-scoped workflow history from broadcasts", () => {
+    const store = makeStore();
+
+    registerUsersHandlers(store)["user.settings.updated"]?.(
+      userSettingsMessage({
+        task_create_last_used: {
+          workflow_ids_by_workspace: {
+            "workspace-1": "workflow-1",
+          },
+        },
+      }),
+    );
+
+    expect(store.getState().userSettings.taskCreateLastUsed).toMatchObject({
+      workflowIdsByWorkspace: { "workspace-1": "workflow-1" },
+      synced: true,
+    });
+  });
+
   it("preserves task-create last-used state when broadcasts omit it", () => {
     const store = makeStore();
     store.setState((state) => ({
@@ -327,6 +347,7 @@ describe("user settings websocket task-create last-used", () => {
           branch: "main",
           agentProfileId: "agent-1",
           executorProfileId: "exec-1",
+          workflowIdsByWorkspace: {},
           synced: true,
         },
       },
@@ -341,6 +362,7 @@ describe("user settings websocket task-create last-used", () => {
       branch: "main",
       agentProfileId: "agent-1",
       executorProfileId: "exec-1",
+      workflowIdsByWorkspace: {},
       synced: true,
     });
   });

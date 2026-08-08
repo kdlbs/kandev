@@ -76,7 +76,9 @@ export function useSessionActions({ sessionId, taskId, onDeleted }: SessionActio
   const appStoreApi = useAppStoreApi();
 
   const setPrimary = useCallback(
-    () => sessionId && wsAction("session.set_primary", "Set primary", { session_id: sessionId }),
+    () =>
+      sessionId &&
+      wsAction("session.set_primary", "Set primary", { session_id: sessionId }, 15000, "inline"),
     [sessionId, wsAction],
   );
 

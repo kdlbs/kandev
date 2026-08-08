@@ -352,6 +352,7 @@ func (h *Handlers) RegisterHandlers(d *ws.Dispatcher) {
 	d.RegisterFunc(ws.ActionMCPStopTask, h.handleStopTask)
 	d.RegisterFunc(ws.ActionMCPSpawnSession, h.handleSpawnSession)
 	d.RegisterFunc(ws.ActionMCPGetTaskConversation, h.handleGetTaskConversation)
+	d.RegisterFunc(ws.ActionMCPListTaskSessions, h.handleListTaskSessions)
 	d.RegisterFunc(ws.ActionMCPAskUserQuestion, h.handleAskUserQuestion)
 	d.RegisterFunc(ws.ActionMCPCreateTaskPlan, h.handleCreateTaskPlan)
 	d.RegisterFunc(ws.ActionMCPGetTaskPlan, h.handleGetTaskPlan)
@@ -2368,6 +2369,7 @@ const errorField = "error"
 // a wire-protocol key updates every handler in one place.
 const (
 	keyTaskID           = "task_id"
+	keyTotal            = "total"
 	keyRepositoryID     = "repository_id"
 	keyTaskRepositoryID = "task_repository_id"
 	keyBaseBranch       = "base_branch"

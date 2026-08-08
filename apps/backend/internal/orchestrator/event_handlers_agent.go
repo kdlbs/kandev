@@ -1145,8 +1145,8 @@ func (s *Service) handleAgentFailedLocked(ctx context.Context, data watcher.Agen
 		return
 	}
 
-	// Transient provider errors (529 Overloaded) get a paced, visible
-	// retry-with-backoff before any red banner. This is the ONLY non-terminal
+	// Short transient provider errors get a paced, visible retry-with-backoff
+	// before any red banner. This is the ONLY non-terminal
 	// failure path, so it runs before automation finalization below — otherwise
 	// a transient 529 on an automation run would mark the run failed and
 	// reap its ephemeral worktree out from under the in-flight retry.
@@ -1590,13 +1590,14 @@ func (s *Service) createRecoveryStatusMessage(ctx context.Context, data watcher.
 	// Resume-corrupted failures (poisoned extended-thinking state after a
 	// session/load) can't be fixed by resuming — steer the user to a fresh
 	// session instead of dumping the raw 400.
+	classified := classifyKanbanFailure(data)
 	statusMsg := fmt.Sprintf("Agent encountered an error: %s", displayMsg)
 	if resumeCorrupted {
 		statusMsg = "This agent session can't be resumed — its saved reasoning state is corrupted. Start a fresh session to continue."
-	} else if routingerr.IsTransientProviderError(data.ErrorMessage) {
+	} else if routingerr.Decide(routingerr.ContextKanban, classified, time.Now().UTC()) == routingerr.DecisionShortRetry {
 		// Reached after the transient retry budget is exhausted — show friendly
-		// copy instead of dumping the raw 529 JSON envelope.
-		statusMsg = "The provider stayed overloaded after several retries. Resume to try again, or start a fresh session."
+		// provider-neutral copy instead of dumping raw adapter evidence.
+		statusMsg = transientFailureExhaustedMessage(classified)
 	}
 	hasResumeToken := s.wasResumeAttempt(ctx, data.SessionID)
 	meta := map[string]interface{}{

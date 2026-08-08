@@ -6,6 +6,7 @@ import (
 	"errors"
 	"maps"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -210,6 +211,45 @@ func TestResolveProbeCommand_RejectsUnknown(t *testing.T) {
 	t.Parallel()
 	if got := resolveProbeCommand("claude"); got != "" {
 		t.Fatalf("resolveProbeCommand(claude) = %q, want empty", got)
+	}
+}
+
+// The mock agent is the one allow-listed command launched from an absolute
+// path, so on Windows it reaches this lookup as "mock-agent.exe". The coverage
+// above builds Unix-style paths, whose base name never carries an executable
+// suffix, which is why the gap passed on every runner including Windows.
+func TestResolveProbeCommand_ExecutableSuffix(t *testing.T) {
+	t.Parallel()
+
+	const name = "mock-agent"
+	dir := t.TempDir()
+
+	for _, tc := range []struct {
+		file        string
+		wantWindows string
+	}{
+		{file: name + ".exe", wantWindows: name},
+		{file: name + ".EXE", wantWindows: name},
+		{file: name + ".cmd", wantWindows: ""},
+		{file: name + ".txt", wantWindows: ""},
+		{file: name + ".exe.txt", wantWindows: ""},
+	} {
+		t.Run(tc.file, func(t *testing.T) {
+			t.Parallel()
+
+			path := filepath.Join(dir, tc.file)
+			got := resolveProbeCommand(path)
+
+			// Only Windows trims, and only ".exe" — any other suffix, and any
+			// suffix at all on Unix, leaves the name unmatched.
+			want := ""
+			if runtime.GOOS == "windows" {
+				want = tc.wantWindows
+			}
+			if got != want {
+				t.Fatalf("resolveProbeCommand(%q) = %q, want %q", path, got, want)
+			}
+		})
 	}
 }
 

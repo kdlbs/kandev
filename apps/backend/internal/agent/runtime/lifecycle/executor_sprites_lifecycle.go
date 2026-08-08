@@ -135,17 +135,23 @@ func (r *SpritesExecutor) runTerminalCleanupScript(ctx context.Context, sprite *
 // shouldRunExecutorCleanup. Stale execution cleanup is intentionally excluded
 // from this shared set: Docker has a runtime-specific helper to remove local
 // stale containers, while Sprites preserves cloud sandboxes for faster and less
-// destructive recovery.
+// destructive recovery. Task-tree reasons are emitted by the archive/delete
+// handoff path before its durable cascade cleanup job runs.
 const (
-	StopReasonTaskArchived    = "task archived"
-	StopReasonTaskDeleted     = "task deleted"
-	StopReasonSessionArchived = "session archived"
-	StopReasonSessionDeleted  = "session deleted"
+	StopReasonTaskArchived     = "task archived"
+	StopReasonTaskDeleted      = "task deleted"
+	StopReasonSessionArchived  = "session archived"
+	StopReasonSessionDeleted   = "session deleted"
+	StopReasonCascadeArchive   = "cascade archive"
+	StopReasonCascadeDelete    = "cascade delete"
+	StopReasonTaskTreeArchived = "task tree archived"
+	StopReasonTaskTreeDeleted  = "task tree deleted"
 )
 
 func shouldRunExecutorCleanup(reason string) bool {
 	switch strings.ToLower(strings.TrimSpace(reason)) {
-	case StopReasonTaskArchived, StopReasonTaskDeleted, StopReasonSessionArchived, StopReasonSessionDeleted:
+	case StopReasonTaskArchived, StopReasonTaskDeleted, StopReasonSessionArchived, StopReasonSessionDeleted,
+		StopReasonCascadeArchive, StopReasonCascadeDelete, StopReasonTaskTreeArchived, StopReasonTaskTreeDeleted:
 		return true
 	default:
 		return false

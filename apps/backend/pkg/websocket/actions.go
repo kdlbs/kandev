@@ -335,7 +335,8 @@ const (
 	// System maintenance jobs (VACUUM, factory reset, snapshot create/restore,
 	// disk walk). Broadcast to all connected clients so the System pages can
 	// render progress.
-	ActionSystemJobUpdate = "system.job.update"
+	ActionSystemJobUpdate                 = "system.job.update"
+	ActionSystemAgentRuntimeStatusChanged = "system.agent_runtime.status_changed"
 
 	// VS Code server actions
 	ActionVscodeStart    = "vscode.start"    // Start code-server for a session
@@ -434,6 +435,7 @@ const (
 	ActionMCPStopTask            = "mcp.stop_task"
 	ActionMCPSpawnSession        = "mcp.spawn_session"
 	ActionMCPGetTaskConversation = "mcp.get_task_conversation"
+	ActionMCPListTaskSessions    = "mcp.list_task_sessions"
 )
 
 const (
