@@ -144,14 +144,15 @@ func (p *Poller) runMRMonitor(ctx context.Context) {
 }
 
 // runMRLifecycleSync re-syncs every linked MR whose task has at least one
-// lifecycle notification switch enabled, and publishes gitlab.task_mr.updated
-// so the orchestrator's lifecycle evaluation pass runs on the fresh state
-// (AC22). A sync failure is recorded on the per-MR checkpoint (AC25) rather
-// than aborting the pass — one broken MR must not block the rest.
+// lifecycle notification, auto-fix, or auto-merge switch enabled, and
+// publishes gitlab.task_mr.updated so the orchestrator's automation
+// evaluation pass runs on the fresh state (AC22). A sync failure is recorded
+// on the per-MR checkpoint (AC25) rather than aborting the pass — one broken
+// MR must not block the rest.
 func (p *Poller) runMRLifecycleSync(ctx context.Context) {
-	rows, err := p.service.ListLifecycleSubscribedTaskMRs(ctx)
+	rows, err := p.service.ListAutomationSubscribedTaskMRs(ctx)
 	if err != nil {
-		p.logger.Warn("gitlab poller: list lifecycle-subscribed task MRs", zap.Error(err))
+		p.logger.Warn("gitlab poller: list automation-subscribed task MRs", zap.Error(err))
 		return
 	}
 	for _, row := range rows {

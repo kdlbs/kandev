@@ -71,6 +71,16 @@ remain during migration, but switchers use the summary when present.
 - Pending permission outranks pending clarification for the row's primary
   state icon. Both outrank generating/background activity, which outranks
   coarse lifecycle state. This is the existing task-row precedence.
+- A session's `pending_action` clears only when the specific request that armed
+  it resolves — a `message.updated` on that same permission/clarification
+  request row (matched by type and `pending_id`) reaching a terminal,
+  non-`pending` status, or that row's deletion. An unrelated message on the
+  same session (a tool call, script execution, or any other row that merely
+  carries its own terminal status metadata) must not clear a different
+  session's armed `pending_action`, and must not clear the current session's
+  `pending_action` unless it is that same request row. Otherwise a session that
+  is busy streaming ordinary tool activity right after a permission/
+  clarification request clears the affordance before the user ever answers it.
 - `active_error` is independent of the primary state icon. It represents the
   newest relevant recoverable agent error and clears after an authoritative
   dismissal or a newer agent response according to the existing error rules.
@@ -216,6 +226,12 @@ intermediate replacement.
 - **GIVEN** a recoverable error is dismissed or followed by a newer agent
   response, **WHEN** the projector processes that occurrence, **THEN** the
   independent error indicator clears on both task switchers.
+- **GIVEN** a session's agent requests permission and, before that request is
+  answered, the same session emits an unrelated tool call/execute/read message
+  that reaches its own terminal status, **WHEN** the projector processes that
+  unrelated message, **THEN** `pending_action` for the session remains
+  `permission` (the affordance does not flash and disappear before the user
+  answers it).
 - **GIVEN** notification traffic saturates its queue, **WHEN** the selected
   session sends `message.add`, **THEN** the correlated response is delivered
   first or the connection closes for deterministic reconciliation.

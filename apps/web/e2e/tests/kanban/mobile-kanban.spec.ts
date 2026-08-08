@@ -247,6 +247,11 @@ test.describe("Mobile kanban view", () => {
     await apiClient.saveUserSettings({
       workspace_id: seedData.workspaceId,
       workflow_filter_id: seedData.workflowId,
+      task_create_last_used: {
+        workflow_ids_by_workspace: {
+          [seedData.workspaceId]: secondWorkflow.id,
+        },
+      },
     });
 
     const mobile = new MobileKanbanPage(testPage);

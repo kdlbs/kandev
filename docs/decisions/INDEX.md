@@ -128,5 +128,7 @@ Read individual ADRs for full context. Create new ones via `/record decision` or
 | 2026-08-05-server-owned-quick-terminal-descriptors | [Server-Owned Quick Terminal Descriptors](2026-08-05-server-owned-quick-terminal-descriptors.md) | accepted | backend, frontend, protocol, security | 2026-08-05 |
 | 2026-08-05-nested-submodules-as-repository-scopes | [Model Nested Submodules as Repository Scopes](2026-08-05-nested-submodules-as-repository-scopes.md) | accepted | backend, frontend, protocol | 2026-08-05 |
 | 2026-08-05-homebrew-remote-helper-audit | [Preserve Remote Helpers in Homebrew Installs](2026-08-05-homebrew-remote-helper-audit.md) | accepted | infra, workflow | 2026-08-05 |
+| 2026-08-07-model-aware-provider-capability-resolution | [Model-aware provider capability resolution](2026-08-07-model-aware-provider-capability-resolution.md) | accepted | backend, frontend, protocol | 2026-08-07 |
 | 2026-08-07-claude-allowlist-label-bridge | [Use the Claude Allowlist as a Trusted Preview Gate](2026-08-07-claude-allowlist-label-bridge.md) | accepted | infra, workflow, security | 2026-08-07 |
 | 2026-08-08-agentctl-crash-containment | [Publish Immutable Agent Events and Explicit Runtime Failure State](2026-08-08-agentctl-crash-containment.md) | proposed | backend, frontend, protocol, operations | 2026-08-08 |
+| 2026-08-08-workspace-scoped-task-create-workflow-memory | [Remember Task-Create Workflows Per Workspace](2026-08-08-workspace-scoped-task-create-workflow-memory.md) | accepted | backend, frontend | 2026-08-08 |

@@ -18,7 +18,7 @@
  *   DOCS_PLUGIN_ID=kandev-plugin-hello \
  *   DOCS_PLUGIN_NAV_ID=hello-world \
  *   DOCS_PLUGIN_ROUTE=/hello-world \
- *   pnpm e2e --project=chromium --workers=1 tests/plugins/plugins-docs-screenshots.spec.ts
+ *   pnpm e2e:raw --project=chromium --workers=1 tests/plugins/plugins-docs-screenshots.spec.ts
  *
  * With no DOCS_PLUGIN_* overrides it falls back to the repo's own e2e fixture
  * package (apps/backend/.build/kandev-plugin-e2e-1.0.0.tar.gz), so the spec is

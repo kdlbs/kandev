@@ -893,13 +893,13 @@ type fileSearchCandidate struct {
 const (
 	// fileSearchDefaultLimit applies when the caller passes a non-positive limit.
 	fileSearchDefaultLimit = 20
-	// fileSearchMaxLimit caps the caller-supplied limit before it is used to
-	// pre-allocate the result slice. The limit reaches this code straight from
-	// the `limit` query parameter of GET /api/v1/workspace/search, so without a
-	// ceiling a request like `?limit=2000000000` makes the process reserve
-	// gigabytes for a result set that can never exceed the number of tracked
-	// files. Mirrors the clamp validateContentSearch already applies to
-	// content search.
+	// fileSearchMaxLimit caps how many results one search may return. The limit
+	// reaches this code straight from the `limit` query parameter of
+	// GET /api/v1/workspace/search, so without a ceiling a request like
+	// `?limit=2000000000` would ask for a result set that can never exceed the
+	// number of tracked files. It also bounds the result slice's capacity,
+	// which is sized from this cap rather than from the request. Mirrors the
+	// clamp validateContentSearch already applies to content search.
 	fileSearchMaxLimit = 200
 )
 
@@ -1100,8 +1100,11 @@ func searchFileCandidates(
 		return len(matches[i].matchPath) < len(matches[j].matchPath)
 	})
 
-	// Return top limit results
-	result := make([]types.FileSearchResult, 0, limit)
+	// Return top limit results. The capacity is derived from values we own —
+	// the matches we actually collected and the hard cap — instead of the
+	// caller-supplied limit, so the allocation size never depends on request
+	// input even indirectly.
+	result := make([]types.FileSearchResult, 0, min(len(matches), fileSearchMaxLimit))
 	for i := 0; i < len(matches) && i < limit; i++ {
 		result = append(result, types.FileSearchResult{
 			RepositoryName: matches[i].repositoryName,

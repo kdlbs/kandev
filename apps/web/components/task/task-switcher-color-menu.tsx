@@ -12,7 +12,7 @@ import { useSetTaskColor, useTaskColor } from "@/hooks/use-task-color";
 import {
   TASK_COLORS,
   TASK_COLOR_BAR_CLASS,
-  TASK_COLOR_LABEL,
+  TASK_COLOR_LABEL_KEYS,
   type TaskColor,
 } from "@/lib/task-colors";
 import { cn } from "@/lib/utils";
@@ -64,10 +64,11 @@ function TaskColorMenuItem({
   selected: boolean;
   onSelect: () => void;
 }) {
+  const { t } = useTranslation();
   return (
     <ContextMenuItem onSelect={onSelect}>
       <span className={cn("mr-2 inline-block h-2 w-2 rounded-full", TASK_COLOR_BAR_CLASS[color])} />
-      {TASK_COLOR_LABEL[color]}
+      {t(TASK_COLOR_LABEL_KEYS[color])}
       {selected && <IconCheck className="ml-auto h-3.5 w-3.5" />}
     </ContextMenuItem>
   );

@@ -33,7 +33,7 @@ func (s *Store) ResetWorkspaceE2E(ctx context.Context, workspaceID string) (E2ER
 
 	// gitlab_task_mr_state / gitlab_task_mr_options are deleted before the
 	// task rows below, per the E2E reset invariant in apps/backend/AGENTS.md:
-	// any workspace-scoped state a global poller reads (ListLifecycleSubscribedTaskMRs)
+	// any workspace-scoped state a global poller reads (ListAutomationSubscribedTaskMRs)
 	// must be gone before task deletion, or the poller can recreate rows
 	// mid-reset and later tests see duplicates.
 	if err := s.deleteMRAutomationForWorkspace(ctx, tx, workspaceID); err != nil {

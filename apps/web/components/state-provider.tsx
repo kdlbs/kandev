@@ -78,6 +78,15 @@ function taskCreateLastUsedEqual(
   a: AppState["userSettings"]["taskCreateLastUsed"],
   b: AppState["userSettings"]["taskCreateLastUsed"],
 ) {
+  return taskCreateLastUsedScalarsEqual(a, b)
+    ? taskCreateWorkflowMapsEqual(a?.workflowIdsByWorkspace, b?.workflowIdsByWorkspace)
+    : false;
+}
+
+function taskCreateLastUsedScalarsEqual(
+  a: AppState["userSettings"]["taskCreateLastUsed"],
+  b: AppState["userSettings"]["taskCreateLastUsed"],
+) {
   return (
     a?.repositoryId === b?.repositoryId &&
     a?.branch === b?.branch &&
@@ -85,6 +94,17 @@ function taskCreateLastUsedEqual(
     a?.executorProfileId === b?.executorProfileId &&
     a?.synced === b?.synced
   );
+}
+
+function taskCreateWorkflowMapsEqual(
+  a: Record<string, string> | undefined,
+  b: Record<string, string> | undefined,
+) {
+  const left = a ?? {};
+  const right = b ?? {};
+  const keys = Object.keys(left);
+  if (keys.length !== Object.keys(right).length) return false;
+  return keys.every((key) => left[key] === right[key]);
 }
 
 export function useAppStore<T>(selector: (state: AppState) => T) {

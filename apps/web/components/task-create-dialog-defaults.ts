@@ -1,6 +1,49 @@
 import type { DialogComputedArgs, StepType } from "@/components/task-create-dialog-types";
 import { computeEffectiveStepId } from "@/components/task-create-dialog-helpers";
 
+type WorkflowCandidate = {
+  id: string;
+  workspaceId?: string;
+  hidden?: boolean;
+};
+
+export type ResolveEffectiveTaskCreateWorkflowIdArgs = {
+  workspaceId: string | null;
+  lockedWorkflowId: string | null;
+  manualWorkflowId: string | null;
+  lastUsedWorkflowId: string | null;
+  contextWorkflowId: string | null;
+  workflows: WorkflowCandidate[];
+};
+
+function isVisibleWorkflow(workflow: WorkflowCandidate | undefined, workspaceId: string | null) {
+  return Boolean(
+    workflow &&
+    !workflow.hidden &&
+    (!workspaceId || !workflow.workspaceId || workflow.workspaceId === workspaceId),
+  );
+}
+
+export function resolveEffectiveTaskCreateWorkflowId({
+  workspaceId,
+  lockedWorkflowId,
+  manualWorkflowId,
+  lastUsedWorkflowId,
+  contextWorkflowId,
+  workflows,
+}: ResolveEffectiveTaskCreateWorkflowIdArgs): string | null {
+  if (lockedWorkflowId) return lockedWorkflowId;
+
+  const visibleWorkflows = workflows.filter((workflow) => isVisibleWorkflow(workflow, workspaceId));
+  const visibleWorkflowIDs = new Set(visibleWorkflows.map((workflow) => workflow.id));
+  if (manualWorkflowId && visibleWorkflowIDs.has(manualWorkflowId)) return manualWorkflowId;
+  if (lastUsedWorkflowId && visibleWorkflowIDs.has(lastUsedWorkflowId)) {
+    return lastUsedWorkflowId;
+  }
+  if (contextWorkflowId && visibleWorkflowIDs.has(contextWorkflowId)) return contextWorkflowId;
+  return visibleWorkflows.length === 1 ? (visibleWorkflows[0]?.id ?? null) : null;
+}
+
 export function resolveTaskCreateWorkflowContext(
   workflowId: string | null,
   defaultStepId: string | null,

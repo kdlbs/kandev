@@ -10,6 +10,7 @@ const hookMocks = vi.hoisted(() => ({
   loading: false,
   updateMock: vi.fn(),
   refreshMock: vi.fn(),
+  resetPromptMock: vi.fn(),
 }));
 
 const responsiveMock = vi.hoisted(() => ({
@@ -32,6 +33,7 @@ vi.mock("@/hooks/domains/gitlab/use-task-mr-automation", () => ({
     error: hookMocks.error,
     refresh: hookMocks.refreshMock,
     update: hookMocks.updateMock,
+    resetPrompt: hookMocks.resetPromptMock,
   }),
 }));
 
@@ -45,6 +47,11 @@ const FOLLOW_UP_TRIGGER = "mr-review-follow-up-trigger";
 function makeOptions(overrides: Partial<TaskMRAutomationOptions> = {}): TaskMRAutomationOptions {
   return {
     task_id: "task-1",
+    auto_fix_enabled: false,
+    auto_merge_enabled: false,
+    auto_fix_max_rounds: 10,
+    effective_auto_fix_prompt: "",
+    using_default_prompt: true,
     prompt_on_review_requested: false,
     prompt_on_merged: false,
     prompt_on_closed: false,
@@ -73,6 +80,8 @@ function resetHookMocks() {
   hookMocks.updateMock.mockResolvedValue(makeOptions());
   hookMocks.refreshMock.mockReset();
   hookMocks.refreshMock.mockResolvedValue(makeOptions());
+  hookMocks.resetPromptMock.mockReset();
+  hookMocks.resetPromptMock.mockResolvedValue(makeOptions());
   responsiveMock.isFinePointer = true;
   responsiveMock.isMobile = false;
 }

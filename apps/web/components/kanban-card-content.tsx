@@ -18,6 +18,7 @@ import { Checkbox } from "@kandev/ui/checkbox";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from "@kandev/ui/dropdown-menu";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { PRTaskIcon } from "@/components/github/pr-task-icon";
+import { MRTaskIcon } from "@/components/gitlab/mr-task-icon";
 import {
   KanbanCardDropdownMenuItems,
   type KanbanCardMenuEntry,
@@ -148,6 +149,7 @@ export function KanbanCardBody({
               {task.title}
             </p>
             <PRTaskIcon taskId={task.id} />
+            <MRTaskIcon taskId={task.id} />
             <TaskCardIndicators task={task} />
           </div>
         </div>

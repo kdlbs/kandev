@@ -1345,8 +1345,12 @@ export const i18nGuardFiles = [
   // does resolve at call time. Only a locale-switch test covers it, which is
   // what `use-filter-value-options-locale.test.tsx` is for.
   //
-  // Still English in `lib/sidebar/apply-view.ts` and belonging to whoever
-  // migrates `lib/sidebar`: `UNASSIGNED_LABEL` and `MULTI_REPO_LABEL`.
+  // `UNASSIGNED_LABEL` and `MULTI_REPO_LABEL` in `lib/sidebar/apply-view.ts`
+  // were the English remainder noted here; they are now
+  // `sidebar:groupUnassigned` / `sidebar:groupMultiRepo`, resolved at call time
+  // alongside the `__all__` heading. `lib/sidebar` is still NOT on this list —
+  // the rest of the directory was not swept, so whoever migrates it adds the
+  // entry.
   //
   // One deliberate English change, the only one in this PR: the SSH
   // running-sessions confirm read "This executor has 3 running session(s)."

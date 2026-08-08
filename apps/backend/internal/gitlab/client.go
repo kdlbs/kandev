@@ -65,6 +65,11 @@ type Client interface {
 	// ListPipelines lists pipelines for a given git ref (branch or SHA).
 	ListPipelines(ctx context.Context, projectPath, ref string) ([]Pipeline, error)
 
+	// ListPipelineJobs lists the jobs belonging to a single pipeline run.
+	// Used to compute job pass-rate counts and to surface failing job
+	// names/URLs for MR auto-fix.
+	ListPipelineJobs(ctx context.Context, projectPath string, pipelineID int64) ([]PipelineJob, error)
+
 	// GetMRFeedback fetches aggregated feedback (approvals, discussions,
 	// pipelines) for an MR.
 	GetMRFeedback(ctx context.Context, projectPath string, iid int) (*MRFeedback, error)

@@ -4,26 +4,30 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/kandev/kandev/internal/common/unidiff"
 )
 
 // rawMR is the JSON shape of a GitLab merge request as returned by the
 // REST v4 API.
 type rawMR struct {
-	ID             int64  `json:"id"`
-	IID            int    `json:"iid"`
-	ProjectID      int64  `json:"project_id"`
-	Title          string `json:"title"`
-	Description    string `json:"description"`
-	State          string `json:"state"` // opened, closed, merged, locked
-	WebURL         string `json:"web_url"`
-	Draft          bool   `json:"draft"`
-	WorkInProgress bool   `json:"work_in_progress"`
-	MergeStatus    string `json:"merge_status"`
-	HasConflicts   bool   `json:"has_conflicts"`
-	SourceBranch   string `json:"source_branch"`
-	TargetBranch   string `json:"target_branch"`
-	SHA            string `json:"sha"`
-	References     struct {
+	ID                          int64  `json:"id"`
+	IID                         int    `json:"iid"`
+	ProjectID                   int64  `json:"project_id"`
+	Title                       string `json:"title"`
+	Description                 string `json:"description"`
+	State                       string `json:"state"` // opened, closed, merged, locked
+	WebURL                      string `json:"web_url"`
+	Draft                       bool   `json:"draft"`
+	WorkInProgress              bool   `json:"work_in_progress"`
+	MergeStatus                 string `json:"merge_status"`
+	DetailedMergeStatus         string `json:"detailed_merge_status"`
+	BlockingDiscussionsResolved bool   `json:"blocking_discussions_resolved"`
+	HasConflicts                bool   `json:"has_conflicts"`
+	SourceBranch                string `json:"source_branch"`
+	TargetBranch                string `json:"target_branch"`
+	SHA                         string `json:"sha"`
+	References                  struct {
 		Full string `json:"full"`
 	} `json:"references"`
 	Author             rawUser    `json:"author"`
@@ -120,6 +124,17 @@ type rawPipeline struct {
 	FinishedAt *time.Time `json:"finished_at"`
 }
 
+// rawPipelineJob is the JSON shape of a single entry from
+// GET /projects/:id/pipelines/:id/jobs.
+type rawPipelineJob struct {
+	ID           int64  `json:"id"`
+	Name         string `json:"name"`
+	Stage        string `json:"stage"`
+	Status       string `json:"status"`
+	AllowFailure bool   `json:"allow_failure"`
+	WebURL       string `json:"web_url"`
+}
+
 func convertRawMR(raw *rawMR) *MR {
 	state := normalizeMRState(raw.State)
 	namespace, projectPath := splitFullReference(raw.References.Full)
@@ -128,33 +143,35 @@ func convertRawMR(raw *rawMR) *MR {
 		targetProjectID = raw.ProjectID
 	}
 	mr := &MR{
-		ID:                 raw.ID,
-		IID:                raw.IID,
-		ProjectID:          raw.ProjectID,
-		Title:              raw.Title,
-		URL:                raw.WebURL,
-		WebURL:             raw.WebURL,
-		State:              state,
-		HeadBranch:         raw.SourceBranch,
-		HeadSHA:            raw.SHA,
-		BaseBranch:         raw.TargetBranch,
-		AuthorUsername:     raw.Author.Username,
-		ProjectNamespace:   namespace,
-		ProjectPath:        projectPath,
-		SourceProjectID:    raw.SourceProjectID,
-		TargetProjectID:    targetProjectID,
-		AllowCollaboration: raw.AllowCollaboration,
-		Body:               raw.Description,
-		Draft:              raw.Draft || raw.WorkInProgress,
-		MergeStatus:        raw.MergeStatus,
-		HasConflicts:       raw.HasConflicts,
-		Reviewers:          convertReviewers(raw.Reviewers),
-		Assignees:          convertReviewers(raw.Assignees),
-		Labels:             append([]string(nil), raw.Labels...),
-		CreatedAt:          raw.CreatedAt,
-		UpdatedAt:          raw.UpdatedAt,
-		MergedAt:           raw.MergedAt,
-		ClosedAt:           raw.ClosedAt,
+		ID:                          raw.ID,
+		IID:                         raw.IID,
+		ProjectID:                   raw.ProjectID,
+		Title:                       raw.Title,
+		URL:                         raw.WebURL,
+		WebURL:                      raw.WebURL,
+		State:                       state,
+		HeadBranch:                  raw.SourceBranch,
+		HeadSHA:                     raw.SHA,
+		BaseBranch:                  raw.TargetBranch,
+		AuthorUsername:              raw.Author.Username,
+		ProjectNamespace:            namespace,
+		ProjectPath:                 projectPath,
+		SourceProjectID:             raw.SourceProjectID,
+		TargetProjectID:             targetProjectID,
+		AllowCollaboration:          raw.AllowCollaboration,
+		Body:                        raw.Description,
+		Draft:                       raw.Draft || raw.WorkInProgress,
+		MergeStatus:                 raw.MergeStatus,
+		DetailedMergeStatus:         raw.DetailedMergeStatus,
+		BlockingDiscussionsResolved: raw.BlockingDiscussionsResolved,
+		HasConflicts:                raw.HasConflicts,
+		Reviewers:                   convertReviewers(raw.Reviewers),
+		Assignees:                   convertReviewers(raw.Assignees),
+		Labels:                      append([]string(nil), raw.Labels...),
+		CreatedAt:                   raw.CreatedAt,
+		UpdatedAt:                   raw.UpdatedAt,
+		MergedAt:                    raw.MergedAt,
+		ClosedAt:                    raw.ClosedAt,
 	}
 	if raw.SourceProject.PathWithNamespace != "" {
 		mr.SourceProjectPath = raw.SourceProject.PathWithNamespace
@@ -304,6 +321,17 @@ func convertRawPipeline(raw *rawPipeline) Pipeline {
 	}
 }
 
+func convertRawPipelineJob(raw *rawPipelineJob) PipelineJob {
+	return PipelineJob{
+		ID:           raw.ID,
+		Name:         raw.Name,
+		Stage:        raw.Stage,
+		Status:       raw.Status,
+		AllowFailure: raw.AllowFailure,
+		WebURL:       raw.WebURL,
+	}
+}
+
 // mrStateOpen is the normalized "open" state value shared with the GitHub
 // integration vocabulary. GitLab's API returns "opened"; we expose "open".
 const mrStateOpen = "open"
@@ -345,12 +373,20 @@ func splitFullReference(full string) (namespace, projectPath string) {
 }
 
 func hasOpenDiscussions(discussions []MRDiscussion) bool {
+	return countUnresolvedDiscussions(discussions) > 0
+}
+
+// countUnresolvedDiscussions counts discussions that are resolvable but not
+// yet resolved — the same predicate hasOpenDiscussions checks, exposed as a
+// count for the automation snapshot and summary UI.
+func countUnresolvedDiscussions(discussions []MRDiscussion) int {
+	count := 0
 	for _, d := range discussions {
 		if d.Resolvable && !d.Resolved {
-			return true
+			count++
 		}
 	}
-	return false
+	return count
 }
 
 func pipelineFailing(pipelines []Pipeline) bool {
@@ -382,6 +418,24 @@ func summarizePipelines(pipelines []Pipeline) (state string, jobsTotal, jobsPass
 		state = statusPending
 	}
 	return state, jobsTotal, jobsPassing
+}
+
+// countUnapprovedReviewers counts assigned reviewers who have not yet
+// recorded an approval (Q2's "awaiting review" signal). GitLab has no
+// distinct "requested but hasn't looked" state, so this only distinguishes
+// "approved" from "everyone else assigned".
+func countUnapprovedReviewers(reviewers []MRReviewer, approvals []MRApproval) int {
+	approved := make(map[string]bool, len(approvals))
+	for _, a := range approvals {
+		approved[a.Username] = true
+	}
+	count := 0
+	for _, r := range reviewers {
+		if !approved[r.Username] {
+			count++
+		}
+	}
+	return count
 }
 
 func summarizeApprovals(have, required int) string {
@@ -505,22 +559,17 @@ func appendFilter(values url.Values, filter string) {
 	}
 }
 
-// countDiffLines returns (additions, deletions) by counting lines starting
-// with "+" or "-" (excluding the diff header lines that start with
-// "+++"/"---"). Best-effort; matches the GitLab UI's own counting.
+// countDiffLines returns (additions, deletions) for one file's patch from the
+// MR /changes payload. GitLab's REST API carries no per-file line counts, so the
+// patch body has to be counted here.
+//
+// It counts only lines inside a `@@` hunk. The previous "+++"/"---" prefix test
+// was content-blind: GitLab returns `--- a/<path>` / `+++ b/<path>` headers ahead
+// of the first hunk, but so does a removed SQL comment (`-- x` arrives as
+// `--- x`) or an added C increment (`++n;` arrives as `+++n;`), and those were
+// dropped from the totals.
 func countDiffLines(diff string) (int, int) {
-	additions, deletions := 0, 0
-	for _, line := range strings.Split(diff, "\n") {
-		switch {
-		case strings.HasPrefix(line, "+++"), strings.HasPrefix(line, "---"):
-			continue
-		case strings.HasPrefix(line, "+"):
-			additions++
-		case strings.HasPrefix(line, "-"):
-			deletions++
-		}
-	}
-	return additions, deletions
+	return unidiff.CountLines(diff)
 }
 
 func diffStatus(newFile, deletedFile, renamedFile bool) string {

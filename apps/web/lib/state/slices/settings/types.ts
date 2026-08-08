@@ -254,6 +254,7 @@ export type TaskCreateLastUsedState = {
   branch: string | null;
   agentProfileId: string | null;
   executorProfileId: string | null;
+  workflowIdsByWorkspace: Record<string, string>;
   synced?: boolean;
 };
 

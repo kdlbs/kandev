@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -367,12 +368,50 @@ func makeTaskCreateLastUsedJSONSetArgs(patch models.TaskCreateLastUsed) []any {
 	if patch.ExecutorProfileID != "" {
 		args = append(args, "$.task_create_last_used.executor_profile_id", patch.ExecutorProfileID)
 	}
+	workflowIDs := make([]string, 0, len(patch.WorkflowIDsByWorkspace))
+	for workspaceID := range patch.WorkflowIDsByWorkspace {
+		workflowIDs = append(workflowIDs, workspaceID)
+	}
+	sort.Strings(workflowIDs)
+	for _, workspaceID := range workflowIDs {
+		workflowID := patch.WorkflowIDsByWorkspace[workspaceID]
+		if !isSafeTaskCreateWorkspacePathKey(workspaceID) || workflowID == "" {
+			continue
+		}
+		// Workspace IDs are generated UUIDs. SQLite JSON1 does not support
+		// PostgreSQL-style parameterized path segments, so reject punctuation
+		// rather than interpolating a key that could change the JSON path.
+		args = append(args,
+			"$.task_create_last_used.workflow_ids_by_workspace."+workspaceID,
+			workflowID,
+		)
+	}
 	return args
+}
+
+func isSafeTaskCreateWorkspacePathKey(value string) bool {
+	if value == "" {
+		return false
+	}
+	for _, char := range value {
+		if (char >= 'a' && char <= 'z') ||
+			(char >= 'A' && char <= 'Z') ||
+			(char >= '0' && char <= '9') ||
+			char == '-' || char == '_' {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 func buildPostgresTaskCreateLastUsedUpdate(patch models.TaskCreateLastUsed) (string, []any) {
 	base := "(CASE WHEN settings IS NULL OR settings = 'null' OR settings = '' THEN '{}'::jsonb ELSE settings::jsonb END)"
-	expr := fmt.Sprintf("jsonb_set(%s, '{task_create_last_used}', COALESCE(%s->'task_create_last_used', '{}'::jsonb), true)", base, base)
+	expr := fmt.Sprintf(
+		"jsonb_set(%s, '{task_create_last_used}', %s, true)",
+		base,
+		normalizePostgresTaskCreateLastUsedExpr(base),
+	)
 	args := []any{}
 	expr, args = applyPostgresTaskCreateLastUsedPatch(expr, patch, args)
 	query := fmt.Sprintf(`
@@ -385,7 +424,10 @@ func buildPostgresTaskCreateLastUsedUpdate(patch models.TaskCreateLastUsed) (str
 
 func buildPostgresUserSettingsPreservingTaskCreateLastUsedUpdate(patch *models.TaskCreateLastUsed) (string, []any) {
 	base := "(CASE WHEN settings IS NULL OR settings = 'null' OR settings = '' THEN '{}'::jsonb ELSE settings::jsonb END)"
-	expr := fmt.Sprintf("jsonb_set(?::jsonb, '{task_create_last_used}', COALESCE(%s->'task_create_last_used', '{}'::jsonb), true)", base)
+	expr := fmt.Sprintf(
+		"jsonb_set(?::jsonb, '{task_create_last_used}', %s, true)",
+		normalizePostgresTaskCreateLastUsedExpr(base),
+	)
 	args := []any{}
 	if patch != nil {
 		expr, args = applyPostgresTaskCreateLastUsedPatch(expr, *patch, args)
@@ -396,6 +438,20 @@ func buildPostgresUserSettingsPreservingTaskCreateLastUsedUpdate(patch *models.T
 		WHERE id = ?
 	`, expr)
 	return query, args
+}
+
+func normalizePostgresTaskCreateLastUsedExpr(base string) string {
+	taskCreate := fmt.Sprintf("COALESCE(%s->'task_create_last_used', '{}'::jsonb)", base)
+	workflowMap := fmt.Sprintf(
+		"CASE WHEN jsonb_typeof(%s->'workflow_ids_by_workspace') = 'object' THEN %s->'workflow_ids_by_workspace' ELSE '{}'::jsonb END",
+		taskCreate,
+		taskCreate,
+	)
+	return fmt.Sprintf(
+		"jsonb_set(%s, '{workflow_ids_by_workspace}', %s, true)",
+		taskCreate,
+		workflowMap,
+	)
 }
 
 func applyPostgresTaskCreateLastUsedPatch(expr string, patch models.TaskCreateLastUsed, args []any) (string, []any) {
@@ -414,6 +470,22 @@ func applyPostgresTaskCreateLastUsedPatch(expr string, patch models.TaskCreateLa
 	if patch.ExecutorProfileID != "" {
 		expr = fmt.Sprintf("jsonb_set(%s, '{task_create_last_used,executor_profile_id}', to_jsonb(?::text), true)", expr)
 		args = append(args, patch.ExecutorProfileID)
+	}
+	workflowIDs := make([]string, 0, len(patch.WorkflowIDsByWorkspace))
+	for workspaceID := range patch.WorkflowIDsByWorkspace {
+		workflowIDs = append(workflowIDs, workspaceID)
+	}
+	sort.Strings(workflowIDs)
+	for _, workspaceID := range workflowIDs {
+		workflowID := patch.WorkflowIDsByWorkspace[workspaceID]
+		if workspaceID == "" || workflowID == "" {
+			continue
+		}
+		expr = fmt.Sprintf(
+			"jsonb_set(%s, ARRAY['task_create_last_used','workflow_ids_by_workspace',?::text], to_jsonb(?::text), true)",
+			expr,
+		)
+		args = append(args, workspaceID, workflowID)
 	}
 	return expr, args
 }
