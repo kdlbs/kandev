@@ -165,6 +165,31 @@ Task tools use normal client discovery. When `step_complete_kandev` is required 
 
 `create_task_kandev` advertises `prompt` for instructions delivered to a newly started agent. Older callers may still send `description` when `prompt` is absent, but sending both is an error; the compatibility name is intentionally omitted from the advertised schema.
 
+### Create idempotency with `external_id`
+
+A caller that cannot tell whether an earlier `create_task_kandev` call (or `POST /api/v1/tasks`) actually landed — a crash before recording the response, a webhook redelivery — can pass an `external_id` and retry safely instead of guessing. `external_id` is an opaque, caller-chosen string, case-sensitive and byte-exact, unique per workspace: two workspaces can each hold their own task for the same value, but a second create for a value already held in the same workspace never makes a second task there. It is validated and trimmed like other free-text fields; a value that is empty after trimming is treated as if the field were omitted.
+
+The response — from both the MCP tool result and the REST response body — adds two fields whenever the request carried a non-empty `external_id`:
+
+- `deduplicated`: `true` when the returned task already existed for that identity, `false` when this call created it.
+- `creation_complete`: `false` only when the returned task is an existing one whose own create is still in flight (an unfinished duplicate of what this same call would have done). Every other outcome reports `true`.
+
+<details>
+<summary>Reading the four outcomes</summary>
+
+| `deduplicated` | `creation_complete` | Meaning |
+| --- | --- | --- |
+| `false` | `true` | This call created the task. |
+| `true` | `true` | An earlier, finished create already holds this identity; that task is returned unchanged, with no new task, agent, or side effect of any kind. |
+| `true` | `false` | An earlier create for this identity is still in progress. The in-progress task is returned as-is; nothing about it is started, modified, or assumed finished. |
+| `false` | `true`, and `external_id` absent from the response | This call finished creating a task, but another actor released or reused the identity in the narrow window before settlement. The task exists and is otherwise normal; it simply is not holding that identity anymore. |
+
+</details>
+
+**Do not react to `creation_complete: false` by releasing the identity and retrying.** An in-progress create may still be doing required work; releasing it out from under that work can produce two tasks for the same identity. `creation_complete: false` means "ask again later," not "safe to force." An operator who has independently confirmed a create is abandoned (not merely slow) can free its identity with `DELETE /api/v1/workspaces/:workspace_id/tasks/by-external-id?external_id=...`, which returns `204` and leaves the task itself untouched. `GET` the same path to look up the task currently holding an identity, including one still in progress, without creating anything; it returns `404` when nothing holds it.
+
+Deleting or archiving the task that holds an identity does not carry the identity forward: archiving leaves it in place, but deleting the task frees the identity for reuse by a later create. `external_id` cannot be changed after creation — update requests that include it leave the task's identity untouched. The WebSocket `task.create` action and the plugin host's `Tasks().Create` do not accept `external_id`; use `create_task_kandev` or `POST /api/v1/tasks` for idempotent creates.
+
 A task session currently registers these tool groups:
 
 | Group                               | Available operations                                                                                                                                                                                                                                               |
