@@ -68,19 +68,40 @@ func TestPostgresExternalIDConcurrentInsertYieldsExactlyOneWinner(t *testing.T) 
 	}
 }
 
-// TestPostgresExternalIDCaseSensitiveDespiteDatabaseCollation covers the
-// column-level COLLATE "C" requirement: even when the database's default
-// collation is case-insensitive (as configured for this test schema),
-// "ext-1" and "EXT-1" must remain distinct identities. An unqualified TEXT
-// column would silently inherit the database default and let this
-// scenario collide.
-func TestPostgresExternalIDCaseSensitiveDespiteDatabaseCollation(t *testing.T) {
+// TestPostgresExternalIDColumnUsesDeterministicCollation covers the
+// column-level COLLATE "C" requirement directly: the migration
+// (base_migrations.go: `ALTER TABLE tasks ADD COLUMN external_id TEXT
+// COLLATE "C"`) must actually take effect, independent of whatever the test
+// database's own default collation happens to be. A behavioral
+// upper-vs-lower-case probe alone is not diagnostic here — a typical
+// Postgres install already treats "ext-1" and "EXT-1" as distinct even on an
+// unqualified TEXT column, since collation affects sorting/equality-class
+// membership under ICU-style rules, not plain byte comparison — so that
+// probe would pass identically whether or not the override was ever applied.
+// Asserting the catalog directly is the only way to pin that the override
+// took effect.
+func TestPostgresExternalIDColumnUsesDeterministicCollation(t *testing.T) {
 	db := testutil.OpenIsolatedPostgres(t, testutil.PostgresDSNFromEnv(t))
 	repo, err := NewWithDB(db, db, nil)
 	if err != nil {
 		t.Fatalf("init postgres schema: %v", err)
 	}
 	ctx := context.Background()
+
+	var collation string
+	err = db.QueryRowContext(ctx, `
+		SELECT co.collname
+		FROM pg_attribute a
+		JOIN pg_collation co ON a.attcollation = co.oid
+		WHERE a.attrelid = 'tasks'::regclass AND a.attname = 'external_id'
+	`).Scan(&collation)
+	if err != nil {
+		t.Fatalf("query external_id column collation: %v", err)
+	}
+	if collation != "C" {
+		t.Fatalf("tasks.external_id collation = %q, want \"C\" — an unqualified TEXT column would silently inherit the database default, which may be case-insensitive or nondeterministic", collation)
+	}
+
 	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-pg-case", Name: "ws-pg-case"}); err != nil {
 		t.Fatalf("seed workspace: %v", err)
 	}
