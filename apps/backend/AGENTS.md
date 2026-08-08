@@ -137,7 +137,7 @@ replace state verification, installation association, or HMAC verification.
 
 **Runtime environment invariant:** `Agent.Runtime().Env` applies to every ACP subprocess entry point. Route new overrides through host-utility probes and sessionless prompts into agentctl child processes before sanitization; cover probe DTO, prompt DTO, and child-process boundaries.
 
-**Convention:** only `internal/agent/runtime/` (and code that pre-dates Phase 1 migration) may import `runtime/lifecycle` or `runtime/agentctl` directly. New consumers — workflow engine actions, cron-driven trigger handlers, future task-tier callers — should depend on `runtime.Runtime`. Existing call sites are migrated through later phases of task-model-unification.
+**Convention:** only `internal/agent/runtime/` (and code that pre-dates Phase 1 migration) may import `runtime/lifecycle` or `runtime/agentctl` directly. New consumers — workflow engine actions, cron-driven trigger handlers, future task-tier callers — should depend on `runtime.Runtime` or narrow local interfaces for the lifecycle-owned capability they consume. Existing call sites are migrated through later phases of task-model-unification.
 
 **Lifecycle Manager** (`internal/agent/runtime/lifecycle/`) manages agent instances under the runtime:
 - `Manager` (`manager.go`, `manager_*.go`) - central coordinator for agent lifecycle
@@ -147,6 +147,7 @@ replace state verification, installation association, or HMAC verification.
 - `streams.go` - WebSocket stream connections to agentctl
 - `process_runner.go` - agent process launch and management
 - `profile_resolver.go` - resolves agent profiles/settings
+**Lifecycle callback identity:** Process callbacks must carry the launched PID and generation; ignore delayed callbacks from replaced processes and duplicate callbacks, with tests for both old-generation and duplicate delivery.
 
 **agentctl client** (`internal/agent/runtime/agentctl/`) is the HTTP/WS client used by the lifecycle manager to talk to a running agentctl instance. It is a runtime-tier package and should not be imported outside `internal/agent/runtime/`.
 
@@ -167,6 +168,8 @@ Standalone agentctl is launched in its own process group so terminal Ctrl+C is h
 - `remote_docker`, `remote_vps`, `k8s` - Planned
 
 **Remote SSH executor platforms:** Treat supported remote OS/arch values as an end-to-end contract. Platform probe/normalization, lifecycle support checks, agentctl helper resolution, platform default shell, SSH readiness endpoints, frontend response types, and tests must stay aligned. Preserve raw unsupported platform details in user-facing errors, but use normalized values for supported-platform matching. Keep shell defaults platform-aware: Darwin defaults to `zsh`, Linux defaults to `bash`, unless an explicit shell is saved.
+
+**Remote SSH lifecycle:** Resolve and run remote preparation, then verify the canonical checkout, origin, and `HEAD` before starting agentctl. Retain the remote task directory in session state for stop/resume; terminal archive/delete/cascade cleanup runs over the live SSH connection before teardown, while ordinary stop and backend shutdown preserve the workspace.
 
 **Opt-in authentication & per-user scoping** (`internal/auth/`): auth is OFF by default; the global middleware (`auth/httpmw`, installed after CORS in `backendapp.buildHTTPServer`) then injects a synthetic admin identity for the pre-auth single user, so behavior is unchanged. Enablement is the `features.auth` runtime flag (`KANDEV_FEATURES_AUTH`, Settings > System > Feature Toggles) — the auth service derives its mode from `cfg.Features.Auth` (`disabled` / `setup` = flag-on-no-admin / `enabled` = flag-on-admin-exists); there is no separate `auth.mode` setting. When enabled, requests authenticate via a `kandev_session` cookie (opaque token, SHA-256 at rest, DB-backed) or a `kandev_pat_*` bearer token. Scoping rules:
 - **Identity travels in the request context** (`authn.IdentityFromContext`). No identity = internal caller (pollers, event bus, office schedulers) = unscoped. Synthetic identity = auth disabled = unscoped.
@@ -206,6 +209,7 @@ Client (WS) ← Orchestrator ← Lifecycle Manager ←──── stream update
 
 - Provider pattern for DI; stderr for logs, stdout for ACP only.
 - Pass context through chains; event bus for cross-component comm.
+- **Dependency direction:** Shared admission limits used by task models and orchestrator/messagequeue belong in a neutral internal package; task/models must not import the higher-level orchestrator/messagequeue package.
 - Production Git commands must use `subproc.NewGitCommand` with a classified
   `subproc.RunGit*` helper, or hold a classified admission slot across
   streaming `Start`/`Wait`. Do not construct raw Git commands outside
@@ -224,24 +228,21 @@ Client (WS) ← Orchestrator ← Lifecycle Manager ←──── stream update
   - **Filesystem permission tests:** Assert permission-denied behavior only after probing that the current executor enforces the permission bit change. Root-like Sprite executors may bypass `chmod` restrictions.
   - **Filesystem safety checks:** Carry the original `os.Lstat` `FileInfo` (or opened handle) through every decision; do not re-stat a validated path, which reopens a TOCTOU window before side effects. Test mismatches before writes or manager commands.
   - **Git indexed-environment tests:** When a test supplies `GIT_CONFIG_COUNT`,
-    `GIT_CONFIG_KEY_n`, and `GIT_CONFIG_VALUE_n`, clear every inherited indexed
-    key first and restore it with `t.Cleanup`. Changing only the count can leave
-    higher parent indexes behind and create a malformed Git config block.
+    `GIT_CONFIG_KEY_n`, and `GIT_CONFIG_VALUE_n`, clear every inherited indexed key first and restore it with `t.Cleanup`; changing only the count can leave higher parent indexes behind and create a malformed Git config block.
   - **Derived environment contracts:** Drive derived values through the production producer/wiring seam instead of manually seeding keys; pair consumer/process coverage with a producer-boundary assertion so missing publication fails.
   - **Full test output:** For local full-suite pass/fail validation, prefer plain `go test -race ./...`. `go test -json ./...` can emit very large JSONL streams; if a wrapper or tracing tool truncates the stream mid-record, downstream JSON parsing may fail even when Go tests passed. Use JSON output mainly for CI artifacts or test-report tooling that explicitly requires it.
-  - **Private executable helpers:** When library code starts `os.Executable()` in
-    a private helper mode, do not rely only on a command package's dispatch or
+  - **Private executable helpers:** When library code starts `os.Executable()` in a private helper mode, do not rely only on a command package's dispatch or
     package-specific `TestMain`: an importing package's test binary can be the
-    executable and recursively run tests. Use either an explicitly marked
-    private env-and-argument trampoline that runs before normal test entry, or
-    inject a dedicated helper executable. Cover it from a different importing
-    package, not only the helper package.
+    executable and recursively run tests. Use either an explicitly marked private
+    env-and-argument trampoline that runs before normal test entry, or inject a
+    dedicated helper executable. Cover it from a different importing package,
+    not only the helper package.
 
 ### Goroutine ownership and leak testing
 
 Every long-running goroutine must have a single owner with explicit start and stop semantics:
 
-- **Lifecycle:** the type that spawns the goroutine also exposes `Start(ctx)` / `Stop()` (or equivalent). `Start` registers on a `sync.WaitGroup`; `Stop` cancels the goroutine's context (or closes a `stopCh`) and `wg.Wait()`s for drain. Idempotent on both ends. `internal/integrations/healthpoll`, `internal/jira`, `internal/linear`, and `internal/github` pollers are the canonical shape.
+- **Lifecycle:** the type that spawns the goroutine also exposes `Start(ctx)` / `Stop()` (or equivalent). `Start` registers on a `sync.WaitGroup`; `Stop` cancels the goroutine's context (or closes a `stopCh`) and `wg.Wait()`s for drain. Idempotent on both ends. Restartable services must reset stopped state and create a fresh cancellable context/cancel under the same mutex used by `Stop`; cover `Stop` → `Start`. `internal/integrations/healthpoll`, `internal/jira`, `internal/linear`, and `internal/github` pollers are the canonical shape.
 - **E2E reset invariant:** `seedData`/backend are worker-scoped, so any workspace-scoped state a global poller reads (for example `github_review_watches`) must be deleted in `cmd/kandev/e2e_reset.go` before task deletion — otherwise the poller recreates rows mid-reset and later tests see duplicates. Add a `Delete...ByWorkspace` cascade when introducing a new poller-backed entity.
 - **Cancellation:** the goroutine selects on `ctx.Done()` (or `stopCh`) in every long wait. Never use `time.Sleep` in a retry/backoff loop — use `time.NewTimer` inside a `select` that also watches the shutdown signal (see `lifecycle.StreamManager.sleepOrStop`).
 - **Detached helpers:** event handlers and short-lived `go func()` calls in `internal/orchestrator/` and `internal/agent/runtime/lifecycle/` must accept a cancellable context (or check the owning type's shutdown signal) and return promptly when it fires.

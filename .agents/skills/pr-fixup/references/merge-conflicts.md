@@ -41,7 +41,7 @@ If `git ls-files -u` prints entries, or conflict markers are present in tracked 
    the user explicitly authorizes bypassing hooks. If the merge commit fails or
    exits ambiguously, inspect and report the hook result; do not bypass it just
    to finish the conflict resolution.
-3. If conflicts appear, inspect each conflicted file, preserve the intended behavior from both sides, remove all conflict markers, and stage only the resolved files. When the index has conflict stages, inspect the competing versions with `git show :2:<path>` and `git show :3:<path>` (or compare the merge-base, current branch, and base branch versions when stages are unavailable). Compare analogous provider implementations and their tests before choosing behavior, then run the focused test for the conflicted feature.
+3. If conflicts appear, inspect each conflicted file, preserve the intended behavior from both sides, remove all conflict markers, and stage only the resolved files. When the index has conflict stages, inspect the competing versions with `git show :2:<path>`, `git show :3:<path>`, and `git log -- <path>` (or compare the merge-base, current branch, and base branch versions when stages are unavailable). Do not choose ours/theirs merely to remove markers; preserve each side's behavioral invariant, compare analogous provider implementations and their tests, then run the focused test for the conflicted feature.
 4. Confirm the conflict is gone before continuing:
    ```bash
    git ls-files -u
@@ -52,6 +52,15 @@ If `git ls-files -u` prints entries, or conflict markers are present in tracked 
    ```
 
    Confirm that the final diff against the current GitHub base contains only the PR's intended delta. A clean index is insufficient if a retargeted stacked PR accidentally retains its merged parent's changes.
+   After the operation completes, inspect each resolved path with
+   `git diff -- origin/<baseRefName>...HEAD -- <resolved-file>` and reread the
+   complete surrounding comments and logic; this catches a duplicate-hunk
+   resolution that silently drops an explanatory line.
+
+   For structured files (especially JSON catalogs), validate syntax and duplicate
+   keys before continuing. JSON's default parser may silently keep the last
+   duplicate key; use an `object_pairs_hook` that raises on duplicates, then run
+   the affected formatter/test and `git diff --check`.
 
 ### When the local index is already unmerged
 
@@ -75,17 +84,36 @@ If `git ls-files -u` shows entries, a previous merge or rebase was left incomple
    ```
 5. Complete the interrupted operation:
    ```bash
-   git commit
+   git commit --no-edit
    # or, if mid-rebase:
    git rebase --continue
    ```
 
+   Use the normal hooks and capture the full receipt. A current-base merge may
+   stage many incoming files, making status look like hundreds of changes; do
+   not reset or broadly unstage them. Resolve only `UU` paths, then inspect
+   `git diff --stat origin/<baseRefName>` and `git diff --name-only origin/<baseRefName>`
+   before committing, and fix any incoming harness-file violation minimally
+   rather than bypassing hooks.
+
+If Git reports an `index.lock`, inspect the exact path and active Git processes
+first (`git rev-parse --git-path index.lock` and a process listing). Never delete
+a lock owned by a live Git process. Remove only that exact lock path after
+confirming no Git process owns it, then retry the operation.
+
 Do not discard unrelated user changes to make a merge/rebase easier. If unrelated dirty files block the conflict-resolution attempt, stop and ask before stashing, committing, or reverting them.
+
+Before a force-push after a rebase or conflict merge, run the task-defined checks
+for every affected package. For web changes, run the affected test suite plus
+`cd apps/web && pnpm run typecheck` and the web lint gate; use the equivalent
+package checks for backend changes. Cleared markers do not prove a semantic
+resolution: duplicate imports/hooks and stale localized mocks require these
+checks to pass.
 
 ## Push after rebasing or merging
 
-Capture the remote branch SHA before fetching the base or starting a merge/rebase
-when possible. Recheck it immediately before pushing. This guards both merge-
+Capture the remote branch SHA before fetching the base or starting a merge/rebase.
+Recheck it immediately before pushing. This guards both merge-
 based conflict fixes and rebases against another writer advancing the PR branch:
 
 ```bash
@@ -102,7 +130,7 @@ remote SHA is unchanged, use a normal push:
 git push origin HEAD:refs/heads/<branch>
 ```
 
-After a successful rebase, prefer an exact force lease:
+After a successful rebase, use an exact force lease:
 
 ```bash
 git push \
@@ -110,4 +138,7 @@ git push \
   origin HEAD:refs/heads/<branch>
 ```
 
-An intervening fetch can update the remote-tracking ref consulted by generic `--force-with-lease`. Use the generic form only when the prior remote SHA was not captured, and never use an unconditional force push.
+An intervening fetch can update the remote-tracking ref consulted by generic
+`--force-with-lease`. If the prior remote SHA was not captured, stop and capture
+it before rewriting when possible; use the generic form only as an explicit last
+resort, and never use an unconditional force push.

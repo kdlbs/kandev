@@ -129,7 +129,7 @@ Start by matching CI as closely as possible, then add pressure deliberately:
      -e NODE_OPTIONS=--dns-result-order=ipv4first \
      -e PLAYWRIGHT_BROWSERS_PATH=/ms-playwright \
      ghcr.io/kdlbs/kandev-ci:runtime-latest \
-     bash -lc 'git config --global --add safe.directory /work 2>/dev/null; npx playwright test --config e2e/playwright.config.ts --project=chromium --project=mobile-chrome --shard=10/10 --reporter=list'
+     bash -lc 'git config --global --add safe.directory /work 2>/dev/null; npx playwright test --config e2e/playwright.config.ts --project=chromium --project=mobile-chrome --shard=13/14 --reporter=list'
    ```
 2. If the exact shard passes, constrain container resources and repeat the
    failing spec/test. GitHub-hosted runners can expose timing bugs that a roomy
@@ -143,21 +143,19 @@ Start by matching CI as closely as possible, then add pressure deliberately:
      ghcr.io/kdlbs/kandev-ci:runtime-latest \
      bash -lc 'git config --global --add safe.directory /work 2>/dev/null; npx playwright test --config e2e/playwright.config.ts --project=mobile-chrome e2e/tests/terminal/mobile-terminal-keybar.spec.ts --grep "user presses an OS-keyboard letter while no modifier is active" --repeat-each=30 --reporter=list'
    ```
-3. Preserve nearby test ordering when a single-test repeat stays green. Run the
-   full spec file or full shard with the same resource limits before declaring
-   a flake non-reproducible.
+3. Preserve nearby test ordering when a single-test repeat stays green; run the full spec or shard with the same resource limits before declaring a flake non-reproducible.
 
 The config uses `failOnFlakyTests: !CI`: local runs fail on a flaky retry, while
 CI temporarily tolerates one. Either result is a failure signal for agents:
-reproduce it locally with per-spec overrides disabled and `--retries=0`; never
+reproduce it with `--retries=0` only after disabling any `test.describe.configure({ retries: 1 })` override; never
 rerun until it happens to pass. If isolated repeats stay green but the shard
 fails, binary-search preceding specs in one worker. The fix is complete only
 when the smallest reproducing sequence passes without retries.
 
-Record the exact command, resource limits, repeat number, and failure artifact
-path. Always inspect `error-context.md`; mobile/terminal flakes often show
-state that the stack trace alone hides, such as duplicate active terminals or a
-terminal stuck on "Starting terminal...".
+Record the exact command, resource limits, repeat number, and failure artifact path. For a failed shard, inspect every `error-context.md` in its downloaded
+`test-results-<shard>` artifact and compare shared page-object waits with `main`
+before changing product code; the context can expose duplicate active terminals
+or a terminal stuck on "Starting terminal...".
 
 When a PR E2E shard fails, investigate every spec, including those outside the
 diff; never dismiss, rerun, or merely record a failure as unrelated. Reproduce
@@ -174,11 +172,15 @@ Without this, tests can exercise stale code: after backend changes run `make -C 
 
 ## Writing a test
 
-1. Read `helpers/api-client.ts` and `pages/` to discover available seed methods and page objects
+1. Read `helpers/api-client.ts` and `pages/` to discover available seed methods and page objects; use `data-testid` attributes for selectors — add them to components as needed
 2. Import fixtures from `../../fixtures/test-base` — provides `testPage`, `apiClient`, and `seedData` (pre-created workspace with default workflow). Pull `backend` from the fixture too when you need the backend URL — it's worker-scoped, dynamic, and `process.env.KANDEV_API_BASE_URL` is **not** set in the Playwright runner. Use `backend.baseUrl`.
-3. Use `data-testid` attributes for selectors — add them to components as needed
-4. Use page objects for common interactions; create new ones for new pages
-5. For GitHub features, use `apiClient.mockGitHub*()` methods to seed mock data
+3. Use page objects for common interactions; create new ones for new pages. For GitHub features, use `apiClient.mockGitHub*()` methods to seed mock data
+
+### Asynchronous capability readiness
+For tests using agent models, modes, commands, or options, treat `not_configured`/`probing` snapshots as provisional: select by stable name/test ID and bounded-poll for the semantic capability before interacting; avoid arbitrary sleeps and `force: true` clicks.
+
+### Remembered workflow fixture state
+After seeding tasks in multiple workflows, set `task_create_last_used.workflow_ids_by_workspace[workspaceId]` to the dialog's workflow (or clear it to test filter fallback), then assert the selector before downstream checks; the remembered workflow outranks `workflow_filter_id`. Verify the exact test with `--retries=0`.
 
 ### Input-modality behavior
 
@@ -353,7 +355,7 @@ Tests are grouped by feature area in subdirectories under `tests/`. When creatin
 
 ## Test quality guidelines
 
-- **Test through the UI, not the API.** E2E tests verify user-facing behavior. Don't write tests that only call the API and assert the response -- those are integration tests. Instead, navigate to the page, interact with UI elements, and assert what the user sees.
+- **Test through the UI, not the API.** E2E tests verify user-facing behavior. Don't write tests that only call the API and assert the response -- those are integration tests. Instead, navigate to the page, interact with UI elements, and assert what the user sees; use `toContainText` or a dedicated locator when labels include metadata such as file sizes.
 - **Verify persistence with page reload.** After changing a setting or creating data, reload the page (`testPage.reload()`) and assert the state is still correct. This catches hydration bugs and Go boot-payload/client-store mismatches.
 - **Restore patched persisted settings.** When a test PATCHes user settings, capture the baseline and restore it in `test.afterEach`. The backend is worker-scoped, and `e2eReset` does not reset every persisted setting, including `system_metrics_display`; leaking one can affect later tests in the same worker. Fixtures are lazy: acquire `testPage` before setting a non-default persisted value in `beforeEach`, otherwise page initialization can reapply the default and silently undo setup. Verify with the focused test that depends on that setting.
 - **Restore patched shared persisted state.** The worker-scoped backend and
@@ -383,6 +385,7 @@ Tests are grouped by feature area in subdirectories under `tests/`. When creatin
 - **Nested Escape controls.** If an inner panel inside a Radix Dialog handles Escape, intercept the key in capture phase and call both `preventDefault()` and `stopPropagation()` before dismissing the inner panel. A bubble-phase window handler runs after Radix can dismiss the outer dialog. Add a regression that asserts the inner panel collapses while the outer dialog remains open.
 - **Seed via API, assert via UI.** Use `apiClient` to set up preconditions quickly, but always verify the result by opening the page and checking the DOM.
 - **Workflow/session invariants.** For session-primary/profile behavior, prefer polling backend state with `apiClient.listTaskSessions(taskId)` for invariants such as `agent_profile_id`, `is_primary`, `state`, and session count, then add UI assertions as secondary evidence. Agent output is not lifecycle readiness: if a follow-up must take the synchronous prompt path rather than the queued path, or a transcript is mutated after an auto-started boot turn, poll the exact session state (for example `WAITING_FOR_INPUT`) before acting. The mock agent can persist text before the lifecycle transition completes. UI tab markers and visible messages can lag or lead the backend invariant and are secondary evidence; verify the affected full spec and original CI shard with `--retries=0`.
+- **WebSocket/frame capture.** Reset capture arrays immediately before the stimulus, but finish all subscription/lifecycle assertions before clearing them. Reselecting an already-active session may emit no new subscribe frame; consume the original frame or trigger a distinct state transition. Verify ordering in the owning Playwright project with `--retries=0`.
 - **Scope terminal helpers to the active panel.** Terminal/mobile helpers must avoid document-wide `.xterm` or `terminal-xterm-host` selectors because multiple terminal panels can be mounted at once. Scope locators through `data-testid="terminal-panel"` and prefer the visible or latest panel for `page.evaluate` helpers.
 - **Scope Dockview preview polling to visible panels.** Hidden or stale Dockview panels can remain mounted and produce false positives if helpers scan all matching custom elements globally. For `diffs-container`, filter candidate elements by visible layout box and computed visibility before reading shadow DOM text.
 - **Poll before Dockview cleanup.** If an E2E helper uses `window.__dockviewApi__`, wait or poll for the API to be attached before acting. A one-shot `if (!api) return` cleanup can silently skip cleanup during page initialization and leak prior preview panels into later assertions.
@@ -426,34 +429,31 @@ When a test fails:
   application-only `window.resize` listener may not be observed in the test.
   Prefer synchronizing with the layout container/observer and assert the
   intended result after both viewport and container-only changes.
-- **Auto-started session never goes idle** — for sessions started by the same call that creates them, the mock agent can finish before the client WS subscription registers, so a raw `idleInput()` visibility wait hangs. Use `SessionPage.waitForChatIdle()` instead; it reloads once and re-derives state from the Go boot payload.
+- **Auto-started session never goes idle** — for sessions started by the same call that creates them, the mock agent can finish before the client WS subscription registers, so a raw `idleInput()` visibility wait hangs. Use `SessionPage.waitForChatIdle()` before opening transient dialogs/drawers/popovers; it may reload and re-derive state from the Go boot payload. If it must run later, reopen the transient UI first. For WS/session hydration races, retain a bounded reload-and-retry fallback in the page object: keep the fast path immediate and the final check failing when genuinely stuck; remove it only with an equivalent deterministic readiness guarantee and focused regression.
 - **Flaky timeouts** — **never increase locator timeouts to fix flaky tests.** If a locator times out, the root cause is almost always something else: a setup failure, missing navigation, race condition, or the element genuinely not rendering. Investigate why the element never appears instead of giving it more time. Note: infrastructure health timeouts (30s in `fixtures/backend.ts`) and overall test timeouts (60s in `playwright.config.ts`) are separate and should not be modified either.
 - Screenshots on failure, video on first retry (CI)
 
 ### Debugging CI shard failures
 
-CI splits tests across 10 shards. To reproduce a specific shard locally:
+CI splits host tests across 14 shards (plus 6 container shards); reproduce a specific shard locally:
 
 ```bash
 # List which tests are in a shard
-npx playwright test --config e2e/playwright.config.ts --shard=2/10 --list
+npx playwright test --config e2e/playwright.config.ts --shard=2/14 --list
 
 # Run that shard locally (requires production build)
 make build-backend build-web
-cd apps/web && npx playwright test --config e2e/playwright.config.ts --shard=2/10
+cd apps/web && npx playwright test --config e2e/playwright.config.ts --shard=2/14
 ```
-
-E2E tests run against the **production Vite build served by the Go backend**, not dev mode. Always rebuild with `make build-web` (or `pnpm --filter @kandev/web build`) after code changes before running E2E tests locally.
 
 ```bash
 # Unzip a shard's blob report from CI artifacts
 unzip report-*.zip -d report-shard && cat report-shard/*.jsonl
 ```
 
-When a CI shard fails, distinguish its two useful artifacts. Download and unzip
-the blob `report-*.zip` to map test IDs, titles, locations, final status, and
-timings from its JSONL events. Download `test-results-<shard>` for the exact
-failed assertion, `error-context.md`, screenshot, and trace:
+When a CI shard fails, distinguish its useful artifacts: download/unzip
+`report-*.zip` to map test IDs and timings; `test-results-<shard>` may be ready
+before the workflow completes even when logs refuse, so try it for the exact assertion, `error-context.md`, screenshot, and trace:
 
 ```bash
 gh run download <run-id> --name test-results-<shard> --dir <temp-dir>
@@ -483,7 +483,7 @@ A test that flakes under parallel/sharded load is one of two things — decide w
 
 ## Selector guidelines
 
-- **Prefer `data-testid` selectors** over text-based locators. Text content can change when UI is updated (e.g., hiding a badge), breaking tests that match by text. Use `getByTestId()` or `locator("[data-testid='...']")` for stable targeting.
+- **Prefer `data-testid` selectors** over text-based locators. Text content can change when UI is updated (e.g., hiding a badge), breaking tests that match by text. Use `getByTestId()` or `locator("[data-testid='...']")` for stable targeting. When translated labels intentionally identify multiple routes, scope by stable `href` or a dedicated test ID rather than role/name alone.
 - **Scope Radix and responsive locators to the active instance.** Tooltips may use `instant-open`, `delayed-open`, or `open`; use `[data-slot="tooltip-content"]:not([data-state="closed"])`, then scope to the visible portal/popover/container and active ancestor. Hidden mounts can make global locators match the wrong instance; do not use `.first()` to hide duplicates.
 - **Use page object methods** like `clickSessionChatTab()` (stable `data-testid`) instead of `sessionTabByText("1")` (fragile text match) for session tabs.
 - **Dropdown menus can detach** from the DOM when React re-renders the parent (e.g., WS events updating the sidebar). The `openSidebarMenuAndClick()` helper in `session-page.ts` retries the full open-click sequence on detachment — use this pattern for similar interactions.

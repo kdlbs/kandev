@@ -21,6 +21,26 @@ The summary fields are:
   from timestamps.
 - `errors`: affected data is unknown; do not reconstruct it from memory.
 
+If `gh`, `scripts/pr-state`, or `scripts/pr-resolve` fails with an
+authentication or transport error (including a broker 401), do not treat empty
+or unknown output as clean. If GitHub connector tools are available, use their
+equivalents of `github_fetch_pr`,
+`github_list_pull_request_review_threads` (including `is_resolved` and
+`is_outdated`), `github_fetch_pr_comments`,
+`github_fetch_commit_workflow_runs`, and
+`github_get_commit_combined_status`. Gather PR metadata, review threads and
+discussion comments, and commit workflow/status evidence. Keep SSH Git
+operations available for fetch, rebase, and push; after a push, require the
+connector-reported PR head OID to equal local `HEAD`. If the fallback cannot
+provide CI or review evidence, report it as unknown or pending, never clean.
+
+For connector-backed review writes, prefer structured workflow results and
+`github_list_pull_request_review_threads`; do not request full PR HTML or diffs.
+Map a GraphQL thread ID to its REST numeric top-level comment ID with
+`github_fetch_pr_comments` before replying, but resolve using the GraphQL thread
+ID. After every push and after automated review aggregation, refresh current-head
+checks and threads.
+
 If head metadata fails but check/thread data is usable, use that data only for
 the current poll and retry once at the next cadence. If review-thread state is
 unknown, do not call review clean/blocked; retry once, then use

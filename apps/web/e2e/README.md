@@ -77,6 +77,10 @@ Or a single spec:
 KANDEV_E2E_CONTAINERS=1 pnpm e2e --project=containers tests/ssh/launch-task.spec.ts
 ```
 
+### Remote-executor fixture contracts
+
+Host-only `file://` fixtures are not reachable from an SSH or Docker target. Use a disposable provider-shaped HTTP Git fixture with a target-side URL rewrite; if the spec also uses host-local `GitHelper` or LSP paths, materialize a local clone at the expected temporary path. Verify both the remote checkout and every host-local fixture consumer.
+
 ### Why "containers" instead of "docker"?
 
 This project used to be named `docker`. It was renamed to `containers` once SSH e2e tests joined it — calling it `docker` was misleading because SSH tests have nothing to do with the Docker _executor_; they just happen to use Docker as the runtime that hosts the sshd target.

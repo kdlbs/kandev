@@ -12,9 +12,10 @@ to wait for or monitor PR updates. For a cost-controlled workflow, the user may
 switch the same conversation to the lower-cost implementation/test model before
 starting CI remediation.
 
-Use `gh` by default; when it is unavailable after access is approved, use an
-available GitHub integration. `scripts/pr-state`, `scripts/pr-resolve`, and
-`scripts/run-quiet` are at the worktree root.
+Use `gh` by default; auth or transport errors leave state unknown, never clean.
+If connector tools are available, use structured PR/check/thread data; avoid
+dumping full HTML/diffs. Map GraphQL thread IDs to REST comment IDs before
+replies, and refresh current-head state after pushes and review aggregation.
 
 ## Pipeline
 
@@ -108,13 +109,13 @@ the parent workflow/job status. A failed job can be visible while its workflow
 is still in progress; confirm its conclusion and failing step before treating
 it as reproducible code evidence. Use
 `scripts/run-quiet gh-run -- gh run view <run-id> --log-failed` so large logs do
-not flood the conversation. If logs are temporarily unavailable or only expose
-an aggregate report job, use `scripts/pr-state --job-log <job_id>` with the
-`job_id` in the summary; it handles GitHub's plain-text and ZIP job-log
-responses and emits bounded matching context. Follow the rest of the fallback
-in `references/ci-troubleshooting.md`. Reproduce the exact failed command where possible;
-CI-specific Go lint often needs `golangci-lint run ./... --new-from-rev=<base>
---timeout=5m`.
+not flood the conversation. If it returns only GitHub request/transport lines
+or no failure text, treat logs as unavailable and, after terminal state, use
+`scripts/pr-state --job-log <job_id>`. For temporary gaps or aggregate-only
+logs, use the same fallback; it handles plain-text and ZIP responses and emits
+bounded context. Follow `references/ci-troubleshooting.md`. Reproduce the exact
+failed command where possible; CI-specific Go lint often needs
+`golangci-lint run ./... --new-from-rev=<base> --timeout=5m`.
 
 If CI reports files or commits outside the PR diff, or a stale base SHA, resolve
 the authoritative base repository, ref name, and current base SHA from PR
@@ -142,10 +143,10 @@ be a test-only assertion update: keep it limited to the reported failure, run
 the focused test, and call out that scope. Do not change unrelated production
 behavior or duplicate a larger sibling change.
 When a remediation changes a documented behavior or contract, update the
-authoritative spec or guidance in the same change and keep the regression test
-and verification commands aligned with that contract. Re-check the affected
-documentation before declaring the fix complete; record why no update is
-needed when the behavior remains internal.
+authoritative spec/guidance, plan, and task file when present; commit docs and
+code together, keep regression tests and verification commands aligned, and
+re-check the documentation before completion. Record why no update is needed
+when the behavior remains internal.
 
 ## 3. Triage And Address Reviews
 
@@ -215,11 +216,11 @@ local upstream tip; after the push, require the PR head OID to equal local
 `HEAD`. If the PR merged or closed, do not recreate its deleted branch with a
 stale push: preserve the local fix and ask before creating a clean follow-up.
 
-After any rebase or force-push, fetch the PR base, rerun the affected checks,
-and compare local `HEAD`, the upstream branch tip, and `pr.head_ref_oid`. Then
-rerun `scripts/pr-resolve list <PR>` and `scripts/pr-state --summary <PR>`;
-distinguish stale failures from current-head failures and report pending checks
-separately. Use `--force-with-lease`, never an unconditional force-push.
+After any rebase or force-push, fetch the PR base and compare local `HEAD`, the upstream tip, and `pr.head_ref_oid`; rerun affected checks.
+A rebase onto a newer base invalidates prior evidence: rerun the exact failed
+command and any package-level gate required by whole-file rules (for example
+max-lines). Then rerun `scripts/pr-resolve list <PR>` and `scripts/pr-state --summary <PR>`; distinguish stale/current
+failures and report pending checks separately. Use `--force-with-lease`, never an unconditional force-push.
 If the rebase or conflict resolution touched `AGENTS.md`, `CLAUDE.md`, or a
 skill/reference file, also run `python3 scripts/lint-harness-files.test.py` and
 `python3 .github/scripts/lint-harness-files.py --all` before pushing. Run
@@ -228,21 +229,21 @@ additions cannot push a file past its line budget.
 
 ## 5. Re-check
 
-After every push, re-fetch the current-head state, run
+After every push, re-fetch current-head state and run
 `scripts/pr-resolve list <PR>` (and `show` for any thread you may answer), then
-run `scripts/pr-state --summary <PR>` again for the new head. Automated
-reviewers may resolve or replace threads between snapshots; do not reply to or
-resolve a thread that the fresh state reports as resolved. Before replying to a
-pre-push thread, run `scripts/pr-resolve show <PR> <thread_id>`; if it reports
-`resolved: true` (often with an `Addressed in commit ...` marker), record the
-thread as auto-resolved and do not post a duplicate reply. Continue replying or
-resolving only for `resolved: false` threads, including hidden unresolved
-threads.
+`scripts/pr-state --summary <PR>` again for the new head. For explicit
+consolidation, verify the target head before commenting/closing the superseded
+PR; preserve its branch unless deletion is requested. Automated reviewers may
+resolve or replace threads; do not reply to or resolve a thread that fresh state
+reports as resolved. Before replying to a pre-push thread, run
+`scripts/pr-resolve show <PR> <thread_id>`; if it reports `resolved: true` (often
+with an `Addressed in commit ...` marker), record the thread as auto-resolved and
+do not post a duplicate reply. Continue replying/resolving only for `resolved: false` threads, including hidden unresolved threads.
 Treat each fresh summary as a new review-evidence snapshot: inspect every
 non-empty body in `review_evidence.exact_current_head_reviews[]`, even when
 `unresolved_review_thread_count=0` and `scripts/pr-resolve list` is empty.
-Classify current-head summary findings before declaring the PR clean; thread and
-issue-comment counts alone are insufficient.
+Classify current-head review bodies and top-level bot/issue comments before
+declaring the PR clean; empty thread and issue-comment counts are insufficient.
 Treat a non-empty `hidden_unresolved_threads` value in that fresh snapshot as a
 mandatory hidden-thread gate: run `scripts/pr-resolve list <PR>` again after
 the refresh and immediately before reporting.
@@ -268,12 +269,11 @@ If the user explicitly requested a persistent Kandev plan update and the task
 has an external Kandev plan, update it after fixup with the remediation commit,
 final exact-head check counts, resolved-thread state, and mergeability. Without
 that authorization, report the plan update as pending and do not invoke Kandev
-task or session APIs. For tracked `docs/plans/**` artifacts, record the remediation
-scope and local verification before the final remediation commit; do not make a
-post-fixup plan edit that changes the PR head and invalidates its own exact-head
-snapshot. Report the final exact-head SHA, CI/review counts, and mergeability in
-the handoff instead. Do not leave planned verification marked unstarted after
-it has run.
+task or session APIs. Batch plan/task synchronization into the final documentation
+commit. For tracked `docs/plans/**` artifacts, keep prose head-agnostic and record
+remediation scope/local verification before that commit; a later metadata commit
+creates a new head and requires a fresh PR-state check. Mark prior current-head
+claims historical/superseded when a new head replaces them; report only the latest head's SHA, CI/review counts, and mergeability. Do not leave planned verification marked unstarted after it has run.
 
 Before declaring fixup complete, verify `git status --short` is clean,
 `git rev-parse HEAD` equals `git rev-parse @{upstream}`, the PR head equals

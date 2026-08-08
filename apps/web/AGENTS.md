@@ -91,6 +91,7 @@ Use subscription hooks only; the WS client auto-deduplicates.
 **Task overview vs. session detail:** Sidebar, Kanban, mobile-switcher, and dashboard rows read the shared task snapshot/`Task.statusSummary`; never call `subscribeSession` per row. A global `task.status_summary.updated` handler fans out shared-cache updates, while opened detail surfaces consume rich streams. Extend the bounded backend projection for new badges; see the [spec](../../docs/specs/platform/bounded-task-status-delivery.md) and [ADR](../../docs/decisions/2026-08-01-separate-task-summary-session-stream-traffic.md).
 
 **Branch-scoped task state:** For live worktree/session state plus `task_prs`, key by `(repository, checked-out branch)`, not task/repository alone. `branch_switched` invalidates prior status/commits; reject late results with a generation/identity guard and preserve siblings. Historical PRs affect Changes only when `repository_id` and normalized `head_branch` match; Review/PR history may still show them. Test single/multi-repo cases and desktop/mobile Changes behavior.
+**HTTP/WS cache races:** When HTTP hydrates a cache also updated by WebSockets, guard responses with per-scope revision and request/workspace generation; discard or refresh stale responses and cover deferred responses.
 
 When changing task lifecycle WS handlers (`task.updated`, `task.deleted`,
 `task.state_changed`), check both kanban and Office surfaces. Archive/delete
@@ -237,10 +238,10 @@ SCREAMING_CASE identifier**, so `const ROWS = [{ label: "Disk usage" }]` passes
 silently. A clean lint is not proof a file is done. `pnpm run i18n:check` gates key/catalog
 drift, `<Trans>` tag indices, inline plurals and module-scope `t()`, and the
 **pseudo-locale** (Settings → General → Appearance, dev/e2e) is the completeness
-check — any plain-English text under it was never externalized. The tooling needs
-**Node 24**. Full guide:
-[`docs/i18n.md`](../../docs/i18n.md); spec:
-[`docs/specs/platform/i18n.md`](../../docs/specs/platform/i18n.md).
+check — any plain-English text under it was never externalized. The tooling
+needs **Node 24**; run web-only i18n scripts from `apps/web`. After conflict
+resolution, parse locale/structured JSON and check for duplicate keys before
+testing. Full guide: [`docs/i18n.md`](../../docs/i18n.md); spec: [`docs/specs/platform/i18n.md`](../../docs/specs/platform/i18n.md).
 
 ## Markdown safety
 

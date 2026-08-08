@@ -118,8 +118,17 @@ qualifies as a successful hook receipt.
    - **Splitting commits with new files:** When introducing a brand-new file alongside the file that uses it, stage them together. The Go lint pre-commit hook stashes *unstaged* changes before linting but keeps *untracked* files in the working tree — so a new helper committed alone, while its (still-unstaged) caller sits in the working tree, lints as `unused` and rejects the commit.
 
 5. **Commit:** Write a commit message following the format above. If changes span multiple concerns, consider separate commits.
+   When `MERGE_HEAD` exists or a merge commit is being completed, use
+   `git commit --no-edit` so a non-interactive runner does not open an editor;
+   normal hooks still run. Confirm the merge commit exists and `MERGE_HEAD` is
+   gone before reporting success.
    If a formatter changes files and prevents the commit, review and re-stage
    those files, then create a new commit attempt; do not use `--amend`.
+   When editing harness files such as `AGENTS.md`, `CLAUDE.md`, or skills, run
+   `python3 scripts/lint-harness-files.test.py` and
+   `python3 .github/scripts/lint-harness-files.py --all` before committing;
+   also run `git diff --check` and inspect `wc -l` for changed harness files so
+   line-limit failures are caught before the hook.
    If a JSX layout-only edit touches an element containing an existing
    hardcoded user-facing literal, `i18n-new-code` may classify that literal as
    changed copy and fail. Localize it and add matching `en`/`pseudo` catalog

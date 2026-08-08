@@ -196,6 +196,12 @@ If any failing check is an E2E test:
    in-DOM React render errors that often show up in
    `e2e/test-results/<test>/error-context.md`.
 
+Before attributing an E2E failure to product code, compare the failed run SHA
+and `checks_head_sha` with local `HEAD`. PR workflows may test GitHub's
+synthetic merge commit, so reproduce the exact base-plus-head merge (or checked
+merge ref) with CI environment, retries disabled, and the same shard/order;
+verify the checkout SHA before interpreting the result.
+
 Useful focused commands:
 
 ```bash

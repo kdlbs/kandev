@@ -1,7 +1,7 @@
 ---
 description: Read-only DeepSeek Flash monitor for a user-authorized wait on PR CI or review updates.
 mode: subagent
-model: deepseek/flash
+model: deepseek-v4-flash
 temperature: 0.1
 permission:
   task: deny

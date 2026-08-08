@@ -73,6 +73,12 @@ Push the already committed branch to its remote.
    ```
    Never embed the token in a remote URL or persist it. Re-fetch the PR and
    require its `headRefOid` to equal local `HEAD` afterward.
+   If HTTPS still rejects a contributor-fork push and SSH authentication is
+   available, verify the exact target with
+   `git ls-remote git@github.com:<head-owner>/<head-repository>.git`, then retry
+   the same exact ref over SSH (using the exact remote-OID lease if history was
+   rewritten). Re-fetch and verify the PR head OID again. Do not substitute a
+   local `fork` remote or an inferred repository.
    Do not use a conveniently named local `fork`/`contributor` remote: linked
    worktrees share remote configuration, so it can refer to another task.
    Re-fetch the PR and require `headRefOid` to equal local `HEAD`.
@@ -82,7 +88,10 @@ Push the already committed branch to its remote.
    `git rev-parse HEAD` equals `git rev-parse '@{upstream}'`, and report the
    branch from `git branch --show-current`.
    If the branch was rebased or history was rewritten, first confirm the current
-   branch is not `main` or `master`, then use `git push --force-with-lease`.
+   branch is not `main` or `master`, then use the exact remote-OID lease
+   `git push --force-with-lease=refs/heads/<branch>:<captured-remote-sha>`.
+   Use generic `--force-with-lease` only when no remote OID was captured; never
+   use an unconditional force push.
    If the branch modifies `.github/workflows/*` and GitHub rejects the push with
    a message like `refusing to allow an OAuth App to create or update workflow
    ... without workflow scope`, treat it as push authentication/scope, not a code

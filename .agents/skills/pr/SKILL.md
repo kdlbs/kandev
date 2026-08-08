@@ -66,7 +66,10 @@ explicitly requests task tracking.
    and stop before PR publication. For non-UI changes, record that screenshots
    are not required and continue.
 
-5. **Create the PR.** Use `--draft` flag if the user requested draft mode, otherwise create as ready-for-review.
+5. **Create the PR.** Before creating, check open PRs for the current branch and
+   inspect task-linked PR metadata. Reuse an existing PR; create a duplicate only
+   when the user explicitly requests separate PRs. Use `--draft` if requested,
+   otherwise create as ready-for-review.
 
    **PR title** must follow Conventional Commits format (see `/commit` for full rules). CI validates via `pr-title.yml` — the PR title becomes the squash-merge commit used for release notes.
 
@@ -191,9 +194,11 @@ required screenshot embedding in step 7 is complete.
       before PATCH and compare the two live snapshots (not the candidate with a
       snapshot). Use PR-scoped temporary filenames, fail immediately on a
       differing `cmp`, and discard any payload on failure; never reuse a prior
-      `/tmp` payload. Verify the payload contains this PR's current body and
-      required sentinels before PATCH. If it changed, re-fetch and merge again;
-      do not overwrite the newer body.
+      `/tmp` payload. Extract JSON bodies byte-for-byte with `jq -j .body` before
+      `cmp`; `jq -r .body` appends a newline and can report a false mismatch.
+      Verify the payload contains this PR's current body and required sentinels
+      before PATCH. If it changed, re-fetch and merge again; do not overwrite
+      the newer body.
    4. After PATCH, read the body back and verify both the intended change and
       all previously present sentinel sections are still present.
 

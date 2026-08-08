@@ -18,6 +18,7 @@ apps/
 - **Package manager**: `pnpm` workspace (run from `apps/`, not repo root)
 - **Backend**: Go with Make (`make -C apps/backend test|lint|build`)
 - **Frontend**: Vite/React SPA (`cd apps && pnpm --filter @kandev/web dev|build:vite|lint`; for direct web typecheck use `cd apps/web && pnpm run typecheck`)
+- **Web-only scripts** live in `apps/web/package.json`; run them from `apps/web` (for example `pnpm run i18n:check` or `pnpm run i18n:ratchet`) or use `pnpm --filter @kandev/web ...`, not from `apps/`.
 - **Desktop**: Tauri shell (`cd apps && pnpm --filter @kandev/desktop build|e2e`; Rust tests from `apps/desktop/src-tauri`)
 - **UI**: Shadcn components via `@kandev/ui`
 - **E2E**: Playwright (`cd apps/web && pnpm e2e`). The `containers` project (gated on `KANDEV_E2E_CONTAINERS=1`, formerly `docker`) covers both the Docker executor and the SSH executor — anything that needs a real Docker daemon on the host lives there. See `apps/web/e2e/README.md`.
@@ -121,6 +122,12 @@ newlines through `--body`; GitHub will render them literally.
 
 For PR review/fixup workflows, prefer the repo helpers before manually querying GitHub/GraphQL: `scripts/pr-state --summary <PR>` for checks and unresolved-thread state, `scripts/pr-state --comment <comment_id>` for a full review-comment body, `scripts/pr-resolve list <PR>` for actionable unresolved review threads, and `scripts/pr-resolve reply <PR> <comment_id> <thread_id> "<body>"` to reply, resolve, and react in one call.
 
+For new or updated GitHub Actions pins, verify that the referenced action's
+`action.yml` declares `runs.using: node24`. Fetch the manifest at the pinned
+SHA, dereference annotated-tag pins through the tag object before fetching it,
+and reject actions that still declare `node20` (or are not `composite`/Docker
+actions).
+
 When a Kandev system message references an MCP tool that is not visible in the active tool list, use the runtime's tool discovery mechanism, such as `tool_search` when available, before falling back to a less specific workflow. Some task messaging and platform helpers are exposed on demand.
 
 ### Single-Session Model Workflow
@@ -176,6 +183,11 @@ review that must start after merge, create it with `parent_id: "self"`,
 `workspace_mode: "new_workspace"`, and the reviewed PR's base branch; otherwise
 a same-repository subtask inherits the reviewed branch. Set `start_agent: false`
 when the follow-up is intentionally queued until merge.
+
+When the user asks for a todo list or durable progress plan, create or update the
+persistent Kandev task plan alongside the transient checklist. Before handoff,
+refresh plan statuses, validation results, remediation commits, PR head,
+review-thread state, and pending CI/mergeability.
 
 ### Third-party integrations
 
