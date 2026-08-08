@@ -378,6 +378,10 @@ test.describe("Session tab management — primary session persistence", () => {
     await expect(session.contextMenuItem("Set as Primary")).toBeVisible({ timeout: 5_000 });
     await session.contextMenuItem("Set as Primary").click();
 
+    await expect(
+      testPage.getByTestId("toast-message").filter({ hasText: "Set primary" }),
+    ).toHaveCount(0);
+
     await expect
       .poll(
         async () => {
