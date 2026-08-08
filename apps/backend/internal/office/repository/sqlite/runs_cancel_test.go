@@ -90,6 +90,9 @@ func TestCancelRun_ClaimedRunIsCancelled(t *testing.T) {
 	if run.CancelReason == nil || *run.CancelReason != "execution_too_old" {
 		t.Errorf("cancel_reason = %v, want execution_too_old", run.CancelReason)
 	}
+	if run.FinishedAt == nil {
+		t.Error("finished_at = nil, want a timestamp")
+	}
 }
 
 // A run that reached a terminal state between the caller's SELECT and this
