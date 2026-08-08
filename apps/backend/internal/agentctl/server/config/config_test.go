@@ -24,10 +24,50 @@ func TestNewInstanceConfigNormalizesMcpProviders(t *testing.T) {
 func TestCollectAgentEnvKeepsGitHubCLIShimAheadOfProfilePath(t *testing.T) {
 	t.Setenv("KANDEV_GITHUB_CREDENTIAL_BROKER_URL", "https://kandev.example/api/github/credentials/resolve")
 	t.Setenv("KANDEV_GITHUB_CLI_SHIM_DIR", "/kandev/shims")
-	env := CollectAgentEnv(map[string]string{"PATH": "/profile/bin:/usr/bin"})
+	// The profile path is joined with the platform separator rather than a
+	// literal ":" so SplitList sees two entries on Windows too — hardcoding the
+	// Unix separator made this fail there with the shim ahead of one unsplit entry.
+	profilePath := strings.Join([]string{"/profile/bin", "/usr/bin"}, string(os.PathListSeparator))
+	env := CollectAgentEnv(map[string]string{"PATH": profilePath})
 	want := strings.Join([]string{"/kandev/shims", "/profile/bin", "/usr/bin"}, string(os.PathListSeparator))
 	if got := envSliceValue(env, "PATH"); got != want {
 		t.Fatalf("PATH = %q, want %q", got, want)
+	}
+}
+
+// Windows hands the search path down as "Path". Writing "PATH" used to leave
+// that untouched and add a second variable holding only the shim directory, so
+// `cmd /c npx …` resolved against the shim dir alone and the agent died with
+// "'npx' is not recognized". Both branches are exercised through the parameter
+// rather than runtime.GOOS so the regression is caught on every runner.
+func TestSearchPathKey(t *testing.T) {
+	inherited := map[string]string{"Path": "/node/bin"}
+	if got := searchPathKey(inherited, true); got != "Path" {
+		t.Fatalf("searchPathKey(case-insensitive) = %q, want the inherited %q", got, "Path")
+	}
+	if got := searchPathKey(inherited, false); got != "PATH" {
+		t.Fatalf("searchPathKey(case-sensitive) = %q, want %q — a Unix \"Path\" is a different variable", got, "PATH")
+	}
+
+	both := map[string]string{"PATH": "/exact", "Path": "/variant"}
+	if got := searchPathKey(both, true); got != "PATH" {
+		t.Fatalf("searchPathKey with both keys = %q, want the exact match to win", got)
+	}
+}
+
+func TestPrependPathEntryExtendsTheKeyItFound(t *testing.T) {
+	env := map[string]string{
+		"PATH": strings.Join([]string{"/node/bin", "/usr/bin"}, string(os.PathListSeparator)),
+	}
+
+	prependPathEntry(env, "/kandev/shims")
+
+	want := strings.Join([]string{"/kandev/shims", "/node/bin", "/usr/bin"}, string(os.PathListSeparator))
+	if env["PATH"] != want {
+		t.Fatalf("PATH = %q, want %q", env["PATH"], want)
+	}
+	if len(env) != 1 {
+		t.Fatalf("prependPathEntry left %d variables, want the one it extended: %v", len(env), env)
 	}
 }
 
