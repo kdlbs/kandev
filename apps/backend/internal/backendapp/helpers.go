@@ -742,12 +742,21 @@ func registerRoutes(p routeParams) {
 // a monitor never needs a credential to read it (see docs/specs/
 // health-endpoint-version/spec.md).
 func healthHandler(p routeParams) gin.HandlerFunc {
+	// p.version is normally the package-level Version wired in by run()'s
+	// registerRoutes call. Falling back here keeps the never-empty guarantee
+	// (AC-11) true regardless of that call-site wiring, since standing up
+	// run()'s full DI graph in a test just to exercise that one field
+	// assignment is out of proportion to this change.
+	version := p.version
+	if version == "" {
+		version = Version
+	}
 	return func(c *gin.Context) {
 		if !ready.Load() {
 			c.JSON(http.StatusServiceUnavailable, gin.H{
 				"status":  "starting",
 				"service": "kandev",
-				"version": p.version,
+				"version": version,
 			})
 			return
 		}
@@ -758,7 +767,7 @@ func healthHandler(p routeParams) gin.HandlerFunc {
 			"status":  "ok",
 			"service": "kandev",
 			"mode":    "websocket+http",
-			"version": p.version,
+			"version": version,
 		})
 	}
 }

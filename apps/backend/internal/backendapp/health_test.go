@@ -157,6 +157,15 @@ func TestSetBuildInfoVersionDefaultAndInjection(t *testing.T) {
 	prevVersion, prevCommit, prevBuildTime := Version, Commit, BuildTime
 	t.Cleanup(func() { Version, Commit, BuildTime = prevVersion, prevCommit, prevBuildTime })
 
+	// AC-8: the compiled-in default (before this test or anything else
+	// mutates the package var) must actually be "dev". Asserted against
+	// prevVersion, captured above before any mutation in this test —
+	// asserting post-mutation would only prove setBuildInfo doesn't clobber
+	// an already-set value, not that the real default is "dev".
+	if prevVersion != "dev" {
+		t.Fatalf("compiled-in default Version = %q, want dev", prevVersion)
+	}
+
 	Version = "dev"
 	setBuildInfo(BuildInfo{})
 	if Version != "dev" {
@@ -174,6 +183,41 @@ func TestSetBuildInfoVersionDefaultAndInjection(t *testing.T) {
 	setBuildInfo(BuildInfo{Version: ""})
 	if Version != "2.3.4" {
 		t.Fatalf("Version after empty ldflag = %q, want prior value 2.3.4 retained", Version)
+	}
+}
+
+// TestHealthHandlerFallsBackToPackageVersionWhenParamEmpty covers AC-11
+// against the production wiring gap: every other test in this file passes an
+// explicit routeParams{version: "..."}, so none of them would notice if the
+// one-line "version: Version" field assignment that wires routeParams.version
+// to the package-level Version var (main.go, in the registerRoutes call built
+// by run()) were ever deleted — /health would then silently serve
+// "version":"" in production. Standing up run()'s full DI graph just to
+// exercise that single field is out of proportion to this change (see the
+// spec's Implementation Notes). Instead, healthHandler falls back to the
+// package-level Version whenever routeParams.version is unset, so the never-
+// empty guarantee holds at the handler layer regardless of what the caller
+// wires up.
+func TestHealthHandlerFallsBackToPackageVersionWhenParamEmpty(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	setReadyForTest(t, true)
+
+	prevVersion := Version
+	t.Cleanup(func() { Version = prevVersion })
+	Version = "9.9.9-fallback-test"
+
+	router := gin.New()
+	router.GET("/health", healthHandler(routeParams{}))
+
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/health", nil))
+
+	var body map[string]interface{}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode body: %v", err)
+	}
+	if body["version"] != "9.9.9-fallback-test" {
+		t.Fatalf("version = %v, want fallback to package-level Version %q", body["version"], "9.9.9-fallback-test")
 	}
 }
 
