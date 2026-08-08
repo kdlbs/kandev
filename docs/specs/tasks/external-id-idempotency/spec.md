@@ -340,8 +340,11 @@ and stamp a settlement onto a task that no longer holds any identity.
   - **The task no longer exists** (it was deleted) → return the surface's
     existing not-found error. There is no task to describe.
 
-  It MUST NOT report `Created` / `creation_complete: true`, which would claim an
-  identity the task no longer holds.
+  It MUST NOT report outcome `Created`, and MUST NOT include `external_id` in
+  the body — either would claim an identity the task no longer holds. Note that
+  `creation_complete: true` **is** correct here and is not what distinguishes
+  this outcome: the create's synchronous work did finish. The absent
+  `external_id` is the distinguishing signal.
 
 Zero rows is a legitimate outcome of a benign race, not an error to log and
 ignore.
