@@ -98,9 +98,7 @@ test.describe("GitLab MR badge on the Kanban card", () => {
 
     const kanban = new KanbanPage(testPage);
     await kanban.goto();
-    await expect(kanban.taskCardInColumn("Single MR badge task", seedData.startStepId)).toBeVisible(
-      { timeout: 45_000 },
-    );
+    await expect(kanban.taskCardByTitle("Single MR badge task")).toBeVisible({ timeout: 45_000 });
 
     const icon = kanban.board.getByTestId(`mr-task-icon-${task.id}`);
     await expect(icon).toBeVisible({ timeout: 15_000 });
@@ -118,7 +116,7 @@ test.describe("GitLab MR badge on the Kanban card", () => {
 
     const kanban = new KanbanPage(testPage);
     await kanban.goto();
-    await expect(kanban.taskCardInColumn("No MR badge task", seedData.startStepId)).toBeVisible({
+    await expect(kanban.taskCardByTitle("No MR badge task")).toBeVisible({
       timeout: 45_000,
     });
 
@@ -159,7 +157,7 @@ test.describe("GitLab MR badge on the Kanban card", () => {
 
     const kanban = new KanbanPage(testPage);
     await kanban.goto();
-    await expect(kanban.taskCardInColumn("Multi MR badge task", seedData.startStepId)).toBeVisible({
+    await expect(kanban.taskCardByTitle("Multi MR badge task")).toBeVisible({
       timeout: 45_000,
     });
 
@@ -200,11 +198,9 @@ test.describe("GitLab MR badge on the Kanban card", () => {
 
     const kanban = new KanbanPage(testPage);
     await kanban.goto();
-    await expect(kanban.taskCardInColumn("PR and MR badge task", seedData.startStepId)).toBeVisible(
-      { timeout: 45_000 },
-    );
+    await expect(kanban.taskCardByTitle("PR and MR badge task")).toBeVisible({ timeout: 45_000 });
 
-    const card = kanban.taskCardInColumn("PR and MR badge task", seedData.startStepId);
+    const card = kanban.taskCardByTitle("PR and MR badge task");
     const prIcon = card.getByTestId(`pr-task-icon-${task.id}`);
     const mrIcon = card.getByTestId(`mr-task-icon-${task.id}`);
     await expect(prIcon).toBeVisible({ timeout: 15_000 });
