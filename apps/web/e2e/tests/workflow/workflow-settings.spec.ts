@@ -459,6 +459,38 @@ test.describe("Workflow settings", () => {
     await page.goto(seedData.workspaceId);
     await expect(await page.findWorkflowCard("Manually Saved Workflow Name")).toBeVisible();
   });
+
+  test("edits and persists a workflow description", async ({ testPage, apiClient, seedData }) => {
+    const workflow = await apiClient.createWorkflow(
+      seedData.workspaceId,
+      "Workflow Description Save",
+    );
+    const page = new WorkflowSettingsPage(testPage);
+    await page.goto(seedData.workspaceId);
+
+    const card = await page.findWorkflowCard(workflow.name);
+    const descriptionInput = card.getByTestId("workflow-description-input");
+    await expect(descriptionInput).toBeVisible();
+    await expect(descriptionInput).toBeEnabled();
+    await descriptionInput.fill("rev 1 (2026-08-08) — test description");
+
+    await expect(descriptionInput).toHaveAttribute("data-settings-dirty", "true");
+
+    expect(
+      (await apiClient.listWorkflows(seedData.workspaceId)).workflows.find(
+        (candidate) => candidate.id === workflow.id,
+      )?.description,
+    ).toBeFalsy();
+    await page.saveChanges();
+
+    await expect(descriptionInput).toHaveAttribute("data-settings-dirty", "false");
+
+    await page.goto(seedData.workspaceId);
+    const reloadedCard = await page.findWorkflowCard(workflow.name);
+    await expect(reloadedCard.getByTestId("workflow-description-input")).toHaveValue(
+      "rev 1 (2026-08-08) — test description",
+    );
+  });
 });
 
 test.describe("Seed protection", () => {

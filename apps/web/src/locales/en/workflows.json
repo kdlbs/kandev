@@ -245,6 +245,8 @@
   "workflowCycleBlockingBody": "This path re-enters \"{{stepName}}\" and can start the agent again without another user action.",
   "workflowCycleReplayPathFor": "Replay path for {{stepName}}",
   "workflowCycleWarningBody": "This path can re-enter \"{{stepName}}\" and start the agent again after a user action.",
+  "workflowDescription": "Description",
+  "workflowDescriptionPlaceholder": "Optional description",
   "workflowDetails": "Workflow details",
   "workflowName": "Workflow Name",
   "workflowsReadOnlyImprove": "Workflows in this workspace are managed by Improve Kandev and cannot be changed.",
