@@ -86,6 +86,34 @@ func TestHealthHandlerStartingBodyIncludesVersion(t *testing.T) {
 	}
 }
 
+// TestHealthHandlerDesktopTokenHeaderOnlyOnReadyPath guards a pre-existing
+// behavior the spec restates as a must-not-regress ("## What": the desktop
+// health-token header SHALL continue to be set on the 200 path only,
+// unchanged) but that had no direct test before this change extracted the
+// handler body into healthHandler. Confirms the refactor didn't move the
+// header write outside its original branch.
+func TestHealthHandlerDesktopTokenHeaderOnlyOnReadyPath(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	t.Setenv(desktopHealthTokenEnv, "  desktop-token  ")
+
+	router := gin.New()
+	router.GET("/health", healthHandler(routeParams{version: "1.2.3"}))
+
+	setReadyForTest(t, false)
+	startingRec := httptest.NewRecorder()
+	router.ServeHTTP(startingRec, httptest.NewRequest(http.MethodGet, "/health", nil))
+	if got := startingRec.Header().Get(desktopHealthTokenHeader); got != "" {
+		t.Fatalf("starting-path %s header = %q, want absent", desktopHealthTokenHeader, got)
+	}
+
+	setReadyForTest(t, true)
+	readyRec := httptest.NewRecorder()
+	router.ServeHTTP(readyRec, httptest.NewRequest(http.MethodGet, "/health", nil))
+	if got := readyRec.Header().Get(desktopHealthTokenHeader); got != "desktop-token" {
+		t.Fatalf("ready-path %s header = %q, want desktop-token", desktopHealthTokenHeader, got)
+	}
+}
+
 // TestHealthHandlerVersionMatchesSystemInfoVersion covers AC-10: /health and
 // /api/v1/system/info are fed the exact same build-version string
 // (backendapp.Version, sampled after setBuildInfo — see main.go:801,1830), so

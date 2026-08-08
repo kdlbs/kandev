@@ -363,3 +363,58 @@ Recorded 2026-08-07, during the build against this frozen spec.
     `str | None` type syntax requiring Python 3.10+; this sandbox has Python 3.9.6.
     `lint-backend` (golangci-lint, 0 issues), `lint-web` (eslint, 0 warnings), and
     `lint-architecture` all pass when run directly.
+
+## Testing Notes (QA pass, 2026-08-08)
+
+- **Mutation testing, not just green tests.** Each new assertion was verified to fail
+  when the behavior it guards is broken, by temporarily reverting `healthHandler` (and,
+  for AC-14, `isPublicPath`) and confirming the specific test fails, then restoring:
+  dropping `version` from the JSON body fails AC-1..4/AC-12; adding an undeclared field
+  fails the AC-4 exact-key-set assertion; widening the allowlist to include
+  `/api/v1/system/info` fails the added `system info` case in
+  `TestEnabledModeAllowlistMatrix`; moving the desktop-token header write outside the
+  ready-only branch fails the new header test below. All four mutations were confirmed
+  to fail their respective test, then the code was restored and confirmed green again.
+- **Added `TestHealthHandlerDesktopTokenHeaderOnlyOnReadyPath`.** The spec's "## What"
+  section states the desktop health-token header "SHALL continue to be set on the 200
+  path only, unchanged," but this wasn't captured by a numbered AC and had no direct
+  test before this change extracted the handler into `healthHandler` — a refactor that
+  touches the exact code region setting that header. Added a test asserting the header
+  is absent on the 503 path and present with the correct value on the 200 path, and
+  mutation-tested it (moved the header write above the `ready` check — test caught it).
+- **Independently re-verified the Consumer Compatibility Audit table**, not just trusted
+  it: read `internal/launcher/health.go` (`probeHealth` discards the body via
+  `io.Copy(io.Discard, ...)`), `apps/cli/src/health.ts` (checks `res.ok` only, no body
+  parsing), and `apps/desktop/src-tauri/src/backend.rs` (`read_http_response_head` stops
+  at the `\r\n\r\n` header terminator and never reads the body at all). All three match
+  the audit table's claims. Also independently searched `docs/**` for any other file
+  reproducing the `/health` JSON body verbatim (beyond `docs/public/operations.md`,
+  already updated) — found only `docs/WEBSOCKET_API.md`'s documentation of the separate
+  WS `health.check` action (explicitly Out of Scope in this spec) and a few unrelated
+  `"status":"ok"` mentions in other features' docs/specs. No additional doc needs
+  updating.
+- **Live end-to-end verification** (real compiled binaries, not just unit tests):
+  confirmed unstamped build reports `"version":"dev"` on `/health`; a build stamped via
+  `-ldflags "-X main.Version=9.9.9-qa-test ..."` reports that value identically on both
+  `/health` and `/api/v1/system/info` (AC-9, AC-10 live); with `KANDEV_FEATURES_AUTH=true`
+  and no credential, `/health` returns 200 with `version` while
+  `/api/v1/system/info` returns 401 (AC-12, AC-14 live).
+- **Incident during live verification, disclosed to the user:** the throwaway test
+  backends were started with `KANDEV_HOME_DIR` overridden to a scratch directory,
+  intending isolation from the real `~/.kandev` install. That override did not work —
+  this session's own ambient environment (it runs as a Kandev-orchestrated task) already
+  exports `KANDEV_DATABASE_PATH` pointing at the real `~/.kandev/data/kandev.db`, and
+  viper's `AutomaticEnv()` binds that key independently of `KANDEV_HOME_DIR`. The
+  throwaway binaries inherited it and booted against the live database, which (a) left
+  `kandev_meta.kandev_version` set to a test value (`9.9.9-qa-test`) instead of the real
+  binary's version — self-correcting on that backend's next restart per the existing
+  upgrade-backup-safety design — and (b) caused the 2-newest backup retention in
+  `~/.kandev/data/backups/` to prune whatever legitimate backups predated this session,
+  which is not recoverable. A direct one-line correction of the metadata key was
+  attempted and blocked by the permission classifier; left as-is per the user's
+  direction rather than retried. Not a defect in the code under test — an environment
+  hazard specific to manually running a real backend binary from inside a Kandev-hosted
+  session — but recorded here since it's exactly the kind of non-obvious, costly-to-learn
+  fact this section exists to preserve. Follow-up live-binary QA in this kind of
+  environment should pass an explicit `KANDEV_DATABASE_PATH` override alongside
+  `KANDEV_HOME_DIR`, or unset inherited `KANDEV_*` vars first.
