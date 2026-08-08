@@ -333,3 +333,50 @@ func TestAgentTypeConfig_ToAPIType(t *testing.T) {
 		t.Errorf("expected Enabled %v, got %v", ag.Enabled(), apiType.Enabled)
 	}
 }
+
+func TestResolveFamilyID(t *testing.T) {
+	reg := NewRegistry(newTestLogger())
+	reg.LoadDefaults()
+
+	cases := []struct {
+		name  string
+		input string
+		want  string
+		ok    bool
+	}{
+		{name: "canonical id", input: "claude-acp", want: "claude-acp", ok: true},
+		{name: "display name", input: "Claude", want: "claude-acp", ok: true},
+		{name: "display name lowercased", input: "claude", want: "claude-acp", ok: true},
+		{name: "agent name", input: "Claude ACP Agent", want: "claude-acp", ok: true},
+		{name: "surrounding whitespace", input: "  Claude  ", want: "claude-acp", ok: true},
+		{name: "mixed case id", input: "Claude-ACP", want: "claude-acp", ok: true},
+		{name: "other family display name", input: "Codex", want: "codex-acp", ok: true},
+		{name: "unknown family", input: "grok-9000", want: "", ok: false},
+		{name: "empty", input: "   ", want: "", ok: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, ok := reg.ResolveFamilyID(tc.input)
+			if ok != tc.ok || got != tc.want {
+				t.Fatalf("ResolveFamilyID(%q) = (%q, %v), want (%q, %v)", tc.input, got, ok, tc.want, tc.ok)
+			}
+		})
+	}
+}
+
+// A canonical ID must win over another agent's display name or name, so a
+// registry mutation cannot make an exact ID resolve somewhere else.
+func TestResolveFamilyIDPrefersCanonicalID(t *testing.T) {
+	reg := NewRegistry(newTestLogger())
+	if err := reg.Register(&testAgent{id: "shadow", name: "Real", enabled: true}); err != nil {
+		t.Fatalf("register shadow: %v", err)
+	}
+	if err := reg.Register(&testAgent{id: "real", name: "shadow", enabled: true}); err != nil {
+		t.Fatalf("register real: %v", err)
+	}
+
+	got, ok := reg.ResolveFamilyID("shadow")
+	if !ok || got != "shadow" {
+		t.Fatalf("ResolveFamilyID(\"shadow\") = (%q, %v), want (\"shadow\", true)", got, ok)
+	}
+}

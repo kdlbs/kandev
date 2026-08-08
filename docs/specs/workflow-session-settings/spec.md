@@ -70,7 +70,7 @@ Conditional rules are stored inside the existing `workflow_steps.events` JSON as
 
 Constraints:
 
-- `agent_name` is non-empty and unique within the action.
+- `agent_name` is non-empty and unique within the action. It is resolved against the agent registry before a rule is selected, so a canonical agent ID (`claude-acp`), a display name (`Claude`), or an agent name (`Claude ACP Agent`) all select the same family, case-insensitively. A rule naming no known agent raises a session warning instead of being dropped silently; a rule naming a known but different family stays a silent no-op.
 - `operation` is `set`, `keep`, or `restore_original`.
 - A `set` rule contains a non-empty `model` or at least one non-empty `config_options` entry.
 - `keep` and `restore_original` rules do not contain `model` or `config_options`.

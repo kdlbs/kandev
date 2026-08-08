@@ -5,6 +5,7 @@ import (
 	"cmp"
 	"fmt"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -221,6 +222,46 @@ func (r *Registry) Exists(id string) bool {
 
 	_, exists := r.agents[id]
 	return exists
+}
+
+// ResolveFamilyID maps a human-written agent family reference onto a canonical
+// agent ID. Workflow definitions are hand-authored and reasonably say "Claude"
+// where the runtime stores "claude-acp", so an exact ID match is tried first and
+// the display name and agent name are accepted as aliases. Matching is
+// case-insensitive and ignores surrounding whitespace; an unknown reference
+// returns false so callers can tell a typo from a deliberate non-match.
+func (r *Registry) ResolveFamilyID(name string) (string, bool) {
+	trimmed := strings.TrimSpace(name)
+	if trimmed == "" {
+		return "", false
+	}
+
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	if ag, exists := r.agents[trimmed]; exists {
+		return ag.ID(), true
+	}
+	// Sort by ID so an alias claimed by more than one agent resolves the same
+	// way on every call regardless of map iteration order.
+	ids := make([]string, 0, len(r.agents))
+	for id := range r.agents {
+		ids = append(ids, id)
+	}
+	slices.Sort(ids)
+	for _, alias := range []func(agents.Agent) string{
+		agents.Agent.ID,
+		agents.Agent.DisplayName,
+		agents.Agent.Name,
+	} {
+		for _, id := range ids {
+			ag := r.agents[id]
+			if strings.EqualFold(strings.TrimSpace(alias(ag)), trimmed) {
+				return ag.ID(), true
+			}
+		}
+	}
+	return "", false
 }
 
 // Register adds a new agent

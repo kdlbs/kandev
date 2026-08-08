@@ -133,8 +133,18 @@ func (s *Service) resolveWorkflowSessionConfigTarget(
 			"This step's session settings were not applied because the original agent family is unknown.")
 		return sessionConfigurationTarget{}, false
 	}
-	rule := matchingConfigureSessionRule(rules, agentName)
-	if rule == nil || rule.Operation == wfmodels.ConfigureSessionKeep {
+	rule, anyKnownFamily := s.matchingConfigureSessionRule(rules, agentName)
+	if rule == nil {
+		// A rule for a real but different agent is a deliberate no-op. A rule
+		// naming no known agent at all is a typo in the workflow, and dropping
+		// it silently is what let per-step model selection fail unnoticed.
+		if !anyKnownFamily {
+			s.warnWorkflowSessionConfig(ctx, taskID, session.ID, step.ID,
+				"This step's session settings were not applied because its configure_session rules name no known agent.")
+		}
+		return sessionConfigurationTarget{}, false
+	}
+	if rule.Operation == wfmodels.ConfigureSessionKeep {
 		return sessionConfigurationTarget{}, false
 	}
 	target, ok := sessionConfigurationTargetForRule(session, *rule)
@@ -146,13 +156,43 @@ func (s *Service) resolveWorkflowSessionConfigTarget(
 	return target, true
 }
 
-func matchingConfigureSessionRule(rules []wfmodels.ConfigureSessionRule, agentName string) *wfmodels.ConfigureSessionRule {
+// matchingConfigureSessionRule returns the rule governing the session's agent
+// family. Workflow rules are hand-authored and name families the way a person
+// writes them ("Claude") while sessions store the canonical agent ID
+// ("claude-acp"), so both sides are resolved before comparison. The second
+// return reports whether any rule named an agent the registry knows, which is
+// what separates a workflow typo from a rule that deliberately targets a
+// different agent.
+func (s *Service) matchingConfigureSessionRule(
+	rules []wfmodels.ConfigureSessionRule,
+	agentName string,
+) (*wfmodels.ConfigureSessionRule, bool) {
+	sessionFamily, _ := s.resolveAgentFamily(agentName)
+	anyKnownFamily := false
 	for index := range rules {
-		if rules[index].AgentName == agentName {
-			return &rules[index]
+		ruleFamily, known := s.resolveAgentFamily(rules[index].AgentName)
+		anyKnownFamily = anyKnownFamily || known
+		if ruleFamily == sessionFamily {
+			return &rules[index], anyKnownFamily
 		}
 	}
-	return nil
+	return nil, anyKnownFamily
+}
+
+// resolveAgentFamily maps an agent family reference onto its canonical ID and
+// reports whether the registry recognized it. Without a resolver wired, or for
+// a name the registry does not know, the trimmed input is returned so matching
+// degrades to the exact comparison this used to perform — an unrecognized name
+// must still be able to match an equally unrecognized session family.
+func (s *Service) resolveAgentFamily(name string) (string, bool) {
+	trimmed := strings.TrimSpace(name)
+	if s.agentFamilyResolver == nil {
+		return trimmed, true
+	}
+	if resolved, ok := s.agentFamilyResolver.ResolveFamilyID(trimmed); ok {
+		return resolved, true
+	}
+	return trimmed, false
 }
 
 func (s *Service) persistWorkflowSessionConfigBeforeStart(

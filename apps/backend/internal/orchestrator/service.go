@@ -162,6 +162,13 @@ type WorkflowStepGetter interface {
 	GetWorkflowMeta(ctx context.Context, workflowID string) (WorkflowMeta, error)
 }
 
+// AgentFamilyResolver maps a hand-written agent family reference onto a
+// canonical agent ID, reporting false when it names no known agent. Implemented
+// by registry.Registry.
+type AgentFamilyResolver interface {
+	ResolveFamilyID(name string) (string, bool)
+}
+
 // PromptReferenceExpander resolves "@name" saved-prompt references embedded in
 // an effective prompt and returns both the expanded prompt and the exact
 // server-generated block content. Implemented by promptservice.Service.
@@ -361,6 +368,11 @@ type Service struct {
 
 	// Workflow step getter for prompt building
 	workflowStepGetter WorkflowStepGetter
+
+	// Resolves the agent family names written in configure_session rules onto
+	// canonical agent IDs. Nil-safe: when unset, rule matching falls back to an
+	// exact string comparison.
+	agentFamilyResolver AgentFamilyResolver
 
 	// Prompt reference expander for resolving "@name" saved-prompt
 	// references in the effective workflow-step prompt. Nil-safe: when
@@ -1150,6 +1162,15 @@ func (s *Service) WorkflowStepRequiresCompletionSignal(ctx context.Context, step
 func (s *Service) SetWorkflowStepGetter(getter WorkflowStepGetter) {
 	s.workflowStepGetter = getter
 	s.initWorkflowEngine()
+}
+
+// SetAgentFamilyResolver sets the collaborator that maps the agent family names
+// written in configure_session rules onto canonical agent IDs.
+//
+// If not set: a rule matches only when its agent_name is byte-identical to the
+// session's stored agent family.
+func (s *Service) SetAgentFamilyResolver(resolver AgentFamilyResolver) {
+	s.agentFamilyResolver = resolver
 }
 
 // SetPromptReferenceExpander sets the collaborator used to resolve "@name"
