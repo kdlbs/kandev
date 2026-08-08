@@ -351,6 +351,10 @@ drained:
 	require.Len(t, notifications, 1, "a live provider rebuild must emit one tools/list_changed notification")
 	require.Equal(t, mcplib.MethodNotificationToolsListChanged, notifications[0].Method)
 	tools := getRegisteredToolNames(s)
+	// Absolute count: a tool added to task mode must be reflected here as well
+	// as in TestServerModeTask_ToolCount and
+	// TestRegisterTools_LoggedCountMatchesRegisteredTools (list_task_sessions_test.go),
+	// which pin the per-mode registration rather than this SetProviders rebuild.
 	require.Len(t, tools, 33, "final registry should contain the complete GitLab-only task tool set")
 	assert.Contains(t, tools, "get_task_mr_automation_kandev")
 	assert.NotContains(t, tools, "get_task_pr_automation_kandev")

@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"testing"
 	"time"
 
@@ -42,7 +43,7 @@ func seedTaskWithSessions(t *testing.T, svc *service.Service, repo seedRepo, ext
 	spawned := make([]*models.TaskSession, 0, extra)
 	for i := 0; i < extra; i++ {
 		session := &models.TaskSession{
-			ID:             "sess-spawned-" + string(rune('a'+i)),
+			ID:             fmt.Sprintf("sess-spawned-%d", i),
 			TaskID:         task.ID,
 			Name:           "reviewer",
 			AgentProfileID: "agent-profile-2",
@@ -152,6 +153,25 @@ func TestHandleListTaskSessions_UnknownTaskIsNotFound(t *testing.T) {
 	resp, err := h.handleListTaskSessions(context.Background(), msg)
 	require.NoError(t, err)
 	assertWSError(t, resp, ws.ErrorCodeNotFound)
+}
+
+// Infrastructure failing during the existence check must not be flattened into
+// "task not found" — that would report a database outage as a bad task ID.
+func TestHandleListTaskSessions_LookupFailureIsInternalError(t *testing.T) {
+	svc, repo := newTestTaskService(t)
+	task, _, _ := seedTaskWithSessions(t, svc, repo, 0)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	h := &Handlers{taskSvc: svc, logger: testLogger(t).WithFields()}
+	msg := makeWSMessage(t, ws.ActionMCPListTaskSessions, map[string]interface{}{
+		"task_id": task.ID,
+	})
+
+	resp, err := h.handleListTaskSessions(ctx, msg)
+	require.NoError(t, err)
+	assertWSError(t, resp, ws.ErrorCodeInternalError)
 }
 
 func TestHandleListTaskSessions_TaskWithoutSessionsReturnsEmptyList(t *testing.T) {

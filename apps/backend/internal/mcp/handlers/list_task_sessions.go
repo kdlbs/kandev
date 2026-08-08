@@ -3,9 +3,11 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"time"
 
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"go.uber.org/zap"
 )
@@ -29,8 +31,12 @@ type taskSessionListEntry struct {
 
 type listTaskSessionsRequest struct {
 	TaskID string `json:"task_id"`
-	// CurrentSessionID is filled in by the MCP server from the session the
-	// tool call arrived on, never by the calling agent.
+	// CurrentSessionID is filled in by the MCP server from the session the tool
+	// call arrived on; it is not part of the tool's advertised schema, so an
+	// agent going through MCP cannot set it. A direct WS caller can, which only
+	// changes which entry its own response marks as is_current — the flag is
+	// informational and grants no access, and the returned set is scoped by
+	// authorizeTaskID either way.
 	CurrentSessionID string `json:"current_session_id"`
 }
 
@@ -52,8 +58,17 @@ func (h *Handlers) handleListTaskSessions(ctx context.Context, msg *ws.Message) 
 	// existence for unscoped callers, so without this an unknown (or invisible)
 	// task ID would return an empty list — indistinguishable from a real task
 	// that has not been started yet.
+	//
+	// A missing task and an unauthorized one both surface as ErrTaskNotFound
+	// (authorizeTaskID returns that same sentinel), so reporting it keeps
+	// existence hidden. Anything else is infrastructure failing, and must not
+	// be flattened into "not found".
 	if _, err := h.taskSvc.GetTask(ctx, req.TaskID); err != nil {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "task not found", nil)
+		if errors.Is(err, repoerrors.ErrTaskNotFound) || errors.Is(err, repoerrors.ErrWorkspaceNotFound) {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "task not found", nil)
+		}
+		h.logger.Error("failed to look up task for session list", zap.Error(err))
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to list task sessions", nil)
 	}
 
 	sessions, err := h.taskSvc.ListTaskSessions(ctx, req.TaskID)
