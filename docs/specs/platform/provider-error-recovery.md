@@ -64,7 +64,7 @@ failure consistently without sharing the same retry policy.
 - Exactly one backend schedule owns retry for a session and prompt generation.
   A successful attempt clears recovery state. Exhaustion transitions to the
   existing manual Resume and Start fresh choices.
-- Authentication, credentials, billing, subscription, plan quota, invalid model,
+- Authentication, credentials, subscription or billing action, plan quota, invalid model,
   disabled model, and provider-configuration failures never schedule a Kanban
   automatic retry.
 - A known quota reset time or remediation destination is displayed, but does not
@@ -97,10 +97,14 @@ failure consistently without sharing the same retry policy.
 - A route with auth, inactive-subscription, missing-configuration, or invalid
   model evidence remains `user_action_required`; Office may try another route,
   but does not schedule the blocked route itself.
-- Renewable quota, short rate, overload, and availability failures carry durable
-  provider-health retry state after the short same-route phase is exhausted. A
-  validated reset hint wins; otherwise Office uses its minute-scale 2, 5, 10,
-  20, and 60 minute backoff with jitter.
+- Renewable quota exhaustion bypasses the same-route short phase, falls through
+  to the next configured route, and leaves the affected route in durable
+  provider-health recovery using a validated reset hint or the minute-scale
+  backoff when no reset is known.
+- Short rate limits, overload, and availability failures carry durable
+  provider-health retry state only after the short same-route phase is
+  exhausted. A validated reset hint wins; otherwise Office uses its
+  minute-scale 2, 5, 10, 20, and 60-minute backoff with jitter.
 - When all routes are exhausted, Office durably parks the run as waiting for
   provider capacity or blocked for provider action. The scheduler wakes waiting
   runs, while blocked runs surface settings/inbox remediation.
@@ -176,8 +180,13 @@ an outcome distinct from fallback exclusion; only short-budget exhaustion marks
 that provider failed for the route cycle.
 
 Office provider health adds a non-degraded `short_retry` cooldown carrying the
-owning run, attempt ordinal, scope, and deadline. It coordinates concurrent runs
-without making the provider eligible for fallback before the short budget ends.
+affected scope and deadline. Durable ownership is represented by the run's
+`current_route_attempt_seq` pointing at its `retry_scheduled` route-attempt row;
+the short-retry ordinal is the count of those rows after the run's cycle
+baseline. The run's `scheduled_retry_at` mirrors the cooldown deadline. This
+mapping coordinates concurrent runs without making the provider eligible for
+fallback before the short budget ends, and survives restart without adding an
+owner column to provider health.
 
 ## API surface
 

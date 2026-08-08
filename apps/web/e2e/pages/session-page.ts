@@ -617,7 +617,7 @@ export class SessionPage {
 
   /** The yellow provider-error retry status card. */
   transientRetryCard(): Locator {
-    return this.chat.getByTestId("transient-retry-card");
+    return this.activeChat().getByTestId("transient-retry-card");
   }
 
   /** Context reset divider shown in chat after resetting agent context. */

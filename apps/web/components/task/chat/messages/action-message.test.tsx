@@ -67,6 +67,19 @@ function retryMessage(overrides: Partial<Message> = {}): Message {
   } as Message;
 }
 
+function transientRetryMetadata(attempt: number, retryInSeconds: number) {
+  return {
+    variant: "warning",
+    retrying: true,
+    attempt,
+    max_attempts: 5,
+    retry_in_seconds: retryInSeconds,
+    session_id: "sess-1",
+    task_id: "task-1",
+    actions: [],
+  };
+}
+
 function recoveryMessage(withParams = false): Message {
   return retryMessage({
     content: RECOVERY_MESSAGE,
@@ -231,6 +244,27 @@ describe("ActionMessage — transient retry (warning variant)", () => {
 
     expect(screen.getByTestId(RESUME_TEST_ID)).toBeTruthy();
     expect(screen.getByText(RECOVERY_MESSAGE)).toBeTruthy();
+  });
+});
+
+describe("ActionMessage — retry schedule updates", () => {
+  it("resets the fallback countdown when a later retry schedule arrives", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-08T12:00:00.000Z"));
+    try {
+      const { rerender } = renderAction(
+        retryMessage({ metadata: transientRetryMetadata(1, 5) }),
+        "WAITING_FOR_INPUT",
+      );
+      expect(screen.getByText(/retrying in 0:05/i)).toBeTruthy();
+      rerender(
+        <ActionMessage comment={retryMessage({ metadata: transientRetryMetadata(2, 10) })} />,
+      );
+      expect(screen.getByText(/retrying in 0:10/i)).toBeTruthy();
+      expect(screen.getByText(/attempt 2 of 5/i)).toBeTruthy();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useEffect, memo, type ReactElement } from "react";
+import { useState, useCallback, useEffect, useMemo, memo, type ReactElement } from "react";
 import { Trans, useTranslation } from "react-i18next";
 import {
   IconAlertTriangle,
@@ -217,8 +217,9 @@ function transientRetryContext(
 function TransientRetryNotice({ metadata, taskId }: { metadata: ActionMeta; taskId?: string }) {
   const { t } = useTranslation();
   const retryAt = parseRetryAt(metadata.retry_at);
-  const [fallbackDeadline] = useState(
+  const fallbackDeadline = useMemo(
     () => Date.now() + Math.max(0, metadata.retry_in_seconds ?? 0) * 1_000,
+    [metadata.attempt, metadata.retry_in_seconds],
   );
   const deadline = retryAt ?? fallbackDeadline;
   const [now, setNow] = useState(() => Date.now());

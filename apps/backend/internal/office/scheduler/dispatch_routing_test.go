@@ -265,6 +265,37 @@ func TestHandlePostStartFailure_UsesValidatedResetDeadline(t *testing.T) {
 	}
 }
 
+func TestHandlePostStartFailure_ClampsElapsedResetDeadline(t *testing.T) {
+	repo := newTestRepoSched(t)
+	seedRoutingConfig(t, repo, []routing.ProviderID{"claude-acp", "codex-acp"})
+	ss := buildScheduler(t, repo, newFakeTaskStarter())
+	run := seedInFlightRoute(t, repo, "t-elapsed-reset-hint")
+	now := time.Now().UTC()
+	resetAt := now.Add(-time.Second)
+
+	handled, err := ss.HandlePostStartFailure(context.Background(), run, makeAgent(),
+		"Selected model is at capacity", &streams.ProviderError{
+			Source:     streams.ProviderErrorSourceCodexACP,
+			ProviderID: "claude-acp",
+			Message:    "Selected model is at capacity",
+			OccurredAt: now,
+			ResetAt:    &resetAt,
+		})
+	if err != nil || !handled {
+		t.Fatalf("handled=%v err=%v, want handled short retry", handled, err)
+	}
+	gotRun, err := repo.GetRunByID(context.Background(), run.ID)
+	if err != nil {
+		t.Fatalf("get run: %v", err)
+	}
+	if gotRun.ScheduledRetryAt == nil {
+		t.Fatal("scheduled retry is nil")
+	}
+	if delay := gotRun.ScheduledRetryAt.Sub(now); delay < 4*time.Second {
+		t.Fatalf("scheduled delay = %v, want the five-second minimum cooldown", delay)
+	}
+}
+
 func TestHandlePostStartFailure_FallsBackAfterShortRetryBudget(t *testing.T) {
 	repo := newTestRepoSched(t)
 	seedRoutingConfig(t, repo, []routing.ProviderID{"claude-acp", "codex-acp"})
@@ -397,6 +428,46 @@ func TestDispatch_RoutingDisabledLaunchesFirstTierProfileOnly(t *testing.T) {
 	}
 	if !launched || parked || starter.callCount() != 1 {
 		t.Fatalf("launched=%v parked=%v calls=%d", launched, parked, starter.callCount())
+	}
+	if got := starter.lastCall().route.ExecutionProfileID; got != "claude-acp-profile" {
+		t.Fatalf("execution profile = %q, want claude-acp-profile", got)
+	}
+}
+
+func TestDispatch_RoutingDisabledIgnoresDegradedHealth(t *testing.T) {
+	repo := newTestRepoSched(t)
+	seedRoutingConfig(t, repo, []routing.ProviderID{"claude-acp", "codex-acp"})
+	cfg, err := repo.GetWorkspaceRouting(context.Background(), testWorkspaceID)
+	if err != nil {
+		t.Fatalf("get routing: %v", err)
+	}
+	cfg.Enabled = false
+	if err := repo.UpsertWorkspaceRouting(context.Background(), testWorkspaceID, cfg); err != nil {
+		t.Fatalf("disable routing: %v", err)
+	}
+	retryAt := time.Now().UTC().Add(time.Hour)
+	if err := repo.MarkProviderDegraded(context.Background(), officemodels.ProviderHealth{
+		WorkspaceID: testWorkspaceID,
+		ProviderID:  "claude-acp",
+		Scope:       officesqlite.HealthScopeProvider,
+		State:       officesqlite.HealthStateDegraded,
+		ErrorCode:   "quota_limited",
+		RetryAt:     &retryAt,
+	}); err != nil {
+		t.Fatalf("seed degraded health: %v", err)
+	}
+
+	starter := newFakeTaskStarter()
+	ss := buildScheduler(t, repo, starter)
+	run := seedRun(t, repo, `{"task_id":"t-1"}`)
+	launched, parked, err := ss.DispatchWithRouting(
+		context.Background(), run, makeAgent(), scheduler.LaunchContext{},
+	)
+	if err != nil {
+		t.Fatalf("dispatch: %v", err)
+	}
+	if !launched || parked || starter.callCount() != 1 {
+		t.Fatalf("launched=%v parked=%v calls=%d, want first profile launch", launched, parked, starter.callCount())
 	}
 	if got := starter.lastCall().route.ExecutionProfileID; got != "claude-acp-profile" {
 		t.Fatalf("execution profile = %q, want claude-acp-profile", got)

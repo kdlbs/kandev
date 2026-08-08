@@ -72,16 +72,17 @@ The initial policies are:
 | `network_unavailable`, `provider_overloaded`, `provider_unavailable`, `model_capacity` | Short same-profile retry when high-confidence and replay-safe | Retry the same route for a few seconds; only degrade and fall through after the short budget is exhausted |
 | `rate_limited` | Retry only a confirmed short throttle; honor a bounded retry hint | Retry the same route when a validated wait is at most 60 seconds; otherwise treat it as a long-horizon route block and fall through |
 | `quota_limited` | Show reset/remediation information; no automatic prompt replay | Fall through to the next configured provider; if all routes are exhausted, park until a validated reset or the Office quota backoff |
-| `auth_required`, `missing_credentials`, `subscription_required`, `billing_required`, `model_unavailable`, `provider_not_configured` | User action; no automatic retry or route change | Mark the failed route user-action-required and try another configured route; if none works, block and surface inbox/settings remediation without a timed retry for that route |
+| `auth_required`, `missing_credentials`, `subscription_required`, `model_unavailable`, `provider_not_configured` | User action; no automatic retry or route change | Mark the failed route user-action-required and try another configured route; if none works, block and surface inbox/settings remediation without a timed retry for that route |
 | `permission_denied_by_user`, `task_error`, `repo_error` | Existing terminal recovery | Do not treat as provider unavailability or change routes |
 | `unknown_provider_error`, `agent_runtime_error`, unclassified evidence | Manual recovery | Pre-start fallback may be allowed conservatively; post-start ambiguous failures do not change providers |
 
 `quota_limited` means a renewable account or plan allowance has been exhausted.
 A short provider throttle is `rate_limited`, while an inactive or insufficient
-subscription is `subscription_required`. Classifiers must not collapse these
-causes merely because they may share an HTTP status. Kanban only displays a
-quota reset hint; Office may use a validated reset hint to wake an unattended
-parked run.
+subscription or billing state is `subscription_required`. Classifiers must not
+collapse these causes merely because they may share an HTTP status. A separate
+`billing_required` code is intentionally not part of the initial taxonomy;
+Kanban only displays a quota reset hint, and Office may use a validated reset
+hint to wake an unattended parked run.
 
 Only high-confidence evidence correlated with the active foreground prompt can
 authorize Kanban automatic retry or Office post-start fallback. Unknown,

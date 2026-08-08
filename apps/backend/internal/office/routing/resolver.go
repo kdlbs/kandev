@@ -198,7 +198,7 @@ func (r *Resolver) Resolve(
 		return nil, err
 	}
 	if !cfg.Enabled {
-		if _, err := r.evaluateProvider(ctx, workspaceID, res, cfg, idx, order[0], tier, r.clock()); err != nil {
+		if _, err := r.evaluateProvider(ctx, workspaceID, res, cfg, idx, order[0], tier, r.clock(), true); err != nil {
 			return nil, err
 		}
 		if len(res.Candidates) == 0 {
@@ -212,7 +212,7 @@ func (r *Resolver) Resolve(
 		if _, skip := excluded[pid]; skip {
 			continue
 		}
-		shortRetry, err := r.evaluateProvider(ctx, workspaceID, res, cfg, idx, pid, tier, now)
+		shortRetry, err := r.evaluateProvider(ctx, workspaceID, res, cfg, idx, pid, tier, now, false)
 		if err != nil {
 			return nil, err
 		}
@@ -236,7 +236,7 @@ func (r *Resolver) Resolve(
 func (r *Resolver) evaluateProvider(
 	ctx context.Context, workspaceID string,
 	res *Resolution, cfg *WorkspaceConfig, idx healthIndex,
-	pid ProviderID, tier Tier, now time.Time,
+	pid ProviderID, tier Tier, now time.Time, shortRetryOnly bool,
 ) (bool, error) {
 	prof, ok := cfg.ProviderProfiles[pid]
 	model := prof.TierMap.Model(tier)
@@ -256,9 +256,11 @@ func (r *Resolver) evaluateProvider(
 		model = resolvedModel
 	}
 	if hit, found := lookupHealth(idx, pid, tier, model); found {
-		if sc, skip := classifyHealthHit(pid, hit, now); skip {
-			res.SkippedDegraded = append(res.SkippedDegraded, sc)
-			return sc.State == healthStateShortRetry, nil
+		if !shortRetryOnly || hit.State == models.ProviderHealthState(healthStateShortRetry) {
+			if sc, skip := classifyHealthHit(pid, hit, now); skip {
+				res.SkippedDegraded = append(res.SkippedDegraded, sc)
+				return sc.State == healthStateShortRetry, nil
+			}
 		}
 	}
 	res.Candidates = append(res.Candidates, Candidate{

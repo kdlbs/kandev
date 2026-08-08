@@ -217,8 +217,15 @@ office_run_route_attempts
 ```
 
 A short transient attempt uses `retry_scheduled` and does not join the current
-route cycle's provider exclusion set. The final exhausted attempt changes to the
-existing provider-unavailable failure outcome before fallback resolution.
+route cycle's provider exclusion set. Its durable owner is the run identified
+by `run_id` plus `runs.current_route_attempt_seq`; its ordinal is the count of
+`retry_scheduled` rows after `route_cycle_baseline_seq`. The affected health
+scope and cooldown deadline live in `office_provider_health.scope`,
+`scope_value`, and `retry_at`, while `runs.scheduled_retry_at` mirrors that
+deadline. On restart, the latest attempt marker preserves the short-retry
+cycle; a resolver seeing a live `short_retry` row holds the route and does not
+fall through. The final exhausted attempt changes to the existing
+provider-unavailable failure outcome before fallback resolution.
 
 ### Agent overrides (`agent_profiles.settings.routing`)
 

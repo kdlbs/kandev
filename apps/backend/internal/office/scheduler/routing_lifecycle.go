@@ -81,19 +81,23 @@ var officeShortRetryBackoff = []time.Duration{
 }
 
 func officeShortRetryDelay(attempt int, e *routingerr.Error, now time.Time) time.Duration {
-	if e != nil && e.ResetHint != nil && !e.ResetHint.Before(now) {
-		untilReset := e.ResetHint.Sub(now)
-		if untilReset <= time.Minute {
-			return untilReset
-		}
-	}
 	if attempt < 1 {
 		attempt = 1
 	}
 	if attempt > len(officeShortRetryBackoff) {
 		attempt = len(officeShortRetryBackoff)
 	}
-	return officeShortRetryBackoff[attempt-1]
+	base := officeShortRetryBackoff[attempt-1]
+	if e != nil && e.ResetHint != nil {
+		untilReset := e.ResetHint.Sub(now)
+		if untilReset > 0 && untilReset <= time.Minute {
+			if untilReset < officeShortRetryBackoff[0] {
+				return officeShortRetryBackoff[0]
+			}
+			return untilReset
+		}
+	}
+	return base
 }
 
 func (ss *SchedulerService) shortRouteRetryCount(
