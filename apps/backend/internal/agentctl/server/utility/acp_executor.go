@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"sort"
 	"strings"
 	"sync"
@@ -850,8 +851,21 @@ var allowedProbeCommands = map[string]string{
 
 // resolveProbeCommand validates and returns a hard-coded executable name for
 // the given command. Returns the empty string if the command is not allowed.
+//
+// An agent launched from an absolute path arrives here carrying the executable
+// suffix Windows requires — "mock-agent.exe" — which never matches the bare
+// allow-list key, so its probe is refused before it can spawn. The suffix is
+// stripped only on Windows: Unix executables carry no such convention, and
+// trimming an extension there would let "opencode.sh" pass as "opencode".
 func resolveProbeCommand(name string) string {
-	return allowedProbeCommands[filepath.Base(name)]
+	base := filepath.Base(name)
+	if resolved, ok := allowedProbeCommands[base]; ok {
+		return resolved
+	}
+	if runtime.GOOS == "windows" {
+		return allowedProbeCommands[strings.TrimSuffix(base, filepath.Ext(base))]
+	}
+	return ""
 }
 
 // sanitizeEnvForAgent returns a child-process environment with agent-declared
