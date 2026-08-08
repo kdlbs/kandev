@@ -90,7 +90,7 @@ help:
 	@echo "  bootstrap        Install mise tools, workspace deps, and git hooks"
 	@echo "  bootstrap-e2e    Bootstrap plus Playwright browser/system deps"
 	@echo "  dev              Run backend + web via local CLI (auto ports)"
-	@echo "  dev PORT=38430 WEB_PORT=37430   Run dev on fixed ports (beat KANDEV_BACKEND_PORT/KANDEV_PORT)"
+	@echo "  dev PORT=38430 WEB_PORT=37430   PORT beats KANDEV_BACKEND_PORT/KANDEV_PORT, WEB_PORT beats KANDEV_WEB_PORT"
 	@echo "  dev DEV_ARGS='--verbose'        Pass extra flags through to the dev CLI"
 	@echo "  dev-prod-db      Run dev mode against the production db at ~/.kandev"
 	@echo "  dev-backend      Run backend in development mode (port 38429)"
