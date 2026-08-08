@@ -154,12 +154,16 @@ type EditableWorkflowField = "name" | "description" | "prompt" | "agent_profile_
 // baseline — i.e. the user has an uncommitted local edit that a store refresh must not clobber.
 // No baseline (a workflow not yet tracked in savedWorkflowItems) is treated as "no draft" so a
 // fresh store sync can still populate it, mirroring the pre-existing name-only behavior.
+// Normalizes absent values via `?? ""` the same way `workflowIsDirty` does — otherwise a field
+// that starts undefined, gets typed into, and is cleared back to "" reads as a phantom draft:
+// it blocks a legitimate store sync while the saved baseline still advances underneath it,
+// leaving the field falsely dirty and primed to clobber the remote value on the next Save.
 function hasLocalDraft(
   displayed: Workflow,
   saved: Workflow | undefined,
   field: EditableWorkflowField,
 ): boolean {
-  return saved != null && displayed[field] !== saved[field];
+  return saved != null && (displayed[field] ?? "") !== (saved[field] ?? "");
 }
 
 type StoreWorkflowItem = {

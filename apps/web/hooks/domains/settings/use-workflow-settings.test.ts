@@ -319,6 +319,112 @@ describe("useWorkflowSettings — cross-tab field sync", () => {
   });
 });
 
+// Regression coverage: a field that starts absent (undefined), gets typed into and
+// cleared back to "" is not dirty per `isWorkflowDirty` (which normalizes via `?? ""`),
+// so a remote update landing afterward must still sync — not get stuck behind a
+// false-positive "local draft" that also silently drags the dirty-flag baseline out
+// from under the stuck display, priming the next Save to clobber the remote value.
+describe("useWorkflowSettings — cross-tab field sync (absent-vs-empty normalization)", () => {
+  it("syncs a description update after a local edit is cleared back to the absent saved value", () => {
+    const initial = [{ ...wf("wf-b1", "ws-b", NAME_B1), description: undefined }];
+    const store: StoreWorkflow = { ...STORE_B1 };
+    const { result, rerender } = renderWithStoreItem(initial, store);
+
+    act(() => {
+      result.current.setWorkflowItems((items) =>
+        items.map((item) => ({ ...item, description: "typed then cleared" })),
+      );
+    });
+    act(() => {
+      result.current.setWorkflowItems((items) =>
+        items.map((item) => ({ ...item, description: "" })),
+      );
+    });
+    expect(result.current.isWorkflowDirty(result.current.workflowItems[0])).toBe(false);
+
+    act(() => {
+      rerender({ storeItems: [{ ...store, description: NEW_DESCRIPTION }] });
+    });
+
+    expect(result.current.workflowItems[0].description).toBe(NEW_DESCRIPTION);
+    expect(result.current.savedWorkflowItems[0].description).toBe(NEW_DESCRIPTION);
+    expect(result.current.isWorkflowDirty(result.current.workflowItems[0])).toBe(false);
+  });
+
+  it("syncs a prompt update after a local edit is cleared back to the absent saved value", () => {
+    const initial = [{ ...wf("wf-b1", "ws-b", NAME_B1), prompt: undefined }];
+    const store: StoreWorkflow = { ...STORE_B1 };
+    const { result, rerender } = renderWithStoreItem(initial, store);
+
+    act(() => {
+      result.current.setWorkflowItems((items) =>
+        items.map((item) => ({ ...item, prompt: "typed then cleared" })),
+      );
+    });
+    act(() => {
+      result.current.setWorkflowItems((items) => items.map((item) => ({ ...item, prompt: "" })));
+    });
+    expect(result.current.isWorkflowDirty(result.current.workflowItems[0])).toBe(false);
+
+    act(() => {
+      rerender({ storeItems: [{ ...store, prompt: NEW_PROMPT }] });
+    });
+
+    expect(result.current.workflowItems[0].prompt).toBe(NEW_PROMPT);
+    expect(result.current.savedWorkflowItems[0].prompt).toBe(NEW_PROMPT);
+    expect(result.current.isWorkflowDirty(result.current.workflowItems[0])).toBe(false);
+  });
+
+  it("syncs an agent_profile_id update after a local edit is cleared back to the absent saved value", () => {
+    // Mirrors the UI: selecting "None" in the agent profile picker sets
+    // agent_profile_id to "" (workflow-card.tsx), not undefined.
+    const initial = [{ ...wf("wf-b1", "ws-b", NAME_B1), agent_profile_id: undefined }];
+    const store: StoreWorkflow = { ...STORE_B1 };
+    const { result, rerender } = renderWithStoreItem(initial, store);
+
+    act(() => {
+      result.current.setWorkflowItems((items) =>
+        items.map((item) => ({ ...item, agent_profile_id: agentProfileId("agent-draft") })),
+      );
+    });
+    act(() => {
+      result.current.setWorkflowItems((items) =>
+        items.map((item) => ({ ...item, agent_profile_id: agentProfileId("") })),
+      );
+    });
+    expect(result.current.isWorkflowDirty(result.current.workflowItems[0])).toBe(false);
+
+    act(() => {
+      rerender({ storeItems: [{ ...store, agent_profile_id: "agent-new" }] });
+    });
+
+    expect(result.current.workflowItems[0].agent_profile_id).toBe(agentProfileId("agent-new"));
+    expect(result.current.savedWorkflowItems[0].agent_profile_id).toBe(agentProfileId("agent-new"));
+    expect(result.current.isWorkflowDirty(result.current.workflowItems[0])).toBe(false);
+  });
+
+  it("does not sync a description update while a different field (name) has a genuine local draft", () => {
+    const initial = [{ ...wf("wf-b1", "ws-b", NAME_B1), description: OLD_DESCRIPTION }];
+    const store: StoreWorkflow = { ...STORE_B1, description: OLD_DESCRIPTION };
+    const { result, rerender } = renderWithStoreItem(initial, store);
+
+    act(() => {
+      result.current.setWorkflowItems((items) =>
+        items.map((item) => ({ ...item, name: UNSAVED_LOCAL_DRAFT })),
+      );
+    });
+    act(() => {
+      rerender({ storeItems: [{ ...store, description: NEW_DESCRIPTION }] });
+    });
+
+    // The name draft is preserved, and the unrelated description field still syncs live.
+    expect(result.current.workflowItems[0].name).toBe(UNSAVED_LOCAL_DRAFT);
+    expect(result.current.workflowItems[0].description).toBe(NEW_DESCRIPTION);
+    expect(result.current.savedWorkflowItems[0].description).toBe(NEW_DESCRIPTION);
+    expect(result.current.isWorkflowDirty(result.current.workflowItems[0])).toBe(true);
+  });
+});
+
 describe("useWorkflowSettings visibility", () => {
   it("excludes hidden system workflows from the settings list", () => {
     // System workflows like "Improve Kandev" live in the global store with
