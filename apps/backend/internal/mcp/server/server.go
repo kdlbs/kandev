@@ -509,7 +509,7 @@ func (s *Server) registerTools() {
 		s.registerConfigExecutorTools()
 		count += 5
 		s.registerConfigTaskTools()
-		count += 6
+		count += 7
 		if !s.disableAskQuestion {
 			s.registerInteractionTools()
 			count++
@@ -527,7 +527,7 @@ func (s *Server) registerTools() {
 		s.registerConfigExecutorTools()
 		count += 5
 		s.registerConfigTaskTools()
-		count += 6
+		count += 7
 		s.registerCreateTaskTool()
 		count++
 	case ModeOffice:
@@ -555,7 +555,7 @@ func (s *Server) registerTools() {
 		// a sibling to message_task_kandev) but NOT the task-document
 		// tools — those are office coordination plumbing.
 		s.registerKanbanTools()
-		count += 15
+		count += 16
 		if mcpproviders.Contains(s.mcpProviders, mcpproviders.GitHub) {
 			s.registerPRAutomationTools()
 			count += 2
@@ -755,6 +755,7 @@ If the child has no live execution, the call succeeds idempotently with status="
 		),
 		s.wrapHandler("get_task_conversation_kandev", s.getTaskConversationHandler()),
 	)
+	s.registerListTaskSessionsTool()
 }
 
 func (s *Server) registerPRAutomationTools() {
@@ -891,6 +892,26 @@ Returns {task_id, session_id, state}.`),
 			mcp.WithString("task_id", mcp.Description("Task to spawn the session on. Omit to use your current task.")),
 		),
 		s.wrapHandler("spawn_session_kandev", s.spawnSessionHandler()),
+	)
+}
+
+// registerListTaskSessionsTool registers list_task_sessions_kandev. It is the
+// discovery half of the session-addressing tools: get_task_conversation_kandev
+// and message_task_kandev both take an optional session_id and fall back to the
+// primary session, so without this a sibling session (one spawned with
+// spawn_session_kandev, or spawned by someone else) is unreachable unless the
+// caller happened to create it. Registered wherever those two tools are.
+func (s *Server) registerListTaskSessionsTool() {
+	s.mcpServer.AddTool(
+		mcp.NewTool("list_task_sessions_kandev",
+			mcp.WithDescription(`List every agent session attached to a task, most recently started first.
+
+Use it to find the session_id to pass to get_task_conversation_kandev or message_task_kandev when a task has more than one session — for example after spawn_session_kandev, or to read a sibling session on your own task. Both of those tools default to the task's primary session when session_id is omitted, so other sessions are only reachable by ID.
+
+Each entry reports session_id, name (the session tab label, if set), state, is_primary (the session the other tools default to), is_current (true for your own session), agent_profile_id, and started/updated/completed timestamps.`),
+			mcp.WithString(mcpKeyTaskID, mcp.Required(), mcp.Description("The task ID whose sessions to list")),
+		),
+		s.wrapHandler("list_task_sessions_kandev", s.listTaskSessionsHandler()),
 	)
 }
 
