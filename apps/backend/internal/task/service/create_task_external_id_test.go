@@ -1,0 +1,308 @@
+package service
+
+import (
+	"context"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/kandev/kandev/internal/task/models"
+	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
+)
+
+func seedWorkspaceAndWorkflowForCreate(t *testing.T, ctx context.Context, repo *sqliterepo.Repository, wsID string) string {
+	t.Helper()
+	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: wsID, Name: wsID}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	wfID := wsID + "-wf"
+	if err := repo.CreateWorkflow(ctx, &models.Workflow{ID: wfID, WorkspaceID: wsID, Name: "WF"}); err != nil {
+		t.Fatalf("create workflow: %v", err)
+	}
+	return wfID
+}
+
+func mustSettle(t *testing.T, ctx context.Context, repo *sqliterepo.Repository, taskID, externalID string) {
+	t.Helper()
+	ok, err := repo.SettleTaskExternalID(ctx, taskID, externalID, time.Now().UTC())
+	if err != nil {
+		t.Fatalf("settle %s/%s: %v", taskID, externalID, err)
+	}
+	if !ok {
+		t.Fatalf("settle %s/%s affected zero rows", taskID, externalID)
+	}
+}
+
+func countTasksHoldingExternalID(t *testing.T, ctx context.Context, repo *sqliterepo.Repository, workspaceID, externalID string) int {
+	t.Helper()
+	if _, err := repo.GetTaskByExternalID(ctx, workspaceID, externalID); err != nil {
+		return 0
+	}
+	return 1
+}
+
+// TestCreateTaskWithExternalIDGoldenPath covers the spec's golden path: a
+// create carrying a fresh external_id makes a new task, reports Created, and
+// leaves the row unsettled — settlement is the handler's job, not the
+// service's, per the create-sequence contract.
+func TestCreateTaskWithExternalIDGoldenPath(t *testing.T) {
+	svc, eventBus, repo := createTestService(t)
+	ctx := context.Background()
+	wfID := seedWorkspaceAndWorkflowForCreate(t, ctx, repo, "ws-golden")
+
+	result, err := svc.CreateTask(ctx, &CreateTaskRequest{
+		WorkspaceID: "ws-golden",
+		WorkflowID:  wfID,
+		Title:       "Task",
+		ExternalID:  "ext-1",
+	})
+	if err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	if result.Outcome != CreateTaskOutcomeCreated {
+		t.Fatalf("outcome = %v, want Created", result.Outcome)
+	}
+	if result.Task.ExternalID != "ext-1" {
+		t.Fatalf("task.ExternalID = %q, want ext-1", result.Task.ExternalID)
+	}
+	if result.Task.ExternalIDSettledAt != nil {
+		t.Fatal("task should be unsettled immediately after Service.CreateTask — settlement is the handler's job")
+	}
+	published := eventBus.GetPublishedEvents()
+	if len(published) != 1 || published[0].Type != "task.created" {
+		t.Fatalf("events = %#v, want exactly one task.created", published)
+	}
+}
+
+// TestCreateTaskWithExternalIDFoundSettled covers the dedupe hit on a settled
+// task: no new row, no event, deduplicated outcome, existing task returned
+// unchanged even though the retry payload differs.
+func TestCreateTaskWithExternalIDFoundSettled(t *testing.T) {
+	svc, eventBus, repo := createTestService(t)
+	ctx := context.Background()
+	wfID := seedWorkspaceAndWorkflowForCreate(t, ctx, repo, "ws-found-settled")
+
+	first, err := svc.CreateTask(ctx, &CreateTaskRequest{
+		WorkspaceID: "ws-found-settled", WorkflowID: wfID, Title: "Original", ExternalID: "ext-1",
+	})
+	if err != nil {
+		t.Fatalf("create first: %v", err)
+	}
+	mustSettle(t, ctx, repo, first.Task.ID, "ext-1")
+
+	retry, err := svc.CreateTask(ctx, &CreateTaskRequest{
+		WorkspaceID: "ws-found-settled", WorkflowID: wfID, Title: "Changed", ExternalID: "ext-1",
+	})
+	if err != nil {
+		t.Fatalf("create retry: %v", err)
+	}
+	if retry.Outcome != CreateTaskOutcomeFoundSettled {
+		t.Fatalf("outcome = %v, want FoundSettled", retry.Outcome)
+	}
+	if retry.Task.ID != first.Task.ID {
+		t.Fatalf("retry task id = %s, want %s", retry.Task.ID, first.Task.ID)
+	}
+	if retry.Task.Title != "Original" {
+		t.Fatalf("retry task title = %q, want unchanged Original", retry.Task.Title)
+	}
+	published := eventBus.GetPublishedEvents()
+	if len(published) != 1 {
+		t.Fatalf("events = %#v, want exactly one (from the first create only)", published)
+	}
+
+	if count := countTasksHoldingExternalID(t, ctx, repo, "ws-found-settled", "ext-1"); count != 1 {
+		t.Fatalf("tasks holding ext-1 = %d, want 1", count)
+	}
+}
+
+// TestCreateTaskWithExternalIDFoundUnsettled covers the diagnostic tuple:
+// deduplicated + creation_complete:false — a retry against a task whose
+// create has not finished must not create anything, and must return the
+// unsettled task unmodified, repeatedly, with no timeout-based change.
+func TestCreateTaskWithExternalIDFoundUnsettled(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	wfID := seedWorkspaceAndWorkflowForCreate(t, ctx, repo, "ws-unsettled")
+
+	first, err := svc.CreateTask(ctx, &CreateTaskRequest{
+		WorkspaceID: "ws-unsettled", WorkflowID: wfID, Title: "Task", ExternalID: "ext-1",
+	})
+	if err != nil {
+		t.Fatalf("create first: %v", err)
+	}
+
+	for i := 0; i < 3; i++ {
+		retry, err := svc.CreateTask(ctx, &CreateTaskRequest{
+			WorkspaceID: "ws-unsettled", WorkflowID: wfID, Title: "Task", ExternalID: "ext-1",
+		})
+		if err != nil {
+			t.Fatalf("retry %d: %v", i, err)
+		}
+		if retry.Outcome != CreateTaskOutcomeFoundUnsettled {
+			t.Fatalf("retry %d outcome = %v, want FoundUnsettled", i, retry.Outcome)
+		}
+		if retry.Task.ID != first.Task.ID {
+			t.Fatalf("retry %d task id = %s, want %s", i, retry.Task.ID, first.Task.ID)
+		}
+	}
+
+	if count := countTasksHoldingExternalID(t, ctx, repo, "ws-unsettled", "ext-1"); count != 1 {
+		t.Fatalf("tasks holding ext-1 = %d, want 1 (no duplicates from repeated retries)", count)
+	}
+}
+
+// TestCreateTaskWithExternalIDLookupPrecedesIdentifierAllocation is the
+// office-task variant of the lookup-before-write ordering requirement:
+// resolving a Found outcome via the step-3 lookup must not burn a
+// task_sequence number.
+func TestCreateTaskWithExternalIDLookupPrecedesIdentifierAllocation(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	wsID := "ws-office-seq"
+	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: wsID, Name: wsID, TaskPrefix: "KAN"}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	if _, err := repo.EnsureOfficeWorkflow(ctx, wsID); err != nil {
+		t.Fatalf("ensure office workflow: %v", err)
+	}
+
+	first, err := svc.CreateTask(ctx, &CreateTaskRequest{
+		WorkspaceID: wsID, Title: "Office task", ExternalID: "ext-1",
+		Origin: models.TaskOriginAgentCreated, ProjectID: "proj-1",
+	})
+	if err != nil {
+		t.Fatalf("create first office task: %v", err)
+	}
+	if first.Task.Identifier == "" {
+		t.Fatal("first office create should have assigned an identifier")
+	}
+	mustSettle(t, ctx, repo, first.Task.ID, "ext-1")
+
+	ws, err := repo.GetWorkspace(ctx, wsID)
+	if err != nil {
+		t.Fatalf("get workspace: %v", err)
+	}
+	seqBefore := ws.TaskSequence
+
+	retry, err := svc.CreateTask(ctx, &CreateTaskRequest{
+		WorkspaceID: wsID, Title: "Office task retry", ExternalID: "ext-1",
+		Origin: models.TaskOriginAgentCreated, ProjectID: "proj-1",
+	})
+	if err != nil {
+		t.Fatalf("retry office task: %v", err)
+	}
+	if retry.Outcome != CreateTaskOutcomeFoundSettled {
+		t.Fatalf("outcome = %v, want FoundSettled", retry.Outcome)
+	}
+
+	wsAfter, err := repo.GetWorkspace(ctx, wsID)
+	if err != nil {
+		t.Fatalf("get workspace after retry: %v", err)
+	}
+	if wsAfter.TaskSequence != seqBefore {
+		t.Fatalf("task_sequence = %d, want unchanged %d — the step-3 lookup must resolve before identifier allocation", wsAfter.TaskSequence, seqBefore)
+	}
+}
+
+// TestCreateTaskWithExternalIDConcurrentRaceYieldsOneWinner exercises the
+// TOCTOU backstop: two creates for the same never-before-seen external_id,
+// racing past the step-3 lookup, must produce exactly one Created + one
+// Found outcome, no orphan row, and no 5xx-shaped error from either caller.
+func TestCreateTaskWithExternalIDConcurrentRaceYieldsOneWinner(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	wfID := seedWorkspaceAndWorkflowForCreate(t, ctx, repo, "ws-race")
+
+	var wg sync.WaitGroup
+	start := make(chan struct{})
+	results := make([]CreateTaskResult, 2)
+	errs := make([]error, 2)
+	for i := 0; i < 2; i++ {
+		i := i
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			results[i], errs[i] = svc.CreateTask(ctx, &CreateTaskRequest{
+				WorkspaceID: "ws-race", WorkflowID: wfID, Title: "Race", ExternalID: "ext-race",
+			})
+		}()
+	}
+	close(start)
+	wg.Wait()
+
+	for i, err := range errs {
+		if err != nil {
+			t.Fatalf("caller %d returned an error instead of a Found outcome: %v", i, err)
+		}
+	}
+
+	createdCount, foundCount := 0, 0
+	for _, r := range results {
+		switch r.Outcome {
+		case CreateTaskOutcomeCreated:
+			createdCount++
+		case CreateTaskOutcomeFoundSettled, CreateTaskOutcomeFoundUnsettled:
+			foundCount++
+		}
+	}
+	if createdCount != 1 || foundCount != 1 {
+		t.Fatalf("outcomes = %#v, want exactly one Created and one Found", results)
+	}
+	if results[0].Task.ID != results[1].Task.ID {
+		t.Fatalf("both callers must observe the same winning task: %s vs %s", results[0].Task.ID, results[1].Task.ID)
+	}
+
+	if count := countTasksHoldingExternalID(t, ctx, repo, "ws-race", "ext-race"); count != 1 {
+		t.Fatalf("tasks holding ext-race = %d, want exactly 1 (no orphan from the loser)", count)
+	}
+}
+
+// TestCreateTaskWithoutExternalIDUnaffected pins the "omitting external_id
+// leaves task creation behaving exactly as it does today" requirement.
+func TestCreateTaskWithoutExternalIDUnaffected(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	wfID := seedWorkspaceAndWorkflowForCreate(t, ctx, repo, "ws-no-ext")
+
+	result, err := svc.CreateTask(ctx, &CreateTaskRequest{
+		WorkspaceID: "ws-no-ext", WorkflowID: wfID, Title: "Plain task",
+	})
+	if err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	if result.Outcome != CreateTaskOutcomeCreated {
+		t.Fatalf("outcome = %v, want Created", result.Outcome)
+	}
+	if result.Task.ExternalID != "" {
+		t.Fatalf("task.ExternalID = %q, want empty", result.Task.ExternalID)
+	}
+
+	second, err := svc.CreateTask(ctx, &CreateTaskRequest{
+		WorkspaceID: "ws-no-ext", WorkflowID: wfID, Title: "Plain task",
+	})
+	if err != nil {
+		t.Fatalf("create second task: %v", err)
+	}
+	if second.Task.ID == result.Task.ID {
+		t.Fatal("two creates without external_id must never collide")
+	}
+}
+
+// TestCreateTaskWithInvalidExternalIDFailsValidation covers a malformed
+// external_id short-circuiting before any task is created.
+func TestCreateTaskWithInvalidExternalIDFailsValidation(t *testing.T) {
+	svc, eventBus, repo := createTestService(t)
+	ctx := context.Background()
+	wfID := seedWorkspaceAndWorkflowForCreate(t, ctx, repo, "ws-invalid-ext")
+
+	_, err := svc.CreateTask(ctx, &CreateTaskRequest{
+		WorkspaceID: "ws-invalid-ext", WorkflowID: wfID, Title: "Task", ExternalID: "ext-1\n",
+	})
+	if err == nil {
+		t.Fatal("expected a validation error for a control character in external_id")
+	}
+	if len(eventBus.GetPublishedEvents()) != 0 {
+		t.Fatal("no task should be created when external_id validation fails")
+	}
+}

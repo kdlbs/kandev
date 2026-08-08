@@ -428,7 +428,7 @@ func (a *reviewTaskCreatorAdapter) CreateReviewTask(ctx context.Context, req *or
 			PRNumber:       r.PRNumber,
 		})
 	}
-	return a.svc.CreateTask(ctx, &taskservice.CreateTaskRequest{
+	result, err := a.svc.CreateTask(ctx, &taskservice.CreateTaskRequest{
 		WorkspaceID:    req.WorkspaceID,
 		WorkflowID:     req.WorkflowID,
 		WorkflowStepID: req.WorkflowStepID,
@@ -439,6 +439,10 @@ func (a *reviewTaskCreatorAdapter) CreateReviewTask(ctx context.Context, req *or
 		IsEphemeral:    req.IsEphemeral,
 		Origin:         req.Origin,
 	})
+	if err != nil {
+		return nil, err
+	}
+	return result.Task, nil
 }
 
 // issueTaskCreatorAdapter adapts the task service to the orchestrator's IssueTaskCreator interface.
@@ -455,7 +459,7 @@ func (a *issueTaskCreatorAdapter) CreateIssueTask(ctx context.Context, req *orch
 			BaseBranch:   r.BaseBranch,
 		})
 	}
-	return a.svc.CreateTask(ctx, &taskservice.CreateTaskRequest{
+	result, err := a.svc.CreateTask(ctx, &taskservice.CreateTaskRequest{
 		WorkspaceID:    req.WorkspaceID,
 		WorkflowID:     req.WorkflowID,
 		WorkflowStepID: req.WorkflowStepID,
@@ -464,6 +468,10 @@ func (a *issueTaskCreatorAdapter) CreateIssueTask(ctx context.Context, req *orch
 		Metadata:       req.Metadata,
 		Repositories:   repos,
 	})
+	if err != nil {
+		return nil, err
+	}
+	return result.Task, nil
 }
 
 // jiraServiceAdapter exposes the JIRA service's issue-watch dedup methods to

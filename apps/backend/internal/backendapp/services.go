@@ -746,7 +746,7 @@ func (a pluginsUtilityAgentAdapter) GetAgentByID(ctx context.Context, id string)
 // adapter needs, so the adapter's field mapping + state validation are
 // unit-testable with a fake. *taskservice.Service satisfies it.
 type pluginTaskWriteService interface {
-	CreateTask(ctx context.Context, req *taskservice.CreateTaskRequest) (*taskmodels.Task, error)
+	CreateTask(ctx context.Context, req *taskservice.CreateTaskRequest) (taskservice.CreateTaskResult, error)
 	UpdateTask(ctx context.Context, id string, req *taskservice.UpdateTaskRequest) (*taskmodels.Task, error)
 }
 
@@ -759,7 +759,7 @@ func (a pluginsTaskWriterAdapter) CreateTask(ctx context.Context, in plugins.Tas
 	if in.Source != "" {
 		metadata = map[string]interface{}{"source": in.Source}
 	}
-	return a.svc.CreateTask(ctx, &taskservice.CreateTaskRequest{
+	result, err := a.svc.CreateTask(ctx, &taskservice.CreateTaskRequest{
 		WorkspaceID:    in.WorkspaceID,
 		WorkflowID:     in.WorkflowID,
 		WorkflowStepID: in.WorkflowStepID,
@@ -768,6 +768,10 @@ func (a pluginsTaskWriterAdapter) CreateTask(ctx context.Context, in plugins.Tas
 		ParentID:       in.ParentID,
 		Metadata:       metadata,
 	})
+	if err != nil {
+		return nil, err
+	}
+	return result.Task, nil
 }
 
 func (a pluginsTaskWriterAdapter) UpdateTask(ctx context.Context, in plugins.TaskUpdateInput) (*taskmodels.Task, error) {

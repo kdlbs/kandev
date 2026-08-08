@@ -321,11 +321,12 @@ func TestHandleAskUserQuestion_NoAnswerPausesSession(t *testing.T) {
 
 	require.NoError(t, repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Test"}))
 	require.NoError(t, repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-1", WorkspaceID: "ws-1", Name: "Board"}))
-	task, err := svc.CreateTask(ctx, &service.CreateTaskRequest{
+	taskResult, err := svc.CreateTask(ctx, &service.CreateTaskRequest{
 		WorkspaceID: "ws-1",
 		WorkflowID:  "wf-1",
 		Title:       "Task",
 	})
+	task := taskResult.Task
 	require.NoError(t, err)
 
 	sess := &models.TaskSession{

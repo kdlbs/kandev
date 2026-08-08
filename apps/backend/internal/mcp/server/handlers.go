@@ -178,6 +178,9 @@ func (s *Server) createTaskHandler() server.ToolHandlerFunc {
 			"source_task_id":      s.taskID,
 			"start_agent":         startAgent,
 		}
+		if externalID := req.GetString("external_id", ""); externalID != "" {
+			payload["external_id"] = externalID
+		}
 
 		// Add repository info. For subtasks an explicit repo overrides the
 		// parent's; if omitted the backend inherits from the parent.
