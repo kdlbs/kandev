@@ -128,11 +128,15 @@ export async function updateAgentProfileAction(
     command_prefix?: string;
     env_vars?: ProfileEnvVar[];
   },
+  force = false,
 ): Promise<AgentProfile> {
-  const raw = await agentSettingsRequest<unknown>(`${apiBaseUrl}/api/v1/agent-profiles/${id}`, {
-    method: "PATCH",
-    body: JSON.stringify(payload),
-  });
+  const raw = await agentSettingsRequest<unknown>(
+    `${apiBaseUrl}/api/v1/agent-profiles/${id}${force ? "?force=true" : ""}`,
+    {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    },
+  );
   return normalizeAgentProfile(raw);
 }
 
@@ -141,6 +145,7 @@ import type {
   AutomationReference,
   RoutingTierReference,
   WatcherReference,
+  UtilityAgentReference,
 } from "@/lib/types/agent-profile-errors";
 
 export type DeleteProfileResult =
@@ -151,9 +156,11 @@ export type DeleteProfileResult =
       watchers: WatcherReference[];
       routingTiers: RoutingTierReference[];
       automations: AutomationReference[];
+      utilityAgents: UtilityAgentReference[];
     }
   | { status: "error"; message: string };
 
+// eslint-disable-next-line complexity
 export async function deleteAgentProfileAction(
   id: string,
   force?: boolean,
@@ -175,7 +182,11 @@ export async function deleteAgentProfileAction(
     // conflict (the new self-heal path) must still pop the dialog.
     if (
       response.status === 409 &&
-      (body.active_sessions || body.watchers || body.routing_tiers || body.automations)
+      (body.active_sessions ||
+        body.watchers ||
+        body.routing_tiers ||
+        body.automations ||
+        body.utility_agents)
     ) {
       return {
         status: "conflict",
@@ -183,6 +194,7 @@ export async function deleteAgentProfileAction(
         watchers: body.watchers ?? [],
         routingTiers: body.routing_tiers ?? [],
         automations: body.automations ?? [],
+        utilityAgents: body.utility_agents ?? [],
       };
     }
     return {

@@ -20,6 +20,7 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/acpcompat"
 	acpclient "github.com/kandev/kandev/internal/agentctl/server/acp"
 	"github.com/kandev/kandev/internal/agentctl/sessionmodel"
+	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"go.uber.org/zap"
 )
@@ -80,7 +81,19 @@ func (e *ACPInferenceExecutor) Execute(ctx context.Context, req *PromptRequest) 
 	// Use the hard-coded resolvedCmd (not args[0]) so CodeQL can see that
 	// the executable name is not derived from tainted input.
 	//nolint:gosec // resolvedCmd is from a hard-coded allow-list; args[1:] are CLI flags
-	cmd := exec.CommandContext(ctx, resolvedCmd, args[1:]...)
+	cmdArgs := args[1:]
+	if len(cfg.CommandPrefix) > 0 {
+		args = append(append([]string{}, cfg.CommandPrefix...), args...)
+		resolvedCmd = resolveProbeCommand(args[0])
+		if resolvedCmd == "" {
+			return &PromptResponse{Success: false, Error: fmt.Sprintf("command prefix %q is not an allowed ACP command", args[0])}, nil
+		}
+		cmdArgs = args[1:]
+	}
+	cmdArgs = append(cmdArgs, cfg.CLIFlags...)
+	// Use the hard-coded resolvedCmd (not args[0]) so CodeQL can see that
+	// the executable name is not derived from tainted input.
+	cmd := exec.CommandContext(ctx, resolvedCmd, cmdArgs...)
 	cmd.Dir = workDir
 	cmd.Env = sanitizeEnvForAgent(req.InferenceConfig)
 	configureACPCommand(cmd, e.logger)
@@ -117,7 +130,7 @@ func (e *ACPInferenceExecutor) Execute(ctx context.Context, req *PromptRequest) 
 		e.logger.Warn("ACP inference: dropping unsupported MCP server transport",
 			zap.String("name", name))
 	}
-	response, err := e.executeACPSession(ctx, stdin, stdout, workDir, req.AgentID, req.Prompt, model, modelConfigOptions, req.Mode, mcpServers)
+	response, err := e.executeACPSession(ctx, stdin, stdout, workDir, req.AgentID, req.Prompt, model, modelConfigOptions, req.Mode, req.AutoApprovePermissions, mcpServers)
 	if err != nil {
 		e.logger.Error("ACP inference failed",
 			zap.String("agent_id", req.AgentID),
@@ -153,6 +166,7 @@ func (e *ACPInferenceExecutor) executeACPSession(
 	model string,
 	modelConfigOptions map[string]string,
 	mode string,
+	autoApprovePermissions *bool,
 	mcpServers []acp.McpServer,
 ) (string, error) {
 	// Collect response text from updates
@@ -172,11 +186,17 @@ func (e *ACPInferenceExecutor) executeACPSession(
 	}
 
 	// Create ACP client
-	client := acpclient.NewClient(
+	clientOptions := []acpclient.ClientOption{
 		acpclient.WithLogger(e.logger),
 		acpclient.WithWorkspaceRoot(workDir),
 		acpclient.WithUpdateHandler(updateHandler),
-	)
+	}
+	if autoApprovePermissions != nil && !*autoApprovePermissions {
+		clientOptions = append(clientOptions, acpclient.WithPermissionHandler(func(context.Context, *agentctltypes.PermissionRequest) (*agentctltypes.PermissionResponse, error) {
+			return &agentctltypes.PermissionResponse{Cancelled: true}, nil
+		}))
+	}
+	client := acpclient.NewClient(clientOptions...)
 
 	// Create ACP connection
 	conn := acp.NewClientSideConnection(client, stdin, stdout)

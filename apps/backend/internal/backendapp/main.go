@@ -51,6 +51,7 @@ import (
 	runtimeskill "github.com/kandev/kandev/internal/agent/runtime/lifecycle/skill"
 	agentsettingscontroller "github.com/kandev/kandev/internal/agent/settings/controller"
 	settingsstore "github.com/kandev/kandev/internal/agent/settings/store"
+	"github.com/kandev/kandev/internal/utility/profilebinding"
 
 	// WebSocket gateway
 	gateways "github.com/kandev/kandev/internal/gateway/websocket"
@@ -59,6 +60,7 @@ import (
 	notificationcontroller "github.com/kandev/kandev/internal/notifications/controller"
 	promptcontroller "github.com/kandev/kandev/internal/prompts/controller"
 	usercontroller "github.com/kandev/kandev/internal/user/controller"
+	userservice "github.com/kandev/kandev/internal/user/service"
 	userstore "github.com/kandev/kandev/internal/user/store"
 	utilitycontroller "github.com/kandev/kandev/internal/utility/controller"
 
@@ -520,6 +522,7 @@ func startAgentInfrastructure(
 		github: services.GitHub,
 		log:    log,
 	})
+	agentSettingsController.SetUtilityDependencyChecker(&utilityDepsAdapter{svc: services.Utility, userSvc: services.User})
 	agentSettingsController.SetRoutingTierDependencyChecker(&routingTierDepsAdapter{
 		repo: repos.Office,
 	})
@@ -715,6 +718,10 @@ func startGatewayAndServe(
 		agentctlclient.WithControlAuthToken(cfg.Agent.StandaloneAuthToken))
 	hostUtilityMgr := hostutility.NewManager(agentRegistry, cfg.Agent.StandaloneHost, cfg.Agent.StandalonePort, hostControlClient, log)
 	hostUtilityMgr.SetAuthToken(cfg.Agent.StandaloneAuthToken)
+	hostUtilityMgr.SetProfileResolver(profilebinding.New(repos.AgentSettings, func(agentID string) bool {
+		_, ok := agentRegistry.GetInferenceAgent(agentID)
+		return ok
+	}))
 	// Wire the host utility manager into the settings controller so
 	// /api/v1/agent-models/:agentName reads live capability data.
 	agentSettingsController.SetHostUtility(hostUtilityMgr)
@@ -729,6 +736,12 @@ func startGatewayAndServe(
 		if err := profileReconciler.Run(ctx); err != nil {
 			log.Warn("profile reconciler error", zap.Error(err))
 		}
+		if migrated, err := services.Utility.MigrateLegacyBindings(ctx); err != nil {
+			log.Warn("utility profile migration failed", zap.Error(err))
+		} else if migrated > 0 {
+			log.Info("migrated utility profile bindings", zap.Int("updated", migrated))
+		}
+		migrateDefaultUtilityProfile(ctx, services.User, repos.AgentSettings, agentRegistry, log)
 	}()
 	addCleanup(func() error {
 		stopCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -742,7 +755,7 @@ func startGatewayAndServe(
 	// runs them through the sessionless host-utility tier, at the first point
 	// where hostUtilityMgr is live.
 	if services.Plugins != nil && services.Utility != nil {
-		services.Plugins.SetUtilityAgent(pluginsUtilityAgentAdapter{svc: services.Utility}, pluginsHostUtilityAdapter{mgr: hostUtilityMgr})
+		services.Plugins.SetUtilityAgent(pluginsUtilityAgentAdapter{svc: services.Utility, userSvc: services.User}, pluginsHostUtilityAdapter{mgr: hostUtilityMgr})
 	}
 
 	if err := orchestratorSvc.Start(ctx); err != nil {
@@ -1883,4 +1896,32 @@ func awaitShutdown(
 		zap.String("signal", sig.String()),
 		zap.Int("pid", os.Getpid()))
 	runGracefulShutdown(server, listeners, scheduling, orchestratorSvc, lifecycleMgr, runCleanups, log)
+}
+
+// migrateDefaultUtilityProfile upgrades the portable user's legacy default
+// pair only when it identifies one eligible profile. Ambiguous and missing
+// values remain untouched for a later retry or user repair.
+func migrateDefaultUtilityProfile(
+	ctx context.Context,
+	userSvc *userservice.Service,
+	profiles settingsstore.Repository,
+	agentRegistry *registry.Registry,
+	log *logger.Logger,
+) {
+	settings, err := userSvc.GetUserSettings(ctx)
+	if err != nil || settings.DefaultUtilityAgentProfileID != "" || (settings.DefaultUtilityAgentID == "" && settings.DefaultUtilityModel == "") {
+		return
+	}
+	resolver := profilebinding.New(profiles, func(agentID string) bool {
+		_, ok := agentRegistry.GetInferenceAgent(agentID)
+		return ok
+	})
+	profile, err := resolver.MatchLegacy(ctx, settings.DefaultUtilityAgentID, settings.DefaultUtilityModel)
+	if err != nil || profile == nil {
+		return
+	}
+	profileID := profile.ID
+	if _, err := userSvc.UpdateUserSettings(ctx, &userservice.UpdateUserSettingsRequest{DefaultUtilityAgentProfileID: &profileID}); err != nil {
+		log.Warn("failed to persist migrated default utility profile", zap.Error(err))
+	}
 }

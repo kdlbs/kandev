@@ -335,15 +335,14 @@ func TestPluginHostData_Wire_InvokeUtilityAgent(t *testing.T) {
 
 	t.Run("Succeeds", func(t *testing.T) {
 		d := newTestDataHost(manifest.Capabilities{AgentInvoke: true})
-		d.utilAgents.agent = &UtilityAgent{Name: "summarizer", AgentID: "claude-acp", Model: "claude-opus-4-8", Enabled: true}
+		d.utilAgents.agent = &UtilityAgent{Name: "summarizer", AgentID: "claude-acp", Model: "claude-opus-4-8", AgentProfileID: "profile-42", ProfileBindingState: "explicit", Enabled: true}
 		d.utilRun.text = "summary text"
 		host := dialPluginHostOverWire(t, d.host)
 
 		got, err := host.InvokeUtilityAgent(context.Background(), "summarize")
 		require.NoError(t, err)
 		require.Equal(t, "summary text", got)
-		require.Equal(t, "claude-acp", d.utilRun.gotAgentType)
-		require.Equal(t, "claude-opus-4-8", d.utilRun.gotModel)
+		require.Equal(t, "profile-42", d.utilRun.gotProfileID)
 	})
 }
 

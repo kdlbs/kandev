@@ -8,6 +8,8 @@ export type UtilityAgent = {
   prompt: string;
   agent_id: string;
   model: string;
+  agent_profile_id?: string;
+  profile_binding_state?: "inherit" | "explicit" | "unconfigured" | string;
   builtin: boolean;
   enabled: boolean;
   created_at: string;
@@ -21,6 +23,7 @@ export type UtilityAgentCall = {
   resolved_prompt: string;
   response: string;
   model: string;
+  agent_profile_id?: string;
   prompt_tokens: number;
   response_tokens: number;
   duration_ms: number;
