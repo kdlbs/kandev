@@ -40,12 +40,21 @@ transition, a two-phase coordinator, and isolation of unsettled rows. It was
 reviewed and rejected as unbuildable. This spec does not reintroduce it, and
 therefore does not make the guarantee it would have bought.
 
-What callers get instead is an honest flag. `creation_complete: false` means
-*"this identity is held by a task whose creation had not finished when we
-looked; it may still be in progress."* It is diagnostic, not actionable. The
-safe response to it is to proceed with the returned task ID, or to escalate to a
-human — never to release the identity and create again. See *The one unsafe
-thing a caller can do*.
+What callers get instead is an honest flag.
+
+**`creation_complete` has exactly one meaning, in every outcome and on every
+surface: the creation of the returned task completed its required synchronous
+work.** Nothing more. It says nothing about whether an agent is running, and
+nothing about whether any process is currently alive.
+
+The diagnostic case is the specific tuple **`deduplicated: true` +
+`creation_complete: false`** — another create claimed this identity and had not
+finished when we looked; it may still be in progress. That combination is
+diagnostic, not actionable. The safe response is to proceed with the returned
+task ID, or to escalate to a human — never to release the identity and create
+again. See *The one unsafe thing a caller can do*.
+
+No other tuple carries the "may still be running" caveat.
 
 ## What
 
@@ -53,24 +62,30 @@ thing a caller can do*.
   the entity in the caller's own system (a Jira key, a webhook delivery ID, a
   UUID the caller minted before its first attempt).
 - An external ID SHALL be held by at most one task per workspace.
-- A create carrying an external ID SHALL have exactly one of three outcomes, and
+- A create carrying an external ID SHALL have exactly one of four outcomes, and
   the response SHALL make which one unambiguous:
-  1. **Created** — no task held that identity; a new task was created.
+  1. **Created** — no task held that identity; a new task was created and holds
+     it.
   2. **Found, settled** — a task already holds it and its creation finished.
   3. **Found, unsettled** — a task already holds it and its creation had not
      finished at observation time. It may still be running.
+  4. **Created, identity lost** — this request created the task and finished its
+     work, but another actor released the identity in the interim, so the task
+     survives holding no external ID. Rare; see *Settlement*.
 - Both **Found** outcomes SHALL have **no side effects**: no new task row, no
   new agent session, no agent launch, no repository attachment, no attachment
   claim, no workspace-policy write, no branch creation, and no `task.created`
   event.
-  - **One bounded exception, and only on the concurrent-loser path.** When a
-    Found outcome is resolved by the step-3 lookup — which is every ordinary
-    retry — nothing whatsoever is consumed. When it is instead resolved by the
-    unique-index backstop, the loser may already have allocated an office
-    task-identifier sequence number before reaching the insert, and that number
-    is not returned to the pool. This is the single permitted side effect; see
-    *Failure modes*. It leaves a gap in the office identifier sequence, which is
-    not required to be contiguous, and no other durable change.
+  - **One bounded exception, on any concurrent-loser path.** When a Found
+    outcome is resolved by the step-3 lookup — which is every ordinary retry —
+    nothing whatsoever is consumed. When it is instead resolved *after* a
+    step-3 miss, the loser may already have allocated an office task-identifier
+    sequence number, and that number is not returned to the pool. This applies
+    to **both** late-resolution paths, because identifier allocation precedes
+    both of them: the unique-index backstop, and the pre-insert re-read that
+    catches an admission or capacity failure. This is the single permitted side
+    effect; it leaves a gap in the office identifier sequence, which is not
+    required to be contiguous, and no other durable change.
 - The system SHALL NOT delete, repair, resume, or reclaim an unsettled task, and
   SHALL NOT expire one. There is no duration after which behavior changes.
 - **REST** callers SHALL have a side-effect-free way to ask what holds an
@@ -320,7 +335,8 @@ and stamp a settlement onto a task that no longer holds any identity.
   dispatch asynchronous work. It then splits by what it finds:
   - **The task exists but no longer holds the identity** (it was released) →
     return outcome `CreatedIdentityLost`: `200`, `deduplicated: false`,
-    `creation_complete: false`, and `external_id` absent from the body.
+    `creation_complete: true`, and `external_id` absent from the body. The work
+    finished; only the stamp had nowhere to land.
   - **The task no longer exists** (it was deleted) → return the surface's
     existing not-found error. There is no task to describe.
 
@@ -377,18 +393,23 @@ CreateTaskResult {
 ```
 
 `CreatedIdentityLost` is the fourth outcome, and it exists solely to represent
-the settlement zero-row race: this request created the task, but by the time
-settlement ran the identity had been released by another actor, so the task
-survives holding no external ID. Without it the contract has a reachable state
-with no representation — the handler would have to either fabricate
-`Created` / `creation_complete: true` for an identity the task no longer holds,
-or invent an undocumented response. See *Settlement*.
+the settlement zero-row race: this request created the task and finished its
+required synchronous work, but by the time settlement ran the identity had been
+released by another actor, so the task survives holding no external ID. Without
+it the contract has a reachable state with no representation — the handler would
+have to claim an identity the task no longer holds, or invent an undocumented
+response. See *Settlement*.
 
 It is deliberately distinct from `FoundUnsettled`: that one means *someone
 else's* create is unfinished, while this one means *this* create finished but
 lost its identity. Callers act differently — the first says "wait or escalate",
 the second says "your task exists, but the identity you asked for is now free
 and someone may claim it".
+
+**It carries `creation_complete: true`.** The work finished; only the settlement
+stamp had nowhere to land. Reporting `false` would break the field's single
+definition and falsely suggest in-progress work. The absent `external_id` is
+what identifies this outcome.
 
 If the task was **deleted** rather than released during that window, there is no
 task to return and the request surfaces the appropriate not-found error; that is
@@ -433,9 +454,9 @@ Response additions, both **always present** on every create response:
 ```jsonc
 {
   "id": "…",
-  "external_id": "jira:PROJ-1234",  // omitted when the task has none
+  "external_id": "jira:PROJ-1234",  // omitted when the task holds none
   "deduplicated": false,            // true for both Found outcomes
-  "creation_complete": true,        // false only for FoundUnsettled
+  "creation_complete": true,        // false ONLY for Found, unsettled
   // …all other existing task DTO fields…
 }
 ```
@@ -449,20 +470,30 @@ narrow thing — that the create's required synchronous setup finished — and a
 broader name invites callers to read it as "the task is done" or "the agent is
 running". Every schema and tool description MUST carry that narrow meaning.
 
+The four success outcomes map to exhaustive, mutually exclusive tuples:
+
 | Outcome | Status | `deduplicated` | `creation_complete` | `external_id` in body |
 |---|---|---|---|---|
 | Created | `200` | `false` | `true` | present |
 | Found, settled | `200` | `true` | `true` | present |
 | Found, unsettled | `200` | `true` | `false` | present |
-| Created, identity lost | `200` | `false` | `false` | **absent** |
+| Created, identity lost | `200` | `false` | `true` | **absent** |
 | `external_id` fails validation | `400` | — | — | — |
 | Caller not authorized for `workspace_id` | `404` `{"error": "task not created"}` | — | — | — |
 
-`Created, identity lost` is distinguishable from `Found, unsettled` by
-`deduplicated`: `false` means this request created the task. It is
-distinguishable from `Created` by the absent `external_id`, which is the literal
-truth — the task no longer holds one. A caller seeing it has a valid task ID and
-should treat the external identity as unclaimed.
+Reading the tuples:
+
+- **`creation_complete: false` occurs in exactly one outcome**, `Found,
+  unsettled`, and only ever alongside `deduplicated: true`. That is the one
+  tuple meaning "another create may still be in progress."
+- **`Created, identity lost` carries `creation_complete: true`**, because this
+  create's required synchronous work genuinely did finish — only the settlement
+  stamp had nowhere to land, since the identity was released. Reporting `false`
+  would contradict the single definition of the field and would falsely imply
+  in-progress work.
+- It is distinguished from `Created` by the **absent `external_id`**, which is
+  the literal truth: the task no longer holds one. A caller seeing this tuple
+  has a valid task ID and should treat the external identity as unclaimed.
 
 All four success outcomes are `200` with the task body. There is no `409` and
 no `410`: an unsettled task is a fact to report, not a conflict to raise, and a
@@ -567,12 +598,20 @@ judged not worth its cost.
   same arguments you sent the first time."
 
 The tool result is the task as JSON carrying `external_id`, `deduplicated`, and
-`creation_complete`. The tool description MUST state that `deduplicated: true`
-means the task already existed and was not created, and that
-`creation_complete: false` additionally means its setup had not finished when
-observed and **may still be in progress** — so a calling agent neither reports
-having created something new, nor assumes the task is ready, nor attempts to
-release and recreate it.
+`creation_complete`. The tool description MUST state all three of these:
+
+1. **This creates the task when nothing holds the identity yet.** It is
+   create-if-absent, not a lookup. An agent must not call it merely to check.
+2. **`deduplicated: true`** means the task already existed and was not created,
+   so the agent must not report having created something new.
+3. **`deduplicated: true` together with `creation_complete: false`** means
+   another create claimed this identity and had not finished when observed, and
+   **may still be in progress** — so the agent must not assume the task is
+   ready, and must not release the identity and create again.
+
+Point 3 is scoped to that tuple deliberately. `creation_complete` appears as
+`false` in no other outcome, so an agent that keys off the pair cannot
+misinterpret it.
 
 The workspace is resolved before the identity is used: explicit `workspace_id`,
 else the parent's when `parent_id` is set, else auto-resolution when exactly one
@@ -692,14 +731,18 @@ create-time condition into unrelated surfaces.
   `external_id: ext-1` targeting that step, **THEN** the existing task is
   returned with `deduplicated: true` — **not** a WIP-capacity error. The step-3
   lookup resolves it before admission is consulted.
-- **GIVEN** a workflow step at its WIP limit and **no** task yet holding
-  `(W, ext-2)`, **WHEN** two creates with `external_id: ext-2` targeting that
-  step race such that both miss the step-3 lookup and the loser is rejected by
-  WIP admission **before** reaching the insert, **THEN** the loser re-reads by
+- **GIVEN** a workflow step with **exactly one remaining WIP slot** and **no**
+  task yet holding `(W, ext-2)`, **WHEN** two creates with `external_id: ext-2`
+  targeting that step race such that both miss the step-3 lookup, the winner
+  consumes the last slot and inserts, and the loser is then rejected by WIP
+  admission **before** reaching the insert, **THEN** the loser re-reads by
   `(workspace_id, external_id)`, finds the winner's task, and returns it as a
   Found outcome — **not** the capacity error. This is the admission-preemption
   guard; without it the contract's "a retry always returns the existing task"
-  promise fails exactly when the step is saturated.
+  promise fails exactly when the step has just saturated.
+  - The one-remaining-slot precondition is load-bearing: if the step were
+    already full before either request, neither could insert, so there would be
+    no winner for the loser to find and the scenario would be unsatisfiable.
 - **GIVEN** the same saturated step and **no** task holding `(W, ext-3)`,
   **WHEN** a single create with `external_id: ext-3` is rejected by WIP
   admission and the re-read still finds nothing, **THEN** the original capacity
@@ -742,12 +785,16 @@ create-time condition into unrelated surfaces.
   after the row commit but before settlement, **WHEN** settlement runs, **THEN**
   it affects **zero** rows — the `external_id` predicate no longer matches — no
   asynchronous work is dispatched, and the response is `200` with
-  `deduplicated: false`, `creation_complete: false`, and **no** `external_id`
+  `deduplicated: false`, `creation_complete: true`, and **no** `external_id`
   field, i.e. outcome `CreatedIdentityLost`.
 - **GIVEN** the same released-before-settlement race, **WHEN** the caller
-  inspects the response, **THEN** it can distinguish this from
-  `Found, unsettled` by `deduplicated: false`, and from `Created` by the absent
-  `external_id`.
+  inspects the response, **THEN** it distinguishes this from `Created` by the
+  absent `external_id`, and from `Found, unsettled` by `deduplicated: false`;
+  **AND** `creation_complete` is `true`, because this create's synchronous work
+  did finish.
+- **GIVEN** every success outcome across the whole contract, **WHEN** their
+  response tuples are enumerated, **THEN** `creation_complete: false` appears in
+  exactly one — `Found, unsettled` — and always alongside `deduplicated: true`.
 - **GIVEN** a create for `ext-1` whose **task is deleted** by another actor
   before settlement, **WHEN** settlement runs, **THEN** it affects zero rows, no
   asynchronous work is dispatched, and the response is the surface's existing
