@@ -207,22 +207,23 @@ func (r *Repository) CountActiveRunsForTasks(ctx context.Context, taskIDs []stri
 	return count, err
 }
 
+// CancelRunsForTasks cancels the queued or claimed runs belonging to the
+// given tasks and returns how many rows were actually cancelled.
+//
+// The terminal write itself lives in the runs repository's CancelRunsWhere,
+// which applies the queued/claimed guard; only the by-task-id selector stays
+// here. json_extract is SQLite-flavoured — Postgres is a supported driver
+// (internal/persistence/provider.go) and would need dialect.JSONExtract — so
+// keeping it local avoids baking dialect-specific SQL into the shared writer.
 func (r *Repository) CancelRunsForTasks(ctx context.Context, taskIDs []string, reason string) (int, error) {
 	if len(taskIDs) == 0 {
 		return 0, nil
 	}
-	query, args := taskIDInQuery(`
-		UPDATE runs
-		SET status = 'cancelled', cancel_reason = ?, finished_at = ?
-		WHERE status IN ('queued', 'claimed')
-		  AND json_extract(payload, '$.task_id') IN (%s)
-	`, taskIDs)
-	args = append([]interface{}{reason, time.Now().UTC()}, args...)
-	res, err := r.db.ExecContext(ctx, r.db.Rebind(query), args...)
+	selector, args := taskIDInQuery(`json_extract(payload, '$.task_id') IN (%s)`, taskIDs)
+	rows, err := r.CancelRunsWhere(ctx, reason, selector, args...)
 	if err != nil {
 		return 0, err
 	}
-	rows, _ := res.RowsAffected()
 	return int(rows), nil
 }
 

@@ -84,14 +84,20 @@ func (h *Handlers) handleUpdateTaskMRAutomation(ctx context.Context, msg *ws.Mes
 		return errResp, err
 	}
 	var req struct {
-		PromptOnReviewRequested *bool `json:"prompt_on_review_requested"`
-		PromptOnMerged          *bool `json:"prompt_on_merged"`
-		PromptOnClosed          *bool `json:"prompt_on_closed"`
+		AutoFixEnabled          *bool   `json:"auto_fix_enabled"`
+		AutoMergeEnabled        *bool   `json:"auto_merge_enabled"`
+		AutoFixPromptOverride   *string `json:"auto_fix_prompt_override"`
+		PromptOnReviewRequested *bool   `json:"prompt_on_review_requested"`
+		PromptOnMerged          *bool   `json:"prompt_on_merged"`
+		PromptOnClosed          *bool   `json:"prompt_on_closed"`
 	}
 	if err := json.Unmarshal(msg.Payload, &req); err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
 	}
 	patch := gitlab.TaskMRAutomationPatch{
+		AutoFixEnabled:          req.AutoFixEnabled,
+		AutoMergeEnabled:        req.AutoMergeEnabled,
+		AutoFixPromptOverride:   req.AutoFixPromptOverride,
 		PromptOnReviewRequested: req.PromptOnReviewRequested,
 		PromptOnMerged:          req.PromptOnMerged,
 		PromptOnClosed:          req.PromptOnClosed,

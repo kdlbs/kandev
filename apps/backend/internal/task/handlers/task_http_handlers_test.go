@@ -560,10 +560,11 @@ func TestHTTPCreateTaskRecordsFinalLastUsedSelections(t *testing.T) {
 	require.Equal(t, http.StatusOK, rec.Code, "body: %s", rec.Body.String())
 	require.Equal(t, 1, recorder.calls)
 	assert.Equal(t, usermodels.TaskCreateLastUsed{
-		RepositoryID:      "repo-2",
-		Branch:            "feature/current",
-		AgentProfileID:    "agent-2",
-		ExecutorProfileID: "exec-profile-2",
+		RepositoryID:           "repo-2",
+		Branch:                 "feature/current",
+		AgentProfileID:         "agent-2",
+		ExecutorProfileID:      "exec-profile-2",
+		WorkflowIDsByWorkspace: map[string]string{"ws-1": "wf-1"},
 	}, recorder.got)
 }
 
@@ -602,8 +603,9 @@ func TestHTTPCreateTaskRecordsRepositoryWithoutProfileIDs(t *testing.T) {
 	require.Equal(t, http.StatusOK, rec.Code, "body: %s", rec.Body.String())
 	require.Equal(t, 1, recorder.calls)
 	assert.Equal(t, usermodels.TaskCreateLastUsed{
-		RepositoryID: "repo-2",
-		Branch:       "main",
+		RepositoryID:           "repo-2",
+		Branch:                 "main",
+		WorkflowIDsByWorkspace: map[string]string{"ws-1": "wf-1"},
 	}, recorder.got)
 }
 
@@ -642,6 +644,21 @@ func TestBuildTaskCreateLastUsedPatchRecordsFirstWorkspaceRepository(t *testing.
 		RepositoryID:      "repo-without-branch",
 		AgentProfileID:    "agent-2",
 		ExecutorProfileID: "exec-profile-2",
+	}, patch)
+}
+
+func TestBuildTaskCreateLastUsedPatchRecordsWorkspaceWorkflow(t *testing.T) {
+	patch := buildTaskCreateLastUsedPatch(httpCreateTaskRequest{
+		WorkspaceID:       "workspace-1",
+		WorkflowID:        "workflow-1",
+		AgentProfileID:    "agent-2",
+		ExecutorProfileID: "exec-profile-2",
+	}, nil)
+
+	assert.Equal(t, usermodels.TaskCreateLastUsed{
+		WorkflowIDsByWorkspace: map[string]string{"workspace-1": "workflow-1"},
+		AgentProfileID:         "agent-2",
+		ExecutorProfileID:      "exec-profile-2",
 	}, patch)
 }
 
@@ -725,10 +742,11 @@ func TestWSCreateTaskRecordsFinalLastUsedSelections(t *testing.T) {
 	require.Equal(t, ws.MessageTypeResponse, resp.Type)
 	require.Equal(t, 1, recorder.calls)
 	assert.Equal(t, usermodels.TaskCreateLastUsed{
-		RepositoryID:      "repo-2",
-		Branch:            "feature/current",
-		AgentProfileID:    "agent-2",
-		ExecutorProfileID: "exec-profile-2",
+		RepositoryID:           "repo-2",
+		Branch:                 "feature/current",
+		AgentProfileID:         "agent-2",
+		ExecutorProfileID:      "exec-profile-2",
+		WorkflowIDsByWorkspace: map[string]string{"ws-1": "wf-1"},
 	}, recorder.got)
 }
 
@@ -797,8 +815,9 @@ func TestWSCreateTaskRecordsFreshBranchRequestBase(t *testing.T) {
 	require.Equal(t, ws.MessageTypeResponse, resp.Type)
 	require.Equal(t, 1, recorder.calls)
 	assert.Equal(t, usermodels.TaskCreateLastUsed{
-		RepositoryID: "repo-2",
-		Branch:       "main",
+		RepositoryID:           "repo-2",
+		Branch:                 "main",
+		WorkflowIDsByWorkspace: map[string]string{"ws-1": "wf-1"},
 	}, recorder.got)
 }
 

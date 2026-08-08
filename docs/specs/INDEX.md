@@ -51,6 +51,7 @@ Product-wide capabilities that are not tied to a single feature area.
 | [bounded-task-status-delivery](platform/bounded-task-status-delivery.md) | approved |
 | [diagnostic-logging](platform/diagnostic-logging.md) | approved |
 | [provider-error-recovery](platform/provider-error-recovery.md) | draft |
+| [health-endpoint-version](health-endpoint-version/spec.md) | building |
 
 ## tasks/ — task & workflow model
 
@@ -87,6 +88,7 @@ Kandev's task model: documents, execution stages, labels, blocker escalation, su
 | [runtime-state-publication-order](tasks/runtime-state-publication-order.md) | shipped |
 | [agent-generated-titles](tasks/agent-generated-titles.md) | approved |
 | [task-create-executor-default](tasks/task-create-executor-default.md) | approved |
+| [task-create-workflow-memory](tasks/task-create-workflow-memory.md) | approved |
 | [prompt-attachments](tasks/prompt-attachments.md) | draft |
 | [sidebar-task-edit](tasks/sidebar-task-edit.md) | approved |
 | [explicit-completion-signal](workflow/explicit-completion-signal/spec.md) | shipped |
@@ -101,6 +103,7 @@ Roles, governance gates, and granular permissions that apply across human users 
 |---|---|
 | [runtime-updates](agents/runtime-updates.md) | approved |
 | [profile-disable](agents/profile-disable.md) | draft |
+| [dynamic-provider-options](agents/dynamic-provider-options.md) | shipped |
 | [roles](agents/roles.md) | shipped |
 | [governance](agents/governance.md) | shipped |
 | [granular-permissions](agents/granular-permissions.md) | draft |

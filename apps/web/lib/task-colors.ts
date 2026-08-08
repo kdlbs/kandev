@@ -14,14 +14,21 @@ export const TASK_COLOR_BAR_CLASS: Record<TaskColor, string> = {
   pink: "bg-pink-500",
 };
 
-export const TASK_COLOR_LABEL: Record<TaskColor, string> = {
-  red: "Red",
-  orange: "Orange",
-  yellow: "Yellow",
-  green: "Green",
-  blue: "Blue",
-  purple: "Purple",
-  pink: "Pink",
+/**
+ * Catalog keys, not resolved labels: a `t()` at module scope would resolve once
+ * at import and freeze at the boot locale. The colour menu resolves at render.
+ *
+ * The record keys are the persisted `TaskColor` values (localStorage, and the
+ * `TASK_COLOR_BAR_CLASS` lookup) and are never translated.
+ */
+export const TASK_COLOR_LABEL_KEYS: Record<TaskColor, string> = {
+  red: "task:colorRed",
+  orange: "task:colorOrange",
+  yellow: "task:colorYellow",
+  green: "task:colorGreen",
+  blue: "task:colorBlue",
+  purple: "task:colorPurple",
+  pink: "task:colorPink",
 };
 
 export const TASK_COLORS_STORAGE_KEY = "kandev.taskColors";

@@ -52,9 +52,9 @@ Or directly via pnpm (requires pre-built binaries and web app):
 
 ```bash
 cd apps
-pnpm --filter @kandev/web e2e                              # All tests
-pnpm --filter @kandev/web e2e -- --grep "task creation"    # By name
-pnpm --filter @kandev/web e2e -- tests/create-task.spec.ts # Single file
+pnpm --filter @kandev/web e2e:raw                              # All tests
+pnpm --filter @kandev/web e2e:raw -- --grep "task creation"    # By name
+pnpm --filter @kandev/web e2e:raw -- tests/create-task.spec.ts # Single file
 pnpm --filter @kandev/web e2e:headed                       # With browser
 pnpm --filter @kandev/web e2e:ui                           # UI mode
 ```

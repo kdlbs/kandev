@@ -59,10 +59,11 @@ func TestMapUserSettingsStateIncludesPortableTaskAndSidebarSettings(t *testing.T
 				SubtaskOrderByParentID: map[string][]string{"task-1": {"task-3"}},
 			},
 			TaskCreateLastUsed: usermodels.TaskCreateLastUsed{
-				RepositoryID:      "repo-1",
-				Branch:            "main",
-				AgentProfileID:    "agent-1",
-				ExecutorProfileID: "executor-1",
+				RepositoryID:           "repo-1",
+				Branch:                 "main",
+				AgentProfileID:         "agent-1",
+				ExecutorProfileID:      "executor-1",
+				WorkflowIDsByWorkspace: map[string]string{"workspace-1": "workflow-1"},
 			},
 		},
 	}, "workspace-1")
@@ -81,6 +82,10 @@ func TestMapUserSettingsStateIncludesPortableTaskAndSidebarSettings(t *testing.T
 	lastUsed, ok := state["taskCreateLastUsed"].(map[string]any)
 	if !ok || lastUsed["repositoryId"] != "repo-1" || lastUsed["synced"] != true {
 		t.Fatalf("taskCreateLastUsed = %#v, want mapped settings", state["taskCreateLastUsed"])
+	}
+	workflowIDs, ok := lastUsed["workflowIdsByWorkspace"].(map[string]string)
+	if !ok || workflowIDs["workspace-1"] != "workflow-1" {
+		t.Fatalf("workflowIdsByWorkspace = %#v, want workspace-1 mapping", lastUsed["workflowIdsByWorkspace"])
 	}
 }
 

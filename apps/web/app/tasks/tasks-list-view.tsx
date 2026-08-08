@@ -143,12 +143,16 @@ function TaskRows({
   onDelete: (taskId: string, opts?: { cascade?: boolean }) => Promise<void>;
   onRowClick: (task: Task) => void;
 }) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const workflowMap = useMemo(() => new Map(workflows.map((w) => [w.id, w.name])), [workflows]);
   const repoMap = useMemo(() => new Map(repositories.map((r) => [r.id, r.name])), [repositories]);
+  // `groupForTask` resolves its headings from the catalog (the no-workflow /
+  // no-repository fallbacks, and now the task-state vocabulary). Without the
+  // language in the deps a section header keeps the previous locale until the
+  // task list itself changes.
   const sections = useMemo(
     () => buildTaskSections(tasks, { groupBy: tasksListGroup, workflowMap, repoMap }),
-    [repoMap, tasks, tasksListGroup, workflowMap],
+    [repoMap, tasks, tasksListGroup, workflowMap, i18n.language],
   );
 
   if (isLoading) {

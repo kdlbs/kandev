@@ -22,7 +22,7 @@ type settingsScanner struct {
 func upsertUserSettingsForTest(t *testing.T, repo *sqliteRepository, ctx context.Context, settings *models.UserSettings) {
 	t.Helper()
 	var patch *models.TaskCreateLastUsed
-	if settings.TaskCreateLastUsed != (models.TaskCreateLastUsed{}) {
+	if !reflect.DeepEqual(settings.TaskCreateLastUsed, models.TaskCreateLastUsed{}) {
 		patch = &settings.TaskCreateLastUsed
 	}
 	if _, err := repo.UpsertUserSettingsPreservingTaskCreateLastUsed(ctx, settings, patch); err != nil {
@@ -737,6 +737,52 @@ func TestSQLiteRepositoryUpdateTaskCreateLastUsedPatchesNonEmptyFields(t *testin
 	}
 }
 
+func TestSQLiteRepositoryUpdateTaskCreateLastUsedPreservesWorkflowHistory(t *testing.T) {
+	conn, err := sqlx.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	conn.SetMaxOpenConns(1)
+	t.Cleanup(func() { _ = conn.Close() })
+	repo, err := newSQLiteRepositoryWithDB(conn, conn)
+	if err != nil {
+		t.Fatalf("new repo: %v", err)
+	}
+
+	ctx := context.Background()
+	settings, err := repo.GetUserSettings(ctx, DefaultUserID)
+	if err != nil {
+		t.Fatalf("get defaults: %v", err)
+	}
+	settings.TaskCreateLastUsed = models.TaskCreateLastUsed{
+		RepositoryID: "repo-1",
+		WorkflowIDsByWorkspace: map[string]string{
+			"workspace-1": "workflow-1",
+			"workspace-2": "workflow-2",
+		},
+	}
+	upsertUserSettingsForTest(t, repo, ctx, settings)
+
+	got, err := repo.UpdateTaskCreateLastUsed(ctx, DefaultUserID, models.TaskCreateLastUsed{
+		WorkflowIDsByWorkspace: map[string]string{"workspace-3": "workflow-3"},
+	})
+	if err != nil {
+		t.Fatalf("update task-create workflow history: %v", err)
+	}
+
+	if got.TaskCreateLastUsed.RepositoryID != "repo-1" {
+		t.Fatalf("repository id should be preserved, got %q", got.TaskCreateLastUsed.RepositoryID)
+	}
+	want := map[string]string{
+		"workspace-1": "workflow-1",
+		"workspace-2": "workflow-2",
+		"workspace-3": "workflow-3",
+	}
+	if !reflect.DeepEqual(got.TaskCreateLastUsed.WorkflowIDsByWorkspace, want) {
+		t.Fatalf("workflow history = %#v, want %#v", got.TaskCreateLastUsed.WorkflowIDsByWorkspace, want)
+	}
+}
+
 func TestSQLiteRepositoryUpdateTaskCreateLastUsedClearsBranchOnRepositoryChange(t *testing.T) {
 	conn, err := sqlx.Open("sqlite3", ":memory:")
 	if err != nil {
@@ -805,6 +851,46 @@ func TestBuildPostgresTaskCreateLastUsedUpdatePatchesNonEmptyFields(t *testing.T
 	}
 	if len(args) != 4 {
 		t.Fatalf("expected one arg per task-create field, got %d", len(args))
+	}
+}
+
+func TestBuildPostgresTaskCreateLastUsedUpdatePatchesWorkflowHistoryEntries(t *testing.T) {
+	query, args := buildPostgresTaskCreateLastUsedUpdate(models.TaskCreateLastUsed{
+		WorkflowIDsByWorkspace: map[string]string{
+			"workspace-1": "workflow-1",
+			"workspace-2": "workflow-2",
+		},
+	})
+
+	for _, workspaceID := range []string{"workspace-1", "workspace-2"} {
+		path := "ARRAY['task_create_last_used','workflow_ids_by_workspace',?::text]"
+		if !strings.Contains(query, path) {
+			t.Fatalf("postgres update should patch workflow path %q for %s: %s", path, workspaceID, query)
+		}
+	}
+	if !strings.Contains(query, "{workflow_ids_by_workspace}") {
+		t.Fatalf("postgres update should initialize the workflow history object: %s", query)
+	}
+	if len(args) != 4 {
+		t.Fatalf("expected workspace and workflow args per entry, got %d", len(args))
+	}
+}
+
+func TestMakeTaskCreateLastUsedJSONSetArgsRejectsUnsafeWorkspacePathKeys(t *testing.T) {
+	args := makeTaskCreateLastUsedJSONSetArgs(models.TaskCreateLastUsed{
+		WorkflowIDsByWorkspace: map[string]string{
+			"workspace-safe":     "workflow-safe",
+			"workspace.with.dot": "workflow-dot",
+			"workspace[bracket]": "workflow-bracket",
+		},
+	})
+
+	if len(args) != 2 {
+		t.Fatalf("expected only the safe workspace entry, got %#v", args)
+	}
+	if args[0] != "$.task_create_last_used.workflow_ids_by_workspace.workspace-safe" ||
+		args[1] != "workflow-safe" {
+		t.Fatalf("unexpected safe workspace args: %#v", args)
 	}
 }
 
