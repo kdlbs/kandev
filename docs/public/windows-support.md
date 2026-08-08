@@ -202,7 +202,7 @@ winget install ezwinports.make
 
 The repository bootstrap script is Bash/package-manager oriented and does not provision a native Windows toolchain automatically. Use Git Bash or another compatible shell for Unix-oriented root recipes, install the pinned tools manually, and follow the contributor guide. `make dev` builds a `winjob.exe` helper so `Ctrl+C` can close a native development process tree.
 
-Backend Windows CI runs `go build ./...`, `go vet ./...`, and focused race tests for Windows-sensitive process and agent-launcher packages. It does not run every backend package or the full product E2E suite. The repository's broader Windows-clean target adds web and CLI unit tests:
+Backend Windows CI runs `go build ./...`, `go vet ./...`, and focused race tests for Windows-sensitive process, agent-launcher, instance-port, and websocket-tunnel packages. It does not run every backend package or the full product E2E suite. The repository's broader Windows-clean target adds web and CLI unit tests:
 
 ```powershell
 make test-windows

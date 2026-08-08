@@ -380,6 +380,15 @@ jobs:
       - name: Test windows-sensitive packages
         run: go test -race -v ./internal/agentctl/server/process/... ./internal/agent/runtime/agentctl/launcher/...
 
+      # Keep port-collision coverage targeted: the instance package contains
+      # broader stdio MCP fixture tests that depend on Unix command behavior.
+      - name: Test Windows port collision handling
+        shell: bash
+        run: |
+          go test -race -v ./internal/common/netutil -run '^TestIsAddrInUse'
+          go test -race -v ./internal/agentctl/server/instance -run '^TestAllocatePortAndListenerRetriesAddressInUse$'
+          go test -race -v ./internal/gateway/websocket -run '^TestResolveAndBindReportsOccupiedPort$'
+
       # Keep this targeted: the service package has broad subprocess coverage,
       # while this native test is the Windows path-semantics regression.
       - name: Test Windows path semantics

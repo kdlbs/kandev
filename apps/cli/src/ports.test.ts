@@ -2,7 +2,12 @@ import net from "node:net";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { ensureValidPort, pickAvailablePort, __testing } from "./ports";
+import {
+  assertPortAvailable,
+  ensureValidPort,
+  pickAvailablePortExcluding,
+  __testing,
+} from "./ports";
 
 describe("ensureValidPort", () => {
   it("returns undefined for undefined input", () => {
@@ -112,18 +117,39 @@ describe("isPortInUse", () => {
   });
 });
 
-describe("pickAvailablePort", () => {
+describe("pickAvailablePortExcluding", () => {
   it("returns the preferred port when it is free", async () => {
     const port = await findReportedAvailablePort();
-    expect(await pickAvailablePort(port)).toBe(port);
+    expect(await pickAvailablePortExcluding(port, new Set())).toBe(port);
+  });
+
+  it("skips an excluded preferred port", async () => {
+    const preferred = await findReportedAvailablePort();
+    const picked = await pickAvailablePortExcluding(preferred, new Set([preferred]), 5);
+
+    expect(picked).not.toBe(preferred);
+    expect(picked).toBeGreaterThan(0);
   });
 
   it("returns a fallback port when the preferred port is taken", async () => {
     const { server, port } = await listenOn("127.0.0.1");
     try {
-      const picked = await pickAvailablePort(port, 5);
+      const picked = await pickAvailablePortExcluding(port, new Set(), 5);
       expect(picked).not.toBe(port);
       expect(picked).toBeGreaterThan(0);
+    } finally {
+      await closeServer(server);
+    }
+  });
+});
+
+describe("assertPortAvailable", () => {
+  it("rejects an occupied explicit port with its configuration source", async () => {
+    const { server, port } = await listenOn("127.0.0.1");
+    try {
+      await expect(assertPortAvailable(port, "KANDEV_BACKEND_PORT")).rejects.toThrow(
+        `Backend port ${port} from KANDEV_BACKEND_PORT is already in use`,
+      );
     } finally {
       await closeServer(server);
     }

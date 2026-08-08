@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 
+import type { BackendPortSource } from "./args";
 import { ensureExtracted, findBundleRoot } from "./bundle";
 import {
   DEFAULT_AGENTCTL_PORT,
@@ -16,13 +17,13 @@ import { ensureAsset, getRelease } from "./github";
 import { resolveHealthTimeoutMs, waitForHealth } from "./health";
 import { getBinaryName, getPlatformDir } from "./platform";
 import { sortVersionsDesc } from "./version";
-import { pickAvailablePort } from "./ports";
 import { createProcessSupervisor } from "./process";
 import { resolveRuntime, validateBundle } from "./runtime";
 import {
   buildBackendEnv,
   createOutputRingBuffer,
   logStartupInfo,
+  pickBackendPorts,
   resolveBackendLogLevels,
 } from "./shared";
 import { launchRestartableBackend } from "./supervisor/backend";
@@ -31,6 +32,7 @@ import { openBrowser } from "./web";
 export type RunOptions = {
   runtimeVersion?: string;
   backendPort?: number;
+  backendPortSource?: BackendPortSource;
   /** Show backend info logs on stdout */
   verbose?: boolean;
   /** Retain backend debug logs in its file + agent message dumps */
@@ -143,6 +145,7 @@ async function downloadRuntimeVersion(runtimeVersion: string): Promise<string> {
 async function prepareBundleForLaunch({
   runtimeVersion,
   backendPort,
+  backendPortSource,
   verbose = false,
   debug = false,
 }: RunOptions): Promise<PreparedBundle> {
@@ -182,9 +185,10 @@ async function prepareBundleForLaunch({
     releaseTag = process.env.KANDEV_VERSION ?? `(${resolved.source})`;
   }
 
-  const actualBackendPort = backendPort ?? (await pickAvailablePort(DEFAULT_BACKEND_PORT));
-  const agentctlPort = await pickAvailablePort(DEFAULT_AGENTCTL_PORT);
-  const backendUrl = `http://localhost:${actualBackendPort}`;
+  const ports = await pickBackendPorts({ backendPort, backendPortSource });
+  const actualBackendPort = ports.backendPort;
+  const agentctlPort = ports.agentctlPort;
+  const backendUrl = ports.backendUrl;
   const levels = resolveBackendLogLevels({ verbose, debug });
   const logLevel = levels.file;
 
@@ -218,6 +222,22 @@ async function prepareBundleForLaunch({
     agentctlPort,
     dbPath,
     logLevel,
+  };
+}
+
+export function buildReleaseLaunchOptions({
+  runtimeVersion,
+  backendPort,
+  backendPortSource,
+  verbose = false,
+  debug = false,
+}: RunOptions): RunOptions {
+  return {
+    runtimeVersion,
+    backendPort,
+    backendPortSource,
+    verbose,
+    debug,
   };
 }
 
@@ -290,20 +310,30 @@ async function launchBundle(prepared: PreparedBundle): Promise<{
 export async function runRelease({
   runtimeVersion,
   backendPort,
+  backendPortSource,
   verbose = false,
   debug = false,
   headless = false,
 }: RunOptions): Promise<void> {
-  const prepared = await prepareBundleForLaunch({
-    runtimeVersion,
-    backendPort,
-    verbose,
-    debug,
-  });
+  const prepared = await prepareBundleForLaunch(
+    buildReleaseLaunchOptions({
+      runtimeVersion,
+      backendPort,
+      backendPortSource,
+      verbose,
+      debug,
+    }),
+  );
   const { backendProc, dumpBackendLogs } = await launchBundle(prepared);
   const healthTimeoutMs = resolveHealthTimeoutMs(HEALTH_TIMEOUT_MS_RELEASE);
   console.log("[kandev] starting backend...");
-  await waitForHealth(prepared.backendUrl, backendProc, healthTimeoutMs, dumpBackendLogs);
+  await waitForHealth(
+    prepared.backendUrl,
+    backendProc,
+    healthTimeoutMs,
+    prepared.backendEnv.KANDEV_DESKTOP_HEALTH_TOKEN,
+    dumpBackendLogs,
+  );
   console.log(`[kandev] backend ready at ${prepared.backendUrl}`);
 
   if (headless) {

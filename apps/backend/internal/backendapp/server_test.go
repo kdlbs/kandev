@@ -2,7 +2,11 @@ package backendapp
 
 import (
 	"net"
+	"net/http"
+	"net/http/httptest"
 	"testing"
+
+	"github.com/gin-gonic/gin"
 )
 
 func TestServerListenAddr(t *testing.T) {
@@ -32,6 +36,26 @@ func TestDesktopHealthTokenTrimsEnv(t *testing.T) {
 
 	if got := desktopHealthToken(); got != "token-value" {
 		t.Fatalf("desktopHealthToken() = %q, want token-value", got)
+	}
+}
+
+func TestHealthHandlerEchoesConfiguredToken(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	t.Setenv(desktopHealthTokenEnv, "route-health-token")
+	ready.Store(true)
+	t.Cleanup(func() { ready.Store(false) })
+
+	router := gin.New()
+	router.GET("/health", healthHandler())
+	response := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "/health", nil)
+	router.ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("health status = %d, want %d", response.Code, http.StatusOK)
+	}
+	if got := response.Header().Get(desktopHealthTokenHeader); got != "route-health-token" {
+		t.Fatalf("health token header = %q, want route-health-token", got)
 	}
 }
 

@@ -53,13 +53,14 @@ func TestWaitForHealthReturnsNilOnHealthyResponse(t *testing.T) {
 			_, _ = w.Write([]byte("starting"))
 			return
 		}
+		w.Header().Set("X-Kandev-Desktop-Health-Token", "expected")
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok"))
 	}))
 	t.Cleanup(srv.Close)
 
 	var failures int
-	err := waitForHealth(context.Background(), srv.URL, fakeChild{}, 5*time.Second, func() { failures++ })
+	err := waitForHealth(context.Background(), srv.URL, fakeChild{}, 5*time.Second, "expected", func() { failures++ })
 	if err != nil {
 		t.Fatalf("waitForHealth() = %v, want nil", err)
 	}
@@ -71,6 +72,26 @@ func TestWaitForHealthReturnsNilOnHealthyResponse(t *testing.T) {
 	}
 }
 
+func TestWaitForHealthIgnoresHealthyResponseWithoutMatchingToken(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("X-Kandev-Desktop-Health-Token", "wrong")
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(srv.Close)
+
+	err := waitForHealth(context.Background(), srv.URL, fakeChild{}, 400*time.Millisecond, "expected", nil)
+	if err == nil {
+		t.Fatal("waitForHealth() = nil, want different-process error")
+	}
+	want := "answered a health check from a different process (missing/mismatched launcher token)"
+	if !strings.Contains(err.Error(), want) {
+		t.Fatalf("error = %v, want %q", err, want)
+	}
+	if !strings.Contains(err.Error(), "runtime bundle predates v0.66.0") {
+		t.Fatalf("error = %v, want legacy runtime guidance", err)
+	}
+}
+
 func TestWaitForHealthTimesOutOnNon2xxResponse(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
@@ -78,7 +99,7 @@ func TestWaitForHealthTimesOutOnNon2xxResponse(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	var failures int
-	err := waitForHealth(context.Background(), srv.URL, fakeChild{}, 400*time.Millisecond, func() { failures++ })
+	err := waitForHealth(context.Background(), srv.URL, fakeChild{}, 400*time.Millisecond, "", func() { failures++ })
 	if err == nil {
 		t.Fatal("waitForHealth() = nil, want timeout error")
 	}
@@ -107,7 +128,7 @@ func TestWaitForHealthReturnsWhenServerHangs(t *testing.T) {
 
 	done := make(chan error, 1)
 	go func() {
-		done <- waitForHealth(context.Background(), srv.URL, fakeChild{}, 300*time.Millisecond, nil)
+		done <- waitForHealth(context.Background(), srv.URL, fakeChild{}, 300*time.Millisecond, "", nil)
 	}()
 
 	select {
@@ -140,7 +161,7 @@ func TestWaitForHealthReturnsWhenContextCanceled(t *testing.T) {
 	done := make(chan error, 1)
 	go func() {
 		// A generous timeout: only cancellation can end this wait in time.
-		done <- waitForHealth(ctx, srv.URL, fakeChild{}, time.Minute, nil)
+		done <- waitForHealth(ctx, srv.URL, fakeChild{}, time.Minute, "", nil)
 	}()
 	cancel()
 
@@ -157,6 +178,25 @@ func TestWaitForHealthReturnsWhenContextCanceled(t *testing.T) {
 	}
 }
 
+func TestWaitForHealthCallsOnFailureWhenContextCanceled(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	var failures atomic.Int32
+	err := waitForHealth(ctx, "http://127.0.0.1:1", fakeChild{}, time.Minute, "", func() {
+		failures.Add(1)
+	})
+	if err == nil {
+		t.Fatal("waitForHealth() = nil, want cancellation error")
+	}
+	if !strings.Contains(err.Error(), "canceled") {
+		t.Fatalf("error = %v, want a cancellation error", err)
+	}
+	if got := failures.Load(); got != 1 {
+		t.Fatalf("onFailure called %d times, want 1", got)
+	}
+}
+
 func TestWaitForHealthFailsFastWhenBackendExited(t *testing.T) {
 	var failures int
 	err := waitForHealth(
@@ -164,6 +204,7 @@ func TestWaitForHealthFailsFastWhenBackendExited(t *testing.T) {
 		"http://127.0.0.1:1",
 		fakeChild{exited: true, code: 3},
 		time.Minute,
+		"",
 		func() { failures++ },
 	)
 	if err == nil {
