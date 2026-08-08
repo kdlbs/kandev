@@ -522,7 +522,7 @@ func startAgentInfrastructure(
 		github: services.GitHub,
 		log:    log,
 	})
-	agentSettingsController.SetUtilityDependencyChecker(&utilityDepsAdapter{svc: services.Utility})
+	agentSettingsController.SetUtilityDependencyChecker(&utilityDepsAdapter{svc: services.Utility, userSvc: services.User})
 	agentSettingsController.SetRoutingTierDependencyChecker(&routingTierDepsAdapter{
 		repo: repos.Office,
 	})

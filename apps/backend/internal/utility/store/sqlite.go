@@ -205,7 +205,7 @@ func (r *sqliteRepository) GetAgentByID(ctx context.Context, id string) (*models
 
 func (r *sqliteRepository) GetAgentByName(ctx context.Context, name string) (*models.UtilityAgent, error) {
 	row := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
-		SELECT id, name, description, prompt, agent_id, model, builtin, enabled, created_at, updated_at
+		SELECT id, name, description, prompt, agent_id, model, agent_profile_id, profile_binding_state, builtin, enabled, created_at, updated_at
 		FROM utility_agents WHERE name = ?
 	`), name)
 	return r.scanAgentRow(row)

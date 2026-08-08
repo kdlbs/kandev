@@ -129,6 +129,7 @@ type UtilityAgentReference struct {
 
 type UtilityDependencyChecker interface {
 	ListUtilityAgentsByAgentProfile(context.Context, string) ([]UtilityAgentReference, error)
+	ClearUtilityAgentProfileBindings(context.Context, string) error
 }
 
 // WatcherReference points at one issue/PR watcher row that uses the profile

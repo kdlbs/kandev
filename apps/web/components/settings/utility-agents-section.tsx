@@ -221,9 +221,13 @@ export function UtilityAgentsSection() {
               setDialogOpen(true);
             }}
             onDelete={async (agent) => {
-              await deleteUtilityAgent(agent.id);
-              setAgents((items) => items.filter((item) => item.id !== agent.id));
-              setSavedAgents((items) => items.filter((item) => item.id !== agent.id));
+              try {
+                await deleteUtilityAgent(agent.id);
+                setAgents((items) => items.filter((item) => item.id !== agent.id));
+                setSavedAgents((items) => items.filter((item) => item.id !== agent.id));
+              } catch (error) {
+                console.error("Failed to delete utility agent", error);
+              }
             }}
           />
         </div>
