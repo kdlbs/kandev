@@ -290,85 +290,39 @@ test.describe("Utility Agents settings page", () => {
     );
   });
 
-  test("selecting an agent populates the model combobox (ACP probe)", async ({
+  test("selecting a profile configures the default utility agent", async ({
     testPage,
-    backend,
+    apiClient,
+    seedData,
   }) => {
-    // Regression guard for "I select an agent but can't select a model".
-    // The mock-agent binary advertises `mock-fast` (default) and `mock-smart`
-    // in its session/new response, so the boot-time ACP probe populates the
-    // host utility capability cache. In E2E (KANDEV_MOCK_AGENT=only) only
-    // `mock-agent` is registered in the inference-agent registry, so the
-    // Agent dropdown shows exactly one option: Mock. (Non-OK agents are no
-    // longer filtered out — see #1269 — but in this profile no other agent
-    // is registered to begin with.)
+    // Utility agents now use the same persisted agent profiles as task
+    // sessions. Keep this regression guard on the profile selector so a
+    // future change cannot reintroduce the legacy agent/model pair.
     const pageErrors: Error[] = [];
     testPage.on("pageerror", (err) => pageErrors.push(err));
 
-    // The probe runs in a goroutine at boot, so the first page load may
-    // land before the cache is populated. Poll the backend directly until
-    // mock-agent is reported with its models so the UI assertions below
-    // aren't racing the probe.
-    await expect
-      .poll(
-        async () => {
-          const resp = await testPage.request.get(
-            `${backend.baseUrl}/api/v1/utility/inference-agents`,
-          );
-          if (!resp.ok()) return 0;
-          const data = (await resp.json()) as {
-            agents: { id: string; models?: { id: string }[] | null }[];
-          };
-          const mock = data.agents.find((a) => a.id === "mock-agent");
-          return mock?.models?.length ?? 0;
-        },
-        { timeout: 15_000, intervals: [250, 500, 1000] },
-      )
-      .toBeGreaterThanOrEqual(2);
+    const { agents } = await apiClient.listAgents();
+    const profile = agents
+      .flatMap((agent) => agent.profiles ?? [])
+      .find((candidate) => candidate.id === seedData.agentProfileId);
+    if (!profile) throw new Error(`seed profile ${seedData.agentProfileId} was not found`);
+    const profileLabel = `${profile.agentDisplayName} • ${profile.name}`;
 
     await testPage.goto("/settings/utility-agents");
     await expect(
       testPage.getByRole("heading", { name: "Utility Agents", exact: true }),
     ).toBeVisible({ timeout: 15_000 });
 
-    // The default-model section has an Agent select (shadcn) and the shared
-    // model/config selector button used by profile settings.
-    const agentSelect = testPage
-      .locator('div:has(> label:text-is("Agent"))')
-      .first()
-      .getByRole("combobox");
-    const modelSelector = testPage.getByRole("button", {
-      name: "Default utility model settings",
-    });
-
-    // Model selector starts disabled until an agent is picked.
-    await expect(modelSelector).toBeDisabled();
-
-    // Open the Agent dropdown: the only healthy option in E2E is Mock.
-    // This implicitly guards the backend filter — if an auth_required or
-    // still-probing agent had leaked through, it would show up here too.
-    await agentSelect.click();
+    const profileSelect = testPage.getByTestId("utility-default-model-card").getByRole("combobox");
+    await profileSelect.click();
     const agentListbox = testPage.getByRole("listbox");
     await expect(agentListbox).toBeVisible();
-    await expect(agentListbox.getByRole("option")).toHaveCount(1);
-    await expect(agentListbox.getByRole("option", { name: "Mock", exact: true })).toBeVisible();
-    await agentListbox.getByRole("option", { name: "Mock", exact: true }).click();
+    await expect(
+      agentListbox.getByRole("option", { name: profileLabel, exact: true }),
+    ).toBeVisible();
+    await agentListbox.getByRole("option", { name: profileLabel, exact: true }).click();
     await expect(agentListbox).not.toBeVisible();
-
-    // Model selector is now enabled. Open the popover and verify both
-    // probed models are listed.
-    await expect(modelSelector).toBeEnabled();
-    await modelSelector.click();
-    const suggestions = testPage.getByLabel("Suggestions");
-    await expect(suggestions.getByText("Mock Fast", { exact: true })).toBeVisible();
-    await expect(suggestions.getByText("Mock Smart", { exact: true })).toBeVisible();
-
-    // Short model lists hide the shared selector's filter input.
-    await expect(testPage.getByPlaceholder("Filter models...")).toHaveCount(0);
-
-    // Pick Mock Smart and verify the trigger reflects the selection.
-    await suggestions.getByText("Mock Smart", { exact: true }).click();
-    await expect(modelSelector).toContainText("Mock Smart");
+    await expect(profileSelect).toContainText(profileLabel);
 
     expect(pageErrors, `uncaught errors: ${pageErrors.map((e) => e.message).join("; ")}`).toEqual(
       [],

@@ -932,6 +932,7 @@ export class ApiClient {
     keyboard_shortcuts?: Record<string, unknown>;
     default_utility_agent_id?: string;
     default_utility_model?: string;
+    default_utility_agent_profile_id?: string;
     sidebar_views?: unknown[];
     sidebar_active_view_id?: string;
     sidebar_draft?: unknown;
