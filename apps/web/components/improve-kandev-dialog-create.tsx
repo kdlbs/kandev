@@ -84,6 +84,10 @@ export function CreateModeView(props: CreateModeViewProps) {
   const forkBlockedReason = ready
     ? getImproveKandevForkBlockedReason(kind, ready.data.fork_status, ready.data.fork_message)
     : null;
+  // Tasks land in the dedicated workspace the bootstrap returned, not the
+  // user's active one. While bootstrap is in flight the active workspace is
+  // only a fallback — submit stays blocked until `ready`.
+  const effectiveWorkspaceId = ready ? ready.data.workspace_id : props.workspaceId;
 
   const handleKindChange = (next: ImproveKind) => {
     setKind(next);
@@ -95,7 +99,7 @@ export function CreateModeView(props: CreateModeViewProps) {
       open={props.open}
       onOpenChange={props.onOpenChange}
       mode="create"
-      workspaceId={props.workspaceId}
+      workspaceId={effectiveWorkspaceId}
       workflowId={workflow.workflowId}
       defaultStepId={workflow.startStep?.id ?? null}
       steps={workflow.steps.map((s) => ({ id: s.id, title: s.name, events: s.events }))}

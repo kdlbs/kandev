@@ -10,6 +10,7 @@ import { useExpandState } from "./use-expand-state";
 import { useOpenFileAtLine } from "@/hooks/use-file-editors";
 import { splitReadFiles, type ReadFileRef } from "@/lib/read-selector";
 import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 
 type ReadFileOutput = {
   content?: string;
@@ -48,9 +49,9 @@ function ReadStatusIcon({ status }: { status: string | undefined }) {
 }
 
 // getReadSummary returns the short "Read N lines" header label for the card.
-function getReadSummary(lineCount: number | undefined): string {
-  if (lineCount) return `Read ${lineCount} line${lineCount !== 1 ? "s" : ""}`;
-  return "Read";
+function getReadSummary(t: TFunction, lineCount: number | undefined): string {
+  if (lineCount) return t("task:readLines", { count: lineCount });
+  return t("task:read");
 }
 
 // formatLineRange renders the range the agent read (carried separately from
@@ -144,7 +145,7 @@ export const ToolReadMessage = memo(function ToolReadMessage({
         <div className="flex items-center gap-2 text-xs min-w-0">
           <span className="inline-flex items-center gap-1.5 shrink-0 whitespace-nowrap">
             <span className="font-mono text-xs text-muted-foreground">
-              {getReadSummary(readOutput?.line_count)}
+              {getReadSummary(t, readOutput?.line_count)}
             </span>
             {!isSuccess && <ReadStatusIcon status={status} />}
           </span>

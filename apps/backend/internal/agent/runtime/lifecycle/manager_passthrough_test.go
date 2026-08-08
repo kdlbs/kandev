@@ -1196,9 +1196,25 @@ func TestManager_VerifyPassthroughEnabled(t *testing.T) {
 				}
 			}
 
-			err := mgr.verifyPassthroughEnabled(context.Background(), "test-session", tt.profileID)
+			profile, err := mgr.verifyPassthroughEnabled(context.Background(), "test-session", tt.profileID)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("verifyPassthroughEnabled() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if tt.wantErr {
+				return
+			}
+			// The resolved profile is returned so createExecutionFromSessionInfo
+			// can hand it straight to the launch instead of resolving twice —
+			// a nil profile here would silently drop the model, permissions and
+			// cli_flags from the passthrough command.
+			if profile == nil {
+				t.Fatal("verifyPassthroughEnabled() returned a nil profile on success")
+			}
+			if profile.ProfileID != tt.profileID {
+				t.Errorf("profile.ProfileID = %q, want %q", profile.ProfileID, tt.profileID)
+			}
+			if !profile.CLIPassthrough {
+				t.Error("profile.CLIPassthrough = false, want true")
 			}
 		})
 	}

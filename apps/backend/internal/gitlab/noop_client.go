@@ -111,6 +111,14 @@ func (c *NoopClient) ListProjectBranches(context.Context, string) ([]RepoBranch,
 	return nil, ErrNoClient
 }
 
+func (c *NoopClient) ListRepoTree(context.Context, string, string, string) ([]RepoTreeEntry, error) {
+	return nil, ErrNoClient
+}
+
+func (c *NoopClient) GetRepoFileContent(context.Context, string, string, string) ([]byte, error) {
+	return nil, ErrNoClient
+}
+
 func (c *NoopClient) ListIssues(context.Context, string, string) ([]*Issue, error) {
 	return nil, ErrNoClient
 }

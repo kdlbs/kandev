@@ -8,6 +8,10 @@ import (
 	"go.uber.org/zap"
 )
 
+// statusClientClosedRequest is nginx's 499, returned by handlers when the
+// caller abandoned the request. Go defines no constant for it.
+const statusClientClosedRequest = 499
+
 // RequestLogger logs HTTP request details after the handler completes.
 func RequestLogger(log *logger.Logger, serverName string) gin.HandlerFunc {
 	return func(c *gin.Context) {
@@ -35,7 +39,9 @@ func RequestLogger(log *logger.Logger, serverName string) gin.HandlerFunc {
 			zap.Int("bytes", size),
 		}
 		switch {
-		case status >= 400 && status != 404:
+		// 404 and 499 are routine: one is a miss, the other is the caller
+		// hanging up mid-request. Neither means something went wrong here.
+		case status >= 400 && status != 404 && status != statusClientClosedRequest:
 			log.Warn("http", fields...)
 		default:
 			log.Debug("http", fields...)

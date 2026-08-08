@@ -110,6 +110,8 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 
 	// Wire workflow provider to workflow service for export/import
 	workflowSvc.SetWorkflowProvider(&workflowProviderAdapter{svc: taskSvc})
+	// Wire workspace provider for the read-only guard (Improve Kandev workspace)
+	workflowSvc.SetWorkspaceProvider(&workflowProviderAdapter{svc: taskSvc})
 
 	// Wire agent profile resolver/matcher for workflow export/import
 	workflowSvc.SetAgentProfileFuncs(
@@ -134,7 +136,7 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 	jiraSvc := initJiraService(dbPool, eventBus, repos.Secrets, log)
 	linearSvc := initLinearService(dbPool, eventBus, repos.Secrets, log)
 	sentrySvc := initSentryService(dbPool, eventBus, repos.Secrets, log)
-	workflowSyncSvc := initWorkflowSyncService(dbPool, githubSvc, workflowSvc, taskSvc, log)
+	workflowSyncSvc := initWorkflowSyncService(dbPool, githubSvc, gitlabSvc, workflowSvc, taskSvc, log)
 	pluginsSvc := initPluginsService(cfg, dbPool, eventBus, repos.Secrets, log)
 	if pluginsSvc != nil {
 		pluginsSvc.SetDataSources(taskSvc, taskSvc, workflowSvc, agentSettingsController, analyticsservice.New(repos.Analytics), taskSvc, pluginsTaskWriterAdapter{svc: taskSvc})
@@ -598,15 +600,28 @@ func initAzureDevOpsService(
 	return svc
 }
 
-// initWorkflowSyncService wires the GitHub workflow-sync service. Failures
-// are non-fatal; the service is nil when GitHub is unavailable.
-func initWorkflowSyncService(dbPool *db.Pool, githubSvc *github.Service, workflowSvc *workflowservice.Service, taskSvc *taskservice.Service, log *logger.Logger) *workflowsync.Service {
-	if githubSvc == nil {
-		log.Warn("workflow sync disabled: GitHub service unavailable")
+// initWorkflowSyncService wires the workflow-sync service. Either integration
+// may be nil; a workspace configured for the unavailable one gets an
+// actionable failure at sync time rather than the service failing to boot.
+// Failures are non-fatal; the service is nil only if the store itself fails.
+func initWorkflowSyncService(
+	dbPool *db.Pool, githubSvc *github.Service, gitlabSvc *gitlab.Service,
+	workflowSvc *workflowservice.Service, taskSvc *taskservice.Service, log *logger.Logger,
+) *workflowsync.Service {
+	if githubSvc == nil && gitlabSvc == nil {
+		log.Warn("workflow sync disabled: no GitHub or GitLab service available")
 		return nil
 	}
 	workflowSvc.SetSyncWorkflowOps(taskSvc)
-	svc, _, err := workflowsync.Provide(dbPool.Writer(), dbPool.Reader(), githubSvc, workflowSvc, log)
+	var githubClients workflowsync.GitHubClientProvider
+	if githubSvc != nil {
+		githubClients = githubSvc
+	}
+	var gitlabClients workflowsync.GitLabClientProvider
+	if gitlabSvc != nil {
+		gitlabClients = gitlabSvc
+	}
+	svc, _, err := workflowsync.Provide(dbPool.Writer(), dbPool.Reader(), githubClients, gitlabClients, workflowSvc, log)
 	if err != nil {
 		log.Warn("workflow sync service initialization failed (non-fatal)", zap.Error(err))
 		return nil
@@ -793,6 +808,11 @@ func (a *workflowProviderAdapter) ListWorkflows(ctx context.Context, workspaceID
 // GetWorkflow implements workflowservice.WorkflowProvider.
 func (a *workflowProviderAdapter) GetWorkflow(ctx context.Context, id string) (*taskmodels.Workflow, error) {
 	return a.svc.GetWorkflow(ctx, id)
+}
+
+// GetWorkspace implements workflowservice.WorkspaceProvider.
+func (a *workflowProviderAdapter) GetWorkspace(ctx context.Context, id string) (*taskmodels.Workspace, error) {
+	return a.svc.GetWorkspace(ctx, id)
 }
 
 // CreateWorkflow implements workflowservice.WorkflowProvider.

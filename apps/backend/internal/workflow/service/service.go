@@ -25,17 +25,30 @@ type WorkflowProvider interface {
 
 // Service provides workflow business logic
 type Service struct {
-	repo             *repository.Repository
-	logger           *logger.Logger
-	workflowProvider WorkflowProvider
-	resolveProfile   models.AgentProfileResolver
-	matchProfile     models.AgentProfileMatcher
-	syncOps          SyncWorkflowOps
+	repo              *repository.Repository
+	logger            *logger.Logger
+	workflowProvider  WorkflowProvider
+	workspaceProvider WorkspaceProvider
+	resolveProfile    models.AgentProfileResolver
+	matchProfile      models.AgentProfileMatcher
+	syncOps           SyncWorkflowOps
+}
+
+// WorkspaceProvider resolves a workspace by ID so the read-only guard can tell
+// whether a workflow lives in the dedicated Improve Kandev workspace.
+type WorkspaceProvider interface {
+	GetWorkspace(ctx context.Context, id string) (*taskmodels.Workspace, error)
 }
 
 // SetWorkflowProvider wires the workflow provider (set during service init to break circular deps).
 func (s *Service) SetWorkflowProvider(wp WorkflowProvider) {
 	s.workflowProvider = wp
+}
+
+// SetWorkspaceProvider wires the workspace provider used by the read-only guard
+// (set during service init to break circular deps).
+func (s *Service) SetWorkspaceProvider(wp WorkspaceProvider) {
+	s.workspaceProvider = wp
 }
 
 // SetAgentProfileFuncs wires the agent profile resolver and matcher for export/import.

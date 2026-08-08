@@ -7,9 +7,8 @@ import { CardContent } from "@kandev/ui/card";
 import { useToast } from "@/components/toast-provider";
 import { SettingsSection } from "@/components/settings/settings-section";
 import { SettingsCard } from "@/components/settings/settings-card";
-import { useSentryEnabled } from "@/hooks/domains/sentry/use-sentry-enabled";
+import { SentryEnabledControl } from "@/components/sentry/sentry-enabled-control";
 import { WorkspaceScopedSection } from "@/components/integrations/workspace-scoped-section";
-import { DraftedIntegrationEnabledControl } from "@/components/integrations/drafted-integration-enabled-control";
 import { INTEGRATION_STATUS_REFRESH_MS } from "@/hooks/domains/integrations/use-integration-availability";
 import {
   deleteSentryInstance,
@@ -126,11 +125,6 @@ function InstanceList({
   );
 }
 
-function EnabledPill() {
-  const { enabled, setEnabled } = useSentryEnabled();
-  return <DraftedIntegrationEnabledControl id="sentry" enabled={enabled} persist={setEnabled} />;
-}
-
 // useDeleteInstance confirms, deletes, and reports the outcome. Split out of
 // SentryConnectionSection so that component stays under the file's
 // max-lines-per-function limit.
@@ -166,6 +160,7 @@ function useDeleteInstance(workspaceId: string, reload: () => Promise<void>) {
   );
 }
 
+/** Sentry connection card: title/enable toggle plus the list of configured Sentry instances. */
 export function SentryConnectionSection({ workspaceId }: { workspaceId: string }) {
   const { t } = useTranslation();
   const { instances, loading, reload } = useInstanceList(workspaceId);
@@ -194,7 +189,7 @@ export function SentryConnectionSection({ workspaceId }: { workspaceId: string }
       icon={<IconBrandSentry className="h-5 w-5" />}
       title={t("sentry:sentryIntegration")}
       description={t("sentry:sentryIntegrationDescription")}
-      action={<EnabledPill />}
+      action={<SentryEnabledControl />}
     >
       <SettingsCard isDirty={formDirty}>
         <CardContent className="space-y-3 pt-6">
@@ -255,6 +250,7 @@ type SentryIntegrationPageProps = {
   workspaceId?: string;
 };
 
+/** Sentry's own settings page: connection card plus issue-watchers section. */
 export function SentryIntegrationPage({ workspaceId }: SentryIntegrationPageProps = {}) {
   return (
     <div className="space-y-8">

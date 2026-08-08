@@ -222,6 +222,22 @@ type RepoBranch struct {
 	Name string `json:"name"`
 }
 
+// Tree entry types as returned by GitLab's repository/tree endpoint.
+const (
+	TreeEntryTypeBlob = "blob"
+	TreeEntryTypeTree = "tree"
+)
+
+// RepoTreeEntry is one entry in a GitLab repository directory listing.
+// Type is TreeEntryTypeBlob for files and TreeEntryTypeTree for directories
+// (GitHub's equivalent endpoint calls these "file" and "dir").
+type RepoTreeEntry struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+	Type string `json:"type"`
+	Path string `json:"path"`
+}
+
 // Status represents GitLab connection status surfaced to the frontend.
 type Status struct {
 	Authenticated   bool             `json:"authenticated"`

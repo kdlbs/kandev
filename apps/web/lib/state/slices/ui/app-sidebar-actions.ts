@@ -29,6 +29,7 @@ export function loadAppSidebarState(): AppSidebarState {
     width: getStoredAppSidebarWidth(APP_SIDEBAR_EXPANDED_WIDTH),
     // Transient — always starts off, never read from / written to storage.
     settingsMode: false,
+    improveDialogOpen: false,
   };
 }
 
@@ -67,6 +68,10 @@ export function buildAppSidebarActions(set: ImmerSet) {
           draft.appSidebar.collapsed = false;
           setStoredAppSidebarCollapsed(false);
         }
+      }),
+    setImproveDialogOpen: (open: boolean) =>
+      set((draft) => {
+        draft.appSidebar.improveDialogOpen = open;
       }),
     toggleAppSidebarSettingsMode: () =>
       set((draft) => {

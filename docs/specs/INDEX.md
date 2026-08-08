@@ -117,7 +117,9 @@ Per-workspace credentials and triage triggers for external services.
 | [provider-aware-review-automation](integrations/provider-aware-review-automation.md) | approved |
 | [github-authentication](integrations/github-authentication.md) | draft |
 | [gitlab-integration](gitlab-integration/spec.md) | shipped |
+| [gitlab-workflow-sync](gitlab-workflow-sync/spec.md) | shipped |
 | [jira-status-filter](jira-status-filter/spec.md) | shipped |
+| [enable-disable-toggle](integrations/enable-disable-toggle.md) | shipped |
 
 ## workspaces/ — workspace lifecycle
 
@@ -192,6 +194,7 @@ Subscription quota tracking and per-agent cheap-model profile routing.
 | [context-compaction-count](context-compaction-count/spec.md) | approved |
 | [context-window reset freshness](context-window-reset-freshness/spec.md) | shipped |
 | [cancel-turn-progress](ui/cancel-turn-progress.md) | approved |
+| [agent-todo-list-panel](ui/agent-todo-list-panel.md) | shipped |
 
 ## system-page/ — operational diagnostics & maintenance UI
 
@@ -231,6 +234,7 @@ System pages (Radarr/Sonarr-style) for status, disk usage, database maintenance,
 | [native-code-review](native-code-review/spec.md) | building |
 | [no-silent-model-fallback](no-silent-model-fallback/spec.md) | approved |
 | [missing-task-route-recovery](missing-task-route-recovery/spec.md) | draft |
+| [browser-inspect-annotations-save](browser-inspect-annotations-save/spec.md) | shipped |
 
 ---
 

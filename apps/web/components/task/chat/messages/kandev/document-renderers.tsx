@@ -17,6 +17,7 @@ import { EmptyListNote, IdChip, KandevBody, KandevRow, KeyValueRow, SummaryDot }
 import { pickArray, pickNumber, pickString } from "./parse";
 import type { KandevRenderer } from "./types";
 import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 
 // MarkdownBody renders task plan / document content. We pre-trim and use the
 // shared markdown component set so heading sizes, code blocks, and mermaid
@@ -43,11 +44,13 @@ function ContentBox({ children }: { children: ReactNode }) {
   );
 }
 
-function summarizeContent(content: string | undefined): string {
-  if (!content) return "empty";
+// Two counts in one label, but i18next selects a plural form on `count` alone.
+// Lines own `count`; the character total rides along as a plain value.
+function summarizeContent(t: TFunction, content: string | undefined): string {
+  if (!content) return t("task:documentSummaryEmpty");
   const lines = content.split("\n").length;
   const chars = content.length;
-  return `${lines} line${lines === 1 ? "" : "s"} · ${chars} chars`;
+  return t("task:documentSummary", { count: lines, chars });
 }
 
 // ---------- get_task_plan ----------
@@ -70,7 +73,7 @@ export const GetTaskPlanRenderer: KandevRenderer = ({ args, result, status }) =>
               <SummaryDot />
             </>
           )}
-          <span>{hasPlan ? summarizeContent(content) : t("task:noPlan")}</span>
+          <span>{hasPlan ? summarizeContent(t, content) : t("task:noPlan")}</span>
         </span>
       }
       status={status}
@@ -153,7 +156,7 @@ export const UpdateTaskPlanRenderer: KandevRenderer = ({ args, result, status })
               <SummaryDot />
             </>
           )}
-          <span>{summarizeContent(displayContent)}</span>
+          <span>{summarizeContent(t, displayContent)}</span>
         </span>
       }
       status={status}

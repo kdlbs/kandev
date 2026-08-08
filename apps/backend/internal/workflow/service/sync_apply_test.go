@@ -446,6 +446,33 @@ func TestEnsureWorkflowMutable(t *testing.T) {
 		"guard fails open on lookup errors; the mutation itself surfaces not-found")
 }
 
+func TestEnsureWorkflowMutable_BlocksImproveWorkspace(t *testing.T) {
+	svc, provider, _ := setupSyncService(t)
+	ctx := context.Background()
+	provider.addWorkflow("wf-improve", "ws-improve", "Improve Kandev Workflow")
+	svc.SetWorkspaceProvider(&fakeWorkspaceProvider{
+		workspaces: map[string]*taskmodels.Workspace{
+			"ws-improve": {ID: "ws-improve", Name: "Improve Kandev"},
+			"ws-normal":  {ID: "ws-normal", Name: "Default Workspace"},
+		},
+	})
+	provider.addWorkflow("wf-normal", "ws-normal", "Normal Flow")
+
+	assert.ErrorIs(t, svc.EnsureWorkflowMutable(ctx, "wf-improve"), ErrWorkflowWorkspaceReadOnly)
+	assert.NoError(t, svc.EnsureWorkflowMutable(ctx, "wf-normal"))
+}
+
+type fakeWorkspaceProvider struct {
+	workspaces map[string]*taskmodels.Workspace
+}
+
+func (f *fakeWorkspaceProvider) GetWorkspace(_ context.Context, id string) (*taskmodels.Workspace, error) {
+	if workspace, ok := f.workspaces[id]; ok {
+		return workspace, nil
+	}
+	return nil, fmt.Errorf("workspace not found: %s", id)
+}
+
 func TestReleaseSyncedWorkflows(t *testing.T) {
 	svc, provider, _ := setupSyncService(t)
 	ctx := context.Background()

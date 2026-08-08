@@ -28,7 +28,6 @@ import { WorkflowCard } from "@/components/settings/workflow-card";
 import { WorkflowSectionActions } from "@/components/settings/workflow-section-actions";
 import { WorkflowSyncSection } from "@/components/settings/workflow-sync-section";
 import { useSettingsSaveContributor } from "@/components/settings/settings-save-provider";
-import { WorkflowExportDialog } from "@/components/settings/workflow-export-dialog";
 import { useToast } from "@/components/toast-provider";
 import { useWorkflowSettings } from "@/hooks/domains/settings/use-workflow-settings";
 import {
@@ -44,10 +43,7 @@ import {
   type Workspace,
   type WorkflowTemplate,
 } from "@/lib/types/http";
-import {
-  CreateWorkflowDialog,
-  ImportWorkflowsDialog,
-} from "@/app/settings/workspace/workspace-workflows-dialogs";
+import { WorkflowDialogs } from "@/app/settings/workspace/workspace-workflows-dialogs";
 import { useWorkflowCreation } from "@/app/settings/workspace/use-workflow-creation";
 import { WorkspaceNotFoundCard } from "@/app/settings/workspace/workspace-not-found-card";
 
@@ -55,6 +51,8 @@ type WorkspaceWorkflowsClientProps = {
   workspace: Workspace | null;
   workflows: Workflow[];
   workflowTemplates: WorkflowTemplate[];
+  /** The dedicated Improve Kandev workspace is configuration-immutable. */
+  isImproveWorkspace?: boolean;
 };
 
 const TEMP_WORKFLOW_PREFIX = "temp-workflow-";
@@ -292,6 +290,8 @@ type WorkflowListProps = {
   orderDirtyIds: ReadonlySet<string>;
   initialStepsByWorkflowId: Map<string, WorkflowStep[]>;
   isWorkflowDirty: (wf: Workflow) => boolean;
+  /** The dedicated Improve Kandev workspace renders workflows read-only. */
+  isImproveWorkspace?: boolean;
   onUpdate: (
     id: string,
     u: { name?: string; description?: string; agent_profile_id?: string },
@@ -305,14 +305,17 @@ type WorkflowListProps = {
 function SortableWorkflowItem({
   workflow,
   isDirty,
+  readOnly,
   children,
 }: {
   workflow: Workflow;
   isDirty: boolean;
+  readOnly?: boolean;
   children: React.ReactNode;
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: workflow.id,
+    disabled: readOnly,
   });
   const style = {
     transform: CSS.Transform.toString(transform),
@@ -328,14 +331,16 @@ function SortableWorkflowItem({
       data-settings-dirty-level="container"
       data-testid={`workflow-order-item-${workflow.id}`}
     >
-      <div
-        className="absolute left-0 top-6 -ml-6 flex items-center cursor-grab active:cursor-grabbing z-10 sm:-ml-8"
-        data-testid={`workflow-drag-handle-${workflow.id}`}
-        {...attributes}
-        {...listeners}
-      >
-        <IconGripVertical className="h-5 w-5 text-muted-foreground" />
-      </div>
+      {!readOnly && (
+        <div
+          className="absolute left-0 top-6 -ml-6 flex items-center cursor-grab active:cursor-grabbing z-10 sm:-ml-8"
+          data-testid={`workflow-drag-handle-${workflow.id}`}
+          {...attributes}
+          {...listeners}
+        >
+          <IconGripVertical className="h-5 w-5 text-muted-foreground" />
+        </div>
+      )}
       {children}
     </div>
   );
@@ -347,6 +352,7 @@ function WorkflowList({
   orderDirtyIds,
   initialStepsByWorkflowId,
   isWorkflowDirty,
+  isImproveWorkspace,
   onUpdate,
   onDelete,
   onWorkflowSaved,
@@ -386,6 +392,7 @@ function WorkflowList({
               key={workflow.id}
               workflow={workflow}
               isDirty={orderDirtyIds.has(workflow.id)}
+              readOnly={isImproveWorkspace}
             >
               <WorkflowCard
                 workflow={workflow}
@@ -394,6 +401,7 @@ function WorkflowList({
                 isOrderDirty={orderDirtyIds.has(workflow.id)}
                 initialWorkflowSteps={initialStepsByWorkflowId.get(workflow.id)}
                 otherWorkflows={workflowItems.filter((w) => w.id !== workflow.id)}
+                isImproveWorkspace={isImproveWorkspace}
                 onUpdateWorkflow={(updates) => onUpdate(workflow.id, updates)}
                 onDeleteWorkflow={async () => {
                   await onDelete(workflow.id);
@@ -409,45 +417,11 @@ function WorkflowList({
   );
 }
 
-function WorkflowDialogs({ page }: { page: ReturnType<typeof useWorkspaceWorkflowsPage> }) {
-  const { t } = useTranslation();
-  return (
-    <>
-      <WorkflowExportDialog
-        open={page.isExportDialogOpen}
-        onOpenChange={page.setIsExportDialogOpen}
-        title={t("workflows:exportWorkflowsTitle")}
-        content={page.exportYaml}
-      />
-      <ImportWorkflowsDialog
-        open={page.isImportDialogOpen}
-        onOpenChange={page.setIsImportDialogOpen}
-        importYaml={page.importYaml}
-        onImportYamlChange={page.setImportYaml}
-        onFileUpload={page.handleFileUpload}
-        fileInputRef={page.fileInputRef}
-        onImport={page.handleImport}
-        importLoading={page.importLoading}
-      />
-      <CreateWorkflowDialog
-        open={page.isAddWorkflowDialogOpen}
-        onOpenChange={page.setIsAddWorkflowDialogOpen}
-        workflowName={page.newWorkflowName}
-        onWorkflowNameChange={page.setNewWorkflowName}
-        selectedTemplateId={page.selectedTemplateId}
-        onSelectedTemplateChange={page.setSelectedTemplateId}
-        workflowTemplates={page.workflowTemplates}
-        onCreate={page.handleCreateWorkflow}
-        createLoading={page.createWorkflowLoading}
-      />
-    </>
-  );
-}
-
 export function WorkspaceWorkflowsClient({
   workspace,
   workflows,
   workflowTemplates,
+  isImproveWorkspace = false,
 }: WorkspaceWorkflowsClientProps) {
   const { t } = useTranslation();
   const page = useWorkspaceWorkflowsPage(workspace, workflows, workflowTemplates);
@@ -462,7 +436,9 @@ export function WorkspaceWorkflowsClient({
         <div>
           <h2 className="text-2xl font-bold">{workspace.name}</h2>
           <p className="text-sm text-muted-foreground mt-1">
-            {t("workflows:manageWorkflowsForThisWorkspace")}
+            {isImproveWorkspace
+              ? t("workflows:workflowsReadOnlyImprove")
+              : t("workflows:manageWorkflowsForThisWorkspace")}
           </p>
         </div>
         <Button asChild variant="outline" size="sm">
@@ -477,25 +453,30 @@ export function WorkspaceWorkflowsClient({
         title={t("workflows:workflows")}
         description={t("workflows:workflowsSectionDescription")}
         action={
-          <WorkflowSectionActions
-            onExport={page.handleExportAll}
-            onImport={() => page.setIsImportDialogOpen(true)}
-            onAdd={page.handleOpenAddWorkflowDialog}
-            onGitHubSync={() => setSyncDialogOpen(true)}
-          />
+          isImproveWorkspace ? undefined : (
+            <WorkflowSectionActions
+              onExport={page.handleExportAll}
+              onImport={() => page.setIsImportDialogOpen(true)}
+              onAdd={page.handleOpenAddWorkflowDialog}
+              onGitHubSync={() => setSyncDialogOpen(true)}
+            />
+          )
         }
       >
-        <WorkflowSyncSection
-          workspaceId={workspace.id}
-          dialogOpen={syncDialogOpen}
-          onDialogOpenChange={setSyncDialogOpen}
-        />
+        {!isImproveWorkspace && (
+          <WorkflowSyncSection
+            workspaceId={workspace.id}
+            dialogOpen={syncDialogOpen}
+            onDialogOpenChange={setSyncDialogOpen}
+          />
+        )}
         <WorkflowList
           workflowItems={page.workflowItems}
           savedWorkflowItems={page.savedWorkflowItems}
           orderDirtyIds={page.workflowOrderDirtyIds}
           initialStepsByWorkflowId={page.initialStepsByWorkflowId}
           isWorkflowDirty={page.isWorkflowDirty}
+          isImproveWorkspace={isImproveWorkspace}
           onUpdate={page.handleUpdateWorkflow}
           onDelete={page.handleDeleteWorkflow}
           onWorkflowSaved={page.handleWorkflowSaved}

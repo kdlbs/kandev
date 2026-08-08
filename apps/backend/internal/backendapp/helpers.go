@@ -39,6 +39,7 @@ import (
 	"github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/common/ports"
+	"github.com/kandev/kandev/internal/db"
 	debughandlers "github.com/kandev/kandev/internal/debug"
 	editorcontroller "github.com/kandev/kandev/internal/editors/controller"
 	editorhandlers "github.com/kandev/kandev/internal/editors/handlers"
@@ -51,6 +52,7 @@ import (
 	"github.com/kandev/kandev/internal/health/oslimits"
 	"github.com/kandev/kandev/internal/i18n"
 	"github.com/kandev/kandev/internal/improvekandev"
+	"github.com/kandev/kandev/internal/integrations/workspacescope"
 	"github.com/kandev/kandev/internal/jira"
 	"github.com/kandev/kandev/internal/linear"
 	lspinstaller "github.com/kandev/kandev/internal/lsp/installer"
@@ -526,6 +528,7 @@ type routeParams struct {
 	systemSvc                     *systemsvc.Service
 	workspaceRestorer             taskhandlers.WorkspaceQuarantineRestorer
 	runtimeFlagsSvc               *runtimeflags.Service
+	dbPool                        *db.Pool
 	agentSettingsController       *agentsettingscontroller.Controller
 	agentSettingsRepo             settingsstore.Repository
 	agentList                     taskhandlers.AgentLister
@@ -1177,7 +1180,15 @@ func registerSecondaryRoutes(
 	}
 
 	if p.repoCloner != nil {
-		ikHandler := improvekandev.NewHandler(p.taskSvc, p.repoCloner, p.version, p.log)
+		var ghCopier improvekandev.GitHubWorkspaceCopier
+		var resolveDefaultWorkspace improvekandev.DefaultWorkspaceResolver
+		if p.services.GitHub != nil && p.dbPool != nil {
+			ghCopier = p.services.GitHub
+			resolveDefaultWorkspace = func(context.Context) (string, error) {
+				return workspacescope.ResolveMigrationTarget(p.dbPool.Reader())
+			}
+		}
+		ikHandler := improvekandev.NewHandler(p.taskSvc, p.repoCloner, ghCopier, resolveDefaultWorkspace, p.version, p.log)
 		if p.systemSvc != nil {
 			ikHandler.SetLogBundles(p.systemSvc.LogBundles)
 		}

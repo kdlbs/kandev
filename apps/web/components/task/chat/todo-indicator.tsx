@@ -169,5 +169,5 @@ export function TodoIndicator({ todos }: TodoIndicatorProps) {
   );
 }
 
-export { StatusIcon, resolveStatus };
+export { StatusIcon, resolveStatus, TodoIndicatorContent };
 export type { TodoDisplayItem };

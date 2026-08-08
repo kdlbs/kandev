@@ -464,6 +464,7 @@ func mapUserSettingsState(response userdto.UserSettingsResponse, workspaceID str
 		"showScrollToLastPrompt":          settings.ShowScrollToLastPrompt,
 		"showScrollToStart":               settings.ShowScrollToStart,
 		"showTranscriptAutoScrollControl": settings.ShowTranscriptAutoScrollControl,
+		"showTodoListPanel":               settings.ShowTodoListPanel,
 		"showReleaseNotification":         settings.ShowReleaseNotification,
 		"releaseNotesLastSeenVersion":     nullString(settings.ReleaseNotesLastSeenVersion),
 		"lspAutoStartLanguages":           stringSlice(settings.LspAutoStartLanguages),

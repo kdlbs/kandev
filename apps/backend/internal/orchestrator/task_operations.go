@@ -5197,8 +5197,12 @@ func (s *Service) takeAndDispatchEntryLocked(ctx context.Context, sessionID, ent
 // cancels anything, so it has no way to supersede a settling dispatch the
 // way a genuine cancel would — it must defer to it instead. The caller
 // must already hold sessionID's cancelInFlight lock.
+//
+// Also defers to an admitted-but-not-yet-dispatched steer (isSteerInFlight;
+// see steerInFlight's field doc comment) for the same reason: this path
+// never cancels, so it has no way to supersede the steer's dispatch either.
 func (s *Service) takeIfPromptableLocked(ctx context.Context, taskID, sessionID, entryID string) (bool, error) {
-	if s.isQueuedDispatchInFlight(sessionID) {
+	if s.isQueuedDispatchInFlight(sessionID) || s.isSteerInFlight(sessionID) {
 		return false, nil
 	}
 	session, err := s.repo.GetTaskSession(ctx, sessionID)

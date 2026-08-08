@@ -25,10 +25,12 @@ import { useWorkflowSync } from "./use-workflow-sync";
 function makeConfig(overrides: Partial<WorkflowSyncConfig> = {}): WorkflowSyncConfig {
   return {
     workspace_id: "ws-1",
+    provider: "github",
     repo_owner: "kdlbs",
     repo_name: "kandev",
+    project_path: "",
     branch: "main",
-    path: ".kandev/workflows",
+    path: WORKFLOWS_DIR,
     interval_seconds: 300,
     poll_enabled: true,
     last_ok: false,
@@ -67,7 +69,7 @@ describe("useWorkflowSync", () => {
     await waitFor(() => expect(result.current.loading).toBe(false));
     expect(result.current.config).toBeNull();
     expect(result.current.form.branch).toBe("main");
-    expect(result.current.form.path).toBe(".kandev/workflows");
+    expect(result.current.form.path).toBe(WORKFLOWS_DIR);
   });
 
   it("handleSave posts the form and updates config from the response", async () => {
@@ -141,5 +143,126 @@ describe("useWorkflowSync", () => {
     });
     expect(getWorkflowSyncConfigMock.mock.calls.length).toBeGreaterThanOrEqual(2);
     expect(result.current.config?.last_error).toBe("boom");
+  });
+});
+
+// The link field must redisplay only the repo identity, never branch or
+// directory — otherwise it can silently disagree with the separate,
+// directly-editable Branch/Directory fields once a user corrects one of them
+// without retyping the whole link.
+describe("useWorkflowSync — link field redisplay", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("redisplays only the repo identity, not branch or directory", async () => {
+    getWorkflowSyncConfigMock.mockResolvedValue(
+      makeConfig({
+        repo_owner: "acme",
+        repo_name: "flows",
+        branch: "release/1.2",
+        path: "custom/dir",
+      }),
+    );
+    const { result } = renderHook(() => useWorkflowSync("ws-1"));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.url).toBe("https://github.com/acme/flows");
+    expect(result.current.form.branch).toBe("release/1.2");
+    expect(result.current.form.path).toBe("custom/dir");
+  });
+
+  it("redisplays a GitLab config's project_path alone", async () => {
+    getWorkflowSyncConfigMock.mockResolvedValue(
+      makeConfig({
+        provider: "gitlab",
+        repo_owner: "",
+        repo_name: "",
+        project_path: "front-end/km-mobile-app",
+        branch: "features/kegmil-location-adoption",
+        path: WORKFLOWS_DIR,
+      }),
+    );
+    const { result } = renderHook(() => useWorkflowSync("ws-1"));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.url).toBe("front-end/km-mobile-app");
+    expect(result.current.form.branch).toBe("features/kegmil-location-adoption");
+  });
+});
+
+const HOST = "https://gitlab.com";
+const GITLAB_PROJECT = "acme/project";
+const WORKFLOWS_DIR = ".kandev/workflows";
+const GITLAB_REF = `${HOST}/${GITLAB_PROJECT}/-/tree/main/${WORKFLOWS_DIR}`;
+
+// GitLab form paths: provider switching, GitLab URL parsing into
+// project_path, and the save payload that must carry project_path without
+// any GitHub identifiers.
+describe("useWorkflowSync — GitLab form paths", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("setProvider clears the other provider's fields", async () => {
+    getWorkflowSyncConfigMock.mockResolvedValue(
+      makeConfig({ repo_owner: "acme", repo_name: "flows" }),
+    );
+    const { result } = renderHook(() => useWorkflowSync("ws-1"));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.form.repo_owner).toBe("acme");
+
+    act(() => result.current.setProvider("gitlab"));
+
+    expect(result.current.form.provider).toBe("gitlab");
+    expect(result.current.form.repo_owner).toBe("");
+    expect(result.current.form.repo_name).toBe("");
+    expect(result.current.form.project_path).toBe("");
+    expect(result.current.url).toBe("");
+  });
+
+  it("setUrlInput parses a GitLab URL into project_path, branch, and path", async () => {
+    getWorkflowSyncConfigMock.mockResolvedValue(
+      makeConfig({ provider: "gitlab", project_path: GITLAB_PROJECT }),
+    );
+    const { result } = renderHook(() => useWorkflowSync("ws-1"));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    act(() => result.current.setUrlInput(GITLAB_REF));
+
+    expect(result.current.form.project_path).toBe(GITLAB_PROJECT);
+    expect(result.current.form.branch).toBe("main");
+    expect(result.current.form.path).toBe(WORKFLOWS_DIR);
+    expect(result.current.urlInvalid).toBe(false);
+  });
+
+  it("handleSave for a GitLab form emits project_path without GitHub identifiers", async () => {
+    getWorkflowSyncConfigMock.mockResolvedValue(
+      makeConfig({ provider: "gitlab", project_path: GITLAB_PROJECT }),
+    );
+    const saved = makeConfig({
+      provider: "gitlab",
+      repo_owner: "",
+      repo_name: "",
+      project_path: GITLAB_PROJECT,
+    });
+    setWorkflowSyncConfigMock.mockResolvedValue(saved);
+    const { result } = renderHook(() => useWorkflowSync("ws-1"));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    await act(async () => {
+      await result.current.handleSave();
+    });
+
+    expect(setWorkflowSyncConfigMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        provider: "gitlab",
+        project_path: GITLAB_PROJECT,
+        branch: "main",
+        path: WORKFLOWS_DIR,
+      }),
+      { workspaceId: "ws-1" },
+    );
+    const payload = setWorkflowSyncConfigMock.mock.calls[0][0] as Record<string, unknown>;
+    expect(payload).not.toHaveProperty("repo_owner");
+    expect(payload).not.toHaveProperty("repo_name");
   });
 });

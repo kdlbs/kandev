@@ -91,6 +91,14 @@ type Client interface {
 	// ListProjectBranches lists branches for a project.
 	ListProjectBranches(ctx context.Context, projectPath string) ([]RepoBranch, error)
 
+	// ListRepoTree lists one repository directory at the given ref,
+	// non-recursively. An empty path lists the repository root.
+	ListRepoTree(ctx context.Context, projectPath, path, ref string) ([]RepoTreeEntry, error)
+
+	// GetRepoFileContent returns the raw bytes of a repository file at the
+	// given ref.
+	GetRepoFileContent(ctx context.Context, projectPath, path, ref string) ([]byte, error)
+
 	// ListIssues searches for open issues. filter is an optional
 	// additional API filter; customQuery, when non-empty, replaces the
 	// entire generated query.

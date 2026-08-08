@@ -690,6 +690,18 @@ type Workflow struct {
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
+// WorkspaceNameImproveKandev is the exact name of the dedicated Improve Kandev
+// workspace created by the improve-kandev bootstrap. The workspace is matched
+// by this name everywhere (bootstrap, guards, frontend) and is
+// configuration-immutable: its workflows and repositories are read-only.
+const WorkspaceNameImproveKandev = "Improve Kandev"
+
+// IsImproveKandev reports whether the workspace is the dedicated Improve
+// Kandev workspace (matched by exact name).
+func (w *Workspace) IsImproveKandev() bool {
+	return w != nil && w.Name == WorkspaceNameImproveKandev
+}
+
 // Workspace represents a workspace
 type Workspace struct {
 	ID                          string    `json:"id"`

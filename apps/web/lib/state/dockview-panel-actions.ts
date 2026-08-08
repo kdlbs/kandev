@@ -1,5 +1,6 @@
 import type { DockviewApi, DockviewGroupPanel } from "dockview-react";
 import type { CommitDetailTarget } from "@/components/task/changes-diff-target";
+import { t } from "@/lib/i18n";
 import { focusOrAddPanel } from "./dockview-layout-builders";
 import {
   parsePluginPanelId,
@@ -613,6 +614,16 @@ export function buildExtraPanelActions(get: StoreGet) {
       api.panels
         .filter((p) => parsePluginPanelId(p.id)?.pluginId === pluginId)
         .forEach((p) => api.removePanel(p));
+    },
+    addTodosPanel: (opts?: SidePanelOpts) => {
+      const { api, centerGroupId } = get();
+      if (!api) return;
+      addSidePanel(
+        api,
+        centerGroupId,
+        { id: "todos", component: "todos", title: t("common:todos") },
+        opts,
+      );
     },
     ...buildReviewPanelActions(get),
     addTerminalPanel: (

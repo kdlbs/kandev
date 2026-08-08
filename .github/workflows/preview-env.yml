@@ -68,9 +68,11 @@ jobs:
   # -----------------------------------------------------------------------
   # Deploy / update preview (fork PRs, gated by allowlist)
   # Uses pull_request_target so secrets are available.
-  # Two approval paths:
+  # Three approval paths:
   #   - PREVIEW_ENV_ALLOWLIST repo variable (trusted login list, all events;
   #     JSON array of logins)
+  #   - CLAUDE_REVIEW_ALLOWLIST repo variable (trusted login list, all events;
+  #     the Claude workflow also adds the approval labels on open)
   #   - `safe-to-test` label (maintainer opt-in, per-commit). Explicitly
   #     blocked on `synchronize` so a contributor's push cannot re-use a
   #     stale label — the maintainer must re-apply it after each push for
@@ -87,7 +89,8 @@ jobs:
       github.event_name == 'pull_request_target' &&
       github.event.pull_request.head.repo.full_name != github.repository &&
       ((github.event.action != 'synchronize' && contains(github.event.pull_request.labels.*.name, 'safe-to-test')) ||
-       (vars.PREVIEW_ENV_ALLOWLIST != '' && contains(fromJSON(vars.PREVIEW_ENV_ALLOWLIST), github.event.pull_request.user.login)))
+       (vars.PREVIEW_ENV_ALLOWLIST != '' && contains(fromJSON(vars.PREVIEW_ENV_ALLOWLIST), github.event.pull_request.user.login)) ||
+       (vars.CLAUDE_REVIEW_ALLOWLIST != '' && contains(fromJSON(vars.CLAUDE_REVIEW_ALLOWLIST), github.event.pull_request.user.login)))
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -98,9 +101,11 @@ jobs:
         with:
           # pull_request_target checks out base by default; explicitly use PR head.
           # Safe: the preview CLI only reads files to build artifacts and posts comments.
-          # NOTE: The allowlist gate (safe-to-test, PREVIEW_ENV_ALLOWLIST)
+          # NOTE: The allowlist gate (safe-to-test, PREVIEW_ENV_ALLOWLIST,
+          # CLAUDE_REVIEW_ALLOWLIST)
           # authorizes running the fork's cmd/preview code with SPRITES_API_TOKEN and GH_TOKEN.
-          # The safe-to-test label must be re-applied after each new push (see strip-safe-to-test job).
+          # The safe-to-test label must be re-applied after each new push for
+          # the label-only path (see strip-safe-to-test job).
           repository: ${{ github.event.pull_request.head.repo.full_name }}
           ref: ${{ github.event.pull_request.head.sha }}
 

@@ -38,6 +38,7 @@ func (c *MockController) RegisterRoutes(router *gin.Engine) {
 	api.POST("/branches", c.seedBranches)
 	api.POST("/members", c.seedMembers)
 	api.POST("/files", c.seedFiles)
+	api.POST("/repo-files", c.seedRepoFiles)
 	api.POST("/commits", c.seedCommits)
 	api.DELETE("/reset", c.reset)
 
@@ -180,6 +181,20 @@ type mockFilesRequest struct {
 	Project string   `json:"project"`
 	IID     int      `json:"iid"`
 	Files   []MRFile `json:"files"`
+}
+
+// mockRepoFilesRequest seeds repository content (as opposed to mockFilesRequest,
+// which seeds files changed in a merge request). Ref is required — repo file
+// content is keyed by branch, unlike MR files which are keyed by IID.
+type mockRepoFilesRequest struct {
+	Project string             `json:"project"`
+	Ref     string             `json:"ref"`
+	Files   []mockRepoFileItem `json:"files"`
+}
+
+type mockRepoFileItem struct {
+	Path    string `json:"path"`
+	Content string `json:"content"`
 }
 
 type mockCommitsRequest struct {
@@ -339,6 +354,22 @@ func (c *MockController) seedFiles(ctx *gin.Context) {
 		return
 	}
 	mock.SeedFiles(req.Project, req.IID, req.Files)
+	ctx.JSON(http.StatusOK, gin.H{"seeded": len(req.Files)})
+}
+
+func (c *MockController) seedRepoFiles(ctx *gin.Context) {
+	var req mockRepoFilesRequest
+	if err := ctx.ShouldBindJSON(&req); err != nil || req.Project == "" || req.Ref == "" || len(req.Files) == 0 {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "project, ref, and files required"})
+		return
+	}
+	mock, ok := c.mockClient(ctx)
+	if !ok {
+		return
+	}
+	for _, f := range req.Files {
+		mock.SeedRepoFile(req.Project, req.Ref, f.Path, []byte(f.Content))
+	}
 	ctx.JSON(http.StatusOK, gin.H{"seeded": len(req.Files)})
 }
 

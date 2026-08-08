@@ -982,6 +982,10 @@ func (m *Manager) ResumePassthroughSession(ctx context.Context, sessionID string
 	}
 
 	execution.PassthroughStartedAt = time.Now()
+	// Must precede PassthroughProcessID: handlePassthroughStatus reads
+	// passthroughLaunchUsedResume synchronously once the process ID is visible
+	// (the ID is what routes a status update to this execution), so the flag has
+	// to be set before the process can exit and publish a status.
 	execution.passthroughLaunchUsedResume = useResume
 	execution.PassthroughProcessID = processInfo.ID
 
@@ -1107,15 +1111,22 @@ func (m *Manager) handlePassthroughStatus(status *agentctltypes.ProcessStatusUpd
 			// goroutine doesn't race the next launch's writes to those fields.
 			startedAt := execution.PassthroughStartedAt
 			usedResume := execution.passthroughLaunchUsedResume
-			// Detect fast-fail synchronously so we can flip the resume-failed
-			// flag before the next WS reconnect arrives. The goroutine below
-			// would otherwise miss this race: when the PTY exits the WS bridge
-			// closes too, and by the time the goroutine runs (after a 100ms
-			// cleanup delay) HasActiveWebSocketBySession returns false and it
-			// bails without setting any flags. Scoped to fast-fail+usedResume
-			// so a healthy resumed session that exits cleanly or crashes long
-			// after launch keeps its resume intent for auto-restart.
-			if usedResume && passthroughExitIsFastFail(startedAt, status) {
+			// Flip the resume-failed flag synchronously so we beat the next WS
+			// reconnect. The goroutine below would otherwise miss this race:
+			// when the PTY exits the WS bridge closes too, and by the time the
+			// goroutine runs (after a 100ms cleanup delay)
+			// HasActiveWebSocketBySession returns false and it bails without
+			// setting any flags.
+			//
+			// Any non-zero exit of a resume launch counts, not just a fast one:
+			// a real CLI takes seconds to boot before it can report "No
+			// conversation found to continue", which lands outside the
+			// fast-fail window and previously left the flag unset — so every
+			// restart re-attached the same broken resume flag and the session
+			// looped forever (issue #2330). A clean (zero) exit still keeps the
+			// resume intent, so a healthy resumed session that the user quits
+			// is auto-restarted as a resume.
+			if usedResume && passthroughExitCode(status) != 0 {
 				execution.passthroughResumeFailed = true
 				execution.isResumedSession = false
 				execution.passthroughLaunchUsedResume = false
@@ -1177,10 +1188,7 @@ func (m *Manager) handlePassthroughExit(execution *AgentExecution, status *agent
 		return
 	}
 
-	exitCode := 0
-	if status.ExitCode != nil {
-		exitCode = *status.ExitCode
-	}
+	exitCode := passthroughExitCode(status)
 
 	// Use the exit timestamp from the status event (set when the child
 	// actually exited), not time.Now() — the cleanupDelay sleep and goroutine
@@ -1202,9 +1210,8 @@ func (m *Manager) handlePassthroughExit(execution *AgentExecution, status *agent
 		// fresh command (no resume flag) before giving up.
 		if usedResume {
 			// Resume-failed flags have already been flipped synchronously in
-			// handlePassthroughStatus (see passthroughExitIsFastFail) so any
-			// concurrent WS reconnect that races this goroutine sees the new
-			// values immediately.
+			// handlePassthroughStatus so any concurrent WS reconnect that
+			// races this goroutine sees the new values immediately.
 			m.attemptResumeFallback(execution, interactiveRunner, sessionID, exitCode, uptime)
 			return
 		}
@@ -1387,20 +1394,13 @@ func (m *Manager) notifyFastFailExit(runner *process.InteractiveRunner, sessionI
 	}
 }
 
-// passthroughExitIsFastFail wraps isFastFailExit for the synchronous
-// status-callback path that doesn't yet have the unpacked exit code or
-// timestamp. Same window/semantics as the goroutine path.
-func passthroughExitIsFastFail(startedAt time.Time, status *agentctltypes.ProcessStatusUpdate) bool {
-	const fastFailWindow = 2 * time.Second
-	exitCode := 0
-	if status.ExitCode != nil {
-		exitCode = *status.ExitCode
+// passthroughExitCode unpacks the exit code from a process status update,
+// treating an absent code as a clean exit.
+func passthroughExitCode(status *agentctltypes.ProcessStatusUpdate) int {
+	if status.ExitCode == nil {
+		return 0
 	}
-	exitedAt := status.Timestamp
-	if exitedAt.IsZero() {
-		exitedAt = time.Now()
-	}
-	return isFastFailExit(startedAt, exitedAt, exitCode, fastFailWindow)
+	return *status.ExitCode
 }
 
 // isFastFailExit reports whether a passthrough process exit looks like a

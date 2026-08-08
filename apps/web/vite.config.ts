@@ -1,8 +1,38 @@
+import fs from "node:fs";
 import path from "node:path";
 import react from "@vitejs/plugin-react";
 import { defineConfig, type Plugin } from "vite";
 
 import { shouldBundlePseudoLocale } from "./lib/i18n/bundling";
+
+const LOCALES_DIR = path.resolve(__dirname, "src/locales");
+
+/**
+ * One chunk per non-`en` locale, instead of one per locale-namespace file.
+ *
+ * `lib/i18n/index.ts` glob-imports the catalogs lazily, which by default emits a
+ * chunk per JSON file — 29 namespaces × 3 locales. i18next is seeded with every
+ * namespace and any surface may use any of them, so a locale is always loaded
+ * whole; per-namespace chunks buy no smaller download and cost a non-English
+ * boot 29 round trips before it can paint. Grouping makes that one request.
+ *
+ * Read from disk rather than mirroring `SUPPORTED_LOCALES`, so adding a locale
+ * directory needs no edit here. `en` is deliberately absent: it is statically
+ * imported into the entry chunk as the synchronous fallback.
+ */
+function localeChunkGroups() {
+  return fs
+    .readdirSync(LOCALES_DIR, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory() && entry.name !== "en")
+    .map((entry) => ({
+      name: `i18n-${entry.name}`,
+      test: new RegExp(`/src/locales/${escapeRegExp(entry.name)}/[^/]+\\.json$`),
+    }));
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
 
 export default defineConfig({
   plugins: [react(), pseudoLocaleBundling()],
@@ -30,6 +60,11 @@ export default defineConfig({
   build: {
     outDir: "dist",
     emptyOutDir: true,
+    rolldownOptions: {
+      output: {
+        advancedChunks: { groups: localeChunkGroups() },
+      },
+    },
   },
 });
 

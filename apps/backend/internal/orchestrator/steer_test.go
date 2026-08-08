@@ -377,3 +377,61 @@ func TestSteerTask_SingleInFlight(t *testing.T) {
 		t.Fatalf("queue count = %v, want 1 (enqueued second steer)", status)
 	}
 }
+
+// TestDrainPaths_DeferToInFlightSteer pins the fix for the ordering gap
+// SteerTask's own comment documents: WithSessionAdmission's per-session lock
+// is released before the blocking dispatch, so a message can be queued — and
+// the underlying turn can complete — in the window between a steer's
+// admission and its actual dispatch. Without this guard, an ordinary drain
+// reacting to that completion would dispatch the later-queued message ahead
+// of the steer that was admitted first, reopening the exact ordering gap the
+// shared lock was meant to close. Both non-cancelling drain paths —
+// drainQueuedMessageForPromptableSessionLocked (and, transitively,
+// DrainQueuedMessage, which delegates to it) and takeIfPromptableLocked —
+// must defer to an in-flight steer the same way they already defer to
+// isQueuedDispatchInFlight.
+func TestDrainPaths_DeferToInFlightSteer(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+
+	const taskID = "task-drain-race"
+	const sessionID = "session-drain-race"
+	// Idle/promptable: the underlying turn has already completed, exactly the
+	// state that would let an ordinary drain fire — while the steer admitted
+	// against that same turn is still working through its own dispatch.
+	seedTaskAndSession(t, repo, taskID, sessionID, models.TaskSessionStateIdle)
+
+	if _, err := svc.messageQueue.QueueMessage(
+		ctx, sessionID, taskID, "queued after admission", "", "user", false, nil,
+	); err != nil {
+		t.Fatalf("seed queued message: %v", err)
+	}
+	entryID := svc.messageQueue.GetStatus(ctx, sessionID).Entries[0].ID
+
+	// Simulate the race window directly, the same way TestSteerTask_SingleInFlight
+	// does: a steer has claimed the in-flight slot but not yet dispatched.
+	svc.steerInFlight.Store(sessionID, struct{}{})
+
+	t.Run("drainQueuedMessageForPromptableSessionLocked backs off", func(t *testing.T) {
+		if dispatched := svc.drainQueuedMessageForPromptableSessionLocked(ctx, sessionID); dispatched {
+			t.Fatal("drain dispatched a queued message while a steer was in flight")
+		}
+		if status := svc.messageQueue.GetStatus(ctx, sessionID); status == nil || status.Count != 1 {
+			t.Fatalf("queue count = %v, want 1 (message must remain queued)", status)
+		}
+	})
+
+	t.Run("takeIfPromptableLocked backs off", func(t *testing.T) {
+		dispatched, err := svc.takeIfPromptableLocked(ctx, taskID, sessionID, entryID)
+		if err != nil {
+			t.Fatalf("takeIfPromptableLocked: %v", err)
+		}
+		if dispatched {
+			t.Fatal("takeIfPromptableLocked dispatched while a steer was in flight")
+		}
+		if status := svc.messageQueue.GetStatus(ctx, sessionID); status == nil || status.Count != 1 {
+			t.Fatalf("queue count = %v, want 1 (message must remain queued)", status)
+		}
+	})
+}

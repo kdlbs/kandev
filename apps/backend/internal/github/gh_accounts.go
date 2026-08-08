@@ -41,7 +41,10 @@ func (systemGHAccountRunner) Run(ctx context.Context, args ...string) (string, e
 		return cmd
 	})
 	if runErr == nil {
-		return stdout.String(), nil
+		if out := stdout.String(); strings.TrimSpace(out) != "" {
+			return out, nil
+		}
+		return stderr.String(), nil
 	}
 	if execCtxErr != nil && (errors.Is(execCtxErr, context.Canceled) || errors.Is(execCtxErr, context.DeadlineExceeded)) {
 		return "", execCtxErr
