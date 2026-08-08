@@ -262,8 +262,9 @@ func (r *Repository) GetFirstGitSnapshot(ctx context.Context, sessionID string) 
 	return r.getGitSnapshotByOrder(ctx, sessionID, "ASC")
 }
 
-// GetGitSnapshotsBySession retrieves all git snapshots for a session, newest
-// first by created_at, regardless of triggered_by.
+// GetGitSnapshotsBySession retrieves a session's "status_update" git
+// snapshots (the only type this method's rows are ever read as — see below),
+// newest first by created_at, regardless of triggered_by.
 //
 // Deliberately does NOT mirror GetLatestGitSnapshot's agent_completed-first
 // preference: that ordering caused a real defect for this method's actual
@@ -276,6 +277,18 @@ func (r *Repository) GetFirstGitSnapshot(ctx context.Context, sessionID string) 
 // UpsertLatestLiveGitSnapshot); callers that need a file count from such a
 // row fall back to its metadata's modified/added/deleted/untracked/renamed
 // lists, which are populated regardless of triggered_by.
+//
+// Filters to snapshot_type = status_update: an "archive" row (captureArchiveDiff)
+// never sets Branch, so it always persists as Branch == "". This method's
+// only production consumer, the pre-delete warning, dedupes by branch — an
+// unfiltered archive row would bucket under the "" key and inflate (or, if a
+// session's real branch is ever also empty, potentially shadow) the reported
+// counts (REVIEW-ROUND: 3).
+//
+// created_at DESC carries an explicit `id` tiebreaker: SQLite (and any other
+// dialect this repository also runs against) gives no ordering guarantee
+// among rows with an identical created_at, so an unbroken tie would make the
+// result nondeterministic (REVIEW-ROUND: 3).
 // If limit > 0, only that many snapshots are returned.
 // Returns an empty slice if no snapshots are found.
 func (r *Repository) GetGitSnapshotsBySession(ctx context.Context, sessionID string, limit int) ([]*models.GitSnapshot, error) {
@@ -283,14 +296,14 @@ func (r *Repository) GetGitSnapshotsBySession(ctx context.Context, sessionID str
 		SELECT id, session_id, snapshot_type, branch, remote_branch, head_commit, base_commit,
 		       ahead, behind, files, triggered_by, metadata, created_at
 		FROM task_session_git_snapshots
-		WHERE session_id = ?
-		ORDER BY created_at DESC
+		WHERE session_id = ? AND snapshot_type = ?
+		ORDER BY created_at DESC, id DESC
 	`
 	if limit > 0 {
 		query += fmt.Sprintf(" LIMIT %d", limit)
 	}
 
-	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(query), sessionID)
+	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(query), sessionID, string(models.SnapshotTypeStatusUpdate))
 	if err != nil {
 		return nil, err
 	}

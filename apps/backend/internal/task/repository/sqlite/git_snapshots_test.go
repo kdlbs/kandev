@@ -97,6 +97,120 @@ func TestGetGitSnapshotsBySession_OrdersByRecencyRegardlessOfTriggeredBy(t *test
 	}
 }
 
+// TestGetGitSnapshotsBySession_OrdersByRecencyRegardlessOfTriggeredBy_InverseArrangement
+// is the sibling of the test above, seeding the opposite arrangement: a
+// genuinely NEWER agent_completed row against an OLDER live_monitor row.
+// Without this inverse case, "sorts by recency" is indistinguishable from
+// "always prefers live_monitor" or "no ordering at all" — both wrong
+// implementations pass the single-arrangement test above (mutation-proven in
+// docs/specs/session-delete-resource-cleanup REVIEW-ROUND: 3: dropping the
+// ORDER BY clause entirely, or replacing it with `ORDER BY triggered_by
+// DESC`, both left the sibling test green). This test only passes when the
+// query is genuinely ordering by created_at, in either direction.
+func TestGetGitSnapshotsBySession_OrdersByRecencyRegardlessOfTriggeredBy_InverseArrangement(t *testing.T) {
+	repo := newRepoForHealTests(t)
+	ctx := context.Background()
+	const taskID = "task-snapshot-recency-inverse"
+	const sessionID = "session-snapshot-recency-inverse"
+	seedGitSnapshotSession(t, repo, taskID, sessionID)
+
+	staleAt := time.Now().UTC()
+	if err := repo.UpsertLatestLiveGitSnapshot(ctx, &models.GitSnapshot{
+		SessionID: sessionID, Branch: "feature/recency-inverse", Ahead: 1,
+		CreatedAt: staleAt,
+	}); err != nil {
+		t.Fatalf("create older live_monitor snapshot: %v", err)
+	}
+
+	// A fresh agent turn completes strictly AFTER the live_monitor tick above
+	// (e.g. the agent kept working after the periodic poll fired) and must
+	// sort first — the newer row wins regardless of which triggered_by it
+	// carries.
+	if err := repo.CreateGitSnapshot(ctx, &models.GitSnapshot{
+		SessionID: sessionID, SnapshotType: models.SnapshotTypeStatusUpdate,
+		Branch: "feature/recency-inverse", Ahead: 2,
+		Files:       map[string]interface{}{"newer.ts": map[string]interface{}{"status": "modified"}},
+		TriggeredBy: "agent_completed",
+		CreatedAt:   staleAt.Add(time.Minute),
+	}); err != nil {
+		t.Fatalf("create newer agent_completed snapshot: %v", err)
+	}
+
+	snapshots, err := repo.GetGitSnapshotsBySession(ctx, sessionID, 5)
+	if err != nil {
+		t.Fatalf("GetGitSnapshotsBySession: %v", err)
+	}
+	if len(snapshots) != 2 {
+		t.Fatalf("snapshot count = %d, want 2", len(snapshots))
+	}
+
+	newest := snapshots[0]
+	if newest.TriggeredBy != "agent_completed" {
+		t.Fatalf("newest snapshot triggered_by = %q, want agent_completed (the genuinely newer row must sort first)",
+			newest.TriggeredBy)
+	}
+	oldest := snapshots[1]
+	if oldest.TriggeredBy != TriggeredByLiveMonitor {
+		t.Fatalf("oldest snapshot triggered_by = %q, want %q", oldest.TriggeredBy, TriggeredByLiveMonitor)
+	}
+}
+
+// TestGetGitSnapshotsBySession_ExcludesArchiveTypeRows guards the
+// session-delete pre-delete-warning defect documented in
+// docs/specs/session-delete-resource-cleanup REVIEW-ROUND: 3: this method's
+// only production consumer is the pre-delete warning
+// (apps/web/hooks/use-session-delete-warning.ts), which dedupes snapshots by
+// branch. captureArchiveDiff (apps/backend/internal/orchestrator/task_operations.go)
+// writes an "archive" snapshot for a session that was archived before later
+// being deleted, and that row never sets Branch — it always persists as "".
+// Without a snapshot_type filter, that archive row's (possibly stale) Files
+// count gets bucketed under the "" branch key and added on top of whatever
+// the session's real branch reports, inflating (or, if the real branch is
+// ever also empty, potentially shadowing) the warning. Only "status_update"
+// rows carry live pre-delete-warning-relevant state.
+func TestGetGitSnapshotsBySession_ExcludesArchiveTypeRows(t *testing.T) {
+	repo := newRepoForHealTests(t)
+	ctx := context.Background()
+	const taskID = "task-snapshot-archive"
+	const sessionID = "session-snapshot-archive"
+	seedGitSnapshotSession(t, repo, taskID, sessionID)
+
+	now := time.Now().UTC()
+	if err := repo.CreateGitSnapshot(ctx, &models.GitSnapshot{
+		SessionID: sessionID, SnapshotType: models.SnapshotTypeStatusUpdate,
+		Branch: "feature/real", Ahead: 1,
+		Files:       map[string]interface{}{"real.ts": map[string]interface{}{"status": "modified"}},
+		TriggeredBy: "agent_completed",
+		CreatedAt:   now,
+	}); err != nil {
+		t.Fatalf("create status_update snapshot: %v", err)
+	}
+
+	// captureArchiveDiff never sets Branch or Ahead, so this row always
+	// persists with Branch == "" — reproduced here exactly as production does.
+	if err := repo.CreateGitSnapshot(ctx, &models.GitSnapshot{
+		SessionID: sessionID, SnapshotType: models.SnapshotTypeArchive,
+		Files:     map[string]interface{}{"archived-stale.ts": map[string]interface{}{"status": "modified"}},
+		CreatedAt: now.Add(time.Minute),
+	}); err != nil {
+		t.Fatalf("create archive snapshot: %v", err)
+	}
+
+	snapshots, err := repo.GetGitSnapshotsBySession(ctx, sessionID, 5)
+	if err != nil {
+		t.Fatalf("GetGitSnapshotsBySession: %v", err)
+	}
+	if len(snapshots) != 1 {
+		t.Fatalf("snapshot count = %d, want 1 (archive-type row must be excluded), got %#v", len(snapshots), snapshots)
+	}
+	if snapshots[0].SnapshotType != models.SnapshotTypeStatusUpdate {
+		t.Fatalf("returned snapshot type = %q, want %q", snapshots[0].SnapshotType, models.SnapshotTypeStatusUpdate)
+	}
+	if snapshots[0].Branch != "feature/real" {
+		t.Fatalf("returned snapshot branch = %q, want feature/real", snapshots[0].Branch)
+	}
+}
+
 // TestGetGitSnapshotsBySession_FilesColumnDecodesToEmptyMapNotNil guards the
 // serialization half of the same defect: a genuinely-empty files column
 // (persisted as the literal "{}") must decode to a non-nil empty map, not Go

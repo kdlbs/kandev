@@ -130,37 +130,35 @@ func TestUpsertLatestLiveGitSnapshot(t *testing.T) {
 			t.Fatalf("second live upsert: %v", err)
 		}
 
-		all, err := repo.GetGitSnapshotsBySession(ctx, sessionID, 0)
+		// GetGitSnapshotsBySession is scoped to status_update rows only (see its
+		// docstring — REVIEW-ROUND: 3 of docs/specs/session-delete-resource-cleanup),
+		// so the archive row's survival is checked via the unfiltered
+		// GetFirstGitSnapshot (oldest-by-created_at, and the archive row was
+		// created first in this test) rather than through that method.
+		archiveSnap, err := repo.GetFirstGitSnapshot(ctx, sessionID)
 		if err != nil {
-			t.Fatalf("list snapshots: %v", err)
+			t.Fatalf("get first (archive) snapshot: %v", err)
 		}
-		if len(all) != 2 {
-			t.Fatalf("expected 2 rows (1 archive + 1 live), got %d", len(all))
+		if archiveSnap.SnapshotType != models.SnapshotTypeArchive {
+			t.Fatalf("archive snapshot disappeared after upsert: got type %q", archiveSnap.SnapshotType)
+		}
+		if archiveSnap.HeadCommit != "archive-head" {
+			t.Errorf("archive head_commit mutated: got %q", archiveSnap.HeadCommit)
 		}
 
-		var sawArchive, sawLive bool
-		for _, snap := range all {
-			switch snap.SnapshotType {
-			case models.SnapshotTypeArchive:
-				sawArchive = true
-				if snap.HeadCommit != "archive-head" {
-					t.Errorf("archive head_commit mutated: got %q", snap.HeadCommit)
-				}
-			case models.SnapshotTypeStatusUpdate:
-				sawLive = true
-				if snap.HeadCommit != "live-head-2" {
-					t.Errorf("live head_commit not updated: got %q", snap.HeadCommit)
-				}
-				if snap.TriggeredBy != sqlite.TriggeredByLiveMonitor {
-					t.Errorf("live triggered_by wrong: got %q", snap.TriggeredBy)
-				}
-			}
+		liveRows, err := repo.GetGitSnapshotsBySession(ctx, sessionID, 0)
+		if err != nil {
+			t.Fatalf("list status_update snapshots: %v", err)
 		}
-		if !sawArchive {
-			t.Error("archive snapshot disappeared after upsert")
+		if len(liveRows) != 1 {
+			t.Fatalf("expected 1 status_update row (the live row; archive is filtered out), got %d", len(liveRows))
 		}
-		if !sawLive {
-			t.Error("live snapshot missing after upsert")
+		live2Snap := liveRows[0]
+		if live2Snap.HeadCommit != "live-head-2" {
+			t.Errorf("live head_commit not updated: got %q", live2Snap.HeadCommit)
+		}
+		if live2Snap.TriggeredBy != sqlite.TriggeredByLiveMonitor {
+			t.Errorf("live triggered_by wrong: got %q", live2Snap.TriggeredBy)
 		}
 	})
 
@@ -282,13 +280,17 @@ func TestDeleteLiveMonitorSnapshots(t *testing.T) {
 		t.Fatalf("upsert live: %v", err)
 	}
 
-	// Create an agent_completed snapshot.
+	// Create an agent_completed snapshot. SnapshotType is set explicitly
+	// (matching how saveGitStatusSnapshot always writes it in production) since
+	// GetGitSnapshotsBySession now scopes to status_update rows only — see its
+	// docstring, REVIEW-ROUND: 3 of docs/specs/session-delete-resource-cleanup.
 	completed := &models.GitSnapshot{
-		SessionID:   sessionID,
-		Branch:      "feature",
-		HeadCommit:  "completed-head",
-		TriggeredBy: "agent_completed",
-		Metadata:    map[string]interface{}{"branch_additions": float64(5)},
+		SessionID:    sessionID,
+		SnapshotType: models.SnapshotTypeStatusUpdate,
+		Branch:       "feature",
+		HeadCommit:   "completed-head",
+		TriggeredBy:  "agent_completed",
+		Metadata:     map[string]interface{}{"branch_additions": float64(5)},
 	}
 	if err := repo.CreateGitSnapshot(ctx, completed); err != nil {
 		t.Fatalf("create agent_completed: %v", err)
