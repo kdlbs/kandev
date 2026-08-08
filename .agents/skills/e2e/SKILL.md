@@ -92,6 +92,8 @@ pnpm e2e:run --project containers tests/docker/<name>.spec.ts
 Use `mobile-chrome` only for `mobile-*.spec.ts` files. Confirm Playwright
 discovers the intended test count before treating a focused command as evidence.
 
+`e2e:run` accepts one `--project`; repeating it selects only the last value, so run desktop and mobile separately when both are required and confirm discovery for each.
+
 The runner solves the sharp edges hand-rolling would hit: in docker it builds the CGO backend on the **host** and runs it in the runtime image (forward-compatible when the host glibc ≤ the image's — the usual case; it smoke-tests this and only falls back to the build image if the host is newer), builds the Vite web assets on the host, runs them through the Go-served SPA, and keeps Playwright output container-local. See `apps/web/e2e/README.md` → "the managed runner".
 
 `--no-build` reuses every production E2E artifact, not only Vite assets and the
@@ -168,7 +170,7 @@ defect with retries disabled, or evidence a concrete external blocker.
 make build-web   # ~30s, required after every frontend change
 ```
 
-Without this, tests run against stale code and failures are misleading. `make build-backend` is also required after Go changes. `make test-e2e` and `pnpm e2e:run` handle both automatically.
+Without this, tests can exercise stale code: after backend changes run `make -C apps/backend build` before reproducing Playwright failures, and compare the binary timestamp/hash if a fixed test still fails. `make test-e2e` and `pnpm e2e:run` handle both builds.
 
 ## Writing a test
 
@@ -249,7 +251,7 @@ Before writing an E2E test, validate the feature works interactively using `play
 
 ### Start the dev environment
 
-Multiple agents may run in parallel, so use random ports to avoid collisions. Fixture ports auto-offset from 18080 (backend) and 13000 (frontend) using `E2E_PORT_OFFSET` (derived from `PID % 30` by default) — stay outside those ranges. Parallel E2E test runs are safe by default.
+Multiple agents may run in parallel, so use random ports for dev servers. Managed runner shards are isolated, but separate raw Playwright processes are not automatically safe: fixture ports are backend `18080 + E2E_PORT_OFFSET + workerIndex` and agentctl `30001 + E2E_PORT_OFFSET*1000 + workerIndex*200`; `--repeat-each` advances `workerIndex`, so nearby fixed offsets can overlap later.
 
 ```bash
 OFFSET=$((RANDOM % 100))
@@ -365,6 +367,8 @@ Tests are grouped by feature area in subdirectories under `tests/`. When creatin
   `page.evaluate` callbacks execute in the browser, so they cannot close over
   Node/test variables. Pass expected values as the argument instead, for
   example `locator.evaluate((el, expected) => Math.abs(el.scrollTop - expected), baseline)`.
+- **Reset pointer state before hover assertions.** A prior click can leave the
+  hover target active; move to a neutral page location before asserting hover UI.
 - **Measure asynchronous layout from a settled baseline.** When the initiating
   UI action changes layout before its delayed result arrives, delay the mock
   response and capture the baseline after that synchronous layout settles. Then
@@ -378,7 +382,7 @@ Tests are grouped by feature area in subdirectories under `tests/`. When creatin
   strategy selected at runtime.
 - **Nested Escape controls.** If an inner panel inside a Radix Dialog handles Escape, intercept the key in capture phase and call both `preventDefault()` and `stopPropagation()` before dismissing the inner panel. A bubble-phase window handler runs after Radix can dismiss the outer dialog. Add a regression that asserts the inner panel collapses while the outer dialog remains open.
 - **Seed via API, assert via UI.** Use `apiClient` to set up preconditions quickly, but always verify the result by opening the page and checking the DOM.
-- **Workflow/session invariants.** For session-primary/profile behavior, prefer polling backend state with `apiClient.listTaskSessions(taskId)` for invariants such as `agent_profile_id`, `is_primary`, `state`, and session count, then add UI assertions as secondary evidence. UI tab markers can lag or be absent when the backend invariant is the behavior under test.
+- **Workflow/session invariants.** For session-primary/profile behavior, prefer polling backend state with `apiClient.listTaskSessions(taskId)` for invariants such as `agent_profile_id`, `is_primary`, `state`, and session count, then add UI assertions as secondary evidence. Agent output is not lifecycle readiness: if a follow-up must take the synchronous prompt path rather than the queued path, or a transcript is mutated after an auto-started boot turn, poll the exact session state (for example `WAITING_FOR_INPUT`) before acting. The mock agent can persist text before the lifecycle transition completes. UI tab markers and visible messages can lag or lead the backend invariant and are secondary evidence; verify the affected full spec and original CI shard with `--retries=0`.
 - **Scope terminal helpers to the active panel.** Terminal/mobile helpers must avoid document-wide `.xterm` or `terminal-xterm-host` selectors because multiple terminal panels can be mounted at once. Scope locators through `data-testid="terminal-panel"` and prefer the visible or latest panel for `page.evaluate` helpers.
 - **Scope Dockview preview polling to visible panels.** Hidden or stale Dockview panels can remain mounted and produce false positives if helpers scan all matching custom elements globally. For `diffs-container`, filter candidate elements by visible layout box and computed visibility before reading shadow DOM text.
 - **Poll before Dockview cleanup.** If an E2E helper uses `window.__dockviewApi__`, wait or poll for the API to be attached before acting. A one-shot `if (!api) return` cleanup can silently skip cleanup during page initialization and leak prior preview panels into later assertions.
@@ -414,7 +418,7 @@ When a test fails:
 
 - **"Backend did not become healthy"** — run `make build-backend build-web`, check with `E2E_DEBUG=1`
 - **"Cannot find module"** — run `cd apps && pnpm install --frozen-lockfile`
-- **Port conflicts** — backends use 18080+ and frontends use 13000+ (per worker), auto-offset by `E2E_PORT_OFFSET` (derived from PID). Set `E2E_PORT_OFFSET=0` for deterministic ports
+- **Port conflicts** — run raw repeat/stress invocations sequentially, or prove both computed port ranges are disjoint and check listeners. A totally white screenshot plus `ERR_CONNECTION_REFUSED` is a port/lifecycle signature to rule out before changing waits; never fix it with longer locator timeouts.
 - **Responsive layout stays stale after `page.setViewportSize()`** — record
   `window.innerWidth`, the affected element and parent `clientWidth`, and any
   layout-library width before changing waits. Headless Chromium reliably
@@ -480,14 +484,10 @@ A test that flakes under parallel/sharded load is one of two things — decide w
 ## Selector guidelines
 
 - **Prefer `data-testid` selectors** over text-based locators. Text content can change when UI is updated (e.g., hiding a badge), breaking tests that match by text. Use `getByTestId()` or `locator("[data-testid='...']")` for stable targeting.
-- **Scope Radix tooltip locators to the visible portal.** Radix can render an
-  accessibility copy as well as the visible tooltip, so global test-id, text,
-  or role locators may match multiple elements in strict mode. Start from a
-  open portal `[data-slot="tooltip-content"][data-state="open"]`, then locate its visible
-  descendant. Do not assume the trigger's `aria-describedby` target is the
-  visual portal. Use bounding-box assertions when relative placement matters.
+- **Scope Radix and responsive locators to the active instance.** Tooltips may use `instant-open`, `delayed-open`, or `open`; use `[data-slot="tooltip-content"]:not([data-state="closed"])`, then scope to the visible portal/popover/container and active ancestor. Hidden mounts can make global locators match the wrong instance; do not use `.first()` to hide duplicates.
 - **Use page object methods** like `clickSessionChatTab()` (stable `data-testid`) instead of `sessionTabByText("1")` (fragile text match) for session tabs.
 - **Dropdown menus can detach** from the DOM when React re-renders the parent (e.g., WS events updating the sidebar). The `openSidebarMenuAndClick()` helper in `session-page.ts` retries the full open-click sequence on detachment — use this pattern for similar interactions.
+- **Sidebar/context-menu editing.** For actions targeting a non-active item, create/select a separate navigation task, assert its initial URL/task ID, act on the target row, then assert the URL/task ID is unchanged and persistence survives reload; cover shared desktop/mobile/tablet menus.
 
 ## TDD workflow
 

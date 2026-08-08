@@ -31,6 +31,11 @@ checks, and push. Ready PR monitoring and remediation continue through
 - `--draft` — create the PR as draft and skip the fixup step. Use when the work is not ready for review.
 - Default (no flag) — create as ready-for-review and continue with `/pr-fixup` in the same conversation.
 
+**Publishing-state precedence:** explicit user state (`--draft` or an explicit
+ready-for-review request) wins. If the `github:yeet` plugin is explicitly
+selected, follow its draft default only when the user did not request either
+state; otherwise `/pr` defaults to ready-for-review. Always report the result.
+
 ## Steps
 
 Track these steps with an internal todo/checklist and mark them complete as you go.
@@ -95,11 +100,22 @@ required screenshot embedding in step 7 is complete.
      treating capture as blocked. Name mobile specs `mobile-*.spec.ts`, write
      assets to ignored `apps/web/.pr-assets`, inspect/compress them, then remove
      the temporary spec and confirm `git status` is clean.
+   - For disposable capture specs, prefer the existing `prCapture` fixture from
+     `apps/web/e2e/fixtures/test-base.ts`; it writes the expected filenames and
+     manifest for PR assets.
+   - `apps/web/e2e/scripts/run-e2e.sh` clears `.pr-assets` at the start of each
+     managed-runner invocation. Capture desktop and mobile assets in one
+     invocation when possible; if separate runs are necessary, preserve/merge
+     the prior assets and revalidate the complete manifest afterward.
    - Reuse only fresh entries from `apps/web/.pr-assets/manifest.json`. After
      every capture, require a non-empty manifest with the intended fresh asset
      entries: `test -s apps/web/.pr-assets/manifest.json`. If it is absent or
      lacks the capture, do not treat the run as successful; rerun with `--host`
      and report the managed-runner gap.
+   - Before inspecting, compressing, or publishing the assets, verify that every
+     manifest entry maps to an existing file under `apps/web/.pr-assets`. If any
+     entry is missing, treat the capture as incomplete and restore or recapture
+     the asset; revalidate the complete mapping immediately before publication.
    - If required assets are missing, run the Playwright capture before
      publication; do not create the PR first.
    - For a mobile capture through `pnpm e2e:run`, select the runner project
@@ -148,21 +164,14 @@ required screenshot embedding in step 7 is complete.
    ```bash
    set -euo pipefail
    PAYLOAD="/tmp/pr-body-<PR_NUMBER>-payload.json"
-   if command -v rtk >/dev/null 2>&1; then
-     rtk proxy jq -n --rawfile body "<body-file>" '{body: $body}' > "$PAYLOAD"
-     rtk proxy jq empty "$PAYLOAD"
-   else
-     jq -n --rawfile body "<body-file>" '{body: $body}' > "$PAYLOAD"
-     jq empty "$PAYLOAD"
-   fi
+   jq -n --rawfile body "<body-file>" '{body: $body}' > "$PAYLOAD"
+   jq empty "$PAYLOAD"
    gh api --method PATCH repos/:owner/:repo/pulls/<PR_NUMBER> --input "$PAYLOAD"
    ```
-   **RTK and JSON payloads:** RTK is optional. If it is installed, it
-   summarizes normal stdout, so it must not sit between a JSON producer and a
-   redirected file or another parser. The conditional recipe above keeps the
-   REST fallback byte-preserving whether or not RTK is installed.
-   The same rule applies to command substitutions, `xargs`, and any other
-   consumer that expects unmodified Git or JSON output.
+   **JSON payloads:** Use `jq` (or an equivalent JSON tool) to build and
+   validate payloads without interpolating untrusted Markdown into shell
+   syntax. Keep the REST fallback byte-preserving for command substitutions,
+   `xargs`, and any other consumer that expects unmodified Git or JSON output.
 
    **Preserve the existing PR description:** The PR body is a shared, mutable
    document. Preview automation and other bots may add sections after the PR

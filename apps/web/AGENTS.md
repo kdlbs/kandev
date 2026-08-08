@@ -40,6 +40,10 @@ Go Boot Payload -> Hydrate Store -> Components Read Store -> Hooks Subscribe
 
 **Never fetch data directly in components.**
 
+### Browser capability boundaries
+
+- Use `generateUUID()` for client-only non-security IDs, not `crypto.randomUUID()`; use `copyToClipboard()` for copy actions, not `navigator.clipboard.writeText()`. Keep fallbacks non-security; test missing or rejected capabilities with an `rg` audit.
+
 ## Store Structure (Domain Slices)
 
 ```text
@@ -87,6 +91,10 @@ For rebasing or finishing PRs written against the old Next.js runtime, follow [`
 **Format:** `{id, type, action, payload, timestamp}`.
 
 Use subscription hooks only; the WS client auto-deduplicates.
+
+**Task overview vs. session detail:** Sidebar, Kanban, mobile-switcher, and dashboard rows read the shared task snapshot/`Task.statusSummary`; never call `subscribeSession` per row. A global `task.status_summary.updated` handler fans out shared-cache updates, while opened detail surfaces consume rich streams. Extend the bounded backend projection for new badges; see the [spec](../../docs/specs/platform/bounded-task-status-delivery.md) and [ADR](../../docs/decisions/2026-08-01-separate-task-summary-session-stream-traffic.md).
+
+**Branch-scoped task state:** For live worktree/session state plus `task_prs`, key by `(repository, checked-out branch)`, not task/repository alone. `branch_switched` invalidates prior status/commits; reject late results with a generation/identity guard and preserve siblings. Historical PRs affect Changes only when `repository_id` and normalized `head_branch` match; Review/PR history may still show them. Test single/multi-repo cases and desktop/mobile Changes behavior.
 
 When changing task lifecycle WS handlers (`task.updated`, `task.deleted`,
 `task.state_changed`), check both kanban and Office surfaces. Archive/delete
@@ -153,33 +161,24 @@ surface.
   with independent open state. Touch-pinned help must close on a second trigger
   tap, outside interaction, and Escape; verify desktop pointer and mobile-sized
   touch flows.
-- **Renaming a `data-testid`:** set the new id as `data-testid="<new>"` and keep the old id as
-  `data-legacy-testid="<old>"`, then migrate e2e specs to the new id in the same PR. JSX rejects two
-  `data-testid` attributes on one element, and Playwright's `getByTestId` only matches one attribute
-  name — the `data-legacy-testid` alias lets existing specs keep selecting the element mid-migration.
-- **Dockview session panel activation:** session chat panels can become active through tab
-  pointer/keyboard events, global tab-cycling shortcuts, reopen/menu actions, and Dockview close
-  controls. When changing `tasks.activeSessionId` or active-session sync, audit all of those paths.
-  Use store state in addition to Dockview `api.isActive`; the current session's chat tab may be
-  Dockview-inactive while Files/Changes is active. Same-session clicks must not leave stale
-  activation intent, and Dockview `.dv-default-tab-action` close controls should be treated as
-  close/delete actions rather than session-switch intent.
-- **Conditional review-panel ownership:** the reusable `pr-detail` panel may be
-  visible only while the active task has a linked PR or MR. A custom Default
-  layout's canonical panel supplies the preferred group and tab index; it does
-  not make an empty tab persistent. After review data hydrates, review loss
-  removes any canonical panel regardless of how it entered the runtime layout.
-  Restoration, maximized layouts, and a session's offered/dismissed marker
-  defer or suppress automatic insertion; linked existing panels synchronize
-  provider and review identity without moving them.
-- **GitHub PR status UI:** visual PR/CI status surfaces should use the shared helpers in
-  `apps/web/components/github/pr-task-icon.tsx` (`hasPRChecksPassedForDisplay`,
-  `hasPRChecksInProgressForDisplay`, `hasPRChecksPassedWithoutReviewWaitForDisplay`) instead of
-  re-deriving status from `checks_state`, `checks_total`, or `checks_passing` locally. Aggregate
-  check counts are a display-only fallback when `checks_state` is empty; they may make chips or task
-  icons render passed/in-progress, but must not enable merge actions. Merge readiness must use
-  `isPRReadyToMerge`, which requires GitHub's explicit `checks_state === "success"` rollup. When
-  changing PR status behavior, update both `pr-task-icon.test.ts` and `pr-status-chip.test.tsx`.
+- **Renaming a `data-testid`:** use `data-legacy-testid` for the old id while
+  migrating specs; JSX and Playwright only support one `data-testid` attribute.
+- **Dockview session activation:** audit pointer/keyboard tabs, shortcuts,
+  reopen/menu actions, and close controls; combine store state with
+  `api.isActive`, clear same-session intent, and treat default-tab close as
+  delete rather than session switching.
+- **Conditional review panels:** show `pr-detail` only for active tasks with a
+  linked PR/MR; default layouts only provide preferred placement. Hydrated review
+  loss removes canonical panels, while restoration/maximized and offered/dismissed
+  markers suppress insertion; existing panels sync identity without moving.
+- **Dockview environment switching:** reconcile ephemeral panels before restoring views;
+  correlate ID-less groups by stable ID or position. Treat `chat`/`session:*` as semantic only with a non-null `activeSessionId`.
+- **GitHub PR status UI:** use the shared `pr-task-icon.tsx` display helpers and
+  `isPRReadyToMerge`; aggregate counts are display-only and cannot enable merges.
+  Update `pr-task-icon.test.ts` and `pr-status-chip.test.tsx` with behavior changes.
+- **GitHub PR associations:** retain terminal/merged siblings for tabs/unlink;
+  derive `openPRs` only for aggregate status/automation and test desktop/mobile
+  terminal unlink plus two-to-one collapse/focus.
 - **Task repository labels:** user-facing task/card repo chips should display a
   stable repo slug or name (`owner/repo` when known, otherwise the repo name),
   not a local filesystem path. Local clone paths or folder paths belong in

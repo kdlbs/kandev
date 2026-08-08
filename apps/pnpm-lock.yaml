@@ -56,6 +56,9 @@ importers:
       knip:
         specifier: 6.31.0
         version: 6.31.0
+      playwright-cli:
+        specifier: 0.262.0
+        version: 0.262.0
       prettier:
         specifier: ^3.6.2
         version: 3.8.1
@@ -5576,6 +5579,10 @@ packages:
 
   platform@1.3.6:
     resolution: {integrity: sha512-fnWVljUchTro6RiCFvCXBbNhJc2NijN7oIQxbwsyL0buWJPG85v81ehlHI9fXrJsMNgTofEoWIQeClKpgxFLrg==}
+
+  playwright-cli@0.262.0:
+    resolution: {integrity: sha512-0ZcfJtffYv0NglJE5RcR3l89j8Hpoo7EoH/3A/1g6+gCIKp9Yq1QqKCqzcifHVBmIXE4A21JN2edkC1xzhf2Hw==}
+    deprecated: This package is deprecated, use @playwright/cli instead.
 
   playwright-core@1.61.1:
     resolution: {integrity: sha512-h7Qlt6m4REp25qvIdvbDtVmD4LqVXfpRxhORv9L0jzETM05p4fuPJ3dKyuSXQxDSbXnmS79HAgi9589lGSpLkg==}
@@ -11930,6 +11937,8 @@ snapshots:
       pathe: 2.0.3
 
   platform@1.3.6: {}
+
+  playwright-cli@0.262.0: {}
 
   playwright-core@1.61.1: {}
 

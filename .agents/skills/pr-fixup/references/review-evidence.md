@@ -26,8 +26,9 @@ the current poll and retry once at the next cadence. If review-thread state is
 unknown, do not call review clean/blocked; retry once, then use
 `scripts/pr-resolve list <PR>` before a final status. If total unresolved count
 is nonzero while visible threads are empty, fetch the authoritative thread list
-and full bodies with `scripts/pr-state --comment <comment_id>` or
-`scripts/pr-resolve show <PR> <THREAD_ID_OR_COMMENT_ID>`.
+and full bodies with `scripts/pr-resolve show <PR> <THREAD_ID>`; use
+`scripts/pr-state --comment <comment_id>` only when a flat comment view is all
+that is available.
 
 If `branch:"unknown"` or PR-view resolution is transient, retry the explicit
 PR-number command once before using direct targeted GitHub fallback. Do not
@@ -58,16 +59,22 @@ scripts/pr-resolve list <PR>
 Transport/collection failure leaves checks unknown. Parseable pending/failing
 rows remain usable when `gh pr checks` exits 8; never hide diagnostics in a pipe.
 
-When `hidden_unresolved_threads` exists or total unresolved count exceeds the
-visible list, fetch each body with `scripts/pr-state --comment <comment_id>` or
-`scripts/pr-resolve show <PR> <THREAD_ID_OR_COMMENT_ID>`. A listed thread that
-is already resolved is stale summary state: re-poll and do not reply again.
+When `hidden_unresolved_threads` is non-empty, fetch each thread body with
+`scripts/pr-resolve show <PR> <THREAD_ID>`; use the flat comment command only
+for a comment without thread context. A listed thread that is already resolved
+is stale summary state: re-poll and do not reply again.
 
 Poll at 30-second cadence with a 20-minute cap using bounded one-shot commands;
-avoid long inline loops and `gh pr checks --watch`. Stop early on a required
-failure. Queued/in-progress jobs are pending, not speculative-fix triggers. On
-an explicit wait-through-CI request, repeat bounded checks until failures,
-pending checks, and unresolved-thread count are all empty/zero.
+avoid long inline loops and `gh pr checks --watch`. In default monitoring,
+stop early on a required failure. For an explicit fixed-duration request, use
+strict-deadline mode: accumulate failures and comments until the absolute
+deadline, stopping early only if the PR is merged/closed or access is revoked.
+Queued/in-progress jobs are pending, not speculative-fix triggers. On an
+explicit wait-through-CI request without a fixed deadline, use the same
+20-minute absolute cap: repeat bounded checks until failures, pending checks,
+and unresolved-thread count are all empty/zero, or stop at the deadline and
+report remaining pending checks or unresolved threads. Preserve early stopping
+for failures and merged/closed or access-revoked conditions.
 
 For E2E-only pending work, summarize a saved snapshot before printing shards:
 

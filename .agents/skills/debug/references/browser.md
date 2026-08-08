@@ -6,37 +6,56 @@ Use this only for UI, layout, focus, WS-driven, console, or click-flow bugs that
 
 - Use an isolated instance from `references/instance.md`.
 - Never drive a browser against the user's live instance.
-- Use `npx playwright-cli`; there is no guaranteed bare `playwright-cli` binary.
+- Use the exact `playwright-cli` dependency from `apps/` via
+  `pnpm --dir apps exec playwright-cli`; do not fetch a CLI dynamically.
 - Reuse an existing browser session when possible.
 
 ## Commands
 
 ```bash
-npx --no-install playwright-cli --version
-npx playwright-cli --help
-npx playwright-cli list
+pnpm --dir apps exec playwright-cli --version
+pnpm --dir apps exec playwright-cli --help
+pnpm --dir apps exec playwright-cli list
 ```
 
 Open only if no suitable session exists:
 
 ```bash
-npx playwright-cli open http://localhost:<your_web_port>
+pnpm --dir apps exec playwright-cli open http://localhost:<your_web_port>
 ```
 
 Common debugging:
 
 ```bash
-npx playwright-cli snapshot
-npx playwright-cli snapshot "#main"
-npx playwright-cli snapshot --depth=4
-npx playwright-cli console
-npx playwright-cli console error
-npx playwright-cli network
-npx playwright-cli goto http://localhost:<your_web_port>/some/path
+pnpm --dir apps exec playwright-cli snapshot
+pnpm --dir apps exec playwright-cli snapshot "#main"
+pnpm --dir apps exec playwright-cli snapshot --depth=4
+pnpm --dir apps exec playwright-cli console
+pnpm --dir apps exec playwright-cli console error
+pnpm --dir apps exec playwright-cli network
+pnpm --dir apps exec playwright-cli goto http://localhost:<your_web_port>/some/path
 ```
 
-Correlate browser console and network activity with a fresh standard bundle or
-the smallest custom source set that answers the question:
+For browser/API failures that may be caused by origin capabilities, capture
+these values in the isolated browser session before attributing the symptom to
+WebSocket or network behavior:
+
+```bash
+pnpm --dir apps exec playwright-cli eval 'JSON.stringify({
+  origin: location.origin,
+  secure_context: window.isSecureContext,
+  random_uuid: typeof crypto === "undefined" ? "undefined" : typeof crypto.randomUUID,
+  subtle: typeof crypto === "undefined" ? "undefined" : typeof crypto.subtle,
+  clipboard_write: typeof navigator === "undefined" || !navigator.clipboard
+    ? "undefined"
+    : typeof navigator.clipboard.writeText,
+})'
+```
+
+Verify the failing code's capability probe and fallback in that same session;
+do not infer support from a different origin or from a test-only stub.
+
+Correlate browser console, frontend log buffer, network activity, and backend logs from:
 
 ```bash
 scripts/kandev-logs <your_backend_port> --source all
@@ -61,5 +80,5 @@ error text.
 Close the browser when done unless the user asks to keep it open:
 
 ```bash
-npx playwright-cli close
+pnpm --dir apps exec playwright-cli close
 ```

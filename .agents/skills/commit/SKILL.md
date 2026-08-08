@@ -94,6 +94,15 @@ explicitly requests task tracking.
      ```
      Retry the normal commit after the install; never bypass the hook.
 
+   - After merging or rebasing the base branch, if `apps/package.json` or
+     `apps/pnpm-lock.yaml` changed and a hook reports
+     `ERR_MODULE_NOT_FOUND` even though `apps/node_modules/.bin/commitlint`
+     exists, refresh the workspace dependencies from `apps/`:
+     ```bash
+     cd apps && pnpm install --frozen-lockfile
+     ```
+     Retry the normal commit without bypassing hooks.
+
    Why this matters: a missing hook lets lint regressions slip past local commits and only surface in CI (e.g. funlen / cognitive complexity on backend Go code). The hook catches them in <1s at commit time. See `Makefile`'s `doctor` target for the idempotent install command.
 
 3. **Capture the parent SHA and preserve hook evidence:**
@@ -111,17 +120,18 @@ qualifies as a successful hook receipt.
 5. **Commit:** Write a commit message following the format above. If changes span multiple concerns, consider separate commits.
    If a formatter changes files and prevents the commit, review and re-stage
    those files, then create a new commit attempt; do not use `--amend`.
+   If a JSX layout-only edit touches an element containing an existing
+   hardcoded user-facing literal, `i18n-new-code` may classify that literal as
+   changed copy and fail. Localize it and add matching `en`/`pseudo` catalog
+   entries before retrying; verify with `cd apps/web && pnpm run i18n:check` and
+   the normal hook receipt.
    Capture the normal hook stream in a temporary log while committing and use
    that log to record each hook ID and result. Do not infer hook results from a
    condensed launcher summary. For example:
    ```bash
    COMMIT_LOG="$(mktemp "${TMPDIR:-/tmp}/kandev-commit.XXXXXX.log")"
    set -o pipefail
-   if command -v rtk >/dev/null 2>&1; then
-     rtk proxy git commit -m "type(scope): description"
-   else
-     git commit -m "type(scope): description"
-   fi 2>&1 | tee "$COMMIT_LOG" >/dev/null
+   git commit -m "type(scope): description" 2>&1 | tee "$COMMIT_LOG" >/dev/null
    ```
    Read the log to extract the hook receipt, rather than printing the full
    stream again. Remove the exact temporary file after copying the receipt into
@@ -129,6 +139,9 @@ qualifies as a successful hook receipt.
    ```bash
    unlink "$COMMIT_LOG"
    ```
+   If the commit exits nonzero, preserve and print the full or bounded log
+   before cleanup so hook diagnostics are not lost. Remove the temporary log
+   only after copying a successful hook receipt or recording the failed output.
 
    If a hook fails only because another worktree is already running
    golangci-lint (for example, `parallel golangci-lint is running`), wait for

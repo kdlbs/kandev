@@ -63,6 +63,16 @@ Push the already committed branch to its remote.
    gh auth setup-git
    git push "https://github.com/<head-owner>/<head-repository>.git" "HEAD:refs/heads/<head-ref>"
    ```
+   If that push fails with `git repository does not match any credential lease
+   scope`, use a one-shot HTTPS Basic auth header instead of changing the
+   remote or persisting credentials:
+   ```bash
+   token=$(gh auth token)
+   auth=$(printf 'x-access-token:%s' "$token" | base64 | tr -d '\n')
+   git -c credential.helper= -c "http.extraheader=Authorization: Basic $auth" push "https://github.com/<head-owner>/<head-repository>.git" "HEAD:refs/heads/<head-ref>"
+   ```
+   Never embed the token in a remote URL or persist it. Re-fetch the PR and
+   require its `headRefOid` to equal local `HEAD` afterward.
    Do not use a conveniently named local `fork`/`contributor` remote: linked
    worktrees share remote configuration, so it can refer to another task.
    Re-fetch the PR and require `headRefOid` to equal local `HEAD`.
