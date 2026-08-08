@@ -2,7 +2,7 @@
 
 import { IconGitPullRequest } from "@tabler/icons-react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
-import { useState } from "react";
+import { useState, type FocusEvent, type PointerEvent } from "react";
 import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
 import { useAppStore } from "@/components/state-provider";
@@ -244,13 +244,45 @@ export function PRTaskIcon({ taskId }: { taskId: string }) {
   return <MultiPRIcon taskId={taskId} prs={prs} />;
 }
 
+function usePRTaskTooltipState() {
+  const [hovered, setHovered] = useState(false);
+  const [focused, setFocused] = useState(false);
+  const [dismissed, setDismissed] = useState(false);
+
+  return {
+    open: !dismissed && (hovered || focused),
+    onPointerEnter(event: PointerEvent<HTMLSpanElement>) {
+      if (event.pointerType !== "mouse") return;
+      setHovered(true);
+      setDismissed(false);
+    },
+    onPointerLeave(event: PointerEvent<HTMLSpanElement>) {
+      if (event.pointerType !== "mouse") return;
+      setHovered(false);
+      if (!focused) setDismissed(false);
+    },
+    onFocus(event: FocusEvent<HTMLSpanElement>) {
+      if (!event.currentTarget.matches(":focus-visible")) return;
+      setFocused(true);
+      setDismissed(false);
+    },
+    onBlur() {
+      setFocused(false);
+      if (!hovered) setDismissed(false);
+    },
+    onEscapeKeyDown() {
+      setDismissed(true);
+    },
+  };
+}
+
 function SinglePRIcon({ taskId, pr }: { taskId: string; pr: TaskPR }) {
   const { t } = useTranslation();
-  const [tooltipOpen, setTooltipOpen] = useState(false);
+  const tooltip = usePRTaskTooltipState();
   const readyToMerge = isPRReadyToMerge(pr);
   const summary = derivePRTaskStatusSummary(pr, readyToMerge);
   return (
-    <Tooltip open={tooltipOpen} onOpenChange={setTooltipOpen}>
+    <Tooltip open={tooltip.open}>
       <TooltipTrigger asChild>
         <span
           data-testid={`pr-task-icon-${taskId}`}
@@ -260,16 +292,20 @@ function SinglePRIcon({ taskId, pr }: { taskId: string; pr: TaskPR }) {
           role="img"
           tabIndex={0}
           aria-label={t("github:pullRequestStatus", { number: pr.pr_number })}
-          onFocus={(event) => {
-            if (event.currentTarget.matches(":focus-visible")) setTooltipOpen(true);
-          }}
-          onBlur={() => setTooltipOpen(false)}
+          onPointerEnter={tooltip.onPointerEnter}
+          onPointerLeave={tooltip.onPointerLeave}
+          onFocus={tooltip.onFocus}
+          onBlur={tooltip.onBlur}
           className={cn("inline-flex items-center shrink-0", getPRStatusColor(pr))}
         >
           <IconGitPullRequest aria-hidden="true" className="h-3.5 w-3.5" />
         </span>
       </TooltipTrigger>
-      <TooltipContent sideOffset={6} className="w-80 max-w-[calc(100vw-1rem)] p-3">
+      <TooltipContent
+        sideOffset={6}
+        onEscapeKeyDown={tooltip.onEscapeKeyDown}
+        className="w-80 max-w-[calc(100vw-1rem)] p-3"
+      >
         <PRTaskStatusSummary summaries={[summary]} />
       </TooltipContent>
     </Tooltip>
@@ -278,12 +314,12 @@ function SinglePRIcon({ taskId, pr }: { taskId: string; pr: TaskPR }) {
 
 function MultiPRIcon({ taskId, prs }: { taskId: string; prs: TaskPR[] }) {
   const { t } = useTranslation();
-  const [tooltipOpen, setTooltipOpen] = useState(false);
+  const tooltip = usePRTaskTooltipState();
   const aggregateColor = aggregatePRStatusColor(prs);
   const allReady = areAllOpenPRsReadyToMerge(prs);
   const summaries = prs.map((pr) => derivePRTaskStatusSummary(pr, isPRReadyToMerge(pr)));
   return (
-    <Tooltip open={tooltipOpen} onOpenChange={setTooltipOpen}>
+    <Tooltip open={tooltip.open}>
       <TooltipTrigger asChild>
         <span
           data-testid={`pr-task-icon-${taskId}`}
@@ -292,17 +328,21 @@ function MultiPRIcon({ taskId, prs }: { taskId: string; prs: TaskPR[] }) {
           role="img"
           tabIndex={0}
           aria-label={t("github:pullRequestStatuses", { count: prs.length })}
-          onFocus={(event) => {
-            if (event.currentTarget.matches(":focus-visible")) setTooltipOpen(true);
-          }}
-          onBlur={() => setTooltipOpen(false)}
+          onPointerEnter={tooltip.onPointerEnter}
+          onPointerLeave={tooltip.onPointerLeave}
+          onFocus={tooltip.onFocus}
+          onBlur={tooltip.onBlur}
           className={cn("inline-flex items-center gap-0.5 shrink-0", aggregateColor)}
         >
           <IconGitPullRequest aria-hidden="true" className="h-3.5 w-3.5" />
           <span className="text-[9px] font-semibold leading-none tabular-nums">{prs.length}</span>
         </span>
       </TooltipTrigger>
-      <TooltipContent sideOffset={6} className="w-80 max-w-[calc(100vw-1rem)] p-3">
+      <TooltipContent
+        sideOffset={6}
+        onEscapeKeyDown={tooltip.onEscapeKeyDown}
+        className="w-80 max-w-[calc(100vw-1rem)] p-3"
+      >
         <PRTaskStatusSummary summaries={summaries} />
       </TooltipContent>
     </Tooltip>

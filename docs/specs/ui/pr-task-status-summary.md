@@ -1,5 +1,5 @@
 ---
-status: building
+status: shipped
 created: 2026-08-06
 owner: kandev
 ---
@@ -51,6 +51,8 @@ make the hover disclosure slow to scan during a brief pointer interaction.
 - **GIVEN** a long PR title, **WHEN** its summary opens near a viewport edge, **THEN** the title
   wraps inside the collision-aware summary and the disclosure causes no document-level horizontal
   overflow.
+- **GIVEN** a pointer-hovered PR indicator also has keyboard focus, **WHEN** the pointer leaves,
+  **THEN** the summary remains visible until focus leaves or the user dismisses it with Escape.
 - **GIVEN** several PRs linked to one task, **WHEN** the task PR summary opens, **THEN** every PR is
   identifiable by number and title and its available status rows are visually grouped beneath it.
 - **GIVEN** a non-empty provider status Kandev does not recognize, **WHEN** the summary opens,

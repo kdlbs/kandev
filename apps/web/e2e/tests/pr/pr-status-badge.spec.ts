@@ -434,8 +434,6 @@ test.describe("PR status badge", () => {
       ),
     ).toBe(true);
 
-    await testPage.mouse.move(viewport!.width - 1, viewport!.height - 1);
-    await expect(summary).toBeHidden();
     await taskRow.focus();
     await testPage.keyboard.press("Tab");
     await expect(icon).toBeFocused();
@@ -443,7 +441,10 @@ test.describe("PR status badge", () => {
     await expect(focusedSummary).toBeVisible();
     await expect(focusedSummary.getByTestId("pr-task-status-title")).toHaveText(prTitle);
 
+    await testPage.mouse.move(viewport!.width - 1, viewport!.height - 1);
+    await expect(focusedSummary).toBeVisible();
     await testPage.keyboard.press("Escape");
+    await expect(focusedSummary).toBeHidden();
     await apiClient.mockGitHubAssociateTaskPR({
       workspace_id: seedData.workspaceId,
       task_id: task.id,
