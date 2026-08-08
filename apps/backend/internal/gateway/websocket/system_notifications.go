@@ -41,6 +41,46 @@ func RegisterSystemNotifications(ctx context.Context, eventBus bus.EventBus, hub
 	return b
 }
 
+// RegisterAgentRuntimeNotifications forwards the install-wide agent runtime
+// state and replays the latest snapshot when a client subscribes to its user.
+// The snapshot provider keeps the gateway independent from the launcher
+// package and ensures replay uses the same sanitized state as boot hydration.
+func RegisterAgentRuntimeNotifications(
+	ctx context.Context,
+	eventBus bus.EventBus,
+	hub *Hub,
+	snapshotProvider func() (any, bool),
+	log *logger.Logger,
+) *SystemEventBroadcaster {
+	b := &SystemEventBroadcaster{
+		hub:    hub,
+		logger: log.WithFields(zap.String("component", "ws-agent-runtime-broadcaster")),
+	}
+	if eventBus != nil {
+		b.subscribe(eventBus, events.AgentRuntimeAvailabilityChanged, ws.ActionSystemAgentRuntimeStatusChanged)
+	}
+	if snapshotProvider != nil {
+		hub.AddUserSubscriptionListener(func(userID string) {
+			payload, ok := snapshotProvider()
+			if !ok {
+				return
+			}
+			msg, err := ws.NewNotification(ws.ActionSystemAgentRuntimeStatusChanged, payload)
+			if err != nil {
+				b.logger.Error("failed to build agent runtime replay notification", zap.Error(err))
+				return
+			}
+			hub.BroadcastToUser(userID, msg)
+		})
+	}
+
+	go func() {
+		<-ctx.Done()
+		b.Close()
+	}()
+	return b
+}
+
 // Close unsubscribes from all event-bus subscriptions.
 func (b *SystemEventBroadcaster) Close() {
 	for _, sub := range b.subscriptions {
@@ -58,6 +98,7 @@ func (b *SystemEventBroadcaster) subscribe(eventBus bus.EventBus, subject, actio
 			b.logger.Error("failed to build websocket notification", zap.String("action", action), zap.Error(err))
 			return nil
 		}
+		//ws:global install-wide system and runtime notifications.
 		b.hub.Broadcast(msg)
 		return nil
 	})

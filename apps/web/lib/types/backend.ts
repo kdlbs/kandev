@@ -33,6 +33,7 @@ import type { TaskMR } from "@/lib/types/gitlab";
 import type { TaskStatusSummary } from "@/lib/types/task-status-summary";
 import type { TaskMRAutomationOptions } from "@/lib/types/gitlab";
 import type { SystemMetricsSnapshot } from "./system";
+import type { AgentRuntimeAvailability } from "./agent-runtime";
 import type { FileChangeNotificationPayload } from "./workspace-files";
 import type {
   AgentCapabilitiesPayload,
@@ -533,6 +534,10 @@ export type BackendMessageMap = OfficeBackendMessageMap &
     "session.git.event": BackendMessage<"session.git.event", GitEventPayload>;
     "system.job.update": BackendMessage<"system.job.update", import("./system").SystemJob>;
     "system.metrics.updated": BackendMessage<"system.metrics.updated", SystemMetricsSnapshot>;
+    "system.agent_runtime.status_changed": BackendMessage<
+      "system.agent_runtime.status_changed",
+      AgentRuntimeAvailability
+    >;
     "system.logs.capture_requested": BackendMessage<
       "system.logs.capture_requested",
       CaptureRequest

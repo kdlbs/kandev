@@ -363,7 +363,8 @@ func startServices( //nolint:cyclop
 	// ============================================
 	// AGENTCTL LAUNCHER (for standalone mode)
 	// ============================================
-	agentctlResult, err := provideAgentctlLauncher(ctx, cfg, log)
+	agentRuntimeAvailability := agentctlclient.NewAvailability(eventBus, log)
+	agentctlResult, err := provideAgentctlLauncher(ctx, cfg, log, agentRuntimeAvailability)
 	if err != nil {
 		log.Error("Failed to start agentctl subprocess", zap.Error(err))
 		return false
@@ -386,7 +387,8 @@ func startServices( //nolint:cyclop
 		agentctlBinaryPath = agentctlResult.binaryPath
 	}
 
-	return startAgentInfrastructure(ctx, cfg, log, addCleanup, eventBus, dbPool, repos, services, agentSettingsController, agentRegistry, agentctlBinaryPath, runCleanups)
+	return startAgentInfrastructure(ctx, cfg, log, addCleanup, eventBus, agentRuntimeAvailability,
+		dbPool, repos, services, agentSettingsController, agentRegistry, agentctlBinaryPath, runCleanups)
 }
 
 // startAgentInfrastructure initializes the agent lifecycle manager, worktree, orchestrator,
@@ -399,6 +401,7 @@ func startAgentInfrastructure(
 	log *logger.Logger,
 	addCleanup func(func() error),
 	eventBus bus.EventBus,
+	agentRuntimeAvailability *agentctlclient.Availability,
 	dbPool *db.Pool,
 	repos *Repositories,
 	services *Services,
@@ -643,7 +646,7 @@ func startAgentInfrastructure(
 		log.Info("Automation scheduler and evaluator started")
 	}
 
-	return startGatewayAndServe(ctx, cfg, log, eventBus, dbPool, repos, services,
+	return startGatewayAndServe(ctx, cfg, log, eventBus, agentRuntimeAvailability, dbPool, repos, services,
 		agentSettingsController, lifecycleMgr, agentRegistry, orchestratorSvc, msgCreator, repoCloner, agentctlBinaryPath, addCleanup, runCleanups)
 }
 
@@ -656,6 +659,7 @@ func startGatewayAndServe(
 	cfg *config.Config,
 	log *logger.Logger,
 	eventBus bus.EventBus,
+	agentRuntimeAvailability *agentctlclient.Availability,
 	dbPool *db.Pool,
 	repos *Repositories,
 	services *Services,
@@ -842,13 +846,20 @@ func startGatewayAndServe(
 	systemSvc.StartBackground(ctx)
 	addCleanup(func() error { systemSvc.StopBackground(); return nil })
 	gateways.RegisterSystemNotifications(ctx, eventBus, gateway.Hub, log)
+	gateways.RegisterAgentRuntimeNotifications(ctx, eventBus, gateway.Hub, func() (any, bool) {
+		if agentRuntimeAvailability == nil {
+			return nil, false
+		}
+		snapshot, ok := agentRuntimeAvailability.Snapshot()
+		return snapshot, ok
+	}, log)
 
 	// ============================================
 	// HTTP SERVER
 	// ============================================
 	server, err := buildHTTPServer(cfg, log, gateway, repos, services, agentSettingsController,
 		lifecycleMgr, eventBus, orchestratorSvc, notificationCtrl, msgCreator, agentRegistry, hostUtilityMgr,
-		addCleanup, repoCloner, systemSvc, storageComposition.workspaceRestorer, dbPool)
+		addCleanup, repoCloner, systemSvc, storageComposition.workspaceRestorer, dbPool, agentRuntimeAvailability)
 	if err != nil {
 		log.Error("Failed to build HTTP server", zap.Error(err))
 		return false
@@ -1750,6 +1761,7 @@ func buildHTTPServer(
 	systemSvc *systemsvc.Service,
 	workspaceRestorer taskhandlers.WorkspaceQuarantineRestorer,
 	dbPool *db.Pool,
+	agentRuntimeAvailability *agentctlclient.Availability,
 ) (*http.Server, error) {
 	gin.SetMode(gin.ReleaseMode)
 	router := gin.New()
@@ -1827,6 +1839,7 @@ func buildHTTPServer(
 		secretStore:                   userSecretStore,
 		mcpConfigSvc:                  mcpconfig.NewService(repos.AgentSettings),
 		authSvc:                       services.Auth,
+		agentRuntimeAvailability:      agentRuntimeAvailability,
 		addCleanup:                    addCleanup,
 		repoCloner:                    repoCloner,
 		version:                       Version,

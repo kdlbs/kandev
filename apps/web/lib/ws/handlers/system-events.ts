@@ -14,6 +14,9 @@ export function registerSystemEventsHandlers(store: StoreApi<AppState>): WsHandl
     "system.metrics.updated": (message) => {
       store.getState().setSystemMetricsSnapshot(message.payload);
     },
+    "system.agent_runtime.status_changed": (message) => {
+      store.getState().setAgentRuntime(message.payload);
+    },
     "system.logs.capture_requested": (message) => {
       const auth = store.getState().auth;
       const identityScope = auth.authenticated

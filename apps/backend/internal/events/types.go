@@ -170,7 +170,8 @@ const PluginUserStateUpdated = "plugin.user-state.updated"
 // create/restore, disk walk). Published by internal/system/jobs.Tracker on
 // every state transition and broadcast to all WebSocket clients.
 const (
-	SystemJobUpdate = "system.job.update"
+	SystemJobUpdate                 = "system.job.update"
+	AgentRuntimeAvailabilityChanged = "system.agent_runtime.availability_changed"
 )
 
 // Event types for environments

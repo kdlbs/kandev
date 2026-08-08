@@ -75,6 +75,11 @@ func bootInitialState(
 			return state
 		}
 	}
+	if p.agentRuntimeAvailability != nil {
+		if snapshot, ok := p.agentRuntimeAvailability.Snapshot(); ok {
+			state["agentRuntime"] = snapshot
+		}
+	}
 
 	if route.Route == webapp.RouteSettings {
 		builder.addWorkspaceState(ctx, state, nil)

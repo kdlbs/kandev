@@ -1,6 +1,7 @@
 ---
 status: in-progress
 created: 2026-04-25
+updated: 2026-08-08
 owner: cfl
 ---
 
@@ -20,6 +21,9 @@ Office adds per-session cost estimation, aggregated views by agent/project/model
 - Cost events are aggregated on read into multiple views (by agent, project, task, model, time window).
 - Budget policies SHALL enforce spending limits per agent, project, or workspace with `notify_only`, `pause_agent`, or `block_new_tasks` actions.
 - Cost is resolved per cost event via a two-layer lookup (provider-reported then `models.dev` cache); no static fallback table exists.
+- Stale `models.dev` pricing remains readable while one coalesced refresh runs per
+  client. Concurrent background lookups and explicit refresh calls do not start
+  duplicate network fetches.
 - For providers that emit token telemetry on the ACP wire (claude-acp, opencode-acp, gemini, codex-acp), cost events are populated from the `complete` event at end-of-turn.
 - For providers without usable wire telemetry (codex per-turn split, amp), a disk-runner subsystem reads on-disk session files via pinned `@ccusage/*` packages and feeds normalized cost events into the same pipeline.
 - The cost explorer UI surfaces aggregations and lets the user manage budget policies.
@@ -73,6 +77,15 @@ Each agent instance has `budget_monthly_cents` set at creation (or inherited fro
 ### Pricing cache (`models.dev`)
 
 The `models.dev` dataset is fetched once per day to a workspace-local disk cache at `<data-dir>/cache/models-dev.json`. The file lives on disk full-fat; only queried models load into the in-memory map. Refresh runs in a background goroutine; refresh failures fall back to the existing on-disk file. Pricing is recorded per-million-tokens for input, cached read, cached write, and output separately (Anthropic charges different rates for cached read vs. cached write).
+
+Each client permits only one physical refresh at a time. Stale lookups return
+current data without waiting, while concurrent explicit `Refresh` callers wait
+for and share the same result. A failed or canceled refresh releases the guard
+so a later request can retry. Cache replacement uses a unique temporary file in
+the cache directory and an atomic rename. Failure removes that temporary file
+and leaves the last valid disk and memory data unchanged. The client marks the
+cache fresh only after the new file is committed and the in-memory indexes are
+replaced successfully.
 
 ### Per-CLI usage shapes (ACP wire)
 
@@ -157,7 +170,12 @@ There is no per-field permission model. Conformance tests should assert that cos
 ## Failure modes
 
 - **models.dev miss**: row recorded with `cost_subcents=0` and `estimated=true`; UI shows "pricing unavailable".
-- **models.dev fetch fails**: background refresh falls back to existing on-disk file; no crash.
+- **models.dev fetch fails or is canceled**: background refresh falls back to
+  existing on-disk and in-memory data; no crash. The in-flight guard is released
+  and a later refresh can retry.
+- **models.dev refresh is requested concurrently**: one network request and one
+  atomic cache replacement run per client. All explicit callers observe the
+  shared result, and temporary files do not collide or remain after failure.
 - **Disk-runner `npx` unavailable**: log one warning per provider per process lifetime, mark run skipped, backend continues. Codex sessions retain wire-side `estimated=true` rows; amp sessions remain untracked.
 - **ccusage JSON schema drift**: schema validator returns decode error; office subscriber treats run as no-op (no rows touched). Codex falls back to wire-side estimated path; amp absent. Nightly fixture-smoke CI alerts maintainers.
 - **`@ccusage/<provider>@latest` yanked**: next runner invocation fails; coverage degrades the same as parse failure.
@@ -173,6 +191,8 @@ There is no per-field permission model. Conformance tests should assert that cos
 - Per-agent `budget_monthly_cents` stored on the agent instance row.
 - Per-model pricing overrides stored in workspace settings.
 - The on-disk `models.dev` cache at `<data-dir>/cache/models-dev.json`. Recovery on next boot: the in-memory pricing map is empty until first query; queries fall back to the on-disk file when the background refresh has not yet completed.
+- A failed refresh never replaces or invalidates the last valid cache. Refresh
+  coordination and temporary files are transient and do not survive restart.
 - Activity log entries `budget.alert` and `budget.exceeded` (workspace-scoped, included in the standard office backup as part of normal SQLite persistence - see `persistence.Provide` for the snapshot policy).
 
 **Does NOT survive restart:**
@@ -190,6 +210,14 @@ No TTL or retention is applied to `office_cost_events`; rows accumulate for the 
 - **GIVEN** an ACP agent session processing a turn, **WHEN** its `complete` event carries normalized usage, **THEN** a cost event is created from the provider-reported USD delta or estimated via models.dev pricing. The session's cumulative `cost_subcents` is updated.
 
 - **GIVEN** a model not found in the models.dev dataset and no user override configured, **WHEN** a cost event is recorded, **THEN** token counts are stored but `cost_subcents` is zero. The cost explorer shows "pricing unavailable" for that model.
+
+- **GIVEN** many stale pricing lookups and direct refresh calls arrive together,
+  **WHEN** refresh starts, **THEN** one network fetch runs for that client while
+  stale lookup data remains available and direct callers share its result.
+
+- **GIVEN** a refresh fails or its context is canceled, **WHEN** a later lookup
+  requests refresh, **THEN** the later refresh can run, the previous valid cache
+  remains readable, and no temporary cache file is left behind.
 
 - **GIVEN** an agent instance with a monthly budget of $10 and 80% alert threshold, **WHEN** spending reaches $8, **THEN** an alert appears in the user's inbox and a `budget_alert` wakeup is queued for the CEO.
 
@@ -231,3 +259,7 @@ No TTL or retention is applied to `office_cost_events`; rows accumulate for the 
 - **Node/npx in the backend container**: the backend image currently does not include Node. Options: `apt-get install nodejs npm` (~50MB), or bundle ccusage as a single-file `bun build --compile` per provider, eliminating runtime Node dependency.
 - **Future providers**: when a new agent CLI lands (hypothetical `@ccusage/auggie`, new `@ccusage/copilot`), the runner should accept provider plugins via a registry, not require new code per provider.
 - **Tokscale as alternative wrapper** (considered, deferred): single Rust binary, 20+ CLIs, but lacks per-session output today. Decision for v1: stay with `@ccusage/*` because per-session output ships. Revisit when (a) we need a provider tokscale supports natively that ccusage doesn't, or (b) the session-grouping contribution lands upstream.
+
+## Implementation plan
+
+[Backend failure containment](../../plans/backend-failure-containment/plan.md)
