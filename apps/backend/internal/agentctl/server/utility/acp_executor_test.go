@@ -109,17 +109,34 @@ func TestResolveProbeCommand_ExecutableSuffix(t *testing.T) {
 	t.Parallel()
 
 	const name = "mock-agent"
-	path := filepath.Join(t.TempDir(), name+".exe")
+	dir := t.TempDir()
 
-	got := resolveProbeCommand(path)
-	if runtime.GOOS == "windows" {
-		if got != name {
-			t.Fatalf("resolveProbeCommand(%q) = %q, want %q", path, got, name)
-		}
-		return
-	}
-	if got != "" {
-		t.Fatalf("resolveProbeCommand(%q) = %q, want empty — a Unix name keeps its suffix", path, got)
+	for _, tc := range []struct {
+		file        string
+		wantWindows string
+	}{
+		{file: name + ".exe", wantWindows: name},
+		{file: name + ".EXE", wantWindows: name},
+		{file: name + ".cmd", wantWindows: ""},
+		{file: name + ".txt", wantWindows: ""},
+		{file: name + ".exe.txt", wantWindows: ""},
+	} {
+		t.Run(tc.file, func(t *testing.T) {
+			t.Parallel()
+
+			path := filepath.Join(dir, tc.file)
+			got := resolveProbeCommand(path)
+
+			// Only Windows trims, and only ".exe" — any other suffix, and any
+			// suffix at all on Unix, leaves the name unmatched.
+			want := ""
+			if runtime.GOOS == "windows" {
+				want = tc.wantWindows
+			}
+			if got != want {
+				t.Fatalf("resolveProbeCommand(%q) = %q, want %q", path, got, want)
+			}
+		})
 	}
 }
 
