@@ -46,7 +46,14 @@ const RELATIVE_UNITS: readonly (readonly [Intl.RelativeTimeFormatUnit, number])[
   ["second", 1],
 ];
 
-/** Anything closer than this to `now` reads as "now" rather than "3 seconds ago". */
+/**
+ * Anything closer than this to `now` reads as "now" rather than "3 seconds
+ * ago". Compared against raw milliseconds, deliberately: testing it against
+ * the already-rounded second count moved the real cutoff to 9.5s, and made it
+ * asymmetric, because `Math.round(-9.5)` is `-9` while `Math.round(9.5)` is
+ * `10` — so 9.5s in the past read "now" while 9.5s in the future read "in 10
+ * seconds".
+ */
 const JUST_NOW_SECONDS = 10;
 
 const relativeFormatters = new Map<string, Intl.RelativeTimeFormat>();
@@ -81,10 +88,15 @@ export function formatRelativeTime(
   if (Number.isNaN(date.getTime())) return "";
 
   const formatter = relativeFormatter();
-  const diffSec = Math.round((date.getTime() - now) / 1000);
-  const magnitude = Math.abs(diffSec);
-  if (magnitude < JUST_NOW_SECONDS) return formatter.format(0, "second");
+  const diffMs = date.getTime() - now;
+  if (Math.abs(diffMs) < JUST_NOW_SECONDS * 1000) return formatter.format(0, "second");
 
+  // Rounded, not truncated, so unit selection lands on the nearest unit —
+  // 59.6s reads "1 minute ago", which describes it better than "59 seconds
+  // ago". That rounding is intended for the unit choice; it just must not
+  // decide the "now" threshold above.
+  const diffSec = Math.round(diffMs / 1000);
+  const magnitude = Math.abs(diffSec);
   for (const [unit, seconds] of RELATIVE_UNITS) {
     if (magnitude >= seconds) return formatter.format(Math.trunc(diffSec / seconds), unit);
   }

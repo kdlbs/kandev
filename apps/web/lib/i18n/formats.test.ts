@@ -110,6 +110,39 @@ describe("formatRelativeTime (en)", () => {
     expect(formatRelativeTime(secondsAhead(9), now)).toBe("now");
   });
 
+  // The threshold is tested against raw milliseconds, not the rounded second
+  // count. Rounding first moved the real cutoff to 9.5s and made it
+  // asymmetric — Math.round(-9.5) is -9 but Math.round(9.5) is 10 — so 9.5s
+  // ago read "now" while 9.5s ahead read "in 10 seconds". Reported by
+  // @yattdev on #2410.
+  it("uses a symmetric 10s 'now' cutoff that sub-second input cannot shift", () => {
+    const ms = (n: number) => new Date(now - n);
+
+    expect(formatRelativeTime(ms(9_400), now)).toBe("now");
+    expect(formatRelativeTime(ms(9_600), now)).toBe("now");
+    expect(formatRelativeTime(ms(9_900), now)).toBe("now");
+    expect(formatRelativeTime(ms(9_999), now)).toBe("now");
+
+    expect(formatRelativeTime(ms(10_000), now)).toBe("10 seconds ago");
+    expect(formatRelativeTime(ms(10_100), now)).toBe("10 seconds ago");
+  });
+
+  it("applies the same cutoff to future timestamps as to past ones", () => {
+    const ahead = (n: number) => new Date(now + n);
+
+    expect(formatRelativeTime(ahead(9_500), now)).toBe("now");
+    expect(formatRelativeTime(ahead(9_900), now)).toBe("now");
+    expect(formatRelativeTime(ahead(10_000), now)).toBe("in 10 seconds");
+  });
+
+  // The other half of the report — 59.6s rendering as "1 minute ago" — is
+  // intended. Unit selection rounds to the nearest unit, which describes
+  // 59.6s better than "59 seconds ago" would.
+  it("selects the nearest unit rather than truncating toward zero", () => {
+    expect(formatRelativeTime(new Date(now - 59_600), now)).toBe("1 minute ago");
+    expect(formatRelativeTime(new Date(now - 59_400), now)).toBe("59 seconds ago");
+  });
+
   it("reports whole seconds below a minute", () => {
     expect(formatRelativeTime(secondsAgo(10), now)).toBe("10 seconds ago");
     expect(formatRelativeTime(secondsAgo(59), now)).toBe("59 seconds ago");
