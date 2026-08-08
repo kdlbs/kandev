@@ -86,7 +86,7 @@ func (e *ACPInferenceExecutor) Execute(ctx context.Context, req *PromptRequest) 
 
 	// Same reasoning as the probe: without this the child's own account of why
 	// it died is discarded.
-	var stderr bytes.Buffer
+	var stderr stderrBuffer
 	cmd.Stderr = &stderr
 
 	stdin, err := cmd.StdinPipe()
@@ -121,7 +121,7 @@ func (e *ACPInferenceExecutor) Execute(ctx context.Context, req *PromptRequest) 
 		e.logger.Error("ACP inference failed",
 			zap.String("agent_id", req.AgentID),
 			zap.Error(err),
-			zap.String("stderr", stderrTail(&stderr)))
+			zap.String("stderr", stderr.tail()))
 		return &PromptResponse{
 			Success:    false,
 			Error:      err.Error(),
@@ -386,7 +386,7 @@ func (e *ACPInferenceExecutor) Probe(ctx context.Context, req *ProbeRequest) (*P
 	// process gave — an npx resolution failure, a missing runtime, a panic —
 	// goes to the void, leaving the UI's "check agent logs" pointing at logs
 	// that never carried it.
-	var stderr bytes.Buffer
+	var stderr stderrBuffer
 	cmd.Stderr = &stderr
 
 	stdin, err := cmd.StdinPipe()
@@ -416,7 +416,7 @@ func (e *ACPInferenceExecutor) Probe(ctx context.Context, req *ProbeRequest) (*P
 		e.logger.Error("ACP probe failed",
 			zap.String("agent_id", req.AgentID),
 			zap.Error(err),
-			zap.String("stderr", stderrTail(&stderr)))
+			zap.String("stderr", stderr.tail()))
 		return &ProbeResponse{
 			Success:    false,
 			Error:      err.Error(),
@@ -885,11 +885,31 @@ func resolveProbeCommand(name string) string {
 // agent cannot flood it.
 const stderrTailLimit = 4 << 10
 
-// stderrTail returns the trailing stderrTailLimit bytes of buf, trimmed. The
-// tail rather than the head, because what a dying process printed last is what
-// explains it.
-func stderrTail(buf *bytes.Buffer) string {
-	out := buf.Bytes()
+// stderrBuffer collects a spawned agent's stderr.
+//
+// os/exec copies stderr on a goroutine of its own whenever the writer is not an
+// *os.File, and the tail is read while the child is still being torn down —
+// cleanup calls Wait from a defer, after the response has been built. Writer and
+// reader therefore overlap, and the mutex is what makes that legal: an
+// unsynchronised bytes.Buffer here trips the race detector in
+// TestProbeCleansUpDescendantProcessOnTimeout.
+type stderrBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *stderrBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+// tail returns the trailing stderrTailLimit bytes, trimmed. The tail rather than
+// the head, because what a dying process printed last is what explains it.
+func (b *stderrBuffer) tail() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	out := b.buf.Bytes()
 	if len(out) > stderrTailLimit {
 		out = out[len(out)-stderrTailLimit:]
 	}

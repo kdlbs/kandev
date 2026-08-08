@@ -1,7 +1,6 @@
 package utility
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -47,19 +46,47 @@ func TestDescribeACPFailureKeepsGenuineErrors(t *testing.T) {
 	}
 }
 
-func TestStderrTailKeepsTheEnd(t *testing.T) {
+func TestStderrBufferTailKeepsTheEnd(t *testing.T) {
 	t.Parallel()
 
-	var buf bytes.Buffer
-	buf.WriteString(strings.Repeat("a", stderrTailLimit))
-	buf.WriteString("\nnpm error code ECONNREFUSED")
+	var buf stderrBuffer
+	if _, err := buf.Write([]byte(strings.Repeat("a", stderrTailLimit))); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	if _, err := buf.Write([]byte("\nnpm error code ECONNREFUSED")); err != nil {
+		t.Fatalf("write: %v", err)
+	}
 
-	tail := stderrTail(&buf)
+	tail := buf.tail()
 	if len(tail) > stderrTailLimit {
 		t.Fatalf("tail is %d bytes, want at most %d", len(tail), stderrTailLimit)
 	}
 	if !strings.HasSuffix(tail, "npm error code ECONNREFUSED") {
 		t.Fatalf("tail = %q, want the final line kept", tail)
+	}
+}
+
+// os/exec writes into this buffer from its stderr-copying goroutine while the
+// tail is read during teardown. Exercising both at once means the race detector
+// asserts the synchronisation rather than it being assumed.
+func TestStderrBufferSurvivesConcurrentUse(t *testing.T) {
+	t.Parallel()
+
+	var buf stderrBuffer
+	written := make(chan struct{})
+	go func() {
+		defer close(written)
+		for range 200 {
+			_, _ = buf.Write([]byte("npm error code ECONNREFUSED\n"))
+		}
+	}()
+	for range 200 {
+		_ = buf.tail()
+	}
+	<-written
+
+	if buf.tail() == "" {
+		t.Fatal("tail is empty after concurrent writes")
 	}
 }
 
