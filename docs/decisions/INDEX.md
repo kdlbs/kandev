@@ -131,3 +131,4 @@ Read individual ADRs for full context. Create new ones via `/record decision` or
 | 2026-08-07-model-aware-provider-capability-resolution | [Model-aware provider capability resolution](2026-08-07-model-aware-provider-capability-resolution.md) | accepted | backend, frontend, protocol | 2026-08-07 |
 | 2026-08-07-claude-allowlist-label-bridge | [Use the Claude Allowlist as a Trusted Preview Gate](2026-08-07-claude-allowlist-label-bridge.md) | accepted | infra, workflow, security | 2026-08-07 |
 | 2026-08-08-workspace-scoped-task-create-workflow-memory | [Remember Task-Create Workflows Per Workspace](2026-08-08-workspace-scoped-task-create-workflow-memory.md) | accepted | backend, frontend | 2026-08-08 |
+| 2026-08-08-task-owned-worktree-lifetime | [Keep Worktree Ownership at the Task Lifecycle](2026-08-08-task-owned-worktree-lifetime.md) | accepted | backend, frontend | 2026-08-08 |
