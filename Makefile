@@ -547,8 +547,11 @@ test-scripts:
 
 .PHONY: test-e2e
 test-e2e: build-backend build-web-e2e build-e2e-plugin-package
-	@printf "$(CYAN)Running E2E tests (headless, parallel)...$(RESET)\n"
-	@cd $(APPS_DIR) && $(PNPM) --filter @kandev/web e2e
+	@printf "$(CYAN)Running E2E tests (headless, parallel, managed runner)...$(RESET)\n"
+	@cd $(WEB_DIR) && for project in routing auth chromium mobile-chrome containers; do \
+		printf "$(CYAN)-- project: $$project --$(RESET)\n"; \
+		e2e/scripts/run-e2e.sh --host --no-build --no-strict --shards 1 --project "$$project" || exit 1; \
+	done
 
 .PHONY: test-e2e-headed
 test-e2e-headed: build-backend build-web-e2e build-e2e-plugin-package
