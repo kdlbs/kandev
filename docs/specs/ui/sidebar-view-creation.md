@@ -26,6 +26,16 @@ Creating a sidebar view currently requires changing an existing view before `Sav
 
 ## Persistence and failure behavior
 
+- A user settings record that omits sidebar-view fields resolves to one canonical
+  `All tasks` view and a matching active-view ID in every complete backend
+  settings payload. The canonical view uses no filters, `state` ascending sort,
+  `repository` grouping, and no collapsed groups.
+- The first edit to that canonical view persists its draft without requiring a
+  prior create, rename, or save-as action and without surfacing a sidebar-view
+  settings error.
+- Replacing `sidebar_views` without an active-view field keeps the persisted
+  active ID referentially valid; an empty replacement resolves to the same
+  canonical `All tasks` view.
 - Creation persists the new view and active-view selection immediately through existing backend-owned user settings. A successful create survives reload and is available on the user's other clients.
 - A failed create restores the previous saved views, active view, and draft, then surfaces the existing sidebar-view sync error. It never leaves a selected view that is absent from persisted settings.
 - Each new view owns independent filter, sort, and collapsed-group data; later changes to it cannot mutate the canonical default or another view by shared reference.
@@ -34,6 +44,15 @@ See [ADR 0041](../../decisions/0041-backend-owned-portable-user-settings.md) for
 
 ## Scenarios
 
+- **GIVEN** a new user whose stored settings omit sidebar-view fields, **WHEN**
+  Kandev returns the user's effective settings, **THEN** the response contains
+  exactly one canonical `All tasks` view and its ID is the active-view ID.
+- **GIVEN** that new user's canonical `All tasks` view, **WHEN** the user changes
+  a filter, sort, or group before creating any other view, **THEN** the draft
+  persists successfully and no sidebar-view error is shown.
+- **GIVEN** a settings update replaces `sidebar_views` with an empty array and
+  omits `sidebar_active_view_id`, **THEN** the effective settings retain the
+  canonical `All tasks` view and matching active ID.
 - **GIVEN** fewer than 50 saved views and no unsaved draft, **WHEN** the user selects `New view`, **THEN** a canonical default view is appended, activated immediately, and offered for focused rename.
 - **GIVEN** the active saved view has custom filters, sort, grouping, or collapsed groups, **WHEN** the user creates a new view, **THEN** the new view still uses the canonical defaults rather than cloning the active state.
 - **GIVEN** saved views named `New view` and `New view 3`, **WHEN** the user creates a new view, **THEN** its automatic name is `New view 2`.
@@ -46,6 +65,8 @@ See [ADR 0041](../../decisions/0041-backend-owned-portable-user-settings.md) for
 
 ## Out of scope
 
+- Migrating existing non-empty custom views or weakening active-view
+  referential validation.
 - Changing `Save as…`, duplicate-view, rename, delete, or saved-view ordering semantics.
 - A pre-creation naming dialog, cancel-to-delete behavior, or delayed persistence until rename.
 - Cloning the active view from the direct-create action.

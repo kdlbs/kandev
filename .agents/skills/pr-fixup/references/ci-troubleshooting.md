@@ -206,8 +206,8 @@ Useful focused commands:
 
 ```bash
 scripts/run-quiet build -- make build-backend build-web
-scripts/run-quiet e2e -- bash -c 'cd apps && pnpm --filter @kandev/web e2e -- tests/path/to/failing.spec.ts'
-scripts/run-quiet e2e -- bash -c 'cd apps && pnpm --filter @kandev/web e2e -- tests/path/to/failing.spec.ts -g "exact failing test title"'
+scripts/run-quiet e2e -- bash -c 'cd apps && pnpm --filter @kandev/web e2e:raw -- tests/path/to/failing.spec.ts'
+scripts/run-quiet e2e -- bash -c 'cd apps && pnpm --filter @kandev/web e2e:raw -- tests/path/to/failing.spec.ts -g "exact failing test title"'
 ```
 
 An isolated pass does not invalidate a CI failure, and a spec outside the PR

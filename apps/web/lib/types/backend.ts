@@ -1,5 +1,8 @@
+import type { QueuedMessage } from "@/lib/state/slices/session/types";
 import type { TaskPlanEventPayload, TaskPlanRevisionEventPayload } from "./task-plan-events";
 import type { CaptureRequest } from "@/lib/logger/capture";
+
+export const SYSTEM_AGENT_RUNTIME_STATUS_CHANGED = "system.agent_runtime.status_changed" as const;
 
 export type BackendMessageType = keyof BackendMessageMap;
 
@@ -32,6 +35,7 @@ import type { TaskMR } from "@/lib/types/gitlab";
 import type { TaskStatusSummary } from "@/lib/types/task-status-summary";
 import type { TaskMRAutomationOptions } from "@/lib/types/gitlab";
 import type { SystemMetricsSnapshot } from "./system";
+import type { AgentRuntimeAvailability } from "./agent-runtime";
 import type { FileChangeNotificationPayload } from "./workspace-files";
 import type {
   AgentCapabilitiesPayload,
@@ -207,6 +211,7 @@ export type WorkflowPayload = {
   workspace_id: string;
   name: string;
   description?: string;
+  prompt?: string;
   agent_profile_id?: string;
   hidden?: boolean;
   /** Phase 2 (ADR-0004) UX hint — frontend-only. */
@@ -290,6 +295,8 @@ export type TaskSessionStateChangedPayload = {
   cancellation_pending?: boolean;
   /** Process-local cancellation transition generation carried by state snapshots. */
   cancellation_revision?: number;
+  /** True when a send right now would steer the running turn; see http.ts. */
+  supports_steering?: boolean;
 };
 
 /**
@@ -302,6 +309,8 @@ export type TaskSessionActivityChangedPayload = {
   session_id: string;
   foreground_activity: ForegroundActivity | null;
   active_subagent_count: number;
+  /** True when a send right now would steer the running turn; see http.ts. */
+  supports_steering?: boolean;
 };
 
 export type TaskSessionCancellationChangedPayload = {
@@ -477,20 +486,12 @@ export {
 
 export type { TaskPlanEventPayload, TaskPlanRevisionEventPayload } from "./task-plan-events";
 
-export type QueuedMessagePayload = {
-  content: string;
-  model?: string;
-  plan_mode?: boolean;
-  task_id: string;
-  user_id?: string;
-  queued_at: string;
-};
-
 export type QueueStatusChangedPayload = {
   session_id: string;
-  entries?: QueuedMessagePayload[] | null;
+  entries?: QueuedMessage[] | null;
   count?: number;
   max?: number;
+  merge_enabled?: boolean;
 };
 
 export type TaskStatusSummaryUpdatedPayload = {
@@ -535,6 +536,10 @@ export type BackendMessageMap = OfficeBackendMessageMap &
     "session.git.event": BackendMessage<"session.git.event", GitEventPayload>;
     "system.job.update": BackendMessage<"system.job.update", import("./system").SystemJob>;
     "system.metrics.updated": BackendMessage<"system.metrics.updated", SystemMetricsSnapshot>;
+    [SYSTEM_AGENT_RUNTIME_STATUS_CHANGED]: BackendMessage<
+      typeof SYSTEM_AGENT_RUNTIME_STATUS_CHANGED,
+      AgentRuntimeAvailability
+    >;
     "system.logs.capture_requested": BackendMessage<
       "system.logs.capture_requested",
       CaptureRequest

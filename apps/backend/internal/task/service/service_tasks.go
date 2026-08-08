@@ -342,7 +342,11 @@ func (s *Service) validateCreateTaskRequest(req *CreateTaskRequest) error {
 		return err
 	}
 	isOffice := isOfficeRequest(req)
-	if !req.IsEphemeral && !isOffice && req.WorkflowID == "" {
+	// Automation runs never land on a board, so they need no workflow — the
+	// trigger is the start signal, not a column. They are still ordinary,
+	// persistent tasks; only their origin keeps them out of board reads.
+	isAutomationRun := req.Origin == models.TaskOriginAutomationRun
+	if !req.IsEphemeral && !isOffice && !isAutomationRun && req.WorkflowID == "" {
 		return fmt.Errorf("workflow_id is required for non-ephemeral tasks")
 	}
 	if req.IsEphemeral && req.WorkflowID != "" {
@@ -529,6 +533,21 @@ func (s *Service) createTaskRepositories(ctx context.Context, taskID, workspaceI
 
 	seen := make(map[string]bool, len(repositories))
 	for i, repoInput := range repositories {
+		if repoInput.RemoteContribution != nil {
+			if err := repoInput.RemoteContribution.Validate(); err != nil {
+				return fmt.Errorf("invalid remote contribution: %w", err)
+			}
+			if repoInput.CheckoutBranch == "" {
+				repoInput.CheckoutBranch = repoInput.RemoteContribution.HeadBranch
+			}
+			if repoInput.BaseBranch == "" {
+				repoInput.BaseBranch = repoInput.RemoteContribution.BaseBranch
+			}
+			if repoInput.CheckoutBranch != repoInput.RemoteContribution.HeadBranch ||
+				repoInput.BaseBranch != repoInput.RemoteContribution.BaseBranch {
+				return fmt.Errorf("remote contribution branches do not match the resolved binding")
+			}
+		}
 		repositoryID, baseBranch, _, err := s.resolveRepoInput(ctx, workspaceID, repoInput, repoByPath)
 		if err != nil {
 			return err
@@ -560,6 +579,11 @@ func (s *Service) createTaskRepositories(ctx context.Context, taskID, workspaceI
 		metadata := make(map[string]interface{})
 		if prNum := resolvePRNumber(repoInput); prNum > 0 {
 			metadata["pr_number"] = prNum
+		}
+		if repoInput.RemoteContribution != nil {
+			if err := models.PutRemoteContribution(metadata, repoInput.RemoteContribution); err != nil {
+				return fmt.Errorf("persist remote contribution: %w", err)
+			}
 		}
 		taskRepo := &models.TaskRepository{
 			TaskID:         taskID,
@@ -910,7 +934,10 @@ func (s *Service) resolveRepoInputRemote(
 		defaultBranch = s.probeProviderDefaultBranchIfMissing(ctx, workspaceID, provider, owner, name)
 	}
 	providerHost := remoteProviderHost(provider, canonicalURL)
-	if provider == providerGitLab && providerHost != "https://gitlab.com" {
+	if repoInput.ProviderHost != "" && !strings.EqualFold(strings.TrimRight(repoInput.ProviderHost, "/"), providerHost) {
+		return "", "", false, fmt.Errorf("remote_url provider host %q does not match %q", providerHost, repoInput.ProviderHost)
+	}
+	if provider == providerGitLab && providerHost != "https://gitlab.com" && !repoInput.TrustedRemote {
 		return "", "", false, fmt.Errorf("untrusted GitLab origin %q", providerHost)
 	}
 	repo, repoCreated, createErr := s.FindOrCreateRepository(ctx, &FindOrCreateRepositoryRequest{
@@ -1229,6 +1256,11 @@ func (s *Service) UpdateTask(ctx context.Context, id string, req *UpdateTaskRequ
 		}
 		parentCleared = *req.ParentID == ""
 		task.ParentID = *req.ParentID
+		// Re-parenting (or un-nesting) an inherit_parent subtask keeps its
+		// materialized workspace as shared_group instead of silently
+		// inheriting a different parent's workspace — the same composite
+		// semantics as detach-then-nest.
+		normalizeWorkspaceModeAfterReparent(task)
 	}
 	task.UpdatedAt = time.Now().UTC()
 
@@ -1359,6 +1391,22 @@ const parentIDEventField = "parent_id"
 // handlers can classify a bad re-parent request as a client error (400)
 // rather than an internal error (500).
 var ErrInvalidParent = errors.New("invalid parent")
+
+// normalizeWorkspaceModeAfterReparent applies the detach operation's
+// workspace policy to an explicit parent change: an inherit_parent subtask
+// whose hierarchy is being changed must not silently start inheriting a
+// different parent's workspace, so its mode becomes shared_group (its
+// materialized workspace and group membership are unchanged). Other modes
+// pass through.
+func normalizeWorkspaceModeAfterReparent(task *models.Task) {
+	workspace, ok := task.Metadata["workspace"].(map[string]interface{})
+	if !ok {
+		return
+	}
+	if workspace["mode"] == workspaceModeInheritParent {
+		workspace["mode"] = workspaceModeSharedGroup
+	}
+}
 
 // resolveParentID validates a proposed parent assignment for task. An empty
 // parentID (un-nest) is always allowed. A non-empty parentID must reference a

@@ -19,6 +19,8 @@ Office agents need a predictable way to choose between CLI providers, accounts, 
 - Provider routing is an advanced workspace setting and automatic fallback is disabled by default.
 - Office always resolves an execution profile from the agent's effective tier, even when automatic fallback is disabled.
 - When routing is disabled, Office selects only the first configured provider in the effective provider order for that tier. It does not health-filter, try a later provider, or silently use a workspace default profile.
+- Short same-route transient retry remains active when routing is disabled; only
+  cross-provider fallback is disabled.
 - Every Office agent has an effective model tier even when routing is disabled.
 - Workspace settings provide the default model tier, initially `balanced`.
 - Agents inherit the workspace default tier unless the user sets an agent-specific override.
@@ -51,9 +53,24 @@ Office agents need a predictable way to choose between CLI providers, accounts, 
 
 ### Fallback chain
 
+- High-confidence short transients do not enter the fallback chain immediately.
+  Network interruption, temporary provider unavailability/overload, model
+  capacity, and rate-limit waits of at most 60 seconds first retry the same
+  execution profile after 5, 10, and 20 seconds.
+  - The short same-route retry phase is scheduler-owned. The current run's
+  `retry_scheduled` route attempt records the retry owner; a
+  workspace/provider/model-scoped `short_retry` cooldown makes concurrent runs
+  wait instead of switching or retrying independently. It does not enter the
+  long-horizon degraded state or route-cycle exclusion set until its
+  three-attempt budget is exhausted. The UI shows the same provider, exact next
+  retry, and attempt ordinal throughout this phase.
 - Fallback is more conservative after the agent has started task work; post-start fallback only happens for clear provider, auth, quota, rate-limit, outage, or model-availability failures.
-- Detectable provider-unavailable errors can fall back to the next configured provider, including auth failures, expired credentials, provider outages, subscription limits, quota limits, and rate limits.
-- When a provider route fails again during a retry/probe, the same task immediately tries the next configured provider candidate and the failed provider route stays degraded with an increased backoff.
+- Detectable provider-unavailable errors can fall back to the next configured provider after any required short phase, including auth failures, expired credentials, persistent provider outages, subscription limits, quota limits, and long rate limits.
+- When an already-degraded provider route fails again during a health retry/probe, the same task immediately tries the next configured provider candidate and the failed provider route stays degraded with an increased backoff.
+- A long-horizon failure, or exhaustion of the short same-route budget, enters
+  the existing degradation and fallback behavior. A validated rate-limit wait
+  longer than 60 seconds, renewable quota, auth/subscription, and invalid model
+  or configuration evidence bypass the short phase.
 - If every configured provider route is unavailable, the task keeps its logical Office agent assignment and waits for provider capacity or user action instead of being reassigned.
 - If at least one exhausted provider route is auto-retryable, the scheduler wakes the blocked task automatically at the earliest retry time.
 - When fallback selects a different execution profile after work has started, Kandev reuses the task, run, task environment, and worktree but starts a fresh provider-native session. A resume token created by one execution profile is never supplied to another.
@@ -63,7 +80,7 @@ Office agents need a predictable way to choose between CLI providers, accounts, 
 ### Provider health checks and degraded state
 
 - A degraded provider route becomes temporarily ineligible for affected workspace launches until it reaches a retry time, passes a health check, succeeds on a launch probe, reconnects, or the user retries it from the UI.
-- Auto-retryable provider-unavailable errors without a known reset time use exponential backoff before that provider route is retried.
+- After the short same-route budget is exhausted, auto-retryable provider-unavailable errors without a known reset time use minute-scale exponential backoff before that degraded route is retried.
 - User-actionable provider blocks, such as missing credentials, expired auth, inactive subscription, provider not installed, provider not configured, or missing model-tier mapping, stay blocked until the user fixes configuration, reconnects, or manually retries.
 - Provider health issues are visible in workspace settings, dashboard, inbox, and affected agent detail pages.
 
@@ -140,7 +157,7 @@ office_provider_health
   provider_id    string     PK part
   scope          string     PK part: provider|tier|model
   scope_value    string     PK part: "" for provider; tier name; model id
-  state          string     healthy|degraded|user_action_required
+  state          string     healthy|short_retry|degraded|user_action_required
   error_code     string     normalized routingerr.Code, "" when healthy
   retry_at       timestamp  nullable; unset for user_action_required
   backoff_step   int        current step in routing.backoffSchedule
@@ -152,11 +169,14 @@ office_provider_health
 
 Primary key is `(workspace_id, provider_id, scope, scope_value)` so a tier-specific failure does not take the whole provider down. `ScopeFromCode` maps normalized error codes to the scope to degrade: `model_unavailable -> (model, <model>)`, `provider_not_configured` (missing tier mapping) -> `(tier, <tier>)`, every other auth/quota/rate/provider failure -> `(provider, "")`.
 
-The resolver walks scope priority `provider -> tier -> model` and uses the first non-healthy hit. `MarkProviderDegraded` increments `backoff_step` on every degraded -> degraded transition; `MarkProviderHealthy` clears `backoff_step`, `retry_at`, and `error_code`.
+The resolver walks scope priority `provider -> tier -> model` and uses the first non-healthy hit. A `short_retry` hit holds matching runs on the same route until its deadline; it never walks to a later candidate. The owning run is recorded by its `retry_scheduled` route attempt. `MarkProviderDegraded` increments `backoff_step` on every degraded -> degraded transition; short-retry transitions do not consume the long-horizon backoff budget. `MarkProviderHealthy` clears `backoff_step`, `retry_at`, and `error_code`.
 
 ### `runs` routing columns (per run)
 
-`runs` carries the per-run routing decision and parking state. All columns are nullable / zero-valued for runs that did not go through the routing path (workspace routing disabled).
+`runs` carries the per-run routing decision, short-retry phase, and parking state.
+The short-retry fields apply to every Office run. Other route-decision columns
+may remain nullable / zero-valued for legacy runs that never resolved an Office
+execution profile.
 
 ```
 runs (routing additions)
@@ -169,7 +189,7 @@ runs (routing additions)
   route_cycle_baseline_seq   int    seq floor for the current retry cycle; attempts at or below the baseline are NOT in the exclude-set
   routing_blocked_status     string waiting_for_provider_capacity | blocked_provider_action_required
   earliest_retry_at          timestamp nullable; minimum auto-retry deadline across degraded routes
-  scheduled_retry_at         timestamp mirrors earliest_retry_at while parked
+  scheduled_retry_at         timestamp next same-route retry or parked-run wake
 ```
 
 ### `office_run_route_attempts` (per run, per attempt)
@@ -195,6 +215,17 @@ office_run_route_attempts
   started_at       timestamp
   finished_at      timestamp nullable
 ```
+
+A short transient attempt uses `retry_scheduled` and does not join the current
+route cycle's provider exclusion set. Its durable owner is the run identified
+by `run_id` plus `runs.current_route_attempt_seq`; its ordinal is the count of
+`retry_scheduled` rows after `route_cycle_baseline_seq`. The affected health
+scope and cooldown deadline live in `office_provider_health.scope`,
+`scope_value`, and `retry_at`, while `runs.scheduled_retry_at` mirrors that
+deadline. On restart, the latest attempt marker preserves the short-retry
+cycle; a resolver seeing a live `short_retry` row holds the route and does not
+fall through. The final exhausted attempt changes to the existing
+provider-unavailable failure outcome before fallback resolution.
 
 ### Agent overrides (`agent_profiles.settings.routing`)
 
@@ -255,7 +286,16 @@ func GetProber(providerID string) (ProviderProber, bool)
 
 Probers must complete in under five seconds and MUST NOT start an agent session. Missing prober means "use the next real launch as the probe" — no default LaunchAsProbe shim exists in v1.
 
-`routingerr.Classify(Input) *Error` is the classifier entry point used by adapters. `Input` carries `(Phase, ProviderID, ExitCode, StructuredErr, HTTPStatus, Stderr, Stdout)`; the returned `*Error` carries `(Code, Confidence, Phase, FallbackAllowed, AutoRetryable, UserAction, ClassifierRule, ExitCode, ResetHint, RawExcerpt)`. Normalized `Code` values include `auth_required`, `missing_credentials`, `subscription_required`, `quota_limited`, `rate_limited`, `provider_unavailable`, `model_unavailable`, `provider_not_configured`, `unknown_provider_error`, `agent_runtime_error`, `permission_denied_by_user`, `task_error`, `repo_error`.
+`routingerr.Classify(Input) *Error` is the classifier entry point used by adapters. `Input` carries `(Phase, ProviderID, ExitCode, StructuredErr, HTTPStatus, Stderr, Stdout)`; the returned `*Error` carries `(Code, Confidence, Phase, FallbackAllowed, AutoRetryable, UserAction, ClassifierRule, ExitCode, ResetHint, RawExcerpt)`. Normalized `Code` values include `auth_required`, `missing_credentials`, `subscription_required`, `quota_limited`, `rate_limited`, `network_unavailable`, `provider_unavailable`, `provider_overloaded`, `model_capacity`, `model_unavailable`, `provider_not_configured`, `unknown_provider_error`, `agent_runtime_error`, `permission_denied_by_user`, `task_error`, `repo_error`.
+
+The provider-neutral recovery contract in
+[`platform/provider-error-recovery.md`](../platform/provider-error-recovery.md)
+is authoritative for semantic classification only. `AutoRetryable`,
+`FallbackAllowed`, and `UserAction` are compatibility projections of the Office
+routing policy, not universal classifier truths. Office may fall through to
+another configured provider for subscription or quota failures. Renewable quota
+can park a run until its reset/backoff; an inactive subscription leaves that
+route user-action-required with no timed retry.
 
 ### HTTP routes (workspace-level, mounted in `dashboard`)
 
@@ -285,13 +325,19 @@ Internal expvar metrics (`/debug/vars` in dev): `routing_route_attempts_total`, 
 
 ### Provider route lifecycle (per workspace, per provider)
 
-- `eligible` -> `degraded` on a classified provider-unavailable error (auth, quota, rate limit, outage, subscription, model-availability).
+- A short transient creates a non-degraded route-scoped `short_retry` cooldown.
+  One run owns the retry; other matching runs wait and do not switch providers or
+  consume the retry budget.
+- `eligible` -> `degraded` on a long-horizon or short-budget-exhausted provider outage, quota, rate-limit, or model-capacity failure.
+- `eligible` -> `user_action_required` on auth, inactive-subscription, missing-configuration, or invalid-model evidence.
 - `degraded` -> `eligible` on any of: scheduled health check success, launch probe success, reconnect, user-triggered retry from the UI.
 - `degraded` -> `degraded` (with increased backoff) on a probe / retry failure; the task using the route immediately moves to the next candidate.
 - Auto-retryable degraded routes carry a `retry_at` timestamp; user-actionable degraded routes remain blocked indefinitely until the user acts.
 
 ### Task resolution outcome
 
+- Short transient -> run schedules the same execution profile and remains out of
+  fallback resolution until success or exhaustion.
 - All-providers-exhausted, at least one auto-retryable: task is parked; scheduler wakes it at the earliest `retry_at`.
 - All-providers-exhausted, all user-actionable: task is blocked until the user reconnects / configures / retries.
 - Mixed: task is blocked, UI surfaces both the earliest automatic retry and the user actions needed.
@@ -307,25 +353,28 @@ Routing is a workspace-admin surface; agents themselves do not call any routing 
 
 ## Failure modes
 
-- **Provider returns a known quota / auth / rate-limit signal**: route resolution uses the normalized error code rather than provider-specific prose. Provider goes `degraded`; task falls through to the next configured provider.
+- **Provider returns a known long quota or rate-limit signal**: route resolution uses the normalized error code rather than provider-specific prose. Provider goes `degraded`; task falls through to the next configured provider.
+- **Provider returns auth, inactive-subscription, or configuration evidence**: route becomes `user_action_required`; task may fall through to another configured provider but the failed route receives no timer.
 - **Provider fails before session start with an unrecognized provider-owned error**: scheduler records a low-confidence `unknown_provider_error`, preserves evidence, and tries the next configured provider.
 - **Task has already started editing or running tools, provider reports an ambiguous failure**: scheduler does not fall back unless the error clearly matches a provider-unavailable class. Post-start fallback is conservative by design.
-- **Provider returns a generic provider-unavailable error without a reset time**: route marked degraded with a short exponential backoff `retry_at`; same task immediately runs through the next configured provider.
+- **Provider returns a generic provider-unavailable error without a reset time**: same run enters the short same-route phase. Exhaustion marks the route degraded with provider-health backoff and allows configured fallback.
+- **Provider returns a short network, overload, availability, or model-capacity error**: same run retries the current execution profile after 5, 10, and 20 seconds. It falls through only after exhaustion.
 - **Degraded provider reaches retry time, probe fails again**: task immediately tries the next candidate; provider route stays degraded with an increased backoff.
 - **Degraded provider's scheduled health check, launch probe, reconnect, or user-triggered retry succeeds**: route returns to `eligible`; future launches can use it again.
 - **All configured providers quota-limited or temporarily unavailable**: task waits for capacity and automatically retries at the earliest route retry time. Logical Office agent assignment is preserved; task is not reassigned automatically.
+- **All configured providers require an inactive subscription or other user action**: task is blocked with remediation hints and does not schedule those routes automatically. An explicitly enabled fallback chain is exhausted before reaching this state.
 - **All configured providers require user action**: task is blocked until the user reconnects, configures a provider, fixes model mappings, or manually retries.
 - **Provider health state changes (workspace level)**: dashboard and inbox show an actionable issue listing affected agents and routes.
 
 ## Persistence guarantees
 
 - **Workspace routing config (`office_workspace_routing`)**: durable. Survives restart. When the row is missing, `GetWorkspaceRouting` synthesises the spec defaults in-memory and the caller may upsert later.
-- **Provider health (`office_provider_health`)**: durable. `state`, `retry_at`, `backoff_step`, `last_failure`, `last_success`, and the sanitized `raw_excerpt` survive restart, so a degraded provider stays degraded until a successful probe / launch / user retry, even across crashes. Healthy rows are not persisted (they are pruned to the healthy state, and `ListProviderHealth` filters them out at the SQL layer).
-- **Run routing decision**: `runs.logical_provider_order`, `requested_tier`, `resolved_execution_profile_id`, `resolved_provider_id`, `resolved_model`, `current_route_attempt_seq`, `route_cycle_baseline_seq`, `routing_blocked_status`, `earliest_retry_at`, `scheduled_retry_at` are durable. A parked run still re-dispatches after a restart because `scheduled_retry_at` re-enters the scheduler's eligibility filter.
+- **Provider health (`office_provider_health`)**: durable. `state`, `retry_at`, `backoff_step`, `last_failure`, `last_success`, and the sanitized `raw_excerpt` survive restart, so a cooldown or degraded provider retains its scheduler meaning across crashes. Healthy rows are not persisted (they are pruned to the healthy state, and `ListProviderHealth` filters them out at the SQL layer).
+- **Run routing decision**: `runs.logical_provider_order`, `requested_tier`, `resolved_execution_profile_id`, `resolved_provider_id`, `resolved_model`, `current_route_attempt_seq`, `route_cycle_baseline_seq`, `routing_blocked_status`, `earliest_retry_at`, and `scheduled_retry_at` are durable. The `retry_scheduled` route attempt identifies a pending short phase; a short retry or parked run still re-dispatches after a restart because `scheduled_retry_at` re-enters the scheduler's eligibility filter.
 - **Route attempts (`office_run_route_attempts`)**: durable. Every attempt records `execution_profile_id` before the next candidate is tried, so post-start fallback reasoning and the exact CLI profile used survive restart.
 - **Session/executor binding**: `task_sessions.execution_profile_id` and `executors_running.execution_profile_id` bind process state and provider-native resume tokens to the concrete profile that created them. A profile change clears or ignores incompatible resume state.
 - **Agent overrides**: durable via `agent_profiles.settings` JSON. Round-trips other settings keys untouched.
-- **Backoff jitter**: deterministic-ish (±25% via the process-default rand source); not seeded across restarts. The base `backoff_step` is durable, so the schedule rung resumes from where it left off, but the exact jitter offset is reset.
+- **Backoff timing**: short same-route delays use the fixed 5/10/20-second ladder; long-horizon provider health uses the existing durable backoff step and retry deadline.
 - **Prober registry (`routingerr.RegisterProber`)**: process-local, in-memory only. Probers must re-register on every boot via package-init or DI wiring. There is no on-disk record of which providers have probers.
 - **Provider order / tier-mapping changes that materially alter routing decisions trigger `ClearAllParkedRoutingForWorkspace`**: parked runs are re-queued and resolution runs fresh against the new config. False-positive clears (changes that could not have affected the block reason) are harmless because runs simply re-park with the latest verdict.
 - **Workspace flips enabled `true -> false`**: `ClearAllParkedRoutingForWorkspace` re-queues every parked run. The next dispatch still resolves the effective tier but tries only the first provider's execution profile.
@@ -339,15 +388,25 @@ See also: [`office/runtime.md`](runtime.md) for how the runtime classifies and s
 - **GIVEN** that Codex execution hits a classified five-hour usage limit after starting work, **WHEN** routing falls back to Claude, **THEN** Kandev starts a fresh Claude-native session in the same task and worktree using the full Claude profile, reapplies the CTO instructions and skills, and tells Claude to inspect durable task and git state before continuing.
 - **GIVEN** that cross-provider fallback, **WHEN** the Claude process starts, **THEN** it does not receive the Codex ACP resume token or Codex-specific environment, flags, permissions, config options, passthrough setting, or MCP configuration.
 - **GIVEN** workspace routing is enabled with `claude -> codex -> opencode` and tier `balanced`, **WHEN** an agent without overrides launches, **THEN** it first tries the Claude balanced model and may fall back through the remaining providers on provider-limit errors.
-- **GIVEN** the CEO agent overrides provider order to `claude` and tier `frontier`, **WHEN** Claude is rate-limited, **THEN** the CEO run does not try Codex or OpenCode and follows the normal failure/escalation path.
+- **GIVEN** the CEO agent overrides provider order to `claude` and tier `frontier`, **WHEN** Claude is rate-limited, **THEN** the CEO run does not try Codex or OpenCode; a short limit retries Claude first, while a long limit or exhausted short budget parks for provider capacity.
 - **GIVEN** a worker agent inherits workspace routing, **WHEN** the workspace default tier changes from `frontier` to `balanced`, **THEN** future worker runs use the balanced tier without editing the worker.
 - **GIVEN** routing is enabled after several agents already exist, **WHEN** those agents still inherit workspace routing, **THEN** their future runs use the workspace default tier and provider order without requiring per-agent edits.
 - **GIVEN** a task run falls back from Claude to Codex because Claude is quota-limited, **WHEN** the user opens the task, run history, agent detail, or dashboard, **THEN** the UI shows the intended primary route, the actual provider/model, and the quota-limit reason.
-- **GIVEN** Claude credentials expire, **WHEN** an agent with fallback providers launches, **THEN** the scheduler records the auth failure, marks Claude degraded for the workspace, and tries the next configured provider.
+- **GIVEN** Claude credentials expire, **WHEN** an agent with fallback providers launches, **THEN** the scheduler records the auth failure, marks Claude user-action-required for the workspace, and tries the next configured provider.
 - **GIVEN** a provider adapter returns a known quota, auth, or rate-limit signal, **WHEN** route resolution handles the failure, **THEN** the scheduler uses the normalized error code rather than provider-specific prose.
 - **GIVEN** a provider fails before session start with an unrecognized provider-owned error, **WHEN** no classifier rule matches, **THEN** the scheduler records a low-confidence `unknown_provider_error`, preserves evidence, and tries the next configured provider.
 - **GIVEN** a task has already started editing or running tools, **WHEN** the provider reports an ambiguous failure, **THEN** the scheduler does not fall back unless the error clearly matches a provider-unavailable class.
-- **GIVEN** a provider returns a generic provider-unavailable error without a reset time, **WHEN** the route fails, **THEN** the scheduler marks that provider route degraded, sets a short backoff retry time, and runs the same task through the next configured provider.
+- **GIVEN** a provider returns a generic provider-unavailable error without a reset time, **WHEN** the route fails, **THEN** the scheduler first retries the same execution profile on the short schedule and only degrades/falls through after exhaustion.
+- **GIVEN** a provider returns a network reset, overload, or model-capacity error,
+  **WHEN** the Office run has short retries remaining, **THEN** the scheduler
+  retries the same execution profile after a few seconds and does not select the
+  next provider.
+- **GIVEN** the same transient survives three short retries, **WHEN** the last
+  attempt fails, **THEN** the scheduler degrades the provider route and continues
+  through the configured fallback chain.
+- **GIVEN** multiple Office runs encounter the same scoped transient, **WHEN** a
+  short retry cooldown is active, **THEN** the other runs wait on the shared
+  cooldown without switching providers or consuming additional attempts.
 - **GIVEN** a degraded provider reaches its retry time, **WHEN** a health probe or task-launch probe fails again, **THEN** the task immediately tries the next candidate and the provider route receives a longer backoff.
 - **GIVEN** a provider is marked degraded, **WHEN** a scheduled health check, launch probe, reconnect, or user-triggered retry succeeds, **THEN** future launches can use that provider again.
 - **GIVEN** all configured providers are quota-limited or temporarily unavailable, **WHEN** a task exhausts the route list, **THEN** the task waits for provider capacity and automatically retries at the earliest route retry time.

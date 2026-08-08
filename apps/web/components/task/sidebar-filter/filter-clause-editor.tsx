@@ -21,10 +21,16 @@ import type {
   FilterOp,
   FilterValue,
 } from "@/lib/state/slices/ui/sidebar-view-types";
-import { DIMENSION_METAS, getDimensionMeta, getOpLabel } from "./filter-dimension-registry";
+import {
+  DIMENSION_METAS,
+  getDimensionEnumOptions,
+  getDimensionMeta,
+  getOpLabel,
+} from "./filter-dimension-registry";
 import { useFilterValueOptions } from "./use-filter-value-options";
 import { FilterMultiSelect } from "./filter-multi-select";
 import { buildOptionGroups, hasGroupedOptions } from "./filter-option-groups";
+import { useTranslation } from "react-i18next";
 
 type ValueOption = { value: string; label: string; color?: string; group?: string };
 
@@ -64,9 +70,10 @@ function normaliseValueForDimension(
 }
 
 export function FilterClauseEditor({ clause, onChange, onRemove }: Props) {
+  const { t } = useTranslation();
   const meta = getDimensionMeta(clause.dimension);
   const enumOptions = useFilterValueOptions(clause.dimension);
-  const availableOptions = meta.enumOptions ?? enumOptions;
+  const availableOptions = getDimensionEnumOptions(meta) ?? enumOptions;
 
   function handleDimensionChange(next: FilterDimension) {
     const nextMeta = getDimensionMeta(next);
@@ -110,7 +117,7 @@ export function FilterClauseEditor({ clause, onChange, onRemove }: Props) {
         <SelectContent>
           {DIMENSION_METAS.map((m) => (
             <SelectItem key={m.dimension} value={m.dimension} className="text-xs">
-              {m.label}
+              {t(m.labelKey)}
             </SelectItem>
           ))}
         </SelectContent>
@@ -142,7 +149,7 @@ export function FilterClauseEditor({ clause, onChange, onRemove }: Props) {
         className="h-6 w-6 cursor-pointer text-muted-foreground hover:text-foreground"
         onClick={onRemove}
         data-testid="filter-clause-remove"
-        aria-label="Remove filter"
+        aria-label={t("task:removeFilter")}
       >
         <IconX className="h-3.5 w-3.5" />
       </Button>
@@ -159,6 +166,7 @@ function ValueInput({
   options: ValueOption[];
   onChange: (v: FilterValue) => void;
 }) {
+  const { t } = useTranslation();
   const meta = getDimensionMeta(clause.dimension);
 
   if (meta.valueKind === "boolean") {
@@ -171,7 +179,7 @@ function ValueInput({
       <Input
         value={String(clause.value ?? "")}
         onChange={(e) => onChange(e.target.value)}
-        placeholder={meta.placeholder ?? "Value"}
+        placeholder={meta.placeholderKey ? t(meta.placeholderKey) : t("task:value")}
         className="h-7 min-w-0 flex-1 text-xs"
         data-testid="filter-value-input"
       />
@@ -195,12 +203,12 @@ function ValueInput({
         className="h-7 min-w-0 flex-1 text-xs"
         data-testid="filter-value-select"
       >
-        <SelectValue placeholder="Select value" />
+        <SelectValue placeholder={t("task:selectValue")} />
       </SelectTrigger>
       <SelectContent>
         {options.length === 0 ? (
           <SelectItem value="__empty__" disabled className="text-xs">
-            No options
+            {t("task:noOptions")}
           </SelectItem>
         ) : (
           <GroupedSelectItems options={options} />

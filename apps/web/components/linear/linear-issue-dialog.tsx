@@ -14,6 +14,7 @@ import {
   useIssueState,
   type IssueState,
 } from "./linear-issue-common";
+import { useDateLocale } from "@/lib/i18n/date-locale";
 import { useTranslation } from "react-i18next";
 
 type LinearIssueDialogProps = {
@@ -321,7 +322,7 @@ function DetailRow({ label, children }: { label: string; children: React.ReactNo
 
 function MetaFooter({ issue }: { issue: LinearIssue }) {
   const { t } = useTranslation();
-  const updated = formatRelative(issue.updated);
+  const updated = formatRelative(issue.updated, useDateLocale());
   if (!updated) return null;
   return (
     <div className="text-xs text-muted-foreground px-1" title={issue.updated}>

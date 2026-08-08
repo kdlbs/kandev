@@ -629,6 +629,10 @@ Mattermost-webapp model), not iframes. The full contract lives in
   without blocking the menu from closing. `registerComponent("task-card-indicators",
   C)` renders `C` beside the PR status icon on every kanban card, receiving
   `{ taskId, workspaceId, workflowStepId }` as `slotProps`.
+  `registerComponent("task-card-tags", C)` renders `C` in its own row on every
+  kanban card (below the badges row), receiving the same
+  `{ taskId, workspaceId, workflowStepId }` shape — for a contribution too wide
+  for the cramped title-row `task-card-indicators` spot, e.g. a row of tag chips.
 - **`host.storage`:** authenticated, per-user key/value storage
   (`get`/`set`/`delete`/`list`/`subscribe`), backed by the `plugin_user_state`
   table (separate from the plugin-backend-only `plugin_state` table — no gRPC/proto
@@ -911,6 +915,18 @@ complete.
   record remain installed for retry, and no successful-uninstall response is emitted.
   **WHEN** cleanup later succeeds and uninstall is retried, **THEN** all users' rows,
   the package, and the record are removed.
+
+- **GIVEN** a plugin registers a component for `"task-card-tags"`, **WHEN** any
+  kanban card renders, **THEN** that component mounts in its own row (distinct
+  from the title row hosting `"task-card-indicators"`), receiving exactly
+  `{ taskId, workspaceId, workflowStepId }` for that card. **GIVEN** no plugin
+  is registered for the slot, **WHEN** a card renders, **THEN** no extra DOM
+  node or empty-row spacing appears. **GIVEN** two plugins register for
+  `"task-card-tags"`, **WHEN** a card renders, **THEN** both render, in
+  registration order. **GIVEN** a `"task-card-tags"` component throws during
+  render, **WHEN** that card renders, **THEN** the card's title and its other
+  slot components (e.g. `"task-card-indicators"`) still render, isolated by
+  the existing per-registration error boundary.
 
 ## Out of scope
 

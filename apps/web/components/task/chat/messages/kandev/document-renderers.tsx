@@ -13,17 +13,11 @@ import {
 } from "@tabler/icons-react";
 import { Badge } from "@kandev/ui/badge";
 import { markdownComponents, remarkPlugins } from "@/components/shared/markdown-components";
-import {
-  EmptyListNote,
-  IdChip,
-  KandevBody,
-  KandevRow,
-  KeyValueRow,
-  SummaryDot,
-  pluralCount,
-} from "./shared";
+import { EmptyListNote, IdChip, KandevBody, KandevRow, KeyValueRow, SummaryDot } from "./shared";
 import { pickArray, pickNumber, pickString } from "./parse";
 import type { KandevRenderer } from "./types";
+import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 
 // MarkdownBody renders task plan / document content. We pre-trim and use the
 // shared markdown component set so heading sizes, code blocks, and mermaid
@@ -50,16 +44,19 @@ function ContentBox({ children }: { children: ReactNode }) {
   );
 }
 
-function summarizeContent(content: string | undefined): string {
-  if (!content) return "empty";
+// Two counts in one label, but i18next selects a plural form on `count` alone.
+// Lines own `count`; the character total rides along as a plain value.
+function summarizeContent(t: TFunction, content: string | undefined): string {
+  if (!content) return t("task:documentSummaryEmpty");
   const lines = content.split("\n").length;
   const chars = content.length;
-  return `${lines} line${lines === 1 ? "" : "s"} · ${chars} chars`;
+  return t("task:documentSummary", { count: lines, chars });
 }
 
 // ---------- get_task_plan ----------
 
 export const GetTaskPlanRenderer: KandevRenderer = ({ args, result, status }) => {
+  const { t } = useTranslation();
   const taskId = pickString(args, "task_id");
   const content = pickString(result, "content");
   const title = pickString(result, "title");
@@ -67,7 +64,7 @@ export const GetTaskPlanRenderer: KandevRenderer = ({ args, result, status }) =>
   return (
     <KandevRow
       Icon={IconChecklist}
-      title="Kandev: Get Task Plan"
+      title={t("task:kandevGetTaskPlan")}
       summary={
         <span className="inline-flex items-center gap-1.5">
           {taskId && (
@@ -76,20 +73,20 @@ export const GetTaskPlanRenderer: KandevRenderer = ({ args, result, status }) =>
               <SummaryDot />
             </>
           )}
-          <span>{hasPlan ? summarizeContent(content) : "no plan"}</span>
+          <span>{hasPlan ? summarizeContent(t, content) : t("task:noPlan")}</span>
         </span>
       }
       status={status}
       hasExpandableContent={hasPlan}
     >
       <KandevBody>
-        {title && <KeyValueRow label="title">{title}</KeyValueRow>}
+        {title && <KeyValueRow label={t("task:title")}>{title}</KeyValueRow>}
         {hasPlan ? (
           <ContentBox>
             <MarkdownBody content={content} />
           </ContentBox>
         ) : (
-          <EmptyListNote noun="plan" />
+          <EmptyListNote messageKey="task:noPlanFound" />
         )}
       </KandevBody>
     </KandevRow>
@@ -99,6 +96,7 @@ export const GetTaskPlanRenderer: KandevRenderer = ({ args, result, status }) =>
 // ---------- create_task_plan ----------
 
 export const CreateTaskPlanRenderer: KandevRenderer = ({ args, result, status }) => {
+  const { t } = useTranslation();
   const taskId = pickString(args, "task_id");
   const argContent = pickString(args, "content");
   const argTitle = pickString(args, "title");
@@ -111,7 +109,7 @@ export const CreateTaskPlanRenderer: KandevRenderer = ({ args, result, status })
   return (
     <KandevRow
       Icon={IconPlus}
-      title="Kandev: Create Task Plan"
+      title={t("task:kandevCreateTaskPlan")}
       summary={
         <span className="inline-flex items-center gap-1.5">
           <IdChip id={taskId} />
@@ -127,7 +125,7 @@ export const CreateTaskPlanRenderer: KandevRenderer = ({ args, result, status })
       hasExpandableContent={!!displayContent}
     >
       <KandevBody>
-        {displayTitle && <KeyValueRow label="title">{displayTitle}</KeyValueRow>}
+        {displayTitle && <KeyValueRow label={t("task:title")}>{displayTitle}</KeyValueRow>}
         {displayContent && (
           <ContentBox>
             <MarkdownBody content={displayContent} />
@@ -141,6 +139,7 @@ export const CreateTaskPlanRenderer: KandevRenderer = ({ args, result, status })
 // ---------- update_task_plan ----------
 
 export const UpdateTaskPlanRenderer: KandevRenderer = ({ args, result, status }) => {
+  const { t } = useTranslation();
   const taskId = pickString(args, "task_id");
   const argContent = pickString(args, "content");
   const displayContent = pickString(result, "content") ?? argContent;
@@ -148,7 +147,7 @@ export const UpdateTaskPlanRenderer: KandevRenderer = ({ args, result, status })
   return (
     <KandevRow
       Icon={IconPencil}
-      title="Kandev: Update Task Plan"
+      title={t("task:kandevUpdateTaskPlan")}
       summary={
         <span className="inline-flex items-center gap-1.5">
           {taskId && (
@@ -157,14 +156,14 @@ export const UpdateTaskPlanRenderer: KandevRenderer = ({ args, result, status })
               <SummaryDot />
             </>
           )}
-          <span>{summarizeContent(displayContent)}</span>
+          <span>{summarizeContent(t, displayContent)}</span>
         </span>
       }
       status={status}
       hasExpandableContent={!!displayContent}
     >
       <KandevBody>
-        {displayTitle && <KeyValueRow label="title">{displayTitle}</KeyValueRow>}
+        {displayTitle && <KeyValueRow label={t("task:title")}>{displayTitle}</KeyValueRow>}
         {displayContent && (
           <ContentBox>
             <MarkdownBody content={displayContent} />
@@ -178,11 +177,12 @@ export const UpdateTaskPlanRenderer: KandevRenderer = ({ args, result, status })
 // ---------- delete_task_plan ----------
 
 export const DeleteTaskPlanRenderer: KandevRenderer = ({ args, status }) => {
+  const { t } = useTranslation();
   const taskId = pickString(args, "task_id");
   return (
     <KandevRow
       Icon={IconTrash}
-      title="Kandev: Delete Task Plan"
+      title={t("task:kandevDeleteTaskPlan")}
       summary={<IdChip id={taskId} />}
       status={status}
       hasExpandableContent={false}
@@ -193,6 +193,7 @@ export const DeleteTaskPlanRenderer: KandevRenderer = ({ args, status }) => {
 // ---------- get_task_document ----------
 
 export const GetTaskDocumentRenderer: KandevRenderer = ({ args, result, status }) => {
+  const { t } = useTranslation();
   const taskId = pickString(args, "task_id");
   const docKey = pickString(args, "document_key") ?? pickString(result, "key");
   const content = pickString(result, "content");
@@ -202,7 +203,7 @@ export const GetTaskDocumentRenderer: KandevRenderer = ({ args, result, status }
   return (
     <KandevRow
       Icon={IconFileText}
-      title="Kandev: Get Task Document"
+      title={t("task:kandevGetTaskDocument")}
       summary={
         <span className="inline-flex items-center gap-1.5">
           <IdChip id={taskId} />
@@ -240,6 +241,7 @@ export const GetTaskDocumentRenderer: KandevRenderer = ({ args, result, status }
 // ---------- write_task_document ----------
 
 export const WriteTaskDocumentRenderer: KandevRenderer = ({ args, result, status }) => {
+  const { t } = useTranslation();
   const taskId = pickString(args, "task_id");
   const docKey = pickString(args, "document_key") ?? pickString(result, "key");
   const argContent = pickString(args, "content");
@@ -249,7 +251,7 @@ export const WriteTaskDocumentRenderer: KandevRenderer = ({ args, result, status
   return (
     <KandevRow
       Icon={IconFile}
-      title="Kandev: Write Task Document"
+      title={t("task:kandevWriteTaskDocument")}
       summary={
         <span className="inline-flex items-center gap-1.5">
           <IdChip id={taskId} />
@@ -318,6 +320,7 @@ function ConversationMessageRow({ msg }: { msg: ConversationMessage }) {
 }
 
 export const GetTaskConversationRenderer: KandevRenderer = ({ args, result, status }) => {
+  const { t } = useTranslation();
   const taskId = pickString(args, "task_id");
   const sessionId = pickString(args, "session_id") ?? pickString(result, "session_id");
   const messages = pickArray<ConversationMessage>(result, "messages") ?? [];
@@ -332,7 +335,7 @@ export const GetTaskConversationRenderer: KandevRenderer = ({ args, result, stat
   return (
     <KandevRow
       Icon={IconMessageCircle}
-      title="Kandev: Get Task Conversation"
+      title={t("task:kandevGetTaskConversation")}
       summary={
         <span className="inline-flex items-center gap-1.5">
           {taskId && <IdChip id={taskId} />}
@@ -343,7 +346,7 @@ export const GetTaskConversationRenderer: KandevRenderer = ({ args, result, stat
             </>
           )}
           {(taskId || sessionId) && <SummaryDot />}
-          {pluralCount(total, "message")}
+          {t("task:messageCount", { count: total })}
         </span>
       }
       status={status}
@@ -351,7 +354,7 @@ export const GetTaskConversationRenderer: KandevRenderer = ({ args, result, stat
     >
       <KandevBody>
         {messages.length === 0 ? (
-          <EmptyListNote noun="messages" />
+          <EmptyListNote messageKey="task:noMessagesFound" />
         ) : (
           <div className="space-y-2 max-h-[400px] overflow-y-auto">
             {visible.map((m, i) => (
@@ -359,7 +362,7 @@ export const GetTaskConversationRenderer: KandevRenderer = ({ args, result, stat
             ))}
             {truncated && (
               <div className="text-[10px] italic text-muted-foreground/70">
-                + {hiddenCount} more not shown
+                {t("task:moreNotShown", { count: hiddenCount })}
               </div>
             )}
           </div>

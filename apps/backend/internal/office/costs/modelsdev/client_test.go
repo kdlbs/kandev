@@ -6,6 +6,8 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -234,5 +236,291 @@ func TestClient_FirstBootMissesGracefully(t *testing.T) {
 	// No Refresh — simulating cold boot before any HTTP fetch.
 	if _, ok := c.LookupForModel(ctx, "claude-opus-4-7"); ok {
 		t.Error("expected miss on cold-boot lookup")
+	}
+}
+
+type requestGate struct {
+	server   *httptest.Server
+	started  chan struct{}
+	release  chan struct{}
+	requests atomic.Int32
+}
+
+func newRequestGate(t *testing.T, body string) *requestGate {
+	t.Helper()
+	gate := &requestGate{
+		started: make(chan struct{}),
+		release: make(chan struct{}),
+	}
+	gate.server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		count := gate.requests.Add(1)
+		if count == 1 {
+			close(gate.started)
+		}
+		select {
+		case <-gate.release:
+		case <-r.Context().Done():
+			return
+		}
+		_, _ = w.Write([]byte(body))
+	}))
+	t.Cleanup(gate.server.Close)
+	return gate
+}
+
+func (g *requestGate) waitForFirstRequest(t *testing.T) {
+	t.Helper()
+	select {
+	case <-g.started:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for the first models.dev request")
+	}
+}
+
+func TestClient_ConcurrentRefreshCallsShareOneFetch(t *testing.T) {
+	dir := t.TempDir()
+	cachePath := filepath.Join(dir, "models-dev.json")
+	gate := newRequestGate(t, sampleDataset)
+	c := modelsdev.New(modelsdev.Config{
+		CachePath:  cachePath,
+		URL:        gate.server.URL,
+		TTL:        time.Hour,
+		HTTPClient: gate.server.Client(),
+	}, logger.Default())
+
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	for index := 0; index < 8; index++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			if err := c.Refresh(context.Background()); err != nil {
+				t.Errorf("Refresh: %v", err)
+			}
+		}()
+	}
+	close(start)
+	gate.waitForFirstRequest(t)
+	close(gate.release)
+	wg.Wait()
+
+	if got := gate.requests.Load(); got != 1 {
+		t.Fatalf("models.dev request count = %d, want 1", got)
+	}
+}
+
+func TestClient_ConcurrentLookupsShareOneBackgroundFetch(t *testing.T) {
+	dir := t.TempDir()
+	cachePath := filepath.Join(dir, "models-dev.json")
+	if err := os.WriteFile(cachePath, []byte(sampleDataset), 0o644); err != nil {
+		t.Fatalf("seed cache: %v", err)
+	}
+	old := time.Now().Add(-time.Hour)
+	if err := os.Chtimes(cachePath, old, old); err != nil {
+		t.Fatalf("age cache: %v", err)
+	}
+	gate := newRequestGate(t, sampleDataset)
+	c := modelsdev.New(modelsdev.Config{
+		CachePath:  cachePath,
+		URL:        gate.server.URL,
+		TTL:        time.Millisecond,
+		HTTPClient: gate.server.Client(),
+	}, logger.Default())
+
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	for index := 0; index < 12; index++ {
+		wg.Add(1)
+		go func(index int) {
+			defer wg.Done()
+			<-start
+			if index%2 == 0 {
+				_, _ = c.LookupForModel(context.Background(), "gpt-5.3-codex-spark")
+				return
+			}
+			_, _ = c.LookupModelInfo(context.Background(), "gpt-5.3-codex-spark")
+		}(index)
+	}
+	close(start)
+	wg.Wait()
+	gate.waitForFirstRequest(t)
+	if got := gate.requests.Load(); got != 1 {
+		t.Fatalf("background models.dev request count before release = %d, want 1", got)
+	}
+	refreshDone := make(chan error, 1)
+	go func() { refreshDone <- c.Refresh(context.Background()) }()
+	close(gate.release)
+	select {
+	case err := <-refreshDone:
+		if err != nil {
+			t.Fatalf("joined background Refresh: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("joined background Refresh did not complete")
+	}
+	if got := gate.requests.Load(); got != 1 {
+		t.Fatalf("background models.dev request count = %d, want 1", got)
+	}
+}
+
+func TestClient_CanceledStaleLookupDoesNotCancelJoinedRefresh(t *testing.T) {
+	dir := t.TempDir()
+	cachePath := filepath.Join(dir, "models-dev.json")
+	if err := os.WriteFile(cachePath, []byte(sampleDataset), 0o644); err != nil {
+		t.Fatalf("seed cache: %v", err)
+	}
+	old := time.Now().Add(-time.Hour)
+	if err := os.Chtimes(cachePath, old, old); err != nil {
+		t.Fatalf("age cache: %v", err)
+	}
+	gate := newRequestGate(t, sampleDataset)
+	c := modelsdev.New(modelsdev.Config{
+		CachePath:  cachePath,
+		URL:        gate.server.URL,
+		TTL:        time.Millisecond,
+		HTTPClient: gate.server.Client(),
+	}, logger.Default())
+
+	lookupCtx, cancelLookup := context.WithCancel(context.Background())
+	_, _ = c.LookupForModel(lookupCtx, "gpt-5.3-codex-spark")
+	gate.waitForFirstRequest(t)
+	cancelLookup()
+
+	refreshDone := make(chan error, 1)
+	go func() { refreshDone <- c.Refresh(context.Background()) }()
+	select {
+	case err := <-refreshDone:
+		t.Fatalf("joined refresh returned before the shared request completed: %v", err)
+	case <-time.After(25 * time.Millisecond):
+	}
+
+	close(gate.release)
+	select {
+	case err := <-refreshDone:
+		if err != nil {
+			t.Fatalf("joined Refresh: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("joined Refresh did not complete")
+	}
+	if got := gate.requests.Load(); got != 1 {
+		t.Fatalf("models.dev request count after canceled lookup = %d, want 1", got)
+	}
+}
+
+func TestClient_FailedRefreshPreservesCacheAndAllowsRetry(t *testing.T) {
+	dir := t.TempDir()
+	cachePath := filepath.Join(dir, "models-dev.json")
+	var fail atomic.Bool
+	var requests atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requests.Add(1)
+		if fail.Load() {
+			http.Error(w, "upstream unavailable", http.StatusBadGateway)
+			return
+		}
+		_, _ = w.Write([]byte(sampleDataset))
+	}))
+	t.Cleanup(server.Close)
+	c := modelsdev.New(modelsdev.Config{
+		CachePath:  cachePath,
+		URL:        server.URL,
+		TTL:        time.Hour,
+		HTTPClient: server.Client(),
+	}, logger.Default())
+
+	if err := c.Refresh(context.Background()); err != nil {
+		t.Fatalf("initial Refresh: %v", err)
+	}
+	before, err := os.ReadFile(cachePath)
+	if err != nil {
+		t.Fatalf("read initial cache: %v", err)
+	}
+	if _, ok := c.LookupForModel(context.Background(), "claude-opus-4-7"); !ok {
+		t.Fatal("initial cache lookup failed")
+	}
+
+	fail.Store(true)
+	if err := c.Refresh(context.Background()); err == nil {
+		t.Fatal("failed Refresh unexpectedly succeeded")
+	}
+	after, err := os.ReadFile(cachePath)
+	if err != nil {
+		t.Fatalf("read cache after failed refresh: %v", err)
+	}
+	if string(after) != string(before) {
+		t.Fatal("failed refresh replaced the valid cache")
+	}
+	if _, ok := c.LookupForModel(context.Background(), "claude-opus-4-7"); !ok {
+		t.Fatal("failed refresh discarded valid in-memory data")
+	}
+
+	fail.Store(false)
+	if err := c.Refresh(context.Background()); err != nil {
+		t.Fatalf("retry Refresh: %v", err)
+	}
+	if got := requests.Load(); got != 3 {
+		t.Fatalf("request count after failed retry = %d, want 3", got)
+	}
+	assertNoCacheTemps(t, cachePath)
+}
+
+func TestClient_CanceledRefreshAllowsRetryAndCleansTemporaryFile(t *testing.T) {
+	dir := t.TempDir()
+	cachePath := filepath.Join(dir, "models-dev.json")
+	firstStarted := make(chan struct{})
+	var requests atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if requests.Add(1) == 1 {
+			close(firstStarted)
+			<-r.Context().Done()
+			return
+		}
+		_, _ = w.Write([]byte(sampleDataset))
+	}))
+	t.Cleanup(server.Close)
+	c := modelsdev.New(modelsdev.Config{
+		CachePath:  cachePath,
+		URL:        server.URL,
+		TTL:        time.Hour,
+		HTTPClient: server.Client(),
+	}, logger.Default())
+
+	ctx, cancel := context.WithCancel(context.Background())
+	refreshDone := make(chan error, 1)
+	go func() { refreshDone <- c.Refresh(ctx) }()
+	select {
+	case <-firstStarted:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for cancelable refresh")
+	}
+	cancel()
+	select {
+	case err := <-refreshDone:
+		if err == nil {
+			t.Fatal("canceled Refresh unexpectedly succeeded")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("canceled Refresh did not return")
+	}
+
+	if err := c.Refresh(context.Background()); err != nil {
+		t.Fatalf("retry Refresh: %v", err)
+	}
+	if got := requests.Load(); got != 2 {
+		t.Fatalf("request count after canceled retry = %d, want 2", got)
+	}
+	assertNoCacheTemps(t, cachePath)
+}
+
+func assertNoCacheTemps(t *testing.T, cachePath string) {
+	t.Helper()
+	matches, err := filepath.Glob(filepath.Join(filepath.Dir(cachePath), "."+filepath.Base(cachePath)+".tmp-*"))
+	if err != nil {
+		t.Fatalf("glob cache temps: %v", err)
+	}
+	if len(matches) != 0 {
+		t.Fatalf("cache temporary files remain: %v", matches)
 	}
 }

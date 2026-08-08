@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { isValidElement, type ReactNode } from "react";
+import { render } from "@testing-library/react";
+import { TooltipProvider } from "@kandev/ui/tooltip";
 import {
   IconCheck,
   IconCircleCheck,
@@ -8,6 +10,7 @@ import {
   IconLoader2,
   IconMessageQuestion,
   IconShieldQuestion,
+  IconX,
 } from "@tabler/icons-react";
 import {
   getSessionStateIcon,
@@ -32,11 +35,13 @@ describe("getTaskStateIcon", () => {
   });
 
   it("uses the question icon when there is a pending clarification", () => {
-    expect(iconType(getTaskStateIcon("REVIEW", undefined, true))).toBe(IconMessageQuestion);
+    expect(iconType(getTaskStateIcon("REVIEW", undefined, { hasPendingClarification: true }))).toBe(
+      IconMessageQuestion,
+    );
   });
 
   it("keeps review task state as the review check without pending clarification", () => {
-    expect(iconType(getTaskStateIcon("REVIEW", undefined, false))).toBe(IconCheck);
+    expect(iconType(getTaskStateIcon("REVIEW", undefined))).toBe(IconCheck);
   });
 });
 
@@ -45,25 +50,46 @@ describe("getTaskStateIcon — waiting-for-input variants", () => {
   //  permission                    → shield-question (needs me: approve/deny)
   //  Both must read apart from done AND from both running affordances by SHAPE.
   it("uses the shield-question icon for a pending permission prompt", () => {
-    expect(iconType(getTaskStateIcon("REVIEW", undefined, false, null, true))).toBe(
-      IconShieldQuestion,
-    );
+    expect(
+      iconType(
+        getTaskStateIcon("REVIEW", undefined, {
+          foregroundActivity: null,
+          hasPendingPermission: true,
+        }),
+      ),
+    ).toBe(IconShieldQuestion);
   });
 
   it("lets a pending permission win over a coarse WAITING_FOR_INPUT state (not masked)", () => {
     // A permission prompt often coincides with the coarse WAITING_FOR_INPUT
     // state; the shield must not be hidden behind the generic question icon.
-    expect(iconType(getTaskStateIcon("WAITING_FOR_INPUT", undefined, false, null, true))).toBe(
-      IconShieldQuestion,
-    );
+    expect(
+      iconType(
+        getTaskStateIcon("WAITING_FOR_INPUT", undefined, {
+          foregroundActivity: null,
+          hasPendingPermission: true,
+        }),
+      ),
+    ).toBe(IconShieldQuestion);
   });
 
   it("distinguishes both waiting variants from done and from both running affordances by SHAPE", () => {
-    const clarification = iconType(getTaskStateIcon("REVIEW", undefined, true));
-    const permission = iconType(getTaskStateIcon("REVIEW", undefined, false, null, true));
-    const generating = iconType(getTaskStateIcon("IN_PROGRESS", undefined, false, "generating"));
-    const background = iconType(getTaskStateIcon("IN_PROGRESS", undefined, false, "background"));
-    const done = iconType(getTaskStateIcon("COMPLETED", undefined, false, null));
+    const clarification = iconType(
+      getTaskStateIcon("REVIEW", undefined, { hasPendingClarification: true }),
+    );
+    const permission = iconType(
+      getTaskStateIcon("REVIEW", undefined, {
+        foregroundActivity: null,
+        hasPendingPermission: true,
+      }),
+    );
+    const generating = iconType(
+      getTaskStateIcon("IN_PROGRESS", undefined, { foregroundActivity: "generating" }),
+    );
+    const background = iconType(
+      getTaskStateIcon("IN_PROGRESS", undefined, { foregroundActivity: "background" }),
+    );
+    const done = iconType(getTaskStateIcon("COMPLETED", undefined, { foregroundActivity: null }));
     for (const running of [generating, background]) {
       expect(clarification).not.toBe(running);
       expect(permission).not.toBe(running);
@@ -75,7 +101,13 @@ describe("getTaskStateIcon — waiting-for-input variants", () => {
 
   it("lets pending permission win over clarification and foreground activity", () => {
     expect(
-      iconType(getTaskStateIcon("WAITING_FOR_INPUT", undefined, true, "generating", true)),
+      iconType(
+        getTaskStateIcon("WAITING_FOR_INPUT", undefined, {
+          hasPendingClarification: true,
+          foregroundActivity: "generating",
+          hasPendingPermission: true,
+        }),
+      ),
     ).toBe(IconShieldQuestion);
   });
 
@@ -83,21 +115,30 @@ describe("getTaskStateIcon — waiting-for-input variants", () => {
     "lets a pending clarification win over %s activity",
     (activity) => {
       expect(
-        iconType(getTaskStateIcon("WAITING_FOR_INPUT", undefined, true, activity, false)),
+        iconType(
+          getTaskStateIcon("WAITING_FOR_INPUT", undefined, {
+            hasPendingClarification: true,
+            foregroundActivity: activity,
+          }),
+        ),
       ).toBe(IconMessageQuestion);
     },
   );
 
   it("lets generating activity win over a coarse waiting state without pending input", () => {
-    expect(iconType(getTaskStateIcon("WAITING_FOR_INPUT", undefined, false, "generating"))).toBe(
-      IconLoader2,
-    );
+    expect(
+      iconType(
+        getTaskStateIcon("WAITING_FOR_INPUT", undefined, { foregroundActivity: "generating" }),
+      ),
+    ).toBe(IconLoader2);
   });
 
   it("lets background activity win over a coarse waiting state without pending input", () => {
-    expect(iconType(getTaskStateIcon("WAITING_FOR_INPUT", undefined, false, "background"))).toBe(
-      IconLoader,
-    );
+    expect(
+      iconType(
+        getTaskStateIcon("WAITING_FOR_INPUT", undefined, { foregroundActivity: "background" }),
+      ),
+    ).toBe(IconLoader);
   });
 });
 
@@ -108,20 +149,73 @@ describe("getTaskStateIcon — task-level activity tri-state", () => {
   it("(a) generating shows the running spinner even when the coarse state is done", () => {
     // Most-active-wins: a generating session outranks a finished primary that
     // would otherwise render the done check.
-    expect(iconType(getTaskStateIcon("COMPLETED", undefined, false, "generating"))).toBe(
-      IconLoader2,
-    );
+    expect(
+      iconType(getTaskStateIcon("COMPLETED", undefined, { foregroundActivity: "generating" })),
+    ).toBe(IconLoader2);
   });
 
   it("(b) background shows a working spinner — never the done check — over a done coarse state", () => {
-    const bg = getTaskStateIcon("COMPLETED", undefined, false, "background");
+    const bg = getTaskStateIcon("COMPLETED", undefined, { foregroundActivity: "background" });
     expect(iconType(bg)).toBe(IconLoader);
     expect(iconType(bg)).not.toBe(IconCheck);
   });
 
   it("(c) falls through to the coarse task state when no session is active", () => {
-    expect(iconType(getTaskStateIcon("COMPLETED", undefined, false, null))).toBe(IconCheck);
-    expect(iconType(getTaskStateIcon("COMPLETED", undefined, false, undefined))).toBe(IconCheck);
+    expect(iconType(getTaskStateIcon("COMPLETED", undefined, { foregroundActivity: null }))).toBe(
+      IconCheck,
+    );
+    expect(iconType(getTaskStateIcon("COMPLETED", undefined))).toBe(IconCheck);
+  });
+
+  it("renders the accessible interrupted icon with the tooltip label", () => {
+    const { container } = render(
+      <TooltipProvider>
+        {getTaskStateIcon("REVIEW", undefined, { interrupted: true })}
+      </TooltipProvider>,
+    );
+    const icon = container.querySelector('[data-testid="task-state-interrupted"]');
+    expect(icon).not.toBeNull();
+    expect(icon?.className).toContain("text-red-500");
+    expect(container.querySelector('[aria-label="Interrupted by restart"]')).not.toBeNull();
+    // The icon itself is decorative; the label lives on the trigger.
+    expect(icon?.getAttribute("aria-hidden")).toBe("true");
+  });
+
+  it("keeps terminal state icons over a lingering interrupted marker", () => {
+    expect(iconType(getTaskStateIcon("COMPLETED", undefined, { interrupted: true }))).toBe(
+      IconCheck,
+    );
+    expect(iconType(getTaskStateIcon("FAILED", undefined, { interrupted: true }))).toBe(IconX);
+    expect(iconType(getTaskStateIcon("CANCELLED", undefined, { interrupted: true }))).toBe(IconX);
+  });
+
+  it("keeps active and pending affordances over the interrupted marker", () => {
+    expect(
+      iconType(
+        getTaskStateIcon("REVIEW", undefined, {
+          foregroundActivity: "generating",
+          interrupted: true,
+        }),
+      ),
+    ).toBe(IconLoader2);
+    expect(
+      iconType(
+        getTaskStateIcon("REVIEW", undefined, {
+          foregroundActivity: "background",
+          interrupted: true,
+        }),
+      ),
+    ).toBe(IconLoader);
+    expect(
+      iconType(
+        getTaskStateIcon("REVIEW", undefined, { hasPendingClarification: true, interrupted: true }),
+      ),
+    ).toBe(IconMessageQuestion);
+    expect(
+      iconType(
+        getTaskStateIcon("REVIEW", undefined, { hasPendingPermission: true, interrupted: true }),
+      ),
+    ).toBe(IconShieldQuestion);
   });
 
   it("safe fallback: an in-progress task with a MISSING aggregate reads not-done, never a check", () => {
@@ -131,8 +225,8 @@ describe("getTaskStateIcon — task-level activity tri-state", () => {
     // a backend restart — must fall back to the working spinner, never the done
     // check. The coarse IN_PROGRESS reading is itself not-done, so a missing
     // aggregate can only ever soften to working, never harden to done.
-    const missingUndefined = getTaskStateIcon("IN_PROGRESS", undefined, false, undefined);
-    const missingNull = getTaskStateIcon("IN_PROGRESS", undefined, false, null);
+    const missingUndefined = getTaskStateIcon("IN_PROGRESS", undefined);
+    const missingNull = getTaskStateIcon("IN_PROGRESS", undefined, { foregroundActivity: null });
     expect(iconType(missingUndefined)).toBe(IconLoader2);
     expect(iconType(missingUndefined)).not.toBe(IconCheck);
     expect(iconType(missingNull)).toBe(IconLoader2);
@@ -143,9 +237,13 @@ describe("getTaskStateIcon — task-level activity tri-state", () => {
     // Icon TYPE (glyph) differs for all three, so the reading survives a
     // grayscale/desaturated scan for color-vision-deficient operators
     // The affordance remains distinguishable without color.
-    const generating = iconType(getTaskStateIcon("IN_PROGRESS", undefined, false, "generating"));
-    const background = iconType(getTaskStateIcon("IN_PROGRESS", undefined, false, "background"));
-    const done = iconType(getTaskStateIcon("COMPLETED", undefined, false, null));
+    const generating = iconType(
+      getTaskStateIcon("IN_PROGRESS", undefined, { foregroundActivity: "generating" }),
+    );
+    const background = iconType(
+      getTaskStateIcon("IN_PROGRESS", undefined, { foregroundActivity: "background" }),
+    );
+    const done = iconType(getTaskStateIcon("COMPLETED", undefined, { foregroundActivity: null }));
     expect(background).not.toBe(generating);
     expect(background).not.toBe(done);
     expect(generating).not.toBe(done);
@@ -156,12 +254,14 @@ describe("getTaskStateIcon — task-level activity tri-state", () => {
     // shape difference so background reads apart from generating at a glance — its
     // own violet, distinct from generating's blue and done's green.
     const generating = iconClassName(
-      getTaskStateIcon("IN_PROGRESS", undefined, false, "generating"),
+      getTaskStateIcon("IN_PROGRESS", undefined, { foregroundActivity: "generating" }),
     );
     const background = iconClassName(
-      getTaskStateIcon("IN_PROGRESS", undefined, false, "background"),
+      getTaskStateIcon("IN_PROGRESS", undefined, { foregroundActivity: "background" }),
     );
-    const done = iconClassName(getTaskStateIcon("COMPLETED", undefined, false, null));
+    const done = iconClassName(
+      getTaskStateIcon("COMPLETED", undefined, { foregroundActivity: null }),
+    );
     expect(background).toContain("text-violet-500");
     expect(background).not.toBe(generating);
     expect(background).not.toBe(done);

@@ -150,11 +150,10 @@ func (r *SpritesExecutor) resolveAuthSecrets(
 		if !ok || method.Type != "env" || method.EnvVar == "" {
 			continue
 		}
-		value, err := r.secretStore.Reveal(ctx, secretID)
+		value, err := revealGlobalSecret(ctx, r.secretStore, secretID)
 		if err != nil {
 			r.logger.Warn("failed to resolve auth secret",
 				zap.String("method_id", methodID),
-				zap.String("secret_id", secretID),
 				zap.Error(err))
 			continue
 		}

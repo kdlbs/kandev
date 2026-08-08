@@ -5,8 +5,9 @@ import type { TaskPR } from "@/lib/types/github";
 import { AddPanelMenuItems, type AddPanelMenuState } from "./dockview-add-panel-items";
 import { pluginRegistry } from "@/lib/plugins/registry";
 
-const { mockAddPRPanel } = vi.hoisted(() => ({
+const { mockAddPRPanel, mockAddTodosPanel } = vi.hoisted(() => ({
   mockAddPRPanel: vi.fn(),
+  mockAddTodosPanel: vi.fn(),
 }));
 
 const mockDockviewStore = vi.hoisted(() => ({
@@ -16,6 +17,7 @@ const mockDockviewStore = vi.hoisted(() => ({
   addVscodePanel: vi.fn(),
   addPlanPanel: vi.fn(),
   addPluginPanel: vi.fn(),
+  addTodosPanel: mockAddTodosPanel,
   addChangesPanel: vi.fn(),
   addFilesPanel: vi.fn(),
   addPRPanel: mockAddPRPanel,
@@ -119,6 +121,7 @@ async function openPRSubmenu() {
 
 beforeEach(() => {
   mockAddPRPanel.mockClear();
+  mockAddTodosPanel.mockClear();
 });
 
 afterEach(() => cleanup());
@@ -201,5 +204,66 @@ describe("AddPanelMenuItems — plugin task panels (AC1)", () => {
       "Notes",
       { groupId: "group-center" },
     );
+  });
+});
+
+describe("AddPanelMenuItems — port forwarding preference", () => {
+  function portForwardingState(
+    overrides: Partial<NonNullable<AddPanelMenuState["portForwarding"]>> = {},
+  ): NonNullable<AddPanelMenuState["portForwarding"]> {
+    return {
+      enabled: false,
+      canToggle: true,
+      isUpdating: false,
+      dialogOpen: false,
+      setDialogOpen: vi.fn(),
+      togglePortForwarding: vi.fn(),
+      ...overrides,
+    };
+  }
+
+  it("renders a checkable row and opens after enabling", () => {
+    const togglePortForwarding = vi.fn();
+    renderMenu({
+      taskId: null,
+      portForwarding: portForwardingState({ togglePortForwarding }),
+    });
+
+    const row = screen.getByTestId("port-forwarding-menu-item");
+    expect(row.getAttribute("role")).toBe("menuitemcheckbox");
+    expect(row.getAttribute("aria-checked")).toBe("false");
+    fireEvent.click(row);
+
+    expect(togglePortForwarding).toHaveBeenCalledWith({ openDialogOnEnable: true });
+  });
+
+  it("disables the row when the task session is not ready", () => {
+    const togglePortForwarding = vi.fn();
+    renderMenu({
+      taskId: null,
+      portForwarding: portForwardingState({ canToggle: false, togglePortForwarding }),
+    });
+
+    const row = screen.getByTestId("port-forwarding-menu-item");
+    expect(row.getAttribute("data-disabled")).toBe("");
+    fireEvent.click(row);
+    expect(togglePortForwarding).not.toHaveBeenCalled();
+  });
+});
+
+describe("AddPanelMenuItems — Todos", () => {
+  it("renders an always-available Todos row that opens/focuses the panel in the invoking group", () => {
+    renderMenu();
+    const item = screen.getByText("Todos");
+    expect(item).toBeTruthy();
+
+    fireEvent.click(item);
+    expect(mockAddTodosPanel).toHaveBeenCalledWith({ groupId: "group-center" });
+  });
+
+  it("hides the Todos row for a passthrough session, matching the Plan row's guard", () => {
+    renderMenu({ isPassthrough: true });
+    expect(screen.queryByText("Todos")).toBeNull();
+    expect(screen.queryByText("Plan")).toBeNull();
   });
 });

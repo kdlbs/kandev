@@ -1,4 +1,5 @@
 import { type Locator, type Page, expect } from "@playwright/test";
+import { FileTreePage } from "./file-tree-page";
 
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -20,6 +21,7 @@ export class SessionPage {
   readonly planPanel: Locator;
   readonly stepper: Locator;
   readonly passthroughTerminal: Locator;
+  readonly fileTree: FileTreePage;
 
   constructor(private readonly page: Page) {
     this.chat = page.getByTestId("session-chat");
@@ -30,11 +32,21 @@ export class SessionPage {
     this.planPanel = page.getByTestId("plan-panel");
     this.stepper = page.getByTestId("workflow-stepper");
     this.passthroughTerminal = page.getByTestId("passthrough-terminal");
+    this.fileTree = new FileTreePage(page, this.files, () => this.activeChat());
   }
 
   // Port forward dialog locators
   get portForwardButton() {
     return this.page.getByTestId("port-forward-button");
+  }
+  get portForwardingMenuItem() {
+    return this.page.getByTestId("port-forwarding-menu-item");
+  }
+  get mobileSessionMenu() {
+    return this.page.getByTestId("mobile-session-menu");
+  }
+  get mobilePortForwardingToggle() {
+    return this.page.getByTestId("mobile-port-forwarding-toggle");
   }
   get portForwardDialog() {
     return this.page.getByTestId("port-forward-dialog");
@@ -50,6 +62,45 @@ export class SessionPage {
   }
   portForwardRow(port: number) {
     return this.page.getByTestId(`port-forward-row-${port}`);
+  }
+  portForwardTunnelToggle(port: number) {
+    return this.portForwardRow(port).getByRole("button").first();
+  }
+  portForwardTunnelStart(port: number) {
+    return this.portForwardRow(port).getByRole("button", { name: "Start", exact: true });
+  }
+  portForwardOpenBrowser(port: number) {
+    return this.portForwardRow(port).getByTestId(`port-forward-open-browser-${port}`);
+  }
+  get browserPanel() {
+    return this.page.locator('[data-testid="browser-panel"]:visible').first();
+  }
+  get browserAddressInput() {
+    return this.browserPanel.locator("input").first();
+  }
+
+  async togglePortForwardingPreference(): Promise<void> {
+    await this.addPanelButton().click();
+    await expect(this.portForwardingMenuItem).toBeVisible();
+    const enabling = (await this.portForwardingMenuItem.getAttribute("aria-checked")) !== "true";
+    await this.portForwardingMenuItem.click({ force: true });
+    if (enabling) {
+      await this.portForwardDialog
+        .waitFor({ state: "visible", timeout: 5_000 })
+        .catch(() => undefined);
+    }
+    if (await this.portForwardDialog.isVisible()) {
+      await this.portForwardDialog.getByRole("button", { name: "Close" }).click();
+    }
+    await this.page.keyboard.press("Escape");
+    await expect(this.portForwardingMenuItem).toBeHidden();
+    await expect(this.portForwardDialog).toBeHidden();
+  }
+
+  async enablePortForwarding(): Promise<void> {
+    if (await this.portForwardButton.isVisible()) return;
+    await this.togglePortForwardingPreference();
+    await expect(this.portForwardButton).toBeVisible();
   }
 
   // Chat status bar locators
@@ -170,26 +221,16 @@ export class SessionPage {
   /**
    * Wait for the chat to be idle (input placeholder visible, agent not busy).
    *
-   * On mobile-chrome (and occasionally desktop), there's a WS subscribe race:
-   * a fresh task auto-starts its agent, the mock agent completes in <1s, and
-   * the session_state transition (RUNNING -> AWAITING_INPUT) can fan out
-   * before the client's WS subscription registers server-side. The client
-   * then sits with `isAgentBusy=true` forever and the idle placeholder
-   * never renders. SSR picks up the right state on the next page load, so
-   * one targeted reload-and-retry is enough to recover.
+   * A fresh task can still miss the first persisted session-state transition
+   * while the page hydrates under CI load. Re-drive SSR hydration periodically
+   * so a stale busy state does not consume the whole idle wait budget.
    *
    * After a backend restart, auto-resume can briefly surface the recovery
    * prompt ("Environment setup failed"); click through it when visible.
-   *
-   * This is the same race the office agent-run-live spec rides out with
-   * `expect.poll`-based re-seeding.
    */
-  async waitForChatIdle(
-    opts: { timeout?: number; attemptTimeout?: number; requireEditable?: boolean } = {},
-  ) {
+  async waitForChatIdle(opts: { timeout?: number; requireEditable?: boolean } = {}) {
     const softTotalTimeout = opts.timeout ?? 45_000;
-    const attemptTimeout =
-      opts.attemptTimeout ?? Math.min(15_000, Math.max(5_000, Math.floor(softTotalTimeout / 3)));
+    const attemptTimeout = Math.min(15_000, Math.max(5_000, Math.floor(softTotalTimeout / 3)));
     const pollSlice = 1_500;
     const idle = this.anyIdleInput();
     const editor = this.activeChat().locator(".tiptap.ProseMirror:visible").first();
@@ -212,10 +253,6 @@ export class SessionPage {
 
       const now = Date.now();
       const remaining = Math.max(1, softTotalTimeout - (now - start));
-      // Re-drive SSR hydration once per attemptTimeout slice (not just once):
-      // under CI shard load a single reload isn't always enough for the
-      // idle-input state to hydrate. Only reload while enough budget remains
-      // for the reloaded page to settle.
       if (now - lastReloadAt >= attemptTimeout && remaining > pollSlice) {
         lastReloadAt = now;
         await this.page.reload();
@@ -225,9 +262,15 @@ export class SessionPage {
         continue;
       }
 
-      await idle
-        .waitFor({ state: "visible", timeout: Math.min(pollSlice, remaining) })
-        .catch(() => undefined);
+      const timeout = Math.min(pollSlice, remaining);
+      if (opts.requireEditable) {
+        await expect
+          .poll(isReady, { timeout })
+          .toBe(true)
+          .catch(() => undefined);
+      } else {
+        await idle.waitFor({ state: "visible", timeout }).catch(() => undefined);
+      }
     }
 
     // Final bounded check: still throws on a genuinely stuck session, but gives
@@ -572,9 +615,9 @@ export class SessionPage {
     return this.page.getByTestId("recovery-cancel-retry-button");
   }
 
-  /** The yellow "Provider overloaded — retrying…" status card text. */
+  /** The yellow provider-error retry status card. */
   transientRetryCard(): Locator {
-    return this.chat.getByText(/Provider overloaded — retrying/i);
+    return this.activeChat().getByTestId("transient-retry-card");
   }
 
   /** Context reset divider shown in chat after resetting agent context. */
@@ -776,6 +819,11 @@ export class SessionPage {
   /** Footer "updated Ns ago" timestamp text. */
   prPopoverUpdatedAt(): Locator {
     return this.prTopbarPopover().getByTestId("pr-popover-updated-at");
+  }
+
+  /** Footer spinner + "Updating…", shown while a refresh is in flight. */
+  prPopoverUpdating(): Locator {
+    return this.prTopbarPopover().getByTestId("pr-popover-updating");
   }
 
   /** Empty-state row when the PR has no checks yet. */
@@ -1011,6 +1059,7 @@ export class SessionPage {
    */
   async sendMessage(text: string) {
     const editor = await this.composerReady();
+    await this.waitForDirectInput();
     await editor.click();
     await editor.fill(text);
     const modifier = process.platform === "darwin" ? "Meta" : "Control";
@@ -1023,6 +1072,7 @@ export class SessionPage {
    */
   async sendMessageViaButton(text: string) {
     const editor = await this.composerReady();
+    await this.waitForDirectInput();
     await editor.click();
     await editor.fill(text);
     const isTouch = await this.page.evaluate(() => window.matchMedia("(pointer: coarse)").matches);
@@ -1031,6 +1081,24 @@ export class SessionPage {
       return;
     }
     await this.clickSubmitWhenReady();
+  }
+
+  /**
+   * Wait until the composer is in direct-input mode — the idle placeholder
+   * ("Continue working on the task...") visible, not the queue affordance
+   * ("Queue instructions to the agent...").
+   *
+   * The submit button stays enabled while the session is busy (the queue
+   * affordance lets you type-and-queue), and `composerReady()` only checks
+   * editability, so a send right after a turn completes can race the store's
+   * RUNNING→WAITING_FOR_INPUT transition and silently queue the message
+   * instead of delivering it. Gating the send on the idle placeholder makes
+   * sends to an idle session deterministic: typing only starts once the store
+   * session state is genuinely promptable. Must run on an empty editor — the
+   * placeholder decoration is only rendered while the editor has no content.
+   */
+  async waitForDirectInput(timeout = 15_000) {
+    await expect(this.anyIdleInput()).toBeVisible({ timeout });
   }
 
   /** The composer's send/submit button (scoped to the active chat panel). */
@@ -1088,27 +1156,11 @@ export class SessionPage {
     return editor;
   }
 
-  /**
-   * Wait for the agent reply containing `text` at the given 0-based match
-   * `index` to be visible after a follow-up prompt. On first timeout, reload
-   * once so SSR re-fetches the persisted turn, then re-assert.
-   *
-   * This rides out the same WS-subscribe race `waitForChatIdle` handles, but
-   * for the reply message itself: a mid-session prompt's response event can be
-   * dropped when the client's WS subscription loses the race with the agent's
-   * reply (common after repeated restart/resume cycles). The reply is persisted
-   * server-side, so a single reload recovers it.
-   */
+  /** Wait for the agent reply containing `text` at the given 0-based match `index`. */
   async expectChatResponseVisible(text: string, index = 0, opts: { timeout?: number } = {}) {
     const timeout = opts.timeout ?? 30_000;
-    const target = () => this.chat.getByText(text, { exact: false }).nth(index);
-    try {
-      await expect(target()).toBeVisible({ timeout });
-    } catch {
-      await this.page.reload();
-      await this.waitForLoad();
-      await expect(target()).toBeVisible({ timeout });
-    }
+    const target = () => this.activeChat().getByText(text, { exact: false }).nth(index);
+    await expect(target()).toBeVisible({ timeout });
   }
 
   /** Toggle plan mode on/off by clicking the plan mode toggle button in the toolbar.
@@ -1319,6 +1371,12 @@ export class SessionPage {
     return this.page.getByTestId("dockview-add-panel-btn").first();
   }
 
+  /** Open a blank built-in Browser panel from the dockview + menu. */
+  async addBrowserPanel(): Promise<void> {
+    await this.addPanelButton().click();
+    await this.page.getByRole("menuitem", { name: "Browser", exact: true }).click();
+  }
+
   /** "New Session" menu item in the dockview + dropdown. */
   newSessionMenuButton(): Locator {
     return this.page.getByTestId("new-session-button");
@@ -1483,12 +1541,57 @@ export class SessionPage {
 
   /** Find a tree node by its data-path attribute. */
   fileTreeNode(nodePath: string): Locator {
-    return this.files.locator(`[data-testid="file-tree-node"][data-path="${nodePath}"]`);
+    return this.fileTree.fileTreeNode(nodePath);
+  }
+
+  /** Visible search button in the Files panel. */
+  fileSearchButton(): Locator {
+    return this.fileTree.fileSearchButton();
+  }
+
+  /** Search input shown in the visible Files panel. */
+  fileSearchInput(): Locator {
+    return this.fileTree.fileSearchInput();
+  }
+
+  /** Search result by its task-root-relative path. */
+  fileSearchResult(nodePath: string): Locator {
+    return this.fileTree.fileSearchResult(nodePath);
   }
 
   /** All file tree nodes with data-selected="true". */
   fileTreeSelectedNodes(): Locator {
-    return this.files.locator("[data-selected='true']");
+    return this.fileTree.fileTreeSelectedNodes();
+  }
+
+  /** The desktop context-menu action for the selected file-tree node. */
+  fileTreeAddToChatContextMenuItem(): Locator {
+    return this.fileTree.fileTreeAddToChatContextMenuItem();
+  }
+
+  /** Visible coarse-pointer row action for one file-tree node. */
+  fileTreeNodeActions(nodePath: string): Locator {
+    return this.fileTree.fileTreeNodeActions(nodePath);
+  }
+
+  /** Responsive dropdown opened from a file-tree row action. */
+  fileTreeTouchMenu(): Locator {
+    return this.fileTree.fileTreeTouchMenu();
+  }
+
+  /** Add-to-chat item inside the responsive file-tree dropdown. */
+  fileTreeTouchAddToChatContextItem(): Locator {
+    return this.fileTree.fileTreeTouchAddToChatContextItem();
+  }
+
+  /** Pending composer chip for a file or directory path. */
+  chatContextFile(path: string): Locator {
+    return this.fileTree.chatContextFile(path);
+  }
+
+  /** Context-file badge on a sent user message. */
+  sentMessageContextFile(path: string): Locator {
+    return this.fileTree.sentMessageContextFile(path);
   }
 
   // --- Changes panel multi-select helpers ---

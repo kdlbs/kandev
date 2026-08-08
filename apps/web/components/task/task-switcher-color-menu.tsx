@@ -12,19 +12,21 @@ import { useSetTaskColor, useTaskColor } from "@/hooks/use-task-color";
 import {
   TASK_COLORS,
   TASK_COLOR_BAR_CLASS,
-  TASK_COLOR_LABEL,
+  TASK_COLOR_LABEL_KEYS,
   type TaskColor,
 } from "@/lib/task-colors";
 import { cn } from "@/lib/utils";
+import { useTranslation } from "react-i18next";
 
 export function TaskColorMenu({ taskId, disabled }: { taskId: string; disabled?: boolean }) {
+  const { t } = useTranslation();
   const currentColor = useTaskColor(taskId);
   const setColor = useSetTaskColor();
   return (
     <ContextMenuSub>
       <ContextMenuSubTrigger disabled={disabled}>
         <IconPalette className="mr-2 h-4 w-4" />
-        Color
+        {t("task:color")}
         {currentColor && (
           <span
             className={cn(
@@ -46,7 +48,7 @@ export function TaskColorMenu({ taskId, disabled }: { taskId: string; disabled?:
         <ContextMenuSeparator />
         <ContextMenuItem disabled={!currentColor} onSelect={() => setColor(taskId, null)}>
           <span className="mr-2 inline-block h-2 w-2 rounded-full border border-muted-foreground/40" />
-          None
+          {t("task:groupNone")}
         </ContextMenuItem>
       </ContextMenuSubContent>
     </ContextMenuSub>
@@ -62,10 +64,11 @@ function TaskColorMenuItem({
   selected: boolean;
   onSelect: () => void;
 }) {
+  const { t } = useTranslation();
   return (
     <ContextMenuItem onSelect={onSelect}>
       <span className={cn("mr-2 inline-block h-2 w-2 rounded-full", TASK_COLOR_BAR_CLASS[color])} />
-      {TASK_COLOR_LABEL[color]}
+      {t(TASK_COLOR_LABEL_KEYS[color])}
       {selected && <IconCheck className="ml-auto h-3.5 w-3.5" />}
     </ContextMenuItem>
   );

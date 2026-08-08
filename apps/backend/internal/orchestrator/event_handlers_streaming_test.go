@@ -357,6 +357,7 @@ func TestUpdateTaskSessionState_EnabledClaudePublishesSettledBackground(t *testi
 	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
 	enableClaudeBackgroundPromptHandoffForTest(t, svc)
 	setSessionAgentNameForTest(t, svc, "session-state-claude", "claude-acp")
+	advertisePromptQueueingForTest(t, svc, "session-state-claude")
 	svc.eventBus = eb
 	svc.registerBackgroundTask("session-state-claude", "background-1")
 	svc.markForegroundIdle("session-state-claude")
@@ -1327,7 +1328,7 @@ func TestCompleteStreamFromCompletedExecutionSkipsDuplicateOfficeTeardown(t *tes
 func TestCompleteStreamFromCompletedExecutionSkipsDuplicateAutomationFinalize(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
-	seedRunModeAutomationSession(t, repo, "t-auto-terminal", "s-auto-terminal", "exec-auto-terminal")
+	seedAutomationRunSession(t, repo, "t-auto-terminal", "s-auto-terminal", "exec-auto-terminal")
 
 	taskRepo := newMockTaskRepo()
 	mgr := &mockAgentManager{}
@@ -2099,6 +2100,170 @@ func TestSetSessionStartingCanDeferTaskInProgress(t *testing.T) {
 	require.Empty(t, taskRepo.stateWrites)
 }
 
+// recordingTaskUpdatedPublisher captures task.updated publishes so tests can
+// assert the interrupted-marker clear republishes the task.
+type recordingTaskUpdatedPublisher struct {
+	updatedTaskIDs []string
+}
+
+func (r *recordingTaskUpdatedPublisher) PublishTaskUpdated(_ context.Context, task *models.Task, _ ...string) {
+	if task != nil {
+		r.updatedTaskIDs = append(r.updatedTaskIDs, task.ID)
+	}
+}
+func (r *recordingTaskUpdatedPublisher) PublishTaskStateChanged(context.Context, *models.Task, v1.TaskState) {
+}
+func (r *recordingTaskUpdatedPublisher) PublishTaskActivityIfChanged(context.Context, string) {}
+
+func seedInterruptedMarker(t *testing.T, repo *sqliterepo.Repository, taskID string) {
+	t.Helper()
+	if err := repo.SetTaskMetadataKey(context.Background(), taskID, models.MetaKeyInterruptedAt, time.Now().UTC().Format(time.RFC3339)); err != nil {
+		t.Fatalf("seed interrupted marker: %v", err)
+	}
+}
+
+func TestSessionStartClearsInterruptedMarker(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("state hook transition to STARTING clears and republishes", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		seedSession(t, repo, "t1", "s1", "step1")
+		seedInterruptedMarker(t, repo, "t1")
+
+		publisher := &recordingTaskUpdatedPublisher{}
+		svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+		svc.SetTaskEventPublisher(publisher)
+
+		updated, changed := svc.updateTaskSessionStateWithHook(
+			ctx, "t1", "s1", models.TaskSessionStateStarting, "", false, nil,
+		)
+		require.NotNil(t, updated)
+		require.True(t, changed)
+
+		task, err := repo.GetTask(ctx, "t1")
+		require.NoError(t, err)
+		_, marked := task.Metadata[models.MetaKeyInterruptedAt]
+		require.False(t, marked, "marker must be cleared when the session enters STARTING")
+		require.Equal(t, []string{"t1"}, publisher.updatedTaskIDs,
+			"task.updated must be republished after clearing the marker")
+	})
+
+	t.Run("launch path via setSessionStarting clears and republishes", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		seedSession(t, repo, "t1", "s1", "step1")
+		seedInterruptedMarker(t, repo, "t1")
+
+		session, err := repo.GetTaskSession(ctx, "s1")
+		require.NoError(t, err)
+		session.State = models.TaskSessionStateStarting
+		session.ErrorMessage = ""
+		session.UpdatedAt = time.Now().UTC()
+
+		publisher := &recordingTaskUpdatedPublisher{}
+		svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+		svc.SetTaskEventPublisher(publisher)
+
+		require.NoError(t, svc.setSessionStarting(ctx, "t1", session, models.TaskSessionStateRunning, true))
+
+		task, err := repo.GetTask(ctx, "t1")
+		require.NoError(t, err)
+		_, marked := task.Metadata[models.MetaKeyInterruptedAt]
+		require.False(t, marked, "marker must be cleared on the launch path")
+		require.Equal(t, []string{"t1"}, publisher.updatedTaskIDs,
+			"task.updated must be republished after clearing the marker")
+	})
+
+	t.Run("no marker means no republish", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		seedSession(t, repo, "t1", "s1", "step1")
+
+		publisher := &recordingTaskUpdatedPublisher{}
+		svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+		svc.SetTaskEventPublisher(publisher)
+
+		updated, changed := svc.updateTaskSessionStateWithHook(
+			ctx, "t1", "s1", models.TaskSessionStateStarting, "", false, nil,
+		)
+		require.NotNil(t, updated)
+		require.True(t, changed)
+		require.Empty(t, publisher.updatedTaskIDs,
+			"no task.updated may be published when no marker was removed")
+	})
+}
+
+// Nothing else ever retires a stored agent failure, so without this clear every
+// path that re-derives task status from session metadata resurrects it and the
+// error icon never goes away.
+func TestClearRecoveredAgentErrorOnTurnCompletion(t *testing.T) {
+	ctx := context.Background()
+
+	seedError := func(t *testing.T, repo *sqliterepo.Repository) {
+		t.Helper()
+		require.NoError(t, repo.SetSessionMetadataKey(
+			ctx, "s1", models.SessionMetaKeyLastAgentError,
+			models.LastAgentError{Message: "agent crashed", OccurredAt: time.Now().UTC().Add(-time.Hour)},
+		))
+	}
+
+	errorEvents := func(eb *recordingEventBus) []recordedEvent {
+		var out []recordedEvent
+		for _, recorded := range eb.events {
+			if recorded.event != nil && recorded.event.Type == events.TaskSessionErrorChanged {
+				out = append(out, recorded)
+			}
+		}
+		return out
+	}
+
+	newService := func(repo *sqliterepo.Repository) (*Service, *recordingEventBus) {
+		eb := &recordingEventBus{}
+		svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+		svc.eventBus = eb
+		return svc, eb
+	}
+
+	t.Run("clears the record and publishes it inactive", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		seedSession(t, repo, "t1", "s1", "step1")
+		seedError(t, repo)
+		svc, eb := newService(repo)
+
+		session, err := repo.GetTaskSession(ctx, "s1")
+		require.NoError(t, err)
+		svc.clearRecoveredAgentError(ctx, "t1", session)
+
+		stored, err := repo.GetTaskSession(ctx, "s1")
+		require.NoError(t, err)
+		_, ok := models.LoadLastAgentError(stored.Metadata)
+		require.False(t, ok, "a recovered failure must not keep driving the error icon")
+
+		// The session-state publish that follows reads session_metadata straight
+		// off this object, so a stale copy would re-arm the icon immediately.
+		_, ok = models.LoadLastAgentError(session.Metadata)
+		require.False(t, ok, "the in-memory copy must be cleared too")
+
+		published := errorEvents(eb)
+		require.Len(t, published, 1, "clients need one event to drop the icon")
+		data, ok := published[0].event.Data.(map[string]interface{})
+		require.True(t, ok)
+		require.Equal(t, false, data["active"])
+		require.Equal(t, "s1", data["session_id"])
+	})
+
+	t.Run("stays silent when the session has no stored error", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		seedSession(t, repo, "t1", "s1", "step1")
+		svc, eb := newService(repo)
+
+		session, err := repo.GetTaskSession(ctx, "s1")
+		require.NoError(t, err)
+		svc.clearRecoveredAgentError(ctx, "t1", session)
+
+		require.Empty(t, errorEvents(eb),
+			"every later completion must stay silent so turns do not churn the row")
+	})
+}
+
 func TestSetSessionStartingRejectsTerminalSession(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
@@ -2328,7 +2493,9 @@ func TestHandleCompleteStreamEvent_NaturalOfficeCompleteStillIdle(t *testing.T) 
 		"natural office turn completion must still call StopAgent to tear down the executor")
 }
 
-func seedRunModeAutomationSession(
+// Automation tasks are ordinary, non-ephemeral tasks tagged by origin — the
+// task/run execution mode is withdrawn, so nothing here sets IsEphemeral.
+func seedAutomationRunSession(
 	t *testing.T,
 	repo *sqliterepo.Repository,
 	taskID, sessionID, executionID string,
@@ -2348,13 +2515,9 @@ func seedRunModeAutomationSession(
 		Title:       "Automation run",
 		Description: "run this",
 		State:       v1.TaskStateInProgress,
-		IsEphemeral: true,
 		Origin:      models.TaskOriginAutomationRun,
-		Metadata: map[string]interface{}{
-			"execution_mode": string(automation.ExecutionModeRun),
-		},
-		CreatedAt: now,
-		UpdatedAt: now,
+		CreatedAt:   now,
+		UpdatedAt:   now,
 	}))
 	require.NoError(t, repo.CreateTaskSession(ctx, &models.TaskSession{
 		ID:        sessionID,
@@ -2366,10 +2529,10 @@ func seedRunModeAutomationSession(
 	seedExecutorRunning(t, repo, sessionID, taskID, executionID)
 }
 
-func TestHandleCompleteStreamEvent_RunModeAutomationStopsAndFinalizes(t *testing.T) {
+func TestHandleCompleteStreamEvent_AutomationRunStopsAndFinalizes(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
-	seedRunModeAutomationSession(t, repo, "t-auto-run", "s-auto-run", "exec-auto-run")
+	seedAutomationRunSession(t, repo, "t-auto-run", "s-auto-run", "exec-auto-run")
 
 	mgr := &mockAgentManager{}
 	automationSvc := &mockAutomationRunService{}
@@ -2394,7 +2557,9 @@ func TestHandleCompleteStreamEvent_RunModeAutomationStopsAndFinalizes(t *testing
 	require.Empty(t, automationSvc.failedTaskIDs)
 	gotSession, err := repo.GetTaskSession(ctx, "s-auto-run")
 	require.NoError(t, err)
-	require.Equal(t, models.TaskSessionStateCompleted, gotSession.State)
+	// Not COMPLETED: that state refuses resume, which would make a finished
+	// report unanswerable. Success lives on the AutomationRun row instead.
+	require.Equal(t, models.TaskSessionStateWaitingForInput, gotSession.State)
 
 	mgr.mu.Lock()
 	stopCalls := append([]stopAgentCall(nil), mgr.stopAgentArgs...)
@@ -2402,7 +2567,7 @@ func TestHandleCompleteStreamEvent_RunModeAutomationStopsAndFinalizes(t *testing
 	require.Equal(t, []stopAgentCall{{ExecutionID: "exec-auto-run"}}, stopCalls)
 }
 
-func TestHandleCompleteStreamEvent_RunModeAutomationFailureStopsAndFinalizes(t *testing.T) {
+func TestHandleCompleteStreamEvent_AutomationRunFailureStopsAndFinalizes(t *testing.T) {
 	cases := []struct {
 		name        string
 		data        map[string]interface{}
@@ -2444,7 +2609,7 @@ func TestHandleCompleteStreamEvent_RunModeAutomationFailureStopsAndFinalizes(t *
 			taskID := "t-auto-" + tc.name
 			sessionID := "s-auto-" + tc.name
 			executionID := "exec-auto-" + tc.name
-			seedRunModeAutomationSession(t, repo, taskID, sessionID, executionID)
+			seedAutomationRunSession(t, repo, taskID, sessionID, executionID)
 
 			mgr := &mockAgentManager{}
 			automationSvc := &mockAutomationRunService{}

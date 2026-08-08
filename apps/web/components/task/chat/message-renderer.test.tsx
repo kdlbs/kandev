@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { MessageRenderer } from "./message-renderer";
 import { sessionId as toSessionId, taskId as toTaskId, type Message } from "@/lib/types/http";
@@ -88,6 +88,30 @@ describe("MessageRenderer markdown file links", () => {
     );
 
     fireEvent.click(screen.getByRole("link", { name: "AGENTS" }));
+
+    expect(onOpenFile).toHaveBeenCalledWith("apps/web/AGENTS.md");
+    expect(fallbackOpenFile).not.toHaveBeenCalled();
+  });
+
+  it("opens thinking file links with the renderer worktree context", () => {
+    const onOpenFile = vi.fn();
+
+    const { container } = render(
+      <MessageRenderer
+        comment={message({
+          type: "thinking",
+          content:
+            "I need to inspect the project guidance before proceeding with this task. Read [AGENTS](/workspace/kandev/apps/web/AGENTS.md).",
+        })}
+        isTaskDescription={false}
+        worktreePath="/workspace/kandev"
+        onOpenFile={onOpenFile}
+      />,
+    );
+
+    const thinking = within(container);
+    fireEvent.click(thinking.getByText("Thinking", { exact: true }));
+    fireEvent.click(thinking.getByRole("link", { name: "AGENTS" }));
 
     expect(onOpenFile).toHaveBeenCalledWith("apps/web/AGENTS.md");
     expect(fallbackOpenFile).not.toHaveBeenCalled();

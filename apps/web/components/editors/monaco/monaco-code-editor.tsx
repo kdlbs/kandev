@@ -16,6 +16,7 @@ import { useMonacoEditorComments } from "./use-monaco-editor-state";
 import { useMonacoEditorLsp, useMonacoDiffDecorations } from "./use-monaco-editor-lsp";
 import { useMonacoWalkthroughRange } from "./use-monaco-walkthrough-range";
 import { initMonacoThemes } from "./monaco-init";
+import { useTranslation } from "react-i18next";
 
 initMonacoThemes();
 
@@ -172,7 +173,17 @@ function useMonacoCodeEditorSetup(props: MonacoCodeEditorProps) {
   return { contentRef, wrapperRef, language, state, lsp, diffStats, options };
 }
 
+function EditorLoading() {
+  const { t } = useTranslation();
+  return (
+    <div className="flex h-full items-center justify-center text-muted-foreground text-sm">
+      {t("editors:loadingEditor")}
+    </div>
+  );
+}
+
 export function MonacoCodeEditor(props: MonacoCodeEditorProps) {
+  const { t } = useTranslation();
   const {
     path,
     content,
@@ -235,11 +246,7 @@ export function MonacoCodeEditor(props: MonacoCodeEditorProps) {
           onMount={state.handleEditorDidMount}
           keepCurrentModel
           options={options}
-          loading={
-            <div className="flex h-full items-center justify-center text-muted-foreground text-sm">
-              Loading editor...
-            </div>
-          }
+          loading={<EditorLoading />}
         />
         {walkthroughRange ? (
           <div
@@ -266,7 +273,7 @@ export function MonacoCodeEditor(props: MonacoCodeEditorProps) {
             onClick={state.handleFloatingButtonClick}
           >
             <IconMessagePlus className="h-3.5 w-3.5" />
-            Comment
+            {t("editors:comment")}
           </Button>
         )}
       </div>

@@ -26,6 +26,8 @@ import { isFromOffice } from "@/lib/types/http";
 import type { Repository, RepositoryScript, Task } from "@/lib/types/http";
 import type { Terminal } from "@/hooks/domains/session/use-terminals";
 import type { Layout } from "react-resizable-panels";
+import { useTranslation } from "react-i18next";
+import { t } from "@/lib/i18n";
 
 type KanbanTaskShellProps = {
   task: Task | null;
@@ -52,6 +54,7 @@ export function KanbanTaskShell({
   urlSimple,
   urlMode,
 }: KanbanTaskShellProps) {
+  const { t } = useTranslation();
   // Kanban shell defaults to advanced. ?simple flips to simple.
   const mode = resolveTaskBodyMode({ simple: urlSimple, mode: urlMode }, "advanced");
   // "Open in office view" only makes sense when (a) the office feature is
@@ -81,8 +84,8 @@ export function KanbanTaskShell({
         <SimpleTaskHeaderRow task={task} />
         <p className="mt-4 text-sm text-muted-foreground">
           {showOfficeLink
-            ? "Simple view for kanban tasks shows the chat that's already in the panels. For the full Linear-style experience (comments, properties, activity timeline), open this task in the office view."
-            : "Simple view shows the chat that's already in the panels. Use ?simple=false to flip back to the advanced layout."}
+            ? t("tasks:simpleViewForKanbanTasksShows")
+            : t("tasks:simpleViewShowsTheChatThat", { simpleQuery: "?simple=false" })}
         </p>
       </div>
     </div>
@@ -110,9 +113,10 @@ function simpleTaskHeaderData(task: Task | null) {
       primarySessionPendingAction: task?.primary_session_pending_action,
     },
     identifier: task?.id?.slice(0, 8),
-    title: task?.title ?? "Loading...",
+    title: task?.title ?? t("tasks:loading"),
     state: task?.state ?? null,
     foregroundActivity: task?.foreground_activity,
+    interrupted: task?.interrupted ?? false,
   };
 }
 
@@ -127,6 +131,7 @@ function SimpleTaskHeaderRow({ task }: { task: Task | null }) {
         foregroundActivity={data.foregroundActivity}
         hasPendingClarification={pendingInput.clarification}
         hasPendingPermission={pendingInput.permission}
+        interrupted={data.interrupted}
       />
       <TaskHeader
         identifier={data.identifier}
@@ -141,8 +146,9 @@ function SimpleTaskHeaderRow({ task }: { task: Task | null }) {
 }
 
 function CrossLinkRow({ taskId, target }: { taskId: string; target: "office" | "kanban" }) {
+  const { t } = useTranslation();
   const href = target === "office" ? `/office/tasks/${taskId}` : `/t/${taskId}`;
-  const label = target === "office" ? "Open in office view" : "Open in advanced view";
+  const label = target === "office" ? t("tasks:openInOfficeView") : t("tasks:openInAdvancedView");
   return (
     <Link
       href={href}

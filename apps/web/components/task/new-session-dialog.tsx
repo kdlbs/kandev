@@ -18,6 +18,7 @@ import { useRemoteAuthSpecs } from "@/hooks/domains/settings/use-remote-auth-spe
 import { useTaskExecutorProfile } from "@/hooks/domains/session/use-task-executor-profile";
 import { isAgentConfiguredOnExecutor } from "@/lib/agent-executor-compat";
 import type { AgentProfileOption } from "@/lib/state/slices";
+import { isSelectableAgentProfile } from "@/lib/state/slices/settings/types";
 import type { ExecutorProfile } from "@/lib/types/http";
 import { usePromptResultDelivery } from "@/hooks/use-prompt-result-delivery";
 import { buildHandoffInitialState, type HandoffPreset } from "./handoff-types";
@@ -27,6 +28,7 @@ import { PromptResultRecovery } from "@/components/prompt-result-recovery";
 import { EnvironmentBadges, ContextSelect } from "./session-dialog-shared";
 import { useSessionContextChange, useSessionLaunchSubmit } from "./new-session-form-actions";
 import { resolveComposerWorkspaceId } from "./chat/composer-workspace";
+import { Trans, useTranslation } from "react-i18next";
 
 export type { HandoffPreset } from "./handoff-types";
 
@@ -92,10 +94,14 @@ function useNewSessionDialogState(taskId: string) {
   });
 
   const sessionProfileId = currentSession?.agent_profile_id ?? "";
-  const profileIsValid = agentProfiles.some((p: { id: string }) => p.id === sessionProfileId);
+  // The default for a NEW session must be selectable: a current session
+  // that uses a now-disabled profile still runs (no effect on existing
+  // sessions), but the dialog falls back to the first enabled profile.
+  const selectableProfiles = agentProfiles.filter(isSelectableAgentProfile);
+  const profileIsValid = selectableProfiles.some((p: { id: string }) => p.id === sessionProfileId);
   const effectiveDefaultProfileId: string = profileIsValid
     ? sessionProfileId
-    : (agentProfiles[0]?.id ?? "");
+    : (selectableProfiles[0]?.id ?? "");
 
   return {
     resolvedWorkspaceId,
@@ -159,10 +165,9 @@ function useCompatibleAgentProfiles(
 ): AgentProfileOption[] {
   const { specs: authSpecs, loaded: authLoaded } = useRemoteAuthSpecs();
   return useMemo(() => {
-    if (!executorProfile || !authLoaded) return agentProfiles;
-    return agentProfiles.filter((ap) =>
-      isAgentConfiguredOnExecutor(ap, executorProfile, authSpecs),
-    );
+    const selectable = agentProfiles.filter(isSelectableAgentProfile);
+    if (!executorProfile || !authLoaded) return selectable;
+    return selectable.filter((ap) => isAgentConfiguredOnExecutor(ap, executorProfile, authSpecs));
   }, [agentProfiles, executorProfile, authSpecs, authLoaded]);
 }
 
@@ -183,6 +188,7 @@ export function useSessionPromptController(
   promptRef: RefObject<TaskFormInputsHandle | null>,
   taskId: string,
 ) {
+  const { t } = useTranslation();
   const { toast } = useToast();
   const { enhancePrompt, isEnhancingPrompt } = useUtilityAgentGenerator({ sessionId: null });
   const latestPromptValueRef = useRef("");
@@ -206,7 +212,7 @@ export function useSessionPromptController(
     await enhancePrompt(current, (enhanced) => {
       const delivered = promptResultDelivery.deliver(current, enhanced, generation);
       if (delivered) {
-        toast({ description: "Enhanced prompt applied.", variant: "success" });
+        toast({ description: t("task:enhancedPromptApplied"), variant: "success" });
       }
 
       return delivered;
@@ -229,16 +235,18 @@ function shouldDisableSubmit(isBusy: boolean, hasPrompt: boolean, hasProfiles: b
 }
 
 function useEnforceCompatibleProfile(
-  hasExecutorProfile: boolean,
   compatible: AgentProfileOption[],
   selectedId: string,
   setSelected: (id: string) => void,
 ) {
   useEffect(() => {
-    if (!hasExecutorProfile) return;
     if (compatible.some((p) => p.id === selectedId)) return;
-    if (compatible.length > 0) setSelected(compatible[0].id);
-  }, [hasExecutorProfile, compatible, selectedId, setSelected]);
+    if (compatible.length > 0) {
+      setSelected(compatible[0].id);
+    } else if (selectedId) {
+      setSelected("");
+    }
+  }, [compatible, selectedId, setSelected]);
 }
 
 function useSessionProfileSelection({
@@ -255,12 +263,7 @@ function useSessionProfileSelection({
   setSelectedProfileId: (value: string) => void;
 }) {
   const compatibleAgentProfiles = useCompatibleAgentProfiles(agentProfiles, executorProfile);
-  useEnforceCompatibleProfile(
-    Boolean(executorProfile),
-    compatibleAgentProfiles,
-    selectedProfileId,
-    setSelectedProfileId,
-  );
+  useEnforceCompatibleProfile(compatibleAgentProfiles, selectedProfileId, setSelectedProfileId);
   const profileOptions = useAgentProfileOptions(compatibleAgentProfiles);
   const hasProfiles = profileOptions.length > 0;
   const noCompatibleProfiles = isMissingCompatibleProfile(
@@ -304,6 +307,7 @@ function SessionFormHeader({
   isCreating: boolean;
   onProfileChange: (value: string) => void;
 }) {
+  const { t } = useTranslation();
   return (
     <>
       <EnvironmentBadges executorLabel={executorLabel} worktreeBranch={worktreeBranch} />
@@ -314,13 +318,15 @@ function SessionFormHeader({
       />
       {showAgentSelector && (
         <div className="min-w-0 space-y-1.5">
-          <label className="text-xs font-medium text-muted-foreground">Agent Profile</label>
+          <label className="text-xs font-medium text-muted-foreground">
+            {t("task:agentProfile")}
+          </label>
           <AgentSelector
             options={profileOptions}
             value={selectedProfileId}
             onValueChange={onProfileChange}
             disabled={isCreating}
-            placeholder="Select agent profile"
+            placeholder={t("task:selectAgentProfile")}
             popoverPortal
           />
         </div>
@@ -359,6 +365,7 @@ function NewSessionForm({
   handoff?: HandoffPreset;
   onClose: () => void;
 }) {
+  const { t } = useTranslation();
   const handoffInitial = handoff ? buildHandoffInitialState(handoff) : null;
   const { toast } = useToast();
   const setActiveSession = useAppStore((state) => state.setActiveSession);
@@ -477,10 +484,10 @@ function NewSessionForm({
           disabled={isCreating}
           className="cursor-pointer"
         >
-          Cancel
+          {t("common:cancel")}
         </Button>
         <Button type="submit" disabled={isSubmitDisabled} className="cursor-pointer">
-          {isCreating ? "Creating..." : "Start Agent"}
+          {isCreating ? t("task:creatingEllipsis") : t("task:startAgent2")}
         </Button>
       </DialogFooter>
     </form>
@@ -496,19 +503,22 @@ function NoAgentBanner({
   hasProfiles: boolean;
   executorProfileName: string | null;
 }) {
+  const { t } = useTranslation();
   if (noCompatibleProfiles) {
     return (
       <p className="text-xs text-center text-muted-foreground">
-        No agent profile is configured for{" "}
-        <span className="text-foreground">“{executorProfileName}”</span>. Configure credentials in
-        Settings → Executors.
+        <Trans i18nKey="task:noAgentProfileConfiguredFor" values={{ name: executorProfileName }}>
+          No agent profile is configured for{" "}
+          <span className="text-foreground">“{executorProfileName}”</span>. Configure credentials in
+          Settings → Executors.
+        </Trans>
       </p>
     );
   }
   if (!hasProfiles) {
     return (
       <p className="text-xs text-center text-muted-foreground">
-        No agent profiles configured. Add one in Settings → Agents first.
+        {t("task:noAgentProfilesConfiguredAddOne")}
       </p>
     );
   }
@@ -557,11 +567,15 @@ export function NewSessionDialog({
           <DialogTitle className="min-w-0 wrap-break-word pr-6 text-sm font-medium">
             {handoffLabel ? (
               <>
-                Hand off to <span className="text-foreground">{handoffLabel}</span>
+                <Trans i18nKey="task:handOffToTarget" values={{ label: handoffLabel }}>
+                  Hand off to <span className="text-foreground">{handoffLabel}</span>
+                </Trans>
               </>
             ) : (
               <>
-                New agent in <span className="text-foreground">{taskTitle}</span>
+                <Trans i18nKey="task:newAgentInTask" values={{ title: taskTitle }}>
+                  New agent in <span className="text-foreground">{taskTitle}</span>
+                </Trans>
               </>
             )}
           </DialogTitle>

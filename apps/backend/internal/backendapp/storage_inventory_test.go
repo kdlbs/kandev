@@ -95,6 +95,48 @@ func TestWorkspaceInventoryOnlyProtectsActiveTaskWorktrees(t *testing.T) {
 	}
 }
 
+func TestWorkspaceInventoryLoadsTaskEligibilityStates(t *testing.T) {
+	t.Run("active and archived tasks", func(t *testing.T) {
+		database := newContainerInventoryDatabase(t)
+		insertContainerInventoryTask(t, database, "active", v1.TaskStateInProgress, false)
+		insertContainerInventoryTask(t, database, "archived", v1.TaskStateCompleted, true)
+
+		states, err := (&storageInventory{reader: database}).taskWorkspaceStates(context.Background())
+		if err != nil {
+			t.Fatalf("taskWorkspaceStates: %v", err)
+		}
+		known, archived := taskEligibilitySets(states)
+		if !reflect.DeepEqual(known, map[string]struct{}{"active": {}, "archived": {}}) {
+			t.Fatalf("known task IDs = %#v", known)
+		}
+		if !reflect.DeepEqual(archived, map[string]struct{}{"archived": {}}) {
+			t.Fatalf("archived task IDs = %#v", archived)
+		}
+	})
+
+	t.Run("empty database", func(t *testing.T) {
+		database := newContainerInventoryDatabase(t)
+		states, err := (&storageInventory{reader: database}).taskWorkspaceStates(context.Background())
+		if err != nil {
+			t.Fatalf("taskWorkspaceStates: %v", err)
+		}
+		known, archived := taskEligibilitySets(states)
+		if len(states) != 0 || len(known) != 0 || len(archived) != 0 {
+			t.Fatalf("empty task eligibility = states %#v known %#v archived %#v", states, known, archived)
+		}
+	})
+
+	t.Run("query error", func(t *testing.T) {
+		database := newContainerInventoryDatabase(t)
+		if err := database.Close(); err != nil {
+			t.Fatalf("close inventory database: %v", err)
+		}
+		if _, err := (&storageInventory{reader: database}).taskWorkspaceStates(context.Background()); err == nil {
+			t.Fatal("taskWorkspaceStates error = nil, want closed-database error")
+		}
+	})
+}
+
 func TestContainerInventoryRemovability(t *testing.T) {
 	tests := []struct {
 		name   string

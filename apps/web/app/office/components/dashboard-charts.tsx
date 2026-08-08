@@ -2,6 +2,7 @@
 
 import { Card } from "@kandev/ui/card";
 import type { RunActivityDay } from "@/lib/state/slices/office/types";
+import { useTranslation } from "react-i18next";
 
 function formatDateLabel(dateStr: string): string {
   const date = new Date(`${dateStr}T00:00:00`);
@@ -51,13 +52,14 @@ function ChartXAxis({ dates }: ChartXAxisProps) {
 }
 
 export function RunActivityChart({ data }: { data: RunActivityDay[] }) {
+  const { t } = useTranslation();
   const maxTotal = Math.max(...data.map((d) => d.succeeded + d.failed + d.other), 1);
 
   return (
     <Card className="p-4">
       <div className="mb-3">
-        <h3 className="text-sm font-semibold">Run Activity</h3>
-        <p className="text-xs text-muted-foreground">Last 14 days</p>
+        <h3 className="text-sm font-semibold">{t("office:runActivity")}</h3>
+        <p className="text-xs text-muted-foreground">{t("office:last14Days")}</p>
       </div>
       <div className="h-28 flex items-end gap-[2px]">
         {data.map((day, i) => (
@@ -74,9 +76,9 @@ export function RunActivityChart({ data }: { data: RunActivityDay[] }) {
       </div>
       <ChartXAxis dates={data.map((d) => d.date)} />
       <div className="flex items-center gap-3 mt-2">
-        <LegendDot color="#10b981" label="Succeeded" />
-        <LegendDot color="#ef4444" label="Failed" />
-        <LegendDot color="#6b7280" label="Other" />
+        <LegendDot color="#10b981" label={t("office:succeeded")} />
+        <LegendDot color="#ef4444" label={t("office:failed")} />
+        <LegendDot color="#6b7280" label={t("office:other")} />
       </div>
     </Card>
   );
@@ -99,11 +101,12 @@ function successRateColor(rate: number, hasRuns: boolean): string {
 }
 
 export function SuccessRateChart({ data }: { data: RunActivityDay[] }) {
+  const { t } = useTranslation();
   return (
     <Card className="p-4">
       <div className="mb-3">
-        <h3 className="text-sm font-semibold">Success Rate</h3>
-        <p className="text-xs text-muted-foreground">Last 14 days</p>
+        <h3 className="text-sm font-semibold">{t("office:successRate")}</h3>
+        <p className="text-xs text-muted-foreground">{t("office:last14Days")}</p>
       </div>
       <div className="h-28 flex items-end gap-[2px]">
         {data.map((day, i) => {
@@ -125,7 +128,7 @@ export function SuccessRateChart({ data }: { data: RunActivityDay[] }) {
         <LegendDot color="#10b981" label=">= 80%" />
         <LegendDot color="#eab308" label=">= 50%" />
         <LegendDot color="#ef4444" label="< 50%" />
-        <LegendDot color="#6b7280" label="No runs" />
+        <LegendDot color="#6b7280" label={t("office:noRuns")} />
       </div>
     </Card>
   );

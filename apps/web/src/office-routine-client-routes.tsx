@@ -3,6 +3,7 @@ import { RoutineDetailView } from "@/app/office/routines/[id]/routine-detail-vie
 import { getRoutine, listRoutineTriggers } from "@/lib/api/domains/office-api";
 import { toRouteErrorState, type LoadState } from "@/lib/routing/client-route-helpers";
 import type { Routine, RoutineTrigger } from "@/lib/state/slices/office/types";
+import { useTranslation } from "react-i18next";
 
 type RoutineDetailData = {
   routine: Routine;
@@ -10,6 +11,7 @@ type RoutineDetailData = {
 };
 
 export function RoutineDetailRoute({ routineId }: { routineId: string }) {
+  const { t } = useTranslation();
   const [state, setState] = useState<LoadState<RoutineDetailData>>({ status: "loading" });
 
   useEffect(() => {
@@ -34,13 +36,13 @@ export function RoutineDetailRoute({ routineId }: { routineId: string }) {
         if (!cancelled) setState({ status: "ready", data });
       })
       .catch((error: unknown) => {
-        if (!cancelled) setState(toRouteErrorState(error, "Failed to load routine"));
+        if (!cancelled) setState(toRouteErrorState(error, t("common:failedToLoadRoutine")));
       });
 
     return () => {
       cancelled = true;
     };
-  }, [routineId]);
+  }, [routineId, t]);
 
   if (state.status !== "ready") {
     return <RoutineRoutePlaceholder state={state} />;
@@ -52,9 +54,10 @@ export function RoutineDetailRoute({ routineId }: { routineId: string }) {
 }
 
 function RoutineRoutePlaceholder<T>({ state }: { state: LoadState<T> }) {
+  const { t } = useTranslation();
   if (state.status === "error") {
     return <div className="py-8 text-sm text-destructive">{state.message}</div>;
   }
 
-  return <div className="py-8 text-sm text-muted-foreground">Loading routine...</div>;
+  return <div className="py-8 text-sm text-muted-foreground">{t("common:loadingRoutine")}</div>;
 }

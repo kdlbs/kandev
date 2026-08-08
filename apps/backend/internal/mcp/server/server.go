@@ -509,7 +509,7 @@ func (s *Server) registerTools() {
 		s.registerConfigExecutorTools()
 		count += 5
 		s.registerConfigTaskTools()
-		count += 6
+		count += 7
 		if !s.disableAskQuestion {
 			s.registerInteractionTools()
 			count++
@@ -527,7 +527,7 @@ func (s *Server) registerTools() {
 		s.registerConfigExecutorTools()
 		count += 5
 		s.registerConfigTaskTools()
-		count += 6
+		count += 7
 		s.registerCreateTaskTool()
 		count++
 	case ModeOffice:
@@ -555,7 +555,7 @@ func (s *Server) registerTools() {
 		// a sibling to message_task_kandev) but NOT the task-document
 		// tools — those are office coordination plumbing.
 		s.registerKanbanTools()
-		count += 15
+		count += 16
 		if mcpproviders.Contains(s.mcpProviders, mcpproviders.GitHub) {
 			s.registerPRAutomationTools()
 			count += 2
@@ -694,7 +694,7 @@ func (s *Server) registerKanbanTools() {
 	)
 	s.mcpServer.AddTool(
 		mcp.NewTool("archive_task_kandev",
-			mcp.WithDescription("Archive a task. The task is hidden from active board views but kept in the database. Use to tidy up finished or abandoned tasks. Unarchiving is a user action done from the UI, not via MCP."),
+			mcp.WithDescription("Archive a task. The task is hidden from active board views but kept in the database. Use to tidy up finished or abandoned tasks. Archiving an already-archived task is a no-op that succeeds with already_archived: true. Unarchiving is a user action done from the UI, not via MCP."),
 			mcp.WithString("task_id", mcp.Required(), mcp.Description("The task ID to archive")),
 		),
 		s.wrapHandler("archive_task_kandev", s.archiveTaskHandler()),
@@ -755,6 +755,7 @@ If the child has no live execution, the call succeeds idempotently with status="
 		),
 		s.wrapHandler("get_task_conversation_kandev", s.getTaskConversationHandler()),
 	)
+	s.registerListTaskSessionsTool()
 }
 
 func (s *Server) registerPRAutomationTools() {
@@ -818,7 +819,7 @@ WHEN TO OMIT parent_id (top-level task):
 
 IMPORTANT:
 - Subtasks inherit task workspace, workflow, agent profile, executor, and materialized workspace from the parent by default. Pass workspace_id/workflow_id only when deliberately targeting a different task workspace/workflow; any supplied workflow_id must belong to the effective workspace_id. Pass workspace_mode='new_workspace' when the subtask needs its own materialized workspace/worktree.
-- An explicit agent_profile_id always wins. When omitted, the saved user policy applies: current_task inherits from the current/source task or parent before workflow and target-workspace defaults; workspace_default skips current/source and parent profiles, honors workflow profiles first, then uses the target workspace default.
+- A workflow step's launch profile outranks an explicit agent_profile_id when the task is on a step: that is the step's pinned profile, or the workflow default when the step has none. That profile is what launches, and it is the one reported back in the created task's metadata. Off a step, or when the step and workflow resolve no profile, an explicit agent_profile_id wins. When both are absent, the saved user policy applies: current_task inherits from the current/source task or parent before workflow and target-workspace defaults; workspace_default skips current/source and parent profiles, honors workflow profiles first, then uses the target workspace default.
 - Executor and executor-profile inheritance from the current/source task or parent is unchanged by either saved agent-profile policy.
 - Every created task must have a resolvable agent profile. start_agent=false still records the profile for a later manual start.
 - Subtasks inherit the parent's repository unless you supply repository_url, repository_id, or local_path — in which case the subtask targets that repo instead
@@ -831,7 +832,7 @@ IMPORTANT:
 - start_agent defaults to true and is what you want in nearly every case — the new task auto-launches an agent that immediately works on the prompt. Pass start_agent=false ONLY for an explicit placeholder (e.g. queuing work the user will start later, or creating a tracking task with no immediate work), and still pass agent_profile_id unless it can be inherited. When in doubt, leave it true.
 - Kanban subtasks cannot have their own subtasks (max nesting depth is 1). To break work down further, create a sibling under the same parent. (Office task trees are exempt.)`
 	parentDesc := "Parent task ID for subtasks. Use 'self' to create a subtask of your current task (RECOMMENDED for plan phases, delegated work). Omit only for unrelated top-level tasks."
-	agentProfileDesc := "Agent profile ID to use. Explicit agent_profile_id always wins. When omitted, current_task inherits the current/source or parent profile before workflow/workspace defaults; workspace_default skips those task profiles, then uses workflow profiles before the target workspace default. start_agent=false still needs a resolvable profile for later manual start."
+	agentProfileDesc := "Agent profile ID to use. On a workflow step, the step's launch profile (its pinned profile, or the workflow default when unpinned) outranks it; otherwise an explicit agent_profile_id wins. When both are absent, current_task inherits the current/source or parent profile before workflow/workspace defaults; workspace_default skips those task profiles, then uses workflow profiles before the target workspace default. start_agent=false still needs a resolvable profile for later manual start."
 
 	if s.mode == ModeExternal {
 		toolDesc = `Create a new top-level task and auto-start an agent on it.
@@ -839,14 +840,14 @@ IMPORTANT:
 IMPORTANT:
 - Provide a repository via repository_url, repository_id, or local_path
 - workspace_id and workflow_id are auto-resolved if only one exists; provide explicitly if ambiguous
-- An explicit agent_profile_id always wins. When omitted, the saved user policy applies: current_task inherits a parent profile before workflow and target-workspace defaults; workspace_default skips the parent profile, honors workflow profiles first, then uses the target workspace default. External mode has no current/source task.
+- A workflow step's launch profile outranks an explicit agent_profile_id when the task is on a step: that is the step's pinned profile, or the workflow default when the step has none. That profile is what launches, and it is the one reported back in the created task's metadata. Off a step, or when the step and workflow resolve no profile, an explicit agent_profile_id wins. When both are absent, the saved user policy applies: current_task inherits a parent profile before workflow and target-workspace defaults; workspace_default skips the parent profile, honors workflow profiles first, then uses the target workspace default. External mode has no current/source task.
 - Executor and executor-profile inheritance from a parent is unchanged by either saved agent-profile policy.
 - Every created task must have a resolvable agent profile. start_agent=false still records the profile for a later manual start.
 - 'prompt' is the agent's initial prompt — be specific and detailed
 - start_agent defaults to true and is what you want in nearly every case — the new task auto-launches an agent that immediately works on the prompt. Pass start_agent=false ONLY for an explicit placeholder (e.g. queuing work the user will start later), and still pass agent_profile_id unless a default exists. When in doubt, leave it true.
 - Use parent_id only when delegating to a known existing task by its ID`
 		parentDesc = "Optional parent task ID. Omit for top-level tasks; provide an existing task ID only to create a subtask of that task."
-		agentProfileDesc = "Agent profile ID to use. Explicit agent_profile_id always wins. When omitted, current_task inherits a parent profile before workflow/workspace defaults; workspace_default skips the parent profile, then uses workflow profiles before the target workspace default. External mode has no current/source task. start_agent=false still needs a resolvable profile for later manual start."
+		agentProfileDesc = "Agent profile ID to use. On a workflow step, the step's launch profile (its pinned profile, or the workflow default when unpinned) outranks it; otherwise an explicit agent_profile_id wins. When both are absent, current_task inherits a parent profile before workflow/workspace defaults; workspace_default skips the parent profile, then uses workflow profiles before the target workspace default. External mode has no current/source task. start_agent=false still needs a resolvable profile for later manual start."
 	}
 
 	s.mcpServer.AddTool(
@@ -864,7 +865,7 @@ IMPORTANT:
 			mcp.WithBoolean("start_agent", mcp.Description("Whether to auto-start an agent on the created task. Default: true — leave it true unless you specifically want a placeholder task with no agent running. Setting false leaves the task waiting for the user to click 'Start agent' in the UI; the prompt is preserved but no work happens automatically.")),
 			mcp.WithString("repository_id", mcp.Description("Repository ID. Required for top-level tasks unless local_path or repository_url is provided. For subtasks: optional — supply only when the subtask should target a different repo than the parent.")),
 			mcp.WithString("local_path", mcp.Description("Local repository folder path (e.g. '/Users/me/projects/myrepo'). Will create/find the repository automatically. Preferred for local worktree flow. For subtasks: supply only when the subtask should target a different repo than the parent.")),
-			mcp.WithString("repository_url", mcp.Description("GitHub repository URL (e.g. 'https://github.com/owner/repo'). The repository will be cloned automatically on first use. For subtasks: supply only when the subtask should target a different repo than the parent.")),
+			mcp.WithString("repository_url", mcp.Description("Repository URL, GitHub pull request URL, or GitLab merge request URL (for example 'https://github.com/owner/repo'). A contribution URL attaches the task to that existing contribution and prepares its source branch. For subtasks: supply only when the subtask should target a different repo than the parent.")),
 			mcp.WithString("base_branch", mcp.Description("Base branch for the repository (e.g. 'main'). Optional. Defaults: same-repo subtasks inherit the parent's base_branch; cross-repo subtasks and top-level tasks fall back to the repository's default_branch (visible via list_repositories_kandev).")),
 		),
 		s.wrapHandler("create_task_kandev", s.createTaskHandler()),
@@ -891,6 +892,26 @@ Returns {task_id, session_id, state}.`),
 			mcp.WithString("task_id", mcp.Description("Task to spawn the session on. Omit to use your current task.")),
 		),
 		s.wrapHandler("spawn_session_kandev", s.spawnSessionHandler()),
+	)
+}
+
+// registerListTaskSessionsTool registers list_task_sessions_kandev. It is the
+// discovery half of the session-addressing tools: get_task_conversation_kandev
+// and message_task_kandev both take an optional session_id and fall back to the
+// primary session, so without this a sibling session (one spawned with
+// spawn_session_kandev, or spawned by someone else) is unreachable unless the
+// caller happened to create it. Registered wherever those two tools are.
+func (s *Server) registerListTaskSessionsTool() {
+	s.mcpServer.AddTool(
+		mcp.NewTool("list_task_sessions_kandev",
+			mcp.WithDescription(`List every agent session attached to a task, most recently started first.
+
+Use it to find the session_id to pass to get_task_conversation_kandev or message_task_kandev when a task has more than one session — for example after spawn_session_kandev, or to read a sibling session on your own task. Both of those tools default to the task's primary session when session_id is omitted, so other sessions are only reachable by ID.
+
+Each entry reports session_id, name (the session tab label, if set), state, is_primary (the session the other tools default to), is_current (true for your own session), agent_profile_id, and started/updated/completed timestamps.`),
+			mcp.WithString(mcpKeyTaskID, mcp.Required(), mcp.Description("The task ID whose sessions to list")),
+		),
+		s.wrapHandler("list_task_sessions_kandev", s.listTaskSessionsHandler()),
 	)
 }
 

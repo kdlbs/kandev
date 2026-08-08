@@ -43,32 +43,48 @@ type TestConnectionResult struct {
 // ID is the global GitLab ID — required for some endpoints. The frontend
 // keys on (ProjectPath, IID).
 type MR struct {
-	ID               int64        `json:"id"`
-	IID              int          `json:"iid"`
-	ProjectID        int64        `json:"project_id"`
-	Title            string       `json:"title"`
-	URL              string       `json:"url"`
-	WebURL           string       `json:"web_url"`
-	State            string       `json:"state"` // open, closed, merged, locked
-	HeadBranch       string       `json:"head_branch"`
-	HeadSHA          string       `json:"head_sha"`
-	BaseBranch       string       `json:"base_branch"`
-	AuthorUsername   string       `json:"author_username"`
-	ProjectNamespace string       `json:"project_namespace"`
-	ProjectPath      string       `json:"project_path"`
-	Body             string       `json:"body"`
-	Draft            bool         `json:"draft"`
-	MergeStatus      string       `json:"merge_status"` // can_be_merged, cannot_be_merged, unchecked, ...
-	HasConflicts     bool         `json:"has_conflicts"`
-	Additions        int          `json:"additions"`
-	Deletions        int          `json:"deletions"`
-	Reviewers        []MRReviewer `json:"reviewers"`
-	Assignees        []MRReviewer `json:"assignees"`
-	Labels           []string     `json:"labels"`
-	CreatedAt        time.Time    `json:"created_at"`
-	UpdatedAt        time.Time    `json:"updated_at"`
-	MergedAt         *time.Time   `json:"merged_at,omitempty"`
-	ClosedAt         *time.Time   `json:"closed_at,omitempty"`
+	ID                     int64        `json:"id"`
+	IID                    int          `json:"iid"`
+	ProjectID              int64        `json:"project_id"`
+	Title                  string       `json:"title"`
+	URL                    string       `json:"url"`
+	WebURL                 string       `json:"web_url"`
+	State                  string       `json:"state"` // open, closed, merged, locked
+	HeadBranch             string       `json:"head_branch"`
+	HeadSHA                string       `json:"head_sha"`
+	BaseBranch             string       `json:"base_branch"`
+	AuthorUsername         string       `json:"author_username"`
+	ProjectNamespace       string       `json:"project_namespace"`
+	ProjectPath            string       `json:"project_path"`
+	SourceProjectID        int64        `json:"source_project_id,omitempty"`
+	SourceProjectPath      string       `json:"source_project_path,omitempty"`
+	SourceProjectRemoteURL string       `json:"source_project_remote_url,omitempty"`
+	TargetProjectID        int64        `json:"target_project_id,omitempty"`
+	TargetProjectPath      string       `json:"target_project_path,omitempty"`
+	TargetDefaultBranch    string       `json:"target_default_branch,omitempty"`
+	AllowCollaboration     bool         `json:"allow_collaboration"`
+	Body                   string       `json:"body"`
+	Draft                  bool         `json:"draft"`
+	MergeStatus            string       `json:"merge_status"` // can_be_merged, cannot_be_merged, unchecked, ...
+	HasConflicts           bool         `json:"has_conflicts"`
+	Additions              int          `json:"additions"`
+	Deletions              int          `json:"deletions"`
+	Reviewers              []MRReviewer `json:"reviewers"`
+	Assignees              []MRReviewer `json:"assignees"`
+	Labels                 []string     `json:"labels"`
+	CreatedAt              time.Time    `json:"created_at"`
+	UpdatedAt              time.Time    `json:"updated_at"`
+	MergedAt               *time.Time   `json:"merged_at,omitempty"`
+	ClosedAt               *time.Time   `json:"closed_at,omitempty"`
+	// DetailedMergeStatus is GitLab 15.6+'s server-side merge-readiness
+	// verdict (e.g. "mergeable", "not_approved", "discussions_not_resolved",
+	// "ci_still_running"). Empty on older/self-managed hosts that predate
+	// it — callers fall back to MergeStatus in that case.
+	DetailedMergeStatus string `json:"detailed_merge_status,omitempty"`
+	// BlockingDiscussionsResolved reflects only discussions the project
+	// marked as blocking; it is not the primary unresolved-discussion
+	// signal (see MRStatus.UnresolvedDiscussions).
+	BlockingDiscussionsResolved bool `json:"blocking_discussions_resolved"`
 }
 
 // MRReviewer represents a reviewer or assignee on an MR.
@@ -148,6 +164,12 @@ type Pipeline struct {
 	JobsPassing int        `json:"jobs_passing"`
 	StartedAt   *time.Time `json:"started_at,omitempty"`
 	FinishedAt  *time.Time `json:"finished_at,omitempty"`
+	// Jobs is only populated for the latest pipeline in an MRFeedback
+	// response (GetMRFeedback) — fetching per-job detail for every historic
+	// pipeline in the list would be N+1 against the jobs API for no UI
+	// benefit. Empty for every other caller (e.g. GetMRStatus, which only
+	// needs JobsTotal/JobsPassing).
+	Jobs []PipelineJob `json:"jobs,omitempty"`
 }
 
 // MRFeedback aggregates all feedback for an MR (fetched live from GitLab).
@@ -160,7 +182,10 @@ type MRFeedback struct {
 }
 
 // MRStatus contains lightweight MR state used by the background poller.
-// Unlike MRFeedback it skips discussions to reduce API calls.
+// Unlike MRFeedback it skips discussions to reduce API calls — so
+// UnresolvedDiscussions is always 0 here. Automation-subscribed MRs get
+// their unresolved-discussion count from GetMRAutomationSnapshot instead,
+// which fetches discussions only for the subset of MRs that need it.
 type MRStatus struct {
 	MR                  *MR    `json:"mr"`
 	ApprovalState       string `json:"approval_state"` // "approved", "changes_requested", "pending", ""
@@ -170,6 +195,18 @@ type MRStatus struct {
 	RequiredApprovals   int    `json:"required_approvals"`
 	PipelineJobsTotal   int    `json:"pipeline_jobs_total"`
 	PipelineJobsPassing int    `json:"pipeline_jobs_passing"`
+	// DetailedMergeStatus mirrors MR.DetailedMergeStatus (free — already
+	// fetched as part of the MR object).
+	DetailedMergeStatus string `json:"detailed_merge_status,omitempty"`
+	// ReviewerCount is len(MR.Reviewers) (free).
+	ReviewerCount int `json:"reviewer_count"`
+	// UnapprovedReviewers counts assigned reviewers whose username is not
+	// present in the approvals list (free — reviewers and approvals are
+	// both already fetched by GetMRStatus).
+	UnapprovedReviewers int `json:"unapproved_reviewers"`
+	// UnresolvedDiscussions is always 0 from GetMRStatus (see type doc);
+	// populated separately for automation-subscribed MRs.
+	UnresolvedDiscussions int `json:"unresolved_discussions"`
 }
 
 // MRSearchPage is a paginated slice of MR search results, with the total
@@ -213,6 +250,22 @@ type Group struct {
 // RepoBranch represents a branch in a GitLab project.
 type RepoBranch struct {
 	Name string `json:"name"`
+}
+
+// Tree entry types as returned by GitLab's repository/tree endpoint.
+const (
+	TreeEntryTypeBlob = "blob"
+	TreeEntryTypeTree = "tree"
+)
+
+// RepoTreeEntry is one entry in a GitLab repository directory listing.
+// Type is TreeEntryTypeBlob for files and TreeEntryTypeTree for directories
+// (GitHub's equivalent endpoint calls these "file" and "dir").
+type RepoTreeEntry struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+	Type string `json:"type"`
+	Path string `json:"path"`
 }
 
 // Status represents GitLab connection status surfaced to the frontend.
@@ -317,31 +370,39 @@ type Issue struct {
 //   - MergeStatus carries GitLab's own merge_status string verbatim
 //     (can_be_merged, cannot_be_merged, unchecked, …) for debugging.
 type TaskMR struct {
-	ID                string     `json:"id" db:"id"`
-	TaskID            string     `json:"task_id" db:"task_id"`
-	RepositoryID      string     `json:"repository_id,omitempty" db:"repository_id"`
-	Host              string     `json:"host" db:"host"`                 // gitlab base URL the MR lives on
-	ProjectPath       string     `json:"project_path" db:"project_path"` // namespace/path
-	MRIID             int        `json:"mr_iid" db:"mr_iid"`             // GitLab per-project sequential id
-	MRURL             string     `json:"mr_url" db:"mr_url"`
-	MRTitle           string     `json:"mr_title" db:"mr_title"`
-	HeadBranch        string     `json:"head_branch" db:"head_branch"`
-	BaseBranch        string     `json:"base_branch" db:"base_branch"`
-	AuthorUsername    string     `json:"author_username" db:"author_username"`
-	State             string     `json:"state" db:"state"`                   // open, closed, merged, locked
-	ApprovalState     string     `json:"approval_state" db:"approval_state"` // approved, pending, ""
-	PipelineState     string     `json:"pipeline_state" db:"pipeline_state"` // success, failure, pending, ""
-	MergeStatus       string     `json:"merge_status" db:"merge_status"`
-	Draft             bool       `json:"draft" db:"draft"`
-	ApprovalCount     int        `json:"approval_count" db:"approval_count"`
-	RequiredApprovals int        `json:"required_approvals" db:"required_approvals"`
-	PipelineJobsTotal int        `json:"pipeline_jobs_total" db:"pipeline_jobs_total"`
-	PipelineJobsPass  int        `json:"pipeline_jobs_pass" db:"pipeline_jobs_pass"`
-	CreatedAt         time.Time  `json:"created_at" db:"created_at"`
-	MergedAt          *time.Time `json:"merged_at,omitempty" db:"merged_at"`
-	ClosedAt          *time.Time `json:"closed_at,omitempty" db:"closed_at"`
-	LastSyncedAt      *time.Time `json:"last_synced_at,omitempty" db:"last_synced_at"`
-	UpdatedAt         time.Time  `json:"updated_at" db:"updated_at"`
+	ID                string `json:"id" db:"id"`
+	TaskID            string `json:"task_id" db:"task_id"`
+	RepositoryID      string `json:"repository_id,omitempty" db:"repository_id"`
+	Host              string `json:"host" db:"host"`                 // gitlab base URL the MR lives on
+	ProjectPath       string `json:"project_path" db:"project_path"` // namespace/path
+	MRIID             int    `json:"mr_iid" db:"mr_iid"`             // GitLab per-project sequential id
+	MRURL             string `json:"mr_url" db:"mr_url"`
+	MRTitle           string `json:"mr_title" db:"mr_title"`
+	HeadBranch        string `json:"head_branch" db:"head_branch"`
+	BaseBranch        string `json:"base_branch" db:"base_branch"`
+	AuthorUsername    string `json:"author_username" db:"author_username"`
+	State             string `json:"state" db:"state"`                   // open, closed, merged, locked
+	ApprovalState     string `json:"approval_state" db:"approval_state"` // approved, pending, ""
+	PipelineState     string `json:"pipeline_state" db:"pipeline_state"` // success, failure, pending, ""
+	MergeStatus       string `json:"merge_status" db:"merge_status"`
+	Draft             bool   `json:"draft" db:"draft"`
+	ApprovalCount     int    `json:"approval_count" db:"approval_count"`
+	RequiredApprovals int    `json:"required_approvals" db:"required_approvals"`
+	PipelineJobsTotal int    `json:"pipeline_jobs_total" db:"pipeline_jobs_total"`
+	PipelineJobsPass  int    `json:"pipeline_jobs_pass" db:"pipeline_jobs_pass"`
+	// DetailedMergeStatus, ReviewerCount and UnapprovedReviewers back the
+	// "awaiting review" summary label (Q2) and the auto-merge readiness
+	// gate (Q3). UnresolvedDiscussions is only ever set for MRs with
+	// automation enabled (Q4) — it stays 0 for lifecycle-only links.
+	DetailedMergeStatus   string     `json:"detailed_merge_status,omitempty" db:"detailed_merge_status"`
+	ReviewerCount         int        `json:"reviewer_count" db:"reviewer_count"`
+	UnapprovedReviewers   int        `json:"unapproved_reviewers" db:"unapproved_reviewers"`
+	UnresolvedDiscussions int        `json:"unresolved_discussions" db:"unresolved_discussions"`
+	CreatedAt             time.Time  `json:"created_at" db:"created_at"`
+	MergedAt              *time.Time `json:"merged_at,omitempty" db:"merged_at"`
+	ClosedAt              *time.Time `json:"closed_at,omitempty" db:"closed_at"`
+	LastSyncedAt          *time.Time `json:"last_synced_at,omitempty" db:"last_synced_at"`
+	UpdatedAt             time.Time  `json:"updated_at" db:"updated_at"`
 }
 
 // TaskMRsResponse is the shape returned by GET /workspaces/:id/task-mrs.

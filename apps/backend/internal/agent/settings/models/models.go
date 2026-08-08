@@ -64,6 +64,12 @@ type AgentProfile struct {
 	// CLIPassthrough enables TUI-passthrough execution style. Orthogonal to ACP.
 	CLIPassthrough bool `json:"cli_passthrough" db:"cli_passthrough"`
 
+	// Enabled gates the profile from new-work selection: when false, the
+	// profile is hidden from task/session creation pickers but keeps serving
+	// existing sessions and remains editable in settings. Independent of
+	// DeletedAt (soft delete) and the office Status column.
+	Enabled bool `json:"enabled" db:"enabled"`
+
 	// CommandPrefix is an optional launcher prefix prepended to the agent
 	// subprocess command. It lets a user wrap the ACP agent in a sandbox
 	// launcher (e.g. "greywall --" produces "greywall -- npx -y <pkg> …").

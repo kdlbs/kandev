@@ -110,12 +110,21 @@ const (
 	// because the winner will (or already did) handle it.
 	// Absent on ordinary (non-watcher) auto-start tasks, which launch normally.
 	MetaKeyAutoStartClaimed = "auto_start_claimed"
+	// MetaKeyInterruptedAt is set by startup reconciliation when a task's
+	// session was mid-turn (STARTING/RUNNING) when the backend died. Its
+	// presence makes the task DTO report `interrupted: true` so task-list
+	// surfaces show the red interruption icon; the orchestrator removes the
+	// key when a session of the task next enters STARTING/RUNNING.
+	MetaKeyInterruptedAt = "interrupted_at"
 	// MetaKeyAgentTitlePending marks tasks created in prompt-first mode whose
 	// provisional title still needs the first eligible agent session to replace it.
 	MetaKeyAgentTitlePending = "agent_title_pending"
 	// MetaKeyAgentTitleOwnerSessionID records the one session that atomically
 	// claimed the first-turn title handoff for a pending task.
 	MetaKeyAgentTitleOwnerSessionID = "agent_title_owner_session_id"
+	// MetaKeyPortForwardingEnabled controls whether a task exposes its
+	// session port-forwarding controls in the task UI.
+	MetaKeyPortForwardingEnabled = "port_forwarding_enabled"
 )
 
 // IsAgentTitlePending reports whether task metadata contains the durable
@@ -309,10 +318,13 @@ const SessionMetaKeyPendingStepCompletion = "pending_step_completion_signal"
 const SessionMetaKeyLastAgentError = "last_agent_error"
 
 // LastAgentError is persisted under TaskSession.Metadata[SessionMetaKeyLastAgentError].
+// RemediationURL is only ever set from an adapter-validated provider
+// diagnostic; it is never reconstructed from the error message.
 type LastAgentError struct {
 	Message          string     `json:"message"`
 	OccurredAt       time.Time  `json:"occurred_at"`
 	AgentExecutionID string     `json:"agent_execution_id,omitempty"`
+	RemediationURL   string     `json:"remediation_url,omitempty"`
 	DismissedAt      *time.Time `json:"dismissed_at,omitempty"`
 }
 
@@ -656,10 +668,13 @@ const (
 
 // Workflow represents a task workflow
 type Workflow struct {
-	ID                 string  `json:"id"`
-	WorkspaceID        string  `json:"workspace_id"`
-	Name               string  `json:"name"`
-	Description        string  `json:"description"`
+	ID          string `json:"id"`
+	WorkspaceID string `json:"workspace_id"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	// Prompt is optional workflow-level agent instructions prepended at
+	// every step entry before the step prompt. Empty means off.
+	Prompt             string  `json:"prompt,omitempty"`
 	AgentProfileID     string  `json:"agent_profile_id,omitempty"`
 	WorkflowTemplateID *string `json:"workflow_template_id,omitempty"`
 	SortOrder          int     `json:"sort_order"`
@@ -679,6 +694,18 @@ type Workflow struct {
 	Style     string    `json:"style,omitempty"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// WorkspaceNameImproveKandev is the exact name of the dedicated Improve Kandev
+// workspace created by the improve-kandev bootstrap. The workspace is matched
+// by this name everywhere (bootstrap, guards, frontend) and is
+// configuration-immutable: its workflows and repositories are read-only.
+const WorkspaceNameImproveKandev = "Improve Kandev"
+
+// IsImproveKandev reports whether the workspace is the dedicated Improve
+// Kandev workspace (matched by exact name).
+func (w *Workspace) IsImproveKandev() bool {
+	return w != nil && w.Name == WorkspaceNameImproveKandev
 }
 
 // Workspace represents a workspace
@@ -1114,23 +1141,35 @@ type Repository struct {
 	// populated after the repo is cloned/synced on the agent host.
 	LocalPath string `json:"local_path"`
 	// Provider fields describe the upstream source (e.g. github/gitlab) for future syncing.
-	Provider               string     `json:"provider"`
-	ProviderRepoID         string     `json:"provider_repo_id"`
-	ProviderHost           string     `json:"provider_host"`
-	ProviderOwner          string     `json:"provider_owner"`
-	ProviderName           string     `json:"provider_name"`
-	RemoteURL              string     `json:"remote_url"`
-	DefaultBranch          string     `json:"default_branch"`
-	WorktreeBranchPrefix   string     `json:"worktree_branch_prefix"`
-	WorktreeBranchTemplate string     `json:"worktree_branch_template"`
-	PullBeforeWorktree     bool       `json:"pull_before_worktree"`
-	SetupScript            string     `json:"setup_script"`
-	CleanupScript          string     `json:"cleanup_script"`
-	DevScript              string     `json:"dev_script"`
-	CopyFiles              string     `json:"copy_files"`
-	CreatedAt              time.Time  `json:"created_at"`
-	UpdatedAt              time.Time  `json:"updated_at"`
-	DeletedAt              *time.Time `json:"deleted_at,omitempty"`
+	Provider               string                    `json:"provider"`
+	ProviderRepoID         string                    `json:"provider_repo_id"`
+	ProviderHost           string                    `json:"provider_host"`
+	ProviderOwner          string                    `json:"provider_owner"`
+	ProviderName           string                    `json:"provider_name"`
+	RemoteURL              string                    `json:"remote_url"`
+	DefaultBranch          string                    `json:"default_branch"`
+	WorktreeBranchPrefix   string                    `json:"worktree_branch_prefix"`
+	WorktreeBranchTemplate string                    `json:"worktree_branch_template"`
+	PullBeforeWorktree     bool                      `json:"pull_before_worktree"`
+	SetupScript            string                    `json:"setup_script"`
+	CleanupScript          string                    `json:"cleanup_script"`
+	DevScript              string                    `json:"dev_script"`
+	CopyFiles              string                    `json:"copy_files"`
+	SecretBindings         []RepositorySecretBinding `json:"secret_bindings,omitempty"`
+	CreatedAt              time.Time                 `json:"created_at"`
+	UpdatedAt              time.Time                 `json:"updated_at"`
+	DeletedAt              *time.Time                `json:"deleted_at,omitempty"`
+}
+
+// RepositorySecretBinding maps an environment key to a secret reference. The
+// value is never persisted or returned; a missing secret intentionally leaves
+// this row dangling so launches can report a broken binding.
+type RepositorySecretBinding struct {
+	RepositoryID string    `json:"repository_id,omitempty"`
+	Key          string    `json:"key"`
+	SecretID     string    `json:"secret_id"`
+	CreatedAt    time.Time `json:"created_at,omitempty"`
+	UpdatedAt    time.Time `json:"updated_at,omitempty"`
 }
 
 // RepositoryScript represents a custom script for a repository
@@ -1783,6 +1822,7 @@ func (t *Task) ToAPI() *v1.Task {
 		CreatedAt:    t.CreatedAt,
 		UpdatedAt:    t.UpdatedAt,
 		Metadata:     t.Metadata,
+		Interrupted:  t.Metadata[MetaKeyInterruptedAt] != nil,
 		IsEphemeral:  t.IsEphemeral,
 		ParentID:     t.ParentID,
 	}

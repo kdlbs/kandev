@@ -47,6 +47,7 @@ export function createDefaultUserSettings(): UserSettingsState {
     showScrollToLastPrompt: true,
     showScrollToStart: false,
     showTranscriptAutoScrollControl: false,
+    showTodoListPanel: false,
     showReleaseNotification: true,
     releaseNotesLastSeenVersion: null,
     lspAutoStartLanguages: [],
@@ -63,6 +64,7 @@ export function createDefaultUserSettings(): UserSettingsState {
       branch: null,
       agentProfileId: null,
       executorProfileId: null,
+      workflowIdsByWorkspace: {},
       synced: false,
     },
     jiraSavedViews: undefined,
@@ -188,7 +190,11 @@ export function taskCreateLastUsedHasValue(
   value: UserSettingsData["task_create_last_used"] | undefined,
 ) {
   return Boolean(
-    value?.repository_id || value?.branch || value?.agent_profile_id || value?.executor_profile_id,
+    value?.repository_id ||
+    value?.branch ||
+    value?.agent_profile_id ||
+    value?.executor_profile_id ||
+    Object.keys(value?.workflow_ids_by_workspace ?? {}).length > 0,
   );
 }
 
@@ -198,6 +204,7 @@ function parseTaskCreateLastUsed(value: UserSettingsData["task_create_last_used"
     branch: value?.branch || null,
     agentProfileId: value?.agent_profile_id || null,
     executorProfileId: value?.executor_profile_id || null,
+    workflowIdsByWorkspace: value?.workflow_ids_by_workspace ?? {},
     synced: taskCreateLastUsedHasValue(value),
   };
 }
@@ -251,6 +258,7 @@ function buildBehaviorFields(s: UserSettingsData, current: UserSettingsState) {
     showScrollToStart: s.show_scroll_to_start ?? current.showScrollToStart,
     showTranscriptAutoScrollControl:
       s.show_transcript_auto_scroll_control ?? current.showTranscriptAutoScrollControl,
+    showTodoListPanel: s.show_todo_list_panel ?? current.showTodoListPanel,
     showReleaseNotification: s.show_release_notification ?? current.showReleaseNotification,
     releaseNotesLastSeenVersion: mapNullableString(
       s.release_notes_last_seen_version,

@@ -1,9 +1,12 @@
 package utility
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"maps"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -12,6 +15,117 @@ import (
 )
 
 func ptr[T any](v T) *T { return &v }
+
+// A probe that outlives its deadline is killed by cleanup, so the ACP client
+// reports the dead pipe rather than the deadline. Reporting that verbatim sends
+// readers after a crashed agent that never crashed.
+func TestDescribeACPFailureNamesTheContextCause(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	err := describeACPFailure(ctx, "initialize", errors.New("peer disconnected before response"))
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("err = %v, want it to wrap context.Canceled", err)
+	}
+	if strings.Contains(err.Error(), "peer disconnected") {
+		t.Fatalf("err = %q, want the context cause instead of the wire symptom", err)
+	}
+}
+
+// The deadline is the case the change exists for: the probe timeout kills the
+// child, the SDK reports the dead pipe, and the timeout has to win over it.
+func TestDescribeACPFailureNamesTheDeadline(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 0)
+	defer cancel()
+	<-ctx.Done()
+
+	err := describeACPFailure(ctx, "initialize", errors.New("peer disconnected before response"))
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("err = %v, want it to wrap context.DeadlineExceeded", err)
+	}
+	if !strings.Contains(err.Error(), "timed out") {
+		t.Fatalf("err = %q, want it to say the phase timed out", err)
+	}
+}
+
+func TestDescribeACPFailureKeepsGenuineErrors(t *testing.T) {
+	t.Parallel()
+
+	inner := errors.New("peer disconnected before response")
+	err := describeACPFailure(context.Background(), "initialize", inner)
+	if !errors.Is(err, inner) {
+		t.Fatalf("err = %v, want the original failure preserved", err)
+	}
+	if strings.Contains(err.Error(), "timed out") {
+		t.Fatalf("err = %q, must not claim a timeout while the context is live", err)
+	}
+}
+
+func TestStderrBufferTailKeepsTheEnd(t *testing.T) {
+	t.Parallel()
+
+	var buf stderrBuffer
+	if _, err := buf.Write([]byte(strings.Repeat("a", stderrTailLimit))); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	if _, err := buf.Write([]byte("\nnpm error code ECONNREFUSED")); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	tail := buf.tail()
+	if len(tail) > stderrTailLimit {
+		t.Fatalf("tail is %d bytes, want at most %d", len(tail), stderrTailLimit)
+	}
+	if !strings.HasSuffix(tail, "npm error code ECONNREFUSED") {
+		t.Fatalf("tail = %q, want the final line kept", tail)
+	}
+}
+
+// Retention is bounded on write, not on read, so a chatty child cannot hold
+// everything it ever printed in memory until something asks for the tail.
+func TestStderrBufferBoundsRetentionOnWrite(t *testing.T) {
+	t.Parallel()
+
+	var buf stderrBuffer
+	chunk := []byte(strings.Repeat("b", 1024))
+	for range 64 {
+		if n, err := buf.Write(chunk); err != nil || n != len(chunk) {
+			t.Fatalf("Write = (%d, %v), want (%d, nil)", n, err, len(chunk))
+		}
+	}
+
+	if got := buf.buf.Len(); got > stderrTailLimit {
+		t.Fatalf("retained %d bytes after 64 KiB of writes, want at most %d", got, stderrTailLimit)
+	}
+}
+
+// os/exec writes into this buffer from its stderr-copying goroutine while the
+// tail is read during teardown. Exercising both at once means the race detector
+// asserts the synchronisation rather than it being assumed.
+func TestStderrBufferSurvivesConcurrentUse(t *testing.T) {
+	t.Parallel()
+
+	var buf stderrBuffer
+	written := make(chan struct{})
+	go func() {
+		defer close(written)
+		for range 200 {
+			_, _ = buf.Write([]byte("npm error code ECONNREFUSED\n"))
+		}
+	}()
+	for range 200 {
+		_ = buf.tail()
+	}
+	<-written
+
+	if buf.tail() == "" {
+		t.Fatal("tail is empty after concurrent writes")
+	}
+}
 
 func TestProbeConfigOptions_PreservesDescriptions(t *testing.T) {
 	t.Parallel()
@@ -97,6 +211,45 @@ func TestResolveProbeCommand_RejectsUnknown(t *testing.T) {
 	t.Parallel()
 	if got := resolveProbeCommand("claude"); got != "" {
 		t.Fatalf("resolveProbeCommand(claude) = %q, want empty", got)
+	}
+}
+
+// The mock agent is the one allow-listed command launched from an absolute
+// path, so on Windows it reaches this lookup as "mock-agent.exe". The coverage
+// above builds Unix-style paths, whose base name never carries an executable
+// suffix, which is why the gap passed on every runner including Windows.
+func TestResolveProbeCommand_ExecutableSuffix(t *testing.T) {
+	t.Parallel()
+
+	const name = "mock-agent"
+	dir := t.TempDir()
+
+	for _, tc := range []struct {
+		file        string
+		wantWindows string
+	}{
+		{file: name + ".exe", wantWindows: name},
+		{file: name + ".EXE", wantWindows: name},
+		{file: name + ".cmd", wantWindows: ""},
+		{file: name + ".txt", wantWindows: ""},
+		{file: name + ".exe.txt", wantWindows: ""},
+	} {
+		t.Run(tc.file, func(t *testing.T) {
+			t.Parallel()
+
+			path := filepath.Join(dir, tc.file)
+			got := resolveProbeCommand(path)
+
+			// Only Windows trims, and only ".exe" — any other suffix, and any
+			// suffix at all on Unix, leaves the name unmatched.
+			want := ""
+			if runtime.GOOS == "windows" {
+				want = tc.wantWindows
+			}
+			if got != want {
+				t.Fatalf("resolveProbeCommand(%q) = %q, want %q", path, got, want)
+			}
+		})
 	}
 }
 

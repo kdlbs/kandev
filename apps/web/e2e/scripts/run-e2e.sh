@@ -92,9 +92,14 @@ restore_pr_asset_ownership() {
     }
 }
 
+# `build:e2e`, not `build`: a plain `vite build` drops the pseudo catalog from
+# the bundle (it is the largest locale and no production user can select it), and
+# tests/i18n/pseudo-coverage.spec.ts is the oracle that needs it. See
+# apps/web/lib/i18n/bundling.ts. Mirror any change here in the CI e2e build job
+# (.github/workflows/e2e-tests.yml -> make build-web-e2e).
 build_fe() {
-  log "building Vite web assets"
-  ( cd "$REPO_ROOT/apps" && pnpm --filter @kandev/web build ) \
+  log "building Vite web assets (with the pseudo QA locale)"
+  ( cd "$REPO_ROOT/apps" && pnpm --filter @kandev/web build:e2e ) \
     || die "FE build failed"
 }
 

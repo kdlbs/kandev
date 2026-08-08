@@ -139,6 +139,21 @@ export async function updateTask(
   });
 }
 
+export async function updateTaskPortForwarding(
+  taskId: string,
+  enabled: boolean,
+  options?: ApiRequestOptions,
+) {
+  return fetchJson<Task>(`/api/v1/tasks/${taskId}/port-forwarding`, {
+    ...options,
+    init: {
+      method: "PATCH",
+      body: JSON.stringify({ enabled }),
+      ...(options?.init ?? {}),
+    },
+  });
+}
+
 export async function detachTask(taskId: string, options?: ApiRequestOptions) {
   return fetchJson<Task>(`/api/v1/tasks/${taskId}/detach`, {
     ...options,

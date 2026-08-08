@@ -7,7 +7,7 @@ function source(relativePath: string): string {
 
 describe("programmatic external links", () => {
   it.each([
-    ["../../components/settings/pty-terminal-dialog.tsx", "PTY login links"],
+    ["../../components/settings/pty-terminal-view.tsx", "PTY terminal links"],
     ["../../hooks/use-terminal-link-handler.ts", "terminal links"],
     ["../../components/task/browser-panel.tsx", "browser panel tabs"],
   ])("routes %s through the shared desktop-aware opener", (path) => {

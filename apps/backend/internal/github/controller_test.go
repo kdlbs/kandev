@@ -117,6 +117,9 @@ func (s *stubClient) ListPRFiles(context.Context, string, string, int) ([]PRFile
 func (s *stubClient) ListPRCommits(context.Context, string, string, int) ([]PRCommitInfo, error) {
 	return nil, nil
 }
+func (s *stubClient) GetPRCommitDetail(context.Context, string, string, string) (PRCommitDetail, error) {
+	return PRCommitDetail{}, nil
+}
 func (s *stubClient) SubmitReview(context.Context, string, string, int, string, string) error {
 	return nil
 }

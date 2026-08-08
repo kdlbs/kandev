@@ -17,6 +17,7 @@ import { FilterClauseEditor } from "./filter-clause-editor";
 import { SortPicker } from "./sort-picker";
 import { GroupPicker } from "./group-picker";
 import { ViewHeaderRow } from "./view-manager";
+import { useTranslation } from "react-i18next";
 
 type Props = {
   trigger: React.ReactNode;
@@ -52,6 +53,7 @@ export function SidebarFilterPopover({
   renameRequestedViewId,
   onRenameRequestHandled,
 }: Props) {
+  const { t } = useTranslation();
   const views = useAppStore((s) => s.sidebarViews.views);
   const activeViewId = useAppStore((s) => s.sidebarViews.activeViewId);
   const storedDraft = useAppStore((s) => s.sidebarViews.draft);
@@ -121,12 +123,12 @@ export function SidebarFilterPopover({
         />
 
         <div className="border-b px-2 pt-0 pb-2">
-          <SectionLabel>Sort</SectionLabel>
+          <SectionLabel>{t("task:sort")}</SectionLabel>
           <SortPicker value={current.sort} onChange={(sort) => updateDraft({ sort })} />
         </div>
 
         <div className="px-2 pt-0 pb-2">
-          <SectionLabel>Group by</SectionLabel>
+          <SectionLabel>{t("task:groupBy")}</SectionLabel>
           <GroupPicker value={current.group} onChange={(group) => updateDraft({ group })} />
         </div>
       </PopoverContent>
@@ -152,10 +154,11 @@ function FilterSection({
   onChange: (next: FilterClause) => void;
   onRemove: (id: string) => void;
 }) {
+  const { t } = useTranslation();
   return (
     <div className="border-b px-2 pt-0 pb-2">
       <div className="-mt-1 mb-1 flex items-center justify-between">
-        <span className={SECTION_LABEL_CLASS}>Filters</span>
+        <span className={SECTION_LABEL_CLASS}>{t("task:filters")}</span>
         <Button
           type="button"
           size="sm"
@@ -165,7 +168,7 @@ function FilterSection({
           data-testid="filter-add-button"
         >
           <IconPlus className="mr-1 h-3 w-3" />
-          Add
+          {t("task:add")}
         </Button>
       </div>
       {filters.length > 0 && (

@@ -1,7 +1,5 @@
-import { cleanup, fireEvent, render } from "@testing-library/react";
+import { cleanup, render } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { TooltipProvider } from "@kandev/ui/tooltip";
-import { ScheduleSelector } from "./schedule-selector";
 import { WebhookConfig } from "./trigger-configs/webhook-config";
 import { WebhookCreatedDialog } from "./webhook-created-dialog";
 
@@ -42,63 +40,16 @@ function text(el: Element | null): string {
   return (el?.textContent ?? "").replace(/\s+/g, " ").trim();
 }
 
-function renderSchedule(onChange = vi.fn()) {
-  return render(
-    <TooltipProvider>
-      <ScheduleSelector config={null} onChange={onChange} />
-    </TooltipProvider>,
-  );
-}
-
-describe("ScheduleSelector syntax help", () => {
-  it("renders the @every help as one sentence with each expression in a code element", () => {
-    const { container } = renderSchedule();
-
-    const paragraphs = Array.from(container.querySelectorAll("p"));
-    const help = paragraphs.find((p) => p.textContent?.includes("@every"));
-    expect(text(help ?? null)).toBe(
-      "Use @every with a duration (e.g., @every 10m, @every 2h30m) or shorthands like @hourly, @daily, @weekly.",
-    );
-    expect(codeTexts(container)).toEqual([
-      "@every",
-      "@every 10m",
-      "@every 2h30m",
-      "@hourly",
-      "@daily",
-      "@weekly",
-    ]);
-  });
-
-  it("labels the interval presets from count rather than a baked-in plural", () => {
-    const { container } = renderSchedule();
-
-    const labels = Array.from(container.querySelectorAll("button")).map((b) => text(b));
-    expect(labels).toEqual(["5 min", "15 min", "30 min", "1 hour", "6 hours", "Daily", "Weekly"]);
-  });
-
-  it("keeps @every verbatim in the invalid-expression error", async () => {
-    const { container, findByText } = renderSchedule();
-
-    const input = container.querySelector('[data-testid="schedule-custom-input"]')!;
-    fireEvent.change(input, { target: { value: "not a cron" } });
-    fireEvent.blur(input);
-
-    // The token travels as an interpolation value, so an accented pseudo build
-    // still tells the user to type the string the scheduler actually accepts.
-    await findByText(
-      "Invalid expression. Use @every with a duration, a shorthand, or a 5-field cron.",
-    );
-  });
-
-  it("keeps the cron expression out of the preset's persisted value", () => {
-    const { container } = renderSchedule();
-
-    // The testid carries the expression, so it doubles as a check that the
-    // persisted value is the untranslated shorthand and not the label.
-    expect(container.querySelector('[data-testid="schedule-preset-@hourly"]')).not.toBeNull();
-    expect(container.querySelector('[data-testid="schedule-preset-@every 6h"]')).not.toBeNull();
-  });
-});
+// The ScheduleSelector syntax-help cases that lived here have been removed.
+// They asserted on a control this change replaces: the picker no longer asks
+// the user to type `@every 2h30m` beside a sentence explaining the grammar —
+// it offers named frequencies and composes the expression itself, so there is
+// no syntax-help sentence left to reassemble and no raw-expression field to
+// reject. `@every` itself still round-trips; that is covered by
+// schedule-expression.test.ts, and the picker by schedule-selector.test.tsx.
+//
+// The Trans-index intent these encoded still applies to the webhook sentences
+// below, which is why those are untouched.
 
 describe("WebhookConfig usage help", () => {
   it("renders one sentence with the header and both placeholder paths in code elements", async () => {

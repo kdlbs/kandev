@@ -27,7 +27,7 @@ fixtures away from tests that count agents or assert the active-agent label. Run
 it directly with:
 
 ```sh
-pnpm e2e --project=routing
+pnpm e2e:raw --project=routing
 ```
 
 ### `auth`
@@ -37,7 +37,7 @@ backend with authentication enabled, so `chromium` intentionally excludes them.
 Select the project explicitly; otherwise Playwright reports `No tests found`:
 
 ```sh
-pnpm e2e --project=auth tests/auth/auth-lifecycle.spec.ts
+pnpm e2e:raw --project=auth tests/auth/auth-lifecycle.spec.ts
 ```
 
 ### `chromium` (default)
@@ -45,7 +45,7 @@ pnpm e2e --project=auth tests/auth/auth-lifecycle.spec.ts
 The everyday surface — runs in every CI shard. Excludes the heavyweight `containers` specs and the mobile specs.
 
 ```sh
-pnpm e2e
+pnpm e2e:raw
 ```
 
 ### `mobile-chrome`
@@ -68,13 +68,13 @@ This project:
 How to run it locally (requires Docker running):
 
 ```sh
-KANDEV_E2E_CONTAINERS=1 pnpm e2e --project=containers
+KANDEV_E2E_CONTAINERS=1 pnpm e2e:raw --project=containers
 ```
 
 Or a single spec:
 
 ```sh
-KANDEV_E2E_CONTAINERS=1 pnpm e2e --project=containers tests/ssh/launch-task.spec.ts
+KANDEV_E2E_CONTAINERS=1 pnpm e2e:raw --project=containers tests/ssh/launch-task.spec.ts
 ```
 
 ### Remote-executor fixture contracts
@@ -89,18 +89,18 @@ This project used to be named `docker`. It was renamed to `containers` once SSH 
 
 ## Commands
 
-`e2e`, `e2e:run`, and `e2e:ui` are defined only in `apps/web/package.json`. Run them from `apps/web` (or `pnpm --filter @kandev/web e2e:run` from elsewhere). From the repo root you get `ERR_PNPM_NO_IMPORTER_MANIFEST_FOUND`.
+`e2e:raw`, `e2e:run`, and `e2e:ui` are defined only in `apps/web/package.json`. Run them from `apps/web` (or `pnpm --filter @kandev/web e2e:run` from elsewhere). From the repo root you get `ERR_PNPM_NO_IMPORTER_MANIFEST_FOUND`.
 
-| Command                            | What it does                                     |
-| ---------------------------------- | ------------------------------------------------ |
-| `pnpm e2e`                         | Run the default (chromium) project headless.     |
-| `pnpm e2e:ui`                      | Open Playwright's UI mode for interactive runs.  |
-| `pnpm e2e:headed`                  | Run headless project but with a visible browser. |
-| `pnpm e2e --project=containers`    | Run container-backed tests (needs Docker).       |
-| `pnpm e2e --project=mobile-chrome` | Run mobile responsive tests.                     |
-| `pnpm e2e --project=routing`       | Run provider-mutating Office routing tests.      |
-| `pnpm e2e --project=auth`          | Run auth-isolated tests.                         |
-| `E2E_DEBUG=1 pnpm e2e`             | Surface Docker build output + extra logging.     |
+| Command                                | What it does                                     |
+| -------------------------------------- | ------------------------------------------------ |
+| `pnpm e2e:raw`                         | Run the default (chromium) project headless.     |
+| `pnpm e2e:ui`                          | Open Playwright's UI mode for interactive runs.  |
+| `pnpm e2e:headed`                      | Run headless project but with a visible browser. |
+| `pnpm e2e:raw --project=containers`    | Run container-backed tests (needs Docker).       |
+| `pnpm e2e:raw --project=mobile-chrome` | Run mobile responsive tests.                     |
+| `pnpm e2e:raw --project=routing`       | Run provider-mutating Office routing tests.      |
+| `pnpm e2e:raw --project=auth`          | Run auth-isolated tests.                         |
+| `E2E_DEBUG=1 pnpm e2e:raw`             | Surface Docker build output + extra logging.     |
 
 Common flags: `--shard=1/4`, `-g "fragment of test name"`, `--repeat-each=3` (flake hunting).
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -16,6 +17,15 @@ import (
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/task/models"
 )
+
+const defaultRemoteContributionPreflightTimeout = 30 * time.Second
+
+func (m *Manager) contributionPreflightTimeout() time.Duration {
+	if m.remoteContributionPreflightTimeout > 0 {
+		return m.remoteContributionPreflightTimeout
+	}
+	return defaultRemoteContributionPreflightTimeout
+}
 
 // startPassthroughExecution dispatches a passthrough-routed execution to the
 // resume or fresh launch path. profileInfo may be nil — see routePassthrough's
@@ -132,6 +142,13 @@ func (m *Manager) StartAgentProcess(ctx context.Context, executionID string) (re
 		m.updateExecutionError(executionID, "agentctl not ready: "+err.Error())
 		return fmt.Errorf("agentctl not ready: %w", err)
 	}
+	preflightCtx, cancelPreflight := context.WithTimeout(operationCtx, m.contributionPreflightTimeout())
+	err = m.preflightRemoteContributionPushes(preflightCtx, execution)
+	cancelPreflight()
+	if err != nil {
+		m.updateExecutionError(executionID, "contribution push preflight failed: "+err.Error())
+		return err
+	}
 
 	taskDescription := getTaskDescriptionFromMetadata(execution)
 	approvalPolicy, agentDisplayName := m.resolveApprovalPolicyAndDisplayName(operationCtx, execution)
@@ -165,6 +182,38 @@ func (m *Manager) StartAgentProcess(ctx context.Context, executionID string) (re
 	}
 
 	return m.initializeAgentSession(operationCtx, execution, bootCommand, agentDisplayName, taskDescription)
+}
+
+func (m *Manager) preflightRemoteContributionPushes(ctx context.Context, execution *AgentExecution) error {
+	if execution == nil || execution.agentctl == nil {
+		return nil
+	}
+	bindings, err := remoteContributionsFromMetadata(execution.Metadata)
+	if err != nil {
+		return err
+	}
+	if len(bindings) == 0 {
+		return nil
+	}
+	keys := make([]string, 0, len(bindings))
+	for key := range bindings {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		result, err := execution.agentctl.GitPushPreflight(ctx, key)
+		if err != nil {
+			return fmt.Errorf("repository %q: %w", key, err)
+		}
+		if result == nil || !result.Success {
+			message := "remote contribution push is not writable"
+			if result != nil && result.Error != "" {
+				message = result.Error
+			}
+			return fmt.Errorf("repository %q: %s", key, message)
+		}
+	}
+	return nil
 }
 
 // pollAgentStderr polls the agent's stderr buffer every 2 seconds and updates the boot message.
@@ -243,6 +292,24 @@ func (m *Manager) finalizeBootMessage(execution *AgentExecution, msg *models.Mes
 // buildEnvForExecution builds environment variables for any runtime.
 // This is the unified method used by the runtime interface.
 func (m *Manager) buildEnvForExecution(ctx context.Context, executionID string, req *LaunchRequest, agentConfig agents.Agent, profileInfo *AgentProfileInfo) (map[string]string, error) {
+	if req.EnvironmentFinalized {
+		env := cloneStringMap(req.Env)
+		if err := spillLargeWakePayloadEnv(env, req.WorkspacePath, m.logger.Zap()); err != nil {
+			return nil, err
+		}
+		return env, nil
+	}
+	if req.EnvironmentResolutionRequired {
+		env, err := m.resolveStrictEnvironment(ctx, executionID, req, agentConfig, profileInfo)
+		if err != nil {
+			return nil, err
+		}
+		if err := spillLargeWakePayloadEnv(env, req.WorkspacePath, m.logger.Zap()); err != nil {
+			return nil, err
+		}
+		return env, nil
+	}
+
 	env := make(map[string]string)
 
 	// Copy request environment
@@ -369,6 +436,12 @@ func (m *Manager) waitForAgentctlReady(execution *AgentExecution) {
 	// default slow poll mode even though the frontend already sent focus,
 	// and git state updates take up to 30s to reach the UI.
 	m.flushCachedPollMode(execution.SessionID)
+	// Seed the workspace's per-repo base-branch map. LaunchRequest metadata
+	// only carries it on the full launch path, so workspaces created by an
+	// agent starting on an already-prepared workspace, or by lazy recovery
+	// after a restart, would otherwise have none — and their branch diff stat
+	// would silently fall back to an integration branch.
+	m.pushTaskBaseBranches(ctx, execution.TaskID, execution.ID, execution.GetAgentCtlClient())
 	// Use the timeout context for event publishing instead of a fresh Background context
 	m.eventPublisher.PublishAgentctlEvent(ctx, events.AgentctlReady, execution, "")
 }

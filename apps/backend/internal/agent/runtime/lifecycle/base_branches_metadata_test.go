@@ -1,8 +1,12 @@
 package lifecycle
 
 import (
+	"context"
+	"errors"
 	"reflect"
 	"testing"
+
+	"github.com/kandev/kandev/internal/common/logger"
 )
 
 // TestCollectBaseBranches_MultiRepo verifies the per-repo map populated for
@@ -179,4 +183,114 @@ func TestBuildLaunchMetadata_IncludesBaseBranches(t *testing.T) {
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("got %v, want %v", got, want)
 	}
+}
+
+// fakeBaseBranchSetter records the maps pushed to one agentctl endpoint.
+type fakeBaseBranchSetter struct {
+	calls []map[string]string
+	err   error
+}
+
+func (f *fakeBaseBranchSetter) SetBaseBranches(_ context.Context, branches map[string]string) error {
+	f.calls = append(f.calls, branches)
+	return f.err
+}
+
+// Regression: the per-repo base-branch map only ever reached agentctl through
+// LaunchRequest metadata (full launch) or an explicit user edit. Workspaces
+// created by startAgentOnExistingWorkspace or post-restart lazy recovery got
+// nothing, so WorkspaceTracker.BaseBranch() stayed empty, resolveBaseBranch
+// skipped the stored ref, and the branch diff stat was computed against an
+// integration candidate (origin/master) — producing whole-tree-scale numbers.
+// Pushing at the agentctl-ready chokepoint covers every creation path.
+func TestPushTaskBaseBranches(t *testing.T) {
+	log, _ := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json"})
+	ctx := context.Background()
+
+	t.Run("pushes the hydrated map", func(t *testing.T) {
+		want := map[string]string{"alpha": "features/x", "": "features/x"}
+		m := &Manager{logger: log}
+		m.SetBaseBranchProvider(func(context.Context, string) (map[string]string, error) {
+			return want, nil
+		})
+
+		setter := &fakeBaseBranchSetter{}
+		m.pushTaskBaseBranches(ctx, "task-1", "exec-1", setter)
+
+		if len(setter.calls) != 1 {
+			t.Fatalf("expected 1 SetBaseBranches call, got %d", len(setter.calls))
+		}
+		if !reflect.DeepEqual(setter.calls[0], want) {
+			t.Errorf("pushed %v, want %v", setter.calls[0], want)
+		}
+	})
+
+	// SetBaseBranches *replaces* the map. The full-launch path already seeded
+	// it from LaunchRequest metadata, so pushing an empty hydration on top
+	// would wipe a correct map and reintroduce the bug on the one path that
+	// never had it.
+	t.Run("empty hydration does not clobber launch metadata", func(t *testing.T) {
+		m := &Manager{logger: log}
+		m.SetBaseBranchProvider(func(context.Context, string) (map[string]string, error) {
+			return nil, nil
+		})
+
+		setter := &fakeBaseBranchSetter{}
+		m.pushTaskBaseBranches(ctx, "task-1", "exec-1", setter)
+
+		if len(setter.calls) != 0 {
+			t.Fatalf("expected no push for an empty map, got %d calls", len(setter.calls))
+		}
+	})
+
+	t.Run("provider error is non-fatal", func(t *testing.T) {
+		m := &Manager{logger: log}
+		m.SetBaseBranchProvider(func(context.Context, string) (map[string]string, error) {
+			return nil, errors.New("db unavailable")
+		})
+
+		setter := &fakeBaseBranchSetter{}
+		m.pushTaskBaseBranches(ctx, "task-1", "exec-1", setter)
+
+		if len(setter.calls) != 0 {
+			t.Fatalf("expected no push after a provider error, got %d calls", len(setter.calls))
+		}
+	})
+
+	t.Run("setter error is non-fatal", func(t *testing.T) {
+		m := &Manager{logger: log}
+		m.SetBaseBranchProvider(func(context.Context, string) (map[string]string, error) {
+			return map[string]string{"alpha": "main"}, nil
+		})
+
+		setter := &fakeBaseBranchSetter{err: errors.New("agentctl down")}
+		m.pushTaskBaseBranches(ctx, "task-1", "exec-1", setter)
+
+		if len(setter.calls) != 1 {
+			t.Fatalf("expected the push to be attempted once, got %d", len(setter.calls))
+		}
+	})
+
+	t.Run("no provider or no task is a no-op", func(t *testing.T) {
+		setter := &fakeBaseBranchSetter{}
+		(&Manager{logger: log}).pushTaskBaseBranches(ctx, "task-1", "exec-1", setter)
+
+		m := &Manager{logger: log}
+		m.SetBaseBranchProvider(func(context.Context, string) (map[string]string, error) {
+			return map[string]string{"alpha": "main"}, nil
+		})
+		m.pushTaskBaseBranches(ctx, "", "exec-1", setter)
+
+		if len(setter.calls) != 0 {
+			t.Fatalf("expected no pushes, got %d", len(setter.calls))
+		}
+	})
+
+	t.Run("nil setter is a no-op", func(t *testing.T) {
+		m := &Manager{logger: log}
+		m.SetBaseBranchProvider(func(context.Context, string) (map[string]string, error) {
+			return map[string]string{"alpha": "main"}, nil
+		})
+		m.pushTaskBaseBranches(ctx, "task-1", "exec-1", nil)
+	})
 }

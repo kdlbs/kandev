@@ -45,6 +45,13 @@ type Repository interface {
 	// CountBySession returns the number of entries for a session.
 	CountBySession(ctx context.Context, sessionID string) (int, error)
 
+	// CountPendingByTaskIDs returns the number of pending entries per task,
+	// keyed by task_id, for every requested task ID (zero when a task has no
+	// pending entries). Pending excludes durable lifecycle rows already
+	// reserved in flight, matching GetStatus semantics. The reserved exclusion
+	// is applied in Go via IsReservedInFlight, never by matching JSON in SQL.
+	CountPendingByTaskIDs(ctx context.Context, taskIDs []string) (map[string]int, error)
+
 	// TakeHead atomically returns and deletes the lowest-position entry for the
 	// session. Returns nil, nil if the queue is empty.
 	TakeHead(ctx context.Context, sessionID string) (*QueuedMessage, error)
@@ -65,6 +72,23 @@ type Repository interface {
 	// its own interrupt, not a user-driven "remove queued message" request.
 	// Returns nil, nil if no entry matches (already taken or never existed).
 	TakeByID(ctx context.Context, sessionID, entryID string) (*QueuedMessage, error)
+
+	// ClaimSendNow atomically claims the exact ordered source snapshot for an
+	// interrupt-and-replace dispatch. The repository compares every requested
+	// row with the snapshot before mutation, then orders the returned sources by
+	// their persisted FIFO positions. Ordinary rows are removed, and durable
+	// lifecycle rows are reserved until AcknowledgeSendNowClaim or
+	// RestoreSendNowClaim.
+	ClaimSendNow(ctx context.Context, sessionID string, expected []QueuedMessage) (*SendNowClaim, error)
+
+	// RestoreSendNowClaim puts every source back at its original position and
+	// clears durable lifecycle reservations. It must restore the complete claim
+	// or leave the queue unchanged.
+	RestoreSendNowClaim(ctx context.Context, claim *SendNowClaim) error
+
+	// AcknowledgeSendNowClaim removes every durable source after the replacement
+	// prompt has been accepted. Ordinary sources were already removed by claim.
+	AcknowledgeSendNowClaim(ctx context.Context, claim *SendNowClaim) error
 
 	// UpdateContent replaces the content/attachments of an entry. The session
 	// scope (`AND session_id = ?`) is mandatory so a caller can't update an

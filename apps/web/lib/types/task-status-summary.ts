@@ -10,6 +10,8 @@ export type TaskStatusSummary = {
   foreground_activity?: ForegroundActivity;
   active_subagent_count?: number;
   pending_action?: TaskPendingAction;
+  /** Number of prompts currently en-queued for the task (all sessions). */
+  queued_prompt_count?: number;
   active_error?: {
     session_id: string;
     stamp: string;

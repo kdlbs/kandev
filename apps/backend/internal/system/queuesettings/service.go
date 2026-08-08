@@ -13,6 +13,8 @@ import (
 type Target interface {
 	MaxPerSession() int
 	SetMaxPerSession(int)
+	MergeEnabled() bool
+	SetMergeEnabled(bool)
 }
 
 type EnvironmentReader func() Environment
@@ -53,13 +55,15 @@ func (s *Service) Get(ctx context.Context) (Response, error) {
 	return resolution.Response, nil
 }
 
-func (s *Service) Update(ctx context.Context, settings Settings) (Response, error) {
+// Update applies a partial patch to the persisted settings: fields the caller
+// omits keep their current effective value rather than resetting to zero, so
+// a client that edits only one field can never silently clobber another (see
+// SettingsPatch). The environment lock only blocks a patch that actually
+// attempts to change max_per_session — it does not control merge_enabled.
+func (s *Service) Update(ctx context.Context, patch SettingsPatch) (Response, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if err := Validate(settings); err != nil {
-		return Response{}, err
-	}
 	environment := s.readEnvironment()
 	current, err := s.loadConfigured(ctx)
 	if err != nil {
@@ -70,8 +74,12 @@ func (s *Service) Update(ctx context.Context, settings Settings) (Response, erro
 		return Response{}, err
 	}
 	s.warnInvalidEnvironment(resolution)
-	if resolution.Effective.Locked {
+	if patch.MaxPerSession != nil && resolution.Effective.Locked {
 		return Response{}, ErrEnvironmentLocked
+	}
+	settings := patch.Apply(resolution.Settings)
+	if err := Validate(settings); err != nil {
+		return Response{}, err
 	}
 	if s.target == nil {
 		return Response{}, ErrTargetUnavailable
@@ -80,6 +88,7 @@ func (s *Service) Update(ctx context.Context, settings Settings) (Response, erro
 		return Response{}, err
 	}
 	s.target.SetMaxPerSession(settings.MaxPerSession)
+	s.target.SetMergeEnabled(settings.MergeEnabled)
 	updated, err := Resolve(&settings, environment)
 	if err != nil {
 		return Response{}, err

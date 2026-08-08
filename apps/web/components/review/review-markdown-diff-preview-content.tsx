@@ -1,12 +1,14 @@
 import { MarkdownPreviewRenderer } from "@/components/task/markdown-preview-content";
 import type { ReviewMarkdownPreview } from "./review-markdown-diff-preview";
+import { useTranslation } from "react-i18next";
 
 export function ReviewMarkdownDiffPreviewContent({ preview }: { preview: ReviewMarkdownPreview }) {
+  const { t } = useTranslation();
   return (
     <section className="px-4 py-6" data-testid="review-markdown-diff-preview">
       {preview.isPartial && (
         <p className="mb-5 text-sm text-muted-foreground">
-          Showing changed Markdown fragments. Unchanged content is not included in this diff.
+          {t("review:markdownPreviewPartialNotice")}
         </p>
       )}
       <div className="markdown-body max-w-3xl">
@@ -17,7 +19,7 @@ export function ReviewMarkdownDiffPreviewContent({ preview }: { preview: ReviewM
           >
             {preview.fragments.length > 1 && (
               <p className="mb-4 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                Changed section {index + 1}
+                {t("review:changedSection", { index: index + 1 })}
               </p>
             )}
             <MarkdownPreviewRenderer content={fragment} />

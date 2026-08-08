@@ -134,7 +134,7 @@ func setupQueueHandlersWithDrainer(t *testing.T, drainer QueueDrainer) (*QueueHa
 	})
 	require.NoError(t, err)
 	svc := messagequeue.NewServiceMemory(log)
-	return NewQueueHandlers(svc, &mockEventBus{}, log, drainer, allowQueueAccess{}), svc
+	return NewQueueHandlers(svc, &mockEventBus{}, log, drainer, allowQueueAccess{}, nil), svc
 }
 
 func setupQueueHandlersWithValidator(t *testing.T, validator entityrefs.SubmissionValidator) (*QueueHandlers, *messagequeue.Service) {
@@ -146,7 +146,7 @@ func setupQueueHandlersWithValidator(t *testing.T, validator entityrefs.Submissi
 	})
 	require.NoError(t, err)
 	svc := messagequeue.NewServiceMemory(log)
-	return NewQueueHandlers(svc, &mockEventBus{}, log, nil, allowQueueAccess{}, validator), svc
+	return NewQueueHandlers(svc, &mockEventBus{}, log, nil, allowQueueAccess{}, nil, validator), svc
 }
 
 func createTestMessage(t *testing.T, action string, payload interface{}) *ws.Message {
@@ -181,6 +181,9 @@ func TestQueueHandlersDenyUnauthorizedSessionActions(t *testing.T) {
 			return map[string]interface{}{"session_id": "s", "entry_id": id, "content": "changed"}
 		}},
 		{name: "drain", action: ws.ActionMessageQueueDrain, call: (*QueueHandlers).wsDrainQueue, body: func(string) map[string]interface{} { return map[string]interface{}{"session_id": "s"} }},
+		{name: "send now", action: ws.ActionMessageQueueSendNow, call: (*QueueHandlers).wsSendNow, body: func(string) map[string]interface{} {
+			return map[string]interface{}{"session_id": "s", "scope": orchestrator.QueueSendNowScopeEntry, "entry_id": "q"}
+		}},
 		{name: "remove", action: ws.ActionMessageQueueRemove, call: (*QueueHandlers).wsRemoveEntry, body: func(id string) map[string]interface{} {
 			return map[string]interface{}{"session_id": "s", "entry_id": id}
 		}},
@@ -201,7 +204,7 @@ func TestQueueHandlersDenyUnauthorizedSessionActions(t *testing.T) {
 			access := &fakeQueueAccessAuthorizer{sessionErr: errors.New("secret denial")}
 			events := &mockEventBus{}
 			drainer := &mockQueueDrainer{drained: true}
-			handlers := NewQueueHandlers(svc, events, log, drainer, access)
+			handlers := NewQueueHandlers(svc, events, log, drainer, access, nil)
 
 			response, err := tc.call(handlers, context.Background(), createTestMessage(t, tc.action, tc.body(second.ID)))
 			require.NoError(t, err)
@@ -232,7 +235,7 @@ func TestQueueHandlersDenyUnauthorizedTaskSessionPairActions(t *testing.T) {
 			svc := messagequeue.NewServiceMemory(log)
 			access := &fakeQueueAccessAuthorizer{pairErr: errors.New("secret denial")}
 			events := &mockEventBus{}
-			handlers := NewQueueHandlers(svc, events, log, nil, access)
+			handlers := NewQueueHandlers(svc, events, log, nil, access, nil)
 
 			response, err := tc.call(handlers, context.Background(), createTestMessage(t, tc.action, map[string]interface{}{
 				"session_id": "s", "task_id": "other-task", "content": "secret",
@@ -251,7 +254,7 @@ func TestQueueHandlersDenyUnauthorizedTaskSessionPairActions(t *testing.T) {
 
 func TestWsQueueMessage(t *testing.T) {
 	t.Run("queues a message", func(t *testing.T) {
-		handlers, _ := setupQueueHandlers(t)
+		handlers, svc := setupQueueHandlers(t)
 		ctx := context.Background()
 
 		msg := createTestMessage(t, ws.ActionMessageQueueAdd, map[string]interface{}{
@@ -259,11 +262,23 @@ func TestWsQueueMessage(t *testing.T) {
 			"task_id":    "task-1",
 			"content":    "test message",
 			"user_id":    "user-1",
+			"context_files": []map[string]interface{}{
+				{"path": "src/components", "name": "components", "is_directory": true},
+			},
 		})
 
 		response, err := handlers.wsQueueMessage(ctx, msg)
 		require.NoError(t, err)
 		assert.Equal(t, ws.MessageTypeResponse, response.Type)
+		entries := svc.GetStatus(ctx, "session-1").Entries
+		require.Len(t, entries, 1)
+		files, ok := entries[0].Metadata[messagequeue.MetadataContextFiles].([]v1.ContextFileMeta)
+		require.True(t, ok)
+		require.Len(t, files, 1)
+		assert.Equal(t, "src/components", files[0].Path)
+		assert.Equal(t, "components", files[0].Name)
+		require.NotNil(t, files[0].IsDirectory)
+		assert.True(t, *files[0].IsDirectory)
 	})
 
 	t.Run("rejects missing session_id", func(t *testing.T) {

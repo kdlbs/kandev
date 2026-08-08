@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -238,6 +239,16 @@ func buildTaskDTOsWithSessionInfo(
 			log.Warn("failed to repair missing task status summaries", zap.Error(err))
 		}
 	}
+	// Stamp the authoritative per-task queued prompt count onto every summary.
+	// The projector keeps the summary field fresh between list loads; this
+	// fresh batch read is the initial-load backstop (e.g. after a restart the
+	// projector may not have observed every queue mutation yet). Never
+	// fabricate a summary here — a synthetic summary would make the frontend
+	// treat summary fields as authoritative and hide the coarse fallbacks.
+	queuedByTask, queuedErr := svc.CountPendingQueuedByTaskIDs(ctx, taskIDs)
+	if queuedErr != nil {
+		log.Warn("failed to load queued prompt counts for task list, omitting badges", zap.Error(queuedErr))
+	}
 	result := make([]dto.TaskDTO, 0, len(tasks))
 	for _, task := range tasks {
 		sessions := sessionsByTask[task.ID]
@@ -270,6 +281,20 @@ func buildTaskDTOsWithSessionInfo(
 		taskDTO.TaskPendingAction = taskPendingActionPtr(sessions, pendingActionsBySession)
 		dto.EnrichTaskForegroundActivity(&taskDTO, sessions, activityProvider)
 		taskDTO.StatusSummary = statusSummaries[task.ID]
+		if taskDTO.StatusSummary != nil {
+			switch {
+			case queuedErr != nil:
+				// Counter failed: honor the documented no-badge fallback in the
+				// response without persisting the cleared value.
+				taskDTO.StatusSummary.QueuedPromptCount = 0
+			case queuedByTask != nil:
+				// Fresh per-task count from the queue store; the projector keeps
+				// this field live between list loads, this batch read is the
+				// authoritative initial-load backstop. See the comment above the
+				// batch load.
+				taskDTO.StatusSummary.QueuedPromptCount = queuedByTask[task.ID]
+			}
+		}
 		result = append(result, taskDTO)
 	}
 	return result, nil
@@ -951,6 +976,9 @@ func buildTaskCreateLastUsedPatch(body httpCreateTaskRequest, repos []dto.TaskRe
 		AgentProfileID:    body.AgentProfileID,
 		ExecutorProfileID: body.ExecutorProfileID,
 	}
+	if body.WorkspaceID != "" && body.WorkflowID != "" {
+		patch.WorkflowIDsByWorkspace = map[string]string{body.WorkspaceID: body.WorkflowID}
+	}
 	for i, repo := range repos {
 		if repo.RepositoryID == "" {
 			continue
@@ -1296,6 +1324,33 @@ type httpUpdateTaskRequest struct {
 	Metadata     map[string]interface{}    `json:"metadata,omitempty"`
 	// ParentID nests the task under another task. "" clears the parent.
 	ParentID *string `json:"parent_id,omitempty"`
+}
+
+type httpUpdateTaskPortForwardingRequest struct {
+	Enabled *bool `json:"enabled"`
+}
+
+func (h *TaskHandlers) httpUpdateTaskPortForwarding(c *gin.Context) {
+	var body httpUpdateTaskPortForwardingRequest
+	decoder := json.NewDecoder(c.Request.Body)
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&body); err != nil || body.Enabled == nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "enabled must be a boolean"})
+		return
+	}
+	if err := decoder.Decode(&struct{}{}); err != io.EOF {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "enabled must be a boolean"})
+		return
+	}
+
+	task, err := h.service.UpdateTaskMetadata(c.Request.Context(), c.Param("id"), map[string]interface{}{
+		models.MetaKeyPortForwardingEnabled: *body.Enabled,
+	})
+	if err != nil {
+		handleNotFound(c, h.logger, err, "task not updated")
+		return
+	}
+	c.JSON(http.StatusOK, dto.FromTask(task))
 }
 
 func (h *TaskHandlers) httpUpdateTask(c *gin.Context) {

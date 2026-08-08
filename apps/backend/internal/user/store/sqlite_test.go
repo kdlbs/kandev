@@ -22,7 +22,7 @@ type settingsScanner struct {
 func upsertUserSettingsForTest(t *testing.T, repo *sqliteRepository, ctx context.Context, settings *models.UserSettings) {
 	t.Helper()
 	var patch *models.TaskCreateLastUsed
-	if settings.TaskCreateLastUsed != (models.TaskCreateLastUsed{}) {
+	if !reflect.DeepEqual(settings.TaskCreateLastUsed, models.TaskCreateLastUsed{}) {
 		patch = &settings.TaskCreateLastUsed
 	}
 	if _, err := repo.UpsertUserSettingsPreservingTaskCreateLastUsed(ctx, settings, patch); err != nil {
@@ -64,6 +64,72 @@ func TestScanUserSettingsStartupPage(t *testing.T) {
 			}
 			if got := payload["startup_page"]; got != tt.want {
 				t.Fatalf("startup_page = %#v, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestScanUserSettingsSidebarDefaults(t *testing.T) {
+	defaultView := models.SidebarView{
+		ID:              "view-all-tasks",
+		Name:            "All tasks",
+		Filters:         []models.SidebarViewClause{},
+		Sort:            models.SidebarViewSort{Key: "state", Direction: "asc"},
+		Group:           "repository",
+		CollapsedGroups: []string{},
+	}
+
+	tests := []struct {
+		name          string
+		raw           string
+		wantDefaults  bool
+		wantViewCount int
+	}{
+		{name: "empty settings use canonical sidebar default", raw: "{}", wantDefaults: true, wantViewCount: 1},
+		{name: "unrelated settings retain canonical sidebar default", raw: `{"workspace_id":"workspace-1"}`, wantDefaults: true, wantViewCount: 1},
+		{name: "explicit sidebar settings are preserved", raw: `{"sidebar_views":[{"id":"custom","name":"Custom"}],"sidebar_active_view_id":"custom"}`, wantDefaults: false, wantViewCount: 1},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			settings, err := scanUserSettings(settingsScanner{raw: tt.raw}, DefaultUserID)
+			if err != nil {
+				t.Fatalf("scan settings: %v", err)
+			}
+			if len(settings.SidebarViews) != tt.wantViewCount {
+				t.Fatalf("sidebar view count = %d, want %d", len(settings.SidebarViews), tt.wantViewCount)
+			}
+			if tt.wantDefaults {
+				if !reflect.DeepEqual(settings.SidebarViews[0], defaultView) {
+					t.Fatalf("sidebar default = %+v, want %+v", settings.SidebarViews[0], defaultView)
+				}
+				if settings.SidebarActiveViewID != defaultView.ID {
+					t.Fatalf("active sidebar view = %q, want %q", settings.SidebarActiveViewID, defaultView.ID)
+				}
+				return
+			}
+			if settings.SidebarViews[0].ID != "custom" || settings.SidebarActiveViewID != "custom" {
+				t.Fatalf("explicit sidebar settings were not preserved: views=%+v active=%q", settings.SidebarViews, settings.SidebarActiveViewID)
+			}
+		})
+	}
+}
+
+func TestScanUserSettingsPreservesExplicitEmptySidebarSettings(t *testing.T) {
+	for _, raw := range []string{
+		`{"sidebar_views":[],"sidebar_active_view_id":""}`,
+		`{"sidebar_views":null,"sidebar_active_view_id":null}`,
+	} {
+		t.Run(raw, func(t *testing.T) {
+			settings, err := scanUserSettings(settingsScanner{raw: raw}, DefaultUserID)
+			if err != nil {
+				t.Fatalf("scan settings: %v", err)
+			}
+			if len(settings.SidebarViews) != 0 {
+				t.Fatalf("sidebar views = %+v, want an explicit empty list", settings.SidebarViews)
+			}
+			if settings.SidebarActiveViewID != "" {
+				t.Fatalf("active sidebar view = %q, want an explicit empty ID", settings.SidebarActiveViewID)
 			}
 		})
 	}
@@ -299,6 +365,52 @@ func TestTranscriptNavigationSettingsRoundTripThroughMarshalAndScan(t *testing.T
 			settings.ShowScrollToStart,
 			settings.ShowTranscriptAutoScrollControl,
 		)
+	}
+}
+
+func TestScanUserSettingsTodoListPanelDefault(t *testing.T) {
+	settings, err := scanUserSettings(settingsScanner{raw: "{}"}, DefaultUserID)
+	if err != nil {
+		t.Fatalf("scan defaults: %v", err)
+	}
+	if settings.ShowTodoListPanel {
+		t.Fatal("ShowTodoListPanel = true, want false (default)")
+	}
+
+	settings, err = scanUserSettings(
+		settingsScanner{raw: `{"show_todo_list_panel":true}`},
+		DefaultUserID,
+	)
+	if err != nil {
+		t.Fatalf("scan stored preference: %v", err)
+	}
+	if !settings.ShowTodoListPanel {
+		t.Fatal("ShowTodoListPanel = false, want true (stored)")
+	}
+
+	settings, err = scanUserSettings(
+		settingsScanner{raw: `{"show_todo_list_panel":false}`},
+		DefaultUserID,
+	)
+	if err != nil {
+		t.Fatalf("scan explicit false: %v", err)
+	}
+	if settings.ShowTodoListPanel {
+		t.Fatal("ShowTodoListPanel = true, want false (explicit)")
+	}
+}
+
+func TestTodoListPanelSettingRoundTripThroughMarshalAndScan(t *testing.T) {
+	raw, err := marshalUserSettingsPayload(&models.UserSettings{ShowTodoListPanel: true})
+	if err != nil {
+		t.Fatalf("marshal settings: %v", err)
+	}
+	settings, err := scanUserSettings(settingsScanner{raw: string(raw)}, DefaultUserID)
+	if err != nil {
+		t.Fatalf("scan settings: %v", err)
+	}
+	if !settings.ShowTodoListPanel {
+		t.Fatal("ShowTodoListPanel = false, want true (round-tripped)")
 	}
 }
 
@@ -625,6 +737,52 @@ func TestSQLiteRepositoryUpdateTaskCreateLastUsedPatchesNonEmptyFields(t *testin
 	}
 }
 
+func TestSQLiteRepositoryUpdateTaskCreateLastUsedPreservesWorkflowHistory(t *testing.T) {
+	conn, err := sqlx.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	conn.SetMaxOpenConns(1)
+	t.Cleanup(func() { _ = conn.Close() })
+	repo, err := newSQLiteRepositoryWithDB(conn, conn)
+	if err != nil {
+		t.Fatalf("new repo: %v", err)
+	}
+
+	ctx := context.Background()
+	settings, err := repo.GetUserSettings(ctx, DefaultUserID)
+	if err != nil {
+		t.Fatalf("get defaults: %v", err)
+	}
+	settings.TaskCreateLastUsed = models.TaskCreateLastUsed{
+		RepositoryID: "repo-1",
+		WorkflowIDsByWorkspace: map[string]string{
+			"workspace-1": "workflow-1",
+			"workspace-2": "workflow-2",
+		},
+	}
+	upsertUserSettingsForTest(t, repo, ctx, settings)
+
+	got, err := repo.UpdateTaskCreateLastUsed(ctx, DefaultUserID, models.TaskCreateLastUsed{
+		WorkflowIDsByWorkspace: map[string]string{"workspace-3": "workflow-3"},
+	})
+	if err != nil {
+		t.Fatalf("update task-create workflow history: %v", err)
+	}
+
+	if got.TaskCreateLastUsed.RepositoryID != "repo-1" {
+		t.Fatalf("repository id should be preserved, got %q", got.TaskCreateLastUsed.RepositoryID)
+	}
+	want := map[string]string{
+		"workspace-1": "workflow-1",
+		"workspace-2": "workflow-2",
+		"workspace-3": "workflow-3",
+	}
+	if !reflect.DeepEqual(got.TaskCreateLastUsed.WorkflowIDsByWorkspace, want) {
+		t.Fatalf("workflow history = %#v, want %#v", got.TaskCreateLastUsed.WorkflowIDsByWorkspace, want)
+	}
+}
+
 func TestSQLiteRepositoryUpdateTaskCreateLastUsedClearsBranchOnRepositoryChange(t *testing.T) {
 	conn, err := sqlx.Open("sqlite3", ":memory:")
 	if err != nil {
@@ -693,6 +851,46 @@ func TestBuildPostgresTaskCreateLastUsedUpdatePatchesNonEmptyFields(t *testing.T
 	}
 	if len(args) != 4 {
 		t.Fatalf("expected one arg per task-create field, got %d", len(args))
+	}
+}
+
+func TestBuildPostgresTaskCreateLastUsedUpdatePatchesWorkflowHistoryEntries(t *testing.T) {
+	query, args := buildPostgresTaskCreateLastUsedUpdate(models.TaskCreateLastUsed{
+		WorkflowIDsByWorkspace: map[string]string{
+			"workspace-1": "workflow-1",
+			"workspace-2": "workflow-2",
+		},
+	})
+
+	for _, workspaceID := range []string{"workspace-1", "workspace-2"} {
+		path := "ARRAY['task_create_last_used','workflow_ids_by_workspace',?::text]"
+		if !strings.Contains(query, path) {
+			t.Fatalf("postgres update should patch workflow path %q for %s: %s", path, workspaceID, query)
+		}
+	}
+	if !strings.Contains(query, "{workflow_ids_by_workspace}") {
+		t.Fatalf("postgres update should initialize the workflow history object: %s", query)
+	}
+	if len(args) != 4 {
+		t.Fatalf("expected workspace and workflow args per entry, got %d", len(args))
+	}
+}
+
+func TestMakeTaskCreateLastUsedJSONSetArgsRejectsUnsafeWorkspacePathKeys(t *testing.T) {
+	args := makeTaskCreateLastUsedJSONSetArgs(models.TaskCreateLastUsed{
+		WorkflowIDsByWorkspace: map[string]string{
+			"workspace-safe":     "workflow-safe",
+			"workspace.with.dot": "workflow-dot",
+			"workspace[bracket]": "workflow-bracket",
+		},
+	})
+
+	if len(args) != 2 {
+		t.Fatalf("expected only the safe workspace entry, got %#v", args)
+	}
+	if args[0] != "$.task_create_last_used.workflow_ids_by_workspace.workspace-safe" ||
+		args[1] != "workflow-safe" {
+		t.Fatalf("unexpected safe workspace args: %#v", args)
 	}
 }
 

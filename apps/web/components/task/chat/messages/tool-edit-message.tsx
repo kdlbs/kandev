@@ -18,6 +18,8 @@ import { ExpandableRow } from "./expandable-row";
 import { transformFileMutation, type FileMutation } from "@/lib/diff";
 import { useExpandState } from "./use-expand-state";
 import { useOpenFileAtLine } from "@/hooks/use-file-editors";
+import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 
 type ModifyFilePayload = {
   file_path?: string;
@@ -47,6 +49,7 @@ function EditStatusIcon({ status }: { status: string | undefined }) {
 
 // getEditSummary returns the short header label for an edit/write card.
 function getEditSummary(
+  t: TFunction,
   content: string,
   worktreePath: string | undefined,
   isWriteOperation: boolean,
@@ -54,7 +57,7 @@ function getEditSummary(
 ): string {
   const baseSummary = transformPathsInText(content, worktreePath);
   if (isWriteOperation && lineCount > 0) {
-    return `${baseSummary} (${lineCount} line${lineCount !== 1 ? "s" : ""})`;
+    return t("task:editSummaryLines", { summary: baseSummary, count: lineCount });
   }
   return baseSummary;
 }
@@ -75,6 +78,7 @@ function FileActionButton({
   copied,
   onCopyPath,
 }: FileActionButtonProps) {
+  const { t } = useTranslation();
   const isFileInWorktree = worktreePath && filePath.startsWith(worktreePath);
   if (onOpenFile && isFileInWorktree) {
     return (
@@ -85,7 +89,7 @@ function FileActionButton({
           onOpenFile(filePath);
         }}
         className="opacity-0 group-hover/expandable:opacity-100 transition-opacity text-muted-foreground hover:text-foreground shrink-0 cursor-pointer"
-        title="Open file"
+        title={t("task:openFile")}
       >
         <IconExternalLink className="h-3.5 w-3.5" />
       </button>
@@ -97,7 +101,7 @@ function FileActionButton({
         type="button"
         onClick={onCopyPath}
         className="opacity-0 group-hover/expandable:opacity-100 transition-opacity text-muted-foreground hover:text-foreground shrink-0 cursor-pointer"
-        title={copied ? "Copied!" : "Copy path"}
+        title={copied ? t("task:copied") : t("task:copyPath")}
       >
         {copied ? (
           <IconCheck className="h-3.5 w-3.5 text-green-500" />
@@ -164,6 +168,7 @@ export const ToolEditMessage = memo(function ToolEditMessage({
   sessionId,
   onOpenFile,
 }: ToolEditMessageProps) {
+  const { t } = useTranslation();
   const {
     status,
     filePath,
@@ -179,7 +184,7 @@ export const ToolEditMessage = memo(function ToolEditMessage({
   const autoExpanded = status === "running";
   const { isExpanded, handleToggle } = useExpandState(status, autoExpanded);
   const Icon = isWriteOperation ? IconFilePlus : IconEdit;
-  const summary = getEditSummary(comment.content, worktreePath, isWriteOperation, lineCount);
+  const summary = getEditSummary(t, comment.content, worktreePath, isWriteOperation, lineCount);
 
   const handleCopyPath = (e: React.MouseEvent) => {
     e.stopPropagation();

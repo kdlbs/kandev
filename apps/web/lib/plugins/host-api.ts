@@ -4,6 +4,7 @@
  */
 import * as React from "react";
 import type { StoreApi } from "zustand";
+import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@kandev/ui/accordion";
 import { Alert, AlertDescription, AlertTitle } from "@kandev/ui/alert";
 import { Badge } from "@kandev/ui/badge";
 import { Button } from "@kandev/ui/button";
@@ -16,7 +17,16 @@ import {
   CardHeader,
   CardTitle,
 } from "@kandev/ui/card";
+import {
+  ChartContainer,
+  ChartLegend,
+  ChartLegendContent,
+  ChartStyle,
+  ChartTooltip,
+  ChartTooltipContent,
+} from "@kandev/ui/chart";
 import { Checkbox } from "@kandev/ui/checkbox";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@kandev/ui/collapsible";
 import {
   Dialog,
   DialogClose,
@@ -34,7 +44,16 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@kandev/ui/dropdown-menu";
+import {
+  Empty,
+  EmptyContent,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from "@kandev/ui/empty";
 import { Input } from "@kandev/ui/input";
+import { Kbd, KbdGroup } from "@kandev/ui/kbd";
 import { Label } from "@kandev/ui/label";
 import {
   Pagination,
@@ -45,6 +64,16 @@ import {
   PaginationNext,
   PaginationPrevious,
 } from "@kandev/ui/pagination";
+import {
+  Popover,
+  PopoverAnchor,
+  PopoverContent,
+  PopoverDescription,
+  PopoverHeader,
+  PopoverTitle,
+  PopoverTrigger,
+} from "@kandev/ui/popover";
+import { Progress } from "@kandev/ui/progress";
 import { ScrollArea } from "@kandev/ui/scroll-area";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import { Separator } from "@kandev/ui/separator";
@@ -64,16 +93,20 @@ import { Switch } from "@kandev/ui/switch";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@kandev/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@kandev/ui/tabs";
 import { Textarea } from "@kandev/ui/textarea";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@kandev/ui/tooltip";
+import { cn } from "@kandev/ui/utils";
 import { Combobox } from "@/components/combobox";
 import { RichTextEditor, RichTextReadOnly } from "@/components/editors/tiptap/rich-text-editor";
 import { PageTopbar } from "@/components/page-topbar";
 import { TaskCreateDialog } from "@/components/task-create-dialog";
 import { getBackendConfig } from "@/lib/config";
+import { formatRelativeTime } from "@/lib/i18n/formats";
+import { createPluginToast } from "@/lib/toast/sonner";
 import { generateUUID } from "@/lib/utils";
 import { softNavigate } from "@/lib/routing/client-router";
 import type { AppState } from "@/lib/state/store";
 import { pluginModalManager } from "./modal-manager";
+import { readResolvedTheme, subscribeToThemeChanges } from "./theme";
 import { composeWriterId, subscribeToUserStateChanges } from "./user-state-sync";
 import {
   PluginStorageConflictError,
@@ -89,10 +122,16 @@ import {
  * host instances rather than bundling their own copies — bundling is not an
  * option for anything that touches React context or portals (Radix), since
  * the plugin shares the host React instance and a second copy would split
- * context and break refs/asChild. Pure-React libs (e.g. icon sets) bundle
- * fine.
+ * context and break refs/asChild. The same applies to recharts behind the
+ * Chart* exports: it drives layout through its own context and portals
+ * tooltips, so a bundled second copy splits that context exactly the way a
+ * second Radix copy does. Pure-React libs (e.g. icon sets) bundle fine.
  */
 const PLUGIN_UI: Record<string, unknown> = {
+  Accordion,
+  AccordionContent,
+  AccordionItem,
+  AccordionTrigger,
   Alert,
   AlertDescription,
   AlertTitle,
@@ -105,7 +144,20 @@ const PLUGIN_UI: Record<string, unknown> = {
   CardFooter,
   CardHeader,
   CardTitle,
+  // Chart: recharts wrappers. Plugins must use these rather than importing
+  // recharts themselves — same context/portal hazard as Radix, and recharts
+  // 2.15.4 is already a dependency of both apps/web and @kandev/ui, so using
+  // the host's copy costs no bundle bytes.
+  ChartContainer,
+  ChartLegend,
+  ChartLegendContent,
+  ChartStyle,
+  ChartTooltip,
+  ChartTooltipContent,
   Checkbox,
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
   Dialog,
   DialogClose,
   DialogContent,
@@ -119,7 +171,15 @@ const PLUGIN_UI: Record<string, unknown> = {
   DropdownMenuItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
+  Empty,
+  EmptyContent,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
   Input,
+  Kbd,
+  KbdGroup,
   Label,
   Pagination,
   PaginationContent,
@@ -128,6 +188,14 @@ const PLUGIN_UI: Record<string, unknown> = {
   PaginationLink,
   PaginationNext,
   PaginationPrevious,
+  Popover,
+  PopoverAnchor,
+  PopoverContent,
+  PopoverDescription,
+  PopoverHeader,
+  PopoverTitle,
+  PopoverTrigger,
+  Progress,
   ScrollArea,
   Select,
   SelectContent,
@@ -159,6 +227,14 @@ const PLUGIN_UI: Record<string, unknown> = {
   Textarea,
   Tooltip,
   TooltipContent,
+  // A plain Tooltip works everywhere a plugin renders, but from two different
+  // providers: routes and slots render inside AppShell and inherit the
+  // app-wide TooltipProvider in app/layout.tsx, while `openModal` content
+  // mounts *outside* AppShell and gets its own from PluginModalHost. This is
+  // exported for plugins that want their own `delayDuration`/
+  // `skipDelayDuration` for a dense cluster of tooltips — nesting a provider
+  // is supported by Radix.
+  TooltipProvider,
   TooltipTrigger,
   // App UI (not shadcn primitives), exposed so plugins compose kandev-native
   // surfaces instead of re-implementing them:
@@ -177,6 +253,19 @@ const PLUGIN_UI: Record<string, unknown> = {
   //   pixel-identical to the Plan panel. See rich-text-editor.tsx.
   RichTextEditor,
   RichTextReadOnly,
+};
+
+/**
+ * `host.utils` — plain functions, deliberately not on `host.ui` (a component
+ * map). Shared rather than reimplemented per plugin: `cn` must be the host's
+ * so Tailwind class merging matches the components it styles, and
+ * `formatRelativeTime` must be the host's so a plugin's timestamps follow the
+ * user's locale instead of the hand-rolled English-only ladders several
+ * published plugins ship today.
+ */
+const PLUGIN_UTILS = {
+  cn,
+  formatRelativeTime,
 };
 
 /**
@@ -212,11 +301,7 @@ function effectiveWriterId(surfaceId: string | undefined): string {
   return composeWriterId(TAB_WRITER_ID, surfaceId);
 }
 
-export function buildHostApi(
-  pluginId: string,
-  storeApi: StoreApi<AppState>,
-  theme: "light" | "dark",
-): PluginHostApi {
+export function buildHostApi(pluginId: string, storeApi: StoreApi<AppState>): PluginHostApi {
   return {
     pluginId,
     React,
@@ -235,9 +320,24 @@ export function buildHostApi(
       },
     },
     ui: PLUGIN_UI,
-    theme,
+    // Getter, not a value captured at boot: a plugin built once at page load
+    // would otherwise read the boot-time theme forever, and one that paints
+    // imperatively (canvas, inline SVG colors) could never follow a
+    // light/dark switch without a full reload.
+    get theme() {
+      return readResolvedTheme();
+    },
+    onThemeChange: (listener) => subscribeToThemeChanges(listener),
     navigate: (href, options) => softNavigate(href, options?.replace ? "replace" : "push"),
     openModal: (options) => pluginModalManager.openModal(pluginId, options),
+    // Sonner's imperative global. The app mounts <Toaster/> once in
+    // app/layout.tsx, so this needs no host wiring and — unlike a rendered
+    // component — works from a plugin modal regardless of which providers
+    // that modal sits under. Scoped per plugin so `.error` logs with
+    // attribution rather than filing a kandev frontend error report; see
+    // createPluginToast.
+    toast: createPluginToast(pluginId),
+    utils: PLUGIN_UTILS,
     storage: buildStorageApi(pluginId),
   };
 }

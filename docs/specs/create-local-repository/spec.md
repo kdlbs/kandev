@@ -1,6 +1,7 @@
 ---
 status: shipped
 created: 2026-07-21
+updated: 2026-08-05
 owner: kandev
 ---
 
@@ -25,18 +26,17 @@ repository on the machine running Kandev, select it, and continue composing the 
   directory browsing behavior as the **None** source mode's starting-folder picker. It also lets
   the user create and enter one new child folder in the currently displayed directory.
 - Confirmation creates `<parent>/<name>` only when that target does not already exist, initializes a
-  local Git repository with unborn default branch `main`, and does not create files or commits.
+  local Git repository with default branch `main`, and creates one empty initial commit on that
+  branch. The working tree contains no user files.
 - Git initialization remains bound to the exact request-owned directory identity that the backend
   opened and verified. Replacing its pathname before or during initialization must not cause Git to
   modify the replacement path.
 - A successfully initialized repository is persisted as a local repository in the active workspace,
   added to the in-memory workspace repository list, selected in the originating row, and displays
   `main` as that row's branch. Other task fields and repository rows are unchanged.
-- A commitless repository can run only with a direct local executor. Confirmation automatically
-  selects a compatible `local` or `local_pc` executor profile for the first task and explains the
-  change. If no direct local profile is available, confirmation is blocked before filesystem
-  mutation. After the repository has a commit, later tasks may use any otherwise compatible
-  executor through the normal task flow.
+- The task-create flow continues to select a compatible `local` or `local_pc` executor profile for
+  the first task when the selected profile cannot run the newly created local repository, and
+  explains the change. Executor selection is unchanged by the initial baseline commit.
 - Multi-repository task creation does not expose the action because those tasks require the worktree
   executor. Users can add the repository to a multi-repository task after it has its first commit.
 - Initialization is an explicit local-path trust grant for the exact canonical repository path. It
@@ -66,9 +66,10 @@ No new database entity is introduced. A successful initialization creates one ex
 | `default_branch` | `main`. |
 
 The filesystem repository and the `repositories` row are created as one product operation when the
-repository form is confirmed, before the task is submitted. A successful response means both exist;
-a failed response must not leave a repository row. The filesystem cleanup behavior for a partial
-failure is described under Failure modes.
+repository form is confirmed, before the task is submitted. The created Git repository contains one
+empty root commit reachable from `refs/heads/main`, but no user files in the working tree. A
+successful response means both exist; a failed response must not leave a repository row. The
+filesystem cleanup behavior for a partial failure is described under Failure modes.
 
 ## API Surface
 
@@ -125,16 +126,17 @@ to the created canonical target path and the active workspace.
 | The nearest existing parent ancestor cannot be trusted, read, or written | The form stays open, shows an error, and no repository is selected or persisted. |
 | Target already exists, including an empty directory | The request returns conflict and does not modify the target. |
 | The request-owned staging pathname is replaced during Git initialization | The operation fails without modifying the replacement path. Cleanup remains limited to a request-owned directory whose identity can still be verified. |
-| `git` is unavailable or initialization fails | The request fails, no repository row is persisted, and Kandev removes only the target directory created by this request when cleanup is safe. A cleanup failure is logged and the error remains visible. |
-| Repository persistence fails after Git initialization | The request fails and performs the same best-effort cleanup of the request-owned target; no repository row is returned. |
+| `git` is unavailable, initialization fails, or the initial commit fails | The request fails, no repository row is persisted, and Kandev removes only the target directory created by this request when cleanup is safe. A cleanup failure is logged and the error remains visible. |
+| Repository persistence fails after Git initialization or the initial commit | The request fails and performs the same best-effort cleanup of the request-owned target; no repository row is returned. |
 | Frontend state refresh fails after a successful response | The returned repository is still selected directly and merged into the active workspace cache without waiting for a second list request. |
-| No direct local executor profile is available | The form explains that an empty repository requires local execution and does not call the initialization endpoint. |
+| No compatible direct local executor profile is available for the existing task-create policy | The form explains the requirement and does not call the initialization endpoint. |
 
 ## Persistence Guarantees
 
-The initialized Git repository is ordinary user-owned filesystem content and is never tied to task
-deletion. Its existing `repositories` record survives backend restart. Canceling, archiving, or
-deleting the task does not delete the repository or its workspace registration.
+The initialized Git repository, including its empty baseline commit, is ordinary user-owned
+filesystem content and is never tied to task deletion. Its existing `repositories` record survives
+backend restart. Canceling, archiving, or deleting the task does not delete the repository or its
+workspace registration.
 
 ## Mobile Design Contract
 
@@ -158,17 +160,17 @@ deleting the task does not delete the repository or its workspace registration.
 
 - **GIVEN** the task dialog has a local repository row, **WHEN** the user chooses **Create new
   repository**, selects `/work/projects`, enters `alpha`, and confirms, **THEN**
-  `/work/projects/alpha` contains a commitless Git repository whose unborn branch is `main`, the
-  workspace has a matching local repository record, the originating task row selects `alpha` /
-  `main`, and the first task uses a direct local executor.
+  `/work/projects/alpha` contains a Git repository with one empty initial commit on `main` and no
+  user files, the workspace has a matching local repository record, the branch endpoint returns a
+  local `main` option, and the originating task row selects `alpha` / `main`.
 - **GIVEN** a worktree or container executor profile is selected and a direct local profile is
   available, **WHEN** repository initialization succeeds, **THEN** the form selects the compatible
   direct local profile and tells the user why the executor changed.
 - **GIVEN** no direct local executor profile is available, **WHEN** the user opens the creation form,
   **THEN** the primary action explains the requirement and no directory or repository is created.
 - **GIVEN** a task with multiple repository rows, **WHEN** the user opens any repository picker,
-  **THEN** **Create new repository** is not offered because an unborn repository cannot use the
-  required worktree executor.
+  **THEN** **Create new repository** is not offered because the action remains limited to the
+  existing single-row task-create flow.
 - **GIVEN** `/work/projects/alpha` already exists, **WHEN** the user tries to create `alpha` under
   `/work/projects`, **THEN** the UI reports the conflict and Kandev does not modify or register the
   existing path.
@@ -199,9 +201,10 @@ deleting the task does not delete the repository or its workspace registration.
 - Cloning, importing, or converting an existing directory; existing paths continue through the
   existing local repository selection and settings flows.
 - README, license, `.gitignore`, language template, remote, visibility, or hosting-provider setup.
-- Choosing the initial branch name or creating an initial commit.
+- Choosing the initial branch name; new repositories always start on `main` with the empty baseline
+  commit described above.
 - Worktree, container, or remote execution before the repository has its first commit.
-- Creating an unborn repository as part of a multi-repository task.
+- Creating a new repository as part of a multi-repository task.
 - Adding the creation action to Quick Chat, repository settings, project repository pickers, or MCP
   tools in this iteration.
 - Automatically deleting a successfully created repository when its originating task is canceled or

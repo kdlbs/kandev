@@ -97,9 +97,12 @@ type Manager struct {
 	remoteStatusPollInterval time.Duration
 	remoteStatusMu           sync.RWMutex
 	remoteStatusBySession    map[string]*RemoteStatus
-	stopCh                   chan struct{}
-	stopOnce                 sync.Once
-	wg                       sync.WaitGroup
+	// Bounds the non-mutating contribution push check before agent launch.
+	// A zero value uses the production default and keeps test Manager literals safe.
+	remoteContributionPreflightTimeout time.Duration
+	stopCh                             chan struct{}
+	stopOnce                           sync.Once
+	wg                                 sync.WaitGroup
 	// shuttingDown is flipped true when graceful shutdown begins (see
 	// StopAllAgents) so handlers running in detached goroutines can
 	// short-circuit work that would otherwise race the teardown and log
@@ -109,6 +112,11 @@ type Manager struct {
 	// pollAggregator routes hub session-mode events to agentctl. See
 	// manager_subscription.go.
 	pollAggregator *workspacePollAggregator
+
+	// baseBranchProvider hydrates a task's stored per-repo base-branch map so
+	// every workspace can be seeded at agentctl-ready time, not just full
+	// launches. See manager_base_branches.go.
+	baseBranchProvider BaseBranchProvider
 
 	// secretStore encrypts/decrypts runtime auth tokens (e.g., agentctl handshake tokens).
 	// Used to persist tokens across backend restarts for remote executor recovery.

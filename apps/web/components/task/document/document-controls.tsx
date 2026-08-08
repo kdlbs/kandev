@@ -5,12 +5,14 @@ import { IconLayoutSidebarLeftCollapse, IconLayoutSidebarRightCollapse } from "@
 import { Button } from "@kandev/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { useLayoutStore } from "@/lib/state/layout-store";
+import { useTranslation } from "react-i18next";
 
 type DocumentControlsProps = {
   activeSessionId: string | null;
 };
 
 export function DocumentControls({ activeSessionId }: DocumentControlsProps) {
+  const { t } = useTranslation();
   const toggleColumn = useLayoutStore((state) => state.toggleColumn);
   const showColumn = useLayoutStore((state) => state.showColumn);
   const toggleRightPanel = useLayoutStore((state) => state.toggleRightPanel);
@@ -42,7 +44,7 @@ export function DocumentControls({ activeSessionId }: DocumentControlsProps) {
               <IconLayoutSidebarLeftCollapse className="h-3 w-3" />
             </Button>
           </TooltipTrigger>
-          <TooltipContent>Show sidebar</TooltipContent>
+          <TooltipContent>{t("task:showSidebar")}</TooltipContent>
         </Tooltip>
       ) : (
         <Tooltip>
@@ -56,7 +58,7 @@ export function DocumentControls({ activeSessionId }: DocumentControlsProps) {
               <IconLayoutSidebarLeftCollapse className="h-3 w-3" />
             </Button>
           </TooltipTrigger>
-          <TooltipContent>Hide sidebar</TooltipContent>
+          <TooltipContent>{t("task:hideSidebar")}</TooltipContent>
         </Tooltip>
       )}
       {rightHidden ? (
@@ -71,7 +73,7 @@ export function DocumentControls({ activeSessionId }: DocumentControlsProps) {
               <IconLayoutSidebarRightCollapse className="h-3 w-3" />
             </Button>
           </TooltipTrigger>
-          <TooltipContent>Show right panel</TooltipContent>
+          <TooltipContent>{t("task:showRightPanel")}</TooltipContent>
         </Tooltip>
       ) : (
         <Tooltip>
@@ -85,7 +87,7 @@ export function DocumentControls({ activeSessionId }: DocumentControlsProps) {
               <IconLayoutSidebarRightCollapse className="h-3 w-3" />
             </Button>
           </TooltipTrigger>
-          <TooltipContent>Hide right panel</TooltipContent>
+          <TooltipContent>{t("task:hideRightPanel")}</TooltipContent>
         </Tooltip>
       )}
     </div>

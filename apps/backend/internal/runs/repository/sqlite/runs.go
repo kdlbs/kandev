@@ -450,17 +450,6 @@ func (r *Repository) RecoverStale(ctx context.Context, claimedOlderThan time.Tim
 	return res.RowsAffected()
 }
 
-// CancelRun marks a run as cancelled with an optional cancel reason.
-func (r *Repository) CancelRun(ctx context.Context, id, cancelReason string) error {
-	now := time.Now().UTC()
-	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
-		UPDATE runs
-		SET status = 'cancelled', cancel_reason = ?, finished_at = ?
-		WHERE id = ?
-	`), cancelReason, now, id)
-	return err
-}
-
 // ListPendingRunsForTask returns queued runs in retry state for the given task.
 func (r *Repository) ListPendingRunsForTask(ctx context.Context, taskID string) ([]*models.Run, error) {
 	var reqs []*models.Run
@@ -629,26 +618,5 @@ func (r *Repository) SetRunErrorMessageForTest(
 	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
 		UPDATE runs SET error_message = ? WHERE id = ?
 	`), errMsg, runID)
-	return err
-}
-
-// BulkCancelRuns cancels multiple runs by ID with the given reason.
-func (r *Repository) BulkCancelRuns(ctx context.Context, ids []string, cancelReason string) error {
-	if len(ids) == 0 {
-		return nil
-	}
-	now := time.Now().UTC()
-	placeholders := make([]string, len(ids))
-	args := make([]interface{}, 0, len(ids)+2)
-	args = append(args, cancelReason, now)
-	for i, id := range ids {
-		placeholders[i] = "?"
-		args = append(args, id)
-	}
-	query := fmt.Sprintf(
-		`UPDATE runs SET status = 'cancelled', cancel_reason = ?, finished_at = ? WHERE id IN (%s)`,
-		strings.Join(placeholders, ","),
-	)
-	_, err := r.db.ExecContext(ctx, r.db.Rebind(query), args...)
 	return err
 }

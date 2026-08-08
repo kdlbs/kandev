@@ -6,6 +6,8 @@ import { Button } from "@kandev/ui/button";
 import type { Annotation } from "@/lib/preview-inspect-bridge";
 import { formatAnnotations } from "@/lib/preview-inspect-bridge";
 import { copyToClipboard } from "@/lib/utils/copy-to-clipboard";
+import { useTranslation } from "react-i18next";
+import { t } from "@/lib/i18n";
 
 interface AnnotationsPanelProps {
   annotations: Annotation[];
@@ -13,20 +15,25 @@ interface AnnotationsPanelProps {
   onClear: () => void;
 }
 
+// Module-level `t` rather than a hook: this runs from render, after a locale is
+// active. The `tag`/`#id`/`.class` suffix is inspected DOM data, never copy.
 function describeAnnotation(a: Annotation): string {
   if (a.kind === "pin") {
     const el = a.element;
-    if (!el) return "Pin";
+    if (!el) return t("task:annotationPin");
     let suffix = "";
     if (el.id) suffix = `#${el.id}`;
     else if (el.classes) suffix = `.${el.classes.split(/\s+/)[0]}`;
     return `${el.tag}${suffix}`;
   }
   const r = a.rect;
-  return r ? `Area ${Math.round(r.w)}x${Math.round(r.h)}` : "Area";
+  return r
+    ? t("task:annotationAreaSized", { w: Math.round(r.w), h: Math.round(r.h) })
+    : t("task:annotationArea");
 }
 
 export function AnnotationsPanel({ annotations, onRemove, onClear }: AnnotationsPanelProps) {
+  const { t } = useTranslation();
   const [copied, setCopied] = useState(false);
   if (annotations.length === 0) return null;
 
@@ -46,7 +53,7 @@ export function AnnotationsPanel({ annotations, onRemove, onClear }: Annotations
     >
       <div className="flex items-center justify-between gap-2">
         <span className="text-xs text-muted-foreground">
-          {annotations.length} annotation{annotations.length === 1 ? "" : "s"}
+          {t("task:annotationCount", { count: annotations.length })}
         </span>
         <div className="flex items-center gap-1">
           <Button
@@ -55,8 +62,8 @@ export function AnnotationsPanel({ annotations, onRemove, onClear }: Annotations
             className="h-6 px-2 cursor-pointer"
             onClick={handleCopy}
             data-testid="preview-annotations-copy"
-            aria-label={copied ? "Copied" : "Copy annotations"}
-            title={copied ? "Copied" : "Copy annotations to clipboard"}
+            aria-label={copied ? t("task:copied2") : t("task:copyAnnotations")}
+            title={copied ? t("task:copied2") : t("task:copyAnnotationsToClipboard")}
           >
             {copied ? <IconCheck className="h-3 w-3" /> : <IconCopy className="h-3 w-3" />}
           </Button>
@@ -66,8 +73,8 @@ export function AnnotationsPanel({ annotations, onRemove, onClear }: Annotations
             className="h-6 px-2 cursor-pointer"
             onClick={onClear}
             data-testid="preview-annotations-clear"
-            aria-label="Clear all annotations"
-            title="Clear all annotations"
+            aria-label={t("task:clearAllAnnotations")}
+            title={t("task:clearAllAnnotations")}
           >
             <IconTrash className="h-3 w-3" />
           </Button>
@@ -92,7 +99,7 @@ export function AnnotationsPanel({ annotations, onRemove, onClear }: Annotations
               variant="ghost"
               className="h-5 w-5 p-0 cursor-pointer shrink-0"
               onClick={() => onRemove(a.id)}
-              aria-label={`Remove annotation ${a.number}`}
+              aria-label={t("task:removeAnnotation", { number: a.number })}
               data-testid="preview-annotation-remove"
             >
               <IconX className="h-3 w-3" />

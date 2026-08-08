@@ -363,3 +363,86 @@ func TestCreateAgent_RejectsBadNestedProfileBeforeAnyWrite(t *testing.T) {
 		t.Fatalf("bad create made writes: agents=%d profiles=%d", len(st.agents), len(st.created))
 	}
 }
+
+func TestCreateProfile_DefaultsEnabled(t *testing.T) {
+	ctrl := newTestController(map[string]agents.Agent{"test-agent": &testAgent{
+		id:          "test-agent",
+		name:        "test-agent",
+		displayName: "Test Agent",
+		enabled:     true,
+	}})
+	st := newFakeStore()
+	agent := &models.Agent{ID: "agent-1", Name: "test-agent"}
+	st.agents[agent.ID] = agent
+	st.byName[agent.Name] = agent
+	ctrl.repo = st
+
+	profile, err := ctrl.CreateProfile(context.Background(), CreateProfileRequest{
+		AgentID: "agent-1",
+		Name:    "Fresh",
+	})
+	if err != nil {
+		t.Fatalf("CreateProfile: %v", err)
+	}
+	if !profile.Enabled {
+		t.Fatal("expected new profile DTO to be enabled")
+	}
+	if len(st.created) != 1 || !st.created[0].Enabled {
+		t.Fatalf("expected stored profile to be enabled, got %+v", st.created)
+	}
+}
+
+func TestUpdateProfile_SetsEnabled(t *testing.T) {
+	ctrl := newTestController(map[string]agents.Agent{"test-agent": &testAgent{
+		id:          "test-agent",
+		name:        "test-agent",
+		displayName: "Test Agent",
+		enabled:     true,
+	}})
+	st := newFakeStore()
+	agent := &models.Agent{ID: "agent-1", Name: "test-agent"}
+	st.agents[agent.ID] = agent
+	st.byName[agent.Name] = agent
+	st.profiles[agent.ID] = []*models.AgentProfile{{
+		ID:               "profile-1",
+		AgentID:          agent.ID,
+		Name:             "Existing",
+		AgentDisplayName: "Test Agent",
+		Enabled:          true,
+	}}
+	ctrl.repo = st
+
+	disable := false
+	updated, err := ctrl.UpdateProfile(context.Background(), UpdateProfileRequest{
+		ID:      "profile-1",
+		Enabled: &disable,
+	})
+	if err != nil {
+		t.Fatalf("UpdateProfile: %v", err)
+	}
+	if updated.Enabled {
+		t.Fatal("expected updated DTO to be disabled")
+	}
+	if updated.UpdatedAt.IsZero() {
+		t.Fatal("expected enabled-only update to return the persisted updated_at")
+	}
+	if len(st.updated) != 1 || st.updated[0].Enabled {
+		t.Fatalf("expected stored profile to be disabled, got %+v", st.updated)
+	}
+
+	// Leaving Enabled nil must not touch the stored value.
+	if _, err := ctrl.UpdateProfile(context.Background(), UpdateProfileRequest{ID: "profile-1"}); err != nil {
+		t.Fatalf("nil Enabled UpdateProfile: %v", err)
+	}
+	if len(st.updated) != 2 || st.updated[1].Enabled {
+		t.Fatalf("expected omitted Enabled to preserve false, got %+v", st.updated)
+	}
+
+	enable := true
+	if _, err := ctrl.UpdateProfile(context.Background(), UpdateProfileRequest{ID: "profile-1", Enabled: &enable}); err != nil {
+		t.Fatalf("re-enable UpdateProfile: %v", err)
+	}
+	if len(st.updated) != 3 || !st.updated[2].Enabled {
+		t.Fatalf("expected stored profile to be re-enabled, got %+v", st.updated)
+	}
+}

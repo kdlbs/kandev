@@ -29,17 +29,7 @@ test.describe("Unread divider", () => {
     const sessionId = task.session_id;
 
     let session = await openTaskSession(testPage, task.id);
-    // attemptTimeout must be raised explicitly, not just `timeout` — its
-    // default is capped at min(15_000, ...) regardless of `timeout` (see
-    // SessionPage.waitForChatIdle). Past that cap it does a page.reload()
-    // to recover from a stuck WS subscription, which is a *real*
-    // navigate-away-and-back from this feature's own perspective — it
-    // would legitimately (and correctly) re-capture a fresh divider
-    // anchor, making later assertions in this test fail for a reason
-    // unrelated to what they're testing (the cursor advancing live while
-    // the session stays genuinely, continuously visible in one browser
-    // session).
-    await session.waitForChatIdle({ timeout: 60_000, attemptTimeout: 60_000 });
+    await session.waitForChatIdle({ timeout: 60_000 });
 
     // First-ever visit: there is no prior read cursor, so nothing renders as
     // "New" — but the cursor must still advance to the latest message so a
@@ -57,7 +47,7 @@ test.describe("Unread divider", () => {
     // cursor keeps advancing live while the session stays in view, so this
     // alone must not produce a divider either.
     await session.sendMessageViaButton("second question");
-    await session.waitForChatIdle({ timeout: 60_000, attemptTimeout: 60_000 });
+    await session.waitForChatIdle({ timeout: 60_000 });
     await expect(session.activeChat().getByTestId("unread-divider")).toHaveCount(0);
 
     const fullTranscript = await apiClient.listSessionMessages(sessionId);
@@ -155,7 +145,7 @@ test.describe("Unread divider", () => {
     await expect(session.activeChat().getByTestId("unread-divider")).toHaveCount(0);
 
     await session.sendMessageViaButton("prompt while actively reading");
-    await session.waitForChatIdle({ timeout: 60_000, attemptTimeout: 60_000 });
+    await session.waitForChatIdle({ timeout: 60_000 });
     await expect(session.activeChat().getByTestId("unread-divider")).toHaveCount(0);
   });
 

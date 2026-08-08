@@ -297,6 +297,115 @@ func TestRepositoryCopyFiles_RoundTrip(t *testing.T) {
 	}
 }
 
+func TestRepositorySecretBindings_RoundTripReplaceAndCascade(t *testing.T) {
+	repo := newRepoForEntityTests(t)
+	ctx := context.Background()
+	seedWorkspace(t, repo, "ws-secret-bindings")
+
+	entity := &models.Repository{
+		ID:          "repo-secret-bindings",
+		WorkspaceID: "ws-secret-bindings",
+		Name:        "app",
+	}
+	bindings := []models.RepositorySecretBinding{
+		{Key: "NPM_TOKEN", SecretID: "secret-npm"},
+		{Key: "SENTRY_AUTH_TOKEN", SecretID: "secret-sentry"},
+	}
+	if err := repo.CreateRepositoryWithSecretBindings(ctx, entity, bindings); err != nil {
+		t.Fatalf("create repository with bindings: %v", err)
+	}
+
+	got, err := repo.GetRepository(ctx, entity.ID)
+	if err != nil {
+		t.Fatalf("get repository: %v", err)
+	}
+	if len(got.SecretBindings) != 2 || got.SecretBindings[0].SecretID == "" {
+		t.Fatalf("get bindings = %+v, want two references", got.SecretBindings)
+	}
+
+	list, err := repo.ListRepositories(ctx, entity.WorkspaceID)
+	if err != nil {
+		t.Fatalf("list repositories: %v", err)
+	}
+	if len(list) != 1 || len(list[0].SecretBindings) != 2 {
+		t.Fatalf("list bindings = %+v, want two references", list)
+	}
+
+	replacement := []models.RepositorySecretBinding{{Key: "NPM_TOKEN", SecretID: "secret-new"}}
+	if err := repo.ReplaceRepositorySecretBindings(ctx, entity.ID, replacement); err != nil {
+		t.Fatalf("replace bindings: %v", err)
+	}
+	got, err = repo.GetRepository(ctx, entity.ID)
+	if err != nil {
+		t.Fatalf("get after replace: %v", err)
+	}
+	if len(got.SecretBindings) != 1 || got.SecretBindings[0].SecretID != "secret-new" {
+		t.Fatalf("bindings after replace = %+v", got.SecretBindings)
+	}
+
+	if err := repo.DeleteRepository(ctx, entity.ID); err != nil {
+		t.Fatalf("delete repository: %v", err)
+	}
+	remaining, err := repo.ListRepositorySecretBindings(ctx, entity.ID)
+	if err != nil {
+		t.Fatalf("list bindings after delete: %v", err)
+	}
+	if len(remaining) != 0 {
+		t.Fatalf("bindings after delete = %+v, want empty", remaining)
+	}
+}
+
+func TestRepositoryDeleteBindingCleanupFailureRollsBackRepositoryDelete(t *testing.T) {
+	deleteMethods := []struct {
+		name string
+		call func(context.Context, *Repository, string) error
+	}{
+		{name: "unconditional", call: func(ctx context.Context, repo *Repository, id string) error {
+			return repo.DeleteRepository(ctx, id)
+		}},
+		{name: "unreferenced", call: func(ctx context.Context, repo *Repository, id string) error {
+			_, err := repo.DeleteRepositoryIfUnreferenced(ctx, id)
+			return err
+		}},
+		{name: "no active sessions", call: func(ctx context.Context, repo *Repository, id string) error {
+			_, err := repo.DeleteRepositoryIfNoActiveTaskSessions(ctx, id)
+			return err
+		}},
+	}
+	for _, method := range deleteMethods {
+		t.Run(method.name, func(t *testing.T) {
+			repo := newRepoForEntityTests(t)
+			ctx := context.Background()
+			seedWorkspace(t, repo, "ws-delete-"+method.name)
+			entity := &models.Repository{ID: "repo-delete-" + method.name, WorkspaceID: "ws-delete-" + method.name, Name: method.name}
+			if err := repo.CreateRepositoryWithSecretBindings(ctx, entity, []models.RepositorySecretBinding{{Key: "TOKEN", SecretID: "secret-token"}}); err != nil {
+				t.Fatalf("create repository: %v", err)
+			}
+			_, err := repo.db.Exec(`
+				CREATE TRIGGER fail_repository_binding_delete
+				BEFORE DELETE ON repository_secret_bindings
+				BEGIN SELECT RAISE(ABORT, 'injected binding cleanup failure'); END`)
+			if err != nil {
+				t.Fatalf("create failure trigger: %v", err)
+			}
+
+			if err := method.call(ctx, repo, entity.ID); err == nil {
+				t.Fatal("delete succeeded, want injected binding cleanup failure")
+			}
+			if _, err := repo.GetRepository(ctx, entity.ID); err != nil {
+				t.Fatalf("repository was soft-deleted after cleanup failure: %v", err)
+			}
+			bindings, err := repo.ListRepositorySecretBindings(ctx, entity.ID)
+			if err != nil {
+				t.Fatalf("list bindings: %v", err)
+			}
+			if len(bindings) != 1 {
+				t.Fatalf("bindings after failed delete = %#v, want one", bindings)
+			}
+		})
+	}
+}
+
 func TestRepositoryProviderHost_RoundTrip(t *testing.T) {
 	repo := newRepoForEntityTests(t)
 	ctx := context.Background()

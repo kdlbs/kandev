@@ -1,19 +1,42 @@
+import { act, renderHook } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import type { Message } from "@/lib/types/http";
 
 const mockListTaskSessionMessages = vi.fn();
+const mockWebSocketClient = {
+  getSessionSubscriptionReadiness: vi.fn(),
+  request: vi.fn(),
+  subscribeSession: vi.fn(),
+  subscribeSessionWithReady: vi.fn(),
+};
+
+const mockState = {
+  messages: {
+    bySession: { "sess-1": [] as Message[] },
+    metaBySession: {
+      "sess-1": { hasMore: false, oldestCursor: null, isLoading: false },
+    },
+  },
+  taskSessions: { items: { "sess-1": { state: "RUNNING" } } },
+  turns: { activeBySession: { "sess-1": null } },
+  connection: { status: "connected" },
+  mergeMessages: vi.fn(),
+  setMessagesLoading: vi.fn(),
+  setMessages: vi.fn(),
+  prependMessages: vi.fn(),
+};
 
 vi.mock("@/lib/api", () => ({
   listTaskSessionMessages: (...args: unknown[]) => mockListTaskSessionMessages(...args),
 }));
 
 vi.mock("@/lib/ws/connection", () => ({
-  getWebSocketClient: () => null,
+  getWebSocketClient: () => mockWebSocketClient,
 }));
 
 vi.mock("@/components/state-provider", () => ({
-  useAppStore: () => null,
-  useAppStoreApi: () => null,
+  useAppStore: (selector: (state: typeof mockState) => unknown) => selector(mockState),
+  useAppStoreApi: () => ({ getState: () => mockState }),
 }));
 
 import { taskId, sessionId } from "@/lib/types/ids";
@@ -21,6 +44,17 @@ import { taskId, sessionId } from "@/lib/types/ids";
 beforeEach(() => {
   vi.clearAllMocks();
   mockListTaskSessionMessages.mockResolvedValue({ messages: [], has_more: false });
+  mockWebSocketClient.request.mockResolvedValue({ messages: [], has_more: false });
+  mockWebSocketClient.subscribeSession.mockReturnValue(vi.fn());
+  mockState.messages.bySession["sess-1"] = [];
+  mockState.messages.metaBySession["sess-1"] = {
+    hasMore: false,
+    oldestCursor: null,
+    isLoading: false,
+  };
+  mockState.connection.status = "connected";
+  mockState.taskSessions.items["sess-1"] = { state: "RUNNING" };
+  mockState.turns.activeBySession["sess-1"] = null;
 });
 
 afterEach(() => {
@@ -37,6 +71,7 @@ import {
   nextFetchSeq,
   commitFetchSeq,
   MAX_AUTO_BACKFILL_PAGES,
+  useSessionMessages,
 } from "./use-session-messages";
 import type { TaskSessionState } from "@/lib/types/http";
 
@@ -312,6 +347,21 @@ describe("runBackfillRound", () => {
     const result = await runBackfillRound("sess-1", store as never, 0);
     expect(result).toBe("stop");
   });
+
+  it("does not prepend messages when cleanup occurs during the fetch", async () => {
+    const request = deferred<{ messages: Message[]; has_more: boolean }>();
+    mockListTaskSessionMessages.mockReturnValueOnce(request.promise);
+    const store = makeStore({ messages: [], hasMore: true, oldestCursor: "msg-1" });
+    let active = true;
+    const round = runBackfillRound("sess-1", store as never, 0, () => active);
+
+    expect(mockListTaskSessionMessages).toHaveBeenCalledTimes(1);
+    active = false;
+    request.resolve({ messages: [makeMessage({ id: "old-1" })], has_more: true });
+
+    await expect(round).resolves.toBe("stop");
+    expect(store._prependMessages).not.toHaveBeenCalled();
+  });
 });
 
 describe("stale concurrent fetch guard", () => {
@@ -389,5 +439,61 @@ describe("autoBackfillUntilUserMessage", () => {
     await autoBackfillUntilUserMessage("sess-1", store as never);
     // After round 0, prependMessages adds the user message; round 1 finds it and stops.
     expect(mockListTaskSessionMessages).toHaveBeenCalledTimes(1);
+  });
+});
+
+function deferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  const promise = new Promise<T>((resolvePromise) => {
+    resolve = resolvePromise;
+  });
+  return { promise, resolve };
+}
+
+describe("session subscription hydration ordering", () => {
+  it("does not request messages before subscription acknowledgement", async () => {
+    const readiness = deferred<void>();
+    mockWebSocketClient.getSessionSubscriptionReadiness.mockReturnValue(readiness.promise);
+    mockWebSocketClient.subscribeSessionWithReady.mockReturnValue({
+      ready: readiness.promise,
+      unsubscribe: vi.fn(),
+    });
+
+    const { unmount } = renderHook(() => useSessionMessages("sess-1"));
+
+    expect(mockWebSocketClient.request).not.toHaveBeenCalled();
+
+    await act(async () => {
+      readiness.resolve();
+      await readiness.promise;
+    });
+
+    expect(mockWebSocketClient.request).toHaveBeenCalledWith(
+      "message.list",
+      expect.objectContaining({ session_id: "sess-1" }),
+      10000,
+    );
+    expect(mockWebSocketClient.request).toHaveBeenCalledTimes(1);
+    unmount();
+  });
+
+  it("does not start hydration when acknowledgement resolves after cleanup", async () => {
+    const readiness = deferred<void>();
+    mockWebSocketClient.getSessionSubscriptionReadiness.mockReturnValue(readiness.promise);
+    mockWebSocketClient.subscribeSessionWithReady.mockReturnValue({
+      ready: readiness.promise,
+      unsubscribe: vi.fn(),
+    });
+
+    const { unmount } = renderHook(() => useSessionMessages("sess-1"));
+    unmount();
+
+    await act(async () => {
+      readiness.resolve();
+      await readiness.promise;
+    });
+
+    expect(mockWebSocketClient.request).not.toHaveBeenCalled();
+    expect(mockState.setMessagesLoading).toHaveBeenLastCalledWith("sess-1", false);
   });
 });

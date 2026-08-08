@@ -98,6 +98,24 @@ var registrations = []runtimeFlagRegistration{
 	},
 	{
 		definition: RuntimeFlagDefinition{
+			Key:         "features.claudeMidTurnSteering",
+			EnvVar:      "KANDEV_FEATURES_CLAUDE_MID_TURN_STEERING",
+			Kind:        KindFeature,
+			Label:       "Claude mid-turn steering",
+			Description: "Delivers a new prompt into a Claude turn that is still generating, instead of holding it until the turn ends.",
+			Stability:   StabilityExperimental,
+			RiskLevel:   RiskHigh,
+			RiskDescription: "Whether the agent folds the delivered prompt into the running turn is decided by the agent CLI and is not advertised over the protocol, " +
+				"so the message may instead run as the next turn. Enabling this also lets two prompts overlap on one session, which can misattribute a turn's " +
+				"completion, usage, or tool state. Use it for controlled testing and disable it if a session behaves unexpectedly.",
+			RestartRequired: true,
+			Mutable:         true,
+		},
+		read:  func(cfg *config.Config) bool { return cfg.Features.ClaudeMidTurnSteering },
+		apply: func(cfg *config.Config, value bool) { cfg.Features.ClaudeMidTurnSteering = value },
+	},
+	{
+		definition: RuntimeFlagDefinition{
 			Key:         "debug.devMode",
 			EnvVar:      "KANDEV_DEBUG_DEV_MODE",
 			Kind:        KindDebug,

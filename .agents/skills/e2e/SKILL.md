@@ -114,8 +114,8 @@ reports a missing `KANDEV_MOCK_AGENT_LINUX_BINARY`, run
 
 ```bash
 make test-e2e                                                      # all tests, headless (host)
-cd apps && pnpm --filter @kandev/web e2e -- tests/task/my-test.spec.ts  # single file
-cd apps && pnpm --filter @kandev/web e2e -- --grep "task creation" # by name
+cd apps && pnpm --filter @kandev/web e2e:raw -- tests/task/my-test.spec.ts  # single file
+cd apps && pnpm --filter @kandev/web e2e:raw -- --grep "task creation" # by name
 ```
 
 ### Flake reproduction
@@ -340,7 +340,7 @@ Always verify against the production build before finishing — dev mode can hid
 playwright-cli close
 # Kill dev server and backend
 make build-web
-cd apps && pnpm --filter @kandev/web e2e -- tests/path/to/test.spec.ts
+cd apps && pnpm --filter @kandev/web e2e:raw -- tests/path/to/test.spec.ts
 ```
 
 ## Test organization
@@ -401,7 +401,7 @@ When a test fails:
 3. **Read the failure screenshot** from `e2e/test-results/` — see what the page actually rendered
 4. **Attach to the failure** for deeper debugging using `playwright-cli`:
    ```bash
-   cd apps && PLAYWRIGHT_HTML_OPEN=never pnpm --filter @kandev/web e2e -- tests/path.spec.ts --debug=cli &
+   cd apps && PLAYWRIGHT_HTML_OPEN=never pnpm --filter @kandev/web e2e:raw -- tests/path.spec.ts --debug=cli &
    # Wait for "Debugging Instructions" with session name
    playwright-cli attach tw-<session>
    playwright-cli snapshot    # inspect page state at failure point

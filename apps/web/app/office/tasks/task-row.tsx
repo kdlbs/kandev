@@ -9,6 +9,7 @@ import { selectLiveSessionForTask } from "@/lib/state/slices/session/selectors";
 import type { OfficeTask } from "@/lib/state/slices/office/types";
 import { StatusIcon } from "./status-icon";
 import { ExecutionIndicator } from "../components/execution-indicator";
+import { useTranslation } from "react-i18next";
 
 type TaskRowProps = {
   task: OfficeTask;
@@ -27,6 +28,7 @@ export function TaskRow({
   onToggleExpand,
   agentName,
 }: TaskRowProps) {
+  const { t } = useTranslation();
   const router = useRouter();
   // Show an animated yellow spinner instead of the static status icon
   // while any session for this task is RUNNING. Drives the "this task
@@ -55,7 +57,7 @@ export function TaskRow({
         <button
           onClick={handleToggle}
           className="shrink-0 cursor-pointer p-0 border-0 bg-transparent"
-          aria-label={expanded ? "Collapse" : "Expand"}
+          aria-label={expanded ? t("office:collapse") : t("office:expand")}
         >
           <IconChevronRight
             className={cn(
@@ -79,7 +81,7 @@ export function TaskRow({
       <span className="flex-1 truncate">{task.title}</span>
       {task.isSystem && (
         <span className="shrink-0 inline-flex items-center rounded-md border border-border px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
-          System
+          {t("common:system")}
         </span>
       )}
       {Array.isArray(task.labels) && task.labels.length > 0 && (

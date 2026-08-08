@@ -2,7 +2,9 @@ package process
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -35,10 +37,19 @@ func (wt *WorkspaceTracker) updateGitStatus(ctx context.Context) bool {
 func (wt *WorkspaceTracker) updateGitStatusClass(ctx context.Context, class subproc.GitWorkClass) bool {
 	status, err := wt.getGitStatusClass(ctx, class)
 	if err != nil {
-		wt.logger.Warn("updateGitStatus: getGitStatus failed", zap.Error(err))
+		// A cancellation is the expected outcome when the tracker is being
+		// torn down (Stop cancels cancelCtx, which kills the in-flight git
+		// command) or when the poll's admission slot is revoked. That is not a
+		// failure worth a warning — it mirrors handleGitPollFailure, which also
+		// downgrades cancellation-class errors to Debug to keep shutdown quiet.
+		if wt.isGitStatusCancellation(err) {
+			wt.logger.Debug("updateGitStatus: getGitStatus canceled", zap.Error(err))
+		} else {
+			wt.logger.Warn("updateGitStatus: getGitStatus failed", zap.Error(err))
+		}
 		return false
 	}
-	if ctx.Err() != nil || wt.cancelCtx.Err() != nil {
+	if ctx.Err() != nil || (wt.cancelCtx != nil && wt.cancelCtx.Err() != nil) {
 		return false
 	}
 
@@ -49,6 +60,17 @@ func (wt *WorkspaceTracker) updateGitStatusClass(ctx context.Context, class subp
 	// Notify workspace stream subscribers
 	wt.notifyWorkspaceStreamGitStatus(status)
 	return true
+}
+
+// isGitStatusCancellation reports whether a getGitStatus error is a benign
+// cancellation rather than a real git failure: the passed context or the
+// tracker's own shutdown context was canceled, or the background admission slot
+// was revoked. These are all expected during teardown and don't warrant a warn.
+func (wt *WorkspaceTracker) isGitStatusCancellation(err error) bool {
+	if errors.Is(err, context.Canceled) || errors.Is(err, subproc.ErrAdmissionCanceled) {
+		return true
+	}
+	return wt.cancelCtx != nil && wt.cancelCtx.Err() != nil
 }
 
 // tryUpdateGitStatus attempts a non-blocking git status update. If another
@@ -201,6 +223,7 @@ func (wt *WorkspaceTracker) computeGitStatus(ctx context.Context) (types.GitStat
 	update := types.GitStatusUpdate{
 		Timestamp:      time.Now(),
 		RepositoryName: wt.repositoryName,
+		IsSubmodule:    wt.IsSubmodule(),
 		Modified:       []string{},
 		Added:          []string{},
 		Deleted:        []string{},
@@ -321,6 +344,16 @@ func (wt *WorkspaceTracker) getGitBranchInfo(ctx context.Context, update *types.
 // baseBranch is treated as user-controlled and re-sanitised here so static
 // analysis sees the regex barrier inline with the `git` invocation.
 func (wt *WorkspaceTracker) computeBaseCommit(ctx context.Context, baseBranch string) string {
+	if wt.IsSubmodule() {
+		if !sha1HexPattern.MatchString(baseBranch) {
+			return ""
+		}
+		out, err := wt.runGitOutput(ctx, "rev-parse", "--verify", baseBranch+"^{commit}")
+		if err != nil {
+			return ""
+		}
+		return strings.TrimSpace(string(out))
+	}
 	// Same inline regex barrier as resolveStoredRef so CodeQL's
 	// taint-tracker sees it co-located with the `git` subprocess call.
 	rest, hasOriginPrefix := strings.CutPrefix(baseBranch, "origin/")
@@ -479,17 +512,102 @@ var aheadBehindFallbackCandidates = integrationBranchRefs(false)
 // stats/commits mismatch even though both sides are computing correctly
 // for the ref name they happened to resolve first.
 func (wt *WorkspaceTracker) resolveBaseBranch(ctx context.Context) string {
-	if stored := wt.BaseBranch(); stored != "" {
-		if ref := wt.resolveStoredRef(ctx, stored); ref != "" {
-			return ref
+	resolution := wt.resolveBaseBranchWithReason(ctx)
+	resolution.log(wt)
+	return resolution.ref
+}
+
+// baseBranchReason records why resolveBaseBranch landed on the ref it did.
+// The two fallback reasons have different fixes — one means the task's base
+// branch never reached this tracker, the other means it did but no longer
+// exists in git — so a wrong diff stat must be attributable to one of them
+// without re-deriving the resolution by hand.
+type baseBranchReason int
+
+const (
+	baseBranchStored baseBranchReason = iota
+	baseBranchFallbackNoStored
+	baseBranchFallbackStoredUnresolved
+	baseBranchUnresolved
+)
+
+// baseBranchResolution is resolveBaseBranch's decision plus the evidence
+// needed to explain it.
+type baseBranchResolution struct {
+	ref    string
+	stored string
+	reason baseBranchReason
+}
+
+// log reports a fallback resolution once per change. The stored case is the
+// norm and stays silent.
+//
+// Two constraints shape this. resolveBaseBranch runs on every status poll — as
+// often as every couple of seconds, per repository — so logging unconditionally
+// would bury the signal in its own repetition; only a *changed* outcome is
+// reported. And a recorded base branch that does not resolve is an anomaly the
+// operator needs to see without turning on debug logging, so it warns, while a
+// task that simply has no recorded base is ordinary and stays at debug.
+func (r baseBranchResolution) log(wt *WorkspaceTracker) {
+	key := strconv.Itoa(int(r.reason)) + "|" + r.stored + "|" + r.ref
+	wt.baseBranchLogMu.Lock()
+	repeat := wt.lastBaseBranchLog == key
+	wt.lastBaseBranchLog = key
+	wt.baseBranchLogMu.Unlock()
+	if repeat || r.reason == baseBranchStored {
+		return
+	}
+	repository := wt.repositoryName
+	if repository == "" && wt.workDir != "" {
+		repository = filepath.Base(filepath.Clean(wt.workDir))
+	}
+
+	switch r.reason {
+	case baseBranchFallbackNoStored:
+		wt.logger.Debug("no base branch recorded for workspace, using integration fallback for diff stats",
+			zap.String("repository", repository),
+			zap.String("candidate", r.ref))
+	case baseBranchFallbackStoredUnresolved:
+		wt.logger.Warn("recorded base branch does not resolve in git, diff stats fall back to an integration branch",
+			zap.String("repository", repository),
+			zap.String("stored_base_branch", r.stored),
+			zap.String("candidate", r.ref))
+	case baseBranchUnresolved:
+		wt.logger.Warn("no base branch or integration candidate resolved, diff stats unavailable",
+			zap.String("repository", repository),
+			zap.String("stored_base_branch", r.stored))
+	case baseBranchStored:
+	}
+}
+
+// resolveBaseBranchWithReason is resolveBaseBranch's decision, separated so the
+// outcome is assertable in tests rather than only observable through logs.
+func (wt *WorkspaceTracker) resolveBaseBranchWithReason(ctx context.Context) baseBranchResolution {
+	stored := wt.BaseBranch()
+	if wt.IsSubmodule() {
+		anchor := wt.ComparisonAnchor()
+		if anchor != "" {
+			if ref := wt.resolveStoredRef(ctx, anchor); ref != "" {
+				return baseBranchResolution{ref: ref, stored: anchor, reason: baseBranchStored}
+			}
 		}
+		return baseBranchResolution{stored: anchor, reason: baseBranchUnresolved}
+	}
+	if stored != "" {
+		if ref := wt.resolveStoredRef(ctx, stored); ref != "" {
+			return baseBranchResolution{ref: ref, stored: stored, reason: baseBranchStored}
+		}
+	}
+	fallbackReason := baseBranchFallbackNoStored
+	if stored != "" {
+		fallbackReason = baseBranchFallbackStoredUnresolved
 	}
 	for _, candidate := range branchDiffCandidates {
 		if err := wt.runGit(ctx, "rev-parse", "--verify", candidate); err == nil {
-			return candidate
+			return baseBranchResolution{ref: candidate, stored: stored, reason: fallbackReason}
 		}
 	}
-	return ""
+	return baseBranchResolution{stored: stored, reason: baseBranchUnresolved}
 }
 
 // resolveAheadBehindRef is the ahead/behind variant of resolveBaseBranch.
@@ -497,6 +615,9 @@ func (wt *WorkspaceTracker) resolveBaseBranch(ctx context.Context) string {
 // aheadBehindFallbackCandidates list — local main/master are excluded
 // because they can show stale, in-progress work for divergence counts.
 func (wt *WorkspaceTracker) resolveAheadBehindRef(ctx context.Context) string {
+	if wt.IsSubmodule() {
+		return wt.resolveBaseBranch(ctx)
+	}
 	if stored := wt.BaseBranch(); stored != "" {
 		if ref := wt.resolveStoredRef(ctx, stored); ref != "" {
 			return ref

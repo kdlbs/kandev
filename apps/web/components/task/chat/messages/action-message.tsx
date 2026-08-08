@@ -1,7 +1,7 @@
 "use client";
 
-import { useState, useCallback, memo, type ReactElement } from "react";
-import { useTranslation } from "react-i18next";
+import { useState, useCallback, useEffect, useMemo, memo, type ReactElement } from "react";
+import { Trans, useTranslation } from "react-i18next";
 import {
   IconAlertTriangle,
   IconArchive,
@@ -22,10 +22,12 @@ import { useArchiveAndSwitchTask } from "@/hooks/use-task-actions";
 import { useTaskRemoval } from "@/hooks/use-task-removal";
 import { deleteTask } from "@/lib/api/domains/kanban-api";
 import { AuthMethodsPanel, GenericAuthPanel } from "./auth-methods-panel";
+import { RemediationLink } from "@/components/task/remediation-link";
 import { HostShellDialog } from "@/components/settings/host-shell-dialog";
 import type { Message, TaskSessionState } from "@/lib/types/http";
 import type { MessageAction, RecoveryAuthMethod } from "@/components/task/chat/types";
 import { formatDateTime } from "@/lib/i18n/formats";
+import { parseRetryAt, retryCountdownLabel } from "./transient-retry";
 
 const ICON_MAP: Record<string, React.ElementType> = {
   archive: IconArchive,
@@ -51,6 +53,13 @@ type ActionMeta = {
   provider_name?: string;
   model_id?: string;
   reset_at?: string;
+  remediation_url?: string;
+  retrying?: boolean;
+  attempt?: number;
+  max_attempts?: number;
+  retry_in_seconds?: number;
+  retry_at?: string;
+  failure_code?: string;
 };
 
 function isSessionActive(state?: TaskSessionState) {
@@ -61,9 +70,10 @@ export const ActionMessage = memo(function ActionMessage({ comment }: { comment:
   // Read session state from the store instead of receiving it as a prop, so a
   // state transition doesn't re-render every message in the list (only the
   // rare action messages that actually depend on it).
+  const { t } = useTranslation();
   const { sessionState, sessionError, activeTurnId } = useActionMessageSession(comment.session_id);
   const metadata = comment.metadata as ActionMeta | undefined;
-  const message = comment.content || "An error occurred";
+  const message = comment.content || t("task:anErrorOccurred");
 
   if (metadata?.action_visibility === "running") {
     if (sessionState !== "RUNNING" || !comment.turn_id || activeTurnId !== comment.turn_id) {
@@ -86,6 +96,38 @@ export const ActionMessage = memo(function ActionMessage({ comment }: { comment:
 });
 
 function SettledActionMessage({
+  metadata,
+  message,
+  sessionError,
+  sessionState,
+  taskId,
+}: {
+  metadata: ActionMeta | undefined;
+  message: string;
+  sessionError?: string;
+  sessionState?: TaskSessionState;
+  taskId?: string;
+}) {
+  // A retry card is persisted against the failed turn, so hide it while the
+  // replacement turn is starting or running to avoid showing stale progress.
+  if (isSessionActive(sessionState)) return null;
+
+  if (metadata?.retrying) {
+    return <TransientRetryNotice metadata={metadata} taskId={taskId} />;
+  }
+
+  return (
+    <SettledFailureMessage
+      metadata={metadata}
+      message={message}
+      sessionError={sessionError}
+      sessionState={sessionState}
+      taskId={taskId}
+    />
+  );
+}
+
+function SettledFailureMessage({
   metadata,
   message,
   sessionError,
@@ -141,6 +183,88 @@ function SettledActionMessage({
         </div>
       </div>
     </div>
+  );
+}
+
+function transientRetryReasonKey(failureCode?: string) {
+  switch (failureCode) {
+    case "model_capacity":
+      return "chat:transientRetryReasonModelCapacity";
+    case "network_unavailable":
+      return "chat:transientRetryReasonNetworkUnavailable";
+    case "provider_overloaded":
+      return "chat:transientRetryReasonProviderOverloaded";
+    case "provider_unavailable":
+      return "chat:transientRetryReasonProviderUnavailable";
+    case "rate_limited":
+      return "chat:transientRetryReasonRateLimited";
+    default:
+      return "chat:transientRetryReasonGeneric";
+  }
+}
+
+function transientRetryContext(
+  t: ReturnType<typeof useTranslation>["t"],
+  provider?: string,
+  model?: string,
+) {
+  if (!provider && !model) return null;
+  if (provider && model) return t("chat:transientRetryProviderModel", { provider, model });
+  if (provider) return t("chat:transientRetryProvider", { provider });
+  return t("chat:transientRetryModel", { model });
+}
+
+function TransientRetryNotice({ metadata, taskId }: { metadata: ActionMeta; taskId?: string }) {
+  const { t } = useTranslation();
+  const retryAt = parseRetryAt(metadata.retry_at);
+  const fallbackDeadline = useMemo(
+    () => Date.now() + Math.max(0, metadata.retry_in_seconds ?? 0) * 1_000,
+    [metadata.attempt, metadata.retry_in_seconds],
+  );
+  const deadline = retryAt ?? fallbackDeadline;
+  const [now, setNow] = useState(() => Date.now());
+
+  useEffect(() => {
+    setNow(Date.now());
+    const timer = window.setInterval(() => setNow(Date.now()), 1_000);
+    return () => window.clearInterval(timer);
+  }, [retryAt, metadata.retry_in_seconds]);
+
+  const remaining = Math.max(0, deadline - now);
+  const reasonKey = transientRetryReasonKey(metadata.failure_code);
+  const provider = metadata.provider_name?.trim();
+  const model = metadata.model_id?.trim();
+  const context = transientRetryContext(t, provider, model);
+  const countdown =
+    remaining > 0
+      ? t("chat:transientRetryIn", { countdown: retryCountdownLabel(remaining) })
+      : t("chat:transientRetryNow");
+
+  return (
+    <section
+      data-testid="transient-retry-card"
+      role="status"
+      aria-live="polite"
+      className="flex w-full min-w-0 items-center gap-2 rounded-md border border-amber-500/25 bg-amber-500/[0.06] px-2 py-1.5 sm:gap-3 sm:px-3"
+    >
+      <IconAlertTriangle className="h-4 w-4 flex-shrink-0 text-amber-500" aria-hidden="true" />
+      <div className="min-w-0 flex-1 text-xs">
+        <div className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5 text-amber-600 dark:text-amber-400">
+          <span>{t(reasonKey)}</span>
+          <span aria-label={t("chat:transientRetryCountdownLabel")}>{countdown}</span>
+        </div>
+        {context && <div className="mt-0.5 truncate text-muted-foreground">{context}</div>}
+        <div className="mt-0.5 text-muted-foreground">
+          {t("chat:transientRetryAttempt", {
+            attempt: metadata.attempt ?? 1,
+            maxAttempts: metadata.max_attempts ?? 1,
+          })}
+        </div>
+      </div>
+      {metadata.actions && metadata.actions.length > 0 && (
+        <ActionButtons actions={metadata.actions} taskId={taskId} compact />
+      )}
+    </section>
   );
 }
 
@@ -277,6 +401,7 @@ function MissingBranchRecovery({
   fallbackMessage: string;
   technicalDetails?: string;
 }) {
+  const { t } = useTranslation();
   const branch = metadata.missing_branch?.trim();
   return (
     <section
@@ -290,14 +415,16 @@ function MissingBranchRecovery({
           aria-hidden="true"
         />
         <div className="min-w-0 flex-1">
-          <h3 className="text-sm font-medium text-foreground">Branch is no longer available</h3>
+          <h3 className="text-sm font-medium text-foreground">
+            {t("task:branchIsNoLongerAvailable")}
+          </h3>
           <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
             {branch ? (
-              <>
+              <Trans i18nKey="task:thisTaskPointsToBranch" values={{ branch }}>
                 This task points to <code className="break-all text-foreground">{branch}</code>, but
                 that branch could not be found on the remote repository. It may have been merged or
                 deleted.
-              </>
+              </Trans>
             ) : (
               fallbackMessage
             )}
@@ -356,6 +483,7 @@ function ActionMessageDetails({
   const errorOutput = metadata.error_output || technicalDetails;
   return (
     <>
+      {metadata.remediation_url && <RemediationLink url={metadata.remediation_url} />}
       {errorOutput && <TechnicalDetails>{errorOutput}</TechnicalDetails>}
       {metadata.is_auth_error && metadata.auth_methods && metadata.auth_methods.length > 0 && (
         <AuthMethodsPanel

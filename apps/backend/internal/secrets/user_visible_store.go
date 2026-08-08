@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"strings"
+
+	"github.com/jmoiron/sqlx"
 )
 
 const internalGitHubSecretPrefix = "github:"
@@ -18,14 +20,16 @@ func IsInternalID(id string) bool {
 // underlying store remains available to integration services for their
 // deterministic internal keys.
 type UserVisibleStore struct {
-	store SecretStore
+	store  SecretStore
+	scoped ScopedSecretStore
 }
 
 func NewUserVisibleStore(store SecretStore) SecretStore {
 	if store == nil {
 		return nil
 	}
-	return &UserVisibleStore{store: store}
+	scoped, _ := store.(ScopedSecretStore)
+	return &UserVisibleStore{store: store, scoped: scoped}
 }
 
 func (s *UserVisibleStore) Create(ctx context.Context, secret *SecretWithValue) error {
@@ -39,12 +43,22 @@ func (s *UserVisibleStore) Get(ctx context.Context, id string) (*Secret, error) 
 	if IsInternalID(id) {
 		return nil, internalSecretNotFound(id)
 	}
-	return s.store.Get(ctx, id)
+	secret, err := s.store.Get(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if normalizeStoredScope(secret.Scope) != ScopeGlobal {
+		return nil, internalSecretNotFound(id)
+	}
+	return secret, nil
 }
 
 func (s *UserVisibleStore) Reveal(ctx context.Context, id string) (string, error) {
 	if IsInternalID(id) {
 		return "", internalSecretNotFound(id)
+	}
+	if s.scoped != nil {
+		return s.scoped.RevealGlobal(ctx, id)
 	}
 	return s.store.Reveal(ctx, id)
 }
@@ -53,6 +67,9 @@ func (s *UserVisibleStore) Update(ctx context.Context, id string, req *UpdateSec
 	if IsInternalID(id) {
 		return internalSecretNotFound(id)
 	}
+	if _, err := s.Get(ctx, id); err != nil {
+		return err
+	}
 	return s.store.Update(ctx, id, req)
 }
 
@@ -60,10 +77,16 @@ func (s *UserVisibleStore) Delete(ctx context.Context, id string) error {
 	if IsInternalID(id) {
 		return internalSecretNotFound(id)
 	}
+	if _, err := s.Get(ctx, id); err != nil {
+		return err
+	}
 	return s.store.Delete(ctx, id)
 }
 
 func (s *UserVisibleStore) List(ctx context.Context) ([]*SecretListItem, error) {
+	if s.scoped != nil {
+		return s.ListScoped(ctx, SecretListOptions{Scope: ScopeGlobal})
+	}
 	items, err := s.store.List(ctx)
 	if err != nil {
 		return nil, err
@@ -77,9 +100,87 @@ func (s *UserVisibleStore) List(ctx context.Context) ([]*SecretListItem, error) 
 	return visible, nil
 }
 
+func (s *UserVisibleStore) ListScoped(ctx context.Context, opts SecretListOptions) ([]*SecretListItem, error) {
+	if opts.Scope == "" {
+		opts.Scope = ScopeGlobal
+	}
+	if s.scoped == nil {
+		if opts.Scope == ScopeGlobal {
+			return s.List(ctx)
+		}
+		return nil, fmt.Errorf("workspace-scoped secret storage is unavailable")
+	}
+	items, err := s.scoped.ListScoped(ctx, opts)
+	if err != nil {
+		return nil, err
+	}
+	return filterInternalSecretItems(items), nil
+}
+
+func (s *UserVisibleStore) GetForWorkspace(ctx context.Context, id, workspaceID string) (*Secret, error) {
+	if IsInternalID(id) {
+		return nil, internalSecretNotFound(id)
+	}
+	if s.scoped == nil {
+		return nil, fmt.Errorf("workspace-scoped secret storage is unavailable")
+	}
+	return s.scoped.GetForWorkspace(ctx, id, workspaceID)
+}
+
+func (s *UserVisibleStore) RevealGlobal(ctx context.Context, id string) (string, error) {
+	if IsInternalID(id) {
+		return "", internalSecretNotFound(id)
+	}
+	if s.scoped != nil {
+		return s.scoped.RevealGlobal(ctx, id)
+	}
+	return s.store.Reveal(ctx, id)
+}
+
+func (s *UserVisibleStore) RevealForWorkspace(ctx context.Context, id, workspaceID string) (string, error) {
+	if IsInternalID(id) {
+		return "", internalSecretNotFound(id)
+	}
+	if s.scoped != nil {
+		return s.scoped.RevealForWorkspace(ctx, id, workspaceID)
+	}
+	if _, err := s.GetForWorkspace(ctx, id, workspaceID); err != nil {
+		return "", err
+	}
+	return s.store.Reveal(ctx, id)
+}
+
+func (s *UserVisibleStore) DeleteWorkspaceSecrets(ctx context.Context, workspaceID string) error {
+	if s.scoped == nil {
+		return fmt.Errorf("workspace-scoped secret storage is unavailable")
+	}
+	return s.scoped.DeleteWorkspaceSecrets(ctx, workspaceID)
+}
+
+func (s *UserVisibleStore) DeleteWorkspaceSecretsTx(ctx context.Context, tx *sqlx.Tx, workspaceID string) error {
+	if s.scoped == nil {
+		return fmt.Errorf("workspace-scoped secret storage is unavailable")
+	}
+	transactional, ok := s.scoped.(WorkspaceSecretTransactionalDeleter)
+	if !ok {
+		return fmt.Errorf("transactional workspace-scoped secret storage is unavailable")
+	}
+	return transactional.DeleteWorkspaceSecretsTx(ctx, tx, workspaceID)
+}
+
 // The wrapped store is owned and closed by the repository container.
 func (s *UserVisibleStore) Close() error { return nil }
 
 func internalSecretNotFound(id string) error {
 	return fmt.Errorf("%w: %s", ErrNotFound, id)
+}
+
+func filterInternalSecretItems(items []*SecretListItem) []*SecretListItem {
+	visible := make([]*SecretListItem, 0, len(items))
+	for _, item := range items {
+		if item != nil && !IsInternalID(item.ID) {
+			visible = append(visible, item)
+		}
+	}
+	return visible
 }

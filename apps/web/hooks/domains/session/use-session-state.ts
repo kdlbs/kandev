@@ -20,12 +20,25 @@ export function deriveSessionFlags(session: TaskSession | null | undefined) {
   const hasBackgroundWork = session?.foreground_activity === "background";
   const inputMode = deriveSessionInputMode(session);
   const isAgentBusy = inputMode === "queue";
+  // supportsSteering is true only when a send would be delivered into a
+  // still-generating turn: RUNNING, generating (so it would otherwise queue),
+  // and the connected agent advertised the capability. The composer uses it to
+  // promise delivery-now rather than a queued follow-up.
+  const supportsSteering = isRunning && !hasBackgroundWork && !!session?.supports_steering;
   // `isWorking` drives the spinner/affordance: any live turn (generating OR
   // background-idle) plus STARTING — it must stay up through (b).
   const isWorking = isStarting || isRunning || hasBackgroundWork;
   const isFailed = state === "FAILED" || state === "CANCELLED";
   const needsRecovery = state === "WAITING_FOR_INPUT" && !!errorMessage;
-  return { inputMode, isStarting, isWorking, isAgentBusy, isFailed, needsRecovery };
+  return {
+    inputMode,
+    isStarting,
+    isWorking,
+    isAgentBusy,
+    supportsSteering,
+    isFailed,
+    needsRecovery,
+  };
 }
 
 type UseSessionStateOptions = {

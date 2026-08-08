@@ -5,8 +5,10 @@ import type { EntityReference } from "@/lib/types/entity-reference";
 
 const queueApiMock = vi.hoisted(() => {
   class QueueEntryNotFoundError extends Error {}
+  class QueueSendNowError extends Error {}
   return {
     QueueEntryNotFoundError,
+    QueueSendNowError,
     queueMessage: vi.fn(),
     clearQueue: vi.fn(),
     drainQueuedMessage: vi.fn(),
@@ -14,6 +16,7 @@ const queueApiMock = vi.hoisted(() => {
     updateQueuedMessage: vi.fn(),
     removeQueuedEntry: vi.fn(),
     mergeQueuedEntry: vi.fn(),
+    sendQueuedNow: vi.fn(),
   };
 });
 
@@ -24,6 +27,7 @@ type MockQueueState = {
     isLoading: Record<string, boolean>;
   };
   connection: { status: string };
+  taskSessions: { items: Record<string, { cancellation_pending?: boolean }> };
   setQueueEntries: ReturnType<typeof vi.fn>;
   removeQueueEntry: ReturnType<typeof vi.fn>;
   setQueueLoading: ReturnType<typeof vi.fn>;
@@ -81,6 +85,7 @@ function resetMockState() {
       isLoading: {},
     },
     connection: { status: "connected" },
+    taskSessions: { items: {} },
     setQueueEntries: vi.fn(),
     removeQueueEntry: vi.fn(),
     setQueueLoading: vi.fn(),
@@ -202,6 +207,94 @@ describe("useQueue", () => {
       attachments: undefined,
       entity_references: [],
     });
+  });
+});
+
+describe("useQueue context file metadata and Send Now", () => {
+  beforeEach(() => {
+    resetMockState();
+    setDocumentVisibility("visible");
+    queueApiMock.getQueueStatus.mockResolvedValue({ entries: [], count: 0, max: 10 });
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.clearAllMocks();
+  });
+
+  it("forwards context file metadata with queued messages", async () => {
+    queueApiMock.queueMessage.mockResolvedValue(entry());
+    const { result } = renderHook(() => useQueue(SESSION_ID));
+    await waitFor(() => expect(queueApiMock.getQueueStatus).toHaveBeenCalled());
+    queueApiMock.queueMessage.mockClear();
+
+    await act(async () => {
+      await result.current.queue({
+        taskId: TASK_ID,
+        content: "queued context",
+        contextFilesMeta: [{ path: "src/components", name: "components", is_directory: true }],
+      } as never);
+    });
+
+    expect(queueApiMock.queueMessage).toHaveBeenCalledWith({
+      session_id: SESSION_ID,
+      task_id: TASK_ID,
+      content: "queued context",
+      model: undefined,
+      plan_mode: undefined,
+      attachments: undefined,
+      entity_references: undefined,
+      context_files: [{ path: "src/components", name: "components", is_directory: true }],
+    });
+  });
+
+  it("sends one exact entry now and refetches authoritative status", async () => {
+    queueApiMock.sendQueuedNow.mockResolvedValue({
+      session_id: SESSION_ID,
+      dispatched: true,
+      sent_count: 1,
+    });
+    const { result } = renderHook(() => useQueue(SESSION_ID));
+    await waitFor(() => expect(queueApiMock.getQueueStatus).toHaveBeenCalled());
+    queueApiMock.getQueueStatus.mockClear();
+
+    await act(async () => {
+      await result.current.sendEntryNow("q-2");
+    });
+
+    expect(queueApiMock.sendQueuedNow).toHaveBeenCalledWith({
+      session_id: SESSION_ID,
+      scope: "entry",
+      entry_id: "q-2",
+    });
+    expect(queueApiMock.getQueueStatus).toHaveBeenCalledWith(SESSION_ID);
+  });
+
+  it("refetches after a raced Send Now failure and preserves the typed error", async () => {
+    queueApiMock.sendQueuedNow.mockRejectedValueOnce(new queueApiMock.QueueSendNowError());
+    const { result } = renderHook(() => useQueue(SESSION_ID));
+    await waitFor(() => expect(queueApiMock.getQueueStatus).toHaveBeenCalled());
+    queueApiMock.getQueueStatus.mockClear();
+
+    await act(async () => {
+      await expect(result.current.sendAllNow()).rejects.toBeInstanceOf(
+        queueApiMock.QueueSendNowError,
+      );
+    });
+
+    expect(queueApiMock.sendQueuedNow).toHaveBeenCalledWith({
+      session_id: SESSION_ID,
+      scope: "all",
+    });
+    expect(queueApiMock.getQueueStatus).toHaveBeenCalledWith(SESSION_ID);
+  });
+
+  it("exposes authoritative cancellation progress for disabling controls", async () => {
+    mockState.taskSessions.items[SESSION_ID] = { cancellation_pending: true };
+    const { result } = renderHook(() => useQueue(SESSION_ID));
+    await waitFor(() => expect(queueApiMock.getQueueStatus).toHaveBeenCalled());
+
+    expect(result.current.cancellationPending).toBe(true);
   });
 });
 

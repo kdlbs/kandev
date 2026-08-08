@@ -6,14 +6,17 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jmoiron/sqlx"
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/events"
+	"github.com/kandev/kandev/internal/secrets"
 	"github.com/kandev/kandev/internal/task/models"
 	taskrepo "github.com/kandev/kandev/internal/task/repository"
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
@@ -28,6 +31,10 @@ const (
 )
 
 var ErrWorkspaceConfirmNameMismatch = errors.New("confirm_name does not match workspace name")
+
+const maxRepositorySecretBindings = 100
+
+var repositorySecretKeyPattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
 func normalizeProviderHost(provider, raw string) string {
 	raw = strings.TrimSpace(raw)
@@ -211,14 +218,33 @@ func (s *Service) deleteWorkspace(ctx context.Context, workspace *models.Workspa
 
 	var deletedTasks []*models.Task
 	var deletedWorkflows []*models.Workflow
-	if confirmedName == nil {
+	transactionalCleanup, hasTransactionalCleanup := s.workspaceSecretDeleter.(secrets.WorkspaceSecretTransactionalDeleter)
+	transactionalCascade, hasTransactionalCascade := s.workspaces.(transactionalWorkspaceCascade)
+	switch {
+	case hasTransactionalCleanup && hasTransactionalCascade:
+		cleanup := func(cleanupCtx context.Context, tx *sqlx.Tx) error {
+			return transactionalCleanup.DeleteWorkspaceSecretsTx(cleanupCtx, tx, workspace.ID)
+		}
+		if confirmedName == nil {
+			deletedTasks, deletedWorkflows, err = transactionalCascade.DeleteWorkspaceCascadeWithSecretCleanup(ctx, workspace.ID, cleanup)
+		} else {
+			deletedTasks, deletedWorkflows, err = transactionalCascade.DeleteWorkspaceCascadeWithNameAndSecretCleanup(ctx, workspace.ID, *confirmedName, cleanup)
+		}
+	case confirmedName == nil:
 		deletedTasks, deletedWorkflows, err = s.workspaces.DeleteWorkspaceCascade(ctx, workspace.ID)
-	} else {
+	default:
 		deletedTasks, deletedWorkflows, err = s.workspaces.DeleteWorkspaceCascadeWithName(ctx, workspace.ID, *confirmedName)
 	}
 	if err != nil {
 		s.cancelWorkspaceDeleteTaskCleanupJobs(ctx, cleanups)
 		return s.mapWorkspaceDeleteError(workspace.ID, err)
+	}
+	if s.workspaceSecretDeleter != nil && (!hasTransactionalCleanup || !hasTransactionalCascade) {
+		if err := s.workspaceSecretDeleter.DeleteWorkspaceSecrets(ctx, workspace.ID); err != nil {
+			s.cancelWorkspaceDeleteTaskCleanupJobs(ctx, cleanups)
+			s.logger.Error("failed to delete workspace secrets", zap.String("workspace_id", workspace.ID), zap.Error(err))
+			return err
+		}
 	}
 	cleanups = s.appendWorkspaceDeleteMissingTaskCleanups(ctx, cleanups, deletedTasks)
 	s.publishWorkspaceDeleteChildEvents(ctx, deletedTasks, deletedWorkflows)
@@ -478,6 +504,7 @@ func (s *Service) CreateWorkflow(ctx context.Context, req *CreateWorkflowRequest
 		WorkspaceID:        req.WorkspaceID,
 		Name:               req.Name,
 		Description:        req.Description,
+		Prompt:             req.Prompt,
 		WorkflowTemplateID: req.WorkflowTemplateID,
 		Hidden:             req.Hidden,
 	}
@@ -526,6 +553,9 @@ func (s *Service) UpdateWorkflow(ctx context.Context, id string, req *UpdateWork
 	}
 	if req.Description != nil {
 		workflow.Description = *req.Description
+	}
+	if req.Prompt != nil {
+		workflow.Prompt = *req.Prompt
 	}
 	if req.AgentProfileID != nil {
 		workflow.AgentProfileID = strings.TrimSpace(*req.AgentProfileID)
@@ -735,6 +765,10 @@ func (s *Service) createRepository(
 	if err := copyfiles.ValidateSpec(req.CopyFiles); err != nil {
 		return nil, fmt.Errorf("%w: %s", ErrInvalidRepositorySettings, err)
 	}
+	bindings, err := s.validateRepositorySecretBindings(ctx, req.WorkspaceID, req.SecretBindings)
+	if err != nil {
+		return nil, err
+	}
 	repository := &models.Repository{
 		ID:                     uuid.New().String(),
 		WorkspaceID:            req.WorkspaceID,
@@ -755,13 +789,21 @@ func (s *Service) createRepository(
 		CleanupScript:          req.CleanupScript,
 		DevScript:              req.DevScript,
 		CopyFiles:              req.CopyFiles,
+		SecretBindings:         bindings,
 	}
 
 	if resolveProvider {
 		resolveRepositoryProviderIdentity(repository)
 	}
 
-	if err := s.repoEntities.CreateRepository(ctx, repository); err != nil {
+	if mutator, ok := s.repoEntities.(taskrepo.RepositorySecretBindingMutator); ok {
+		if err := mutator.CreateRepositoryWithSecretBindings(ctx, repository, bindings); err != nil {
+			s.logger.Error("failed to create repository", zap.Error(err))
+			return nil, err
+		}
+	} else if len(bindings) > 0 {
+		return nil, fmt.Errorf("%w: repository secret bindings are unavailable", ErrInvalidRepositorySettings)
+	} else if err := s.repoEntities.CreateRepository(ctx, repository); err != nil {
 		s.logger.Error("failed to create repository", zap.Error(err))
 		return nil, err
 	}
@@ -987,9 +1029,26 @@ func (s *Service) UpdateRepository(ctx context.Context, id string, req *UpdateRe
 	if err := applyRepositoryUpdates(repository, &updates); err != nil {
 		return nil, err
 	}
+	var replacement []models.RepositorySecretBinding
+	if req.SecretBindings != nil {
+		replacement, err = s.validateRepositorySecretBindings(ctx, repository.WorkspaceID, *req.SecretBindings)
+		if err != nil {
+			return nil, err
+		}
+		repository.SecretBindings = replacement
+	}
 	repository.UpdatedAt = time.Now().UTC()
 
-	if err := s.repoEntities.UpdateRepository(ctx, repository); err != nil {
+	if req.SecretBindings != nil {
+		mutator, ok := s.repoEntities.(taskrepo.RepositorySecretBindingMutator)
+		if !ok {
+			return nil, fmt.Errorf("%w: repository secret bindings are unavailable", ErrInvalidRepositorySettings)
+		}
+		if err := mutator.UpdateRepositoryWithSecretBindings(ctx, repository, replacement); err != nil {
+			s.logger.Error("failed to update repository", zap.String("repository_id", id), zap.Error(err))
+			return nil, err
+		}
+	} else if err := s.repoEntities.UpdateRepository(ctx, repository); err != nil {
 		s.logger.Error("failed to update repository", zap.String("repository_id", id), zap.Error(err))
 		return nil, err
 	}
@@ -997,6 +1056,43 @@ func (s *Service) UpdateRepository(ctx context.Context, id string, req *UpdateRe
 	s.publishRepositoryEvent(ctx, events.RepositoryUpdated, repository)
 	s.logger.Info("repository updated", zap.String("repository_id", repository.ID))
 	return repository, nil
+}
+
+func (s *Service) validateRepositorySecretBindings(
+	ctx context.Context, workspaceID string, inputs []RepositorySecretBindingInput,
+) ([]models.RepositorySecretBinding, error) {
+	if len(inputs) > maxRepositorySecretBindings {
+		return nil, fmt.Errorf("%w: at most %d secret bindings are allowed", ErrInvalidRepositorySettings, maxRepositorySecretBindings)
+	}
+	if len(inputs) == 0 {
+		return nil, nil
+	}
+	catalog, ok := s.secretStore.(secrets.ScopedSecretStore)
+	if !ok {
+		return nil, fmt.Errorf("%w: secret binding validation is unavailable", ErrInvalidRepositorySettings)
+	}
+	seen := make(map[string]struct{}, len(inputs))
+	bindings := make([]models.RepositorySecretBinding, 0, len(inputs))
+	for _, input := range inputs {
+		key := strings.TrimSpace(input.Key)
+		if key != input.Key || key == "" || len(key) > 256 || !repositorySecretKeyPattern.MatchString(key) ||
+			key == "TASK_DESCRIPTION" || strings.HasPrefix(key, "KANDEV_") {
+			return nil, fmt.Errorf("%w: invalid secret binding key", ErrInvalidRepositorySettings)
+		}
+		if _, exists := seen[key]; exists {
+			return nil, fmt.Errorf("%w: duplicate secret binding key", ErrInvalidRepositorySettings)
+		}
+		seen[key] = struct{}{}
+		secretID := strings.TrimSpace(input.SecretID)
+		if secretID == "" {
+			return nil, fmt.Errorf("%w: secret binding reference is required", ErrInvalidRepositorySettings)
+		}
+		if _, err := catalog.GetForWorkspace(ctx, secretID, workspaceID); err != nil {
+			return nil, fmt.Errorf("%w: secret binding reference is not available", ErrInvalidRepositorySettings)
+		}
+		bindings = append(bindings, models.RepositorySecretBinding{Key: key, SecretID: secretID})
+	}
+	return bindings, nil
 }
 
 func canonicalRepositoryLocalPath(localPath string) (string, error) {
@@ -1445,6 +1541,9 @@ func (s *Service) CreateExecutorProfile(ctx context.Context, req *CreateExecutor
 	if req.ExecutorID == "" {
 		return nil, fmt.Errorf("executor_id is required")
 	}
+	if err := s.validateGlobalProfileEnvRefs(ctx, req.EnvVars); err != nil {
+		return nil, err
+	}
 	// Verify executor exists
 	executor, err := s.executors.GetExecutor(ctx, req.ExecutorID)
 	if err != nil {
@@ -1498,6 +1597,9 @@ func (s *Service) UpdateExecutorProfile(ctx context.Context, id string, req *Upd
 		profile.CleanupScript = *req.CleanupScript
 	}
 	if req.EnvVars != nil {
+		if err := s.validateGlobalProfileEnvRefs(ctx, req.EnvVars); err != nil {
+			return nil, err
+		}
 		if executor.Type == models.ExecutorTypeSprites {
 			req.EnvVars = mergeSpritesTokenEnvVars(profile.EnvVars, req.EnvVars)
 		}
@@ -1508,6 +1610,21 @@ func (s *Service) UpdateExecutorProfile(ctx context.Context, id string, req *Upd
 	}
 	s.publishExecutorProfileEvent(ctx, events.ExecutorProfileUpdated, profile)
 	return profile, nil
+}
+
+func (s *Service) validateGlobalProfileEnvRefs(ctx context.Context, envVars []models.ProfileEnvVar) error {
+	if s.secretStore == nil {
+		return nil
+	}
+	for i, envVar := range envVars {
+		if strings.TrimSpace(envVar.SecretID) == "" {
+			continue
+		}
+		if err := secrets.ValidateGlobalReference(ctx, s.secretStore, envVar.SecretID); err != nil {
+			return fmt.Errorf("profile env_vars[%d] secret must be global", i)
+		}
+	}
+	return nil
 }
 
 func mergeSpritesTokenEnvVars(existing, incoming []models.ProfileEnvVar) []models.ProfileEnvVar {

@@ -121,6 +121,7 @@ function ContextWindowRing({ usagePercent }: { usagePercent: number }) {
 }
 
 function ContextWindowSource({ source }: { source: "acp" | "api" | undefined }) {
+  const { t } = useTranslation();
   const helpId = useId();
   const [helpOpen, setHelpOpen] = useState(false);
   const [touchMode, setTouchMode] = useState(false);
@@ -134,11 +135,11 @@ function ContextWindowSource({ source }: { source: "acp" | "api" | undefined }) 
 
   return (
     <div className="group relative flex shrink-0 items-center gap-1 text-[10px] text-muted-foreground">
-      <span>Source</span>
+      <span>{t("task:source")}</span>
       <span className="font-medium text-foreground">{source.toUpperCase()}</span>
       <button
         type="button"
-        aria-label="About context window source"
+        aria-label={t("task:aboutContextWindowSource")}
         aria-describedby={helpId}
         aria-expanded={helpOpen}
         className="inline-flex size-6 cursor-help items-center justify-center text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring sm:size-4"
@@ -240,6 +241,7 @@ export const TokenUsageDisplay = memo(function TokenUsageDisplay({
   sessionId,
   className,
 }: TokenUsageDisplayProps) {
+  const { t } = useTranslation();
   const tooltip = usePinnableTooltip();
   const contextWindow = useSessionContextWindow(sessionId);
 
@@ -252,6 +254,17 @@ export const TokenUsageDisplay = memo(function TokenUsageDisplay({
   if (!isContextWindowReliable(size, used)) return null;
 
   const usagePercent = (used / size) * 100;
+  const pendingUsage = used === 0;
+
+  const usagePercentLabel = pendingUsage
+    ? t("task:contextWindowUsagePendingPercent")
+    : `${usagePercent.toFixed(0)}%`;
+  const usageTokenLabel = pendingUsage
+    ? t("task:contextWindowUsagePendingTokens", { size: formatNumber(size) })
+    : t("task:contextWindowUsedTokens", {
+        used: formatNumber(used),
+        size: formatNumber(size),
+      });
 
   return (
     // The UI wrapper defaults this to true; the source control must remain reachable inside.
@@ -261,7 +274,11 @@ export const TokenUsageDisplay = memo(function TokenUsageDisplay({
           <button
             ref={tooltip.triggerRef}
             type="button"
-            aria-label={`Context window: ${usagePercent.toFixed(0)}% used`}
+            aria-label={
+              pendingUsage
+                ? t("task:contextWindowNotMeasured")
+                : t("task:contextWindowUsed", { percent: usagePercent.toFixed(0) })
+            }
             aria-expanded={tooltip.open}
             onClick={tooltip.onTriggerClick}
             className={cn(
@@ -277,10 +294,10 @@ export const TokenUsageDisplay = memo(function TokenUsageDisplay({
             <div className="space-y-2" data-testid="context-window-usage">
               <div className="flex items-baseline justify-between gap-6">
                 <span className="text-[10px] font-medium uppercase text-muted-foreground">
-                  Context window
+                  {t("task:contextWindow")}
                 </span>
                 <span className="text-base font-semibold tabular-nums text-foreground">
-                  {usagePercent.toFixed(0)}%
+                  {usagePercentLabel}
                 </span>
               </div>
               <div
@@ -299,10 +316,18 @@ export const TokenUsageDisplay = memo(function TokenUsageDisplay({
                 data-testid="context-window-token-row"
               >
                 <span className="text-[11px] tabular-nums text-muted-foreground">
-                  {formatNumber(used)} of {formatNumber(size)} tokens
+                  {usageTokenLabel}
                 </span>
                 <ContextWindowSource source={source} />
               </div>
+              {pendingUsage && (
+                <p
+                  className="text-[11px] text-muted-foreground"
+                  data-testid="context-window-usage-pending"
+                >
+                  {t("task:contextWindowUsagePendingExplain")}
+                </p>
+              )}
               <ContextCompactionCount count={compactionCount} />
             </div>
           </div>

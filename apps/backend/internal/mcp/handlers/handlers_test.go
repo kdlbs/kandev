@@ -186,6 +186,154 @@ func (p *mcpUserSettingsProvider) GetUserSettings(context.Context) (*usermodels.
 	return p.settings, p.err
 }
 
+type recordingRemoteContributionService struct {
+	resolution   *models.RemoteContributionResolution
+	associateErr error
+	associateURL string
+	taskID       string
+	repositoryID string
+}
+
+func (s *recordingRemoteContributionService) Resolve(_ context.Context, _, _, rawURL string) (*models.RemoteContributionResolution, bool, error) {
+	s.associateURL = rawURL
+	return s.resolution, true, nil
+}
+
+func (s *recordingRemoteContributionService) Associate(_ context.Context, _, _, taskID, repositoryID string, _ *models.RemoteContributionResolution) error {
+	s.taskID = taskID
+	s.repositoryID = repositoryID
+	return s.associateErr
+}
+
+func testRemoteContributionResolution() *models.RemoteContributionResolution {
+	return &models.RemoteContributionResolution{
+		Binding: models.RemoteContribution{
+			Version:      models.RemoteContributionVersion,
+			Provider:     models.RemoteContributionProviderGitHub,
+			Kind:         models.RemoteContributionKindPullRequest,
+			CanonicalURL: "https://github.com/acme/widget/pull/7",
+			Number:       7,
+			State:        models.RemoteContributionStateOpen,
+			BaseBranch:   "main",
+			HeadBranch:   "feature/remote",
+			HeadSHA:      strings.Repeat("a", 40),
+			SourceRepository: models.RemoteContributionRepository{
+				Host: "github.com", Path: "contributor/widget", ProviderID: "R_kgDOFork123", RemoteURL: "https://github.com/contributor/widget.git",
+			},
+			CollaborationAllowed: true,
+		},
+		TargetProvider:      models.RemoteContributionProviderGitHub,
+		TargetHost:          "https://github.com",
+		TargetPath:          "acme/widget",
+		TargetProviderID:    "99",
+		TargetRemoteURL:     "https://github.com/acme/widget.git",
+		TargetDefaultBranch: "main",
+	}
+}
+
+func TestHandleCreateTask_AssociatesExistingRemoteContribution(t *testing.T) {
+	svc, repo := newTestTaskService(t)
+	ctx := context.Background()
+	workspaces, err := svc.ListWorkspaces(ctx)
+	require.NoError(t, err)
+	workflows, err := svc.ListWorkflows(ctx, workspaces[0].ID, false)
+	require.NoError(t, err)
+	remote := &recordingRemoteContributionService{resolution: testRemoteContributionResolution()}
+	h := NewHandlers(svc, nil, nil, nil, nil, repo, repo, nil, nil, nil, nil, nil, testLogger(t))
+	h.SetRemoteContributionService(remote)
+
+	resp, err := h.handleCreateTask(ctx, makeWSMessage(t, ws.ActionMCPCreateTask, map[string]interface{}{
+		"workspace_id":     workspaces[0].ID,
+		"workflow_id":      workflows[0].ID,
+		"title":            "Remote contribution",
+		"description":      "Work on the existing contribution",
+		"agent_profile_id": "profile-remote",
+		"start_agent":      false,
+		"repositories": []map[string]interface{}{{
+			"github_url":  "https://github.com/acme/widget/pull/7",
+			"base_branch": "main",
+		}},
+	}))
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	if resp.Type == ws.MessageTypeError {
+		t.Fatalf("create task returned error: %s", string(resp.Payload))
+	}
+	if remote.associateURL != "https://github.com/acme/widget/pull/7" || remote.taskID == "" || remote.repositoryID == "" {
+		t.Fatalf("remote association = URL %q, task %q, repository %q", remote.associateURL, remote.taskID, remote.repositoryID)
+	}
+	task, err := svc.GetTask(ctx, remote.taskID)
+	require.NoError(t, err)
+	require.NotNil(t, task)
+	taskRepos, err := repo.ListTaskRepositories(ctx, task.ID)
+	require.NoError(t, err)
+	require.Len(t, taskRepos, 1)
+	binding, found, err := models.LoadRemoteContribution(taskRepos[0].Metadata)
+	require.NoError(t, err)
+	if !found || binding.SourceRepository.Path != "contributor/widget" {
+		t.Fatalf("persisted remote contribution = (%+v, found=%v)", binding, found)
+	}
+}
+
+func TestResolveMCPRemoteContributionsPreservesExistingDefaultBranch(t *testing.T) {
+	resolution := testRemoteContributionResolution()
+	resolution.TargetDefaultBranch = ""
+	remote := &recordingRemoteContributionService{resolution: resolution}
+	h := &Handlers{remoteContributionSvc: remote, logger: testLogger(t)}
+	repos := []service.TaskRepositoryInput{{
+		RemoteURL:     "https://github.com/acme/widget/pull/7",
+		DefaultBranch: "trunk",
+	}}
+	resolutions, err := h.resolveMCPRemoteContributions(context.Background(), "workspace-1", "user-1", repos)
+	if err != nil {
+		t.Fatalf("resolveMCPRemoteContributions() error = %v", err)
+	}
+	if len(resolutions) != 1 || resolutions[0] == nil {
+		t.Fatalf("resolutions = %#v, want one resolution", resolutions)
+	}
+	if repos[0].DefaultBranch != "trunk" {
+		t.Fatalf("default branch = %q, want existing branch trunk", repos[0].DefaultBranch)
+	}
+}
+
+func TestHandleCreateTask_RollsBackWhenRemoteContributionAssociationFails(t *testing.T) {
+	svc, repo := newTestTaskService(t)
+	ctx := context.Background()
+	workspaces, err := svc.ListWorkspaces(ctx)
+	require.NoError(t, err)
+	workflows, err := svc.ListWorkflows(ctx, workspaces[0].ID, false)
+	require.NoError(t, err)
+	remote := &recordingRemoteContributionService{
+		resolution:   testRemoteContributionResolution(),
+		associateErr: errors.New("association failed"),
+	}
+	h := NewHandlers(svc, nil, nil, nil, nil, repo, repo, nil, nil, nil, nil, nil, testLogger(t))
+	h.SetRemoteContributionService(remote)
+
+	resp, err := h.handleCreateTask(ctx, makeWSMessage(t, ws.ActionMCPCreateTask, map[string]interface{}{
+		"workspace_id":     workspaces[0].ID,
+		"workflow_id":      workflows[0].ID,
+		"title":            "Rollback contribution",
+		"description":      "This association will fail",
+		"agent_profile_id": "profile-remote",
+		"start_agent":      false,
+		"repositories": []map[string]interface{}{{
+			"github_url":  "https://github.com/acme/widget/pull/7",
+			"base_branch": "main",
+		}},
+	}))
+	require.NoError(t, err)
+	assertWSError(t, resp, ws.ErrorCodeInternalError)
+	if remote.taskID == "" || remote.repositoryID == "" {
+		t.Fatalf("association was not attempted: task %q repository %q", remote.taskID, remote.repositoryID)
+	}
+	tasks, err := svc.ListTasks(ctx, workflows[0].ID)
+	require.NoError(t, err)
+	if len(tasks) != 0 {
+		t.Fatalf("tasks after association rollback = %d, want 0", len(tasks))
+	}
+}
+
 // TestClassifyAddBranchError_UnresolvedBaseBranchIsValidation pins the
 // classifier's handling of the new "cannot resolve base_branch" sentinel
 // emitted by AddBranchToTask when neither base_branch nor a probed
@@ -1685,6 +1833,118 @@ func TestResolveMCPAutoStartConfig_FallsBackToWorkflowAgentProfile(t *testing.T)
 		WorkspaceID: workspace.ID,
 		WorkflowID:  workflow.ID,
 	}, "", "", "")
+
+	assert.Equal(t, workflowProfileID, config.AgentProfileID)
+}
+
+// The reported bug: a task pinned to an unpinned step still launches with the
+// workflow default (resolveEffectiveAgentProfile -> resolveStepAgentProfile
+// falls back to the workflow default and overrides the caller). MCP must report
+// that same profile, not the caller's explicit one, or the stored metadata
+// disagrees with the launched profile.
+func TestResolveMCPAutoStartConfig_WorkflowDefaultOutranksExplicitOnUnpinnedStep(t *testing.T) {
+	svc, _, workflowCtrl, workflowRepo := newTestTaskServiceWithWorkflow(t)
+	ctx := context.Background()
+	workspace, workflow := defaultWorkspaceAndWorkflow(t, ctx, svc)
+	workflowProfileID := "workflow-profile"
+	_, err := svc.UpdateWorkflow(ctx, workflow.ID, &service.UpdateWorkflowRequest{
+		AgentProfileID: &workflowProfileID,
+	})
+	require.NoError(t, err)
+	step := seedWorkflowStep(t, ctx, workflowRepo, &workflowmodels.WorkflowStep{
+		WorkflowID:      workflow.ID,
+		Name:            "Unassigned",
+		Position:        1,
+		AllowManualMove: true,
+	})
+	h := &Handlers{taskSvc: svc, workflowCtrl: workflowCtrl, logger: testLogger(t).WithFields()}
+
+	config := h.resolveMCPAutoStartConfig(ctx, &models.Task{
+		WorkspaceID:    workspace.ID,
+		WorkflowID:     workflow.ID,
+		WorkflowStepID: step.ID,
+	}, "explicit-profile", "", "")
+
+	assert.Equal(t, workflowProfileID, config.AgentProfileID)
+}
+
+// A task on a stepless workflow keeps the caller's explicit profile even when the
+// workflow has a default: with no steps CreateTask assigns no start step, so the
+// task launches stepless and resolveEffectiveAgentProfile keeps the caller
+// profile. The workflow default must not leak in when the task will not be on a
+// step at launch.
+func TestResolveMCPAutoStartConfig_WorkflowDefaultDoesNotOverrideExplicitOnSteplessWorkflow(t *testing.T) {
+	svc, _, workflowCtrl, _ := newTestTaskServiceWithWorkflow(t)
+	ctx := context.Background()
+	workspace, workflow := defaultWorkspaceAndWorkflow(t, ctx, svc)
+	workflowProfileID := "workflow-profile"
+	_, err := svc.UpdateWorkflow(ctx, workflow.ID, &service.UpdateWorkflowRequest{
+		AgentProfileID: &workflowProfileID,
+	})
+	require.NoError(t, err)
+	h := &Handlers{taskSvc: svc, workflowCtrl: workflowCtrl, logger: testLogger(t).WithFields()}
+
+	config := h.resolveMCPAutoStartConfig(ctx, &models.Task{
+		WorkspaceID: workspace.ID,
+		WorkflowID:  workflow.ID,
+	}, "explicit-profile", "", "")
+
+	assert.Equal(t, "explicit-profile", config.AgentProfileID)
+}
+
+// A task created with an explicit profile but no step, on a workflow that has a
+// start step, lands on that start step at CreateTask time. The orchestrator then
+// launches it with the start step's pinned profile, overriding the caller. The
+// reported/stored profile must match, or task metadata disagrees with the
+// launched profile. This covers the stepless-at-resolve-time gap: the step is
+// omitted here but the persisted task will sit on the start step at launch.
+func TestResolveMCPAutoStartConfig_StartStepPinnedOutranksExplicitWhenStepOmitted(t *testing.T) {
+	svc, _, workflowCtrl, workflowRepo := newTestTaskServiceWithWorkflow(t)
+	ctx := context.Background()
+	workspace, workflow := defaultWorkspaceAndWorkflow(t, ctx, svc)
+	seedWorkflowStep(t, ctx, workflowRepo, &workflowmodels.WorkflowStep{
+		WorkflowID:      workflow.ID,
+		Name:            "Start",
+		Position:        1,
+		IsStartStep:     true,
+		AgentProfileID:  "start-profile",
+		AllowManualMove: true,
+	})
+	h := &Handlers{taskSvc: svc, workflowCtrl: workflowCtrl, logger: testLogger(t).WithFields()}
+
+	config := h.resolveMCPAutoStartConfig(ctx, &models.Task{
+		WorkspaceID: workspace.ID,
+		WorkflowID:  workflow.ID,
+	}, "explicit-profile", "", "")
+
+	assert.Equal(t, "start-profile", config.AgentProfileID)
+}
+
+// Same stepless-at-resolve-time gap as above, but the start step is unpinned and
+// the workflow supplies a default: the launcher applies the workflow default over
+// the caller, so the reported profile must be the workflow default.
+func TestResolveMCPAutoStartConfig_WorkflowDefaultOutranksExplicitWhenStepOmitted(t *testing.T) {
+	svc, _, workflowCtrl, workflowRepo := newTestTaskServiceWithWorkflow(t)
+	ctx := context.Background()
+	workspace, workflow := defaultWorkspaceAndWorkflow(t, ctx, svc)
+	workflowProfileID := "workflow-profile"
+	_, err := svc.UpdateWorkflow(ctx, workflow.ID, &service.UpdateWorkflowRequest{
+		AgentProfileID: &workflowProfileID,
+	})
+	require.NoError(t, err)
+	seedWorkflowStep(t, ctx, workflowRepo, &workflowmodels.WorkflowStep{
+		WorkflowID:      workflow.ID,
+		Name:            "Start",
+		Position:        1,
+		IsStartStep:     true,
+		AllowManualMove: true,
+	})
+	h := &Handlers{taskSvc: svc, workflowCtrl: workflowCtrl, logger: testLogger(t).WithFields()}
+
+	config := h.resolveMCPAutoStartConfig(ctx, &models.Task{
+		WorkspaceID: workspace.ID,
+		WorkflowID:  workflow.ID,
+	}, "explicit-profile", "", "")
 
 	assert.Equal(t, workflowProfileID, config.AgentProfileID)
 }

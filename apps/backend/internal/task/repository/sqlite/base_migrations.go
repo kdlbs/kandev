@@ -76,6 +76,9 @@ func (r *Repository) runMigrations() error {
 	if err := r.migrateTasksRemoveWorkflowFK(); err != nil {
 		return err
 	}
+	if err := r.dropRetiredSlackIntegration(); err != nil {
+		return err
+	}
 	r.migrate.Apply("idx_tasks_queued_for_step", `CREATE INDEX IF NOT EXISTS idx_tasks_queued_for_step ON tasks(queued_for_step_id, queued_at)`)
 	// Remove deprecated workflow_step_id column from task_sessions
 	if err := r.migrateSessionsRemoveWorkflowStepID(); err != nil {
@@ -110,6 +113,19 @@ func (r *Repository) runMigrations() error {
 	// column added earlier.
 	r.migrate.Apply("task_sessions.name", `ALTER TABLE task_sessions ADD COLUMN name TEXT DEFAULT ''`)
 	r.migrate.Apply("repositories.copy_files", `ALTER TABLE repositories ADD COLUMN copy_files TEXT DEFAULT ''`)
+	r.migrate.Apply("repository_secret_bindings.table", `
+		CREATE TABLE IF NOT EXISTS repository_secret_bindings (
+			repository_id TEXT NOT NULL,
+			key TEXT NOT NULL,
+			secret_id TEXT NOT NULL,
+			created_at TIMESTAMP NOT NULL,
+			updated_at TIMESTAMP NOT NULL,
+			PRIMARY KEY (repository_id, key),
+			FOREIGN KEY (repository_id) REFERENCES repositories(id) ON DELETE CASCADE
+		)`)
+	r.migrate.Apply("repository_secret_bindings.index", `
+		CREATE INDEX IF NOT EXISTS idx_repository_secret_bindings_repository
+		ON repository_secret_bindings(repository_id)`)
 	r.migrate.Apply("repositories.remote_url", `ALTER TABLE repositories ADD COLUMN remote_url TEXT DEFAULT ''`)
 	r.migrate.Apply("repositories.provider_host", `ALTER TABLE repositories ADD COLUMN provider_host TEXT DEFAULT ''`)
 	r.migrate.Apply("repositories.provider_host.github_backfill", `
@@ -175,6 +191,7 @@ func (r *Repository) runMigrations() error {
 	// file path it was synced from.
 	r.migrate.Apply("workflows.source", `ALTER TABLE workflows ADD COLUMN source TEXT NOT NULL DEFAULT 'manual'`)
 	r.migrate.Apply("workflows.source_path", `ALTER TABLE workflows ADD COLUMN source_path TEXT NOT NULL DEFAULT ''`)
+	r.migrate.Apply("workflows.prompt", `ALTER TABLE workflows ADD COLUMN prompt TEXT NOT NULL DEFAULT ''`)
 	if err := r.ensureImproveKandevWorkflowTemplateUniqueness(); err != nil {
 		return err
 	}
@@ -220,7 +237,114 @@ func (r *Repository) runMigrations() error {
 		CREATE INDEX IF NOT EXISTS idx_task_status_summaries_workspace
 			ON task_status_summaries(workspace_id)`)
 
+	if err := r.clearRecoveredAgentErrors(); err != nil {
+		return err
+	}
+
 	return nil
+}
+
+// clearRecoveredAgentErrors repairs sessions whose stored agent failure was
+// overtaken by successful work before the orchestrator learned to clear it.
+//
+// Nothing used to retire `last_agent_error`, so a failure the agent recovered
+// from weeks ago still reads as live and keeps a red error icon on the task list
+// forever. The orchestrator now clears the record on turn completion; this
+// applies the same rule to history.
+//
+// Deliberately narrow: a record is cleared only when the session has an ordinary
+// agent message newer than the failure — the same "the agent has produced good
+// output since" signal. A failure with no successful work after it is current
+// and is left alone.
+func (r *Repository) clearRecoveredAgentErrors() error {
+	postgres := dialect.IsPostgres(r.db.DriverName())
+
+	sessionError := func(key string) string {
+		return jsonText(postgres, "s.metadata", "last_agent_error", key)
+	}
+	recoveredSessions := `
+		SELECT s.id
+		FROM task_sessions s
+		WHERE ` + sessionError("message") + ` IS NOT NULL
+			AND EXISTS (
+				SELECT 1 FROM task_session_messages m
+				WHERE m.task_session_id = s.id
+					AND m.author_type = 'agent'
+					AND m.type NOT IN ('error', 'status')
+					AND ` + timestampColumn(postgres, "m.created_at") + ` > ` +
+		timestampFromText(postgres, sessionError("occurred_at")) + `
+			)`
+
+	r.migrate.Apply("task_sessions.last_agent_error.recovered_cleanup",
+		`UPDATE task_sessions SET metadata = `+jsonRemoveKey(postgres, "metadata", "last_agent_error")+
+			` WHERE id IN (`+recoveredSessions+`)`)
+
+	// The summary row caches the derived error, so clearing the session record
+	// alone would leave the icon up until that session next emitted an event.
+	// A cached error naming a session that has no stored failure is stale by
+	// definition, which also sweeps up any earlier drift.
+	r.migrate.Apply("task_status_summaries.active_error.recovered_cleanup", `
+		UPDATE task_status_summaries
+		SET summary = `+jsonRemoveKey(postgres, "summary", "active_error")+`
+		WHERE `+jsonText(postgres, "summary", "active_error", "session_id")+` IN (
+			SELECT s.id FROM task_sessions s
+			WHERE `+sessionError("message")+` IS NULL
+		)`)
+	return nil
+}
+
+// jsonColumn makes a TEXT-typed JSON column safe to parse. Both dialects raise
+// on an empty or malformed document — Postgres on the `::jsonb` cast, SQLite in
+// `json_extract` — and these statements scan every row before filtering, so a
+// single such row aborts the whole migration. The repository writes ” and
+// 'null' for "no metadata", so both are normalized the way the rest of the
+// package already does.
+func jsonColumn(postgres bool, column string) string {
+	empty, open := "'{}'", ""
+	if postgres {
+		empty, open = "'{}'::jsonb", "::jsonb"
+	}
+	return "(CASE WHEN " + column + " IS NULL OR " + column + " = 'null' OR " + column +
+		" = '' THEN " + empty + " ELSE " + column + open + " END)"
+}
+
+// jsonText extracts a nested JSON text value from a TEXT-typed JSON column.
+func jsonText(postgres bool, column, parent, key string) string {
+	base := jsonColumn(postgres, column)
+	if postgres {
+		return "(" + base + " #>> '{" + parent + "," + key + "}')"
+	}
+	return "json_extract(" + base + ", '$." + parent + "." + key + "')"
+}
+
+// timestampColumn normalizes a timestamp column for comparison. SQLite stores
+// timestamps as text and would compare them lexically, so it needs Julian days;
+// on Postgres the column is already a timestamp.
+func timestampColumn(postgres bool, column string) string {
+	if postgres {
+		return "(" + column + ")::timestamptz"
+	}
+	return "julianday(" + column + ")"
+}
+
+// timestampFromText normalizes a timestamp extracted from JSON so it compares
+// against timestampColumn — the two carry different text shapes
+// ('2026-08-01 10:00:00+00:00' vs RFC3339 '2026-08-01T10:00:00Z'). NULLIF keeps
+// an empty stored timestamp from raising on the Postgres cast; it then compares
+// as NULL, so the row simply does not match.
+func timestampFromText(postgres bool, expression string) string {
+	if postgres {
+		return "(NULLIF(" + expression + ", '')::timestamptz)"
+	}
+	return "julianday(" + expression + ")"
+}
+
+func jsonRemoveKey(postgres bool, column, key string) string {
+	base := jsonColumn(postgres, column)
+	if postgres {
+		return "(" + base + " - '" + key + "')::text"
+	}
+	return "json_remove(" + base + ", '$." + key + "')"
 }
 
 // ensureImproveKandevWorkflowTemplateUniqueness removes the broad index from

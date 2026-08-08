@@ -7,17 +7,19 @@ import { useTaskPendingInput, type PendingInput } from "@/hooks/use-task-pending
 import { getTaskStateIcon } from "@/lib/ui/state-icons";
 import type { Repository, Task } from "@/lib/types/http";
 import { resolveRichTaskRowDetails } from "./rich-task-row-details";
+import { useTranslation } from "react-i18next";
 
 type RichTaskRowDetails = ReturnType<typeof resolveRichTaskRowDetails>;
 
 function ArchivedBadge({ task }: { task: Task }) {
+  const { t } = useTranslation();
   if (!task.archived_at) return null;
   return (
     <Badge
       variant="outline"
       className="shrink-0 border-amber-500/30 px-1.5 py-0 text-[10px] text-amber-500"
     >
-      Archived
+      {t("tasks:archived")}
     </Badge>
   );
 }
@@ -33,13 +35,12 @@ function PrimaryTaskLine({
 }) {
   return (
     <>
-      {getTaskStateIcon(
-        task.state,
-        "h-4 w-4 shrink-0",
-        pendingInput.clarification,
-        task.foreground_activity,
-        pendingInput.permission,
-      )}
+      {getTaskStateIcon(task.state, "h-4 w-4 shrink-0", {
+        hasPendingClarification: pendingInput.clarification,
+        foregroundActivity: task.foreground_activity,
+        hasPendingPermission: pendingInput.permission,
+        interrupted: task.interrupted,
+      })}
       <span className="min-w-0 truncate font-medium" data-testid="tasks-list-row-title">
         {task.title}
       </span>
@@ -87,11 +88,12 @@ function RichMetadataBadges({ details }: { details: RichTaskRowDetails }) {
 }
 
 function ReviewAttention({ attention }: { attention: RichTaskRowDetails["reviewAttention"] }) {
+  const { t } = useTranslation();
   if (attention === "approval_required") {
     return (
       <div className="mt-1 flex items-center gap-1 pl-6 text-amber-700 dark:text-amber-600">
         <IconAlertCircle className="h-3.5 w-3.5 shrink-0" />
-        <span className="text-[10px] font-medium">Approval Required</span>
+        <span className="text-[10px] font-medium">{t("tasks:approvalRequired")}</span>
       </div>
     );
   }
@@ -101,7 +103,7 @@ function ReviewAttention({ attention }: { attention: RichTaskRowDetails["reviewA
       className="mt-1 ml-6 border-amber-500 bg-amber-50 px-1.5 py-0 text-[10px] text-amber-600 dark:bg-amber-950/50"
       variant="outline"
     >
-      Changes Requested
+      {t("tasks:changesRequested")}
     </Badge>
   );
 }

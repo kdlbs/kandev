@@ -601,6 +601,7 @@ func buildSSHCreateInstanceRequest(req *ExecutorCreateRequest, workspacePath str
 		RequiresProcessKill: requiresProcessKillFromReq(req),
 		StripEnv:            stripEnvFromReq(req),
 		BaseBranches:        getMetadataStringMap(req.Metadata, MetadataKeyBaseBranches),
+		RemoteContributions: req.RemoteContributions,
 		Env:                 sshRemoteAgentEnv(req),
 	}
 }
@@ -736,6 +737,9 @@ const (
 	envKeyGoogleAPIKey         = "GOOGLE_API_KEY"
 	envKeyGitHubToken          = "GITHUB_TOKEN"
 	envKeyGHToken              = "GH_TOKEN"
+	envKeyGitLabToken          = "GITLAB_TOKEN"
+	envKeyGitLabHost           = "GITLAB_HOST"
+	envKeyKandevGitLabHost     = "KANDEV_GITLAB_HOST"
 )
 
 var sshRemoteAgentCredentialEnvKeys = []string{
@@ -746,6 +750,9 @@ var sshRemoteAgentCredentialEnvKeys = []string{
 	envKeyGoogleAPIKey,
 	envKeyGitHubToken,
 	envKeyGHToken,
+	envKeyGitLabToken,
+	envKeyGitLabHost,
+	envKeyKandevGitLabHost,
 }
 
 // sshRemoteAgentEnv builds the env map sent to the remote agent instance. Each
@@ -769,6 +776,25 @@ func sshRemoteAgentEnv(req *ExecutorCreateRequest) map[string]string {
 	}
 	for key, value := range managedGitHubBrokerEnv(req.Env) {
 		env[key] = value
+	}
+	// GitLab workspace credentials use the indexed Git config helper rather
+	// than a GitHub broker lease. Preserve that credential-free routing shape
+	// for the remote agentctl process as well.
+	copyIndexedGitConfig(req.Env, env)
+
+	for _, key := range req.ApprovedSecretEnvKeys {
+		if !posixSSHEnvIdentifier.MatchString(key) {
+			continue
+		}
+		// Repository approval grants forwarding of an otherwise non-managed
+		// key; it must never replace a credential or broker value selected by
+		// the executor composition boundary.
+		if _, exists := env[key]; exists {
+			continue
+		}
+		if value := req.Env[key]; value != "" {
+			env[key] = value
+		}
 	}
 	if len(env) == 0 {
 		return nil

@@ -514,6 +514,8 @@ export type PRDiffFile = {
   deletions: number;
   patch: string;
   old_path?: string;
+  /** True when the PR file belongs to an initialized Git submodule scope. */
+  is_submodule?: boolean;
 };
 
 // PR commit info (from GitHub API)
@@ -525,6 +527,21 @@ export type PRCommitInfo = {
   additions: number;
   deletions: number;
   files_changed: number;
+  /** False when the PR commit-list endpoint did not include exact stats. */
+  stats_available?: boolean;
+};
+
+/** Exact metadata and files returned by the individual GitHub commit endpoint. */
+export type PRCommitDetail = {
+  sha: string;
+  message: string;
+  author_login: string;
+  author_name: string;
+  author_date: string;
+  additions: number;
+  deletions: number;
+  files_changed: number;
+  files: PRDiffFile[];
 };
 
 // GitHub Issue (separate from Pull Request)

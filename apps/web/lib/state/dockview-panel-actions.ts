@@ -1,4 +1,6 @@
 import type { DockviewApi, DockviewGroupPanel } from "dockview-react";
+import type { CommitDetailTarget } from "@/components/task/changes-diff-target";
+import { t } from "@/lib/i18n";
 import { focusOrAddPanel } from "./dockview-layout-builders";
 import {
   parsePluginPanelId,
@@ -28,6 +30,26 @@ type SimplePanelOpts = {
 
 function addSimplePanel(api: DockviewApi, groupId: string, opts: SimplePanelOpts): void {
   focusOrAddPanel(api, { ...opts, position: { referenceGroup: groupId } });
+}
+
+function openBrowserPanel(api: DockviewApi, centerGroupId: string, url: string): void {
+  const browserPanel =
+    (api.activePanel?.api.component === "browser" ? api.activePanel : undefined) ??
+    api.panels.find((panel) => panel.api.component === "browser");
+
+  if (browserPanel) {
+    browserPanel.api.updateParameters({ url });
+    browserPanel.api.setActive();
+    return;
+  }
+
+  focusOrAddPanel(api, {
+    id: `browser:${url}`,
+    component: "browser",
+    title: t("task:browser"),
+    params: { url },
+    position: { referenceGroup: centerGroupId },
+  });
 }
 
 type SidePanelOpts = { groupId?: string; quiet?: boolean; inCenter?: boolean };
@@ -360,20 +382,46 @@ function buildFileDiffAction(get: StoreGet) {
   };
 }
 
+function buildCommitItemId(
+  requestedTarget: CommitDetailTarget | string,
+  target: CommitDetailTarget,
+  legacyRepo?: string,
+): string {
+  if (typeof requestedTarget === "string") {
+    return legacyRepo ? `${legacyRepo}:${requestedTarget}` : requestedTarget;
+  }
+  if (target.source === "local") return `local:${target.repo ?? ""}:${target.sha}`;
+  return `github:${target.workspaceId}:${target.owner}/${target.repo}:${target.sha}`;
+}
+
 function buildCommitDetailAction(get: StoreGet) {
-  return (sha: string, opts?: OpenPanelOpts & { groupId?: string; repo?: string }) => {
+  return (
+    requestedTarget: CommitDetailTarget | string,
+    opts?: OpenPanelOpts & { groupId?: string; repo?: string },
+  ) => {
     const { api, centerGroupId } = get();
     if (!api) return;
-    // Multi-repo: scope the panel id by repo so the same SHA from two repos
-    // (rare in practice, but cheap to be correct) doesn't collide and so the
-    // existing-tab dedup doesn't reuse the wrong-repo's panel.
-    const itemId = opts?.repo ? `${opts.repo}:${sha}` : sha;
+    const target: CommitDetailTarget =
+      typeof requestedTarget === "string"
+        ? {
+            source: "local",
+            sha: requestedTarget,
+            ...(opts?.repo ? { repo: opts.repo } : {}),
+          }
+        : requestedTarget;
+    // Preserve the legacy string-call identity for saved callers/tests; new
+    // discriminated targets include provenance and repository identity.
+    const itemId = buildCommitItemId(requestedTarget, target, opts?.repo);
     openOrReplacePreview({
       api,
       type: "commit-detail",
       itemId,
-      title: sha.slice(0, 7),
-      params: { commitSha: sha, repo: opts?.repo },
+      title: target.sha.slice(0, 7),
+      params: {
+        target,
+        commitSha: target.sha,
+        ...(target.source === "local" && target.repo ? { repo: target.repo } : {}),
+      },
       groupId: opts?.groupId ?? centerGroupId,
       quiet: opts?.quiet,
       pin: opts?.pin,
@@ -435,9 +483,14 @@ export function buildPanelActions(set: StoreSet, get: StoreGet) {
       addSimplePanel(api, groupId ?? centerGroupId, {
         id: browserId,
         component: "browser",
-        title: "Browser",
+        title: t("task:browser"),
         params: { url: url ?? "" },
       });
+    },
+    openBrowserPanel: (url: string) => {
+      const { api, centerGroupId } = get();
+      if (!api) return;
+      openBrowserPanel(api, centerGroupId, url);
     },
     promotePreviewToPinned: (type: PreviewType): void => {
       const { api } = get();
@@ -586,6 +639,16 @@ export function buildExtraPanelActions(get: StoreGet) {
       api.panels
         .filter((p) => parsePluginPanelId(p.id)?.pluginId === pluginId)
         .forEach((p) => api.removePanel(p));
+    },
+    addTodosPanel: (opts?: SidePanelOpts) => {
+      const { api, centerGroupId } = get();
+      if (!api) return;
+      addSidePanel(
+        api,
+        centerGroupId,
+        { id: "todos", component: "todos", title: t("common:todos") },
+        opts,
+      );
     },
     ...buildReviewPanelActions(get),
     addTerminalPanel: (

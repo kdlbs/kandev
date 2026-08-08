@@ -15,6 +15,7 @@ import type {
   ListWorkspacesResponse,
   RepositoryPathValidationResponse,
   Repository,
+  RepositorySecretBinding,
   RepositoryScript,
   StepEvents,
   Workspace,
@@ -137,6 +138,7 @@ export async function createWorkflowAction(payload: {
   workspace_id: string;
   name: string;
   description?: string;
+  prompt?: string;
   workflow_template_id?: string;
 }) {
   return fetchJson<Workflow>(`${apiBaseUrl}/api/v1/workflows`, {
@@ -147,7 +149,7 @@ export async function createWorkflowAction(payload: {
 
 export async function updateWorkflowAction(
   id: string,
-  payload: { name?: string; description?: string; agent_profile_id?: string },
+  payload: { name?: string; description?: string; prompt?: string; agent_profile_id?: string },
 ) {
   return fetchJson<Workflow>(`${apiBaseUrl}/api/v1/workflows/${id}`, {
     method: "PATCH",
@@ -230,6 +232,7 @@ export async function createRepositoryAction(payload: {
   cleanup_script: string;
   dev_script: string;
   copy_files: string;
+  secret_bindings?: RepositorySecretBinding[];
 }) {
   return fetchJson<Repository>(
     `${apiBaseUrl}/api/v1/workspaces/${payload.workspace_id}/repositories`,
@@ -252,6 +255,7 @@ export async function createRepositoryAction(payload: {
         cleanup_script: payload.cleanup_script,
         dev_script: payload.dev_script,
         copy_files: payload.copy_files,
+        secret_bindings: payload.secret_bindings,
       }),
     },
   );

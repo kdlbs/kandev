@@ -1,6 +1,10 @@
 package lifecycle
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/kandev/kandev/internal/task/models"
+)
 
 func TestLaunchRequest_RepoSpecs_ReturnsExplicitListWhenSet(t *testing.T) {
 	req := &LaunchRequest{
@@ -24,6 +28,7 @@ func TestLaunchRequest_RepoSpecs_ReturnsExplicitListWhenSet(t *testing.T) {
 }
 
 func TestLaunchRequest_RepoSpecs_SynthesizesFromLegacyFields(t *testing.T) {
+	binding := models.RemoteContribution{CanonicalURL: "https://github.com/acme/widget/pull/7"}
 	req := &LaunchRequest{
 		RepositoryID:         "repo-x",
 		RepositoryPath:       "/x",
@@ -35,6 +40,7 @@ func TestLaunchRequest_RepoSpecs_SynthesizesFromLegacyFields(t *testing.T) {
 		RepoName:             "x",
 		BranchSlug:           "feature-y",
 		BranchIdentitySlug:   "feature-y",
+		RemoteContribution:   &binding,
 	}
 	specs := req.RepoSpecs()
 	if len(specs) != 1 {
@@ -47,6 +53,9 @@ func TestLaunchRequest_RepoSpecs_SynthesizesFromLegacyFields(t *testing.T) {
 		!got.PullBeforeWorktree || got.RepoName != "x" ||
 		got.BranchSlug != "feature-y" || got.BranchIdentitySlug != "feature-y" {
 		t.Errorf("synthesized spec mismatch: %+v", got)
+	}
+	if got.RemoteContribution != &binding {
+		t.Errorf("remote contribution = %#v, want %#v", got.RemoteContribution, &binding)
 	}
 }
 

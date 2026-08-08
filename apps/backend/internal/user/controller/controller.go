@@ -66,6 +66,7 @@ func (c *Controller) UpdateUserSettings(ctx context.Context, req dto.UpdateUserS
 		ShowScrollToLastPrompt:          req.ShowScrollToLastPrompt,
 		ShowScrollToStart:               req.ShowScrollToStart,
 		ShowTranscriptAutoScrollControl: req.ShowTranscriptAutoScrollControl,
+		ShowTodoListPanel:               req.ShowTodoListPanel,
 		ShowReleaseNotification:         req.ShowReleaseNotification,
 		ReleaseNotesLastSeenVersion:     req.ReleaseNotesLastSeenVersion,
 		LspAutoStartLanguages:           req.LspAutoStartLanguages,

@@ -4,6 +4,8 @@ export type LastAgentError = {
   message: string;
   occurredAt?: string;
   agentExecutionId?: string;
+  /** Adapter-validated provider remediation URL; never derived from prose. */
+  remediationUrl?: string;
   dismissedAt?: string;
 };
 
@@ -55,6 +57,8 @@ export function readLastAgentError(metadata: Record<string, unknown> | null | un
     occurredAt: readOptionalString(record.occurred_at) ?? readOptionalString(record.occurredAt),
     agentExecutionId:
       readOptionalString(record.agent_execution_id) ?? readOptionalString(record.agentExecutionId),
+    remediationUrl:
+      readOptionalString(record.remediation_url) ?? readOptionalString(record.remediationUrl),
   } satisfies LastAgentError;
 }
 

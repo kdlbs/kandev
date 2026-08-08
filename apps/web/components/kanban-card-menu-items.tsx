@@ -4,14 +4,8 @@ import { useMemo, type ReactNode } from "react";
 import {
   IconArchive,
   IconArrowRight,
-  IconBrandGitlab,
-  IconBrandSentry,
-  IconCircleDot,
-  IconGitPullRequest,
-  IconLink,
   IconLoader,
   IconLogicBuffer,
-  IconTicket,
   IconTrash,
   IconUnlink,
 } from "@tabler/icons-react";
@@ -40,6 +34,10 @@ import {
 import { cn } from "@/lib/utils";
 import type { PluginTaskMenuContext } from "@/lib/plugins/types";
 import { buildEditMenuEntry } from "./kanban-card-edit-submenu";
+import { buildLinkSubmenu } from "./kanban-card-link-submenu";
+import { buildPrimaryPluginEntries } from "./kanban-card-plugin-menu-actions";
+import { useTranslation } from "react-i18next";
+import { t } from "@/lib/i18n";
 
 type ItemEntry = {
   kind: "item";
@@ -114,14 +112,17 @@ function resolvePluginMenuContext(context?: PluginTaskMenuContext): PluginTaskMe
 }
 
 function StepBadges({ step, isCurrent }: { step: TaskMoveStep; isCurrent: boolean }) {
+  const { t } = useTranslation();
   const hasAutoStart = stepHasAutoStart(step);
   if (!isCurrent && !hasAutoStart) return null;
 
   return (
     <span className="ml-auto flex items-center gap-1 text-[10px] text-muted-foreground">
-      {isCurrent && <span data-testid={`task-context-step-current-${step.id}`}>Current</span>}
+      {isCurrent && (
+        <span data-testid={`task-context-step-current-${step.id}`}>{t("kanban:current")}</span>
+      )}
       {hasAutoStart && (
-        <span data-testid={`task-context-step-autostart-${step.id}`}>Auto-start</span>
+        <span data-testid={`task-context-step-autostart-${step.id}`}>{t("kanban:autoStart")}</span>
       )}
     </span>
   );
@@ -164,7 +165,7 @@ function buildMoveToCurrentWorkflowSubmenu({
     key: "move-to",
     testId: "task-context-move-to",
     icon: <IconArrowRight className="mr-2 h-4 w-4" />,
-    label: "Move to",
+    label: t("kanban:moveTo"),
     disabled,
     className: "w-48",
     children: steps.map((step) => buildStepEntry(step, currentStepId, onMoveToStep)),
@@ -191,7 +192,7 @@ function buildWorkflowTargetEntry({
       label: <span className="flex-1 truncate">{workflow.name}</span>,
       trailing: (
         <span data-testid="task-context-disabled-reason" className="ml-2 text-[10px]">
-          No steps
+          {t("kanban:noSteps")}
         </span>
       ),
     };
@@ -230,7 +231,7 @@ function buildSendToWorkflowSubmenu({
     key: "send-to-workflow",
     testId: "task-context-send-to-workflow",
     icon: <IconLogicBuffer className="mr-2 h-4 w-4" />,
-    label: "Send to workflow",
+    label: t("kanban:sendToWorkflow"),
     disabled,
     className: "w-56",
     children: targets.map((workflow) =>
@@ -241,122 +242,6 @@ function buildSendToWorkflowSubmenu({
         onSendToWorkflow,
       }),
     ),
-  };
-}
-
-function buildGitLabMergeRequestLinkEntry({
-  disabled,
-  onLinkMergeRequest,
-}: {
-  disabled?: boolean;
-  onLinkMergeRequest?: () => void;
-}): KanbanCardMenuEntry | null {
-  if (!onLinkMergeRequest) return null;
-  return {
-    kind: "item",
-    key: "link-gitlab-merge-request",
-    testId: "task-context-link-gitlab-merge-request",
-    icon: <IconBrandGitlab className="mr-2 h-4 w-4" />,
-    label: "GitLab Merge Request",
-    disabled,
-    onSelect: onLinkMergeRequest,
-  };
-}
-
-function buildLinkSubmenu({
-  disabled,
-  onLinkPullRequest,
-  onLinkIssue,
-  onLinkMergeRequest,
-  onLinkJiraTicket,
-  onLinkLinearIssue,
-  onLinkSentryIssue,
-}: {
-  disabled?: boolean;
-  onLinkPullRequest?: () => void;
-  onLinkIssue?: () => void;
-  onLinkMergeRequest?: () => void;
-  onLinkJiraTicket?: () => void;
-  onLinkLinearIssue?: () => void;
-  onLinkSentryIssue?: () => void;
-}): KanbanCardMenuEntry | null {
-  if (
-    !onLinkPullRequest &&
-    !onLinkIssue &&
-    !onLinkMergeRequest &&
-    !onLinkJiraTicket &&
-    !onLinkLinearIssue &&
-    !onLinkSentryIssue
-  ) {
-    return null;
-  }
-  const children: KanbanCardMenuEntry[] = [];
-  if (onLinkPullRequest) {
-    children.push({
-      kind: "item",
-      key: "link-github-pull-request",
-      testId: "task-context-link-github-pull-request",
-      icon: <IconGitPullRequest className="mr-2 h-4 w-4" />,
-      label: "GitHub Pull Request",
-      disabled,
-      onSelect: onLinkPullRequest,
-    });
-  }
-  if (onLinkIssue) {
-    children.push({
-      kind: "item",
-      key: "link-github-issue",
-      testId: "task-context-link-github-issue",
-      icon: <IconCircleDot className="mr-2 h-4 w-4" />,
-      label: "GitHub Issue",
-      disabled,
-      onSelect: onLinkIssue,
-    });
-  }
-  const gitLabEntry = buildGitLabMergeRequestLinkEntry({ disabled, onLinkMergeRequest });
-  if (gitLabEntry) children.push(gitLabEntry);
-  if (onLinkJiraTicket) {
-    children.push({
-      kind: "item",
-      key: "link-jira-ticket",
-      testId: "task-context-link-jira-ticket",
-      icon: <IconTicket className="mr-2 h-4 w-4" />,
-      label: "Jira Ticket",
-      disabled,
-      onSelect: onLinkJiraTicket,
-    });
-  }
-  if (onLinkLinearIssue) {
-    children.push({
-      kind: "item",
-      key: "link-linear-issue",
-      testId: "task-context-link-linear-issue",
-      icon: <IconCircleDot className="mr-2 h-4 w-4" />,
-      label: "Linear Issue",
-      disabled,
-      onSelect: onLinkLinearIssue,
-    });
-  }
-  if (onLinkSentryIssue) {
-    children.push({
-      kind: "item",
-      key: "link-sentry-issue",
-      testId: "task-context-link-sentry-issue",
-      icon: <IconBrandSentry className="mr-2 h-4 w-4" />,
-      label: "Sentry Issue",
-      disabled,
-      onSelect: onLinkSentryIssue,
-    });
-  }
-  return {
-    kind: "submenu",
-    key: "link",
-    testId: "task-context-link",
-    icon: <IconLink className="mr-2 h-4 w-4" />,
-    label: "Link",
-    disabled,
-    className: "w-56",
-    children,
   };
 }
 
@@ -412,6 +297,13 @@ export function buildKanbanCardMenuEntries({
   });
   if (sendToEntry) entries.push(sendToEntry);
 
+  entries.push(
+    ...buildPrimaryPluginEntries({
+      disabled: isProcessing,
+      context: resolvePluginMenuContext(pluginMenuContext),
+    }),
+  );
+
   const linkEntry = buildLinkSubmenu({
     disabled: isProcessing,
     onLinkPullRequest,
@@ -431,7 +323,7 @@ export function buildKanbanCardMenuEntries({
     ) : (
       <IconArchive className="mr-2 h-4 w-4" />
     ),
-    label: "Archive",
+    label: t("kanban:archive"),
     disabled: isProcessing || !onArchive,
     onSelect: onArchive,
   });
@@ -448,7 +340,7 @@ export function buildKanbanCardMenuEntries({
     ) : (
       <IconTrash className="mr-2 h-4 w-4" />
     ),
-    label: "Delete",
+    label: t("kanban:delete"),
     destructive: true,
     disabled: isProcessing || !onDelete,
     onSelect: onDelete,
@@ -475,7 +367,7 @@ function buildDetachEntry({
     ) : (
       <IconUnlink className="mr-2 h-4 w-4" />
     ),
-    label: "Detach from parent",
+    label: t("kanban:detachFromParent"),
     disabled: isProcessing,
     onSelect: onDetach,
   };

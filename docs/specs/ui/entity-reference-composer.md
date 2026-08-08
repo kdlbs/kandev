@@ -1,6 +1,7 @@
 ---
 status: shipped
 created: 2026-07-21
+updated: 2026-08-08
 owner: kandev
 ---
 
@@ -25,6 +26,8 @@ Users discuss external work items in agent chat, but plain ticket keys and pull-
 - Results are grouped by provider and work-item kind. Provider order and ordering within each group are deterministic; Kandev does not present unrelated provider scores as globally comparable relevance. Sources that are not configured or cannot search the active workspace are omitted from the menu rather than rendered as empty unavailable sections.
 - Search groups carry provider-neutral display descriptors. Composer, message, and queue code use normalized fields and a generic fallback rather than exhaustive switches over native integrations, so a future plugin bridge can supply the same contract.
 - Search is debounced, cancels or ignores stale requests, and caps work per provider and configured workspace/project scope. Each connected provider continues examining available in-scope results until it finds the requested number of matches, has no more results, reaches a search bound, or the request is canceled. One disconnected, slow, rate-limited, or failing provider never hides successful results from other providers.
+- Cancellation of a superseded search is a normal client outcome. The backend
+  does not report it as an internal server failure.
 - Arrow Up and Arrow Down move the active result. Tab or Enter selects it. Pointer or touch selection has the same behavior. Escape closes the menu without changing or sending the draft.
 - Selection replaces only the active `#query` range with an inline reference chip, appends a trailing space, keeps focus in the composer, and never submits or queues the message.
 - A chip displays a stable key when one exists (for example `#ENG-123` or `#123`) and otherwise a concise title. It retains a title snapshot and source label for disambiguation.
@@ -101,7 +104,13 @@ The editor's `entityReference` atom stores the same presentation and identity fi
 - Group status is one of `ok`, `not_configured`, `unauthorized`, `rate_limited`, `timeout`, `upstream_error`, or `unsupported_scope`.
 - `source` is an opaque stable source ID. `display_name` and `kind_label` let the UI render a provider without importing its native model; unknown providers use a generic work-item icon.
 - Sources with `not_configured` or `unsupported_scope` status are omitted from the menu, but their safe status remains available in the response. Transient failures from configured sources may be shown non-disruptively. Raw provider errors are never returned.
-- Invalid query/limit returns 400. An unknown workspace returns 404. Aggregate infrastructure failure returns 500.
+- Invalid query/limit returns 400. An unknown workspace returns 404. A request
+  canceled by the client returns 499. Aggregate infrastructure failure returns
+  500, and every 500 has one corresponding structured backend error record.
+- Search diagnostics can include the workspace ID, stable failure stage, source,
+  provider, kind, and safe status. They never include the query, prompt,
+  credentials, tokens, or raw provider payloads. Provider-level failures remain
+  represented as safe groups in an HTTP 200 aggregate response.
 
 ### Message submission
 
@@ -129,6 +138,11 @@ Typing updates Primed/Searching/Results/Empty. Escape, moving outside the trigge
 ## Failure modes
 
 - A provider timeout, auth failure, rate limit, malformed upstream response, or unsupported workspace scope produces a safe group status while other groups remain selectable.
+- A canceled request stops provider work and returns 499. It is not logged as an
+  unexpected HTTP 500.
+- A workspace repository failure or another unexpected aggregate search failure
+  returns 500 only after the handler writes one structured error with the safe
+  workspace and failure-stage context.
 - If the aggregate endpoint is unreachable, the menu preserves the draft and shows a retryable error state. It never submits the draft.
 - Stale responses after continued typing, session changes, or menu dismissal are ignored.
 - Invalid or unsafe returned URLs are discarded. URLs must use HTTP(S) and match the configured provider origin; internal routes are rejected.
@@ -151,6 +165,16 @@ Typing updates Primed/Searching/Results/Empty. Escape, moving outside the trigge
 - **GIVEN** the menu is open on a phone viewport, **WHEN** the user taps a result, **THEN** the same chip is inserted and every required row is touch reachable without horizontal document overflow.
 - **GIVEN** GitHub times out while Jira returns hits, **WHEN** search finishes, **THEN** Jira results remain selectable and GitHub exposes only a safe timeout state.
 - **GIVEN** the user types another character before an earlier request returns, **WHEN** the older response arrives last, **THEN** only results for the newest query are displayed.
+- **GIVEN** the browser cancels a superseded search request, **WHEN** the backend
+  observes cancellation, **THEN** provider work stops and the request completes
+  as 499 without an internal-server-error record.
+- **GIVEN** workspace validation or aggregate search fails unexpectedly, **WHEN**
+  the endpoint returns 500, **THEN** one structured backend error identifies the
+  workspace and stable failure stage without recording the query or provider
+  secrets.
+- **GIVEN** one provider search fails while another succeeds, **WHEN** aggregation
+  completes, **THEN** HTTP 200 contains a safe status for the failed provider and
+  retains the successful results.
 - **GIVEN** a connected provider's first available results do not match the query but later in-scope results do, **WHEN** the user searches, **THEN** matching results are returned up to the requested per-source limit unless the provider has no more results, a workspace/project search bound is reached, or the request is canceled.
 - **GIVEN** a selected external reference followed by ordinary text, **WHEN** the user explicitly sends, **THEN** the visible message contains a clickable chip/Markdown fallback and its stable identity is stored in message metadata and supplied to the agent as sanitized reference context.
 - **GIVEN** the agent is busy, **WHEN** the user queues a message containing two references, **THEN** both references survive queue display, backend restart, drain, and sent-message rendering.
@@ -172,3 +196,7 @@ Typing updates Primed/Searching/Results/Empty. Escape, moving outside the trigge
 - Raw provider query-language syntax, advanced filters, user-controlled result pagination, or a full-screen global search page.
 - Implementing the plugin manifest contribution, workspace permission/grant, Kandev-to-plugin search RPC, or loading plugin-provided sources in this release. The normalized registry and DTO MUST remain transport-neutral so a later plugin bridge can implement the same provider contract without changing composer/message formats. Search-provider contribution is distinct from the plugin-to-Kandev Host data API and its `api_read` capabilities.
 - Cross-workspace search.
+
+## Implementation plan
+
+[Backend failure containment](../../plans/backend-failure-containment/plan.md)

@@ -1,3 +1,11 @@
+/**
+ * Seeds for the first task the onboarding wizard creates.
+ *
+ * Deliberately NOT localized. The title is persisted as the task's own title and
+ * the description is sent verbatim to the coordinator agent as its prompt —
+ * translating either would change stored data and the instructions the model
+ * receives, which is a bug rather than a missing translation.
+ */
 export const DEFAULT_ONBOARDING_TASK_TITLE = "Setup Workspace";
 
 export const DEFAULT_ONBOARDING_TASK_DESCRIPTION = `Investigate the project in https://github.com/org/repo. Replace this URL with each repository that should be managed in this workspace.

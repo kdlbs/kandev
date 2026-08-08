@@ -140,6 +140,7 @@ export function mergeBaseWithKanban(
     position: kanbanTask.position ?? baseTask.position,
     state: (kanbanTask.state as Task["state"] | undefined) ?? baseTask.state,
     repositories: baseTask.repositories,
+    metadata: kanbanTask.metadata !== undefined ? kanbanTask.metadata : baseTask.metadata,
     archived_at: hasNewerKanbanState ? null : baseTask.archived_at,
   };
 }
@@ -158,6 +159,7 @@ export function buildTaskFromKanban(kanbanTask: KanbanState["tasks"][number]): T
     repositories: [],
     created_at: "",
     updated_at: kanbanTask.updatedAt ?? "",
+    metadata: kanbanTask.metadata,
   };
 }
 

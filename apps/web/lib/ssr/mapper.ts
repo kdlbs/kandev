@@ -53,6 +53,7 @@ export function snapshotToState(snapshot: WorkflowSnapshot): Partial<AppState> {
         sessionCount: task.session_count ?? undefined,
         reviewStatus: task.review_status ?? undefined,
         parentTaskId: task.parent_id ?? undefined,
+        metadata: task.metadata,
         workspaceMode: workspaceModeFromMetadata(task.metadata),
         updatedAt: task.updated_at,
         isPRReview: isPRReviewFromMetadata(task.metadata),

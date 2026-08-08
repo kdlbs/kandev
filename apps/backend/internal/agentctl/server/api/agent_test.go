@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/coder/acp-go-sdk"
 	"github.com/gorilla/websocket"
 	"github.com/kandev/kandev/internal/agentctl/server/adapter"
 	"github.com/kandev/kandev/internal/agentctl/server/config"
@@ -416,6 +417,62 @@ func TestHandleWSPrompt_NoAdapter(t *testing.T) {
 	}
 	if !strings.Contains(errPayload.Message, "agent not running") {
 		t.Errorf("expected 'agent not running', got %q", errPayload.Message)
+	}
+}
+
+// TestHandleWSPrompt_SanitizesACPActionURLError is a regression test for the
+// structured ACP service-failure path: RequestError.Error() serializes Data
+// (action_url and any other raw provider fields), so the sanitized provider
+// message must be the only text that reaches the error event and downstream
+// persisted/UI error surfaces.
+func TestHandleWSPrompt_SanitizesACPActionURLError(t *testing.T) {
+	s := newTestServer(t)
+	prompted := make(chan uint64, 1)
+	const wantURL = "https://opencode.ai/workspace/wrk_01KQM7K5CYT715264YKKFB17ZY/go"
+	s.procMgr.SetAdapterForTest(&promptErrorAdapter{
+		sessionID: "session-123",
+		err: &acp.RequestError{
+			Code:    -32603,
+			Message: "AI_APICallError: 5-hour usage limit reached: " + wantURL,
+			Data: map[string]any{
+				"action_url": wantURL,
+				"raw_secret": "provider-internal-value",
+			},
+		},
+		prompted: prompted,
+	})
+
+	msg, _ := ws.NewRequest("req-1", "agent.prompt", PromptRequest{
+		Text:             "hello",
+		PromptGeneration: 42,
+	})
+	resp := s.handleWSPrompt(context.Background(), msg)
+	if resp.Type != ws.MessageTypeResponse {
+		t.Fatalf("expected response type, got %q", resp.Type)
+	}
+
+	select {
+	case event := <-s.procMgr.GetUpdates():
+		if event.Type != adapter.EventTypeError {
+			t.Fatalf("event type = %q, want error", event.Type)
+		}
+		if strings.Contains(event.Error, "https://") ||
+			strings.Contains(event.Error, "wrk_") ||
+			strings.Contains(event.Error, "raw_secret") ||
+			strings.Contains(event.Error, "provider-internal-value") {
+			t.Fatalf("error message leaks raw ACP data: %q", event.Error)
+		}
+		if !strings.Contains(event.Error, "usage limit reached") {
+			t.Fatalf("error message lost the sanitized copy: %q", event.Error)
+		}
+		if event.ProviderError == nil {
+			t.Fatal("expected a provider error diagnostic")
+		}
+		if event.ProviderError.RemediationURL != wantURL {
+			t.Fatalf("remediation URL = %q, want %q", event.ProviderError.RemediationURL, wantURL)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("expected an error event")
 	}
 }
 

@@ -9,6 +9,7 @@ import type { ToolCallMetadata } from "@/components/task/chat/types";
 import { readMonitorView } from "@/components/task/chat/types";
 import { ExpandableRow } from "./expandable-row";
 import { useExpandState } from "./use-expand-state";
+import { t } from "@/lib/i18n";
 
 type MonitorMessageProps = {
   comment: Message;
@@ -45,7 +46,9 @@ type MonitorViewModel = {
 
 function pluralizeEventCount(n: number): string {
   if (n <= 0) return "";
-  return ` · ${n} event${n === 1 ? "" : "s"}`;
+  // The leading separator stays in code — it is layout punctuation between the
+  // title and the count, not copy a translator should have to reproduce.
+  return ` · ${t("task:eventCount", { count: n })}`;
 }
 
 function buildMonitorViewModel(comment: Message): MonitorViewModel {
@@ -59,7 +62,7 @@ function buildMonitorViewModel(comment: Message): MonitorViewModel {
     endReason: view.end_reason ?? "",
     eventCount,
     recentEvents: view.recent_events ?? [],
-    title: command ? `Monitor: ${command}` : "Monitor",
+    title: command ? t("task:monitorCommand", { command }) : t("task:monitor"),
     countSuffix: pluralizeEventCount(eventCount),
   };
 }

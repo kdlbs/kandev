@@ -50,6 +50,7 @@ import {
 } from "./office-agent-client-routes";
 import { RoutineDetailRoute } from "./office-routine-client-routes";
 import { TooltipProvider } from "@kandev/ui/tooltip";
+import { Trans, useTranslation } from "react-i18next";
 
 type RouteRenderer = () => React.ReactNode;
 
@@ -107,7 +108,20 @@ export function OfficeRoutes({ pathname }: { pathname: string }) {
     <TooltipProvider>
       <div className="flex h-full min-h-0 flex-col">
         <OfficeTopbar />
-        <main className="flex-1 min-h-0 overflow-y-auto">
+        {/* `data-office-route` stamps the RESOLVED route onto the outlet, and is
+            the render anchor the pseudo-coverage oracle waits on for every
+            `office — …` screen (e2e/tests/i18n/pseudo-coverage.spec.ts).
+
+            It is an attribute on the outlet rather than a testid inside each
+            page because these pages are mounted with empty collections
+            (`initialItems={[]}`), so they legitimately render empty states in
+            e2e — an anchor inside the populated branch would never match. This
+            attribute is present whichever branch a page takes, and it is not
+            shell-satisfiable: this element lives in the office chunk, is not
+            rendered while `OfficeRouteLoading` holds, and its VALUE identifies
+            the specific route, so a mis-pointed URL cannot match another
+            screen's anchor. */}
+        <main className="flex-1 min-h-0 overflow-y-auto" data-office-route={normalizedPathname}>
           {renderOfficeRoute(normalizedPathname)}
         </main>
       </div>
@@ -369,17 +383,19 @@ function matchAgentRoute(pathname: string): AgentRouteMatch | null {
 }
 
 function OfficeUnavailable() {
+  const { t } = useTranslation();
   return (
     <div className="flex h-full items-center justify-center p-6 text-sm text-muted-foreground">
-      Office is not enabled for this runtime.
+      {t("common:officeIsNotEnabledForThis")}
     </div>
   );
 }
 
 function OfficeRouteLoading() {
+  const { t } = useTranslation();
   return (
     <div className="flex h-full items-center justify-center">
-      <span className="text-sm text-muted-foreground">Loading...</span>
+      <span className="text-sm text-muted-foreground">{t("common:loadingEllipsis")}</span>
     </div>
   );
 }
@@ -406,6 +422,7 @@ type OfficeSetupState =
   | { status: "error"; message: string };
 
 function OfficeSetupRoute() {
+  const { t } = useTranslation();
   const router = useRouter();
   const searchParams = useSearchParams();
   const mode = searchParams.get("mode") ?? undefined;
@@ -428,7 +445,7 @@ function OfficeSetupRoute() {
         if (cancelled) return;
         setState({
           status: "error",
-          message: error instanceof Error ? error.message : "Failed to load setup",
+          message: error instanceof Error ? error.message : t("common:failedToLoadSetup"),
         });
       }
     }
@@ -457,8 +474,10 @@ function OfficeSetupRoute() {
 function OfficeRouteFallback({ pathname }: { pathname: string }) {
   return (
     <div className="p-6 text-sm text-muted-foreground">
-      This Office route is handled by the SPA shell, but its dedicated client page is still being
-      ported: <span className="font-mono">{pathname}</span>
+      <Trans i18nKey="common:officeRouteNotPortedYet" values={{ pathname }}>
+        This Office route is handled by the SPA shell, but its dedicated client page is still being
+        ported: <span className="font-mono">{pathname}</span>
+      </Trans>
     </div>
   );
 }

@@ -84,6 +84,26 @@ func TestUnavailableManagedAgentOmitsRuntimeMetadata(t *testing.T) {
 	}
 }
 
+func TestAvailableACPInferenceAgentIsDynamicBeforeProbeSnapshot(t *testing.T) {
+	ag := agents.NewMockAgent()
+	ag.SetEnabled(true)
+	ctrl := newTestController(map[string]agents.Agent{ag.ID(): ag})
+
+	item := ctrl.buildAvailableAgentDTO(
+		context.Background(),
+		ag,
+		discovery.Availability{Name: ag.ID(), Available: true},
+		time.Now(),
+	)
+
+	if !item.ModelConfig.SupportsDynamicModels {
+		t.Fatal("supports_dynamic_models = false, want true before the probe snapshot is cached")
+	}
+	if item.ModelConfig.Status != "not_configured" {
+		t.Fatalf("status = %q, want not_configured without a host utility", item.ModelConfig.Status)
+	}
+}
+
 func TestConfigOptionDTOsPreserveDescriptions(t *testing.T) {
 	dtos := configOptionDTOs([]hostutility.ConfigOption{{
 		Type:         "select",

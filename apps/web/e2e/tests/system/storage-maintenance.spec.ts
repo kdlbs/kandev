@@ -141,6 +141,11 @@ test.describe("System storage maintenance", () => {
       await expect(testPage.getByTestId("storage-policy-card")).toBeVisible();
       await expect(testPage.getByTestId("storage-run-history")).toBeVisible();
       await expect(testPage.getByTestId("storage-quarantine-card")).toBeVisible();
+      await expect(testPage.getByTestId("storage-disk-capacity-card")).toBeVisible();
+      await expect(testPage.getByRole("progressbar")).toBeVisible();
+      await expect(testPage.getByTestId("storage-dependency-allowlist")).toContainText(
+        "node_modules",
+      );
       await expect(testPage.getByTestId("storage-overview-spinner")).toBeVisible();
       await expect(testPage.getByTestId("storage-analysis-total")).toHaveCount(0);
       await expect(testPage.getByTestId("toast-message")).toHaveCount(0);

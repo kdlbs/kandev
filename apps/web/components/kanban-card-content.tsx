@@ -18,11 +18,12 @@ import { Checkbox } from "@kandev/ui/checkbox";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from "@kandev/ui/dropdown-menu";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { PRTaskIcon } from "@/components/github/pr-task-icon";
-import { PluginSlot } from "@/components/plugins/plugin-slot";
+import { MRTaskIcon } from "@/components/gitlab/mr-task-icon";
 import {
   KanbanCardDropdownMenuItems,
   type KanbanCardMenuEntry,
 } from "@/components/kanban-card-menu-items";
+import { TaskCardIndicators, TaskCardTags } from "@/components/kanban-card-plugin-slots";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { RemoteCloudTooltip } from "@/components/task/remote-cloud-tooltip";
 import { useTaskPendingInput } from "@/hooks/use-task-pending-input";
@@ -126,22 +127,6 @@ function RepoChipRow({ chips }: { chips: RepositoryChip[] }) {
   );
 }
 
-/**
- * `task-card-indicators` slot (AC13): reads the active workspace from the
- * store itself, rather than threading `workspaceId` through the
- * KanbanCardFrame -> KanbanCardShell -> KanbanCardBody prop chain, since
- * `<PluginSlot/>` already renders nothing when the slot is empty (AC14).
- */
-function TaskCardIndicators({ task }: { task: Task }) {
-  const workspaceId = useAppStore((state) => state.workspaces.activeId);
-  return (
-    <PluginSlot
-      name="task-card-indicators"
-      slotProps={{ taskId: task.id, workspaceId, workflowStepId: task.workflowStepId }}
-    />
-  );
-}
-
 export function KanbanCardBody({
   task,
   repositoryChips,
@@ -156,7 +141,7 @@ export function KanbanCardBody({
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0 flex-1">
           <RepoChipRow chips={repositoryChips} />
-          <div className="flex items-center gap-1 min-w-0">
+          <div className="flex items-center gap-1 min-w-0" data-testid="kanban-card-title-row">
             <p
               data-testid="task-card-title"
               className="text-sm font-medium leading-tight line-clamp-1 min-w-0"
@@ -164,6 +149,7 @@ export function KanbanCardBody({
               {task.title}
             </p>
             <PRTaskIcon taskId={task.id} />
+            <MRTaskIcon taskId={task.id} />
             <TaskCardIndicators task={task} />
           </div>
         </div>
@@ -184,11 +170,13 @@ export function KanbanCardBody({
       )}
       <KanbanCardRelationship task={task} />
       <KanbanCardBadges task={task} />
+      <TaskCardTags task={task} />
     </>
   );
 }
 
 function KanbanCardRelationship({ task }: { task: Task }) {
+  const { t } = useTranslation();
   const parentTitle = useAppStore((s) => {
     if (!task.parentTaskId) return null;
     return s.kanban.tasks.find((t) => t.id === task.parentTaskId)?.title ?? null;
@@ -204,13 +192,14 @@ function KanbanCardRelationship({ task }: { task: Task }) {
       className="mt-1 flex min-w-0 items-center gap-1 text-[10px] text-muted-foreground"
     >
       <IconSubtask className="h-3 w-3 shrink-0" />
-      <span className="shrink-0 font-medium">Subtask of</span>
+      <span className="shrink-0 font-medium">{t("kanban:subtaskOf")}</span>
       <span className="min-w-0 truncate">{relationshipTitle}</span>
     </div>
   );
 }
 
 function KanbanCardBadges({ task }: { task: Task }) {
+  const { t } = useTranslation();
   const showRow = hasCardBadges(task);
 
   if (!showRow) return null;
@@ -221,20 +210,26 @@ function KanbanCardBadges({ task }: { task: Task }) {
         <Badge
           variant="secondary"
           className="text-xs h-5"
-          title={`Queued for ${task.queuedForStepTitle ?? `workflow step ${task.queuedForStepId}`}`}
+          title={t("kanban:queuedForStep", {
+            step:
+              task.queuedForStepTitle ??
+              t("kanban:workflowStepFallback", { stepId: task.queuedForStepId }),
+          })}
         >
-          Queued for {task.queuedForStepTitle ?? "next capacity"}
+          {t("kanban:queuedForStep", {
+            step: task.queuedForStepTitle ?? t("kanban:nextCapacity"),
+          })}
         </Badge>
       )}
       {task.sessionCount && task.sessionCount > 1 && (
         <Badge variant="secondary" className="text-xs h-5">
-          {task.sessionCount} sessions
+          {t("kanban:sessionCount", { count: task.sessionCount })}
         </Badge>
       )}
       {task.reviewStatus === "pending" && task.state !== "IN_PROGRESS" && (
         <div className="flex items-center gap-1 text-amber-700 dark:text-amber-600">
           <IconAlertCircle className="h-3.5 w-3.5" />
-          <span className="text-[10px] font-medium">Approval Required</span>
+          <span className="text-[10px] font-medium">{t("kanban:approvalRequired")}</span>
         </div>
       )}
       {task.reviewStatus === "changes_requested" && (
@@ -242,7 +237,7 @@ function KanbanCardBadges({ task }: { task: Task }) {
           variant="outline"
           className="border-amber-500 text-amber-600 bg-amber-50 dark:bg-amber-950/50 text-xs h-5"
         >
-          Changes Requested
+          {t("kanban:changesRequested")}
         </Badge>
       )}
     </div>
@@ -276,9 +271,10 @@ export function renderTaskStatusIcon(
   const showQuestionIcon = shouldUseQuestionTaskIcon(task.state, hasPendingClarification);
   const showPermissionIcon = shouldUsePermissionTaskIcon(hasPendingPermission);
   const needsMe = showQuestionIcon || showPermissionIcon;
+  const showInterrupted = !!task.interrupted;
   const hasActivity =
     task.foregroundActivity === "generating" || task.foregroundActivity === "background";
-  if (!showRunningSpinner && !needsMe && !hasActivity) {
+  if (!showRunningSpinner && !needsMe && !hasActivity && !showInterrupted) {
     return null;
   }
   // A "needs me" prompt (pending clarification / permission) must not be masked
@@ -288,13 +284,12 @@ export function renderTaskStatusIcon(
   if (showRunningSpinner && !needsMe && task.foregroundActivity !== "background") {
     return <IconLoader2 className="h-4 w-4 text-blue-500 animate-spin" />;
   }
-  return getTaskStateIcon(
-    task.state,
-    "h-4 w-4",
+  return getTaskStateIcon(task.state, "h-4 w-4", {
     hasPendingClarification,
-    task.foregroundActivity,
+    foregroundActivity: task.foregroundActivity,
     hasPendingPermission,
-  );
+    interrupted: showInterrupted,
+  });
 }
 
 // The board's only window into a fan-out. `activeSubagentCount` is derived from
@@ -424,7 +419,7 @@ function KanbanCardActions({
     <div className="flex items-center gap-2">
       {renderSubagentCountChip(
         task,
-        t("activeSubagents", { count: task.activeSubagentCount ?? 0 }),
+        t("common:activeSubagents", { count: task.activeSubagentCount ?? 0 }),
       )}
       {statusIcon}
       {showMaximizeButton && onOpenFullPage && hasKnownSession && (
@@ -448,6 +443,7 @@ type KanbanCardMenuProps = KanbanCardActionProps & {
 };
 
 function KanbanCardMenu(props: KanbanCardMenuProps) {
+  const { t } = useTranslation();
   const { effectiveMenuOpen, setMenuOpen, isDeleting, isArchiving } = props;
   const { menuEntries } = props;
   const isProcessing = isDeleting || isArchiving;
@@ -466,7 +462,7 @@ function KanbanCardMenu(props: KanbanCardMenuProps) {
           className="text-muted-foreground hover:text-foreground hover:bg-muted rounded-sm p-1 -m-1 transition-colors cursor-pointer"
           onClick={(e) => e.stopPropagation()}
           onPointerDown={(e) => e.stopPropagation()}
-          aria-label="More options"
+          aria-label={t("kanban:moreOptions")}
         >
           <IconDots className="h-4 w-4" />
         </button>
@@ -489,6 +485,7 @@ function KanbanCardCheckbox({
   isSelected?: boolean;
   onCheckboxClick: (e: React.MouseEvent) => void;
 }) {
+  const { t } = useTranslation();
   return (
     <div
       className="mt-0.5 shrink-0"
@@ -498,7 +495,7 @@ function KanbanCardCheckbox({
     >
       <Checkbox
         checked={!!isSelected}
-        aria-label={`Select task ${taskTitle}`}
+        aria-label={t("kanban:selectTask", { title: taskTitle })}
         className="cursor-pointer border-muted-foreground/50"
       />
     </div>

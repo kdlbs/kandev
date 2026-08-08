@@ -16,6 +16,7 @@ import { SessionCommands } from "@/components/session-commands";
 import { TaskPRShortcut } from "@/components/task/task-pr-shortcut";
 import { useEmbeddedVscodeSupport } from "@/components/task/task-page-editor-capability";
 import { VcsDialogsProvider } from "@/components/vcs/vcs-dialogs";
+import { PortForwardingVisibilityProvider } from "@/components/task/port-forwarding-visibility-provider";
 import {
   buildDebugEntries,
   buildArchivedValue,
@@ -29,6 +30,7 @@ import type {
   useSessionPanelState,
   useMergedAgentState,
 } from "./task-page-content";
+import { useTranslation } from "react-i18next";
 
 export type TaskPageInnerProps = {
   task: Task | null;
@@ -103,7 +105,6 @@ function buildTaskTopBarProps(params: {
   effectiveSessionId: string | null;
   remote: ReturnType<typeof resolveRemoteExecutor>;
   sessionWorkflowStepId: string | null;
-  agentctlReady: boolean;
   embeddedVscodeSupported: boolean;
   officeTaskHref?: string | null;
   onTaskUnarchived: (taskId: string) => void;
@@ -127,8 +128,6 @@ function buildTaskTopBarProps(params: {
     issueUrl: taskProps.issueUrl,
     issueNumber: taskProps.issueNumber,
     isArchived: taskProps.isArchived,
-    isRemoteExecutor: params.remote.isRemoteExecutor,
-    isAgentctlReady: params.agentctlReady,
     embeddedVscodeSupported: params.embeddedVscodeSupported,
     remoteExecutorType: params.remote.remoteExecutorType,
     officeTaskHref: params.officeTaskHref,
@@ -201,7 +200,18 @@ function maybeBuildDebugEntries(params: {
   });
 }
 
-export function TaskPageInner({
+function TaskDebugOverlay({ entries }: { entries: ReturnType<typeof maybeBuildDebugEntries> }) {
+  const { t } = useTranslation();
+  if (!entries) return null;
+  return <DebugOverlay title={t("task:taskDebug")} entries={entries} />;
+}
+
+/**
+ * Derives everything the task page renders from its inputs: the resolved task
+ * props plus the three prop bundles handed to the debug overlay, top bar, and
+ * layout. Kept out of `TaskPageInner` so that component stays a wiring shell.
+ */
+function useTaskPageDerivedProps({
   task,
   effectiveSessionId,
   repository,
@@ -212,8 +222,6 @@ export function TaskPageInner({
   agentctlStatus,
   connectionStatus,
   workflowSteps,
-  archivedValue,
-  isMobile,
   showDebugOverlay,
   onToggleDebugOverlay,
   initialScripts,
@@ -221,7 +229,6 @@ export function TaskPageInner({
   defaultLayouts,
   initialLayout,
   officeTaskHref,
-  ensureSession,
   onTaskUnarchived,
 }: TaskPageInnerProps) {
   const taskProps = resolveTaskProps(task, repository);
@@ -251,7 +258,6 @@ export function TaskPageInner({
     effectiveSessionId,
     remote,
     sessionWorkflowStepId: sessionPanel.sessionWorkflowStepId,
-    agentctlReady: agentctlStatus.isReady,
     embeddedVscodeSupported: embeddedVscode,
     officeTaskHref,
     onTaskUnarchived,
@@ -268,37 +274,54 @@ export function TaskPageInner({
     initialLayout,
   });
 
+  return { taskProps, debugEntries, topBarProps, layoutProps };
+}
+
+export function TaskPageInner(props: TaskPageInnerProps) {
+  const { effectiveSessionId, task, merged, sessionPanel, archivedValue, isMobile, ensureSession } =
+    props;
+  const { taskProps, debugEntries, topBarProps, layoutProps } = useTaskPageDerivedProps(props);
+
   return (
     <TooltipProvider>
-      <VcsDialogsProvider
+      <PortForwardingVisibilityProvider
+        taskId={taskProps.taskId}
+        metadata={task?.metadata}
         sessionId={effectiveSessionId}
-        baseBranch={taskProps.baseBranch}
-        taskTitle={taskProps.taskTitle}
-        displayBranch={merged.worktreeBranch}
+        isAgentctlReady={props.agentctlStatus.isReady}
+        isArchived={taskProps.isArchived}
       >
-        <div className="flex h-full min-h-0 w-full flex-col overflow-hidden bg-background">
-          <SessionCommands
-            sessionId={effectiveSessionId}
-            baseBranch={taskProps.baseBranch}
-            isAgentRunning={merged.isAgentWorking}
-            hasWorktree={Boolean(merged.worktreeBranch)}
-            isPassthrough={sessionPanel.isSessionPassthrough}
-          />
-          <TaskPRShortcut taskId={taskProps.taskId} />
-          {debugEntries && <DebugOverlay title="Task Debug" entries={debugEntries} />}
-          {!isMobile && <TaskTopBar {...topBarProps} />}
-          {ensureSession.status === "error" && (
-            <EnsureSessionErrorBanner
-              error={ensureSession.error}
-              onRetry={ensureSession.retry}
-              workspaceId={task?.workspace_id ?? null}
+        <VcsDialogsProvider
+          sessionId={effectiveSessionId}
+          baseBranch={taskProps.baseBranch}
+          taskTitle={taskProps.taskTitle}
+          displayBranch={merged.worktreeBranch}
+        >
+          <div className="flex h-full min-h-0 w-full flex-col overflow-hidden bg-background">
+            <SessionCommands
+              sessionId={effectiveSessionId}
+              baseBranch={taskProps.baseBranch}
+              isAgentRunning={merged.isAgentWorking}
+              hasWorktree={Boolean(merged.worktreeBranch)}
+              isPassthrough={sessionPanel.isSessionPassthrough}
+              isTaskArchived={archivedValue.isArchived}
             />
-          )}
-          <TaskArchivedProvider value={archivedValue}>
-            <TaskLayout {...layoutProps} />
-          </TaskArchivedProvider>
-        </div>
-      </VcsDialogsProvider>
+            <TaskPRShortcut taskId={taskProps.taskId} />
+            <TaskDebugOverlay entries={debugEntries} />
+            {!isMobile && <TaskTopBar {...topBarProps} />}
+            {ensureSession.status === "error" && (
+              <EnsureSessionErrorBanner
+                error={ensureSession.error}
+                onRetry={ensureSession.retry}
+                workspaceId={task?.workspace_id ?? null}
+              />
+            )}
+            <TaskArchivedProvider value={archivedValue}>
+              <TaskLayout {...layoutProps} />
+            </TaskArchivedProvider>
+          </div>
+        </VcsDialogsProvider>
+      </PortForwardingVisibilityProvider>
     </TooltipProvider>
   );
 }

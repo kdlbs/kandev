@@ -219,7 +219,10 @@ func (r *SpritesExecutor) runPrepareScript(
 	req *ExecutorCreateRequest,
 	onOutput func(string),
 ) error {
-	script := r.resolvePrepareScript(req)
+	script, err := r.resolvePrepareScript(req)
+	if err != nil {
+		return err
+	}
 	if script == "" {
 		r.logger.Debug("no prepare script configured, skipping")
 		return nil
@@ -292,15 +295,22 @@ func (r *SpritesExecutor) runPrepareScript(
 // pattern. Profiles created in the UI snapshot the default at create time,
 // so without an unconditional postlude older Sprites profiles would still
 // commit straight onto main.
-func (r *SpritesExecutor) resolvePrepareScript(req *ExecutorCreateRequest) string {
+func (r *SpritesExecutor) resolvePrepareScript(req *ExecutorCreateRequest) (string, error) {
 	script := getMetadataString(req.Metadata, MetadataKeySetupScript)
 	if script == "" {
 		script = DefaultPrepareScript("sprites")
 	}
 	if script == "" {
-		return ""
+		return "", nil
 	}
 	script += KandevBranchCheckoutPostlude()
+	if binding, ok := req.RemoteContributions[""]; ok {
+		contributionScript, err := scriptengine.RemoteContributionSetupScript(&binding)
+		if err != nil {
+			return "", err
+		}
+		script += contributionScript
+	}
 
 	installScripts := r.collectAgentInstallScripts(req)
 
@@ -324,7 +334,7 @@ func (r *SpritesExecutor) resolvePrepareScript(req *ExecutorCreateRequest) strin
 			injectGitHubTokenIntoCloneURL,
 		))
 
-	return resolver.Resolve(script)
+	return resolver.Resolve(script), nil
 }
 
 // collectAgentInstallScripts extracts agent IDs from the executor profile metadata
@@ -437,6 +447,7 @@ func spriteCreateInstanceRequest(req *ExecutorCreateRequest) agentctl.CreateInst
 		RequiresProcessKill: requiresProcessKillFromReq(req),
 		StripEnv:            stripEnvFromReq(req),
 		BaseBranches:        getMetadataStringMap(req.Metadata, MetadataKeyBaseBranches),
+		RemoteContributions: req.RemoteContributions,
 		Env:                 cloneStringMap(req.Env),
 	}
 }

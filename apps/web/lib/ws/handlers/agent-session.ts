@@ -10,7 +10,7 @@ import {
   type TaskSession,
   type TaskSessionState,
 } from "@/lib/types/http";
-import type { QueuedMessage } from "@/lib/state/slices/session/types";
+import type { QueueStatusChangedPayload } from "@/lib/types/backend";
 import { syncKanbanPrimarySessionState } from "@/lib/ws/handlers/agent-session-kanban-sync";
 import { parseContextWindowEntry } from "@/lib/state/slices/session-runtime/context-window";
 
@@ -213,34 +213,48 @@ export function isStaleSessionStateEvent(
   return payloadTime < existingTime;
 }
 
+// Fields carried onto the update object verbatim whenever the payload defines
+// them (undefined = key omitted so it never clobbers live client state).
+// `name` is present here so a rename event's cleared label ("") still applies;
+// foreground_activity/active_subagent_count carry the ADR-0049 activity
+// substate; supports_steering carries the live steer-eligibility flip so the
+// composer can switch affordance without a refetch; cancellation_* carry the
+// backend-owned cancellation projection.
+const CARRIED_WHEN_DEFINED = [
+  "review_status",
+  "error_message",
+  "is_passthrough",
+  "name",
+  "foreground_activity",
+  "active_subagent_count",
+  "supports_steering",
+  "cancellation_pending",
+  "cancellation_revision",
+] as const;
+
+/** Copy each CARRIED_WHEN_DEFINED field onto `update` only when the payload defines it. */
+function carryDefinedFields(
+  update: Record<string, unknown>,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  payload: any,
+): void {
+  for (const key of CARRIED_WHEN_DEFINED) {
+    if (payload[key] !== undefined) update[key] = payload[key];
+  }
+}
+
 /** Build a session update object from the state_changed payload. */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function buildSessionUpdate(payload: any): Record<string, unknown> {
   const update: Record<string, unknown> = {};
   if (payload.new_state) update.state = payload.new_state;
   if (payload.agent_profile_id) update.agent_profile_id = payload.agent_profile_id;
-  if (payload.review_status !== undefined) update.review_status = payload.review_status;
-  if (payload.error_message !== undefined) update.error_message = payload.error_message;
   if (payload.agent_profile_snapshot)
     update.agent_profile_snapshot = payload.agent_profile_snapshot;
-  if (payload.is_passthrough !== undefined) update.is_passthrough = payload.is_passthrough;
   if (payload.session_metadata !== undefined) update.metadata = payload.session_metadata;
-  // Apply only when the key is present: rename events always carry `name`
-  // (including "" for a cleared label); other session events omit it.
-  if (payload.name !== undefined) update.name = payload.name;
   if (payload.task_environment_id) update.task_environment_id = payload.task_environment_id;
   if (payload.updated_at) update.updated_at = payload.updated_at;
-  // Carry the authoritative activity value across coarse transitions. A new
-  // foreground turn resets it to generating; settled detached work may remain
-  // background (ADR-0049).
-  if (payload.foreground_activity !== undefined)
-    update.foreground_activity = payload.foreground_activity;
-  if (payload.active_subagent_count !== undefined)
-    update.active_subagent_count = payload.active_subagent_count;
-  if (payload.cancellation_pending !== undefined)
-    update.cancellation_pending = payload.cancellation_pending;
-  if (payload.cancellation_revision !== undefined)
-    update.cancellation_revision = payload.cancellation_revision;
+  carryDefinedFields(update, payload);
   return update;
 }
 
@@ -570,10 +584,8 @@ function applyForegroundActivity(
     started_at: existing.started_at ?? "",
     updated_at: existing.updated_at ?? "",
     foreground_activity: payload.foreground_activity ?? null,
-    active_subagent_count:
-      payload.active_subagent_count !== undefined
-        ? payload.active_subagent_count
-        : (existing.active_subagent_count ?? 0),
+    active_subagent_count: pickActiveSubagentCount(payload, existing),
+    supports_steering: pickSupportsSteering(payload, existing),
   });
 }
 
@@ -601,6 +613,23 @@ function applyCancellationPending(
     cancellation_pending: payload.cancellation_pending,
     cancellation_revision: payload.cancellation_revision,
   });
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function pickActiveSubagentCount(payload: any, existing: TaskSession): number {
+  return payload.active_subagent_count !== undefined
+    ? payload.active_subagent_count
+    : (existing.active_subagent_count ?? 0);
+}
+
+function pickSupportsSteering(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  payload: any,
+  existing: TaskSession,
+): boolean | undefined {
+  return payload.supports_steering !== undefined
+    ? payload.supports_steering
+    : existing.supports_steering;
 }
 
 function handleWorkspaceSourcesUpdated(
@@ -639,20 +668,27 @@ function handleCancellationPendingMessage(
   applyCancellationPending(store, payload);
 }
 
+/** Writes a message.queue.status_changed broadcast into the queue slice,
+ * defaulting count/max/mergeEnabled when the backend omits them. */
+function handleQueueStatusChangedMessage(
+  store: StoreApi<AppState>,
+  payload: QueueStatusChangedPayload,
+): void {
+  if (!payload.session_id) {
+    console.warn("[Queue] Missing session_id in queue status change event");
+    return;
+  }
+  const entries = payload.entries ?? [];
+  const count = typeof payload.count === "number" ? payload.count : entries.length;
+  const max = typeof payload.max === "number" ? payload.max : 0;
+  const mergeEnabled = typeof payload.merge_enabled === "boolean" ? payload.merge_enabled : true;
+  store.getState().setQueueEntries(payload.session_id, entries, { count, max, mergeEnabled });
+}
+
 export function registerTaskSessionHandlers(store: StoreApi<AppState>): WsHandlers {
   return {
-    "message.queue.status_changed": (message) => {
-      const payload = message.payload;
-      if (!payload?.session_id) {
-        console.warn("[Queue] Missing session_id in queue status change event");
-        return;
-      }
-      const sessionId = payload.session_id;
-      const entries = (payload.entries as QueuedMessage[] | null | undefined) ?? [];
-      const count = typeof payload.count === "number" ? payload.count : entries.length;
-      const max = typeof payload.max === "number" ? payload.max : 0;
-      store.getState().setQueueEntries(sessionId, entries, { count, max });
-    },
+    "message.queue.status_changed": (message) =>
+      handleQueueStatusChangedMessage(store, message.payload),
     "session.state_changed": (message) => {
       const payload = message.payload;
       if (!payload?.task_id) return;

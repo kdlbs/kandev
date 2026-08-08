@@ -158,7 +158,7 @@ func (s *Server) handleFileContentAtRef(c *gin.Context) {
 	}
 
 	repo := c.Query("repo")
-	if repo == "" && len(s.procMgr.RepoSubpaths()) > 0 {
+	if repo == "" && requiresExplicitRepositoryScope(s.procMgr.RepositoryScopes()) {
 		c.JSON(400, types.FileContentResponse{Path: path, Error: "repo is required for multi-repo workspace"})
 		return
 	}

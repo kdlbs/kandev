@@ -46,6 +46,37 @@ async function seedShellMessage(
 }
 
 test.describe("shell command output", () => {
+  test("does not show an output disclosure for a command with no output", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const command = "true";
+    const taskId = await seedShellMessage(apiClient, seedData, {
+      title: "Empty Command Output",
+      command,
+      status: "complete",
+      output: { exit_code: 0 },
+    });
+    const shellOutputRequests: string[] = [];
+    testPage.on("request", (request) => {
+      if (request.url().endsWith("/shell-output")) shellOutputRequests.push(request.url());
+    });
+
+    await testPage.goto(`/t/${taskId}`);
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+    const chat = session.activeChat();
+
+    await expect(chat.getByTestId("tool-execute-command").filter({ hasText: command })).toBeVisible(
+      { timeout: 15_000 },
+    );
+    await expect(chat.getByLabel("Command succeeded")).toBeVisible();
+    await expect(chat.getByRole("button", { name: "Show command output" })).toHaveCount(0);
+    await expect(chat.getByTestId("tool-execute-output")).toHaveCount(0);
+    expect(shellOutputRequests).toHaveLength(0);
+  });
+
   test("keeps full commands visible and fetches completed output only after expansion", async ({
     testPage,
     apiClient,

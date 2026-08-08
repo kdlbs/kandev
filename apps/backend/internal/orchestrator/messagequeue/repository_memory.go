@@ -2,6 +2,7 @@ package messagequeue
 
 import (
 	"context"
+	"reflect"
 	"sort"
 	"sync"
 	"time"
@@ -57,6 +58,31 @@ func (r *memoryRepository) PurgeTask(_ context.Context, taskID string) (int, err
 	}
 	r.generation[taskID]++
 	return removed, nil
+}
+
+// CountPendingByTaskIDs counts pending entries per task, excluding durable
+// lifecycle rows reserved in flight (filtered via IsReservedInFlight).
+func (r *memoryRepository) CountPendingByTaskIDs(_ context.Context, taskIDs []string) (map[string]int, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	counts := make(map[string]int, len(taskIDs))
+	for _, taskID := range taskIDs {
+		counts[taskID] = 0
+	}
+	if len(taskIDs) == 0 {
+		return counts, nil
+	}
+	for _, list := range r.entries {
+		for _, msg := range list {
+			if msg.IsReservedInFlight() {
+				continue
+			}
+			if _, wanted := counts[msg.TaskID]; wanted {
+				counts[msg.TaskID]++
+			}
+		}
+	}
+	return counts, nil
 }
 
 func (r *memoryRepository) Insert(_ context.Context, msg *QueuedMessage, maxPerSession int) error {
@@ -313,6 +339,211 @@ func (r *memoryRepository) TakeByID(_ context.Context, sessionID, entryID string
 		return &out, nil
 	}
 	return nil, nil
+}
+
+func (r *memoryRepository) ClaimSendNow(_ context.Context, sessionID string, expected []QueuedMessage) (*SendNowClaim, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if len(expected) == 0 {
+		return nil, ErrSendNowEmpty
+	}
+
+	requested, err := requestedSendNowIDs(expected)
+	if err != nil {
+		return nil, err
+	}
+
+	list := r.entries[sessionID]
+	selected := make([]*QueuedMessage, 0, len(expected))
+	for _, entry := range list {
+		if _, ok := requested[entry.ID]; !ok {
+			continue
+		}
+		if entry.IsReservedInFlight() {
+			return nil, ErrSendNowReservationConflict
+		}
+		selected = append(selected, entry)
+	}
+	if len(selected) != len(expected) {
+		return nil, ErrSendNowClaimChanged
+	}
+	if err := validateSendNowSnapshot(selected, expected); err != nil {
+		return nil, ErrSendNowClaimChanged
+	}
+
+	sources := cloneSendNowSources(selected)
+	envelope, err := BuildSendNowEnvelope(sources)
+	if err != nil {
+		return nil, err
+	}
+	generations := make(map[string]int64)
+	for _, source := range sources {
+		if source.TaskID != "" {
+			generations[source.TaskID] = r.generation[source.TaskID]
+		}
+	}
+
+	remaining := make([]*QueuedMessage, 0, len(list))
+	for _, entry := range list {
+		if _, ok := requested[entry.ID]; !ok {
+			remaining = append(remaining, entry)
+			continue
+		}
+		if entry.IsDurableLifecycle() {
+			entry.Metadata = markReservedMetadata(entry.Metadata)
+			remaining = append(remaining, entry)
+		}
+	}
+	if len(remaining) == 0 {
+		delete(r.entries, sessionID)
+		delete(r.nextPosition, sessionID)
+	} else {
+		r.entries[sessionID] = remaining
+	}
+	return &SendNowClaim{Sources: sources, Dispatch: *envelope, SourceGenerations: generations}, nil
+}
+
+func (r *memoryRepository) RestoreSendNowClaim(_ context.Context, claim *SendNowClaim) error {
+	if claim == nil || len(claim.Sources) == 0 {
+		return ErrSendNowEmpty
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	sessionID := claim.Sources[0].SessionID
+	list := r.entries[sessionID]
+	existing := make(map[string]*QueuedMessage, len(list))
+	for _, entry := range list {
+		existing[entry.ID] = entry
+	}
+	if err := validateMemorySendNowRestore(claim, sessionID, existing, r.generation); err != nil {
+		return err
+	}
+
+	for _, source := range claim.Sources {
+		if sendNowSourceGenerationChanged(claim, source, r.generation[source.TaskID]) {
+			continue
+		}
+		if existing[source.ID] != nil {
+			if source.IsDurableLifecycle() {
+				existing[source.ID].Metadata = restoreSendNowMetadata(existing[source.ID].Metadata, source.Metadata)
+			}
+			continue
+		}
+		clone := cloneQueuedMessage(&source)
+		clone.Metadata = clearReservedMetadata(clone.Metadata)
+		list = append(list, clone)
+		if clone.Position > r.nextPosition[sessionID] {
+			r.nextPosition[sessionID] = clone.Position
+		}
+	}
+	sort.Slice(list, func(i, j int) bool { return list[i].Position < list[j].Position })
+	r.entries[sessionID] = list
+	return nil
+}
+
+func validateMemorySendNowRestore(
+	claim *SendNowClaim,
+	sessionID string,
+	existing map[string]*QueuedMessage,
+	generations map[string]int64,
+) error {
+	for _, source := range claim.Sources {
+		if source.SessionID != sessionID {
+			return ErrSendNowClaimChanged
+		}
+		if sendNowSourceGenerationChanged(claim, source, generations[source.TaskID]) {
+			continue
+		}
+		entry := existing[source.ID]
+		if source.IsDurableLifecycle() {
+			if entry == nil || (!entry.IsReservedInFlight() && !sameQueuedMessageContent(entry, &source)) {
+				return ErrSendNowClaimChanged
+			}
+			continue
+		}
+		if entry != nil && entry.IsReservedInFlight() {
+			return ErrSendNowClaimChanged
+		}
+	}
+	return nil
+}
+
+func (r *memoryRepository) AcknowledgeSendNowClaim(_ context.Context, claim *SendNowClaim) error {
+	if claim == nil || len(claim.Sources) == 0 {
+		return ErrSendNowEmpty
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	sessionID := claim.Sources[0].SessionID
+	requested := make(map[string]struct{})
+	for _, source := range claim.Sources {
+		if source.SessionID != sessionID {
+			return ErrSendNowClaimChanged
+		}
+		if !source.IsDurableLifecycle() {
+			continue
+		}
+		requested[source.ID] = struct{}{}
+	}
+	for _, entry := range r.entries[sessionID] {
+		if _, ok := requested[entry.ID]; ok && !entry.IsReservedInFlight() {
+			return ErrSendNowClaimChanged
+		}
+	}
+	if len(requested) == 0 {
+		return nil
+	}
+	list := r.entries[sessionID]
+	remaining := list[:0]
+	for _, entry := range list {
+		if _, ok := requested[entry.ID]; !ok {
+			remaining = append(remaining, entry)
+		}
+	}
+	if len(remaining) == 0 {
+		delete(r.entries, sessionID)
+		delete(r.nextPosition, sessionID)
+	} else {
+		r.entries[sessionID] = remaining
+	}
+	return nil
+}
+
+func cloneSendNowSources(entries []*QueuedMessage) []QueuedMessage {
+	sources := make([]QueuedMessage, 0, len(entries))
+	for _, entry := range entries {
+		clone := cloneQueuedMessage(entry)
+		clone.Metadata = clearReservedMetadata(clone.Metadata)
+		if entry.IsDurableLifecycle() {
+			clone.reservedLifecycleDelivery = true
+		}
+		sources = append(sources, *clone)
+	}
+	return sources
+}
+
+func cloneQueuedMessage(entry *QueuedMessage) *QueuedMessage {
+	if entry == nil {
+		return nil
+	}
+	clone := *entry
+	clone.Attachments = append([]MessageAttachment(nil), entry.Attachments...)
+	clone.Metadata = copyMessageMetadata(entry.Metadata, 0)
+	return &clone
+}
+
+func sameQueuedMessageContent(left, right *QueuedMessage) bool {
+	if left == nil || right == nil {
+		return false
+	}
+	leftCopy := cloneQueuedMessage(left)
+	rightCopy := cloneQueuedMessage(right)
+	leftCopy.Metadata = clearReservedMetadata(leftCopy.Metadata)
+	rightCopy.Metadata = clearReservedMetadata(rightCopy.Metadata)
+	leftCopy.reservedLifecycleDelivery = false
+	rightCopy.reservedLifecycleDelivery = false
+	return reflect.DeepEqual(leftCopy, rightCopy)
 }
 
 func (r *memoryRepository) UpdateContent(ctx context.Context, sessionID, entryID, content string, attachments []MessageAttachment, queuedBy string) error {

@@ -10,6 +10,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/registry"
 	"github.com/kandev/kandev/internal/agent/settings/models"
 	"github.com/kandev/kandev/internal/agent/settings/store"
+	"github.com/kandev/kandev/internal/agentctl/acpcompat"
 	"github.com/kandev/kandev/internal/common/logger"
 )
 
@@ -24,6 +25,7 @@ type MockRepository struct {
 	ListAgentsFn                      func(ctx context.Context) ([]*models.Agent, error)
 	ListAgentProfilesFn               func(ctx context.Context, agentID string) ([]*models.AgentProfile, error)
 	HasDeletedAgentProfilesFn         func(ctx context.Context, agentID string) (bool, error)
+	updateAgentProfileFn              func(ctx context.Context, profile *models.AgentProfile) error
 }
 
 var _ store.Repository = (*MockRepository)(nil)
@@ -74,7 +76,14 @@ func (m *MockRepository) CreateAgentProfile(ctx context.Context, profile *models
 }
 
 func (m *MockRepository) UpdateAgentProfile(ctx context.Context, profile *models.AgentProfile) error {
+	if m.updateAgentProfileFn != nil {
+		return m.updateAgentProfileFn(ctx, profile)
+	}
 	return nil
+}
+
+func (m *MockRepository) UpdateAgentProfileEnabled(_ context.Context, _ string, _ bool) (time.Time, error) {
+	return time.Time{}, nil
 }
 
 func (m *MockRepository) DeleteAgentProfile(ctx context.Context, id string) error {
@@ -181,6 +190,53 @@ func TestStoreProfileResolver_ResolveProfile_Success(t *testing.T) {
 	}
 	if info.DangerouslySkipPermissions != false {
 		t.Error("expected DangerouslySkipPermissions to be false")
+	}
+}
+
+func TestStoreProfileResolver_MigratesCursorVariantModel(t *testing.T) {
+	profile := &models.AgentProfile{
+		ID:      "profile-cursor",
+		AgentID: "agent-cursor",
+		Model:   "grok-4.5[effort=high,fast=true]",
+		ConfigOptions: map[string]string{
+			"effort": "low",
+		},
+	}
+	var updated *models.AgentProfile
+	mockRepo := &MockRepository{
+		GetAgentProfileFn: func(context.Context, string) (*models.AgentProfile, error) {
+			return profile, nil
+		},
+		GetAgentFn: func(context.Context, string) (*models.Agent, error) {
+			return &models.Agent{ID: "agent-cursor", Name: acpcompat.CursorAgentID}, nil
+		},
+	}
+	// Capture the write without changing the profile returned by the fake read.
+	mockRepo.updateAgentProfileFn = func(_ context.Context, got *models.AgentProfile) error {
+		updated = got
+		return nil
+	}
+
+	resolver := NewStoreProfileResolver(mockRepo, nil)
+	info, err := resolver.ResolveProfile(context.Background(), profile.ID)
+	if err != nil {
+		t.Fatalf("ResolveProfile: %v", err)
+	}
+
+	if info.Model != "grok-4.5" {
+		t.Fatalf("resolved model = %q, want bare Cursor model", info.Model)
+	}
+	if got := info.ConfigOptions["effort"]; got != "low" {
+		t.Errorf("resolved effort = %q, want existing profile value low", got)
+	}
+	if got := info.ConfigOptions["fast"]; got != "true" {
+		t.Errorf("resolved fast = %q, want migrated value true", got)
+	}
+	if updated == nil {
+		t.Fatal("expected migrated profile to be persisted")
+	}
+	if updated.Model != "grok-4.5" || updated.ConfigOptions["fast"] != "true" {
+		t.Fatalf("persisted profile = %+v, want bare model and fast option", updated)
 	}
 }
 

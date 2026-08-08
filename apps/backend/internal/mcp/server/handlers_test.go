@@ -48,6 +48,11 @@ func TestCreateTask_ToolSchema_HasParentID(t *testing.T) {
 	assert.Contains(t, props, "workflow_step_id")
 	assert.Contains(t, props, "workspace_mode")
 	assert.Contains(t, props, "prompt")
+	assert.ElementsMatch(t, []string{
+		"parent_id", "workspace_id", "workflow_id", "workflow_step_id", "workspace_mode",
+		"title", "prompt", "agent_profile_id", "executor_profile_id", "start_agent",
+		"repository_id", "local_path", "repository_url", "base_branch",
+	}, propertyNames(props), "remote contribution support must not add tool properties")
 	assert.NotContains(t, props, "description", "legacy alias must not increase the advertised schema")
 	assert.Contains(t, tool.Tool.Description, "'prompt' is the sub-agent's initial prompt")
 	assert.NotContains(t, tool.Tool.Description, "'description' is the sub-agent's initial prompt")
@@ -57,7 +62,7 @@ func TestCreateTask_ToolSchema_HasParentID(t *testing.T) {
 	require.True(t, ok, "prompt should have a description")
 	assert.Contains(t, promptDesc, "For auto-started subtasks")
 	assert.NotContains(t, promptDesc, "REQUIRED")
-	assert.Contains(t, tool.Tool.Description, "explicit agent_profile_id always wins")
+	assert.Contains(t, tool.Tool.Description, "outranks an explicit agent_profile_id")
 	assert.Contains(t, tool.Tool.Description, "current_task")
 	assert.Contains(t, tool.Tool.Description, "workspace_default")
 	assert.Contains(t, tool.Tool.Description, "workflow")
@@ -68,7 +73,7 @@ func TestCreateTask_ToolSchema_HasParentID(t *testing.T) {
 	require.True(t, ok, "agent_profile_id schema should be an object")
 	agentProfileDesc, ok := agentProfileProp["description"].(string)
 	require.True(t, ok, "agent_profile_id should have a description")
-	assert.Contains(t, agentProfileDesc, "Explicit agent_profile_id always wins")
+	assert.Contains(t, agentProfileDesc, "outranks it")
 	assert.Contains(t, agentProfileDesc, "current_task")
 	assert.Contains(t, agentProfileDesc, "workspace_default")
 
@@ -102,6 +107,14 @@ func TestCreateTask_ToolSchema_HasParentID(t *testing.T) {
 	assert.False(t, requiredSet["parent_id"], "parent_id should not be required")
 	assert.False(t, requiredSet["workspace_id"], "workspace_id should not be required")
 	assert.False(t, requiredSet["workflow_id"], "workflow_id should not be required")
+}
+
+func propertyNames(properties map[string]interface{}) []string {
+	names := make([]string, 0, len(properties))
+	for name := range properties {
+		names = append(names, name)
+	}
+	return names
 }
 
 func TestUpdateTask_ToolSchema_HasTitleMaxLength(t *testing.T) {

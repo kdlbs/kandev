@@ -181,7 +181,20 @@ func TestEnabledModeAllowlistMatrix(t *testing.T) {
 			mutate: []func(*http.Request){func(r *http.Request) { r.Header.Set("Authorization", "Bearer agent.jwt.here") }},
 		},
 
+		{name: "github credential broker readiness", method: http.MethodGet, path: "/api/v1/github/credentials/resolve"},
+		{name: "github credential broker resolve", method: http.MethodPost, path: "/api/v1/github/credentials/resolve"},
+		{
+			name: "github app webhook", method: http.MethodPost,
+			path: "/api/v1/github/app/registrations/reg1/webhook",
+		},
+
 		{name: "office without bearer", method: http.MethodGet, path: "/api/v1/office/tasks/t1", blocked: true},
+		{
+			// AC-14 (docs/specs/health-endpoint-version/spec.md): /health
+			// gained a version field, but /api/v1/system/info is not on the
+			// allowlist and must stay rejected — the change must not widen it.
+			name: "system info", method: http.MethodGet, path: "/api/v1/system/info", blocked: true,
+		},
 		{name: "tasks api", method: http.MethodGet, path: "/api/v1/tasks", blocked: true},
 		{name: "workspaces api", method: http.MethodGet, path: "/api/v1/workspaces", blocked: true},
 		{name: "plugin management", method: http.MethodGet, path: "/api/plugins", blocked: true},
@@ -191,6 +204,10 @@ func TestEnabledModeAllowlistMatrix(t *testing.T) {
 			path: "/api/plugins/p1/user-state/task/task1/note", blocked: true,
 		},
 		{name: "debug", method: http.MethodGet, path: "/debug/vars", blocked: true},
+		{
+			name: "github connections requires auth", method: http.MethodGet,
+			path: "/api/v1/github/connections", blocked: true,
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

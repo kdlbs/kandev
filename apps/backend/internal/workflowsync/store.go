@@ -43,7 +43,9 @@ const createTablesSQL = `
 		last_warnings TEXT NOT NULL DEFAULT '[]',
 		last_hash TEXT NOT NULL DEFAULT '',
 		created_at DATETIME NOT NULL,
-		updated_at DATETIME NOT NULL
+		updated_at DATETIME NOT NULL,
+		provider TEXT NOT NULL DEFAULT 'github',
+		project_path TEXT NOT NULL DEFAULT ''
 	);
 `
 
@@ -51,7 +53,26 @@ func (s *Store) initSchema() error {
 	if _, err := s.db.Exec(createTablesSQL); err != nil {
 		return err
 	}
-	return s.addPollEnabledColumn()
+	if err := s.addPollEnabledColumn(); err != nil {
+		return err
+	}
+	return s.addProviderColumns()
+}
+
+// addProviderColumns brings databases created before GitLab sync up to the
+// current schema. The 'github' default is what every pre-existing row
+// implicitly was. Idempotent and race-safe, matching addPollEnabledColumn.
+func (s *Store) addProviderColumns() error {
+	statements := []string{
+		`ALTER TABLE workflow_sync_configs ADD COLUMN provider TEXT NOT NULL DEFAULT 'github'`,
+		`ALTER TABLE workflow_sync_configs ADD COLUMN project_path TEXT NOT NULL DEFAULT ''`,
+	}
+	for _, stmt := range statements {
+		if _, err := s.db.Exec(stmt); err != nil && !db.IsDuplicateColumnError(err) {
+			return err
+		}
+	}
+	return nil
 }
 
 // addPollEnabledColumn brings databases created before the poll toggle up to
@@ -65,8 +86,9 @@ func (s *Store) addPollEnabledColumn() error {
 	return nil
 }
 
-const configSelectColumns = `workspace_id, repo_owner, repo_name, branch, path, interval_seconds,
-	poll_enabled, last_synced_at, last_ok, last_error, last_warnings, last_hash, created_at, updated_at`
+const configSelectColumns = `workspace_id, provider, repo_owner, repo_name, project_path, branch, path,
+	interval_seconds, poll_enabled, last_synced_at, last_ok, last_error, last_warnings, last_hash,
+	created_at, updated_at`
 
 type configScanner interface {
 	Scan(dest ...interface{}) error
@@ -79,8 +101,10 @@ func scanConfig(row configScanner) (*Config, error) {
 	var warningsJSON string
 	if err := row.Scan(
 		&cfg.WorkspaceID,
+		&cfg.Provider,
 		&cfg.RepoOwner,
 		&cfg.RepoName,
+		&cfg.ProjectPath,
 		&cfg.Branch,
 		&cfg.Path,
 		&cfg.IntervalSeconds,
@@ -97,6 +121,12 @@ func scanConfig(row configScanner) (*Config, error) {
 	}
 	cfg.LastOk = lastOk != 0
 	cfg.PollEnabled = pollEnabled != 0
+	// A row written before the provider column existed carries the implicit
+	// GitHub meaning. The migration default covers the normal path; this
+	// guards any row that still reads back empty.
+	if cfg.Provider == "" {
+		cfg.Provider = ProviderGitHub
+	}
 	if lastSyncedAt.Valid {
 		t := lastSyncedAt.Time
 		cfg.LastSyncedAt = &t
@@ -149,12 +179,15 @@ func (s *Store) UpsertConfigForWorkspace(ctx context.Context, workspaceID string
 	now := time.Now().UTC()
 	_, err := s.db.ExecContext(ctx, s.db.Rebind(`
 		INSERT INTO workflow_sync_configs (
-			workspace_id, repo_owner, repo_name, branch, path, interval_seconds, poll_enabled,
+			workspace_id, provider, repo_owner, repo_name, project_path, branch, path,
+			interval_seconds, poll_enabled,
 			last_synced_at, last_ok, last_error, last_warnings, last_hash, created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, NULL, 0, '', '[]', '', ?, ?)
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 0, '', '[]', '', ?, ?)
 		ON CONFLICT(workspace_id) DO UPDATE SET
+			provider = excluded.provider,
 			repo_owner = excluded.repo_owner,
 			repo_name = excluded.repo_name,
+			project_path = excluded.project_path,
 			branch = excluded.branch,
 			path = excluded.path,
 			interval_seconds = excluded.interval_seconds,
@@ -165,7 +198,8 @@ func (s *Store) UpsertConfigForWorkspace(ctx context.Context, workspaceID string
 			last_warnings = '[]',
 			last_hash = '',
 			updated_at = excluded.updated_at
-	`), workspaceID, req.RepoOwner, req.RepoName, req.Branch, req.Path, req.IntervalSeconds, boolToInt(req.PollEnabled != nil && *req.PollEnabled), now, now)
+	`), workspaceID, req.Provider, req.RepoOwner, req.RepoName, req.ProjectPath, req.Branch, req.Path,
+		req.IntervalSeconds, boolToInt(req.PollEnabled != nil && *req.PollEnabled), now, now)
 	if err != nil {
 		return nil, err
 	}

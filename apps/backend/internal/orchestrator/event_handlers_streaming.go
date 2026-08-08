@@ -836,6 +836,12 @@ func (s *Service) updateTaskSessionStateWithHook(
 	if onChanged != nil {
 		onChanged()
 	}
+	// Work has resumed: a session entering STARTING/RUNNING clears the
+	// startup interruption marker and republishes the task so open clients
+	// drop the red interruption icon. No-op when the marker is absent.
+	if nextState == models.TaskSessionStateStarting || nextState == models.TaskSessionStateRunning {
+		s.clearTaskInterruptedMarker(ctx, taskID)
+	}
 	if authoritativeUpdatedAt == nil {
 		s.logger.Warn("skipping session state_changed publish; could not read authoritative updated_at",
 			zap.String("task_id", taskID),
@@ -1153,6 +1159,7 @@ func (s *Service) publishTaskSessionStateChanged(
 		// previously-live busy signal during settlement or teardown.
 		"foreground_activity":   foregroundActivity,
 		"active_subagent_count": s.ActiveSubagentCount(sessionID),
+		"supports_steering":     s.SteerEligible(sessionID, nextState),
 	}
 	if stateUpdatedAt != nil && !stateUpdatedAt.IsZero() {
 		eventData[metaKeyUpdatedAt] = stateUpdatedAt.Format(time.RFC3339Nano)
@@ -1411,10 +1418,44 @@ func (s *Service) setSessionStarting(
 		s.writeTaskInProgressForRuntime(ctx, taskID, session.ID)
 	}
 
+	// The launch path moves a session to STARTING without going through
+	// updateTaskSessionStateWithHook, so clear the interruption marker here
+	// too (no-op when absent).
+	s.clearTaskInterruptedMarker(ctx, taskID)
+
 	if publishSession != nil {
 		s.publishTaskSessionStateChanged(ctx, taskID, session.ID, oldState, session.State, session.ErrorMessage, stateUpdatedAt, publishSession)
 	}
 	return nil
+}
+
+// clearTaskInterruptedMarker removes the startup interruption marker from a
+// task and republishes task.updated when it was actually present, so open
+// clients drop the red interruption icon. Called from the session-start
+// funnel when a session enters STARTING/RUNNING — work has resumed, so the
+// task is no longer interrupted. No-op when the marker is absent.
+func (s *Service) clearTaskInterruptedMarker(ctx context.Context, taskID string) {
+	if taskID == "" {
+		return
+	}
+	removed, err := s.repo.RemoveTaskMetadataKey(ctx, taskID, models.MetaKeyInterruptedAt)
+	if err != nil {
+		s.logger.Warn("failed to clear interrupted marker",
+			zap.String("task_id", taskID),
+			zap.Error(err))
+		return
+	}
+	if !removed {
+		return
+	}
+	task, err := s.repo.GetTask(ctx, taskID)
+	if err != nil || task == nil {
+		s.logger.Warn("failed to load task for interrupted-clear publish",
+			zap.String("task_id", taskID),
+			zap.Error(err))
+		return
+	}
+	s.publishTaskUpdated(ctx, task)
 }
 
 func (s *Service) persistFullTaskSessionIfCurrent(
@@ -2381,7 +2422,16 @@ func (s *Service) persistSessionMode(ctx context.Context, sessionID, modeID stri
 // handleAgentCapabilitiesEvent broadcasts agent_capabilities events to the WebSocket.
 func (s *Service) handleAgentCapabilitiesEvent(ctx context.Context, payload *lifecycle.AgentStreamEventPayload) {
 	sessionID := payload.SessionID
-	if sessionID == "" || s.eventBus == nil {
+	if sessionID == "" {
+		return
+	}
+	// Record the negotiated prompt-queueing advertisement before the event-bus
+	// guard. It gates prompt handoff and mid-turn steering, so it must land as
+	// soon as the agent advertises it — recording is admission state, whereas the
+	// bus below is only broadcast. Skipping it when no bus is configured would
+	// silently make a capable agent ineligible.
+	s.recordSessionPromptQueueing(sessionID, payload.Data.SupportsPromptQueueing)
+	if s.eventBus == nil {
 		return
 	}
 	eventPayload := lifecycle.AgentCapabilitiesEventPayload{
@@ -2391,6 +2441,7 @@ func (s *Service) handleAgentCapabilitiesEvent(ctx context.Context, payload *lif
 		SupportsImage:           payload.Data.SupportsImage,
 		SupportsAudio:           payload.Data.SupportsAudio,
 		SupportsEmbeddedContext: payload.Data.SupportsEmbeddedContext,
+		SupportsPromptQueueing:  payload.Data.SupportsPromptQueueing,
 		AuthMethods:             payload.Data.AuthMethods,
 		Timestamp:               time.Now().UTC().Format(time.RFC3339),
 	}

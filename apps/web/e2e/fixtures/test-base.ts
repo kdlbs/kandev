@@ -8,6 +8,15 @@ import { PrAssetCapture } from "../helpers/pr-asset-capture";
 import { makeGitEnv } from "../helpers/git-helper";
 import type { WorkflowStep } from "../../lib/types/http";
 
+const DEFAULT_SIDEBAR_VIEW = {
+  id: "view-all-tasks",
+  name: "All tasks",
+  filters: [],
+  sort: { key: "state", direction: "asc" },
+  group: "repository",
+  collapsed_groups: [],
+};
+
 export type SeedData = {
   workspaceId: string;
   workflowId: string;
@@ -185,7 +194,9 @@ export const test = backendFixture.extend<
       confirm_task_archive: true,
       agent_generated_task_titles: false,
       mcp_task_agent_profile_default: "current_task",
-      sidebar_views: [],
+      sidebar_views: [DEFAULT_SIDEBAR_VIEW],
+      sidebar_active_view_id: DEFAULT_SIDEBAR_VIEW.id,
+      sidebar_draft: null,
       saved_layouts: [],
       lsp_auto_start_languages: [],
       lsp_auto_install_languages: [],
@@ -194,6 +205,7 @@ export const test = backendFixture.extend<
         repository_id: seedData.repositoryId,
         branch: "main",
         agent_profile_id: seedData.agentProfileId,
+        workflow_ids_by_workspace: { [seedData.workspaceId]: seedData.workflowId },
       },
       // Reset to default kanban view. Pipeline-view tests switch this to
       // "graph2", which persists per-workspace; without this reset the next
@@ -320,7 +332,9 @@ test.beforeEach(async ({ apiClient, seedData }) => {
     confirm_task_archive: true,
     agent_generated_task_titles: false,
     mcp_task_agent_profile_default: "current_task",
-    sidebar_views: [],
+    sidebar_views: [DEFAULT_SIDEBAR_VIEW],
+    sidebar_active_view_id: DEFAULT_SIDEBAR_VIEW.id,
+    sidebar_draft: null,
     saved_layouts: [],
     lsp_auto_start_languages: [],
     lsp_auto_install_languages: [],
@@ -335,6 +349,7 @@ test.beforeEach(async ({ apiClient, seedData }) => {
       repository_id: seedData.repositoryId,
       branch: "main",
       agent_profile_id: seedData.agentProfileId,
+      workflow_ids_by_workspace: { [seedData.workspaceId]: seedData.workflowId },
     },
   });
 });

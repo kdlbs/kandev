@@ -196,6 +196,42 @@ func TestPATClient_ListCheckRunsPaginatesCheckRuns(t *testing.T) {
 	}
 }
 
+func TestPATClient_PRCommitDetailUsesExactSHAAndMergesPages(t *testing.T) {
+	var requested []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requested = append(requested, r.URL.RequestURI())
+		if r.URL.Path != "/repos/acme/widget/commits/2222222222222222222222222222222222222222" {
+			t.Errorf("path = %q", r.URL.Path)
+		}
+		if r.URL.Query().Get("per_page") != "100" {
+			t.Errorf("per_page = %q, want 100", r.URL.Query().Get("per_page"))
+		}
+		if r.URL.Query().Get("page") == "2" {
+			_, _ = w.Write([]byte(`{"sha":"2222222222222222222222222222222222222222","commit":{"message":"ignored","author":{"name":"Other","date":"2026-08-05T11:00:00Z"}},"stats":{"additions":99,"deletions":99},"files":[{"filename":"two.txt","status":"removed","additions":0,"deletions":2,"patch":"@@ -1 +0,0 @@\n-gone"}]}`))
+			return
+		}
+		w.Header().Set("Link", `<`+githubAPIBase+`/repos/acme/widget/commits/2222222222222222222222222222222222222222?per_page=100&page=2>; rel="next"`)
+		_, _ = w.Write([]byte(`{"sha":"2222222222222222222222222222222222222222","commit":{"message":"remote detail","author":{"name":"Octo Cat","date":"2026-08-04T11:00:00Z"}},"author":{"login":"octocat"},"stats":{"additions":7,"deletions":3},"files":[{"filename":"one.txt","status":"modified","additions":4,"deletions":1,"patch":"@@ -1 +1 @@\n-old\n+new"}]}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	detail, err := newPATClientPointingAt(t, srv.URL).GetPRCommitDetail(
+		context.Background(), "acme", "widget", "2222222222222222222222222222222222222222",
+	)
+	if err != nil {
+		t.Fatalf("GetPRCommitDetail: %v", err)
+	}
+	if detail.AuthorLogin != "octocat" || detail.AuthorName != "Octo Cat" || detail.FilesChanged != 2 {
+		t.Fatalf("detail = %#v", detail)
+	}
+	if detail.Additions != 7 || detail.Deletions != 3 || len(detail.Files) != 2 {
+		t.Fatalf("detail stats/files = %#v", detail)
+	}
+	if len(requested) != 2 {
+		t.Fatalf("requests = %#v, want two pages", requested)
+	}
+}
+
 func TestConvertPatPR_Mergeable(t *testing.T) {
 	mergeable := true
 	raw := &patPR{

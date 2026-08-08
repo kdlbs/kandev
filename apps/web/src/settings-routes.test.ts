@@ -8,12 +8,14 @@ import ExecutorCreatePage from "@/app/settings/executor/new/page";
 import ProfileEditPage from "@/app/settings/executors/[profileId]/page";
 import CreateProfilePage from "@/app/settings/executors/new/[type]/page";
 import SSHExecutorPage from "@/app/settings/executors/ssh/[executorId]/page";
+import IntegrationsGitHubPage from "@/app/settings/integrations/github/page";
 import IntegrationsGitLabPage from "@/app/settings/integrations/gitlab/page";
 import PluginDetailPage from "@/app/settings/plugins/[pluginId]/page";
 import AutomationEditorPage from "@/app/settings/workspace/[id]/automations/[automationId]/page";
 import NewAutomationPage from "@/app/settings/workspace/[id]/automations/new/page";
 import WorkspaceEditPage from "@/app/settings/workspace/[id]/page";
 import { TaskActionsSettings } from "@/components/settings/general-settings";
+import { SecretsSettings } from "@/components/settings/secrets-settings";
 import { workspaceId, workflowId } from "@/lib/types/ids";
 import type { ListWorkspacesResponse, UserSettingsResponse } from "@/lib/types/http";
 import { buildSettingsInitialStateForRoute, renderSettingsRoute } from "./settings-routes";
@@ -23,6 +25,8 @@ vi.mock("@/components/settings/system/updates-card", () => ({ UpdatesCard: () =>
 const ACTIVE_WORKSPACE_COOKIE = "kandev-active-workspace";
 const OWNER_ID = "owner-1";
 const TIMESTAMP = "2026-01-01T00:00:00Z";
+const ENCODED_WORKSPACE_ID = "workspace%20one";
+const DECODED_WORKSPACE_ID = "workspace one";
 
 describe("buildSettingsInitialStateForRoute", () => {
   beforeEach(() => {
@@ -177,6 +181,13 @@ describe("renderSettingsRoute", () => {
     expect(gitLabRouteWorkspaceId("/settings/workspace/ws%202/integrations/gitlab")).toBe("ws 2");
   });
 
+  it("routes GitHub settings through the integration page wrapper", () => {
+    const route = renderSettingsRoute("/settings/integrations/github");
+
+    expect(isValidElement(route)).toBe(true);
+    expect((route as ReactElement).type).toBe(IntegrationsGitHubPage);
+  });
+
   it.each([
     {
       pathname: "/settings/plugins/plugin%20one",
@@ -209,42 +220,29 @@ describe("renderSettingsRoute", () => {
       identifiers: { executorId: "executor one" },
     },
     {
-      pathname: "/settings/workspace/workspace%20one",
+      pathname: `/settings/workspace/${ENCODED_WORKSPACE_ID}`,
       component: WorkspaceEditPage,
-      identifiers: { workspaceId: "workspace one" },
+      identifiers: { workspaceId: DECODED_WORKSPACE_ID },
     },
     {
-      pathname: "/settings/workspace/workspace%20one/automations/new",
+      pathname: `/settings/workspace/${ENCODED_WORKSPACE_ID}/automations/new`,
       component: NewAutomationPage,
-      identifiers: { workspaceId: "workspace one" },
+      identifiers: { workspaceId: DECODED_WORKSPACE_ID },
     },
     {
-      pathname: "/settings/workspace/workspace%20one/automations/automation%20one",
+      pathname: `/settings/workspace/${ENCODED_WORKSPACE_ID}/automations/automation%20one`,
       component: AutomationEditorPage,
-      identifiers: { workspaceId: "workspace one", automationId: "automation one" },
+      identifiers: { workspaceId: DECODED_WORKSPACE_ID, automationId: "automation one" },
+    },
+    {
+      pathname: `/settings/workspace/${ENCODED_WORKSPACE_ID}/secrets`,
+      component: SecretsSettings,
+      identifiers: { scope: "workspace", workspaceId: DECODED_WORKSPACE_ID },
     },
   ])(
     "passes decoded synchronous identifiers for $pathname",
     ({ pathname, component, identifiers }) => {
-      const route = renderSettingsRoute(pathname);
-      if (!isValidElement<Record<string, unknown>>(route)) {
-        throw new Error(`expected a route element for ${pathname}`);
-      }
-
-      expect({
-        component: route.type,
-        identifiers: pickProps(route.props, Object.keys(identifiers)),
-        thenableProps: Object.entries(route.props)
-          .filter(([, value]) => isThenable(value))
-          .map(([name]) => name),
-        asyncComponent:
-          typeof route.type === "function" && route.type.constructor.name === "AsyncFunction",
-      }).toEqual({
-        component,
-        identifiers,
-        thenableProps: [],
-        asyncComponent: false,
-      });
+      assertSynchronousRouteIdentifiers(pathname, component, identifiers);
     },
   );
 
@@ -255,6 +253,32 @@ describe("renderSettingsRoute", () => {
     expect((route as ReactElement).type).toBe(ExecutorCreatePage);
   });
 });
+
+function assertSynchronousRouteIdentifiers(
+  pathname: string,
+  component: unknown,
+  identifiers: Record<string, unknown>,
+) {
+  const route = renderSettingsRoute(pathname);
+  if (!isValidElement<Record<string, unknown>>(route)) {
+    throw new Error(`expected a route element for ${pathname}`);
+  }
+
+  expect({
+    component: route.type,
+    identifiers: pickProps(route.props, Object.keys(identifiers)),
+    thenableProps: Object.entries(route.props)
+      .filter(([, value]) => isThenable(value))
+      .map(([name]) => name),
+    asyncComponent:
+      typeof route.type === "function" && route.type.constructor.name === "AsyncFunction",
+  }).toEqual({
+    component,
+    identifiers,
+    thenableProps: [],
+    asyncComponent: false,
+  });
+}
 
 function buildState(
   overrides: Partial<Parameters<typeof buildSettingsInitialStateForRoute>[0]> = {},

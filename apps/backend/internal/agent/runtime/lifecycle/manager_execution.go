@@ -418,7 +418,14 @@ func (m *Manager) resumeExistingExecution(ctx context.Context, sessionID string,
 }
 
 // createExecutionFromSessionInfo creates a new execution for a passthrough session
-// when no execution exists (e.g., backend restarted and execution store was cleared).
+// when no execution exists — either because the session has never run (a task
+// created with start_agent:false, started later) or because a backend restart
+// cleared the execution store. The two are distinguished by applyResumeIntent,
+// which decides fresh launch vs resume.
+//
+// Terminal sessions are rejected by the guard at the top of createExecution, the
+// same one every other creation path goes through, so this recovery path never
+// spawns a runtime for a session that ended before the restart.
 func (m *Manager) createExecutionFromSessionInfo(ctx context.Context, sessionID string) (*AgentExecution, error) {
 	if m.workspaceInfoProvider == nil {
 		return nil, fmt.Errorf("cannot restore session %s: workspace info provider not configured", sessionID)
@@ -439,18 +446,24 @@ func (m *Manager) createExecutionFromSessionInfo(ctx context.Context, sessionID 
 	}
 
 	// Verify this session should use passthrough mode
-	if err := m.verifyPassthroughEnabled(ctx, sessionID, workspaceExecutionProfileID(info)); err != nil {
+	profileInfo, err := m.verifyPassthroughEnabled(ctx, sessionID, workspaceExecutionProfileID(info))
+	if err != nil {
 		return nil, err
 	}
 
 	// If agent ID not in workspace info (snapshot missing/empty), resolve from profile
 	executionProfileID := workspaceExecutionProfileID(info)
 	if info.AgentID == "" && executionProfileID != "" && m.profileResolver != nil {
-		profileInfo, err := m.profileResolver.ResolveProfile(ctx, executionProfileID)
+		// Resolve only to backfill info.AgentID — keep the name distinct from the
+		// outer profileInfo so it's clear this one is not what reaches
+		// startPassthroughExecution below. Both resolve from the same profile ID,
+		// so the content is identical, but avoiding the shadow keeps ownership
+		// unambiguous for future readers.
+		agentProfile, err := m.profileResolver.ResolveProfile(ctx, executionProfileID)
 		if err != nil {
 			return nil, fmt.Errorf("resolve agent for session %s: %w", sessionID, err)
 		}
-		info.AgentID = profileInfo.AgentName
+		info.AgentID = agentProfile.AgentName
 	}
 
 	// Create the execution
@@ -464,12 +477,15 @@ func (m *Manager) createExecutionFromSessionInfo(ctx context.Context, sessionID 
 		return nil, fmt.Errorf("create execution for session %s: %w", sessionID, err)
 	}
 
-	// Start the passthrough process using resume command (recovery after restart)
+	// createExecution derived the resume intent (applyResumeIntent): a session
+	// with no prior agent execution has never run, so there is nothing for the
+	// CLI's resume flag to attach to and it launches fresh (issue #2330).
 	m.logger.Info("starting passthrough process for session",
 		zap.String("session_id", sessionID),
-		zap.String("execution_id", execution.ID))
+		zap.String("execution_id", execution.ID),
+		zap.Bool("resumed_session", execution.isResumedSession))
 
-	if err := m.ResumePassthroughSession(ctx, sessionID); err != nil {
+	if err := m.startPassthroughExecution(ctx, execution, profileInfo); err != nil {
 		return nil, fmt.Errorf("start passthrough process for session %s: %w", sessionID, err)
 	}
 
@@ -482,10 +498,27 @@ func (m *Manager) createExecutionFromSessionInfo(ctx context.Context, sessionID 
 	return execution, nil
 }
 
-// verifyPassthroughEnabled checks if the session's profile has CLI passthrough enabled.
-func (m *Manager) verifyPassthroughEnabled(ctx context.Context, sessionID, profileID string) error {
+// applyResumeIntent marks whether a freshly built execution should launch as a
+// resume, from the same PreviousExecutionID buildExecutionFromInstance uses on
+// the ACP launch path (populated here from info.AgentExecutionID).
+//
+// An empty PreviousExecutionID means no agent execution has ever been recorded
+// for this session — the state a task created with start_agent:false is in.
+// startPassthroughExecution reads the flag: such a session has no CLI-side
+// conversation for `-c` / `--resume` to attach to, and its stored prompt has
+// never been delivered, so it must take the fresh-launch path. Only a session
+// that previously ran — one whose execution was lost from the in-memory store
+// by a backend restart — is a genuine recovery.
+func applyResumeIntent(execution *AgentExecution, req *ExecutorCreateRequest) {
+	execution.isResumedSession = req.PreviousExecutionID != ""
+}
+
+// verifyPassthroughEnabled checks if the session's profile has CLI passthrough
+// enabled, returning the resolved profile so callers can reuse it for command
+// building instead of resolving twice.
+func (m *Manager) verifyPassthroughEnabled(ctx context.Context, sessionID, profileID string) (*AgentProfileInfo, error) {
 	if m.profileResolver == nil || profileID == "" {
-		return fmt.Errorf("session %s has no profile configured for passthrough mode", sessionID)
+		return nil, fmt.Errorf("session %s has no profile configured for passthrough mode", sessionID)
 	}
 
 	profileInfo, err := m.profileResolver.ResolveProfile(ctx, profileID)
@@ -494,14 +527,14 @@ func (m *Manager) verifyPassthroughEnabled(ctx context.Context, sessionID, profi
 			zap.String("session_id", sessionID),
 			zap.String("profile_id", profileID),
 			zap.Error(err))
-		return fmt.Errorf("session %s: failed to resolve profile %s: %w", sessionID, profileID, err)
+		return nil, fmt.Errorf("session %s: failed to resolve profile %s: %w", sessionID, profileID, err)
 	}
 
 	if profileInfo == nil || !profileInfo.CLIPassthrough {
-		return fmt.Errorf("session %s is not configured for CLI passthrough mode", sessionID)
+		return nil, fmt.Errorf("session %s is not configured for CLI passthrough mode", sessionID)
 	}
 
-	return nil
+	return profileInfo, nil
 }
 
 // createExecution creates an agentctl execution.
@@ -509,6 +542,15 @@ func (m *Manager) verifyPassthroughEnabled(ctx context.Context, sessionID, profi
 func (m *Manager) createExecution(ctx context.Context, taskID string, info *WorkspaceInfo) (*AgentExecution, error) {
 	if info == nil {
 		return nil, fmt.Errorf("workspace info is required")
+	}
+	// A terminal session can never gain an execution, so reject it before
+	// reconciling the workspace, taking an activity lease, or creating a
+	// runtime instance. User-facing panels (terminal, git, files) reconnect on
+	// a timer; without this every retry paid for a full instance creation that
+	// the post-creation check below tore straight back down. That check stays —
+	// it guards the session that terminalizes *during* creation.
+	if err := m.ensureLaunchSessionStillActive(ctx, info.SessionID); err != nil {
+		return nil, err
 	}
 	owner := ownedDirectoryLinkOwner(taskID, info.TaskDirName)
 	if err := reconcileWorkspaceSources(ctx, info.WorkspacePath, info.WorkspaceFolders, owner); err != nil {
@@ -548,16 +590,6 @@ func (m *Manager) createExecution(ctx context.Context, taskID string, info *Work
 		return nil, fmt.Errorf("agent type %q not found in registry", info.AgentID)
 	}
 
-	// Forward AgentProfile.EnvVars to the runtime instance. The Launch /
-	// ResumeSession paths merge these into req.Env via buildEnvForExecution
-	// before calling LaunchAgent; the lazy workspace-only path (any
-	// GetOrEnsureExecution* caller after backend restart) lands here directly,
-	// so without this merge the runtime instance gets spawned with empty env
-	// and CLAUDE_CONFIG_DIR (and any other workspace profile var) is lost.
-	// The agent subprocess inherits the instance env via agentctl, and ACP
-	// session/load then looks under the wrong SDK root → -32002 Resource not
-	// found.
-	env := map[string]string{}
 	var profileInfo *AgentProfileInfo
 	executionProfileID := workspaceExecutionProfileID(info)
 	if executionProfileID != "" && m.profileResolver != nil {
@@ -570,12 +602,34 @@ func (m *Manager) createExecution(ctx context.Context, taskID string, info *Work
 			profileInfo = resolvedProfile
 		}
 	}
-	m.mergeAgentProfileEnvFromInfo(ctx, profileInfo, env)
-	managedReq := &LaunchRequest{ExecutorType: info.ExecutorType, Env: env}
+	managedReq := &LaunchRequest{
+		TaskID:             taskID,
+		WorkspaceID:        info.WorkspaceID,
+		SessionID:          info.SessionID,
+		AgentProfileID:     info.AgentProfileID,
+		ExecutionProfileID: executionProfileID,
+		ExecutorType:       info.ExecutorType,
+		Env:                make(map[string]string),
+	}
 	if err := m.prepareManagedGoCacheEnvironment(ctx, managedReq); err != nil {
 		return nil, err
 	}
-	env = managedReq.Env
+	definitions, err := m.repositoryEnvironmentDefinitions(ctx, taskID, info.WorkspaceID)
+	if err != nil {
+		return nil, err
+	}
+	managedReq.EnvironmentDefinitions = append(managedReq.EnvironmentDefinitions, definitions...)
+	executorDefinitions, err := m.executorProfileEnvironmentDefinitions(ctx, workspaceExecutorProfileID(info))
+	if err != nil {
+		return nil, err
+	}
+	managedReq.EnvironmentDefinitions = append(managedReq.EnvironmentDefinitions, executorDefinitions...)
+	managedReq.ApprovedSecretEnvKeys = approvedSecretEnvironmentKeys(managedReq.EnvironmentDefinitions)
+	managedReq.EnvironmentResolutionRequired = true
+	env, err := m.buildEnvForExecution(ctx, executionID, managedReq, agentConfig, profileInfo)
+	if err != nil {
+		return nil, fmt.Errorf("build recovered environment: %w", err)
+	}
 	autoApprove := false
 	var autoApproveOverride *bool
 	if profileInfo != nil {
@@ -591,6 +645,10 @@ func (m *Manager) createExecution(ctx context.Context, taskID string, info *Work
 	}
 	if managedReq.managedGoCachePath != "" {
 		metadata[managedGoCacheMetadataKey] = managedReq.managedGoCachePath
+	}
+	remoteContributions, err := remoteContributionsFromMetadata(metadata)
+	if err != nil {
+		return nil, err
 	}
 
 	req := &ExecutorCreateRequest{
@@ -608,9 +666,11 @@ func (m *Manager) createExecution(ctx context.Context, taskID string, info *Work
 		AutoApprovePermissionsOverride: autoApproveOverride,
 		AgentConfig:                    agentConfig,
 		Metadata:                       metadata,
+		ApprovedSecretEnvKeys:          append([]string(nil), managedReq.ApprovedSecretEnvKeys...),
 		PreviousExecutionID:            info.AgentExecutionID,
 		AuthToken:                      m.revealRuntimeSecret(ctx, info.Metadata, MetadataKeyAuthTokenSecret),
 		BootstrapNonce:                 m.revealRuntimeSecret(ctx, info.Metadata, MetadataKeyBootstrapNonceSecret),
+		RemoteContributions:            remoteContributions,
 	}
 
 	if err := resumeRemoteInstancePreflight(ctx, rt, req); err != nil {
@@ -624,13 +684,16 @@ func (m *Manager) createExecution(ctx context.Context, taskID string, info *Work
 
 	execution := runtimeInstance.ToAgentExecution(req)
 	execution.RuntimeName = rt.Name()
+	// Set before executionStore.Add: once the execution is registered, a
+	// concurrent EnsurePassthroughExecution can reach it, and it must never
+	// observe a half-initialised resume intent.
+	applyResumeIntent(execution, req)
 
-	// Cache the resolved profile env on the execution so a subsequent
-	// configureAndStartAgent (when this workspace-only execution is promoted)
-	// reuses it via mergeAgentProfileEnvForExecution instead of doing another
-	// secret-store round-trip. Mirrors the Launch path (manager_launch.go).
-	if env != nil {
-		m.cacheResolvedProfileEnv(execution, env)
+	// Cache only agent-profile values for the best-effort configure fallback.
+	// The effective runtime snapshot (including repository secrets) is already
+	// captured by ToAgentExecution and must not be mislabeled as profile data.
+	if profileInfo != nil && len(profileInfo.EnvVars) > 0 {
+		m.cacheResolvedProfileEnv(execution, m.resolveAgentProfileEnvVars(ctx, profileInfo.EnvVars))
 	}
 
 	// Set the ACP session ID for session resumption
@@ -738,6 +801,13 @@ func workspaceExecutionProfileID(info *WorkspaceInfo) string {
 	return info.AgentProfileID
 }
 
+func workspaceExecutorProfileID(info *WorkspaceInfo) string {
+	if info == nil {
+		return ""
+	}
+	return info.ExecutorProfileID
+}
+
 // rollbackRacedExecution tears down an execution that lost a session-conflict
 // race in the store. Without this the runtime instance (agentctl + agent
 // subprocess if any) keeps running with no tracking entry, and no cleanup path
@@ -816,8 +886,7 @@ func (m *Manager) persistRuntimeSecret(
 
 	m.logger.Debug("persisted runtime secret in secret store",
 		zap.String("instance_id", instance.InstanceID),
-		zap.String("metadata_key", metadataKey),
-		zap.String("secret_id", secret.ID))
+		zap.String("metadata_key", metadataKey))
 }
 
 func (m *Manager) revealRuntimeSecret(ctx context.Context, metadata map[string]interface{}, metadataKey string) string {
@@ -828,11 +897,10 @@ func (m *Manager) revealRuntimeSecret(ctx context.Context, metadata map[string]i
 	if secretID == "" {
 		return ""
 	}
-	value, err := m.secretStore.Reveal(ctx, secretID)
+	value, err := revealGlobalSecret(ctx, m.secretStore, secretID)
 	if err != nil {
 		m.logger.Warn("failed to reveal runtime secret",
 			zap.String("metadata_key", metadataKey),
-			zap.String("secret_id", secretID),
 			zap.Error(err))
 		return ""
 	}

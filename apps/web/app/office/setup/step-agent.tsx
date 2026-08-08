@@ -17,6 +17,8 @@ import {
   CreateProfilePanel,
   useSelectableProfileOptions,
 } from "./agent-profile-setup-controls";
+import { Trans, useTranslation } from "react-i18next";
+import { TIER_NAME_KEYS } from "../lib/label-keys";
 
 type ProfileSelectOption = ReturnType<typeof useSelectableProfileOptions>["profileOptions"][number];
 
@@ -36,13 +38,23 @@ type StepAgentProps = {
 };
 
 // Fallback used only when meta has not been hydrated yet (graceful degradation).
+// Catalog keys, not copy — module scope freezes a `t()` at the boot locale. The
+// `id`s are the persisted executor-type values.
 const FALLBACK_EXECUTOR_OPTIONS = [
-  { id: "local_pc", label: "Local (standalone)", description: "Run on host machine" },
-  { id: "local_docker", label: "Local Docker", description: "Run in a local Docker container" },
+  {
+    id: "local_pc",
+    labelKey: "office:localStandalone",
+    descriptionKey: "office:runOnHostMachine",
+  },
+  {
+    id: "local_docker",
+    labelKey: "office:localDocker",
+    descriptionKey: "office:runInALocalDockerContainer",
+  },
   {
     id: "sprites",
-    label: "Sprites (remote sandbox)",
-    description: "Run in a Sprites cloud environment",
+    labelKey: "office:spritesRemoteSandbox",
+    descriptionKey: "office:runInASpritesCloudEnvironment",
   },
 ];
 
@@ -55,8 +67,15 @@ export function StepAgent({
   onChange,
   onAgentProfilesChange,
 }: StepAgentProps) {
+  const { t } = useTranslation();
   const meta = useAppStore((s) => s.office.meta);
-  const executorOptions = meta?.executorTypes ?? FALLBACK_EXECUTOR_OPTIONS;
+  const executorOptions =
+    meta?.executorTypes ??
+    FALLBACK_EXECUTOR_OPTIONS.map((o) => ({
+      id: o.id,
+      label: t(o.labelKey),
+      description: t(o.descriptionKey),
+    }));
   const settingsAgents = useAppStore((s) => s.settingsAgents.items);
   const setAgentProfiles = useAppStore((s) => s.setAgentProfiles);
 
@@ -68,14 +87,14 @@ export function StepAgent({
   return (
     <div className="space-y-6">
       <div>
-        <h2 className="text-xl font-semibold">Create your coordinator agent</h2>
+        <h2 className="text-xl font-semibold">{t("office:createYourCoordinatorAgent")}</h2>
         <p className="text-sm text-muted-foreground mt-1">
-          The coordinator manages other agents, delegates tasks, and monitors progress.
+          {t("office:theCoordinatorManagesOtherAgentsDelegates")}
         </p>
       </div>
       <div className="space-y-4">
         <div>
-          <Label htmlFor="agent-name">Agent name</Label>
+          <Label htmlFor="agent-name">{t("office:agentName")}</Label>
           <Input
             id="agent-name"
             value={agentName}
@@ -136,16 +155,17 @@ function ProfileSelectorSection({
   onChange: StepAgentProps["onChange"];
   onCreateClick: () => void;
 }) {
+  const { t } = useTranslation();
   return (
     <>
-      <Label>CLI agent profile</Label>
+      <Label>{t("office:cliAgentProfile")}</Label>
       {!showCreate && (
         <AgentSelector
           options={profileOptions}
           value={agentProfileId}
           onValueChange={(v) => onChange({ agentProfileId: v })}
           disabled={profileOptions.length === 0}
-          placeholder="Select an agent profile..."
+          placeholder={t("office:selectAnAgentProfile")}
           triggerClassName="mt-1 border border-input rounded-md px-3 h-9"
         />
       )}
@@ -169,6 +189,7 @@ function TierIndicator({
   defaultTier?: Tier;
   onChange: (t: Tier) => void;
 }) {
+  const { t } = useTranslation();
   // The label string in AgentProfileOption is "<agent display> • <profile name>"
   // — fall back to the raw label when we cannot extract a model id, since the
   // seed mapping only matters for the "we'll treat X as the Y tier" hint.
@@ -177,11 +198,25 @@ function TierIndicator({
   const value: Tier = defaultTier ?? seeded;
   return (
     <div>
-      <Label>Workspace default tier</Label>
+      <Label>{t("office:workspaceDefaultTier")}</Label>
+      {/*
+        One sentence, one key. Splitting it into "We'll treat" + a model chip +
+        " as the " + a tier id + " tier for " freezes English word order, and the
+        tier arrived as a raw wire value (`frontier`) doubling as display copy.
+        The tier now travels as a translated name resolved from TIER_NAME_KEYS.
+      */}
       <p className="text-xs text-muted-foreground mb-2">
-        We&apos;ll treat <span className="font-mono">{modelHint || "your model"}</span> as the{" "}
-        {value} tier for {selectedProfile?.agent_name || "this provider"}. Change it later in
-        Workspace → Provider routing.
+        <Trans
+          i18nKey="office:workspaceDefaultTierHint"
+          values={{
+            model: modelHint || t("office:yourModel"),
+            tier: t(TIER_NAME_KEYS[value]),
+            provider: selectedProfile?.agent_name || t("office:thisProvider"),
+          }}
+        >
+          We&apos;ll treat <span className="font-mono">model</span> as the tier for the provider.
+          Change it later in Workspace → Provider routing.
+        </Trans>
       </p>
       <ToggleGroup
         type="single"
@@ -190,13 +225,13 @@ function TierIndicator({
         className="justify-start"
       >
         <ToggleGroupItem value="frontier" className="cursor-pointer capitalize">
-          Frontier
+          {t("office:tierFrontier")}
         </ToggleGroupItem>
         <ToggleGroupItem value="balanced" className="cursor-pointer capitalize">
-          Balanced
+          {t("office:tierBalanced")}
         </ToggleGroupItem>
         <ToggleGroupItem value="economy" className="cursor-pointer capitalize">
-          Economy
+          {t("office:tierEconomy")}
         </ToggleGroupItem>
       </ToggleGroup>
     </div>
@@ -212,10 +247,11 @@ function ProfilePickerHint({
   selected: AgentProfileOption | undefined;
   onCreateClick: () => void;
 }) {
+  const { t } = useTranslation();
   if (!hasProfiles) {
     return (
       <div className="mt-2 text-xs text-muted-foreground space-y-1">
-        <p>No CLI agent profiles available yet.</p>
+        <p>{t("office:noCliAgentProfilesAvailableYet")}</p>
         <CreateProfileButton hasProfiles={false} onCreateClick={onCreateClick} />
       </div>
     );
@@ -225,10 +261,12 @@ function ProfilePickerHint({
       {selected ? (
         <div className="flex items-center gap-2 flex-wrap">
           <Badge variant="secondary">{selected.agent_name}</Badge>
-          {selected.cli_passthrough ? <Badge variant="outline">CLI passthrough</Badge> : null}
+          {selected.cli_passthrough ? (
+            <Badge variant="outline">{t("common:cliPassthrough")}</Badge>
+          ) : null}
         </div>
       ) : (
-        <p>Picks the CLI client, model, mode, and flags this agent will use.</p>
+        <p>{t("office:picksTheCliClientModelMode")}</p>
       )}
       <CreateProfileButton hasProfiles={hasProfiles} onCreateClick={onCreateClick} />
     </div>
@@ -253,6 +291,7 @@ function ExecutorSelector({
   options: { id: string; label: string; description: string }[];
   onChange: (v: string) => void;
 }) {
+  const { t } = useTranslation();
   const current = value || "local_pc";
   const selected = options.find((o) => o.id === current);
   const comboOptions: ComboboxOption[] = options.map((opt) => {
@@ -263,7 +302,7 @@ function ExecutorSelector({
       label: opt.label,
       description: opt.description,
       disabled,
-      disabledReason: disabled ? "Coming soon — only Local is supported right now." : undefined,
+      disabledReason: disabled ? t("office:comingSoonOnlyLocalIsSupported") : undefined,
       renderLabel: () => (
         <span className="flex min-w-0 flex-1 items-center gap-2">
           <Icon className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
@@ -274,12 +313,12 @@ function ExecutorSelector({
   });
   return (
     <div>
-      <Label>Executor preference</Label>
+      <Label>{t("office:executorPreference")}</Label>
       <Combobox
         options={comboOptions}
         value={current}
         onValueChange={onChange}
-        placeholder="Select executor..."
+        placeholder={t("office:selectExecutor")}
         showSearch={false}
         triggerClassName="mt-1 border border-input rounded-md px-3 h-9"
       />

@@ -20,15 +20,24 @@ import (
 const (
 	// queueErrorCodeEntryNotFound is surfaced when an edit/remove targets an entry
 	// that has already been drained (atomic-take won the race).
-	queueErrorCodeEntryNotFound = "entry_not_found"
-	queueErrorCodeSessionBusy   = "session_busy"
-	queueErrorCodeNotPromptable = "session_not_promptable"
+	queueErrorCodeEntryNotFound             = "entry_not_found"
+	queueErrorCodeSessionBusy               = "session_busy"
+	queueErrorCodeNotPromptable             = "session_not_promptable"
+	queueErrorCodeSendNowQueueEmpty         = "queue_empty"
+	queueErrorCodeSendNowQueueChanged       = "queue_changed"
+	queueErrorCodeSendNowConflict           = "send_now_conflict"
+	queueErrorCodeSendNowTurnChanged        = "turn_changed"
+	queueErrorCodeSendNowAttachmentOverflow = "send_now_attachment_overflow"
+	queueErrorCodeSendNowReferenceOverflow  = "send_now_reference_overflow"
 	// queueErrorCodeMergeReferenceOverflow is surfaced when a merge would push
 	// the combined entity references past the per-message cap; the merge is
 	// rejected atomically instead of dropping persisted references.
 	queueErrorCodeMergeReferenceOverflow = "merge_reference_overflow"
-	queueInvalidReferences               = "Invalid entity references"
-	queueAccessDenied                    = "Session not found"
+	// queueErrorCodeMergeDisabled is surfaced when queued-message merging is
+	// disabled via the message queue system setting.
+	queueErrorCodeMergeDisabled = "merge_disabled"
+	queueInvalidReferences      = "Invalid entity references"
+	queueAccessDenied           = "Session not found"
 
 	// Payload field names — extracted to satisfy goconst (≥3 occurrences).
 	fieldSessionID = "session_id"
@@ -55,11 +64,24 @@ type QueueDrainer interface {
 	DrainQueuedMessage(ctx context.Context, sessionID string) (bool, error)
 }
 
+// QueueSendNowDispatcher is implemented by the orchestrator service. It is
+// kept separate from QueueDrainer so queue-focused handlers can retain their
+// small test doubles while the new action gets the replacement-turn contract.
+type QueueSendNowDispatcher interface {
+	SendQueuedNow(ctx context.Context, sessionID, scope, entryID string) (int, error)
+}
+
 // QueueAccessAuthorizer scopes queue reads and mutations to visible sessions.
 type QueueAccessAuthorizer interface {
 	AuthorizeSessionAccess(ctx context.Context, sessionID string) error
 	AuthorizeTaskSessionAccess(ctx context.Context, taskID, sessionID string) error
 }
+
+// SessionTaskResolver returns the task that owns a session. It enriches the
+// message.queue.status_changed event with task_id so task-scoped consumers
+// (e.g. the status summary projector) can refresh per-task queued counts.
+// An empty result omits the field; an error is logged and also omits it.
+type SessionTaskResolver func(ctx context.Context, sessionID string) (string, error)
 
 // QueueAttachmentClaimer binds staged file descriptors to the task/session
 // after a queue entry has been durably accepted.
@@ -77,13 +99,15 @@ type queueEntryTaker interface {
 
 // QueueHandlers handles WebSocket message-queue operations.
 type QueueHandlers struct {
-	queueService       QueueService
-	queueDrainer       QueueDrainer
-	accessAuthorizer   QueueAccessAuthorizer
-	eventBus           bus.EventBus
-	logger             *logger.Logger
-	referenceValidator entityrefs.SubmissionValidator
-	attachmentClaimer  QueueAttachmentClaimer
+	queueService        QueueService
+	queueDrainer        QueueDrainer
+	queueDispatcher     QueueSendNowDispatcher
+	accessAuthorizer    QueueAccessAuthorizer
+	sessionTaskResolver SessionTaskResolver
+	eventBus            bus.EventBus
+	logger              *logger.Logger
+	referenceValidator  entityrefs.SubmissionValidator
+	attachmentClaimer   QueueAttachmentClaimer
 }
 
 // SetAttachmentClaimer wires the task attachment registry into queue adds.
@@ -92,27 +116,35 @@ func (h *QueueHandlers) SetAttachmentClaimer(claimer QueueAttachmentClaimer) {
 	h.attachmentClaimer = claimer
 }
 
-// NewQueueHandlers creates a new QueueHandlers instance.
+// NewQueueHandlers creates a new QueueHandlers instance. sessionTaskResolver
+// enriches published queue status events with the owning task_id; nil keeps
+// the payload unchanged.
 func NewQueueHandlers(
 	queueService QueueService,
 	eventBus bus.EventBus,
 	log *logger.Logger,
 	queueDrainer QueueDrainer,
 	accessAuthorizer QueueAccessAuthorizer,
+	sessionTaskResolver SessionTaskResolver,
 	validators ...entityrefs.SubmissionValidator,
 ) *QueueHandlers {
 	var referenceValidator entityrefs.SubmissionValidator
 	if len(validators) > 0 {
 		referenceValidator = validators[0]
 	}
-	return &QueueHandlers{
-		queueService:       queueService,
-		queueDrainer:       queueDrainer,
-		accessAuthorizer:   accessAuthorizer,
-		eventBus:           eventBus,
-		logger:             log.WithFields(zap.String("component", "queue-handlers")),
-		referenceValidator: referenceValidator,
+	handlers := &QueueHandlers{
+		queueService:        queueService,
+		queueDrainer:        queueDrainer,
+		accessAuthorizer:    accessAuthorizer,
+		sessionTaskResolver: sessionTaskResolver,
+		eventBus:            eventBus,
+		logger:              log.WithFields(zap.String("component", "queue-handlers")),
+		referenceValidator:  referenceValidator,
 	}
+	if dispatcher, ok := queueDrainer.(QueueSendNowDispatcher); ok {
+		handlers.queueDispatcher = dispatcher
+	}
+	return handlers
 }
 
 // RegisterHandlers registers queue handlers with the dispatcher.
@@ -123,6 +155,7 @@ func (h *QueueHandlers) RegisterHandlers(d *ws.Dispatcher) {
 	d.RegisterFunc(ws.ActionMessageQueueUpdate, h.wsUpdateMessage)
 	d.RegisterFunc(ws.ActionMessageQueueAppend, h.wsAppendToQueue)
 	d.RegisterFunc(ws.ActionMessageQueueDrain, h.wsDrainQueue)
+	d.RegisterFunc(ws.ActionMessageQueueSendNow, h.wsSendNow)
 	d.RegisterFunc(ws.ActionMessageQueueRemove, h.wsRemoveEntry)
 	d.RegisterFunc(ws.ActionMessageQueueMerge, h.wsMergeIntoAbove)
 }
@@ -134,6 +167,7 @@ type wsQueueMessageRequest struct {
 	Model            string                           `json:"model,omitempty"`
 	PlanMode         bool                             `json:"plan_mode,omitempty"`
 	Attachments      []messagequeue.MessageAttachment `json:"attachments,omitempty"`
+	ContextFiles     []v1.ContextFileMeta             `json:"context_files,omitempty"`
 	EntityReferences []v1.EntityReference             `json:"entity_references,omitempty"`
 	UserID           string                           `json:"user_id,omitempty"`
 }
@@ -180,7 +214,10 @@ func (h *QueueHandlers) wsQueueMessage(ctx context.Context, msg *ws.Message) (*w
 	if queuedBy == "" {
 		queuedBy = messagequeue.QueuedByUser
 	}
-	metadata := orchestrator.NewUserMessageMeta().WithEntityReferences(req.EntityReferences).ToMap()
+	metadata := orchestrator.NewUserMessageMeta().
+		WithContextFiles(req.ContextFiles).
+		WithEntityReferences(req.EntityReferences).
+		ToMap()
 	queued, err := h.queueService.QueueMessageWithMetadata(ctx, req.SessionID, req.TaskID, req.Content, req.Model, queuedBy, req.PlanMode, req.Attachments, metadata)
 	if err != nil {
 		if errors.Is(err, messagequeue.ErrQueueFull) {
@@ -273,6 +310,80 @@ func (h *QueueHandlers) wsDrainQueue(ctx context.Context, msg *ws.Message) (*ws.
 		fieldSessionID: req.SessionID,
 		"drained":      drained,
 	})
+}
+
+type wsSendNowRequest struct {
+	SessionID string `json:"session_id"`
+	Scope     string `json:"scope"`
+	EntryID   string `json:"entry_id,omitempty"`
+}
+
+func (h *QueueHandlers) wsSendNow(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	var req wsSendNowRequest
+	if err := msg.ParsePayload(&req); err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
+	}
+	if req.SessionID == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "session_id is required", nil)
+	}
+	if denied := h.authorizeSession(ctx, msg, req.SessionID); denied != nil {
+		return denied, nil
+	}
+	if validation := validateSendNowRequest(req); validation != "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, validation, nil)
+	}
+	if h.queueDispatcher == nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Queue send-now is unavailable", nil)
+	}
+
+	sentCount, err := h.queueDispatcher.SendQueuedNow(ctx, req.SessionID, req.Scope, req.EntryID)
+	if err != nil {
+		return h.sendNowErrorResponse(msg, req.SessionID, err)
+	}
+
+	h.publishStatus(ctx, req.SessionID)
+	return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
+		fieldSessionID: req.SessionID,
+		"dispatched":   true,
+		"sent_count":   sentCount,
+	})
+}
+
+func validateSendNowRequest(req wsSendNowRequest) string {
+	switch {
+	case req.Scope != orchestrator.QueueSendNowScopeEntry && req.Scope != orchestrator.QueueSendNowScopeAll:
+		return "scope must be entry or all"
+	case req.Scope == orchestrator.QueueSendNowScopeEntry && req.EntryID == "":
+		return "entry_id is required for entry scope"
+	case req.Scope == orchestrator.QueueSendNowScopeAll && req.EntryID != "":
+		return "entry_id is not allowed for all scope"
+	default:
+		return ""
+	}
+}
+
+func (h *QueueHandlers) sendNowErrorResponse(msg *ws.Message, sessionID string, err error) (*ws.Message, error) {
+	switch {
+	case errors.Is(err, orchestrator.ErrSendNowEntryNotFound):
+		return ws.NewError(msg.ID, msg.Action, queueErrorCodeEntryNotFound, "Queue entry is no longer pending", nil)
+	case errors.Is(err, orchestrator.ErrSendNowQueueEmpty):
+		return ws.NewError(msg.ID, msg.Action, queueErrorCodeSendNowQueueEmpty, "Queue is empty", nil)
+	case errors.Is(err, orchestrator.ErrSendNowQueueChanged):
+		return ws.NewError(msg.ID, msg.Action, queueErrorCodeSendNowQueueChanged, "Queue changed before Send Now could start", nil)
+	case errors.Is(err, orchestrator.ErrSendNowConflict):
+		return ws.NewError(msg.ID, msg.Action, queueErrorCodeSendNowConflict, "Another cancellation or Send Now operation is in progress", nil)
+	case errors.Is(err, orchestrator.ErrSendNowTurnChanged):
+		return ws.NewError(msg.ID, msg.Action, queueErrorCodeSendNowTurnChanged, "The active turn changed before Send Now could start", nil)
+	case errors.Is(err, messagequeue.ErrSendNowAttachmentOverflow):
+		return ws.NewError(msg.ID, msg.Action, queueErrorCodeSendNowAttachmentOverflow, "Combined attachments exceed the message limits", nil)
+	case errors.Is(err, messagequeue.ErrSendNowReferenceOverflow):
+		return ws.NewError(msg.ID, msg.Action, queueErrorCodeSendNowReferenceOverflow, "Combined entity references exceed the message limit", nil)
+	case errors.Is(err, orchestrator.ErrSessionNotPromptable):
+		return ws.NewError(msg.ID, msg.Action, queueErrorCodeNotPromptable, "Session is not ready for input", nil)
+	default:
+		h.logger.Error("failed to send queued message now", zap.String(fieldSessionID, sessionID), zap.Error(err))
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to send queued message now", nil)
+	}
 }
 
 type wsGetQueueStatusRequest struct {
@@ -618,6 +729,9 @@ func (h *QueueHandlers) wsMergeIntoAbove(ctx context.Context, msg *ws.Message) (
 		if errors.Is(err, messagequeue.ErrMergeReferenceOverflow) {
 			return ws.NewError(msg.ID, msg.Action, queueErrorCodeMergeReferenceOverflow, err.Error(), nil)
 		}
+		if errors.Is(err, messagequeue.ErrMergeDisabled) {
+			return ws.NewError(msg.ID, msg.Action, queueErrorCodeMergeDisabled, "Message merging is disabled", nil)
+		}
 		h.logger.Error("failed to merge queued message", zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to merge queued message", nil)
 	}
@@ -725,14 +839,25 @@ func (h *QueueHandlers) publishStatus(ctx context.Context, sessionID string) {
 		return
 	}
 	status := h.queueService.GetStatus(ctx, sessionID)
+	eventData := map[string]interface{}{
+		fieldSessionID:  sessionID,
+		"entries":       status.Entries,
+		"count":         status.Count,
+		fieldMax:        status.Max,
+		"merge_enabled": status.MergeEnabled,
+	}
+	if h.sessionTaskResolver != nil {
+		if taskID, err := h.sessionTaskResolver(ctx, sessionID); err != nil {
+			h.logger.Warn("resolve session task for queue status event",
+				zap.String("session_id", sessionID),
+				zap.Error(err))
+		} else if taskID != "" {
+			eventData["task_id"] = taskID
+		}
+	}
 	_ = h.eventBus.Publish(ctx, events.MessageQueueStatusChanged, bus.NewEvent(
 		events.MessageQueueStatusChanged,
 		"queue-handlers",
-		map[string]interface{}{
-			fieldSessionID: sessionID,
-			"entries":      status.Entries,
-			"count":        status.Count,
-			fieldMax:       status.Max,
-		},
+		eventData,
 	))
 }

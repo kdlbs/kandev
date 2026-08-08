@@ -7,8 +7,12 @@ import {
   IconFolder,
   IconGitBranch,
   IconGitPullRequest,
+  IconListCheck,
+  IconNetwork,
 } from "@tabler/icons-react";
+import { useTranslation } from "react-i18next";
 import {
+  DropdownMenuCheckboxItem,
   DropdownMenuItem,
   DropdownMenuSub,
   DropdownMenuSubContent,
@@ -24,6 +28,7 @@ import { mrTaskKey } from "@/components/gitlab/mr-detail-panel";
 import { RepositoryScriptsMenuItems } from "./repository-scripts-menu";
 import { SessionReopenMenuItems } from "./session-reopen-menu";
 import { TerminalReopenMenuItems } from "./terminal-reopen-menu";
+import type { PortForwardingVisibility } from "./port-forwarding-visibility-provider";
 
 export type AddPanelMenuState = {
   taskId: string | null;
@@ -33,6 +38,7 @@ export type AddPanelMenuState = {
   /** All PRs linked to the task; multi-repo tasks render one menu item per PR. */
   prs: TaskPR[];
   mrs: TaskMR[];
+  portForwarding?: PortForwardingVisibility;
 };
 
 type AddPanelMenuItemsProps = {
@@ -55,6 +61,7 @@ const PR_SUBMENU_TEST_ID = "add-panel-pr-submenu";
  * tasks with up to ten linked PRs don't stretch the main menu too tall.
  */
 function PRPanelMenuItems({ prs, onOpenPR }: { prs: TaskPR[]; onOpenPR: (pr: TaskPR) => void }) {
+  const { t } = useTranslation();
   if (prs.length === 0) return null;
   if (prs.length === 1) {
     const pr = prs[0];
@@ -77,7 +84,7 @@ function PRPanelMenuItems({ prs, onOpenPR }: { prs: TaskPR[]; onOpenPR: (pr: Tas
         data-pr-count={prs.length}
       >
         <IconGitPullRequest className={MENU_ICON_CLASS} />
-        Pull requests
+        {t("task:pullRequests")}
       </DropdownMenuSubTrigger>
       <DropdownMenuSubContent className="max-h-[min(24rem,60vh)] w-52 overflow-y-auto">
         {prs.map((pr) => (
@@ -134,9 +141,11 @@ export function AddPanelMenuItems({
   onRunScript,
   onRunDevScript,
 }: AddPanelMenuItemsProps) {
+  const { t } = useTranslation();
   const addBrowserPanel = useDockviewStore((s) => s.addBrowserPanel);
   const addVscodePanel = useDockviewStore((s) => s.addVscodePanel);
   const addPlanPanel = useDockviewStore((s) => s.addPlanPanel);
+  const addTodosPanel = useDockviewStore((s) => s.addTodosPanel);
   const addFilesPanel = useDockviewStore((s) => s.addFilesPanel);
   const addChangesPanel = useDockviewStore((s) => s.addChangesPanel);
   const addPRPanel = useDockviewStore((s) => s.addPRPanel);
@@ -157,29 +166,49 @@ export function AddPanelMenuItems({
         className={MENU_ITEM_CLASS}
       >
         <IconDeviceDesktop className={MENU_ICON_CLASS} />
-        Browser
+        {t("task:browser")}
       </DropdownMenuItem>
       <DropdownMenuItem onClick={() => addVscodePanel()} className={MENU_ITEM_CLASS}>
         <IconBrandVscode className={MENU_ICON_CLASS} />
-        VS Code
+        {t("task:vsCode")}
       </DropdownMenuItem>
       {!state.isPassthrough && (
         <DropdownMenuItem onClick={() => addPlanPanel({ groupId })} className={MENU_ITEM_CLASS}>
           <IconFileText className={MENU_ICON_CLASS} />
-          Plan
+          {t("task:plan")}
         </DropdownMenuItem>
       )}
+      {state.portForwarding && (
+        <DropdownMenuCheckboxItem
+          checked={state.portForwarding.enabled}
+          disabled={!state.portForwarding.canToggle || state.portForwarding.isUpdating}
+          onCheckedChange={() =>
+            void state.portForwarding?.togglePortForwarding({ openDialogOnEnable: true })
+          }
+          className={MENU_ITEM_CLASS}
+          data-testid="port-forwarding-menu-item"
+        >
+          <IconNetwork className={MENU_ICON_CLASS} />
+          {t("task:portForwarding")}
+        </DropdownMenuCheckboxItem>
+      )}
       <PluginTaskPanelMenuItems groupId={groupId} />
+      {!state.isPassthrough && (
+        <DropdownMenuItem onClick={() => addTodosPanel({ groupId })} className={MENU_ITEM_CLASS}>
+          <IconListCheck className={MENU_ICON_CLASS} />
+          {t("common:todos")}
+        </DropdownMenuItem>
+      )}
       {!state.hasChanges && (
         <DropdownMenuItem onClick={() => addChangesPanel(groupId)} className={MENU_ITEM_CLASS}>
           <IconGitBranch className={MENU_ICON_CLASS} />
-          Changes
+          {t("task:changes")}
         </DropdownMenuItem>
       )}
       {!state.hasFiles && (
         <DropdownMenuItem onClick={() => addFilesPanel(groupId)} className={MENU_ITEM_CLASS}>
           <IconFolder className={MENU_ICON_CLASS} />
-          Files
+          {t("task:files")}
         </DropdownMenuItem>
       )}
       <PRPanelMenuItems prs={state.prs} onOpenPR={(pr) => addPRPanel(prTaskKey(pr))} />
@@ -193,7 +222,7 @@ export function AddPanelMenuItems({
           <IconGitPullRequest className={`${MENU_ICON_CLASS} text-orange-500`} />
           {state.mrs.length > 1
             ? `MR !${mr.mr_iid} - ${mr.project_path}`
-            : `Merge Request !${mr.mr_iid}`}
+            : t("task:mergeRequest", { mriid: mr.mr_iid })}
         </DropdownMenuItem>
       ))}
       <RepositoryScriptsMenuItems onRunScript={onRunScript} onRunDevScript={onRunDevScript} />

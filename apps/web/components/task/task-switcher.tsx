@@ -72,6 +72,7 @@ function buildGroupSectionProps(
     showHeader,
     onReorderGroup: props.onReorderGroup,
     onReorderSubtasks: props.onReorderSubtasks,
+    onNestTask: props.onNestTask,
   };
 }
 
@@ -116,7 +117,7 @@ export const TaskSwitcher = memo(function TaskSwitcher(props: TaskSwitcherProps)
     return (
       <>
         {loadErrorNotice}
-        <div className="px-3 py-3 text-xs text-muted-foreground">{t("noTasksYet")}</div>
+        <div className="px-3 py-3 text-xs text-muted-foreground">{t("sidebar:noTasksYet")}</div>
       </>
     );
   }

@@ -13,6 +13,7 @@ import {
 import type { StorageMaintenanceSettings as Settings, SystemJob } from "@/lib/types/system";
 import { useSettingsSaveContributor } from "../../settings-save-provider";
 import { StorageActionButton } from "./storage-action-button";
+import { StorageDiskCapacityCard } from "./storage-disk-capacity-card";
 import { StorageOverviewCard } from "./storage-overview-card";
 import { StoragePolicyCard } from "./storage-policy-card";
 import { StorageQuarantineCard } from "./storage-quarantine-card";
@@ -296,6 +297,11 @@ function StoragePrimarySections({
   const capabilities = controller.policy?.capabilities ?? controller.overview?.capabilities;
   return (
     <div className="min-w-0 space-y-4" data-testid="storage-primary-sections">
+      <StorageDiskCapacityCard
+        disk={controller.disk}
+        loading={controller.loading?.disk}
+        error={controller.sectionErrors?.disk}
+      />
       <StorageOverviewCard
         overview={controller.overview}
         settings={savedSettings ?? undefined}
@@ -313,6 +319,7 @@ function StoragePrimarySections({
           pending={controlsPending}
           onChange={setDraft}
           onAdopt={controller.adopt}
+          onCleanDependencies={() => void controller.runNow(["workspace_dependencies"])}
         />
       )}
     </div>

@@ -96,6 +96,26 @@ export type SystemHealthState = {
 
 export type QuickChatSessionKind = "chat" | "config";
 
+export type QuickTerminalStatus = "connecting" | "running" | "exited" | "error";
+
+export type QuickTerminalTab = {
+  tabId: string;
+  workspaceId: string;
+  sessionId: string | null;
+  sequence: number;
+  status: QuickTerminalStatus;
+  exitCode?: number;
+  error?: string;
+};
+
+export type QuickTerminalUpdate = {
+  sequence?: number;
+  sessionId?: string | null;
+  status?: QuickTerminalStatus;
+  exitCode?: number | null;
+  error?: string | null;
+};
+
 export type QuickChatSession = {
   kind: QuickChatSessionKind;
   sessionId: string;
@@ -107,10 +127,16 @@ export type QuickChatSession = {
   initialPrompt?: string;
 };
 
+export type QuickChatActiveKind = "conversation" | "terminal";
+
 export type QuickChatState = {
   isOpen: boolean;
   sessions: QuickChatSession[];
   activeSessionId: string | null;
+  terminalTabs: QuickTerminalTab[];
+  activeKind: QuickChatActiveKind;
+  activeTerminalTabId: string | null;
+  lastTerminalTabIdByWorkspace: Record<string, string>;
 };
 
 export type SessionFailureNotification = {
@@ -168,6 +194,12 @@ export type AppSidebarState = {
    * reload never traps the user in settings.
    */
   settingsMode: boolean;
+  /**
+   * Shared Improve Kandev dialog open flag. Owned by the store so the footer
+   * button and the New Task entry (inside the Improve Kandev workspace) open
+   * the same dialog instance. Transient, never persisted.
+   */
+  improveDialogOpen: boolean;
 };
 
 export type UISliceState = {
@@ -252,12 +284,19 @@ export type UISliceActions = {
     kind?: QuickChatSessionKind,
     taskId?: string,
   ) => void;
+  reuseOrCreateQuickTerminal: (workspaceId: string) => string;
+  createQuickTerminal: (workspaceId: string) => string;
+  updateQuickTerminal: (tabId: string, update: QuickTerminalUpdate) => void;
+  activateQuickTerminal: (tabId: string, workspaceId: string) => void;
+  removeQuickTerminal: (tabId: string) => void;
   closeQuickChat: () => void;
   closeQuickChatSession: (sessionId: string) => void;
   setActiveQuickChatSession: (sessionId: string, workspaceId: string) => void;
   renameQuickChatSession: (sessionId: string, name: string) => void;
   /** Replaces a workspace's quick-chat tabs with the server's authoritative list. */
   syncQuickChatSessions: (workspaceId: string, sessions: QuickChatSession[]) => void;
+  /** Replaces a workspace's terminal descriptors with the server's list. */
+  syncQuickTerminalTabs: (workspaceId: string, tabs: QuickTerminalTab[]) => void;
   /** Adds or updates a tab observed on the wire, without stealing focus. */
   upsertQuickChatSessionFromEvent: (session: QuickChatSession) => void;
   /** Drops tabs whose backing task was deleted (possibly on another device). */
@@ -307,6 +346,8 @@ export type UISliceActions = {
   setAppSidebarWidth: (width: number) => void;
   setAppSidebarSettingsMode: (settingsMode: boolean) => void;
   toggleAppSidebarSettingsMode: () => void;
+  /** Open/close the shared Improve Kandev dialog (footer + New Task routing). */
+  setImproveDialogOpen: (open: boolean) => void;
   /** Record multiple sidebar badge acknowledgements with one localStorage merge. */
   acknowledgeAgentErrors: (stamps: Record<string, string>) => void;
   /** Record that `stamp` has been dismissed for `sessionId`. */

@@ -2,54 +2,16 @@
 
 import { useCallback, useState, type ReactNode } from "react";
 import { IconGitMerge, IconGitPullRequestClosed, IconX } from "@tabler/icons-react";
-import { TaskArchiveConfirmDialog } from "@/components/task/task-archive-confirm-dialog";
-import { useAppStore, useAppStoreApi } from "@/components/state-provider";
-import { useArchiveAndSwitchTask } from "@/hooks/use-task-actions";
-import { useToast } from "@/components/toast-provider";
-import { findTaskInSnapshots } from "@/lib/kanban/find-task";
+import { TaskArchiveConfirmFlow } from "@/components/task/task-archive-confirm-flow";
+import { useAppStore } from "@/components/state-provider";
+import { useTaskArchiveConfirm } from "@/hooks/use-task-archive-confirm";
 import {
   markPRClosedBannerDismissed,
   markPRMergedBannerDismissed,
   wasPRClosedBannerDismissed,
   wasPRMergedBannerDismissed,
 } from "@/lib/local-storage";
-
-type ArchiveTarget = { title: string; executorType?: string | null };
-
-// Archiving from the terminal-state banners goes through the same confirmation
-// dialog as every other archive surface. Only failures toast; on success the
-// archive-and-switch flow moves the user to the next task.
-function useBannerArchiveConfirm(taskId: string) {
-  const store = useAppStoreApi();
-  const archiveAndSwitch = useArchiveAndSwitchTask();
-  const { toast } = useToast();
-  const [target, setTarget] = useState<ArchiveTarget | null>(null);
-  const [isPending, setIsPending] = useState(false);
-
-  const requestArchive = useCallback(() => {
-    const state = store.getState();
-    const task = findTaskInSnapshots(taskId, state.kanbanMulti.snapshots, state.kanban.tasks);
-    setTarget({ title: task?.title ?? "this task", executorType: task?.primaryExecutorType });
-  }, [store, taskId]);
-
-  const closeConfirm = useCallback(() => setTarget(null), []);
-
-  const confirmArchive = useCallback(
-    async ({ cascade }: { cascade: boolean }) => {
-      setIsPending(true);
-      try {
-        await archiveAndSwitch(taskId, { cascade });
-      } catch {
-        toast({ description: "Failed to archive task", variant: "error" });
-      } finally {
-        setIsPending(false);
-      }
-    },
-    [archiveAndSwitch, taskId, toast],
-  );
-
-  return { target, requestArchive, closeConfirm, confirmArchive, isPending };
-}
+import { useTranslation } from "react-i18next";
 
 // Presentational banner shared by PRMergedBanner / PRClosedBanner — an icon, a
 // message, and Archive + Dismiss controls. Colors/icon/testIds are supplied by
@@ -74,8 +36,8 @@ function ArchiveDismissBanner({
   taskId: string;
   onDismiss: () => void;
 }) {
-  const { target, requestArchive, closeConfirm, confirmArchive, isPending } =
-    useBannerArchiveConfirm(taskId);
+  const { t } = useTranslation();
+  const archive = useTaskArchiveConfirm(taskId);
   return (
     <>
       <div data-testid={`${testIdPrefix}-banner`} className={containerClass}>
@@ -84,14 +46,14 @@ function ArchiveDismissBanner({
         <button
           type="button"
           data-testid={`${testIdPrefix}-archive-button`}
-          onClick={requestArchive}
+          onClick={archive.requestArchive}
           className={archiveClass}
         >
-          Archive
+          {t("task:archive")}
         </button>
         <button
           type="button"
-          aria-label="Dismiss"
+          aria-label={t("task:dismiss")}
           data-testid={`${testIdPrefix}-dismiss-button`}
           onClick={onDismiss}
           className={dismissClass}
@@ -99,16 +61,9 @@ function ArchiveDismissBanner({
           <IconX className="h-3 w-3" />
         </button>
       </div>
-      <TaskArchiveConfirmDialog
-        open={target !== null}
-        onOpenChange={(open) => {
-          if (!open) closeConfirm();
-        }}
-        taskTitle={target?.title ?? ""}
+      <TaskArchiveConfirmFlow
         taskId={taskId}
-        executorType={target?.executorType}
-        isArchiving={isPending}
-        onConfirm={confirmArchive}
+        archive={archive}
         confirmTestId={`${testIdPrefix}-archive-confirm`}
       />
     </>

@@ -12,6 +12,7 @@ import {
 import { cn } from "@/lib/utils";
 import { getPRStatusColor } from "@/components/github/pr-task-icon";
 import type { TaskReviewTarget } from "./task-pr-open";
+import { useTranslation } from "react-i18next";
 
 type TaskPRPickerDialogProps = {
   open: boolean;
@@ -84,6 +85,7 @@ export function TaskPRPickerDialog({
   onSelectedIndexChange,
   onActivateIndex,
 }: TaskPRPickerDialogProps) {
+  const { t } = useTranslation();
   const listRef = useRef<HTMLDivElement>(null);
   const hasMergeRequests = targets.some((target) => target.type === "mr");
 
@@ -124,11 +126,13 @@ export function TaskPRPickerDialog({
         onOpenAutoFocus={focusSelectedRow}
       >
         <DialogHeader>
-          <DialogTitle>{hasMergeRequests ? "Open code review" : "Open pull request"}</DialogTitle>
+          <DialogTitle>
+            {hasMergeRequests ? t("task:openCodeReview") : t("task:openPullRequest")}
+          </DialogTitle>
           <DialogDescription>
             {hasMergeRequests
-              ? "Choose a linked pull request or merge request to open at its provider."
-              : `This task has ${targets.length} linked pull requests. Choose one to open on GitHub.`}
+              ? t("task:chooseALinkedPullRequestOr")
+              : t("task:thisTaskHasLinkedPullRequests", { length: targets.length })}
           </DialogDescription>
         </DialogHeader>
         <div

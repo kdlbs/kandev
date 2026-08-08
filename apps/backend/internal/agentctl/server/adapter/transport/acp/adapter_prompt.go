@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/coder/acp-go-sdk"
 	"github.com/kandev/kandev/internal/agentctl/server/adapter/transport/shared"
@@ -28,7 +29,36 @@ func (a *Adapter) Prompt(
 	promptGeneration uint64,
 ) error {
 	// A user prompt always targets the current session, so it is not pinned.
-	return a.sendPrompt(ctx, message, attachments, "", promptGeneration)
+	return a.sendPrompt(ctx, message, attachments, "", promptGeneration, false)
+}
+
+// SupportsSteering reports whether this adapter can deliver a prompt into a turn
+// that is still generating. It is the same negotiated advertisement that gates
+// prompt handoff — the agent must accept a concurrent session/prompt.
+func (a *Adapter) SupportsSteering() bool {
+	return a.supportsPromptHandoff()
+}
+
+// PromptSteer delivers a prompt without waiting for the in-flight turn to end.
+//
+// It differs from Prompt in exactly one way: instead of blocking on the prompt
+// gate until the current turn releases it (or a provider foreground-idle event
+// attests a handoff), the operator's send is itself the handoff trigger. The
+// predecessor's `session/prompt` stays open and the token transfers to this
+// call, so two prompts briefly overlap on one ACP session with one logical
+// owner — the arrangement ADR 0049 already built for the foreground-idle case.
+//
+// Delivery is opportunistic. Whether the agent folds this prompt into the
+// running turn or runs it as the next turn is the agent's decision and is not
+// advertised over the protocol, so both outcomes must be correct. See
+// docs/specs/platform/mid-turn-steering.md.
+func (a *Adapter) PromptSteer(
+	ctx context.Context,
+	message string,
+	attachments []v1.MessageAttachment,
+	promptGeneration uint64,
+) error {
+	return a.sendPrompt(ctx, message, attachments, "", promptGeneration, true)
 }
 
 // sendPrompt serializes session/prompt calls through promptGate and sends one
@@ -45,6 +75,7 @@ func (a *Adapter) sendPrompt(
 	attachments []v1.MessageAttachment,
 	expectSession string,
 	promptGeneration uint64,
+	steer bool,
 ) error {
 	humanPrompt := expectSession == ""
 	promptCtx, turn := newPromptTurnState(
@@ -52,6 +83,20 @@ func (a *Adapter) sendPrompt(
 		promptGeneration,
 		humanPrompt && a.supportsPromptHandoff() && promptGeneration != 0,
 	)
+	// A steer initiates the handoff itself rather than waiting for a provider
+	// foreground-idle event. Best-effort by design: if there is no handoff-eligible
+	// turn in flight (idle session, or a synthetic wakeup holding the gate), this
+	// is a no-op and the call falls through to ordinary gate acquisition, which is
+	// exactly the specified behavior for those cases.
+	//
+	// Guarded on a live context: beginSteerHandoff protects the predecessor's
+	// background work and closes its handoff channel, which only pays off once a
+	// successor actually acquires the gate. If ctx is already cancelled the
+	// acquisition below will fail immediately, so triggering the handoff first
+	// would strand that protection with no successor to clear it.
+	if steer && humanPrompt && promptGeneration != 0 && a.supportsPromptHandoff() && ctx.Err() == nil {
+		a.beginSteerHandoff()
+	}
 	if err := a.acquirePromptTurn(ctx, turn, humanPrompt); err != nil {
 		return err
 	}
@@ -194,6 +239,27 @@ func (a *Adapter) sendPrompt(
 	// state when the parent prompt completes naturally.
 	a.sweepMonitorsOnPromptEnd(sessionID)
 
+	if a.agentID == codexAgentID && turn.codexCapacityFailure() {
+		const safeMessage = codexModelCapacityErrorMessage
+		a.logger.Info("codex prompt ended with model-capacity evidence",
+			zap.String("session_id", sessionID),
+			zap.Uint64("prompt_generation", promptGeneration))
+		a.cancelAsyncTurnComplete(sessionID)
+		a.sendUpdate(AgentEvent{
+			Type:             streams.EventTypeError,
+			SessionID:        sessionID,
+			PromptGeneration: promptGeneration,
+			Error:            safeMessage,
+			ProviderError: &streams.ProviderError{
+				Source:     streams.ProviderErrorSourceCodexACP,
+				ProviderID: codexAgentID,
+				Message:    safeMessage,
+				OccurredAt: time.Now().UTC(),
+			},
+		})
+		return nil
+	}
+
 	// Emit complete event via the stream, including the StopReason from the agent.
 	// This normalizes ACP behavior to match other adapters (stream-json, amp, copilot, opencode).
 	a.logger.Debug("emitting complete event after prompt",
@@ -235,8 +301,14 @@ func (a *Adapter) sendPrompt(
 	return nil
 }
 
+// supportsPromptHandoff reports whether this adapter's connected agent may have
+// its in-flight prompt handed off to a human successor. Gated on the negotiated
+// prompt-queueing advertisement rather than the agent's id, per ADR 0049's
+// rejection of a central agent-name whitelist.
 func (a *Adapter) supportsPromptHandoff() bool {
-	return a.agentID == claudeAgentID || a.agentID == mockAgentID
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	return a.promptQueueing
 }
 
 func normalizePromptErrorAfterCancel(promptCtx context.Context, err error) error {
@@ -379,7 +451,9 @@ func (a *Adapter) fireWakeup(sessionID, prompt string) {
 		defer cancel()
 		// Pin to the scheduled session: if the active session changed while this
 		// wakeup waited on the prompt gate, sendPrompt drops it.
-		if err := a.sendPrompt(ctx, prompt, nil, sessionID, 0); err != nil {
+		// Never a steer: a synthetic wakeup must stay serialized behind the owning
+		// prompt and must not consume a handoff meant for a human successor.
+		if err := a.sendPrompt(ctx, prompt, nil, sessionID, 0, false); err != nil {
 			a.logger.Error("synthetic wakeup prompt failed",
 				zap.String("session_id", sessionID),
 				zap.Error(err))

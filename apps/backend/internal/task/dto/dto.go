@@ -14,6 +14,7 @@ type WorkflowDTO struct {
 	WorkspaceID    string  `json:"workspace_id"`
 	Name           string  `json:"name"`
 	Description    *string `json:"description,omitempty"`
+	Prompt         *string `json:"prompt,omitempty"`
 	AgentProfileID string  `json:"agent_profile_id,omitempty"`
 	SortOrder      int     `json:"sort_order"`
 	Hidden         bool    `json:"hidden,omitempty"`
@@ -45,28 +46,34 @@ type WorkspaceDTO struct {
 }
 
 type RepositoryDTO struct {
-	ID                     string                `json:"id"`
-	WorkspaceID            string                `json:"workspace_id"`
-	Name                   string                `json:"name"`
-	SourceType             string                `json:"source_type"`
-	LocalPath              string                `json:"local_path"`
-	Provider               string                `json:"provider"`
-	ProviderRepoID         string                `json:"provider_repo_id"`
-	ProviderHost           string                `json:"provider_host"`
-	ProviderOwner          string                `json:"provider_owner"`
-	ProviderName           string                `json:"provider_name"`
-	RemoteURL              string                `json:"remote_url"`
-	DefaultBranch          string                `json:"default_branch"`
-	WorktreeBranchPrefix   string                `json:"worktree_branch_prefix"`
-	WorktreeBranchTemplate string                `json:"worktree_branch_template"`
-	PullBeforeWorktree     bool                  `json:"pull_before_worktree"`
-	SetupScript            string                `json:"setup_script"`
-	CleanupScript          string                `json:"cleanup_script"`
-	DevScript              string                `json:"dev_script"`
-	CopyFiles              string                `json:"copy_files"`
-	CreatedAt              time.Time             `json:"created_at"`
-	UpdatedAt              time.Time             `json:"updated_at"`
-	Scripts                []RepositoryScriptDTO `json:"scripts,omitempty"`
+	ID                     string                       `json:"id"`
+	WorkspaceID            string                       `json:"workspace_id"`
+	Name                   string                       `json:"name"`
+	SourceType             string                       `json:"source_type"`
+	LocalPath              string                       `json:"local_path"`
+	Provider               string                       `json:"provider"`
+	ProviderRepoID         string                       `json:"provider_repo_id"`
+	ProviderHost           string                       `json:"provider_host"`
+	ProviderOwner          string                       `json:"provider_owner"`
+	ProviderName           string                       `json:"provider_name"`
+	RemoteURL              string                       `json:"remote_url"`
+	DefaultBranch          string                       `json:"default_branch"`
+	WorktreeBranchPrefix   string                       `json:"worktree_branch_prefix"`
+	WorktreeBranchTemplate string                       `json:"worktree_branch_template"`
+	PullBeforeWorktree     bool                         `json:"pull_before_worktree"`
+	SetupScript            string                       `json:"setup_script"`
+	CleanupScript          string                       `json:"cleanup_script"`
+	DevScript              string                       `json:"dev_script"`
+	CopyFiles              string                       `json:"copy_files"`
+	SecretBindings         []RepositorySecretBindingDTO `json:"secret_bindings,omitempty"`
+	CreatedAt              time.Time                    `json:"created_at"`
+	UpdatedAt              time.Time                    `json:"updated_at"`
+	Scripts                []RepositoryScriptDTO        `json:"scripts,omitempty"`
+}
+
+type RepositorySecretBindingDTO struct {
+	Key      string `json:"key"`
+	SecretID string `json:"secret_id"`
 }
 
 type RepositoryScriptDTO struct {
@@ -175,6 +182,10 @@ type TaskDTO struct {
 	CreatedAt           time.Time              `json:"created_at"`
 	UpdatedAt           time.Time              `json:"updated_at"`
 	Metadata            map[string]interface{} `json:"metadata,omitempty"`
+	// Interrupted reports that the task's session was mid-turn when the backend
+	// died and has not been resumed since. Derived from the interrupted_at
+	// metadata key at DTO conversion time (see FromTaskWithSessionInfo).
+	Interrupted bool `json:"interrupted,omitempty"`
 
 	// Office extensions
 	AssigneeAgentProfileID string `json:"assignee_agent_profile_id,omitempty"`
@@ -279,6 +290,12 @@ type TaskSessionDTO struct {
 	// generation that produced CancellationPending. It is always serialized so
 	// clients can reject delayed snapshots from older generations.
 	CancellationRevision uint64 `json:"cancellation_revision"`
+	// SupportsSteering is true when a send right now would be delivered into the
+	// still-generating turn (mid-turn steering) rather than blocked/queued.
+	// Derived live at serialization from the connected agent's negotiated
+	// capability plus the runtime flag; never persisted (see mid-turn-steering
+	// spec). The composer uses it to promise delivery, not folding.
+	SupportsSteering bool `json:"supports_steering,omitempty"`
 	// PendingAction is the compact per-session projection used when the
 	// session transcript is not loaded in the client.
 	PendingAction       *string `json:"pending_action,omitempty"`
@@ -335,6 +352,8 @@ type TaskSessionSummaryDTO struct {
 	// CancellationRevision identifies the process-local cancellation transition
 	// generation represented by CancellationPending.
 	CancellationRevision uint64 `json:"cancellation_revision"`
+	// SupportsSteering mirrors TaskSessionDTO.SupportsSteering for list endpoints.
+	SupportsSteering bool `json:"supports_steering,omitempty"`
 	// PendingAction is the compact per-session projection used when the
 	// session transcript is not loaded in the client.
 	PendingAction       *string `json:"pending_action"`
@@ -509,12 +528,17 @@ func FromWorkflow(workflow *models.Workflow) WorkflowDTO {
 	if workflow.Description != "" {
 		description = &workflow.Description
 	}
+	var prompt *string
+	if workflow.Prompt != "" {
+		prompt = &workflow.Prompt
+	}
 
 	return WorkflowDTO{
 		ID:             workflow.ID,
 		WorkspaceID:    workflow.WorkspaceID,
 		Name:           workflow.Name,
 		Description:    description,
+		Prompt:         prompt,
 		AgentProfileID: workflow.AgentProfileID,
 		SortOrder:      workflow.SortOrder,
 		Hidden:         workflow.Hidden,
@@ -550,6 +574,10 @@ func FromWorkspace(workspace *models.Workspace) WorkspaceDTO {
 }
 
 func FromRepository(repository *models.Repository) RepositoryDTO {
+	bindings := make([]RepositorySecretBindingDTO, 0, len(repository.SecretBindings))
+	for _, binding := range repository.SecretBindings {
+		bindings = append(bindings, RepositorySecretBindingDTO{Key: binding.Key, SecretID: binding.SecretID})
+	}
 	return RepositoryDTO{
 		ID:                     repository.ID,
 		WorkspaceID:            repository.WorkspaceID,
@@ -570,6 +598,7 @@ func FromRepository(repository *models.Repository) RepositoryDTO {
 		CleanupScript:          repository.CleanupScript,
 		DevScript:              repository.DevScript,
 		CopyFiles:              repository.CopyFiles,
+		SecretBindings:         bindings,
 		CreatedAt:              repository.CreatedAt,
 		UpdatedAt:              repository.UpdatedAt,
 	}
@@ -732,6 +761,7 @@ func FromTaskWithSessionInfo(
 		CreatedAt:                   task.CreatedAt,
 		UpdatedAt:                   task.UpdatedAt,
 		Metadata:                    task.Metadata,
+		Interrupted:                 task.Metadata[models.MetaKeyInterruptedAt] != nil,
 		// Office extensions. AssigneeAgentProfileID is a read-time
 		// projection from workflow_step_participants (ADR 0005 Wave F);
 		// the repo's task SELECTs hydrate it via a correlated subquery.
@@ -847,6 +877,13 @@ type ActiveSubagentCountProvider interface {
 	ActiveSubagentCount(sessionID string) int
 }
 
+// SteerEligibleProvider reports whether a send to a session right now would be
+// delivered as a mid-turn steer. Optional: a provider that does not implement it
+// simply never advertises steering, which is the conservative default.
+type SteerEligibleProvider interface {
+	SteerEligible(sessionID string, state models.TaskSessionState) bool
+}
+
 // EnrichForegroundActivity stamps the live fine-grained busy substate onto a full
 // session DTO. Generating is emitted only for RUNNING sessions; detached
 // background activity remains meaningful after the coarse state settles.
@@ -858,6 +895,7 @@ func EnrichForegroundActivity(dto *TaskSessionDTO, provider ForegroundActivityPr
 		dto.ForegroundActivity = activity
 	}
 	dto.ActiveSubagentCount = activeSubagentCount(dto.ID, provider)
+	dto.SupportsSteering = steerEligible(dto.ID, dto.State, provider)
 }
 
 // EnrichForegroundActivitySummary is EnrichForegroundActivity for the lightweight
@@ -870,6 +908,7 @@ func EnrichForegroundActivitySummary(dto *TaskSessionSummaryDTO, provider Foregr
 		dto.ForegroundActivity = activity
 	}
 	dto.ActiveSubagentCount = activeSubagentCount(dto.ID, provider)
+	dto.SupportsSteering = steerEligible(dto.ID, dto.State, provider)
 }
 
 func activeSubagentCount(sessionID string, provider ForegroundActivityProvider) int {
@@ -878,6 +917,18 @@ func activeSubagentCount(sessionID string, provider ForegroundActivityProvider) 
 		return 0
 	}
 	return countProvider.ActiveSubagentCount(sessionID)
+}
+
+// steerEligible reports whether the live provider would deliver a send to this
+// session as a mid-turn steer. Derived here at the serialization boundary from
+// the live in-memory provider and never persisted, so a restart with no
+// connected execution serializes false.
+func steerEligible(sessionID string, state models.TaskSessionState, provider ForegroundActivityProvider) bool {
+	steerProvider, ok := provider.(SteerEligibleProvider)
+	if !ok {
+		return false
+	}
+	return steerProvider.SteerEligible(sessionID, state)
 }
 
 // WorkflowStepDTO represents a workflow step for API responses

@@ -32,6 +32,40 @@ describe("readLastAgentError", () => {
     });
   });
 
+  it("reads the remediation_url field from snake_case and camelCase metadata", () => {
+    const url = "https://opencode.ai/workspace/wrk_01KQM7K5CYT715264YKKFB17ZY/go";
+    expect(
+      readLastAgentError({
+        last_agent_error: {
+          message: AGENT_ERROR_MESSAGE,
+          remediation_url: url,
+        },
+      }),
+    ).toEqual({
+      message: AGENT_ERROR_MESSAGE,
+      remediationUrl: url,
+    });
+    expect(
+      readLastAgentError({
+        last_agent_error: {
+          message: AGENT_ERROR_MESSAGE,
+          remediationUrl: url,
+        },
+      }),
+    ).toEqual({
+      message: AGENT_ERROR_MESSAGE,
+      remediationUrl: url,
+    });
+  });
+
+  it("omits remediationUrl when the metadata carries no URL", () => {
+    expect(
+      readLastAgentError({
+        last_agent_error: { message: AGENT_ERROR_MESSAGE, remediation_url: "" },
+      }),
+    ).toEqual({ message: AGENT_ERROR_MESSAGE });
+  });
+
   it("reads camelCase metadata after a store round trip", () => {
     expect(
       readLastAgentError({

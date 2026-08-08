@@ -40,6 +40,16 @@ type SessionManager struct {
 	historyManager       *SessionHistoryManager
 	attachmentReader     AttachmentReader
 	stopCh               <-chan struct{} // For graceful shutdown coordination
+	// beforeSteerDispatchHook, when set (tests only), runs inside tryDispatchSteer
+	// after the active generation is selected but before the steer RPC, while
+	// promptLifecycleMu is held — used to drive the completion-vs-dispatch race
+	// deterministically.
+	beforeSteerDispatchHook func()
+	// beforePromptDispatchHook, when set (tests only), runs inside sendPrompt after
+	// the generation is begun but before it is dispatched — used to pin a
+	// predecessor in the admitted-but-undispatched window so a racing steer's
+	// ordering can be observed deterministically.
+	beforePromptDispatchHook func()
 }
 
 // NewSessionManager creates a new SessionManager
@@ -510,6 +520,11 @@ func (sm *SessionManager) applyRuntimeSessionLayers(
 				zap.String("execution_id", execution.ID), zap.String("model", runtimeModel), zap.Error(err))
 		} else {
 			finalConfigID = modelConfigIDFromState(execution.GetModelState())
+			// Logged like the profile layer above: without this line a trace
+			// shows only the profile write, and a runtime layer that never ran
+			// is indistinguishable from one that ran and was overwritten.
+			sm.logger.Info("set runtime model on ACP session",
+				zap.String("execution_id", execution.ID), zap.String("model", runtimeModel))
 		}
 	}
 	if runtimeMode != "" && runtimeMode != profileMode {
@@ -861,7 +876,7 @@ func (sm *SessionManager) SendPrompt(
 	attachments []v1.MessageAttachment,
 	dispatchOnly bool,
 ) (*PromptResult, error) {
-	return sm.sendPrompt(ctx, execution, prompt, validateStatus, attachments, dispatchOnly, nil)
+	return sm.sendPrompt(ctx, execution, prompt, validateStatus, attachments, dispatchOnly, nil, false)
 }
 
 // SendPromptWithDispatchCallback reports the point at which agentctl accepted
@@ -875,7 +890,186 @@ func (sm *SessionManager) SendPromptWithDispatchCallback(
 	dispatchOnly bool,
 	onDispatched func(),
 ) (*PromptResult, error) {
-	return sm.sendPrompt(ctx, execution, prompt, validateStatus, attachments, dispatchOnly, onDispatched)
+	return sm.sendPrompt(ctx, execution, prompt, validateStatus, attachments, dispatchOnly, onDispatched, false)
+}
+
+// activePromptGeneration returns the dispatched, in-flight prompt generation a
+// steer must reuse, or 0 when there is none to steer into. The execution store
+// is the authoritative, lock-guarded source; tests that build a SessionManager
+// without one apply the same predicate directly.
+func (sm *SessionManager) activePromptGeneration(execution *AgentExecution) uint64 {
+	if sm.executionStore != nil {
+		return sm.executionStore.ActivePromptGeneration(execution.ID)
+	}
+	gen := execution.promptGeneration
+	if gen == 0 || execution.dispatchedPromptGeneration != gen || execution.promptCompletionGeneration == gen {
+		return 0
+	}
+	return gen
+}
+
+// markPromptDispatched records that an ordinary prompt's generation reached
+// agentctl, making it eligible for a steer to reuse. Mirrors the store predicate
+// for the no-store test path.
+func (sm *SessionManager) markPromptDispatched(execution *AgentExecution, generation uint64) {
+	if sm.executionStore != nil {
+		sm.executionStore.MarkPromptDispatched(execution.ID, generation)
+		return
+	}
+	if generation != 0 && execution.promptGeneration == generation &&
+		execution.promptCompletionGeneration != generation {
+		execution.dispatchedPromptGeneration = generation
+	}
+}
+
+// SendPromptSteerWithDispatchCallback delivers a steer into a still-generating
+// turn. It deliberately bypasses the serialized path in sendPrompt: taking
+// execution.promptMu or waiting on the pending-dispatch barrier would hold the
+// steer until the very turn it is meant to interrupt has ended, defeating the
+// feature. Instead it issues the ACP PromptSteer against the *active* prompt
+// generation, so agentctl folds the message into the running turn (or hands the
+// turn off) while the predecessor's completion waiter and streaming buffers stay
+// authoritative.
+//
+// Reusing the active generation is load-bearing: the single real completion the
+// ACP adapter emits (the predecessor's early end_turn is suppressed there) then
+// carries that generation and wakes the predecessor's waitForPromptDone. A fresh
+// generation would be discarded as a mismatch and the predecessor would hang.
+// This path therefore never begins a new generation, resets buffers, drains
+// promptDoneCh, or opens a completion barrier — the ACP adapter's
+// beginSteerHandoff owns the gate transfer and generation-keyed suppression.
+//
+// Delivery is opportunistic: with no live turn to fold into (idle, a turn that
+// was admitted but not yet dispatched, one that already completed, or a
+// disconnected stream) there is nothing to steer, so it falls back to an
+// ordinary prompt delivered in submission order rather than dropping the message.
+func (sm *SessionManager) SendPromptSteerWithDispatchCallback(
+	ctx context.Context,
+	execution *AgentExecution,
+	prompt string,
+	validateStatus bool,
+	attachments []v1.MessageAttachment,
+	dispatchOnly bool,
+	onDispatched func(),
+) (*PromptResult, error) {
+	if execution.agentctl == nil {
+		return nil, fmt.Errorf("execution %q has no agentctl client", execution.ID)
+	}
+	if validateStatus && execution.Status != v1.AgentStatusRunning && execution.Status != v1.AgentStatusReady {
+		return nil, fmt.Errorf("execution %q is not ready for prompts (status: %s)", execution.ID, execution.Status)
+	}
+
+	steered, err := sm.tryDispatchSteer(ctx, execution, prompt, attachments)
+	if err != nil {
+		return nil, err
+	}
+	if !steered {
+		return sm.sendPrompt(ctx, execution, prompt, validateStatus, attachments, dispatchOnly, onDispatched, false)
+	}
+	if onDispatched != nil {
+		onDispatched()
+	}
+	// A steer never owns turn completion — the predecessor's waiter does — so it
+	// always returns dispatched-and-continue regardless of the caller's
+	// dispatchOnly hint.
+	return &PromptResult{StopReason: PromptStopReasonDispatched}, nil
+}
+
+// steerDispatchTimeout bounds how long tryDispatchSteer holds promptLifecycleMu
+// waiting for agentctl to acknowledge the steer. The healthy path is a single WS
+// round-trip (agentctl acks before it runs the prompt), but sendStreamRequest has
+// no deadline of its own, so a half-open connection could otherwise pin the lock
+// — wedging this execution's completion claims and new prompts — until the stream
+// tears down. A timeout lands on the error path, which is send-safe under the
+// no-resend fallback. Exposed as a var so tests can shorten it.
+var steerDispatchTimeout = 5 * time.Second
+
+// tryDispatchSteer selects the active dispatched generation and issues the steer
+// against it while holding promptLifecycleMu, so neither a completion
+// (claimPromptCompletion) nor a new turn (beginExecutionPrompt) — both of which
+// take the same lock — can invalidate the chosen generation between the read and
+// the send. Without this the read-then-send gap is a TOCTOU: the turn could
+// complete in the window and the steer would fire on a dead generation whose
+// completion the manager then discards as already-claimed.
+//
+// Holding the lock across the RPC is deadlock-free: the ACP client resolves the
+// prompt-ack on its read loop, while the event worker that takes this lock is a
+// separate goroutine (see agent.go readUpdatesStream) — a completion event
+// arriving first is enqueued, never inline, so it cannot backpressure the ack.
+// The RPC is bounded by steerDispatchTimeout so the lock is never held on a
+// stalled connection, and the history append is done after the lock is released.
+//
+// Returns (false, nil) when there is nothing to steer into — no live generation,
+// or the stream is not connected — so the caller degrades to an ordinary prompt.
+// It deliberately uses the single fast RPC, not dispatchPrompt's reconnect path:
+// a disconnected stream means there is no live turn to fold into, and reconnect
+// can block for seconds, which must not run under the lifecycle lock.
+func (sm *SessionManager) tryDispatchSteer(
+	ctx context.Context,
+	execution *AgentExecution,
+	prompt string,
+	attachments []v1.MessageAttachment,
+) (bool, error) {
+	if sessionSpan := trace.SpanFromContext(execution.SessionTraceContext()); sessionSpan.SpanContext().IsValid() {
+		ctx = trace.ContextWithSpan(ctx, sessionSpan)
+	}
+	dispatched, err := sm.dispatchSteerLocked(ctx, execution, prompt, attachments)
+	if err != nil {
+		if isAgentStreamNotConnectedErr(err) {
+			return false, nil
+		}
+		return false, err
+	}
+	if !dispatched {
+		return false, nil
+	}
+	// History I/O is done outside promptLifecycleMu so a slow history store never
+	// extends the lifecycle lock's hold.
+	sm.recordSteerActivity(execution, prompt)
+	return true, nil
+}
+
+// dispatchSteerLocked performs the lock-guarded critical section of a steer: read
+// the live generation and issue the bounded RPC under promptLifecycleMu. Returns
+// (false, nil) when there is no live generation to steer into.
+func (sm *SessionManager) dispatchSteerLocked(
+	ctx context.Context,
+	execution *AgentExecution,
+	prompt string,
+	attachments []v1.MessageAttachment,
+) (bool, error) {
+	execution.promptLifecycleMu.Lock()
+	defer execution.promptLifecycleMu.Unlock()
+
+	generation := sm.activePromptGeneration(execution)
+	if generation == 0 {
+		return false, nil
+	}
+	if sm.beforeSteerDispatchHook != nil {
+		sm.beforeSteerDispatchHook()
+	}
+	effectivePrompt := sm.buildEffectivePrompt(execution, prompt)
+	dispatchCtx, cancel := context.WithTimeout(ctx, steerDispatchTimeout)
+	defer cancel()
+	if err := sm.callAgentctlPrompt(dispatchCtx, execution, effectivePrompt, attachments, generation, true); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+// recordSteerActivity mirrors the ordinary prompt path's history append and
+// activity-timestamp bump for a steer that actually dispatched. Kept off the
+// fallback path so a steer that degrades to an ordinary prompt is not recorded
+// twice.
+func (sm *SessionManager) recordSteerActivity(execution *AgentExecution, prompt string) {
+	if sm.historyManager != nil && execution.historyEnabled && execution.SessionID != "" {
+		if err := sm.historyManager.AppendUserMessage(execution.SessionID, prompt); err != nil {
+			sm.logger.Warn("failed to store steer user message to history", zap.Error(err))
+		}
+	}
+	execution.lastActivityAtMu.Lock()
+	execution.lastActivityAt = time.Now()
+	execution.lastActivityAtMu.Unlock()
 }
 
 func (sm *SessionManager) sendPrompt(
@@ -886,6 +1080,7 @@ func (sm *SessionManager) sendPrompt(
 	attachments []v1.MessageAttachment,
 	dispatchOnly bool,
 	onDispatched func(),
+	steer bool,
 ) (*PromptResult, error) {
 	if execution.agentctl == nil {
 		return nil, fmt.Errorf("execution %q has no agentctl client", execution.ID)
@@ -929,9 +1124,15 @@ func (sm *SessionManager) sendPrompt(
 	if err != nil {
 		return nil, err
 	}
-	if err := sm.triggerPrompt(preparedCtx, execution, effectivePrompt, materializedAttachments, promptGeneration); err != nil {
+	if sm.beforePromptDispatchHook != nil {
+		sm.beforePromptDispatchHook()
+	}
+	if err := sm.triggerPrompt(preparedCtx, execution, effectivePrompt, materializedAttachments, promptGeneration, steer); err != nil {
 		return nil, err
 	}
+	// The generation is now accepted by agentctl and in flight, so a concurrent
+	// steer may reuse it. (The steer path never marks — it reuses, not owns.)
+	sm.markPromptDispatched(execution, promptGeneration)
 	return sm.finishAcceptedPrompt(preparedCtx, execution, dispatchOnly, onDispatched, promptGeneration)
 }
 
@@ -1070,8 +1271,9 @@ func (sm *SessionManager) triggerPrompt(
 	prompt string,
 	attachments []v1.MessageAttachment,
 	promptGeneration uint64,
+	steer bool,
 ) error {
-	err := sm.dispatchPrompt(ctx, execution, prompt, attachments, promptGeneration)
+	err := sm.dispatchPrompt(ctx, execution, prompt, attachments, promptGeneration, steer)
 	if err == nil {
 		return nil
 	}
@@ -1118,21 +1320,39 @@ func (sm *SessionManager) finishAcceptedPrompt(
 	return sm.waitForPromptDone(ctx, execution, promptGeneration)
 }
 
+// callAgentctlPrompt selects the steer or ordinary prompt RPC. Kept in one place
+// so the initial dispatch and the post-reconnect retry cannot diverge on which
+// one they send.
+func (sm *SessionManager) callAgentctlPrompt(
+	ctx context.Context,
+	execution *AgentExecution,
+	prompt string,
+	attachments []v1.MessageAttachment,
+	promptGeneration uint64,
+	steer bool,
+) error {
+	if steer {
+		return execution.agentctl.PromptSteer(ctx, prompt, attachments, promptGeneration)
+	}
+	return execution.agentctl.Prompt(ctx, prompt, attachments, promptGeneration)
+}
+
 func (sm *SessionManager) dispatchPrompt(
 	ctx context.Context,
 	execution *AgentExecution,
 	prompt string,
 	attachments []v1.MessageAttachment,
 	promptGeneration uint64,
+	steer bool,
 ) error {
-	err := execution.agentctl.Prompt(ctx, prompt, attachments, promptGeneration)
+	err := sm.callAgentctlPrompt(ctx, execution, prompt, attachments, promptGeneration, steer)
 	if err == nil || !isAgentStreamNotConnectedErr(err) || sm.streamManager == nil {
 		return err
 	}
 
 	sm.logger.Warn("agent stream not connected, reconnecting and retrying prompt once",
 		zap.String("execution_id", execution.ID))
-	retryErr := sm.retryPromptAfterReconnect(ctx, execution, prompt, attachments, promptGeneration)
+	retryErr := sm.retryPromptAfterReconnect(ctx, execution, prompt, attachments, promptGeneration, steer)
 	if retryErr == nil {
 		return nil
 	}
@@ -1159,6 +1379,7 @@ func (sm *SessionManager) retryPromptAfterReconnect(
 	prompt string,
 	attachments []v1.MessageAttachment,
 	promptGeneration uint64,
+	steer bool,
 ) error {
 	reconnectCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
@@ -1180,8 +1401,8 @@ func (sm *SessionManager) retryPromptAfterReconnect(
 		}
 
 		if execution.agentctl.HasAgentStream() {
-			if err := execution.agentctl.Prompt(
-				reconnectCtx, prompt, attachments, promptGeneration,
+			if err := sm.callAgentctlPrompt(
+				reconnectCtx, execution, prompt, attachments, promptGeneration, steer,
 			); err == nil {
 				return nil
 			} else if !isAgentStreamNotConnectedErr(err) {

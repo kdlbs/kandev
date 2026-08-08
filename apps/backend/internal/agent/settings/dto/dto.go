@@ -19,6 +19,10 @@ type AgentProfileDTO struct {
 	CLIFlags         []CLIFlagDTO       `json:"cli_flags"`
 	EnvVars          []ProfileEnvVarDTO `json:"env_vars,omitempty"`
 	CLIPassthrough   bool               `json:"cli_passthrough"`
+	// Enabled gates the profile from new-work selection. When false the
+	// profile is hidden from task/session creation pickers but still serves
+	// existing sessions and remains editable in settings.
+	Enabled bool `json:"enabled"`
 	// CommandPrefix is an optional launcher prefix prepended to the agent
 	// command (e.g. "greywall --"). Shell-tokenised at launch time.
 	CommandPrefix string `json:"command_prefix,omitempty"`
@@ -332,6 +336,24 @@ type DynamicModelsResponse struct {
 	CurrentModeID  string            `json:"current_mode_id,omitempty"`
 	Commands       []CommandEntryDTO `json:"commands,omitempty"`
 	Error          *string           `json:"error"`
+}
+
+// ResolveAgentModelConfigRequest selects the provider context to resolve.
+type ResolveAgentModelConfigRequest struct {
+	Model         string            `json:"model"`
+	Mode          string            `json:"mode,omitempty"`
+	ConfigOptions map[string]string `json:"config_options,omitempty"`
+	Refresh       bool              `json:"refresh,omitempty"`
+}
+
+// AgentModelConfigResponse is the complete provider option snapshot for one
+// selected model.
+type AgentModelConfigResponse struct {
+	AgentName     string            `json:"agent_name"`
+	Model         string            `json:"model"`
+	Status        string            `json:"status"`
+	ConfigOptions []ConfigOptionDTO `json:"config_options"`
+	Error         *string           `json:"error"`
 }
 
 // ModeEntryDTO is a single ACP session mode advertised by an agent.

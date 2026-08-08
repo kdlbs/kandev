@@ -1,6 +1,9 @@
 package streams
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"reflect"
+)
 
 // ToolKind categorizes the normalized tool operation
 type ToolKind string
@@ -82,6 +85,209 @@ func (p *NormalizedPayload) SubagentTask() *SubagentTaskPayload { return p.subag
 func (p *NormalizedPayload) ShowPlan() *ShowPlanPayload         { return p.showPlan }
 func (p *NormalizedPayload) ManageTodos() *ManageTodosPayload   { return p.manageTodos }
 func (p *NormalizedPayload) Misc() *MiscPayload                 { return p.misc }
+
+// Snapshot returns a detached copy of the normalized payload. A snapshot owns
+// every pointer, slice, and JSON-compatible value reachable from the payload so
+// it can safely cross an asynchronous event boundary.
+func (p *NormalizedPayload) Snapshot() *NormalizedPayload {
+	if p == nil {
+		return nil
+	}
+	return &NormalizedPayload{
+		kind:           p.kind,
+		readFile:       cloneReadFilePayload(p.readFile),
+		modifyFile:     cloneModifyFilePayload(p.modifyFile),
+		shellExec:      cloneShellExecPayload(p.shellExec),
+		codeSearch:     cloneCodeSearchPayload(p.codeSearch),
+		httpRequest:    cloneHttpRequestPayload(p.httpRequest),
+		generic:        cloneGenericPayload(p.generic),
+		createTask:     cloneCreateTaskPayload(p.createTask),
+		subagentTask:   cloneSubagentTaskPayload(p.subagentTask),
+		showPlan:       cloneShowPlanPayload(p.showPlan),
+		manageTodos:    cloneManageTodosPayload(p.manageTodos),
+		misc:           cloneMiscPayload(p.misc),
+		backgroundWork: cloneBackgroundWorkPayload(p.backgroundWork),
+		monitor:        cloneMonitorPayload(p.monitor),
+	}
+}
+
+func cloneReadFilePayload(src *ReadFilePayload) *ReadFilePayload {
+	if src == nil {
+		return nil
+	}
+	clone := *src
+	if src.Output != nil {
+		output := *src.Output
+		clone.Output = &output
+	}
+	return &clone
+}
+
+func cloneModifyFilePayload(src *ModifyFilePayload) *ModifyFilePayload {
+	if src == nil {
+		return nil
+	}
+	clone := *src
+	clone.Mutations = append([]FileMutation(nil), src.Mutations...)
+	return &clone
+}
+
+func cloneShellExecPayload(src *ShellExecPayload) *ShellExecPayload {
+	if src == nil {
+		return nil
+	}
+	clone := *src
+	if src.Output != nil {
+		output := *src.Output
+		clone.Output = &output
+	}
+	return &clone
+}
+
+func cloneCodeSearchPayload(src *CodeSearchPayload) *CodeSearchPayload {
+	if src == nil {
+		return nil
+	}
+	clone := *src
+	if src.Output != nil {
+		output := *src.Output
+		output.Files = append([]string(nil), src.Output.Files...)
+		clone.Output = &output
+	}
+	return &clone
+}
+
+func cloneHttpRequestPayload(src *HttpRequestPayload) *HttpRequestPayload {
+	if src == nil {
+		return nil
+	}
+	clone := *src
+	return &clone
+}
+
+func cloneGenericPayload(src *GenericPayload) *GenericPayload {
+	if src == nil {
+		return nil
+	}
+	clone := *src
+	clone.Input = cloneJSONValue(src.Input)
+	clone.Output = cloneJSONValue(src.Output)
+	return &clone
+}
+
+func cloneCreateTaskPayload(src *CreateTaskPayload) *CreateTaskPayload {
+	if src == nil {
+		return nil
+	}
+	clone := *src
+	return &clone
+}
+
+func cloneSubagentTaskPayload(src *SubagentTaskPayload) *SubagentTaskPayload {
+	if src == nil {
+		return nil
+	}
+	clone := *src
+	if src.ToolUseCount != nil {
+		count := *src.ToolUseCount
+		clone.ToolUseCount = &count
+	}
+	return &clone
+}
+
+func cloneShowPlanPayload(src *ShowPlanPayload) *ShowPlanPayload {
+	if src == nil {
+		return nil
+	}
+	clone := *src
+	clone.Steps = append([]string(nil), src.Steps...)
+	return &clone
+}
+
+func cloneManageTodosPayload(src *ManageTodosPayload) *ManageTodosPayload {
+	if src == nil {
+		return nil
+	}
+	clone := *src
+	clone.Items = append([]TodoItem(nil), src.Items...)
+	return &clone
+}
+
+func cloneMiscPayload(src *MiscPayload) *MiscPayload {
+	if src == nil {
+		return nil
+	}
+	clone := *src
+	clone.Details = cloneJSONValue(src.Details)
+	return &clone
+}
+
+func cloneBackgroundWorkPayload(src *BackgroundWorkPayload) *BackgroundWorkPayload {
+	if src == nil {
+		return nil
+	}
+	clone := *src
+	return &clone
+}
+
+func cloneMonitorPayload(src *MonitorPayload) *MonitorPayload {
+	if src == nil {
+		return nil
+	}
+	clone := *src
+	return &clone
+}
+
+func cloneJSONValue(value any) any {
+	if value == nil {
+		return nil
+	}
+	return cloneJSONReflectValue(reflect.ValueOf(value)).Interface()
+}
+
+func cloneJSONReflectValue(value reflect.Value) reflect.Value {
+	if !value.IsValid() {
+		return value
+	}
+	switch value.Kind() {
+	case reflect.Interface:
+		if value.IsNil() {
+			return reflect.Zero(value.Type())
+		}
+		clone := cloneJSONReflectValue(value.Elem())
+		result := reflect.New(value.Type()).Elem()
+		result.Set(clone)
+		return result
+	case reflect.Map:
+		if value.IsNil() {
+			return reflect.Zero(value.Type())
+		}
+		result := reflect.MakeMapWithSize(value.Type(), value.Len())
+		iter := value.MapRange()
+		for iter.Next() {
+			result.SetMapIndex(iter.Key(), cloneJSONReflectValue(iter.Value()))
+		}
+		return result
+	case reflect.Slice:
+		if value.IsNil() {
+			return reflect.Zero(value.Type())
+		}
+		result := reflect.MakeSlice(value.Type(), value.Len(), value.Len())
+		for index := 0; index < value.Len(); index++ {
+			result.Index(index).Set(cloneJSONReflectValue(value.Index(index)))
+		}
+		return result
+	case reflect.Pointer:
+		if value.IsNil() {
+			return reflect.Zero(value.Type())
+		}
+		result := reflect.New(value.Type().Elem())
+		result.Elem().Set(cloneJSONReflectValue(value.Elem()))
+		return result
+	default:
+		return value
+	}
+}
 
 // MarshalJSON implements custom JSON marshaling for NormalizedPayload.
 func (p *NormalizedPayload) MarshalJSON() ([]byte, error) {

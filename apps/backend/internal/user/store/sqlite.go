@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -15,8 +16,9 @@ import (
 )
 
 const (
-	DefaultUserID    = "default-user"
-	DefaultUserEmail = "default@kandev.local"
+	DefaultUserID        = "default-user"
+	DefaultUserEmail     = "default@kandev.local"
+	DefaultSidebarViewID = "view-all-tasks"
 
 	defaultChangesPanelLayout = "tree"
 )
@@ -366,12 +368,50 @@ func makeTaskCreateLastUsedJSONSetArgs(patch models.TaskCreateLastUsed) []any {
 	if patch.ExecutorProfileID != "" {
 		args = append(args, "$.task_create_last_used.executor_profile_id", patch.ExecutorProfileID)
 	}
+	workflowIDs := make([]string, 0, len(patch.WorkflowIDsByWorkspace))
+	for workspaceID := range patch.WorkflowIDsByWorkspace {
+		workflowIDs = append(workflowIDs, workspaceID)
+	}
+	sort.Strings(workflowIDs)
+	for _, workspaceID := range workflowIDs {
+		workflowID := patch.WorkflowIDsByWorkspace[workspaceID]
+		if !isSafeTaskCreateWorkspacePathKey(workspaceID) || workflowID == "" {
+			continue
+		}
+		// Workspace IDs are generated UUIDs. SQLite JSON1 does not support
+		// PostgreSQL-style parameterized path segments, so reject punctuation
+		// rather than interpolating a key that could change the JSON path.
+		args = append(args,
+			"$.task_create_last_used.workflow_ids_by_workspace."+workspaceID,
+			workflowID,
+		)
+	}
 	return args
+}
+
+func isSafeTaskCreateWorkspacePathKey(value string) bool {
+	if value == "" {
+		return false
+	}
+	for _, char := range value {
+		if (char >= 'a' && char <= 'z') ||
+			(char >= 'A' && char <= 'Z') ||
+			(char >= '0' && char <= '9') ||
+			char == '-' || char == '_' {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 func buildPostgresTaskCreateLastUsedUpdate(patch models.TaskCreateLastUsed) (string, []any) {
 	base := "(CASE WHEN settings IS NULL OR settings = 'null' OR settings = '' THEN '{}'::jsonb ELSE settings::jsonb END)"
-	expr := fmt.Sprintf("jsonb_set(%s, '{task_create_last_used}', COALESCE(%s->'task_create_last_used', '{}'::jsonb), true)", base, base)
+	expr := fmt.Sprintf(
+		"jsonb_set(%s, '{task_create_last_used}', %s, true)",
+		base,
+		normalizePostgresTaskCreateLastUsedExpr(base),
+	)
 	args := []any{}
 	expr, args = applyPostgresTaskCreateLastUsedPatch(expr, patch, args)
 	query := fmt.Sprintf(`
@@ -384,7 +424,10 @@ func buildPostgresTaskCreateLastUsedUpdate(patch models.TaskCreateLastUsed) (str
 
 func buildPostgresUserSettingsPreservingTaskCreateLastUsedUpdate(patch *models.TaskCreateLastUsed) (string, []any) {
 	base := "(CASE WHEN settings IS NULL OR settings = 'null' OR settings = '' THEN '{}'::jsonb ELSE settings::jsonb END)"
-	expr := fmt.Sprintf("jsonb_set(?::jsonb, '{task_create_last_used}', COALESCE(%s->'task_create_last_used', '{}'::jsonb), true)", base)
+	expr := fmt.Sprintf(
+		"jsonb_set(?::jsonb, '{task_create_last_used}', %s, true)",
+		normalizePostgresTaskCreateLastUsedExpr(base),
+	)
 	args := []any{}
 	if patch != nil {
 		expr, args = applyPostgresTaskCreateLastUsedPatch(expr, *patch, args)
@@ -395,6 +438,20 @@ func buildPostgresUserSettingsPreservingTaskCreateLastUsedUpdate(patch *models.T
 		WHERE id = ?
 	`, expr)
 	return query, args
+}
+
+func normalizePostgresTaskCreateLastUsedExpr(base string) string {
+	taskCreate := fmt.Sprintf("COALESCE(%s->'task_create_last_used', '{}'::jsonb)", base)
+	workflowMap := fmt.Sprintf(
+		"CASE WHEN jsonb_typeof(%s->'workflow_ids_by_workspace') = 'object' THEN %s->'workflow_ids_by_workspace' ELSE '{}'::jsonb END",
+		taskCreate,
+		taskCreate,
+	)
+	return fmt.Sprintf(
+		"jsonb_set(%s, '{workflow_ids_by_workspace}', %s, true)",
+		taskCreate,
+		workflowMap,
+	)
 }
 
 func applyPostgresTaskCreateLastUsedPatch(expr string, patch models.TaskCreateLastUsed, args []any) (string, []any) {
@@ -413,6 +470,22 @@ func applyPostgresTaskCreateLastUsedPatch(expr string, patch models.TaskCreateLa
 	if patch.ExecutorProfileID != "" {
 		expr = fmt.Sprintf("jsonb_set(%s, '{task_create_last_used,executor_profile_id}', to_jsonb(?::text), true)", expr)
 		args = append(args, patch.ExecutorProfileID)
+	}
+	workflowIDs := make([]string, 0, len(patch.WorkflowIDsByWorkspace))
+	for workspaceID := range patch.WorkflowIDsByWorkspace {
+		workflowIDs = append(workflowIDs, workspaceID)
+	}
+	sort.Strings(workflowIDs)
+	for _, workspaceID := range workflowIDs {
+		workflowID := patch.WorkflowIDsByWorkspace[workspaceID]
+		if workspaceID == "" || workflowID == "" {
+			continue
+		}
+		expr = fmt.Sprintf(
+			"jsonb_set(%s, ARRAY['task_create_last_used','workflow_ids_by_workspace',?::text], to_jsonb(?::text), true)",
+			expr,
+		)
+		args = append(args, workspaceID, workflowID)
 	}
 	return expr, args
 }
@@ -466,6 +539,7 @@ func marshalUserSettingsPayload(settings *models.UserSettings) ([]byte, error) {
 		"show_scroll_to_last_prompt":          settings.ShowScrollToLastPrompt,
 		"show_scroll_to_start":                settings.ShowScrollToStart,
 		"show_transcript_auto_scroll_control": settings.ShowTranscriptAutoScrollControl,
+		"show_todo_list_panel":                settings.ShowTodoListPanel,
 		"show_release_notification":           settings.ShowReleaseNotification,
 		"release_notes_last_seen_version":     settings.ReleaseNotesLastSeenVersion,
 		"lsp_auto_start_languages":            lspAutoStart,
@@ -588,6 +662,7 @@ func defaultUserSettings(userID string) *models.UserSettings {
 		ShowScrollToLastPrompt:          true,
 		ShowScrollToStart:               false,
 		ShowTranscriptAutoScrollControl: false,
+		ShowTodoListPanel:               false,
 		ShowReleaseNotification:         true,
 		LspAutoStartLanguages:           []string{},
 		LspAutoInstallLanguages:         []string{},
@@ -598,11 +673,23 @@ func defaultUserSettings(userID string) *models.UserSettings {
 		KeyboardShortcuts:               map[string]interface{}{},
 		TerminalLinkBehavior:            "new_tab",
 		ChangesPanelLayout:              defaultChangesPanelLayout,
-		SidebarViews:                    []models.SidebarView{},
+		SidebarViews:                    DefaultSidebarViews(),
+		SidebarActiveViewID:             DefaultSidebarViewID,
 		SidebarTaskPrefs:                normalizeSidebarTaskPrefs(models.SidebarTaskPrefs{}),
 		AppStatusBarOrder:               normalizeAppStatusBarOrder(models.AppStatusBarOrder{}),
 		VoiceMode:                       defaultVoiceModeSettings(),
 	}
+}
+
+func DefaultSidebarViews() []models.SidebarView {
+	return []models.SidebarView{{
+		ID:              DefaultSidebarViewID,
+		Name:            "All tasks",
+		Filters:         []models.SidebarViewClause{},
+		Sort:            models.SidebarViewSort{Key: "state", Direction: "asc"},
+		Group:           "repository",
+		CollapsedGroups: []string{},
+	}}
 }
 
 func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID string) (*models.UserSettings, error) {
@@ -637,6 +724,7 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 		ShowScrollToLastPrompt          *bool                               `json:"show_scroll_to_last_prompt"`
 		ShowScrollToStart               *bool                               `json:"show_scroll_to_start"`
 		ShowTranscriptAutoScrollControl *bool                               `json:"show_transcript_auto_scroll_control"`
+		ShowTodoListPanel               *bool                               `json:"show_todo_list_panel"`
 		ShowReleaseNotification         *bool                               `json:"show_release_notification"`
 		ReleaseNotesLastSeenVersion     string                              `json:"release_notes_last_seen_version"`
 		LspAutoStartLanguages           []string                            `json:"lsp_auto_start_languages"`
@@ -644,8 +732,8 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 		LspServerConfigs                map[string]map[string]interface{}   `json:"lsp_server_configs"`
 		LspStatusLocation               string                              `json:"lsp_status_location"`
 		SavedLayouts                    []models.SavedLayout                `json:"saved_layouts"`
-		SidebarViews                    []models.SidebarView                `json:"sidebar_views"`
-		SidebarActiveViewID             string                              `json:"sidebar_active_view_id"`
+		SidebarViews                    json.RawMessage                     `json:"sidebar_views"`
+		SidebarActiveViewID             json.RawMessage                     `json:"sidebar_active_view_id"`
 		SidebarDraft                    *models.SidebarViewDraft            `json:"sidebar_draft"`
 		SidebarTaskPrefs                models.SidebarTaskPrefs             `json:"sidebar_task_prefs"`
 		TaskCreateLastUsed              models.TaskCreateLastUsed           `json:"task_create_last_used"`
@@ -712,6 +800,9 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 	if payload.ShowTranscriptAutoScrollControl != nil {
 		settings.ShowTranscriptAutoScrollControl = *payload.ShowTranscriptAutoScrollControl
 	}
+	if payload.ShowTodoListPanel != nil {
+		settings.ShowTodoListPanel = *payload.ShowTodoListPanel
+	}
 	if payload.ShowReleaseNotification != nil {
 		settings.ShowReleaseNotification = *payload.ShowReleaseNotification
 	}
@@ -733,11 +824,25 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 	if settings.SavedLayouts == nil {
 		settings.SavedLayouts = []models.SavedLayout{}
 	}
-	settings.SidebarViews = payload.SidebarViews
-	if settings.SidebarViews == nil {
-		settings.SidebarViews = []models.SidebarView{}
+	if len(payload.SidebarViews) > 0 {
+		if err := json.Unmarshal(payload.SidebarViews, &settings.SidebarViews); err != nil {
+			return nil, err
+		}
+		if settings.SidebarViews == nil {
+			settings.SidebarViews = []models.SidebarView{}
+		}
 	}
-	settings.SidebarActiveViewID = payload.SidebarActiveViewID
+	if len(payload.SidebarActiveViewID) > 0 {
+		var activeViewID *string
+		if err := json.Unmarshal(payload.SidebarActiveViewID, &activeViewID); err != nil {
+			return nil, err
+		}
+		if activeViewID == nil {
+			settings.SidebarActiveViewID = ""
+		} else {
+			settings.SidebarActiveViewID = *activeViewID
+		}
+	}
 	settings.SidebarDraft = payload.SidebarDraft
 	settings.SidebarTaskPrefs = normalizeSidebarTaskPrefs(payload.SidebarTaskPrefs)
 	settings.TaskCreateLastUsed = payload.TaskCreateLastUsed

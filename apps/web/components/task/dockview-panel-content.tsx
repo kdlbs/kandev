@@ -13,7 +13,7 @@ import { t } from "@/lib/i18n";
 import { setPanelTitle } from "@/lib/layout/panel-portal-manager";
 import { useDockviewStore } from "@/lib/state/dockview-store";
 import { BrowserPanel } from "./browser-panel";
-import type { OpenDiffOptions } from "./changes-diff-target";
+import type { CommitDetailTarget, OpenDiffOptions } from "./changes-diff-target";
 import { ChangesPanel } from "./changes-panel";
 import { CommitDetailPanel } from "./commit-detail-panel";
 import { FileEditorPanel } from "./file-editor-panel";
@@ -25,6 +25,7 @@ import { TaskChangesPanel } from "./task-changes-panel";
 import { TaskChatPanel } from "./task-chat-panel";
 import { TaskPlanPanel } from "./task-plan-panel";
 import { TerminalPanel } from "./terminal-panel";
+import { TodosContent } from "./todos-panel-content";
 import { VscodePanel } from "./vscode-panel";
 
 export const CHAT_PANEL_FALLBACK_LABEL = "Agent";
@@ -154,7 +155,7 @@ function ChangesContent({ panelId }: { panelId: string }) {
     [addFileDiffPanel],
   );
   const handleOpenCommitDetail = useCallback(
-    (sha: string, repo?: string) => addCommitDetailPanel(sha, { repo }),
+    (target: CommitDetailTarget) => addCommitDetailPanel(target),
     [addCommitDetailPanel],
   );
   const handleOpenDiffAll = useCallback(() => addDiffViewerPanel(), [addDiffViewerPanel]);
@@ -215,6 +216,7 @@ const PANEL_RENDERERS: Record<string, PanelRenderer> = {
   browser: (panelId, params) => <BrowserPanel panelId={panelId} params={params} />,
   vscode: (panelId) => <VscodePanel panelId={panelId} />,
   plan: () => <PlanContent />,
+  todos: () => <TodosContent />,
   "pr-detail": (panelId, params) => (
     <ReviewDetailPanelComponent panelId={panelId} params={params} />
   ),

@@ -15,6 +15,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/settings/modelfetcher"
 	"github.com/kandev/kandev/internal/agent/settings/store"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/secrets"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"go.uber.org/zap"
 )
@@ -56,15 +57,23 @@ type Controller struct {
 	sessionChecker  SessionChecker
 	watcherDeps     WatcherDependencyChecker
 	routingTierDeps RoutingTierDependencyChecker
+	automationDeps  AutomationDependencyChecker
 	mcpService      *mcpconfig.Service
 	modelCache      *modelfetcher.Cache
-	hostUtility     *hostutility.Manager
+	hostUtility     hostUtilityProvider
 	jobStore        *JobStore
 	updateJobStore  *AgentUpdateJobStore
 	runtimeUpdater  RuntimeUpdater
 	maintenance     *maintenanceCoordinator
 	hub             JobBroadcaster
 	logger          *logger.Logger
+	secretStore     secrets.SecretStore
+}
+
+// SetSecretStore wires the metadata-only validator used by shared agent
+// profiles. Workspace-scoped references are intentionally rejected here.
+func (c *Controller) SetSecretStore(secretStore secrets.SecretStore) {
+	c.secretStore = secretStore
 }
 
 // SetWatcherDependencyChecker wires in the watcher dependency enumerator so
@@ -80,6 +89,14 @@ func (c *Controller) SetRoutingTierDependencyChecker(r RoutingTierDependencyChec
 	c.routingTierDeps = r
 }
 
+// SetAutomationDependencyChecker wires in the automation enumerator so
+// DeleteProfile can name the automations that would be left pointing at a
+// deleted profile. Optional; when unset the delete path keeps its
+// pre-automation behaviour.
+func (c *Controller) SetAutomationDependencyChecker(a AutomationDependencyChecker) {
+	c.automationDeps = a
+}
+
 // ErrProfileInUseDetail is returned when a profile cannot be deleted because
 // active sessions or external integration watchers reference it. The UI uses
 // the breakdown to render a "this will also disable N watchers — continue?"
@@ -88,11 +105,13 @@ type ErrProfileInUseDetail struct {
 	ActiveSessions []agentdto.ActiveTaskInfo
 	Watchers       []WatcherReference
 	RoutingTiers   []RoutingTierReference
+	Automations    []AutomationReference
 }
 
 func (e *ErrProfileInUseDetail) Error() string {
-	return fmt.Sprintf("agent profile is used by %d active session(s), %d watcher(s), and %d routing tier(s)",
-		len(e.ActiveSessions), len(e.Watchers), len(e.RoutingTiers))
+	return fmt.Sprintf(
+		"agent profile is used by %d active session(s), %d watcher(s), %d routing tier(s), and %d automation(s)",
+		len(e.ActiveSessions), len(e.Watchers), len(e.RoutingTiers), len(e.Automations))
 }
 
 // WatcherReference points at one issue/PR watcher row that uses the profile
@@ -124,6 +143,33 @@ type RoutingTierReference struct {
 // watcher stays enabled-but-orphaned until its next external trigger fires
 // the lazy preflight, which never happens for filters that match nothing
 // new after the profile is deleted.
+// AutomationReference points at one enabled automation that would be left
+// referencing a deleted agent profile. An automation is configuration rather
+// than a session: nothing is running, so it does not show up in the active-task
+// list, but its next firing would launch against a profile that no longer
+// exists.
+type AutomationReference struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	WorkspaceID string `json:"workspace_id"`
+}
+
+// AutomationDependencyChecker enumerates enabled automations bound to an agent
+// profile and disables them when that profile is deleted.
+//
+// ListEnabledAutomationsByAgentProfile feeds the confirmation dialog.
+// DisableAutomationsByAgentProfile runs on the delete path *before* the profile
+// row is removed and its error aborts the delete — unlike the watcher
+// equivalent, which runs after and is best-effort. The asymmetry is deliberate:
+// a watcher left enabled against a deleted profile is repaired by the dispatch
+// coordinator's preflight on the next poll, and an automation has no such
+// backstop, so the only safe moment to disable it is while the delete can still
+// be called off.
+type AutomationDependencyChecker interface {
+	ListEnabledAutomationsByAgentProfile(ctx context.Context, agentProfileID string) ([]AutomationReference, error)
+	DisableAutomationsByAgentProfile(ctx context.Context, agentProfileID string) ([]AutomationReference, error)
+}
+
 type WatcherDependencyChecker interface {
 	ListWatchersByAgentProfile(ctx context.Context, agentProfileID string) ([]WatcherReference, error)
 	DisableWatchersByAgentProfile(ctx context.Context, agentProfileID, cause string) ([]WatcherReference, error)
@@ -137,6 +183,16 @@ type SessionChecker interface {
 
 type RoutingTierDependencyChecker interface {
 	ListRoutingTierReferencesByAgentProfile(ctx context.Context, profileID string) ([]RoutingTierReference, error)
+}
+
+type hostUtilityProvider interface {
+	Get(agentType string) (hostutility.AgentCapabilities, bool)
+	Refresh(ctx context.Context, agentType string) (hostutility.AgentCapabilities, error)
+	ResolveModelConfig(
+		ctx context.Context,
+		agentType string,
+		req hostutility.ModelConfigResolutionRequest,
+	) (hostutility.ModelConfigResolution, error)
 }
 
 func NewController(repo store.Repository, discoveryRegistry *discovery.Registry, agentRegistry *registry.Registry, sessionChecker SessionChecker, log *logger.Logger,

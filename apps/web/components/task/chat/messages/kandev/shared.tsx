@@ -14,6 +14,7 @@ import { cn } from "@/lib/utils";
 import { ExpandableRow } from "../expandable-row";
 import { useExpandState } from "../use-expand-state";
 import { shortId } from "./parse";
+import { useTranslation } from "react-i18next";
 
 export type KandevStatus = "pending" | "running" | "complete" | "error" | "cancelled" | undefined;
 
@@ -181,8 +182,9 @@ export function TaskStateBadge({ state }: { state: string | undefined }) {
 // EmptyListNote is what we render when a list response comes back with 0
 // items. Plain "No results" rendered inside the body rather than the header so
 // the header stays consistent across all states.
-export function EmptyListNote({ noun }: { noun: string }) {
-  return <div className="text-xs text-muted-foreground italic">No {noun} found.</div>;
+export function EmptyListNote({ messageKey }: { messageKey: string }) {
+  const { t } = useTranslation();
+  return <div className="text-xs text-muted-foreground italic">{t(messageKey)}</div>;
 }
 
 // ListItemRow is one row in a list-style result. Plain layout — no border,
@@ -194,7 +196,3 @@ export function ListItemRow({ children }: { children: ReactNode }) {
 
 // CountBadge formats `N items` / `1 item` for the header summary. Pure helper
 // kept here so all renderers pluralise the same way.
-export function pluralCount(n: number, noun: string, nounPlural?: string): string {
-  if (n === 1) return `1 ${noun}`;
-  return `${n} ${nounPlural ?? `${noun}s`}`;
-}

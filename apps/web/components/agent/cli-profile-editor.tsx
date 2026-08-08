@@ -22,6 +22,7 @@ import {
   buildDefaultPermissions,
   PERMISSION_APPLY_AGENTCTL_AUTO_APPROVE,
 } from "@/lib/agent-permissions";
+import { useTranslation } from "react-i18next";
 
 export type CliProfileEditorMode = "create" | "edit";
 
@@ -102,6 +103,28 @@ function initialState(
   return fromDefaultAgent(defaultName, defaultAgent);
 }
 
+function ProfileNameField({
+  value,
+  onChange,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <div>
+      <Label htmlFor="cli-profile-name">{t("common:profileName")}</Label>
+      <Input
+        id="cli-profile-name"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={t("common:default")}
+        className="mt-1"
+      />
+    </div>
+  );
+}
+
 export function CliProfileEditor({
   mode,
   profile,
@@ -166,16 +189,10 @@ export function CliProfileEditor({
         />
       )}
 
-      <div>
-        <Label htmlFor="cli-profile-name">Profile name</Label>
-        <Input
-          id="cli-profile-name"
-          value={form.profileName}
-          onChange={(e) => patch({ profileName: e.target.value })}
-          placeholder="default"
-          className="mt-1"
-        />
-      </div>
+      <ProfileNameField
+        value={form.profileName}
+        onChange={(profileName) => patch({ profileName })}
+      />
 
       <ModelModeFields
         modelConfig={modelConfig ?? null}
@@ -230,6 +247,7 @@ function EditorFooter({
   onSave: () => void;
   onCancel?: () => void;
 }) {
+  const { t } = useTranslation();
   return (
     <div className="flex items-center justify-end gap-2 pt-2">
       {onCancel && (
@@ -240,7 +258,7 @@ function EditorFooter({
           disabled={saving}
           className="cursor-pointer"
         >
-          Cancel
+          {t("common:cancel")}
         </Button>
       )}
       <Button
@@ -264,12 +282,13 @@ function CliClientPicker({
   value: string;
   onChange: (name: string) => void;
 }) {
+  const { t } = useTranslation();
   return (
     <div>
-      <Label>CLI client</Label>
+      <Label>{t("common:cliClient")}</Label>
       <Select value={value} onValueChange={onChange} disabled={installed.length === 0}>
         <SelectTrigger className="mt-1 cursor-pointer">
-          <SelectValue placeholder="Pick a CLI client" />
+          <SelectValue placeholder={t("common:pickACliClient")} />
         </SelectTrigger>
         <SelectContent>
           {installed.map((agent) => (
@@ -281,8 +300,7 @@ function CliClientPicker({
       </Select>
       {installed.length === 0 && (
         <p className="text-xs text-muted-foreground mt-1">
-          No CLI clients installed yet. Install Claude / Codex / OpenCode / Amp to enable this
-          picker.
+          {t("common:noCliClientsInstalledYetInstall")}
         </p>
       )}
     </div>
@@ -304,17 +322,14 @@ function ModelModeFields({
   onModelChange,
   onModeChange,
 }: ModelModeFieldsProps) {
+  const { t } = useTranslation();
   if (!modelConfig) {
-    return (
-      <p className="text-xs text-muted-foreground">
-        Pick a CLI client to load its available models and modes.
-      </p>
-    );
+    return <p className="text-xs text-muted-foreground">{t("common:pickACliClientToLoad")}</p>;
   }
   return (
     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
       <div>
-        <Label>Model</Label>
+        <Label>{t("common:model")}</Label>
         <ModelCombobox
           value={model}
           onChange={onModelChange}
@@ -324,7 +339,7 @@ function ModelModeFields({
       </div>
       {(modelConfig.available_modes ?? []).length > 0 && (
         <div>
-          <Label>Mode</Label>
+          <Label>{t("common:mode")}</Label>
           <ModeCombobox
             value={mode}
             onChange={onModeChange}
@@ -368,6 +383,7 @@ function AdvancedToggles({
   onAutoApproveChange,
   onCliFlagsChange,
 }: AdvancedTogglesProps) {
+  const { t } = useTranslation();
   const autoSetting = permissionSettings?.auto_approve;
   const showAgentctlAutoApprove = Boolean(
     autoSetting?.supported && autoSetting.apply_method === PERMISSION_APPLY_AGENTCTL_AUTO_APPROVE,
@@ -380,15 +396,15 @@ function AdvancedToggles({
         onClick={onToggle}
         className="text-xs text-muted-foreground hover:text-foreground cursor-pointer"
       >
-        {open ? "Hide" : "Show"} advanced options
+        {open ? t("common:hideAdvancedOptions") : t("common:showAdvancedOptions")}
       </button>
       {open && (
         <div className="mt-3 space-y-3">
           {allowCliPassthrough && (
             <ToggleRow
               id="cli-passthrough"
-              label="CLI passthrough"
-              description="Forward stdin/stdout straight to the CLI subprocess. Disables ACP."
+              label={t("common:cliPassthrough")}
+              description={t("common:forwardStdinStdoutStraightToThe")}
               checked={cliPassthrough}
               onChange={onCliPassthroughChange}
             />
@@ -404,8 +420,8 @@ function AdvancedToggles({
           {showAllowIndexing && (
             <ToggleRow
               id="allow-indexing"
-              label="Allow indexing"
-              description="Permit the CLI to upload code for cloud indexing (auggie / similar)."
+              label={t("common:allowIndexing")}
+              description={t("common:permitTheCliToUploadCode")}
               checked={allowIndexing}
               onChange={onAllowIndexingChange}
             />
@@ -459,15 +475,15 @@ function AgentctlAutoApproveRow({
   checked: boolean;
   onChange: (v: boolean) => void;
 }) {
+  const { t } = useTranslation();
   return (
     <div className="flex items-start justify-between gap-3 rounded-md border border-destructive/40 bg-destructive/5 px-3 py-2">
       <div className="space-y-0.5">
         <Label htmlFor={id} className="text-sm text-destructive">
-          {setting?.label ?? "Auto-approve all permissions"}
+          {setting?.label ?? t("common:autoApproveAllPermissions")}
         </Label>
         <p className="text-xs text-muted-foreground">
-          {setting?.description ??
-            "Kandev allows every agent permission request without prompting you."}
+          {setting?.description ?? t("common:kandevAllowsEveryAgentPermissionRequest")}
         </p>
       </div>
       <Switch

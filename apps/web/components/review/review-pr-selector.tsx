@@ -15,6 +15,7 @@ import { cn } from "@kandev/ui/lib/utils";
 import { prIdentitySlug, prTaskKey } from "@/components/github/pr-utils";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import type { TaskPR } from "@/lib/types/github";
+import { useTranslation } from "react-i18next";
 
 type ReviewPRSelectorProps = {
   prs: TaskPR[];
@@ -35,6 +36,7 @@ export function ReviewPRSelector({
   compact = false,
   testIdPrefix = "review-pr-selector",
 }: ReviewPRSelectorProps) {
+  const { t } = useTranslation();
   const { isMobile, isFinePointer } = useResponsiveBreakpoint();
   if (prs.length < 2 || !selectedPR) return null;
 
@@ -53,7 +55,10 @@ export function ReviewPRSelector({
           variant="outline"
           data-testid={`${testIdPrefix}-trigger`}
           data-pr-number={selectedPR.pr_number}
-          aria-label={`Review pull request ${selectedPR.repo} #${selectedPR.pr_number}`}
+          aria-label={t("review:reviewPullRequestFor", {
+            repo: selectedPR.repo,
+            prNumber: selectedPR.pr_number,
+          })}
           className={cn(
             "max-w-full cursor-pointer gap-1.5 px-2 transition-transform active:scale-[0.96]",
             triggerHeight,
@@ -76,7 +81,7 @@ export function ReviewPRSelector({
         data-testid={`${testIdPrefix}-menu`}
         className="max-h-[calc(100dvh-1rem)] w-80 max-w-[calc(100vw-1rem)] overflow-y-auto overscroll-contain sm:max-h-80"
       >
-        <DropdownMenuLabel>Review pull request</DropdownMenuLabel>
+        <DropdownMenuLabel>{t("review:reviewPullRequest")}</DropdownMenuLabel>
         <DropdownMenuSeparator />
         <DropdownMenuRadioGroup
           value={selectedKey}

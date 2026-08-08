@@ -40,7 +40,6 @@ import (
 	jirapkg "github.com/kandev/kandev/internal/jira"
 	linearpkg "github.com/kandev/kandev/internal/linear"
 	sentrypkg "github.com/kandev/kandev/internal/sentry"
-	slackpkg "github.com/kandev/kandev/internal/slack"
 	workflowsyncpkg "github.com/kandev/kandev/internal/workflowsync"
 
 	// Agent infrastructure
@@ -364,7 +363,8 @@ func startServices( //nolint:cyclop
 	// ============================================
 	// AGENTCTL LAUNCHER (for standalone mode)
 	// ============================================
-	agentctlResult, err := provideAgentctlLauncher(ctx, cfg, log)
+	agentRuntimeAvailability := agentctlclient.NewAvailability(eventBus, log)
+	agentctlResult, err := provideAgentctlLauncher(ctx, cfg, log, agentRuntimeAvailability)
 	if err != nil {
 		log.Error("Failed to start agentctl subprocess", zap.Error(err))
 		return false
@@ -387,7 +387,8 @@ func startServices( //nolint:cyclop
 		agentctlBinaryPath = agentctlResult.binaryPath
 	}
 
-	return startAgentInfrastructure(ctx, cfg, log, addCleanup, eventBus, dbPool, repos, services, agentSettingsController, agentRegistry, agentctlBinaryPath, runCleanups)
+	return startAgentInfrastructure(ctx, cfg, log, addCleanup, eventBus, agentRuntimeAvailability,
+		dbPool, repos, services, agentSettingsController, agentRegistry, agentctlBinaryPath, runCleanups)
 }
 
 // startAgentInfrastructure initializes the agent lifecycle manager, worktree, orchestrator,
@@ -400,6 +401,7 @@ func startAgentInfrastructure(
 	log *logger.Logger,
 	addCleanup func(func() error),
 	eventBus bus.EventBus,
+	agentRuntimeAvailability *agentctlclient.Availability,
 	dbPool *db.Pool,
 	repos *Repositories,
 	services *Services,
@@ -412,7 +414,7 @@ func startAgentInfrastructure(
 	// ============================================
 	// AGENT MANAGER
 	// ============================================
-	lifecycleMgr, err := provideLifecycleManager(ctx, cfg, log, eventBus, repos.AgentSettings, agentRegistry, userSecretStore)
+	lifecycleMgr, err := provideLifecycleManager(ctx, cfg, log, eventBus, repos.AgentSettings, agentRegistry, userSecretStore, services.Task.TaskBaseBranches)
 	if err != nil {
 		log.Error("Failed to initialize agent manager", zap.Error(err))
 		return false
@@ -524,6 +526,15 @@ func startAgentInfrastructure(
 	agentSettingsController.SetRoutingTierDependencyChecker(&routingTierDepsAdapter{
 		repo: repos.Office,
 	})
+	// An enabled automation is a standing instruction to launch against a
+	// profile. Nothing is running, so it never reaches the active-session list,
+	// but deleting the profile would leave the schedule firing into nothing —
+	// quietly, hours later. Name them in the confirmation instead.
+	if services.Automation != nil {
+		agentSettingsController.SetAutomationDependencyChecker(&automationDepsAdapter{
+			store: services.Automation.Service.Store(),
+		})
+	}
 
 	// Wire GitHub service into orchestrator for PR auto-detection on push
 	if services.GitHub != nil {
@@ -608,20 +619,6 @@ func startAgentInfrastructure(
 		addCleanup(func() error { sentryPoller.Stop(); return nil })
 	}
 
-	// Start Slack auth-health poller and the trigger loop. The trigger
-	// polls each configured workspace every 30s for new `!kandev …`
-	// messages from the authenticated user and turns them into Kandev
-	// tasks via taskSvc.
-	if services.Slack != nil {
-		slackPoller := slackpkg.NewPoller(services.Slack, log)
-		slackPoller.Start(ctx)
-		addCleanup(func() error { slackPoller.Stop(); return nil })
-
-		slackTrigger := slackpkg.NewTrigger(services.Slack, log)
-		slackTrigger.Start(ctx)
-		addCleanup(func() error { slackTrigger.Stop(); return nil })
-	}
-
 	// Start workflow-sync poller: periodically pulls workflow definition
 	// files from each workspace's configured GitHub repo and reconciles the
 	// workspace's synced workflows with them.
@@ -649,7 +646,7 @@ func startAgentInfrastructure(
 		log.Info("Automation scheduler and evaluator started")
 	}
 
-	return startGatewayAndServe(ctx, cfg, log, eventBus, dbPool, repos, services,
+	return startGatewayAndServe(ctx, cfg, log, eventBus, agentRuntimeAvailability, dbPool, repos, services,
 		agentSettingsController, lifecycleMgr, agentRegistry, orchestratorSvc, msgCreator, repoCloner, agentctlBinaryPath, addCleanup, runCleanups)
 }
 
@@ -662,6 +659,7 @@ func startGatewayAndServe(
 	cfg *config.Config,
 	log *logger.Logger,
 	eventBus bus.EventBus,
+	agentRuntimeAvailability *agentctlclient.Availability,
 	dbPool *db.Pool,
 	repos *Repositories,
 	services *Services,
@@ -743,28 +741,10 @@ func startGatewayAndServe(
 		return nil
 	})
 
-	// Wire the Slack agent runner. Slack triage uses the host-utility
-	// inference path (single-shot ACP subprocess) with the Kandev MCP
-	// server attached so the agent can call list_workflows_kandev /
-	// create_task_kandev / etc. mid-prompt. Both deps land here at the
-	// same time: hostUtilityMgr just bootstrapped above, services.Utility
-	// was constructed in provideServices.
-	if services.Slack != nil && services.Utility != nil {
-		mcpURL := buildKandevMCPURL(cfg.Server.Port)
-		slackRunner := slackpkg.NewRunner(
-			services.Utility,
-			services.User,
-			slackHostUtilityAdapter{mgr: hostUtilityMgr},
-			[]slackpkg.MCPDescriptor{{Name: "kandev", URL: mcpURL}},
-			log,
-		)
-		services.Slack.SetRunner(slackRunner)
-	}
-
 	// Wire Host.InvokeUtilityAgent (ADR 0048): plugins delegate one-shot LLM
 	// calls to the utility agent selected in each plugin's configuration and
-	// runs them through the sessionless host-utility
-	// tier. Same landing point as the Slack runner — hostUtilityMgr is live.
+	// runs them through the sessionless host-utility tier, at the first point
+	// where hostUtilityMgr is live.
 	if services.Plugins != nil && services.Utility != nil {
 		services.Plugins.SetUtilityAgent(pluginsUtilityAgentAdapter{svc: services.Utility}, pluginsHostUtilityAdapter{mgr: hostUtilityMgr})
 	}
@@ -866,13 +846,20 @@ func startGatewayAndServe(
 	systemSvc.StartBackground(ctx)
 	addCleanup(func() error { systemSvc.StopBackground(); return nil })
 	gateways.RegisterSystemNotifications(ctx, eventBus, gateway.Hub, log)
+	gateways.RegisterAgentRuntimeNotifications(ctx, eventBus, gateway.Hub, func() (any, bool) {
+		if agentRuntimeAvailability == nil {
+			return nil, false
+		}
+		snapshot, ok := agentRuntimeAvailability.Snapshot()
+		return snapshot, ok
+	}, log)
 
 	// ============================================
 	// HTTP SERVER
 	// ============================================
 	server, err := buildHTTPServer(cfg, log, gateway, repos, services, agentSettingsController,
 		lifecycleMgr, eventBus, orchestratorSvc, notificationCtrl, msgCreator, agentRegistry, hostUtilityMgr,
-		addCleanup, repoCloner, systemSvc, storageComposition.workspaceRestorer)
+		addCleanup, repoCloner, systemSvc, storageComposition.workspaceRestorer, dbPool, agentRuntimeAvailability)
 	if err != nil {
 		log.Error("Failed to build HTTP server", zap.Error(err))
 		return false
@@ -1773,6 +1760,8 @@ func buildHTTPServer(
 	repoCloner *repoclone.Cloner,
 	systemSvc *systemsvc.Service,
 	workspaceRestorer taskhandlers.WorkspaceQuarantineRestorer,
+	dbPool *db.Pool,
+	agentRuntimeAvailability *agentctlclient.Availability,
 ) (*http.Server, error) {
 	gin.SetMode(gin.ReleaseMode)
 	router := gin.New()
@@ -1797,6 +1786,16 @@ func buildHTTPServer(
 		return nil, fmt.Errorf("generate interim settings interlock token: %w", err)
 	}
 	userSecretStore := secrets.NewUserVisibleStore(repos.Secrets)
+	// The login PTY manager is shared by agent-login dialogs and Quick
+	// Terminal tabs. The latter uses an owner-aware exit callback to keep its
+	// durable descriptor accurate even while no browser is attached.
+	loginMgr, quickTerminalSvc := buildLoginPTYServices(
+		log,
+		repos.QuickTerminal,
+		services.Task,
+		agentSettingsController,
+		addCleanup,
+	)
 
 	// Opt-in authentication. Runs after CORS; in disabled mode it only
 	// injects the synthetic single-user identity (behavior unchanged).
@@ -1806,6 +1805,8 @@ func buildHTTPServer(
 	// workspace_id with no gate of their own. No-op when auth is disabled.
 	router.Use(integrationWorkspaceScopeMiddleware(services.Auth, services.Task))
 
+	secretsSvc := secrets.NewService(userSecretStore, log)
+	secretsSvc.SetWorkspaceAuthorizer(services.Task.AuthorizeWorkspaceAccess)
 	registerRoutes(routeParams{
 		router:                        router,
 		gateway:                       gateway,
@@ -1815,12 +1816,15 @@ func buildHTTPServer(
 		analyticsRepo:                 repos.Analytics,
 		orchestratorSvc:               orchestratorSvc,
 		lifecycleMgr:                  lifecycleMgr,
+		loginMgr:                      loginMgr,
+		quickTerminalSvc:              quickTerminalSvc,
 		hostUtilityMgr:                hostUtilityMgr,
 		eventBus:                      eventBus,
 		services:                      services,
 		systemSvc:                     systemSvc,
 		workspaceRestorer:             workspaceRestorer,
 		runtimeFlagsSvc:               services.RuntimeFlags,
+		dbPool:                        dbPool,
 		agentSettingsController:       agentSettingsController,
 		agentSettingsRepo:             repos.AgentSettings,
 		agentList:                     agentRegistry,
@@ -1831,10 +1835,11 @@ func buildHTTPServer(
 		promptCtrl:                    promptcontroller.NewController(services.Prompts),
 		utilityCtrl:                   utilitycontroller.NewController(services.Utility),
 		msgCreator:                    msgCreator,
-		secretsSvc:                    secrets.NewService(userSecretStore, log),
+		secretsSvc:                    secretsSvc,
 		secretStore:                   userSecretStore,
 		mcpConfigSvc:                  mcpconfig.NewService(repos.AgentSettings),
 		authSvc:                       services.Auth,
+		agentRuntimeAvailability:      agentRuntimeAvailability,
 		addCleanup:                    addCleanup,
 		repoCloner:                    repoCloner,
 		version:                       Version,

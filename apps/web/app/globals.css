@@ -305,6 +305,21 @@ html[data-rendering-engine="webkit"] [data-webkit-safe-motion="true"][data-state
   animation-name: kandev-dialog-webkit-exit;
 }
 
+/*
+ * Tooltip content is `pointer-events: none` (@kandev/ui/tooltip.tsx) so a
+ * bubble never blocks clicks on whatever it's covering — but that class only
+ * reaches the inner content, not Radix Popper's auto-generated positioning
+ * wrapper around it, which keeps the browser default `pointer-events: auto`.
+ * A tooltip anchored deep inside a scrollable/nested surface (e.g. an
+ * automation help icon inside the MR hover popover) can end up geometrically
+ * overlapping unrelated interactive elements above it; without this, that
+ * wrapper silently intercepts clicks meant for whatever sits underneath,
+ * even after the tooltip's own trigger is no longer hovered.
+ */
+[data-radix-popper-content-wrapper]:has(> [data-slot="tooltip-content"]) {
+  pointer-events: none;
+}
+
 @media (min-width: 640px) {
   html[data-rendering-engine="webkit"] [data-webkit-safe-motion="true"] {
     height: fit-content;
@@ -1043,31 +1058,60 @@ html[data-rendering-engine="webkit"] [data-webkit-safe-motion="true"][data-state
   table-layout: auto;
 }
 
+.markdown-table-scroll {
+  position: relative;
+}
+
+.markdown-table-resizer {
+  position: absolute;
+  z-index: 10;
+  width: 0.625rem;
+  padding: 0;
+  transform: translateX(-50%);
+  cursor: col-resize;
+  touch-action: none;
+  border: 0;
+  outline: none;
+  background: transparent;
+}
+
+.markdown-table-resizer::after {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 2px;
+  content: "";
+  transform: translateX(-50%);
+  background: transparent;
+  transition: background-color 100ms ease;
+}
+
+.markdown-table-resizer:hover::after,
+.markdown-table-resizer:focus-visible::after,
+.markdown-table-resizer[data-active="true"]::after {
+  background: var(--primary);
+}
+
 .markdown-body th,
 .markdown-body td {
   border: 1px solid var(--border);
   padding: 0.25rem 0.5rem;
   font-size: 13px;
   vertical-align: top;
+  overflow-wrap: anywhere;
+  white-space: normal;
 }
 
-.markdown-body td {
-  overflow-wrap: anywhere;
+/* Keep genuinely wide Markdown tables readable in their local scroll wrapper.
+   Ordinary two- and three-column tables use the available width and wrap. */
+.markdown-body table:has(> thead > tr > th:nth-child(4)) :is(th, td) {
+  min-width: 8rem;
 }
 
 .markdown-body th {
   background: var(--muted);
   font-weight: 600;
-  white-space: nowrap;
-}
-
-/* Label/value tables (common in agent output) put short keys in the first
-   column. Keep that column on one line and sized to its content so a long
-   value cell can't starve it down to a few characters and wrap "Failing"
-   into "Failin g". */
-.markdown-body td:first-child {
-  white-space: nowrap;
-  width: 1%;
 }
 
 .markdown-body td:not(:first-child) code {

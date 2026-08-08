@@ -48,7 +48,8 @@ func insertWorkflow(t *testing.T, db *sqlx.DB, id, name string) {
 
 // mockWorkflowProvider implements WorkflowProvider with in-memory state for tests.
 type mockWorkflowProvider struct {
-	workflows []*taskmodels.Workflow
+	workflows        []*taskmodels.Workflow
+	getWorkflowCalls int
 }
 
 func (m *mockWorkflowProvider) ListWorkflows(_ context.Context, workspaceID string, includeHidden bool) ([]*taskmodels.Workflow, error) {
@@ -66,6 +67,7 @@ func (m *mockWorkflowProvider) ListWorkflows(_ context.Context, workspaceID stri
 }
 
 func (m *mockWorkflowProvider) GetWorkflow(_ context.Context, id string) (*taskmodels.Workflow, error) {
+	m.getWorkflowCalls++
 	for _, wf := range m.workflows {
 		if wf.ID == id {
 			return wf, nil
@@ -711,6 +713,33 @@ func TestImportWorkflows(t *testing.T) {
 		steps, err := svc.repo.ListStepsByWorkflow(ctx, "imported-Imported WF")
 		require.NoError(t, err)
 		assert.Len(t, steps, 2)
+	})
+
+	t.Run("imports workflow-level prompt", func(t *testing.T) {
+		svc, _, provider := setupTestServiceWithProvider(t)
+		ctx := context.Background()
+
+		export := &models.WorkflowExport{
+			Version: models.ExportVersion,
+			Type:    models.ExportType,
+			Workflows: []models.WorkflowPortable{
+				{
+					Name:   "Prompted WF",
+					Prompt: "If the PR is merged or closed, move the Task to Done.",
+					Steps: []models.StepPortable{
+						{Name: "Todo", Position: 0, Color: "gray"},
+					},
+				},
+			},
+		}
+
+		result, err := svc.ImportWorkflows(ctx, "ws-1", export)
+		require.NoError(t, err)
+		assert.Equal(t, []string{"Prompted WF"}, result.Created)
+
+		wf, err := provider.GetWorkflow(ctx, "imported-Prompted WF")
+		require.NoError(t, err)
+		assert.Equal(t, "If the PR is merged or closed, move the Task to Done.", wf.Prompt)
 	})
 
 	t.Run("normalizes duplicate start steps on import", func(t *testing.T) {

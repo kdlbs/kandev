@@ -101,6 +101,7 @@
         "get_task_document_kandev",
         "list_related_tasks_kandev",
         "list_task_documents_kandev",
+        "list_task_sessions_kandev",
         "message_task_kandev",
         "spawn_session_kandev",
         "write_task_document_kandev"
@@ -227,8 +228,7 @@
         "/settings/integrations/gitlab",
         "/settings/integrations/jira",
         "/settings/integrations/linear",
-        "/settings/integrations/sentry",
-        "/settings/integrations/slack"
+        "/settings/integrations/sentry"
       ],
       "mcpTools": [
         "get_task_mr_automation_kandev",

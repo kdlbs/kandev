@@ -10,15 +10,14 @@
  */
 
 import { useMemo, useState } from "react";
-import { areCLIFlagsEqual } from "@/lib/cli-flags";
-import { areConfigOptionsEqual } from "@/lib/config-options";
-import { arePermissionsDirty, permissionsToProfilePatch } from "@/lib/agent-permissions";
+import { permissionsToProfilePatch } from "@/lib/agent-permissions";
 import { deleteAgentProfileAction, updateAgentProfileAction } from "@/app/actions/agents";
 import { useAppStore } from "@/components/state-provider";
+import { isProfileDirty } from "@/components/settings/agent-profile-dirty";
 import type { useToast } from "@/components/toast-provider";
 import type { AgentProfileDeleteConflict } from "@/components/settings/agent-profile-delete-dialog";
-import { areEnvVarsEqual } from "@/components/settings/profile-edit/profile-env-vars-section";
 import { t as translate } from "@/lib/i18n";
+import { toAgentProfileOption } from "@/lib/state/slices/settings/types";
 import type { Agent, AgentProfile, PermissionSetting } from "@/lib/types/http";
 
 export type SaveStatus = "idle" | "loading" | "success" | "error";
@@ -30,13 +29,7 @@ export function useSyncAgentsToStore() {
     setSettingsAgents(nextAgents);
     setAgentProfiles(
       nextAgents.flatMap((agentItem) =>
-        agentItem.profiles.map((agentProfile) => ({
-          id: agentProfile.id,
-          label: `${agentProfile.agentDisplayName ?? ""} • ${agentProfile.name}`,
-          agent_id: agentItem.id,
-          agent_name: agentItem.name,
-          cli_passthrough: agentProfile.cliPassthrough ?? false,
-        })),
+        agentItem.profiles.map((agentProfile) => toAgentProfileOption(agentItem, agentProfile)),
       ),
     );
   };
@@ -51,16 +44,7 @@ export function useProfileEditorState(
   const [saveStatus, setSaveStatus] = useState<"idle" | "loading" | "success" | "error">("idle");
 
   const isDirty = useMemo(
-    () =>
-      draft.name !== savedProfile.name ||
-      draft.model !== savedProfile.model ||
-      (draft.mode ?? "") !== (savedProfile.mode ?? "") ||
-      !areConfigOptionsEqual(draft.configOptions, savedProfile.configOptions) ||
-      arePermissionsDirty(draft, savedProfile, permissionSettings) ||
-      draft.cliPassthrough !== savedProfile.cliPassthrough ||
-      !areCLIFlagsEqual(draft.cliFlags ?? [], savedProfile.cliFlags ?? []) ||
-      (draft.commandPrefix ?? "") !== (savedProfile.commandPrefix ?? "") ||
-      !areEnvVarsEqual(draft.envVars, savedProfile.envVars),
+    () => isProfileDirty(draft, savedProfile, permissionSettings),
     [draft, savedProfile, permissionSettings],
   );
 
@@ -74,6 +58,7 @@ export function errorMessage(error: unknown): string {
 type ProfileEditorActionsOptions = {
   agent: Agent;
   draft: AgentProfile;
+  savedProfile: AgentProfile;
   setSavedProfile: (p: AgentProfile) => void;
   setDraft: React.Dispatch<React.SetStateAction<AgentProfile>>;
   setSaveStatus: (s: SaveStatus) => void;
@@ -85,6 +70,7 @@ type ProfileEditorActionsOptions = {
 export function useProfileSave({
   agent,
   draft,
+  savedProfile,
   setSavedProfile,
   setDraft,
   setSaveStatus,
@@ -112,6 +98,12 @@ export function useProfileSave({
         config_options: draft.configOptions ?? {},
         ...permissionsToProfilePatch(draft),
         cli_passthrough: draft.cliPassthrough,
+        // Omit an unchanged enabled value so a profile editor save cannot
+        // resurrect a concurrent list-toggle response from its stale draft.
+        enabled:
+          (draft.enabled ?? true) !== (savedProfile.enabled ?? true)
+            ? (draft.enabled ?? true)
+            : undefined,
         cli_flags: draft.cliFlags,
         command_prefix: draft.commandPrefix ?? "",
         env_vars: draft.envVars ?? [],
@@ -187,6 +179,7 @@ export function useProfileDelete(
         activeSessions: result.activeSessions,
         watchers: result.watchers,
         routingTiers: result.routingTiers,
+        automations: result.automations,
       });
     } else {
       toast({
@@ -207,6 +200,7 @@ export function useProfileDelete(
         activeSessions: result.activeSessions,
         watchers: result.watchers,
         routingTiers: result.routingTiers,
+        automations: result.automations,
       });
     } else if (result.status === "error") {
       toast({

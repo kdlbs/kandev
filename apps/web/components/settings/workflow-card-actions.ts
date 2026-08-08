@@ -246,6 +246,7 @@ export async function persistWorkflowDraft({
   const updatedWorkflow = await updateWorkflowAction(persistedWorkflow.id, {
     name: workflow.name.trim(),
     description: workflow.description ?? "",
+    prompt: workflow.prompt ?? "",
     agent_profile_id: workflow.agent_profile_id ?? "",
   });
   progress.workflow = updatedWorkflow;
@@ -272,6 +273,7 @@ async function ensurePersistedWorkflow(
         workspace_id: workflow.workspace_id,
         name: workflow.name.trim(),
         description: workflow.description ?? undefined,
+        prompt: workflow.prompt ?? undefined,
         workflow_template_id: workflow.workflow_template_id ?? undefined,
       })
     : workflow;

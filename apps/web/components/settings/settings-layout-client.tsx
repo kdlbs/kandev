@@ -17,7 +17,6 @@ import { safeDecodePathSegment } from "@/lib/routing/path";
 import { SettingsSaveProvider } from "@/components/settings/settings-save-provider";
 import { SettingsTargetProvider } from "@/components/settings/settings-target-provider";
 import { useTranslation } from "react-i18next";
-import { t } from "@/lib/i18n";
 import { connectionIssueDetails } from "@/components/app-status-bar/connection-status-item";
 import { linkToTaskOverview } from "@/lib/links";
 import { cn } from "@/lib/utils";
@@ -30,7 +29,6 @@ const SEGMENT_LABEL_OVERRIDES: Record<string, string> = {
   github: "GitHub",
   jira: "Jira",
   linear: "Linear",
-  slack: "Slack",
   mcp: "MCP",
   ui: "UI",
   vscode: "VS Code",
@@ -108,16 +106,27 @@ function deriveCurrentPageLabel(pathname: string, t: (key: string) => string): s
 }
 
 // Build the intermediate breadcrumb crumbs between the back link and the
-// current page title. For workspace-scoped automation pages, inject an
-// "Automations" crumb so the breadcrumb reads e.g.
-// Home > Settings > Automations > New.
-function deriveParents(pathname: string): Array<{ label: string; href: string }> {
+// current page title. Workspace-scoped pages include the routed workspace so
+// the breadcrumb identifies which workspace owns the settings being edited.
+function deriveParents(
+  pathname: string,
+  workspaceName: string | null,
+  t: (key: string) => string,
+): Array<{ label: string; href: string }> {
   const segments = pathname.split("/").filter(Boolean);
   if (segments.length <= 1) return [];
 
   const parents: Array<{ label: string; href: string }> = [
     { label: t("common:settings"), href: "/settings" },
   ];
+
+  const workspaceId = workspaceIdFromPathname(pathname);
+  if (workspaceId) {
+    parents.push({
+      label: workspaceName ?? t("common:workspace"),
+      href: `/settings/workspace/${encodeURIComponent(workspaceId)}`,
+    });
+  }
 
   const automationsMatch = pathname.match(
     /^\/settings\/workspace\/([^/]+)\/automations(?:\/(.+))?/,
@@ -138,6 +147,7 @@ function deriveParents(pathname: string): Array<{ label: string; href: string }>
 export function SettingsLayoutClient({ children }: { children: React.ReactNode }) {
   const { t } = useTranslation();
   const pathname = usePathname();
+  const workspaces = useAppStore((s) => s.workspaces.items);
   const isAgentDetail = pathname.startsWith("/settings/agents/") && pathname !== "/settings/agents";
   const showIntegrationCopyAction = integrationFromPathname(pathname) !== null;
 
@@ -157,7 +167,10 @@ export function SettingsLayoutClient({ children }: { children: React.ReactNode }
 
   const pageLabel = deriveCurrentPageLabel(pathname, t);
   const title = pageLabel ?? t("settings:settings");
-  const parents = deriveParents(pathname);
+  const routeWorkspaceId = workspaceIdFromPathname(pathname);
+  const workspaceName =
+    workspaces.find((workspace) => workspace.id === routeWorkspaceId)?.name ?? null;
+  const parents = deriveParents(pathname, workspaceName, t);
 
   return (
     <SettingsShell

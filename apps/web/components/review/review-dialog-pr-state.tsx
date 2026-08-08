@@ -5,6 +5,7 @@ import { IconLoader2, IconRefresh } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import type { TaskPR } from "@/lib/types/github";
 import type { ReviewFile } from "./types";
+import { useTranslation } from "react-i18next";
 
 type AutoCloseReviewDialogInput = {
   open: boolean;
@@ -129,12 +130,16 @@ export function ReviewPRDiffBoundary({
   onRetry,
   children,
 }: ReviewPRDiffBoundaryProps) {
+  const { t } = useTranslation();
   if (selectedPR && loading) {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-2 px-6 text-center text-sm text-muted-foreground">
         <IconLoader2 className="h-5 w-5 animate-spin" />
         <span>
-          Loading {selectedPR.repo} #{selectedPR.pr_number} changes…
+          {t("review:loadingPRChanges", {
+            repo: selectedPR.repo,
+            prNumber: selectedPR.pr_number,
+          })}
         </span>
       </div>
     );
@@ -146,7 +151,7 @@ export function ReviewPRDiffBoundary({
         {onRetry && (
           <Button className="min-h-11" variant="outline" size="sm" onClick={onRetry}>
             <IconRefresh className="h-4 w-4" />
-            Retry
+            {t("review:retry")}
           </Button>
         )}
       </div>

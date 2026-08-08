@@ -33,6 +33,7 @@ import {
   materializeReusableChatPanel,
 } from "./layout-manager";
 import type { BuiltInPreset, LayoutState, LayoutGroupIds } from "./layout-manager";
+import type { CommitDetailTarget } from "@/components/task/changes-diff-target";
 import { performEnvSwitch, replaceStaleSessionPanels } from "./dockview-env-switch";
 import { enforcePinnedTargets } from "./dockview-pinned-enforce";
 import {
@@ -149,12 +150,13 @@ type DockviewStore = {
     },
   ) => void;
   addCommitDetailPanel: (
-    sha: string,
+    target: CommitDetailTarget | string,
     opts?: OpenPanelOpts & { groupId?: string; repo?: string },
   ) => void;
   addFileEditorPanel: (path: string, name: string, opts?: OpenPanelOpts) => void;
   promotePreviewToPinned: (type: PreviewType) => void;
   addBrowserPanel: (url?: string, groupId?: string) => void;
+  openBrowserPanel: (url: string) => void;
   addVscodePanel: () => void;
   openInternalVscode: (goto_: { file: string; line: number; col: number } | null) => void;
   addPlanPanel: (opts?: { groupId?: string; quiet?: boolean; inCenter?: boolean }) => void;
@@ -167,6 +169,7 @@ type DockviewStore = {
   ) => void;
   /** Close every currently-open panel contributed by pluginId (disable/uninstall — AC4). */
   closePluginPanels: (pluginId: string) => void;
+  addTodosPanel: (opts?: { groupId?: string; quiet?: boolean; inCenter?: boolean }) => void;
   /** Open a PR detail panel. prKey (owner/repo/pr_number) gives multi-repo tasks one tab per PR. */
   addPRPanel: (prKey?: string) => void;
   /** Open a GitLab merge request detail panel keyed by host/project/iid. */
@@ -208,6 +211,7 @@ type DockviewStore = {
     newEnvId: string,
     activeSessionId: string | null,
     currentSessionIds?: string[],
+    initialLayout?: string | null,
   ) => void;
   deferredPanelActions: DeferredPanelAction[];
   queuePanelAction: (action: DeferredPanelAction) => void;
@@ -823,6 +827,7 @@ function buildEnvSwitchAction(set: StoreSet, get: StoreGet) {
     newEnvId: string,
     activeSessionId: string | null,
     currentSessionIds: string[] = [],
+    initialLayout?: string | null,
   ) => {
     const { api, currentLayoutEnvId, preMaximizeLayout } = get();
     if (!api) {
@@ -871,7 +876,12 @@ function buildEnvSwitchAction(set: StoreSet, get: StoreGet) {
       pinnedWidths: manualRightWidth === null ? new Map() : new Map([["right", manualRightWidth]]),
     });
     try {
-      if (restoreMaximizeFromStorage(api, newEnvId, set, activeSessionId, currentSessionIds))
+      const hasFirstAdoptionRouteLayout =
+        oldEnvId === null && currentLayoutEnvId === null && Boolean(initialLayout);
+      if (
+        !hasFirstAdoptionRouteLayout &&
+        restoreMaximizeFromStorage(api, newEnvId, set, activeSessionId, currentSessionIds)
+      )
         return;
       const measured = measureDockviewContainer(api);
       const ids = performEnvSwitch({
@@ -882,8 +892,9 @@ function buildEnvSwitchAction(set: StoreSet, get: StoreGet) {
         currentSessionIds,
         safeWidth: measured.width,
         safeHeight: measured.height,
-        buildDefault: (a) => get().buildDefaultLayout(a),
+        buildDefault: (a, intentName) => get().buildDefaultLayout(a, intentName),
         getDefaultLayout: () => get().userDefaultLayout ?? getPresetLayout(get().defaultPreset),
+        initialLayout,
       });
       set(ids);
       enforceFromStore(api, get);
@@ -1203,10 +1214,11 @@ export function performLayoutSwitch(
   newEnvId: string,
   activeSessionId: string | null,
   currentSessionIds: string[] = [],
+  initialLayout?: string | null,
 ): void {
   useDockviewStore
     .getState()
-    .switchEnvLayout(oldEnvId, newEnvId, activeSessionId, currentSessionIds);
+    .switchEnvLayout(oldEnvId, newEnvId, activeSessionId, currentSessionIds, initialLayout);
 }
 
 /**

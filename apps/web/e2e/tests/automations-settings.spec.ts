@@ -23,8 +23,8 @@ test.describe("Automations settings page", () => {
     await automations.nameInput.fill("Daily Check");
     await expect(automations.nameInput).toHaveAttribute("data-settings-dirty", "true");
 
-    // Select a schedule preset
-    await automations.schedulePreset("@daily").click();
+    // Pick a schedule
+    await automations.selectFrequency("every day");
 
     // Select workflow and step
     await automations.selectWorkflow("E2E Workflow");
@@ -45,8 +45,7 @@ test.describe("Automations settings page", () => {
     await automations.gotoNew();
 
     await automations.nameInput.fill("Custom Schedule");
-    await automations.customScheduleInput.fill("@every 2h");
-    await automations.customScheduleInput.blur();
+    await automations.setCustomSchedule("@every 2h");
 
     // Select workflow and step
     await automations.selectWorkflow("E2E Workflow");
@@ -63,11 +62,12 @@ test.describe("Automations settings page", () => {
     const automations = new AutomationsPage(testPage, seedData.workspaceId);
     await automations.gotoNew();
 
-    await automations.customScheduleInput.fill("invalid-cron");
-    await automations.customScheduleInput.blur();
+    await automations.setCustomSchedule("invalid-cron");
 
     // Should show error text
-    await expect(testPage.getByText("Invalid expression")).toBeVisible({ timeout: 5_000 });
+    await expect(testPage.getByText("not a schedule we can read")).toBeVisible({
+      timeout: 5_000,
+    });
   });
 
   test("edit automation name", async ({ testPage, seedData }) => {
@@ -76,7 +76,7 @@ test.describe("Automations settings page", () => {
     // Create an automation first
     await automations.gotoNew();
     await automations.nameInput.fill("Original Name");
-    await automations.schedulePreset("@hourly").click();
+    await automations.selectFrequency("every hour");
     await automations.selectWorkflow("E2E Workflow");
     await automations.selectWorkflowStep(seedData.steps[0].name);
     await expect(automations.saveButton).toBeEnabled({ timeout: 5_000 });
@@ -87,7 +87,7 @@ test.describe("Automations settings page", () => {
     // the row so the click doesn't race the listings hydration.
     await expect(testPage).toHaveURL(/automations$/, { timeout: 15_000 });
     await expect(automations.table).toBeVisible({ timeout: 10_000 });
-    await automations.table.locator("tr", { hasText: "Original Name" }).click();
+    await automations.openByName("Original Name");
     await expect(testPage).toHaveURL(/automations\/[a-f0-9-]+$/, { timeout: 10_000 });
     await expect(automations.editor).toBeVisible();
 
@@ -108,7 +108,7 @@ test.describe("Automations settings page", () => {
     // Create an automation first
     await automations.gotoNew();
     await automations.nameInput.fill("To Be Deleted");
-    await automations.schedulePreset("@weekly").click();
+    await automations.selectFrequency("every week");
     await automations.selectWorkflow("E2E Workflow");
     await automations.selectWorkflowStep(seedData.steps[0].name);
     await expect(automations.saveButton).toBeEnabled({ timeout: 5_000 });
@@ -117,7 +117,7 @@ test.describe("Automations settings page", () => {
     // Land on listings, click into the new row to reach the editor.
     await expect(testPage).toHaveURL(/automations$/, { timeout: 15_000 });
     await expect(automations.table).toBeVisible({ timeout: 10_000 });
-    await automations.table.locator("tr", { hasText: "To Be Deleted" }).click();
+    await automations.openByName("To Be Deleted");
     await expect(testPage).toHaveURL(/automations\/[a-f0-9-]+$/, { timeout: 10_000 });
 
     // Delete it
@@ -201,7 +201,7 @@ test.describe("Automations settings page", () => {
     await expect(automations.table).toBeVisible({ timeout: 10_000 });
 
     // Click into the automation row to open the editor
-    await automations.table.locator("tr", { hasText: "Reveal Me" }).click();
+    await automations.openByName("Reveal Me");
     await expect(testPage).toHaveURL(/automations\/[a-f0-9-]+$/, { timeout: 10_000 });
     await expect(automations.editor).toBeVisible();
 
@@ -260,7 +260,7 @@ test.describe("Automations settings page", () => {
     // Create an automation — the new flow lands directly on the listings page.
     await automations.gotoNew();
     await automations.nameInput.fill("Toggle Test");
-    await automations.schedulePreset("@daily").click();
+    await automations.selectFrequency("every day");
     await automations.selectWorkflow("E2E Workflow");
     await automations.selectWorkflowStep(seedData.steps[0].name);
     await expect(automations.saveButton).toBeEnabled({ timeout: 5_000 });
@@ -416,21 +416,109 @@ test.describe("Automations settings page", () => {
 
     // The archived task's run is no longer outstanding work, and reads
     // "Archived" rather than being conflated with a real cancellation.
-    const archivedRow = testPage.locator("table tbody tr", {
-      hasText: archivedTask.id.slice(0, 8),
-    });
+    const archivedRow = testPage.locator(`table tbody tr[data-task-id="${archivedTask.id}"]`);
     await expect(archivedRow.getByText("Archived", { exact: true })).toBeVisible();
 
     // A task whose current (primary) session was genuinely cancelled —
     // the signal a real Stop leaves behind — reads "Cancelled", distinct
     // from "Archived".
-    const cancelledRow = testPage.locator("table tbody tr", {
-      hasText: cancelledTask.id.slice(0, 8),
-    });
+    const cancelledRow = testPage.locator(`table tbody tr[data-task-id="${cancelledTask.id}"]`);
     await expect(cancelledRow.getByText("Cancelled", { exact: true })).toBeVisible();
 
     // The still-open task's run is unaffected.
-    const openRow = testPage.locator("table tbody tr", { hasText: openTask.id.slice(0, 8) });
+    const openRow = testPage.locator(`table tbody tr[data-task-id="${openTask.id}"]`);
     await expect(openRow.getByText("Running", { exact: true })).toBeVisible();
+  });
+});
+
+/**
+ * The one-time notice that automation runs stopped landing on the kanban.
+ *
+ * Withdrawing execution modes made every firing land in one hidden place, but
+ * `task` was the stored default — so on upgrade a working setup simply stops
+ * producing the cards someone built their day around. The server derives
+ * `legacy_board_card` from the retained `execution_mode` column, and the API
+ * ignores that field on input by design, so these tests backdate the column
+ * through the E2E seeding endpoint (`seedAutomation({ legacyBoardCard: true })`)
+ * — the same on-disk state a real upgraded install carries. The flag the UI
+ * reads is then produced by the production SQL, not by a stub.
+ */
+test.describe("Automations board-move migration notice", () => {
+  test("tells a workspace whose automations used to put cards on the board", async ({
+    testPage,
+    seedData,
+    apiClient,
+  }) => {
+    await apiClient.seedAutomation({
+      workspaceId: seedData.workspaceId,
+      name: "Legacy Board Automation",
+      workflowId: seedData.workflowId,
+      workflowStepId: seedData.startStepId,
+      legacyBoardCard: true,
+    });
+
+    const automations = new AutomationsPage(testPage, seedData.workspaceId);
+    await automations.goto();
+
+    const notice = testPage.getByTestId("automation-board-move-notice");
+    await expect(notice).toBeVisible({ timeout: 15_000 });
+    await expect(notice).toContainText("no longer appear on the board");
+    // Above the table, because it explains why the table's automations stopped
+    // showing up where the reader last saw them.
+    await expect(automations.table).toBeVisible();
+    const [noticeTop, tableTop] = await Promise.all([
+      notice.evaluate((el) => el.getBoundingClientRect().top),
+      automations.table.evaluate((el) => el.getBoundingClientRect().top),
+    ]);
+    expect(noticeTop).toBeLessThan(tableTop);
+  });
+
+  test("stays gone once dismissed, across a reload", async ({ testPage, seedData, apiClient }) => {
+    await apiClient.seedAutomation({
+      workspaceId: seedData.workspaceId,
+      name: "Dismissible Legacy Automation",
+      workflowId: seedData.workflowId,
+      workflowStepId: seedData.startStepId,
+      legacyBoardCard: true,
+    });
+
+    const automations = new AutomationsPage(testPage, seedData.workspaceId);
+    await automations.goto();
+
+    const notice = testPage.getByTestId("automation-board-move-notice");
+    await expect(notice).toBeVisible({ timeout: 15_000 });
+    await testPage.getByTestId("automation-board-move-notice-dismiss").click();
+    await expect(notice).toHaveCount(0);
+
+    // The dismissal is durable — a migration notice that came back on every
+    // visit would be worse than not shipping it.
+    await testPage.reload();
+    await expect(automations.table).toBeVisible({ timeout: 15_000 });
+    await expect(notice).toHaveCount(0);
+  });
+
+  test("says nothing to a workspace that never ran in the withdrawn mode", async ({
+    testPage,
+    seedData,
+    apiClient,
+  }) => {
+    // Created the way everything is created now: nothing was lost here, so
+    // there is no news to break.
+    await apiClient.seedAutomation({
+      workspaceId: seedData.workspaceId,
+      name: "Run Mode Automation",
+      workflowId: seedData.workflowId,
+      workflowStepId: seedData.startStepId,
+    });
+
+    const automations = new AutomationsPage(testPage, seedData.workspaceId);
+    await automations.goto();
+
+    // Assert against a rendered table, not an empty page — the notice sits
+    // beside the automations it is about, and an empty list would hide it for
+    // the wrong reason.
+    await expect(automations.table).toBeVisible({ timeout: 15_000 });
+    await expect(testPage.getByText("Run Mode Automation")).toBeVisible();
+    await expect(testPage.getByTestId("automation-board-move-notice")).toHaveCount(0);
   });
 });

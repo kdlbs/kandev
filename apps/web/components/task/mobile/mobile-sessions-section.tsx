@@ -39,6 +39,8 @@ import { repositorySlug } from "@/lib/repository-slug";
 import { useSessionPendingInput, type PendingInput } from "@/hooks/use-task-pending-input";
 import type { ForegroundActivity, TaskSession, TaskSessionState } from "@/lib/types/http";
 import type { AgentProfileOption } from "@/lib/state/slices";
+import { useTranslation } from "react-i18next";
+import { t } from "@/lib/i18n";
 
 type SessionRow = {
   id: string;
@@ -69,7 +71,7 @@ function buildSessionRows(
       agentName: profile?.agent_name ?? null,
       // User-supplied session name wins over the derived profile label,
       // matching the desktop session tab title precedence.
-      agentLabel: s.name || labelParts[1] || labelParts[0] || profile?.label || "Agent",
+      agentLabel: s.name || labelParts[1] || labelParts[0] || profile?.label || t("task:agent"),
       repositoryLabel: s.repository_id ? (repositoryLabelsById.get(s.repository_id) ?? null) : null,
       state: (s.state as TaskSessionState | undefined) ?? null,
       foregroundActivity: s.foreground_activity ?? null,
@@ -88,7 +90,8 @@ function buildSessionRows(
 // grayscale scan. The label reinforces the distinction in words: while spawned
 // background work runs, the row reads "Working in background" rather than the
 // bare "Running", so background is never confused with generating.
-const BACKGROUND_RUNNING_LABEL = "Working in background";
+// A catalog key, not copy: `t()` at module scope would freeze at the boot locale.
+const BACKGROUND_RUNNING_LABEL_KEY = "task:workingInBackground";
 
 function sessionStateLabel(
   state: TaskSessionState,
@@ -96,11 +99,13 @@ function sessionStateLabel(
   pending: PendingInput,
 ): string {
   const canRequestInput = state === "RUNNING" || state === "WAITING_FOR_INPUT";
-  if (canRequestInput && pending.permission) return "Permission requested";
+  if (canRequestInput && pending.permission) return t("task:permissionRequested");
   if (canRequestInput && pending.clarification) {
     return formatTaskSessionStateLabel("WAITING_FOR_INPUT");
   }
-  if (canRequestInput && foregroundActivity === "background") return BACKGROUND_RUNNING_LABEL;
+  if (canRequestInput && foregroundActivity === "background") {
+    return t(BACKGROUND_RUNNING_LABEL_KEY);
+  }
   return formatTaskSessionStateLabel(state);
 }
 
@@ -155,6 +160,7 @@ function SessionActionsMenu({
   onAskDelete: () => void;
   onHandoffProfile: (profileId: string) => void;
 }) {
+  const { t } = useTranslation();
   const hasLifecycleAction =
     !!state &&
     (isSessionStoppable(state) || isSessionResumable(state) || isSessionDeletable(state));
@@ -167,7 +173,7 @@ function SessionActionsMenu({
           size="icon-sm"
           className="cursor-pointer h-7 w-7"
           onClick={(e) => e.stopPropagation()}
-          aria-label="Session actions"
+          aria-label={t("task:sessionActions")}
         >
           <IconDotsVertical className="h-4 w-4" />
         </Button>
@@ -178,17 +184,17 @@ function SessionActionsMenu({
           onSelect={onSetPrimary}
           disabled={isPrimary || !state}
         >
-          Set as Primary
+          {t("task:setAsPrimary")}
         </DropdownMenuItem>
         <DropdownMenuSeparator />
         {state && isSessionStoppable(state) && (
           <DropdownMenuItem className="cursor-pointer" onSelect={onStop}>
-            Stop
+            {t("task:stop")}
           </DropdownMenuItem>
         )}
         {state && isSessionResumable(state) && (
           <DropdownMenuItem className="cursor-pointer" onSelect={onResume}>
-            Resume
+            {t("task:resume")}
           </DropdownMenuItem>
         )}
         {state && isSessionDeletable(state) && (
@@ -196,7 +202,7 @@ function SessionActionsMenu({
             className="cursor-pointer text-destructive focus:text-destructive"
             onSelect={onAskDelete}
           >
-            Delete
+            {t("task:delete")}
           </DropdownMenuItem>
         )}
         {hasLifecycleAction && <DropdownMenuSeparator />}
@@ -219,27 +225,26 @@ function DeleteSessionConfirmDialog({
   isOnlySession: boolean;
   onConfirm: () => void;
 }) {
+  const { t } = useTranslation();
   return (
     <AlertDialog open={open} onOpenChange={onOpenChange}>
       <AlertDialogContent>
         <AlertDialogHeader>
-          <AlertDialogTitle>Delete session?</AlertDialogTitle>
+          <AlertDialogTitle>{t("task:deleteSession")}</AlertDialogTitle>
           <AlertDialogDescription asChild>
             <div>
-              <p>This will permanently delete the conversation history with this session.</p>
+              <p>{t("task:thisWillPermanentlyDeleteTheConversation")}</p>
               {isPrimary && !isOnlySession && (
-                <p className="mt-2 font-medium">
-                  This is the primary session. Another session will be set as primary.
-                </p>
+                <p className="mt-2 font-medium">{t("task:thisIsThePrimarySessionAnother")}</p>
               )}
               {isOnlySession && (
-                <p className="mt-2 font-medium">This is the only session for this task.</p>
+                <p className="mt-2 font-medium">{t("task:thisIsTheOnlySessionFor")}</p>
               )}
             </div>
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
-          <AlertDialogCancel className="cursor-pointer">Cancel</AlertDialogCancel>
+          <AlertDialogCancel className="cursor-pointer">{t("common:cancel")}</AlertDialogCancel>
           <AlertDialogAction
             onClick={() => {
               onOpenChange(false);
@@ -247,7 +252,7 @@ function DeleteSessionConfirmDialog({
             }}
             className="cursor-pointer bg-destructive text-destructive-foreground hover:bg-destructive/90"
           >
-            Delete
+            {t("task:delete")}
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>
@@ -366,6 +371,10 @@ function SessionRowItem({
 }
 
 function useSessionRows(taskId: string | null) {
+  // `buildSessionRows` resolves its agent-name fallback through the module-level
+  // `t`, so the language has to reach the memo below for that label to follow a
+  // runtime locale switch.
+  const { i18n } = useTranslation();
   const agentProfiles = useAppStore((s) => s.agentProfiles.items);
   const repositoriesByWorkspace = useAppStore((s) => s.repositories.itemsByWorkspaceId);
   const primarySessionId = useAppStore((s) => {
@@ -389,7 +398,8 @@ function useSessionRows(taskId: string | null) {
   }, [repositoriesByWorkspace, sessions]);
   const rows = useMemo(
     () => buildSessionRows(sessions, agentProfiles, primarySessionId, repositoryLabelsById),
-    [sessions, agentProfiles, primarySessionId, repositoryLabelsById],
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- i18n.language is the locale trigger
+    [sessions, agentProfiles, primarySessionId, repositoryLabelsById, i18n.language],
   );
   return { rows, isLoading, primarySessionId };
 }
@@ -403,6 +413,7 @@ const MobileSessionsList = memo(function MobileSessionsList({
   activeSessionId: string | null;
   onClose: () => void;
 }) {
+  const { t } = useTranslation();
   const setActiveSession = useAppStore((s) => s.setActiveSession);
   const { rows, isLoading } = useSessionRows(taskId);
   const [launchOpen, setLaunchOpen] = useState(false);
@@ -418,7 +429,9 @@ const MobileSessionsList = memo(function MobileSessionsList({
 
   if (!taskId) {
     return (
-      <div className="text-xs text-muted-foreground px-2 py-6 text-center">No active task</div>
+      <div className="text-xs text-muted-foreground px-2 py-6 text-center">
+        {t("task:noActiveTask")}
+      </div>
     );
   }
 
@@ -426,7 +439,7 @@ const MobileSessionsList = memo(function MobileSessionsList({
     <div className="flex flex-col gap-2 px-1">
       <div className="flex items-center justify-between px-1">
         <span className="text-xs font-medium text-muted-foreground">
-          {rows.length} session{rows.length === 1 ? "" : "s"}
+          {t("task:sessionCount", { count: rows.length })}
         </span>
         <Button
           size="sm"
@@ -436,18 +449,18 @@ const MobileSessionsList = memo(function MobileSessionsList({
           data-testid="mobile-launch-session"
         >
           <IconPlus className="h-4 w-4" />
-          New session
+          {t("task:newSession")}
         </Button>
       </div>
       <div className="flex flex-col gap-0.5">
         {isLoading && rows.length === 0 && (
           <div className="text-xs text-muted-foreground px-2 py-4 text-center">
-            Loading sessions…
+            {t("task:loadingSessions")}
           </div>
         )}
         {!isLoading && rows.length === 0 && (
           <div className="text-xs text-muted-foreground px-2 py-4 text-center">
-            No sessions yet. Launch one to get started.
+            {t("task:noSessionsYetLaunchOneTo")}
           </div>
         )}
         {rows.map((row) => (
@@ -478,6 +491,7 @@ function useActiveSessionPillLabel(
   effectiveSessionId: string | null;
   ariaLabel: string;
 } {
+  const { t } = useTranslation();
   const storedActiveSessionId = useAppStore((s) => s.tasks.activeSessionId);
   const { rows } = useSessionRows(taskId);
   const effectiveSessionId = sessionId === undefined ? storedActiveSessionId : sessionId;
@@ -487,7 +501,7 @@ function useActiveSessionPillLabel(
   let count: string | undefined;
   if (total > 1 && idx) count = `${idx}/${total}`;
   else if (total > 1) count = `${total}`;
-  const agentLabel = activeRow?.agentLabel ?? "Session";
+  const agentLabel = activeRow?.agentLabel ?? t("task:sessionFallbackLabel");
   const repositoryLabel = activeRow?.repositoryLabel;
   return {
     label: repositoryLabel ? `${agentLabel} · ${repositoryLabel}` : agentLabel,
@@ -495,8 +509,8 @@ function useActiveSessionPillLabel(
     agentName: activeRow?.agentName ?? null,
     effectiveSessionId,
     ariaLabel: repositoryLabel
-      ? `Active session: ${agentLabel}. Repository: ${repositoryLabel}. Tap to switch.`
-      : `Active session: ${agentLabel}. Tap to switch.`,
+      ? t("task:activeSessionRepositoryTapToSwitch", { agentLabel, repositoryLabel })
+      : t("task:activeSessionTapToSwitch", { agentLabel }),
   };
 }
 
@@ -511,6 +525,7 @@ export const MobileSessionsPicker = memo(function MobileSessionsPicker({
   compact?: boolean;
   fullWidth?: boolean;
 }) {
+  const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const { label, count, agentName, effectiveSessionId, ariaLabel } = useActiveSessionPillLabel(
     taskId,
@@ -540,7 +555,7 @@ export const MobileSessionsPicker = memo(function MobileSessionsPicker({
         data-testid="mobile-sessions-pill"
         ariaLabel={ariaLabel}
       />
-      <MobilePickerSheet open={open} onOpenChange={setOpen} title="Sessions">
+      <MobilePickerSheet open={open} onOpenChange={setOpen} title={t("task:sessions")}>
         <MobileSessionsList
           taskId={taskId}
           activeSessionId={effectiveSessionId}

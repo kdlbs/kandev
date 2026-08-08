@@ -6,6 +6,7 @@ import { Button } from "@kandev/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import type { RecoveryAuthMethod } from "@/components/task/chat/types";
 import { copyToClipboard } from "@/lib/utils/copy-to-clipboard";
+import { useTranslation } from "react-i18next";
 
 function buildFullCommand(termAuth: RecoveryAuthMethod["terminal_auth"]): string | null {
   if (!termAuth) return null;
@@ -22,10 +23,11 @@ export function AuthMethodsPanel({
   methods: RecoveryAuthMethod[];
   onOpenTerminal: (command: string) => void;
 }) {
+  const { t } = useTranslation();
   return (
     <div className="mt-2 rounded border border-amber-500/30 bg-amber-500/5 p-2.5 space-y-2">
       <div className="text-xs font-medium text-amber-600 dark:text-amber-400">
-        Authentication required, log in before resuming
+        {t("task:authenticationRequiredLogInBeforeResuming")}
       </div>
       {methods.map((method) => (
         <AuthMethodRow key={method.id} method={method} onOpenTerminal={onOpenTerminal} />
@@ -35,10 +37,11 @@ export function AuthMethodsPanel({
 }
 
 export function GenericAuthPanel({ onOpenTerminal }: { onOpenTerminal: () => void }) {
+  const { t } = useTranslation();
   return (
     <div className="mt-2 rounded border border-amber-500/30 bg-amber-500/5 p-2.5 space-y-2">
       <div className="text-xs font-medium text-amber-600 dark:text-amber-400">
-        Authentication required — please log in via the terminal
+        {t("task:authenticationRequiredPleaseLogInVia")}
       </div>
       <Button
         variant="outline"
@@ -47,7 +50,7 @@ export function GenericAuthPanel({ onOpenTerminal }: { onOpenTerminal: () => voi
         onClick={onOpenTerminal}
       >
         <IconTerminal2 className="h-3 w-3" />
-        Open terminal
+        {t("task:openTerminal")}
       </Button>
     </div>
   );
@@ -60,6 +63,7 @@ function AuthMethodRow({
   method: RecoveryAuthMethod;
   onOpenTerminal: (command: string) => void;
 }) {
+  const { t } = useTranslation();
   const [copied, setCopied] = useState(false);
   const termAuth = method.terminal_auth;
   const fullCommand = buildFullCommand(termAuth);
@@ -88,7 +92,7 @@ function AuthMethodRow({
                 size="sm"
                 className="h-6 w-6 p-0 cursor-pointer shrink-0"
                 onClick={handleCopy}
-                aria-label={copied ? "Command copied" : "Copy command"}
+                aria-label={copied ? t("task:commandCopied") : t("task:copyCommand")}
               >
                 {copied ? (
                   <IconCheck className="h-3 w-3 text-green-500" />
@@ -97,7 +101,7 @@ function AuthMethodRow({
                 )}
               </Button>
             </TooltipTrigger>
-            <TooltipContent side="top">Copy command</TooltipContent>
+            <TooltipContent side="top">{t("task:copyCommand")}</TooltipContent>
           </Tooltip>
           <Tooltip>
             <TooltipTrigger asChild>
@@ -108,17 +112,15 @@ function AuthMethodRow({
                 onClick={() => fullCommand && onOpenTerminal(fullCommand)}
               >
                 <IconTerminal2 className="h-3 w-3" />
-                Run in terminal
+                {t("task:runInTerminal")}
               </Button>
             </TooltipTrigger>
-            <TooltipContent side="top">
-              Open the bottom terminal and paste this command
-            </TooltipContent>
+            <TooltipContent side="top">{t("task:openTheBottomTerminalAndPaste")}</TooltipContent>
           </Tooltip>
         </div>
       ) : (
         <div className="text-xs text-muted-foreground">
-          {method.description || "Login required"}
+          {method.description || t("task:loginRequired")}
         </div>
       )}
     </div>

@@ -15,7 +15,6 @@ import (
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/github"
-	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/sysprompt"
 	"github.com/kandev/kandev/internal/task/models"
 	taskrepo "github.com/kandev/kandev/internal/task/repository"
@@ -38,8 +37,6 @@ const (
 
 var ciAutomationSnapshotFieldReplacer = strings.NewReplacer("\r", " ", "\n", " ", "<", "", ">", "")
 
-var errCIAutoFixRoundCapReached = errors.New("CI auto-fix round cap reached")
-
 type ciAutomationCheckpoint struct {
 	FailedChecks []ciAutomationCheckSnapshot   `json:"failed_checks"`
 	Comments     []ciAutomationCommentSnapshot `json:"comments"`
@@ -57,22 +54,6 @@ type ciAutomationCommentSnapshot struct {
 	Body string `json:"body,omitempty"`
 	Path string `json:"path,omitempty"`
 	Line int    `json:"line,omitempty"`
-}
-
-type ciAutomationDispatchKind string
-
-const (
-	ciAutomationDispatchDirect        ciAutomationDispatchKind = "direct"
-	ciAutomationDispatchQueuedInsert  ciAutomationDispatchKind = "queued_insert"
-	ciAutomationDispatchQueuedReplace ciAutomationDispatchKind = "queued_replace"
-)
-
-type ciAutomationDispatchResult struct {
-	kind ciAutomationDispatchKind
-}
-
-func (r ciAutomationDispatchResult) consumesRound() bool {
-	return r.kind == ciAutomationDispatchDirect || r.kind == ciAutomationDispatchQueuedInsert
 }
 
 func (s *Service) handleTaskPRCIAutomation(ctx context.Context, pr *github.TaskPR) error {
@@ -327,50 +308,14 @@ func ciAutomationCanPromptForFeedback(pr *github.TaskPR, feedback *github.PRFeed
 	return ciAutomationCanAutoFixFromFeedbackPR(feedback) && ciAutomationChecksSettledForAutoFix(pr, feedback)
 }
 
+// resolveCIAutoFixSession adapts the provider-agnostic resolveAutoFixSession
+// (ci_automation_dispatch.go, C5) to GitHub's checkpoint state shape.
 func (s *Service) resolveCIAutoFixSession(ctx context.Context, taskID string, state *github.TaskCIPRAutomationState) (*models.TaskSession, error) {
-	if state != nil && state.LastFixSessionID != nil && strings.TrimSpace(*state.LastFixSessionID) != "" {
-		session, err := s.repo.GetTaskSession(ctx, *state.LastFixSessionID)
-		if err != nil && !errors.Is(err, models.ErrTaskSessionNotFound) {
-			return nil, err
-		}
-		if session != nil && session.TaskID != taskID {
-			return nil, fmt.Errorf("previous CI auto-fix session belongs to task %s", session.TaskID)
-		}
-		if ciAutomationSessionCanReceivePrompt(session) {
-			return session, nil
-		}
+	var lastFixSessionID *string
+	if state != nil {
+		lastFixSessionID = state.LastFixSessionID
 	}
-	sessions, err := s.repo.ListActiveTaskSessionsByTaskID(ctx, taskID)
-	if err != nil {
-		return nil, err
-	}
-	for _, session := range sessions {
-		if ciAutomationSessionCanReceivePrompt(session) && session.IsPrimary {
-			return session, nil
-		}
-	}
-	for _, session := range sessions {
-		if ciAutomationSessionCanReceivePrompt(session) {
-			return session, nil
-		}
-	}
-	return nil, fmt.Errorf("no active agent session for task: %s", taskID)
-}
-
-func ciAutomationSessionCanReceivePrompt(session *models.TaskSession) bool {
-	if session == nil {
-		return false
-	}
-	switch session.State {
-	case models.TaskSessionStateCreated,
-		models.TaskSessionStateStarting,
-		models.TaskSessionStateRunning,
-		models.TaskSessionStateWaitingForInput,
-		models.TaskSessionStateIdle:
-		return true
-	default:
-		return false
-	}
+	return s.resolveAutoFixSession(ctx, taskID, lastFixSessionID)
 }
 
 func (s *Service) handleTaskPRCIAutoFixEmptyDelta(ctx context.Context, pr *github.TaskPR, state *github.TaskCIPRAutomationState, previous ciAutomationCheckpoint, signature, checkpointJSON string) bool {
@@ -410,88 +355,19 @@ func (s *Service) handleTaskPRCIAutoMerge(ctx context.Context, pr *github.TaskPR
 	return ""
 }
 
-func (s *Service) dispatchCIAutomationPromptForPR(ctx context.Context, session *models.TaskSession, pr *github.TaskPR, prompt, signature string, allowNewRound bool) (ciAutomationDispatchResult, error) {
-	chatPrompt := ciAutomationChatPrompt(prompt)
-	switch session.State {
-	case models.TaskSessionStateCreated, models.TaskSessionStateRunning, models.TaskSessionStateStarting:
-		return s.queueOrReplaceCIAutomationPromptForPR(ctx, session, pr, chatPrompt, signature, allowNewRound)
-	case models.TaskSessionStateWaitingForInput, models.TaskSessionStateIdle:
-		result, replaced, err := s.replacePendingCIAutomationPromptForPR(ctx, session, pr, chatPrompt, signature)
-		if err != nil {
-			return ciAutomationDispatchResult{}, err
-		}
-		if replaced {
-			if !s.drainQueuedMessageForPromptableSession(ctx, session.ID) {
-				return ciAutomationDispatchResult{}, fmt.Errorf("failed to dispatch replaced CI automation prompt")
-			}
-			return result, nil
-		}
-		if !allowNewRound {
-			return ciAutomationDispatchResult{}, errCIAutoFixRoundCapReached
-		}
-		if !s.recordCIAutomationUserMessage(ctx, session.TaskID, session.ID, chatPrompt) {
-			return ciAutomationDispatchResult{}, fmt.Errorf("failed to record CI automation user message")
-		}
-		if _, err := s.PromptTask(ctx, session.TaskID, session.ID, chatPrompt, "", false, nil, true); err != nil {
-			return ciAutomationDispatchResult{}, err
-		}
-		return ciAutomationDispatchResult{kind: ciAutomationDispatchDirect}, nil
-	default:
-		return ciAutomationDispatchResult{}, fmt.Errorf("session is not promptable: %s", session.State)
-	}
-}
-
-func (s *Service) replacePendingCIAutomationPromptForPR(ctx context.Context, session *models.TaskSession, pr *github.TaskPR, chatPrompt, signature string) (ciAutomationDispatchResult, bool, error) {
-	if s.messageQueue == nil {
-		return ciAutomationDispatchResult{}, false, nil
-	}
-	result, err := s.queueOrReplaceCIAutomationPromptForPR(ctx, session, pr, chatPrompt, signature, false)
-	if err == nil {
-		return result, true, nil
-	}
-	if errors.Is(err, errCIAutoFixRoundCapReached) {
-		return ciAutomationDispatchResult{}, false, nil
-	}
-	return ciAutomationDispatchResult{}, false, err
-}
-
-func (s *Service) queueOrReplaceCIAutomationPromptForPR(ctx context.Context, session *models.TaskSession, pr *github.TaskPR, chatPrompt, signature string, allowInsert bool) (ciAutomationDispatchResult, error) {
-	if s.messageQueue == nil {
-		return ciAutomationDispatchResult{}, fmt.Errorf("message queue is not configured")
-	}
-	metadata := ciAutomationMessageMetadataForPR(pr, signature)
-	_, replaced, err := s.messageQueue.QueueMessageWithCoalesceKey(ctx, session.ID, session.TaskID, chatPrompt, "", messagequeue.QueuedByWorkflow, false, nil, metadata, ciAutomationCoalesceKey(pr), allowInsert)
-	if err != nil {
-		if errors.Is(err, messagequeue.ErrEntryNotFound) && !allowInsert {
-			return ciAutomationDispatchResult{}, errCIAutoFixRoundCapReached
-		}
-		return ciAutomationDispatchResult{}, err
-	}
-	s.publishQueueStatusEvent(ctx, session.ID)
-	if replaced {
-		return ciAutomationDispatchResult{kind: ciAutomationDispatchQueuedReplace}, nil
-	}
-	return ciAutomationDispatchResult{kind: ciAutomationDispatchQueuedInsert}, nil
-}
-
-func (s *Service) recordCIAutomationUserMessage(ctx context.Context, taskID, sessionID, prompt string) bool {
-	if s.messageCreator == nil || prompt == "" {
-		return false
-	}
-	turnID := s.getActiveTurnID(sessionID)
-	if turnID == "" {
-		s.startTurnForSession(ctx, sessionID)
-		turnID = s.getActiveTurnID(sessionID)
-	}
-	meta := ciAutomationMessageMetadata()
-	if err := s.messageCreator.CreateUserMessage(ctx, taskID, prompt, sessionID, turnID, meta); err != nil {
-		s.logger.Error("failed to create CI automation user message",
-			zap.String("task_id", taskID),
-			zap.String("session_id", sessionID),
-			zap.Error(err))
-		return false
-	}
-	return true
+// dispatchCIAutomationPromptForPR adapts the provider-agnostic
+// dispatchCIAutomationPrompt (ci_automation_dispatch.go, C5) to GitHub PR
+// vocabulary: the prompt gets the "@ci-auto-fix" mention prefix, the
+// coalesce key and message metadata are derived from the PR.
+func (s *Service) dispatchCIAutomationPromptForPR(
+	ctx context.Context, session *models.TaskSession, pr *github.TaskPR, prompt, signature string, allowNewRound bool,
+) (ciAutomationDispatchResult, error) {
+	return s.dispatchCIAutomationPrompt(ctx, session, ciAutomationDispatchParams{
+		ChatPrompt:    ciAutomationChatPrompt(prompt),
+		CoalesceKey:   ciAutomationCoalesceKey(pr),
+		Metadata:      ciAutomationMessageMetadataForPR(pr, signature),
+		AllowNewRound: allowNewRound,
+	})
 }
 
 func ciAutomationMessageMetadata() map[string]interface{} {

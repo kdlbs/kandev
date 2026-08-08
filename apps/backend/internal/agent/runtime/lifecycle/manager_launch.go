@@ -176,6 +176,47 @@ func buildLaunchMetadata(req *LaunchRequest, mainRepoGitDir, worktreeID, worktre
 	return metadata
 }
 
+// collectRemoteContributions projects the validated per-repository bindings
+// into the workspace-subpath keys understood by agentctl. The first repository
+// owns the workspace root; sibling destinations use the same deterministic key
+// as base-branch and workspace materialization projection.
+func collectRemoteContributions(req *LaunchRequest) (map[string]models.RemoteContribution, error) {
+	if req == nil {
+		return nil, nil
+	}
+	specs := req.RepoSpecs()
+	if len(specs) == 0 {
+		if req.RemoteContribution == nil {
+			return nil, nil
+		}
+		if err := req.RemoteContribution.Validate(); err != nil {
+			return nil, fmt.Errorf("validate remote contribution: %w", err)
+		}
+		return map[string]models.RemoteContribution{"": *req.RemoteContribution}, nil
+	}
+	bindings := make(map[string]models.RemoteContribution)
+	for index, spec := range specs {
+		if spec.RemoteContribution == nil {
+			continue
+		}
+		if err := spec.RemoteContribution.Validate(); err != nil {
+			return nil, fmt.Errorf("validate remote contribution for repository %q: %w", spec.RepoName, err)
+		}
+		key := ""
+		if index > 0 {
+			key = baseBranchMetadataKey(spec)
+		}
+		if existing, ok := bindings[key]; ok && existing.CanonicalURL != spec.RemoteContribution.CanonicalURL {
+			return nil, fmt.Errorf("multiple remote contributions target workspace repository %q", key)
+		}
+		bindings[key] = *spec.RemoteContribution
+	}
+	if len(bindings) == 0 {
+		return nil, nil
+	}
+	return bindings, nil
+}
+
 // collectBaseBranches builds the per-repo {RepositoryName → base_branch}
 // map that agentctl reads to scope diff stats. Single-repo legacy launches
 // are recorded under the empty key "" so single-repo trackers (which have
@@ -390,7 +431,7 @@ func (m *Manager) launchResolveWorkspacePath(ctx context.Context, req *LaunchReq
 	// For tasks without a repository, create a scratch workspace.
 	// - Non-ephemeral repo-less tasks: <homeDir>/tasks/<workspaceID>/<taskID>/
 	//   (task-scoped, persists across sessions, mirrors the worktree task layout).
-	// - Ephemeral tasks (slack triage / quick chat): <dataDir>/quick-chat/<sessionID>/
+	// - Ephemeral tasks (quick chat): <dataDir>/quick-chat/<sessionID>/
 	//   (session-scoped, cleaned up on task delete via performTaskCleanup).
 	// Office tasks that have no repo (onboarding, planning) take the
 	// non-ephemeral branch and land under <homeDir>/tasks/...
@@ -443,7 +484,7 @@ func (m *Manager) resolveScratchWorkspace(ctx context.Context, req *LaunchReques
 func (m *Manager) scratchWorkspacePath(req *LaunchRequest) string {
 	if req.IsEphemeral {
 		// Legacy quick-chat path — session-scoped, kept for backward compat with
-		// slack triage and other ephemeral one-shot flows.
+		// ephemeral one-shot flows.
 		if strings.ContainsAny(req.SessionID, `/\`) {
 			m.logger.Warn("session ID contains path separator, rejecting",
 				zap.String("session_id", req.SessionID))
@@ -478,7 +519,8 @@ func invalidScratchPathID(id string) bool {
 }
 
 // launchPrepareRequest copies the launch request, sets the resolved workspace path,
-// populates metadata from the request fields, and injects profile environment variables.
+// and populates metadata from the request fields. Runtime/profile environment
+// values are composed later, after every managed source has been collected.
 func (m *Manager) launchPrepareRequest(req *LaunchRequest, profileInfo *AgentProfileInfo, workspacePath string) (LaunchRequest, string, error) {
 	executionID := uuid.New().String()
 	reqWithWorktree := *req
@@ -497,17 +539,6 @@ func (m *Manager) launchPrepareRequest(req *LaunchRequest, profileInfo *AgentPro
 		reqWithWorktree.Metadata["session_id"] = req.SessionID
 	}
 
-	if profileInfo != nil {
-		if reqWithWorktree.Env == nil {
-			reqWithWorktree.Env = make(map[string]string)
-		}
-		if profileInfo.Model != "" {
-			reqWithWorktree.Env["AGENT_MODEL"] = profileInfo.Model
-		}
-		if profileInfo.AutoApprove {
-			reqWithWorktree.Env["AGENTCTL_AUTO_APPROVE_PERMISSIONS"] = "true"
-		}
-	}
 	if err := mergeRouteOverrideEnv(&reqWithWorktree); err != nil {
 		return LaunchRequest{}, "", err
 	}
@@ -641,6 +672,13 @@ func (m *Manager) launchBuildExecutorRequest(ctx context.Context, executionID st
 	}
 
 	metadata := buildLaunchMetadata(reqWithWorktree, mainRepoGitDir, worktreeID, worktreeBranch)
+	remoteContributions, err := collectRemoteContributions(reqWithWorktree)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	if len(remoteContributions) > 0 {
+		metadata[MetadataKeyRemoteContributions] = remoteContributions
+	}
 
 	var autoApproveOverride *bool
 	if profileInfo != nil {
@@ -662,6 +700,7 @@ func (m *Manager) launchBuildExecutorRequest(ctx context.Context, executionID st
 		AutoApprovePermissionsOverride: autoApproveOverride,
 		Metadata:                       metadata,
 		AgentConfig:                    agentConfig,
+		ApprovedSecretEnvKeys:          append([]string(nil), reqWithWorktree.ApprovedSecretEnvKeys...),
 		McpServers:                     mcpServers,
 		PreviousExecutionID:            reqWithWorktree.PreviousExecutionID,
 		McpMode:                        reqWithWorktree.McpMode,
@@ -669,6 +708,7 @@ func (m *Manager) launchBuildExecutorRequest(ctx context.Context, executionID st
 		AuthToken:                      m.revealRuntimeSecret(ctx, metadata, MetadataKeyAuthTokenSecret),
 		BootstrapNonce:                 m.revealRuntimeSecret(ctx, metadata, MetadataKeyBootstrapNonceSecret),
 		OnProgress:                     onProgress,
+		RemoteContributions:            remoteContributions,
 	}
 
 	if err := resumeRemoteInstancePreflight(ctx, rt, execReq); err != nil {
@@ -783,6 +823,7 @@ func buildEnvPrepareRequest(req *LaunchRequest, workspacePath string, execName e
 		DefaultBranch:          req.DefaultBranch,
 		CheckoutBranch:         req.CheckoutBranch,
 		PRNumber:               req.PRNumber,
+		RemoteContribution:     req.RemoteContribution,
 		WorktreeBranch:         getMetadataString(req.Metadata, MetadataKeyWorktreeBranch),
 		WorktreeBranchPrefix:   req.WorktreeBranchPrefix,
 		WorktreeBranchTemplate: req.WorktreeBranchTemplate,
@@ -812,6 +853,7 @@ func buildEnvPrepareRequest(req *LaunchRequest, workspacePath string, execName e
 				DefaultBranch:          r.DefaultBranch,
 				CheckoutBranch:         r.CheckoutBranch,
 				PRNumber:               r.PRNumber,
+				RemoteContribution:     r.RemoteContribution,
 				WorktreeID:             r.WorktreeID,
 				WorktreeBranchPrefix:   r.WorktreeBranchPrefix,
 				WorktreeBranchTemplate: r.WorktreeBranchTemplate,
@@ -1094,11 +1136,28 @@ func (m *Manager) launchInternal(ctx context.Context, req *LaunchRequest) (*Agen
 	}
 	progressRecorder := newPrepareProgressRecorder(m.newProgressCallback(req.TaskID, req.SessionID))
 
+	// Compose the request before preparation so setup scripts receive the same
+	// final snapshot that the runtime, agent, shell, and terminal will use.
+	reqWithWorktree, executionID, err := m.launchPrepareRequest(req, profileInfo, workspacePath)
+	if err != nil {
+		m.publishLaunchPrepareCompleted(req, nil, progressRecorder, workspacePath, false, err)
+		return nil, err
+	}
+	finalEnv, err := m.buildEnvForExecution(ctx, executionID, &reqWithWorktree, agentConfig, profileInfo)
+	if err != nil {
+		m.publishLaunchPrepareCompleted(req, nil, progressRecorder, workspacePath, false, err)
+		return nil, err
+	}
+	reqWithWorktree.Env = finalEnv
+	reqWithWorktree.EnvironmentDefinitions = nil
+	reqWithWorktree.EnvironmentResolutionRequired = false
+	reqWithWorktree.EnvironmentFinalized = true
+
 	// 4b. Run environment preparation (if preparer registered for this executor type).
 	// Skip on resume (ACPSessionID set) — workspace was already prepared during initial launch.
 	var prepResult *EnvPrepareResult
 	if req.ACPSessionID == "" {
-		prepResult = m.runEnvironmentPreparerWithProgress(ctx, req, workspacePath, progressRecorder.Callback(0))
+		prepResult = m.runEnvironmentPreparerWithProgress(ctx, &reqWithWorktree, workspacePath, progressRecorder.Callback(0))
 	} else {
 		m.logger.Debug("skipping environment preparation for resumed session",
 			zap.String("task_id", req.TaskID),
@@ -1106,16 +1165,14 @@ func (m *Manager) launchInternal(ctx context.Context, req *LaunchRequest) (*Agen
 	}
 	if prepResult != nil {
 		progressRecorder.Merge(prepResult.Steps)
-		if err := m.launchApplyPrepareResult(req, prepResult, &workspacePath, &mainRepoGitDir, &worktreeID, &worktreeBranch); err != nil {
+		if err := m.launchApplyPrepareResult(&reqWithWorktree, prepResult, &workspacePath, &mainRepoGitDir, &worktreeID, &worktreeBranch); err != nil {
 			return nil, err
 		}
-	}
-
-	// 5 & 6. Prepare the request copy with metadata and profile env
-	reqWithWorktree, executionID, err := m.launchPrepareRequest(req, profileInfo, workspacePath)
-	if err != nil {
-		m.publishLaunchPrepareCompleted(req, prepResult, progressRecorder, workspacePath, false, err)
-		return nil, err
+		// The preparer owns the final workspace location for worktree-backed
+		// launches. Keep the executor request in sync with the local launch
+		// state; otherwise standalone receives the repository path (or an empty
+		// path) that was present before preparation completed.
+		reqWithWorktree.WorkspacePath = workspacePath
 	}
 
 	// 6b. Deploy per-profile skills + custom prompt (ADR 0005 Wave A).

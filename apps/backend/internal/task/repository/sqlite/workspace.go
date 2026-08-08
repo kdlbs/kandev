@@ -145,7 +145,7 @@ func (r *Repository) DeleteWorkspaceCascade(
 	ctx context.Context,
 	id string,
 ) ([]*models.Task, []*models.Workflow, error) {
-	return r.deleteWorkspaceCascade(ctx, id, nil)
+	return r.deleteWorkspaceCascade(ctx, id, nil, nil)
 }
 
 // DeleteWorkspaceCascadeWithName deletes a workspace and its task/workflow rows
@@ -154,13 +154,34 @@ func (r *Repository) DeleteWorkspaceCascadeWithName(
 	ctx context.Context,
 	id, name string,
 ) ([]*models.Task, []*models.Workflow, error) {
-	return r.deleteWorkspaceCascade(ctx, id, &name)
+	return r.deleteWorkspaceCascade(ctx, id, &name, nil)
+}
+
+// DeleteWorkspaceCascadeWithSecretCleanup deletes the workspace cascade and
+// invokes cleanup on the same transaction before commit.
+func (r *Repository) DeleteWorkspaceCascadeWithSecretCleanup(
+	ctx context.Context,
+	id string,
+	cleanup func(context.Context, *sqlx.Tx) error,
+) ([]*models.Task, []*models.Workflow, error) {
+	return r.deleteWorkspaceCascade(ctx, id, nil, cleanup)
+}
+
+// DeleteWorkspaceCascadeWithNameAndSecretCleanup is the confirmation-aware
+// transactional variant of DeleteWorkspaceCascadeWithName.
+func (r *Repository) DeleteWorkspaceCascadeWithNameAndSecretCleanup(
+	ctx context.Context,
+	id, name string,
+	cleanup func(context.Context, *sqlx.Tx) error,
+) ([]*models.Task, []*models.Workflow, error) {
+	return r.deleteWorkspaceCascade(ctx, id, &name, cleanup)
 }
 
 func (r *Repository) deleteWorkspaceCascade(
 	ctx context.Context,
 	id string,
 	expectedName *string,
+	cleanup func(context.Context, *sqlx.Tx) error,
 ) ([]*models.Task, []*models.Workflow, error) {
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
@@ -217,6 +238,11 @@ func (r *Repository) deleteWorkspaceCascade(
 		WHERE workspace_id = ?
 	`), id); err != nil {
 		return nil, nil, err
+	}
+	if cleanup != nil {
+		if err := cleanup(ctx, tx); err != nil {
+			return nil, nil, fmt.Errorf("workspace secret cleanup: %w", err)
+		}
 	}
 	if err := tx.Commit(); err != nil {
 		return nil, nil, err

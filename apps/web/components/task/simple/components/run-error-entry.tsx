@@ -13,7 +13,9 @@ import { useAppStore } from "@/components/state-provider";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { formatRelativeTime } from "@/lib/utils";
 import { AgentAvatar } from "@/app/office/components/agent-avatar";
+import { RemediationLink } from "@/components/task/remediation-link";
 import type { RunError } from "@/app/office/tasks/[id]/types";
+import { useTranslation } from "react-i18next";
 
 type RunErrorEntryProps = {
   taskId: string;
@@ -29,10 +31,11 @@ type RunErrorEntryProps = {
  * request so the recovery semantics are unchanged.
  */
 export function RunErrorEntry({ taskId, error }: RunErrorEntryProps) {
+  const { t } = useTranslation();
   const agentName = useAppStore((s) =>
     error.agentProfileId
-      ? (s.office.agentProfiles.find((a) => a.id === error.agentProfileId)?.name ?? "Agent")
-      : "Agent",
+      ? (s.office.agentProfiles.find((a) => a.id === error.agentProfileId)?.name ?? t("task:agent"))
+      : t("task:agent"),
   );
   const [showDetails, setShowDetails] = useState(false);
 
@@ -58,23 +61,20 @@ export function RunErrorEntry({ taskId, error }: RunErrorEntryProps) {
           <span className="font-medium text-sm">{agentName}</span>
           <span className="inline-flex items-center gap-1 text-xs text-red-600 dark:text-red-400">
             <IconAlertTriangle className="h-3.5 w-3.5" />
-            stopped with an error
+            {t("task:stoppedWithAnError")}
           </span>
           <span className="text-xs text-muted-foreground">
             {formatRelativeTime(error.failedAt)}
           </span>
         </div>
-        <p className="mt-1 text-sm text-muted-foreground">
-          The agent stopped with an error. Resume to retry the same conversation, or start a fresh
-          session.
-        </p>
+        <p className="mt-1 text-sm text-muted-foreground">{t("task:theAgentStoppedWithAnError")}</p>
         {error.rawPayload && (
           <Collapsible open={showDetails} onOpenChange={setShowDetails} className="mt-2">
             <CollapsibleTrigger className="flex items-center gap-1 text-xs text-muted-foreground cursor-pointer hover:text-foreground transition-colors">
               <IconChevronDown
                 className={`h-3.5 w-3.5 transition-transform ${showDetails ? "rotate-180" : ""}`}
               />
-              Show details
+              {t("task:showDetails")}
             </CollapsibleTrigger>
             <CollapsibleContent>
               <pre
@@ -86,7 +86,8 @@ export function RunErrorEntry({ taskId, error }: RunErrorEntryProps) {
             </CollapsibleContent>
           </Collapsible>
         )}
-        <div className="mt-2 flex items-center gap-2">
+        <div className="mt-2 flex items-center gap-2 flex-wrap">
+          <RemediationLink url={error.remediationUrl} />
           <Button
             variant="outline"
             size="sm"
@@ -95,7 +96,7 @@ export function RunErrorEntry({ taskId, error }: RunErrorEntryProps) {
             data-testid="run-error-resume-button"
           >
             <IconRefresh className="h-3 w-3" />
-            Resume session
+            {t("task:resumeSession")}
           </Button>
           <Button
             variant="outline"
@@ -105,7 +106,7 @@ export function RunErrorEntry({ taskId, error }: RunErrorEntryProps) {
             data-testid="run-error-fresh-button"
           >
             <IconPlayerPlay className="h-3 w-3" />
-            Start fresh session
+            {t("task:startFreshSession")}
           </Button>
         </div>
       </div>

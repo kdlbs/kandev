@@ -84,6 +84,7 @@
   "failedToCreateProfile": "Failed to create profile",
   "failedToCreateSecret": "Failed to create secret",
   "failedToLoadExecutor": "Failed to load executor",
+  "missingSecretReference": "Missing secret reference",
   "failedToSaveProfile": "Failed to save profile",
   "filesSelected": "Files Selected",
   "gitIdentity": "Git Identity",

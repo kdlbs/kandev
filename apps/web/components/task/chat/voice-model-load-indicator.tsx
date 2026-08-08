@@ -2,6 +2,7 @@
 
 import { IconAlertTriangle } from "@tabler/icons-react";
 import { Progress } from "@kandev/ui/progress";
+import { useTranslation } from "react-i18next";
 
 export type VoiceModelLoadIndicatorProps = {
   state: "idle" | "loading" | "ready" | "error";
@@ -23,6 +24,7 @@ export function VoiceModelLoadIndicator({
   progress,
   modelLabel,
 }: VoiceModelLoadIndicatorProps) {
+  const { t } = useTranslation();
   if (state === "idle" || state === "ready") return null;
 
   const pct = clampPercent(progress);
@@ -36,7 +38,7 @@ export function VoiceModelLoadIndicator({
       data-testid="voice-model-load-indicator"
       data-state={state}
       role="status"
-      aria-label={state === "error" ? `${modelLabel} failed to load` : undefined}
+      aria-label={state === "error" ? t("task:failedToLoad", { modelLabel }) : undefined}
       className={
         state === "error"
           ? "flex items-center gap-1 text-xs text-destructive w-32"
@@ -46,17 +48,17 @@ export function VoiceModelLoadIndicator({
       {state === "error" ? (
         <>
           <IconAlertTriangle className="h-3.5 w-3.5 shrink-0" />
-          <span className="hidden sm:inline">{modelLabel} failed to load</span>
+          <span className="hidden sm:inline">{t("task:failedToLoad", { modelLabel })}</span>
         </>
       ) : (
         <div className="flex flex-col gap-0.5 min-w-0 flex-1">
           <span className="hidden sm:inline text-[10px] leading-none text-muted-foreground truncate">
-            Downloading {modelLabel}… {pct}%
+            {t("task:downloadingModelPercent", { modelLabel, pct })}
           </span>
           <Progress
             value={pct}
             className="h-1"
-            aria-label={`Downloading ${modelLabel}, ${pct} percent`}
+            aria-label={t("task:downloadingPercent", { modelLabel, pct })}
           />
         </div>
       )}

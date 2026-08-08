@@ -82,6 +82,8 @@ export type KanbanState = {
      * list background-running affordance.
      */
     foregroundActivity?: ForegroundActivity | null;
+    /** True when the task's session was mid-turn when the backend died. */
+    interrupted?: boolean;
     /** Live subagents across this task's sessions; drives the board count chip. */
     activeSubagentCount?: number;
     sessionCount?: number | null;
@@ -99,6 +101,7 @@ export type KanbanState = {
     queuedAt?: string;
     isPRReview?: boolean;
     isIssueWatch?: boolean;
+    metadata?: Record<string, unknown> | null;
     isArchived?: boolean;
     issueUrl?: string;
     issueNumber?: number;

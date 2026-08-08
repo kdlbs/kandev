@@ -29,6 +29,7 @@ afterEach(() => {
 const CANCEL_TEST_ID = "recovery-cancel-retry-button";
 const TECHNICAL_DETAILS = "Technical details";
 const RECOVERY_MESSAGE = "Agent encountered an error";
+const RESUME_LABEL = "Resume session";
 const RESUME_TEST_ID = "recovery-resume-button";
 const STALL_CANCEL_TEST_ID = "stall-cancel-turn-button";
 
@@ -38,14 +39,14 @@ function retryMessage(overrides: Partial<Message> = {}): Message {
     session_id: toSessionId("sess-1"),
     task_id: toTaskId("task-1"),
     author_type: "system",
-    content: "Provider overloaded — retrying in 5s (attempt 1/3)",
+    content: "Provider overloaded — retrying in 5s (attempt 1/5)",
     type: "status",
     created_at: "2026-05-30T00:00:00Z",
     metadata: {
       variant: "warning",
       retrying: true,
       attempt: 1,
-      max_attempts: 3,
+      max_attempts: 5,
       retry_in_seconds: 5,
       session_id: "sess-1",
       task_id: "task-1",
@@ -66,6 +67,19 @@ function retryMessage(overrides: Partial<Message> = {}): Message {
   } as Message;
 }
 
+function transientRetryMetadata(attempt: number, retryInSeconds: number) {
+  return {
+    variant: "warning",
+    retrying: true,
+    attempt,
+    max_attempts: 5,
+    retry_in_seconds: retryInSeconds,
+    session_id: "sess-1",
+    task_id: "task-1",
+    actions: [],
+  };
+}
+
 function recoveryMessage(withParams = false): Message {
   return retryMessage({
     content: RECOVERY_MESSAGE,
@@ -75,7 +89,7 @@ function recoveryMessage(withParams = false): Message {
       actions: [
         {
           type: "ws_request",
-          label: "Resume session",
+          label: RESUME_LABEL,
           test_id: RESUME_TEST_ID,
           ...(withParams
             ? {
@@ -140,9 +154,42 @@ function renderAction(
 describe("ActionMessage — transient retry (warning variant)", () => {
   it("renders the retrying copy in amber, not red", () => {
     renderAction(retryMessage(), "WAITING_FOR_INPUT");
-    const text = screen.getByText(/retrying in 5s \(attempt 1\/3\)/i);
-    expect(text.className).toContain("text-amber-600");
-    expect(text.className).not.toContain("text-red-600");
+    const text = screen.getByLabelText("Retry countdown");
+    expect(text.textContent).toMatch(/retrying in 0:0[45]/i);
+    expect(text.parentElement?.className).toContain("text-amber-600");
+    expect(text.parentElement?.className).not.toContain("text-red-600");
+  });
+
+  it("renders a localized countdown from the persisted retry deadline", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-08T12:00:00.000Z"));
+    try {
+      renderAction(
+        retryMessage({
+          content: "Provider error",
+          metadata: {
+            variant: "warning",
+            retrying: true,
+            attempt: 1,
+            max_attempts: 5,
+            retry_at: "2026-08-08T12:01:05.000Z",
+            failure_code: "model_capacity",
+            provider_name: "Codex",
+            model_id: "gpt-5",
+            session_id: "sess-1",
+            task_id: "task-1",
+            actions: [],
+          },
+        }),
+        "WAITING_FOR_INPUT",
+      );
+      expect(screen.getByTestId("transient-retry-card")).toBeTruthy();
+      expect(screen.getByText(/retrying in 1:05/i)).toBeTruthy();
+      expect(screen.getByText(/Codex · gpt-5/i)).toBeTruthy();
+      expect(screen.getByText(/attempt 1 of 5/i)).toBeTruthy();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("Cancel fires a session.recover ws_request with action cancel_retry", async () => {
@@ -197,6 +244,27 @@ describe("ActionMessage — transient retry (warning variant)", () => {
 
     expect(screen.getByTestId(RESUME_TEST_ID)).toBeTruthy();
     expect(screen.getByText(RECOVERY_MESSAGE)).toBeTruthy();
+  });
+});
+
+describe("ActionMessage — retry schedule updates", () => {
+  it("resets the fallback countdown when a later retry schedule arrives", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-08T12:00:00.000Z"));
+    try {
+      const { rerender } = renderAction(
+        retryMessage({ metadata: transientRetryMetadata(1, 5) }),
+        "WAITING_FOR_INPUT",
+      );
+      expect(screen.getByText(/retrying in 0:05/i)).toBeTruthy();
+      rerender(
+        <ActionMessage comment={retryMessage({ metadata: transientRetryMetadata(2, 10) })} />,
+      );
+      expect(screen.getByText(/retrying in 0:10/i)).toBeTruthy();
+      expect(screen.getByText(/attempt 2 of 5/i)).toBeTruthy();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 
@@ -334,7 +402,7 @@ describe("ActionMessage — provider quota recovery", () => {
           actions: [
             {
               type: "ws_request",
-              label: "Resume session",
+              label: RESUME_LABEL,
               test_id: RESUME_TEST_ID,
             },
           ],
@@ -374,5 +442,68 @@ describe("ActionMessage — provider quota recovery", () => {
 
     expect(screen.getByTestId("provider-quota-recovery")).toBeTruthy();
     expect(screen.getByText(/when the provider makes capacity available/i)).toBeTruthy();
+  });
+});
+
+describe("ActionMessage — remediation link", () => {
+  const REMEDIATION_URL = "https://opencode.ai/workspace/wrk_01KQM7K5CYT715264YKKFB17ZY/go";
+  const QUOTA_OUTPUT = "5-hour usage limit reached";
+
+  function recoveryMeta(remediationUrl?: string): Message {
+    return retryMessage({
+      content: RECOVERY_MESSAGE,
+      metadata: {
+        variant: "error",
+        recovery_actions: true,
+        remediation_url: remediationUrl,
+        error_output: "usage limit reached",
+        actions: [{ type: "ws_request", label: RESUME_LABEL, test_id: RESUME_TEST_ID }],
+      },
+    } as Partial<Message>);
+  }
+
+  it("renders a validated remediation link for quota recovery", () => {
+    renderAction(
+      retryMessage({
+        content: "provider quota reached",
+        metadata: {
+          variant: "error",
+          recovery_actions: true,
+          failure_kind: "provider_quota_limited",
+          provider_name: "OpenCode",
+          error_output: QUOTA_OUTPUT,
+          remediation_url: REMEDIATION_URL,
+          actions: [{ type: "ws_request", label: RESUME_LABEL, test_id: RESUME_TEST_ID }],
+        },
+      } as Partial<Message>),
+      "WAITING_FOR_INPUT",
+    );
+
+    const link = screen.getByTestId("remediation-link") as HTMLAnchorElement;
+    expect(link.href).toBe(REMEDIATION_URL);
+    expect(link.target).toBe("_blank");
+    expect(link.rel).toBe("noopener noreferrer");
+    expect(link.className).toContain("min-h-11");
+    // The sanitized message and collapsed details stay URL-free.
+    expect(screen.queryByText(/opencode\.ai\/workspace/i)).toBeNull();
+    expect(screen.getByTestId("provider-quota-recovery").textContent).toContain(QUOTA_OUTPUT);
+  });
+
+  it("renders a remediation link for a generic recovery card too", () => {
+    renderAction(recoveryMeta(REMEDIATION_URL), "WAITING_FOR_INPUT");
+
+    const link = screen.getByTestId("remediation-link") as HTMLAnchorElement;
+    expect(link.href).toBe(REMEDIATION_URL);
+    expect(screen.getByTestId(RESUME_TEST_ID)).toBeTruthy();
+  });
+
+  it("renders no link for an invalid remediation URL", () => {
+    renderAction(
+      recoveryMeta("https://evil.example.com/workspace/wrk_123/go"),
+      "WAITING_FOR_INPUT",
+    );
+
+    expect(screen.queryByTestId("remediation-link")).toBeNull();
+    expect(screen.getByTestId(RESUME_TEST_ID)).toBeTruthy();
   });
 });

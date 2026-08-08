@@ -104,8 +104,10 @@ export function buildContextFilesContext(
   let context = "";
 
   if (files.length > 0) {
-    const fileList = files.map((f) => `- ${f.path}`).join("\n");
-    context += `\n\n<kandev-system>\nCONTEXT FILES: The user has attached the following files as context. Read these files to understand what the user is referring to:\n${fileList}\n</kandev-system>`;
+    const pathList = files
+      .map((f) => `- ${f.isDirectory ? "directory" : "file"}: ${sanitizeForPrompt(f.path)}`)
+      .join("\n");
+    context += `\n\n<kandev-system>\nCONTEXT PATHS: The user has attached the following file and directory paths as context. Inspect these paths to understand what the user is referring to:\n${pathList}\n</kandev-system>`;
   }
 
   if (promptFiles.length > 0) {
@@ -163,7 +165,7 @@ type SendMessagePayload = {
   planMode: boolean;
   hasReviewComments?: boolean;
   attachments?: MessageAttachment[];
-  contextFilesMeta?: Array<{ path: string; name: string }>;
+  contextFilesMeta?: Array<{ path: string; name: string; is_directory?: boolean }>;
   entityReferences?: EntityReference[];
 };
 
@@ -297,6 +299,17 @@ function requireSessionInputMode(state: AppState, selectedSessionId: string): Se
   return inputMode;
 }
 
+function buildQueueAttachments(attachments?: MessageAttachment[]) {
+  return attachments?.map((att) => ({
+    type: att.type,
+    ...(att.attachment_id ? { attachment_id: att.attachment_id } : { data: att.data ?? "" }),
+    mime_type: att.mime_type,
+    name: att.name,
+    size_bytes: att.size_bytes,
+    delivery_mode: att.delivery_mode,
+  }));
+}
+
 export function useMessageHandler({
   resolvedSessionId,
   taskId,
@@ -349,18 +362,17 @@ export function useMessageHandler({
         (f) => !f.path.startsWith("prompt:") && f.path !== "plan:context",
       );
       const contextFilesMeta =
-        realFiles.length > 0 ? realFiles.map((f) => ({ path: f.path, name: f.name })) : undefined;
+        realFiles.length > 0
+          ? realFiles.map((f) => ({
+              path: f.path,
+              name: f.name,
+              ...(f.isDirectory !== undefined ? { is_directory: f.isDirectory } : {}),
+            }))
+          : undefined;
 
       const inputMode = requireSessionInputMode(storeApi.getState(), resolvedSessionId);
       if (hasPendingClarification || inputMode === "queue") {
-        const queueAttachments = payload.attachments?.map((att) => ({
-          type: att.type,
-          ...(att.attachment_id ? { attachment_id: att.attachment_id } : { data: att.data ?? "" }),
-          mime_type: att.mime_type,
-          name: att.name,
-          size_bytes: att.size_bytes,
-          delivery_mode: att.delivery_mode,
-        }));
+        const queueAttachments = buildQueueAttachments(payload.attachments);
         await queue({
           taskId,
           content: finalMessage,
@@ -368,6 +380,7 @@ export function useMessageHandler({
           planMode: planModeEnabled,
           attachments: queueAttachments,
           entityReferences: payload.entityReferences,
+          ...(contextFilesMeta ? { contextFilesMeta } : {}),
         });
         return;
       }

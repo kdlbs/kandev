@@ -52,6 +52,40 @@ func TestInspectorScript_UsesPreviewRouteForAnnotationPagePath(t *testing.T) {
 	}
 }
 
+func TestInspectorScript_PreservesPendingAnnotationAcrossPopupCleanup(t *testing.T) {
+	openStart := strings.Index(inspectorScript, "function openCommentPopup(")
+	if openStart < 0 {
+		t.Fatal("inspector should define openCommentPopup")
+	}
+	openEnd := strings.Index(inspectorScript[openStart:], "function commitAnnotation(")
+	if openEnd < 0 {
+		t.Fatal("inspector should define commitAnnotation after openCommentPopup")
+	}
+	openBody := inspectorScript[openStart : openStart+openEnd]
+
+	keep := strings.Index(openBody, "var keep = pendingAnnotation;")
+	cleanup := strings.Index(openBody, "closePopup();")
+	restore := strings.Index(openBody, "pendingAnnotation = keep;")
+	if keep < 0 || cleanup < 0 || restore < 0 {
+		t.Fatal("openCommentPopup should preserve pendingAnnotation across preventive cleanup")
+	}
+	if keep >= cleanup || cleanup >= restore {
+		t.Fatal("openCommentPopup should preserve pendingAnnotation across preventive cleanup")
+	}
+
+	closeStart := strings.Index(inspectorScript, "function closePopup()")
+	if closeStart < 0 {
+		t.Fatal("inspector should define closePopup")
+	}
+	closeEnd := strings.Index(inspectorScript[closeStart:], "function currentPagePath()")
+	if closeEnd < 0 {
+		t.Fatal("inspector should define currentPagePath after closePopup")
+	}
+	if !strings.Contains(inspectorScript[closeStart:closeStart+closeEnd], "pendingAnnotation = null;") {
+		t.Fatal("direct popup cleanup should still clear pendingAnnotation")
+	}
+}
+
 func TestStripIframeSecurityHeaders_RemovesBlockingHeaders(t *testing.T) {
 	h := http.Header{}
 	h.Set("Content-Security-Policy", "default-src 'none'")

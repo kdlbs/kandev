@@ -81,6 +81,16 @@ describe("toKanbanTask — HTTP DTO / WS payload parity", () => {
     expect(toKanbanTask(httpDTO())).toEqual(toKanbanTask(wsPayload()));
   });
 
+  it("carries task metadata through both shapes", () => {
+    const metadata = { port_forwarding_enabled: true, unrelated: "preserve" };
+    const http = toKanbanTask(httpDTO({ metadata }));
+    const ws = toKanbanTask(wsPayload({ metadata }));
+
+    expect(http.metadata).toEqual(metadata);
+    expect(ws.metadata).toEqual(metadata);
+    expect(ws).toEqual(http);
+  });
+
   it("PR review task: review_watch_id flags isPRReview from both shapes", () => {
     const metadata = { review_watch_id: "watch-123" };
     const out = toKanbanTask(httpDTO({ metadata }));
@@ -143,6 +153,18 @@ describe("toKanbanTask — HTTP DTO / WS payload parity", () => {
     expect(toKanbanTask(wsPayload(invalid)).taskPendingAction).toBeUndefined();
   });
 
+  it("maps the interrupted marker from HTTP and WS shapes", () => {
+    const marked = { interrupted: true } as Partial<TaskLike>;
+    const http = toKanbanTask(httpDTO(marked));
+    const ws = toKanbanTask(wsPayload(marked));
+    expect(http.interrupted).toBe(true);
+    expect(ws.interrupted).toBe(true);
+    // Absent field maps to undefined so a partial update can never synthesize
+    // an interrupted reading.
+    expect(toKanbanTask(httpDTO()).interrupted).toBeUndefined();
+    expect(toKanbanTask(wsPayload()).interrupted).toBeUndefined();
+  });
+
   it("maps the bounded status summary from HTTP and WS task shapes", () => {
     const statusSummary = {
       revision: 7,
@@ -203,8 +225,12 @@ describe("toKanbanTask — state normalization", () => {
     expect(first.isIssueWatch).toBe(false);
     expect(first.issueUrl).toBeUndefined();
     expect(first.issueNumber).toBeUndefined();
+    expect(mapped[1].metadata).toBeUndefined();
+    expect(mapped[2].metadata).toEqual({});
+    const { metadata: _firstMetadata, ...firstWithoutMetadata } = first;
     for (const out of mapped.slice(1)) {
-      expect(out).toEqual(first);
+      const { metadata: _metadata, ...outWithoutMetadata } = out;
+      expect(outWithoutMetadata).toEqual(firstWithoutMetadata);
     }
   });
 

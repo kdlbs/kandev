@@ -18,6 +18,7 @@ import {
   deleteDocument,
   type TaskDocument,
 } from "@/lib/api/domains/office-extended-api";
+import { useTranslation } from "react-i18next";
 
 // --- Document type config ---
 
@@ -85,6 +86,7 @@ function NewDocumentForm({
   onCreated: () => void;
   onCancel: () => void;
 }) {
+  const { t } = useTranslation();
   const [form, setForm] = useState<NewDocFormState>(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
 
@@ -94,7 +96,7 @@ function NewDocumentForm({
 
   const handleSubmit = async () => {
     if (!form.key.trim() || !form.content.trim()) {
-      toast.error("Key and content are required");
+      toast.error(t("task:keyAndContentAreRequired"));
       return;
     }
     setSaving(true);
@@ -104,10 +106,10 @@ function NewDocumentForm({
         title: form.title.trim() || undefined,
         content: form.content,
       });
-      toast.success("Document saved");
+      toast.success(t("task:documentSaved"));
       onCreated();
     } catch {
-      toast.error("Failed to save document");
+      toast.error(t("task:failedToSaveDocument"));
     } finally {
       setSaving(false);
     }
@@ -118,7 +120,7 @@ function NewDocumentForm({
       <div className="flex gap-2">
         <input
           className="flex-1 px-2 py-1 text-sm border border-border rounded bg-background"
-          placeholder="Key (e.g. plan, notes)"
+          placeholder={t("task:keyEGPlanNotes")}
           value={form.key}
           onChange={(e) => update({ key: e.target.value })}
         />
@@ -136,22 +138,22 @@ function NewDocumentForm({
       </div>
       <input
         className="w-full px-2 py-1 text-sm border border-border rounded bg-background"
-        placeholder="Title (optional)"
+        placeholder={t("task:titleOptional")}
         value={form.title}
         onChange={(e) => update({ title: e.target.value })}
       />
       <Textarea
-        placeholder="Content (markdown supported)"
+        placeholder={t("task:contentMarkdownSupported")}
         value={form.content}
         onChange={(e) => update({ content: e.target.value })}
         className="min-h-[100px] text-sm"
       />
       <div className="flex gap-2 justify-end">
         <Button variant="ghost" size="sm" className="cursor-pointer" onClick={onCancel}>
-          Cancel
+          {t("common:cancel")}
         </Button>
         <Button size="sm" className="cursor-pointer" disabled={saving} onClick={handleSubmit}>
-          {saving ? "Saving..." : "Save"}
+          {saving ? t("task:saving") : t("common:save")}
         </Button>
       </div>
     </div>
@@ -161,11 +163,16 @@ function NewDocumentForm({
 // --- Document card ---
 
 function AttachmentBody({ doc }: { doc: TaskDocument }) {
+  const { t } = useTranslation();
   return (
     <div className="flex items-center gap-2 px-3 pb-3">
       <span className="text-sm text-muted-foreground flex-1">
         {doc.filename ?? doc.key}
-        {doc.size !== undefined && <span className="ml-1">({Math.round(doc.size / 1024)} KB)</span>}
+        {doc.size !== undefined && (
+          <span className="ml-1">
+            {t("task:attachmentSizeKb", { size: Math.round(doc.size / 1024) })}
+          </span>
+        )}
       </span>
       <a
         href={`/api/v1/office/tasks/${doc.taskId}/documents/${encodeURIComponent(doc.key)}/download`}
@@ -181,6 +188,7 @@ function AttachmentBody({ doc }: { doc: TaskDocument }) {
 }
 
 function DocumentCard({ doc, onDelete }: { doc: TaskDocument; onDelete: (key: string) => void }) {
+  const { t } = useTranslation();
   const [expanded, setExpanded] = useState(false);
   const typeConfig = getTypeConfig(doc.type);
   const isAttachment = doc.type.toUpperCase() === "ATTACHMENT";
@@ -223,7 +231,7 @@ function DocumentCard({ doc, onDelete }: { doc: TaskDocument; onDelete: (key: st
           <AttachmentBody doc={doc} />
         ) : (
           <div className="px-3 pb-3 pt-1 text-sm text-muted-foreground whitespace-pre-wrap border-t border-border/50 max-h-[400px] overflow-y-auto">
-            {doc.content || <span className="italic">No content</span>}
+            {doc.content || <span className="italic">{t("task:noContent")}</span>}
           </div>
         ))}
     </div>
@@ -237,6 +245,7 @@ type Props = {
 };
 
 export function TaskDocuments({ taskId }: Props) {
+  const { t } = useTranslation();
   const [documents, setDocuments] = useState<TaskDocument[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [showForm, setShowForm] = useState(false);
@@ -249,23 +258,23 @@ export function TaskDocuments({ taskId }: Props) {
       setDocuments(res.documents ?? []);
       setLoaded(true);
     } catch {
-      toast.error("Failed to load documents");
+      toast.error(t("task:failedToLoadDocuments"));
     } finally {
       setLoading(false);
     }
-  }, [taskId]);
+  }, [taskId, t]);
 
   const handleDelete = useCallback(
     async (key: string) => {
       try {
         await deleteDocument(taskId, key);
         setDocuments((prev) => prev?.filter((d) => d.key !== key) ?? null);
-        toast.success("Document deleted");
+        toast.success(t("task:documentDeleted"));
       } catch {
-        toast.error("Failed to delete document");
+        toast.error(t("task:failedToDeleteDocument"));
       }
     },
-    [taskId],
+    [taskId, t],
   );
 
   const handleCreated = useCallback(async () => {
@@ -283,7 +292,7 @@ export function TaskDocuments({ taskId }: Props) {
   return (
     <div className="mt-6">
       <div className="flex items-center justify-between mb-3">
-        <h2 className="text-sm font-semibold">Documents</h2>
+        <h2 className="text-sm font-semibold">{t("task:documents")}</h2>
         <Button
           variant="ghost"
           size="sm"
@@ -291,7 +300,7 @@ export function TaskDocuments({ taskId }: Props) {
           onClick={() => setShowForm((v) => !v)}
         >
           <IconPlus className="h-3.5 w-3.5 mr-1" />
-          New document
+          {t("task:newDocument")}
         </Button>
       </div>
 
@@ -305,10 +314,12 @@ export function TaskDocuments({ taskId }: Props) {
         </div>
       )}
 
-      {loading && docs.length === 0 && <p className="text-sm text-muted-foreground">Loading...</p>}
+      {loading && docs.length === 0 && (
+        <p className="text-sm text-muted-foreground">{t("task:loading")}</p>
+      )}
 
       {loaded && docs.length === 0 && !showForm && (
-        <p className="text-sm text-muted-foreground">No documents yet.</p>
+        <p className="text-sm text-muted-foreground">{t("task:noDocumentsYet")}</p>
       )}
 
       <div className="space-y-2">

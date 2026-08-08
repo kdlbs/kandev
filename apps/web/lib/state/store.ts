@@ -11,6 +11,7 @@ import type {
   TaskWalkthrough,
 } from "@/lib/types/http";
 import type { SystemHealthResponse } from "@/lib/types/health";
+import type { AgentRuntimeAvailability } from "@/lib/types/agent-runtime";
 import type { UISliceActions as UIA } from "./slices/ui/types";
 import type * as UISliceTypes from "./slices/ui/types";
 import type { AgentUpdateJob, InstallJob } from "./slices/settings/types";
@@ -212,6 +213,7 @@ export type AppState = KanbanSlice & {
 
   // System slice (actions merged via SystemSliceActions intersection on AppState)
   system: (typeof defaultSystemState)["system"];
+  agentRuntime: AgentRuntimeAvailability | null;
 
   // Plugins slice (actions merged via PluginsSliceActions intersection on AppState)
   plugins: (typeof defaultPluginsState)["plugins"];
@@ -342,9 +344,16 @@ export type AppState = KanbanSlice & {
   setSystemHealth: (response: SystemHealthResponse) => void;
   setSystemHealthLoading: (loading: boolean) => void;
   invalidateSystemHealth: () => void;
+  setAgentRuntime: (snapshot: AgentRuntimeAvailability | null) => void;
   openQuickChat: UIA["openQuickChat"];
   addQuickChatSession: UIA["addQuickChatSession"];
+  reuseOrCreateQuickTerminal: UIA["reuseOrCreateQuickTerminal"];
+  createQuickTerminal: UIA["createQuickTerminal"];
+  updateQuickTerminal: UIA["updateQuickTerminal"];
+  activateQuickTerminal: UIA["activateQuickTerminal"];
+  removeQuickTerminal: UIA["removeQuickTerminal"];
   syncQuickChatSessions: UIA["syncQuickChatSessions"];
+  syncQuickTerminalTabs: UIA["syncQuickTerminalTabs"];
   upsertQuickChatSessionFromEvent: UIA["upsertQuickChatSessionFromEvent"];
   removeQuickChatSessionsForTask: UIA["removeQuickChatSessionsForTask"];
   closeQuickChat: () => void;
@@ -512,6 +521,7 @@ export type AppState = KanbanSlice & {
   setAppSidebarWidth: UIA["setAppSidebarWidth"];
   setAppSidebarSettingsMode: UIA["setAppSidebarSettingsMode"];
   toggleAppSidebarSettingsMode: UIA["toggleAppSidebarSettingsMode"];
+  setImproveDialogOpen: UIA["setImproveDialogOpen"];
   acknowledgeAgentErrors: UIA["acknowledgeAgentErrors"];
   dismissAgentError: UIA["dismissAgentError"];
 } & GitHubSliceActions &
@@ -534,7 +544,8 @@ export type AppState = KanbanSlice & {
 // only have one piece of it (e.g. update notification settings from the
 // settings boot payload) must be able to pass a partial `system` object
 // without fabricating placeholder values for the rest.
-export type HydrationState = Omit<Partial<AppState>, "system"> & {
+export type HydrationState = Omit<Partial<AppState>, "system" | "quickChat"> & {
+  quickChat?: Partial<AppState["quickChat"]>;
   system?: Partial<AppState["system"]>;
 };
 
@@ -574,6 +585,10 @@ export function createAppStore(initialState?: HydrationState) {
       ...createAuthSlice(set as any),
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       ...createSystemSlice(set as any, get as any, api as any),
+      setAgentRuntime: (snapshot) =>
+        set((draft) => {
+          draft.agentRuntime = snapshot;
+        }),
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       ...createUISlice(set as any, get as any, api as any),
       // eslint-disable-next-line @typescript-eslint/no-explicit-any

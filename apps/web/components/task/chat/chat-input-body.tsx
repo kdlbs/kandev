@@ -77,6 +77,7 @@ function EditorWithTooltip({
   className?: string;
   children: React.ReactNode;
 }) {
+  const { t } = useTranslation();
   return (
     <Tooltip open={showTooltip}>
       <TooltipTrigger asChild>
@@ -91,7 +92,7 @@ function EditorWithTooltip({
         </div>
       </TooltipTrigger>
       <TooltipContent side="top" className="bg-orange-600 text-white border-orange-700">
-        <p className="font-medium">Write your changes here</p>
+        <p className="font-medium">{t("task:writeYourChangesHere")}</p>
       </TooltipContent>
     </Tooltip>
   );

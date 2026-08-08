@@ -10,8 +10,10 @@ import {
 import { Button } from "@kandev/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { CommitRow, type CommitItem } from "./commit-row";
+import type { CommitDetailTarget } from "./changes-diff-target";
 import { groupByRepositoryName } from "@/lib/group-by-repo";
 import type { ChangedFile } from "./changes-panel-helpers";
+import { useTranslation } from "react-i18next";
 
 export type RepoGroup = ReturnType<typeof groupByRepositoryName<ChangedFile>>[number];
 
@@ -31,6 +33,7 @@ export function RepoGroupItem({
   onRepoAction,
   onRepoSecondaryAction,
   displayName,
+  disabled = false,
 }: {
   group: RepoGroup;
   collapsed: boolean;
@@ -42,6 +45,7 @@ export function RepoGroupItem({
   onRepoSecondaryAction?: (repo: string) => void;
   /** Optional display label override; defaults to group.repositoryName. */
   displayName?: string;
+  disabled?: boolean;
 }) {
   const stop = (e: React.MouseEvent) => e.stopPropagation();
   const label = displayName || group.repositoryName || "Repository";
@@ -73,6 +77,7 @@ export function RepoGroupItem({
                 variant="ghost"
                 className="h-5 text-[10px] px-1.5 cursor-pointer"
                 data-testid="repo-group-action"
+                disabled={disabled}
                 onClick={() => onRepoAction(group.repositoryName)}
               >
                 {primaryLabel}
@@ -84,6 +89,7 @@ export function RepoGroupItem({
                 variant="ghost"
                 className="h-5 text-[10px] px-1.5 cursor-pointer text-muted-foreground"
                 data-testid="repo-group-secondary-action"
+                disabled={disabled}
                 onClick={() => onRepoSecondaryAction(group.repositoryName)}
               >
                 {secondaryLabel}
@@ -106,11 +112,13 @@ export function FileSectionActions({
   secondaryLabel,
   onAction,
   onSecondaryAction,
+  disabled = false,
 }: {
   primaryLabel: string;
   secondaryLabel?: string;
   onAction?: (repo: string) => void;
   onSecondaryAction?: (repo: string) => void;
+  disabled?: boolean;
 }) {
   if (!onAction && !onSecondaryAction) return null;
   return (
@@ -121,6 +129,7 @@ export function FileSectionActions({
           variant="ghost"
           className="h-5 text-[10px] px-1.5 cursor-pointer"
           data-testid="repo-group-action"
+          disabled={disabled}
           onClick={() => onAction("")}
         >
           {primaryLabel}
@@ -132,6 +141,7 @@ export function FileSectionActions({
           variant="ghost"
           className="h-5 text-[10px] px-1.5 cursor-pointer text-muted-foreground"
           data-testid="repo-group-secondary-action"
+          disabled={disabled}
           onClick={() => onSecondaryAction("")}
         >
           {secondaryLabel}
@@ -158,6 +168,7 @@ export function CommitsGroupActions({
   onRepoCreatePR?: (repo: string) => void;
   stop: (e: React.MouseEvent) => void;
 }) {
+  const { t } = useTranslation();
   return (
     <div className="flex items-center gap-1" onClick={stop}>
       {onRepoPush && aheadCount > 0 && (
@@ -169,7 +180,7 @@ export function CommitsGroupActions({
           onClick={() => onRepoPush(repositoryName)}
         >
           <IconCloudUpload className="h-3 w-3" />
-          Push
+          {t("task:push")}
           <span className="text-muted-foreground">{aheadCount}</span>
         </Button>
       )}
@@ -188,7 +199,7 @@ export function CommitsGroupActions({
               PR
             </Button>
           </TooltipTrigger>
-          {prExists && <TooltipContent>A pull request already exists for this task</TooltipContent>}
+          {prExists && <TooltipContent>{t("task:aPullRequestAlreadyExistsFor")}</TooltipContent>}
         </Tooltip>
       )}
     </div>
@@ -222,7 +233,7 @@ export function CommitsRepoGroup({
    *  workspaces use this — the action buttons (Push / PR) move up to the
    *  section header so we don't render a redundant repo sub-header. */
   showHeader?: boolean;
-  onOpenCommitDetail?: (sha: string, repo?: string) => void;
+  onOpenCommitDetail?: (target: CommitDetailTarget) => void;
   onAmendCommit?: (currentMessage: string, repo?: string) => void;
   onRevertCommit?: (sha: string, repo?: string) => void;
   onResetToCommit?: (sha: string, repo?: string) => void;

@@ -97,7 +97,8 @@ test.describe("Quick Chat", () => {
     await configTab.getByRole("button").first().click();
     await expect(configTab).toHaveClass(/bg-background/);
 
-    await dialog.getByRole("button", { name: "Start new chat" }).click();
+    await dialog.getByTestId("quick-chat-add-menu-trigger").click();
+    await testPage.getByTestId("quick-chat-new-agent").click();
     const newSetup = dialog.getByTestId("quick-chat-setup");
     await expect(newSetup).toBeVisible();
     await expect(newSetup.getByRole("switch", { name: "Configuration chat" })).toHaveCount(0);
@@ -158,7 +159,7 @@ test.describe("Quick Chat", () => {
     );
 
     const tab = dialog.getByTestId("quick-chat-tab").last();
-    const newChat = dialog.getByLabel("Start new chat");
+    const newChat = dialog.getByTestId("quick-chat-add-menu-trigger");
     const tabBox = await tab.boundingBox();
     const newChatBox = await newChat.boundingBox();
     expect(newChatBox!.x - (tabBox!.x + tabBox!.width)).toBeLessThanOrEqual(8);
@@ -454,8 +455,8 @@ test.describe("Quick Chat", () => {
     });
 
     // Create a new tab.
-    const newChatBtn = dialog.getByLabel("Start new chat");
-    await newChatBtn.click();
+    await dialog.getByTestId("quick-chat-add-menu-trigger").click();
+    await testPage.getByTestId("quick-chat-new-agent").click();
 
     // Setup guidance remains visible for every new chat.
     await expect(dialog.getByTestId("quick-chat-setup")).toBeVisible({ timeout: 5_000 });

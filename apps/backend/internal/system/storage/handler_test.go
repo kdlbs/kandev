@@ -71,6 +71,88 @@ func TestGetStorageReturnsSnapshotAnalyzedAt(t *testing.T) {
 	}
 }
 
+func TestGetStorageDiskReturnsIndependentCapacityResponse(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	RegisterRoutes(router.Group("/api/v1/system"), NewHandler(HandlerConfig{}))
+
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/v1/system/storage/disk", nil))
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", response.Code)
+	}
+	var body struct {
+		Available bool `json:"available"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if body.Available {
+		t.Fatalf("unconfigured disk reader should be unavailable: %s", response.Body.String())
+	}
+}
+
+func TestGetStorageDiskReturnsMeasuredFields(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	RegisterRoutes(router.Group("/api/v1/system"), NewHandler(HandlerConfig{
+		DiskPath: "/data",
+		DiskCapacity: func(context.Context, string) (DiskCapacity, error) {
+			return DiskCapacity{
+				TotalBytes: 1000, UsedBytes: 750, AvailableBytes: 250, UsedPercent: 75,
+			}, nil
+		},
+	}))
+
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/v1/system/storage/disk", nil))
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", response.Code)
+	}
+	var body DiskCapacity
+	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	want := DiskCapacity{
+		Path: "/data", TotalBytes: 1000, UsedBytes: 750, AvailableBytes: 250, UsedPercent: 75, Available: true,
+	}
+	if body != want {
+		t.Fatalf("disk response = %#v, want %#v", body, want)
+	}
+}
+
+func TestGetStorageDiskLogsReaderErrorsAndReturnsUnavailable(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	var loggedMessage string
+	router := gin.New()
+	RegisterRoutes(router.Group("/api/v1/system"), NewHandler(HandlerConfig{
+		DiskPath: "/data",
+		DiskCapacity: func(context.Context, string) (DiskCapacity, error) {
+			return DiskCapacity{}, errors.New("statfs failed")
+		},
+		LogError: func(message string, _ error) { loggedMessage = message },
+	}))
+
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/v1/system/storage/disk", nil))
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", response.Code)
+	}
+	if loggedMessage != "failed to read storage disk capacity" {
+		t.Fatalf("logged message = %q", loggedMessage)
+	}
+	var body DiskCapacity
+	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if body.Available || body.Warning == "" {
+		t.Fatalf("error response = %#v, want unavailable warning", body)
+	}
+}
+
 func TestGetStorageSettingsReturnsPolicyWithoutOverviewScan(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	settings := DefaultSettings()

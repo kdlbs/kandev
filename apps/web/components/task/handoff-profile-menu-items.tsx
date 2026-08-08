@@ -19,6 +19,8 @@ import { useRemoteAuthSpecs } from "@/hooks/domains/settings/use-remote-auth-spe
 import { useTaskExecutorProfile } from "@/hooks/domains/session/use-task-executor-profile";
 import { isAgentConfiguredOnExecutor } from "@/lib/agent-executor-compat";
 import type { AgentProfileOption } from "@/lib/state/slices";
+import { isSelectableAgentProfile } from "@/lib/state/slices/settings/types";
+import { useTranslation } from "react-i18next";
 
 export type HandoffProfile = {
   id: string;
@@ -43,7 +45,7 @@ export function useHandoffProfiles(taskId: string, enabled = true): HandoffProfi
   const { specs: authSpecs, loaded: authLoaded } = useRemoteAuthSpecs();
 
   return useMemo(() => {
-    return agentProfiles.map((profile) => {
+    return agentProfiles.filter(isSelectableAgentProfile).map((profile) => {
       const { label, agentName } = profileDisplayLabel(profile);
       let disabled = false;
       if (executorProfile && authLoaded) {
@@ -63,10 +65,11 @@ function HandoffProfileList({
   onSelectProfile: (profileId: string) => void;
   Item: typeof ContextMenuItem | typeof DropdownMenuItem;
 }) {
+  const { t } = useTranslation();
   if (profiles.length === 0) {
     return (
       <Item disabled className="text-xs text-muted-foreground">
-        No agent profiles configured
+        {t("task:noAgentProfilesConfigured")}
       </Item>
     );
   }
@@ -75,7 +78,7 @@ function HandoffProfileList({
       key={profile.id}
       className="cursor-pointer"
       disabled={profile.disabled}
-      title={profile.disabled ? "Not configured for this executor" : undefined}
+      title={profile.disabled ? t("task:notConfiguredForThisExecutor") : undefined}
       data-testid={`handoff-profile-${profile.id}`}
       onSelect={() => onSelectProfile(profile.id)}
     >
@@ -96,6 +99,7 @@ type HandoffMenuProps = {
 };
 
 export function HandoffContextMenuSub({ taskId, disabled, onSelectProfile }: HandoffMenuProps) {
+  const { t } = useTranslation();
   const [submenuOpen, setSubmenuOpen] = useState(false);
   const profiles = useHandoffProfiles(taskId, submenuOpen);
   const submenuDisabled = disabled || (profiles.length > 0 && profiles.every((p) => p.disabled));
@@ -107,7 +111,7 @@ export function HandoffContextMenuSub({ taskId, disabled, onSelectProfile }: Han
         disabled={submenuDisabled}
         data-testid="session-handoff-submenu"
       >
-        Handoff
+        {t("task:handoff")}
       </ContextMenuSubTrigger>
       <ContextMenuSubContent className="w-48">
         <HandoffProfileList
@@ -121,6 +125,7 @@ export function HandoffContextMenuSub({ taskId, disabled, onSelectProfile }: Han
 }
 
 export function HandoffDropdownMenuSub({ taskId, disabled, onSelectProfile }: HandoffMenuProps) {
+  const { t } = useTranslation();
   const [submenuOpen, setSubmenuOpen] = useState(false);
   const profiles = useHandoffProfiles(taskId, submenuOpen);
   const submenuDisabled = disabled || (profiles.length > 0 && profiles.every((p) => p.disabled));
@@ -132,7 +137,7 @@ export function HandoffDropdownMenuSub({ taskId, disabled, onSelectProfile }: Ha
         disabled={submenuDisabled}
         data-testid="session-handoff-submenu"
       >
-        Handoff
+        {t("task:handoff")}
       </DropdownMenuSubTrigger>
       <DropdownMenuSubContent className="w-48">
         <HandoffProfileList

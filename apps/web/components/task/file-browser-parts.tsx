@@ -7,7 +7,15 @@ import {
   IconFolder,
   IconFolderOpen,
   IconRefresh,
+  IconDotsVertical,
 } from "@tabler/icons-react";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@kandev/ui/dropdown-menu";
+import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
 import { FileIcon } from "@/components/ui/file-icon";
 import type { FileTreeNode } from "@/lib/types/backend";
@@ -56,6 +64,8 @@ type TreeNodeRowProps = {
   onDrop?: (targetPath: string, e: React.DragEvent) => void;
   selectedCount?: number;
   selectedPaths?: Set<string>;
+  showTouchActions?: boolean;
+  onAddToChatContext?: (node: FileTreeNode) => void;
 };
 
 function treeNodePaddingLeft(depth: number, isDir: boolean): string {
@@ -132,6 +142,54 @@ function getTreeNodeRowClass(
   );
 }
 
+export function FileTreeNodeTouchActions({
+  node,
+  showTouchActions,
+  onAddToChatContext,
+}: {
+  node: FileTreeNode;
+  showTouchActions?: boolean;
+  onAddToChatContext?: (node: FileTreeNode) => void;
+}) {
+  const { t } = useTranslation("chat");
+  if (!showTouchActions || !onAddToChatContext) return null;
+
+  const stopRowInteraction = (event: React.SyntheticEvent) => event.stopPropagation();
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <button
+          type="button"
+          data-testid="file-tree-node-actions"
+          data-path={node.path}
+          aria-label={t("chat:fileTreeActions")}
+          className="ml-auto flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground cursor-pointer"
+          onPointerDown={stopRowInteraction}
+          onMouseDown={stopRowInteraction}
+          onClick={stopRowInteraction}
+          onKeyDown={stopRowInteraction}
+        >
+          <IconDotsVertical className="h-4 w-4" />
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent
+        align="end"
+        data-testid="file-tree-touch-menu"
+        onClick={stopRowInteraction}
+      >
+        <DropdownMenuItem
+          data-testid="file-tree-touch-add-to-chat"
+          className="min-h-11 cursor-pointer"
+          onSelect={() => onAddToChatContext(node)}
+        >
+          {t("chat:addToChatContext")}
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
 export function TreeNodeItem(props: TreeNodeRowProps) {
   const { row, activeFolderPath, activeFilePath, visibleLoadingPaths } = props;
   const {
@@ -143,6 +201,8 @@ export function TreeNodeItem(props: TreeNodeRowProps) {
     onRenameFile,
     onDownloadFile,
     setTree,
+    showTouchActions,
+    onAddToChatContext,
   } = props;
   const node = row.node;
 
@@ -202,6 +262,11 @@ export function TreeNodeItem(props: TreeNodeRowProps) {
       )}
       <TreeNodeFileIcon node={node} isExpanded={isExpanded} isActive={isActive} />
       <TreeNodeName node={node} isActive={isActive} gitStatus={gitStatus} rename={rename} />
+      <FileTreeNodeTouchActions
+        node={node}
+        showTouchActions={showTouchActions}
+        onAddToChatContext={onAddToChatContext}
+      />
     </div>
   );
 
@@ -214,6 +279,7 @@ export function TreeNodeItem(props: TreeNodeRowProps) {
       onRenameFile={onRenameFile}
       onDownloadFile={onDownloadFile}
       onStartRename={rename.handleStartRename}
+      onAddToChatContext={onAddToChatContext}
       selectedCount={props.selectedCount}
       selectedPaths={props.selectedPaths}
     >
@@ -226,28 +292,46 @@ type SearchResultsListProps = {
   searchResults: string[] | null;
   fileStatuses: Map<string, GitFileStatus>;
   onOpenFile: (path: string) => void;
+  showTouchActions?: boolean;
+  onAddToChatContext?: (node: FileTreeNode) => void;
 };
+
+function searchResultNode(path: string): FileTreeNode {
+  return {
+    name: path.split("/").pop() || path,
+    path,
+    is_dir: false,
+    size: 0,
+  };
+}
 
 export function SearchResultsList({
   searchResults,
   fileStatuses,
   onOpenFile,
+  showTouchActions,
+  onAddToChatContext,
 }: SearchResultsListProps) {
+  const { t } = useTranslation();
   if (!searchResults) return null;
 
   if (searchResults.length === 0) {
-    return <div className="p-4 text-sm text-muted-foreground text-center">No files found</div>;
+    return (
+      <div className="p-4 text-sm text-muted-foreground text-center">{t("task:noFilesFound")}</div>
+    );
   }
 
   return (
     <div className="pb-2">
       {searchResults.map((path) => {
-        const name = path.split("/").pop() || path;
+        const node = searchResultNode(path);
+        const name = node.name;
         const folder = path.includes("/") ? path.substring(0, path.lastIndexOf("/")) : "";
         const gitStatus = fileStatuses.get(path);
-        return (
+        const row = (
           <div
-            key={path}
+            data-testid="file-search-result"
+            data-path={path}
             className={cn(
               "group flex w-full items-center gap-1 px-2 py-0.5 text-left text-sm cursor-pointer",
               "hover:bg-muted",
@@ -269,7 +353,25 @@ export function SearchResultsList({
               {folder && <span>{folder}/</span>}
               <span>{name}</span>
             </span>
+            <FileTreeNodeTouchActions
+              node={node}
+              showTouchActions={showTouchActions}
+              onAddToChatContext={onAddToChatContext}
+            />
           </div>
+        );
+
+        return (
+          <FileContextMenu
+            key={path}
+            node={node}
+            tree={null}
+            setTree={() => {}}
+            onStartRename={() => {}}
+            onAddToChatContext={onAddToChatContext}
+          >
+            {row}
+          </FileContextMenu>
         );
       })}
     </div>
@@ -313,6 +415,8 @@ type FileBrowserContentAreaProps = {
   onDrop?: (targetPath: string, e: React.DragEvent) => void;
   selectedCount?: number;
   selectedPaths?: Set<string>;
+  showTouchActions?: boolean;
+  onAddToChatContext?: (node: FileTreeNode) => void;
 };
 
 function rowToItemProps(props: FileBrowserContentAreaProps, row: FileBrowserRow): TreeNodeRowProps {
@@ -340,6 +444,8 @@ function rowToItemProps(props: FileBrowserContentAreaProps, row: FileBrowserRow)
     onDrop: props.onDrop,
     selectedCount: props.selectedCount,
     selectedPaths: props.selectedPaths,
+    showTouchActions: props.showTouchActions,
+    onAddToChatContext: props.onAddToChatContext,
   };
 }
 
@@ -372,12 +478,15 @@ function FileTreeView(props: FileBrowserContentAreaProps) {
 }
 
 export function FileBrowserContentArea(props: FileBrowserContentAreaProps) {
+  const { t } = useTranslation();
   if (props.isSearchActive && props.searchResults !== null) {
     return (
       <SearchResultsList
         searchResults={props.searchResults}
         fileStatuses={props.fileStatuses}
         onOpenFile={props.onOpenFile}
+        showTouchActions={props.showTouchActions}
+        onAddToChatContext={props.onAddToChatContext}
       />
     );
   }
@@ -392,5 +501,5 @@ export function FileBrowserContentArea(props: FileBrowserContentAreaProps) {
   });
   if (loadStateResult) return loadStateResult;
   if (props.tree) return <FileTreeView {...props} />;
-  return <div className="p-4 text-sm text-muted-foreground">No files found</div>;
+  return <div className="p-4 text-sm text-muted-foreground">{t("task:noFilesFound")}</div>;
 }

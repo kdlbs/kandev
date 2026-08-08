@@ -10,7 +10,7 @@ import {
   type ReactNode,
 } from "react";
 import type { Components } from "react-markdown";
-import { IconWand, IconMessageDots, IconFile } from "@tabler/icons-react";
+import { IconWand, IconMessageDots, IconFile, IconFolder } from "@tabler/icons-react";
 import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
 import type { Message } from "@/lib/types/http";
@@ -18,7 +18,6 @@ import { MessageActions } from "@/components/task/chat/messages/message-actions"
 import { useMessageFavorite } from "@/hooks/domains/session/use-message-favorite";
 import { useUserMessageNavigation } from "@/hooks/use-message-navigation";
 import { SenderTaskBadge, type SenderTaskInfo } from "./sender-task-badge";
-import { MemoizedMarkdown } from "@/components/shared/memoized-markdown";
 import { ImagePreviewDialog } from "@/components/task/chat/image-preview-dialog";
 import { useAppStore } from "@/components/state-provider";
 import { HoverCard, HoverCardTrigger, HoverCardContent } from "@kandev/ui/hover-card";
@@ -39,6 +38,7 @@ import { entityReferencesFromMetadata } from "@/lib/entity-references/message-re
 import type { EntityReference } from "@/lib/types/entity-reference";
 import { attachmentContentUrl } from "@/lib/api/domains/attachment-api";
 import { formatBytes } from "@/lib/utils/format-bytes";
+import { renderUserMessageBody } from "./user-message-body";
 
 type ChatMessageProps = {
   comment: Message;
@@ -94,53 +94,6 @@ function renderContentWithFileRefs(content: string): React.ReactNode[] {
   return parts.length > 0 ? parts : [content];
 }
 
-// ── Markdown component overrides imported from shared/markdown-components ─────
-
-type UserMessageBodyOptions = {
-  hasContent: boolean;
-  showRaw: boolean;
-  hasAttachments: boolean;
-  content: string;
-  rawContent?: string;
-  promptMentionComponents?: Components;
-  taskId: string;
-  worktreePath?: string;
-  onOpenFile?: (path: string) => void;
-};
-
-function renderUserMessageBody({
-  hasContent,
-  showRaw,
-  hasAttachments,
-  content,
-  rawContent,
-  promptMentionComponents,
-  taskId,
-  worktreePath,
-  onOpenFile,
-}: UserMessageBodyOptions): React.ReactNode {
-  if (hasContent && showRaw) {
-    return <pre className="whitespace-pre-wrap font-mono text-xs">{rawContent || content}</pre>;
-  }
-  if (hasContent) {
-    return (
-      <div className="markdown-body markdown-body-user max-w-none">
-        <MemoizedMarkdown
-          content={content}
-          taskId={taskId}
-          components={promptMentionComponents}
-          worktreePath={worktreePath}
-          onOpenFile={onOpenFile}
-        />
-      </div>
-    );
-  }
-  if (!hasAttachments) {
-    return <p className="whitespace-pre-wrap break-words overflow-wrap-anywhere">(empty)</p>;
-  }
-  return null;
-}
-
 // ── User message sub-component ──────────────────────────────────────
 
 type UserMessageProps = {
@@ -158,7 +111,7 @@ type UserMessageMetadata = WorkflowMessageMetadata & {
   plan_mode?: boolean;
   has_review_comments?: boolean;
   has_hidden_prompts?: boolean;
-  context_files?: Array<{ path: string; name: string }>;
+  context_files?: Array<{ path: string; name: string; is_directory?: boolean }>;
   sender_task_id?: string;
   sender_task_title?: string;
   sender_session_id?: string;
@@ -283,6 +236,7 @@ const PROMPT_MENTION_CHIP_CLASS =
  * doesn't need to switch to the raw message view.
  */
 function PromptMentionChip({ name, value }: { name: string; value: string }) {
+  const { t } = useTranslation();
   const content = useAppStore(
     useCallback(
       (state) => state.prompts.items.find((prompt) => prompt.name === name)?.content ?? null,
@@ -295,7 +249,7 @@ function PromptMentionChip({ name, value }: { name: string; value: string }) {
       <span
         data-testid="custom-prompt-mention"
         data-prompt-name={name}
-        title={`Custom prompt: ${name}`}
+        title={t("task:customPromptNamed", { name })}
         className={PROMPT_MENTION_CHIP_CLASS}
       >
         {value}
@@ -364,10 +318,11 @@ function UserContextBadges({
 }: {
   hasPlanMode: boolean;
   hasReviewComments: boolean;
-  contextFiles: Array<{ path: string; name: string }>;
+  contextFiles: Array<{ path: string; name: string; is_directory?: boolean }>;
   senderTask: SenderTaskInfo | null;
   workflowMessage: WorkflowStepMessageInfo | null;
 }) {
+  const { t } = useTranslation();
   if (
     !hasPlanMode &&
     !hasReviewComments &&
@@ -382,20 +337,27 @@ function UserContextBadges({
       {senderTask && <SenderTaskBadge sender={senderTask} />}
       {hasPlanMode && (
         <span className="inline-flex items-center gap-1 rounded-full bg-slate-500/20 px-2 py-0.5 text-[10px] text-slate-400">
-          <IconWand size={10} /> Plan mode
+          <IconWand size={10} /> {t("task:planMode")}
         </span>
       )}
       {hasReviewComments && (
         <span className="inline-flex items-center gap-1 rounded-full bg-blue-500/20 px-2 py-0.5 text-[10px] text-blue-400">
-          <IconMessageDots size={10} /> Review comments
+          <IconMessageDots size={10} /> {t("task:reviewComments")}
         </span>
       )}
       {contextFiles.map((f) => (
         <span
           key={f.path}
+          data-testid="message-context-file"
+          data-path={f.path}
           className="inline-flex items-center gap-1 rounded-full bg-muted/50 px-2 py-0.5 text-[10px] text-muted-foreground"
         >
-          <IconFile size={10} /> {f.name}
+          {f.is_directory ? (
+            <IconFolder data-testid="message-context-directory-icon" size={10} />
+          ) : (
+            <IconFile data-testid="message-context-file-icon" size={10} />
+          )}{" "}
+          {f.name}
         </span>
       ))}
     </div>
@@ -575,6 +537,7 @@ export const ChatMessage = memo(function ChatMessage({
   onScrollToMessage,
   isTurnActive = false,
 }: ChatMessageProps) {
+  const { t } = useTranslation();
   const [showRaw, setShowRaw] = useState(false);
   const toggleRaw = useCallback(() => setShowRaw((v) => !v), []);
 
@@ -586,13 +549,13 @@ export const ChatMessage = memo(function ChatMessage({
           <p className="text-[11px] uppercase tracking-wide opacity-70">
             {comment.requests_input ? (
               <span className="ml-2 rounded-full bg-amber-500/20 px-2 py-0.5 text-[10px] text-amber-300">
-                Needs input
+                {t("task:needsInput")}
               </span>
             ) : null}
           </p>
         </div>
         <p className="whitespace-pre-wrap">
-          {comment.content ? renderContentWithFileRefs(comment.content) : "(empty)"}
+          {comment.content ? renderContentWithFileRefs(comment.content) : t("task:empty")}
         </p>
       </div>
     );

@@ -21,12 +21,56 @@ import { test, expect } from "../../fixtures/test-base";
  * only sees plain literals in JSX, so it and this spec cover different halves of
  * the same question — add to both in the PR that migrates a directory.
  *
- * Gated on `KANDEV_I18N_COVERAGE=1` rather than run in CI: with the migration
- * proceeding one directory at a time, a screen's own copy can be clean while
- * shared chrome it renders is not yet. It becomes a hard gate when the last
- * directory lands and the env guard comes off.
+ * THIS IS A HARD CI GATE. It ran behind `KANDEV_I18N_COVERAGE=1` only while the
+ * migration was mid-flight, because a screen's own copy could be clean while
+ * shared chrome it renders was not yet. The last live directory has landed and
+ * the env guard is gone: it now runs unconditionally in the `chromium` project
+ * alongside every other spec.
  *
- *   KANDEV_I18N_COVERAGE=1 pnpm e2e -- e2e/tests/i18n/pseudo-coverage.spec.ts
+ *   pnpm e2e:raw -- e2e/tests/i18n/pseudo-coverage.spec.ts
+ *
+ * WHAT IT GUARANTEES: on each screen in `SCREENS`, every rendered text node and
+ * every value of a `COPY_ATTRIBUTES` attribute that the detector below can see
+ * either came through `t()` / `<Trans>` (and so renders accented under the
+ * pseudo-locale), or is on an allowlist that says why it must not be translated.
+ *
+ * That guarantee rests on the scan having run against the screen it names, which
+ * for a while it did not. Each `SCREENS` entry carries a required `anchor` — a
+ * selector that cannot match until that route rendered — and `waitForScreen`
+ * blocks on it before anything is inspected. Read its comment before touching
+ * the readiness logic: the wait it replaced was a one-second settle, and with
+ * both lazy route chunks blocked so that NO screen rendered, 13-16 of the 21
+ * tests still reported clean.
+ *
+ * It is a floor, not a proof of total coverage. Two limits are deliberate and
+ * both are documented where they are implemented, because relaxing either
+ * reddens every screen today:
+ *   - `wordlike` requires a 4-letter ASCII run, so a hardcoded string shorter
+ *     than that ("Add", "of") is not reported. Lowering it to 2 was measured:
+ *     9 of the 10 tests here go red, on real but out-of-scope copy owned by
+ *     `@kandev/ui` and sonner (e.g. the `alt+T` in sonner's toast-region label).
+ *   - the text pass clears a node on ANY accented character, so an un-migrated
+ *     word sharing one text node with migrated copy is missed. The attribute
+ *     pass does NOT have this limit — it strips allowlisted tokens first and
+ *     reports the remainder as `English frame, migrated value`. docs/i18n.md
+ *     covers the text-node case under "…and it is weakest at an interpolated
+ *     value"; it is why the by-hand pseudo walk is still step 9 of a migration.
+ *
+ * IF YOUR PR JUST WENT RED HERE, the failure names the exact strings and the
+ * screen. Read them: each one is copy your change put on screen without routing
+ * it through `t()`. This spec is the ONLY gate that can see most of them —
+ * `i18next/no-literal-string` inspects literals in JSX and nothing else, so copy
+ * in a variable, a default parameter, a `.ts` helper or a SCREAMING_CASE config
+ * table is invisible to lint and visible only here. Repeated by-hand sweeps
+ * found 15-60 such strings that every other gate passed.
+ *
+ * The fix is to externalize the string: add it to `src/locales/en/<ns>.json` and
+ * call `t("<ns>:<key>")`. See docs/i18n.md. Adding an `allow:` entry is NOT the
+ * fix and is the one failure mode this file has actually shipped twice — an
+ * entry asserting a path was migrated while it still rendered English. `allow`
+ * is for text the frontend must not translate but cannot avoid rendering (a
+ * backend-owned record, a product name), and it must say where the value comes
+ * from.
  *
  * BOTH passes walk `document.body`, deliberately, and NOT the page's `<main>`.
  * Scoping to the page under test is the obvious reading of what each test claims,
@@ -47,8 +91,6 @@ import { test, expect } from "../../fixtures/test-base";
  * chrome, not narrowing the oracle.
  */
 
-const COVERAGE_ENABLED = process.env.KANDEV_I18N_COVERAGE === "1";
-
 /**
  * Migrated screens whose visible text is overwhelmingly UI chrome, not user data.
  *
@@ -56,29 +98,90 @@ const COVERAGE_ENABLED = process.env.KANDEV_I18N_COVERAGE === "1";
  * must NOT translate but cannot avoid rendering — records the backend owns, or a
  * product name — and say where the value comes from, so the exemption stays
  * auditable instead of quietly widening into a place to hide missed strings.
+ *
+ * `anchor` is REQUIRED and is what makes a green result mean anything; see
+ * `waitForScreen` below for why a settle timeout did not.
  */
-const SCREENS: Array<{ name: string; url: string; allow?: string[] }> = [
-  { name: "settings — appearance", url: "/settings/general/appearance" },
+type Screen = {
+  name: string;
+  url: string;
+  /**
+   * A selector that cannot match until the ROUTE UNDER TEST has rendered. The
+   * walk does not start until it matches AND the matched element's text is
+   * accented.
+   *
+   * The test it must pass is not "is it unique" but "could the app shell alone
+   * satisfy it?". `secrets-settings-body` also renders on the workspace-scoped
+   * secrets page, and that is fine — reaching it still proves a secrets screen
+   * mounted. What disqualifies a selector is matching something painted before
+   * the route arrives, which is exactly the bug this field fixes.
+   *
+   * The two route trees answer that differently, and the difference is real
+   * rather than an inconsistency to tidy up:
+   *
+   *   - SETTINGS screens anchor on a `data-testid` the page's own component
+   *     renders. Seven already had one; `secrets-settings-body` and
+   *     `sprites-connection-card` were added alongside this field.
+   *   - OFFICE screens anchor on `main[data-office-route="<path>"]`, the route
+   *     outlet in src/office-routes.tsx stamped with the RESOLVED path. A
+   *     component-level testid was tried and rejected: the SPA route table
+   *     mounts these pages with empty collections (`initialItems={[]}`), so they
+   *     legitimately render empty states in e2e and any anchor inside the
+   *     populated branch would never match. The outlet is present whichever
+   *     branch a page takes, lives inside the office chunk, is absent while
+   *     `OfficeRouteLoading` holds, and — because the selector pins the VALUE —
+   *     cannot be satisfied by a different office route or by the unknown-route
+   *     fallback.
+   *
+   * Note what carries the weight in the Office case: the element is generic, so
+   * the ACCENTED half of `waitForScreen` is what proves a page actually painted
+   * into it. An empty outlet has no accented text and times out.
+   *
+   * An attribute and not a heading name, deliberately, in both trees: the anchor
+   * has to be findable BEFORE the pseudo catalog is known to have applied, and
+   * every accessible name in the app changes under pseudo.
+   */
+  anchor: string;
+  allow?: string[];
+};
+
+const SCREENS: Screen[] = [
+  {
+    name: "settings — appearance",
+    url: "/settings/general/appearance",
+    anchor: "[data-testid=theme-settings-card]",
+  },
   {
     name: "settings — notifications",
     url: "/settings/general/notifications",
+    anchor: "[data-testid=notification-sound-group]",
     // Provider names are rows in the notification_providers table. The backend
     // seeds these two (apps/backend/internal/notifications/service/service.go)
     // and users name their own Apprise ones, so they are data on the same
     // footing as a task title. `Apprise` labels the provider type.
     allow: ["Desktop Notifications", "System Notifications", "Apprise"],
   },
-  { name: "settings — secrets", url: "/settings/general/secrets" },
-  { name: "settings — terminal", url: "/settings/general/terminal" },
+  {
+    name: "settings — secrets",
+    url: "/settings/general/secrets",
+    anchor: "[data-testid=secrets-settings-body]",
+  },
+  {
+    name: "settings — terminal",
+    url: "/settings/general/terminal",
+    anchor: "[data-testid=terminal-font-size-card]",
+  },
   {
     name: "settings — sprites",
     url: "/settings/general/sprites",
+    anchor: "[data-testid=sprites-connection-card]",
     // Product name of the sandbox provider.
     allow: ["Sprites.dev"],
   },
   {
     name: "settings — layouts",
     url: "/settings/general/layouts",
+    anchor: "[data-testid=layout-settings]",
     // NOTE: everything here must be a PERSISTED name. This list is load-bearing
     // in the wrong direction — a broad token also hides genuinely un-migrated
     // copy that happens to match it. "Default" already masked the
@@ -124,6 +227,7 @@ const SCREENS: Array<{ name: string; url: string; allow?: string[] }> = [
   {
     name: "settings — keyboard shortcuts",
     url: "/settings/general/keyboard-shortcuts",
+    anchor: "[data-testid=chat-submit-key-card]",
     // Modifier/key names label a physical key and are out of scope for
     // translation — the same rule the eslint guard's keyboard pattern encodes.
     //
@@ -157,8 +261,103 @@ const SCREENS: Array<{ name: string; url: string; allow?: string[] }> = [
       "Open Task Pull Request",
     ],
   },
-  { name: "settings — task actions", url: "/settings/general/task-actions" },
-  { name: "settings — plugins", url: "/settings/plugins" },
+  {
+    name: "settings — task actions",
+    url: "/settings/general/task-actions",
+    anchor: "[data-testid=archive-confirmation-card]",
+  },
+  {
+    name: "settings — plugins",
+    url: "/settings/plugins",
+    anchor: "[data-testid=plugins-tab-installed]",
+  },
+  // Office — the last live directory to migrate (#2357 was the batch before it).
+  // All twelve routes were run under the pseudo-locale before being listed here;
+  // eleven came back with nothing, and the one `allow` below is the only string
+  // any of them renders that must stay ASCII.
+  //
+  // These twelve reach the browser through a DIFFERENT route tree than the
+  // settings screens above — their own lazy chunk, loaded by `office-routes`
+  // rather than `settings-routes` — so they need their own anchors and were
+  // proved separately; see `waitForScreen`.
+  // NOT YET: "office — dashboard" (`/office`). The entry existed and passed, and
+  // it was not testing the dashboard.
+  //
+  // `/office` renders the dashboard only for a workspace that has an
+  // `office_workflow_id` (`hasOfficeWorkspace` in src/office-routes.tsx). The
+  // shared e2e fixture never seeds one, so `resolveOfficeHomeSetupRedirect`
+  // sends `/office` to `/office/setup?mode=new` on every run, and the screen the
+  // walk actually scanned was the SETUP WIZARD — "Set up your Office workspace",
+  // a different screen from the one the test named. It reported clean because
+  // the wizard is itself fully migrated, so the pass was real and was about
+  // something else.
+  //
+  // The anchor is what surfaced this: the redirect is invisible to a walk that
+  // only asks "is anything accented". Restoring real dashboard coverage needs an
+  // office workflow seeded in the fixture, which is a change to shared
+  // `test-base` state and belongs with whoever owns that fixture — not an
+  // allowlist entry and not a renamed screen, either of which would keep the
+  // false claim alive in a new form.
+  {
+    name: "office — inbox",
+    url: "/office/inbox",
+    anchor: 'main[data-office-route="/office/inbox"]',
+  },
+  {
+    name: "office — tasks",
+    url: "/office/tasks",
+    anchor: 'main[data-office-route="/office/tasks"]',
+  },
+  {
+    name: "office — agents",
+    url: "/office/agents",
+    anchor: 'main[data-office-route="/office/agents"]',
+  },
+  {
+    name: "office — projects",
+    url: "/office/projects",
+    anchor: 'main[data-office-route="/office/projects"]',
+  },
+  {
+    name: "office — routines",
+    url: "/office/routines",
+    anchor: 'main[data-office-route="/office/routines"]',
+  },
+  {
+    name: "office — workspace costs",
+    url: "/office/workspace/costs",
+    anchor: 'main[data-office-route="/office/workspace/costs"]',
+  },
+  {
+    name: "office — workspace activity",
+    url: "/office/workspace/activity",
+    anchor: 'main[data-office-route="/office/workspace/activity"]',
+  },
+  {
+    name: "office — workspace routing",
+    url: "/office/workspace/routing",
+    anchor: 'main[data-office-route="/office/workspace/routing"]',
+  },
+  {
+    name: "office — workspace skills",
+    url: "/office/workspace/skills",
+    anchor: 'main[data-office-route="/office/workspace/skills"]',
+  },
+  {
+    name: "office — workspace org",
+    url: "/office/workspace/org",
+    anchor: 'main[data-office-route="/office/workspace/org"]',
+  },
+  {
+    name: "office — workspace settings",
+    url: "/office/workspace/settings",
+    anchor: 'main[data-office-route="/office/workspace/settings"]',
+    // The clone field's placeholder is an example git URL — the SHAPE the user
+    // is meant to imitate, on the same footing as the email and CSS-function
+    // placeholders the eslint guard already excludes via its `(https?|ssh|git)://`
+    // pattern. Accenting it would show a URL that cannot be typed.
+    allow: ["https://github.com/org/config.git"],
+  },
   // NOT YET: "settings — executors", "settings — account security",
   // "settings — account tokens". All three routes' own copy is fully migrated
   // and was verified by walking them under pseudo — including every dialog and
@@ -198,18 +397,15 @@ const SCREENS: Array<{ name: string; url: string; allow?: string[] }> = [
   // migration owns.
   //
   // What still blocks these five entries is the shared integration chrome, not
-  // the nav. Two components rendered by all five pages are still English and
-  // would have to be migrated (or allowlisted, which is worse) first:
-  // `components/integrations/drafted-integration-enabled-control.tsx`
-  // ("Enabled"/"Disabled") and `components/watcher-repository-fields.tsx`
-  // ("Repository", "Base Branch", "(no repository)"), plus `STEP_DEFAULT_LABEL`
-  // and `stepPlaceholder`. All four are shared with the un-migrated Azure DevOps
-  // surface, plus `components/integrations/settings-section.tsx` chrome and the
-  // watcher card's own empty/loading states.
-  //
-  // The Sentry run also surfaced `components/integrations/auth-status-banner.tsx`
-  // ("Authenticated", "· checked <relative>") and `@kandev/ui`'s built-in dialog
-  // "Close" label — both shared, both out of scope for a per-integration PR.
+  // the nav. `components/integrations/**` is now migrated, which cleared
+  // `drafted-integration-enabled-control.tsx` ("Enabled"/"Disabled"),
+  // `auth-status-banner.tsx` ("Authenticated", "· checked <relative>") and the
+  // watcher card's loading state. What is left is
+  // `components/watcher-repository-fields.tsx` ("Repository", "Base Branch",
+  // "(no repository)"), `STEP_DEFAULT_LABEL` and `stepPlaceholder` — all shared
+  // with the un-migrated Azure DevOps surface — plus
+  // `components/integrations/settings-section.tsx` chrome and `@kandev/ui`'s
+  // built-in dialog "Close" label.
   //
   // NOT YET: "settings — external mcp", "… prompts", "… voice mode",
   // "… utility agents". All four pages' own copy is fully migrated and was
@@ -274,13 +470,98 @@ const ALLOWED = [
   "QA",
 ];
 
+/**
+ * Any character in the accented range the pseudo-locale transform emits. Shared
+ * with the in-page detector below, which cannot close over it.
+ */
+const ACCENTED = /[À-ɏ]/;
+
 async function activatePseudo(page: Page, url: string) {
   await page.goto(url);
   await page.evaluate(() => {
     document.cookie = "kandev_locale=pseudo; path=/; max-age=31536000; SameSite=Lax";
   });
   await page.reload();
+  // `<html lang>` proves the SHELL is on the pseudo locale and nothing more: the
+  // Go shell writes it from the cookie, so it is already correct in the HTML the
+  // browser parses, before any script has run. Every stronger fact — the route
+  // rendered, and the catalog reached its copy — is `waitForScreen`'s job, and
+  // it is per-screen precisely because anything generic enough to assert here is
+  // something the app shell alone satisfies.
   await expect(page.locator("html")).toHaveAttribute("lang", "pseudo", { timeout: 15_000 });
+}
+
+/**
+ * Block until the SCREEN UNDER TEST has rendered under the pseudo locale.
+ *
+ * This replaces a `waitForTimeout(1_000)` settle, and the reason is the only
+ * thing in this file worth reading twice: THE SETTLE LET THE ORACLE REPORT A
+ * PASS IT HAD NOT EARNED, and it did so in the direction that hurts.
+ *
+ * `SCREENS` are lazy routes in two separate chunks — `settings-routes` (2.8 MB)
+ * and `office-routes`. Nothing in the old wait was tied to either arriving:
+ *   - `activatePseudo`'s `lang="pseudo"` assertion is written server-side by
+ *     shell.go before a single script runs, so it is true immediately;
+ *   - the `inspectedAttributes > 0` control below is satisfied by the sidebar,
+ *     topbar and status bar, which are accented long before the route renders;
+ *   - so the only thing standing between "route rendered" and "scan the DOM"
+ *     was one second of wall clock.
+ * Measured with BOTH chunks blocked outright, so that not one screen rendered:
+ * 13-16 of the 21 tests reported clean, varying run to run — because whether a
+ * screen "passed" came down to a race the settle could not see. The failure mode
+ * is worse than flakiness — under CI load a slow render makes a green result
+ * MORE likely, so the gate is at its most permissive exactly when the tree is
+ * most likely to be broken. With the anchors below the same probe fails all 21,
+ * every run.
+ *
+ * The fix has to be per-screen. Any signal generic enough to share is a signal
+ * the app shell already satisfies, which is how this happened in the first
+ * place. So each screen names a selector nothing but that route can satisfy, and
+ * this waits on two facts about it:
+ *   1. it is VISIBLE — the lazy route mounted and this screen, specifically, is
+ *      the one on screen;
+ *   2. its text is ACCENTED — the pseudo catalog has actually been applied to
+ *      copy this route owns. This was written as insurance against a catalog
+ *      that arrives asynchronously; it stopped being hypothetical the moment
+ *      lazy catalog loading landed, and `pseudo` is now a fetched chunk like
+ *      every locale but `en`. Without it the walk could run against a route
+ *      rendered in English fallback and report every string on it as a miss.
+ *      Waiting here is robust to that without weakening anything: a wait can
+ *      only delay the scan, never excuse a finding.
+ *
+ * Both are `expect` assertions, not `waitFor`s, so an anchor that never arrives
+ * FAILS this spec instead of quietly scanning whatever the shell had painted.
+ * That is the whole point: the gate has to be capable of going red.
+ *
+ * Do NOT be tempted to swap this for `waitForLoadState("networkidle")`. Kandev
+ * holds a live WebSocket for the session stream, so the network is never idle
+ * and it would hang until timeout — it looks like a stronger wait and is not a
+ * wait at all.
+ */
+async function waitForScreen(page: Page, screen: Screen) {
+  // NOT `.first()`. A selector that matches more than one element is an
+  // ambiguous anchor, and `.first()` would silently pick one and gate on it —
+  // the same shape of mistake as the settle this function replaced. Playwright's
+  // strict mode turns that ambiguity into a failure, which is the direction this
+  // spec wants. All nine anchors resolve to exactly one element today.
+  const anchor = page.locator(screen.anchor);
+
+  await expect(
+    anchor,
+    `The render anchor \`${screen.anchor}\` never appeared on ${screen.name}, so the ` +
+      `route under test did not render. Scanning now would report the app shell as ` +
+      `clean and prove nothing about ${screen.name}. If this element was renamed, ` +
+      `update the \`anchor\` for this screen in SCREENS.`,
+  ).toBeVisible({ timeout: 15_000 });
+
+  await expect(
+    anchor,
+    `The render anchor \`${screen.anchor}\` rendered on ${screen.name} but its copy ` +
+      `never went accented, so the pseudo catalog had not been applied to this ` +
+      `route's copy. Every string on the screen would be reported as a miss. If ` +
+      `this anchor's own copy was just un-externalized, THAT is the finding — fix ` +
+      `it rather than moving the anchor.`,
+  ).toHaveText(ACCENTED, { timeout: 15_000 });
 }
 
 /**
@@ -334,6 +615,8 @@ async function findUnlocalizedCopy(
       // cannot present a label at all are skipped here.
       const attrSkipTags = new Set(["SCRIPT", "STYLE", "NOSCRIPT"]);
       const wordlike = /[A-Za-z]{4,}/;
+      // Same range as `ACCENTED` above, restated because this body is
+      // serialized into the page and cannot close over module scope.
       const accented = /[À-ɏ]/;
 
       // User data is never copy, and a workspace's name is user data on the same
@@ -497,16 +780,10 @@ async function findUnlocalizedCopy(
 }
 
 test.describe("i18n pseudo-locale coverage", () => {
-  test.skip(
-    !COVERAGE_ENABLED,
-    "Set KANDEV_I18N_COVERAGE=1 to run the string-externalization oracle (hard gate at task-40).",
-  );
-
   for (const screen of SCREENS) {
     test(`no un-externalized copy on ${screen.name}`, async ({ testPage }) => {
       await activatePseudo(testPage, screen.url);
-      // Let lazy panels settle before scanning.
-      await testPage.waitForTimeout(1_000);
+      await waitForScreen(testPage, screen);
 
       const { leftovers, localizedAttributes, inspectedAttributes } = await findUnlocalizedCopy(
         testPage,
@@ -517,6 +794,14 @@ test.describe("i18n pseudo-locale coverage", () => {
       // to the leftover check by construction, which means a screen that is
       // clean and a selector that matched NOTHING report identically. Assert the
       // pass actually read attributes before believing what it did not find.
+      //
+      // NOTE what this does and does not establish, because getting that wrong
+      // is what made this spec passable without looking at anything: it proves
+      // the pass READ ATTRIBUTES, not that it read THIS SCREEN'S. The sidebar,
+      // topbar and status bar supply well over a hundred of them on every route,
+      // so this stays green on a page where the route never mounted. `anchor`
+      // above is what ties the scan to the screen under test; this remains
+      // useful only as the narrower check that the selector itself works.
       expect(
         inspectedAttributes,
         `The attribute pass examined no attribute at all on ${screen.name}, so a ` +
@@ -548,8 +833,11 @@ test.describe("i18n pseudo-locale coverage", () => {
    * so it fired on three screens that were fine.
    */
   test("the attribute pass recognizes migrated attribute copy", async ({ testPage }) => {
-    await activatePseudo(testPage, "/settings/general/appearance");
-    await testPage.waitForTimeout(1_000);
+    const appearance = SCREENS.find((screen) => screen.url === "/settings/general/appearance");
+    if (!appearance) throw new Error("the appearance screen is no longer in SCREENS");
+
+    await activatePseudo(testPage, appearance.url);
+    await waitForScreen(testPage, appearance);
 
     const { localizedAttributes } = await findUnlocalizedCopy(testPage, ALLOWED);
 

@@ -162,6 +162,9 @@ func (r *DockerExecutor) HealthCheck(_ context.Context) error {
 }
 
 func (r *DockerExecutor) CreateInstance(ctx context.Context, req *ExecutorCreateRequest) (instance *ExecutorInstance, err error) {
+	if _, err := validateRemoteContributions(req.RemoteContributions); err != nil {
+		return nil, err
+	}
 	dockerClient, containerMgr, err := r.ensureClient()
 	if err != nil {
 		return nil, fmt.Errorf("docker unavailable: %w", err)
@@ -177,7 +180,10 @@ func (r *DockerExecutor) CreateInstance(ctx context.Context, req *ExecutorCreate
 
 	r.seedSessionDir(ctx, req)
 
-	containerCfg := r.buildContainerLaunchConfig(req)
+	containerCfg, err := r.buildContainerLaunchConfig(req)
+	if err != nil {
+		return nil, fmt.Errorf("build container launch config: %w", err)
+	}
 	result, err := containerMgr.LaunchContainer(ctx, containerCfg)
 	if err != nil {
 		return nil, fmt.Errorf("failed to launch container: %w", err)
@@ -242,7 +248,11 @@ func (r *DockerExecutor) seedSessionDir(ctx context.Context, req *ExecutorCreate
 	}
 }
 
-func (r *DockerExecutor) buildContainerLaunchConfig(req *ExecutorCreateRequest) ContainerConfig {
+func (r *DockerExecutor) buildContainerLaunchConfig(req *ExecutorCreateRequest) (ContainerConfig, error) {
+	prepareScript, err := r.resolvePrepareScript(req)
+	if err != nil {
+		return ContainerConfig{}, err
+	}
 	return ContainerConfig{
 		AgentConfig:                    req.AgentConfig,
 		WorkspacePath:                  "", // Empty = no workspace mount; we clone inside container.
@@ -257,11 +267,12 @@ func (r *DockerExecutor) buildContainerLaunchConfig(req *ExecutorCreateRequest) 
 		AutoApprovePermissionsOverride: req.AutoApprovePermissionsOverride,
 		McpServers:                     req.McpServers,
 		McpProviders:                   req.McpProviders,
-		PrepareScript:                  r.resolvePrepareScript(req),
+		PrepareScript:                  prepareScript,
 		ImageTagOverride:               getMetadataString(req.Metadata, MetadataKeyImageTagOverride),
 		LocalClonePath:                 localCloneMountPath(req.Metadata),
 		BaseBranches:                   getMetadataStringMap(req.Metadata, MetadataKeyBaseBranches),
-	}
+		RemoteContributions:            req.RemoteContributions,
+	}, nil
 }
 
 func (r *DockerExecutor) buildCreatedInstance(req *ExecutorCreateRequest, result *LaunchResult, containerIP string) *ExecutorInstance {
@@ -559,6 +570,7 @@ func buildReconnectCreateInstanceRequest(req *ExecutorCreateRequest, instanceID 
 		RequiresProcessKill: requiresProcessKill,
 		StripEnv:            stripEnv,
 		BaseBranches:        getMetadataStringMap(req.Metadata, MetadataKeyBaseBranches),
+		RemoteContributions: req.RemoteContributions,
 	}
 }
 
@@ -765,15 +777,22 @@ func (r *DockerExecutor) IsAlwaysResumable() bool         { return true }
 // postlude — older profiles that snapshot a then-current default lacked it,
 // so simply updating DefaultPrepareScript wouldn't reach those users. The
 // postlude runs after the user's prepare script and is idempotent.
-func (r *DockerExecutor) resolvePrepareScript(req *ExecutorCreateRequest) string {
+func (r *DockerExecutor) resolvePrepareScript(req *ExecutorCreateRequest) (string, error) {
 	script := getMetadataString(req.Metadata, MetadataKeySetupScript)
 	if script == "" {
 		script = DefaultPrepareScript("local_docker")
 	}
 	if script == "" {
-		return ""
+		return "", nil
 	}
 	script += KandevBranchCheckoutPostlude()
+	if binding, ok := req.RemoteContributions[""]; ok {
+		contributionScript, err := scriptengine.RemoteContributionSetupScript(&binding)
+		if err != nil {
+			return "", err
+		}
+		script += contributionScript
+	}
 
 	resolver := scriptengine.NewResolver().
 		WithProvider(scriptengine.WorkspaceProvider(dockerWorkspacePath)).
@@ -802,7 +821,7 @@ func (r *DockerExecutor) resolvePrepareScript(req *ExecutorCreateRequest) string
 			"kandev.agentctl.start":   "",
 		})
 
-	return resolver.Resolve(script)
+	return resolver.Resolve(script), nil
 }
 
 func localCloneMountPath(metadata map[string]interface{}) string {

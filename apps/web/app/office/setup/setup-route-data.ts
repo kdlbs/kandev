@@ -64,6 +64,8 @@ export async function loadSetupRouteData(mode?: string): Promise<SetupRouteData>
   };
 }
 
+// Produces a persisted workspace NAME, not copy: "Default", "Default 2", …
+// Translating it would store a different name per boot locale.
 function suggestWorkspaceName(existing: string[]): string {
   const base = "Default";
   const taken = new Set(existing);

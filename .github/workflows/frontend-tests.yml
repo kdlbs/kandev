@@ -70,7 +70,7 @@ jobs:
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
       - name: Cache pnpm store
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.local/share/pnpm/store
           key: pnpm-${{ runner.os }}-${{ hashFiles('apps/pnpm-lock.yaml') }}
@@ -153,6 +153,12 @@ jobs:
 
       - name: Run lint
         run: pnpm --filter @kandev/web lint
+
+      # `build` below is Vite, which strips types with esbuild and never checks
+      # them, so nothing in this job used to fail on a type error. Runs before
+      # the tests to fail fast on the cheaper check.
+      - name: Run typecheck
+        run: pnpm --filter @kandev/web typecheck
 
       # Unlike the eslint literal-string guard (scoped to already-migrated paths
       # via i18nGuardFiles), these four checks scan components/app/hooks/lib

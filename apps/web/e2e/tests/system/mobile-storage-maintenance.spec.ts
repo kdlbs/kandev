@@ -70,6 +70,8 @@ test.describe("Mobile storage maintenance", () => {
     await settingsMenu.getByRole("link", { name: "Storage" }).click();
 
     await expect(testPage.getByTestId("storage-settings-page")).toBeVisible();
+    await expect(testPage.getByTestId("storage-disk-capacity-card")).toBeVisible();
+    await expect(testPage.getByRole("progressbar")).toBeVisible();
     await testPage
       .getByRole("button", { name: "More information about Scheduled maintenance" })
       .click();
@@ -117,6 +119,13 @@ test.describe("Mobile storage maintenance", () => {
     await expect(testPage.getByText("Go build cache adopted")).toBeVisible();
     await testPage.reload();
     await expect(testPage.getByTestId("storage-go-cache-adopt-path")).toHaveValue(externalGoCache);
+    await expect(testPage.getByTestId("storage-dependency-allowlist")).toContainText(".yarn/cache");
+    await testPage
+      .getByRole("button", { name: "More information about Folders Kandev will check" })
+      .tap();
+    await expect(testPage.getByRole("tooltip")).toContainText("recursively");
+    await testPage.reload();
+    await expect(testPage.getByTestId("storage-settings-page")).toBeVisible();
     await testPage.getByRole("button", { name: "More information about Quarantine" }).click();
     await expect(testPage.getByRole("tooltip")).toContainText("recoverable holding area");
     await expect

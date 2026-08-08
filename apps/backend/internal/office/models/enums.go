@@ -200,6 +200,7 @@ type ProviderHealthState string
 // "blocked, won't auto-recover" terminal state; degraded is auto-retryable.
 const (
 	ProviderHealthHealthy            ProviderHealthState = "healthy"
+	ProviderHealthShortRetry         ProviderHealthState = "short_retry"
 	ProviderHealthDegraded           ProviderHealthState = "degraded"
 	ProviderHealthUserActionRequired ProviderHealthState = "user_action_required"
 )
@@ -228,6 +229,7 @@ type RouteAttemptOutcome string
 // Route attempt outcome values.
 const (
 	RouteAttemptOutcomeLaunched              RouteAttemptOutcome = "launched"
+	RouteAttemptOutcomeRetryScheduled        RouteAttemptOutcome = "retry_scheduled"
 	RouteAttemptOutcomeFailedProviderUnavail RouteAttemptOutcome = "failed_provider_unavailable"
 	RouteAttemptOutcomeFailedOther           RouteAttemptOutcome = "failed_other"
 	RouteAttemptOutcomeSkippedDegraded       RouteAttemptOutcome = "skipped_degraded"

@@ -1,6 +1,7 @@
 "use client";
 
 import { Fragment, memo, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { IconCheck, IconChevronDown, IconLogicBuffer } from "@tabler/icons-react";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@kandev/ui/tooltip";
 import { Popover, PopoverContent, PopoverTrigger } from "@kandev/ui/popover";
@@ -25,6 +26,7 @@ function InlineSteps({
   steps: StepItem[];
   agentProfiles: AgentProfileOption[];
 }) {
+  const { t } = useTranslation();
   if (steps.length === 0) return null;
   return (
     <div className="flex items-center gap-1.5 text-xs text-muted-foreground whitespace-nowrap">
@@ -47,7 +49,7 @@ function InlineSteps({
                     <TooltipTrigger asChild>
                       <span className="text-[10px] text-muted-foreground/60 leading-none">*</span>
                     </TooltipTrigger>
-                    <TooltipContent>Start step</TooltipContent>
+                    <TooltipContent>{t("workflows:startStep")}</TooltipContent>
                   </Tooltip>
                 </TooltipProvider>
               )}
@@ -85,7 +87,6 @@ type WorkflowSelectorRowProps = {
   snapshots: Record<string, WorkflowSnapshotData>;
   selectedWorkflowId: string | null;
   onWorkflowChange: (workflowId: string) => void;
-  lastUsedWorkflowId?: string | null;
   agentProfiles: AgentProfileOption[];
 };
 
@@ -94,25 +95,15 @@ export const WorkflowSelectorRow = memo(function WorkflowSelectorRow({
   snapshots,
   selectedWorkflowId,
   onWorkflowChange,
-  lastUsedWorkflowId,
   agentProfiles,
 }: WorkflowSelectorRowProps) {
+  const { t } = useTranslation();
   const [open, setOpen] = useState(false);
 
   const selectedWorkflow = useMemo(
     () => workflows.find((w) => w.id === selectedWorkflowId),
     [workflows, selectedWorkflowId],
   );
-
-  // Sort workflows: last-used first, then original order (which is already by sort_order)
-  const sortedWorkflows = useMemo(() => {
-    if (!lastUsedWorkflowId) return workflows;
-    return [...workflows].sort((a, b) => {
-      if (a.id === lastUsedWorkflowId) return -1;
-      if (b.id === lastUsedWorkflowId) return 1;
-      return 0;
-    });
-  }, [workflows, lastUsedWorkflowId]);
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -124,13 +115,17 @@ export const WorkflowSelectorRow = memo(function WorkflowSelectorRow({
           data-testid="workflow-selector-trigger"
         >
           <IconLogicBuffer className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-          <span className="truncate">{selectedWorkflow?.name ?? "Select workflow"}</span>
+          <span className="truncate">
+            {selectedWorkflow?.name ?? t("workflows:selectWorkflow")}
+          </span>
           <IconChevronDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
         </Button>
       </PopoverTrigger>
       <PopoverContent className="w-auto min-w-[300px] max-w-none p-1" align="start">
-        <div className="text-muted-foreground px-2 py-1.5 text-xs border-b">Workflow</div>
-        {sortedWorkflows.map((wf) => {
+        <div className="text-muted-foreground px-2 py-1.5 text-xs border-b">
+          {t("workflows:workflow")}
+        </div>
+        {workflows.map((wf) => {
           const isSelected = wf.id === selectedWorkflowId;
           const snapshot = snapshots[wf.id];
           const steps = snapshot ? [...snapshot.steps].sort((a, b) => a.position - b.position) : [];

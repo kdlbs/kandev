@@ -5,6 +5,7 @@ import { IconFile, IconX } from "@tabler/icons-react";
 import { cn } from "@/lib/utils";
 import { formatBytes } from "@/lib/utils/format-bytes";
 import { type FileAttachment } from "./file-attachment";
+import { useTranslation } from "react-i18next";
 
 type FileAttachmentPreviewProps = {
   attachments: FileAttachment[];
@@ -17,6 +18,7 @@ export const FileAttachmentPreview = memo(function FileAttachmentPreview({
   onRemove,
   disabled = false,
 }: FileAttachmentPreviewProps) {
+  const { t } = useTranslation();
   if (attachments.length === 0) return null;
 
   return (
@@ -32,7 +34,7 @@ export const FileAttachmentPreview = memo(function FileAttachmentPreview({
           {attachment.isImage && attachment.preview ? (
             <img
               src={attachment.preview}
-              alt="Attachment preview"
+              alt={t("task:attachmentPreview")}
               className="h-10 w-10 object-cover"
             />
           ) : (
@@ -60,7 +62,7 @@ export const FileAttachmentPreview = memo(function FileAttachmentPreview({
                 "hover:bg-black/90 cursor-pointer",
                 "focus:outline-none focus:ring-1 focus:ring-white/50",
               )}
-              aria-label={`Remove ${attachment.isImage ? "image" : "file"}`}
+              aria-label={attachment.isImage ? t("task:removeImage") : t("task:removeFile")}
             >
               <IconX className="h-2.5 w-2.5" />
             </button>

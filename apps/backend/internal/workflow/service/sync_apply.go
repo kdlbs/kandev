@@ -270,10 +270,11 @@ func (s *Service) applyWorkflowFields(ctx context.Context, wf *taskmodels.Workfl
 	if pw.AgentProfile != nil && s.matchProfile != nil {
 		profileID = s.matchProfile(pw.AgentProfile.AgentName, pw.AgentProfile.Model, pw.AgentProfile.Mode)
 	}
-	if wf.Description == pw.Description && wf.AgentProfileID == profileID {
+	if wf.Description == pw.Description && wf.Prompt == pw.Prompt && wf.AgentProfileID == profileID {
 		return false, nil
 	}
 	wf.Description = pw.Description
+	wf.Prompt = pw.Prompt
 	wf.AgentProfileID = profileID
 	return true, s.workflowProvider.UpdateWorkflow(ctx, wf)
 }

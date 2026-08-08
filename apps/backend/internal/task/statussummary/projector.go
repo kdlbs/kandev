@@ -56,8 +56,13 @@ type ProjectorConfig struct {
 	EventBus            bus.EventBus
 	ResolveWorkspace    WorkspaceResolver
 	LoadGitObservations GitObservationLoader
-	Logger              *logger.Logger
-	Now                 func() time.Time
+	// CountQueuedPrompts returns the number of prompts currently en-queued for
+	// a task across all of its sessions (pending semantics identical to
+	// message.queue.get). Wired from the messagequeue service at the
+	// composition root; nil disables queued-prompt projection.
+	CountQueuedPrompts func(context.Context, string) (int, error)
+	Logger             *logger.Logger
+	Now                func() time.Time
 }
 
 // Projector converts authoritative, bounded occurrences into one complete
@@ -69,6 +74,7 @@ type Projector struct {
 	eventBus            bus.EventBus
 	resolveWorkspace    WorkspaceResolver
 	loadGitObservations GitObservationLoader
+	countQueuedPrompts  func(context.Context, string) (int, error)
 	logger              *logger.Logger
 	now                 func() time.Time
 
@@ -88,19 +94,25 @@ type projectionState struct {
 	workspaceID      string
 	revision         uint64
 	current          *TaskStatusSummary
+	queuedCount      int
 	sessions         map[string]sessionObservation
 	pending          map[string]string
+	pendingRequests  map[string]pendingRequestIdentity
 	taskPending      string
 	pendingObserved  bool
 	activityObserved bool
 	errors           map[string]*ActiveErrorSummary
-	errorsObserved   bool
-	git              map[string]GitSummary
-	gitBaseline      *GitSummary
-	gitObserved      bool
-	prs              map[string]pullRequestObservation
-	prBaseline       *PullRequestSummary
-	prObserved       bool
+	// clearedErrorStamps records, per session, the stamp of the last error this
+	// projection cleared, so a durable breadcrumb replayed on a later session
+	// event cannot re-arm an error affordance the agent already recovered from.
+	clearedErrorStamps map[string]string
+	errorsObserved     bool
+	git                map[string]GitSummary
+	gitBaseline        *GitSummary
+	gitObserved        bool
+	prs                map[string]pullRequestObservation
+	prBaseline         *PullRequestSummary
+	prObserved         bool
 }
 
 type sessionObservation struct {
@@ -109,6 +121,11 @@ type sessionObservation struct {
 	isPrimary           bool
 	foregroundActivity  string
 	activeSubagentCount int
+}
+
+type pendingRequestIdentity struct {
+	messageType string
+	pendingID   string
 }
 
 type pullRequestObservation struct {
@@ -139,6 +156,7 @@ func NewProjector(cfg ProjectorConfig) *Projector {
 		eventBus:            cfg.EventBus,
 		resolveWorkspace:    cfg.ResolveWorkspace,
 		loadGitObservations: cfg.LoadGitObservations,
+		countQueuedPrompts:  cfg.CountQueuedPrompts,
 		logger:              log.WithFields(zap.String("component", "task-status-summary-projector")),
 		now:                 now,
 		state:               make(map[string]*projectionState),
@@ -168,6 +186,7 @@ func (p *Projector) Start(ctx context.Context) error {
 		events.BuildPermissionRequestWildcardSubject(),
 		events.BuildGitEventWildcardSubject(),
 		events.GitHubTaskPRUpdated,
+		events.MessageQueueStatusChanged,
 	}
 	for _, pattern := range patterns {
 		sub, err := p.eventBus.Subscribe(pattern, p.handleEvent)
@@ -238,11 +257,57 @@ func (p *Projector) handleEvent(ctx context.Context, event *bus.Event) error {
 		return fmt.Errorf("task status summary %q has no workspace", taskID)
 	}
 
+	if event.Type == events.MessageQueueStatusChanged {
+		return p.applyQueueStatusEvent(ctx, state, taskID)
+	}
+
 	changed := p.applySourceEventLocked(state, event.Type, data)
 	if !changed {
 		return nil
 	}
-	return p.persistAndPublishLocked(ctx, taskID, state)
+	_, err = p.persistAndPublishLocked(ctx, taskID, state)
+	return err
+}
+
+// maxQueueCountPersistAttempts bounds the retry loop when a competing writer
+// keeps winning the compare-and-set. Each attempt re-reads the stored summary
+// (which persistAndPublishLocked syncs into state on rejection) and re-queries
+// the authoritative count, so a rejection can never suppress the update by
+// leaving state.queuedCount ahead of the persisted value.
+const maxQueueCountPersistAttempts = 3
+
+// applyQueueStatusEvent refreshes the task's queued prompt count from the
+// authoritative queue store. The event payload's per-session count is not
+// reused: the badge is per-task across all sessions, and the queue may have
+// changed between the status snapshot and this projection.
+func (p *Projector) applyQueueStatusEvent(ctx context.Context, state *projectionState, taskID string) error {
+	if p.countQueuedPrompts == nil {
+		return nil
+	}
+	for attempt := 0; attempt < maxQueueCountPersistAttempts; attempt++ {
+		count, err := p.countQueuedPrompts(ctx, taskID)
+		if err != nil {
+			return fmt.Errorf("count queued prompts for task %q: %w", taskID, err)
+		}
+		if count == state.queuedCount {
+			return nil
+		}
+		state.queuedCount = count
+		accepted, err := p.persistAndPublishLocked(ctx, taskID, state)
+		if err != nil {
+			return err
+		}
+		if accepted {
+			return nil
+		}
+	}
+	// The count self-corrects on the next queue event or list load, but a
+	// sustained contention run is worth surfacing so a repeated rejector is not
+	// silently starved.
+	p.logger.Warn("exhausted CAS retries updating queued prompt count",
+		zap.String("task_id", taskID),
+		zap.Int("attempts", maxQueueCountPersistAttempts))
+	return nil
 }
 
 func (p *Projector) applySourceEventLocked(state *projectionState, eventType string, data map[string]interface{}) bool {
@@ -273,11 +338,22 @@ func (p *Projector) applySourceEventLocked(state *projectionState, eventType str
 
 func applyPermissionEventLocked(state *projectionState, data map[string]interface{}) bool {
 	sessionID := stringField(data, "session_id")
-	if sessionID == "" || state.pending[sessionID] == pendingPermission {
+	if sessionID == "" {
+		return false
+	}
+	identity := pendingRequestIdentity{
+		messageType: "permission_request",
+		pendingID:   stringField(data, "pending_id"),
+	}
+	if state.pending[sessionID] == pendingPermission {
+		if _, exists := state.pendingRequests[sessionID]; !exists {
+			state.pendingRequests[sessionID] = identity
+		}
 		return false
 	}
 	state.pendingObserved = true
 	state.pending[sessionID] = pendingPermission
+	state.pendingRequests[sessionID] = identity
 	return true
 }
 
@@ -377,6 +453,7 @@ func applyTaskPendingUpdateLocked(state *projectionState, data map[string]interf
 		value := stringFromNullable(pending)
 		if len(state.pending) > 0 {
 			state.pending = make(map[string]string)
+			state.pendingRequests = make(map[string]pendingRequestIdentity)
 			changed = true
 		}
 		if state.taskPending != value {
@@ -393,26 +470,28 @@ func applyTaskPendingUpdateLocked(state *projectionState, data map[string]interf
 
 func updateSessionPendingLocked(state *projectionState, sessionID, action string) bool {
 	if action == "" {
-		if _, exists := state.pending[sessionID]; exists {
-			delete(state.pending, sessionID)
-			return true
-		}
-		return false
+		_, existed := state.pending[sessionID]
+		delete(state.pending, sessionID)
+		delete(state.pendingRequests, sessionID)
+		return existed
 	}
 	if state.pending[sessionID] == action {
 		return false
 	}
 	state.pending[sessionID] = action
+	delete(state.pendingRequests, sessionID)
 	return true
 }
 
 func newProjectionState() *projectionState {
 	return &projectionState{
-		sessions: make(map[string]sessionObservation),
-		pending:  make(map[string]string),
-		errors:   make(map[string]*ActiveErrorSummary),
-		git:      make(map[string]GitSummary),
-		prs:      make(map[string]pullRequestObservation),
+		sessions:           make(map[string]sessionObservation),
+		pending:            make(map[string]string),
+		pendingRequests:    make(map[string]pendingRequestIdentity),
+		errors:             make(map[string]*ActiveErrorSummary),
+		clearedErrorStamps: make(map[string]string),
+		git:                make(map[string]GitSummary),
+		prs:                make(map[string]pullRequestObservation),
 	}
 }
 
@@ -455,6 +534,7 @@ func (p *Projector) restorePersistedState(ctx context.Context, taskID string, st
 	}
 	state.current = cloneSummary(summary)
 	state.revision = summary.Revision
+	state.queuedCount = summary.QueuedPromptCount
 	state.taskPending = summary.PendingAction
 	if summary.PrimarySession != nil && summary.PrimarySession.ID != "" {
 		state.sessions[summary.PrimarySession.ID] = sessionObservation{
@@ -535,13 +615,34 @@ func (p *Projector) applySessionEventLocked(state *projectionState, data map[str
 
 	changed := true
 	if metadata, ok := data["session_metadata"].(map[string]interface{}); ok {
-		if errSummary, present := errorFromMetadata(p.now().UTC(), sessionID, metadata); present {
-			state.errorsObserved = true
-			changed = !errorEqual(state.errors[sessionID], errSummary) || changed
-			state.errors[sessionID] = errSummary
-		}
+		p.applySessionMetadataErrorLocked(state, sessionID, metadata)
 	}
 	return changed
+}
+
+// applySessionMetadataErrorLocked folds the session's durable error record into
+// the projection. A dismissed or superseded record clears the affordance, and a
+// record this projection already cleared is not re-applied — session metadata
+// keeps failures as a breadcrumb, so replaying it verbatim would re-arm errors
+// the agent has since recovered from.
+func (p *Projector) applySessionMetadataErrorLocked(
+	state *projectionState,
+	sessionID string,
+	metadata map[string]interface{},
+) {
+	errSummary, observed := errorFromMetadata(p.now().UTC(), sessionID, metadata)
+	if !observed {
+		return
+	}
+	state.errorsObserved = true
+	if errSummary == nil {
+		p.clearErrorLocked(state, sessionID)
+		return
+	}
+	if state.clearedErrorStamps[sessionID] == errSummary.Stamp {
+		return
+	}
+	state.errors[sessionID] = errSummary
 }
 
 func (p *Projector) applyActivityEventLocked(state *projectionState, data map[string]interface{}) bool {
@@ -579,6 +680,10 @@ func (p *Projector) applyErrorEventLocked(state *projectionState, data map[strin
 	if errorEqual(state.errors[sessionID], errSummary) {
 		return false
 	}
+	// An explicit error event is authoritative: it re-arms even a stamp this
+	// projection cleared earlier, which is what makes an identical failure
+	// recurring after a recovery visible again.
+	delete(state.clearedErrorStamps, sessionID)
 	state.errors[sessionID] = errSummary
 	return true
 }
@@ -613,25 +718,61 @@ func (p *Projector) applyPendingMessageLocked(state *projectionState, eventType 
 	messageType := strings.ToLower(stringField(data, "type"))
 	metadata, _ := data["metadata"].(map[string]interface{})
 	status := strings.ToLower(stringField(metadata, "status"))
-	isPendingMessage := boolValue(data["requests_input"]) ||
-		messageType == "clarification_request" || messageType == "permission_request"
-	isTrackedMessage := isPendingMessage || stringField(metadata, "pending_id") != "" || status != ""
-	if !isTrackedMessage {
+	requestIdentity := pendingRequestIdentity{
+		messageType: messageType,
+		pendingID:   stringField(metadata, "pending_id"),
+	}
+	action := pendingActionForMessage(messageType, boolValue(data["requests_input"]))
+	if action == "" {
 		return false
 	}
 	state.pendingObserved = true
-	if eventType == events.MessageDeleted || (!isPendingMessage && status != "" && status != statusPending) {
-		return p.clearPendingLocked(state, sessionID)
-	}
-	action := pendingPermission
-	if messageType == "clarification_request" || boolValue(data["requests_input"]) {
-		action = pendingClarification
+	// A terminal status on the request row means the prompt is no longer awaiting
+	// the user. Resolutions land as a message.updated on that row (approved/
+	// rejected/expired for permissions, answered/rejected/cancelled/expired for
+	// clarifications). Only the request that armed the affordance may clear it;
+	// a detached-but-answerable clarification stays pending.
+	if eventType == events.MessageDeleted || (status != "" && status != statusPending) {
+		if state.pendingRequests[sessionID] == requestIdentity {
+			return p.clearPendingLocked(state, sessionID)
+		}
+		return false
 	}
 	if state.pending[sessionID] == action {
+		if _, exists := state.pendingRequests[sessionID]; !exists {
+			state.pendingRequests[sessionID] = requestIdentity
+		}
 		return false
 	}
 	state.pending[sessionID] = action
+	state.pendingRequests[sessionID] = requestIdentity
 	return true
+}
+
+// pendingActionForMessage maps a message to the task-row affordance it drives,
+// or "" when the message asks the user for nothing. A message that asks for
+// nothing is not evidence about the pending state in either direction, so the
+// caller ignores it rather than letting it arm or clear the affordance.
+//
+// The distinction matters because a status of "pending" is not exclusive to
+// prompts: every announced tool call is persisted with the raw ACP tool status,
+// which starts at "pending" and only becomes in_progress/complete on the first
+// tool_update. Treating those rows as prompts made the amber "waiting on you"
+// icon flash onto the task row for every tool call the agent made (and stick
+// whenever a turn ended before its last tool_update landed), while their
+// terminal updates tore down a genuinely pending prompt — a background tool
+// completing would clear the icon while the foreground turn was still blocked.
+// The exact request types are matched before the generic requests_input flag, so
+// a permission row that ever starts carrying the flag stays a permission rather
+// than silently degrading to a clarification.
+func pendingActionForMessage(messageType string, requestsInput bool) string {
+	if messageType == messageTypePermissionRequest {
+		return pendingPermission
+	}
+	if messageType == messageTypeClarificationRequest || requestsInput {
+		return pendingClarification
+	}
+	return ""
 }
 
 func (p *Projector) applyGitEventLocked(state *projectionState, data map[string]interface{}) bool {
@@ -719,21 +860,26 @@ func pullRequestObservationKey(data map[string]interface{}) string {
 	return ""
 }
 
-func (p *Projector) persistAndPublishLocked(ctx context.Context, taskID string, state *projectionState) error {
+// persistAndPublishLocked persists the projected summary and publishes the
+// replacement event. The boolean reports whether the write was accepted (or a
+// no-op because the derived summary is already current); false means a
+// competing writer won and the stored summary was reloaded into state,
+// including queuedCount, so callers can retry against the refreshed revision.
+func (p *Projector) persistAndPublishLocked(ctx context.Context, taskID string, state *projectionState) (bool, error) {
 	next := deriveSummary(state)
 	if state.current != nil && state.current.SemanticEqual(next) {
-		return nil
+		return true, nil
 	}
 	if state.revision == ^uint64(0) {
-		return fmt.Errorf("task status summary %q revision overflow", taskID)
+		return false, fmt.Errorf("task status summary %q revision overflow", taskID)
 	}
 	next.Revision = state.revision + 1
 	next.UpdatedAt = p.now().UTC()
 	if err := next.Validate(); err != nil {
-		return fmt.Errorf("validate projected task status summary %q: %w", taskID, err)
+		return false, fmt.Errorf("validate projected task status summary %q: %w", taskID, err)
 	}
 	if p.store == nil {
-		return fmt.Errorf("task status summary store is unavailable")
+		return false, fmt.Errorf("task status summary store is unavailable")
 	}
 	accepted, err := p.store.CompareAndUpdateTaskStatusSummary(ctx, &StoredTaskStatusSummary{
 		TaskID:      taskID,
@@ -741,18 +887,19 @@ func (p *Projector) persistAndPublishLocked(ctx context.Context, taskID string, 
 		Summary:     next,
 	})
 	if err != nil {
-		return fmt.Errorf("persist projected task status summary %q: %w", taskID, err)
+		return false, fmt.Errorf("persist projected task status summary %q: %w", taskID, err)
 	}
 	if !accepted {
 		rows, loadErr := p.store.LoadTaskStatusSummaries(ctx, []string{taskID})
 		if loadErr != nil {
-			return fmt.Errorf("reload projected task status summary %q: %w", taskID, loadErr)
+			return false, fmt.Errorf("reload projected task status summary %q: %w", taskID, loadErr)
 		}
 		if stored := rows[taskID]; stored != nil {
 			state.current = cloneSummary(stored)
 			state.revision = stored.Revision
+			state.queuedCount = stored.QueuedPromptCount
 		}
-		return nil
+		return false, nil
 	}
 	state.current = cloneSummary(&next)
 	state.revision = next.Revision
@@ -760,10 +907,10 @@ func (p *Projector) persistAndPublishLocked(ctx context.Context, taskID string, 
 		payload := SummaryUpdated{TaskID: taskID, WorkspaceID: state.workspaceID, Summary: next}
 		if err := p.eventBus.Publish(ctx, events.TaskStatusSummaryUpdated,
 			bus.NewEvent(events.TaskStatusSummaryUpdated, "task-status-summary", payload)); err != nil {
-			return fmt.Errorf("publish task status summary %q: %w", taskID, err)
+			return false, fmt.Errorf("publish task status summary %q: %w", taskID, err)
 		}
 	}
-	return nil
+	return true, nil
 }
 
 func deriveSummary(state *projectionState) TaskStatusSummary {
@@ -776,6 +923,7 @@ func deriveSummary(state *projectionState) TaskStatusSummary {
 		ActiveError:         deriveActiveError(state),
 		Git:                 deriveGitSummary(state),
 		PullRequest:         derivePullRequestSummary(state),
+		QueuedPromptCount:   state.queuedCount,
 	}
 }
 

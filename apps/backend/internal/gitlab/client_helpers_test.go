@@ -28,6 +28,38 @@ func TestConvertRawMRHydratesLabels(t *testing.T) {
 	}
 }
 
+func TestConvertRawMR_DetailedMergeStatus(t *testing.T) {
+	// Present (GitLab 15.6+).
+	mr := convertRawMR(&rawMR{DetailedMergeStatus: "mergeable", BlockingDiscussionsResolved: true})
+	if mr.DetailedMergeStatus != "mergeable" {
+		t.Errorf("DetailedMergeStatus = %q, want mergeable", mr.DetailedMergeStatus)
+	}
+	if !mr.BlockingDiscussionsResolved {
+		t.Errorf("BlockingDiscussionsResolved = false, want true")
+	}
+
+	// Absent (pre-15.6 self-managed host) — must not fabricate a value.
+	old := convertRawMR(&rawMR{MergeStatus: "can_be_merged"})
+	if old.DetailedMergeStatus != "" {
+		t.Errorf("DetailedMergeStatus = %q, want empty when the API omits it", old.DetailedMergeStatus)
+	}
+}
+
+func TestCountUnapprovedReviewers(t *testing.T) {
+	reviewers := []MRReviewer{{Username: "alice"}, {Username: "bob"}, {Username: "carol"}}
+	approvals := []MRApproval{{Username: "bob"}}
+	if got := countUnapprovedReviewers(reviewers, approvals); got != 2 {
+		t.Errorf("countUnapprovedReviewers() = %d, want 2 (alice, carol)", got)
+	}
+	if got := countUnapprovedReviewers(nil, approvals); got != 0 {
+		t.Errorf("countUnapprovedReviewers(no reviewers) = %d, want 0", got)
+	}
+	allApproved := []MRApproval{{Username: "alice"}, {Username: "bob"}, {Username: "carol"}}
+	if got := countUnapprovedReviewers(reviewers, allApproved); got != 0 {
+		t.Errorf("countUnapprovedReviewers(all approved) = %d, want 0", got)
+	}
+}
+
 // User-supplied filter keys must override defaults seeded by the caller.
 // The previous implementation used values.Add(), which kept the default
 // alongside the user value (e.g. state=opened&state=closed) and GitLab

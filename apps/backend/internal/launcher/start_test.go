@@ -42,16 +42,34 @@ func TestResolveLogThresholdsByMode(t *testing.T) {
 }
 
 func TestBackendEnvCarriesIndependentThresholds(t *testing.T) {
-	env := backendEnv(portConfig{BackendPort: 1234, AgentctlPort: 5678}, "debug", "warn", true)
+	env := backendEnv(portConfig{BackendPort: 1234, AgentctlPort: 5678}, "debug", "warn", true, "health-token")
 	joined := strings.Join(env, "\n")
 	for _, expected := range []string{
 		"KANDEV_LOG_LEVEL=debug",
 		"KANDEV_CONSOLE_LOG_LEVEL=warn",
 		"KANDEV_DEBUG_AGENT_MESSAGES=true",
+		"KANDEV_DESKTOP_HEALTH_TOKEN=health-token",
 	} {
 		if !strings.Contains(joined, expected) {
 			t.Fatalf("backend environment missing %q", expected)
 		}
+	}
+}
+
+func TestNewHealthTokenIsFreshAndOpaque(t *testing.T) {
+	first, err := newHealthToken()
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := newHealthToken()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(first) != healthTokenBytes*2 || len(second) != healthTokenBytes*2 {
+		t.Fatalf("health token lengths = %d and %d, want %d", len(first), len(second), healthTokenBytes*2)
+	}
+	if first == second {
+		t.Fatal("two health token generations returned the same value")
 	}
 }
 
@@ -112,6 +130,8 @@ func TestRunManagedAppAttachesSignalsBeforeBackendLaunch(t *testing.T) {
 
 	var events []string
 	var launchedQuiet bool
+	var launchedHealthToken string
+	var waitedHealthToken string
 	newSupervisorFn = func() *processSupervisor {
 		events = append(events, "new-supervisor")
 		return newSupervisor()
@@ -120,13 +140,18 @@ func TestRunManagedAppAttachesSignalsBeforeBackendLaunch(t *testing.T) {
 		_ string,
 		_ []string,
 		_ string,
-		_ []string,
+		env []string,
 		quiet bool,
 		_ portConfig,
 		_ string,
 		_ *processSupervisor,
 	) (*restartableBackend, func(), error) {
 		launchedQuiet = quiet
+		for _, item := range env {
+			if strings.HasPrefix(item, "KANDEV_DESKTOP_HEALTH_TOKEN=") {
+				launchedHealthToken = strings.TrimPrefix(item, "KANDEV_DESKTOP_HEALTH_TOKEN=")
+			}
+		}
 		events = append(events, "launch-backend")
 		exitCh := make(chan int, 1)
 		exitCh <- 0
@@ -135,7 +160,8 @@ func TestRunManagedAppAttachesSignalsBeforeBackendLaunch(t *testing.T) {
 	attachSignalsFn = func(_ *processSupervisor) {
 		events = append(events, "attach-signals")
 	}
-	waitForHealthFn = func(_ context.Context, _ string, _ childState, _ time.Duration, _ func()) error {
+	waitForHealthFn = func(_ context.Context, _ string, _ childState, _ time.Duration, expectedToken string, _ func()) error {
+		waitedHealthToken = expectedToken
 		events = append(events, "wait-health")
 		return nil
 	}
@@ -161,5 +187,8 @@ func TestRunManagedAppAttachesSignalsBeforeBackendLaunch(t *testing.T) {
 	}
 	if launchedQuiet {
 		t.Fatal("backend stdout was not forwarded")
+	}
+	if launchedHealthToken == "" || launchedHealthToken != waitedHealthToken {
+		t.Fatalf("health token launched=%q waited=%q, want one shared non-empty token", launchedHealthToken, waitedHealthToken)
 	}
 }

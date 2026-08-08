@@ -1,6 +1,7 @@
 /** Section IDs used for both display and persistence keys in the AppSidebar. */
 export const APP_SIDEBAR_SECTION_IDS = {
   tasks: "tasks",
+  automations: "automations",
   officeWork: "office-work",
   officeWorkspace: "office-workspace",
   projects: "projects",

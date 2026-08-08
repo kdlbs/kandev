@@ -40,6 +40,8 @@ import type { ChatPanelState } from "./use-chat-panel-state";
 import { useComposerProps } from "./use-composer-props";
 import { cn } from "@/lib/utils";
 import { resolveComposerWorkspaceId } from "./composer-workspace";
+import { useTranslation } from "react-i18next";
+import { t } from "@/lib/i18n";
 
 const PLAN_CONTEXT_PATH = "plan:context";
 
@@ -133,16 +135,15 @@ function showMessageSendToast(error: unknown, toast: ReturnType<typeof useToast>
   console.error("Failed to send message:", error);
   if (isMessageSendError(error)) {
     toast({
-      title: "Message not sent",
+      title: t("task:messageNotSent"),
       description: error.message,
       variant: "error",
     });
     return;
   }
   toast({
-    title: "Message send status unknown",
-    description:
-      "The connection dropped or timed out. Refresh the task to confirm whether it went through.",
+    title: t("task:messageSendStatusUnknown"),
+    description: t("task:theConnectionDroppedOrTimedOut"),
     variant: "error",
   });
 }
@@ -392,6 +393,7 @@ function ChatStatusBar({
   showScrollToStart,
   onScrollToStart,
 }: ChatStatusBarProps) {
+  const { t } = useTranslation();
   const showTodos = todoItems.length > 0;
   const showProceed = !!nextStepName && !isAgentBusy;
   const showAutoScrollControl = useAppStore(
@@ -462,7 +464,7 @@ function ChatStatusBar({
               <IconArrowRight className="h-3.5 w-3.5" />
             </Button>
           </TooltipTrigger>
-          <TooltipContent>Move task to the next workflow step</TooltipContent>
+          <TooltipContent>{t("task:moveTaskToTheNextWorkflow")}</TooltipContent>
         </Tooltip>
       )}
     </div>
@@ -481,6 +483,12 @@ type ChatInputAreaProps = {
   isSending: boolean;
   hideSessionsDropdown?: boolean;
   minimalToolbar?: boolean;
+  /** Hide ACP/session-specific controls (model picker, mode, MCP, reset context,
+   *  sessions, enhance, plugin actions) while keeping Plan, attachment and
+   *  context controls. Surfaces whose agent only exists for the length of a turn
+   *  — an automation run — flip this off the moment the turn ends, so a control
+   *  that talks to a live ACP session is never left on screen without one. */
+  hideAgentControls?: boolean;
   /** Hide the plan mode toggle button (for ephemeral/quick chat sessions) */
   hidePlanMode?: boolean;
   placeholderOverride?: string;
@@ -573,6 +581,7 @@ export function ChatInputArea({
   isSending,
   hideSessionsDropdown,
   minimalToolbar,
+  hideAgentControls,
   hidePlanMode,
   placeholderOverride,
   surfaceClassName,
@@ -607,6 +616,7 @@ export function ChatInputArea({
     onClarificationResolved,
     hideSessionsDropdown,
     minimalToolbar,
+    hideAgentControls,
     hidePlanMode,
   });
   return (

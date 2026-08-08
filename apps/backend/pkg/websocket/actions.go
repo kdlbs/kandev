@@ -117,6 +117,7 @@ const (
 	ActionMessageQueueUpdate        = "message.queue.update"
 	ActionMessageQueueAppend        = "message.queue.append"
 	ActionMessageQueueDrain         = "message.queue.drain"          // Dispatch one queued entry now when the session is promptable
+	ActionMessageQueueSendNow       = "message.queue.send_now"       // Interrupt and replace the active turn with an exact queue selection
 	ActionMessageQueueRemove        = "message.queue.remove"         // Delete a single entry by id
 	ActionMessageQueueMerge         = "message.queue.merge"          // Fold an entry into the entry above it
 	ActionMessageQueueStatusChanged = "message.queue.status_changed" // Notification: queue status changed
@@ -334,7 +335,8 @@ const (
 	// System maintenance jobs (VACUUM, factory reset, snapshot create/restore,
 	// disk walk). Broadcast to all connected clients so the System pages can
 	// render progress.
-	ActionSystemJobUpdate = "system.job.update"
+	ActionSystemJobUpdate                 = "system.job.update"
+	ActionSystemAgentRuntimeStatusChanged = "system.agent_runtime.status_changed"
 
 	// VS Code server actions
 	ActionVscodeStart    = "vscode.start"    // Start code-server for a session
@@ -433,6 +435,7 @@ const (
 	ActionMCPStopTask            = "mcp.stop_task"
 	ActionMCPSpawnSession        = "mcp.spawn_session"
 	ActionMCPGetTaskConversation = "mcp.get_task_conversation"
+	ActionMCPListTaskSessions    = "mcp.list_task_sessions"
 )
 
 const (
@@ -457,6 +460,7 @@ const (
 	ActionGitHubPRWatchDelete        = "github.pr_watches.delete"
 	ActionGitHubPRFilesGet           = "github.pr_files.get"
 	ActionGitHubPRCommitsGet         = "github.pr_commits.get"
+	ActionGitHubPRCommitGet          = "github.pr_commit.get"
 	ActionGitHubTaskPRUpdated        = "github.task_pr.updated"         // Notification
 	ActionGitHubTaskPRDeleted        = "github.task_pr.deleted"         // Notification
 	ActionGitHubTaskCIOptionsUpdated = "github.task_ci_options.updated" // Notification
@@ -612,6 +616,9 @@ const (
 	ActionAutomationDisable             = "automation.disable"
 	ActionAutomationTrigger             = "automation.trigger"
 	ActionAutomationRunsList            = "automation.runs.list"
+	ActionAutomationRunsListWorkspace   = "automation.runs.list_workspace"
+	ActionAutomationSummaries           = "automation.summaries"
+	ActionAutomationSummary             = "automation.summary"
 	ActionAutomationTriggerAdd          = "automation.trigger.add"
 	ActionAutomationTriggerUpdate       = "automation.trigger.update"
 	ActionAutomationTriggerDelete       = "automation.trigger.delete"

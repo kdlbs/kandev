@@ -15,12 +15,16 @@ import { KanbanPage } from "../../pages/kanban-page";
 useRegularMode();
 
 async function expectWheelScrollsListInsideDialog(testPage: Page) {
-  const list = testPage.locator("[cmdk-list]").first();
+  // Closed Radix popovers stay mounted, so target the currently visible
+  // command list instead of whichever list happens to be first in the DOM.
+  const list = testPage.locator("[cmdk-list]:visible").last();
   await expect(list).toBeVisible();
   await expect
     .poll(() => list.evaluate((el) => Boolean(el.closest('[data-testid="create-task-dialog"]'))))
     .toBe(true);
 
+  // Selector data arrives asynchronously after the popover opens. Wait for
+  // the list to lay out its overflow before sending a wheel event.
   await expect
     .poll(
       () =>
@@ -52,6 +56,7 @@ async function expectWheelScrollsListInsideDialog(testPage: Page) {
   });
   expect(await list.evaluate((el) => el.scrollTop)).toBe(0);
 
+  await expect.poll(() => list.boundingBox(), { timeout: 5_000 }).toBeTruthy();
   const box = await list.boundingBox();
   if (!box) throw new Error("selector list has no bounding box");
   await testPage.mouse.move(box.x + box.width / 2, box.y + box.height / 2);

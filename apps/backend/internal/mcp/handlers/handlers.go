@@ -13,6 +13,7 @@ import (
 
 	"github.com/kandev/kandev/internal/agent/mcpconfig"
 	agentsettingscontroller "github.com/kandev/kandev/internal/agent/settings/controller"
+	"github.com/kandev/kandev/internal/auth/authn"
 	"github.com/kandev/kandev/internal/clarification"
 	"github.com/kandev/kandev/internal/common/constants"
 	"github.com/kandev/kandev/internal/common/logger"
@@ -103,6 +104,14 @@ type conditionalSessionStateUpdater interface {
 // TaskRepository interface for updating task state.
 type TaskRepository interface {
 	UpdateTaskState(ctx context.Context, taskID string, state v1.TaskState) error
+}
+
+// RemoteContributionService resolves provider URLs before task creation and
+// associates an already-existing PR/MR after the target task-repository row
+// exists. Implementations must return only server-authored identity data.
+type RemoteContributionService interface {
+	Resolve(ctx context.Context, workspaceID, userID, rawURL string) (*models.RemoteContributionResolution, bool, error)
+	Associate(ctx context.Context, workspaceID, userID, taskID, repositoryID string, resolution *models.RemoteContributionResolution) error
 }
 
 // sessionOwnedTaskStateUpdater atomically guards a task-state write with the
@@ -227,10 +236,11 @@ type Handlers struct {
 
 	// Optional task-bound GitHub PR automation controls.
 	taskPRAutomation       TaskPRAutomationService
+	remoteContributionSvc  RemoteContributionService
 	diagnosticBundles      DiagnosticBundleProvider
 	diagnosticMaterializer DiagnosticBundleMaterializer
 	// Optional task-bound GitLab MR automation controls.
-	taskMRAutomation       TaskMRAutomationService
+	taskMRAutomation TaskMRAutomationService
 }
 
 // NewHandlers creates new MCP handlers.
@@ -299,6 +309,12 @@ func (h *Handlers) SetUserSettingsProvider(provider UserSettingsProvider) {
 	h.userSettingsProvider = provider
 }
 
+// SetRemoteContributionService wires provider-backed PR/MR resolution for
+// repository_url values that identify an existing contribution.
+func (h *Handlers) SetRemoteContributionService(svc RemoteContributionService) {
+	h.remoteContributionSvc = svc
+}
+
 // SetConfigDeps sets the config-mode dependencies for agent-native configuration handlers.
 // These are optional and only needed when config-mode MCP sessions are used.
 func (h *Handlers) SetConfigDeps(
@@ -336,6 +352,7 @@ func (h *Handlers) RegisterHandlers(d *ws.Dispatcher) {
 	d.RegisterFunc(ws.ActionMCPStopTask, h.handleStopTask)
 	d.RegisterFunc(ws.ActionMCPSpawnSession, h.handleSpawnSession)
 	d.RegisterFunc(ws.ActionMCPGetTaskConversation, h.handleGetTaskConversation)
+	d.RegisterFunc(ws.ActionMCPListTaskSessions, h.handleListTaskSessions)
 	d.RegisterFunc(ws.ActionMCPAskUserQuestion, h.handleAskUserQuestion)
 	d.RegisterFunc(ws.ActionMCPCreateTaskPlan, h.handleCreateTaskPlan)
 	d.RegisterFunc(ws.ActionMCPGetTaskPlan, h.handleGetTaskPlan)
@@ -497,8 +514,8 @@ func (h *Handlers) handleListWorkflowSteps(ctx context.Context, msg *ws.Message)
 
 // handleListRepositories lists repositories for a workspace. Exposes the same
 // data the kanban "Edit task → Repositories" picker reads, so an MCP-driven
-// agent (e.g. the Slack triage runner) can match a request against an actual
-// repo instead of guessing or making up an ID.
+// agent can match a request against an actual repo instead of guessing or
+// making up an ID.
 func (h *Handlers) handleListRepositories(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 	return h.handleListByField(ctx, msg, "workspace_id", "failed to list repositories", "Failed to list repositories",
 		func(ctx context.Context, workspaceID string) (any, error) {
@@ -638,6 +655,12 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		return ws.NewError(msg.ID, msg.Action, code, message, nil)
 	}
 
+	identity, _ := authn.IdentityFromContext(ctx)
+	contributions, err := h.resolveMCPRemoteContributions(ctx, req.WorkspaceID, identity.UserID, repos)
+	if err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, err.Error(), nil)
+	}
+
 	workspacePolicy, err := h.resolveMCPWorkspacePolicy(req.ParentID, req.WorkspaceMode)
 	if err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, err.Error(), nil)
@@ -690,6 +713,28 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		return ws.NewError(msg.ID, msg.Action, code, message, nil)
 	}
 
+	for index, resolution := range contributions {
+		if resolution == nil {
+			continue
+		}
+		if index >= len(task.Repositories) || task.Repositories[index] == nil {
+			if delErr := h.taskSvc.DeleteTask(ctx, task.ID); delErr != nil {
+				h.logger.Error("rollback delete failed after missing task repository",
+					zap.String("task_id", task.ID), zap.Error(delErr))
+			}
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "failed to attach remote contribution: task repository is missing", nil)
+		}
+		if err := h.remoteContributionSvc.Associate(ctx, req.WorkspaceID, identity.UserID, task.ID, task.Repositories[index].ID, resolution); err != nil {
+			h.logger.Error("associate remote contribution; rolling back task creation",
+				zap.String("task_id", task.ID), zap.Error(err))
+			if delErr := h.taskSvc.DeleteTask(ctx, task.ID); delErr != nil {
+				h.logger.Error("rollback delete failed after contribution association error",
+					zap.String("task_id", task.ID), zap.Error(delErr))
+			}
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "failed to attach remote contribution: "+err.Error(), nil)
+		}
+	}
+
 	if h.handoffSvc != nil && workspacePolicy.NeedsAttachment() {
 		if attachErr := h.handoffSvc.AttachWorkspacePolicy(ctx, task.ID, req.ParentID, workspacePolicy); attachErr != nil {
 			h.logger.Error("attach workspace policy; rolling back task creation",
@@ -730,6 +775,65 @@ type taskRepoResult struct {
 	Repos       []service.TaskRepositoryInput
 	WorkspaceID string // inherited from parent, empty otherwise
 	WorkflowID  string // inherited from parent, empty otherwise
+}
+
+func (h *Handlers) resolveMCPRemoteContributions(
+	ctx context.Context, workspaceID, userID string, repos []service.TaskRepositoryInput,
+) ([]*models.RemoteContributionResolution, error) {
+	resolutions := make([]*models.RemoteContributionResolution, len(repos))
+	if h.remoteContributionSvc == nil {
+		return resolutions, nil
+	}
+	for index := range repos {
+		rawURL := strings.TrimSpace(repos[index].RemoteURL)
+		if rawURL == "" {
+			rawURL = strings.TrimSpace(repos[index].GitHubURL)
+		}
+		if rawURL == "" {
+			continue
+		}
+		resolution, matched, err := h.remoteContributionSvc.Resolve(ctx, workspaceID, userID, rawURL)
+		if err != nil {
+			return nil, err
+		}
+		if !matched {
+			continue
+		}
+		if resolution == nil {
+			return nil, errors.New("remote contribution resolver returned no binding")
+		}
+		owner, name, err := splitRemoteContributionTarget(resolution.TargetPath)
+		if err != nil {
+			return nil, err
+		}
+		repo := &repos[index]
+		repo.RepositoryID = ""
+		repo.LocalPath = ""
+		repo.GitHubURL = ""
+		repo.RemoteURL = resolution.TargetRemoteURL
+		repo.Provider = resolution.TargetProvider
+		repo.ProviderHost = resolution.TargetHost
+		repo.ProviderRepoID = resolution.TargetProviderID
+		repo.ProviderOwner = owner
+		repo.ProviderName = name
+		if resolution.TargetDefaultBranch != "" {
+			repo.DefaultBranch = resolution.TargetDefaultBranch
+		}
+		repo.BaseBranch = resolution.Binding.BaseBranch
+		repo.CheckoutBranch = resolution.Binding.HeadBranch
+		repo.RemoteContribution = &resolution.Binding
+		repo.TrustedRemote = true
+		resolutions[index] = resolution
+	}
+	return resolutions, nil
+}
+
+func splitRemoteContributionTarget(path string) (string, string, error) {
+	parts := strings.Split(strings.Trim(path, "/"), "/")
+	if len(parts) < 2 || parts[len(parts)-1] == "" {
+		return "", "", fmt.Errorf("remote contribution target repository %q is invalid", path)
+	}
+	return strings.Join(parts[:len(parts)-1], "/"), parts[len(parts)-1], nil
 }
 
 // resolveTaskRepositories builds the repository list for a new task.
@@ -1026,12 +1130,22 @@ func (h *Handlers) resolveMCPAutoStartConfigWithError(ctx context.Context, task 
 		}
 	}
 
-	if agentProfileID == "" {
-		var err error
-		agentProfileID, err = h.resolveWorkflowAgentProfileWithError(ctx, task.WorkflowStepID, task.WorkflowID)
-		if err != nil {
-			return mcpAutoStartConfig{}, fmt.Errorf("resolve workflow agent profile: %w", err)
-		}
+	// Mirror the orchestrator's launch-time precedence so the profile reported
+	// back to the caller (and stored in task metadata) equals the one that will
+	// actually run. At launch resolveEffectiveAgentProfile applies the step's
+	// launch profile (the step's pinned profile, or the workflow default when the
+	// step has none) over any caller-provided profile, but only when the task
+	// sits on a workflow step. A create_task_kandev task lands on a step whenever
+	// its workflow has steps: the explicit workflow_step_id, or the start step
+	// CreateTask assigns when the step is omitted. When the task will be on a
+	// step, the workflow-derived profile overrides the caller; otherwise it only
+	// fills an omitted profile.
+	workflowProfileID, onStepAtLaunch, err := h.resolveWorkflowLaunchProfile(ctx, task.WorkflowStepID, task.WorkflowID)
+	if err != nil {
+		return mcpAutoStartConfig{}, fmt.Errorf("resolve workflow agent profile: %w", err)
+	}
+	if workflowProfileID != "" && (onStepAtLaunch || agentProfileID == "") {
+		agentProfileID = workflowProfileID
 	}
 	if agentProfileID == "" && h.taskSvc != nil {
 		workspace, err := h.taskSvc.GetWorkspace(ctx, task.WorkspaceID)
@@ -1065,6 +1179,36 @@ func (h *Handlers) mcpTaskAgentProfileDefault(ctx context.Context, explicitAgent
 		return usermodels.MCPTaskAgentProfileDefaultCurrentTask, nil
 	}
 	return usermodels.NormalizeMCPTaskAgentProfileDefault(settings.MCPTaskAgentProfileDefault), nil
+}
+
+// resolveWorkflowLaunchProfile returns the workflow-derived agent profile a task
+// launches with and whether the task will sit on a workflow step at launch.
+// onStepAtLaunch is true when the task has an explicit step, or when it has no
+// step yet but its workflow has at least one step (CreateTask assigns that start
+// step). Callers apply the returned profile over an explicit caller profile only
+// when onStepAtLaunch is true; off a step it may only fill an omitted profile.
+func (h *Handlers) resolveWorkflowLaunchProfile(ctx context.Context, workflowStepID, workflowID string) (string, bool, error) {
+	profileID, err := h.resolveWorkflowAgentProfileWithError(ctx, workflowStepID, workflowID)
+	if err != nil {
+		return "", false, err
+	}
+	if workflowStepID != "" {
+		return profileID, true, nil
+	}
+	return profileID, h.workflowHasSteps(ctx, workflowID), nil
+}
+
+// workflowHasSteps reports whether the workflow has at least one step, i.e. a
+// stepless task created on it will be assigned a start step at CreateTask time.
+func (h *Handlers) workflowHasSteps(ctx context.Context, workflowID string) bool {
+	if workflowID == "" || h.workflowCtrl == nil {
+		return false
+	}
+	resp, err := h.workflowCtrl.ListStepsByWorkflow(ctx, workflowctrl.ListStepsRequest{WorkflowID: workflowID})
+	if err != nil || resp == nil {
+		return false
+	}
+	return len(resp.Steps) > 0
 }
 
 func (h *Handlers) resolveWorkflowAgentProfileWithError(ctx context.Context, workflowStepID, workflowID string) (string, error) {
@@ -2225,6 +2369,7 @@ const errorField = "error"
 // a wire-protocol key updates every handler in one place.
 const (
 	keyTaskID           = "task_id"
+	keyTotal            = "total"
 	keyRepositoryID     = "repository_id"
 	keyTaskRepositoryID = "task_repository_id"
 	keyBaseBranch       = "base_branch"

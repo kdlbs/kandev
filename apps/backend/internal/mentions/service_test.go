@@ -9,7 +9,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kandev/kandev/internal/common/logger"
 	apiv1 "github.com/kandev/kandev/pkg/api/v1"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zaptest/observer"
 )
 
 type fakeProvider struct {
@@ -93,6 +96,50 @@ func TestServiceSearch_RegistryOwnsNamespacedProviderIdentity(t *testing.T) {
 	const wantRef = "mention:v1:plugin%3Aacme%3Atracker:incident:tenant-a:incident-7"
 	if result.Ref != wantRef {
 		t.Fatalf("ref = %q, want %q", result.Ref, wantRef)
+	}
+}
+
+func TestServiceSearchLogsProviderFailureWithSafeIdentity(t *testing.T) {
+	core, observed := observer.New(zap.DebugLevel)
+	log, err := logger.NewFromZap(zap.New(core))
+	if err != nil {
+		t.Fatalf("create observer logger: %v", err)
+	}
+	registry := NewRegistry()
+	if err := registry.Register(fakeProvider{
+		descriptor: ProviderDescriptor{
+			Source: "acme_issues", Provider: "acme", Kind: "issue",
+			DisplayName: "Acme issues", KindLabel: "Issue",
+		},
+		search: func(context.Context, SearchRequest) ([]Candidate, error) {
+			return nil, NewProviderError(StatusUnauthorized, errors.New("secret upstream detail"))
+		},
+	}); err != nil {
+		t.Fatalf("register provider: %v", err)
+	}
+
+	response, err := NewService(registry, WithLogger(log)).Search(context.Background(), SearchRequest{
+		WorkspaceID: "workspace-1",
+		Query:       "secret-query",
+	})
+	if err != nil {
+		t.Fatalf("search: %v", err)
+	}
+	if response.Groups[0].Status != StatusUnauthorized {
+		t.Fatalf("provider status = %q, want %q", response.Groups[0].Status, StatusUnauthorized)
+	}
+	entries := observed.All()
+	if len(entries) != 1 || entries[0].Level != zap.WarnLevel {
+		t.Fatalf("provider diagnostics = %#v", entries)
+	}
+	fields := entries[0].ContextMap()
+	if fields["source"] != "acme_issues" || fields["provider"] != "acme" ||
+		fields["kind"] != "issue" || fields["status"] != string(StatusUnauthorized) {
+		t.Fatalf("provider diagnostic fields = %#v", fields)
+	}
+	if strings.Contains(fmt.Sprint(fields), "secret-query") ||
+		strings.Contains(fmt.Sprint(fields), "secret upstream detail") {
+		t.Fatalf("provider diagnostic leaked sensitive detail: %#v", fields)
 	}
 }
 

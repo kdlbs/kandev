@@ -70,6 +70,10 @@ func TestMockControllerSeedsReviewDataAndResetsWorkspace(t *testing.T) {
 		{"/members", mockMembersRequest{Project: "group/project", Members: []ProjectMember{{ID: 42, Username: "alice"}}}},
 		{"/files", mockFilesRequest{Project: "group/project", IID: 7, Files: []MRFile{{Filename: "main.go"}}}},
 		{"/commits", mockCommitsRequest{Project: "group/project", IID: 7, Commits: []MRCommitInfo{{SHA: "abc"}}}},
+		{"/repo-files", mockRepoFilesRequest{
+			Project: "group/project", Ref: "main",
+			Files: []mockRepoFileItem{{Path: ".kandev/workflows/review.yaml", Content: "name: Review\n"}},
+		}},
 	}
 	workspaceA.SeedMR("group/project", &MR{IID: 7, Title: "Reset me"})
 	for _, item := range requests {
@@ -87,6 +91,9 @@ func TestMockControllerSeedsReviewDataAndResetsWorkspace(t *testing.T) {
 	}
 	if got := workspaceA.Stats(); got != "mrs=0 discussions=0 issues=0" {
 		t.Fatalf("workspace A after reset = %q", got)
+	}
+	if entries, err := workspaceA.ListRepoTree(t.Context(), "group/project", ".kandev/workflows", "main"); err != nil || len(entries) != 0 {
+		t.Fatalf("workspace A repo files after reset: entries=%+v err=%v", entries, err)
 	}
 	if _, err := workspaceB.GetMR(t.Context(), "other/project", 9); err != nil {
 		t.Fatalf("workspace B was reset: %v", err)
@@ -141,5 +148,47 @@ func TestMockControllerServesWorkspaceScopedGitLabCreationAPI(t *testing.T) {
 	router.ServeHTTP(listed, get)
 	if listed.Code != http.StatusOK || !strings.Contains(listed.Body.String(), mr.WebURL) {
 		t.Fatalf("list status=%d body=%s", listed.Code, listed.Body.String())
+	}
+}
+
+func TestMockControllerSeedsRepoFilesScopedToWorkspace(t *testing.T) {
+	router, workspaceA, workspaceB := newMockControllerFixture(t)
+	res := mockControlRequest(t, router, http.MethodPost,
+		"/api/v1/gitlab/mock/repo-files?workspace_id=workspace-a",
+		mockRepoFilesRequest{
+			Project: "group/project",
+			Ref:     "main",
+			Files: []mockRepoFileItem{
+				{Path: ".kandev/workflows/review.yaml", Content: "name: Review\n"},
+			},
+		})
+	if res.Code != http.StatusOK {
+		t.Fatalf("seed status=%d body=%s", res.Code, res.Body.String())
+	}
+
+	entries, err := workspaceA.ListRepoTree(t.Context(), "group/project", ".kandev/workflows", "main")
+	if err != nil {
+		t.Fatalf("workspace A tree missing: %v", err)
+	}
+	if len(entries) != 1 || entries[0].Name != "review.yaml" {
+		t.Fatalf("workspace A entries = %+v", entries)
+	}
+
+	bEntries, err := workspaceB.ListRepoTree(t.Context(), "group/project", ".kandev/workflows", "main")
+	if err != nil {
+		t.Fatalf("workspace B tree err = %v", err)
+	}
+	if len(bEntries) != 0 {
+		t.Fatalf("workspace B observed workspace A's seeded repo file: %+v", bEntries)
+	}
+}
+
+func TestMockControllerRejectsIncompleteRepoFilesRequest(t *testing.T) {
+	router, _, _ := newMockControllerFixture(t)
+	res := mockControlRequest(t, router, http.MethodPost,
+		"/api/v1/gitlab/mock/repo-files?workspace_id=workspace-a",
+		mockRepoFilesRequest{Project: "group/project"})
+	if res.Code != http.StatusBadRequest {
+		t.Fatalf("status=%d body=%s", res.Code, res.Body.String())
 	}
 }

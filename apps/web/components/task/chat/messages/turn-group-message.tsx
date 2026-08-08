@@ -7,7 +7,7 @@ import { GridSpinner } from "@/components/grid-spinner";
 import { cn, transformPathsInText } from "@/lib/utils";
 import type { Message } from "@/lib/types/http";
 import type { TurnGroup } from "@/hooks/use-processed-messages";
-import type { ToolCallMetadata } from "@/components/task/chat/types";
+import { hasProjectedShellOutput, type ToolCallMetadata } from "@/components/task/chat/types";
 import { MessageRenderer } from "@/components/task/chat/message-renderer";
 import { isSubagentEffectivelyActive } from "@/components/task/chat/messages/tool-subagent-message";
 
@@ -167,14 +167,6 @@ function isZeroExitCode(shellExec: ShellExecPayload): boolean {
   return exitCode === 0;
 }
 
-function hasProjectedShellOutput(output: ShellExecPayload["output"]): boolean {
-  return (
-    Boolean(output?.has_output) ||
-    (output?.stdout_bytes ?? 0) > 0 ||
-    (output?.stderr_bytes ?? 0) > 0
-  );
-}
-
 function createShellExecSummary(message: Message, shellExec: ShellExecPayload): ShellExecSummary {
   const output = shellExec.output;
   return {
@@ -274,6 +266,7 @@ function RepeatedToolSummary({
   entry: Extract<TurnGroupContentEntry, { kind: "repeated_tool_summary" }>;
   renderProps: MessageRenderProps;
 }) {
+  const { t } = useTranslation();
   const [expanded, setExpanded] = useState(false);
   const count = entry.messages.length;
   return (
@@ -293,7 +286,9 @@ function RepeatedToolSummary({
           <IconChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground/60" />
         )}
         <span className="min-w-0 break-words">
-          {count} repeated identical terminal commands {expanded ? "shown" : "hidden"}
+          {expanded
+            ? t("task:repeatedTerminalCommandsShown", { count })
+            : t("task:repeatedTerminalCommandsHidden", { count })}
         </span>
       </button>
       {expanded && (
@@ -375,7 +370,7 @@ export const TurnGroupMessage = memo(function TurnGroupMessage({
   // calls and nothing else.
   const rawDescription = isGroupRunning
     ? getActiveGroupDescription(group.messages)
-    : t("turnGroupToolCalls", { count: group.messages.length });
+    : t("chat:turnGroupToolCalls", { count: group.messages.length });
   const description = transformPathsInText(rawDescription, worktreePath);
   const count = group.messages.length;
 

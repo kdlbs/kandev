@@ -11,7 +11,75 @@ import (
 	"github.com/kandev/kandev/internal/db"
 )
 
-func boolPtr(b bool) *bool { return &b }
+func boolPtr(b bool) *bool       { return &b }
+func stringPtr(s string) *string { return &s }
+
+// TestStore_UpdateTaskMRAutomationOptions_AutoMergeAndPromptOverrideRoundTrip
+// closes a coverage gap: auto_fix_enabled is exercised indirectly by
+// TestStore_UpdateTaskMRAutomationOptions_ReenablingAutoFixResetsRoundCap,
+// but nothing wrote auto_merge_enabled or auto_fix_prompt_override and read
+// them back, including the empty-string-normalizes-to-NULL path
+// (normalizedMRPromptOverride).
+func TestStore_UpdateTaskMRAutomationOptions_AutoMergeAndPromptOverrideRoundTrip(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	seedTask(t, store, "task-1", "")
+
+	updated, err := store.UpdateTaskMRAutomationOptions(ctx, "task-1", TaskMRAutomationPatch{
+		AutoMergeEnabled: boolPtr(true),
+	}, nil)
+	if err != nil {
+		t.Fatalf("enable auto-merge: %v", err)
+	}
+	if !updated.AutoMergeEnabled {
+		t.Fatalf("AutoMergeEnabled = false immediately after patch, want true")
+	}
+	got, err := store.GetTaskMRAutomationOptions(ctx, "task-1")
+	if err != nil {
+		t.Fatalf("GetTaskMRAutomationOptions: %v", err)
+	}
+	if !got.AutoMergeEnabled {
+		t.Fatalf("AutoMergeEnabled = false after persisted read-back, want true")
+	}
+
+	updated, err = store.UpdateTaskMRAutomationOptions(ctx, "task-1", TaskMRAutomationPatch{
+		AutoFixPromptOverride: stringPtr("custom prompt text"),
+	}, nil)
+	if err != nil {
+		t.Fatalf("set prompt override: %v", err)
+	}
+	if updated.AutoFixPromptOverride == nil || *updated.AutoFixPromptOverride != "custom prompt text" {
+		t.Fatalf("AutoFixPromptOverride = %v immediately after patch, want \"custom prompt text\"", updated.AutoFixPromptOverride)
+	}
+	got, err = store.GetTaskMRAutomationOptions(ctx, "task-1")
+	if err != nil {
+		t.Fatalf("GetTaskMRAutomationOptions: %v", err)
+	}
+	if got.AutoFixPromptOverride == nil || *got.AutoFixPromptOverride != "custom prompt text" {
+		t.Fatalf("AutoFixPromptOverride = %v after persisted read-back, want \"custom prompt text\"", got.AutoFixPromptOverride)
+	}
+	if !got.AutoMergeEnabled {
+		t.Fatalf("AutoMergeEnabled reverted to false after an unrelated patch, want still true")
+	}
+
+	// Clearing via an empty string must normalize to NULL, not persist "".
+	updated, err = store.UpdateTaskMRAutomationOptions(ctx, "task-1", TaskMRAutomationPatch{
+		AutoFixPromptOverride: stringPtr(""),
+	}, nil)
+	if err != nil {
+		t.Fatalf("clear prompt override: %v", err)
+	}
+	if updated.AutoFixPromptOverride != nil {
+		t.Fatalf("AutoFixPromptOverride = %v immediately after clearing, want nil", updated.AutoFixPromptOverride)
+	}
+	got, err = store.GetTaskMRAutomationOptions(ctx, "task-1")
+	if err != nil {
+		t.Fatalf("GetTaskMRAutomationOptions: %v", err)
+	}
+	if got.AutoFixPromptOverride != nil {
+		t.Fatalf("AutoFixPromptOverride = %v after persisted read-back, want nil", got.AutoFixPromptOverride)
+	}
+}
 
 func TestStore_GetTaskMRAutomationOptions_ImplicitDefault(t *testing.T) {
 	store := newTestStore(t)
@@ -368,6 +436,95 @@ func TestStore_UpdateTaskMRAutomationOptions_ReenablingMergedSwitchResetsCheckpo
 	}
 }
 
+// TestStore_UpdateTaskMRAutomationOptions_ReenablingAutoFixResetsRoundCap
+// covers AC11: toggling auto-fix off and on again must clear
+// auto_fix_exhausted_at and auto_fix_round_count so a subsequent failing
+// pipeline can dispatch again.
+func TestStore_UpdateTaskMRAutomationOptions_ReenablingAutoFixResetsRoundCap(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	seedTask(t, store, "task-1", "")
+
+	if _, err := store.UpdateTaskMRAutomationOptions(ctx, "task-1", TaskMRAutomationPatch{
+		AutoFixEnabled: boolPtr(true),
+	}, nil); err != nil {
+		t.Fatalf("enable auto-fix: %v", err)
+	}
+	if err := store.RecordTaskMRFixAttempt(ctx, TaskMRFixAttempt{
+		TaskID: "task-1", ProjectPath: "group/a", MRIID: 1,
+		Signature: "sig-1", CheckpointJSON: "{}", SessionID: "sess-1",
+		EnqueuedAt: time.Now().UTC(), IncrementRound: true,
+	}); err != nil {
+		t.Fatalf("record fix attempt: %v", err)
+	}
+	if err := store.MarkTaskMRAutoFixExhausted(ctx, "task-1", "", "group/a", 1, "paused"); err != nil {
+		t.Fatalf("mark exhausted: %v", err)
+	}
+
+	got, err := store.GetTaskMRLifecycleState(ctx, "task-1", "", "group/a", 1)
+	if err != nil || got == nil {
+		t.Fatalf("GetTaskMRLifecycleState: %+v err=%v", got, err)
+	}
+	if got.AutoFixRoundCount != 1 || got.AutoFixExhaustedAt == nil {
+		t.Fatalf("expected round count 1 and exhausted set before reset, got %+v", got)
+	}
+
+	// Disable, then re-enable — the round cap and exhaustion must clear.
+	if _, err := store.UpdateTaskMRAutomationOptions(ctx, "task-1", TaskMRAutomationPatch{
+		AutoFixEnabled: boolPtr(false),
+	}, nil); err != nil {
+		t.Fatalf("disable auto-fix: %v", err)
+	}
+	if _, err := store.UpdateTaskMRAutomationOptions(ctx, "task-1", TaskMRAutomationPatch{
+		AutoFixEnabled: boolPtr(true),
+	}, nil); err != nil {
+		t.Fatalf("re-enable auto-fix: %v", err)
+	}
+
+	got, err = store.GetTaskMRLifecycleState(ctx, "task-1", "", "group/a", 1)
+	if err != nil || got == nil {
+		t.Fatalf("GetTaskMRLifecycleState after reset: %+v err=%v", got, err)
+	}
+	if got.AutoFixRoundCount != 0 || got.AutoFixExhaustedAt != nil {
+		t.Fatalf("expected round count and exhaustion cleared after re-enabling, got %+v", got)
+	}
+}
+
+// TestStore_RecordTaskMRFixAttempt_IncrementsRoundOnlyWhenRequested covers
+// the round-cap accounting AC10 depends on: IncrementRound=false (a queued
+// replace, not a new round) must not advance the counter.
+func TestStore_RecordTaskMRFixAttempt_IncrementsRoundOnlyWhenRequested(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	seedTask(t, store, "task-1", "")
+
+	for i := 0; i < 3; i++ {
+		if err := store.RecordTaskMRFixAttempt(ctx, TaskMRFixAttempt{
+			TaskID: "task-1", ProjectPath: "group/a", MRIID: 1,
+			Signature: "sig", CheckpointJSON: "{}", IncrementRound: true,
+		}); err != nil {
+			t.Fatalf("record fix attempt %d: %v", i, err)
+		}
+	}
+	if err := store.RecordTaskMRFixAttempt(ctx, TaskMRFixAttempt{
+		TaskID: "task-1", ProjectPath: "group/a", MRIID: 1,
+		Signature: "sig2", CheckpointJSON: "{}", IncrementRound: false,
+	}); err != nil {
+		t.Fatalf("record non-incrementing attempt: %v", err)
+	}
+
+	got, err := store.GetTaskMRLifecycleState(ctx, "task-1", "", "group/a", 1)
+	if err != nil || got == nil {
+		t.Fatalf("GetTaskMRLifecycleState: %+v err=%v", got, err)
+	}
+	if got.AutoFixRoundCount != 3 {
+		t.Errorf("AutoFixRoundCount = %d, want 3 (the non-incrementing attempt must not count)", got.AutoFixRoundCount)
+	}
+	if got.LastFixSignature != "sig2" {
+		t.Errorf("LastFixSignature = %q, want the latest attempt's signature", got.LastFixSignature)
+	}
+}
+
 // TestStore_ObservedStateAndErrorMutatorsDoNotClobberEachOther pins the
 // data-integrity fix directly: SetTaskMRObservedState and
 // RecordTaskMRAutomationError each write only their own column now, so
@@ -435,12 +592,13 @@ func TestStore_TaskDeleteCascadesMRAutomationRows(t *testing.T) {
 	}
 }
 
-func TestStore_ListLifecycleSubscribedTaskMRs(t *testing.T) {
+func TestStore_ListAutomationSubscribedTaskMRs(t *testing.T) {
 	store := newTestStore(t)
 	ctx := context.Background()
 	seedWorkspace(t, store, "ws-1")
 	seedTask(t, store, "task-1", "ws-1")
 	seedTask(t, store, "task-2", "ws-1")
+	seedTask(t, store, "task-3", "ws-1")
 
 	subscribed := newTestMR("task-1", "", "group/subscribed", 1)
 	if err := store.UpsertTaskMR(ctx, subscribed); err != nil {
@@ -450,18 +608,34 @@ func TestStore_ListLifecycleSubscribedTaskMRs(t *testing.T) {
 	if err := store.UpsertTaskMR(ctx, unsubscribed); err != nil {
 		t.Fatalf("upsert unsubscribed MR: %v", err)
 	}
+	autoFixOnly := newTestMR("task-3", "", "group/autofix", 3)
+	if err := store.UpsertTaskMR(ctx, autoFixOnly); err != nil {
+		t.Fatalf("upsert auto-fix-only MR: %v", err)
+	}
 	if _, err := store.UpdateTaskMRAutomationOptions(ctx, "task-1", TaskMRAutomationPatch{
 		PromptOnMerged: boolPtr(true),
 	}, nil); err != nil {
 		t.Fatalf("enable switch for task-1: %v", err)
 	}
-
-	rows, err := store.ListLifecycleSubscribedTaskMRs(ctx)
-	if err != nil {
-		t.Fatalf("ListLifecycleSubscribedTaskMRs: %v", err)
+	// task-3 has no lifecycle switch on, only auto-fix — must still be
+	// returned since the query was widened to OR in auto_fix_enabled /
+	// auto_merge_enabled (this task's change).
+	if _, err := store.UpdateTaskMRAutomationOptions(ctx, "task-3", TaskMRAutomationPatch{
+		AutoFixEnabled: boolPtr(true),
+	}, nil); err != nil {
+		t.Fatalf("enable auto-fix for task-3: %v", err)
 	}
-	if len(rows) != 1 || rows[0].TaskID != "task-1" || rows[0].ProjectPath != "group/subscribed" {
-		t.Fatalf("expected only task-1's MR, got %+v", rows)
+
+	rows, err := store.ListAutomationSubscribedTaskMRs(ctx)
+	if err != nil {
+		t.Fatalf("ListAutomationSubscribedTaskMRs: %v", err)
+	}
+	if len(rows) != 2 {
+		t.Fatalf("expected task-1's lifecycle-subscribed MR and task-3's auto-fix-subscribed MR, got %+v", rows)
+	}
+	gotTasks := map[string]bool{rows[0].TaskID: true, rows[1].TaskID: true}
+	if !gotTasks["task-1"] || !gotTasks["task-3"] {
+		t.Fatalf("expected task-1 and task-3, got %+v", rows)
 	}
 }
 

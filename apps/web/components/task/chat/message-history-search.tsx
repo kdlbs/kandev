@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { searchHistory, type MessageHistoryEntry, type SearchHit } from "./message-history";
 import { HitRow } from "./message-history-search-row";
+import { useTranslation } from "react-i18next";
 
 type MessageHistorySearchProps = {
   /** Newest-first list of the user's previous messages for this session. */
@@ -114,6 +115,7 @@ export function MessageHistorySearch({
   onClose,
   onSelect,
 }: MessageHistorySearchProps) {
+  const { t } = useTranslation();
   const [query, setQuery] = useState("");
   const hits = useHits(history, query);
   const [selectedIndex, setSelectedIndex] = useSelectedIndex(hits.length, query);
@@ -150,7 +152,7 @@ export function MessageHistorySearch({
     >
       <div className="flex items-center gap-2 px-2 py-1.5 border-b border-border/50">
         <span className="text-xs font-medium text-muted-foreground shrink-0">
-          (reverse-i-search)
+          {t("task:reverseISearch")}
         </span>
         <input
           ref={inputRef}
@@ -160,7 +162,7 @@ export function MessageHistorySearch({
           onKeyDown={(e) =>
             handleOverlayKeyDown(e, { hits, selectedIndex, setSelectedIndex, onSelect, onClose })
           }
-          placeholder="Type to search previous messages..."
+          placeholder={t("task:typeToSearchPreviousMessages")}
           className="flex-1 bg-transparent text-xs outline-none placeholder:text-muted-foreground"
           data-testid="history-search-input"
         />
@@ -169,7 +171,7 @@ export function MessageHistorySearch({
             className="text-[10px] text-muted-foreground shrink-0"
             data-testid="history-search-loading-older"
           >
-            loading older…
+            {t("task:loadingOlder")}
           </span>
         )}
       </div>
@@ -179,7 +181,7 @@ export function MessageHistorySearch({
         style={{ maxHeight: OVERLAY_HEIGHT - 36 }}
       >
         {hits.length === 0 ? (
-          <div className="px-3 py-2 text-xs text-muted-foreground">No matches</div>
+          <div className="px-3 py-2 text-xs text-muted-foreground">{t("task:noMatches")}</div>
         ) : (
           hits.map((hit, rowIndex) => (
             <HitRow

@@ -1,6 +1,8 @@
 import { IconAlertTriangle } from "@tabler/icons-react";
+import { Trans, useTranslation } from "react-i18next";
 
 export function WorkspaceChangeConsequences({ restartsWorkspace }: { restartsWorkspace: boolean }) {
+  const { t } = useTranslation();
   return (
     <section
       role="note"
@@ -17,29 +19,30 @@ export function WorkspaceChangeConsequences({ restartsWorkspace }: { restartsWor
           <div className="space-y-1">
             <h3 id="workspace-change-consequences-title" className="font-medium text-foreground">
               {restartsWorkspace
-                ? "This restarts the task workspace"
-                : "This updates the live task workspace"}
+                ? t("task:thisRestartsTheTaskWorkspace")
+                : t("task:thisUpdatesTheLiveTaskWorkspace")}
             </h3>
             <p className="text-muted-foreground">
-              Review these changes before adding sources. The task must remain idle until the
-              operation finishes.
+              {t("task:reviewTheseChangesBeforeAddingSources")}
             </p>
           </div>
           {restartsWorkspace ? <RestartSummary /> : <LiveUpdateSummary />}
           <details className="group">
             <summary className="flex min-h-11 cursor-pointer items-center font-medium text-foreground">
-              Full impact details
+              {t("task:fullImpactDetails")}
             </summary>
             <div className="pb-1">
               {restartsWorkspace ? <RestartConsequences /> : <LiveUpdateConsequences />}
             </div>
           </details>
           <p className="border-t border-amber-500/20 pt-2 text-muted-foreground">
-            <strong className="font-medium text-foreground">
-              Cancel leaves the workspace unchanged.
-            </strong>{" "}
-            If you continue, the batch is all-or-nothing: when any source fails, none of the new
-            sources are attached.
+            <Trans i18nKey="task:cancelLeavesWorkspaceUnchangedDetail">
+              <strong className="font-medium text-foreground">
+                Cancel leaves the workspace unchanged.
+              </strong>{" "}
+              If you continue, the batch is all-or-nothing: when any source fails, none of the new
+              sources are attached.
+            </Trans>
           </p>
         </div>
       </div>
@@ -48,31 +51,21 @@ export function WorkspaceChangeConsequences({ restartsWorkspace }: { restartsWor
 }
 
 function RestartSummary() {
+  const { t } = useTranslation();
   return (
     <ul className="list-disc space-y-1.5 pl-4 text-muted-foreground">
-      <li>
-        The idle agent restarts at the task root. Existing files, Git changes, task and session
-        history, messages, plan, attached sources, model, and mode remain.
-      </li>
-      <li>
-        Provider-private context that Kandev did not record may not carry over. Open terminals, dev
-        servers, and other workspace processes stop, including the task editor server.
-      </li>
+      <li>{t("task:theIdleAgentRestartsAtThe")}</li>
+      <li>{t("task:providerPrivateContextThatKandevDid")}</li>
     </ul>
   );
 }
 
 function LiveUpdateSummary() {
+  const { t } = useTranslation();
   return (
     <ul className="list-disc space-y-1.5 pl-4 text-muted-foreground">
-      <li>
-        Repositories are added as top-level entries in the current remote workspace. The
-        agent&apos;s working directory does not change.
-      </li>
-      <li>
-        The agent and running workspace processes continue. Existing files, Git changes, and
-        recorded task and session context remain.
-      </li>
+      <li>{t("task:repositoriesAreAddedAsTopLevel")}</li>
+      <li>{t("task:theAgentAndRunningWorkspaceProcesses")}</li>
     </ul>
   );
 }
@@ -81,23 +74,30 @@ function RestartConsequences() {
   return (
     <ul className="list-disc space-y-1.5 pl-4 text-muted-foreground">
       <li>
-        <strong className="font-medium text-foreground">Workspace:</strong> The task root becomes
-        the agent&apos;s working directory. For a single-repository task, this moves the CWD up one
-        level and shows every source as a named top-level entry. Existing files and Git changes are
-        not moved or discarded.
+        <Trans i18nKey="task:restartConsequenceWorkspace">
+          <strong className="font-medium text-foreground">Workspace:</strong> The task root becomes
+          the agent&apos;s working directory. For a single-repository task, this moves the CWD up
+          one level and shows every source as a named top-level entry. Existing files and Git
+          changes are not moved or discarded.
+        </Trans>
       </li>
       <li>
-        <strong className="font-medium text-foreground">Session context:</strong> Kandev restarts
-        the idle agent while preserving the task, session, task state, messages, plan, attached
-        sources, and selected model and mode. Providers that support cross-directory resume keep
-        their native session. Other providers start a new session and receive Kandev&apos;s recorded
-        conversation with the next prompt. Provider-private context that Kandev did not record may
-        not carry over.
+        <Trans i18nKey="task:restartConsequenceSessionContext">
+          <strong className="font-medium text-foreground">Session context:</strong> Kandev restarts
+          the idle agent while preserving the task, session, task state, messages, plan, attached
+          sources, and selected model and mode. Providers that support cross-directory resume keep
+          their native session. Other providers start a new session and receive Kandev&apos;s
+          recorded conversation with the next prompt. Provider-private context that Kandev did not
+          record may not carry over.
+        </Trans>
       </li>
       <li>
-        <strong className="font-medium text-foreground">Running processes:</strong> Open terminals,
-        dev servers, and other workspace processes stop. This includes the task editor server. Save
-        unsaved work, then reopen or restart those processes after the sources are attached.
+        <Trans i18nKey="task:restartConsequenceRunningProcesses">
+          <strong className="font-medium text-foreground">Running processes:</strong> Open
+          terminals, dev servers, and other workspace processes stop. This includes the task editor
+          server. Save unsaved work, then reopen or restart those processes after the sources are
+          attached.
+        </Trans>
       </li>
     </ul>
   );
@@ -107,14 +107,19 @@ function LiveUpdateConsequences() {
   return (
     <ul className="list-disc space-y-1.5 pl-4 text-muted-foreground">
       <li>
-        <strong className="font-medium text-foreground">Workspace:</strong> Repositories are cloned
-        as named top-level entries under the current remote workspace. The agent&apos;s working
-        directory does not change, and existing files and Git changes are not moved or discarded.
+        <Trans i18nKey="task:liveUpdateConsequenceWorkspace">
+          <strong className="font-medium text-foreground">Workspace:</strong> Repositories are
+          cloned as named top-level entries under the current remote workspace. The agent&apos;s
+          working directory does not change, and existing files and Git changes are not moved or
+          discarded.
+        </Trans>
       </li>
       <li>
-        <strong className="font-medium text-foreground">Session and processes:</strong> The agent
-        and running workspace processes continue while Kandev rescans the workspace. The task,
-        session, task state, messages, plan, attached sources, model, and mode remain in place.
+        <Trans i18nKey="task:liveUpdateConsequenceSessionAndProcesses">
+          <strong className="font-medium text-foreground">Session and processes:</strong> The agent
+          and running workspace processes continue while Kandev rescans the workspace. The task,
+          session, task state, messages, plan, attached sources, model, and mode remain in place.
+        </Trans>
       </li>
     </ul>
   );

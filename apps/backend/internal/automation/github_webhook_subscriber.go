@@ -128,7 +128,7 @@ func (s *GitHubWebhookSubscriber) checkPushTrigger(
 		"pusher_login": payload.PusherLogin,
 		"message":      payload.HeadCommitMsg,
 	})
-	if err := s.svc.FireTrigger(ctx, t.AutomationID, t.ID, TriggerTypeGitHubPush, data, dedupKey); err != nil {
+	if _, err := s.svc.FireTrigger(ctx, t.AutomationID, t.ID, TriggerTypeGitHubPush, data, dedupKey); err != nil {
 		s.logger.Error("failed to fire push trigger", zap.String("trigger_id", t.ID), zap.Error(err))
 	}
 }
@@ -176,7 +176,7 @@ func (s *GitHubWebhookSubscriber) checkCITrigger(
 		"check_run_id": payload.CheckRunID,
 		"html_url":     payload.HTMLURL,
 	})
-	if err := s.svc.FireTrigger(ctx, t.AutomationID, t.ID, TriggerTypeGitHubCI, data, dedupKey); err != nil {
+	if _, err := s.svc.FireTrigger(ctx, t.AutomationID, t.ID, TriggerTypeGitHubCI, data, dedupKey); err != nil {
 		s.logger.Error("failed to fire CI trigger", zap.String("trigger_id", t.ID), zap.Error(err))
 	}
 }

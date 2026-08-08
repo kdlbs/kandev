@@ -128,6 +128,13 @@ type Adapter struct {
 	agentInfo    *AgentInfo
 	capabilities acp.AgentCapabilities
 
+	// promptQueueing caches the negotiated prompt-queueing advertisement from the
+	// initialize response. It is derived once under `mu` rather than re-read from
+	// `capabilities` on each prompt because the prompt path reads it concurrently
+	// with nothing else holding the write side, and a plain read of the untyped
+	// `capabilities.Meta` map would race.
+	promptQueueing bool
+
 	// Update channel
 	updatesCh chan AgentEvent
 
@@ -299,10 +306,41 @@ type promptTurnState struct {
 	handoffCh        chan struct{}
 	providerErrorCh  chan openCodeStderrDiagnostic
 	promptGeneration uint64
+	evidenceMu       sync.Mutex
+	codexSystemError bool
+	codexCapacity    bool
 	allowHandoff     bool
 	handedOff        bool
 	gateOwned        bool
 	finishing        bool
+}
+
+func (t *promptTurnState) observeCodexEvidence(systemError, capacity bool) {
+	if t == nil || (!systemError && !capacity) {
+		return
+	}
+	t.evidenceMu.Lock()
+	t.codexSystemError = t.codexSystemError || systemError
+	t.codexCapacity = t.codexCapacity || capacity
+	t.evidenceMu.Unlock()
+}
+
+func (t *promptTurnState) codexCapacityFailure() bool {
+	if t == nil {
+		return false
+	}
+	t.evidenceMu.Lock()
+	defer t.evidenceMu.Unlock()
+	return t.codexSystemError && t.codexCapacity
+}
+
+func (t *promptTurnState) hasCodexSystemError() bool {
+	if t == nil {
+		return false
+	}
+	t.evidenceMu.Lock()
+	defer t.evidenceMu.Unlock()
+	return t.codexSystemError
 }
 
 type asyncTurnFinalizer struct {
@@ -412,10 +450,8 @@ func (a *Adapter) Initialize(ctx context.Context) error {
 	defer span.End()
 
 	resp, err := a.acpConn.Initialize(ctx, acp.InitializeRequest{
-		ProtocolVersion: acp.ProtocolVersionNumber,
-		ClientCapabilities: acp.ClientCapabilities{
-			Meta: map[string]any{"terminal_output": true},
-		},
+		ProtocolVersion:    acp.ProtocolVersionNumber,
+		ClientCapabilities: clientCapabilitiesForAgent(a.agentID),
 		ClientInfo: &acp.Implementation{
 			Name:    "kandev-agentctl",
 			Version: "1.0.0",
@@ -436,22 +472,26 @@ func (a *Adapter) Initialize(ctx context.Context) error {
 		a.agentInfo.Version = resp.AgentInfo.Version
 	}
 	a.capabilities = resp.AgentCapabilities
+	promptQueueing := agentAdvertisesPromptQueueing(resp.AgentCapabilities)
 
 	span.SetAttributes(
 		attribute.String("agent_name", a.agentInfo.Name),
 		attribute.String("agent_version", a.agentInfo.Version),
 		attribute.Bool("supports_load_session", a.capabilities.LoadSession),
+		attribute.Bool("supports_prompt_queueing", promptQueueing),
 	)
 
 	a.logger.Info("ACP adapter initialized",
 		zap.String("agent_name", a.agentInfo.Name),
 		zap.String("agent_version", a.agentInfo.Version),
-		zap.Bool("supports_load_session", a.capabilities.LoadSession))
+		zap.Bool("supports_load_session", a.capabilities.LoadSession),
+		zap.Bool("supports_prompt_queueing", promptQueueing))
 
 	// Cache auth methods so we can re-emit them on auth_required without re-running initialize.
 	authMethods := convertAuthMethods(resp.AuthMethods)
 	a.mu.Lock()
 	a.availableAuthMethods = authMethods
+	a.promptQueueing = promptQueueing
 	a.mu.Unlock()
 
 	// Emit agent capabilities event with prompt capabilities and auth methods
@@ -460,6 +500,7 @@ func (a *Adapter) Initialize(ctx context.Context) error {
 		SupportsImage:           a.capabilities.PromptCapabilities.Image,
 		SupportsAudio:           a.capabilities.PromptCapabilities.Audio,
 		SupportsEmbeddedContext: a.capabilities.PromptCapabilities.EmbeddedContext,
+		SupportsPromptQueueing:  promptQueueing,
 		AuthMethods:             authMethods,
 	})
 
@@ -524,6 +565,7 @@ func (a *Adapter) sendUpdate(event AgentEvent) {
 	if lifetimeCtx == nil {
 		lifetimeCtx = context.Background()
 	}
+	event.NormalizedPayload = event.NormalizedPayload.Snapshot()
 	closedCh := a.closedCh
 	if closedCh != nil {
 		a.updateSendWg.Add(1)
@@ -548,6 +590,7 @@ func (a *Adapter) sendUpdateLocked(event AgentEvent) bool {
 	if a.closed {
 		return false
 	}
+	event.NormalizedPayload = event.NormalizedPayload.Snapshot()
 	select {
 	case a.updatesCh <- event:
 		return true

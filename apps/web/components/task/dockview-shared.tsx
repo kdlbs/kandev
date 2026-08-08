@@ -35,11 +35,12 @@ import { TerminalPanel } from "./terminal-panel";
 import { BrowserPanel } from "./browser-panel";
 import { VscodePanel } from "./vscode-panel";
 import { CommitDetailPanel } from "./commit-detail-panel";
-import type { OpenDiffOptions } from "./changes-diff-target";
+import type { CommitDetailTarget, OpenDiffOptions } from "./changes-diff-target";
 import { ReviewDetailPanelComponent } from "./review-detail-panel";
 import { MRDetailPanelComponent } from "@/components/gitlab/mr-detail-panel";
 import { PluginTaskPanel } from "./plugin-task-panel";
 import { PluginPanelTab } from "./plugin-panel-tab";
+import { TodosContent } from "./todos-panel-content";
 
 import { setPanelTitle, panelPortalManager } from "@/lib/layout/panel-portal-manager";
 import { getWebSocketClient } from "@/lib/ws/connection";
@@ -117,6 +118,7 @@ export const dockviewComponents: Record<string, React.FunctionComponent<IDockvie
   browser: PortalSlot,
   vscode: PortalSlot,
   plan: PortalSlot,
+  todos: PortalSlot,
   "pr-detail": PortalSlot,
   "mr-detail": PortalSlot,
   // Generic component every plugin-contributed task panel shares (Approach
@@ -332,7 +334,7 @@ function ChangesContent({ panelId }: { panelId: string }) {
     [addFileDiffPanel],
   );
   const handleOpenCommitDetail = useCallback(
-    (sha: string, repo?: string) => addCommitDetailPanel(sha, { repo }),
+    (target: CommitDetailTarget) => addCommitDetailPanel(target),
     [addCommitDetailPanel],
   );
   const handleOpenDiffAll = useCallback(() => addDiffViewerPanel(), [addDiffViewerPanel]);
@@ -398,6 +400,7 @@ const PANEL_RENDERERS: Record<string, PanelRenderer> = {
   browser: (panelId, params) => <BrowserPanel panelId={panelId} params={params} />,
   vscode: (panelId) => <VscodePanel panelId={panelId} />,
   plan: () => <PlanContent />,
+  todos: () => <TodosContent />,
   "pr-detail": (panelId, params) => (
     <ReviewDetailPanelComponent panelId={panelId} params={params} />
   ),

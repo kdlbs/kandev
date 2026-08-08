@@ -13,6 +13,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/registry"
 	runtimeapi "github.com/kandev/kandev/internal/agent/runtime"
 	"github.com/kandev/kandev/internal/agent/runtime/agentctl"
+	runtimeenv "github.com/kandev/kandev/internal/agent/runtime/environment"
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/clarification"
@@ -112,7 +113,19 @@ func newLifecycleAdapter(mgr *lifecycle.Manager, reg *registry.Registry, log *lo
 // LaunchAgent creates a new agentctl instance for a task.
 // Agent subprocess is NOT started - call StartAgentProcess() explicitly.
 func (a *lifecycleAdapter) LaunchAgent(ctx context.Context, req *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
-	launchReq := buildLifecycleLaunchRequest(req)
+	// WorkspacePath wins when set (repo-less task with picked folder); otherwise
+	// fall back to RepositoryURL (legacy: this carries a local filesystem path
+	// for the workspace). Empty is also valid — lifecycle manager creates a
+	// scratch workspace.
+	workspacePath := req.WorkspacePath
+	if workspacePath == "" {
+		workspacePath = req.RepositoryURL
+	}
+	officeProfileID := req.OfficeAgentProfileID
+	if officeProfileID == "" {
+		officeProfileID = req.AgentProfileID
+	}
+	launchReq := buildLifecycleLaunchRequest(req, workspacePath, officeProfileID)
 
 	// Create the agentctl execution (does NOT start agent process)
 	execution, err := a.mgr.Launch(ctx, launchReq)
@@ -166,96 +179,93 @@ func (a *lifecycleAdapter) LaunchAgent(ctx context.Context, req *executor.Launch
 	}, nil
 }
 
-func buildLifecycleLaunchRequest(req *executor.LaunchAgentRequest) *lifecycle.LaunchRequest {
-	// WorkspacePath wins when set (repo-less task with picked folder); otherwise
-	// fall back to RepositoryURL (legacy: this carries a local filesystem path
-	// for the workspace). Empty is also valid — lifecycle manager creates a
-	// scratch workspace.
-	workspacePath := req.WorkspacePath
-	if workspacePath == "" {
-		workspacePath = req.RepositoryURL
-	}
-	officeProfileID := req.OfficeAgentProfileID
-	if officeProfileID == "" {
-		officeProfileID = req.AgentProfileID
-	}
+func buildLifecycleLaunchRequest(
+	req *executor.LaunchAgentRequest, workspacePath, officeProfileID string,
+) *lifecycle.LaunchRequest {
 	launchReq := &lifecycle.LaunchRequest{
-		TaskID:              req.TaskID,
-		WorkspaceID:         req.WorkspaceID,
-		SessionID:           req.SessionID,
-		TaskEnvironmentID:   req.TaskEnvironmentID,
-		TaskTitle:           req.TaskTitle,
-		AgentProfileID:      officeProfileID,
-		ExecutionProfileID:  req.AgentProfileID,
-		StartAgent:          req.StartAgent,
-		WorkspacePath:       workspacePath,
-		TaskDescription:     req.TaskDescription,
-		Attachments:         convertToLifecycleAttachments(req.Attachments),
-		Env:                 req.Env,
-		ACPSessionID:        req.ACPSessionID,
-		Metadata:            req.Metadata,
-		ModelOverride:       req.ModelOverride,
-		ExecutorType:        req.ExecutorType,
-		ExecutorConfig:      req.ExecutorConfig,
-		PreviousExecutionID: req.PreviousExecutionID,
-		McpMode:             req.McpMode,
-		McpProviders:        req.McpProviders,
-		IsEphemeral:         req.IsEphemeral,
-		IsPassthrough:       req.IsPassthrough,
-		SetupScript:         req.SetupScript,
-		CopyFiles:           req.CopyFiles,
-		// Worktree configuration for concurrent agent execution
-		UseWorktree:            req.UseWorktree,
-		WorktreeID:             req.WorktreeID,
-		RepositoryID:           req.RepositoryID,
-		RepositoryPath:         req.RepositoryPath,
-		BaseBranch:             req.BaseBranch,
-		DefaultBranch:          req.DefaultBranch,
-		CheckoutBranch:         req.CheckoutBranch,
-		PRNumber:               req.PRNumber,
-		WorktreeBranchPrefix:   req.WorktreeBranchPrefix,
-		WorktreeBranchTemplate: req.WorktreeBranchTemplate,
-		WorktreeBranchTicket:   req.WorktreeBranchTicket,
-		PullBeforeWorktree:     req.PullBeforeWorktree,
-		// Task directory mode
-		TaskDirName:        req.TaskDirName,
-		RepoName:           req.RepoName,
-		BranchSlug:         req.BranchSlug,
-		BranchIdentitySlug: req.BranchIdentitySlug,
+		TaskID:                        req.TaskID,
+		WorkspaceID:                   req.WorkspaceID,
+		SessionID:                     req.SessionID,
+		TaskEnvironmentID:             req.TaskEnvironmentID,
+		TaskTitle:                     req.TaskTitle,
+		AgentProfileID:                officeProfileID,
+		ExecutionProfileID:            req.AgentProfileID,
+		StartAgent:                    req.StartAgent,
+		WorkspacePath:                 workspacePath,
+		TaskDescription:               req.TaskDescription,
+		Attachments:                   convertToLifecycleAttachments(req.Attachments),
+		Env:                           req.Env,
+		ApprovedSecretEnvKeys:         append([]string(nil), req.ApprovedSecretEnvKeys...),
+		EnvironmentDefinitions:        append([]runtimeenv.Definition(nil), req.EnvironmentDefinitions...),
+		EnvironmentResolutionRequired: req.EnvironmentResolutionRequired,
+		ACPSessionID:                  req.ACPSessionID,
+		Metadata:                      req.Metadata,
+		ModelOverride:                 req.ModelOverride,
+		ExecutorType:                  req.ExecutorType,
+		ExecutorConfig:                req.ExecutorConfig,
+		PreviousExecutionID:           req.PreviousExecutionID,
+		McpMode:                       req.McpMode,
+		McpProviders:                  req.McpProviders,
+		IsEphemeral:                   req.IsEphemeral,
+		IsPassthrough:                 req.IsPassthrough,
+		SetupScript:                   req.SetupScript,
+		CopyFiles:                     req.CopyFiles,
+		UseWorktree:                   req.UseWorktree,
+		WorktreeID:                    req.WorktreeID,
+		RepositoryID:                  req.RepositoryID,
+		RepositoryPath:                req.RepositoryPath,
+		BaseBranch:                    req.BaseBranch,
+		DefaultBranch:                 req.DefaultBranch,
+		CheckoutBranch:                req.CheckoutBranch,
+		PRNumber:                      req.PRNumber,
+		RemoteContribution:            req.RemoteContribution,
+		WorktreeBranchPrefix:          req.WorktreeBranchPrefix,
+		WorktreeBranchTemplate:        req.WorktreeBranchTemplate,
+		WorktreeBranchTicket:          req.WorktreeBranchTicket,
+		PullBeforeWorktree:            req.PullBeforeWorktree,
+		TaskDirName:                   req.TaskDirName,
+		RepoName:                      req.RepoName,
+		BranchSlug:                    req.BranchSlug,
+		BranchIdentitySlug:            req.BranchIdentitySlug,
 	}
-	for _, f := range req.WorkspaceFolders {
-		launchReq.WorkspaceFolders = append(launchReq.WorkspaceFolders, lifecycle.WorkspaceFolderSpec{Name: f.Name, LocalPath: f.LocalPath})
-	}
-
-	applyLifecycleRouteOverride(launchReq, req.RouteOverride)
-	launchReq.Repositories = convertToLifecycleRepoSpecs(req.Repositories)
-
+	launchReq.WorkspaceFolders = lifecycleWorkspaceFolders(req.WorkspaceFolders)
+	launchReq.RouteOverride = lifecycleRouteOverride(req.RouteOverride)
+	launchReq.Repositories = lifecycleRepoLaunchSpecs(req.Repositories)
 	return launchReq
 }
 
-func applyLifecycleRouteOverride(launchReq *lifecycle.LaunchRequest, route *executor.RouteOverride) {
-	if route == nil {
-		return
+func lifecycleWorkspaceFolders(folders []executor.WorkspaceFolderSpec) []lifecycle.WorkspaceFolderSpec {
+	if len(folders) == 0 {
+		return nil
 	}
-	launchReq.RouteOverride = &lifecycle.RouteOverride{
-		ExecutionProfileID: route.ExecutionProfileID,
-		ProviderID:         route.ProviderID,
-		Model:              route.Model,
-		Tier:               route.Tier,
-		Mode:               route.Mode,
-		Flags:              route.Flags,
-		Env:                route.Env,
+	result := make([]lifecycle.WorkspaceFolderSpec, 0, len(folders))
+	for _, f := range folders {
+		result = append(result, lifecycle.WorkspaceFolderSpec{Name: f.Name, LocalPath: f.LocalPath})
+	}
+	return result
+}
+
+func lifecycleRouteOverride(override *executor.RouteOverride) *lifecycle.RouteOverride {
+	if override == nil {
+		return nil
+	}
+	return &lifecycle.RouteOverride{
+		ExecutionProfileID: override.ExecutionProfileID,
+		ProviderID:         override.ProviderID,
+		Model:              override.Model,
+		Tier:               override.Tier,
+		Mode:               override.Mode,
+		Flags:              override.Flags,
+		Env:                override.Env,
 	}
 }
 
-// convertToLifecycleRepoSpecs forwards the explicit repo list when the
-// orchestrator built one for a multi-repository launch.
-func convertToLifecycleRepoSpecs(repositories []executor.RepoSpec) []lifecycle.RepoLaunchSpec {
-	if len(repositories) == 0 {
+func lifecycleRepoLaunchSpecs(repos []executor.RepoSpec) []lifecycle.RepoLaunchSpec {
+	if len(repos) == 0 {
 		return nil
 	}
-	specs := make([]lifecycle.RepoLaunchSpec, 0, len(repositories))
-	for _, r := range repositories {
+	specs := make([]lifecycle.RepoLaunchSpec, 0, len(repos))
+	for _, r := range repos {
 		specs = append(specs, lifecycle.RepoLaunchSpec{
 			RepositoryID:           r.RepositoryID,
 			RepositoryPath:         r.RepositoryPath,
@@ -265,6 +275,7 @@ func convertToLifecycleRepoSpecs(repositories []executor.RepoSpec) []lifecycle.R
 			DefaultBranch:          r.DefaultBranch,
 			CheckoutBranch:         r.CheckoutBranch,
 			PRNumber:               r.PRNumber,
+			RemoteContribution:     r.RemoteContribution,
 			WorktreeID:             r.WorktreeID,
 			WorktreeBranchPrefix:   r.WorktreeBranchPrefix,
 			WorktreeBranchTemplate: r.WorktreeBranchTemplate,
@@ -446,6 +457,32 @@ func (a *lifecycleAdapter) PromptAgent(ctx context.Context, agentInstanceID stri
 
 func (a *lifecycleAdapter) PromptAgentWithDispatchCallback(ctx context.Context, agentInstanceID string, prompt string, attachments []v1.MessageAttachment, dispatchOnly bool, onDispatched func()) (*executor.PromptResult, error) {
 	result, err := a.mgr.PromptAgentWithDispatchCallback(ctx, agentInstanceID, prompt, attachments, dispatchOnly, onDispatched)
+	if err != nil {
+		return nil, err
+	}
+	return &executor.PromptResult{
+		StopReason:   result.StopReason,
+		AgentMessage: result.AgentMessage,
+	}, nil
+}
+
+// Compile-time guard for the steer capability. The executor selects the steer
+// path by asserting the agent manager to its unexported
+// steerAgentWithDispatchCallback interface (internal/orchestrator/executor); that
+// assertion fails silently at runtime if this method's signature drifts,
+// disabling every production steer. Pin the exact shape here so drift is a build
+// error, not a runtime regression.
+var _ interface {
+	SteerAgentWithDispatchCallback(context.Context, string, string, []v1.MessageAttachment, bool, func()) (*executor.PromptResult, error)
+} = (*lifecycleAdapter)(nil)
+
+// SteerAgentWithDispatchCallback forwards a mid-turn steer to the lifecycle
+// manager. Without it the executor's steer path type-assertion fails and every
+// eligible steer returns ErrPromptDispatchCallbackUnsupported, so the production
+// agent-manager client must satisfy the steerAgentWithDispatchCallback capability
+// exactly as it does the ordinary dispatch-callback prompt.
+func (a *lifecycleAdapter) SteerAgentWithDispatchCallback(ctx context.Context, agentInstanceID string, prompt string, attachments []v1.MessageAttachment, dispatchOnly bool, onDispatched func()) (*executor.PromptResult, error) {
+	result, err := a.mgr.SteerAgentWithDispatchCallback(ctx, agentInstanceID, prompt, attachments, dispatchOnly, onDispatched)
 	if err != nil {
 		return nil, err
 	}
@@ -726,6 +763,14 @@ func (w *orchestratorWrapper) StepRequiresCompletionSignal(ctx context.Context, 
 // ForegroundActivity forwards to the orchestrator service (ADR-0049).
 func (w *orchestratorWrapper) ForegroundActivity(sessionID string) v1.ForegroundActivity {
 	return w.svc.ForegroundActivity(sessionID)
+}
+
+func (w *orchestratorWrapper) SteerEligible(sessionID string, state models.TaskSessionState) bool {
+	return w.svc.SteerEligible(sessionID, state)
+}
+
+func (w *orchestratorWrapper) SteerTask(ctx context.Context, taskID, sessionID, prompt, model string, planMode bool, attachments []v1.MessageAttachment) (*orchestrator.PromptResult, error) {
+	return w.svc.SteerTask(ctx, taskID, sessionID, prompt, model, planMode, attachments)
 }
 
 // messageCreatorAdapter adapts the task service to the orchestrator.MessageCreator interface

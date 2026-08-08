@@ -16,6 +16,8 @@ import {
   ContextMenuTrigger,
 } from "@kandev/ui/context-menu";
 import { timeAgo } from "@/lib/utils/time";
+import type { CommitDetailTarget } from "./changes-diff-target";
+import { useTranslation } from "react-i18next";
 
 export type CommitItem = {
   commit_sha: string;
@@ -23,6 +25,8 @@ export type CommitItem = {
   insertions: number;
   deletions: number;
   pushed?: boolean;
+  statsAvailable: boolean;
+  detailTarget: CommitDetailTarget;
   /** Multi-repo: name of the repo this commit was made in. Empty for single-repo. */
   repository_name?: string;
   committed_at?: string;
@@ -47,7 +51,9 @@ function CommitContextMenu({
   onRevertCommit?: (sha: string, repo?: string) => void;
   onResetToCommit?: (sha: string, repo?: string) => void;
 }) {
-  const hasActions = onAmendCommit || onRevertCommit || onResetToCommit;
+  const { t } = useTranslation();
+  const hasActions =
+    commit.detailTarget.source === "local" && (onAmendCommit || onRevertCommit || onResetToCommit);
 
   if (!hasActions) {
     return <>{children}</>;
@@ -62,7 +68,7 @@ function CommitContextMenu({
             onSelect={() => onAmendCommit(commit.commit_message, commit.repository_name)}
           >
             <IconPencil className="h-3.5 w-3.5" />
-            Amend message
+            {t("task:amendMessage")}
           </ContextMenuItem>
         )}
         {isLatest && onRevertCommit && (
@@ -70,7 +76,7 @@ function CommitContextMenu({
             onSelect={() => onRevertCommit(commit.commit_sha, commit.repository_name)}
           >
             <IconArrowBackUp className="h-3.5 w-3.5" />
-            Revert commit
+            {t("task:revertCommit")}
           </ContextMenuItem>
         )}
         {onResetToCommit && (
@@ -78,7 +84,7 @@ function CommitContextMenu({
             onSelect={() => onResetToCommit(commit.commit_sha, commit.repository_name)}
           >
             <IconHistoryToggle className="h-3.5 w-3.5" />
-            Reset to this commit
+            {t("task:resetToThisCommit")}
           </ContextMenuItem>
         )}
       </ContextMenuContent>
@@ -103,6 +109,7 @@ function CommitRowActions({
   onRevertCommit?: (sha: string, repo?: string) => void;
   onResetToCommit?: (sha: string, repo?: string) => void;
 }) {
+  const { t } = useTranslation();
   return (
     <span className="hidden group-hover:flex items-center gap-1">
       {isLatest && onAmendCommit && (
@@ -110,7 +117,7 @@ function CommitRowActions({
           <TooltipTrigger asChild>
             <button
               type="button"
-              aria-label="Amend commit message"
+              aria-label={t("task:amendCommitMessage2")}
               className="p-0.5 text-muted-foreground hover:text-foreground cursor-pointer"
               onClick={(e) => {
                 e.stopPropagation();
@@ -120,7 +127,7 @@ function CommitRowActions({
               <IconPencil className="h-3.5 w-3.5" />
             </button>
           </TooltipTrigger>
-          <TooltipContent>Amend commit message</TooltipContent>
+          <TooltipContent>{t("task:amendCommitMessage2")}</TooltipContent>
         </Tooltip>
       )}
       {isLatest && onRevertCommit && (
@@ -128,7 +135,7 @@ function CommitRowActions({
           <TooltipTrigger asChild>
             <button
               type="button"
-              aria-label="Revert commit"
+              aria-label={t("task:revertCommit")}
               className="p-0.5 text-muted-foreground hover:text-foreground cursor-pointer"
               onClick={(e) => {
                 e.stopPropagation();
@@ -138,7 +145,7 @@ function CommitRowActions({
               <IconArrowBackUp className="h-3.5 w-3.5" />
             </button>
           </TooltipTrigger>
-          <TooltipContent>Revert commit</TooltipContent>
+          <TooltipContent>{t("task:revertCommit")}</TooltipContent>
         </Tooltip>
       )}
       {onResetToCommit && (
@@ -146,7 +153,7 @@ function CommitRowActions({
           <TooltipTrigger asChild>
             <button
               type="button"
-              aria-label="Reset to this commit"
+              aria-label={t("task:resetToThisCommit")}
               className="p-0.5 text-muted-foreground hover:text-foreground cursor-pointer"
               onClick={(e) => {
                 e.stopPropagation();
@@ -156,7 +163,7 @@ function CommitRowActions({
               <IconHistoryToggle className="h-3.5 w-3.5" />
             </button>
           </TooltipTrigger>
-          <TooltipContent>Reset to this commit</TooltipContent>
+          <TooltipContent>{t("task:resetToThisCommit")}</TooltipContent>
         </Tooltip>
       )}
     </span>
@@ -177,7 +184,7 @@ export function CommitRow({
   // Multi-repo: opening the diff for a non-primary repo's commit needs the
   // repo subpath, otherwise the agentctl looks up the SHA at the workspace
   // root and finds nothing (each repo has its own commit graph).
-  onOpenCommitDetail?: (sha: string, repo?: string) => void;
+  onOpenCommitDetail?: (target: CommitDetailTarget) => void;
   // Multi-repo: handlers receive the commit's repository_name so the
   // amend/revert/reset op runs in the right git repo. Without it, ops hit
   // the workspace root which fails on multi-repo task workspaces.
@@ -185,7 +192,10 @@ export function CommitRow({
   onRevertCommit?: (sha: string, repo?: string) => void;
   onResetToCommit?: (sha: string, repo?: string) => void;
 }) {
-  const showActions = onResetToCommit || (isLatest && (onAmendCommit || onRevertCommit));
+  const { t } = useTranslation();
+  const isLocalCommit = commit.detailTarget.source === "local";
+  const showActions =
+    isLocalCommit && (onResetToCommit || (isLatest && (onAmendCommit || onRevertCommit)));
 
   return (
     <CommitContextMenu
@@ -200,20 +210,22 @@ export function CommitRow({
         tabIndex={0}
         data-testid={`commit-row-${commit.commit_sha.slice(0, 7)}`}
         className="group relative flex items-center gap-2 text-xs rounded-md px-1 py-1 -mx-1 hover:bg-muted/60 cursor-pointer"
-        onClick={() => onOpenCommitDetail?.(commit.commit_sha, commit.repository_name)}
+        onClick={() => onOpenCommitDetail?.(commit.detailTarget)}
         onKeyDown={(e) => {
           if (e.key === "Enter" || e.key === " ") {
             e.preventDefault();
-            onOpenCommitDetail?.(commit.commit_sha, commit.repository_name);
+            onOpenCommitDetail?.(commit.detailTarget);
           }
         }}
       >
         <span
           className="shrink-0"
-          title={commit.pushed === true ? "Pushed to remote" : "Local commit (not yet pushed)"}
+          title={
+            commit.pushed === true ? t("task:pushedToRemote") : t("task:localCommitNotYetPushed")
+          }
         >
           <span className="sr-only">
-            {commit.pushed === true ? "Pushed commit" : "Unpushed commit"}
+            {commit.pushed === true ? t("task:pushedCommit") : t("task:unpushedCommit")}
           </span>
           {commit.pushed === true ? (
             <IconGitCommit aria-hidden="true" className="h-3.5 w-3.5 text-muted-foreground" />
@@ -225,12 +237,14 @@ export function CommitRow({
           {commit.commit_sha.slice(0, 7)}
         </code>
         <span className="flex-1 min-w-0 truncate text-foreground">{commit.commit_message}</span>
-        <span
-          className={`shrink-0 text-[11px] flex items-center gap-1 mr-1 ${commit.committed_at ? "group-hover:hidden" : ""}`}
-        >
-          <span className="text-emerald-500">+{commit.insertions}</span>{" "}
-          <span className="text-rose-500">-{commit.deletions}</span>
-        </span>
+        {commit.statsAvailable && (
+          <span
+            className={`shrink-0 text-[11px] flex items-center gap-1 mr-1 ${commit.committed_at ? "group-hover:hidden" : ""}`}
+          >
+            <span className="text-emerald-500">+{commit.insertions}</span>{" "}
+            <span className="text-rose-500">-{commit.deletions}</span>
+          </span>
+        )}
         {commit.committed_at && (
           <span className="hidden group-hover:flex shrink-0 text-[11px] items-center gap-1 mr-1 text-muted-foreground">
             {timeAgo(commit.committed_at)}

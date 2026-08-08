@@ -26,6 +26,8 @@ import {
   resolveImproveKandevWorkflow,
   type ImproveKandevKind,
 } from "./improve-kandev-dialog-model";
+import { Trans, useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 
 export type BootstrapState =
   | { kind: "idle" }
@@ -43,22 +45,22 @@ type ImproveKind = ImproveKandevKind;
 // Surfaced in the dialog's submit-button tooltip while the bootstrap probe is
 // in flight, so the disabled state has an explanation the user can act on
 // instead of the usual missing-field reasons.
-function bootstrapBlockedReason(bootstrap: BootstrapState): string | null {
+function bootstrapBlockedReason(t: TFunction, bootstrap: BootstrapState): string | null {
   if (bootstrap.kind === "loading" || bootstrap.kind === "idle") {
-    return "Preparing kandev repository…";
+    return t("common:preparingKandevRepository");
   }
   if (bootstrap.kind === "error") {
-    return "Bootstrap failed — close and reopen to retry.";
+    return t("common:bootstrapFailedCloseAndReopen");
   }
   return null;
 }
 
-const PLACEHOLDERS: Record<ImproveKind, string> = {
-  bug: "E.g. When I open the kanban board, the column header text overlaps the task count badge on screens narrower than 1200px...",
-  feature:
-    "E.g. Add a keyboard shortcut to mark a task as Done from the task detail view, and show the shortcut in the task action menu...",
-  issue:
-    "Describe the problem or request you want published. The agent will ask for any details required by the matching GitHub issue template...",
+// Keys, not resolved copy: a `t()` at module scope would freeze at the boot
+// locale and the pseudo-locale could not see it.
+const PLACEHOLDER_KEYS: Record<ImproveKind, string> = {
+  bug: "common:improveKandevBugPlaceholder",
+  feature: "common:improveKandevFeaturePlaceholder",
+  issue: "common:improveKandevIssuePlaceholder",
 };
 
 type CreateModeViewProps = {
@@ -74,6 +76,7 @@ type CreateModeViewProps = {
 };
 
 export function CreateModeView(props: CreateModeViewProps) {
+  const { t } = useTranslation();
   const { bootstrap, captureLogs, setCaptureLogs } = props;
   const [kind, setKind] = useState<ImproveKind>("bug");
   const ready = bootstrap.kind === "ready" ? bootstrap : null;
@@ -81,6 +84,10 @@ export function CreateModeView(props: CreateModeViewProps) {
   const forkBlockedReason = ready
     ? getImproveKandevForkBlockedReason(kind, ready.data.fork_status, ready.data.fork_message)
     : null;
+  // Tasks land in the dedicated workspace the bootstrap returned, not the
+  // user's active one. While bootstrap is in flight the active workspace is
+  // only a fallback — submit stays blocked until `ready`.
+  const effectiveWorkspaceId = ready ? ready.data.workspace_id : props.workspaceId;
 
   const handleKindChange = (next: ImproveKind) => {
     setKind(next);
@@ -92,7 +99,7 @@ export function CreateModeView(props: CreateModeViewProps) {
       open={props.open}
       onOpenChange={props.onOpenChange}
       mode="create"
-      workspaceId={props.workspaceId}
+      workspaceId={effectiveWorkspaceId}
       workflowId={workflow.workflowId}
       defaultStepId={workflow.startStep?.id ?? null}
       steps={workflow.steps.map((s) => ({ id: s.id, title: s.name, events: s.events }))}
@@ -104,9 +111,9 @@ export function CreateModeView(props: CreateModeViewProps) {
       onSuccess={props.onTaskCreated}
       lockedFields={{ repository: true, branch: true, workflow: true }}
       submitBlockedReason={
-        props.externalBlockedReason ?? forkBlockedReason ?? bootstrapBlockedReason(bootstrap)
+        props.externalBlockedReason ?? forkBlockedReason ?? bootstrapBlockedReason(t, bootstrap)
       }
-      descriptionPlaceholder={PLACEHOLDERS[kind]}
+      descriptionPlaceholder={t(PLACEHOLDER_KEYS[kind])}
       aboveDescriptionSlot={<KindTabs kind={kind} onChange={handleKindChange} />}
       extraFormSlot={
         <BootstrapStatusSlot
@@ -138,12 +145,13 @@ function CreateModeBottomSlot({ kind, steps }: { kind: ImproveKind; steps: Workf
 }
 
 function WorkflowStepsPreview({ steps }: { steps: WorkflowStep[] }) {
+  const { t } = useTranslation();
   if (steps.length === 0) return null;
   const ordered = [...steps].sort((a, b) => a.position - b.position);
   return (
     <div className="rounded-md border border-border bg-muted/30 px-3 py-2">
       <p className="mb-1.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground/80">
-        Workflow
+        {t("common:workflow")}
       </p>
       <TooltipProvider delayDuration={150}>
         <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
@@ -175,6 +183,7 @@ function WorkflowStepsPreview({ steps }: { steps: WorkflowStep[] }) {
 }
 
 function UsefulInfoCollapsible() {
+  const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   return (
     <Collapsible open={open} onOpenChange={setOpen}>
@@ -184,7 +193,7 @@ function UsefulInfoCollapsible() {
           className="group flex w-full cursor-pointer items-center justify-between rounded-md border border-border bg-muted/30 px-3 py-2 text-left text-xs hover:bg-muted/50"
         >
           <span className="font-medium text-muted-foreground">
-            Useful commands &amp; agent skills
+            {t("common:usefulCommandsAgentSkills")}
           </span>
           <IconChevronDown className="h-3.5 w-3.5 text-muted-foreground transition-transform group-data-[state=open]:rotate-180" />
         </button>
@@ -192,32 +201,33 @@ function UsefulInfoCollapsible() {
       <CollapsibleContent>
         <div className="mt-2 space-y-3 rounded-md border border-border bg-muted/20 px-3 py-2 text-xs leading-relaxed text-muted-foreground">
           <p>
-            Shell command you can run in the secondary instance, plus slash-command <em>skills</em>{" "}
-            you can ask the agent to run during the workflow.
+            <Trans i18nKey="common:shellCommandPlusSlashCommandSkills">
+              Shell command you can run in the secondary instance, plus slash-command{" "}
+              <em>skills</em> you can ask the agent to run during the workflow.
+            </Trans>
           </p>
           <div className="space-y-2">
             <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground/70">
-              Shell
+              {t("common:shell")}
             </p>
             <UsefulInfoItem cmd="make install && make dev">
-              Boots a secondary kandev dev instance with a clean DB so you can verify the change
-              without touching your main one.
+              {t("common:bootsASecondaryKandevDevInstance")}
             </UsefulInfoItem>
           </div>
           <div className="space-y-2">
             <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground/70">
-              Agent skills (ask the agent to run)
+              {t("common:agentSkillsAskTheAgentTo")}
             </p>
             <UsefulInfoItem cmd="/commit">
-              Stages and commits changes using Conventional Commits.
+              {t("common:stagesAndCommitsChangesUsingConventional")}
             </UsefulInfoItem>
-            <UsefulInfoItem cmd="/push">Commits and pushes to the current branch.</UsefulInfoItem>
+            <UsefulInfoItem cmd="/push">{t("common:commitsAndPushesToTheCurrent")}</UsefulInfoItem>
             <UsefulInfoItem cmd="/verify">
-              Runs format, typecheck, test, and lint across the monorepo.
+              {t("common:runsFormatTypecheckTestAndLint")}
             </UsefulInfoItem>
-            <UsefulInfoItem cmd="/pr">Commits, pushes, and opens a pull request.</UsefulInfoItem>
+            <UsefulInfoItem cmd="/pr">{t("common:commitsPushesAndOpensAPull")}</UsefulInfoItem>
             <UsefulInfoItem cmd="/pr-fixup">
-              Waits for CI and automated reviews, then fixes failures and addresses comments.
+              {t("common:waitsForCiAndAutomatedReviews")}
             </UsefulInfoItem>
           </div>
         </div>
@@ -242,17 +252,18 @@ function KindTabs({
   kind: ImproveKind;
   onChange: (next: ImproveKind) => void;
 }) {
+  const { t } = useTranslation();
   return (
     <Tabs value={kind} onValueChange={(v) => onChange(v as ImproveKind)}>
       <TabsList>
         <TabsTrigger value="bug" className="cursor-pointer">
-          Bug fix
+          {t("common:bugFix")}
         </TabsTrigger>
         <TabsTrigger value="feature" className="cursor-pointer">
-          Feature request
+          {t("common:featureRequest")}
         </TabsTrigger>
         <TabsTrigger value="issue" className="cursor-pointer">
-          Open issue
+          {t("common:openIssue")}
         </TabsTrigger>
       </TabsList>
     </Tabs>
@@ -270,6 +281,7 @@ function BootstrapStatusSlot({
   captureLogs: boolean;
   setCaptureLogs: (v: boolean) => void;
 }) {
+  const { t } = useTranslation();
   return (
     <div className="space-y-2">
       <BootstrapBanner bootstrap={bootstrap} kind={kind} />
@@ -278,32 +290,27 @@ function BootstrapStatusSlot({
           className="rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-muted-foreground"
           data-testid="improve-kandev-issue-only-notice"
         >
-          This workflow will only create a GitHub issue from the repository template. The agent will
-          ask for missing details and publication approval; it will not implement the change or open
-          a pull request.
+          {t("common:thisWorkflowWillOnlyCreateA")}
         </div>
       )}
       <div className="flex items-center gap-2 text-sm text-muted-foreground">
         <label className="flex cursor-pointer items-center gap-2">
           <Checkbox checked={captureLogs} onCheckedChange={(v) => setCaptureLogs(v === true)} />
-          Include recent backend &amp; browser logs as context for the agent
+          {t("common:includeRecentBackendAndBrowserLogs")}
         </label>
         <TooltipProvider delayDuration={150}>
           <Tooltip>
             <TooltipTrigger asChild>
               <button
                 type="button"
-                aria-label="How log context works"
+                aria-label={t("common:howLogContextWorks")}
                 className="cursor-help text-muted-foreground/70 hover:text-muted-foreground"
               >
                 <IconInfoCircle className="h-3.5 w-3.5" />
               </button>
             </TooltipTrigger>
             <TooltipContent side="top" className="max-w-xs text-xs leading-relaxed">
-              Kandev keeps a small in-memory ring buffer of the most recent backend logs and browser
-              console events. When enabled, those logs are written to a temporary folder on your
-              machine, and the file paths are appended to the task description so the agent can read
-              them while investigating.
+              {t("common:kandevKeepsASmallInMemory")}
             </TooltipContent>
           </Tooltip>
         </TooltipProvider>
@@ -313,11 +320,12 @@ function BootstrapStatusSlot({
 }
 
 function BootstrapBanner({ bootstrap, kind }: { bootstrap: BootstrapState; kind: ImproveKind }) {
+  const { t } = useTranslation();
   if (bootstrap.kind === "loading" || bootstrap.kind === "idle") {
     return (
       <div className="flex items-center gap-2 rounded-md border border-border bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
         <IconLoader2 className="h-3.5 w-3.5 animate-spin" />
-        Preparing kandev repository in background. Fill in the details, submit when ready.
+        {t("common:preparingKandevRepositoryInBackground")}
       </div>
     );
   }
@@ -339,12 +347,13 @@ function ContributorBanner({
   data: ImproveKandevBootstrapResponse;
   kind: ImproveKind;
 }) {
+  const { t } = useTranslation();
   const { github_login: login, has_write_access: hasWrite } = data;
   if (data.fork_status === "blocked_emu" && kind !== "issue") {
     return (
       <div className="flex items-start gap-2 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">
         <IconAlertTriangle className="h-3.5 w-3.5 mt-0.5 shrink-0" />
-        <span>{data.fork_message ?? "This GitHub account cannot fork kdlbs/kandev."}</span>
+        <span>{data.fork_message ?? t("common:thisGithubAccountCannotForkKdlbs")}</span>
       </div>
     );
   }
@@ -356,14 +365,18 @@ function ContributorBanner({
       ) : (
         <IconGitFork className="h-3.5 w-3.5 mt-0.5 shrink-0" />
       )}
+      {/* One complete sentence per branch. Splitting this into a "Contributing
+          as" stem plus a tail would freeze the word order in JSX and leave the
+          tail untranslatable. */}
       <span>
-        Contributing as{" "}
         {login ? (
-          <code className="font-mono text-foreground">@{login}</code>
+          <Trans i18nKey="common:contributingAsLogin" values={{ login, access: accessMessage }}>
+            Contributing as <code className="font-mono text-foreground">@{login}</code>.{" "}
+            {accessMessage}
+          </Trans>
         ) : (
-          <span>your GitHub account</span>
+          t("common:contributingAsYourGithubAccount", { access: accessMessage })
         )}
-        . {accessMessage}
       </span>
     </div>
   );

@@ -9,16 +9,21 @@ import { ExportFileTree } from "./export-file-tree";
 import { ExportFilePreview } from "./export-file-preview";
 import { buildFileTree, bundleToExportFiles, countSelectedFiles } from "./export-utils";
 import type { ExportFile } from "./export-types";
+import { useTranslation } from "react-i18next";
 
 export function ExportPreview() {
+  const { t } = useTranslation();
   const activeWorkspaceId = useAppStore((s) => s.workspaces?.activeId ?? "");
   const workspaces = useAppStore((s) => s.workspaces);
   const activeWorkspace = workspaces.items.find((w) => w.id === workspaces.activeId);
-  const workspaceName = activeWorkspace?.name || "Workspace";
+  // Fallback LABEL for the bundle header, shown only before the workspace loads.
+  const workspaceName = activeWorkspace?.name || t("common:workspace");
 
   const [files, setFiles] = useState<ExportFile[]>([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  // A catalog KEY, not a message: the load effect below must not take `t` in
+  // its dep array, or a locale switch would re-issue the export request.
+  const [errorKey, setErrorKey] = useState<string | null>(null);
   const [selectedPaths, setSelectedPaths] = useState<Set<string>>(new Set());
   const [previewPath, setPreviewPath] = useState<string | null>(null);
 
@@ -35,7 +40,7 @@ export function ExportPreview() {
         if (exported.length > 0) setPreviewPath(exported[0].path);
       })
       .catch(() => {
-        if (!cancelled) setError("Failed to load export bundle");
+        if (!cancelled) setErrorKey("office:failedToLoadExportBundle");
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -62,15 +67,15 @@ export function ExportPreview() {
   if (loading) {
     return (
       <div className="flex items-center justify-center h-full text-sm text-muted-foreground">
-        Loading export bundle...
+        {t("office:loadingExportBundle")}
       </div>
     );
   }
 
-  if (error) {
+  if (errorKey) {
     return (
       <div className="flex items-center justify-center h-full text-sm text-destructive">
-        {error}
+        {t(errorKey)}
       </div>
     );
   }
@@ -79,7 +84,11 @@ export function ExportPreview() {
     <div className="flex flex-col h-full">
       <div className="flex items-center justify-between px-4 py-3 border-b border-border shrink-0">
         <span className="text-sm text-muted-foreground">
-          {workspaceName} export &middot; {selectedCount} / {files.length} files selected
+          {t("office:exportSelectionSummary", {
+            workspace: workspaceName,
+            selected: selectedCount,
+            total: files.length,
+          })}
         </span>
         <Button
           size="sm"
@@ -88,7 +97,7 @@ export function ExportPreview() {
           className="cursor-pointer"
         >
           <IconDownload className="h-4 w-4 mr-1.5" />
-          Export {selectedCount} files
+          {t("office:exportFilesCount", { count: selectedCount })}
         </Button>
       </div>
       <div className="flex flex-1 min-h-0">

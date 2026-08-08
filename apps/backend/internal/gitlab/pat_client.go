@@ -58,9 +58,26 @@ func NewPATClient(host, token string) *PATClient {
 	}
 	host = strings.TrimRight(host, "/")
 	return &PATClient{
-		host:       host,
-		token:      token,
-		httpClient: &http.Client{Timeout: requestTimeout},
+		host:  host,
+		token: token,
+		httpClient: &http.Client{
+			Timeout: requestTimeout,
+			// net/http only strips the standard sensitive headers
+			// (Authorization, Cookie, ...) when a redirect leaves the
+			// original host; a custom PRIVATE-TOKEN header would be forwarded
+			// to the redirect target unchanged. Reject any redirect that
+			// leaves the configured origin so the credential can never be
+			// delivered to an untrusted host.
+			CheckRedirect: func(req *http.Request, via []*http.Request) error {
+				if len(via) == 0 {
+					return nil
+				}
+				if !strings.EqualFold(req.URL.Host, via[0].URL.Host) {
+					return fmt.Errorf("refusing cross-host redirect to %s", req.URL.Host)
+				}
+				return nil
+			},
+		},
 	}
 }
 
@@ -122,7 +139,14 @@ func (c *PATClient) GetAuthenticatedUser(ctx context.Context) (string, error) {
 // url.PathEscape leaves "/" alone, so do the substitution manually before
 // URL-escaping the rest.
 func projectRef(projectPath string) string {
-	return strings.ReplaceAll(url.PathEscape(projectPath), "/", "%2F")
+	return encodeSegment(projectPath)
+}
+
+// encodeSegment percent-encodes a value so it survives as one URL path
+// segment. GitLab's :id and :file_path both need this: an unencoded slash
+// routes to a different resource and 404s.
+func encodeSegment(value string) string {
+	return strings.ReplaceAll(url.PathEscape(value), "/", "%2F")
 }
 
 // groupRef returns the URL-encoded group path used as :id in /groups/:id/...
@@ -140,7 +164,35 @@ func (c *PATClient) GetMR(ctx context.Context, projectPath string, iid int) (*MR
 	if err := c.get(ctx, endpoint, &raw); err != nil {
 		return nil, fmt.Errorf("get MR !%d: %w", iid, err)
 	}
+	targetProjectID := raw.TargetProjectID
+	if targetProjectID == 0 {
+		targetProjectID = raw.ProjectID
+	}
+	if raw.SourceProjectID > 0 && (targetProjectID == 0 || raw.SourceProjectID != targetProjectID) {
+		sourceProject, err := c.getProjectByID(ctx, raw.SourceProjectID)
+		if err != nil {
+			return nil, fmt.Errorf("resolve MR source project %d: %w", raw.SourceProjectID, err)
+		}
+		raw.SourceProject = *sourceProject
+	}
 	return convertRawMR(&raw), nil
+}
+
+func (c *PATClient) getProjectByID(ctx context.Context, id int64) (*rawProject, error) {
+	if id <= 0 {
+		return nil, errors.New("source project ID is invalid")
+	}
+	var project rawProject
+	if err := c.get(ctx, fmt.Sprintf("/projects/%d", id), &project); err != nil {
+		return nil, err
+	}
+	if project.ID == 0 {
+		project.ID = id
+	}
+	if strings.TrimSpace(project.PathWithNamespace) == "" {
+		return nil, errors.New("source project path is missing")
+	}
+	return &project, nil
 }
 
 func (c *PATClient) FindMRByBranch(ctx context.Context, projectPath, branch string) (*MR, error) {
@@ -379,6 +431,40 @@ func (c *PATClient) ListPipelines(ctx context.Context, projectPath, ref string) 
 	return pipelines, nil
 }
 
+func (c *PATClient) ListPipelineJobs(ctx context.Context, projectPath string, pipelineID int64) ([]PipelineJob, error) {
+	endpoint := fmt.Sprintf("/projects/%s/pipelines/%d/jobs?per_page=%d", projectRef(projectPath), pipelineID, maxPageSize)
+	var raw []rawPipelineJob
+	for endpoint != "" {
+		var page []rawPipelineJob
+		nextLink, err := c.getPaginated(ctx, endpoint, &page)
+		if err != nil {
+			return nil, fmt.Errorf("list pipeline jobs: %w", err)
+		}
+		raw = append(raw, page...)
+		endpoint = nextLink
+	}
+	jobs := make([]PipelineJob, len(raw))
+	for i := range raw {
+		jobs[i] = convertRawPipelineJob(&raw[i])
+	}
+	return jobs, nil
+}
+
+// populatePipelineJobCounts fetches the given pipeline's jobs and fills in
+// its JobsTotal/JobsPassing from them. GitLab's pipeline list/get endpoints
+// never carry job counts (unlike GitHub's check-runs summary), so this is
+// the only way to populate them.
+func (c *PATClient) populatePipelineJobCounts(ctx context.Context, projectPath string, pipeline *Pipeline) error {
+	jobs, err := c.ListPipelineJobs(ctx, projectPath, pipeline.ID)
+	if err != nil {
+		return err
+	}
+	total, passing, _ := summarizePipelineJobs(jobs)
+	pipeline.JobsTotal = total
+	pipeline.JobsPassing = passing
+	return nil
+}
+
 func (c *PATClient) GetMRFeedback(ctx context.Context, projectPath string, iid int) (*MRFeedback, error) {
 	mr, err := c.GetMR(ctx, projectPath, iid)
 	if err != nil {
@@ -398,6 +484,16 @@ func (c *PATClient) GetMRFeedback(ctx context.Context, projectPath string, iid i
 		if err != nil {
 			return nil, err
 		}
+	}
+	if len(pipelines) > 0 {
+		jobs, err := c.ListPipelineJobs(ctx, projectPath, pipelines[0].ID)
+		if err != nil {
+			return nil, err
+		}
+		total, passing, _ := summarizePipelineJobs(jobs)
+		pipelines[0].JobsTotal = total
+		pipelines[0].JobsPassing = passing
+		pipelines[0].Jobs = jobs
 	}
 	return &MRFeedback{
 		MR:          mr,
@@ -424,6 +520,11 @@ func (c *PATClient) GetMRStatus(ctx context.Context, projectPath string, iid int
 			return nil, err
 		}
 	}
+	if len(pipelines) > 0 {
+		if err := c.populatePipelineJobCounts(ctx, projectPath, &pipelines[0]); err != nil {
+			return nil, err
+		}
+	}
 	pipelineState, jobsTotal, jobsPassing := summarizePipelines(pipelines)
 	approvalState := summarizeApprovals(len(approvals), required)
 	return &MRStatus{
@@ -435,6 +536,9 @@ func (c *PATClient) GetMRStatus(ctx context.Context, projectPath string, iid int
 		RequiredApprovals:   required,
 		PipelineJobsTotal:   jobsTotal,
 		PipelineJobsPassing: jobsPassing,
+		DetailedMergeStatus: mr.DetailedMergeStatus,
+		ReviewerCount:       len(mr.Reviewers),
+		UnapprovedReviewers: countUnapprovedReviewers(mr.Reviewers, approvals),
 	}, nil
 }
 

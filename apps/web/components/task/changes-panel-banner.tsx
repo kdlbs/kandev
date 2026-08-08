@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 import { IconAlertTriangle } from "@tabler/icons-react";
 import { reviewFileKey } from "@/components/review/types";
+import { useTranslation } from "react-i18next";
 
 /** Composite key for the file currently selected in single-file mode. */
 export function useSelectedFileKey(
@@ -20,6 +21,7 @@ export function useSelectedFileKey(
 /** Banner shown when the backend dropped files from a huge cumulative diff
  *  (large rebase) to keep the rendered row count bounded. */
 export function TruncatedFilesBanner({ count }: { count: number }) {
+  const { t } = useTranslation();
   if (count <= 0) return null;
   return (
     <div
@@ -28,8 +30,7 @@ export function TruncatedFilesBanner({ count }: { count: number }) {
     >
       <IconAlertTriangle className="h-3.5 w-3.5 shrink-0" />
       <span>
-        {count.toLocaleString()} more changed {count === 1 ? "file is" : "files are"} hidden — the
-        change set is too large to render in full.
+        {t("task:changesHiddenBanner", { count, formattedCount: count.toLocaleString() })}
       </span>
     </div>
   );

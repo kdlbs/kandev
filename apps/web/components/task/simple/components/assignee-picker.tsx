@@ -8,6 +8,7 @@ import { listAgentProfiles } from "@/lib/api/domains/office-api";
 import { useOptimisticTaskMutation } from "@/hooks/use-optimistic-task-mutation";
 import { AgentAvatar } from "@/app/office/components/agent-avatar";
 import type { Task } from "@/app/office/tasks/[id]/types";
+import { useTranslation } from "react-i18next";
 
 type AssigneePickerProps = {
   task: Task;
@@ -16,6 +17,7 @@ type AssigneePickerProps = {
 const NO_ASSIGNEE = "__none__";
 
 export function AssigneePicker({ task }: AssigneePickerProps) {
+  const { t } = useTranslation();
   const agents = useAppStore((s) => s.office.agentProfiles);
   const setOfficeAgentProfiles = useAppStore((s) => s.setOfficeAgentProfiles);
   const workspaceId = useAppStore((s) => s.workspaces.activeId);
@@ -43,9 +45,9 @@ export function AssigneePicker({ task }: AssigneePickerProps) {
   const options = useMemo<ComboboxOption[]>(() => {
     const noOpt: ComboboxOption = {
       value: NO_ASSIGNEE,
-      label: "No assignee",
+      label: t("task:noAssignee"),
       keywords: ["none", "unassigned"],
-      renderLabel: () => <span className="text-muted-foreground">No assignee</span>,
+      renderLabel: () => <span className="text-muted-foreground">{t("task:noAssignee")}</span>,
     };
     const agentOpts = agents.map<ComboboxOption>((a) => ({
       value: a.id,
@@ -59,7 +61,7 @@ export function AssigneePicker({ task }: AssigneePickerProps) {
       ),
     }));
     return [noOpt, ...agentOpts];
-  }, [agents]);
+  }, [agents, t]);
 
   const currentValue = task.assigneeAgentProfileId || NO_ASSIGNEE;
 
@@ -86,9 +88,9 @@ export function AssigneePicker({ task }: AssigneePickerProps) {
       options={options}
       value={currentValue}
       onValueChange={handleSelect}
-      placeholder="No assignee"
-      searchPlaceholder="Search agents..."
-      emptyMessage="No agents found."
+      placeholder={t("task:noAssignee")}
+      searchPlaceholder={t("task:searchAgents")}
+      emptyMessage={t("task:noAgentsFound")}
       triggerClassName="h-7 w-full justify-end px-2"
       popoverAlign="end"
       testId="assignee-picker-trigger"

@@ -20,6 +20,7 @@ import {
   ClarificationOptions,
   ClarificationStepper,
 } from "./clarification-overlay-parts";
+import { useTranslation } from "react-i18next";
 
 type ClarificationInputOverlayProps = {
   messages: readonly Message[] | null | undefined;
@@ -85,6 +86,7 @@ type CardProps = {
 };
 
 function ClarificationCard(props: CardProps) {
+  const { t } = useTranslation();
   const {
     meta,
     index,
@@ -112,7 +114,7 @@ function ClarificationCard(props: CardProps) {
         <div className="flex items-center gap-2 mb-2 text-xs text-muted-foreground">
           {total > 1 && (
             <span data-testid="clarification-progress-chip">
-              Question {index + 1} of {total}
+              {t("task:questionOfTotal", { index: index + 1, total })}
             </span>
           )}
           {metadata.question.title && (
@@ -141,7 +143,7 @@ function ClarificationCard(props: CardProps) {
           className="mt-2 flex items-center gap-1.5 text-xs text-slate-600 dark:text-slate-400"
         >
           <IconInfoCircle className="h-3.5 w-3.5 flex-shrink-0" />
-          The agent has moved on. Your response will be sent as a new message.
+          {t("task:theAgentHasMovedOn")}
         </div>
       )}
       <ClarificationCustomInput
@@ -464,12 +466,13 @@ function ClarificationHeaderActions({
   onSubmit: () => void;
   onSkip: () => void;
 }) {
+  const { t } = useTranslation();
   return (
     <div className="flex items-center gap-2">
       {total > 1 && (
         <KeyboardShortcutTooltip
           shortcut={SHORTCUTS.SUBMIT}
-          description="Submit answers"
+          description={t("task:submitAnswers")}
           enabled={!isSubmitting}
         >
           <span
@@ -489,7 +492,7 @@ function ClarificationHeaderActions({
                   : "bg-muted text-muted-foreground cursor-not-allowed",
               )}
             >
-              {isSubmitting ? "Submitting…" : "Submit"}
+              {isSubmitting ? t("task:submitting") : t("task:submit")}
               <IconCheck className="h-3 w-3" />
             </button>
           </span>
@@ -497,7 +500,7 @@ function ClarificationHeaderActions({
       )}
       <KeyboardShortcutTooltip
         shortcut={SHORTCUTS.CANCEL}
-        description="Skip all questions"
+        description={t("task:skipAllQuestions")}
         enabled={!isSubmitting}
       >
         <span className="inline-flex" data-testid="clarification-skip-shortcut">
@@ -507,7 +510,7 @@ function ClarificationHeaderActions({
             disabled={isSubmitting}
             className="text-muted-foreground hover:text-foreground cursor-pointer disabled:opacity-50"
             data-testid="clarification-skip"
-            aria-label="Skip all questions"
+            aria-label={t("task:skipAllQuestions")}
           >
             <IconX className="h-4 w-4" />
           </button>

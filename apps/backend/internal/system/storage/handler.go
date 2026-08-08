@@ -46,6 +46,22 @@ type Summary struct {
 	Docker     any `json:"docker"`
 }
 
+type DiskCapacity struct {
+	Path           string  `json:"path"`
+	TotalBytes     uint64  `json:"total_bytes"`
+	UsedBytes      uint64  `json:"used_bytes"`
+	AvailableBytes uint64  `json:"available_bytes"`
+	UsedPercent    float64 `json:"used_percent"`
+	Available      bool    `json:"available"`
+	Warning        string  `json:"warning,omitempty"`
+}
+
+type DiskCapacityReader func(context.Context, string) (DiskCapacity, error)
+
+func (r DiskCapacityReader) ReadDiskCapacity(ctx context.Context, path string) (DiskCapacity, error) {
+	return r(ctx, path)
+}
+
 type QuarantineSummary struct {
 	Count     int   `json:"count" db:"count"`
 	SizeBytes int64 `json:"size_bytes" db:"size_bytes"`
@@ -68,6 +84,8 @@ type HandlerConfig struct {
 	Runs              RunLister
 	Quarantine        QuarantineLister
 	Overview          OverviewReader
+	DiskCapacity      DiskCapacityReader
+	DiskPath          string
 	Mutations         Mutations
 	OnSettingsChanged func(StorageMaintenanceSettings)
 	LogError          func(string, error)
@@ -89,6 +107,7 @@ func (h *Handler) logError(message string, err error) {
 
 func RegisterRoutes(group *gin.RouterGroup, handler *Handler) {
 	group.GET("/storage", handler.getStorage)
+	group.GET("/storage/disk", handler.getStorageDisk)
 	group.GET("/storage/settings", handler.getStorageSettings)
 	group.PATCH("/storage/settings", handler.patchSettings)
 	group.POST("/storage/go-cache/adopt", handler.adoptGoCache)
@@ -99,6 +118,25 @@ func RegisterRoutes(group *gin.RouterGroup, handler *Handler) {
 	group.POST("/storage/quarantine/:id/restore", handler.restoreQuarantine)
 	group.DELETE("/storage/quarantine", handler.deleteQuarantineBulk)
 	group.DELETE("/storage/quarantine/:id", handler.deleteQuarantine)
+}
+
+func (h *Handler) getStorageDisk(c *gin.Context) {
+	result := DiskCapacity{Path: h.config.DiskPath}
+	if h.config.DiskCapacity == nil {
+		result.Warning = "disk usage unavailable"
+		c.JSON(http.StatusOK, result)
+		return
+	}
+	capacity, err := h.config.DiskCapacity.ReadDiskCapacity(c.Request.Context(), h.config.DiskPath)
+	if err != nil {
+		h.logError("failed to read storage disk capacity", err)
+		result.Warning = "disk usage unavailable"
+		c.JSON(http.StatusOK, result)
+		return
+	}
+	capacity.Path = h.config.DiskPath
+	capacity.Available = true
+	c.JSON(http.StatusOK, capacity)
 }
 
 func (h *Handler) listRuns(c *gin.Context) {

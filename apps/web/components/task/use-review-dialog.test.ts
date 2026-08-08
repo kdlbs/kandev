@@ -106,4 +106,29 @@ describe("buildReviewGitStatusFiles", () => {
     expect(result.isMultiRepo).toBe(true);
     expect(Object.keys(result.files ?? {})).toEqual(["frontend\u0000README.md"]);
   });
+
+  it("keeps the real root status when a submodule status is also present", () => {
+    const result = buildReviewGitStatusFiles(
+      undefined,
+      [
+        {
+          repository_name: "",
+          status: status({ "README.md": file() }),
+        },
+        {
+          repository_name: "vendor/lib",
+          status: status({ "src/lib.ts": file("src/lib.ts") }),
+        },
+      ],
+      1,
+    );
+
+    expect(result.isMultiRepo).toBe(true);
+    expect(Object.keys(result.files ?? {}).sort()).toEqual([
+      "\u0000README.md",
+      "vendor/lib\u0000src/lib.ts",
+    ]);
+    expect(result.files?.["\u0000README.md"]?.repository_name).toBe("");
+    expect(result.files?.["vendor/lib\u0000src/lib.ts"]?.repository_name).toBe("vendor/lib");
+  });
 });

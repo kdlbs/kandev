@@ -7,6 +7,8 @@ vi.mock("@/lib/config", () => ({
 import {
   fetchMessageQueueSettings,
   fetchSleepInhibitionSettings,
+  resolveAgentModelConfig,
+  startHostShell,
   updateMessageQueueSettings,
   updateSleepInhibitionSettings,
 } from "./settings-api";
@@ -101,5 +103,64 @@ describe("sleep inhibition settings api", () => {
     expect(lastCall().url).toBe("http://api.test/api/v1/system/sleep-inhibition");
     expect(lastCall().init?.method).toBe("PATCH");
     expect(lastCall().init?.body).toBe(JSON.stringify({ enabled: true }));
+  });
+});
+
+describe("startHostShell", () => {
+  it("serializes a client id alongside the terminal size", async () => {
+    const clientId = "6f2d7f2d-0d0c-4c9b-8b73-1c53a5ed5b6b";
+    fetchSpy.mockResolvedValueOnce(
+      jsonResponse({
+        session_id: "session-1",
+        agent_id: "_host_shell",
+        cmd: ["/bin/bash"],
+        running: true,
+        started_at: "2026-08-04T00:00:00Z",
+      }),
+    );
+
+    await startHostShell({ cols: 80, rows: 24 }, { clientId });
+
+    expect(JSON.parse(String(lastCall().init?.body))).toEqual({
+      cols: 80,
+      rows: 24,
+      client_id: clientId,
+    });
+  });
+
+  it("preserves the legacy request shape without a client id", async () => {
+    fetchSpy.mockResolvedValueOnce(jsonResponse({}));
+    await startHostShell({ cols: 80, rows: 24 });
+
+    const fetchCall = vi.mocked(fetch).mock.calls[0];
+    expect(JSON.parse(String(fetchCall?.[1]?.body))).toEqual({ cols: 80, rows: 24 });
+  });
+});
+
+describe("resolveAgentModelConfig", () => {
+  it("posts the selected provider context", async () => {
+    fetchSpy.mockResolvedValueOnce(
+      jsonResponse({
+        agent_name: "opencode",
+        model: "opencode/gpt-5.6",
+        status: "ok",
+        config_options: [],
+        error: null,
+      }),
+    );
+
+    await resolveAgentModelConfig("opencode", {
+      model: "opencode/gpt-5.6",
+      mode: "build",
+      config_options: { reasoning_effort: "high" },
+    });
+
+    expect(lastCall().url).toBe("http://api.test/api/v1/agent-models/opencode/resolve");
+    expect(lastCall().init?.method).toBe("POST");
+    expect(JSON.parse(String(lastCall().init?.body))).toEqual({
+      model: "opencode/gpt-5.6",
+      mode: "build",
+      config_options: { reasoning_effort: "high" },
+    });
   });
 });

@@ -177,6 +177,9 @@ test.describe("Workflow start step placement", () => {
     await apiClient.saveUserSettings({
       workspace_id: seedData.workspaceId,
       workflow_filter_id: workflow.id,
+      task_create_last_used: {
+        workflow_ids_by_workspace: { [seedData.workspaceId]: workflow.id },
+      },
       enable_preview_on_click: false,
     });
 
@@ -267,6 +270,9 @@ test.describe("Workflow start step placement", () => {
     await apiClient.saveUserSettings({
       workspace_id: seedData.workspaceId,
       workflow_filter_id: workflow.id,
+      task_create_last_used: {
+        workflow_ids_by_workspace: { [seedData.workspaceId]: workflow.id },
+      },
       enable_preview_on_click: false,
     });
 

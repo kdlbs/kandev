@@ -81,6 +81,10 @@ func (ss *SchedulerService) DispatchWithRouting(
 		return false, false, fmt.Errorf("dispatch: resolve: %w", err)
 	}
 	if !res.Enabled && len(res.Candidates) == 0 {
+		if res.BlockReason.Status == routing.StatusWaitingForCapacity {
+			_, _, perr := ss.parkRunBlocked(ctx, run, agent.WorkspaceID, res)
+			return false, true, perr
+		}
 		return false, false, nil
 	}
 	if err := ss.persistRoutingDecision(ctx, run, res); err != nil {
@@ -276,6 +280,18 @@ func (ss *SchedulerService) tryCandidates(
 		}
 		ss.recordRouteAttempt(agent.WorkspaceID,
 			string(candidate.ProviderID), outcome, string(classified.Code))
+		if routingerr.Decide(routingerr.ContextOffice, classified, time.Now().UTC()) == routingerr.DecisionShortRetry {
+			retryCount, countErr := ss.shortRouteRetryCount(ctx, run, candidate)
+			if countErr != nil {
+				return false, nil, countErr
+			}
+			if retryCount < officeShortRetryMaxAttempts {
+				if applyErr := ss.applyShortRouteRetry(ctx, run, agent, candidate, classified, retryCount+1); applyErr != nil {
+					return false, nil, applyErr
+				}
+				return false, nil, nil
+			}
+		}
 		fatal, err := ss.handleLaunchFailure(ctx, run, agent, candidate, seq, launchErr)
 		if err != nil {
 			return false, nil, err

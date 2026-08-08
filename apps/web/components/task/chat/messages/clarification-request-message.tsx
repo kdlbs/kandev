@@ -4,6 +4,7 @@ import ReactMarkdown from "react-markdown";
 import { IconMessageQuestion, IconCheck, IconX } from "@tabler/icons-react";
 import { markdownComponents, remarkPlugins } from "@/components/shared/markdown-components";
 import type { Message, ClarificationRequestMetadata } from "@/lib/types/http";
+import { useTranslation } from "react-i18next";
 
 type ClarificationRequestMessageProps = {
   comment: Message;
@@ -14,6 +15,7 @@ type ClarificationRequestMessageProps = {
  * Pending clarifications are shown in the input area instead.
  */
 export function ClarificationRequestMessage({ comment }: ClarificationRequestMessageProps) {
+  const { t } = useTranslation();
   const metadata = comment.metadata as ClarificationRequestMetadata | undefined;
 
   if (!metadata?.question) {
@@ -89,20 +91,20 @@ export function ClarificationRequestMessage({ comment }: ClarificationRequestMes
               {/* pre-wrap preserves newlines from multiline custom answers. */}
               <span className="whitespace-pre-wrap">{getAnswerSummary()}</span>
               {metadata.agent_disconnected && (
-                <span className="text-muted-foreground">· sent as new message</span>
+                <span className="text-muted-foreground">{t("task:sentAsNewMessage")}</span>
               )}
             </div>
           )}
           {isSkipped && (
             <div className="mt-1 ml-3 flex items-center gap-1.5 text-xs text-muted-foreground">
               {getStatusIndicator()}
-              Skipped
+              {t("task:skipped")}
             </div>
           )}
           {isCancelled && (
             <div className="mt-1 ml-3 flex items-center gap-1.5 text-xs text-muted-foreground">
               {getStatusIndicator()}
-              Cancelled
+              {t("task:cancelled")}
             </div>
           )}
           {isExpired && (
@@ -111,7 +113,7 @@ export function ClarificationRequestMessage({ comment }: ClarificationRequestMes
               className="mt-1 ml-3 flex items-center gap-1.5 text-xs text-orange-500/80"
             >
               {getStatusIndicator()}
-              Timed out (agent moved on)
+              {t("task:timedOutAgentMovedOn")}
             </div>
           )}
         </div>
