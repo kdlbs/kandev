@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -139,6 +140,51 @@ func TestReclaimSessionWorktree_IdempotentWhenDirectoryAlreadyAbsent(t *testing.
 
 	if err := mgr.ReclaimSessionWorktree(ctx, wt); err != nil {
 		t.Fatalf("ReclaimSessionWorktree on already-absent directory: %v", err)
+	}
+}
+
+// TestReclaimSessionWorktree_ReturnsRemovalFailure proves ReclaimSessionWorktree
+// actually returns a directory-removal failure rather than only logging it,
+// which is what the durable cleanup job's retry budget and the spec's
+// "Reclamation failure SHALL be observable" (docs/specs/
+// session-delete-resource-cleanup) depend on. test-supervisor (round 2)
+// mutation-proved this gap: swapping the production `return fmt.Errorf(...)`
+// for a Warn log + `return nil` left the whole package green.
+func TestReclaimSessionWorktree_ReturnsRemovalFailure(t *testing.T) {
+	mgr, store := newReferenceCleanupTestManager(t)
+	ctx := context.Background()
+	seedReferenceCleanupSession(t, store, "task-owner", "session-owner", models.TaskSessionStateCompleted)
+	wt := createReferenceCleanupWorktree(t, mgr, "task-owner", "session-owner")
+	simulateSessionCascadeDelete(t, store, "session-owner")
+
+	// Make the worktree's parent directory read-only so both `git worktree
+	// remove --force` and the os.RemoveAll/`rm -rf` fallback fail to unlink
+	// the worktree directory from it.
+	parent := filepath.Dir(wt.Path)
+	probePath := filepath.Join(parent, ".permission-probe")
+	if err := os.WriteFile(probePath, []byte("probe"), 0o644); err != nil {
+		t.Fatalf("create permission probe file: %v", err)
+	}
+	if err := os.Chmod(parent, 0o555); err != nil {
+		t.Fatalf("chmod parent read-only: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(parent, 0o755) })
+
+	// Probe first (per apps/backend/CLAUDE.md "Filesystem permission tests"):
+	// only assert permission-denied behavior once we've confirmed this
+	// executor actually enforces the permission bit change — a root-like
+	// Sprite executor may bypass it entirely.
+	if err := os.Remove(probePath); err == nil {
+		t.Skip("executor does not enforce directory write permission (likely running as root); " +
+			"cannot exercise the removal-failure path")
+	}
+
+	err := mgr.ReclaimSessionWorktree(ctx, wt)
+	if err == nil {
+		t.Fatal("expected ReclaimSessionWorktree to return an error when directory removal fails, got nil")
+	}
+	if !strings.Contains(err.Error(), wt.Path) {
+		t.Fatalf("error = %q, want it to name the unreclaimed worktree path %s", err.Error(), wt.Path)
 	}
 }
 

@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -163,6 +164,12 @@ func TestSessionDeleteCleanupMutationCommitted(t *testing.T) {
 	}
 }
 
+// TestExecuteSessionDeleteResourceCleanup_ReclaimsEveryWorktreeIndependently
+// asserts reclaimedIDs set-equality, not just a call count. A call-count-only
+// assertion is mutation-blind: reclaiming the same worktree twice (leaking a
+// multi-repo session's other worktree) still produces 2 calls and would pass
+// silently (test-supervisor round-2 finding,
+// docs/specs/session-delete-resource-cleanup REVIEW-ROUND: 2).
 func TestExecuteSessionDeleteResourceCleanup_ReclaimsEveryWorktreeIndependently(t *testing.T) {
 	taskSvc, _ := setupOfficeTest(t)
 	fake := &fakeSessionWorktreeCleanup{}
@@ -180,6 +187,15 @@ func TestExecuteSessionDeleteResourceCleanup_ReclaimsEveryWorktreeIndependently(
 	}
 	if fake.reclaimedCalls != 2 {
 		t.Fatalf("reclaim calls = %d, want 2", fake.reclaimedCalls)
+	}
+	gotIDs := map[string]bool{}
+	for _, id := range fake.reclaimedIDs {
+		gotIDs[id] = true
+	}
+	wantIDs := map[string]bool{"wt-a": true, "wt-b": true}
+	if !reflect.DeepEqual(gotIDs, wantIDs) {
+		t.Fatalf("reclaimed IDs = %v, want exactly {wt-a, wt-b} (each reclaimed once, not one worktree twice)",
+			fake.reclaimedIDs)
 	}
 }
 
@@ -206,6 +222,117 @@ func TestExecuteSessionDeleteResourceCleanup_FailurePathSurvivesInError(t *testi
 	}
 	if strings.Contains(err.Error(), "/tmp/ok") {
 		t.Fatalf("error = %q, should not blame the worktree that reclaimed successfully", err.Error())
+	}
+}
+
+// TestProcessTaskResourceCleanupJob_SessionDeleteRetriesTransientFailureThenSucceeds
+// drives a session_delete job through the actual worker dispatch
+// (processTaskResourceCleanupJob -> executeClaimedTaskResourceCleanupJob ->
+// executeSessionDeleteResourceCleanup), not by calling
+// executeSessionDeleteResourceCleanup or retryTaskResourceCleanupJob
+// directly. Round-2 test-supervisor mutation-proved this gap: making a
+// failed reclamation swallow its error and report succeeded anyway left
+// every package green, because nothing exercised the dispatch path for this
+// trigger. Asserts the job reaches retry_wait (not failed) after one
+// transient failure, then succeeds on the next attempt — and that the fake
+// reclaimer actually ran twice, proving the retry re-executes real
+// reclamation rather than only flipping job state.
+func TestProcessTaskResourceCleanupJob_SessionDeleteRetriesTransientFailureThenSucceeds(t *testing.T) {
+	taskSvc, repo := setupOfficeTest(t)
+	taskSvc.StopTaskResourceCleanupWorker()
+	ctx := context.Background()
+
+	fake := &fakeSessionWorktreeCleanup{
+		failReclaim: map[string]error{"wt-retry": errors.New("git worktree remove: transient lock")},
+	}
+	taskSvc.SetWorktreeCleanup(fake)
+
+	job := &models.TaskResourceCleanupJob{
+		ID: "job-session-retry", OperationID: "session_delete:job-session-retry",
+		TaskID: "task-session-retry", Trigger: models.TaskResourceCleanupTriggerSessionDelete,
+		State:            models.TaskResourceCleanupStatePending,
+		ResourceSnapshot: `{"session_id":"session-retry","worktrees":[{"id":"wt-retry","path":"/tmp/retry"}]}`,
+	}
+	if err := repo.CreateTaskResourceCleanupJob(ctx, job); err != nil {
+		t.Fatalf("CreateTaskResourceCleanupJob: %v", err)
+	}
+
+	if err := taskSvc.processTaskResourceCleanupJob(ctx, job.ID); err == nil {
+		t.Fatal("expected the first (failing) attempt to return an error")
+	}
+	got, err := repo.GetTaskResourceCleanupJob(ctx, job.ID)
+	if err != nil {
+		t.Fatalf("GetTaskResourceCleanupJob: %v", err)
+	}
+	if got.State != models.TaskResourceCleanupStateRetryWait {
+		t.Fatalf("state after transient failure = %q, want retry_wait", got.State)
+	}
+	if !strings.Contains(got.LastError, "/tmp/retry") {
+		t.Fatalf("LastError = %q, want it to name /tmp/retry", got.LastError)
+	}
+	if len(fake.reclaimedIDs) != 1 {
+		t.Fatalf("reclaim attempts so far = %v, want exactly one", fake.reclaimedIDs)
+	}
+
+	// Clear the transient failure so the retried attempt succeeds.
+	// MarkTaskResourceCleanupJobRunning claims from state IN (pending,
+	// retry_wait), so retry_wait alone lets the worker pick this job up
+	// again without any manual state manipulation.
+	fake.failReclaim = nil
+	if err := taskSvc.processTaskResourceCleanupJob(ctx, job.ID); err != nil {
+		t.Fatalf("second (successful) attempt: %v", err)
+	}
+	got, err = repo.GetTaskResourceCleanupJob(ctx, job.ID)
+	if err != nil {
+		t.Fatalf("reload after retry: %v", err)
+	}
+	if got.State != models.TaskResourceCleanupStateSucceeded {
+		t.Fatalf("state after retry succeeds = %q, want succeeded", got.State)
+	}
+	if len(fake.reclaimedIDs) != 2 || fake.reclaimedIDs[1] != "wt-retry" {
+		t.Fatalf("reclaimedIDs = %v, want a second real reclaim attempt for wt-retry", fake.reclaimedIDs)
+	}
+}
+
+// TestProcessTaskResourceCleanupJob_SessionDeleteExhaustsRetryBudgetAndRecordsPath
+// proves a session_delete job that fails on every attempt goes terminally
+// failed once the shared eight-attempt budget (taskResourceCleanupMaxAttempts)
+// is exhausted, with the unreclaimed worktree path recorded on the job — the
+// spec's "Reclamation failure SHALL be observable" and the Durability
+// scenario's eight-attempt-exhaustion case
+// (docs/specs/session-delete-resource-cleanup).
+func TestProcessTaskResourceCleanupJob_SessionDeleteExhaustsRetryBudgetAndRecordsPath(t *testing.T) {
+	taskSvc, repo := setupOfficeTest(t)
+	taskSvc.StopTaskResourceCleanupWorker()
+	ctx := context.Background()
+
+	fake := &fakeSessionWorktreeCleanup{
+		failReclaim: map[string]error{"wt-exhausted": errors.New("git worktree remove: permission denied")},
+	}
+	taskSvc.SetWorktreeCleanup(fake)
+
+	job := &models.TaskResourceCleanupJob{
+		ID: "job-session-exhausted", OperationID: "session_delete:job-session-exhausted",
+		TaskID: "task-session-exhausted", Trigger: models.TaskResourceCleanupTriggerSessionDelete,
+		State: models.TaskResourceCleanupStatePending, Attempts: taskResourceCleanupMaxAttempts - 1,
+		ResourceSnapshot: `{"session_id":"session-exhausted","worktrees":[{"id":"wt-exhausted","path":"/tmp/exhausted"}]}`,
+	}
+	if err := repo.CreateTaskResourceCleanupJob(ctx, job); err != nil {
+		t.Fatalf("CreateTaskResourceCleanupJob: %v", err)
+	}
+
+	if err := taskSvc.processTaskResourceCleanupJob(ctx, job.ID); err == nil {
+		t.Fatal("expected the budget-exhausting attempt to return an error")
+	}
+	got, err := repo.GetTaskResourceCleanupJob(ctx, job.ID)
+	if err != nil {
+		t.Fatalf("GetTaskResourceCleanupJob: %v", err)
+	}
+	if got.State != models.TaskResourceCleanupStateFailed {
+		t.Fatalf("state after exhausting the retry budget = %q, want failed", got.State)
+	}
+	if !strings.Contains(got.LastError, "/tmp/exhausted") {
+		t.Fatalf("LastError = %q, want it to name the unreclaimed path /tmp/exhausted", got.LastError)
 	}
 }
 
