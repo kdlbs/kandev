@@ -908,6 +908,31 @@ LIMIT 1` pattern. It is off the session-delete path and empirically
 non-flaky at the same microsecond precision, so it is not itself a blocking
 finding — but note it in the same pass if convenient.
 
+**Resolved (Build round 4, commit pending): direction (b).** This repository
+already makes the identical tradeoff, deliberately and documented, for
+`UpdateTaskSessionLastReadMessageID`'s `id`-based tiebreak (`session.go:1420
+-1428`): "id as a deterministic tiebreaker... Portable across SQLite and
+Postgres — no dialect branching needed, unlike the rowid-based approach this
+replaced (SQLite's rowid pseudo-column doesn't exist on Postgres)." Direction
+(a) would introduce a new, one-off monotonic-column mechanism into a codebase
+that has already chosen, and justified, the opposite tradeoff for the same
+shape of problem (tie-breaking timestamped inserts) — inconsistent for no
+correctness gain, since the code's own severity analysis above already
+establishes the reachability gap is negligible. Took direction (b):
+- Corrected `git_snapshots.go:288-291`'s doc comment to state plainly that
+  the `id` tiebreak guarantees a stable, repeatable order on a tie, not that
+  the newer row wins, and cross-referenced the `session.go` precedent.
+- Added `TestGetGitSnapshotsBySession_TiebreaksIdenticalTimestampsStably`
+  (`git_snapshots_test.go`), seeding two `status_update` rows with an
+  identical `created_at` and explicit, orderable IDs. Mutation-verified by
+  hand against the production query before landing: reverting to plain
+  `ORDER BY created_at DESC`, and flipping to `id ASC`, both fail the new
+  test (confirmed by executing each mutant), closing the exact gap
+  test-supervisor found.
+- `getGitSnapshotByOrder`/`GetFirstGitSnapshot` left as-is per the note above
+  (off the session-delete path, empirically non-flaky, not itself a blocking
+  finding).
+
 ### Everything else re-confirmed clean this round
 
 All four legs independently re-verified, by direct code reading (not
