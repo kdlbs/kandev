@@ -45,6 +45,15 @@ Architecture notes and per-area conventions live alongside the code they describ
 
 ## Best Practices
 
+### Engineering Principles
+
+- Choose the simplest implementation that fully meets the current requirements. Avoid speculative abstractions, configuration, and indirection.
+- Grow the system in layers. Start from the smallest version that works end to end, and add each new capability on top of a product that already works. Never trade a working product for unfinished complexity.
+- Keep components modular and concerns clearly separated.
+- Prefer established, well-maintained libraries when they reduce overall complexity or improve reliability. Do not reimplement common functionality without a clear reason.
+- Lean on the dependencies already in the project before writing your own implementation or adding packages. Do not assume a library lacks a capability without checking its documentation and types.
+- Make architectural decisions for the long term. Do not accept a stopgap that only works for now and is meant to be replaced later.
+
 ### Commit Conventions (enforced by CI)
 
 Commits to `main` **must** follow [Conventional Commits](https://www.conventionalcommits.org/) (`type: description`). PRs are squash-merged - the PR title becomes the commit, validated by CI. Changelog is auto-generated from these via git-cliff (`cliff.toml`). See `.agents/skills/commit/SKILL.md` for allowed types and examples.
@@ -210,7 +219,3 @@ When a change is scoped to a single subtree, update the scoped `AGENTS.md` inste
 ## Remote cloud environment
 
 For developing in ephemeral cloud VMs (Cursor Cloud, Codex, GitHub Codespaces, etc.), see [`docs/remote-cloud-environment.md`](docs/remote-cloud-environment.md) — covers runtime requirements, generated-file gotchas, dev-mode setup, key commands, and Firecracker-specific caveats.
-
----
-
-**Last Updated**: 2026-08-02
