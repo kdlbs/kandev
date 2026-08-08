@@ -54,6 +54,45 @@ func (s *Service) ListAgents(ctx context.Context) ([]*models.UtilityAgent, error
 	return s.repo.ListAgents(ctx)
 }
 
+// ClearAgentProfileBindings marks utility agents that reference a deleted
+// profile as unconfigured. This keeps forced profile deletion fail-closed.
+func (s *Service) ClearAgentProfileBindings(ctx context.Context, profileID string) error {
+	agents, err := s.repo.ListAgents(ctx)
+	if err != nil {
+		return err
+	}
+	for _, agent := range agents {
+		if agent == nil || agent.AgentProfileID != profileID {
+			continue
+		}
+		agent.AgentProfileID = ""
+		agent.ProfileBindingState = models.ProfileBindingUnconfigured
+		if err := s.repo.UpdateAgent(ctx, agent); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// ClearInheritedProfileBindings marks built-in agents that inherit a deleted
+// default profile as unconfigured.
+func (s *Service) ClearInheritedProfileBindings(ctx context.Context) error {
+	agents, err := s.repo.ListAgents(ctx)
+	if err != nil {
+		return err
+	}
+	for _, agent := range agents {
+		if agent == nil || agent.ProfileBindingState != models.ProfileBindingInherit {
+			continue
+		}
+		agent.ProfileBindingState = models.ProfileBindingUnconfigured
+		if err := s.repo.UpdateAgent(ctx, agent); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // MigrateLegacyBindings upgrades old agent/model selections after profile
 // reconciliation. The operation is idempotent and leaves explicit bindings
 // untouched. A built-in row with inherit state is also left untouched.
@@ -67,7 +106,9 @@ func (s *Service) MigrateLegacyBindings(ctx context.Context) (int, error) {
 	}
 	updated := 0
 	for _, agent := range agents {
-		if agent == nil || agent.AgentProfileID != "" || agent.ProfileBindingState == models.ProfileBindingInherit {
+		if agent == nil || agent.AgentProfileID != "" ||
+			agent.ProfileBindingState == models.ProfileBindingInherit ||
+			agent.ProfileBindingState == models.ProfileBindingUnconfigured {
 			continue
 		}
 		profile, matchErr := s.profileResolver.MatchLegacy(ctx, agent.AgentID, agent.Model)
@@ -213,7 +254,7 @@ func (s *Service) UpdateAgent(ctx context.Context, id string, name, description,
 	if enabled != nil {
 		// Allow enabling even with empty agent_id/model - defaults can be used at execution time.
 		// For custom (non-builtin) agents, we still require agent_id and model.
-		if *enabled && !agent.Builtin && (agent.AgentID == "" || agent.Model == "") {
+		if *enabled && !agent.Builtin && s.profileResolver == nil && (agent.AgentID == "" || agent.Model == "") {
 			return nil, ErrInvalidAgent
 		}
 		agent.Enabled = *enabled

@@ -31,7 +31,10 @@ export function DefaultModelSection({
   isDirty: boolean;
 }) {
   const { t } = useTranslation();
-  const selected = profiles.find((profile) => profile.id === profileId);
+  const eligibleProfiles = profiles.filter(
+    (profile) => profile.enabled !== false && !profile.cli_passthrough && !profile.workspace_id,
+  );
+  const selected = eligibleProfiles.find((profile) => profile.id === profileId);
   return (
     <SettingsCard
       isDirty={isDirty}
@@ -65,16 +68,11 @@ export function DefaultModelSection({
                   {t("settings:utilityUnavailableProfile", { name: profileId })}
                 </SelectItem>
               )}
-              {profiles
-                .filter(
-                  (profile) =>
-                    profile.enabled !== false && !profile.cli_passthrough && !profile.workspace_id,
-                )
-                .map((profile) => (
-                  <SelectItem key={profile.id} value={profile.id}>
-                    {profileLabel(profile)}
-                  </SelectItem>
-                ))}
+              {eligibleProfiles.map((profile) => (
+                <SelectItem key={profile.id} value={profile.id}>
+                  {profileLabel(profile)}
+                </SelectItem>
+              ))}
             </SelectContent>
           </Select>
           {profileId && !selected && (
@@ -101,6 +99,7 @@ export function BuiltinActionRow({
   onEdit: (agent: UtilityAgent) => void;
   isDirty: boolean;
 }) {
+  const { t } = useTranslation();
   let currentValue = USE_DEFAULT;
   if (agent.profile_binding_state === "unconfigured") {
     currentValue = UNCONFIGURED;

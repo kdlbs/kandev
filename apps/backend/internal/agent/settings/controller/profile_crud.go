@@ -328,6 +328,11 @@ func (c *Controller) DeleteProfile(ctx context.Context, id string, force bool) (
 	// it. Automations have no such preflight, which is the whole reason they
 	// are handled above instead of here.
 	if force {
+		if c.utilityDeps != nil {
+			if err := c.utilityDeps.ClearUtilityAgentProfileBindings(ctx, id); err != nil {
+				return nil, fmt.Errorf("clear utility agents using this profile: %w", err)
+			}
+		}
 		c.disableReferencingWatchers(ctx, id, profile.Name)
 	}
 	result := toProfileDTO(profile)
