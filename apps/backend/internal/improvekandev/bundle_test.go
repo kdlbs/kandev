@@ -5,7 +5,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 )
 
 func TestCreateBundleDirWritesOwnerMarker(t *testing.T) {
@@ -66,43 +65,5 @@ func TestValidateBundleDir_RejectsBad(t *testing.T) {
 				t.Errorf("expected error for %q", tc.dir)
 			}
 		})
-	}
-}
-
-func TestCleanupStaleBundles_RemovesOnlyStale(t *testing.T) {
-	root := t.TempDir()
-
-	stale := filepath.Join(root, bundlePrefix+"old")
-	if err := os.Mkdir(stale, 0o755); err != nil {
-		t.Fatalf("mkdir stale: %v", err)
-	}
-	old := time.Now().Add(-72 * time.Hour)
-	if err := os.Chtimes(stale, old, old); err != nil {
-		t.Fatalf("chtimes stale: %v", err)
-	}
-
-	fresh := filepath.Join(root, bundlePrefix+"new")
-	if err := os.Mkdir(fresh, 0o755); err != nil {
-		t.Fatalf("mkdir fresh: %v", err)
-	}
-
-	other := filepath.Join(root, "unrelated-dir")
-	if err := os.Mkdir(other, 0o755); err != nil {
-		t.Fatalf("mkdir other: %v", err)
-	}
-	if err := os.Chtimes(other, old, old); err != nil {
-		t.Fatalf("chtimes other: %v", err)
-	}
-
-	cleanupStaleBundlesIn(root, 24*time.Hour, nil)
-
-	if _, err := os.Stat(stale); !os.IsNotExist(err) {
-		t.Errorf("stale bundle %q should have been removed: %v", stale, err)
-	}
-	if _, err := os.Stat(fresh); err != nil {
-		t.Errorf("fresh bundle %q should have been preserved: %v", fresh, err)
-	}
-	if _, err := os.Stat(other); err != nil {
-		t.Errorf("non-bundle dir %q should have been preserved: %v", other, err)
 	}
 }

@@ -174,6 +174,17 @@ Host-wide Docker build-cache and unused-image cleanup remain disabled until you 
 owns a dedicated Docker daemon.
 Do not enable those rules on a daemon shared with unrelated workloads.
 
+The Storage page also reports **Kandev temporary artifacts** created by services that need a
+short-lived directory under the host temporary root. Each current artifact is registered in the
+Kandev database and carries an owner-only marker in its exact directory. Active artifacts and
+artifacts created within the last 24 hours are protected. **Clean stale artifacts** is a manual-only
+action: it moves eligible, registered artifacts into Kandev quarantine on the same filesystem so
+they can be restored during the configured retention period. It does not permanently delete them.
+The action does not inspect or claim arbitrary `/tmp` entries, shared caches, Node or Playwright
+caches, preview/CI/dev-harness directories, or temporary data belonging to another Kandev
+installation. A missing registry or failed measurement is shown as unavailable rather than as
+zero usage. The inherited `TMPDIR`, `TMP`, and `TEMP` behavior below is unchanged.
+
 Host-local agents inherit the Kandev service's `TMPDIR`, `TMP`, and `TEMP` values unchanged. If the
 service leaves them unset, agent tools use their normal operating-system defaults; if an operator
 sets them on the service, all host-local agents share those configured locations. This permits

@@ -116,6 +116,7 @@ import (
 
 	// System pages (status / database / backups / logs / updates / about)
 	systemsvc "github.com/kandev/kandev/internal/system"
+	"github.com/kandev/kandev/internal/system/storage/tempartifacts"
 
 	// Database
 	"github.com/kandev/kandev/internal/db"
@@ -719,23 +720,6 @@ func startGatewayAndServe(
 	// /api/v1/agent-models/:agentName reads live capability data.
 	agentSettingsController.SetHostUtility(hostUtilityMgr)
 	profileReconciler := agentsettingscontroller.NewProfileReconciler(hostUtilityMgr, agentRegistry, repos.AgentSettings, log)
-	go func() {
-		if err := hostUtilityMgr.Start(ctx); err != nil {
-			log.Warn("host utility manager bootstrap error", zap.Error(err))
-		}
-		// Reconcile profiles against fresh probe results — seeds defaults for
-		// newly probed agents, heals stale profile models/modes, cleans up
-		// orphans referencing removed agents.
-		if err := profileReconciler.Run(ctx); err != nil {
-			log.Warn("profile reconciler error", zap.Error(err))
-		}
-	}()
-	addCleanup(func() error {
-		stopCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-		hostUtilityMgr.Stop(stopCtx)
-		return nil
-	})
 
 	// Wire Host.InvokeUtilityAgent (ADR 0048): plugins delegate one-shot LLM
 	// calls to the utility agent selected in each plugin's configuration and
@@ -816,6 +800,24 @@ func startGatewayAndServe(
 		log.Error("Failed to initialize storage maintenance", zap.Error(err))
 		return false
 	}
+	hostUtilityMgr.SetTemporaryArtifactRegistry(storageComposition.tempArtifacts)
+	go func() {
+		if err := hostUtilityMgr.Start(ctx); err != nil {
+			log.Warn("host utility manager bootstrap error", zap.Error(err))
+		}
+		// Reconcile profiles against fresh probe results — seeds defaults for
+		// newly probed agents, heals stale profile models/modes, cleans up
+		// orphans referencing removed agents.
+		if err := profileReconciler.Run(ctx); err != nil {
+			log.Warn("profile reconciler error", zap.Error(err))
+		}
+	}()
+	addCleanup(func() error {
+		stopCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		hostUtilityMgr.Stop(stopCtx)
+		return nil
+	})
 	systemSvc.Storage = storageComposition.handler
 	systemSvc.StorageRuntime = storageComposition.runtime
 	if systemSvc.LogBundles != nil {
@@ -848,7 +850,8 @@ func startGatewayAndServe(
 	// ============================================
 	server, err := buildHTTPServer(cfg, log, gateway, repos, services, agentSettingsController,
 		lifecycleMgr, eventBus, orchestratorSvc, notificationCtrl, msgCreator, agentRegistry, hostUtilityMgr,
-		addCleanup, repoCloner, systemSvc, storageComposition.workspaceRestorer, dbPool)
+		addCleanup, repoCloner, systemSvc, storageComposition.workspaceRestorer,
+		storageComposition.tempArtifacts, dbPool)
 	if err != nil {
 		log.Error("Failed to build HTTP server", zap.Error(err))
 		return false
@@ -1749,6 +1752,7 @@ func buildHTTPServer(
 	repoCloner *repoclone.Cloner,
 	systemSvc *systemsvc.Service,
 	workspaceRestorer taskhandlers.WorkspaceQuarantineRestorer,
+	temporaryArtifacts *tempartifacts.Registry,
 	dbPool *db.Pool,
 ) (*http.Server, error) {
 	gin.SetMode(gin.ReleaseMode)
@@ -1811,6 +1815,7 @@ func buildHTTPServer(
 		services:                      services,
 		systemSvc:                     systemSvc,
 		workspaceRestorer:             workspaceRestorer,
+		temporaryArtifacts:            temporaryArtifacts,
 		runtimeFlagsSvc:               services.RuntimeFlags,
 		dbPool:                        dbPool,
 		agentSettingsController:       agentSettingsController,

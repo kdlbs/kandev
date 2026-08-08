@@ -295,6 +295,7 @@ export interface StorageMaintenanceSettings {
 export interface StorageCapabilities {
   managed_go_cache_path: string;
   go_cache_adoption_available: boolean;
+  temporary_artifacts_available: boolean;
   docker_available: boolean;
   docker_host: string;
   host_global_docker_cleanup_allowed: boolean;
@@ -344,10 +345,26 @@ export type StorageQuarantineSummary =
       size_bytes?: never;
     };
 
+export interface StorageTemporaryArtifactsSummary {
+  available?: boolean;
+  total_count?: number;
+  total_bytes?: number;
+  active_count?: number;
+  active_bytes?: number;
+  protected_count?: number;
+  protected_bytes?: number;
+  stale_count?: number;
+  stale_bytes?: number;
+  skipped_count?: number;
+  warnings?: string[];
+  warning?: string;
+}
+
 export interface StorageSummary {
   workspaces: StorageWorkspaceSummary;
   go_cache: StorageGoCacheSummary;
   quarantine: StorageQuarantineSummary;
+  temporary_artifacts: StorageTemporaryArtifactsSummary;
   docker: StorageDockerSummary;
 }
 
@@ -383,7 +400,7 @@ export interface StorageMaintenanceRun {
 
 export interface StorageQuarantineEntry {
   id: string;
-  resource_type: "task_workspace" | "go_cache";
+  resource_type: "task_workspace" | "go_cache" | "temporary_artifact";
   task_id?: string;
   workspace_id?: string;
   original_path: string;

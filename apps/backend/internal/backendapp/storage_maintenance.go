@@ -21,6 +21,7 @@ import (
 	storagepkg "github.com/kandev/kandev/internal/system/storage"
 	"github.com/kandev/kandev/internal/system/storage/dockerstore"
 	"github.com/kandev/kandev/internal/system/storage/gocache"
+	"github.com/kandev/kandev/internal/system/storage/tempartifacts"
 	"github.com/kandev/kandev/internal/system/storage/workspaces"
 	taskservice "github.com/kandev/kandev/internal/task/service"
 	"github.com/kandev/kandev/internal/worktree"
@@ -30,6 +31,7 @@ type storageComposition struct {
 	handler           *storagepkg.Handler
 	runtime           *storagepkg.Runtime
 	workspaceRestorer *workspaceQuarantineController
+	tempArtifacts     *tempartifacts.Registry
 }
 
 func provideStorageComposition(
@@ -50,6 +52,19 @@ func provideStorageComposition(
 	store, err := storagepkg.NewStore(pool)
 	if err != nil {
 		return nil, fmt.Errorf("initialize storage store: %w", err)
+	}
+	tempArtifacts := tempartifacts.NewRegistry(tempartifacts.Config{
+		Store: store, TempRoot: os.TempDir(),
+	})
+	if err := tempArtifacts.Reconcile(context.Background()); err != nil {
+		logError("reconcile temporary artifact registry", err)
+	}
+	tempProvider := tempartifacts.NewProvider(tempartifacts.ProviderConfig{
+		Registry: tempArtifacts, Store: store, HomeDir: cfg.ResolvedHomeDir(),
+		TrashDir: filepath.Join(cfg.ResolvedHomeDir(), "trash"),
+	})
+	if err := tempProvider.Reconcile(context.Background()); err != nil {
+		logError("reconcile temporary artifact quarantine", err)
 	}
 	coordinator := activity.NewCoordinator(activity.Options{})
 	taskSvc.SetTaskResourceCleanupActivityGate(&taskCleanupActivityGate{coordinator: coordinator})
@@ -72,14 +87,14 @@ func provideStorageComposition(
 	overview := &storageOverview{
 		settings: settings, quarantine: store, workspaceFactory: workspaceFactory, goCache: goCache,
 		docker: dockerProvider, dockerClient: dockerClient, dockerHost: cfg.Docker.Host,
-		homeDir: cfg.ResolvedHomeDir(),
+		homeDir: cfg.ResolvedHomeDir(), tempArtifacts: tempProvider,
 	}
 	cachedOverview := storagepkg.NewOverviewCache(overview)
 	quarantine := &workspaceQuarantineController{
 		settings: settings, store: store, factory: workspaceFactory, homeDir: cfg.ResolvedHomeDir(),
-		activity: coordinator,
+		activity: coordinator, temporary: tempProvider,
 	}
-	providers := storageCleanupProviders(settings, workspaceFactory, goCache, dockerProvider, quarantine)
+	providers := storageCleanupProviders(settings, workspaceFactory, goCache, dockerProvider, quarantine, tempProvider)
 	if taskSvc.AttachmentService() == nil && taskSvc.AttachmentRepository() != nil {
 		attachmentSvc, attachmentErr := taskservice.NewAttachmentService(
 			taskSvc.AttachmentRepository(), cfg.ResolvedHomeDir(), taskSvc.AuthorizeWorkspaceAccess, log,
@@ -123,7 +138,7 @@ func provideStorageComposition(
 		Mutations: operations, OnSettingsChanged: runtime.ApplySettings, LogError: logError,
 	})
 	return &storageComposition{
-		handler: handler, runtime: runtime, workspaceRestorer: quarantine,
+		handler: handler, runtime: runtime, workspaceRestorer: quarantine, tempArtifacts: tempArtifacts,
 	}, nil
 }
 
@@ -179,6 +194,7 @@ type storageOverview struct {
 	goCache          *gocache.Provider
 	goCacheAnalyze   func(context.Context) (gocache.Analysis, error)
 	docker           *dockerstore.Provider
+	tempArtifacts    *tempartifacts.Provider
 	dockerClient     *lazyStorageDocker
 	dockerHost       string
 	homeDir          string
@@ -197,6 +213,8 @@ func (o *storageOverview) Summary(ctx context.Context) (storagepkg.Summary, erro
 		quarantineSummary storagepkg.QuarantineSummary
 		quarantineErr     error
 		dockerSummary     dockerstore.Analysis
+		tempSummary       tempartifacts.Analysis
+		tempErr           error
 	)
 	var measurements sync.WaitGroup
 	measurements.Add(4)
@@ -226,11 +244,19 @@ func (o *storageOverview) Summary(ctx context.Context) (storagepkg.Summary, erro
 		defer measurements.Done()
 		dockerSummary = o.docker.Analyze(ctx)
 	}()
+	if o.tempArtifacts != nil {
+		measurements.Add(1)
+		go func() {
+			defer measurements.Done()
+			tempSummary, tempErr = o.tempArtifacts.Analyze(ctx)
+		}()
+	}
 	measurements.Wait()
 	return storagepkg.Summary{
-		Workspaces: summaryValue(workspaceSummary, workspaceErr),
-		GoCache:    summaryValue(goCacheSummary, goCacheErr),
-		Quarantine: summaryValue(quarantineSummary, quarantineErr),
+		Workspaces:         summaryValue(workspaceSummary, workspaceErr),
+		GoCache:            summaryValue(goCacheSummary, goCacheErr),
+		Quarantine:         summaryValue(quarantineSummary, quarantineErr),
+		TemporaryArtifacts: summaryValue(tempSummary, tempErr),
 		Docker: map[string]any{
 			"available": dockerSummary.Available, "build_cache_bytes": dockerSummary.BuildCacheBytes,
 			"image_layer_bytes":  dockerSummary.ImageLayerBytes,
@@ -259,7 +285,8 @@ func (o *storageOverview) SettingsCapabilities(
 	dockerAvailable := o.dockerClient != nil && o.dockerClient.Ping(ctx) == nil
 	return storagepkg.Capabilities{
 		ManagedGoCachePath: goPath, GoCacheAdoptionAvailable: true,
-		DockerAvailable: dockerAvailable, DockerHost: o.dockerHost,
+		TemporaryArtifactsAvailable: o.tempArtifacts != nil,
+		DockerAvailable:             dockerAvailable, DockerHost: o.dockerHost,
 		HostGlobalDockerCleanup: dockerAvailable && settings.Docker.DedicatedDaemonAcknowledged,
 	}
 }
@@ -316,8 +343,9 @@ func storageCleanupProviders(
 	goCache *gocache.Provider,
 	docker *dockerstore.Provider,
 	quarantine quarantinePurger,
+	temporary ...storagepkg.CleanupProvider,
 ) []storagepkg.CleanupProvider {
-	return []storagepkg.CleanupProvider{
+	providers := []storagepkg.CleanupProvider{
 		quarantineCleanupProvider{purger: quarantine},
 		workspaceCleanupAdapter(settings, workspaceFactory),
 		workspaceDependencyCleanupAdapter(settings, workspaceFactory),
@@ -326,6 +354,7 @@ func storageCleanupProviders(
 		dockerBuildCacheCleanupAdapter(settings, docker),
 		dockerImageCleanupAdapter(settings, docker),
 	}
+	return append(providers, temporary...)
 }
 
 func workspaceDependencyCleanupAdapter(
@@ -419,12 +448,13 @@ func (r *workspaceReconciler) Reconcile(ctx context.Context) error {
 }
 
 type workspaceQuarantineController struct {
-	settings *storagepkg.SettingsStore
-	store    quarantineEntryStore
-	factory  workspaceFactory
-	homeDir  string
-	activity *activity.Coordinator
-	rename   func(string, string) error
+	settings  *storagepkg.SettingsStore
+	store     quarantineEntryStore
+	factory   workspaceFactory
+	homeDir   string
+	activity  *activity.Coordinator
+	temporary *tempartifacts.Provider
+	rename    func(string, string) error
 }
 
 type quarantineEntryStore interface {
@@ -517,6 +547,12 @@ func (c *workspaceQuarantineController) Restore(
 	if entry.ResourceType == storagepkg.ResourceTypeGoCache {
 		return c.restoreGoCache(ctx, entry)
 	}
+	if entry.ResourceType == storagepkg.ResourceTypeTemporaryArtifact {
+		if c.temporary == nil {
+			return storagepkg.QuarantineEntry{}, errors.New("temporary artifact provider is unavailable")
+		}
+		return c.temporary.Restore(ctx, id)
+	}
 	if entry.ResourceType != storagepkg.ResourceTypeTaskWorkspace {
 		return storagepkg.QuarantineEntry{}, fmt.Errorf("%w: unsupported quarantine resource %q", storagepkg.ErrValidation, entry.ResourceType)
 	}
@@ -562,6 +598,15 @@ func (c *workspaceQuarantineController) permanentDelete(
 			return c.deleteGoCacheForce(ctx, entry, confirmation)
 		}
 		return c.deleteGoCache(ctx, entry, confirmation)
+	}
+	if entry.ResourceType == storagepkg.ResourceTypeTemporaryArtifact {
+		if c.temporary == nil {
+			return storagepkg.QuarantineEntry{}, errors.New("temporary artifact provider is unavailable")
+		}
+		if force {
+			return c.temporary.PermanentDeleteForce(ctx, id, confirmation)
+		}
+		return c.temporary.PermanentDelete(ctx, id, confirmation)
 	}
 	if entry.ResourceType != storagepkg.ResourceTypeTaskWorkspace {
 		return storagepkg.QuarantineEntry{}, fmt.Errorf("%w: unsupported quarantine resource %q", storagepkg.ErrValidation, entry.ResourceType)
