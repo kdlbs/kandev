@@ -622,15 +622,13 @@ func (s *Service) refreshStaleWorkspaceWatches(workspaceID string, staleTasks ma
 		defer s.inflightWorkspaceRefreshes.Delete(workspaceID)
 		syncCtx, cancel := context.WithTimeout(s.stopCtx, 60*time.Second)
 		defer cancel()
-		var allWatches []*PRWatch
-		for taskID := range staleTasks {
-			watches, err := s.store.ListPRWatchesByTask(syncCtx, taskID)
-			if err != nil {
-				s.logger.Debug("list PR watches for refresh failed",
-					zap.String("task_id", taskID), zap.Error(err))
-				continue
-			}
-			allWatches = append(allWatches, watches...)
+		allWatches, unwatched := s.collectStaleWorkspaceSyncTargets(syncCtx, staleTasks)
+		// PRs left behind by a branch handover have no watch to fan in, so
+		// they would stay stale on every workspace load. Reconcile them in
+		// one batched call for the whole workspace; once a row reaches a
+		// terminal state it drops out of this set permanently.
+		if len(unwatched) > 0 {
+			s.syncUnwatchedTaskPRs(syncCtx, unwatched, workspaceID)
 		}
 		if len(allWatches) == 0 {
 			return
@@ -897,17 +895,27 @@ func (s *Service) triggerPRSyncAllPermanent(ctx context.Context, taskID string) 
 		return nil, false, fmt.Errorf("list PR watches: %w", err)
 	}
 	if len(watches) == 0 {
-		// No watches — fall back to whatever TaskPRs already exist (e.g.
-		// PRs imported via task-create-from-PR-URL where the watch is
-		// optional). Empty slice if none. permanent=false (the task can
-		// still acquire a watch later via push detection).
-		existing, listErr := s.store.ListTaskPRsByTask(ctx, taskID)
+		// No watches — the TaskPRs that already exist (e.g. PRs imported via
+		// task-create-from-PR-URL where the watch is optional) have no other
+		// sync path at all, so reconcile them here rather than returning the
+		// stored snapshot verbatim. Empty slice if none. permanent=false (the
+		// task can still acquire a watch later via push detection).
+		existing, listErr := s.reconcileTaskUnwatchedPRs(ctx, taskID, nil)
 		if listErr != nil {
-			return nil, false, fmt.Errorf("list task PRs: %w", listErr)
+			return nil, false, listErr
 		}
 		return existing, false, nil
 	}
 	prs, syncErr := s.runBatchedOrPerWatchSync(ctx, taskID, watches)
+	// PRs the task linked from an earlier branch are no longer covered by any
+	// watch — the loop above cannot see them, and without this they keep their
+	// last-observed state (open, green, mergeable) forever.
+	if reconciled, listErr := s.reconcileTaskUnwatchedPRs(ctx, taskID, watches); listErr != nil {
+		s.logger.Debug("unwatched task PR reconciliation failed",
+			zap.String("task_id", taskID), zap.Error(listErr))
+	} else {
+		prs = reconciled
+	}
 	return prs, s.areAllWatchesPermanentlyMissing(ctx, watches), syncErr
 }
 
