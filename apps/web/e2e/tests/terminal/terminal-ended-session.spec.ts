@@ -40,18 +40,25 @@ test.describe("terminal on an ended session", () => {
     const sessionId = sessions[0]?.id;
     expect(sessionId, "task must have a session to end").toBeTruthy();
 
-    // Drive it to a terminal state rather than waiting for one, so the test
-    // does not depend on how the seeded agent happens to finish.
-    await apiClient.stopSession({ session_id: sessionId as string, force: true });
+    // Let the seeded run finish on its own first. session.stop needs a live
+    // execution to cancel, so calling it straight away fails with "no
+    // execution for session" — the session has not started one yet.
+    const state = async () => {
+      const { sessions: current } = await apiClient.listTaskSessions(task.id);
+      return current[0]?.state ?? "";
+    };
     await expect
-      .poll(
-        async () => {
-          const { sessions: current } = await apiClient.listTaskSessions(task.id);
-          return current[0]?.state ?? "";
-        },
-        { timeout: 30_000, message: "Waiting for the session to reach a terminal state" },
-      )
-      .toMatch(new RegExp(TERMINAL_STATES.join("|")));
+      .poll(state, { timeout: 60_000, message: "Waiting for the session to settle" })
+      .toMatch(new RegExp([...TERMINAL_STATES, "WAITING_FOR_INPUT", "IDLE"].join("|")));
+
+    // If it settled somewhere still live, cancel it. By now an execution
+    // exists, so the stop lands.
+    if (!TERMINAL_STATES.includes(await state())) {
+      await apiClient.stopSession({ session_id: sessionId as string, force: true });
+      await expect
+        .poll(state, { timeout: 30_000, message: "Waiting for the cancel to land" })
+        .toMatch(new RegExp(TERMINAL_STATES.join("|")));
+    }
 
     const kanban = new KanbanPage(page);
     await kanban.goto();
