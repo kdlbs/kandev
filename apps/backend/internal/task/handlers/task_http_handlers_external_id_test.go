@@ -14,12 +14,47 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/kandev/kandev/internal/orchestrator"
 	taskrepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/service"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 )
+
+// recordingOrchestrator is a non-nil OrchestratorStarter that records whether
+// it was ever invoked. newIdempotencyTestHandlers otherwise leaves
+// h.orchestrator nil, under which handlePostCreateTaskSession no-ops on its
+// own nil check regardless of whether the caller should have reached it at
+// all — which cannot distinguish "correctly skipped for a Found/
+// CreatedIdentityLost outcome" from "incorrectly attempted, but swallowed by
+// the nil guard". Wiring this in makes a missing no-side-effects guard
+// observable: if handlePostCreateTaskSession is reached, LaunchSession fires
+// for real and launched flips true.
+type recordingOrchestrator struct {
+	mu       sync.Mutex
+	launched bool
+}
+
+func (o *recordingOrchestrator) LaunchSession(context.Context, *orchestrator.LaunchSessionRequest) (*orchestrator.LaunchSessionResponse, error) {
+	o.mu.Lock()
+	o.launched = true
+	o.mu.Unlock()
+	return &orchestrator.LaunchSessionResponse{Success: true, SessionID: "should-not-have-launched"}, nil
+}
+
+func (o *recordingOrchestrator) EnsureSession(context.Context, string, ...orchestrator.EnsureSessionOptions) (*orchestrator.EnsureSessionResponse, error) {
+	o.mu.Lock()
+	o.launched = true
+	o.mu.Unlock()
+	return &orchestrator.EnsureSessionResponse{Success: true, SessionID: "should-not-have-launched"}, nil
+}
+
+func (o *recordingOrchestrator) wasLaunched() bool {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return o.launched
+}
 
 // idempotentCreateTaskRepo is a minimal in-memory TaskRepository fake that
 // supports the external-id create-idempotency contract end to end (create,
@@ -164,6 +199,17 @@ func TestHTTPCreateTask_ExternalIDGoldenPath(t *testing.T) {
 	assert.Equal(t, "ext-1", resp["external_id"])
 	assert.Equal(t, false, resp["deduplicated"])
 	assert.Equal(t, true, resp["creation_complete"])
+
+	// creation_complete:true above is a literal in httpCreateTask's Created
+	// branch, not read back from the row — it would read true even if the
+	// handler's own h.service.SettleExternalID call were deleted entirely.
+	// Assert the row itself to pin that the handler's settlement call
+	// actually ran and stamped it.
+	repo.mu.Lock()
+	stored, ok := repo.tasks[resp["id"].(string)]
+	repo.mu.Unlock()
+	require.True(t, ok, "created task must exist in the repo")
+	assert.NotNil(t, stored.ExternalIDSettledAt, "the handler's own settlement call must have stamped external_id_settled_at")
 }
 
 // TestHTTPCreateTask_FoundSettledSkipsPostCreateWork covers the dedupe hit:
@@ -186,6 +232,15 @@ func TestHTTPCreateTask_FoundSettledSkipsPostCreateWork(t *testing.T) {
 	_, err := repo.SettleTaskExternalID(context.Background(), firstID, "ext-1", time.Now().UTC())
 	require.NoError(t, err)
 
+	// A non-nil recording orchestrator: with h.orchestrator left nil (as
+	// newIdempotencyTestHandlers otherwise does), handlePostCreateTaskSession
+	// no-ops on its own nil check regardless of whether the Found-outcome
+	// guard above it even ran, so an empty session_id alone cannot tell
+	// "correctly skipped" from "incorrectly attempted, but swallowed by the
+	// nil guard". This makes a missing guard observable.
+	rec := &recordingOrchestrator{}
+	h.orchestrator = rec
+
 	retry := doCreateTask(h, `{"workspace_id":"ws-1","workflow_id":"wf-1","workflow_step_id":"step-1","title":"Changed","external_id":"ext-1","start_agent":true,"agent_profile_id":"agent-1"}`)
 	require.Equal(t, http.StatusOK, retry.Code, "body: %s", retry.Body.String())
 
@@ -196,6 +251,7 @@ func TestHTTPCreateTask_FoundSettledSkipsPostCreateWork(t *testing.T) {
 	assert.Equal(t, true, retryResp["deduplicated"])
 	assert.Equal(t, true, retryResp["creation_complete"])
 	assert.Nil(t, retryResp["session_id"], "no session should be prepared/started for a Found outcome")
+	assert.False(t, rec.wasLaunched(), "the orchestrator must never be reached for a Found outcome, even with start_agent:true")
 
 	repo.mu.Lock()
 	count := 0
@@ -299,6 +355,12 @@ func TestHTTPCreateTask_CreatedIdentityLostOmitsExternalID(t *testing.T) {
 	repo.forceNextSettle0 = true
 	repo.mu.Unlock()
 
+	// See recordingOrchestrator's doc comment: a nil h.orchestrator can't
+	// distinguish "correctly skipped" from "incorrectly attempted, but
+	// swallowed by handlePostCreateTaskSession's own nil check".
+	orch := &recordingOrchestrator{}
+	h.orchestrator = orch
+
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
 	c.Request = httptest.NewRequest(http.MethodPost, "/tasks", strings.NewReader(
@@ -315,6 +377,7 @@ func TestHTTPCreateTask_CreatedIdentityLostOmitsExternalID(t *testing.T) {
 	assert.Equal(t, false, resp["deduplicated"])
 	assert.Equal(t, true, resp["creation_complete"])
 	assert.Nil(t, resp["session_id"], "no session should be dispatched when the identity was lost")
+	assert.False(t, orch.wasLaunched(), "the orchestrator must never be reached once settlement reports CreatedIdentityLost")
 }
 
 func doGetTaskByExternalID(h *TaskHandlers, workspaceID, externalID string) *httptest.ResponseRecorder {
