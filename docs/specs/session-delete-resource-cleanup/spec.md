@@ -712,3 +712,123 @@ to a single synthetic error frame, silently dropping any sibling frame that
 happened to arrive batched alongside the targeted response — was fixed and
 committed in this round (`9dcc00214`) since it's test infrastructure, not
 production code, and was re-verified green before and after.
+
+## REVIEW-ROUND: 3
+
+Fresh-context review wave (2026-08-08) ran code-reviewer, security-reviewer,
+and test-supervisor (ksdd subagents) plus a cross-vendor Codex review over the
+two commits that were supposed to close round 2 (`021ac26da`, `6d14b4d1d`),
+after independently re-verifying all round-1 and round-2 fixes are still
+correctly in place at HEAD (confirmed by direct code reading, not by trusting
+this file's own claims). **Verdict: production-bug residual, round 3 — back
+to Build.** Two findings, both independently reproduced against the actual
+code before being recorded here.
+
+### MUST-FIX 1 — archive-type snapshot rows pollute the pre-delete warning
+
+(code-reviewer, independently reproduced by tracing the full call chain)
+
+`GetGitSnapshotsBySession`/`GetGitSnapshots` apply no `snapshot_type` filter —
+confirmed by reading the query
+(`apps/backend/internal/task/repository/sqlite/git_snapshots.go:281`) and
+every layer between it and the `session.git.snapshots` WS handler
+(`apps/backend/internal/task/service/service_turns.go:457`,
+`apps/backend/internal/task/handlers/task_git_handlers.go:19-40`). A session
+that was archived via `ArchiveTask` before later being deleted has an
+`archive`-type row from `captureArchiveDiff`
+(`apps/backend/internal/orchestrator/task_operations.go:3204-3216`), which
+never sets `Branch` or `Ahead` — both zero-value, and `Branch string
+json:"branch"` has no `omitempty`
+(`apps/backend/internal/task/models/git.go:28`), so the row always serializes
+as `{"branch": "", "ahead": 0, "files": {...real diff...}}`.
+`summarizeSnapshots`'s branch-keyed dedup
+(`apps/web/hooks/use-session-delete-warning.ts:128-140`) treats `branch: ""`
+as its own bucket, so the archive row's file count is **added on top of**
+whatever the real branch's row shows. `DeleteSession`
+(`apps/backend/internal/orchestrator/task_operations.go:2726`) does not gate
+on the parent task's `ArchivedAt`, so this path is reachable through the
+ordinary session-delete flow, not merely a code smell.
+
+Failure direction is mostly safe (inflates the warning rather than
+suppressing it), but it collides destructively — reintroducing exactly the
+class of bug round 2's CRITICAL was about — if a session's *real* live
+`status.Branch` is ever also empty (e.g. detached HEAD), since both rows
+would then key on the same `""` bucket and either could shadow the other.
+Believed rare for kandev-managed worktrees (they always check out a named
+branch) but not proven impossible, and untested either way.
+
+Fix: filter to `snapshot_type = 'status_update'`, either in
+`GetGitSnapshotsBySession`'s query or in `summarizeSnapshots` before the
+branch-keyed dedup. Add a regression test seeding an `archive`-type row
+(`branch: ""`, non-empty `files`) alongside a real branch's `status_update`
+row, asserting the archive row's files are excluded from the reported count.
+
+### MUST-FIX 2 — ordering fix has no deterministic tiebreak, and its own regression test doesn't prove recency ordering
+
+(Converged independently across code-reviewer [COR-002], Codex [marked P1],
+and this review's own reasoning about SQLite tie semantics; test-supervisor's
+mutation testing separately proved the regression test itself is
+insufficient — four legs on one underlying defect.)
+
+`GetGitSnapshotsBySession`'s `ORDER BY created_at DESC`
+(`git_snapshots.go:287`, introduced by `021ac26da`) carries no secondary sort
+key. SQLite gives no ordering guarantee among rows with an identical
+`created_at`, so a tie could resurrect the exact round-2 undercount
+nondeterministically. Practical reachability is low — `time.Now().UTC()`
+carries sub-second precision and `saveGitStatusSnapshot` proactively deletes
+any existing `live_monitor` row for the session via `DeleteLiveMonitorSnapshots`
+right after writing an `agent_completed` row
+(`apps/backend/internal/orchestrator/task_operations.go:3173-3181`), closing
+off one collision surface — but it is a real gap in a query this feature's
+whole safety property depends on, and it is untested.
+
+Separately, and more concretely: test-supervisor mutation-tested
+`TestGetGitSnapshotsBySession_OrdersByRecencyRegardlessOfTriggeredBy`
+(`git_snapshots_test.go:52`) against the actual production query and found it
+**survives** two mutations that should kill it — deleting the `ORDER BY`
+clause entirely, and replacing it with `ORDER BY triggered_by DESC` (i.e.
+"live_monitor always first, recency ignored"). Both survive because the test
+only seeds one arrangement (older `agent_completed`, newer `live_monitor`)
+and never the inverse. The test currently proves "the old ordering is gone,"
+not "the new ordering is recency-based" — it does not pin the actual contract
+this round's fix was supposed to establish.
+
+Fix: add `id` (or another monotonic column) as an explicit secondary
+`ORDER BY` key for deterministic tie-break. Strengthen the existing test to
+also seed the inverse arrangement (a genuinely newer `agent_completed` row
+against an older `live_monitor` row, asserting `agent_completed` sorts
+first) so it actually pins recency semantics in both directions.
+
+### Should-fix, not blocking (named residual, carried forward)
+
+test-supervisor's independently-probed AC coverage gaps — none masking a
+production bug, each individually verified by direct code tracing or a
+throwaway probe against real SQLite/git before being characterized as
+test-rigor only:
+
+1. Mixed shared+exclusive multi-worktree reclaim has no test against real
+   reference counting (only a fake's call count). test-supervisor's own probe
+   against real SQLite confirmed the composition is correct.
+2. The golden-path "both commits reachable from `B`" scenario is unasserted;
+   only branch resolvability is checked.
+3. Both idempotency/downstream-path scenarios (task delete after worktree
+   reclaimed; stale `worktree_id` on relaunch) have no direct test — verified
+   correct by code tracing (`pruneQuarantinedWorktree`,
+   `tryReuseExisting`/`buildWorktreeNames`'s random suffix ruling out branch
+   collision).
+4. Both Invariant scenarios still have no integration test anywhere.
+5. The retry-exhaustion test doesn't assert the warning-level log line half
+   of that scenario's AC (only job state + `LastError`).
+
+Codex's advisory finding that the eight-attempt threshold isn't pinned by the
+new exhaustion test was checked and found **not** to be a gap: a pre-existing
+test (`TestRetryTaskResourceCleanupJobUsesBoundedBackoffAndTerminalState`)
+already pins `taskResourceCleanupMaxAttempts` independently.
+
+Everything else re-confirmed clean this round by direct code reading, not
+inherited from this file's prior claims: auth-first ordering in `DeleteSession`,
+the round-1 lock-order-inversion fix, the round-1 path-vs-ID verification fix,
+the round-1 ambiguous-error resolution fix, job-claim CAS atomicity,
+snapshot-scoped worker execution (no scope widening), no SQL-injection or XSS
+surface in the round-3 diff, and the round-1 P1 confirm-control gating
+(`disabled={!isLoaded}`).
