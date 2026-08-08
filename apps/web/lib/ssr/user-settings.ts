@@ -64,6 +64,7 @@ export function createDefaultUserSettings(): UserSettingsState {
       branch: null,
       agentProfileId: null,
       executorProfileId: null,
+      workflowIdsByWorkspace: {},
       synced: false,
     },
     jiraSavedViews: undefined,
@@ -189,7 +190,11 @@ export function taskCreateLastUsedHasValue(
   value: UserSettingsData["task_create_last_used"] | undefined,
 ) {
   return Boolean(
-    value?.repository_id || value?.branch || value?.agent_profile_id || value?.executor_profile_id,
+    value?.repository_id ||
+    value?.branch ||
+    value?.agent_profile_id ||
+    value?.executor_profile_id ||
+    Object.keys(value?.workflow_ids_by_workspace ?? {}).length > 0,
   );
 }
 
@@ -199,6 +204,7 @@ function parseTaskCreateLastUsed(value: UserSettingsData["task_create_last_used"
     branch: value?.branch || null,
     agentProfileId: value?.agent_profile_id || null,
     executorProfileId: value?.executor_profile_id || null,
+    workflowIdsByWorkspace: value?.workflow_ids_by_workspace ?? {},
     synced: taskCreateLastUsedHasValue(value),
   };
 }

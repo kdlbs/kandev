@@ -578,6 +578,7 @@ export function useTaskCreateDialogEffects(fs: DialogFormState, args: TaskCreate
     lastUsedAgentProfileId: args.lastUsedAgentProfileId,
     authLoaded,
     userSettingsLoaded: args.userSettingsLoaded,
+    effectiveWorkflowId,
   });
   useRepositoryAutoSelectEffect(fs, open, workspaceId, repositories, {
     lastUsedRepositoryId: args.lastUsedRepositoryId,
@@ -598,6 +599,7 @@ export function useTaskCreateDialogEffects(fs: DialogFormState, args: TaskCreate
       userSettingsLoaded: args.userSettingsLoaded,
       lastUsedAgentProfileId: args.lastUsedAgentProfileId,
       lastUsedExecutorProfileId: args.lastUsedExecutorProfileId,
+      effectiveWorkflowId,
     },
     workflows,
   );

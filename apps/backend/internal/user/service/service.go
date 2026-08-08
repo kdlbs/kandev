@@ -197,7 +197,8 @@ func taskCreateLastUsedPatchEmpty(patch models.TaskCreateLastUsed) bool {
 	return patch.RepositoryID == "" &&
 		patch.Branch == "" &&
 		patch.AgentProfileID == "" &&
-		patch.ExecutorProfileID == ""
+		patch.ExecutorProfileID == "" &&
+		len(patch.WorkflowIDsByWorkspace) == 0
 }
 
 // applyBasicSettings copies simple (non-validated) fields from req to settings.

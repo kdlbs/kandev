@@ -976,6 +976,9 @@ func buildTaskCreateLastUsedPatch(body httpCreateTaskRequest, repos []dto.TaskRe
 		AgentProfileID:    body.AgentProfileID,
 		ExecutorProfileID: body.ExecutorProfileID,
 	}
+	if body.WorkspaceID != "" && body.WorkflowID != "" {
+		patch.WorkflowIDsByWorkspace = map[string]string{body.WorkspaceID: body.WorkflowID}
+	}
 	for i, repo := range repos {
 		if repo.RepositoryID == "" {
 			continue

@@ -629,12 +629,18 @@ func mapAppStatusBarOrder(order usermodels.AppStatusBarOrder) map[string]any {
 }
 
 func mapTaskCreateLastUsed(value usermodels.TaskCreateLastUsed) map[string]any {
+	workflowIDsByWorkspace := value.WorkflowIDsByWorkspace
+	if workflowIDsByWorkspace == nil {
+		workflowIDsByWorkspace = map[string]string{}
+	}
 	return map[string]any{
-		"repositoryId":      nullString(value.RepositoryID),
-		"branch":            nullString(value.Branch),
-		"agentProfileId":    nullString(value.AgentProfileID),
-		"executorProfileId": nullString(value.ExecutorProfileID),
-		"synced":            value.RepositoryID != "" || value.Branch != "" || value.AgentProfileID != "" || value.ExecutorProfileID != "",
+		"repositoryId":           nullString(value.RepositoryID),
+		"branch":                 nullString(value.Branch),
+		"agentProfileId":         nullString(value.AgentProfileID),
+		"executorProfileId":      nullString(value.ExecutorProfileID),
+		"workflowIdsByWorkspace": workflowIDsByWorkspace,
+		"synced": value.RepositoryID != "" || value.Branch != "" || value.AgentProfileID != "" ||
+			value.ExecutorProfileID != "" || len(workflowIDsByWorkspace) > 0,
 	}
 }
 
