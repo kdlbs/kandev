@@ -23,6 +23,7 @@
   "checkFailed": "检查失败：{{error}}",
   "checkingJiraStatus": "正在检查 Jira 状态…",
   "checkNow": "立即检查",
+  "checkingJiraStatus": "正在检查 Jira 状态…",
   "clear": "清除{{lowerCase}}",
   "clearFilters": "清除筛选条件",
   "connectedAs": "已连接为 {{name}}",

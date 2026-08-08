@@ -6,7 +6,7 @@ import { IconBrandGithub, IconMenu2 } from "@tabler/icons-react";
 import { Alert, AlertDescription } from "@kandev/ui/alert";
 import { Button } from "@kandev/ui/button";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@kandev/ui/sheet";
-import { PageTopbar } from "@/components/page-topbar";
+import { PageShell } from "@/components/page-shell";
 import { useGitHubStatus } from "@/hooks/domains/github/use-github-status";
 import { usePRKeyToTasks } from "@/hooks/domains/github/use-pr-key-to-tasks";
 import { useIssueKeyToTasks } from "@/hooks/domains/github/use-issue-key-to-tasks";
@@ -57,28 +57,20 @@ type GitHubPageClientProps = {
   repositories: Repository[];
 };
 
-function PageHeader({ onOpenMobileSidebar }: { onOpenMobileSidebar?: () => void }) {
+function MobileFiltersButton({ show, onClick }: { show: boolean; onClick: () => void }) {
   const { t } = useTranslation();
+  if (!show) return null;
   return (
-    <PageTopbar
-      title="GitHub"
-      subtitle={t("github:pullRequestsAndIssuesAcrossYour")}
-      icon={<IconBrandGithub className="h-4 w-4" />}
-      actions={
-        onOpenMobileSidebar && (
-          <Button
-            variant="outline"
-            size="icon-lg"
-            onClick={onOpenMobileSidebar}
-            className="md:hidden cursor-pointer"
-            data-testid="github-mobile-menu-button"
-            aria-label={t("github:openGithubFilters")}
-          >
-            <IconMenu2 className="h-4 w-4" />
-          </Button>
-        )
-      }
-    />
+    <Button
+      variant="outline"
+      size="icon-lg"
+      onClick={onClick}
+      className="md:hidden cursor-pointer"
+      data-testid="github-mobile-menu-button"
+      aria-label={t("github:openGithubFilters")}
+    >
+      <IconMenu2 className="h-4 w-4" />
+    </Button>
   );
 }
 
@@ -91,7 +83,7 @@ function NotAuthenticatedNotice({
 }) {
   const { t } = useTranslation();
   const settingsHref = workspaceId
-    ? `/settings/workspace/${workspaceId}/integrations/github`
+    ? `/settings/workspaces/${workspaceId}/integrations/github`
     : "/settings/integrations/github";
   return (
     <Alert>
@@ -439,7 +431,8 @@ function AuthenticatedLayout({
   const issueKeyToTasks = useIssueKeyToTasks(workspaceId ?? null);
   useAllWorkflowSnapshots(workspaceId ?? null);
   return (
-    <main className="flex-1 flex flex-col min-w-0 overflow-hidden">
+    // Not a <main>: AppShell owns that landmark, one per page.
+    <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
       <PresetsScopeBar
         className="hidden md:flex"
         selected={selection}
@@ -486,7 +479,46 @@ function AuthenticatedLayout({
         total={search.total}
         onPageChange={search.setPage}
       />
-    </main>
+    </div>
+  );
+}
+
+function MobileFiltersSheet({
+  open,
+  onOpenChange,
+  state,
+  onSelect,
+  onSaveCurrent,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  state: GitHubPageState;
+  onSelect: (s: Parameters<GitHubPageState["onSelect"]>[0]) => void;
+  onSaveCurrent: () => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <Sheet open={open} onOpenChange={onOpenChange}>
+      <SheetContent
+        side="right"
+        className="w-full sm:max-w-sm overflow-y-auto p-0"
+        data-testid="github-mobile-sidebar"
+      >
+        <SheetHeader className="px-4 pt-4 pb-2">
+          <SheetTitle>{t("github:filters")}</SheetTitle>
+        </SheetHeader>
+        <PresetsSidebar
+          selected={state.selection}
+          onSelect={onSelect}
+          savedPresets={state.savedPresets}
+          onDeleteSaved={state.onDeleteSaved}
+          canSaveCurrent={state.canSaveCurrent}
+          onSaveCurrent={onSaveCurrent}
+          prPresets={state.resolvedPrPresets}
+          issuePresets={state.resolvedIssuePresets}
+        />
+      </SheetContent>
+    </Sheet>
   );
 }
 
@@ -512,7 +544,6 @@ export function GitHubPageClient({
 
   const onStartTask = useCallback((payload: LaunchPayload) => setLaunchPayload(payload), []);
   const onCloseLaunch = useCallback(() => setLaunchPayload(null), []);
-  const onOpenMobileSidebar = useCallback(() => setMobileSidebarOpen(true), []);
   // Close the mobile sheet after any sidebar selection. KindToggle clicks also
   // route through onSelect — closing on every selection is acceptable UX since
   // the user always wants to see the list after picking a kind or preset.
@@ -528,49 +559,44 @@ export function GitHubPageClient({
   };
 
   return (
-    <div className="flex h-full min-h-0 w-full flex-col bg-background">
-      <PageHeader onOpenMobileSidebar={loaded && authed ? onOpenMobileSidebar : undefined} />
-      {!loaded && (
-        <div className="p-6 text-sm text-muted-foreground">{t("github:checkingGithubStatus")}</div>
-      )}
-      {loaded && !authed && (
-        <div className="p-6 max-w-2xl">
-          <NotAuthenticatedNotice
+    <PageShell
+      title="GitHub"
+      subtitle={t("github:pullRequestsAndIssuesAcrossYour")}
+      icon={<IconBrandGithub className="h-4 w-4" />}
+      scroll="none"
+      actions={
+        <MobileFiltersButton show={loaded && authed} onClick={() => setMobileSidebarOpen(true)} />
+      }
+    >
+      <div className="flex min-h-0 w-full flex-1 flex-col bg-background">
+        {!loaded && (
+          <div className="p-6 text-sm text-muted-foreground">{t("github:checkingGithubStatus")}</div>
+        )}
+        {loaded && !authed && (
+          <div className="p-6 max-w-2xl">
+            <NotAuthenticatedNotice
+              workspaceId={workspaceId}
+              personalRequired={status?.automation?.source === "github_app_installation"}
+            />
+          </div>
+        )}
+        {loaded && authed && (
+          <AuthenticatedLayout
             workspaceId={workspaceId}
-            personalRequired={status?.automation?.source === "github_app_installation"}
+            state={state}
+            prPresets={prPresets}
+            issuePresets={issuePresets}
+            onStartTask={onStartTask}
           />
-        </div>
-      )}
-      {loaded && authed && (
-        <AuthenticatedLayout
-          workspaceId={workspaceId}
-          state={state}
-          prPresets={prPresets}
-          issuePresets={issuePresets}
-          onStartTask={onStartTask}
-        />
-      )}
-      <Sheet open={mobileSidebarOpen} onOpenChange={setMobileSidebarOpen}>
-        <SheetContent
-          side="right"
-          className="w-full sm:max-w-sm overflow-y-auto p-0"
-          data-testid="github-mobile-sidebar"
-        >
-          <SheetHeader className="px-4 pt-4 pb-2">
-            <SheetTitle>{t("github:filters")}</SheetTitle>
-          </SheetHeader>
-          <PresetsSidebar
-            selected={state.selection}
-            onSelect={onMobileSidebarSelect}
-            savedPresets={state.savedPresets}
-            onDeleteSaved={state.onDeleteSaved}
-            canSaveCurrent={state.canSaveCurrent}
-            onSaveCurrent={onMobileSaveCurrent}
-            prPresets={state.resolvedPrPresets}
-            issuePresets={state.resolvedIssuePresets}
-          />
-        </SheetContent>
-      </Sheet>
+        )}
+      </div>
+      <MobileFiltersSheet
+        open={mobileSidebarOpen}
+        onOpenChange={setMobileSidebarOpen}
+        state={state}
+        onSelect={onMobileSidebarSelect}
+        onSaveCurrent={onMobileSaveCurrent}
+      />
       <QuickTaskLauncher
         workspaceId={workspaceId ?? null}
         workflows={workflows}
@@ -589,6 +615,6 @@ export function GitHubPageClient({
         suggestedLabel={state.suggestedLabel}
         onSave={state.onConfirmSave}
       />
-    </div>
+    </PageShell>
   );
 }

@@ -34,7 +34,7 @@ test.describe("System storage maintenance", () => {
     const overviewResponse = testPage.waitForResponse(
       (response) => new URL(response.url()).pathname === "/api/v1/system/storage",
     );
-    await testPage.goto("/settings/system/storage");
+    await testPage.goto("/settings/system/data-storage");
     const overview = await (await overviewResponse).json();
     expect(overview.summary.go_cache).toMatchObject({ owned: true });
     expect(overview.summary.go_cache.size_bytes).toBeGreaterThan(15 * 1024 * 1024 * 1024);
@@ -66,7 +66,7 @@ test.describe("System storage maintenance", () => {
   });
 
   test("reuses the cached snapshot until Analyze refreshes it", async ({ testPage }) => {
-    await testPage.goto("/settings/system/storage");
+    await testPage.goto("/settings/system/data-storage");
     const analyzedTime = testPage.locator("time[datetime]").filter({ hasText: "Last analyzed" });
     await expect(analyzedTime).toHaveText(/^Last analyzed .+/);
     const initialAnalyzedAt = await analyzedTime.getAttribute("datetime");
@@ -135,7 +135,7 @@ test.describe("System storage maintenance", () => {
 
     await testPage.route(overviewPattern, holdOverview);
     try {
-      await testPage.goto("/settings/system/storage");
+      await testPage.goto("/settings/system/data-storage");
       await overviewObserved;
 
       await expect(testPage.getByTestId("storage-policy-card")).toBeVisible();
@@ -165,7 +165,7 @@ test.describe("System storage maintenance", () => {
     backend,
   }) => {
     const orphan = seedOrphanWorkspace(backend.tmpDir);
-    await testPage.goto("/settings/system/storage");
+    await testPage.goto("/settings/system/data-storage");
     const overviewBox = await testPage.getByTestId("storage-overview-card").boundingBox();
     const policyBox = await testPage.getByTestId("storage-policy-card").boundingBox();
     expect(overviewBox).not.toBeNull();
@@ -275,7 +275,7 @@ test.describe("System storage maintenance", () => {
       )
       .toBe("RUNNING");
 
-    await testPage.goto("/settings/system/storage");
+    await testPage.goto("/settings/system/data-storage");
     const responsePromise = testPage.waitForResponse(
       (response) =>
         response.request().method() === "POST" &&
@@ -366,7 +366,7 @@ test.describe("System storage maintenance", () => {
         body: JSON.stringify({ job_id: "eligible-purge" }),
       });
     });
-    await testPage.goto("/settings/system/storage");
+    await testPage.goto("/settings/system/data-storage");
     await expect(
       testPage.getByTestId("storage-quarantine-eligible-entry").getByText("Eligible now"),
     ).toBeVisible();

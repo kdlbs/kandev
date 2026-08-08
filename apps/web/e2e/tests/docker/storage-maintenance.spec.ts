@@ -36,7 +36,7 @@ test("removes only stopped Kandev-labeled containers and gates daemon-wide clean
   const active = createStoppedContainer(["kandev.managed=true", `kandev.task_id=${activeTask.id}`]);
   const unrelated = createStoppedContainer(["e2e.storage=unrelated"]);
   try {
-    await testPage.goto("/settings/system/storage");
+    await testPage.goto("/settings/system/data-storage");
     await expect(testPage.getByTestId("storage-docker-build-cache")).toBeDisabled();
     await expect(testPage.getByTestId("storage-resource-managed-containers-trigger")).toContainText(
       "Kandev containers<0.01 GB",

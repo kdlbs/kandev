@@ -107,7 +107,9 @@ test.describe("Mobile plugin navigation", () => {
     const home = testPage.getByTestId("topbar-phone-home");
     await expect(home).toBeVisible();
     await home.click();
-    await expect(testPage).toHaveURL(/\/\?home=overview$/);
+    // The crumb resolves through the navigation manifest, which keeps the
+    // active workspace instead of dropping to the workspace-less overview.
+    await expect(testPage).toHaveURL(/\/\?home=overview(&workspaceId=[^&]+)?$/);
 
     // Desktop parity reference: the same item in the always-visible sidebar.
     const desktop = await openDesktopClient(browser, backend.frontendUrl, backend.port);

@@ -5,7 +5,7 @@ import { Trans, useTranslation } from "react-i18next";
 import Link from "@/components/routing/app-link";
 import { useRouter } from "@/lib/routing/client-router";
 import { runWithNavigationBlockerBypassed } from "@/lib/routing/navigation-guard";
-import { IconGitBranch, IconLayoutColumns, IconTrash } from "@tabler/icons-react";
+import { IconTrash } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Input } from "@kandev/ui/input";
 import { Label } from "@kandev/ui/label";
@@ -33,6 +33,7 @@ import { SettingsCard } from "@/components/settings/settings-card";
 import { useSettingsSaveContributor } from "@/components/settings/settings-save-provider";
 import { SettingsTarget } from "@/components/settings/settings-target";
 import { workspaceDiscoveryTarget } from "@/lib/settings-discovery/dynamic-targets";
+import { WorkspaceSectionHeader } from "@/components/settings/workspaces/workspace-section-header";
 
 type WorkspaceEditClientProps = {
   workspaceId: string;
@@ -51,7 +52,7 @@ export function WorkspaceEditClient({ workspaceId }: WorkspaceEditClientProps) {
           <CardContent className="py-12 text-center">
             <p className="text-muted-foreground">{t("workspaces:workspaceNotFound")}</p>
             <Button className="mt-4" asChild>
-              <Link href="/settings/workspace">{t("workspaces:backToWorkspaces")}</Link>
+              <Link href="/settings/workspaces">{t("workspaces:backToWorkspaces")}</Link>
             </Button>
           </CardContent>
         </Card>
@@ -200,37 +201,6 @@ function WorkspaceSettingsCard({
         </div>
       </CardContent>
     </SettingsCard>
-  );
-}
-
-type WorkspaceLinksCardProps = {
-  workspaceId: string;
-};
-
-function WorkspaceLinksCard({ workspaceId }: WorkspaceLinksCardProps) {
-  const { t } = useTranslation();
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle>{t("workspaces:workspaceLinks")}</CardTitle>
-      </CardHeader>
-      <CardContent>
-        <div className="grid gap-3 sm:grid-cols-2">
-          <Button asChild variant="outline" className="justify-start gap-2">
-            <Link href={`/settings/workspace/${workspaceId}/repositories`}>
-              <IconGitBranch className="h-4 w-4" />
-              {t("workspaces:repositories")}
-            </Link>
-          </Button>
-          <Button asChild variant="outline" className="justify-start gap-2">
-            <Link href={`/settings/workspace/${workspaceId}/workflows`}>
-              <IconLayoutColumns className="h-4 w-4" />
-              {t("workspaces:workflows")}
-            </Link>
-          </Button>
-        </div>
-      </CardContent>
-    </Card>
   );
 }
 
@@ -478,7 +448,7 @@ function useWorkspaceEditForm(workspace: Workspace) {
     try {
       await deleteWorkspaceRequest.run(currentWorkspace.id, currentWorkspace.name);
       setWorkspaces(workspaces.filter((ws: Workspace) => ws.id !== currentWorkspace.id));
-      runWithNavigationBlockerBypassed(() => router.push("/settings/workspace"));
+      runWithNavigationBlockerBypassed(() => router.push("/settings/workspaces"));
     } catch (error) {
       toast({
         title: t("workspaces:failedToDeleteWorkspace"),
@@ -563,12 +533,10 @@ function WorkspaceEditForm({ workspace }: WorkspaceEditFormProps) {
 
   return (
     <div className="space-y-8">
-      <div>
-        <h2 className="text-2xl font-bold">{currentWorkspace.name}</h2>
-        <p className="text-sm text-muted-foreground mt-1">
-          {t("workspaces:manageWorkspaceDetails")}
-        </p>
-      </div>
+      <WorkspaceSectionHeader
+        tab="overview"
+        description={t("workspaces:manageWorkspaceDetails")}
+      />
       <Separator />
       <WorkspaceSettingsCard
         workspaceId={currentWorkspace.id}
@@ -585,7 +553,6 @@ function WorkspaceEditForm({ workspace }: WorkspaceEditFormProps) {
         onAgentProfileChange={setDefaultAgentProfileId}
         agentProfiles={agentProfiles}
       />
-      <WorkspaceLinksCard workspaceId={currentWorkspace.id} />
       <Separator />
       <DeleteWorkspaceCard
         workspaceName={currentWorkspace.name}

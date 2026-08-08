@@ -23,6 +23,7 @@ import { agentProfileId as toAgentProfileId } from "@/lib/types/ids";
 import { useAppStore } from "@/components/state-provider";
 import { useAvailableAgents } from "@/hooks/domains/settings/use-available-agents";
 import { deleteAgentAction } from "@/app/actions/agents";
+import { SettingsRedirect } from "@/src/settings-route-helpers";
 import { saveNewAgent, saveExistingAgent, isProfileDirty } from "./agent-save-helpers";
 import type { DraftProfile, DraftAgent } from "./agent-save-helpers";
 import { AgentHeader, ProfilesCard } from "./agent-setup-parts";
@@ -553,6 +554,13 @@ export default function AgentSetupPage() {
       variant: "error",
     });
   };
+
+  // Saved agents have no page of their own — the Agents index shows each
+  // agent with its profiles inline. The route only serves creation (new agent
+  // from browse, or ?mode=create for a new profile).
+  if (savedAgent && !isCreateMode) {
+    return <SettingsRedirect to="/settings/agents" />;
+  }
 
   return (
     <AgentSetupForm

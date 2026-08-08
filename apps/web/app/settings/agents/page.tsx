@@ -1,13 +1,11 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
+import Link from "@/components/routing/app-link";
 import {
   IconAlertTriangle,
-  IconCheck,
-  IconClipboard,
   IconDownload,
-  IconExternalLink,
   IconLoader2,
   IconPlus,
   IconRefresh,
@@ -17,153 +15,35 @@ import { Button } from "@kandev/ui/button";
 import { Card, CardContent } from "@kandev/ui/card";
 import { Separator } from "@kandev/ui/separator";
 import { useAppStore } from "@/components/state-provider";
-import {
-  createCustomTUIAgent,
-  installAgent,
-  listAgentDiscovery,
-  listAgents,
-  listAvailableAgents,
-  listInstallJobs,
-} from "@/lib/api";
+import { createCustomTUIAgent, listAgentDiscovery, listAgents, listAvailableAgents } from "@/lib/api";
 import type { AgentUpdateJob, AgentUpdatePreview, InstallJob } from "@/lib/api";
 import { useAgentDiscovery } from "@/hooks/domains/settings/use-agent-discovery";
 import { useAgentRuntimeUpdates } from "@/hooks/domains/settings/use-agent-runtime-updates";
 import { useAvailableAgents } from "@/hooks/domains/settings/use-available-agents";
-import { copyToClipboard } from "@/lib/utils/copy-to-clipboard";
 import { AddTUIAgentDialog } from "@/components/settings/add-tui-agent-dialog";
+import { AgentProfilesSubList } from "@/components/settings/agents/agent-profiles-section";
 import { HostShellDialog } from "@/components/settings/host-shell-dialog";
-import { InstallAgentCard } from "@/components/settings/install-agent-card";
 import { InstalledAgentCard } from "@/components/settings/installed-agent-card";
+import { AGENTS_BROWSE_SETTINGS_HREF } from "@/lib/settings-discovery/catalog/agents";
+import {
+  detectedAgents,
+  orderAgentsForDisplay,
+  orphanedAgents,
+  type DiscoveredAgent,
+} from "@/lib/settings/agent-display-order";
 import { toAgentProfileOption } from "@/lib/state/slices/settings/types";
-import { ProfileListItem } from "@/app/settings/agents/profile-list-item";
-import { useProfileEnabledToggle } from "@/hooks/domains/settings/use-profile-enabled-toggle";
-import { ProfileEnabledHelp } from "@/components/settings/profile-enabled-help";
 import type {
   AgentDiscovery,
   Agent,
   AvailableAgent,
-  AgentProfile,
   RuntimeUpdate,
-  ToolStatus,
 } from "@/lib/types/http";
-
-function useCopyCommand() {
-  const [copiedValue, setCopiedValue] = useState<string | null>(null);
-  const copy = useCallback(async (text: string) => {
-    if (await copyToClipboard(text)) {
-      setCopiedValue(text);
-      setTimeout(() => setCopiedValue(null), 2000);
-    }
-  }, []);
-  return { copiedValue, copy };
-}
-
-function CopyButton({
-  text,
-  copiedValue,
-  onCopy,
-}: {
-  text: string;
-  copiedValue: string | null;
-  onCopy: (text: string) => void;
-}) {
-  const { t } = useTranslation();
-  const isCopied = copiedValue === text;
-  return (
-    <Button
-      variant="ghost"
-      size="sm"
-      className="h-7 w-7 p-0 cursor-pointer shrink-0"
-      aria-label={isCopied ? t("agents:copied") : t("agents:copyInstallCommand")}
-      onClick={() => onCopy(text)}
-    >
-      {isCopied ? (
-        <IconCheck className="h-3.5 w-3.5 text-green-500" />
-      ) : (
-        <IconClipboard className="h-3.5 w-3.5 text-muted-foreground" />
-      )}
-    </Button>
-  );
-}
-
-function InstallCard({
-  agent,
-  copiedValue,
-  onCopy,
-  job,
-  onInstall,
-}: {
-  agent: AvailableAgent;
-  copiedValue: string | null;
-  onCopy: (text: string) => void;
-  job: InstallJob | undefined;
-  onInstall: (name: string) => void;
-}) {
-  return (
-    <InstallAgentCard
-      agent={agent}
-      job={job}
-      onInstall={onInstall}
-      scriptSlot={
-        agent.install_script ? (
-          <div className="flex items-center gap-1 rounded-md bg-muted px-2 py-1.5 font-mono text-xs">
-            <code className="flex-1 truncate">{agent.install_script}</code>
-            <CopyButton text={agent.install_script} copiedValue={copiedValue} onCopy={onCopy} />
-          </div>
-        ) : null
-      }
-    />
-  );
-}
-
-function ToolInstallCard({
-  tool,
-  copiedValue,
-  onCopy,
-}: {
-  tool: ToolStatus;
-  copiedValue: string | null;
-  onCopy: (text: string) => void;
-}) {
-  const { t } = useTranslation();
-  return (
-    <Card className="border-dashed">
-      <CardContent className="py-4 flex flex-col gap-2">
-        <div className="flex items-center gap-2">
-          <IconDownload className="h-5 w-5 text-muted-foreground shrink-0" />
-          <h4 className="font-medium">{tool.display_name}</h4>
-          {tool.available && (
-            <span className="flex items-center gap-1 text-xs text-green-600 dark:text-green-400">
-              <IconCheck className="h-3.5 w-3.5" />
-              {t("agents:installed")}
-            </span>
-          )}
-        </div>
-        {tool.description && <p className="text-xs text-muted-foreground">{tool.description}</p>}
-        {!tool.available && tool.install_script && (
-          <div className="flex items-center gap-1 rounded-md bg-muted px-2 py-1.5 font-mono text-xs">
-            <code className="flex-1 truncate">{tool.install_script}</code>
-            <CopyButton text={tool.install_script} copiedValue={copiedValue} onCopy={onCopy} />
-          </div>
-        )}
-        {tool.info_url && (
-          <a
-            href={tool.info_url}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground cursor-pointer"
-          >
-            <IconExternalLink className="h-3 w-3" />
-            {tool.info_url}
-          </a>
-        )}
-      </CardContent>
-    </Card>
-  );
-}
 
 type InstalledAgentsSectionProps = {
   installedAgents: AgentDiscovery[];
+  /** The full scan, detected or not — the backend's ranking of every agent. */
+  discoveryOrder: AgentDiscovery[];
+  savedAgents: Agent[];
   discoveryLoading: boolean;
   rescanning: boolean;
   savedAgentsByName: Map<string, Agent>;
@@ -230,8 +110,48 @@ function InstalledAgentsHeader({
   );
 }
 
+type AgentCard = { key: string; agent: AgentDiscovery; detected: boolean };
+
+/**
+ * Every agent worth a card, in the backend's rank order: the ones the scan
+ * found, plus configured agents it did not, the latter given a synthetic
+ * discovery record so a missing CLI never hides its profiles.
+ */
+function agentCards(
+  installedAgents: AgentDiscovery[],
+  savedAgents: Agent[],
+  discoveryOrder: DiscoveredAgent[],
+): AgentCard[] {
+  const detected: AgentCard[] = installedAgents.map((agent) => ({
+    key: agent.name,
+    agent,
+    detected: true,
+  }));
+  const orphans: AgentCard[] = orphanedAgents(installedAgents, savedAgents).map((agent) => ({
+    key: agent.id,
+    agent: {
+      name: agent.name,
+      supports_mcp: agent.supports_mcp,
+      mcp_config_path: agent.mcp_config_path ?? null,
+      installation_paths: [],
+      available: false,
+      matched_path: null,
+    },
+    detected: false,
+  }));
+  // Rank by name against the same list the menu ranks against, so the two
+  // surfaces cannot order the same agents differently.
+  const ordered = orderAgentsForDisplay(
+    discoveryOrder,
+    [...detected, ...orphans].map((card) => ({ name: card.agent.name, profiles: [], card })),
+  );
+  return ordered.map((entry) => entry.card);
+}
+
 function InstalledAgentsSection({
   installedAgents,
+  discoveryOrder,
+  savedAgents,
   discoveryLoading,
   rescanning,
   savedAgentsByName,
@@ -247,6 +167,14 @@ function InstalledAgentsSection({
 }: InstalledAgentsSectionProps) {
   const { t } = useTranslation();
   const [shellOpen, setShellOpen] = useState(false);
+
+  // One ranked list rather than "detected, then the rest". Two groups meant an
+  // agent the scan misses always sorted below every detected one — which put
+  // the dev-only mock agent, ranked last by the backend, ahead of real agents
+  // whose CLI happened to be absent. Undetected agents still render, via a
+  // synthetic discovery record, so their profiles never vanish; they just keep
+  // their rank. The settings menu ranks the same way — see `agent-display-order`.
+  const cards = agentCards(installedAgents, savedAgents, discoveryOrder);
 
   return (
     <div className="space-y-4">
@@ -266,7 +194,7 @@ function InstalledAgentsSection({
         }}
       />
 
-      {installedAgents.length === 0 && (
+      {cards.length === 0 && (
         <Card>
           <CardContent className="py-8 text-center">
             <div className="flex items-center justify-center gap-2 text-sm text-muted-foreground">
@@ -283,176 +211,34 @@ function InstalledAgentsSection({
         </Card>
       )}
 
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
-        {installedAgents.map((agent: AgentDiscovery) => (
+      <div className="grid gap-3">
+        {cards.map(({ key, agent, detected }) => (
           <InstalledAgentCard
-            key={agent.name}
+            key={key}
             agent={agent}
             savedAgent={savedAgentsByName.get(agent.name)}
             displayName={resolveDisplayName(agent.name)}
-            capabilityStatus={resolveCapabilityStatus(agent.name)}
-            runtimeUpdate={resolveRuntimeUpdate(agent.name)}
-            installJob={installJobs[agent.name]}
-            updateJob={updateJobs[agent.name]}
-            onPreview={previewUpdate}
-            onUpdate={startUpdate}
-            onAuthComplete={() => void handleRescan()}
-          />
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function SuggestInstallSection({
-  notInstalledAgents,
-  tools,
-  copiedValue,
-  onCopy,
-  installJobs,
-  onInstall,
-}: {
-  notInstalledAgents: AvailableAgent[];
-  tools: ToolStatus[];
-  copiedValue: string | null;
-  onCopy: (text: string) => void;
-  installJobs: Record<string, InstallJob>;
-  onInstall: (name: string) => void;
-}) {
-  const { t } = useTranslation();
-  const notInstalledTools = tools.filter((tool) => !tool.available);
-  if (notInstalledAgents.length === 0 && notInstalledTools.length === 0) return null;
-
-  return (
-    <div className="space-y-4">
-      <Separator />
-      <div>
-        <h3 className="text-lg font-semibold">{t("agents:availableToInstall")}</h3>
-        <p className="text-sm text-muted-foreground">{t("agents:availableToInstallDescription")}</p>
-      </div>
-
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
-        {notInstalledAgents.map((agent) => (
-          <InstallCard
-            key={agent.name}
-            agent={agent}
-            copiedValue={copiedValue}
-            onCopy={onCopy}
-            job={installJobs[agent.name]}
-            onInstall={onInstall}
-          />
-        ))}
-        {notInstalledTools.map((tool) => (
-          <ToolInstallCard key={tool.name} tool={tool} copiedValue={copiedValue} onCopy={onCopy} />
-        ))}
-      </div>
-    </div>
-  );
-}
-
-type AgentProfilesSectionProps = {
-  savedAgents: Agent[];
-  onToggleEnabled: (profile: AgentProfile, enabled: boolean) => void;
-};
-
-function AgentProfilesSection({ savedAgents, onToggleEnabled }: AgentProfilesSectionProps) {
-  const { t } = useTranslation();
-  if (!savedAgents.some((agent: Agent) => agent.profiles.length > 0)) {
-    return null;
-  }
-
-  return (
-    <div className="space-y-4">
-      <Separator />
-      <div>
-        <div className="flex items-center gap-1">
-          <h3 className="text-lg font-semibold">{t("agents:agentProfiles")}</h3>
-          <ProfileEnabledHelp />
-        </div>
-        <p className="text-sm text-muted-foreground">{t("agents:agentProfilesDescription")}</p>
-      </div>
-
-      <div className="space-y-2">
-        {savedAgents.flatMap((agent: Agent) =>
-          agent.profiles.map((profile: AgentProfile) => (
-            <ProfileListItem
-              key={profile.id}
-              agent={agent}
-              profile={profile}
-              onToggleEnabled={onToggleEnabled}
+            {...(detected
+              ? {
+                  capabilityStatus: resolveCapabilityStatus(agent.name),
+                  runtimeUpdate: resolveRuntimeUpdate(agent.name),
+                  installJob: installJobs[agent.name],
+                  updateJob: updateJobs[agent.name],
+                  onPreview: previewUpdate,
+                  onUpdate: startUpdate,
+                  onAuthComplete: () => void handleRescan(),
+                }
+              : {})}
+          >
+            <AgentProfilesSubList
+              savedAgent={savedAgentsByName.get(agent.name)}
+              agentName={agent.name}
             />
-          )),
-        )}
+          </InstalledAgentCard>
+        ))}
       </div>
     </div>
   );
-}
-
-/**
- * Install state is held in the store (driven by WS events
- * agent.install.{started,output,finished}). This hook:
- *   - Rehydrates jobs on mount so a page reload picks up in-flight installs.
- *   - Subscribes to agent.available.updated → calls onSuccess() to rescan.
- *   - Exposes handleInstall(name) which POSTs to enqueue (idempotent on the
- *     server: clicking again while running returns the same job_id).
- */
-function useInstallAgent(onSuccess: () => Promise<void>) {
-  const installJobs = useAppStore((state) => state.installJobs.byAgent);
-  const upsertInstallJob = useAppStore((state) => state.upsertInstallJob);
-
-  useEffect(() => {
-    let cancelled = false;
-    listInstallJobs()
-      .then((resp) => {
-        if (cancelled) return;
-        // Upsert per-job rather than wholesale-replace: if a WS event
-        // already seeded an in-flight job with output chunks between page
-        // mount and this HTTP response, the snapshot from the server may
-        // be older, and a full replace would clobber the live output.
-        for (const job of resp.jobs) upsertInstallJob(job);
-      })
-      .catch(() => {
-        /* page mount; ignore */
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [upsertInstallJob]);
-
-  // When any install finishes successfully, trigger the page-level rescan so
-  // the agent disappears from "Available to Install" and shows up under
-  // "Installed Agents".
-  useEffect(() => {
-    const succeeded = Object.values(installJobs).filter((j) => j.status === "succeeded");
-    if (succeeded.length > 0) {
-      void onSuccess();
-    }
-    // Intentionally only depends on the count of succeeded jobs to avoid
-    // re-firing on every output chunk during a running install.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [Object.values(installJobs).filter((j) => j.status === "succeeded").length]);
-
-  const handleInstall = useCallback(
-    async (name: string) => {
-      try {
-        const job = await installAgent(name);
-        // The WS event will normally arrive first, but seed the store in case
-        // the WS round-trip is slower than the HTTP response.
-        upsertInstallJob(job);
-      } catch (err) {
-        upsertInstallJob({
-          job_id: `local-error-${name}`,
-          agent_name: name,
-          status: "failed",
-          error: err instanceof Error ? err.message : String(err),
-          started_at: new Date().toISOString(),
-        });
-      }
-    },
-    [upsertInstallJob],
-  );
-
-  return { installJobs, handleInstall };
 }
 
 function useAgentPageState() {
@@ -462,18 +248,12 @@ function useAgentPageState() {
   const setSettingsAgents = useAppStore((state) => state.setSettingsAgents);
   const setAvailableAgents = useAppStore((state) => state.setAvailableAgents);
   const setAgentProfiles = useAppStore((state) => state.setAgentProfiles);
-  const { items: availableAgents, tools } = useAvailableAgents();
+  const installJobs = useAppStore((state) => state.installJobs.byAgent);
+  const { items: availableAgents } = useAvailableAgents();
   const [rescanning, setRescanning] = useState(false);
   const [tuiDialogOpen, setTuiDialogOpen] = useState(false);
 
-  const installedAgents = useMemo(
-    () => discoveryAgents.filter((agent: AgentDiscovery) => agent.available),
-    [discoveryAgents],
-  );
-  const notInstalledAgents = useMemo(
-    () => availableAgents.filter((a: AvailableAgent) => !a.available && a.install_script),
-    [availableAgents],
-  );
+  const installedAgents = useMemo(() => detectedAgents(discoveryAgents), [discoveryAgents]);
   const savedAgentsByName = useMemo(
     () => new Map(savedAgents.map((agent: Agent) => [agent.name, agent])),
     [savedAgents],
@@ -502,9 +282,7 @@ function useAgentPageState() {
     }
   };
 
-  const { installJobs, handleInstall } = useInstallAgent(handleRescan);
   const { updateJobs, previewUpdate, startUpdate } = useAgentRuntimeUpdates();
-  const handleToggleProfileEnabled = useProfileEnabledToggle();
 
   const handleCreateCustomTUI = async (data: {
     display_name: string;
@@ -530,8 +308,7 @@ function useAgentPageState() {
   return {
     savedAgents,
     installedAgents,
-    notInstalledAgents,
-    tools,
+    discoveryAgents,
     savedAgentsByName,
     discoveryLoading,
     rescanning,
@@ -543,11 +320,9 @@ function useAgentPageState() {
     handleRescan,
     handleCreateCustomTUI,
     installJobs,
-    handleInstall,
     updateJobs,
     previewUpdate,
     startUpdate,
-    handleToggleProfileEnabled,
   };
 }
 
@@ -555,8 +330,7 @@ export default function AgentsSettingsPage() {
   const {
     savedAgents,
     installedAgents,
-    notInstalledAgents,
-    tools,
+    discoveryAgents,
     savedAgentsByName,
     discoveryLoading,
     rescanning,
@@ -568,26 +342,35 @@ export default function AgentsSettingsPage() {
     handleRescan,
     handleCreateCustomTUI,
     installJobs,
-    handleInstall,
     updateJobs,
     previewUpdate,
     startUpdate,
-    handleToggleProfileEnabled,
   } = useAgentPageState();
-  const { copiedValue, copy } = useCopyCommand();
   const { t } = useTranslation();
 
   return (
     <div className="space-y-8">
-      <div>
-        <h2 className="text-2xl font-bold">{t("common:agents")}</h2>
-        <p className="text-sm text-muted-foreground mt-1">{t("agents:pageDescription")}</p>
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <h2 className="text-2xl font-bold">{t("common:agents")}</h2>
+          <p className="text-sm text-muted-foreground mt-1">{t("agents:pageDescription")}</p>
+        </div>
+        {/* The page's primary action: everything else on this page manages what
+            is already installed. */}
+        <Button size="sm" className="cursor-pointer" asChild data-testid="install-agents-button">
+          <Link href={AGENTS_BROWSE_SETTINGS_HREF}>
+            <IconDownload className="h-4 w-4 mr-2" />
+            {t("agents:installAgents")}
+          </Link>
+        </Button>
       </div>
 
       <Separator />
 
       <InstalledAgentsSection
         installedAgents={installedAgents}
+        discoveryOrder={discoveryAgents}
+        savedAgents={savedAgents}
         discoveryLoading={discoveryLoading}
         rescanning={rescanning}
         savedAgentsByName={savedAgentsByName}
@@ -600,20 +383,6 @@ export default function AgentsSettingsPage() {
         startUpdate={startUpdate}
         setTuiDialogOpen={setTuiDialogOpen}
         handleRescan={handleRescan}
-      />
-
-      <SuggestInstallSection
-        notInstalledAgents={notInstalledAgents}
-        tools={tools}
-        copiedValue={copiedValue}
-        onCopy={copy}
-        installJobs={installJobs}
-        onInstall={handleInstall}
-      />
-
-      <AgentProfilesSection
-        savedAgents={savedAgents}
-        onToggleEnabled={handleToggleProfileEnabled}
       />
 
       <AddTUIAgentDialog

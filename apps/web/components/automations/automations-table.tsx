@@ -146,7 +146,7 @@ export function AutomationsTable({
                 data-settings-dirty-level="container"
                 className="cursor-pointer hover:bg-muted/50"
                 onClick={() =>
-                  router.push(`/settings/workspace/${workspaceId}/automations/${a.id}`)
+                  router.push(`/settings/workspaces/${workspaceId}/automations/${a.id}`)
                 }
               >
                 <TableCell className="font-medium">{a.name}</TableCell>

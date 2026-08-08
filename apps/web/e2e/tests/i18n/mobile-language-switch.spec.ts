@@ -1,6 +1,6 @@
 import { test, expect } from "../../fixtures/test-base";
 
-const APPEARANCE_URL = "/settings/general/appearance";
+const APPEARANCE_URL = "/settings/preferences/appearance";
 
 test.describe("mobile i18n language switcher", () => {
   test("switches to Chinese, persists through reload, and restores English", async ({

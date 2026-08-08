@@ -17,7 +17,7 @@ test.describe("GitHub workspace settings on mobile", () => {
       { host: "github.com", login: "mobile-cli", active: true, state: "active" },
     ]);
     await stubGitHubRateLimits(testPage, workspaceId);
-    await testPage.goto(`/settings/workspace/${workspaceId}/integrations/github`);
+    await testPage.goto(`/settings/workspaces/${workspaceId}/integrations/github`);
     const automation = testPage.getByTestId("github-workspace-automation");
     await expect(automation.getByTestId("github-task-access-summary")).toContainText(
       "Inherit executor Git credentials",
@@ -162,7 +162,7 @@ test.describe("GitHub workspace settings on mobile", () => {
     testPage,
     seedData,
   }) => {
-    await testPage.goto(`/settings/workspace/${seedData.workspaceId}/integrations/github`);
+    await testPage.goto(`/settings/workspaces/${seedData.workspaceId}/integrations/github`);
 
     const issueWatchesHeading = testPage.getByRole("heading", { name: "Issue Watches" });
     const repositoryScopeHeading = testPage.getByRole("heading", {

@@ -178,7 +178,7 @@ function WorkspaceCreateItems({
     return (
       <DropdownMenuItem
         className="cursor-pointer gap-2"
-        onSelect={() => onNavigate("/settings/workspace")}
+        onSelect={() => onNavigate("/settings/workspaces")}
       >
         <IconPlus className="h-3.5 w-3.5" />
         <span>{t("sidebar:addWorkspace")}</span>
@@ -190,7 +190,7 @@ function WorkspaceCreateItems({
     <>
       <DropdownMenuItem
         className="cursor-pointer gap-2"
-        onSelect={() => onNavigate("/settings/workspace")}
+        onSelect={() => onNavigate("/settings/workspaces")}
       >
         <IconLayoutKanban className="h-3.5 w-3.5" />
         <span>{t("sidebar:newKanbanWorkspace")}</span>

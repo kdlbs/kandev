@@ -37,7 +37,7 @@ export async function addExplicitLocalRepository(options: {
     const relativeToBackendHome = path.relative(backend.tmpDir, repoPath);
     expect(relativeToBackendHome.startsWith(`..${path.sep}`)).toBe(true);
 
-    await page.goto(`/settings/workspace/${seedData.workspaceId}/repositories`);
+    await page.goto(`/settings/workspaces/${seedData.workspaceId}/repositories`);
     await page.getByRole("button", { name: "Add Local Repository" }).click();
 
     const dialog = page.getByRole("dialog", { name: "Add Local Repository" });

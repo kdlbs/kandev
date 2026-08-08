@@ -23,6 +23,10 @@ test.describe("Kanban topbar utilities", () => {
     // Clicking a settings leaf navigates to its /settings/... page.
     await settingsMode.getByRole("link", { name: "Automations" }).click();
     await expect(testPage).toHaveURL(/\/settings\//);
+
+    // While the sidebar shows the settings tree its Home row is gone, so the
+    // topbar home crumb stays visible even at desktop width.
+    await expect(testPage.getByTestId("topbar-phone-home")).toBeVisible();
   });
 
   test("system health button is hidden when there are no issues", async ({ testPage, backend }) => {

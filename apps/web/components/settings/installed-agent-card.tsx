@@ -1,12 +1,14 @@
 "use client";
 
 import { useState } from "react";
+import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import Link from "@/components/routing/app-link";
 import { IconLoader2, IconLock, IconSettings } from "@tabler/icons-react";
 import { Badge } from "@kandev/ui/badge";
+import { NotInstalledBadge } from "@/components/settings/record-badges";
 import { Button } from "@kandev/ui/button";
-import { Card, CardContent } from "@kandev/ui/card";
+import { Card } from "@kandev/ui/card";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { AgentLogo } from "@/components/agent-logo";
 import { AgentLoginDialog } from "@/components/settings/agent-login-dialog";
@@ -32,6 +34,8 @@ type Props = {
    * after a successful sign-in, making the recovery flow look broken.
    */
   onAuthComplete?: () => void;
+  /** The agent's profiles sub-list, rendered inside the group card. */
+  children?: ReactNode;
 };
 
 function InstalledAgentIdentity({
@@ -56,9 +60,12 @@ function InstalledAgentIdentity({
     <div className="space-y-1">
       <div className="flex min-w-0 flex-wrap items-center gap-2">
         <AgentLogo agentName={agent.name} size={20} className="shrink-0" />
-        <h4 className="min-w-0 truncate font-medium">{displayName}</h4>
+        <h4 className="min-w-0 truncate text-lg font-semibold">{displayName}</h4>
         {agent.supports_mcp && <Badge variant="secondary">MCP</Badge>}
         {configured && <Badge variant="outline">{t("agents:configured")}</Badge>}
+        {/* Its profiles are still listed and editable below, so the card has to
+            say why none of them can run. */}
+        {!agent.available && <NotInstalledBadge />}
         <div className="ml-auto flex shrink-0 items-center gap-1">
           {probing && (
             <Tooltip>
@@ -97,7 +104,7 @@ function InstalledAgentIdentity({
         </div>
       </div>
       <p
-        className="text-xs text-muted-foreground line-clamp-2 min-h-[2rem]"
+        className="text-xs text-muted-foreground line-clamp-2"
         title={agent.matched_path ?? undefined}
       >
         {agent.matched_path ? t("agents:detectedAt", { path: agent.matched_path }) : ""}
@@ -107,8 +114,9 @@ function InstalledAgentIdentity({
 }
 
 /**
- * Card rendered under "Installed Agents" - links to the agent profile
- * editor and surfaces a yellow lock icon when the capability probe reports
+ * Card rendered under "Installed Agents" - links to the agent's page (its
+ * profile list) once configured, or straight into profile creation otherwise.
+ * Surfaces a yellow lock icon when the capability probe reports
  * `auth_required`. Clicking the lock opens a PTY login dialog if the agent
  * type has a registered LoginCommand.
  */
@@ -123,6 +131,7 @@ export function InstalledAgentCard({
   onPreview,
   onUpdate,
   onAuthComplete,
+  children,
 }: Props) {
   const { t } = useTranslation();
   const configured = Boolean(savedAgent && savedAgent.profiles.length > 0);
@@ -142,34 +151,21 @@ export function InstalledAgentCard({
   };
 
   return (
-    <Card className="flex min-w-0 flex-col">
-      <CardContent className="py-4 flex min-w-0 flex-col gap-3 flex-1">
-        <InstalledAgentIdentity
-          agent={agent}
-          displayName={displayName}
-          configured={configured}
-          probing={probing}
-          authRequired={authRequired}
-          loginAvailable={loginAvailable}
-          onAuthClick={handleAuthClick}
-        />
-        <div className="mt-auto flex items-center gap-2">
-          <Button
-            size="sm"
-            className="h-11 min-h-11 flex-1 cursor-pointer sm:h-7 sm:min-h-7"
-            asChild
-          >
-            <Link
-              href={
-                hasAgentRecord
-                  ? `/settings/agents/${encodeURIComponent(agent.name)}?mode=create`
-                  : `/settings/agents/${encodeURIComponent(agent.name)}`
-              }
-            >
-              <IconSettings className="mr-2 h-4 w-4" />
-              {hasAgentRecord ? t("agents:createNewProfile") : t("agents:setupProfile")}
-            </Link>
-          </Button>
+    <Card className="min-w-0 gap-0 py-0" data-testid={`agent-group-${agent.name}`}>
+      {/* Header section: identity + agent-level actions. */}
+      <div className="flex min-w-0 flex-wrap items-start justify-between gap-3 px-3 py-2.5">
+        <div className="min-w-0 flex-1">
+          <InstalledAgentIdentity
+            agent={agent}
+            displayName={displayName}
+            configured={configured}
+            probing={probing}
+            authRequired={authRequired}
+            loginAvailable={loginAvailable}
+            onAuthClick={handleAuthClick}
+          />
+        </div>
+        <div className="flex shrink-0 items-center gap-2">
           {runtimeUpdate?.supported && onPreview && onUpdate && (
             <AgentRuntimeUpdateControl
               agentName={agent.name}
@@ -181,17 +177,27 @@ export function InstalledAgentCard({
               onUpdate={onUpdate}
             />
           )}
+          {!hasAgentRecord && (
+            <Button size="sm" className="cursor-pointer" asChild>
+              <Link href={`/settings/agents/${encodeURIComponent(agent.name)}`}>
+                <IconSettings className="mr-2 h-4 w-4" />
+                {t("agents:setupProfile")}
+              </Link>
+            </Button>
+          )}
         </div>
-        <AuthDialogs
-          agent={agent}
-          loginOpen={loginOpen}
-          setLoginOpen={setLoginOpen}
-          shellOpen={shellOpen}
-          setShellOpen={setShellOpen}
-          loginAvailable={loginAvailable}
-          onAuthComplete={onAuthComplete}
-        />
-      </CardContent>
+      </div>
+      {/* Profiles area: full-bleed below the header, split off by a 1px border. */}
+      {children}
+      <AuthDialogs
+        agent={agent}
+        loginOpen={loginOpen}
+        setLoginOpen={setLoginOpen}
+        shellOpen={shellOpen}
+        setShellOpen={setShellOpen}
+        loginAvailable={loginAvailable}
+        onAuthComplete={onAuthComplete}
+      />
     </Card>
   );
 }

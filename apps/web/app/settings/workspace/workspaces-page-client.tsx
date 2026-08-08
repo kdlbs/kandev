@@ -2,18 +2,27 @@
 
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import Link from "@/components/routing/app-link";
-import { IconFolder, IconPlus, IconChevronRight } from "@tabler/icons-react";
+import { IconChevronRight, IconPlus } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Card, CardContent } from "@kandev/ui/card";
 import { Separator } from "@kandev/ui/separator";
 import { Input } from "@kandev/ui/input";
 import { Label } from "@kandev/ui/label";
+import { cn } from "@kandev/ui/lib/utils";
+import Link from "@/components/routing/app-link";
 import { createWorkspaceAction } from "@/app/actions/workspaces";
 import { useRequest } from "@/lib/http/use-request";
 import { useToast } from "@/components/toast-provider";
 import { RequestIndicator } from "@/components/request-indicator";
 import { useAppStore } from "@/components/state-provider";
+import {
+  useWorkspaceSectionCounts,
+  WorkspaceSectionStats,
+} from "@/components/settings/workspaces/workspace-section-links";
+import {
+  ActiveWorkspaceBadge,
+  workspaceSettingsHref,
+} from "@/components/settings/workspaces/workspace-settings-shell";
 import type { WorkspaceState } from "@/lib/state/slices";
 
 type Workspace = WorkspaceState["items"][number];
@@ -70,27 +79,45 @@ function AddWorkspaceForm({
 
 function WorkspaceListItem({ workspace }: { workspace: Workspace }) {
   const { t } = useTranslation();
+  const activeId = useAppStore((s) => s.workspaces.activeId);
+  const isActive = workspace.id === activeId;
+  const { counts, settled } = useWorkspaceSectionCounts(workspace.id);
+  const total = Object.values(counts).reduce(
+    (sum, value) => sum + (value ?? 0),
+    0,
+  );
   return (
-    <Link href={`/settings/workspace/${workspace.id}`}>
-      <Card className="hover:bg-accent transition-colors cursor-pointer">
-        <CardContent className="py-4">
-          <div className="flex items-start justify-between">
-            <div className="flex items-start gap-3 flex-1">
-              <div className="p-2 bg-muted rounded-md">
-                <IconFolder className="h-4 w-4" />
-              </div>
-              <div className="flex-1 min-w-0">
-                <h4 className="font-medium">{workspace.name}</h4>
-                <div className="flex items-center gap-3 text-xs text-muted-foreground mt-1">
-                  <span>{t("workspaces:workflowsManagedInThisWorkspace")}</span>
-                </div>
-              </div>
+    <Card
+      className={cn(
+        "relative transition-colors hover:bg-muted/50",
+        isActive && "border-l-2 border-l-primary",
+      )}
+      data-testid="workspace-list-item"
+    >
+      {/* Whole-card link as an overlay — the section tiles sit above it (z-10). */}
+      <Link
+        href={workspaceSettingsHref(workspace.id, "overview")}
+        aria-label={workspace.name}
+        className="absolute inset-0"
+        data-testid="workspace-overview-link"
+      />
+      <CardContent className="flex flex-col gap-3 lg:flex-row lg:items-center lg:gap-6">
+        <div className="flex items-center justify-between gap-3 lg:w-44 lg:shrink-0">
+          <div className="min-w-0">
+            <div className="flex items-center gap-2">
+              <h4 className="truncate text-lg font-semibold">{workspace.name}</h4>
+              {isActive && <ActiveWorkspaceBadge />}
             </div>
-            <IconChevronRight className="h-5 w-5 text-muted-foreground" />
+            <p className="mt-0.5 hidden text-sm text-muted-foreground lg:block">
+              {settled ? t("workspaces:resourceCount", { count: total }) : "\u00a0"}
+            </p>
           </div>
-        </CardContent>
-      </Card>
-    </Link>
+          <IconChevronRight className="h-5 w-5 shrink-0 text-muted-foreground lg:hidden" />
+        </div>
+        <WorkspaceSectionStats workspaceId={workspace.id} counts={counts} />
+        <IconChevronRight className="hidden h-5 w-5 shrink-0 text-muted-foreground lg:block" />
+      </CardContent>
+    </Card>
   );
 }
 

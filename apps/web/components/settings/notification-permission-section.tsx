@@ -10,7 +10,7 @@ import {
 } from "@/lib/desktop/native-notification-client";
 import type { PermissionRefresh } from "./notifications-settings-actions";
 import { SettingsTarget } from "./settings-target";
-import { GENERAL_SETTINGS_TARGETS } from "@/lib/settings-discovery/catalog/general";
+import { GENERAL_SETTINGS_TARGETS } from "@/lib/settings-discovery/catalog/preferences";
 
 type NotificationPermissionState =
   | NativeNotificationPermission

@@ -1,176 +1,20 @@
 "use client";
 
-import { useState, type MouseEvent } from "react";
 import { usePathname } from "@/lib/routing/client-router";
-import { Button } from "@kandev/ui/button";
-import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@kandev/ui/sheet";
 import { TooltipProvider } from "@kandev/ui/tooltip";
-import { IconActivity, IconHome, IconMenu2 } from "@tabler/icons-react";
-import { useAppStatusDrawer } from "@/components/app-status-bar/app-status-surface-provider";
-import { PageTopbar } from "@/components/page-topbar";
-import Link from "@/components/routing/app-link";
-import { SettingsTree } from "@/components/app-sidebar/sections/settings/settings-tree";
+import { PageShell } from "@/components/page-shell";
+import type { ParentCrumb } from "@/components/page-topbar";
 import { useAppStore } from "@/components/state-provider";
 import { IntegrationCopyConfigMenu } from "@/components/integrations/integration-copy-config-menu";
 import { integrationFromPathname } from "@/components/integrations/integration-copy-config";
 import { safeDecodePathSegment } from "@/lib/routing/path";
 import { SettingsSaveProvider } from "@/components/settings/settings-save-provider";
 import { SettingsTargetProvider } from "@/components/settings/settings-target-provider";
-import { useTranslation } from "react-i18next";
-import { connectionIssueDetails } from "@/components/app-status-bar/connection-status-item";
-import { linkToTaskOverview } from "@/lib/links";
-import { cn } from "@/lib/utils";
-
-// Brand/initialism overrides so the derived label matches how the rest of the
-// app spells these (e.g. "github" → "GitHub", not "Github"). Anything not
-// listed here falls back to dash-aware title-casing of the path segment.
-const SEGMENT_LABEL_OVERRIDES: Record<string, string> = {
-  "azure-devops": "Azure DevOps",
-  github: "GitHub",
-  jira: "Jira",
-  linear: "Linear",
-  mcp: "MCP",
-  ui: "UI",
-  vscode: "VS Code",
-};
-
-/**
- * Catalog key per settings path segment. The breadcrumb's page title used to be
- * title-cased straight off the URL, which no lint rule can catch (there is no
- * literal to flag) and no locale can translate — the pseudo-locale QA pass is
- * what surfaced it. `SEGMENT_LABEL_OVERRIDES` above stays for brand names, which
- * are the same in every language.
- */
-const SEGMENT_LABEL_KEYS: Record<string, string> = {
-  agent: "settings:agent",
-  agents: "common:agents",
-  appearance: "settings:appearance",
-  automations: "common:automations",
-  changelog: "common:changelog",
-  "changes-panel": "settings:changesPanel",
-  "chat-input": "settings:chatInput",
-  editors: "settings:editors",
-  executor: "settings:executor",
-  executors: "common:executors",
-  "external-mcp": "common:externalMcp",
-  general: "settings:general",
-  integrations: "common:integrations",
-  "keyboard-shortcuts": "settings:keyboardShortcuts",
-  layouts: "settings:layouts",
-  "message-queue": "system:messageQueueTitle",
-  new: "settings:new",
-  notifications: "settings:notifications",
-  plugins: "common:plugins",
-  prompts: "common:prompts",
-  "resource-metrics": "settings:resourceMetrics",
-  secrets: "settings:secrets",
-  security: "settings:security",
-  shell: "common:shell",
-  sprites: "settings:sprites",
-  system: "common:system",
-  "task-actions": "settings:taskActions",
-  terminal: "settings:terminal",
-  tokens: "settings:tokens",
-  "utility-agents": "settings:utilityAgents",
-  "voice-mode": "settings:voiceMode",
-  workspace: "common:workspace",
-  workspaces: "common:workspaces",
-};
-
-/**
- * Display name for a path segment: a translated page name, a brand override, or
- * (for an unmapped route) dash-aware title casing, which stays English.
- */
-function segmentLabel(segment: string, t: (key: string) => string): string {
-  if (SEGMENT_LABEL_KEYS[segment]) return t(SEGMENT_LABEL_KEYS[segment]);
-  if (SEGMENT_LABEL_OVERRIDES[segment]) return SEGMENT_LABEL_OVERRIDES[segment];
-  return segment
-    .split("-")
-    .map((p) => (p.length === 0 ? p : p[0].toUpperCase() + p.slice(1)))
-    .join(" ");
-}
-
-// Derive the human-readable label for the current /settings sub-page from the
-// deepest non-id path segment. /settings → null (the topbar still shows
-// "Settings" as the page itself). UUID-looking segments are skipped so e.g.
-// /settings/workspace/<uuid> resolves to "Workspace" not the raw id.
-function deriveCurrentPageLabel(pathname: string, t: (key: string) => string): string | null {
-  const segments = pathname.split("/").filter(Boolean);
-  if (segments.length <= 1) return null; // just /settings
-  for (let i = segments.length - 1; i >= 1; i--) {
-    const seg = segments[i];
-    if (/^[0-9a-f-]{8,}$/i.test(seg)) continue; // skip ids
-    return segmentLabel(seg, t);
-  }
-  return null;
-}
-
-// Build the intermediate breadcrumb crumbs between the back link and the
-// current page title. Workspace-scoped pages include the routed workspace so
-// the breadcrumb identifies which workspace owns the settings being edited.
-function deriveParents(
-  pathname: string,
-  workspaceName: string | null,
-  t: (key: string) => string,
-): Array<{ label: string; href: string }> {
-  const segments = pathname.split("/").filter(Boolean);
-  if (segments.length <= 1) return [];
-
-  const parents: Array<{ label: string; href: string }> = [
-    { label: t("common:settings"), href: "/settings" },
-  ];
-
-  const workspaceId = workspaceIdFromPathname(pathname);
-  if (workspaceId) {
-    parents.push({
-      label: workspaceName ?? t("common:workspace"),
-      href: `/settings/workspace/${encodeURIComponent(workspaceId)}`,
-    });
-  }
-
-  const automationsMatch = pathname.match(
-    /^\/settings\/workspace\/([^/]+)\/automations(?:\/(.+))?/,
-  );
-  if (automationsMatch && automationsMatch[2]) {
-    // Only inject the Automations crumb when we're on a sub-page (new or
-    // edit), not on the listing page itself — the listing page title is
-    // already "Automations".
-    parents.push({
-      label: t("common:automations"),
-      href: `/settings/workspace/${automationsMatch[1]}/automations`,
-    });
-  }
-
-  return parents;
-}
+import { useSettingsBreadcrumbs } from "@/components/settings/use-settings-breadcrumbs";
 
 export function SettingsLayoutClient({ children }: { children: React.ReactNode }) {
-  const { t } = useTranslation();
   const pathname = usePathname();
-  const workspaces = useAppStore((s) => s.workspaces.items);
-  const isAgentDetail = pathname.startsWith("/settings/agents/") && pathname !== "/settings/agents";
-  const showIntegrationCopyAction = integrationFromPathname(pathname) !== null;
-
-  if (isAgentDetail) {
-    return (
-      <SettingsShell
-        title={t("settings:agent")}
-        backHref="/settings/agents"
-        backLabel={t("common:agents")}
-        parents={[]}
-        showIntegrationCopyAction={showIntegrationCopyAction}
-      >
-        {children}
-      </SettingsShell>
-    );
-  }
-
-  const pageLabel = deriveCurrentPageLabel(pathname, t);
-  const title = pageLabel ?? t("settings:settings");
-  const routeWorkspaceId = workspaceIdFromPathname(pathname);
-  const workspaceName =
-    workspaces.find((workspace) => workspace.id === routeWorkspaceId)?.name ?? null;
-  const parents = deriveParents(pathname, workspaceName, t);
+  const { parents, title } = useSettingsBreadcrumbs(pathname);
 
   return (
     <SettingsShell
@@ -178,7 +22,7 @@ export function SettingsLayoutClient({ children }: { children: React.ReactNode }
       backHref="/"
       backLabel="Kandev"
       parents={parents}
-      showIntegrationCopyAction={showIntegrationCopyAction}
+      showIntegrationCopyAction={integrationFromPathname(pathname) !== null}
     >
       {children}
     </SettingsShell>
@@ -189,11 +33,7 @@ function IntegrationCopyConfigAction() {
   const pathname = usePathname();
   const workspaces = useAppStore((s) => s.workspaces.items);
   const activeId = useAppStore((s) => s.workspaces.activeId);
-  const routeWorkspaceId = workspaceIdFromPathname(pathname);
-  const selected =
-    routeWorkspaceId && workspaces.some((workspace) => workspace.id === routeWorkspaceId)
-      ? routeWorkspaceId
-      : (activeId ?? workspaces[0]?.id ?? null);
+  const selected = copySourceWorkspaceId(pathname, workspaces, activeId);
   const integration = integrationFromPathname(pathname);
 
   if (!integration || !selected || workspaces.length === 0) return null;
@@ -209,152 +49,40 @@ function IntegrationCopyConfigAction() {
   );
 }
 
-/**
- * Status entry in the mobile settings menu. Extracted from SettingsMobileMenu to
- * keep that function under the max-lines-per-function limit.
- */
-function SettingsMobileStatusButton({
-  issueSeverity,
-  issueDescription,
-  dotClass,
-  onClick,
-}: {
-  issueSeverity: string;
-  issueDescription: string | null;
-  dotClass: string | undefined;
-  onClick: () => void;
-}) {
-  const { t } = useTranslation();
-  return (
-    <Button
-      type="button"
-      variant="ghost"
-      className={cn(
-        "relative h-11 cursor-pointer justify-start gap-2.5 px-2.5",
-        issueSeverity === "lost" && "text-destructive",
-        issueSeverity === "unstable" && "text-amber-500",
-      )}
-      onClick={onClick}
-      data-testid="settings-mobile-status-button"
-      // Keeps the visible "Status" label inside the accessible name (WCAG 2.5.3):
-      // the raw description alone replaced it.
-      aria-label={
-        issueDescription
-          ? t("settings:statusWithConnectionIssue", { description: issueDescription })
-          : undefined
-      }
-      data-connection-severity={issueSeverity === "none" ? undefined : issueSeverity}
-    >
-      <IconActivity className="h-4 w-4 shrink-0" />
-      <span>{t("common:status")}</span>
-      {dotClass && (
-        <span className={cn("ml-auto size-2 rounded-full", dotClass)} aria-hidden="true" />
-      )}
-    </Button>
-  );
-}
-
-function SettingsMobileMenu({ pathname }: { pathname: string }) {
-  const { t } = useTranslation();
-  const [open, setOpen] = useState(false);
-  const { enabled: statusDrawerEnabled, issueSeverity, openStatusDrawer } = useAppStatusDrawer();
-  const issueDetails = issueSeverity === "none" ? null : connectionIssueDetails(issueSeverity);
-  // `connectionIssueDetails` lives in a directory that has not been migrated yet
-  // and returns English, so the severity is mapped to a catalog key here rather
-  // than interpolating its `description` into an otherwise-translated label.
-  const issueDescription =
-    issueSeverity === "none"
-      ? null
-      : t(
-          issueSeverity === "lost"
-            ? "settings:connectionLostDescription"
-            : "settings:connectionUnstableDescription",
-        );
-
-  const closeOnLinkClick = (event: MouseEvent<HTMLDivElement>) => {
-    if (event.target instanceof Element && event.target.closest("a[href]")) {
-      setOpen(false);
-    }
-  };
-  const openStatus = () => {
-    setOpen(false);
-    requestAnimationFrame(openStatusDrawer);
-  };
-
-  return (
-    <Sheet open={open} onOpenChange={setOpen}>
-      <SheetTrigger asChild>
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon"
-          className={cn(
-            "relative h-11 w-11 cursor-pointer md:hidden",
-            issueSeverity === "lost" && "text-destructive",
-            issueSeverity === "unstable" && "text-amber-500",
-          )}
-          aria-label={
-            issueDescription
-              ? t("settings:openSettingsMenuWithConnectionIssue", {
-                  description: issueDescription,
-                })
-              : t("settings:openSettingsMenu")
-          }
-          data-testid="settings-mobile-menu-button"
-          data-connection-severity={issueSeverity === "none" ? undefined : issueSeverity}
-        >
-          <IconMenu2 className="h-4 w-4" />
-          {issueDetails && (
-            <span
-              className={cn(
-                "absolute right-2 top-2 size-2 rounded-full ring-2 ring-background",
-                issueDetails.dotClass,
-              )}
-              aria-hidden="true"
-            />
-          )}
-        </Button>
-      </SheetTrigger>
-      <SheetContent
-        side="left"
-        className="flex w-80 max-w-[85vw] flex-col overflow-hidden p-0"
-        data-testid="settings-mobile-menu"
-      >
-        <SheetHeader className="border-b px-4 py-3 text-left">
-          <SheetTitle>{t("common:settings")}</SheetTitle>
-        </SheetHeader>
-        <nav className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-3">
-          {statusDrawerEnabled && (
-            <SettingsMobileStatusButton
-              issueSeverity={issueSeverity}
-              issueDescription={issueDescription}
-              dotClass={issueDetails?.dotClass}
-              onClick={openStatus}
-            />
-          )}
-          <Link
-            href={linkToTaskOverview()}
-            className="flex h-11 cursor-pointer items-center gap-2.5 rounded-md px-2.5 text-sm font-medium text-foreground/80 transition-colors hover:bg-muted hover:text-foreground"
-            onClick={() => setOpen(false)}
-          >
-            <IconHome className="h-4 w-4 shrink-0" />
-            <span className="truncate">{t("settings:home")}</span>
-          </Link>
-          <div
-            className="flex flex-col gap-0.5 [&_a]:min-h-11 [&_a]:text-sm [&_button]:min-h-11 [&_button]:min-w-11 [&_button]:text-sm [&_svg]:h-4 [&_svg]:w-4"
-            onClick={closeOnLinkClick}
-          >
-            <SettingsTree pathname={pathname} />
-          </div>
-        </nav>
-      </SheetContent>
-    </Sheet>
-  );
-}
+// Either spelling: `workspaces` is canonical, `workspace` the legacy path the
+// route table redirects. Both are matched because `integrationFromPathname`
+// matches both — a plural-only parse here left the copy action rendered with no
+// routed workspace, silently sourcing from the active one instead.
+const WORKSPACE_SCOPED_SETTINGS = /^\/settings\/workspaces?\//;
 
 function workspaceIdFromPathname(pathname: string): string | null {
-  const match = pathname.match(/^\/settings\/workspace\/([^/]+)(?:\/|$)/);
+  const match = pathname.match(/^\/settings\/workspaces?\/([^/]+)(?:\/|$)/);
   return safeDecodePathSegment(match?.[1]);
+}
+
+/**
+ * Which workspace the copy action reads its configuration *from*.
+ *
+ * An unscoped `/settings/integrations/<slug>` genuinely means "the active
+ * workspace" — the route table redirects it into that workspace's tab — so the
+ * active workspace is the right source there.
+ *
+ * A route that names a workspace is different: if that workspace does not
+ * resolve (deleted since the URL was bookmarked, or a malformed segment) then
+ * falling back would copy credentials out of a workspace the URL never
+ * mentioned, with nothing on screen saying so. There is no safe substitute, so
+ * the action stays hidden.
+ */
+function copySourceWorkspaceId(
+  pathname: string,
+  workspaces: Array<{ id: string }>,
+  activeId: string | null,
+): string | null {
+  if (WORKSPACE_SCOPED_SETTINGS.test(pathname)) {
+    const routed = workspaceIdFromPathname(pathname);
+    return routed && workspaces.some((workspace) => workspace.id === routed) ? routed : null;
+  }
+  return activeId ?? workspaces[0]?.id ?? null;
 }
 
 function SettingsShell({
@@ -368,36 +96,41 @@ function SettingsShell({
   title: string;
   backHref: string;
   backLabel: string;
-  parents: Array<{ label: string; href: string }>;
+  parents: ParentCrumb[];
   showIntegrationCopyAction: boolean;
   children: React.ReactNode;
 }) {
   const pathname = usePathname();
+  // A settings form floats its Save action above the fold and needs room to
+  // scroll clear of it. The index floats only the search field, which is a
+  // third of that — the same padding there is dead scroll below the last row.
+  const contentBottomPadding =
+    pathname === "/settings"
+      ? "pb-[calc(5.25rem_+_env(safe-area-inset-bottom)_+_var(--app-status-bar-height))]"
+      : "pb-[calc(11rem_+_env(safe-area-inset-bottom)_+_var(--app-status-bar-height))]";
 
   return (
     <TooltipProvider>
       <SettingsSaveProvider key={pathname}>
         <SettingsTargetProvider>
-          <main className="flex min-h-0 flex-1 flex-col">
-            <PageTopbar
-              title={title}
-              backHref={backHref}
-              backLabel={backLabel}
-              parents={parents}
-              leading={<SettingsMobileMenu pathname={pathname} />}
-              showStatusTrigger={false}
-              className="h-10"
-              actions={showIntegrationCopyAction ? <IntegrationCopyConfigAction /> : undefined}
-            />
-            {/* Scroll the content, not the topbar: min-h-0 lets this flex child
-              shrink below its content height so overflow-y-auto can take effect. */}
-            <div
-              data-testid="settings-scroll-container"
-              className="flex min-w-0 min-h-0 flex-1 flex-col gap-4 overflow-y-auto overscroll-contain p-4 pb-[calc(11rem_+_env(safe-area-inset-bottom)_+_var(--app-status-bar-height))]"
-            >
-              {children}
-            </div>
-          </main>
+          <PageShell
+            title={title}
+            backHref={backHref}
+            backLabel={backLabel}
+            parents={parents}
+            showStatusTrigger={false}
+            className="h-10"
+            actions={showIntegrationCopyAction ? <IntegrationCopyConfigAction /> : undefined}
+            // No hamburger inside Settings: `/settings` renders the menu as a
+            // page on a phone, reached through the breadcrumb's Settings crumb
+            // (a link only below md — on desktop the sidebar menu is always
+            // visible, so the crumb is static text). The home crumb leaves.
+            showNavTrigger={false}
+            contentTestId="settings-scroll-container"
+            contentClassName={`flex flex-col gap-4 overscroll-contain p-4 ${contentBottomPadding}`}
+          >
+            {children}
+          </PageShell>
         </SettingsTargetProvider>
       </SettingsSaveProvider>
     </TooltipProvider>
