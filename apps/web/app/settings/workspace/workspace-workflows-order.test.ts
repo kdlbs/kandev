@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { workflowId as toWorkflowId, type Workflow } from "@/lib/types/http";
+import {
+  agentProfileId as toAgentProfileId,
+  workflowId as toWorkflowId,
+  type Workflow,
+} from "@/lib/types/http";
 import {
   alignSavedWorkflowsToDraftOrder,
   getWorkflowOrderDirtyIds,
@@ -85,6 +89,29 @@ describe("hasNewerWorkflowMetadata", () => {
   it("still detects a real description change", () => {
     const saved: Workflow = { ...workflow("wf-1"), description: "old" };
     const current: Workflow = { ...workflow("wf-1"), description: "new" };
+
+    expect(hasNewerWorkflowMetadata(current, saved)).toBe(true);
+  });
+
+  it("treats an empty agent_profile_id as unchanged from an absent saved agent_profile_id", () => {
+    // Same omitempty class of bug as description: clearing a profile override
+    // produces agent_profile_id === "" locally, but the save response omits
+    // the empty field, so saved.agent_profile_id is undefined.
+    const saved: Workflow = { ...workflow("wf-1"), agent_profile_id: undefined };
+    const current: Workflow = { ...workflow("wf-1"), agent_profile_id: toAgentProfileId("") };
+
+    expect(hasNewerWorkflowMetadata(current, saved)).toBe(false);
+  });
+
+  it("still detects a real agent_profile_id change", () => {
+    const saved: Workflow = {
+      ...workflow("wf-1"),
+      agent_profile_id: toAgentProfileId("profile-a"),
+    };
+    const current: Workflow = {
+      ...workflow("wf-1"),
+      agent_profile_id: toAgentProfileId("profile-b"),
+    };
 
     expect(hasNewerWorkflowMetadata(current, saved)).toBe(true);
   });

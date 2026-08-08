@@ -13,11 +13,7 @@ type WorkflowDescriptionFieldProps = {
   onUpdate: (description: string) => void;
 };
 
-/**
- * Always visible (unlike WorkflowPromptSection's collapsible): every synced
- * workflow already carries a description by convention, so it belongs beside
- * Name/Agent Profile rather than tucked behind an optional disclosure.
- */
+// Always visible, unlike WorkflowPromptSection's collapsible — every synced workflow carries one.
 export function WorkflowDescriptionField({
   workflow,
   savedWorkflow,
@@ -25,10 +21,12 @@ export function WorkflowDescriptionField({
   onUpdate,
 }: WorkflowDescriptionFieldProps) {
   const { t } = useTranslation();
+  const inputId = `workflow-description-input-${workflow.id}`;
   return (
     <div className="space-y-1.5">
-      <Label>{t("workflows:workflowDescription")}</Label>
+      <Label htmlFor={inputId}>{t("workflows:workflowDescription")}</Label>
       <Textarea
+        id={inputId}
         value={workflow.description ?? ""}
         onChange={(e) => onUpdate(e.target.value)}
         disabled={readOnly}
