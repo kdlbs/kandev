@@ -200,7 +200,6 @@ func TestSetBuildInfoVersionDefaultAndInjection(t *testing.T) {
 // wires up.
 func TestHealthHandlerFallsBackToPackageVersionWhenParamEmpty(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	setReadyForTest(t, true)
 
 	prevVersion := Version
 	t.Cleanup(func() { Version = prevVersion })
@@ -209,15 +208,26 @@ func TestHealthHandlerFallsBackToPackageVersionWhenParamEmpty(t *testing.T) {
 	router := gin.New()
 	router.GET("/health", healthHandler(routeParams{}))
 
-	recorder := httptest.NewRecorder()
-	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/health", nil))
+	for _, tc := range []struct {
+		name  string
+		ready bool
+	}{
+		{name: "ready", ready: true},
+		{name: "starting", ready: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			setReadyForTest(t, tc.ready)
+			recorder := httptest.NewRecorder()
+			router.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/health", nil))
 
-	var body map[string]interface{}
-	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
-		t.Fatalf("decode body: %v", err)
-	}
-	if body["version"] != "9.9.9-fallback-test" {
-		t.Fatalf("version = %v, want fallback to package-level Version %q", body["version"], "9.9.9-fallback-test")
+			var body map[string]interface{}
+			if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
+				t.Fatalf("decode body: %v", err)
+			}
+			if body["version"] != "9.9.9-fallback-test" {
+				t.Fatalf("version = %v, want fallback to package-level Version %q", body["version"], "9.9.9-fallback-test")
+			}
+		})
 	}
 }
 

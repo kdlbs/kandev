@@ -399,22 +399,13 @@ Recorded 2026-08-07, during the build against this frozen spec.
   `/health` and `/api/v1/system/info` (AC-9, AC-10 live); with `KANDEV_FEATURES_AUTH=true`
   and no credential, `/health` returns 200 with `version` while
   `/api/v1/system/info` returns 401 (AC-12, AC-14 live).
-- **Incident during live verification, disclosed to the user:** the throwaway test
-  backends were started with `KANDEV_HOME_DIR` overridden to a scratch directory,
-  intending isolation from the real `~/.kandev` install. That override did not work —
-  this session's own ambient environment (it runs as a Kandev-orchestrated task) already
-  exports `KANDEV_DATABASE_PATH` pointing at the real `~/.kandev/data/kandev.db`, and
-  viper's `AutomaticEnv()` binds that key independently of `KANDEV_HOME_DIR`. The
-  throwaway binaries inherited it and booted against the live database, which (a) left
-  `kandev_meta.kandev_version` set to a test value (`9.9.9-qa-test`) instead of the real
-  binary's version — self-correcting on that backend's next restart per the existing
-  upgrade-backup-safety design — and (b) caused the 2-newest backup retention in
-  `~/.kandev/data/backups/` to prune whatever legitimate backups predated this session,
-  which is not recoverable. A direct one-line correction of the metadata key was
-  attempted and blocked by the permission classifier; left as-is per the user's
-  direction rather than retried. Not a defect in the code under test — an environment
-  hazard specific to manually running a real backend binary from inside a Kandev-hosted
-  session — but recorded here since it's exactly the kind of non-obvious, costly-to-learn
-  fact this section exists to preserve. Follow-up live-binary QA in this kind of
-  environment should pass an explicit `KANDEV_DATABASE_PATH` override alongside
-  `KANDEV_HOME_DIR`, or unset inherited `KANDEV_*` vars first.
+- **Safe-testing rule for live-binary QA in a Kandev-hosted session:** a
+  `KANDEV_HOME_DIR` override alone does not isolate a throwaway QA binary from
+  the real `~/.kandev` install. This session's own ambient environment (it runs
+  as a Kandev-orchestrated task) exports `KANDEV_DATABASE_PATH`, which viper's
+  `AutomaticEnv()` binds independently of `KANDEV_HOME_DIR` — a QA binary
+  started this way inherits it and boots against the live database instead of
+  the intended scratch one. Pass an explicit `KANDEV_DATABASE_PATH` override
+  alongside `KANDEV_HOME_DIR`, or unset inherited `KANDEV_*` vars first, before
+  running a live compiled binary for QA in this kind of environment. Not a
+  defect in the code under test.
