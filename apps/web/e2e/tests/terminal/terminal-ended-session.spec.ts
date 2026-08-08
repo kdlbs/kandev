@@ -18,8 +18,11 @@ const TERMINAL_STATES = ["COMPLETED", "FAILED", "CANCELLED"];
  * the reconnect loop can see neither.
  */
 test.describe("terminal on an ended session", () => {
+  // testPage, not page: it is the fixture that points baseURL at the worker's
+  // own frontend. With the default page, KanbanPage.goto()'s relative "/" has
+  // nothing to resolve against and Playwright rejects it as an invalid URL.
   test("shows the ended-session reason instead of a connecting spinner", async ({
-    page,
+    testPage,
     apiClient,
     seedData,
   }) => {
@@ -60,17 +63,17 @@ test.describe("terminal on an ended session", () => {
         .toMatch(new RegExp(TERMINAL_STATES.join("|")));
     }
 
-    const kanban = new KanbanPage(page);
+    const kanban = new KanbanPage(testPage);
     await kanban.goto();
     const card = kanban.taskCardByTitle(title);
     await expect(card).toBeVisible({ timeout: 15_000 });
     await card.click();
-    await expect(page).toHaveURL(/\/t\//, { timeout: 15_000 });
+    await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
 
-    const session = new SessionPage(page);
+    const session = new SessionPage(testPage);
     await session.waitForLoad();
 
-    const terminalPanel = page.getByTestId("terminal-panel").first();
+    const terminalPanel = testPage.getByTestId("terminal-panel").first();
     await expect(terminalPanel).toBeVisible({ timeout: 15_000 });
 
     // The assertion that matters: the reason is on screen.
