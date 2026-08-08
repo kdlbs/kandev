@@ -19,21 +19,33 @@ heuristics (scanning task titles for a prefix, treating an existing branch name
 as a witness that the task exists), which break the moment a title is edited or
 a branch is renamed.
 
-## Design stance: report honestly, do not heal
+## What this feature is, and is not
 
-This feature makes one promise: **a create carrying an external ID always tells
-the caller the truth about what already exists under that identity.** It
-deliberately does *not* promise to repair a partially-created task.
+**It is durable duplicate suppression.** A create carrying an external ID never
+produces a second task for that identity, and always returns the task that holds
+it — including after the caller crashed before recording the task ID. That is
+the unblock: the caller gets its task ID back and stops guessing.
 
-That distinction is the whole design. An earlier draft promised that a retry
-would never observe a half-created task, which required a lease protocol with
-fencing tokens, compare-and-swap on every transition, a two-phase create
-coordinator, and isolation of unsettled rows from ordinary reads. That machinery
-is where the bugs live, and it is not what the consuming system needs. A caller
-recovering from its own crash is perfectly able to act on "this exists but was
-never finished" — it just needs to be told, unambiguously, instead of guessing.
+**It is not automated crash repair.** Kandev does not detect, adopt, resume, or
+clean up a partially-created task, and callers MUST NOT automate doing so
+either. The reason is not implementation cost — it is that the information does
+not exist. A task whose creation has not finished is indistinguishable from one
+whose creation is *still running*: both are simply "not settled yet". Without a
+liveness signal — a lease, a heartbeat, an owner token — no observer can tell a
+crashed create from a slow one.
 
-So Kandev reports; the caller decides. Everything below follows from that.
+An earlier draft claimed a retry would never observe a half-created task, which
+required exactly that machinery: fencing tokens, compare-and-swap on every
+transition, a two-phase coordinator, and isolation of unsettled rows. It was
+reviewed and rejected as unbuildable. This spec does not reintroduce it, and
+therefore does not make the guarantee it would have bought.
+
+What callers get instead is an honest flag. `creation_complete: false` means
+*"this identity is held by a task whose creation had not finished when we
+looked; it may still be in progress."* It is diagnostic, not actionable. The
+safe response to it is to proceed with the returned task ID, or to escalate to a
+human — never to release the identity and create again. See *The one unsafe
+thing a caller can do*.
 
 ## What
 
@@ -41,36 +53,67 @@ So Kandev reports; the caller decides. Everything below follows from that.
   the entity in the caller's own system (a Jira key, a webhook delivery ID, a
   UUID the caller minted before its first attempt).
 - An external ID SHALL be held by at most one task per workspace.
-- A create carrying an external ID SHALL have exactly one of three outcomes,
-  and the response SHALL make which one unambiguous:
+- A create carrying an external ID SHALL have exactly one of three outcomes, and
+  the response SHALL make which one unambiguous:
   1. **Created** — no task held that identity; a new task was created.
-  2. **Found, complete** — a task already holds it and its creation finished.
-     The existing task is returned and nothing else happens.
-  3. **Found, incomplete** — a task already holds it but its creation was
-     interrupted and never finished. The existing task is returned, marked
-     incomplete, and nothing else happens.
-- Outcome 2 and outcome 3 SHALL both have **no side effects**: no new task row,
-  no new agent session, no agent launch, no repository attachment, no attachment
-  claim, no workspace-policy write, no branch creation, no `task.created` event.
-- The system SHALL NOT delete, repair, or reclaim an incomplete task. Recovery
-  is the caller's decision, taken with the task ID the response gave it.
-- Callers SHALL be able to look a task up by its external ID without attempting
-  a create, so recovery does not require a side-effecting probe.
+  2. **Found, settled** — a task already holds it and its creation finished.
+  3. **Found, unsettled** — a task already holds it and its creation had not
+     finished at observation time. It may still be running.
+- Both **Found** outcomes SHALL have **no side effects**: no new task row, no
+  new agent session, no agent launch, no repository attachment, no attachment
+  claim, no workspace-policy write, no branch creation, no `task.created` event,
+  **and no consumption of a workspace task-identifier sequence number**.
+- The system SHALL NOT delete, repair, resume, or reclaim an unsettled task, and
+  SHALL NOT expire one. There is no duration after which behavior changes.
+- A caller SHALL have a side-effect-free way to ask what holds an identity
+  without risking a create.
 - Callers SHALL be able to release an external ID from a task, freeing it for
-  reuse without deleting the task.
+  reuse without deleting the task. This is an operator action, not a recovery
+  step — see *The one unsafe thing a caller can do*.
 - Omitting the external ID SHALL leave task creation behaving exactly as it does
   today.
 - The external ID SHALL be accepted on the **REST create endpoint** and the
   **`create_task_kandev` MCP tool**. The WebSocket `task.create` action and the
   plugin host task-create API do not accept it in this iteration.
-- A task carrying an external ID SHALL show it wherever tasks are already
-  **read**, including surfaces that cannot set it.
+- The external ID SHALL appear on exactly the task representations listed in
+  *Task representations*. That table is the complete requirement; there is no
+  broader "everywhere tasks are read" obligation.
 - The external ID identifies the **external entity**, not the request body. A
   second create for a held external ID SHALL return the existing task unchanged
   even when the rest of the payload differs; it SHALL NOT patch the existing
   task.
 - An external ID SHALL NOT be inherited by subtasks, copied on any task-cloning
   path, or auto-generated by the system.
+
+## The one unsafe thing a caller can do
+
+**Do not automatically release an identity because a create reported
+`creation_complete: false`, and then create again.** This is called out
+explicitly because it is the intuitive "recovery" move and it is unsafe.
+
+The failure:
+
+1. Create A commits its task row for identity `E` and continues its remaining
+   work normally.
+2. Retry B observes `E` held by an unsettled task and returns
+   `creation_complete: false`.
+3. B releases `E` and creates again, producing task T2.
+4. A finishes. Two tasks now exist for one external entity, and if both
+   requested an agent, two agents are running.
+
+The unique index prevents two *simultaneous holders*; it cannot prevent
+duplicates across a release. Releasing an identity that another create is
+actively using re-opens exactly the duplicate this feature exists to prevent.
+
+**Safe responses to `creation_complete: false`:**
+
+- Proceed with the returned task ID. It is a real task.
+- Poll the lookup; if it settles, the original create finished on its own.
+- Escalate to a human, who can inspect the task and decide.
+
+**Release is for a human or operator who has determined the task is abandoned**
+— not for an automated retry loop. Client libraries and agent tooling SHOULD NOT
+expose release as an automatic recovery action.
 
 ## Data model
 
@@ -82,17 +125,18 @@ tasks
   external_id             TEXT       nullable  caller-supplied identity;
                                                NULL when the task has none
   external_id_settled_at  TIMESTAMP  nullable  when creation finished;
-                                               NULL means "still incomplete"
+                                               NULL means not settled
 ```
 
 - **Uniqueness:** partial unique index `uniq_tasks_external_id` on
   `(workspace_id, external_id)` `WHERE external_id IS NOT NULL`. Supported by
   both SQLite and PostgreSQL. Naming it matters — violation handling must be
   attributable to this constraint specifically, never to "some unique index".
-- **Completeness:** `external_id_settled_at IS NULL` means the create that
-  claimed this identity did not finish. Non-NULL means it did.
+- **Settledness:** `external_id_settled_at IS NULL` means the create that
+  claimed this identity had not finished its required synchronous work. It does
+  **not** mean that create is dead.
 - Empty or whitespace-only input normalizes to `NULL` (see *Validation*), so
-  many tasks without an external ID never collide with each other.
+  tasks without an external ID never collide with each other.
 
 ### Why the identity lives on the task row
 
@@ -101,16 +145,11 @@ whole classes of failure **by construction rather than by specification**:
 
 | Hazard | Why it cannot occur here |
 |---|---|
-| Claim and task disagreeing | They are the same row. There is nothing to keep in sync. |
-| Orphan claim after a task is deleted | The columns are deleted with the row, through *any* deletion path — including office handoff cascades and other code that calls the repository directly and bypasses the service. |
+| Claim and task disagreeing | They are the same row. Nothing to keep in sync. |
+| Orphan claim after a task is deleted | The columns are deleted with the row, through *any* deletion path — including office handoff cascades that call the repository directly and bypass the service. |
 | Non-atomic "mark deleted" transition | There is no transition. Deleting the row releases the identity. |
 | E2E reset leaving stale claims | Reset already deletes tasks; the columns go with them. No reset change is needed. |
-| A partial task with no claim, or a claim with no task | One row, one insert. Impossible. |
-
-This is a deliberate reversal of an earlier draft that used a `task_external_ids`
-reservation table. That table existed to support a `deleted` tombstone and a
-reclaim protocol, both of which this design drops. Without them the table only
-added surface area and synchronization duties.
+| A task with no claim, or a claim with no task | One row, one insert. Impossible. |
 
 ### Validation and normalization
 
@@ -125,9 +164,7 @@ normative because it decides which error a malformed value produces.
 2. **Trim** leading and trailing Unicode whitespace (any code point with the
    Unicode `White_Space` property).
 3. **Empty after trim** → treat as absent (`NULL`). Not an error.
-4. **Length** of the trimmed value in **UTF-8 bytes** MUST be ≤ 255. Bytes, not
-   code points and not grapheme clusters, so the storage bound and the
-   validation bound are the same number.
+4. **Length** of the trimmed value in **UTF-8 bytes** MUST be ≤ 255.
 
 Everything surviving those rules is accepted verbatim: `jira:PROJ-1234`,
 `gh-issue/kdlbs/kandev#2325`, a bare UUID, and non-ASCII letters are all valid.
@@ -142,32 +179,42 @@ binary/deterministic collation (SQLite `COLLATE BINARY`, the default;
 PostgreSQL `COLLATE "C"` or another explicitly deterministic collation). An
 unqualified `TEXT` column on PostgreSQL follows the database collation, which
 may be case-insensitive or nondeterministic and would silently violate this
-contract. No Unicode normalization is performed: two byte-different encodings of
-a visually identical string are different identities.
+contract. No Unicode normalization is performed.
 
 ### Lifecycle
 
 - **Set once at create.** No API changes an external ID on an existing task;
   `PATCH /tasks/:id` and the update MCP/WS surfaces do not accept the field.
-- **Settled once at create.** `external_id_settled_at` is stamped at the end of
-  the create that claimed the identity (see *State machine*) and is never
-  cleared or re-stamped afterwards.
-- **Archiving changes nothing.** An archived task still holds its identity, so a
-  later create returns it. Re-creating a task the user archived is exactly the
-  duplicate this feature exists to prevent.
-- **Deleting frees the identity.** The row is gone, so a later create makes a
-  new task.
-- **Releasing frees the identity without deleting the task.** Sets both columns
-  to `NULL`.
+- **Settled once at create**, then never cleared or re-stamped except by release.
+- **Archiving changes nothing.** An archived task still holds its identity.
+- **Deleting frees the identity.** The row is gone.
+- **Releasing frees the identity without deleting the task**, setting both
+  columns to `NULL`.
 
-**Accepted risk — the ABA case.** Because deletion frees the identity, a
-redelivery arriving after a task was deliberately deleted creates a new task
-under the same external ID rather than reporting the deletion. A caller that
-recorded the original task ID can detect this (the returned ID differs). The
-alternative — a permanent tombstone — was rejected: it requires the identity to
-outlive the row, which reintroduces the side table and every synchronization
-hazard in the table above, and it poisons an identity forever with no escape
-except an explicit release. Re-open this only if a real caller is bitten.
+### Idempotency is scoped to the task's lifetime
+
+Once the task holding an identity is deleted or released, that identity is free,
+and a later create makes a new task. This is a real limitation and it is stated
+without excuse:
+
+**A consumer that redelivers indefinitely must suppress redelivery for entities
+it has itself deleted.** Kandev retains no record of a consumed identity, so it
+cannot distinguish "never seen" from "seen and since deleted".
+
+An earlier draft argued that a caller could detect this because the returned
+task ID differs from the one it recorded. That rationale is withdrawn: the
+motivating scenario is a caller that crashed *before* recording any task ID, and
+such a caller has nothing to compare against.
+
+The alternative — a durable tombstone of consumed identities — was rejected
+because it requires the identity to outlive the task row, which reintroduces the
+side table and every synchronization hazard the table above removes. If a real
+consumer cannot suppress its own post-deletion redeliveries, that is the trigger
+to revisit this, and it should be treated as a design change rather than a
+tweak.
+
+**This limitation does not affect the motivating crash-recovery case**, where no
+deletion occurs.
 
 ## State machine
 
@@ -175,59 +222,112 @@ Two observable states for a task holding an external ID:
 
 | State | Representation | Meaning |
 |---|---|---|
-| **incomplete** | `external_id` set, `external_id_settled_at IS NULL` | The create that claimed this identity did not finish. |
-| **complete** | both set | Creation finished. |
+| **unsettled** | `external_id` set, `external_id_settled_at IS NULL` | The create that claimed this identity had not finished its required synchronous work at observation time. It may still be running. |
+| **settled** | both set | That work finished. |
 
 Transitions:
 
 | From | To | Trigger |
 |---|---|---|
-| (none) | incomplete | A create wins the unique index and commits the task row |
-| incomplete | complete | That same create finishes its synchronous work |
+| (none) | unsettled | A create wins the unique index and commits the task row |
+| unsettled | settled | That same create completes its required synchronous work |
 | any | (none) | The task is deleted, or the identity is released |
 
 There is no reclaim, no lease, no timeout, and no ownership token, because
-nothing in this design ever mutates another caller's task. The only contested
-operation is the initial insert, and the unique index settles it.
+nothing in this design ever mutates another caller's task.
 
-### The create sequence
+### Create sequence (normative)
 
 ```
-one transaction: insert task row WITH external_id (settled_at NULL)
-                 ↓ unique-index violation? → roll back, re-read, report Found
-      synchronous post-create work (repositories, blockers, attachments,
-                                    workspace policy, fresh branch)
-                 ↓
-      stamp external_id_settled_at   ← the completeness commit point
-                 ↓
-      asynchronous work (agent launch, PR association) — NOT covered
+1. authorize workspace                       ← already first in CreateTask
+2. validate + normalize external_id
+3. LOOKUP by (workspace_id, external_id)     ← before ANY write or allocation
+     └─ found → return Found outcome, stop. Nothing else runs.
+4. required create-time validation
+5. identifier allocation, WIP admission, task-row insert (incl. external_id)
+     └─ unique violation on uniq_tasks_external_id → roll back, re-read, Found
+6. required synchronous post-create work
+7. SETTLE (conditional UPDATE, see below)
+8. asynchronous dispatch (agent launch, PR association)
 ```
 
-Two properties make this implementable, where the earlier draft's was not:
+**Step 3 is load-bearing and its position is normative.** It must precede
+identifier allocation, WIP admission, and every other write. Two concrete
+consequences of getting this wrong, both of which violate the no-side-effects
+requirement:
 
-1. **The identity is claimed in the same statement that creates the task.**
-   There is no window where one exists without the other, and no coordination
-   between two writes.
-2. **Settlement is a single conditional UPDATE**, guarded on the task ID and on
-   `external_id_settled_at IS NULL`. If the task was deleted or its identity
-   released while the create was still running, the update affects zero rows and
-   is discarded. Nothing is corrupted and no error is surfaced; the task simply
-   remains as whatever the other actor left it.
+- `assignIdentifier` runs before persistence and calls `IncrementTaskSequence`,
+  an unconditional `UPDATE workspaces SET task_sequence = task_sequence + 1`.
+  A found outcome resolved after that point permanently burns a sequence number.
+- WIP admission can reject a create before the insert is ever attempted, so a
+  retry for an already-held identity would fail with a capacity error instead of
+  returning the existing task.
 
-### What "complete" does and does not mean
+Step 5's unique-violation path remains as the **TOCTOU backstop** for the narrow
+race between the step-3 lookup and the insert. It is not the primary mechanism.
 
-`external_id_settled_at` means **the durable task record and its synchronous
-setup finished**. It does *not* mean an agent is running.
+### Settlement (normative)
 
-This is a deliberate narrowing, and it is what makes the commit point
-implementable at all. Agent launch and PR association are dispatched
-asynchronously today — REST starts the agent in a goroutine, and PR association
-is background work — so no synchronous step can wait for them. A spec that
-required settlement to follow "every post-create step" would be asking for
-something the code shape cannot deliver.
+Settlement is a single conditional UPDATE. The predicate MUST include
+`external_id`:
+
+```sql
+UPDATE tasks
+   SET external_id_settled_at = ?
+ WHERE id = ?
+   AND external_id = ?
+   AND external_id_settled_at IS NULL
+```
+
+`external_id` in the predicate is **required, not defensive**. Release sets both
+`external_id` and `external_id_settled_at` to `NULL`; a predicate guarding only
+on `id` and `external_id_settled_at IS NULL` would still match a released row
+and stamp a settlement onto a task that no longer holds any identity.
+
+**The affected-row count MUST be checked.**
+
+- **One row** — settlement succeeded. Proceed to asynchronous dispatch.
+- **Zero rows** — the task was deleted or its identity released while this
+  create was running. The implementation MUST re-read current state, MUST NOT
+  dispatch asynchronous work, and MUST NOT return a `Created` /
+  `creation_complete: true` response claiming an identity it no longer holds.
+  Return the task as it now stands, with `external_id` absent if it was
+  released, or the appropriate not-found error if it was deleted.
+
+Zero rows is a legitimate outcome of a benign race, not an error to log and
+ignore.
+
+### Settlement call site (normative, per surface)
+
+The service cannot settle, because required synchronous work continues in the
+handlers after `CreateTask` returns. Settlement is therefore the **handler's**
+responsibility, and the covered steps differ per surface:
+
+| Surface | Required synchronous steps that must succeed before settling | Settle after |
+|---|---|---|
+| REST | attachment claim, workspace-policy attach, fresh-branch commit | fresh-branch commit, and **before** any session dispatch |
+| MCP | remote-contribution association, workspace-policy attach | policy attach, and **before** auto-start dispatch |
+
+**REST's session helper must be split.** It currently performs synchronous
+preparation and asynchronous dispatch in one call, swallowing preparation
+errors before dispatching the start goroutine. Settling after that helper would
+place settlement after async dispatch has already begun, violating step 7 → 8
+ordering. The helper must expose preparation and dispatch separately so
+settlement can sit between them.
+
+**Best-effort steps do not block settlement.** Task-create last-used recording
+and PR association are best-effort today; their failure MUST NOT prevent
+settlement and MUST NOT trigger compensation. Only the steps listed in the table
+above gate it.
+
+### What "settled" does and does not mean
+
+`external_id_settled_at` means **the required synchronous setup finished**. It
+does *not* mean an agent is running, and it does not mean the create's process
+is alive or dead.
 
 Callers needing to know whether an agent is running read session state, which
-already exists and is already authoritative. They do not read this field for it.
+already exists and is already authoritative.
 
 ## API surface
 
@@ -238,13 +338,12 @@ outcome signal. It SHALL return:
 
 ```
 CreateTaskResult {
-  Task       *models.Task
-  Outcome    enum { Created, FoundComplete, FoundIncomplete }
+  Task     *models.Task
+  Outcome  enum { Created, FoundSettled, FoundUnsettled }
 }
 ```
 
-Callers MUST skip their post-create work on `FoundComplete` and
-`FoundIncomplete`:
+Callers MUST skip their post-create work on both `Found*` outcomes:
 
 | Caller | In scope? | Post-create work to skip |
 |---|---|---|
@@ -254,8 +353,8 @@ Callers MUST skip their post-create work on `FoundComplete` and
 | Plugin host `Tasks().Create` | Deferred | `StartAgent` best-effort start |
 
 The deferred rows cannot misbehave in this iteration because their surfaces do
-not accept an external ID, so the outcome is always `Created` for them. Their
-rows are listed so that enabling one later starts from a complete inventory.
+not accept an external ID, so the outcome is always `Created` for them. They are
+listed so enabling one later starts from a complete inventory.
 
 ### ⚠️ The MCP skip is a data-loss guard
 
@@ -284,28 +383,47 @@ Response additions, both **always present** on every create response:
 {
   "id": "…",
   "external_id": "jira:PROJ-1234",  // omitted when the task has none
-  "deduplicated": false,            // true for both found outcomes
-  "complete": true,                 // false only for FoundIncomplete
+  "deduplicated": false,            // true for both Found outcomes
+  "creation_complete": true,        // false only for FoundUnsettled
   // …all other existing task DTO fields…
 }
 ```
 
-`deduplicated` and `complete` are required booleans, not presence-only markers.
-A presence-only field makes a serialization bug indistinguishable from a genuine
-fresh create, which is the failure this feature exists to prevent.
+`deduplicated` and `creation_complete` are required booleans, not presence-only
+markers. A presence-only field makes a serialization bug indistinguishable from
+a genuine fresh create.
 
-| Outcome | Status | `deduplicated` | `complete` |
+The field is named `creation_complete`, not `complete`, because it describes one
+narrow thing — that the create's required synchronous setup finished — and a
+broader name invites callers to read it as "the task is done" or "the agent is
+running". Every schema and tool description MUST carry that narrow meaning.
+
+| Outcome | Status | `deduplicated` | `creation_complete` |
 |---|---|---|---|
 | Created | `200` | `false` | `true` |
-| Found, complete | `200` | `true` | `true` |
-| Found, incomplete | `200` | `true` | `false` |
+| Found, settled | `200` | `true` | `true` |
+| Found, unsettled | `200` | `true` | `false` |
 | `external_id` fails validation | `400` | — | — |
 | Caller not authorized for `workspace_id` | `404` `{"error": "task not created"}` | — | — |
 
 All three success outcomes are `200` with the task body. There is no `409` and
-no `410`: an incomplete task is a fact to report, not a conflict to raise, and a
+no `410`: an unsettled task is a fact to report, not a conflict to raise, and a
 freed identity is indistinguishable from one never used. Keeping fresh creates
 at `200` also avoids a breaking change for existing clients.
+
+### The side-effect-free probe
+
+A caller can safely ask what holds an identity in two ways, and the SHALL in
+*What* is satisfied by either:
+
+1. **The REST lookup route** below.
+2. **A create carrying the external ID.** Because both Found outcomes have no
+   side effects, issuing the create *is* a safe probe for any caller that would
+   accept the task if it did not exist.
+
+MCP callers rely on (2); no MCP lookup tool is added in this iteration. This is
+sufficient because an MCP caller reaching for an identity is, by construction,
+willing to create the task if it is absent.
 
 ### REST — lookup
 
@@ -315,7 +433,7 @@ GET /api/v1/workspaces/:id/tasks/by-external-id?external_id=<value>
 
 | Situation | Status | Body |
 |---|---|---|
-| A task holds it (including archived, including incomplete) | `200` | task DTO with `complete` |
+| A task holds it (including archived, including unsettled) | `200` | task DTO with `creation_complete` |
 | No task holds it | `404` | `{"error": "task not found"}` |
 | `external_id` missing or fails validation | `400` | `{"error": "<reason>"}` |
 | Caller not authorized for the workspace | `404` | `{"error": "task not found"}` |
@@ -333,36 +451,47 @@ it. Does **not** delete or otherwise modify the task. Returns `204` on success,
 `404` when no task holds it, `400` on validation failure, `404` when
 unauthorized.
 
-Release is the escape hatch for an identity stuck on an incomplete task the
-caller has decided to abandon. Because release and settlement are both
-conditional single-row updates, a release racing a still-running create simply
-causes that create's settlement to affect zero rows — the task stays, without an
-identity, and nothing is corrupted.
+Release is an operator action for an identity a human has determined is
+abandoned. See *The one unsafe thing a caller can do* for why it must not be
+automated in response to `creation_complete: false`.
 
 ### Request ordering and error precedence
 
-Two orderings are normative. The rest is left to the handlers as they are.
+Two orderings are normative:
 
-1. **Authorization precedes any external-ID work.** A caller not authorized for
-   the target workspace receives the existing unauthorized response and SHALL
-   NOT learn whether an external ID exists there, whether it is held, or whether
-   the holding task is complete. `Service.CreateTask` already authorizes as its
-   first statement, which satisfies this.
-2. **Validation of the external ID precedes claim resolution**, so a malformed
-   value is a `400` rather than an accidental lookup.
+1. **Authorization precedes any external-ID work.** An unauthorized caller
+   receives the existing unauthorized response and SHALL NOT learn whether an
+   external ID exists there, whether it is held, or whether its task is settled.
+   `Service.CreateTask` already authorizes as its first statement.
+2. **Validation of the external ID precedes the lookup**, so a malformed value
+   is a `400` rather than an accidental lookup.
 
-**Honest limitation:** both in-scope handlers perform substantial validation
-*before* reaching the service — REST validates attachments, launch-profile
-requirements, and repositories; MCP resolves repositories, workflow, workspace,
-contributions, and launch metadata. This spec does **not** require restructuring
-them. The consequence is that a retry whose payload has drifted can still fail
-handler-level validation before any dedupe occurs.
+The step-3 lookup then precedes all remaining create-time work, per
+*Create sequence*.
 
-The guidance is therefore simple and must be documented on both surfaces:
-**replay the whole original payload.** This is a weaker promise than "a dedupe
-hit always succeeds regardless of payload", and it is stated plainly rather than
-implied, because pretending otherwise would require a create-coordinator
-refactor that is not worth its cost here.
+**Honest limitation — a retry can still fail before dedupe.** Both in-scope
+handlers perform validation *before* reaching the service: REST validates
+attachments, launch-profile requirements, and repositories; MCP resolves
+repositories, workflow, workspace, contributions, and launch metadata. This spec
+does not require restructuring them. Two distinct causes follow:
+
+- **Payload drift** — the retry sends something different from the original.
+  Mitigated by replaying the original payload.
+- **Server-state drift** — the retry is byte-identical, but the world changed:
+  a repository was deleted, a workflow or step was removed, an agent profile was
+  disabled, a parent task was archived, a credential expired. **Replaying the
+  original payload does not help here.**
+
+Server-state drift means the "a caller that crashed and came back a week later
+still finds its task" property holds for the **lookup route**, which touches
+none of that validation, but **not necessarily for the create path**. A caller
+that wants recovery robust against long absences should use the lookup route
+first and fall back to create only when the lookup returns `404`.
+
+This is a real weakening relative to an idealized idempotent create, and it is
+stated rather than implied. Engineering around it would require a create
+coordinator that resolves the identity before any handler validation, which was
+judged not worth its cost.
 
 ### MCP
 
@@ -375,20 +504,21 @@ refactor that is not worth its cost here.
   same arguments you sent the first time."
 
 The tool result is the task as JSON carrying `external_id`, `deduplicated`, and
-`complete`. The tool description states that `deduplicated: true` means the task
-already existed and was not created, and that `complete: false` additionally
-means its creation never finished, so a calling agent neither reports having
-created something new nor assumes the task is ready to work on.
+`creation_complete`. The tool description MUST state that `deduplicated: true`
+means the task already existed and was not created, and that
+`creation_complete: false` additionally means its setup had not finished when
+observed and **may still be in progress** — so a calling agent neither reports
+having created something new, nor assumes the task is ready, nor attempts to
+release and recreate it.
 
 The workspace is resolved before the identity is used: explicit `workspace_id`,
 else the parent's when `parent_id` is set, else auto-resolution when exactly one
-workspace exists. The identity resolves against that **effective** workspace,
-matching where the task would have been created.
+workspace exists. The identity resolves against that **effective** workspace.
 
 The pre-existing MCP-layer `title` check runs before any backend call, so an MCP
 replay carrying an external ID but no title gets the MCP validation error rather
-than a found outcome. This is existing behavior, consistent with the replay
-guidance above, and is not special-cased.
+than a found outcome. This is existing behavior and is consistent with the
+replay guidance above.
 
 ### Write surfaces NOT changed
 
@@ -396,47 +526,40 @@ The WebSocket `task.create` action and the plugin host `Tasks().Create` do not
 accept `external_id`. A caller supplying it there has the field ignored, exactly
 as any other unknown field is today; no error, no claim.
 
-No dedupe event suppression is needed on the WebSocket: the suppression rule
-lives in the service, where the found outcomes return early, so WS subscribers
-never see an event for a create that did not happen.
+No dedupe event suppression is needed on the WebSocket: the found outcomes
+return early inside the service, so WS subscribers never see an event for a
+create that did not happen.
 
 ### Task representations
 
-`external_id` is added to exactly these. The list is exhaustive.
+`external_id` is added to exactly these. This table **is** the requirement.
 
 | Representation | Location | Carries it |
 |---|---|---|
 | `dto.TaskDTO` | `internal/task/dto/dto.go` | Yes — `omitempty`, like the sibling `identifier` field. Covers REST reads/lists and the MCP task tools, which project this DTO. |
 | WS task lifecycle events | `publishTaskEventNow`'s hand-built map, `service_events.go` | Yes — added explicitly. **Not** built from `TaskDTO`, so it needs its own change. |
-| Plugin `Task` + SDK type + mapper | `plugin.proto`, `pkg/pluginsdk/data_types.go`, `internal/plugins/host_data.go` | **No.** Deferred with the plugin surface. Accepted inconsistency: a plugin reading such a task sees no `external_id`. Adding it later is additive on the proto (ADR 0043) and not breaking. |
+| Plugin `Task` + SDK type + mapper | `plugin.proto`, `pkg/pluginsdk/data_types.go`, `internal/plugins/host_data.go` | **No.** Deferred with the plugin surface. Adding it later is additive on the proto (ADR 0043) and not breaking. |
 | `v1.Task` | `pkg/api/v1/task.go` | **No.** Separate legacy projection. |
-| Task-context references | `pkg/api/v1/task_context.go` | **No.** Lightweight ref, deliberately excluded. |
+| Task-context references | `pkg/api/v1/task_context.go` | **No.** Lightweight ref. |
 
-`complete` is a **create-response and lookup-response field only**. It is not
-added to the shared task DTO, because it is meaningful only in the context of an
-idempotent create; putting it on every task read would leak a create-time
-condition into unrelated surfaces.
-
-Reading is intentionally wider than writing: **REST and MCP** can set an
-external ID, but the DTO and the WS event map are shared by every task consumer,
-so a task created through either shows a consistent record everywhere those two
-reach. The plugin projection is the one knowing exception.
+`creation_complete` is a **create-response and lookup-response field only**. It
+is not added to the shared task DTO, because it is meaningful only in the
+context of an idempotent create; putting it on every task read would leak a
+create-time condition into unrelated surfaces.
 
 ## Permissions
 
 - The external ID is workspace-scoped data and inherits the workspace's existing
-  authorization rules with no additions. There is no separate permission for
-  setting, reading, or releasing it.
+  authorization rules with no additions.
 - Authorization precedes all external-ID work. An unauthorized caller receives
   `404 {"error": "task not created"}` for a create and
   `404 {"error": "task not found"}` for a lookup or release, and cannot learn
-  whether an identity exists in that workspace or whether its task is complete.
+  whether an identity exists in that workspace or whether its task is settled.
 - Because uniqueness is workspace-scoped and workspaces are per-owner when auth
   is enabled, two users cannot collide on each other's external IDs or probe
   each other's namespaces.
 - An in-session agent calling `create_task_kandev` is already scoped to its
-  task's workspace owner by the MCP identity scoper; that scoping governs
-  identity resolution unchanged.
+  task's workspace owner by the MCP identity scoper.
 - Release is a workspace-scoped mutation requiring the same authorization as any
   other write to that workspace.
 
@@ -444,32 +567,28 @@ reach. The plugin projection is the one knowing exception.
 
 | Condition | Behavior |
 |---|---|
-| Two concurrent creates race on the same identity | The partial unique index admits exactly one. The loser's transaction rolls back — including its task row — then re-reads by `(workspace_id, external_id)` and returns that task as a found outcome. Neither caller sees a `5xx`, and no partial row survives from the loser. |
-| The loser re-reads and finds nothing (winner deleted or released in between) | Retry the whole create once. If it fails again, return `500` rather than looping. |
-| Unique-violation classification across dialects | The violation MUST be attributed to `uniq_tasks_external_id` specifically — by constraint name on PostgreSQL via typed `pgconn.PgError` inspection, and by the constraint-bearing message on SQLite. A bare `23505` check is insufficient: it matches any unique violation, so a primary-key or unrelated-constraint failure would be misread as a found outcome. |
-| Crash between the task insert and settlement | The task exists with `external_id_settled_at IS NULL`. A retry returns it as **Found, incomplete**. Nothing is deleted, nothing is repaired, and the caller decides. This is the crash-recovery path. |
-| Crash after settlement, before the response reaches the caller | A retry returns **Found, complete**. |
-| The task is deleted or released while its create is still running | Settlement is conditional and affects zero rows. No error, no corruption; the task is whatever the other actor left it. |
-| Found outcome where `start_agent: true` was requested | No agent launched, no session created. Every in-scope caller skips its launch path. This is the central safety property: retrying a create must never double-launch. |
-| Found outcome on an archived task | The archived task is returned with its `archived_at` set, so the caller can tell it is looking at archived work. It is not auto-unarchived. |
+| Two concurrent creates race past the step-3 lookup | The partial unique index admits exactly one. The loser's insert transaction rolls back — including its task row and runner participant — then it re-reads by `(workspace_id, external_id)` and returns that task as a Found outcome. Neither sees a `5xx`, and no orphan row survives. A loser that already allocated an office identifier has burned a sequence number; see the row below. |
+| A concurrent loser burned a task-identifier sequence number | Accepted. The step-3 lookup makes this rare (it requires two creates to interleave within the window between lookup and insert), and the consequence is a gap in the office identifier sequence, not a correctness failure. Identifier sequences are not required to be contiguous. |
+| Unique-violation classification across dialects | The violation MUST be attributed to `uniq_tasks_external_id` specifically — by constraint name on PostgreSQL via typed `pgconn.PgError` inspection, and by the constraint-bearing message on SQLite. A bare `23505` check is insufficient: it matches any unique violation, so a primary-key failure would be misread as a Found outcome. |
+| Crash between the task insert and settlement | The task exists unsettled. A retry returns **Found, unsettled**. Nothing is deleted or repaired. |
+| Crash after settlement, before the response reaches the caller | A retry returns **Found, settled**. |
+| The task is deleted while its create is still running | Settlement affects zero rows. Async dispatch is suppressed, state is re-read, and the response reflects reality rather than claiming a create that no longer exists. |
+| The identity is released while its create is still running | Settlement affects zero rows (the `external_id` predicate no longer matches). Same handling as above; the task survives without an identity. |
+| Found outcome where `start_agent: true` was requested | No agent launched, no session created. This is the central safety property. |
+| Found outcome on an archived task | The archived task is returned with `archived_at` set. Not auto-unarchived. |
 | Found outcome where the request carried different repositories, attachments, parent, or policy | All ignored; the existing task is returned unmodified. |
-| Handler-level validation rejects a drifted retry payload | The request fails with that handler's existing error before any dedupe. Documented, not worked around; replay the original payload. |
+| A retry fails handler validation because server state changed | The request fails with that handler's existing error. Documented, not worked around. Use the lookup route for drift-robust recovery. |
 | Workspace deleted | Its tasks are deleted; their identities go with them. |
-| A caller supplies an external ID on a subtask create | Accepted and applied to the subtask, scoped to the effective workspace. The parent's external ID is irrelevant and never inherited. |
+| A caller supplies an external ID on a subtask create | Accepted and applied to the subtask, scoped to the effective workspace. Never inherited from the parent. |
 
 ## Persistence guarantees
 
 - Both columns live on `tasks` and survive restart with the row. Nothing is
   cached, and there is no TTL.
 - **There is no idempotency window.** A held identity resolves against the
-  current table however old the task is. This differs deliberately from the
-  office `runs` idempotency key, whose precheck is windowed, because a run is a
-  transient unit of work and a task is durable. A caller that crashed and came
-  back a week later still finds its task.
-- An incomplete task persists indefinitely. Kandev never sweeps, expires, or
-  repairs one. It is visible and mutable like any other task; the only thing
-  special about it is that a create against its identity reports
-  `complete: false`.
+  current table however old the task is.
+- An unsettled task persists indefinitely. Kandev never sweeps, expires, or
+  repairs one. It is visible and mutable like any other task.
 - A released or deleted identity is gone irreversibly; no history is retained.
 
 ## Scenarios
@@ -479,92 +598,125 @@ reach. The plugin projection is the one knowing exception.
 - **GIVEN** workspace `W` has no task holding `ext-1`, **WHEN** a client POSTs
   `/api/v1/tasks` with `workspace_id: W` and `external_id: ext-1`, **THEN** a
   task is created, the response carries `external_id: "ext-1"`,
-  `deduplicated: false`, and `complete: true`, a `task.created` event is
+  `deduplicated: false`, `creation_complete: true`, a `task.created` event is
   published, and the row has a non-NULL `external_id_settled_at`.
-- **GIVEN** a complete task `T` holding `(W, ext-1)`, **WHEN** a client POSTs the
+- **GIVEN** a settled task `T` holding `(W, ext-1)`, **WHEN** a client POSTs the
   same create again, **THEN** the response is `200` with `id` equal to `T.id`,
-  `deduplicated: true`, `complete: true`, `W` still has exactly one task holding
-  `ext-1`, and no `task.created` event is published.
-- **GIVEN** a complete task `T` holding `(W, ext-1)`, **WHEN** a client GETs
-  `/api/v1/workspaces/W/tasks/by-external-id?external_id=ext-1`, **THEN** the
-  response is `200` with `T`'s DTO and no task is created.
+  `deduplicated: true`, `creation_complete: true`, `W` still has exactly one
+  task holding `ext-1`, and no `task.created` event is published.
+- **GIVEN** a settled task `T` holding `(W, ext-1)`, **WHEN** a client GETs the
+  lookup route, **THEN** the response is `200` with `T`'s DTO and no task is
+  created.
 - **GIVEN** no task holds `(W, ext-nope)`, **WHEN** a client GETs the lookup,
-  **THEN** the response is `404` and no task is created.
+  **THEN** the response is `404`.
 
-### Crash recovery (the incomplete outcome)
+### Lookup-before-write ordering
+
+- **GIVEN** an office workspace `W` whose `task_sequence` is `N`, and a settled
+  task holding `(W, ext-1)`, **WHEN** a client POSTs a create with
+  `external_id: ext-1` and office-task parameters, **THEN** the existing task is
+  returned and `W.task_sequence` is **still `N`** — no identifier was allocated.
+- **GIVEN** a workflow step at its WIP limit, and a settled task holding
+  `(W, ext-1)` on that step, **WHEN** a client POSTs a create with
+  `external_id: ext-1` targeting that step, **THEN** the existing task is
+  returned with `deduplicated: true` — **not** a WIP-capacity error.
+- **GIVEN** a settled task holding `(W, ext-1)`, **WHEN** a client POSTs a create
+  with `external_id: ext-1` and a `repositories` entry naming a repository that
+  no longer exists, **THEN** the outcome depends on where that validation lives:
+  if the handler rejects it pre-service the request fails (documented
+  limitation); if it reaches the service, the existing task is returned. The
+  implementation MUST state which, and a test MUST pin the actual behavior.
+
+### Unsettled outcome and the unsafe-recovery guard
 
 - **GIVEN** a task `T` holding `(W, ext-1)` with `external_id_settled_at IS NULL`,
   **WHEN** a client POSTs a create with `external_id: ext-1`, **THEN** the
-  response is `200` with `T.id`, `deduplicated: true`, and `complete: false`;
-  `T` still exists unmodified; and no new task is created.
-- **GIVEN** the same incomplete task `T`, **WHEN** a client POSTs that create
-  ten more times over any span of time, **THEN** every response is identical and
-  `T` is never deleted, repaired, or duplicated — there is no timeout after
-  which behavior changes.
-- **GIVEN** the same incomplete task `T`, **WHEN** a client GETs the lookup for
-  `ext-1`, **THEN** the response is `200` with `complete: false`.
-- **GIVEN** an incomplete task `T` holding `(W, ext-1)`, **WHEN** a client
-  DELETEs the release route for `ext-1` and then POSTs the create again,
-  **THEN** the release returns `204`, `T` still exists with a NULL
-  `external_id`, and the create produces a **new** task with
-  `deduplicated: false` and `complete: true`.
-- **GIVEN** a create for `ext-1` that is still running its synchronous
-  post-create work, **WHEN** that task is deleted by another actor before
-  settlement, **THEN** the settlement update affects zero rows, the create
-  surfaces no error attributable to settlement, and no row carries `ext-1`.
+  response is `200` with `T.id`, `deduplicated: true`, and
+  `creation_complete: false`; `T` is unmodified; no new task is created.
+- **GIVEN** the same unsettled task `T`, **WHEN** a client POSTs that create ten
+  more times over any span of time, **THEN** every response is identical and `T`
+  is never deleted, repaired, or duplicated — there is no timeout after which
+  behavior changes.
+- **GIVEN** the same unsettled task `T`, **WHEN** a client GETs the lookup for
+  `ext-1`, **THEN** the response is `200` with `creation_complete: false`.
+- **GIVEN** a create for `ext-1` still running its required synchronous work,
+  **WHEN** a second caller releases `ext-1` and creates again, **THEN** two tasks
+  exist for `ext-1`'s entity. This is the documented unsafe path; the test
+  exists to pin the consequence, and the MCP tool description and REST docs MUST
+  warn against automating it.
+- **GIVEN** an unsettled task `T` holding `(W, ext-1)`, **WHEN** an operator
+  DELETEs the release route and then a client POSTs the create again, **THEN**
+  the release returns `204`, `T` still exists with NULL `external_id`, and the
+  create produces a **new** task with `deduplicated: false`.
+
+### Settlement predicate and zero-row handling
+
+- **GIVEN** a create for `ext-1` that has committed its task row and finished its
+  required synchronous work, **WHEN** settlement runs, **THEN** exactly one row
+  is updated and asynchronous dispatch proceeds.
+- **GIVEN** a create for `ext-1` whose identity is **released** by another actor
+  after the row commit but before settlement, **WHEN** settlement runs, **THEN**
+  it affects **zero** rows — the `external_id` predicate no longer matches — no
+  asynchronous work is dispatched, and the response does not claim
+  `creation_complete: true` for an identity the task no longer holds.
+- **GIVEN** a create for `ext-1` whose **task is deleted** by another actor
+  before settlement, **WHEN** settlement runs, **THEN** it affects zero rows, no
+  asynchronous work is dispatched, and the response is the appropriate not-found
+  error rather than a fabricated success.
+- **GIVEN** any settlement that affects zero rows, **WHEN** the handler
+  continues, **THEN** no agent is launched and no PR association is started.
 
 ### No side effects on a found outcome
 
-- **GIVEN** a complete task `T` holding `(W, ext-1)` with exactly one agent
+- **GIVEN** a settled task `T` holding `(W, ext-1)` with exactly one agent
   session, **WHEN** a client POSTs a create with `external_id: ext-1` and
-  `start_agent: true`, **THEN** the response returns `T` with
-  `deduplicated: true`, `T` still has exactly one session, and no new agent
-  execution is started.
-- **GIVEN** an **incomplete** task `T` holding `(W, ext-1)` with no session,
+  `start_agent: true`, **THEN** `T` still has exactly one session and no new
+  agent execution is started.
+- **GIVEN** an **unsettled** task `T` holding `(W, ext-1)` with no session,
   **WHEN** a client POSTs a create with `external_id: ext-1` and
   `start_agent: true`, **THEN** `T` still has no session and no agent is
-  launched — an incomplete task is reported, never resumed.
-- **GIVEN** a complete task `T` holding `(W, ext-1)`, **WHEN** a client POSTs a
+  launched — an unsettled task is reported, never resumed.
+- **GIVEN** a settled task `T` holding `(W, ext-1)`, **WHEN** a client POSTs a
   create with `external_id: ext-1`, `start_agent: true`, one attachment, and a
   `repositories` entry naming a different repository with `fresh_branch: true`
   (the flag is per-repository, not top-level), **THEN** `T` still has exactly its
   original repositories, no new worktree or branch exists, the attachment is not
   claimed, and no last-used task-create settings are recorded.
-- **GIVEN** a complete task `T` holding `(W, ext-1)` and title `"Original"`,
+- **GIVEN** a settled task `T` holding `(W, ext-1)` and title `"Original"`,
   **WHEN** a client POSTs a create with `external_id: ext-1` and title
-  `"Changed"`, **THEN** the response returns `T` with title `"Original"` and
-  `T`'s stored title is still `"Original"`.
+  `"Changed"`, **THEN** `T`'s stored title is still `"Original"`.
 
 ### MCP
 
-- **GIVEN** a complete task `T` holding `(W, ext-1)`, **WHEN** an agent calls
+- **GIVEN** a settled task `T` holding `(W, ext-1)`, **WHEN** an agent calls
   `create_task_kandev` with `external_id: ext-1` resolving to `W` and
   `start_agent: true`, **THEN** the tool result JSON carries `T.id`,
-  `deduplicated: true`, `complete: true`, and no new task or session is created.
-- **GIVEN** an **incomplete** task `T` holding `(W, ext-1)`, **WHEN** an agent
+  `deduplicated: true`, `creation_complete: true`, and no new task or session is
+  created.
+- **GIVEN** an **unsettled** task `T` holding `(W, ext-1)`, **WHEN** an agent
   calls `create_task_kandev` with `external_id: ext-1`, **THEN** the result
-  carries `T.id` with `complete: false` and no task is created or started.
-- **GIVEN** a complete task `T` holding `(W, ext-1)` whose repository list
-  differs from the retry payload, **WHEN** an agent calls `create_task_kandev`
-  with `external_id: ext-1` and a `repository_url` that would resolve to a remote
+  carries `T.id` with `creation_complete: false` and no task is created or
+  started.
+- **GIVEN** a settled task `T` holding `(W, ext-1)` whose repository list differs
+  from the retry payload, **WHEN** an agent calls `create_task_kandev` with
+  `external_id: ext-1` and a `repository_url` that would resolve to a remote
   contribution, **THEN** `T` is returned, no remote contribution is associated,
-  **and `T` still exists**. This is the data-loss guard; it is required coverage.
-- **GIVEN** a complete task `T` holding `(W, ext-1)`, **WHEN** an agent calls
-  `create_task_kandev` with `external_id: ext-1` and a `workspace_mode` that
-  would need a workspace-policy attach, **THEN** no policy is attached and `T`
-  still exists.
-- **GIVEN** a complete task holding `(W, ext-1)` and `W` is the only workspace,
+  **and `T` still exists**. This is the data-loss guard; required coverage.
+- **GIVEN** a settled task `T` holding `(W, ext-1)`, **WHEN** an agent calls
+  `create_task_kandev` with `external_id: ext-1` and a `workspace_mode` needing
+  a workspace-policy attach, **THEN** no policy is attached and `T` still exists.
+- **GIVEN** a settled task holding `(W, ext-1)` and `W` is the only workspace,
   **WHEN** an agent calls `create_task_kandev` with `external_id: ext-1` and no
   `workspace_id`, **THEN** that task is returned with `deduplicated: true`.
-- **GIVEN** a complete task holding `(W, ext-1)`, **WHEN** an agent calls
+- **GIVEN** a settled task holding `(W, ext-1)`, **WHEN** an agent calls
   `create_task_kandev` with `parent_id` naming a task in a different workspace
   `W2` and `external_id: ext-1`, **THEN** a new subtask is created in `W2`
   holding `ext-1`, because the effective workspace is `W2`.
 - **GIVEN** an agent whose session belongs to a task in workspace `W`, and a task
   holding `(W2, ext-1)` in a workspace the agent's task does not belong to,
   **WHEN** the agent calls `create_task_kandev` targeting `W2` with
-  `external_id: ext-1`, **THEN** the call is denied by the existing MCP identity
-  scoping and reveals nothing about `W2`.
+  `external_id: ext-1`, **THEN** the call is denied by MCP identity scoping and
+  reveals nothing about `W2`.
 
 ### Uniqueness and concurrency
 
@@ -576,16 +728,16 @@ reach. The plugin projection is the one knowing exception.
 - **GIVEN** a task `P` in `W` holding `ext-parent`, **WHEN** a client creates a
   subtask of `P` with no `external_id`, **THEN** the subtask holds no identity.
 - **GIVEN** no task holds `(W, ext-race)`, **WHEN** two creates with
-  `external_id: ext-race` are issued concurrently, **THEN** exactly one task in
-  `W` holds `ext-race`, both requests return `200`, the outcomes are
-  (`deduplicated: false`, `deduplicated: true`), and **no orphan task row exists
-  from the loser**.
+  `external_id: ext-race` are issued concurrently and both pass the step-3
+  lookup, **THEN** exactly one task in `W` holds `ext-race`, both requests return
+  `200`, the outcomes are (`deduplicated: false`, `deduplicated: true`), and
+  **no orphan task row exists from the loser**.
 - **GIVEN** the same race against **PostgreSQL**, **THEN** the same assertions
   hold — an environment-gated PostgreSQL test, since the SQLite path passing is
   not evidence for it.
 - **GIVEN** a create whose task-row insert collides on the `tasks` primary key
-  rather than on `uniq_tasks_external_id`, **WHEN** the client POSTs it,
-  **THEN** the response is an error and **not** a found outcome.
+  rather than on `uniq_tasks_external_id`, **THEN** the response is an error and
+  **not** a Found outcome.
 
 ### Validation
 
@@ -594,56 +746,53 @@ reach. The plugin projection is the one knowing exception.
   is `400`, no task is created, and no agent is launched.
 - **GIVEN** any workspace, **WHEN** a client POSTs a create with `external_id`
   `"ext-1\n"`, **THEN** the response is `400` — the control character is
-  rejected before trimming, so the newline is not silently erased.
+  rejected before trimming.
 - **GIVEN** any workspace, **WHEN** a client POSTs a create with `external_id`
   `"\t"`, **THEN** the response is `400`, not "absent".
 - **GIVEN** any workspace, **WHEN** a client POSTs a create with `external_id`
   `"   "`, **THEN** the task is created with a NULL `external_id`, and the
-  response omits `external_id` and carries `deduplicated: false`.
+  response omits `external_id`.
 - **GIVEN** a task holding `(W, ext-1)`, **WHEN** a client POSTs a create with
   `external_id: "  ext-1  "`, **THEN** that task is returned with
-  `deduplicated: true` — trimming precedes resolution.
+  `deduplicated: true` — trimming precedes the lookup.
 - **GIVEN** a task holding `(W, ext-1)`, **WHEN** a client POSTs a create with
-  `external_id: "EXT-1"`, **THEN** a new task is created — matching is
-  case-sensitive.
+  `external_id: "EXT-1"`, **THEN** a new task is created — case-sensitive.
 - **GIVEN** a PostgreSQL install whose database collation is case-insensitive,
   **WHEN** the previous scenario runs, **THEN** it still produces two distinct
   tasks — the column's deterministic collation overrides the database default.
 
 ### Lifecycle
 
-- **GIVEN** a complete task `T` holding `(W, ext-1)` that has been archived,
+- **GIVEN** a settled task `T` holding `(W, ext-1)` that has been archived,
   **WHEN** a client POSTs a create with `external_id: ext-1`, **THEN** `T` is
   returned with `deduplicated: true` and a non-null `archived_at`, and `T`
   remains archived.
-- **GIVEN** a complete task `T` holding `(W, ext-1)`, **WHEN** `T` is deleted and
+- **GIVEN** a settled task `T` holding `(W, ext-1)`, **WHEN** `T` is deleted and
   a client POSTs the create again, **THEN** a new task is created with
-  `deduplicated: false`.
-- **GIVEN** a complete task `T` holding `(W, ext-1)`, **WHEN** `T` is deleted by
+  `deduplicated: false` — idempotency is scoped to the task's lifetime.
+- **GIVEN** a settled task `T` holding `(W, ext-1)`, **WHEN** `T` is deleted by
   an office handoff cascade that calls the repository directly, **THEN** the
   identity is free and a subsequent create succeeds — no code path can leave a
-  stale identity behind, because the identity is a column on the deleted row.
-- **GIVEN** a complete task `T` holding `(W, ext-1)`, **WHEN** a client DELETEs
-  the release route for `ext-1`, **THEN** the response is `204`, `T` still exists
-  with NULL `external_id` and NULL `external_id_settled_at`, and the lookup for
-  `ext-1` returns `404`.
+  stale identity behind.
+- **GIVEN** a settled task `T` holding `(W, ext-1)`, **WHEN** a client DELETEs
+  the release route, **THEN** the response is `204`, `T` still exists with NULL
+  `external_id` and NULL `external_id_settled_at`, and the lookup returns `404`.
 - **GIVEN** a task `T` holding `ext-1`, **WHEN** a client PATCHes
   `/api/v1/tasks/T` with an `external_id` field in the body, **THEN** `T`'s
   identity is unchanged.
 
 ### Permissions
 
-- **GIVEN** auth is enabled, a complete task holding `(W, ext-1)` in a workspace
-  owned by user `A`, and user `B` who does not own `W`, **WHEN** `B` POSTs a
-  create for `workspace_id: W` with `external_id: ext-1`, **THEN** `B` receives
+- **GIVEN** auth is enabled, a settled task holding `(W, ext-1)` owned by user
+  `A`, and user `B` who does not own `W`, **WHEN** `B` POSTs a create for
+  `workspace_id: W` with `external_id: ext-1`, **THEN** `B` receives
   `404 {"error": "task not created"}`, the response carries no `deduplicated`,
-  no `complete`, and no field of `A`'s task, and no task is created.
-- **GIVEN** the same setup but an **incomplete** task, **WHEN** `B` POSTs the
-  same create, **THEN** `B` receives `404` — completeness is not observable
+  no `creation_complete`, and no field of `A`'s task, and no task is created.
+- **GIVEN** the same setup but an **unsettled** task, **WHEN** `B` POSTs the
+  same create, **THEN** `B` receives `404` — settledness is not observable
   across an authorization boundary.
 - **GIVEN** the same setup, **WHEN** `B` GETs or DELETEs the by-external-id route
-  for `W`, **THEN** the response is `404` — indistinguishable from "workspace
-  exists, identity does not".
+  for `W`, **THEN** the response is `404`.
 - **GIVEN** user `B` unauthorized for `W`, **WHEN** `B` POSTs a create for `W`
   with a 300-byte `external_id`, **THEN** the response is `404`, not `400` —
   authorization precedes validation.
@@ -657,8 +806,7 @@ reach. The plugin projection is the one knowing exception.
   **THEN** the representation omits `external_id` rather than sending `null` or
   `""`.
 - **GIVEN** a task holding `ext-1`, **WHEN** it is returned by an ordinary task
-  read, **THEN** the representation does **not** carry `complete` — that field
-  exists only on create and lookup responses.
+  read, **THEN** the representation does **not** carry `creation_complete`.
 - **GIVEN** a task holding `(W, ext-1)`, **WHEN** a client sends the
   `task.create` WS action with an `external_id` field, **THEN** a new task is
   created and the field is ignored.
@@ -666,60 +814,47 @@ reach. The plugin projection is the one knowing exception.
   `Tasks().Create` with `StartAgent: true`, **THEN** a new task is created and
   started normally.
 
-These two "ignored" scenarios pin each deferral as deliberate and observable, so
-enabling a surface later is a visible behavior change with a failing test to
-flip, not a silent one.
-
 ### Migration
 
 - **GIVEN** an existing database whose tasks predate this feature, **WHEN** the
   backend starts, **THEN** both columns exist and are NULL for every
   pre-existing task, `uniq_tasks_external_id` exists, and creating tasks without
-  an external ID continues to succeed for all of them.
+  an external ID continues to succeed.
 - **GIVEN** the same database, **WHEN** the backend starts a second time,
-  **THEN** the migration replays without error (idempotent `ADD COLUMN` and
-  `CREATE UNIQUE INDEX IF NOT EXISTS`).
+  **THEN** the migration replays without error.
 
 ## Out of scope
 
 ### Deferred write surfaces (designed, not built)
 
 Neither has a named consumer today, and they are **not equally cheap** to
-enable. Each is additive: turning either on changes no behavior for a caller
-that does not pass the new field.
+enable. Each is additive.
 
 | Surface | Cost to enable later |
 |---|---|
-| WebSocket `task.create` | **Low.** One request-struct field, one line in the service-call literal, and skip the launch and last-used recording on a found outcome. One file. Deferred because it is the UI's own path: nothing retries on the UI's behalf, so idempotency buys little there. |
+| WebSocket `task.create` | **Low.** One request-struct field, one line in the service-call literal, and skip the launch and last-used recording on a found outcome. One file. Deferred because it is the UI's own path: nothing retries on the UI's behalf. |
 | Plugin host | **Meaningfully higher.** `plugin.pb.go` and `plugin_grpc.pb.go` are generated and committed, so a proto edit requires regenerating them through the Makefile proto target (installs `protoc-gen-go`, needs network). It also needs a new SDK method — **do not change the existing `TaskReader.Create` signature**, which is source-breaking for shipped plugins — a mapper change, and a release in each separate plugin repo. |
 
 ### Other non-goals
 
-- **Repairing, resuming, or garbage-collecting incomplete tasks.** The whole
-  design stance. Kandev reports; the caller decides.
-- **Any timeout, lease, or expiry on an incomplete task.** There is no duration
-  after which behavior changes.
-- **A tombstone for deleted identities.** See the accepted ABA risk above.
+- **Detecting whether an unsettled create is still alive.** No lease, heartbeat,
+  or owner token. This is the deliberate boundary of the feature.
+- **Repairing, resuming, adopting, or garbage-collecting unsettled tasks.**
+- **Any timeout or expiry on an unsettled task.**
+- **A tombstone for deleted identities.** See *Idempotency is scoped to the
+  task's lifetime*.
+- **An MCP lookup tool.** MCP callers probe via a side-effect-free create.
 - **Changing an external ID in place.** Write-once; re-key via release + create.
 - **System-generated external IDs.**
-- **Idempotency for anything other than task creation.** Message sends, session
-  spawns, task moves, and updates keep their current semantics.
-  `spawn_session_kandev` is not covered.
-- **Restructuring the create handlers** so that claim resolution precedes
-  handler-level validation. The consequence — a drifted retry payload can fail
-  validation before dedupe — is documented, not engineered around.
-- **Retiring the existing integration dedupe tables.** Jira and Linear watchers
-  keep their `*_issue_watch_tasks` rows.
+- **Idempotency for anything other than task creation.** `spawn_session_kandev`
+  is not covered.
+- **Restructuring the create handlers** so identity resolution precedes
+  handler-level validation. The consequence — payload and server-state drift can
+  fail a retry before dedupe — is documented, not engineered around.
+- **Retiring the existing integration dedupe tables.**
 - **Replacing the office `runs.idempotency_key` mechanism.**
-- **The office runtime `create_task` HTTP action**, which has an explicit field
-  allowlist.
-- **Request-payload fingerprinting.** Kandev does not hash the create request or
-  reject a reused identity whose payload differs. Accepted risk: a caller
-  reusing an identity with a genuinely different intended payload gets a `200`
-  and a task that does not match what it asked for. The alternative was rejected
-  because the identity names an external entity whose title and description
-  legitimately drift between redeliveries, and a fingerprint would turn every
-  benign upstream edit into a failed retry.
+- **The office runtime `create_task` HTTP action.**
+- **Request-payload fingerprinting.**
 - **Cross-workspace uniqueness or a global namespace.**
 - **A UI surface** for entering, displaying, or releasing external IDs.
 - **Bulk lookup or bulk release.**
@@ -732,98 +867,96 @@ back here if a change is needed.
 
 ## Appendix: verified current state
 
-Claims checked against the code at `6ba94371a` (a fast-forward of `origin/main`
+Claims checked against the code at `09fa82144` (a fast-forward of `origin/main`
 at `cba3838c8`).
 
-**In-scope entry points.** REST `POST /api/v1/tasks`
-(`task_handlers.go:140` → `httpCreateTask` at `task_http_handlers.go:826`, body
-struct `httpCreateTaskRequest` at `:730`) and MCP `create_task_kandev` (tool
-schema `internal/mcp/server/server.go:805`, client handler
-`internal/mcp/server/handlers.go:142`, backend handler `handleCreateTask` at
+**In-scope entry points.** REST `POST /api/v1/tasks` (`task_handlers.go:140` →
+`httpCreateTask` at `task_http_handlers.go:826`, body struct at `:730`) and MCP
+`create_task_kandev` (tool schema `internal/mcp/server/server.go:805`, client
+handler `internal/mcp/server/handlers.go:142`, backend handler at
 `internal/mcp/handlers/handlers.go:559`). Both converge on
 `taskservice.Service.CreateTask` (`internal/task/service/service_tasks.go:124`),
-request struct `CreateTaskRequest` (`service_requests.go:45`).
+which authorizes first at `:125`.
 
-**Why the service must return an outcome.** `CreateTask` returns only
-`(*models.Task, error)`, and each caller does its own post-create work: REST
-claims attachments (`task_http_handlers.go:912`), attaches policy (`:933`),
+**Why the lookup must precede allocation and admission.** `assignIdentifier`
+runs at `service_tasks.go:160`, before `createTaskWithCapacity` at `:166`, and
+calls `IncrementTaskSequence` — an unconditional
+`UPDATE workspaces SET task_sequence = task_sequence + 1`
+(`repository/sqlite/task.go:2328`). Admission checks precede the insert
+(`task.go:215`) and can return before it (`:257`). Both were confirmed by
+adversarial review.
+
+**Why settlement needs the `external_id` predicate.** Release sets both columns
+to `NULL`, so a predicate of `id` plus `external_id_settled_at IS NULL` still
+matches a released row.
+
+**Why settlement lives in the handlers.** The service publishes `task.created`
+and returns before caller-specific work (`service_tasks.go:171`, `:190`). REST
+then claims attachments (`task_http_handlers.go:912`), attaches policy (`:933`),
 commits a fresh branch (`:947`), and prepares/starts a session (`:954`); MCP
-associates remote contributions (`mcp/handlers/handlers.go:715`), attaches
-policy (`:737`), and launches (`:749`).
+associates remote contributions (`handlers.go:715`), attaches policy (`:737`),
+and launches (`:749`).
+
+**Why REST's session helper must be split.** Preparation errors are swallowed at
+`task_http_handlers.go:1237` while the start goroutine is dispatched at `:1289`,
+inside the same helper. PR association is background work at `:1201`. MCP
+auto-start is a goroutine at `handlers.go:1303`.
 
 **The MCP data-loss path.** `resolveMCPRemoteContributions` derives contributions
-from the request at `handlers.go:658`; the handler then indexes them against the
-returned task's repositories at `:715-719`, and the guard at `:719` calls
-`DeleteTask` at `:720`. Two further rollback-delete paths sit at `:729` and
-`:741`. Independently confirmed by adversarial review.
-
-**Why post-create work cannot be awaited.** REST session preparation failures
-are logged and ignored (`task_http_handlers.go:1237`), the actual start is
-launched in a goroutine (`:1289`), PR association is background work (`:1201`),
-and MCP auto-start is launched in a goroutine (`handlers.go:1303`).
-`task.created` publishes inside the service at `service_tasks.go:190`, before
-caller-specific work. This is why settlement covers synchronous work only.
+from the request at `handlers.go:658`; the handler indexes them against the
+returned task's repositories at `:715-719`; the guard at `:719` calls
+`DeleteTask` at `:720`. Further rollback-delete paths at `:729` and `:741`.
+Independently confirmed.
 
 **Schema placement.** The `tasks` DDL is
 `internal/task/repository/sqlite/base_schema.go:295`. Per
 `apps/backend/AGENTS.md`, a column added to an existing table must come from an
-idempotent `ADD COLUMN` in `runMigrations()`, and anything referencing it (the
-unique index) must follow it there, not in schema init. Precedents:
-`r.migrate.Apply("tasks.identifier", …)` at `base_migrations.go:165`; a unique
-index at `:1086`. The insert to extend is `insertTaskTx`
-(`repository/sqlite/task.go:316`).
+idempotent `ADD COLUMN` in `runMigrations()`, with anything referencing it
+following there, not in schema init. Precedents at `base_migrations.go:165` and
+`:1086`. The insert to extend is `insertTaskTx` (`repository/sqlite/task.go:316`),
+whose task insert and runner participant are genuinely transactional — a unique
+loser leaves no row and does not double-count WIP.
 
 **Response shape.** `createTaskResponse` (`task_http_handlers.go:761`) embeds
 `dto.TaskDTO` (`internal/task/dto/dto.go:143`); the current success path returns
-`http.StatusOK`, not `201` (`:960`), which is why outcomes are signalled by body
-fields. `TaskDTO` already carries the analogous optional `Identifier` at
-`dto.go:195`. Unauthorized/not-found maps to `404` via `handleNotFound`
-(`internal/task/handlers/errors.go:20`).
+`http.StatusOK`, not `201` (`:960`). `TaskDTO` already carries the analogous
+optional `Identifier` at `dto.go:195`. Unauthorized/not-found maps to `404` via
+`handleNotFound` (`internal/task/handlers/errors.go:20`).
 
 **Representations are not all TaskDTO.** WS task lifecycle events are a
-hand-built `map[string]interface{}` in `publishTaskEventNow`
-(`internal/task/service/service_events.go:367`). Plugins have an independent
-proto message, SDK type, and mapper (`proto/kandev/plugin/v1/plugin.proto:216`,
+hand-built map in `publishTaskEventNow` (`service_events.go:367`). Plugins have
+an independent proto message, SDK type, and mapper (`plugin.proto:216`,
 `pkg/pluginsdk/data_types.go:92`, `internal/plugins/host_data.go:878`);
 `CreateTaskResponse` holds only `Task task = 1` (`plugin.proto:456`) and SDK
-`TaskReader.Create` returns `(*Task, error)` (`pkg/pluginsdk/host.go:138`, gRPC
-impl `:363`).
+`TaskReader.Create` returns `(*Task, error)` (`pkg/pluginsdk/host.go:138`).
 
-**Dialect handling.** Partial unique indexes are supported by both SQLite and
-PostgreSQL. A typed `pgconn.PgError` precedent exists at
-`internal/task/repository/sqlite/task.go:2238`. Every existing *unique*-violation
-helper matches SQLite text only (`internal/office/repository/sqlite/wakeup_requests.go:246`
-with a comment admitting the workaround, plus `internal/github/store.go:1433`,
-`internal/prompts/service/service.go:64`, `internal/sentry/store.go:948`), and
-per `apps/backend/AGENTS.md` this repository package also runs against
-PostgreSQL — so reusing one unchanged would break the race contract there.
+**Dialect handling.** Partial unique indexes work on both dialects. A typed
+`pgconn.PgError` precedent exists at `repository/sqlite/task.go:2238`. Every
+existing *unique*-violation helper matches SQLite text only
+(`internal/office/repository/sqlite/wakeup_requests.go:246`,
+`internal/github/store.go:1433`, `internal/prompts/service/service.go:64`,
+`internal/sentry/store.go:948`), and per `apps/backend/AGENTS.md` this package
+also runs against PostgreSQL.
 
 **Deletion shadow paths.** Office handoff cascades delete tasks through the
-repository directly rather than the service (`handoff_cascade.go:332`), which is
-the same bypass `AGENTS.md` warns about for event publishing. This design is
-immune: the identity is a column on the deleted row, so every deletion path
-frees it without needing to know the feature exists.
+repository directly (`handoff_cascade.go:332`). This design is immune: the
+identity is a column on the deleted row.
 
-**Authorization.** `CreateTask` calls `authorizeWorkspaceID` as its first
-statement (`service_tasks.go:125`). Workspaces are per-owner with `*NotFound`
-sentinels and no existence leak (`apps/backend/AGENTS.md`); in-session agent MCP
-is scoped to the task owner via `internal/mcp/scope`.
+**Design provenance.** Three independent adversarial reviews (OpenAI Codex,
+read-only). Pass 1 (unique index): 10 P1s, including a crash between the row
+commit and post-create work leaving a half-created task returned as complete.
+Pass 2 (reservation table + lease + reclaim): NOT READY, 7 P1s — no fencing
+token, destructive release of live claims, non-atomic tombstoning across
+deletion shadow paths, an unimplementable completion protocol given async work,
+unsettled rows visible to ordinary reads, unsatisfiable handler ordering.
+Pass 3 (identity on the task row, honest reporting): NOT READY, 7 P1s — the
+decisive one being that `complete: false` cannot distinguish a live create from
+an abandoned one, so the release-and-recreate "recovery" it implied could
+produce duplicate tasks and agents.
 
-**Design provenance.** This spec was reviewed twice by an independent model
-(OpenAI Codex, read-only). The first pass produced 10 P1 findings against a
-unique-index design; the response was a `task_external_ids` reservation table
-with a lease and reclaim protocol. The second pass returned that design NOT
-READY with 7 P1s: no fencing token on reclaim, destructive release of live
-claims, non-atomic tombstoning across deletion shadow paths, an unimplementable
-completion protocol given asynchronous post-create work, unsettled tasks visible
-to ordinary reads, and an ordering requirement the handlers cannot satisfy. Both
-reviews' factual findings were independently re-verified against source before
-being accepted.
-
-The current design responds by **narrowing the promise** rather than building
-the machinery: Kandev reports an incomplete task instead of repairing one. That
-removes the reclaim protocol (nothing is ever taken from another caller), the
-tombstone (nothing must outlive the row), the isolation requirement (an
-incomplete task is meant to be visible), and the two-phase coordinator (settling
-covers synchronous work only). The remaining concurrency is a single unique
-index and two conditional single-row updates.
+This version responds by **removing the recovery claim rather than the
+information**. The flag remains, explicitly diagnostic; the unsafe automated
+action is named and forbidden; the settlement predicate, its zero-row handling,
+its call site, and the lookup-before-write ordering are now specified concretely.
+All factual findings from every pass were independently re-verified against
+source before acceptance.
