@@ -118,6 +118,26 @@ func TestCountLines(t *testing.T) {
 			wantDeletion: 1,
 		},
 		{
+			// Real `git show --cc` output for a conflicted merge. The two marker
+			// columns would break a one-column counter, so the hunk pattern
+			// deliberately does not match `@@@` and the patch counts as zero.
+			// No caller produces one (ShowCommit passes --first-parent), and
+			// counting nothing beats counting wrongly.
+			name: "combined merge diff is not counted",
+			diff: "diff --cc f.txt\n" +
+				"index 797be14,0c02ccc..db3c03a\n" +
+				"--- a/f.txt\n" +
+				"+++ b/f.txt\n" +
+				"@@@ -1,3 -1,3 +1,3 @@@\n" +
+				"  a\n" +
+				"- Y\n" +
+				" -X\n" +
+				"++Z\n" +
+				"  c\n",
+			wantAddition: 0,
+			wantDeletion: 0,
+		},
+		{
 			name: "empty context line carrying no marker stays in the hunk",
 			diff: "--- a/a.txt\n" +
 				"+++ b/a.txt\n" +

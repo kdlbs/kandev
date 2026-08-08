@@ -265,9 +265,11 @@ func (g *GitOperator) GetCumulativeDiff(ctx context.Context, baseCommit string) 
 	// Get the cumulative diff (base → working tree, includes uncommitted changes).
 	// Deliberately no --numstat here: parseCommitDiffWithOptions falls back to
 	// unidiff.CountLines, which was checked against git's own numstat over 600
-	// commits of this repo's history with zero disagreements. Adding the flag
-	// would change a production git invocation for a difference no test can
-	// observe.
+	// commits of this repo's history with zero disagreements on line counts.
+	// (Binary files were excluded from that comparison — numstat reports them as
+	// `-` with nothing to compare — but both routes report 0/0 for them anyway,
+	// since a binary block carries no hunk.) Adding the flag would change a
+	// production git invocation for a difference no test can observe.
 	diffOutput, err := g.runGitCommand(ctx, "diff", baseCommit)
 	if err != nil {
 		result.Error = fmt.Sprintf("failed to get diff: %s", err.Error())

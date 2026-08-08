@@ -14,6 +14,14 @@ import (
 // hunkHeaderPattern matches a unified-diff hunk header, e.g. `@@ -12,7 +34,9 @@ func Foo()`.
 // It mirrors the pattern used by internal/review's anchor walker, which walks the
 // same format for a different purpose.
+//
+// It deliberately does NOT match a combined-diff header (`@@@ -1,3 -1,3 +1,3 @@@`,
+// from `git show --cc` on a merge): the body requires exactly one old-side range,
+// and the leading `@@+` only tolerates the extra `@` characters. Combined diffs
+// also use two marker columns, which this one-column counter would misread. No
+// caller produces one — ShowCommit passes --first-parent, GetCumulativeDiff uses
+// `git diff <base>`, and GitLab returns per-file patches — so a combined patch
+// counts as zero rather than counting wrongly. See TestCountLines.
 var hunkHeaderPattern = regexp.MustCompile(`^@@+ -\d+(?:,\d+)? \+\d+(?:,\d+)? @@`)
 
 // CountLines returns the number of added and removed content lines in a unified
@@ -40,8 +48,10 @@ func CountLines(diff string) (additions, deletions int) {
 		case strings.HasPrefix(line, "-"):
 			deletions++
 		case strings.HasPrefix(line, " "), strings.HasPrefix(line, "\\"), line == "":
-			// Context line, the `\ No newline at end of file` marker, or the
-			// empty element a trailing newline leaves behind. None is content.
+			// Context line, a blank context line inside the hunk body (some
+			// producers drop the marker on an empty line), the `\ No newline at
+			// end of file` marker, or the empty element a trailing newline
+			// leaves behind. None is content, and none ends the hunk.
 		default:
 			// File metadata between hunks ends the current hunk.
 			inHunk = false
