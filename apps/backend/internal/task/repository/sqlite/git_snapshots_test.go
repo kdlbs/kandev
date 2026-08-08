@@ -30,27 +30,36 @@ func seedGitSnapshotSession(t *testing.T, repo *Repository, taskID, sessionID st
 	}
 }
 
-// TestGetGitSnapshotsBySession_PrefersAuthoritativeOverRacingLiveMonitor
-// reproduces the session-delete pre-delete-warning defect found in QA
-// (docs/specs/session-delete-resource-cleanup): saveGitStatusSnapshot writes
-// an authoritative "agent_completed" snapshot with full file-diff data on
-// turn completion, but a periodic live-git-status-monitor tick can land
-// microseconds-to-seconds later with a newer created_at and an always-empty
-// files column (UpsertLatestLiveGitSnapshot never populates Files). A caller
-// that reads "the newest snapshot" — like the session-delete warning's
-// session.git.snapshots consumer — must not have that newer, less complete
-// row shadow the authoritative one.
-func TestGetGitSnapshotsBySession_PrefersAuthoritativeOverRacingLiveMonitor(t *testing.T) {
+// TestGetGitSnapshotsBySession_OrdersByRecencyRegardlessOfTriggeredBy
+// replaces a prior version of this test that asserted the opposite ordering
+// (agent_completed always sorts first, regardless of actual recency) as
+// correct. That ordering IS the session-delete pre-delete-warning defect
+// documented in docs/specs/session-delete-resource-cleanup REVIEW-ROUND: 2:
+// an agent turn completes (authoritative "agent_completed" snapshot with
+// full file-diff data), then the user hand-edits a file outside the agent
+// (a later, genuinely fresher "live_monitor" tick, which never populates
+// Files by design — see UpsertLatestLiveGitSnapshot). A consumer that reads
+// "the newest snapshot" — the session-delete warning's session.git.snapshots
+// consumer — must see the newer row, not have a stale-but-"authoritative"
+// row shadow it and silently undercount real uncommitted work to zero.
+// Callers that need the newer row's file count when its Files column is
+// empty fall back to its Metadata's modified/added/deleted/untracked/renamed
+// lists (see apps/web/hooks/use-session-delete-warning.ts), which
+// saveGitStatusSnapshot and UpsertLatestLiveGitSnapshot both always persist
+// regardless of triggered_by — so recency-first ordering no longer trades
+// away file-count accuracy the way it would have before that fallback
+// existed.
+func TestGetGitSnapshotsBySession_OrdersByRecencyRegardlessOfTriggeredBy(t *testing.T) {
 	repo := newRepoForHealTests(t)
 	ctx := context.Background()
-	const taskID = "task-snapshot-race"
-	const sessionID = "session-snapshot-race"
+	const taskID = "task-snapshot-recency"
+	const sessionID = "session-snapshot-recency"
 	seedGitSnapshotSession(t, repo, taskID, sessionID)
 
 	authoritativeAt := time.Now().UTC()
 	if err := repo.CreateGitSnapshot(ctx, &models.GitSnapshot{
 		SessionID: sessionID, SnapshotType: models.SnapshotTypeStatusUpdate,
-		Branch: "feature/race", Ahead: 1,
+		Branch: "feature/recency", Ahead: 1,
 		Files:       map[string]interface{}{"diff_update_test.txt": map[string]interface{}{"status": "modified"}},
 		TriggeredBy: "agent_completed",
 		CreatedAt:   authoritativeAt,
@@ -58,14 +67,15 @@ func TestGetGitSnapshotsBySession_PrefersAuthoritativeOverRacingLiveMonitor(t *t
 		t.Fatalf("create authoritative snapshot: %v", err)
 	}
 
-	// The live_monitor row lands AFTER the authoritative one (later
-	// created_at) and — as UpsertLatestLiveGitSnapshot always does — carries
-	// no file data. This is the exact race observed in QA.
+	// A live_monitor row lands strictly AFTER the authoritative one — e.g. the
+	// user hand-edited a file via the terminal after the turn completed. It
+	// carries no Files data (UpsertLatestLiveGitSnapshot never populates it)
+	// but is the genuinely newer state and must sort first.
 	if err := repo.UpsertLatestLiveGitSnapshot(ctx, &models.GitSnapshot{
-		SessionID: sessionID, Branch: "feature/race", Ahead: 1,
-		CreatedAt: authoritativeAt.Add(time.Millisecond),
+		SessionID: sessionID, Branch: "feature/recency", Ahead: 1,
+		CreatedAt: authoritativeAt.Add(time.Minute),
 	}); err != nil {
-		t.Fatalf("create racing live_monitor snapshot: %v", err)
+		t.Fatalf("create newer live_monitor snapshot: %v", err)
 	}
 
 	snapshots, err := repo.GetGitSnapshotsBySession(ctx, sessionID, 5)
@@ -77,12 +87,13 @@ func TestGetGitSnapshotsBySession_PrefersAuthoritativeOverRacingLiveMonitor(t *t
 	}
 
 	newest := snapshots[0]
-	if newest.TriggeredBy != "agent_completed" {
-		t.Fatalf("newest snapshot triggered_by = %q, want agent_completed (live_monitor race must not shadow it)",
-			newest.TriggeredBy)
+	if newest.TriggeredBy != TriggeredByLiveMonitor {
+		t.Fatalf("newest snapshot triggered_by = %q, want %q (the genuinely newer row must sort first)",
+			newest.TriggeredBy, TriggeredByLiveMonitor)
 	}
-	if len(newest.Files) != 1 {
-		t.Fatalf("newest snapshot files = %#v, want the authoritative diff, not the empty live_monitor row", newest.Files)
+	oldest := snapshots[1]
+	if oldest.TriggeredBy != "agent_completed" {
+		t.Fatalf("oldest snapshot triggered_by = %q, want agent_completed", oldest.TriggeredBy)
 	}
 }
 

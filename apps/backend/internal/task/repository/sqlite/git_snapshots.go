@@ -262,16 +262,20 @@ func (r *Repository) GetFirstGitSnapshot(ctx context.Context, sessionID string) 
 	return r.getGitSnapshotByOrder(ctx, sessionID, "ASC")
 }
 
-// GetGitSnapshotsBySession retrieves all git snapshots for a session.
-// Ordering mirrors GetLatestGitSnapshot's authoritative-first preference: an
-// agent_completed snapshot (captured at exact turn-completion time, always
-// carrying full file-diff data) sorts before any live_monitor snapshot (a
-// periodic poll that can land microseconds-to-seconds later with a newer
-// created_at, but whose files column is always empty), then newest-first
-// within each group. Without this, a caller that reads "the newest
-// snapshot" — e.g. the session-delete pre-delete warning — can
-// non-deterministically read a live_monitor row and silently undercount
-// uncommitted files to zero (see docs/specs/session-delete-resource-cleanup).
+// GetGitSnapshotsBySession retrieves all git snapshots for a session, newest
+// first by created_at, regardless of triggered_by.
+//
+// Deliberately does NOT mirror GetLatestGitSnapshot's agent_completed-first
+// preference: that ordering caused a real defect for this method's actual
+// caller (the session-delete pre-delete warning, session.git.snapshots) — a
+// stale agent_completed row would sort ahead of a genuinely newer
+// live_monitor row (e.g. the user hand-edited a file after the agent turn
+// completed), silently undercounting real uncommitted work to zero (see
+// docs/specs/session-delete-resource-cleanup REVIEW-ROUND: 2). A
+// live_monitor row's files column is always empty by design (see
+// UpsertLatestLiveGitSnapshot); callers that need a file count from such a
+// row fall back to its metadata's modified/added/deleted/untracked/renamed
+// lists, which are populated regardless of triggered_by.
 // If limit > 0, only that many snapshots are returned.
 // Returns an empty slice if no snapshots are found.
 func (r *Repository) GetGitSnapshotsBySession(ctx context.Context, sessionID string, limit int) ([]*models.GitSnapshot, error) {
@@ -280,9 +284,7 @@ func (r *Repository) GetGitSnapshotsBySession(ctx context.Context, sessionID str
 		       ahead, behind, files, triggered_by, metadata, created_at
 		FROM task_session_git_snapshots
 		WHERE session_id = ?
-		ORDER BY
-			CASE WHEN triggered_by = 'agent_completed' THEN 0 ELSE 1 END,
-			created_at DESC
+		ORDER BY created_at DESC
 	`
 	if limit > 0 {
 		query += fmt.Sprintf(" LIMIT %d", limit)

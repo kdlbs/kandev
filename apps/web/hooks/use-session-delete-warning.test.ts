@@ -180,3 +180,77 @@ describe("useSessionDeleteWarning isLoaded gating", () => {
     await waitFor(() => expect(result.current.isLoaded).toBe(true));
   });
 });
+
+describe("useSessionDeleteWarning metadata fallback", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  afterEach(() => {
+    cleanup();
+  });
+
+  it("falls back to metadata file counts when the newest row's files map is empty (round-2 CRITICAL regression)", async () => {
+    mockRequest.mockResolvedValue({
+      snapshots: [
+        // Newest row: a live_monitor tick after the user hand-edited a file
+        // outside the agent turn. Its files map is always empty by design
+        // (see git_snapshots.go UpsertLatestLiveGitSnapshot), but metadata
+        // still carries the real per-category file lists.
+        {
+          branch: "main",
+          ahead: 1,
+          files: {},
+          metadata: {
+            modified: ["a.ts"],
+            added: [],
+            deleted: [],
+            untracked: ["b.txt"],
+            renamed: [],
+          },
+        },
+        // Older, now-stale agent_completed row for the same branch. Under
+        // the old "agent_completed always first" ordering this would have
+        // shadowed the row above and reported 0/0.
+        { branch: "main", ahead: 5, files: { "stale.ts": {} } },
+      ],
+    });
+
+    const { result } = renderHook(() => useSessionDeleteWarning(true, "session-metadata-fallback"));
+
+    await waitFor(() => {
+      expect(result.current).toEqual({
+        warning: { uncommittedFiles: 2, unpushedCommits: 1 },
+        isLoaded: true,
+      });
+    });
+  });
+
+  it("prefers the files map over metadata when both are present on the newest row", async () => {
+    mockRequest.mockResolvedValue({
+      snapshots: [
+        {
+          branch: "main",
+          ahead: 1,
+          files: { "a.ts": {}, "b.ts": {} },
+          metadata: {
+            modified: ["a.ts", "b.ts", "c.ts"],
+            added: [],
+            deleted: [],
+            untracked: [],
+            renamed: [],
+          },
+        },
+      ],
+    });
+
+    const { result } = renderHook(() => useSessionDeleteWarning(true, "session-files-preferred"));
+
+    await waitFor(() => {
+      expect(result.current).toEqual({
+        warning: { uncommittedFiles: 2, unpushedCommits: 1 },
+        isLoaded: true,
+      });
+    });
+  });
+});

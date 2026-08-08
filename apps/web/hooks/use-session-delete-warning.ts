@@ -22,10 +22,19 @@ export type SessionDeleteWarningState = {
   isLoaded: boolean;
 };
 
+type SessionGitSnapshotMetadata = {
+  modified?: string[];
+  added?: string[];
+  deleted?: string[];
+  untracked?: string[];
+  renamed?: string[];
+};
+
 type SessionGitSnapshotSummary = {
   branch?: string;
   ahead?: number;
   files?: Record<string, unknown>;
+  metadata?: SessionGitSnapshotMetadata;
 };
 
 // `session.git.snapshots` returns a per-session history ordered newest-first
@@ -92,6 +101,30 @@ export function useSessionDeleteWarning(
   return { warning, isLoaded };
 }
 
+// uncommittedFileCount prefers the snapshot's files map (the richer,
+// diff-carrying source populated on agent_completed rows). A live_monitor
+// row's files map is always empty by design (see git_snapshots.go
+// UpsertLatestLiveGitSnapshot) even when real uncommitted work exists, so
+// when files is empty this falls back to summing the snapshot's metadata
+// per-category file lists, which both row types always persist. Without this
+// fallback, the newest row winning the backend's now-recency-first ordering
+// (see GetGitSnapshotsBySession) could still undercount to zero whenever
+// that newest row happens to be a live_monitor tick
+// (docs/specs/session-delete-resource-cleanup REVIEW-ROUND: 2).
+function uncommittedFileCount(snapshot: SessionGitSnapshotSummary): number {
+  const filesCount = Object.keys(snapshot.files ?? {}).length;
+  if (filesCount > 0) return filesCount;
+  const metadata = snapshot.metadata;
+  if (!metadata) return 0;
+  return (
+    (metadata.modified?.length ?? 0) +
+    (metadata.added?.length ?? 0) +
+    (metadata.deleted?.length ?? 0) +
+    (metadata.untracked?.length ?? 0) +
+    (metadata.renamed?.length ?? 0)
+  );
+}
+
 function summarizeSnapshots(snapshots: SessionGitSnapshotSummary[]): SessionDeleteWarning {
   const seenBranches = new Set<string>();
   let uncommittedFiles = 0;
@@ -100,7 +133,7 @@ function summarizeSnapshots(snapshots: SessionGitSnapshotSummary[]): SessionDele
     const branchKey = snapshot.branch ?? "";
     if (seenBranches.has(branchKey)) continue;
     seenBranches.add(branchKey);
-    uncommittedFiles += Object.keys(snapshot.files ?? {}).length;
+    uncommittedFiles += uncommittedFileCount(snapshot);
     unpushedCommits += snapshot.ahead ?? 0;
   }
   return { uncommittedFiles, unpushedCommits };
