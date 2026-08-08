@@ -2,12 +2,14 @@ package service
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/kandev/kandev/internal/task/models"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
+	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 )
 
 func seedWorkspaceAndWorkflowForCreate(t *testing.T, ctx context.Context, repo *sqliterepo.Repository, wsID string) string {
@@ -304,5 +306,131 @@ func TestCreateTaskWithInvalidExternalIDFailsValidation(t *testing.T) {
 	}
 	if len(eventBus.GetPublishedEvents()) != 0 {
 		t.Fatal("no task should be created when external_id validation fails")
+	}
+}
+
+// seedAdmissionPreemptionWorkflow wires a target step with a WIP limit of 1
+// and a feeder step that is already saturated. Docs/specs/tasks/external-id-
+// idempotency/spec.md's "Lookup-before-write ordering" section: with no
+// feeder configured, a loser that misses the target's last slot is only
+// QUEUED (not rejected) by internal/task/repository/sqlite/task.go's
+// applyAdmissionPlacement, and its insert then fails on the unique index
+// instead — already covered by
+// TestCreateTaskWithExternalIDConcurrentRaceYieldsOneWinner. The genuinely
+// untested path is admission rejecting BEFORE the insert is even attempted,
+// which this implementation only does when the feeder is configured and is
+// itself also at capacity (applyAdmissionPlacement's default branch,
+// task.go:258-265). That is the configuration exercised here.
+func seedAdmissionPreemptionWorkflow(t *testing.T, ctx context.Context, repo *sqliterepo.Repository, svc *Service) (workspaceID, targetStepID string) {
+	t.Helper()
+	workspaceID = "ws-admission-preempt"
+	workflowID := "wf-admission-preempt"
+	feederStepID := "feeder-step"
+	targetStepID = "target-step"
+
+	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: workspaceID, Name: workspaceID}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	if err := repo.CreateWorkflow(ctx, &models.Workflow{ID: workflowID, WorkspaceID: workspaceID, Name: "WF"}); err != nil {
+		t.Fatalf("create workflow: %v", err)
+	}
+	if err := repo.CreateTask(ctx, &models.Task{
+		ID: "feeder-occupant", WorkspaceID: workspaceID, WorkflowID: workflowID,
+		WorkflowStepID: feederStepID, WIPAdmitted: true, Title: "Feeder occupant",
+	}); err != nil {
+		t.Fatalf("seed feeder occupant: %v", err)
+	}
+
+	svc.SetWorkflowStepGetter(&fakeWorkflowStepGetter{steps: map[string]*wfmodels.WorkflowStep{
+		feederStepID: {ID: feederStepID, WorkflowID: workflowID, Name: "Feeder", WIPLimit: 1},
+		targetStepID: {ID: targetStepID, WorkflowID: workflowID, Name: "Target", WIPLimit: 1, PullFromStepID: feederStepID},
+	}})
+	return workspaceID, targetStepID
+}
+
+// TestCreateTaskWithExternalIDAdmissionPreemptionGuard is the spec's
+// "load-bearing" admission-preemption scenario (LO4): a target step with
+// exactly one remaining WIP slot, two creates race past a step-3 miss, the
+// winner consumes the slot and inserts, and the loser is rejected by WIP
+// admission BEFORE reaching the insert (because its feeder is also
+// saturated, so applyAdmissionPlacement returns before insertTaskTx runs).
+// Without recoverFoundTaskAfterInsertFailure re-reading on that failure, the
+// loser would surface a raw capacity error instead of the winner's task.
+func TestCreateTaskWithExternalIDAdmissionPreemptionGuard(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	workspaceID, targetStepID := seedAdmissionPreemptionWorkflow(t, ctx, repo, svc)
+
+	var wg sync.WaitGroup
+	start := make(chan struct{})
+	results := make([]CreateTaskResult, 2)
+	errs := make([]error, 2)
+	for i := 0; i < 2; i++ {
+		i := i
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			results[i], errs[i] = svc.CreateTask(ctx, &CreateTaskRequest{
+				WorkspaceID: workspaceID, WorkflowID: "wf-admission-preempt", WorkflowStepID: targetStepID, Title: "Preempt", ExternalID: "ext-preempt",
+			})
+		}()
+	}
+	close(start)
+	wg.Wait()
+
+	for i, err := range errs {
+		if err != nil {
+			t.Fatalf("caller %d returned an error instead of a Found outcome — the admission-preemption guard did not fire: %v", i, err)
+		}
+	}
+
+	createdCount, foundCount := 0, 0
+	for _, r := range results {
+		switch r.Outcome {
+		case CreateTaskOutcomeCreated:
+			createdCount++
+		case CreateTaskOutcomeFoundSettled, CreateTaskOutcomeFoundUnsettled:
+			foundCount++
+		}
+	}
+	if createdCount != 1 || foundCount != 1 {
+		t.Fatalf("outcomes = %#v, want exactly one Created and one Found", results)
+	}
+	if results[0].Task.ID != results[1].Task.ID {
+		t.Fatalf("both callers must observe the same winning task: %s vs %s", results[0].Task.ID, results[1].Task.ID)
+	}
+	if count := countTasksHoldingExternalID(t, ctx, repo, workspaceID, "ext-preempt"); count != 1 {
+		t.Fatalf("tasks holding ext-preempt = %d, want exactly 1 (no orphan from the loser)", count)
+	}
+}
+
+// TestCreateTaskWithExternalIDAdmissionRejectionSurfacesWithoutWinner is the
+// spec's LO5 sibling scenario: the same saturated step and feeder, but a
+// single request for an external_id nobody holds. The admission-preemption
+// guard's re-read finds nothing, so it must not swallow the genuine capacity
+// failure — the original WIP-limit error surfaces unchanged.
+func TestCreateTaskWithExternalIDAdmissionRejectionSurfacesWithoutWinner(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	workspaceID, targetStepID := seedAdmissionPreemptionWorkflow(t, ctx, repo, svc)
+	if err := repo.CreateTask(ctx, &models.Task{
+		ID: "target-occupant", WorkspaceID: workspaceID, WorkflowID: "wf-admission-preempt",
+		WorkflowStepID: targetStepID, WIPAdmitted: true, Title: "Target occupant",
+	}); err != nil {
+		t.Fatalf("seed target occupant: %v", err)
+	}
+
+	_, err := svc.CreateTask(ctx, &CreateTaskRequest{
+		WorkspaceID: workspaceID, WorkflowID: "wf-admission-preempt", WorkflowStepID: targetStepID, Title: "No winner", ExternalID: "ext-no-winner",
+	})
+	if err == nil {
+		t.Fatal("expected the original capacity error to surface — nothing holds ext-no-winner for the re-read to find")
+	}
+	if !errors.Is(err, wfmodels.ErrWIPLimitExceeded) {
+		t.Fatalf("err = %v, want a WIP-limit error, not swallowed or replaced", err)
+	}
+	if count := countTasksHoldingExternalID(t, ctx, repo, workspaceID, "ext-no-winner"); count != 0 {
+		t.Fatalf("tasks holding ext-no-winner = %d, want 0 — the rejected create must not have persisted anything", count)
 	}
 }
