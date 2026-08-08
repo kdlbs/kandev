@@ -65,11 +65,14 @@ status updates. Keep the plugin API and install pipeline unchanged.
   translation with an animated `IconLoader2` and `aria-busy` while the shared
   install pipeline is pending; disabled behavior and test IDs remain unchanged.
 - Added the URL pending-state component regression and desktop/mobile held-route
-  E2E coverage. The E2E tests verify recovery to the idle Install action and the
-  existing inline error state after a controlled failure.
+  E2E coverage. The shared held-install helper in
+  `apps/web/e2e/helpers/plugin-install.ts` is used by both E2E specs. The tests
+  verify recovery to the idle Install action and the existing inline error state
+  after a controlled failure.
 - Preserved the existing successful URL/upload install pipeline, store updates,
   bundle loading, dialog close behavior, and marketplace install controls.
 - Verification passed: production build, focused page suite (17 tests),
   Chromium E2E (1 test), Pixel 5 E2E (1 test), typecheck, targeted ESLint,
   `git diff --check`, interactive browser validation, and managed desktop/mobile
-  screenshot capture.
+  screenshot capture. After PR review, the shared-helper fix was rechecked with
+  the focused Chromium and Pixel 5 E2E tests plus targeted ESLint.

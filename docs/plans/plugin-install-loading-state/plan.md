@@ -84,10 +84,12 @@ marketplace actions already expose their own in-progress label and are unchanged
   is deliberately held before its response reaches the browser, THEN the
   desktop Install button is disabled and visibly spinning; after a controlled
   failure is released, the action recovers and the inline error remains visible.
-  **File:** `apps/web/e2e/tests/plugins/plugins.spec.ts`.
+  **Files:** `apps/web/e2e/helpers/plugin-install.ts` and
+  `apps/web/e2e/tests/plugins/plugins.spec.ts`.
 - **Scenario:** The same pending upload state remains reachable and visually
   understandable on the configured Pixel 5 project.
-  **File:** `apps/web/e2e/tests/plugins/mobile-plugin-nav.spec.ts`.
+  **File:** `apps/web/e2e/tests/plugins/mobile-plugin-nav.spec.ts`, using the
+  shared install-response helper.
 - **Focused commands:**
   - `cd apps && pnpm install --frozen-lockfile` (only if this worktree lacks dependencies)
   - `cd apps && pnpm --filter @kandev/web test -- --run app/settings/plugins/page.test.tsx`
@@ -106,6 +108,9 @@ marketplace actions already expose their own in-progress label and are unchanged
 - `git diff --check` — passed.
 - Interactive dev-browser validation confirmed `disabled`, `aria-busy="true"`, the animated spinner, and `Installing…` before the held response was released.
 - Managed screenshot capture passed and generated two fresh, compressed, secret-free assets in `.pr-assets/manifest.json` for desktop and Pixel 5 viewports; the disposable capture spec was removed afterward.
+- CodeRabbit's valid duplication finding was fixed by moving the held-install
+  route helper into `apps/web/e2e/helpers/plugin-install.ts`; both focused E2E
+  regressions passed again afterward.
 
 ## Implementation Waves And Parallel Candidates
 
