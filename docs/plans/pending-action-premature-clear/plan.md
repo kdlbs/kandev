@@ -66,13 +66,13 @@ matching the specific resolved request.
 Update `applyPendingMessageLocked` in
 `apps/backend/internal/task/statussummary/projector.go` so the terminal-status
 clear only fires when the triggering message is the request that armed
-`pending_action` for that session. The function already computes the right
-predicate for this — `isPendingMessage` (line ~702:
-`boolValue(data["requests_input"]) || messageType == "clarification_request"
-|| messageType == "permission_request"`) is exactly the condition used to
-*arm* the flag a few lines later (line ~720). The clear branch currently uses
-the broader `isTrackedMessage` (which also matches on bare `pending_id`
-metadata or any non-empty `status`) instead of reusing `isPendingMessage`:
+`pending_action` for that session. The projector records that request's
+normalized type and `pending_id` in a session-scoped `pendingRequests` map when
+the permission event or request message arms the action. The terminal/deletion
+branch must require both the request-shaped `isPendingMessage` predicate and an
+exact identity match before clearing. The current clear branch uses the
+broader `isTrackedMessage` (which also matches on bare `pending_id` metadata or
+any non-empty `status`) and has no request identity check:
 
 ```go
 // current (too broad):
@@ -80,32 +80,35 @@ if eventType == events.MessageDeleted || (status != "" && status != statusPendin
     return p.clearPendingLocked(state, sessionID)
 }
 
-// fix: also require this message to be the kind that can arm pending_action
-if isPendingMessage && (eventType == events.MessageDeleted || (status != "" && status != statusPending)) {
+// fix: require a request-shaped message and the identity that armed the action
+if isPendingMessage && state.pendingRequests[sessionID] == requestIdentity &&
+    (eventType == events.MessageDeleted || (status != "" && status != statusPending)) {
     return p.clearPendingLocked(state, sessionID)
 }
 ```
 
 Keep `isTrackedMessage` as-is for the early-return gate (`state.pendingObserved`
-bookkeeping still applies to any tracked message) — only the clear branch's
-condition changes. This makes arm and clear symmetric: whatever predicate can
-set `state.pending[sessionID]` is the same predicate required to clear it.
+bookkeeping still applies to any tracked message). Clear the stored identity
+alongside the action in `clearPendingLocked` and direct pending-action updates.
+This makes arm and clear symmetric: the same request type and `pending_id`
+that armed `state.pending[sessionID]` are required to clear it.
 Preserve existing behavior for:
 
-- `events.MessageDeleted` on the request row (still clears).
+- `events.MessageDeleted` on the matching request row (still clears).
 - The detached-but-answerable clarification case
   (`TestProjectorKeepsPendingWhenRequestStaysAnswerable`): a `status: "pending"`
   update must still keep the affordance armed.
+- A terminal update or deletion for a different request type or `pending_id`
+  must leave the armed request untouched.
 - Non-request tracked messages (bare `pending_id` metadata, or `requests_input`
   without a recognized request type) that were previously exercised by
   existing tests — keep their current arm/no-op behavior; only the
   clear branch's message-type gate changes.
 
-Do not change `applyPermissionEventLocked`, `clearPendingLocked`, the
-clarification-event branch in `applySourceEventLocked`
+Keep the clarification-event branch in `applySourceEventLocked`
 (`events.ClarificationAnswered` etc. already clear correctly since they carry
-their own session-scoped clear, independent of message type), or any other
-projector function.
+their own session-scoped clear, independent of message type) unchanged beyond
+removing the stored request identity when the shared clear helper runs.
 
 ## Tests
 
@@ -118,8 +121,10 @@ projector function.
   unrelated `events.MessageUpdated` (or `MessageAdded`) for a
   `tool_execute`-typed message on the same session with
   `metadata: {"status": "completed"}` and a *different* `pending_id`
-  (or none), and assert `PendingAction` is still armed. Then resolve the real
-  request row and assert it clears — reusing the existing
+  (or none), and assert `PendingAction` is still armed. Then resolve a
+  request-shaped row with a different `pending_id` and assert it remains
+  armed, before resolving the matching request row and asserting it clears —
+  reusing the existing
   `TestProjectorClearsPendingWhenRequestMessageResolves` table is the
   intended integration point (add a case, or a sibling test using the same
   `newProjectorTest`/`publishProjectorEvent`/`publishSessionState` helpers).

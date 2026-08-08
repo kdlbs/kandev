@@ -24,28 +24,26 @@ is the sidebar/kanban "shield icon flashes and disappears" bug.
 
 ## Acceptance
 
-- `applyPendingMessageLocked`'s terminal-status clear branch only fires when
-  the triggering message is itself a request that can arm `pending_action`
-  (i.e. gated by the same `isPendingMessage` predicate already used to arm the
-  flag: `requests_input` true, or `messageType` is `clarification_request` /
-  `permission_request`), for both the `status != "" && status != "pending"`
-  case and the `events.MessageDeleted` case.
+- `applyPendingMessageLocked`'s terminal-status or deletion clear branch only
+  fires when the triggering message is a request that can arm `pending_action`
+  and its normalized type plus `metadata.pending_id` exactly match the request
+  identity stored when the action was armed.
   See `docs/plans/pending-action-premature-clear/plan.md` for the exact
   before/after diff.
-- A new regression test proves an unrelated `tool_execute` message reaching
-  `status: "completed"` does not clear an armed `permission` (or
-  `clarification`) `pending_action` on the same session.
-- All existing tests in the package keep passing unmodified:
+- A regression test proves an unrelated `tool_execute` message reaching
+  `status: "completed"`, and a request-shaped message with a different
+  `pending_id`, do not clear an armed permission request; the matching request
+  still clears it.
+- All existing tests in the package keep passing:
   `TestProjectorClearsPendingWhenRequestMessageResolves` (the request's own
   resolution still clears — permission approved/expired/rejected,
   clarification answered/cancelled) and
   `TestProjectorKeepsPendingWhenRequestStaysAnswerable` (a `status: "pending"`
   update on a detached clarification still keeps it armed).
-- Do not change `applyPermissionEventLocked`, `clearPendingLocked`, or the
-  `events.ClarificationAnswered` / `ClarificationPrimaryAnswered` /
-  `ClarificationCancelled` / `ClarificationStaleDismissed` branch in
-  `applySourceEventLocked` — those already clear correctly and are out of
-  scope.
+- Keep the `events.ClarificationAnswered` /
+  `ClarificationPrimaryAnswered` / `ClarificationCancelled` /
+  `ClarificationStaleDismissed` branch in `applySourceEventLocked` unchanged;
+  the shared clear helper removes the stored identity as well as the action.
 
 ## Verification
 

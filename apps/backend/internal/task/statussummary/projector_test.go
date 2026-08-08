@@ -640,6 +640,7 @@ func TestProjectorClearsPendingWhenRequestMessageResolves(t *testing.T) {
 				publishProjectorEvent(t, eventBus, events.PermissionRequestReceived, events.BuildPermissionRequestSubject(sessionID), map[string]interface{}{
 					"task_id":    taskID,
 					"session_id": sessionID,
+					"pending_id": "pending-1",
 				})
 			},
 			wantArmed: "permission",
@@ -652,6 +653,7 @@ func TestProjectorClearsPendingWhenRequestMessageResolves(t *testing.T) {
 				publishProjectorEvent(t, eventBus, events.PermissionRequestReceived, events.BuildPermissionRequestSubject(sessionID), map[string]interface{}{
 					"task_id":    taskID,
 					"session_id": sessionID,
+					"pending_id": "pending-1",
 				})
 			},
 			wantArmed: "permission",
@@ -680,6 +682,7 @@ func TestProjectorClearsPendingWhenRequestMessageResolves(t *testing.T) {
 				publishProjectorEvent(t, eventBus, events.PermissionRequestReceived, events.BuildPermissionRequestSubject(sessionID), map[string]interface{}{
 					"task_id":    taskID,
 					"session_id": sessionID,
+					"pending_id": "pending-1",
 				})
 			},
 			wantArmed: "permission",
@@ -745,6 +748,7 @@ func TestProjectorKeepsPendingWhenUnrelatedMessageResolves(t *testing.T) {
 	publishProjectorEvent(t, eventBus, events.PermissionRequestReceived, events.BuildPermissionRequestSubject(sessionID), map[string]interface{}{
 		"task_id":    taskID,
 		"session_id": sessionID,
+		"pending_id": "permission-a",
 	})
 
 	publishProjectorEvent(t, eventBus, events.MessageUpdated, events.MessageUpdated, map[string]interface{}{
@@ -763,7 +767,31 @@ func TestProjectorKeepsPendingWhenUnrelatedMessageResolves(t *testing.T) {
 		"task_id":    taskID,
 		"session_id": sessionID,
 		"type":       "permission_request",
-		"metadata":   map[string]interface{}{"status": "approved", "pending_id": "permission-1"},
+		"metadata":   map[string]interface{}{"status": "expired", "pending_id": "permission-b"},
+	})
+
+	got = store.summary(taskID)
+	if got == nil || got.PendingAction != "permission" {
+		t.Fatalf("pending action after different request resolution = %+v, want permission", got)
+	}
+
+	publishProjectorEvent(t, eventBus, events.MessageDeleted, events.MessageDeleted, map[string]interface{}{
+		"task_id":    taskID,
+		"session_id": sessionID,
+		"type":       "permission_request",
+		"metadata":   map[string]interface{}{"pending_id": "permission-b"},
+	})
+
+	got = store.summary(taskID)
+	if got == nil || got.PendingAction != "permission" {
+		t.Fatalf("pending action after deleting a different request = %+v, want permission", got)
+	}
+
+	publishProjectorEvent(t, eventBus, events.MessageUpdated, events.MessageUpdated, map[string]interface{}{
+		"task_id":    taskID,
+		"session_id": sessionID,
+		"type":       "permission_request",
+		"metadata":   map[string]interface{}{"status": "approved", "pending_id": "permission-a"},
 	})
 
 	got = store.summary(taskID)
