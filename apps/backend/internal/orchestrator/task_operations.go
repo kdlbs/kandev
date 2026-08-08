@@ -3909,7 +3909,7 @@ func (s *Service) handlePromptError(ctx context.Context, taskID, sessionID strin
 	// (session → WAITING_FOR_INPUT, task → REVIEW, cancel message, complete
 	// turn); skip the REVIEW write here so we don't race that path with a
 	// duplicate update.
-	// A transient provider error (529 Overloaded) is owned by the async
+	// A short transient provider error is owned by the async
 	// retry-with-backoff path (handleTransientFailure), which keeps the task
 	// in progress while it retries — so don't flap it to REVIEW here.
 	if !isTransientPromptError(err) && !errors.Is(err, lifecycle.ErrCancelEscalated) &&

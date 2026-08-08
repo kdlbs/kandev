@@ -7,6 +7,9 @@ const (
 	// ProviderErrorSourceOpenCodeACP marks a provider diagnostic projected
 	// from a structured ACP service-failure response.
 	ProviderErrorSourceOpenCodeACP = "opencode_acp"
+	// ProviderErrorSourceCodexACP marks a safe diagnostic reconstructed from
+	// Codex ACP metadata and its matching capacity message.
+	ProviderErrorSourceCodexACP = "codex_acp"
 )
 
 // ProviderError is the bounded, sanitized provider diagnostic that may cross
