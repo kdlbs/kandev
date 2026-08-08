@@ -224,11 +224,11 @@ at render, or make the value a component. `check-module-scope-t.mjs` enforces it
 **error**), but **only on the `i18nGuardFiles` allowlist** in
 `eslint.i18n.options.mjs`, which covers every area the migration touched. It
 stays an allowlist because a repo-wide error breaks every unrelated PR that adds
-a label — what made the first attempt unmergeable. **When you add a path that
-renders user-facing copy, append it in the same PR.** Never delete an entry to
-make a build pass; `check-guard-allowlist.mjs` rejects that unless the file is
-gone. Use `pnpm run lint:i18n <path>` to preview the guard on a path not yet on
-the list.
+a label — what made the first attempt unmergeable. **Append a path in the same PR
+that adds it or externalizes it** (`lib/sidebar` is one still off the list).
+Never delete an entry to make a build pass; `check-guard-allowlist.mjs` rejects
+that unless the file is gone. Use `pnpm run lint:i18n <path>` to preview the
+guard on a path not yet on the list.
 
 Separately, `pnpm run i18n:ratchet` (pre-commit + CI) guards **new code
 everywhere**, regardless of the allowlist: a file you added must be clean outright,

@@ -54,9 +54,9 @@ const eslintConfig = defineConfig([
   // Hardcoded user-facing strings. An ERROR, but only on the allowlist in
   // eslint.i18n.options.mjs — the paths that render user-facing copy, which is
   // where a regression is real. A repo-wide error would break every unrelated PR
-  // that lands a literal; a warning would let listed paths drift back. The
-  // migration is done, so a PR appends to `i18nGuardFiles` when it adds such a
-  // path, not as it externalizes an old one.
+  // that lands a literal; a warning would let listed paths drift back. A PR
+  // appends to `i18nGuardFiles` when it adds such a path or externalizes one
+  // still off the list — `lib/sidebar` is one the screen sweep did not cover.
   {
     files: i18nGuardFiles,
     // Test files build fixtures out of literal strings on purpose; guarding them
