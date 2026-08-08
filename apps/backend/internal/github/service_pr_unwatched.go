@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/kandev/kandev/internal/events"
+	"github.com/kandev/kandev/internal/events/bus"
 	"go.uber.org/zap"
 )
 
@@ -55,10 +57,15 @@ func taskPRNeedsUnwatchedSync(tp *TaskPR, now time.Time) bool {
 	return tp.LastSyncedAt == nil || now.Sub(*tp.LastSyncedAt) >= PRSyncFreshnessWindow
 }
 
-// syncUnwatchedTaskPRs refreshes the supplied unwatched rows, one batched
+// syncUnwatchedTaskPRs reconciles the supplied unwatched rows, one batched
 // query per workspace. Best-effort: every failure is logged at Debug and
 // leaves the row for the next attempt, matching the surrounding
 // reconciliation paths — a dead repo must not fail the caller's sync.
+//
+// Only lifecycle fields are written (see reconcileTaskPRLifecycle). Check and
+// review aggregates deliberately stay untouched: they belong to the active,
+// watch-covered PR, and a row nobody watches only needs to learn that it
+// reached a terminal state.
 //
 // fallbackWorkspaceID covers legacy rows written before task_prs carried
 // workspace ownership; rows with neither are skipped because there is no
@@ -89,26 +96,62 @@ func (s *Service) syncUnwatchedTaskPRGroup(ctx context.Context, workspaceID stri
 			zap.String("workspace_id", workspaceID), zap.Error(err))
 		return
 	}
-	statuses := s.fetchUnwatchedTaskPRStatuses(ctx, resolved, group)
+	live := s.fetchUnwatchedTaskPRs(ctx, resolved, group)
 	for _, tp := range group {
-		status := statuses[prStatusCacheKey(tp.Owner, tp.Repo, tp.PRNumber)]
-		if status == nil || status.PR == nil {
+		pr := live[prStatusCacheKey(tp.Owner, tp.Repo, tp.PRNumber)]
+		if pr == nil {
 			continue
 		}
-		if syncErr := s.SyncTaskPR(ctx, tp.TaskID, status); syncErr != nil {
-			s.logger.Debug("unwatched task PR sync failed",
+		if syncErr := s.reconcileTaskPRLifecycle(ctx, tp, pr); syncErr != nil {
+			s.logger.Debug("unwatched task PR reconcile failed",
 				zap.String("task_id", tp.TaskID), zap.Int("pr_number", tp.PRNumber), zap.Error(syncErr))
 		}
 	}
 }
 
-// fetchUnwatchedTaskPRStatuses prefers the batched GraphQL query — one call
-// for the whole group — and falls back to per-PR status fetches when the
-// client can't speak GraphQL (NoopClient) or the batch itself fails. Same
-// batched-then-per-item shape as runBatchedOrPerWatchSync.
-func (s *Service) fetchUnwatchedTaskPRStatuses(
+// reconcileTaskPRLifecycle writes only the fields that describe where the PR
+// sits in its lifecycle, then publishes the same update event SyncTaskPR does
+// so every client converges.
+//
+// Everything else on the row is left alone on purpose. The aggregates
+// (checks_state, checks_total/passing, review_state, review counts, unresolved
+// threads, mergeable_state) are owned by the watch-driven sync, which fetches
+// the reviews and check runs needed to compute them. Writing them from here
+// would mean either re-fetching all of that for a PR nobody is working on, or
+// — worse — persisting a less-informed answer over a better one: the per-PR
+// REST status sets ChecksPopulated/ReviewCountsPopulated with zeroed counts
+// when it has nothing to count, which SyncTaskPR then faithfully stores.
+func (s *Service) reconcileTaskPRLifecycle(ctx context.Context, tp *TaskPR, pr *PR) error {
+	changed := tp.State != pr.State ||
+		!timeEqual(tp.MergedAt, pr.MergedAt) ||
+		!timeEqual(tp.ClosedAt, pr.ClosedAt)
+
+	tp.State = pr.State
+	tp.MergedAt = pr.MergedAt
+	tp.ClosedAt = pr.ClosedAt
+	now := time.Now().UTC()
+	tp.LastSyncedAt = &now
+
+	if err := s.store.UpdateTaskPR(ctx, tp); err != nil {
+		return fmt.Errorf("update task PR: %w", err)
+	}
+	if changed && s.eventBus != nil {
+		event := bus.NewEvent(events.GitHubTaskPRUpdated, "github", tp)
+		if err := s.eventBus.Publish(ctx, events.GitHubTaskPRUpdated, event); err != nil {
+			s.logger.Debug("failed to publish task PR updated event", zap.Error(err))
+		}
+	}
+	return nil
+}
+
+// fetchUnwatchedTaskPRs prefers the batched GraphQL query — one call for the
+// whole group — and falls back to per-PR reads when the client can't speak
+// GraphQL (NoopClient) or the batch itself fails. Same batched-then-per-item
+// shape as runBatchedOrPerWatchSync. Returns the live PRs keyed by
+// prStatusCacheKey.
+func (s *Service) fetchUnwatchedTaskPRs(
 	ctx context.Context, resolved *resolvedServiceClient, group []*TaskPR,
-) map[string]*PRStatus {
+) map[string]*PR {
 	refs := make([]graphQLPRRef, 0, len(group))
 	for _, tp := range group {
 		// The repo is in the 10-min negative cache; probing it would only
@@ -128,27 +171,40 @@ func (s *Service) fetchUnwatchedTaskPRStatuses(
 		out, err := runBatchedPRQuery(ctx, exec, refs)
 		out, err = s.absorbMissingReposErr(out, err, resolved.CacheScope, repoErrGen)
 		if err == nil {
-			return out
+			return prsFromStatuses(out)
 		}
 		s.logger.Debug("batched unwatched task PR query failed; falling back per PR", zap.Error(err))
 	}
-	return s.fetchUnwatchedTaskPRStatusesPerPR(ctx, resolved, refs)
+	return s.fetchUnwatchedTaskPRsPerPR(ctx, resolved, refs)
 }
 
-func (s *Service) fetchUnwatchedTaskPRStatusesPerPR(
+func prsFromStatuses(statuses map[string]*PRStatus) map[string]*PR {
+	out := make(map[string]*PR, len(statuses))
+	for key, status := range statuses {
+		if status != nil && status.PR != nil {
+			out[key] = status.PR
+		}
+	}
+	return out
+}
+
+// fetchUnwatchedTaskPRsPerPR reads one PR at a time. GetPR is deliberate: the
+// full status helper also lists reviews and check runs (three calls per PR) to
+// compute aggregates this path does not write.
+func (s *Service) fetchUnwatchedTaskPRsPerPR(
 	ctx context.Context, resolved *resolvedServiceClient, refs []graphQLPRRef,
-) map[string]*PRStatus {
-	out := make(map[string]*PRStatus, len(refs))
+) map[string]*PR {
+	out := make(map[string]*PR, len(refs))
 	for _, ref := range refs {
-		status, err := s.getPRStatus(ctx, resolved.Client, resolved.CacheScope, ref.Owner, ref.Repo, ref.Number)
+		pr, err := resolved.Client.GetPR(ctx, ref.Owner, ref.Repo, ref.Number)
 		if err != nil {
-			s.logger.Debug("per-PR unwatched task PR status fetch failed",
+			s.logger.Debug("per-PR unwatched task PR read failed",
 				zap.String("owner", ref.Owner), zap.String("repo", ref.Repo),
 				zap.Int("pr_number", ref.Number), zap.Error(err))
 			continue
 		}
-		if status != nil {
-			out[prStatusCacheKey(ref.Owner, ref.Repo, ref.Number)] = status
+		if pr != nil {
+			out[prStatusCacheKey(ref.Owner, ref.Repo, ref.Number)] = pr
 		}
 	}
 	return out
