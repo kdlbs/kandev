@@ -74,6 +74,12 @@ var (
 	// (initial materialization). The manager treats it as a skip, not a
 	// failure — the launch's environment persistence records the worktree.
 	ErrEnvironmentNotResolved = errors.New("session has no task environment")
+
+	// ErrTaskCleanupInProgress is returned by the store when the owning
+	// task has an active lifecycle cleanup barrier. The caller compensates
+	// the just-created physical worktree instead of admitting it after
+	// cleanup inventory was captured.
+	ErrTaskCleanupInProgress = errors.New("task cleanup in progress")
 )
 
 // containsAuthFailure checks if git output indicates an authentication failure.

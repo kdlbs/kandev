@@ -8,6 +8,9 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
+
+	"github.com/kandev/kandev/internal/db/dialect"
+	"github.com/kandev/kandev/internal/task/models"
 )
 
 // SQLiteStore implements Store interface using SQLite.
@@ -125,6 +128,11 @@ func (s *SQLiteStore) resolveEnvironmentID(ctx context.Context, sessionID string
 // CreateWorktree persists a worktree record under the session's task
 // environment. The environment-repository row is the only physical-worktree
 // record; multiple sessions sharing the environment observe the same rows.
+//
+// The insert serializes against the task cleanup barrier: PostgreSQL locks
+// the owning task row and SQLite serializes the writer transaction, so a
+// worktree admitted after archive/delete inventory capture is rejected with
+// ErrTaskCleanupInProgress and the caller compensates the physical directory.
 func (s *SQLiteStore) CreateWorktree(ctx context.Context, wt *Worktree) error {
 	if wt.ID == "" {
 		wt.ID = uuid.New().String()
@@ -151,7 +159,22 @@ func (s *SQLiteStore) CreateWorktree(ctx context.Context, wt *Worktree) error {
 	}
 	wt.TaskEnvironmentID = envID
 
-	_, err = s.db.ExecContext(ctx, s.db.Rebind(`
+	tx, err := s.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	var taskID string
+	if err := tx.QueryRowContext(ctx, s.db.Rebind(`
+		SELECT task_id FROM task_environments WHERE id = ?`), envID).Scan(&taskID); err != nil {
+		return fmt.Errorf("resolve worktree owner %s: %w", envID, err)
+	}
+	if err := s.checkTaskCleanupBarrierLocked(ctx, tx, taskID); err != nil {
+		return err
+	}
+
+	_, err = tx.ExecContext(ctx, s.db.Rebind(`
 		INSERT INTO task_environment_repos (
 			id, task_environment_id, repository_id, branch_slug,
 			worktree_id, worktree_path, worktree_branch, position,
@@ -169,8 +192,42 @@ func (s *SQLiteStore) CreateWorktree(ctx context.Context, wt *Worktree) error {
 		wt.ID, wt.Path, wt.Branch, 0,
 		"", wt.Status,
 		wt.CreatedAt, wt.UpdatedAt, wt.MergedAt, wt.DeletedAt)
+	if err != nil {
+		return err
+	}
+	return tx.Commit()
+}
 
-	return err
+// checkTaskCleanupBarrierLocked rejects the persistence when a task lifecycle
+// cleanup barrier is active for the owning task. PostgreSQL serializes through
+// a row lock on the task; SQLite's single-writer transaction is the lock.
+func (s *SQLiteStore) checkTaskCleanupBarrierLocked(ctx context.Context, tx *sqlx.Tx, taskID string) error {
+	if dialect.IsPostgres(s.db.DriverName()) {
+		var lockedTaskID string
+		if err := tx.QueryRowContext(ctx, s.db.Rebind(
+			`SELECT id FROM tasks WHERE id = ? FOR UPDATE`,
+		), taskID).Scan(&lockedTaskID); err != nil {
+			return fmt.Errorf("lock task for creation barrier: %w", err)
+		}
+	}
+	var active bool
+	if err := tx.QueryRowContext(ctx, s.db.Rebind(`
+		SELECT EXISTS (
+			SELECT 1 FROM task_resource_cleanup_jobs
+			WHERE task_id = ? AND state IN (?, ?, ?, ?)
+		)
+	`), taskID,
+		models.TaskResourceCleanupStatePrepared,
+		models.TaskResourceCleanupStatePending,
+		models.TaskResourceCleanupStateRunning,
+		models.TaskResourceCleanupStateRetryWait,
+	).Scan(&active); err != nil {
+		return fmt.Errorf("check task cleanup barrier: %w", err)
+	}
+	if active {
+		return fmt.Errorf("%w: %s", ErrTaskCleanupInProgress, taskID)
+	}
+	return nil
 }
 
 // GetWorktreeByID retrieves a worktree by its unique ID.

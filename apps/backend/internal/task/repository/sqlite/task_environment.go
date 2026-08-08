@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jmoiron/sqlx"
 
 	"github.com/kandev/kandev/internal/task/models"
 )
@@ -28,11 +29,17 @@ func (r *Repository) CreateTaskEnvironment(ctx context.Context, env *models.Task
 	env.CreatedAt = now
 	env.UpdatedAt = now
 
-	tx, err := r.db.BeginTx(ctx, nil)
+	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
+
+	// Serialize environment creation against the task cleanup barrier so a
+	// worktree admitted after inventory capture cannot be missed.
+	if err := r.taskCleanupBarrierLocked(ctx, tx, env.TaskID); err != nil {
+		return err
+	}
 
 	if _, err := tx.ExecContext(ctx, r.db.Rebind(`
 		INSERT INTO task_environments (
@@ -211,7 +218,9 @@ func (r *Repository) DeleteTaskEnvironmentsByTask(ctx context.Context, taskID st
 	return err
 }
 
-// CreateTaskEnvironmentRepo inserts a single per-repo environment row.
+// CreateTaskEnvironmentRepo inserts a single per-repo environment row. The
+// owning task is resolved through the environment and serialized against the
+// task cleanup barrier before the insert commits.
 func (r *Repository) CreateTaskEnvironmentRepo(ctx context.Context, repo *models.TaskEnvironmentRepo) error {
 	if repo.TaskEnvironmentID == "" {
 		return fmt.Errorf("task_environment_id is required")
@@ -219,6 +228,21 @@ func (r *Repository) CreateTaskEnvironmentRepo(ctx context.Context, repo *models
 	if repo.RepositoryID == "" {
 		return fmt.Errorf("repository_id is required")
 	}
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	var taskID string
+	if err := tx.QueryRowContext(ctx, r.db.Rebind(`
+		SELECT task_id FROM task_environments WHERE id = ?`), repo.TaskEnvironmentID).Scan(&taskID); err != nil {
+		return fmt.Errorf("resolve environment owner %s: %w", repo.TaskEnvironmentID, err)
+	}
+	if err := r.taskCleanupBarrierLocked(ctx, tx, taskID); err != nil {
+		return err
+	}
+
 	if repo.ID == "" {
 		repo.ID = uuid.New().String()
 	}
@@ -229,7 +253,7 @@ func (r *Repository) CreateTaskEnvironmentRepo(ctx context.Context, repo *models
 		repo.Status = worktreeRepoStatusActive
 	}
 
-	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
+	if _, err := tx.ExecContext(ctx, r.db.Rebind(`
 		INSERT INTO task_environment_repos (
 			id, task_environment_id, repository_id, branch_slug,
 			worktree_id, worktree_path, worktree_branch,
@@ -239,12 +263,14 @@ func (r *Repository) CreateTaskEnvironmentRepo(ctx context.Context, repo *models
 		repo.ID, repo.TaskEnvironmentID, repo.RepositoryID, repo.BranchSlug,
 		repo.WorktreeID, repo.WorktreePath, repo.WorktreeBranch,
 		repo.Position, repo.ErrorMessage, repo.Status, repo.CreatedAt, repo.UpdatedAt,
-	)
-	return err
+	); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // insertTaskEnvironmentRepoTx is the in-transaction variant of CreateTaskEnvironmentRepo.
-func (r *Repository) insertTaskEnvironmentRepoTx(ctx context.Context, tx *sql.Tx, repo *models.TaskEnvironmentRepo) error {
+func (r *Repository) insertTaskEnvironmentRepoTx(ctx context.Context, tx *sqlx.Tx, repo *models.TaskEnvironmentRepo) error {
 	if repo.RepositoryID == "" {
 		return fmt.Errorf("repository_id is required")
 	}

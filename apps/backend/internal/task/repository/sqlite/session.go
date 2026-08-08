@@ -213,7 +213,22 @@ const taskSessionFromClause = `FROM task_sessions ts
 
 // CreateTaskSession creates a new agent session
 func (r *Repository) CreateTaskSession(ctx context.Context, session *models.TaskSession) error {
-	return r.createTaskSession(ctx, r.db, session)
+	// The task cleanup barrier serializes session creation against archive/
+	// delete preparation (ADR-2026-08-08): PostgreSQL takes a row lock on the
+	// task, SQLite serializes the writer transaction. A creation admitted
+	// after cleanup inventory was captured would be missed by the snapshot.
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := r.taskCleanupBarrierLocked(ctx, tx, session.TaskID); err != nil {
+		return err
+	}
+	if err := r.createTaskSession(ctx, tx, session); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // CreateOfficeTaskSession creates an Office session and atomically marks it as

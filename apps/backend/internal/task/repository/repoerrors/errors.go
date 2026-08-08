@@ -20,3 +20,9 @@ var ErrRepositoryNotFound = errors.New("repository not found")
 
 // ErrTaskEnvironmentNotFound reports that no task environment row matched the supplied id.
 var ErrTaskEnvironmentNotFound = errors.New("task environment not found")
+
+// ErrTaskCleanupInProgress reports that a task lifecycle cleanup barrier is
+// active, so new sessions or physical worktrees cannot be admitted for the
+// task. Creation races resolve by rejecting the late comer; the cleanup
+// inventory was captured under the same barrier.
+var ErrTaskCleanupInProgress = errors.New("task cleanup in progress")

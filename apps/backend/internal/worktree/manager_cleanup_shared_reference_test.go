@@ -212,3 +212,51 @@ func assertWorktreeReferenceStatus(t *testing.T, store *SQLiteStore, worktreeID,
 		t.Fatalf("worktree status = %q, want %q", got, want)
 	}
 }
+
+// TestCreateWorktree_RejectedByTaskCleanupBarrier proves the worktree store
+// refuses to admit a physical worktree once the owning task's lifecycle
+// cleanup barrier is active, and that the manager compensates by removing the
+// just-created directory.
+func TestCreateWorktree_RejectedByTaskCleanupBarrier(t *testing.T) {
+	mgr, store := newReferenceCleanupTestManager(t)
+	ctx := context.Background()
+	seedReferenceCleanupSession(t, store, "task-barrier", "session-barrier", models.TaskSessionStateRunning)
+
+	// First creation succeeds and leaves a live directory behind.
+	first := createReferenceCleanupWorktree(t, mgr, "task-barrier", "session-barrier")
+	if _, err := os.Stat(first.Path); err != nil {
+		t.Fatalf("first worktree dir missing: %v", err)
+	}
+
+	// Archive preparation reserves its barrier before inventory capture.
+	if _, err := store.db.ExecContext(ctx, `
+		INSERT INTO task_resource_cleanup_jobs (
+			id, operation_id, task_id, trigger, state, resource_snapshot, attempts, created_at, updated_at
+		) VALUES ('barrier-job', 'op-barrier', 'task-barrier', 'archive', 'prepared', '{}', 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+	`); err != nil {
+		t.Fatalf("reserve barrier: %v", err)
+	}
+
+	// A second materialization must be rejected: the physical directory the
+	// manager just created is compensated away.
+	second, err := mgr.Create(ctx, CreateRequest{
+		TaskID:         "task-barrier",
+		SessionID:      "session-barrier",
+		TaskTitle:      "Barrier",
+		RepositoryID:   "repository",
+		RepositoryPath: initGitRepoWithRemote(t),
+		BaseBranch:     "main",
+		TaskDirName:    "task-barrier",
+		RepoName:       "repository",
+		BranchSlug:     "second",
+	})
+	if err == nil {
+		t.Fatalf("expected barrier rejection, got worktree %s", second.ID)
+	}
+	if !strings.Contains(err.Error(), "task cleanup in progress") {
+		t.Fatalf("error = %v, want task cleanup barrier rejection", err)
+	}
+	if _, statErr := os.Stat(first.Path); statErr != nil {
+		t.Fatalf("pre-existing worktree dir must survive compensation: %v", statErr)
+	}
+}
