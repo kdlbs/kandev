@@ -17,7 +17,11 @@ Review feedback on agent-written code only reaches a Kandev user after they push
 - Findings render as inline annotations in the existing Changes/Review diff, at their anchored line, using the same annotation surface as anchored review comments.
 - Findings are **advisory**. For each finding the human can **Resolve** it, **Dismiss** it, or **Send to agent** — which turns the finding into ordinary agent context and sends it to the active session. Kandev SHALL NOT apply, stage, or commit a fix on its own.
 - A review pass SHALL be triggerable two ways: on demand from the Review/Changes surface, and as a workflow-step entry action so a review sits between an implement step and a human review step.
-- The reviewing agent and model are configurable independently of the agent that wrote the code. The on-demand path uses the built-in `code-review` utility agent; the workflow-step path can additionally name an agent profile whose agent and model are used instead.
+- The reviewing runtime is configurable independently of the agent that wrote the code. The
+  on-demand path uses the effective profile selected by the built-in `code-review` utility agent;
+  the workflow-step path can additionally name an agent profile directly. Both paths use the
+  profile's complete launch and permission configuration as defined by
+  [Profile-backed Utility Agents](../agents/utility-agent-profiles.md).
 - For a multi-repository task, findings carry their repository and are grouped per repository exactly like the rest of the Changes panel.
 - When the diff moves under a finding, the finding SHALL become **stale** rather than being dropped or rendered against unrelated code. Staleness reuses the per-file diff-hash mechanism that already drives review-mark staleness.
 - An agent with task MCP SHALL be able to publish findings directly, so a full agent session (workflow step, or a user prompt) can produce the same findings as the built-in pass.
@@ -144,8 +148,8 @@ A finding: `open` → `resolved` (user resolves) or `dismissed` (user dismisses)
 
 | Condition | Behavior |
 |---|---|
-| No inference-capable agent, or the resolved profile is CLI-passthrough-only | The run fails immediately with `review_agent_unavailable`. The Review surface shows an inline message naming **Settings → Utility Agents** and does not retry. No findings are written. |
-| Resolved agent has no usable model | Same as above; the error names the missing model. |
+| No effective utility profile, or the resolved profile is missing, disabled, non-inference-capable, or CLI-passthrough-only | The run fails immediately with `review_agent_unavailable`. The Review surface shows an inline message naming **Settings → Utility Agents** and does not retry. No findings are written. |
+| Resolved profile has no usable model | Same as above; the error names the profile and missing model. |
 | Task workspace not materialized, or agentctl unreachable | The run fails with `review_workspace_unavailable`. Existing findings are untouched. |
 | Task has no changed files | `task.review.run` returns `review_no_changes` without creating a run. |
 | Reviewer returns text that contains no parseable findings block | The run fails with `review_unparseable_response`, and the raw response is retained on the run's `error_message` (truncated) for debugging. No findings are written. |
@@ -168,7 +172,9 @@ Derived staleness is not persisted. A finding's `file_diff_hash` and `anchor_tex
 - **GIVEN** a multi-repository task with findings in `frontend` and `backend`, **WHEN** the Review panel renders, **THEN** each finding renders only inside its own repository's file, and the findings overview groups them under per-repository headings.
 - **GIVEN** an open finding whose file diff has changed since the run, **WHEN** the Review panel renders, **THEN** the finding is shown as stale in that file's section and is not rendered against the file's current line 42.
 - **GIVEN** a workflow step configured with the `run_code_review` entry action and an agent profile whose model differs from the implementing step's, **WHEN** a task moves into that step, **THEN** a run with `trigger = workflow_step` starts using that profile's agent and model, and the resulting findings are visible in the task's Review panel.
-- **GIVEN** a workspace with no inference-capable agent configured, **WHEN** the user selects **Review changes**, **THEN** no run is created and the surface shows an actionable message pointing at Settings → Utility Agents.
+- **GIVEN** a workspace with no effective utility profile configured, **WHEN** the user selects
+  **Review changes**, **THEN** no run is created and the surface shows an actionable message
+  pointing at Settings → Utility Agents.
 - **GIVEN** a task whose only agent profile is CLI-passthrough, **WHEN** a `run_code_review` step is entered, **THEN** the run fails with `review_agent_unavailable` and the task still enters the step.
 - **GIVEN** an agent session with task MCP, **WHEN** it calls `publish_review_findings_kandev` with two valid findings, **THEN** a `completed` run with `trigger = agent` is stored and both findings appear in the Review panel without a page reload.
 - **GIVEN** an agent calls `publish_review_findings_kandev` with one finding missing `file`, **WHEN** the call is handled, **THEN** it returns an error, and no run or finding is stored.

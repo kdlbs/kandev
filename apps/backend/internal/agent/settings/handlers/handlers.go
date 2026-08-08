@@ -19,6 +19,8 @@ import (
 	"go.uber.org/zap"
 )
 
+const queryTrue = "true"
+
 var availableAgentsBroadcastTimeout = 10 * time.Second
 
 type Handlers struct {
@@ -580,6 +582,7 @@ func (h *Handlers) httpUpdateProfile(c *gin.Context) {
 		CLIFlags:       body.CLIFlags,
 		EnvVars:        body.EnvVars,
 		CommandPrefix:  body.CommandPrefix,
+		Force:          c.Query("force") == queryTrue,
 	})
 	if err != nil {
 		if err == controller.ErrAgentProfileNotFound {
@@ -588,6 +591,11 @@ func (h *Handlers) httpUpdateProfile(c *gin.Context) {
 		}
 		if errors.Is(err, controller.ErrInvalidProfileEnvVars) || errors.Is(err, controller.ErrInvalidCommandPrefix) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		var inUseErr *controller.ErrProfileInUseDetail
+		if errors.As(err, &inUseErr) {
+			c.JSON(http.StatusConflict, gin.H{"error": "agent profile is in use", "utility_agents": inUseErr.UtilityAgents})
 			return
 		}
 		h.logger.Error("failed to update profile", zap.Error(err))
@@ -619,6 +627,7 @@ func (h *Handlers) httpDeleteProfile(c *gin.Context) {
 				"watchers":        inUseErr.Watchers,
 				"routing_tiers":   inUseErr.RoutingTiers,
 				"automations":     inUseErr.Automations,
+				"utility_agents":  inUseErr.UtilityAgents,
 			})
 			return
 		}

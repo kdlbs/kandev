@@ -38,6 +38,7 @@ import (
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	taskservice "github.com/kandev/kandev/internal/task/service"
 	userservice "github.com/kandev/kandev/internal/user/service"
+	utilityservice "github.com/kandev/kandev/internal/utility/service"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 	workflowservice "github.com/kandev/kandev/internal/workflow/service"
 )
@@ -567,6 +568,25 @@ func (a *profileLookupAdapter) LookupProfile(ctx context.Context, profileID stri
 // types into it.
 type automationDepsAdapter struct {
 	store *automationpkg.Store
+}
+
+type utilityDepsAdapter struct{ svc *utilityservice.Service }
+
+func (a *utilityDepsAdapter) ListUtilityAgentsByAgentProfile(ctx context.Context, profileID string) ([]agentsettingscontroller.UtilityAgentReference, error) {
+	if a == nil || a.svc == nil {
+		return nil, nil
+	}
+	agents, err := a.svc.ListAgents(ctx)
+	if err != nil {
+		return nil, err
+	}
+	refs := make([]agentsettingscontroller.UtilityAgentReference, 0)
+	for _, agent := range agents {
+		if agent != nil && agent.AgentProfileID == profileID {
+			refs = append(refs, agentsettingscontroller.UtilityAgentReference{ID: agent.ID, Name: agent.Name})
+		}
+	}
+	return refs, nil
 }
 
 func (a *automationDepsAdapter) ListEnabledAutomationsByAgentProfile(

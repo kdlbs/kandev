@@ -1,25 +1,19 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import { useEffect, useState } from "react";
 import { Trans, useTranslation } from "react-i18next";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@kandev/ui/dialog";
 import { Button } from "@kandev/ui/button";
 import { Input } from "@kandev/ui/input";
 import { Label } from "@kandev/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
-import { ModelCombobox } from "@/components/settings/model-combobox";
 import {
   type UtilityAgent,
   createUtilityAgent,
   updateUtilityAgent,
   getTemplateVariables,
-  listInferenceAgents,
-  type TemplateVariable,
-  type InferenceAgent,
-  type InferenceModel,
 } from "@/lib/api/domains/utility-api";
-import { InferenceAgentStatusNote } from "./inference-agent-status";
-import { useInferenceAgents } from "./use-inference-agents";
+import { useAppStore } from "@/components/state-provider";
 import { ScriptEditor } from "./profile-edit/script-editor";
 import type { ScriptPlaceholder } from "./profile-edit/script-editor-completions";
 
@@ -29,278 +23,163 @@ type Props = {
   agent: UtilityAgent | null;
   onSuccess: () => void;
 };
-
-type FormState = {
-  name: string;
-  description: string;
-  prompt: string;
-  agent_id: string;
-  model: string;
-};
-
-/** Opening delimiter of the prompt-template placeholder syntax, typed verbatim. */
+type FormState = { name: string; description: string; prompt: string; profile_id: string };
 const PROMPT_VARIABLE_SIGIL = "{{";
+const defaultFormState: FormState = { name: "", description: "", prompt: "", profile_id: "" };
 
-const defaultFormState: FormState = {
-  name: "",
-  description: "",
-  prompt: "",
-  agent_id: "claude-acp",
-  model: "",
-};
-
-function toScriptPlaceholders(variables: TemplateVariable[]): ScriptPlaceholder[] {
-  return variables.map((v) => ({
-    key: v.name,
-    description: v.description,
-    example: v.example,
+function toScriptPlaceholders(
+  variables: { name: string; description: string; example: string }[],
+): ScriptPlaceholder[] {
+  return variables.map((variable) => ({
+    key: variable.name,
+    description: variable.description,
+    example: variable.example,
     executor_types: [],
   }));
 }
 
-type AgentModelSelectProps = {
-  agentId: string;
-  model: string;
-  inferenceAgents: InferenceAgent[];
-  selectedAgent: InferenceAgent | undefined;
-  availableModels: InferenceModel[];
-  onAgentChange: (agentId: string) => void;
-  onModelChange: (model: string) => void;
-  onRefresh: () => Promise<unknown> | void;
-};
-
-function AgentModelSelect({
-  agentId,
-  model,
-  inferenceAgents,
-  selectedAgent,
-  availableModels,
-  onAgentChange,
-  onModelChange,
-  onRefresh,
-}: AgentModelSelectProps) {
-  const { t } = useTranslation();
-  return (
-    <div className="space-y-2">
-      <div className="grid grid-cols-2 gap-4">
-        <div className="space-y-2">
-          <Label>{t("settings:agent")}</Label>
-          <Select value={agentId} onValueChange={onAgentChange}>
-            <SelectTrigger className="cursor-pointer">
-              <SelectValue placeholder={t("settings:utilitySelectAgent")} />
-            </SelectTrigger>
-            <SelectContent>
-              {inferenceAgents.map((ia) => (
-                <SelectItem key={ia.id} value={ia.id}>
-                  {ia.display_name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-        <div className="space-y-2">
-          <Label>{t("settings:model")}</Label>
-          <ModelCombobox
-            value={model}
-            onChange={onModelChange}
-            models={availableModels}
-            currentModelId={availableModels.find((m) => m.is_default)?.id}
-            placeholder={t("settings:utilitySelectModel")}
-            disabled={availableModels.length === 0}
-          />
-        </div>
-      </div>
-      <InferenceAgentStatusNote
-        agent={selectedAgent}
-        fallbackName={agentId}
-        onRefresh={onRefresh}
-      />
-    </div>
-  );
-}
-
-type UtilityAgentFormProps = {
-  form: FormState;
-  setForm: React.Dispatch<React.SetStateAction<FormState>>;
-  isBuiltin: boolean;
-  inferenceAgents: InferenceAgent[];
-  selectedAgent: InferenceAgent | undefined;
-  availableModels: InferenceModel[];
-  placeholders: ScriptPlaceholder[];
-  onRefreshAgent: () => Promise<unknown> | void;
-};
-
-function UtilityAgentForm({
-  form,
-  setForm,
-  isBuiltin,
-  inferenceAgents,
-  selectedAgent,
-  availableModels,
-  placeholders,
-  onRefreshAgent,
-}: UtilityAgentFormProps) {
-  const { t } = useTranslation();
-  return (
-    <div className="space-y-4 py-4">
-      <div className="space-y-2">
-        <Label htmlFor="name">{t("settings:name")}</Label>
-        <Input
-          id="name"
-          value={form.name}
-          onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
-          placeholder={t("settings:utilityAgentNamePlaceholder")}
-          disabled={isBuiltin}
-        />
-      </div>
-      <div className="space-y-2">
-        <Label htmlFor="description">{t("settings:utilityAgentDescriptionLabel")}</Label>
-        <Input
-          id="description"
-          value={form.description}
-          onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))}
-          placeholder={t("settings:utilityAgentDescriptionPlaceholder")}
-        />
-      </div>
-      <AgentModelSelect
-        agentId={form.agent_id}
-        model={form.model}
-        inferenceAgents={inferenceAgents}
-        selectedAgent={selectedAgent}
-        availableModels={availableModels}
-        onAgentChange={(v) => setForm((f) => ({ ...f, agent_id: v, model: "" }))}
-        onModelChange={(v) => setForm((f) => ({ ...f, model: v }))}
-        onRefresh={onRefreshAgent}
-      />
-      <div className="space-y-2">
-        <Label>{t("settings:utilityAgentPromptTemplate")}</Label>
-        <div className="border rounded-md overflow-hidden">
-          <ScriptEditor
-            value={form.prompt}
-            onChange={(v) => setForm((f) => ({ ...f, prompt: v }))}
-            language="plaintext"
-            height="200px"
-            placeholders={placeholders}
-            lineNumbers="off"
-          />
-        </div>
-        <p className="text-xs text-muted-foreground">
-          <Trans
-            i18nKey="settings:utilityAgentPromptHint"
-            values={{ sigil: PROMPT_VARIABLE_SIGIL }}
-          >
-            Type <code>{PROMPT_VARIABLE_SIGIL}</code> to see available variables with autocomplete
-          </Trans>
-        </p>
-      </div>
-    </div>
-  );
-}
-
+// eslint-disable-next-line max-lines-per-function
 export function UtilityAgentDialog({ open, onOpenChange, agent, onSuccess }: Props) {
   const { t } = useTranslation();
+  const profiles = useAppStore((state) => state.agentProfiles.items);
   const [form, setForm] = useState<FormState>(defaultFormState);
   const [saving, setSaving] = useState(false);
   const [placeholders, setPlaceholders] = useState<ScriptPlaceholder[]>([]);
-  const { inferenceAgents, setInferenceAgents, refreshAgent } = useInferenceAgents();
   const isEdit = Boolean(agent);
-
-  // Fetch template variables and inference agents
   useEffect(() => {
     getTemplateVariables()
       .then(({ variables }) => setPlaceholders(toScriptPlaceholders(variables)))
       .catch(() => setPlaceholders([]));
-
-    listInferenceAgents()
-      .then(({ agents }) => setInferenceAgents(agents))
-      .catch(() => setInferenceAgents([]));
-  }, [setInferenceAgents]);
-
-  const selectedAgent = useMemo(
-    () => inferenceAgents.find((a) => a.id === form.agent_id),
-    [inferenceAgents, form.agent_id],
-  );
-  const availableModels = selectedAgent?.models ?? [];
-  const refreshCurrentAgent = () => refreshAgent(form.agent_id);
-
-  // Auto-select default model when agent changes
+  }, [open]);
   useEffect(() => {
-    if (selectedAgent && !form.model) {
-      const defaultModel = (selectedAgent.models ?? []).find((m) => m.is_default);
-      if (defaultModel) {
-        setForm((f) => ({ ...f, model: defaultModel.id }));
-      }
-    }
-  }, [selectedAgent, form.model]);
-
-  useEffect(() => {
-    if (agent) {
-      setForm({
-        name: agent.name,
-        description: agent.description,
-        prompt: agent.prompt,
-        agent_id: agent.agent_id || "claude-acp",
-        model: agent.model || "",
-      });
-    } else {
-      setForm(defaultFormState);
-    }
+    setForm(
+      agent
+        ? {
+            name: agent.name,
+            description: agent.description,
+            prompt: agent.prompt,
+            profile_id: agent.agent_profile_id || "",
+          }
+        : defaultFormState,
+    );
   }, [agent, open]);
-
-  const handleSubmit = async () => {
+  const eligible = profiles.filter(
+    (profile) => profile.enabled !== false && !profile.cli_passthrough && !profile.workspace_id,
+  );
+  let submitLabel = t("settings:utilityAgentDialogCreate");
+  if (saving) submitLabel = t("settings:saving");
+  else if (isEdit) submitLabel = t("settings:utilityAgentDialogSave");
+  const submit = async () => {
+    if (!form.name.trim() || !form.prompt.trim() || !form.profile_id) return;
     setSaving(true);
     try {
       const data = {
         name: form.name,
         description: form.description,
         prompt: form.prompt,
-        agent_id: form.agent_id,
-        model: form.model,
+        agent_profile_id: form.profile_id,
+        profile_binding_state: "explicit",
       };
-
-      if (isEdit && agent) {
-        await updateUtilityAgent(agent.id, data);
-      } else {
-        await createUtilityAgent(data);
-      }
+      if (agent) await updateUtilityAgent(agent.id, data);
+      else await createUtilityAgent(data);
       onSuccess();
     } catch (error) {
-      console.error("Failed to save agent:", error);
+      console.error("Failed to save utility agent", error);
     } finally {
       setSaving(false);
     }
   };
-
-  const dialogTitle = isEdit
-    ? t("settings:utilityAgentDialogEditTitle")
-    : t("settings:utilityAgentDialogCreateTitle");
-  const getSubmitLabel = () => {
-    if (saving) return t("settings:saving");
-    return isEdit ? t("settings:utilityAgentDialogSave") : t("settings:utilityAgentDialogCreate");
-  };
-
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-lg">
         <DialogHeader>
-          <DialogTitle>{dialogTitle}</DialogTitle>
+          <DialogTitle>
+            {isEdit
+              ? t("settings:utilityAgentDialogEditTitle")
+              : t("settings:utilityAgentDialogCreateTitle")}
+          </DialogTitle>
         </DialogHeader>
-        <UtilityAgentForm
-          form={form}
-          setForm={setForm}
-          isBuiltin={agent?.builtin ?? false}
-          inferenceAgents={inferenceAgents}
-          selectedAgent={selectedAgent}
-          availableModels={availableModels}
-          placeholders={placeholders}
-          onRefreshAgent={refreshCurrentAgent}
-        />
+        <div className="space-y-4 py-4">
+          <div className="space-y-2">
+            <Label htmlFor="name">{t("settings:name")}</Label>
+            <Input
+              id="name"
+              value={form.name}
+              onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))}
+              placeholder={t("settings:utilityAgentNamePlaceholder")}
+              disabled={agent?.builtin ?? false}
+            />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="description">{t("settings:utilityAgentDescriptionLabel")}</Label>
+            <Input
+              id="description"
+              value={form.description}
+              onChange={(event) =>
+                setForm((current) => ({ ...current, description: event.target.value }))
+              }
+              placeholder={t("settings:utilityAgentDescriptionPlaceholder")}
+            />
+          </div>
+          <div className="space-y-2">
+            <Label>{t("settings:utilityAgentProfile")}</Label>
+            <Select
+              value={form.profile_id}
+              onValueChange={(value) => setForm((current) => ({ ...current, profile_id: value }))}
+            >
+              <SelectTrigger className="cursor-pointer">
+                <SelectValue placeholder={t("settings:utilitySelectProfile")} />
+              </SelectTrigger>
+              <SelectContent>
+                {form.profile_id && !eligible.some((profile) => profile.id === form.profile_id) && (
+                  <SelectItem value={form.profile_id}>
+                    {t("settings:utilityUnavailableProfile", { name: form.profile_id })}
+                  </SelectItem>
+                )}
+                {eligible.map((profile) => (
+                  <SelectItem key={profile.id} value={profile.id}>
+                    {profile.label || profile.id}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {form.profile_id && !eligible.some((profile) => profile.id === form.profile_id) && (
+              <p className="text-xs text-destructive">{t("settings:utilityProfileNeedsRepair")}</p>
+            )}
+          </div>
+          <div className="space-y-2">
+            <Label>{t("settings:utilityAgentPromptTemplate")}</Label>
+            <div className="border rounded-md overflow-hidden">
+              <ScriptEditor
+                value={form.prompt}
+                onChange={(value) => setForm((current) => ({ ...current, prompt: value }))}
+                language="plaintext"
+                height="200px"
+                placeholders={placeholders}
+                lineNumbers="off"
+              />
+            </div>
+            <p className="text-xs text-muted-foreground">
+              <Trans
+                i18nKey="settings:utilityAgentPromptHint"
+                values={{ sigil: PROMPT_VARIABLE_SIGIL }}
+              >
+                Type <code>{PROMPT_VARIABLE_SIGIL}</code> to see available variables with
+                autocomplete
+              </Trans>
+            </p>
+          </div>
+        </div>
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)} className="cursor-pointer">
             {t("settings:cancel")}
           </Button>
-          <Button onClick={handleSubmit} disabled={saving || !form.name} className="cursor-pointer">
-            {getSubmitLabel()}
+          <Button
+            onClick={submit}
+            disabled={saving || !form.name.trim() || !form.prompt.trim() || !form.profile_id}
+            className="cursor-pointer"
+          >
+            {submitLabel}
           </Button>
         </DialogFooter>
       </DialogContent>
