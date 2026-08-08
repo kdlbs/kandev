@@ -469,7 +469,7 @@ test.describe("Workflow settings", () => {
     await page.goto(seedData.workspaceId);
 
     const card = await page.findWorkflowCard(workflow.name);
-    const descriptionInput = card.getByTestId("workflow-description-input");
+    const descriptionInput = card.getByLabel("Description", { exact: true });
     await expect(descriptionInput).toBeVisible();
     await expect(descriptionInput).toBeEnabled();
     await descriptionInput.fill("rev 1 (2026-08-08) — test description");
@@ -508,7 +508,7 @@ test.describe("Workflow settings", () => {
     const page = new WorkflowSettingsPage(testPage);
     await page.goto(seedData.workspaceId);
     const card = await page.findWorkflowCard(workflow.name);
-    const descriptionInput = card.getByTestId("workflow-description-input");
+    const descriptionInput = card.getByLabel("Description", { exact: true });
     await expect(descriptionInput).toHaveValue("Old description");
 
     // Local, unsaved edit to a different field (name) — must survive the cross-tab sync below.

@@ -121,7 +121,7 @@ test.describe("GitLab workflow sync", () => {
     // Synced workflows are read-only: the description renders the synced
     // value but must not be editable, or a later reconcile would just
     // revert a user's in-UI edit.
-    const descriptionInput = card.getByTestId("workflow-description-input");
+    const descriptionInput = card.getByLabel("Description", { exact: true });
     await expect(descriptionInput).toHaveValue(SYNCED_WORKFLOW_DESCRIPTION);
     await expect(descriptionInput).toBeDisabled();
   });
