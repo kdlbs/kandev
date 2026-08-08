@@ -2,10 +2,10 @@
 // Mirrors apps/backend/internal/mcp/server (ModeExternal). Keep in sync when
 // tools are added, removed, or renamed.
 //
-// KNOWN DRIFT: `ModeExternal` registers 32 tools, this lists 29 —
-// `list_repositories_kandev`, `import_workflow_kandev` and one task tool are
-// missing, so the settings page under-advertises the endpoint. See the note in
-// `external-mcp-tools.test.ts`.
+// KNOWN DRIFT: `ModeExternal` registers 33 tools, this lists 30 —
+// `list_repositories_kandev`, `import_workflow_kandev` and
+// `get_task_conversation_kandev` are missing, so the settings page
+// under-advertises the endpoint. See the note in `external-mcp-tools.test.ts`.
 //
 // The `name`s are the protocol identifiers an external agent calls, so they stay
 // literal in every locale. Only the group titles and the human descriptions are
@@ -132,6 +132,10 @@ export const EXTERNAL_MCP_TOOL_GROUPS: ExternalMcpToolGroup[] = [
     descriptionKey: "settings:externalMcpGroupTasksDescription",
     tools: [
       { name: "list_tasks_kandev", descriptionKey: "settings:externalMcpToolListTasks" },
+      {
+        name: "list_task_sessions_kandev",
+        descriptionKey: "settings:externalMcpToolListTaskSessions",
+      },
       { name: "move_task_kandev", descriptionKey: "settings:externalMcpToolMoveTask" },
       { name: "delete_task_kandev", descriptionKey: "settings:externalMcpToolDeleteTask" },
       { name: "archive_task_kandev", descriptionKey: "settings:externalMcpToolArchiveTask" },

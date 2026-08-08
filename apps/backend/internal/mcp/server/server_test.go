@@ -351,7 +351,11 @@ drained:
 	require.Len(t, notifications, 1, "a live provider rebuild must emit one tools/list_changed notification")
 	require.Equal(t, mcplib.MethodNotificationToolsListChanged, notifications[0].Method)
 	tools := getRegisteredToolNames(s)
-	require.Len(t, tools, 32, "final registry should contain the complete GitLab-only task tool set")
+	// Absolute count: a tool added to task mode must be reflected here as well
+	// as in TestServerModeTask_ToolCount and
+	// TestRegisterTools_LoggedCountMatchesRegisteredTools (list_task_sessions_test.go),
+	// which pin the per-mode registration rather than this SetProviders rebuild.
+	require.Len(t, tools, 33, "final registry should contain the complete GitLab-only task tool set")
 	assert.Contains(t, tools, "get_task_mr_automation_kandev")
 	assert.NotContains(t, tools, "get_task_pr_automation_kandev")
 }
@@ -475,18 +479,19 @@ func TestServerModeTask_ToolCount(t *testing.T) {
 
 	s := New(backend, "test-session", "test-task", 10005, log, "", false, ModeTask, []string{"github", "gitlab"})
 	tools := getRegisteredToolNames(s)
-	// 19 kanban (incl. delete + archive task + stop_task + spawn_session + PR
-	// automation + MR automation) + 1 add_branch_to_task +
+	// 20 kanban (incl. delete + archive task + stop_task + spawn_session +
+	// list_task_sessions + PR automation + MR automation) + 1 add_branch_to_task +
 	// 1 add_workspace_sources + 1 update_repository_base_branch +
 	// 1 step_complete (ADR 0015) + 1 interaction + 4 plan + 3 walkthrough +
-	// 1 publish_review_findings + 1 related-tasks + 1 diagnostic bundle = 34.
+	// 1 publish_review_findings + 1 related-tasks + 1 diagnostic bundle = 35.
 	// Task-document tools (list/get/write) are office-only.
 	assert.Contains(t, tools, "step_complete_kandev", "ADR 0015 explicit-completion signal must be registered in task mode")
 	assert.Contains(t, tools, "show_walkthrough_kandev", "walkthrough tool must be registered in task mode")
 	assert.Contains(t, tools, "publish_review_findings_kandev", "native code-review publishing must be registered in task mode")
 	assert.Contains(t, tools, "spawn_session_kandev", "spawn_session must be registered in task mode")
 	assert.Contains(t, tools, "add_workspace_sources_kandev")
-	assert.Equal(t, 34, len(tools))
+	assert.Contains(t, tools, "list_task_sessions_kandev", "session discovery must be registered in task mode")
+	assert.Equal(t, 35, len(tools))
 }
 
 func TestServerStepCompleteTool_TaskOnlyAndDiscoverable(t *testing.T) {
@@ -519,9 +524,9 @@ func TestServerModeConfig_ToolCount(t *testing.T) {
 
 	s := New(backend, "test-session", "test-task", 10005, log, "", false, ModeConfig)
 	tools := getRegisteredToolNames(s)
-	// 12 workflow (incl. list_repositories + import_workflow) + 4 agent + 4 mcp + 5 executor + 6 task + 1 interaction = 32
+	// 12 workflow (incl. list_repositories + import_workflow) + 4 agent + 4 mcp + 5 executor + 7 task (incl. list_task_sessions) + 1 interaction = 33
 	assert.NotContains(t, tools, "step_complete_kandev", "step_complete_kandev requires a live task session; must NOT register in config mode")
-	assert.Equal(t, 32, len(tools))
+	assert.Equal(t, 33, len(tools))
 }
 
 func TestServerModeConfig_ToolDescriptions(t *testing.T) {
@@ -673,9 +678,9 @@ func TestServerModeExternal_ToolCount(t *testing.T) {
 
 	s := New(backend, "", "", 0, log, "", true, ModeExternal)
 	tools := getRegisteredToolNames(s)
-	// 12 workflow (incl. list_repositories + import_workflow) + 4 agent + 4 mcp + 5 executor + 6 task + 1 create_task = 32.
+	// 12 workflow (incl. list_repositories + import_workflow) + 4 agent + 4 mcp + 5 executor + 7 task (incl. list_task_sessions) + 1 create_task = 33.
 	// add_branch_to_task_kandev is task-mode only — external coding agents have no live session to attach a worktree to.
-	assert.Equal(t, 32, len(tools))
+	assert.Equal(t, 33, len(tools))
 	assert.NotContains(t, tools, "add_branch_to_task_kandev")
 }
 

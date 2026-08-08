@@ -314,6 +314,7 @@ func (s *Server) registerConfigTaskTools() {
 		),
 		s.wrapHandler("get_task_conversation_kandev", s.getTaskConversationHandler()),
 	)
+	s.registerListTaskSessionsTool()
 }
 
 // --- Handler implementations ---
