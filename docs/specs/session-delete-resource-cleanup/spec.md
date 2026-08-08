@@ -832,3 +832,99 @@ the round-1 ambiguous-error resolution fix, job-claim CAS atomicity,
 snapshot-scoped worker execution (no scope widening), no SQL-injection or XSS
 surface in the round-3 diff, and the round-1 P1 confirm-control gating
 (`disabled={!isLoaded}`).
+
+## REVIEW-ROUND: 4
+
+Fresh-context review wave (2026-08-08) ran code-reviewer, security-reviewer,
+and test-supervisor (ksdd subagents) plus a cross-vendor Codex CLI review over
+the commit that was supposed to close round 3 (`31a9706c0`), after
+independently re-verifying rounds 1-3's fixes are still correctly in place at
+HEAD (round-1 lock ordering, path-vs-ID verification, ambiguous-error
+resolution; round-3's archive-row exclusion). **Verdict: production-code
+residual, round 4 — back to Build.** One finding, converged across all four
+legs and confirmed by test-supervisor's actually-executed mutation testing
+(not speculation).
+
+### MUST-FIX — the round-3 tiebreak fix only half-satisfies its own ask: `id` is a random UUID, not a monotonic column
+
+(code-reviewer, security-reviewer, test-supervisor, and Codex CLI all
+independently identified the same underlying fact; test-supervisor
+additionally proved it by executing real mutants against the production
+query.)
+
+Round 3's MUST-FIX 2 asked for "`id` (or another monotonic column) as an
+explicit secondary `ORDER BY` key for deterministic tie-break." `31a9706c0`
+added `ORDER BY created_at DESC, id DESC`
+(`apps/backend/internal/task/repository/sqlite/git_snapshots.go:300`), but
+`id` is `uuid.New().String()` — a random UUIDv4 — at every insert site
+(`git_snapshots.go:31` in `UpsertLatestLiveGitSnapshot`, `:103` in
+`CreateGitSnapshot`), over a plain `id TEXT PRIMARY KEY` column
+(`base_schema.go:786`) with no monotonic sequence. On a genuine `created_at`
+tie between an `agent_completed` row and a `live_monitor` row for the same
+branch, `id DESC` makes the result **deterministic but arbitrary** — a UUID
+coin flip decides which row wins, not recency. That reopens (stably, rather
+than flakily) the exact failure class round 2's CRITICAL and round 3's
+MUST-FIX 2 were about: a stale row could still shadow a genuinely newer one
+in the pre-delete warning.
+
+test-supervisor mutation-tested the actual production query and confirmed
+this line is currently unguarded: dropping `, id DESC` entirely, or flipping
+it to `id ASC`, both leave the full `internal/task/repository` suite green.
+No existing test seeds two rows with an identical `created_at`.
+
+**Calibrated severity — legs disagree, and that disagreement is itself
+informative.** code-reviewer rated this HIGH and recommended
+`REQUEST_CHANGES`. security-reviewer (LOW, APPROVE), Codex CLI
+("low-risk/non-blocking hardening issue"), and test-supervisor ("present-day
+production impact low, not high") independently converged on low practical
+severity. Two independent checks narrow the reachability further: this
+review's own inspection confirmed `CreatedAt` is never truncated before
+persisting (`time.Now().UTC()` used directly at every call site, no
+`.Truncate`), and test-supervisor empirically measured the stored column at
+microsecond precision with ~58µs between consecutive inserts under real
+load — consistent with mattn/go-sqlite3's nanosecond-precision timestamp
+formatting. An exact tie is not attacker-forceable and is very unlikely in
+practice. This is why the finding routes back to Build rather than being
+escalated as a human-triage question: the code itself settles the severity
+disagreement (confirmed negligible reachability), only the test-coverage gap
+on a safety-critical query is unambiguous and mutation-proven.
+
+Fix (Build's choice of either direction, both close the gap):
+(a) replace `id` with a genuinely monotonic secondary key (an
+auto-increment/sequence-backed column, portable across this repository's
+SQLite-and-Postgres dialect constraint per `apps/backend/CLAUDE.md`'s schema
+rules) and add a test seeding two `status_update` rows with an **identical**
+`created_at`, asserting the later-inserted row sorts first; or
+(b) keep `id` as a stability-only tiebreak, correct the doc comment at
+`git_snapshots.go:288-291` (and this section) to state plainly that it
+guarantees repeatable ordering, not recency-correctness, on an exact tie, and
+add a test asserting the tie resolves to a stable (repeatable-across-calls)
+order.
+
+Either direction should also address test-supervisor's should-fix note:
+`getGitSnapshotByOrder` (`git_snapshots.go:126-134`, backing
+`GetFirstGitSnapshot`) carries the same untiebroken `ORDER BY created_at ASC
+LIMIT 1` pattern. It is off the session-delete path and empirically
+non-flaky at the same microsecond precision, so it is not itself a blocking
+finding — but note it in the same pass if convenient.
+
+### Everything else re-confirmed clean this round
+
+All four legs independently re-verified, by direct code reading (not
+inherited from this file's prior claims): round-3 MUST-FIX 1 (archive-row
+exclusion) is correctly and completely closed with a genuine, mutation-proven
+regression test; `GetGitSnapshotsBySession`'s only production consumer is
+still the pre-delete warning path (traced fresh — `Service.GetGitSnapshots` →
+`wsGetGitSnapshots` → `apps/web/hooks/use-session-delete-warning.ts`, used by
+both `session-tab-menu.tsx` and `mobile-sessions-section.tsx`); both
+production writers of `status_update` rows are unconditional, so the new
+`snapshot_type` filter drops nothing currently reachable; round-1's
+lock-ordering, path-vs-ID verification, and ambiguous-error-resolution fixes
+remain intact; auth-first ordering on both `session.delete` and
+`session.git.snapshots`; no command injection, SQL injection, path traversal,
+or secrets/PII exposure in the round-4 diff; the durable cleanup worker's
+snapshot isolation is unchanged and correct.
+
+The round-1/2/3 "should-fix, not blocking" residual list is unchanged and
+still accurate — this round's diff touched only the snapshot query and its
+tests, so nothing on that list was disturbed.
